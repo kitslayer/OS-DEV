@@ -42,4 +42,9 @@ caught boom
 fin
 json err caught
 err:undefined variable
+-- this / new / methods --
+11 12 12
+105
+3,6,9
+6 21
 -- done --

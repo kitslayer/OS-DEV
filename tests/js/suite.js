@@ -43,4 +43,11 @@ print("-- exceptions --");
 try { throw "boom"; } catch(e){ print("caught "+e); } finally { print("fin"); }
 try { JSON.parse("{bad"); } catch(e){ print("json err caught"); }
 function safe(){ try { return undefinedVar; } catch(e){ return "err:"+e; } } print(safe());
+print("-- this / new / methods --");
+function Ctr(s){ this.n=s; this.inc=function(){ this.n++; return this.n; }; }
+var ct=new Ctr(10); print(ct.inc(), ct.inc(), ct.n);
+var om={ base:100, add(x){ return this.base+x; } }; print(om.add(5));
+function Bx(v){ this.v=v; this.scale=function(a){ return a.map(x=> x*this.v); }; }
+print(new Bx(3).scale([1,2,3]).join(","));
+var oc={n:5}; oc.n++; var ac=[10,20]; ac[1]++; print(oc.n, ac[1]);
 print("-- done --");

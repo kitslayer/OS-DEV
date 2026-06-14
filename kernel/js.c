@@ -82,7 +82,7 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
-    "switch","case","default","do","try","catch","finally","throw",0 };
+    "switch","case","default","do","try","catch","finally","throw","this","new",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -182,7 +182,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW };
 
 typedef struct node node;
 struct node {
@@ -212,6 +212,21 @@ static node *parse_stmt(lexer *L);
 static node *parse_unary(lexer *L);
 
 static void expect_punc(lexer *L, const char *p){ token t=advance(L); if(!(t.type==T_PUNC && tok_is(t,p))) rt_err("syntax: expected punctuation"); }
+
+/* Parse a `( p1, p2 = default, ... )` parameter list into fn->list. Shared by
+ * `function`, object-literal method shorthand, and (indirectly) constructors. */
+static void parse_fn_params(lexer *L, node *fn) {
+    expect_punc(L,"(");
+    fn->list = aalloc(sizeof(node*)*32); fn->nlist=0;
+    while (!peek_punc(L,")") && peek(L).type!=T_EOF && !g_err && !g_oom) {
+        token p=advance(L);
+        if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len;
+            if (peek_punc(L,"=")) { advance(L); id->a=parse_assign(L); }   /* default param value */
+            if (fn->list && fn->nlist<32) fn->list[fn->nlist++]=id; }
+        if (peek_punc(L,",")) advance(L); else break;
+    }
+    expect_punc(L,")");
+}
 
 static node **parse_list(lexer *L, const char *close, int *count) {
     node **arr = aalloc(sizeof(node*) * 64); int n = 0;
@@ -264,19 +279,26 @@ static node *parse_primary(lexer *L) {
             advance(L); node *n=mknode(N_FUNC);
             token name = peek(L);
             if (name.type==T_IDENT) { advance(L); n->str=intern(name.s,name.len); n->slen=name.len; }
-            expect_punc(L,"(");
-            n->list = aalloc(sizeof(node*)*32); n->nlist=0;
-            while (!peek_punc(L,")") && peek(L).type!=T_EOF && !g_err && !g_oom) {
-                token p=advance(L); if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len;
-                    if (peek_punc(L,"=")) { advance(L); id->a=parse_assign(L); }   /* default param value */
-                    if(n->list && n->nlist<32) n->list[n->nlist++]=id; }
-                if (peek_punc(L,",")) advance(L); else break;
-            }
-            expect_punc(L,")");
+            parse_fn_params(L, n);
             n->a = parse_stmt(L);   /* body block */
             return n;
         }
         if (tok_is(t,"typeof")) { advance(L); node *n=mknode(N_UNARY); n->op='t'; n->a=parse_primary(L); return n; }
+        if (tok_is(t,"this")) { advance(L); return mknode(N_THIS); }
+        if (tok_is(t,"new")) {
+            advance(L);
+            node *callee = parse_primary(L);
+            /* member chain (a.b.C / a[k]) binds to `new`, but a `(` opens the
+             * constructor's own arg list — so we stop the chain before calls. */
+            for (;;) {
+                if (peek_punc(L,".")) { advance(L); token p=advance(L); node *m=mknode(N_MEMBER); m->a=callee; m->str=intern(p.s,p.len); m->slen=p.len; callee=m; }
+                else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=callee; m->b=idx; callee=m; }
+                else break;
+            }
+            node *nw = mknode(N_NEW); nw->a = callee;
+            if (peek_punc(L,"(")) { advance(L); nw->list = parse_list(L,")",&nw->nlist); }
+            return nw;
+        }
     }
     if (t.type == T_IDENT) { advance(L); node *n=mknode(N_IDENT); n->str=intern(t.s,t.len); n->slen=t.len; return n; }
     if (t.type == T_PUNC) {
@@ -288,6 +310,7 @@ static node *parse_primary(lexer *L) {
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
+                else if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); parse_fn_params(L,fn); fn->a=parse_stmt(L); pr->a=fn; }   /* method shorthand: name(args){…} */
                 else { node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; pr->a=id; }   /* {x} shorthand == {x:x} */
                 if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
                 if (peek_punc(L,",")) advance(L); else break;
@@ -365,6 +388,7 @@ static node *parse_cond(lexer *L) {
  * (a `{ }` block, or an expression that becomes an implicit `return`). */
 static node *make_arrow(lexer *L, node **params, int np) {
     node *fn = mknode(N_FUNC);
+    fn->prefix = 1;   /* mark as arrow: inherits `this` lexically (no own binding) */
     fn->list = aalloc((long)sizeof(node*) * (np>0?np:1)); fn->nlist = np;
     for (int i=0;i<np;i++) fn->list[i]=params[i];
     if (peek_punc(L,"{")) { fn->a = parse_stmt(L); }
@@ -619,13 +643,18 @@ static comp eval_stmt(node *n, env *e);
 
 static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names interned at parse time */
 
-static val call_function(val fn, val *args, int nargs) {
+/* Call `fn` with an explicit `this` binding. Regular functions bind `this` in
+ * their call frame (a method's receiver, the new object under `new`, or undefined
+ * for a plain call); arrow functions (node->prefix==1) deliberately do NOT bind
+ * one, so `this` resolves lexically up the scope chain to the enclosing function. */
+static val call_function_this(val fn, val thisv, val *args, int nargs) {
     if (fn.t==V_NATIVE) return fn.o->native(args,nargs);
     if (fn.t!=V_FUN) { rt_err("not a function"); return UND(); }
     if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }
     env *fe = new_env(fn.o->scope);
     if (!fe) { g_oom=1; g_depth--; return UND(); }     /* arena exhausted: bail, don't deref NULL */
     node *def = fn.o->fn;
+    if (!def->prefix) env_define(fe, "this", thisv);   /* non-arrow gets its own `this` */
     for (int i=0;i<def->nlist;i++){ node *pn=def->list[i];
         val pv = (i<nargs) ? args[i] : (pn->a ? eval_expr(pn->a, fe) : UND());   /* default value if arg omitted */
         env_define(fe, node_name(pn), pv); }
@@ -633,6 +662,7 @@ static val call_function(val fn, val *args, int nargs) {
     g_depth--;
     return c.kind==C_RETURN ? c.v : UND();
 }
+static val call_function(val fn, val *args, int nargs){ return call_function_this(fn, UND(), args, nargs); }
 
 /* resolve a member/index target for assignment: returns the container + key */
 static val eval_string_method(val recv, const char *name, val *args, int nargs);
@@ -672,8 +702,23 @@ static val eval_expr_inner(node *n, env *e) {
             return UND();
         }
         case N_UPDATE: {
-            node *t=n->a; const char *nm; val *slot=0;
-            if (t->type==N_IDENT) { nm=node_name(t); slot=env_find(e,nm); }
+            node *t=n->a; val *slot=0;
+            if (t->type==N_IDENT) { slot=env_find(e,node_name(t)); }
+            else if (t->type==N_MEMBER) {            /* o.prop++ */
+                val recv=eval_expr(t->a,e);
+                if (recv.t==V_OBJ && recv.o) { const char *key=node_name(t);
+                    for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
+                    if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
+                }
+            }
+            else if (t->type==N_INDEX) {             /* arr[i]++ / o[k]++ */
+                val recv=eval_expr(t->a,e), idx=eval_expr(t->b,e);
+                if (recv.t==V_ARR && recv.o) { int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) slot=&recv.o->vals[i]; }
+                else if (recv.t==V_OBJ && recv.o) { const char *key=val_to_str(idx);
+                    for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
+                    if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
+                }
+            }
             if (!slot) { rt_err("invalid ++/-- target"); return UND(); }
             int64_t old=to_num(*slot); int64_t nw = n->op=='+'?old+1:old-1; *slot=NUM(nw);
             return NUM(n->prefix?nw:old);
@@ -746,10 +791,21 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
                 if (recv.t==V_ARR) return eval_array_method(recv,m,args,na);
                 if (recv.t==V_NUM || recv.t==V_BOOL) return eval_number_method(recv,m,args,na);
-                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)) return call_function(fn,args,na); }
+                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)) return call_function_this(fn,recv,args,na); }
                 rt_err("no such method"); return UND();
             }
             val fn=eval_expr(callee,e); return call_function(fn,args,na);
+        }
+        case N_THIS: { val *t=env_find(e,"this"); return t?*t:UND(); }
+        case N_NEW: {
+            val ctor=eval_expr(n->a,e); val args[16]; int na=n->nlist>16?16:n->nlist;
+            for (int i=0;i<na;i++) args[i]=eval_expr(n->list[i],e);
+            if (ctor.t!=V_FUN) { rt_err("not a constructor"); return UND(); }
+            obj *self=new_obj(V_OBJ); if(!self){ g_oom=1; return UND(); }
+            val selfv=obj_val(self);
+            val r=call_function_this(ctor, selfv, args, na);
+            /* a constructor that explicitly returns an object overrides `this` */
+            return (r.t==V_OBJ||r.t==V_ARR) ? r : selfv;
         }
     }
     return UND();
