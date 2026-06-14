@@ -95,6 +95,7 @@ struct browser {
     uint32_t curcolor;                                   /* <font color> in effect (0=none, else 0x01000000|rgb) */
     uint32_t tokcolor[TOK_MAX];                          /* per-token colour override */
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
+    int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
 };
 
 static void drop_image(browser_t *b);        /* fwd: free any decoded image */
@@ -560,7 +561,12 @@ static void parse_html(browser_t *b, const char *body, int len) {
             }
             tag[tl] = 0;
             int astart = j;
-            while (j < len && body[j] != '>') j++;        /* attributes -> '>' */
+            { char q = 0;                                 /* attributes -> unquoted '>' (so a quoted */
+              while (j < len) { char ac = body[j];        /* '>' e.g. in href="javascript:...'<p>'" is kept) */
+                  if (q) { if (ac == q) q = 0; }
+                  else if (ac=='"' || ac=='\'') q = ac;
+                  else if (ac=='>') break;
+                  j++; } }
 
             if (tageq(tag, "script")) {
                 if (!closing) { inscript = 1; sc_start = j + 1; }          /* body starts after '>' */
@@ -648,6 +654,21 @@ static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     if (jsout[0]) kprintf("[js] %s\n", jsout);           /* console.log / errors -> serial */
     if (written > 0)                                     /* re-render incl. the written HTML */
         parse_html(b, b->raw + bodyoff, bodylen + written);  /* scriptlen reset inside; not re-run */
+}
+
+/* Run a `javascript:` link / onclick handler: execute the code, splice any
+ * document.write output into the page after the body, and re-render. Reuses the
+ * stored body region so the page updates in place on click. */
+static void run_js_handler(browser_t *b, const char *code) {
+    static char jsout[2048];
+    int appendpos = b->bodyoff + b->bodylen;
+    if (appendpos >= RAW_MAX - 1) return;
+    g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_max = RAW_MAX;
+    js_run_doc(code, jsout, sizeof(jsout), script_write_cb);
+    int written = g_sw_pos - appendpos;
+    g_sw_raw = 0;
+    if (jsout[0]) kprintf("[js] %s\n", jsout);
+    if (written > 0) { b->bodylen += written; parse_html(b, b->raw + b->bodyoff, b->bodylen); }
 }
 
 /* Render plain text: words become WORD tokens, newlines become line breaks
@@ -969,7 +990,7 @@ static void browser_navigate(browser_t *b) {
         b->raw[n] = 0; b->rawlen = (int)n;
         if (try_image(b, (const uint8_t *)b->raw, (int)n)) { set_status(b, "image"); return; }
         const char *q = b->raw; while (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t') q++;
-        if (*q == '<') { parse_html(b, b->raw, (int)n);  /* looks like HTML */
+        if (*q == '<') { b->bodyoff = 0; b->bodylen = (int)n; parse_html(b, b->raw, (int)n);  /* looks like HTML */
                          if (b->scriptlen > 0) run_page_scripts(b, 0, (int)n); }
         else           parse_text(b, b->raw, (int)n);  /* plain text */
         set_status(b, "local file");
@@ -1143,6 +1164,7 @@ int browser_poll(browser_t *b) {
     if (try_image(b, (const uint8_t *)(b->raw + bodyoff), bodylen)) {  /* an image? */
         set_status(b, "image"); return 1;
     }
+    b->bodyoff = bodyoff; b->bodylen = bodylen;          /* remember for click-time JS re-render */
     parse_html(b, b->raw + bodyoff, bodylen);
     if (b->scriptlen > 0) run_page_scripts(b, bodyoff, bodylen);   /* run inline <script> (once) */
 
@@ -1166,7 +1188,8 @@ int browser_poll(browser_t *b) {
  * and navigate there. If suppress_push, replace the current history entry
  * rather than pushing (used for redirects, so Back doesn't loop). */
 static void goto_href(browser_t *b, const char *href, int suppress_push) {
-    if (href[0]=='#' || startsw(href, "mailto:") || startsw(href, "javascript:")) return;
+    if (startsw(href, "javascript:")) { run_js_handler(b, href + 11); return; }   /* run, don't navigate */
+    if (href[0]=='#' || startsw(href, "mailto:")) return;
 
     char newurl[URL_MAX];
     if (startsw(href, "http://") || startsw(href, "https://") || startsw(href, "file:")) {  /* absolute */
