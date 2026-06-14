@@ -175,7 +175,7 @@ static void skip_semi(lexer *L){ while (peek_punc(L,";")) advance(L); }   /* ; i
 enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
-       N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE };
+       N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF };
 
 typedef struct node node;
 struct node {
@@ -447,7 +447,18 @@ static node *parse_stmt(lexer *L) {
         expect_punc(L,"}"); g_depth--; return n;
     }
     if (peek_kw(L,"for")) {
-        advance(L); expect_punc(L,"("); node *n=mknode(N_FOR);
+        advance(L); expect_punc(L,"(");
+        /* for (x of iterable) — detect the contextual `of` with bounded lookahead */
+        lexsave sv = lex_save(L);
+        if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) advance(L);
+        token v = peek(L);
+        if (v.type==T_IDENT) { advance(L); token of = peek(L);
+            if (of.type==T_IDENT && of.len==2 && of.s[0]=='o' && of.s[1]=='f') {
+                advance(L); node *fo=mknode(N_FOROF); fo->str=intern(v.s,v.len); fo->slen=v.len;
+                fo->a=parse_expr(L); expect_punc(L,")"); fo->b=parse_stmt(L); g_depth--; return fo; }
+        }
+        lex_restore(L, sv);
+        node *n=mknode(N_FOR);
         if (!peek_punc(L,";")) { if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) n->a=parse_var(L); else n->a=parse_expr(L); }
         expect_punc(L,";");
         if (!peek_punc(L,";")) n->b=parse_expr(L);
@@ -772,6 +783,19 @@ static comp eval_stmt_inner(node *n, env *e) {
                 if(++guard>5000000){rt_err("loop limit");break;}
                 comp c=eval_stmt(n->d,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err) break;
                 if(n->c) eval_expr(n->c,fe);
+            }
+            return CN();
+        }
+        case N_FOROF: {
+            val it=eval_expr(n->a,e); env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
+            const char *vn=node_name(n); env_define(fe, vn, UND());
+            if (it.t==V_ARR && it.o) {
+                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=it.o->vals[i];
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+            } else if (it.t==V_STR) {
+                int l=(int)strlen(it.str);
+                for (int i=0;i<l && !g_err && !g_oom;i++){ char*ch=aalloc(2); if(ch){ch[0]=it.str[i];ch[1]=0;} val *slot=env_find(fe,vn); if(slot) *slot=STRV(ch?ch:"");
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
             }
             return CN();
         }
