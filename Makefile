@@ -17,7 +17,7 @@ QEMU    := qemu-system-x86_64
 # clobber it), and no SSE/MMX/x87 (we haven't enabled the FPU yet).
 CFLAGS  := -std=gnu11 -ffreestanding -nostdlib \
            -fno-stack-protector -fno-pic -fno-pie \
-           -mno-red-zone -mgeneral-regs-only \
+           -mno-red-zone -mgeneral-regs-only -fwrapv \
            -Wall -Wextra -Ikernel/include -O2 -g
 
 ASFLAGS := -f elf64
@@ -62,9 +62,9 @@ $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# The JS interpreter does integer arithmetic on attacker-supplied values; build it
-# with -fwrapv so signed overflow is defined (wrapping) rather than UB under -O2.
-$(BUILD)/kernel/js.o: CFLAGS += -fwrapv
+# -fwrapv is in CFLAGS above (global): the kernel parses untrusted input (network,
+# disk, images, TLS, HTML, JS) with signed arithmetic, so signed overflow must be
+# defined (wrapping) rather than UB under -O2 across the whole kernel.
 
 $(BUILD)/%.o: %.asm
 	@mkdir -p $(dir $@)
