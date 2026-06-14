@@ -6,14 +6,19 @@ Editable fields (M198) let you *type* into a form; this milestone lets you
 HTML GET form submission. Point the `action` at a search engine and the same
 form is a working web search box.
 
-Verified end-to-end in the real kernel over **real HTTPS** (`SEARCH.HTM`):
-typed `hello world` into a field, followed `[Submit to example.com]`, and the
-browser navigated to
+Verified end-to-end in the real kernel over **real HTTPS** as an actual **web
+search** (`SEARCH.HTM` points its `action` at DuckDuckGo's HTML endpoint): typed
+`from scratch os` into the field, followed `[Search DuckDuckGo]`, and the browser
+navigated to
 
-    https://example.com/?cat=general&q=hello+world
+    https://html.duckduckgo.com/html/?q=from+scratch+os
 
-(loaded `818b`, `TLS*` = anchored cert chain). Note `hello world` → `hello+world`
-(space encoded), and the untouched default field `cat=general` was included.
+(36590 B, `TLS*` = chain anchored to DigiCert Global Root G2) and rendered real
+results — fittingly, *"Guide to Build an Operating System From Scratch"* with its
+snippet and link. Both spaces became `+`. The same form against `example.com`
+shows the query string land in the address bar (`?q=…&cat=general`, including a
+seeded default field). So the OS can now **search the live web** from a typed
+query — type → build `?q=…` → HTTPS fetch + cert-validate → render results.
 
 ## How to submit a form
 
