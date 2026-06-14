@@ -25,6 +25,7 @@
 #include <stdint.h>
 #else
 #include "string.h"
+#include "rtc.h"
 #include <stdint.h>
 #include <stddef.h>
 #endif
@@ -954,6 +955,23 @@ static val native_ls_setItem(val *args, int nargs) {
     return UND();
 }
 
+/* Date() -> current wall-clock as "YYYY-MM-DD HH:MM:SS" (a useful subset of the
+ * real Date). Reads the CMOS RTC directly (kernel); a fixed string on the host. */
+static void d2(char *b, int *p, int v){ b[(*p)++]='0'+(v/10)%10; b[(*p)++]='0'+v%10; }
+static val nat_date(val *a, int n){
+    (void)a; (void)n; char buf[24]; int p=0;
+#ifndef JS_HOSTTEST
+    struct rtc_time t; rtc_now(&t);
+    int y=t.year; buf[p++]='0'+(y/1000)%10; buf[p++]='0'+(y/100)%10; buf[p++]='0'+(y/10)%10; buf[p++]='0'+y%10;
+    buf[p++]='-'; d2(buf,&p,t.month); buf[p++]='-'; d2(buf,&p,t.day);
+    buf[p++]=' '; d2(buf,&p,t.hour); buf[p++]=':'; d2(buf,&p,t.min); buf[p++]=':'; d2(buf,&p,t.sec);
+    buf[p]=0;
+#else
+    const char *s="2026-06-13 12:00:00"; while(s[p]){buf[p]=s[p];p++;} buf[p]=0;
+#endif
+    return STRV(intern(buf, p));
+}
+
 /* ---- Math (integer; the kernel has no FPU) ---- */
 static int64_t iabs64(int64_t x){ return x < 0 ? -x : x; }
 static val nat_abs(val *a, int n){ return NUM(n ? iabs64(to_num(a[0])) : 0); }
@@ -1103,6 +1121,7 @@ static void install_globals(env *g) {
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
+    obj *dt=new_obj(V_NATIVE); dt->native=nat_date;     env_define(g,"Date",obj_val_native(dt));   /* Date() -> wall-clock string */
 }
 
 /* =========================== entry point =========================== */
