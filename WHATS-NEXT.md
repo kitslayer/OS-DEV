@@ -1,6 +1,18 @@
 # What's next
 
-OS-DEV is a **graphical desktop OS** (100 milestones). It boots to a themed
+> **Status (215+ milestones):** the big arcs below are now DONE — a from-scratch
+> **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
+> **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
+> Map/Set/Date) runs in the shell and in pages, and the browser is **fully
+> interactive**: a minimal DOM (`getElementById`/`querySelector` →
+> `textContent`/`innerHTML`/`.value`/`getAttribute`/`setAttribute`),
+> `window.location`, inline `onclick`, the complete form-input set
+> (text/password/checkbox/radio/hidden/submit/button), **GET form submission +
+> live web search (DuckDuckGo) + address-bar search**, and reactive events
+> (`onchange`/`oninput`). See the milestone table in `README.md` for M139–215.
+> The genuinely-remaining frontier is in "biggest remaining gaps" below.
+
+OS-DEV is a **graphical desktop OS** (215+ milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts eight **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and four
 games (Snake, 2048, Life, Tetris) — plus a **graphical web browser**. Under the
@@ -79,28 +91,28 @@ beep mem ps clear reboot ver pid exit`.
 
 ## The biggest remaining gaps
 
-1. **Browser interactivity — the real frontier now (HTTPS + page-JS already work).**
-   The browser **browses the real HTTPS web** with a from-scratch **TLS 1.3 client**
-   that does **full X.509 cert-chain validation to baked-in trusted roots** (the
-   `TLS*` badge — example.com, NPR, gnu.org, google.com), and it **runs JavaScript**:
-   pages execute their `<script>` at load (`document.write`) and `<a href="javascript:…">`
-   links run JS on click, via a from-scratch JS engine (`kernel/js.c`). The engine is
-   now genuinely capable — closures, arrow functions, template literals,
-   switch/do-while/for-of/for-in, try/catch/finally/throw, **full class-based OOP
-   (`class`/`extends`/`super`, `this`, `new`)**, **ES6 spread/rest `...` and
-   destructuring**, a Math/JSON/String/Array stdlib, and a browser-owned
-   **`localStorage`** so click handlers keep state across runs (all verified in-OS:
-   `CLASS.JS`, `ES6.JS`, `OOP.HTM`, `JSCLICK.HTM`). What's still missing for *real
-   interactivity*:
-   - **A minimal DOM** — `getElementById`/`querySelector`, `element.textContent`/
-     `.innerHTML`, and element `onclick` that *mutates existing nodes* (not just
-     `document.write`). The renderer is a flat token stream, not a DOM tree, so this
-     is a real build (the next big, risky one — best done with guidance).
-   - Then: forms that submit (GET → query string), cookies (sessions), remote `<img>`.
-   *Known limit: `lite.cnn.com` and similar refuse our minimal ClientHello (Fastly
-   TLS fingerprinting) — not a TCP/crypto bug; our stack validates Cloudflare/Let's-
-   Encrypt/DigiCert/GTS. And the hard ceiling stands: real web apps (Google Docs) /
-   Chromium are out of reach — see GOALS.md.*
+1. **Browser interactivity — LARGELY DONE; the frontier has moved.** The browser
+   browses the real HTTPS web (from-scratch **TLS 1.3** + X.509 chain validation to
+   baked-in roots — `TLS*` on example.com/NPR/gnu.org/google.com), runs a
+   **comprehensive JS engine** (OOP + ES6 + regex + Map/Set/Date), and is now
+   **interactive**: a minimal **DOM** (`getElementById`/`querySelector` →
+   `textContent`/`innerHTML`/`.value`, `getAttribute`/`setAttribute`),
+   `window.location`, inline `onclick`, the full **form-input set**, **GET form
+   submission**, **live web search** (DuckDuckGo, from a form or the address bar),
+   and **reactive events** (`onchange`/`oninput`). What's left for *more*
+   interactivity — each a real build, best done with guidance:
+   - **`addEventListener` / `el.onclick = fn`** (JS-assigned handlers) — needs a
+     *persistent per-page JS env* (the arena resets per run, no GC), so a function
+     defined at load can fire on a later event. The deepest remaining DOM change.
+   - **`querySelectorAll` / `getElementsByTagName`** — needs *position-based* element
+     handles (today's handles are keyed by `id`, so id-less matches can't be
+     addressed); **`createElement`/`appendChild`** — needs a real DOM tree (the
+     renderer is a flat token stream).
+   - **CSS / layout**, cookies (sessions), inline remote `<img>`, `<textarea>`
+     multiline.
+   *Known limit: `lite.cnn.com` etc. refuse our minimal ClientHello (Fastly TLS
+   fingerprinting) — not a TCP/crypto bug. Hard ceiling stands: real web apps
+   (Google Docs) / Chromium are out of reach — see GOALS.md.*
 2. **`fork` / `exec` + a process table.** Programs spawn fresh from embedded or
    on-disk ELFs (loading from disk now works — milestone 85); true `fork` +
    `exec` would enable a Unix-like model with child processes.
