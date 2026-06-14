@@ -637,6 +637,7 @@ static val call_function(val fn, val *args, int nargs) {
 /* resolve a member/index target for assignment: returns the container + key */
 static val eval_string_method(val recv, const char *name, val *args, int nargs);
 static val eval_array_method(val recv, const char *name, val *args, int nargs);
+static val eval_number_method(val recv, const char *name, val *args, int nargs);
 
 static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
@@ -744,6 +745,7 @@ static val eval_expr_inner(node *n, env *e) {
                 val recv=eval_expr(callee->a,e); const char *m=node_name(callee);
                 if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
                 if (recv.t==V_ARR) return eval_array_method(recv,m,args,na);
+                if (recv.t==V_NUM || recv.t==V_BOOL) return eval_number_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)) return call_function(fn,args,na); }
                 rt_err("no such method"); return UND();
             }
@@ -874,6 +876,25 @@ static comp eval_stmt(node *n, env *e) {
 }
 
 /* ---- builtin methods + globals ---- */
+/* methods on number/bool primitives: (255).toString(16) -> "ff". The kernel is
+ * integer-only (no FPU), so toFixed just renders the integer (decimals dropped). */
+static val eval_number_method(val recv, const char *name, val *args, int nargs) {
+    long long v=(long long)to_num(recv);
+    if (strcmp(name,"toString")==0) {
+        int radix=nargs?(int)to_num(args[0]):10; if(radix<2||radix>36) radix=10;
+        char tmp[72]; int i=0; int neg=v<0;
+        unsigned long long u = neg ? (unsigned long long)(-(v+1))+1ULL : (unsigned long long)v;
+        if(u==0) tmp[i++]='0';
+        while(u){ int d=(int)(u%(unsigned)radix); tmp[i++]=d<10?('0'+d):('a'+d-10); u/=(unsigned)radix; }
+        if(neg) tmp[i++]='-';
+        char*r=aalloc(i+1); if(!r) return STRV("");
+        for(int j=0;j<i;j++){ r[j]=tmp[i-1-j]; } r[i]=0; return STRV(r);
+    }
+    if (strcmp(name,"toFixed")==0) return STRV(val_to_str(recv));   /* integer: no fractional part */
+    if (strcmp(name,"valueOf")==0) return recv;
+    rt_err("no such number method"); return UND();
+}
+
 static val eval_string_method(val recv, const char *name, val *args, int nargs) {
     const char *s=recv.str; int len=(int)strlen(s);
     if (strcmp(name,"charAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return STRV(""); char*r=aalloc(2); r[0]=s[i]; r[1]=0; return STRV(r); }
