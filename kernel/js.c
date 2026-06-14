@@ -338,6 +338,7 @@ static node *parse_primary(lexer *L) {
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
                 else if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); parse_fn_params(L,fn); fn->a=parse_stmt(L); pr->a=fn; }   /* method shorthand: name(args){…} */
+                else if (peek_punc(L,"=")) { advance(L); node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; node *as=mknode(N_ASSIGN); as->op='='; as->a=id; as->b=parse_assign(L); pr->a=as; }   /* {x = default} (destructuring) */
                 else { node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; pr->a=id; }   /* {x} shorthand == {x:x} */
                 if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
                 if (peek_punc(L,",")) advance(L); else break;
@@ -469,7 +470,9 @@ static node *parse_var(lexer *L) {
     advance(L);  /* var/let/const */
     node *n=mknode(N_VAR); n->list=aalloc(sizeof(node*)*32); n->nlist=0;
     for (;;) {
-        token id=advance(L); node *decl=mknode(N_PROP); decl->str=intern(id.s,id.len); decl->slen=id.len;
+        node *decl=mknode(N_PROP);
+        if (peek_punc(L,"[")||peek_punc(L,"{")) { decl->b=parse_primary(L); }   /* [..]/{..} destructuring pattern */
+        else { token id=advance(L); decl->str=intern(id.s,id.len); decl->slen=id.len; }
         if (peek_punc(L,"=")) { advance(L); decl->a=parse_assign(L); }
         if (n->list && n->nlist<32) n->list[n->nlist++]=decl;
         if (g_err || g_oom) break;
@@ -524,13 +527,20 @@ static node *parse_stmt(lexer *L) {
         /* for (x of iterable) — detect the contextual `of` with bounded lookahead */
         lexsave sv = lex_save(L);
         if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) advance(L);
-        token v = peek(L);
-        if (v.type==T_IDENT) { advance(L); token kw = peek(L);
-            int isof = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='o' && kw.s[1]=='f');
-            int isin = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='i' && kw.s[1]=='n');
-            if (isof || isin) {
-                advance(L); node *fo=mknode(isof?N_FOROF:N_FORIN); fo->str=intern(v.s,v.len); fo->slen=v.len;
+        if (peek_punc(L,"[")||peek_punc(L,"{")) {   /* for (var [a,b] of ...) — destructuring loop var */
+            node *pat=parse_primary(L); token kw=peek(L);
+            if (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='o' && kw.s[1]=='f') {
+                advance(L); node *fo=mknode(N_FOROF); fo->c=pat;
                 fo->a=parse_expr(L); expect_punc(L,")"); fo->b=parse_stmt(L); g_depth--; return fo; }
+        } else {
+            token v = peek(L);
+            if (v.type==T_IDENT) { advance(L); token kw = peek(L);
+                int isof = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='o' && kw.s[1]=='f');
+                int isin = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='i' && kw.s[1]=='n');
+                if (isof || isin) {
+                    advance(L); node *fo=mknode(isof?N_FOROF:N_FORIN); fo->str=intern(v.s,v.len); fo->slen=v.len;
+                    fo->a=parse_expr(L); expect_punc(L,")"); fo->b=parse_stmt(L); g_depth--; return fo; }
+            }
         }
         lex_restore(L, sv);
         node *n=mknode(N_FOR);
@@ -717,6 +727,37 @@ static int build_args(node **list, int nlist, env *e, val *args, int maxargs) {
         } else { args[na++]=eval_expr(el,e); }
     }
     return na;
+}
+
+/* Bind a destructuring pattern (an N_ARRAY/N_OBJECT of targets, reusing the
+ * literal parsers) to a value, defining each leaf identifier in `e`. Handles
+ * defaults (N_ASSIGN), array/object rest (N_SPREAD), rename, and nesting. */
+static void bind_pattern(node *pat, val v, env *e) {
+    if (!pat || g_oom) return;
+    if (pat->type==N_ASSIGN) { if (v.t==V_UNDEF) v=eval_expr(pat->b,e); bind_pattern(pat->a, v, e); return; }
+    if (pat->type==N_IDENT)  { env_define(e, node_name(pat), v); return; }
+    if (pat->type==N_ARRAY) {
+        for (int i=0;i<pat->nlist && !g_oom;i++){ node *el=pat->list[i];
+            if (el->type==N_SPREAD){ obj *ro=new_obj(V_ARR); if(!ro){g_oom=1;return;}
+                if (v.t==V_ARR && v.o) for(int j=i;j<v.o->n && !g_oom;j++) arr_push_val(ro, v.o->vals[j]);
+                val rv=UND(); rv.t=V_ARR; rv.o=ro; bind_pattern(el->a, rv, e); break; }
+            val ev = (v.t==V_ARR && v.o && i<v.o->n) ? v.o->vals[i] : UND();
+            bind_pattern(el, ev, e);
+        }
+        return;
+    }
+    if (pat->type==N_OBJECT) {
+        for (int i=0;i<pat->nlist && !g_oom;i++){ node *pr=pat->list[i];
+            if (pr->type==N_SPREAD){ obj *ro=new_obj(V_OBJ); if(!ro){g_oom=1;return;}
+                if (v.t==V_OBJ && v.o) for(int j=0;j<v.o->n && !g_oom;j++){ const char*k=v.o->keys[j]; int named=0;
+                    for(int m=0;m<i;m++){ node*q=pat->list[m]; if(q->type!=N_SPREAD && q->str && strcmp(q->str,k)==0){named=1;break;} }
+                    if(!named) obj_set(ro, k, v.o->vals[j]); }
+                val rv=UND(); rv.t=V_OBJ; rv.o=ro; bind_pattern(pr->a, rv, e); break; }
+            val ev=UND(); if (v.t==V_OBJ && v.o) obj_get(v.o, pr->str, &ev);
+            bind_pattern(pr->a, ev, e);   /* pr->a is the target (ident, N_ASSIGN default, or nested pattern) */
+        }
+        return;
+    }
 }
 
 /* resolve a member/index target for assignment: returns the container + key */
@@ -944,7 +985,8 @@ static comp eval_stmt_inner(node *n, env *e) {
             for (int i=0;i<n->nlist;i++){ comp c=eval_stmt(n->list[i],be); if(c.kind!=C_NORMAL||g_err||g_oom) return c; }
             return CN();
         }
-        case N_VAR: { for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND(); env_define(e,node_name(d),v); } return CN(); }
+        case N_VAR: { for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND();
+            if (d->b) bind_pattern(d->b, v, e); else env_define(e,node_name(d),v); } return CN(); }
         case N_FUNC: { eval_expr(n,e); return CN(); }
         case N_EXPR: { eval_expr(n->a,e); return CN(); }
         case N_IF: { if (truthy(eval_expr(n->a,e))) return eval_stmt(n->b,e); else if (n->c) return eval_stmt(n->c,e); return CN(); }
@@ -986,13 +1028,16 @@ static comp eval_stmt_inner(node *n, env *e) {
         }
         case N_FOROF: {
             val it=eval_expr(n->a,e); env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
-            const char *vn=node_name(n); env_define(fe, vn, UND());
+            const char *vn = n->c ? 0 : node_name(n);   /* n->c is a destructuring pattern, else a plain name */
+            if (vn) env_define(fe, vn, UND());
             if (it.t==V_ARR && it.o) {
-                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=it.o->vals[i];
+                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
+                    if (n->c) bind_pattern(n->c, it.o->vals[i], fe); else { val *slot=env_find(fe,vn); if(slot) *slot=it.o->vals[i]; }
                     comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_STR) {
                 int l=(int)strlen(it.str);
-                for (int i=0;i<l && !g_err && !g_oom;i++){ char*ch=aalloc(2); if(ch){ch[0]=it.str[i];ch[1]=0;} val *slot=env_find(fe,vn); if(slot) *slot=STRV(ch?ch:"");
+                for (int i=0;i<l && !g_err && !g_oom;i++){ char*ch=aalloc(2); if(ch){ch[0]=it.str[i];ch[1]=0;} val cv=STRV(ch?ch:"");
+                    if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
                     comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
             }
             return CN();

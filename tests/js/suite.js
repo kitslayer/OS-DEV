@@ -64,4 +64,8 @@ print("-- spread / rest --");
 var sa=[2,3]; print([1,...sa,4].join(","), [..."ab"].join("."));
 function ssum(...xs){ return xs.reduce((a,b)=>a+b,0); } print(ssum(...sa,5));
 var so={x:1}; print(JSON.stringify({...so,y:2}));
+print("-- destructuring --");
+var [da,db,...dr]=[1,2,3,4]; print(da, db, dr.join(","));
+var {dn, dx=9}={dn:"z"}; print(dn, dx);
+var ds=0; for (var [dk,dv] of [[2,3],[4,5]]) ds+=dk*dv; print(ds);
 print("-- done --");
