@@ -625,7 +625,7 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET, V_REGEX, V_DATE /* obj->kind markers only; the val.t stays V_OBJ */ };
+       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT /* obj->kind markers only; the val.t stays V_OBJ */ };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -1078,6 +1078,7 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs);
 static val eval_map_method(val recv, const char *name, val *args, int nargs);
 static val eval_set_method(val recv, const char *name, val *args, int nargs);
 static val eval_date_method(val recv, const char *name, val *args, int nargs);
+static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax);   /* DOM element read/write */
 
 static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
@@ -1088,6 +1089,7 @@ static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_OBJ && recv.o) {
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM(recv.o->n/2);   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
+        if (recv.o->kind==V_ELEMENT) { static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) return out;
     }
     return UND();
@@ -1188,7 +1190,9 @@ static val eval_expr_inner(node *n, env *e) {
                 else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): (y?x%y:0)); }
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
-            if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e); if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
+            if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) { dom_prop(recv.o, node_name(t), val_to_str(rhs), 0, 0); return rhs; }   /* el.textContent = … -> mutate the page */
+                if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
                 if (recv.t==V_ARR && recv.o) {
                     long i = to_num(idx);
@@ -1660,6 +1664,32 @@ static val native_doc_write(val *args, int nargs) {
     return UND();
 }
 
+/* ---- minimal DOM ---- document.getElementById(id) returns a V_ELEMENT handle
+ * (the id lives in vals[0]); reading/writing its .textContent/.innerHTML calls
+ * host callbacks the browser registers — it finds the element in the page source,
+ * mutates it, and re-renders (mirroring the document.write / localStorage model). */
+static int  (*g_dom_get)(const char *id, char *out, int max, int html);   /* 1 if found */
+static void (*g_dom_set)(const char *id, const char *value, int html);
+static val nat_getElementById(val *args, int nargs) {
+    const char *id = nargs ? val_to_str(args[0]) : "";
+    obj *o = new_obj(V_ELEMENT); if(!o){ g_oom=1; return UND(); }
+    arr_push_val(o, STRV(intern(id, (int)strlen(id))));   /* vals[0] = the element id */
+    return obj_val(o);
+}
+/* read/write a V_ELEMENT property; returns 1 if handled (so eval_member_get /
+ * assignment can fall through for anything else). `set` NULL = read into out. */
+static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax) {
+    const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
+    int html = (strcmp(name,"innerHTML")==0);
+    if (strcmp(name,"id")==0) { if(!setval && out){ int i=0; while(id[i]&&i<outmax-1){out[i]=id[i];i++;} out[i]=0; } return 1; }
+    if (html || strcmp(name,"textContent")==0 || strcmp(name,"innerText")==0) {
+        if (setval) { if(g_dom_set) g_dom_set(id, setval, html); }
+        else { if(out){ out[0]=0; if(g_dom_get) g_dom_get(id, out, outmax, html); } }
+        return 1;
+    }
+    return 0;
+}
+
 /* localStorage: a host-provided key->value (string) store that survives the
  * per-run arena reset, so page click-handlers can accumulate state (a counter). */
 static const char *(*g_ls_get)(const char *key);
@@ -1875,11 +1905,11 @@ static void install_globals(env *g) {
     obj *log=new_obj(V_NATIVE); log->native=native_print; val lv=UND(); lv.t=V_NATIVE; lv.o=log;
     obj *con=new_obj(V_OBJ); obj_set(con,"log",lv); obj_set(con,"warn",lv); obj_set(con,"error",lv); obj_set(con,"info",lv); obj_set(con,"debug",lv);   /* all print; page scripts use warn/error too */
     val cv=UND(); cv.t=V_OBJ; cv.o=con; env_define(g,"console",cv);
-    /* document: write() splices HTML into the page. getElementById() returns
-     * undefined for now (a real DOM is future work) — scripts that touch the
-     * result no-op safely rather than crash. */
+    /* document: write() splices HTML into the page; getElementById(id) returns a
+     * live element handle whose .textContent/.innerHTML read & mutate the page. */
     obj *dw=new_obj(V_NATIVE); dw->native=native_doc_write; val dwv=UND(); dwv.t=V_NATIVE; dwv.o=dw;
     obj *doc=new_obj(V_OBJ); obj_set(doc,"write",dwv); obj_set(doc,"writeln",dwv);
+    def_native(doc,"getElementById",nat_getElementById);
     val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
     /* localStorage.getItem/setItem (browser-backed; no-ops at the shell) */
     obj *ls=new_obj(V_OBJ); def_native(ls,"getItem",native_ls_getItem); def_native(ls,"setItem",native_ls_setItem);
@@ -1954,12 +1984,17 @@ static int js_run_impl(const char *src, char *out, int outmax) {
 int js_run(const char *src, char *out, int outmax) {
     g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
     g_ls_get = 0; g_ls_set = 0;           /* and no persistent storage */
+    g_dom_get = 0; g_dom_set = 0;         /* and no DOM (no page) */
     return js_run_impl(src, out, outmax);
 }
 
 /* The browser registers a localStorage backing store before running page JS. */
 void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *)) {
     g_ls_get = get; g_ls_set = set;
+}
+/* The browser registers DOM read/mutate callbacks for getElementById handles. */
+void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const char *, const char *, int)) {
+    g_dom_get = get; g_dom_set = set;
 }
 
 /* Run page scripts with a host document.write sink (the browser splices the
@@ -1980,11 +2015,16 @@ static void host_set(const char *k, const char *v){
     if(i==hn){ if(hn>=16) return; int j=0; while(k[j]&&j<31){hk[hn][j]=k[j];j++;} hk[hn][j]=0; i=hn++; }
     int j=0; while(v[j]&&j<159){hv[i][j]=v[j];j++;} hv[i][j]=0;
 }
+/* a trivial in-memory "DOM" (id -> text) so host tests can exercise getElementById */
+static char dk[16][32], dv[16][256]; static int dnn;
+static void hdom_set(const char *id, const char *v, int html){ (void)html; int i; for(i=0;i<dnn;i++) if(!strcmp(dk[i],id)) break; if(i==dnn){ if(dnn>=16) return; int j=0; while(id[j]&&j<31){dk[dnn][j]=id[j];j++;} dk[dnn][j]=0; i=dnn++; } int j=0; while(v[j]&&j<255){dv[i][j]=v[j];j++;} dv[i][j]=0; }
+static int hdom_get(const char *id, char *out, int max, int html){ (void)html; for(int i=0;i<dnn;i++) if(!strcmp(dk[i],id)){ int j=0; while(dv[i][j]&&j<max-1){out[j]=dv[i][j];j++;} out[j]=0; return 1; } if(max) out[0]=0; return 0; }
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
     static char outb[200000];
     js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
+    js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
     return r<0?1:0;

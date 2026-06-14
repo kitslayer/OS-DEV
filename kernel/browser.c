@@ -669,7 +669,57 @@ static void browser_ls_set(const char *key, const char *val) {
     if (i == g_ls_b->ls_n) { if (g_ls_b->ls_n >= 16) return; int j=0; while(key[j]&&j<31){g_ls_b->ls_keys[i][j]=key[j];j++;} g_ls_b->ls_keys[i][j]=0; g_ls_b->ls_n++; }
     int j=0; while(val[j]&&j<159){g_ls_b->ls_vals[i][j]=val[j];j++;} g_ls_b->ls_vals[i][j]=0;
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); }
+/* ---- minimal DOM: find/read/mutate an element by id in the page source ----
+ * Locate <tag … id="ID" …>INNER</tag> in the body region of b->raw and report
+ * INNER's byte range [*is, *ie). Handles nested same-name tags by depth count. */
+static int dom_alnum(int c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9'); }
+static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
+    const char *r = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
+    int idlen = 0; while (id[idlen]) idlen++;
+    if (idlen == 0) return 0;
+    for (int i = lo; i + 4 < hi; i++) {
+        if (!(r[i]=='i' && r[i+1]=='d' && r[i+2]=='=' && (r[i+3]=='"' || r[i+3]=='\''))) continue;
+        char q = r[i+3]; int vs = i + 4, k = 0;
+        while (k < idlen && vs + k < hi && r[vs+k] == id[k]) k++;
+        if (!(k == idlen && vs + k < hi && r[vs+k] == q)) continue;   /* whole attr value must equal id */
+        int ts = i; while (ts > lo && r[ts] != '<') ts--;             /* back up to the opening '<' */
+        if (r[ts] != '<') continue;
+        char tag[16]; int tn = 0, ne = ts + 1;
+        while (ne < hi && dom_alnum(r[ne]) && tn < 15) tag[tn++] = r[ne++];
+        if (tn == 0) continue;
+        int gt = i; while (gt < hi && r[gt] != '>') gt++;             /* end of the opening tag */
+        if (gt >= hi) return 0;
+        int istart = gt + 1, depth = 1, p = istart;
+        while (p < hi) {
+            if (r[p] == '<') {
+                if (p+2+tn <= hi && r[p+1]=='/' && memcmp(r+p+2, tag, tn)==0) { if(--depth==0){ *is=istart; *ie=p; return 1; } }
+                else if (p+1+tn < hi && memcmp(r+p+1, tag, tn)==0 && (r[p+1+tn]==' '||r[p+1+tn]=='>'||r[p+1+tn]=='/')) depth++;
+            }
+            p++;
+        }
+        return 0;
+    }
+    return 0;
+}
+static int browser_dom_get(const char *id, char *out, int max, int html) {
+    (void)html; if (max) out[0] = 0;
+    if (!g_ls_b) return 0;
+    int is, ie; if (!dom_find(g_ls_b, id, &is, &ie)) return 0;
+    int len = ie - is; if (len > max - 1) len = max - 1; if (len < 0) len = 0;
+    memcpy(out, g_ls_b->raw + is, len); out[len] = 0; return 1;
+}
+static void browser_dom_set(const char *id, const char *value, int html) {
+    (void)html; browser_t *b = g_ls_b; if (!b) return;
+    int is, ie; if (!dom_find(b, id, &is, &ie)) return;
+    int vlen = 0; while (value[vlen]) vlen++;
+    int bodyend = b->bodyoff + b->bodylen, delta = vlen - (ie - is);
+    if (bodyend + delta >= RAW_MAX - 1 || bodyend + delta < b->bodyoff) return;   /* out of room */
+    memmove(b->raw + ie + delta, b->raw + ie, bodyend - ie);   /* shift the tail */
+    memcpy(b->raw + is, value, vlen);                          /* splice in the new content */
+    b->bodylen += delta; b->raw[b->bodyoff + b->bodylen] = 0;
+    parse_html(b, b->raw + b->bodyoff, b->bodylen);            /* re-render the page in place */
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
