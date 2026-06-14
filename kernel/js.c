@@ -1597,6 +1597,33 @@ static val eval_set_method(val recv, const char *name, val *args, int nargs) {
     rt_err("unknown Set method"); return UND();
 }
 
+/* URI encode/decode (pure string funcs; bounded output). `comp`=1 for the stricter
+ * encodeURIComponent set, 0 for encodeURI (keeps reserved URI delimiters). */
+static int uri_keep(int c, int comp){
+    if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')) return 1;
+    if(c=='-'||c=='_'||c=='.'||c=='!'||c=='~'||c=='*'||c=='\''||c=='('||c==')') return 1;
+    if(!comp && (c==';'||c==','||c=='/'||c=='?'||c==':'||c=='@'||c=='&'||c=='='||c=='+'||c=='$'||c=='#')) return 1;
+    return 0;
+}
+static val uri_encode(val *args, int nargs, int comp){
+    if(!nargs) return STRV("undefined"); const char *s=val_to_str(args[0]); int len=(int)strlen(s);
+    char *r=aalloc((long)len*3+1); if(!r) return STRV(""); int p=0;
+    for(int i=0;i<len;i++){ unsigned char c=s[i];
+        if(uri_keep(c,comp)) r[p++]=c;
+        else { const char *hex="0123456789ABCDEF"; r[p++]='%'; r[p++]=hex[c>>4]; r[p++]=hex[c&15]; } }
+    r[p]=0; return STRV(r);
+}
+static int hexval(int c){ if(c>='0'&&c<='9')return c-'0'; if(c>='A'&&c<='F')return c-'A'+10; if(c>='a'&&c<='f')return c-'a'+10; return -1; }
+static val uri_decode(val *args, int nargs){
+    if(!nargs) return STRV("undefined"); const char *s=val_to_str(args[0]); int len=(int)strlen(s);
+    char *r=aalloc(len+1); if(!r) return STRV(""); int p=0;
+    for(int i=0;i<len;i++){ if(s[i]=='%' && i+2<len){ int h=hexval(s[i+1]),l=hexval(s[i+2]); if(h>=0&&l>=0){ r[p++]=(char)(h*16+l); i+=2; continue; } } r[p++]=s[i]; }
+    r[p]=0; return STRV(r);
+}
+static val nat_encodeURIComponent(val *a,int n){ return uri_encode(a,n,1); }
+static val nat_encodeURI(val *a,int n){ return uri_encode(a,n,0); }
+static val nat_decodeURI(val *a,int n){ return uri_decode(a,n); }
+
 /* native print/console.log */
 static val native_print(val *args, int nargs) {
     for (int i=0;i<nargs;i++){ if(i) out_str(" "); out_str(val_to_str(args[i])); }
@@ -1855,6 +1882,10 @@ static void install_globals(env *g) {
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
+    { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURIComponent; env_define(g,"encodeURIComponent",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=uri_decode;             env_define(g,"decodeURIComponent",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURI;          env_define(g,"encodeURI",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_decodeURI;          env_define(g,"decodeURI",obj_val_native(e)); }
     obj *dt=new_obj(V_NATIVE); dt->native=nat_date;     env_define(g,"Date",obj_val_native(dt));   /* Date() -> wall-clock string */
 }
 

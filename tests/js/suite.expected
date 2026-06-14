@@ -83,6 +83,7 @@ undefined 5
 4 true {"a":1,"b":2}
 4 x  | |  y
 number number 19
+a%20b%26c x y p/q?x=1
 -- more stdlib --
 30 1,1,2,2,3,3 2
 a/b/c i
