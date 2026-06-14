@@ -80,6 +80,17 @@ static const struct {
         "document.write(\"<p>r(500) = \" + r(500) + \"</p>\");\n"
         "</script>"
         "<p>If you can read this paragraph and the OS is still responsive, the guard held.</p>" },
+    { "SHOWCASEJS ", "print(\"== OS-DEV from-scratch JavaScript ==\");\n"
+        "var n = [5, 3, 8, 1, 9, 2, 7];\n"
+        "print(\"squares: \" + n.map(x => x * x).join(\", \"));\n"
+        "print(\"evens:   \" + n.filter(x => x % 2 == 0).join(\", \"));\n"
+        "var s = 0; n.forEach(x => s += x); print(\"sum:     \" + s);\n"
+        "function fib(k){ return k < 2 ? k : fib(k-1) + fib(k-2); }\n"
+        "print(\"fib:     \" + [0,1,2,3,4,5,6,7,8,9,10].map(fib).join(\", \"));\n"
+        "var d = { os: \"OS-DEV\", ms: 148, features: [\"TLS\", \"browser\", \"JS\"] };\n"
+        "print(\"json:    \" + JSON.stringify(d));\n"
+        "var back = JSON.parse(JSON.stringify(d));\n"
+        "print(\"parse:   \" + back.os + \", \" + back.features.length + \" features, sqrt(2025)=\" + Math.sqrt(2025));\n" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)
