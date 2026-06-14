@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define RAW_MAX   131072        /* response/image fetch buffer (128 KB) */
+#define RAW_MAX   262144        /* response/image fetch buffer (256 KB) */
 #define TEXT_MAX  49152         /* token text pool (< 65536: token off is uint16) */
 #define TOK_MAX   7000
 #define SCRIPT_MAX 16384        /* concatenated inline <script> text run per page */
