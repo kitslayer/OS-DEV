@@ -68,4 +68,9 @@ z 9
 2 1
 8 9
 1 2,3
+-- nullish / optional chaining --
+d 0 7
+5 undefined undefined
+undefined undefined undefined
+9 undefined
 -- done --

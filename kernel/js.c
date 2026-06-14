@@ -39,7 +39,11 @@ static void out_str(const char *s) {
 }
 
 /* ---- arena allocator (no free; reset per run) ---- */
-#define JS_ARENA   (1024 * 1024)
+/* Holds the whole parsed AST + the global objects + every value a run allocates,
+ * all at once (reset only between runs). 2 MB so large scripts — the kitchen-sink
+ * regression suite, or a page that defines several classes — have eval headroom
+ * above the parsed AST; the buffer is static BSS, cheap on the kernel's RAM. */
+#define JS_ARENA   (2048 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -162,7 +166,7 @@ static token lex_next(lexer *L) {
     }
     /* punctuation / multi-char operators */
     static const char *ops[] = { "===","!==","<<=",">>=","...","==","!=","<=",">=",
-        "&&","||","++","--","+=","-=","*=","/=","%=","<<",">>","=>",0 };
+        "&&","||","??","?.","++","--","+=","-=","*=","/=","%=","<<",">>","=>",0 };
     for (int i=0; ops[i]; i++) { int ol=(int)strlen(ops[i]); if (L->pos+ol<=L->len && memcmp(ops[i],s+L->pos,ol)==0) { t.type=T_PUNC; t.s=s+L->pos; t.len=ol; L->pos+=ol; return t; } }
     t.type=T_PUNC; t.s=s+L->pos; t.len=1; L->pos++; return t;
 }
@@ -361,6 +365,11 @@ static node *parse_postfix(lexer *L) {
     node *e = parse_primary(L);
     for (;;) {
         if (peek_punc(L,".")) { advance(L); token p=advance(L); node *m=mknode(N_MEMBER); m->a=e; m->str=intern(p.s,p.len); m->slen=p.len; e=m; }
+        else if (peek_punc(L,"?.")) { advance(L);   /* optional chaining: ?.x  ?.[i]  ?.() */
+            if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->prefix=1; call->list=parse_list(L,")",&call->nlist); e=call; }
+            else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; m->prefix=1; e=m; }
+            else { token p=advance(L); node *m=mknode(N_MEMBER); m->a=e; m->str=intern(p.s,p.len); m->slen=p.len; m->prefix=1; e=m; }
+        }
         else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; e=m; }
         else if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->list=parse_list(L,")",&call->nlist); e=call; }
         else if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->a=e; u->prefix=0; e=u; }
@@ -397,6 +406,7 @@ static int bin_prec(token t, int *code) {
     if (tok_is(t,"|")) { *code='|'; return 4; }
     if (tok_is(t,"&&")) { *code='A'; return 3; }
     if (tok_is(t,"||")) { *code='O'; return 2; }
+    if (tok_is(t,"??")) { *code='N'; return 2; }   /* nullish coalescing */
     return 0;
 }
 
@@ -407,7 +417,7 @@ static node *parse_binary(lexer *L, int minp) {
         if (p == 0 || p < minp) break;
         advance(L);
         node *right = parse_binary(L, p+1);
-        int logical = (code=='A'||code=='O');
+        int logical = (code=='A'||code=='O'||code=='N');
         node *n = mknode(logical?N_LOGICAL:N_BINARY); n->op=code; n->a=left; n->b=right;
         left = n;
     }
@@ -838,7 +848,9 @@ static val eval_expr_inner(node *n, env *e) {
             val r=UND(); r.t=V_OBJ; r.o=o; return r; }
         case N_FUNC: { obj *o=new_obj(V_FUN); if(!o) return UND(); o->fn=n; o->scope=e; val r=UND(); r.t=V_FUN; r.o=o; if(n->str){ env_define(e,node_name(n),r); } return r; }
         case N_COND: return truthy(eval_expr(n->a,e)) ? eval_expr(n->b,e) : eval_expr(n->c,e);
-        case N_LOGICAL: { val l=eval_expr(n->a,e); if(n->op=='A') return truthy(l)?eval_expr(n->b,e):l; else return truthy(l)?l:eval_expr(n->b,e); }
+        case N_LOGICAL: { val l=eval_expr(n->a,e);
+            if(n->op=='N') return (l.t==V_UNDEF||l.t==V_NULL) ? eval_expr(n->b,e) : l;   /* ?? : only null/undefined fall through */
+            if(n->op=='A') return truthy(l)?eval_expr(n->b,e):l; else return truthy(l)?l:eval_expr(n->b,e); }
         case N_UNARY: {
             if (n->op=='t') { val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE)?"function":"object"; return STRV(ty); }
             val v=eval_expr(n->a,e);
@@ -930,8 +942,12 @@ static val eval_expr_inner(node *n, env *e) {
                 if (sup && sup->t==V_FUN && sup->o->home_proto){ val out; if(obj_get(sup->o->home_proto,node_name(n),&out)) return out; }
                 return UND();
             }
-            val recv=eval_expr(n->a,e); return eval_member_get(recv, node_name(n)); }
-        case N_INDEX: { val recv=eval_expr(n->a,e); val idx=eval_expr(n->b,e);
+            val recv=eval_expr(n->a,e);
+            if (n->prefix && (recv.t==V_UNDEF||recv.t==V_NULL)) return UND();   /* obj?.prop short-circuit */
+            return eval_member_get(recv, node_name(n)); }
+        case N_INDEX: { val recv=eval_expr(n->a,e);
+            if (n->prefix && (recv.t==V_UNDEF||recv.t==V_NULL)) return UND();   /* obj?.[i] short-circuit */
+            val idx=eval_expr(n->b,e);
             if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
             if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
             if (recv.t==V_OBJ && recv.o){ val out; if(obj_get(recv.o,val_to_str(idx),&out)) return out; }
@@ -954,13 +970,17 @@ static val eval_expr_inner(node *n, env *e) {
             }
             if (callee->type==N_MEMBER) {
                 val recv=eval_expr(callee->a,e); const char *m=node_name(callee);
+                if (callee->prefix && (recv.t==V_UNDEF||recv.t==V_NULL)) return UND();   /* obj?.method() short-circuit */
                 if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
                 if (recv.t==V_ARR) return eval_array_method(recv,m,args,na);
                 if (recv.t==V_NUM || recv.t==V_BOOL) return eval_number_method(recv,m,args,na);
-                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)) return call_function_this(fn,recv,args,na); }
+                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
+                if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();
             }
-            val fn=eval_expr(callee,e); return call_function(fn,args,na);
+            val fn=eval_expr(callee,e);
+            if (n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND();   /* fn?.() short-circuit */
+            return call_function(fn,args,na);
         }
         case N_THIS: { val *t=env_find(e,"this"); return t?*t:UND(); }
         case N_CLASS: {
