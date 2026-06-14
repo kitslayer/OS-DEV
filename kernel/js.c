@@ -597,7 +597,7 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET /* obj->kind markers only; the val.t stays V_OBJ */ };
+       V_MAP, V_SET, V_REGEX /* obj->kind markers only; the val.t stays V_OBJ */ };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -613,6 +613,7 @@ struct obj {
     val (*native)(val *args, int nargs);
     obj *home_proto;   /* class constructors: an object holding the methods to copy onto each new instance */
     obj *super_class;  /* a class method/ctor's parent constructor, for super() / super.m() */
+    void *rx;          /* compiled regex (struct regex*) when kind==V_REGEX */
 };
 
 struct env { const char **keys; val *vals; int n, cap; env *parent; };
@@ -676,6 +677,191 @@ static int val_equal(val a, val b) {
         case V_STR: return a.str && b.str && strcmp(a.str,b.str)==0;
         default: return a.o==b.o;   /* V_OBJ/V_ARR/V_FUN/V_NATIVE: identity */
     }
+}
+
+/* =========================== regular expressions ===========================
+ * A from-scratch regex: pattern -> tree -> a small instruction program, run by
+ * a recursive backtracking matcher with a STEP BUDGET + DEPTH CAP so a
+ * pathological pattern on untrusted input fails gracefully instead of hanging or
+ * overflowing the kernel stack (verified on `(a+)+$`). Supports literals, . ,
+ * [classes] (ranges, negation, \d\w\s\D\W\S), * + ? (greedy), | , (capture
+ * groups), ^ $, escapes; flags i (ignore case) and g (global). */
+enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
+typedef struct { int op; int c; int x, y; unsigned char *cls; } reinst;
+#define RE_MAXPROG 512
+#define RE_MAXGROUP 9
+typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int lastIndex; const char *source; int ok; } regex;
+
+enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
+typedef struct rnode rnode;
+struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; };
+typedef struct { const char *p; int len, pos; int ngroup; int err; } rparse;
+
+static rnode *rx_node(int t){ rnode *n=aalloc(sizeof(rnode)); if(!n) return 0; memset(n,0,sizeof(*n)); n->type=t; return n; }
+static rnode *rx_alt(rparse *P);
+static void cls_set(unsigned char *cls,int c){ cls[(c&0xff)>>3] |= 1<<(c&7); }
+static void cls_class(unsigned char *cls,int kind){
+    if(kind=='d'){ for(int c='0';c<='9';c++) cls_set(cls,c); }
+    else if(kind=='w'){ for(int c='0';c<='9';c++) cls_set(cls,c); for(int c='a';c<='z';c++) cls_set(cls,c); for(int c='A';c<='Z';c++) cls_set(cls,c); cls_set(cls,'_'); }
+    else if(kind=='s'){ cls_set(cls,' '); cls_set(cls,'\t'); cls_set(cls,'\n'); cls_set(cls,'\r'); cls_set(cls,'\f'); cls_set(cls,'\v'); }
+}
+static rnode *rx_class(rparse *P){
+    rnode *n=rx_node(RN_CLASS); if(!n){P->err=1;return 0;} n->cls=aalloc(32); if(!n->cls){P->err=1;return 0;} memset(n->cls,0,32);
+    int neg=0; if(P->pos<P->len && P->p[P->pos]=='^'){ neg=1; P->pos++; }
+    while(P->pos<P->len && P->p[P->pos]!=']'){
+        int c=(unsigned char)P->p[P->pos++];
+        if(c=='\\' && P->pos<P->len){ int e=(unsigned char)P->p[P->pos++];
+            if(e=='d'||e=='w'||e=='s'){ cls_class(n->cls,e); continue; }
+            if(e=='D'||e=='W'||e=='S'){ unsigned char tmp[32]; memset(tmp,0,32); cls_class(tmp,e+32); for(int i=0;i<32;i++) n->cls[i]|=~tmp[i]; continue; }
+            if(e=='n')c='\n'; else if(e=='t')c='\t'; else if(e=='r')c='\r'; else c=e;
+        }
+        if(P->pos+1<P->len && P->p[P->pos]=='-' && P->p[P->pos+1]!=']'){ P->pos++; int hi=(unsigned char)P->p[P->pos++]; if(hi=='\\'&&P->pos<P->len) hi=(unsigned char)P->p[P->pos++]; for(int x=c;x<=hi;x++) cls_set(n->cls,x); }
+        else cls_set(n->cls,c);
+    }
+    if(P->pos<P->len && P->p[P->pos]==']') P->pos++; else P->err=1;
+    n->c=neg; return n;
+}
+static rnode *rx_atom(rparse *P){
+    if(P->pos>=P->len) return rx_node(RN_EMPTY);
+    int c=(unsigned char)P->p[P->pos];
+    if(c=='('){ P->pos++; if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') P->pos+=2; int gi=(P->ngroup<RE_MAXGROUP)?++P->ngroup:0; rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1; rnode *g=rx_node(RN_GROUP); if(!g){P->err=1;return 0;} g->a=body; g->group=gi; return g; }
+    if(c=='['){ P->pos++; return rx_class(P); }
+    if(c=='.'){ P->pos++; return rx_node(RN_ANY); }
+    if(c=='^'){ P->pos++; return rx_node(RN_BOL); }
+    if(c=='$'){ P->pos++; return rx_node(RN_EOL); }
+    if(c=='\\' && P->pos+1<P->len){ P->pos++; int e=(unsigned char)P->p[P->pos++];
+        if(e=='d'||e=='w'||e=='s'){ rnode *n=rx_node(RN_CLASS); if(!n){P->err=1;return 0;} n->cls=aalloc(32); if(!n->cls){P->err=1;return 0;} memset(n->cls,0,32); cls_class(n->cls,e); n->c=0; return n; }
+        if(e=='D'||e=='W'||e=='S'){ rnode *n=rx_node(RN_CLASS); if(!n){P->err=1;return 0;} n->cls=aalloc(32); if(!n->cls){P->err=1;return 0;} memset(n->cls,0,32); cls_class(n->cls,e+32); n->c=1; return n; }
+        rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} if(e=='n')n->c='\n'; else if(e=='t')n->c='\t'; else if(e=='r')n->c='\r'; else n->c=e; return n; }
+    P->pos++; rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} n->c=c; return n;
+}
+static rnode *rx_rep(rparse *P){
+    rnode *a=rx_atom(P); if(!a) return 0;
+    while(P->pos<P->len){ int c=P->p[P->pos];
+        if(c=='*'||c=='+'||c=='?'){ P->pos++; rnode *q=rx_node(c=='*'?RN_STAR:c=='+'?RN_PLUS:RN_OPT); if(!q){P->err=1;return 0;} q->a=a; a=q; }
+        else break; }
+    return a;
+}
+static rnode *rx_cat(rparse *P){
+    rnode *a=0;
+    while(P->pos<P->len && P->p[P->pos]!='|' && P->p[P->pos]!=')'){ rnode *r=rx_rep(P); if(P->err) return a; if(!a) a=r; else { rnode *c=rx_node(RN_CAT); if(!c){P->err=1;return a;} c->a=a; c->b=r; a=c; } }
+    return a?a:rx_node(RN_EMPTY);
+}
+static rnode *rx_alt(rparse *P){
+    rnode *a=rx_cat(P);
+    while(P->pos<P->len && P->p[P->pos]=='|'){ P->pos++; rnode *b=rx_cat(P); rnode *alt=rx_node(RN_ALT); if(!alt){P->err=1;return a;} alt->a=a; alt->b=b; a=alt; }
+    return a;
+}
+typedef struct { reinst *prog; int pc; int err; } remit;
+static int rx_emit(remit *E,int op,int c,int x,int y,unsigned char*cls){ if(E->pc>=RE_MAXPROG){E->err=1;return 0;} int at=E->pc++; E->prog[at].op=op; E->prog[at].c=c; E->prog[at].x=x; E->prog[at].y=y; E->prog[at].cls=cls; return at; }
+static void rx_compile(remit *E, rnode *n){
+    if(!n||E->err) return;
+    switch(n->type){
+        case RN_CHAR: rx_emit(E,I_CHAR,n->c,0,0,0); break;
+        case RN_ANY: rx_emit(E,I_ANY,0,0,0,0); break;
+        case RN_CLASS: rx_emit(E,I_CLASS,n->c,0,0,n->cls); break;
+        case RN_BOL: rx_emit(E,I_BOL,0,0,0,0); break;
+        case RN_EOL: rx_emit(E,I_EOL,0,0,0,0); break;
+        case RN_EMPTY: break;
+        case RN_CAT: rx_compile(E,n->a); rx_compile(E,n->b); break;
+        case RN_GROUP: if(n->group){ rx_emit(E,I_SAVE,2*n->group,0,0,0); rx_compile(E,n->a); rx_emit(E,I_SAVE,2*n->group+1,0,0,0); } else rx_compile(E,n->a); break;
+        case RN_STAR: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); rx_emit(E,I_JMP,0,l1,0,0); E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; break; }
+        case RN_PLUS: { int l1=E->pc; rx_compile(E,n->a); int sp=rx_emit(E,I_SPLIT,0,l1,0,0); E->prog[sp].y=E->pc; break; }
+        case RN_OPT: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; break; }
+        case RN_ALT: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); int j=rx_emit(E,I_JMP,0,0,0,0); E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; rx_compile(E,n->b); E->prog[j].x=E->pc; break; }
+    }
+}
+static regex *re_compile(const char *pat, const char *flags){
+    regex *re=aalloc(sizeof(regex)); if(!re) return 0; memset(re,0,sizeof(*re));
+    if(flags) for(const char*f=flags;*f;f++){ if(*f=='i')re->icase=1; else if(*f=='g')re->global=1; }
+    re->source=pat?pat:"";
+    rparse P; memset(&P,0,sizeof(P)); P.p=pat?pat:""; P.len=(int)strlen(P.p);
+    rnode *tree=rx_alt(&P);
+    if(P.err || P.pos!=P.len){ re->ok=0; return re; }
+    re->ngroup=P.ngroup;
+    remit E; E.prog=aalloc((long)sizeof(reinst)*RE_MAXPROG); if(!E.prog){re->ok=0;return re;} E.pc=0; E.err=0;
+    rx_emit(&E,I_SAVE,0,0,0,0); rx_compile(&E,tree); rx_emit(&E,I_SAVE,1,0,0,0); rx_emit(&E,I_MATCH,0,0,0,0);
+    if(E.err){ re->ok=0; return re; }
+    re->prog=E.prog; re->n=E.pc; re->ok=1; return re;
+}
+static int rx_eqc(int a,int b,int icase){ if(a==b) return 1; if(icase){ int la=(a>='A'&&a<='Z')?a+32:a, lb=(b>='A'&&b<='Z')?b+32:b; return la==lb; } return 0; }
+static int re_run(regex *re,int pc,const char*s,int slen,int sp,int*caps,long*budget,int depth){
+    if(--*budget<0 || depth>3000) return -2;
+    for(;;){
+        reinst *in=&re->prog[pc];
+        switch(in->op){
+            case I_CHAR: if(sp<slen && rx_eqc((unsigned char)s[sp],in->c,re->icase)){ sp++; pc++; continue; } return 0;
+            case I_ANY: if(sp<slen && s[sp]!='\n'){ sp++; pc++; continue; } return 0;
+            case I_CLASS: { if(sp>=slen) return 0; unsigned char ch=(unsigned char)s[sp]; int hit=(in->cls[ch>>3]>>(ch&7))&1;
+                if(re->icase && !hit){ int o=(ch>='a'&&ch<='z')?ch-32:(ch>='A'&&ch<='Z')?ch+32:ch; hit=(in->cls[(o&0xff)>>3]>>(o&7))&1; }
+                if(in->c) hit=!hit; if(hit){ sp++; pc++; continue; } return 0; }
+            case I_BOL: if(sp==0 || s[sp-1]=='\n'){ pc++; continue; } return 0;
+            case I_EOL: if(sp==slen || s[sp]=='\n'){ pc++; continue; } return 0;
+            case I_JMP: pc=in->x; continue;
+            case I_SPLIT: { int r=re_run(re,in->x,s,slen,sp,caps,budget,depth+1); if(r!=0) return r; pc=in->y; continue; }
+            case I_SAVE: { int idx=in->c; int old=(idx<2*(RE_MAXGROUP+1))?caps[idx]:-1; if(idx<2*(RE_MAXGROUP+1)) caps[idx]=sp;
+                int r=re_run(re,pc+1,s,slen,sp,caps,budget,depth+1); if(r!=0) return r; if(idx<2*(RE_MAXGROUP+1)) caps[idx]=old; return 0; }
+            case I_MATCH: return 1;
+        }
+        return 0;
+    }
+}
+/* search at or after `start`; fills caps[0..]=match+groups; returns match start or -1 */
+static int re_search(regex *re,const char*s,int slen,int start,int*caps){
+    if(!re||!re->ok||!re->prog) return -1;
+    for(int sp=start; sp<=slen; sp++){
+        for(int i=0;i<2*(RE_MAXGROUP+1);i++) caps[i]=-1;
+        long budget=300000;
+        if(re_run(re,0,s,slen,sp,caps,&budget,0)==1) return caps[0];
+    }
+    return -1;
+}
+/* build the [fullMatch, g1, g2, …] result array (with an .index property) from caps */
+static val re_result(regex *re,const char*s,int*caps){
+    obj *a=new_obj(V_ARR); if(!a){ g_oom=1; return UND(); }
+    for(int g=0; g<=re->ngroup; g++){ int st=caps[2*g], en=caps[2*g+1];
+        if(st>=0 && en>=st){ char*m=aalloc(en-st+1); if(m){ memcpy(m,s+st,en-st); m[en-st]=0; } arr_push_val(a, STRV(m?m:"")); }
+        else arr_push_val(a, UND()); }
+    /* note: JS exposes a .index on this array; arrays here can't carry named props, so it's omitted */
+    val r=UND(); r.t=V_ARR; r.o=a; return r;
+}
+static regex *rx_of(val v){ return (v.t==V_OBJ && v.o && v.o->kind==V_REGEX) ? (regex*)v.o->rx : 0; }
+/* a growable string builder on the arena (no realloc/free; grows by doubling) */
+typedef struct { char *buf; int len, cap; } sbuild;
+static void sb_put(sbuild *b, const char *s, int n){ if(n<0) return; if(b->len+n+1>b->cap){ int nc=b->cap*2; if(nc<b->len+n+16) nc=b->len+n+16; char*nb=aalloc(nc); if(!nb){g_oom=1;return;} if(b->buf) memcpy(nb,b->buf,b->len); b->buf=nb; b->cap=nc; } if(b->buf){ memcpy(b->buf+b->len,s,n); b->len+=n; } }
+/* expand a replacement template ($&=whole match, $1..$9=group, $$=$) into b */
+static void sb_expand(sbuild *b, const char *repl, const char *s, int *caps, int ngroup){
+    int rl=(int)strlen(repl);
+    for(int i=0;i<rl;i++){ if(repl[i]=='$' && i+1<rl){ char d=repl[i+1];
+        if(d=='&'){ sb_put(b, s+caps[0], caps[1]-caps[0]); i++; continue; }
+        if(d=='$'){ sb_put(b,"$",1); i++; continue; }
+        if(d>='1'&&d<='9'){ int g=d-'0'; if(g<=ngroup){ int a=caps[2*g],e=caps[2*g+1]; if(a>=0&&e>=a) sb_put(b,s+a,e-a); } i++; continue; } }
+        sb_put(b, repl+i, 1); }
+}
+/* methods on a RegExp object (recv.o->kind==V_REGEX, recv.o->rx is the regex*) */
+static val eval_regex_method(val recv, const char *name, val *args, int nargs){
+    regex *re=(regex*)recv.o->rx; if(!re){ return UND(); }
+    const char *s = nargs? val_to_str(args[0]) : ""; int slen=(int)strlen(s);
+    int caps[2*(RE_MAXGROUP+1)];
+    if(strcmp(name,"test")==0){ int start = re->global ? re->lastIndex : 0; if(start<0||start>slen) start=0;
+        int st=re_search(re,s,slen,start,caps);
+        if(re->global) re->lastIndex = (st>=0) ? (caps[1]>caps[0]?caps[1]:caps[1]+1) : 0;
+        return BOOLV(st>=0); }
+    if(strcmp(name,"exec")==0){ int start = re->global ? re->lastIndex : 0; if(start<0||start>slen) start=0;
+        int st=re_search(re,s,slen,start,caps);
+        if(st<0){ if(re->global) re->lastIndex=0; val nv=UND(); nv.t=V_NULL; return nv; }
+        if(re->global) re->lastIndex = caps[1]>caps[0]?caps[1]:caps[1]+1;
+        return re_result(re,s,caps); }
+    rt_err("unknown RegExp method"); return UND();
+}
+/* RegExp(pattern, flags) / new RegExp(...) -> a V_REGEX object */
+static val nat_regexp(val *args, int nargs){
+    const char *pat = nargs>0? val_to_str(args[0]) : "";
+    const char *fl  = nargs>1? val_to_str(args[1]) : "";
+    regex *re=re_compile(pat, fl);
+    obj *o=new_obj(V_REGEX); if(!o){ g_oom=1; return UND(); }
+    o->rx=re; obj_set(o,"source",STRV(pat)); obj_set(o,"global",BOOLV(re&&re->global)); obj_set(o,"flags",STRV(fl));
+    return obj_val(o);
 }
 static const char *val_to_str_inner(val v) {
     switch (v.t) {
@@ -840,7 +1026,7 @@ static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
     if (recv.t==V_ARR && recv.o) {        /* recv.o can be NULL if a producing method hit OOM */
         if (strcmp(name,"length")==0) return NUM(recv.o->n);
-        /* methods returned as native bound below via call path; here return undefined */
+        /* arrays store elements in vals[] with keys[] unused — no named-property lookup here */
     }
     if (recv.t==V_OBJ && recv.o) {
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM(recv.o->n/2);   /* entries are [k,v] pairs */
@@ -1005,6 +1191,7 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_NUM || recv.t==V_BOOL) return eval_number_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_MAP) return eval_map_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_SET) return eval_set_method(recv,m,args,na);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX) return eval_regex_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();
@@ -1224,6 +1411,18 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
     if (strcmp(name,"endsWith")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); return BOOLV(sl<=len && memcmp(s+len-sl,sub,sl)==0); }
     if (strcmp(name,"trim")==0){ int a=0,b=len; while(a<b&&(s[a]==' '||s[a]=='\t'||s[a]=='\n'||s[a]=='\r'))a++; while(b>a&&(s[b-1]==' '||s[b-1]=='\t'||s[b-1]=='\n'||s[b-1]=='\r'))b--; char*r=aalloc(b-a+1); if(!r) return STRV(""); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
     if (strcmp(name,"repeat")==0){ int cnt=nargs?(int)to_num(args[0]):0; if(cnt<0)cnt=0; long total=(long)len*cnt; if(total>JS_ARENA){ rt_err("repeat too large"); return STRV(""); } char*r=aalloc(total+1); if(!r) return STRV(""); int p=0; for(int k=0;k<cnt;k++) for(int j=0;j<len;j++) r[p++]=s[j]; r[p]=0; return STRV(r); }
+    if (strcmp(name,"search")==0){ regex *re=nargs?rx_of(args[0]):0; if(!re&&nargs) re=re_compile(val_to_str(args[0]),""); if(!re) return NUM(-1); int caps[2*(RE_MAXGROUP+1)]; return NUM(re_search(re,s,len,0,caps)); }
+    if (strcmp(name,"match")==0){ regex *re=nargs?rx_of(args[0]):0; if(!re&&nargs) re=re_compile(val_to_str(args[0]),""); if(!re||!re->ok){ val nv=UND(); nv.t=V_NULL; return nv; }
+        int caps[2*(RE_MAXGROUP+1)];
+        if(re->global){ obj*a=new_obj(V_ARR); if(!a) return UND(); int pos=0,any=0; while(pos<=len){ int st=re_search(re,s,len,pos,caps); if(st<0) break; any=1; char*m=aalloc(caps[1]-caps[0]+1); if(m){memcpy(m,s+caps[0],caps[1]-caps[0]);m[caps[1]-caps[0]]=0;} arr_push_val(a,STRV(m?m:"")); pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(g_oom)break; } if(!any){ val nv=UND(); nv.t=V_NULL; return nv; } val r=UND();r.t=V_ARR;r.o=a;return r; }
+        int st=re_search(re,s,len,0,caps); if(st<0){ val nv=UND(); nv.t=V_NULL; return nv; } return re_result(re,s,caps); }
+    if (strcmp(name,"replace")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]); const char *repl=nargs>1?val_to_str(args[1]):""; int caps[2*(RE_MAXGROUP+1)];
+        sbuild b; memset(&b,0,sizeof(b)); int pos=0;
+        for(;;){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom) break;
+            sb_put(&b, s+pos, caps[0]-pos); sb_expand(&b, repl, s, caps, re->ngroup);
+            pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(caps[1]==caps[0] && caps[0]<len) sb_put(&b, s+caps[0], 1);   /* zero-width: emit a char, advance */
+            if(!re->global){ break; } }
+        sb_put(&b, s+pos, len-pos); if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
     if (strcmp(name,"replace")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]),*to=val_to_str(args[1]); int fl=(int)strlen(from),tl=(int)strlen(to); if(fl==0) return STRV(s); for(int i=0;i+fl<=len;i++){ if(memcmp(s+i,from,fl)==0){ char*r=aalloc((long)len-fl+tl+1); if(!r) return STRV(""); memcpy(r,s,i); memcpy(r+i,to,tl); memcpy(r+i+tl,s+i+fl,len-i-fl); r[len-fl+tl]=0; return STRV(r); } } return STRV(s); }
     if (strcmp(name,"replaceAll")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]),*to=val_to_str(args[1]); int fl=(int)strlen(from),tl=(int)strlen(to); if(fl==0) return STRV(s);
         int cnt=0; for(int i=0;i+fl<=len;){ if(memcmp(s+i,from,fl)==0){cnt++;i+=fl;} else i++; }
@@ -1237,6 +1436,10 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         if(name[3]=='S'){ for(int i=0;i<padn;i++) r[p++]=pad[i%pl]; for(int i=0;i<len;i++) r[p++]=s[i]; }   /* padStart */
         else { for(int i=0;i<len;i++) r[p++]=s[i]; for(int i=0;i<padn;i++) r[p++]=pad[i%pl]; }              /* padEnd */
         r[p]=0; return STRV(r); }
+    if (strcmp(name,"split")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]); obj*arr=new_obj(V_ARR); if(!arr) return UND(); int caps[2*(RE_MAXGROUP+1)]; int start=0,pos=0;
+        while(pos<=len){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom) break; if(caps[1]==caps[0]){ pos++; continue; }   /* skip zero-width to make progress */
+            char*p=aalloc(caps[0]-start+1); if(p){memcpy(p,s+start,caps[0]-start);p[caps[0]-start]=0;} arr_push_val(arr,STRV(p?p:"")); start=caps[1]; pos=caps[1]; }
+        char*p=aalloc(len-start+1); if(p){memcpy(p,s+start,len-start);p[len-start]=0;} arr_push_val(arr,STRV(p?p:"")); val v=UND();v.t=V_ARR;v.o=arr;return v; }
     if (strcmp(name,"split")==0){ obj*arr=new_obj(V_ARR); if(!arr) return UND(); const char*sep=nargs?val_to_str(args[0]):0; int sl=sep?(int)strlen(sep):-1;
         if(sl<0){ arr_push_val(arr,STRV(s)); }                       /* no separator: whole string */
         else if(sl==0){ for(int i=0;i<len;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} arr_push_val(arr,STRV(c?c:"")); } }  /* "" -> chars */
@@ -1539,6 +1742,7 @@ static void install_globals(env *g) {
     obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); env_define(g,"Object",obj_val(objc));
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
+    { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
     obj *arrc=new_obj(V_OBJ); def_native(arrc,"isArray",nat_array_isArray); def_native(arrc,"from",nat_array_from); env_define(g,"Array",obj_val(arrc));
     /* JSON (stringify) */
     obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
