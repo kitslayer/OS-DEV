@@ -28,6 +28,32 @@ below are what comes *after* it, and each adds large subsystems.
 - **🤖 Run Claude Code — still a multi-year stretch.** Unchanged: needs a Linux
   syscall ABI + a JS runtime. Not attempted.
 
+## Update (later 2026-06): HTTPS + a JavaScript engine landed
+
+Two big things changed since the note above:
+
+- **🔒 HTTPS/TLS is done.** A from-scratch **TLS 1.3 client** (X25519 + HKDF,
+  AES-GCM/ChaCha20-Poly1305, from-scratch RSA + ECDSA P-256/P-384 + SHA-256/384)
+  with **X.509 certificate-chain validation to baked-in trusted roots** browses
+  the real HTTPS web (example.com, NPR, gnu.org, danluu.com, google.com → `TLS*`).
+  The browser is no longer HTTP-only.
+- **🧩 A from-scratch JavaScript engine** (`kernel/js.c`) — closures, arrow
+  functions, template literals, `switch`/`for-of`, `try/catch/finally/throw`,
+  `JSON.parse/stringify`, and a Math/String/Array standard library. It runs from
+  the shell (`js`) **and inside the browser**: pages execute their `<script>` at
+  load (`document.write`) and `javascript:` links run JS on click.
+
+**The honest ceiling (decided with Miles):** running **Chromium / Google Docs /
+Blackbaud** is **not achievable** here. Those need a complete modern engine — a
+full JS+DOM+CSS layout engine, an event loop, `fetch`/WebSocket, plus (to run the
+*real* browser binary) a Linux ABI, libc, dynamic loader, threads, and a graphics
+stack. That's a multi-year "build a Linux clone" effort, not a feature. The
+realistic direction is **"the best little from-scratch browser"**, not real-web-app
+compatibility. The browser is currently a *token-stream renderer* (no DOM tree);
+the next big build toward interactivity is a **minimal DOM**
+(`getElementById`/`textContent`/element `onclick`) plus a persistent per-page JS
+context — until then, in-page JS is `document.write` + `javascript:` links.
+
 The detailed original analysis follows.
 
 ---

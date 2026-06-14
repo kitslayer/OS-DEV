@@ -814,16 +814,19 @@ static comp eval_stmt_inner(node *n, env *e) {
             }
             return CN();
         }
-        case N_THROW: { val v=eval_expr(n->a,e); g_throwval=v; g_threw=1;
-            if(!g_err){ g_err=1; const char*s=val_to_str(v); int i=0; while(s[i]&&i<127){g_errmsg[i]=s[i];i++;} g_errmsg[i]=0; }
-            return CN(); }   /* unwinds via g_err */
+        case N_THROW: { val v=eval_expr(n->a,e);
+            if(!g_err){ g_throwval=v; g_threw=1; g_err=1; const char*s=val_to_str(v); int i=0; while(s[i]&&i<127){g_errmsg[i]=s[i];i++;} g_errmsg[i]=0; }
+            return CN(); }   /* unwinds via g_err; if the operand itself errored, that error propagates */
         case N_TRY: {
             comp tc = eval_stmt(n->a, e);                /* try block */
-            if (g_err && !g_oom) {                       /* an exception (not OOM) was thrown */
-                val ev = g_threw ? g_throwval : STRV(g_errmsg[0]?g_errmsg:"error");
+            if (g_err && !g_oom && n->b) {               /* caught — ONLY if a catch clause exists */
+                /* copy the message into the arena BEFORE clearing g_errmsg (STRV stores the pointer) */
+                val ev = g_threw ? g_throwval : STRV(intern(g_errmsg[0]?g_errmsg:"error", (int)strlen(g_errmsg[0]?g_errmsg:"error")));
                 g_err=0; g_threw=0; g_errmsg[0]=0; tc=CN();
-                if (n->b) { env *ce=new_env(e); if(!ce){ g_oom=1; } else { if(n->str) env_define(ce, node_name(n), ev); tc=eval_stmt(n->b,ce); } }
+                env *ce=new_env(e); if(!ce){ g_oom=1; } else { if(n->str) env_define(ce, node_name(n), ev); tc=eval_stmt(n->b,ce); }
             }
+            /* with no catch clause, g_err stays set so the exception propagates (re-raised
+             * past finally via the save/restore below, or out of the try if no finally). */
             if (n->c) {                                  /* finally always runs (on a clean slate) */
                 int s_err=g_err, s_threw=g_threw; val s_tv=g_throwval; char s_msg[128]; memcpy(s_msg,g_errmsg,128);
                 g_err=0; g_threw=0;
