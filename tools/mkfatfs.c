@@ -89,7 +89,10 @@ static const struct {
         "<li><a href=\"javascript:document.getElementById('msg').textContent='Hello from a real DOM!'\">set the message text</a></li>"
         "<li><a href=\"javascript:document.getElementById('msg').innerHTML='now <b>bold</b> via innerHTML'\">set message HTML</a></li>"
         "<li><a href=\"javascript:document.getElementById('count').textContent='0'; document.getElementById('fib').textContent='0'; document.getElementById('msg').textContent='(reset)'\">reset</a></li>"
-        "</ul><p>The values above change when you click &mdash; the element is found by id, its content replaced (after computing), and the page re-renders.</p>" },
+        "</ul>"
+        "<p>And an inline <code>&lt;button onclick=...&gt;</code> (a real HTML event handler, not a javascript: link): "
+        "<button onclick=\"document.getElementById('count').textContent='42'\">[ set counter to 42 ]</button></p>"
+        "<p>The values above change when you click &mdash; the element is found by id, its content replaced (after computing), and the page re-renders.</p>" },
     { "OOP     HTM", "<h1>Object-oriented JavaScript in the browser</h1>"
         "<p>The list below is generated live by a page &lt;script&gt; using classes, inheritance, <code>super</code>, destructuring, spread and template literals:</p><ul>"
         "<script>\n"

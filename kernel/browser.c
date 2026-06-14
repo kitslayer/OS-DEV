@@ -97,6 +97,7 @@ struct browser {
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
+    char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
 };
 
 static void drop_image(browser_t *b);        /* fwd: free any decoded image */
@@ -331,6 +332,17 @@ static int add_href(browser_t *b, const char *v, int vlen) {
     b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)vlen };
     return b->nlink++;
 }
+/* Store an onclick handler as a "javascript:CODE" link so the existing click path
+ * (goto_href -> run_js_handler) runs the code; returns the link id. */
+static int add_onclick(browser_t *b, const char *code, int codelen) {
+    const char *pfx = "javascript:"; int pl = 11;
+    if (codelen <= 0 || b->nlink >= LINK_MAX || b->hreflen + pl + codelen >= HREF_MAX) return NO_LINK;
+    int off = b->hreflen;
+    for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
+    for (int i = 0; i < codelen; i++) b->hrefs[b->hreflen++] = code[i];
+    b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + codelen) };
+    return b->nlink++;
+}
 
 static int hexd(int c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -364,9 +376,33 @@ static uint32_t parse_color(const char *v, int vl) {
     return 0;
 }
 
+/* void (self-closing) elements have no close tag, so they can't open an onclick scope */
+static int is_void_tag(const char *t) {
+    return tageq(t,"input")||tageq(t,"img")||tageq(t,"br")||tageq(t,"hr")||tageq(t,"meta")||
+           tageq(t,"link")||tageq(t,"area")||tageq(t,"col")||tageq(t,"base")||tageq(t,"wbr")||
+           tageq(t,"embed")||tageq(t,"source");
+}
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
+    /* inline onclick="CODE": make the element's content a clickable javascript: link,
+     * scoped to the element (depth-counted so nested same-name tags don't end it early). */
+    if (b->oc_depth > 0 && tageq(tag, b->oc_tag)) {
+        if (closing) { if (--b->oc_depth == 0) { *curlink = b->oc_link; if (*style == STY_LINK) *style = b->oc_style; } }
+        else b->oc_depth++;
+    }
+    if (!closing && b->oc_depth == 0 && !is_void_tag(tag)) {
+        const char *oc; int ocl;
+        if (find_attr(attrs, attrlen, "onclick", &oc, &ocl)) {
+            int lk = add_onclick(b, oc, ocl);
+            if (lk != NO_LINK) {
+                b->oc_link = *curlink; b->oc_style = *style;
+                *curlink = lk; if (*style == STY_NORMAL) *style = STY_LINK;
+                int i = 0; while (tag[i] && i < 15) { b->oc_tag[i] = tag[i]; i++; } b->oc_tag[i] = 0;
+                b->oc_depth = 1;
+            }
+        }
+    }
     if (tageq(tag, "br")) { emit_break(b, TK_BREAK); return; }
     if (tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6' && tag[2] == 0) {
         if (!closing) { emit_break(b, TK_PARA); *style = (tag[1] <= '2') ? STY_H1 : STY_H2; }
@@ -523,6 +559,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     drop_image_slots(b);                                 /* and its inline images */
     b->textlen = b->ntok = b->hreflen = b->nlink = 0;
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
+    b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
     b->find_tok = -1;                                    /* clear any find highlight */
     b->curcolor = 0;                                     /* default text colour */
