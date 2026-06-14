@@ -72,4 +72,8 @@ print("-- param destructuring --");
 function pd({a, b=5}){ return a+b; } print(pd({a:1}), pd({a:1,b:2}));
 print([[1,2],[3,4]].map(([x,y]) => x*y).join(","));
 var swap=([a,b])=>[b,a]; print(swap([7,9]).join(","));
+print("-- assignment destructuring --");
+var aa=1, ab=2; [aa,ab]=[ab,aa]; print(aa, ab);
+var ax,ay; ({x:ax,y:ay}={x:8,y:9}); print(ax, ay);
+var af, ar2; [af,...ar2]=[1,2,3]; print(af, ar2.join(","));
 print("-- done --");

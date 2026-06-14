@@ -64,4 +64,8 @@ z 9
 6 3
 2,12
 9,7
+-- assignment destructuring --
+2 1
+8 9
+1 2,3
 -- done --

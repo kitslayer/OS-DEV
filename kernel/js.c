@@ -753,17 +753,27 @@ static int build_args(node **list, int nlist, env *e, val *args, int maxargs) {
  * Pattern nesting is already bounded by the parser's depth guard, but bind_pattern
  * carries its own g_depth guard too (via the wrapper below) so it can never be the
  * path that overflows the C stack regardless of the entry task's stack budget. */
-static void bind_pattern_inner(node *pat, val v, env *e) {
+static void bind_pat(node *pat, val v, env *e, int assign);   /* guarded wrapper (fwd) */
+static void bind_pat_inner(node *pat, val v, env *e, int assign) {
     if (!pat || g_oom) return;
-    if (pat->type==N_ASSIGN) { if (v.t==V_UNDEF) v=eval_expr(pat->b,e); bind_pattern(pat->a, v, e); return; }
-    if (pat->type==N_IDENT)  { env_define(e, node_name(pat), v); return; }
+    if (pat->type==N_ASSIGN) { if (v.t==V_UNDEF) v=eval_expr(pat->b,e); bind_pat(pat->a, v, e, assign); return; }
+    if (pat->type==N_IDENT || pat->type==N_MEMBER || pat->type==N_INDEX) {   /* a leaf target */
+        if (!assign) { env_define(e, node_name(pat), v); return; }           /* var/param/for-of: fresh binding */
+        /* assignment target — match N_ASSIGN's identifier/member/index semantics */
+        if (pat->type==N_IDENT) { const char *nm=node_name(pat); val *slot=env_find(e,nm); if(slot) *slot=v; else env_define(e,nm,v); }
+        else if (pat->type==N_MEMBER) { val recv=eval_expr(pat->a,e); if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o) obj_set(recv.o, node_name(pat), v); }
+        else { val recv=eval_expr(pat->a,e), idx=eval_expr(pat->b,e);
+               if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) recv.o->vals[i]=v; }
+               else if (recv.t==V_OBJ && recv.o) obj_set(recv.o, val_to_str(idx), v); }
+        return;
+    }
     if (pat->type==N_ARRAY) {
         for (int i=0;i<pat->nlist && !g_oom;i++){ node *el=pat->list[i];
             if (el->type==N_SPREAD){ obj *ro=new_obj(V_ARR); if(!ro){g_oom=1;return;}
                 if (v.t==V_ARR && v.o) for(int j=i;j<v.o->n && !g_oom;j++) arr_push_val(ro, v.o->vals[j]);
-                val rv=UND(); rv.t=V_ARR; rv.o=ro; bind_pattern(el->a, rv, e); break; }
+                val rv=UND(); rv.t=V_ARR; rv.o=ro; bind_pat(el->a, rv, e, assign); break; }
             val ev = (v.t==V_ARR && v.o && i<v.o->n) ? v.o->vals[i] : UND();
-            bind_pattern(el, ev, e);
+            bind_pat(el, ev, e, assign);
         }
         return;
     }
@@ -773,17 +783,19 @@ static void bind_pattern_inner(node *pat, val v, env *e) {
                 if (v.t==V_OBJ && v.o) for(int j=0;j<v.o->n && !g_oom;j++){ const char*k=v.o->keys[j]; int named=0;
                     for(int m=0;m<i;m++){ node*q=pat->list[m]; if(q->type!=N_SPREAD && q->str && strcmp(q->str,k)==0){named=1;break;} }
                     if(!named) obj_set(ro, k, v.o->vals[j]); }
-                val rv=UND(); rv.t=V_OBJ; rv.o=ro; bind_pattern(pr->a, rv, e); break; }
+                val rv=UND(); rv.t=V_OBJ; rv.o=ro; bind_pat(pr->a, rv, e, assign); break; }
             val ev=UND(); if (v.t==V_OBJ && v.o) obj_get(v.o, pr->str, &ev);
-            bind_pattern(pr->a, ev, e);   /* pr->a is the target (ident, N_ASSIGN default, or nested pattern) */
+            bind_pat(pr->a, ev, e, assign);   /* pr->a is the target (ident, N_ASSIGN default, member, or nested pattern) */
         }
         return;
     }
 }
-static void bind_pattern(node *pat, val v, env *e) {
+static void bind_pat(node *pat, val v, env *e, int assign) {
     if (++g_depth > MAXDEPTH) { g_depth--; rt_err("pattern too deeply nested"); return; }
-    bind_pattern_inner(pat, v, e); g_depth--;
+    bind_pat_inner(pat, v, e, assign); g_depth--;
 }
+static void bind_pattern(node *pat, val v, env *e)        { bind_pat(pat, v, e, 0); }   /* var / param / for-of (declarations) */
+static void bind_pattern_assign(node *pat, val v, env *e) { bind_pat(pat, v, e, 1); }   /* [a,b]=… / ({x}=…) (assignments) */
 
 /* resolve a member/index target for assignment: returns the container + key */
 static val eval_string_method(val recv, const char *name, val *args, int nargs);
@@ -889,6 +901,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (n->op!='=') { val cur=eval_expr(t,e); int64_t x=to_num(cur),y=to_num(rhs);
                 if (n->op=='+'&&(cur.t==V_STR||rhs.t==V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
                 else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): (y?x%y:0)); }
+            if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e); if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
