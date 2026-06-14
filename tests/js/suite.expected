@@ -105,6 +105,8 @@ undefined undefined
 2,3 1,a,b,c,4,5
 0 1,2,3
 cba 16
+-- call/apply --
+11 7 Hi Ada 9
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

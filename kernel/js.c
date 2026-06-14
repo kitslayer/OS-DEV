@@ -1257,6 +1257,12 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX) return eval_regex_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_DATE) return eval_date_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) return eval_element_method(recv,m,args,na);
+                if (recv.t==V_FUN || recv.t==V_NATIVE) {            /* Function.prototype.call / .apply */
+                    if (strcmp(m,"call")==0)  return call_function_this(recv, na>0?args[0]:UND(), na>1?args+1:args, na>1?na-1:0);
+                    if (strcmp(m,"apply")==0) { val th=na>0?args[0]:UND();
+                        if (na>1 && args[1].t==V_ARR && args[1].o) return call_function_this(recv, th, args[1].o->vals, args[1].o->n);
+                        return call_function_this(recv, th, 0, 0); }
+                }
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();

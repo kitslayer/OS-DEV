@@ -116,6 +116,9 @@ print("-- array mutators --");
 var sp=[1,2,3,4,5]; var rm=sp.splice(1,2,"a","b","c"); print(rm.join(","), sp.join(","));
 var q=[2,3]; q.unshift(0,1); print(q.shift(), q.join(","));
 print(["a","b","c"].reduceRight(function(a,x){return a+x;}), [1,2,3].reduceRight(function(a,b){return a+b;}, 10));
+print("-- call/apply --");
+function _ad(a,b){return a+b;} function _gr(g){return g+" "+this.name;}
+print(_ad.call(null,5,6), _ad.apply(null,[3,4]), _gr.call({name:"Ada"},"Hi"), Math.max.apply(null,[2,9,4]));
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);
