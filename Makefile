@@ -46,7 +46,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run test clean
+.PHONY: all run test jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -107,6 +107,10 @@ test: $(KERNEL) $(DISK)
 	@timeout 5 $(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) \
 	    -display none -serial stdio ; \
 	    echo "--- qemu exited ---"
+
+# Host-side regression test of the from-scratch JavaScript engine (ASan+UBSan).
+jstest:
+	@tests/run-js-tests.sh
 
 clean:
 	rm -rf $(BUILD)
