@@ -1830,6 +1830,26 @@ static void find_prompt(browser_t *b) {
     st[p] = 0; set_status(b, st);
 }
 
+/* Does the address-bar text look like a web-search query rather than a URL?
+ * A scheme (http/https/file), the home keyword, or a dotted host -> navigate;
+ * a space or no dot at all (e.g. "operating systems", "weather") -> search. */
+static int looks_like_search(const char *s) {
+    if (startsw(s, "http://") || startsw(s, "https://") || startsw(s, "file:")) return 0;
+    if (!s[0] || streqs(s, "home")) return 0;
+    int hasdot = 0, hasspace = 0;
+    for (int i = 0; s[i]; i++) { if (s[i] == '.') hasdot = 1; if (s[i] == ' ') hasspace = 1; }
+    return hasspace || !hasdot;
+}
+/* Rewrite the address-bar query into a DuckDuckGo HTML search URL (in place). */
+static void make_search_url(char *url) {
+    char q[URL_MAX]; int p = 0;
+    const char *pfx = "https://html.duckduckgo.com/html/?q=";
+    for (int i = 0; pfx[i] && p < URL_MAX - 1; i++) q[p++] = pfx[i];
+    p += url_encode(q + p, URL_MAX - 1 - p, url);
+    q[p] = 0;
+    copy_url(url, q);
+}
+
 void browser_key(browser_t *b, int c) {
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
         if (c == '\n' || c == '\r' || c == 27) {
@@ -1864,7 +1884,7 @@ void browser_key(browser_t *b, int c) {
         return;
     }
     if (b->editing) {
-        if (c == '\n' || c == '\r') { b->editing = 0; browser_navigate(b); }
+        if (c == '\n' || c == '\r') { b->editing = 0; if (looks_like_search(b->url)) make_search_url(b->url); browser_navigate(b); }
         else if (c == 27)            { b->editing = 0; }
         else if (c == 8 || c == 127) { int n = (int)strlen(b->url); if (n) b->url[n-1] = 0; }
         else if (c >= 32 && c < 127) { int n = (int)strlen(b->url); if (n < URL_MAX-1) { b->url[n]=(char)c; b->url[n+1]=0; } }

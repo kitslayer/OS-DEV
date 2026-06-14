@@ -56,6 +56,17 @@ builds into a fixed `q[URL_MAX]` (160 B) with each append guarded, and
 `url_encode` reserves room for a worst-case `%XX`. Reviewed clean (ASan/UBSan
 fuzz of `url_encode` + the query-build loop).
 
+## Address-bar search (M202)
+
+The address bar is now a search box too: press `e`/`/` to edit it, type a query,
+and Enter. If the text isn't a URL — `looks_like_search` treats anything with a
+space, or with no dot and no `http(s):`/`file:` scheme (e.g. `weather`,
+`operating systems`), as a query — the browser rewrites it to
+`https://html.duckduckgo.com/html/?q=…` (via the same `url_encode`) and
+navigates. So `tetris game` in the bar → DuckDuckGo results, while `example.com`
+or `file:index.htm` still load directly. Verified in-OS (`tetris game` → "Play
+the Official Tetris Game for Free").
+
 ## Limitations / next
 
 - **GET only** — POST would need a request body in the fetch path.
