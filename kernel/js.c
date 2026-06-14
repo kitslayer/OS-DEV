@@ -40,10 +40,12 @@ static void out_str(const char *s) {
 
 /* ---- arena allocator (no free; reset per run) ---- */
 /* Holds the whole parsed AST + the global objects + every value a run allocates,
- * all at once (reset only between runs). 2 MB so large scripts — the kitchen-sink
- * regression suite, or a page that defines several classes — have eval headroom
- * above the parsed AST; the buffer is static BSS, cheap on the kernel's RAM. */
-#define JS_ARENA   (2048 * 1024)
+ * all at once (reset only between runs). Large scripts — the kitchen-sink
+ * regression suite, or a page that defines several classes — need eval headroom
+ * above the parsed AST; the buffer is static BSS, cheap on the kernel's RAM.
+ * 4 MB: regex compilation is arena-heavy (each compiled program is sizeable), and
+ * the kitchen-sink suite now compiles many regexes on top of a large AST. */
+#define JS_ARENA   (4096 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
