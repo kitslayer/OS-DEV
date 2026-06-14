@@ -182,7 +182,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW };
+       N_TRY, N_THROW, N_FORIN };
 
 typedef struct node node;
 struct node {
@@ -472,9 +472,11 @@ static node *parse_stmt(lexer *L) {
         lexsave sv = lex_save(L);
         if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) advance(L);
         token v = peek(L);
-        if (v.type==T_IDENT) { advance(L); token of = peek(L);
-            if (of.type==T_IDENT && of.len==2 && of.s[0]=='o' && of.s[1]=='f') {
-                advance(L); node *fo=mknode(N_FOROF); fo->str=intern(v.s,v.len); fo->slen=v.len;
+        if (v.type==T_IDENT) { advance(L); token kw = peek(L);
+            int isof = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='o' && kw.s[1]=='f');
+            int isin = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='i' && kw.s[1]=='n');
+            if (isof || isin) {
+                advance(L); node *fo=mknode(isof?N_FOROF:N_FORIN); fo->str=intern(v.s,v.len); fo->slen=v.len;
                 fo->a=parse_expr(L); expect_punc(L,")"); fo->b=parse_stmt(L); g_depth--; return fo; }
         }
         lex_restore(L, sv);
@@ -845,6 +847,18 @@ static comp eval_stmt_inner(node *n, env *e) {
                 g_err=s_err; g_threw=s_threw; g_throwval=s_tv; memcpy(g_errmsg,s_msg,128);   /* restore pending */
             }
             return tc;
+        }
+        case N_FORIN: {
+            val it=eval_expr(n->a,e); env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
+            const char *vn=node_name(n); env_define(fe, vn, UND());
+            if (it.t==V_OBJ && it.o) {
+                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=STRV(it.o->keys[i]);
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+            } else if (it.t==V_ARR && it.o) {
+                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=NUM(i);   /* array indices */
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+            }
+            return CN();
         }
         case N_RETURN: { comp c; c.kind=C_RETURN; c.v = n->a?eval_expr(n->a,e):UND(); return c; }
         case N_BREAK: { comp c=CN(); c.kind=C_BREAK; return c; }

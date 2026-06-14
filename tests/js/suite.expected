@@ -32,6 +32,7 @@ nested in 6
 -- control flow --
 one two/three many
 60
+abc
 10
 -- exceptions --
 caught boom

@@ -34,6 +34,7 @@ print("-- control flow --");
 function cls(n){ switch(n){ case 1: return "one"; case 2: case 3: return "two/three"; default: return "many"; } }
 print(cls(1), cls(3), cls(9));
 var s=0; for(var e of [10,20,30]) s+=e; print(s);
+var ks=""; for(var k in {a:1,b:2,c:3}) ks+=k; print(ks);
 var d=0,i=0; do { d+=i; i++; } while(i<5); print(d);
 print("-- exceptions --");
 try { throw "boom"; } catch(e){ print("caught "+e); } finally { print("fin"); }
