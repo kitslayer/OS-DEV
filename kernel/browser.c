@@ -496,9 +496,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             b->oc_depth = 1;
         }
     }
-    if (!closing && b->anc_n < 32) {                     /* record id -> token index for #fragment scroll-to */
+    if (!closing && b->anc_n < 32) {                     /* record id (or <a name>) -> token index for #fragment scroll-to */
         const char *idv; int idl;
-        if (find_attr(attrs, attrlen, "id", &idv, &idl) && idl > 0 && idl < 32) {
+        if ((find_attr(attrs, attrlen, "id", &idv, &idl) ||                     /* modern: any element's id */
+             (tageq(tag, "a") && find_attr(attrs, attrlen, "name", &idv, &idl)))  /* legacy: <a name="..."> */
+            && idl > 0 && idl < 32) {
             int k = 0; for (; k < idl; k++) b->anc_id[b->anc_n][k] = idv[k]; b->anc_id[b->anc_n][k] = 0;
             b->anc_tok[b->anc_n] = (uint16_t)(b->ntok < TOK_MAX ? b->ntok : TOK_MAX - 1);
             b->anc_n++;
