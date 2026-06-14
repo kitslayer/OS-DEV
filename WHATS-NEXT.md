@@ -43,7 +43,10 @@ boot → long mode → interrupts → timer/kbd → memory → heap → preempti
  → root-CA trust store + chain anchoring (NPR → ISRG Root X1)
  → SHA-384/512 + SHA-384 cert sigs (microsoft.com chain 2/2)
  → ECDSA P-384 (example.com EC chain 3/3)
- → trust store (ISRG/DigiCert/SSL.com) + key-match anchoring → 144 milestones  ✅
+ → trust store (ISRG/DigiCert/SSL.com) + key-match anchoring
+ → out-of-order TCP reassembly → GTS Root R4 (google.com → TLS*)
+ → from-scratch JavaScript interpreter (shell `js`)
+ → JavaScript runs in the browser (pages execute their <script> tags) → 145 milestones  ✅
 ```
 
 The browser is now **fully keyboard-drivable**: Tab/n/p to select links, Enter

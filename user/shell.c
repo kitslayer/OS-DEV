@@ -97,6 +97,10 @@ int main(void) {
                     "print(\"2^10 = \"+(1<<10)+\", 17%5 = \"+(17%5));\n";
                 int i = 0; while (demo[i] && i < (int)sizeof(src) - 1) { src[i] = demo[i]; i++; } src[i] = 0;
                 have = 1;
+            } else if (startswith(line, "js -e ")) {     /* inline: js -e <code> */
+                const char *code = line + 6;
+                int i = 0; while (code[i] && i < (int)sizeof(src) - 1) { src[i] = code[i]; i++; } src[i] = 0;
+                have = 1;
             } else {
                 long n = sys_readfile(line + 3, src, sizeof(src) - 1);
                 if (n < 0) { print("js: no such file: "); print(line + 3); print("\n"); }

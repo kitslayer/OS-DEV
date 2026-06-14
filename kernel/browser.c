@@ -21,6 +21,8 @@
 #include "gif.h"
 #include "jpeg.h"
 #include "tls.h"
+#include "js.h"
+#include "console.h"
 #include "kheap.h"
 #include "string.h"
 #include "task.h"
@@ -32,6 +34,7 @@
 #define RAW_MAX   131072        /* response/image fetch buffer (128 KB) */
 #define TEXT_MAX  49152         /* token text pool (< 65536: token off is uint16) */
 #define TOK_MAX   7000
+#define SCRIPT_MAX 16384        /* concatenated inline <script> text run per page */
 #define HREF_MAX  8192
 #define LINK_MAX  512
 #define LREC_MAX  1024
@@ -91,6 +94,7 @@ struct browser {
     uint8_t *imgs[IMG_SLOTS]; int imgsw[IMG_SLOTS], imgsh[IMG_SLOTS]; int nimg;  /* inline images */
     uint32_t curcolor;                                   /* <font color> in effect (0=none, else 0x01000000|rgb) */
     uint32_t tokcolor[TOK_MAX];                          /* per-token colour override */
+    char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
 };
 
 static void drop_image(browser_t *b);        /* fwd: free any decoded image */
@@ -503,10 +507,20 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
 }
 
 /* Strip the HTML body into the token stream + href table. */
+/* Append the text inside a <script>...</script> to b->scripts (so it can be run
+ * after the page is parsed). Multiple scripts are separated by a newline+';'. */
+static void capture_script(browser_t *b, const char *s, int len) {
+    if (!b->scripts) return;
+    if (b->scriptlen > 0 && b->scriptlen < SCRIPT_MAX - 2) { b->scripts[b->scriptlen++] = '\n'; b->scripts[b->scriptlen++] = ';'; }
+    for (int k = 0; k < len && b->scriptlen < SCRIPT_MAX - 1; k++) b->scripts[b->scriptlen++] = s[k];
+    b->scripts[b->scriptlen] = 0;
+}
+
 static void parse_html(browser_t *b, const char *body, int len) {
     drop_image(b);                                       /* a page replaces any prior image */
     drop_image_slots(b);                                 /* and its inline images */
     b->textlen = b->ntok = b->hreflen = b->nlink = 0;
+    b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
     b->find_tok = -1;                                    /* clear any find highlight */
     b->curcolor = 0;                                     /* default text colour */
@@ -521,6 +535,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
      * and <body> force-clears head/title so a missing </head> can't blank the
      * whole page (fail-safe on malformed input). */
     int inscript = 0, instyle = 0, intitle = 0, inhead = 0, inpre = 0, insvg = 0, wstart = -1;
+    int sc_start = -1;                                   /* offset where current <script> body began */
 
     for (int i = 0; i < len; i++) {
         char c = body[i];
@@ -547,7 +562,11 @@ static void parse_html(browser_t *b, const char *body, int len) {
             int astart = j;
             while (j < len && body[j] != '>') j++;        /* attributes -> '>' */
 
-            if (tageq(tag, "script")) inscript = !closing;
+            if (tageq(tag, "script")) {
+                if (!closing) { inscript = 1; sc_start = j + 1; }          /* body starts after '>' */
+                else { if (inscript && sc_start >= 0 && i > sc_start) capture_script(b, body + sc_start, i - sc_start);
+                       inscript = 0; sc_start = -1; }
+            }
             else if (tageq(tag, "style")) instyle = !closing;
             else if (tageq(tag, "svg")) insvg = !closing;        /* inline SVG: skip its guts */
             else if (tageq(tag, "title") && !insvg) intitle = !closing;  /* (svg <title> mustn't hijack) */
@@ -606,6 +625,29 @@ static void parse_html(browser_t *b, const char *body, int len) {
     }
     if (wstart >= 0) emit_word(b, wstart, style, curlink);
     b->title[titlelen] = 0;
+}
+
+/* ---- run a page's inline JavaScript ----
+ * document.write() output is spliced into b->raw right after the body and the
+ * page is re-parsed, so script-generated HTML renders. A real DOM (getElementById,
+ * .innerHTML) is future work; this covers the classic document.write pattern. */
+static char *g_sw_raw; static int g_sw_pos, g_sw_max;
+static void script_write_cb(const char *s) {
+    if (!g_sw_raw) return;
+    while (*s && g_sw_pos < g_sw_max - 1) g_sw_raw[g_sw_pos++] = *s++;
+    g_sw_raw[g_sw_pos] = 0;
+}
+static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
+    static char jsout[2048];
+    int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
+    if (appendpos >= RAW_MAX - 1) return;                /* no room to write */
+    g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_max = RAW_MAX;
+    js_run_doc(b->scripts, jsout, sizeof(jsout), script_write_cb);
+    int written = g_sw_pos - appendpos;
+    g_sw_raw = 0;
+    if (jsout[0]) kprintf("[js] %s\n", jsout);           /* console.log / errors -> serial */
+    if (written > 0)                                     /* re-render incl. the written HTML */
+        parse_html(b, b->raw + bodyoff, bodylen + written);  /* scriptlen reset inside; not re-run */
 }
 
 /* Render plain text: words become WORD tokens, newlines become line breaks
@@ -668,6 +710,7 @@ static void free_buffers(browser_t *b) {
     else if (b->img) kfree(b->img);
     for (int i = 0; i < b->nimg; i++) if (b->imgs[i]) kfree(b->imgs[i]);
     kfree(b->lrec); kfree(b->links); kfree(b->hrefs);
+    kfree(b->scripts);
     kfree(b->toks); kfree(b->text); kfree(b->raw); kfree(b);
 }
 
@@ -924,7 +967,8 @@ static void browser_navigate(browser_t *b) {
         b->raw[n] = 0; b->rawlen = (int)n;
         if (try_image(b, (const uint8_t *)b->raw, (int)n)) { set_status(b, "image"); return; }
         const char *q = b->raw; while (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t') q++;
-        if (*q == '<') parse_html(b, b->raw, (int)n);  /* looks like HTML */
+        if (*q == '<') { parse_html(b, b->raw, (int)n);  /* looks like HTML */
+                         if (b->scriptlen > 0) run_page_scripts(b, 0, (int)n); }
         else           parse_text(b, b->raw, (int)n);  /* plain text */
         set_status(b, "local file");
         return;
@@ -1098,6 +1142,7 @@ int browser_poll(browser_t *b) {
         set_status(b, "image"); return 1;
     }
     parse_html(b, b->raw + bodyoff, bodylen);
+    if (b->scriptlen > 0) run_page_scripts(b, bodyoff, bodylen);   /* run inline <script> (once) */
 
     char st[40]; int v = n, k = 0, p = 0; char tmp[12];
     if (!v) tmp[k++] = '0'; while (v) { tmp[k++] = '0'+v%10; v/=10; }
@@ -1522,10 +1567,11 @@ browser_t *browser_create(const char *url) {
     b->hrefs = kmalloc(HREF_MAX);
     b->links = kmalloc(sizeof(href_t) * LINK_MAX);
     b->lrec  = kmalloc(sizeof(lrec_t) * LREC_MAX);
+    b->scripts = kmalloc(SCRIPT_MAX);
     if (!url || !url[0]) url = "home";        /* open the start page by default */
     int i = 0; while (url[i] && i < URL_MAX-1) { b->url[i] = url[i]; i++; }
     b->url[i] = 0;
-    if (b->raw && b->text && b->toks && b->hrefs && b->links && b->lrec)
+    if (b->raw && b->text && b->toks && b->hrefs && b->links && b->lrec && b->scripts)
         browser_navigate(b);
     else set_status(b, "nomem");
     return b;

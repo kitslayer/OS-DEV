@@ -62,6 +62,14 @@ static const struct {
         "print(\"primes < 30: \" + primes);\n"
         "var os = { name: \"OS-DEV\", lang: \"JavaScript\" };\n"
         "print(os.lang + \" running on \" + os.name + \"!\");\n" },
+    { "JSTEST  HTM", "<h1>JavaScript in the browser</h1>"
+        "<p>Everything below this line is generated <b>live</b> by JavaScript running inside the page (via document.write):</p>"
+        "<script>\n"
+        "for (var i = 1; i <= 5; i++) document.write(\"<p>Item \" + i + \": \" + i + \" squared = \" + (i*i) + \"</p>\");\n"
+        "var sum = 0; for (var k = 1; k <= 100; k++) sum += k;\n"
+        "document.write(\"<h2>Sum of 1..100 = \" + sum + \"</h2>\");\n"
+        "console.log(\"page script ran; sum=\" + sum);\n"
+        "</script>" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)

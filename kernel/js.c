@@ -692,18 +692,49 @@ static val native_print(val *args, int nargs) {
     out_str("\n"); return UND();
 }
 
+/* document.write(...): when a host (the browser) registers g_doc_write, the joined
+ * argument string is handed to it (to splice into the page); otherwise it falls
+ * back to the normal output stream so `js` at the shell still shows it. */
+static void (*g_doc_write)(const char *s);
+static val native_doc_write(val *args, int nargs) {
+    for (int i=0;i<nargs;i++){ const char *s=val_to_str(args[i]); if(g_doc_write) g_doc_write(s); else out_str(s); }
+    return UND();
+}
+
 static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
     /* console.log */
     obj *log=new_obj(V_NATIVE); log->native=native_print; val lv=UND(); lv.t=V_NATIVE; lv.o=log;
     obj *con=new_obj(V_OBJ); obj_set(con,"log",lv); val cv=UND(); cv.t=V_OBJ; cv.o=con; env_define(g,"console",cv);
+    /* document: write() splices HTML into the page. getElementById() returns
+     * undefined for now (a real DOM is future work) — scripts that touch the
+     * result no-op safely rather than crash. */
+    obj *dw=new_obj(V_NATIVE); dw->native=native_doc_write; val dwv=UND(); dwv.t=V_NATIVE; dwv.o=dw;
+    obj *doc=new_obj(V_OBJ); obj_set(doc,"write",dwv); obj_set(doc,"writeln",dwv);
+    val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
 }
 
 /* =========================== entry point =========================== */
 /* Run JS source; print output into out[0..outmax). Returns output length, or -1
  * on error (with the message appended to the output). Serialized: uses static
  * arena + globals, so only one js_run() may be in flight at a time. */
-int js_run(const char *src, char *out, int outmax) {
+/* Interpreter state is static (arena + globals), so only one run may be in flight.
+ * The browser (WM thread) and the shell's `js` (a ring-3 syscall) are distinct
+ * preemptible tasks, so guard with an irq-protected flag like tls_get does. */
+#ifndef JS_HOSTTEST
+static inline unsigned long js_irq_save(void){ unsigned long f; __asm__ volatile("pushfq; pop %0; cli":"=r"(f)::"memory"); return f; }
+static inline void js_irq_restore(unsigned long f){ __asm__ volatile("push %0; popfq"::"r"(f):"memory","cc"); }
+#else
+static inline unsigned long js_irq_save(void){ return 0; }
+static inline void js_irq_restore(unsigned long f){ (void)f; }
+#endif
+static volatile int js_busy;
+
+static int js_run_impl(const char *src, char *out, int outmax) {
+    unsigned long f = js_irq_save();
+    if (js_busy) { js_irq_restore(f); if (outmax) out[0]=0; return -1; }   /* another run in flight */
+    js_busy = 1; js_irq_restore(f);
+
     g_arena_off=0; g_oom=0; g_err=0; g_errmsg[0]=0; g_depth=0;
     g_out=out; g_out_cap=outmax; g_out_len=0; if(outmax) out[0]=0;
 
@@ -715,8 +746,24 @@ int js_run(const char *src, char *out, int outmax) {
         if (g) { install_globals(g); eval_stmt(prog, g); }
     }
     if (g_oom) rt_err("out of memory (arena)");
-    if (g_err) { out_str("\n[js error: "); out_str(g_errmsg); out_str("]\n"); return -1; }
-    return g_out_len;
+    int r = g_out_len;
+    if (g_err) { out_str("\n[js error: "); out_str(g_errmsg); out_str("]\n"); r = -1; }
+    js_busy = 0;
+    return r;
+}
+
+int js_run(const char *src, char *out, int outmax) {
+    g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
+    return js_run_impl(src, out, outmax);
+}
+
+/* Run page scripts with a host document.write sink (the browser splices the
+ * written HTML into the page and re-parses). */
+int js_run_doc(const char *src, char *out, int outmax, void (*write_cb)(const char *)) {
+    g_doc_write = write_cb;
+    int r = js_run_impl(src, out, outmax);
+    g_doc_write = 0;
+    return r;
 }
 
 #ifdef JS_HOSTTEST
