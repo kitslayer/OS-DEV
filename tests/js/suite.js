@@ -93,6 +93,7 @@ print(Array.from(new Set([3,1,3,2,1])).join(","), new Set([1,1,2]).size, Array.f
 print(JSON.stringify({a:1,b:2},null,2).split("\n").length, JSON.stringify([1,2],null,1).indexOf("\n")>=0, JSON.stringify({a:1,b:2}));
 print([1,[2,[3,[4]]]].flat(64).length, "  x  ".trimStart()+"|", "|"+"  y  ".trimEnd());
 var dd=new Date(); print(typeof dd.getFullYear(), typeof dd.getHours(), (""+dd).length);
+print(dd.nope, JSON.stringify(dd).length>2, Object.keys(dd).length, JSON.stringify(new Map().set("a",1)), JSON.stringify({...new Set([1,2])}));
 print(encodeURIComponent("a b&c"), decodeURIComponent("x%20y"), encodeURI("p/q?x=1"));
 print("a=1 b=2".matchAll(/(\w)=(\d)/g).map(m=>m[1]+m[2]).join(","), "x=9".matchAll(/(\w)=(\d)/g).length);
 print("a1b2".replace(/\d/g, m=>m*2), "x-y".replace(/(\w)-(\w)/, (m,a,b)=>b+a));

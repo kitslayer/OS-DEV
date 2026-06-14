@@ -654,13 +654,20 @@ static val g_throwval;        /* value of the in-flight `throw` (when g_threw) *
 
 static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
 
+/* True only for objects whose keys[]/vals[] are real keyed properties (V_OBJ and
+ * V_REGEX, which use obj_set). V_ARR/V_MAP/V_SET/V_DATE store data in vals[] via
+ * arr_push_val, which does NOT maintain keys[] — keys[] there is garbage and
+ * shorter than n, so it must NEVER be iterated as property keys. */
+static int obj_keyed(obj *o){ return o && (o->kind==V_OBJ || o->kind==V_REGEX); }
 static void obj_set(obj *o, const char *key, val v) {
     if (!o || !o->keys || !o->vals) { g_oom=1; return; }   /* a NULL/half-built obj (OOM) — don't deref */
+    if (!obj_keyed(o)) return;   /* not a keyed object (array/map/set/date) — ignore stray property writes */
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { o->vals[i]=v; return; }
     if (o->n>=o->cap) { int nc=o->cap*2; const char **nk=aalloc(sizeof(char*)*nc); val *nv=aalloc(sizeof(val)*nc); if(!nk||!nv){g_oom=1;return;} memcpy(nk,o->keys,sizeof(char*)*o->n); memcpy(nv,o->vals,sizeof(val)*o->n); o->keys=nk; o->vals=nv; o->cap=nc; }
     o->keys[o->n]=key; o->vals[o->n]=v; o->n++;
 }
 static int obj_get(obj *o, const char *key, val *out) {
+    if (!obj_keyed(o)) return 0;   /* array/map/set/date have no keyed properties */
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { *out=o->vals[i]; return 1; }
     return 0;
 }
@@ -1047,7 +1054,7 @@ static void bind_pat_inner(node *pat, val v, env *e, int assign) {
     if (pat->type==N_OBJECT) {
         for (int i=0;i<pat->nlist && !g_oom;i++){ node *pr=pat->list[i];
             if (pr->type==N_SPREAD){ obj *ro=new_obj(V_OBJ); if(!ro){g_oom=1;return;}
-                if (v.t==V_OBJ && v.o) for(int j=0;j<v.o->n && !g_oom;j++){ const char*k=v.o->keys[j]; int named=0;
+                if (v.t==V_OBJ && obj_keyed(v.o)) for(int j=0;j<v.o->n && !g_oom;j++){ const char*k=v.o->keys[j]; int named=0;
                     for(int m=0;m<i;m++){ node*q=pat->list[m]; if(q->type!=N_SPREAD && q->str && strcmp(q->str,k)==0){named=1;break;} }
                     if(!named) obj_set(ro, k, v.o->vals[j]); }
                 val rv=UND(); rv.t=V_OBJ; rv.o=ro; bind_pat(pr->a, rv, e, assign); break; }
@@ -1107,7 +1114,7 @@ static val eval_expr_inner(node *n, env *e) {
         case N_OBJECT: { obj *o=new_obj(V_OBJ); if(!o) return UND();
             for(int i=0;i<n->nlist && !g_oom;i++){ node*pr=n->list[i];
                 if (pr->type==N_SPREAD){ val sv=eval_expr(pr->a,e);
-                    if (sv.t==V_OBJ && sv.o){ for(int j=0;j<sv.o->n && !g_oom;j++) obj_set(o, sv.o->keys[j], sv.o->vals[j]); }
+                    if (sv.t==V_OBJ && obj_keyed(sv.o)){ for(int j=0;j<sv.o->n && !g_oom;j++) obj_set(o, sv.o->keys[j], sv.o->vals[j]); }
                 } else { const char *key = pr->b ? val_to_str(eval_expr(pr->b,e)) : node_name(pr);   /* pr->b = computed key */
                     obj_set(o, key, eval_expr(pr->a,e)); }
             }
@@ -1130,7 +1137,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (t->type==N_IDENT) { slot=env_find(e,node_name(t)); }
             else if (t->type==N_MEMBER) {            /* o.prop++ */
                 val recv=eval_expr(t->a,e);
-                if (recv.t==V_OBJ && recv.o) { const char *key=node_name(t);
+                if (recv.t==V_OBJ && obj_keyed(recv.o)) { const char *key=node_name(t);
                     for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
                     if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
                 }
@@ -1138,7 +1145,7 @@ static val eval_expr_inner(node *n, env *e) {
             else if (t->type==N_INDEX) {             /* arr[i]++ / o[k]++ */
                 val recv=eval_expr(t->a,e), idx=eval_expr(t->b,e);
                 if (recv.t==V_ARR && recv.o) { int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) slot=&recv.o->vals[i]; }
-                else if (recv.t==V_OBJ && recv.o) { const char *key=val_to_str(idx);
+                else if (recv.t==V_OBJ && obj_keyed(recv.o)) { const char *key=val_to_str(idx);
                     for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
                     if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
                 }
@@ -1407,8 +1414,9 @@ static comp eval_stmt_inner(node *n, env *e) {
         case N_FORIN: {
             val it=eval_expr(n->a,e); env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
             const char *vn=node_name(n); env_define(fe, vn, UND());
-            if (it.t==V_OBJ && it.o) {
-                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=STRV(it.o->keys[i]);
+            if (it.t==V_OBJ && obj_keyed(it.o)) {   /* keyed objects only (Date/Map/Set/arrays have no enumerable own keys here) */
+                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
+                    val *slot=env_find(fe,vn); if(slot) *slot=STRV(it.o->keys[i]);
                     comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_ARR && it.o) {
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=NUM(i);   /* array indices */
@@ -1727,9 +1735,9 @@ static val nat_isNaN(val *a, int n){ (void)a; (void)n; return BOOLV(0); }       
 /* ---- Object.keys(o) -> array of key strings ---- */
 static val nat_obj_keys(val *a, int n){
     obj *r = new_obj(V_ARR); if(!r) return UND();
-    if (n && (a[0].t==V_OBJ)) {
+    if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) {   /* keyed objects only (Date/Map/Set have no enumerable own keys) */
         obj *o=a[0].o;
-        for (int i=0;i<o->n;i++){ if(r->n>=r->cap){int nc=r->cap*2+2;val*nv=aalloc((long)sizeof(val)*nc); if(!nv){g_oom=1;break;} memcpy(nv,r->vals,sizeof(val)*r->n); r->vals=nv; r->cap=nc;} r->vals[r->n++]=STRV(o->keys[i]); }
+        for (int i=0;i<o->n;i++) arr_push_val(r, STRV(o->keys[i]));
     }
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
@@ -1751,7 +1759,10 @@ static void json_val(val v, int depth){
         case V_STR:  js_appq(v.str); break;
         case V_ARR:  if(v.o->n==0){ js_app("[]"); break; } js_app("[");
             for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("]"); break;
-        case V_OBJ:  if(v.o->n==0){ js_app("{}"); break; } js_app("{");
+        case V_OBJ:
+            if(v.o && v.o->kind==V_DATE){ js_appq(val_to_str(v)); break; }   /* a Date serializes as its string */
+            if(!obj_keyed(v.o) || v.o->n==0){ js_app("{}"); break; }          /* map/set/empty: no enumerable props */
+            js_app("{");
             for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("}"); break;
         default:     js_app("null"); break;   /* undefined/null/function */
     }
@@ -1809,12 +1820,12 @@ static val nat_json_parse(val *a, int n){ if(!n || a[0].t!=V_STR) return UND(); 
 /* ---- Object.values / Object.entries, Array.isArray / Array.from ---- */
 static val nat_obj_values(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
-    if (n && a[0].t==V_OBJ && a[0].o) for (int i=0;i<a[0].o->n;i++) arr_push_val(r, a[0].o->vals[i]);
+    if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++) arr_push_val(r, a[0].o->vals[i]);
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
 static val nat_obj_entries(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
-    if (n && a[0].t==V_OBJ && a[0].o) for (int i=0;i<a[0].o->n;i++){
+    if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){
         obj *pair=new_obj(V_ARR); if(!pair) break; arr_push_val(pair, STRV(a[0].o->keys[i])); arr_push_val(pair, a[0].o->vals[i]);
         val pv=UND(); pv.t=V_ARR; pv.o=pair; arr_push_val(r, pv); }
     val v=UND(); v.t=V_ARR; v.o=r; return v;
@@ -1833,7 +1844,7 @@ static val nat_obj_fromEntries(val *a, int n){
 }
 static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
     if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
-    for (int i=1;i<n;i++) if (a[i].t==V_OBJ && a[i].o) for (int j=0;j<a[i].o->n;j++) obj_set(a[0].o, a[i].o->keys[j], a[i].o->vals[j]);
+    for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++) obj_set(a[0].o, a[i].o->keys[j], a[i].o->vals[j]);
     return a[0];
 }
 static int64_t nat_sign_v(int64_t x){ return x>0?1:x<0?-1:0; }
