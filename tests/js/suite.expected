@@ -107,6 +107,7 @@ undefined undefined
 cba 16
 -- call/apply --
 11 7 Hi Ada 9
+13 111 function
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

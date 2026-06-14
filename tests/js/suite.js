@@ -119,6 +119,8 @@ print(["a","b","c"].reduceRight(function(a,x){return a+x;}), [1,2,3].reduceRight
 print("-- call/apply --");
 function _ad(a,b){return a+b;} function _gr(g){return g+" "+this.name;}
 print(_ad.call(null,5,6), _ad.apply(null,[3,4]), _gr.call({name:"Ada"},"Hi"), Math.max.apply(null,[2,9,4]));
+function _bf(a,b){return this.x+a+b;}
+print(_bf.bind({x:10},1)(2), _bf.bind({x:100})(5,6), typeof _bf.bind({x:1}));
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);

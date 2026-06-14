@@ -625,7 +625,7 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT /* obj->kind markers only; the val.t stays V_OBJ */ };
+       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND /* obj->kind markers only; the val.t stays V_OBJ */ };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -913,6 +913,7 @@ static val nat_regexp(val *args, int nargs){
     return make_regex_val(pat, fl);
 }
 static const char *val_to_str_inner(val v) {
+    if (v.t == V_OBJ && v.o && v.o->kind == V_BOUND) return "function";   /* a bound function */
     switch (v.t) {
         case V_UNDEF: return "undefined";
         case V_NULL: return "null";
@@ -978,6 +979,19 @@ static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names
  * for a plain call); arrow functions (node->prefix==1) deliberately do NOT bind
  * one, so `this` resolves lexically up the scope chain to the enclosing function. */
 static val call_function_this(val fn, val thisv, val *args, int nargs) {
+    if (fn.t==V_OBJ && fn.o && fn.o->kind==V_BOUND) {   /* a bound function: prepend its bound this + partial args */
+        if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }   /* guard a bind() chain */
+        obj *bf = fn.o;
+        val orig  = bf->n > 0 ? bf->vals[0] : UND();
+        val bthis = bf->n > 1 ? bf->vals[1] : UND();
+        int np = bf->n > 2 ? bf->n - 2 : 0;
+        val comb[24]; int cn = 0;
+        for (int i = 0; i < np && cn < 24; i++) comb[cn++] = bf->vals[2 + i];
+        for (int i = 0; i < nargs && cn < 24; i++) comb[cn++] = args[i];
+        val r = call_function_this(orig, bthis, comb, cn);   /* bound `this` is fixed; the call-site thisv is ignored */
+        g_depth--;
+        return r;
+    }
     if (fn.t==V_NATIVE) return fn.o->native(args,nargs);
     if (fn.t!=V_FUN) { rt_err("not a function"); return UND(); }
     if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }
@@ -1128,7 +1142,7 @@ static val eval_expr_inner(node *n, env *e) {
             if(n->op=='N') return (l.t==V_UNDEF||l.t==V_NULL) ? eval_expr(n->b,e) : l;   /* ?? : only null/undefined fall through */
             if(n->op=='A') return truthy(l)?eval_expr(n->b,e):l; else return truthy(l)?l:eval_expr(n->b,e); }
         case N_UNARY: {
-            if (n->op=='t') { val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE)?"function":"object"; return STRV(ty); }
+            if (n->op=='t') { val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE||(v.t==V_OBJ&&v.o&&v.o->kind==V_BOUND))?"function":"object"; return STRV(ty); }
             val v=eval_expr(n->a,e);
             if (n->op=='!') return BOOLV(!truthy(v));
             if (n->op=='-') return NUM(-to_num(v));
@@ -1257,11 +1271,15 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX) return eval_regex_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_DATE) return eval_date_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) return eval_element_method(recv,m,args,na);
-                if (recv.t==V_FUN || recv.t==V_NATIVE) {            /* Function.prototype.call / .apply */
+                if (recv.t==V_FUN || recv.t==V_NATIVE || (recv.t==V_OBJ && recv.o && recv.o->kind==V_BOUND)) {   /* Function call/apply/bind */
                     if (strcmp(m,"call")==0)  return call_function_this(recv, na>0?args[0]:UND(), na>1?args+1:args, na>1?na-1:0);
                     if (strcmp(m,"apply")==0) { val th=na>0?args[0]:UND();
                         if (na>1 && args[1].t==V_ARR && args[1].o) return call_function_this(recv, th, args[1].o->vals, args[1].o->n);
                         return call_function_this(recv, th, 0, 0); }
+                    if (strcmp(m,"bind")==0) { obj *bf=new_obj(V_BOUND); if(!bf){g_oom=1;return UND();}
+                        arr_push_val(bf, recv); arr_push_val(bf, na>0?args[0]:UND());   /* [0]=fn [1]=this */
+                        for (int i=1;i<na && !g_oom;i++) arr_push_val(bf, args[i]);      /* [2..]=partial args */
+                        return obj_val(bf); }
                 }
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
