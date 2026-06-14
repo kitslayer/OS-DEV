@@ -64,8 +64,12 @@ static const char *intern(const char *s, int len) {
 }
 
 /* ---- runtime error handling ---- */
+/* g_err unwinds eval like an exception; a try/catch clears it. g_threw marks that
+ * the in-flight error is an explicit `throw` (carrying g_throwval) vs a built-in
+ * runtime error (caught as its message string). g_oom is NOT catchable. */
 static int  g_err;
 static char g_errmsg[128];
+static int  g_threw;
 static void rt_err(const char *m) {
     if (!g_err) { g_err = 1; int i = 0; while (m[i] && i < 127) { g_errmsg[i] = m[i]; i++; } g_errmsg[i] = 0; }
 }
@@ -76,7 +80,7 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
-    "switch","case","default","do",0 };
+    "switch","case","default","do","try","catch","finally","throw",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -175,7 +179,8 @@ static void skip_semi(lexer *L){ while (peek_punc(L,";")) advance(L); }   /* ; i
 enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
-       N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF };
+       N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
+       N_TRY, N_THROW };
 
 typedef struct node node;
 struct node {
@@ -429,6 +434,15 @@ static node *parse_stmt(lexer *L) {
         if (peek_kw(L,"else")) { advance(L); n->c=parse_stmt(L); } g_depth--; return n;
     }
     if (peek_kw(L,"while")) { advance(L); expect_punc(L,"("); node *n=mknode(N_WHILE); n->a=parse_expr(L); expect_punc(L,")"); n->b=parse_stmt(L); g_depth--; return n; }
+    if (peek_kw(L,"try")) {
+        advance(L); node *n=mknode(N_TRY); n->a=parse_block(L);
+        if (peek_kw(L,"catch")) { advance(L);
+            if (peek_punc(L,"(")) { advance(L); token p=advance(L); if(p.type==T_IDENT){ n->str=intern(p.s,p.len); n->slen=p.len; } expect_punc(L,")"); }
+            n->b=parse_block(L); }
+        if (peek_kw(L,"finally")) { advance(L); n->c=parse_block(L); }
+        g_depth--; return n;
+    }
+    if (peek_kw(L,"throw")) { advance(L); node *n=mknode(N_THROW); n->a=parse_expr(L); g_depth--; return n; }
     if (peek_kw(L,"do")) { advance(L); node *n=mknode(N_DOWHILE); n->b=parse_stmt(L); skip_semi(L);
         if (peek_kw(L,"while")) advance(L); expect_punc(L,"("); n->a=parse_expr(L); expect_punc(L,")"); g_depth--; return n; }
     if (peek_kw(L,"switch")) {
@@ -499,6 +513,7 @@ static val UND(void){ val v; v.t=V_UNDEF; v.num=0; v.str=0; v.o=0; return v; }
 static val NUM(int64_t x){ val v=UND(); v.t=V_NUM; v.num=x; return v; }
 static val BOOLV(int b){ val v=UND(); v.t=V_BOOL; v.num=b?1:0; return v; }
 static val STRV(const char *s){ val v=UND(); v.t=V_STR; v.str=s?s:""; return v; }
+static val g_throwval;        /* value of the in-flight `throw` (when g_threw) */
 
 static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
 
@@ -798,6 +813,26 @@ static comp eval_stmt_inner(node *n, env *e) {
                     comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
             }
             return CN();
+        }
+        case N_THROW: { val v=eval_expr(n->a,e); g_throwval=v; g_threw=1;
+            if(!g_err){ g_err=1; const char*s=val_to_str(v); int i=0; while(s[i]&&i<127){g_errmsg[i]=s[i];i++;} g_errmsg[i]=0; }
+            return CN(); }   /* unwinds via g_err */
+        case N_TRY: {
+            comp tc = eval_stmt(n->a, e);                /* try block */
+            if (g_err && !g_oom) {                       /* an exception (not OOM) was thrown */
+                val ev = g_threw ? g_throwval : STRV(g_errmsg[0]?g_errmsg:"error");
+                g_err=0; g_threw=0; g_errmsg[0]=0; tc=CN();
+                if (n->b) { env *ce=new_env(e); if(!ce){ g_oom=1; } else { if(n->str) env_define(ce, node_name(n), ev); tc=eval_stmt(n->b,ce); } }
+            }
+            if (n->c) {                                  /* finally always runs (on a clean slate) */
+                int s_err=g_err, s_threw=g_threw; val s_tv=g_throwval; char s_msg[128]; memcpy(s_msg,g_errmsg,128);
+                g_err=0; g_threw=0;
+                comp fc=eval_stmt(n->c,e);
+                if (fc.kind!=C_NORMAL) return fc;        /* finally's return/break/continue wins */
+                if (g_err) return tc;                    /* finally itself threw -> propagate it */
+                g_err=s_err; g_threw=s_threw; g_throwval=s_tv; memcpy(g_errmsg,s_msg,128);   /* restore pending */
+            }
+            return tc;
         }
         case N_RETURN: { comp c; c.kind=C_RETURN; c.v = n->a?eval_expr(n->a,e):UND(); return c; }
         case N_BREAK: { comp c=CN(); c.kind=C_BREAK; return c; }
