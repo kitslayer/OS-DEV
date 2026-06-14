@@ -212,6 +212,7 @@ static node *parse_assign(lexer *L);
 static node *parse_stmt(lexer *L);
 static node *parse_unary(lexer *L);
 static node *parse_postfix(lexer *L);
+static node *parse_primary(lexer *L);
 
 static void expect_punc(lexer *L, const char *p){ token t=advance(L); if(!(t.type==T_PUNC && tok_is(t,p))) rt_err("syntax: expected punctuation"); }
 
@@ -222,6 +223,13 @@ static void parse_fn_params(lexer *L, node *fn) {
     fn->list = aalloc(sizeof(node*)*32); fn->nlist=0;
     while (!peek_punc(L,")") && peek(L).type!=T_EOF && !g_err && !g_oom) {
         int rest=0; if (peek_punc(L,"...")) { advance(L); rest=1; }   /* ...rest param */
+        if (!rest && (peek_punc(L,"[")||peek_punc(L,"{"))) {          /* destructuring param: f([a,b], {c}) */
+            node *pat=parse_primary(L);
+            if (peek_punc(L,"=")) { advance(L); node *as=mknode(N_ASSIGN); as->op='='; as->a=pat; as->b=parse_assign(L); pat=as; }  /* default for a missing arg */
+            if (fn->list && fn->nlist<32) fn->list[fn->nlist++]=pat;
+            if (peek_punc(L,",")) advance(L); else break;
+            continue;
+        }
         token p=advance(L);
         if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len;
             if (rest) id->op='.';                                      /* marks the rest param */
@@ -439,6 +447,12 @@ static node *parse_assign(lexer *L) {
         lexsave sv = lex_save(L); advance(L);
         node *ps[16]; int np=0, ok=1;
         if (!peek_punc(L,")")) for(;;){ int rest=0; if(peek_punc(L,"...")){ advance(L); rest=1; }
+            if (!rest && (peek_punc(L,"[")||peek_punc(L,"{"))) {   /* ([a,b])=>… / ({x})=>… destructuring param */
+                node *pat=parse_primary(L);
+                if (peek_punc(L,"=")) { advance(L); node *as=mknode(N_ASSIGN); as->op='='; as->a=pat; as->b=parse_assign(L); pat=as; }
+                if(np<16) ps[np++]=pat;
+                if(peek_punc(L,",")) { advance(L); continue; } else break;
+            }
             token p=peek(L); if(p.type!=T_IDENT){ ok=0; break; } advance(L);
             if(np<16){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len; if(rest) id->op='.'; ps[np++]=id; }
             if(rest) break;   /* ...rest is the last param */
@@ -681,6 +695,7 @@ typedef struct { int kind; val v; } comp;
 
 static val eval_expr(node *n, env *e);
 static comp eval_stmt(node *n, env *e);
+static void bind_pattern(node *pat, val v, env *e);   /* destructuring (defined below) */
 
 static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names interned at parse time */
 
@@ -700,6 +715,9 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
         if (fn.o->super_class) { val sup=UND(); sup.t=V_FUN; sup.o=fn.o->super_class; env_define(fe, "@super", sup); }
     }
     for (int i=0;i<def->nlist;i++){ node *pn=def->list[i];
+        if (pn->type!=N_IDENT) {   /* destructuring param ([a,b], {c}, or =default wrapping a pattern) */
+            bind_pattern(pn, (i<nargs)?args[i]:UND(), fe); continue;
+        }
         if (pn->op=='.') {   /* ...rest: gather the remaining args into an array, then stop */
             obj *ro=new_obj(V_ARR); if(!ro){ g_oom=1; break; }
             for (int j=i;j<nargs && !g_oom;j++) arr_push_val(ro, args[j]);
@@ -735,7 +753,6 @@ static int build_args(node **list, int nlist, env *e, val *args, int maxargs) {
  * Pattern nesting is already bounded by the parser's depth guard, but bind_pattern
  * carries its own g_depth guard too (via the wrapper below) so it can never be the
  * path that overflows the C stack regardless of the entry task's stack budget. */
-static void bind_pattern(node *pat, val v, env *e);   /* fwd: the guarded wrapper */
 static void bind_pattern_inner(node *pat, val v, env *e) {
     if (!pat || g_oom) return;
     if (pat->type==N_ASSIGN) { if (v.t==V_UNDEF) v=eval_expr(pat->b,e); bind_pattern(pat->a, v, e); return; }

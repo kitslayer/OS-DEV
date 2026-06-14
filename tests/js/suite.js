@@ -68,4 +68,8 @@ print("-- destructuring --");
 var [da,db,...dr]=[1,2,3,4]; print(da, db, dr.join(","));
 var {dn, dx=9}={dn:"z"}; print(dn, dx);
 var ds=0; for (var [dk,dv] of [[2,3],[4,5]]) ds+=dk*dv; print(ds);
+print("-- param destructuring --");
+function pd({a, b=5}){ return a+b; } print(pd({a:1}), pd({a:1,b:2}));
+print([[1,2],[3,4]].map(([x,y]) => x*y).join(","));
+var swap=([a,b])=>[b,a]; print(swap([7,9]).join(","));
 print("-- done --");

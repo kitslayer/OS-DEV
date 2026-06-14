@@ -60,4 +60,8 @@ square 25
 1 2 3,4
 z 9
 26
+-- param destructuring --
+6 3
+2,12
+9,7
 -- done --
