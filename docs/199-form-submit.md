@@ -56,6 +56,15 @@ builds into a fixed `q[URL_MAX]` (160 B) with each append guarded, and
 `url_encode` reserves room for a worst-case `%XX`. Reviewed clean (ASan/UBSan
 fuzz of `url_encode` + the query-build loop).
 
+## Password masking (M203)
+
+An `<input type="password">` renders `*` per character on screen instead of the
+text (the placeholder is still shown plainly — it's a hint, not a secret). The
+masking is display-only: the field store keeps the real value, so
+`getElementById(pw).value` and form submission see the actual characters.
+Verified in-OS (`LOGIN.HTM`): typed a 7-char password shown as `[*******]`, and
+a button's `onclick` read `.value.length` → "password had 7 chars".
+
 ## Address-bar search (M202)
 
 The address bar is now a search box too: press `e`/`/` to edit it, type a query,

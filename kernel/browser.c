@@ -509,6 +509,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             const char *tp; int tpl; int has_type = find_attr(attrs, attrlen, "type", &tp, &tpl);
             int is_submit = has_type && (attr_eq(tp, tpl, "submit") || attr_eq(tp, tpl, "image"));
             int is_hidden = has_type && attr_eq(tp, tpl, "hidden");
+            int is_pw = has_type && attr_eq(tp, tpl, "password");
             if (is_submit) {                             /* a submit button -> a link that submits the form */
                 char s[64]; int p = 0; s[p++] = '[';
                 if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0) { for (int i=0;i<vl&&p<60;i++) s[p++]=v[i]; }
@@ -535,8 +536,8 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             const char *stored = idbuf[0] ? in_get(b, idbuf) : 0;   /* typed / scripted / seeded .value */
             int focused = idbuf[0] && streqs(b->focus_id, idbuf);
             char s[100]; int p = 0; s[p++] = '[';
-            if (stored)                                                                 { for (int i=0; stored[i] && p<94; i++) s[p++]=stored[i]; }
-            else if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0)             { for (int i=0; i<vl && p<94; i++) s[p++]=v[i]; }
+            if (stored)                                                                 { for (int i=0; stored[i] && p<94; i++) s[p++]= is_pw ? '*' : stored[i]; }
+            else if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0)             { for (int i=0; i<vl && p<94; i++) s[p++]= is_pw ? '*' : v[i]; }
             else if (find_attr(attrs, attrlen, "placeholder", &v, &vl) && vl > 0)       { for (int i=0; i<vl && p<94; i++) s[p++]=v[i]; }
             else                                                                        { s[p++]='_'; s[p++]='_'; s[p++]='_'; s[p++]='_'; }
             if (focused) s[p++] = '|';                   /* a cursor on the focused field */
