@@ -295,17 +295,17 @@ whole thing works:
 | 202| **Address-bar search** — type a query (not a URL) in the bar → DuckDuckGo results, like any modern browser | [docs/199](docs/199-form-submit.md) |
 | 203| **Password masking** — `<input type=password>` shows `*` on screen; JS/submit still get the real value | [docs/199](docs/199-form-submit.md) |
 | 204| **256 KB fetch buffer** — doubled from 128 KB so larger pages render fully (e.g. Wikipedia reaches its TOC/article); TCP verified stable | [kernel/browser.c](kernel/browser.c) |
-| 205| **`element.getAttribute(name)`** — page JS reads any element's HTML attributes (href, `data-*`, type…); missing → `null` | [kernel/js.c](kernel/js.c) |
-| 206| **`element.setAttribute(name,val)`** — page JS writes attributes (rewrites the tag in place + re-renders); swap `src`/`href`/`data-*` | [kernel/js.c](kernel/js.c) |
-| 207| **`window.location`** — page JS reads the current URL (`href`/`protocol`/`host`/`pathname`/`search`), e.g. a results page's `?q=` | [kernel/js.c](kernel/js.c) |
+| 205| **`element.getAttribute(name)`** — page JS reads any element's HTML attributes (href, `data-*`, type…); missing → `null` | [docs/205](docs/205-dom-attributes-and-events.md) |
+| 206| **`element.setAttribute(name,val)`** — page JS writes attributes (rewrites the tag in place + re-renders); swap `src`/`href`/`data-*` | [docs/205](docs/205-dom-attributes-and-events.md) |
+| 207| **`window.location`** — page JS reads the current URL (`href`/`protocol`/`host`/`pathname`/`search`), e.g. a results page's `?q=` | [docs/205](docs/205-dom-attributes-and-events.md) |
 | 208| **Address-bar replace-on-type** — first keystroke after focusing the bar clears it, so typing a search/URL needs no backspacing | [kernel/browser.c](kernel/browser.c) |
 | 209| **`Array.splice`/`shift`/`unshift`** — the common array mutators (insert/remove anywhere, front ops), ASan-fuzzed | [kernel/js.c](kernel/js.c) |
-| 210| **Checkboxes & radios** — `[x]`/`(o)` toggles (Enter), `checked` default, read via `.value`; checked ones submit `name=on` | [kernel/browser.c](kernel/browser.c) |
-| 211| **Radio group exclusion** — selecting a radio unchecks the others sharing its `name` (proper mutually-exclusive groups) | [kernel/browser.c](kernel/browser.c) |
-| 212| **`onchange` handlers** — toggling a checkbox/radio runs its `onchange` JS immediately (reactive forms, no button) | [kernel/browser.c](kernel/browser.c) |
-| 213| **Text-field `onchange`** — a text input fires its `onchange` on blur (Enter/Esc): type, leave the field, the handler runs | [kernel/browser.c](kernel/browser.c) |
+| 210| **Checkboxes & radios** — `[x]`/`(o)` toggles (Enter), `checked` default, read via `.value`; checked ones submit `name=on` | [docs/205](docs/205-dom-attributes-and-events.md) |
+| 211| **Radio group exclusion** — selecting a radio unchecks the others sharing its `name` (proper mutually-exclusive groups) | [docs/205](docs/205-dom-attributes-and-events.md) |
+| 212| **`onchange` handlers** — toggling a checkbox/radio runs its `onchange` JS immediately (reactive forms, no button) | [docs/205](docs/205-dom-attributes-and-events.md) |
+| 213| **Text-field `onchange`** — a text input fires its `onchange` on blur (Enter/Esc): type, leave the field, the handler runs | [docs/205](docs/205-dom-attributes-and-events.md) |
 | 214| **`Array.reduceRight`** — right-to-left reduce, completing the reduce family | [kernel/js.c](kernel/js.c) |
-| 215| **`oninput`** — text fields fire `oninput` on every keystroke (search-as-you-type / live validation) | [kernel/browser.c](kernel/browser.c) |
+| 215| **`oninput`** — text fields fire `oninput` on every keystroke (search-as-you-type / live validation) | [docs/205](docs/205-dom-attributes-and-events.md) |
 
 ## Roadmap
 
