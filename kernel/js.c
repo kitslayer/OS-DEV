@@ -1537,8 +1537,24 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
  * Both are V_OBJ values whose obj->kind is V_MAP/V_SET. A Map stores entries
  * interleaved in obj->vals as [k0,v0,k1,v1,…] (so n is 2*size); a Set stores
  * [v0,v1,…]. Lookup is a linear scan with `===` equality (val_equal). */
-static val nat_map(val *args, int nargs){ (void)args;(void)nargs; obj *o=new_obj(V_MAP); if(!o){g_oom=1;return UND();} o->n=0; return obj_val(o); }
-static val nat_set(val *args, int nargs){ (void)args;(void)nargs; obj *o=new_obj(V_SET); if(!o){g_oom=1;return UND();} o->n=0; return obj_val(o); }
+static val nat_map(val *args, int nargs){
+    obj *o=new_obj(V_MAP); if(!o){g_oom=1;return UND();} o->n=0; val mv=obj_val(o);
+    if (nargs>0 && args[0].t==V_ARR && args[0].o) {          /* new Map([[k,v],…]) */
+        obj *src=args[0].o; for(int i=0;i<src->n && !g_oom;i++){ val e=src->vals[i]; if(e.t==V_ARR && e.o && e.o->n>=1){ val kv[2]={e.o->vals[0], e.o->n>1?e.o->vals[1]:UND()}; eval_map_method(mv,"set",kv,2); } }
+    } else if (nargs>0 && args[0].t==V_OBJ && args[0].o && args[0].o->kind==V_MAP) {   /* new Map(otherMap) */
+        obj *src=args[0].o; for(int i=0;i+1<src->n && !g_oom;i+=2){ val kv[2]={src->vals[i],src->vals[i+1]}; eval_map_method(mv,"set",kv,2); }
+    }
+    return mv;
+}
+static val nat_set(val *args, int nargs){
+    obj *o=new_obj(V_SET); if(!o){g_oom=1;return UND();} o->n=0; val sv=obj_val(o);
+    if (nargs>0) { val src=args[0];                          /* new Set([…]) / new Set("…") / new Set(otherSet) */
+        if (src.t==V_ARR && src.o) for(int i=0;i<src.o->n && !g_oom;i++) eval_set_method(sv,"add",&src.o->vals[i],1);
+        else if (src.t==V_OBJ && src.o && src.o->kind==V_SET) for(int i=0;i<src.o->n && !g_oom;i++) eval_set_method(sv,"add",&src.o->vals[i],1);
+        else if (src.t==V_STR) { const char*s=src.str; for(int i=0;s[i]&&!g_oom;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} val cv=STRV(c?c:""); eval_set_method(sv,"add",&cv,1); } }
+    }
+    return sv;
+}
 
 static val eval_map_method(val recv, const char *name, val *args, int nargs) {
     obj *o=recv.o; val k = nargs>0?args[0]:UND();
@@ -1744,12 +1760,18 @@ static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources)
 }
 static int64_t nat_sign_v(int64_t x){ return x>0?1:x<0?-1:0; }
 static val nat_sign(val *a, int n){ return NUM(n?nat_sign_v(to_num(a[0])):0); }
+/* push `e` onto r, applying the optional Array.from map function (e, index) */
+static void from_push(obj *r, val e, val fn, int hasfn){ if(hasfn){ val ca[2]={e,NUM(r->n)}; e=call_function(fn,ca,2); } arr_push_val(r,e); }
 static val nat_array_from(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
-    if (n && a[0].t==V_ARR && a[0].o) for (int i=0;i<a[0].o->n;i++) arr_push_val(r, a[0].o->vals[i]);
-    else if (n && a[0].t==V_STR) { const char*s=a[0].str; for (int i=0;s[i];i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} arr_push_val(r, STRV(c?c:"")); } }
+    val fn = n>1?a[1]:UND(); int hasfn=(fn.t==V_FUN||fn.t==V_NATIVE);
+    if (n && a[0].t==V_ARR && a[0].o) for (int i=0;i<a[0].o->n && !g_oom;i++) from_push(r, a[0].o->vals[i], fn, hasfn);
+    else if (n && a[0].t==V_OBJ && a[0].o && a[0].o->kind==V_SET) for (int i=0;i<a[0].o->n && !g_oom;i++) from_push(r, a[0].o->vals[i], fn, hasfn);   /* Array.from(set) — dedup idiom */
+    else if (n && a[0].t==V_OBJ && a[0].o && a[0].o->kind==V_MAP) for (int i=0;i+1<a[0].o->n && !g_oom;i+=2){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,a[0].o->vals[i]); arr_push_val(p,a[0].o->vals[i+1]); val pv=UND();pv.t=V_ARR;pv.o=p; from_push(r, pv, fn, hasfn); }
+    else if (n && a[0].t==V_STR) { const char*s=a[0].str; for (int i=0;s[i] && !g_oom;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} from_push(r, STRV(c?c:""), fn, hasfn); } }
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
+static val nat_array_of(val *a, int n){ obj *r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<n && !g_oom;i++) arr_push_val(r,a[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
 
 /* register a native function on object `o` under `name` */
 static void def_native(obj *o, const char *name, val (*fn)(val*,int)){
@@ -1784,7 +1806,7 @@ static void install_globals(env *g) {
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
-    obj *arrc=new_obj(V_OBJ); def_native(arrc,"isArray",nat_array_isArray); def_native(arrc,"from",nat_array_from); env_define(g,"Array",obj_val(arrc));
+    obj *arrc=new_obj(V_OBJ); def_native(arrc,"isArray",nat_array_isArray); def_native(arrc,"from",nat_array_from); def_native(arrc,"of",nat_array_of); env_define(g,"Array",obj_val(arrc));
     /* JSON (stringify) */
     obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
     /* global functions */

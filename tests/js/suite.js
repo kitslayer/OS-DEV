@@ -89,6 +89,7 @@ print(mm.size, mm.get("a"), mm.has("b"), mm.get("z"));
 var ss=new Set(); [1,2,2,3,1].forEach(x=>ss.add(x));
 print(ss.size, ss.has(2), ss.values().join(","));
 var mt=0; var mk=new Map(); mk.set(1,10).set(2,20); for(var [k,v] of mk) mt+=k*v; print(mt);
+print(Array.from(new Set([3,1,3,2,1])).join(","), new Set([1,1,2]).size, Array.from([1,2,3],x=>x*2).join(","), Array.of(9).length);
 print("-- more stdlib --");
 print([10,20,30].at(-1), [1,2,3].flatMap(x=>[x,x]).join(","), [4,9,2,8].findLast(x=>x<5));
 print("a.b.c".replaceAll(".","/"), "hi".at(-1));
