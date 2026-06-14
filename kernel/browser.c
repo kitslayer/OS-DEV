@@ -99,7 +99,9 @@ struct browser {
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
+    char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
+    char    form_action[URL_MAX];                               /* current <form action>; empty = submit to the current page */
 };
 
 static void drop_image(browser_t *b);        /* fwd: free any decoded image */
@@ -166,6 +168,8 @@ static void emit_literal_link(browser_t *b, const char *s, int link) {
     emit_word(b, start, STY_LINK, link);
 }
 static const char *in_get(browser_t *b, const char *id);   /* fwd: <input> field value lookup */
+static void in_set(browser_t *b, const char *id, const char *val);          /* fwd */
+static void in_name_set(browser_t *b, const char *id, const char *name);    /* fwd */
 
 /* Does `lit` exactly equal the first `len` chars of `s`? (tageq requires full
  * equality of both strings, which is wrong here because `s` continues into the
@@ -362,6 +366,34 @@ static int add_onclick(browser_t *b, const char *code, int codelen) {
     b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + codelen) };
     return b->nlink++;
 }
+/* Store a "submit:ACTION" link; following it (browser_follow) builds a GET query
+ * from the field store and navigates. The action is snapshotted at render time
+ * because the parse-time form_action is cleared by the </form> close tag. */
+static int add_submit_link(browser_t *b, const char *action) {
+    const char *pfx = "submit:"; int pl = 7; int al = 0; while (action[al]) al++;
+    if (b->nlink >= LINK_MAX || b->hreflen + pl + al >= HREF_MAX) return NO_LINK;
+    int off = b->hreflen;
+    for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
+    for (int i = 0; i < al; i++) b->hrefs[b->hreflen++] = action[i];
+    b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + al) };
+    return b->nlink++;
+}
+/* Percent-encode s into out (cap = bytes available incl. NUL slot); returns bytes
+ * written (no NUL). Unreserved chars pass through, space -> '+', else %XX. */
+static int url_encode(char *out, int cap, const char *s) {
+    int o = 0;
+    for (int i = 0; s[i] && o < cap - 3; i++) {          /* -3: room for a worst-case %XX */
+        char c = s[i];
+        if ((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.'||c=='~') out[o++] = c;
+        else if (c == ' ') out[o++] = '+';
+        else { const char *h = "0123456789ABCDEF"; out[o++]='%'; out[o++]=h[(c>>4)&0xF]; out[o++]=h[c&0xF]; }
+    }
+    return o;
+}
+/* Case-insensitive compare of an attribute value (v,vl) against a literal. */
+static int attr_eq(const char *v, int vl, const char *lit) {
+    int i = 0; for (; i < vl; i++) { if (!lit[i] || lc(v[i]) != lc(lit[i])) return 0; } return lit[i] == 0;
+}
 
 static int hexd(int c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -469,13 +501,39 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             const char *idp;
             char idbuf[32]; idbuf[0] = 0;
             if (find_attr(attrs, attrlen, "id", &idp, &idl) && idl < 32) { int k=0; for(;k<idl;k++) idbuf[k]=idp[k]; idbuf[k]=0; }
-            const char *stored = idbuf[0] ? in_get(b, idbuf) : 0;   /* typed / scripted .value */
+            const char *tp; int tpl; int has_type = find_attr(attrs, attrlen, "type", &tp, &tpl);
+            int is_submit = has_type && (attr_eq(tp, tpl, "submit") || attr_eq(tp, tpl, "image"));
+            int is_hidden = has_type && attr_eq(tp, tpl, "hidden");
+            if (is_submit) {                             /* a submit button -> a link that submits the form */
+                char s[64]; int p = 0; s[p++] = '[';
+                if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0) { for (int i=0;i<vl&&p<60;i++) s[p++]=v[i]; }
+                else { const char *d = "Submit"; for (int i=0; d[i] && p<60; i++) s[p++]=d[i]; }
+                s[p++] = ']'; s[p] = 0;
+                int lk = add_submit_link(b, b->form_action);
+                if (lk != NO_LINK) emit_literal_link(b, s, lk); else emit_literal(b, s, STY_EM);
+                return;
+            }
+            /* seed a store slot from the value= attr (only if absent) so the field's
+             * default is both shown and submittable; idempotent across re-renders. */
+            if (idbuf[0] && !in_get(b, idbuf) && find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0) {
+                char vb[96]; int n = vl; if (n > 95) n = 95; for (int i=0;i<n;i++) vb[i]=v[i]; vb[n]=0;
+                in_set(b, idbuf, vb);
+            }
+            if (idbuf[0]) {                              /* attach the name= for GET submit (if the slot exists) */
+                const char *nm; int nml;
+                if (find_attr(attrs, attrlen, "name", &nm, &nml) && nml > 0) {
+                    char nb[32]; int n = nml; if (n > 31) n = 31; for (int i=0;i<n;i++) nb[i]=nm[i]; nb[n]=0;
+                    in_name_set(b, idbuf, nb);
+                }
+            }
+            if (is_hidden) return;                       /* hidden fields are submittable but not drawn */
+            const char *stored = idbuf[0] ? in_get(b, idbuf) : 0;   /* typed / scripted / seeded .value */
             int focused = idbuf[0] && streqs(b->focus_id, idbuf);
             char s[100]; int p = 0; s[p++] = '[';
             if (stored)                                                                 { for (int i=0; stored[i] && p<94; i++) s[p++]=stored[i]; }
             else if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0)             { for (int i=0; i<vl && p<94; i++) s[p++]=v[i]; }
             else if (find_attr(attrs, attrlen, "placeholder", &v, &vl) && vl > 0)       { for (int i=0; i<vl && p<94; i++) s[p++]=v[i]; }
-            else if (!stored)                                                          { s[p++]='_'; s[p++]='_'; s[p++]='_'; s[p++]='_'; }
+            else                                                                        { s[p++]='_'; s[p++]='_'; s[p++]='_'; s[p++]='_'; }
             if (focused) s[p++] = '|';                   /* a cursor on the focused field */
             s[p++] = ']'; s[p] = 0;
             if (idbuf[0]) { int lk = add_input_link(b, idbuf);   /* a field with an id is focusable (Enter to type) */
@@ -558,12 +616,24 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         } else if (tag[0] == 't' && tag[1] == 'h' && *style == STY_BOLD) *style = STY_NORMAL;
         return;
     }
+    if (tageq(tag, "form")) {                            /* capture the GET action; submit buttons snapshot it */
+        if (!closing) {
+            const char *v; int vl; b->form_action[0] = 0;
+            if (find_attr(attrs, attrlen, "action", &v, &vl) && vl > 0) {
+                int n = vl; if (n > URL_MAX - 1) n = URL_MAX - 1;
+                for (int i = 0; i < n; i++) b->form_action[i] = v[i];
+                b->form_action[n] = 0;
+            }
+        } else b->form_action[0] = 0;
+        emit_break(b, TK_BREAK);
+        return;
+    }
     if (tageq(tag, "p") || tageq(tag, "dt")) { emit_break(b, TK_PARA); return; }
     if (tageq(tag, "table")) { emit_break(b, TK_PARA); b->tdcount = 0; return; }
     if (tageq(tag, "div") || tageq(tag, "section") ||
         tageq(tag, "article") || tageq(tag, "header") || tageq(tag, "footer") ||
         tageq(tag, "nav") || tageq(tag, "pre") || tageq(tag, "dl") ||
-        tageq(tag, "blockquote") || tageq(tag, "form") || tageq(tag, "main"))
+        tageq(tag, "blockquote") || tageq(tag, "main"))
         emit_break(b, TK_BREAK);
 }
 
@@ -583,6 +653,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->textlen = b->ntok = b->hreflen = b->nlink = 0;
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
+    b->form_action[0] = 0;                               /* no <form> action open yet */
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
     b->find_tok = -1;                                    /* clear any find highlight */
     b->curcolor = 0;                                     /* default text colour */
@@ -771,8 +842,14 @@ static const char *in_get(browser_t *b, const char *id) {
 }
 static void in_set(browser_t *b, const char *id, const char *val) {
     int i; for (i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) break;
-    if (i == b->in_n) { if (b->in_n >= 8 || !id[0]) return; int j=0; while(id[j]&&j<31){b->in_id[i][j]=id[j];j++;} b->in_id[i][j]=0; b->in_n++; }
+    if (i == b->in_n) { if (b->in_n >= 8 || !id[0]) return; int j=0; while(id[j]&&j<31){b->in_id[i][j]=id[j];j++;} b->in_id[i][j]=0; b->in_name[i][0]=0; b->in_n++; }
     int j=0; while(val[j]&&j<95){b->in_val[i][j]=val[j];j++;} b->in_val[i][j]=0;
+}
+/* Record a field's name= (for GET submit) in the slot already created for its id. */
+static void in_name_set(browser_t *b, const char *id, const char *name) {
+    for (int i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) {
+        int j=0; while(name[j]&&j<31){b->in_name[i][j]=name[j];j++;} b->in_name[i][j]=0; return;
+    }
 }
 static int browser_dom_get(const char *id, char *out, int max, int html) {
     if (max) out[0] = 0;
@@ -1151,6 +1228,7 @@ static void browser_navigate(browser_t *b) {
     b->bodyoff = 0; b->bodylen = 0;   /* clean baseline; HTML paths set the real region */
     b->ls_n = 0;                      /* fresh localStorage per page */
     b->in_n = 0; b->focus_id[0] = 0;  /* fresh input-field state per page */
+    b->form_action[0] = 0;            /* and no carried-over form action */
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }
@@ -1431,6 +1509,26 @@ static void browser_follow(browser_t *b, int id) {
         if (!in_get(b, b->focus_id)) in_set(b, b->focus_id, "");   /* ensure a store slot exists */
         set_status(b, "type into the field, Enter when done");
         parse_html(b, b->raw + b->bodyoff, b->bodylen);  /* re-render to show the focus cursor */
+        return;
+    }
+    int issub = (len > 6); if (issub) for (int k = 0; k < 7; k++) if (lc(hp[k]) != "submit:"[k]) { issub = 0; break; }
+    if (issub) {                                         /* a form submit: action?name=value&… (GET) */
+        char q[URL_MAX]; int p = 0;
+        int al = len - 7;                                /* the snapshotted action follows "submit:" */
+        if (al > 0) { for (int i = 0; i < al && p < URL_MAX - 1; i++) q[p++] = hp[7 + i]; }
+        else { for (int i = 0; b->url[i] && b->url[i] != '?' && p < URL_MAX - 1; i++) q[p++] = b->url[i]; }  /* no action -> this page */
+        int first = 1;
+        for (int f = 0; f < b->in_n; f++) {              /* every named field becomes a query pair */
+            if (!b->in_name[f][0]) continue;
+            if (p < URL_MAX - 1) q[p++] = first ? '?' : '&';
+            first = 0;
+            p += url_encode(q + p, URL_MAX - 1 - p, b->in_name[f]);
+            if (p < URL_MAX - 1) q[p++] = '=';
+            p += url_encode(q + p, URL_MAX - 1 - p, b->in_val[f]);
+        }
+        q[p] = 0;
+        b->focus_id[0] = 0;                              /* leave any field-typing mode */
+        goto_href(b, q, 0);
         return;
     }
     int isjs = (len > 11); if (isjs) for (int k = 0; k < 11; k++) if (lc(hp[k]) != "javascript:"[k]) { isjs = 0; break; }
