@@ -14,14 +14,20 @@ below are what comes *after* it, and each adds large subsystems.
 
 ## Update (2026-06-02): where we actually landed
 
-- **🌐 Web browser — substantially achieved (for HTTP).** OS-DEV has a
-  from-scratch TCP/HTTP stack and its own HTML renderer drawing to the
-  framebuffer: headings, bold/italic, links, lists, tables, `<pre>`, `<img>`
-  alt text, form-field placeholders, and HTML entities — fully keyboard-driven
-  (link nav, in-page find, bookmarks, history, save). It renders real sites like
-  info.cern.ch and example.com. **HTTPS/TLS is the remaining gate** to the modern
-  (mostly-HTTPS, JS-heavy) web — see that section below; it's the honest reason
-  the browser is HTTP-only.
+- **🌐 Web browser — achieved, far beyond the original bar** (updated ~M215).
+  OS-DEV browses the **real HTTPS web** with a from-scratch **TLS 1.3 client** +
+  full X.509 chain validation to baked-in roots (the once-"remaining gate" is
+  done — example.com/NPR/gnu.org/google.com all validate, `TLS*`), its own HTML
+  renderer (headings, bold/italic, links, lists, tables, `<pre>`, inline
+  PNG/GIF/JPEG, colour, entities), and a **comprehensive from-scratch JavaScript
+  engine** (OOP + ES6 + regex + Map/Set/Date) that runs in pages. It is
+  **interactive**: a minimal DOM (`getElementById`/`querySelector` →
+  `textContent`/`innerHTML`/`.value`/`getAttribute`/`setAttribute`),
+  `window.location`, inline `onclick`, the full form-input set, **GET form
+  submission + live web search (DuckDuckGo, from a form or the address bar)**,
+  and reactive `onchange`/`oninput`. Fully keyboard-driven. The honest ceiling
+  (real web apps / Chromium) still stands — see below — but "a browser somehow"
+  is comprehensively met.
 - **🎵 Music from the NAS — shelved.** Miles deprioritized this ("idc about music
   i want a good DE"). The networking foundation it needed exists; an audio driver
   + decoder were never built.
