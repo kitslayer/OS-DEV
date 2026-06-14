@@ -101,6 +101,32 @@ static const struct {
         "<li><a href=\"javascript:document.write('<p>8! = '+[1,2,3,4,5,6,7,8].reduce(function(a,b){return a*b;})+'</p>')\">8 factorial via reduce</a></li>"
         "<li><a href=\"javascript:document.write('<p>reversed: '+'OS-DEV rocks'.split('').reverse().join('')+'</p>')\">reverse a string</a></li>"
         "</ul><hr>" },
+    { "CLASS   JS ", "// class.js  --  object-oriented JavaScript, from scratch.  Run: js class.js\n"
+        "class Animal {\n"
+        "  constructor(name){ this.name = name; }\n"
+        "  speak(){ return this.name + \" makes a sound\"; }\n"
+        "}\n"
+        "class Dog extends Animal {\n"
+        "  constructor(name){ super(name); this.sound = \"woof\"; }\n"
+        "  speak(){ return super.speak() + \" (\" + this.sound + \")\"; }\n"
+        "}\n"
+        "var d = new Dog(\"Rex\");\n"
+        "print(d.speak());\n"
+        "print(\"name=\" + d.name + \" sound=\" + d.sound);\n"
+        "// a little stack, with method chaining via `this`\n"
+        "class Stack {\n"
+        "  constructor(){ this.items = []; }\n"
+        "  push(x){ this.items.push(x); return this; }\n"
+        "  size(){ return this.items.length; }\n"
+        "  top(){ return this.items[this.size() - 1]; }\n"
+        "}\n"
+        "var st = new Stack().push(10).push(20).push(30);\n"
+        "print(\"stack size=\" + st.size() + \" top=\" + st.top());\n"
+        "// three-level inheritance with super at each step\n"
+        "class A { who(){ return \"A\"; } }\n"
+        "class B extends A { who(){ return super.who() + \"B\"; } }\n"
+        "class C extends B { who(){ return super.who() + \"C\"; } }\n"
+        "print(\"chain=\" + new C().who());\n" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)
