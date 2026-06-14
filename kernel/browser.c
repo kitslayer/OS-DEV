@@ -326,6 +326,18 @@ static int find_attr(const char *a, int n, const char *name, const char **val, i
     }
     return 0;
 }
+/* Is a (possibly valueless) boolean attribute present? e.g. `checked`, `disabled`. */
+static int has_attr(const char *a, int n, const char *name) {
+    int nl = 0; while (name[nl]) nl++;
+    for (int i = 0; i + nl <= n; i++) {
+        if (i > 0 && a[i-1] != ' ' && a[i-1] != '\t') continue;       /* attr boundary */
+        int m = 0; while (m < nl && lc(a[i+m]) == name[m]) m++;
+        if (m != nl) continue;
+        int k = i + nl;                                               /* must be a complete token */
+        if (k >= n || a[k]==' ' || a[k]=='\t' || a[k]=='=' || a[k]=='>' || a[k]=='/') return 1;
+    }
+    return 0;
+}
 /* Parse a numeric attribute (e.g. width="48"); 0 if absent/non-numeric. */
 static int attr_int(const char *a, int n, const char *name) {
     const char *v; int vl;
@@ -349,6 +361,16 @@ static int add_href(browser_t *b, const char *v, int vlen) {
 /* Store an "input:ID" link so following it focuses that field for typing. */
 static int add_input_link(browser_t *b, const char *id) {
     const char *pfx = "input:"; int pl = 6; int il = 0; while (id[il]) il++;
+    if (il <= 0 || b->nlink >= LINK_MAX || b->hreflen + pl + il >= HREF_MAX) return NO_LINK;
+    int off = b->hreflen;
+    for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
+    for (int i = 0; i < il; i++) b->hrefs[b->hreflen++] = id[i];
+    b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + il) };
+    return b->nlink++;
+}
+/* Store a "check:ID" link so following it toggles that checkbox/radio. */
+static int add_check_link(browser_t *b, const char *id) {
+    const char *pfx = "check:"; int pl = 6; int il = 0; while (id[il]) il++;
     if (il <= 0 || b->nlink >= LINK_MAX || b->hreflen + pl + il >= HREF_MAX) return NO_LINK;
     int off = b->hreflen;
     for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
@@ -511,6 +533,21 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int is_submit = has_type && (attr_eq(tp, tpl, "submit") || attr_eq(tp, tpl, "image"));
             int is_hidden = has_type && attr_eq(tp, tpl, "hidden");
             int is_pw = has_type && attr_eq(tp, tpl, "password");
+            int is_radio = has_type && attr_eq(tp, tpl, "radio");
+            int is_check = is_radio || (has_type && attr_eq(tp, tpl, "checkbox"));
+            if (is_check) {                              /* a checkbox/radio -> a [x]/(o) toggle link */
+                if (idbuf[0] && !in_get(b, idbuf) && has_attr(attrs, attrlen, "checked")) in_set(b, idbuf, "on");  /* default-checked */
+                const char *cur = idbuf[0] ? in_get(b, idbuf) : 0;
+                int checked = cur && streqs(cur, "on");
+                if (idbuf[0] && find_attr(attrs, attrlen, "name", &v, &vl) && vl > 0) {   /* checked -> submit name=on; unchecked -> omit */
+                    if (checked) { char nb[32]; int n=vl; if(n>31)n=31; for(int i=0;i<n;i++) nb[i]=v[i]; nb[n]=0; in_name_set(b, idbuf, nb); }
+                    else in_name_set(b, idbuf, "");
+                }
+                char s[4]; s[0]= is_radio?'(':'['; s[1]= checked?(is_radio?'o':'x'):' '; s[2]= is_radio?')':']'; s[3]=0;
+                if (idbuf[0]) { int lk = add_check_link(b, idbuf); if (lk != NO_LINK) emit_literal_link(b, s, lk); else emit_literal(b, s, STY_EM); }
+                else emit_literal(b, s, STY_EM);
+                return;
+            }
             if (is_submit) {                             /* a submit button -> a link that submits the form */
                 char s[64]; int p = 0; s[p++] = '[';
                 if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0) { for (int i=0;i<vl&&p<60;i++) s[p++]=v[i]; }
@@ -1580,6 +1617,16 @@ static void browser_follow(browser_t *b, int id) {
         if (!in_get(b, b->focus_id)) in_set(b, b->focus_id, "");   /* ensure a store slot exists */
         set_status(b, "type into the field, Enter when done");
         parse_html(b, b->raw + b->bodyoff, b->bodylen);  /* re-render to show the focus cursor */
+        return;
+    }
+    int ischk = (len > 6); if (ischk) for (int k = 0; k < 6; k++) if (lc(hp[k]) != "check:"[k]) { ischk = 0; break; }
+    if (ischk) {                                         /* toggle a checkbox/radio */
+        char cid[32]; int n = len - 6; if (n > 31) n = 31;
+        for (int i = 0; i < n; i++) cid[i] = hp[6 + i];
+        cid[n] = 0;
+        const char *cur = in_get(b, cid);
+        in_set(b, cid, (cur && streqs(cur, "on")) ? "" : "on");   /* flip; the re-render updates its submit name */
+        parse_html(b, b->raw + b->bodyoff, b->bodylen);
         return;
     }
     int issub = (len > 6); if (issub) for (int k = 0; k < 7; k++) if (lc(hp[k]) != "submit:"[k]) { issub = 0; break; }
