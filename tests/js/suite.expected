@@ -79,4 +79,8 @@ undefined 5
 2 9 true undefined
 3 true 1,2,3
 50
+-- more stdlib --
+30 1,1,2,2,3,3 2
+a/b/c i
+{"k":1} {"z":9}
 -- done --
