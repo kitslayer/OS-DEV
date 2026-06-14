@@ -1239,9 +1239,21 @@ static void goto_href(browser_t *b, const char *href, int suppress_push) {
 
 static void browser_follow(browser_t *b, int id) {
     if (id == NO_LINK || id >= b->nlink) return;
-    char href[URL_MAX]; int hl = b->links[id].len;
-    if (hl > URL_MAX - 1) hl = URL_MAX - 1;
-    for (int i = 0; i < hl; i++) href[i] = b->hrefs[b->links[id].off + i];
+    int off = b->links[id].off, len = b->links[id].len;
+    const char *hp = b->hrefs + off;
+    /* a javascript: handler is code, not a URL — run the FULL slice; the URL_MAX
+     * copy below would truncate a longer handler into a syntax error. */
+    int isjs = (len > 11); if (isjs) for (int k = 0; k < 11; k++) if (lc(hp[k]) != "javascript:"[k]) { isjs = 0; break; }
+    if (isjs) {
+        static char jsbuf[4096];
+        int n = len - 11; if (n > (int)sizeof(jsbuf) - 1) n = (int)sizeof(jsbuf) - 1;
+        for (int i = 0; i < n; i++) jsbuf[i] = hp[11 + i];
+        jsbuf[n] = 0;
+        run_js_handler(b, jsbuf);
+        return;
+    }
+    char href[URL_MAX]; int hl = len; if (hl > URL_MAX - 1) hl = URL_MAX - 1;
+    for (int i = 0; i < hl; i++) href[i] = hp[i];
     href[hl] = 0;
     goto_href(b, href, 0);
 }

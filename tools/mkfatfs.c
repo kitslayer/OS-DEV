@@ -96,6 +96,9 @@ static const struct {
         "<li><a href=\"javascript:document.write('<p><b>6 * 7 = '+(6*7)+'</b></p>')\">compute 6 * 7</a></li>"
         "<li><a href=\"javascript:var s=0; for(var i=1;i<=100;i++) s+=i; document.write('<p>sum 1..100 = '+s+'</p>')\">sum 1..100</a></li>"
         "<li><a href=\"javascript:document.write('<p>squares: '+[1,2,3,4,5].map(x=>x*x).join(', ')+'</p>')\">squares via map(x =&gt; x*x)</a></li>"
+        "<li><a href=\"javascript:document.write('<p>primes up to 50: '+(function(){var r=[];for(var n=2;n<50;n++){var p=true;for(var d=2;d*d<=n;d++)if(n%d==0)p=false;if(p)r.push(n);}return r;})().join(', ')+'</p>')\">primes under 50</a></li>"
+        "<li><a href=\"javascript:document.write('<p>8! = '+[1,2,3,4,5,6,7,8].reduce(function(a,b){return a*b;})+'</p>')\">8 factorial via reduce</a></li>"
+        "<li><a href=\"javascript:document.write('<p>reversed: '+'OS-DEV rocks'.split('').reverse().join('')+'</p>')\">reverse a string</a></li>"
         "</ul><hr>" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
