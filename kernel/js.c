@@ -1007,6 +1007,27 @@ static val json_parse_val(void){
 }
 static val nat_json_parse(val *a, int n){ if(!n || a[0].t!=V_STR) return UND(); const char *s=a[0].str; jp=s; jp_end=s+strlen(s); jp_err=0; val r=json_parse_val(); if(jp_err){ rt_err("JSON.parse: invalid JSON"); return UND(); } return r; }
 
+/* ---- Object.values / Object.entries, Array.isArray / Array.from ---- */
+static val nat_obj_values(val *a, int n){
+    obj *r=new_obj(V_ARR); if(!r) return UND();
+    if (n && a[0].t==V_OBJ && a[0].o) for (int i=0;i<a[0].o->n;i++) arr_push_val(r, a[0].o->vals[i]);
+    val v=UND(); v.t=V_ARR; v.o=r; return v;
+}
+static val nat_obj_entries(val *a, int n){
+    obj *r=new_obj(V_ARR); if(!r) return UND();
+    if (n && a[0].t==V_OBJ && a[0].o) for (int i=0;i<a[0].o->n;i++){
+        obj *pair=new_obj(V_ARR); if(!pair) break; arr_push_val(pair, STRV(a[0].o->keys[i])); arr_push_val(pair, a[0].o->vals[i]);
+        val pv=UND(); pv.t=V_ARR; pv.o=pair; arr_push_val(r, pv); }
+    val v=UND(); v.t=V_ARR; v.o=r; return v;
+}
+static val nat_array_isArray(val *a, int n){ return BOOLV(n && a[0].t==V_ARR); }
+static val nat_array_from(val *a, int n){
+    obj *r=new_obj(V_ARR); if(!r) return UND();
+    if (n && a[0].t==V_ARR && a[0].o) for (int i=0;i<a[0].o->n;i++) arr_push_val(r, a[0].o->vals[i]);
+    else if (n && a[0].t==V_STR) { const char*s=a[0].str; for (int i=0;s[i];i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} arr_push_val(r, STRV(c?c:"")); } }
+    val v=UND(); v.t=V_ARR; v.o=r; return v;
+}
+
 /* register a native function on object `o` under `name` */
 static void def_native(obj *o, const char *name, val (*fn)(val*,int)){
     obj *f=new_obj(V_NATIVE); if(!f) return; f->native=fn; val v=UND(); v.t=V_NATIVE; v.o=f; obj_set(o,name,v);
@@ -1033,7 +1054,8 @@ static void install_globals(env *g) {
     def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); env_define(g,"Object",obj_val(objc));
+    obj *arrc=new_obj(V_OBJ); def_native(arrc,"isArray",nat_array_isArray); def_native(arrc,"from",nat_array_from); env_define(g,"Array",obj_val(arrc));
     /* JSON (stringify) */
     obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
     /* global functions */
