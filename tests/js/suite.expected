@@ -52,4 +52,8 @@ square 25
 7
 -- super --
 4 vehicle:car
+-- spread / rest --
+1,2,3,4 a.b
+10
+{"x":1,"y":2}
 -- done --

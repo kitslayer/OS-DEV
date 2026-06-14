@@ -60,4 +60,8 @@ print("-- super --");
 class Vh { constructor(w){ this.wheels=w; } kind(){ return "vehicle"; } }
 class Car extends Vh { constructor(){ super(4); } kind(){ return super.kind()+":car"; } }
 var car=new Car(); print(car.wheels, car.kind());
+print("-- spread / rest --");
+var sa=[2,3]; print([1,...sa,4].join(","), [..."ab"].join("."));
+function ssum(...xs){ return xs.reduce((a,b)=>a+b,0); } print(ssum(...sa,5));
+var so={x:1}; print(JSON.stringify({...so,y:2}));
 print("-- done --");

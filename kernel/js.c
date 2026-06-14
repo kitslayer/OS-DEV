@@ -183,7 +183,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD };
 
 typedef struct node node;
 struct node {
@@ -221,10 +221,13 @@ static void parse_fn_params(lexer *L, node *fn) {
     expect_punc(L,"(");
     fn->list = aalloc(sizeof(node*)*32); fn->nlist=0;
     while (!peek_punc(L,")") && peek(L).type!=T_EOF && !g_err && !g_oom) {
+        int rest=0; if (peek_punc(L,"...")) { advance(L); rest=1; }   /* ...rest param */
         token p=advance(L);
         if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len;
-            if (peek_punc(L,"=")) { advance(L); id->a=parse_assign(L); }   /* default param value */
+            if (rest) id->op='.';                                      /* marks the rest param */
+            else if (peek_punc(L,"=")) { advance(L); id->a=parse_assign(L); }   /* default param value */
             if (fn->list && fn->nlist<32) fn->list[fn->nlist++]=id; }
+        if (rest) break;                                              /* rest is the last param */
         if (peek_punc(L,",")) advance(L); else break;
     }
     expect_punc(L,")");
@@ -233,8 +236,10 @@ static void parse_fn_params(lexer *L, node *fn) {
 static node **parse_list(lexer *L, const char *close, int *count) {
     node **arr = aalloc(sizeof(node*) * 64); int n = 0;
     while (!peek_punc(L, close) && peek(L).type != T_EOF && !g_err && !g_oom) {
-        if (arr && n < 64) arr[n++] = parse_assign(L);
-        else { parse_assign(L); }
+        node *el;
+        if (peek_punc(L,"...")) { advance(L); el=mknode(N_SPREAD); el->a=parse_assign(L); }  /* ...spread */
+        else el=parse_assign(L);
+        if (arr && n < 64) arr[n++] = el;
         if (peek_punc(L, ",")) advance(L); else break;
     }
     expect_punc(L, close); *count = n; return arr;
@@ -328,6 +333,7 @@ static node *parse_primary(lexer *L) {
         if (tok_is(t,"{")) {
             advance(L); node *n=mknode(N_OBJECT); n->list=aalloc(sizeof(node*)*64); n->nlist=0;
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
+                if (peek_punc(L,"...")) { advance(L); node *sp=mknode(N_SPREAD); sp->a=parse_assign(L); if(n->list && n->nlist<64) n->list[n->nlist++]=sp; if(peek_punc(L,",")) advance(L); continue; }  /* {...obj} */
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
@@ -431,8 +437,10 @@ static node *parse_assign(lexer *L) {
     } else if (t0.type==T_PUNC && tok_is(t0,"(")) {
         lexsave sv = lex_save(L); advance(L);
         node *ps[16]; int np=0, ok=1;
-        if (!peek_punc(L,")")) for(;;){ token p=peek(L); if(p.type!=T_IDENT){ ok=0; break; } advance(L);
-            if(np<16){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len; ps[np++]=id; }
+        if (!peek_punc(L,")")) for(;;){ int rest=0; if(peek_punc(L,"...")){ advance(L); rest=1; }
+            token p=peek(L); if(p.type!=T_IDENT){ ok=0; break; } advance(L);
+            if(np<16){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len; if(rest) id->op='.'; ps[np++]=id; }
+            if(rest) break;   /* ...rest is the last param */
             if(peek_punc(L,",")) advance(L); else break; }
         if (ok && peek_punc(L,")")) { advance(L); if (peek_punc(L,"=>")) { advance(L); node *fn=make_arrow(L,ps,np); g_depth--; return fn; } }
         lex_restore(L, sv);
@@ -682,6 +690,11 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
         if (fn.o->super_class) { val sup=UND(); sup.t=V_FUN; sup.o=fn.o->super_class; env_define(fe, "@super", sup); }
     }
     for (int i=0;i<def->nlist;i++){ node *pn=def->list[i];
+        if (pn->op=='.') {   /* ...rest: gather the remaining args into an array, then stop */
+            obj *ro=new_obj(V_ARR); if(!ro){ g_oom=1; break; }
+            for (int j=i;j<nargs && !g_oom;j++) arr_push_val(ro, args[j]);
+            val rv=UND(); rv.t=V_ARR; rv.o=ro; env_define(fe, node_name(pn), rv); break;
+        }
         val pv = (i<nargs) ? args[i] : (pn->a ? eval_expr(pn->a, fe) : UND());   /* default value if arg omitted */
         env_define(fe, node_name(pn), pv); }
     comp c = eval_stmt(def->a, fe);
@@ -689,6 +702,22 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
     return c.kind==C_RETURN ? c.v : UND();
 }
 static val call_function(val fn, val *args, int nargs){ return call_function_this(fn, UND(), args, nargs); }
+
+/* Evaluate call-argument nodes into a flat array, expanding `...spread` of arrays
+ * (and strings → chars). Returns the count, capped at maxargs. */
+static int build_args(node **list, int nlist, env *e, val *args, int maxargs) {
+    int na=0;
+    for (int i=0;i<nlist && na<maxargs;i++){
+        node *el=list[i];
+        if (el->type==N_SPREAD){
+            val v=eval_expr(el->a,e);
+            if (v.t==V_ARR && v.o){ for(int j=0;j<v.o->n && na<maxargs;j++) args[na++]=v.o->vals[j]; }
+            else if (v.t==V_STR){ const char*s=v.str; for(int j=0;s[j] && na<maxargs;j++){ char*c=aalloc(2); if(c){c[0]=s[j];c[1]=0;} args[na++]=STRV(c?c:""); } }
+            /* a non-iterable spread contributes nothing */
+        } else { args[na++]=eval_expr(el,e); }
+    }
+    return na;
+}
 
 /* resolve a member/index target for assignment: returns the container + key */
 static val eval_string_method(val recv, const char *name, val *args, int nargs);
@@ -714,8 +743,21 @@ static val eval_expr_inner(node *n, env *e) {
         case N_NULL: { val v=UND(); v.t=V_NULL; return v; }
         case N_UNDEF: return UND();
         case N_IDENT: { const char *nm=node_name(n); val *p=env_find(e,nm); if(!p){ rt_err("undefined variable"); return UND(); } return *p; }
-        case N_ARRAY: { obj *o=new_obj(V_ARR); if(!o) return UND(); for(int i=0;i<n->nlist;i++){ val v=eval_expr(n->list[i],e); if(o->n>=o->cap){int nc=o->cap*2;val*nv=aalloc(sizeof(val)*nc);const char**nk=aalloc(sizeof(char*)*nc); if(!nv){g_oom=1;break;} memcpy(nv,o->vals,sizeof(val)*o->n); o->vals=nv; o->keys=nk; o->cap=nc;} o->vals[o->n++]=v; } val r=UND(); r.t=V_ARR; r.o=o; return r; }
-        case N_OBJECT: { obj *o=new_obj(V_OBJ); if(!o) return UND(); for(int i=0;i<n->nlist;i++){ node*pr=n->list[i]; obj_set(o, node_name(pr), eval_expr(pr->a,e)); } val r=UND(); r.t=V_OBJ; r.o=o; return r; }
+        case N_ARRAY: { obj *o=new_obj(V_ARR); if(!o) return UND();
+            for(int i=0;i<n->nlist && !g_oom;i++){ node *el=n->list[i];
+                if (el->type==N_SPREAD){ val sv=eval_expr(el->a,e);
+                    if (sv.t==V_ARR && sv.o){ for(int j=0;j<sv.o->n && !g_oom;j++) arr_push_val(o, sv.o->vals[j]); }
+                    else if (sv.t==V_STR){ const char*s=sv.str; for(int j=0;s[j] && !g_oom;j++){ char*c=aalloc(2); if(c){c[0]=s[j];c[1]=0;} arr_push_val(o, STRV(c?c:"")); } }
+                } else arr_push_val(o, eval_expr(el,e));
+            }
+            val r=UND(); r.t=V_ARR; r.o=o; return r; }
+        case N_OBJECT: { obj *o=new_obj(V_OBJ); if(!o) return UND();
+            for(int i=0;i<n->nlist && !g_oom;i++){ node*pr=n->list[i];
+                if (pr->type==N_SPREAD){ val sv=eval_expr(pr->a,e);
+                    if (sv.t==V_OBJ && sv.o){ for(int j=0;j<sv.o->n && !g_oom;j++) obj_set(o, sv.o->keys[j], sv.o->vals[j]); }
+                } else obj_set(o, node_name(pr), eval_expr(pr->a,e));
+            }
+            val r=UND(); r.t=V_OBJ; r.o=o; return r; }
         case N_FUNC: { obj *o=new_obj(V_FUN); if(!o) return UND(); o->fn=n; o->scope=e; val r=UND(); r.t=V_FUN; r.o=o; if(n->str){ env_define(e,node_name(n),r); } return r; }
         case N_COND: return truthy(eval_expr(n->a,e)) ? eval_expr(n->b,e) : eval_expr(n->c,e);
         case N_LOGICAL: { val l=eval_expr(n->a,e); if(n->op=='A') return truthy(l)?eval_expr(n->b,e):l; else return truthy(l)?l:eval_expr(n->b,e); }
@@ -817,8 +859,7 @@ static val eval_expr_inner(node *n, env *e) {
             return UND(); }
         case N_CALL: {
             /* method call a.b(...) needs the receiver for string/array methods */
-            node *callee=n->a; val args[16]; int na=n->nlist>16?16:n->nlist;
-            for (int i=0;i<na;i++) args[i]=eval_expr(n->list[i],e);
+            node *callee=n->a; val args[16]; int na=build_args(n->list, n->nlist, e, args, 16);
             /* super(...) and super.m(...): resolve via the call frame's @super (the
              * parent constructor), invoked with the current `this`. */
             if (callee->type==N_SUPER) {
@@ -869,8 +910,7 @@ static val eval_expr_inner(node *n, env *e) {
             return cv;
         }
         case N_NEW: {
-            val ctor=eval_expr(n->a,e); val args[16]; int na=n->nlist>16?16:n->nlist;
-            for (int i=0;i<na;i++) args[i]=eval_expr(n->list[i],e);
+            val ctor=eval_expr(n->a,e); val args[16]; int na=build_args(n->list, n->nlist, e, args, 16);
             if (ctor.t!=V_FUN) { rt_err("not a constructor"); return UND(); }
             obj *self=new_obj(V_OBJ); if(!self){ g_oom=1; return UND(); }
             /* class instance: copy the class's methods onto the new object as own
