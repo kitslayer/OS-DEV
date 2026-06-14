@@ -60,7 +60,8 @@ static void *aalloc(long n) {
  * string. Done once at parse time so eval never re-allocates for identifiers. */
 static const char *intern(const char *s, int len) {
     char *p = aalloc(len + 1); if (!p) return "";
-    memcpy(p, s, len); p[len] = 0; return p;
+    if (len > 0) memcpy(p, s, len);    /* guard memcpy(_, NULL, 0) for an OOM'd token (UB) */
+    p[len] = 0; return p;
 }
 
 /* ---- runtime error handling ---- */
@@ -264,10 +265,10 @@ static node *parse_primary(lexer *L) {
             if (name.type==T_IDENT) { advance(L); n->str=intern(name.s,name.len); n->slen=name.len; }
             expect_punc(L,"(");
             n->list = aalloc(sizeof(node*)*32); n->nlist=0;
-            while (!peek_punc(L,")") && peek(L).type!=T_EOF) {
+            while (!peek_punc(L,")") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 token p=advance(L); if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len;
                     if (peek_punc(L,"=")) { advance(L); id->a=parse_assign(L); }   /* default param value */
-                    if(n->nlist<32) n->list[n->nlist++]=id; }
+                    if(n->list && n->nlist<32) n->list[n->nlist++]=id; }
                 if (peek_punc(L,",")) advance(L); else break;
             }
             expect_punc(L,")");
@@ -282,12 +283,12 @@ static node *parse_primary(lexer *L) {
         if (tok_is(t,"[")) { advance(L); node *n=mknode(N_ARRAY); n->list=parse_list(L,"]",&n->nlist); return n; }
         if (tok_is(t,"{")) {
             advance(L); node *n=mknode(N_OBJECT); n->list=aalloc(sizeof(node*)*64); n->nlist=0;
-            while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err) {
+            while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
                 else { node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; pr->a=id; }   /* {x} shorthand == {x:x} */
-                if (n->nlist<64) n->list[n->nlist++]=pr;
+                if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
                 if (peek_punc(L,",")) advance(L); else break;
             }
             expect_punc(L,"}"); return n;
@@ -416,7 +417,8 @@ static node *parse_var(lexer *L) {
     for (;;) {
         token id=advance(L); node *decl=mknode(N_PROP); decl->str=intern(id.s,id.len); decl->slen=id.len;
         if (peek_punc(L,"=")) { advance(L); decl->a=parse_assign(L); }
-        if (n->nlist<32) n->list[n->nlist++]=decl;
+        if (n->list && n->nlist<32) n->list[n->nlist++]=decl;
+        if (g_err || g_oom) break;
         if (peek_punc(L,",")) advance(L); else break;
     }
     return n;
@@ -521,6 +523,7 @@ static val g_throwval;        /* value of the in-flight `throw` (when g_threw) *
 static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
 
 static void obj_set(obj *o, const char *key, val v) {
+    if (!o || !o->keys || !o->vals) { g_oom=1; return; }   /* a NULL/half-built obj (OOM) — don't deref */
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { o->vals[i]=v; return; }
     if (o->n>=o->cap) { int nc=o->cap*2; const char **nk=aalloc(sizeof(char*)*nc); val *nv=aalloc(sizeof(val)*nc); if(!nk||!nv){g_oom=1;return;} memcpy(nk,o->keys,sizeof(char*)*o->n); memcpy(nv,o->vals,sizeof(val)*o->n); o->keys=nk; o->vals=nv; o->cap=nc; }
     o->keys[o->n]=key; o->vals[o->n]=v; o->n++;
