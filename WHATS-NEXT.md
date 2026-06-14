@@ -46,7 +46,10 @@ boot → long mode → interrupts → timer/kbd → memory → heap → preempti
  → trust store (ISRG/DigiCert/SSL.com) + key-match anchoring
  → out-of-order TCP reassembly → GTS Root R4 (google.com → TLS*)
  → from-scratch JavaScript interpreter (shell `js`)
- → JavaScript runs in the browser (pages execute their <script> tags) → 145 milestones  ✅
+ → JavaScript runs in the browser (pages execute their <script> tags)
+ → JS standard library (Math, JSON.stringify/parse, String/Array map·filter·…)
+ → arrow functions (x => x*x)
+ → template literals (`hi ${name}`) → 149 milestones  ✅
 ```
 
 The browser is now **fully keyboard-drivable**: Tab/n/p to select links, Enter

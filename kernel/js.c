@@ -71,7 +71,7 @@ static void rt_err(const char *m) {
 }
 
 /* =========================== lexer =========================== */
-enum { T_EOF, T_NUM, T_STR, T_IDENT, T_PUNC, T_KW };
+enum { T_EOF, T_NUM, T_STR, T_IDENT, T_PUNC, T_KW, T_TEMPLATE };
 typedef struct { int type; int64_t num; const char *s; int len; } token;
 
 static const char *kw[] = { "var","let","const","function","return","if","else",
@@ -128,6 +128,22 @@ static token lex_next(lexer *L) {
         if (L->pos<L->len) L->pos++;                 /* closing quote */
         if (buf) buf[n]=0;
         t.type=T_STR; t.s=buf; t.len=n; return t;
+    }
+    /* template literal `...${expr}...` — capture the raw inner text (balancing
+     * ${ } so a `}` inside a substitution doesn't end it); the parser splits it. */
+    if (c=='`') {
+        int start = L->pos+1, i = start, depth = 0;
+        while (i < L->len) {
+            char ch = s[i];
+            if (ch=='\\') { i += 2; continue; }
+            if (depth==0 && ch=='`') break;
+            if (ch=='$' && i+1<L->len && s[i+1]=='{') { depth++; i += 2; continue; }
+            if (depth>0 && ch=='{') depth++;
+            else if (depth>0 && ch=='}') depth--;
+            i++;
+        }
+        t.type=T_TEMPLATE; t.s=s+start; t.len=i-start; L->pos = (i<L->len)? i+1 : i;
+        return t;
     }
     /* identifier / keyword */
     if (is_id_start(c)) {
@@ -199,8 +215,37 @@ static node **parse_list(lexer *L, const char *close, int *count) {
     expect_punc(L, close); *count = n; return arr;
 }
 
+static node *mkbin_plus(node *a, node *b){ node *n=mknode(N_BINARY); n->op='+'; n->a=a; n->b=b; return n; }
+
+/* Parse a template literal's raw inner text into a `+`-concatenation of string
+ * literals and `${expr}` substitutions. Always begins with a (possibly empty)
+ * string literal, so the whole chain coerces to a string. */
+static node *parse_template(const char *raw, int len) {
+    node *chain = 0;
+    char *lit = aalloc(len + 1); int ln = 0;
+    #define TPL_FLUSH() do { if(lit) lit[ln]=0; node *sn=mknode(N_STR); sn->str=intern(lit?lit:"",ln); sn->slen=ln; chain = chain ? mkbin_plus(chain,sn) : sn; ln=0; } while(0)
+    int i = 0;
+    while (i < len) {
+        if (raw[i]=='\\' && i+1<len) { char e=raw[i+1]; char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
+        if (raw[i]=='$' && i+1<len && raw[i+1]=='{') {
+            TPL_FLUSH();                                  /* literal before the ${ */
+            int j=i+2, depth=1; while(j<len && depth>0){ if(raw[j]=='{') depth++; else if(raw[j]=='}'){ depth--; if(depth==0) break; } j++; }
+            lexer sub; memset(&sub,0,sizeof(sub)); sub.src=raw+i+2; sub.len=j-(i+2); sub.pos=0;
+            node *e = parse_assign(&sub);
+            chain = mkbin_plus(chain, e);                 /* chain is non-null after TPL_FLUSH */
+            i = (j<len)? j+1 : j;
+            continue;
+        }
+        if (lit && ln<len) lit[ln++]=raw[i];
+        i++;
+    }
+    TPL_FLUSH();                                          /* trailing literal */
+    return chain;
+}
+
 static node *parse_primary(lexer *L) {
     token t = peek(L);
+    if (t.type == T_TEMPLATE) { advance(L); return parse_template(t.s, t.len); }
     if (t.type == T_NUM) { advance(L); node *n=mknode(N_NUM); n->num=t.num; return n; }
     if (t.type == T_STR) { advance(L); node *n=mknode(N_STR); n->str=t.s; n->slen=t.len; return n; }
     if (t.type == T_KW) {
