@@ -441,6 +441,8 @@ static void arr_push_val(obj *o, val v) {
     if (o->n >= o->cap) { int nc=o->cap*2+2; val *nv=aalloc((long)sizeof(val)*nc); if(!nv){g_oom=1;return;} memcpy(nv,o->vals,sizeof(val)*o->n); o->vals=nv; o->cap=nc; }
     o->vals[o->n++]=v;
 }
+static val obj_val(obj *o);          /* fwd (defined near install_globals) */
+static val obj_val_native(obj *o);
 
 /* ---- number/string helpers ---- */
 static char *i64_to_str(int64_t v) {
@@ -805,6 +807,47 @@ static void json_val(val v){
 }
 static val nat_json_stringify(val *a, int n){ if(!n) return UND(); char *buf=aalloc(16384); if(!buf) return STRV(""); g_json=buf; g_json_pos=0; g_json_cap=16384; json_val(a[0]); buf[g_json_pos]=0; return STRV(buf); }
 
+/* ---- JSON.parse (recursive descent; bounded + depth-guarded) ---- */
+static const char *jp, *jp_end; static int jp_err;
+static void jp_ws(void){ while(jp<jp_end && (*jp==' '||*jp=='\t'||*jp=='\n'||*jp=='\r')) jp++; }
+static val json_parse_val(void);
+static const char *jp_string(void){          /* assumes *jp == '"'; sizes from the raw token */
+    jp++; const char *raw=jp, *e=jp;
+    while(e<jp_end && *e!='"'){ if(*e=='\\' && e+1<jp_end) e++; e++; }
+    int cap=(int)(e-raw)+1; char *buf=aalloc(cap); int nn=0;
+    while(jp<e){ char c=*jp++; if(c=='\\' && jp<jp_end){ char x=*jp++; c = x=='n'?'\n':x=='t'?'\t':x=='r'?'\r':x=='"'?'"':x=='\\'?'\\':x=='/'?'/':x; if(x=='u'){ for(int k=0;k<4 && jp<jp_end;k++) jp++; c='?'; } } if(buf && nn<cap-1) buf[nn++]=c; }
+    if(jp<jp_end && *jp=='"') jp++;
+    if(buf) buf[nn]=0; return buf?buf:"";
+}
+static val json_parse_val(void){
+    if(++g_depth>MAXDEPTH){ g_depth--; jp_err=1; return UND(); }
+    val r=UND(); jp_ws();
+    if(jp>=jp_end) jp_err=1;
+    else if(*jp=='{'){ obj*o=new_obj(V_OBJ); jp++; jp_ws();
+        if(jp<jp_end && *jp=='}') jp++;
+        else for(;;){ jp_ws(); if(jp>=jp_end||*jp!='"'){ jp_err=1; break; } const char*k=jp_string(); jp_ws();
+            if(jp<jp_end && *jp==':') jp++; else { jp_err=1; break; }
+            val v=json_parse_val(); if(o) obj_set(o,k,v); jp_ws();
+            if(jp<jp_end && *jp==','){ jp++; continue; } if(jp<jp_end && *jp=='}'){ jp++; } else jp_err=1; break; }
+        r=obj_val(o); }
+    else if(*jp=='['){ obj*o=new_obj(V_ARR); jp++; jp_ws();
+        if(jp<jp_end && *jp==']') jp++;
+        else for(;;){ val v=json_parse_val(); if(o) arr_push_val(o,v); jp_ws();
+            if(jp<jp_end && *jp==','){ jp++; continue; } if(jp<jp_end && *jp==']'){ jp++; } else jp_err=1; break; }
+        val vv=UND(); vv.t=V_ARR; vv.o=o; r=vv; }
+    else if(*jp=='"'){ r=STRV(jp_string()); }
+    else if(*jp=='t'){ r=BOOLV(1); while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
+    else if(*jp=='f'){ r=BOOLV(0); while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
+    else if(*jp=='n'){ r.t=V_NULL; while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
+    else if(*jp=='-' || (*jp>='0'&&*jp<='9')){ int neg=0; if(*jp=='-'){ neg=1; jp++; } int64_t v=0;
+        while(jp<jp_end && *jp>='0'&&*jp<='9'){ v=(int64_t)((uint64_t)v*10+(unsigned)(*jp-'0')); jp++; }
+        if(jp<jp_end && *jp=='.'){ jp++; while(jp<jp_end && *jp>='0'&&*jp<='9') jp++; }   /* integer Number: drop fraction */
+        r=NUM(neg?-v:v); }
+    else jp_err=1;
+    g_depth--; return r;
+}
+static val nat_json_parse(val *a, int n){ if(!n || a[0].t!=V_STR) return UND(); const char *s=a[0].str; jp=s; jp_end=s+strlen(s); jp_err=0; val r=json_parse_val(); if(jp_err){ rt_err("JSON.parse: invalid JSON"); return UND(); } return r; }
+
 /* register a native function on object `o` under `name` */
 static void def_native(obj *o, const char *name, val (*fn)(val*,int)){
     obj *f=new_obj(V_NATIVE); if(!f) return; f->native=fn; val v=UND(); v.t=V_NATIVE; v.o=f; obj_set(o,name,v);
@@ -833,7 +876,7 @@ static void install_globals(env *g) {
     /* Object (Object.keys) */
     obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); env_define(g,"Object",obj_val(objc));
     /* JSON (stringify) */
-    obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); env_define(g,"JSON",obj_val(json));
+    obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
     /* global functions */
     obj *pi=new_obj(V_NATIVE); pi->native=nat_parseInt; env_define(g,"parseInt",obj_val_native(pi));
     obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));
