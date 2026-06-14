@@ -88,6 +88,7 @@ struct browser {
     char    findq[40];                                   /* the find query */
     int     find_tok;                                    /* highlighted match token (-1 none) */
     int     toky[TOK_MAX];                               /* content-space y of every token (scroll-to) */
+    char    anc_id[32][32]; uint16_t anc_tok[32]; int anc_n;   /* id -> token index, for #fragment scroll-to */
     uint8_t *img; int imgw, imgh;                        /* current full-page frame (RGBA), or NULL */
     uint8_t *framebuf; int nframes, curframe;            /* animated GIF: all frames + current */
     int      framedelay[64];                             /* per-frame delay (centiseconds) */
@@ -482,6 +483,14 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             b->oc_depth = 1;
         }
     }
+    if (!closing && b->anc_n < 32) {                     /* record id -> token index for #fragment scroll-to */
+        const char *idv; int idl;
+        if (find_attr(attrs, attrlen, "id", &idv, &idl) && idl > 0 && idl < 32) {
+            int k = 0; for (; k < idl; k++) b->anc_id[b->anc_n][k] = idv[k]; b->anc_id[b->anc_n][k] = 0;
+            b->anc_tok[b->anc_n] = (uint16_t)(b->ntok < TOK_MAX ? b->ntok : TOK_MAX - 1);
+            b->anc_n++;
+        }
+    }
     if (tageq(tag, "br")) { emit_break(b, TK_BREAK); return; }
     if (tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6' && tag[2] == 0) {
         if (!closing) { emit_break(b, TK_PARA); *style = (tag[1] <= '2') ? STY_H1 : STY_H2; }
@@ -698,6 +707,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
     b->form_action[0] = 0;                               /* no <form> action open yet */
+    b->anc_n = 0;                                        /* fresh #fragment anchor table */
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
     b->find_tok = -1;                                    /* clear any find highlight */
     b->curcolor = 0;                                     /* default text colour */
@@ -1573,7 +1583,18 @@ int browser_poll(browser_t *b) {
 static void goto_href(browser_t *b, const char *href, int suppress_push) {
     { const char *jp="javascript:"; int isjs=1; for (int k=0;k<11;k++) if (lc(href[k])!=jp[k]) { isjs=0; break; }
       if (isjs) { run_js_handler(b, href + 11); return; } }   /* javascript: (any case) runs, doesn't navigate */
-    if (href[0]=='#' || startsw(href, "mailto:")) return;
+    if (href[0] == '#') {                                /* in-page anchor: scroll to the element with that id */
+        const char *id = href + 1;
+        for (int i = 0; i < b->anc_n; i++)
+            if (streqs(b->anc_id[i], id)) {
+                int t = b->anc_tok[i];
+                if (t < b->ntok) { b->scroll = b->toky[t] - 20; if (b->scroll < 0) b->scroll = 0; }
+                return;
+            }
+        if (!id[0] || streqs(id, "top")) b->scroll = 0;  /* "#"/"#top" -> top; an unknown id stays put */
+        return;
+    }
+    if (startsw(href, "mailto:")) return;
 
     char newurl[URL_MAX];
     if (startsw(href, "http://") || startsw(href, "https://") || startsw(href, "file:")) {  /* absolute */
