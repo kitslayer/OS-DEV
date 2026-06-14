@@ -404,6 +404,10 @@ static int obj_get(obj *o, const char *key, val *out) {
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { *out=o->vals[i]; return 1; }
     return 0;
 }
+static void arr_push_val(obj *o, val v) {
+    if (o->n >= o->cap) { int nc=o->cap*2+2; val *nv=aalloc((long)sizeof(val)*nc); if(!nv){g_oom=1;return;} memcpy(nv,o->vals,sizeof(val)*o->n); o->vals=nv; o->cap=nc; }
+    o->vals[o->n++]=v;
+}
 
 /* ---- number/string helpers ---- */
 static char *i64_to_str(int64_t v) {
@@ -672,6 +676,17 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
     if (strcmp(name,"toLowerCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='A'&&s[i]<='Z')?s[i]+32:s[i]; r[len]=0; return STRV(r); }
     if (strcmp(name,"substring")==0||strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0; int b=nargs>1?(int)to_num(args[1]):len; if(a<0)a=0; if(b>len)b=len; if(b<a)b=a; char*r=aalloc(b-a+1); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
     if (strcmp(name,"indexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); for(int i=0;i+sl<=len;i++){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
+    if (strcmp(name,"includes")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); for(int i=0;i+sl<=len;i++) if(memcmp(s+i,sub,sl)==0) return BOOLV(1); return BOOLV(0); }
+    if (strcmp(name,"startsWith")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); return BOOLV(sl<=len && memcmp(s,sub,sl)==0); }
+    if (strcmp(name,"endsWith")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); return BOOLV(sl<=len && memcmp(s+len-sl,sub,sl)==0); }
+    if (strcmp(name,"trim")==0){ int a=0,b=len; while(a<b&&(s[a]==' '||s[a]=='\t'||s[a]=='\n'||s[a]=='\r'))a++; while(b>a&&(s[b-1]==' '||s[b-1]=='\t'||s[b-1]=='\n'||s[b-1]=='\r'))b--; char*r=aalloc(b-a+1); if(!r) return STRV(""); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
+    if (strcmp(name,"repeat")==0){ int cnt=nargs?(int)to_num(args[0]):0; if(cnt<0)cnt=0; long total=(long)len*cnt; if(total>JS_ARENA){ rt_err("repeat too large"); return STRV(""); } char*r=aalloc(total+1); if(!r) return STRV(""); int p=0; for(int k=0;k<cnt;k++) for(int j=0;j<len;j++) r[p++]=s[j]; r[p]=0; return STRV(r); }
+    if (strcmp(name,"replace")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]),*to=val_to_str(args[1]); int fl=(int)strlen(from),tl=(int)strlen(to); if(fl==0) return STRV(s); for(int i=0;i+fl<=len;i++){ if(memcmp(s+i,from,fl)==0){ char*r=aalloc((long)len-fl+tl+1); if(!r) return STRV(""); memcpy(r,s,i); memcpy(r+i,to,tl); memcpy(r+i+tl,s+i+fl,len-i-fl); r[len-fl+tl]=0; return STRV(r); } } return STRV(s); }
+    if (strcmp(name,"split")==0){ obj*arr=new_obj(V_ARR); if(!arr) return UND(); const char*sep=nargs?val_to_str(args[0]):0; int sl=sep?(int)strlen(sep):-1;
+        if(sl<0){ arr_push_val(arr,STRV(s)); }                       /* no separator: whole string */
+        else if(sl==0){ for(int i=0;i<len;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} arr_push_val(arr,STRV(c?c:"")); } }  /* "" -> chars */
+        else { int start=0; for(int i=0;i+sl<=len;){ if(memcmp(s+i,sep,sl)==0){ char*p=aalloc(i-start+1); if(p){memcpy(p,s+start,i-start);p[i-start]=0;} arr_push_val(arr,STRV(p?p:"")); i+=sl; start=i; } else i++; } char*p=aalloc(len-start+1); if(p){memcpy(p,s+start,len-start);p[len-start]=0;} arr_push_val(arr,STRV(p?p:"")); }
+        val v=UND(); v.t=V_ARR; v.o=arr; return v; }
     rt_err("unknown string method"); return UND();
 }
 static val eval_array_method(val recv, const char *name, val *args, int nargs) {
@@ -687,6 +702,11 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         buf[p]=0; return STRV(buf);
     }
     if (strcmp(name,"indexOf")==0){ for(int i=0;i<o->n;i++){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if(x.t==V_NUM&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
+    if (strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0, b=nargs>1?(int)to_num(args[1]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; obj*r=new_obj(V_ARR); if(r) for(int i=a;i<b;i++) arr_push_val(r,o->vals[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"reverse")==0){ for(int i=0,j=o->n-1;i<j;i++,j--){ val t=o->vals[i]; o->vals[i]=o->vals[j]; o->vals[j]=t; } return recv; }
+    if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
+    if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(r&&nargs) for(int i=0;i<o->n && !g_err;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"filter")==0){ obj*r=new_obj(V_ARR); if(r&&nargs) for(int i=0;i<o->n && !g_err;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) arr_push_val(r,o->vals[i]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     rt_err("unknown array method"); return UND();
 }
 
@@ -705,6 +725,60 @@ static val native_doc_write(val *args, int nargs) {
     return UND();
 }
 
+/* ---- Math (integer; the kernel has no FPU) ---- */
+static int64_t iabs64(int64_t x){ return x < 0 ? -x : x; }
+static val nat_abs(val *a, int n){ return NUM(n ? iabs64(to_num(a[0])) : 0); }
+static val nat_max(val *a, int n){ if(!n) return UND(); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v>m)m=v;} return NUM(m); }
+static val nat_min(val *a, int n){ if(!n) return UND(); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v<m)m=v;} return NUM(m); }
+static val nat_ident(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }   /* floor/ceil/round are identity on ints */
+static val nat_sqrt(val *a, int n){ int64_t x=n?to_num(a[0]):0; if(x<1) return NUM(0); int64_t lo=0, hi=(x<2?x:x/2+1); if(hi>3037000499LL) hi=3037000499LL; while(lo<hi){ int64_t mid=lo+(hi-lo+1)/2; if(mid<=x/mid) lo=mid; else hi=mid-1; } return NUM(lo); }
+static val nat_pow(val *a, int n){ int64_t b=n>0?to_num(a[0]):0, e=n>1?to_num(a[1]):0; int64_t r=1; for(int64_t i=0;i<e && i<63;i++) r*=b; return NUM(r); }
+
+/* ---- global functions ---- */
+static val nat_parseInt(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }       /* to_num already parses leading int */
+static val nat_String(val *a, int n){ return STRV(n ? val_to_str(a[0]) : ""); }
+static val nat_Number(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }
+static val nat_Boolean(val *a, int n){ return BOOLV(n ? truthy(a[0]) : 0); }
+static val nat_isNaN(val *a, int n){ (void)a; (void)n; return BOOLV(0); }          /* integer Number is never NaN */
+
+/* ---- Object.keys(o) -> array of key strings ---- */
+static val nat_obj_keys(val *a, int n){
+    obj *r = new_obj(V_ARR); if(!r) return UND();
+    if (n && (a[0].t==V_OBJ)) {
+        obj *o=a[0].o;
+        for (int i=0;i<o->n;i++){ if(r->n>=r->cap){int nc=r->cap*2+2;val*nv=aalloc((long)sizeof(val)*nc); if(!nv){g_oom=1;break;} memcpy(nv,r->vals,sizeof(val)*r->n); r->vals=nv; r->cap=nc;} r->vals[r->n++]=STRV(o->keys[i]); }
+    }
+    val v=UND(); v.t=V_ARR; v.o=r; return v;
+}
+
+/* ---- JSON.stringify (bounded 16 KB output; depth-guarded against cycles) ---- */
+static char *g_json; static int g_json_pos, g_json_cap;
+static void js_app(const char *s){ while(*s && g_json_pos<g_json_cap-1) g_json[g_json_pos++]=*s++; }
+static void js_appq(const char *s){ js_app("\""); for(; *s && g_json_pos<g_json_cap-2; s++){ char c=*s;
+        if(c=='"'||c=='\\'){ g_json[g_json_pos++]='\\'; g_json[g_json_pos++]=c; }
+        else if(c=='\n'){ js_app("\\n"); } else if(c=='\t'){ js_app("\\t"); } else if(c=='\r'){ js_app("\\r"); }
+        else g_json[g_json_pos++]=c; } js_app("\""); }
+static void json_val(val v){
+    if(++g_depth>MAXDEPTH){ g_depth--; js_app("null"); return; }
+    switch(v.t){
+        case V_BOOL: js_app(v.num?"true":"false"); break;
+        case V_NUM:  js_app(i64_to_str(v.num)); break;
+        case V_STR:  js_appq(v.str); break;
+        case V_ARR:  js_app("["); for(int i=0;i<v.o->n;i++){ if(i) js_app(","); json_val(v.o->vals[i]); } js_app("]"); break;
+        case V_OBJ:  js_app("{"); for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_appq(v.o->keys[i]); js_app(":"); json_val(v.o->vals[i]); } js_app("}"); break;
+        default:     js_app("null"); break;   /* undefined/null/function */
+    }
+    g_depth--;
+}
+static val nat_json_stringify(val *a, int n){ if(!n) return UND(); char *buf=aalloc(16384); if(!buf) return STRV(""); g_json=buf; g_json_pos=0; g_json_cap=16384; json_val(a[0]); buf[g_json_pos]=0; return STRV(buf); }
+
+/* register a native function on object `o` under `name` */
+static void def_native(obj *o, const char *name, val (*fn)(val*,int)){
+    obj *f=new_obj(V_NATIVE); if(!f) return; f->native=fn; val v=UND(); v.t=V_NATIVE; v.o=f; obj_set(o,name,v);
+}
+static val obj_val(obj *o){ val v=UND(); v.t=V_OBJ; v.o=o; return v; }
+static val obj_val_native(obj *o){ val v=UND(); v.t=V_NATIVE; v.o=o; return v; }
+
 static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
     /* console.log */
@@ -716,6 +790,24 @@ static void install_globals(env *g) {
     obj *dw=new_obj(V_NATIVE); dw->native=native_doc_write; val dwv=UND(); dwv.t=V_NATIVE; dwv.o=dw;
     obj *doc=new_obj(V_OBJ); obj_set(doc,"write",dwv); obj_set(doc,"writeln",dwv);
     val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
+
+    /* Math */
+    obj *math=new_obj(V_OBJ);
+    def_native(math,"abs",nat_abs); def_native(math,"max",nat_max); def_native(math,"min",nat_min);
+    def_native(math,"floor",nat_ident); def_native(math,"ceil",nat_ident); def_native(math,"round",nat_ident); def_native(math,"trunc",nat_ident);
+    def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow);
+    env_define(g,"Math",obj_val(math));
+    /* Object (Object.keys) */
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); env_define(g,"Object",obj_val(objc));
+    /* JSON (stringify) */
+    obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); env_define(g,"JSON",obj_val(json));
+    /* global functions */
+    obj *pi=new_obj(V_NATIVE); pi->native=nat_parseInt; env_define(g,"parseInt",obj_val_native(pi));
+    obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));
+    obj *sf=new_obj(V_NATIVE); sf->native=nat_String;   env_define(g,"String",obj_val_native(sf));
+    obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
+    obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
+    obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
 }
 
 /* =========================== entry point =========================== */
