@@ -73,6 +73,7 @@ d 0 7
 5 undefined undefined
 undefined undefined undefined
 9 undefined
+undefined 5
 -- Map / Set --
 2 9 true undefined
 3 true 1,2,3

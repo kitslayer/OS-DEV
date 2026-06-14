@@ -363,15 +363,19 @@ static node *parse_primary(lexer *L) {
 
 static node *parse_postfix(lexer *L) {
     node *e = parse_primary(L);
+    int opt = 0;   /* once a `?.` appears, the rest of this chain short-circuits on a nullish
+                    * receiver too (so `a?.b.c()` yields undefined when a is null, per spec).
+                    * Marking a link optional only ADDS a nullish guard; non-null behaviour is
+                    * unchanged, so propagating it to later links is safe. */
     for (;;) {
-        if (peek_punc(L,".")) { advance(L); token p=advance(L); node *m=mknode(N_MEMBER); m->a=e; m->str=intern(p.s,p.len); m->slen=p.len; e=m; }
-        else if (peek_punc(L,"?.")) { advance(L);   /* optional chaining: ?.x  ?.[i]  ?.() */
+        if (peek_punc(L,".")) { advance(L); token p=advance(L); node *m=mknode(N_MEMBER); m->a=e; m->str=intern(p.s,p.len); m->slen=p.len; m->prefix=opt; e=m; }
+        else if (peek_punc(L,"?.")) { opt=1; advance(L);   /* optional chaining: ?.x  ?.[i]  ?.() */
             if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->prefix=1; call->list=parse_list(L,")",&call->nlist); e=call; }
             else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; m->prefix=1; e=m; }
             else { token p=advance(L); node *m=mknode(N_MEMBER); m->a=e; m->str=intern(p.s,p.len); m->slen=p.len; m->prefix=1; e=m; }
         }
-        else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; e=m; }
-        else if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->list=parse_list(L,")",&call->nlist); e=call; }
+        else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; m->prefix=opt; e=m; }
+        else if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->prefix=opt; call->list=parse_list(L,")",&call->nlist); e=call; }
         else if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->a=e; u->prefix=0; e=u; }
         else break;
     }
