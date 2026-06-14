@@ -529,7 +529,8 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         else if (*style == STY_BOLD) *style = STY_NORMAL;
         return;
     }
-    if (tageq(tag, "i") || tageq(tag, "em")) {
+    if (tageq(tag, "i") || tageq(tag, "em") || tageq(tag, "cite") ||      /* italic-by-convention */
+        tageq(tag, "var") || tageq(tag, "dfn") || tageq(tag, "address")) {
         if (!closing) { if (*style == STY_NORMAL) *style = STY_EM; }
         else if (*style == STY_EM) *style = STY_NORMAL;
         return;
