@@ -25,6 +25,7 @@ print("hello".includes("ell"), "hi".padStart(4,"."), "x".charCodeAt(0), "abcabc"
 print("-- objects --");
 var o={a:1,b:2}; o.c=3; print(o.a+o.b+o.c, Object.keys(o).join(","), Object.values(o).join(","));
 var k=7,v=8; print(JSON.stringify({k,v}));
+print(JSON.stringify(Object.assign({a:1},{b:2})), [[1,2],[3]].flat().join(","), Math.sign(-5));
 print("-- JSON --");
 print(JSON.stringify({n:"OS",a:[1,2],ok:true}));
 var p=JSON.parse('{"x":1,"y":[2,3],"s":"hi"}'); print(p.x, p.y[1], p.s);

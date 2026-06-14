@@ -920,6 +920,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"reverse")==0){ for(int i=0,j=o->n-1;i<j;i++,j--){ val t=o->vals[i]; o->vals[i]=o->vals[j]; o->vals[j]=t; } return recv; }
     if (strcmp(name,"fill")==0){ val fv=nargs?args[0]:UND(); int st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):o->n; if(st<0)st+=o->n; if(en<0)en+=o->n; if(st<0)st=0; if(en>o->n)en=o->n; for(int i=st;i<en;i++) o->vals[i]=fv; return recv; }
     if (strcmp(name,"lastIndexOf")==0){ for(int i=o->n-1;i>=0;i--){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if((x.t==V_NUM||x.t==V_BOOL)&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
+    if (strcmp(name,"flat")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<o->n;i++){ if(o->vals[i].t==V_ARR&&o->vals[i].o){ for(int j=0;j<o->vals[i].o->n;j++) arr_push_val(r,o->vals[i].o->vals[j]); } else arr_push_val(r,o->vals[i]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
     if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"filter")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) arr_push_val(r,o->vals[i]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -1102,6 +1103,13 @@ static val nat_obj_entries(val *a, int n){
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
 static val nat_array_isArray(val *a, int n){ return BOOLV(n && a[0].t==V_ARR); }
+static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
+    if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
+    for (int i=1;i<n;i++) if (a[i].t==V_OBJ && a[i].o) for (int j=0;j<a[i].o->n;j++) obj_set(a[0].o, a[i].o->keys[j], a[i].o->vals[j]);
+    return a[0];
+}
+static int64_t nat_sign_v(int64_t x){ return x>0?1:x<0?-1:0; }
+static val nat_sign(val *a, int n){ return NUM(n?nat_sign_v(to_num(a[0])):0); }
 static val nat_array_from(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
     if (n && a[0].t==V_ARR && a[0].o) for (int i=0;i<a[0].o->n;i++) arr_push_val(r, a[0].o->vals[i]);
@@ -1135,10 +1143,10 @@ static void install_globals(env *g) {
     obj *math=new_obj(V_OBJ);
     def_native(math,"abs",nat_abs); def_native(math,"max",nat_max); def_native(math,"min",nat_min);
     def_native(math,"floor",nat_ident); def_native(math,"ceil",nat_ident); def_native(math,"round",nat_ident); def_native(math,"trunc",nat_ident);
-    def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow);
+    def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow); def_native(math,"sign",nat_sign);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); env_define(g,"Object",obj_val(objc));
     obj *arrc=new_obj(V_OBJ); def_native(arrc,"isArray",nat_array_isArray); def_native(arrc,"from",nat_array_from); env_define(g,"Array",obj_val(arrc));
     /* JSON (stringify) */
     obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
