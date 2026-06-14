@@ -87,7 +87,7 @@ static const struct {
         "var s = 0; n.forEach(x => s += x); print(\"sum:     \" + s);\n"
         "function fib(k){ return k < 2 ? k : fib(k-1) + fib(k-2); }\n"
         "print(\"fib:     \" + [0,1,2,3,4,5,6,7,8,9,10].map(fib).join(\", \"));\n"
-        "var d = { os: \"OS-DEV\", ms: 148, features: [\"TLS\", \"browser\", \"JS\"] };\n"
+        "var d = { os: \"OS-DEV\", ms: 169, features: [\"TLS\", \"browser\", \"JS\"] };\n"
         "print(\"json:    \" + JSON.stringify(d));\n"
         "var back = JSON.parse(JSON.stringify(d));\n"
         "print(\"parse:   \" + back.os + \", \" + back.features.length + \" features, sqrt(2025)=\" + Math.sqrt(2025));\n" },
