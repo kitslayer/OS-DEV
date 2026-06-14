@@ -1081,7 +1081,7 @@ static val eval_expr_inner(node *n, env *e) {
     switch (n->type) {
         case N_NUM: return NUM(n->num);
         case N_STR: return STRV(n->str);
-        case N_REGEX: { char fl[3]; int k=0; if(n->num&1)fl[k++]='g'; if(n->num&2)fl[k++]='i'; fl[k]=0; return make_regex_val(node_name(n), fl); }
+        case N_REGEX: { char fl[3]; int k=0; if(n->num&1)fl[k++]='g'; if(n->num&2)fl[k++]='i'; fl[k]=0; return make_regex_val(node_name(n), intern(fl,k)); }   /* intern: flags must be arena-stable, not a dead stack buffer */
         case N_BOOL: return BOOLV((int)n->num);
         case N_NULL: { val v=UND(); v.t=V_NULL; return v; }
         case N_UNDEF: return UND();

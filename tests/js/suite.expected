@@ -92,4 +92,5 @@ true false
 15/01/2024
 123 a|b|c
 true a#b# 5 1
+gi ! {"source":"z","global":true,"flags":"g"}
 -- done --
