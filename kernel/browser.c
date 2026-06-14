@@ -83,6 +83,7 @@ struct browser {
     int     listdepth;                                   /* nested <ul>/<ol> depth */
     char    listtype[8];                                 /* 'u' or 'o' per level */
     int     listnum[8];                                  /* <ol> item counter per level */
+    char    listfmt[8];                                  /* <ol type>: '1'/'a'/'A'/'i'/'I' per level */
     int     tdcount;                                     /* cells emitted in the current <tr> */
     int     finding;                                     /* in-page find: typing a query */
     char    findq[40];                                   /* the find query */
@@ -361,6 +362,26 @@ static int has_attr(const char *a, int n, const char *name) {
         if (k >= n || a[k]==' ' || a[k]=='\t' || a[k]=='=' || a[k]=='>' || a[k]=='/') return 1;
     }
     return 0;
+}
+/* Format an <ol> item number n in the given type into out[<max]: '1' decimal,
+ * 'a'/'A' alphabetic (a,b,…,z,aa,…), 'i'/'I' roman (1–3999). */
+static void fmt_li_num(int n, char fmt, char *out, int max) {
+    int p = 0; if (n < 1) n = 1; if (max < 2) { if (max > 0) out[0] = 0; return; }
+    if (fmt == 'a' || fmt == 'A') {
+        char base = (fmt == 'A') ? 'A' : 'a'; char tmp[8]; int k = 0;
+        while (n > 0 && k < 7) { n--; tmp[k++] = (char)(base + n % 26); n /= 26; }
+        while (k && p < max - 1) out[p++] = tmp[--k];
+    } else if (fmt == 'i' || fmt == 'I') {
+        static const int vals[] = {1000,900,500,400,100,90,50,40,10,9,5,4,1};
+        static const char *syms[] = {"m","cm","d","cd","c","xc","l","xl","x","ix","v","iv","i"};
+        if (n > 3999) n = 3999;
+        for (int i = 0; i < 13 && p < max - 1; i++)
+            while (n >= vals[i] && p < max - 1) { for (const char *s = syms[i]; *s && p < max - 1; s++) out[p++] = (fmt == 'I') ? (char)(*s - 32) : *s; n -= vals[i]; }
+    } else {
+        char tmp[12]; int k = 0; int t = n; while (t && k < 11) { tmp[k++] = (char)('0' + t % 10); t /= 10; }
+        while (k && p < max - 1) out[p++] = tmp[--k];
+    }
+    out[p] = 0;
 }
 /* Parse a numeric attribute (e.g. width="48"); 0 if absent/non-numeric. */
 static int attr_int(const char *a, int n, const char *name) {
@@ -688,7 +709,16 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     }
     if (tageq(tag, "ul") || tageq(tag, "ol")) {          /* track list nesting + kind */
         if (!closing) {
-            if (b->listdepth < 8) { b->listtype[b->listdepth] = tag[0]; b->listnum[b->listdepth] = 0; b->listdepth++; }
+            if (b->listdepth < 8) {
+                b->listtype[b->listdepth] = tag[0];
+                char fmt = '1'; const char *tv; int tvl;                       /* <ol type=…> marker style */
+                if (tag[0] == 'o' && find_attr(attrs, attrlen, "type", &tv, &tvl) && tvl >= 1
+                    && (tv[0]=='a'||tv[0]=='A'||tv[0]=='i'||tv[0]=='I'||tv[0]=='1')) fmt = tv[0];
+                b->listfmt[b->listdepth] = fmt;
+                int st = (tag[0] == 'o') ? attr_int(attrs, attrlen, "start") : 0;   /* <ol start=N> */
+                b->listnum[b->listdepth] = st > 0 ? st - 1 : 0;
+                b->listdepth++;
+            }
         } else if (b->listdepth > 0) b->listdepth--;
         emit_break(b, TK_BREAK);
         return;
@@ -702,10 +732,9 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int depth = b->listdepth > 0 ? b->listdepth : 1;   /* indent: 2 spaces/level */
             for (int i = 0; i < depth && p < 18; i++) { marker[p++] = ' '; marker[p++] = ' '; }
             if (b->listdepth > 0 && b->listtype[b->listdepth - 1] == 'o') {
-                int n = ++b->listnum[b->listdepth - 1];        /* numbered item */
-                char num[8]; int k = 0; int t = n; if (!t) num[k++] = '0';
-                while (t) { num[k++] = '0' + t % 10; t /= 10; }
-                while (k && p < 22) marker[p++] = num[--k];
+                int n = ++b->listnum[b->listdepth - 1];        /* numbered item, formatted per <ol type> */
+                char num[16]; fmt_li_num(n, b->listfmt[b->listdepth - 1], num, sizeof(num));
+                for (int k = 0; num[k] && p < 22; k++) marker[p++] = num[k];
                 if (p < 23) marker[p++] = '.';
             } else if (p < 23) marker[p++] = '-';              /* bulleted item */
             marker[p] = 0;
