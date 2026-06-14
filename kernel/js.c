@@ -471,7 +471,7 @@ static val NUM(int64_t x){ val v=UND(); v.t=V_NUM; v.num=x; return v; }
 static val BOOLV(int b){ val v=UND(); v.t=V_BOOL; v.num=b?1:0; return v; }
 static val STRV(const char *s){ val v=UND(); v.t=V_STR; v.str=s?s:""; return v; }
 
-static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); return o; }
+static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
 
 static void obj_set(obj *o, const char *key, val v) {
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { o->vals[i]=v; return; }
@@ -546,7 +546,7 @@ static const char *val_to_str(val v) {
 }
 
 /* ---- environments ---- */
-static env *new_env(env *parent){ env *e=aalloc(sizeof(env)); if(!e) return 0; e->cap=4; e->keys=aalloc(sizeof(char*)*e->cap); e->vals=aalloc(sizeof(val)*e->cap); e->n=0; e->parent=parent; return e; }
+static env *new_env(env *parent){ env *e=aalloc(sizeof(env)); if(!e) return 0; e->cap=4; e->keys=aalloc(sizeof(char*)*e->cap); e->vals=aalloc(sizeof(val)*e->cap); if(!e->keys||!e->vals){ g_oom=1; return 0; } e->n=0; e->parent=parent; return e; }
 static void env_define(env *e, const char *key, val v) {
     for (int i=0;i<e->n;i++) if (strcmp(e->keys[i],key)==0){ e->vals[i]=v; return; }
     if (e->n>=e->cap){ int nc=e->cap*2; const char**nk=aalloc(sizeof(char*)*nc); val*nv=aalloc(sizeof(val)*nc); if(!nk||!nv){g_oom=1;return;} memcpy(nk,e->keys,sizeof(char*)*e->n); memcpy(nv,e->vals,sizeof(val)*e->n); e->keys=nk; e->vals=nv; e->cap=nc; }
@@ -571,6 +571,7 @@ static val call_function(val fn, val *args, int nargs) {
     if (fn.t!=V_FUN) { rt_err("not a function"); return UND(); }
     if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }
     env *fe = new_env(fn.o->scope);
+    if (!fe) { g_oom=1; g_depth--; return UND(); }     /* arena exhausted: bail, don't deref NULL */
     node *def = fn.o->fn;
     for (int i=0;i<def->nlist;i++) env_define(fe, node_name(def->list[i]), i<nargs?args[i]:UND());
     comp c = eval_stmt(def->a, fe);
@@ -584,11 +585,11 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs);
 
 static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
-    if (recv.t==V_ARR) {
+    if (recv.t==V_ARR && recv.o) {        /* recv.o can be NULL if a producing method hit OOM */
         if (strcmp(name,"length")==0) return NUM(recv.o->n);
         /* methods returned as native bound below via call path; here return undefined */
     }
-    if (recv.t==V_OBJ) { val out; if (obj_get(recv.o,name,&out)) return out; }
+    if (recv.t==V_OBJ && recv.o) { val out; if (obj_get(recv.o,name,&out)) return out; }
     return UND();
 }
 
@@ -654,9 +655,9 @@ static val eval_expr_inner(node *n, env *e) {
                 if (n->op=='+'&&(cur.t==V_STR||rhs.t==V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
                 else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): (y?x%y:0)); }
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
-            if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e); if(recv.t==V_OBJ||recv.t==V_ARR){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
+            if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e); if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
-                if (recv.t==V_ARR) {
+                if (recv.t==V_ARR && recv.o) {
                     long i = to_num(idx);
                     if (i < 0 || i > (1<<24)) { rt_err("array index out of range"); return rhs; }
                     while (recv.o->n <= (int)i && !g_oom) {           /* grow with UND() to reach i */
@@ -670,15 +671,15 @@ static val eval_expr_inner(node *n, env *e) {
                     }
                     if (!g_oom && (int)i < recv.o->n) recv.o->vals[(int)i]=rhs;
                 }
-                else if (recv.t==V_OBJ) { obj_set(recv.o, val_to_str(idx), rhs); }
+                else if (recv.t==V_OBJ && recv.o) { obj_set(recv.o, val_to_str(idx), rhs); }
                 return rhs; }
             rt_err("invalid assignment target"); return UND();
         }
         case N_MEMBER: { val recv=eval_expr(n->a,e); return eval_member_get(recv, node_name(n)); }
         case N_INDEX: { val recv=eval_expr(n->a,e); val idx=eval_expr(n->b,e);
-            if (recv.t==V_ARR){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
-            if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); s[0]=recv.str[i]; s[1]=0; return STRV(s);} return UND(); }
-            if (recv.t==V_OBJ){ val out; if(obj_get(recv.o,val_to_str(idx),&out)) return out; }
+            if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
+            if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
+            if (recv.t==V_OBJ && recv.o){ val out; if(obj_get(recv.o,val_to_str(idx),&out)) return out; }
             return UND(); }
         case N_CALL: {
             /* method call a.b(...) needs the receiver for string/array methods */
@@ -688,7 +689,7 @@ static val eval_expr_inner(node *n, env *e) {
                 val recv=eval_expr(callee->a,e); const char *m=node_name(callee);
                 if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
                 if (recv.t==V_ARR) return eval_array_method(recv,m,args,na);
-                if (recv.t==V_OBJ) { val fn; if(obj_get(recv.o,m,&fn)) return call_function(fn,args,na); }
+                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)) return call_function(fn,args,na); }
                 rt_err("no such method"); return UND();
             }
             val fn=eval_expr(callee,e); return call_function(fn,args,na);
@@ -712,7 +713,8 @@ static comp eval_stmt_inner(node *n, env *e) {
     switch (n->type) {
         case N_PROGRAM: case N_BLOCK: {
             env *be = (n->type==N_BLOCK)? new_env(e) : e;
-            for (int i=0;i<n->nlist;i++){ comp c=eval_stmt(n->list[i],be); if(c.kind!=C_NORMAL||g_err) return c; }
+            if (!be) { g_oom=1; return CN(); }
+            for (int i=0;i<n->nlist;i++){ comp c=eval_stmt(n->list[i],be); if(c.kind!=C_NORMAL||g_err||g_oom) return c; }
             return CN();
         }
         case N_VAR: { for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND(); env_define(e,node_name(d),v); } return CN(); }
@@ -725,7 +727,8 @@ static comp eval_stmt_inner(node *n, env *e) {
             return CN();
         }
         case N_FOR: {
-            env *fe=new_env(e); if(n->a){ if(n->a->type==N_VAR) eval_stmt(n->a,fe); else eval_expr(n->a,fe); }
+            env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
+            if(n->a){ if(n->a->type==N_VAR) eval_stmt(n->a,fe); else eval_expr(n->a,fe); }
             int guard=0;
             while (!n->b || truthy(eval_expr(n->b,fe))) {
                 if(++guard>5000000){rt_err("loop limit");break;}
@@ -770,7 +773,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
     rt_err("unknown string method"); return UND();
 }
 static val eval_array_method(val recv, const char *name, val *args, int nargs) {
-    obj *o=recv.o;
+    obj *o=recv.o; if(!o) return UND();   /* a method that OOM'd can yield a NULL-backed array */
     if (strcmp(name,"push")==0){ for(int i=0;i<nargs;i++){ if(o->n>=o->cap){int nc=o->cap*2+4;val*nv=aalloc(sizeof(val)*nc);if(!nv){g_oom=1;break;}memcpy(nv,o->vals,sizeof(val)*o->n);o->vals=nv;o->cap=nc;} o->vals[o->n++]=args[i]; } return NUM(o->n); }
     if (strcmp(name,"pop")==0){ if(o->n==0) return UND(); return o->vals[--o->n]; }
     if (strcmp(name,"join")==0){
@@ -782,11 +785,11 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         buf[p]=0; return STRV(buf);
     }
     if (strcmp(name,"indexOf")==0){ for(int i=0;i<o->n;i++){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if(x.t==V_NUM&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
-    if (strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0, b=nargs>1?(int)to_num(args[1]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; obj*r=new_obj(V_ARR); if(r) for(int i=a;i<b;i++) arr_push_val(r,o->vals[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0, b=nargs>1?(int)to_num(args[1]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=a;i<b;i++) arr_push_val(r,o->vals[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"reverse")==0){ for(int i=0,j=o->n-1;i<j;i++,j--){ val t=o->vals[i]; o->vals[i]=o->vals[j]; o->vals[j]=t; } return recv; }
-    if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
-    if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(r&&nargs) for(int i=0;i<o->n && !g_err;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
-    if (strcmp(name,"filter")==0){ obj*r=new_obj(V_ARR); if(r&&nargs) for(int i=0;i<o->n && !g_err;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) arr_push_val(r,o->vals[i]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
+    if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"filter")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) arr_push_val(r,o->vals[i]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     rt_err("unknown array method"); return UND();
 }
 
@@ -868,14 +871,14 @@ static val json_parse_val(void){
     if(++g_depth>MAXDEPTH){ g_depth--; jp_err=1; return UND(); }
     val r=UND(); jp_ws();
     if(jp>=jp_end) jp_err=1;
-    else if(*jp=='{'){ obj*o=new_obj(V_OBJ); jp++; jp_ws();
+    else if(*jp=='{'){ obj*o=new_obj(V_OBJ); if(!o){ jp_err=1; g_depth--; return UND(); } jp++; jp_ws();
         if(jp<jp_end && *jp=='}') jp++;
         else for(;;){ jp_ws(); if(jp>=jp_end||*jp!='"'){ jp_err=1; break; } const char*k=jp_string(); jp_ws();
             if(jp<jp_end && *jp==':') jp++; else { jp_err=1; break; }
             val v=json_parse_val(); if(o) obj_set(o,k,v); jp_ws();
             if(jp<jp_end && *jp==','){ jp++; continue; } if(jp<jp_end && *jp=='}'){ jp++; } else jp_err=1; break; }
         r=obj_val(o); }
-    else if(*jp=='['){ obj*o=new_obj(V_ARR); jp++; jp_ws();
+    else if(*jp=='['){ obj*o=new_obj(V_ARR); if(!o){ jp_err=1; g_depth--; return UND(); } jp++; jp_ws();
         if(jp<jp_end && *jp==']') jp++;
         else for(;;){ val v=json_parse_val(); if(o) arr_push_val(o,v); jp_ws();
             if(jp<jp_end && *jp==','){ jp++; continue; } if(jp<jp_end && *jp==']'){ jp++; } else jp_err=1; break; }
