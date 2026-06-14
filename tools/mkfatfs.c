@@ -173,16 +173,16 @@ static const struct {
         "print(\"port=\" + (cfg?.server?.port ?? 3000));\n"
         "print(\"host=\" + (cfg?.server?.host ?? \"localhost\"));\n"
         "print(\"missing=\" + (cfg?.db?.name ?? \"none\"));\n" },
-    { "REGEX   JS ", "// regex.js  --  from-scratch regular expressions.  Run: js regex.js\n"
+    { "REGEX   JS ", "// regex.js  --  from-scratch regular expressions, with /literal/ syntax.  Run: js regex.js\n"
         "var prices = \"apples $3, bread $2, milk $4\";\n"
-        "print(\"prices: \" + prices.match(new RegExp(\"\\\\d+\", \"g\")).join(\", \"));\n"
-        "var ok = new RegExp(\"^[a-z0-9_]+$\", \"i\");\n"
+        "print(\"prices: \" + prices.match(/\\d+/g).join(\", \"));\n"
+        "var ok = /^[a-z0-9_]+$/i;\n"
         "print(\"user_42 valid? \" + ok.test(\"user_42\"));\n"
         "print(\"bad name! valid? \" + ok.test(\"bad name!\"));\n"
-        "print(\"ISO: \" + \"01/15/2024\".replace(new RegExp(\"(\\\\d+)/(\\\\d+)/(\\\\d+)\"), \"$3-$1-$2\"));\n"
-        "print(\"tokens: \" + \"red,  green ,blue\".split(new RegExp(\"\\\\s*,\\\\s*\")).join(\" | \"));\n"
-        "print(\"first word: \" + \"  Hello there\".match(new RegExp(\"[A-Za-z]+\"))[0]);\n"
-        "print(\"collapsed: [\" + \"too   many    spaces\".replace(new RegExp(\"\\\\s+\",\"g\"),\" \") + \"]\");\n" },
+        "print(\"ISO: \" + \"01/15/2024\".replace(/(\\d+)\\/(\\d+)\\/(\\d+)/, \"$3-$1-$2\"));\n"
+        "print(\"tokens: \" + \"red,  green ,blue\".split(/\\s*,\\s*/).join(\" | \"));\n"
+        "print(\"first word: \" + \"  Hello there\".match(/[A-Za-z]+/)[0]);\n"
+        "print(\"collapsed: [\" + \"too   many    spaces\".replace(/\\s+/g,\" \") + \"]\");\n" },
     { "RXTEST  JS ", "// rxtest.js  --  regex hardening: pathological patterns fail gracefully, never crash.\n"
         "print(\"deep groups: \" + new RegExp(\"(\".repeat(1800)).test(\"x\"));\n"   /* parser depth-capped at 400 */
         "print(\"long match: \" + new RegExp(\"a+\").test(\"a\".repeat(2500)));\n"  /* matcher depth-capped at 900 */

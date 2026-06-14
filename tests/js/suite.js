@@ -98,4 +98,5 @@ print(new RegExp("\\d+").test("abc42"), new RegExp("z").test("abc"));
 print(new RegExp("(\\d+)x(\\d+)").exec("a3x7b").join(","));
 print("2024-01-15".replace(new RegExp("(\\d+)-(\\d+)-(\\d+)"), "$3/$2/$1"));
 print("a1b2c3".match(new RegExp("\\d","g")).join(""), "a, b ,c".split(new RegExp("\\s*,\\s*")).join("|"));
+print(/\d+/.test("x9"), "a1b2".replace(/\d/g,"#"), 20/4, [1,2,3].length/3);
 print("-- done --");

@@ -81,7 +81,7 @@ static void rt_err(const char *m) {
 }
 
 /* =========================== lexer =========================== */
-enum { T_EOF, T_NUM, T_STR, T_IDENT, T_PUNC, T_KW, T_TEMPLATE };
+enum { T_EOF, T_NUM, T_STR, T_IDENT, T_PUNC, T_KW, T_TEMPLATE, T_REGEX };
 typedef struct { int type; int64_t num; const char *s; int len; } token;
 
 static const char *kw[] = { "var","let","const","function","return","if","else",
@@ -92,13 +92,15 @@ static const char *kw[] = { "var","let","const","function","return","if","else",
 typedef struct {
     const char *src; int pos, len;
     token cur, peeked; int has_peek;
+    token last;   /* last token lex_next produced — used to decide `/` = regex vs division */
 } lexer;
 
+static int tok_is(token t, const char *p);   /* fwd: used by the regex/division decision in lex_next_raw */
 static int is_id_start(int c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='_'||c=='$'; }
 static int is_id(int c){ return is_id_start(c)||(c>='0'&&c<='9'); }
 static int is_digit(int c){ return c>='0'&&c<='9'; }
 
-static token lex_next(lexer *L) {
+static token lex_next_raw(lexer *L) {
     token t; t.type = T_EOF; t.s = 0; t.len = 0; t.num = 0;
     const char *s = L->src;
     /* skip whitespace + comments */
@@ -164,6 +166,28 @@ static token lex_next(lexer *L) {
         for (int i=0; kw[i]; i++) { int kl=(int)strlen(kw[i]); if (kl==t.len && memcmp(kw[i],t.s,kl)==0) { t.type=T_KW; break; } }
         return t;
     }
+    /* regex literal /pattern/flags — `/` starts one unless the previous token ends an
+     * operand (then it's division). The pattern bypasses the parser's depth guard, so
+     * the regex compiler caps its own recursion (M179). */
+    if (c=='/') {
+        token p=L->last; int div_ctx=0;
+        if (p.type==T_NUM||p.type==T_STR||p.type==T_TEMPLATE||p.type==T_IDENT||p.type==T_REGEX) div_ctx=1;
+        else if (p.type==T_PUNC && (tok_is(p,")")||tok_is(p,"]")||tok_is(p,"++")||tok_is(p,"--"))) div_ctx=1;   /* postfix x++ / 2 is division */
+        else if (p.type==T_KW && (tok_is(p,"this")||tok_is(p,"true")||tok_is(p,"false")||tok_is(p,"null")||tok_is(p,"undefined")||tok_is(p,"super"))) div_ctx=1;
+        if (!div_ctx) {
+            L->pos++;                                   /* opening / */
+            int pstart=L->pos, inclass=0;
+            while (L->pos<L->len) { int ch=s[L->pos];
+                if (ch=='\\') { L->pos+=2; continue; }
+                if (ch=='\n') break;
+                if (ch=='[') inclass=1; else if (ch==']') inclass=0; else if (ch=='/' && !inclass) break;
+                L->pos++; }
+            int plen=L->pos-pstart;
+            if (L->pos<L->len && s[L->pos]=='/') L->pos++;   /* closing / */
+            int64_t fb=0; while (L->pos<L->len && is_id(s[L->pos])) { char f=s[L->pos]; if(f=='g')fb|=1; else if(f=='i')fb|=2; L->pos++; }
+            t.type=T_REGEX; t.s=s+pstart; t.len=plen; t.num=fb; return t;
+        }
+    }
     /* punctuation / multi-char operators */
     static const char *ops[] = { "===","!==","<<=",">>=","...","==","!=","<=",">=",
         "&&","||","??","?.","++","--","+=","-=","*=","/=","%=","<<",">>","=>",0 };
@@ -171,12 +195,13 @@ static token lex_next(lexer *L) {
     t.type=T_PUNC; t.s=s+L->pos; t.len=1; L->pos++; return t;
 }
 
+static token lex_next(lexer *L){ token t=lex_next_raw(L); L->last=t; return t; }   /* track last token for the `/` regex/division decision */
 static token peek(lexer *L){ if (!L->has_peek){ L->peeked=lex_next(L); L->has_peek=1; } return L->peeked; }
 static token advance(lexer *L){ if (L->has_peek){ L->has_peek=0; return L->peeked; } return lex_next(L); }
 /* save/restore lexer position for bounded lookahead (arrow-function detection) */
-typedef struct { int pos, has_peek; token peeked; } lexsave;
-static lexsave lex_save(lexer *L){ lexsave s; s.pos=L->pos; s.has_peek=L->has_peek; s.peeked=L->peeked; return s; }
-static void lex_restore(lexer *L, lexsave s){ L->pos=s.pos; L->has_peek=s.has_peek; L->peeked=s.peeked; }
+typedef struct { int pos, has_peek; token peeked, last; } lexsave;
+static lexsave lex_save(lexer *L){ lexsave s; s.pos=L->pos; s.has_peek=L->has_peek; s.peeked=L->peeked; s.last=L->last; return s; }
+static void lex_restore(lexer *L, lexsave s){ L->pos=s.pos; L->has_peek=s.has_peek; L->peeked=s.peeked; L->last=s.last; }
 static int tok_is(token t, const char *p){ int l=(int)strlen(p); return t.len==l && t.s && memcmp(t.s,p,l)==0; }
 static int peek_punc(lexer *L, const char *p){ token t=peek(L); return t.type==T_PUNC && tok_is(t,p); }
 static int peek_kw(lexer *L, const char *p){ token t=peek(L); return t.type==T_KW && tok_is(t,p); }
@@ -187,7 +212,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD, N_REGEX };
 
 typedef struct node node;
 struct node {
@@ -290,6 +315,7 @@ static node *parse_primary(lexer *L) {
     if (t.type == T_TEMPLATE) { advance(L); return parse_template(t.s, t.len); }
     if (t.type == T_NUM) { advance(L); node *n=mknode(N_NUM); n->num=t.num; return n; }
     if (t.type == T_STR) { advance(L); node *n=mknode(N_STR); n->str=t.s; n->slen=t.len; return n; }
+    if (t.type == T_REGEX) { advance(L); node *n=mknode(N_REGEX); n->str=intern(t.s,t.len); n->slen=t.len; n->num=t.num; return n; }   /* /pattern/flags; num bit0=g bit1=i */
     if (t.type == T_KW) {
         if (tok_is(t,"true")||tok_is(t,"false")) { advance(L); node *n=mknode(N_BOOL); n->num=tok_is(t,"true"); return n; }
         if (tok_is(t,"null")) { advance(L); return mknode(N_NULL); }
@@ -864,14 +890,18 @@ static val eval_regex_method(val recv, const char *name, val *args, int nargs){
         return re_result(re,s,caps); }
     rt_err("unknown RegExp method"); return UND();
 }
+/* build a V_REGEX object from a pattern + flags string (shared by RegExp() and /literals/) */
+static val make_regex_val(const char *pat, const char *fl){
+    regex *re=re_compile(pat?pat:"", fl?fl:"");
+    obj *o=new_obj(V_REGEX); if(!o){ g_oom=1; return UND(); }
+    o->rx=re; obj_set(o,"source",STRV(pat?pat:"")); obj_set(o,"global",BOOLV(re&&re->global)); obj_set(o,"flags",STRV(fl?fl:""));
+    return obj_val(o);
+}
 /* RegExp(pattern, flags) / new RegExp(...) -> a V_REGEX object */
 static val nat_regexp(val *args, int nargs){
     const char *pat = nargs>0? val_to_str(args[0]) : "";
     const char *fl  = nargs>1? val_to_str(args[1]) : "";
-    regex *re=re_compile(pat, fl);
-    obj *o=new_obj(V_REGEX); if(!o){ g_oom=1; return UND(); }
-    o->rx=re; obj_set(o,"source",STRV(pat)); obj_set(o,"global",BOOLV(re&&re->global)); obj_set(o,"flags",STRV(fl));
-    return obj_val(o);
+    return make_regex_val(pat, fl);
 }
 static const char *val_to_str_inner(val v) {
     switch (v.t) {
@@ -1051,6 +1081,7 @@ static val eval_expr_inner(node *n, env *e) {
     switch (n->type) {
         case N_NUM: return NUM(n->num);
         case N_STR: return STRV(n->str);
+        case N_REGEX: { char fl[3]; int k=0; if(n->num&1)fl[k++]='g'; if(n->num&2)fl[k++]='i'; fl[k]=0; return make_regex_val(node_name(n), fl); }
         case N_BOOL: return BOOLV((int)n->num);
         case N_NULL: { val v=UND(); v.t=V_NULL; return v; }
         case N_UNDEF: return UND();
