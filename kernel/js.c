@@ -225,10 +225,13 @@ struct node {
 };
 
 static int g_depth;            /* recursion guard (parser + eval + val_to_str + calls) */
-/* ~850 B of C stack per nesting level (measured). Cap so the worst case (~120 *
- * 850 B ≈ 100 KB) stays well within the 256 KB kernel stacks BOTH entry paths run
- * on — the ring-3 SYS_js task stack AND the WM/boot stack the browser uses — with
- * margin for the call chain + interrupts, since neither stack has a guard page. */
+/* The largest C frame per nesting level is eval_expr (~1.5 KB, measured via
+ * objdump); the worst case (~120 × 1.5 KB ≈ 185 KB) stays within the 256 KB
+ * kernel stacks BOTH entry paths run on — the ring-3 SYS_js task stack AND the
+ * WM/boot stack the browser uses — with margin for the call chain + interrupts,
+ * since neither stack has a guard page. (call_bound's comb[24] is a separate
+ * ~0.9 KB frame on the rare bound-call path, kept out of the hot call_function_this
+ * frame; the regex matcher caps itself at depth 900 — see re_run.) */
 #define MAXDEPTH 120
 
 /* On arena exhaustion, return a shared dummy node (never NULL) so the parser's
@@ -978,20 +981,24 @@ static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names
  * their call frame (a method's receiver, the new object under `new`, or undefined
  * for a plain call); arrow functions (node->prefix==1) deliberately do NOT bind
  * one, so `this` resolves lexically up the scope chain to the enclosing function. */
+static val call_function_this(val fn, val thisv, val *args, int nargs);   /* fwd: call_bound recurses into it */
+/* A bound function (V_BOUND): prepend its bound `this` + partial args, then call
+ * the original. Kept OUT of call_function_this so its comb[24] doesn't bloat that
+ * hot, deeply-recursed frame. Depth-guarded so a bind() chain can't overflow. */
+static __attribute__((noinline)) val call_bound(obj *bf, val *args, int nargs) {
+    if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }
+    val orig  = bf->n > 0 ? bf->vals[0] : UND();
+    val bthis = bf->n > 1 ? bf->vals[1] : UND();
+    int np = bf->n > 2 ? bf->n - 2 : 0;
+    val comb[24]; int cn = 0;
+    for (int i = 0; i < np && cn < 24; i++) comb[cn++] = bf->vals[2 + i];
+    for (int i = 0; i < nargs && cn < 24; i++) comb[cn++] = args[i];
+    val r = call_function_this(orig, bthis, comb, cn);   /* bound `this` is fixed; the call-site thisv is ignored */
+    g_depth--;
+    return r;
+}
 static val call_function_this(val fn, val thisv, val *args, int nargs) {
-    if (fn.t==V_OBJ && fn.o && fn.o->kind==V_BOUND) {   /* a bound function: prepend its bound this + partial args */
-        if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }   /* guard a bind() chain */
-        obj *bf = fn.o;
-        val orig  = bf->n > 0 ? bf->vals[0] : UND();
-        val bthis = bf->n > 1 ? bf->vals[1] : UND();
-        int np = bf->n > 2 ? bf->n - 2 : 0;
-        val comb[24]; int cn = 0;
-        for (int i = 0; i < np && cn < 24; i++) comb[cn++] = bf->vals[2 + i];
-        for (int i = 0; i < nargs && cn < 24; i++) comb[cn++] = args[i];
-        val r = call_function_this(orig, bthis, comb, cn);   /* bound `this` is fixed; the call-site thisv is ignored */
-        g_depth--;
-        return r;
-    }
+    if (fn.t==V_OBJ && fn.o && fn.o->kind==V_BOUND) return call_bound(fn.o, args, nargs);
     if (fn.t==V_NATIVE) return fn.o->native(args,nargs);
     if (fn.t!=V_FUN) { rt_err("not a function"); return UND(); }
     if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }
