@@ -89,6 +89,7 @@ struct browser {
     int     find_tok;                                    /* highlighted match token (-1 none) */
     int     toky[TOK_MAX];                               /* content-space y of every token (scroll-to) */
     char    anc_id[32][32]; uint16_t anc_tok[32]; int anc_n;   /* id -> token index, for #fragment scroll-to */
+    uint8_t det_open[16];                                      /* <details> open state by index (0xFF=unseeded), persists across re-renders */
     uint8_t *img; int imgw, imgh;                        /* current full-page frame (RGBA), or NULL */
     uint8_t *framebuf; int nframes, curframe;            /* animated GIF: all frames + current */
     int      framedelay[64];                             /* per-frame delay (centiseconds) */
@@ -390,6 +391,17 @@ static int add_check_link(browser_t *b, const char *id) {
     for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
     for (int i = 0; i < il; i++) b->hrefs[b->hreflen++] = id[i];
     b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + il) };
+    return b->nlink++;
+}
+/* Store a "det:N" link so following it toggles <details> index N open/closed. */
+static int add_det_link(browser_t *b, int idx) {
+    char buf[8]; int p = 0; const char *pfx = "det:"; while (pfx[p]) { buf[p] = pfx[p]; p++; }
+    if (idx >= 10) buf[p++] = (char)('0' + idx / 10);
+    buf[p++] = (char)('0' + idx % 10); buf[p] = 0;
+    if (b->nlink >= LINK_MAX || b->hreflen + p >= HREF_MAX) return NO_LINK;
+    int off = b->hreflen;
+    for (int i = 0; i < p; i++) b->hrefs[b->hreflen++] = buf[i];
+    b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)p };
     return b->nlink++;
 }
 /* Store an onclick handler as a "javascript:CODE" link so the existing click path
@@ -755,6 +767,8 @@ static void parse_html(browser_t *b, const char *body, int len) {
      * whole page (fail-safe on malformed input). */
     int inscript = 0, instyle = 0, intitle = 0, inhead = 0, inpre = 0, insvg = 0, wstart = -1;
     int sc_start = -1;                                   /* offset where current <script> body began */
+    int det_n = 0, det_depth = 0, det_hide = 0, in_summary = 0, det_cur = 0;   /* <details>: index / nesting / suppress-depth / in-<summary> / current idx */
+    int sum_link = NO_LINK, sum_style = STY_NORMAL;      /* saved link/style around a <summary> */
 
     for (int i = 0; i < len; i++) {
         char c = body[i];
@@ -810,7 +824,24 @@ static void parse_html(browser_t *b, const char *body, int len) {
                 inpre = !closing;
                 emit_break(b, TK_PARA);                          /* pre starts/ends on its own line */
             }
-            else if (!inscript && !instyle && !intitle && !inhead && !insvg)
+            else if (tageq(tag, "details")) {                    /* collapsible: hide the body when closed */
+                if (!closing) {
+                    int idx = det_n < 16 ? det_n : 15; if (det_n < 16) det_n++;   /* cap idx so det_open[idx] stays in bounds */
+                    if (b->det_open[idx] == 0xFF) b->det_open[idx] = has_attr(body + astart, j - astart, "open") ? 1 : 0;
+                    det_depth++; det_cur = idx;
+                    if (!b->det_open[idx] && !det_hide) det_hide = det_depth;     /* start hiding this closed details' body */
+                } else { if (det_depth == det_hide) det_hide = 0; if (det_depth > 0) det_depth--; }
+                emit_break(b, TK_PARA);
+            }
+            else if (tageq(tag, "summary")) {                    /* the always-shown, clickable toggle */
+                if (!closing && det_depth > 0) {
+                    in_summary = 1; sum_link = curlink; sum_style = style;
+                    int lk = add_det_link(b, det_cur);
+                    if (lk != NO_LINK) { curlink = lk; if (style == STY_NORMAL) style = STY_LINK;
+                        emit_literal_link(b, b->det_open[det_cur] ? "[-] " : "[+] ", lk); }
+                } else if (closing && in_summary) { in_summary = 0; curlink = sum_link; style = sum_style; }
+            }
+            else if (!inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary))
                 handle_tag(b, tag, closing, body + astart, j - astart,
                            &style, &linkdepth, &curlink);
 
@@ -818,6 +849,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
             continue;
         }
         if (inscript || instyle || insvg) continue;  /* never render script/style/svg */
+        if (det_hide && !in_summary) continue;        /* inside a collapsed <details>, outside its <summary> */
 
         if (c == '&') {
             char dec; int adv = decode_entity(body + i, len - i, &dec);
@@ -1392,6 +1424,7 @@ static void browser_navigate(browser_t *b) {
     b->ls_n = 0;                      /* fresh localStorage per page */
     b->in_n = 0; b->focus_id[0] = 0;  /* fresh input-field state per page */
     b->form_action[0] = 0;            /* and no carried-over form action */
+    memset(b->det_open, 0xFF, sizeof(b->det_open));   /* <details> states unseeded until first render */
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }
@@ -1683,6 +1716,13 @@ static void browser_follow(browser_t *b, int id) {
         if (!in_get(b, b->focus_id)) in_set(b, b->focus_id, "");   /* ensure a store slot exists */
         set_status(b, "type into the field, Enter when done");
         parse_html(b, b->raw + b->bodyoff, b->bodylen);  /* re-render to show the focus cursor */
+        return;
+    }
+    int isdet = (len > 4); if (isdet) for (int k = 0; k < 4; k++) if (lc(hp[k]) != "det:"[k]) { isdet = 0; break; }
+    if (isdet) {                                         /* toggle a <details> open/closed */
+        int idx = 0; for (int k = 4; k < len; k++) if (hp[k] >= '0' && hp[k] <= '9') idx = idx * 10 + (hp[k] - '0');
+        if (idx >= 0 && idx < 16) b->det_open[idx] = b->det_open[idx] ? 0 : 1;   /* flip (seeded by the render) */
+        parse_html(b, b->raw + b->bodyoff, b->bodylen);
         return;
     }
     int ischk = (len > 6); if (ischk) for (int k = 0; k < 6; k++) if (lc(hp[k]) != "check:"[k]) { ischk = 0; break; }
