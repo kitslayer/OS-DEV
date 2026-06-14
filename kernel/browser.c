@@ -46,7 +46,7 @@
 #define IMG_READ_MAX 131072         /* scratch to read a local image file */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
 
-enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE };
+enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = image slot */
 
 typedef struct { uint16_t off, len, link; uint8_t style, type; } tok_t;
@@ -134,6 +134,7 @@ static uint32_t color_for(int style) {
     case STY_EM:   return 0x6A4A1A;
     case STY_CODE: return 0xA83254;          /* inline <code>/<tt>: crimson */
     case STY_STRIKE: return 0x808890;        /* <s>/<del>: muted grey, drawn with a strike-line */
+    case STY_MARK: return 0x101015;          /* <mark>: dark text on a yellow highlight (set in the draw) */
     default:       return 0x202024;
     }
 }
@@ -539,6 +540,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     if (tageq(tag, "s") || tageq(tag, "del") || tageq(tag, "strike")) {   /* strikethrough */
         if (!closing) { if (*style == STY_NORMAL) *style = STY_STRIKE; }
         else if (*style == STY_STRIKE) *style = STY_NORMAL;
+        return;
+    }
+    if (tageq(tag, "mark")) {                                             /* highlighted text */
+        if (!closing) { if (*style == STY_NORMAL) *style = STY_MARK; }
+        else if (*style == STY_MARK) *style = STY_NORMAL;
         return;
     }
     if (tageq(tag, "font")) {                            /* <font color="..."> text colour */
@@ -1863,7 +1869,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             uint32_t fg = color_for(tk->style);
             if (tk->style != STY_LINK && (b->tokcolor[t] & 0x01000000))   /* <font color> override */
                 fg = b->tokcolor[t] & 0xFFFFFF;
-            uint32_t wbg = selected ? 0xFFE9A8 : (current ? 0x7FC0FF : (matched ? 0xCDE8FF : BG));
+            uint32_t wbg = selected ? 0xFFE9A8 : (current ? 0x7FC0FF : (matched ? 0xCDE8FF : (tk->style == STY_MARK ? 0xFFF080 : BG)));
             int maxc = (cr - cx) / (GW * sc); if (maxc < 0) maxc = 0;
             int dl = tk->len > maxc ? maxc : tk->len;      /* clip to content width (no h-scroll) */
             int drawpx = dl * GW * sc;
