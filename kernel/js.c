@@ -265,7 +265,9 @@ static node *parse_primary(lexer *L) {
             expect_punc(L,"(");
             n->list = aalloc(sizeof(node*)*32); n->nlist=0;
             while (!peek_punc(L,")") && peek(L).type!=T_EOF) {
-                token p=advance(L); if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len; if(n->nlist<32) n->list[n->nlist++]=id; }
+                token p=advance(L); if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len;
+                    if (peek_punc(L,"=")) { advance(L); id->a=parse_assign(L); }   /* default param value */
+                    if(n->nlist<32) n->list[n->nlist++]=id; }
                 if (peek_punc(L,",")) advance(L); else break;
             }
             expect_punc(L,")");
@@ -283,7 +285,8 @@ static node *parse_primary(lexer *L) {
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err) {
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
-                expect_punc(L,":"); pr->a=parse_assign(L);
+                if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
+                else { node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; pr->a=id; }   /* {x} shorthand == {x:x} */
                 if (n->nlist<64) n->list[n->nlist++]=pr;
                 if (peek_punc(L,",")) advance(L); else break;
             }
@@ -617,7 +620,9 @@ static val call_function(val fn, val *args, int nargs) {
     env *fe = new_env(fn.o->scope);
     if (!fe) { g_oom=1; g_depth--; return UND(); }     /* arena exhausted: bail, don't deref NULL */
     node *def = fn.o->fn;
-    for (int i=0;i<def->nlist;i++) env_define(fe, node_name(def->list[i]), i<nargs?args[i]:UND());
+    for (int i=0;i<def->nlist;i++){ node *pn=def->list[i];
+        val pv = (i<nargs) ? args[i] : (pn->a ? eval_expr(pn->a, fe) : UND());   /* default value if arg omitted */
+        env_define(fe, node_name(pn), pv); }
     comp c = eval_stmt(def->a, fe);
     g_depth--;
     return c.kind==C_RETURN ? c.v : UND();
