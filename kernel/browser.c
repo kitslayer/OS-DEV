@@ -542,6 +542,16 @@ static void parse_html(browser_t *b, const char *body, int len) {
     for (int i = 0; i < len; i++) {
         char c = body[i];
         if (c == '<') {
+            /* Inside <script>/<style>, content is raw: a '<' that isn't the matching
+             * close tag (e.g. `i < 5`, or `<p>` inside a document.write string) must
+             * be treated as content, NOT parsed as a tag — otherwise the (quote-aware)
+             * tag scan can run past </script> and the block is never closed/captured. */
+            if (inscript || instyle) {
+                const char *ct = inscript ? "/script" : "/style";
+                int match = (i+1 < len && body[i+1] == '/');
+                if (match) for (int z = 0; ct[z]; z++) { if (i+1+z >= len || lc(body[i+1+z]) != ct[z]) { match = 0; break; } }
+                if (!match) continue;                 /* '<' is script/style content; skip it */
+            }
             if (wstart >= 0) { emit_word(b, wstart, style, curlink); wstart = -1; }
             /* HTML comment <!-- ... -->: skip to the "-->" terminator. A comment
              * may contain '>' (conditional comments, embedded markup), so we can't
