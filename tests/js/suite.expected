@@ -14,10 +14,11 @@
 10 12 true
 3,2,1 2,3
 true a.b.c
+true 1,2,3,4,5
 -- strings --
 HELLO world hi!
 3 ababab hello JS
-true ..hi 120
+true ..hi 120 4
 -- objects --
 6 a,b,c 1,2,3
 {"k":7,"v":8}
