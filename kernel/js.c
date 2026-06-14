@@ -83,7 +83,7 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
     "switch","case","default","do","try","catch","finally","throw","this","new",
-    "class","extends",0 };
+    "class","extends","super",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -183,7 +183,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER };
 
 typedef struct node node;
 struct node {
@@ -287,6 +287,7 @@ static node *parse_primary(lexer *L) {
         }
         if (tok_is(t,"typeof")) { advance(L); node *n=mknode(N_UNARY); n->op='t'; n->a=parse_primary(L); return n; }
         if (tok_is(t,"this")) { advance(L); return mknode(N_THIS); }
+        if (tok_is(t,"super")) { advance(L); return mknode(N_SUPER); }
         if (tok_is(t,"class")) {
             advance(L);
             node *cls=mknode(N_CLASS);
@@ -558,6 +559,7 @@ struct obj {
     node *fn; env *scope;
     val (*native)(val *args, int nargs);
     obj *home_proto;   /* class constructors: an object holding the methods to copy onto each new instance */
+    obj *super_class;  /* a class method/ctor's parent constructor, for super() / super.m() */
 };
 
 struct env { const char **keys; val *vals; int n, cap; env *parent; };
@@ -675,7 +677,10 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
     env *fe = new_env(fn.o->scope);
     if (!fe) { g_oom=1; g_depth--; return UND(); }     /* arena exhausted: bail, don't deref NULL */
     node *def = fn.o->fn;
-    if (!def->prefix) env_define(fe, "this", thisv);   /* non-arrow gets its own `this` */
+    if (!def->prefix) {                                /* non-arrow gets its own `this` (+ `super` if a class member) */
+        env_define(fe, "this", thisv);
+        if (fn.o->super_class) { val sup=UND(); sup.t=V_FUN; sup.o=fn.o->super_class; env_define(fe, "@super", sup); }
+    }
     for (int i=0;i<def->nlist;i++){ node *pn=def->list[i];
         val pv = (i<nargs) ? args[i] : (pn->a ? eval_expr(pn->a, fe) : UND());   /* default value if arg omitted */
         env_define(fe, node_name(pn), pv); }
@@ -797,7 +802,14 @@ static val eval_expr_inner(node *n, env *e) {
                 return rhs; }
             rt_err("invalid assignment target"); return UND();
         }
-        case N_MEMBER: { val recv=eval_expr(n->a,e); return eval_member_get(recv, node_name(n)); }
+        case N_SUPER: { val *s=env_find(e,"@super"); return s?*s:UND(); }
+        case N_MEMBER: {
+            if (n->a->type==N_SUPER) {   /* super.prop (no call): read from the parent's method table */
+                val *sup=env_find(e,"@super");
+                if (sup && sup->t==V_FUN && sup->o->home_proto){ val out; if(obj_get(sup->o->home_proto,node_name(n),&out)) return out; }
+                return UND();
+            }
+            val recv=eval_expr(n->a,e); return eval_member_get(recv, node_name(n)); }
         case N_INDEX: { val recv=eval_expr(n->a,e); val idx=eval_expr(n->b,e);
             if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
             if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
@@ -807,6 +819,19 @@ static val eval_expr_inner(node *n, env *e) {
             /* method call a.b(...) needs the receiver for string/array methods */
             node *callee=n->a; val args[16]; int na=n->nlist>16?16:n->nlist;
             for (int i=0;i<na;i++) args[i]=eval_expr(n->list[i],e);
+            /* super(...) and super.m(...): resolve via the call frame's @super (the
+             * parent constructor), invoked with the current `this`. */
+            if (callee->type==N_SUPER) {
+                val *sup=env_find(e,"@super"), *th=env_find(e,"this");
+                if (!sup || sup->t!=V_FUN) { rt_err("super outside a derived constructor"); return UND(); }
+                call_function_this(*sup, th?*th:UND(), args, na); return UND();
+            }
+            if (callee->type==N_MEMBER && callee->a->type==N_SUPER) {
+                val *sup=env_find(e,"@super"), *th=env_find(e,"this"); const char *m=node_name(callee);
+                if (!sup || sup->t!=V_FUN || !sup->o->home_proto) { rt_err("no super method"); return UND(); }
+                val fn; if (obj_get(sup->o->home_proto,m,&fn)) return call_function_this(fn, th?*th:UND(), args, na);
+                rt_err("no such super method"); return UND();
+            }
             if (callee->type==N_MEMBER) {
                 val recv=eval_expr(callee->a,e); const char *m=node_name(callee);
                 if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
@@ -822,21 +847,23 @@ static val eval_expr_inner(node *n, env *e) {
             /* Build the method table P, then a constructor function value carrying
              * P in home_proto. `extends` copies the parent's methods into P first
              * (children override by being added after), and an absent child
-             * constructor inherits the parent's. (super is not yet supported.) */
+             * constructor inherits the parent's. Each own method/ctor records its
+             * parent constructor in super_class so super()/super.m() can find it. */
             obj *P=new_obj(V_OBJ); if(!P){ g_oom=1; return UND(); }
-            node *ctor_node=0; val parentC=UND(); int has_parent=0;
+            node *ctor_node=0; val parentC=UND(); int has_parent=0; obj *parent_obj=0;
             if (n->a) {
-                parentC=eval_expr(n->a,e); has_parent=(parentC.t==V_FUN);
+                parentC=eval_expr(n->a,e); has_parent=(parentC.t==V_FUN); if(has_parent) parent_obj=parentC.o;
                 if (has_parent && parentC.o->home_proto) { obj *pp=parentC.o->home_proto; for(int i=0;i<pp->n && !g_oom;i++) obj_set(P,pp->keys[i],pp->vals[i]); }
             }
             for (int i=0;i<n->nlist && !g_oom;i++){ node *m=n->list[i];
                 if (strcmp(node_name(m),"constructor")==0){ ctor_node=m; continue; }
-                obj *fo=new_obj(V_FUN); if(!fo){ g_oom=1; return UND(); } fo->fn=m; fo->scope=e;
+                obj *fo=new_obj(V_FUN); if(!fo){ g_oom=1; return UND(); } fo->fn=m; fo->scope=e; fo->super_class=parent_obj;
                 val fv=UND(); fv.t=V_FUN; fv.o=fo; obj_set(P, node_name(m), fv);
             }
-            if (!ctor_node && has_parent) ctor_node = parentC.o->fn;   /* inherit parent ctor */
+            obj *ctor_super=parent_obj;   /* own ctor: super is this class's parent */
+            if (!ctor_node && has_parent) { ctor_node = parentC.o->fn; ctor_super = parentC.o->super_class; }  /* inherited ctor: its super is the GRANDparent (where it was defined) */
             if (!ctor_node) { node *em=mknode(N_FUNC); em->list=aalloc(sizeof(node*)); em->nlist=0; em->a=mknode(N_BLOCK); ctor_node=em; }
-            obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P;
+            obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P; co->super_class=ctor_super;
             val cv=UND(); cv.t=V_FUN; cv.o=co;
             if (n->str) env_define(e, node_name(n), cv);
             return cv;

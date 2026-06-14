@@ -50,4 +50,6 @@ err:undefined variable
 -- class --
 square 25
 7
+-- super --
+4 vehicle:car
 -- done --

@@ -56,4 +56,8 @@ class Square extends Shape { area(s){ return s*s; } }
 var sq=new Square("square"); print(sq.kind(), sq.area(5));
 class Acc { constructor(){ this.t=0; } add(x){ this.t+=x; return this; } }
 print(new Acc().add(3).add(4).t);
+print("-- super --");
+class Vh { constructor(w){ this.wheels=w; } kind(){ return "vehicle"; } }
+class Car extends Vh { constructor(){ super(4); } kind(){ return super.kind()+":car"; } }
+var car=new Car(); print(car.wheels, car.kind());
 print("-- done --");
