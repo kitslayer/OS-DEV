@@ -649,6 +649,9 @@ static void parse_html(browser_t *b, const char *body, int len) {
  * page is re-parsed, so script-generated HTML renders. A real DOM (getElementById,
  * .innerHTML) is future work; this covers the classic document.write pattern. */
 static char *g_sw_raw; static int g_sw_pos, g_sw_max;
+static int  g_sw_base;   /* the document.write append base (body end at script start); a DOM
+                          * mutation that shifts the buffer adjusts this + g_sw_pos together, so
+                          * `written = g_sw_pos - g_sw_base` stays correct when both are used. */
 static void script_write_cb(const char *s) {
     if (!g_sw_raw) return;
     while (*s && g_sw_pos < g_sw_max - 1) g_sw_raw[g_sw_pos++] = *s++;
@@ -712,11 +715,16 @@ static void browser_dom_set(const char *id, const char *value, int html) {
     (void)html; browser_t *b = g_ls_b; if (!b) return;
     int is, ie; if (!dom_find(b, id, &is, &ie)) return;
     int vlen = 0; while (value[vlen]) vlen++;
-    int bodyend = b->bodyoff + b->bodylen, delta = vlen - (ie - is);
-    if (bodyend + delta >= RAW_MAX - 1 || bodyend + delta < b->bodyoff) return;   /* out of room */
-    memmove(b->raw + ie + delta, b->raw + ie, bodyend - ie);   /* shift the tail */
+    int delta = vlen - (ie - is);
+    int active = (g_sw_raw == b->raw);                         /* a script's document.write is appending here */
+    int bodyend = b->bodyoff + b->bodylen;
+    int live_end = (active && g_sw_pos > bodyend) ? g_sw_pos : bodyend;   /* include any document.write'd bytes */
+    if (live_end + delta >= RAW_MAX - 1 || live_end + delta < b->bodyoff) return;   /* out of room */
+    memmove(b->raw + ie + delta, b->raw + ie, live_end - ie);  /* shift the tail (incl. document.write appends) */
     memcpy(b->raw + is, value, vlen);                          /* splice in the new content */
-    b->bodylen += delta; b->raw[b->bodyoff + b->bodylen] = 0;
+    b->bodylen += delta;
+    if (active) { if (g_sw_pos > ie) g_sw_pos += delta; if (g_sw_base > ie) g_sw_base += delta; }   /* keep cursors in sync */
+    b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);            /* re-render the page in place */
 }
 static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); }
@@ -724,10 +732,10 @@ static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
     if (appendpos >= RAW_MAX - 1) return;                /* no room to write */
-    g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_max = RAW_MAX;
+    g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_base = appendpos; g_sw_max = RAW_MAX;
     js_bind_storage(b);
     js_run_doc(b->scripts, jsout, sizeof(jsout), script_write_cb);
-    int written = g_sw_pos - appendpos;
+    int written = g_sw_pos - g_sw_base;                  /* g_sw_base may have shifted if a DOM write moved the buffer */
     g_sw_raw = 0;
     if (jsout[0]) kprintf("[js] %s\n", jsout);           /* console.log / errors -> serial */
     if (written > 0)                                     /* re-render incl. the written HTML */
@@ -741,10 +749,10 @@ static void run_js_handler(browser_t *b, const char *code) {
     static char jsout[2048];
     int appendpos = b->bodyoff + b->bodylen;
     if (appendpos >= RAW_MAX - 1) return;
-    g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_max = RAW_MAX;
+    g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_base = appendpos; g_sw_max = RAW_MAX;
     js_bind_storage(b);
     js_run_doc(code, jsout, sizeof(jsout), script_write_cb);
-    int written = g_sw_pos - appendpos;
+    int written = g_sw_pos - g_sw_base;                  /* g_sw_base may have shifted if a DOM write moved the buffer */
     g_sw_raw = 0;
     if (jsout[0]) kprintf("[js] %s\n", jsout);
     if (written > 0) { b->bodylen += written; parse_html(b, b->raw + b->bodyoff, b->bodylen); }
