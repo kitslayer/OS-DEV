@@ -731,8 +731,12 @@ static int build_args(node **list, int nlist, env *e, val *args, int maxargs) {
 
 /* Bind a destructuring pattern (an N_ARRAY/N_OBJECT of targets, reusing the
  * literal parsers) to a value, defining each leaf identifier in `e`. Handles
- * defaults (N_ASSIGN), array/object rest (N_SPREAD), rename, and nesting. */
-static void bind_pattern(node *pat, val v, env *e) {
+ * defaults (N_ASSIGN), array/object rest (N_SPREAD), rename, and nesting.
+ * Pattern nesting is already bounded by the parser's depth guard, but bind_pattern
+ * carries its own g_depth guard too (via the wrapper below) so it can never be the
+ * path that overflows the C stack regardless of the entry task's stack budget. */
+static void bind_pattern(node *pat, val v, env *e);   /* fwd: the guarded wrapper */
+static void bind_pattern_inner(node *pat, val v, env *e) {
     if (!pat || g_oom) return;
     if (pat->type==N_ASSIGN) { if (v.t==V_UNDEF) v=eval_expr(pat->b,e); bind_pattern(pat->a, v, e); return; }
     if (pat->type==N_IDENT)  { env_define(e, node_name(pat), v); return; }
@@ -758,6 +762,10 @@ static void bind_pattern(node *pat, val v, env *e) {
         }
         return;
     }
+}
+static void bind_pattern(node *pat, val v, env *e) {
+    if (++g_depth > MAXDEPTH) { g_depth--; rt_err("pattern too deeply nested"); return; }
+    bind_pattern_inner(pat, v, e); g_depth--;
 }
 
 /* resolve a member/index target for assignment: returns the container + key */
