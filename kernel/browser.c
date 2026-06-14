@@ -279,7 +279,16 @@ static int decode_entity(const char *s, int maxlen, char *out) {
     if (ent_is(s, len, "&Prime;") ) { *out = '"'; return len; }
     if (ent_is(s, len, "&sect;")  ) { *out = 'S'; return len; }
     if (ent_is(s, len, "&para;")  ) { *out = 'P'; return len; }
-    if (ent_is(s, len, "&dagger;")) { *out = '+'; return len; }
+    if (ent_is(s, len, "&dagger;") || ent_is(s, len, "&Dagger;")) { *out = '+'; return len; }
+    if (ent_is(s, len, "&cent;")  ) { *out = 'c'; return len; }
+    if (ent_is(s, len, "&pound;") ) { *out = 'L'; return len; }
+    if (ent_is(s, len, "&yen;")   ) { *out = 'Y'; return len; }
+    if (ent_is(s, len, "&micro;") ) { *out = 'u'; return len; }
+    if (ent_is(s, len, "&frasl;") ) { *out = '/'; return len; }
+    if (ent_is(s, len, "&lsaquo;")) { *out = '<'; return len; }
+    if (ent_is(s, len, "&rsaquo;")) { *out = '>'; return len; }
+    if (ent_is(s, len, "&sbquo;") ) { *out = ','; return len; }
+    if (ent_is(s, len, "&bdquo;") ) { *out = '"'; return len; }
     return 0;
 }
 
