@@ -847,6 +847,7 @@ static void build_home(browser_t *b) {
          "p previous, Enter to follow, Backspace to go back, s to save, a to bookmark, "
          "\\ to find text. Bookmarks live in a SITES file (one URL per line).</p></body></html>");
     #undef HAPP
+    b->bodyoff = 0; b->bodylen = p;   /* start page body region (for click-time JS) */
     parse_html(b, b->raw, p);
 }
 
@@ -967,6 +968,7 @@ static int decode_local_to_slot(browser_t *b, const char *path) {
  * (b->want) and retry from browser_poll(), so a load is never silently dropped. */
 static void browser_navigate(browser_t *b) {
     if (!b->raw || !b->text || !b->toks) return;
+    b->bodyoff = 0; b->bodylen = 0;   /* clean baseline; HTML paths set the real region */
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }
@@ -1188,7 +1190,8 @@ int browser_poll(browser_t *b) {
  * and navigate there. If suppress_push, replace the current history entry
  * rather than pushing (used for redirects, so Back doesn't loop). */
 static void goto_href(browser_t *b, const char *href, int suppress_push) {
-    if (startsw(href, "javascript:")) { run_js_handler(b, href + 11); return; }   /* run, don't navigate */
+    { const char *jp="javascript:"; int isjs=1; for (int k=0;k<11;k++) if (lc(href[k])!=jp[k]) { isjs=0; break; }
+      if (isjs) { run_js_handler(b, href + 11); return; } }   /* javascript: (any case) runs, doesn't navigate */
     if (href[0]=='#' || startsw(href, "mailto:")) return;
 
     char newurl[URL_MAX];
