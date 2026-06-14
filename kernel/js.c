@@ -623,7 +623,7 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET, V_REGEX /* obj->kind markers only; the val.t stays V_OBJ */ };
+       V_MAP, V_SET, V_REGEX, V_DATE /* obj->kind markers only; the val.t stays V_OBJ */ };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -924,7 +924,14 @@ static const char *val_to_str_inner(val v) {
             for (int i=0;i<o->n;i++){ if(i) buf[p++]=','; const char*s=parts[i]; while(*s) buf[p++]=*s++; }
             buf[p]=0; return buf;
         }
-        case V_OBJ: return "[object Object]";
+        case V_OBJ:
+            if (v.o && v.o->kind==V_DATE && v.o->n>=6) {   /* "YYYY-MM-DD HH:MM:SS" from vals[0..5] */
+                char *b=aalloc(24); if(!b) return "[date]"; int p=0; int y=(int)v.o->vals[0].num;
+                b[p++]='0'+(y/1000)%10; b[p++]='0'+(y/100)%10; b[p++]='0'+(y/10)%10; b[p++]='0'+y%10;
+                for (int f=1; f<6; f++){ b[p++]=(f<3)?'-':(f==3)?' ':':'; int x=(int)v.o->vals[f].num; b[p++]='0'+(x/10)%10; b[p++]='0'+x%10; }
+                b[p]=0; return b;
+            }
+            return "[object Object]";
     }
     return "";
 }
@@ -1061,6 +1068,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs);
 static val eval_number_method(val recv, const char *name, val *args, int nargs);
 static val eval_map_method(val recv, const char *name, val *args, int nargs);
 static val eval_set_method(val recv, const char *name, val *args, int nargs);
+static val eval_date_method(val recv, const char *name, val *args, int nargs);
 
 static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
@@ -1233,6 +1241,7 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_MAP) return eval_map_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_SET) return eval_set_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX) return eval_regex_method(recv,m,args,na);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_DATE) return eval_date_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();
@@ -1621,18 +1630,30 @@ static val native_ls_setItem(val *args, int nargs) {
 /* Date() -> current wall-clock as "YYYY-MM-DD HH:MM:SS" (a useful subset of the
  * real Date). Reads the CMOS RTC directly (kernel); a fixed string on the host. */
 static void d2(char *b, int *p, int v){ b[(*p)++]='0'+(v/10)%10; b[(*p)++]='0'+v%10; }
+/* Date() / new Date() -> a V_DATE object holding [year,month,day,hour,min,sec] in
+ * vals[0..5] (read from the RTC at construction). Methods via eval_date_method;
+ * val_to_str renders "YYYY-MM-DD HH:MM:SS" so it still prints/coerces like before. */
 static val nat_date(val *a, int n){
-    (void)a; (void)n; char buf[24]; int p=0;
+    (void)a; (void)n; int y,mo,d,h,mi,s;
 #ifndef JS_HOSTTEST
-    struct rtc_time t; rtc_now(&t);
-    int y=t.year; buf[p++]='0'+(y/1000)%10; buf[p++]='0'+(y/100)%10; buf[p++]='0'+(y/10)%10; buf[p++]='0'+y%10;
-    buf[p++]='-'; d2(buf,&p,t.month); buf[p++]='-'; d2(buf,&p,t.day);
-    buf[p++]=' '; d2(buf,&p,t.hour); buf[p++]=':'; d2(buf,&p,t.min); buf[p++]=':'; d2(buf,&p,t.sec);
-    buf[p]=0;
+    struct rtc_time t; rtc_now(&t); y=t.year; mo=t.month; d=t.day; h=t.hour; mi=t.min; s=t.sec;
 #else
-    const char *s="2026-06-13 12:00:00"; while(s[p]){buf[p]=s[p];p++;} buf[p]=0;
+    y=2026; mo=6; d=13; h=12; mi=0; s=0;
 #endif
-    return STRV(intern(buf, p));
+    obj *o=new_obj(V_DATE); if(!o){ g_oom=1; return UND(); }
+    arr_push_val(o,NUM(y)); arr_push_val(o,NUM(mo)); arr_push_val(o,NUM(d)); arr_push_val(o,NUM(h)); arr_push_val(o,NUM(mi)); arr_push_val(o,NUM(s));
+    return obj_val(o);
+}
+static val eval_date_method(val recv, const char *name, val *args, int nargs){
+    (void)args;(void)nargs; obj *o=recv.o; if(!o || o->n<6) return UND();
+    if(strcmp(name,"getFullYear")==0) return o->vals[0];
+    if(strcmp(name,"getMonth")==0)    return NUM(o->vals[1].num-1);   /* JS months are 0-based */
+    if(strcmp(name,"getDate")==0)     return o->vals[2];
+    if(strcmp(name,"getHours")==0)    return o->vals[3];
+    if(strcmp(name,"getMinutes")==0)  return o->vals[4];
+    if(strcmp(name,"getSeconds")==0)  return o->vals[5];
+    if(strcmp(name,"toString")==0||strcmp(name,"toISOString")==0) return STRV(val_to_str(recv));
+    rt_err("unknown Date method"); return UND();
 }
 
 /* ---- Math (integer; the kernel has no FPU) ---- */
