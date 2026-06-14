@@ -1033,18 +1033,19 @@ static void run_js_handler(browser_t *b, const char *code) {
      * pressing Enter again re-runs the same link (e.g. clicking a counter repeatedly). */
     if (saved_sel != NO_LINK && saved_sel < b->nlink) b->sel = saved_sel;
 }
-/* If the element has an onchange="CODE" handler, run it (after a value change).
+/* If the element has the named inline handler (onchange/oninput/…), run it.
  * Returns 1 if it ran (run_js_handler re-renders), so the caller can skip its own. */
-static int fire_onchange(browser_t *b, const char *id) {
+static int fire_handler(browser_t *b, const char *id, const char *attr) {
     int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return 0;
     const char *oc; int ocl;
-    if (!find_attr(b->raw + as, ae - as, "onchange", &oc, &ocl) || ocl <= 0) return 0;
+    if (!find_attr(b->raw + as, ae - as, attr, &oc, &ocl) || ocl <= 0) return 0;
     char code[1024]; int n = ocl; if (n > (int)sizeof(code) - 1) n = (int)sizeof(code) - 1;
     for (int i = 0; i < n; i++) code[i] = oc[i];   /* copy BEFORE run_js_handler mutates b->raw */
     code[n] = 0;
     run_js_handler(b, code);
     return 1;
 }
+static int fire_onchange(browser_t *b, const char *id) { return fire_handler(b, id, "onchange"); }
 
 /* Render plain text: words become WORD tokens, newlines become line breaks
  * (a blank line becomes a paragraph break), so file structure is preserved. */
@@ -2003,11 +2004,13 @@ void browser_key(browser_t *b, int c) {
         }
         else if (c == 8 || c == 127) {                  /* backspace */
             const char *cur = in_get(b, b->focus_id);
-            if (cur && cur[0]) { char t[96]; int n=0; while(cur[n]&&n<95){t[n]=cur[n];n++;} t[n-1]=0; in_set(b, b->focus_id, t); parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+            if (cur && cur[0]) { char t[96]; int n=0; while(cur[n]&&n<95){t[n]=cur[n];n++;} t[n-1]=0; in_set(b, b->focus_id, t);
+                if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen); }
         } else if (c >= 32 && c < 127) {                /* a printable char */
             const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
             if (cur) while (cur[n] && n<94) { t[n]=cur[n]; n++; }
-            if (n < 94) { t[n++]=(char)c; t[n]=0; in_set(b, b->focus_id, t); parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+            if (n < 94) { t[n++]=(char)c; t[n]=0; in_set(b, b->focus_id, t);
+                if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen); }   /* oninput fires per keystroke */
         }
         return;
     }
