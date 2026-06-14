@@ -46,7 +46,7 @@
 #define IMG_READ_MAX 131072         /* scratch to read a local image file */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
 
-enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK };
+enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = image slot */
 
 typedef struct { uint16_t off, len, link; uint8_t style, type; } tok_t;
@@ -547,6 +547,12 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     if (tageq(tag, "mark")) {                                             /* highlighted text */
         if (!closing) { if (*style == STY_NORMAL) *style = STY_MARK; }
         else if (*style == STY_MARK) *style = STY_NORMAL;
+        return;
+    }
+    if (tageq(tag, "sub") || tageq(tag, "sup")) {                         /* sub/superscript (drawn at a y-offset) */
+        int st = tageq(tag, "sub") ? STY_SUB : STY_SUP;
+        if (!closing) { if (*style == STY_NORMAL) *style = st; }
+        else if (*style == st) *style = STY_NORMAL;
         return;
     }
     if (tageq(tag, "font")) {                            /* <font color="..."> text colour */
@@ -1875,7 +1881,8 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             int maxc = (cr - cx) / (GW * sc); if (maxc < 0) maxc = 0;
             int dl = tk->len > maxc ? maxc : tk->len;      /* clip to content width (no h-scroll) */
             int drawpx = dl * GW * sc;
-            put_word(cx, cy, b->text + tk->off, dl, fg, wbg, sc);
+            int yo = tk->style == STY_SUB ? 5 : tk->style == STY_SUP ? -4 : 0;   /* sub/superscript vertical shift */
+            put_word(cx, cy + yo, b->text + tk->off, dl, fg, wbg, sc);
             if (tk->style == STY_BOLD) {                   /* faux-bold: transparent 1px overstrike */
                 char w[72]; int ln = dl > 71 ? 71 : dl;
                 for (int i = 0; i < ln; i++) w[i] = b->text[tk->off + i];
