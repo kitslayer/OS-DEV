@@ -712,7 +712,19 @@ static int browser_dom_get(const char *id, char *out, int max, int html) {
     memcpy(out, g_ls_b->raw + is, len); out[len] = 0; return 1;
 }
 static void browser_dom_set(const char *id, const char *value, int html) {
-    (void)html; browser_t *b = g_ls_b; if (!b) return;
+    browser_t *b = g_ls_b; if (!b) return;
+    static char esc[8192];
+    if (!html) {   /* textContent: HTML-escape so the text isn't interpreted as markup (innerHTML inserts raw) */
+        int o = 0;
+        for (int i = 0; value[i] && o < (int)sizeof(esc) - 7; i++) {
+            char c = value[i];
+            if (c=='<')      { memcpy(esc+o, "&lt;", 4); o += 4; }
+            else if (c=='>') { memcpy(esc+o, "&gt;", 4); o += 4; }
+            else if (c=='&') { memcpy(esc+o, "&amp;", 5); o += 5; }
+            else esc[o++] = c;
+        }
+        esc[o] = 0; value = esc;
+    }
     int is, ie; if (!dom_find(b, id, &is, &ie)) return;
     int vlen = 0; while (value[vlen]) vlen++;
     int delta = vlen - (ie - is);
