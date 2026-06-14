@@ -1473,10 +1473,16 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         if(re&&re->ok){ int caps[2*(RE_MAXGROUP+1)]; int pos=0;
             while(pos<=len && !g_oom){ int st=re_search(re,s,len,pos,caps); if(st<0) break; arr_push_val(out, re_result(re,s,caps)); pos = caps[1]>caps[0]?caps[1]:caps[1]+1; } }
         val r=UND(); r.t=V_ARR; r.o=out; return r; }
-    if (strcmp(name,"replace")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]); const char *repl=nargs>1?val_to_str(args[1]):""; int caps[2*(RE_MAXGROUP+1)];
-        sbuild b; memset(&b,0,sizeof(b)); int pos=0;
+    if (strcmp(name,"replace")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]);
+        int has_fn = nargs>1 && (args[1].t==V_FUN||args[1].t==V_NATIVE);   /* str.replace(re, (m,g1,…)=>…) */
+        const char *repl = (nargs>1 && !has_fn) ? val_to_str(args[1]) : "";
+        int caps[2*(RE_MAXGROUP+1)]; sbuild b; memset(&b,0,sizeof(b)); int pos=0;
         for(;;){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom) break;
-            sb_put(&b, s+pos, caps[0]-pos); sb_expand(&b, repl, s, caps, re->ngroup);
+            sb_put(&b, s+pos, caps[0]-pos);
+            if(has_fn){ val fa[RE_MAXGROUP+1]; int na=0;                    /* pass (match, g1, …, gN) */
+                for(int gi=0; gi<=re->ngroup && na<RE_MAXGROUP+1; gi++){ int a=caps[2*gi],e=caps[2*gi+1]; if(a>=0&&e>=a){ char*m=aalloc(e-a+1); if(m){memcpy(m,s+a,e-a);m[e-a]=0;} fa[na++]=STRV(m?m:""); } else fa[na++]=UND(); }
+                val rv=call_function(args[1], fa, na); const char *rs=val_to_str(rv); sb_put(&b, rs, (int)strlen(rs)); }
+            else sb_expand(&b, repl, s, caps, re->ngroup);
             pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(caps[1]==caps[0] && caps[0]<len) sb_put(&b, s+caps[0], 1);   /* zero-width: emit a char, advance */
             if(!re->global){ break; } }
         sb_put(&b, s+pos, len-pos); if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
