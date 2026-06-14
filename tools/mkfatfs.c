@@ -70,6 +70,16 @@ static const struct {
         "document.write(\"<h2>Sum of 1..100 = \" + sum + \"</h2>\");\n"
         "console.log(\"page script ran; sum=\" + sum);\n"
         "</script>" },
+    { "JSDEEP  HTM", "<h1>Deep recursion guard</h1>"
+        "<p>This page's script recurses 500 deep on purpose. The interpreter must"
+        " stop it at the depth cap and report an error &mdash; <b>without</b> crashing"
+        " the OS (the browser runs page scripts on the kernel stack, which has no"
+        " guard page):</p>"
+        "<script>\n"
+        "function r(n){ return n <= 0 ? 0 : 1 + r(n - 1); }\n"
+        "document.write(\"<p>r(500) = \" + r(500) + \"</p>\");\n"
+        "</script>"
+        "<p>If you can read this paragraph and the OS is still responsive, the guard held.</p>" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)

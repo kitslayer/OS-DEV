@@ -211,7 +211,12 @@ global multiboot_info_ptr
 multiboot_info_ptr: resq 1
 
 alignb 16
-stack_bottom: resb 16384            ; 16 KiB boot stack
+; 256 KiB boot stack. kmain() -> desktop_run() (the window manager) runs on this
+; stack, and the browser executes page <script> there via the JS interpreter,
+; whose recursion can be stack-heavy. There is no guard page, so this matches the
+; 256 KiB kernel stack the ring-3 apps get (app.c) for the same JS/TLS code.
+; (Identity-mapped: early paging maps the first 1 GiB, kernel+BSS is only ~3 MiB.)
+stack_bottom: resb 262144           ; 256 KiB boot stack
 stack_top:
 
 ; Mark the stack non-executable (silences a linker warning; harmless here).

@@ -165,7 +165,11 @@ struct node {
 };
 
 static int g_depth;            /* recursion guard (parser + eval + val_to_str + calls) */
-#define MAXDEPTH 250           /* bounded for the app's 256 KB kernel stack (no guard page) */
+/* ~850 B of C stack per nesting level (measured). Cap so the worst case (~120 *
+ * 850 B ≈ 100 KB) stays well within the 256 KB kernel stacks BOTH entry paths run
+ * on — the ring-3 SYS_js task stack AND the WM/boot stack the browser uses — with
+ * margin for the call chain + interrupts, since neither stack has a guard page. */
+#define MAXDEPTH 120
 
 /* On arena exhaustion, return a shared dummy node (never NULL) so the parser's
  * field writes (n->a=..., n->op=...) are harmless scribbles rather than NULL

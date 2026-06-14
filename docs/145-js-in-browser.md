@@ -47,6 +47,15 @@ renders the heading, the five generated `<p>` items, and a `<h2>` showing `5050`
   browser (WM thread) and the shell's `js` (a ring-3 syscall) are distinct
   preemptible tasks that share the interpreter's static arena — only one runs at
   a time (the same pattern as `tls_get`).
+- **Stack budget** (review finding C1): the browser runs page scripts on the
+  WM/boot stack, which was only 16 KB with no guard page — far too little for the
+  interpreter's recursion (the old `MAXDEPTH=250` was sized for the 256 KB
+  `SYS_js` task stack). A `<script>` nesting ~15 deep would have silently
+  corrupted kernel memory. Fixed by **growing the boot stack to 256 KB** (matching
+  the app stacks, well within the 1 GiB identity map) and **lowering `MAXDEPTH` to
+  120** (~100 KB worst case) so both entry paths have comfortable margin. Verified:
+  a script recursing 500 deep now reports `expression too deeply nested` and the
+  OS stays responsive.
 
 ## Honest limits (what this is *not*)
 
