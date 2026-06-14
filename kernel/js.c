@@ -1581,6 +1581,8 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"every")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(!truthy(call_function(args[0],ca,2))) return BOOLV(0); } return BOOLV(1); }
     if (strcmp(name,"reduce")==0){ if(!nargs) return UND(); int i=0; val acc; if(nargs>1) acc=args[1]; else { if(o->n==0) return UND(); acc=o->vals[0]; i=1; }
         for(; i<o->n && !g_err && !g_oom; i++){ val ca[3]={acc,o->vals[i],NUM(i)}; acc=call_function(args[0],ca,3); } return acc; }
+    if (strcmp(name,"reduceRight")==0){ if(!nargs) return UND(); int i=o->n-1; val acc; if(nargs>1) acc=args[1]; else { if(o->n==0) return UND(); acc=o->vals[o->n-1]; i=o->n-2; }
+        for(; i>=0 && !g_err && !g_oom; i--){ val ca[3]={acc,o->vals[i],NUM(i)}; acc=call_function(args[0],ca,3); } return acc; }
     if (strcmp(name,"sort")==0){   /* in-place insertion sort: comparator if given, else string order (JS default) */
         int havecmp = (nargs && (args[0].t==V_FUN || args[0].t==V_NATIVE));
         for (int i=1; i<o->n && !g_err && !g_oom; i++){ val key=o->vals[i]; int j=i-1;

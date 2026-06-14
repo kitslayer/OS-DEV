@@ -104,6 +104,7 @@ undefined undefined
 -- array mutators --
 2,3 1,a,b,c,4,5
 0 1,2,3
+cba 16
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2
