@@ -1625,7 +1625,18 @@ static void browser_follow(browser_t *b, int id) {
         for (int i = 0; i < n; i++) cid[i] = hp[6 + i];
         cid[n] = 0;
         const char *cur = in_get(b, cid);
-        in_set(b, cid, (cur && streqs(cur, "on")) ? "" : "on");   /* flip; the re-render updates its submit name */
+        int turning_on = !(cur && streqs(cur, "on"));
+        in_set(b, cid, turning_on ? "on" : "");                   /* flip; the re-render updates its submit name */
+        if (turning_on) {                                         /* a radio turning on unchecks its group siblings */
+            int as, ae; const char *tp; int tpl; const char *nm; int nml;
+            if (dom_attr_region(b, cid, &as, &ae)
+                && find_attr(b->raw + as, ae - as, "type", &tp, &tpl) && attr_eq(tp, tpl, "radio")
+                && find_attr(b->raw + as, ae - as, "name", &nm, &nml) && nml > 0) {
+                char grp[32]; int gn = nml; if (gn > 31) gn = 31; for (int i = 0; i < gn; i++) grp[i] = nm[i]; grp[gn] = 0;
+                for (int j = 0; j < b->in_n; j++)                 /* the previously-checked sibling has its name == group */
+                    if (!streqs(b->in_id[j], cid) && b->in_name[j][0] && streqs(b->in_name[j], grp)) b->in_val[j][0] = 0;
+            }
+        }
         parse_html(b, b->raw + b->bodyoff, b->bodylen);
         return;
     }
