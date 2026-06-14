@@ -5,7 +5,7 @@ booted via Multiboot under QEMU.
 
 ## Status
 
-✅ **146 milestones complete — a fully keyboard-drivable graphical desktop OS with its own from-scratch JavaScript interpreter (with a Math/JSON/String/Array standard library, runnable from the shell *and* inside web pages via `<script>`), whose web browser now browses the real HTTPS web (validated live on example.com, gnu.org, the NPR text news site, and danluu.com) — verifying the server's CertificateVerify signature, the cert chain's issuer links, and anchoring the chain to a baked-in trusted root CA (NPR → R13 → ISRG Root X1), all with from-scratch ECDSA/RSA/X.509 crypto — following links across pages (a from-scratch TLS 1.3 client, also wired to the shell's `get`/`wget`) and renders every common image format — PNG (incl. interlaced), animated GIF, and baseline-&-progressive JPEG — all inline and from scratch, plus colour text, a hierarchical filesystem, ten userspace apps (six games incl. Tetris/Breakout/Minesweeper, a text editor, …), a system monitor, a complete verified crypto + TLS toolkit (SHA-256/AES-GCM/ChaCha20-Poly1305/HKDF/X25519/RSA/ECDSA/X.509), and a real taskbar. It even loads and runs programs from its own disk.**
+✅ **147 milestones complete — a fully keyboard-drivable graphical desktop OS with its own from-scratch JavaScript interpreter (with a Math/JSON/String/Array standard library, runnable from the shell *and* inside web pages via `<script>`), whose web browser now browses the real HTTPS web (validated live on example.com, gnu.org, the NPR text news site, and danluu.com) — verifying the server's CertificateVerify signature, the cert chain's issuer links, and anchoring the chain to a baked-in trusted root CA (NPR → R13 → ISRG Root X1), all with from-scratch ECDSA/RSA/X.509 crypto — following links across pages (a from-scratch TLS 1.3 client, also wired to the shell's `get`/`wget`) and renders every common image format — PNG (incl. interlaced), animated GIF, and baseline-&-progressive JPEG — all inline and from scratch, plus colour text, a hierarchical filesystem, ten userspace apps (six games incl. Tetris/Breakout/Minesweeper, a text editor, …), a system monitor, a complete verified crypto + TLS toolkit (SHA-256/AES-GCM/ChaCha20-Poly1305/HKDF/X25519/RSA/ECDSA/X.509), and a real taskbar. It even loads and runs programs from its own disk.**
 OS-DEV goes from power-on to a themed windowing **desktop environment** that
 hosts **actual ring-3 programs as windows**: 64-bit long mode, interrupts,
 physical/virtual memory + a heap, **preemptive** multitasking with **sleep/wake**
@@ -237,6 +237,7 @@ whole thing works:
 | 144| **From-scratch JavaScript interpreter** — lexer + parser + tree-walking evaluator; shell `js` / `js file.js` | [docs/144](docs/144-js-interpreter.md) |
 | 145| **JavaScript runs in the browser** — pages execute their `<script>` tags (document.write) | [docs/145](docs/145-js-in-browser.md) |
 | 146| **JS standard library** — Math, JSON.stringify, Object.keys, String/Array methods (map/filter/…) | [docs/146](docs/146-js-stdlib.md) |
+| 147| **Arrow functions** — `x => x*x`, `(a,b) => a+b`, block bodies, currying | [docs/147](docs/147-arrow-functions.md) |
 
 ## Roadmap
 

@@ -145,6 +145,10 @@ static token lex_next(lexer *L) {
 
 static token peek(lexer *L){ if (!L->has_peek){ L->peeked=lex_next(L); L->has_peek=1; } return L->peeked; }
 static token advance(lexer *L){ if (L->has_peek){ L->has_peek=0; return L->peeked; } return lex_next(L); }
+/* save/restore lexer position for bounded lookahead (arrow-function detection) */
+typedef struct { int pos, has_peek; token peeked; } lexsave;
+static lexsave lex_save(lexer *L){ lexsave s; s.pos=L->pos; s.has_peek=L->has_peek; s.peeked=L->peeked; return s; }
+static void lex_restore(lexer *L, lexsave s){ L->pos=s.pos; L->has_peek=s.has_peek; L->peeked=s.peeked; }
 static int tok_is(token t, const char *p){ int l=(int)strlen(p); return t.len==l && t.s && memcmp(t.s,p,l)==0; }
 static int peek_punc(lexer *L, const char *p){ token t=peek(L); return t.type==T_PUNC && tok_is(t,p); }
 static int peek_kw(lexer *L, const char *p){ token t=peek(L); return t.type==T_KW && tok_is(t,p); }
@@ -301,8 +305,37 @@ static node *parse_cond(lexer *L) {
     return c;
 }
 
+/* Build an arrow function N_FUNC from already-parsed params; parses the body
+ * (a `{ }` block, or an expression that becomes an implicit `return`). */
+static node *make_arrow(lexer *L, node **params, int np) {
+    node *fn = mknode(N_FUNC);
+    fn->list = aalloc((long)sizeof(node*) * (np>0?np:1)); fn->nlist = np;
+    for (int i=0;i<np;i++) fn->list[i]=params[i];
+    if (peek_punc(L,"{")) { fn->a = parse_stmt(L); }
+    else { node *ret=mknode(N_RETURN); ret->a=parse_assign(L);
+           node *blk=mknode(N_BLOCK); blk->list=aalloc(sizeof(node*)); if(blk->list){blk->list[0]=ret; blk->nlist=1;} fn->a=blk; }
+    return fn;
+}
+
 static node *parse_assign(lexer *L) {
     if (++g_depth > MAXDEPTH) { rt_err("max recursion"); g_depth--; return mknode(N_UNDEF); }
+    /* arrow functions: `x => body` and `(a, b, ...) => body`. Detected with bounded
+     * lookahead (save/restore the lexer) so a plain `(expr)` isn't misparsed. */
+    token t0 = peek(L);
+    if (t0.type==T_IDENT) {
+        lexsave sv = lex_save(L); token id = advance(L);
+        if (peek_punc(L,"=>")) { advance(L); node *p=mknode(N_IDENT); p->str=intern(id.s,id.len); p->slen=id.len;
+                                 node *ps[1]={p}; node *fn=make_arrow(L,ps,1); g_depth--; return fn; }
+        lex_restore(L, sv);
+    } else if (t0.type==T_PUNC && tok_is(t0,"(")) {
+        lexsave sv = lex_save(L); advance(L);
+        node *ps[16]; int np=0, ok=1;
+        if (!peek_punc(L,")")) for(;;){ token p=peek(L); if(p.type!=T_IDENT){ ok=0; break; } advance(L);
+            if(np<16){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len; ps[np++]=id; }
+            if(peek_punc(L,",")) advance(L); else break; }
+        if (ok && peek_punc(L,")")) { advance(L); if (peek_punc(L,"=>")) { advance(L); node *fn=make_arrow(L,ps,np); g_depth--; return fn; } }
+        lex_restore(L, sv);
+    }
     node *left = parse_cond(L);
     token t = peek(L);
     if (t.type==T_PUNC && (tok_is(t,"=")||tok_is(t,"+=")||tok_is(t,"-=")||tok_is(t,"*=")||tok_is(t,"/=")||tok_is(t,"%="))) {
