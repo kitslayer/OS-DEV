@@ -82,13 +82,14 @@ static const struct {
         "<p>If you can read this paragraph and the OS is still responsive, the guard held.</p>" },
     { "DOM     HTM", "<h1>Interactive DOM</h1>"
         "<p>Each link runs JavaScript that updates the page <b>in place</b> by mutating an element through <code>document.getElementById</code> &mdash; no document.write. Tab/n to a link, Enter to run it:</p>"
-        "<p>Counter: <b id=\"count\">0</b></p>"
+        "<p>Counter: <b id=\"count\">0</b> &nbsp; fib(counter) = <b id=\"fib\">0</b></p>"
         "<p>Message: <span id=\"msg\">(click below)</span></p><ul>"
         "<li><a href=\"javascript:var c=parseInt(document.getElementById('count').textContent)+1; document.getElementById('count').textContent=''+c\">increment the counter</a></li>"
+        "<li><a href=\"javascript:function f(k){return k<2?k:f(k-1)+f(k-2);} document.getElementById('fib').textContent=''+f(parseInt(document.getElementById('count').textContent))\">compute fib(counter) &mdash; DOM read, JS recursion, DOM write</a></li>"
         "<li><a href=\"javascript:document.getElementById('msg').textContent='Hello from a real DOM!'\">set the message text</a></li>"
         "<li><a href=\"javascript:document.getElementById('msg').innerHTML='now <b>bold</b> via innerHTML'\">set message HTML</a></li>"
-        "<li><a href=\"javascript:document.getElementById('count').textContent='0'; document.getElementById('msg').textContent='(reset)'\">reset</a></li>"
-        "</ul><p>The counter and message above change when you click &mdash; the element is found by id and its content replaced, then the page re-renders.</p>" },
+        "<li><a href=\"javascript:document.getElementById('count').textContent='0'; document.getElementById('fib').textContent='0'; document.getElementById('msg').textContent='(reset)'\">reset</a></li>"
+        "</ul><p>The values above change when you click &mdash; the element is found by id, its content replaced (after computing), and the page re-renders.</p>" },
     { "OOP     HTM", "<h1>Object-oriented JavaScript in the browser</h1>"
         "<p>The list below is generated live by a page &lt;script&gt; using classes, inheritance, <code>super</code>, destructuring, spread and template literals:</p><ul>"
         "<script>\n"
