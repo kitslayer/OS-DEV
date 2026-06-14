@@ -183,6 +183,12 @@ static const struct {
         "print(\"tokens: \" + \"red,  green ,blue\".split(new RegExp(\"\\\\s*,\\\\s*\")).join(\" | \"));\n"
         "print(\"first word: \" + \"  Hello there\".match(new RegExp(\"[A-Za-z]+\"))[0]);\n"
         "print(\"collapsed: [\" + \"too   many    spaces\".replace(new RegExp(\"\\\\s+\",\"g\"),\" \") + \"]\");\n" },
+    { "RXTEST  JS ", "// rxtest.js  --  regex hardening: pathological patterns fail gracefully, never crash.\n"
+        "print(\"deep groups: \" + new RegExp(\"(\".repeat(1800)).test(\"x\"));\n"   /* parser depth-capped at 400 */
+        "print(\"long match: \" + new RegExp(\"a+\").test(\"a\".repeat(2500)));\n"  /* matcher depth-capped at 900 */
+        "print(\"redos: \" + new RegExp(\"(a+)+$\").test(\"aaaaaaaaaaaaaaaaaaaaX\"));\n"  /* step-budget, no hang */
+        "print(\"normal: \" + \"id-42\".replace(new RegExp(\"(\\\\w+)-(\\\\d+)\"), \"$2:$1\"));\n"
+        "print(\"SURVIVED\");\n" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)

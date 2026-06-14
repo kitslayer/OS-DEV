@@ -695,7 +695,7 @@ typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int las
 enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
 typedef struct rnode rnode;
 struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; };
-typedef struct { const char *p; int len, pos; int ngroup; int err; } rparse;
+typedef struct { const char *p; int len, pos; int ngroup; int err; int depth; } rparse;
 
 static rnode *rx_node(int t){ rnode *n=aalloc(sizeof(rnode)); if(!n) return 0; memset(n,0,sizeof(*n)); n->type=t; return n; }
 static rnode *rx_alt(rparse *P);
@@ -748,8 +748,13 @@ static rnode *rx_cat(rparse *P){
     return a?a:rx_node(RN_EMPTY);
 }
 static rnode *rx_alt(rparse *P){
+    /* group nesting recurses here (rx_atom -> rx_alt for `(`); the pattern is an
+     * ordinary string so the interpreter's MAXDEPTH doesn't bound it. Cap it well
+     * below the ~1700-group C-stack cliff on the kernel's 256 KB JS stack. */
+    if(++P->depth > 400){ P->err=1; P->depth--; return rx_node(RN_EMPTY); }
     rnode *a=rx_cat(P);
-    while(P->pos<P->len && P->p[P->pos]=='|'){ P->pos++; rnode *b=rx_cat(P); rnode *alt=rx_node(RN_ALT); if(!alt){P->err=1;return a;} alt->a=a; alt->b=b; a=alt; }
+    while(P->pos<P->len && P->p[P->pos]=='|'){ P->pos++; rnode *b=rx_cat(P); rnode *alt=rx_node(RN_ALT); if(!alt){P->err=1;break;} alt->a=a; alt->b=b; a=alt; }
+    P->depth--;
     return a;
 }
 typedef struct { reinst *prog; int pc; int err; } remit;
@@ -786,7 +791,12 @@ static regex *re_compile(const char *pat, const char *flags){
 }
 static int rx_eqc(int a,int b,int icase){ if(a==b) return 1; if(icase){ int la=(a>='A'&&a<='Z')?a+32:a, lb=(b>='A'&&b<='Z')?b+32:b; return la==lb; } return 0; }
 static int re_run(regex *re,int pc,const char*s,int slen,int sp,int*caps,long*budget,int depth){
-    if(--*budget<0 || depth>3000) return -2;
+    /* re_run recurses per I_SPLIT/I_SAVE, so a greedy quantifier matching N chars
+     * recurses ~N deep. The kernel JS task stack is 256 KB with NO guard page and
+     * already holds the interpreter's eval frames, so cap conservatively (~900) —
+     * the host's 8 MB stack tolerated 3000, the kernel's does not. A single run
+     * longer than this fails to match rather than corrupting kernel memory. */
+    if(--*budget<0 || depth>900) return -2;
     for(;;){
         reinst *in=&re->prog[pc];
         switch(in->op){
