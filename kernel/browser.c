@@ -56,6 +56,7 @@ typedef struct { int16_t x, y, w, h; uint16_t link; } lrec_t;  /* a clickable re
 struct browser {
     char    url[URL_MAX];
     int     editing;
+    int     edit_fresh;                                  /* just entered the address bar: first keystroke replaces the URL */
     int     viewsource;                                  /* 'u': show raw HTML instead of rendering */
     char   *raw;  int rawlen;
     char   *text; int textlen;
@@ -1951,8 +1952,9 @@ void browser_key(browser_t *b, int c) {
     if (b->editing) {
         if (c == '\n' || c == '\r') { b->editing = 0; if (looks_like_search(b->url)) make_search_url(b->url); browser_navigate(b); }
         else if (c == 27)            { b->editing = 0; }
-        else if (c == 8 || c == 127) { int n = (int)strlen(b->url); if (n) b->url[n-1] = 0; }
-        else if (c >= 32 && c < 127) { int n = (int)strlen(b->url); if (n < URL_MAX-1) { b->url[n]=(char)c; b->url[n+1]=0; } }
+        else if (c == 8 || c == 127) { b->edit_fresh = 0; int n = (int)strlen(b->url); if (n) b->url[n-1] = 0; }   /* editing the existing URL */
+        else if (c >= 32 && c < 127) { if (b->edit_fresh) { b->url[0] = 0; b->edit_fresh = 0; }   /* first keystroke replaces the shown URL */
+                                       int n = (int)strlen(b->url); if (n < URL_MAX-1) { b->url[n]=(char)c; b->url[n+1]=0; } }
         return;
     }
     if (c == 8 || c == 127) { browser_back(b); return; }   /* Backspace = Back */
@@ -1970,7 +1972,7 @@ void browser_key(browser_t *b, int c) {
     case 'u':           if (!b->img) { b->viewsource = !b->viewsource; b->scroll = 0;  /* toggle raw HTML */
                             set_status(b, b->viewsource ? "source" : ""); } break;
     case 'a':           browser_bookmark(b); break; /* add current URL to SITES */
-    case '/': case 'e': b->editing = 1;    break;
+    case '/': case 'e': b->editing = 1; b->edit_fresh = 1;    break;
     case '\\':          b->finding = 1; b->findq[0] = 0; b->find_tok = -1; set_status(b, "find: "); break;
     case '\t': case 'n': select_link(b, +1); break; /* next link (keyboard nav) */
     case 'p':            select_link(b, -1); break; /* previous link */
@@ -1985,7 +1987,7 @@ int browser_click(browser_t *b, int rx, int ry, int w, int h) {
     (void)w; (void)h;
     if (ry < ADDR_H) {
         if (rx >= 6 && rx < 24) browser_back(b);          /* the Back button */
-        else b->editing = 1;                              /* edit the address */
+        else { b->editing = 1; b->edit_fresh = 1; }       /* edit the address */
         return 1;
     }
     b->editing = 0;
