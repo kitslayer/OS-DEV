@@ -50,4 +50,10 @@ var om={ base:100, add(x){ return this.base+x; } }; print(om.add(5));
 function Bx(v){ this.v=v; this.scale=function(a){ return a.map(x=> x*this.v); }; }
 print(new Bx(3).scale([1,2,3]).join(","));
 var oc={n:5}; oc.n++; var ac=[10,20]; ac[1]++; print(oc.n, ac[1]);
+print("-- class --");
+class Shape { constructor(n){ this.n=n; } kind(){ return this.n; } }
+class Square extends Shape { area(s){ return s*s; } }
+var sq=new Square("square"); print(sq.kind(), sq.area(5));
+class Acc { constructor(){ this.t=0; } add(x){ this.t+=x; return this; } }
+print(new Acc().add(3).add(4).t);
 print("-- done --");

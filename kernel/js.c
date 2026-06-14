@@ -82,7 +82,8 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
-    "switch","case","default","do","try","catch","finally","throw","this","new",0 };
+    "switch","case","default","do","try","catch","finally","throw","this","new",
+    "class","extends",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -182,7 +183,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS };
 
 typedef struct node node;
 struct node {
@@ -210,6 +211,7 @@ static node *parse_expr(lexer *L);
 static node *parse_assign(lexer *L);
 static node *parse_stmt(lexer *L);
 static node *parse_unary(lexer *L);
+static node *parse_postfix(lexer *L);
 
 static void expect_punc(lexer *L, const char *p){ token t=advance(L); if(!(t.type==T_PUNC && tok_is(t,p))) rt_err("syntax: expected punctuation"); }
 
@@ -285,6 +287,24 @@ static node *parse_primary(lexer *L) {
         }
         if (tok_is(t,"typeof")) { advance(L); node *n=mknode(N_UNARY); n->op='t'; n->a=parse_primary(L); return n; }
         if (tok_is(t,"this")) { advance(L); return mknode(N_THIS); }
+        if (tok_is(t,"class")) {
+            advance(L);
+            node *cls=mknode(N_CLASS);
+            token nm=peek(L); if(nm.type==T_IDENT){ advance(L); cls->str=intern(nm.s,nm.len); cls->slen=nm.len; }
+            if (peek_kw(L,"extends")) { advance(L); cls->a=parse_postfix(L); }   /* superclass expression */
+            expect_punc(L,"{");
+            cls->list=aalloc(sizeof(node*)*32); cls->nlist=0;
+            while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
+                if (peek_punc(L,";")) { advance(L); continue; }   /* stray semicolons between members */
+                token mn=advance(L);                              /* method name (incl. "constructor") */
+                node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len;
+                parse_fn_params(L, fn);
+                fn->a = parse_stmt(L);                            /* method body */
+                if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
+            }
+            expect_punc(L,"}");
+            return cls;
+        }
         if (tok_is(t,"new")) {
             advance(L);
             node *callee = parse_primary(L);
@@ -537,6 +557,7 @@ struct obj {
     /* function */
     node *fn; env *scope;
     val (*native)(val *args, int nargs);
+    obj *home_proto;   /* class constructors: an object holding the methods to copy onto each new instance */
 };
 
 struct env { const char **keys; val *vals; int n, cap; env *parent; };
@@ -797,11 +818,37 @@ static val eval_expr_inner(node *n, env *e) {
             val fn=eval_expr(callee,e); return call_function(fn,args,na);
         }
         case N_THIS: { val *t=env_find(e,"this"); return t?*t:UND(); }
+        case N_CLASS: {
+            /* Build the method table P, then a constructor function value carrying
+             * P in home_proto. `extends` copies the parent's methods into P first
+             * (children override by being added after), and an absent child
+             * constructor inherits the parent's. (super is not yet supported.) */
+            obj *P=new_obj(V_OBJ); if(!P){ g_oom=1; return UND(); }
+            node *ctor_node=0; val parentC=UND(); int has_parent=0;
+            if (n->a) {
+                parentC=eval_expr(n->a,e); has_parent=(parentC.t==V_FUN);
+                if (has_parent && parentC.o->home_proto) { obj *pp=parentC.o->home_proto; for(int i=0;i<pp->n && !g_oom;i++) obj_set(P,pp->keys[i],pp->vals[i]); }
+            }
+            for (int i=0;i<n->nlist && !g_oom;i++){ node *m=n->list[i];
+                if (strcmp(node_name(m),"constructor")==0){ ctor_node=m; continue; }
+                obj *fo=new_obj(V_FUN); if(!fo){ g_oom=1; return UND(); } fo->fn=m; fo->scope=e;
+                val fv=UND(); fv.t=V_FUN; fv.o=fo; obj_set(P, node_name(m), fv);
+            }
+            if (!ctor_node && has_parent) ctor_node = parentC.o->fn;   /* inherit parent ctor */
+            if (!ctor_node) { node *em=mknode(N_FUNC); em->list=aalloc(sizeof(node*)); em->nlist=0; em->a=mknode(N_BLOCK); ctor_node=em; }
+            obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P;
+            val cv=UND(); cv.t=V_FUN; cv.o=co;
+            if (n->str) env_define(e, node_name(n), cv);
+            return cv;
+        }
         case N_NEW: {
             val ctor=eval_expr(n->a,e); val args[16]; int na=n->nlist>16?16:n->nlist;
             for (int i=0;i<na;i++) args[i]=eval_expr(n->list[i],e);
             if (ctor.t!=V_FUN) { rt_err("not a constructor"); return UND(); }
             obj *self=new_obj(V_OBJ); if(!self){ g_oom=1; return UND(); }
+            /* class instance: copy the class's methods onto the new object as own
+             * properties (we model methods by copying rather than a prototype chain) */
+            if (ctor.o->home_proto) { obj *P=ctor.o->home_proto; for(int i=0;i<P->n && !g_oom;i++) obj_set(self,P->keys[i],P->vals[i]); }
             val selfv=obj_val(self);
             val r=call_function_this(ctor, selfv, args, na);
             /* a constructor that explicitly returns an object overrides `this` */
