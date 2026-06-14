@@ -444,14 +444,19 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     }
     if (!closing && b->oc_depth == 0 && !is_void_tag(tag)) {
         const char *oc; int ocl;
+        int lk = NO_LINK;
         if (find_attr(attrs, attrlen, "onclick", &oc, &ocl)) {
-            int lk = add_onclick(b, oc, ocl);
-            if (lk != NO_LINK) {
-                b->oc_link = *curlink; b->oc_style = *style;
-                *curlink = lk; if (*style == STY_NORMAL) *style = STY_LINK;
-                int i = 0; while (tag[i] && i < 15) { b->oc_tag[i] = tag[i]; i++; } b->oc_tag[i] = 0;
-                b->oc_depth = 1;
-            }
+            lk = add_onclick(b, oc, ocl);              /* inline handler: scope the element to a javascript: link */
+        } else if (tageq(tag, "button")) {             /* a <button> with no handler submits the form (HTML default), unless type=button/reset */
+            const char *tp; int tpl;
+            int suppress = find_attr(attrs, attrlen, "type", &tp, &tpl) && (attr_eq(tp, tpl, "button") || attr_eq(tp, tpl, "reset"));
+            if (!suppress) lk = add_submit_link(b, b->form_action);
+        }
+        if (lk != NO_LINK) {                           /* open a click scope (depth-counted) over the element's content */
+            b->oc_link = *curlink; b->oc_style = *style;
+            *curlink = lk; if (*style == STY_NORMAL) *style = STY_LINK;
+            int i = 0; while (tag[i] && i < 15) { b->oc_tag[i] = tag[i]; i++; } b->oc_tag[i] = 0;
+            b->oc_depth = 1;
         }
     }
     if (tageq(tag, "br")) { emit_break(b, TK_BREAK); return; }

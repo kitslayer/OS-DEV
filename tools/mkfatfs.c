@@ -50,7 +50,7 @@ static const struct {
         "<p>A real working web search, from scratch. Type a query and follow <b>[Search]</b>: the browser builds <code>action?q=YOUR+QUERY</code>, URL-encodes it, and navigates over <b>HTTPS</b> to DuckDuckGo's HTML results &mdash; a genuine HTML GET form submission to the live web.</p>"
         "<form action=\"https://html.duckduckgo.com/html/\">"
         "<p>Query: <input id=\"q\" name=\"q\" placeholder=\"e.g. operating system\"></p>"
-        "<p><input type=\"submit\" value=\"Search DuckDuckGo\"></p>"
+        "<p><button type=\"submit\">Search DuckDuckGo</button></p>"
         "</form>"
         "<p>How: Tab/n to the field, Enter to edit, type, Enter to finish; then Tab/n to <b>[Search]</b> and Enter. Spaces become <code>+</code> and specials are percent-encoded, so <code>?q=operating+system</code> is a valid request. The results page is itself a form &mdash; search again right from it.</p>"
         "<p>The same mechanism works with any GET form (try pointing <code>action</code> at example.com to watch the query string appear in the address bar).</p>" },

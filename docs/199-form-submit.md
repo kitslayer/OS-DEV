@@ -63,8 +63,11 @@ fuzz of `url_encode` + the query-build loop).
   fields (fine for the common single-form/search-box page; multi-form pages
   send extra params, which servers ignore).
 - The store holds 8 fields × 95 chars; the whole URL is capped at 160 bytes.
-- `<button type="submit">` (vs `<input type="submit">`) needs an `onclick` for
-  now.
+**`<button>` submit (M201):** a `<button>` with no `onclick` submits the form
+(HTML's default button type in a form), unless it's `type="button"`/`"reset"`.
+It reuses the inline-onclick scope machinery — the button's content becomes a
+`submit:` link — so both `<input type="submit">` and `<button>Search</button>`
+work.
 
 **Enter-to-submit (M200):** pressing Enter while typing in a field submits the
 form if the page has a submit button — `browser_key` scans the links for the
