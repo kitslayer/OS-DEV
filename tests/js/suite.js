@@ -16,6 +16,7 @@ print([1,2,3,4].reduce((a,b)=>a+b,0), [5,12,3].find(n=>n>10), [2,4,6].every(n=>n
 print([1,2,3].reverse().join(","), [1,2,3,4,5].slice(1,3).join(","));
 print(Array.isArray([1]), Array.from("abc").join("."));
 print([1,2,3].includes(2), [1,2].concat([3,4],5).join(","));
+print([3,1,2].sort().join(","), [10,9,2].sort((a,b)=>a-b).join(","), ["pear","fig","kiwi"].sort().join(","));
 print("-- strings --");
 print("Hello".toUpperCase(), "WORLD".toLowerCase(), "  hi  ".trim()+"!");
 print("a,b,c".split(",").length, "ab".repeat(3), "hello world".replace("world","JS"));

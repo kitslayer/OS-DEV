@@ -15,6 +15,7 @@
 3,2,1 2,3
 true a.b.c
 true 1,2,3,4,5
+1,2,3 2,9,10 fig,kiwi,pear
 -- strings --
 HELLO world hi!
 3 ababab hello JS
