@@ -346,6 +346,12 @@ static node *parse_primary(lexer *L) {
             advance(L); node *n=mknode(N_OBJECT); n->list=aalloc(sizeof(node*)*64); n->nlist=0;
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,"...")) { advance(L); node *sp=mknode(N_SPREAD); sp->a=parse_assign(L); if(n->list && n->nlist<64) n->list[n->nlist++]=sp; if(peek_punc(L,",")) advance(L); continue; }  /* {...obj} */
+                if (peek_punc(L,"[")) {   /* computed key: {[expr]: value} (pr->b holds the key expression) */
+                    advance(L); node *pr=mknode(N_PROP); pr->b=parse_assign(L); expect_punc(L,"]"); expect_punc(L,":"); pr->a=parse_assign(L);
+                    if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
+                    if (peek_punc(L,",")) advance(L); else break;
+                    continue;
+                }
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
@@ -865,7 +871,8 @@ static val eval_expr_inner(node *n, env *e) {
             for(int i=0;i<n->nlist && !g_oom;i++){ node*pr=n->list[i];
                 if (pr->type==N_SPREAD){ val sv=eval_expr(pr->a,e);
                     if (sv.t==V_OBJ && sv.o){ for(int j=0;j<sv.o->n && !g_oom;j++) obj_set(o, sv.o->keys[j], sv.o->vals[j]); }
-                } else obj_set(o, node_name(pr), eval_expr(pr->a,e));
+                } else { const char *key = pr->b ? val_to_str(eval_expr(pr->b,e)) : node_name(pr);   /* pr->b = computed key */
+                    obj_set(o, key, eval_expr(pr->a,e)); }
             }
             val r=UND(); r.t=V_OBJ; r.o=o; return r; }
         case N_FUNC: { obj *o=new_obj(V_FUN); if(!o) return UND(); o->fn=n; o->scope=e; val r=UND(); r.t=V_FUN; r.o=o; if(n->str){ env_define(e,node_name(n),r); } return r; }

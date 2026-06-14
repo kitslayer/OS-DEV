@@ -82,6 +82,7 @@ var u={a:{b:5}}; print(u?.a?.b, u?.a?.z, u?.x?.y);
 var nn=null; print(nn?.p, nn?.[0], nn?.());
 var ob={f(){return 9;}}; print(ob.f?.(), ob.g?.());
 var nz=null; print(nz?.a.b.c(), ({u:{n:5}})?.u.n);
+var ck="dyn"; print(JSON.stringify({[ck]:1,["a"+"b"]:2}));
 print("-- Map / Set --");
 var mm=new Map(); mm.set("a",1).set("b",2).set("a",9);
 print(mm.size, mm.get("a"), mm.has("b"), mm.get("z"));
