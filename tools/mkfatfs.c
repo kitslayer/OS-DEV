@@ -1,0 +1,219 @@
+/*
+ * mkfatfs.c — a tiny host-side FAT32 image builder.
+ *
+ * Runs on the HOST (built with the system gcc), not in the kernel. It writes a
+ * small but valid FAT32 filesystem image with a few files in the root
+ * directory, which QEMU then attaches as a virtual disk. We build the image
+ * ourselves (rather than mkfs.fat + mtools) so the project is self-contained
+ * and the on-disk layout is guaranteed to match our kernel reader.
+ *
+ *   usage: mkfatfs <output.img>
+ */
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define SECTOR        512
+#define TOTAL_SECTORS 8192          /* 4 MiB image */
+#define RESERVED      32
+#define NUM_FATS      2
+#define SPC           1             /* sectors per cluster */
+
+static uint8_t *img;
+
+static void put16(uint8_t *p, uint16_t v) { p[0] = v; p[1] = v >> 8; }
+static void put32(uint8_t *p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
+
+/* The files baked into the root directory. Names are 8.3, space-padded to 11. */
+static const struct {
+    const char *name83;
+    const char *content;
+} files[] = {
+    { "README  TXT", "OS-DEV: a from-scratch x86_64 OS.\nThis file lives on a FAT32 disk read by our own driver.\n" },
+    { "HELLO   TXT", "Hello from a real file on a virtual disk!\n" },
+    { "MOTD    TXT", "Milestone 10 reached: VFS + FAT32 + ATA driver.\nTry: ls   and   cat hello.txt\n" },
+    { "PRE     HTM", "<h2>Preformatted</h2><p>This paragraph is normal flow: whitespace    collapses and the text wraps to the window width as usual.</p><pre>function hello() {\n    return 1 + 2;      // spaces   kept\n\n    blank line above is preserved\n}</pre><p>Back to normal flow after the pre block.</p>" },
+    { "LIST    HTM", "<h2>Lists</h2><p>An ordered list with a nested bullet list:</p><ol><li>First item<li>Second item<ul><li>nested bullet<li>another nested</ul><li>Third item</ol><p>And a plain bullet list:</p><ul><li>alpha<li>beta<li>gamma</ul>" },
+    { "TABLE   HTM", "<h2>Table</h2><p>A small table renders as pipe-separated rows with bold headers:</p><table><tr><th>Name<th>Role<th>Year<tr><td>Alice<td>Engineer<td>2021<tr><td>Bob<td>Designer<td>2022<tr><td>Carol<td>Manager<td>2019</table><p>After the table.</p>" },
+    { "ENT     HTM", "<h2>Entities</h2><p>Named: &lsquo;single&rsquo; and &ldquo;double&rdquo;, dash &mdash; here, ellipsis&hellip; bullet &bull; copy &copy;.</p><p>Numeric decimal: &#39;apos&#39; and &#8220;quote&#8221;.</p><p>Numeric hex: &#x27;hex-apos&#x27; and &#x2014; em-dash.</p>" },
+    { "UTF8    HTM", "<h2>UTF-8</h2><p>Raw UTF-8 bytes (not entities): smart quotes “hello” and ‘hi’, em dash — here, ellipsis… bullet •.</p><p>Accents fold to ASCII: café, naïve, jalapeño, Über, straße.</p><p>Symbols: euro € and 30°C.</p><!-- a comment with a > and <b>markup</b> inside: none of THIS must render -->A<!--[if IE]><p>conditional</p><![endif]-->B<p>After comments.</p><svg width=\"12\" height=\"12\"><title>svgtitle-must-not-show</title><text x=\"0\" y=\"9\">SVGLEAK</text><path d=\"M0 0 L12 12\"/></svg><p>After svg.</p>" },
+    { "IMG     HTM", "<h2>Images</h2><p>Local images render inline, decoded by our own PNG, GIF and JPEG code: <img src=\"file:test.png\" alt=\"the test image\"> and an icon <img src=\"file:icon.png\" alt=\"an icon\">. Here is a baseline JPEG photo, scaled with width=\"240\" (its natural size is 120): <img src=\"file:photo.jpg\" alt=\"a jpeg photo\" width=\"240\">. Remote images stay clickable links you follow to view full-size.</p>" },
+    { "FORM    HTM", "<h2>Form</h2><p>A search form:</p><form><input type=\"text\" placeholder=\"Search the site\"> <input type=\"submit\" value=\"Go\"></form><p>And a bare field: <input type=\"text\"> after.</p>" },
+    { "COLOR   HTM", "<h2>Colours</h2><p>Text can be <font color=\"red\">red</font>, <font color=\"green\">green</font>, <font color=\"blue\">blue</font>, <font color=\"#E07000\">hex orange</font>, and <font color=\"purple\">purple</font>. Back to normal.</p>" },
+    { "INDEX   HTM", "<h1>OS-DEV Demo Index</h1><p>Local demo pages baked onto the FAT32 disk &mdash; select with Tab/n and press Enter:</p><ul><li><a href=\"file:pre.htm\">Preformatted text</a><li><a href=\"file:list.htm\">Lists (nested &amp; ordered)</a><li><a href=\"file:nested.htm\">Deeply nested lists</a><li><a href=\"file:table.htm\">Tables</a><li><a href=\"file:ent.htm\">HTML entities</a><li><a href=\"file:img.htm\">Images</a><li><a href=\"file:form.htm\">Forms</a><li><a href=\"file:color.htm\">Coloured text</a><li><a href=\"file:code.htm\">Inline code</a></ul><p>Backspace returns here. Press <b>h</b> for the start page.</p>" },
+    { "CODE    HTM", "<h2>Inline code</h2><p>Run the <code>browse</code> command, then press <kbd>Enter</kbd> to follow a link. The call <code>memcpy(dst, src, n)</code> copies <samp>n</samp> bytes; configuration lives in <tt>/etc/config</tt>. Inline code renders in a distinct colour so it stands out from <b>bold</b> and <i>italic</i> text.</p><p>Back to normal flow.</p>" },
+    { "NESTED  HTM", "<h2>Deeply nested lists</h2><ol><li>Top one<ol><li>One-A<li>One-B<ul><li>bullet under 1-B<li>another bullet<ol><li>deep one<li>deep two</ol></ul></ol><li>Top two<ul><li>plain bullet<li>plain bullet</ul><li>Top three</ol><p>Numbering and indentation track the nesting depth.</p>" },
+    { "GUIDE   TXT", "OS-DEV quick guide\n==================\nDesktop: Apps menu launches programs. Drag titlebars; drag edges to resize.\n  F2 cycle focus, F4 maximise, F5/F6 tile left/right.\nBrowser: type a host or file:NAME then Enter. Tab/n/p pick links, Enter follows.\n  g/G top/bottom, h home, r reload, s save, u view-source, a bookmark, \\ find.\nShell: ls, cat, cd, tree, find, grep, df, run NAME.ELF, browse URL, wget URL.\nStart here: browse file:index.htm\n" },
+    { "SAMPLE  JS ", "// sample.js  --  run with: js sample.js   (edit with: edit sample.js)\n"
+        "print(\"FizzBuzz 1..15:\");\n"
+        "var line = \"\";\n"
+        "for (var i = 1; i <= 15; i = i + 1) {\n"
+        "  if (i % 15 == 0) line += \"FizzBuzz\";\n"
+        "  else if (i % 3 == 0) line += \"Fizz\";\n"
+        "  else if (i % 5 == 0) line += \"Buzz\";\n"
+        "  else line += i;\n"
+        "  line += \" \";\n"
+        "}\n"
+        "print(line);\n"
+        "function isPrime(n){ if (n < 2) return false; for (var d = 2; d*d <= n; d = d+1) if (n % d == 0) return false; return true; }\n"
+        "var primes = \"\";\n"
+        "for (var k = 2; k < 30; k = k+1) if (isPrime(k)) primes += k + \" \";\n"
+        "print(\"primes < 30: \" + primes);\n"
+        "var os = { name: \"OS-DEV\", lang: \"JavaScript\" };\n"
+        "print(os.lang + \" running on \" + os.name + \"!\");\n" },
+};
+#define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
+#define CLUSTER_BYTES (SPC * SECTOR)
+#define DIR_PER_CLUSTER (CLUSTER_BYTES / 32)   /* 32-byte dir entries per cluster */
+
+/* Files copied verbatim from a host path (e.g. a built ELF) so the OS can load
+ * real programs from disk. Skipped with a warning if the path is missing. */
+static const struct {
+    const char *name83;
+    const char *hostpath;
+} hostfiles[] = {
+    { "CALC    ELF", "build/calc.elf" },   /* run it in-OS with: run calc.elf */
+    { "TEST    PNG", "tools/test.png" },   /* view in-OS with: browse file:test.png */
+    { "BIG     PNG", "tools/big.png" },    /* 113 KB image — needs the 128 KB fetch buffer */
+    { "ICON    PNG", "tools/icon.png" },  /* palette + tRNS transparency */
+    { "LOGO    GIF", "tools/logo.gif" },  /* GIF: LZW + transparency + interlace */
+    { "PHOTO   JPG", "tools/photo.jpg" }, /* baseline JPEG (integer IDCT, 4:2:0) */
+    { "INTER   PNG", "tools/inter.png" }, /* interlaced (Adam7) truecolour PNG */
+    { "PPHOTO  JPG", "tools/pphoto.jpg" },/* PROGRESSIVE JPEG (multi-scan, integer) */
+    { "ANIM    GIF", "tools/anim.gif" },  /* ANIMATED GIF (multi-frame, timer-driven) */
+};
+#define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
+
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <output.img>\n", argv[0]);
+        return 1;
+    }
+
+    /* Solve for the FAT size (sectors) that covers the cluster count. */
+    uint32_t fatsz = 1, clusters;
+    for (;;) {
+        uint32_t data = TOTAL_SECTORS - RESERVED - NUM_FATS * fatsz;
+        clusters = data / SPC;
+        uint32_t need = ((clusters + 2) * 4 + SECTOR - 1) / SECTOR;
+        if (need <= fatsz) break;
+        fatsz = need;
+    }
+
+    uint32_t fat_start  = RESERVED;
+    uint32_t data_start = RESERVED + NUM_FATS * fatsz;   /* cluster 2 lands here */
+
+    img = calloc(TOTAL_SECTORS, SECTOR);
+    if (!img) { perror("calloc"); return 1; }
+
+    /* ---- boot sector / BPB ---- */
+    uint8_t *b = img;
+    b[0] = 0xEB; b[1] = 0x58; b[2] = 0x90;        /* jmp + nop */
+    memcpy(b + 3, "OSDEV1.0", 8);                 /* OEM name */
+    put16(b + 11, SECTOR);                        /* bytes per sector */
+    b[13] = SPC;                                  /* sectors per cluster */
+    put16(b + 14, RESERVED);                      /* reserved sectors */
+    b[16] = NUM_FATS;                             /* number of FATs */
+    put16(b + 17, 0);                             /* root entries (0 on FAT32) */
+    put16(b + 19, 0);                             /* total16 (0 -> use total32) */
+    b[21] = 0xF8;                                 /* media descriptor */
+    put16(b + 22, 0);                             /* FAT size 16 (0 on FAT32) */
+    put16(b + 24, 32);                            /* sectors per track */
+    put16(b + 26, 2);                             /* heads */
+    put32(b + 28, 0);                             /* hidden sectors */
+    put32(b + 32, TOTAL_SECTORS);                 /* total sectors 32 */
+    put32(b + 36, fatsz);                         /* FAT size 32 */
+    put16(b + 40, 0);                             /* ext flags */
+    put16(b + 42, 0);                             /* fs version */
+    put32(b + 44, 2);                             /* root cluster */
+    put16(b + 48, 1);                             /* FSInfo sector */
+    put16(b + 50, 6);                             /* backup boot sector */
+    b[64] = 0x80;                                 /* drive number */
+    b[66] = 0x29;                                 /* extended boot signature */
+    put32(b + 67, 0x12345678);                    /* volume id */
+    memcpy(b + 71, "OSDEV VOL  ", 11);            /* volume label */
+    memcpy(b + 82, "FAT32   ", 8);                /* fs type */
+    put16(b + 510, 0xAA55);                       /* boot signature */
+
+    /* ---- FAT + directory + file data ---- */
+    uint32_t *fat = calloc(clusters + 2, sizeof(uint32_t));
+    fat[0] = 0x0FFFFFF8;          /* media in low byte */
+    fat[1] = 0x0FFFFFFF;
+    /* root directory FAT chain is set once we know the file count (below) */
+
+    /* Build a unified list of {name, bytes, len}: inline strings first, then any
+     * host files read from disk (e.g. build/calc.elf). */
+    struct { const char *name83; const uint8_t *data; uint32_t len; } ent[64];
+    int ne = 0;
+    for (int i = 0; i < NUM_FILES; i++)
+        ent[ne++] = (typeof(ent[0])){ files[i].name83, (const uint8_t *)files[i].content,
+                                      (uint32_t)strlen(files[i].content) };
+    for (int i = 0; i < NUM_HOST && ne < 64; i++) {
+        FILE *hf = fopen(hostfiles[i].hostpath, "rb");
+        if (!hf) { fprintf(stderr, "mkfatfs: skip %s (not found)\n", hostfiles[i].hostpath); continue; }
+        fseek(hf, 0, SEEK_END); long sz = ftell(hf); fseek(hf, 0, SEEK_SET);
+        uint8_t *buf = malloc(sz > 0 ? (size_t)sz : 1);
+        if (fread(buf, 1, (size_t)sz, hf) != (size_t)sz) { fprintf(stderr, "mkfatfs: read %s failed\n", hostfiles[i].hostpath); fclose(hf); free(buf); continue; }
+        fclose(hf);
+        ent[ne++] = (typeof(ent[0])){ hostfiles[i].name83, buf, (uint32_t)sz };
+    }
+
+    /* The root directory itself spans as many clusters as it needs (16 dir
+     * entries per 512-byte cluster), chained in the FAT.  We size it one slot
+     * past the last entry so a zeroed end-of-directory marker always exists. */
+    uint32_t rootcl = (uint32_t)ne / DIR_PER_CLUSTER + 1;
+    if (rootcl > clusters) {   /* highest root cluster (1+rootcl) must be <= clusters+1 */
+        fprintf(stderr, "mkfatfs: %u files need a %u-cluster root, volume holds %u\n",
+                (unsigned)ne, rootcl, clusters);
+        return 1;
+    }
+    for (uint32_t c = 0; c < rootcl; c++)
+        fat[2 + c] = (c == rootcl - 1) ? 0x0FFFFFFF : (2 + c + 1);
+
+    /* Lay each file out as a chain of clusters (multi-cluster supported),
+     * starting right after the root directory clusters. */
+    uint32_t next_cluster = 2 + rootcl;
+    for (int i = 0; i < ne; i++) {
+        uint32_t len = ent[i].len;
+        uint32_t need = len ? (len + CLUSTER_BYTES - 1) / CLUSTER_BYTES : 1;
+        if (next_cluster + need - 1 > clusters + 1) {   /* would run past the last data cluster */
+            fprintf(stderr, "mkfatfs: out of space writing %.11s (needs %u clusters)\n",
+                    ent[i].name83, need);
+            return 1;
+        }
+        uint32_t first = next_cluster;
+        for (uint32_t c = 0; c < need; c++) {
+            uint32_t cl = next_cluster++;
+            fat[cl] = (c == need - 1) ? 0x0FFFFFFF : cl + 1;   /* chain, EOC on last */
+            uint8_t *data = img + ((uint64_t)data_start + (cl - 2) * SPC) * SECTOR;
+            uint32_t off = c * CLUSTER_BYTES, n = len - off;
+            if (n > CLUSTER_BYTES) n = CLUSTER_BYTES;
+            memcpy(data, ent[i].data + off, n);
+        }
+        /* directory entry, placed in the right root-directory cluster */
+        uint8_t *de = img + ((uint64_t)data_start + (uint32_t)(i / DIR_PER_CLUSTER) * SPC) * SECTOR
+                          + (i % DIR_PER_CLUSTER) * 32;
+        memcpy(de, ent[i].name83, 11);
+        de[11] = 0x20;                            /* attribute: archive */
+        put16(de + 20, (uint16_t)(first >> 16));     /* first cluster high */
+        put16(de + 26, (uint16_t)(first & 0xFFFF));  /* first cluster low */
+        put32(de + 28, len);                      /* file size */
+    }
+
+    /* write both FAT copies (little-endian 32-bit entries) */
+    for (int f = 0; f < NUM_FATS; f++) {
+        uint8_t *dst = img + (uint64_t)(fat_start + f * fatsz) * SECTOR;
+        for (uint32_t i = 0; i < clusters + 2; i++)
+            put32(dst + i * 4, fat[i]);
+    }
+
+    FILE *out = fopen(argv[1], "wb");
+    if (!out) { perror("fopen"); return 1; }
+    fwrite(img, SECTOR, TOTAL_SECTORS, out);
+    fclose(out);
+
+    printf("mkfatfs: wrote %s (%d sectors, fatsz=%u, %d files)\n",
+           argv[1], TOTAL_SECTORS, fatsz, ne);
+    return 0;
+}

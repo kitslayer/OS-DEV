@@ -1,0 +1,141 @@
+/*
+ * pmm.c — physical memory manager (a frame allocator).
+ *
+ * The job: track which 4 KiB physical "frames" of RAM are free vs used, and
+ * hand them out one at a time. Everything above this (paging, the heap,
+ * user processes) ultimately gets its memory from here.
+ *
+ * Design: a bitmap, one bit per frame (1 = used). Simple and compact —
+ * 128 MiB of RAM needs a 4 KiB bitmap. We discover RAM from the Multiboot
+ * memory map, mark all of it used, then free the regions the firmware says
+ * are available, and finally re-reserve the frames our kernel and the bitmap
+ * itself occupy.
+ *
+ * Everything here works in physical addresses, which are currently identical
+ * to virtual addresses (the low 1 GiB is identity-mapped). M5 changes that.
+ */
+#include "pmm.h"
+#include "multiboot.h"
+#include "string.h"
+
+/* End of the kernel image in memory, provided by the linker script. */
+extern char kernel_end[];
+
+static uint8_t  *bitmap;          /* one bit per frame */
+static uint64_t  total_frames;
+static uint64_t  used_frames;
+static uint64_t  bitmap_bytes;
+static uint64_t  next_hint;       /* where to start the next allocation scan */
+
+static inline void bm_set(uint64_t f)   { bitmap[f >> 3] |=  (1u << (f & 7)); }
+static inline void bm_clear(uint64_t f) { bitmap[f >> 3] &= ~(1u << (f & 7)); }
+static inline int  bm_test(uint64_t f)  { return bitmap[f >> 3] & (1u << (f & 7)); }
+
+static inline uint64_t align_up(uint64_t x, uint64_t a) {
+    return (x + a - 1) & ~(a - 1);
+}
+
+static void mark_used(uint64_t frame) {
+    if (frame < total_frames && !bm_test(frame)) {
+        bm_set(frame);
+        used_frames++;
+    }
+}
+
+static void mark_free(uint64_t frame) {
+    if (frame < total_frames && bm_test(frame)) {
+        bm_clear(frame);
+        used_frames--;
+    }
+}
+
+void pmm_init(uint64_t mb_info_phys) {
+    struct multiboot_info *mbi = (struct multiboot_info *)(uintptr_t)mb_info_phys;
+
+    /* Pass 1: find the highest physical address present, to size the bitmap. */
+    uint64_t highest = 0;
+    if (mbi->flags & MULTIBOOT_FLAG_MMAP) {
+        uint32_t cur = mbi->mmap_addr;
+        uint32_t stop = mbi->mmap_addr + mbi->mmap_length;
+        while (cur < stop) {
+            struct multiboot_mmap_entry *e =
+                (struct multiboot_mmap_entry *)(uintptr_t)cur;
+            uint64_t top = e->addr + e->len;
+            if (e->type == MULTIBOOT_MEM_AVAILABLE && top > highest)
+                highest = top;
+            cur += e->size + 4;
+        }
+    } else {
+        /* Fallback: mem_upper is KiB above 1 MiB. */
+        highest = 0x100000 + (uint64_t)mbi->mem_upper * 1024;
+    }
+
+    total_frames = highest / PAGE_SIZE;
+    bitmap_bytes = align_up(total_frames / 8, PAGE_SIZE);
+
+    /* Park the bitmap right after the kernel image. */
+    bitmap = (uint8_t *)align_up((uintptr_t)kernel_end, PAGE_SIZE);
+
+    /* Start with everything marked used... */
+    memset(bitmap, 0xFF, bitmap_bytes);
+    used_frames = total_frames;
+
+    /* ...then free exactly the frames the firmware reports as available. */
+    if (mbi->flags & MULTIBOOT_FLAG_MMAP) {
+        uint32_t cur = mbi->mmap_addr;
+        uint32_t stop = mbi->mmap_addr + mbi->mmap_length;
+        while (cur < stop) {
+            struct multiboot_mmap_entry *e =
+                (struct multiboot_mmap_entry *)(uintptr_t)cur;
+            if (e->type == MULTIBOOT_MEM_AVAILABLE) {
+                uint64_t start = align_up(e->addr, PAGE_SIZE);
+                uint64_t end   = e->addr + e->len;
+                for (uint64_t a = start; a + PAGE_SIZE <= end; a += PAGE_SIZE)
+                    mark_free(a / PAGE_SIZE);
+            }
+            cur += e->size + 4;
+        }
+    } else {
+        for (uint64_t a = 0x100000; a + PAGE_SIZE <= highest; a += PAGE_SIZE)
+            mark_free(a / PAGE_SIZE);
+    }
+
+    /* Re-reserve everything from address 0 through the end of our bitmap:
+     * the low BIOS area, the kernel image, and the bitmap storage itself. */
+    uint64_t reserved_top = (uint64_t)(uintptr_t)bitmap + bitmap_bytes;
+    for (uint64_t a = 0; a < reserved_top; a += PAGE_SIZE)
+        mark_used(a / PAGE_SIZE);
+
+    next_hint = 0;
+}
+
+uint64_t pmm_alloc_frame(void) {
+    for (uint64_t i = next_hint; i < total_frames; i++) {
+        if (!bm_test(i)) {
+            bm_set(i);
+            used_frames++;
+            next_hint = i + 1;
+            return i * PAGE_SIZE;
+        }
+    }
+    /* wrap around once */
+    for (uint64_t i = 0; i < next_hint; i++) {
+        if (!bm_test(i)) {
+            bm_set(i);
+            used_frames++;
+            next_hint = i + 1;
+            return i * PAGE_SIZE;
+        }
+    }
+    return 0;   /* out of memory */
+}
+
+void pmm_free_frame(uint64_t phys) {
+    uint64_t frame = phys / PAGE_SIZE;
+    mark_free(frame);
+    if (frame < next_hint)
+        next_hint = frame;
+}
+
+uint64_t pmm_total_bytes(void) { return total_frames * PAGE_SIZE; }
+uint64_t pmm_free_bytes(void)  { return (total_frames - used_frames) * PAGE_SIZE; }

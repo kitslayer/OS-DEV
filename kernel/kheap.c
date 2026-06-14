@@ -1,0 +1,127 @@
+/*
+ * kheap.c — a simple but real kernel heap (kmalloc/kfree).
+ *
+ * The PMM hands out whole 4 KiB frames; the VMM maps them. But kernel code
+ * wants to allocate a 40-byte struct, or a 300-byte buffer. The heap bridges
+ * that gap: it grabs pages from the VMM and carves them into variable-sized
+ * blocks.
+ *
+ * Design: a singly linked list of contiguous blocks, each with a small header
+ * { size, free, next }. Allocation is first-fit with splitting; freeing
+ * coalesces with the following block. When nothing fits, we grow the heap by
+ * mapping more pages at its end. Not the fastest design, but easy to read and
+ * entirely sufficient for a kernel.
+ *
+ * The heap lives in its own higher-half virtual region, backed by frames the
+ * VMM maps on demand.
+ */
+#include "kheap.h"
+#include "vmm.h"
+#include "pmm.h"
+#include "string.h"
+#include <stdint.h>
+
+#define KHEAP_BASE        0xFFFF900000000000ull
+#define KHEAP_GROW_PAGES  16                       /* grow 64 KiB at a time */
+
+typedef struct block {
+    uint64_t      size;     /* usable payload bytes, excluding this header */
+    struct block *next;
+    uint32_t      free;
+} block_t;
+
+static block_t  *head;
+static uint64_t  heap_end;  /* first virtual address not yet mapped */
+
+static inline uint64_t align16(uint64_t x) { return (x + 15) & ~15ull; }
+static inline uint64_t align_page(uint64_t x) {
+    return (x + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+}
+
+/* Map [from, to) of heap virtual space to fresh physical frames. */
+static void map_range(uint64_t from, uint64_t to) {
+    for (uint64_t v = from; v < to; v += PAGE_SIZE)
+        vmm_map(v, pmm_alloc_frame(), PTE_WRITABLE);
+}
+
+void kheap_init(void) {
+    uint64_t bytes = KHEAP_GROW_PAGES * PAGE_SIZE;
+    map_range(KHEAP_BASE, KHEAP_BASE + bytes);
+    heap_end = KHEAP_BASE + bytes;
+
+    head = (block_t *)KHEAP_BASE;
+    head->size = bytes - sizeof(block_t);
+    head->next = NULL;
+    head->free = 1;
+}
+
+/* Add more mapped pages and append a free block covering them. */
+static void grow_heap(uint64_t need_bytes) {
+    uint64_t grow = align_page(need_bytes + sizeof(block_t));
+    if (grow < KHEAP_GROW_PAGES * PAGE_SIZE)
+        grow = KHEAP_GROW_PAGES * PAGE_SIZE;
+
+    map_range(heap_end, heap_end + grow);
+    block_t *nb = (block_t *)heap_end;
+    nb->size = grow - sizeof(block_t);
+    nb->next = NULL;
+    nb->free = 1;
+    heap_end += grow;
+
+    block_t *last = head;
+    while (last->next)
+        last = last->next;
+    last->next = nb;
+
+    /* If the previous last block was free and physically adjacent, merge. */
+    if (last->free &&
+        (uint8_t *)last + sizeof(block_t) + last->size == (uint8_t *)nb) {
+        last->size += sizeof(block_t) + nb->size;
+        last->next = nb->next;
+    }
+}
+
+void *kmalloc(size_t size) {
+    uint64_t need = align16(size);
+
+    for (block_t *b = head; b; b = b->next) {
+        if (!b->free || b->size < need)
+            continue;
+
+        /* Split if there's room for another usable block afterward. */
+        if (b->size >= need + sizeof(block_t) + 16) {
+            block_t *nb = (block_t *)((uint8_t *)b + sizeof(block_t) + need);
+            nb->size = b->size - need - sizeof(block_t);
+            nb->free = 1;
+            nb->next = b->next;
+            b->next = nb;
+            b->size = need;
+        }
+        b->free = 0;
+        return (uint8_t *)b + sizeof(block_t);
+    }
+
+    grow_heap(need);
+    return kmalloc(size);   /* one retry; the new block will fit */
+}
+
+void *kzalloc(size_t size) {
+    void *p = kmalloc(size);
+    if (p)
+        memset(p, 0, size);
+    return p;
+}
+
+void kfree(void *ptr) {
+    if (!ptr)
+        return;
+    block_t *b = (block_t *)((uint8_t *)ptr - sizeof(block_t));
+    b->free = 1;
+
+    /* Coalesce with following free, adjacent blocks. */
+    while (b->next && b->next->free &&
+           (uint8_t *)b + sizeof(block_t) + b->size == (uint8_t *)b->next) {
+        b->size += sizeof(block_t) + b->next->size;
+        b->next = b->next->next;
+    }
+}

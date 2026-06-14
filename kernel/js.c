@@ -1,0 +1,731 @@
+/*
+ * js.c — a small from-scratch JavaScript interpreter (tree-walking).
+ *
+ * Supports a useful core of the language: var/let/const, integer numbers,
+ * strings, booleans, null/undefined; the usual operators (+ - * / %, comparisons,
+ * && || !, ?:, ++/--, typeof); if/else, while, for, blocks, break/continue;
+ * function declarations + expressions with lexical closures and recursion;
+ * array and object literals with member/index access, .length and a few methods;
+ * and the builtins print()/console.log() plus a small Math.
+ *
+ * Deliberate simplifications (this is an OS kernel with no FPU and tiny stacks):
+ *  - Number is a 64-bit INTEGER (the kernel is built -mgeneral-regs-only, no
+ *    floating point). So 7/2 === 3. Float support would need soft-float.
+ *  - Memory is an arena that is reset wholesale after each top-level run (no GC):
+ *    one script runs, prints, and the arena is recycled. Bounded by JS_ARENA.
+ *  - Recursion (parser + evaluator) is depth-limited to stay within the stack.
+ *
+ * The file compiles both freestanding in the kernel and, with -DJS_HOSTTEST, as
+ * a standalone host program for testing (see the main() at the bottom).
+ */
+#ifdef JS_HOSTTEST
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#else
+#include "string.h"
+#include <stdint.h>
+#include <stddef.h>
+#endif
+
+/* ---- output sink: all print() output is appended here ---- */
+static char  *g_out;
+static int    g_out_cap, g_out_len;
+static void out_str(const char *s) {
+    while (*s && g_out_len < g_out_cap - 1) g_out[g_out_len++] = *s++;
+    if (g_out_cap) g_out[g_out_len] = 0;
+}
+
+/* ---- arena allocator (no free; reset per run) ---- */
+#define JS_ARENA   (1024 * 1024)
+#ifdef JS_HOSTTEST
+static char g_arena_buf[JS_ARENA];
+#else
+static char g_arena_buf[JS_ARENA];   /* BSS */
+#endif
+static int  g_arena_off;
+static int  g_oom;
+/* n is a 64-bit signed size: callers pass sizeof(T)*count which is size_t, so a
+ * count that would overflow a 32-bit size arrives here as a huge value and is
+ * rejected (rather than silently truncating to a small/zero size -> OOB). */
+static void *aalloc(long n) {
+    if (n < 0) { g_oom = 1; return 0; }
+    n = (n + 7) & ~7;
+    if (n > (long)(JS_ARENA - g_arena_off)) { g_oom = 1; return 0; }   /* incl. n > JS_ARENA */
+    void *p = g_arena_buf + g_arena_off; g_arena_off += (int)n;
+    return p;
+}
+/* intern a (possibly non-terminated) name into a stable, NUL-terminated arena
+ * string. Done once at parse time so eval never re-allocates for identifiers. */
+static const char *intern(const char *s, int len) {
+    char *p = aalloc(len + 1); if (!p) return "";
+    memcpy(p, s, len); p[len] = 0; return p;
+}
+
+/* ---- runtime error handling ---- */
+static int  g_err;
+static char g_errmsg[128];
+static void rt_err(const char *m) {
+    if (!g_err) { g_err = 1; int i = 0; while (m[i] && i < 127) { g_errmsg[i] = m[i]; i++; } g_errmsg[i] = 0; }
+}
+
+/* =========================== lexer =========================== */
+enum { T_EOF, T_NUM, T_STR, T_IDENT, T_PUNC, T_KW };
+typedef struct { int type; int64_t num; const char *s; int len; } token;
+
+static const char *kw[] = { "var","let","const","function","return","if","else",
+    "while","for","true","false","null","undefined","break","continue","typeof",0 };
+
+typedef struct {
+    const char *src; int pos, len;
+    token cur, peeked; int has_peek;
+} lexer;
+
+static int is_id_start(int c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='_'||c=='$'; }
+static int is_id(int c){ return is_id_start(c)||(c>='0'&&c<='9'); }
+static int is_digit(int c){ return c>='0'&&c<='9'; }
+
+static token lex_next(lexer *L) {
+    token t; t.type = T_EOF; t.s = 0; t.len = 0; t.num = 0;
+    const char *s = L->src;
+    /* skip whitespace + comments */
+    for (;;) {
+        while (L->pos < L->len && (s[L->pos]==' '||s[L->pos]=='\t'||s[L->pos]=='\n'||s[L->pos]=='\r')) L->pos++;
+        if (L->pos+1 < L->len && s[L->pos]=='/' && s[L->pos+1]=='/') { while (L->pos<L->len && s[L->pos]!='\n') L->pos++; continue; }
+        if (L->pos+1 < L->len && s[L->pos]=='/' && s[L->pos+1]=='*') { L->pos+=2; while (L->pos+1<L->len && !(s[L->pos]=='*'&&s[L->pos+1]=='/')) L->pos++; L->pos+=2; continue; }
+        break;
+    }
+    if (L->pos >= L->len) return t;
+    int c = s[L->pos];
+    /* number (integer) */
+    if (is_digit(c)) {
+        int64_t v = 0; int start = L->pos;
+        if (c=='0' && L->pos+1<L->len && (s[L->pos+1]=='x'||s[L->pos+1]=='X')) {
+            L->pos += 2;
+            while (L->pos<L->len) { int d=s[L->pos]; int h;
+                if (d>='0'&&d<='9') h=d-'0'; else if (d>='a'&&d<='f') h=d-'a'+10; else if (d>='A'&&d<='F') h=d-'A'+10; else break;
+                v = v*16 + h; L->pos++; }
+        } else {
+            while (L->pos<L->len && is_digit(s[L->pos])) { v = v*10 + (s[L->pos]-'0'); L->pos++; }
+            /* skip a fractional part if present (we truncate to int) */
+            if (L->pos<L->len && s[L->pos]=='.') { L->pos++; while (L->pos<L->len && is_digit(s[L->pos])) L->pos++; }
+        }
+        (void)start; t.type=T_NUM; t.num=v; return t;
+    }
+    /* string */
+    if (c=='"' || c=='\'') {
+        int q = c; L->pos++;
+        char *buf = aalloc(L->len); int n = 0;       /* generous; arena */
+        while (L->pos<L->len && s[L->pos]!=q) {
+            int ch = s[L->pos++];
+            if (ch=='\\' && L->pos<L->len) {
+                int e = s[L->pos++];
+                ch = e=='n'?'\n': e=='t'?'\t': e=='r'?'\r': e=='\\'?'\\': e=='\''?'\'': e=='"'?'"': e=='0'?0: e;
+            }
+            if (buf) buf[n++] = (char)ch;
+        }
+        if (L->pos<L->len) L->pos++;                 /* closing quote */
+        if (buf) buf[n]=0;
+        t.type=T_STR; t.s=buf; t.len=n; return t;
+    }
+    /* identifier / keyword */
+    if (is_id_start(c)) {
+        int start = L->pos; while (L->pos<L->len && is_id(s[L->pos])) L->pos++;
+        t.s = s+start; t.len = L->pos-start; t.type = T_IDENT;
+        for (int i=0; kw[i]; i++) { int kl=(int)strlen(kw[i]); if (kl==t.len && memcmp(kw[i],t.s,kl)==0) { t.type=T_KW; break; } }
+        return t;
+    }
+    /* punctuation / multi-char operators */
+    static const char *ops[] = { "===","!==","<<=",">>=","...","==","!=","<=",">=",
+        "&&","||","++","--","+=","-=","*=","/=","%=","<<",">>","=>",0 };
+    for (int i=0; ops[i]; i++) { int ol=(int)strlen(ops[i]); if (L->pos+ol<=L->len && memcmp(ops[i],s+L->pos,ol)==0) { t.type=T_PUNC; t.s=s+L->pos; t.len=ol; L->pos+=ol; return t; } }
+    t.type=T_PUNC; t.s=s+L->pos; t.len=1; L->pos++; return t;
+}
+
+static token peek(lexer *L){ if (!L->has_peek){ L->peeked=lex_next(L); L->has_peek=1; } return L->peeked; }
+static token advance(lexer *L){ if (L->has_peek){ L->has_peek=0; return L->peeked; } return lex_next(L); }
+static int tok_is(token t, const char *p){ int l=(int)strlen(p); return t.len==l && t.s && memcmp(t.s,p,l)==0; }
+static int peek_punc(lexer *L, const char *p){ token t=peek(L); return t.type==T_PUNC && tok_is(t,p); }
+static int peek_kw(lexer *L, const char *p){ token t=peek(L); return t.type==T_KW && tok_is(t,p); }
+static void skip_semi(lexer *L){ while (peek_punc(L,";")) advance(L); }   /* ; is an optional terminator */
+
+/* =========================== AST =========================== */
+enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
+       N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
+       N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
+       N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP };
+
+typedef struct node node;
+struct node {
+    int type; int64_t num; int op /*single-char or coded*/; const char *str; int slen;
+    node *a, *b, *c, *d;
+    node **list; int nlist;
+    int prefix;   /* for N_UPDATE: prefix vs postfix */
+};
+
+static int g_depth;            /* recursion guard (parser + eval + val_to_str + calls) */
+#define MAXDEPTH 250           /* bounded for the app's 256 KB kernel stack (no guard page) */
+
+/* On arena exhaustion, return a shared dummy node (never NULL) so the parser's
+ * field writes (n->a=..., n->op=...) are harmless scribbles rather than NULL
+ * derefs; g_oom is set and the parse loops bail. The garbage AST is never run. */
+static node g_dummy_node;
+static node *mknode(int type){ node *n=aalloc(sizeof(node)); if(!n){ memset(&g_dummy_node,0,sizeof(g_dummy_node)); return &g_dummy_node; } memset(n,0,sizeof(*n)); n->type=type; return n; }
+
+/* ---- parser (recursive descent + precedence climbing) ---- */
+static node *parse_expr(lexer *L);
+static node *parse_assign(lexer *L);
+static node *parse_stmt(lexer *L);
+static node *parse_unary(lexer *L);
+
+static void expect_punc(lexer *L, const char *p){ token t=advance(L); if(!(t.type==T_PUNC && tok_is(t,p))) rt_err("syntax: expected punctuation"); }
+
+static node **parse_list(lexer *L, const char *close, int *count) {
+    node **arr = aalloc(sizeof(node*) * 64); int n = 0;
+    while (!peek_punc(L, close) && peek(L).type != T_EOF && !g_err && !g_oom) {
+        if (arr && n < 64) arr[n++] = parse_assign(L);
+        else { parse_assign(L); }
+        if (peek_punc(L, ",")) advance(L); else break;
+    }
+    expect_punc(L, close); *count = n; return arr;
+}
+
+static node *parse_primary(lexer *L) {
+    token t = peek(L);
+    if (t.type == T_NUM) { advance(L); node *n=mknode(N_NUM); n->num=t.num; return n; }
+    if (t.type == T_STR) { advance(L); node *n=mknode(N_STR); n->str=t.s; n->slen=t.len; return n; }
+    if (t.type == T_KW) {
+        if (tok_is(t,"true")||tok_is(t,"false")) { advance(L); node *n=mknode(N_BOOL); n->num=tok_is(t,"true"); return n; }
+        if (tok_is(t,"null")) { advance(L); return mknode(N_NULL); }
+        if (tok_is(t,"undefined")) { advance(L); return mknode(N_UNDEF); }
+        if (tok_is(t,"function")) {
+            advance(L); node *n=mknode(N_FUNC);
+            token name = peek(L);
+            if (name.type==T_IDENT) { advance(L); n->str=intern(name.s,name.len); n->slen=name.len; }
+            expect_punc(L,"(");
+            n->list = aalloc(sizeof(node*)*32); n->nlist=0;
+            while (!peek_punc(L,")") && peek(L).type!=T_EOF) {
+                token p=advance(L); if (p.type==T_IDENT){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len; if(n->nlist<32) n->list[n->nlist++]=id; }
+                if (peek_punc(L,",")) advance(L); else break;
+            }
+            expect_punc(L,")");
+            n->a = parse_stmt(L);   /* body block */
+            return n;
+        }
+        if (tok_is(t,"typeof")) { advance(L); node *n=mknode(N_UNARY); n->op='t'; n->a=parse_primary(L); return n; }
+    }
+    if (t.type == T_IDENT) { advance(L); node *n=mknode(N_IDENT); n->str=intern(t.s,t.len); n->slen=t.len; return n; }
+    if (t.type == T_PUNC) {
+        if (tok_is(t,"(")) { advance(L); node *e=parse_expr(L); expect_punc(L,")"); return e; }
+        if (tok_is(t,"[")) { advance(L); node *n=mknode(N_ARRAY); n->list=parse_list(L,"]",&n->nlist); return n; }
+        if (tok_is(t,"{")) {
+            advance(L); node *n=mknode(N_OBJECT); n->list=aalloc(sizeof(node*)*64); n->nlist=0;
+            while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err) {
+                token k=advance(L); node *pr=mknode(N_PROP);
+                pr->str=intern(k.s,k.len); pr->slen=k.len;
+                expect_punc(L,":"); pr->a=parse_assign(L);
+                if (n->nlist<64) n->list[n->nlist++]=pr;
+                if (peek_punc(L,",")) advance(L); else break;
+            }
+            expect_punc(L,"}"); return n;
+        }
+    }
+    rt_err("syntax: unexpected token"); advance(L); return mknode(N_UNDEF);
+}
+
+static node *parse_postfix(lexer *L) {
+    node *e = parse_primary(L);
+    for (;;) {
+        if (peek_punc(L,".")) { advance(L); token p=advance(L); node *m=mknode(N_MEMBER); m->a=e; m->str=intern(p.s,p.len); m->slen=p.len; e=m; }
+        else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; e=m; }
+        else if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->list=parse_list(L,")",&call->nlist); e=call; }
+        else if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->a=e; u->prefix=0; e=u; }
+        else break;
+    }
+    return e;
+}
+
+static node *parse_unary_inner(lexer *L) {
+    if (peek_punc(L,"!")||peek_punc(L,"-")||peek_punc(L,"+")) { token o=advance(L); node *u=mknode(N_UNARY); u->op=o.s[0]; u->a=parse_unary(L); return u; }
+    if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->prefix=1; u->a=parse_unary(L); return u; }
+    if (peek_kw(L,"typeof")) { advance(L); node *u=mknode(N_UNARY); u->op='t'; u->a=parse_unary(L); return u; }
+    return parse_postfix(L);
+}
+/* depth-guarded wrapper: a `!!!!...` / `typeof typeof...` / `- - -...` chain
+ * otherwise recurses C-stack-deep with no bound (parse_assign only guards via the
+ * paren/binary paths). MAXDEPTH protects the guard-page-less kernel stack. */
+static node *parse_unary(lexer *L) {
+    if (++g_depth > MAXDEPTH) { rt_err("expression nested too deep"); g_depth--; return mknode(N_UNDEF); }
+    node *r = parse_unary_inner(L); g_depth--; return r;
+}
+
+/* binary precedence */
+static int bin_prec(token t, int *code) {
+    if (t.type!=T_PUNC) return 0;
+    if (tok_is(t,"*")||tok_is(t,"/")||tok_is(t,"%")) { *code=t.s[0]; return 11; }
+    if (tok_is(t,"+")||tok_is(t,"-")) { *code=t.s[0]; return 10; }
+    if (tok_is(t,"<<")||tok_is(t,">>")) { *code=(t.s[0]=='<')?'L':'R'; return 9; }
+    if (tok_is(t,"<")||tok_is(t,">")) { *code=t.s[0]; return 8; }
+    if (tok_is(t,"<=")) { *code='l'; return 8; } if (tok_is(t,">=")) { *code='g'; return 8; }
+    if (tok_is(t,"===")||tok_is(t,"==")) { *code='='; return 7; }
+    if (tok_is(t,"!==")||tok_is(t,"!=")) { *code='!'; return 7; }
+    if (tok_is(t,"&")) { *code='&'; return 6; }
+    if (tok_is(t,"|")) { *code='|'; return 4; }
+    if (tok_is(t,"&&")) { *code='A'; return 3; }
+    if (tok_is(t,"||")) { *code='O'; return 2; }
+    return 0;
+}
+
+static node *parse_binary(lexer *L, int minp) {
+    node *left = parse_unary(L);
+    for (;;) {
+        int code; int p = bin_prec(peek(L), &code);
+        if (p == 0 || p < minp) break;
+        advance(L);
+        node *right = parse_binary(L, p+1);
+        int logical = (code=='A'||code=='O');
+        node *n = mknode(logical?N_LOGICAL:N_BINARY); n->op=code; n->a=left; n->b=right;
+        left = n;
+    }
+    return left;
+}
+
+static node *parse_cond(lexer *L) {
+    node *c = parse_binary(L, 1);
+    if (peek_punc(L,"?")) { advance(L); node *n=mknode(N_COND); n->a=c; n->b=parse_assign(L); expect_punc(L,":"); n->c=parse_assign(L); return n; }
+    return c;
+}
+
+static node *parse_assign(lexer *L) {
+    if (++g_depth > MAXDEPTH) { rt_err("max recursion"); g_depth--; return mknode(N_UNDEF); }
+    node *left = parse_cond(L);
+    token t = peek(L);
+    if (t.type==T_PUNC && (tok_is(t,"=")||tok_is(t,"+=")||tok_is(t,"-=")||tok_is(t,"*=")||tok_is(t,"/=")||tok_is(t,"%="))) {
+        advance(L); node *n=mknode(N_ASSIGN); n->op = (t.len==1)?'=':t.s[0]; n->a=left; n->b=parse_assign(L); g_depth--; return n;
+    }
+    g_depth--; return left;
+}
+
+static node *parse_expr(lexer *L) {
+    node *e = parse_assign(L);
+    while (peek_punc(L,",")) { advance(L); e = parse_assign(L); }   /* comma: keep last */
+    return e;
+}
+
+static node *parse_block(lexer *L) {
+    expect_punc(L,"{"); node *n=mknode(N_BLOCK); n->list=aalloc(sizeof(node*)*256); n->nlist=0;
+    for (;;) { skip_semi(L); if (peek_punc(L,"}")||peek(L).type==T_EOF||g_err||g_oom) break; node *s=parse_stmt(L); if(n->list&&n->nlist<256) n->list[n->nlist++]=s; }
+    expect_punc(L,"}"); return n;
+}
+
+static node *parse_var(lexer *L) {
+    advance(L);  /* var/let/const */
+    node *n=mknode(N_VAR); n->list=aalloc(sizeof(node*)*32); n->nlist=0;
+    for (;;) {
+        token id=advance(L); node *decl=mknode(N_PROP); decl->str=intern(id.s,id.len); decl->slen=id.len;
+        if (peek_punc(L,"=")) { advance(L); decl->a=parse_assign(L); }
+        if (n->nlist<32) n->list[n->nlist++]=decl;
+        if (peek_punc(L,",")) advance(L); else break;
+    }
+    return n;
+}
+
+static node *parse_stmt(lexer *L) {
+    if (++g_depth > MAXDEPTH) { rt_err("max recursion"); g_depth--; return mknode(N_UNDEF); }
+    node *r;
+    if (peek_punc(L,"{")) { r=parse_block(L); g_depth--; return r; }
+    if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) { r=parse_var(L); g_depth--; return r; }
+    if (peek_kw(L,"function")) { r=parse_primary(L); g_depth--; return r; }   /* function decl */
+    if (peek_kw(L,"return")) { advance(L); node *n=mknode(N_RETURN); if(!peek_punc(L,"}")&&!peek_punc(L,";")&&peek(L).type!=T_EOF) n->a=parse_expr(L); g_depth--; return n; }
+    if (peek_kw(L,"break")) { advance(L); g_depth--; return mknode(N_BREAK); }
+    if (peek_kw(L,"continue")) { advance(L); g_depth--; return mknode(N_CONTINUE); }
+    if (peek_kw(L,"if")) {
+        advance(L); expect_punc(L,"("); node *n=mknode(N_IF); n->a=parse_expr(L); expect_punc(L,")");
+        n->b=parse_stmt(L); skip_semi(L);   /* a ; may terminate the then-branch before else */
+        if (peek_kw(L,"else")) { advance(L); n->c=parse_stmt(L); } g_depth--; return n;
+    }
+    if (peek_kw(L,"while")) { advance(L); expect_punc(L,"("); node *n=mknode(N_WHILE); n->a=parse_expr(L); expect_punc(L,")"); n->b=parse_stmt(L); g_depth--; return n; }
+    if (peek_kw(L,"for")) {
+        advance(L); expect_punc(L,"("); node *n=mknode(N_FOR);
+        if (!peek_punc(L,";")) { if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) n->a=parse_var(L); else n->a=parse_expr(L); }
+        expect_punc(L,";");
+        if (!peek_punc(L,";")) n->b=parse_expr(L);
+        expect_punc(L,";");
+        if (!peek_punc(L,")")) n->c=parse_expr(L);
+        expect_punc(L,")");
+        n->d=parse_stmt(L); g_depth--; return n;
+    }
+    node *e=mknode(N_EXPR); e->a=parse_expr(L); g_depth--; return e;
+}
+
+static node *parse_program(lexer *L) {
+    node *n=mknode(N_PROGRAM); n->list=aalloc(sizeof(node*)*1024); n->nlist=0;
+    for (;;) { skip_semi(L); if (peek(L).type==T_EOF||g_err||g_oom) break; node *s=parse_stmt(L); if(n->list&&n->nlist<1024) n->list[n->nlist++]=s; }
+    return n;
+}
+
+/* =========================== values =========================== */
+enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE };
+typedef struct val val;
+typedef struct obj obj;
+typedef struct env env;
+
+struct val { int t; int64_t num; const char *str; obj *o; };
+
+struct obj {
+    int kind;
+    /* object: parallel key/val arrays */
+    const char **keys; val *vals; int n, cap;
+    /* function */
+    node *fn; env *scope;
+    val (*native)(val *args, int nargs);
+};
+
+struct env { const char **keys; val *vals; int n, cap; env *parent; };
+
+static val UND(void){ val v; v.t=V_UNDEF; v.num=0; v.str=0; v.o=0; return v; }
+static val NUM(int64_t x){ val v=UND(); v.t=V_NUM; v.num=x; return v; }
+static val BOOLV(int b){ val v=UND(); v.t=V_BOOL; v.num=b?1:0; return v; }
+static val STRV(const char *s){ val v=UND(); v.t=V_STR; v.str=s?s:""; return v; }
+
+static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); return o; }
+
+static void obj_set(obj *o, const char *key, val v) {
+    for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { o->vals[i]=v; return; }
+    if (o->n>=o->cap) { int nc=o->cap*2; const char **nk=aalloc(sizeof(char*)*nc); val *nv=aalloc(sizeof(val)*nc); if(!nk||!nv){g_oom=1;return;} memcpy(nk,o->keys,sizeof(char*)*o->n); memcpy(nv,o->vals,sizeof(val)*o->n); o->keys=nk; o->vals=nv; o->cap=nc; }
+    o->keys[o->n]=key; o->vals[o->n]=v; o->n++;
+}
+static int obj_get(obj *o, const char *key, val *out) {
+    for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { *out=o->vals[i]; return 1; }
+    return 0;
+}
+
+/* ---- number/string helpers ---- */
+static char *i64_to_str(int64_t v) {
+    char tmp[24]; int i=0; int neg = v<0; uint64_t u = neg?(uint64_t)(-(v+1))+1:(uint64_t)v;
+    if (u==0) tmp[i++]='0';
+    while (u){ tmp[i++]='0'+(int)(u%10); u/=10; }
+    if (neg) tmp[i++]='-';
+    char *s=aalloc(i+1); if(!s) return ""; for(int j=0;j<i;j++) s[j]=tmp[i-1-j]; s[i]=0; return s;
+}
+static const char *val_to_str(val v); /* fwd */
+static int truthy(val v) {
+    switch (v.t) {
+        case V_UNDEF: case V_NULL: return 0;
+        case V_BOOL: case V_NUM: return v.num!=0;
+        case V_STR: return v.str && v.str[0];
+        default: return 1;
+    }
+}
+static int64_t to_num(val v) {
+    switch (v.t) {
+        case V_NUM: case V_BOOL: return v.num;
+        case V_STR: { int64_t x=0; const char*s=v.str; int neg=0; if(*s=='-'){neg=1;s++;} while(*s>='0'&&*s<='9'){x=x*10+(*s-'0');s++;} return neg?-x:x; }
+        default: return 0;
+    }
+}
+static const char *val_to_str_inner(val v) {
+    switch (v.t) {
+        case V_UNDEF: return "undefined";
+        case V_NULL: return "null";
+        case V_BOOL: return v.num?"true":"false";
+        case V_NUM: return i64_to_str(v.num);
+        case V_STR: return v.str;
+        case V_FUN: case V_NATIVE: return "function";
+        case V_ARR: {
+            /* two passes: stringify each element, sum the REAL lengths (a wrong
+             * n*24 estimate would overflow the buffer for long element strings),
+             * then allocate exactly. total is 64-bit so it can't overflow. */
+            obj *o=v.o;
+            const char **parts = aalloc((long)sizeof(char*) * (o->n>0?o->n:1));
+            if (!parts) return "[array]";
+            long total = 0;
+            for (int i=0;i<o->n;i++){ parts[i]=val_to_str(o->vals[i]); total += (long)strlen(parts[i]) + 1; }
+            char *buf=aalloc(total+1); if(!buf) return "[array]"; int p=0;
+            for (int i=0;i<o->n;i++){ if(i) buf[p++]=','; const char*s=parts[i]; while(*s) buf[p++]=*s++; }
+            buf[p]=0; return buf;
+        }
+        case V_OBJ: return "[object Object]";
+    }
+    return "";
+}
+/* depth-guarded wrapper: stops infinite recursion on a self-referential value
+ * (e.g. `var a=[]; a.push(a); print(a);`) before it overruns the kernel stack. */
+static const char *val_to_str(val v) {
+    if (++g_depth > MAXDEPTH) { g_depth--; return "[...]"; }
+    const char *s = val_to_str_inner(v); g_depth--; return s;
+}
+
+/* ---- environments ---- */
+static env *new_env(env *parent){ env *e=aalloc(sizeof(env)); if(!e) return 0; e->cap=4; e->keys=aalloc(sizeof(char*)*e->cap); e->vals=aalloc(sizeof(val)*e->cap); e->n=0; e->parent=parent; return e; }
+static void env_define(env *e, const char *key, val v) {
+    for (int i=0;i<e->n;i++) if (strcmp(e->keys[i],key)==0){ e->vals[i]=v; return; }
+    if (e->n>=e->cap){ int nc=e->cap*2; const char**nk=aalloc(sizeof(char*)*nc); val*nv=aalloc(sizeof(val)*nc); if(!nk||!nv){g_oom=1;return;} memcpy(nk,e->keys,sizeof(char*)*e->n); memcpy(nv,e->vals,sizeof(val)*e->n); e->keys=nk; e->vals=nv; e->cap=nc; }
+    e->keys[e->n]=key; e->vals[e->n]=v; e->n++;
+}
+static val *env_find(env *e, const char *key) {
+    for (; e; e=e->parent) for (int i=0;i<e->n;i++) if (strcmp(e->keys[i],key)==0) return &e->vals[i];
+    return 0;
+}
+
+/* =========================== evaluator =========================== */
+enum { C_NORMAL, C_RETURN, C_BREAK, C_CONTINUE };
+typedef struct { int kind; val v; } comp;
+
+static val eval_expr(node *n, env *e);
+static comp eval_stmt(node *n, env *e);
+
+static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names interned at parse time */
+
+static val call_function(val fn, val *args, int nargs) {
+    if (fn.t==V_NATIVE) return fn.o->native(args,nargs);
+    if (fn.t!=V_FUN) { rt_err("not a function"); return UND(); }
+    if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }
+    env *fe = new_env(fn.o->scope);
+    node *def = fn.o->fn;
+    for (int i=0;i<def->nlist;i++) env_define(fe, node_name(def->list[i]), i<nargs?args[i]:UND());
+    comp c = eval_stmt(def->a, fe);
+    g_depth--;
+    return c.kind==C_RETURN ? c.v : UND();
+}
+
+/* resolve a member/index target for assignment: returns the container + key */
+static val eval_string_method(val recv, const char *name, val *args, int nargs);
+static val eval_array_method(val recv, const char *name, val *args, int nargs);
+
+static val eval_member_get(val recv, const char *name) {
+    if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
+    if (recv.t==V_ARR) {
+        if (strcmp(name,"length")==0) return NUM(recv.o->n);
+        /* methods returned as native bound below via call path; here return undefined */
+    }
+    if (recv.t==V_OBJ) { val out; if (obj_get(recv.o,name,&out)) return out; }
+    return UND();
+}
+
+static val eval_expr_inner(node *n, env *e) {
+    if (g_err || g_oom) return UND();
+    switch (n->type) {
+        case N_NUM: return NUM(n->num);
+        case N_STR: return STRV(n->str);
+        case N_BOOL: return BOOLV((int)n->num);
+        case N_NULL: { val v=UND(); v.t=V_NULL; return v; }
+        case N_UNDEF: return UND();
+        case N_IDENT: { const char *nm=node_name(n); val *p=env_find(e,nm); if(!p){ rt_err("undefined variable"); return UND(); } return *p; }
+        case N_ARRAY: { obj *o=new_obj(V_ARR); if(!o) return UND(); for(int i=0;i<n->nlist;i++){ val v=eval_expr(n->list[i],e); if(o->n>=o->cap){int nc=o->cap*2;val*nv=aalloc(sizeof(val)*nc);const char**nk=aalloc(sizeof(char*)*nc); if(!nv){g_oom=1;break;} memcpy(nv,o->vals,sizeof(val)*o->n); o->vals=nv; o->keys=nk; o->cap=nc;} o->vals[o->n++]=v; } val r=UND(); r.t=V_ARR; r.o=o; return r; }
+        case N_OBJECT: { obj *o=new_obj(V_OBJ); if(!o) return UND(); for(int i=0;i<n->nlist;i++){ node*pr=n->list[i]; obj_set(o, node_name(pr), eval_expr(pr->a,e)); } val r=UND(); r.t=V_OBJ; r.o=o; return r; }
+        case N_FUNC: { obj *o=new_obj(V_FUN); if(!o) return UND(); o->fn=n; o->scope=e; val r=UND(); r.t=V_FUN; r.o=o; if(n->str){ env_define(e,node_name(n),r); } return r; }
+        case N_COND: return truthy(eval_expr(n->a,e)) ? eval_expr(n->b,e) : eval_expr(n->c,e);
+        case N_LOGICAL: { val l=eval_expr(n->a,e); if(n->op=='A') return truthy(l)?eval_expr(n->b,e):l; else return truthy(l)?l:eval_expr(n->b,e); }
+        case N_UNARY: {
+            if (n->op=='t') { val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE)?"function":"object"; return STRV(ty); }
+            val v=eval_expr(n->a,e);
+            if (n->op=='!') return BOOLV(!truthy(v));
+            if (n->op=='-') return NUM(-to_num(v));
+            if (n->op=='+') return NUM(to_num(v));
+            return UND();
+        }
+        case N_UPDATE: {
+            node *t=n->a; const char *nm; val *slot=0;
+            if (t->type==N_IDENT) { nm=node_name(t); slot=env_find(e,nm); }
+            if (!slot) { rt_err("invalid ++/-- target"); return UND(); }
+            int64_t old=to_num(*slot); int64_t nw = n->op=='+'?old+1:old-1; *slot=NUM(nw);
+            return NUM(n->prefix?nw:old);
+        }
+        case N_BINARY: {
+            val a=eval_expr(n->a,e), b=eval_expr(n->b,e);
+            if (n->op=='+') { if (a.t==V_STR||b.t==V_STR) { const char*sa=val_to_str(a),*sb=val_to_str(b); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(!s) return UND(); memcpy(s,sa,la); memcpy(s+la,sb,lb); s[la+lb]=0; return STRV(s); } return NUM(to_num(a)+to_num(b)); }
+            int64_t x=to_num(a), y=to_num(b);
+            switch (n->op) {
+                case '-': return NUM(x-y);
+                case '*': return NUM(x*y);
+                case '/': return NUM(y?x/y:0);
+                case '%': return NUM(y?x%y:0);
+                case '<': return BOOLV(x<y); case '>': return BOOLV(x>y);
+                case 'l': return BOOLV(x<=y); case 'g': return BOOLV(x>=y);
+                case '&': return NUM(x&y); case '|': return NUM(x|y);
+                case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
+                case '=': {
+                    if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)==0);
+                    if (a.t!=b.t && !((a.t==V_NUM||a.t==V_BOOL)&&(b.t==V_NUM||b.t==V_BOOL))) return BOOLV(0);
+                    return BOOLV(x==y);
+                }
+                case '!': {
+                    if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)!=0);
+                    if (a.t!=b.t && !((a.t==V_NUM||a.t==V_BOOL)&&(b.t==V_NUM||b.t==V_BOOL))) return BOOLV(1);
+                    return BOOLV(x!=y);
+                }
+            }
+            return UND();
+        }
+        case N_ASSIGN: {
+            val rhs = eval_expr(n->b,e);
+            node *t=n->a;
+            if (n->op!='=') { val cur=eval_expr(t,e); int64_t x=to_num(cur),y=to_num(rhs);
+                if (n->op=='+'&&(cur.t==V_STR||rhs.t==V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
+                else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): (y?x%y:0)); }
+            if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
+            if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e); if(recv.t==V_OBJ||recv.t==V_ARR){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
+            if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
+                if (recv.t==V_ARR) {
+                    long i = to_num(idx);
+                    if (i < 0 || i > (1<<24)) { rt_err("array index out of range"); return rhs; }
+                    while (recv.o->n <= (int)i && !g_oom) {           /* grow with UND() to reach i */
+                        if (recv.o->n >= recv.o->cap) {
+                            int nc = recv.o->cap*2; if (nc <= (int)i) nc = (int)i + 1;   /* i<=2^24: no int overflow */
+                            val *nv = aalloc((long)sizeof(val)*nc);   /* 64-bit size; rejects if > arena */
+                            if (!nv) break;                            /* g_oom set; do NOT write below */
+                            memcpy(nv, recv.o->vals, sizeof(val)*recv.o->n); recv.o->vals=nv; recv.o->cap=nc;
+                        }
+                        recv.o->vals[recv.o->n++]=UND();
+                    }
+                    if (!g_oom && (int)i < recv.o->n) recv.o->vals[(int)i]=rhs;
+                }
+                else if (recv.t==V_OBJ) { obj_set(recv.o, val_to_str(idx), rhs); }
+                return rhs; }
+            rt_err("invalid assignment target"); return UND();
+        }
+        case N_MEMBER: { val recv=eval_expr(n->a,e); return eval_member_get(recv, node_name(n)); }
+        case N_INDEX: { val recv=eval_expr(n->a,e); val idx=eval_expr(n->b,e);
+            if (recv.t==V_ARR){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
+            if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); s[0]=recv.str[i]; s[1]=0; return STRV(s);} return UND(); }
+            if (recv.t==V_OBJ){ val out; if(obj_get(recv.o,val_to_str(idx),&out)) return out; }
+            return UND(); }
+        case N_CALL: {
+            /* method call a.b(...) needs the receiver for string/array methods */
+            node *callee=n->a; val args[16]; int na=n->nlist>16?16:n->nlist;
+            for (int i=0;i<na;i++) args[i]=eval_expr(n->list[i],e);
+            if (callee->type==N_MEMBER) {
+                val recv=eval_expr(callee->a,e); const char *m=node_name(callee);
+                if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
+                if (recv.t==V_ARR) return eval_array_method(recv,m,args,na);
+                if (recv.t==V_OBJ) { val fn; if(obj_get(recv.o,m,&fn)) return call_function(fn,args,na); }
+                rt_err("no such method"); return UND();
+            }
+            val fn=eval_expr(callee,e); return call_function(fn,args,na);
+        }
+    }
+    return UND();
+}
+
+/* depth-guarded wrapper around the expression evaluator: a deep AST (member/index
+ * chains, nested operators, self-referential structures via val_to_str) would
+ * otherwise recurse C-stack-deep. Shares g_depth with the parser/calls. */
+static val eval_expr(node *n, env *e) {
+    if (++g_depth > MAXDEPTH) { rt_err("expression too deeply nested"); g_depth--; return UND(); }
+    val v = eval_expr_inner(n, e); g_depth--; return v;
+}
+
+static comp CN(void){ comp c; c.kind=C_NORMAL; c.v=UND(); return c; }
+
+static comp eval_stmt_inner(node *n, env *e) {
+    if (g_err || g_oom) return CN();
+    switch (n->type) {
+        case N_PROGRAM: case N_BLOCK: {
+            env *be = (n->type==N_BLOCK)? new_env(e) : e;
+            for (int i=0;i<n->nlist;i++){ comp c=eval_stmt(n->list[i],be); if(c.kind!=C_NORMAL||g_err) return c; }
+            return CN();
+        }
+        case N_VAR: { for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND(); env_define(e,node_name(d),v); } return CN(); }
+        case N_FUNC: { eval_expr(n,e); return CN(); }
+        case N_EXPR: { eval_expr(n->a,e); return CN(); }
+        case N_IF: { if (truthy(eval_expr(n->a,e))) return eval_stmt(n->b,e); else if (n->c) return eval_stmt(n->c,e); return CN(); }
+        case N_WHILE: {
+            int guard=0;
+            while (truthy(eval_expr(n->a,e))) { if(++guard>5000000){rt_err("loop limit");break;} comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err) break; }
+            return CN();
+        }
+        case N_FOR: {
+            env *fe=new_env(e); if(n->a){ if(n->a->type==N_VAR) eval_stmt(n->a,fe); else eval_expr(n->a,fe); }
+            int guard=0;
+            while (!n->b || truthy(eval_expr(n->b,fe))) {
+                if(++guard>5000000){rt_err("loop limit");break;}
+                comp c=eval_stmt(n->d,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err) break;
+                if(n->c) eval_expr(n->c,fe);
+            }
+            return CN();
+        }
+        case N_RETURN: { comp c; c.kind=C_RETURN; c.v = n->a?eval_expr(n->a,e):UND(); return c; }
+        case N_BREAK: { comp c=CN(); c.kind=C_BREAK; return c; }
+        case N_CONTINUE: { comp c=CN(); c.kind=C_CONTINUE; return c; }
+        default: eval_expr(n,e); return CN();
+    }
+}
+/* depth-guarded wrapper around the statement evaluator (deeply nested blocks /
+ * if / while / for). Shares g_depth with eval_expr, the parser, and calls. */
+static comp eval_stmt(node *n, env *e) {
+    if (++g_depth > MAXDEPTH) { rt_err("statements too deeply nested"); g_depth--; return CN(); }
+    comp c = eval_stmt_inner(n, e); g_depth--; return c;
+}
+
+/* ---- builtin methods + globals ---- */
+static val eval_string_method(val recv, const char *name, val *args, int nargs) {
+    const char *s=recv.str; int len=(int)strlen(s);
+    if (strcmp(name,"charAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return STRV(""); char*r=aalloc(2); r[0]=s[i]; r[1]=0; return STRV(r); }
+    if (strcmp(name,"charCodeAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }
+    if (strcmp(name,"toUpperCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='a'&&s[i]<='z')?s[i]-32:s[i]; r[len]=0; return STRV(r); }
+    if (strcmp(name,"toLowerCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='A'&&s[i]<='Z')?s[i]+32:s[i]; r[len]=0; return STRV(r); }
+    if (strcmp(name,"substring")==0||strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0; int b=nargs>1?(int)to_num(args[1]):len; if(a<0)a=0; if(b>len)b=len; if(b<a)b=a; char*r=aalloc(b-a+1); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
+    if (strcmp(name,"indexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); for(int i=0;i+sl<=len;i++){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
+    rt_err("unknown string method"); return UND();
+}
+static val eval_array_method(val recv, const char *name, val *args, int nargs) {
+    obj *o=recv.o;
+    if (strcmp(name,"push")==0){ for(int i=0;i<nargs;i++){ if(o->n>=o->cap){int nc=o->cap*2+4;val*nv=aalloc(sizeof(val)*nc);if(!nv){g_oom=1;break;}memcpy(nv,o->vals,sizeof(val)*o->n);o->vals=nv;o->cap=nc;} o->vals[o->n++]=args[i]; } return NUM(o->n); }
+    if (strcmp(name,"pop")==0){ if(o->n==0) return UND(); return o->vals[--o->n]; }
+    if (strcmp(name,"join")==0){
+        const char*sep=nargs?val_to_str(args[0]):","; long sl=(long)strlen(sep);
+        const char **parts=aalloc((long)sizeof(char*)*(o->n>0?o->n:1)); if(!parts) return STRV("");
+        long total=0; for(int i=0;i<o->n;i++){ parts[i]=val_to_str(o->vals[i]); total+=(long)strlen(parts[i]); if(i) total+=sl; }
+        char*buf=aalloc(total+1); if(!buf) return STRV(""); int p=0;
+        for(int i=0;i<o->n;i++){ if(i){ for(long k=0;k<sl;k++) buf[p++]=sep[k]; } const char*v=parts[i]; while(*v) buf[p++]=*v++; }
+        buf[p]=0; return STRV(buf);
+    }
+    if (strcmp(name,"indexOf")==0){ for(int i=0;i<o->n;i++){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if(x.t==V_NUM&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
+    rt_err("unknown array method"); return UND();
+}
+
+/* native print/console.log */
+static val native_print(val *args, int nargs) {
+    for (int i=0;i<nargs;i++){ if(i) out_str(" "); out_str(val_to_str(args[i])); }
+    out_str("\n"); return UND();
+}
+
+static void install_globals(env *g) {
+    obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
+    /* console.log */
+    obj *log=new_obj(V_NATIVE); log->native=native_print; val lv=UND(); lv.t=V_NATIVE; lv.o=log;
+    obj *con=new_obj(V_OBJ); obj_set(con,"log",lv); val cv=UND(); cv.t=V_OBJ; cv.o=con; env_define(g,"console",cv);
+}
+
+/* =========================== entry point =========================== */
+/* Run JS source; print output into out[0..outmax). Returns output length, or -1
+ * on error (with the message appended to the output). Serialized: uses static
+ * arena + globals, so only one js_run() may be in flight at a time. */
+int js_run(const char *src, char *out, int outmax) {
+    g_arena_off=0; g_oom=0; g_err=0; g_errmsg[0]=0; g_depth=0;
+    g_out=out; g_out_cap=outmax; g_out_len=0; if(outmax) out[0]=0;
+
+    lexer L; memset(&L,0,sizeof(L)); L.src=src; L.len=(int)strlen(src); L.pos=0;
+    node *prog = parse_program(&L);
+    g_depth = 0;                          /* parse balances g_depth to 0; reset defensively for eval */
+    if (!g_err && !g_oom) {
+        env *g = new_env(0);
+        if (g) { install_globals(g); eval_stmt(prog, g); }
+    }
+    if (g_oom) rt_err("out of memory (arena)");
+    if (g_err) { out_str("\n[js error: "); out_str(g_errmsg); out_str("]\n"); return -1; }
+    return g_out_len;
+}
+
+#ifdef JS_HOSTTEST
+int main(int argc, char **argv) {
+    static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
+    n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
+    static char outb[200000];
+    int r = js_run(src, outb, sizeof(outb));
+    fputs(outb, stdout);
+    return r<0?1:0;
+}
+#endif

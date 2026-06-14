@@ -1,0 +1,17 @@
+/*
+ * console.h — the kernel's unified text output.
+ *
+ * console_putc writes one character to *both* the VGA screen and the serial
+ * port, so everything the kernel prints is visible in a QEMU window and
+ * capturable headlessly. kprintf is our freestanding printf built on top.
+ */
+#pragma once
+#include <stdarg.h>
+
+void console_init(void);
+void console_putc(char c);
+void console_write(const char *s);
+void console_enable_gfx(void);   /* route output to the framebuffer console */
+
+void kprintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void kvprintf(const char *fmt, va_list ap);

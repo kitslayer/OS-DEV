@@ -1,0 +1,8 @@
+-ffreestanding
+-nostdlib
+-fno-pic
+-fno-pie
+-mno-red-zone
+-mgeneral-regs-only
+-std=gnu11
+-Ikernel/include

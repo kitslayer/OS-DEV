@@ -1,0 +1,42 @@
+/* ulib.h — tiny userspace C library (the start of a libc). */
+#pragma once
+
+/* raw syscalls */
+long sys_write(int fd, const void *buf, unsigned long len);
+long sys_read(int fd, void *buf, unsigned long len);
+void sys_exit(int code);
+int  sys_getpid(void);
+long sys_list(void *buf, unsigned long len);
+long sys_readfile(const char *name, void *buf, unsigned long len);
+long sys_writefile(const char *name, const void *buf, unsigned long len);
+long sys_delete(const char *name);
+long sys_time(void *buf, unsigned long len);
+void sys_beep(int hz, int ms);
+long sys_sysinfo(void *buf, unsigned long len);
+void sys_clear(void);
+void sys_reboot(void);
+long sys_ping(void);
+long sys_resolve(const char *host, void *buf, unsigned long len);
+long sys_http(const char *host, const char *path, void *buf, unsigned long max);
+long sys_https(const char *host, const char *path, void *buf, unsigned long max);
+long sys_spawn(const char *name);
+long sys_browse(const char *url);
+long sys_mkdir(const char *path);
+long sys_chdir(const char *path);
+long sys_tree(void *buf, unsigned long len);
+long sys_ps(void *buf, unsigned long len);
+long sys_history(void *buf, unsigned long len);
+int  sys_pollkey(void);
+long sys_df(void *buf, unsigned long len);
+long sys_find(const char *want, void *buf, unsigned long len);
+long sys_sha256(const char *name, void *hexbuf, unsigned long max);
+long sys_crypt(const char *name, const char *pass);
+long sys_js(const char *src, void *out, unsigned long max);
+void sys_sleep(int ms);
+
+/* convenience */
+void          print(const char *s);
+int           readline(char *buf, int max);   /* reads a line, strips '\n', NUL-terminates */
+unsigned long ustrlen(const char *s);
+int           streq(const char *a, const char *b);
+int           startswith(const char *s, const char *prefix);

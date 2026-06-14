@@ -1,0 +1,193 @@
+/*
+ * e1000.c — driver for the Intel 82540EM ("e1000") network card.
+ *
+ * A modern NIC isn't driven by poking bytes one at a time; it uses **DMA**. We
+ * hand it two rings of "descriptors" in RAM — one for receive, one for transmit
+ * — where each descriptor points at a packet buffer. To send, we fill a TX
+ * descriptor and bump the tail pointer; the card DMAs the buffer onto the wire
+ * and sets a "done" bit. To receive, the card DMAs incoming frames into RX
+ * buffers and sets their done bits, which we poll.
+ *
+ * The card's control registers are memory-mapped (PCI BAR0); the descriptor
+ * rings and buffers are plain RAM frames from the PMM (their physical addresses
+ * double as virtual ones via the identity map, which is what the card's DMA
+ * engine needs).
+ */
+#include "e1000.h"
+#include "pci.h"
+#include "pmm.h"
+#include "vmm.h"
+#include "string.h"
+
+/* register offsets */
+#define REG_CTRL   0x0000
+#define REG_EERD   0x0014
+#define REG_ICR    0x00C0
+#define REG_IMC    0x00D8
+#define REG_RCTL   0x0100
+#define REG_TCTL   0x0400
+#define REG_TIPG   0x0410
+#define REG_RDBAL  0x2800
+#define REG_RDBAH  0x2804
+#define REG_RDLEN  0x2808
+#define REG_RDH    0x2810
+#define REG_RDT    0x2818
+#define REG_TDBAL  0x3800
+#define REG_TDBAH  0x3804
+#define REG_TDLEN  0x3808
+#define REG_TDH    0x3810
+#define REG_TDT    0x3818
+#define REG_RAL0   0x5400
+#define REG_RAH0   0x5404
+#define REG_MTA    0x5200
+
+#define RCTL_EN    (1 << 1)
+#define RCTL_BAM   (1 << 15)   /* accept broadcast */
+#define RCTL_SECRC (1 << 26)   /* strip ethernet CRC */
+
+#define TCTL_EN    (1 << 1)
+#define TCTL_PSP   (1 << 3)    /* pad short packets */
+
+#define TXCMD_EOP  (1 << 0)
+#define TXCMD_IFCS (1 << 1)
+#define TXCMD_RS   (1 << 3)
+#define TXSTAT_DD  (1 << 0)
+#define RXSTAT_DD  (1 << 0)
+
+#define RX_COUNT   32
+#define TX_COUNT   8
+#define BUF_SIZE   2048
+
+struct rx_desc {
+    volatile uint64_t addr;
+    volatile uint16_t length;
+    volatile uint16_t checksum;
+    volatile uint8_t  status;
+    volatile uint8_t  errors;
+    volatile uint16_t special;
+} __attribute__((packed));
+
+struct tx_desc {
+    volatile uint64_t addr;
+    volatile uint16_t length;
+    volatile uint8_t  cso;
+    volatile uint8_t  cmd;
+    volatile uint8_t  status;
+    volatile uint8_t  css;
+    volatile uint16_t special;
+} __attribute__((packed));
+
+static volatile uint8_t *mmio;
+static uint8_t  mac[6];
+
+static struct rx_desc *rx_ring;
+static struct tx_desc *tx_ring;
+static uint64_t rx_buf[RX_COUNT];
+static uint64_t tx_buf[TX_COUNT];
+static uint32_t rx_cur, tx_cur;
+
+static uint32_t reg_read(uint32_t off)            { return *(volatile uint32_t *)(mmio + off); }
+static void     reg_write(uint32_t off, uint32_t v){ *(volatile uint32_t *)(mmio + off) = v; }
+
+static uint16_t eeprom_read(uint8_t addr) {
+    reg_write(REG_EERD, ((uint32_t)addr << 8) | 1);
+    uint32_t v;
+    do { v = reg_read(REG_EERD); } while (!(v & (1 << 4)));   /* wait for DONE */
+    return (v >> 16) & 0xFFFF;
+}
+
+const uint8_t *e1000_mac(void) { return mac; }
+
+int e1000_init(void) {
+    pci_device_t dev = pci_find(0x8086, 0x100E);
+    if (!dev.valid)
+        return -1;
+    pci_enable_bus_master(&dev);
+
+    /* Map the register block (BAR0) as cache-disabled MMIO. */
+    uint64_t bar0 = pci_bar(&dev, 0);
+    for (uint64_t off = 0; off < 0x20000; off += PAGE_SIZE)
+        vmm_map(bar0 + off, bar0 + off, PTE_WRITABLE | PTE_PCD);
+    mmio = (volatile uint8_t *)(uintptr_t)bar0;
+
+    reg_write(REG_IMC, 0xFFFFFFFF);    /* mask all NIC interrupts; we poll */
+
+    /* MAC address from the EEPROM. */
+    uint16_t w0 = eeprom_read(0), w1 = eeprom_read(1), w2 = eeprom_read(2);
+    mac[0] = w0; mac[1] = w0 >> 8;
+    mac[2] = w1; mac[3] = w1 >> 8;
+    mac[4] = w2; mac[5] = w2 >> 8;
+
+    /* Program the receive-address filter so unicast to us is accepted. */
+    reg_write(REG_RAL0, (uint32_t)(mac[0] | mac[1] << 8 | mac[2] << 16 | (uint32_t)mac[3] << 24));
+    reg_write(REG_RAH0, (uint32_t)(mac[4] | mac[5] << 8) | (1u << 31));   /* AV = valid */
+    for (int i = 0; i < 128; i++)
+        reg_write(REG_MTA + i * 4, 0);
+
+    /* RX ring + buffers. */
+    rx_ring = (struct rx_desc *)(uintptr_t)pmm_alloc_frame();
+    memset(rx_ring, 0, RX_COUNT * sizeof(struct rx_desc));
+    for (int i = 0; i < RX_COUNT; i++) {
+        rx_buf[i] = pmm_alloc_frame();
+        rx_ring[i].addr = rx_buf[i];
+        rx_ring[i].status = 0;
+    }
+    reg_write(REG_RDBAL, (uint32_t)(uintptr_t)rx_ring);
+    reg_write(REG_RDBAH, (uint32_t)((uint64_t)(uintptr_t)rx_ring >> 32));
+    reg_write(REG_RDLEN, RX_COUNT * sizeof(struct rx_desc));
+    reg_write(REG_RDH, 0);
+    reg_write(REG_RDT, RX_COUNT - 1);
+    reg_write(REG_RCTL, RCTL_EN | RCTL_BAM | RCTL_SECRC);
+    rx_cur = 0;
+
+    /* TX ring + buffers. */
+    tx_ring = (struct tx_desc *)(uintptr_t)pmm_alloc_frame();
+    memset(tx_ring, 0, TX_COUNT * sizeof(struct tx_desc));
+    for (int i = 0; i < TX_COUNT; i++) {
+        tx_buf[i] = pmm_alloc_frame();
+        tx_ring[i].status = TXSTAT_DD;   /* mark free */
+    }
+    reg_write(REG_TDBAL, (uint32_t)(uintptr_t)tx_ring);
+    reg_write(REG_TDBAH, (uint32_t)((uint64_t)(uintptr_t)tx_ring >> 32));
+    reg_write(REG_TDLEN, TX_COUNT * sizeof(struct tx_desc));
+    reg_write(REG_TDH, 0);
+    reg_write(REG_TDT, 0);
+    reg_write(REG_TIPG, 0x0060200A);
+    reg_write(REG_TCTL, TCTL_EN | TCTL_PSP | (0x0F << 4) | (0x40 << 12));
+    tx_cur = 0;
+
+    return 0;
+}
+
+int e1000_send(const void *frame, uint16_t len) {
+    uint32_t i = tx_cur;
+    memcpy((void *)(uintptr_t)tx_buf[i], frame, len);
+    tx_ring[i].addr = tx_buf[i];
+    tx_ring[i].length = len;
+    tx_ring[i].cmd = TXCMD_EOP | TXCMD_IFCS | TXCMD_RS;
+    tx_ring[i].status = 0;
+
+    tx_cur = (i + 1) % TX_COUNT;
+    reg_write(REG_TDT, tx_cur);
+
+    /* wait for the card to mark the descriptor done */
+    for (int spin = 0; spin < 1000000; spin++)
+        if (tx_ring[i].status & TXSTAT_DD)
+            return 0;
+    return -1;
+}
+
+int e1000_receive(void *out, uint16_t max) {
+    uint32_t i = rx_cur;
+    if (!(rx_ring[i].status & RXSTAT_DD))
+        return 0;                       /* nothing received */
+
+    uint16_t len = rx_ring[i].length;
+    if (len > max) len = max;
+    memcpy(out, (void *)(uintptr_t)rx_buf[i], len);
+
+    rx_ring[i].status = 0;
+    reg_write(REG_RDT, i);              /* return the buffer to the card */
+    rx_cur = (i + 1) % RX_COUNT;
+    return len;
+}
