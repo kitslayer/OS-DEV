@@ -49,7 +49,10 @@ boot → long mode → interrupts → timer/kbd → memory → heap → preempti
  → JavaScript runs in the browser (pages execute their <script> tags)
  → JS standard library (Math, JSON.stringify/parse, String/Array map·filter·…)
  → arrow functions (x => x*x)
- → template literals (`hi ${name}`) → 149 milestones  ✅
+ → template literals (`hi ${name}`)
+ → clickable JavaScript (<a href="javascript:..."> runs JS on click)
+ → JS switch / do-while / for-of → try/catch/finally/throw (exceptions)
+ → Object.values/entries, Array.isArray/from → object shorthand + default params → 156 milestones  ✅
 ```
 
 The browser is now **fully keyboard-drivable**: Tab/n/p to select links, Enter
@@ -72,30 +75,27 @@ beep mem ps clear reboot ver pid exit`.
 
 ## The biggest remaining gaps
 
-1. **HTTPS works — now harden it with cert-chain validation.** The browser
-   **fetches real pages over real HTTPS** via a from-scratch **TLS 1.3 client**
-   (m127, `kernel/tls.c`): ClientHello/ServerHello, X25519 + HKDF key schedule,
-   transcript hashing, the AES-GCM/ChaCha20-Poly1305 record layer, **server
-   Finished verification**, and application data — verified against a Python `ssl`
-   server *and* live against `example.com` (Cloudflare). The remaining hardening
-   step is **certificate-chain validation**: the handshake currently skips it, so
-   it protects against a passive eavesdropper but **not an active MITM**. All the
-   pieces exist (m123 `x509_parse`, m124 RSA verify, m125 ECDSA-P256). **Progress
-   (m138):** the **CertificateVerify** signature is now verified against the leaf
-   cert's key (the server proves key-possession) — live on Cloudflare/NPR/Let's
-   Encrypt — after giving the fetch worker a 256 KB stack (the heavy crypto
-   overflowed the 16 KB default). **Chain-internal verification (m139)** now also
-   checks each cert is signed by the next (live: gnu.org/NPR leaf&larr;Let's-Encrypt
-   RSA links verify; example.com's EC leaf link verifies). Still **logged, not
-   enforced**. Remaining for real MITM protection: (1) **SHA-384 + ECDSA P-384** so
-   the CA-to-CA links (which use them) verify, not just the leaf link; (2) a
-   baked-in **root-CA store** to anchor the chain top; (3) make it **fatal**.
-   Also: TLS session tickets and HTTP/1.1 keep-alive.
-   *Validated live on `example.com`, `www.gnu.org` (incl. following its links), and
-   `text.npr.org` (a real news site, rendered beautifully). Known limit: very large
-   /fast CDN responses (e.g. `lite.cnn.com`) can defeat the **minimal TCP** (in-order
-   only, no out-of-order buffering / SACK / retransmit) — a robust TCP is the other
-   frontier for "any real site".*
+1. **Browser interactivity — the real frontier now (HTTPS + page-JS already work).**
+   The browser **browses the real HTTPS web** with a from-scratch **TLS 1.3 client**
+   that does **full X.509 cert-chain validation to baked-in trusted roots** (the
+   `TLS*` badge — example.com, NPR, gnu.org, google.com), and it **runs JavaScript**:
+   pages execute their `<script>` at load (`document.write`) and `<a href="javascript:…">`
+   links run JS on click, via a from-scratch JS engine (`kernel/js.c` — closures,
+   arrows, template literals, switch/for-of, try/catch, JSON, a real stdlib). What's
+   missing for *real interactivity*:
+   - **A minimal DOM** — `getElementById`/`querySelector`, `element.textContent`/
+     `.innerHTML`, and element `onclick` that *mutates existing nodes* (not just
+     `document.write`). The renderer is a flat token stream, not a DOM tree, so this
+     is a real build (the next big, risky one — best done with guidance).
+   - **Persistent per-page JS state** so click handlers accumulate state (a counter
+     that counts). Each click is currently a fresh `js_run` (arena reset). A
+     contained low-risk path: a browser-owned **`localStorage`** (getItem/setItem)
+     that survives the resets.
+   - Then: forms that submit (GET → query string), cookies (sessions), remote `<img>`.
+   *Known limit: `lite.cnn.com` and similar refuse our minimal ClientHello (Fastly
+   TLS fingerprinting) — not a TCP/crypto bug; our stack validates Cloudflare/Let's-
+   Encrypt/DigiCert/GTS. And the hard ceiling stands: real web apps (Google Docs) /
+   Chromium are out of reach — see GOALS.md.*
 2. **`fork` / `exec` + a process table.** Programs spawn fresh from embedded or
    on-disk ELFs (loading from disk now works — milestone 85); true `fork` +
    `exec` would enable a Unix-like model with child processes.
