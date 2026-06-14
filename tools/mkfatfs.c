@@ -127,6 +127,21 @@ static const struct {
         "class B extends A { who(){ return super.who() + \"B\"; } }\n"
         "class C extends B { who(){ return super.who() + \"C\"; } }\n"
         "print(\"chain=\" + new C().who());\n" },
+    { "ES6     JS ", "// es6.js  --  modern JavaScript: spread, rest, destructuring.  Run: js es6.js\n"
+        "var nums = [3, 1, 4, 1, 5, 9];\n"
+        "var [head, ...rest] = nums;\n"
+        "print(\"head=\" + head + \" rest=\" + rest.join(\",\"));\n"
+        "print(\"spread: \" + [0, ...nums, 10].join(\",\"));\n"
+        "print(\"max=\" + Math.max(...nums));\n"
+        "function tag(first, ...others){ return first + \" + \" + others.length + \" more\"; }\n"
+        "print(tag(\"a\", \"b\", \"c\", \"d\"));\n"
+        "var person = { name: \"Ada\", role: \"pioneer\", year: 1843 };\n"
+        "var { name, ...info } = person;\n"
+        "print(\"name=\" + name + \" info=\" + JSON.stringify(info));\n"
+        "var { role: job = \"x\" } = person;\n"
+        "print(\"job=\" + job);\n"
+        "for (var [k, v] of [[\"x\", 1], [\"y\", 2], [\"z\", 3]]) print(\"  \" + k + \" => \" + v);\n"
+        "print(\"merged: \" + JSON.stringify({ ...person, role: \"legend\" }));\n" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)
