@@ -112,6 +112,9 @@ print("-- dom getAttribute --");
 var gel = document.getElementById("box");
 print(gel.getAttribute("href"), gel.getAttribute("data-id"), document.querySelector("#q").getAttribute("type"));
 print(gel.setAttribute("data-id", "99"), typeof gel.setAttribute);   /* call returns undefined; member-access is undefined (not a real prop) */
+print("-- array mutators --");
+var sp=[1,2,3,4,5]; var rm=sp.splice(1,2,"a","b","c"); print(rm.join(","), sp.join(","));
+var q=[2,3]; q.unshift(0,1); print(q.shift(), q.join(","));
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);

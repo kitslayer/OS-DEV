@@ -101,6 +101,9 @@ gi ! {"source":"z","global":true,"flags":"g"}
 -- dom getAttribute --
 href data-id type
 undefined undefined
+-- array mutators --
+2,3 1,a,b,c,4,5
+0 1,2,3
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

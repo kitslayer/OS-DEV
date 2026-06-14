@@ -1548,6 +1548,23 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"concat")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<o->n;i++) arr_push_val(r,o->vals[i]); for(int a=0;a<nargs;a++){ if(args[a].t==V_ARR&&args[a].o){ for(int i=0;i<args[a].o->n;i++) arr_push_val(r,args[a].o->vals[i]); } else arr_push_val(r,args[a]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0, b=nargs>1?(int)to_num(args[1]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=a;i<b;i++) arr_push_val(r,o->vals[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"reverse")==0){ for(int i=0,j=o->n-1;i<j;i++,j--){ val t=o->vals[i]; o->vals[i]=o->vals[j]; o->vals[j]=t; } return recv; }
+    if (strcmp(name,"shift")==0){ if(o->n==0) return UND(); val r=o->vals[0]; for(int i=1;i<o->n;i++) o->vals[i-1]=o->vals[i]; o->n--; return r; }
+    if (strcmp(name,"unshift")==0){ int need=o->n+nargs;
+        if(need>o->cap){ int nc=o->cap*2+4; while(nc<need) nc*=2; val*nv=aalloc((long)sizeof(val)*nc); if(!nv){g_oom=1;return NUM(o->n);} memcpy(nv,o->vals,(long)sizeof(val)*o->n); o->vals=nv; o->cap=nc; }
+        for(int i=o->n-1;i>=0;i--) o->vals[i+nargs]=o->vals[i];   /* shift existing right */
+        for(int i=0;i<nargs;i++) o->vals[i]=args[i]; o->n+=nargs; return NUM(o->n); }
+    if (strcmp(name,"splice")==0){   /* splice(start, delCount, ...items) -> removed array */
+        int start=nargs>0?(int)to_num(args[0]):0; if(start<0){ start+=o->n; if(start<0)start=0; } if(start>o->n)start=o->n;
+        int del=nargs>1?(int)to_num(args[1]):(o->n-start); if(del<0)del=0; if(del>o->n-start)del=o->n-start;
+        int nins=nargs>2?nargs-2:0;
+        obj*rem=new_obj(V_ARR); if(!rem){g_oom=1;return UND();}
+        for(int i=0;i<del;i++) arr_push_val(rem,o->vals[start+i]);   /* collect removed */
+        int newn=o->n-del+nins, tail=o->n-(start+del);
+        if(newn>o->cap){ int nc=o->cap*2+4; while(nc<newn) nc*=2; val*nv=aalloc((long)sizeof(val)*nc); if(!nv){g_oom=1; val v=UND(); v.t=V_ARR; v.o=rem; return v; } memcpy(nv,o->vals,(long)sizeof(val)*o->n); o->vals=nv; o->cap=nc; }
+        if(nins>del){ for(int i=tail-1;i>=0;i--) o->vals[start+nins+i]=o->vals[start+del+i]; }       /* grow: move tail right (backwards) */
+        else if(nins<del){ for(int i=0;i<tail;i++) o->vals[start+nins+i]=o->vals[start+del+i]; }      /* shrink: move tail left (forwards) */
+        for(int i=0;i<nins;i++) o->vals[start+i]=args[2+i]; o->n=newn;
+        val v=UND(); v.t=V_ARR; v.o=rem; return v; }
     if (strcmp(name,"fill")==0){ val fv=nargs?args[0]:UND(); int st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):o->n; if(st<0)st+=o->n; if(en<0)en+=o->n; if(st<0)st=0; if(en>o->n)en=o->n; for(int i=st;i<en;i++) o->vals[i]=fv; return recv; }
     if (strcmp(name,"lastIndexOf")==0){ for(int i=o->n-1;i>=0;i--){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if((x.t==V_NUM||x.t==V_BOOL)&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
     if (strcmp(name,"flat")==0){ int depth=nargs?(int)to_num(args[0]):1; if(depth<0)depth=0; if(depth>64)depth=64; obj*r=new_obj(V_ARR); if(!r) return UND(); flat_into(r,o,depth); val v=UND(); v.t=V_ARR; v.o=r; return v; }
