@@ -52,7 +52,11 @@ boot → long mode → interrupts → timer/kbd → memory → heap → preempti
  → template literals (`hi ${name}`)
  → clickable JavaScript (<a href="javascript:..."> runs JS on click)
  → JS switch / do-while / for-of → try/catch/finally/throw (exceptions)
- → Object.values/entries, Array.isArray/from → object shorthand + default params → 156 milestones  ✅
+ → Object.values/entries, Array.isArray/from → object shorthand + default params
+ → localStorage (stateful pages) → Date/for-in → parseInt(radix)/Object.assign/
+   Array.flat/Math.sign/Number.toString(radix)
+ → JS `this`/`new`/OOP → `class`/`extends` → `super` → spread/rest `...`
+ → destructuring → full class-based OOP + ES6 (verified in-OS) → 169 milestones  ✅
 ```
 
 The browser is now **fully keyboard-drivable**: Tab/n/p to select links, Enter
@@ -80,17 +84,18 @@ beep mem ps clear reboot ver pid exit`.
    that does **full X.509 cert-chain validation to baked-in trusted roots** (the
    `TLS*` badge — example.com, NPR, gnu.org, google.com), and it **runs JavaScript**:
    pages execute their `<script>` at load (`document.write`) and `<a href="javascript:…">`
-   links run JS on click, via a from-scratch JS engine (`kernel/js.c` — closures,
-   arrows, template literals, switch/for-of, try/catch, JSON, a real stdlib). What's
-   missing for *real interactivity*:
+   links run JS on click, via a from-scratch JS engine (`kernel/js.c`). The engine is
+   now genuinely capable — closures, arrow functions, template literals,
+   switch/do-while/for-of/for-in, try/catch/finally/throw, **full class-based OOP
+   (`class`/`extends`/`super`, `this`, `new`)**, **ES6 spread/rest `...` and
+   destructuring**, a Math/JSON/String/Array stdlib, and a browser-owned
+   **`localStorage`** so click handlers keep state across runs (all verified in-OS:
+   `CLASS.JS`, `ES6.JS`, `OOP.HTM`, `JSCLICK.HTM`). What's still missing for *real
+   interactivity*:
    - **A minimal DOM** — `getElementById`/`querySelector`, `element.textContent`/
      `.innerHTML`, and element `onclick` that *mutates existing nodes* (not just
      `document.write`). The renderer is a flat token stream, not a DOM tree, so this
      is a real build (the next big, risky one — best done with guidance).
-   - **Persistent per-page JS state** so click handlers accumulate state (a counter
-     that counts). Each click is currently a fresh `js_run` (arena reset). A
-     contained low-risk path: a browser-owned **`localStorage`** (getItem/setItem)
-     that survives the resets.
    - Then: forms that submit (GET → query string), cookies (sessions), remote `<img>`.
    *Known limit: `lite.cnn.com` and similar refuse our minimal ClientHello (Fastly
    TLS fingerprinting) — not a TCP/crypto bug; our stack validates Cloudflare/Let's-
