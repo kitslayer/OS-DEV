@@ -1468,6 +1468,11 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         int caps[2*(RE_MAXGROUP+1)];
         if(re->global){ obj*a=new_obj(V_ARR); if(!a) return UND(); int pos=0,any=0; while(pos<=len){ int st=re_search(re,s,len,pos,caps); if(st<0) break; any=1; char*m=aalloc(caps[1]-caps[0]+1); if(m){memcpy(m,s+caps[0],caps[1]-caps[0]);m[caps[1]-caps[0]]=0;} arr_push_val(a,STRV(m?m:"")); pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(g_oom)break; } if(!any){ val nv=UND(); nv.t=V_NULL; return nv; } val r=UND();r.t=V_ARR;r.o=a;return r; }
         int st=re_search(re,s,len,0,caps); if(st<0){ val nv=UND(); nv.t=V_NULL; return nv; } return re_result(re,s,caps); }
+    if (strcmp(name,"matchAll")==0){ regex *re=nargs?rx_of(args[0]):0; if(!re&&nargs) re=re_compile(val_to_str(args[0]),"");
+        obj*out=new_obj(V_ARR); if(!out) return UND();                  /* array of [fullMatch, g1, g2, …] result arrays */
+        if(re&&re->ok){ int caps[2*(RE_MAXGROUP+1)]; int pos=0;
+            while(pos<=len && !g_oom){ int st=re_search(re,s,len,pos,caps); if(st<0) break; arr_push_val(out, re_result(re,s,caps)); pos = caps[1]>caps[0]?caps[1]:caps[1]+1; } }
+        val r=UND(); r.t=V_ARR; r.o=out; return r; }
     if (strcmp(name,"replace")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]); const char *repl=nargs>1?val_to_str(args[1]):""; int caps[2*(RE_MAXGROUP+1)];
         sbuild b; memset(&b,0,sizeof(b)); int pos=0;
         for(;;){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom) break;

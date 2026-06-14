@@ -94,6 +94,7 @@ print(JSON.stringify({a:1,b:2},null,2).split("\n").length, JSON.stringify([1,2],
 print([1,[2,[3,[4]]]].flat(64).length, "  x  ".trimStart()+"|", "|"+"  y  ".trimEnd());
 var dd=new Date(); print(typeof dd.getFullYear(), typeof dd.getHours(), (""+dd).length);
 print(encodeURIComponent("a b&c"), decodeURIComponent("x%20y"), encodeURI("p/q?x=1"));
+print("a=1 b=2".matchAll(/(\w)=(\d)/g).map(m=>m[1]+m[2]).join(","), "x=9".matchAll(/(\w)=(\d)/g).length);
 print("-- more stdlib --");
 print([10,20,30].at(-1), [1,2,3].flatMap(x=>[x,x]).join(","), [4,9,2,8].findLast(x=>x<5));
 print("a.b.c".replaceAll(".","/"), "hi".at(-1));
