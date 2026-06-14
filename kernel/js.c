@@ -1078,6 +1078,7 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs);
 static val eval_map_method(val recv, const char *name, val *args, int nargs);
 static val eval_set_method(val recv, const char *name, val *args, int nargs);
 static val eval_date_method(val recv, const char *name, val *args, int nargs);
+static val eval_element_method(val recv, const char *name, val *args, int nargs);
 static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax);   /* DOM element read/write */
 
 static val eval_member_get(val recv, const char *name) {
@@ -1255,6 +1256,7 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_SET) return eval_set_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX) return eval_regex_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_DATE) return eval_date_method(recv,m,args,na);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) return eval_element_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();
@@ -1670,6 +1672,7 @@ static val native_doc_write(val *args, int nargs) {
  * mutates it, and re-renders (mirroring the document.write / localStorage model). */
 static int  (*g_dom_get)(const char *id, char *out, int max, int html);   /* 1 if found */
 static void (*g_dom_set)(const char *id, const char *value, int html);
+static int  (*g_dom_getattr)(const char *id, const char *attr, char *out, int max);   /* getAttribute; 1 if present */
 static val element_handle(const char *id) {
     obj *o = new_obj(V_ELEMENT); if(!o){ g_oom=1; return UND(); }
     arr_push_val(o, STRV(intern(id, (int)strlen(id))));   /* vals[0] = the element id */
@@ -1700,6 +1703,19 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
         return 1;
     }
     return 0;
+}
+/* methods on a DOM element handle (recv.o->kind==V_ELEMENT): getAttribute(name). */
+static val eval_element_method(val recv, const char *name, val *args, int nargs) {
+    obj *el = recv.o;
+    const char *id = (el->n > 0 && el->vals[0].t == V_STR) ? el->vals[0].str : "";
+    if (strcmp(name, "getAttribute") == 0) {
+        const char *aname = nargs ? val_to_str(args[0]) : "";
+        static char ab[2048]; ab[0] = 0;
+        if (g_dom_getattr && g_dom_getattr(id, aname, ab, (int)sizeof(ab)))
+            return STRV(intern(ab, (int)strlen(ab)));
+        val nv = UND(); nv.t = V_NULL; return nv;   /* missing attribute -> null, per the DOM */
+    }
+    rt_err("no such element method"); return UND();
 }
 
 /* localStorage: a host-provided key->value (string) store that survives the
@@ -1997,7 +2013,7 @@ static int js_run_impl(const char *src, char *out, int outmax) {
 int js_run(const char *src, char *out, int outmax) {
     g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
     g_ls_get = 0; g_ls_set = 0;           /* and no persistent storage */
-    g_dom_get = 0; g_dom_set = 0;         /* and no DOM (no page) */
+    g_dom_get = 0; g_dom_set = 0; g_dom_getattr = 0;   /* and no DOM (no page) */
     return js_run_impl(src, out, outmax);
 }
 
@@ -2008,6 +2024,10 @@ void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, 
 /* The browser registers DOM read/mutate callbacks for getElementById handles. */
 void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const char *, const char *, int)) {
     g_dom_get = get; g_dom_set = set;
+}
+/* The browser registers a getAttribute backing (separate so js_set_dom's signature is untouched). */
+void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int)) {
+    g_dom_getattr = getattr;
 }
 
 /* Run page scripts with a host document.write sink (the browser splices the
@@ -2032,12 +2052,15 @@ static void host_set(const char *k, const char *v){
 static char dk[16][32], dv[16][256]; static int dnn;
 static void hdom_set(const char *id, const char *v, int html){ (void)html; int i; for(i=0;i<dnn;i++) if(!strcmp(dk[i],id)) break; if(i==dnn){ if(dnn>=16) return; int j=0; while(id[j]&&j<31){dk[dnn][j]=id[j];j++;} dk[dnn][j]=0; i=dnn++; } int j=0; while(v[j]&&j<255){dv[i][j]=v[j];j++;} dv[i][j]=0; }
 static int hdom_get(const char *id, char *out, int max, int html){ (void)html; for(int i=0;i<dnn;i++) if(!strcmp(dk[i],id)){ int j=0; while(dv[i][j]&&j<max-1){out[j]=dv[i][j];j++;} out[j]=0; return 1; } if(max) out[0]=0; return 0; }
+/* mock getAttribute: echo the attr name back as its value (so the suite can assert the round-trip) */
+static int hdom_getattr(const char *id, const char *attr, char *out, int max){ (void)id; if(max<=0) return 0; int j=0; while(attr[j]&&j<max-1){out[j]=attr[j];j++;} out[j]=0; return 1; }
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
     static char outb[200000];
     js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
+    js_set_dom_attr(hdom_getattr);
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
     return r<0?1:0;

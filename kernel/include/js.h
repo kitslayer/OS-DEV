@@ -20,3 +20,4 @@ void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, 
  *  set(id, value, html) -> replace the element's text/HTML and re-render.
  * Cleared automatically by js_run (the shell path). */
 void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const char *, const char *, int));
+void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int));

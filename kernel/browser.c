@@ -897,7 +897,38 @@ static void browser_dom_set(const char *id, const char *value, int html) {
     b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);            /* re-render the page in place */
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); }
+/* Locate the attribute span of the element with this id: [*as, *ae) is the text
+ * between the tag name and the opening tag's '>'. Mirrors dom_find's tag locate. */
+static int dom_attr_region(browser_t *b, const char *id, int *as, int *ae) {
+    const char *r = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
+    int idlen = 0; while (id[idlen]) idlen++;
+    if (idlen == 0) return 0;
+    for (int i = lo; i + 4 < hi; i++) {
+        if (!(r[i]=='i' && r[i+1]=='d' && r[i+2]=='=' && (r[i+3]=='"' || r[i+3]=='\''))) continue;
+        char q = r[i+3]; int vs = i + 4, k = 0;
+        while (k < idlen && vs + k < hi && r[vs+k] == id[k]) k++;
+        if (!(k == idlen && vs + k < hi && r[vs+k] == q)) continue;   /* whole attr value must equal id */
+        int ts = i; while (ts > lo && r[ts] != '<') ts--;             /* back up to the opening '<' */
+        if (r[ts] != '<') continue;
+        int ne = ts + 1, tn = 0;
+        while (ne < hi && dom_alnum(r[ne]) && tn < 15) { ne++; tn++; }  /* skip the tag name */
+        if (tn == 0) continue;
+        int gt = i; while (gt < hi && r[gt] != '>') gt++;             /* end of the opening tag */
+        if (gt >= hi) return 0;
+        *as = ne; *ae = gt; return 1;
+    }
+    return 0;
+}
+/* getAttribute(id, attr): read the named attribute off the element's opening tag. */
+static int browser_dom_getattr(const char *id, const char *attr, char *out, int max) {
+    browser_t *b = g_ls_b; if (!b || max <= 0) return 0; out[0] = 0;
+    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return 0;
+    const char *v; int vl;
+    if (!find_attr(b->raw + as, ae - as, attr, &v, &vl)) return 0;
+    int n = vl; if (n > max - 1) n = max - 1; if (n < 0) n = 0;
+    memcpy(out, v, n); out[n] = 0; return 1;
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
