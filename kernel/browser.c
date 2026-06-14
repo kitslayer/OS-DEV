@@ -817,6 +817,8 @@ static void build_home(browser_t *b) {
          "forms, inline code, and PNG / GIF / JPEG images &mdash; all rendered from scratch</dd>"
          "<dt><a href=\"file:jstest.htm\">file:jstest.htm</a></dt><dd>a page whose content is generated "
          "<b>live by JavaScript</b> (a from-scratch JS interpreter runs its &lt;script&gt;)</dd>"
+         "<dt><a href=\"file:jsclick.htm\">file:jsclick.htm</a></dt><dd>links that <b>run JavaScript on click</b> "
+         "(a from-scratch JS engine: arrows, JSON, try/catch &mdash; also at the shell: <tt>js</tt>)</dd>"
          "<dt><a href=\"file:anim.gif\">anim.gif</a></dt><dd>an animated GIF; "
          "<a href=\"file:pphoto.jpg\">pphoto.jpg</a> a progressive JPEG; "
          "<a href=\"file:inter.png\">inter.png</a> an interlaced PNG</dd>");
