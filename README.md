@@ -373,5 +373,9 @@ whole thing works:
 - [x] 68. **AES-128 + `crypt`** — verified cipher, passphrase file encryption
 - [x] 69. **`base64`** — encode files to text (rounds out crypto/encoding tools)
 
-**Where next (see WHATS-NEXT.md):** TLS/HTTPS (the big one), `fork`/`exec`,
-window minimize, and more apps.
+**Where next:** TLS/HTTPS, the graphical web browser, a from-scratch JavaScript
+engine, an interactive DOM, and live web search all shipped long ago — see the
+milestone table above (now 200+). The honest remaining frontier: richer browser
+interactivity (more form controls like `<textarea>`/checkboxes, more DOM APIs),
+*enforcing* certificate validation (needs a fuller baked-in root-CA set), and
+more robust TCP (out-of-order/retransmit) for large CDN sites.
