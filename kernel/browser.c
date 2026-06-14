@@ -46,7 +46,7 @@
 #define IMG_READ_MAX 131072         /* scratch to read a local image file */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
 
-enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE };
+enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = image slot */
 
 typedef struct { uint16_t off, len, link; uint8_t style, type; } tok_t;
@@ -133,6 +133,7 @@ static uint32_t color_for(int style) {
     case STY_BOLD: return 0x101015;
     case STY_EM:   return 0x6A4A1A;
     case STY_CODE: return 0xA83254;          /* inline <code>/<tt>: crimson */
+    case STY_STRIKE: return 0x808890;        /* <s>/<del>: muted grey, drawn with a strike-line */
     default:       return 0x202024;
     }
 }
@@ -533,6 +534,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     if (tageq(tag, "code") || tageq(tag, "tt") || tageq(tag, "kbd") || tageq(tag, "samp")) {
         if (!closing) { if (*style == STY_NORMAL) *style = STY_CODE; }
         else if (*style == STY_CODE) *style = STY_NORMAL;
+        return;
+    }
+    if (tageq(tag, "s") || tageq(tag, "del") || tageq(tag, "strike")) {   /* strikethrough */
+        if (!closing) { if (*style == STY_NORMAL) *style = STY_STRIKE; }
+        else if (*style == STY_STRIKE) *style = STY_NORMAL;
         return;
     }
     if (tageq(tag, "font")) {                            /* <font color="..."> text colour */
@@ -1868,6 +1874,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 w[ln] = 0;
                 fb_text(cx + 1, cy, w, fg, sc);
             }
+            if (tk->style == STY_STRIKE) fb_fill_rect(cx, cy + 7, drawpx, 1, fg);   /* strike-line through the text */
             if (tk->style == STY_LINK) {
                 fb_fill_rect(cx, cy + 15, drawpx, 1, fg);
                 if (selected) box(cx - 1, cy - 1, drawpx + 2, lh, 0xC08000);  /* selection outline */
