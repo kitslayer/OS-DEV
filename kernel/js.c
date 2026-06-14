@@ -75,7 +75,8 @@ enum { T_EOF, T_NUM, T_STR, T_IDENT, T_PUNC, T_KW, T_TEMPLATE };
 typedef struct { int type; int64_t num; const char *s; int len; } token;
 
 static const char *kw[] = { "var","let","const","function","return","if","else",
-    "while","for","true","false","null","undefined","break","continue","typeof",0 };
+    "while","for","true","false","null","undefined","break","continue","typeof",
+    "switch","case","default","do",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -174,7 +175,7 @@ static void skip_semi(lexer *L){ while (peek_punc(L,";")) advance(L); }   /* ; i
 enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
-       N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP };
+       N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE };
 
 typedef struct node node;
 struct node {
@@ -428,6 +429,23 @@ static node *parse_stmt(lexer *L) {
         if (peek_kw(L,"else")) { advance(L); n->c=parse_stmt(L); } g_depth--; return n;
     }
     if (peek_kw(L,"while")) { advance(L); expect_punc(L,"("); node *n=mknode(N_WHILE); n->a=parse_expr(L); expect_punc(L,")"); n->b=parse_stmt(L); g_depth--; return n; }
+    if (peek_kw(L,"do")) { advance(L); node *n=mknode(N_DOWHILE); n->b=parse_stmt(L); skip_semi(L);
+        if (peek_kw(L,"while")) advance(L); expect_punc(L,"("); n->a=parse_expr(L); expect_punc(L,")"); g_depth--; return n; }
+    if (peek_kw(L,"switch")) {
+        advance(L); expect_punc(L,"("); node *n=mknode(N_SWITCH); n->a=parse_expr(L); expect_punc(L,")"); expect_punc(L,"{");
+        n->list=aalloc(sizeof(node*)*64); n->nlist=0;
+        while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
+            node *cl=mknode(N_CASE);
+            if (peek_kw(L,"case")) { advance(L); cl->a=parse_expr(L); expect_punc(L,":"); }
+            else if (peek_kw(L,"default")) { advance(L); cl->a=0; expect_punc(L,":"); }
+            else { advance(L); continue; }                /* tolerate stray tokens */
+            cl->list=aalloc(sizeof(node*)*64); cl->nlist=0;
+            for (;;) { skip_semi(L); if (peek_kw(L,"case")||peek_kw(L,"default")||peek_punc(L,"}")||peek(L).type==T_EOF||g_err||g_oom) break;
+                node *s=parse_stmt(L); if (cl->list && cl->nlist<64) cl->list[cl->nlist++]=s; }
+            if (n->list && n->nlist<64) n->list[n->nlist++]=cl;
+        }
+        expect_punc(L,"}"); g_depth--; return n;
+    }
     if (peek_kw(L,"for")) {
         advance(L); expect_punc(L,"("); node *n=mknode(N_FOR);
         if (!peek_punc(L,";")) { if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) n->a=parse_var(L); else n->a=parse_expr(L); }
@@ -723,7 +741,27 @@ static comp eval_stmt_inner(node *n, env *e) {
         case N_IF: { if (truthy(eval_expr(n->a,e))) return eval_stmt(n->b,e); else if (n->c) return eval_stmt(n->c,e); return CN(); }
         case N_WHILE: {
             int guard=0;
-            while (truthy(eval_expr(n->a,e))) { if(++guard>5000000){rt_err("loop limit");break;} comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err) break; }
+            while (truthy(eval_expr(n->a,e))) { if(++guard>5000000){rt_err("loop limit");break;} comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err||g_oom) break; }
+            return CN();
+        }
+        case N_DOWHILE: {
+            int guard=0;
+            do { comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err||g_oom) break; if(++guard>5000000){rt_err("loop limit");break;} } while (truthy(eval_expr(n->a,e)));
+            return CN();
+        }
+        case N_SWITCH: {
+            val disc=eval_expr(n->a,e); env *se=new_env(e); if(!se){ g_oom=1; return CN(); }
+            int matched=-1, defidx=-1;
+            for (int i=0;i<n->nlist && !g_err && !g_oom;i++){ node*cl=n->list[i]; if(!cl->a){ defidx=i; continue; }
+                val cv=eval_expr(cl->a,se); int eq;
+                if (disc.t==V_STR && cv.t==V_STR) eq=(strcmp(disc.str,cv.str)==0);
+                else if ((disc.t==V_NUM||disc.t==V_BOOL)&&(cv.t==V_NUM||cv.t==V_BOOL)) eq=(disc.num==cv.num);
+                else eq=(disc.t==cv.t && disc.num==cv.num);
+                if (eq){ matched=i; break; } }
+            if (matched<0) matched=defidx;
+            if (matched>=0) for (int i=matched;i<n->nlist;i++){ node*cl=n->list[i];
+                for (int j=0;j<cl->nlist;j++){ comp c=eval_stmt(cl->list[j],se);
+                    if (c.kind==C_BREAK) return CN(); if (c.kind==C_RETURN||c.kind==C_CONTINUE) return c; if (g_err||g_oom) return CN(); } }
             return CN();
         }
         case N_FOR: {
