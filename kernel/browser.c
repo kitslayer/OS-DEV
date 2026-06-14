@@ -1989,6 +1989,7 @@ static void make_search_url(char *url) {
 void browser_key(browser_t *b, int c) {
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
         if (c == '\n' || c == '\r' || c == 27) {
+            char fid[32]; { int k=0; while (b->focus_id[k] && k<31) { fid[k]=b->focus_id[k]; k++; } fid[k]=0; }   /* the field losing focus */
             b->focus_id[0] = 0;                          /* leave typing mode */
             if (c != 27) {                               /* Enter (not Esc): submit the form if it has a submit button */
                 for (int i = 0; i < b->nlink; i++) {
@@ -1997,7 +1998,8 @@ void browser_key(browser_t *b, int c) {
                     if (sub) { browser_follow(b, i); return; }
                 }
             }
-            set_status(b, ""); parse_html(b, b->raw + b->bodyoff, b->bodylen);
+            set_status(b, "");
+            if (!fire_onchange(b, fid)) parse_html(b, b->raw + b->bodyoff, b->bodylen);   /* onchange fires on blur; it re-renders */
         }
         else if (c == 8 || c == 127) {                  /* backspace */
             const char *cur = in_get(b, b->focus_id);
