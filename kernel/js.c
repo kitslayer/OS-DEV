@@ -1670,11 +1670,20 @@ static val native_doc_write(val *args, int nargs) {
  * mutates it, and re-renders (mirroring the document.write / localStorage model). */
 static int  (*g_dom_get)(const char *id, char *out, int max, int html);   /* 1 if found */
 static void (*g_dom_set)(const char *id, const char *value, int html);
-static val nat_getElementById(val *args, int nargs) {
-    const char *id = nargs ? val_to_str(args[0]) : "";
+static val element_handle(const char *id) {
     obj *o = new_obj(V_ELEMENT); if(!o){ g_oom=1; return UND(); }
     arr_push_val(o, STRV(intern(id, (int)strlen(id))));   /* vals[0] = the element id */
     return obj_val(o);
+}
+static val nat_getElementById(val *args, int nargs) {
+    return element_handle(nargs ? val_to_str(args[0]) : "");
+}
+/* querySelector: supports the "#id" selector (the common case) -> the element by
+ * id; tag/class selectors aren't supported yet and return null. */
+static val nat_querySelector(val *args, int nargs) {
+    const char *sel = nargs ? val_to_str(args[0]) : "";
+    if (sel[0]=='#' && sel[1]) return element_handle(sel+1);
+    val nv=UND(); nv.t=V_NULL; return nv;
 }
 /* read/write a V_ELEMENT property; returns 1 if handled (so eval_member_get /
  * assignment can fall through for anything else). `set` NULL = read into out. */
@@ -1910,6 +1919,7 @@ static void install_globals(env *g) {
     obj *dw=new_obj(V_NATIVE); dw->native=native_doc_write; val dwv=UND(); dwv.t=V_NATIVE; dwv.o=dw;
     obj *doc=new_obj(V_OBJ); obj_set(doc,"write",dwv); obj_set(doc,"writeln",dwv);
     def_native(doc,"getElementById",nat_getElementById);
+    def_native(doc,"querySelector",nat_querySelector);
     val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
     /* localStorage.getItem/setItem (browser-backed; no-ops at the shell) */
     obj *ls=new_obj(V_OBJ); def_native(ls,"getItem",native_ls_getItem); def_native(ls,"setItem",native_ls_setItem);
