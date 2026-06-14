@@ -1763,7 +1763,6 @@ static val native_ls_setItem(val *args, int nargs) {
 
 /* Date() -> current wall-clock as "YYYY-MM-DD HH:MM:SS" (a useful subset of the
  * real Date). Reads the CMOS RTC directly (kernel); a fixed string on the host. */
-static void d2(char *b, int *p, int v){ b[(*p)++]='0'+(v/10)%10; b[(*p)++]='0'+v%10; }
 /* Date() / new Date() -> a V_DATE object holding [year,month,day,hour,min,sec] in
  * vals[0..5] (read from the RTC at construction). Methods via eval_date_method;
  * val_to_str renders "YYYY-MM-DD HH:MM:SS" so it still prints/coerces like before. */
