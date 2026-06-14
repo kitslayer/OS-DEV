@@ -794,6 +794,8 @@ static void build_home(browser_t *b) {
          "<dt><a href=\"file:README.TXT\">file:README.TXT</a></dt><dd>a local file on the disk</dd>"
          "<dt><a href=\"file:index.htm\">Local demos</a></dt><dd>lists, tables, entities, colour, "
          "forms, inline code, and PNG / GIF / JPEG images &mdash; all rendered from scratch</dd>"
+         "<dt><a href=\"file:jstest.htm\">file:jstest.htm</a></dt><dd>a page whose content is generated "
+         "<b>live by JavaScript</b> (a from-scratch JS interpreter runs its &lt;script&gt;)</dd>"
          "<dt><a href=\"file:anim.gif\">anim.gif</a></dt><dd>an animated GIF; "
          "<a href=\"file:pphoto.jpg\">pphoto.jpg</a> a progressive JPEG; "
          "<a href=\"file:inter.png\">inter.png</a> an interlaced PNG</dd>");
