@@ -96,6 +96,7 @@ struct browser {
     uint32_t tokcolor[TOK_MAX];                          /* per-token colour override */
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
+    char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
 };
 
 static void drop_image(browser_t *b);        /* fwd: free any decoded image */
@@ -643,11 +644,28 @@ static void script_write_cb(const char *s) {
     while (*s && g_sw_pos < g_sw_max - 1) g_sw_raw[g_sw_pos++] = *s++;
     g_sw_raw[g_sw_pos] = 0;
 }
+
+/* localStorage backing: a per-page key->value store the JS engine reads/writes
+ * (survives the engine's per-run arena reset, so click handlers keep state). */
+static browser_t *g_ls_b;
+static const char *browser_ls_get(const char *key) {
+    if (!g_ls_b) return 0;
+    for (int i = 0; i < g_ls_b->ls_n; i++) if (streqs(g_ls_b->ls_keys[i], key)) return g_ls_b->ls_vals[i];
+    return 0;
+}
+static void browser_ls_set(const char *key, const char *val) {
+    if (!g_ls_b) return;
+    int i; for (i = 0; i < g_ls_b->ls_n; i++) if (streqs(g_ls_b->ls_keys[i], key)) break;
+    if (i == g_ls_b->ls_n) { if (g_ls_b->ls_n >= 16) return; int j=0; while(key[j]&&j<31){g_ls_b->ls_keys[i][j]=key[j];j++;} g_ls_b->ls_keys[i][j]=0; g_ls_b->ls_n++; }
+    int j=0; while(val[j]&&j<159){g_ls_b->ls_vals[i][j]=val[j];j++;} g_ls_b->ls_vals[i][j]=0;
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
     if (appendpos >= RAW_MAX - 1) return;                /* no room to write */
     g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_max = RAW_MAX;
+    js_bind_storage(b);
     js_run_doc(b->scripts, jsout, sizeof(jsout), script_write_cb);
     int written = g_sw_pos - appendpos;
     g_sw_raw = 0;
@@ -664,6 +682,7 @@ static void run_js_handler(browser_t *b, const char *code) {
     int appendpos = b->bodyoff + b->bodylen;
     if (appendpos >= RAW_MAX - 1) return;
     g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_max = RAW_MAX;
+    js_bind_storage(b);
     js_run_doc(code, jsout, sizeof(jsout), script_write_cb);
     int written = g_sw_pos - appendpos;
     g_sw_raw = 0;
@@ -971,6 +990,7 @@ static int decode_local_to_slot(browser_t *b, const char *path) {
 static void browser_navigate(browser_t *b) {
     if (!b->raw || !b->text || !b->toks) return;
     b->bodyoff = 0; b->bodylen = 0;   /* clean baseline; HTML paths set the real region */
+    b->ls_n = 0;                      /* fresh localStorage per page */
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }

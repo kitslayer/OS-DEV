@@ -924,6 +924,21 @@ static val native_doc_write(val *args, int nargs) {
     return UND();
 }
 
+/* localStorage: a host-provided key->value (string) store that survives the
+ * per-run arena reset, so page click-handlers can accumulate state (a counter). */
+static const char *(*g_ls_get)(const char *key);
+static void        (*g_ls_set)(const char *key, const char *val);
+static val native_ls_getItem(val *args, int nargs) {
+    if (!g_ls_get || !nargs) { val v=UND(); v.t=V_NULL; return v; }
+    const char *r = g_ls_get(val_to_str(args[0]));
+    if (!r) { val v=UND(); v.t=V_NULL; return v; }
+    return STRV(intern(r, (int)strlen(r)));               /* copy out (host buffer may change) */
+}
+static val native_ls_setItem(val *args, int nargs) {
+    if (g_ls_set && nargs>=2) g_ls_set(val_to_str(args[0]), val_to_str(args[1]));
+    return UND();
+}
+
 /* ---- Math (integer; the kernel has no FPU) ---- */
 static int64_t iabs64(int64_t x){ return x < 0 ? -x : x; }
 static val nat_abs(val *a, int n){ return NUM(n ? iabs64(to_num(a[0])) : 0); }
@@ -1051,6 +1066,9 @@ static void install_globals(env *g) {
     obj *dw=new_obj(V_NATIVE); dw->native=native_doc_write; val dwv=UND(); dwv.t=V_NATIVE; dwv.o=dw;
     obj *doc=new_obj(V_OBJ); obj_set(doc,"write",dwv); obj_set(doc,"writeln",dwv);
     val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
+    /* localStorage.getItem/setItem (browser-backed; no-ops at the shell) */
+    obj *ls=new_obj(V_OBJ); def_native(ls,"getItem",native_ls_getItem); def_native(ls,"setItem",native_ls_setItem);
+    env_define(g,"localStorage",obj_val(ls));
 
     /* Math */
     obj *math=new_obj(V_OBJ);
@@ -1112,7 +1130,13 @@ static int js_run_impl(const char *src, char *out, int outmax) {
 
 int js_run(const char *src, char *out, int outmax) {
     g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
+    g_ls_get = 0; g_ls_set = 0;           /* and no persistent storage */
     return js_run_impl(src, out, outmax);
+}
+
+/* The browser registers a localStorage backing store before running page JS. */
+void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *)) {
+    g_ls_get = get; g_ls_set = set;
 }
 
 /* Run page scripts with a host document.write sink (the browser splices the
@@ -1125,11 +1149,20 @@ int js_run_doc(const char *src, char *out, int outmax, void (*write_cb)(const ch
 }
 
 #ifdef JS_HOSTTEST
+/* a tiny in-memory localStorage so host tests can exercise the persistent path */
+static char hk[16][32], hv[16][160]; static int hn;
+static const char *host_get(const char *k){ for(int i=0;i<hn;i++) if(!strcmp(hk[i],k)) return hv[i]; return 0; }
+static void host_set(const char *k, const char *v){
+    int i; for(i=0;i<hn;i++) if(!strcmp(hk[i],k)) break;
+    if(i==hn){ if(hn>=16) return; int j=0; while(k[j]&&j<31){hk[hn][j]=k[j];j++;} hk[hn][j]=0; i=hn++; }
+    int j=0; while(v[j]&&j<159){hv[i][j]=v[j];j++;} hv[i][j]=0;
+}
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
     static char outb[200000];
-    int r = js_run(src, outb, sizeof(outb));
+    js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
+    int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
     return r<0?1:0;
 }

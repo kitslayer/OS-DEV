@@ -9,3 +9,7 @@ int js_run(const char *src, char *out, int outmax);
 /* Like js_run, but document.write(s) calls write_cb(s) instead of appending to
  * out — used by the browser to splice script-generated HTML into the page. */
 int js_run_doc(const char *src, char *out, int outmax, void (*write_cb)(const char *));
+
+/* Register a localStorage backing store (key->value strings) used by page JS;
+ * cleared automatically by js_run (the shell path). */
+void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *));

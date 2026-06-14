@@ -93,6 +93,7 @@ static const struct {
         "print(\"parse:   \" + back.os + \", \" + back.features.length + \" features, sqrt(2025)=\" + Math.sqrt(2025));\n" },
     { "JSCLICK HTM", "<h1>Interactive JavaScript</h1>"
         "<p>Each link runs JavaScript <b>in the page</b> when you click it (or Tab/n to select, then Enter). The result is appended below:</p><ul>"
+        "<li><a href=\"javascript:var c=(parseInt(localStorage.getItem('c'))||0)+1; localStorage.setItem('c',c); document.write('<p><b>counter = '+c+'</b> (click again &mdash; it remembers, via localStorage)</p>')\">a stateful counter</a></li>"
         "<li><a href=\"javascript:document.write('<p><b>6 * 7 = '+(6*7)+'</b></p>')\">compute 6 * 7</a></li>"
         "<li><a href=\"javascript:var s=0; for(var i=1;i<=100;i++) s+=i; document.write('<p>sum 1..100 = '+s+'</p>')\">sum 1..100</a></li>"
         "<li><a href=\"javascript:document.write('<p>squares: '+[1,2,3,4,5].map(x=>x*x).join(', ')+'</p>')\">squares via map(x =&gt; x*x)</a></li>"
