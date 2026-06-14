@@ -1673,19 +1673,29 @@ static void js_appq(const char *s){ js_app("\""); for(; *s && g_json_pos<g_json_
         if(c=='"'||c=='\\'){ g_json[g_json_pos++]='\\'; g_json[g_json_pos++]=c; }
         else if(c=='\n'){ js_app("\\n"); } else if(c=='\t'){ js_app("\\t"); } else if(c=='\r'){ js_app("\\r"); }
         else g_json[g_json_pos++]=c; } js_app("\""); }
-static void json_val(val v){
+static int g_json_pretty; static char g_json_unit[16];   /* indentation: "" (compact) or N spaces / a string */
+static void js_nl(int depth){ if(!g_json_pretty) return; js_app("\n"); for(int i=0;i<depth && i<64;i++) js_app(g_json_unit); }
+static void json_val(val v, int depth){
     if(++g_depth>MAXDEPTH){ g_depth--; js_app("null"); return; }
     switch(v.t){
         case V_BOOL: js_app(v.num?"true":"false"); break;
         case V_NUM:  js_app(i64_to_str(v.num)); break;
         case V_STR:  js_appq(v.str); break;
-        case V_ARR:  js_app("["); for(int i=0;i<v.o->n;i++){ if(i) js_app(","); json_val(v.o->vals[i]); } js_app("]"); break;
-        case V_OBJ:  js_app("{"); for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_appq(v.o->keys[i]); js_app(":"); json_val(v.o->vals[i]); } js_app("}"); break;
+        case V_ARR:  if(v.o->n==0){ js_app("[]"); break; } js_app("[");
+            for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("]"); break;
+        case V_OBJ:  if(v.o->n==0){ js_app("{}"); break; } js_app("{");
+            for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("}"); break;
         default:     js_app("null"); break;   /* undefined/null/function */
     }
     g_depth--;
 }
-static val nat_json_stringify(val *a, int n){ if(!n) return UND(); char *buf=aalloc(16384); if(!buf) return STRV(""); g_json=buf; g_json_pos=0; g_json_cap=16384; json_val(a[0]); buf[g_json_pos]=0; return STRV(buf); }
+static val nat_json_stringify(val *a, int n){ if(!n) return UND(); char *buf=aalloc(16384); if(!buf) return STRV("");
+    g_json=buf; g_json_pos=0; g_json_cap=16384; g_json_pretty=0; g_json_unit[0]=0;
+    if(n>2){ val sp=a[2];                         /* a[1] is the (ignored) replacer; a[2] is the indent */
+        if(sp.t==V_NUM){ int k=(int)sp.num; if(k<0)k=0; if(k>10)k=10; for(int i=0;i<k;i++) g_json_unit[i]=' '; g_json_unit[k]=0; if(k>0) g_json_pretty=1; }
+        else if(sp.t==V_STR){ int i=0; for(; sp.str[i] && i<15; i++) g_json_unit[i]=sp.str[i]; g_json_unit[i]=0; if(i>0) g_json_pretty=1; }
+    }
+    json_val(a[0], 0); buf[g_json_pos]=0; return STRV(buf); }
 
 /* ---- JSON.parse (recursive descent; bounded + depth-guarded) ---- */
 static const char *jp, *jp_end; static int jp_err;
