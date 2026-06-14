@@ -266,6 +266,17 @@ static int decode_entity(const char *s, int maxlen, char *out) {
     if (ent_is(s, len, "&deg;")   ) { *out = 'o';  return len; }
     if (ent_is(s, len, "&laquo;") || ent_is(s, len, "&raquo;")) { *out = '"'; return len; }
     if (ent_is(s, len, "&euro;")  ) { *out = 'E';  return len; }
+    if (ent_is(s, len, "&rarr;") || ent_is(s, len, "&rArr;")) { *out = '>'; return len; }   /* arrows -> nearest ASCII */
+    if (ent_is(s, len, "&larr;") || ent_is(s, len, "&lArr;")) { *out = '<'; return len; }
+    if (ent_is(s, len, "&uarr;") ) { *out = '^'; return len; }
+    if (ent_is(s, len, "&darr;") ) { *out = 'v'; return len; }
+    if (ent_is(s, len, "&harr;") || ent_is(s, len, "&minus;")) { *out = '-'; return len; }
+    if (ent_is(s, len, "&plusmn;")) { *out = '+'; return len; }
+    if (ent_is(s, len, "&prime;") ) { *out = '\''; return len; }
+    if (ent_is(s, len, "&Prime;") ) { *out = '"'; return len; }
+    if (ent_is(s, len, "&sect;")  ) { *out = 'S'; return len; }
+    if (ent_is(s, len, "&para;")  ) { *out = 'P'; return len; }
+    if (ent_is(s, len, "&dagger;")) { *out = '+'; return len; }
     return 0;
 }
 
