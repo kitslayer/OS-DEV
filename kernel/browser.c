@@ -928,7 +928,40 @@ static int browser_dom_getattr(const char *id, const char *attr, char *out, int 
     int n = vl; if (n > max - 1) n = max - 1; if (n < 0) n = 0;
     memcpy(out, v, n); out[n] = 0; return 1;
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr); }
+/* setAttribute(id, attr, val): replace the attribute's value on the element's
+ * opening tag (or insert the attribute if absent), then re-render. The splice
+ * mirrors browser_dom_set; the value has quotes stripped so it can't break out. */
+static void browser_dom_setattr(const char *id, const char *attr, const char *val) {
+    browser_t *b = g_ls_b; if (!b) return;
+    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return;
+    char vbuf[256]; int vlen = 0;                                 /* sanitized value (no quotes) */
+    for (int i = 0; val[i] && vlen < (int)sizeof(vbuf) - 1; i++) { char c = val[i]; if (c != '"' && c != '\'') vbuf[vlen++] = c; }
+    vbuf[vlen] = 0;
+    const char *fv; int fvl;
+    int rs, rend; const char *repl; int rlen; char ins[384];
+    if (find_attr(b->raw + as, ae - as, attr, &fv, &fvl)) {        /* attr exists: replace its value (between quotes) */
+        rs = (int)(fv - b->raw); rend = rs + fvl; repl = vbuf; rlen = vlen;
+    } else {                                                       /* attr absent: insert ` attr="val"` before '>' */
+        int p = 0; ins[p++] = ' ';
+        for (int i = 0; attr[i] && p < 80; i++) { char c = attr[i]; if (c=='"'||c=='\''||c=='='||c==' '||c=='<'||c=='>'||c=='/') continue; ins[p++] = c; }
+        ins[p++] = '='; ins[p++] = '"';
+        for (int i = 0; i < vlen && p < 380; i++) ins[p++] = vbuf[i];
+        ins[p++] = '"'; ins[p] = 0;
+        rs = ae; rend = ae; repl = ins; rlen = p;
+    }
+    int delta = rlen - (rend - rs);
+    int active = (g_sw_raw == b->raw);
+    int bodyend = b->bodyoff + b->bodylen;
+    int live_end = (active && g_sw_pos > bodyend) ? g_sw_pos : bodyend;
+    if (live_end + delta >= RAW_MAX - 1 || live_end + delta < b->bodyoff) return;   /* out of room */
+    memmove(b->raw + rend + delta, b->raw + rend, live_end - rend);   /* shift the tail */
+    memcpy(b->raw + rs, repl, rlen);                                  /* write the new attr/value */
+    b->bodylen += delta;
+    if (active) { if (g_sw_pos > rend) g_sw_pos += delta; if (g_sw_base > rend) g_sw_base += delta; }
+    b->raw[live_end + delta] = 0;
+    parse_html(b, b->raw + b->bodyoff, b->bodylen);
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

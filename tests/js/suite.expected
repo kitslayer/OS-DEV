@@ -100,4 +100,5 @@ true a#b# 5 1
 gi ! {"source":"z","global":true,"flags":"g"}
 -- dom getAttribute --
 href data-id type
+undefined undefined
 -- done --

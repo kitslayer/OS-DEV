@@ -111,4 +111,5 @@ print(/x/gi.flags, /y/.flags+"!", JSON.stringify(/z/g));
 print("-- dom getAttribute --");
 var gel = document.getElementById("box");
 print(gel.getAttribute("href"), gel.getAttribute("data-id"), document.querySelector("#q").getAttribute("type"));
+print(gel.setAttribute("data-id", "99"), typeof gel.setAttribute);   /* call returns undefined; member-access is undefined (not a real prop) */
 print("-- done --");
