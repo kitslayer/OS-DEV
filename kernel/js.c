@@ -1674,6 +1674,7 @@ static int  (*g_dom_get)(const char *id, char *out, int max, int html);   /* 1 i
 static void (*g_dom_set)(const char *id, const char *value, int html);
 static int  (*g_dom_getattr)(const char *id, const char *attr, char *out, int max);   /* getAttribute; 1 if present */
 static void (*g_dom_setattr)(const char *id, const char *attr, const char *val);      /* setAttribute */
+static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
 static val element_handle(const char *id) {
     obj *o = new_obj(V_ELEMENT); if(!o){ g_oom=1; return UND(); }
     arr_push_val(o, STRV(intern(id, (int)strlen(id))));   /* vals[0] = the element id */
@@ -1948,6 +1949,28 @@ static void install_globals(env *g) {
     def_native(doc,"getElementById",nat_getElementById);
     def_native(doc,"querySelector",nat_querySelector);
     val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
+    /* window.location: a read-only snapshot of the current page URL, parsed into
+     * href/protocol/host/pathname/search so page JS can inspect it (e.g. ?query). */
+    { obj *loc=new_obj(V_OBJ);
+      if (loc) {
+        const char *u=g_location_url; int ulen=(int)strlen(u);
+        obj_set(loc,"href",STRV(intern(u,ulen)));
+        const char *proto=""; const char *hs=u; int hashost=0;
+        if (ulen>=8 && memcmp(u,"https://",8)==0)      { proto="https:"; hs=u+8; hashost=1; }
+        else if (ulen>=7 && memcmp(u,"http://",7)==0)  { proto="http:";  hs=u+7; hashost=1; }
+        else if (ulen>=5 && memcmp(u,"file:",5)==0)    { proto="file:";  hs=u+5; }   /* file: has no //host */
+        obj_set(loc,"protocol",STRV(intern(proto,(int)strlen(proto))));
+        const char *rest=hs;
+        if (hashost) { int hl=0; while(hs[hl] && hs[hl]!='/' && hs[hl]!='?') hl++;   /* host = up to '/' or '?' */
+                       obj_set(loc,"host",STRV(intern(hs,hl))); rest=hs+hl; }
+        else obj_set(loc,"host",STRV(intern("",0)));
+        int pl=0; while(rest[pl] && rest[pl]!='?') pl++;   /* path, then ?search */
+        obj_set(loc,"pathname",STRV(intern(rest,pl)));
+        obj_set(loc,"search",STRV(intern(rest+pl,(int)strlen(rest+pl))));
+        env_define(g,"location",obj_val(loc));
+        obj *win=new_obj(V_OBJ); if(win){ obj_set(win,"location",obj_val(loc)); env_define(g,"window",obj_val(win)); }
+      }
+    }
     /* localStorage.getItem/setItem (browser-backed; no-ops at the shell) */
     obj *ls=new_obj(V_OBJ); def_native(ls,"getItem",native_ls_getItem); def_native(ls,"setItem",native_ls_setItem);
     env_define(g,"localStorage",obj_val(ls));
@@ -2022,6 +2045,7 @@ int js_run(const char *src, char *out, int outmax) {
     g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
     g_ls_get = 0; g_ls_set = 0;           /* and no persistent storage */
     g_dom_get = 0; g_dom_set = 0; g_dom_getattr = 0; g_dom_setattr = 0;   /* and no DOM (no page) */
+    g_location_url[0] = 0;                /* shell `js`: window.location is empty */
     return js_run_impl(src, out, outmax);
 }
 
@@ -2037,6 +2061,11 @@ void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const ch
 void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int),
                      void (*setattr)(const char *, const char *, const char *)) {
     g_dom_getattr = getattr; g_dom_setattr = setattr;
+}
+/* The browser sets the current page URL before running page JS (for window.location). */
+void js_set_location(const char *url) {
+    int i = 0; if (url) while (url[i] && i < (int)sizeof(g_location_url) - 1) { g_location_url[i] = url[i]; i++; }
+    g_location_url[i] = 0;
 }
 
 /* Run page scripts with a host document.write sink (the browser splices the
@@ -2071,6 +2100,7 @@ int main(int argc, char **argv) {
     js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     js_set_dom_attr(hdom_getattr, hdom_setattr);
+    js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
     return r<0?1:0;

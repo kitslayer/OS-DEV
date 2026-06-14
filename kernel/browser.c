@@ -932,7 +932,7 @@ static int browser_dom_getattr(const char *id, const char *attr, char *out, int 
  * opening tag (or insert the attribute if absent), then re-render. The splice
  * mirrors browser_dom_set; the value has quotes stripped so it can't break out. */
 static void browser_dom_setattr(const char *id, const char *attr, const char *val) {
-    browser_t *b = g_ls_b; if (!b) return;
+    browser_t *b = g_ls_b; if (!b || !attr[0]) return;   /* an empty attribute name is a no-op */
     int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return;
     char vbuf[256]; int vlen = 0;                                 /* sanitized value (no quotes) */
     for (int i = 0; val[i] && vlen < (int)sizeof(vbuf) - 1; i++) { char c = val[i]; if (c != '"' && c != '\'') vbuf[vlen++] = c; }
@@ -961,7 +961,7 @@ static void browser_dom_setattr(const char *id, const char *attr, const char *va
     b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

@@ -101,4 +101,7 @@ gi ! {"source":"z","global":true,"flags":"g"}
 -- dom getAttribute --
 href data-id type
 undefined undefined
+-- location --
+https: host.example /dir/page ?q=hi&n=2
+https://host.example/dir/page?q=hi&n=2
 -- done --

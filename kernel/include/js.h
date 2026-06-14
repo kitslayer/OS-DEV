@@ -22,3 +22,4 @@ void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, 
 void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const char *, const char *, int));
 void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int),
                      void (*setattr)(const char *, const char *, const char *));
+void js_set_location(const char *url);
