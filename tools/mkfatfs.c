@@ -161,6 +161,18 @@ static const struct {
         "print(\"job=\" + job);\n"
         "for (var [k, v] of [[\"x\", 1], [\"y\", 2], [\"z\", 3]]) print(\"  \" + k + \" => \" + v);\n"
         "print(\"merged: \" + JSON.stringify({ ...person, role: \"legend\" }));\n" },
+    { "COLLECT JS ", "// collect.js  --  Map, Set, optional chaining, nullish.  Run: js collect.js\n"
+        "var words = \"the cat sat on the mat the cat ran\".split(\" \");\n"
+        "var freq = new Map();\n"
+        "for (var w of words) freq.set(w, (freq.get(w) ?? 0) + 1);\n"
+        "for (var [word, count] of freq) print(word + \": \" + count);\n"
+        "var nums = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];\n"
+        "var uniq = new Set(); nums.forEach(n => uniq.add(n));\n"
+        "print(\"unique: \" + uniq.values().join(\",\") + \" (\" + uniq.size + \" of \" + nums.length + \")\");\n"
+        "var cfg = { server: { port: 8080 } };\n"
+        "print(\"port=\" + (cfg?.server?.port ?? 3000));\n"
+        "print(\"host=\" + (cfg?.server?.host ?? \"localhost\"));\n"
+        "print(\"missing=\" + (cfg?.db?.name ?? \"none\"));\n" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)
