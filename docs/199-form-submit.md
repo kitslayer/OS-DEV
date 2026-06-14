@@ -63,9 +63,14 @@ fuzz of `url_encode` + the query-build loop).
   fields (fine for the common single-form/search-box page; multi-form pages
   send extra params, which servers ignore).
 - The store holds 8 fields × 95 chars; the whole URL is capped at 160 bytes.
-- Submitting on **Enter inside a field** isn't wired (use the submit button);
-  `<button type="submit">` (vs `<input type="submit">`) needs an `onclick` for
+- `<button type="submit">` (vs `<input type="submit">`) needs an `onclick` for
   now.
+
+**Enter-to-submit (M200):** pressing Enter while typing in a field submits the
+form if the page has a submit button — `browser_key` scans the links for the
+`submit:` one and follows it (the typed value is already in the store). So a
+search box works the natural way: focus, type, Enter. (Esc still just leaves
+typing mode; a form with no submit button also just unfocuses.)
 
 The change is additive — the new `submit:` scheme and the `type=submit`/`hidden`
 branches don't alter the verified text-field render or typing paths. `make

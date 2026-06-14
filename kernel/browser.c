@@ -1827,7 +1827,17 @@ static void find_prompt(browser_t *b) {
 
 void browser_key(browser_t *b, int c) {
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
-        if (c == '\n' || c == '\r' || c == 27) { b->focus_id[0] = 0; set_status(b, ""); parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+        if (c == '\n' || c == '\r' || c == 27) {
+            b->focus_id[0] = 0;                          /* leave typing mode */
+            if (c != 27) {                               /* Enter (not Esc): submit the form if it has a submit button */
+                for (int i = 0; i < b->nlink; i++) {
+                    const char *h = b->hrefs + b->links[i].off; int hl = b->links[i].len;
+                    int sub = (hl > 6); if (sub) for (int k = 0; k < 7; k++) if (lc(h[k]) != "submit:"[k]) { sub = 0; break; }
+                    if (sub) { browser_follow(b, i); return; }
+                }
+            }
+            set_status(b, ""); parse_html(b, b->raw + b->bodyoff, b->bodylen);
+        }
         else if (c == 8 || c == 127) {                  /* backspace */
             const char *cur = in_get(b, b->focus_id);
             if (cur && cur[0]) { char t[96]; int n=0; while(cur[n]&&n<95){t[n]=cur[n];n++;} t[n-1]=0; in_set(b, b->focus_id, t); parse_html(b, b->raw + b->bodyoff, b->bodylen); }
