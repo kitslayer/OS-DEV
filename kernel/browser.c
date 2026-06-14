@@ -1033,6 +1033,18 @@ static void run_js_handler(browser_t *b, const char *code) {
      * pressing Enter again re-runs the same link (e.g. clicking a counter repeatedly). */
     if (saved_sel != NO_LINK && saved_sel < b->nlink) b->sel = saved_sel;
 }
+/* If the element has an onchange="CODE" handler, run it (after a value change).
+ * Returns 1 if it ran (run_js_handler re-renders), so the caller can skip its own. */
+static int fire_onchange(browser_t *b, const char *id) {
+    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return 0;
+    const char *oc; int ocl;
+    if (!find_attr(b->raw + as, ae - as, "onchange", &oc, &ocl) || ocl <= 0) return 0;
+    char code[1024]; int n = ocl; if (n > (int)sizeof(code) - 1) n = (int)sizeof(code) - 1;
+    for (int i = 0; i < n; i++) code[i] = oc[i];   /* copy BEFORE run_js_handler mutates b->raw */
+    code[n] = 0;
+    run_js_handler(b, code);
+    return 1;
+}
 
 /* Render plain text: words become WORD tokens, newlines become line breaks
  * (a blank line becomes a paragraph break), so file structure is preserved. */
@@ -1637,7 +1649,7 @@ static void browser_follow(browser_t *b, int id) {
                     if (!streqs(b->in_id[j], cid) && b->in_name[j][0] && streqs(b->in_name[j], grp)) b->in_val[j][0] = 0;
             }
         }
-        parse_html(b, b->raw + b->bodyoff, b->bodylen);
+        if (!fire_onchange(b, cid)) parse_html(b, b->raw + b->bodyoff, b->bodylen);   /* onchange (if any) re-renders */
         return;
     }
     int issub = (len > 6); if (issub) for (int k = 0; k < 7; k++) if (lc(hp[k]) != "submit:"[k]) { issub = 0; break; }
