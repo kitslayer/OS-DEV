@@ -1689,11 +1689,14 @@ static val nat_querySelector(val *args, int nargs) {
  * assignment can fall through for anything else). `set` NULL = read into out. */
 static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax) {
     const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
-    int html = (strcmp(name,"innerHTML")==0);
     if (strcmp(name,"id")==0) { if(!setval && out){ int i=0; while(id[i]&&i<outmax-1){out[i]=id[i];i++;} out[i]=0; } return 1; }
-    if (html || strcmp(name,"textContent")==0 || strcmp(name,"innerText")==0) {
-        if (setval) { if(g_dom_set) g_dom_set(id, setval, html); }
-        else { if(out){ out[0]=0; if(g_dom_get) g_dom_get(id, out, outmax, html); } }
+    int kind = -1;                                   /* 0=textContent, 1=innerHTML, 2=input .value */
+    if (strcmp(name,"value")==0) kind = 2;
+    else if (strcmp(name,"innerHTML")==0) kind = 1;
+    else if (strcmp(name,"textContent")==0 || strcmp(name,"innerText")==0) kind = 0;
+    if (kind >= 0) {
+        if (setval) { if(g_dom_set) g_dom_set(id, setval, kind); }
+        else { if(out){ out[0]=0; if(g_dom_get) g_dom_get(id, out, outmax, kind); } }
         return 1;
     }
     return 0;

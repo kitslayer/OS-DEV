@@ -98,6 +98,8 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
+    char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
+    char    focus_id[32];                                       /* id of the focused input field (empty = none) */
 };
 
 static void drop_image(browser_t *b);        /* fwd: free any decoded image */
@@ -157,6 +159,13 @@ static void emit_literal(browser_t *b, const char *s, int style) {
     for (int i = 0; s[i] && b->textlen < TEXT_MAX - 1; i++) b->text[b->textlen++] = s[i];
     emit_word(b, start, style, NO_LINK);
 }
+/* Emit a literal word as a clickable/selectable link (used for <input> fields). */
+static void emit_literal_link(browser_t *b, const char *s, int link) {
+    int start = b->textlen;
+    for (int i = 0; s[i] && b->textlen < TEXT_MAX - 1; i++) b->text[b->textlen++] = s[i];
+    emit_word(b, start, STY_LINK, link);
+}
+static const char *in_get(browser_t *b, const char *id);   /* fwd: <input> field value lookup */
 
 /* Does `lit` exactly equal the first `len` chars of `s`? (tageq requires full
  * equality of both strings, which is wrong here because `s` continues into the
@@ -332,6 +341,16 @@ static int add_href(browser_t *b, const char *v, int vlen) {
     b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)vlen };
     return b->nlink++;
 }
+/* Store an "input:ID" link so following it focuses that field for typing. */
+static int add_input_link(browser_t *b, const char *id) {
+    const char *pfx = "input:"; int pl = 6; int il = 0; while (id[il]) il++;
+    if (il <= 0 || b->nlink >= LINK_MAX || b->hreflen + pl + il >= HREF_MAX) return NO_LINK;
+    int off = b->hreflen;
+    for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
+    for (int i = 0; i < il; i++) b->hrefs[b->hreflen++] = id[i];
+    b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + il) };
+    return b->nlink++;
+}
 /* Store an onclick handler as a "javascript:CODE" link so the existing click path
  * (goto_href -> run_js_handler) runs the code; returns the link id. */
 static int add_onclick(browser_t *b, const char *code, int codelen) {
@@ -444,20 +463,24 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         return;
     }
     if (tageq(tag, "hr")) { if (b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){0,0,NO_LINK,STY_NORMAL,TK_HR}; return; }
-    if (tageq(tag, "input")) {                           /* show a form field placeholder */
+    if (tageq(tag, "input")) {                           /* a form field: shows its value; focusable for typing */
         if (!closing) {
-            const char *v; int vl;
-            if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0) {        /* button/submit */
-                char s[40]; int p = 0; s[p++] = '['; s[p++] = ' ';
-                for (int i = 0; i < vl && p < 36; i++) s[p++] = v[i];
-                s[p++] = ' '; s[p++] = ']'; s[p] = 0;
-                emit_literal(b, s, STY_EM);
-            } else if (find_attr(attrs, attrlen, "placeholder", &v, &vl) && vl > 0) {
-                char s[40]; int p = 0; s[p++] = '[';
-                for (int i = 0; i < vl && p < 37; i++) s[p++] = v[i];
-                s[p++] = ']'; s[p] = 0;
-                emit_literal(b, s, STY_EM);
-            } else emit_literal(b, "[____]", STY_EM);     /* a plain text field */
+            const char *v; int vl, idl;
+            const char *idp;
+            char idbuf[32]; idbuf[0] = 0;
+            if (find_attr(attrs, attrlen, "id", &idp, &idl) && idl < 32) { int k=0; for(;k<idl;k++) idbuf[k]=idp[k]; idbuf[k]=0; }
+            const char *stored = idbuf[0] ? in_get(b, idbuf) : 0;   /* typed / scripted .value */
+            int focused = idbuf[0] && streqs(b->focus_id, idbuf);
+            char s[100]; int p = 0; s[p++] = '[';
+            if (stored)                                                                 { for (int i=0; stored[i] && p<94; i++) s[p++]=stored[i]; }
+            else if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0)             { for (int i=0; i<vl && p<94; i++) s[p++]=v[i]; }
+            else if (find_attr(attrs, attrlen, "placeholder", &v, &vl) && vl > 0)       { for (int i=0; i<vl && p<94; i++) s[p++]=v[i]; }
+            else if (!stored)                                                          { s[p++]='_'; s[p++]='_'; s[p++]='_'; s[p++]='_'; }
+            if (focused) s[p++] = '|';                   /* a cursor on the focused field */
+            s[p++] = ']'; s[p] = 0;
+            if (idbuf[0]) { int lk = add_input_link(b, idbuf);   /* a field with an id is focusable (Enter to type) */
+                if (lk != NO_LINK) emit_literal_link(b, s, lk); else emit_literal(b, s, STY_EM); }
+            else emit_literal(b, s, STY_EM);
         }
         return;
     }
@@ -741,15 +764,30 @@ static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
     }
     return 0;
 }
+/* <input> field values, keyed by id (the typed or scripted .value text) */
+static const char *in_get(browser_t *b, const char *id) {
+    for (int i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) return b->in_val[i];
+    return 0;
+}
+static void in_set(browser_t *b, const char *id, const char *val) {
+    int i; for (i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) break;
+    if (i == b->in_n) { if (b->in_n >= 8 || !id[0]) return; int j=0; while(id[j]&&j<31){b->in_id[i][j]=id[j];j++;} b->in_id[i][j]=0; b->in_n++; }
+    int j=0; while(val[j]&&j<95){b->in_val[i][j]=val[j];j++;} b->in_val[i][j]=0;
+}
 static int browser_dom_get(const char *id, char *out, int max, int html) {
-    (void)html; if (max) out[0] = 0;
+    if (max) out[0] = 0;
     if (!g_ls_b) return 0;
+    if (html == 2) {   /* element.value -> the input field's stored text */
+        const char *v = in_get(g_ls_b, id); if (!v) return 0;
+        int i = 0; while (v[i] && i < max - 1) { out[i] = v[i]; i++; } out[i] = 0; return 1;
+    }
     int is, ie; if (!dom_find(g_ls_b, id, &is, &ie)) return 0;
     int len = ie - is; if (len > max - 1) len = max - 1; if (len < 0) len = 0;
     memcpy(out, g_ls_b->raw + is, len); out[len] = 0; return 1;
 }
 static void browser_dom_set(const char *id, const char *value, int html) {
     browser_t *b = g_ls_b; if (!b) return;
+    if (html == 2) { in_set(b, id, value); parse_html(b, b->raw + b->bodyoff, b->bodylen); return; }   /* element.value = … */
     static char esc[8192];
     if (!html) {   /* textContent: HTML-escape so the text isn't interpreted as markup (innerHTML inserts raw) */
         int o = 0;
@@ -1112,6 +1150,7 @@ static void browser_navigate(browser_t *b) {
     if (!b->raw || !b->text || !b->toks) return;
     b->bodyoff = 0; b->bodylen = 0;   /* clean baseline; HTML paths set the real region */
     b->ls_n = 0;                      /* fresh localStorage per page */
+    b->in_n = 0; b->focus_id[0] = 0;  /* fresh input-field state per page */
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }
@@ -1384,6 +1423,16 @@ static void browser_follow(browser_t *b, int id) {
     const char *hp = b->hrefs + off;
     /* a javascript: handler is code, not a URL — run the FULL slice; the URL_MAX
      * copy below would truncate a longer handler into a syntax error. */
+    int isin = (len > 6); if (isin) for (int k = 0; k < 6; k++) if (lc(hp[k]) != "input:"[k]) { isin = 0; break; }
+    if (isin) {                                          /* focus an <input> field for typing */
+        int n = len - 6; if (n > 31) n = 31;
+        for (int i = 0; i < n; i++) b->focus_id[i] = hp[6 + i];
+        b->focus_id[n] = 0;
+        if (!in_get(b, b->focus_id)) in_set(b, b->focus_id, "");   /* ensure a store slot exists */
+        set_status(b, "type into the field, Enter when done");
+        parse_html(b, b->raw + b->bodyoff, b->bodylen);  /* re-render to show the focus cursor */
+        return;
+    }
     int isjs = (len > 11); if (isjs) for (int k = 0; k < 11; k++) if (lc(hp[k]) != "javascript:"[k]) { isjs = 0; break; }
     if (isjs) {
         static char jsbuf[4096];
@@ -1679,6 +1728,18 @@ static void find_prompt(browser_t *b) {
 }
 
 void browser_key(browser_t *b, int c) {
+    if (b->focus_id[0]) {                               /* typing into a focused <input> field */
+        if (c == '\n' || c == '\r' || c == 27) { b->focus_id[0] = 0; set_status(b, ""); parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+        else if (c == 8 || c == 127) {                  /* backspace */
+            const char *cur = in_get(b, b->focus_id);
+            if (cur && cur[0]) { char t[96]; int n=0; while(cur[n]&&n<95){t[n]=cur[n];n++;} t[n-1]=0; in_set(b, b->focus_id, t); parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+        } else if (c >= 32 && c < 127) {                /* a printable char */
+            const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
+            if (cur) while (cur[n] && n<94) { t[n]=cur[n]; n++; }
+            if (n < 94) { t[n++]=(char)c; t[n]=0; in_set(b, b->focus_id, t); parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+        }
+        return;
+    }
     if (b->finding) {                                   /* in-page find input mode */
         if (c == '\n' || c == '\r' || c == 0x12)         /* Enter / Down: next match */
             do_find(b, b->find_tok >= 0 ? b->find_tok + 1 : 0, +1);
