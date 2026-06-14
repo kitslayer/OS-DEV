@@ -1822,7 +1822,8 @@ static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
     /* console.log */
     obj *log=new_obj(V_NATIVE); log->native=native_print; val lv=UND(); lv.t=V_NATIVE; lv.o=log;
-    obj *con=new_obj(V_OBJ); obj_set(con,"log",lv); val cv=UND(); cv.t=V_OBJ; cv.o=con; env_define(g,"console",cv);
+    obj *con=new_obj(V_OBJ); obj_set(con,"log",lv); obj_set(con,"warn",lv); obj_set(con,"error",lv); obj_set(con,"info",lv); obj_set(con,"debug",lv);   /* all print; page scripts use warn/error too */
+    val cv=UND(); cv.t=V_OBJ; cv.o=con; env_define(g,"console",cv);
     /* document: write() splices HTML into the page. getElementById() returns
      * undefined for now (a real DOM is future work) — scripts that touch the
      * result no-op safely rather than crash. */
