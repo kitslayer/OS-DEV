@@ -747,6 +747,7 @@ static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
  * stored body region so the page updates in place on click. */
 static void run_js_handler(browser_t *b, const char *code) {
     static char jsout[2048];
+    int saved_sel = b->sel;                              /* the clicked link; re-render below clears it */
     int appendpos = b->bodyoff + b->bodylen;
     if (appendpos >= RAW_MAX - 1) return;
     g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_base = appendpos; g_sw_max = RAW_MAX;
@@ -756,6 +757,9 @@ static void run_js_handler(browser_t *b, const char *code) {
     g_sw_raw = 0;
     if (jsout[0]) kprintf("[js] %s\n", jsout);
     if (written > 0) { b->bodylen += written; parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+    /* a DOM mutation or document.write re-render clears the selection; restore it so
+     * pressing Enter again re-runs the same link (e.g. clicking a counter repeatedly). */
+    if (saved_sel != NO_LINK && saved_sel < b->nlink) b->sel = saved_sel;
 }
 
 /* Render plain text: words become WORD tokens, newlines become line breaks
