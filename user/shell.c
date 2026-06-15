@@ -103,7 +103,7 @@ int main(void) {
             print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
-            print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
+            print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        run: apps run<prog> js<file>\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
@@ -1045,6 +1045,23 @@ int main(void) {
                 if (lo < 0) break;                            /* odd trailing nibble: stop */
                 p++;
                 out[oi++] = (char)(hi * 16 + lo);
+            }
+            out[oi] = 0;
+            print("  "); print(out); print("\n");
+        } else if (startswith(line, "unbase64 ")) {       /* unbase64 B64 -> decoded text */
+            const char *p = line + 9; while (*p == ' ') p++;
+            char out[256]; int oi = 0, acc = 0, bits = 0;
+            while (*p && oi < 255) {
+                char c = *p++; int v;
+                if (c >= 'A' && c <= 'Z') v = c - 'A';
+                else if (c >= 'a' && c <= 'z') v = c - 'a' + 26;
+                else if (c >= '0' && c <= '9') v = c - '0' + 52;
+                else if (c == '+') v = 62;
+                else if (c == '/') v = 63;
+                else if (c == '=') break;                 /* padding: done */
+                else continue;                            /* skip whitespace/other */
+                acc = (acc << 6) | v; bits += 6;
+                if (bits >= 8) { bits -= 8; out[oi++] = (char)((acc >> bits) & 0xFF); }
             }
             out[oi] = 0;
             print("  "); print(out); print("\n");
