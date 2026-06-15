@@ -228,6 +228,7 @@ alpha null
 <li id="z9">hi</li>
 null
 beta null alpha
+P LI
 -- getElementsBy* + getAttribute --
 2 2 0
 href@1 data@2

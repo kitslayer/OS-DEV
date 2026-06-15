@@ -2139,6 +2139,8 @@ static int  (*g_dom_parent)(const char *id);                        /* element.p
 static int  (*g_dom_parent_at)(int off);                            /* element.parentElement — position handle */
 static int  (*g_dom_sibling)(const char *id, int dir);              /* next/previousElementSibling (dir<0=prev) — id handle */
 static int  (*g_dom_sibling_at)(int off, int dir);                  /* next/previousElementSibling — position handle */
+static int  (*g_dom_tag)(const char *id, char *out, int max);       /* element.tagName — id handle */
+static int  (*g_dom_tag_at)(int off, char *out, int max);           /* element.tagName — position handle */
 #define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
 static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
 static val element_handle(const char *id) {
@@ -2212,6 +2214,10 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
             if (has_pos) { out[0]=0; if (g_dom_getattr_at) g_dom_getattr_at(off, "id", out, outmax); }
             else { int i=0; while(id[i]&&i<outmax-1){out[i]=id[i];i++;} out[i]=0; }
         }
+        return 1;
+    }
+    if (strcmp(name,"tagName")==0 || strcmp(name,"nodeName")==0) {   /* the element's uppercased tag (read-only) */
+        if (!setval && out) { out[0]=0; if (has_pos) { if(g_dom_tag_at) g_dom_tag_at(off, out, outmax); } else { if(g_dom_tag) g_dom_tag(id, out, outmax); } }
         return 1;
     }
     int kind = -1;                                   /* 0=textContent, 1=innerHTML, 2=input .value */
@@ -2968,6 +2974,10 @@ void js_set_dom_children(int (*children)(const char *, int *, int), int (*childr
     g_dom_parent = parent; g_dom_parent_at = parent_at;
     g_dom_sibling = sibling; g_dom_sibling_at = sibling_at;
 }
+/* The browser registers element.tagName backings (id + position variants). */
+void js_set_dom_tag(int (*tag)(const char *, char *, int), int (*tag_at)(int, char *, int)) {
+    g_dom_tag = tag; g_dom_tag_at = tag_at;
+}
 /* The browser sets the current page URL before running page JS (for window.location). */
 void js_set_location(const char *url) {
     int i = 0; if (url) while (url[i] && i < (int)sizeof(g_location_url) - 1) { g_location_url[i] = url[i]; i++; }
@@ -3123,6 +3133,8 @@ static int hdom_parent_at(int off){ (void)off; return -1; }   /* mock has no ele
 static int hdom_parent(const char *id){ (void)id; return -1; }
 static int hdom_sibling_at(int off, int dir){ if(off==10 && dir>0) return 20; if(off==20 && dir<0) return 10; return -1; }   /* canned: 10<->20 (real scan tested in-OS) */
 static int hdom_sibling(const char *id, int dir){ (void)id; (void)dir; return -1; }
+static int hdom_tag_at(int off, char *out, int max){ if(max<=0)return 0; const char *t=off==10?"P":off==20?"LI":"DIV"; int j=0; while(t[j]&&j<max-1){out[j]=t[j];j++;} out[j]=0; return 1; }
+static int hdom_tag(const char *id, char *out, int max){ (void)id; if(max<=0)return 0; const char *t="DIV"; int j=0; while(t[j]&&j<max-1){out[j]=t[j];j++;} out[j]=0; return 1; }
 /* mock removeAttribute: clear the class store entry (so a later hasAttribute("class") reads false) */
 static void hdom_rmattr_at(int off, const char *attr){ if(strcmp(attr,"class")) return; for(int i=0;i<hcls_n;i++) if(hcls_off[i]==off){ hcls_val[i][0]=0; return; } }
 static void hdom_rmattr(const char *id, const char *attr){ (void)id; (void)attr; }   /* id handles: no id-class store in the mock */
@@ -3136,6 +3148,7 @@ int main(int argc, char **argv) {
     js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);   /* mock querySelector(All) for host tests */
     js_set_dom_match(hdom_matches, hdom_matches_at, hdom_closest, hdom_closest_at);   /* mock element.matches/closest for host tests */
     js_set_dom_children(hdom_children, hdom_children_at, hdom_parent, hdom_parent_at, hdom_sibling, hdom_sibling_at);   /* mock element.children/parentElement/sibling for host tests */
+    js_set_dom_tag(hdom_tag, hdom_tag_at);   /* mock element.tagName for host tests */
     js_set_dom_rmattr(hdom_rmattr, hdom_rmattr_at);    /* mock removeAttribute for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);

@@ -1255,6 +1255,23 @@ static int browser_dom_sibling(const char *id, int dir) {
     if (r[off] != '<') return -1;
     return browser_dom_sibling_at(off, dir);
 }
+/* element.tagName / nodeName: the element's tag name, UPPERCASED (per the DOM). */
+static int browser_dom_tag_at(int off, char *out, int max) {
+    browser_t *b = g_ls_b; if (max <= 0) return 0; out[0] = 0; if (!b) return 0;
+    const char *r = b->raw; int hi = b->bodyoff + b->bodylen;
+    if (off < b->bodyoff || off+1 >= hi || r[off] != '<' || !dom_alnum(r[off+1])) return 0;
+    int p = off+1, o = 0;
+    while (p < hi && dom_alnum(r[p]) && o < max-1) { char c = r[p++]; out[o++] = (c >= 'a' && c <= 'z') ? c - 32 : c; }
+    out[o] = 0; return o > 0;
+}
+static int browser_dom_tag(const char *id, char *out, int max) {
+    browser_t *b = g_ls_b; if (max <= 0) return 0; out[0] = 0; if (!b) return 0;
+    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return 0;
+    const char *r = b->raw; int lo = b->bodyoff, off = as;
+    while (off > lo && r[off] != '<') off--;
+    if (r[off] != '<') return 0;
+    return browser_dom_tag_at(off, out, max);
+}
 /* <input> field values, keyed by id (the typed or scripted .value text) */
 static const char *in_get(browser_t *b, const char *id) {
     for (int i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) return b->in_val[i];
@@ -1520,7 +1537,7 @@ static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-han
     b->raw[live_end+delta]=0;
     parse_html(b,b->raw+b->bodyoff,b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_location(b->url); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

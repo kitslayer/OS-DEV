@@ -50,4 +50,6 @@ void js_set_dom_rmattr(void (*rmattr)(const char *, const char *), void (*rmattr
 void js_set_dom_children(int (*children)(const char *, int *, int), int (*children_at)(int, int *, int),
                          int (*parent)(const char *), int (*parent_at)(int),
                          int (*sibling)(const char *, int), int (*sibling_at)(int, int));
+/* element.tagName backings (id + position variants; fill the uppercased tag, return >0 if found). */
+void js_set_dom_tag(int (*tag)(const char *, char *, int), int (*tag_at)(int, char *, int));
 void js_set_location(const char *url);

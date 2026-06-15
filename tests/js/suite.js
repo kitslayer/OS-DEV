@@ -251,6 +251,7 @@ var _ch=document.querySelector("p").children; var _cc=0; for(var _ce of _ch)_cc+
 var _ne=document.createElement("li"); _ne.textContent="hi"; _ne.id="z9"; document.getElementById("nb").appendChild(_ne); print(document.getElementById("nb").innerHTML);  // <li id="z9">hi</li> (createElement + appendChild: build child HTML, append to parent innerHTML; M298)
 print(document.querySelector("p").parentElement);  // null (parentElement -> enclosing element or null; mock has no tree, real parent tested in-OS; M299)
 print(document.querySelector("p").nextElementSibling.textContent, document.querySelector("p").previousElementSibling, document.querySelectorAll(".item")[1].previousElementSibling.textContent);  // beta null alpha (next/previousElementSibling -> element handle or null; M300)
+print(document.querySelector("p").tagName, document.querySelectorAll(".item")[1].tagName);  // P LI (element.tagName, uppercased; M301)
 print("-- getElementsBy* + getAttribute --");
 print(document.getElementsByTagName("p").length, document.getElementsByClassName("item").length, document.getElementsByClassName("zzz").length);  // 2 2 0 (getElementsByTagName/ClassName -> arrays of position handles; M282, host mock)
 print(document.querySelector("p").getAttribute("href"), document.getElementsByClassName("item")[1].getAttribute("data"));  // href@1 data@2 (getAttribute on a position handle; mock echoes attr@offset; M282)
