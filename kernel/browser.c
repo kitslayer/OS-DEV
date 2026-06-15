@@ -1237,7 +1237,89 @@ static void browser_dom_setattr(const char *id, const char *attr, const char *va
     b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_getattr_at, browser_dom_query); js_set_location(b->url); }
+/* Position-keyed write: textContent/innerHTML (html 0/1) and remove (html 3) on
+ * the element whose opening '<' is at byte `off`. Duplicates browser_dom_set's
+ * splice with dom_find_at in place of dom_find (the id path stays untouched).
+ * NOTE: after a splice + re-render, the offsets of LATER elements shift, so a
+ * second position handle into the same page is stale; dom_find_at re-validates
+ * '<' at off, so a stale write fails closed (no-op) or edits a still-valid '<' —
+ * always within bounds (memory-safe). Single-match writes are exact. */
+static void browser_dom_set_at(int off, const char *value, int html) {
+    browser_t *b = g_ls_b; if (!b) return;
+    if (html == 2) return;   /* .value is keyed by id; not position-addressable */
+    if (html == 3) {         /* remove(): off IS the opening '<'; splice [off, past-close) */
+        int is, ie; if (!dom_find_at(b, off, &is, &ie)) return;
+        const char *r = b->raw; int bodyend = b->bodyoff + b->bodylen;
+        int ts = off;
+        int ce = ie; while (ce < bodyend && r[ce] != '>') ce++; if (ce >= bodyend) return; ce++;
+        int delta = -(ce - ts);
+        int active = (g_sw_raw == b->raw);
+        int live_end = (active && g_sw_pos > bodyend) ? g_sw_pos : bodyend;
+        memmove(b->raw + ts, b->raw + ce, live_end - ce);
+        b->bodylen += delta;
+        if (active) { if (g_sw_pos > ts) g_sw_pos += delta; if (g_sw_base > ts) g_sw_base += delta; }
+        b->raw[live_end + delta] = 0;
+        parse_html(b, b->raw + b->bodyoff, b->bodylen);
+        return;
+    }
+    static char esc[8192];
+    if (!html) {   /* textContent: HTML-escape (innerHTML inserts raw) — same as browser_dom_set */
+        int o = 0;
+        for (int i = 0; value[i] && o < (int)sizeof(esc) - 7; i++) {
+            char c = value[i];
+            if (c=='<')      { memcpy(esc+o, "&lt;", 4); o += 4; }
+            else if (c=='>') { memcpy(esc+o, "&gt;", 4); o += 4; }
+            else if (c=='&') { memcpy(esc+o, "&amp;", 5); o += 5; }
+            else esc[o++] = c;
+        }
+        esc[o] = 0; value = esc;
+    }
+    int is, ie; if (!dom_find_at(b, off, &is, &ie)) return;
+    int vlen = 0; while (value[vlen]) vlen++;
+    int delta = vlen - (ie - is);
+    int active = (g_sw_raw == b->raw);
+    int bodyend = b->bodyoff + b->bodylen;
+    int live_end = (active && g_sw_pos > bodyend) ? g_sw_pos : bodyend;
+    if (live_end + delta >= RAW_MAX - 1 || live_end + delta < b->bodyoff) return;
+    memmove(b->raw + ie + delta, b->raw + ie, live_end - ie);
+    memcpy(b->raw + is, value, vlen);
+    b->bodylen += delta;
+    if (active) { if (g_sw_pos > ie) g_sw_pos += delta; if (g_sw_base > ie) g_sw_base += delta; }
+    b->raw[live_end + delta] = 0;
+    parse_html(b, b->raw + b->bodyoff, b->bodylen);
+}
+/* Position-keyed setAttribute: duplicates browser_dom_setattr with dom_attr_region_at. */
+static void browser_dom_setattr_at(int off, const char *attr, const char *val) {
+    browser_t *b = g_ls_b; if (!b || !attr[0]) return;
+    int as, ae; if (!dom_attr_region_at(b, off, &as, &ae)) return;
+    char vbuf[256]; int vlen = 0;
+    for (int i = 0; val[i] && vlen < (int)sizeof(vbuf) - 1; i++) { char c = val[i]; if (c != '"' && c != '\'') vbuf[vlen++] = c; }
+    vbuf[vlen] = 0;
+    const char *fv; int fvl;
+    int rs, rend; const char *repl; int rlen; char ins[384];
+    if (find_attr(b->raw + as, ae - as, attr, &fv, &fvl)) {
+        rs = (int)(fv - b->raw); rend = rs + fvl; repl = vbuf; rlen = vlen;
+    } else {
+        int p = 0; ins[p++] = ' ';
+        for (int i = 0; attr[i] && p < 80; i++) { char c = attr[i]; if (c=='"'||c=='\''||c=='='||c==' '||c=='<'||c=='>'||c=='/') continue; ins[p++] = c; }
+        ins[p++] = '='; ins[p++] = '"';
+        for (int i = 0; i < vlen && p < 380; i++) ins[p++] = vbuf[i];
+        ins[p++] = '"'; ins[p] = 0;
+        rs = ae; rend = ae; repl = ins; rlen = p;
+    }
+    int delta = rlen - (rend - rs);
+    int active = (g_sw_raw == b->raw);
+    int bodyend = b->bodyoff + b->bodylen;
+    int live_end = (active && g_sw_pos > bodyend) ? g_sw_pos : bodyend;
+    if (live_end + delta >= RAW_MAX - 1 || live_end + delta < b->bodyoff) return;
+    memmove(b->raw + rend + delta, b->raw + rend, live_end - rend);
+    memcpy(b->raw + rs, repl, rlen);
+    b->bodylen += delta;
+    if (active) { if (g_sw_pos > rend) g_sw_pos += delta; if (g_sw_base > rend) g_sw_base += delta; }
+    b->raw[live_end + delta] = 0;
+    parse_html(b, b->raw + b->bodyoff, b->bodylen);
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

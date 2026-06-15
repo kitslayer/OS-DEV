@@ -224,4 +224,7 @@ alpha null alpha
 -- getElementsBy* + getAttribute --
 2 2 0
 href@1 data@2
+-- position write --
+W1
+W2 W1
 -- done --

@@ -2106,7 +2106,9 @@ static void (*g_dom_setattr)(const char *id, const char *attr, const char *val);
  * position, parallel to the id-keyed ones above (additive — id handles never
  * use them). g_dom_query runs the selector match and returns match offsets. */
 static int  (*g_dom_get_at)(int off, char *out, int max, int html);
+static void (*g_dom_set_at)(int off, const char *value, int html);                /* textContent/innerHTML/remove on a match */
 static int  (*g_dom_getattr_at)(int off, const char *attr, char *out, int max);   /* getAttribute on a match */
+static void (*g_dom_setattr_at)(int off, const char *attr, const char *val);      /* setAttribute on a match */
 static int  (*g_dom_query)(const char *sel, int *offs, int max);   /* returns match count */
 #define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
 static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
@@ -2173,8 +2175,9 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
     else if (strcmp(name,"innerHTML")==0) kind = 1;
     else if (strcmp(name,"textContent")==0 || strcmp(name,"innerText")==0) kind = 0;
     if (kind >= 0) {
-        if (setval) {                                /* position-keyed write lands in a later increment; id write unchanged */
-            if (!has_pos) { if(g_dom_set) g_dom_set(id, setval, kind); }
+        if (setval) {
+            if (has_pos) { if(g_dom_set_at) g_dom_set_at(off, setval, kind); }
+            else         { if(g_dom_set)    g_dom_set(id, setval, kind); }
         } else if (out) {
             out[0]=0;
             if (has_pos) { if(g_dom_get_at) g_dom_get_at(off, out, outmax, kind); }
@@ -2190,7 +2193,11 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
     const char *id = (el->n > 0 && el->vals[0].t == V_STR) ? el->vals[0].str : "";
     int has_pos = (el->n > 1 && el->vals[1].t == V_NUM);   /* a querySelector match keyed by byte offset */
     int off = has_pos ? (int)el->vals[1].num : 0;
-    if (strcmp(name, "remove") == 0) { if (!has_pos && g_dom_set) g_dom_set(id, "", 3); return UND(); }   /* element.remove(): id path; position remove lands with position write */
+    if (strcmp(name, "remove") == 0) {   /* element.remove(): splice the whole element out (id or position handle) */
+        if (has_pos) { if (g_dom_set_at) g_dom_set_at(off, "", 3); }
+        else         { if (g_dom_set)    g_dom_set(id, "", 3); }
+        return UND();
+    }
     if (strcmp(name, "getAttribute") == 0) {
         const char *aname = nargs ? val_to_str(args[0]) : "";
         static char ab[2048]; ab[0] = 0;
@@ -2203,7 +2210,8 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
         char an[128];   /* copy the name BEFORE the 2nd val_to_str (it may share a static buffer) */
         { const char *s = nargs > 0 ? val_to_str(args[0]) : ""; int i = 0; while (s[i] && i < 127) { an[i] = s[i]; i++; } an[i] = 0; }
         const char *av = nargs > 1 ? val_to_str(args[1]) : "";
-        if (g_dom_setattr) g_dom_setattr(id, an, av);
+        if (has_pos) { if (g_dom_setattr_at) g_dom_setattr_at(off, an, av); }
+        else         { if (g_dom_setattr)    g_dom_setattr(id, an, av); }
         return UND();
     }
     rt_err("no such element method"); return UND();
@@ -2708,9 +2716,12 @@ void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int),
 }
 /* The browser registers position-keyed DOM callbacks for querySelector(All) matches. */
 void js_set_dom_pos(int (*get_at)(int, char *, int, int),
+                    void (*set_at)(int, const char *, int),
                     int (*getattr_at)(int, const char *, char *, int),
+                    void (*setattr_at)(int, const char *, const char *),
                     int (*query)(const char *, int *, int)) {
-    g_dom_get_at = get_at; g_dom_getattr_at = getattr_at; g_dom_query = query;
+    g_dom_get_at = get_at; g_dom_set_at = set_at;
+    g_dom_getattr_at = getattr_at; g_dom_setattr_at = setattr_at; g_dom_query = query;
 }
 /* The browser sets the current page URL before running page JS (for window.location). */
 void js_set_location(const char *url) {
@@ -2748,11 +2759,18 @@ static int hdom_query(const char *sel, int *offs, int max){ if(max<1) return 0;
     if(!strcmp(sel,"p")||!strcmp(sel,".item")){ int n=0; if(n<max)offs[n++]=10; if(n<max)offs[n++]=20; return n; }
     if(!strcmp(sel,"#solo")||!strcmp(sel,"b.x")){ offs[0]=10; return 1; }
     return 0; }
+/* a tiny offset->text override store so position writes are observable on read-back */
+static int wat_off[8]; static char wat_txt[8][64]; static int wat_n;
 static int hdom_get_at(int off, char *out, int max, int html){ (void)html; if(max<=0) return 0;
+    for(int i=0;i<wat_n;i++) if(wat_off[i]==off){ int j=0; while(wat_txt[i][j]&&j<max-1){out[j]=wat_txt[i][j];j++;} out[j]=0; return 1; }
     const char *t = off==10 ? "alpha" : off==20 ? "beta" : ""; int j=0; while(t[j]&&j<max-1){out[j]=t[j];j++;} out[j]=0; return 1; }
 /* mock getAttribute-by-position: echo "<attr>@<off>" so the suite can assert the round-trip */
 static int hdom_getattr_at(int off, const char *attr, char *out, int max){ if(max<=0) return 0;
     int j=0; while(attr[j]&&j<max-2){out[j]=attr[j];j++;} if(j<max-2)out[j++]='@'; if(j<max-1)out[j++]=(char)('0'+(off/10)%10); out[j]=0; return 1; }
+/* mock writes-by-position: store into the shared offset->text store so a read-back reflects it */
+static void hdom_set_at(int off, const char *value, int html){ (void)html; int i; for(i=0;i<wat_n;i++) if(wat_off[i]==off) break;
+    if(i==wat_n){ if(wat_n>=8) return; wat_off[wat_n++]=off; } int j=0; while(value[j]&&j<63){wat_txt[i][j]=value[j];j++;} wat_txt[i][j]=0; }
+static void hdom_setattr_at(int off, const char *attr, const char *val){ (void)off; (void)attr; (void)val; }
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -2760,7 +2778,7 @@ int main(int argc, char **argv) {
     js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     js_set_dom_attr(hdom_getattr, hdom_setattr);
-    js_set_dom_pos(hdom_get_at, hdom_getattr_at, hdom_query);   /* mock querySelector(All) for host tests */
+    js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);   /* mock querySelector(All) for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);

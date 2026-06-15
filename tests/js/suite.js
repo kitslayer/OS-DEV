@@ -247,4 +247,7 @@ var _qa=document.querySelectorAll(".item"); var _qc=0; _qa.forEach(function(e){_
 print("-- getElementsBy* + getAttribute --");
 print(document.getElementsByTagName("p").length, document.getElementsByClassName("item").length, document.getElementsByClassName("zzz").length);  // 2 2 0 (getElementsByTagName/ClassName -> arrays of position handles; M282, host mock)
 print(document.querySelector("p").getAttribute("href"), document.getElementsByClassName("item")[1].getAttribute("data"));  // href@1 data@2 (getAttribute on a position handle; mock echoes attr@offset; M282)
+print("-- position write --");
+document.querySelector("p").textContent = "W1"; print(document.querySelector("p").textContent);  // W1 (textContent write on a position handle; read-back via mock store; M283)
+document.querySelectorAll(".item")[1].textContent = "W2"; print(document.querySelectorAll(".item")[1].textContent, document.querySelectorAll(".item")[0].textContent);  // W2 W1 (indexed write; distinct offsets independent; M283)
 print("-- done --");

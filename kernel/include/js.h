@@ -26,6 +26,8 @@ void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int),
  *  get_at(off, out, max, html) -> read the element at byte offset `off`;
  *  query(sel, offs, max) -> fill offs[] with match offsets, return the count. */
 void js_set_dom_pos(int (*get_at)(int, char *, int, int),
+                    void (*set_at)(int, const char *, int),
                     int (*getattr_at)(int, const char *, char *, int),
+                    void (*setattr_at)(int, const char *, const char *),
                     int (*query)(const char *, int *, int));
 void js_set_location(const char *url);
