@@ -727,14 +727,21 @@ int main(void) {
             sys_reboot();
         } else if (streq(line, "cal")) {
             cmd_cal();
-        } else if (startswith(line, "cal ")) {         /* cal <month 1-12> <year> : any month */
+        } else if (startswith(line, "cal ")) {         /* cal <month> <year>, or cal -y <year> for the whole year */
             const char *p = line + 4; while (*p == ' ') p++;
-            int m = 0, y = 0;
-            while (*p >= '0' && *p <= '9') { if (m < 1000000) m = m*10 + (*p - '0'); p++; }
-            while (*p == ' ') p++;
-            while (*p >= '0' && *p <= '9') { if (y < 1000000) y = y*10 + (*p - '0'); p++; }
-            if (m < 1 || m > 12 || y < 1 || y > 9999) print("usage: cal <month 1-12> <year>   (e.g. cal 7 1969)\n");
-            else cmd_cal_ym(y, m, 0);
+            if (p[0] == '-' && p[1] == 'y') {
+                p += 2; while (*p == ' ') p++;
+                int y = 0; while (*p >= '0' && *p <= '9') { if (y < 1000000) y = y*10 + (*p - '0'); p++; }
+                if (y < 1 || y > 9999) print("usage: cal -y <year>\n");
+                else for (int mm = 1; mm <= 12; mm++) cmd_cal_ym(y, mm, 0);    /* the full year, month by month */
+            } else {
+                int m = 0, y = 0;
+                while (*p >= '0' && *p <= '9') { if (m < 1000000) m = m*10 + (*p - '0'); p++; }
+                while (*p == ' ') p++;
+                while (*p >= '0' && *p <= '9') { if (y < 1000000) y = y*10 + (*p - '0'); p++; }
+                if (m < 1 || m > 12 || y < 1 || y > 9999) print("usage: cal <month 1-12> <year>  |  cal -y <year>\n");
+                else cmd_cal_ym(y, m, 0);
+            }
         } else if (startswith(line, "weekday ")) {        /* weekday YYYYMMDD -> the day name (Sakamoto) */
             const char *p = line + 8; while (*p == ' ') p++;
             int dig[8], k = 0;
