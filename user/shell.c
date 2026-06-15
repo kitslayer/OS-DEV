@@ -66,7 +66,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
+            print("files:  ls cat head tail sort nl edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
@@ -96,6 +96,26 @@ int main(void) {
                 for (; i < n && lines < 20; i++) if (buf[i] == '\n') lines++;   /* first 20 lines */
                 buf[i] = '\0'; print(buf);
                 if (i < n) print("...\n");
+            }
+        } else if (startswith(line, "nl ")) {
+            static char buf[8192];
+            long n = sys_readfile(line + 3, buf, sizeof(buf) - 1);
+            if (n < 0) { print("nl: no such file: "); print(line + 3); print("\n"); }
+            else {
+                int ln = 1, start = 0; char num[12];
+                for (int i = 0; i < (int)n; i++) {
+                    if (buf[i] == '\n') {
+                        buf[i] = '\0';
+                        itoa_simple(ln++, num);
+                        print("  "); print(num); print("  "); print(buf + start); print("\n");
+                        start = i + 1;
+                    }
+                }
+                if (start < (int)n) {                       /* final line with no trailing newline */
+                    buf[n] = '\0';
+                    itoa_simple(ln, num);
+                    print("  "); print(num); print("  "); print(buf + start); print("\n");
+                }
             }
         } else if (startswith(line, "tail ")) {
             char buf[2048];
