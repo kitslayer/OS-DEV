@@ -177,8 +177,8 @@ static const struct {
         "<h1 id=\"ans\">. . .</h1>"
         "<p><button onclick=\"ask()\">[ Ask the 8-Ball ]</button></p>"
         "<script>\n"
-        "var answers=['It is certain.','Without a doubt.','Yes, definitely.','Most likely.','Signs point to yes.','Reply hazy -- try again.','Ask again later.','Cannot predict now.','Do not count on it.','My reply is no.','Very doubtful.','Outlook not so good.'];\n"
-        "function ask(){ document.getElementById('ans').textContent = answers[Math.random(12)]; }\n"
+        "var answers=['It is certain.','It is decidedly so.','Without a doubt.','Yes, definitely.','You may rely on it.','As I see it, yes.','Most likely.','Outlook good.','Yes.','Signs point to yes.','Reply hazy -- try again.','Ask again later.','Better not tell you now.','Cannot predict now.','Concentrate and ask again.','Do not count on it.','My reply is no.','My sources say no.','Outlook not so good.','Very doubtful.'];\n"
+        "function ask(){ document.getElementById('ans').textContent = answers[Math.random(20)]; }\n"
         "</script>" },
     { "SEARCH  HTM", "<h1>Search the web</h1>"
         "<p>A real working web search, from scratch. Type a query and follow <b>[Search]</b>: the browser builds <code>action?q=YOUR+QUERY</code>, URL-encodes it, and navigates over <b>HTTPS</b> to DuckDuckGo's HTML results &mdash; a genuine HTML GET form submission to the live web.</p>"
