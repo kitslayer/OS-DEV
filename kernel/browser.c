@@ -103,6 +103,7 @@ struct browser {
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
     char    sc_tag[16]; int sc_depth; uint32_t sc_savecolor;    /* active inline style="color:" scope (restores curcolor on close) */
+    int     sc_savestyle, sc_setstyle;                          /* same scope's text-style save + the STY_ it applied (-1 = none), for font-weight/font-style */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
@@ -534,6 +535,39 @@ static uint32_t parse_style_color(const char *s, int n) {
     }
     return 0;
 }
+/* Find a lowercase CSS property `prop` (length plen) at a property boundary in an inline
+ * style string and return its trimmed value span [*vs,*ve); 1 if found. Bounded read-only. */
+static int style_prop(const char *s, int n, const char *prop, int plen, int *vs, int *ve) {
+    for (int i = 0; i + plen + 1 <= n; i++) {                /* room for prop + ':' */
+        int m = 1;
+        for (int j = 0; j < plen; j++) if (lc(s[i+j]) != prop[j]) { m = 0; break; }
+        if (!m || s[i+plen] != ':') continue;
+        char before = (i > 0) ? s[i-1] : ' ';                /* must start a property (not a hyphen-suffix like -weight) */
+        if (!(before==' '||before==';'||before=='\t'||before=='\n'||before=='"'||before=='\'')) continue;
+        int k = i + plen + 1; while (k < n && (s[k]==' '||s[k]=='\t')) k++;   /* ws after ':' */
+        int a = k; while (k < n && s[k] != ';' && s[k] != '}') k++;          /* value to ';' or end */
+        int e = k; while (e > a && (s[e-1]==' '||s[e-1]=='\t')) e--;          /* trim trailing ws */
+        *vs = a; *ve = e; return 1;
+    }
+    return 0;
+}
+/* Map an inline style's font-weight/font-style to the renderer's text-style enum:
+ * font-weight bold/bolder/600..900 -> STY_BOLD; font-style italic/oblique -> STY_EM; else -1.
+ * (The renderer's style is a single enum, so bold takes precedence when both are set.) */
+static int parse_style_textstyle(const char *s, int n) {
+    int vs, ve;
+    if (style_prop(s, n, "font-weight", 11, &vs, &ve)) {
+        const char *v = s + vs; int vl = ve - vs;
+        if (attr_eq(v, vl, "bold") || attr_eq(v, vl, "bolder") ||
+            (vl >= 3 && v[0] >= '6' && v[0] <= '9'))         /* 600/700/800/900 */
+            return STY_BOLD;
+    }
+    if (style_prop(s, n, "font-style", 10, &vs, &ve)) {
+        const char *v = s + vs; int vl = ve - vs;
+        if (attr_eq(v, vl, "italic") || attr_eq(v, vl, "oblique")) return STY_EM;
+    }
+    return -1;
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -550,16 +584,25 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         if (closing) { if (--b->oc_depth == 0) { *curlink = b->oc_link; if (*style == STY_LINK) *style = b->oc_style; } }
         else b->oc_depth++;
     }
-    if (b->sc_depth > 0 && tageq(tag, b->sc_tag)) {              /* inline style="color" scope: restore curcolor on its close */
-        if (closing) { if (--b->sc_depth == 0) b->curcolor = b->sc_savecolor; }
+    if (b->sc_depth > 0 && tageq(tag, b->sc_tag)) {              /* inline style scope: restore curcolor (+ text-style) on its close */
+        if (closing) { if (--b->sc_depth == 0) {
+            b->curcolor = b->sc_savecolor;
+            if (b->sc_setstyle >= 0 && *style == b->sc_setstyle) *style = b->sc_savestyle;  /* restore only if still ours (mirror oc_*) */
+        } }
         else b->sc_depth++;
     }
-    if (!closing && b->sc_depth == 0 && !is_void_tag(tag)) {     /* open a colour scope for an element with style="color:..." */
+    if (!closing && b->sc_depth == 0 && !is_void_tag(tag)) {     /* open an inline-style scope: color and/or font-weight/font-style */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {
             uint32_t c = parse_style_color(st, stl);
-            if (c) { b->sc_savecolor = b->curcolor; b->curcolor = c;
-                     int i = 0; while (tag[i] && i < 15) { b->sc_tag[i] = tag[i]; i++; } b->sc_tag[i] = 0; b->sc_depth = 1; }
+            int ts = parse_style_textstyle(st, stl);            /* STY_BOLD / STY_EM, or -1 */
+            int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
+            if (c || apply_ts) {
+                b->sc_savecolor = b->curcolor; if (c) b->curcolor = c;
+                b->sc_savestyle = *style; b->sc_setstyle = -1;
+                if (apply_ts) { *style = ts; b->sc_setstyle = ts; }
+                int i = 0; while (tag[i] && i < 15) { b->sc_tag[i] = tag[i]; i++; } b->sc_tag[i] = 0; b->sc_depth = 1;
+            }
         }
     }
     if (!closing && b->oc_depth == 0 && !is_void_tag(tag)) {
