@@ -1049,7 +1049,7 @@ static int sel_match_all(browser_t *b, const sel_t *sel, int *offs, int max) {
  * then returns INNER's [*is,*ie) via the same depth-count as dom_find. */
 static int dom_find_at(browser_t *b, int off, int *is, int *ie) {
     const char *r = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
-    if (off < lo || off+1 >= hi || r[off] != '<' || !dom_alnum(r[off+1])) return 0;
+    if (off < lo || off >= hi - 1 || r[off] != '<' || !dom_alnum(r[off+1])) return 0;   /* `off >= hi-1` (not `off+1 >= hi`) so off==INT_MAX can't overflow past the guard */
     char tag[16]; int tn = 0, ne = off + 1;
     while (ne < hi && dom_alnum(r[ne]) && tn < 15) tag[tn++] = r[ne++];
     if (tn == 0) return 0;
@@ -1077,7 +1077,7 @@ static int browser_dom_get_at(int off, char *out, int max, int html) {
 /* Position variant of dom_attr_region: the opening-tag attr span of the element at `off`. */
 static int dom_attr_region_at(browser_t *b, int off, int *as, int *ae) {
     const char *r = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
-    if (off < lo || off+1 >= hi || r[off] != '<' || !dom_alnum(r[off+1])) return 0;
+    if (off < lo || off >= hi - 1 || r[off] != '<' || !dom_alnum(r[off+1])) return 0;   /* `off >= hi-1` (not `off+1 >= hi`) so off==INT_MAX can't overflow past the guard */
     int ne = off + 1, tn = 0;
     while (ne < hi && dom_alnum(r[ne]) && tn < 15) { ne++; tn++; }   /* skip the tag name */
     if (tn == 0) return 0;
