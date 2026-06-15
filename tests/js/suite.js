@@ -236,4 +236,9 @@ var _es="";for(var [_i,_x] of ["p","q"].entries())_es+=_i+_x; print("hello".subs
 var _rf={a:1}; Reflect.set(_rf,"b",2); print(Reflect.get(_rf,"a"), Reflect.has(_rf,"b"), Reflect.ownKeys(_rf).join(","), Reflect.deleteProperty(_rf,"a"), Reflect.has(_rf,"a"));  // 1 true a,b true false (Reflect, M277)
 print((1234567).toLocaleString(), "a".localeCompare("b"), "abc".codePointAt(0), String.fromCodePoint(65,66));  // 1,234,567 -1 97 AB (toLocaleString grouping + localeCompare + codePointAt/fromCodePoint, M278)
 var _pe={a:1}; var _gd=Object.getOwnPropertyDescriptors({x:5}); print(_pe.propertyIsEnumerable("a"), _pe.propertyIsEnumerable("z"), [1,2,3].toLocaleString(), _gd.x.value);  // true false 1,2,3 5 (propertyIsEnumerable + array toLocaleString + getOwnPropertyDescriptors, M279)
+print("-- labeled break/continue --");
+var _lr=""; _o1: for(var _i=0;_i<3;_i++){ for(var _j=0;_j<3;_j++){ if(_j==1) continue _o1; if(_i==2) break _o1; _lr+=_i+""+_j+" "; } } print(_lr.trim());  // 00 10
+var _pp=0; _o2: for(var _q=0;_q<5;_q++){ if(_q==2) break _o2; _pp++; } print(_pp);  // 2
+var _sv=""; _o3: for(var _s=0;_s<4;_s++){ switch(_s){ case 1: _sv+="a"; break; case 2: break _o3; default: _sv+="d"; } _sv+=_s; } print(_sv);  // d0a1
+var _ub=0; for(var _u=0;_u<10;_u++){ if(_u==3) break; _ub++; } print(_ub, true?7:9);  // 3 7 (unlabeled break unchanged + ?: not a label)
 print("-- done --");

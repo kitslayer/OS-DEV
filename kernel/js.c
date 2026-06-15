@@ -239,6 +239,7 @@ struct node {
     node *a, *b, *c, *d;
     node **list; int nlist;
     int prefix;   /* for N_UPDATE: prefix vs postfix */
+    const char *label;   /* labeled stmt: a loop's own label; or a break/continue target. NULL=none (memset-zeroed by mknode) (M280) */
 };
 
 static int g_depth;            /* recursion guard (parser + eval + val_to_str + calls) */
@@ -672,12 +673,17 @@ static node *parse_var(lexer *L) {
 static node *parse_stmt(lexer *L) {
     if (++g_depth > MAXDEPTH) { rt_err("max recursion"); g_depth--; return mknode(N_UNDEF); }
     node *r;
+    if (peek(L).type==T_IDENT) {   /* labeled statement `name: stmt` (M280): IDENT then ':' at statement start. ?:/object-literal/case: never start a statement with IDENT-then-colon, so this is unambiguous; lex_restore if it's just an expression like `a ? b : c`. */
+        lexsave sv=lex_save(L); token id=advance(L);
+        if (peek_punc(L,":")) { advance(L); node *body=parse_stmt(L); body->label=intern(id.s,id.len); g_depth--; return body; }
+        lex_restore(L,sv);
+    }
     if (peek_punc(L,"{")) { r=parse_block(L); g_depth--; return r; }
     if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) { r=parse_var(L); g_depth--; return r; }
     if (peek_kw(L,"function")) { r=parse_primary(L); g_depth--; return r; }   /* function decl */
     if (peek_kw(L,"return")) { advance(L); node *n=mknode(N_RETURN); if(!peek_punc(L,"}")&&!peek_punc(L,";")&&peek(L).type!=T_EOF) n->a=parse_expr(L); g_depth--; return n; }
-    if (peek_kw(L,"break")) { advance(L); g_depth--; return mknode(N_BREAK); }
-    if (peek_kw(L,"continue")) { advance(L); g_depth--; return mknode(N_CONTINUE); }
+    if (peek_kw(L,"break")) { advance(L); node *n=mknode(N_BREAK); if (peek(L).type==T_IDENT){ token lt=advance(L); n->label=intern(lt.s,lt.len); } g_depth--; return n; }   /* break [label] (M280) */
+    if (peek_kw(L,"continue")) { advance(L); node *n=mknode(N_CONTINUE); if (peek(L).type==T_IDENT){ token lt=advance(L); n->label=intern(lt.s,lt.len); } g_depth--; return n; }
     if (peek_kw(L,"if")) {
         advance(L); expect_punc(L,"("); node *n=mknode(N_IF); n->a=parse_expr(L); expect_punc(L,")");
         n->b=parse_stmt(L); skip_semi(L);   /* a ; may terminate the then-branch before else */
@@ -1117,7 +1123,7 @@ static val *env_find(env *e, const char *key) {
 
 /* =========================== evaluator =========================== */
 enum { C_NORMAL, C_RETURN, C_BREAK, C_CONTINUE };
-typedef struct { int kind; val v; } comp;
+typedef struct { int kind; val v; const char *label; } comp;   /* label: target of a labeled break/continue (NULL=unlabeled) (M280) */
 
 static val eval_expr(node *n, env *e);
 static comp eval_stmt(node *n, env *e);
@@ -1653,7 +1659,11 @@ static val eval_expr(node *n, env *e) {
     val v = eval_expr_inner(n, e); g_depth--; return v;
 }
 
-static comp CN(void){ comp c; c.kind=C_NORMAL; c.v=UND(); return c; }
+static comp CN(void){ comp c; c.kind=C_NORMAL; c.v=UND(); c.label=0; return c; }
+/* labeled break/continue (M280): does completion c (a BREAK/CONTINUE) terminate/re-target a loop
+ * labeled `lbl` (NULL=unlabeled loop)? An unlabeled completion (c.label==0) applies to ANY loop;
+ * a labeled one only to its matching label. intern() does NOT dedup, so compare with strcmp. */
+static int label_here(comp c, const char *lbl){ return c.label==0 || (lbl && strcmp(c.label,lbl)==0); }
 
 static comp eval_stmt_inner(node *n, env *e) {
     if (g_err || g_oom) return CN();
@@ -1671,12 +1681,12 @@ static comp eval_stmt_inner(node *n, env *e) {
         case N_IF: { if (truthy(eval_expr(n->a,e))) return eval_stmt(n->b,e); else if (n->c) return eval_stmt(n->c,e); return CN(); }
         case N_WHILE: {
             int guard=0;
-            while (truthy(eval_expr(n->a,e))) { if(++guard>5000000){rt_err("loop limit");break;} comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err||g_oom) break; }
+            while (truthy(eval_expr(n->a,e))) { if(++guard>5000000){rt_err("loop limit");break;} comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; if(g_err||g_oom) break; }
             return CN();
         }
         case N_DOWHILE: {
             int guard=0;
-            do { comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err||g_oom) break; if(++guard>5000000){rt_err("loop limit");break;} } while (truthy(eval_expr(n->a,e)));
+            do { comp c=eval_stmt(n->b,e); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; if(g_err||g_oom) break; if(++guard>5000000){rt_err("loop limit");break;} } while (truthy(eval_expr(n->a,e)));
             return CN();
         }
         case N_SWITCH: {
@@ -1691,7 +1701,7 @@ static comp eval_stmt_inner(node *n, env *e) {
             if (matched<0) matched=defidx;
             if (matched>=0) for (int i=matched;i<n->nlist;i++){ node*cl=n->list[i];
                 for (int j=0;j<cl->nlist;j++){ comp c=eval_stmt(cl->list[j],se);
-                    if (c.kind==C_BREAK) return CN(); if (c.kind==C_RETURN||c.kind==C_CONTINUE) return c; if (g_err||g_oom) return CN(); } }
+                    if (c.kind==C_BREAK){ if (c.label==0) return CN(); else return c; } if (c.kind==C_RETURN||c.kind==C_CONTINUE) return c; if (g_err||g_oom) return CN(); } }   /* unlabeled break ends the switch; labeled break + any continue propagate to the enclosing loop (M280) */
             return CN();
         }
         case N_FOR: {
@@ -1700,7 +1710,7 @@ static comp eval_stmt_inner(node *n, env *e) {
             int guard=0;
             while (!n->b || truthy(eval_expr(n->b,fe))) {
                 if(++guard>5000000){rt_err("loop limit");break;}
-                comp c=eval_stmt(n->d,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; if(g_err) break;
+                comp c=eval_stmt(n->d,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; if(g_err) break;
                 if(n->c) eval_expr(n->c,fe);
             }
             return CN();
@@ -1712,22 +1722,22 @@ static comp eval_stmt_inner(node *n, env *e) {
             if (it.t==V_ARR && it.o) {
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
                     if (n->c) bind_pattern(n->c, it.o->vals[i], fe); else { val *slot=env_find(fe,vn); if(slot) *slot=it.o->vals[i]; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_STR) {
                 int l=(int)strlen(it.str);
                 for (int i=0;i<l && !g_err && !g_oom;i++){ char*ch=aalloc(2); if(ch){ch[0]=it.str[i];ch[1]=0;} val cv=STRV(ch?ch:"");
                     if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_OBJ && it.o && it.o->kind==V_SET) {
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val cv=it.o->vals[i];
                     if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_OBJ && it.o && it.o->kind==V_MAP) {
                 for (int i=0;i+1<it.o->n && !g_err && !g_oom;i+=2){             /* each entry is a fresh [k,v] array */
                     obj *pair=new_obj(V_ARR); if(!pair){ g_oom=1; break; } arr_push_val(pair,it.o->vals[i]); arr_push_val(pair,it.o->vals[i+1]);
                     val cv=UND(); cv.t=V_ARR; cv.o=pair;
                     if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             }
             return CN();
         }
@@ -1760,16 +1770,16 @@ static comp eval_stmt_inner(node *n, env *e) {
             if (it.t==V_OBJ && obj_keyed(it.o)) {   /* keyed objects only (Date/Map/Set/arrays have no enumerable own keys here) */
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
                     val *slot=env_find(fe,vn); if(slot) *slot=STRV(it.o->keys[i]);
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_ARR && it.o) {
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=NUM(i);   /* array indices */
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK) break; if(c.kind==C_RETURN) return c; }
+                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             }
             return CN();
         }
-        case N_RETURN: { comp c; c.kind=C_RETURN; c.v = n->a?eval_expr(n->a,e):UND(); return c; }
-        case N_BREAK: { comp c=CN(); c.kind=C_BREAK; return c; }
-        case N_CONTINUE: { comp c=CN(); c.kind=C_CONTINUE; return c; }
+        case N_RETURN: { comp c; c.kind=C_RETURN; c.v = n->a?eval_expr(n->a,e):UND(); c.label=0; return c; }
+        case N_BREAK: { comp c=CN(); c.kind=C_BREAK; c.label=n->label; return c; }   /* c.label = target label or NULL (M280) */
+        case N_CONTINUE: { comp c=CN(); c.kind=C_CONTINUE; c.label=n->label; return c; }
         default: eval_expr(n,e); return CN();
     }
 }
