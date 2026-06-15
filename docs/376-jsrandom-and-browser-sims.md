@@ -70,3 +70,35 @@ Ten subagent reviews across the session, all SHIP. The ones here (c4+uniq,
 grep-v/sort-r/cut, Math.random/crc32/cal, tr/wc/mkfatfs) found no
 memory-safety bugs; the durable output was the mkfatfs exact-sizing and a
 couple of cut edge-case fixes (empty-slice trailing line, overflow caps).
+
+## Continued: M388–400 (the demo suite + CLI tools + date tools)
+
+The browser-program pattern was pushed to a **thirteen-page demo suite** —
+games (RPS, Guess, Slot, 8-Ball), a simulation (Life + a Glider seed), a stats
+visualisation (the 2d6 bell-curve histogram), and tools (base converter, ROT13,
+UUID, number-facts, day-of-week, password generator). Each is a tiny baked page
+exercising the engine + DOM; together they're the visible payoff of M376's
+Math.random + the persistent per-page env.
+
+Two genuine engineering points from this stretch:
+
+1. **Gap-finding > assuming.** I kept probing the JS stdlib with `js -e` (28
+   common features across several batches: map/filter/reduce, JSON.parse/
+   stringify, Object.keys/values/entries, Array some/every/fill/reverse/
+   indexOf/findIndex, String split/replace/slice/trim/padStart/repeat/
+   toString(radix)/charCodeAt/fromCharCode, flat, try/catch, Date). **All work
+   — Math.random was the only gap.** The engine is genuinely comprehensive;
+   this is now a settled fact, not an assumption.
+
+2. **CLI ↔ browser companions.** Several tools got both surfaces: `genpass` ↔
+   passgen.htm, `uuidgen` ↔ uuid.htm, `weekday` ↔ weekday.htm. Plus pure-CLI
+   `dur` (seconds → d/h/m/s) and `cal -y YEAR` (full-year calendar), rounding
+   out the shell's date/time utilities beside `cal`/`cal MM YYYY`.
+
+Verification lesson reinforced: 1-button / 1-input pages drive cleanly via the
+harness; multi-button apps (a full calculator, a card-match grid) are NOT
+reliably harness-verifiable, so they were deliberately skipped in favour of
+verifiable designs. The remaining high-value work (enforcing cert validation,
+inline remote images, shell pipes, the app-exit vmm teardown, FAT32 write
+robustness) is genuinely risky and stays deferred to protect the working
+browser/kernel/disk — a focused session each, not end-of-session attempts.
