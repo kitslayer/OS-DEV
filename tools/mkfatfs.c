@@ -395,7 +395,7 @@ static const struct {
         "<dl>"
         "<dt>shell, clock, calc, editor</dt><dd>a terminal, a clock dashboard, a calculator (<code>+ - * / % ^</code>, parens, <code>0x</code> hex), a text editor</dd>"
         "<dt>games</dt><dd>snake, 2048, life, tetris, breakout, mines, sudoku, maze, adv (a text adventure) &mdash; all in colour</dd>"
-        "<dt>tools</dt><dd>calendar (month view), mandel (a Mandelbrot explorer), piano (the keyboard plays notes), matrix (a digital-rain screensaver)</dd>"
+        "<dt>tools</dt><dd>calendar (month view), mandel (a Mandelbrot explorer), piano (the keyboard plays notes), matrix (a digital-rain screensaver), paint (an ASCII-art canvas, saves to PAINT.TXT)</dd>"
         "</dl>"
         "<h2>Shell commands</h2>"
         "<p>Files: <code>ls cat edit write rm cp mv mkdir cd pwd tree find grep hexdump wc</code>. "
