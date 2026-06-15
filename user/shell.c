@@ -106,7 +106,7 @@ int main(void) {
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> rev<text> rot13<text> ascii cowsay<text> fortune\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -1014,6 +1014,26 @@ int main(void) {
                 if (gb || mb || kb) { printl(kb); print(" KB "); }
                 printl(by); print(" B\n");
             }
+        } else if (startswith(line, "unmorse ")) {        /* unmorse CODE -> text (reverse of morse; / = word space) */
+            const char *p = line + 8;
+            static const char *codes[] = { ".-","-...","-.-.","-..",".","..-.","--.","....","..",".---","-.-",".-..","--","-.","---",".--.","--.-",".-.","...","-","..-","...-",".--","-..-","-.--","--..","-----",".----","..---","...--","....-",".....","-....","--...","---..","----." };
+            static const char *letters = "abcdefghijklmnopqrstuvwxyz0123456789";
+            char out[256]; int oi = 0;
+            while (*p && oi < 255) {
+                if (*p == '/') { out[oi++] = ' '; p++; continue; }
+                if (*p == ' ') { p++; continue; }
+                char tok[12]; int ti = 0;
+                while ((*p == '.' || *p == '-') && ti < 11) tok[ti++] = *p++;
+                tok[ti] = 0;
+                if (ti == 0) { p++; continue; }                       /* skip any other char */
+                for (int i = 0; i < 36; i++) {
+                    const char *c = codes[i], *t = tok;
+                    while (*c && *t && *c == *t) { c++; t++; }
+                    if (!*c && !*t) { out[oi++] = letters[i]; break; }
+                }
+            }
+            out[oi] = 0;
+            print("  "); print(out); print("\n");
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
