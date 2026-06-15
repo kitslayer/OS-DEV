@@ -116,6 +116,9 @@ int main(void) {
         } else if (startswith(line, "head ")) {
             char buf[2048];
             const char *p = line + 5;
+            while (*p == ' ') p++;
+            int cnt = 20;                                  /* default; -N sets the line count */
+            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9') cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
             const char *cq = p; int fc = 0;                /* count files -> name headers only if >1 */
             while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
             int any = 0;
@@ -129,7 +132,7 @@ int main(void) {
                 if (n < 0) { print("head: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 int i = 0, lines = 0;
-                for (; i < n && lines < 20; i++) if (buf[i] == '\n') lines++;
+                for (; i < n && lines < cnt; i++) if (buf[i] == '\n') lines++;
                 buf[i] = '\0'; print(buf);
                 if (i < n) print("...\n");
             }
@@ -157,6 +160,9 @@ int main(void) {
         } else if (startswith(line, "tail ")) {
             char buf[2048];
             const char *p = line + 5;
+            while (*p == ' ') p++;
+            int cnt = 20;                                  /* default; -N sets the line count */
+            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9') cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
             const char *cq = p; int fc = 0;
             while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
             int any = 0;
@@ -173,7 +179,7 @@ int main(void) {
                 int total = 0;
                 for (int i = 0; i < n; i++) if (buf[i] == '\n') total++;
                 if (n > 0 && buf[n - 1] != '\n') total++;
-                int skip = total > 20 ? total - 20 : 0;       /* keep the last 20 lines */
+                int skip = total > cnt ? total - cnt : 0;     /* keep the last cnt lines */
                 int i = 0, sk = 0;
                 while (i < n && sk < skip) { if (buf[i++] == '\n') sk++; }
                 print(buf + i);
