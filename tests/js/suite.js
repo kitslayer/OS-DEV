@@ -151,6 +151,7 @@ var _cs="a"; _cs+="b"; var _co={n:8}; _co.n|=1; print(_cs,_co.n);
 print("-- num-literals --");
 print(0b1010, 0o17, 1e3, 0xFF, 5E2, 0b11111111);
 print(0b1010 + 0o17 + 0xF, 3.7, 1e-3);
+print(1_000_000, 0xFF_FF, 0b1010_1010);
 print("-- stdlib --");
 print([1,2,3,4].fill(0).join(","), [1,2,3,4].fill(9,1,3).join(","));
 print(Math.hypot(3,4), Math.hypot(5,12), Math.log2(1024), Math.sqrt(16));

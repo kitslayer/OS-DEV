@@ -120,16 +120,17 @@ static token lex_next_raw(lexer *L) {
         if (c=='0' && L->pos+1<L->len && (s[L->pos+1]=='x'||s[L->pos+1]=='X')) {
             L->pos += 2;
             while (L->pos<L->len) { int d=s[L->pos]; int h;
+                if (d=='_') { L->pos++; continue; }   /* `_` separator */
                 if (d>='0'&&d<='9') h=d-'0'; else if (d>='a'&&d<='f') h=d-'a'+10; else if (d>='A'&&d<='F') h=d-'A'+10; else break;
                 v = v*16 + h; L->pos++; }
         } else if (c=='0' && L->pos+1<L->len && (s[L->pos+1]=='b'||s[L->pos+1]=='B')) {
             L->pos += 2;   /* binary 0b1010 */
-            while (L->pos<L->len && (s[L->pos]=='0'||s[L->pos]=='1')) { v = v*2 + (s[L->pos]-'0'); L->pos++; }
+            while (L->pos<L->len && (s[L->pos]=='0'||s[L->pos]=='1'||s[L->pos]=='_')) { if(s[L->pos]!='_') v = v*2 + (s[L->pos]-'0'); L->pos++; }
         } else if (c=='0' && L->pos+1<L->len && (s[L->pos+1]=='o'||s[L->pos+1]=='O')) {
             L->pos += 2;   /* octal 0o17 */
-            while (L->pos<L->len && s[L->pos]>='0' && s[L->pos]<='7') { v = v*8 + (s[L->pos]-'0'); L->pos++; }
+            while (L->pos<L->len && ((s[L->pos]>='0'&&s[L->pos]<='7')||s[L->pos]=='_')) { if(s[L->pos]!='_') v = v*8 + (s[L->pos]-'0'); L->pos++; }
         } else {
-            while (L->pos<L->len && is_digit(s[L->pos])) { v = v*10 + (s[L->pos]-'0'); L->pos++; }
+            while (L->pos<L->len && (is_digit(s[L->pos])||s[L->pos]=='_')) { if(s[L->pos]!='_') v = v*10 + (s[L->pos]-'0'); L->pos++; }   /* `_` digit separators */
             /* skip a fractional part if present (we truncate to int) */
             if (L->pos<L->len && s[L->pos]=='.') { L->pos++; while (L->pos<L->len && is_digit(s[L->pos])) L->pos++; }
             /* exponent 1e3 -> 1000 (integer engine; a fractional mantissa is already truncated,
