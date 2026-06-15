@@ -1053,6 +1053,15 @@ static int sel_match_all(browser_t *b, const sel_t *sel, int *offs, int max) {
         int astart = j; char q=0;                                   /* quote-aware scan to '>' (mirrors parse_html) */
         while (j<hi) { char c=body[j]; if(q){if(c==q)q=0;} else if(c=='"'||c=='\'')q=c; else if(c=='>')break; j++; }
         int alen = j - astart;
+        if (tageq(tag,"script") || tageq(tag,"style")) {   /* raw-text elements: skip their content so tag-like TEXT inside (e.g. "<li class=\"x\">" in a script string) isn't matched */
+            int e = j + 1, found = 0;
+            while (e + 2 + tl <= hi) {
+                if (body[e]=='<' && body[e+1]=='/') { int m=0; while (m<tl && lc(body[e+2+m])==tag[m]) m++; if (m==tl) { found=1; break; } }
+                e++;
+            }
+            i = found ? e : hi;   /* resume at the </tag> (for-loop i++ steps past its '<'); to end if unclosed */
+            continue;
+        }
         if (sel->tag[0] && !tageq(tag, sel->tag)) { i=j; continue; }
         if (sel->cls[0]) { const char *v; int vl; if(!find_attr(body+astart,alen,"class",&v,&vl) || !class_has(v,vl,sel->cls)) { i=j; continue; } }
         if (sel->id[0])  { const char *v; int vl; if(!find_attr(body+astart,alen,"id",&v,&vl)    || !attr_eq(v,vl,sel->id))     { i=j; continue; } }
