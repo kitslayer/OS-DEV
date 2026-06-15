@@ -43,13 +43,28 @@ static void shuffle(void) {
 }
 static int draw(void) { if (dp >= 52) shuffle(); return deck[dp++]; }
 
-static void printnum(int v) {
-    char t[12]; int i = 0, n = v;
+static int itoa_b(int v, char *out) {          /* non-negative int -> string; returns length */
+    char t[12]; int i = 0, n = v < 0 ? 0 : v;
     if (n == 0) t[i++] = '0';
     while (n) { t[i++] = (char)('0' + n % 10); n /= 10; }
-    char o[12]; int j = 0; while (i) o[j++] = t[--i]; o[j] = 0;
-    print(o);
+    int j = 0; while (i) out[j++] = t[--i];
+    out[j] = 0; return j;
 }
+static void printnum(int v) { char b[12]; itoa_b(v, b); print(b); }
+
+/* The chip bankroll persists across sessions in BJ.HI (a high-score-style file). */
+static void load_chips(void) {
+    char b[16]; long n = sys_readfile("BJ.HI", b, sizeof(b) - 1);
+    if (n <= 0) { chips = 100; return; }            /* no save yet: a fresh bankroll */
+    int v = 0, any = 0;
+    for (long i = 0; i < n; i++) {
+        if (b[i] < '0' || b[i] > '9') break;
+        v = v * 10 + (b[i] - '0'); any = 1;
+        if (v > 1000000) { v = 1000000; break; }    /* clamp a corrupt file (no int overflow) */
+    }
+    chips = any ? v : 100;
+}
+static void save_chips(void) { char b[12]; int n = itoa_b(chips, b); sys_writefile("BJ.HI", b, (unsigned long)n); }
 static void putcard(int c) {
     int s = suitof(c);
     if (s == 1 || s == 2) sys_setcolor(2); else sys_setcolor(8);   /* hearts/diamonds red, else grey */
@@ -76,7 +91,7 @@ static void render(void) {
 static void finish(void) {
     hide = 0;
     int pt = total(ph, pn);
-    if (pt > 21) { chips -= BET; msg = "BUST! you lose.   d = deal"; state = 2; sys_beep(196, 220); return; }
+    if (pt > 21) { chips -= BET; msg = "BUST! you lose.   d = deal"; state = 2; sys_beep(196, 220); save_chips(); return; }
     while (total(dh, dn) < 17 && dn < 16) dh[dn++] = draw();
     int dt = total(dh, dn);
     int bj = (pt == 21 && pn == 2);
@@ -95,6 +110,7 @@ static void finish(void) {
         msg = "Push (tie).   d = deal";
     }
     state = 2;
+    save_chips();
 }
 
 static void deal(void) {
@@ -112,14 +128,14 @@ int main(void) {
     for (long i = 0; i < tn; i++) rng = rng * 31u + (unsigned char)tb[i];
     if (!rng) rng = 12345u;
 
-    chips = 100; state = 0; pn = dn = 0;
+    load_chips(); state = 0; pn = dn = 0;
     msg = "Press d to deal (bet 10)";
     render();
     for (;;) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
         if (k == 'q' || k == 'Q') break;
-        if (k == 'r' || k == 'R') { chips = 100; state = 0; pn = dn = 0; msg = "Reset. d = deal."; render(); continue; }
+        if (k == 'r' || k == 'R') { chips = 100; save_chips(); state = 0; pn = dn = 0; msg = "Reset. d = deal."; render(); continue; }
         if ((k == 'd' || k == 'D') && state != 1) { deal(); render(); continue; }
         if (state == 1) {
             if ((k == 'h' || k == 'H') && pn < 16) {   /* pn<16: explicit bound (the bust invariant already caps it ~8) */
