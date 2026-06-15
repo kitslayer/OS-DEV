@@ -96,7 +96,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -751,6 +751,19 @@ int main(void) {
                     static const char *names[] = { "Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday" };
                     print("  "); print(names[w]); print("\n");
                 }
+            }
+        } else if (startswith(line, "dur ")) {            /* dur SECONDS -> Dd Hh Mm Ss */
+            const char *p = line + 4; while (*p == ' ') p++;
+            long s = 0; int any = 0;
+            while (*p >= '0' && *p <= '9') { if (s < 100000000000L) s = s * 10 + (*p - '0'); p++; any = 1; }
+            if (!any) print("usage: dur <seconds>   (e.g. dur 90061)\n");
+            else {
+                long d = s/86400, h = (s%86400)/3600, m = (s%3600)/60, sec = s%60;
+                print("  ");
+                if (d) { printl(d); print("d "); }
+                if (d || h) { printl(h); print("h "); }
+                if (d || h || m) { printl(m); print("m "); }
+                printl(sec); print("s\n");
             }
         } else if (streq(line, "date")) {
             char buf[24];
