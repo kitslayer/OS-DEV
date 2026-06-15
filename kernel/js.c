@@ -2344,11 +2344,20 @@ static val nat_obj_getOwnPropertyDescriptor(val *a, int n){
     obj_set(d,"enumerable",BOOLV(1)); obj_set(d,"configurable",BOOLV(1));
     return obj_val(d);
 }
-/* Prototype-chain natives (M263). Object.create(proto) makes an object whose [[Prototype]]
- * is proto (null -> none); the 2nd descriptor arg is deferred. get/setPrototypeOf read/write
- * the link. The chain itself is consulted only at the evaluator member sites (see proto_lookup). */
+/* Object.defineProperties(obj, descriptors): defineProperty for each own key of the descriptors
+ * object (also backs Object.create's 2nd arg). Reuses the reviewed nat_obj_defineProperty. (M265) */
+static val nat_obj_defineProperties(val *a, int n){
+    if (n<2 || a[0].t!=V_OBJ || !obj_keyed(a[0].o) || a[1].t!=V_OBJ || !obj_keyed(a[1].o)) { rt_err("Object.defineProperties(obj, descriptors)"); return UND(); }
+    obj *descs=a[1].o;
+    for (int i=0;i<descs->n && !g_oom && !g_err;i++) { val da[3]={ a[0], STRV(descs->keys[i]), descs->vals[i] }; nat_obj_defineProperty(da,3); }
+    return a[0];
+}
+/* Prototype-chain natives (M263). Object.create(proto[, descriptors]) makes an object whose
+ * [[Prototype]] is proto (null -> none) and applies the optional descriptors (M265).
+ * get/setPrototypeOf read/write the link; the chain is consulted only at the evaluator member sites. */
 static val nat_obj_create(val *a, int n){ obj *o=new_obj(V_OBJ); if(!o){ g_oom=1; return UND(); }
     if (n>=1 && a[0].t==V_OBJ && a[0].o) o->proto=a[0].o;   /* Object.create(null) / non-object -> proto stays NULL */
+    if (n>=2 && a[1].t==V_OBJ && obj_keyed(a[1].o)) { val da[2]={ obj_val(o), a[1] }; nat_obj_defineProperties(da,2); }   /* 2nd arg: property descriptors (M265) */
     return obj_val(o); }
 static val nat_obj_getPrototypeOf(val *a, int n){ if (n>=1 && (a[0].t==V_OBJ||a[0].t==V_FUN) && a[0].o && a[0].o->proto) return obj_val(a[0].o->proto); val v=UND(); v.t=V_NULL; return v; }
 static val nat_obj_setPrototypeOf(val *a, int n){ if (n>=1 && a[0].t==V_OBJ && a[0].o) a[0].o->proto = (n>=2 && a[1].t==V_OBJ && a[1].o) ? a[1].o : 0; return n? a[0] : UND(); }
@@ -2432,7 +2441,7 @@ static void install_globals(env *g) {
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"defineProperties",nat_obj_defineProperties); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); env_define(g,"Object",obj_val(objc));
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */

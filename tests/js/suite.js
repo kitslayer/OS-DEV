@@ -217,4 +217,5 @@ var _px={}; print(_px.__proto__); _px.__proto__={v:7}; print(_px.v, Object.getPr
 var _pa={get full(){return this.f+this.l;}}; var _pi=Object.create(_pa); _pi.f="X"; _pi.l="Y"; print(_pi.full);  // XY
 var _c1={}, _c2={}; _c1.__proto__=_c2; _c2.__proto__=_c1; print(_c1.zzz);                                         // undefined (cycle, no hang)
 print("k" in Object.create({k:1}), "z" in {a:1}, Object.create(_PF.prototype) instanceof _PF, new _PF() instanceof _PF);  // true false true true (in + instanceof walk the chain, M264)
+var _dps={}; Object.defineProperties(_dps,{a:{value:1},b:{get:function(){return 8;}}}); var _crd=Object.create({},{c:{value:5}}); print(_dps.a, _dps.b, _crd.c);  // 1 8 5 (defineProperties + Object.create 2nd arg, M265)
 print("-- done --");
