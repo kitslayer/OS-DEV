@@ -12,6 +12,7 @@ typedef struct app app_t;
 
 app_t      *app_spawn(const void *elf, const char *title, uint64_t elfsz);  /* run an ELF as a process */
 int         app_spawn_named(const char *name);   /* launch a registered program; 0/-1 */
+int         app_list_names(char *buf, int max);  /* space-separated prog names; bytes written */
 int         app_spawn_from_file(const char *path);/* load + run an ELF from a FAT32 file */
 app_t      *app_take_pending(void);              /* next app awaiting a window (WM)    */
 void        app_browse(const char *url);         /* queue a URL for a browser window   */

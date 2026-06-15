@@ -408,6 +408,19 @@ int app_spawn_named(const char *name) {
     return -1;
 }
 
+/* List the registered program names, space-separated, into buf (for the shell's
+ * `apps` command). Single source of truth = progs[]. Returns bytes written. */
+int app_list_names(char *buf, int max) {
+    int n = 0;
+    for (int i = 0; i < NPROGS; i++) {
+        const char *s = progs[i].name;
+        if (i && n + 1 < max) buf[n++] = ' ';
+        while (*s && n + 1 < max) buf[n++] = *s++;
+    }
+    if (max > 0) buf[n] = 0;
+    return n;
+}
+
 /* The window manager calls this to claim freshly-spawned apps. */
 app_t *app_take_pending(void) {
     if (pend_t == pend_h) return 0;

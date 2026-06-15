@@ -156,6 +156,9 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* DNS + ICMP both need the timer running */
         r->rax = (uint64_t)(int64_t)net_ping_host((const char *)r->rdi);
         break;
+    case SYS_apps:
+        r->rax = (uint64_t)(int64_t)app_list_names((char *)r->rdi, (int)r->rsi);
+        break;
     case SYS_netinfo: {                    /* our IP/MAC/gateway/DNS as aligned text */
         char *b = (char *)r->rdi; int max = (int)r->rsi;
         if (max < 128) { r->rax = (uint64_t)-1; break; }   /* worst case ~96 B; require headroom */

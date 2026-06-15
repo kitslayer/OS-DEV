@@ -69,7 +69,7 @@ int main(void) {
             print("files:  ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
-            print("crypto: sha256<file> crypt base64     run: run<prog>  js<file>\n");
+            print("crypto: sha256<file> crypt base64     run: apps run<prog> js<file>\n");
             print("misc:   echo cal date beep mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -455,8 +455,14 @@ int main(void) {
         } else if (startswith(line, "browse ")) {
             sys_browse(line + 7);
             print("opening browser: "); print(line + 7); print("\n");
+        } else if (streq(line, "apps")) {
+            char b[256];
+            if (sys_apps(b, sizeof(b)) > 0) {
+                print("apps: "); print(b); print("\n");
+                print("(launch: run <name>, or the F9 Apps menu)\n");
+            } else print("apps: (none)\n");
         } else if (startswith(line, "run ")) {
-            if (sys_spawn(line + 4) < 0) print("run: no such program (built-in: shell clock calc snake editor 2048; or a disk .elf)\n");
+            if (sys_spawn(line + 4) < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
             else { print("launched "); print(line + 4); print("\n"); }
         } else if (startswith(line, "cp ") || startswith(line, "mv ")) {
             int move = (line[0] == 'm');
