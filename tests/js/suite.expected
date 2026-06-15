@@ -128,6 +128,9 @@ true true false false w
 -- pow/void --
 1024 512 18 undefined undefined
 10 12
+-- cmp-assign --
+8 15 6 16 32 1024
+ab 9
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

@@ -143,6 +143,11 @@ print(_d instanceof _Dg, _d instanceof _An, _d instanceof Map, ({}) instanceof _
 print("-- pow/void --");
 print(2 ** 10, 2 ** 3 ** 2, 2 * 3 ** 2, void 0, typeof void 1);
 var _pm=3; _pm*=4; print(2*5, _pm);   /* regression: * and *= unaffected by adding ** */
+print("-- cmp-assign --");
+var _ca=12; _ca&=10; var _cb=12; _cb|=3; var _cc=12; _cc^=10;
+var _cd=1; _cd<<=4; var _ce=256; _ce>>=3; var _cf=2; _cf**=10;
+print(_ca,_cb,_cc,_cd,_ce,_cf);
+var _cs="a"; _cs+="b"; var _co={n:8}; _co.n|=1; print(_cs,_co.n);
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);

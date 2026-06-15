@@ -191,8 +191,8 @@ static token lex_next_raw(lexer *L) {
         }
     }
     /* punctuation / multi-char operators */
-    static const char *ops[] = { "===","!==","<<=",">>=","...","**","==","!=","<=",">=",
-        "&&","||","??","?.","++","--","+=","-=","*=","/=","%=","<<",">>","=>",0 };
+    static const char *ops[] = { "===","!==","<<=",">>=","...","**=","**","==","!=","<=",">=",
+        "&&","||","??","?.","++","--","+=","-=","*=","/=","%=","&=","|=","^=","<<",">>","=>",0 };
     for (int i=0; ops[i]; i++) { int ol=(int)strlen(ops[i]); if (L->pos+ol<=L->len && memcmp(ops[i],s+L->pos,ol)==0) { t.type=T_PUNC; t.s=s+L->pos; t.len=ol; L->pos+=ol; return t; } }
     t.type=T_PUNC; t.s=s+L->pos; t.len=1; L->pos++; return t;
 }
@@ -519,8 +519,15 @@ static node *parse_assign(lexer *L) {
     }
     node *left = parse_cond(L);
     token t = peek(L);
-    if (t.type==T_PUNC && (tok_is(t,"=")||tok_is(t,"+=")||tok_is(t,"-=")||tok_is(t,"*=")||tok_is(t,"/=")||tok_is(t,"%="))) {
-        advance(L); node *n=mknode(N_ASSIGN); n->op = (t.len==1)?'=':t.s[0]; n->a=left; n->b=parse_assign(L); g_depth--; return n;
+    if (t.type==T_PUNC && (tok_is(t,"=")||tok_is(t,"+=")||tok_is(t,"-=")||tok_is(t,"*=")||tok_is(t,"/=")||tok_is(t,"%=")||
+                           tok_is(t,"&=")||tok_is(t,"|=")||tok_is(t,"^=")||tok_is(t,"<<=")||tok_is(t,">>=")||tok_is(t,"**="))) {
+        advance(L); node *n=mknode(N_ASSIGN);
+        /* explicit op codes (reuse the binary-operator codes): t.s[0] can't tell
+         * <<= from < or **= from *=, so map each token to its compute code */
+        n->op = tok_is(t,"+=")?'+': tok_is(t,"-=")?'-': tok_is(t,"*=")?'*': tok_is(t,"/=")?'/': tok_is(t,"%=")?'%':
+                tok_is(t,"&=")?'&': tok_is(t,"|=")?'|': tok_is(t,"^=")?'^':
+                tok_is(t,"<<=")?'L': tok_is(t,">>=")?'R': tok_is(t,"**=")?'P': '=';
+        n->a=left; n->b=parse_assign(L); g_depth--; return n;
     }
     g_depth--; return left;
 }
@@ -709,6 +716,9 @@ static char *i64_to_str(int64_t v) {
     if (neg) tmp[i++]='-';
     char *s=aalloc(i+1); if(!s) return ""; for(int j=0;j<i;j++) s[j]=tmp[i-1-j]; s[i]=0; return s;
 }
+/* Integer exponentiation for the `**` and `**=` operators (exponent capped at 63
+ * to bound the loop; matches the existing Math.pow semantics). */
+static int64_t i_pow(int64_t b, int64_t e){ int64_t r=1; for (int64_t i=0;i<e && i<63;i++) r*=b; return r; }
 static const char *val_to_str(val v); /* fwd */
 static int truthy(val v) {
     switch (v.t) {
@@ -1219,7 +1229,7 @@ static val eval_expr_inner(node *n, env *e) {
                 case '%': return NUM(y?x%y:0);
                 case '<': return BOOLV(x<y); case '>': return BOOLV(x>y);
                 case 'l': return BOOLV(x<=y); case 'g': return BOOLV(x>=y);
-                case 'P': { int64_t r=1; for (int64_t i=0;i<y && i<63;i++) r*=x; return NUM(r); }   /* x ** y (integer, matches Math.pow) */
+                case 'P': return NUM(i_pow(x,y));   /* x ** y (integer, matches Math.pow) */
                 case 'I':   /* `in`: own-property test on objects, valid-index test on arrays */
                     if (b.t==V_OBJ && b.o) { val tmp; return BOOLV(obj_get(b.o, val_to_str(a), &tmp)); }
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
@@ -1248,7 +1258,10 @@ static val eval_expr_inner(node *n, env *e) {
             node *t=n->a;
             if (n->op!='=') { val cur=eval_expr(t,e); int64_t x=to_num(cur),y=to_num(rhs);
                 if (n->op=='+'&&(cur.t==V_STR||rhs.t==V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
-                else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): (y?x%y:0)); }
+                else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): n->op=='%'?(y?x%y:0):
+                               n->op=='&'?x&y: n->op=='|'?x|y: n->op=='^'?x^y:
+                               n->op=='L'?(int64_t)((uint64_t)x<<(y&63)): n->op=='R'?(x>>(y&63)):
+                               n->op=='P'?i_pow(x,y): 0); }
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
