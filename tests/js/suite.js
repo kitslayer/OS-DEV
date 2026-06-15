@@ -159,6 +159,7 @@ print(Array.from({length:4}, function(_,i){return i;}).join(","));
 print(Object.getOwnPropertyNames({x:1,y:2}).join(","));
 print(Math.cbrt(27), Math.cbrt(-64), Math.clz32(1), Math.imul(0xFFFFFFFF,5));
 print(Number.isInteger(5), Number.isNaN(1), Number.MAX_SAFE_INTEGER, String.fromCharCode(72,105), Number("17"), typeof Number);
+print([...new Set([3,1,2,1,3])].join(","), Number.isSafeInteger(5), Number.isSafeInteger("x"));
 var _fo={a:1}; Object.freeze(_fo); _fo.a=9; _fo.b=2; delete _fo.a; print(_fo.a, _fo.b, Object.isFrozen(_fo));
 var _fn={a:1}; _fn.a=9; _fn.c=3; print(_fn.a, _fn.c, Object.isFrozen(_fn));
 var _dt=new Date(); print(_dt.valueOf()===_dt.getTime(), _dt.getTime()%1000, _dt.getDay()>=0&&_dt.getDay()<=6, _dt.getMilliseconds());

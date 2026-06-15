@@ -1152,6 +1152,8 @@ static int build_args(node **list, int nlist, env *e, val *args, int maxargs) {
             val v=eval_expr(el->a,e);
             if (v.t==V_ARR && v.o){ for(int j=0;j<v.o->n && na<maxargs;j++) args[na++]=v.o->vals[j]; }
             else if (v.t==V_STR){ const char*s=v.str; for(int j=0;s[j] && na<maxargs;j++){ char*c=aalloc(2); if(c){c[0]=s[j];c[1]=0;} args[na++]=STRV(c?c:""); } }
+            else if (v.t==V_OBJ && v.o && v.o->kind==V_SET){ for(int j=0;j<v.o->n && na<maxargs;j++) args[na++]=v.o->vals[j]; }   /* f(...set) */
+            else if (v.t==V_OBJ && v.o && v.o->kind==V_MAP){ for(int j=0;j+1<v.o->n && na<maxargs;j+=2){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,v.o->vals[j]); arr_push_val(p,v.o->vals[j+1]); val pv=UND();pv.t=V_ARR;pv.o=p; args[na++]=pv; } }   /* f(...map) */
             /* a non-iterable spread contributes nothing */
         } else { args[na++]=eval_expr(el,e); }
     }
@@ -1249,6 +1251,8 @@ static val eval_expr_inner(node *n, env *e) {
                 if (el->type==N_SPREAD){ val sv=eval_expr(el->a,e);
                     if (sv.t==V_ARR && sv.o){ for(int j=0;j<sv.o->n && !g_oom;j++) arr_push_val(o, sv.o->vals[j]); }
                     else if (sv.t==V_STR){ const char*s=sv.str; for(int j=0;s[j] && !g_oom;j++){ char*c=aalloc(2); if(c){c[0]=s[j];c[1]=0;} arr_push_val(o, STRV(c?c:"")); } }
+                    else if (sv.t==V_OBJ && sv.o && sv.o->kind==V_SET){ for(int j=0;j<sv.o->n && !g_oom;j++) arr_push_val(o, sv.o->vals[j]); }   /* [...set] */
+                    else if (sv.t==V_OBJ && sv.o && sv.o->kind==V_MAP){ for(int j=0;j+1<sv.o->n && !g_oom;j+=2){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,sv.o->vals[j]); arr_push_val(p,sv.o->vals[j+1]); val pv=UND();pv.t=V_ARR;pv.o=p; arr_push_val(o,pv); } }   /* [...map] -> [[k,v],...] */
                 } else arr_push_val(o, eval_expr(el,e));
             }
             val r=UND(); r.t=V_ARR; r.o=o; return r; }
@@ -2034,6 +2038,7 @@ static val nat_Boolean(val *a, int n){ return BOOLV(n ? truthy(a[0]) : 0); }
 static val nat_isNaN(val *a, int n){ (void)a; (void)n; return BOOLV(0); }          /* integer Number is never NaN */
 static val nat_num_isInteger(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }    /* every Number is an integer here */
 static val nat_num_isFinite(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }     /* ...and finite */
+static val nat_num_isSafeInteger(val *a, int n){ if(!n||a[0].t!=V_NUM) return BOOLV(0); int64_t x=a[0].num; return BOOLV(x>=-9007199254740991LL && x<=9007199254740991LL); }
 static val nat_str_fromCharCode(val *a, int n){ char *r=aalloc(n+1); if(!r) return STRV(""); for(int i=0;i<n;i++) r[i]=(char)((int64_t)to_num(a[i])&0xFF); r[n]=0; return STRV(r); }
 
 /* ---- Object.keys(o) -> array of key strings ---- */
@@ -2240,7 +2245,7 @@ static void install_globals(env *g) {
     obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));
     obj *sf=new_obj(V_NATIVE); sf->native=nat_String;   env_define(g,"String",obj_val_native(sf));
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
-    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); nf->statics=nst; }
+    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); nf->statics=nst; }
       obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); sf->statics=sst; } }   /* Number.* / String.* statics via the side-statics object (Number/String stay V_NATIVE) */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
