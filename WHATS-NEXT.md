@@ -1,6 +1,10 @@
 # What's next
 
-> **Status (373 milestones).** Latest arc (M341–358): a shell **networking
+> **Status (386 milestones).** (M374–386: `sort -r`, `cut`, `tr`, `wc -l/-w/-c`,
+> `cal MM YYYY`, from-scratch `crc32`, `cowsay`/`fortune`; **`Math.random()`** added
+> to the JS engine; interactive browser pages — Rock-Paper-Scissors, a number base
+> converter, Guess-the-Number, an ASCII table; and a mkfatfs >64-file capacity fix.
+> Ten subagent reviews this session, all SHIP.) Latest arc (M341–358): a shell **networking
 > diagnostic toolkit** (`headers` = curl -I, `ping <host>`, `ifconfig`) + a
 > deeper e1000 RX ring; **four new apps** (Tic-Tac-Toe vs an unbeatable minimax
 > AI, Blackjack, a typing-speed test, Simon) bringing the suite to **twenty-four**,
