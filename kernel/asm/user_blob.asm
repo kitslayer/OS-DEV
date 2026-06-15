@@ -18,6 +18,7 @@ global breakout_elf_start, breakout_elf_end
 global mines_elf_start, mines_elf_end
 global sudoku_elf_start, sudoku_elf_end
 global calendar_elf_start, calendar_elf_end
+global mandel_elf_start, mandel_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -66,5 +67,9 @@ sudoku_elf_end:
 calendar_elf_start:
     incbin "build/calendar.elf"
 calendar_elf_end:
+
+mandel_elf_start:
+    incbin "build/mandel.elf"
+mandel_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
