@@ -1141,6 +1141,7 @@ static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names
  * one, so `this` resolves lexically up the scope chain to the enclosing function. */
 static val call_function_this(val fn, val thisv, val *args, int nargs);   /* fwd: call_bound recurses into it */
 static void register_handler(obj *el, const char *type, val fn);   /* fwd: el.onclick=fn / addEventListener -> the per-page handler registry */
+static void unregister_handler(obj *el, const char *type);          /* fwd: el.onclick=null / removeEventListener */
 /* Does this function body reference `arguments`? (skips nested functions — they have their
  * own.) Walked once per function then cached in node->num, so functions that never use it
  * pay nothing (no per-call arguments allocation). The AST is MAXDEPTH-bounded, so the
@@ -1490,8 +1491,12 @@ static val eval_expr_inner(node *n, env *e) {
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) {
                     const char *pn = node_name(t);
-                    if (pn[0]=='o' && pn[1]=='n' && (rhs.t==V_FUN || rhs.t==V_NATIVE || (rhs.t==V_OBJ && rhs.o && rhs.o->kind==V_BOUND)))
-                        { register_handler(recv.o, pn+2, rhs); return rhs; }   /* el.onclick = fn -> register a JS-assigned event handler */
+                    if (pn[0]=='o' && pn[1]=='n') {
+                        if (rhs.t==V_FUN || rhs.t==V_NATIVE || (rhs.t==V_OBJ && rhs.o && rhs.o->kind==V_BOUND))
+                            { register_handler(recv.o, pn+2, rhs); return rhs; }       /* el.onclick = fn  -> register */
+                        if (rhs.t==V_NULL || rhs.t==V_UNDEF)
+                            { unregister_handler(recv.o, pn+2); return rhs; }          /* el.onclick = null -> unregister */
+                    }
                     dom_prop(recv.o, pn, val_to_str(rhs), 0, 0); return rhs;   /* el.textContent/innerHTML/value = … -> mutate the page */
                 }
                 if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
@@ -2236,6 +2241,10 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
             register_handler(el, type, args[1]);
         return UND();
     }
+    if (strcmp(name, "removeEventListener") == 0) {   /* v1: unregister by type (listener-fn identity isn't tracked) */
+        unregister_handler(el, nargs > 0 ? val_to_str(args[0]) : "");
+        return UND();
+    }
     rt_err("no such element method"); return UND();
 }
 /* el.classList -> a V_CLASSLIST handle carrying the same id/offset addressing as
@@ -2883,6 +2892,17 @@ static void register_handler(obj *el, const char *type, val fn) {
     char key[160]; hkey(key, type, id);
     obj_set(h, intern(key, (int)strlen(key)), fn);   /* intern: obj_set stores the key POINTER, so it must outlive this stack frame */
     if (strcmp(type,"click")==0 && g_dom_setattr) g_dom_setattr(id, "data-jsh", "1");   /* mark clickable -> renderer makes it an event link */
+}
+/* el.onclick=null / removeEventListener: drop the handler. The data-jsh marker is
+ * left in place (a click then finds no handler and is a safe no-op) — fully
+ * un-marking would need removeAttribute, a separate feature. */
+static void unregister_handler(obj *el, const char *type) {
+    const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
+    if (!id[0] || !type[0] || !g_page_env) return;
+    val *hv = env_find(g_page_env, "@handlers");
+    if (!hv || hv->t!=V_OBJ || !hv->o) return;
+    char key[160]; hkey(key, type, id);
+    obj_delete(hv->o, key);
 }
 /* The browser calls this when an `event:ID` link is activated: look up and invoke
  * the registered handler in the persistent env (no arena reset). 1 if one ran. */
