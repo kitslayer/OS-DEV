@@ -17,6 +17,7 @@ global tetris_elf_start, tetris_elf_end
 global breakout_elf_start, breakout_elf_end
 global mines_elf_start, mines_elf_end
 global sudoku_elf_start, sudoku_elf_end
+global calendar_elf_start, calendar_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -61,5 +62,9 @@ mines_elf_end:
 sudoku_elf_start:
     incbin "build/sudoku.elf"
 sudoku_elf_end:
+
+calendar_elf_start:
+    incbin "build/calendar.elf"
+calendar_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
