@@ -143,6 +143,7 @@ x,y
 3 -4 31 -5
 true false 9007199254740991 Hi 17 function
 3,1,2 true false
+llo 2 2 false hello
 1 undefined true
 9 3 false
 true 0 true 0
