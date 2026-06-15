@@ -1,6 +1,22 @@
 # What's next
 
-> **Status (386 milestones).** (M374–386: `sort -r`, `cut`, `tr`, `wc -l/-w/-c`,
+> **Status (423 milestones).** (M387–423: the JS-engine / browser-demo / shell
+> spaces were saturated with verified increments — a 15-page interactive browser
+> demo suite (games/sims/tools) + CLI companions (`unmorse`/`unhex`/`unbase64`,
+> `cal -3`). Then a **correctness + security pass** on the highest-risk code:
+> (a) probing the JS engine found + fixed two real correctness bugs —
+> `[1] instanceof Array` returned `false` (M419) and `[1,2]+[3]` returned `0`
+> instead of string-concatenating per ToPrimitive (M420) — and verified ~60
+> features plus graceful failure on all three exhaustion axes (stack depth, heap,
+> malformed syntax); (b) the **Files panel now browses ALL 86 disk files** (was
+> capped at 32 — M421); (c) a **comprehensive untrusted-input SECURITY AUDIT** —
+> 9 subagent reviews + ASan/UBSan fuzzing of every kernel-side parser
+> (network → TLS → X.509 → crypto, and HTML/CSS → image decoders → JS) — found +
+> fixed **two real KERNEL memory-safety bugs**: a JPEG DRI out-of-bounds read
+> (M422) and a DNS-query-builder kernel-stack overflow (M423), both ASan-proven,
+> with the rest verified bounds-safe. See
+> [docs/422-untrusted-input-security-audit.md](docs/422-untrusted-input-security-audit.md).
+> All reviews SHIP. M374–386: `sort -r`, `cut`, `tr`, `wc -l/-w/-c`,
 > `cal MM YYYY`, from-scratch `crc32`, `cowsay`/`fortune`; **`Math.random()`** added
 > to the JS engine; interactive browser pages — Rock-Paper-Scissors, a number base
 > converter, Guess-the-Number, an ASCII table; and a mkfatfs >64-file capacity fix.
