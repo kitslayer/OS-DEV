@@ -26,10 +26,12 @@
 > file *creation* stops working once the root dir's clusters fill (~the 64 baked
 > files + a little slack); fix = extend the dir chain in `add_entry`. Separately,
 > the persisted `build/fat.img` showed **empty** after this session's intensive
-> write-accumulation across ~25 boots (todo + `*.HI` rewrites) — cause
-> unconfirmed (possibly a host/QEMU writeback artifact across many sequential
-> runs, or a subtle write bug); `rm build/fat.img && make` regenerates a clean
-> disk. Don't touch the FAT32 write path casually — verify every change against
+> write-accumulation (todo + `*.HI` rewrites across many boots). **Diagnosed
+> write-triggered (M367):** a fresh disk + read-only boots are fine — `fat.img`
+> is byte-unchanged after a read-only boot — so it's the repeated file *writes*
+> that corrupt it over time, not a boot/mount-write or QEMU-read artifact;
+> consistent with the add_entry dir-fill limit + a likely write-path bug.
+> `rm build/fat.img && make` regenerates a clean disk. Don't touch the FAT32 write path casually — verify every change against
 > the baked files.
 >
 > ---
