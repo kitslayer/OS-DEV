@@ -237,7 +237,8 @@ int dns_resolve(const char *host, uint8_t out_ip[4]) {
     dl = 12;
     const char *p = host;
     while (*p) {
-        int len = 0; while (p[len] && p[len] != '.') len++;
+        int len = 0; while (p[len] && p[len] != '.' && len < 64) len++;  /* bound the read; a DNS label is max 63 bytes */
+        if (len > 63 || dl + 1 + len > (int)sizeof(q) - 5) return -1;     /* reject a too-long label or one that would overflow q[] (leave room for root + QTYPE + QCLASS) */
         q[dl++] = (uint8_t)len;
         for (int i = 0; i < len; i++) q[dl++] = p[i];
         p += len; if (*p == '.') p++;
