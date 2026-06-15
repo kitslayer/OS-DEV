@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (299 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (305 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -62,17 +62,22 @@
 > What remains is either *fundamentally blocked by the integer-only Number*
 > (`Math.random`, float math, `isFinite`/full `isNaN` — all need a NaN /
 > floating-point representation we deliberately don't have) or genuinely
-> *architectural*: **CSS/layout** (a real styling/layout engine), **generators/
+> *architectural*: **CSS layout** (a real box/layout engine), **generators/
 > iterators**, **async/Promises**, **modules**, **Proxy**, **`Symbol`**. (The DOM
 > itself is now **comprehensively complete** — M281–299 delivered queries,
 > traversal [matches/closest/children/parentElement], attributes [get/set/has/
 > remove + classList], read/write, **node construction** [createElement/appendChild
 > — which turned out NOT to need a tree, via innerHTML-reuse], and the full
 > event-handler lifecycle [onclick/addEventListener/onchange/oninput, add/fire/
-> remove] on a persistent per-page JS env. Only CSS styling genuinely needs a
-> layout engine the token-stream renderer lacks.)
+> remove] on a persistent per-page JS env. And **a small CSS engine now exists**
+> — M302–305: per-element `color` / `font-weight` / `font-style` from inline
+> `style=` *and* `<style>` rules (`tag`/`.class`/`#id`/`[attr]` selectors), with
+> a real cascade and a scope **stack** so styled elements nest to any depth. Only
+> CSS *layout* — `font-size`, `text-align`, the box model, backgrounds — still
+> needs a layout engine the token-stream renderer lacks; the *machinery* of CSS
+> [selectors, cascade, nesting] is done.)
 
-OS-DEV is a **graphical desktop OS** (299 milestones). It boots to a themed
+OS-DEV is a **graphical desktop OS** (305 milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and six
 games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
@@ -172,8 +177,14 @@ beep mem ps clear reboot ver pid exit`.
      `get`/`has`/`set`/`removeAttribute` + `classList`; textContent/innerHTML/value
      read+write, `remove`; and **node construction** `createElement`+`appendChild`
      (turned out NOT to need a tree — `parent.innerHTML += built-HTML`). All via
-     byte-offset *position handles*. **CSS styling/layout** is the one remaining DOM
-     piece — it genuinely needs a layout engine the flat token-stream renderer lacks.
+     byte-offset *position handles*.
+   - **CSS — a small engine DONE (M302–305)**: per-element `color` / `font-weight`
+     / `font-style` from inline `style=` *and* `<style>` rules (`tag`/`.class`/`#id`/
+     `[attr]` selectors), a real cascade (rules < inline, per property), and a scope
+     **stack** so styled elements nest to any depth. Only CSS *layout* — `font-size`,
+     `text-align`, the box model, backgrounds — still needs a layout engine the flat
+     token-stream renderer lacks. Possible next slivers without one: `rgb()`/more named
+     colours, `text-decoration` (underline/line-through).
    - **CSS / layout**, cookies (sessions), inline remote `<img>`, `<textarea>`
      multiline.
    *Known limit: `lite.cnn.com` etc. refuse our minimal ClientHello (Fastly TLS
