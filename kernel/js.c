@@ -2757,7 +2757,7 @@ static void hdom_setattr(const char *id, const char *attr, const char *val){ (vo
 /* mock querySelector(All): "p"/".item" match two elements (offsets 10,20); "#solo"/"b.x" match one. */
 static int hdom_query(const char *sel, int *offs, int max){ if(max<1) return 0;
     if(!strcmp(sel,"p")||!strcmp(sel,".item")){ int n=0; if(n<max)offs[n++]=10; if(n<max)offs[n++]=20; return n; }
-    if(!strcmp(sel,"#solo")||!strcmp(sel,"b.x")){ offs[0]=10; return 1; }
+    if(!strcmp(sel,"#solo")||!strcmp(sel,"b.x")||!strcmp(sel,"[data-x]")){ offs[0]=10; return 1; }
     return 0; }
 /* a tiny offset->text override store so position writes are observable on read-back */
 static int wat_off[8]; static char wat_txt[8][64]; static int wat_n;

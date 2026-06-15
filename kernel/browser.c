@@ -998,18 +998,20 @@ static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
  * same byte coordinates the id-keyed splice code already uses) — so id-less
  * matches become addressable WITHOUT changing the id path. */
 #define QSA_MAX 256
-typedef struct { char tag[16]; char cls[32]; char id[32]; } sel_t;
+typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32]; } sel_t;
 static int sel_parse(const char *s, sel_t *o) {
-    o->tag[0]=o->cls[0]=o->id[0]=0;
+    o->tag[0]=o->cls[0]=o->id[0]=o->attr[0]=0;
     int i=0, k=0;
     while (s[i] && dom_alnum(s[i]) && k<15) { o->tag[k++]=(char)lc(s[i]); i++; }   /* leading tag name (lowercased) */
     o->tag[k]=0;
     while (s[i]) {
         if (s[i]=='.')      { i++; k=0; while (s[i] && (dom_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->cls[k++]=s[i++]; o->cls[k]=0; }
         else if (s[i]=='#') { i++; k=0; while (s[i] && (dom_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->id[k++]=s[i++];  o->id[k]=0;  }
+        else if (s[i]=='[') { i++; k=0; while (s[i] && s[i]!=']' && s[i]!='=' && k<31) o->attr[k++]=(char)lc(s[i++]); o->attr[k]=0;   /* [attr] presence (value, if any, ignored) */
+                              while (s[i] && s[i]!=']') i++; if (s[i]==']') i++; }
         else return 0;   /* an unsupported combinator/char -> fail closed (no match) */
     }
-    return (o->tag[0]||o->cls[0]||o->id[0]);
+    return (o->tag[0]||o->cls[0]||o->id[0]||o->attr[0]);
 }
 /* Word-boundary class match within a class="..." value (space-separated tokens). */
 static int class_has(const char *v, int vl, const char *cls) {
@@ -1039,6 +1041,7 @@ static int sel_match_all(browser_t *b, const sel_t *sel, int *offs, int max) {
         if (sel->tag[0] && !tageq(tag, sel->tag)) { i=j; continue; }
         if (sel->cls[0]) { const char *v; int vl; if(!find_attr(body+astart,alen,"class",&v,&vl) || !class_has(v,vl,sel->cls)) { i=j; continue; } }
         if (sel->id[0])  { const char *v; int vl; if(!find_attr(body+astart,alen,"id",&v,&vl)    || !attr_eq(v,vl,sel->id))     { i=j; continue; } }
+        if (sel->attr[0] && !has_attr(body+astart,alen,sel->attr)) { i=j; continue; }   /* [attr] presence (has_attr matches valued + boolean attrs) */
         offs[n++] = i;          /* matched: record the '<' offset */
         i = j;                  /* advance past this opening tag (children are still scanned) */
     }
