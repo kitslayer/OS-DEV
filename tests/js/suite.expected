@@ -232,4 +232,6 @@ W2 W1
 false true true false false
 a b
 b
+false
+true z
 -- done --

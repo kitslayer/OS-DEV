@@ -2201,6 +2201,13 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
         else         { if (g_dom_set)    g_dom_set(id, "", 3); }
         return UND();
     }
+    if (strcmp(name, "hasAttribute") == 0) {
+        const char *aname = nargs ? val_to_str(args[0]) : "";
+        static char hb[256]; hb[0] = 0;
+        int got = has_pos ? (g_dom_getattr_at && g_dom_getattr_at(off, aname, hb, (int)sizeof(hb)))
+                          : (g_dom_getattr    && g_dom_getattr(id, aname, hb, (int)sizeof(hb)));
+        return BOOLV(got);
+    }
     if (strcmp(name, "getAttribute") == 0) {
         const char *aname = nargs ? val_to_str(args[0]) : "";
         static char ab[2048]; ab[0] = 0;

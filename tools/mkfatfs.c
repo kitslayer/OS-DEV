@@ -165,6 +165,7 @@ static const struct {
         "console.log(\"first fruit class=\" + document.querySelector(\"p.fruit\").getAttribute(\"class\"));\n"
         "console.log(\"byAttr [class]=\" + document.querySelectorAll(\"[class]\").length);\n"
         "console.log(\"byAttr p[class]=\" + document.querySelectorAll(\"p[class]\").length);\n"
+        "console.log(\"hasAttr class=\" + document.querySelector(\"p.fruit\").hasAttribute(\"class\") + \" title=\" + document.querySelector(\"p.fruit\").hasAttribute(\"title\"));\n"
         "</script>" },
     { "QSAW    HTM", "<h1>querySelector write</h1>"
         "<p>A load-time script finds the first &lt;p class=&quot;msg&quot;&gt; by CSS selector, rewrites its text and sets an attribute on it, then the page re-renders &mdash; no reload. The position handle resolves to the element's byte span and splices the page source:</p>"

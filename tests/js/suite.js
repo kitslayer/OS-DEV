@@ -256,4 +256,5 @@ var _cl=document.querySelector("p");
 print(_cl.classList.contains("x"), _cl.classList.toggle("x"), _cl.classList.contains("x"), _cl.classList.toggle("x"), _cl.classList.contains("x"));  // false true true false false (toggle add/remove + contains; M285)
 _cl.classList.add("a"); _cl.classList.add("a"); _cl.classList.add("b"); print(document.querySelector("p").getAttribute("class"));  // a b (add dedups; reads back via class attr)
 _cl.classList.remove("a"); print(document.querySelector("p").getAttribute("class"));  // b (remove)
+var _he=document.querySelectorAll(".item")[1]; print(_he.hasAttribute("class")); _he.classList.add("z"); print(_he.hasAttribute("class"), _he.getAttribute("class"));  // false / true z (hasAttribute reflects the class attr; M286)
 print("-- done --");
