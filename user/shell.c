@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> edit write rm cp mv mkdir cd pwd tree find grep hexdump unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1065,6 +1065,37 @@ int main(void) {
             }
             out[oi] = 0;
             print("  "); print(out); print("\n");
+        } else if (startswith(line, "cmp ")) {            /* cmp F1 F2 -> identical, or the first differing line */
+            static char b1[2048], b2[2048];
+            const char *p = line + 4; while (*p == ' ') p++;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            while (*p == ' ') p++;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            if (!f1[0] || !f2[0]) { print("usage: cmp <file1> <file2>\n"); }
+            else {
+                long n1 = sys_readfile(f1, b1, sizeof(b1));
+                long n2 = sys_readfile(f2, b2, sizeof(b2));
+                if (n1 < 0)      { print("cmp: no such file: "); print(f1); print("\n"); }
+                else if (n2 < 0) { print("cmp: no such file: "); print(f2); print("\n"); }
+                else {
+                    long i1 = 0, i2 = 0; int lineno = 1, differ = 0;
+                    while (i1 < n1 || i2 < n2) {
+                        long s1 = i1; while (i1 < n1 && b1[i1] != '\n') i1++; long e1 = i1; if (i1 < n1) i1++;
+                        long s2 = i2; while (i2 < n2 && b2[i2] != '\n') i2++; long e2 = i2; if (i2 < n2) i2++;
+                        long l1 = e1 - s1, l2 = e2 - s2; int same = (l1 == l2);
+                        for (long k = 0; same && k < l1; k++) if (b1[s1 + k] != b2[s2 + k]) same = 0;
+                        if (!same) {
+                            char t[256]; long k;
+                            print("  line "); printl(lineno); print(" differs:\n");
+                            print("  < "); for (k = 0; k < l1 && k < 255; k++) t[k] = b1[s1 + k]; t[k] = 0; print(t); print("\n");
+                            print("  > "); for (k = 0; k < l2 && k < 255; k++) t[k] = b2[s2 + k]; t[k] = 0; print(t); print("\n");
+                            differ = 1; break;
+                        }
+                        lineno++;
+                    }
+                    if (!differ) print("  files are identical\n");
+                }
+            }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
