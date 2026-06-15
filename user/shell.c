@@ -96,7 +96,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text>\n");
+            print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -714,6 +714,16 @@ int main(void) {
         } else if (startswith(line, "echo ")) {
             print(line + 5);
             print("\n");
+        } else if (startswith(line, "cowsay ")) {         /* the classic: a cow speaks your message */
+            const char *msg = line + 7; int len = 0; while (msg[len]) len++;
+            print(" "); for (int i = 0; i < len + 2; i++) print("_"); print("\n");
+            print("< "); print(msg); print(" >\n");
+            print(" "); for (int i = 0; i < len + 2; i++) print("-"); print("\n");
+            print("        \\   ^__^\n");
+            print("         \\  (oo)\\_______\n");
+            print("            (__)\\       )\\/\\\n");
+            print("                ||----w |\n");
+            print("                ||     ||\n");
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
