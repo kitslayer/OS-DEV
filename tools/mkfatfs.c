@@ -356,7 +356,10 @@ static const struct {
         "<p style=\"font-weight: bold\">This paragraph is bold (font-weight: bold).</p>"
         "<p style=\"font-weight: 700\">Numeric weight 700 is bold too.</p>"
         "<p style=\"font-style: italic\">This one is italic (font-style: italic).</p>"
-        "<p>Normal, then <span style=\"font-weight:bold; color:#cc0000\">bold red</span> (weight + colour together), then normal.</p>" },
+        "<p>Normal, then <span style=\"font-weight:bold; color:#cc0000\">bold red</span> (weight + colour together), then normal.</p>"
+        "<p style=\"color: rgb(192, 20, 60)\">This uses <code>rgb(192, 20, 60)</code> &mdash; functional colour notation.</p>"
+        "<p style=\"color: rgb(10%, 40%, 75%)\">And this is <code>rgb(10%, 40%, 75%)</code> &mdash; percentage components.</p>"
+        "<p style=\"color: crimson\">Named colours expanded too: <span style=\"color:indigo\">indigo</span>, <span style=\"color:teal\">teal</span>, <span style=\"color:steelblue\">steelblue</span>, <span style=\"color:darkgreen\">darkgreen</span>.</p>" },
     { "CSS     HTM", "<style>\n"
         "  h2 { color: #800080 }\n"
         "  p { color: #333333 }\n"

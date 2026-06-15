@@ -510,12 +510,35 @@ static uint32_t parse_color(const char *v, int vl) {
         else return 0;
         return 0x01000000u | rgb;
     }
+    if (vl >= 4 && lc(v[0])=='r' && lc(v[1])=='g' && lc(v[2])=='b') {   /* rgb(r,g,b) / rgba(r,g,b,a) — alpha ignored */
+        int i = 3; if (i < vl && lc(v[i])=='a') i++;          /* skip the 'a' of rgba */
+        while (i < vl && v[i] != '(') i++;
+        if (i >= vl) return 0;
+        i++;                                                  /* past '(' */
+        int comp[3], nc = 0;
+        while (i < vl && nc < 3) {
+            while (i < vl && (v[i]==' '||v[i]==',')) i++;      /* skip separators */
+            if (i >= vl || v[i] < '0' || v[i] > '9') break;   /* no number here (')' / '%'-only / junk) */
+            int val = 0;
+            while (i < vl && v[i] >= '0' && v[i] <= '9') { val = val*10 + (v[i]-'0'); if (val > 1000) val = 1000; i++; }
+            if (i < vl && v[i]=='%') { val = val * 255 / 100; i++; }   /* percentage component */
+            if (val > 255) val = 255;
+            comp[nc++] = val;
+            while (i < vl && v[i] != ',' && v[i] != ')') i++; /* to the next separator */
+        }
+        if (nc >= 3) return 0x01000000u | ((uint32_t)comp[0]<<16) | ((uint32_t)comp[1]<<8) | (uint32_t)comp[2];
+        return 0;
+    }
     static const struct { const char *n; uint32_t rgb; } named[] = {
         {"red",0xCC0000},{"green",0x008000},{"blue",0x0000CC},{"black",0x000000},
         {"gray",0x808080},{"grey",0x808080},{"silver",0xC0C0C0},{"orange",0xE07000},
         {"yellow",0xB8A000},{"purple",0x800080},{"navy",0x000080},{"teal",0x008080},
         {"maroon",0x800000},{"olive",0x808000},{"lime",0x00A000},{"cyan",0x008B8B},
         {"magenta",0xB000B0},{"brown",0x8B4513},{"pink",0xD06080},
+        {"crimson",0xC0143C},{"gold",0xB8860B},{"indigo",0x4B0082},{"violet",0x8A2BE2},
+        {"coral",0xD0522D},{"salmon",0xC0593B},{"turquoise",0x209888},{"tan",0x8B7355},
+        {"darkred",0x8B0000},{"darkblue",0x00008B},{"darkgreen",0x006400},{"darkgray",0x595959},
+        {"darkgrey",0x595959},{"slategray",0x5A6A78},{"slategrey",0x5A6A78},{"steelblue",0x3672A0},
     };
     char buf[16]; int p = 0;
     for (int i = 0; i < vl && p < 15; i++) buf[p++] = (char)lc(v[i]);
