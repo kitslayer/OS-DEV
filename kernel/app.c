@@ -60,7 +60,7 @@ static int pend_h, pend_t;
 /* the embedded programs (see kernel/asm/user_blob.asm) */
 extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_start[],
             editor_elf_start[], g2048_elf_start[], life_elf_start[], tetris_elf_start[],
-            breakout_elf_start[], mines_elf_start[];
+            breakout_elf_start[], mines_elf_start[], sudoku_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -72,6 +72,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "tetris", tetris_elf_start, "Tetris" },
     { "breakout", breakout_elf_start, "Breakout" },
     { "mines",  mines_elf_start,  "Mines"  },
+    { "sudoku", sudoku_elf_start, "Sudoku" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
