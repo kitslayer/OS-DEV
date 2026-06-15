@@ -96,7 +96,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -735,6 +735,23 @@ int main(void) {
             while (*p >= '0' && *p <= '9') { if (y < 1000000) y = y*10 + (*p - '0'); p++; }
             if (m < 1 || m > 12 || y < 1 || y > 9999) print("usage: cal <month 1-12> <year>   (e.g. cal 7 1969)\n");
             else cmd_cal_ym(y, m, 0);
+        } else if (startswith(line, "weekday ")) {        /* weekday YYYYMMDD -> the day name (Sakamoto) */
+            const char *p = line + 8; while (*p == ' ') p++;
+            int dig[8], k = 0;
+            while (*p >= '0' && *p <= '9' && k < 8) dig[k++] = *p++ - '0';
+            if (k != 8) print("usage: weekday YYYYMMDD   (e.g. weekday 20000101)\n");
+            else {
+                int y = dig[0]*1000 + dig[1]*100 + dig[2]*10 + dig[3];
+                int m = dig[4]*10 + dig[5], d = dig[6]*10 + dig[7];
+                if (m < 1 || m > 12 || d < 1 || d > 31) print("weekday: bad date\n");
+                else {
+                    static const int tt[] = { 0,3,2,5,0,3,5,1,4,6,2,4 };
+                    int yy = y - (m < 3);
+                    int w = (yy + yy/4 - yy/100 + yy/400 + tt[m-1] + d) % 7;
+                    static const char *names[] = { "Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday" };
+                    print("  "); print(names[w]); print("\n");
+                }
+            }
         } else if (streq(line, "date")) {
             char buf[24];
             sys_time(buf, sizeof(buf));
