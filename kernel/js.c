@@ -2152,6 +2152,15 @@ static val element_handle_at(int off) {
 static val nat_getElementById(val *args, int nargs) {
     return element_handle(nargs ? val_to_str(args[0]) : "");
 }
+/* document.createElement(tag): a detached element — a plain object holding the
+ * tag + (settable) textContent/innerHTML/className/id; appendChild builds its HTML
+ * and splices it into a parent's content (via the innerHTML path). */
+static val nat_createElement(val *args, int nargs) {
+    obj *o = new_obj(V_OBJ); if(!o){ g_oom=1; return UND(); }
+    const char *tag = nargs ? val_to_str(args[0]) : "div";
+    obj_set(o, "tagName", STRV(intern(tag, (int)strlen(tag))));
+    return obj_val(o);
+}
 /* querySelector: a pure "#id" selector keeps the fast id path (byte-identical);
  * tag/class/compound selectors run the host matcher and return the first match
  * as a position handle, or null if nothing matched. */
@@ -2216,6 +2225,38 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
     }
     return 0;
 }
+/* Build the HTML for a createElement node (a plain object carrying tagName +
+ * textContent/innerHTML/className/id properties), for appendChild. Bounded. */
+static void build_child_html(obj *child, char *out, int max) {
+    val v; const char *tag = "div";
+    if (obj_get(child, "tagName", &v) && v.t==V_STR && v.str[0]) tag = v.str;
+    int p = 0;
+    out[p++]='<'; for (const char *t=tag; *t && p<max-2; t++) out[p++]=*t;
+    if (obj_get(child, "id", &v) && v.t==V_STR && v.str[0]) {            /* id="..." (quotes stripped from the value) */
+        const char *a=" id=\""; while(*a && p<max-2) out[p++]=*a++;
+        for (const char *s=v.str; *s && p<max-2; s++) if(*s!='"' && *s!='<' && *s!='>') out[p++]=*s;
+        if(p<max-2) out[p++]='"';
+    }
+    if (obj_get(child, "className", &v) && v.t==V_STR && v.str[0]) {     /* class="..." */
+        const char *a=" class=\""; while(*a && p<max-2) out[p++]=*a++;
+        for (const char *s=v.str; *s && p<max-2; s++) if(*s!='"' && *s!='<' && *s!='>') out[p++]=*s;
+        if(p<max-2) out[p++]='"';
+    }
+    if (p<max-2) out[p++]='>';
+    if (obj_get(child, "innerHTML", &v) && v.t==V_STR && v.str[0]) {     /* innerHTML: raw */
+        for (const char *s=v.str; *s && p<max-2; s++) out[p++]=*s;
+    } else if (obj_get(child, "textContent", &v) && v.t==V_STR) {       /* textContent: HTML-escaped */
+        for (const char *s=v.str; *s && p<max-7; s++) {
+            char c=*s;
+            if(c=='<'){ memcpy(out+p,"&lt;",4); p+=4; }
+            else if(c=='>'){ memcpy(out+p,"&gt;",4); p+=4; }
+            else if(c=='&'){ memcpy(out+p,"&amp;",5); p+=5; }
+            else out[p++]=c;
+        }
+    }
+    if (p<max-3) { out[p++]='<'; out[p++]='/'; for(const char *t=tag; *t && p<max-2; t++) out[p++]=*t; if(p<max-1) out[p++]='>'; }
+    out[p]=0;
+}
 /* methods on a DOM element handle (recv.o->kind==V_ELEMENT): getAttribute(name). */
 static val eval_element_method(val recv, const char *name, val *args, int nargs) {
     obj *el = recv.o;
@@ -2272,6 +2313,20 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
                         : (g_dom_closest    ? g_dom_closest(id, sel)     : -1);
         if (r >= 0) return element_handle_at(r);
         val nv = UND(); nv.t = V_NULL; return nv;
+    }
+    if (strcmp(name, "appendChild") == 0) {   /* append a createElement node: parent.innerHTML += built-child-HTML (reuses the innerHTML splice) */
+        if (nargs < 1 || args[0].t != V_OBJ || !args[0].o) return UND();
+        static char chtml[4096]; build_child_html(args[0].o, chtml, sizeof(chtml));
+        static char cur[4096]; cur[0]=0;
+        if (has_pos) { if(g_dom_get_at) g_dom_get_at(off, cur, (int)sizeof(cur), 1); }
+        else         { if(g_dom_get)    g_dom_get(id, cur, (int)sizeof(cur), 1); }
+        static char nh[8192]; int p=0;
+        for (int i=0; cur[i] && p<8000; i++) nh[p++]=cur[i];
+        for (int i=0; chtml[i] && p<8180; i++) nh[p++]=chtml[i];
+        nh[p]=0;
+        if (has_pos) { if(g_dom_set_at) g_dom_set_at(off, nh, 1); }
+        else         { if(g_dom_set)    g_dom_set(id, nh, 1); }
+        return args[0];   /* DOM appendChild returns the appended child */
     }
     if (strcmp(name, "removeAttribute") == 0) {   /* splice " attr=…" out of the opening tag (completes get/set/has/remove) */
         const char *aname = nargs ? val_to_str(args[0]) : "";
@@ -2716,6 +2771,7 @@ static void install_globals(env *g) {
     obj *dw=new_obj(V_NATIVE); dw->native=native_doc_write; val dwv=UND(); dwv.t=V_NATIVE; dwv.o=dw;
     obj *doc=new_obj(V_OBJ); obj_set(doc,"write",dwv); obj_set(doc,"writeln",dwv);
     def_native(doc,"getElementById",nat_getElementById);
+    def_native(doc,"createElement",nat_createElement);
     def_native(doc,"querySelector",nat_querySelector);
     def_native(doc,"querySelectorAll",nat_querySelectorAll);
     def_native(doc,"getElementsByTagName",nat_getElementsByTagName);

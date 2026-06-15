@@ -225,6 +225,7 @@ alpha null
 true false true
 alpha null
 2 alpha beta 2
+<li id="z9">hi</li>
 -- getElementsBy* + getAttribute --
 2 2 0
 href@1 data@2
