@@ -1221,6 +1221,40 @@ static int browser_dom_parent(const char *id) {
     if (r[off] != '<') return -1;
     return browser_dom_parent_at(off);
 }
+/* element.nextElementSibling / previousElementSibling: among the element's
+ * siblings (the top-level children of its parent, or top-level body elements),
+ * the nearest one after (*next) / before (*prev) it. One scan of the sibling range. */
+static void browser_dom_siblings_at(int off, int *prev, int *next) {
+    *prev = -1; *next = -1;
+    browser_t *b = g_ls_b; if (!b) return;
+    int lo, hi, parent = browser_dom_parent_at(off);
+    if (parent >= 0) { int is, ie; if (!dom_find_at(b, parent, &is, &ie)) return; lo = is; hi = ie; }
+    else { lo = b->bodyoff; hi = b->bodyoff + b->bodylen; }   /* top-level: siblings are body-level elements */
+    const char *body = b->raw;
+    for (int i = lo; i < hi; ) {
+        if (body[i] != '<') { i++; continue; }
+        int j = i + 1;
+        if (j >= hi || body[j]=='/' || body[j]=='!' || body[j]=='?' || !dom_alnum(body[j])) { i++; continue; }
+        if (i < off) { if (i > *prev) *prev = i; }              /* a sibling before off */
+        else if (i > off && *next < 0) *next = i;               /* the first sibling after off */
+        int cis, cie, e;
+        if (dom_find_at(b, i, &cis, &cie)) { e = cie; while (e < hi && body[e] != '>') e++; }
+        else { e = i; while (e < hi && body[e] != '>') e++; }
+        i = (e < hi) ? e + 1 : hi;                              /* skip this sibling's whole element */
+    }
+}
+static int browser_dom_sibling_at(int off, int dir) {   /* dir<0 = previous, else = next; returns offset or -1 */
+    int prev, next; browser_dom_siblings_at(off, &prev, &next);
+    return dir < 0 ? prev : next;
+}
+static int browser_dom_sibling(const char *id, int dir) {
+    browser_t *b = g_ls_b; if (!b) return -1;
+    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return -1;
+    const char *r = b->raw; int lo = b->bodyoff, off = as;
+    while (off > lo && r[off] != '<') off--;
+    if (r[off] != '<') return -1;
+    return browser_dom_sibling_at(off, dir);
+}
 /* <input> field values, keyed by id (the typed or scripted .value text) */
 static const char *in_get(browser_t *b, const char *id) {
     for (int i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) return b->in_val[i];
@@ -1486,7 +1520,7 @@ static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-han
     b->raw[live_end+delta]=0;
     parse_html(b,b->raw+b->bodyoff,b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at); js_set_location(b->url); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

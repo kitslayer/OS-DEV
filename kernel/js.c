@@ -1283,6 +1283,7 @@ static val eval_classlist_method(val recv, const char *name, val *args, int narg
 static val classlist_handle(obj *el);
 static val children_array(obj *el);   /* fwd: el.children -> array of position handles */
 static val parent_handle(obj *el);     /* fwd: el.parentElement -> a position handle or null */
+static val sibling_handle(obj *el, int dir);   /* fwd: el.next/previousElementSibling -> a position handle or null */
 static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax);   /* DOM element read/write */
 
 /* Accessor properties (getters/setters). An accessor is a V_ACCESSOR obj stored
@@ -1325,7 +1326,7 @@ static val eval_member_get(val recv, const char *name) {
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM(recv.o->n/2);   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
-        if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
+        if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); if(strcmp(name,"nextElementSibling")==0) return sibling_handle(recv.o,1); if(strcmp(name,"previousElementSibling")==0) return sibling_handle(recv.o,-1); static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
         if (recv.o->proto) { val pv; if (proto_lookup(recv.o->proto, name, recv, &pv)) return pv; }   /* inherited property/method (M263) */
     }
@@ -2136,6 +2137,8 @@ static int  (*g_dom_children)(const char *id, int *offs, int max);  /* element.c
 static int  (*g_dom_children_at)(int off, int *offs, int max);      /* element.children — position handle */
 static int  (*g_dom_parent)(const char *id);                        /* element.parentElement — id handle; returns an offset or -1 */
 static int  (*g_dom_parent_at)(int off);                            /* element.parentElement — position handle */
+static int  (*g_dom_sibling)(const char *id, int dir);              /* next/previousElementSibling (dir<0=prev) — id handle */
+static int  (*g_dom_sibling_at)(int off, int dir);                  /* next/previousElementSibling — position handle */
 #define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
 static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
 static val element_handle(const char *id) {
@@ -2364,6 +2367,14 @@ static val parent_handle(obj *el) {
     const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
     int has_pos = (el->n>1 && el->vals[1].t==V_NUM); int off = has_pos ? (int)el->vals[1].num : 0;
     int r = has_pos ? (g_dom_parent_at ? g_dom_parent_at(off) : -1) : (g_dom_parent ? g_dom_parent(id) : -1);
+    if (r >= 0) return element_handle_at(r);
+    val nv=UND(); nv.t=V_NULL; return nv;
+}
+/* el.nextElementSibling (dir>0) / previousElementSibling (dir<0) -> a position handle or null. */
+static val sibling_handle(obj *el, int dir) {
+    const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
+    int has_pos = (el->n>1 && el->vals[1].t==V_NUM); int off = has_pos ? (int)el->vals[1].num : 0;
+    int r = has_pos ? (g_dom_sibling_at ? g_dom_sibling_at(off, dir) : -1) : (g_dom_sibling ? g_dom_sibling(id, dir) : -1);
     if (r >= 0) return element_handle_at(r);
     val nv=UND(); nv.t=V_NULL; return nv;
 }
@@ -2949,11 +2960,13 @@ void js_set_dom_match(int (*matches)(const char *, const char *), int (*matches_
 void js_set_dom_rmattr(void (*rmattr)(const char *, const char *), void (*rmattr_at)(int, const char *)) {
     g_dom_rmattr = rmattr; g_dom_rmattr_at = rmattr_at;
 }
-/* The browser registers element.children + parentElement backings (id + position variants). */
+/* The browser registers element.children + parentElement + sibling backings (id + position variants). */
 void js_set_dom_children(int (*children)(const char *, int *, int), int (*children_at)(int, int *, int),
-                         int (*parent)(const char *), int (*parent_at)(int)) {
+                         int (*parent)(const char *), int (*parent_at)(int),
+                         int (*sibling)(const char *, int), int (*sibling_at)(int, int)) {
     g_dom_children = children; g_dom_children_at = children_at;
     g_dom_parent = parent; g_dom_parent_at = parent_at;
+    g_dom_sibling = sibling; g_dom_sibling_at = sibling_at;
 }
 /* The browser sets the current page URL before running page JS (for window.location). */
 void js_set_location(const char *url) {
@@ -3108,6 +3121,8 @@ static int hdom_children_at(int off, int *offs, int max){ if(off==10 && max>=2){
 static int hdom_children(const char *id, int *offs, int max){ (void)id; (void)offs; (void)max; return 0; }
 static int hdom_parent_at(int off){ (void)off; return -1; }   /* mock has no element tree; real parent tested in-OS */
 static int hdom_parent(const char *id){ (void)id; return -1; }
+static int hdom_sibling_at(int off, int dir){ if(off==10 && dir>0) return 20; if(off==20 && dir<0) return 10; return -1; }   /* canned: 10<->20 (real scan tested in-OS) */
+static int hdom_sibling(const char *id, int dir){ (void)id; (void)dir; return -1; }
 /* mock removeAttribute: clear the class store entry (so a later hasAttribute("class") reads false) */
 static void hdom_rmattr_at(int off, const char *attr){ if(strcmp(attr,"class")) return; for(int i=0;i<hcls_n;i++) if(hcls_off[i]==off){ hcls_val[i][0]=0; return; } }
 static void hdom_rmattr(const char *id, const char *attr){ (void)id; (void)attr; }   /* id handles: no id-class store in the mock */
@@ -3120,7 +3135,7 @@ int main(int argc, char **argv) {
     js_set_dom_attr(hdom_getattr, hdom_setattr);
     js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);   /* mock querySelector(All) for host tests */
     js_set_dom_match(hdom_matches, hdom_matches_at, hdom_closest, hdom_closest_at);   /* mock element.matches/closest for host tests */
-    js_set_dom_children(hdom_children, hdom_children_at, hdom_parent, hdom_parent_at);   /* mock element.children/parentElement for host tests */
+    js_set_dom_children(hdom_children, hdom_children_at, hdom_parent, hdom_parent_at, hdom_sibling, hdom_sibling_at);   /* mock element.children/parentElement/sibling for host tests */
     js_set_dom_rmattr(hdom_rmattr, hdom_rmattr_at);    /* mock removeAttribute for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
