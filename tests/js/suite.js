@@ -121,6 +121,13 @@ function _ad(a,b){return a+b;} function _gr(g){return g+" "+this.name;}
 print(_ad.call(null,5,6), _ad.apply(null,[3,4]), _gr.call({name:"Ada"},"Hi"), Math.max.apply(null,[2,9,4]));
 function _bf(a,b){return this.x+a+b;}
 print(_bf.bind({x:10},1)(2), _bf.bind({x:100})(5,6), typeof _bf.bind({x:1}));
+print("-- delete --");
+var _do={a:1,b:2,c:3}; print(delete _do.b, _do.a+","+_do.c, _do.b);
+print(Object.keys(_do).join(","));
+var _dp={x:10,y:20}; delete _dp["x"]; print(_dp.x, _dp.y);
+var _da=[1,2,3]; print(delete _da[1], _da[0]+"/"+_da[1]+"/"+_da[2]);
+print(delete _do.zzz, delete 5);
+var _dm=new Map(); _dm.set("k",9); print(_dm.delete("k"), _dm.has("k"));
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);

@@ -89,7 +89,7 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
     "switch","case","default","do","try","catch","finally","throw","this","new",
-    "class","extends","super",0 };
+    "class","extends","super","delete",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -423,6 +423,7 @@ static node *parse_unary_inner(lexer *L) {
     if (peek_punc(L,"!")||peek_punc(L,"-")||peek_punc(L,"+")) { token o=advance(L); node *u=mknode(N_UNARY); u->op=o.s[0]; u->a=parse_unary(L); return u; }
     if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->prefix=1; u->a=parse_unary(L); return u; }
     if (peek_kw(L,"typeof")) { advance(L); node *u=mknode(N_UNARY); u->op='t'; u->a=parse_unary(L); return u; }
+    if (peek_kw(L,"delete")) { advance(L); node *u=mknode(N_UNARY); u->op='d'; u->a=parse_unary(L); return u; }
     return parse_postfix(L);
 }
 /* depth-guarded wrapper: a `!!!!...` / `typeof typeof...` / `- - -...` chain
@@ -672,6 +673,17 @@ static void obj_set(obj *o, const char *key, val v) {
 static int obj_get(obj *o, const char *key, val *out) {
     if (!obj_keyed(o)) return 0;   /* array/map/set/date have no keyed properties */
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { *out=o->vals[i]; return 1; }
+    return 0;
+}
+/* Remove an own property (the `delete obj.x` operator). Shifts keys[]/vals[] down,
+ * exactly like the proven Map/Set .delete(); only touches keyed objects (V_OBJ/V_REGEX),
+ * never arrays/maps whose vals[] are positional. */
+static int obj_delete(obj *o, const char *key) {
+    if (!obj_keyed(o)) return 0;
+    for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) {
+        for (int j=i;j+1<o->n;j++) { o->keys[j]=o->keys[j+1]; o->vals[j]=o->vals[j+1]; }
+        o->n--; return 1;
+    }
     return 0;
 }
 static void arr_push_val(obj *o, val v) {
@@ -1150,6 +1162,14 @@ static val eval_expr_inner(node *n, env *e) {
             if(n->op=='A') return truthy(l)?eval_expr(n->b,e):l; else return truthy(l)?l:eval_expr(n->b,e); }
         case N_UNARY: {
             if (n->op=='t') { val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE||(v.t==V_OBJ&&v.o&&v.o->kind==V_BOUND))?"function":"object"; return STRV(ty); }
+            if (n->op=='d') {   /* delete obj.x / obj[k]: remove an own property, evaluate to true */
+                node *t=n->a;
+                if (t->type==N_MEMBER) { val r=eval_expr(t->a,e); if(r.t==V_OBJ&&r.o) obj_delete(r.o,node_name(t)); }
+                else if (t->type==N_INDEX) { val r=eval_expr(t->a,e); val k=eval_expr(t->b,e);
+                    if(r.t==V_OBJ&&r.o) obj_delete(r.o,val_to_str(k));
+                    else if(r.t==V_ARR&&r.o){ int i=(int)to_num(k); if(i>=0&&i<r.o->n) r.o->vals[i]=UND(); } }
+                return BOOLV(1);
+            }
             val v=eval_expr(n->a,e);
             if (n->op=='!') return BOOLV(!truthy(v));
             if (n->op=='-') return NUM(-to_num(v));
