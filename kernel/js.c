@@ -1540,6 +1540,15 @@ static val eval_expr_inner(node *n, env *e) {
             if (callee->type==N_MEMBER) {
                 val recv=eval_expr(callee->a,e); const char *m=node_name(callee);
                 if (callee->prefix && (recv.t==V_UNDEF||recv.t==V_NULL)) return UND();   /* obj?.method() short-circuit */
+                /* universal toString()/valueOf() for strings, arrays, plain objects (M275).
+                 * Excludes Number/Boolean (eval_number_method keeps the radix-aware toString) and
+                 * the kind-marked objects (Map/Set/Date/Regex/Element keep their own methods, e.g.
+                 * Date.valueOf -> epoch). A plain object's OWN toString/valueOf still wins. */
+                if (na==0 && (strcmp(m,"toString")==0 || strcmp(m,"valueOf")==0)
+                    && (recv.t==V_STR || recv.t==V_ARR || (recv.t==V_OBJ && recv.o && recv.o->kind==V_OBJ))) {
+                    if (recv.t==V_OBJ) { val f; if(obj_get(recv.o,m,&f) && (f.t==V_FUN||f.t==V_NATIVE)) return call_function_this(f,recv,args,na); }
+                    return m[0]=='v' ? recv : STRV(val_to_str(recv));
+                }
                 if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
                 if (recv.t==V_ARR) return eval_array_method(recv,m,args,na);
                 if (recv.t==V_NUM || recv.t==V_BOOL) return eval_number_method(recv,m,args,na);

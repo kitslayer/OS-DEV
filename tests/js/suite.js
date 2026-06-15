@@ -231,4 +231,5 @@ print({}==[], []==[], [1]==1, [1,2]=="1,2");  // false false true true (distinct
 print([1,2,3,4,5].copyWithin(0,3).join(","), [1,2,3,4,5].copyWithin(1,3,4).join(","));  // 4,5,3,4,5 1,4,3,4,5 (copyWithin in place, M272)
 var _wm=new WeakMap(),_wk={}; _wm.set(_wk,7); var _ws=new WeakSet(),_wo={}; _ws.add(_wo); print(_wm.get(_wk), _wm.has(_wk), _ws.has(_wo), _wm instanceof WeakMap);  // 7 true true true (WeakMap/WeakSet, M273)
 var _ho={a:1}; var _hi=Object.create({p:9}); _hi.own=1; print(_ho.hasOwnProperty("a"), _ho.hasOwnProperty("z"), Object.hasOwn(_ho,"a"), _hi.hasOwnProperty("own"), _hi.hasOwnProperty("p"), [1,2].hasOwnProperty(0));  // true false true true false true (hasOwnProperty own-only + Object.hasOwn, M274)
+print(({}).toString(), [1,2,3].toString(), "s".toString(), (9).toString(2), typeof (new Date()).valueOf());  // [object Object] 1,2,3 s 1001 number (toString/valueOf method calls; number radix + Date.valueOf unaffected, M275)
 print("-- done --");
