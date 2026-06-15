@@ -2654,13 +2654,13 @@ static val nat_json_parse(val *a, int n){ if(!n || a[0].t!=V_STR) return UND(); 
 /* ---- Object.values / Object.entries, Array.isArray / Array.from ---- */
 static val nat_obj_values(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
-    if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++) arr_push_val(r, a[0].o->vals[i]);
+    if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){ val pv=a[0].o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,a[0]); arr_push_val(r, pv); }   /* fire getters (M426, same pattern as the M425 JSON fix) */
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
 static val nat_obj_entries(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
     if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){
-        obj *pair=new_obj(V_ARR); if(!pair) break; arr_push_val(pair, STRV(a[0].o->keys[i])); arr_push_val(pair, a[0].o->vals[i]);
+        obj *pair=new_obj(V_ARR); if(!pair) break; arr_push_val(pair, STRV(a[0].o->keys[i])); val gv=a[0].o->vals[i]; if(is_accessor(gv)) gv=fire_getter(gv,a[0]); arr_push_val(pair, gv);   /* fire getters (M426) */
         val pv=UND(); pv.t=V_ARR; pv.o=pair; arr_push_val(r, pv); }
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
