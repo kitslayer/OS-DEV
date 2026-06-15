@@ -2106,6 +2106,7 @@ static void (*g_dom_setattr)(const char *id, const char *attr, const char *val);
  * position, parallel to the id-keyed ones above (additive — id handles never
  * use them). g_dom_query runs the selector match and returns match offsets. */
 static int  (*g_dom_get_at)(int off, char *out, int max, int html);
+static int  (*g_dom_getattr_at)(int off, const char *attr, char *out, int max);   /* getAttribute on a match */
 static int  (*g_dom_query)(const char *sel, int *offs, int max);   /* returns match count */
 #define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
 static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
@@ -2139,14 +2140,26 @@ static val nat_querySelector(val *args, int nargs) {
     if (n > 0) return element_handle_at(offs[0]);
     val nv=UND(); nv.t=V_NULL; return nv;
 }
-/* querySelectorAll: every match as an array of position handles (.length, [i],
- * forEach, for-of all work via the generic array machinery). */
-static val nat_querySelectorAll(val *args, int nargs) {
+/* Run a selector and collect every match as an array of position handles
+ * (.length, [i], forEach, for-of all work via the generic array machinery). */
+static val qsa_array(const char *sel) {
     obj *a = new_obj(V_ARR); if(!a){ g_oom=1; return UND(); }
-    const char *sel = nargs ? val_to_str(args[0]) : "";
     int offs[QSA_MAX_JS]; int n = g_dom_query ? g_dom_query(sel, offs, QSA_MAX_JS) : 0;
     for (int i=0; i<n && !g_oom; i++) arr_push_val(a, element_handle_at(offs[i]));
     val r=UND(); r.t=V_ARR; r.o=a; return r;
+}
+static val nat_querySelectorAll(val *args, int nargs) {
+    return qsa_array(nargs ? val_to_str(args[0]) : "");
+}
+/* getElementsByTagName(name): the tag selector. */
+static val nat_getElementsByTagName(val *args, int nargs) {
+    return qsa_array(nargs ? val_to_str(args[0]) : "");
+}
+/* getElementsByClassName(name): the ".name" selector (built into a small buffer). */
+static val nat_getElementsByClassName(val *args, int nargs) {
+    char buf[64]; buf[0]='.'; const char *s = nargs ? val_to_str(args[0]) : "";
+    int i=0; while (s[i] && i<62) { buf[i+1]=s[i]; i++; } buf[i+1]=0;
+    return qsa_array(buf);
 }
 /* read/write a V_ELEMENT property; returns 1 if handled (so eval_member_get /
  * assignment can fall through for anything else). `set` NULL = read into out. */
@@ -2175,12 +2188,15 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
 static val eval_element_method(val recv, const char *name, val *args, int nargs) {
     obj *el = recv.o;
     const char *id = (el->n > 0 && el->vals[0].t == V_STR) ? el->vals[0].str : "";
-    if (strcmp(name, "remove") == 0) { if (g_dom_set) g_dom_set(id, "", 3); return UND(); }   /* element.remove(): splice the whole element out of the page */
+    int has_pos = (el->n > 1 && el->vals[1].t == V_NUM);   /* a querySelector match keyed by byte offset */
+    int off = has_pos ? (int)el->vals[1].num : 0;
+    if (strcmp(name, "remove") == 0) { if (!has_pos && g_dom_set) g_dom_set(id, "", 3); return UND(); }   /* element.remove(): id path; position remove lands with position write */
     if (strcmp(name, "getAttribute") == 0) {
         const char *aname = nargs ? val_to_str(args[0]) : "";
         static char ab[2048]; ab[0] = 0;
-        if (g_dom_getattr && g_dom_getattr(id, aname, ab, (int)sizeof(ab)))
-            return STRV(intern(ab, (int)strlen(ab)));
+        int got = has_pos ? (g_dom_getattr_at && g_dom_getattr_at(off, aname, ab, (int)sizeof(ab)))
+                          : (g_dom_getattr    && g_dom_getattr(id, aname, ab, (int)sizeof(ab)));
+        if (got) return STRV(intern(ab, (int)strlen(ab)));
         val nv = UND(); nv.t = V_NULL; return nv;   /* missing attribute -> null, per the DOM */
     }
     if (strcmp(name, "setAttribute") == 0) {
@@ -2559,6 +2575,8 @@ static void install_globals(env *g) {
     def_native(doc,"getElementById",nat_getElementById);
     def_native(doc,"querySelector",nat_querySelector);
     def_native(doc,"querySelectorAll",nat_querySelectorAll);
+    def_native(doc,"getElementsByTagName",nat_getElementsByTagName);
+    def_native(doc,"getElementsByClassName",nat_getElementsByClassName);
     val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
     /* window.location: a read-only snapshot of the current page URL, parsed into
      * href/protocol/host/pathname/search so page JS can inspect it (e.g. ?query). */
@@ -2689,8 +2707,10 @@ void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int),
     g_dom_getattr = getattr; g_dom_setattr = setattr;
 }
 /* The browser registers position-keyed DOM callbacks for querySelector(All) matches. */
-void js_set_dom_pos(int (*get_at)(int, char *, int, int), int (*query)(const char *, int *, int)) {
-    g_dom_get_at = get_at; g_dom_query = query;
+void js_set_dom_pos(int (*get_at)(int, char *, int, int),
+                    int (*getattr_at)(int, const char *, char *, int),
+                    int (*query)(const char *, int *, int)) {
+    g_dom_get_at = get_at; g_dom_getattr_at = getattr_at; g_dom_query = query;
 }
 /* The browser sets the current page URL before running page JS (for window.location). */
 void js_set_location(const char *url) {
@@ -2730,6 +2750,9 @@ static int hdom_query(const char *sel, int *offs, int max){ if(max<1) return 0;
     return 0; }
 static int hdom_get_at(int off, char *out, int max, int html){ (void)html; if(max<=0) return 0;
     const char *t = off==10 ? "alpha" : off==20 ? "beta" : ""; int j=0; while(t[j]&&j<max-1){out[j]=t[j];j++;} out[j]=0; return 1; }
+/* mock getAttribute-by-position: echo "<attr>@<off>" so the suite can assert the round-trip */
+static int hdom_getattr_at(int off, const char *attr, char *out, int max){ if(max<=0) return 0;
+    int j=0; while(attr[j]&&j<max-2){out[j]=attr[j];j++;} if(j<max-2)out[j++]='@'; if(j<max-1)out[j++]=(char)('0'+(off/10)%10); out[j]=0; return 1; }
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -2737,7 +2760,7 @@ int main(int argc, char **argv) {
     js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     js_set_dom_attr(hdom_getattr, hdom_setattr);
-    js_set_dom_pos(hdom_get_at, hdom_query);             /* mock querySelector(All) for host tests */
+    js_set_dom_pos(hdom_get_at, hdom_getattr_at, hdom_query);   /* mock querySelector(All) for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);

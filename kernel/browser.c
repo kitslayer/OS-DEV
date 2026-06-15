@@ -1074,6 +1074,26 @@ static int browser_dom_get_at(int off, char *out, int max, int html) {
     int len = ie - is; if (len > max - 1) len = max - 1; if (len < 0) len = 0;
     memcpy(out, b->raw + is, len); out[len] = 0; return 1;
 }
+/* Position variant of dom_attr_region: the opening-tag attr span of the element at `off`. */
+static int dom_attr_region_at(browser_t *b, int off, int *as, int *ae) {
+    const char *r = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
+    if (off < lo || off+1 >= hi || r[off] != '<' || !dom_alnum(r[off+1])) return 0;
+    int ne = off + 1, tn = 0;
+    while (ne < hi && dom_alnum(r[ne]) && tn < 15) { ne++; tn++; }   /* skip the tag name */
+    if (tn == 0) return 0;
+    int gt = off; while (gt < hi && r[gt] != '>') gt++;
+    if (gt >= hi) return 0;
+    *as = ne; *ae = gt; return 1;
+}
+/* getAttribute on a position-addressed element (read-only; mirrors browser_dom_getattr). */
+static int browser_dom_getattr_at(int off, const char *attr, char *out, int max) {
+    browser_t *b = g_ls_b; if (!b || max <= 0) return 0; out[0] = 0;
+    int as, ae; if (!dom_attr_region_at(b, off, &as, &ae)) return 0;
+    const char *v; int vl;
+    if (!find_attr(b->raw + as, ae - as, attr, &v, &vl)) return 0;
+    int n = vl; if (n > max - 1) n = max - 1; if (n < 0) n = 0;
+    memcpy(out, v, n); out[n] = 0; return 1;
+}
 /* document.querySelector(All): parse the selector, scan, fill offs[] with match offsets. */
 static int browser_dom_query(const char *sel, int *offs, int max) {
     browser_t *b = g_ls_b; if (!b) return 0;
@@ -1217,7 +1237,7 @@ static void browser_dom_setattr(const char *id, const char *attr, const char *va
     b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_query); js_set_location(b->url); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_getattr_at, browser_dom_query); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

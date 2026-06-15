@@ -25,5 +25,7 @@ void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int),
 /* Register position-keyed DOM callbacks for querySelector(All) matches (id-less):
  *  get_at(off, out, max, html) -> read the element at byte offset `off`;
  *  query(sel, offs, max) -> fill offs[] with match offsets, return the count. */
-void js_set_dom_pos(int (*get_at)(int, char *, int, int), int (*query)(const char *, int *, int));
+void js_set_dom_pos(int (*get_at)(int, char *, int, int),
+                    int (*getattr_at)(int, const char *, char *, int),
+                    int (*query)(const char *, int *, int));
 void js_set_location(const char *url);

@@ -160,6 +160,9 @@ static const struct {
         "console.log(\"first p.fruit=\" + first.textContent);\n"
         "document.getElementById(\"title\").textContent = \"First match: \" + first.textContent;\n"
         "console.log(\"missing selector -> \" + document.querySelector(\".nope\"));\n"
+        "console.log(\"byTag p=\" + document.getElementsByTagName(\"p\").length);\n"
+        "console.log(\"byClass fruit=\" + document.getElementsByClassName(\"fruit\").length);\n"
+        "console.log(\"first fruit class=\" + document.querySelector(\"p.fruit\").getAttribute(\"class\"));\n"
         "</script>" },
     { "JSDEEP  HTM", "<h1>Deep recursion guard</h1>"
         "<p>This page's script recurses 500 deep on purpose. The interpreter must"
