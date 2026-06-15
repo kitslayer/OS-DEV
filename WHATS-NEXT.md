@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (283 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (287 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -62,12 +62,14 @@
 > What remains is either *fundamentally blocked by the integer-only Number*
 > (`Math.random`, float math, `isFinite`/full `isNaN` — all need a NaN /
 > floating-point representation we deliberately don't have) or genuinely
-> *architectural*: a real **DOM tree** (`createElement`/node construction), a
-> **persistent per-page JS environment** (`addEventListener` — the arena resets
-> per run), **CSS/layout**, **generators/iterators**, **async/Promises**,
-> **modules**, **Proxy**, **`Symbol`**.
+> *architectural*: a real **DOM tree** (`createElement`/node construction),
+> **CSS/layout**, **generators/iterators**, **async/Promises**, **modules**,
+> **Proxy**, **`Symbol`**. (The *persistent per-page JS env* — long the deepest
+> DOM blocker — **landed in M287**, so `addEventListener`/`el.onclick=fn` is no
+> longer architecturally blocked: it now just needs storing + firing a handler
+> function.)
 
-OS-DEV is a **graphical desktop OS** (283 milestones). It boots to a themed
+OS-DEV is a **graphical desktop OS** (287 milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and six
 games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
@@ -156,13 +158,15 @@ beep mem ps clear reboot ver pid exit`.
    submission**, **live web search** (DuckDuckGo, from a form or the address bar),
    and **reactive events** (`onchange`/`oninput`). What's left for *more*
    interactivity — each a real build, best done with guidance:
-   - **`addEventListener` / `el.onclick = fn`** (JS-assigned handlers) — needs a
-     *persistent per-page JS env* (the arena resets per run, no GC), so a function
-     defined at load can fire on a later event. The deepest remaining DOM change.
-   - **`querySelectorAll` / `getElementsByTagName`** — needs *position-based* element
-     handles (today's handles are keyed by `id`, so id-less matches can't be
-     addressed); **`createElement`/`appendChild`** — needs a real DOM tree (the
-     renderer is a flat token stream).
+   - **`addEventListener` / `el.onclick = fn`** (JS-assigned handlers) — the
+     *persistent per-page JS env* this needed **landed in M287**, so a function
+     defined at load now survives to a later event; what remains is storing the
+     handler function against the element and firing it on the click. Next up.
+   - **`querySelectorAll` / `getElementsByTagName`** — **DONE (M281–286)** via
+     byte-offset *position handles* (incl. `.class`/`#id`/`[attr]` selectors,
+     `getAttribute`/`hasAttribute`/`classList`, and write). **`createElement`/
+     `appendChild`** — still needs a real DOM tree (the renderer is a flat token
+     stream).
    - **CSS / layout**, cookies (sessions), inline remote `<img>`, `<textarea>`
      multiline.
    *Known limit: `lite.cnn.com` etc. refuse our minimal ClientHello (Fastly TLS
