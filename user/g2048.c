@@ -12,6 +12,7 @@ static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
 
 static int g[4][4];
 static unsigned score;
+static unsigned best;          /* high score, persisted to 2048.HI */
 static int won;
 
 static void itoa_u(unsigned v, char *o) {
@@ -20,6 +21,17 @@ static void itoa_u(unsigned v, char *o) {
     while (v) { t[i++] = (char)('0' + v % 10); v /= 10; }
     int j = 0; while (i) o[j++] = t[--i];
     o[j] = 0;
+}
+
+static void load_best(void) {
+    char b[16]; long n = sys_readfile("2048.HI", b, sizeof(b) - 1);
+    best = 0;
+    for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best * 10 + (b[i] - '0'); }
+}
+static void save_best(void) {
+    char b[12]; itoa_u(best, b);
+    int n = 0; while (b[n]) n++;
+    sys_writefile("2048.HI", b, (unsigned long)n);
 }
 
 static void add_tile(void) {
@@ -93,8 +105,10 @@ static int tile_color(unsigned v) {
 static void render(const char *msg) {
     sys_clear();
     char sl[40]; int p = 0;
-    const char *a = "  2048    score "; while (*a) sl[p++] = *a++;
+    const char *a = "  2048   score "; while (*a) sl[p++] = *a++;
     char num[12]; itoa_u(score, num); for (int i = 0; num[i]; i++) sl[p++] = num[i];
+    a = "   best "; while (*a) sl[p++] = *a++;
+    itoa_u(best, num); for (int i = 0; num[i]; i++) sl[p++] = num[i];
     sl[p] = 0;
     sys_setcolor(8); print(sl); print("\n\n");           /* header in grey */
 
@@ -121,6 +135,7 @@ static void render(const char *msg) {
 int main(void) {
     for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) g[y][x] = 0;
     score = 0; won = 0;
+    load_best();
     add_tile(); add_tile();
     render(0);
     for (;;) {
@@ -131,7 +146,7 @@ int main(void) {
         if (k == 0x13) dir = 0; else if (k == 0x14) dir = 1;
         else if (k == 0x11) dir = 2; else if (k == 0x12) dir = 3;
         if (dir < 0) continue;
-        if (move(dir)) { add_tile(); }
+        if (move(dir)) { add_tile(); if (score > best) { best = score; save_best(); } }
         if (won)            render("you reached 2048!");
         else if (!can_move()) render("game over - q to quit");
         else                render(0);
