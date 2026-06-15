@@ -1032,7 +1032,7 @@ static void browser_dom_set(const char *id, const char *value, int html) {
         int live_end = (active && g_sw_pos > bodyend) ? g_sw_pos : bodyend;
         memmove(b->raw + ts, b->raw + ce, live_end - ce);         /* shift the tail down over the removed element */
         b->bodylen += delta;
-        if (active) { if (g_sw_pos > ce) g_sw_pos += delta; if (g_sw_base > ce) g_sw_base += delta; }   /* keep document.write cursors in sync */
+        if (active) { if (g_sw_pos > ts) g_sw_pos += delta; if (g_sw_base > ts) g_sw_base += delta; }   /* sync document.write cursors; pivot on ts (removed-span start) so both shift together */
         b->raw[live_end + delta] = 0;
         parse_html(b, b->raw + b->bodyoff, b->bodylen);
         return;
