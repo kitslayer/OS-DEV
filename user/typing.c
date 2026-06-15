@@ -1,5 +1,5 @@
 /*
- * typing.c — a typing-speed test (WPM + accuracy).
+ * typing.c — a typing-speed test (WPM + accuracy), with a persistent best.
  *
  * A different category from the games: a skill/practice tool. A target sentence
  * is shown; you retype it. Each key is matched against the expected character
@@ -7,6 +7,7 @@
  * your position — there's no backspace, so accuracy counts every keystroke.
  * Timing (from the wall clock, to the second) starts on your first keystroke;
  * on completion it reports words-per-minute (chars/5 over the time) + accuracy.
+ * Your best WPM on a clean run (>=90% accuracy) persists in TYPING.HI.
  */
 #include "ulib.h"
 
@@ -28,7 +29,8 @@ static int correct;          /* count typed correctly */
 static int round;            /* which sentence (rotates) */
 static int state;            /* 1 typing, 2 done */
 static int t_start;          /* seconds-of-day at the first keystroke (-1 = not yet) */
-static int t_end;            /* seconds-of-day at completion */
+static int result_wpm, result_acc;   /* computed once at completion */
+static int best;             /* best clean-run WPM, persisted to TYPING.HI */
 
 static unsigned slen(const char *s) { unsigned n = 0; while (s[n]) n++; return n; }
 
@@ -41,12 +43,23 @@ static int now_secs(void) {                    /* parse "YYYY-MM-DD HH:MM:SS" ->
     return hh*3600 + mm*60 + ss;
 }
 
-static void printnum(int v) {
+static int itoa_b(int v, char *out) {          /* non-negative int -> string; returns length */
     char t[12]; int i = 0, n = v < 0 ? 0 : v;
     if (n == 0) t[i++] = '0';
     while (n) { t[i++] = (char)('0' + n % 10); n /= 10; }
-    char o[12]; int j = 0; while (i) o[j++] = t[--i]; o[j] = 0;
-    print(o);
+    int j = 0; while (i) out[j++] = t[--i];
+    out[j] = 0; return j;
+}
+static void printnum(int v) { char b[12]; itoa_b(v, b); print(b); }
+
+static void load_best(void) {
+    char b[16]; long n = sys_readfile("TYPING.HI", b, sizeof(b) - 1);
+    best = 0;
+    for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best * 10 + (b[i] - '0'); }
+}
+static void save_best(void) {
+    char b[12]; int n = itoa_b(best, b);
+    sys_writefile("TYPING.HI", b, (unsigned long)n);
 }
 
 static void load_round(void) {
@@ -61,7 +74,8 @@ static void load_round(void) {
 static void render(void) {
     sys_clear();
     sys_setcolor(4); print("\n  Typing Test"); sys_setcolor(0);
-    print("    round "); printnum(round + 1); print("\n\n");
+    print("    round "); printnum(round + 1);
+    print("    best "); sys_setcolor(3); printnum(best); print(" wpm"); sys_setcolor(0); print("\n\n");
 
     print("  target:\n  "); sys_setcolor(8); print(target); sys_setcolor(0); print("\n\n");
 
@@ -75,21 +89,30 @@ static void render(void) {
 
     if (state == 1) print("type it!   (no backspace, Esc quits)");
     else {
-        int el = t_end - t_start;
-        if (el < 0) el += 86400;
-        if (el < 1) el = 1;
-        int wpm = (correct * 12) / el;             /* (correct/5) / (el/60) */
-        int acc = len ? (correct * 100) / len : 0;
         sys_setcolor(2); print("done!  "); sys_setcolor(0);
-        print("WPM "); sys_setcolor(3); printnum(wpm); sys_setcolor(0);
-        print("   accuracy "); sys_setcolor(3); printnum(acc); print("%"); sys_setcolor(0);
+        print("WPM "); sys_setcolor(3); printnum(result_wpm); sys_setcolor(0);
+        print("   accuracy "); sys_setcolor(3); printnum(result_acc); print("%"); sys_setcolor(0);
         print("\n  SPACE = next sentence");
     }
     print("\n");
 }
 
+static void finish(void) {
+    int el = now_secs() - t_start;
+    if (el < 0) el += 86400;                       /* crossed midnight */
+    if (el < 1) el = 1;
+    result_wpm = (correct * 12) / el;              /* (correct/5) / (el/60) */
+    result_acc = len ? (correct * 100) / len : 0;
+    state = 2;
+    if (result_acc >= 90 && result_wpm > best) {   /* a clean run beat the record */
+        best = result_wpm;
+        save_best();
+    }
+}
+
 int main(void) {
     round = 0;
+    load_best();
     load_round();
     render();
     for (;;) {
@@ -103,7 +126,7 @@ int main(void) {
                 ok[pos] = (k == target[pos]);
                 if (ok[pos]) correct++;
                 pos++;
-                if (pos >= len) { state = 2; t_end = now_secs(); }   /* finished */
+                if (pos >= len) finish();
                 render();
             }
         } else { /* state 2: done */
