@@ -21,6 +21,7 @@ global calendar_elf_start, calendar_elf_end
 global mandel_elf_start, mandel_elf_end
 global piano_elf_start, piano_elf_end
 global maze_elf_start, maze_elf_end
+global adv_elf_start, adv_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -81,5 +82,9 @@ piano_elf_end:
 maze_elf_start:
     incbin "build/maze.elf"
 maze_elf_end:
+
+adv_elf_start:
+    incbin "build/adv.elf"
+adv_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
