@@ -102,6 +102,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
+    char    sc_tag[16]; int sc_depth; uint32_t sc_savecolor;    /* active inline style="color:" scope (restores curcolor on close) */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
@@ -517,6 +518,22 @@ static uint32_t parse_color(const char *v, int vl) {
         if (streqs(buf, named[i].n)) return 0x01000000u | named[i].rgb;
     return 0;
 }
+/* Extract the `color:` value from an inline style="..." string and parse it (a tiny
+ * CSS subset). Skips `background-color:` by requiring a property boundary before `color`. */
+static uint32_t parse_style_color(const char *s, int n) {
+    for (int i = 0; i + 6 <= n; i++) {
+        if (lc(s[i])=='c' && lc(s[i+1])=='o' && lc(s[i+2])=='l' && lc(s[i+3])=='o' && lc(s[i+4])=='r' && s[i+5]==':') {
+            char before = (i > 0) ? s[i-1] : ' ';   /* must start a property, not be the tail of e.g. background-color */
+            if (before==' ' || before==';' || before=='\t' || before=='\n' || before=='"' || before=='\'') {
+                int k = i + 6; while (k < n && (s[k]==' '||s[k]=='\t')) k++;     /* skip ws after ':' */
+                int vs = k; while (k < n && s[k] != ';' && s[k] != '}') k++;     /* value to ';' or end */
+                int ve = k; while (ve > vs && (s[ve-1]==' '||s[ve-1]=='\t')) ve--;  /* trim trailing ws */
+                return parse_color(s + vs, ve - vs);
+            }
+        }
+    }
+    return 0;
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -532,6 +549,18 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     if (b->oc_depth > 0 && tageq(tag, b->oc_tag)) {
         if (closing) { if (--b->oc_depth == 0) { *curlink = b->oc_link; if (*style == STY_LINK) *style = b->oc_style; } }
         else b->oc_depth++;
+    }
+    if (b->sc_depth > 0 && tageq(tag, b->sc_tag)) {              /* inline style="color" scope: restore curcolor on its close */
+        if (closing) { if (--b->sc_depth == 0) b->curcolor = b->sc_savecolor; }
+        else b->sc_depth++;
+    }
+    if (!closing && b->sc_depth == 0 && !is_void_tag(tag)) {     /* open a colour scope for an element with style="color:..." */
+        const char *st; int stl;
+        if (find_attr(attrs, attrlen, "style", &st, &stl)) {
+            uint32_t c = parse_style_color(st, stl);
+            if (c) { b->sc_savecolor = b->curcolor; b->curcolor = c;
+                     int i = 0; while (tag[i] && i < 15) { b->sc_tag[i] = tag[i]; i++; } b->sc_tag[i] = 0; b->sc_depth = 1; }
+        }
     }
     if (!closing && b->oc_depth == 0 && !is_void_tag(tag)) {
         const char *oc; int ocl;
@@ -803,6 +832,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->textlen = b->ntok = b->hreflen = b->nlink = 0;
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
+    b->sc_depth = 0;                                     /* no inline style-colour scope open yet */
     b->form_action[0] = 0;                               /* no <form> action open yet */
     b->anc_n = 0;                                        /* fresh #fragment anchor table */
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
