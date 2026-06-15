@@ -1741,6 +1741,7 @@ void browser_back(browser_t *b) {
     if (!claim_fetch(b)) { copy_url(b->url, b->cur); return; }  /* lost race: restore, keep history */
     b->histn--;                                /* pop only after a successful claim */
     b->is_back = 0;
+    js_page_reset();                           /* this branch skips browser_navigate; drop the previous page's JS env so a script-less backed-to page doesn't reuse it */
     copy_url(b->cur, b->url);
     b->ntok = 0; b->nlrec = 0; b->scroll = 0;
     set_status(b, "loading...");

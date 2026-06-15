@@ -2764,7 +2764,7 @@ static int js_run_impl(const char *src, char *out, int outmax, int mode) {
     if (!g_err && !g_oom) {
         env *g = reuse ? g_page_env : new_env(0);
         if (g) {
-            if (!reuse) { install_globals(g); if (mode >= 1) g_page_env = g; }   /* page-begin persists the env */
+            if (!reuse) { install_globals(g); if (mode >= 1) g_page_env = g; }   /* persist on page-begin (1) AND a script-less page's first event (mode 2, no env yet) so its later clicks share state */
             eval_stmt(prog, g);
         }
     }
