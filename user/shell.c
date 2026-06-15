@@ -66,7 +66,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("cmds: help ls cat edit write rm cp mv mkdir cd pwd tree find grep hexdump wc sha256 crypt base64 run<p> get<url> wget<url file> browse<url> js<file> echo cal date ping resolve beep mem ps df history clear exit\n");
+            print("cmds: help ls cat head tail edit write rm cp mv mkdir cd pwd tree find grep hexdump wc sha256 crypt base64 run<p> get<url> wget<url file> browse<url> js<file> echo cal date ping resolve beep mem ps df history clear exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -81,6 +81,30 @@ int main(void) {
             } else {
                 buf[n] = '\0';
                 print(buf);
+            }
+        } else if (startswith(line, "head ")) {
+            char buf[2048];
+            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
+            if (n < 0) { print("head: no such file: "); print(line + 5); print("\n"); }
+            else {
+                int i = 0, lines = 0;
+                for (; i < n && lines < 20; i++) if (buf[i] == '\n') lines++;   /* first 20 lines */
+                buf[i] = '\0'; print(buf);
+                if (i < n) print("...\n");
+            }
+        } else if (startswith(line, "tail ")) {
+            char buf[2048];
+            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
+            if (n < 0) { print("tail: no such file: "); print(line + 5); print("\n"); }
+            else {
+                buf[n] = '\0';
+                int total = 0;
+                for (int i = 0; i < n; i++) if (buf[i] == '\n') total++;
+                if (n > 0 && buf[n - 1] != '\n') total++;
+                int skip = total > 20 ? total - 20 : 0;       /* keep the last 20 lines */
+                int i = 0, sk = 0;
+                while (i < n && sk < skip) { if (buf[i++] == '\n') sk++; }
+                print(buf + i);
             }
         } else if (streq(line, "js") || startswith(line, "js ")) {
             static char src[8192];
