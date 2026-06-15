@@ -1098,6 +1098,18 @@ static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names
  * for a plain call); arrow functions (node->prefix==1) deliberately do NOT bind
  * one, so `this` resolves lexically up the scope chain to the enclosing function. */
 static val call_function_this(val fn, val thisv, val *args, int nargs);   /* fwd: call_bound recurses into it */
+/* Does this function body reference `arguments`? (skips nested functions — they have their
+ * own.) Walked once per function then cached in node->num, so functions that never use it
+ * pay nothing (no per-call arguments allocation). The AST is MAXDEPTH-bounded, so the
+ * recursion is shallow. */
+static int node_uses_args(node *n){
+    if (!n) return 0;
+    if (n->type==N_FUNC && !n->prefix) return 0;   /* a nested NON-arrow function has its own arguments; arrows inherit, so descend into them */
+    if (n->type==N_IDENT && n->str && strcmp(n->str,"arguments")==0) return 1;
+    if (node_uses_args(n->a) || node_uses_args(n->b) || node_uses_args(n->c)) return 1;
+    for (int i=0;i<n->nlist;i++) if (n->list && node_uses_args(n->list[i])) return 1;
+    return 0;
+}
 /* A bound function (V_BOUND): prepend its bound `this` + partial args, then call
  * the original. Kept OUT of call_function_this so its comb[24] doesn't bloat that
  * hot, deeply-recursed frame. Depth-guarded so a bind() chain can't overflow. */
@@ -1136,6 +1148,10 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
         }
         val pv = (i<nargs) ? args[i] : (pn->a ? eval_expr(pn->a, fe) : UND());   /* default value if arg omitted */
         env_define(fe, node_name(pn), pv); }
+    if (!def->prefix) {   /* `arguments`: only for non-arrow functions that actually reference it (cached) */
+        if (def->num==0) def->num = node_uses_args(def->a) ? 1 : 2;
+        if (def->num==1) { obj *ao=new_obj(V_ARR); if(ao){ for(int i=0;i<nargs && !g_oom;i++) arr_push_val(ao,args[i]); val av=UND(); av.t=V_ARR; av.o=ao; env_define(fe,"arguments",av); } }   /* V_ARR val (obj_val would tag it V_OBJ) */
+    }
     comp c = eval_stmt(def->a, fe);
     g_depth--;
     return c.kind==C_RETURN ? c.v : UND();

@@ -171,6 +171,7 @@ print(typeof Date.now, Date.now() > 0, Date.now() % 1000, Date.now() === new Dat
 var _la=0; _la||=5; var _lb=3; _lb||=9; var _lc=null; _lc??=7; var _ld=0; _ld??=8;
 var _cnt=0; function _sf(){_cnt++;return 1;} var _lg=5; _lg||=_sf(); var _lh=1; _lh&&=8;
 print(_la,_lb,_lc,_ld,_lg,_cnt,_lh);
+function _argsum(){ var t=0; for(var i=0;i<arguments.length;i++) t+=arguments[i]; return t; } function _add(a,b){ return a+b; } print(_argsum(1,2,3,4), _argsum(), _add(2,3));
 print("-- class-fields --");
 class _Cf { n = 5; m = 2*3; inc(){ this.n++; return this.n; } }
 var _cf = new _Cf(); print(_cf.n, _cf.m, _cf.inc());
