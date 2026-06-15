@@ -586,7 +586,9 @@ int jpeg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             if (have_sof) return JE_ERR;
             rc = parse_sof(j, seglen); have_sof = 1; j->progressive = 1; break;
         case 0xC4: rc = parse_dht(j, seglen); break;          /* DHT */
-        case 0xDD: j->ri = rd16(j); break;                    /* DRI */
+        case 0xDD:                                            /* DRI: body is a 2-byte restart interval */
+            if (seglen < 2) return JE_ERR;                    /* guard rd16's 2-byte read: line 577 ensures p+seglen<=len, so seglen>=2 => p+2<=len (a short/truncated DRI would else OOB-read past data+len) */
+            j->ri = rd16(j); break;
         case 0xDA: rc = parse_sos(j, seglen); break;          /* SOS */
         default: break;                                       /* APPn/COM/etc: skip */
         }
