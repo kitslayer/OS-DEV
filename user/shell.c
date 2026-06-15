@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N> rot13<text>\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N> rot13<text> fizzbuzz<N>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -909,6 +909,21 @@ int main(void) {
             }
             out[i] = 0;
             print("  "); print(out); print("\n");
+        } else if (startswith(line, "fizzbuzz ")) {       /* the classic FizzBuzz up to N */
+            const char *p = line + 9; while (*p == ' ') p++;
+            int n = 0; while (*p >= '0' && *p <= '9' && n < 10000) n = n * 10 + (*p++ - '0');
+            if (n < 1 || n > 1000) print("usage: fizzbuzz <1-1000>\n");
+            else {
+                char nb[12]; print("  ");
+                for (int k = 1; k <= n; k++) {
+                    if (k % 15 == 0) print("FizzBuzz");
+                    else if (k % 3 == 0) print("Fizz");
+                    else if (k % 5 == 0) print("Buzz");
+                    else { itoa_simple(k, nb); print(nb); }
+                    print(" ");
+                }
+                print("\n");
+            }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
