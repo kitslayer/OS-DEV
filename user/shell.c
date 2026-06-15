@@ -88,7 +88,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
+            print("files:  ls cat head tail sort nl tac edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
@@ -185,6 +185,22 @@ int main(void) {
                 print(buf + i);
             }
             if (!any) print("usage: tail <file>...\n");
+        } else if (startswith(line, "tac ")) {           /* print a file's lines in reverse order */
+            static char buf[2048];
+            long n = sys_readfile(line + 4, buf, sizeof(buf) - 1);
+            if (n < 0) { print("tac: no such file: "); print(line + 4); print("\n"); }
+            else {
+                buf[n] = 0;
+                int starts[256], ns = 0; starts[ns++] = 0;
+                for (long i = 0; i < n; i++) if (buf[i] == '\n' && ns < 256) starts[ns++] = (int)(i + 1);
+                for (int k = ns - 1; k >= 0; k--) {
+                    int s = starts[k]; if (s >= (int)n) continue;     /* skip empty trailing line */
+                    int e = s; while (e < (int)n && buf[e] != '\n') e++;
+                    char save = buf[e]; buf[e] = 0;
+                    print(buf + s); print("\n");
+                    buf[e] = save;
+                }
+            }
         } else if (startswith(line, "sort ")) {
             static char buf[2048];
             long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
