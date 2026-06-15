@@ -798,6 +798,9 @@ static val STRV(const char *s){ val v=UND(); v.t=V_STR; v.str=s?s:""; return v; 
 static val g_throwval;        /* value of the in-flight `throw` (when g_threw) */
 
 static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
+/* The built-in Array/Object constructor objects, recorded at setup so `instanceof`
+ * can recognise array/object literals against them (they have no ctor_class link). M419 */
+static obj *g_array_ctor, *g_object_ctor;
 
 /* True only for objects whose keys[]/vals[] are real keyed properties (V_OBJ and
  * V_REGEX, which use obj_set). V_ARR/V_MAP/V_SET/V_DATE store data in vals[] via
@@ -1458,6 +1461,8 @@ static val eval_expr_inner(node *n, env *e) {
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
                     return BOOLV(0);
                 case 'S':   /* `instanceof`: the instance's ctor chain (classes) OR the RHS's .prototype in the instance's proto chain (M264) */
+                    if (b.o && b.o==g_array_ctor) return BOOLV(a.t==V_ARR);   /* [..] instanceof Array (literals carry no ctor_class) M419 */
+                    if (b.o && b.o==g_object_ctor) return BOOLV(a.t==V_ARR||a.t==V_OBJ||a.t==V_FUN||a.t==V_NATIVE);   /* arrays/objects/functions are all `instanceof Object` M419 */
                     if (a.t!=V_OBJ || !a.o || (b.t!=V_FUN && b.t!=V_NATIVE) || !b.o) return BOOLV(0);   /* RHS: a class (V_FUN) or a native ctor (Map/Set/Error/Date) */
                     for (obj *c=a.o->ctor_class; c; c=c->parent_class) if (c==b.o) return BOOLV(1);
                     if (b.o->fn_proto) { int g=0; for (obj *p=a.o->proto; p && ++g<=JS_PROTO_MAX; p=p->proto) if (p==b.o->fn_proto) return BOOLV(1); }   /* Object.create(F.prototype) instanceof F */
@@ -2852,7 +2857,7 @@ static void install_globals(env *g) {
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"hasOwn",nat_obj_hasOwn); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"defineProperties",nat_obj_defineProperties); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"getOwnPropertyDescriptors",nat_obj_getOwnPropertyDescriptors); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"hasOwn",nat_obj_hasOwn); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"defineProperties",nat_obj_defineProperties); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"getOwnPropertyDescriptors",nat_obj_getOwnPropertyDescriptors); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); g_object_ctor=objc; env_define(g,"Object",obj_val(objc));
     { obj *refl=new_obj(V_OBJ); if(refl){ def_native(refl,"get",nat_reflect_get); def_native(refl,"has",nat_reflect_has); def_native(refl,"set",nat_reflect_set); def_native(refl,"deleteProperty",nat_reflect_deleteProperty); def_native(refl,"ownKeys",nat_reflect_ownKeys); env_define(g,"Reflect",obj_val(refl)); } }   /* Reflect metaprogramming namespace (M277) */
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
@@ -2861,7 +2866,7 @@ static void install_globals(env *g) {
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
     { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */
         obj *ast=new_obj(V_OBJ); if(ast){ def_native(ast,"isArray",nat_array_isArray); def_native(ast,"from",nat_array_from); def_native(ast,"of",nat_array_of); arrc->statics=ast; }
-        env_define(g,"Array",obj_val_native(arrc)); } }
+        g_array_ctor=arrc; env_define(g,"Array",obj_val_native(arrc)); } }
     /* JSON (stringify) */
     obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
     /* global functions */
