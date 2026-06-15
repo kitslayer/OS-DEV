@@ -2466,6 +2466,18 @@ static val sclone(val v, sclone_pair *seen, int *nseen, int cap, int depth) {
 }
 static val nat_structured_clone(val *a, int n){ if(!n) return UND(); sclone_pair seen[128]; int nseen=0; return sclone(a[0], seen, &nseen, 128, 0); }
 
+/* Reflect: standard metaprogramming namespace mirroring the core object operations. get reuses
+ * the read path (fires getters, walks the proto chain); ownKeys = Object.keys; deleteProperty =
+ * delete; has = own+prototype existence; set fires an own setter else writes an own data prop. (M277) */
+static val nat_reflect_get(val *a, int n){ if(n<2) return UND(); return eval_member_get(a[0], val_to_str(a[1])); }
+static val nat_reflect_has(val *a, int n){ if(n<2 || a[0].t!=V_OBJ || !obj_keyed(a[0].o)) return BOOLV(0); const char *k=val_to_str(a[1]); val t;
+    if(obj_get(a[0].o,k,&t)) return BOOLV(1); int g=0; for(obj*p=a[0].o->proto; p && ++g<=JS_PROTO_MAX; p=p->proto) if(obj_get(p,k,&t)) return BOOLV(1); return BOOLV(0); }
+static val nat_reflect_set(val *a, int n){ if(n<3 || a[0].t!=V_OBJ || !obj_keyed(a[0].o)) return BOOLV(0); obj*o=a[0].o; const char*k=val_to_str(a[1]); val cur;
+    if(obj_get(o,k,&cur) && is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF){ val rv=a[2]; call_function_this(s,a[0],&rv,1); } return BOOLV(1); }
+    obj_set(o,k,a[2]); return BOOLV(1); }
+static val nat_reflect_deleteProperty(val *a, int n){ if(n<2 || a[0].t!=V_OBJ || !a[0].o) return BOOLV(0); return BOOLV(obj_delete(a[0].o, val_to_str(a[1]))); }
+static val nat_reflect_ownKeys(val *a, int n){ return nat_obj_keys(a,n); }   /* own enumerable keys (= Object.keys) */
+
 static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
     /* console.log */
@@ -2515,6 +2527,7 @@ static void install_globals(env *g) {
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
     obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"hasOwn",nat_obj_hasOwn); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"defineProperties",nat_obj_defineProperties); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); env_define(g,"Object",obj_val(objc));
+    { obj *refl=new_obj(V_OBJ); if(refl){ def_native(refl,"get",nat_reflect_get); def_native(refl,"has",nat_reflect_has); def_native(refl,"set",nat_reflect_set); def_native(refl,"deleteProperty",nat_reflect_deleteProperty); def_native(refl,"ownKeys",nat_reflect_ownKeys); env_define(g,"Reflect",obj_val(refl)); } }   /* Reflect metaprogramming namespace (M277) */
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *wm=new_obj(V_NATIVE); if(wm){ wm->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=wm; env_define(g,"WeakMap",v); } }   /* WeakMap: backed by Map (no GC, so weak refs are moot) -- distinct ctor for instanceof (M273) */
