@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (271 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (283 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -48,15 +48,26 @@
 > string `<`/`>` was always `false` (coerced to 0), `1===true` was `true`, and
 > `arr.length =` was ignored.
 >
+> **M281–283 added `querySelector`/`querySelectorAll`/`getElementsByTagName`/
+> `getElementsByClassName` by CSS selector** (`tag`/`.class`/`#id`/compounds) +
+> `getAttribute` + WRITE (`textContent`/`innerHTML`/`setAttribute`/`remove`) on
+> matches — **without** a DOM tree. The "an id-less match has no name to address
+> it by" blocker is solved with **byte-offset position handles** (the matched
+> `<`'s offset in `vals[1]`), fully additive (the id path stays byte-identical),
+> with the write splice duplicated from the id path and the offset re-validated
+> each use (memory-safe; single-match writes exact, multi-write best-effort). So
+> the common selector-query DOM API is now covered on the token-stream renderer;
+> only node *construction* still needs the tree.
+>
 > What remains is either *fundamentally blocked by the integer-only Number*
 > (`Math.random`, float math, `isFinite`/full `isNaN` — all need a NaN /
 > floating-point representation we deliberately don't have) or genuinely
-> *architectural*: a real **DOM tree** (`querySelectorAll`/`createElement`), a
+> *architectural*: a real **DOM tree** (`createElement`/node construction), a
 > **persistent per-page JS environment** (`addEventListener` — the arena resets
 > per run), **CSS/layout**, **generators/iterators**, **async/Promises**,
 > **modules**, **Proxy**, **`Symbol`**.
 
-OS-DEV is a **graphical desktop OS** (271 milestones). It boots to a themed
+OS-DEV is a **graphical desktop OS** (283 milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and six
 games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
