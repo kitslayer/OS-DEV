@@ -427,20 +427,20 @@ int main(void) {
             if (sys_sha512(line + 7, hex, sizeof(hex)) < 0) print("sha512: no such file\n");
             else { print("  "); print(hex); print("\n"); }
         } else if (startswith(line, "grep ")) {
-            char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0;
+            char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0, cc = 0;
             while (*p == ' ') p++;
             while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insensitive), -n (line #s), combinable as -in */
                 if (p[1] == '-' && (p[2] == ' ' || p[2] == 0)) { p += 2; while (*p == ' ') p++; break; }  /* "--": end of flags (pattern may then start with '-') */
                 int t, valid = 1;
-                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n') valid = 0;
+                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n' && p[t] != 'c') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a pattern starting with '-') */
-                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else nn = 1; }
+                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else if (p[t] == 'n') nn = 1; else cc = 1; }
                 p += t; while (*p == ' ') p++;
             }
             while (*p && *p != ' ' && i < 39) pat[i++] = *p++;
             pat[i] = 0;
             while (*p == ' ') p++;
-            if (pat[0] == 0 || *p == 0) { print("usage: grep [-in] <pattern> <file>...\n"); }
+            if (pat[0] == 0 || *p == 0) { print("usage: grep [-inc] <pattern> <file>...\n"); }
             else {
                 static char buf[2048];
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
@@ -466,19 +466,23 @@ int main(void) {
                                 if (!pat[b]) found = 1;
                             }
                             if (found) {
-                                char save = buf[k]; buf[k] = 0;
-                                if (fcount > 1) print(name);
-                                if (fcount > 1 && nn) print(":");
-                                if (nn) { char ln_[12]; itoa_simple(lno, ln_); print(ln_); }
-                                if (fcount > 1 || nn) print(": "); else print("  ");
-                                print(buf + ls); print("\n");
-                                buf[k] = save; hits++;
+                                hits++;
+                                if (!cc) {                  /* -c: count only, don't print the line */
+                                    char save = buf[k]; buf[k] = 0;
+                                    if (fcount > 1) print(name);
+                                    if (fcount > 1 && nn) print(":");
+                                    if (nn) { char ln_[12]; itoa_simple(lno, ln_); print(ln_); }
+                                    if (fcount > 1 || nn) print(": "); else print("  ");
+                                    print(buf + ls); print("\n");
+                                    buf[k] = save;
+                                }
                             }
                             ls = (int)k + 1;
                         }
                     }
                 }
-                if (!hits) print("  (no matches)\n");
+                if (cc) { char cb[12]; itoa_simple(hits, cb); print("  "); print(cb); print("\n"); }
+                else if (!hits) print("  (no matches)\n");
             }
         } else if (startswith(line, "wc ")) {
             static char buf[2048];
