@@ -94,7 +94,7 @@ int main(void) {
             print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc] tr\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
-            print("crypto: sha256<file> sha512<file> crc32<file> crypt base64\n");
+            print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
             print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
@@ -775,6 +775,15 @@ int main(void) {
             };
             int fn = (int)(sizeof(fortunes) / sizeof(fortunes[0]));
             print(fortunes[shroll() % (unsigned)fn]); print("\n");
+        } else if (streq(line, "genpass") || startswith(line, "genpass ")) {   /* random password (CLI companion to passgen.htm) */
+            int n = 16;
+            if (line[7] == ' ') { const char *p = line + 8; while (*p == ' ') p++; if (*p >= '0' && *p <= '9') { n = 0; while (*p >= '0' && *p <= '9' && n < 1000) n = n * 10 + (*p++ - '0'); } }
+            if (n < 1) n = 16;
+            if (n > 64) n = 64;
+            static const char gcs[] = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*";   /* no ambiguous l/I/O/0/1 */
+            int gl = (int)sizeof(gcs) - 1;
+            char gp[66]; for (int i = 0; i < n; i++) gp[i] = gcs[shroll() % (unsigned)gl]; gp[n] = 0;
+            print("  "); print(gp); print("\n");
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
