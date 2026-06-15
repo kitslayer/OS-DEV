@@ -100,15 +100,18 @@ int main(void) {
             print(buf);
         } else if (startswith(line, "cat ")) {
             char buf[2048];
-            long n = sys_readfile(line + 4, buf, sizeof(buf) - 1);
-            if (n < 0) {
-                print("cat: no such file: ");
-                print(line + 4);
-                print("\n");
-            } else {
-                buf[n] = '\0';
-                print(buf);
+            const char *p = line + 4; int any = 0;
+            while (*p) {                                  /* concatenate each space-separated file */
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int i = 0;
+                while (*p && *p != ' ' && i < 63) name[i++] = *p++;
+                name[i] = '\0'; any = 1;
+                long n = sys_readfile(name, buf, sizeof(buf) - 1);
+                if (n < 0) { print("cat: no such file: "); print(name); print("\n"); }
+                else { buf[n] = '\0'; print(buf); }
             }
+            if (!any) print("usage: cat <file>...\n");
         } else if (startswith(line, "head ")) {
             char buf[2048];
             long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
