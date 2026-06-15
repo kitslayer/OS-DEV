@@ -228,4 +228,5 @@ print(-1>>>28, 16>>>2, -8>>1, -8>>>1, 8>>>1+1);  // 15 4 -4 2147483644 2 (>>> un
 var _u=-1; _u>>>=0; var _ss=256; _ss>>>=4; var _sl=3; _sl<<=2; print(_u, _ss, _sl);  // 4294967295 16 12 (>>>= compound assignment, M270)
 var _xu; print(null==undefined, null===undefined, "5"==5, "5"===5, 1==true, 1===true, _xu==null, {}=={}, [1]==1);  // true false true false true false true false true (loose == vs strict ===, M271)
 print({}==[], []==[], [1]==1, [1,2]=="1,2");  // false false true true (distinct objects by identity; object->primitive coercion; M271 review fix)
+print([1,2,3,4,5].copyWithin(0,3).join(","), [1,2,3,4,5].copyWithin(1,3,4).join(","));  // 4,5,3,4,5 1,4,3,4,5 (copyWithin in place, M272)
 print("-- done --");

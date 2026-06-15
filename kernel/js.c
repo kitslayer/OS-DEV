@@ -1951,6 +1951,13 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         for(int i=2;i<nargs;i++) arr_push_val(r,args[i]);           /* inserted items */
         for(int i=start+del;i<o->n;i++) arr_push_val(r,o->vals[i]); /* tail */
         val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"copyWithin")==0){   /* copyWithin(target, start, end): copy the slice [start,end) over target, in place (M272) */
+        int len=o->n; int tgt=nargs>0?(int)to_num(args[0]):0, st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):len;
+        if(tgt<0)tgt+=len; if(st<0)st+=len; if(en<0)en+=len;
+        if(tgt<0)tgt=0; if(st<0)st=0; if(en<0)en=0; if(tgt>len)tgt=len; if(st>len)st=len; if(en>len)en=len;
+        int count=en-st; if(count>len-tgt)count=len-tgt;
+        if(count>0) memmove(&o->vals[tgt], &o->vals[st], (size_t)count*sizeof(val));   /* memmove handles overlapping ranges */
+        return recv; }
     rt_err("unknown array method"); return UND();
 }
 
