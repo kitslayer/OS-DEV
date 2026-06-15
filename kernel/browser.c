@@ -55,6 +55,7 @@ typedef struct { int16_t x, y, w, h; uint16_t link; } lrec_t;  /* a clickable re
 typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32]; } sel_t;  /* one simple CSS selector (tag/.class/#id/[attr]) */
 
 #define CSS_MAX 24                  /* simple style rules captured from <style> blocks per page */
+#define SC_MAX  16                  /* max nesting depth of active style scopes (color/weight) */
 
 struct browser {
     char    url[URL_MAX];
@@ -105,8 +106,8 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    char    sc_tag[16]; int sc_depth; uint32_t sc_savecolor;    /* active inline style="color:" scope (restores curcolor on close) */
-    int     sc_savestyle, sc_setstyle;                          /* same scope's text-style save + the STY_ it applied (-1 = none), for font-weight/font-style */
+    struct { char tag[16]; int depth; uint32_t savecolor; int savestyle, setstyle; } sc[SC_MAX];  /* nested style scopes (color/font-weight/font-style), a stack so nested styled elements compose */
+    int     sc_sp;                                              /* number of active style frames (0 = none) */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
@@ -593,14 +594,19 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         if (closing) { if (--b->oc_depth == 0) { *curlink = b->oc_link; if (*style == STY_LINK) *style = b->oc_style; } }
         else b->oc_depth++;
     }
-    if (b->sc_depth > 0 && tageq(tag, b->sc_tag)) {              /* inline style scope: restore curcolor (+ text-style) on its close */
-        if (closing) { if (--b->sc_depth == 0) {
-            b->curcolor = b->sc_savecolor;
-            if (b->sc_setstyle >= 0 && *style == b->sc_setstyle) *style = b->sc_savestyle;  /* restore only if still ours (mirror oc_*) */
-        } }
-        else b->sc_depth++;
-    }
-    if (!closing && b->sc_depth == 0 && !is_void_tag(tag)) {     /* open an inline-style scope: color and/or font-weight/font-style */
+    /* style scope STACK (color / font-weight / font-style from inline style= and <style> rules).
+     * A styled element pushes a frame; its matching close pops it (restoring colour + text-style),
+     * so nested styled elements compose. Same-tag nesting is depth-counted per frame; the restore
+     * mirrors the oc_* link scope (only if *style is still the one we set). */
+    if (closing) {
+        if (b->sc_sp > 0 && tageq(tag, b->sc[b->sc_sp-1].tag)) {
+            if (--b->sc[b->sc_sp-1].depth == 0) {
+                int sp = --b->sc_sp;
+                b->curcolor = b->sc[sp].savecolor;
+                if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
+            }
+        }
+    } else if (!is_void_tag(tag)) {
         uint32_t c = 0; int ts = -1;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts);   /* <style> rules first (lower priority) */
         const char *st; int stl;
@@ -609,11 +615,18 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int its = parse_style_textstyle(st, stl);  if (its >= 0) ts = its;
         }
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts) {
-            b->sc_savecolor = b->curcolor; if (c) b->curcolor = c;
-            b->sc_savestyle = *style; b->sc_setstyle = -1;
-            if (apply_ts) { *style = ts; b->sc_setstyle = ts; }
-            int i = 0; while (tag[i] && i < 15) { b->sc_tag[i] = tag[i]; i++; } b->sc_tag[i] = 0; b->sc_depth = 1;
+        if (c || apply_ts) {                                /* styled element -> push a frame */
+            if (b->sc_sp < SC_MAX) {
+                int sp = b->sc_sp;
+                b->sc[sp].savecolor = b->curcolor; if (c) b->curcolor = c;
+                b->sc[sp].savestyle = *style; b->sc[sp].setstyle = -1;
+                if (apply_ts) { *style = ts; b->sc[sp].setstyle = ts; }
+                int i = 0; while (tag[i] && i < 15) { b->sc[sp].tag[i] = tag[i]; i++; } b->sc[sp].tag[i] = 0;
+                b->sc[sp].depth = 1;
+                b->sc_sp++;
+            }   /* stack full: skip (no scope) — graceful, never overflows */
+        } else if (b->sc_sp > 0 && tageq(tag, b->sc[b->sc_sp-1].tag)) {
+            b->sc[b->sc_sp-1].depth++;                       /* unstyled same-tag nesting of the top frame */
         }
     }
     if (!closing && b->oc_depth == 0 && !is_void_tag(tag)) {
@@ -886,7 +899,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->textlen = b->ntok = b->hreflen = b->nlink = 0;
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
-    b->sc_depth = 0;                                     /* no inline style-colour scope open yet */
+    b->sc_sp = 0;                                        /* no style scopes open yet */
     b->n_css = 0;                                        /* <style> rules captured fresh each parse */
     b->form_action[0] = 0;                               /* no <form> action open yet */
     b->anc_n = 0;                                        /* fresh #fragment anchor table */
