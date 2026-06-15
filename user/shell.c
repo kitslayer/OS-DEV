@@ -767,12 +767,19 @@ int main(void) {
                 int y = 0; while (*p >= '0' && *p <= '9') { if (y < 1000000) y = y*10 + (*p - '0'); p++; }
                 if (y < 1 || y > 9999) print("usage: cal -y <year>\n");
                 else for (int mm = 1; mm <= 12; mm++) cmd_cal_ym(y, mm, 0);    /* the full year, month by month */
+            } else if (p[0] == '-' && p[1] == '3') {      /* cal -3 : previous, current, next month */
+                char t[24]; sys_time(t, sizeof(t));
+                int y = (t[0]-'0')*1000 + (t[1]-'0')*100 + (t[2]-'0')*10 + (t[3]-'0');
+                int m = (t[5]-'0')*10 + (t[6]-'0'), today = (t[8]-'0')*10 + (t[9]-'0');
+                int pm = m-1, py = y; if (pm < 1) { pm = 12; py--; }
+                int nm = m+1, ny = y; if (nm > 12) { nm = 1; ny++; }
+                cmd_cal_ym(py, pm, 0); cmd_cal_ym(y, m, today); cmd_cal_ym(ny, nm, 0);
             } else {
                 int m = 0, y = 0;
                 while (*p >= '0' && *p <= '9') { if (m < 1000000) m = m*10 + (*p - '0'); p++; }
                 while (*p == ' ') p++;
                 while (*p >= '0' && *p <= '9') { if (y < 1000000) y = y*10 + (*p - '0'); p++; }
-                if (m < 1 || m > 12 || y < 1 || y > 9999) print("usage: cal <month 1-12> <year>  |  cal -y <year>\n");
+                if (m < 1 || m > 12 || y < 1 || y > 9999) print("usage: cal <month 1-12> <year>  |  cal -y <year>  |  cal -3\n");
                 else cmd_cal_ym(y, m, 0);
             }
         } else if (startswith(line, "weekday ")) {        /* weekday YYYYMMDD -> the day name (Sakamoto) */
