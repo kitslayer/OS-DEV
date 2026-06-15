@@ -2391,6 +2391,13 @@ static val nat_array_from(val *a, int n){
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
 static val nat_array_of(val *a, int n){ obj *r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<n && !g_oom;i++) arr_push_val(r,a[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
+/* Array(...) / new Array(...): a single NUMBER arg -> a length-n array of undefined;
+ * otherwise the args become the elements. Array is a callable V_NATIVE (so `typeof Array`
+ * === "function"); isArray/from/of live on its side statics, like Number/String. (M268) */
+static val nat_array_ctor(val *a, int n){ obj *r=new_obj(V_ARR); if(!r){g_oom=1;return UND();}
+    if (n==1 && a[0].t==V_NUM) { int64_t len=a[0].num; if(len<0||len>(1<<24)){ rt_err("invalid array length"); return UND(); } for(int64_t i=0;i<len && !g_oom;i++) arr_push_val(r,UND()); }
+    else { for(int i=0;i<n && !g_oom;i++) arr_push_val(r,a[i]); }
+    val v=UND(); v.t=V_ARR; v.o=r; return v; }
 
 /* register a native function on object `o` under `name` */
 static void def_native(obj *o, const char *name, val (*fn)(val*,int)){
@@ -2474,7 +2481,9 @@ static void install_globals(env *g) {
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
-    obj *arrc=new_obj(V_OBJ); def_native(arrc,"isArray",nat_array_isArray); def_native(arrc,"from",nat_array_from); def_native(arrc,"of",nat_array_of); env_define(g,"Array",obj_val(arrc));
+    { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */
+        obj *ast=new_obj(V_OBJ); if(ast){ def_native(ast,"isArray",nat_array_isArray); def_native(ast,"from",nat_array_from); def_native(ast,"of",nat_array_of); arrc->statics=ast; }
+        env_define(g,"Array",obj_val_native(arrc)); } }
     /* JSON (stringify) */
     obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
     /* global functions */
