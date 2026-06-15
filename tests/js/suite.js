@@ -229,4 +229,5 @@ var _u=-1; _u>>>=0; var _ss=256; _ss>>>=4; var _sl=3; _sl<<=2; print(_u, _ss, _s
 var _xu; print(null==undefined, null===undefined, "5"==5, "5"===5, 1==true, 1===true, _xu==null, {}=={}, [1]==1);  // true false true false true false true false true (loose == vs strict ===, M271)
 print({}==[], []==[], [1]==1, [1,2]=="1,2");  // false false true true (distinct objects by identity; object->primitive coercion; M271 review fix)
 print([1,2,3,4,5].copyWithin(0,3).join(","), [1,2,3,4,5].copyWithin(1,3,4).join(","));  // 4,5,3,4,5 1,4,3,4,5 (copyWithin in place, M272)
+var _wm=new WeakMap(),_wk={}; _wm.set(_wk,7); var _ws=new WeakSet(),_wo={}; _ws.add(_wo); print(_wm.get(_wk), _wm.has(_wk), _ws.has(_wo), _wm instanceof WeakMap);  // 7 true true true (WeakMap/WeakSet, M273)
 print("-- done --");
