@@ -39,6 +39,7 @@
 #define SYS_history 29 /* (buf, len)      -> recent command history; bytes      */
 #define SYS_https  30  /* (host,path,buf,max) -> HTTPS GET bytes via TLS 1.3, or -1 */
 #define SYS_js     31  /* (src, out, outmax)  -> run JavaScript; output bytes, or -1 */
+#define SYS_setcolor 32 /* (idx)            -> set the app text colour (palette 0-15)  */
 
 #define SYSCALL_VECTOR 0x80
 

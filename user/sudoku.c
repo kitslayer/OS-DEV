@@ -75,23 +75,26 @@ static int render(void) {
     p = 0; puts_(line, &p, "  Sudoku    ");
     if (solved)     puts_(line, &p, "** SOLVED! **");
     else          { puts_(line, &p, "conflicts: "); putn_(line, &p, conf); }
-    line[p] = 0; print(line); print("\n");
+    line[p] = 0;
+    sys_setcolor(solved ? 9 : 8);            /* header: lime when solved, else grey */
+    print(line); print("\n");
 
     for (int r = 0; r < 9; r++) {
-        if (r % 3 == 0) { print(SEP); print("\n"); }
-        p = 0; line[p++] = '|';
+        if (r % 3 == 0) { sys_setcolor(8); print(SEP); print("\n"); }
         for (int c = 0; c < 9; c++) {
+            if (c % 3 == 0) { sys_setcolor(8); print("|"); }
             char d = cell[r][c] ? (char)('0' + cell[r][c]) : '.';
-            char l = ' ', rt = ' ';
-            if (r == cy && c == cx)      { l = '['; rt = ']'; }   /* cursor */
-            else if (conflict(r, c))     { l = '('; rt = ')'; }   /* clashes */
-            line[p++] = l; line[p++] = d; line[p++] = rt;
-            if (c % 3 == 2) line[p++] = '|';
+            char l = ' ', rt = ' '; int col = 0;                       /* entry / empty: green */
+            if (r == cy && c == cx)  { l = '['; rt = ']'; col = 4; }   /* cursor: cyan */
+            else if (conflict(r, c)) { l = '('; rt = ')'; col = 2; }   /* clash: red */
+            else if (given[r][c])    col = 1;                          /* clue: white */
+            char cb[4]; cb[0] = l; cb[1] = d; cb[2] = rt; cb[3] = 0;
+            sys_setcolor(col); print(cb);
         }
-        line[p] = 0; print(line); print("\n");
+        sys_setcolor(8); print("|\n");
     }
-    print(SEP); print("\n");
-    print(" arrows move  1-9 set  0 clr  n new  q quit\n");
+    sys_setcolor(8); print(SEP); print("\n");
+    sys_setcolor(0); print(" arrows move  1-9 set  0 clr  n new  q quit\n");
     return solved;
 }
 

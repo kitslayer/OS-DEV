@@ -128,6 +128,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_clear:
         app_sys_clear();
         break;
+    case SYS_setcolor:
+        app_setcolor((int)r->rdi);
+        break;
     case SYS_writefile:
         r->rax = (uint64_t)vfs_write((const char *)r->rdi, (const void *)r->rsi, r->rdx);
         break;

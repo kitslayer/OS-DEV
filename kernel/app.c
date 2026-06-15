@@ -38,6 +38,8 @@ struct app {
     char        titlebuf[24];            /* persistent copy of the title */
     uint64_t cr3, entry, ustack;
     char     grid[APP_ROWS][APP_COLS];
+    uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
+    uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
     int      cx, cy;
     char     sb[SB_ROWS][APP_COLS];      /* scrollback: lines that scrolled off */
     int      sb_count;                   /* how many scrollback lines are stored */
@@ -52,6 +54,13 @@ struct app {
 
 static struct app apps[MAX_APPS];
 static int next_pid = 100;
+
+/* text-colour palette for apps (index 0 = the default green, so an app that never
+ * calls SYS_setcolor renders byte-identically). Vivid hues on the dark app background. */
+static const uint32_t app_palette[16] = {
+    0x33FF66, 0xEAEAEA, 0xFF5555, 0xFFE048, 0x44E0FF, 0xFF6CE0, 0x6E9CFF, 0xFF9A3C,
+    0x9098A0, 0xB6FF4A, 0x2FE0C0, 0xB98CFF, 0xE8C040, 0xFF7A5C, 0x40C0FF, 0x6CFFB0,
+};
 
 /* apps awaiting a window from the window manager */
 static struct app *pending[MAX_APPS];
@@ -90,7 +99,7 @@ static struct app *cur(void) { return (struct app *)task_self()->proc; }
 /* ---- text grid ---- */
 static void grid_clear(struct app *a) {
     for (int r = 0; r < APP_ROWS; r++)
-        for (int c = 0; c < APP_COLS; c++) a->grid[r][c] = ' ';
+        for (int c = 0; c < APP_COLS; c++) { a->grid[r][c] = ' '; a->gcol[r][c] = 0; }
     a->cx = a->cy = 0;
     a->sb_count = 0; a->view = 0;
     a->gdirty = 1;
@@ -106,6 +115,8 @@ static void grid_scroll(struct app *a) {
     }
     for (int r = 1; r < APP_ROWS; r++) memcpy(a->grid[r-1], a->grid[r], APP_COLS);
     for (int c = 0; c < APP_COLS; c++) a->grid[APP_ROWS-1][c] = ' ';
+    for (int r = 1; r < APP_ROWS; r++) memcpy(a->gcol[r-1], a->gcol[r], APP_COLS);   /* live colours scroll with their rows */
+    for (int c = 0; c < APP_COLS; c++) a->gcol[APP_ROWS-1][c] = 0;
     a->cy = APP_ROWS - 1;
 }
 static void grid_nl(struct app *a) { a->cx = 0; if (++a->cy >= APP_ROWS) grid_scroll(a); }
@@ -125,6 +136,7 @@ static void grid_putc(struct app *a, char ch) {
     if (ch == '\n') { grid_nl(a); return; }
     if (ch == '\r') { a->cx = 0; return; }
     a->grid[a->cy][a->cx] = ch;
+    a->gcol[a->cy][a->cx] = a->curcol;
     if (++a->cx >= APP_COLS) grid_nl(a);
 }
 
@@ -133,10 +145,13 @@ void app_render(app_t *a, int px, int py) {
     for (int r = 0; r < APP_ROWS; r++) {
         int L = (a->sb_count - a->view) + r;        /* logical row in the combined buffer */
         for (int c = 0; c < APP_COLS; c++) {
-            char ch = ' ';
-            if (L >= 0 && L < a->sb_count) ch = a->sb[L][c];
-            else if (L >= a->sb_count && (L - a->sb_count) < APP_ROWS) ch = a->grid[L - a->sb_count][c];
-            fb_glyph(px + c * font_width, py + r * font_height, ch, 0x33FF66, 0x0A0A0A);
+            char ch = ' '; uint32_t fg = 0x33FF66;
+            if (L >= 0 && L < a->sb_count) ch = a->sb[L][c];               /* scrollback: default green */
+            else if (L >= a->sb_count && (L - a->sb_count) < APP_ROWS) {
+                int gr = L - a->sb_count; ch = a->grid[gr][c];
+                fg = app_palette[a->gcol[gr][c] & 15];                     /* live grid: per-cell colour */
+            }
+            fb_glyph(px + c * font_width, py + r * font_height, ch, fg, 0x0A0A0A);
         }
     }
     if (a->view > 0)                                /* scrolled-up indicator (top-right) */
@@ -265,6 +280,7 @@ int app_sys_read(char *buf, unsigned max) {
 
 int  app_sys_getpid(void) { return cur()->pid; }
 void app_sys_clear(void)  { grid_clear(cur()); }
+void app_setcolor(int idx) { struct app *a = cur(); if (a) a->curcol = (uint8_t)(idx & 15); }
 void app_sys_exit(void)   { cur()->exited = 1; task_exit(); }
 
 /* Format the caller's command history (oldest first) as "  N  command\n"

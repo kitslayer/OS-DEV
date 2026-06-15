@@ -43,17 +43,22 @@ static int escape(long cr, long ci) {
 
 static void render(void) {
     sys_clear();
+    sys_setcolor(8);                       /* help line in grey */
     print(" arrows pan   +/- zoom   r reset   q quit\n");
-    char line[W + 2];
     for (int py = 0; py < H; py++) {
         long ci = cy0 + (long)((long long)py * spany / H);
         for (int px = 0; px < W; px++) {
             long cr = cx0 + (long)((long long)px * spanx / W);
             int it = escape(cr, ci);
-            line[px] = (it >= MAXIT) ? PAL[NPAL] : PAL[it * NPAL / MAXIT];
+            char ch; int col;
+            if (it >= MAXIT) { ch = PAL[NPAL]; col = 0; }                  /* in the set: '@', green */
+            else { ch = PAL[it * NPAL / MAXIT]; col = 1 + (it * 14) / MAXIT; }  /* escape band -> colour by speed */
+            sys_setcolor(col);
+            sys_write(1, &ch, 1);
         }
-        line[W] = '\n'; line[W + 1] = 0; print(line);
+        sys_write(1, "\n", 1);
     }
+    sys_setcolor(0);
 }
 
 int main(void) {
