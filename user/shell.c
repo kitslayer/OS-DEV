@@ -66,7 +66,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("cmds: help ls cat head tail edit write rm cp mv mkdir cd pwd tree find grep hexdump wc sha256 crypt base64 run<p> get<url> wget<url file> browse<url> js<file> echo cal date ping resolve beep mem ps df history clear exit\n");
+            print("cmds: help ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc sha256 crypt base64 run<p> get<url> wget<url file> browse<url> js<file> echo cal date ping resolve beep mem ps df history clear exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -105,6 +105,30 @@ int main(void) {
                 int i = 0, sk = 0;
                 while (i < n && sk < skip) { if (buf[i++] == '\n') sk++; }
                 print(buf + i);
+            }
+        } else if (startswith(line, "sort ")) {
+            static char buf[2048];
+            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
+            if (n < 0) { print("sort: no such file: "); print(line + 5); print("\n"); }
+            else {
+                buf[n] = '\0';
+                char *lns[128]; int nl = 0; char *p = buf;
+                while (*p && nl < 128) {                       /* split into lines */
+                    lns[nl++] = p;
+                    while (*p && *p != '\n') p++;
+                    if (*p == '\n') *p++ = '\0';
+                }
+                for (int i = 1; i < nl; i++) {                 /* insertion sort (byte order) */
+                    char *key = lns[i]; int j = i - 1;
+                    while (j >= 0) {
+                        const char *a = lns[j], *b = key;
+                        while (*a && *a == *b) { a++; b++; }
+                        if ((unsigned char)*a <= (unsigned char)*b) break;
+                        lns[j+1] = lns[j]; j--;
+                    }
+                    lns[j+1] = key;
+                }
+                for (int i = 0; i < nl; i++) { print(lns[i]); print("\n"); }
             }
         } else if (streq(line, "js") || startswith(line, "js ")) {
             static char src[8192];
