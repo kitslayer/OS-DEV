@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N>\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N> rot13<text>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -898,6 +898,17 @@ int main(void) {
                 }
                 print("\n");
             }
+        } else if (startswith(line, "rot13 ")) {          /* rot13 TEXT -> ROT13 (CLI companion to rot13.htm) */
+            const char *p = line + 6;
+            char out[256]; int i = 0;
+            while (*p && i < 255) {
+                char c = *p++;
+                if (c >= 'A' && c <= 'Z') out[i++] = (char)((c - 'A' + 13) % 26 + 'A');
+                else if (c >= 'a' && c <= 'z') out[i++] = (char)((c - 'a' + 13) % 26 + 'a');
+                else out[i++] = c;
+            }
+            out[i] = 0;
+            print("  "); print(out); print("\n");
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
