@@ -87,6 +87,10 @@ static void finish(void) {
         sys_beep(880, 160);
     } else if (pt < dt) {
         chips -= BET; msg = "Dealer wins.   d = deal"; sys_beep(196, 220);
+    } else if (bj && dn > 2) {
+        /* a player natural still beats the dealer's *drawn* 21 (pays 3:2);
+         * only a dealer NATURAL (dn==2) pushes it. */
+        chips += (BET * 3) / 2; msg = "BLACKJACK! you win 3:2.   d = deal"; sys_beep(880, 160);
     } else {
         msg = "Push (tie).   d = deal";
     }
@@ -118,7 +122,7 @@ int main(void) {
         if (k == 'r' || k == 'R') { chips = 100; state = 0; pn = dn = 0; msg = "Reset. d = deal."; render(); continue; }
         if ((k == 'd' || k == 'D') && state != 1) { deal(); render(); continue; }
         if (state == 1) {
-            if (k == 'h' || k == 'H') {
+            if ((k == 'h' || k == 'H') && pn < 16) {   /* pn<16: explicit bound (the bust invariant already caps it ~8) */
                 ph[pn++] = draw();
                 if (total(ph, pn) > 21) finish(); else msg = "h = hit, s = stand";
                 render();

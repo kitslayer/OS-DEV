@@ -55,7 +55,11 @@ static void printnum(int v) { char b[12]; itoa_b(v, b); print(b); }
 static void load_best(void) {
     char b[16]; long n = sys_readfile("TYPING.HI", b, sizeof(b) - 1);
     best = 0;
-    for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best * 10 + (b[i] - '0'); }
+    for (long i = 0; i < n; i++) {
+        if (b[i] < '0' || b[i] > '9') break;
+        best = best * 10 + (b[i] - '0');
+        if (best > 100000) { best = 100000; break; }   /* clamp: a corrupt file can't overflow int */
+    }
 }
 static void save_best(void) {
     char b[12]; int n = itoa_b(best, b);
