@@ -169,6 +169,8 @@ class _Cf { n = 5; m = 2*3; inc(){ this.n++; return this.n; } }
 var _cf = new _Cf(); print(_cf.n, _cf.m, _cf.inc());
 class _Ca { a = 1; } class _Cb extends _Ca { b = 2; }
 var _cb = new _Cb(); print(_cb.a, _cb.b);
+class _Sm { static sq(x){ return x*x; } static V = 7; m(){ return this.V || 1; } static both(){ return _Sm.sq(2) + _Sm.V; } }
+print(_Sm.sq(6), _Sm.V, new _Sm().m(), _Sm.both());
 print(typeof _undeclared_xyz, typeof _undeclared_xyz === "undefined", typeof print);
 var _ck="go"; var _cmo={ [_ck](){return 7;}, speed:3, [_ck+"f"](){return this.speed;} }; print(_cmo.go(), _cmo.gof());
 print("-- location --");
