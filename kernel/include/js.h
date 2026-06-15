@@ -43,4 +43,6 @@ void js_set_dom_pos(int (*get_at)(int, char *, int, int),
                     int (*query)(const char *, int *, int));
 /* element.matches(selector) backings (id + position variants). */
 void js_set_dom_match(int (*matches)(const char *, const char *), int (*matches_at)(int, const char *));
+/* element.removeAttribute(name) backings (id + position variants). */
+void js_set_dom_rmattr(void (*rmattr)(const char *, const char *), void (*rmattr_at)(int, const char *));
 void js_set_location(const char *url);

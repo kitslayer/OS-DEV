@@ -259,4 +259,5 @@ _cl.classList.add("a"); _cl.classList.add("a"); _cl.classList.add("b"); print(do
 _cl.classList.remove("a"); print(document.querySelector("p").getAttribute("class"));  // b (remove)
 print(_cl.classList.toggle("ff", true), _cl.classList.contains("ff"), _cl.classList.toggle("ff", false), _cl.classList.contains("ff"));  // true true false false (toggle(name, force) 2-arg form; M293)
 var _he=document.querySelectorAll(".item")[1]; print(_he.hasAttribute("class")); _he.classList.add("z"); print(_he.hasAttribute("class"), _he.getAttribute("class"));  // false / true z (hasAttribute reflects the class attr; M286)
+var _ra=document.querySelector("p"); _ra.classList.add("k"); var _h1=_ra.hasAttribute("class"); _ra.removeAttribute("class"); print(_h1, _ra.hasAttribute("class"));  // true false (removeAttribute drops the attr; M295)
 print("-- done --");

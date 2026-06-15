@@ -2126,6 +2126,8 @@ static void (*g_dom_setattr_at)(int off, const char *attr, const char *val);    
 static int  (*g_dom_query)(const char *sel, int *offs, int max);   /* returns match count */
 static int  (*g_dom_matches)(const char *id, const char *sel);     /* element.matches(sel) — id handle */
 static int  (*g_dom_matches_at)(int off, const char *sel);         /* element.matches(sel) — position handle */
+static void (*g_dom_rmattr)(const char *id, const char *attr);     /* removeAttribute — id handle */
+static void (*g_dom_rmattr_at)(int off, const char *attr);         /* removeAttribute — position handle */
 #define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
 static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
 static val element_handle(const char *id) {
@@ -2252,6 +2254,12 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
         int m = has_pos ? (g_dom_matches_at && g_dom_matches_at(off, sel))
                         : (g_dom_matches    && g_dom_matches(id, sel));
         return BOOLV(m);
+    }
+    if (strcmp(name, "removeAttribute") == 0) {   /* splice " attr=…" out of the opening tag (completes get/set/has/remove) */
+        const char *aname = nargs ? val_to_str(args[0]) : "";
+        if (has_pos) { if (g_dom_rmattr_at) g_dom_rmattr_at(off, aname); }
+        else         { if (g_dom_rmattr)    g_dom_rmattr(id, aname); }
+        return UND();
     }
     rt_err("no such element method"); return UND();
 }
@@ -2839,6 +2847,10 @@ void js_set_dom_pos(int (*get_at)(int, char *, int, int),
 void js_set_dom_match(int (*matches)(const char *, const char *), int (*matches_at)(int, const char *)) {
     g_dom_matches = matches; g_dom_matches_at = matches_at;
 }
+/* The browser registers removeAttribute backings (id + position variants). */
+void js_set_dom_rmattr(void (*rmattr)(const char *, const char *), void (*rmattr_at)(int, const char *)) {
+    g_dom_rmattr = rmattr; g_dom_rmattr_at = rmattr_at;
+}
 /* The browser sets the current page URL before running page JS (for window.location). */
 void js_set_location(const char *url) {
     int i = 0; if (url) while (url[i] && i < (int)sizeof(g_location_url) - 1) { g_location_url[i] = url[i]; i++; }
@@ -2985,6 +2997,9 @@ static void hdom_setattr_at(int off, const char *attr, const char *val){ if(strc
 /* mock matches: reuse hdom_query (membership), mirroring the real browser_dom_matches_at */
 static int hdom_matches_at(int off, const char *sel){ int offs[8]; int n=hdom_query(sel,offs,8); for(int i=0;i<n;i++) if(offs[i]==off) return 1; return 0; }
 static int hdom_matches(const char *id, const char *sel){ (void)id; (void)sel; return 0; }   /* id handles: mock store has no offset */
+/* mock removeAttribute: clear the class store entry (so a later hasAttribute("class") reads false) */
+static void hdom_rmattr_at(int off, const char *attr){ if(strcmp(attr,"class")) return; for(int i=0;i<hcls_n;i++) if(hcls_off[i]==off){ hcls_val[i][0]=0; return; } }
+static void hdom_rmattr(const char *id, const char *attr){ (void)id; (void)attr; }   /* id handles: no id-class store in the mock */
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -2994,6 +3009,7 @@ int main(int argc, char **argv) {
     js_set_dom_attr(hdom_getattr, hdom_setattr);
     js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);   /* mock querySelector(All) for host tests */
     js_set_dom_match(hdom_matches, hdom_matches_at);   /* mock element.matches for host tests */
+    js_set_dom_rmattr(hdom_rmattr, hdom_rmattr_at);    /* mock removeAttribute for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);

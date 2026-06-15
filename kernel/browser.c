@@ -1365,7 +1365,54 @@ static void browser_dom_setattr_at(int off, const char *attr, const char *val) {
     b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at); js_set_location(b->url); }
+/* Find the full " attr[=value]" span (incl one leading space) within the opening-tag
+ * attr region [as,ae), for removeAttribute. Returns 1 + [*rs,*rend). */
+static int attr_span(browser_t *b, int as, int ae, const char *attr, int *rs, int *rend) {
+    const char *a = b->raw; int nl=0; while(attr[nl]) nl++; if(!nl) return 0;
+    for (int i = as; i + nl <= ae; i++) {
+        if (i>as && a[i-1]!=' ' && a[i-1]!='\t') continue;                 /* attr-name boundary */
+        int m=0; while (m<nl && lc(a[i+m])==lc(attr[m])) m++;
+        if (m!=nl) continue;
+        int k=i+nl;
+        if (k<ae && a[k]!=' ' && a[k]!='\t' && a[k]!='=' && a[k]!='>') continue;   /* complete token, not a prefix */
+        int start=i; while (start>as && (a[start-1]==' '||a[start-1]=='\t')) start--;   /* eat one+ leading space */
+        int e=k; while (e<ae && (a[e]==' '||a[e]=='\t')) e++;              /* optional =value */
+        if (e<ae && a[e]=='=') { e++; while (e<ae && (a[e]==' '||a[e]=='\t')) e++;
+            if (e<ae && (a[e]=='"'||a[e]=='\'')) { char q=a[e]; e++; while (e<ae && a[e]!=q) e++; if(e<ae) e++; }   /* quoted value */
+            else { while (e<ae && a[e]!=' ' && a[e]!='\t') e++; } }                                                /* unquoted value */
+        *rs = start; *rend = e; return 1;
+    }
+    return 0;
+}
+/* removeAttribute: splice " attr[=value]" out of the opening tag + re-render.
+ * Mirrors browser_dom_set's remove-path splice (bounds-checked). */
+static void browser_dom_rmattr(const char *id, const char *attr) {
+    browser_t *b=g_ls_b; if(!b||!attr[0]) return;
+    int as,ae; if(!dom_attr_region(b,id,&as,&ae)) return;
+    int rs,rend; if(!attr_span(b,as,ae,attr,&rs,&rend)) return;
+    int delta=-(rend-rs);
+    int active=(g_sw_raw==b->raw); int bodyend=b->bodyoff+b->bodylen;
+    int live_end=(active && g_sw_pos>bodyend)?g_sw_pos:bodyend;
+    memmove(b->raw+rs, b->raw+rend, live_end-rend);
+    b->bodylen+=delta;
+    if(active){ if(g_sw_pos>rend)g_sw_pos+=delta; if(g_sw_base>rend)g_sw_base+=delta; }
+    b->raw[live_end+delta]=0;
+    parse_html(b,b->raw+b->bodyoff,b->bodylen);
+}
+static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-handle variant */
+    browser_t *b=g_ls_b; if(!b||!attr[0]) return;
+    int as,ae; if(!dom_attr_region_at(b,off,&as,&ae)) return;
+    int rs,rend; if(!attr_span(b,as,ae,attr,&rs,&rend)) return;
+    int delta=-(rend-rs);
+    int active=(g_sw_raw==b->raw); int bodyend=b->bodyoff+b->bodylen;
+    int live_end=(active && g_sw_pos>bodyend)?g_sw_pos:bodyend;
+    memmove(b->raw+rs, b->raw+rend, live_end-rend);
+    b->bodylen+=delta;
+    if(active){ if(g_sw_pos>rend)g_sw_pos+=delta; if(g_sw_base>rend)g_sw_base+=delta; }
+    b->raw[live_end+delta]=0;
+    parse_html(b,b->raw+b->bodyoff,b->bodylen);
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
