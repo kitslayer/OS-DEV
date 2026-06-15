@@ -1,4 +1,4 @@
-# Milestones 239–243 — modern JavaScript syntax
+# Milestones 239–244 — modern JavaScript syntax
 
 After completing the operator set (M228–232) and assignment/number-literal
 sets (M233–234), this arc closed the gap on several syntactic features that
@@ -72,6 +72,25 @@ parser now accepts `(` after the `[expr]` key and parses a method there. No
 evaluator change was needed: the method's function node is stored under the
 computed key and instantiated by the existing computed-key path, so it gets a
 dynamic `this` like any object method.
+
+## M244 — static class members
+
+`static method(){…}` and `static field = …` — members that live on the class
+itself (`MathUtil.square(5)`, `Config.DEFAULT`) rather than on instances. This
+completes the modern class story alongside M240's instance fields.
+
+The constructor is a function value (`V_FUN`), and functions don't carry keyed
+properties in this engine, so statics are kept in a **side object**: the parser
+routes `static` members into their own block, and the class evaluator builds
+them into a fresh `V_OBJ` hung off the constructor (`co->statics`), evaluated
+after the class name is bound so a static can reference its own class. Two
+narrowly-gated lookups consult it — one in member-read for `Class.field`, one in
+the call dispatch (after the `.call`/`.apply`/`.bind` cases) so `Class.method()`
+invokes with `this` bound to the class, which makes `static make(){ return new
+this(); }` work. Both branches are guarded on `recv` being a function with a
+non-null `statics`, so regular functions and classes without statics are
+completely unaffected. (Static *inheritance* — a subclass seeing a parent's
+statics — is a deliberate follow-up.)
 
 ## Where this leaves the engine
 
