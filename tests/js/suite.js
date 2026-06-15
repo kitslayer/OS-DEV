@@ -206,4 +206,5 @@ class _Rc { constructor(){ this.w=3; this.h=4; } get area(){ return this.w*this.
 var _r=new _Rc(); print(_r.area); _r.area=10; print(_r.area, _r.w);            // 12 / 40 10
 class _Ba { get nm(){ return "base"; } } class _Su extends _Ba { get nm(){ return "sub"; } }
 print(new _Ba().nm, new _Su().nm, new (class extends _Ba {})().nm);            // base sub base
+var _up={_n:5, get n(){return this._n;}, set n(v){this._n=v;}}; print(_up.n++, _up.n, ++_up.n); var _gu={get n(){return 7;}}; print(_gu.n++, _gu.n);  // 5 6 7 / 7 7 (++ routes thru get/set, doesn't corrupt the accessor)
 print("-- done --");

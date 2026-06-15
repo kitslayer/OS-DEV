@@ -78,8 +78,14 @@ or `JSON.stringify`).
   `Object.assign` iterate `vals[]` directly, bypassing the eval read sites, so
   they do **not** fire getters (an accessor serializes as `{}`).
 - `static get`/`static set` on a class is parsed but not wired up.
-- Compound update on an accessor (`o.x++`, `o.x += 1`) is not routed through
-  get-then-set.
+- `super.<accessor>` (reading an inherited accessor through `super`) reads the
+  raw parent slot and does not fire — normal inherited access through an
+  instance fires correctly.
+
+(`o.x++` / `o.x += 1` *do* fire correctly — `+=` always did; `++`/`--` were
+routed through the getter+setter in the M261 review follow-up, after the review
+found that `o.x++` had been silently overwriting the accessor with a plain
+number instead of leaving it intact.)
 
 ## Reusable lesson
 

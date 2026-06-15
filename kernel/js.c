@@ -1351,17 +1351,17 @@ static val eval_expr_inner(node *n, env *e) {
             return UND();
         }
         case N_UPDATE: {
-            node *t=n->a; val *slot=0;
+            node *t=n->a; val *slot=0; val recv=UND();
             if (t->type==N_IDENT) { slot=env_find(e,node_name(t)); }
             else if (t->type==N_MEMBER) {            /* o.prop++ */
-                val recv=eval_expr(t->a,e);
+                recv=eval_expr(t->a,e);
                 if (recv.t==V_OBJ && obj_keyed(recv.o)) { const char *key=node_name(t);
                     for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
                     if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
                 }
             }
             else if (t->type==N_INDEX) {             /* arr[i]++ / o[k]++ */
-                val recv=eval_expr(t->a,e), idx=eval_expr(t->b,e);
+                recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
                 if (recv.t==V_ARR && recv.o) { int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) slot=&recv.o->vals[i]; }
                 else if (recv.t==V_OBJ && obj_keyed(recv.o)) { const char *key=val_to_str(idx);
                     for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
@@ -1369,6 +1369,12 @@ static val eval_expr_inner(node *n, env *e) {
                 }
             }
             if (!slot) { rt_err("invalid ++/-- target"); return UND(); }
+            if (is_accessor(*slot)) {   /* o.accessor++ : read via getter, write via setter -- NEVER overwrite the accessor slot (M261 review Finding 1) */
+                if (recv.t!=V_OBJ) { rt_err("invalid ++/-- on accessor"); return UND(); }   /* detached (e.g. destructured) accessor: no receiver */
+                val acc=*slot; int64_t old=to_num(fire_getter(acc,recv)); int64_t nw = n->op=='+'?old+1:old-1;   /* capture acc by value before firing (getter may realloc vals[], dangling slot) */
+                val s=acc.o->vals[1]; if(s.t!=V_UNDEF){ val av=NUM(nw); call_function_this(s,recv,&av,1); }       /* getter-only: write ignored (non-strict) */
+                return NUM(n->prefix?nw:old);
+            }
             int64_t old=to_num(*slot); int64_t nw = n->op=='+'?old+1:old-1; *slot=NUM(nw);
             return NUM(n->prefix?nw:old);
         }
