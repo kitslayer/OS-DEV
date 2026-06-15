@@ -353,13 +353,19 @@ int main(void) {
             if (sys_sha512(line + 7, hex, sizeof(hex)) < 0) print("sha512: no such file\n");
             else { print("  "); print(hex); print("\n"); }
         } else if (startswith(line, "grep ")) {
-            char *p = line + 5, pat[40]; int i = 0, ci = 0;
+            char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0;
             while (*p == ' ') p++;
-            if (p[0] == '-' && p[1] == 'i' && (p[2] == ' ' || p[2] == 0)) { ci = 1; p += 2; while (*p == ' ') p++; }  /* -i: case-insensitive */
+            while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insensitive), -n (line #s), combinable as -in */
+                int t, valid = 1;
+                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n') valid = 0;
+                if (!valid) break;                          /* not a flag token (e.g. a pattern starting with '-') */
+                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else nn = 1; }
+                p += t; while (*p == ' ') p++;
+            }
             while (*p && *p != ' ' && i < 39) pat[i++] = *p++;
             pat[i] = 0;
             while (*p == ' ') p++;
-            if (pat[0] == 0 || *p == 0) { print("usage: grep [-i] <pattern> <file>...\n"); }
+            if (pat[0] == 0 || *p == 0) { print("usage: grep [-in] <pattern> <file>...\n"); }
             else {
                 static char buf[2048];
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
@@ -374,9 +380,10 @@ int main(void) {
                     long n = sys_readfile(name, buf, sizeof(buf) - 1);   /* -1 so buf[n]=0 can't write past the array */
                     if (n < 0) { print("grep: no such file: "); print(name); print("\n"); continue; }
                     buf[n] = 0;
-                    int ls = 0;
+                    int ls = 0, lno = 0;
                     for (long k = 0; k <= n; k++) {
                         if (k == n || buf[k] == '\n') {
+                            lno++;
                             int found = 0;
                             for (long a = ls; a < k && !found; a++) {
                                 int b = 0;
@@ -385,7 +392,10 @@ int main(void) {
                             }
                             if (found) {
                                 char save = buf[k]; buf[k] = 0;
-                                if (fcount > 1) { print(name); print(": "); } else print("  ");
+                                if (fcount > 1) print(name);
+                                if (fcount > 1 && nn) print(":");
+                                if (nn) { char ln_[12]; itoa_simple(lno, ln_); print(ln_); }
+                                if (fcount > 1 || nn) print(": "); else print("  ");
                                 print(buf + ls); print("\n");
                                 buf[k] = save; hits++;
                             }
