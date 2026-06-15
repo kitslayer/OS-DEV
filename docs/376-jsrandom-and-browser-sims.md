@@ -102,3 +102,25 @@ verifiable designs. The remaining high-value work (enforcing cert validation,
 inline remote images, shell pipes, the app-exit vmm teardown, FAT32 write
 robustness) is genuinely risky and stays deferred to protect the working
 browser/kernel/disk — a focused session each, not end-of-session attempts.
+
+## M401–415: completing the utilities, and the parse-cap lesson
+
+This stretch rounded out the shell's standard utilities — text (`fold`), number
+theory (`gcd`/`primes`/`fib`/`fizzbuzz`/`stats`), base conversion (`base`/`dec`),
+`roman`, `ascii`, `rot13`, and the data/time formatters (`size` bytes→GB/MB/KB,
+`dur` seconds→d/h/m/s) — plus more browser pages (palette, a `Date`-driven
+**clock** that confirmed the engine's `Date` is RTC-wired and live) and richer
+calendars (`cal -y` full year, `cal -3` prev/current/next).
+
+**Durable lesson (review #13 caught two real bugs):** the digit-parse idiom
+matters. `while (d && x < CAP) x = x*10+d;` makes the cap the *loop condition*,
+so the body runs once more after x crosses CAP and **x reaches ~10×CAP**. That
+let `gcd` parse args to ~1e10 (cap 1e9) so `a*b` overflowed `long`, and `dec`
+parse v to ~1.6e19 so `(long)v` printed negative. The safe idiom is to guard the
+*assignment*: `while (d) { if (x < CAP) x = x*10+d; p++; }` — x freezes at ~10×CAP
+and each command must size its downstream math (sum / division / iteration cap)
+to absorb that overshoot. Fixes: tightened gcd's cap and printed dec's value
+unsigned (`print_base(v,10)`). Review #14 then confirmed `stats`/`size`/`fib`
+already use the safe idiom. Fourteen reviews this session, all SHIP after the
+two #13 fixes — the periodic reviews keep earning their keep even on "trivial"
+code.
