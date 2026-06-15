@@ -246,6 +246,7 @@ print(document.querySelector("p").textContent, document.querySelector("nope"), d
 var _qa=document.querySelectorAll(".item"); var _qc=0; _qa.forEach(function(e){_qc++;}); var _qf=""; for(var _qe of _qa)_qf+=_qe.textContent; print(_qa.length, _qa[0].textContent, _qa[1].textContent, _qc, _qf, document.querySelectorAll("zzz").length);  // 2 alpha beta 2 alphabeta 0 (querySelectorAll -> array of position handles: length/index/forEach/for-of all work; empty match->len 0; M281)
 print(document.querySelector("[data-x]").textContent, document.querySelector("[nope]"));  // alpha null (attribute-presence selector [attr] + tag[attr] compounds; M284, host mock)
 print(document.querySelector("p").matches("p"), document.querySelector("p").matches("zzz"), document.querySelectorAll(".item")[1].matches(".item"));  // true false true (element.matches: membership in the selector's matches; M294)
+print(document.querySelector("p").closest("p").textContent, document.querySelector("p").closest("zzz"));  // alpha null (element.closest: self-or-ancestor match -> element handle, or null; M296)
 print("-- getElementsBy* + getAttribute --");
 print(document.getElementsByTagName("p").length, document.getElementsByClassName("item").length, document.getElementsByClassName("zzz").length);  // 2 2 0 (getElementsByTagName/ClassName -> arrays of position handles; M282, host mock)
 print(document.querySelector("p").getAttribute("href"), document.getElementsByClassName("item")[1].getAttribute("data"));  // href@1 data@2 (getAttribute on a position handle; mock echoes attr@offset; M282)

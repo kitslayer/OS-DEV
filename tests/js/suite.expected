@@ -223,6 +223,7 @@ alpha null alpha
 2 alpha beta 2 alphabeta 0
 alpha null
 true false true
+alpha null
 -- getElementsBy* + getAttribute --
 2 2 0
 href@1 data@2

@@ -2126,6 +2126,8 @@ static void (*g_dom_setattr_at)(int off, const char *attr, const char *val);    
 static int  (*g_dom_query)(const char *sel, int *offs, int max);   /* returns match count */
 static int  (*g_dom_matches)(const char *id, const char *sel);     /* element.matches(sel) — id handle */
 static int  (*g_dom_matches_at)(int off, const char *sel);         /* element.matches(sel) — position handle */
+static int  (*g_dom_closest)(const char *id, const char *sel);     /* element.closest(sel) — id handle; returns an offset or -1 */
+static int  (*g_dom_closest_at)(int off, const char *sel);         /* element.closest(sel) — position handle */
 static void (*g_dom_rmattr)(const char *id, const char *attr);     /* removeAttribute — id handle */
 static void (*g_dom_rmattr_at)(int off, const char *attr);         /* removeAttribute — position handle */
 #define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
@@ -2187,7 +2189,13 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
     const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
     int has_pos = (el->n>1 && el->vals[1].t==V_NUM);   /* a querySelector match keyed by byte offset */
     int off = has_pos ? (int)el->vals[1].num : 0;
-    if (strcmp(name,"id")==0) { if(!setval && out){ int i=0; while(id[i]&&i<outmax-1){out[i]=id[i];i++;} out[i]=0; } return 1; }
+    if (strcmp(name,"id")==0) {   /* position handles have no stored id -> read the id attribute from the source */
+        if (!setval && out) {
+            if (has_pos) { out[0]=0; if (g_dom_getattr_at) g_dom_getattr_at(off, "id", out, outmax); }
+            else { int i=0; while(id[i]&&i<outmax-1){out[i]=id[i];i++;} out[i]=0; }
+        }
+        return 1;
+    }
     int kind = -1;                                   /* 0=textContent, 1=innerHTML, 2=input .value */
     if (strcmp(name,"value")==0) kind = 2;
     else if (strcmp(name,"innerHTML")==0) kind = 1;
@@ -2254,6 +2262,13 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
         int m = has_pos ? (g_dom_matches_at && g_dom_matches_at(off, sel))
                         : (g_dom_matches    && g_dom_matches(id, sel));
         return BOOLV(m);
+    }
+    if (strcmp(name, "closest") == 0) {   /* nearest self-or-ancestor matching the selector, or null */
+        const char *sel = nargs ? val_to_str(args[0]) : "";
+        int r = has_pos ? (g_dom_closest_at ? g_dom_closest_at(off, sel) : -1)
+                        : (g_dom_closest    ? g_dom_closest(id, sel)     : -1);
+        if (r >= 0) return element_handle_at(r);
+        val nv = UND(); nv.t = V_NULL; return nv;
     }
     if (strcmp(name, "removeAttribute") == 0) {   /* splice " attr=…" out of the opening tag (completes get/set/has/remove) */
         const char *aname = nargs ? val_to_str(args[0]) : "";
@@ -2843,9 +2858,11 @@ void js_set_dom_pos(int (*get_at)(int, char *, int, int),
     g_dom_get_at = get_at; g_dom_set_at = set_at;
     g_dom_getattr_at = getattr_at; g_dom_setattr_at = setattr_at; g_dom_query = query;
 }
-/* The browser registers element.matches() backings (id + position variants). */
-void js_set_dom_match(int (*matches)(const char *, const char *), int (*matches_at)(int, const char *)) {
+/* The browser registers element.matches()/closest() backings (id + position variants). */
+void js_set_dom_match(int (*matches)(const char *, const char *), int (*matches_at)(int, const char *),
+                      int (*closest)(const char *, const char *), int (*closest_at)(int, const char *)) {
     g_dom_matches = matches; g_dom_matches_at = matches_at;
+    g_dom_closest = closest; g_dom_closest_at = closest_at;
 }
 /* The browser registers removeAttribute backings (id + position variants). */
 void js_set_dom_rmattr(void (*rmattr)(const char *, const char *), void (*rmattr_at)(int, const char *)) {
@@ -2997,6 +3014,8 @@ static void hdom_setattr_at(int off, const char *attr, const char *val){ if(strc
 /* mock matches: reuse hdom_query (membership), mirroring the real browser_dom_matches_at */
 static int hdom_matches_at(int off, const char *sel){ int offs[8]; int n=hdom_query(sel,offs,8); for(int i=0;i<n;i++) if(offs[i]==off) return 1; return 0; }
 static int hdom_matches(const char *id, const char *sel){ (void)id; (void)sel; return 0; }   /* id handles: mock store has no offset */
+static int hdom_closest_at(int off, const char *sel){ int offs[8]; int n=hdom_query(sel,offs,8); for(int i=0;i<n;i++) if(offs[i]==off) return off; return -1; }   /* mock: self-match only (no ancestor spans) */
+static int hdom_closest(const char *id, const char *sel){ (void)id; (void)sel; return -1; }
 /* mock removeAttribute: clear the class store entry (so a later hasAttribute("class") reads false) */
 static void hdom_rmattr_at(int off, const char *attr){ if(strcmp(attr,"class")) return; for(int i=0;i<hcls_n;i++) if(hcls_off[i]==off){ hcls_val[i][0]=0; return; } }
 static void hdom_rmattr(const char *id, const char *attr){ (void)id; (void)attr; }   /* id handles: no id-class store in the mock */
@@ -3008,7 +3027,7 @@ int main(int argc, char **argv) {
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     js_set_dom_attr(hdom_getattr, hdom_setattr);
     js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);   /* mock querySelector(All) for host tests */
-    js_set_dom_match(hdom_matches, hdom_matches_at);   /* mock element.matches for host tests */
+    js_set_dom_match(hdom_matches, hdom_matches_at, hdom_closest, hdom_closest_at);   /* mock element.matches/closest for host tests */
     js_set_dom_rmattr(hdom_rmattr, hdom_rmattr_at);    /* mock removeAttribute for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
