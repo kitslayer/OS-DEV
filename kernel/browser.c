@@ -1171,6 +1171,33 @@ static int browser_dom_closest(const char *id, const char *sel) {
     if (r[off] != '<') return -1;
     return browser_dom_closest_at(off, sel);
 }
+/* element.children: the byte offsets of the DIRECT child elements of the element
+ * at `off`. Scans the inner span for top-level open tags, skipping each child's
+ * own subtree (via dom_find_at) so descendants aren't counted. */
+static int browser_dom_children_at(int off, int *offs, int max) {
+    browser_t *b = g_ls_b; if (!b) return 0;
+    int is, ie; if (!dom_find_at(b, off, &is, &ie)) return 0;   /* parent's inner span */
+    const char *body = b->raw; int n = 0;
+    for (int i = is; i < ie && n < max; ) {
+        if (body[i] != '<') { i++; continue; }
+        int j = i + 1;
+        if (j >= ie || body[j]=='/' || body[j]=='!' || body[j]=='?') { i++; continue; }   /* not an opening tag */
+        offs[n++] = i;                                  /* a direct child */
+        int cis, cie, e;
+        if (dom_find_at(b, i, &cis, &cie)) { e = cie; while (e < ie && body[e] != '>') e++; }   /* skip the child's whole element */
+        else { e = i; while (e < ie && body[e] != '>') e++; }                                   /* void/self-closing: just past its '>' */
+        i = (e < ie) ? e + 1 : ie;
+    }
+    return n;
+}
+static int browser_dom_children(const char *id, int *offs, int max) {
+    browser_t *b = g_ls_b; if (!b) return 0;
+    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return 0;
+    const char *r = b->raw; int lo = b->bodyoff, off = as;
+    while (off > lo && r[off] != '<') off--;
+    if (r[off] != '<') return 0;
+    return browser_dom_children_at(off, offs, max);
+}
 /* <input> field values, keyed by id (the typed or scripted .value text) */
 static const char *in_get(browser_t *b, const char *id) {
     for (int i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) return b->in_val[i];
@@ -1436,7 +1463,7 @@ static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-han
     b->raw[live_end+delta]=0;
     parse_html(b,b->raw+b->bodyoff,b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_location(b->url); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

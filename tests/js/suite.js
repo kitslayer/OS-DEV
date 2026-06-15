@@ -247,6 +247,7 @@ var _qa=document.querySelectorAll(".item"); var _qc=0; _qa.forEach(function(e){_
 print(document.querySelector("[data-x]").textContent, document.querySelector("[nope]"));  // alpha null (attribute-presence selector [attr] + tag[attr] compounds; M284, host mock)
 print(document.querySelector("p").matches("p"), document.querySelector("p").matches("zzz"), document.querySelectorAll(".item")[1].matches(".item"));  // true false true (element.matches: membership in the selector's matches; M294)
 print(document.querySelector("p").closest("p").textContent, document.querySelector("p").closest("zzz"));  // alpha null (element.closest: self-or-ancestor match -> element handle, or null; M296)
+var _ch=document.querySelector("p").children; var _cc=0; for(var _ce of _ch)_cc++; print(_ch.length, _ch[0].textContent, _ch[1].textContent, _cc);  // 2 alpha beta 2 (element.children -> array of position handles; M297)
 print("-- getElementsBy* + getAttribute --");
 print(document.getElementsByTagName("p").length, document.getElementsByClassName("item").length, document.getElementsByClassName("zzz").length);  // 2 2 0 (getElementsByTagName/ClassName -> arrays of position handles; M282, host mock)
 print(document.querySelector("p").getAttribute("href"), document.getElementsByClassName("item")[1].getAttribute("data"));  // href@1 data@2 (getAttribute on a position handle; mock echoes attr@offset; M282)
