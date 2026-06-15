@@ -553,8 +553,8 @@ static int bin_prec(token t, int *code) {
     if (tok_is(t,"<<")||tok_is(t,">>")) { *code=(t.s[0]=='<')?'L':'R'; return 9; }
     if (tok_is(t,"<")||tok_is(t,">")) { *code=t.s[0]; return 8; }
     if (tok_is(t,"<=")) { *code='l'; return 8; } if (tok_is(t,">=")) { *code='g'; return 8; }
-    if (tok_is(t,"===")||tok_is(t,"==")) { *code='='; return 7; }
-    if (tok_is(t,"!==")||tok_is(t,"!=")) { *code='!'; return 7; }
+    if (tok_is(t,"===")) { *code='='; return 7; }  if (tok_is(t,"==")) { *code='e'; return 7; }   /* === strict, == loose (M271) */
+    if (tok_is(t,"!==")) { *code='!'; return 7; }  if (tok_is(t,"!=")) { *code='n'; return 7; }   /* !== strict, != loose (M271) */
     if (tok_is(t,"&")) { *code='&'; return 6; }
     if (tok_is(t,"^")) { *code='^'; return 5; }   /* bitwise XOR: between & and | */
     if (tok_is(t,"|")) { *code='|'; return 4; }
@@ -1320,6 +1320,19 @@ static val eval_member_get(val recv, const char *name) {
     return UND();
 }
 
+/* JS abstract equality (==): same type -> strict (val_equal); null/undefined are inter-equal
+ * but unequal to everything else; an object vs a primitive coerces the object to a string and
+ * re-compares; number/string/boolean cross-type compare numerically. Recursion is bounded to
+ * one object->primitive step. (=== uses val_equal directly; this is only for loose ==.) (M271) */
+static int loose_eq(val a, val b) {
+    if (a.t==b.t) return val_equal(a,b);
+    if ((a.t==V_NULL||a.t==V_UNDEF) && (b.t==V_NULL||b.t==V_UNDEF)) return 1;
+    if (a.t==V_NULL||a.t==V_UNDEF||b.t==V_NULL||b.t==V_UNDEF) return 0;
+    if ((a.t==V_OBJ||a.t==V_ARR) && !(b.t==V_OBJ||b.t==V_ARR)) return loose_eq(STRV(val_to_str(a)), b);
+    if ((b.t==V_OBJ||b.t==V_ARR) && !(a.t==V_OBJ||a.t==V_ARR)) return loose_eq(a, STRV(val_to_str(b)));
+    return to_num(a)==to_num(b);   /* number/string/boolean cross-type */
+}
+
 static val eval_expr_inner(node *n, env *e) {
     if (g_err || g_oom) return UND();
     switch (n->type) {
@@ -1433,18 +1446,10 @@ static val eval_expr_inner(node *n, env *e) {
                 case '&': return NUM(x&y); case '|': return NUM(x|y); case '^': return NUM(x^y);
                 case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
                 case 'U': return NUM((int64_t)((uint32_t)x >> (y&31)));   /* >>> unsigned (32-bit, JS semantics): -1>>>0 = 4294967295 (M269) */
-                case '=': {
-                    if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)==0);
-                    if (a.t!=b.t && !((a.t==V_NUM||a.t==V_BOOL)&&(b.t==V_NUM||b.t==V_BOOL))) return BOOLV(0);
-                    if (a.t==V_OBJ||a.t==V_ARR||a.t==V_FUN||a.t==V_NATIVE) return BOOLV(a.o==b.o);   /* objects/arrays/functions: reference identity (to_num coerced every object to 0 -> any two compared equal) */
-                    return BOOLV(x==y);
-                }
-                case '!': {
-                    if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)!=0);
-                    if (a.t!=b.t && !((a.t==V_NUM||a.t==V_BOOL)&&(b.t==V_NUM||b.t==V_BOOL))) return BOOLV(1);
-                    if (a.t==V_OBJ||a.t==V_ARR||a.t==V_FUN||a.t==V_NATIVE) return BOOLV(a.o!=b.o);   /* reference identity */
-                    return BOOLV(x!=y);
-                }
+                case '=': return BOOLV(val_equal(a,b));    /* === strict: val_equal is exactly it (same-type required incl. object identity; fixes 1===true which was true) (M271) */
+                case '!': return BOOLV(!val_equal(a,b));    /* !== strict */
+                case 'e': return BOOLV(loose_eq(a,b));      /* == loose abstract equality (M271) */
+                case 'n': return BOOLV(!loose_eq(a,b));     /* != loose */
             }
             return UND();
         }
