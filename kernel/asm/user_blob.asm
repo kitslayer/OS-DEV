@@ -24,6 +24,7 @@ global maze_elf_start, maze_elf_end
 global adv_elf_start, adv_elf_end
 global matrix_elf_start, matrix_elf_end
 global paint_elf_start, paint_elf_end
+global hangman_elf_start, hangman_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -96,5 +97,9 @@ matrix_elf_end:
 paint_elf_start:
     incbin "build/paint.elf"
 paint_elf_end:
+
+hangman_elf_start:
+    incbin "build/hangman.elf"
+hangman_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
