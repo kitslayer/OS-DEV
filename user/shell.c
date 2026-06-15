@@ -88,7 +88,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
+            print("files:  ls cat head tail sort nl tac uniq edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
@@ -199,6 +199,29 @@ int main(void) {
                     char save = buf[e]; buf[e] = 0;
                     print(buf + s); print("\n");
                     buf[e] = save;
+                }
+            }
+        } else if (startswith(line, "uniq ")) {           /* drop adjacent duplicate lines */
+            static char buf[2048];
+            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
+            if (n < 0) { print("uniq: no such file: "); print(line + 5); print("\n"); }
+            else {
+                buf[n] = 0;
+                int ps = -1, pl = -1, ls = 0;              /* previous printed line [ps, ps+pl) */
+                for (long k = 0; k <= n; k++) {
+                    if (k == n || buf[k] == '\n') {
+                        int len = (int)(k - ls);
+                        if (k == n && len == 0) { ls = (int)k + 1; continue; }   /* skip empty trailing */
+                        int same = (pl == len);
+                        if (same) for (int j = 0; j < len; j++) if (buf[ls + j] != buf[ps + j]) { same = 0; break; }
+                        if (!same) {
+                            char save = buf[k]; buf[k] = 0;
+                            print(buf + ls); print("\n");
+                            buf[k] = save;
+                            ps = ls; pl = len;
+                        }
+                        ls = (int)k + 1;
+                    }
                 }
             }
         } else if (startswith(line, "sort ")) {
