@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b>\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -883,6 +883,19 @@ int main(void) {
                 long x = a, y = b; while (y) { long t = x % y; x = y; y = t; }   /* Euclid's algorithm */
                 print("  gcd="); printl(x);
                 print("  lcm="); printl(a / x * b);                              /* a/g*b avoids a*b overflow */
+                print("\n");
+            }
+        } else if (startswith(line, "primes ")) {         /* primes N -> all primes up to N */
+            const char *p = line + 7; while (*p == ' ') p++;
+            int n = 0; while (*p >= '0' && *p <= '9' && n < 100000) n = n * 10 + (*p++ - '0');
+            if (n < 2 || n > 10000) print("usage: primes <2-10000>\n");
+            else {
+                char nb[12]; print("  ");
+                for (int k = 2; k <= n; k++) {
+                    int prime = 1;
+                    for (int d = 2; d * d <= k; d++) if (k % d == 0) { prime = 0; break; }
+                    if (prime) { itoa_simple(k, nb); print(nb); print(" "); }
+                }
                 print("\n");
             }
         } else if (startswith(line, "get ")) {
