@@ -361,7 +361,7 @@ whole thing works:
 | 268| **`Array(n)` / `new Array(…)` constructor** — `new Array(3)` (length-3), `Array(1,2,3)` (elements); `Array` is now a callable function (`typeof Array`→`"function"`) with `isArray`/`from`/`of` kept on the side; length bounded | [kernel/js.c](kernel/js.c) |
 | 269| **`>>>` unsigned right shift** — completes the bitwise/shift operator set; 32-bit unsigned per JS (`-1>>>0`→`4294967295`, `-8>>>1`→`2147483644`), same precedence as `<<`/`>>` | [kernel/js.c](kernel/js.c) |
 | 270| **`>>>=` compound assignment** — the last missing compound op; completes the set (`+= -= *= /= %= &= \|= ^= <<= >>= >>>= **= \|\|= &&= ??=`) | [kernel/js.c](kernel/js.c) |
-| 271| **Loose `==`/`!=` vs strict `===`/`!==`** — `==` now does abstract equality (`null==undefined`→`true`, `"5"==5`→`true`, `x==null` matches null *or* undefined, object↔primitive coercion); `===` routes through `val_equal` so it's truly strict, also fixing the old `1===true`→`true` | [kernel/js.c](kernel/js.c) |
+| 271| **Loose `==`/`!=` vs strict `===`/`!==`** — `==` now does abstract equality (`null==undefined`→`true`, `"5"==5`→`true`, `x==null` matches null *or* undefined, object↔primitive coercion); `===` routes through `val_equal` so it's truly strict, also fixing the old `1===true`→`true` | [kernel/js.c](kernel/js.c), [docs](docs/271-loose-equality-and-probing.md) |
 
 ## Roadmap
 

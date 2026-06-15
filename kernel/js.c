@@ -1328,8 +1328,10 @@ static int loose_eq(val a, val b) {
     if (a.t==b.t) return val_equal(a,b);
     if ((a.t==V_NULL||a.t==V_UNDEF) && (b.t==V_NULL||b.t==V_UNDEF)) return 1;
     if (a.t==V_NULL||a.t==V_UNDEF||b.t==V_NULL||b.t==V_UNDEF) return 0;
-    if ((a.t==V_OBJ||a.t==V_ARR) && !(b.t==V_OBJ||b.t==V_ARR)) return loose_eq(STRV(val_to_str(a)), b);
-    if ((b.t==V_OBJ||b.t==V_ARR) && !(a.t==V_OBJ||a.t==V_ARR)) return loose_eq(a, STRV(val_to_str(b)));
+    int aobj=(a.t==V_OBJ||a.t==V_ARR||a.t==V_FUN||a.t==V_NATIVE), bobj=(b.t==V_OBJ||b.t==V_ARR||b.t==V_FUN||b.t==V_NATIVE);
+    if (aobj && bobj) return a.o==b.o;                    /* two objects of any val-types: reference identity ({}==[] -> false) (M271 review fix) */
+    if (aobj) return loose_eq(STRV(val_to_str(a)), b);    /* object/function vs primitive: coerce to a string, re-compare (one bounded step) */
+    if (bobj) return loose_eq(a, STRV(val_to_str(b)));
     return to_num(a)==to_num(b);   /* number/string/boolean cross-type */
 }
 
