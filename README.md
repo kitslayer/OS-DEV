@@ -353,7 +353,7 @@ whole thing works:
 | 260| **ES2023 change-array-by-copy** — `with(i,v)`, `toReversed()`, `toSorted(cmp)`, `toSpliced(start,del,…items)`: each returns a **new** array and leaves the original intact (immutable updates) | [kernel/js.c](kernel/js.c) |
 | 261| **Getters & setters** — accessor properties in object literals *and* classes (`get x(){…}` / `set x(v){…}`), fired on `.x`/`[k]` read & write incl. inheritance/override; `in`/`delete`/`JSON` correctly never fire them; `get`/`set` stay usable as ordinary names | [kernel/js.c](kernel/js.c), [docs](docs/261-getters-setters.md) |
 | 262| **`Object.defineProperty` / `getOwnPropertyDescriptor`** — programmatic accessor (`{get,set}`, reusing M261) or data (`{value}`) property definition + descriptor read-back; the prototype-needing `Object.create`/`.prototype` stay deferred | [kernel/js.c](kernel/js.c) |
-| 263| **Prototype chain** — `Object.create`/`getPrototypeOf`/`setPrototypeOf`, function `.prototype` + `new F()` for plain constructors, `__proto__`; member read/call/write walk the chain (inherited accessors fire with `this`=receiver), cycle-capped. **Additive**: own-only `delete`/`in`/enumeration and the class system are unchanged | [kernel/js.c](kernel/js.c) |
+| 263| **Prototype chain** — `Object.create`/`getPrototypeOf`/`setPrototypeOf`, function `.prototype` + `new F()` for plain constructors, `__proto__`; member read/call/write walk the chain (inherited accessors fire with `this`=receiver), cycle-capped. **Additive**: own-only `delete`/`in`/enumeration and the class system are unchanged | [kernel/js.c](kernel/js.c), [docs](docs/263-prototype-chain.md) |
 
 ## Roadmap
 
