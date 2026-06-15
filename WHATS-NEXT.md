@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (287 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (288 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -65,11 +65,11 @@
 > *architectural*: a real **DOM tree** (`createElement`/node construction),
 > **CSS/layout**, **generators/iterators**, **async/Promises**, **modules**,
 > **Proxy**, **`Symbol`**. (The *persistent per-page JS env* — long the deepest
-> DOM blocker — **landed in M287**, so `addEventListener`/`el.onclick=fn` is no
-> longer architecturally blocked: it now just needs storing + firing a handler
-> function.)
+> DOM blocker — **landed in M287**, and **`addEventListener`/`el.onclick=fn`
+> followed in M288**: JS-assigned handler functions now fire on clicks, with state
+> persisting. So the browser has real event-driven page JS.)
 
-OS-DEV is a **graphical desktop OS** (287 milestones). It boots to a themed
+OS-DEV is a **graphical desktop OS** (288 milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and six
 games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
@@ -158,10 +158,12 @@ beep mem ps clear reboot ver pid exit`.
    submission**, **live web search** (DuckDuckGo, from a form or the address bar),
    and **reactive events** (`onchange`/`oninput`). What's left for *more*
    interactivity — each a real build, best done with guidance:
-   - **`addEventListener` / `el.onclick = fn`** (JS-assigned handlers) — the
-     *persistent per-page JS env* this needed **landed in M287**, so a function
-     defined at load now survives to a later event; what remains is storing the
-     handler function against the element and firing it on the click. Next up.
+   - **`addEventListener` / `el.onclick = fn`** (JS-assigned handlers) — **DONE
+     (M288)**: the persistent env (M287) + a per-page handler registry + a
+     `data-jsh` marker that the renderer turns into an `event:ID` link. A handler
+     function attached at load fires on a click, with state persisting. (Remaining
+     polish: scripted `onchange`/`oninput`, id-less elements, `removeEventListener`,
+     multiple listeners per event, a real `event` arg.)
    - **`querySelectorAll` / `getElementsByTagName`** — **DONE (M281–286)** via
      byte-offset *position handles* (incl. `.class`/`#id`/`[attr]` selectors,
      `getAttribute`/`hasAttribute`/`classList`, and write). **`createElement`/
