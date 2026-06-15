@@ -171,6 +171,12 @@ static const struct {
         "document.write(\"<p>Math.hypot(3,4) = \" + Math.hypot(3,4) + \" | Math.cbrt(27) = \" + Math.cbrt(27) + \" | Math.log2(1024) = \" + Math.log2(1024) + \"</p>\");\n"
         "var fz = Object.freeze({x:1}); fz.x = 99;\n"
         "document.write(\"<p>Object.freeze({x:1}): after fz.x=99, x is still \" + fz.x + \"</p>\");\n"
+        "document.write(\"<h2>Modern classes &amp; assignment</h2>\");\n"
+        "class Pt { x = 0; y = 0; dist2(){ return this.x*this.x + this.y*this.y; } }\n"
+        "var pt = new Pt(); pt.x = 3; pt.y = 4;\n"
+        "document.write(\"<p>class fields + method: new Pt(), set x=3 y=4, dist2() = \" + pt.dist2() + \"</p>\");\n"
+        "var cfg = {}; cfg.theme ||= \"dark\"; cfg.theme ||= \"light\";\n"
+        "document.write(\"<p>logical assign: cfg.theme ||= dark then ||= light gives \" + cfg.theme + \"</p>\");\n"
         "</script>"
         "<p><a href=\"file:index.htm\">Back to the demo index</a></p>" },
     { "DOM     HTM", "<h1>Interactive DOM</h1>"
