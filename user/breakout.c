@@ -16,6 +16,25 @@
 
 static char brick[BRICK_ROWS][W];     /* 1 = present */
 static int bricks_left;
+static int score, best;               /* best persists in BREAKOUT.HI */
+
+static int appendnum(char *sl, int p, int v) {   /* append v's digits at p; return new p */
+    char t[8]; int k = 0;
+    if (!v) t[k++] = '0';
+    while (v) { t[k++] = (char)('0' + v % 10); v /= 10; }
+    while (k) sl[p++] = t[--k];
+    return p;
+}
+static void load_best(void) {
+    char b[16]; long n = sys_readfile("BREAKOUT.HI", b, sizeof(b) - 1);
+    best = 0;
+    for (long i = 0; i < n; i++) {
+        if (b[i] < '0' || b[i] > '9') break;
+        best = best * 10 + (b[i] - '0');
+        if (best > 1000000) { best = 1000000; break; }   /* clamp a corrupt file */
+    }
+}
+static void save_best(void) { char b[12]; int k = appendnum(b, 0, best); b[k] = 0; sys_writefile("BREAKOUT.HI", b, (unsigned long)k); }
 
 static void render(int px, int bx, int by, int lives, const char *msg) {
     static char g[H][W];
@@ -25,11 +44,11 @@ static void render(int px, int bx, int by, int lives, const char *msg) {
     if (by >= 0 && by < H && bx >= 0 && bx < W) g[by][bx] = 'o';
 
     sys_clear();
-    char sl[48]; int p = 0;
+    char sl[64]; int p = 0;
     const char *a = "BREAKOUT  lives "; while (*a) sl[p++] = *a++;
     sl[p++] = (char)('0' + lives);
-    a = "  bricks "; while (*a) sl[p++] = *a++;
-    int v = bricks_left, k = 0; char t[8]; if (!v) t[k++]='0'; while (v){t[k++]='0'+v%10;v/=10;} while (k) sl[p++]=t[--k];
+    a = "  score "; while (*a) sl[p++] = *a++; p = appendnum(sl, p, score);
+    a = "  best "; while (*a) sl[p++] = *a++;  p = appendnum(sl, p, best);
     sl[p] = 0; sys_setcolor(8); print(sl); print("\n");
 
     static const unsigned char BRICK_COL[3] = { 2, 7, 3 };   /* row colours: red, orange, yellow */
@@ -49,9 +68,11 @@ static void render(int px, int bx, int by, int lives, const char *msg) {
 
 int main(void) {
     int px, bx, by, dx, dy, lives;
+    load_best();
 restart:
     for (int r = 0; r < BRICK_ROWS; r++) for (int x = 0; x < W; x++) brick[r][x] = 1;
     bricks_left = BRICK_ROWS * W;
+    score = 0;
     lives = 3; px = (W - PADW) / 2;
 serve:
     bx = W / 2; by = H - 2; dx = 1; dy = -1;
@@ -68,8 +89,9 @@ serve:
         if (ny < 0)            { dy = -dy; ny = by + dy; }       /* top wall */
         /* brick hit? */
         if (ny >= 0 && ny < BRICK_ROWS && nx >= 0 && nx < W && brick[ny][nx]) {
-            brick[ny][nx] = 0; bricks_left--; dy = -dy; ny = by + dy;
-            if (bricks_left == 0) { render(px, bx, by, lives, "\n YOU WIN! any key to replay, q quit\n");
+            brick[ny][nx] = 0; bricks_left--; score += BRICK_ROWS - ny; dy = -dy; ny = by + dy;
+            if (bricks_left == 0) { if (score > best) { best = score; save_best(); }
+                                    render(px, bx, by, lives, " YOU WIN! any key to replay, q quit\n");
                                     for (;;){int c=sys_pollkey(); if(c=='q')return 0; if(c>=0)goto restart; sys_sleep(50);} }
         }
         /* paddle / bottom */
@@ -77,7 +99,8 @@ serve:
             if (nx >= px && nx < px + PADW) { dy = -dy; ny = by + dy;  /* bounce off paddle */
                 int hit = nx - px; if (hit < 2 && dx > 0) dx = -1; else if (hit > PADW-3 && dx < 0) dx = 1; }
             else {                                                /* missed: lose a life */
-                if (--lives <= 0) { render(px, bx, by, 0, "\n GAME OVER - any key to retry, q quit\n");
+                if (--lives <= 0) { if (score > best) { best = score; save_best(); }
+                                    render(px, bx, by, 0, " GAME OVER - any key to retry, q quit\n");
                                     for (;;){int c=sys_pollkey(); if(c=='q')return 0; if(c>=0)goto restart; sys_sleep(50);} }
                 goto serve;
             }
