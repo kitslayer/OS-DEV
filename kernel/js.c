@@ -1725,6 +1725,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         if(sl<0){ arr_push_val(arr,STRV(s)); }                       /* no separator: whole string */
         else if(sl==0){ for(int i=0;i<len;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} arr_push_val(arr,STRV(c?c:"")); } }  /* "" -> chars */
         else { int start=0; for(int i=0;i+sl<=len;){ if(memcmp(s+i,sep,sl)==0){ char*p=aalloc(i-start+1); if(p){memcpy(p,s+start,i-start);p[i-start]=0;} arr_push_val(arr,STRV(p?p:"")); i+=sl; start=i; } else i++; } char*p=aalloc(len-start+1); if(p){memcpy(p,s+start,len-start);p[len-start]=0;} arr_push_val(arr,STRV(p?p:"")); }
+        if (nargs>1) { int lim=(int)to_num(args[1]); if(lim>=0 && arr->n>lim) arr->n=lim; }   /* split(sep, limit) */
         val v=UND(); v.t=V_ARR; v.o=arr; return v; }
     rt_err("unknown string method"); return UND();
 }

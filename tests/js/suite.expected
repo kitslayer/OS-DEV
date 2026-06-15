@@ -144,6 +144,7 @@ x,y
 true false 9007199254740991 Hi 17 function
 3,1,2 true false
 llo 2 2 false hello
+a|b 3
 1 undefined true
 9 3 false
 true 0 true 0
