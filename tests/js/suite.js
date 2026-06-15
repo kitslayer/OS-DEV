@@ -201,7 +201,7 @@ print(_ac.x); _ac.x=5; print(_ac.x, _ac._x); _ac["x"]=50; print(_ac["x"]);   // 
 var _go={ get v(){ return 7; } }; _go.v=999; print(_go.v);                     // 7 (getter-only: write ignored)
 var _so={ set w(v){ this._w=v; } }; _so.w=3; print(_so._w, typeof _so.w);      // 3 undefined
 var _gk={ get:1, set:2, get q(){ return 8; } }; print(_gk.get, _gk.set, _gk.q);// 1 2 8 (get/set as plain keys + an accessor)
-print("y" in {get y(){return 1;}}, JSON.stringify({get z(){return 9;}}));      // true {} (in doesn't fire; JSON limitation)
+print("y" in {get y(){return 1;}}, JSON.stringify({get z(){return 9;}}));      // true {"z":9} (`in` doesn't fire getters; JSON.stringify now does, M425)
 class _Rc { constructor(){ this.w=3; this.h=4; } get area(){ return this.w*this.h; } set area(a){ this.w=a; } }
 var _r=new _Rc(); print(_r.area); _r.area=10; print(_r.area, _r.w);            // 12 / 40 10
 class _Ba { get nm(){ return "base"; } } class _Su extends _Ba { get nm(){ return "sub"; } }

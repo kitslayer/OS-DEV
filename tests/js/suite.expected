@@ -178,7 +178,7 @@ https://host.example/dir/page?q=hi&n=2
 7
 3 undefined
 1 2 8
-true {"z":{}}
+true {"z":9}
 12
 40 10
 base sub base

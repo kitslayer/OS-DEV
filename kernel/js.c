@@ -2597,7 +2597,7 @@ static void json_val(val v, int depth){
             if(v.o && v.o->kind==V_DATE){ js_appq(val_to_str(v)); break; }   /* a Date serializes as its string */
             if(!obj_keyed(v.o) || v.o->n==0){ js_app("{}"); break; }          /* map/set/empty: no enumerable props */
             js_app("{");
-            for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("}"); break;
+            for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); val pv=v.o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,v); json_val(pv, depth+1); } js_nl(depth); js_app("}"); break;  /* fire getters during serialization (M425) — targeted to JSON, not the global obj_get hot path */
         default:     js_app("null"); break;   /* undefined/null/function */
     }
     g_depth--;
