@@ -11,16 +11,20 @@
 int main(void) {
     for (;;) {
         sys_clear();
-        print("==  OS-DEV clock  ==\n\n");
+        sys_setcolor(4); print("  == OS-DEV Clock ==\n\n");      /* title: cyan */
 
         char when[24];
-        sys_time(when, sizeof(when));
-        print(when);
+        sys_time(when, sizeof(when));            /* "YYYY-MM-DD HH:MM:SS" */
+        char date[11]; for (int i = 0; i < 10 && when[i]; i++) date[i] = when[i]; date[10] = 0;
+        sys_setcolor(8); print("  Date   ");     /* labels: grey */
+        sys_setcolor(1); print(date); print("\n");
+        sys_setcolor(8); print("  Time   ");
+        sys_setcolor(3); print(when + 11); print("\n\n");        /* time: yellow */
 
         char info[128];
         sys_sysinfo(info, sizeof(info));
-        print("\n");
-        print(info);
+        sys_setcolor(9); print(info);            /* RAM / uptime / tasks: lime */
+        sys_setcolor(0);
 
         sys_sleep(1000);          /* refresh once a second */
     }
