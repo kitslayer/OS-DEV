@@ -359,7 +359,9 @@ static const struct {
         "<p>Normal, then <span style=\"font-weight:bold; color:#cc0000\">bold red</span> (weight + colour together), then normal.</p>"
         "<p style=\"color: rgb(192, 20, 60)\">This uses <code>rgb(192, 20, 60)</code> &mdash; functional colour notation.</p>"
         "<p style=\"color: rgb(10%, 40%, 75%)\">And this is <code>rgb(10%, 40%, 75%)</code> &mdash; percentage components.</p>"
-        "<p style=\"color: crimson\">Named colours expanded too: <span style=\"color:indigo\">indigo</span>, <span style=\"color:teal\">teal</span>, <span style=\"color:steelblue\">steelblue</span>, <span style=\"color:darkgreen\">darkgreen</span>.</p>" },
+        "<p style=\"color: crimson\">Named colours expanded too: <span style=\"color:indigo\">indigo</span>, <span style=\"color:teal\">teal</span>, <span style=\"color:steelblue\">steelblue</span>, <span style=\"color:darkgreen\">darkgreen</span>.</p>"
+        "<p>An <u>underlined</u> word (the <code>&lt;u&gt;</code> tag), and <span style=\"text-decoration: underline\">text-decoration: underline</span> set inline.</p>"
+        "<p style=\"text-decoration: underline; color: #cc0000; font-weight: bold\">Underlined, red, <i>and</i> bold &mdash; all three compose on one element.</p>" },
     { "CSS     HTM", "<style>\n"
         "  h2 { color: #800080 }\n"
         "  p { color: #333333 }\n"
