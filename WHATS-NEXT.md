@@ -89,9 +89,11 @@
 > [selectors, cascade, nesting] is done.)
 
 OS-DEV is a **graphical desktop OS** (337 milestones). It boots to a themed
-windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
-programs** as windows — a shell, a clock, a calculator, a text editor, and six
-games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
+windowing desktop with a **taskbar** that hosts **twenty real ring-3 userspace
+programs** as windows — a shell, a clock, a calculator, a text editor, an
+ASCII-paint canvas, a calendar, a Mandelbrot explorer, a piano, a music jukebox,
+a Matrix screensaver, and ten games (Snake, 2048, Life, Tetris, Breakout,
+Minesweeper, Sudoku, Maze, Hangman, a text adventure) — plus a **graphical web
 browser**. Under the hood:
 preemptive multitasking with sleep/wake and **per-process isolation**, a
 read-write **FAT32** filesystem with **subdirectories** and a full file toolkit,
