@@ -1230,7 +1230,7 @@ static val eval_member_get(val recv, const char *name) {
         if (recv.o->kind==V_ELEMENT) { static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) return out;
     }
-    if (recv.t==V_FUN && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val out; if (obj_get(k->statics,name,&out)) return out; } }   /* Class.staticField / static method as a value (inherited up the chain) */
+    if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val out; if (obj_get(k->statics,name,&out)) return out; } }   /* Class.staticField / Number.isInteger / static method as a value (inherited up the chain) */
     return UND();
 }
 
@@ -1437,7 +1437,7 @@ static val eval_expr_inner(node *n, env *e) {
                         arr_push_val(bf, recv); arr_push_val(bf, na>0?args[0]:UND());   /* [0]=fn [1]=this */
                         for (int i=1;i<na && !g_oom;i++) arr_push_val(bf, args[i]);      /* [2..]=partial args */
                         return obj_val(bf); }
-                    if (recv.t==V_FUN && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val sfn; if(obj_get(k->statics,m,&sfn)) return call_function_this(sfn, recv, args, na); } }   /* Class.staticMethod() — `this` is the (sub)class; inherited up the chain */
+                    if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val sfn; if(obj_get(k->statics,m,&sfn)) return call_function_this(sfn, recv, args, na); } }   /* Class.staticMethod() / Number.isInteger() — `this` is the (sub)class; inherited up the chain */
                 }
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
@@ -2032,6 +2032,9 @@ static val nat_String(val *a, int n){ return STRV(n ? val_to_str(a[0]) : ""); }
 static val nat_Number(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }
 static val nat_Boolean(val *a, int n){ return BOOLV(n ? truthy(a[0]) : 0); }
 static val nat_isNaN(val *a, int n){ (void)a; (void)n; return BOOLV(0); }          /* integer Number is never NaN */
+static val nat_num_isInteger(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }    /* every Number is an integer here */
+static val nat_num_isFinite(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }     /* ...and finite */
+static val nat_str_fromCharCode(val *a, int n){ char *r=aalloc(n+1); if(!r) return STRV(""); for(int i=0;i<n;i++) r[i]=(char)((int64_t)to_num(a[i])&0xFF); r[n]=0; return STRV(r); }
 
 /* ---- Object.keys(o) -> array of key strings ---- */
 static val nat_obj_keys(val *a, int n){
@@ -2237,6 +2240,8 @@ static void install_globals(env *g) {
     obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));
     obj *sf=new_obj(V_NATIVE); sf->native=nat_String;   env_define(g,"String",obj_val_native(sf));
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
+    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); nf->statics=nst; }
+      obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); sf->statics=sst; } }   /* Number.* / String.* statics via the side-statics object (Number/String stay V_NATIVE) */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
     { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURIComponent; env_define(g,"encodeURIComponent",obj_val_native(e)); }
