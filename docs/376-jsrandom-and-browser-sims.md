@@ -169,3 +169,30 @@ ES2023 `findLast`. The engine is comprehensively modern AND correct; the only
 known remaining gaps are getters/setters (hot path) and generators/async
 (architecturally hard) — both deferred. Seventeen reviews this session, all SHIP.
 **Probing > assuming, again: ~43 confirmations plus 2 real fixes.**
+
+## The depth guard, stress-tested (the safety-critical bit)
+
+The same probing campaign stress-tested the engine's single most safety-critical
+mechanism — the recursion guard that protects the **guard-page-less** JS stack
+(an overflow there is silent memory corruption, not a clean fault). Findings,
+all verified in-OS:
+
+- **It fails GRACEFULLY, never crashes.** `r(50000)` linear recursion and deep
+  `fib` both return `[js error: statements too deeply nested]` with NO
+  `#PF`/`#GP`/`#DF`/panic. The guard catches the overflow before it happens.
+- **No session poisoning (no `g_depth` leak).** `g_depth` is a single shared
+  counter (parser + eval + calls + `val_to_str`); it's never reset to 0, so it
+  relies on balanced inc/dec. `rt_err` sets a flag (NOT a longjmp), so every
+  frame still runs its `g_depth--` on the way out as the error propagates.
+  Verified: `fib(12)`→144, then a cap-tripping `r(5000)`, then `fib(12)`→144
+  AGAIN — the counter is fully restored, so one too-deep expression does NOT
+  break later JS (this matters most in the browser, where a poisoned counter
+  would break every later page).
+- **The ceiling is ~`MAXDEPTH`(120) of COMBINED nesting**, not pure call depth:
+  `fib`'s `fib(n-1)+fib(n-2)` adds ~6 levels per recursion (binop→operand→call→
+  stmt→ternary→…), so `fib(12)`≈72 passes but `fib(20)`≈120 trips it. **This is
+  intentional and calibrated to the smallest guard-page-less stack the engine
+  runs in — do NOT raise `MAXDEPTH` to "fix" `fib(20)`; that trades a graceful
+  error for silent stack corruption.** Also why a cap-trip can't be a `jstest`
+  suite line: it emits `[js error:`, which the suite's error-guard treats as a
+  failure (correctly).
