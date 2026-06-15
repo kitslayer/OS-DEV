@@ -96,7 +96,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -832,6 +832,16 @@ int main(void) {
             }
             u[j] = 0;
             print("  "); print(u); print("\n");
+        } else if (streq(line, "ascii")) {                /* the printable ASCII table (CLI companion to ascii.htm) */
+            for (int c = 32; c <= 126; c++) {
+                char nb[8]; itoa_simple(c, nb);
+                if (c < 100) print(" ");
+                print(nb); print(" ");
+                char cb[2] = { (char)c, 0 }; print(cb);
+                print("  ");
+                if ((c - 31) % 6 == 0) print("\n");      /* 6/row fits the 44-col shell grid */
+            }
+            print("\n");
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
