@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (290 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (295 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -69,7 +69,7 @@
 > followed in M288**: JS-assigned handler functions now fire on clicks, with state
 > persisting. So the browser has real event-driven page JS.)
 
-OS-DEV is a **graphical desktop OS** (290 milestones). It boots to a themed
+OS-DEV is a **graphical desktop OS** (295 milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and six
 games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
@@ -166,11 +166,14 @@ beep mem ps clear reboot ver pid exit`.
      (onclick + addEventListener + onchange/oninput, inline *and* scripted). (Remaining
      polish: id-less elements, `removeEventListener`, multiple listeners per event,
      a real `event` arg.)
-   - **`querySelectorAll` / `getElementsByTagName`** — **DONE (M281–286)** via
-     byte-offset *position handles* (incl. `.class`/`#id`/`[attr]` selectors,
-     `getAttribute`/`hasAttribute`/`classList`, and write). **`createElement`/
-     `appendChild`** — still needs a real DOM tree (the renderer is a flat token
-     stream).
+   - **DOM queries + element API — DONE (M281–295)**: querySelector(All) /
+     getElementsByTagName/ClassName by CSS selector (tag/`.class`/`#id`/`[attr]`/
+     compounds), `get`/`has`/`set`/`removeAttribute`, `classList`
+     (add/remove/toggle/contains/toggle-force), `matches`, textContent/innerHTML/value
+     read+write, `remove` — all via byte-offset *position handles*. **`createElement`/
+     `appendChild`, `el.closest`, and CSS** are what's left — all need a real DOM
+     **tree** (parent/child traversal); the flat token-stream renderer can't support
+     them additively (a hard architectural boundary, like the Chromium ceiling).
    - **CSS / layout**, cookies (sessions), inline remote `<img>`, `<textarea>`
      multiline.
    *Known limit: `lite.cnn.com` etc. refuse our minimal ClientHello (Fastly TLS
