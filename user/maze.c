@@ -20,6 +20,24 @@ static int  won;
 static unsigned rng = 2463534242u;
 static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
+static int t_start, best;       /* solve-time in seconds; best (fastest) persists in MAZE.HI */
+static int now_secs(void) {
+    char b[40]; sys_time(b, sizeof(b));
+    int hh = (b[11]-'0')*10 + (b[12]-'0'), mm = (b[14]-'0')*10 + (b[15]-'0'), ss = (b[17]-'0')*10 + (b[18]-'0');
+    return hh*3600 + mm*60 + ss;
+}
+static void load_best(void) {
+    char b[16]; long n = sys_readfile("MAZE.HI", b, sizeof(b) - 1);
+    best = 0;
+    for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best*10 + (b[i]-'0'); if (best > 100000) { best = 100000; break; } }
+}
+static void save_best(void) {
+    char b[12], t[12]; int k = 0, v = best;
+    if (!v) t[k++] = '0'; while (v) { t[k++] = (char)('0' + v % 10); v /= 10; }
+    int i = 0; while (k) b[i++] = t[--k]; b[i] = 0;
+    sys_writefile("MAZE.HI", b, (unsigned long)i);
+}
+
 static void gen(void) {
     for (int y = 0; y < GH; y++) for (int x = 0; x < GW; x++) wall[y][x] = 1;
     int stkx[256], stky[256], sp = 0;
@@ -42,12 +60,20 @@ static void gen(void) {
         if (!moved) sp--;
     }
     px = 1; py = 1; won = 0;
+    t_start = now_secs();          /* time the solve from when the maze appears */
 }
 
 static void render(void) {
     sys_clear();
     sys_setcolor(8);
-    print(won ? "  Maze   ** reached the exit! **\n" : "  Maze   reach the lime E\n");
+    char hdr[64]; int p = 0;
+    const char *t = won ? "  Maze   ** solved! **" : "  Maze   reach the lime E";
+    while (*t) hdr[p++] = *t++;
+    t = "   best: "; while (*t) hdr[p++] = *t++;
+    if (best <= 0) { hdr[p++] = '-'; hdr[p++] = '-'; }
+    else { char nb[8]; int k = 0, v = best; while (v) { nb[k++] = (char)('0' + v % 10); v /= 10; } while (k) hdr[p++] = nb[--k]; hdr[p++] = 's'; }
+    hdr[p] = 0;
+    print(hdr); print("\n");
     for (int y = 0; y < GH; y++) {
         for (int x = 0; x < GW; x++) {
             char ch; int col;
@@ -69,12 +95,17 @@ static void try_move(int nx, int ny) {
     if (nx < 0 || nx >= GW || ny < 0 || ny >= GH) return;
     if (wall[ny][nx]) return;                  /* can't walk through a wall */
     px = nx; py = ny;
-    if (px == EX && py == EY) won = 1;
+    if (px == EX && py == EY) {
+        won = 1;
+        int el = now_secs() - t_start; if (el < 0) el += 86400; if (el < 1) el = 1;
+        if (best == 0 || el < best) { best = el; save_best(); }   /* faster solve = new record */
+    }
 }
 
 int main(void) {
     char tb[24]; sys_time(tb, sizeof(tb));     /* seed from the clock for variety */
     for (int i = 0; tb[i]; i++) rng = rng * 31 + (unsigned char)tb[i];
+    load_best();
     gen();
     render();
     for (;;) {
