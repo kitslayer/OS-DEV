@@ -22,6 +22,7 @@ global mandel_elf_start, mandel_elf_end
 global piano_elf_start, piano_elf_end
 global maze_elf_start, maze_elf_end
 global adv_elf_start, adv_elf_end
+global matrix_elf_start, matrix_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -86,5 +87,9 @@ maze_elf_end:
 adv_elf_start:
     incbin "build/adv.elf"
 adv_elf_end:
+
+matrix_elf_start:
+    incbin "build/matrix.elf"
+matrix_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

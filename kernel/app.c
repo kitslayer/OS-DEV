@@ -70,7 +70,8 @@ static int pend_h, pend_t;
 extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_start[],
             editor_elf_start[], g2048_elf_start[], life_elf_start[], tetris_elf_start[],
             breakout_elf_start[], mines_elf_start[], sudoku_elf_start[], calendar_elf_start[],
-            mandel_elf_start[], piano_elf_start[], maze_elf_start[], adv_elf_start[];
+            mandel_elf_start[], piano_elf_start[], maze_elf_start[], adv_elf_start[],
+            matrix_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -88,6 +89,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "piano",  piano_elf_start,  "Piano" },
     { "maze",   maze_elf_start,   "Maze" },
     { "adv",    adv_elf_start,    "Adventure" },
+    { "matrix", matrix_elf_start, "Matrix" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
