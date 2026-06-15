@@ -162,6 +162,7 @@ print(Number.isInteger(5), Number.isNaN(1), Number.MAX_SAFE_INTEGER, String.from
 print([...new Set([3,1,2,1,3])].join(","), Number.isSafeInteger(5), Number.isSafeInteger("x"));
 print("hello".slice(-3), "ababab".indexOf("ab",1), [1,2,1,3].indexOf(1,1), [1,2,3].includes(1,1), "hello".substring(-3));
 print("a,b,c,d".split(",",2).join("|"), "a,b,c".split(",").length);
+var _er=new Error("oops"); print(_er.message, _er.name); try { throw new TypeError("t"); } catch(_x) { print(_x.name+":"+_x.message); }
 var _fo={a:1}; Object.freeze(_fo); _fo.a=9; _fo.b=2; delete _fo.a; print(_fo.a, _fo.b, Object.isFrozen(_fo));
 var _fn={a:1}; _fn.a=9; _fn.c=3; print(_fn.a, _fn.c, Object.isFrozen(_fn));
 var _dt=new Date(); print(_dt.valueOf()===_dt.getTime(), _dt.getTime()%1000, _dt.getDay()>=0&&_dt.getDay()<=6, _dt.getMilliseconds());

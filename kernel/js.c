@@ -45,7 +45,7 @@ static void out_str(const char *s) {
  * above the parsed AST; the buffer is static BSS, cheap on the kernel's RAM.
  * 4 MB: regex compilation is arena-heavy (each compiled program is sizeable), and
  * the kitchen-sink suite now compiles many regexes on top of a large AST. */
-#define JS_ARENA   (4096 * 1024)
+#define JS_ARENA   (8192 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -2043,6 +2043,13 @@ static val nat_num_isInteger(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }
 static val nat_num_isFinite(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }     /* ...and finite */
 static val nat_num_isSafeInteger(val *a, int n){ if(!n||a[0].t!=V_NUM) return BOOLV(0); int64_t x=a[0].num; return BOOLV(x>=-9007199254740991LL && x<=9007199254740991LL); }
 static val nat_str_fromCharCode(val *a, int n){ char *r=aalloc(n+1); if(!r) return STRV(""); for(int i=0;i<n;i++) r[i]=(char)((int64_t)to_num(a[i])&0xFF); r[n]=0; return STRV(r); }
+/* Error constructors: `new Error("msg")` / `Error("msg")` -> an object with .message and .name.
+ * (Engine-thrown runtime errors are still caught as their message string; this is for user code.) */
+static val make_error(const char *name, val *a, int n){ obj *o=new_obj(V_OBJ); if(!o) return UND(); obj_set(o,"message", (n && a[0].t!=V_UNDEF)?STRV(val_to_str(a[0])):STRV("")); obj_set(o,"name", STRV(name)); return obj_val(o); }
+static val nat_Error(val *a, int n){ return make_error("Error",a,n); }
+static val nat_TypeError(val *a, int n){ return make_error("TypeError",a,n); }
+static val nat_RangeError(val *a, int n){ return make_error("RangeError",a,n); }
+static val nat_SyntaxError(val *a, int n){ return make_error("SyntaxError",a,n); }
 
 /* ---- Object.keys(o) -> array of key strings ---- */
 static val nat_obj_keys(val *a, int n){
@@ -2252,6 +2259,10 @@ static void install_globals(env *g) {
       obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); sf->statics=sst; } }   /* Number.* / String.* statics via the side-statics object (Number/String stay V_NATIVE) */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
+    { obj *e=new_obj(V_NATIVE); e->native=nat_Error;       env_define(g,"Error",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_TypeError;   env_define(g,"TypeError",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_RangeError;  env_define(g,"RangeError",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_SyntaxError; env_define(g,"SyntaxError",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURIComponent; env_define(g,"encodeURIComponent",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=uri_decode;             env_define(g,"decodeURIComponent",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURI;          env_define(g,"encodeURI",obj_val_native(e)); }
