@@ -171,4 +171,15 @@ x|y|z:1,2 no-interp:undefined,undefined
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2
+-- accessors (getters/setters) --
+10
+10 10
+100
+7
+3 undefined
+1 2 8
+true {"z":{}}
+12
+40 10
+base sub base
 -- done --

@@ -401,6 +401,19 @@ static node *parse_primary(lexer *L) {
                 token mn=advance(L);                              /* member name (incl. "constructor") */
                 int is_static=0;                                  /* `static <name>`: class-level member (co->statics) */
                 if (mn.len==6 && memcmp(mn.s,"static",6)==0 && peek(L).type==T_IDENT) { is_static=1; mn=advance(L); }
+                if (mn.type==T_IDENT && (tok_is(mn,"get")||tok_is(mn,"set")) && !peek_punc(L,"(")) {   /* class accessor: `get area(){…}` / `set area(v){…}` (mn already consumed) */
+                    token nm=peek(L);
+                    if (nm.type==T_IDENT||nm.type==T_KW||nm.type==T_STR) {
+                        lexsave sv=lex_save(L); int isget=mn.s[0]=='g'; advance(L);   /* consume accessor name */
+                        if (peek_punc(L,"(")) {
+                            node *fn=mknode(N_FUNC); fn->str=intern(nm.s,nm.len); fn->slen=nm.len; fn->op=isget?'g':'s';
+                            parse_fn_params(L,fn); fn->a=parse_stmt(L);
+                            if (!is_static && cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;   /* static accessors parsed but unsupported in v1 */
+                            continue;
+                        }
+                        lex_restore(L,sv);
+                    }
+                }
                 if (peek_punc(L,"(")) {                           /* method:  name(params){body} */
                     node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len;
                     parse_fn_params(L, fn);
@@ -458,6 +471,22 @@ static node *parse_primary(lexer *L) {
                     if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
                     if (peek_punc(L,",")) advance(L); else break;
                     continue;
+                }
+                token gtok=peek(L);   /* `get x(){…}` / `set x(v){…}` accessor; `get`/`set` stay valid keys otherwise */
+                if (gtok.type==T_IDENT && (tok_is(gtok,"get")||tok_is(gtok,"set"))) {
+                    lexsave sv=lex_save(L); int isget=gtok.s[0]=='g'; advance(L);   /* consume get/set */
+                    token nm=peek(L);
+                    if (nm.type==T_IDENT||nm.type==T_KW||nm.type==T_STR) {
+                        advance(L);                                   /* consume the accessor name */
+                        if (peek_punc(L,"(")) {                       /* confirmed: get/set NAME ( … ) { … } */
+                            node *pr=mknode(N_PROP); pr->op=isget?'g':'s'; pr->str=intern(nm.s,nm.len); pr->slen=nm.len;
+                            node *fn=mknode(N_FUNC); parse_fn_params(L,fn); fn->a=parse_stmt(L); pr->a=fn;
+                            if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
+                            if (peek_punc(L,",")) advance(L); else break;
+                            continue;
+                        }
+                    }
+                    lex_restore(L,sv);                                /* not an accessor — `get`/`set` is an ordinary key */
                 }
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
@@ -721,7 +750,7 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND /* obj->kind markers only; the val.t stays V_OBJ */ };
+       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR /* obj->kind markers only; the val.t stays V_OBJ */ };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -1237,6 +1266,16 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs);
 static val eval_element_method(val recv, const char *name, val *args, int nargs);
 static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax);   /* DOM element read/write */
 
+/* Accessor properties (getters/setters). An accessor is a V_ACCESSOR obj stored
+ * AS the property value (its val.t stays V_OBJ, like V_BOUND), holding getter in
+ * vals[0] and setter in vals[1] (UND() when absent). obj_get returns it raw — only
+ * the eval READ sites (member/index get, method dispatch) fire the getter and the
+ * WRITE sites (member/index assign) fire the setter, so `in`/`delete`/enumeration
+ * correctly never trigger side effects. */
+static int  is_accessor(val v){ return v.t==V_OBJ && v.o && v.o->kind==V_ACCESSOR; }
+static obj *new_accessor(void){ obj *a=new_obj(V_ACCESSOR); if(a){ a->vals[0]=UND(); a->vals[1]=UND(); a->n=2; } return a; }
+static val  fire_getter(val acc, val recv){ val g=acc.o->vals[0]; if(g.t==V_UNDEF) return UND(); return call_function_this(g, recv, 0, 0); }
+
 static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
     if (recv.t==V_ARR && recv.o) {        /* recv.o can be NULL if a producing method hit OOM */
@@ -1247,7 +1286,7 @@ static val eval_member_get(val recv, const char *name) {
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM(recv.o->n/2);   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
         if (recv.o->kind==V_ELEMENT) { static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
-        val out; if (obj_get(recv.o,name,&out)) return out;
+        val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
     }
     if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val out; if (obj_get(k->statics,name,&out)) return out; } }   /* Class.staticField / Number.isInteger / static method as a value (inherited up the chain) */
     return UND();
@@ -1277,6 +1316,11 @@ static val eval_expr_inner(node *n, env *e) {
             for(int i=0;i<n->nlist && !g_oom;i++){ node*pr=n->list[i];
                 if (pr->type==N_SPREAD){ val sv=eval_expr(pr->a,e);
                     if (sv.t==V_OBJ && obj_keyed(sv.o)){ for(int j=0;j<sv.o->n && !g_oom;j++) obj_set(o, sv.o->keys[j], sv.o->vals[j]); }
+                } else if (pr->op=='g' || pr->op=='s') {   /* accessor half: merge get/set for one key into a V_ACCESSOR */
+                    const char *key = node_name(pr); val cur; obj *acc;
+                    if (obj_get(o,key,&cur) && is_accessor(cur)) acc=cur.o;       /* fill the other slot of an existing accessor */
+                    else { acc=new_accessor(); if(!acc){ g_oom=1; break; } obj_set(o,key,obj_val(acc)); }
+                    acc->vals[pr->op=='g'?0:1] = eval_expr(pr->a,e);              /* getter->[0], setter->[1] */
                 } else { const char *key = pr->b ? val_to_str(eval_expr(pr->b,e)) : node_name(pr);   /* pr->b = computed key */
                     obj_set(o, key, eval_expr(pr->a,e)); }
             }
@@ -1385,7 +1429,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) { dom_prop(recv.o, node_name(t), val_to_str(rhs), 0, 0); return rhs; }   /* el.textContent = … -> mutate the page */
                 if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
-                if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
+                if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ val cur; if(obj_get(recv.o,node_name(t),&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } /* fire setter */ else obj_set(recv.o, node_name(t), rhs); } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
                 if (recv.t==V_ARR && recv.o) {
                     long i = to_num(idx);
@@ -1401,7 +1445,7 @@ static val eval_expr_inner(node *n, env *e) {
                     }
                     if (!g_oom && (int)i < recv.o->n) recv.o->vals[(int)i]=rhs;
                 }
-                else if (recv.t==V_OBJ && recv.o) { obj_set(recv.o, val_to_str(idx), rhs); }
+                else if (recv.t==V_OBJ && recv.o) { const char *key=val_to_str(idx); val cur; if(obj_get(recv.o,key,&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } /* fire setter */ else obj_set(recv.o, key, rhs); }
                 return rhs; }
             rt_err("invalid assignment target"); return UND();
         }
@@ -1420,7 +1464,7 @@ static val eval_expr_inner(node *n, env *e) {
             val idx=eval_expr(n->b,e);
             if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
             if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
-            if (recv.t==V_OBJ && recv.o){ val out; if(obj_get(recv.o,val_to_str(idx),&out)) return out; }
+            if (recv.t==V_OBJ && recv.o){ val out; if(obj_get(recv.o,val_to_str(idx),&out)){ if(is_accessor(out)) return fire_getter(out,recv); return out; } }
             return UND(); }
         case N_CALL: {
             /* method call a.b(...) needs the receiver for string/array methods */
@@ -1460,7 +1504,7 @@ static val eval_expr_inner(node *n, env *e) {
                         return obj_val(bf); }
                     if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val sfn; if(obj_get(k->statics,m,&sfn)) return call_function_this(sfn, recv, args, na); } }   /* Class.staticMethod() / Number.isInteger() — `this` is the (sub)class; inherited up the chain */
                 }
-                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
+                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(is_accessor(fn)) fn=fire_getter(fn,recv); if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();
             }
@@ -1484,7 +1528,12 @@ static val eval_expr_inner(node *n, env *e) {
             for (int i=0;i<n->nlist && !g_oom;i++){ node *m=n->list[i];
                 if (strcmp(node_name(m),"constructor")==0){ ctor_node=m; continue; }
                 obj *fo=new_obj(V_FUN); if(!fo){ g_oom=1; return UND(); } fo->fn=m; fo->scope=e; fo->super_class=parent_obj;
-                val fv=UND(); fv.t=V_FUN; fv.o=fo; obj_set(P, node_name(m), fv);
+                val fv=UND(); fv.t=V_FUN; fv.o=fo;
+                if (m->op=='g' || m->op=='s') {   /* accessor method -> merge into an accessor in P[name] (fresh copy so overriding a parent's accessor doesn't mutate it) */
+                    obj *acc=new_accessor(); if(!acc){ g_oom=1; return UND(); }
+                    val cur; if (obj_get(P,node_name(m),&cur) && is_accessor(cur)){ acc->vals[0]=cur.o->vals[0]; acc->vals[1]=cur.o->vals[1]; }
+                    acc->vals[m->op=='g'?0:1]=fv; obj_set(P, node_name(m), obj_val(acc));
+                } else obj_set(P, node_name(m), fv);
             }
             obj *ctor_super=parent_obj;   /* own ctor: super is this class's parent */
             if (!ctor_node && has_parent) { ctor_node = parentC.o->fn; ctor_super = parentC.o->super_class; }  /* inherited ctor: its super is the GRANDparent (where it was defined) */
