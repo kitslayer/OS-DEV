@@ -79,3 +79,36 @@ later event. That's the next increment; M287 is the foundation: persistent
 globals across the load script and all event handlers, verified in-OS
 (`file:persist.htm`: a load-defined `greet()` and a `clicks` counter that
 survives across clicks → "Hello, Ada! (clicks: 2)").
+
+## M288: that next increment — `el.onclick = fn` / `addEventListener`
+
+With the persistent env in place, JS-assigned handlers followed directly:
+
+- **Registry.** `el.onXXX = fn` (assign hook) and `el.addEventListener(type, fn)`
+  store the function in a per-page `@handlers` object (keyed `"type:id"`) bound in
+  `g_page_env` — so it lives and dies with the persistent env (survives clicks,
+  dropped on navigation), no extra lifetime plumbing.
+- **Making the element clickable after render.** The handler is assigned at
+  *runtime*, after the page was rendered, so the element isn't a link yet.
+  `register_handler` writes a synthetic **`data-jsh`** attribute (through the
+  existing `setAttribute` → re-render path); the renderer's `handle_tag` then turns
+  any `data-jsh`+`id` element into an **`event:ID`** link (checked after inline
+  `onclick`, before the button-default-submit — so existing pages render
+  byte-identically). Clicking it routes through `browser_follow` → `run_js_event`
+  → **`js_fire_event(id,"click")`**, which looks up the fn and invokes it via
+  `call_function_this` in the persistent env (no arena reset).
+- **v1 keys by id.** A position offset would be stale the instant the
+  `data-jsh` write re-renders and shifts the buffer; an `id` is re-resolved each
+  fire. Id-less elements are a no-op for now.
+
+A subtle bug surfaced in the in-OS test and is worth remembering: **`obj_set`
+stores the key *pointer*, not a copy** (fine for the string literals it's usually
+given). The registry key is built in a stack buffer, so it must be `intern()`'d
+into the arena before `obj_set`, or it dangles and the handler is never found.
+
+Verified in-OS (`file:events.htm`): a load script does
+`document.getElementById('go').onclick = function(){…}` and
+`getElementById('add').addEventListener('click', …)` with **no** inline
+`onclick=`; clicking fires the stored functions (onclick state persists across
+clicks; addEventListener updates the DOM), and the inline-`onclick` path
+(`dom.htm`) is unregressed.
