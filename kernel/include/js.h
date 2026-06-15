@@ -10,6 +10,14 @@ int js_run(const char *src, char *out, int outmax);
  * out — used by the browser to splice script-generated HTML into the page. */
 int js_run_doc(const char *src, char *out, int outmax, void (*write_cb)(const char *));
 
+/* Page-session runs: js_page_load runs a page's load <script> and PERSISTS its
+ * global env; js_page_event runs an event handler (onclick/onchange) in that same
+ * persistent env, so it can call functions / read vars the load script defined.
+ * The env is rebuilt on the next js_page_load (arena reset then). */
+int js_page_load(const char *src, char *out, int outmax, void (*write_cb)(const char *));
+int js_page_event(const char *src, char *out, int outmax, void (*write_cb)(const char *));
+void js_page_reset(void);   /* drop the persistent page env (call on navigation) */
+
 /* Register a localStorage backing store (key->value strings) used by page JS;
  * cleared automatically by js_run (the shell path). */
 void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *));

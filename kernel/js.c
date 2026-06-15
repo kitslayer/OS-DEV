@@ -2740,20 +2740,33 @@ static inline void js_irq_restore(unsigned long f){ (void)f; }
 #endif
 static volatile int js_busy;
 
-static int js_run_impl(const char *src, char *out, int outmax) {
+/* A page's persistent global env (across its load <script> + every later event
+ * handler), so a function/var defined at load survives to fire on a click. Set
+ * on a page-begin run, reused by page-event runs, discarded on the next page-begin
+ * (the arena is reset then). The shell `js` path never touches it. */
+static env *g_page_env;
+/* mode: 0 = fresh (shell `js`/document.write — reset arena, new env, no persist);
+ *       1 = page-begin (navigation load script — reset arena, new env, PERSIST it);
+ *       2 = page-event (onclick/onchange — KEEP arena + REUSE the persistent env). */
+static int js_run_impl(const char *src, char *out, int outmax, int mode) {
     unsigned long f = js_irq_save();
     if (js_busy) { js_irq_restore(f); if (outmax) out[0]=0; return -1; }   /* another run in flight */
     js_busy = 1; js_irq_restore(f);
 
-    g_arena_off=0; g_oom=0; g_err=0; g_errmsg[0]=0; g_depth=0;
+    int reuse = (mode == 2 && g_page_env);             /* an event reusing the live page env */
+    if (!reuse) g_arena_off = 0;                       /* events keep the arena so the env survives */
+    g_oom=0; g_err=0; g_errmsg[0]=0; g_depth=0;
     g_out=out; g_out_cap=outmax; g_out_len=0; if(outmax) out[0]=0;
 
     lexer L; memset(&L,0,sizeof(L)); L.src=src; L.len=(int)strlen(src); L.pos=0;
     node *prog = parse_program(&L);
     g_depth = 0;                          /* parse balances g_depth to 0; reset defensively for eval */
     if (!g_err && !g_oom) {
-        env *g = new_env(0);
-        if (g) { install_globals(g); eval_stmt(prog, g); }
+        env *g = reuse ? g_page_env : new_env(0);
+        if (g) {
+            if (!reuse) { install_globals(g); if (mode >= 1) g_page_env = g; }   /* page-begin persists the env */
+            eval_stmt(prog, g);
+        }
     }
     if (g_oom) rt_err("out of memory (arena)");
     int r = g_out_len;
@@ -2766,8 +2779,9 @@ int js_run(const char *src, char *out, int outmax) {
     g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
     g_ls_get = 0; g_ls_set = 0;           /* and no persistent storage */
     g_dom_get = 0; g_dom_set = 0; g_dom_getattr = 0; g_dom_setattr = 0;   /* and no DOM (no page) */
+    g_page_env = 0;                       /* shell `js`: never reuse a page env */
     g_location_url[0] = 0;                /* shell `js`: window.location is empty */
-    return js_run_impl(src, out, outmax);
+    return js_run_impl(src, out, outmax, 0);
 }
 
 /* The browser registers a localStorage backing store before running page JS. */
@@ -2802,10 +2816,30 @@ void js_set_location(const char *url) {
  * written HTML into the page and re-parses). */
 int js_run_doc(const char *src, char *out, int outmax, void (*write_cb)(const char *)) {
     g_doc_write = write_cb;
-    int r = js_run_impl(src, out, outmax);
+    int r = js_run_impl(src, out, outmax, 0);
     g_doc_write = 0;
     return r;
 }
+/* Page navigation: run the load <script> and PERSIST its global env so later
+ * event handlers (onclick/onchange) can see the functions/vars it defined. */
+int js_page_load(const char *src, char *out, int outmax, void (*write_cb)(const char *)) {
+    g_doc_write = write_cb;
+    int r = js_run_impl(src, out, outmax, 1);
+    g_doc_write = 0;
+    return r;
+}
+/* A page event handler: run in the persistent page env (no arena reset), so the
+ * code can call functions / read vars defined by the load script. */
+int js_page_event(const char *src, char *out, int outmax, void (*write_cb)(const char *)) {
+    g_doc_write = write_cb;
+    int r = js_run_impl(src, out, outmax, 2);
+    g_doc_write = 0;
+    return r;
+}
+/* The browser calls this on navigation so a new page never inherits the previous
+ * page's persistent globals (the next js_page_load — or the first event on a
+ * script-less page — rebuilds the env from scratch and resets the arena). */
+void js_page_reset(void) { g_page_env = 0; }
 
 #ifdef JS_HOSTTEST
 /* a tiny in-memory localStorage so host tests can exercise the persistent path */

@@ -1329,7 +1329,7 @@ static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     if (appendpos >= RAW_MAX - 1) return;                /* no room to write */
     g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_base = appendpos; g_sw_max = RAW_MAX;
     js_bind_storage(b);
-    js_run_doc(b->scripts, jsout, sizeof(jsout), script_write_cb);
+    js_page_load(b->scripts, jsout, sizeof(jsout), script_write_cb);   /* persists the page's global env for later events */
     int written = g_sw_pos - g_sw_base;                  /* g_sw_base may have shifted if a DOM write moved the buffer */
     g_sw_raw = 0;
     if (jsout[0]) kprintf("[js] %s\n", jsout);           /* console.log / errors -> serial */
@@ -1347,7 +1347,7 @@ static void run_js_handler(browser_t *b, const char *code) {
     if (appendpos >= RAW_MAX - 1) return;
     g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_base = appendpos; g_sw_max = RAW_MAX;
     js_bind_storage(b);
-    js_run_doc(code, jsout, sizeof(jsout), script_write_cb);
+    js_page_event(code, jsout, sizeof(jsout), script_write_cb);   /* runs in the persistent page env (sees load-script globals) */
     int written = g_sw_pos - g_sw_base;                  /* g_sw_base may have shifted if a DOM write moved the buffer */
     g_sw_raw = 0;
     if (jsout[0]) kprintf("[js] %s\n", jsout);
@@ -1673,6 +1673,7 @@ static void browser_navigate(browser_t *b) {
     b->ls_n = 0;                      /* fresh localStorage per page */
     b->in_n = 0; b->focus_id[0] = 0;  /* fresh input-field state per page */
     b->form_action[0] = 0;            /* and no carried-over form action */
+    js_page_reset();                  /* drop the previous page's persistent JS globals */
     memset(b->det_open, 0xFF, sizeof(b->det_open));   /* <details> states unseeded until first render */
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
