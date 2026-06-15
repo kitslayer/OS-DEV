@@ -241,4 +241,7 @@ var _lr=""; _o1: for(var _i=0;_i<3;_i++){ for(var _j=0;_j<3;_j++){ if(_j==1) con
 var _pp=0; _o2: for(var _q=0;_q<5;_q++){ if(_q==2) break _o2; _pp++; } print(_pp);  // 2
 var _sv=""; _o3: for(var _s=0;_s<4;_s++){ switch(_s){ case 1: _sv+="a"; break; case 2: break _o3; default: _sv+="d"; } _sv+=_s; } print(_sv);  // d0a1
 var _ub=0; for(var _u=0;_u<10;_u++){ if(_u==3) break; _ub++; } print(_ub, true?7:9);  // 3 7 (unlabeled break unchanged + ?: not a label)
+print("-- querySelector(All) --");
+print(document.querySelector("p").textContent, document.querySelector("nope"), document.querySelector("b.x").textContent);  // alpha null alpha (tag match; no-match->null; compound tag.class->position handle; M281, host mock)
+var _qa=document.querySelectorAll(".item"); var _qc=0; _qa.forEach(function(e){_qc++;}); var _qf=""; for(var _qe of _qa)_qf+=_qe.textContent; print(_qa.length, _qa[0].textContent, _qa[1].textContent, _qc, _qf, document.querySelectorAll("zzz").length);  // 2 alpha beta 2 alphabeta 0 (querySelectorAll -> array of position handles: length/index/forEach/for-of all work; empty match->len 0; M281)
 print("-- done --");

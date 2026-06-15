@@ -44,8 +44,12 @@ static void out_str(const char *s) {
  * regression suite, or a page that defines several classes — need eval headroom
  * above the parsed AST; the buffer is static BSS, cheap on the kernel's RAM.
  * 4 MB: regex compilation is arena-heavy (each compiled program is sizeable), and
- * the kitchen-sink suite now compiles many regexes on top of a large AST. */
-#define JS_ARENA   (8192 * 1024)
+ * the kitchen-sink suite now compiles many regexes on top of a large AST.
+ * 12 MB: the single-run regression suite (no GC -> every alloc accumulates until
+ * the run ends) crossed 8 MB once querySelector(All) tests were added; 12 MB
+ * restores headroom for the suite's continued growth and for heavy real pages.
+ * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
+#define JS_ARENA   (12288 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -2097,34 +2101,72 @@ static int  (*g_dom_get)(const char *id, char *out, int max, int html);   /* 1 i
 static void (*g_dom_set)(const char *id, const char *value, int html);
 static int  (*g_dom_getattr)(const char *id, const char *attr, char *out, int max);   /* getAttribute; 1 if present */
 static void (*g_dom_setattr)(const char *id, const char *attr, const char *val);      /* setAttribute */
+/* querySelector(All): a handle can instead be keyed by a BYTE OFFSET into the
+ * page source (an id-less match). These callbacks address such elements by
+ * position, parallel to the id-keyed ones above (additive — id handles never
+ * use them). g_dom_query runs the selector match and returns match offsets. */
+static int  (*g_dom_get_at)(int off, char *out, int max, int html);
+static int  (*g_dom_query)(const char *sel, int *offs, int max);   /* returns match count */
+#define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
 static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
 static val element_handle(const char *id) {
     obj *o = new_obj(V_ELEMENT); if(!o){ g_oom=1; return UND(); }
     arr_push_val(o, STRV(intern(id, (int)strlen(id))));   /* vals[0] = the element id */
     return obj_val(o);
 }
+/* A position-keyed element handle (a querySelector match with no id): vals[0]
+ * is "" and vals[1] is the byte offset of its opening '<'. Reads/writes route
+ * through the g_dom_*_at callbacks. Legacy id handles have n==1 (no vals[1]). */
+static val element_handle_at(int off) {
+    obj *o = new_obj(V_ELEMENT); if(!o){ g_oom=1; return UND(); }
+    arr_push_val(o, STRV(intern("", 0)));   /* vals[0] = "" (no id) */
+    arr_push_val(o, NUM(off));              /* vals[1] = byte offset of the opening '<' */
+    return obj_val(o);
+}
 static val nat_getElementById(val *args, int nargs) {
     return element_handle(nargs ? val_to_str(args[0]) : "");
 }
-/* querySelector: supports the "#id" selector (the common case) -> the element by
- * id; tag/class selectors aren't supported yet and return null. */
+/* querySelector: a pure "#id" selector keeps the fast id path (byte-identical);
+ * tag/class/compound selectors run the host matcher and return the first match
+ * as a position handle, or null if nothing matched. */
 static val nat_querySelector(val *args, int nargs) {
     const char *sel = nargs ? val_to_str(args[0]) : "";
-    if (sel[0]=='#' && sel[1]) return element_handle(sel+1);
+    if (sel[0]=='#' && sel[1]) {                       /* pure #id (no .class / compound) -> fast id handle */
+        int plain=1; for (const char *p=sel+1; *p; p++) if(*p=='.'||*p=='#'||*p=='['||*p==' ') { plain=0; break; }
+        if (plain) return element_handle(sel+1);
+    }
+    int offs[1]; int n = g_dom_query ? g_dom_query(sel, offs, 1) : 0;
+    if (n > 0) return element_handle_at(offs[0]);
     val nv=UND(); nv.t=V_NULL; return nv;
+}
+/* querySelectorAll: every match as an array of position handles (.length, [i],
+ * forEach, for-of all work via the generic array machinery). */
+static val nat_querySelectorAll(val *args, int nargs) {
+    obj *a = new_obj(V_ARR); if(!a){ g_oom=1; return UND(); }
+    const char *sel = nargs ? val_to_str(args[0]) : "";
+    int offs[QSA_MAX_JS]; int n = g_dom_query ? g_dom_query(sel, offs, QSA_MAX_JS) : 0;
+    for (int i=0; i<n && !g_oom; i++) arr_push_val(a, element_handle_at(offs[i]));
+    val r=UND(); r.t=V_ARR; r.o=a; return r;
 }
 /* read/write a V_ELEMENT property; returns 1 if handled (so eval_member_get /
  * assignment can fall through for anything else). `set` NULL = read into out. */
 static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax) {
     const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
+    int has_pos = (el->n>1 && el->vals[1].t==V_NUM);   /* a querySelector match keyed by byte offset */
+    int off = has_pos ? (int)el->vals[1].num : 0;
     if (strcmp(name,"id")==0) { if(!setval && out){ int i=0; while(id[i]&&i<outmax-1){out[i]=id[i];i++;} out[i]=0; } return 1; }
     int kind = -1;                                   /* 0=textContent, 1=innerHTML, 2=input .value */
     if (strcmp(name,"value")==0) kind = 2;
     else if (strcmp(name,"innerHTML")==0) kind = 1;
     else if (strcmp(name,"textContent")==0 || strcmp(name,"innerText")==0) kind = 0;
     if (kind >= 0) {
-        if (setval) { if(g_dom_set) g_dom_set(id, setval, kind); }
-        else { if(out){ out[0]=0; if(g_dom_get) g_dom_get(id, out, outmax, kind); } }
+        if (setval) {                                /* position-keyed write lands in a later increment; id write unchanged */
+            if (!has_pos) { if(g_dom_set) g_dom_set(id, setval, kind); }
+        } else if (out) {
+            out[0]=0;
+            if (has_pos) { if(g_dom_get_at) g_dom_get_at(off, out, outmax, kind); }
+            else         { if(g_dom_get)    g_dom_get(id, out, outmax, kind); }
+        }
         return 1;
     }
     return 0;
@@ -2516,6 +2558,7 @@ static void install_globals(env *g) {
     obj *doc=new_obj(V_OBJ); obj_set(doc,"write",dwv); obj_set(doc,"writeln",dwv);
     def_native(doc,"getElementById",nat_getElementById);
     def_native(doc,"querySelector",nat_querySelector);
+    def_native(doc,"querySelectorAll",nat_querySelectorAll);
     val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
     /* window.location: a read-only snapshot of the current page URL, parsed into
      * href/protocol/host/pathname/search so page JS can inspect it (e.g. ?query). */
@@ -2645,6 +2688,10 @@ void js_set_dom_attr(int (*getattr)(const char *, const char *, char *, int),
                      void (*setattr)(const char *, const char *, const char *)) {
     g_dom_getattr = getattr; g_dom_setattr = setattr;
 }
+/* The browser registers position-keyed DOM callbacks for querySelector(All) matches. */
+void js_set_dom_pos(int (*get_at)(int, char *, int, int), int (*query)(const char *, int *, int)) {
+    g_dom_get_at = get_at; g_dom_query = query;
+}
 /* The browser sets the current page URL before running page JS (for window.location). */
 void js_set_location(const char *url) {
     int i = 0; if (url) while (url[i] && i < (int)sizeof(g_location_url) - 1) { g_location_url[i] = url[i]; i++; }
@@ -2676,6 +2723,13 @@ static int hdom_get(const char *id, char *out, int max, int html){ (void)html; f
 /* mock getAttribute: echo the attr name back as its value (so the suite can assert the round-trip) */
 static int hdom_getattr(const char *id, const char *attr, char *out, int max){ (void)id; if(max<=0) return 0; int j=0; while(attr[j]&&j<max-1){out[j]=attr[j];j++;} out[j]=0; return 1; }
 static void hdom_setattr(const char *id, const char *attr, const char *val){ (void)id; (void)attr; (void)val; }
+/* mock querySelector(All): "p"/".item" match two elements (offsets 10,20); "#solo"/"b.x" match one. */
+static int hdom_query(const char *sel, int *offs, int max){ if(max<1) return 0;
+    if(!strcmp(sel,"p")||!strcmp(sel,".item")){ int n=0; if(n<max)offs[n++]=10; if(n<max)offs[n++]=20; return n; }
+    if(!strcmp(sel,"#solo")||!strcmp(sel,"b.x")){ offs[0]=10; return 1; }
+    return 0; }
+static int hdom_get_at(int off, char *out, int max, int html){ (void)html; if(max<=0) return 0;
+    const char *t = off==10 ? "alpha" : off==20 ? "beta" : ""; int j=0; while(t[j]&&j<max-1){out[j]=t[j];j++;} out[j]=0; return 1; }
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -2683,6 +2737,7 @@ int main(int argc, char **argv) {
     js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     js_set_dom_attr(hdom_getattr, hdom_setattr);
+    js_set_dom_pos(hdom_get_at, hdom_query);             /* mock querySelector(All) for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);

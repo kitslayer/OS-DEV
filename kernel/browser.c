@@ -991,6 +991,96 @@ static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
     }
     return 0;
 }
+/* ---- querySelector(All): a tiny CSS-selector matcher over the page source ----
+ * Supports simple selectors: a tag name, ".class", "#id", and compounds like
+ * "div.note" / "p#x". Matches are reported as the byte offset of each opening
+ * '<' in b->raw, which dom_find_at() then resolves to an inner-text span (the
+ * same byte coordinates the id-keyed splice code already uses) — so id-less
+ * matches become addressable WITHOUT changing the id path. */
+#define QSA_MAX 256
+typedef struct { char tag[16]; char cls[32]; char id[32]; } sel_t;
+static int sel_parse(const char *s, sel_t *o) {
+    o->tag[0]=o->cls[0]=o->id[0]=0;
+    int i=0, k=0;
+    while (s[i] && dom_alnum(s[i]) && k<15) { o->tag[k++]=(char)lc(s[i]); i++; }   /* leading tag name (lowercased) */
+    o->tag[k]=0;
+    while (s[i]) {
+        if (s[i]=='.')      { i++; k=0; while (s[i] && (dom_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->cls[k++]=s[i++]; o->cls[k]=0; }
+        else if (s[i]=='#') { i++; k=0; while (s[i] && (dom_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->id[k++]=s[i++];  o->id[k]=0;  }
+        else return 0;   /* an unsupported combinator/char -> fail closed (no match) */
+    }
+    return (o->tag[0]||o->cls[0]||o->id[0]);
+}
+/* Word-boundary class match within a class="..." value (space-separated tokens). */
+static int class_has(const char *v, int vl, const char *cls) {
+    int cl=0; while (cls[cl]) cl++; if (cl==0) return 0;
+    for (int i=0; i+cl<=vl; i++) {
+        if (i>0 && v[i-1]!=' ' && v[i-1]!='\t') continue;
+        int m=0; while (m<cl && v[i+m]==cls[m]) m++;
+        if (m==cl && (i+cl==vl || v[i+cl]==' ' || v[i+cl]=='\t')) return 1;
+    }
+    return 0;
+}
+/* Scan the body region for elements matching `sel`; fill offs[] with the byte
+ * offset of each matching opening '<'. Returns the count (bounded by max). */
+static int sel_match_all(browser_t *b, const sel_t *sel, int *offs, int max) {
+    const char *body = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
+    int n = 0;
+    for (int i = lo; i < hi && n < max; i++) {
+        if (body[i] != '<') continue;
+        int j = i + 1;
+        if (j>=hi || body[j]=='/' || body[j]=='!' || body[j]=='?') continue;   /* closing tag / comment / decl */
+        char tag[16]; int tl = 0;
+        while (j<hi && tl<15) { char c=body[j]; if(c=='>'||c==' '||c=='/'||c=='\t'||c=='\n') break; tag[tl++]=(char)lc(c); j++; }
+        tag[tl]=0; if (tl==0) continue;
+        int astart = j; char q=0;                                   /* quote-aware scan to '>' (mirrors parse_html) */
+        while (j<hi) { char c=body[j]; if(q){if(c==q)q=0;} else if(c=='"'||c=='\'')q=c; else if(c=='>')break; j++; }
+        int alen = j - astart;
+        if (sel->tag[0] && !tageq(tag, sel->tag)) { i=j; continue; }
+        if (sel->cls[0]) { const char *v; int vl; if(!find_attr(body+astart,alen,"class",&v,&vl) || !class_has(v,vl,sel->cls)) { i=j; continue; } }
+        if (sel->id[0])  { const char *v; int vl; if(!find_attr(body+astart,alen,"id",&v,&vl)    || !attr_eq(v,vl,sel->id))     { i=j; continue; } }
+        offs[n++] = i;          /* matched: record the '<' offset */
+        i = j;                  /* advance past this opening tag (children are still scanned) */
+    }
+    return n;
+}
+/* Position variant of dom_find: the element whose opening '<' is at byte `off`.
+ * Validates `off` is a real in-body opening tag (so a stale offset fails closed),
+ * then returns INNER's [*is,*ie) via the same depth-count as dom_find. */
+static int dom_find_at(browser_t *b, int off, int *is, int *ie) {
+    const char *r = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
+    if (off < lo || off+1 >= hi || r[off] != '<' || !dom_alnum(r[off+1])) return 0;
+    char tag[16]; int tn = 0, ne = off + 1;
+    while (ne < hi && dom_alnum(r[ne]) && tn < 15) tag[tn++] = r[ne++];
+    if (tn == 0) return 0;
+    int gt = off; while (gt < hi && r[gt] != '>') gt++;
+    if (gt >= hi) return 0;
+    int istart = gt + 1, depth = 1, p = istart;
+    while (p < hi) {
+        if (r[p] == '<') {
+            if (p+2+tn <= hi && r[p+1]=='/' && memcmp(r+p+2, tag, tn)==0) { if(--depth==0){ *is=istart; *ie=p; return 1; } }
+            else if (p+1+tn < hi && memcmp(r+p+1, tag, tn)==0 && (r[p+1+tn]==' '||r[p+1+tn]=='>'||r[p+1+tn]=='/')) depth++;
+        }
+        p++;
+    }
+    return 0;
+}
+/* Read a position-addressed element's textContent/innerHTML (html 0/1). The
+ * .value path (html 2) is keyed by id, so a position handle can't address it. */
+static int browser_dom_get_at(int off, char *out, int max, int html) {
+    browser_t *b = g_ls_b; if (max) out[0] = 0; if (!b) return 0;
+    if (html == 2) return 0;
+    int is, ie; if (!dom_find_at(b, off, &is, &ie)) return 0;
+    int len = ie - is; if (len > max - 1) len = max - 1; if (len < 0) len = 0;
+    memcpy(out, b->raw + is, len); out[len] = 0; return 1;
+}
+/* document.querySelector(All): parse the selector, scan, fill offs[] with match offsets. */
+static int browser_dom_query(const char *sel, int *offs, int max) {
+    browser_t *b = g_ls_b; if (!b) return 0;
+    sel_t s; if (!sel_parse(sel, &s)) return 0;
+    int m = (max < QSA_MAX) ? max : QSA_MAX;
+    return sel_match_all(b, &s, offs, m);
+}
 /* <input> field values, keyed by id (the typed or scripted .value text) */
 static const char *in_get(browser_t *b, const char *id) {
     for (int i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) return b->in_val[i];
@@ -1127,7 +1217,7 @@ static void browser_dom_setattr(const char *id, const char *attr, const char *va
     b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_location(b->url); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_query); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

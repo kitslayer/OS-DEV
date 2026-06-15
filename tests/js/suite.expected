@@ -218,4 +218,7 @@ true false 1,2,3 5
 2
 d0a1
 3 7
+-- querySelector(All) --
+alpha null alpha
+2 alpha beta 2 alphabeta 0
 -- done --
