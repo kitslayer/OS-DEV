@@ -1195,7 +1195,7 @@ static val eval_member_get(val recv, const char *name) {
         if (recv.o->kind==V_ELEMENT) { static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) return out;
     }
-    if (recv.t==V_FUN && recv.o && recv.o->statics) { val out; if (obj_get(recv.o->statics,name,&out)) return out; }   /* Class.staticField / static method as a value */
+    if (recv.t==V_FUN && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val out; if (obj_get(k->statics,name,&out)) return out; } }   /* Class.staticField / static method as a value (inherited up the chain) */
     return UND();
 }
 
@@ -1402,7 +1402,7 @@ static val eval_expr_inner(node *n, env *e) {
                         arr_push_val(bf, recv); arr_push_val(bf, na>0?args[0]:UND());   /* [0]=fn [1]=this */
                         for (int i=1;i<na && !g_oom;i++) arr_push_val(bf, args[i]);      /* [2..]=partial args */
                         return obj_val(bf); }
-                    if (recv.t==V_FUN && recv.o && recv.o->statics) { val sfn; if(obj_get(recv.o->statics,m,&sfn)) return call_function_this(sfn, recv, args, na); }   /* Class.staticMethod() — `this` is the class */
+                    if (recv.t==V_FUN && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val sfn; if(obj_get(k->statics,m,&sfn)) return call_function_this(sfn, recv, args, na); } }   /* Class.staticMethod() — `this` is the (sub)class; inherited up the chain */
                 }
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
