@@ -13,6 +13,7 @@
 static const char *cur;          /* the parse cursor */
 static int err;
 static long expr(void);
+static long bor(void);          /* the lowest-precedence level (bitwise OR) — the eval entry */
 
 static void skipws(void) { while (*cur == ' ' || *cur == '\t') cur++; }
 
@@ -20,12 +21,13 @@ static long factor(void) {
     skipws();
     if (*cur == '(') {
         cur++;
-        long v = expr();
+        long v = bor();
         skipws();
         if (*cur == ')') cur++; else err = 1;
         return v;
     }
     if (*cur == '-') { cur++; return -factor(); }
+    if (*cur == '~') { cur++; return ~factor(); }   /* bitwise NOT */
     long v = 0; int any = 0;
     if (cur[0] == '0' && (cur[1] == 'x' || cur[1] == 'X')) {          /* hex literal: 0x... */
         cur += 2;
@@ -81,6 +83,27 @@ static long expr(void) {
     return v;
 }
 
+static long shift(void) {       /* << >> ; looser than + - */
+    long v = expr();
+    for (;;) {
+        skipws();
+        if (cur[0] == '<' && cur[1] == '<') { cur += 2; long s = expr(); v = (s >= 0 && s < 64) ? v << s : 0; }
+        else if (cur[0] == '>' && cur[1] == '>') { cur += 2; long s = expr(); v = (s >= 0 && s < 64) ? v >> s : 0; }
+        else break;
+    }
+    return v;
+}
+static long band(void) {        /* bitwise AND */
+    long v = shift();
+    for (;;) { skipws(); if (*cur == '&') { cur++; v &= shift(); } else break; }
+    return v;
+}
+static long bor(void) {         /* bitwise OR (lowest precedence) */
+    long v = band();
+    for (;;) { skipws(); if (*cur == '|') { cur++; v |= band(); } else break; }
+    return v;
+}
+
 static void itoa_l(long v, char *out) {
     char t[24]; int i = 0, neg = v < 0;
     unsigned long u = neg ? (unsigned long)(-v) : (unsigned long)v;
@@ -101,7 +124,7 @@ static void itoa_hex(long v, char *out) {        /* unsigned 64-bit hex (so nega
 }
 
 int main(void) {
-    sys_setcolor(4); print("\n  OS-DEV calc -- + - * / % ^ ( )  0x.. hex\n");   /* title: cyan */
+    sys_setcolor(4); print("\n  OS-DEV calc: + - * / % ^ & | << >> ~ ( ) 0x\n");   /* title: cyan */
     sys_setcolor(8); print("  e.g. (2+3)*4 ; 'q' to quit\n\n"); sys_setcolor(0);
     char line[128];
     for (;;) {
@@ -110,7 +133,7 @@ int main(void) {
         if (line[0] == '\0') continue;
         if (streq(line, "q") || streq(line, "quit") || streq(line, "exit")) break;
         cur = line; err = 0;
-        long r = expr();
+        long r = bor();
         skipws();
         if (err || *cur) { sys_setcolor(2); print("  ? syntax error\n"); sys_setcolor(0); }   /* error: red */
         else { char b[24]; itoa_l(r, b); print("  = "); sys_setcolor(3); print(b); sys_setcolor(0);  /* decimal: yellow */
