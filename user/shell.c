@@ -28,6 +28,15 @@ static void printl(long v) {              /* print a (possibly large) integer */
     while (i) o[j++] = t[--i];
     o[j] = '\0'; print(o);
 }
+static void print_base(unsigned long n, int base) {   /* print n in base 2-16 */
+    const char *dgt = "0123456789abcdef";
+    char t[72]; int i = 0;
+    if (!n) t[i++] = '0';
+    while (n) { t[i++] = dgt[n % (unsigned)base]; n /= (unsigned)base; }
+    char o[72]; int j = 0;
+    while (i) o[j++] = t[--i];
+    o[j] = '\0'; print(o);
+}
 static unsigned shell_rng = 0;            /* lazily seeded from the clock on first use */
 static unsigned shroll(void) {
     if (!shell_rng) {
@@ -96,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N>\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -851,6 +860,17 @@ int main(void) {
                 static const char *syms[] = { "M","CM","D","CD","C","XC","L","XL","X","IX","V","IV","I" };
                 print("  ");
                 for (int i = 0; i < 13; i++) while (n >= vals[i]) { print(syms[i]); n -= vals[i]; }
+                print("\n");
+            }
+        } else if (startswith(line, "base ")) {           /* base N -> binary / octal / hex (CLI companion to base.htm) */
+            const char *p = line + 5; while (*p == ' ') p++;
+            unsigned long n = 0; int any = 0;
+            while (*p >= '0' && *p <= '9') { if (n < 100000000000000000UL) n = n * 10 + (unsigned)(*p - '0'); p++; any = 1; }
+            if (!any) print("usage: base <decimal>   (e.g. base 255)\n");
+            else {
+                print("  bin "); print_base(n, 2);
+                print("  oct "); print_base(n, 8);
+                print("  hex "); print_base(n, 16);
                 print("\n");
             }
         } else if (startswith(line, "get ")) {
