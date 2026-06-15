@@ -1,10 +1,11 @@
-# Milestones 228–231 — completing the JavaScript operator set
+# Milestones 228–232 — completing the JavaScript operator set
 
 By M227 the from-scratch JavaScript engine (`kernel/js.c`) had classes, ES6,
 regex, `Map`/`Set`, `Date`, and a comprehensive standard library — but it was
 still missing several *operators* that real code reaches for constantly. This
-arc filled that gap: `delete`, `in`, bitwise `^`/`~`, and `instanceof`. Each is
-small, but together they remove a class of "why doesn't this parse?" surprises.
+arc filled that gap: `delete`, `in`, bitwise `^`/`~`, `instanceof`, `**`, and
+`void`. Each is small, but together they remove a class of "why doesn't this
+parse?" surprises — the operator set is now complete.
 
 Every operator was verified the same way: a host build under
 AddressSanitizer + UndefinedBehaviorSanitizer
@@ -83,6 +84,25 @@ skip the direct parent — so a dedicated, always-the-direct-parent pointer was 
 clean fix. Verified with single-level and inherited classes, and that
 `instanceof` returns `false` for plain objects, primitives, arrays, native
 constructors (`Map`), and non-constructor right-hand sides.
+
+## M232 — `**` and `void`
+
+`**` (exponentiation) was the only operator here that touched more than its own
+code path. Three changes: it joins the lexer's `ops[]` table so `2 ** 3` lexes as
+a single `**` token rather than two `*` (which would never parse); it sits in
+`bin_prec` at precedence 12, *tighter* than `*`/`/`/`%` at 11 (so `2 * 3 ** 2` is
+`2 * (3 ** 2)` = 18); and it is **right-associative**, unlike every other binary
+operator. The precedence-climbing `parse_binary` normally recurses on the right
+operand at `p+1` (left-associative); for `**` it recurses at `p`, so
+`2 ** 3 ** 2` groups as `2 ** (3 ** 2)` = 512, not `(2 ** 3) ** 2` = 64. That one
+conditional (`code=='P' ? p : p+1`) is the only change to the shared binary
+parser, and it affects nothing but `**`. Evaluation is integer power, matching
+the existing `Math.pow`. (`**=` assignment was deliberately not added.)
+
+`void` is trivial by comparison: a new keyword and `N_UNARY` case that lets the
+operand evaluate (so its side effects run) and then yields `undefined`. It earns
+its place here because `javascript:void(0)` is a common idiom in page links, and
+this is a browser.
 
 ## Why these were safe to add late in the engine's life
 
