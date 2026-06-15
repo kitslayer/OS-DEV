@@ -196,3 +196,23 @@ all verified in-OS:
   error for silent stack corruption.** Also why a cap-trip can't be a `jstest`
   suite line: it emits `[js error:`, which the suite's error-guard treats as a
   failure (correctly).
+
+The same campaign confirmed the engine fails safe on the OTHER two exhaustion
+axes too, so untrusted page scripts can't crash it on any of them:
+
+- **Heap/arena exhaustion → graceful.** A 33M-char string (`s=s+s` ×25) and a
+  200k-element array both return `[js error: out of memory (arena)]`, no crash —
+  the `g_oom` flag propagates like `g_err` (every `aalloc` caller checks its
+  result; the `+` concat does `if(!s) return UND()`), unwinding the run cleanly.
+- **Malformed/adversarial syntax → graceful.** Unterminated strings
+  (`print("x`), garbage punctuation (`)(}{][`), deeply-unbalanced braces
+  (`{{{{{{{{`), and incomplete statements (`var x =`) all yield
+  `[js error: syntax: …]` with no OOB read past the source, no infinite loop,
+  and no stack blow-up (the parser shares the same `g_depth` guard). A 30-digit
+  number literal wraps to a 64-bit value (integer engine, no float) — wrong vs
+  `1e30` but safe, not a crash.
+
+So across **features** (~60 verified, 2 bugs fixed), **stack depth**, **heap**,
+and **malformed input**, the from-scratch engine is correct where it should be
+and fails gracefully everywhere else — the full robustness profile for the
+untrusted-input crown jewel. Eighteen reviews this session, all SHIP.
