@@ -1,13 +1,17 @@
 # What's next
 
-> **Status (358 milestones).** Latest arc (M341–358): a shell **networking
+> **Status (373 milestones).** Latest arc (M341–358): a shell **networking
 > diagnostic toolkit** (`headers` = curl -I, `ping <host>`, `ifconfig`) + a
 > deeper e1000 RX ring; **four new apps** (Tic-Tac-Toe vs an unbeatable minimax
 > AI, Blackjack, a typing-speed test, Simon) bringing the suite to **twenty-four**,
 > with saved best scores/times now across the games (typing/bj/simon/breakout/
 > mines/maze); the F9 Apps menu lists **every** app + a shell `apps`; and more
 > shell tools (`sha512`, `nl`, `morse`, `factor`, `roll`). Three subagent reviews
-> this arc, all SHIP. **Remaining big/risky (deferred to protect working
+> this arc, all SHIP. **M359–373** then added the multi-file text tools
+> (`cat`/`grep`/`wc`/`head`/`tail` over many files) + `grep -i/-n/-c/-v/--` +
+> `uniq`/`seq`/`rev`/`tac`/`head -N`/`tail -N`, a persistent `todo` manager, and
+> a **Connect Four** game vs a 1-ply AI (suite now **25**, F9 menu full at 30) —
+> several more subagent reviews, all SHIP. **Remaining big/risky (deferred to protect working
 > systems — best done in a focused session):** ENFORCING cert validation (a
 > fatal gate; the trust store has ISRG/DigiCert/SSL.com/GTS but enforcement needs
 > ~all common roots), **inline remote images** — local `<img>` decode inline;
@@ -31,7 +35,14 @@
 > is byte-unchanged after a read-only boot — so it's the repeated file *writes*
 > that corrupt it over time, not a boot/mount-write or QEMU-read artifact;
 > consistent with the add_entry dir-fill limit + a likely write-path bug.
-> `rm build/fat.img && make` regenerates a clean disk. Don't touch the FAT32 write path casually — verify every change against
+> `rm build/fat.img && make` regenerates a clean disk. **First-read-after-boot
+> transient (M373):** the *first* file read can intermittently fail ("no such
+> file" on a `cat` issued within the first ~5 s post-boot), while the very next
+> read of the same file succeeds — a disk-readiness race at boot, not a logic
+> bug (cat/grep/tac share one `sys_readfile` path). Any prior disk op (e.g.
+> `ls`) or a couple seconds' settle warms it up, and a human typing the first
+> command never hits it — only the fast test harness does. Same off-limits
+> kernel disk/ATA-init path; deferred. Don't touch the FAT32 write path casually — verify every change against
 > the baked files.
 >
 > ---
