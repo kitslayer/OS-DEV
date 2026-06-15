@@ -177,6 +177,10 @@ static const struct {
         "document.write(\"<p>class fields + method: new Pt(), set x=3 y=4, dist2() = \" + pt.dist2() + \"</p>\");\n"
         "var cfg = {}; cfg.theme ||= \"dark\"; cfg.theme ||= \"light\";\n"
         "document.write(\"<p>logical assign: cfg.theme ||= dark then ||= light gives \" + cfg.theme + \"</p>\");\n"
+        "class Counter { static total = 0; static add(){ Counter.total = Counter.total + 1; return Counter.total; } }\n"
+        "document.write(\"<p>static counter: add() three times = \" + Counter.add() + \", \" + Counter.add() + \", \" + Counter.add() + \"</p>\");\n"
+        "function hl(parts, v){ return parts[0] + \"[\" + v + \"]\" + parts[1]; }\n"
+        "document.write(\"<p>tagged template (cooked strings + a ${6*7} value) = \" + hl`a ${6*7} b` + \"</p>\");\n"
         "</script>"
         "<p><a href=\"file:index.htm\">Back to the demo index</a></p>" },
     { "DOM     HTM", "<h1>Interactive DOM</h1>"
