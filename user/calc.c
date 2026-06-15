@@ -31,12 +31,27 @@ static long factor(void) {
     return v;
 }
 
+static long power(void) {               /* right-associative ^, binds tighter than * / % */
+    long b = factor();
+    skipws();
+    if (*cur == '^') {
+        cur++;
+        long e = power();
+        if (e < 0) return 0;            /* integer: x^(negative) rounds to 0 */
+        long r = 1;
+        for (long i = 0; i < e && i < 64; i++) r *= b;   /* capped to bound the loop */
+        return r;
+    }
+    return b;
+}
+
 static long term(void) {
-    long v = factor();
+    long v = power();
     for (;;) {
         skipws();
-        if (*cur == '*') { cur++; v *= factor(); }
-        else if (*cur == '/') { cur++; long d = factor(); if (d == 0) err = 1; else v /= d; }
+        if (*cur == '*') { cur++; v *= power(); }
+        else if (*cur == '/') { cur++; long d = power(); if (d == 0) err = 1; else v /= d; }
+        else if (*cur == '%') { cur++; long d = power(); if (d == 0) err = 1; else v %= d; }
         else break;
     }
     return v;
@@ -64,7 +79,7 @@ static void itoa_l(long v, char *out) {
 }
 
 int main(void) {
-    sys_setcolor(4); print("\n  OS-DEV calc -- + - * / and ( )\n");   /* title: cyan */
+    sys_setcolor(4); print("\n  OS-DEV calc -- + - * / % ^ and ( )\n");   /* title: cyan */
     sys_setcolor(8); print("  e.g. (2+3)*4 ; 'q' to quit\n\n"); sys_setcolor(0);
     char line[128];
     for (;;) {
