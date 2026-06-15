@@ -1,5 +1,25 @@
 # What's next
 
+> **Status (358 milestones).** Latest arc (M341–358): a shell **networking
+> diagnostic toolkit** (`headers` = curl -I, `ping <host>`, `ifconfig`) + a
+> deeper e1000 RX ring; **four new apps** (Tic-Tac-Toe vs an unbeatable minimax
+> AI, Blackjack, a typing-speed test, Simon) bringing the suite to **twenty-four**,
+> with saved best scores/times now across the games (typing/bj/simon/breakout/
+> mines/maze); the F9 Apps menu lists **every** app + a shell `apps`; and more
+> shell tools (`sha512`, `nl`, `morse`, `factor`, `roll`). Three subagent reviews
+> this arc, all SHIP. **Remaining big/risky (deferred to protect working
+> systems — best done in a focused session):** ENFORCING cert validation (a
+> fatal gate; the trust store has ISRG/DigiCert/SSL.com/GTS but enforcement needs
+> ~all common roots), **inline remote images** (local `<img>` decode inline;
+> remote is a clickable full-page view — inline needs a render-time fetch on a
+> big-stack task), the **app-exit resource leak** (MAX_APPS spawns/boot; needs a
+> careful vmm teardown that frees only the app's user ranges), a **2-column F9
+> menu** (the single column is near its ~30-item cap), and shell **pipes/redirect**.
+>
+> ---
+>
+> The historical status below is from the 337-milestone mark.
+>
 > **Status (337 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
