@@ -274,4 +274,6 @@ function _IC(){} print(new _IC() instanceof _IC, new _IC() instanceof Object);  
 print(new Map() instanceof Map, _ar instanceof Map);  // true false (native ctor unchanged; array is not a Map)
 print([1,2]+[3], 1+[2,3], "o="+_ob);  // 1,23 12,3 o=[object Object] (M420: object operands string-concat via ToPrimitive)
 print(2+3, [1,2,3].reduce(function(a,b){return a+b;},0), "n="+5);  // 5 6 n=5 (numeric path unregressed)
+print("-- integer arithmetic / div-by-zero safety --");
+print(7/2, 10/0, 0/0, 0-7%3, 2147483647+1);  // 3 0 0 -1 2147483648 (integer division truncates; div-by-zero GUARDED to 0 — no #DE crash; modulo; 64-bit so no 32-bit overflow)
 print("-- done --");

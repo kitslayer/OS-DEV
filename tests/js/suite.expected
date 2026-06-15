@@ -250,4 +250,6 @@ true true
 true false
 1,23 12,3 o=[object Object]
 5 6 n=5
+-- integer arithmetic / div-by-zero safety --
+3 0 0 -1 2147483648
 -- done --
