@@ -1961,6 +1961,7 @@ static void build_home(browser_t *b) {
          "<dt><a href=\"http://info.cern.ch/hypertext/WWW/TheProject.html\">The WWW Project</a></dt>"
          "<dd>the original 1991 page about the World Wide Web</dd>"
          "<dt><a href=\"file:README.TXT\">file:README.TXT</a></dt><dd>a local file on the disk</dd>"
+         "<dt><a href=\"file:help.htm\">file:help.htm</a></dt><dd>a built-in <b>help/manual</b> &mdash; apps, shell commands, and keyboard shortcuts (styled by the CSS engine)</dd>"
          "<dt><a href=\"file:index.htm\">Local demos</a></dt><dd>lists, tables, entities, colour, "
          "forms, inline code, and PNG / GIF / JPEG images &mdash; all rendered from scratch</dd>"
          "<dt><a href=\"file:jstest.htm\">file:jstest.htm</a></dt><dd>a page whose content is generated "
