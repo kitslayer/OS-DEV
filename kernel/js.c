@@ -2518,6 +2518,18 @@ static val nat_cbrt(val *a, int n){ int64_t x=n?to_num(a[0]):0; int neg=x<0; uin
 static val nat_clz32(val *a, int n){ uint32_t u=(uint32_t)(n?to_num(a[0]):0); if(!u) return NUM(32); int c=0; while(!(u&0x80000000u)){ u<<=1; c++; } return NUM(c); }   /* count leading zeros in 32 bits */
 static val nat_imul(val *a, int n){ uint32_t x=(uint32_t)(n>0?to_num(a[0]):0), y=(uint32_t)(n>1?to_num(a[1]):0); return NUM((int32_t)(x*y)); }   /* 32-bit integer multiply */
 static val nat_pow(val *a, int n){ int64_t b=n>0?to_num(a[0]):0, e=n>1?to_num(a[1]):0; int64_t r=1; for(int64_t i=0;i<e && i<63;i++) r*=b; return NUM(r); }
+/* Math.random(): the engine is integer-only (no FPU), so there is no [0,1) float.
+ * Math.random(n) returns a uniform integer in [0,n) -- a die/range; the no-arg
+ * form returns [0, 2^31) (use `% n`). xorshift64, lazily seeded from the CPU's
+ * cycle counter so it varies across boots. */
+static uint64_t js_rng_state = 0;
+static val nat_random(val *a, int n){
+    if(js_rng_state == 0){ uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); js_rng_state = (((uint64_t)hi<<32) | lo) | 1ull; }
+    js_rng_state ^= js_rng_state << 13; js_rng_state ^= js_rng_state >> 7; js_rng_state ^= js_rng_state << 17;
+    uint64_t r = js_rng_state;
+    if(n >= 1){ int64_t m = to_num(a[0]); return NUM(m > 0 ? (int64_t)(r % (uint64_t)m) : 0); }   /* Math.random(n) -> [0,n) */
+    return NUM((int64_t)(r & 0x7FFFFFFFull));                                                     /* Math.random()  -> [0,2^31) */
+}
 
 /* ---- global functions ---- */
 static val nat_parseInt(val *a, int n){                                            /* parseInt(str, radix), with 0x detection */
@@ -2835,7 +2847,7 @@ static void install_globals(env *g) {
     obj *math=new_obj(V_OBJ);
     def_native(math,"abs",nat_abs); def_native(math,"max",nat_max); def_native(math,"min",nat_min);
     def_native(math,"floor",nat_ident); def_native(math,"ceil",nat_ident); def_native(math,"round",nat_ident); def_native(math,"trunc",nat_ident);
-    def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow); def_native(math,"sign",nat_sign);
+    def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow); def_native(math,"sign",nat_sign); def_native(math,"random",nat_random);
     def_native(math,"hypot",nat_hypot); def_native(math,"log2",nat_log2);
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
