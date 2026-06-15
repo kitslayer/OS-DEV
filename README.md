@@ -351,7 +351,7 @@ whole thing works:
 | 258| **`substring` arg-swap** — `"abc".substring(3,1)`→`"bc"` (swaps when start>end, per spec; `slice` still clamps to empty) | [kernel/js.c](kernel/js.c) |
 | 259| **`Object.is`** — precise equality (`Object.is({},{})`→`false` by identity, `Object.is(true,1)`→`false` across types); in an integer engine with no `NaN`/`-0` it is exactly strict `===` | [kernel/js.c](kernel/js.c) |
 | 260| **ES2023 change-array-by-copy** — `with(i,v)`, `toReversed()`, `toSorted(cmp)`, `toSpliced(start,del,…items)`: each returns a **new** array and leaves the original intact (immutable updates) | [kernel/js.c](kernel/js.c) |
-| 261| **Getters & setters** — accessor properties in object literals *and* classes (`get x(){…}` / `set x(v){…}`), fired on `.x`/`[k]` read & write incl. inheritance/override; `in`/`delete`/`JSON` correctly never fire them; `get`/`set` stay usable as ordinary names | [kernel/js.c](kernel/js.c) |
+| 261| **Getters & setters** — accessor properties in object literals *and* classes (`get x(){…}` / `set x(v){…}`), fired on `.x`/`[k]` read & write incl. inheritance/override; `in`/`delete`/`JSON` correctly never fire them; `get`/`set` stay usable as ordinary names | [kernel/js.c](kernel/js.c), [docs](docs/261-getters-setters.md) |
 
 ## Roadmap
 
