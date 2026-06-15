@@ -89,7 +89,7 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
     "switch","case","default","do","try","catch","finally","throw","this","new",
-    "class","extends","super","delete","in",0 };
+    "class","extends","super","delete","in","instanceof",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -437,6 +437,7 @@ static node *parse_unary(lexer *L) {
 /* binary precedence */
 static int bin_prec(token t, int *code) {
     if (t.type==T_KW && tok_is(t,"in")) { *code='I'; return 8; }   /* `in` operator: relational precedence */
+    if (t.type==T_KW && tok_is(t,"instanceof")) { *code='S'; return 8; }   /* `instanceof`: relational precedence */
     if (t.type!=T_PUNC) return 0;
     if (tok_is(t,"*")||tok_is(t,"/")||tok_is(t,"%")) { *code=t.s[0]; return 11; }
     if (tok_is(t,"+")||tok_is(t,"-")) { *code=t.s[0]; return 10; }
@@ -647,6 +648,9 @@ struct obj {
     val (*native)(val *args, int nargs);
     obj *home_proto;   /* class constructors: an object holding the methods to copy onto each new instance */
     obj *super_class;  /* a class method/ctor's parent constructor, for super() / super.m() */
+    obj *ctor_class;   /* the constructor `new` used to build this instance (for `instanceof`) */
+    obj *parent_class; /* a class ctor's TRUE direct parent (distinct from super_class, which points
+                        * at the GRANDparent for an inherited ctor); the `instanceof` chain walks this */
     void *rx;          /* compiled regex (struct regex*) when kind==V_REGEX */
 };
 
@@ -1216,6 +1220,10 @@ static val eval_expr_inner(node *n, env *e) {
                     if (b.t==V_OBJ && b.o) { val tmp; return BOOLV(obj_get(b.o, val_to_str(a), &tmp)); }
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
                     return BOOLV(0);
+                case 'S':   /* `instanceof`: walk the instance's constructor chain looking for the RHS */
+                    if (a.t!=V_OBJ || !a.o || b.t!=V_FUN || !b.o) return BOOLV(0);
+                    for (obj *c=a.o->ctor_class; c; c=c->parent_class) if (c==b.o) return BOOLV(1);
+                    return BOOLV(0);
                 case '&': return NUM(x&y); case '|': return NUM(x|y); case '^': return NUM(x^y);
                 case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
                 case '=': {
@@ -1344,7 +1352,7 @@ static val eval_expr_inner(node *n, env *e) {
             obj *ctor_super=parent_obj;   /* own ctor: super is this class's parent */
             if (!ctor_node && has_parent) { ctor_node = parentC.o->fn; ctor_super = parentC.o->super_class; }  /* inherited ctor: its super is the GRANDparent (where it was defined) */
             if (!ctor_node) { node *em=mknode(N_FUNC); em->list=aalloc(sizeof(node*)); em->nlist=0; em->a=mknode(N_BLOCK); ctor_node=em; }
-            obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P; co->super_class=ctor_super;
+            obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P; co->super_class=ctor_super; co->parent_class=parent_obj;
             val cv=UND(); cv.t=V_FUN; cv.o=co;
             if (n->str) env_define(e, node_name(n), cv);
             return cv;
@@ -1354,6 +1362,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (ctor.t==V_NATIVE) return ctor.o->native(args,na);   /* new Map() / new Set(): native makes the instance */
             if (ctor.t!=V_FUN) { rt_err("not a constructor"); return UND(); }
             obj *self=new_obj(V_OBJ); if(!self){ g_oom=1; return UND(); }
+            self->ctor_class = ctor.o;   /* record the constructor so `instanceof` can find it */
             /* class instance: copy the class's methods onto the new object as own
              * properties (we model methods by copying rather than a prototype chain) */
             if (ctor.o->home_proto) { obj *P=ctor.o->home_proto; for(int i=0;i<P->n && !g_oom;i++) obj_set(self,P->keys[i],P->vals[i]); }

@@ -123,6 +123,8 @@ ab
 Y
 -- bitwise --
 6 -6 6 1 -1 7
+-- instanceof --
+true true false false w
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2
