@@ -41,6 +41,7 @@
 #define SYS_js     31  /* (src, out, outmax)  -> run JavaScript; output bytes, or -1 */
 #define SYS_setcolor 32 /* (idx)            -> set the app text colour (palette 0-15)  */
 #define SYS_pinghost 33 /* (host)           -> DNS-resolve + ICMP-echo a host; replies/-1 */
+#define SYS_netinfo 34  /* (buf, len)       -> our IP/MAC/gateway/DNS as text; bytes/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

@@ -68,7 +68,7 @@ int main(void) {
         } else if (streq(line, "help")) {
             print("files:  ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
-            print("        ping[<host>] resolve<host>\n");
+            print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> crypt base64     run: run<prog>  js<file>\n");
             print("misc:   echo cal date beep mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
@@ -162,6 +162,10 @@ int main(void) {
         } else if (streq(line, "beep")) {
             sys_beep(880, 150);
             print("beep!\n");
+        } else if (streq(line, "ifconfig") || streq(line, "netinfo")) {
+            char info[128];
+            if (sys_netinfo(info, sizeof(info)) > 0) print(info);
+            else print("ifconfig: unavailable\n");
         } else if (streq(line, "ping")) {
             long n = sys_ping();
             if (n < 0) print("ping: no network\n");

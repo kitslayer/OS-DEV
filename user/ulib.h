@@ -17,6 +17,7 @@ void sys_clear(void);
 void sys_reboot(void);
 long sys_ping(void);
 long sys_ping_host(const char *host);
+long sys_netinfo(void *buf, unsigned long len);
 long sys_resolve(const char *host, void *buf, unsigned long len);
 long sys_http(const char *host, const char *path, void *buf, unsigned long max);
 long sys_https(const char *host, const char *path, void *buf, unsigned long max);

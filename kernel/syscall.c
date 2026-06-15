@@ -156,6 +156,26 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* DNS + ICMP both need the timer running */
         r->rax = (uint64_t)(int64_t)net_ping_host((const char *)r->rdi);
         break;
+    case SYS_netinfo: {                    /* our IP/MAC/gateway/DNS as aligned text */
+        char *b = (char *)r->rdi; int max = (int)r->rsi;
+        if (max < 128) { r->rax = (uint64_t)-1; break; }   /* worst case ~96 B; require headroom */
+        const uint8_t *ip = net_ip(), *gw = net_gateway(), *dns = net_dns(), *m = net_mac();
+        static const char H[] = "0123456789abcdef";
+        int n = 0;
+        const char *labels[4] = { "IP    ", "MAC   ", "GW    ", "DNS   " };
+        const uint8_t *v4[4]  = { ip, NULL, gw, dns };     /* slot 1 (MAC) handled specially */
+        for (int row = 0; row < 4; row++) {
+            for (const char *s = labels[row]; *s; s++) b[n++] = *s;
+            if (row == 1) {                                /* MAC: 6 hex bytes, colon-separated */
+                for (int i = 0; i < 6; i++) { b[n++] = H[m[i] >> 4]; b[n++] = H[m[i] & 15]; if (i < 5) b[n++] = ':'; }
+            } else {                                       /* IPv4 dotted quad */
+                for (int i = 0; i < 4; i++) { n = snum(b, n, max, v4[row][i]); if (i < 3) b[n++] = '.'; }
+            }
+            b[n++] = '\n';
+        }
+        b[n] = 0; r->rax = (uint64_t)n;
+        break;
+    }
     case SYS_http:
         __asm__ volatile("sti");           /* TCP needs the timer running */
         r->rax = (uint64_t)(int64_t)http_get((const char *)r->rdi,

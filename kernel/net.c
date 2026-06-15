@@ -24,6 +24,7 @@ static const uint8_t  BROADCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
 const uint8_t *net_ip(void)      { return OUR_IP; }
 const uint8_t *net_gateway(void) { return GW_IP; }
+const uint8_t *net_mac(void)     { return e1000_mac(); }
 
 /* --- byte helpers (everything on the wire is big-endian) --- */
 static void put16(uint8_t *p, uint16_t v) { p[0] = v >> 8; p[1] = v; }
@@ -162,6 +163,7 @@ static int ping(const uint8_t *ip, const uint8_t *dst_mac, uint16_t seq) {
 }
 
 static const uint8_t DNS_IP[4] = {10, 0, 2, 3};
+const uint8_t *net_dns(void)     { return DNS_IP; }
 
 int net_ping_gateway(void) {
     uint8_t mac[6];
