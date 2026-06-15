@@ -1218,7 +1218,9 @@ static val eval_expr_inner(node *n, env *e) {
             if(n->op=='N') return (l.t==V_UNDEF||l.t==V_NULL) ? eval_expr(n->b,e) : l;   /* ?? : only null/undefined fall through */
             if(n->op=='A') return truthy(l)?eval_expr(n->b,e):l; else return truthy(l)?l:eval_expr(n->b,e); }
         case N_UNARY: {
-            if (n->op=='t') { val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE||(v.t==V_OBJ&&v.o&&v.o->kind==V_BOUND))?"function":"object"; return STRV(ty); }
+            if (n->op=='t') {
+                if (n->a->type==N_IDENT && !env_find(e, node_name(n->a))) return STRV("undefined");   /* `typeof undeclaredVar` -> "undefined" (don't throw — the feature-detection idiom) */
+                val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE||(v.t==V_OBJ&&v.o&&v.o->kind==V_BOUND))?"function":"object"; return STRV(ty); }
             if (n->op=='d') {   /* delete obj.x / obj[k]: remove an own property, evaluate to true */
                 node *t=n->a;
                 if (t->type==N_MEMBER) { val r=eval_expr(t->a,e); if(r.t==V_OBJ&&r.o) obj_delete(r.o,node_name(t)); }

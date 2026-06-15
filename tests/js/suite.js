@@ -168,6 +168,7 @@ class _Cf { n = 5; m = 2*3; inc(){ this.n++; return this.n; } }
 var _cf = new _Cf(); print(_cf.n, _cf.m, _cf.inc());
 class _Ca { a = 1; } class _Cb extends _Ca { b = 2; }
 var _cb = new _Cb(); print(_cb.a, _cb.b);
+print(typeof _undeclared_xyz, typeof _undeclared_xyz === "undefined", typeof print);
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);
