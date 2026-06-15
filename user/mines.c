@@ -17,6 +17,24 @@ static unsigned rng;
 
 static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
+static int t_start, best;       /* clear-time in seconds; best (fastest) persists in MINES.HI */
+static int now_secs(void) {     /* "YYYY-MM-DD HH:MM:SS" -> seconds of day */
+    char b[40]; sys_time(b, sizeof(b));
+    int hh = (b[11]-'0')*10 + (b[12]-'0'), mm = (b[14]-'0')*10 + (b[15]-'0'), ss = (b[17]-'0')*10 + (b[18]-'0');
+    return hh*3600 + mm*60 + ss;
+}
+static void load_best(void) {
+    char b[16]; long n = sys_readfile("MINES.HI", b, sizeof(b) - 1);
+    best = 0;
+    for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best*10 + (b[i]-'0'); if (best > 100000) { best = 100000; break; } }
+}
+static void save_best(void) {
+    char b[12], t[12]; int k = 0, v = best;
+    if (!v) t[k++] = '0'; while (v) { t[k++] = (char)('0' + v % 10); v /= 10; }
+    int i = 0; while (k) b[i++] = t[--k]; b[i] = 0;
+    sys_writefile("MINES.HI", b, (unsigned long)i);
+}
+
 static void reset(void) {
     for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) { mine[y][x]=adj[y][x]=st[y][x]=0; }
     int placed = 0;
@@ -75,11 +93,15 @@ static void render(void) {
     sys_clear();
     int flags = 0;
     for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) if (st[y][x]==2) flags++;
-    char hdr[48]; int p = 0;
-    const char *t = "  Minesweeper   mines left: ";
+    char hdr[64]; int p = 0;
+    const char *t = "  Mines  left: ";
     while (*t) hdr[p++] = *t++;
     int left = MINES - flags; if (left < 0) left = 0;
-    hdr[p++] = (char)('0' + left/10); hdr[p++] = (char)('0' + left%10); hdr[p] = 0;
+    hdr[p++] = (char)('0' + left/10); hdr[p++] = (char)('0' + left%10);
+    t = "  best: "; while (*t) hdr[p++] = *t++;
+    if (best <= 0) { hdr[p++] = '-'; hdr[p++] = '-'; }
+    else { char nb[8]; int k = 0, v = best; while (v) { nb[k++] = (char)('0' + v % 10); v /= 10; } while (k) hdr[p++] = nb[--k]; hdr[p++] = 's'; }
+    hdr[p] = 0;
     sys_setcolor(8); print(hdr); print("\n\n");
     for (int y = 0; y < N; y++) {
         for (int x = 0; x < N; x++) {
@@ -108,6 +130,7 @@ int main(void) {
     rng = 0x2545F491u;
     for (long i = 0; i < tn; i++) rng = rng * 31 + (unsigned char)tb[i];
     if (!rng) rng = 12345u;
+    load_best();
     reset();
     render();
     for (;;) {
@@ -121,7 +144,15 @@ int main(void) {
         else if (k == 0x13) { if (cx > 0)   cx--; }   /* left  */
         else if (k == 0x14) { if (cx < N-1) cx++; }   /* right */
         else if (k == ' ' || k == '\n') {
-            if (st[cy][cx] != 2) { reveal(cx, cy); started = 1; if (!dead && check_win()) won = 1; }
+            if (st[cy][cx] != 2) {
+                if (!started) { started = 1; t_start = now_secs(); }
+                reveal(cx, cy);
+                if (!dead && check_win()) {
+                    won = 1;
+                    int el = now_secs() - t_start; if (el < 0) el += 86400; if (el < 1) el = 1;
+                    if (best == 0 || el < best) { best = el; save_best(); }   /* faster = new record */
+                }
+            }
         }
         else if (k == 'f') {
             if (st[cy][cx] == 0) st[cy][cx] = 2;
