@@ -234,4 +234,5 @@ var _ho={a:1}; var _hi=Object.create({p:9}); _hi.own=1; print(_ho.hasOwnProperty
 print(({}).toString(), [1,2,3].toString(), "s".toString(), (9).toString(2), typeof (new Date()).valueOf());  // [object Object] 1,2,3 s 1001 number (toString/valueOf method calls; number radix + Date.valueOf unaffected, M275)
 var _es="";for(var [_i,_x] of ["p","q"].entries())_es+=_i+_x; print("hello".substr(1,3), ["a","b","c"].keys().join(","), [10,20].values().join(","), _es);  // ell 0,1,2 10,20 0p1q (substr + array iterators, M276)
 var _rf={a:1}; Reflect.set(_rf,"b",2); print(Reflect.get(_rf,"a"), Reflect.has(_rf,"b"), Reflect.ownKeys(_rf).join(","), Reflect.deleteProperty(_rf,"a"), Reflect.has(_rf,"a"));  // 1 true a,b true false (Reflect, M277)
+print((1234567).toLocaleString(), "a".localeCompare("b"), "abc".codePointAt(0), String.fromCodePoint(65,66));  // 1,234,567 -1 97 AB (toLocaleString grouping + localeCompare + codePointAt/fromCodePoint, M278)
 print("-- done --");

@@ -1796,6 +1796,13 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
     }
     if (strcmp(name,"toFixed")==0) return STRV(val_to_str(recv));   /* integer: no fractional part */
     if (strcmp(name,"valueOf")==0) return recv;
+    if (strcmp(name,"toLocaleString")==0){   /* group integer digits in 3s with commas: 1234567 -> "1,234,567" (M278) */
+        char d[24]; int dn=0; int neg=v<0; unsigned long long u=neg?(unsigned long long)(-(v+1))+1ULL:(unsigned long long)v;
+        if(u==0)d[dn++]='0'; while(u){ d[dn++]='0'+(int)(u%10); u/=10; }
+        char out[40]; int oi=0; if(neg)out[oi++]='-';
+        for(int i=dn-1;i>=0;i--){ out[oi++]=d[i]; if(i>0 && i%3==0) out[oi++]=','; }
+        out[oi]=0; char*r=aalloc(oi+1); if(!r) return STRV(""); memcpy(r,out,oi+1); return STRV(r);
+    }
     rt_err("no such number method"); return UND();
 }
 
@@ -1803,6 +1810,8 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
     const char *s=recv.str; int len=(int)strlen(s);
     if (strcmp(name,"charAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return STRV(""); char*r=aalloc(2); r[0]=s[i]; r[1]=0; return STRV(r); }
     if (strcmp(name,"charCodeAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }
+    if (strcmp(name,"codePointAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }   /* = charCodeAt for ASCII (M278) */
+    if (strcmp(name,"localeCompare")==0){ const char*o=nargs?val_to_str(args[0]):""; int c=strcmp(s,o); return NUM(c<0?-1:c>0?1:0); }   /* ASCII collation (M278) */
     if (strcmp(name,"toUpperCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='a'&&s[i]<='z')?s[i]-32:s[i]; r[len]=0; return STRV(r); }
     if (strcmp(name,"toLowerCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='A'&&s[i]<='Z')?s[i]+32:s[i]; r[len]=0; return STRV(r); }
     if (strcmp(name,"substring")==0||strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0; int b=nargs>1?(int)to_num(args[1]):len;
@@ -2544,7 +2553,7 @@ static void install_globals(env *g) {
     obj *sf=new_obj(V_NATIVE); sf->native=nat_String;   env_define(g,"String",obj_val_native(sf));
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
     { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); nf->statics=nst; }
-      obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); sf->statics=sst; } }   /* Number.* / String.* statics via the side-statics object (Number/String stay V_NATIVE) */
+      obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); def_native(sst,"fromCodePoint",nat_str_fromCharCode); sf->statics=sst; } }   /* String.fromCharCode/fromCodePoint (ASCII: same) via side-statics; Number/String stay V_NATIVE */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
     { obj *e=new_obj(V_NATIVE); e->native=nat_Error;       env_define(g,"Error",obj_val_native(e)); }
