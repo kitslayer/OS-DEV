@@ -151,6 +151,7 @@ TypeError:t
 1 undefined true
 9 3 false
 true 0 true 0
+function true 0 true
 5 3 7 0 5 0 8
 -- class-fields --
 5 6 6

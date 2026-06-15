@@ -1991,6 +1991,13 @@ static val nat_date(val *a, int n){
     arr_push_val(o,NUM(y)); arr_push_val(o,NUM(mo)); arr_push_val(o,NUM(d)); arr_push_val(o,NUM(h)); arr_push_val(o,NUM(mi)); arr_push_val(o,NUM(s));
     return obj_val(o);
 }
+static val nat_date_now(val *a, int n){ (void)a; (void)n; int y,mo,d,h,mi,s;   /* Date.now() -> current epoch ms */
+#ifndef JS_HOSTTEST
+    struct rtc_time t; rtc_now(&t); y=t.year; mo=t.month; d=t.day; h=t.hour; mi=t.min; s=t.sec;
+#else
+    y=2026; mo=6; d=13; h=12; mi=0; s=0;
+#endif
+    int64_t z=days_from_civil(y,mo,d); return NUM((z*86400 + (int64_t)h*3600 + mi*60 + s)*1000); }
 static val eval_date_method(val recv, const char *name, val *args, int nargs){
     (void)args;(void)nargs; obj *o=recv.o; if(!o || o->n<6) return UND();
     if(strcmp(name,"getFullYear")==0) return o->vals[0];
@@ -2268,6 +2275,7 @@ static void install_globals(env *g) {
     { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURI;          env_define(g,"encodeURI",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_decodeURI;          env_define(g,"decodeURI",obj_val_native(e)); }
     obj *dt=new_obj(V_NATIVE); dt->native=nat_date;     env_define(g,"Date",obj_val_native(dt));   /* Date() -> wall-clock string */
+    { obj *dst=new_obj(V_OBJ); if(dst){ def_native(dst,"now",nat_date_now); dt->statics=dst; } }   /* Date.now() */
 }
 
 /* =========================== entry point =========================== */
