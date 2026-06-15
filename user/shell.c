@@ -41,12 +41,7 @@ static unsigned shroll(void) {
 }
 
 /* Print a month calendar for the current date (from the RTC). */
-static void cmd_cal(void) {
-    char t[24];
-    sys_time(t, sizeof(t));                          /* "YYYY-MM-DD HH:MM:SS" */
-    int y = (t[0]-'0')*1000 + (t[1]-'0')*100 + (t[2]-'0')*10 + (t[3]-'0');
-    int m = (t[5]-'0')*10 + (t[6]-'0');
-    int today = (t[8]-'0')*10 + (t[9]-'0');
+static void cmd_cal_ym(int y, int m, int today) {   /* render month m (1-12) of year y; today=0 -> no highlight */
     if (m < 1 || m > 12) { print("cal: bad date\n"); return; }
 
     static const int mdays[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
@@ -73,6 +68,14 @@ static void cmd_cal(void) {
     }
     if (p) { line[p] = 0; print(line); print("\n"); }
 }
+static void cmd_cal(void) {                          /* current month, today highlighted */
+    char t[24];
+    sys_time(t, sizeof(t));                          /* "YYYY-MM-DD HH:MM:SS" */
+    int y = (t[0]-'0')*1000 + (t[1]-'0')*100 + (t[2]-'0')*10 + (t[3]-'0');
+    int m = (t[5]-'0')*10 + (t[6]-'0');
+    int today = (t[8]-'0')*10 + (t[9]-'0');
+    cmd_cal_ym(y, m, today);
+}
 
 int main(void) {
     print("\n");
@@ -93,7 +96,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal date beep morse<text> factor<n> roll<NdM> seq<n> rev<text>\n");
+            print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -672,6 +675,14 @@ int main(void) {
             sys_reboot();
         } else if (streq(line, "cal")) {
             cmd_cal();
+        } else if (startswith(line, "cal ")) {         /* cal <month 1-12> <year> : any month */
+            const char *p = line + 4; while (*p == ' ') p++;
+            int m = 0, y = 0;
+            while (*p >= '0' && *p <= '9') { if (m < 1000000) m = m*10 + (*p - '0'); p++; }
+            while (*p == ' ') p++;
+            while (*p >= '0' && *p <= '9') { if (y < 1000000) y = y*10 + (*p - '0'); p++; }
+            if (m < 1 || m > 12 || y < 1 || y > 9999) print("usage: cal <month 1-12> <year>   (e.g. cal 7 1969)\n");
+            else cmd_cal_ym(y, m, 0);
         } else if (streq(line, "date")) {
             char buf[24];
             sys_time(buf, sizeof(buf));
