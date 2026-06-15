@@ -231,7 +231,7 @@ int main(void) {
         } else if (startswith(line, "factor ")) {
             const char *q = line + 7; while (*q == ' ') q++;
             long n = 0; int any = 0;
-            while (*q >= '0' && *q <= '9' && n < 1000000000000000000L) { n = n * 10 + (*q - '0'); q++; any = 1; }
+            while (*q >= '0' && *q <= '9' && n < 900000000000000000L) { n = n * 10 + (*q - '0'); q++; any = 1; }   /* bound so n*10+digit can't overflow long */
             if (!any || n < 2) { print("usage: factor <n>  (n >= 2)\n"); }
             else {
                 printl(n); print(":");
@@ -244,9 +244,9 @@ int main(void) {
             }
         } else if (startswith(line, "roll ")) {
             const char *q = line + 5; while (*q == ' ') q++;
-            int a = 0; while (*q >= '0' && *q <= '9') { a = a * 10 + (*q - '0'); q++; }
+            int a = 0; while (*q >= '0' && *q <= '9' && a < 100000000) { a = a * 10 + (*q - '0'); q++; }
             int n, sides;
-            if (*q == 'd' || *q == 'D') { q++; sides = 0; while (*q >= '0' && *q <= '9') { sides = sides * 10 + (*q - '0'); q++; } n = a ? a : 1; }
+            if (*q == 'd' || *q == 'D') { q++; sides = 0; while (*q >= '0' && *q <= '9' && sides < 100000000) { sides = sides * 10 + (*q - '0'); q++; } n = a ? a : 1; }
             else { n = 1; sides = a; }                         /* "roll 6" = 1d6 */
             if (n < 1) n = 1; if (n > 40) n = 40;
             if (sides < 2 || sides > 1000) { print("usage: roll NdM  (e.g. roll 2d6)\n"); }
