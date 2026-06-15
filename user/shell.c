@@ -96,7 +96,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text>\n");
+            print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -724,6 +724,21 @@ int main(void) {
             print("            (__)\\       )\\/\\\n");
             print("                ||----w |\n");
             print("                ||     ||\n");
+        } else if (streq(line, "fortune")) {              /* a random programming aphorism (pairs with cowsay) */
+            static const char *fortunes[] = {
+                "The best way to predict the future is to invent it.  -Alan Kay",
+                "Premature optimization is the root of all evil.  -Knuth",
+                "There are 2 hard problems in CS: cache invalidation, naming things, and off-by-one errors.",
+                "Talk is cheap. Show me the code.  -Linus Torvalds",
+                "Simplicity is the ultimate sophistication.  -da Vinci",
+                "Weeks of coding can save hours of planning.",
+                "It works on my machine.",
+                "First, solve the problem. Then, write the code.  -John Johnson",
+                "Any sufficiently advanced technology is indistinguishable from magic.  -Clarke",
+                "A user interface is like a joke: if you have to explain it, it is not that good.",
+            };
+            int fn = (int)(sizeof(fortunes) / sizeof(fortunes[0]));
+            print(fortunes[shroll() % (unsigned)fn]); print("\n");
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
