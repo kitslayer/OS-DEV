@@ -9,12 +9,15 @@
  */
 #include "ulib.h"
 
-static const char *NAMES[] = { "Scale", "Twinkle Twinkle", "Ode to Joy", "Happy Birthday" };
+static const char *NAMES[] = { "Scale", "Twinkle Twinkle", "Ode to Joy", "Happy Birthday",
+                               "Mary Had a Lamb", "Jingle Bells" };
 static const char *TUNES[] = {
     "cdefgabC",
     "ccggaag ffeeddc",
     "eefggfeddccdeed",
     "ccdcfe ccdcgf",
+    "edcdeee ddd egg",
+    "eee eee egcde",
 };
 #define NT ((int)(sizeof(NAMES) / sizeof(NAMES[0])))
 
