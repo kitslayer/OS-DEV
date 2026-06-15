@@ -17,7 +17,7 @@ static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
 
 /* spawn masks for I,O,T,S,Z,J,L (4x4, bit = y*4+x) */
 static const unsigned short PIECE[7] = { 0x00F0,0x0660,0x0270,0x0360,0x0630,0x0470,0x0170 };
-static const char GLYPH[7] = { 'I','O','T','S','Z','J','L' };
+static const unsigned char COLOR[7] = { 4, 3, 11, 9, 2, 6, 7 };  /* I cyan, O yellow, T violet, S green, Z red, J blue, L orange */
 
 static char board[BH][BW];        /* 0 = empty, else the piece glyph */
 static int curp, curx, cury;
@@ -54,7 +54,7 @@ static void lock_and_clear(void) {
     for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
         if (curmask & (1 << (y*4 + x))) {
             int bx = curx + x, by = cury + y;
-            if (by >= 0 && by < BH && bx >= 0 && bx < BW) board[by][bx] = GLYPH[curp] + 1; /* nonzero */
+            if (by >= 0 && by < BH && bx >= 0 && bx < BW) board[by][bx] = (char)(curp + 1); /* piece index + 1 (nonzero) */
         }
     int cleared = 0;
     for (int y = BH - 1; y >= 0; ) {
@@ -82,21 +82,27 @@ static void render(const char *msg) {
     char n[12]; int v = (int)score, i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
     a = "  lines "; while (*a) st[p++] = *a++;
     v = (int)lines; i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
-    st[p] = 0; print(st); print("\n");
+    st[p] = 0; sys_setcolor(8); print(st); print("\n");
 
-    /* compose board + current piece into a render grid */
-    static char g[BH][BW];
-    for (int y = 0; y < BH; y++) for (int x = 0; x < BW; x++) g[y][x] = board[y][x] ? '#' : ' ';
-    for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
-        if (curmask & (1 << (y*4 + x))) { int bx = curx+x, by = cury+y; if (by>=0&&by<BH&&bx>=0&&bx<BW) g[by][bx]='#'; }
-
-    char buf[(BW + 3) * BH + 1]; p = 0;
-    for (int y = 0; y < BH; y++) {
-        buf[p++] = '|';
-        for (int x = 0; x < BW; x++) buf[p++] = g[y][x];
-        buf[p++] = '|'; buf[p++] = '\n';
+    /* compose board + current piece into render + colour grids */
+    static char g[BH][BW]; static unsigned char gc[BH][BW];
+    for (int y = 0; y < BH; y++) for (int x = 0; x < BW; x++) {
+        if (board[y][x]) { g[y][x]='#'; gc[y][x]=COLOR[(board[y][x]-1) % 7]; }
+        else             { g[y][x]=' '; gc[y][x]=0; }
     }
-    buf[p] = 0; print(buf);
+    for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++)
+        if (curmask & (1 << (y*4 + x))) { int bx = curx+x, by = cury+y;
+            if (by>=0&&by<BH&&bx>=0&&bx<BW) { g[by][bx]='#'; gc[by][bx]=COLOR[curp]; } }
+
+    for (int y = 0; y < BH; y++) {
+        sys_setcolor(8); print("|");                       /* walls in grey */
+        for (int x = 0; x < BW; x++) {
+            if (g[y][x] == ' ') { sys_setcolor(0); print(" "); }
+            else { sys_setcolor(gc[y][x]); print("#"); }   /* each block its piece colour */
+        }
+        sys_setcolor(8); print("|\n");
+    }
+    sys_setcolor(0);
     if (msg) print(msg);
 }
 
