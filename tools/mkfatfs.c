@@ -775,12 +775,12 @@ int main(int argc, char **argv) {
 
     /* Build a unified list of {name, bytes, len}: inline strings first, then any
      * host files read from disk (e.g. build/calc.elf). */
-    struct { const char *name83; const uint8_t *data; uint32_t len; } ent[128];
+    struct { const char *name83; const uint8_t *data; uint32_t len; } ent[NUM_FILES + NUM_HOST];   /* exact size: can't overflow, auto-grows */
     int ne = 0;
     for (int i = 0; i < NUM_FILES; i++)
         ent[ne++] = (typeof(ent[0])){ files[i].name83, (const uint8_t *)files[i].content,
                                       (uint32_t)strlen(files[i].content) };
-    for (int i = 0; i < NUM_HOST && ne < 128; i++) {
+    for (int i = 0; i < NUM_HOST && ne < NUM_FILES + NUM_HOST; i++) {
         FILE *hf = fopen(hostfiles[i].hostpath, "rb");
         if (!hf) { fprintf(stderr, "mkfatfs: skip %s (not found)\n", hostfiles[i].hostpath); continue; }
         fseek(hf, 0, SEEK_END); long sz = ftell(hf); fseek(hf, 0, SEEK_SET);
