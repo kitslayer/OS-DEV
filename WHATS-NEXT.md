@@ -19,7 +19,18 @@
 > overflow its stack. The pieces exist (decoders, slots, the worker fetch); the
 > risk is to the working browser, so a focused session, the **app-exit resource leak** (MAX_APPS spawns/boot; needs a
 > careful vmm teardown that frees only the app's user ranges), a **2-column F9
-> menu** (the single column is near its ~30-item cap), and shell **pipes/redirect**.
+> menu** (the single column is near its ~30-item cap), shell **pipes/redirect**,
+> and **FAT32 write robustness** (investigated M366): `fat32_write` is
+> delete-then-write (no cluster leak), but `add_entry` (kernel/fat32.c) **fails
+> cleanly on a full directory** — it doesn't allocate/link a new dir cluster, so
+> file *creation* stops working once the root dir's clusters fill (~the 64 baked
+> files + a little slack); fix = extend the dir chain in `add_entry`. Separately,
+> the persisted `build/fat.img` showed **empty** after this session's intensive
+> write-accumulation across ~25 boots (todo + `*.HI` rewrites) — cause
+> unconfirmed (possibly a host/QEMU writeback artifact across many sequential
+> runs, or a subtle write bug); `rm build/fat.img && make` regenerates a clean
+> disk. Don't touch the FAT32 write path casually — verify every change against
+> the baked files.
 >
 > ---
 >
