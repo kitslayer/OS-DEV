@@ -898,9 +898,9 @@ int main(void) {
             }
         } else if (startswith(line, "gcd ")) {            /* gcd A B -> gcd + lcm (Euclid) */
             const char *p = line + 4; while (*p == ' ') p++;
-            long a = 0; while (*p >= '0' && *p <= '9' && a < 1000000000L) a = a * 10 + (*p++ - '0');
+            long a = 0; while (*p >= '0' && *p <= '9' && a < 100000000L) a = a * 10 + (*p++ - '0');   /* cap ~1e9 so a*b can't overflow long */
             while (*p == ' ') p++;
-            long b = 0; while (*p >= '0' && *p <= '9' && b < 1000000000L) b = b * 10 + (*p++ - '0');
+            long b = 0; while (*p >= '0' && *p <= '9' && b < 100000000L) b = b * 10 + (*p++ - '0');
             if (a < 1 || b < 1) print("usage: gcd <a> <b>   (e.g. gcd 12 18)\n");
             else {
                 long x = a, y = b; while (y) { long t = x % y; x = y; y = t; }   /* Euclid's algorithm */
@@ -965,7 +965,7 @@ int main(void) {
                 v = v * (unsigned)base + (unsigned)d; any = 1; p++;
             }
             if (!any) print("usage: dec <0x.. | 0b.. | 0o.. | decimal>\n");
-            else { print("  "); printl((long)v); print("\n"); }
+            else { print("  "); print_base(v, 10); print("\n"); }   /* unsigned: correct even when v > LONG_MAX */
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
