@@ -94,7 +94,7 @@ int main(void) {
     draw("Your move!");
     for (;;) {
         int k = sys_pollkey();
-        if (!k) { sys_sleep(20); continue; }          /* yield while idle */
+        if (k < 0) { sys_sleep(20); continue; }        /* no key (iq_get returns -1): yield */
         if (k == 'q' || k == 'Q') break;
         if (k == 'r' || k == 'R') {
             for (int i = 0; i < 9; i++) bd[i] = ' ';
