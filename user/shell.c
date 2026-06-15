@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc] tr\n");
+            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
@@ -295,6 +295,29 @@ int main(void) {
                 long n = sys_readfile(p, buf, sizeof(buf) - 1);
                 if (n < 0 || !oldc || !newc) { print("usage: tr OLD NEW FILE  |  tr -d CHARS FILE\n"); }
                 else { buf[n] = 0; for (long i = 0; i < n; i++) if (buf[i] == oldc) buf[i] = newc; print(buf); }
+            }
+        } else if (startswith(line, "fold ")) {           /* fold [-w]N FILE : wrap each line at N columns (default 60) */
+            static char buf[2048], fout[2400];
+            const char *p = line + 5; while (*p == ' ') p++;
+            int w = 0;
+            if (p[0] == '-' && p[1] == 'w') p += 2;
+            while (*p >= '0' && *p <= '9') w = w * 10 + (*p++ - '0');
+            while (*p == ' ') p++;
+            if (w < 1) w = 60;
+            if (w > 200) w = 200;
+            long n = sys_readfile(p, buf, sizeof(buf) - 1);
+            if (n < 0) { print("fold: no such file: "); print(p); print("\n"); }
+            else {
+                buf[n] = 0;
+                int oi = 0, col = 0;
+                for (long i = 0; i < n && oi < 2390; i++) {
+                    char c = buf[i];
+                    if (c == '\n') { fout[oi++] = '\n'; col = 0; continue; }
+                    fout[oi++] = c; col++;
+                    if (col >= w && oi < 2390) { fout[oi++] = '\n'; col = 0; }
+                }
+                if (oi > 0 && fout[oi-1] != '\n') fout[oi++] = '\n';
+                fout[oi] = 0; print(fout);
             }
         } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE : keep a 1-based char range of each line */
             static char buf[2048];
