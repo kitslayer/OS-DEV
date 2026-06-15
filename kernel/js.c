@@ -1417,13 +1417,15 @@ static val eval_expr_inner(node *n, env *e) {
                 case '<': return BOOLV(x<y); case '>': return BOOLV(x>y);
                 case 'l': return BOOLV(x<=y); case 'g': return BOOLV(x>=y);
                 case 'P': return NUM(i_pow(x,y));   /* x ** y (integer, matches Math.pow) */
-                case 'I':   /* `in`: own-property test on objects, valid-index test on arrays */
-                    if (b.t==V_OBJ && b.o) { val tmp; return BOOLV(obj_get(b.o, val_to_str(a), &tmp)); }
+                case 'I':   /* `in`: own-OR-inherited property on objects (walks the proto chain, non-firing — M264), valid-index test on arrays */
+                    if (b.t==V_OBJ && b.o) { const char *k=val_to_str(a); val tmp; if (obj_get(b.o,k,&tmp)) return BOOLV(1);
+                        int g=0; for (obj *p=b.o->proto; p && ++g<=JS_PROTO_MAX; p=p->proto) if (obj_get(p,k,&tmp)) return BOOLV(1); return BOOLV(0); }
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
                     return BOOLV(0);
-                case 'S':   /* `instanceof`: walk the instance's constructor chain looking for the RHS */
+                case 'S':   /* `instanceof`: the instance's ctor chain (classes) OR the RHS's .prototype in the instance's proto chain (M264) */
                     if (a.t!=V_OBJ || !a.o || (b.t!=V_FUN && b.t!=V_NATIVE) || !b.o) return BOOLV(0);   /* RHS: a class (V_FUN) or a native ctor (Map/Set/Error/Date) */
                     for (obj *c=a.o->ctor_class; c; c=c->parent_class) if (c==b.o) return BOOLV(1);
+                    if (b.o->fn_proto) { int g=0; for (obj *p=a.o->proto; p && ++g<=JS_PROTO_MAX; p=p->proto) if (p==b.o->fn_proto) return BOOLV(1); }   /* Object.create(F.prototype) instanceof F */
                     return BOOLV(0);
                 case '&': return NUM(x&y); case '|': return NUM(x|y); case '^': return NUM(x^y);
                 case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
