@@ -71,7 +71,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal date beep mem ps df history clear reboot exit\n");
+            print("misc:   echo cal date beep morse<text> mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -183,6 +183,29 @@ int main(void) {
         } else if (streq(line, "beep")) {
             sys_beep(880, 150);
             print("beep!\n");
+        } else if (startswith(line, "morse ")) {
+            /* print AND beep the Morse code for the text (a-z, 0-9, space) */
+            static const char *M[36] = {
+                ".-","-...","-.-.","-..",".","..-.","--.","....","..",".---","-.-",".-..","--",
+                "-.","---",".--.","--.-",".-.","...","-","..-","...-",".--","-..-","-.--","--..",
+                "-----",".----","..---","...--","....-",".....","-....","--...","---..","----."
+            };
+            for (const char *p = line + 6; *p; p++) {
+                char c = *p;
+                if (c >= 'A' && c <= 'Z') c += 32;
+                const char *code = 0;
+                if (c >= 'a' && c <= 'z') code = M[c - 'a'];
+                else if (c >= '0' && c <= '9') code = M[26 + c - '0'];
+                else if (c == ' ') { print("  "); sys_sleep(400); continue; }
+                if (!code) continue;
+                print(code); print(" ");
+                for (const char *s = code; *s; s++) {
+                    sys_beep(700, *s == '-' ? 240 : 80);   /* dash long, dot short */
+                    sys_sleep(80);                          /* intra-character gap */
+                }
+                sys_sleep(150);                             /* inter-character gap */
+            }
+            print("\n");
         } else if (streq(line, "ifconfig") || streq(line, "netinfo")) {
             char info[128];
             if (sys_netinfo(info, sizeof(info)) > 0) print(info);
