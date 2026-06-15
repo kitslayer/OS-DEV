@@ -409,7 +409,7 @@ static const struct {
         "<dt>tools</dt><dd>calendar (month view), mandel (a Mandelbrot explorer), piano, jukebox (built-in tunes), matrix (a digital-rain screensaver), paint (an ASCII-art canvas, saves to PAINT.TXT), typing (a WPM speed test)</dd>"
         "</dl>"
         "<h2>Shell commands</h2>"
-        "<p>Files: <code>ls cat head tail sort nl edit write rm cp mv mkdir cd pwd tree find grep hexdump wc</code>. "
+        "<p>Files: <code>ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc</code>. "
         "Net: <code>get URL</code>, <code>headers URL</code>, <code>wget URL FILE</code>, <code>browse URL</code>, <code>ping [HOST]</code>, <code>resolve HOST</code>, <code>ifconfig</code>. "
         "Crypto: <code>sha256 FILE</code>, <code>sha512 FILE</code>, <code>crypt</code>, <code>base64</code>. "
         "Also: <code>apps</code>, <code>js</code>, <code>cal</code>, <code>date</code>, <code>mem</code>, <code>ps</code>, <code>df</code>, <code>beep</code>, <code>morse TEXT</code>, <code>factor N</code>, <code>clear</code>. Type <code>help</code> in the shell for the full list.</p>"

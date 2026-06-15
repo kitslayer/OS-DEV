@@ -88,7 +88,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
+            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
@@ -257,6 +257,31 @@ int main(void) {
                     lns[j+1] = key;
                 }
                 for (int i = 0; i < nl; i++) { print(lns[i]); print("\n"); }
+            }
+        } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE : keep a 1-based char range of each line */
+            static char buf[2048];
+            const char *p = line + 4; while (*p == ' ') p++;
+            if (p[0] != '-' || p[1] != 'c') { print("usage: cut -cN[-M] <file>  (e.g. cut -c1-5 FILE)\n"); }
+            else {
+                p += 2;
+                int from = 0, to = 0, openend = 0;
+                while (*p >= '0' && *p <= '9') from = from * 10 + (*p++ - '0');
+                if (*p == '-') { p++; if (*p >= '0' && *p <= '9') { while (*p >= '0' && *p <= '9') to = to * 10 + (*p++ - '0'); } else openend = 1; }
+                else to = from;                            /* -cN alone = just column N */
+                while (*p == ' ') p++;
+                if (from < 1) from = 1;
+                long n = sys_readfile(p, buf, sizeof(buf) - 1);
+                if (n < 0) { print("cut: no such file: "); print(p); print("\n"); }
+                else {
+                    buf[n] = 0;
+                    char out[256]; int oi = 0, col = 0;
+                    for (long k = 0; k < n; k++) {
+                        if (buf[k] == '\n') { out[oi] = 0; print(out); print("\n"); oi = 0; col = 0; continue; }
+                        col++;
+                        if (col >= from && (openend || col <= to) && oi < 255) out[oi++] = buf[k];
+                    }
+                    if (oi > 0) { out[oi] = 0; print(out); print("\n"); }   /* trailing line with no newline */
+                }
             }
         } else if (streq(line, "js") || startswith(line, "js ")) {
             static char src[8192];
