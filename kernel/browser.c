@@ -1128,6 +1128,25 @@ static int browser_dom_query(const char *sel, int *offs, int max) {
     int m = (max < QSA_MAX) ? max : QSA_MAX;
     return sel_match_all(b, &s, offs, m);
 }
+static int dom_attr_region(browser_t *b, const char *id, int *as, int *ae);   /* fwd (defined below, near browser_dom_getattr) */
+/* element.matches(sel): does the element whose opening '<' is at byte `off` match
+ * the selector? Reuses the (reviewed) matcher — run it and test membership. */
+static int browser_dom_matches_at(int off, const char *sel) {
+    browser_t *b = g_ls_b; if (!b) return 0;
+    sel_t s; if (!sel_parse(sel, &s)) return 0;
+    int offs[QSA_MAX]; int n = sel_match_all(b, &s, offs, QSA_MAX);
+    for (int i = 0; i < n; i++) if (offs[i] == off) return 1;
+    return 0;
+}
+/* matches() for an id handle: locate the element's opening '<', then reuse the above. */
+static int browser_dom_matches(const char *id, const char *sel) {
+    browser_t *b = g_ls_b; if (!b) return 0;
+    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return 0;   /* finds the element by id */
+    const char *r = b->raw; int lo = b->bodyoff, off = as;
+    while (off > lo && r[off] != '<') off--;
+    if (r[off] != '<') return 0;
+    return browser_dom_matches_at(off, sel);
+}
 /* <input> field values, keyed by id (the typed or scripted .value text) */
 static const char *in_get(browser_t *b, const char *id) {
     for (int i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) return b->in_val[i];
@@ -1346,7 +1365,7 @@ static void browser_dom_setattr_at(int off, const char *attr, const char *val) {
     b->raw[live_end + delta] = 0;
     parse_html(b, b->raw + b->bodyoff, b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_location(b->url); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at); js_set_location(b->url); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

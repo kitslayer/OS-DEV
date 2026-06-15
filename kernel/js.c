@@ -2124,6 +2124,8 @@ static void (*g_dom_set_at)(int off, const char *value, int html);              
 static int  (*g_dom_getattr_at)(int off, const char *attr, char *out, int max);   /* getAttribute on a match */
 static void (*g_dom_setattr_at)(int off, const char *attr, const char *val);      /* setAttribute on a match */
 static int  (*g_dom_query)(const char *sel, int *offs, int max);   /* returns match count */
+static int  (*g_dom_matches)(const char *id, const char *sel);     /* element.matches(sel) — id handle */
+static int  (*g_dom_matches_at)(int off, const char *sel);         /* element.matches(sel) — position handle */
 #define QSA_MAX_JS 256   /* cap on querySelectorAll results (bounds the on-stack offs[]) */
 static char g_location_url[256];   /* current page URL, snapshotted into window.location before page JS runs */
 static val element_handle(const char *id) {
@@ -2244,6 +2246,12 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
     if (strcmp(name, "removeEventListener") == 0) {   /* v1: unregister by type (listener-fn identity isn't tracked) */
         unregister_handler(el, nargs > 0 ? val_to_str(args[0]) : "");
         return UND();
+    }
+    if (strcmp(name, "matches") == 0) {   /* does this element match the CSS selector? (event-delegation idiom e.target.matches('.x')) */
+        const char *sel = nargs ? val_to_str(args[0]) : "";
+        int m = has_pos ? (g_dom_matches_at && g_dom_matches_at(off, sel))
+                        : (g_dom_matches    && g_dom_matches(id, sel));
+        return BOOLV(m);
     }
     rt_err("no such element method"); return UND();
 }
@@ -2827,6 +2835,10 @@ void js_set_dom_pos(int (*get_at)(int, char *, int, int),
     g_dom_get_at = get_at; g_dom_set_at = set_at;
     g_dom_getattr_at = getattr_at; g_dom_setattr_at = setattr_at; g_dom_query = query;
 }
+/* The browser registers element.matches() backings (id + position variants). */
+void js_set_dom_match(int (*matches)(const char *, const char *), int (*matches_at)(int, const char *)) {
+    g_dom_matches = matches; g_dom_matches_at = matches_at;
+}
 /* The browser sets the current page URL before running page JS (for window.location). */
 void js_set_location(const char *url) {
     int i = 0; if (url) while (url[i] && i < (int)sizeof(g_location_url) - 1) { g_location_url[i] = url[i]; i++; }
@@ -2970,6 +2982,9 @@ static void hdom_set_at(int off, const char *value, int html){ (void)html; int i
     if(i==wat_n){ if(wat_n>=8) return; wat_off[wat_n++]=off; } int j=0; while(value[j]&&j<63){wat_txt[i][j]=value[j];j++;} wat_txt[i][j]=0; }
 static void hdom_setattr_at(int off, const char *attr, const char *val){ if(strcmp(attr,"class")) return;   /* only "class" is stored (for classList) */
     int i; for(i=0;i<hcls_n;i++) if(hcls_off[i]==off) break; if(i==hcls_n){ if(hcls_n>=8) return; hcls_off[hcls_n++]=off; } int j=0; while(val[j]&&j<127){hcls_val[i][j]=val[j];j++;} hcls_val[i][j]=0; }
+/* mock matches: reuse hdom_query (membership), mirroring the real browser_dom_matches_at */
+static int hdom_matches_at(int off, const char *sel){ int offs[8]; int n=hdom_query(sel,offs,8); for(int i=0;i<n;i++) if(offs[i]==off) return 1; return 0; }
+static int hdom_matches(const char *id, const char *sel){ (void)id; (void)sel; return 0; }   /* id handles: mock store has no offset */
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -2978,6 +2993,7 @@ int main(int argc, char **argv) {
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     js_set_dom_attr(hdom_getattr, hdom_setattr);
     js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);   /* mock querySelector(All) for host tests */
+    js_set_dom_match(hdom_matches, hdom_matches_at);   /* mock element.matches for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
