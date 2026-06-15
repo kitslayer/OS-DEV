@@ -37,12 +37,16 @@ static void render(unsigned gen, int paused) {
     char t[12]; int i = 0; unsigned v = gen; if (!v) t[i++] = '0'; while (v) { t[i++] = '0' + v % 10; v /= 10; }
     while (i) sl[p++] = t[--i];
     a = paused ? "  [paused]" : "  [run]"; while (*a) sl[p++] = *a++;
-    sl[p] = 0; print(sl); print("\n");
+    sl[p] = 0; sys_setcolor(8); print(sl); print("\n");          /* status: grey */
 
-    char buf[(W + 1) * H + 1]; p = 0;
-    for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) buf[p++] = cur[y][x] ? '#' : ' '; buf[p++] = '\n'; }
-    buf[p] = 0; print(buf);
-    print("space=pause r=rand c=clear s=step q=quit\n");
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            if (cur[y][x]) { sys_setcolor(9); print("#"); }       /* live cell: lime */
+            else           { sys_setcolor(0); print(" "); }
+        }
+        print("\n");
+    }
+    sys_setcolor(8); print("space=pause r=rand c=clear s=step q=quit\n"); sys_setcolor(0);
 }
 
 int main(void) {

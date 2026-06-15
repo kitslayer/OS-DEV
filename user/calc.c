@@ -64,8 +64,8 @@ static void itoa_l(long v, char *out) {
 }
 
 int main(void) {
-    print("\n  OS-DEV calc -- + - * / and ( )\n");
-    print("  e.g. (2+3)*4 ; 'q' to quit\n\n");
+    sys_setcolor(4); print("\n  OS-DEV calc -- + - * / and ( )\n");   /* title: cyan */
+    sys_setcolor(8); print("  e.g. (2+3)*4 ; 'q' to quit\n\n"); sys_setcolor(0);
     char line[128];
     for (;;) {
         print("calc> ");
@@ -75,8 +75,8 @@ int main(void) {
         cur = line; err = 0;
         long r = expr();
         skipws();
-        if (err || *cur) { print("  ? syntax error\n"); }
-        else { char b[24]; itoa_l(r, b); print("  = "); print(b); print("\n"); }
+        if (err || *cur) { sys_setcolor(2); print("  ? syntax error\n"); sys_setcolor(0); }   /* error: red */
+        else { char b[24]; itoa_l(r, b); print("  = "); sys_setcolor(3); print(b); sys_setcolor(0); print("\n"); }  /* result: yellow */
     }
     print("bye!\n");
     return 0;
