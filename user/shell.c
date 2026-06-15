@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N> rot13<text> fizzbuzz<N> dec<0x..>\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N> rot13<text> fizzbuzz<N> dec<0x..> fib<N>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -966,6 +966,15 @@ int main(void) {
             }
             if (!any) print("usage: dec <0x.. | 0b.. | 0o.. | decimal>\n");
             else { print("  "); print_base(v, 10); print("\n"); }   /* unsigned: correct even when v > LONG_MAX */
+        } else if (startswith(line, "fib ")) {            /* fib N -> the Nth Fibonacci number */
+            const char *p = line + 4; while (*p == ' ') p++;
+            int n = 0; while (*p >= '0' && *p <= '9' && n < 1000) n = n * 10 + (*p++ - '0');
+            if (n > 90) print("fib: max 90 (fib(91)+ overflows 64-bit)\n");
+            else {
+                long a = 0, b = 1;
+                for (int i = 0; i < n; i++) { long t = a + b; a = b; b = t; }
+                print("  "); printl(a); print("\n");
+            }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
