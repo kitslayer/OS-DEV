@@ -335,14 +335,22 @@ int main(void) {
             while (*p && *p != ' ' && i < 39) pat[i++] = *p++;
             pat[i] = 0;
             while (*p == ' ') p++;
-            if (pat[0] == 0 || *p == 0) { print("usage: grep <pattern> <file>\n"); }
+            if (pat[0] == 0 || *p == 0) { print("usage: grep <pattern> <file>...\n"); }
             else {
                 static char buf[2048];
-                long n = sys_readfile(p, buf, sizeof(buf) - 1);   /* -1 so buf[n]=0 can't write past the array */
-                if (n < 0) { print("grep: no such file\n"); }
-                else {
+                const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
+                while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fcount++; while (*cq && *cq != ' ') cq++; }
+                int hits = 0;
+                while (*p) {                                       /* grep each space-separated file */
+                    while (*p == ' ') p++;
+                    if (!*p) break;
+                    char name[64]; int j = 0;
+                    while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                    name[j] = 0;
+                    long n = sys_readfile(name, buf, sizeof(buf) - 1);   /* -1 so buf[n]=0 can't write past the array */
+                    if (n < 0) { print("grep: no such file: "); print(name); print("\n"); continue; }
                     buf[n] = 0;
-                    int ls = 0, hits = 0;
+                    int ls = 0;
                     for (long k = 0; k <= n; k++) {
                         if (k == n || buf[k] == '\n') {
                             int found = 0;
@@ -353,14 +361,15 @@ int main(void) {
                             }
                             if (found) {
                                 char save = buf[k]; buf[k] = 0;
-                                print("  "); print(buf + ls); print("\n");
+                                if (fcount > 1) { print(name); print(": "); } else print("  ");
+                                print(buf + ls); print("\n");
                                 buf[k] = save; hits++;
                             }
                             ls = (int)k + 1;
                         }
                     }
-                    if (!hits) print("  (no matches)\n");
                 }
+                if (!hits) print("  (no matches)\n");
             }
         } else if (startswith(line, "wc ")) {
             static char buf[2048];
