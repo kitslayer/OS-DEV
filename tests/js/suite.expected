@@ -121,6 +121,8 @@ true true false
 ab
 18
 Y
+-- bitwise --
+6 -6 6 1 -1 7
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

@@ -420,7 +420,7 @@ static node *parse_postfix(lexer *L) {
 }
 
 static node *parse_unary_inner(lexer *L) {
-    if (peek_punc(L,"!")||peek_punc(L,"-")||peek_punc(L,"+")) { token o=advance(L); node *u=mknode(N_UNARY); u->op=o.s[0]; u->a=parse_unary(L); return u; }
+    if (peek_punc(L,"!")||peek_punc(L,"-")||peek_punc(L,"+")||peek_punc(L,"~")) { token o=advance(L); node *u=mknode(N_UNARY); u->op=o.s[0]; u->a=parse_unary(L); return u; }
     if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->prefix=1; u->a=parse_unary(L); return u; }
     if (peek_kw(L,"typeof")) { advance(L); node *u=mknode(N_UNARY); u->op='t'; u->a=parse_unary(L); return u; }
     if (peek_kw(L,"delete")) { advance(L); node *u=mknode(N_UNARY); u->op='d'; u->a=parse_unary(L); return u; }
@@ -446,6 +446,7 @@ static int bin_prec(token t, int *code) {
     if (tok_is(t,"===")||tok_is(t,"==")) { *code='='; return 7; }
     if (tok_is(t,"!==")||tok_is(t,"!=")) { *code='!'; return 7; }
     if (tok_is(t,"&")) { *code='&'; return 6; }
+    if (tok_is(t,"^")) { *code='^'; return 5; }   /* bitwise XOR: between & and | */
     if (tok_is(t,"|")) { *code='|'; return 4; }
     if (tok_is(t,"&&")) { *code='A'; return 3; }
     if (tok_is(t,"||")) { *code='O'; return 2; }
@@ -1175,6 +1176,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (n->op=='!') return BOOLV(!truthy(v));
             if (n->op=='-') return NUM(-to_num(v));
             if (n->op=='+') return NUM(to_num(v));
+            if (n->op=='~') return NUM(~to_num(v));
             return UND();
         }
         case N_UPDATE: {
@@ -1214,7 +1216,7 @@ static val eval_expr_inner(node *n, env *e) {
                     if (b.t==V_OBJ && b.o) { val tmp; return BOOLV(obj_get(b.o, val_to_str(a), &tmp)); }
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
                     return BOOLV(0);
-                case '&': return NUM(x&y); case '|': return NUM(x|y);
+                case '&': return NUM(x&y); case '|': return NUM(x|y); case '^': return NUM(x^y);
                 case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
                 case '=': {
                     if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)==0);

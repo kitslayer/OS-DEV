@@ -134,6 +134,8 @@ var _ia=[5,6,7]; print(0 in _ia, 2 in _ia, 9 in _ia);
 var _ik=""; for (var _k in _io) _ik+=_k; print(_ik);
 var _is=0; for (var _v of _ia) _is+=_v; print(_is);
 print(("a" in _io) ? "Y" : "N");
+print("-- bitwise --");
+print(5 ^ 3, ~5, 12 ^ 10, 1 | 2 ^ 3 & 3, ~1 ^ 1, ~~7);
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);
