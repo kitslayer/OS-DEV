@@ -66,7 +66,10 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("cmds: help ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc sha256 crypt base64 run<p> get<url> wget<url file> browse<url> js<file> echo cal date ping resolve beep mem ps df history clear exit\n");
+            print("files:  ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
+            print("net:    get<url> wget<url file> browse<url> ping resolve<host>\n");
+            print("crypto: sha256<file> crypt base64     run: run<prog>  js<file>\n");
+            print("misc:   echo cal date beep mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
