@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (263 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (271 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -35,19 +35,28 @@
 > `getOwnPropertyDescriptor`**, and a real **prototype chain** (`Object.create`,
 > function `.prototype` + `new F()` for plain constructors, `__proto__`,
 > `getPrototypeOf`/`setPrototypeOf`). The prototype chain is **additive** — walked
-> only at the evaluator's member sites after an own-miss, so `delete`/`in`/
-> enumeration stay own-only and the class system is byte-identical.
+> only at the evaluator's member sites after an own-miss, so `delete`/enumeration
+> stay own-only and the class system is byte-identical.
+>
+> **M264–271 hardened and completed the engine:** `in`/`instanceof` now walk the
+> prototype chain; `Object.defineProperties` + `Object.create(proto, descriptors)`;
+> `structuredClone` (cycle-preserving deep clone); the `Array(n)`/`new Array(…)`
+> constructor; `>>>`/`>>>=` (completing the operator + compound-assignment sets);
+> and **loose `==`/`!=` vs strict `===`/`!==`** (the `x==null` idiom + coercion).
+> Systematic probing of the mature engine also surfaced and fixed real
+> pre-existing bugs: `{}===​{}` returned `true` (objects compared via `to_num`→0),
+> string `<`/`>` was always `false` (coerced to 0), `1===true` was `true`, and
+> `arr.length =` was ignored.
 >
 > What remains is either *fundamentally blocked by the integer-only Number*
-> (`Math.random`, float math, a correct `isNaN`/`isFinite` — all need a NaN /
+> (`Math.random`, float math, `isFinite`/full `isNaN` — all need a NaN /
 > floating-point representation we deliberately don't have) or genuinely
 > *architectural*: a real **DOM tree** (`querySelectorAll`/`createElement`), a
 > **persistent per-page JS environment** (`addEventListener` — the arena resets
 > per run), **CSS/layout**, **generators/iterators**, **async/Promises**,
-> **modules**, **Proxy**. Smaller follow-ons that build on M263 (deferred as
-> own-only in v1): `in`/`instanceof` consulting the prototype chain.
+> **modules**, **Proxy**, **`Symbol`**.
 
-OS-DEV is a **graphical desktop OS** (263 milestones). It boots to a themed
+OS-DEV is a **graphical desktop OS** (271 milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and six
 games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
