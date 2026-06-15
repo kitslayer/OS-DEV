@@ -16,6 +16,7 @@
 #include "pic.h"
 #include "console.h"
 #include "syscall.h"
+#include "app.h"
 #include <stdint.h>
 
 static const char *const exception_names[32] = {
@@ -69,6 +70,16 @@ void isr_dispatch(struct registers *r) {
             kprintf("[int] #BP breakpoint trap at rip=%p (resuming)\n",
                     (void *)r->rip);
             return;
+        }
+
+        /* A fault from ring 3 (CS RPL == 3) is a userspace app bug, not a kernel
+         * bug: report it and terminate just that task, leaving the kernel and the
+         * rest of the desktop running. (A ring-0 fault falls through and panics —
+         * that IS a real kernel bug.) */
+        if ((r->cs & 3) == 3) {
+            kprintf("[fault] %s (vector %lu) err=0x%lx in a ring-3 task at rip=%p -- terminating it\n",
+                    exception_names[r->int_no], r->int_no, r->err_code, (void *)r->rip);
+            app_fault_current();   /* marks the app exited + task_exit(); does not return */
         }
 
         interrupts_disable();

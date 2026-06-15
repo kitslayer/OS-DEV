@@ -82,13 +82,13 @@ static void step_down(void) {
 
 static void render(const char *msg) {
     sys_clear();
-    char st[48]; int p = 0;
+    char st[80]; int p = 0; char n[12];
     const char *a = "TETRIS  score "; while (*a) st[p++] = *a++;
-    char n[12]; int v = (int)score, i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
+    itoa_u(score, n); for (int i = 0; n[i]; i++) st[p++] = n[i];   /* unsigned (was an (int) cast that garbled >INT_MAX) */
     a = "  lines "; while (*a) st[p++] = *a++;
-    v = (int)lines; i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
+    itoa_u(lines, n); for (int i = 0; n[i]; i++) st[p++] = n[i];
     a = "  best "; while (*a) st[p++] = *a++;
-    v = (int)best; i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
+    itoa_u(best, n); for (int i = 0; n[i]; i++) st[p++] = n[i];
     st[p] = 0; sys_setcolor(8); print(st); print("\n");
 
     /* compose board + current piece into render + colour grids */

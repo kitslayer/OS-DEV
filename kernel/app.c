@@ -290,6 +290,14 @@ int  app_sys_getpid(void) { return cur()->pid; }
 void app_sys_clear(void)  { grid_clear(cur()); }
 void app_setcolor(int idx) { struct app *a = cur(); if (a) a->curcol = (uint8_t)(idx & 15); }
 void app_sys_exit(void)   { cur()->exited = 1; task_exit(); }
+/* A ring-3 task hit a CPU exception (divide error, page fault, …). Mark its app
+ * exited so the WM tears down the window, then terminate just this task — the
+ * kernel and the rest of the desktop keep running. Does not return. */
+void app_fault_current(void) {
+    struct app *a = (struct app *)task_self()->proc;
+    if (a) a->exited = 1;
+    task_exit();
+}
 
 /* Format the caller's command history (oldest first) as "  N  command\n"
  * lines into buf. Returns bytes written (excluding the NUL terminator). The

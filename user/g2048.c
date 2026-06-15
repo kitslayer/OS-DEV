@@ -104,7 +104,7 @@ static int tile_color(unsigned v) {
 
 static void render(const char *msg) {
     sys_clear();
-    char sl[40]; int p = 0;
+    char sl[64]; int p = 0;
     const char *a = "  2048   score "; while (*a) sl[p++] = *a++;
     char num[12]; itoa_u(score, num); for (int i = 0; num[i]; i++) sl[p++] = num[i];
     a = "   best "; while (*a) sl[p++] = *a++;

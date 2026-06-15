@@ -9,6 +9,7 @@
  */
 #include "ulib.h"
 
+#define LONG_MIN (-9223372036854775807L - 1)   /* freestanding: no limits.h */
 static const char *cur;          /* the parse cursor */
 static int err;
 static long expr(void);
@@ -62,8 +63,8 @@ static long term(void) {
     for (;;) {
         skipws();
         if (*cur == '*') { cur++; v *= power(); }
-        else if (*cur == '/') { cur++; long d = power(); if (d == 0) err = 1; else v /= d; }
-        else if (*cur == '%') { cur++; long d = power(); if (d == 0) err = 1; else v %= d; }
+        else if (*cur == '/') { cur++; long d = power(); if (d == 0 || (d == -1 && v == LONG_MIN)) err = 1; else v /= d; }
+        else if (*cur == '%') { cur++; long d = power(); if (d == 0 || (d == -1 && v == LONG_MIN)) err = 1; else v %= d; }
         else break;
     }
     return v;

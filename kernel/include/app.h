@@ -32,4 +32,5 @@ int    app_sys_getpid(void);
 void   app_sys_clear(void);             /* clear the calling app's screen */
 void   app_setcolor(int idx);           /* set the calling app's text colour (palette 0-15) */
 void   app_sys_exit(void);              /* does not return */
+void   app_fault_current(void);         /* a ring-3 task faulted: kill it, keep the kernel alive; does not return */
 int    app_sys_history(char *buf, int max);  /* the caller's command history */

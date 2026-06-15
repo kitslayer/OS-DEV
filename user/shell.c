@@ -189,7 +189,7 @@ int main(void) {
             if (pat[0] == 0 || *p == 0) { print("usage: grep <pattern> <file>\n"); }
             else {
                 static char buf[2048];
-                long n = sys_readfile(p, buf, sizeof(buf));
+                long n = sys_readfile(p, buf, sizeof(buf) - 1);   /* -1 so buf[n]=0 can't write past the array */
                 if (n < 0) { print("grep: no such file\n"); }
                 else {
                     buf[n] = 0;
