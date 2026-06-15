@@ -405,7 +405,7 @@ static const struct {
         "<p>Open from the <b>Apps</b> menu (<span class=\"key\">F9</span>) or the shell with <code>run NAME</code>:</p>"
         "<dl>"
         "<dt>shell, clock, calc, editor</dt><dd>a terminal, a clock dashboard, a calculator (<code>+ - * / % ^ &amp; | &lt;&lt; &gt;&gt; ~</code>, parens, <code>0x</code> hex), a text editor</dd>"
-        "<dt>games</dt><dd>snake, 2048, life, tetris, breakout, mines, sudoku, maze, hangman, ttt (tic-tac-toe vs an unbeatable AI), bj (blackjack), simon (a tone-memory game), adv (a text adventure) &mdash; all in colour, several with saved best scores</dd>"
+        "<dt>games</dt><dd>snake, 2048, life, tetris, breakout, mines, sudoku, maze, hangman, ttt (tic-tac-toe vs an unbeatable AI), bj (blackjack), simon (a tone-memory game), c4 (Connect Four vs an AI), adv (a text adventure) &mdash; all in colour, several with saved best scores</dd>"
         "<dt>tools</dt><dd>calendar (month view), mandel (a Mandelbrot explorer), piano, jukebox (built-in tunes), matrix (a digital-rain screensaver), paint (an ASCII-art canvas, saves to PAINT.TXT), typing (a WPM speed test)</dd>"
         "</dl>"
         "<h2>Shell commands</h2>"
