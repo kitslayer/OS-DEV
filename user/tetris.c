@@ -24,6 +24,10 @@ static int curp, curx, cury;
 static unsigned short curmask;
 static unsigned score, lines;
 static int over;
+static unsigned best;          /* high score, persisted to TETRIS.HI */
+static void itoa_u(unsigned v, char *o) { char t[12]; int i=0; if(!v)t[i++]='0'; while(v){t[i++]=(char)('0'+v%10);v/=10;} int j=0; while(i)o[j++]=t[--i]; o[j]=0; }
+static void load_best(void) { char b[16]; long n=sys_readfile("TETRIS.HI",b,sizeof(b)-1); best=0; for(long i=0;i<n;i++){if(b[i]<'0'||b[i]>'9')break;best=best*10+(b[i]-'0');} }
+static void save_best(void) { char b[12]; itoa_u(best,b); int n=0; while(b[n])n++; sys_writefile("TETRIS.HI",b,(unsigned long)n); }
 
 static unsigned short rot_cw(unsigned short m) {
     unsigned short r = 0;
@@ -66,7 +70,8 @@ static void lock_and_clear(void) {
             cleared++;
         } else y--;
     }
-    if (cleared) { lines += cleared; score += cleared * cleared * 100; }
+    if (cleared) { lines += cleared; score += cleared * cleared * 100;
+                   if (score > best) { best = score; save_best(); } }
     spawn();
 }
 
@@ -82,6 +87,8 @@ static void render(const char *msg) {
     char n[12]; int v = (int)score, i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
     a = "  lines "; while (*a) st[p++] = *a++;
     v = (int)lines; i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
+    a = "  best "; while (*a) st[p++] = *a++;
+    v = (int)best; i = 0; if (!v) n[i++]='0'; while (v){n[i++]='0'+v%10;v/=10;} while (i) st[p++]=n[--i];
     st[p] = 0; sys_setcolor(8); print(st); print("\n");
 
     /* compose board + current piece into render + colour grids */
@@ -100,13 +107,14 @@ static void render(const char *msg) {
             if (g[y][x] == ' ') { sys_setcolor(0); print(" "); }
             else { sys_setcolor(gc[y][x]); print("#"); }   /* each block its piece colour */
         }
-        sys_setcolor(8); print("|\n");
+        sys_setcolor(8); print(y < BH - 1 ? "|\n" : "|");   /* no trailing newline on the last row, or the header scrolls off the 17-row grid */
     }
     sys_setcolor(0);
     if (msg) print(msg);
 }
 
 int main(void) {
+    load_best();
 restart:
     for (int y = 0; y < BH; y++) for (int x = 0; x < BW; x++) board[y][x] = 0;
     score = lines = 0; over = 0;

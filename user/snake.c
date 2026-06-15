@@ -23,6 +23,14 @@ static void itoa_u(unsigned v, char *o) {
 }
 
 static int sx[W * H], sy[W * H];
+static unsigned best;          /* high score, persisted to SNAKE.HI */
+static void load_best(void) {
+    char b[16]; long n = sys_readfile("SNAKE.HI", b, sizeof(b) - 1);
+    best = 0; for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best * 10 + (b[i] - '0'); }
+}
+static void save_best(void) {
+    char b[12]; itoa_u(best, b); int n = 0; while (b[n]) n++; sys_writefile("SNAKE.HI", b, (unsigned long)n);
+}
 
 static void render(int len, int fx, int fy, unsigned score, const char *msg) {
     static char g[H][W];
@@ -34,6 +42,8 @@ static void render(int len, int fx, int fy, unsigned score, const char *msg) {
     char sl[48]; int p = 0;
     const char *a = "  snake   score "; while (*a) sl[p++] = *a++;
     char num[12]; itoa_u(score, num); for (int i = 0; num[i]; i++) sl[p++] = num[i];
+    a = "   best "; while (*a) sl[p++] = *a++;
+    itoa_u(best, num); for (int i = 0; num[i]; i++) sl[p++] = num[i];
     sl[p] = 0;
     sys_setcolor(8); print(sl); print("\n");           /* header in grey */
 
@@ -54,6 +64,7 @@ static void render(int len, int fx, int fy, unsigned score, const char *msg) {
 
 int main(void) {
     int len, dx, dy, fx, fy; unsigned score;
+    load_best();
 restart:
     len = 3; dx = 1; dy = 0; score = 0;
     sx[0] = W/2; sy[0] = H/2;
@@ -81,6 +92,7 @@ restart:
         if (nx == fx && ny == fy) {                 /* ate the food: grow */
             if (len < W*H) { sx[len] = tx; sy[len] = ty; len++; }
             score += 10;
+            if (score > best) { best = score; save_best(); }
             fx = (int)(rnd() % W); fy = (int)(rnd() % H);
         }
         render(len, fx, fy, score, 0);
