@@ -52,6 +52,9 @@ enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = im
 typedef struct { uint16_t off, len, link; uint8_t style, type; } tok_t;
 typedef struct { uint16_t off, len; } href_t;            /* slice into hrefs[] */
 typedef struct { int16_t x, y, w, h; uint16_t link; } lrec_t;  /* a clickable rect */
+typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32]; } sel_t;  /* one simple CSS selector (tag/.class/#id/[attr]) */
+
+#define CSS_MAX 24                  /* simple style rules captured from <style> blocks per page */
 
 struct browser {
     char    url[URL_MAX];
@@ -104,6 +107,7 @@ struct browser {
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
     char    sc_tag[16]; int sc_depth; uint32_t sc_savecolor;    /* active inline style="color:" scope (restores curcolor on close) */
     int     sc_savestyle, sc_setstyle;                          /* same scope's text-style save + the STY_ it applied (-1 = none), for font-weight/font-style */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
@@ -575,6 +579,11 @@ static int is_void_tag(const char *t) {
            tageq(t,"link")||tageq(t,"area")||tageq(t,"col")||tageq(t,"base")||tageq(t,"wbr")||
            tageq(t,"embed")||tageq(t,"source");
 }
+/* <style> support (defined after sel_parse): parse a <style> body into b->css_* rules,
+ * and find the cascaded color/text-style for one element from those rules. */
+static void capture_css(browser_t *b, const char *s, int n);
+static int  css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
+                      uint32_t *color, int *textstyle);
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
@@ -592,17 +601,19 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         else b->sc_depth++;
     }
     if (!closing && b->sc_depth == 0 && !is_void_tag(tag)) {     /* open an inline-style scope: color and/or font-weight/font-style */
+        uint32_t c = 0; int ts = -1;
+        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts);   /* <style> rules first (lower priority) */
         const char *st; int stl;
-        if (find_attr(attrs, attrlen, "style", &st, &stl)) {
-            uint32_t c = parse_style_color(st, stl);
-            int ts = parse_style_textstyle(st, stl);            /* STY_BOLD / STY_EM, or -1 */
-            int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-            if (c || apply_ts) {
-                b->sc_savecolor = b->curcolor; if (c) b->curcolor = c;
-                b->sc_savestyle = *style; b->sc_setstyle = -1;
-                if (apply_ts) { *style = ts; b->sc_setstyle = ts; }
-                int i = 0; while (tag[i] && i < 15) { b->sc_tag[i] = tag[i]; i++; } b->sc_tag[i] = 0; b->sc_depth = 1;
-            }
+        if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
+            uint32_t ic = parse_style_color(st, stl);  if (ic) c = ic;
+            int its = parse_style_textstyle(st, stl);  if (its >= 0) ts = its;
+        }
+        int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
+        if (c || apply_ts) {
+            b->sc_savecolor = b->curcolor; if (c) b->curcolor = c;
+            b->sc_savestyle = *style; b->sc_setstyle = -1;
+            if (apply_ts) { *style = ts; b->sc_setstyle = ts; }
+            int i = 0; while (tag[i] && i < 15) { b->sc_tag[i] = tag[i]; i++; } b->sc_tag[i] = 0; b->sc_depth = 1;
         }
     }
     if (!closing && b->oc_depth == 0 && !is_void_tag(tag)) {
@@ -876,6 +887,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
     b->sc_depth = 0;                                     /* no inline style-colour scope open yet */
+    b->n_css = 0;                                        /* <style> rules captured fresh each parse */
     b->form_action[0] = 0;                               /* no <form> action open yet */
     b->anc_n = 0;                                        /* fresh #fragment anchor table */
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
@@ -893,6 +905,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
      * whole page (fail-safe on malformed input). */
     int inscript = 0, instyle = 0, intitle = 0, inhead = 0, inpre = 0, insvg = 0, wstart = -1;
     int sc_start = -1;                                   /* offset where current <script> body began */
+    int st_start = -1;                                   /* offset where current <style> body began */
     int det_n = 0, det_depth = 0, det_hide = 0, in_summary = 0, det_cur = 0;   /* <details>: index / nesting / suppress-depth / in-<summary> / current idx */
     int sum_link = NO_LINK, sum_style = STY_NORMAL;      /* saved link/style around a <summary> */
 
@@ -941,7 +954,11 @@ static void parse_html(browser_t *b, const char *body, int len) {
                 else { if (inscript && sc_start >= 0 && i > sc_start) capture_script(b, body + sc_start, i - sc_start);
                        inscript = 0; sc_start = -1; }
             }
-            else if (tageq(tag, "style")) instyle = !closing;
+            else if (tageq(tag, "style")) {
+                if (!closing) { instyle = 1; st_start = j + 1; }          /* body starts after '>' */
+                else { if (instyle && st_start >= 0 && i > st_start) capture_css(b, body + st_start, i - st_start);
+                       instyle = 0; st_start = -1; }
+            }
             else if (tageq(tag, "svg")) insvg = !closing;        /* inline SVG: skip its guts */
             else if (tageq(tag, "title") && !insvg) intitle = !closing;  /* (svg <title> mustn't hijack) */
             else if (tageq(tag, "head")) inhead = !closing;
@@ -1086,7 +1103,6 @@ static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
  * same byte coordinates the id-keyed splice code already uses) — so id-less
  * matches become addressable WITHOUT changing the id path. */
 #define QSA_MAX 256
-typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32]; } sel_t;
 static int sel_parse(const char *s, sel_t *o) {
     o->tag[0]=o->cls[0]=o->id[0]=o->attr[0]=0;
     int i=0, k=0;
@@ -1110,6 +1126,52 @@ static int class_has(const char *v, int vl, const char *cls) {
         if (m==cl && (i+cl==vl || v[i+cl]==' ' || v[i+cl]=='\t')) return 1;
     }
     return 0;
+}
+/* Parse a <style> body into simple `selector { color / font-weight / font-style }` rules
+ * (b->css_*). A selector that isn't a single simple selector (descendant, comma-grouped,
+ * @-rule) fails sel_parse and is skipped. Bounded read-only over s[0..n); caps at CSS_MAX. */
+static void capture_css(browser_t *b, const char *s, int n) {
+    int i = 0;
+    while (i < n && b->n_css < CSS_MAX) {
+        while (i < n && (s[i]==' '||s[i]=='\t'||s[i]=='\n'||s[i]=='\r'||s[i]==';'||s[i]=='}')) i++;  /* ws / stray ; } */
+        if (i >= n) break;
+        int ss = i; while (i < n && s[i] != '{' && s[i] != '}') i++;   /* selector text up to '{' */
+        if (i >= n || s[i] != '{') continue;         /* '}' (e.g. @-rule close) or end before '{' */
+        int se = i; i++;                             /* selector is [ss,se); step past '{' */
+        int ds = i; while (i < n && s[i] != '}') i++;   /* declaration block [ds,de) */
+        int de = i; if (i < n) i++;                  /* step past '}' */
+        while (ss < se && (s[ss]==' '||s[ss]=='\t'||s[ss]=='\n'||s[ss]=='\r')) ss++;   /* trim selector */
+        while (se > ss && (s[se-1]==' '||s[se-1]=='\t'||s[se-1]=='\n'||s[se-1]=='\r')) se--;
+        int sl = se - ss; if (sl <= 0 || sl >= 40) continue;          /* empty or too long -> skip */
+        char selbuf[40]; for (int k = 0; k < sl; k++) selbuf[k] = s[ss+k]; selbuf[sl] = 0;
+        sel_t sel; if (!sel_parse(selbuf, &sel)) continue;            /* unsupported selector -> skip */
+        uint32_t col = parse_style_color(s + ds, de - ds);           /* reuse the reviewed value parsers */
+        int tsv = parse_style_textstyle(s + ds, de - ds);
+        if (col || tsv >= 0) {                       /* keep only rules that set something we render */
+            b->css_sel[b->n_css] = sel;
+            b->css_color[b->n_css] = col;
+            b->css_style[b->n_css] = (int16_t)tsv;
+            b->n_css++;
+        }
+    }
+}
+/* Cascade the captured <style> rules onto one element: each matching rule (tag / .class /
+ * #id / [attr]) sets *color / *textstyle, later rules winning per property (source order).
+ * Returns 1 if any rule matched. Matching mirrors sel_match_all's per-element checks. */
+static int css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
+                     uint32_t *color, int *textstyle) {
+    int hit = 0;
+    for (int r = 0; r < b->n_css; r++) {
+        const sel_t *s = &b->css_sel[r];
+        if (s->tag[0] && !tageq(tag, s->tag)) continue;
+        if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) continue; }
+        if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     continue; }
+        if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) continue;
+        if (b->css_color[r]) *color = b->css_color[r];
+        if (b->css_style[r] >= 0) *textstyle = b->css_style[r];
+        hit = 1;
+    }
+    return hit;
 }
 /* Scan the body region for elements matching `sel`; fill offs[] with the byte
  * offset of each matching opening '<'. Returns the count (bounded by max). */
