@@ -17,6 +17,7 @@ static void itoa_simple(int v, char *out) {
     while (i > 0) out[j++] = tmp[--i];
     out[j] = '\0';
 }
+static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }   /* ASCII lowercase */
 static void printl(long v) {              /* print a (possibly large) integer */
     char t[24]; int i = 0;
     unsigned long u = v < 0 ? -(unsigned long)v : (unsigned long)v;
@@ -352,12 +353,13 @@ int main(void) {
             if (sys_sha512(line + 7, hex, sizeof(hex)) < 0) print("sha512: no such file\n");
             else { print("  "); print(hex); print("\n"); }
         } else if (startswith(line, "grep ")) {
-            char *p = line + 5, pat[40]; int i = 0;
+            char *p = line + 5, pat[40]; int i = 0, ci = 0;
             while (*p == ' ') p++;
+            if (p[0] == '-' && p[1] == 'i' && (p[2] == ' ' || p[2] == 0)) { ci = 1; p += 2; while (*p == ' ') p++; }  /* -i: case-insensitive */
             while (*p && *p != ' ' && i < 39) pat[i++] = *p++;
             pat[i] = 0;
             while (*p == ' ') p++;
-            if (pat[0] == 0 || *p == 0) { print("usage: grep <pattern> <file>...\n"); }
+            if (pat[0] == 0 || *p == 0) { print("usage: grep [-i] <pattern> <file>...\n"); }
             else {
                 static char buf[2048];
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
@@ -378,7 +380,7 @@ int main(void) {
                             int found = 0;
                             for (long a = ls; a < k && !found; a++) {
                                 int b = 0;
-                                while (a + b < k && pat[b] && buf[a+b] == pat[b]) b++;
+                                while (a + b < k && pat[b] && (ci ? lc(buf[a+b]) == lc(pat[b]) : buf[a+b] == pat[b])) b++;
                                 if (!pat[b]) found = 1;
                             }
                             if (found) {
