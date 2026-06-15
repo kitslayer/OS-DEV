@@ -152,6 +152,10 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* needs the timer for its timeout */
         r->rax = (uint64_t)(int64_t)net_ping_gateway();
         break;
+    case SYS_pinghost:
+        __asm__ volatile("sti");           /* DNS + ICMP both need the timer running */
+        r->rax = (uint64_t)(int64_t)net_ping_host((const char *)r->rdi);
+        break;
     case SYS_http:
         __asm__ volatile("sti");           /* TCP needs the timer running */
         r->rax = (uint64_t)(int64_t)http_get((const char *)r->rdi,

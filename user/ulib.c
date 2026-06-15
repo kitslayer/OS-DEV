@@ -46,6 +46,7 @@ void sys_clear(void)  { do_syscall(SYS_clear, 0, 0, 0); }
 void sys_setcolor(int color) { do_syscall(SYS_setcolor, color, 0, 0); }
 void sys_reboot(void) { do_syscall(SYS_reboot, 0, 0, 0); }
 long sys_ping(void) { return do_syscall(SYS_ping, 0, 0, 0); }
+long sys_ping_host(const char *host) { return do_syscall(SYS_pinghost, (long)host, 0, 0); }
 long sys_spawn(const char *name) { return do_syscall(SYS_spawn, (long)name, 0, 0); }
 long sys_browse(const char *url) { return do_syscall(SYS_browse, (long)url, 0, 0); }
 long sys_mkdir(const char *path) { return do_syscall(SYS_mkdir, (long)path, 0, 0); }

@@ -8,6 +8,8 @@ void net_demo(void);
 #include <stdint.h>
 /* Ping the gateway 3 times; returns the number of echo replies (-1 = no ARP). */
 int net_ping_gateway(void);
+/* DNS-resolve a host and ICMP-echo it 3 times via the gateway; reply count or -1. */
+int net_ping_host(const char *host);
 /* Resolve a hostname to an IPv4 address via DNS. 0 on success, -1 otherwise. */
 int dns_resolve(const char *host, uint8_t out_ip[4]);
 /* HTTP/1.0 GET http://host/path -> raw response into out (max bytes).

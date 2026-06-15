@@ -174,6 +174,22 @@ int net_ping_gateway(void) {
     return got;
 }
 
+/* Ping a host by name: DNS-resolve it, then ICMP-echo the address 3 times,
+ * routed through the gateway (the next hop for any off-LAN destination — the
+ * same ping() helper, just a remote target IP behind the gateway's MAC).
+ * Returns the echo-reply count (0-3), or -1 if DNS or the gateway ARP fails. */
+int net_ping_host(const char *host) {
+    uint8_t ip[4];
+    if (dns_resolve(host, ip) != 0) return -1;
+    uint8_t mac[6];
+    if (!arp_resolve(GW_IP, mac)) return -1;     /* route via the gateway */
+    int got = 0;
+    for (uint16_t s = 1; s <= 3; s++)
+        if (ping(ip, mac, s))
+            got++;
+    return got;
+}
+
 /* Tiny DNS cache: browsing a site re-resolves the same host on every page/link
  * fetch, so cache recent answers. Entries expire after DNS_TTL ticks so a stale
  * IP is never served indefinitely; a cache miss just falls through to a query. */

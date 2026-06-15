@@ -68,7 +68,7 @@ int main(void) {
         } else if (streq(line, "help")) {
             print("files:  ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
-            print("        ping resolve<host>\n");
+            print("        ping[<host>] resolve<host>\n");
             print("crypto: sha256<file> crypt base64     run: run<prog>  js<file>\n");
             print("misc:   echo cal date beep mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
@@ -168,6 +168,22 @@ int main(void) {
             else {
                 char c[2] = { (char)('0' + (int)n), 0 };
                 print("gateway 10.0.2.2: "); print(c); print("/3 replies\n");
+            }
+        } else if (startswith(line, "ping ")) {
+            /* ping a host by name: resolve (also shows the IP), then ICMP-echo */
+            char host[64]; char *p = line + 5; while (*p == ' ') p++;
+            int i = 0; while (*p && *p != ' ' && i < 63) host[i++] = *p++; host[i] = 0;
+            if (host[0] == 0) { print("usage: ping <host>\n"); }
+            else {
+                char ip[40];
+                if (sys_resolve(host, ip, sizeof(ip)) < 0) { print("ping: cannot resolve "); print(host); print("\n"); }
+                else {
+                    for (int k = 0; ip[k]; k++) if (ip[k] == '\n') ip[k] = 0;   /* inline the IP */
+                    print("PING "); print(host); print(" ("); print(ip); print(") ...\n");
+                    long n = sys_ping_host(host);
+                    if (n < 0) print("ping: no route to host\n");
+                    else { char c[2] = { (char)('0' + (int)n), 0 }; print(c); print("/3 echo replies\n"); }
+                }
             }
         } else if (startswith(line, "resolve ")) {
             char ip[40];
