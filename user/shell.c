@@ -69,7 +69,8 @@ int main(void) {
             print("files:  ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
-            print("crypto: sha256<file> crypt base64     run: apps run<prog> js<file>\n");
+            print("crypto: sha256<file> sha512<file> crypt base64\n");
+            print("        run: apps run<prog> js<file>\n");
             print("misc:   echo cal date beep mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -227,6 +228,10 @@ int main(void) {
         } else if (startswith(line, "sha256 ")) {
             char hex[72];
             if (sys_sha256(line + 7, hex, sizeof(hex)) < 0) print("sha256: no such file\n");
+            else { print("  "); print(hex); print("\n"); }
+        } else if (startswith(line, "sha512 ")) {
+            char hex[136];
+            if (sys_sha512(line + 7, hex, sizeof(hex)) < 0) print("sha512: no such file\n");
             else { print("  "); print(hex); print("\n"); }
         } else if (startswith(line, "grep ")) {
             char *p = line + 5, pat[40]; int i = 0;

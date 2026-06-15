@@ -60,6 +60,7 @@ int  sys_pollkey(void) { return (int)do_syscall(SYS_pollkey, 0, 0, 0); }
 long sys_df(void *buf, unsigned long len) { return do_syscall(SYS_df, 0, (long)buf, (long)len); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }
+long sys_sha512(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha512, (long)name, (long)hexbuf, (long)max); }
 long sys_crypt(const char *name, const char *pass) { return do_syscall(SYS_crypt, (long)name, (long)pass, 0); }
 long sys_js(const char *src, void *out, unsigned long max) { return do_syscall(SYS_js, (long)src, (long)out, (long)max); }
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }

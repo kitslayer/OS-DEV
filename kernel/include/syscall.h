@@ -43,6 +43,7 @@
 #define SYS_pinghost 33 /* (host)           -> DNS-resolve + ICMP-echo a host; replies/-1 */
 #define SYS_netinfo 34  /* (buf, len)       -> our IP/MAC/gateway/DNS as text; bytes/-1 */
 #define SYS_apps   35   /* (buf, len)       -> registered app names, space-separated; bytes */
+#define SYS_sha512 36   /* (name, hexbuf)   -> SHA-512 of a file as 128 hex chars; 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

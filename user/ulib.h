@@ -33,6 +33,7 @@ int  sys_pollkey(void);
 long sys_df(void *buf, unsigned long len);
 long sys_find(const char *want, void *buf, unsigned long len);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);
+long sys_sha512(const char *name, void *hexbuf, unsigned long max);
 long sys_crypt(const char *name, const char *pass);
 long sys_js(const char *src, void *out, unsigned long max);
 void sys_sleep(int ms);

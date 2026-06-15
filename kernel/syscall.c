@@ -22,6 +22,7 @@
 #include "tls.h"
 #include "js.h"
 #include "sha256.h"
+#include "sha512.h"
 #include "aes.h"
 #include "string.h"
 #include <stdint.h>
@@ -234,6 +235,17 @@ void syscall_dispatch(struct registers *r) {
         char *hx = (char *)r->rsi; const char *H = "0123456789abcdef";
         for (int i = 0; i < 32; i++) { hx[i*2] = H[dg[i]>>4]; hx[i*2+1] = H[dg[i]&0xF]; }
         hx[64] = 0; r->rax = 0;
+        break;
+    }
+    case SYS_sha512: {
+        if ((int)r->rdx < 129) { r->rax = (uint64_t)-1; break; }   /* need room for 128 hex + NUL */
+        static uint8_t fbuf512[16384];
+        long fn = vfs_read((const char *)r->rdi, fbuf512, sizeof(fbuf512));
+        if (fn < 0) { r->rax = (uint64_t)-1; break; }
+        uint8_t dg[64]; sha512(fbuf512, (size_t)fn, dg);
+        char *hx = (char *)r->rsi; const char *H = "0123456789abcdef";
+        for (int i = 0; i < 64; i++) { hx[i*2] = H[dg[i]>>4]; hx[i*2+1] = H[dg[i]&0xF]; }
+        hx[128] = 0; r->rax = 0;
         break;
     }
     case SYS_crypt: {
