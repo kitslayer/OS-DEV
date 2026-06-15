@@ -67,7 +67,8 @@ int main(void) {
             continue;
         } else if (streq(line, "help")) {
             print("files:  ls cat head tail sort edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
-            print("net:    get<url> wget<url file> browse<url> ping resolve<host>\n");
+            print("net:    get<url> headers<url> wget<url file> browse<url>\n");
+            print("        ping resolve<host>\n");
             print("crypto: sha256<file> crypt base64     run: run<prog>  js<file>\n");
             print("misc:   echo cal date beep mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
@@ -370,6 +371,33 @@ int main(void) {
                     resp[n] = 0;
                     char num[12]; itoa_simple((int)n, num);
                     print("--- "); print(num); print(" bytes ---\n");
+                    print(resp); print("\n");
+                }
+            }
+        } else if (startswith(line, "headers ")) {
+            /* curl -I style: show just the HTTP response headers — status line,
+             * Content-Type, redirects (Location:) — that 'browse' hides. Reuses
+             * the same fetch; a 2 KB buffer suffices since headers lead the body. */
+            char host[64], path[160]; int i = 0; char *p = line + 8;
+            while (*p == ' ') p++;
+            int secure = 0;
+            if (startswith(p, "https://")) { secure = 1; p += 8; }
+            else if (startswith(p, "http://")) { p += 7; }
+            while (*p && *p != ' ' && *p != '/' && i < 63) host[i++] = *p++; host[i] = 0;
+            if (*p == '/') { int j = 0; while (*p && *p != ' ' && j < 159) path[j++] = *p++; path[j] = 0; }
+            else { path[0] = '/'; path[1] = 0; }
+            if (host[0] == 0) { print("usage: headers [http(s)://]<host>[/path]\n"); }
+            else {
+                static char resp[2048];
+                print(secure ? "headers https://" : "headers http://"); print(host); print(path); print(" ...\n");
+                long n = secure ? sys_https(host, path, resp, sizeof(resp) - 1)
+                                : sys_http(host, path, resp, sizeof(resp) - 1);
+                if (n < 0) print("headers: failed (no net/DNS/connect)\n");
+                else {
+                    int end = (int)n;                        /* print up to the blank line */
+                    for (int t = 0; t + 3 < (int)n; t++)
+                        if (resp[t]=='\r'&&resp[t+1]=='\n'&&resp[t+2]=='\r'&&resp[t+3]=='\n') { end = t + 2; break; }
+                    resp[end] = 0;
                     print(resp); print("\n");
                 }
             }
