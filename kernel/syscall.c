@@ -164,14 +164,22 @@ void syscall_dispatch(struct registers *r) {
         int n = 0;
         const char *labels[4] = { "IP    ", "MAC   ", "GW    ", "DNS   " };
         const uint8_t *v4[4]  = { ip, NULL, gw, dns };     /* slot 1 (MAC) handled specially */
+        /* Every raw write is guarded by `n + 1 < max` (leaving room for the
+         * trailing NUL), exactly like SYS_resolve above — so the formatter stays
+         * memory-safe for ANY buffer size even if fields are added later, rather
+         * than relying on the worst-case length staying under the guard. */
         for (int row = 0; row < 4; row++) {
-            for (const char *s = labels[row]; *s; s++) b[n++] = *s;
+            for (const char *s = labels[row]; *s; s++) if (n + 1 < max) b[n++] = *s;
             if (row == 1) {                                /* MAC: 6 hex bytes, colon-separated */
-                for (int i = 0; i < 6; i++) { b[n++] = H[m[i] >> 4]; b[n++] = H[m[i] & 15]; if (i < 5) b[n++] = ':'; }
+                for (int i = 0; i < 6; i++) {
+                    if (n + 1 < max) b[n++] = H[m[i] >> 4];
+                    if (n + 1 < max) b[n++] = H[m[i] & 15];
+                    if (i < 5 && n + 1 < max) b[n++] = ':';
+                }
             } else {                                       /* IPv4 dotted quad */
-                for (int i = 0; i < 4; i++) { n = snum(b, n, max, v4[row][i]); if (i < 3) b[n++] = '.'; }
+                for (int i = 0; i < 4; i++) { n = snum(b, n, max, v4[row][i]); if (i < 3 && n + 1 < max) b[n++] = '.'; }
             }
-            b[n++] = '\n';
+            if (n + 1 < max) b[n++] = '\n';
         }
         b[n] = 0; r->rax = (uint64_t)n;
         break;
