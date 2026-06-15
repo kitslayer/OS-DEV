@@ -93,7 +93,7 @@ int main(void) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
         if (k == 'q' || k == 'Q') break;
-        if (state == 1) { if (k == ' ') new_game(); continue; }   /* game over: SPACE restarts (NOT any key: a key-up code would otherwise mask the game-over screen) */
+        if (state == 1) { if (k == ' ') new_game(); continue; }   /* game over: SPACE restarts (NOT "any key": a stray Enter would otherwise dismiss it instantly) */
         if (k >= '1' && k <= '4') {
             int pad = k - '1';
             render(pad, "your turn! press 1-4");            /* light + sound the pressed pad */
