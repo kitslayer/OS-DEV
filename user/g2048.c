@@ -72,25 +72,48 @@ static int can_move(void) {
     return 0;
 }
 
+/* palette colour for a tile value (like the real 2048's escalating hues) */
+static int tile_color(unsigned v) {
+    switch (v) {
+        case 0:    return 0;    /* empty '.': green   */
+        case 2:    return 1;    /* white   */
+        case 4:    return 3;    /* yellow  */
+        case 8:    return 7;    /* orange  */
+        case 16:   return 13;   /* coral   */
+        case 32:   return 2;    /* red     */
+        case 64:   return 5;    /* pink    */
+        case 128:  return 11;   /* violet  */
+        case 256:  return 6;    /* blue    */
+        case 512:  return 4;    /* cyan    */
+        case 1024: return 10;   /* teal    */
+        default:   return 9;    /* 2048+: lime */
+    }
+}
+
 static void render(const char *msg) {
     sys_clear();
     char sl[40]; int p = 0;
     const char *a = "  2048    score "; while (*a) sl[p++] = *a++;
     char num[12]; itoa_u(score, num); for (int i = 0; num[i]; i++) sl[p++] = num[i];
-    sl[p] = 0; print(sl); print("\n\n");
+    sl[p] = 0;
+    sys_setcolor(8); print(sl); print("\n\n");           /* header in grey */
 
     for (int y = 0; y < 4; y++) {
-        char row[48]; int q = 0;
         for (int x = 0; x < 4; x++) {
             char cell[8];
             if (g[y][x] == 0) { cell[0]='.'; cell[1]=0; }
             else itoa_u((unsigned)g[y][x], cell);
             int len = 0; while (cell[len]) len++;
-            for (int s = 0; s < 6 - len; s++) row[q++] = ' ';   /* right-align in 6 */
-            for (int i = 0; cell[i]; i++) row[q++] = cell[i];
+            char out[8]; int q = 0;
+            for (int s = 0; s < 6 - len; s++) out[q++] = ' ';   /* right-align in 6 */
+            for (int i = 0; cell[i]; i++) out[q++] = cell[i];
+            out[q] = 0;
+            sys_setcolor(tile_color((unsigned)g[y][x]));         /* each tile its own colour */
+            print(out);
         }
-        row[q] = 0; print(row); print("\n");
+        print("\n");
     }
+    sys_setcolor(0);
     print("\n  arrows to move, q to quit");
     if (msg) { print("\n  "); print(msg); }
 }
