@@ -116,5 +116,9 @@ jstest:
 imgtest:
 	@tests/run-img-tests.sh
 
+# Host-side fuzz test of the X.509 certificate parser (ASan+UBSan).
+x509test:
+	@tests/run-x509-tests.sh
+
 clean:
 	rm -rf $(BUILD)
