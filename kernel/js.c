@@ -89,7 +89,7 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
     "switch","case","default","do","try","catch","finally","throw","this","new",
-    "class","extends","super","delete","in","instanceof",0 };
+    "class","extends","super","delete","in","instanceof","void",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -191,7 +191,7 @@ static token lex_next_raw(lexer *L) {
         }
     }
     /* punctuation / multi-char operators */
-    static const char *ops[] = { "===","!==","<<=",">>=","...","==","!=","<=",">=",
+    static const char *ops[] = { "===","!==","<<=",">>=","...","**","==","!=","<=",">=",
         "&&","||","??","?.","++","--","+=","-=","*=","/=","%=","<<",">>","=>",0 };
     for (int i=0; ops[i]; i++) { int ol=(int)strlen(ops[i]); if (L->pos+ol<=L->len && memcmp(ops[i],s+L->pos,ol)==0) { t.type=T_PUNC; t.s=s+L->pos; t.len=ol; L->pos+=ol; return t; } }
     t.type=T_PUNC; t.s=s+L->pos; t.len=1; L->pos++; return t;
@@ -424,6 +424,7 @@ static node *parse_unary_inner(lexer *L) {
     if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->prefix=1; u->a=parse_unary(L); return u; }
     if (peek_kw(L,"typeof")) { advance(L); node *u=mknode(N_UNARY); u->op='t'; u->a=parse_unary(L); return u; }
     if (peek_kw(L,"delete")) { advance(L); node *u=mknode(N_UNARY); u->op='d'; u->a=parse_unary(L); return u; }
+    if (peek_kw(L,"void"))   { advance(L); node *u=mknode(N_UNARY); u->op='v'; u->a=parse_unary(L); return u; }
     return parse_postfix(L);
 }
 /* depth-guarded wrapper: a `!!!!...` / `typeof typeof...` / `- - -...` chain
@@ -439,6 +440,7 @@ static int bin_prec(token t, int *code) {
     if (t.type==T_KW && tok_is(t,"in")) { *code='I'; return 8; }   /* `in` operator: relational precedence */
     if (t.type==T_KW && tok_is(t,"instanceof")) { *code='S'; return 8; }   /* `instanceof`: relational precedence */
     if (t.type!=T_PUNC) return 0;
+    if (tok_is(t,"**")) { *code='P'; return 12; }   /* exponentiation: tighter than * / %, right-associative */
     if (tok_is(t,"*")||tok_is(t,"/")||tok_is(t,"%")) { *code=t.s[0]; return 11; }
     if (tok_is(t,"+")||tok_is(t,"-")) { *code=t.s[0]; return 10; }
     if (tok_is(t,"<<")||tok_is(t,">>")) { *code=(t.s[0]=='<')?'L':'R'; return 9; }
@@ -461,7 +463,7 @@ static node *parse_binary(lexer *L, int minp) {
         int code; int p = bin_prec(peek(L), &code);
         if (p == 0 || p < minp) break;
         advance(L);
-        node *right = parse_binary(L, p+1);
+        node *right = parse_binary(L, code=='P'?p:p+1);   /* `**` is right-associative (recurse at same precedence) */
         int logical = (code=='A'||code=='O'||code=='N');
         node *n = mknode(logical?N_LOGICAL:N_BINARY); n->op=code; n->a=left; n->b=right;
         left = n;
@@ -1181,6 +1183,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (n->op=='-') return NUM(-to_num(v));
             if (n->op=='+') return NUM(to_num(v));
             if (n->op=='~') return NUM(~to_num(v));
+            if (n->op=='v') return UND();   /* void: operand already evaluated for side effects, yield undefined */
             return UND();
         }
         case N_UPDATE: {
@@ -1216,6 +1219,7 @@ static val eval_expr_inner(node *n, env *e) {
                 case '%': return NUM(y?x%y:0);
                 case '<': return BOOLV(x<y); case '>': return BOOLV(x>y);
                 case 'l': return BOOLV(x<=y); case 'g': return BOOLV(x>=y);
+                case 'P': { int64_t r=1; for (int64_t i=0;i<y && i<63;i++) r*=x; return NUM(r); }   /* x ** y (integer, matches Math.pow) */
                 case 'I':   /* `in`: own-property test on objects, valid-index test on arrays */
                     if (b.t==V_OBJ && b.o) { val tmp; return BOOLV(obj_get(b.o, val_to_str(a), &tmp)); }
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
