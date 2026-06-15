@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..>\n");
+            print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
@@ -993,6 +993,19 @@ int main(void) {
                 print("  max="); printl(mx);
                 print("  sum="); printl(sum);
                 print("\n");
+            }
+        } else if (startswith(line, "size ")) {           /* size BYTES -> GB/MB/KB/B (1024-based) */
+            const char *p = line + 5; while (*p == ' ') p++;
+            long b = 0; int any = 0;
+            while (*p >= '0' && *p <= '9') { if (b < 100000000000000L) b = b * 10 + (*p - '0'); p++; any = 1; }
+            if (!any) print("usage: size <bytes>   (e.g. size 1536000)\n");
+            else {
+                long gb = b/1073741824, mb = (b%1073741824)/1048576, kb = (b%1048576)/1024, by = b%1024;
+                print("  ");
+                if (gb) { printl(gb); print(" GB "); }
+                if (gb || mb) { printl(mb); print(" MB "); }
+                if (gb || mb || kb) { printl(kb); print(" KB "); }
+                printl(by); print(" B\n");
             }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
