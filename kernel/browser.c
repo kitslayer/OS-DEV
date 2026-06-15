@@ -1950,7 +1950,7 @@ static void build_home(browser_t *b) {
          ".new { color: #006400; font-weight: bold } </style></head><body>"
          "<h1>OS-DEV Browser</h1>"
          "<p class=\"new\">New this build: a small CSS engine &mdash; this very page is styled by it "
-         "&mdash; plus sixteen apps including a piano, a maze, a Mandelbrot explorer, and a text adventure.</p>"
+         "&mdash; plus twenty apps including a piano, a music jukebox, a maze, a Mandelbrot explorer, an ASCII paint, and a text adventure.</p>"
          "<p>A from-scratch browser on a from-scratch OS, now over <b>real HTTPS</b> "
          "(a from-scratch TLS 1.3 client). Some pages that work:</p><dl>"
          "<dt><a href=\"https://text.npr.org\">https://text.npr.org</a></dt><dd>a LIVE news site over HTTPS &mdash; real headlines you can click</dd>"
