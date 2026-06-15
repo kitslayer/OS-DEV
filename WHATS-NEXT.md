@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (244 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (260 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -11,23 +11,39 @@
 > live web search (DuckDuckGo) + address-bar search**, and reactive events
 > (`onchange`/`oninput`).
 >
-> **M216–244 rounded the JavaScript language out to near-completeness** (found by
-> systematic probing): the full operator set (`delete`/`in`/`instanceof`/`**`/
-> bitwise `^`·`~`/`void`), all compound + logical assignments (`&=`…`**=`, `||=`/
-> `&&=`/`??=`), binary/octal/exponent + `_`-separated number literals, modern
-> classes (**public instance fields + static methods/fields**), computed method
-> names, `typeof undeclared`→`"undefined"`, and a larger stdlib (Array.fill/
-> from-length, Math.hypot/log2/cbrt/clz32/imul, Object.freeze, Date.getTime/
-> getDay). See the milestone table in `README.md` for M139–244.
-> The genuinely-remaining frontier (in "biggest remaining gaps" below) is now
-> almost entirely *architectural*: getters/setters, a real DOM tree, a persistent
-> per-page JS environment, CSS, generators/iterators.
+> **M216–260 rounded the JavaScript language + stdlib out to near-completeness**
+> (found by systematic probing): the full operator set (`delete`/`in`/
+> `instanceof`/`**`/bitwise `^`·`~`/`void`), all compound + logical assignments
+> (`&=`…`**=`, `||=`/`&&=`/`??=`), binary/octal/exponent + `_`-separated number
+> literals, modern classes (**public instance fields + static methods/fields**),
+> computed method names, tagged templates, `typeof undeclared`→`"undefined"`, the
+> **`arguments`** object, **Error/TypeError/RangeError/SyntaxError** objects,
+> spread of `Set`/`Map`, a full **`Date`** (getTime/valueOf/getDay/
+> getMilliseconds + `Date.now()` + setFullYear…setSeconds), and a stdlib that now
+> covers essentially every common synchronous method — String (replaceAll,
+> matchAll, padStart/End, trimStart/End, at, slice/substring edge cases),
+> Array (map/filter/reduce/reduceRight, flat(depth)/flatMap, findLast, at, **the
+> ES2023 immutable `with`/`toReversed`/`toSorted`/`toSpliced`**), Object
+> (keys/values/entries/assign/fromEntries/freeze/**is**), Number (isInteger/
+> parseInt/parseFloat/toFixed/toString-radix/MAX_SAFE_INTEGER), Math (hypot/log2/
+> cbrt/clz32/imul/sign), and JSON (pretty `stringify` with indent + `parse`). See
+> the milestone table in `README.md` for M139–260.
+>
+> **The clean stdlib space is now exhausted** — what remains is *architectural*
+> (the frontier below) or *fundamentally blocked by the integer-only Number*
+> (`Math.random`, float math, and a correct `isNaN`/`isFinite` all need a NaN /
+> floating-point representation we deliberately don't have). The architectural
+> frontier: getters/setters (see the design note in memory — it touches the
+> object model + parser in both object-literals and class bodies + 3 firing
+> sites, so it wants a fresh focused session), a real DOM tree
+> (`querySelectorAll`/`createElement`), a persistent per-page JS environment
+> (`addEventListener`), CSS, generators/iterators, modules.
 
-OS-DEV is a **graphical desktop OS** (215+ milestones). It boots to a themed
-windowing desktop with a **taskbar** that hosts eight **real ring-3 userspace
-programs** as windows — a shell, a clock, a calculator, a text editor, and four
-games (Snake, 2048, Life, Tetris) — plus a **graphical web browser**. Under the
-hood:
+OS-DEV is a **graphical desktop OS** (260 milestones). It boots to a themed
+windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
+programs** as windows — a shell, a clock, a calculator, a text editor, and six
+games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
+browser**. Under the hood:
 preemptive multitasking with sleep/wake and **per-process isolation**, a
 read-write **FAT32** filesystem with **subdirectories** and a full file toolkit,
 a from-scratch **TCP/HTTP** stack that fetches real web pages (redirects +
