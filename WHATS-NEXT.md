@@ -10,9 +10,14 @@
 > this arc, all SHIP. **Remaining big/risky (deferred to protect working
 > systems — best done in a focused session):** ENFORCING cert validation (a
 > fatal gate; the trust store has ISRG/DigiCert/SSL.com/GTS but enforcement needs
-> ~all common roots), **inline remote images** (local `<img>` decode inline;
-> remote is a clickable full-page view — inline needs a render-time fetch on a
-> big-stack task), the **app-exit resource leak** (MAX_APPS spawns/boot; needs a
+> ~all common roots), **inline remote images** — local `<img>` decode inline;
+> remote is a clickable full-page view. APPROACH (investigated M358): the render
+> runs on the **WM** (`need_parse`: worker→WM), but only the fetch **worker** has
+> the 256 KB stack `tls_get` needs — so the worker must **pre-fetch + decode**
+> remote `<img>` bytes into the existing inline-image slots (`imgs[]`) *after* the
+> page fetch and *before* signaling render; a render-time fetch on the WM would
+> overflow its stack. The pieces exist (decoders, slots, the worker fetch); the
+> risk is to the working browser, so a focused session, the **app-exit resource leak** (MAX_APPS spawns/boot; needs a
 > careful vmm teardown that frees only the app's user ranges), a **2-column F9
 > menu** (the single column is near its ~30-item cap), and shell **pipes/redirect**.
 >
