@@ -1900,6 +1900,9 @@ static int64_t i_sqrt(int64_t x){ if(x<1) return 0; int64_t lo=0, hi=(x<2?x:x/2+
 static val nat_sqrt(val *a, int n){ return NUM(i_sqrt(n?to_num(a[0]):0)); }
 static val nat_hypot(val *a, int n){ int64_t s=0; for(int i=0;i<n;i++){ int64_t v=to_num(a[i]); s+=v*v; } return NUM(i_sqrt(s)); }   /* floor(sqrt(sum of squares)) */
 static val nat_log2(val *a, int n){ int64_t x=n?to_num(a[0]):0; if(x<1) return NUM(0); int64_t r=0; while(x>1){ x>>=1; r++; } return NUM(r); }   /* floor(log2 x) = index of the high bit */
+static val nat_cbrt(val *a, int n){ int64_t x=n?to_num(a[0]):0; int neg=x<0; uint64_t ux=neg?(uint64_t)(-(x+1))+1:(uint64_t)x; int64_t lo=0,hi=2097152; while(lo<hi){ int64_t mid=lo+(hi-lo+1)/2; if((uint64_t)mid*(uint64_t)mid*(uint64_t)mid<=ux) lo=mid; else hi=mid-1; } return NUM(neg?-lo:lo); }   /* integer cube root (hi^3 stays within uint64) */
+static val nat_clz32(val *a, int n){ uint32_t u=(uint32_t)(n?to_num(a[0]):0); if(!u) return NUM(32); int c=0; while(!(u&0x80000000u)){ u<<=1; c++; } return NUM(c); }   /* count leading zeros in 32 bits */
+static val nat_imul(val *a, int n){ uint32_t x=(uint32_t)(n>0?to_num(a[0]):0), y=(uint32_t)(n>1?to_num(a[1]):0); return NUM((int32_t)(x*y)); }   /* 32-bit integer multiply */
 static val nat_pow(val *a, int n){ int64_t b=n>0?to_num(a[0]):0, e=n>1?to_num(a[1]):0; int64_t r=1; for(int64_t i=0;i<e && i<63;i++) r*=b; return NUM(r); }
 
 /* ---- global functions ---- */
@@ -2108,6 +2111,7 @@ static void install_globals(env *g) {
     def_native(math,"floor",nat_ident); def_native(math,"ceil",nat_ident); def_native(math,"round",nat_ident); def_native(math,"trunc",nat_ident);
     def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow); def_native(math,"sign",nat_sign);
     def_native(math,"hypot",nat_hypot); def_native(math,"log2",nat_log2);
+    def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
     obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); env_define(g,"Object",obj_val(objc));

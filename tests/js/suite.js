@@ -156,6 +156,7 @@ print([1,2,3,4].fill(0).join(","), [1,2,3,4].fill(9,1,3).join(","));
 print(Math.hypot(3,4), Math.hypot(5,12), Math.log2(1024), Math.sqrt(16));
 print(Array.from({length:4}, function(_,i){return i;}).join(","));
 print(Object.getOwnPropertyNames({x:1,y:2}).join(","));
+print(Math.cbrt(27), Math.cbrt(-64), Math.clz32(1), Math.imul(0xFFFFFFFF,5));
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);
