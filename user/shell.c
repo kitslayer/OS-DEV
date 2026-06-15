@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N>\n");
+            print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
@@ -975,6 +975,24 @@ int main(void) {
                 long a = 0, b = 1;
                 for (int i = 0; i < n; i++) { long t = a + b; a = b; b = t; }
                 print("  "); printl(a); print("\n");
+            }
+        } else if (startswith(line, "stats ")) {          /* stats N1 N2 ... -> count/min/max/sum */
+            const char *p = line + 6;
+            long mn = 0, mx = 0, sum = 0; int cnt = 0;
+            while (*p) {
+                while (*p == ' ') p++;
+                if (*p < '0' || *p > '9') break;
+                long v = 0; while (*p >= '0' && *p <= '9') { if (v < 1000000000000L) v = v * 10 + (*p - '0'); p++; }
+                if (cnt == 0) { mn = mx = v; } else { if (v < mn) mn = v; if (v > mx) mx = v; }
+                sum += v; cnt++;
+            }
+            if (cnt == 0) print("usage: stats <n1> <n2> ...\n");
+            else {
+                print("  count="); printl(cnt);
+                print("  min="); printl(mn);
+                print("  max="); printl(mx);
+                print("  sum="); printl(sum);
+                print("\n");
             }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
