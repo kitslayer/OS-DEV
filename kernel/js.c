@@ -1815,6 +1815,33 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
                 if (cmp>0){ o->vals[j+1]=o->vals[j]; j--; } else break; }
             o->vals[j+1]=key; }
         return recv; }
+    /* ES2023 change-array-by-copy: return a NEW array, never mutate the receiver */
+    if (strcmp(name,"with")==0){ int idx=nargs>0?(int)to_num(args[0]):0; if(idx<0)idx+=o->n;
+        if(idx<0||idx>=o->n){ rt_err("Array.with index out of range"); return UND(); }
+        obj*r=new_obj(V_ARR); if(!r) return UND();
+        for(int i=0;i<o->n;i++) arr_push_val(r, i==idx ? (nargs>1?args[1]:UND()) : o->vals[i]);
+        val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"toReversed")==0){ obj*r=new_obj(V_ARR); if(!r) return UND();
+        for(int i=o->n-1;i>=0;i--) arr_push_val(r,o->vals[i]);
+        val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"toSorted")==0){ obj*r=new_obj(V_ARR); if(!r) return UND();
+        for(int i=0;i<o->n;i++) arr_push_val(r,o->vals[i]);   /* copy, then sort the copy in place (mirrors `sort`) */
+        int havecmp = (nargs && (args[0].t==V_FUN || args[0].t==V_NATIVE));
+        for (int i=1; i<r->n && !g_err && !g_oom; i++){ val key=r->vals[i]; int j=i-1;
+            while (j>=0){ int cmp;
+                if (havecmp){ val ca[2]={r->vals[j],key}; cmp=(int)to_num(call_function(args[0],ca,2)); }
+                else cmp=strcmp(val_to_str(r->vals[j]), val_to_str(key));
+                if (cmp>0){ r->vals[j+1]=r->vals[j]; j--; } else break; }
+            r->vals[j+1]=key; }
+        val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"toSpliced")==0){   /* toSpliced(start, delCount, ...items) -> new array */
+        int start=nargs>0?(int)to_num(args[0]):0; if(start<0){ start+=o->n; if(start<0)start=0; } if(start>o->n)start=o->n;
+        int del=nargs>1?(int)to_num(args[1]):(o->n-start); if(del<0)del=0; if(del>o->n-start)del=o->n-start;
+        obj*r=new_obj(V_ARR); if(!r) return UND();
+        for(int i=0;i<start;i++) arr_push_val(r,o->vals[i]);        /* head */
+        for(int i=2;i<nargs;i++) arr_push_val(r,args[i]);           /* inserted items */
+        for(int i=start+del;i<o->n;i++) arr_push_val(r,o->vals[i]); /* tail */
+        val v=UND(); v.t=V_ARR; v.o=r; return v; }
     rt_err("unknown array method"); return UND();
 }
 
