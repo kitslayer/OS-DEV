@@ -93,7 +93,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal date beep morse<text> factor<n> roll<NdM> seq<n>\n");
+            print("misc:   echo cal date beep morse<text> factor<n> roll<NdM> seq<n> rev<text>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -288,6 +288,12 @@ int main(void) {
                 if (n > 1) { print(" total "); itoa_simple(total, nb); print(nb); }
                 print("\n");
             }
+        } else if (startswith(line, "rev ")) {
+            const char *t = line + 4;
+            char r[128]; int len = 0; while (t[len] && len < 127) len++;
+            for (int i = 0; i < len; i++) r[i] = t[len - 1 - i];
+            r[len] = 0;
+            print(r); print("\n");
         } else if (startswith(line, "seq ")) {
             const char *q = line + 4; while (*q == ' ') q++;
             int m = 0; while (*q >= '0' && *q <= '9' && m < 100000) { m = m * 10 + (*q - '0'); q++; }
