@@ -221,4 +221,6 @@ var _dps={}; Object.defineProperties(_dps,{a:{value:1},b:{get:function(){return 
 var _e1={}, _e2={}; print(_e1===_e2, _e1===_e1, [1]===[1], _e1!==_e2);  // false true false true (object identity in ===/!==, was always-equal)
 var _scs={v:1}; var _sco={p:_scs,q:_scs,a:[1,2]}; var _scc=structuredClone(_sco); _scc.a[0]=9; _scc.p.v=5;
 print(_sco.a[0], _scc.a[0], _sco.p.v, _scc.p.v, _scc.p===_scc.q, _sco.p===_scc.p);  // 1 9 1 5 true false (deep clone: original intact, shared ref preserved, M266)
+print("b">"a", "apple"<"banana", "2">"10", "5"<10, 2<3, 5>10);  // true true true true true false (string lexical + numeric relational, M267)
+var _al=[1,2,3,4,5]; _al.length=2; var _ag=[1,2]; _ag.length=4; print(_al.join(","), _al.length, _ag.length, _ag[3]);  // 1,2 2 4 undefined (array .length assignment, M267)
 print("-- done --");

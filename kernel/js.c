@@ -1414,8 +1414,10 @@ static val eval_expr_inner(node *n, env *e) {
                 case '*': return NUM(x*y);
                 case '/': return NUM(y?x/y:0);
                 case '%': return NUM(y?x%y:0);
-                case '<': return BOOLV(x<y); case '>': return BOOLV(x>y);
-                case 'l': return BOOLV(x<=y); case 'g': return BOOLV(x>=y);
+                case '<': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)<0);  return BOOLV(x<y);   /* two strings compare lexically; else numeric (M267) */
+                case '>': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)>0);  return BOOLV(x>y);
+                case 'l': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)<=0); return BOOLV(x<=y);
+                case 'g': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)>=0); return BOOLV(x>=y);
                 case 'P': return NUM(i_pow(x,y));   /* x ** y (integer, matches Math.pow) */
                 case 'I':   /* `in`: own-OR-inherited property on objects (walks the proto chain, non-firing — M264), valid-index test on arrays */
                     if (b.t==V_OBJ && b.o) { const char *k=val_to_str(a); val tmp; if (obj_get(b.o,k,&tmp)) return BOOLV(1);
@@ -1467,6 +1469,8 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) { dom_prop(recv.o, node_name(t), val_to_str(rhs), 0, 0); return rhs; }   /* el.textContent = … -> mutate the page */
                 if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
                 if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ const char *wk=node_name(t); val cur;
+                    if(recv.t==V_ARR && strcmp(wk,"length")==0){ int nl=(int)to_num(rhs); if(nl<0)nl=0; if(nl>(1<<24)){ rt_err("array length too large"); return rhs; }
+                        if(nl<=recv.o->n) recv.o->n=nl; else while(recv.o->n<nl && !g_oom) arr_push_val(recv.o,UND()); return rhs; }   /* a.length = n: truncate or grow-with-undefined (M267) */
                     if(recv.t==V_OBJ && strcmp(wk,"__proto__")==0){ recv.o->proto=(rhs.t==V_OBJ&&rhs.o)?rhs.o:0; return rhs; }   /* a.__proto__ = b / null (M263) */
                     if(obj_get(recv.o,wk,&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); }                       /* own setter */
                     else if(recv.o->proto && proto_find_accessor(recv.o->proto,wk,&cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); }   /* inherited setter (M263) */
