@@ -1687,7 +1687,9 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
     if (strcmp(name,"toLowerCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='A'&&s[i]<='Z')?s[i]+32:s[i]; r[len]=0; return STRV(r); }
     if (strcmp(name,"substring")==0||strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0; int b=nargs>1?(int)to_num(args[1]):len;
         if (name[1]=='l') { if(a<0)a+=len; if(b<0)b+=len; }   /* slice (name[1]=='l') counts negatives from the end; substring clamps to 0 */
-        if(a<0)a=0; if(b<0)b=0; if(a>len)a=len; if(b>len)b=len; if(b<a)b=a; char*r=aalloc(b-a+1); if(!r) return STRV(""); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
+        if(a<0)a=0; if(b<0)b=0; if(a>len)a=len; if(b>len)b=len;
+        if (name[1]=='u' && a>b) { int t=a; a=b; b=t; }   /* substring swaps its args when start>end (slice clamps to empty instead) */
+        if(b<a)b=a; char*r=aalloc(b-a+1); if(!r) return STRV(""); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
     if (strcmp(name,"indexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; for(int i=from;i+sl<=len;i++){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
     if (strcmp(name,"lastIndexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); for(int i=len-sl;i>=0;i--){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
     if (strcmp(name,"includes")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; for(int i=from;i+sl<=len;i++) if(memcmp(s+i,sub,sl)==0) return BOOLV(1); return BOOLV(0); }
