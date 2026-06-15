@@ -70,6 +70,18 @@ Per-character colour means printing cell-by-cell (`sys_setcolor` then a one-char
 `print`/`sys_write`) instead of one big buffer — a few hundred syscalls per
 frame, which is nothing for an interactive app.
 
+## Two gotchas worth remembering
+
+1. **The 17-row-grid trailing-newline scroll trap.** The app grid is `APP_ROWS`
+   (17) rows. If a render emits exactly 17 lines (e.g. a title + 16 board rows)
+   *each ending in `\n`*, the last `\n` advances the cursor off the bottom and
+   the grid scrolls — silently eating the top line (the title/score header). This
+   bit Tetris (its score/lines header was invisible for ages). Fix: don't print a
+   trailing `\n` after the final line, or keep total lines ≤ 16. (Likewise a row
+   of exactly `APP_COLS` (44) chars + `\n` wraps *then* newlines — use ≤ 43.)
+2. **`%` is literal in `mkfatfs.c` page content** (it's written verbatim, not
+   `printf`'d) — so `rgb(10%, …)` / "`+ - * / %`" use a single `%`, not `%%`.
+
 ## Files
 
 - `kernel/include/syscall.h` (`SYS_setcolor`), `kernel/syscall.c` (dispatch),
