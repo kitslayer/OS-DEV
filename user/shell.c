@@ -265,8 +265,8 @@ int main(void) {
             else {
                 p += 2;
                 int from = 0, to = 0, openend = 0;
-                while (*p >= '0' && *p <= '9') from = from * 10 + (*p++ - '0');
-                if (*p == '-') { p++; if (*p >= '0' && *p <= '9') { while (*p >= '0' && *p <= '9') to = to * 10 + (*p++ - '0'); } else openend = 1; }
+                while (*p >= '0' && *p <= '9') { if (from < 100000000) from = from * 10 + (*p - '0'); p++; }   /* cap: no int overflow on absurd N */
+                if (*p == '-') { p++; if (*p >= '0' && *p <= '9') { while (*p >= '0' && *p <= '9') { if (to < 100000000) to = to * 10 + (*p - '0'); p++; } } else openend = 1; }
                 else to = from;                            /* -cN alone = just column N */
                 while (*p == ' ') p++;
                 if (from < 1) from = 1;
@@ -280,7 +280,7 @@ int main(void) {
                         col++;
                         if (col >= from && (openend || col <= to) && oi < 255) out[oi++] = buf[k];
                     }
-                    if (oi > 0) { out[oi] = 0; print(out); print("\n"); }   /* trailing line with no newline */
+                    if (col > 0) { out[oi] = 0; print(out); print("\n"); }   /* trailing line w/o newline, even if its slice is empty */
                 }
             }
         } else if (streq(line, "js") || startswith(line, "js ")) {
