@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (215+ milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (244 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -9,8 +9,19 @@
 > `window.location`, inline `onclick`, the complete form-input set
 > (text/password/checkbox/radio/hidden/submit/button), **GET form submission +
 > live web search (DuckDuckGo) + address-bar search**, and reactive events
-> (`onchange`/`oninput`). See the milestone table in `README.md` for M139–215.
-> The genuinely-remaining frontier is in "biggest remaining gaps" below.
+> (`onchange`/`oninput`).
+>
+> **M216–244 rounded the JavaScript language out to near-completeness** (found by
+> systematic probing): the full operator set (`delete`/`in`/`instanceof`/`**`/
+> bitwise `^`·`~`/`void`), all compound + logical assignments (`&=`…`**=`, `||=`/
+> `&&=`/`??=`), binary/octal/exponent + `_`-separated number literals, modern
+> classes (**public instance fields + static methods/fields**), computed method
+> names, `typeof undeclared`→`"undefined"`, and a larger stdlib (Array.fill/
+> from-length, Math.hypot/log2/cbrt/clz32/imul, Object.freeze, Date.getTime/
+> getDay). See the milestone table in `README.md` for M139–244.
+> The genuinely-remaining frontier (in "biggest remaining gaps" below) is now
+> almost entirely *architectural*: getters/setters, a real DOM tree, a persistent
+> per-page JS environment, CSS, generators/iterators.
 
 OS-DEV is a **graphical desktop OS** (215+ milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts eight **real ring-3 userspace
