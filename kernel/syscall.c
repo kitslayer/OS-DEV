@@ -239,7 +239,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_sha512: {
         if ((int)r->rdx < 129) { r->rax = (uint64_t)-1; break; }   /* need room for 128 hex + NUL */
-        static uint8_t fbuf512[16384];
+        static uint8_t fbuf512[16384];                             /* hashes only the first 16 KB of a larger file (matches SYS_sha256) */
         long fn = vfs_read((const char *)r->rdi, fbuf512, sizeof(fbuf512));
         if (fn < 0) { r->rax = (uint64_t)-1; break; }
         uint8_t dg[64]; sha512(fbuf512, (size_t)fn, dg);

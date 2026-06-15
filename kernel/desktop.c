@@ -77,6 +77,10 @@ static const struct menu_item menu[] = {
     { "Files", KIND_FILES, 0 }, { "Welcome", KIND_WELCOME, 0 },
     { "About", KIND_ABOUT, 0 },
 };
+/* CAPACITY: one column rendered upward from the taskbar fits ~30 entries at
+ * 1024x768 (my0 = ty - (MENU_N*MENU_ITEM_H + 4) goes negative at N>=31, clipping
+ * the top off-screen — graceful, no fault, but unreadable). Add a 2-column or
+ * scrolling menu before exceeding that. Currently 29. */
 #define MENU_N      (int)(sizeof(menu) / sizeof(menu[0]))
 #define MENU_W      150
 #define MENU_ITEM_H 24
