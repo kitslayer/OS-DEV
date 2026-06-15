@@ -89,7 +89,7 @@ typedef struct { int type; int64_t num; const char *s; int len; } token;
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
     "switch","case","default","do","try","catch","finally","throw","this","new",
-    "class","extends","super","delete",0 };
+    "class","extends","super","delete","in",0 };
 
 typedef struct {
     const char *src; int pos, len;
@@ -436,6 +436,7 @@ static node *parse_unary(lexer *L) {
 
 /* binary precedence */
 static int bin_prec(token t, int *code) {
+    if (t.type==T_KW && tok_is(t,"in")) { *code='I'; return 8; }   /* `in` operator: relational precedence */
     if (t.type!=T_PUNC) return 0;
     if (tok_is(t,"*")||tok_is(t,"/")||tok_is(t,"%")) { *code=t.s[0]; return 11; }
     if (tok_is(t,"+")||tok_is(t,"-")) { *code=t.s[0]; return 10; }
@@ -602,7 +603,7 @@ static node *parse_stmt(lexer *L) {
             token v = peek(L);
             if (v.type==T_IDENT) { advance(L); token kw = peek(L);
                 int isof = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='o' && kw.s[1]=='f');
-                int isin = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='i' && kw.s[1]=='n');
+                int isin = ((kw.type==T_IDENT||kw.type==T_KW) && kw.len==2 && kw.s[0]=='i' && kw.s[1]=='n');   /* `in` is now a keyword */
                 if (isof || isin) {
                     advance(L); node *fo=mknode(isof?N_FOROF:N_FORIN); fo->str=intern(v.s,v.len); fo->slen=v.len;
                     fo->a=parse_expr(L); expect_punc(L,")"); fo->b=parse_stmt(L); g_depth--; return fo; }
@@ -1209,6 +1210,10 @@ static val eval_expr_inner(node *n, env *e) {
                 case '%': return NUM(y?x%y:0);
                 case '<': return BOOLV(x<y); case '>': return BOOLV(x>y);
                 case 'l': return BOOLV(x<=y); case 'g': return BOOLV(x>=y);
+                case 'I':   /* `in`: own-property test on objects, valid-index test on arrays */
+                    if (b.t==V_OBJ && b.o) { val tmp; return BOOLV(obj_get(b.o, val_to_str(a), &tmp)); }
+                    if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
+                    return BOOLV(0);
                 case '&': return NUM(x&y); case '|': return NUM(x|y);
                 case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
                 case '=': {
