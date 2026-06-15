@@ -120,5 +120,9 @@ imgtest:
 x509test:
 	@tests/run-x509-tests.sh
 
+# Run every host-side regression/fuzz suite (JS engine + image decoders + X.509).
+test: jstest imgtest x509test
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test)"
+
 clean:
 	rm -rf $(BUILD)
