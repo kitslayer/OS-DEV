@@ -91,7 +91,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc]\n");
+            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc] tr\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> crypt base64\n");
@@ -260,6 +260,32 @@ int main(void) {
                     lns[j+1] = key;
                 }
                 for (int i = 0; i < nl; i++) { print(lns[i]); print("\n"); }
+            }
+        } else if (startswith(line, "tr ")) {              /* tr -d CHARS FILE (delete) | tr OLD NEW FILE (replace one char) */
+            static char buf[2048];
+            const char *p = line + 3; while (*p == ' ') p++;
+            if (p[0] == '-' && p[1] == 'd' && p[2] == ' ') {
+                p += 3; while (*p == ' ') p++;
+                char del[16]; int dn = 0;
+                while (*p && *p != ' ' && dn < 15) del[dn++] = *p++;
+                while (*p == ' ') p++;
+                long n = sys_readfile(p, buf, sizeof(buf) - 1);
+                if (n < 0) { print("tr: no such file: "); print(p); print("\n"); }
+                else {
+                    long oi = 0;
+                    for (long i = 0; i < n; i++) {
+                        int drop = 0;
+                        for (int j = 0; j < dn; j++) if (buf[i] == del[j]) { drop = 1; break; }
+                        if (!drop) buf[oi++] = buf[i];          /* compact in place (oi <= i) */
+                    }
+                    buf[oi] = 0; print(buf);
+                }
+            } else {
+                char oldc = *p; if (oldc) p++; while (*p == ' ') p++;
+                char newc = *p; if (newc) p++; while (*p == ' ') p++;
+                long n = sys_readfile(p, buf, sizeof(buf) - 1);
+                if (n < 0 || !oldc || !newc) { print("usage: tr OLD NEW FILE  |  tr -d CHARS FILE\n"); }
+                else { buf[n] = 0; for (long i = 0; i < n; i++) if (buf[i] == oldc) buf[i] = newc; print(buf); }
             }
         } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE : keep a 1-based char range of each line */
             static char buf[2048];
