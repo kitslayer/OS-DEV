@@ -93,7 +93,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal date beep morse<text> factor<n> roll<NdM>\n");
+            print("misc:   echo cal date beep morse<text> factor<n> roll<NdM> seq<n>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -286,6 +286,16 @@ int main(void) {
                 int total = 0; char nb[12]; print(" ");
                 for (int i = 0; i < n; i++) { int r = (int)(shroll() % (unsigned)sides) + 1; total += r; itoa_simple(r, nb); print(nb); print(" "); }
                 if (n > 1) { print(" total "); itoa_simple(total, nb); print(nb); }
+                print("\n");
+            }
+        } else if (startswith(line, "seq ")) {
+            const char *q = line + 4; while (*q == ' ') q++;
+            int m = 0; while (*q >= '0' && *q <= '9' && m < 100000) { m = m * 10 + (*q - '0'); q++; }
+            if (m < 1) print("usage: seq <n>  (prints 1..n)\n");
+            else {
+                if (m > 1000) m = 1000;                /* cap the output */
+                char nb[12]; print(" ");
+                for (int i = 1; i <= m; i++) { itoa_simple(i, nb); print(nb); print(" "); }
                 print("\n");
             }
         } else if (streq(line, "todo") || startswith(line, "todo ")) {
