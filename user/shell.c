@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N> rot13<text> fizzbuzz<N>\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b> primes<N> rot13<text> fizzbuzz<N> dec<0x..>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -924,6 +924,25 @@ int main(void) {
                 }
                 print("\n");
             }
+        } else if (startswith(line, "dec ")) {            /* dec 0x.. / 0b.. / 0o.. / decimal -> decimal value */
+            const char *p = line + 4; while (*p == ' ') p++;
+            int base = 10;
+            if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { base = 16; p += 2; }
+            else if (p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) { base = 2; p += 2; }
+            else if (p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) { base = 8; p += 2; }
+            unsigned long v = 0; int any = 0;
+            while (*p) {
+                char c = *p; int d;
+                if (c >= '0' && c <= '9') d = c - '0';
+                else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+                else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+                else break;
+                if (d >= base) break;
+                if (v > 1000000000000000000UL) break;
+                v = v * (unsigned)base + (unsigned)d; any = 1; p++;
+            }
+            if (!any) print("usage: dec <0x.. | 0b.. | 0o.. | decimal>\n");
+            else { print("  "); printl((long)v); print("\n"); }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
