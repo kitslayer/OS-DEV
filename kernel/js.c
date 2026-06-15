@@ -209,7 +209,7 @@ static token lex_next_raw(lexer *L) {
     }
     /* punctuation / multi-char operators */
     static const char *ops[] = { "===","!==","<<=",">>=","...","**=","**","==","!=","<=",">=",
-        "||=","&&=","?\?=","&&","||","??","?.","++","--","+=","-=","*=","/=","%=","&=","|=","^=","<<",">>","=>",0 };
+        "||=","&&=","?\?=","&&","||","??","?.","++","--","+=","-=","*=","/=","%=","&=","|=","^=","<<",">>>",">>","=>",0 };
     for (int i=0; ops[i]; i++) { int ol=(int)strlen(ops[i]); if (L->pos+ol<=L->len && memcmp(ops[i],s+L->pos,ol)==0) { t.type=T_PUNC; t.s=s+L->pos; t.len=ol; L->pos+=ol; return t; } }
     t.type=T_PUNC; t.s=s+L->pos; t.len=1; L->pos++; return t;
 }
@@ -549,6 +549,7 @@ static int bin_prec(token t, int *code) {
     if (tok_is(t,"**")) { *code='P'; return 12; }   /* exponentiation: tighter than * / %, right-associative */
     if (tok_is(t,"*")||tok_is(t,"/")||tok_is(t,"%")) { *code=t.s[0]; return 11; }
     if (tok_is(t,"+")||tok_is(t,"-")) { *code=t.s[0]; return 10; }
+    if (tok_is(t,">>>")) { *code='U'; return 9; }   /* unsigned right shift (M269) */
     if (tok_is(t,"<<")||tok_is(t,">>")) { *code=(t.s[0]=='<')?'L':'R'; return 9; }
     if (tok_is(t,"<")||tok_is(t,">")) { *code=t.s[0]; return 8; }
     if (tok_is(t,"<=")) { *code='l'; return 8; } if (tok_is(t,">=")) { *code='g'; return 8; }
@@ -1431,6 +1432,7 @@ static val eval_expr_inner(node *n, env *e) {
                     return BOOLV(0);
                 case '&': return NUM(x&y); case '|': return NUM(x|y); case '^': return NUM(x^y);
                 case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
+                case 'U': return NUM((int64_t)((uint32_t)x >> (y&31)));   /* >>> unsigned (32-bit, JS semantics): -1>>>0 = 4294967295 (M269) */
                 case '=': {
                     if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)==0);
                     if (a.t!=b.t && !((a.t==V_NUM||a.t==V_BOOL)&&(b.t==V_NUM||b.t==V_BOOL))) return BOOLV(0);
