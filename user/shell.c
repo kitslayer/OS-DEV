@@ -118,7 +118,7 @@ int main(void) {
             const char *p = line + 5;
             while (*p == ' ') p++;
             int cnt = 20;                                  /* default; -N sets the line count */
-            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9') cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
+            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
             const char *cq = p; int fc = 0;                /* count files -> name headers only if >1 */
             while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
             int any = 0;
@@ -162,7 +162,7 @@ int main(void) {
             const char *p = line + 5;
             while (*p == ' ') p++;
             int cnt = 20;                                  /* default; -N sets the line count */
-            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9') cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
+            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
             const char *cq = p; int fc = 0;
             while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
             int any = 0;
@@ -191,8 +191,8 @@ int main(void) {
             if (n < 0) { print("tac: no such file: "); print(line + 4); print("\n"); }
             else {
                 buf[n] = 0;
-                int starts[256], ns = 0; starts[ns++] = 0;
-                for (long i = 0; i < n; i++) if (buf[i] == '\n' && ns < 256) starts[ns++] = (int)(i + 1);
+                static int starts[1024]; int ns = 0; starts[ns++] = 0;   /* 1024 >= max lines in a 2047-byte buffer */
+                for (long i = 0; i < n; i++) if (buf[i] == '\n' && ns < 1024) starts[ns++] = (int)(i + 1);
                 for (int k = ns - 1; k >= 0; k--) {
                     int s = starts[k]; if (s >= (int)n) continue;     /* skip empty trailing line */
                     int e = s; while (e < (int)n && buf[e] != '\n') e++;
