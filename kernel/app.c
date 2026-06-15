@@ -71,7 +71,8 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             editor_elf_start[], g2048_elf_start[], life_elf_start[], tetris_elf_start[],
             breakout_elf_start[], mines_elf_start[], sudoku_elf_start[], calendar_elf_start[],
             mandel_elf_start[], piano_elf_start[], maze_elf_start[], adv_elf_start[],
-            matrix_elf_start[], paint_elf_start[], hangman_elf_start[], jukebox_elf_start[];
+            matrix_elf_start[], paint_elf_start[], hangman_elf_start[], jukebox_elf_start[],
+            ttt_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -93,6 +94,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "paint",  paint_elf_start,  "Paint" },
     { "hangman", hangman_elf_start, "Hangman" },
     { "jukebox", jukebox_elf_start, "Jukebox" },
+    { "ttt",    ttt_elf_start,    "Tic-Tac-Toe" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
