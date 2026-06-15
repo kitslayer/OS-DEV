@@ -94,7 +94,7 @@ int main(void) {
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
             print("misc:   echo cal date beep morse<text> factor<n> roll<NdM>\n");
-            print("        mem ps df history clear reboot exit\n");
+            print("        todo[ add T|done N] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -281,6 +281,51 @@ int main(void) {
                 for (int i = 0; i < n; i++) { int r = (int)(shroll() % (unsigned)sides) + 1; total += r; itoa_simple(r, nb); print(nb); print(" "); }
                 if (n > 1) { print(" total "); itoa_simple(total, nb); print(nb); }
                 print("\n");
+            }
+        } else if (streq(line, "todo") || startswith(line, "todo ")) {
+            static char buf[2048];
+            long n = sys_readfile("TODO.TXT", buf, sizeof(buf) - 1);
+            if (n < 0) n = 0;
+            buf[n] = 0;
+            if (startswith(line, "todo add ")) {                  /* append a new item */
+                const char *t = line + 9; while (*t == ' ') t++;
+                if (!*t) print("usage: todo add <text>\n");
+                else {
+                    int p = (int)n;
+                    const char *pre = "[ ] ";
+                    for (int i = 0; pre[i] && p < (int)sizeof(buf) - 2; i++) buf[p++] = pre[i];
+                    for (; *t && p < (int)sizeof(buf) - 2; t++) buf[p++] = *t;
+                    buf[p++] = '\n'; buf[p] = 0;
+                    sys_writefile("TODO.TXT", buf, (unsigned long)p);
+                    print("added.\n");
+                }
+            } else if (startswith(line, "todo done ")) {          /* toggle item N's checkbox */
+                int target = 0; const char *d = line + 10; while (*d == ' ') d++;
+                while (*d >= '0' && *d <= '9') target = target * 10 + (*d++ - '0');
+                int item = 0, found = 0;
+                for (int i = 0; i < (int)n; ) {
+                    int ls = i; while (i < (int)n && buf[i] != '\n') i++;
+                    if (++item == target && i - ls >= 3 && buf[ls] == '[' && buf[ls + 2] == ']') {
+                        buf[ls + 1] = (buf[ls + 1] == 'x') ? ' ' : 'x';
+                        found = 1;
+                    }
+                    if (i < (int)n) i++;
+                }
+                if (found) { sys_writefile("TODO.TXT", buf, (unsigned long)n); print("toggled.\n"); }
+                else print("todo: no such item\n");
+            } else {                                              /* list */
+                if (n == 0) print("  (empty; add with: todo add <text>)\n");
+                else {
+                    int item = 0;
+                    for (int i = 0; i < (int)n; ) {
+                        int ls = i; while (i < (int)n && buf[i] != '\n') i++;
+                        char save = buf[i]; buf[i] = 0;
+                        char num[8]; itoa_simple(++item, num);
+                        print("  "); print(num); print(". "); print(buf + ls); print("\n");
+                        buf[i] = save;
+                        if (i < (int)n) i++;
+                    }
+                }
             }
         } else if (streq(line, "ifconfig") || streq(line, "netinfo")) {
             char info[128];
