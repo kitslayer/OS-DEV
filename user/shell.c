@@ -17,6 +17,16 @@ static void itoa_simple(int v, char *out) {
     while (i > 0) out[j++] = tmp[--i];
     out[j] = '\0';
 }
+static void printl(long v) {              /* print a (possibly large) integer */
+    char t[24]; int i = 0;
+    unsigned long u = v < 0 ? -(unsigned long)v : (unsigned long)v;
+    if (v < 0) print("-");
+    if (!u) t[i++] = '0';
+    while (u) { t[i++] = (char)('0' + u % 10); u /= 10; }
+    char o[24]; int j = 0;
+    while (i) o[j++] = t[--i];
+    o[j] = '\0'; print(o);
+}
 
 /* Print a month calendar for the current date (from the RTC). */
 static void cmd_cal(void) {
@@ -71,7 +81,8 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal date beep morse<text> mem ps df history clear reboot exit\n");
+            print("misc:   echo cal date beep morse<text> factor<n> mem ps df history\n");
+            print("        clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -206,6 +217,20 @@ int main(void) {
                 sys_sleep(150);                             /* inter-character gap */
             }
             print("\n");
+        } else if (startswith(line, "factor ")) {
+            const char *q = line + 7; while (*q == ' ') q++;
+            long n = 0; int any = 0;
+            while (*q >= '0' && *q <= '9' && n < 1000000000000000000L) { n = n * 10 + (*q - '0'); q++; any = 1; }
+            if (!any || n < 2) { print("usage: factor <n>  (n >= 2)\n"); }
+            else {
+                printl(n); print(":");
+                long m = n;
+                while (m % 2 == 0) { print(" 2"); m /= 2; }
+                for (long d = 3; d <= 3000000L && d <= m / d; d += 2)   /* trial division to ~sqrt, capped */
+                    while (m % d == 0) { print(" "); printl(d); m /= d; }
+                if (m > 1) { print(" "); printl(m); }                  /* remaining prime (or a large factor) */
+                print("\n");
+            }
         } else if (streq(line, "ifconfig") || streq(line, "netinfo")) {
             char info[128];
             if (sys_netinfo(info, sizeof(info)) > 0) print(info);
