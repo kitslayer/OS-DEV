@@ -222,5 +222,32 @@ axes too, so untrusted page scripts can't crash it on any of them:
 So across **features** (~60 verified, 2 bugs fixed), **stack depth**, **heap**,
 **malformed input**, and **catastrophic regex**, the from-scratch engine is
 correct where it should be and fails gracefully everywhere else — the full
-robustness profile for the untrusted-input crown jewel. Eighteen reviews this
-session, all SHIP.
+robustness profile for the untrusted-input crown jewel.
+
+## M425–426: getters fire in value-iteration too (the targeted-vs-hot-path lesson)
+
+Probing kept paying: getters/setters work at eval read-sites (`o.x`, `obj[k]`,
+class accessors — M261), but **value-iteration didn't fire them**, so
+`JSON.stringify({get x(){return 7}})` gave `{"x":{}}` (the accessor serialized as
+an empty object) and `Object.values`/`entries` returned `[object Object]`. The
+root cause is the documented design choice: getters fire at the *evaluator's*
+member sites, **not** in `obj_get` (the hot path that every property read goes
+through — firing there was deferred to avoid the cost/complexity on the common
+read).
+
+The fix is the **targeted** pattern, not the global one: at each value-iteration
+site that needs the fired value (the `json_val` object loop, `Object.values`,
+`Object.entries`), check `is_accessor(v)` and, if so, `fire_getter(v, obj)` with
+`this`=the holding object — reusing the *same* eval-site helpers. This corrects
+the common serialize/iterate-computed-props cases (verified to any nesting depth,
+and through `Object.assign`+JSON) **without** touching the `obj_get` hot path
+that the global change would. `Object.keys` (keys only) and spread (copies the
+accessor, which then fires at the eval site) were already correct.
+
+**Lesson:** when a behavior is deferred "in the hot path," the common *symptoms*
+can often be fixed at the specific call sites that need it, reusing the existing
+machinery, far more safely than the global change. Each fix was verified live +
+ASan-clean via `make jstest` (the suite's own getter case, long marked a "JSON
+limitation," is now correct); the JSON one got a full review (#20, SHIP) and the
+others reuse its exact pattern. Twenty reviews this session, all SHIP (bar the
+two that *found* the M422/M423 kernel bugs).
