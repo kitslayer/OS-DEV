@@ -114,14 +114,25 @@ int main(void) {
             if (!any) print("usage: cat <file>...\n");
         } else if (startswith(line, "head ")) {
             char buf[2048];
-            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
-            if (n < 0) { print("head: no such file: "); print(line + 5); print("\n"); }
-            else {
+            const char *p = line + 5;
+            const char *cq = p; int fc = 0;                /* count files -> name headers only if >1 */
+            while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
+            int any = 0;
+            while (*p) {                                   /* first 20 lines of each space-separated file */
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0;
+                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                name[j] = '\0'; any = 1;
+                long n = sys_readfile(name, buf, sizeof(buf) - 1);
+                if (n < 0) { print("head: no such file: "); print(name); print("\n"); continue; }
+                if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 int i = 0, lines = 0;
-                for (; i < n && lines < 20; i++) if (buf[i] == '\n') lines++;   /* first 20 lines */
+                for (; i < n && lines < 20; i++) if (buf[i] == '\n') lines++;
                 buf[i] = '\0'; print(buf);
                 if (i < n) print("...\n");
             }
+            if (!any) print("usage: head <file>...\n");
         } else if (startswith(line, "nl ")) {
             static char buf[8192];
             long n = sys_readfile(line + 3, buf, sizeof(buf) - 1);
@@ -144,9 +155,19 @@ int main(void) {
             }
         } else if (startswith(line, "tail ")) {
             char buf[2048];
-            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
-            if (n < 0) { print("tail: no such file: "); print(line + 5); print("\n"); }
-            else {
+            const char *p = line + 5;
+            const char *cq = p; int fc = 0;
+            while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
+            int any = 0;
+            while (*p) {                                   /* last 20 lines of each space-separated file */
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0;
+                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                name[j] = '\0'; any = 1;
+                long n = sys_readfile(name, buf, sizeof(buf) - 1);
+                if (n < 0) { print("tail: no such file: "); print(name); print("\n"); continue; }
+                if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 buf[n] = '\0';
                 int total = 0;
                 for (int i = 0; i < n; i++) if (buf[i] == '\n') total++;
@@ -156,6 +177,7 @@ int main(void) {
                 while (i < n && sk < skip) { if (buf[i++] == '\n') sk++; }
                 print(buf + i);
             }
+            if (!any) print("usage: tail <file>...\n");
         } else if (startswith(line, "sort ")) {
             static char buf[2048];
             long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
