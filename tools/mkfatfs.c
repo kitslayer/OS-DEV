@@ -347,7 +347,7 @@ static const struct {
         "document.getElementById('out').textContent = s;\n"
         "console.log('tagNames: ' + s);\n"
         "</script>" },
-    { "STYLE   HTM", "<h1>Inline CSS</h1>"
+    { "STYLE   HTM", "<title>Inline CSS</title><h1>Inline CSS</h1>"
         "<p>A small subset of CSS &mdash; the <code>color</code>, <code>font-weight</code> and <code>font-style</code> properties in an inline <code>style=\"...\"</code> attribute &mdash; now style text:</p>"
         "<p style=\"color: red\">This paragraph is red (a named colour).</p>"
         "<p style=\"color: #008000\">This one is green (a #hex colour).</p>"
@@ -362,7 +362,7 @@ static const struct {
         "<p style=\"color: crimson\">Named colours expanded too: <span style=\"color:indigo\">indigo</span>, <span style=\"color:teal\">teal</span>, <span style=\"color:steelblue\">steelblue</span>, <span style=\"color:darkgreen\">darkgreen</span>.</p>"
         "<p>An <u>underlined</u> word (the <code>&lt;u&gt;</code> tag), and <span style=\"text-decoration: underline\">text-decoration: underline</span> set inline.</p>"
         "<p style=\"text-decoration: underline; color: #cc0000; font-weight: bold\">Underlined, red, <i>and</i> bold &mdash; all three compose on one element.</p>" },
-    { "CSS     HTM", "<style>\n"
+    { "CSS     HTM", "<title>CSS style blocks</title><style>\n"
         "  h2 { color: #800080 }\n"
         "  p { color: #333333 }\n"
         "  .warn { color: red; font-weight: bold }\n"
@@ -377,7 +377,7 @@ static const struct {
         "<p class=\"warn\">This is a bold red warning &mdash; <code>.warn</code> wins over <code>p</code> (later rule).</p>"
         "<p class=\"b\">This whole paragraph is bold <i>and</i> gray &mdash; the <code>.b</code> rule (bold) cascades with the <code>p</code> rule (gray) on one element.</p>"
         "<p style=\"color: #0000cc\">Inline <code>style=\"color:blue\"</code> overrides the <code>p</code> rule &mdash; this line is blue.</p>" },
-    { "NEST    HTM", "<style>\n"
+    { "NEST    HTM", "<title>Nested style scopes</title><style>\n"
         "  p { color: #333333 }\n"
         "  .red { color: #cc0000 }\n"
         "</style>"
