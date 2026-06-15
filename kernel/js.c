@@ -2899,7 +2899,10 @@ int js_fire_event(const char *id, const char *type, char *out, int outmax, void 
         char key[160]; hkey(key, type, id);
         val fn;
         if (obj_get(hv->o, key, &fn) && (fn.t==V_FUN || fn.t==V_NATIVE || (fn.t==V_OBJ && fn.o && fn.o->kind==V_BOUND))) {
-            call_function_this(fn, UND(), 0, 0);   /* invoke in the persistent env (mode-2 semantics: no arena reset) */
+            val target = element_handle(id);                    /* the element the event fired on */
+            obj *eo = new_obj(V_OBJ); val ev = UND();           /* a minimal event: { type, target } */
+            if (eo) { obj_set(eo, "type", STRV(intern(type,(int)strlen(type)))); obj_set(eo, "target", target); ev = obj_val(eo); }
+            call_function_this(fn, target, &ev, 1);   /* this = the element, arg[0] = the event; in the persistent env (no arena reset) */
             ran = 1;
         }
     }
