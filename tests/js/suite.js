@@ -235,4 +235,5 @@ print(({}).toString(), [1,2,3].toString(), "s".toString(), (9).toString(2), type
 var _es="";for(var [_i,_x] of ["p","q"].entries())_es+=_i+_x; print("hello".substr(1,3), ["a","b","c"].keys().join(","), [10,20].values().join(","), _es);  // ell 0,1,2 10,20 0p1q (substr + array iterators, M276)
 var _rf={a:1}; Reflect.set(_rf,"b",2); print(Reflect.get(_rf,"a"), Reflect.has(_rf,"b"), Reflect.ownKeys(_rf).join(","), Reflect.deleteProperty(_rf,"a"), Reflect.has(_rf,"a"));  // 1 true a,b true false (Reflect, M277)
 print((1234567).toLocaleString(), "a".localeCompare("b"), "abc".codePointAt(0), String.fromCodePoint(65,66));  // 1,234,567 -1 97 AB (toLocaleString grouping + localeCompare + codePointAt/fromCodePoint, M278)
+var _pe={a:1}; var _gd=Object.getOwnPropertyDescriptors({x:5}); print(_pe.propertyIsEnumerable("a"), _pe.propertyIsEnumerable("z"), [1,2,3].toLocaleString(), _gd.x.value);  // true false 1,2,3 5 (propertyIsEnumerable + array toLocaleString + getOwnPropertyDescriptors, M279)
 print("-- done --");

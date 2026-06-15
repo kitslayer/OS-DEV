@@ -1570,6 +1570,7 @@ static val eval_expr_inner(node *n, env *e) {
                 }
                 if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(is_accessor(fn)) fn=fire_getter(fn,recv); if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); }
                     if(strcmp(m,"hasOwnProperty")==0){ val tmp; return BOOLV(na>0 && obj_keyed(recv.o) && obj_get(recv.o, val_to_str(args[0]), &tmp)); }   /* built-in own-property test (M274) */
+                    if(strcmp(m,"propertyIsEnumerable")==0){ val tmp; return BOOLV(na>0 && obj_keyed(recv.o) && obj_get(recv.o, val_to_str(args[0]), &tmp)); }   /* all own props are enumerable here (M279) */
                     if(recv.o->proto && proto_lookup(recv.o->proto,m,recv,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }   /* inherited method, this=recv (M263) */
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();
@@ -1974,6 +1975,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         for(int i=start+del;i<o->n;i++) arr_push_val(r,o->vals[i]); /* tail */
         val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"hasOwnProperty")==0){ const char *k=nargs?val_to_str(args[0]):""; if(strcmp(k,"length")==0) return BOOLV(1); int i=nargs?(int)to_num(args[0]):-1; return BOOLV(i>=0 && i<o->n); }   /* arr.hasOwnProperty(index|"length") (M274) */
+    if (strcmp(name,"toLocaleString")==0) return STRV(val_to_str(recv));   /* = join, like toString (M279) */
     if (strcmp(name,"keys")==0){ obj*r=new_obj(V_ARR); if(!r)return UND(); for(int i=0;i<o->n && !g_oom;i++) arr_push_val(r,NUM(i)); val v=UND();v.t=V_ARR;v.o=r;return v; }   /* eager-array iterators (work with for-of) (M276) */
     if (strcmp(name,"values")==0){ obj*r=new_obj(V_ARR); if(!r)return UND(); for(int i=0;i<o->n && !g_oom;i++) arr_push_val(r,o->vals[i]); val v=UND();v.t=V_ARR;v.o=r;return v; }
     if (strcmp(name,"entries")==0){ obj*r=new_obj(V_ARR); if(!r)return UND(); for(int i=0;i<o->n && !g_oom;i++){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,NUM(i)); arr_push_val(p,o->vals[i]); val pv=UND();pv.t=V_ARR;pv.o=p; arr_push_val(r,pv); } val v=UND();v.t=V_ARR;v.o=r;return v; }
@@ -2396,6 +2398,11 @@ static val nat_obj_getOwnPropertyDescriptor(val *a, int n){
     obj_set(d,"enumerable",BOOLV(1)); obj_set(d,"configurable",BOOLV(1));
     return obj_val(d);
 }
+static val nat_obj_getOwnPropertyDescriptors(val *a, int n){   /* {key: descriptor} for every own key (reuses the singular form) (M279) */
+    obj *r=new_obj(V_OBJ); if(!r){g_oom=1;return UND();}
+    if (n>=1 && a[0].t==V_OBJ && obj_keyed(a[0].o)) { obj*o=a[0].o; for(int i=0;i<o->n && !g_oom;i++){ val da[2]={ a[0], STRV(o->keys[i]) }; obj_set(r, o->keys[i], nat_obj_getOwnPropertyDescriptor(da,2)); } }
+    return obj_val(r);
+}
 /* Object.defineProperties(obj, descriptors): defineProperty for each own key of the descriptors
  * object (also backs Object.create's 2nd arg). Reuses the reviewed nat_obj_defineProperty. (M265) */
 static val nat_obj_defineProperties(val *a, int n){
@@ -2535,7 +2542,7 @@ static void install_globals(env *g) {
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"hasOwn",nat_obj_hasOwn); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"defineProperties",nat_obj_defineProperties); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"hasOwn",nat_obj_hasOwn); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"defineProperties",nat_obj_defineProperties); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"getOwnPropertyDescriptors",nat_obj_getOwnPropertyDescriptors); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); env_define(g,"Object",obj_val(objc));
     { obj *refl=new_obj(V_OBJ); if(refl){ def_native(refl,"get",nat_reflect_get); def_native(refl,"has",nat_reflect_has); def_native(refl,"set",nat_reflect_set); def_native(refl,"deleteProperty",nat_reflect_deleteProperty); def_native(refl,"ownKeys",nat_reflect_ownKeys); env_define(g,"Reflect",obj_val(refl)); } }   /* Reflect metaprogramming namespace (M277) */
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
