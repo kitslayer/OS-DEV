@@ -356,6 +356,7 @@ int main(void) {
             char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0;
             while (*p == ' ') p++;
             while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insensitive), -n (line #s), combinable as -in */
+                if (p[1] == '-' && (p[2] == ' ' || p[2] == 0)) { p += 2; while (*p == ' ') p++; break; }  /* "--": end of flags (pattern may then start with '-') */
                 int t, valid = 1;
                 for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a pattern starting with '-') */
