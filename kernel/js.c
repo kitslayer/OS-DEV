@@ -208,7 +208,7 @@ static token lex_next_raw(lexer *L) {
         }
     }
     /* punctuation / multi-char operators */
-    static const char *ops[] = { "===","!==","<<=",">>=","...","**=","**","==","!=","<=",">=",
+    static const char *ops[] = { "===","!==","<<=",">>>=",">>=","...","**=","**","==","!=","<=",">=",
         "||=","&&=","?\?=","&&","||","??","?.","++","--","+=","-=","*=","/=","%=","&=","|=","^=","<<",">>>",">>","=>",0 };
     for (int i=0; ops[i]; i++) { int ol=(int)strlen(ops[i]); if (L->pos+ol<=L->len && memcmp(ops[i],s+L->pos,ol)==0) { t.type=T_PUNC; t.s=s+L->pos; t.len=ol; L->pos+=ol; return t; } }
     t.type=T_PUNC; t.s=s+L->pos; t.len=1; L->pos++; return t;
@@ -627,7 +627,7 @@ static node *parse_assign(lexer *L) {
     node *left = parse_cond(L);
     token t = peek(L);
     if (t.type==T_PUNC && (tok_is(t,"=")||tok_is(t,"+=")||tok_is(t,"-=")||tok_is(t,"*=")||tok_is(t,"/=")||tok_is(t,"%=")||
-                           tok_is(t,"&=")||tok_is(t,"|=")||tok_is(t,"^=")||tok_is(t,"<<=")||tok_is(t,">>=")||tok_is(t,"**=")||
+                           tok_is(t,"&=")||tok_is(t,"|=")||tok_is(t,"^=")||tok_is(t,"<<=")||tok_is(t,">>>=")||tok_is(t,">>=")||tok_is(t,"**=")||
                            tok_is(t,"||=")||tok_is(t,"&&=")||tok_is(t,"?\?="))) {
         advance(L); node *n=mknode(N_ASSIGN);
         /* explicit op codes (reuse the binary-operator codes): t.s[0] can't tell
@@ -635,7 +635,7 @@ static node *parse_assign(lexer *L) {
          * ||= &&= ??= get lowercase o/a/n -- they short-circuit (handled separately). */
         n->op = tok_is(t,"+=")?'+': tok_is(t,"-=")?'-': tok_is(t,"*=")?'*': tok_is(t,"/=")?'/': tok_is(t,"%=")?'%':
                 tok_is(t,"&=")?'&': tok_is(t,"|=")?'|': tok_is(t,"^=")?'^':
-                tok_is(t,"<<=")?'L': tok_is(t,">>=")?'R': tok_is(t,"**=")?'P':
+                tok_is(t,"<<=")?'L': tok_is(t,">>>=")?'U': tok_is(t,">>=")?'R': tok_is(t,"**=")?'P':
                 tok_is(t,"||=")?'o': tok_is(t,"&&=")?'a': tok_is(t,"?\?=")?'n': '=';
         n->a=left; n->b=parse_assign(L); g_depth--; return n;
     }
@@ -1462,7 +1462,7 @@ static val eval_expr_inner(node *n, env *e) {
                     if (n->op=='+'&&(cur.t==V_STR||rhs.t==V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
                     else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): n->op=='%'?(y?x%y:0):
                                    n->op=='&'?x&y: n->op=='|'?x|y: n->op=='^'?x^y:
-                                   n->op=='L'?(int64_t)((uint64_t)x<<(y&63)): n->op=='R'?(x>>(y&63)):
+                                   n->op=='L'?(int64_t)((uint64_t)x<<(y&63)): n->op=='R'?(x>>(y&63)): n->op=='U'?(int64_t)((uint32_t)x>>(y&31)):
                                    n->op=='P'?i_pow(x,y): 0); }
             }
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
