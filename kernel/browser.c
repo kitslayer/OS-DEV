@@ -1021,6 +1021,22 @@ static int browser_dom_get(const char *id, char *out, int max, int html) {
 static void browser_dom_set(const char *id, const char *value, int html) {
     browser_t *b = g_ls_b; if (!b) return;
     if (html == 2) { in_set(b, id, value); parse_html(b, b->raw + b->bodyoff, b->bodylen); return; }   /* element.value = … */
+    if (html == 3) {   /* element.remove(): splice the whole <tag id>…</tag> out of b->raw (full-span variant of the set below) */
+        int is, ie; if (!dom_find(b, id, &is, &ie)) return;
+        const char *r = b->raw; int lo = b->bodyoff;
+        int ts = is - 1; while (ts > lo && r[ts] != '<') ts--; if (r[ts] != '<') return;   /* opening '<' */
+        int bodyend = b->bodyoff + b->bodylen;
+        int ce = ie; while (ce < bodyend && r[ce] != '>') ce++; if (ce >= bodyend) return; ce++;   /* past the closing '>' */
+        int delta = -(ce - ts);                                   /* removing [ts, ce) */
+        int active = (g_sw_raw == b->raw);
+        int live_end = (active && g_sw_pos > bodyend) ? g_sw_pos : bodyend;
+        memmove(b->raw + ts, b->raw + ce, live_end - ce);         /* shift the tail down over the removed element */
+        b->bodylen += delta;
+        if (active) { if (g_sw_pos > ce) g_sw_pos += delta; if (g_sw_base > ce) g_sw_base += delta; }   /* keep document.write cursors in sync */
+        b->raw[live_end + delta] = 0;
+        parse_html(b, b->raw + b->bodyoff, b->bodylen);
+        return;
+    }
     static char esc[8192];
     if (!html) {   /* textContent: HTML-escape so the text isn't interpreted as markup (innerHTML inserts raw) */
         int o = 0;

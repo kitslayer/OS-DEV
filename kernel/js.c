@@ -1933,6 +1933,7 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
 static val eval_element_method(val recv, const char *name, val *args, int nargs) {
     obj *el = recv.o;
     const char *id = (el->n > 0 && el->vals[0].t == V_STR) ? el->vals[0].str : "";
+    if (strcmp(name, "remove") == 0) { if (g_dom_set) g_dom_set(id, "", 3); return UND(); }   /* element.remove(): splice the whole element out of the page */
     if (strcmp(name, "getAttribute") == 0) {
         const char *aname = nargs ? val_to_str(args[0]) : "";
         static char ab[2048]; ab[0] = 0;
