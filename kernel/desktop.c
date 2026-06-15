@@ -156,7 +156,7 @@ static void draw_content(const window_t *w) {
     }
     case KIND_FILES: {
         draw_text(bx, by, "FAT32 disk (/) - up/down, Enter opens:", 0x202028);
-        vfs_dirent e[32]; int n = vfs_list(e, 32);
+        static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* static (BSS): ~18KB won't fit the 16KB guard-page-less stack; single-threaded render makes it safe. Browse ALL disk files, not just the first 32 (M421) */
         int rows = (w->h - TITLEBAR_H - 30) / 18;          /* rows that fit in the body */
         if (rows < 1) rows = 1;
         int top = 0;                                       /* scroll so the selection stays visible */
@@ -455,7 +455,7 @@ static void spawn_browser(const char *url) {
 /* Keyboard navigation for the read-only Files window: up/down move the
  * selection, Enter opens the highlighted file in a browser window (file:NAME). */
 static void files_key(window_t *w, int k) {
-    vfs_dirent e[32]; int n = vfs_list(e, 32);
+    static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* match the render cap; static (BSS), safe single-threaded (M421) */
     if (n <= 0) return;
     if (w->fsel >= n) w->fsel = n - 1;
     if (k == 0x11)       { if (w->fsel > 0)     w->fsel--; }   /* up   */
