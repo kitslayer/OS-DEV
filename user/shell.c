@@ -94,7 +94,7 @@ int main(void) {
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
             print("misc:   echo cal date beep morse<text> factor<n> roll<NdM>\n");
-            print("        todo[ add T|done N] mem ps df history clear reboot exit\n");
+            print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -313,6 +313,19 @@ int main(void) {
                 }
                 if (found) { sys_writefile("TODO.TXT", buf, (unsigned long)n); print("toggled.\n"); }
                 else print("todo: no such item\n");
+            } else if (streq(line, "todo clear")) {               /* drop completed ([x]) items */
+                int w = 0;
+                for (int i = 0; i < (int)n; ) {
+                    int ls = i; while (i < (int)n && buf[i] != '\n') i++;
+                    int le = i; if (i < (int)n) i++;
+                    if (!(le - ls >= 3 && buf[ls] == '[' && buf[ls + 1] == 'x' && buf[ls + 2] == ']')) {
+                        for (int j = ls; j < le; j++) buf[w++] = buf[j];   /* compact in place (w <= ls) */
+                        buf[w++] = '\n';
+                    }
+                }
+                buf[w] = 0;
+                sys_writefile("TODO.TXT", buf, (unsigned long)w);
+                print("cleared completed items.\n");
             } else {                                              /* list */
                 if (n == 0) print("  (empty; add with: todo add <text>)\n");
                 else {
