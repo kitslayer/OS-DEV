@@ -1443,7 +1443,7 @@ static val eval_expr_inner(node *n, env *e) {
         }
         case N_BINARY: {
             val a=eval_expr(n->a,e), b=eval_expr(n->b,e);
-            if (n->op=='+') { if (a.t==V_STR||b.t==V_STR) { const char*sa=val_to_str(a),*sb=val_to_str(b); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(!s) return UND(); memcpy(s,sa,la); memcpy(s+la,sb,lb); s[la+lb]=0; return STRV(s); } return NUM(to_num(a)+to_num(b)); }
+            if (n->op=='+') { if (a.t>=V_STR||b.t>=V_STR) { const char*sa=val_to_str(a),*sb=val_to_str(b);   /* concat if either is a string OR an object (V_STR..V_NATIVE are all >= V_STR): ToPrimitive stringifies objects (M420) */ int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(!s) return UND(); memcpy(s,sa,la); memcpy(s+la,sb,lb); s[la+lb]=0; return STRV(s); } return NUM(to_num(a)+to_num(b)); }
             int64_t x=to_num(a), y=to_num(b);
             switch (n->op) {
                 case '-': return NUM(x-y);
@@ -1488,7 +1488,7 @@ static val eval_expr_inner(node *n, env *e) {
             } else {
                 rhs = eval_expr(n->b,e);
                 if (n->op!='=') { val cur=eval_expr(t,e); int64_t x=to_num(cur),y=to_num(rhs);
-                    if (n->op=='+'&&(cur.t==V_STR||rhs.t==V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
+                    if (n->op=='+'&&(cur.t>=V_STR||rhs.t>=V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs);   /* += concat matches binary + (M420) */ int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
                     else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): n->op=='%'?(y?x%y:0):
                                    n->op=='&'?x&y: n->op=='|'?x|y: n->op=='^'?x^y:
                                    n->op=='L'?(int64_t)((uint64_t)x<<(y&63)): n->op=='R'?(x>>(y&63)): n->op=='U'?(int64_t)((uint32_t)x>>(y&31)):
