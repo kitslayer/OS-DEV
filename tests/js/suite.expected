@@ -134,6 +134,11 @@ ab 9
 -- num-literals --
 10 15 1000 255 500 255
 40 3 0
+-- stdlib --
+0,0,0,0 1,9,9,4
+5 13 10 4
+0,1,2,3
+x,y
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

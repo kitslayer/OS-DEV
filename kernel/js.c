@@ -1646,6 +1646,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"indexOf")==0){ for(int i=0;i<o->n;i++){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if(x.t==V_NUM&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
     if (strcmp(name,"includes")==0){ for(int i=0;i<o->n;i++){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if((x.t==V_NUM||x.t==V_BOOL)&&x.num==args[0].num) return BOOLV(1); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return BOOLV(1);} } return BOOLV(0); }
     if (strcmp(name,"concat")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<o->n;i++) arr_push_val(r,o->vals[i]); for(int a=0;a<nargs;a++){ if(args[a].t==V_ARR&&args[a].o){ for(int i=0;i<args[a].o->n;i++) arr_push_val(r,args[a].o->vals[i]); } else arr_push_val(r,args[a]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"fill")==0){ val fv=nargs>0?args[0]:UND(); int a=nargs>1?(int)to_num(args[1]):0, b=nargs>2?(int)to_num(args[2]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; for(int i=a;i<b;i++) o->vals[i]=fv; return recv; }   /* fill existing slots [start,end) */
     if (strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0, b=nargs>1?(int)to_num(args[1]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=a;i<b;i++) arr_push_val(r,o->vals[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"reverse")==0){ for(int i=0,j=o->n-1;i<j;i++,j--){ val t=o->vals[i]; o->vals[i]=o->vals[j]; o->vals[j]=t; } return recv; }
     if (strcmp(name,"shift")==0){ if(o->n==0) return UND(); val r=o->vals[0]; for(int i=1;i<o->n;i++) o->vals[i-1]=o->vals[i]; o->n--; return r; }
@@ -1895,7 +1896,10 @@ static val nat_abs(val *a, int n){ return NUM(n ? iabs64(to_num(a[0])) : 0); }
 static val nat_max(val *a, int n){ if(!n) return UND(); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v>m)m=v;} return NUM(m); }
 static val nat_min(val *a, int n){ if(!n) return UND(); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v<m)m=v;} return NUM(m); }
 static val nat_ident(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }   /* floor/ceil/round are identity on ints */
-static val nat_sqrt(val *a, int n){ int64_t x=n?to_num(a[0]):0; if(x<1) return NUM(0); int64_t lo=0, hi=(x<2?x:x/2+1); if(hi>3037000499LL) hi=3037000499LL; while(lo<hi){ int64_t mid=lo+(hi-lo+1)/2; if(mid<=x/mid) lo=mid; else hi=mid-1; } return NUM(lo); }
+static int64_t i_sqrt(int64_t x){ if(x<1) return 0; int64_t lo=0, hi=(x<2?x:x/2+1); if(hi>3037000499LL) hi=3037000499LL; while(lo<hi){ int64_t mid=lo+(hi-lo+1)/2; if(mid<=x/mid) lo=mid; else hi=mid-1; } return lo; }
+static val nat_sqrt(val *a, int n){ return NUM(i_sqrt(n?to_num(a[0]):0)); }
+static val nat_hypot(val *a, int n){ int64_t s=0; for(int i=0;i<n;i++){ int64_t v=to_num(a[i]); s+=v*v; } return NUM(i_sqrt(s)); }   /* floor(sqrt(sum of squares)) */
+static val nat_log2(val *a, int n){ int64_t x=n?to_num(a[0]):0; if(x<1) return NUM(0); int64_t r=0; while(x>1){ x>>=1; r++; } return NUM(r); }   /* floor(log2 x) = index of the high bit */
 static val nat_pow(val *a, int n){ int64_t b=n>0?to_num(a[0]):0, e=n>1?to_num(a[1]):0; int64_t r=1; for(int64_t i=0;i<e && i<63;i++) r*=b; return NUM(r); }
 
 /* ---- global functions ---- */
@@ -2043,6 +2047,11 @@ static val nat_array_from(val *a, int n){
     else if (n && a[0].t==V_OBJ && a[0].o && a[0].o->kind==V_SET) for (int i=0;i<a[0].o->n && !g_oom;i++) from_push(r, a[0].o->vals[i], fn, hasfn);   /* Array.from(set) — dedup idiom */
     else if (n && a[0].t==V_OBJ && a[0].o && a[0].o->kind==V_MAP) for (int i=0;i+1<a[0].o->n && !g_oom;i+=2){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,a[0].o->vals[i]); arr_push_val(p,a[0].o->vals[i+1]); val pv=UND();pv.t=V_ARR;pv.o=p; from_push(r, pv, fn, hasfn); }
     else if (n && a[0].t==V_STR) { const char*s=a[0].str; for (int i=0;s[i] && !g_oom;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} from_push(r, STRV(c?c:""), fn, hasfn); } }
+    else if (n && a[0].t==V_OBJ && a[0].o && obj_keyed(a[0].o)) {   /* array-like {length:n}: Array.from({length:3}) -> [undefined x3] (pairs with .fill / a map fn) */
+        val lv; int64_t len = obj_get(a[0].o,"length",&lv) ? to_num(lv) : 0;
+        if (len<0) len=0; if (len>1000000) len=1000000;   /* bound a malicious {length:1e18} */
+        for (int64_t i=0;i<len && !g_oom;i++) from_push(r, UND(), fn, hasfn);
+    }
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
 static val nat_array_of(val *a, int n){ obj *r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<n && !g_oom;i++) arr_push_val(r,a[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -2098,9 +2107,10 @@ static void install_globals(env *g) {
     def_native(math,"abs",nat_abs); def_native(math,"max",nat_max); def_native(math,"min",nat_min);
     def_native(math,"floor",nat_ident); def_native(math,"ceil",nat_ident); def_native(math,"round",nat_ident); def_native(math,"trunc",nat_ident);
     def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow); def_native(math,"sign",nat_sign);
+    def_native(math,"hypot",nat_hypot); def_native(math,"log2",nat_log2);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); env_define(g,"Object",obj_val(objc));
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
