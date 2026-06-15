@@ -112,5 +112,9 @@ test: $(KERNEL) $(DISK)
 jstest:
 	@tests/run-js-tests.sh
 
+# Host-side regression + fuzz test of the image decoders (ASan+UBSan).
+imgtest:
+	@tests/run-img-tests.sh
+
 clean:
 	rm -rf $(BUILD)
