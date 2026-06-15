@@ -2280,7 +2280,7 @@ static val eval_classlist_method(val recv, const char *name, val *args, int narg
     int want;                                            /* 1 = ensure present (add), 0 = ensure absent (remove) */
     if (strcmp(name,"add")==0) want = 1;
     else if (strcmp(name,"remove")==0) want = 0;
-    else if (strcmp(name,"toggle")==0) want = !present;
+    else if (strcmp(name,"toggle")==0) want = (nargs > 1) ? truthy(args[1]) : !present;   /* toggle(name, force): force the state if a 2nd arg is given */
     else { rt_err("no such classList method"); return UND(); }
     if (want != present && tok[0]) {                     /* rebuild + write only when it changes (and the token is non-empty) */
         static char nb[2100]; int o=0;
