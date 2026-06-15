@@ -1150,7 +1150,8 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
         env_define(fe, node_name(pn), pv); }
     if (!def->prefix) {   /* `arguments`: only for non-arrow functions that actually reference it (cached) */
         if (def->num==0) def->num = node_uses_args(def->a) ? 1 : 2;
-        if (def->num==1) { obj *ao=new_obj(V_ARR); if(ao){ for(int i=0;i<nargs && !g_oom;i++) arr_push_val(ao,args[i]); val av=UND(); av.t=V_ARR; av.o=ao; env_define(fe,"arguments",av); } }   /* V_ARR val (obj_val would tag it V_OBJ) */
+        if (def->num==1) { int taken=0; for(int i=0;i<fe->n;i++) if(strcmp(fe->keys[i],"arguments")==0){taken=1;break;}   /* a param named `arguments` wins -- don't clobber it */
+            if(!taken){ obj *ao=new_obj(V_ARR); if(ao){ for(int i=0;i<nargs && !g_oom;i++) arr_push_val(ao,args[i]); val av=UND(); av.t=V_ARR; av.o=ao; env_define(fe,"arguments",av); } } }   /* V_ARR val (obj_val would tag it V_OBJ) */
     }
     comp c = eval_stmt(def->a, fe);
     g_depth--;
