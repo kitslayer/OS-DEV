@@ -409,8 +409,10 @@ static node *parse_primary(lexer *L) {
             advance(L); node *n=mknode(N_OBJECT); n->list=aalloc(sizeof(node*)*64); n->nlist=0;
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,"...")) { advance(L); node *sp=mknode(N_SPREAD); sp->a=parse_assign(L); if(n->list && n->nlist<64) n->list[n->nlist++]=sp; if(peek_punc(L,",")) advance(L); continue; }  /* {...obj} */
-                if (peek_punc(L,"[")) {   /* computed key: {[expr]: value} (pr->b holds the key expression) */
-                    advance(L); node *pr=mknode(N_PROP); pr->b=parse_assign(L); expect_punc(L,"]"); expect_punc(L,":"); pr->a=parse_assign(L);
+                if (peek_punc(L,"[")) {   /* computed key: {[expr]: value} or computed method {[expr](){…}} (pr->b = key expr) */
+                    advance(L); node *pr=mknode(N_PROP); pr->b=parse_assign(L); expect_punc(L,"]");
+                    if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); parse_fn_params(L,fn); fn->a=parse_stmt(L); pr->a=fn; }   /* {[e](){…}} */
+                    else { expect_punc(L,":"); pr->a=parse_assign(L); }                                                       /* {[e]: value} */
                     if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
                     if (peek_punc(L,",")) advance(L); else break;
                     continue;
