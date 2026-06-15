@@ -226,8 +226,16 @@ int main(void) {
             }
         } else if (startswith(line, "sort ")) {
             static char buf[2048];
-            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
-            if (n < 0) { print("sort: no such file: "); print(line + 5); print("\n"); }
+            const char *fp = line + 5; int rev = 0;        /* -r: reverse (descending) */
+            while (*fp == ' ') fp++;
+            while (fp[0] == '-' && fp[1] && fp[1] != ' ') {
+                int t, valid = 1;
+                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'r') valid = 0;
+                if (!valid) break;                          /* not a flag token (e.g. a filename) */
+                rev = 1; fp += t; while (*fp == ' ') fp++;
+            }
+            long n = sys_readfile(fp, buf, sizeof(buf) - 1);
+            if (n < 0) { print("sort: no such file: "); print(fp); print("\n"); }
             else {
                 buf[n] = '\0';
                 char *lns[128]; int nl = 0; char *p = buf;
@@ -241,7 +249,9 @@ int main(void) {
                     while (j >= 0) {
                         const char *a = lns[j], *b = key;
                         while (*a && *a == *b) { a++; b++; }
-                        if ((unsigned char)*a <= (unsigned char)*b) break;
+                        int cmp = (int)(unsigned char)*a - (int)(unsigned char)*b;
+                        if (rev) cmp = -cmp;
+                        if (cmp <= 0) break;                   /* lns[j] already in order vs key */
                         lns[j+1] = lns[j]; j--;
                     }
                     lns[j+1] = key;
