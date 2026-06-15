@@ -54,6 +54,17 @@ static void render(void) {
 
 int main(void) {
     for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) { canv[y][x] = ' '; canc[y][x] = 0; }
+    /* load an existing picture so it can be re-edited (colour isn't stored, so it loads green) */
+    char fb[H * (W + 2) + 4];
+    long n = sys_readfile("PAINT.TXT", fb, sizeof(fb) - 1);
+    if (n > 0) {
+        int x = 0, y = 0;
+        for (long i = 0; i < n && y < H; i++) {
+            char c = fb[i];
+            if (c == '\n') { x = 0; y++; }
+            else { if (x < W && c != '\r') canv[y][x] = c; x++; }
+        }
+    }
     cx = cy = 0;
     render();
     for (;;) {
