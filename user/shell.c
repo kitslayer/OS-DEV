@@ -105,7 +105,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N>\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N> base<N> gcd<a b>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -871,6 +871,18 @@ int main(void) {
                 print("  bin "); print_base(n, 2);
                 print("  oct "); print_base(n, 8);
                 print("  hex "); print_base(n, 16);
+                print("\n");
+            }
+        } else if (startswith(line, "gcd ")) {            /* gcd A B -> gcd + lcm (Euclid) */
+            const char *p = line + 4; while (*p == ' ') p++;
+            long a = 0; while (*p >= '0' && *p <= '9' && a < 1000000000L) a = a * 10 + (*p++ - '0');
+            while (*p == ' ') p++;
+            long b = 0; while (*p >= '0' && *p <= '9' && b < 1000000000L) b = b * 10 + (*p++ - '0');
+            if (a < 1 || b < 1) print("usage: gcd <a> <b>   (e.g. gcd 12 18)\n");
+            else {
+                long x = a, y = b; while (y) { long t = x % y; x = y; y = t; }   /* Euclid's algorithm */
+                print("  gcd="); printl(x);
+                print("  lcm="); printl(a / x * b);                              /* a/g*b avoids a*b overflow */
                 print("\n");
             }
         } else if (startswith(line, "get ")) {
