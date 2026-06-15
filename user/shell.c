@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
@@ -1031,6 +1031,20 @@ int main(void) {
                     while (*c && *t && *c == *t) { c++; t++; }
                     if (!*c && !*t) { out[oi++] = letters[i]; break; }
                 }
+            }
+            out[oi] = 0;
+            print("  "); print(out); print("\n");
+        } else if (startswith(line, "unhex ")) {          /* unhex HEXSTRING -> ASCII text */
+            const char *p = line + 6; while (*p == ' ') p++;
+            char out[256]; int oi = 0;
+            while (*p && oi < 255) {
+                int hi = (*p>='0'&&*p<='9') ? *p-'0' : (*p>='a'&&*p<='f') ? *p-'a'+10 : (*p>='A'&&*p<='F') ? *p-'A'+10 : -1;
+                if (hi < 0) { p++; continue; }                /* skip spaces / non-hex */
+                p++;
+                int lo = (*p>='0'&&*p<='9') ? *p-'0' : (*p>='a'&&*p<='f') ? *p-'a'+10 : (*p>='A'&&*p<='F') ? *p-'A'+10 : -1;
+                if (lo < 0) break;                            /* odd trailing nibble: stop */
+                p++;
+                out[oi++] = (char)(hi * 16 + lo);
             }
             out[oi] = 0;
             print("  "); print(out); print("\n");
