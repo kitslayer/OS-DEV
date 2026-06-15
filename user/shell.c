@@ -94,7 +94,7 @@ int main(void) {
             print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc] tr\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
-            print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] crypt base64\n");
+            print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
             print("misc:   echo cal[ M Y] date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
@@ -784,6 +784,17 @@ int main(void) {
             int gl = (int)sizeof(gcs) - 1;
             char gp[66]; for (int i = 0; i < n; i++) gp[i] = gcs[shroll() % (unsigned)gl]; gp[n] = 0;
             print("  "); print(gp); print("\n");
+        } else if (streq(line, "uuidgen")) {              /* random RFC-4122 v4 UUID (CLI companion to uuid.htm) */
+            static const char uhx[] = "0123456789abcdef";
+            char u[37]; int j = 0;
+            for (int i = 0; i < 36; i++) {
+                if (i==8 || i==13 || i==18 || i==23) u[j++] = '-';
+                else if (i==14) u[j++] = '4';                       /* version 4 */
+                else if (i==19) u[j++] = uhx[8 + (shroll() % 4)];   /* variant 8/9/a/b */
+                else u[j++] = uhx[shroll() % 16];
+            }
+            u[j] = 0;
+            print("  "); print(u); print("\n");
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
