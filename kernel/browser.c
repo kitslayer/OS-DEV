@@ -1945,8 +1945,12 @@ void browser_init(void) {
 static void build_home(browser_t *b) {
     char *o = b->raw; int p = 0;
     #define HAPP(s) do { for (const char *q = (s); *q && p < RAW_MAX - 1; q++) o[p++] = *q; } while (0)
-    HAPP("<html><head><title>OS-DEV Start</title></head><body>"
+    HAPP("<html><head><title>OS-DEV Start</title>"
+         "<style> h1 { color: #2C66D6 }  dd { color: #555555 }  "
+         ".new { color: #006400; font-weight: bold } </style></head><body>"
          "<h1>OS-DEV Browser</h1>"
+         "<p class=\"new\">New this build: a small CSS engine &mdash; this very page is styled by it "
+         "&mdash; plus sixteen apps including a piano, a maze, a Mandelbrot explorer, and a text adventure.</p>"
          "<p>A from-scratch browser on a from-scratch OS, now over <b>real HTTPS</b> "
          "(a from-scratch TLS 1.3 client). Some pages that work:</p><dl>"
          "<dt><a href=\"https://text.npr.org\">https://text.npr.org</a></dt><dd>a LIVE news site over HTTPS &mdash; real headlines you can click</dd>"
