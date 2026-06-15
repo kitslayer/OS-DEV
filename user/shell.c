@@ -472,20 +472,20 @@ int main(void) {
             if (sys_sha512(line + 7, hex, sizeof(hex)) < 0) print("sha512: no such file\n");
             else { print("  "); print(hex); print("\n"); }
         } else if (startswith(line, "grep ")) {
-            char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0, cc = 0;
+            char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0, cc = 0, vv = 0;
             while (*p == ' ') p++;
-            while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insensitive), -n (line #s), combinable as -in */
+            while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insens), -n (line#s), -c (count), -v (invert); combinable as -in */
                 if (p[1] == '-' && (p[2] == ' ' || p[2] == 0)) { p += 2; while (*p == ' ') p++; break; }  /* "--": end of flags (pattern may then start with '-') */
                 int t, valid = 1;
-                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n' && p[t] != 'c') valid = 0;
+                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n' && p[t] != 'c' && p[t] != 'v') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a pattern starting with '-') */
-                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else if (p[t] == 'n') nn = 1; else cc = 1; }
+                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else if (p[t] == 'n') nn = 1; else if (p[t] == 'c') cc = 1; else vv = 1; }
                 p += t; while (*p == ' ') p++;
             }
             while (*p && *p != ' ' && i < 39) pat[i++] = *p++;
             pat[i] = 0;
             while (*p == ' ') p++;
-            if (pat[0] == 0 || *p == 0) { print("usage: grep [-inc] <pattern> <file>...\n"); }
+            if (pat[0] == 0 || *p == 0) { print("usage: grep [-incv] <pattern> <file>...\n"); }
             else {
                 static char buf[2048];
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
@@ -510,7 +510,8 @@ int main(void) {
                                 while (a + b < k && pat[b] && (ci ? lc(buf[a+b]) == lc(pat[b]) : buf[a+b] == pat[b])) b++;
                                 if (!pat[b]) found = 1;
                             }
-                            if (found) {
+                            int hit = vv ? !found : found;   /* -v inverts: act on non-matching lines */
+                            if (hit) {
                                 hits++;
                                 if (!cc) {                  /* -c: count only, don't print the line */
                                     char save = buf[k]; buf[k] = 0;
