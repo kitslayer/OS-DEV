@@ -153,6 +153,7 @@ true 0 true 0
 d b b
 undefined true function
 7 3
+x|y|z:1,2 no-interp:undefined,undefined
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

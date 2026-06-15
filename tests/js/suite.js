@@ -177,6 +177,7 @@ class _Bse { static k = "b"; static who(){ return this.k; } } class _Der extends
 print(_Der.who(), _Pln.who(), _Pln.k);
 print(typeof _undeclared_xyz, typeof _undeclared_xyz === "undefined", typeof print);
 var _ck="go"; var _cmo={ [_ck](){return 7;}, speed:3, [_ck+"f"](){return this.speed;} }; print(_cmo.go(), _cmo.gof());
+function _ttag(s,a,b){ return s.join("|")+":"+a+","+b; } print(_ttag`x${1}y${2}z`, _ttag`no-interp`);
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);

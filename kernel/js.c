@@ -332,6 +332,40 @@ static node *parse_template(const char *raw, int len) {
     return chain;
 }
 
+/* Tagged template `tag`a${x}b`` -> a call tag(["a","b"], x): the cooked string
+ * parts become an array argument, the ${…} values become the rest of the args.
+ * Mirrors parse_template's escape/`${}`-balancing walk but splits rather than +-chains. */
+static node *parse_tagged(node *tag, const char *raw, int len) {
+    node *call = mknode(N_CALL); call->a = tag;
+    call->list = aalloc(sizeof(node*) * 64); call->nlist = 0;
+    node *strs = mknode(N_ARRAY); strs->list = aalloc(sizeof(node*) * 33); strs->nlist = 0;
+    node *vals[63]; int nv = 0;
+    char *lit = aalloc(len + 1); int ln = 0;
+    #define TT_FLUSH() do { if(lit) lit[ln]=0; node *sn=mknode(N_STR); sn->str=intern(lit?lit:"",ln); sn->slen=ln; if(strs->list && strs->nlist<33) strs->list[strs->nlist++]=sn; ln=0; } while(0)
+    int i = 0;
+    while (i < len) {
+        if (raw[i]=='\\' && i+1<len) { char e=raw[i+1]; char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
+        if (raw[i]=='$' && i+1<len && raw[i+1]=='{') {
+            TT_FLUSH();
+            int j=i+2, depth=1; while(j<len && depth>0){ if(raw[j]=='{') depth++; else if(raw[j]=='}'){ depth--; if(depth==0) break; } j++; }
+            lexer sub; memset(&sub,0,sizeof(sub)); sub.src=raw+i+2; sub.len=j-(i+2); sub.pos=0;
+            node *ex = parse_assign(&sub);
+            if (nv < 63) vals[nv++] = ex;
+            i = (j<len)? j+1 : j;
+            continue;
+        }
+        if (lit && ln<len) lit[ln++]=raw[i];
+        i++;
+    }
+    TT_FLUSH();                                           /* trailing string part */
+    #undef TT_FLUSH
+    if (call->list) {
+        call->list[call->nlist++] = strs;                /* arg 0: the cooked strings array */
+        for (int k=0; k<nv && call->nlist<64; k++) call->list[call->nlist++] = vals[k];   /* args 1..: the values */
+    }
+    return call;
+}
+
 static node *parse_primary(lexer *L) {
     token t = peek(L);
     if (t.type == T_TEMPLATE) { advance(L); return parse_template(t.s, t.len); }
@@ -456,6 +490,7 @@ static node *parse_postfix(lexer *L) {
         else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; m->prefix=opt; e=m; }
         else if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->prefix=opt; call->list=parse_list(L,")",&call->nlist); e=call; }
         else if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->a=e; u->prefix=0; e=u; }
+        else if (peek(L).type==T_TEMPLATE) { token tt=advance(L); e = parse_tagged(e, tt.s, tt.len); }   /* tagged template: tag`…${x}…` -> tag([strings], x) */
         else break;
     }
     return e;
