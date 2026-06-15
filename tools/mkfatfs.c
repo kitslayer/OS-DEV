@@ -176,6 +176,8 @@ static const struct {
         "first.setAttribute(\"data-done\", \"yes\");\n"
         "console.log(\"qsaw read-back=\" + document.querySelector(\"p.msg\").textContent);\n"
         "console.log(\"qsaw attr=\" + document.querySelector(\"p.msg\").getAttribute(\"data-done\"));\n"
+        "first.classList.add(\"hi\"); first.classList.add(\"hi\"); first.classList.toggle(\"big\");\n"
+        "console.log(\"qsaw classList=\" + document.querySelector(\"p.msg\").getAttribute(\"class\") + \" has-hi=\" + first.classList.contains(\"hi\"));\n"
         "</script>" },
     { "JSDEEP  HTM", "<h1>Deep recursion guard</h1>"
         "<p>This page's script recurses 500 deep on purpose. The interpreter must"

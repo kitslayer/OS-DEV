@@ -251,4 +251,9 @@ print(document.querySelector("p").getAttribute("href"), document.getElementsByCl
 print("-- position write --");
 document.querySelector("p").textContent = "W1"; print(document.querySelector("p").textContent);  // W1 (textContent write on a position handle; read-back via mock store; M283)
 document.querySelectorAll(".item")[1].textContent = "W2"; print(document.querySelectorAll(".item")[1].textContent, document.querySelectorAll(".item")[0].textContent);  // W2 W1 (indexed write; distinct offsets independent; M283)
+print("-- classList --");
+var _cl=document.querySelector("p");
+print(_cl.classList.contains("x"), _cl.classList.toggle("x"), _cl.classList.contains("x"), _cl.classList.toggle("x"), _cl.classList.contains("x"));  // false true true false false (toggle add/remove + contains; M285)
+_cl.classList.add("a"); _cl.classList.add("a"); _cl.classList.add("b"); print(document.querySelector("p").getAttribute("class"));  // a b (add dedups; reads back via class attr)
+_cl.classList.remove("a"); print(document.querySelector("p").getAttribute("class"));  // b (remove)
 print("-- done --");

@@ -761,7 +761,7 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR /* obj->kind markers only; the val.t stays V_OBJ */ };
+       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR, V_CLASSLIST /* obj->kind markers only; the val.t stays V_OBJ */ };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -1277,6 +1277,8 @@ static val eval_map_method(val recv, const char *name, val *args, int nargs);
 static val eval_set_method(val recv, const char *name, val *args, int nargs);
 static val eval_date_method(val recv, const char *name, val *args, int nargs);
 static val eval_element_method(val recv, const char *name, val *args, int nargs);
+static val eval_classlist_method(val recv, const char *name, val *args, int nargs);
+static val classlist_handle(obj *el);
 static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax);   /* DOM element read/write */
 
 /* Accessor properties (getters/setters). An accessor is a V_ACCESSOR obj stored
@@ -1319,7 +1321,7 @@ static val eval_member_get(val recv, const char *name) {
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM(recv.o->n/2);   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
-        if (recv.o->kind==V_ELEMENT) { static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
+        if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
         if (recv.o->proto) { val pv; if (proto_lookup(recv.o->proto, name, recv, &pv)) return pv; }   /* inherited property/method (M263) */
     }
@@ -1567,6 +1569,7 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX) return eval_regex_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_DATE) return eval_date_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) return eval_element_method(recv,m,args,na);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_CLASSLIST) return eval_classlist_method(recv,m,args,na);
                 if (recv.t==V_FUN || recv.t==V_NATIVE || (recv.t==V_OBJ && recv.o && recv.o->kind==V_BOUND)) {   /* Function call/apply/bind */
                     if (strcmp(m,"call")==0)  return call_function_this(recv, na>0?args[0]:UND(), na>1?args+1:args, na>1?na-1:0);
                     if (strcmp(m,"apply")==0) { val th=na>0?args[0]:UND();
@@ -2216,6 +2219,65 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
     }
     rt_err("no such element method"); return UND();
 }
+/* el.classList -> a V_CLASSLIST handle carrying the same id/offset addressing as
+ * the element; its add/remove/toggle/contains read & rewrite the class attribute
+ * via the existing get/setAttribute callbacks (works for id + position handles). */
+static val classlist_handle(obj *el) {
+    obj *o = new_obj(V_CLASSLIST); if(!o){ g_oom=1; return UND(); }
+    arr_push_val(o, (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0] : STRV(intern("",0)));   /* vals[0] = id or "" */
+    if (el->n>1 && el->vals[1].t==V_NUM) arr_push_val(o, el->vals[1]);                        /* vals[1] = byte offset (position handle) */
+    return obj_val(o);
+}
+/* whitespace-delimited token membership */
+static int cl_has(const char *s, const char *tok) {
+    int tl=0; while(tok[tl]) tl++; if(!tl) return 0;
+    for(int i=0; s[i]; ){
+        while(s[i]==' '||s[i]=='\t') i++;
+        int st=i; while(s[i]&&s[i]!=' '&&s[i]!='\t') i++;
+        if(i-st==tl){ int m=0; while(m<tl && s[st+m]==tok[m]) m++; if(m==tl) return 1; }
+    }
+    return 0;
+}
+static val eval_classlist_method(val recv, const char *name, val *args, int nargs) {
+    obj *el = recv.o;
+    const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
+    int has_pos = (el->n>1 && el->vals[1].t==V_NUM);
+    int off = has_pos ? (int)el->vals[1].num : 0;
+    static char clbuf[2048]; clbuf[0]=0;
+    if (has_pos) { if(g_dom_getattr_at) g_dom_getattr_at(off,"class",clbuf,(int)sizeof(clbuf)); }
+    else         { if(g_dom_getattr)    g_dom_getattr(id,"class",clbuf,(int)sizeof(clbuf)); }
+    const char *tok = nargs ? val_to_str(args[0]) : "";
+    int present = cl_has(clbuf, tok);
+    if (strcmp(name,"contains")==0) return BOOLV(present);
+    int want;                                            /* 1 = ensure present (add), 0 = ensure absent (remove) */
+    if (strcmp(name,"add")==0) want = 1;
+    else if (strcmp(name,"remove")==0) want = 0;
+    else if (strcmp(name,"toggle")==0) want = !present;
+    else { rt_err("no such classList method"); return UND(); }
+    if (want != present && tok[0]) {                     /* rebuild + write only when it changes (and the token is non-empty) */
+        static char nb[2100]; int o=0;
+        if (want) {                                      /* add: append the token */
+            int i=0; while(clbuf[i] && o<2090) nb[o++]=clbuf[i++];
+            if (o>0 && nb[o-1]!=' ') nb[o++]=' ';
+            for (int t=0; tok[t] && o<2098; t++) nb[o++]=tok[t];
+            nb[o]=0;
+        } else {                                         /* remove: copy every token except `tok` */
+            int tl=0; while(tok[tl]) tl++;
+            int i=0; while(clbuf[i]){
+                while(clbuf[i]==' '||clbuf[i]=='\t') i++;
+                int st=i; while(clbuf[i]&&clbuf[i]!=' '&&clbuf[i]!='\t') i++;
+                int len=i-st; if(len==0) continue;
+                int istok=0; if(len==tl){ int m=0; while(m<tl && clbuf[st+m]==tok[m]) m++; if(m==tl) istok=1; }
+                if(!istok){ if(o>0 && o<2098) nb[o++]=' '; for(int k=0;k<len && o<2098;k++) nb[o++]=clbuf[st+k]; }
+            }
+            nb[o]=0;
+        }
+        if (has_pos) { if(g_dom_setattr_at) g_dom_setattr_at(off,"class",nb); }
+        else         { if(g_dom_setattr)    g_dom_setattr(id,"class",nb); }
+    }
+    if (strcmp(name,"toggle")==0) return BOOLV(want);
+    return UND();
+}
 
 /* localStorage: a host-provided key->value (string) store that survives the
  * per-run arena reset, so page click-handlers can accumulate state (a counter). */
@@ -2764,13 +2826,18 @@ static int wat_off[8]; static char wat_txt[8][64]; static int wat_n;
 static int hdom_get_at(int off, char *out, int max, int html){ (void)html; if(max<=0) return 0;
     for(int i=0;i<wat_n;i++) if(wat_off[i]==off){ int j=0; while(wat_txt[i][j]&&j<max-1){out[j]=wat_txt[i][j];j++;} out[j]=0; return 1; }
     const char *t = off==10 ? "alpha" : off==20 ? "beta" : ""; int j=0; while(t[j]&&j<max-1){out[j]=t[j];j++;} out[j]=0; return 1; }
-/* mock getAttribute-by-position: echo "<attr>@<off>" so the suite can assert the round-trip */
+/* a per-offset "class" attribute store so classList round-trips host-side */
+static int hcls_off[8]; static char hcls_val[8][128]; static int hcls_n;
+/* mock getAttribute-by-position: "class" comes from the class store (so classList
+ * works); any other attr echoes "<attr>@<off>" (so the M282 getAttribute test holds) */
 static int hdom_getattr_at(int off, const char *attr, char *out, int max){ if(max<=0) return 0;
+    if(!strcmp(attr,"class")){ for(int i=0;i<hcls_n;i++) if(hcls_off[i]==off){ int j=0; while(hcls_val[i][j]&&j<max-1){out[j]=hcls_val[i][j];j++;} out[j]=0; return j>0; } out[0]=0; return 0; }
     int j=0; while(attr[j]&&j<max-2){out[j]=attr[j];j++;} if(j<max-2)out[j++]='@'; if(j<max-1)out[j++]=(char)('0'+(off/10)%10); out[j]=0; return 1; }
 /* mock writes-by-position: store into the shared offset->text store so a read-back reflects it */
 static void hdom_set_at(int off, const char *value, int html){ (void)html; int i; for(i=0;i<wat_n;i++) if(wat_off[i]==off) break;
     if(i==wat_n){ if(wat_n>=8) return; wat_off[wat_n++]=off; } int j=0; while(value[j]&&j<63){wat_txt[i][j]=value[j];j++;} wat_txt[i][j]=0; }
-static void hdom_setattr_at(int off, const char *attr, const char *val){ (void)off; (void)attr; (void)val; }
+static void hdom_setattr_at(int off, const char *attr, const char *val){ if(strcmp(attr,"class")) return;   /* only "class" is stored (for classList) */
+    int i; for(i=0;i<hcls_n;i++) if(hcls_off[i]==off) break; if(i==hcls_n){ if(hcls_n>=8) return; hcls_off[hcls_n++]=off; } int j=0; while(val[j]&&j<127){hcls_val[i][j]=val[j];j++;} hcls_val[i][j]=0; }
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
