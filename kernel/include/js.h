@@ -46,6 +46,7 @@ void js_set_dom_match(int (*matches)(const char *, const char *), int (*matches_
                       int (*closest)(const char *, const char *), int (*closest_at)(int, const char *));
 /* element.removeAttribute(name) backings (id + position variants). */
 void js_set_dom_rmattr(void (*rmattr)(const char *, const char *), void (*rmattr_at)(int, const char *));
-/* element.children backings (id + position variants; fill child byte-offsets, return count). */
-void js_set_dom_children(int (*children)(const char *, int *, int), int (*children_at)(int, int *, int));
+/* element.children + parentElement backings (id + position variants; parent returns an offset or -1). */
+void js_set_dom_children(int (*children)(const char *, int *, int), int (*children_at)(int, int *, int),
+                         int (*parent)(const char *), int (*parent_at)(int));
 void js_set_location(const char *url);
