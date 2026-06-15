@@ -51,6 +51,26 @@ static int check_win(void) {
     return 1;
 }
 
+/* palette colour for a board cell (cursor highlighted; classic Minesweeper number hues) */
+static int cell_color(char c, int cursor) {
+    if (cursor) return 3;          /* cursor: yellow */
+    switch (c) {
+        case 'F': return 2;        /* flag: red */
+        case '#': return 8;        /* hidden: grey */
+        case '*': return 13;       /* mine: coral */
+        case '.': return 8;        /* empty: grey */
+        case '1': return 6;        /* blue  */
+        case '2': return 9;        /* green */
+        case '3': return 2;        /* red   */
+        case '4': return 11;       /* violet */
+        case '5': return 13;       /* coral */
+        case '6': return 10;       /* teal  */
+        case '7': return 12;       /* gold  */
+        case '8': return 8;        /* grey  */
+        default:  return 0;
+    }
+}
+
 static void render(void) {
     sys_clear();
     int flags = 0;
@@ -60,9 +80,8 @@ static void render(void) {
     while (*t) hdr[p++] = *t++;
     int left = MINES - flags; if (left < 0) left = 0;
     hdr[p++] = (char)('0' + left/10); hdr[p++] = (char)('0' + left%10); hdr[p] = 0;
-    print(hdr); print("\n\n");
+    sys_setcolor(8); print(hdr); print("\n\n");
     for (int y = 0; y < N; y++) {
-        char row[64]; int q = 0;
         for (int x = 0; x < N; x++) {
             char c;
             if (st[y][x] == 2)               c = 'F';                 /* flag */
@@ -70,11 +89,15 @@ static void render(void) {
             else if (mine[y][x])             c = '*';                 /* revealed mine (loss) */
             else if (adj[y][x] == 0)         c = '.';
             else                             c = (char)('0' + adj[y][x]);
-            if (x == cx && y == cy) { row[q++]='['; row[q++]=c; row[q++]=']'; }
-            else                    { row[q++]=' '; row[q++]=c; row[q++]=' '; }
+            int cur = (x == cx && y == cy);
+            char cb[4];
+            if (cur) { cb[0]='['; cb[1]=c; cb[2]=']'; } else { cb[0]=' '; cb[1]=c; cb[2]=' '; }
+            cb[3] = 0;
+            sys_setcolor(cell_color(c, cur)); print(cb);
         }
-        row[q] = 0; print(row); print("\n");
+        print("\n");
     }
+    sys_setcolor(0);
     print("\n  arrows move, space reveal, f flag, r restart, q quit");
     if (dead)      print("\n  *** BOOM - you hit a mine! (r to retry) ***");
     else if (won)  print("\n  *** cleared! you win! (r to play again) ***");
