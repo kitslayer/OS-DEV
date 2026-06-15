@@ -131,6 +131,9 @@ true true false false w
 -- cmp-assign --
 8 15 6 16 32 1024
 ab 9
+-- num-literals --
+10 15 1000 255 500 255
+40 3 0
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

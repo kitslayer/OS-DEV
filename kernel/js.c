@@ -116,18 +116,34 @@ static token lex_next_raw(lexer *L) {
     int c = s[L->pos];
     /* number (integer) */
     if (is_digit(c)) {
-        int64_t v = 0; int start = L->pos;
+        int64_t v = 0;
         if (c=='0' && L->pos+1<L->len && (s[L->pos+1]=='x'||s[L->pos+1]=='X')) {
             L->pos += 2;
             while (L->pos<L->len) { int d=s[L->pos]; int h;
                 if (d>='0'&&d<='9') h=d-'0'; else if (d>='a'&&d<='f') h=d-'a'+10; else if (d>='A'&&d<='F') h=d-'A'+10; else break;
                 v = v*16 + h; L->pos++; }
+        } else if (c=='0' && L->pos+1<L->len && (s[L->pos+1]=='b'||s[L->pos+1]=='B')) {
+            L->pos += 2;   /* binary 0b1010 */
+            while (L->pos<L->len && (s[L->pos]=='0'||s[L->pos]=='1')) { v = v*2 + (s[L->pos]-'0'); L->pos++; }
+        } else if (c=='0' && L->pos+1<L->len && (s[L->pos+1]=='o'||s[L->pos+1]=='O')) {
+            L->pos += 2;   /* octal 0o17 */
+            while (L->pos<L->len && s[L->pos]>='0' && s[L->pos]<='7') { v = v*8 + (s[L->pos]-'0'); L->pos++; }
         } else {
             while (L->pos<L->len && is_digit(s[L->pos])) { v = v*10 + (s[L->pos]-'0'); L->pos++; }
             /* skip a fractional part if present (we truncate to int) */
             if (L->pos<L->len && s[L->pos]=='.') { L->pos++; while (L->pos<L->len && is_digit(s[L->pos])) L->pos++; }
+            /* exponent 1e3 -> 1000 (integer engine; a fractional mantissa is already truncated,
+             * and a negative exponent floors to 0). Back off if `e` isn't a real exponent. */
+            if (L->pos<L->len && (s[L->pos]=='e'||s[L->pos]=='E')) {
+                int save=L->pos; L->pos++;
+                int neg=0; if (L->pos<L->len && (s[L->pos]=='+'||s[L->pos]=='-')) { neg=(s[L->pos]=='-'); L->pos++; }
+                if (L->pos<L->len && is_digit(s[L->pos])) {
+                    int exp=0; while (L->pos<L->len && is_digit(s[L->pos])) { exp=exp*10+(s[L->pos]-'0'); if(exp>18)exp=18; L->pos++; }
+                    if (neg) v = 0; else for (int k=0;k<exp;k++) v*=10;
+                } else L->pos=save;   /* a bare `e` that starts an identifier — not an exponent */
+            }
         }
-        (void)start; t.type=T_NUM; t.num=v; return t;
+        t.type=T_NUM; t.num=v; return t;
     }
     /* string */
     if (c=='"' || c=='\'') {
