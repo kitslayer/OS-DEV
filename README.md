@@ -356,7 +356,7 @@ whole thing works:
 | 263| **Prototype chain** — `Object.create`/`getPrototypeOf`/`setPrototypeOf`, function `.prototype` + `new F()` for plain constructors, `__proto__`; member read/call/write walk the chain (inherited accessors fire with `this`=receiver), cycle-capped. **Additive**: own-only `delete`/enumeration and the class system are unchanged | [kernel/js.c](kernel/js.c), [docs](docs/263-prototype-chain.md) |
 | 264| **`in` / `instanceof` walk the prototype chain** — `'k' in Object.create({k:1})`→`true` (existence only — never fires an inherited getter); `Object.create(F.prototype) instanceof F`→`true`; both cycle-capped and additive (proto-less objects & class instances unchanged) | [kernel/js.c](kernel/js.c) |
 | 265| **`Object.defineProperties` + `Object.create(proto, descriptors)`** — apply a whole `{key:{value\|get\|set}}` map at once (each via M262's `defineProperty`); completes the define/create family | [kernel/js.c](kernel/js.c) |
-| 266| **`structuredClone`** (deep clone preserving cycles & shared refs) **+ fixed object identity in `===`/`!==`/`==`/`!=`** — they coerced every object to `0` so *any two objects compared equal* (`{}===​{}`→`true`!); now reference identity (`{}===​{}`→`false`, `a===a`→`true`), matching `Object.is` | [kernel/js.c](kernel/js.c) |
+| 266| **`structuredClone`** (deep clone preserving cycles & shared refs) **+ fixed object identity in `===`/`!==`/`==`/`!=`** — they coerced every object to `0` so *any two objects compared equal* (`{}===​{}`→`true`!); now reference identity (`{}===​{}`→`false`, `a===a`→`true`), matching `Object.is` | [kernel/js.c](kernel/js.c), [docs](docs/266-equality-and-structured-clone.md) |
 
 ## Roadmap
 
