@@ -373,9 +373,16 @@ int main(void) {
             }
         } else if (startswith(line, "wc ")) {
             static char buf[2048];
-            long n = sys_readfile(line + 3, buf, sizeof(buf));
-            if (n < 0) { print("wc: no such file\n"); }
-            else {
+            const char *p = line + 3; char num[12];
+            int tl = 0, tw = 0, nfiles = 0; long tb = 0;
+            while (*p) {                                   /* count each space-separated file */
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0;
+                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                name[j] = 0;
+                long n = sys_readfile(name, buf, sizeof(buf));
+                if (n < 0) { print("wc: no such file: "); print(name); print("\n"); continue; }
                 int lines = 0, words = 0, inword = 0;
                 for (long i = 0; i < n; i++) {
                     char c = buf[i];
@@ -383,11 +390,19 @@ int main(void) {
                     if (c == ' ' || c == '\t' || c == '\n' || c == '\r') inword = 0;
                     else if (!inword) { inword = 1; words++; }
                 }
-                char num[12];
                 print("  lines "); itoa_simple(lines, num); print(num);
                 print("  words "); itoa_simple(words, num); print(num);
-                print("  bytes "); itoa_simple((int)n, num); print(num); print("\n");
+                print("  bytes "); itoa_simple((int)n, num); print(num);
+                print("  "); print(name); print("\n");
+                tl += lines; tw += words; tb += n; nfiles++;
             }
+            if (nfiles > 1) {
+                print("  lines "); itoa_simple(tl, num); print(num);
+                print("  words "); itoa_simple(tw, num); print(num);
+                print("  bytes "); itoa_simple((int)tb, num); print(num);
+                print("  total\n");
+            }
+            if (nfiles == 0) print("usage: wc <file>...\n");
         } else if (startswith(line, "hexdump ")) {
             static char buf[512];
             long n = sys_readfile(line + 8, buf, sizeof(buf));
