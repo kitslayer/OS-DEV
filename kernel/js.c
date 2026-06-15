@@ -1865,6 +1865,9 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         else { int start=0; for(int i=0;i+sl<=len;){ if(memcmp(s+i,sep,sl)==0){ char*p=aalloc(i-start+1); if(p){memcpy(p,s+start,i-start);p[i-start]=0;} arr_push_val(arr,STRV(p?p:"")); i+=sl; start=i; } else i++; } char*p=aalloc(len-start+1); if(p){memcpy(p,s+start,len-start);p[len-start]=0;} arr_push_val(arr,STRV(p?p:"")); }
         if (nargs>1) { int lim=(int)to_num(args[1]); if(lim>=0 && arr->n>lim) arr->n=lim; }   /* split(sep, limit) */
         val v=UND(); v.t=V_ARR; v.o=arr; return v; }
+    if (strcmp(name,"substr")==0){ int a=nargs>0?(int)to_num(args[0]):0; if(a<0){a+=len; if(a<0)a=0;} if(a>len)a=len;   /* substr(start, length) -- legacy (M276) */
+        int ln=nargs>1?(int)to_num(args[1]):(len-a); if(ln<0)ln=0; if(ln>len-a)ln=len-a;
+        char*r=aalloc(ln+1); if(!r) return STRV(""); memcpy(r,s+a,ln); r[ln]=0; return STRV(r); }
     rt_err("unknown string method"); return UND();
 }
 /* recursively flatten `src` into `r` up to `depth` levels (depth is caller-capped) */
@@ -1962,6 +1965,9 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         for(int i=start+del;i<o->n;i++) arr_push_val(r,o->vals[i]); /* tail */
         val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"hasOwnProperty")==0){ const char *k=nargs?val_to_str(args[0]):""; if(strcmp(k,"length")==0) return BOOLV(1); int i=nargs?(int)to_num(args[0]):-1; return BOOLV(i>=0 && i<o->n); }   /* arr.hasOwnProperty(index|"length") (M274) */
+    if (strcmp(name,"keys")==0){ obj*r=new_obj(V_ARR); if(!r)return UND(); for(int i=0;i<o->n && !g_oom;i++) arr_push_val(r,NUM(i)); val v=UND();v.t=V_ARR;v.o=r;return v; }   /* eager-array iterators (work with for-of) (M276) */
+    if (strcmp(name,"values")==0){ obj*r=new_obj(V_ARR); if(!r)return UND(); for(int i=0;i<o->n && !g_oom;i++) arr_push_val(r,o->vals[i]); val v=UND();v.t=V_ARR;v.o=r;return v; }
+    if (strcmp(name,"entries")==0){ obj*r=new_obj(V_ARR); if(!r)return UND(); for(int i=0;i<o->n && !g_oom;i++){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,NUM(i)); arr_push_val(p,o->vals[i]); val pv=UND();pv.t=V_ARR;pv.o=p; arr_push_val(r,pv); } val v=UND();v.t=V_ARR;v.o=r;return v; }
     if (strcmp(name,"copyWithin")==0){   /* copyWithin(target, start, end): copy the slice [start,end) over target, in place (M272) */
         int len=o->n; int tgt=nargs>0?(int)to_num(args[0]):0, st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):len;
         if(tgt<0)tgt+=len; if(st<0)st+=len; if(en<0)en+=len;
