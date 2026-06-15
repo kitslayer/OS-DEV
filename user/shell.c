@@ -27,6 +27,17 @@ static void printl(long v) {              /* print a (possibly large) integer */
     while (i) o[j++] = t[--i];
     o[j] = '\0'; print(o);
 }
+static unsigned shell_rng = 0;            /* lazily seeded from the clock on first use */
+static unsigned shroll(void) {
+    if (!shell_rng) {
+        char tb[40]; long tn = sys_time(tb, sizeof(tb));
+        shell_rng = 0x2545F491u;
+        for (long i = 0; i < tn; i++) shell_rng = shell_rng * 31u + (unsigned char)tb[i];
+        if (!shell_rng) shell_rng = 12345u;
+    }
+    shell_rng ^= shell_rng << 13; shell_rng ^= shell_rng >> 17; shell_rng ^= shell_rng << 5;
+    return shell_rng;
+}
 
 /* Print a month calendar for the current date (from the RTC). */
 static void cmd_cal(void) {
@@ -81,8 +92,8 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal date beep morse<text> factor<n> mem ps df history\n");
-            print("        clear reboot exit\n");
+            print("misc:   echo cal date beep morse<text> factor<n> roll<NdM>\n");
+            print("        mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -229,6 +240,20 @@ int main(void) {
                 for (long d = 3; d <= 3000000L && d <= m / d; d += 2)   /* trial division to ~sqrt, capped */
                     while (m % d == 0) { print(" "); printl(d); m /= d; }
                 if (m > 1) { print(" "); printl(m); }                  /* remaining prime (or a large factor) */
+                print("\n");
+            }
+        } else if (startswith(line, "roll ")) {
+            const char *q = line + 5; while (*q == ' ') q++;
+            int a = 0; while (*q >= '0' && *q <= '9') { a = a * 10 + (*q - '0'); q++; }
+            int n, sides;
+            if (*q == 'd' || *q == 'D') { q++; sides = 0; while (*q >= '0' && *q <= '9') { sides = sides * 10 + (*q - '0'); q++; } n = a ? a : 1; }
+            else { n = 1; sides = a; }                         /* "roll 6" = 1d6 */
+            if (n < 1) n = 1; if (n > 40) n = 40;
+            if (sides < 2 || sides > 1000) { print("usage: roll NdM  (e.g. roll 2d6)\n"); }
+            else {
+                int total = 0; char nb[12]; print(" ");
+                for (int i = 0; i < n; i++) { int r = (int)(shroll() % (unsigned)sides) + 1; total += r; itoa_simple(r, nb); print(nb); print(" "); }
+                if (n > 1) { print(" total "); itoa_simple(total, nb); print(nb); }
                 print("\n");
             }
         } else if (streq(line, "ifconfig") || streq(line, "netinfo")) {
