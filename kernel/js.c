@@ -1328,6 +1328,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) { dom_prop(recv.o, node_name(t), val_to_str(rhs), 0, 0); return rhs; }   /* el.textContent = … -> mutate the page */
+                if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
                 if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ obj_set(recv.o, node_name(t), rhs); } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
                 if (recv.t==V_ARR && recv.o) {
@@ -1437,7 +1438,8 @@ static val eval_expr_inner(node *n, env *e) {
             if (n->str) env_define(e, node_name(n), cv);   /* bind the class name first so statics can reference it */
             if (n->c && n->c->type==N_BLOCK && n->c->nlist>0) {   /* build co->statics (Class.method / Class.field) */
                 obj *st=new_obj(V_OBJ);
-                if (st) { for (int i=0;i<n->c->nlist && !g_oom;i++){ node *pr=n->c->list[i]; obj_set(st, node_name(pr), eval_expr(pr->a, e)); } co->statics=st; }
+                if (st) { co->statics=st;   /* attach BEFORE the loop so a static init can reference an earlier static via the class name */
+                          for (int i=0;i<n->c->nlist && !g_oom;i++){ node *pr=n->c->list[i]; obj_set(st, node_name(pr), eval_expr(pr->a, e)); } }
             }
             return cv;
         }
