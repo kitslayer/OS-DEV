@@ -96,7 +96,7 @@ int main(void) {
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64\n");
             print("        run: apps run<prog> js<file>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> factor<n> roll<NdM> seq<n> rev<text> cowsay<text> fortune ascii roman<N>\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
@@ -842,6 +842,17 @@ int main(void) {
                 if ((c - 31) % 6 == 0) print("\n");      /* 6/row fits the 44-col shell grid */
             }
             print("\n");
+        } else if (startswith(line, "roman ")) {          /* roman N -> Roman numerals (1-3999) */
+            const char *p = line + 6; while (*p == ' ') p++;
+            int n = 0; while (*p >= '0' && *p <= '9' && n < 100000) n = n * 10 + (*p++ - '0');
+            if (n < 1 || n > 3999) print("usage: roman <1-3999>\n");
+            else {
+                static const int vals[] = { 1000,900,500,400,100,90,50,40,10,9,5,4,1 };
+                static const char *syms[] = { "M","CM","D","CD","C","XC","L","XL","X","IX","V","IV","I" };
+                print("  ");
+                for (int i = 0; i < 13; i++) while (n >= vals[i]) { print(syms[i]); n -= vals[i]; }
+                print("\n");
+            }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
