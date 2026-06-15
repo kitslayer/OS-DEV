@@ -457,6 +457,18 @@ static int add_submit_link(browser_t *b, const char *action) {
     b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + al) };
     return b->nlink++;
 }
+/* Store an "event:ID" link; activating it (browser_follow) calls js_fire_event(ID,
+ * "click") to run a JS-assigned handler (el.onclick=fn / addEventListener). The
+ * element gets one via a synthetic data-jsh attribute the handler-registration wrote. */
+static int add_event_link(browser_t *b, const char *id, int idlen) {
+    const char *pfx = "event:"; int pl = 6;
+    if (idlen <= 0 || b->nlink >= LINK_MAX || b->hreflen + pl + idlen >= HREF_MAX) return NO_LINK;
+    int off = b->hreflen;
+    for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
+    for (int i = 0; i < idlen; i++) b->hrefs[b->hreflen++] = id[i];
+    b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + idlen) };
+    return b->nlink++;
+}
 /* Percent-encode s into out (cap = bytes available incl. NUL slot); returns bytes
  * written (no NUL). Unreserved chars pass through, space -> '+', else %XX. */
 static int url_encode(char *out, int cap, const char *s) {
@@ -526,6 +538,9 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         int lk = NO_LINK;
         if (find_attr(attrs, attrlen, "onclick", &oc, &ocl)) {
             lk = add_onclick(b, oc, ocl);              /* inline handler: scope the element to a javascript: link */
+        } else if (find_attr(attrs, attrlen, "data-jsh", &oc, &ocl)) {   /* el.onclick=fn marker: clickable -> event:ID link (id-keyed registry) */
+            const char *idv; int idl;
+            if (find_attr(attrs, attrlen, "id", &idv, &idl) && idl > 0) lk = add_event_link(b, idv, idl);
         } else if (tageq(tag, "button")) {             /* a <button> with no handler submits the form (HTML default), unless type=button/reset */
             const char *tp; int tpl;
             int suppress = find_attr(attrs, attrlen, "type", &tp, &tpl) && (attr_eq(tp, tpl, "button") || attr_eq(tp, tpl, "reset"));
@@ -1356,6 +1371,23 @@ static void run_js_handler(browser_t *b, const char *code) {
      * pressing Enter again re-runs the same link (e.g. clicking a counter repeatedly). */
     if (saved_sel != NO_LINK && saved_sel < b->nlink) b->sel = saved_sel;
 }
+/* Activate an `event:ID` link: fire the JS-assigned handler registered for that
+ * element id. Same document.write splice + re-render + selection-restore wrapper
+ * as run_js_handler, but dispatches through js_fire_event (the persistent env). */
+static void run_js_event(browser_t *b, const char *id, const char *type) {
+    static char jsout[2048];
+    int saved_sel = b->sel;
+    int appendpos = b->bodyoff + b->bodylen;
+    if (appendpos >= RAW_MAX - 1) return;
+    g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_base = appendpos; g_sw_max = RAW_MAX;
+    js_bind_storage(b);
+    js_fire_event(id, type, jsout, sizeof(jsout), script_write_cb);
+    int written = g_sw_pos - g_sw_base;
+    g_sw_raw = 0;
+    if (jsout[0]) kprintf("[js] %s\n", jsout);
+    if (written > 0) { b->bodylen += written; parse_html(b, b->raw + b->bodyoff, b->bodylen); }
+    if (saved_sel != NO_LINK && saved_sel < b->nlink) b->sel = saved_sel;
+}
 /* If the element has the named inline handler (onchange/oninput/…), run it.
  * Returns 1 if it ran (run_js_handler re-renders), so the caller can skip its own. */
 static int fire_handler(browser_t *b, const char *id, const char *attr) {
@@ -2024,6 +2056,14 @@ static void browser_follow(browser_t *b, int id) {
         for (int i = 0; i < n; i++) jsbuf[i] = hp[11 + i];
         jsbuf[n] = 0;
         run_js_handler(b, jsbuf);
+        return;
+    }
+    int isev = (len > 6); if (isev) for (int k = 0; k < 6; k++) if (lc(hp[k]) != "event:"[k]) { isev = 0; break; }
+    if (isev) {                                          /* event:ID -> fire the JS-assigned click handler for element ID */
+        char eid[40]; int n = len - 6; if (n > 39) n = 39;
+        for (int i = 0; i < n; i++) eid[i] = hp[6 + i];
+        eid[n] = 0;
+        run_js_event(b, eid, "click");
         return;
     }
     char href[URL_MAX]; int hl = len; if (hl > URL_MAX - 1) hl = URL_MAX - 1;

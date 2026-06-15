@@ -1140,6 +1140,7 @@ static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names
  * for a plain call); arrow functions (node->prefix==1) deliberately do NOT bind
  * one, so `this` resolves lexically up the scope chain to the enclosing function. */
 static val call_function_this(val fn, val thisv, val *args, int nargs);   /* fwd: call_bound recurses into it */
+static void register_handler(obj *el, const char *type, val fn);   /* fwd: el.onclick=fn / addEventListener -> the per-page handler registry */
 /* Does this function body reference `arguments`? (skips nested functions — they have their
  * own.) Walked once per function then cached in node->num, so functions that never use it
  * pay nothing (no per-call arguments allocation). The AST is MAXDEPTH-bounded, so the
@@ -1487,7 +1488,12 @@ static val eval_expr_inner(node *n, env *e) {
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
-                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) { dom_prop(recv.o, node_name(t), val_to_str(rhs), 0, 0); return rhs; }   /* el.textContent = … -> mutate the page */
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) {
+                    const char *pn = node_name(t);
+                    if (pn[0]=='o' && pn[1]=='n' && (rhs.t==V_FUN || rhs.t==V_NATIVE || (rhs.t==V_OBJ && rhs.o && rhs.o->kind==V_BOUND)))
+                        { register_handler(recv.o, pn+2, rhs); return rhs; }   /* el.onclick = fn -> register a JS-assigned event handler */
+                    dom_prop(recv.o, pn, val_to_str(rhs), 0, 0); return rhs;   /* el.textContent/innerHTML/value = … -> mutate the page */
+                }
                 if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
                 if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ const char *wk=node_name(t); val cur;
                     if(recv.t==V_ARR && strcmp(wk,"length")==0){ int nl=(int)to_num(rhs); if(nl<0)nl=0; if(nl>(1<<24)){ rt_err("array length too large"); return rhs; }
@@ -2224,6 +2230,12 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
         else         { if (g_dom_setattr)    g_dom_setattr(id, an, av); }
         return UND();
     }
+    if (strcmp(name, "addEventListener") == 0) {   /* addEventListener("click", fn) -> the same registry as el.onclick=fn (type already bare, e.g. "click") */
+        const char *type = nargs > 0 ? val_to_str(args[0]) : "";
+        if (nargs > 1 && (args[1].t==V_FUN || args[1].t==V_NATIVE || (args[1].t==V_OBJ && args[1].o && args[1].o->kind==V_BOUND)))
+            register_handler(el, type, args[1]);
+        return UND();
+    }
     rt_err("no such element method"); return UND();
 }
 /* el.classList -> a V_CLASSLIST handle carrying the same id/offset addressing as
@@ -2840,6 +2852,62 @@ int js_page_event(const char *src, char *out, int outmax, void (*write_cb)(const
  * page's persistent globals (the next js_page_load — or the first event on a
  * script-less page — rebuilds the env from scratch and resets the arena). */
 void js_page_reset(void) { g_page_env = 0; }
+
+/* ---- JS-assigned event handlers (el.onclick=fn / addEventListener) ----
+ * Handlers live in a per-page registry `@handlers` (a V_OBJ keyed "type:id" ->
+ * fn) bound in the persistent g_page_env, so they survive across events and are
+ * dropped on navigation with the env (M287). The element is marked clickable via
+ * a synthetic `data-jsh` attribute (written through the existing setAttribute +
+ * re-render path); the renderer then turns it into an `event:ID` link that the
+ * browser dispatches back to js_fire_event. v1 keys by id (offsets are stale once
+ * the re-render the assignment triggers shifts the buffer); id-less elements are
+ * a no-op. */
+static void hkey(char *key, const char *type, const char *id) {   /* "type:id", bounded to key[160] */
+    int k=0; for (const char *p=type; *p && k<78; p++) key[k++]=*p;
+    if (k<159) key[k++]=':';
+    for (const char *p=id; *p && k<159; p++) key[k++]=*p;
+    key[k]=0;
+}
+static obj *handlers_obj(void) {
+    if (!g_page_env) return 0;
+    val *hv = env_find(g_page_env, "@handlers");
+    if (hv && hv->t==V_OBJ && hv->o) return hv->o;
+    obj *o = new_obj(V_OBJ); if (!o) { g_oom=1; return 0; }
+    env_define(g_page_env, "@handlers", obj_val(o));
+    return o;
+}
+static void register_handler(obj *el, const char *type, val fn) {
+    const char *id = (el->n>0 && el->vals[0].t==V_STR) ? el->vals[0].str : "";
+    if (!id[0] || !type[0]) return;                 /* v1: id-keyed only */
+    obj *h = handlers_obj(); if (!h || h->n >= 128) return;   /* bound the registry */
+    char key[160]; hkey(key, type, id);
+    obj_set(h, intern(key, (int)strlen(key)), fn);   /* intern: obj_set stores the key POINTER, so it must outlive this stack frame */
+    if (strcmp(type,"click")==0 && g_dom_setattr) g_dom_setattr(id, "data-jsh", "1");   /* mark clickable -> renderer makes it an event link */
+}
+/* The browser calls this when an `event:ID` link is activated: look up and invoke
+ * the registered handler in the persistent env (no arena reset). 1 if one ran. */
+int js_fire_event(const char *id, const char *type, char *out, int outmax, void (*write_cb)(const char *)) {
+    unsigned long f = js_irq_save();
+    if (js_busy || !g_page_env) { js_irq_restore(f); if (outmax) out[0]=0; return 0; }
+    js_busy = 1; js_irq_restore(f);
+    g_doc_write = write_cb;
+    g_oom=0; g_err=0; g_errmsg[0]=0; g_depth=0;
+    g_out=out; g_out_cap=outmax; g_out_len=0; if (outmax) out[0]=0;
+    int ran = 0;
+    val *hv = env_find(g_page_env, "@handlers");
+    if (hv && hv->t==V_OBJ && hv->o) {
+        char key[160]; hkey(key, type, id);
+        val fn;
+        if (obj_get(hv->o, key, &fn) && (fn.t==V_FUN || fn.t==V_NATIVE || (fn.t==V_OBJ && fn.o && fn.o->kind==V_BOUND))) {
+            call_function_this(fn, UND(), 0, 0);   /* invoke in the persistent env (mode-2 semantics: no arena reset) */
+            ran = 1;
+        }
+    }
+    if (g_err) { out_str("\n[js error: "); out_str(g_errmsg); out_str("]\n"); }
+    g_doc_write = 0;
+    js_busy = 0;
+    return ran;
+}
 
 #ifdef JS_HOSTTEST
 /* a tiny in-memory localStorage so host tests can exercise the persistent path */

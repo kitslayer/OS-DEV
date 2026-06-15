@@ -17,6 +17,9 @@ int js_run_doc(const char *src, char *out, int outmax, void (*write_cb)(const ch
 int js_page_load(const char *src, char *out, int outmax, void (*write_cb)(const char *));
 int js_page_event(const char *src, char *out, int outmax, void (*write_cb)(const char *));
 void js_page_reset(void);   /* drop the persistent page env (call on navigation) */
+/* Fire the JS handler registered (el.onclick=fn / addEventListener) for element
+ * `id` and event `type` (e.g. "click"), in the persistent page env. 1 if one ran. */
+int js_fire_event(const char *id, const char *type, char *out, int outmax, void (*write_cb)(const char *));
 
 /* Register a localStorage backing store (key->value strings) used by page JS;
  * cleared automatically by js_run (the shell path). */
