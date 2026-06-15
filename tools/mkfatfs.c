@@ -404,7 +404,7 @@ static const struct {
         "<h2>Apps</h2>"
         "<p>Open from the <b>Apps</b> menu (<span class=\"key\">F9</span>) or the shell with <code>run NAME</code>:</p>"
         "<dl>"
-        "<dt>shell, clock, calc, editor</dt><dd>a terminal, a clock dashboard, a calculator (<code>+ - * / % ^</code>, parens, <code>0x</code> hex), a text editor</dd>"
+        "<dt>shell, clock, calc, editor</dt><dd>a terminal, a clock dashboard, a calculator (<code>+ - * / % ^ &amp; | &lt;&lt; &gt;&gt; ~</code>, parens, <code>0x</code> hex), a text editor</dd>"
         "<dt>games</dt><dd>snake, 2048, life, tetris, breakout, mines, sudoku, maze, hangman, adv (a text adventure) &mdash; all in colour, several with saved high scores</dd>"
         "<dt>tools</dt><dd>calendar (month view), mandel (a Mandelbrot explorer), piano, jukebox (built-in tunes), matrix (a digital-rain screensaver), paint (an ASCII-art canvas, saves to PAINT.TXT)</dd>"
         "</dl>"
