@@ -54,7 +54,12 @@
 #define TXSTAT_DD  (1 << 0)
 #define RXSTAT_DD  (1 << 0)
 
-#define RX_COUNT   32
+/* A deeper RX ring absorbs fast bursts (e.g. a CDN sending a dozen back-to-back
+ * full-size segments) before the poll loop drains them — fewer descriptor
+ * overflows means fewer dropped segments for the TCP layer's out-of-order
+ * reassembly to recover. 64 descriptors fit one 4 KB frame (64*16 = 1024 B, and
+ * RDLEN stays 128-byte aligned); each needs a 4 KB receive buffer (+128 KB). */
+#define RX_COUNT   64
 #define TX_COUNT   8
 #define BUF_SIZE   2048
 
