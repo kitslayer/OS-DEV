@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (305 milestones):** the big arcs below are now DONE — a from-scratch
+> **Status (337 milestones):** the big arcs below are now DONE — a from-scratch
 > **TLS 1.3 client** browses the real HTTPS web with X.509 chain validation, a
 > **comprehensive from-scratch JavaScript engine** (full OOP + ES6 + regex +
 > Map/Set/Date) runs in the shell and in pages, and the browser is **fully
@@ -10,6 +10,17 @@
 > (text/password/checkbox/radio/hidden/submit/button), **GET form submission +
 > live web search (DuckDuckGo) + address-bar search**, and reactive events
 > (`onchange`/`oninput`).
+>
+> **M302–337 added a small CSS engine and a big app suite:** the browser now has
+> a real (if small) **CSS engine** — per-element `color`/`font-weight`/
+> `font-style`/`text-decoration` from inline `style=` *and* `<style>` rules
+> (`tag`/`.class`/`#id`/`[attr]` selectors), `rgb()`/named colours, a real cascade
+> and a nesting scope stack — and the start/help/index pages are styled by it.
+> Userspace grew to **twenty apps** via a `sys_setcolor` palette: new ones are
+> Sudoku, a Calendar, a Mandelbrot explorer, a Piano, a Maze, a text Adventure, a
+> Matrix screensaver, an ASCII Paint (saves/loads files), Hangman, and a music
+> Jukebox; the games are colourised and several keep persistent high scores. Only
+> CSS *layout* (font-size/text-align/box model) still needs a layout engine.
 >
 > **M216–260 rounded the JavaScript language + stdlib out to near-completeness**
 > (found by systematic probing): the full operator set (`delete`/`in`/
@@ -77,7 +88,7 @@
 > needs a layout engine the token-stream renderer lacks; the *machinery* of CSS
 > [selectors, cascade, nesting] is done.)
 
-OS-DEV is a **graphical desktop OS** (305 milestones). It boots to a themed
+OS-DEV is a **graphical desktop OS** (337 milestones). It boots to a themed
 windowing desktop with a **taskbar** that hosts ten **real ring-3 userspace
 programs** as windows — a shell, a clock, a calculator, a text editor, and six
 games (Snake, 2048, Life, Tetris, Breakout, Minesweeper) — plus a **graphical web
