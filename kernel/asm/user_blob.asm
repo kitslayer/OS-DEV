@@ -27,6 +27,7 @@ global paint_elf_start, paint_elf_end
 global hangman_elf_start, hangman_elf_end
 global jukebox_elf_start, jukebox_elf_end
 global ttt_elf_start, ttt_elf_end
+global bj_elf_start, bj_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -111,5 +112,9 @@ jukebox_elf_end:
 ttt_elf_start:
     incbin "build/ttt.elf"
 ttt_elf_end:
+
+bj_elf_start:
+    incbin "build/bj.elf"
+bj_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
