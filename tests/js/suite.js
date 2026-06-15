@@ -157,6 +157,8 @@ print(Math.hypot(3,4), Math.hypot(5,12), Math.log2(1024), Math.sqrt(16));
 print(Array.from({length:4}, function(_,i){return i;}).join(","));
 print(Object.getOwnPropertyNames({x:1,y:2}).join(","));
 print(Math.cbrt(27), Math.cbrt(-64), Math.clz32(1), Math.imul(0xFFFFFFFF,5));
+var _fo={a:1}; Object.freeze(_fo); _fo.a=9; _fo.b=2; delete _fo.a; print(_fo.a, _fo.b, Object.isFrozen(_fo));
+var _fn={a:1}; _fn.a=9; _fn.c=3; print(_fn.a, _fn.c, Object.isFrozen(_fn));
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);

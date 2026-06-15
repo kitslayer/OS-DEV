@@ -666,6 +666,7 @@ struct val { int t; int64_t num; const char *str; obj *o; };
 
 struct obj {
     int kind;
+    int frozen;        /* Object.freeze: blocks property set/delete (shallow) */
     /* object: parallel key/val arrays */
     const char **keys; val *vals; int n, cap;
     /* function */
@@ -697,6 +698,7 @@ static int obj_keyed(obj *o){ return o && (o->kind==V_OBJ || o->kind==V_REGEX); 
 static void obj_set(obj *o, const char *key, val v) {
     if (!o || !o->keys || !o->vals) { g_oom=1; return; }   /* a NULL/half-built obj (OOM) — don't deref */
     if (!obj_keyed(o)) return;   /* not a keyed object (array/map/set/date) — ignore stray property writes */
+    if (o->frozen) return;       /* Object.freeze: silently ignore writes (non-strict semantics) */
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) { o->vals[i]=v; return; }
     if (o->n>=o->cap) { int nc=o->cap*2; const char **nk=aalloc(sizeof(char*)*nc); val *nv=aalloc(sizeof(val)*nc); if(!nk||!nv){g_oom=1;return;} memcpy(nk,o->keys,sizeof(char*)*o->n); memcpy(nv,o->vals,sizeof(val)*o->n); o->keys=nk; o->vals=nv; o->cap=nc; }
     o->keys[o->n]=key; o->vals[o->n]=v; o->n++;
@@ -711,6 +713,7 @@ static int obj_get(obj *o, const char *key, val *out) {
  * never arrays/maps whose vals[] are positional. */
 static int obj_delete(obj *o, const char *key) {
     if (!obj_keyed(o)) return 0;
+    if (o->frozen) return 0;   /* Object.freeze: can't delete */
     for (int i=0;i<o->n;i++) if (strcmp(o->keys[i],key)==0) {
         for (int j=i;j+1<o->n;j++) { o->keys[j]=o->keys[j+1]; o->vals[j]=o->vals[j+1]; }
         o->n--; return 1;
@@ -2034,6 +2037,8 @@ static val nat_obj_fromEntries(val *a, int n){
     }
     return obj_val(r);
 }
+static val nat_obj_freeze(val *a, int n){ if(n && a[0].t==V_OBJ && a[0].o) a[0].o->frozen=1; return n?a[0]:UND(); }
+static val nat_obj_isFrozen(val *a, int n){ if(!n || a[0].t!=V_OBJ || !a[0].o) return BOOLV(1); return BOOLV(a[0].o->frozen!=0); }   /* non-objects are "frozen" per spec */
 static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
     if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
     for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++) obj_set(a[0].o, a[i].o->keys[j], a[i].o->vals[j]);
@@ -2114,7 +2119,7 @@ static void install_globals(env *g) {
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); env_define(g,"Object",obj_val(objc));
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
