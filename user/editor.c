@@ -90,7 +90,7 @@ static void render(const char *msg) {
     st[p++] = ':';
     itoa_i(cl, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* col */
     st[p] = 0;
-    print(st); print("\n");
+    sys_setcolor(4); print(st); print("\n"); sys_setcolor(0);   /* status line: cyan */
 
     /* Scroll a window around the cursor so it's always visible (centred when
      * possible), and print exactly EDVIS grid-rows so the grid doesn't scroll
