@@ -91,7 +91,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc\n");
+            print("files:  ls cat head tail sort nl tac uniq cut edit write rm cp mv mkdir cd pwd tree find grep hexdump wc[-lwc]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> crypt base64\n");
@@ -588,6 +588,16 @@ int main(void) {
             static char buf[2048];
             const char *p = line + 3; char num[12];
             int tl = 0, tw = 0, nfiles = 0; long tb = 0;
+            int wl = 0, ww = 0, wcb = 0;                   /* -l/-w/-c: which counts to show (no flag = all three) */
+            while (*p == ' ') p++;
+            while (p[0] == '-' && p[1] && p[1] != ' ') {
+                int t, valid = 1;
+                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'l' && p[t] != 'w' && p[t] != 'c') valid = 0;
+                if (!valid) break;                          /* not a flag token (e.g. a filename) */
+                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'l') wl = 1; else if (p[t] == 'w') ww = 1; else wcb = 1; }
+                p += t; while (*p == ' ') p++;
+            }
+            if (!wl && !ww && !wcb) { wl = ww = wcb = 1; }
             while (*p) {                                   /* count each space-separated file */
                 while (*p == ' ') p++;
                 if (!*p) break;
@@ -603,19 +613,19 @@ int main(void) {
                     if (c == ' ' || c == '\t' || c == '\n' || c == '\r') inword = 0;
                     else if (!inword) { inword = 1; words++; }
                 }
-                print("  lines "); itoa_simple(lines, num); print(num);
-                print("  words "); itoa_simple(words, num); print(num);
-                print("  bytes "); itoa_simple((int)n, num); print(num);
+                if (wl) { print("  lines "); itoa_simple(lines, num); print(num); }
+                if (ww) { print("  words "); itoa_simple(words, num); print(num); }
+                if (wcb) { print("  bytes "); itoa_simple((int)n, num); print(num); }
                 print("  "); print(name); print("\n");
                 tl += lines; tw += words; tb += n; nfiles++;
             }
             if (nfiles > 1) {
-                print("  lines "); itoa_simple(tl, num); print(num);
-                print("  words "); itoa_simple(tw, num); print(num);
-                print("  bytes "); itoa_simple((int)tb, num); print(num);
+                if (wl) { print("  lines "); itoa_simple(tl, num); print(num); }
+                if (ww) { print("  words "); itoa_simple(tw, num); print(num); }
+                if (wcb) { print("  bytes "); itoa_simple((int)tb, num); print(num); }
                 print("  total\n");
             }
-            if (nfiles == 0) print("usage: wc <file>...\n");
+            if (nfiles == 0) print("usage: wc [-lwc] <file>...\n");
         } else if (startswith(line, "hexdump ")) {
             static char buf[512];
             long n = sys_readfile(line + 8, buf, sizeof(buf));
