@@ -151,6 +151,7 @@ oops Error
 TypeError:t
 1 undefined true
 9 3 false
+true false true false true false true false
 true 0 true 0
 function true 0 true
 2030 5 20 3

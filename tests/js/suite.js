@@ -167,6 +167,7 @@ print("hello".substring(3,1), "[" + "hello".slice(3,1) + "]");
 var _er=new Error("oops"); print(_er.message, _er.name); try { throw new TypeError("t"); } catch(_x) { print(_x.name+":"+_x.message); }
 var _fo={a:1}; Object.freeze(_fo); _fo.a=9; _fo.b=2; delete _fo.a; print(_fo.a, _fo.b, Object.isFrozen(_fo));
 var _fn={a:1}; _fn.a=9; _fn.c=3; print(_fn.a, _fn.c, Object.isFrozen(_fn));
+var _oi={}; print(Object.is(1,1), Object.is(1,2), Object.is("a","a"), Object.is(true,1), Object.is(_oi,_oi), Object.is({},{}), Object.is(null,null), Object.is(null,undefined));
 var _dt=new Date(); print(_dt.valueOf()===_dt.getTime(), _dt.getTime()%1000, _dt.getDay()>=0&&_dt.getDay()<=6, _dt.getMilliseconds());
 print(typeof Date.now, Date.now() > 0, Date.now() % 1000, Date.now() === new Date().getTime());
 var _ds=new Date(); _ds.setFullYear(2030); _ds.setMonth(5); _ds.setDate(20); _ds.setHours(3); print(_ds.getFullYear(), _ds.getMonth(), _ds.getDate(), _ds.getHours());
