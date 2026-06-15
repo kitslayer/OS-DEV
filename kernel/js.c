@@ -1432,11 +1432,13 @@ static val eval_expr_inner(node *n, env *e) {
                 case '=': {
                     if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)==0);
                     if (a.t!=b.t && !((a.t==V_NUM||a.t==V_BOOL)&&(b.t==V_NUM||b.t==V_BOOL))) return BOOLV(0);
+                    if (a.t==V_OBJ||a.t==V_ARR||a.t==V_FUN||a.t==V_NATIVE) return BOOLV(a.o==b.o);   /* objects/arrays/functions: reference identity (to_num coerced every object to 0 -> any two compared equal) */
                     return BOOLV(x==y);
                 }
                 case '!': {
                     if (a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)!=0);
                     if (a.t!=b.t && !((a.t==V_NUM||a.t==V_BOOL)&&(b.t==V_NUM||b.t==V_BOOL))) return BOOLV(1);
+                    if (a.t==V_OBJ||a.t==V_ARR||a.t==V_FUN||a.t==V_NATIVE) return BOOLV(a.o!=b.o);   /* reference identity */
                     return BOOLV(x!=y);
                 }
             }
@@ -2393,6 +2395,29 @@ static void def_native(obj *o, const char *name, val (*fn)(val*,int)){
 static val obj_val(obj *o){ val v=UND(); v.t=V_OBJ; v.o=o; return v; }
 static val obj_val_native(obj *o){ val v=UND(); v.t=V_NATIVE; v.o=o; return v; }
 
+/* structuredClone (M266): a deep clone that PRESERVES cycles & shared refs (the JSON
+ * round-trip can't). Plain objects/arrays cloned recursively; primitives by value; a
+ * `seen` map sends a re-encountered source to the SAME clone (cycles/shared refs kept).
+ * Functions and the exotic kinds (Map/Set/Date/RegExp/accessor/element) are not cloneable
+ * -> throw. Depth-capped; the bounded `seen[]` lives in the caller frame (no per-level alloc). */
+typedef struct { obj *from; obj *to; } sclone_pair;
+static val sclone(val v, sclone_pair *seen, int *nseen, int cap, int depth) {
+    if (g_err || g_oom) return UND();
+    if (depth > 64) { rt_err("structuredClone: structure too deep"); return UND(); }
+    if (v.t == V_FUN || v.t == V_NATIVE) { rt_err("structuredClone: cannot clone a function"); return UND(); }
+    if (v.t != V_OBJ && v.t != V_ARR) return v;        /* primitives copied by value */
+    if (!v.o) return v;
+    if (v.t == V_OBJ && v.o->kind != V_OBJ) { rt_err("structuredClone: value not cloneable"); return UND(); }   /* Map/Set/Date/RegExp/accessor/element */
+    for (int i=0;i<*nseen;i++) if (seen[i].from == v.o) { val r=UND(); r.t=v.t; r.o=seen[i].to; return r; }      /* already cloned -> same clone */
+    obj *c = new_obj(v.t==V_ARR ? V_ARR : V_OBJ); if(!c){ g_oom=1; return UND(); }
+    if (*nseen < cap) { seen[*nseen].from=v.o; seen[*nseen].to=c; (*nseen)++; }                                  /* register before recursing (cycles) */
+    val cv=UND(); cv.t=v.t; cv.o=c;
+    if (v.t==V_ARR) { for(int i=0;i<v.o->n && !g_oom && !g_err;i++) arr_push_val(c, sclone(v.o->vals[i], seen, nseen, cap, depth+1)); }
+    else { for(int i=0;i<v.o->n && !g_oom && !g_err;i++) obj_set(c, v.o->keys[i], sclone(v.o->vals[i], seen, nseen, cap, depth+1)); }
+    return cv;
+}
+static val nat_structured_clone(val *a, int n){ if(!n) return UND(); sclone_pair seen[128]; int nseen=0; return sclone(a[0], seen, &nseen, 128, 0); }
+
 static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
     /* console.log */
@@ -2465,6 +2490,7 @@ static void install_globals(env *g) {
     { obj *e=new_obj(V_NATIVE); e->native=uri_decode;             env_define(g,"decodeURIComponent",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURI;          env_define(g,"encodeURI",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_decodeURI;          env_define(g,"decodeURI",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_structured_clone; env_define(g,"structuredClone",obj_val_native(e)); }   /* deep clone w/ cycle preservation (M266) */
     obj *dt=new_obj(V_NATIVE); dt->native=nat_date;     env_define(g,"Date",obj_val_native(dt));   /* Date() -> wall-clock string */
     { obj *dst=new_obj(V_OBJ); if(dst){ def_native(dst,"now",nat_date_now); dt->statics=dst; } }   /* Date.now() */
 }

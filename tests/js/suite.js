@@ -218,4 +218,7 @@ var _pa={get full(){return this.f+this.l;}}; var _pi=Object.create(_pa); _pi.f="
 var _c1={}, _c2={}; _c1.__proto__=_c2; _c2.__proto__=_c1; print(_c1.zzz);                                         // undefined (cycle, no hang)
 print("k" in Object.create({k:1}), "z" in {a:1}, Object.create(_PF.prototype) instanceof _PF, new _PF() instanceof _PF);  // true false true true (in + instanceof walk the chain, M264)
 var _dps={}; Object.defineProperties(_dps,{a:{value:1},b:{get:function(){return 8;}}}); var _crd=Object.create({},{c:{value:5}}); print(_dps.a, _dps.b, _crd.c);  // 1 8 5 (defineProperties + Object.create 2nd arg, M265)
+var _e1={}, _e2={}; print(_e1===_e2, _e1===_e1, [1]===[1], _e1!==_e2);  // false true false true (object identity in ===/!==, was always-equal)
+var _scs={v:1}; var _sco={p:_scs,q:_scs,a:[1,2]}; var _scc=structuredClone(_sco); _scc.a[0]=9; _scc.p.v=5;
+print(_sco.a[0], _scc.a[0], _sco.p.v, _scc.p.v, _scc.p===_scc.q, _sco.p===_scc.p);  // 1 9 1 5 true false (deep clone: original intact, shared ref preserved, M266)
 print("-- done --");
