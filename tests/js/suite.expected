@@ -243,4 +243,11 @@ true true false false
 false
 true z
 true false
+-- instanceof / + ToPrimitive (M419-420) --
+true true true
+false false false
+true true
+true false
+1,23 12,3 o=[object Object]
+5 6 n=5
 -- done --

@@ -124,3 +124,48 @@ unsigned (`print_base(v,10)`). Review #14 then confirmed `stats`/`size`/`fib`
 already use the safe idiom. Fourteen reviews this session, all SHIP after the
 two #13 fixes — the periodic reviews keep earning their keep even on "trivial"
 code.
+
+## M416–420: the decode companions, and probing the engine to TWO real fixes
+
+The shell's decoders rounded out their encoders: `unmorse` (Morse→text, an
+exact-match table lookup), `unhex` (hex→ASCII), and `unbase64` (base64→text, a
+6-bit accumulator over the A–Za–z0–9+/ alphabet). Review #15 SHIP'd all three —
+the `unmorse` exact-match was *exhaustively* proven free of prefix false
+positives (≈95 prefix collisions in the table, zero wrong matches) by emulating
+every dot/dash string up to length 6.
+
+Then the **gap-finding lesson paid off twice over.** Probing the JS engine from
+the shell (`js -e print(...)` — note: `-e` does NOT auto-print, you need an
+explicit `print`/`console.log`) across nine batches (~45 features) turned up two
+genuine **correctness bugs** in the crown jewel, both fixed + reviewed:
+
+1. **`[1] instanceof Array` → `false`** (M419). Arrays are `V_ARR`, not `V_OBJ`,
+   and `Array` is a `V_NATIVE` ctor while `Object` is a `V_OBJ` — so the
+   `instanceof` handler's "LHS must be V_OBJ, RHS must be V_FUN/V_NATIVE"
+   early-return rejected both `[..] instanceof Array` and `{} instanceof Object`.
+   Fix: record the two built-in ctor objects at setup (`g_array_ctor`/
+   `g_object_ctor`) and, at the top of `case 'S'`, return true for an array vs
+   `Array` and any array/object/function vs `Object`. Additive + fall-through:
+   every other RHS (user classes, native Map/Set/Error/Date) has a distinct ctor
+   object, so it reaches the existing `ctor_class`/`fn_proto` walk UNCHANGED.
+   Primitives carry `.o==0` (all val ctors build from `UND()`), so the
+   `b.o && b.o==g_*_ctor` guard can't spuriously match.
+
+2. **`[1,2]+[3]` → `0`** (M420). The `+` handler only took the concat path for a
+   literal `V_STR` operand, so two arrays hit `to_num(arr)+to_num(arr)=0`. Real
+   JS does ToPrimitive first (objects stringify). The fix exploits the enum order
+   — number-ish types (`V_UNDEF..V_NUM`) are `< V_STR`, and string + every
+   object type are `>= V_STR` (Map/Set/Date keep `val.t==V_OBJ`) — so `==V_STR`
+   becomes `>=V_STR` at both `+` sites. The numeric path is **byte-identical**
+   for number-ish operands; only object operands (previously garbage `0`) are
+   redirected to the already-proven concat path. `2+3`→5 and a numeric `reduce`
+   stay numeric; `1+[2,3]`→"12,3" is now spec-correct.
+
+**The bigger finding:** everything *else* probed is correct, including the subtle
+cases people get wrong — `typeof null`→"object", default `.sort()` is
+lexicographic (`[10,2,1]`→"1,10,2"), `0 ?? 5`→0 (nullish ≠ `||`), `'x'+[1,2,3]`
+→"x1,2,3", optional chaining, spread-into-call, ES2021 `replaceAll`/`flatMap`,
+ES2023 `findLast`. The engine is comprehensively modern AND correct; the only
+known remaining gaps are getters/setters (hot path) and generators/async
+(architecturally hard) — both deferred. Seventeen reviews this session, all SHIP.
+**Probing > assuming, again: ~43 confirmations plus 2 real fixes.**

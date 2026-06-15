@@ -266,4 +266,12 @@ _cl.classList.remove("a"); print(document.querySelector("p").getAttribute("class
 print(_cl.classList.toggle("ff", true), _cl.classList.contains("ff"), _cl.classList.toggle("ff", false), _cl.classList.contains("ff"));  // true true false false (toggle(name, force) 2-arg form; M293)
 var _he=document.querySelectorAll(".item")[1]; print(_he.hasAttribute("class")); _he.classList.add("z"); print(_he.hasAttribute("class"), _he.getAttribute("class"));  // false / true z (hasAttribute reflects the class attr; M286)
 var _ra=document.querySelector("p"); _ra.classList.add("k"); var _h1=_ra.hasAttribute("class"); _ra.removeAttribute("class"); print(_h1, _ra.hasAttribute("class"));  // true false (removeAttribute drops the attr; M295)
+print("-- instanceof / + ToPrimitive (M419-420) --");
+var _ar=[1,2], _ob={a:1};
+print(_ar instanceof Array, _ob instanceof Object, _ar instanceof Object);  // true true true (M419: array/object literals vs built-in ctors)
+print(5 instanceof Object, "s" instanceof Array, null instanceof Object);   // false false false (primitives are not instanceof)
+function _IC(){} print(new _IC() instanceof _IC, new _IC() instanceof Object);  // true true (user ctor chain still works; instance is also instanceof Object)
+print(new Map() instanceof Map, _ar instanceof Map);  // true false (native ctor unchanged; array is not a Map)
+print([1,2]+[3], 1+[2,3], "o="+_ob);  // 1,23 12,3 o=[object Object] (M420: object operands string-concat via ToPrimitive)
+print(2+3, [1,2,3].reduce(function(a,b){return a+b;},0), "n="+5);  // 5 6 n=5 (numeric path unregressed)
 print("-- done --");
