@@ -29,6 +29,7 @@ global jukebox_elf_start, jukebox_elf_end
 global ttt_elf_start, ttt_elf_end
 global bj_elf_start, bj_elf_end
 global typing_elf_start, typing_elf_end
+global simon_elf_start, simon_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -121,5 +122,9 @@ bj_elf_end:
 typing_elf_start:
     incbin "build/typing.elf"
 typing_elf_end:
+
+simon_elf_start:
+    incbin "build/simon.elf"
+simon_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
