@@ -142,6 +142,7 @@ x,y
 3 -4 31 -5
 1 undefined true
 9 3 false
+true 0 true 0
 -- location --
 https: host.example /dir/page ?q=hi&n=2
 https://host.example/dir/page?q=hi&n=2

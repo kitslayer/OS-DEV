@@ -1867,6 +1867,16 @@ static val native_ls_setItem(val *args, int nargs) {
 
 /* Date() -> current wall-clock as "YYYY-MM-DD HH:MM:SS" (a useful subset of the
  * real Date). Reads the CMOS RTC directly (kernel); a fixed string on the host. */
+/* Days since the Unix epoch (1970-01-01) for a proleptic-Gregorian y/m(1-12)/d.
+ * Howard Hinnant's branch-free algorithm; exact, no FPU. Used by Date.getTime/getDay. */
+static int64_t days_from_civil(int64_t y, int64_t m, int64_t d){
+    y -= (m <= 2);
+    int64_t era = (y >= 0 ? y : y-399) / 400;
+    int64_t yoe = y - era*400;
+    int64_t doy = (153*(m + (m > 2 ? -3 : 9)) + 2)/5 + d-1;
+    int64_t doe = yoe*365 + yoe/4 - yoe/100 + doy;
+    return era*146097 + doe - 719468;
+}
 /* Date() / new Date() -> a V_DATE object holding [year,month,day,hour,min,sec] in
  * vals[0..5] (read from the RTC at construction). Methods via eval_date_method;
  * val_to_str renders "YYYY-MM-DD HH:MM:SS" so it still prints/coerces like before. */
@@ -1889,6 +1899,9 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
     if(strcmp(name,"getHours")==0)    return o->vals[3];
     if(strcmp(name,"getMinutes")==0)  return o->vals[4];
     if(strcmp(name,"getSeconds")==0)  return o->vals[5];
+    if(strcmp(name,"getMilliseconds")==0) return NUM(0);   /* RTC is second-resolution */
+    if(strcmp(name,"getDay")==0){ int64_t z=days_from_civil(o->vals[0].num,o->vals[1].num,o->vals[2].num); int64_t wd=(z+4)%7; if(wd<0)wd+=7; return NUM(wd); }   /* 0=Sun..6=Sat (epoch day 0 was a Thursday) */
+    if(strcmp(name,"getTime")==0||strcmp(name,"valueOf")==0){ int64_t z=days_from_civil(o->vals[0].num,o->vals[1].num,o->vals[2].num); int64_t secs=z*86400 + o->vals[3].num*3600 + o->vals[4].num*60 + o->vals[5].num; return NUM(secs*1000); }   /* epoch ms */
     if(strcmp(name,"toString")==0||strcmp(name,"toISOString")==0) return STRV(val_to_str(recv));
     rt_err("unknown Date method"); return UND();
 }
