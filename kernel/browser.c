@@ -1400,14 +1400,35 @@ static void run_js_event(browser_t *b, const char *id, const char *type) {
 /* If the element has the named inline handler (onchange/oninput/…), run it.
  * Returns 1 if it ran (run_js_handler re-renders), so the caller can skip its own. */
 static int fire_handler(browser_t *b, const char *id, const char *attr) {
-    int as, ae; if (!dom_attr_region(b, id, &as, &ae)) return 0;
-    const char *oc; int ocl;
-    if (!find_attr(b->raw + as, ae - as, attr, &oc, &ocl) || ocl <= 0) return 0;
-    char code[1024]; int n = ocl; if (n > (int)sizeof(code) - 1) n = (int)sizeof(code) - 1;
-    for (int i = 0; i < n; i++) code[i] = oc[i];   /* copy BEFORE run_js_handler mutates b->raw */
-    code[n] = 0;
-    run_js_handler(b, code);
-    return 1;
+    int as, ae;
+    if (dom_attr_region(b, id, &as, &ae)) {
+        const char *oc; int ocl;
+        if (find_attr(b->raw + as, ae - as, attr, &oc, &ocl) && ocl > 0) {   /* inline onchange="CODE" */
+            char code[1024]; int n = ocl; if (n > (int)sizeof(code) - 1) n = (int)sizeof(code) - 1;
+            for (int i = 0; i < n; i++) code[i] = oc[i];   /* copy BEFORE run_js_handler mutates b->raw */
+            code[n] = 0;
+            run_js_handler(b, code);
+            return 1;
+        }
+    }
+    /* no inline attribute: try a JS-assigned handler (el.onchange=fn / addEventListener),
+     * keyed by id with the bare event type ("on" stripped). Rides this same input path. */
+    {
+        static char jsout[2048];
+        int saved_sel = b->sel;                          /* preserve selection across the re-render (parity with run_js_handler) */
+        int appendpos = b->bodyoff + b->bodylen;
+        if (appendpos >= RAW_MAX - 1) return 0;
+        g_sw_raw = b->raw; g_sw_pos = appendpos; g_sw_base = appendpos; g_sw_max = RAW_MAX;
+        js_bind_storage(b);
+        int ran = js_fire_event(id, attr + 2, jsout, sizeof(jsout), script_write_cb);
+        int written = g_sw_pos - g_sw_base;
+        g_sw_raw = 0;
+        if (jsout[0]) kprintf("[js] %s\n", jsout);
+        if (written > 0) b->bodylen += written;
+        if (ran || written > 0) parse_html(b, b->raw + b->bodyoff, b->bodylen);   /* re-render to show the change + handler effects */
+        if (saved_sel != NO_LINK && saved_sel < b->nlink) b->sel = saved_sel;
+        return ran;
+    }
 }
 static int fire_onchange(browser_t *b, const char *id) { return fire_handler(b, id, "onchange"); }
 
