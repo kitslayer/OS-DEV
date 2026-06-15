@@ -207,4 +207,6 @@ var _r=new _Rc(); print(_r.area); _r.area=10; print(_r.area, _r.w);            /
 class _Ba { get nm(){ return "base"; } } class _Su extends _Ba { get nm(){ return "sub"; } }
 print(new _Ba().nm, new _Su().nm, new (class extends _Ba {})().nm);            // base sub base
 var _up={_n:5, get n(){return this._n;}, set n(v){this._n=v;}}; print(_up.n++, _up.n, ++_up.n); var _gu={get n(){return 7;}}; print(_gu.n++, _gu.n);  // 5 6 7 / 7 7 (++ routes thru get/set, doesn't corrupt the accessor)
+var _dp={_v:1}; Object.defineProperty(_dp,"x",{get:function(){return this._v*10;},set:function(v){this._v=v;}}); _dp.x=5; Object.defineProperty(_dp,"d",{value:8});
+print(_dp.x, _dp.d, Object.getOwnPropertyDescriptor({a:7},"a").value, typeof Object.getOwnPropertyDescriptor(_dp,"x").get, Object.getOwnPropertyDescriptor({},"z"));  // 50 8 7 function undefined
 print("-- done --");

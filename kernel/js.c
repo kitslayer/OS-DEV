@@ -2279,6 +2279,32 @@ static val nat_obj_fromEntries(val *a, int n){
 static val nat_obj_freeze(val *a, int n){ if(n && a[0].t==V_OBJ && a[0].o) a[0].o->frozen=1; return n?a[0]:UND(); }
 static val nat_obj_isFrozen(val *a, int n){ if(!n || a[0].t!=V_OBJ || !a[0].o) return BOOLV(1); return BOOLV(a[0].o->frozen!=0); }   /* non-objects are "frozen" per spec */
 static val nat_object_is(val *a, int n){ return BOOLV(val_equal(n>0?a[0]:UND(), n>1?a[1]:UND())); }   /* Object.is: with no NaN/-0 in an integer engine, this is exactly strict (===) equality (val_equal) */
+/* Object.defineProperty(obj, key, descriptor): the programmatic way to install an
+ * accessor (reusing M261's V_ACCESSOR) or a data property. {get}/{set} -> accessor;
+ * {value} -> plain value. writable/enumerable/configurable are accepted but not
+ * enforced (this engine has no such property attributes). Returns the object. */
+static val nat_obj_defineProperty(val *a, int n){
+    if (n<3 || a[0].t!=V_OBJ || !obj_keyed(a[0].o) || a[2].t!=V_OBJ) { rt_err("Object.defineProperty(obj, key, descriptor)"); return UND(); }
+    obj *o=a[0].o; const char *key=val_to_str(a[1]); obj *desc=a[2].o; val g,s,v;
+    int hg=obj_get(desc,"get",&g) && (g.t==V_FUN||g.t==V_NATIVE);
+    int hs=obj_get(desc,"set",&s) && (s.t==V_FUN||s.t==V_NATIVE);
+    if (hg||hs) { obj *acc=new_accessor(); if(!acc){g_oom=1;return UND();} if(hg)acc->vals[0]=g; if(hs)acc->vals[1]=s; obj_set(o,key,obj_val(acc)); }   /* accessor descriptor */
+    else if (obj_get(desc,"value",&v)) obj_set(o,key,v);                                                                                          /* data descriptor */
+    else obj_set(o,key,UND());
+    return a[0];
+}
+/* Object.getOwnPropertyDescriptor(obj, key): the read pair. Accessor -> {get,set,...},
+ * data -> {value,writable,...}; missing key -> undefined. Flags are always true
+ * (no attribute enforcement here). Reads the slot RAW (obj_get doesn't fire). */
+static val nat_obj_getOwnPropertyDescriptor(val *a, int n){
+    if (n<2 || a[0].t!=V_OBJ || !obj_keyed(a[0].o)) return UND();
+    val stored; if (!obj_get(a[0].o, val_to_str(a[1]), &stored)) return UND();
+    obj *d=new_obj(V_OBJ); if(!d){g_oom=1;return UND();}
+    if (is_accessor(stored)) { obj_set(d,"get",stored.o->vals[0]); obj_set(d,"set",stored.o->vals[1]); }
+    else { obj_set(d,"value",stored); obj_set(d,"writable",BOOLV(1)); }
+    obj_set(d,"enumerable",BOOLV(1)); obj_set(d,"configurable",BOOLV(1));
+    return obj_val(d);
+}
 static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
     if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
     for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++) obj_set(a[0].o, a[i].o->keys[j], a[i].o->vals[j]);
@@ -2359,7 +2385,7 @@ static void install_globals(env *g) {
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); env_define(g,"Object",obj_val(objc));
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
