@@ -359,15 +359,30 @@ static node *parse_primary(lexer *L) {
             if (peek_kw(L,"extends")) { advance(L); cls->a=parse_postfix(L); }   /* superclass expression */
             expect_punc(L,"{");
             cls->list=aalloc(sizeof(node*)*32); cls->nlist=0;
+            node *fieldblk=mknode(N_BLOCK); fieldblk->list=aalloc(sizeof(node*)*32); fieldblk->nlist=0;
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,";")) { advance(L); continue; }   /* stray semicolons between members */
-                token mn=advance(L);                              /* method name (incl. "constructor") */
-                node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len;
-                parse_fn_params(L, fn);
-                fn->a = parse_stmt(L);                            /* method body */
-                if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
+                token mn=advance(L);                              /* member name (incl. "constructor") */
+                /* `static`: v1 has no class-level statics, so a `static <name>` member is treated as
+                 * an instance member (skip the modifier) — avoids a bogus field named "static". */
+                if (mn.len==6 && memcmp(mn.s,"static",6)==0 && peek(L).type==T_IDENT) mn=advance(L);
+                if (peek_punc(L,"(")) {                           /* method:  name(params){body} */
+                    node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len;
+                    parse_fn_params(L, fn);
+                    fn->a = parse_stmt(L);
+                    if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
+                } else {                                          /* field:  name [= expr] ;  ->  this.name = expr */
+                    node *init = peek_punc(L,"=") ? (advance(L), parse_assign(L)) : mknode(N_UNDEF);
+                    node *th=mknode(N_THIS);
+                    node *mem=mknode(N_MEMBER); mem->a=th; mem->str=intern(mn.s,mn.len); mem->slen=mn.len;
+                    node *as=mknode(N_ASSIGN); as->op='='; as->a=mem; as->b=init;
+                    node *ex=mknode(N_EXPR); ex->a=as;
+                    if (fieldblk->list && fieldblk->nlist<32) fieldblk->list[fieldblk->nlist++]=ex;
+                    skip_semi(L);
+                }
             }
             expect_punc(L,"}");
+            if (fieldblk->nlist>0) cls->b=fieldblk;               /* instance field initializers (run in N_NEW) */
             return cls;
         }
         if (tok_is(t,"new")) {
@@ -680,6 +695,8 @@ struct obj {
     obj *ctor_class;   /* the constructor `new` used to build this instance (for `instanceof`) */
     obj *parent_class; /* a class ctor's TRUE direct parent (distinct from super_class, which points
                         * at the GRANDparent for an inherited ctor); the `instanceof` chain walks this */
+    node *fields;      /* a class ctor's OWN instance-field initializers (an N_BLOCK of `this.x=init`);
+                        * N_NEW runs them up the parent_class chain before the constructor */
     void *rx;          /* compiled regex (struct regex*) when kind==V_REGEX */
 };
 
@@ -1399,7 +1416,7 @@ static val eval_expr_inner(node *n, env *e) {
             obj *ctor_super=parent_obj;   /* own ctor: super is this class's parent */
             if (!ctor_node && has_parent) { ctor_node = parentC.o->fn; ctor_super = parentC.o->super_class; }  /* inherited ctor: its super is the GRANDparent (where it was defined) */
             if (!ctor_node) { node *em=mknode(N_FUNC); em->list=aalloc(sizeof(node*)); em->nlist=0; em->a=mknode(N_BLOCK); ctor_node=em; }
-            obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P; co->super_class=ctor_super; co->parent_class=parent_obj;
+            obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P; co->super_class=ctor_super; co->parent_class=parent_obj; co->fields=n->b;
             val cv=UND(); cv.t=V_FUN; cv.o=co;
             if (n->str) env_define(e, node_name(n), cv);
             return cv;
@@ -1414,6 +1431,14 @@ static val eval_expr_inner(node *n, env *e) {
              * properties (we model methods by copying rather than a prototype chain) */
             if (ctor.o->home_proto) { obj *P=ctor.o->home_proto; for(int i=0;i<P->n && !g_oom;i++) obj_set(self,P->keys[i],P->vals[i]); }
             val selfv=obj_val(self);
+            /* run instance field initializers (this.x=init), parent-class first so a child can override */
+            { obj *chain[32]; int cn=0; for (obj *k=ctor.o; k && cn<32; k=k->parent_class) chain[cn++]=k;
+              for (int ci=cn-1; ci>=0 && !g_err && !g_oom; ci--) { obj *k=chain[ci];
+                  if (k->fields && k->fields->type==N_BLOCK) {
+                      env *fe=new_env(k->scope); if(!fe){ g_oom=1; break; }
+                      env_define(fe,"this",selfv);
+                      for (int si=0; si<k->fields->nlist && !g_err && !g_oom; si++) eval_stmt(k->fields->list[si], fe);
+                  } } }
             val r=call_function_this(ctor, selfv, args, na);
             /* a constructor that explicitly returns an object overrides `this` */
             return (r.t==V_OBJ||r.t==V_ARR) ? r : selfv;

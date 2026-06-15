@@ -163,6 +163,11 @@ var _dt=new Date(); print(_dt.valueOf()===_dt.getTime(), _dt.getTime()%1000, _dt
 var _la=0; _la||=5; var _lb=3; _lb||=9; var _lc=null; _lc??=7; var _ld=0; _ld??=8;
 var _cnt=0; function _sf(){_cnt++;return 1;} var _lg=5; _lg||=_sf(); var _lh=1; _lh&&=8;
 print(_la,_lb,_lc,_ld,_lg,_cnt,_lh);
+print("-- class-fields --");
+class _Cf { n = 5; m = 2*3; inc(){ this.n++; return this.n; } }
+var _cf = new _Cf(); print(_cf.n, _cf.m, _cf.inc());
+class _Ca { a = 1; } class _Cb extends _Ca { b = 2; }
+var _cb = new _Cb(); print(_cb.a, _cb.b);
 print("-- location --");
 print(location.protocol, location.host, location.pathname, location.search);
 print(window.location.href);
