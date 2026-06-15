@@ -30,11 +30,20 @@ static void render(int px, int bx, int by, int lives, const char *msg) {
     sl[p++] = (char)('0' + lives);
     a = "  bricks "; while (*a) sl[p++] = *a++;
     int v = bricks_left, k = 0; char t[8]; if (!v) t[k++]='0'; while (v){t[k++]='0'+v%10;v/=10;} while (k) sl[p++]=t[--k];
-    sl[p] = 0; print(sl); print("\n");
+    sl[p] = 0; sys_setcolor(8); print(sl); print("\n");
 
-    char buf[(W + 1) * H + 1]; p = 0;
-    for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) buf[p++] = g[y][x]; buf[p++] = '\n'; }
-    buf[p] = 0; print(buf);
+    static const unsigned char BRICK_COL[3] = { 2, 7, 3 };   /* row colours: red, orange, yellow */
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            char ch = g[y][x]; int col = 0;
+            if (ch == '#')      col = BRICK_COL[y < BRICK_ROWS ? y : BRICK_ROWS - 1];  /* brick: by row */
+            else if (ch == '=') col = 4;        /* paddle: cyan */
+            else if (ch == 'o') col = 1;        /* ball: white */
+            sys_setcolor(col);
+            char cb[2] = { ch, 0 }; print(cb);
+        }
+        sys_setcolor(0); print("\n");
+    }
     if (msg) print(msg);
 }
 
