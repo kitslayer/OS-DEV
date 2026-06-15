@@ -211,8 +211,16 @@ axes too, so untrusted page scripts can't crash it on any of them:
   and no stack blow-up (the parser shares the same `g_depth` guard). A 30-digit
   number literal wraps to a 64-bit value (integer engine, no float) — wrong vs
   `1e30` but safe, not a crash.
+- **Catastrophic-backtracking regex → graceful (ReDoS-safe).** The classic ReDoS
+  patterns `/(a+)+$/` and `/(x+x+)+y/` against a long non-matching string both
+  return `false` (not a hang) — the regex engine's step budget cuts the
+  exponential search; deeply-nested groups `/((((((((((a))))))))))/`  don't blow
+  the stack (depth cap), and a `/a{99999}/` quantifier is bounded. (The two regex
+  stack-overflows earlier reviews caught are long fixed; this confirms the
+  hardening holds on adversarial patterns.)
 
 So across **features** (~60 verified, 2 bugs fixed), **stack depth**, **heap**,
-and **malformed input**, the from-scratch engine is correct where it should be
-and fails gracefully everywhere else — the full robustness profile for the
-untrusted-input crown jewel. Eighteen reviews this session, all SHIP.
+**malformed input**, and **catastrophic regex**, the from-scratch engine is
+correct where it should be and fails gracefully everywhere else — the full
+robustness profile for the untrusted-input crown jewel. Eighteen reviews this
+session, all SHIP.
