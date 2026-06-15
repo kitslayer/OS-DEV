@@ -35,12 +35,20 @@ static void render(int len, int fx, int fy, unsigned score, const char *msg) {
     const char *a = "  snake   score "; while (*a) sl[p++] = *a++;
     char num[12]; itoa_u(score, num); for (int i = 0; num[i]; i++) sl[p++] = num[i];
     sl[p] = 0;
-    print(sl); print("\n");
+    sys_setcolor(8); print(sl); print("\n");           /* header in grey */
 
-    char buf[(W + 1) * H + 1]; p = 0;
-    for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) buf[p++] = g[y][x]; buf[p++] = '\n'; }
-    buf[p] = 0;
-    print(buf);
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            char ch = g[y][x]; int col = 0;
+            if (ch == '*')      col = 2;   /* food: red    */
+            else if (ch == '@') col = 3;   /* head: yellow */
+            else if (ch == 'o') col = 9;   /* body: lime   */
+            sys_setcolor(col);
+            char cb[2] = { ch, 0 }; print(cb);
+        }
+        print("\n");
+    }
+    sys_setcolor(0);
     if (msg) { print(msg); }
 }
 
