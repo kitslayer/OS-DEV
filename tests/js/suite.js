@@ -209,4 +209,11 @@ print(new _Ba().nm, new _Su().nm, new (class extends _Ba {})().nm);            /
 var _up={_n:5, get n(){return this._n;}, set n(v){this._n=v;}}; print(_up.n++, _up.n, ++_up.n); var _gu={get n(){return 7;}}; print(_gu.n++, _gu.n);  // 5 6 7 / 7 7 (++ routes thru get/set, doesn't corrupt the accessor)
 var _dp={_v:1}; Object.defineProperty(_dp,"x",{get:function(){return this._v*10;},set:function(v){this._v=v;}}); _dp.x=5; Object.defineProperty(_dp,"d",{value:8});
 print(_dp.x, _dp.d, Object.getOwnPropertyDescriptor({a:7},"a").value, typeof Object.getOwnPropertyDescriptor(_dp,"x").get, Object.getOwnPropertyDescriptor({},"z"));  // 50 8 7 function undefined
+print("-- prototype chain --");
+var _pc=Object.create({greet(){return "hi "+this.nm;}}); _pc.nm="Ada"; print(_pc.greet());                       // hi Ada
+function _PF(){this.a=1;} _PF.prototype.m=function(){return this.a+1;}; var _pf=new _PF(); print(_pf.m(), _pf.a); // 2 1
+var _pb={k:"base"}; var _pd=Object.create(_pb); print(_pd.k); _pd.k="own"; print(_pd.k, _pb.k);                   // base / own base
+var _px={}; print(_px.__proto__); _px.__proto__={v:7}; print(_px.v, Object.getPrototypeOf(_px).v);                // null / 7 7
+var _pa={get full(){return this.f+this.l;}}; var _pi=Object.create(_pa); _pi.f="X"; _pi.l="Y"; print(_pi.full);  // XY
+var _c1={}, _c2={}; _c1.__proto__=_c2; _c2.__proto__=_c1; print(_c1.zzz);                                         // undefined (cycle, no hang)
 print("-- done --");

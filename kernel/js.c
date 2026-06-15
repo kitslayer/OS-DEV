@@ -774,6 +774,8 @@ struct obj {
                         * N_NEW runs them up the parent_class chain before the constructor */
     obj *statics;      /* a class ctor's static methods/fields as a V_OBJ (Class.method / Class.field) */
     void *rx;          /* compiled regex (struct regex*) when kind==V_REGEX */
+    obj *proto;        /* [[Prototype]] chain parent; NULL = none (every pre-M263 object, Object.create(null)) */
+    obj *fn_proto;     /* a plain function's `.prototype` object (becomes each `new F()` instance's proto). Stored in a field, NOT a keyed prop, because functions aren't obj_keyed */
 };
 
 struct env { const char **keys; val *vals; int n, cap; env *parent; };
@@ -1275,6 +1277,26 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
 static int  is_accessor(val v){ return v.t==V_OBJ && v.o && v.o->kind==V_ACCESSOR; }
 static obj *new_accessor(void){ obj *a=new_obj(V_ACCESSOR); if(a){ a->vals[0]=UND(); a->vals[1]=UND(); a->n=2; } return a; }
 static val  fire_getter(val acc, val recv){ val g=acc.o->vals[0]; if(g.t==V_UNDEF) return UND(); return call_function_this(g, recv, 0, 0); }
+/* Prototype chain (M263). Walk starts AFTER an own-property miss; on a hit, an inherited
+ * accessor fires with `this`=recv (the ORIGINAL receiver, not the holder). Cycle-capped
+ * (a.__proto__=b; b.__proto__=a) so it can never infinite-loop. ONLY the evaluator's member
+ * sites call this -- obj_get stays own-only, so in/delete/enumeration never walk the chain. */
+#define JS_PROTO_MAX 1000
+static int proto_lookup(obj *start, const char *name, val recv, val *out) {
+    int guard=0;
+    for (obj *p=start; p && ++guard<=JS_PROTO_MAX; p=p->proto) {
+        val v; if (obj_get(p,name,&v)) { if (is_accessor(v)) { *out=fire_getter(v,recv); return 1; } *out=v; return 1; }
+    }
+    return 0;
+}
+/* Non-firing variant for the WRITE path: find the first OWN match on the chain; report it
+ * only if it's an accessor (with a settable half). A plain data prop on the chain stops the
+ * search -> caller shadows it with an own property (never writes through). */
+static int proto_find_accessor(obj *start, const char *name, val *out) {
+    int guard=0;
+    for (obj *p=start; p && ++guard<=JS_PROTO_MAX; p=p->proto) { val v; if(obj_get(p,name,&v)){ if(is_accessor(v)){*out=v; return 1;} return 0; } }
+    return 0;
+}
 
 static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
@@ -1283,12 +1305,17 @@ static val eval_member_get(val recv, const char *name) {
         /* arrays store elements in vals[] with keys[] unused — no named-property lookup here */
     }
     if (recv.t==V_OBJ && recv.o) {
+        if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM(recv.o->n/2);   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
         if (recv.o->kind==V_ELEMENT) { static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
+        if (recv.o->proto) { val pv; if (proto_lookup(recv.o->proto, name, recv, &pv)) return pv; }   /* inherited property/method (M263) */
     }
-    if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val out; if (obj_get(k->statics,name,&out)) return out; } }   /* Class.staticField / Number.isInteger / static method as a value (inherited up the chain) */
+    if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) {
+        if (recv.t==V_FUN && strcmp(name,"prototype")==0) { if (!recv.o->fn_proto) { recv.o->fn_proto=new_obj(V_OBJ); if(!recv.o->fn_proto){ g_oom=1; return UND(); } } return obj_val(recv.o->fn_proto); }   /* lazy F.prototype, in a field (functions aren't obj_keyed) (M263) */
+        for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val out; if (obj_get(k->statics,name,&out)) return out; }   /* Class.staticField / Number.isInteger / static method as a value (inherited up the chain) */
+    }
     return UND();
 }
 
@@ -1435,7 +1462,12 @@ static val eval_expr_inner(node *n, env *e) {
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) { dom_prop(recv.o, node_name(t), val_to_str(rhs), 0, 0); return rhs; }   /* el.textContent = … -> mutate the page */
                 if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
-                if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ val cur; if(obj_get(recv.o,node_name(t),&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } /* fire setter */ else obj_set(recv.o, node_name(t), rhs); } return rhs; }
+                if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ const char *wk=node_name(t); val cur;
+                    if(recv.t==V_OBJ && strcmp(wk,"__proto__")==0){ recv.o->proto=(rhs.t==V_OBJ&&rhs.o)?rhs.o:0; return rhs; }   /* a.__proto__ = b / null (M263) */
+                    if(obj_get(recv.o,wk,&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); }                       /* own setter */
+                    else if(recv.o->proto && proto_find_accessor(recv.o->proto,wk,&cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); }   /* inherited setter (M263) */
+                    else obj_set(recv.o, wk, rhs);                                                                                                                    /* own data prop (shadows inherited data) */
+                } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
                 if (recv.t==V_ARR && recv.o) {
                     long i = to_num(idx);
@@ -1451,7 +1483,7 @@ static val eval_expr_inner(node *n, env *e) {
                     }
                     if (!g_oom && (int)i < recv.o->n) recv.o->vals[(int)i]=rhs;
                 }
-                else if (recv.t==V_OBJ && recv.o) { const char *key=val_to_str(idx); val cur; if(obj_get(recv.o,key,&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } /* fire setter */ else obj_set(recv.o, key, rhs); }
+                else if (recv.t==V_OBJ && recv.o) { const char *key=val_to_str(idx); val cur; if(obj_get(recv.o,key,&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } /* own setter */ else { val acc; if(recv.o->proto && proto_find_accessor(recv.o->proto,key,&acc)){ val s=acc.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } else obj_set(recv.o, key, rhs); } }   /* inherited setter or own data (M263) */
                 return rhs; }
             rt_err("invalid assignment target"); return UND();
         }
@@ -1470,7 +1502,7 @@ static val eval_expr_inner(node *n, env *e) {
             val idx=eval_expr(n->b,e);
             if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
             if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
-            if (recv.t==V_OBJ && recv.o){ val out; if(obj_get(recv.o,val_to_str(idx),&out)){ if(is_accessor(out)) return fire_getter(out,recv); return out; } }
+            if (recv.t==V_OBJ && recv.o){ const char *ik=val_to_str(idx); val out; if(obj_get(recv.o,ik,&out)){ if(is_accessor(out)) return fire_getter(out,recv); return out; } if(recv.o->proto){ val pv; if(proto_lookup(recv.o->proto,ik,recv,&pv)) return pv; } }   /* inherited (M263) */
             return UND(); }
         case N_CALL: {
             /* method call a.b(...) needs the receiver for string/array methods */
@@ -1510,7 +1542,8 @@ static val eval_expr_inner(node *n, env *e) {
                         return obj_val(bf); }
                     if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) { for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val sfn; if(obj_get(k->statics,m,&sfn)) return call_function_this(sfn, recv, args, na); } }   /* Class.staticMethod() / Number.isInteger() — `this` is the (sub)class; inherited up the chain */
                 }
-                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(is_accessor(fn)) fn=fire_getter(fn,recv); if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }
+                if (recv.t==V_OBJ && recv.o) { val fn; if(obj_get(recv.o,m,&fn)){ if(is_accessor(fn)) fn=fire_getter(fn,recv); if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); }
+                    if(recv.o->proto && proto_lookup(recv.o->proto,m,recv,&fn)){ if(n->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND(); return call_function_this(fn,recv,args,na); } }   /* inherited method, this=recv (M263) */
                 if (n->prefix) return UND();   /* obj.method?.() where method is absent */
                 rt_err("no such method"); return UND();
             }
@@ -1560,6 +1593,10 @@ static val eval_expr_inner(node *n, env *e) {
             if (ctor.t!=V_FUN) { rt_err("not a constructor"); return UND(); }
             obj *self=new_obj(V_OBJ); if(!self){ g_oom=1; return UND(); }
             self->ctor_class = ctor.o;   /* record the constructor so `instanceof` can find it */
+            if (!ctor.o->home_proto) {   /* PLAIN function (home_proto==NULL) -> instances inherit from F.prototype (the fn_proto object); classes (home_proto!=NULL) use the copy below, untouched (M263) */
+                if (!ctor.o->fn_proto) { ctor.o->fn_proto=new_obj(V_OBJ); if(!ctor.o->fn_proto){ g_oom=1; return UND(); } }
+                self->proto = ctor.o->fn_proto;
+            }
             /* class instance: copy the class's methods onto the new object as own
              * properties (we model methods by copying rather than a prototype chain) */
             if (ctor.o->home_proto) { obj *P=ctor.o->home_proto; for(int i=0;i<P->n && !g_oom;i++) obj_set(self,P->keys[i],P->vals[i]); }
@@ -2305,6 +2342,14 @@ static val nat_obj_getOwnPropertyDescriptor(val *a, int n){
     obj_set(d,"enumerable",BOOLV(1)); obj_set(d,"configurable",BOOLV(1));
     return obj_val(d);
 }
+/* Prototype-chain natives (M263). Object.create(proto) makes an object whose [[Prototype]]
+ * is proto (null -> none); the 2nd descriptor arg is deferred. get/setPrototypeOf read/write
+ * the link. The chain itself is consulted only at the evaluator member sites (see proto_lookup). */
+static val nat_obj_create(val *a, int n){ obj *o=new_obj(V_OBJ); if(!o){ g_oom=1; return UND(); }
+    if (n>=1 && a[0].t==V_OBJ && a[0].o) o->proto=a[0].o;   /* Object.create(null) / non-object -> proto stays NULL */
+    return obj_val(o); }
+static val nat_obj_getPrototypeOf(val *a, int n){ if (n>=1 && (a[0].t==V_OBJ||a[0].t==V_FUN) && a[0].o && a[0].o->proto) return obj_val(a[0].o->proto); val v=UND(); v.t=V_NULL; return v; }
+static val nat_obj_setPrototypeOf(val *a, int n){ if (n>=1 && a[0].t==V_OBJ && a[0].o) a[0].o->proto = (n>=2 && a[1].t==V_OBJ && a[1].o) ? a[1].o : 0; return n? a[0] : UND(); }
 static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
     if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
     for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++) obj_set(a[0].o, a[i].o->keys[j], a[i].o->vals[j]);
@@ -2385,7 +2430,7 @@ static void install_globals(env *g) {
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
-    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); env_define(g,"Object",obj_val(objc));
+    obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); env_define(g,"Object",obj_val(objc));
     { obj *mp=new_obj(V_NATIVE); if(mp){ mp->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=mp; env_define(g,"Map",v); } }   /* new Map() */
     { obj *st=new_obj(V_NATIVE); if(st){ st->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"Set",v); } }   /* new Set() */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */

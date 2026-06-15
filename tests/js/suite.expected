@@ -185,4 +185,13 @@ base sub base
 5 6 7
 7 7
 50 8 7 function undefined
+-- prototype chain --
+hi Ada
+2 1
+base
+own base
+null
+7 7
+XY
+undefined
 -- done --
