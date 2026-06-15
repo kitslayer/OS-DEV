@@ -2026,6 +2026,12 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
     if(strcmp(name,"getMilliseconds")==0) return NUM(0);   /* RTC is second-resolution */
     if(strcmp(name,"getDay")==0){ int64_t z=days_from_civil(o->vals[0].num,o->vals[1].num,o->vals[2].num); int64_t wd=(z+4)%7; if(wd<0)wd+=7; return NUM(wd); }   /* 0=Sun..6=Sat (epoch day 0 was a Thursday) */
     if(strcmp(name,"getTime")==0||strcmp(name,"valueOf")==0){ int64_t z=days_from_civil(o->vals[0].num,o->vals[1].num,o->vals[2].num); int64_t secs=z*86400 + o->vals[3].num*3600 + o->vals[4].num*60 + o->vals[5].num; return NUM(secs*1000); }   /* epoch ms */
+    if(strcmp(name,"setFullYear")==0){ if(nargs) o->vals[0]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }   /* setters store the field, return the new epoch ms */
+    if(strcmp(name,"setMonth")==0)   { if(nargs) o->vals[1]=NUM((int64_t)to_num(args[0])+1); return eval_date_method(recv,"getTime",0,0); }   /* arg is 0-based */
+    if(strcmp(name,"setDate")==0)    { if(nargs) o->vals[2]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setHours")==0)   { if(nargs) o->vals[3]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setMinutes")==0) { if(nargs) o->vals[4]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setSeconds")==0) { if(nargs) o->vals[5]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
     if(strcmp(name,"toString")==0||strcmp(name,"toISOString")==0) return STRV(val_to_str(recv));
     rt_err("unknown Date method"); return UND();
 }

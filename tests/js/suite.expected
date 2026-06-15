@@ -152,6 +152,7 @@ TypeError:t
 9 3 false
 true 0 true 0
 function true 0 true
+2030 5 20 3
 5 3 7 0 5 0 8
 10 0 5
 -- class-fields --

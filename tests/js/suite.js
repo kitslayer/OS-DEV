@@ -168,6 +168,7 @@ var _fo={a:1}; Object.freeze(_fo); _fo.a=9; _fo.b=2; delete _fo.a; print(_fo.a, 
 var _fn={a:1}; _fn.a=9; _fn.c=3; print(_fn.a, _fn.c, Object.isFrozen(_fn));
 var _dt=new Date(); print(_dt.valueOf()===_dt.getTime(), _dt.getTime()%1000, _dt.getDay()>=0&&_dt.getDay()<=6, _dt.getMilliseconds());
 print(typeof Date.now, Date.now() > 0, Date.now() % 1000, Date.now() === new Date().getTime());
+var _ds=new Date(); _ds.setFullYear(2030); _ds.setMonth(5); _ds.setDate(20); _ds.setHours(3); print(_ds.getFullYear(), _ds.getMonth(), _ds.getDate(), _ds.getHours());
 var _la=0; _la||=5; var _lb=3; _lb||=9; var _lc=null; _lc??=7; var _ld=0; _ld??=8;
 var _cnt=0; function _sf(){_cnt++;return 1;} var _lg=5; _lg||=_sf(); var _lh=1; _lh&&=8;
 print(_la,_lb,_lc,_ld,_lg,_cnt,_lh);
