@@ -15,6 +15,7 @@ int jpeg_probe (const uint8_t *, int, int *, int *, long *);
 int jpeg_decode(const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
 int png_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
 int gif_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
+int inflate    (const uint8_t *, int, uint8_t *, int);   /* raw DEFLATE */
 
 static uint8_t obuf[4u << 20], sbuf[4u << 20];   /* 4 MB each (BSS) */
 
@@ -66,6 +67,16 @@ int main(void) {
         run_all(f, n);
     }
 
-    printf("imgtest: M422 DRI PoC + truncated headers + %d fuzz iters — ASan/UBSan clean\n", ITERS);
+    /* 4. Direct DEFLATE fuzz: random streams straight into inflate(). The PNG
+     *    path reaches inflate only shallowly (PNG header parsing rejects most
+     *    random bytes first), so this directly exercises the huffman-table and
+     *    LZ77 back-reference paths — the classic DEFLATE OOB/loop vectors. */
+    for (int i = 0; i < ITERS; i++) {
+        int n = 1 + (int)(xr() % 80);
+        for (int j = 0; j < n; j++) f[j] = (uint8_t)xr();
+        inflate(f, n, obuf, sizeof obuf);
+    }
+
+    printf("imgtest: M422 DRI PoC + truncated headers + %d decoder + %d DEFLATE fuzz iters — ASan/UBSan clean\n", ITERS, ITERS);
     return 0;
 }
