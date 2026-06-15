@@ -125,6 +125,7 @@ Y
 6 -6 6 1 -1 7
 -- instanceof --
 true true false false w
+true true true false
 -- pow/void --
 1024 512 18 undefined undefined
 10 12

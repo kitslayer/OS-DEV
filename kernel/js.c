@@ -1328,7 +1328,7 @@ static val eval_expr_inner(node *n, env *e) {
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
                     return BOOLV(0);
                 case 'S':   /* `instanceof`: walk the instance's constructor chain looking for the RHS */
-                    if (a.t!=V_OBJ || !a.o || b.t!=V_FUN || !b.o) return BOOLV(0);
+                    if (a.t!=V_OBJ || !a.o || (b.t!=V_FUN && b.t!=V_NATIVE) || !b.o) return BOOLV(0);   /* RHS: a class (V_FUN) or a native ctor (Map/Set/Error/Date) */
                     for (obj *c=a.o->ctor_class; c; c=c->parent_class) if (c==b.o) return BOOLV(1);
                     return BOOLV(0);
                 case '&': return NUM(x&y); case '|': return NUM(x|y); case '^': return NUM(x^y);
@@ -1484,7 +1484,7 @@ static val eval_expr_inner(node *n, env *e) {
         }
         case N_NEW: {
             val ctor=eval_expr(n->a,e); val args[16]; int na=build_args(n->list, n->nlist, e, args, 16);
-            if (ctor.t==V_NATIVE) return ctor.o->native(args,na);   /* new Map() / new Set(): native makes the instance */
+            if (ctor.t==V_NATIVE) { val r=ctor.o->native(args,na); if (r.t==V_OBJ && r.o && !r.o->ctor_class) r.o->ctor_class=ctor.o; return r; }   /* new Map()/Set()/Error()/Date(): native makes the instance; link it to the ctor for instanceof */
             if (ctor.t!=V_FUN) { rt_err("not a constructor"); return UND(); }
             obj *self=new_obj(V_OBJ); if(!self){ g_oom=1; return UND(); }
             self->ctor_class = ctor.o;   /* record the constructor so `instanceof` can find it */
