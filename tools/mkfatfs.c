@@ -663,6 +663,13 @@ static const struct {
         "The legacy <big>&lt;big&gt; tag</big> and <font size=\"6\">&lt;font size=6&gt;</font> enlarge too. "
         "Small sizes such as <span style=\"font-size:10px\">10px</span> stay 1x &mdash; the bitmap font has no sub-1x. "
         "<span style=\"font-size:28px;color:#cc3300\">Large + coloured</span> compose.</p>" },
+    { "HIDE    HTM", "<title>display:none</title><h2>CSS display:none</h2>"
+        "<p>1. This paragraph is visible.</p>"
+        "<p style=\"display:none\">HIDDENP: this paragraph sets display:none and must NOT appear anywhere.</p>"
+        "<div hidden><p>HIDDENDIV: hidden via the HTML5 hidden attribute.</p><ul><li>HIDDENLI a hidden list item</li></ul></div>"
+        "<p>2. This paragraph is visible again, immediately after the hidden block.</p>"
+        "<p>3. A visible span<span style=\"display:none\"> HIDDENSPAN</span> with a hidden inline span (the word HIDDENSPAN must not show).</p>"
+        "<p>4. Final visible paragraph.</p>" },
     { "QUOTE   HTM", "<title>Blockquotes</title><h2>Blockquotes</h2>"
         "<p>A normal paragraph sits at the left margin for comparison.</p>"
         "<blockquote>This is a quoted block: it is indented from the left margin, and crucially, when it wraps across several lines every wrapped line stays indented under the quote &mdash; not only the first line.</blockquote>"

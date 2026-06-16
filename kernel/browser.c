@@ -125,8 +125,9 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
+    int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
@@ -176,7 +177,7 @@ static int scale_for(int style) { return style == STY_H1 ? 2 : 1; }
 /* ---- token emission ---- */
 static void emit_word(browser_t *b, int start, int style, int link) {
     int len = b->textlen - start;
-    if (len <= 0 || b->ntok >= TOK_MAX) return;
+    if (len <= 0 || b->ntok >= TOK_MAX || b->n_hidden > 0) return;   /* display:none -> emit nothing */
     b->tokcolor[b->ntok] = b->curcolor;                  /* <font color> override (0 = none) */
     b->tokul[b->ntok] = (uint8_t)b->curul;               /* underline (text-decoration / <u>) */
     b->tokbg[b->ntok] = b->curbg;                        /* background-color highlight (0 = none) */
@@ -187,7 +188,7 @@ static void emit_word(browser_t *b, int start, int style, int link) {
                                   (uint16_t)link, (uint8_t)style, TK_WORD };
 }
 static void emit_break(browser_t *b, int type) {
-    if (b->ntok == 0) return;                            /* no leading blank lines */
+    if (b->ntok == 0 || b->n_hidden > 0) return;         /* no leading blank lines / display:none */
     tok_t *last = &b->toks[b->ntok - 1];
     if (last->type == TK_WORD) {
         if (b->ntok >= TOK_MAX) return;
@@ -685,6 +686,12 @@ static int parse_style_fontsize(const char *s, int n) {
     if (ul >= 3 && (u[0]|32)=='r' && (u[1]|32)=='e' && (u[2]|32)=='m')   return num >= 2 ? 3 : num >= 1 ? 2 : 0;
     return num >= 28 ? 3 : num >= 19 ? 2 : 0;                            /* px / pt / unitless */
 }
+/* display: returns 1 for "display:none" (the element + its content are hidden). */
+static int parse_style_display(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "display", 7, &vs, &ve)) return 0;
+    return attr_eq(s + vs, ve - vs, "none");
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -720,11 +727,12 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->curtransform = b->sc[sp].savetransform;
                 b->curalign = b->sc[sp].savealign;
                 b->curscale = b->sc[sp].savescale;
+                if (b->sc[sp].hidden && b->n_hidden > 0) b->n_hidden--;   /* leaving a display:none element */
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al);   /* <style> rules first (lower priority) */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
@@ -735,7 +743,9 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
+            if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
         }
+        if (has_attr(attrs, attrlen, "hidden")) hide = 1;   /* the HTML5 `hidden` attribute */
         if (tageq(tag, "big")) { if (!fs) fs = 2; }         /* <big> -> 2x */
         if (tageq(tag, "font")) {                           /* <font size=N>: 5+ -> 2x, 6+/7 -> 3x */
             const char *sv; int svl;
@@ -750,9 +760,10 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
               if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg || al || fs) {  /* styled element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al || fs || hide) {  /* styled/hidden element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
+                b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
                 b->sc[sp].savecolor = b->curcolor; if (c) b->curcolor = c;
                 b->sc[sp].savebg = b->curbg; if (bg) b->curbg = bg;
                 b->sc[sp].saveul = b->curul; if (ul) b->curul = 1;
@@ -856,7 +867,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         } else b->curcolor = 0;
         return;
     }
-    if (tageq(tag, "hr")) { if (b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){0,0,NO_LINK,STY_NORMAL,TK_HR}; return; }
+    if (tageq(tag, "hr")) { if (b->ntok < TOK_MAX && b->n_hidden == 0) b->toks[b->ntok++] = (tok_t){0,0,NO_LINK,STY_NORMAL,TK_HR}; return; }
     if (tageq(tag, "input")) {                           /* a form field: shows its value; focusable for typing */
         if (!closing) {
             const char *v; int vl, idl;
@@ -937,7 +948,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                     char path[96]; int pn = 0;
                     for (int i = 5; i < srcl && pn < 95; i++) path[pn++] = src[i];
                     path[pn] = 0;
-                    int slot = decode_local_to_slot(b, path);
+                    int slot = b->n_hidden ? -1 : decode_local_to_slot(b, path);   /* display:none -> don't show */
                     if (slot >= 0 && b->ntok + 2 < TOK_MAX) {
                         /* honour explicit width/height (off=w, len=h; 0 = natural) */
                         int aw = attr_int(attrs, attrlen, "width");
@@ -961,7 +972,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                         int m = 1;
                         for (int i = 0; i < srcl; i++) { if (b->rimg_src[k][i] != src[i]) { m = 0; break; } }
                         if (!m || b->rimg_src[k][srcl] != 0) continue;   /* exact length+bytes */
-                        int slot = decode_bytes_to_slot(b, b->rimg_data[k], b->rimg_len[k]);
+                        int slot = b->n_hidden ? -1 : decode_bytes_to_slot(b, b->rimg_data[k], b->rimg_len[k]);
                         if (slot >= 0 && b->ntok + 2 < TOK_MAX) {
                             int aw = attr_int(attrs, attrlen, "width");
                             int ah = attr_int(attrs, attrlen, "height");
@@ -1162,6 +1173,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
     b->sc_sp = 0;                                        /* no style scopes open yet */
+    b->n_hidden = 0;                                     /* nothing hidden yet */
     b->n_css = 0;                                        /* <style> rules captured fresh each parse */
     b->form_action[0] = 0;                               /* no <form> action open yet */
     b->anc_n = 0;                                        /* fresh #fragment anchor table */
@@ -1281,6 +1293,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
         }
         if (inscript || instyle || insvg) continue;  /* never render script/style/svg */
         if (det_hide && !in_summary) continue;        /* inside a collapsed <details>, outside its <summary> */
+        if (b->n_hidden > 0) continue;                /* inside a display:none element (tags still tracked above) */
 
         if (c == '&') {
             char dec; int adv = decode_entity(body + i, len - i, &dec);

@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (453 milestones).** (M453: **browser cert-info display** — press `i` on an HTTPS page →
+> **Status (454 milestones).** (M454: **CSS `display:none` + `hidden` attr** — an element with inline
+> `display:none` (or the HTML5 `hidden` attr) suppresses itself + all content (text/bullets/hr/img).
+> An `n_hidden` counter raised/lowered by the existing tag-depth-matched sc[] scope stack (composes
+> with nesting); every emit primitive (emit_word/emit_break/hr+img token pushes) + the text-accum loop
+> gated on it. Additive (n_hidden=0 ⇒ unchanged); visual blast radius only. Verified in-OS (HIDE.HTM:
+> display:none p + hidden div+list + inline display:none span all absent, visible paragraphs in order,
+> no leak). Note: `<style>`-rule display:none + standalone void-element (img) display:none deferred.
+> M453: **browser cert-info display** — press `i` on an HTTPS page →
 > the status shows the leaf cert's CN + expiry (YYMMDD) + a verification word (`anchored`/`verified`).
 > `tls.c` exposes `tls_leaf_cn`/`tls_leaf_expiry`; browser snapshots CN/expiry/host_match per HTTPS
 > load. Safe read-only "padlock details" surfacing M451/M452. Verified in-OS (example.com →
