@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> paste<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1127,6 +1127,31 @@ int main(void) {
             if (last < 0) print("  .\n");                              /* no slash -> current dir */
             else if (last == 0) print("  /\n");                        /* "/file" -> "/" */
             else { path[last] = 0; print("  "); print(path); print("\n"); }
+        } else if (startswith(line, "paste ")) {          /* paste F1 F2 -> each file's line i, side by side (tab-joined) */
+            static char c1[2048], c2[2048];
+            const char *p = line + 6; while (*p == ' ') p++;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            while (*p == ' ') p++;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            if (!f1[0] || !f2[0]) { print("usage: paste <file1> <file2>\n"); }
+            else {
+                long n1 = sys_readfile(f1, c1, sizeof(c1));
+                long n2 = sys_readfile(f2, c2, sizeof(c2));
+                if (n1 < 0)      { print("paste: no such file: "); print(f1); print("\n"); }
+                else if (n2 < 0) { print("paste: no such file: "); print(f2); print("\n"); }
+                else {
+                    long i1 = 0, i2 = 0;
+                    while (i1 < n1 || i2 < n2) {
+                        long s1 = i1; while (i1 < n1 && c1[i1] != '\n') i1++; long e1 = i1; if (i1 < n1) i1++;
+                        long s2 = i2; while (i2 < n2 && c2[i2] != '\n') i2++; long e2 = i2; if (i2 < n2) i2++;
+                        char t[160]; long k, q = 0;
+                        for (k = s1; k < e1 && q < 78; k++) t[q++] = c1[k];   /* file1's line */
+                        t[q++] = '\t';
+                        for (k = s2; k < e2 && q < 158; k++) t[q++] = c2[k];  /* file2's line */
+                        t[q] = 0; print("  "); print(t); print("\n");
+                    }
+                }
+            }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
