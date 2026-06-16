@@ -45,6 +45,8 @@ void sys_sleep(int ms);
 void sys_setcolor(int color);   /* text colour for subsequent output: palette index 0-15 (0 = default) */
 void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, or (void*)-1 */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
+int  sys_gfx_init(int w, int h);     /* enter graphics mode: a w*h XRGB pixel canvas; 0/-1 */
+int  sys_gfx_blit(const void *pixels); /* copy w*h pixels (0x00RRGGBB) to the window; 0/-1 */
 
 /* dynamic memory (a first-fit free list over sbrk) */
 void *malloc(unsigned long n);

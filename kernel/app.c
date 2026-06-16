@@ -44,6 +44,8 @@ struct app {
     char        titlebuf[24];            /* persistent copy of the title */
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
+    uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
+    int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
     char     grid[APP_ROWS][APP_COLS];
     uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
     uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
@@ -81,7 +83,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             mandel_elf_start[], piano_elf_start[], maze_elf_start[], adv_elf_start[],
             matrix_elf_start[], paint_elf_start[], hangman_elf_start[], jukebox_elf_start[],
             ttt_elf_start[], bj_elf_start[], typing_elf_start[], simon_elf_start[],
-            c4_elf_start[], wordle_elf_start[];
+            c4_elf_start[], wordle_elf_start[], gfxdemo_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -109,6 +111,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "simon",  simon_elf_start,  "Simon" },
     { "c4",     c4_elf_start,     "Connect Four" },
     { "wordle", wordle_elf_start, "Wordle" },
+    { "gfxdemo", gfxdemo_elf_start, "Graphics Demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -200,6 +203,7 @@ int app_reap(app_t *a) {
         a->task = 0;
         vmm_destroy_address_space(a->cr3);   /* free page tables + user frames */
         a->cr3 = 0;
+        if (a->gfx) { kfree(a->gfx); a->gfx = 0; }   /* graphics canvas (kernel heap) */
         a->used = 0;
     }
     return !a->used;
@@ -368,6 +372,47 @@ uint64_t app_sbrk(long inc) {
     }
     a->heap_end = newend;
     return old;
+}
+
+/* ---- graphics mode: a per-app pixel canvas the WM composites --------------
+ * An app calls app_gfx_init(w,h) to swap its text grid for a w*h pixel canvas
+ * (0x00RRGGBB), draws into a userspace buffer, and app_gfx_blit()s it across.
+ * The window manager draws the canvas (sized to fit) instead of the grid. This
+ * is what lets a real graphical program — DOOM — render to a window. */
+#define GFX_MAX_W 1024
+#define GFX_MAX_H 768
+
+int app_gfx_init(int w, int h) {
+    struct app *a = cur();
+    if (!a || w <= 0 || h <= 0 || w > GFX_MAX_W || h > GFX_MAX_H) return -1;
+    if (a->gfx && (a->gfx_w != w || a->gfx_h != h)) { kfree(a->gfx); a->gfx = 0; }
+    if (!a->gfx) {
+        a->gfx = kmalloc((size_t)w * (size_t)h * 4);
+        if (!a->gfx) return -1;
+    }
+    a->gfx_w = w; a->gfx_h = h;
+    for (int i = 0; i < w * h; i++) a->gfx[i] = 0;     /* start black */
+    a->gdirty = 1;
+    return 0;
+}
+
+/* Copy the caller's w*h pixel buffer into the canvas and mark the window dirty.
+ * The source lives in the app's address space (CR3 is the app's during the
+ * syscall); the destination is exactly gfx_w*gfx_h*4, so the kernel can't be
+ * overrun — an undersized/bad user pointer faults only the app. 0, or -1. */
+int app_gfx_blit(const uint32_t *pixels) {
+    struct app *a = cur();
+    if (!a || !a->gfx) return -1;
+    memcpy(a->gfx, pixels, (size_t)a->gfx_w * (size_t)a->gfx_h * 4);
+    a->gdirty = 1;
+    return 0;
+}
+
+/* WM: the app's canvas + dims (1 if in graphics mode, else 0). */
+int app_gfx_get(app_t *a, uint32_t **buf, int *w, int *h) {
+    if (!a || !a->gfx) return 0;
+    *buf = a->gfx; *w = a->gfx_w; *h = a->gfx_h;
+    return 1;
 }
 
 int  app_sys_getpid(void) { return cur()->pid; }

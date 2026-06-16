@@ -32,6 +32,7 @@ global typing_elf_start, typing_elf_end
 global simon_elf_start, simon_elf_end
 global c4_elf_start, c4_elf_end
 global wordle_elf_start, wordle_elf_end
+global gfxdemo_elf_start, gfxdemo_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -136,5 +137,9 @@ c4_elf_end:
 wordle_elf_start:
     incbin "build/wordle.elf"
 wordle_elf_end:
+
+gfxdemo_elf_start:
+    incbin "build/gfxdemo.elf"
+gfxdemo_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

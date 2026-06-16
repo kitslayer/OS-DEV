@@ -73,6 +73,7 @@ static const struct menu_item menu[] = {
     { "Tic-Tac-Toe", KIND_APP, "ttt" }, { "Blackjack", KIND_APP, "bj" }, { "Typing", KIND_APP, "typing" },
     { "Simon", KIND_APP, "simon" }, { "Connect 4", KIND_APP, "c4" },
     { "Wordle", KIND_APP, "wordle" },
+    { "Graphics Demo", KIND_APP, "gfxdemo" },
     { "Paint", KIND_APP, "paint" }, { "Piano", KIND_APP, "piano" }, { "Jukebox", KIND_APP, "jukebox" },
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Monitor", KIND_SYSMON, 0 },
@@ -179,9 +180,17 @@ static void draw_content(const window_t *w) {
         }
         break;
     }
-    case KIND_APP:
-        if (w->app) app_render((app_t *)w->app, bx - 2, by - 2);
+    case KIND_APP: {
+        uint32_t *cb; int gw, gh;
+        if (w->app && app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) {
+            /* graphics mode: blit the app's pixel canvas 1:1 into the body */
+            int dx = bx - 2, dy = by - 2;
+            for (int yy = 0; yy < gh; yy++)
+                for (int xx = 0; xx < gw; xx++)
+                    fb_pixel(dx + xx, dy + yy, cb[yy * gw + xx] & 0xFFFFFF);
+        } else if (w->app) app_render((app_t *)w->app, bx - 2, by - 2);
         break;
+    }
     case KIND_BROWSER:
         if (w->app) browser_render((browser_t *)w->app, w->x, w->y + TITLEBAR_H,
                                    w->w, w->h - TITLEBAR_H);
@@ -538,8 +547,22 @@ void desktop_run(void) {
 
         /* repaint promptly when an app produced output (typing, clock, games) */
         for (int i = 0; i < win_count; i++)
-            if (windows[i].kind == KIND_APP && windows[i].app &&
-                app_dirty_clear((app_t *)windows[i].app)) dirty = 1;
+            if (windows[i].kind == KIND_APP && windows[i].app) {
+                if (app_dirty_clear((app_t *)windows[i].app)) dirty = 1;
+                /* a graphics-mode app sizes its window to its canvas (+ borders) */
+                uint32_t *cb; int gw, gh;
+                if (app_gfx_get((app_t *)windows[i].app, &cb, &gw, &gh)) {
+                    int dw = gw + 12, dh = gh + TITLEBAR_H + 12;
+                    if (windows[i].w != dw || windows[i].h != dh) {
+                        windows[i].w = dw; windows[i].h = dh;
+                        if (windows[i].x + dw > screen_w) windows[i].x = screen_w - dw;
+                        if (windows[i].y + dh > screen_h - TASKBAR_H) windows[i].y = screen_h - TASKBAR_H - dh;
+                        if (windows[i].x < 0) windows[i].x = 0;
+                        if (windows[i].y < 0) windows[i].y = 0;
+                        dirty = 1;
+                    }
+                }
+            }
 
         int k;
         while ((k = input_trygetchar()) >= 0) {

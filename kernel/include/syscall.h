@@ -51,6 +51,8 @@
 #define SYS_untar  41   /* (tarname)        -> extract a .tar/.tar.gz to 8.3 files; files written, or -1 */
 #define SYS_sbrk   42   /* (inc)            -> grow the heap by inc bytes; old break, or (void*)-1 */
 #define SYS_uptime_ms 43 /* ()              -> milliseconds since boot (monotonic) */
+#define SYS_gfx_init 44 /* (w, h)           -> enter graphics mode with a w*h canvas; 0/-1 */
+#define SYS_gfx_blit 45 /* (pixels)         -> copy w*h XRGB pixels to the window; 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

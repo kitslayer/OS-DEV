@@ -420,6 +420,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_uptime_ms:
         r->rax = timer_ms();               /* monotonic milliseconds since boot */
         break;
+    case SYS_gfx_init:
+        r->rax = (uint64_t)(int64_t)app_gfx_init((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_gfx_blit:
+        r->rax = (uint64_t)(int64_t)app_gfx_blit((const uint32_t *)r->rdi);
+        break;
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;
