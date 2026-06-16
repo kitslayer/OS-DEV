@@ -47,6 +47,7 @@ struct app {
     char     iq[IQ_SIZE];
     volatile int ih, it;
     volatile int exited;
+    volatile int kill;                   /* WM asked this app to close: it self-exits at its input wait */
     char     hist[6][96];                /* recent input lines (for up/down) */
     int      hist_n, hist_pos;
     volatile int gdirty;                 /* grid changed -> WM should repaint */
@@ -196,6 +197,19 @@ int app_reap(app_t *a) {
     return !a->used;
 }
 
+/* Ask a running app to close (e.g. the user clicked the window's X or pressed
+ * the close key). We can't safely free a running task from outside, so instead
+ * we raise a flag and wake the app: it next returns from its blocking input
+ * read, sees the flag, and calls task_exit() from its OWN context — a clean
+ * exit. The WM then reaps it (app_reap) like any other exited app. Apps that
+ * are busy (not waiting for input) close once they next read input. */
+void app_request_kill(app_t *a) {
+    if (a && a->used && !a->exited) {
+        a->kill = 1;
+        task_wake(a->task);   /* unblock it if it's sleeping in app_sys_read */
+    }
+}
+
 /* WM polls this: returns 1 (and clears) if the app's grid changed since asked. */
 int app_dirty_clear(app_t *a) { int d = a->gdirty; a->gdirty = 0; return d; }
 
@@ -255,9 +269,10 @@ int app_sys_read(char *buf, unsigned max) {
     int cx0 = a->cx, cy0 = a->cy;                   /* where the input starts */
     a->hist_pos = a->hist_n;                        /* start just past the newest */
     while (n < max) {
+        if (a->kill) { a->exited = 1; task_exit(); }  /* WM asked us to close: exit cleanly (WM then reaps) */
         uint64_t f = irq_save();                    /* check-and-block atomically */
         int c = iq_get(a);
-        if (c < 0) { task_block(); irq_restore(f); continue; }  /* sleep until woken */
+        if (c < 0) { task_block(); irq_restore(f); continue; }  /* sleep until woken (incl. by a kill request) */
         irq_restore(f);
         if (c == '\n' || c == '\r') {
             if (n > 0) {                            /* save this line to history */

@@ -1,6 +1,18 @@
 # What's next
 
-> **Status (466 milestones).** (M466: **App address-space reclamation (full teardown)** — completes
+> **Status (467 milestones).** (M467: **Window close (F8 keyboard + mouse X) with app termination** —
+> the DE gains a keyboard window-close (F8 → scancode 0x42 → WM code 0x1A), and closing an app window
+> (F8 OR the title-bar ×) now TERMINATES the app instead of orphaning it (was: task kept running, no
+> window, leaking slot+memory — so M464/M466 only helped self-`exit` apps). Cooperative kill: WM sets
+> a->kill + task_wake; the app returns from its blocking app_sys_read, sees kill at the loop top, sets
+> exited=1 + task_exit from its OWN context → M464/M466 reaper reclaims it. (Bug found+fixed mid-impl
+> via temp kprintf: first cut called task_exit WITHOUT setting exited=1, so app_alive stayed true and
+> the reaper skipped it — task dead but window+slot leaked. Set exited=1 first.) Verified: 10 spawn+F8
+> cycles → free memory flat at the 102 MiB baseline, 0 faults, 0 orphans, all 7 suites. THE KEYSTONE:
+> the teardown now applies to the normal close path. Files: app.c, app.h, keyboard.c, desktop.c.
+> Remaining deferred: forced-kill of a TRULY-stuck app (one not reading input — rare), ~150-root TLS
+> chain enforcement (bulky), FAT32 write-robustness (fragile).
+> M466: **App address-space reclamation (full teardown)** — completes
 > M464. New `vmm_destroy_address_space` (vmm.c) frees an exited app's page tables AND user frames
 > (ELF+stack, ~59 frames/app), called from app_reap. PROVABLY SAFE: vmm_create copies boot's PDPT
 > verbatim + next_table only writes not-present slots ⇒ a PDPT entry DIFFERING from boot's is always

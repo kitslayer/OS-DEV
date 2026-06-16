@@ -576,6 +576,17 @@ void desktop_run(void) {
                 if (win_count > 0) { snap_window(win_count - 1, k == 0x17); dirty = 1; }
                 continue;
             }
+            if (k == 0x1A) {                    /* F8: close the focused window */
+                if (win_count > 0) {
+                    int fi = win_count - 1;
+                    if (windows[fi].kind == KIND_APP && windows[fi].app)
+                        app_request_kill((app_t *)windows[fi].app);  /* app self-exits; reap loop drops the window */
+                    else
+                        remove_window(fi);       /* browser/files/etc: drop immediately */
+                    dragging = resizing = -1; dirty = 1;
+                }
+                continue;
+            }
             window_t *top = &windows[win_count - 1];
             if (top->minimized) { /* no visible focused window: swallow the key */ }
             else if (top->kind == KIND_APP && top->app) { app_key((app_t *)top->app, (char)k); dirty = 1; }
@@ -608,7 +619,10 @@ void desktop_run(void) {
                     if (w->minimized) continue;                 /* hidden: not clickable */
                     if (!in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
                     if (in_rect(mx, my, w->x + w->w - 20, w->y + 7, 12, 12)) {
-                        remove_window(i);
+                        if (w->kind == KIND_APP && w->app)
+                            app_request_kill((app_t *)w->app);  /* app self-exits; reap loop drops the window */
+                        else
+                            remove_window(i);                   /* browser/files/etc: drop immediately */
                     } else if (in_rect(mx, my, w->x + w->w - GRIP, w->y + w->h - GRIP, GRIP, GRIP)) {
                         raise_window(i); resizing = win_count - 1;
                     } else {
