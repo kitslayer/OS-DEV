@@ -426,6 +426,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_gfx_blit:
         r->rax = (uint64_t)(int64_t)app_gfx_blit((const uint32_t *)r->rdi);
         break;
+    case SYS_setkbmode:
+        app_set_rawkb((int)r->rdi);
+        break;
+    case SYS_getkbevent:
+        r->rax = (uint64_t)(int64_t)app_sys_getkbevent();
+        break;
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

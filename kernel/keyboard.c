@@ -65,6 +65,22 @@ int input_trygetchar(void) {
     return input_try();
 }
 
+/* ---- raw make/break event ring (games) -------------------------------- */
+#define RAWQ_SIZE 256
+static volatile unsigned short rawq[RAWQ_SIZE];
+static volatile uint32_t       rawh, rawt;
+
+void input_push_raw(unsigned short ev) {
+    uint32_t next = (rawh + 1) % RAWQ_SIZE;
+    if (next != rawt) { rawq[rawh] = ev; rawh = next; }   /* drop on overflow */
+}
+int input_pop_raw(void) {
+    if (rawh == rawt) return -1;
+    unsigned short ev = rawq[rawt];
+    rawt = (rawt + 1) % RAWQ_SIZE;
+    return (int)ev;
+}
+
 int input_getchar(void) {
     for (;;) {
         int c = input_try();
@@ -86,6 +102,16 @@ static void keyboard_handler(struct registers *r) {
      * arrows as control codes 0x11-0x14 (up/down/left/right) for apps to use. */
     static bool ext;
     if (sc == 0xE0) { ext = true; return; }
+
+    /* Raw make/break event for games (DOOM), independent of the cooking below:
+     * record every press and release with its scancode + extended flag. */
+    {
+        unsigned short ev = (unsigned short)(sc & 0x7F);
+        if (sc & SC_RELEASE) ev |= 0x100;     /* key released (break code) */
+        if (ext)             ev |= 0x200;     /* extended (E0-prefixed) key */
+        input_push_raw(ev);
+    }
+
     if (ext) {
         ext = false;
         if (!(sc & SC_RELEASE)) {

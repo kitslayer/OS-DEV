@@ -46,6 +46,9 @@ struct app {
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
     int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
+    int       rawkb;                     /* raw keyboard mode (games get make/break events) */
+    volatile unsigned short rawiq[64];   /* raw key-event queue (WM fills, app drains) */
+    volatile int rqh, rqt;
     char     grid[APP_ROWS][APP_COLS];
     uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
     uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
@@ -413,6 +416,28 @@ int app_gfx_get(app_t *a, uint32_t **buf, int *w, int *h) {
     if (!a || !a->gfx) return 0;
     *buf = a->gfx; *w = a->gfx_w; *h = a->gfx_h;
     return 1;
+}
+
+/* ---- raw keyboard mode (games) ----
+ * In raw mode the WM routes make/break key events (scancode + pressed/released
+ * + extended) to this app instead of, or alongside, the cooked ASCII it still
+ * gets. DOOM needs key-down AND key-up for held movement/fire. */
+void app_set_rawkb(int on) { struct app *a = cur(); if (a) a->rawkb = on ? 1 : 0; }
+int  app_get_rawkb(app_t *a) { return a && a->rawkb; }
+
+/* WM: deliver one raw key event to a raw-mode app's queue. */
+void app_key_raw(app_t *a, unsigned short ev) {
+    int n = (a->rqh + 1) % 64;
+    if (n != a->rqt) { a->rawiq[a->rqh] = ev; a->rqh = n; }   /* drop on overflow */
+}
+
+/* SYS_getkbevent: next raw key event for the caller, or -1 if none (non-blocking). */
+int app_sys_getkbevent(void) {
+    struct app *a = cur();
+    if (!a || a->rqh == a->rqt) return -1;
+    unsigned short ev = a->rawiq[a->rqt];
+    a->rqt = (a->rqt + 1) % 64;
+    return (int)ev;
 }
 
 int  app_sys_getpid(void) { return cur()->pid; }

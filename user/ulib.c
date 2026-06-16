@@ -73,6 +73,8 @@ void *sbrk(long inc) { return (void *)do_syscall(SYS_sbrk, inc, 0, 0); }
 unsigned long sys_uptime_ms(void) { return (unsigned long)do_syscall(SYS_uptime_ms, 0, 0, 0); }
 int  sys_gfx_init(int w, int h) { return (int)do_syscall(SYS_gfx_init, w, h, 0); }
 int  sys_gfx_blit(const void *pixels) { return (int)do_syscall(SYS_gfx_blit, (long)pixels, 0, 0); }
+void sys_setkbmode(int raw) { do_syscall(SYS_setkbmode, raw, 0, 0); }
+int  sys_getkbevent(void) { return (int)do_syscall(SYS_getkbevent, 0, 0, 0); }
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);
 }

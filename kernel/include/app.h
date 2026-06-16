@@ -36,6 +36,10 @@ uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old brea
 int    app_gfx_init(int w, int h);     /* put the caller in graphics mode (w*h pixel canvas) */
 int    app_gfx_blit(const uint32_t *pixels);  /* copy the caller's pixels to the canvas */
 int    app_gfx_get(app_t *a, uint32_t **buf, int *w, int *h);  /* WM: canvas + dims; 1/0 */
+void   app_set_rawkb(int on);          /* caller opts into raw make/break key events */
+int    app_get_rawkb(app_t *a);        /* WM: is this app in raw keyboard mode? */
+void   app_key_raw(app_t *a, unsigned short ev);  /* WM: deliver a raw key event */
+int    app_sys_getkbevent(void);       /* next raw key event for the caller, or -1 */
 void   app_sys_clear(void);             /* clear the calling app's screen */
 void   app_setcolor(int idx);           /* set the calling app's text colour (palette 0-15) */
 void   app_sys_exit(void);              /* does not return */

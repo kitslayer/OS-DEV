@@ -47,6 +47,8 @@ void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, o
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
 int  sys_gfx_init(int w, int h);     /* enter graphics mode: a w*h XRGB pixel canvas; 0/-1 */
 int  sys_gfx_blit(const void *pixels); /* copy w*h pixels (0x00RRGGBB) to the window; 0/-1 */
+void sys_setkbmode(int raw);         /* 1 = raw make/break key events, 0 = cooked ASCII */
+int  sys_getkbevent(void);           /* next raw key event (scancode|0x100 released|0x200 ext), or -1 */
 
 /* dynamic memory (a first-fit free list over sbrk) */
 void *malloc(unsigned long n);

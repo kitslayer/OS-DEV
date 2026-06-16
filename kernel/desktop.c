@@ -631,6 +631,18 @@ void desktop_run(void) {
             else if (top->kind == KIND_FILES) { files_key(top, k); dirty = 1; }
         }
 
+        /* raw make/break key events -> the focused app, if it opted into raw mode
+         * (games like DOOM). Always drained so they never accumulate; delivered
+         * only to a focused raw-mode app, else discarded. */
+        {
+            window_t *top = (win_count > 0) ? &windows[win_count - 1] : 0;
+            int rawmode = top && !top->minimized && top->kind == KIND_APP &&
+                          top->app && app_get_rawkb((app_t *)top->app);
+            int ev;
+            while ((ev = input_pop_raw()) >= 0)
+                if (rawmode) app_key_raw((app_t *)top->app, (unsigned short)ev);
+        }
+
         int mx = mouse_x(), my = mouse_y(), btn = mouse_buttons(), left = btn & 1;
 
         if (left && !(prev_btn & 1)) {
