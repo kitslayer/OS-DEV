@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (467 milestones).** (M467: **Window close (F8 keyboard + mouse X) with app termination** —
+> **Status (468 milestones).** (M468: **Shell output redirection `>` / `>>`** — `cmd > file` (overwrite)
+> + `cmd >> file` (append), composing with M463 pipes (`ls | grep TXT > found.txt`). Reuses the M463
+> opt-in print-capture: main() parses+strips a trailing `>`/`>>`+filename, then the command (single OR
+> a pipeline whose final stage is captured) runs under cap_begin/cap_end and the bytes go to the file
+> via write_redirect (append reads existing first, both capped 8KB BSS). run_pipe gained (rfile,append)
+> params for its final stage. Help line documents `|`/`>`/`>>`. Verified in-OS (>, >>, pipe+redirect,
+> plain-pipe regression — all good) + all 7 suites + clean disk rebuild. SAFE/userspace; same write-path
+> reliance as pipes. Files: user/shell.c only.
+> M467: **Window close (F8 keyboard + mouse X) with app termination** —
 > the DE gains a keyboard window-close (F8 → scancode 0x42 → WM code 0x1A), and closing an app window
 > (F8 OR the title-bar ×) now TERMINATES the app instead of orphaning it (was: task kept running, no
 > window, leaking slot+memory — so M464/M466 only helped self-`exit` apps). Cooperative kill: WM sets

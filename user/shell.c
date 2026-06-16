@@ -109,6 +109,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
+            print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
@@ -1417,7 +1418,21 @@ static int run_command(char *line, char *cwd) {
  * its output replaces it for the next '|'. Buffers are fixed-size; oversized
  * intermediate output truncates (length-capped capture, NUL-terminated).
  */
-static void run_pipe(char *line, char *cwd) {
+/* Write a command's captured output to a file: overwrite for ">", append for
+ * ">>" (append reads the existing contents first, capped to the buffer). */
+static void write_redirect(const char *file, const char *buf, unsigned long len, int append) {
+    if (append) {
+        static char abuf[8192];
+        long old = sys_readfile(file, abuf, sizeof abuf - 1);
+        unsigned long total = old > 0 ? (unsigned long)old : 0;
+        for (unsigned long i = 0; i < len && total < sizeof abuf; i++) abuf[total++] = buf[i];
+        sys_writefile(file, abuf, total);
+    } else {
+        sys_writefile(file, buf, len);
+    }
+}
+
+static void run_pipe(char *line, char *cwd, const char *rfile, int append) {
     static char pbuf[8192];            /* captured output of one stage (static: too big for the stack) */
     char cmd[160];                     /* the current stage's command line (cmd2 + " PIPE.TMP") */
     const char *seg = line;            /* start of the current segment */
@@ -1449,7 +1464,14 @@ static void run_pipe(char *line, char *cwd) {
             /* empty stage (e.g. "ls |" or "| grep"): nothing to run.
              * For the last stage, fall through so PIPE.TMP gets cleaned up. */
         } else if (last) {
-            run_command(cmd, cwd);             /* final stage: print to the screen */
+            if (rfile) {                       /* final stage redirected to a file */
+                cap_begin(pbuf, sizeof pbuf);
+                run_command(cmd, cwd);
+                unsigned long rlen = cap_end();
+                write_redirect(rfile, pbuf, rlen, append);
+            } else {
+                run_command(cmd, cwd);         /* final stage: print to the screen */
+            }
         } else {
             cap_begin(pbuf, sizeof pbuf);      /* intermediate stage: capture its output */
             run_command(cmd, cwd);
@@ -1476,10 +1498,29 @@ int main(void) {
         print("osdev:"); print(cwd); print("$ ");
         readline(line, sizeof(line));
 
+        /* output redirection: "cmd > file" (overwrite) or "cmd >> file" (append).
+         * Strip it off; the command part (possibly a pipeline) is captured to the file. */
+        const char *rfile = 0; int append = 0;
+        for (int i = 0; line[i]; i++) if (line[i] == '>') {
+            if (line[i+1] == '>') { append = 1; rfile = &line[i+2]; } else { rfile = &line[i+1]; }
+            line[i] = 0;                            /* end the command part */
+            while (*rfile == ' ') rfile++;          /* skip spaces before the filename */
+            char *fe = (char *)rfile; while (*fe) fe++; while (fe > rfile && fe[-1] == ' ') *--fe = 0;
+            if (!*rfile) rfile = 0;                 /* "cmd >" with no filename: ignore the redirect */
+            break;
+        }
+
         int piped = 0;                              /* a '|' anywhere -> run as a pipeline */
         for (int i = 0; line[i]; i++) if (line[i] == '|') { piped = 1; break; }
 
-        if (piped) run_pipe(line, cwd);
+        if (piped) run_pipe(line, cwd, rfile, append);
+        else if (rfile) {                           /* redirect a single command's output to a file */
+            static char rbuf[8192];
+            cap_begin(rbuf, sizeof rbuf);
+            run_command(line, cwd);
+            unsigned long rlen = cap_end();
+            write_redirect(rfile, rbuf, rlen, append);
+        }
         else if (run_command(line, cwd)) break;     /* run_command returns 1 only for "exit" */
     }
     return 0;
