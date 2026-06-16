@@ -427,6 +427,9 @@ typedef struct {
     fx      in_swid;
     color_t fillstk[SVG_MAX_GROUPS], strokestk[SVG_MAX_GROUPS];
     fx      swidstk[SVG_MAX_GROUPS];
+    /* inherited group opacity (0..255 multiplier), accumulated down <g> nesting. */
+    int     in_alpha;
+    int     alphastk[SVG_MAX_GROUPS];
 } ctx_t;
 
 /* Map a user-space coord (16.16) to device (pixel) fixed-point. The subtraction
@@ -775,14 +778,36 @@ static int ieq(const char *a, const char *b) {
     return *a == 0 && *b == 0;
 }
 
-/* ---- presentation attrs (fill / stroke / stroke-width) ----------------- *
+/* Read an opacity-style property (`opacity`/`fill-opacity`/`stroke-opacity`) from
+ * a shape's style= or attr and return it as a 0..255 multiplier (255 if absent).
+ * Accepts a 0..1 fraction ("0.5") or a percentage ("50%"); clamped. */
+static int alpha_attr(const char *s, const char *e, const char *key) {
+    char style[1024]; style[0] = 0;
+    get_attr(s, e, "style", style, sizeof style);
+    char v[64];
+    if (get_style(style, key, v, sizeof v) || get_attr(s, e, key, v, sizeof v)) {
+        const char *p = v, *ve = v + strlen(v);
+        fx n = parse_num(&p, ve);
+        long a = (p < ve && *p == '%') ? (long)(n >> FX_SHIFT) * 255 / 100
+                                       : ((long)n * 255) >> FX_SHIFT;
+        if (a < 0) a = 0;
+        if (a > 255) a = 255;
+        return (int)a;
+    }
+    return 255;
+}
+
+/* ---- presentation attrs (fill / stroke / stroke-width + opacity) -------- *
  * Resolves each property: a shape's own `style=` overrides its attr, which
  * overrides the INHERITED value (c->in_*). The SVG initial values (opaque-black
  * fill, unset stroke, stroke-width 1) live in c->in_* and are unchanged unless a
  * <svg>/<g> ancestor set them — so an SVG with no inherited paint renders exactly
- * as before. "inherit" explicitly takes the inherited value. */
+ * as before. "inherit" explicitly takes the inherited value. When `apply_opacity`
+ * is set (shapes, not the <g> inherited-paint update) the resolved fill/stroke
+ * alpha is scaled by the inherited group opacity (c->in_alpha) and this element's
+ * opacity/fill-opacity/stroke-opacity. */
 static void read_paint(ctx_t *c, const char *s, const char *e,
-                       color_t *fill, color_t *stroke, fx *swid) {
+                       color_t *fill, color_t *stroke, fx *swid, int apply_opacity) {
     char style[1024]; style[0] = 0;
     get_attr(s, e, "style", style, sizeof style);
     char v[256];
@@ -802,6 +827,17 @@ static void read_paint(ctx_t *c, const char *s, const char *e,
         else { const char *p = v; *swid = parse_num(&p, v + strlen(v)); }
     } else *swid = c->in_swid;
     /* scale stroke width into device px (use sx; aspect ignored) — done by caller via swid*sx */
+
+    if (apply_opacity) {
+        int base = c->in_alpha;                                /* inherited group opacity */
+        int ea  = alpha_attr(s, e, "opacity");                 /* this element's opacity   */
+        int faf = alpha_attr(s, e, "fill-opacity");
+        int saf = alpha_attr(s, e, "stroke-opacity");
+        /* product of four 0..255 factors (<= 255^4 ~ 4.2e9) / 255^3 -> back to 0..255;
+         * int64 intermediate so it can't overflow regardless of the platform `long`. */
+        fill->a   = (uint8_t)((int64_t)fill->a   * base * ea * faf / ((int64_t)255*255*255));
+        stroke->a = (uint8_t)((int64_t)stroke->a * base * ea * saf / ((int64_t)255*255*255));
+    }
 }
 
 /* Rasterize the current point list with the given paint. `closed`=1 for filled
@@ -899,7 +935,8 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
     parse_color("", &C.in_fill, 1);
     parse_color("", &C.in_stroke, 0);
     C.in_swid = FX_ONE;
-    read_paint(&C, svg_s, svg_e, &C.in_fill, &C.in_stroke, &C.in_swid);
+    read_paint(&C, svg_s, svg_e, &C.in_fill, &C.in_stroke, &C.in_swid, 0);
+    C.in_alpha = alpha_attr(svg_s, svg_e, "opacity");   /* root opacity (255 if absent) */
 
     /* clear bitmap to fully-transparent black */
     memset(out, 0, (long)C.W * C.H * 4);
@@ -960,6 +997,7 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                         C.in_fill = C.fillstk[C.gdepth];
                         C.in_stroke = C.strokestk[C.gdepth];
                         C.in_swid = C.swidstk[C.gdepth];
+                        C.in_alpha = C.alphastk[C.gdepth];
                     }
                 }
             } else if (!(body_e > name && body_e[-1] == '/')) {   /* <g ...> (not self-closing) */
@@ -968,13 +1006,16 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                     C.fillstk[C.gdepth] = C.in_fill;
                     C.strokestk[C.gdepth] = C.in_stroke;
                     C.swidstk[C.gdepth] = C.in_swid;
+                    C.alphastk[C.gdepth] = C.in_alpha;
                     char tf[256];
                     if (get_attr(name, body_e, "transform", tf, sizeof tf)) {
                         fx tm[6]; parse_transform(tf, (int)strlen(tf), tm);
                         mat_mul(C.m, C.m, tm);
                     }
-                    /* the group's own fill/stroke/stroke-width update the inherited paint */
-                    read_paint(&C, name, body_e, &C.in_fill, &C.in_stroke, &C.in_swid);
+                    /* the group's own fill/stroke/stroke-width update the inherited paint;
+                     * its opacity multiplies into the inherited group-opacity. */
+                    read_paint(&C, name, body_e, &C.in_fill, &C.in_stroke, &C.in_swid, 0);
+                    C.in_alpha = C.in_alpha * alpha_attr(name, body_e, "opacity") / 255;
                 }
                 C.gdepth++;                         /* unconditional: keeps push/pop balanced past the cap */
             }
@@ -994,11 +1035,11 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
           } }
 
         if (IS("rect")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             build_rect(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("circle")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             char v[48]; fx cx=0,cy=0,r=0;
             if (get_attr(name,body_e,"cx",v,sizeof v)) { const char*q=v; cx=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"cy",v,sizeof v)) { const char*q=v; cy=parse_num(&q,v+strlen(v)); }
@@ -1006,7 +1047,7 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             build_ellipse(&C, cx, cy, r, r);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("ellipse")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             char v[48]; fx cx=0,cy=0,rx=0,ry=0;
             if (get_attr(name,body_e,"cx",v,sizeof v)) { const char*q=v; cx=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"cy",v,sizeof v)) { const char*q=v; cy=parse_num(&q,v+strlen(v)); }
@@ -1015,7 +1056,7 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             build_ellipse(&C, cx, cy, rx, ry);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("line")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             char v[48]; fx x1=0,y1=0,x2=0,y2=0;
             if (get_attr(name,body_e,"x1",v,sizeof v)) { const char*q=v; x1=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"y1",v,sizeof v)) { const char*q=v; y1=parse_num(&q,v+strlen(v)); }
@@ -1026,15 +1067,15 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             if (!stroke.set) parse_color("black", &stroke, 1);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 0);
         } else if (IS("polyline")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             build_points(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 0);
         } else if (IS("polygon")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             build_points(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("path")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             build_path(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         }

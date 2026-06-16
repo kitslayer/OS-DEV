@@ -217,6 +217,39 @@ static void test_inherit(void) {
     }
 }
 
+/* --- test 8: opacity (fill-opacity / opacity / group opacity) ----------- */
+static void test_opacity(void) {
+    const char *svg =
+        "<svg width='60' height='60'>"
+        "<rect x='0' y='0' width='20' height='20' fill='red' fill-opacity='0.5'/>"     /* a~128 */
+        "<rect x='20' y='0' width='20' height='20' fill='blue' opacity='0.25'/>"        /* a~64  */
+        "<rect x='40' y='0' width='20' height='20' fill='black'/>"                      /* a=255 (additive) */
+        "<g opacity='0.5'>"
+          "<rect x='0' y='20' width='20' height='20' fill='green'/>"                    /* a~128 (group) */
+          "<rect x='20' y='20' width='20' height='20' fill='green' opacity='0.5'/>"     /* a~64 (group*own) */
+        "</g>"
+        "<rect x='0' y='40' width='20' height='20' fill='black'/>"                      /* a=255 (in_alpha restored after </g>) */
+        "</svg>";
+    int w, h;
+    int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                       obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+    CHECK(r == 0 && w == 60 && h == 60, "opacity: decode 60x60");
+    if (r == 0) {
+        const uint8_t *fo = px(w, 10, 10);   /* fill-opacity 0.5 over transparent -> ~half alpha */
+        CHECK(fo[3] > 100 && fo[3] < 160 && fo[0] > 180, "opacity: fill-opacity 0.5 -> ~half-alpha red");
+        const uint8_t *op = px(w, 30, 10);   /* opacity 0.25 -> ~quarter alpha */
+        CHECK(op[3] > 40 && op[3] < 90 && op[2] > 180, "opacity: opacity 0.25 -> ~quarter-alpha blue");
+        const uint8_t *opq = px(w, 50, 10);  /* no opacity attr -> fully opaque (additive) */
+        CHECK(opq[3] > 250, "opacity: no opacity attr -> fully opaque");
+        const uint8_t *go = px(w, 10, 30);   /* <g opacity=0.5> -> ~half alpha */
+        CHECK(go[3] > 100 && go[3] < 160 && go[1] > 100, "opacity: group opacity 0.5 -> ~half-alpha green");
+        const uint8_t *gc = px(w, 30, 30);   /* group 0.5 * own 0.5 -> ~quarter alpha */
+        CHECK(gc[3] > 40 && gc[3] < 90, "opacity: group*element opacity -> ~quarter alpha");
+        const uint8_t *rst = px(w, 10, 50);  /* after </g>: in_alpha restored -> opaque */
+        CHECK(rst[3] > 250, "opacity: group opacity restored after </g>");
+    }
+}
+
 /* --- fuzz harness -------------------------------------------------------- */
 static uint32_t rs = 0x5EED1234u;
 static uint32_t xr(void) { rs ^= rs<<13; rs ^= rs>>17; rs ^= rs<<5; return rs; }
@@ -229,6 +262,7 @@ int main(void) {
     test_misc();
     test_transform();
     test_inherit();
+    test_opacity();
 
     /* Valid seeds to mutate during fuzzing. */
     const char *seeds[] = {
@@ -290,6 +324,7 @@ int main(void) {
             "<g transform='","translate(","scale(","rotate(","matrix(","skewX(",
             "skewY(",")","'>","</g>","' transform='rotate(",
             "<g fill='","' fill='","stroke='","' fill='inherit'","#abc","' stroke-width='",
+            "' opacity='","' fill-opacity='","' stroke-opacity='","0.5","%","0.25",
         };
         int nfr = (int)(sizeof frag / sizeof frag[0]);
         for (unsigned seed = 1; seed <= 16; seed++) {
@@ -338,8 +373,8 @@ int main(void) {
     }
 
     if (fails == 0)
-        printf("svgtest: 7 unit tests (incl. transforms + paint inheritance) + %d random + %d mutation "
-               "+ 320000 structured fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
+        printf("svgtest: 8 unit tests (incl. transforms + paint inheritance + opacity) + %d random + %d "
+               "mutation + 320000 structured fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
     else
         printf("svgtest: %d FAILURE(S)\n", fails);
     return fails ? 1 : 0;

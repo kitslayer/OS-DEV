@@ -1,6 +1,12 @@
 # What's next
 
-> **Status (443 milestones).** (M443: **SVG paint inheritance** — shapes inherit
+> **Status (444 milestones).** (M444: **SVG opacity** — `opacity`/`fill-opacity`/`stroke-opacity`
+> (a 0..1 fraction or `%`) scale a shape's alpha; a group `<g opacity>` multiplies down to its
+> children (inherited `in_alpha` on the same paint stack). Reuses the existing alpha-compositing
+> `blend_px`, so translucent overlaps blend. Strictly additive (no opacity = exact prior alpha,
+> byte-for-byte); int64 alpha math (no overflow). svgtest +opacity unit test +fuzz; SHIP-reviewed
+> (4.5M+ adversarial iters). Verified in-OS (OPAC.SVG → three 50%-opaque circles, overlaps blend).
+> M443: **SVG paint inheritance** — shapes inherit
 > `fill`/`stroke`/`stroke-width` from a `fill=`/`stroke=` on the root `<svg>` or an enclosing
 > `<g>` (was: always black), per-shape values override, `inherit` keyword honoured. A paint
 > stack parallel to (and sharing the depth of) the M442 transform stack; strictly additive
