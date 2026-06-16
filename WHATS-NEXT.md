@@ -1,6 +1,12 @@
 # What's next
 
-> **Status (457 milestones).** (M457: **browser content zoom** — `+`/`-`/`0` scale page text 1×–4×
+> **Status (458 milestones).** (M458: **CSS `visibility:hidden` + hidden `<img>`** — completes hiding
+> (M454/455): `visibility:hidden` (inline/`<style>`) hides like display:none via the same scope (1 line
+> in parse_style_display); a void `<img>` with its own display:none/visibility:hidden/hidden renders
+> nothing (the deferred standalone-hidden-img case). Additive, no render-loop change. Verified in-OS.
+> NOTE: standalone SVG browsing already works (try_image); SVG `<use>`/`<symbol>` deferred (needs a
+> render-loop refactor — risky to the working decoder; worktree isolation unavailable here).
+> M457: **browser content zoom** — `+`/`-`/`0` scale page text 1×–4×
 > (persists across navigation). Multiplies the per-token `sc`/line-height the renderer already
 > computes (headings/font-size/bold all scale) + the wrap reflows. Additive (zoom 1 = unchanged).
 > Verified in-OS (text file ~3× + reflowed). Note: images don't zoom (text-only).

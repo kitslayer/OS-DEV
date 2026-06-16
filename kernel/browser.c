@@ -687,11 +687,14 @@ static int parse_style_fontsize(const char *s, int n) {
     if (ul >= 3 && (u[0]|32)=='r' && (u[1]|32)=='e' && (u[2]|32)=='m')   return num >= 2 ? 3 : num >= 1 ? 2 : 0;
     return num >= 28 ? 3 : num >= 19 ? 2 : 0;                            /* px / pt / unitless */
 }
-/* display: returns 1 for "display:none" (the element + its content are hidden). */
+/* returns 1 if the element should be hidden: display:none OR visibility:hidden.
+ * (In this box-model-less renderer visibility:hidden can't preserve the element's
+ * space, so it hides the content like display:none — fine for reader-mode.) */
 static int parse_style_display(const char *s, int n) {
     int vs, ve;
-    if (!style_prop(s, n, "display", 7, &vs, &ve)) return 0;
-    return attr_eq(s + vs, ve - vs, "none");
+    if (style_prop(s, n, "display", 7, &vs, &ve) && attr_eq(s + vs, ve - vs, "none")) return 1;
+    if (style_prop(s, n, "visibility", 10, &vs, &ve) && attr_eq(s + vs, ve - vs, "hidden")) return 1;
+    return 0;
 }
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
@@ -935,6 +938,9 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     }
     if (tageq(tag, "img")) {                             /* [alt] — a clickable link to the image */
         if (!closing) {
+            { const char *st; int stl; int ih = has_attr(attrs, attrlen, "hidden");   /* a hidden image (its own display:none/visibility:hidden/hidden) shows nothing */
+              if (find_attr(attrs, attrlen, "style", &st, &stl) && parse_style_display(st, stl)) ih = 1;
+              if (ih) return; }
             const char *v; int vl;
             char label[40]; int p = 0; label[p++] = '[';
             if (find_attr(attrs, attrlen, "alt", &v, &vl) && vl > 0)
