@@ -1,6 +1,18 @@
 # What's next
 
-> **Status (450 milestones).** (M450: **`<blockquote>` indentation** — quoted blocks indent 24px/
+> **Status (451 milestones).** (M451: **TLS hostname verification (ENFORCED)** — the client
+> validated/anchored the cert chain but never checked the cert named the host (any valid cert for
+> any domain was accepted = MITM hole). Now `x509.c` parses subjectAltName dNSNames (new bounded
+> `find_san` over the `[3]` extensions) + `host_matches_cert` (RFC 6125: SAN-authoritative, no CN
+> fallback when SAN present, case-insensitive, single-label wildcard rejecting apex/multi-label/
+> `*.com`); `tls.c` REJECTS a definitive mismatch before sending the request, FAILS OPEN on
+> uncertainty (>16 SANs / no cert) so legit sites never wrongly reject. Chain anchoring stays
+> informational (incomplete root set). x509test +4 real certs +RFC6125 assertions +400k SAN-mutation
+> fuzz (ASan/UBSan clean). Subagent review BLOCKED by the cyber safeguard (cert/MITM framing) →
+> compensated with a thorough self-audit + the 400k-iter fuzz. Verified in-OS: example.com (SSL.com)
+> + danluu.com (Google GTS) both MATCH + load. The remaining "enforcing certs" gap is now just the
+> chain-to-root part (needs ~150 baked roots).
+> M450: **`<blockquote>` indentation** — quoted blocks indent 24px/
 > level, and EVERY wrapped line stays indented (unlike the list-marker first-line-only indent),
 > because indent is applied at each line start via a per-token `tokindent` + a `curindent` counter
 > (`<blockquote>` open/close adjusts it) consumed by the same line-start `cx` logic as text-align.

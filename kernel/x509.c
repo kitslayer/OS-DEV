@@ -15,7 +15,11 @@
 #define T_UTF8  0x0c
 #define T_SEQ   0x30
 #define T_SET   0x31
+#define T_BOOL  0x01       /* BOOLEAN (extension `critical` flag) */
+#define T_OCTET 0x04       /* OCTET STRING (extnValue wrapper) */
 #define T_CTX0  0xA0       /* [0] EXPLICIT */
+#define T_CTX3  0xA3       /* [3] EXPLICIT extensions */
+#define SAN_DNS 0x82       /* [2] dNSName (context-primitive) inside a GeneralName */
 
 /* Read one TLV at *p (bounded by end): set tag + content pointer/length and
  * advance *p past the whole element. Returns 0, or -1 on any malformation. */
@@ -40,6 +44,7 @@ static int tlv(const uint8_t **p, const uint8_t *end, int *tag,
 static const uint8_t OID_RSA[] = {0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x01,0x01};
 static const uint8_t OID_EC[]  = {0x2A,0x86,0x48,0xCE,0x3D,0x02,0x01};
 static const uint8_t OID_CN[]  = {0x55,0x04,0x03};            /* commonName 2.5.4.3 */
+static const uint8_t OID_SAN[] = {0x55,0x1D,0x11};            /* subjectAltName 2.5.29.17 */
 /* signature algorithms we can verify: sha256WithRSAEncryption (1.2.840.113549.1.1.11)
  * and ecdsa-with-SHA256 (1.2.840.10045.4.3.2). */
 static const uint8_t OID_RSA_SHA256[]   = {0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x01,0x0B};
@@ -77,6 +82,83 @@ static void find_cn(const uint8_t *p, const uint8_t *end, char *cn, int cnsz) {
             }
         }
     }
+}
+
+/* Walk the [3] extensions content (already unwrapped one level) for subjectAltName,
+ * collecting its dNSName entries into out->san[]. Every step is bounded by the
+ * enclosing length via tlv(); malformed/truncated input just stops early (never OOB).
+ * A dNSName containing an embedded NUL is dropped (defeats the null-prefix attack). */
+static void find_san(const uint8_t *p, const uint8_t *end, x509_cert *out) {
+    int tag; const uint8_t *c; size_t cl;
+    if (tlv(&p, end, &tag, &c, &cl) != 0 || tag != T_SEQ) return;   /* Extensions ::= SEQUENCE OF */
+    const uint8_t *xp = c, *xend = c + cl;
+    while (xp < xend) {
+        if (tlv(&xp, xend, &tag, &c, &cl) != 0) return;            /* one Extension ::= SEQUENCE */
+        if (tag != T_SEQ) continue;
+        const uint8_t *ep = c, *eend = c + cl;
+        int t; const uint8_t *oid; size_t oidl;
+        if (tlv(&ep, eend, &t, &oid, &oidl) != 0 || t != T_OID) continue;   /* extnID */
+        const uint8_t *v; size_t vl;
+        if (tlv(&ep, eend, &t, &v, &vl) != 0) continue;            /* critical BOOLEAN or extnValue */
+        if (t == T_BOOL) { if (tlv(&ep, eend, &t, &v, &vl) != 0) continue; } /* skip critical, read extnValue */
+        if (t != T_OCTET) continue;
+        if (!oid_eq(oid, oidl, OID_SAN, sizeof OID_SAN)) continue; /* only subjectAltName */
+        /* extnValue OCTET STRING content is itself DER: GeneralNames ::= SEQUENCE OF GeneralName */
+        const uint8_t *sp = v, *send = v + vl;
+        if (tlv(&sp, send, &t, &c, &cl) != 0 || t != T_SEQ) return;
+        const uint8_t *gp = c, *gend = c + cl;
+        while (gp < gend) {
+            int gt; const uint8_t *gv; size_t gvl;
+            if (tlv(&gp, gend, &gt, &gv, &gvl) != 0) break;
+            if (gt != SAN_DNS) continue;                           /* only dNSName [2]; skip the rest */
+            if (out->n_san >= X509_MAX_SAN) { out->san_capped = 1; return; }  /* more than we store */
+            int m = (int)gvl, bad = 0;
+            if (m > X509_SAN_LEN - 1) m = X509_SAN_LEN - 1;
+            for (int i = 0; i < m; i++) { if (gv[i] == 0) { bad = 1; break; } out->san[out->n_san][i] = (char)gv[i]; }
+            if (bad) continue;                                     /* embedded NUL -> drop this entry */
+            out->san[out->n_san][m] = 0;
+            out->n_san++;
+        }
+        return;   /* SAN found + processed; no need to scan further extensions */
+    }
+}
+
+/* lowercase one ASCII byte */
+static int lc1(int ch) { return (ch >= 'A' && ch <= 'Z') ? ch + 32 : ch; }
+
+/* Match a certificate DNS pattern against a host (ASCII, case-insensitive). Supports
+ * a single leftmost-label wildcard ("*.example.com"): it matches exactly one label
+ * (a.example.com) but NOT the bare apex (example.com) nor a deeper name (a.b.example.com). */
+static int dns_name_match(const char *pat, const char *host) {
+    if (!pat[0] || !host[0]) return 0;
+    if (pat[0] == '*' && pat[1] == '.') {
+        const char *rest = pat + 2;                /* the part after "*." */
+        if (!rest[0]) return 0;
+        /* the wildcard remainder must itself be a multi-label domain (reject "*.com") */
+        { const char *d = rest; int dot = 0; while (*d) { if (*d == '.') dot = 1; d++; } if (!dot) return 0; }
+        /* host's first label must be non-empty, and the remainder after the first '.'
+         * must equal `rest` case-insensitively (so exactly one label is wildcarded). */
+        const char *h = host; int label = 0;
+        while (*h && *h != '.') { h++; label++; }
+        if (!label || *h != '.') return 0;         /* no first label, or host has no dot */
+        h++;                                       /* host remainder after first label */
+        while (*h && *rest) { if (lc1((unsigned char)*h) != lc1((unsigned char)*rest)) return 0; h++; rest++; }
+        return *h == 0 && *rest == 0;
+    }
+    /* exact, case-insensitive */
+    while (*pat && *host) { if (lc1((unsigned char)*pat) != lc1((unsigned char)*host)) return 0; pat++; host++; }
+    return *pat == 0 && *host == 0;
+}
+
+int host_matches_cert(const char *host, const x509_cert *cert) {
+    if (!host || !host[0]) return 0;
+    if (cert->n_san > 0) {                          /* SAN dNSNames present: authoritative (CN ignored) */
+        for (int i = 0; i < cert->n_san; i++)
+            if (dns_name_match(cert->san[i], host)) return 1;
+        return 0;
+    }
+    if (cert->subject_cn[0]) return dns_name_match(cert->subject_cn, host);   /* legacy fallback */
+    return 0;
 }
 
 int x509_parse(const uint8_t *der, size_t len, x509_cert *out) {
@@ -128,6 +210,18 @@ int x509_parse(const uint8_t *der, size_t len, x509_cert *out) {
     if (cl < 1) return -1;
     out->key = c + 1;                                                   /* skip the unused-bits byte */
     out->key_len = cl - 1;
+
+    /* ADDITIVE: the TBSCertificate may carry optional [1] issuerUniqueID, [2]
+     * subjectUniqueID, then [3] EXPLICIT extensions. Walk what remains in the TBS
+     * (cursor `q`, bounded by `qend` — untouched by the signature block below) and,
+     * if [3] is present, pull subjectAltName dNSNames out of it. Best-effort: a
+     * malformed tail just stops, leaving n_san at whatever was parsed. */
+    while (q < qend) {
+        int xt; const uint8_t *xc; size_t xl;
+        if (tlv(&q, qend, &xt, &xc, &xl) != 0) break;
+        if (xt == T_CTX3) { find_san(xc, xc + xl, out); break; }
+        /* [1]/[2] unique IDs (or anything else) — tlv already advanced past it */
+    }
 
     /* signatureAlgorithm + signatureValue follow tbsCertificate in the Certificate
      * SEQUENCE (tp now points past tbsCertificate). Best-effort: leave sig_alg = OTHER

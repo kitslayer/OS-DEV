@@ -61,6 +61,7 @@ typedef struct {
     /* leaf certificate public key (copied out of the flight buffer, which moves) */
     uint8_t   leaf_key[1100]; int leaf_key_len, leaf_key_alg;
     int       chain_anchored;        /* chain top verified against a trusted root CA */
+    int       host_ok;               /* leaf-cert hostname match: 1 match, 0 definitive mismatch, -1 unknown */
 } tls;
 
 /* CertificateVerify result of the most recent handshake, for the browser UI:
@@ -70,6 +71,10 @@ int tls_cert_status(void) { return g_cert_status; }
 /* 1 if the most recent chain anchored to a trusted root CA (full path validated). */
 static int g_chain_anchored = 0;
 int tls_chain_anchored(void) { return g_chain_anchored; }
+
+/* leaf-cert hostname match of the most recent tls_get: -2 none, 1 match, 0 mismatch. */
+static int g_host_match = -2;
+int tls_host_match(void) { return g_host_match; }
 
 /* tiny RNG for ephemeral key + randoms (seeded by the caller). */
 static uint32_t g_rng = 0x1234abcd;
@@ -240,7 +245,7 @@ static int cert_sig_ok(const x509_cert *c, const uint8_t *ikey, size_t iklen, in
  * read from the wire is bounded against mlen. Returns 0 if a leaf key was captured.
  *
  * Layout: ctx_len(1) ctx[ctx_len] cert_list_len(3) [ cert_len(3) cert[..] ext_len(2) ext[..] ]... */
-static int tls_capture_leaf_key(tls *t, const uint8_t *m, int mlen) {
+static int tls_capture_leaf_key(tls *t, const uint8_t *m, int mlen, const char *host) {
     t->leaf_key_len = 0;
     int o = 0;
     if (o + 1 > mlen) return -1;
@@ -275,6 +280,20 @@ static int tls_capture_leaf_key(tls *t, const uint8_t *m, int mlen) {
         memcpy(t->leaf_key, certs[0].key, certs[0].key_len);
         t->leaf_key_len = (int)certs[0].key_len;
         t->leaf_key_alg = certs[0].key_alg;
+    }
+
+    /* HOSTNAME VERIFICATION: does the leaf cert's SAN/CN actually name this host?
+     * 1 = match, 0 = DEFINITIVE mismatch (we saw the cert's whole name set), -1 =
+     * uncertain (no host, or the SAN list was larger than we store — fail open so a
+     * legitimate mega-SAN cert is never wrongly rejected). The enforcing gate in
+     * tls_get_inner rejects only on a definitive (0) mismatch. */
+    if (host && host[0]) {
+        if (host_matches_cert(host, &certs[0]))      t->host_ok = 1;
+        else if (certs[0].san_capped)                t->host_ok = -1;   /* couldn't see all SANs */
+        else                                          t->host_ok = 0;
+        kprintf("[tls] hostname %s vs leaf cert (CN=%s, %d SAN): %s\n", host,
+                certs[0].subject_cn[0] ? certs[0].subject_cn : "?", certs[0].n_san,
+                t->host_ok == 1 ? "MATCH" : t->host_ok == 0 ? "MISMATCH" : "uncertain");
     }
 
     /* chain-internal verification (NON-FATAL, logged): each cert is signed by the
@@ -350,7 +369,7 @@ static int tls_verify_certverify(tls *t, const uint8_t *m, int mlen, const uint8
 /* full client. Returns response length into `out`, or -1. */
 static int tls_get_inner(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) {
     rng_seed(seed);
-    g_cert_status = -2; g_chain_anchored = 0;   /* clear stale results */
+    g_cert_status = -2; g_chain_anchored = 0; g_host_match = -2;   /* clear stale results */
     uint8_t ip[4];
     if (dns_resolve(host, ip) != 0) return -1;
     tcp_conn tcp;
@@ -360,6 +379,7 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
      * shared, so tls_get() serializes all callers (the browser worker AND the shell's
      * sys_https) — never two tls_get_inner() at once. */
     static tls T; memset(&T, 0, sizeof(T)); T.tcp = &tcp;
+    T.host_ok = -1;                 /* unknown until the leaf cert is parsed (0 = mismatch is meaningful) */
 
     /* --- ephemeral X25519 key --- */
     uint8_t priv[32], cpub[32];
@@ -486,7 +506,7 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
             if (mt == HS_FINISHED) {
                 trans_hash(&T, s_fin_hash); have_finhash = 1;   /* transcript up to (not incl) server Finished */
             }
-            if (mt == HS_CERT)             tls_capture_leaf_key(&T, hsbuf + o + 4, ml);
+            if (mt == HS_CERT)             tls_capture_leaf_key(&T, hsbuf + o + 4, ml, host);
             else if (mt == HS_CERT_VERIFY) trans_hash(&T, cv_th);  /* snapshot BEFORE adding CertVerify */
             trans_add(&T, hsbuf + o, 4 + ml);
             if (mt == HS_CERT_VERIFY)                /* server proves it holds the leaf key (non-fatal) */
@@ -514,6 +534,7 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
             cv_ok == 0 ? "signature OK (leaf key proven)"
                        : cv_ok == -2 ? "absent" : "FAILED/unsupported");
     g_cert_status = cv_ok;          /* expose to the browser UI (see tls_cert_status) */
+    g_host_match = T.host_ok;       /* expose the hostname-match result too */
 
     /* --- application traffic keys (transcript now includes server Finished) --- */
     uint8_t fhash[32]; trans_hash(&T, fhash);
@@ -533,6 +554,19 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
     /* --- switch to application keys --- */
     derive_traffic(&T, c_ap, T.ckey, T.civ); T.cseq = 0;
     derive_traffic(&T, s_ap, T.skey, T.siv); T.sseq = 0;
+
+    /* ENFORCING (hostname): if the leaf cert's SAN/CN does not name the host we asked
+     * for, this is not the site's certificate (a MITM or misissued cert) — abort the
+     * connection BEFORE sending the request. Only a DEFINITIVE mismatch (host_ok==0,
+     * i.e. we saw the cert's whole name set) rejects; host_ok==-1 (no cert, or a SAN
+     * list larger than we store) fails open as informational, so a legitimate site is
+     * never wrongly rejected. Chain-to-root anchoring stays informational (the baked
+     * root set is incomplete) — see docs/438. */
+    if (T.host_ok == 0) {
+        kprintf("[tls] ABORT: leaf certificate does not match host %s — refusing\n", host);
+        tcp_close(&tcp);
+        return -1;
+    }
 
     /* --- send the HTTP request, read the response --- */
     char req[512]; int rl = 0;

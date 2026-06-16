@@ -15,3 +15,7 @@ int tls_cert_status(void);
 /* 1 if the most recent tls_get's certificate chain anchored to a trusted root CA
  * (full path validated); 0 otherwise. */
 int tls_chain_anchored(void);
+
+/* leaf-certificate hostname match of the most recent tls_get: -2 = n/a, 1 = the cert's
+ * SAN/CN matches the requested host, 0 = mismatch (the connection was rejected). */
+int tls_host_match(void);
