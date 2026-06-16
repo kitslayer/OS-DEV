@@ -962,6 +962,7 @@ static const struct {
     { "MUSIC   WAV", "tools/MUSIC.WAV" }, /* a C-major-scale tune: play in-OS with: play MUSIC.WAV */
     { "TUNE2   WAV", "tools/TUNE2.WAV" }, /* an arpeggio (for the jukebox playlist) */
     { "TUNE3   WAV", "tools/TUNE3.WAV" }, /* a little melody (for the jukebox playlist) */
+    { "WALL    PNG", "tools/WALL.PNG" },  /* the desktop wallpaper (1024x768), loaded by the WM */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 

@@ -26,6 +26,7 @@
 #include "net.h"
 #include "vfs.h"
 #include "rtc.h"
+#include "png.h"
 #include "string.h"
 #include "pmm.h"
 #include "task.h"
@@ -129,7 +130,14 @@ static const int corner[] = { 4, 2, 1, 1 };
 #define WP_TOP 0x183A5C
 #define WP_BOT 0x081320
 static int wp_h;
-static uint32_t wallpaper_color(int y) { return lerp(WP_TOP, WP_BOT, y, wp_h - 1); }
+static uint32_t *wallpaper_bmp;   /* a screen-sized image loaded from disk, or NULL = gradient */
+/* Background colour at (x,y): the loaded wallpaper if present, else the gradient. */
+static uint32_t wallpaper_at(int x, int y) {
+    if (wallpaper_bmp && x >= 0 && x < screen_w && y >= 0 && y < screen_h)
+        return wallpaper_bmp[(size_t)y * screen_w + x];
+    int yy = y < 0 ? 0 : (y >= wp_h ? wp_h - 1 : y);
+    return lerp(WP_TOP, WP_BOT, yy, wp_h - 1);
+}
 static void u2(uint64_t v, char *o) { o[0]='0'+(v/10)%10; o[1]='0'+v%10; o[2]=0; }
 static int unum(uint64_t v, char *o) {           /* general unsigned -> string; returns len */
     char t[24]; int i = 0;
@@ -305,12 +313,35 @@ static void draw_window(const window_t *w, int focused) {
     for (int j = 0; j < CORNER_R; j++) {              /* round the 4 corners */
         int in = corner[j];
         for (int i = 0; i < in; i++) {
-            fb_pixel(x + i, y + j, wallpaper_color(y + j));
-            fb_pixel(x + ww - 1 - i, y + j, wallpaper_color(y + j));
-            fb_pixel(x + i, y + hh - 1 - j, wallpaper_color(y + hh - 1 - j));
-            fb_pixel(x + ww - 1 - i, y + hh - 1 - j, wallpaper_color(y + hh - 1 - j));
+            fb_pixel(x + i, y + j, wallpaper_at(x + i, y + j));
+            fb_pixel(x + ww - 1 - i, y + j, wallpaper_at(x + ww - 1 - i, y + j));
+            fb_pixel(x + i, y + hh - 1 - j, wallpaper_at(x + i, y + hh - 1 - j));
+            fb_pixel(x + ww - 1 - i, y + hh - 1 - j, wallpaper_at(x + ww - 1 - i, y + hh - 1 - j));
         }
     }
+}
+
+/* Load WALL.PNG from disk into a screen-sized 0x00RRGGBB bitmap, if present and
+ * exactly the screen size. Any failure leaves wallpaper_bmp NULL (gradient). */
+static void load_wallpaper(void) {
+    long npix = (long)screen_w * screen_h;
+    uint8_t *file = kmalloc(512 * 1024);
+    if (!file) return;
+    long n = vfs_read("WALL.PNG", file, 512 * 1024);
+    if (n <= 0) { kfree(file); return; }
+    uint8_t *rgba = kmalloc((size_t)npix * 4);
+    uint8_t *scratch = kmalloc((size_t)npix * 4 + 8192);   /* inflated+unfiltered scanlines */
+    if (!rgba || !scratch) { kfree(file); if (rgba) kfree(rgba); if (scratch) kfree(scratch); return; }
+    int w = 0, h = 0;
+    int rc = png_decode(file, (int)n, rgba, (int)(npix * 4), scratch, (int)(npix * 4 + 8192), &w, &h);
+    kfree(file); kfree(scratch);
+    if (rc != 0 || w != screen_w || h != screen_h) { kfree(rgba); return; }
+    uint32_t *bmp = kmalloc((size_t)npix * 4);
+    if (!bmp) { kfree(rgba); return; }
+    for (long i = 0; i < npix; i++)                         /* RGBA bytes -> 0x00RRGGBB */
+        bmp[i] = ((uint32_t)rgba[i*4] << 16) | ((uint32_t)rgba[i*4+1] << 8) | rgba[i*4+2];
+    kfree(rgba);
+    wallpaper_bmp = bmp;
 }
 
 /* Render the whole scene (wallpaper, windows, taskbar — but NOT the cursor)
@@ -319,7 +350,10 @@ static void draw_window(const window_t *w, int focused) {
 static void render_scene(void) {
     fb_set_target(scenebuf);
     wp_h = screen_h;
-    vgrad(0, 0, screen_w, screen_h, WP_TOP, WP_BOT);        /* wallpaper */
+    if (wallpaper_bmp)                                      /* image from disk */
+        memcpy(scenebuf, wallpaper_bmp, (size_t)screen_w * screen_h * 4);
+    else
+        vgrad(0, 0, screen_w, screen_h, WP_TOP, WP_BOT);    /* fallback: gradient */
 
     for (int i = 0; i < win_count; i++)
         if (!windows[i].minimized)                          /* minimized = hidden to its chip */
@@ -528,6 +562,7 @@ void desktop_run(void) {
     backbuffer = kmalloc((size_t)screen_w * screen_h * 4);
     scenebuf   = kmalloc((size_t)screen_w * screen_h * 4);
     fb_set_target(backbuffer);
+    load_wallpaper();                    /* WALL.PNG from disk, else the gradient */
     start_y = screen_h - TASKBAR_H + 5;
 
     windows[win_count++] = (window_t){ 60, 70, 360, 206, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0 };
