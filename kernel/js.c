@@ -49,7 +49,7 @@ static void out_str(const char *s) {
  * the run ends) crossed 8 MB once querySelector(All) tests were added; 12 MB
  * restores headroom for the suite's continued growth and for heavy real pages.
  * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
-#define JS_ARENA   (12288 * 1024)
+#define JS_ARENA   (16384 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else

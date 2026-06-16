@@ -280,4 +280,6 @@ print("-- coercion edges (ToPrimitive / ToNumber, integer engine) --");
 print("["+([]+[])+"]", []+{}, +[], null+1, undefined+1, true+true);  // [] [object Object] 0 1 1 2 (empty array->""; array/object->string; +[]->0; null/undefined->0 [no NaN]; bool->num)
 print('5'*2, '5'-2, [5]+3, 0.5);  // 10 3 53 0 (string<->num arithmetic; [5]->"5" then +3 concats; fractional literal truncates)
 print(parseInt("0xff"), parseInt("  42abc"));  // 255 42 (hex prefix; leading ws + trailing junk)
+print("-- regex bounded quantifiers {n,m} (M438) --");
+print((/a{2,3}/.exec("aaaa")||["x"])[0], /\d{3}/.test("12"), (/x\w{2,4}y/.exec("xabcy")||["?"])[0]);  // aaa false xabcy (greedy {2,3} caps at 3; {3} needs exactly 3; {2,4} matches abc)
 print("-- done --");

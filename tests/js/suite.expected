@@ -256,4 +256,6 @@ true false
 [] [object Object] 0 1 1 2
 10 3 53 0
 255 42
+-- regex bounded quantifiers {n,m} (M438) --
+aaa false xabcy
 -- done --
