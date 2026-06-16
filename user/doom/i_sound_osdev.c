@@ -10,15 +10,18 @@
 // platform layer (doomgeneric_osdev.c, top of DG_DrawFrame), which keeps the
 // ~1-second ring topped up at ~70 fps without ever blocking.
 //
-// Music is NOT implemented here — DOOM's MUS format needs an OPL/FM synth we
-// don't have. i_sound.c keeps its no-op music stubs and no music module is
-// selected (snd_musicdevice can stay whatever; InitMusicModule does nothing
-// unless FEATURE_SOUND, which is off).
+// Music IS implemented here too (see the "MUS music synth" section below):
+// DOOM's MUS-format music lumps are parsed and rendered by a small polyphonic
+// triangle-wave synthesizer whose clock is driven by the audio we generate.
+// The synth's per-frame sample is ADDED into the same mix as the SFX inside
+// osdev_sound_pump(), so music and effects share the one 48 kHz output stream.
+// DG_music_module (at the bottom of this file) exposes it to i_sound.c.
 //
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "doomtype.h"
 #include "i_sound.h"
@@ -275,6 +278,363 @@ static void I_OSDEV_CacheSounds(sfxinfo_t *sounds, int num_sounds)
     }
 }
 
+// ===========================================================================
+// MUS music synth
+// ---------------------------------------------------------------------------
+// We parse DOOM's MUS-format music lumps and render them with a tiny
+// polyphonic triangle-wave synth.  The MUS clock (140 ticks/second) is driven
+// from the audio we generate: each output frame advances a fractional sample
+// accumulator, and when a tick elapses we process the next group of MUS events.
+// The summed voice value for each frame is produced by MusicNextSample() and
+// added into the SFX mix by osdev_sound_pump() (see below), so SFX + music
+// share the single 48 kHz stereo output stream.
+// ===========================================================================
+
+#define MUS_RATE        140             // MUS score runs at 140 Hz
+#define MAX_VOICES      16              // hard cap on simultaneous notes
+#define MUS_CHANNELS    16              // MUS has 16 logical channels (15=perc)
+#define PERCUSSION_CHAN 15
+
+// One sounding voice, keyed by (channel, note).
+typedef struct
+{
+    int      active;
+    int      channel;                   // 0..15
+    int      note;                      // MIDI note 0..127
+    int      vol;                       // effective per-note volume 0..127
+    double   phase;                     // triangle phase, 0..1 (wraps)
+    double   phase_inc;                 // phase advance per output frame
+} mus_voice_t;
+
+// A registered song: a private copy of the MUS lump plus parsed header offsets.
+typedef struct
+{
+    uint8_t *data;                      // owned copy of the lump
+    int      len;                       // copy length
+    int      score_start;               // byte offset of the score
+    int      score_len;                 // declared score length (bytes)
+} mus_song_t;
+
+static mus_voice_t mus_voices[MAX_VOICES];
+static int  mus_chan_vol[MUS_CHANNELS]; // per-channel volume 0..127
+
+static mus_song_t *mus_current = NULL;  // song currently selected for playback
+static int   mus_pos        = 0;        // read cursor within data[] (score)
+static int   mus_playing    = 0;        // 1 while actively rendering
+static int   mus_paused     = 0;        // 1 while paused (clock frozen)
+static int   mus_looping    = 0;        // loop at ScoreEnd?
+static int   mus_finished    = 0;       // hit ScoreEnd with looping == 0
+
+static double mus_tick_samples = 0.0;   // samples remaining until next event
+static int    mus_music_volume = 127;   // 0..127, from SetMusicVolume
+
+// Precomputed MIDI-note -> phase increment (cycles per output frame).
+// phase_inc = freq / OUT_RATE, freq = 440 * 2^((note-69)/12).
+static double mus_note_inc[128];
+static int    mus_note_inc_ready = 0;
+
+static void MusicInitNoteTable(void)
+{
+    int n;
+
+    if (mus_note_inc_ready)
+    {
+        return;
+    }
+
+    for (n = 0; n < 128; ++n)
+    {
+        double freq = 440.0 * pow(2.0, (n - 69) / 12.0);
+        mus_note_inc[n] = freq / (double) OUT_RATE;
+    }
+
+    mus_note_inc_ready = 1;
+}
+
+// Start (or retrigger) a voice for (channel, note) at the given volume.
+static void MusicVoiceOn(int channel, int note, int vol)
+{
+    int i, free_slot = -1, oldest = 0;
+
+    if (note < 0 || note > 127)
+    {
+        return;
+    }
+
+    // Reuse an existing voice for the same (channel,note) if present, else the
+    // first free slot, else steal slot 0 (simple, bounded).
+    for (i = 0; i < MAX_VOICES; ++i)
+    {
+        if (mus_voices[i].active
+         && mus_voices[i].channel == channel
+         && mus_voices[i].note == note)
+        {
+            free_slot = i;
+            break;
+        }
+        if (free_slot < 0 && !mus_voices[i].active)
+        {
+            free_slot = i;
+        }
+    }
+
+    if (free_slot < 0)
+    {
+        free_slot = oldest;             // steal (voice cap reached)
+    }
+
+    mus_voices[free_slot].active    = 1;
+    mus_voices[free_slot].channel   = channel;
+    mus_voices[free_slot].note      = note;
+    mus_voices[free_slot].vol       = vol;
+    mus_voices[free_slot].phase     = 0.0;
+    mus_voices[free_slot].phase_inc = mus_note_inc[note];
+}
+
+// Stop the voice matching (channel, note), if any.
+static void MusicVoiceOff(int channel, int note)
+{
+    int i;
+
+    for (i = 0; i < MAX_VOICES; ++i)
+    {
+        if (mus_voices[i].active
+         && mus_voices[i].channel == channel
+         && mus_voices[i].note == note)
+        {
+            mus_voices[i].active = 0;
+        }
+    }
+}
+
+static void MusicAllVoicesOff(void)
+{
+    memset(mus_voices, 0, sizeof(mus_voices));
+}
+
+// Read one byte of the score, staying within the owned copy.  Out-of-bounds
+// reads end the song (treated like ScoreEnd) rather than reading past the buffer.
+static int MusicReadByte(void)
+{
+    if (mus_current == NULL || mus_pos < 0 || mus_pos >= mus_current->len)
+    {
+        return -1;
+    }
+    return mus_current->data[mus_pos++];
+}
+
+// Process MUS events starting at mus_pos until one carries the "last" flag,
+// then read the trailing variable-length delay (in ticks) and convert it to
+// output samples, which we add to mus_tick_samples.  Sets mus_finished/stops or
+// loops on ScoreEnd.  Every read is bounds-checked via MusicReadByte().
+static void MusicRunEvents(void)
+{
+    int guard;
+
+    // Bound the work per call so a malformed score can never spin forever:
+    // a well-formed group is a handful of events, but cap generously.
+    for (guard = 0; guard < 4096; ++guard)
+    {
+        int event = MusicReadByte();
+        int last, type, channel;
+
+        if (event < 0)
+        {
+            // Ran off the end without a ScoreEnd: stop (or loop).
+            goto score_end;
+        }
+
+        last    = (event >> 7) & 1;
+        type    = (event >> 4) & 7;
+        channel = event & 0x0F;
+
+        switch (type)
+        {
+            case 0:     // ReleaseNote: 1 byte (note)
+            {
+                int note = MusicReadByte();
+                if (note < 0) goto score_end;
+                MusicVoiceOff(channel, note & 0x7F);
+                break;
+            }
+
+            case 1:     // PlayNote: note byte, optional volume byte
+            {
+                int note = MusicReadByte();
+                int vol;
+                if (note < 0) goto score_end;
+
+                if (note & 0x80)
+                {
+                    int v = MusicReadByte();
+                    if (v < 0) goto score_end;
+                    mus_chan_vol[channel] = v & 0x7F;
+                }
+                note &= 0x7F;
+                vol = mus_chan_vol[channel];
+
+                // Channel 15 is percussion: with a pure-tone synth a "note"
+                // there is meaningless, so skip it (silent) to avoid drone.
+                if (channel != PERCUSSION_CHAN)
+                {
+                    MusicVoiceOn(channel, note, vol);
+                }
+                break;
+            }
+
+            case 2:     // PitchBend: 1 byte (ignored — tones stay on-pitch)
+            {
+                if (MusicReadByte() < 0) goto score_end;
+                break;
+            }
+
+            case 3:     // SystemEvent: 1 byte (ignored)
+            {
+                if (MusicReadByte() < 0) goto score_end;
+                break;
+            }
+
+            case 4:     // Controller: 2 bytes (controller, value)
+            {
+                int ctrl = MusicReadByte();
+                int val;
+                if (ctrl < 0) goto score_end;
+                val = MusicReadByte();
+                if (val < 0) goto score_end;
+
+                // Controller 3 is the MUS "volume" controller; honour it so
+                // channel levels track the score.  Others (pan, etc.) ignored.
+                if ((ctrl & 0x7F) == 3)
+                {
+                    mus_chan_vol[channel] = val & 0x7F;
+                }
+                break;
+            }
+
+            case 6:     // ScoreEnd
+                goto score_end;
+
+            default:    // 5 and 7 are unused/reserved — treat as end (defensive)
+                goto score_end;
+        }
+
+        if (last)
+        {
+            // Variable-length delay (ticks): 7 bits/byte, high bit = continue.
+            uint32_t delay = 0;
+            int vb, vguard;
+
+            for (vguard = 0; vguard < 5; ++vguard)   // <=5 bytes covers 32 bits
+            {
+                vb = MusicReadByte();
+                if (vb < 0) goto score_end;
+                delay = (delay << 7) | (uint32_t)(vb & 0x7F);
+                if (!(vb & 0x80))
+                {
+                    break;
+                }
+            }
+
+            // Convert ticks -> output samples and accumulate.  Keeping this as
+            // a double preserves the fractional 48000/140 ratio across ticks.
+            mus_tick_samples += (double) delay * ((double) OUT_RATE / (double) MUS_RATE);
+            return;
+        }
+        // Otherwise loop and read the next event in this same group (delay 0).
+    }
+
+    // Fell through the guard (pathological score): stop to stay safe.
+score_end:
+    if (mus_looping && mus_current != NULL)
+    {
+        // Restart from the score: reset cursor, voices and channel volumes.
+        mus_pos = mus_current->score_start;
+        MusicAllVoicesOff();
+        // Leave mus_tick_samples as-is (>=0); next call schedules the next group.
+        if (mus_tick_samples < 1.0)
+        {
+            mus_tick_samples += (double) OUT_RATE / (double) MUS_RATE;
+        }
+    }
+    else
+    {
+        mus_playing  = 0;
+        mus_finished = 1;
+        MusicAllVoicesOff();
+    }
+}
+
+// Produce the next mono music sample (already scaled by master music volume),
+// advancing the MUS clock by exactly one output frame.  Returns a value in
+// roughly int16 range (may be added to the SFX mix; the caller clamps).
+static int32_t MusicNextSample(void)
+{
+    int i;
+    int32_t mix;
+
+    if (!mus_playing || mus_paused || mus_current == NULL)
+    {
+        return 0;
+    }
+
+    // Advance the MUS clock by one frame and run due event groups.  A while
+    // loop handles zero-delay groups (several events landing on one tick).
+    mus_tick_samples -= 1.0;
+    {
+        int spin = 0;
+        while (mus_playing && mus_tick_samples < 1.0 && spin < 1024)
+        {
+            MusicRunEvents();
+            ++spin;
+        }
+    }
+
+    if (!mus_playing)
+    {
+        return 0;
+    }
+
+    // Sum the active triangle-wave voices.
+    //
+    // A triangle in [-1,1] from phase p in [0,1):
+    //   tri = 4*|p - 0.5| - 1     (peaks +1 at p=0, -1 at p=0.5)
+    // Scale each voice by (note vol / 127) and a conservative per-voice
+    // amplitude so that several voices summed stay within int16 without harsh
+    // clipping.  PER_VOICE_AMP * MAX_VOICES is kept well under 32767.
+    {
+        const double PER_VOICE_AMP = 1400.0;   // 1400 * 16 = 22400 < 32767
+        double acc = 0.0;
+
+        for (i = 0; i < MAX_VOICES; ++i)
+        {
+            mus_voice_t *v = &mus_voices[i];
+            double tri, p;
+
+            if (!v->active)
+            {
+                continue;
+            }
+
+            p = v->phase;
+            tri = 4.0 * fabs(p - 0.5) - 1.0;        // -1..+1
+
+            acc += tri * ((double) v->vol / 127.0) * PER_VOICE_AMP;
+
+            p += v->phase_inc;
+            if (p >= 1.0)
+            {
+                p -= (double)(int) p;               // wrap into [0,1)
+            }
+            v->phase = p;
+        }
+
+        // Apply the master music volume (0..127).
+        mix = (int32_t)(acc * ((double) mus_music_volume / 127.0));
+    }
+
+    return mix;
+}
+
 // ---------------------------------------------------------------------------
 // The mixer / pump
 // ---------------------------------------------------------------------------
@@ -286,7 +646,8 @@ static inline int16_t clamp_s16(int32_t v)
     return (int16_t) v;
 }
 
-// Mix `nframes` interleaved stereo frames from the active channels into `out`.
+// Mix `nframes` interleaved stereo frames from the active channels into `out`,
+// then add the music synth (advancing the MUS clock one step per frame) on top.
 static void MixChunk(int16_t *out, int nframes)
 {
     int i, c;
@@ -356,6 +717,21 @@ static void MixChunk(int16_t *out, int nframes)
             ch->samples = NULL;
         }
     }
+
+    // Music pass: add the synth's per-frame sample (mono) to both channels.
+    // MusicNextSample() advances the MUS clock one frame per call and returns
+    // 0 when not playing, so this runs every chunk regardless of SFX activity
+    // and keeps the score in continuous sync with the audio we generate.
+    for (i = 0; i < nframes; ++i)
+    {
+        int32_t m = MusicNextSample();
+
+        if (m != 0)
+        {
+            out[i * 2 + 0] = clamp_s16((int32_t) out[i * 2 + 0] + m);
+            out[i * 2 + 1] = clamp_s16((int32_t) out[i * 2 + 1] + m);
+        }
+    }
 }
 
 // Called once per rendered frame from DG_DrawFrame.  Mixes and pushes chunks
@@ -421,4 +797,215 @@ sound_module_t DG_sound_module =
     I_OSDEV_StopSound,
     I_OSDEV_SoundIsPlaying,
     I_OSDEV_CacheSounds,
+};
+
+// ===========================================================================
+// music_module_t implementation (the MUS synth above, exposed to i_sound.c)
+// ---------------------------------------------------------------------------
+// Actual sound rendering happens in osdev_sound_pump()/MixChunk() via
+// MusicNextSample(); these entry points just manage song state.  i_sound.c
+// guards every call (music_module != NULL), and our pump drives the clock, so
+// Poll is a no-op.
+// ===========================================================================
+
+#define MUS_MAGIC0 'M'
+#define MUS_MAGIC1 'U'
+#define MUS_MAGIC2 'S'
+#define MUS_MAGIC3 0x1A
+
+static boolean I_OSDEV_InitMusic(void)
+{
+    int i;
+
+    MusicInitNoteTable();
+    MusicAllVoicesOff();
+
+    for (i = 0; i < MUS_CHANNELS; ++i)
+    {
+        mus_chan_vol[i] = 127;          // sensible default until the score sets it
+    }
+
+    mus_current      = NULL;
+    mus_pos          = 0;
+    mus_playing      = 0;
+    mus_paused       = 0;
+    mus_looping      = 0;
+    mus_finished     = 0;
+    mus_tick_samples = 0.0;
+
+    return true;
+}
+
+static void I_OSDEV_ShutdownMusic(void)
+{
+    mus_playing  = 0;
+    mus_current  = NULL;
+    MusicAllVoicesOff();
+}
+
+static void I_OSDEV_SetMusicVolume(int volume)
+{
+    if (volume < 0)   volume = 0;
+    if (volume > 127) volume = 127;
+    mus_music_volume = volume;
+}
+
+static void I_OSDEV_PauseMusic(void)
+{
+    mus_paused = 1;
+}
+
+static void I_OSDEV_ResumeMusic(void)
+{
+    mus_paused = 0;
+}
+
+// Validate the MUS header and take a private copy of the lump.  Returns an
+// opaque handle (mus_song_t*) or NULL if the lump is not valid MUS.
+static void *I_OSDEV_RegisterSong(void *data, int len)
+{
+    const uint8_t *src = (const uint8_t *) data;
+    mus_song_t *song;
+    int score_len, score_start;
+
+    // Need at least the fixed 16-byte MUS header.
+    if (src == NULL || len < 16)
+    {
+        return NULL;
+    }
+
+    // Magic "MUS\x1A".
+    if (src[0] != MUS_MAGIC0 || src[1] != MUS_MAGIC1
+     || src[2] != MUS_MAGIC2 || src[3] != MUS_MAGIC3)
+    {
+        return NULL;
+    }
+
+    // u16 scoreLen, u16 scoreStart (little-endian) at offsets 4 and 6.
+    score_len   = (int) (src[4] | (src[5] << 8));
+    score_start = (int) (src[6] | (src[7] << 8));
+
+    // Bounds: the score must lie within the lump.  Clamp score_len to what the
+    // lump actually holds so every later read stays in range even if the
+    // header lies or the lump is truncated.
+    if (score_start < 0 || score_start > len)
+    {
+        return NULL;
+    }
+    if (score_len < 0 || score_start + score_len > len)
+    {
+        score_len = len - score_start;
+    }
+
+    song = malloc(sizeof(mus_song_t));
+    if (song == NULL)
+    {
+        return NULL;
+    }
+
+    song->data = malloc((size_t) len);
+    if (song->data == NULL)
+    {
+        free(song);
+        return NULL;
+    }
+
+    memcpy(song->data, src, (size_t) len);
+    song->len         = len;
+    song->score_start = score_start;
+    song->score_len   = score_len;
+
+    return song;
+}
+
+static void I_OSDEV_UnRegisterSong(void *handle)
+{
+    mus_song_t *song = (mus_song_t *) handle;
+
+    if (song == NULL)
+    {
+        return;
+    }
+
+    // If we're freeing the song that's currently selected, stop first.
+    if (song == mus_current)
+    {
+        mus_playing = 0;
+        mus_current = NULL;
+        MusicAllVoicesOff();
+    }
+
+    free(song->data);
+    free(song);
+}
+
+static void I_OSDEV_PlaySong(void *handle, boolean looping)
+{
+    mus_song_t *song = (mus_song_t *) handle;
+    int i;
+
+    if (song == NULL)
+    {
+        return;
+    }
+
+    MusicInitNoteTable();
+    MusicAllVoicesOff();
+
+    for (i = 0; i < MUS_CHANNELS; ++i)
+    {
+        mus_chan_vol[i] = 127;
+    }
+
+    mus_current      = song;
+    mus_pos          = song->score_start;
+    mus_looping      = looping ? 1 : 0;
+    mus_finished     = 0;
+    mus_paused       = 0;
+    mus_tick_samples = 0.0;             // first event group runs immediately
+    mus_playing      = 1;
+}
+
+static void I_OSDEV_StopSong(void)
+{
+    mus_playing = 0;
+    MusicAllVoicesOff();
+}
+
+static boolean I_OSDEV_MusicIsPlaying(void)
+{
+    return (mus_playing && !mus_finished) ? true : false;
+}
+
+static void I_OSDEV_PollMusic(void)
+{
+    // Rendering + the MUS clock are driven from osdev_sound_pump(); nothing to do.
+}
+
+// snd_musicdevice defaults to SNDDEVICE_SB (see i_sound.c).  Music module
+// selection in i_sound.c's InitMusicModule() assigns DG_music_module directly
+// (no device-list scan), so this list is informational; claim SB for parity.
+static snddevice_t music_osdev_devices[] =
+{
+    SNDDEVICE_SB,
+    SNDDEVICE_GENMIDI,
+    SNDDEVICE_GUS,
+    SNDDEVICE_AWE32,
+};
+
+music_module_t DG_music_module =
+{
+    music_osdev_devices,
+    sizeof(music_osdev_devices) / sizeof(*music_osdev_devices),
+    I_OSDEV_InitMusic,
+    I_OSDEV_ShutdownMusic,
+    I_OSDEV_SetMusicVolume,
+    I_OSDEV_PauseMusic,
+    I_OSDEV_ResumeMusic,
+    I_OSDEV_RegisterSong,
+    I_OSDEV_UnRegisterSong,
+    I_OSDEV_PlaySong,
+    I_OSDEV_StopSong,
+    I_OSDEV_MusicIsPlaying,
+    I_OSDEV_PollMusic,
 };

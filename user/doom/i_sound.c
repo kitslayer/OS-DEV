@@ -76,6 +76,11 @@ static int snd_mport = 0;
 // default snd_sfxdevice, so InitSfxModule selects it.
 extern sound_module_t DG_sound_module;
 
+// The OSDEV MUS music synth (also in user/doom/i_sound_osdev.c).  Declared
+// unconditionally here (the i_sound.h decl is under FEATURE_SOUND) so
+// InitMusicModule() can select it without that build flag.
+extern music_module_t DG_music_module;
+
 static sound_module_t *sound_modules[] =
 {
     &DG_sound_module,
@@ -133,9 +138,11 @@ static void InitSfxModule(boolean use_sfx_prefix)
 
 static void InitMusicModule(void)
 {
-#ifdef FEATURE_SOUND
+    // Always select the OSDEV MUS synth (mirrors how DG_sound_module is the
+    // sole, always-present SFX module).  snd_musicdevice defaults to
+    // SNDDEVICE_SB; we assign the module directly rather than scanning a device
+    // list, so it is selected regardless of that setting.
     music_module = &DG_music_module;
-#endif /* FEATURE_SOUND */
 }
 
 //
