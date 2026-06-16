@@ -446,6 +446,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mouse:
         r->rax = (uint64_t)app_get_mouse();
         break;
+    case SYS_mouse_rel:
+        r->rax = (uint64_t)app_get_mouse_rel();
+        break;
     case SYS_playbg: {
         __asm__ volatile("sti");                  /* the file read can be slow; stay preemptible */
         uint8_t *wb = kmalloc(8 * 1024 * 1024);

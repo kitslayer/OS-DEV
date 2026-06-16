@@ -17,6 +17,7 @@
 
 #include "doomgeneric.h"
 #include "doomkeys.h"
+#include "d_event.h"
 
 /* ---- syscalls from ulib (declared here to avoid pulling in ulib.h, which is
  * outside our -I path; the symbols resolve at link time against user_ulib.o) */
@@ -26,6 +27,7 @@ extern void          sys_setkbmode(int raw);
 extern int           sys_getkbevent(void);
 extern unsigned long sys_uptime_ms(void);
 extern void          sys_sleep(int ms);
+extern void          sys_mouse_rel(int *dx, int *dy);
 
 /* DOOM sound mixer pump (user/doom/i_sound_osdev.c): mixes the active sound
  * channels to 48 kHz stereo and feeds the kernel's streaming PCM ring.  Called
@@ -193,6 +195,17 @@ int main(void)
     char *argv[] = { "doom", "-iwad", "DOOM1.WAD" };
     doomgeneric_Create(3, argv);
     for (;;) {
+        /* mouselook: turn the player by the mouse's horizontal motion */
+        int dx, dy; sys_mouse_rel(&dx, &dy);
+        (void)dy;
+        if (dx) {
+            event_t ev;
+            ev.type = ev_mouse;
+            ev.data1 = 0;            /* no mouse buttons (fire is on Ctrl) */
+            ev.data2 = dx * 4;       /* x movement -> turn (DOOM scales by sensitivity) */
+            ev.data3 = 0;            /* no mouse forward/back */
+            D_PostEvent(&ev);
+        }
         doomgeneric_Tick();
     }
     return 0;

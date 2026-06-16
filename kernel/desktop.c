@@ -697,7 +697,9 @@ void desktop_run(void) {
         int mx = mouse_x(), my = mouse_y(), btn = mouse_buttons(), left = btn & 1;
 
         /* feed the focused graphics app its cursor position (canvas-relative,
-         * undoing the integer upscale) + buttons, so apps can use the mouse */
+         * undoing the integer upscale) + buttons, plus relative motion for
+         * mouselook, so apps (and games like DOOM) can use the mouse */
+        int rdx, rdy; mouse_read_rel(&rdx, &rdy);   /* always drain so it can't pile up */
         if (win_count > 0) {
             window_t *fw = &windows[win_count - 1];
             uint32_t *cb; int gw, gh;
@@ -707,6 +709,7 @@ void desktop_run(void) {
                 int rx = (mx - (fw->x + 6)) / s, ry = (my - (fw->y + TITLEBAR_H + 6)) / s;
                 if (rx < 0 || ry < 0 || rx >= gw || ry >= gh) { rx = -1; ry = -1; }
                 app_set_mouse((app_t *)fw->app, rx, ry, btn);
+                app_add_mouse_rel((app_t *)fw->app, rdx, rdy);
             }
         }
 

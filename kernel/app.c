@@ -50,6 +50,7 @@ struct app {
     volatile unsigned short rawiq[64];   /* raw key-event queue (WM fills, app drains) */
     volatile int rqh, rqt;
     volatile int ms_x, ms_y, ms_btn;     /* cursor relative to the gfx canvas (-1 outside) + buttons */
+    volatile int ms_dx, ms_dy;           /* accumulated relative motion (mouselook) */
     char     grid[APP_ROWS][APP_COLS];
     uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
     uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
@@ -448,6 +449,22 @@ long app_get_mouse(void) {
     return ((long)(a->ms_btn & 0x7) << 32)
          | ((long)(a->ms_y & 0xFFFF) << 16)
          | ((long)(a->ms_x & 0xFFFF));
+}
+
+/* WM: accumulate relative mouse motion for an app (mouselook). */
+void app_add_mouse_rel(app_t *a, int dx, int dy) {
+    if (!a) return;
+    a->ms_dx += dx; a->ms_dy += dy;
+}
+
+/* SYS_mouse_rel: the caller's accumulated relative motion, read + cleared.
+ * dx in bits 0-31, dy in bits 32-63 (both signed). */
+long app_get_mouse_rel(void) {
+    struct app *a = cur();
+    if (!a) return 0;
+    int dx = a->ms_dx, dy = a->ms_dy;
+    a->ms_dx = 0; a->ms_dy = 0;
+    return ((long)(uint32_t)dy << 32) | (long)(uint32_t)dx;
 }
 
 /* SYS_getkbevent: next raw key event for the caller, or -1 if none (non-blocking). */

@@ -5,6 +5,7 @@ void mouse_init(void);
 int  mouse_x(void);
 int  mouse_y(void);
 int  mouse_buttons(void);     /* bit0 left, bit1 right, bit2 middle */
+void mouse_read_rel(int *dx, int *dy);  /* raw motion since last call (read+clear); for mouselook */
 
 /* Set the pointer to an absolute position (used by the USB tablet, which
  * reports absolute coordinates instead of relative motion). */

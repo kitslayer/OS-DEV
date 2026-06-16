@@ -44,12 +44,24 @@ static void mouse_command(uint8_t cmd) {
 }
 
 static int      mx, my, buttons;
+static volatile int rel_dx, rel_dy;        /* raw motion since the last mouse_read_rel */
 static uint8_t  packet[3];
 static int      phase;
 
 int mouse_x(void)       { return mx; }
 int mouse_y(void)       { return my; }
 int mouse_buttons(void) { return buttons; }
+
+/* Relative motion accumulated since the previous call (read + clear). Used for
+ * mouselook in games, where absolute clamped-to-screen position can't turn past
+ * the edge. */
+void mouse_read_rel(int *dx, int *dy) {
+    uint64_t fl; __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    if (dx) *dx = rel_dx;
+    if (dy) *dy = rel_dy;
+    rel_dx = rel_dy = 0;
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
 
 void mouse_set_abs(int x, int y, int b) {
     if (x < 0) x = 0;
@@ -73,6 +85,8 @@ static void handle_packet(void) {
     if (packet[0] & 0x10) dx |= ~0xFF;       /* sign-extend X */
     if (packet[0] & 0x20) dy |= ~0xFF;       /* sign-extend Y */
 
+    rel_dx += dx;                            /* accumulate raw motion for mouselook */
+    rel_dy += dy;
     mx += dx;
     my -= dy;                                /* screen Y grows downward */
     if (mx < 0) mx = 0;

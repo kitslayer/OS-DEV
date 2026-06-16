@@ -62,6 +62,7 @@
 #define SYS_mouse  52   /* ()              -> packed cursor: x|0-15 y|16-31 buttons|32-34 */
 #define SYS_playbg 53   /* (name)          -> play a .wav in the background (non-blocking); 0/-1 */
 #define SYS_audiostop 54 /* ()             -> stop background audio */
+#define SYS_mouse_rel 55 /* ()             -> packed relative motion dx|0-31 dy|32-63 (mouselook) */
 
 #define SYSCALL_VECTOR 0x80
 
