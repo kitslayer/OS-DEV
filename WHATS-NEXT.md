@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (464 milestones).** (M464: **App-exit resource reclamation** — a ring-3 app that exits
+> **Status (465 milestones).** (M465: **Kernel-heap interrupt-safety** — `kmalloc`/`kfree` (kheap.c)
+> now bracket their shared-free-list edit with irq_save(cli)/irq_restore, closing the pre-existing
+> latent race the M464 review surfaced (an IF-on WM `kfree` preempted by an app's IF-clear syscall
+> `kmalloc` over a half-linked list). Restores the caller's prior IF state (safe on/off), nests across
+> kmalloc's grow-and-retry recursion. Correctness-only (single-threaded behaviour unchanged). Verified:
+> all 7 suites + in-OS stress (5 spawn+exit cycles freeing 256 KB stacks from the WM, interleaved with
+> a heap-heavy CSS-page browser render — 0 faults). The prior review explicitly recommended this fix.
+> M464: **App-exit resource reclamation** — a ring-3 app that exits
 > cleanly now has its `task_t` + 256 KB kernel stack freed and its `apps[]` slot released (was: all
 > leaked → 8-spawns/boot hard cap). New `task_free` (task.c) + `app_reap` (app.c); the WM reap loop
 > (desktop.c) frees from its own task only once the dead app's task is `TASK_DEAD` — set interrupts-off

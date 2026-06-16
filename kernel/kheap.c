@@ -38,6 +38,21 @@ static inline uint64_t align_page(uint64_t x) {
     return (x + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
 }
 
+/* The free list is shared mutable state, so every allocation/free must be
+ * atomic against preemption: a timer IRQ that switched tasks mid-edit could let
+ * another task walk a half-linked list (e.g. the WM frees an app's stack with
+ * interrupts on while an app's syscall allocates). These save RFLAGS + disable
+ * interrupts, then restore the caller's prior state — so they nest correctly and
+ * are safe whether the caller already had interrupts off (syscalls) or on. */
+static inline uint64_t irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    return fl;
+}
+static inline void irq_restore(uint64_t fl) {
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
+
 /* Map [from, to) of heap virtual space to fresh physical frames. */
 static void map_range(uint64_t from, uint64_t to) {
     for (uint64_t v = from; v < to; v += PAGE_SIZE)
@@ -83,6 +98,7 @@ static void grow_heap(uint64_t need_bytes) {
 
 void *kmalloc(size_t size) {
     uint64_t need = align16(size);
+    uint64_t f = irq_save();
 
     for (block_t *b = head; b; b = b->next) {
         if (!b->free || b->size < need)
@@ -98,11 +114,16 @@ void *kmalloc(size_t size) {
             b->size = need;
         }
         b->free = 0;
-        return (uint8_t *)b + sizeof(block_t);
+        void *p = (uint8_t *)b + sizeof(block_t);
+        irq_restore(f);
+        return p;
     }
 
     grow_heap(need);
-    return kmalloc(size);   /* one retry; the new block will fit */
+    void *p = kmalloc(size);   /* one retry; the new block will fit (nested
+                                * irq_save is a no-op while we hold IF off) */
+    irq_restore(f);
+    return p;
 }
 
 void *kzalloc(size_t size) {
@@ -115,6 +136,7 @@ void *kzalloc(size_t size) {
 void kfree(void *ptr) {
     if (!ptr)
         return;
+    uint64_t f = irq_save();
     block_t *b = (block_t *)((uint8_t *)ptr - sizeof(block_t));
     b->free = 1;
 
@@ -124,4 +146,5 @@ void kfree(void *ptr) {
         b->size += sizeof(block_t) + b->next->size;
         b->next = b->next->next;
     }
+    irq_restore(f);
 }
