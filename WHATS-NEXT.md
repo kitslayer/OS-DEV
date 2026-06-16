@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (455 milestones).** (M455: **`display:none` + `font-size` from `<style>` rules** — M448/M454
+> **Status (456 milestones).** (M456: **SVG `<text>`** — svg.c renders `<text>` with the kernel 8×16
+> bitmap font (`font_glyphs`, isolated; svgtest stubs it), each glyph scaled to `font-size` device px
+> + `fill`-coloured, anchor through transform/viewBox map (translate/scale positioning; no glyph
+> rotation). Bounded (blend_px clamps every px + char/height caps) → fuzz-safe. svgtest +text unit
+> test +text fuzz frags. Verified in-OS (TXTSVG.SVG: "Hello, SVG!" 22px blue, "text labels work" 15px
+> red, "OK" on a circle). The SVG decoder is now comprehensive: shapes/paths + transforms +
+> inheritance + opacity + gradients + text.
+> M455: **`display:none` + `font-size` from `<style>` rules** — M448/M454
 > did these inline; now the `<style>` cascade does too, so `.hidden{display:none}` (ubiquitous utility
 > classes) + `.big{font-size:2rem}` work. capture_css parses font-size/display into 2 new rule columns;
 > css_match reports them (a display:none rule raises the same n_hidden scope; a font-size rule sets the

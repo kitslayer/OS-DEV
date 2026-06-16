@@ -24,6 +24,12 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
 static uint8_t obuf[512u*512u*4u];          /* 1 MB */
 static uint8_t sbuf[256u*1024u];            /* 256 KB scratch */
 
+/* svg.c uses the kernel font for <text>; stub it here (the real font is in font.c, linked
+ * into the kernel build). 'A'/'B' are solid blocks so a <text> test can assert pixels;
+ * other glyphs are blank. This locks draw_text's bounds + positioning, not glyph fidelity. */
+#define SOLID16 {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}
+const unsigned char font_glyphs[128][16] = { [0x41] = SOLID16, [0x42] = SOLID16 };
+
 static int fails = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); fails++; } } while (0)
 
@@ -285,6 +291,22 @@ static void test_gradient(void) {
     }
 }
 
+/* --- test 10: <text> (renders glyphs via the font; stub: 'A'/'B' = solid blocks) -- */
+static void test_text(void) {
+    const char *svg = "<svg width='100' height='40'>"
+        "<text x='10' y='30' font-size='20' fill='#ff0000'>AB</text></svg>";
+    int w, h;
+    int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                       obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+    CHECK(r == 0 && w == 100 && h == 40, "text: decode 100x40");
+    if (r == 0) {
+        const uint8_t *g = px(w, 15, 22);    /* inside the 'A' glyph cell ([10,20]x[10,30]) */
+        CHECK(g[0] > 180 && g[1] < 60 && g[2] < 60 && g[3] > 200, "text: glyph drawn red at (15,22)");
+        const uint8_t *o = px(w, 70, 35);    /* well outside the two glyphs */
+        CHECK(o[3] == 0, "text: empty area stays transparent");
+    }
+}
+
 /* --- fuzz harness -------------------------------------------------------- */
 static uint32_t rs = 0x5EED1234u;
 static uint32_t xr(void) { rs ^= rs<<13; rs ^= rs>>17; rs ^= rs<<5; return rs; }
@@ -299,6 +321,7 @@ int main(void) {
     test_inherit();
     test_opacity();
     test_gradient();
+    test_text();
 
     /* Valid seeds to mutate during fuzzing. */
     const char *seeds[] = {
@@ -364,6 +387,7 @@ int main(void) {
             "<defs>","</defs>","<linearGradient id='","<radialGradient id='","</linearGradient>",
             "</radialGradient>","<stop offset='","' stop-color='","' stop-opacity='","fill='url(#",
             "url(#g)","' gradientUnits='userSpaceOnUse","' cx='","' r='","</stop>",
+            "<text x='","' y='","' font-size='","'>","</text>","ABCabc 123 xyz!",
         };
         int nfr = (int)(sizeof frag / sizeof frag[0]);
         for (unsigned seed = 1; seed <= 16; seed++) {
@@ -422,7 +446,7 @@ int main(void) {
     }
 
     if (fails == 0)
-        printf("svgtest: 9 unit tests (incl. transforms + inheritance + opacity + gradients) + %d random + %d "
+        printf("svgtest: 10 unit tests (transforms + inheritance + opacity + gradients + text) + %d random + %d "
                "mutation + 320000 structured fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
     else
         printf("svgtest: %d FAILURE(S)\n", fails);

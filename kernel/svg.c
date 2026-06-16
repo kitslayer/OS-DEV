@@ -39,6 +39,7 @@
  */
 #include "svg.h"
 #include "string.h"
+#include "font.h"      /* font_glyphs[128][16] for <text> rendering */
 
 /* ---- caps (documented) ------------------------------------------------- */
 #define SVG_MAX_DIM    512      /* W,H each <= this */
@@ -1003,6 +1004,42 @@ static void raster_shape(ctx_t *c, color_t fill, color_t stroke, fx swid_dev, in
     stroke_poly(c, stroke, closed, swid_dev);
 }
 
+/* ---- <text>: render a string with the kernel 8x16 bitmap font --------------- *
+ * The text anchor (ux,uy is the BASELINE) is run through the CTM + viewBox map; each
+ * glyph is then drawn axis-aligned, scaled so its height is the font-size in device
+ * pixels (8x16 glyph -> width = height/2). Translate/scale positioning works; rotation
+ * of the glyphs themselves is not applied (rare). Everything is bounded + clamped:
+ * blend_px range-checks every pixel, and the char count / glyph height are capped. */
+#define SVG_TEXT_MAX  512    /* chars rendered per <text> */
+#define SVG_TEXT_HMAX 128    /* device glyph height cap (bounds the per-glyph work) */
+static void draw_text(ctx_t *c, fx ux, fx uy, fx fsize, const char *s, int n, color_t col) {
+    if (!col.set || n <= 0) return;
+    if (n > SVG_TEXT_MAX) n = SVG_TEXT_MAX;
+    int x0  = map_x(c, ctm_x(c, ux, uy)) >> FX_SHIFT;          /* device anchor (baseline) */
+    int by  = map_y(c, ctm_y(c, ux, uy)) >> FX_SHIFT;
+    int H = (int)(fx_mulc(fsize, c->sy) >> FX_SHIFT);          /* glyph height in device px */
+    if (H < 6) H = 6;
+    if (H > SVG_TEXT_HMAX) H = SVG_TEXT_HMAX;
+    int W = H / 2; if (W < 3) W = 3;                           /* 8x16 -> advance = height/2 */
+    int top = by - H;                                         /* baseline -> top of the glyph cell */
+    for (int i = 0; i < n; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch >= 128) ch = '?';
+        int cx = x0 + i * W;
+        for (int gy = 0; gy < 16; gy++) {
+            unsigned char row = font_glyphs[ch][gy];
+            if (!row) continue;
+            int py0 = top + gy * H / 16, py1 = top + (gy + 1) * H / 16;
+            for (int gx = 0; gx < 8; gx++) {
+                if (!(row & (0x80 >> gx))) continue;
+                int px0 = cx + gx * W / 8, px1 = cx + (gx + 1) * W / 8;
+                for (int py = py0; py < py1; py++)
+                    for (int px = px0; px < px1; px++) blend_px(c, px, py, col, col.a);
+            }
+        }
+    }
+}
+
 /* ---- the <svg> tag: dimensions + viewBox ------------------------------- */
 /* Returns 0 and fills the ctx scale/canvas, or -1. */
 static int read_svg_tag(ctx_t *c, const char *s, const char *e, int out_cap) {
@@ -1328,8 +1365,28 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
             build_path(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
+        } else if (IS("text") && !closing) {
+            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);   /* text uses the fill colour */
+            char v[64]; fx tx = 0, ty = 0, fsz = fx_from_int(16);     /* default font-size 16 */
+            if (get_attr(name, body_e, "x", v, sizeof v)) { const char *q=v; tx = parse_num(&q, v+strlen(v)); }
+            if (get_attr(name, body_e, "y", v, sizeof v)) { const char *q=v; ty = parse_num(&q, v+strlen(v)); }
+            if (get_attr(name, body_e, "font-size", v, sizeof v)) { const char *q=v; fsz = parse_num(&q, v+strlen(v)); }
+            else { char st[256]; st[0]=0; get_attr(name, body_e, "style", st, sizeof st);
+                   char fv[32]; if (get_style(st, "font-size", fv, sizeof fv)) { const char *q=fv; fsz = parse_num(&q, fv+strlen(fv)); } }
+            /* content = the text up to the next tag (nested <tspan> etc. truncate it, ok for v1) */
+            const char *cs = next, *ce = next;
+            while (ce < end && *ce != '<') ce++;
+            char buf[SVG_TEXT_MAX]; int bn = 0;
+            for (const char *q = cs; q < ce && bn < SVG_TEXT_MAX-1; q++) {
+                char ch = *q;
+                if (ch=='\n' || ch=='\t' || ch=='\r') ch = ' ';      /* collapse layout whitespace */
+                buf[bn++] = ch;
+            }
+            buf[bn] = 0;
+            draw_text(&C, tx, ty, fsz, buf, bn, fill);
         }
-        /* else: <text>, <image>, <use>, gradients, unknown -> skipped (<g> handled above) */
+        /* else: <image>, <use>, unknown -> skipped (<g> handled above; the text content
+         * after a <text> tag is plain text and is skipped by the tag scanner) */
 
         if (shape_tf) for (int i = 0; i < 6; i++) C.m[i] = shape_saved[i];   /* restore CTM */
         #undef IS
