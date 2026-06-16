@@ -1,12 +1,17 @@
 # What's next
 
-> **Status (429 milestones).** (M424–429: shell `cmp` (file compare); and a
-> JS-engine correctness sweep found by probing — getters now fire in
-> value-iteration too (`JSON.stringify`/`Object.values`/`entries`/`assign`/spread,
-> M425–428) and `to_num(Date)` returns the epoch so Date arithmetic/comparison
-> work (M429); plus committed ASan/UBSan fuzz harnesses for the kernel's
-> untrusted-input parsers — `make check` = jstest + imgtest + x509test + nettest,
-> each verified to catch a reintroduced OOB. M387–423: the JS-engine / browser-demo / shell
+> **Status (434 milestones).** (M424–434: more shell tools — `cmp`/`paste`/`comm`
+> (the file-compare set), `strings`, `basename`/`dirname`; a JS-engine correctness
+> sweep found by probing — getters now fire in value-iteration too
+> (`JSON.stringify`/`Object.values`/`entries`/`assign`/spread, M425–428) and
+> `to_num(Date)` returns the epoch so Date arithmetic/comparison work (M429); the
+> untrusted-input **security audit was deepened on the browser** (M434) — beyond the
+> M422 high-level tokenizer review, a granular bound-by-bound pass over every
+> self-contained HTML/CSS sub-parser (`decode_entity`/`parse_color`/the inline-`style=`
+> parsers/`sel_parse`/the attr helpers), independently reviewed **bounds-safe**, with
+> one `decode_entity` defense-in-depth guard; plus committed ASan/UBSan fuzz harnesses
+> for the kernel's untrusted-input parsers — `make check` = jstest + imgtest + x509test
+> + nettest, each verified to catch a reintroduced OOB. M387–423: the JS-engine / browser-demo / shell
 > spaces were saturated with verified increments — a 15-page interactive browser
 > demo suite (games/sims/tools) + CLI companions (`unmorse`/`unhex`/`unbase64`,
 > `cal -3`). Then a **correctness + security pass** on the highest-risk code:

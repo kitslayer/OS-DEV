@@ -240,6 +240,7 @@ static char uni_to_ascii(unsigned v) {
 
 /* Decode &entity; at s (s[0]=='&'); writes *out + returns chars consumed, or 0. */
 static int decode_entity(const char *s, int maxlen, char *out) {
+    if (maxlen < 2) return 0;   /* shortest decodable entity is >=2 chars; also makes the s[1] read below in-bounds regardless of caller (defense-in-depth: callers already pass s[0]=='&') */
     int n = 0; while (n < maxlen && n < 12 && s[n] != ';') n++;
     if (n >= maxlen || s[n] != ';') return 0;
     int len = n + 1;
