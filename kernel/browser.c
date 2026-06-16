@@ -2754,7 +2754,7 @@ static void md_esc(char *o, int *p, int cap, char c) {            /* escape HTML
     else md_putc(o, p, cap, c);
 }
 static void md_inline(char *o, int *p, int cap, const char *s, int len) {  /* spans within one line */
-    int bold = 0, ital = 0;
+    int bold = 0, ital = 0, strike = 0;
     for (int i = 0; i < len; ) {
         char c = s[i];
         if (c == '\\' && i + 1 < len) { md_esc(o, p, cap, s[i + 1]); i += 2; continue; }   /* backslash escape */
@@ -2796,11 +2796,28 @@ static void md_inline(char *o, int *p, int cap, const char *s, int len) {  /* sp
             md_esc(o, p, cap, c); i++; continue;
         }
         if (c == '*' && i + 1 < len && s[i + 1] == '*') { md_put(o, p, cap, bold ? "</b>" : "<b>"); bold = !bold; i += 2; continue; }
+        if (c == '~' && i + 1 < len && s[i + 1] == '~') { md_put(o, p, cap, strike ? "</s>" : "<s>"); strike = !strike; i += 2; continue; }
         if (c == '*' || c == '_') { md_put(o, p, cap, ital ? "</i>" : "<i>"); ital = !ital; i++; continue; }
+        if (c == 'h') {                                          /* autolink: a bare http(s):// URL */
+            int sch = 0;
+            if (i + 7 <= len && s[i+1]=='t'&&s[i+2]=='t'&&s[i+3]=='p'&&s[i+4]==':'&&s[i+5]=='/'&&s[i+6]=='/') sch = 7;
+            else if (i + 8 <= len && s[i+1]=='t'&&s[i+2]=='t'&&s[i+3]=='p'&&s[i+4]=='s'&&s[i+5]==':'&&s[i+6]=='/'&&s[i+7]=='/') sch = 8;
+            if (sch) {
+                int u = i + sch;
+                while (u < len && s[u]!=' '&&s[u]!='\t'&&s[u]!=')'&&s[u]!='<'&&s[u]!='>'&&s[u]!='"') u++;
+                md_put(o, p, cap, "<a href=\"");
+                for (int k = i; k < u; k++) md_esc(o, p, cap, s[k]);
+                md_put(o, p, cap, "\">");
+                for (int k = i; k < u; k++) md_esc(o, p, cap, s[k]);
+                md_put(o, p, cap, "</a>");
+                i = u; continue;
+            }
+        }
         md_esc(o, p, cap, c); i++;
     }
-    if (bold) md_put(o, p, cap, "</b>");                         /* close any span left open at line end */
-    if (ital) md_put(o, p, cap, "</i>");
+    if (bold)   md_put(o, p, cap, "</b>");                       /* close any span left open at line end */
+    if (ital)   md_put(o, p, cap, "</i>");
+    if (strike) md_put(o, p, cap, "</s>");
 }
 /* Emit one GFM table row; cells are the runs of text between '|' delimiters. */
 static void md_table_row(char *o, int *p, int cap, const char *s, int len, int hdr) {

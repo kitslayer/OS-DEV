@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (485 milestones).** (M485: **CSV files render as tables (`.csv`)** — a local `.csv` opens as an
+> **Status (486 milestones).** (M486: **Markdown autolinks + strikethrough** — rounds out `md_inline`: a
+> bare `http(s)://` URL → a clickable `<a>` (bounded scheme-prefix probe + scan to whitespace/delimiter),
+> and `~~text~~` → `<s>` (flat toggle like bold/italic; the renderer already draws a strike-line for STY_
+> STRIKE). Both isolated to the inline scanner — non-recursive, bounds-checked, no touch to anything risky.
+> readme.md demo gained a bare URL + struck text. Verified in-OS: browse file:readme.md → https://example.com
+> is a blue link, struck text is greyed with a line through it. File: kernel/browser.c, tools/mkfatfs.c.
+> **The markdown renderer is now fairly complete GFM: headings/bold/italic/strike/code/fenced/lists/quotes/
+> links/autolinks/images/tables. Safe + fully locally verifiable.**)
+> M485: **CSV files render as tables (`.csv`)** — a local `.csv` opens as an
 > HTML `<table>` via `csv_to_html` (same safe pattern as markdown: convert → parse_html, reuses md_put/
 > md_esc). RFC-4180 quoting: a `"`-quoted field may contain commas, `""` = a literal quote; first row =
 > `<th>` header. Bounded (writes capped, reads within len; rows split on `\n` — embedded newlines in quotes
