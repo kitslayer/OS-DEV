@@ -21,6 +21,7 @@
 #include "gif.h"
 #include "jpeg.h"
 #include "svg.h"
+#include "bmp.h"
 #include "tls.h"
 #include "js.h"
 #include "console.h"
@@ -45,6 +46,7 @@
 #define NO_LINK   0xFFFF
 #define IMG_SLOTS 6                 /* inline images decoded per page */
 #define IMG_READ_MAX 131072         /* scratch to read a local image file */
+#define LOCAL_IMG_MAX (1024*1024)   /* transient buffer for a full-page local image (a 24-bit BMP screenshot is ~576 KB > RAW_MAX) */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
 #define REMOTE_IMG_MAX 3            /* remote <img> URLs prefetched per page (best-effort) */
 
@@ -2542,6 +2544,22 @@ static uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
         if (r != 0) { kfree(rgba); return 0; }
         return rgba;
     }
+    /* BMP (BM ...): an uncompressed Windows bitmap — e.g. our own `screenshot`
+     * output. Read W/H from the header, allocate, then decode. */
+    if (len >= 54 && data[0]=='B' && data[1]=='M' &&
+        ((uint32_t)data[14]|((uint32_t)data[15]<<8)|((uint32_t)data[16]<<16)|((uint32_t)data[17]<<24)) >= 40) {
+        int32_t bw = (int32_t)(((uint32_t)data[18])|((uint32_t)data[19]<<8)|((uint32_t)data[20]<<16)|((uint32_t)data[21]<<24));
+        int32_t bh = (int32_t)(((uint32_t)data[22])|((uint32_t)data[23]<<8)|((uint32_t)data[24]<<16)|((uint32_t)data[25]<<24));
+        long aw = bw, ah = bh < 0 ? -(long)bh : (long)bh;
+        if (aw >= 1 && aw <= 2048 && ah >= 1 && ah <= 2048 && aw * ah <= 1024*1024) {
+            long rgba_sz = aw * ah * 4;
+            uint8_t *rgba = kmalloc((unsigned long)rgba_sz);
+            if (!rgba) return 0;
+            int r = bmp_decode(data, len, rgba, (int)rgba_sz, ow, oh);
+            if (r != 0) { kfree(rgba); return 0; }
+            return rgba;
+        }
+    }
     /* SVG (text XML): detect "<svg" within the first chunk, then rasterize. svg_decode
      * caps W,H<=512, so a 1 MB worst-case buffer holds any output; shrink to exact after. */
     { int issvg = 0, lim = len < 512 ? len : 512;
@@ -2685,10 +2703,26 @@ static void browser_navigate(browser_t *b) {
             copy_url(b->hist[b->histn++], b->cur);
         b->is_back = 0; copy_url(b->cur, b->url);
         b->want = 0; b->scroll = 0;
-        long n = vfs_read(b->url + 5, b->raw, RAW_MAX - 1);
-        if (n < 0) { b->ntok = 0; set_status(b, "file not found"); return; }
-        b->raw[n] = 0; b->rawlen = (int)n;
-        if (try_image(b, (const uint8_t *)b->raw, (int)n)) { set_status(b, "image"); return; }
+        /* A local image can be larger than the HTML buffer (a 24-bit BMP
+         * screenshot is ~576 KB > RAW_MAX), so first read into a transient
+         * buffer and try to decode it as an image; if it isn't one (or the
+         * alloc fails), fall back to the HTML/text path on b->raw as before. */
+        uint8_t *big = kmalloc(LOCAL_IMG_MAX);
+        if (big) {
+            long bn = vfs_read(b->url + 5, big, LOCAL_IMG_MAX);
+            if (bn < 0) { kfree(big); b->ntok = 0; set_status(b, "file not found"); return; }
+            if (try_image(b, big, (int)bn)) { kfree(big); set_status(b, "image"); return; }
+            long cp = bn < RAW_MAX - 1 ? bn : RAW_MAX - 1;   /* not an image: keep (capped) for text/HTML */
+            memcpy(b->raw, big, (size_t)cp);
+            kfree(big);
+            b->raw[cp] = 0; b->rawlen = (int)cp;
+        } else {
+            long n0 = vfs_read(b->url + 5, b->raw, RAW_MAX - 1);
+            if (n0 < 0) { b->ntok = 0; set_status(b, "file not found"); return; }
+            b->raw[n0] = 0; b->rawlen = (int)n0;
+            if (try_image(b, (const uint8_t *)b->raw, (int)n0)) { set_status(b, "image"); return; }
+        }
+        long n = b->rawlen;
         const char *q = b->raw; while (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t') q++;
         if (*q == '<') { b->bodyoff = 0; b->bodylen = (int)n; parse_html(b, b->raw, (int)n);  /* looks like HTML */
                          if (b->scriptlen > 0) run_page_scripts(b, 0, (int)n); }

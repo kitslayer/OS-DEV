@@ -9,7 +9,7 @@ CC=${CC:-gcc}
 SAN="-fsanitize=address,undefined -fno-sanitize-recover=all"
 echo "building host image decoders (ASan+UBSan)..."
 $CC -std=gnu11 -O1 $SAN -Ikernel/include \
-    tests/img/img_test.c kernel/jpeg.c kernel/png.c kernel/gif.c kernel/inflate.c \
+    tests/img/img_test.c kernel/jpeg.c kernel/png.c kernel/gif.c kernel/inflate.c kernel/bmp.c \
     -o /tmp/osdev_img_test
 echo "running image-decoder regression + fuzz..."
 if /tmp/osdev_img_test; then

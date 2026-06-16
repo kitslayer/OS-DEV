@@ -15,6 +15,7 @@ int jpeg_probe (const uint8_t *, int, int *, int *, long *);
 int jpeg_decode(const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
 int png_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
 int gif_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
+int bmp_decode (const uint8_t *, int, uint8_t *, int, int *, int *);
 int inflate    (const uint8_t *, int, uint8_t *, int);   /* raw DEFLATE */
 
 static uint8_t obuf[4u << 20], sbuf[4u << 20];   /* 4 MB each (BSS) */
@@ -28,6 +29,7 @@ static void run_all(const uint8_t *d, int n) {
     jpeg_decode(d, n, obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
     png_decode (d, n, obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
     gif_decode (d, n, obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+    bmp_decode (d, n, obuf, sizeof obuf, &w, &h);
 }
 
 int main(void) {
@@ -77,6 +79,36 @@ int main(void) {
         inflate(f, n, obuf, sizeof obuf);
     }
 
-    printf("imgtest: M422 DRI PoC + truncated headers + %d decoder + %d DEFLATE fuzz iters — ASan/UBSan clean\n", ITERS, ITERS);
+    /* 5. BMP correctness: a 2x2 24-bit bottom-up BMP with four known colours
+     *    must decode to the right top-down RGBA pixels (and prove the bottom-up
+     *    row flip + BGR->RGBA order). */
+    static const uint8_t bmp24[70] = {
+        'B','M', 70,0,0,0, 0,0,0,0, 54,0,0,0,            /* file: size=70, pixels@54 */
+        40,0,0,0, 2,0,0,0, 2,0,0,0, 1,0, 24,0, 0,0,0,0,  /* DIB: 40, w=2,h=2, 1 plane, 24bpp, BI_RGB */
+        16,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,    /* imgsize=16, ppm/clrused/clrimp = 0 */
+        255,0,0,  255,255,255, 0,0,                       /* bottom row (y=1): blue,  white  + pad */
+        0,0,255,  0,255,0,     0,0,                       /* top row    (y=0): red,   green  + pad */
+    };
+    {
+        int w = 0, hh = 0;
+        int r = bmp_decode(bmp24, sizeof bmp24, obuf, sizeof obuf, &w, &hh);
+        const uint8_t exp[16] = { 255,0,0,255,  0,255,0,255,  0,0,255,255,  255,255,255,255 };
+        int ok = (r == 0 && w == 2 && hh == 2);
+        for (int i = 0; ok && i < 16; i++) if (obuf[i] != exp[i]) ok = 0;
+        if (!ok) { printf("FAIL: BMP 2x2 decode wrong (r=%d w=%d h=%d)\n", r, w, hh); return 1; }
+    }
+
+    /* 6. BMP-targeted fuzz: 'BM' + a 40-size DIB header, then random bytes, so
+     *    the parse runs past the magic into the stride / data-offset / palette
+     *    math (the BMP OOB vectors) with random width/height/bpp/offset. */
+    for (int i = 0; i < ITERS; i++) {
+        int n = 54 + (int)(xr() % 40);           /* 54..93 bytes */
+        for (int j = 0; j < n; j++) f[j] = (uint8_t)xr();
+        f[0] = 'B'; f[1] = 'M';
+        f[14] = 40; f[15] = f[16] = f[17] = 0;   /* DIB size = 40 -> parser proceeds */
+        int w, h; bmp_decode(f, n, obuf, sizeof obuf, &w, &h);
+    }
+
+    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + %d decoder + %d DEFLATE + %d BMP fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS);
     return 0;
 }

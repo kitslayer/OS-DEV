@@ -1,6 +1,19 @@
 # What's next
 
-> **Status (478 milestones).** (M478: **Screenshot to BMP (`screenshot [file]`)** — new `SYS_screenshot`
+> **Status (479 milestones).** (M479: **BMP decoder — VIEW a screenshot in the browser** — a from-scratch
+> decoder (`kernel/bmp.c`) for uncompressed BI_RGB Windows BMPs (24-/32-/8-bit palettized, bottom-up or
+> top-down → RGBA, A=255), wired into the browser's `decode_image` dispatch — closes the loop with M478:
+> the OS can now both SAVE and VIEW a screenshot. Untrusted-byte safe (every pixel/palette read bounded
+> vs `len`, like the other decoders). imgtest gained a 2×2 correctness case (proves bottom-up row-flip +
+> BGR→RGBA) + a 120k `BM`-prefixed fuzz (ASan/UBSan clean). KEY: the browser's `file:` path read into the
+> 256 KB HTML buffer, too small for a ~576 KB 24-bit screenshot → first attempt rendered the BMP bytes as
+> TEXT. FIX: read a local image into a transient 1 MB buffer (`LOCAL_IMG_MAX`), try_image, free; graceful
+> fallback to the old capped text/HTML path if it's not an image / alloc fails (protects the working
+> local-file path). Verified end-to-end in-OS: `screenshot` → `browse file:SHOT.BMP` renders the captured
+> desktop full-page (status "image"), colours correct. Files: kernel/bmp.c, kernel/browser.c. **Genuinely
+> useful (not bloat): the BMP decoder works for any BMP — disk files, `<img src>` in pages — not just
+> screenshots, and the buffer fix improves local-image viewing generally.**)
+> M478: **Screenshot to BMP (`screenshot [file]`)** — new `SYS_screenshot`
 > syscall + shell command (default `SHOT.BMP`) saves the live desktop to a 24-bit BMP on the FAT32 disk,
 > downscaled 2× (≤512×384, ~576 KB). KEY FIX found in testing: the first cut read the back buffer
 > (`target`) and caught it MID-COMPOSE (captured the wallpaper gradient only, windows missing) — switched
