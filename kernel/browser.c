@@ -117,6 +117,8 @@ struct browser {
     uint8_t  tokalign[TOK_MAX];                          /* per-token text-align (a line takes its first token's value) */
     int      curscale;                                   /* CSS font-size scale override in effect (0=none/use style default, else 2 or 3) */
     uint8_t  tokscale[TOK_MAX];                           /* per-token glyph-scale override (0=none; enlarges only — the bitmap font has no sub-1x) */
+    int      curindent;                                  /* left-indent in px (from <blockquote> nesting), applied at every line start */
+    uint8_t  tokindent[TOK_MAX];                          /* per-token left-indent in px, capped at 255 (a line takes its first token's value) */
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
@@ -178,6 +180,7 @@ static void emit_word(browser_t *b, int start, int style, int link) {
     b->tokbg[b->ntok] = b->curbg;                        /* background-color highlight (0 = none) */
     b->tokalign[b->ntok] = (uint8_t)b->curalign;         /* text-align (0=left/1=center/2=right) */
     b->tokscale[b->ntok] = (uint8_t)b->curscale;         /* font-size scale override (0=none) */
+    b->tokindent[b->ntok] = (uint8_t)(b->curindent > 255 ? 255 : b->curindent);   /* left-indent px */
     b->toks[b->ntok++] = (tok_t){ (uint16_t)start, (uint16_t)len,
                                   (uint16_t)link, (uint8_t)style, TK_WORD };
 }
@@ -1035,10 +1038,16 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     }
     if (tageq(tag, "p") || tageq(tag, "dt")) { emit_break(b, TK_PARA); return; }
     if (tageq(tag, "table")) { emit_break(b, TK_PARA); b->tdcount = 0; return; }
+    if (tageq(tag, "blockquote")) {                      /* indent the quoted block (incl. wrapped lines) */
+        emit_break(b, TK_PARA);
+        if (!closing) { if (b->curindent < 200) b->curindent += 24; }
+        else { b->curindent -= 24; if (b->curindent < 0) b->curindent = 0; }
+        return;
+    }
     if (tageq(tag, "div") || tageq(tag, "section") ||
         tageq(tag, "article") || tageq(tag, "header") || tageq(tag, "footer") ||
         tageq(tag, "nav") || tageq(tag, "pre") || tageq(tag, "dl") ||
-        tageq(tag, "blockquote") || tageq(tag, "main"))
+        tageq(tag, "main"))
         emit_break(b, TK_BREAK);
 }
 
@@ -1160,6 +1169,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->curbg = 0;                                        /* no background-color in effect */
     b->curalign = 0;                                     /* default left alignment */
     b->curscale = 0;                                     /* no font-size override in effect */
+    b->curindent = 0;                                    /* no blockquote indent in effect */
     b->curul = 0;                                        /* no underline in effect */
     b->curtransform = 0;                                 /* no text-transform in effect */
     b->viewsource = 0;                                   /* show the rendered page, not source */
@@ -3050,26 +3060,32 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         int wpx = tk->len * GW * sc; if (wpx > cr - cl) wpx = cr - cl;
         if (cx + wpx > cr && cx > cl) { cy += curlh; cx = cl; curlh = 18; }
         if (lh > curlh) curlh = lh;
-        /* text-align: at a line start, look ahead over the words that will fit on
-         * this line (replicating the wrap test) and shift cx for center/right.
-         * align 0 (left, the default) -> no shift, so left-aligned pages are
-         * byte-for-byte unchanged; bounded by ntok, can only move cx within [cl,cr). */
+        /* at a line start (cx==cl): apply the line's left-indent (<blockquote>) and, for
+         * center/right text-align, look ahead over the words that fit on the line
+         * (replicating the wrap test) and shift cx. indent 0 + align 0 (the defaults) ->
+         * cx stays cl, so ordinary pages are byte-for-byte unchanged; everything is bounded
+         * by ntok and cx only ever moves within [cl, cr). A line takes its first token's value. */
         if (cx == cl) {
+            int indent = (t < TOK_MAX) ? b->tokindent[t] : 0;
+            if (indent > (cr - cl) - GW * 4) indent = (cr - cl) - GW * 4;   /* leave room for text */
+            if (indent < 0) indent = 0;
+            int ls = cl + indent;
             int al = (t < TOK_MAX) ? b->tokalign[t] : 0;
             if (al) {
-                int avail = cr - cl, probe = cl, endx = cl;
+                int avail = cr - ls, probe = ls, endx = ls;
                 for (int u = t; u < b->ntok; u++) {
                     tok_t *pk = &b->toks[u];
                     if (pk->type != TK_WORD) break;          /* break/para/hr/img end the line */
                     int pts = (u < TOK_MAX) ? b->tokscale[u] : 0;
                     int ps = pts ? pts : scale_for(pk->style);
                     int pw = pk->len * GW * ps; if (pw > avail) pw = avail;
-                    if (probe + pw > cr && probe > cl) break;  /* would wrap -> line ends here */
+                    if (probe + pw > cr && probe > ls) break;  /* would wrap -> line ends here */
                     endx = probe + pw; probe = endx + GW * ps;
                 }
-                int off = (al == 1) ? (avail - (endx - cl)) / 2 : (avail - (endx - cl));
-                if (off > 0) cx = cl + off;
-            }
+                int off = (al == 1) ? (avail - (endx - ls)) / 2 : (avail - (endx - ls));
+                if (off < 0) off = 0;
+                cx = ls + off;
+            } else cx = ls;
         }
 
         /* record every link's content-space y (even off-screen) so keyboard

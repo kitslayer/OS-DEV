@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (449 milestones).** (M449: **column-aligned `<table>` rendering** — was pipe-separated/
+> **Status (450 milestones).** (M450: **`<blockquote>` indentation** — quoted blocks indent 24px/
+> level, and EVERY wrapped line stays indented (unlike the list-marker first-line-only indent),
+> because indent is applied at each line start via a per-token `tokindent` + a `curindent` counter
+> (`<blockquote>` open/close adjusts it) consumed by the same line-start `cx` logic as text-align.
+> Nested blockquotes indent further; close restores parent. Additive (no bq ⇒ curindent 0 ⇒ cx
+> unchanged) + bounded (clamped, cx within [cl,cr)). Verified in-OS (QUOTE.HTM). Lists keep their
+> existing first-line marker indent (untouched).
+> M449: **column-aligned `<table>` rendering** — was pipe-separated/
 > unaligned; now a self-contained `render_table` consumes the `<table>..</table>` region in two
 > bounded passes (measure each column's max width, then emit each cell padded to it) → aligned
 > columns in the fixed-width font, `<th>` bold. `cell_extract` (strip inline tags/entities/UTF-8,

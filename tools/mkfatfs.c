@@ -663,6 +663,12 @@ static const struct {
         "The legacy <big>&lt;big&gt; tag</big> and <font size=\"6\">&lt;font size=6&gt;</font> enlarge too. "
         "Small sizes such as <span style=\"font-size:10px\">10px</span> stay 1x &mdash; the bitmap font has no sub-1x. "
         "<span style=\"font-size:28px;color:#cc3300\">Large + coloured</span> compose.</p>" },
+    { "QUOTE   HTM", "<title>Blockquotes</title><h2>Blockquotes</h2>"
+        "<p>A normal paragraph sits at the left margin for comparison.</p>"
+        "<blockquote>This is a quoted block: it is indented from the left margin, and crucially, when it wraps across several lines every wrapped line stays indented under the quote &mdash; not only the first line.</blockquote>"
+        "<p>Back at the normal margin.</p>"
+        "<blockquote>An outer quote. <blockquote>A nested quote is indented one level further than its parent.</blockquote> And back out to the outer level again.</blockquote>"
+        "<p>Normal flow resumes here.</p>" },
     { "NEST    HTM", "<title>Nested style scopes</title><style>\n"
         "  p { color: #333333 }\n"
         "  .red { color: #cc0000 }\n"
