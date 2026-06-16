@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (441 milestones).** (M441: **from-scratch SVG rasterizer** (`kernel/svg.c`, 846 lines,
+> **Status (442 milestones).** (M442: **SVG affine transforms** — `kernel/svg.c` now honours
+> `transform=` on shapes and `<g>` groups (translate/scale/rotate/matrix/skewX/skewY, composed
+> left-to-right) via a depth-16 transform-matrix stack; each user point runs through the current
+> 2×3 matrix before the viewBox→pixel map. All 16.16 fixed-point (no FPU), overflow-clamped;
+> strictly additive (identity CTM = the M441 render byte-for-byte). `svgtest` extended to fuzz the
+> transform parser; SHIP-reviewed (~26.5M adversarial iters, one negative-left-shift UB fixed).
+> Verified in-OS (XFORM.SVG → a four-arm pinwheel placed by group translate + per-arm rotate).
+> M441: **from-scratch SVG rasterizer** (`kernel/svg.c`, 846 lines,
 > integer-only/no-FPU) — decodes a useful SVG subset (rect/circle/ellipse/line/poly*/path with
 > beziers, solid fills, viewBox, even-odd scanline fill + stroke) to RGBA, plugged into
 > `decode_image` so local+remote SVGs render inline (the M439 `.svg`-skip is lifted); SHIP-reviewed

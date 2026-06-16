@@ -140,6 +140,51 @@ static void test_misc(void) {
     }
 }
 
+/* --- test 6: transforms (translate/scale/rotate, <g> groups + per-shape) -- */
+static void test_transform(void) {
+    const char *svg =
+        "<svg width='100' height='100'>"
+        "<g transform='translate(50,0)'>"
+          "<rect x='0' y='0' width='10' height='10' fill='red'/>"     /* -> [50,60]x[0,10]   */
+        "</g>"
+        "<rect x='0' y='0' width='6' height='6' fill='blue'/>"        /* CTM restored: origin */
+        "<g transform='scale(2)'>"
+          "<rect x='5' y='5' width='5' height='5' fill='lime'/>"      /* -> [10,20]x[10,20]   */
+        "</g>"
+        "<rect x='0' y='0' width='10' height='10' fill='green' transform='translate(40,40)'/>"  /* ->[40,50]x[40,50] */
+        "<g transform='translate(20,20)'><g transform='translate(20,0)'>"
+          "<rect x='0' y='0' width='8' height='8' fill='#ff00ff'/>"   /* nested -> [40,48]x[20,28] */
+        "</g></g>"
+        "<g transform='rotate(90,50,50)'>"
+          "<rect x='50' y='40' width='20' height='4' fill='cyan'/>"   /* (x,y)->(100-y,x): -> x[56,60]y[50,70] */
+        "</g>"
+        "</svg>";
+    int w, h;
+    int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                       obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+    CHECK(r == 0 && w == 100 && h == 100, "transform: decode 100x100");
+    if (r == 0) {
+        const uint8_t *tr = px(w, 55, 5);    /* <g> translate moved the red rect here */
+        CHECK(tr[0]>200 && tr[1]<60 && tr[2]<60 && tr[3]>200, "transform: <g> translate -> red at (55,5)");
+        const uint8_t *og = px(w, 8, 8);     /* red rect's untranslated footprint [0,10], outside the blue [0,6] */
+        CHECK(og[3]==0, "transform: red rect no longer at original (8,8)");
+        const uint8_t *bl = px(w, 3, 3);     /* sibling after </g> is back at the origin */
+        CHECK(bl[2]>200 && bl[0]<60 && bl[3]>200, "transform: CTM restored after </g> (blue at origin)");
+        const uint8_t *sc = px(w, 15, 15);   /* scale(2): user (5..10) -> px (10..20) */
+        CHECK(sc[1]>200 && sc[0]<60 && sc[3]>200, "transform: scale(2) -> lime at (15,15)");
+        const uint8_t *so = px(w, 7, 7);     /* scaled rect starts at px 10, so (7,7) is empty */
+        CHECK(so[3]==0, "transform: scaled rect does not cover (7,7)");
+        const uint8_t *ps = px(w, 45, 45);   /* per-shape transform= on the rect */
+        CHECK(ps[1]>100 && ps[0]<60 && ps[3]>200, "transform: per-shape translate -> green at (45,45)");
+        const uint8_t *ne = px(w, 44, 24);   /* two nested <g> translates compose */
+        CHECK(ne[0]>200 && ne[1]<60 && ne[2]>200 && ne[3]>200, "transform: nested <g> -> magenta at (44,24)");
+        const uint8_t *ro = px(w, 58, 60);   /* rotate(90) about (50,50) maps the bar here */
+        CHECK(ro[1]>200 && ro[2]>200 && ro[0]<60 && ro[3]>200, "transform: rotate(90) -> cyan at (58,60)");
+        const uint8_t *rq = px(w, 62, 42);   /* ...and NOT at the bar's pre-rotation location */
+        CHECK(rq[3]==0, "transform: rotate moved the bar off its original spot (62,42)");
+    }
+}
+
 /* --- fuzz harness -------------------------------------------------------- */
 static uint32_t rs = 0x5EED1234u;
 static uint32_t xr(void) { rs ^= rs<<13; rs ^= rs>>17; rs ^= rs<<5; return rs; }
@@ -150,6 +195,7 @@ int main(void) {
     test_circle_path();
     test_polygon_stroke();
     test_misc();
+    test_transform();
 
     /* Valid seeds to mutate during fuzzing. */
     const char *seeds[] = {
@@ -159,6 +205,9 @@ int main(void) {
         "<svg viewBox='0 0 24 24'><path d='M12 2 L22 22 H2 Z'/></svg>",
         "<svg width='64' height='64'><polygon points='1,1 60,1 30,60' stroke='red' stroke-width='3' fill='none'/></svg>",
         "<svg width='40' height='40'><ellipse cx='20' cy='20' rx='18' ry='9' fill='rgb(255,128,0)'/></svg>",
+        "<svg width='60' height='60'><g transform='translate(10,10) scale(2) rotate(30)'>"
+            "<rect x='0' y='0' width='10' height='10' fill='red' transform='rotate(45,5,5)'/>"
+            "<g transform='matrix(1,0.2,-0.2,1,5,5)'><circle cx='5' cy='5' r='4'/></g></g></svg>",
     };
     int nseeds = (int)(sizeof seeds / sizeof seeds[0]);
 
@@ -205,6 +254,8 @@ int main(void) {
             "<rect x='","<circle cx='","fill='#","' style='fill:red;stroke:",
             " L"," Q"," A"," H"," V","-",".","e","99999","<polygon points='",
             ",","/>","</svg>","<ellipse rx='","' r='","' cy='","   ",
+            "<g transform='","translate(","scale(","rotate(","matrix(","skewX(",
+            "skewY(",")","'>","</g>","' transform='rotate(",
         };
         int nfr = (int)(sizeof frag / sizeof frag[0]);
         for (unsigned seed = 1; seed <= 16; seed++) {
@@ -253,8 +304,8 @@ int main(void) {
     }
 
     if (fails == 0)
-        printf("svgtest: 5 unit tests + %d random + %d mutation + 320000 structured fuzz iters "
-               "+ adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
+        printf("svgtest: 6 unit tests (incl. transforms) + %d random + %d mutation + 320000 structured "
+               "fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
     else
         printf("svgtest: %d FAILURE(S)\n", fails);
     return fails ? 1 : 0;

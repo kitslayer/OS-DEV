@@ -47,6 +47,7 @@
 #define SVG_MAX_CMDS   16384    /* path 'd' commands processed (bounds the work) */
 #define SVG_BEZ_STEPS  16       /* line segments per cubic/quadratic bezier */
 #define SVG_MAX_TAGS   65536    /* hard ceiling on tags scanned (anti-hang) */
+#define SVG_MAX_GROUPS 16       /* transform-stack depth for nested <g> (capped) */
 
 /* ---- 16.16 signed fixed-point ------------------------------------------ */
 typedef int32_t fx;            /* value = real * 65536 */
@@ -80,6 +81,131 @@ static fx fx_radd(fx a, fx b) {
 }
 static fx fx_reflect(fx a, fx b) {              /* 2*a - b, clamped */
     return (fx)clamp64((int64_t)2*a - b, (int64_t)FX_CLAMP_INT << FX_SHIFT);
+}
+
+/* fwd decls: the tiny char helpers are defined just below but are used by the
+ * transform parser that sits above them. */
+static int is_space(int c);
+static int is_digit(int c);
+static int lc(int c);
+static int hexv(int c);
+
+/* a*b in 16.16 with the result CLAMPED to the safe fx range. Unlike fx_mul (which
+ * assumes pre-clamped inputs whose product fits), this is for transform matrices
+ * whose entries can be large scales/translations — a huge product saturates to the
+ * clamped extreme (an off-canvas coord, harmless) rather than wrapping a 32-bit fx. */
+static fx fx_mulc(fx a, fx b) {
+    return (fx)clamp64(((int64_t)a * b) >> FX_SHIFT, (int64_t)FX_CLAMP_INT << FX_SHIFT);
+}
+
+/* ---- sine/cosine from a small fixed-point quarter-wave table (no FPU) ---- *
+ * SIN256[k] = round(sin(k*pi/128)*256) for k=0..64 (a quarter wave); the other
+ * three quadrants are reflections. Used by <circle>/<ellipse> and rotate(). */
+static const int SIN256[65] = {
+    0,6,13,19,25,31,38,44,50,56,62,68,74,80,86,92,98,104,109,115,121,126,
+    132,137,142,147,152,157,162,167,172,177,181,185,190,194,198,202,206,
+    209,213,216,220,223,226,229,231,234,237,239,241,243,245,247,248,250,
+    251,252,253,254,255,255,256,256,256 };
+/* sin/cos of an angle in DEGREES (fx). Sub-degree precision is dropped (fine for
+ * icon rendering). Outputs are fx in [-FX_ONE, FX_ONE]. */
+static void sincos_deg(fx deg, fx *sinout, fx *cosout) {
+    int d = (int)(deg >> FX_SHIFT);          /* integer degrees */
+    d %= 360; if (d < 0) d += 360;
+    int ang = (d * 256) / 360;               /* 0..255 ~ 0..2pi */
+    int q = ang & 0xFF, s, co;
+    if (q < 64)       { s =  SIN256[q];      co =  SIN256[64-q]; }
+    else if (q < 128) { s =  SIN256[128-q];  co = -SIN256[q-64]; }
+    else if (q < 192) { s = -SIN256[q-128];  co = -SIN256[192-q]; }
+    else              { s = -SIN256[256-q];  co =  SIN256[q-192]; }
+    *sinout = (fx)(s  * (FX_ONE/256));
+    *cosout = (fx)(co * (FX_ONE/256));
+}
+
+/* ---- 2x3 affine transform matrices (16.16) ----------------------------- *
+ * m[0..5] = a,b,c,d,e,f mapping (x,y) -> (a*x + c*y + e,  b*x + d*y + f). All
+ * products use the clamped fx_mulc so a large scale/translate saturates rather
+ * than overflowing a 32-bit fx into a wild coordinate/index. */
+static void set_identity(fx *m) { m[0]=FX_ONE; m[1]=0; m[2]=0; m[3]=FX_ONE; m[4]=0; m[5]=0; }
+/* out = A * B (B is applied to the point first). out may alias A or B. */
+static void mat_mul(fx *out, const fx *A, const fx *B) {
+    fx r[6];
+    r[0] = fx_radd(fx_mulc(A[0],B[0]), fx_mulc(A[2],B[1]));
+    r[1] = fx_radd(fx_mulc(A[1],B[0]), fx_mulc(A[3],B[1]));
+    r[2] = fx_radd(fx_mulc(A[0],B[2]), fx_mulc(A[2],B[3]));
+    r[3] = fx_radd(fx_mulc(A[1],B[2]), fx_mulc(A[3],B[3]));
+    r[4] = fx_radd(fx_radd(fx_mulc(A[0],B[4]), fx_mulc(A[2],B[5])), A[4]);
+    r[5] = fx_radd(fx_radd(fx_mulc(A[1],B[4]), fx_mulc(A[3],B[5])), A[5]);
+    for (int i = 0; i < 6; i++) out[i] = r[i];
+}
+/* Compare nl chars at p to keyword k (case-insensitive); k must end exactly at nl. */
+static int kw_eq(const char *p, int n, const char *k) {
+    int i = 0;
+    for (; i < n; i++) { if (!k[i] || lc((unsigned char)p[i]) != lc((unsigned char)k[i])) return 0; }
+    return k[i] == 0;
+}
+/* Parse an SVG transform list ("translate(..) rotate(..) scale(..) matrix(..)
+ * skewX/Y(..)") into *out, composed left-to-right (so a point is transformed by
+ * the rightmost function first). A bounded scan; unknown functions are skipped. */
+static fx parse_num(const char **pp, const char *end);   /* fwd (defined below) */
+static void parse_transform(const char *str, int slen, fx *out) {
+    set_identity(out);
+    const char *p = str, *e = str + slen;
+    int guard = 0;
+    while (p < e && guard++ < 64) {
+        while (p < e && (is_space((unsigned char)*p) || *p==',')) p++;
+        if (p >= e) break;
+        const char *ns = p;
+        while (p < e && lc((unsigned char)*p) >= 'a' && lc((unsigned char)*p) <= 'z') p++;
+        int nl = (int)(p - ns);
+        while (p < e && is_space((unsigned char)*p)) p++;
+        if (p >= e || *p != '(') { if (p < e) p++; continue; }
+        p++;
+        fx a[6]; int na = 0;
+        while (p < e && *p != ')' && na < 6) {
+            while (p < e && (is_space((unsigned char)*p) || *p==',')) p++;
+            if (p >= e || *p == ')') break;
+            const char *bf = p;
+            a[na] = parse_num(&p, e);
+            if (p == bf) { p++; continue; }       /* no progress -> advance, don't hang */
+            na++;
+        }
+        while (p < e && *p != ')') p++;
+        if (p < e) p++;                            /* consume ')' */
+
+        fx m[6]; set_identity(m);
+        if (nl == 9 && kw_eq(ns, nl, "translate")) {
+            if (na >= 1) m[4] = a[0];
+            if (na >= 2) m[5] = a[1];
+        } else if (nl == 5 && kw_eq(ns, nl, "scale")) {
+            if (na >= 1) { m[0] = a[0]; m[3] = (na >= 2) ? a[1] : a[0]; }
+        } else if (nl == 6 && kw_eq(ns, nl, "matrix")) {
+            if (na >= 6) { m[0]=a[0]; m[1]=a[1]; m[2]=a[2]; m[3]=a[3]; m[4]=a[4]; m[5]=a[5]; }
+        } else if (nl == 6 && kw_eq(ns, nl, "rotate")) {
+            if (na >= 1) {
+                fx sn, cs; sincos_deg(a[0], &sn, &cs);
+                fx R[6]; R[0]=cs; R[1]=sn; R[2]=-sn; R[3]=cs; R[4]=0; R[5]=0;
+                if (na >= 3) {                     /* rotate(deg, cx, cy) about a point */
+                    fx T1[6]; set_identity(T1); T1[4]=a[1];  T1[5]=a[2];
+                    fx T2[6]; set_identity(T2); T2[4]=-a[1]; T2[5]=-a[2];
+                    mat_mul(R, T1, R);             /* T(c) * R         */
+                    mat_mul(R, R, T2);             /* T(c) * R * T(-c) */
+                }
+                for (int i = 0; i < 6; i++) m[i] = R[i];
+            }
+        } else if (nl == 5 && (kw_eq(ns, nl, "skewx") || kw_eq(ns, nl, "skewy"))) {
+            if (na >= 1) {
+                fx sn, cs; sincos_deg(a[0], &sn, &cs);
+                /* tan = sin/cos in 16.16; multiply (not <<) — sn may be negative
+                 * and a left shift of a negative value is undefined behaviour. */
+                fx tn = cs ? (fx)clamp64(((int64_t)sn * FX_ONE) / cs,
+                                         (int64_t)FX_CLAMP_INT << FX_SHIFT) : 0;
+                if (lc((unsigned char)ns[4]) == 'x') m[2] = tn; else m[1] = tn;
+            }
+        } else {
+            continue;                              /* unknown transform function */
+        }
+        mat_mul(out, out, m);                      /* compose left-to-right */
+    }
 }
 
 /* ---- tiny char helpers (no ctype) -------------------------------------- */
@@ -290,6 +416,11 @@ typedef struct {
     int  npt;
     int  sub_start[SVG_MAX_SUBS + 1];  /* index where each subpath begins */
     int  nsub;
+    /* current transform matrix (user coords are run through this BEFORE the
+     * viewBox->pixel map) + a stack saved/restored across nested <g> groups. */
+    fx   m[6];
+    fx   gstack[SVG_MAX_GROUPS][6];
+    int  gdepth;
 } ctx_t;
 
 /* Map a user-space coord (16.16) to device (pixel) fixed-point. The subtraction
@@ -303,6 +434,15 @@ static fx map_y(ctx_t *c, fx uy) {
     int64_t d = clamp64((int64_t)uy - c->oy, (int64_t)FX_CLAMP_INT << FX_SHIFT);
     return fx_mul((fx)d, c->sy);
 }
+/* Apply the current transform matrix to a user-space point (clamped). */
+static fx ctm_x(ctx_t *c, fx ux, fx uy) {
+    int64_t v = (int64_t)fx_mulc(c->m[0], ux) + fx_mulc(c->m[2], uy) + c->m[4];
+    return (fx)clamp64(v, (int64_t)FX_CLAMP_INT << FX_SHIFT);
+}
+static fx ctm_y(ctx_t *c, fx ux, fx uy) {
+    int64_t v = (int64_t)fx_mulc(c->m[1], ux) + fx_mulc(c->m[3], uy) + c->m[5];
+    return (fx)clamp64(v, (int64_t)FX_CLAMP_INT << FX_SHIFT);
+}
 
 /* Append a device-space point to the current subpath (bounds-checked). */
 static void push_pt(ctx_t *c, fx dx, fx dy) {
@@ -311,8 +451,12 @@ static void push_pt(ctx_t *c, fx dx, fx dy) {
     c->py[c->npt] = fx_clamp(dy);
     c->npt++;
 }
-/* Append a user-space point (mapped to device). */
-static void push_user(ctx_t *c, fx ux, fx uy) { push_pt(c, map_x(c, ux), map_y(c, uy)); }
+/* Append a user-space point: run it through the current transform matrix, then
+ * map viewBox->device. (Identity CTM => byte-for-byte the old map-only path.) */
+static void push_user(ctx_t *c, fx ux, fx uy) {
+    fx tx = ctm_x(c, ux, uy), ty = ctm_y(c, ux, uy);
+    push_pt(c, map_x(c, tx), map_y(c, ty));
+}
 
 /* Begin a new subpath at the current point count. */
 static void begin_sub(ctx_t *c) {
@@ -495,13 +639,7 @@ static void build_ellipse(ctx_t *c, fx cx, fx cy, fx rx, fx ry) {
     if (rx <= 0 || ry <= 0) { reset_shape(c); return; }
     reset_shape(c);
     int steps = 48;
-    /* cos/sin via a tiny fixed-point table (no FPU). 16-entry quarter table. */
-    /* Use the cubic flattener-free direct parametric approach with a sine LUT. */
-    static const int SIN256[65] = {     /* sin(k*pi/128)*256, k=0..64 (quarter) */
-        0,6,13,19,25,31,38,44,50,56,62,68,74,80,86,92,98,104,109,115,121,126,
-        132,137,142,147,152,157,162,167,172,177,181,185,190,194,198,202,206,
-        209,213,216,220,223,226,229,231,234,237,239,241,243,245,247,248,250,
-        251,252,253,254,255,255,256,256,256 };
+    /* direct parametric circle/ellipse via the file-scope SIN256 quarter table. */
     for (int i = 0; i <= steps; i++) {
         int ang = (i * 256) / steps;        /* 0..256 == 0..2pi */
         int s, co;
@@ -733,6 +871,7 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
 
     ctx_t C;
     memset(&C, 0, sizeof C);
+    set_identity(C.m);              /* transform stack starts at identity */
     C.out = out;
     C.px = (fx *)scratch;
     C.py = (fx *)(scratch + (long)SVG_MAX_PTS * sizeof(fx));
@@ -786,9 +925,40 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
 
         if (IS("defs")) { if (closing) in_defs = 0; else in_defs = 1; p = next; continue; }
         if (IS("svg") && closing) break;            /* </svg> ends it */
-        if (in_defs || closing) { p = next; continue; }
+        if (in_defs) { p = next; continue; }        /* skip ALL defs content (incl. <g>) */
+
+        if (IS("g")) {                              /* group: maintain the transform stack */
+            if (closing) {                          /* </g>: pop -> restore parent CTM */
+                if (C.gdepth > 0) {
+                    C.gdepth--;
+                    if (C.gdepth < SVG_MAX_GROUPS)
+                        for (int i = 0; i < 6; i++) C.m[i] = C.gstack[C.gdepth][i];
+                }
+            } else if (!(body_e > name && body_e[-1] == '/')) {   /* <g ...> (not self-closing) */
+                if (C.gdepth < SVG_MAX_GROUPS) {    /* save CTM, compose this group's transform */
+                    for (int i = 0; i < 6; i++) C.gstack[C.gdepth][i] = C.m[i];
+                    char tf[256];
+                    if (get_attr(name, body_e, "transform", tf, sizeof tf)) {
+                        fx tm[6]; parse_transform(tf, (int)strlen(tf), tm);
+                        mat_mul(C.m, C.m, tm);
+                    }
+                }
+                C.gdepth++;                         /* unconditional: keeps push/pop balanced past the cap */
+            }
+            p = next; continue;
+        }
+        if (closing) { p = next; continue; }
 
         color_t fill, stroke; fx swid;
+        /* per-element transform= : compose over the CTM for this shape only. */
+        fx shape_saved[6]; int shape_tf = 0;
+        { char tf[256];
+          if (get_attr(name, body_e, "transform", tf, sizeof tf)) {
+              for (int i = 0; i < 6; i++) shape_saved[i] = C.m[i];
+              fx tm[6]; parse_transform(tf, (int)strlen(tf), tm);
+              mat_mul(C.m, C.m, tm);
+              shape_tf = 1;
+          } }
 
         if (IS("rect")) {
             read_paint(name, body_e, &fill, &stroke, &swid);
@@ -835,8 +1005,9 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             build_path(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         }
-        /* else: <g>, <text>, <image>, <use>, gradients, unknown -> skipped */
+        /* else: <text>, <image>, <use>, gradients, unknown -> skipped (<g> handled above) */
 
+        if (shape_tf) for (int i = 0; i < 6; i++) C.m[i] = shape_saved[i];   /* restore CTM */
         #undef IS
         p = next;
     }
