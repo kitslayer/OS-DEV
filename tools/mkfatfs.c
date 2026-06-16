@@ -654,6 +654,15 @@ static const struct {
         "<center>The legacy &lt;center&gt; tag also centers.</center>"
         "<p align=\"right\">And the old <code>align=\"right\"</code> attribute works too.</p>"
         "<p>This last paragraph is normal left-aligned flow for comparison.</p>" },
+    { "SIZE    HTM", "<title>CSS font-size</title>"
+        "<p>Normal body text (1x). Then "
+        "<span style=\"font-size:24px\">24px is 2x</span>, and "
+        "<span style=\"font-size:34px\">34px is 3x</span>. "
+        "Percentages: <span style=\"font-size:200%\">200%</span>. "
+        "Ems: <span style=\"font-size:2em\">2em</span>. "
+        "The legacy <big>&lt;big&gt; tag</big> and <font size=\"6\">&lt;font size=6&gt;</font> enlarge too. "
+        "Small sizes such as <span style=\"font-size:10px\">10px</span> stay 1x &mdash; the bitmap font has no sub-1x. "
+        "<span style=\"font-size:28px;color:#cc3300\">Large + coloured</span> compose.</p>" },
     { "NEST    HTM", "<title>Nested style scopes</title><style>\n"
         "  p { color: #333333 }\n"
         "  .red { color: #cc0000 }\n"

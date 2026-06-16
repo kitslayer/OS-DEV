@@ -115,11 +115,13 @@ struct browser {
     uint32_t tokbg[TOK_MAX];                             /* per-token background colour (drawn as an inline highlight behind the text) */
     int      curalign;                                   /* text-align in effect: 0=left, 1=center, 2=right */
     uint8_t  tokalign[TOK_MAX];                          /* per-token text-align (a line takes its first token's value) */
+    int      curscale;                                   /* CSS font-size scale override in effect (0=none/use style default, else 2 or 3) */
+    uint8_t  tokscale[TOK_MAX];                           /* per-token glyph-scale override (0=none; enlarges only — the bitmap font has no sub-1x) */
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
@@ -175,6 +177,7 @@ static void emit_word(browser_t *b, int start, int style, int link) {
     b->tokul[b->ntok] = (uint8_t)b->curul;               /* underline (text-decoration / <u>) */
     b->tokbg[b->ntok] = b->curbg;                        /* background-color highlight (0 = none) */
     b->tokalign[b->ntok] = (uint8_t)b->curalign;         /* text-align (0=left/1=center/2=right) */
+    b->tokscale[b->ntok] = (uint8_t)b->curscale;         /* font-size scale override (0=none) */
     b->toks[b->ntok++] = (tok_t){ (uint16_t)start, (uint16_t)len,
                                   (uint16_t)link, (uint8_t)style, TK_WORD };
 }
@@ -656,6 +659,27 @@ static int parse_style_align(const char *s, int n) {
     if (attr_eq(v, vl, "right"))  return 2;
     return 0;
 }
+/* font-size -> a glyph-scale bucket: 3 (≈ ≥28px / ≥175% / ≥1.8em), 2 (≈ ≥19px / ≥119% /
+ * ≥1.2em), else 0 (no override). The bitmap font has no sub-1x, so this only enlarges;
+ * small sizes just fall through to the default 1x. Reads the leading integer of the value. */
+static int parse_style_fontsize(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "font-size", 9, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs, i = 0, num = 0, seen = 0;
+    while (i < vl && v[i] >= '0' && v[i] <= '9') { num = num*10 + (v[i]-'0'); i++; seen = 1; }
+    if (!seen) {                                            /* keywords: large/x-large/… */
+        if (attr_eq(v, vl, "large") || attr_eq(v, vl, "larger")) return 2;
+        if (attr_eq(v, vl, "x-large") || attr_eq(v, vl, "xx-large")) return 3;
+        return 0;
+    }
+    if (i < vl && v[i] == '.') { i++; while (i < vl && v[i] >= '0' && v[i] <= '9') i++; }  /* skip any fraction */
+    /* unit: % / em / rem / px / pt (default ~px). em/rem are relative to 1; % to 100. */
+    const char *u = v + i; int ul = vl - i;
+    if (ul >= 1 && u[0] == '%')                                          return num >= 175 ? 3 : num >= 119 ? 2 : 0;
+    if (ul >= 2 && (u[0]|32)=='e' && (u[1]|32)=='m')                     return num >= 2 ? 3 : num >= 1 ? 2 : 0;
+    if (ul >= 3 && (u[0]|32)=='r' && (u[1]|32)=='e' && (u[2]|32)=='m')   return num >= 2 ? 3 : num >= 1 ? 2 : 0;
+    return num >= 28 ? 3 : num >= 19 ? 2 : 0;                            /* px / pt / unitless */
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -690,11 +714,12 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->curul = b->sc[sp].saveul;
                 b->curtransform = b->sc[sp].savetransform;
                 b->curalign = b->sc[sp].savealign;
+                b->curscale = b->sc[sp].savescale;
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al);   /* <style> rules first (lower priority) */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
@@ -704,6 +729,15 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int itr = parse_style_transform(st, stl);  if (itr) tr = itr;   /* text-transform (inline only) */
             uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
+            int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
+        }
+        if (tageq(tag, "big")) { if (!fs) fs = 2; }         /* <big> -> 2x */
+        if (tageq(tag, "font")) {                           /* <font size=N>: 5+ -> 2x, 6+/7 -> 3x */
+            const char *sv; int svl;
+            if (find_attr(attrs, attrlen, "size", &sv, &svl) && svl > 0) {
+                int neg = (sv[0]=='+'||sv[0]=='-'), d = (svl>neg) ? sv[neg]-'0' : 0;
+                if (sv[0] != '-' && d >= 6) fs = 3; else if (sv[0] != '-' && d >= 4) fs = 2;
+            }
         }
         if (tageq(tag, "center")) al = 1;                   /* the legacy <center> tag */
         { const char *av; int avl;                          /* and the legacy align= attribute (div, p, headings, td) */
@@ -711,7 +745,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
               if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg || al) {        /* styled element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al || fs) {  /* styled element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].savecolor = b->curcolor; if (c) b->curcolor = c;
@@ -719,6 +753,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].saveul = b->curul; if (ul) b->curul = 1;
                 b->sc[sp].savetransform = b->curtransform; if (tr) b->curtransform = tr;
                 b->sc[sp].savealign = b->curalign; if (al) b->curalign = al;
+                b->sc[sp].savescale = b->curscale; if (fs) b->curscale = fs;
                 b->sc[sp].savestyle = *style; b->sc[sp].setstyle = -1;
                 if (apply_ts) { *style = ts; b->sc[sp].setstyle = ts; }
                 int i = 0; while (tag[i] && i < 15) { b->sc[sp].tag[i] = tag[i]; i++; } b->sc[sp].tag[i] = 0;
@@ -1032,6 +1067,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->curcolor = 0;                                     /* default text colour */
     b->curbg = 0;                                        /* no background-color in effect */
     b->curalign = 0;                                     /* default left alignment */
+    b->curscale = 0;                                     /* no font-size override in effect */
     b->curul = 0;                                        /* no underline in effect */
     b->curtransform = 0;                                 /* no text-transform in effect */
     b->viewsource = 0;                                   /* show the rendered page, not source */
@@ -2909,7 +2945,9 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             continue;
         }
 
-        int sc = scale_for(tk->style), lh = lineh_for(tk->style);
+        int tsc = (t < TOK_MAX) ? b->tokscale[t] : 0;       /* CSS font-size override (0 = use style default) */
+        int sc = tsc ? tsc : scale_for(tk->style);
+        int lh = tsc ? (16 * tsc + 2) : lineh_for(tk->style);
         int wpx = tk->len * GW * sc; if (wpx > cr - cl) wpx = cr - cl;
         if (cx + wpx > cr && cx > cl) { cy += curlh; cx = cl; curlh = 18; }
         if (lh > curlh) curlh = lh;
@@ -2924,7 +2962,8 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 for (int u = t; u < b->ntok; u++) {
                     tok_t *pk = &b->toks[u];
                     if (pk->type != TK_WORD) break;          /* break/para/hr/img end the line */
-                    int ps = scale_for(pk->style);
+                    int pts = (u < TOK_MAX) ? b->tokscale[u] : 0;
+                    int ps = pts ? pts : scale_for(pk->style);
                     int pw = pk->len * GW * ps; if (pw > avail) pw = avail;
                     if (probe + pw > cr && probe > cl) break;  /* would wrap -> line ends here */
                     endx = probe + pw; probe = endx + GW * ps;

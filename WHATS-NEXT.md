@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (447 milestones).** (M447: **CSS `text-align: center`/`right`** — inline `style=` +
+> **Status (448 milestones).** (M448: **CSS `font-size` (enlarge)** — `font-size` (inline `style=`,
+> px/pt/%/em/rem + large/x-large keywords) + legacy `<big>`/`<font size=N>` scale text up via a
+> per-token glyph-scale bucket (≈2× for ≥19px/119%/1.2em, ≈3× for ≥28px/175%/2em). Mirrors M447
+> `tokalign` (`tokscale[]` + `curscale` scope); the renderer's per-token scale/line-height + the
+> align look-ahead all consult it, so mixed-size words wrap correctly and font-size composes with
+> colour/bold. Bitmap font = no sub-1×, so enlarge-only (small falls to 1×). Additive. Verified
+> in-OS (SIZE.HTM: 24px→2×, 34px→3×, 200%/2em→3×, `<big>`/`<font size=6>`, 10px stays 1×, large+colour).
+> M447: **CSS `text-align: center`/`right`** — inline `style=` +
 > `<style>` rules + the `<center>` tag + the `align=` attr now center/right-align text. The
 > single-pass word-wrapper does a bounded line-width look-ahead at each line start (replicating
 > the wrap test), then offsets `cx`. Per-token `tokalign[]` + a `curalign` scope (mirroring M446
