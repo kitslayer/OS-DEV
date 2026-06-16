@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (448 milestones).** (M448: **CSS `font-size` (enlarge)** — `font-size` (inline `style=`,
+> **Status (449 milestones).** (M449: **column-aligned `<table>` rendering** — was pipe-separated/
+> unaligned; now a self-contained `render_table` consumes the `<table>..</table>` region in two
+> bounded passes (measure each column's max width, then emit each cell padded to it) → aligned
+> columns in the fixed-width font, `<th>` bold. `cell_extract` (strip inline tags/entities/UTF-8,
+> collapse ws) + `tbl_classify`. Plugged into `parse_html` as a single `<table>` interception that
+> renders+skips the region, so non-table pages are byte-for-byte unaffected. Defensively reviewed
+> (15M ASan/UBSan fuzz iters: bounds-safe + always-terminating). Verified in-OS (TABLE.HTM: two
+> tables, both aligned). This is the first real **layout** (a contained mini table layout).
+> M448: **CSS `font-size` (enlarge)** — `font-size` (inline `style=`,
 > px/pt/%/em/rem + large/x-large keywords) + legacy `<big>`/`<font size=N>` scale text up via a
 > per-token glyph-scale bucket (≈2× for ≥19px/119%/1.2em, ≈3× for ≥28px/175%/2em). Mirrors M447
 > `tokalign` (`tokscale[]` + `curscale` scope); the renderer's per-token scale/line-height + the

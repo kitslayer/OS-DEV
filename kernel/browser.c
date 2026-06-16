@@ -1052,6 +1052,98 @@ static void capture_script(browser_t *b, const char *s, int len) {
     b->scripts[b->scriptlen] = 0;
 }
 
+/* ---- <table> rendering: monospace column-aligned rows --------------------- *
+ * A <table> is rendered self-contained: render_table consumes the whole
+ * <table>..</table> region and emits cells padded (with spaces) to each column's
+ * max width, so the fixed-width font lays them out as aligned columns. It does
+ * its own bounded parsing of the region and never touches non-table content. */
+#define TBL_COLS     16
+#define TBL_CELL_MAX 64
+/* Classify a tag at p: 1=<tr> 2=<td> 6=<th> 3=</tr> 4=</table> 5=</td>|</th> 0=other.
+ * *after := just past '>'. All reads bounded by e. */
+static int tbl_classify(const char *p, const char *e, const char **after) {
+    const char *q = p + 1; int cl = 0;
+    if (q < e && *q == '/') { cl = 1; q++; }
+    char nm[8]; int nl = 0;
+    while (q < e && nl < 7) { int ch = lc((unsigned char)*q); if (ch < 'a' || ch > 'z') break; nm[nl++] = (char)ch; q++; }
+    const char *r = q; while (r < e && *r != '>') r++;
+    *after = (r < e) ? r + 1 : e;
+    if (nl == 2 && nm[0]=='t' && nm[1]=='r') return cl ? 3 : 1;
+    if (nl == 2 && nm[0]=='t' && nm[1]=='d') return cl ? 5 : 2;
+    if (nl == 2 && nm[0]=='t' && nm[1]=='h') return cl ? 5 : 6;
+    if (nl == 5 && nm[0]=='t'&&nm[1]=='a'&&nm[2]=='b'&&nm[3]=='l'&&nm[4]=='e') return cl ? 4 : 0;
+    return 0;
+}
+/* Extract a cell's visible text into out (capped): strip inline tags, decode entities,
+ * fold non-ASCII, collapse runs of whitespace to one space. Returns the char length. */
+static int cell_extract(const char *s, const char *e, char *out, int cap) {
+    int n = 0, sp = 0;
+    const char *p = s;
+    while (p < e && n < cap - 1) {
+        if (*p == '<') { while (p < e && *p != '>') p++; if (p < e) p++; continue; }
+        char c;
+        if (*p == '&') { char d; int adv = decode_entity(p, (int)(e - p), &d); if (adv) { c = d; p += adv; } else { c = *p; p++; } }
+        else if ((unsigned char)*p >= 0x80) { unsigned cp; int adv = decode_utf8(p, (int)(e - p), &cp); c = uni_to_ascii(cp); p += (adv > 0 ? adv : 1); }
+        else { c = *p; p++; }
+        if (c==' '||c=='\t'||c=='\n'||c=='\r') { sp = 1; continue; }
+        if (sp && n > 0 && n < cap - 1) out[n++] = ' ';
+        sp = 0;
+        if (n < cap - 1) out[n++] = c;
+    }
+    out[n] = 0;
+    return n;
+}
+/* Render the table region [s, s+len). Returns chars consumed (to just past </table>). */
+static int render_table(browser_t *b, const char *s, int len) {
+    if (len <= 0) return 0;
+    const char *e = s + len, *tend = e;
+    int col_w[TBL_COLS]; for (int i = 0; i < TBL_COLS; i++) col_w[i] = 0;
+    char out[TBL_CELL_MAX];
+
+    /* pass 1: measure each column's max cell width */
+    { const char *p = s; int col = 0, guard = 0;
+      while (p < e && guard++ < 200000) {
+        if (*p != '<') { p++; continue; }
+        const char *after; int k = tbl_classify(p, e, &after);
+        if (k == 4) { tend = after; break; }
+        if (k == 1) { col = 0; p = after; continue; }
+        if (k == 2 || k == 6) {
+            const char *cs = after, *cend = cs;
+            while (cend < e) { if (*cend == '<') { const char *aa; if (tbl_classify(cend, e, &aa)) break; } cend++; }
+            int n = cell_extract(cs, cend, out, TBL_CELL_MAX);
+            if (col < TBL_COLS && n > col_w[col]) col_w[col] = n;
+            col++; p = cend; continue;
+        }
+        p = after;
+      }
+    }
+    /* pass 2: emit each cell padded to its column width (fixed-width font => aligned) */
+    emit_break(b, TK_PARA);
+    { const char *p = s; int col = 0, guard = 0;
+      while (p < e && guard++ < 200000) {
+        if (*p != '<') { p++; continue; }
+        const char *after; int k = tbl_classify(p, e, &after);
+        if (k == 4) break;
+        if (k == 1) { emit_break(b, TK_BREAK); col = 0; p = after; continue; }
+        if (k == 2 || k == 6) {
+            const char *cs = after, *cend = cs;
+            while (cend < e) { if (*cend == '<') { const char *aa; if (tbl_classify(cend, e, &aa)) break; } cend++; }
+            int n = cell_extract(cs, cend, out, TBL_CELL_MAX);
+            int w = (col < TBL_COLS) ? col_w[col] : n;
+            char padded[TBL_CELL_MAX + 2]; int m = 0;
+            for (int i = 0; i < n && m < TBL_CELL_MAX; i++) padded[m++] = out[i];
+            while (m < w && m < TBL_CELL_MAX) padded[m++] = ' ';
+            padded[m] = 0;
+            emit_literal(b, padded, (k == 6) ? STY_BOLD : STY_NORMAL);
+            col++; p = cend; continue;
+        }
+        p = after;
+      }
+    }
+    emit_break(b, TK_PARA);
+    return (tend < e) ? (int)(tend - s) : len;
+}
+
 static void parse_html(browser_t *b, const char *body, int len) {
     drop_image(b);                                       /* a page replaces any prior image */
     drop_image_slots(b);                                 /* and its inline images */
@@ -1160,6 +1252,13 @@ static void parse_html(browser_t *b, const char *body, int len) {
                     if (lk != NO_LINK) { curlink = lk; if (style == STY_NORMAL) style = STY_LINK;
                         emit_literal_link(b, b->det_open[det_cur] ? "[-] " : "[+] ", lk); }
                 } else if (closing && in_summary) { in_summary = 0; curlink = sum_link; style = sum_style; }
+            }
+            else if (tageq(tag, "table") && !closing &&
+                     !inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary)) {
+                /* render the whole <table>..</table> region as aligned columns, then skip past it */
+                int consumed = render_table(b, body + j + 1, len - (j + 1));
+                i = j + consumed;                         /* loop ++ lands just past </table> */
+                continue;
             }
             else if (!inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary))
                 handle_tag(b, tag, closing, body + astart, j - astart,
