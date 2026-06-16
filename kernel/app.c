@@ -30,6 +30,12 @@
 #define USTACK_BASE  0x50000000ull
 #define USTACK_PAGES 4
 
+/* Userspace heap: grows up from 1 GiB + 64 MiB (clear of any app image, which
+ * loads at 1 GiB and is at most a couple of MiB) toward the stack at 0x50000000.
+ * That leaves ~192 MiB of per-process heap virtual space for malloc (sbrk). */
+#define UHEAP_BASE   0x44000000ull
+#define UHEAP_LIMIT  USTACK_BASE
+
 struct app {
     int         used;
     int         pid;
@@ -37,6 +43,7 @@ struct app {
     const char *title;
     char        titlebuf[24];            /* persistent copy of the title */
     uint64_t cr3, entry, ustack;
+    uint64_t heap_end;                   /* current program break (0 = not yet started) */
     char     grid[APP_ROWS][APP_COLS];
     uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
     uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
@@ -328,6 +335,39 @@ int app_sys_read(char *buf, unsigned max) {
         grid_putc(a, (char)c); buf[n++] = (char)c;  /* echo */
     }
     return (int)n;
+}
+
+/* SYS_sbrk: grow the calling app's heap by `inc` bytes (rounded up to whole
+ * pages), mapping fresh USER|WRITABLE frames into its address space, and return
+ * the PREVIOUS break so ulib's malloc can carve allocations from [old, new).
+ * Returns (uint64_t)-1 on out-of-memory or if the heap would reach the stack.
+ * We only ever grow: a non-positive inc just reports the current break, since
+ * ulib's allocator reuses freed space itself (the kernel never has to shrink).
+ * Frames mapped here are reclaimed wholesale by vmm_destroy_address_space when
+ * the app exits, so even the OOM path below leaks nothing past the app's life. */
+uint64_t app_sbrk(long inc) {
+    struct app *a = cur();
+    if (!a) return (uint64_t)-1;
+    if (!a->heap_end) a->heap_end = UHEAP_BASE;       /* lazily start at the heap base */
+    uint64_t old = a->heap_end;
+    if (inc <= 0) return old;
+    uint64_t pages  = ((uint64_t)inc + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint64_t newend = old + pages * PAGE_SIZE;
+    if (newend > UHEAP_LIMIT || newend < old) return (uint64_t)-1;   /* hit the stack / overflow */
+    for (uint64_t v = old; v < newend; v += PAGE_SIZE) {
+        uint64_t frame = pmm_alloc_frame();
+        if (!frame) {                                 /* OOM: undo this call's partial mapping */
+            for (uint64_t u = old; u < v; u += PAGE_SIZE) {
+                uint64_t ph = vmm_translate(u);
+                vmm_unmap(u);
+                if (ph) pmm_free_frame(ph);
+            }
+            return (uint64_t)-1;
+        }
+        vmm_map(v, frame, PTE_WRITABLE | PTE_USER);
+    }
+    a->heap_end = newend;
+    return old;
 }
 
 int  app_sys_getpid(void) { return cur()->pid; }

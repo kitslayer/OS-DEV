@@ -81,8 +81,8 @@ $(BUILD)/user_%.o: user/%.c
 	@mkdir -p $(BUILD)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(BUILD)/%.elf: $(BUILD)/user_%.o $(BUILD)/user_ulib.o user/user.ld
-	$(LD) -T user/user.ld -o $@ $(BUILD)/user_$*.o $(BUILD)/user_ulib.o
+$(BUILD)/%.elf: $(BUILD)/user_%.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld
+	$(LD) -T user/user.ld -o $@ $(BUILD)/user_$*.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (userspace program)"
 
 # the embedded blob depends on every program ELF
@@ -152,9 +152,13 @@ ziptest:
 tartest:
 	@tests/run-tar-tests.sh
 
+# Host-side regression test of the userspace malloc/free allocator (ASan+UBSan).
+heaptest:
+	@tests/run-heap-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest)"
 
 clean:
 	rm -rf $(BUILD)

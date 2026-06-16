@@ -32,6 +32,7 @@ int    app_rows(void);
 void   app_sys_write(const char *buf, unsigned len);
 int    app_sys_read(char *buf, unsigned max);
 int    app_sys_getpid(void);
+uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 void   app_sys_clear(void);             /* clear the calling app's screen */
 void   app_setcolor(int idx);           /* set the calling app's text colour (palette 0-15) */
 void   app_sys_exit(void);              /* does not return */

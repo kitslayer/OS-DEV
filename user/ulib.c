@@ -69,6 +69,7 @@ long sys_gzip(const char *insrc, const char *outname) { return do_syscall(SYS_gz
 long sys_unzip(const char *zipname) { return do_syscall(SYS_unzip, (long)zipname, 0, 0); }
 long sys_untar(const char *tarname) { return do_syscall(SYS_untar, (long)tarname, 0, 0); }
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }
+void *sbrk(long inc) { return (void *)do_syscall(SYS_sbrk, inc, 0, 0); }
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);
 }
@@ -151,6 +152,45 @@ int startswith(const char *s, const char *prefix) {
     }
     return 1;
 }
+
+/* ---- freestanding mem primitives -------------------------------------- *
+ * Word-at-a-time so GCC's loop-pattern pass doesn't rewrite a naive byte loop
+ * into a call to memcpy/memset (which would be infinite recursion), mirroring
+ * the kernel's kernel/lib/string.c. GCC may emit calls to these from struct
+ * copies / array inits even under -ffreestanding, so they must exist. */
+typedef unsigned long uword_t;
+
+void *memset(void *dst, int c, unsigned long n) {
+    unsigned char *p = dst;
+    unsigned char b = (unsigned char)c;
+    if (n >= 8) {
+        uword_t w = (uword_t)b;
+        w |= w << 8; w |= w << 16; w |= w << 32;
+        while (n && ((unsigned long)p & 7u)) { *p++ = b; n--; }
+        while (n >= 8) { *(uword_t *)p = w; p += 8; n -= 8; }
+    }
+    while (n--) *p++ = b;
+    return dst;
+}
+void *memcpy(void *dst, const void *src, unsigned long n) {
+    unsigned char *d = dst;
+    const unsigned char *s = src;
+    if ((((unsigned long)d ^ (unsigned long)s) & 7u) == 0) {
+        while (n && ((unsigned long)d & 7u)) { *d++ = *s++; n--; }
+        while (n >= 8) { *(uword_t *)d = *(const uword_t *)s; d += 8; s += 8; n -= 8; }
+    }
+    while (n--) *d++ = *s++;
+    return dst;
+}
+void *memmove(void *dst, const void *src, unsigned long n) {
+    unsigned char *d = dst;
+    const unsigned char *s = src;
+    if (d < s) { while (n--) *d++ = *s++; }
+    else { d += n; s += n; while (n--) *--d = *--s; }
+    return dst;
+}
+
+/* malloc/free/calloc/realloc live in umalloc.c (host-testable in isolation). */
 
 /* Program entry: the ELF entry point. Calls main() and exits with its result. */
 extern int main(void);

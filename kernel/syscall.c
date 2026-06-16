@@ -414,6 +414,9 @@ void syscall_dispatch(struct registers *r) {
         outb(0x64, 0xFE);                  /* pulse the 8042 reset line */
         for (;;) __asm__ volatile("hlt");
         break;
+    case SYS_sbrk:
+        r->rax = app_sbrk((long)r->rdi);   /* grow the heap; old break, or (uint64_t)-1 */
+        break;
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

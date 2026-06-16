@@ -43,6 +43,18 @@ long sys_unzip(const char *zipname);
 long sys_untar(const char *tarname);
 void sys_sleep(int ms);
 void sys_setcolor(int color);   /* text colour for subsequent output: palette index 0-15 (0 = default) */
+void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, or (void*)-1 */
+
+/* dynamic memory (a first-fit free list over sbrk) */
+void *malloc(unsigned long n);
+void  free(void *p);
+void *calloc(unsigned long nmemb, unsigned long size);
+void *realloc(void *p, unsigned long n);
+
+/* freestanding mem primitives (GCC may also emit calls to these) */
+void *memset(void *dst, int c, unsigned long n);
+void *memcpy(void *dst, const void *src, unsigned long n);
+void *memmove(void *dst, const void *src, unsigned long n);
 
 /* convenience */
 void          print(const char *s);

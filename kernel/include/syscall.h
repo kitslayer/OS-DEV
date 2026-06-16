@@ -49,6 +49,7 @@
 #define SYS_gzip   39   /* (insrc, outname) -> gzip-compress a file; output bytes, or -1 */
 #define SYS_unzip  40   /* (zipname)        -> extract a .zip to 8.3 files; files written, or -1 */
 #define SYS_untar  41   /* (tarname)        -> extract a .tar/.tar.gz to 8.3 files; files written, or -1 */
+#define SYS_sbrk   42   /* (inc)            -> grow the heap by inc bytes; old break, or (void*)-1 */
 
 #define SYSCALL_VECTOR 0x80
 
