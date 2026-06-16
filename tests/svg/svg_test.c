@@ -250,6 +250,41 @@ static void test_opacity(void) {
     }
 }
 
+/* --- test 9: gradients (linear red->blue + radial white->black) --------- */
+static void test_gradient(void) {
+    const char *svg =
+        "<svg width='100' height='40'>"
+        "<defs>"
+          "<linearGradient id='lg'>"
+            "<stop offset='0' stop-color='#ff0000'/>"
+            "<stop offset='1' stop-color='#0000ff'/>"
+          "</linearGradient>"
+          "<radialGradient id='rg'>"
+            "<stop offset='0' stop-color='#ffffff'/>"
+            "<stop offset='1' stop-color='#000000'/>"
+          "</radialGradient>"
+        "</defs>"
+        "<rect x='0' y='0' width='60' height='40' fill='url(#lg)'/>"   /* horizontal red->blue */
+        "<circle cx='80' cy='20' r='18' fill='url(#rg)'/>"             /* radial white->black */
+        "</svg>";
+    int w, h;
+    int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                       obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+    CHECK(r == 0 && w == 100 && h == 40, "gradient: decode 100x40");
+    if (r == 0) {
+        const uint8_t *lft = px(w, 3, 20);    /* linear t~0 -> red */
+        CHECK(lft[0] > 180 && lft[2] < 80 && lft[3] > 200, "gradient: linear left edge ~red");
+        const uint8_t *rgt = px(w, 56, 20);   /* linear t~1 -> blue */
+        CHECK(rgt[2] > 180 && rgt[0] < 80 && rgt[3] > 200, "gradient: linear right edge ~blue");
+        const uint8_t *mid = px(w, 30, 20);   /* linear t~0.5 -> blend (both channels mid) */
+        CHECK(mid[0] > 60 && mid[0] < 200 && mid[2] > 60 && mid[2] < 200, "gradient: linear midpoint blends");
+        const uint8_t *cen = px(w, 80, 20);   /* radial t~0 -> white */
+        CHECK(cen[0] > 200 && cen[1] > 200 && cen[2] > 200 && cen[3] > 200, "gradient: radial center ~white");
+        const uint8_t *edg = px(w, 80, 4);    /* radial t~0.9 (near r) -> dark */
+        CHECK(edg[0] < 100 && edg[3] > 200, "gradient: radial edge ~dark");
+    }
+}
+
 /* --- fuzz harness -------------------------------------------------------- */
 static uint32_t rs = 0x5EED1234u;
 static uint32_t xr(void) { rs ^= rs<<13; rs ^= rs>>17; rs ^= rs<<5; return rs; }
@@ -263,6 +298,7 @@ int main(void) {
     test_transform();
     test_inherit();
     test_opacity();
+    test_gradient();
 
     /* Valid seeds to mutate during fuzzing. */
     const char *seeds[] = {
@@ -325,6 +361,9 @@ int main(void) {
             "skewY(",")","'>","</g>","' transform='rotate(",
             "<g fill='","' fill='","stroke='","' fill='inherit'","#abc","' stroke-width='",
             "' opacity='","' fill-opacity='","' stroke-opacity='","0.5","%","0.25",
+            "<defs>","</defs>","<linearGradient id='","<radialGradient id='","</linearGradient>",
+            "</radialGradient>","<stop offset='","' stop-color='","' stop-opacity='","fill='url(#",
+            "url(#g)","' gradientUnits='userSpaceOnUse","' cx='","' r='","</stop>",
         };
         int nfr = (int)(sizeof frag / sizeof frag[0]);
         for (unsigned seed = 1; seed <= 16; seed++) {
@@ -351,6 +390,16 @@ int main(void) {
         /* huge declared dims (must be capped / rejected, never overflow) */
         const char *big = "<svg width='99999' height='99999'><rect width='99999' height='99999' fill='red'/></svg>";
         svg_decode((const uint8_t*)big, (int)strlen(big), obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        /* gradient with HUGE coords on a HUGE shape (the grad_color_at dx*dx int64
+         * overflow path — must clamp, never overflow/UB). */
+        const char *bg = "<svg width='400' height='400' viewBox='0 0 999999 999999'>"
+            "<defs><linearGradient id='g' gradientUnits='userSpaceOnUse' x1='-999999' y1='-999999' x2='999999' y2='999999'>"
+            "<stop offset='0' stop-color='#f00'/><stop offset='1' stop-color='#00f'/></linearGradient>"
+            "<radialGradient id='r' gradientUnits='userSpaceOnUse' cx='999999' cy='-999999' r='999999'>"
+            "<stop offset='0' stop-color='#fff'/><stop offset='1' stop-color='#000'/></radialGradient></defs>"
+            "<rect width='999999' height='999999' fill='url(#g)'/>"
+            "<circle cx='500000' cy='500000' r='499999' fill='url(#r)'/></svg>";
+        svg_decode((const uint8_t*)bg, (int)strlen(bg), obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
         /* a path with thousands of commands */
         static char buf[16000];
         int n = 0;
@@ -373,7 +422,7 @@ int main(void) {
     }
 
     if (fails == 0)
-        printf("svgtest: 8 unit tests (incl. transforms + paint inheritance + opacity) + %d random + %d "
+        printf("svgtest: 9 unit tests (incl. transforms + inheritance + opacity + gradients) + %d random + %d "
                "mutation + 320000 structured fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
     else
         printf("svgtest: %d FAILURE(S)\n", fails);

@@ -48,6 +48,8 @@
 #define SVG_BEZ_STEPS  16       /* line segments per cubic/quadratic bezier */
 #define SVG_MAX_TAGS   65536    /* hard ceiling on tags scanned (anti-hang) */
 #define SVG_MAX_GROUPS 16       /* transform-stack depth for nested <g> (capped) */
+#define SVG_MAX_GRADS  8        /* gradient definitions collected (capped) */
+#define SVG_MAX_STOPS  8        /* color stops per gradient (capped) */
 
 /* ---- 16.16 signed fixed-point ------------------------------------------ */
 typedef int32_t fx;            /* value = real * 65536 */
@@ -335,7 +337,23 @@ static int get_style(const char *style, const char *key, char *buf, int bufcap) 
 }
 
 /* ---- colour parsing ---------------------------------------------------- */
-typedef struct { uint8_t r, g, b, a; int set; } color_t;   /* set=0 -> "none"/unset */
+typedef struct { uint8_t r, g, b, a; int set; int grad; } color_t;   /* set=0 -> "none"/unset; grad>0 -> gradient index+1 */
+
+/* ---- gradients --------------------------------------------------------- *
+ * A small fixed table of linear/radial gradients collected from the SVG (a
+ * <linearGradient>/<radialGradient> with <stop> children). Coordinates are kept
+ * in their declared form: for the default objectBoundingBox units they are 0..1
+ * fractions of the filled shape's bounding box; for userSpaceOnUse they are user
+ * coordinates (mapped to device like any point). */
+typedef struct { fx off; uint8_t r, g, b, a; } gstop_t;   /* offset 0..1 (fx) + colour */
+typedef struct {
+    char    id[40];
+    int     radial;        /* 0 = linear, 1 = radial */
+    int     userspace;     /* 0 = objectBoundingBox (default), 1 = userSpaceOnUse */
+    fx      x1, y1, x2, y2; /* linear axis; radial: (x1,y1)=center, x2=radius */
+    gstop_t stops[SVG_MAX_STOPS];
+    int     nstops;
+} grad_t;
 
 struct named { const char *name; uint8_t r, g, b; };
 static const struct named NAMED[] = {
@@ -353,7 +371,7 @@ static const struct named NAMED[] = {
 /* Parse a colour spec into *c. `dflt_set` chooses what an empty/garbage string
  * means (default fill is opaque black; default stroke is "unset"). */
 static void parse_color(const char *s, color_t *c, int dflt_set) {
-    c->r = c->g = c->b = 0; c->a = 255; c->set = dflt_set;
+    c->r = c->g = c->b = 0; c->a = 255; c->set = dflt_set; c->grad = 0;
     if (!s || !*s) return;
     while (is_space((unsigned char)*s)) s++;
     int n = (int)strlen(s);
@@ -430,6 +448,9 @@ typedef struct {
     /* inherited group opacity (0..255 multiplier), accumulated down <g> nesting. */
     int     in_alpha;
     int     alphastk[SVG_MAX_GROUPS];
+    /* gradient definitions, collected in a pre-pass and referenced by fill=url(#id). */
+    grad_t  grads[SVG_MAX_GRADS];
+    int     ngrad;
 } ctx_t;
 
 /* Map a user-space coord (16.16) to device (pixel) fixed-point. The subtraction
@@ -496,6 +517,100 @@ static void blend_px(ctx_t *c, int x, int y, color_t col, int a) {
     o[0]=(uint8_t)nr; o[1]=(uint8_t)ng; o[2]=(uint8_t)nb; o[3]=(uint8_t)na;
 }
 
+/* ---- gradient evaluation ----------------------------------------------- */
+/* integer sqrt of a non-negative int64 (Newton; bounded iterations, no FPU). */
+static int64_t isqrt64(int64_t v) {
+    if (v <= 0) return 0;
+    int64_t x = v, nx = (x + 1) / 2;
+    for (int it = 0; it < 100 && nx < x; it++) { x = nx; nx = (x + v / x) / 2; }
+    return x;
+}
+/* lerp two 0..255 channels by f (16.16, 0..1), clamped to 0..255. */
+static uint8_t lerp8(int a, int b, fx f) {
+    int v = a + (int)(((int64_t)(b - a) * f) >> FX_SHIFT);
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+    return (uint8_t)v;
+}
+/* Colour of gradient `gi` at device pixel (px,py); the filled shape's device-space
+ * bounding box [bx0,by0]-[bx1,by1] maps objectBoundingBox (0..1) coords. Returns the
+ * interpolated stop colour+alpha. All fixed-point with int64 intermediates; the
+ * projection scale is reduced by 2^16 before dividing so num*FX_ONE can't overflow. */
+static color_t grad_color_at(ctx_t *c, int gi, fx bx0, fx by0, fx bx1, fx by1, int px, int py) {
+    color_t out; out.r = out.g = out.b = 0; out.a = 255; out.set = 1; out.grad = 0;
+    /* defensive: the sole caller passes gi = col.grad-1 in [0,ngrad), but re-check
+     * so the grads[] index is provably in range even if a future caller slips up. */
+    if (gi < 0 || gi >= c->ngrad || gi >= SVG_MAX_GRADS) return out;
+    grad_t *g = &c->grads[gi];
+    if (g->nstops == 0) return out;
+
+    int64_t Px = ((int64_t)px << FX_SHIFT) + FX_ONE / 2;   /* pixel centre, device fx */
+    int64_t Py = ((int64_t)py << FX_SHIFT) + FX_ONE / 2;
+
+    /* resolve gradient geometry to device fx */
+    int64_t ax, ay, bxx, byy, cxx, cyy, rr;
+    if (!g->userspace) {                       /* objectBoundingBox: 0..1 of the bbox */
+        int64_t bw = (int64_t)bx1 - bx0, bh = (int64_t)by1 - by0;
+        ax  = (int64_t)bx0 + fx_mulc(g->x1, (fx)clamp64(bw, (int64_t)FX_CLAMP_INT << FX_SHIFT));
+        ay  = (int64_t)by0 + fx_mulc(g->y1, (fx)clamp64(bh, (int64_t)FX_CLAMP_INT << FX_SHIFT));
+        bxx = (int64_t)bx0 + fx_mulc(g->x2, (fx)clamp64(bw, (int64_t)FX_CLAMP_INT << FX_SHIFT));
+        byy = (int64_t)by0 + fx_mulc(g->y2, (fx)clamp64(bh, (int64_t)FX_CLAMP_INT << FX_SHIFT));
+        cxx = ax; cyy = ay;
+        rr  = fx_mulc(g->x2, (fx)clamp64((bw + bh) / 2, (int64_t)FX_CLAMP_INT << FX_SHIFT));
+    } else {                                   /* userSpaceOnUse: user coords -> device */
+        ax  = map_x(c, g->x1); ay  = map_y(c, g->y1);
+        bxx = map_x(c, g->x2); byy = map_y(c, g->y2);
+        cxx = ax; cyy = ay;
+        rr  = fx_mulc(g->x2, c->sx);
+    }
+    /* Clamp the resolved geometry to a generous device range (>> any real <=512px
+     * canvas, so visible gradients are unaffected) BEFORE the dx/dy squaring below:
+     * unclamped, a malicious huge-coordinate SVG could make dx*dx overflow int64.
+     * 1<<28 keeps dx in +-2^29 so dx*dx + dy*dy stays well within int64. */
+    {
+        const int64_t GC = (int64_t)1 << 28;
+        ax = clamp64(ax, GC); ay = clamp64(ay, GC);
+        bxx = clamp64(bxx, GC); byy = clamp64(byy, GC);
+        cxx = clamp64(cxx, GC); cyy = clamp64(cyy, GC);
+    }
+
+    fx t;                                       /* position along the gradient, 0..1 (fx) */
+    if (!g->radial) {
+        int64_t dx = bxx - ax, dy = byy - ay;
+        int64_t lensq = (dx * dx + dy * dy) >> FX_SHIFT;   /* reduce 2^32 scale by 2^16 */
+        if (lensq <= 0) t = 0;
+        else {
+            int64_t num = ((Px - ax) * dx + (Py - ay) * dy) >> FX_SHIFT;
+            int64_t tt = (num * FX_ONE) / lensq;
+            t = (fx)clamp64(tt, (int64_t)FX_ONE);
+        }
+    } else {
+        int64_t dx = Px - cxx, dy = Py - cyy;
+        int64_t dist = isqrt64(dx * dx + dy * dy);          /* device fx distance */
+        if (rr <= 0) t = FX_ONE;
+        else { int64_t tt = (dist * FX_ONE) / rr; t = (fx)clamp64(tt, (int64_t)FX_ONE); }
+    }
+    if (t < 0) t = 0;
+
+    /* find the stop pair bracketing t and interpolate (stops assumed in offset order). */
+    gstop_t *st = g->stops; int n = g->nstops;
+    if (t <= st[0].off)   { out.r=st[0].r;   out.g=st[0].g;   out.b=st[0].b;   out.a=st[0].a;   return out; }
+    if (t >= st[n-1].off) { out.r=st[n-1].r; out.g=st[n-1].g; out.b=st[n-1].b; out.a=st[n-1].a; return out; }
+    for (int i = 0; i + 1 < n; i++) {
+        if (t >= st[i].off && t <= st[i+1].off) {
+            fx span = st[i+1].off - st[i].off;
+            fx f = span > 0 ? (fx)(((int64_t)(t - st[i].off) * FX_ONE) / span) : 0;
+            out.r = lerp8(st[i].r, st[i+1].r, f);
+            out.g = lerp8(st[i].g, st[i+1].g, f);
+            out.b = lerp8(st[i].b, st[i+1].b, f);
+            out.a = lerp8(st[i].a, st[i+1].a, f);
+            return out;
+        }
+    }
+    out.r=st[n-1].r; out.g=st[n-1].g; out.b=st[n-1].b; out.a=st[n-1].a;   /* fallthrough */
+    return out;
+}
+
 /* ---- scanline polygon fill (even-odd) ---------------------------------- *
  * Fills all current subpaths together (even-odd rule, so holes work). For each
  * scanline center y+0.5 we gather edge crossings (fixed-point x), insertion-sort
@@ -507,9 +622,12 @@ static void insort(fx *a, int n) {                 /* tiny insertion sort */
 }
 static void fill_poly(ctx_t *c, color_t col) {
     if (!col.set || c->npt < 3) return;
-    /* device-space vertical extent -> pixel scanline range */
-    fx ymin = c->py[0], ymax = c->py[0];
-    for (int i = 1; i < c->npt; i++) { if (c->py[i]<ymin) ymin=c->py[i]; if (c->py[i]>ymax) ymax=c->py[i]; }
+    /* device-space bounding box: vertical extent -> scanlines; full box -> gradient mapping */
+    fx ymin = c->py[0], ymax = c->py[0], xmin = c->px[0], xmax = c->px[0];
+    for (int i = 1; i < c->npt; i++) {
+        if (c->py[i]<ymin) ymin=c->py[i]; if (c->py[i]>ymax) ymax=c->py[i];
+        if (c->px[i]<xmin) xmin=c->px[i]; if (c->px[i]>xmax) xmax=c->px[i];
+    }
     int y0 = ymin >> FX_SHIFT, y1 = (ymax >> FX_SHIFT) + 1;
     if (y0 < 0) y0 = 0;
     if (y1 > c->H) y1 = c->H;
@@ -541,7 +659,15 @@ static void fill_poly(ctx_t *c, color_t col) {
             int xb = (xs[k+1] + (FX_ONE/2)) >> FX_SHIFT;
             if (xa < 0) xa = 0;
             if (xb > c->W) xb = c->W;
-            for (int x = xa; x < xb; x++) blend_px(c, x, y, col, col.a);
+            if (col.grad) {                            /* gradient fill: per-pixel colour */
+                int gi = col.grad - 1;
+                for (int x = xa; x < xb; x++) {
+                    color_t gc = grad_color_at(c, gi, xmin, ymin, xmax, ymax, x, y);
+                    blend_px(c, x, y, gc, gc.a * (int)col.a / 255);
+                }
+            } else {                                   /* solid fill (unchanged path) */
+                for (int x = xa; x < xb; x++) blend_px(c, x, y, col, col.a);
+            }
         }
     }
 }
@@ -778,6 +904,25 @@ static int ieq(const char *a, const char *b) {
     return *a == 0 && *b == 0;
 }
 
+/* Parse a gradient coordinate value -> 16.16. A bare number is taken as-is; a
+ * percentage ("50%") becomes the 0..1 fraction (0.5). */
+static fx parse_coord(const char *v) {
+    const char *p = v, *e = v + strlen(v);
+    fx n = parse_num(&p, e);
+    if (p < e && *p == '%') n = (fx)((int64_t)n / 100);
+    return n;
+}
+
+/* Find a collected gradient by id (id[0..idlen) vs the NUL-terminated stored id). */
+static int find_grad(ctx_t *c, const char *id, int idlen) {
+    for (int i = 0; i < c->ngrad && i < SVG_MAX_GRADS; i++) {
+        const char *gi = c->grads[i].id; int k = 0;
+        while (k < idlen && gi[k] && gi[k] == id[k]) k++;
+        if (k == idlen && gi[k] == 0) return i;
+    }
+    return -1;
+}
+
 /* Read an opacity-style property (`opacity`/`fill-opacity`/`stroke-opacity`) from
  * a shape's style= or attr and return it as a 0..255 multiplier (255 if absent).
  * Accepts a 0..1 fraction ("0.5") or a percentage ("50%"); clamped. */
@@ -814,7 +959,17 @@ static void read_paint(ctx_t *c, const char *s, const char *e,
 
     if (get_style(style, "fill", v, sizeof v) || get_attr(s, e, "fill", v, sizeof v)) {
         if (ieq(v, "inherit")) *fill = c->in_fill;
-        else parse_color(v, fill, 1);
+        else {
+            parse_color(v, fill, 1);                 /* sets grad=0; url() -> gray fallback */
+            if (lc((unsigned char)v[0])=='u' && lc((unsigned char)v[1])=='r' && lc((unsigned char)v[2])=='l') {
+                const char *h = v; while (*h && *h != '#') h++;   /* fill:url(#id) -> a gradient? */
+                if (*h == '#') { h++; const char *ids = h;
+                    while (*h && *h != ')' && !is_space((unsigned char)*h)) h++;
+                    int gi = find_grad(c, ids, (int)(h - ids));
+                    if (gi >= 0) { fill->grad = gi + 1; fill->set = 1; }
+                }
+            }
+        }
     } else *fill = c->in_fill;
 
     if (get_style(style, "stroke", v, sizeof v) || get_attr(s, e, "stroke", v, sizeof v)) {
@@ -889,6 +1044,98 @@ static int read_svg_tag(ctx_t *c, const char *s, const char *e, int out_cap) {
     return 0;
 }
 
+/* ---- gradient collection pre-pass -------------------------------------- *
+ * Scans the whole SVG (including inside <defs>) for <linearGradient>/<radialGradient>
+ * elements and their <stop> children, filling c->grads[]. Runs before the render
+ * walk so forward references (fill=url(#id) before the gradient is declared) resolve.
+ * Bounded by SVG_MAX_TAGS; never reads past `end`; every table write is capped. */
+static void collect_gradients(ctx_t *c, const uint8_t *data, int len) {
+    const char *p = (const char *)data, *end = p + len;
+    int tags = 0, cur = -1;     /* cur = index of the gradient currently collecting stops */
+    while (p < end && tags++ < SVG_MAX_TAGS) {
+        if (*p != '<') { p++; continue; }
+        const char *tag = p + 1;
+        if (tag >= end) break;
+        if (*tag == '!' || *tag == '?') {           /* comment / PI: skip to '>' */
+            const char *q = tag;
+            if (tag + 3 < end && tag[0]=='!' && tag[1]=='-' && tag[2]=='-') {
+                q = tag + 3;
+                while (q + 2 < end && !(q[0]=='-'&&q[1]=='-'&&q[2]=='>')) q++;
+                p = (q + 2 < end) ? q + 3 : end;
+            } else { while (q < end && *q != '>') q++; p = (q < end) ? q + 1 : end; }
+            continue;
+        }
+        int closing = 0; const char *name = tag;
+        if (*name == '/') { closing = 1; name++; }
+        const char *ne = name;
+        while (ne < end && !is_space((unsigned char)*ne) && *ne != '>' && *ne != '/') ne++;
+        int nlen = (int)(ne - name);
+        const char *tend = ne;
+        while (tend < end && *tend != '>') tend++;
+        const char *body_e = tend;
+        const char *next = (tend < end) ? tend + 1 : end;
+
+        int is_lin = (nlen == 14 && kw_eq(name, nlen, "lineargradient"));
+        int is_rad = (nlen == 14 && kw_eq(name, nlen, "radialgradient"));
+        int is_stop = (nlen == 4 && kw_eq(name, nlen, "stop"));
+
+        if ((is_lin || is_rad) && !closing) {
+            cur = -1;
+            if (c->ngrad < SVG_MAX_GRADS) {
+                grad_t *g = &c->grads[c->ngrad];
+                memset(g, 0, sizeof *g);
+                g->radial = is_rad;
+                char v[64];
+                get_attr(name, body_e, "id", g->id, sizeof g->id);
+                if (get_attr(name, body_e, "gradientUnits", v, sizeof v) && ieq(v, "userSpaceOnUse"))
+                    g->userspace = 1;
+                if (is_rad) { g->x1 = FX_ONE/2; g->y1 = FX_ONE/2; g->x2 = FX_ONE/2; }  /* cx,cy,r */
+                else        { g->x1 = 0; g->y1 = 0; g->x2 = FX_ONE; g->y2 = 0; }        /* default axis */
+                if (is_rad) {
+                    if (get_attr(name, body_e, "cx", v, sizeof v)) g->x1 = parse_coord(v);
+                    if (get_attr(name, body_e, "cy", v, sizeof v)) g->y1 = parse_coord(v);
+                    if (get_attr(name, body_e, "r",  v, sizeof v)) g->x2 = parse_coord(v);
+                } else {
+                    if (get_attr(name, body_e, "x1", v, sizeof v)) g->x1 = parse_coord(v);
+                    if (get_attr(name, body_e, "y1", v, sizeof v)) g->y1 = parse_coord(v);
+                    if (get_attr(name, body_e, "x2", v, sizeof v)) g->x2 = parse_coord(v);
+                    if (get_attr(name, body_e, "y2", v, sizeof v)) g->y2 = parse_coord(v);
+                }
+                g->nstops = 0;
+                cur = c->ngrad;
+                c->ngrad++;
+                if (body_e > name && body_e[-1] == '/') cur = -1;   /* self-closing: no stops */
+            }
+        } else if ((is_lin || is_rad) && closing) {
+            cur = -1;
+        } else if (is_stop && !closing && cur >= 0 && cur < SVG_MAX_GRADS) {
+            grad_t *g = &c->grads[cur];
+            if (g->nstops < SVG_MAX_STOPS) {
+                char style[256]; style[0] = 0; get_attr(name, body_e, "style", style, sizeof style);
+                char v[64];
+                fx off = 0;
+                if (get_attr(name, body_e, "offset", v, sizeof v)) off = parse_coord(v);
+                if (off < 0) off = 0;
+                if (off > FX_ONE) off = FX_ONE;
+                color_t sc;
+                if (get_style(style, "stop-color", v, sizeof v) || get_attr(name, body_e, "stop-color", v, sizeof v))
+                    parse_color(v, &sc, 1);
+                else parse_color("", &sc, 1);          /* default black */
+                int sa = 255;
+                if (get_style(style, "stop-opacity", v, sizeof v) || get_attr(name, body_e, "stop-opacity", v, sizeof v)) {
+                    const char *op = v; fx on = parse_num(&op, v + strlen(v));
+                    long aa = ((long)on * 255) >> FX_SHIFT;
+                    if (aa < 0) aa = 0; if (aa > 255) aa = 255; sa = (int)aa;
+                }
+                gstop_t *st = &g->stops[g->nstops++];
+                st->off = off; st->r = sc.r; st->g = sc.g; st->b = sc.b;
+                st->a = (uint8_t)(sc.a * sa / 255);
+            }
+        }
+        p = next;
+    }
+}
+
 /* ------------------------------------------------------------------------ */
 int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                uint8_t *scratch, int scratch_cap, int *ow, int *oh) {
@@ -937,6 +1184,9 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
     C.in_swid = FX_ONE;
     read_paint(&C, svg_s, svg_e, &C.in_fill, &C.in_stroke, &C.in_swid, 0);
     C.in_alpha = alpha_attr(svg_s, svg_e, "opacity");   /* root opacity (255 if absent) */
+
+    /* collect gradient defs (pre-pass) so fill=url(#id) resolves, incl. forward refs */
+    collect_gradients(&C, data, len);
 
     /* clear bitmap to fully-transparent black */
     memset(out, 0, (long)C.W * C.H * 4);

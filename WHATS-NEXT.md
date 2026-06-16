@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (444 milestones).** (M444: **SVG opacity** — `opacity`/`fill-opacity`/`stroke-opacity`
+> **Status (445 milestones).** (M445: **SVG gradients** — `<linearGradient>`/`<radialGradient>`
+> (multiple `<stop>`s, `stop-opacity`, `gradientUnits`) referenced by `fill=url(#id)`, evaluated
+> per-pixel in the scanline fill (integer/16.16, Newton int-sqrt for radial, no FPU). A pre-pass
+> collects defs (forward refs + `<defs>` resolve); objectBoundingBox (default) maps to the shape
+> bbox, userSpaceOnUse to device. Strictly additive (no gradient = unchanged solid path). Self-review
+> found+fixed an int64 overflow (clamp the resolved geometry before dx*dx). ~6.5M ASan/UBSan fuzz
+> iters. Verified in-OS (GRAD.SVG → a sky linear gradient behind a 3-stop radial sphere). The SVG
+> decoder is now comprehensive: shapes/paths + transforms + inheritance + opacity + gradients.
+> M444: **SVG opacity** — `opacity`/`fill-opacity`/`stroke-opacity`
 > (a 0..1 fraction or `%`) scale a shape's alpha; a group `<g opacity>` multiplies down to its
 > children (inherited `in_alpha` on the same paint stack). Reuses the existing alpha-compositing
 > `blend_px`, so translucent overlaps blend. Strictly additive (no opacity = exact prior alpha,
