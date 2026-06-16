@@ -276,4 +276,8 @@ print([1,2]+[3], 1+[2,3], "o="+_ob);  // 1,23 12,3 o=[object Object] (M420: obje
 print(2+3, [1,2,3].reduce(function(a,b){return a+b;},0), "n="+5);  // 5 6 n=5 (numeric path unregressed)
 print("-- integer arithmetic / div-by-zero safety --");
 print(7/2, 10/0, 0/0, 0-7%3, 2147483647+1);  // 3 0 0 -1 2147483648 (integer division truncates; div-by-zero GUARDED to 0 — no #DE crash; modulo; 64-bit so no 32-bit overflow)
+print("-- coercion edges (ToPrimitive / ToNumber, integer engine) --");
+print("["+([]+[])+"]", []+{}, +[], null+1, undefined+1, true+true);  // [] [object Object] 0 1 1 2 (empty array->""; array/object->string; +[]->0; null/undefined->0 [no NaN]; bool->num)
+print('5'*2, '5'-2, [5]+3, 0.5);  // 10 3 53 0 (string<->num arithmetic; [5]->"5" then +3 concats; fractional literal truncates)
+print(parseInt("0xff"), parseInt("  42abc"));  // 255 42 (hex prefix; leading ws + trailing junk)
 print("-- done --");
