@@ -1,0 +1,121 @@
+/*
+ * crypto_test.c — known-answer tests (KAT) for the from-scratch crypto
+ * primitives that underpin the TLS 1.3 client (the project's north star).
+ *
+ * Until now these were validated only INDIRECTLY (a live handshake either works
+ * or doesn't) — a subtle regression in SHA-256/AES/ChaCha/HKDF/X25519 would
+ * silently break TLS with no fast signal. This suite checks each primitive
+ * against its published RFC/FIPS test vector, built for the host under
+ * ASan+UBSan. Run via "make kattest". Exit 0 = all vectors match.
+ *
+ * The kernel crypto .c files are passed as separate translation units to the
+ * compiler (see run-crypto-tests.sh) so file-local statics can't collide; this
+ * harness just calls their public APIs. Vectors:
+ *   SHA-256/384/512 — FIPS 180-4 "abc"
+ *   HMAC-SHA256  — RFC 4231 test case 2
+ *   HKDF-SHA256  — RFC 5869 test case 1
+ *   AES-128      — FIPS-197 appendix C.1 single block
+ *   AES-128-GCM  — GCM spec test cases 1 & 2
+ *   ChaCha20-Poly1305 — RFC 8439 section 2.8.2
+ *   X25519       — RFC 7748 sections 5.2 and 6.1
+ */
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include "sha256.h"
+#include "sha512.h"
+#include "aes.h"
+#include "aesgcm.h"
+#include "chachapoly.h"
+#include "hkdf.h"
+#include "x25519.h"
+
+static int g_fails = 0;
+static int hxd(char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; }
+static int H(uint8_t *out, const char *hex) {            /* hex string -> bytes, returns count */
+    int n = 0; for (int i = 0; hex[i] && hex[i+1]; i += 2) out[n++] = (uint8_t)((hxd(hex[i]) << 4) | hxd(hex[i+1]));
+    return n;
+}
+static void check(const char *name, const uint8_t *got, const char *want_hex, int len) {
+    uint8_t want[128]; H(want, want_hex);
+    if (memcmp(got, want, len) == 0) printf("  ok: %s\n", name);
+    else { printf("  FAIL: %s\n", name); g_fails++; }
+}
+
+int main(void) {
+    uint8_t buf[256], k[64], iv[16], pt[256], ct[256], tag[16], dec[256];
+
+    /* --- SHA-256 / SHA-512 ("abc") --- */
+    { uint8_t d[32]; sha256((const uint8_t *)"abc", 3, d);
+      check("SHA-256(abc)", d, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", 32); }
+    { uint8_t d[64]; sha512((const uint8_t *)"abc", 3, d);
+      check("SHA-512(abc)", d,
+        "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
+        "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f", 64); }
+    { uint8_t d[48]; sha384((const uint8_t *)"abc", 3, d);     /* used for P-384/RSA cert sigs */
+      check("SHA-384(abc)", d,
+        "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed"
+        "8086072ba1e7cc2358baeca134c825a7", 48); }
+
+    /* --- HMAC-SHA256 (RFC 4231 test case 2) --- */
+    { uint8_t mac[32]; hmac_sha256((const uint8_t *)"Jefe", 4,
+        (const uint8_t *)"what do ya want for nothing?", 28, mac);
+      check("HMAC-SHA256 (RFC4231 #2)", mac,
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", 32); }
+
+    /* --- HKDF-SHA256 (RFC 5869 test case 1) --- */
+    { uint8_t ikm[22], salt[13], info[10], prk[32], okm[42];
+      memset(ikm, 0x0b, 22); H(salt, "000102030405060708090a0b0c"); H(info, "f0f1f2f3f4f5f6f7f8f9");
+      hkdf_extract(salt, 13, ikm, 22, prk);
+      check("HKDF extract (RFC5869 #1)", prk,
+        "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5", 32);
+      hkdf_expand(prk, info, 10, okm, 42);
+      check("HKDF expand (RFC5869 #1)", okm,
+        "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865", 42); }
+
+    /* --- AES-128 single block (FIPS-197 appendix C.1) --- */
+    { H(k, "000102030405060708090a0b0c0d0e0f"); H(buf, "00112233445566778899aabbccddeeff");
+      aes128_encrypt_block(buf, k);
+      check("AES-128 block (FIPS-197)", buf, "69c4e0d86a7b0430d8cdb78070b4c55a", 16); }
+
+    /* --- AES-128-GCM (GCM spec test cases 1 & 2) --- */
+    { memset(k, 0, 16); memset(iv, 0, 12);
+      aes128_gcm_encrypt(ct, tag, pt, 0, NULL, 0, k, iv);     /* TC1: empty plaintext */
+      check("AES-GCM tag (TC1 empty)", tag, "58e2fccefa7e3061367f1d57a4e7455a", 16);
+      memset(pt, 0, 16);
+      aes128_gcm_encrypt(ct, tag, pt, 16, NULL, 0, k, iv);    /* TC2: 16 zero bytes */
+      check("AES-GCM ct (TC2)", ct, "0388dace60b6a392f328c2b971b2fe78", 16);
+      check("AES-GCM tag (TC2)", tag, "ab6e47d42cec13bdf53a67b21257bddf", 16);
+      if (aes128_gcm_decrypt(dec, ct, 16, NULL, 0, tag, k, iv) != 0 || memcmp(dec, pt, 16) != 0) {
+        printf("  FAIL: AES-GCM decrypt round-trip\n"); g_fails++; } else printf("  ok: AES-GCM decrypt round-trip\n"); }
+
+    /* --- ChaCha20-Poly1305 (RFC 8439 section 2.8.2) --- */
+    { uint8_t key[32], nonce[12], aad[12];
+      H(key, "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
+      H(nonce, "070000004041424344454647"); H(aad, "50515253c0c1c2c3c4c5c6c7");
+      const char *msg = "Ladies and Gentlemen of the class of '99: If I could offer you "
+                        "only one tip for the future, sunscreen would be it.";
+      size_t mlen = strlen(msg);                              /* 114 bytes */
+      chacha20poly1305_encrypt(ct, tag, (const uint8_t *)msg, mlen, aad, 12, key, nonce);
+      check("ChaCha20-Poly1305 tag (RFC8439)", tag, "1ae10b594f09e26a7e902ecbd0600691", 16);
+      if (chacha20poly1305_decrypt(dec, ct, mlen, aad, 12, tag, key, nonce) != 0 || memcmp(dec, msg, mlen) != 0) {
+        printf("  FAIL: ChaCha20-Poly1305 decrypt round-trip\n"); g_fails++; } else printf("  ok: ChaCha20-Poly1305 decrypt round-trip\n");
+      tag[0] ^= 1;                                            /* AEAD must REJECT a tampered tag */
+      if (chacha20poly1305_decrypt(dec, ct, mlen, aad, 12, tag, key, nonce) == 0) {
+        printf("  FAIL: ChaCha20-Poly1305 accepted a forged tag\n"); g_fails++; } else printf("  ok: ChaCha20-Poly1305 rejects forged tag\n"); }
+
+    /* --- X25519 (RFC 7748 sections 5.2 and 6.1) --- */
+    { uint8_t scalar[32], point[32], q[32];
+      H(scalar, "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4");
+      H(point,  "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c");
+      x25519(q, scalar, point);
+      check("X25519 (RFC7748 5.2)", q, "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552", 32);
+      uint8_t secret[32], pub[32];
+      H(secret, "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+      x25519_base(pub, secret);
+      check("X25519 base (RFC7748 6.1)", pub, "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a", 32); }
+
+    if (g_fails) { printf("FAIL: %d crypto KAT(s) mismatched\n", g_fails); return 1; }
+    printf("PASS: all crypto KATs match (SHA-256/512, HMAC, HKDF, AES, AES-GCM, ChaCha20-Poly1305, X25519)\n");
+    return 0;
+}

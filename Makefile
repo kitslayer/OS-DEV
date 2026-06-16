@@ -128,9 +128,13 @@ nettest:
 fstest:
 	@tests/run-fs-tests.sh
 
-# Run every host-side regression/fuzz suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest)"
+# Host-side known-answer test of the crypto primitives vs published RFC/FIPS vectors (ASan+UBSan).
+kattest:
+	@tests/run-crypto-tests.sh
+
+# Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
+check: jstest imgtest x509test nettest fstest kattest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest)"
 
 clean:
 	rm -rf $(BUILD)
