@@ -143,6 +143,33 @@ int main(void) {
         char trb[4096];
         fat32_tree(trb, sizeof(trb));                  /* recursive tree walk */
     }
-    printf("PASS: %ld fuzz iters, ASan/UBSan clean (corrupt FAT/dir never OOB or hung)\n", ITERS);
+    printf("  read-path: %ld corrupt-image iters clean\n", ITERS);
+
+    /* ---- Phase 2: write-path stress (the kernel's most-fragile parser) ----
+     * From a fresh valid image, hammer create/write/delete/mkdir + read-back on
+     * an ACCUMULATING image (the "heavy repeated writes" scenario the kernel is
+     * flagged-fragile on), under ASan. Stresses alloc_cluster / add_entry /
+     * write_fat / chain-extension / cluster-free on deletion. All on the
+     * in-memory image — the real disk is never touched. */
+    build_valid_image();
+    if (fat32_mount() != 0) { printf("FAIL: remount for write fuzz\n"); return 1; }
+    static char wdata[1600];
+    for (size_t i = 0; i < sizeof(wdata); i++) wdata[i] = (char)('a' + (i % 26));
+    const long WOPS = 8000;
+    for (long it = 0; it < WOPS; it++) {
+        char nm[4]; nm[0]='F'; nm[1]=(char)('0' + (xr()%8)); nm[2]=0;   /* F0..F7 */
+        char dn[4]; dn[0]='D'; dn[1]=(char)('0' + (xr()%4)); dn[2]=0;   /* D0..D3 */
+        char rb2[2048];
+        switch (xr() % 6) {
+            case 0: case 1: fat32_write(nm, wdata, xr() % (sizeof(wdata)+1)); break;  /* create/overwrite 0..1600B */
+            case 2: fat32_delete(nm); break;
+            case 3: fat32_mkdir(dn); break;
+            case 4: fat32_read(nm, rb2, sizeof(rb2)); break;
+            case 5: { vfs_dirent fe2[32]; fat32_list(fe2, 32); char tb2[4096]; fat32_tree(tb2, sizeof(tb2)); } break;
+        }
+    }
+    printf("  write-path: %ld create/write/delete/mkdir ops clean\n", WOPS);
+
+    printf("PASS: FAT32 read+write paths, ASan/UBSan clean (corrupt-FAT fuzz + write stress)\n");
     return 0;
 }
