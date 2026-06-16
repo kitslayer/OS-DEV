@@ -71,11 +71,14 @@ static int snd_mport = 0;
 
 // Compiled-in sound modules:
 
-static sound_module_t *sound_modules[] = 
+// The OSDEV software mixer (user/doom/i_sound_osdev.c).  It is always present
+// (defined outside FEATURE_SOUND) and claims SNDDEVICE_SB, which is the
+// default snd_sfxdevice, so InitSfxModule selects it.
+extern sound_module_t DG_sound_module;
+
+static sound_module_t *sound_modules[] =
 {
-    #ifdef FEATURE_SOUND
     &DG_sound_module,
-    #endif
     NULL,
 };
 

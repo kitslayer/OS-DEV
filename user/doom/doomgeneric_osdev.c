@@ -27,6 +27,11 @@ extern int           sys_getkbevent(void);
 extern unsigned long sys_uptime_ms(void);
 extern void          sys_sleep(int ms);
 
+/* DOOM sound mixer pump (user/doom/i_sound_osdev.c): mixes the active sound
+ * channels to 48 kHz stereo and feeds the kernel's streaming PCM ring.  Called
+ * once per frame so the ~1-second ring stays topped up at ~70 fps. */
+extern void          osdev_sound_pump(void);
+
 /* ----------------------------------------------------------------------- */
 
 void DG_Init(void)
@@ -37,6 +42,10 @@ void DG_Init(void)
 
 void DG_DrawFrame(void)
 {
+    /* Keep the audio ring fed first — non-blocking; mixes only while there's
+     * room, so this is cheap when the ring is already full. */
+    osdev_sound_pump();
+
     /* DG_ScreenBuffer is already 0x00RRGGBB per pixel — pass it straight. */
     sys_gfx_blit(DG_ScreenBuffer);
 }
