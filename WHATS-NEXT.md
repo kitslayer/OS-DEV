@@ -1,6 +1,8 @@
 # What's next
 
-> **Status (439 milestones).** (M439: **inline remote images** — the browser now fetches
+> **Status (440 milestones).** (M440: CSS `text-transform:uppercase/lowercase` — inline `style=`
+> + `<style>`-rule cascade, emit-time case-fold into the render pool (so `.textContent` stays
+> original), composes with the color/weight/style/underline scope stack; verified in-OS (NEST.HTM). M439: **inline remote images** — the browser now fetches
 > + decodes remote PNG/GIF/JPEG `<img>` inline (was: links). Designed via a Plan subagent
 > (Option B: in-worker pre-parse fetch, ≤3 imgs, separate `rimg_*` arrays, `parse_html`
 > untouched); a header-strip bug was found (stored the whole HTTP response so the decoder

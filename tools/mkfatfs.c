@@ -639,12 +639,16 @@ static const struct {
     { "NEST    HTM", "<title>Nested style scopes</title><style>\n"
         "  p { color: #333333 }\n"
         "  .red { color: #cc0000 }\n"
+        "  .up { text-transform: uppercase }\n"
         "</style>"
         "<h1>Nested style scopes</h1>"
         "<p>Styled elements now <i>nest</i>: a colour applies to its element's content and the previous colour is restored at its close, to any depth.</p>"
         "<p>This paragraph is gray (the <code>p</code> rule), with a <span class=\"red\">red span</span> inside, then gray again.</p>"
         "<p style=\"color: #008000\">Green (inline) with a <span style=\"color:#0000cc\">blue span</span> nested inside, then green again &mdash; inline nesting composes too.</p>"
-        "<p style=\"color: #800080\">Purple, with <b style=\"color:#cc0000\">bold red</b> nested, then <span style=\"font-style:italic\">italic purple</span>, then purple.</p>" },
+        "<p style=\"color: #800080\">Purple, with <b style=\"color:#cc0000\">bold red</b> nested, then <span style=\"font-style:italic\">italic purple</span>, then purple.</p>"
+        "<p style=\"text-transform:uppercase\">text-transform: this line is rendered in UPPERCASE (the source stays lower-case).</p>"
+        "<p style=\"text-transform:lowercase\">text-transform: THIS LINE is rendered in lowercase.</p>"
+        "<p class=\"up\">and via a &lt;style&gt; rule (.up): this line is uppercased by the cascade.</p>" },
     { "ARTICLE HTM", "<title>A styled article</title>"
         "<style> h1 { color:#2c66d6 }  h2 { color:#800080 }  .lead { color:#555555; font-style:italic }  .tip { color:#006400; font-weight:bold } </style>"
         "<h1>Rendering CSS from scratch</h1>"
