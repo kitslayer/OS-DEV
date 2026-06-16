@@ -1,6 +1,19 @@
 # What's next
 
-> **Status (494 milestones).** (M494: **`ls` shows the whole directory (was capped at 32)** — a real bug:
+> **Status (503 milestones) — DOOM RUNS.** OS-DEV now runs **id Software's DOOM** (the shareware
+> doomgeneric port) as a windowed ring-3 app: it loads the IWAD from our own FAT32 disk, renders E1M1 in a
+> crisp 640x400 window at ~70 fps, and is keyboard-playable through its menus into a live game. Getting
+> there meant building six new OS capabilities first, each shipped + verified on its own (M496-M501):
+> a **userspace heap** (SYS_sbrk + malloc/free/realloc, host-fuzzed under ASan), a **monotonic ms clock**,
+> a **graphics window API** (real per-window pixel canvases the compositor blits — the end of
+> text-grid-only userspace), **raw make/break keyboard events** for games, **FPU/SSE** enablement, and a
+> **16 MiB disk** holding the ~4 MB WAD (a full multi-MB FAT32 read verified byte-exact by CRC-32). Then
+> M502 vendored doomgeneric with a from-scratch **libc shim** + a **platform layer** over those syscalls
+> (the one real bug: `_start` must force-align the stack or DOOM's first SSE `movaps` #GPs), and M503 added
+> compositor integer-upscaling so the native 320x200 render shows at 2x. M495 (`file`, a magic-byte type
+> identifier) opened the session. **All 12 host suites pass. The "best little from-scratch OS" now runs a
+> real, beloved game — alongside its own browser, TLS stack, and JS engine.**
+> M494: **`ls` shows the whole directory (was capped at 32)** — a real bug:
 > SYS_list enumerated only 32 entries (vfs_dirent ents[32] on the stack), so with ~100 files now on the
 > disk (~60 INDEX-linked .htm demos + baked images/archives + SHOT screenshots + extracted files) `ls`,
 > GLOB expansion, and the browser file list all silently saw ~1/3. Fix: cap 32→256 using a STATIC array
@@ -8,7 +21,7 @@
 > names) + a defensive j<63 name bound; shell ls buffer 1024→8192 + glob listing 2048→8192. Verified
 > in-OS: `ls | wc -l` → 108 (was 32); `ls | grep TGZ` → finds TEST.TGZ (previously invisible). Files:
 > kernel/syscall.c, user/shell.c. **A quality/bug-fix found while testing the archive work — the disk grew
-> past the old cap. "Improve what needs it most." 17 milestones this session (M478-494).**)
+> past the old cap. "Improve what needs it most." 17 milestones this session (M478-494).**
 > M493: **`tar` — extract `.tar` + `.tar.gz`** — completes the archive suite
 > (.gz/.zip/.tar.gz). kernel/tar.c: simple ustar 512-byte-header parsing (name@0, octal size@124, type@156),
 > bounded (data span checked vs len, walk always advances), I wrote it directly (simple). SYS_untar(41):
