@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> edit write rm cp mv mkdir cd pwd tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1114,6 +1114,19 @@ int main(void) {
                     if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); }   /* trailing run */
                 }
             }
+        } else if (startswith(line, "basename ")) {       /* basename PATH -> the last component */
+            const char *p = line + 9; while (*p == ' ') p++;
+            char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0;
+            while (pl > 1 && path[pl-1] == '/') path[--pl] = 0;        /* strip trailing slashes (keep a lone "/") */
+            int last = -1; for (int i = 0; i < pl; i++) if (path[i] == '/') last = i;
+            print("  "); print(last >= 0 ? path + last + 1 : path); print("\n");
+        } else if (startswith(line, "dirname ")) {        /* dirname PATH -> the directory part */
+            const char *p = line + 8; while (*p == ' ') p++;
+            char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0;
+            int last = -1; for (int i = 0; i < pl; i++) if (path[i] == '/') last = i;
+            if (last < 0) print("  .\n");                              /* no slash -> current dir */
+            else if (last == 0) print("  /\n");                        /* "/file" -> "/" */
+            else { path[last] = 0; print("  "); print(path); print("\n"); }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
             while (*p == ' ') p++;
