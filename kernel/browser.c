@@ -45,6 +45,7 @@
 #define IMG_SLOTS 6                 /* inline images decoded per page */
 #define IMG_READ_MAX 131072         /* scratch to read a local image file */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
+#define REMOTE_IMG_MAX 3            /* remote <img> URLs prefetched per page (best-effort) */
 
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = image slot */
@@ -100,6 +101,10 @@ struct browser {
     int      framedelay[64];                             /* per-frame delay (centiseconds) */
     uint64_t frametick;                                  /* tick at which curframe was shown */
     uint8_t *imgs[IMG_SLOTS]; int imgsw[IMG_SLOTS], imgsh[IMG_SLOTS]; int nimg;  /* inline images */
+    char     rimg_src[REMOTE_IMG_MAX][96];   /* the RAW src string as it appears in the <img> (for matching) */
+    uint8_t *rimg_data[REMOTE_IMG_MAX];      /* the fetched COMPRESSED image bytes (kmalloc'd), or NULL */
+    int      rimg_len[REMOTE_IMG_MAX];       /* byte length of rimg_data[i] */
+    int      n_rimg;                         /* how many remote images prefetched (0..REMOTE_IMG_MAX) */
     uint32_t curcolor;                                   /* <font color> in effect (0=none, else 0x01000000|rgb) */
     uint32_t tokcolor[TOK_MAX];                          /* per-token colour override */
     int      curul;                                      /* underline in effect (text-decoration:underline / <u>/<ins>); independent of style, so it composes */
@@ -119,7 +124,11 @@ struct browser {
 
 static void drop_image(browser_t *b);        /* fwd: free any decoded image */
 static void drop_image_slots(browser_t *b);  /* fwd: free inline images */
+static void drop_remote_imgs(browser_t *b);  /* fwd: free prefetched remote-image bytes */
 static int  decode_local_to_slot(browser_t *b, const char *path);  /* fwd */
+static int  decode_bytes_to_slot(browser_t *b, const uint8_t *data, int len);  /* fwd: decode an in-memory image blob into an inline slot */
+static int  is_chunked(const char *raw, int hdr_end);   /* fwd: chunked transfer-encoding? */
+static int  dechunk(char *body, int len);               /* fwd: de-chunk an HTTP body in place */
 
 /* ---- small helpers ---- */
 static int lc(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
@@ -847,6 +856,30 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                         b->toks[b->ntok++] = (tok_t){ (uint16_t)aw, (uint16_t)ah, (uint16_t)slot, STY_NORMAL, TK_IMG };
                         emit_break(b, TK_BREAK);
                         shown = 1;
+                    }
+                }
+                if (!shown && !b->loading) {
+                    /* A remote src the worker prefetched (matched by raw src string)
+                     * decodes inline, like a local one; the compressed bytes were
+                     * stashed in rimg_data[] pre-parse. Gated on !loading: the worker
+                     * mutates rimg_* (drop+repopulate) only while loading==1, so reading
+                     * them here on the WM thread when !loading is a DIRECT guard against
+                     * a free/use race (not relying on the indirect "render triggers are
+                     * disabled during load" invariant). */
+                    for (int k = 0; k < b->n_rimg && !shown; k++) {
+                        if (!b->rimg_data[k]) continue;
+                        int m = 1;
+                        for (int i = 0; i < srcl; i++) { if (b->rimg_src[k][i] != src[i]) { m = 0; break; } }
+                        if (!m || b->rimg_src[k][srcl] != 0) continue;   /* exact length+bytes */
+                        int slot = decode_bytes_to_slot(b, b->rimg_data[k], b->rimg_len[k]);
+                        if (slot >= 0 && b->ntok + 2 < TOK_MAX) {
+                            int aw = attr_int(attrs, attrlen, "width");
+                            int ah = attr_int(attrs, attrlen, "height");
+                            emit_break(b, TK_BREAK);
+                            b->toks[b->ntok++] = (tok_t){ (uint16_t)aw, (uint16_t)ah, (uint16_t)slot, STY_NORMAL, TK_IMG };
+                            emit_break(b, TK_BREAK);
+                            shown = 1;
+                        }
                     }
                 }
                 if (!shown) {
@@ -1875,6 +1908,7 @@ static void free_buffers(browser_t *b) {
     if (b->framebuf) kfree(b->framebuf);          /* animated GIF frames (img points into it) */
     else if (b->img) kfree(b->img);
     for (int i = 0; i < b->nimg; i++) if (b->imgs[i]) kfree(b->imgs[i]);
+    drop_remote_imgs(b);                           /* prefetched remote-image bytes */
     kfree(b->lrec); kfree(b->links); kfree(b->hrefs);
     kfree(b->scripts);
     kfree(b->toks); kfree(b->text); kfree(b->raw); kfree(b);
@@ -1900,9 +1934,160 @@ static int claim_fetch(browser_t *b) {
     return 1;
 }
 
+/* Resolve a raw <img src> (as it appears in the HTML) into a full absolute URL,
+ * the SAME way goto_href resolves a link: an absolute http(s):// src is kept;
+ * a protocol-relative //host/path, root-relative /path, or dir-relative src is
+ * resolved against `base` (the page URL), keeping the page's scheme. file:/data:
+ * srcs are rejected (returns 0). Writes a NUL-terminated URL into out[<outsz];
+ * returns 1 on success, 0 if it can't be resolved or won't fit. */
+static int resolve_img_url(const char *base, const char *src, int srcl, char *out, int outsz) {
+    if (srcl <= 0 || outsz < 2) return 0;
+    /* reject file:/data: (and any scheme we don't fetch over the network) */
+    if (srcl >= 5 && lc(src[0])=='f'&&lc(src[1])=='i'&&lc(src[2])=='l'&&lc(src[3])=='e'&&src[4]==':') return 0;
+    if (srcl >= 5 && lc(src[0])=='d'&&lc(src[1])=='a'&&lc(src[2])=='t'&&lc(src[3])=='a'&&src[4]==':') return 0;
+    /* `src` points into the HTML and is only guaranteed valid for srcl bytes
+     * (not NUL-terminated), so detect an absolute URL with an explicit
+     * length-bounded prefix compare rather than startsw. */
+    int isabs = 0;
+    if (srcl >= 7) { const char *h = "http://";  int m=1; for (int k=0;k<7;k++) if (lc(src[k])!=h[k]) { m=0; break; } if (m) isabs=1; }
+    if (!isabs && srcl >= 8) { const char *h = "https://"; int m=1; for (int k=0;k<8;k++) if (lc(src[k])!=h[k]) { m=0; break; } if (m) isabs=1; }
+    int p = 0;
+    if (isabs) {                                          /* absolute: copy verbatim */
+        for (int i = 0; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
+        if (p >= outsz - 1 && srcl > p) return 0;         /* would truncate -> skip */
+        out[p] = 0;
+        return 1;
+    }
+    /* relative — resolve against `base`, keeping its scheme (mirrors goto_href) */
+    const char *cu = base;
+    const char *scheme = startsw(cu, "https://") ? "https://" : "http://";
+    if (startsw(cu, "http://")) cu += 7; else if (startsw(cu, "https://")) cu += 8;
+    char host[96]; int hi = 0; while (cu[hi] && cu[hi] != '/' && hi < 95) { host[hi] = cu[hi]; hi++; } host[hi] = 0;
+    for (const char *s = scheme; *s && p < outsz - 1; s++) out[p++] = *s;   /* scheme prefix */
+    if (srcl >= 2 && src[0] == '/' && src[1] == '/') {    /* protocol-relative //host/path */
+        for (int i = 2; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
+        out[p] = 0; return p > 0;
+    }
+    for (int i = 0; host[i] && p < outsz - 1; i++) out[p++] = host[i];
+    if (srcl >= 1 && src[0] == '/') {                     /* absolute path */
+        for (int i = 0; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
+    } else {                                              /* relative to current dir */
+        const char *cp = cu + hi;                         /* current path incl leading '/' */
+        int lastslash = 0;
+        for (int i = 0; cp[i]; i++) if (cp[i] == '/') lastslash = i + 1;
+        if (p < outsz - 1) out[p++] = '/';
+        for (int i = 0; i < lastslash && cp[i] && p < outsz - 1; i++)
+            if (!(i == 0 && cp[0] == '/')) out[p++] = cp[i];
+        for (int i = 0; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
+    }
+    out[p] = 0;
+    return p > 0;
+}
+
+/* Best-effort: scan the fetched HTML in b->raw for up to REMOTE_IMG_MAX remote
+ * <img src=...> URLs, fetch each over HTTP/HTTPS, and stash the COMPRESSED bytes
+ * in b->rimg_data[]/rimg_len[] keyed by the RAW src string (b->rimg_src[]). The
+ * parse later matches an <img>'s raw src against rimg_src[] and decodes inline.
+ *
+ * STRICTLY best-effort: any failure (alloc, fetch<=0, src too long, no src)
+ * simply skips that image. Runs on the worker (it does the blocking tls_get/
+ * http_get). Re-checks b->closed between fetches so a closed window bails fast. */
+static void collect_remote_imgs(browser_t *b) {
+    b->n_rimg = 0;
+    if (!b->raw || b->rawlen <= 0) return;
+    const char *h = b->raw;
+    int len = b->rawlen;
+    for (int i = 0; i + 4 < len && b->n_rimg < REMOTE_IMG_MAX; i++) {
+        if (b->closed) return;                            /* window closed mid-scan */
+        if (h[i] != '<') continue;
+        if (lc(h[i+1]) != 'i' || lc(h[i+2]) != 'm' || lc(h[i+3]) != 'g') continue;
+        if (h[i+4] != ' ' && h[i+4] != '\t' && h[i+4] != '\n' && h[i+4] != '\r' && h[i+4] != '/' && h[i+4] != '>') continue;
+        /* find the end of this tag's attributes (the unquoted '>'), quote-aware
+         * exactly like the main tokenizer so we delimit the same <img> it does */
+        int as = i + 4, ae = as;
+        { char q = 0;
+          while (ae < len) { char ac = h[ae];
+              if (q) { if (ac == q) q = 0; }
+              else if (ac=='"' || ac=='\'') q = ac;
+              else if (ac=='>') break;
+              ae++; } }
+        if (ae >= len) break;                             /* unterminated tag -> stop */
+        const char *src; int srcl;
+        if (find_attr(h + as, ae - as, "src", &src, &srcl) && srcl > 0 && srcl <= 95) {
+            /* our decoders handle PNG/GIF/JPEG only — skip a src whose extension is a
+             * format we can't decode (SVG/WebP/AVIF/ICO, common on the modern web) so we
+             * don't waste a fetch + pre-paint latency on an image that would just fall
+             * back to a link. Extension-less srcs are still tried (may be a real image). */
+            int pe = srcl; for (int x = 0; x < srcl; x++) if (src[x] == '?') { pe = x; break; }
+            int unsup = 0;
+            if (pe >= 4) { const char *e = src + pe - 4;
+                if (e[0]=='.' && lc(e[1])=='s'&&lc(e[2])=='v'&&lc(e[3])=='g') unsup = 1;       /* .svg */
+                if (e[0]=='.' && lc(e[1])=='i'&&lc(e[2])=='c'&&lc(e[3])=='o') unsup = 1; }     /* .ico */
+            if (!unsup && pe >= 5) { const char *e = src + pe - 5;
+                if (e[0]=='.' && lc(e[1])=='w'&&lc(e[2])=='e'&&lc(e[3])=='b'&&lc(e[4])=='p') unsup = 1;   /* .webp */
+                if (e[0]=='.' && lc(e[1])=='a'&&lc(e[2])=='v'&&lc(e[3])=='i'&&lc(e[4])=='f') unsup = 1; } /* .avif */
+            if (unsup) { i = ae; continue; }
+            /* skip a src already queued (a page may repeat the same image) */
+            int dup = 0;
+            for (int k = 0; k < b->n_rimg; k++) {
+                int m = 1;
+                for (int j = 0; j < srcl; j++) { if (b->rimg_src[k][j] != src[j]) { m = 0; break; } }
+                if (m && b->rimg_src[k][srcl] == 0) { dup = 1; break; }
+            }
+            if (!dup) {
+                char url[URL_MAX];
+                if (resolve_img_url(b->url, src, srcl, url, sizeof(url))) {
+                    int k = b->n_rimg;                    /* candidate slot */
+                    char host[96];
+                    const char *path = url_split(url, host, sizeof(host));
+                    int https = startsw(url, "https://");
+                    uint8_t *scratch = kmalloc(IMG_READ_MAX);
+                    if (scratch) {
+                        int n = https
+                            ? tls_get(host, path, scratch, IMG_READ_MAX - 1, (uint32_t)timer_ticks())
+                            : http_get(host, path, (char *)scratch, IMG_READ_MAX - 1);
+                        if (n > 0) {
+                            /* tls_get/http_get returns the whole HTTP response; strip the
+                             * headers (and de-chunk) to get the raw image bytes — exactly
+                             * like the page path in browser_poll. Storing the response with
+                             * its headers would put "HTTP/1.1 200..." before the image
+                             * signature and the decoder would reject it. */
+                            int bo = 0;
+                            for (int x = 0; x + 3 < n; x++)
+                                if (scratch[x]=='\r'&&scratch[x+1]=='\n'&&scratch[x+2]=='\r'&&scratch[x+3]=='\n') { bo = x + 4; break; }
+                            int blen = n - bo;
+                            if (bo > 0 && is_chunked((const char *)scratch, bo))
+                                blen = dechunk((char *)scratch + bo, blen);
+                            if (blen > 0) {
+                                uint8_t *data = kmalloc((unsigned long)blen);
+                                if (data) {
+                                    memcpy(data, scratch + bo, (unsigned long)blen);
+                                    /* commit this slot only once everything succeeded */
+                                    for (int j = 0; j < srcl; j++) b->rimg_src[k][j] = src[j];
+                                    b->rimg_src[k][srcl] = 0;
+                                    b->rimg_data[k] = data;
+                                    b->rimg_len[k]  = blen;
+                                    b->n_rimg++;
+                                }
+                            }
+                        }
+                        kfree(scratch);
+                    }
+                }
+            }
+        }
+        i = ae;                                           /* skip past this tag */
+    }
+}
+
 /* Worker task: fetch b->url into b->raw. The close/finish decision is made under
  * a lock so EXACTLY ONE of the worker and browser_destroy frees b (review C1). */
 static void worker_fetch(browser_t *b) {
+    /* Free the PREVIOUS page's prefetched remote images here, on the worker
+     * thread — this runs while loading==1, and the WM reads rimg_* only when
+     * !loading (the <img> branch is gated on it), so the free/repopulate here
+     * can't race a WM read. collect_remote_imgs below repopulates them. */
+    drop_remote_imgs(b);
     char host[96];
     const char *path = url_split(b->url, host, sizeof(host));
     int n; int https = startsw(b->url, "https://");
@@ -1913,6 +2098,12 @@ static void worker_fetch(browser_t *b) {
     b->chain_ok = https ? tls_chain_anchored() : 0;
     b->http_n = n;
     if (n > 0) { b->rawlen = n; b->raw[n] = 0; }
+    /* Best-effort inline-image prefetch (worker-side; does its own blocking
+     * fetches). MUST NOT prevent the render handoff below: collect_remote_imgs
+     * never aborts the page and bails fast if the window closed. Only runs on a
+     * real HTML fetch; a closed window skips it entirely (n_rimg already 0 from
+     * the drop_remote_imgs above). */
+    if (n > 0 && !b->closed) collect_remote_imgs(b);
     uint64_t f = irq_save();
     int closed = b->closed;                    /* did the window close mid-fetch? */
     if (!closed) { b->need_parse = 1; b->loading = 0; }
@@ -2014,6 +2205,18 @@ static void drop_image_slots(browser_t *b) {
     b->nimg = 0;
 }
 
+/* Free the prefetched COMPRESSED remote-image bytes and clear the match table.
+ * Called on navigation (before fetching the next page) and on teardown. NOT
+ * called from parse_html, so the bytes survive every re-render of one page. */
+static void drop_remote_imgs(browser_t *b) {
+    for (int k = 0; k < REMOTE_IMG_MAX; k++) {
+        if (b->rimg_data[k]) { kfree(b->rimg_data[k]); b->rimg_data[k] = 0; }
+        b->rimg_len[k] = 0;
+        b->rimg_src[k][0] = 0;
+    }
+    b->n_rimg = 0;
+}
+
 /* Decode a PNG/GIF blob into a freshly kmalloc'd RGBA buffer (caller frees).
  * Bounds the dimensions, allocates exactly what's needed, frees its own
  * scratch. Returns the RGBA buffer and sets ow/oh, or NULL on any failure. */
@@ -2099,6 +2302,20 @@ static int try_image(browser_t *b, const uint8_t *data, int len) {
     return 1;
 }
 
+/* Decode an in-memory image blob (PNG/GIF/JPEG) into the next inline-image
+ * slot. Returns the slot index, or -1 (caller falls back to a clickable link).
+ * Shared by the local-file and remote-image paths. */
+static int decode_bytes_to_slot(browser_t *b, const uint8_t *data, int len) {
+    if (b->nimg >= IMG_SLOTS) return -1;
+    if (!data || len <= 0) return -1;
+    int ow, oh;
+    uint8_t *rgba = decode_image(data, len, &ow, &oh);
+    if (!rgba) return -1;
+    int s = b->nimg++;
+    b->imgs[s] = rgba; b->imgsw[s] = ow; b->imgsh[s] = oh;
+    return s;
+}
+
 /* Read a local file and decode it into the next inline-image slot. Returns the
  * slot index, or -1 (caller then falls back to a clickable link). */
 static int decode_local_to_slot(browser_t *b, const char *path) {
@@ -2107,12 +2324,8 @@ static int decode_local_to_slot(browser_t *b, const char *path) {
     if (!buf) return -1;
     long n = vfs_read(path, buf, IMG_READ_MAX);
     if (n <= 0) { kfree(buf); return -1; }
-    int ow, oh;
-    uint8_t *rgba = decode_image(buf, (int)n, &ow, &oh);
+    int s = decode_bytes_to_slot(b, buf, (int)n);
     kfree(buf);
-    if (!rgba) return -1;
-    int s = b->nimg++;
-    b->imgs[s] = rgba; b->imgsw[s] = ow; b->imgsh[s] = oh;
     return s;
 }
 
@@ -2129,6 +2342,7 @@ static void browser_navigate(browser_t *b) {
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }
+        drop_remote_imgs(b);          /* no worker here: clear any prior page's remote-image table */
         if (!b->is_back && b->cur[0] && !streqs(b->cur, "home") && b->histn < 16)
             copy_url(b->hist[b->histn++], b->cur);
         b->is_back = 0; copy_url(b->url, "home"); copy_url(b->cur, "home");
@@ -2140,6 +2354,7 @@ static void browser_navigate(browser_t *b) {
 
     if (startsw(b->url, "file:")) {                   /* a local file, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }
+        drop_remote_imgs(b);          /* no worker here: clear any prior page's remote-image table */
         if (!b->is_back && b->cur[0] && !streqs(b->cur, b->url) && b->histn < 16)
             copy_url(b->hist[b->histn++], b->cur);
         b->is_back = 0; copy_url(b->cur, b->url);

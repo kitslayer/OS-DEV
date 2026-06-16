@@ -1,6 +1,12 @@
 # What's next
 
-> **Status (438 milestones).** (M438: **JS regex bounded quantifiers `{n}`/`{n,}`/`{n,m}`**
+> **Status (439 milestones).** (M439: **inline remote images** — the browser now fetches
+> + decodes remote PNG/GIF/JPEG `<img>` inline (was: links). Designed via a Plan subagent
+> (Option B: in-worker pre-parse fetch, ≤3 imgs, separate `rimg_*` arrays, `parse_html`
+> untouched); a header-strip bug was found (stored the whole HTTP response so the decoder
+> saw `HTTP/1.1…` not the image) + fixed; skips undecodable `.svg`/`.webp`/`.avif`; SHIP-
+> reviewed (8M-iter ASan, concurrency/lifecycle clean) + component-verified (gnu.org fetch+
+> match; strip+decode on a real PNG; local-image render). M438: **JS regex bounded quantifiers `{n}`/`{n,}`/`{n,m}`**
 > — a real architectural feature done safely by EXPANDING in the parser into existing
 > nodes (`a{2,4}`→`a a a? a?`), so the audited matcher/compiler stay byte-for-byte
 > unchanged; count-capped + RE_MAXPROG-bounded + ReDoS-safe; reviewed SHIP (3M-iter
