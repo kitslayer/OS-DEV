@@ -33,6 +33,7 @@ global simon_elf_start, simon_elf_end
 global c4_elf_start, c4_elf_end
 global wordle_elf_start, wordle_elf_end
 global gfxdemo_elf_start, gfxdemo_elf_end
+global doom_elf_start, doom_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -141,5 +142,9 @@ wordle_elf_end:
 gfxdemo_elf_start:
     incbin "build/gfxdemo.elf"
 gfxdemo_elf_end:
+
+doom_elf_start:
+    incbin "build/doom.elf"
+doom_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -75,7 +75,7 @@ $(BUILD)/%.o: %.asm
 # own ELF; the kernel embeds them all (see kernel/asm/user_blob.asm).
 USER_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
                -mgeneral-regs-only -std=gnu11 -O2 -Wall -Ikernel/include
-USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf
+USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/doom.elf
 
 $(BUILD)/user_%.o: user/%.c
 	@mkdir -p $(BUILD)
@@ -84,6 +84,27 @@ $(BUILD)/user_%.o: user/%.c
 $(BUILD)/%.elf: $(BUILD)/user_%.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld
 	$(LD) -T user/user.ld -o $@ $(BUILD)/user_$*.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (userspace program)"
+
+# --- DOOM (vendored doomgeneric) ---------------------------------------------
+# Same shape as USER_CFLAGS but WITH floating point (DOOM uses double): drop
+# -mgeneral-regs-only, add SSE. -w silences DOOM's many legacy warnings;
+# -fcommon tolerates its tentative-definition globals. The shim headers in
+# user/doom/include stand in for libc.
+DOOM_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
+               -std=gnu11 -O2 -w -fcommon -msse2 -mfpmath=sse \
+               -Iuser/doom/include -Ikernel/include \
+               -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -DNORMALUNIX
+
+DOOM_SRCS := $(wildcard user/doom/*.c)
+DOOM_OBJS := $(patsubst user/doom/%.c,$(BUILD)/doom/%.o,$(DOOM_SRCS))
+
+$(BUILD)/doom/%.o: user/doom/%.c
+	@mkdir -p $(BUILD)/doom
+	$(CC) $(DOOM_CFLAGS) -c $< -o $@
+
+$(BUILD)/doom.elf: $(DOOM_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld
+	$(LD) -T user/user.ld -o $@ $(DOOM_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (DOOM)"
 
 # the embedded blob depends on every program ELF
 $(BUILD)/kernel/asm/user_blob.o: $(USER_ELFS)

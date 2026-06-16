@@ -28,7 +28,7 @@
 #define MAX_APPS 8
 
 #define USTACK_BASE  0x50000000ull
-#define USTACK_PAGES 4
+#define USTACK_PAGES 128             /* 512 KiB user stack — DOOM's BSP renderer recurses deeply */
 
 /* Userspace heap: grows up from 1 GiB + 64 MiB (clear of any app image, which
  * loads at 1 GiB and is at most a couple of MiB) toward the stack at 0x50000000.
@@ -86,7 +86,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             mandel_elf_start[], piano_elf_start[], maze_elf_start[], adv_elf_start[],
             matrix_elf_start[], paint_elf_start[], hangman_elf_start[], jukebox_elf_start[],
             ttt_elf_start[], bj_elf_start[], typing_elf_start[], simon_elf_start[],
-            c4_elf_start[], wordle_elf_start[], gfxdemo_elf_start[];
+            c4_elf_start[], wordle_elf_start[], gfxdemo_elf_start[], doom_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -115,6 +115,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "c4",     c4_elf_start,     "Connect Four" },
     { "wordle", wordle_elf_start, "Wordle" },
     { "gfxdemo", gfxdemo_elf_start, "Graphics Demo" },
+    { "doom",   doom_elf_start,   "DOOM" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 

@@ -197,8 +197,16 @@ void *memmove(void *dst, const void *src, unsigned long n) {
 
 /* malloc/free/calloc/realloc live in umalloc.c (host-testable in isolation). */
 
-/* Program entry: the ELF entry point. Calls main() and exits with its result. */
+/* Program entry: the ELF entry point. Calls main() and exits with its result.
+ * force_align_arg_pointer: the kernel enters _start with a 16-byte-aligned RSP
+ * (the ELF entry-point convention), but GCC compiles _start as an ordinary
+ * function assuming the post-CALL alignment (RSP ≡ 8 mod 16). That 8-byte skew
+ * is invisible to integer code but makes SSE programs (DOOM, built with -msse2)
+ * fault on the first aligned `movaps (%rsp)` in main. The attribute emits a
+ * stack-realigning prologue so main and everything it calls get correct
+ * 16-byte alignment regardless. Harmless for the non-SSE apps. */
 extern int main(void);
+__attribute__((force_align_arg_pointer))
 void _start(void) {
     sys_exit(main());
     for (;;) { }
