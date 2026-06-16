@@ -1,6 +1,18 @@
 # What's next
 
-> **Status (490 milestones).** (M490: **`gzip` — from-scratch DEFLATE COMPRESSOR** — completes the
+> **Status (491 milestones).** (M491: **PNG screenshots — from-scratch PNG ENCODER** — kernel/png_encode.c
+> (filter-0 scanlines → zlib[raw_deflate body + Adler-32] → IHDR/IDAT/IEND chunks + CRC-32), fully bounded.
+> DELEGATED to a subagent (intricate, non-cyber) → reviewed (every out-write via bounded pe_put, IDAT
+> length-patch + CRC guarded by the oom check first, integer-overflow guarded) → integrated. fb_save_png
+> (capture top-down RGB → png_encode, transient kmalloc bufs). F12 now saves SHOT0.PNG/SHOT1.PNG (~9KB vs
+> ~576KB BMP = 64x smaller — the screen compresses well); shell `screenshot <f>` → PNG for a .png name else
+> BMP (SYS_screenshot dispatches by extension). New pngenctest in `make check` (round-trips vs the DECODER,
+> exact RGB, ASan/UBSan, bounds) + subagent libpng/`file` interop. Verified in-OS: F12 → SHOT0.PNG (PIL
+> opens it 512x384 RGB, 9173 bytes) → `browse file:SHOT0.PNG` renders via the OS's OWN png_decode = full
+> from-scratch encode→decode round-trip. Files: kernel/png_encode.c, fb.c, fb.h, syscall.c, desktop.c,
+> Makefile, tests/png/*. **Capstone: ties M490 deflate + M478-480 image work + the PNG decoder together.
+> 9 host suites now. Both M490/M491 substantial from-scratch algorithms via subagents + my review.**)
+> M490: **`gzip` — from-scratch DEFLATE COMPRESSOR** — completes the
 > compression story (had gunzip/decompress, now compress). New kernel/deflate.c (encoding counterpart to
 > inflate.c): LZ77 (3-byte hash-chain, 32KB window, MAX_CHAIN=128 anti-blowup) + fixed-Huffman + CRC32,
 > fully bounded (every write vs outcap). `gzip <file> [out.gz]` + SYS_gzip(39). DELEGATED to a subagent

@@ -589,7 +589,7 @@ void desktop_run(void) {
                 }
                 continue;
             }
-            if (k == 0x1C) {                    /* F12: screenshot to SHOT0.BMP, SHOT1.BMP, ... */
+            if (k == 0x1C) {                    /* F12: screenshot to SHOT0.PNG, SHOT1.PNG, ... */
                 static int shot_n;              /* auto-incrementing so a shot never overwrites the last */
                 char name[16]; int q = 0;
                 name[q++]='S'; name[q++]='H'; name[q++]='O'; name[q++]='T';
@@ -597,8 +597,8 @@ void desktop_run(void) {
                 if (n >= 100) name[q++] = (char)('0' + (n/100)%10);
                 if (n >= 10)  name[q++] = (char)('0' + (n/10)%10);
                 name[q++] = (char)('0' + n%10);
-                name[q++]='.'; name[q++]='B'; name[q++]='M'; name[q++]='P'; name[q]=0;
-                if (fb_save_bmp(name) == 0) { beep(1800, 30); if (shot_n < 999) shot_n++; }
+                name[q++]='.'; name[q++]='P'; name[q++]='N'; name[q++]='G'; name[q]=0;
+                if (fb_save_png(name) == 0) { beep(1800, 30); if (shot_n < 999) shot_n++; }   /* PNG: ~9 KB vs ~576 KB BMP */
                 continue;
             }
             window_t *top = &windows[win_count - 1];

@@ -17,6 +17,8 @@
 #include "io.h"
 #include "string.h"
 #include "vfs.h"
+#include "png.h"      /* png_encode */
+#include "kheap.h"    /* kmalloc/kfree for the transient PNG buffers */
 
 #define VBE_INDEX  0x01CE
 #define VBE_DATA   0x01CF
@@ -123,6 +125,40 @@ int fb_save_bmp(const char *name) {
         }
     }
     return vfs_write(name, g_shot, (unsigned long)total) < 0 ? -1 : 0;
+}
+
+/* Save a screenshot as a PNG (our from-scratch png_encode + DEFLATE). Same
+ * 2x-downscale as fb_save_bmp, but PNG rows are top-down and RGB, and the file
+ * is far smaller (the screen compresses well). Buffers are transient kmalloc
+ * (RGB + filtered scratch + compressed out), freed before returning. */
+int fb_save_png(const char *name) {
+    if (!lfb || fb_w < 1 || fb_h < 1) return -1;
+    const volatile uint32_t *src = lfb;            /* the presented frame, a complete scene */
+    int ow = fb_w < SHOT_W ? fb_w : SHOT_W;
+    int oh = fb_h < SHOT_H ? fb_h : SHOT_H;
+    int sx = fb_w / ow, sy = fb_h / oh;            /* integer downscale step */
+    long rgbsz = (long)ow * oh * 3;
+    long scrsz = (1 + (long)ow * 3) * oh;          /* filtered scanlines png_encode needs */
+    long outsz = scrsz + scrsz / 2 + 1024;         /* headroom for fixed-Huffman worst case + chunks */
+    uint8_t *rgb = kmalloc((unsigned long)rgbsz);
+    uint8_t *scr = kmalloc((unsigned long)scrsz);
+    uint8_t *out = kmalloc((unsigned long)outsz);
+    if (!rgb || !scr || !out) { if (rgb) kfree(rgb); if (scr) kfree(scr); if (out) kfree(out); return -1; }
+    for (int oy = 0; oy < oh; oy++) {              /* capture top-down RGB */
+        int iy = oy * sy; if (iy >= fb_h) iy = fb_h - 1;
+        uint8_t *r = rgb + (long)oy * ow * 3;
+        for (int ox = 0; ox < ow; ox++) {
+            int ix = ox * sx; if (ix >= fb_w) ix = fb_w - 1;
+            uint32_t c = src[(long)iy * fb_w + ix];   /* 0x00RRGGBB */
+            r[ox*3+0] = (c >> 16) & 0xff;          /* R */
+            r[ox*3+1] = (c >> 8) & 0xff;           /* G */
+            r[ox*3+2] = c & 0xff;                  /* B */
+        }
+    }
+    int n = png_encode(rgb, ow, oh, out, (int)outsz, scr, (int)scrsz);
+    int rc = (n > 0 && vfs_write(name, out, (unsigned long)n) >= 0) ? 0 : -1;
+    kfree(rgb); kfree(scr); kfree(out);
+    return rc;
 }
 
 /* Copy just a clipped rectangle from the back buffer to the visible screen.

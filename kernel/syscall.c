@@ -251,9 +251,13 @@ void syscall_dispatch(struct registers *r) {
         hx[128] = 0; r->rax = 0;
         break;
     }
-    case SYS_screenshot:
-        r->rax = (uint64_t)(int64_t)fb_save_bmp((const char *)r->rdi);   /* save the screen to a BMP */
+    case SYS_screenshot: {
+        const char *sn = (const char *)r->rdi;          /* a ".png" name -> PNG, else BMP */
+        int L = 0; while (sn[L]) L++;
+        int png = (L >= 4 && sn[L-4]=='.' && (sn[L-3]|32)=='p' && (sn[L-2]|32)=='n' && (sn[L-1]|32)=='g');
+        r->rax = (uint64_t)(int64_t)(png ? fb_save_png(sn) : fb_save_bmp(sn));
         break;
+    }
     case SYS_gunzip: {
         const char *insrc = (const char *)r->rdi, *outname = (const char *)r->rsi;
         uint8_t *in = kmalloc(262144);          /* the .gz input (<= 256 KB) */

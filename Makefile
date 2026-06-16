@@ -140,9 +140,13 @@ svgtest:
 deflatetest:
 	@tests/run-deflate-tests.sh
 
+# Host-side round-trip test of the PNG encoder vs the decoder (ASan+UBSan).
+pngenctest:
+	@tests/run-pngenc-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest)"
 
 clean:
 	rm -rf $(BUILD)
