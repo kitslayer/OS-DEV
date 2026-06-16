@@ -18,6 +18,14 @@ static void itoa_simple(int v, char *out) {
     out[j] = '\0';
 }
 static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }   /* ASCII lowercase */
+static int b64v(char c) {                 /* base64 digit -> value, or -1 */
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
 static void printl(long v) {              /* print a (possibly large) integer */
     char t[24]; int i = 0;
     unsigned long u = v < 0 ? -(unsigned long)v : (unsigned long)v;
@@ -562,9 +570,34 @@ static int run_command(char *line, char *cwd) {
             if (fn[0] == 0 || *p == 0) print("usage: crypt <file> <pass>\n");
             else if (sys_crypt(fn, p) < 0) print("crypt: failed\n");
             else { print("crypt: "); print(fn); print(" (run again to reverse)\n"); }
+        } else if (startswith(line, "base64 -d ")) {       /* decode base64 -> bytes, written to a file */
+            char *q = line + 10; while (*q == ' ') q++;
+            char src[64]; int si = 0; while (*q && *q != ' ' && si < 63) src[si++] = *q++; src[si] = 0;
+            while (*q == ' ') q++;
+            char dst[64]; int di = 0;
+            if (*q) { while (*q && *q != ' ' && di < 63) dst[di++] = *q++; dst[di] = 0; }
+            else { dst[0]='O'; dst[1]='U'; dst[2]='T'; dst[3]=0; }
+            static char inb[4096], outb[3072];
+            long n = src[0] ? sys_readfile(src, inb, sizeof(inb)) : -1;
+            if (n < 0) print("base64: no such file (usage: base64 -d <file> [out])\n");
+            else {
+                unsigned acc = 0; int nbits = 0, op = 0;
+                for (long i = 0; i < n && op < (int)sizeof(outb); i++) {
+                    char c = inb[i];
+                    if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
+                    if (c == '=') break;
+                    int v = b64v(c); if (v < 0) break;
+                    acc = (acc << 6) | (unsigned)v; nbits += 6;
+                    if (nbits >= 8) { nbits -= 8; outb[op++] = (char)((acc >> nbits) & 0xff); }
+                }
+                if (sys_writefile(dst, outb, (unsigned long)op) < 0) print("base64: write failed\n");
+                else { char nb[12]; itoa_simple(op, nb); print("base64: wrote "); print(dst); print(" ("); print(nb); print(" bytes)\n"); }
+            }
         } else if (startswith(line, "base64 ")) {
+            char *a = line + 7; while (*a == ' ') a++;     /* trim spaces so `base64 F > OUT` works */
+            char fn[64]; int fi = 0; while (*a && *a != ' ' && fi < 63) fn[fi++] = *a++; fn[fi] = 0;
             static char buf[1536];
-            long n = sys_readfile(line + 7, buf, sizeof(buf));
+            long n = fn[0] ? sys_readfile(fn, buf, sizeof(buf)) : -1;
             if (n < 0) { print("base64: no such file\n"); }
             else {
                 static const char *B =

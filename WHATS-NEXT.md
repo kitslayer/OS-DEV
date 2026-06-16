@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (488 milestones).** (M488: **`gunzip` — .gz decompression** — shell `gunzip <f.gz> [out]` +
+> **Status (489 milestones).** (M489: **`base64 -d` decode + encode-redirect fix** — the shell's base64 was
+> ENCODE-only; added `base64 -d <file> [out]` to DECODE base64→bytes (skips whitespace, stops at `=`/invalid,
+> bounded static bufs, b64v helper). ALSO fixed a real pre-existing bug found while testing: `base64 F > OUT`
+> failed because the encode passed `readfile` the filename WITH the redirect's trailing space ("MOTD.TXT ")
+> → trimmed it now. Together = clean round-trip. Verified in-OS: `base64 MOTD.TXT > ENC.B64; base64 -d
+> ENC.B64 DEC; cmp MOTD.TXT DEC` → "files are identical" (78 bytes). File: user/shell.c. **Like M488
+> (gunzip), a safe gap-fill — completes an existing half-feature + fixes a latent bug, fully verifiable
+> in-OS via the round-trip. Both M488/489 are pure-userspace-or-reuse, zero risk to working systems.**)
+> M488: **`gunzip` — .gz decompression** — shell `gunzip <f.gz> [out]` +
 > SYS_gunzip(38) decompress a gzip file by REUSING the fuzz-tested DEFLATE `inflate`; only a thin bounded
 > wrapper `gz_inflate` (kernel/inflate.c: magic/method check, skip header + optional FEXTRA/FNAME/FCOMMENT/
 > FHCRC, inflate body, ignore trailer) is new. SAFE + additive (new syscall+command, no working-system
