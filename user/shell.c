@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> edit write rm cp mv mkdir cd pwd tree find grep hexdump unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> edit write rm cp mv mkdir cd pwd tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1094,6 +1094,24 @@ int main(void) {
                         lineno++;
                     }
                     if (!differ) print("  files are identical\n");
+                }
+            }
+        } else if (startswith(line, "strings ")) {        /* strings FILE -> runs of >=4 printable chars */
+            static char buf[2048];
+            const char *p = line + 8; while (*p == ' ') p++;
+            char name[64]; int j = 0; while (*p && *p != ' ' && j < 63) name[j++] = *p++; name[j] = 0;
+            if (!name[0]) { print("usage: strings <file>\n"); }
+            else {
+                long n = sys_readfile(name, buf, sizeof(buf));
+                if (n < 0) { print("strings: no such file: "); print(name); print("\n"); }
+                else {
+                    char run[80]; int rl = 0;
+                    for (long i = 0; i < n; i++) {
+                        char c = buf[i];
+                        if (c >= 32 && c < 127) { if (rl < 79) run[rl++] = c; }   /* printable ASCII */
+                        else { if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); } rl = 0; }
+                    }
+                    if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); }   /* trailing run */
                 }
             }
         } else if (startswith(line, "get ")) {
