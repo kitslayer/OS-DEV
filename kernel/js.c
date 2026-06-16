@@ -859,10 +859,14 @@ static int truthy(val v) {
         default: return 1;
     }
 }
+static int64_t days_from_civil(int64_t y, int64_t m, int64_t d);   /* fwd (defined near Date) — lets to_num(Date) return the epoch, so date2-date1 works (M429) */
 static int64_t to_num(val v) {
     switch (v.t) {
         case V_NUM: case V_BOOL: return v.num;
         case V_STR: { int64_t x=0; const char*s=v.str; int neg=0; if(*s=='-'){neg=1;s++;} while(*s>='0'&&*s<='9'){x=x*10+(*s-'0');s++;} return neg?-x:x; }
+        case V_OBJ: if (v.o && v.o->kind==V_DATE && v.o->n>=6)   /* Date -> epoch ms, matching getTime (M429) */
+                        return (days_from_civil(v.o->vals[0].num, v.o->vals[1].num, v.o->vals[2].num)*86400 + v.o->vals[3].num*3600 + v.o->vals[4].num*60 + v.o->vals[5].num)*1000;
+                    return 0;   /* other objects: 0 (full ToNumber via toString is integer-engine-limited — no NaN) */
         default: return 0;
     }
 }
