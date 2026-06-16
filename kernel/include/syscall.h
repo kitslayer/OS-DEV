@@ -60,6 +60,8 @@
 #define SYS_pcm_stream 50 /* (frames,nframes)-> queue stereo PCM (non-blocking); frames accepted */
 #define SYS_pcm_avail 51 /* ()              -> free frames in the streaming ring */
 #define SYS_mouse  52   /* ()              -> packed cursor: x|0-15 y|16-31 buttons|32-34 */
+#define SYS_playbg 53   /* (name)          -> play a .wav in the background (non-blocking); 0/-1 */
+#define SYS_audiostop 54 /* ()             -> stop background audio */
 
 #define SYSCALL_VECTOR 0x80
 

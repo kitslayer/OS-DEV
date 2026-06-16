@@ -120,26 +120,34 @@ void ac97_play(const int16_t *frames, int nframes) {
     }
 }
 
-int ac97_play_wav(const uint8_t *d, int len) {
-    if (!inited) return -1;
+/* Decode a 16-bit PCM WAV into a fresh kmalloc'd 48 kHz-stereo buffer (caller
+ * frees). Sets *nframes; returns NULL on a bad/unsupported WAV or OOM. */
+static int16_t *wav_decode(const uint8_t *d, int len, long *nframes) {
     int channels, rate, bits;
     long pcm_off, pcm_len;
-    if (wav_parse(d, len, &channels, &rate, &bits, &pcm_off, &pcm_len) < 0) return -1;
-
+    if (wav_parse(d, len, &channels, &rate, &bits, &pcm_off, &pcm_len) < 0) return 0;
     long in_frames = pcm_len / (2 * channels);
     const int16_t *in = (const int16_t *)(d + pcm_off);
     long out_frames = in_frames * 48000 / rate;       /* resample to the AC'97's 48 kHz */
-    if (out_frames <= 0) return -1;
+    if (out_frames <= 0) return 0;
     int16_t *out = kmalloc((size_t)out_frames * 4);
-    if (!out) return -1;
+    if (!out) return 0;
     for (long i = 0; i < out_frames; i++) {
         long si = i * rate / 48000;                   /* nearest-neighbour */
         if (si >= in_frames) si = in_frames - 1;
         if (channels == 2) { out[i*2] = in[si*2]; out[i*2+1] = in[si*2+1]; }
         else               { out[i*2] = out[i*2+1] = in[si]; }
     }
-    ac97_play(out, (int)out_frames);
-    kfree(out);
+    *nframes = out_frames;
+    return out;
+}
+
+int ac97_play_wav(const uint8_t *d, int len) {        /* blocking */
+    if (!inited) return -1;
+    long n; int16_t *pcm = wav_decode(d, len, &n);
+    if (!pcm) return -1;
+    ac97_play(pcm, (int)n);
+    kfree(pcm);
     return 0;
 }
 
@@ -154,6 +162,13 @@ static int16_t        *sbuf;
 static volatile uint32_t s_head, s_tail;   /* producer / consumer, in frames */
 static volatile int    stream_on;
 static int             last_civ;
+
+/* Background music: a decoded 48 kHz-stereo song the pump streams on its own
+ * (non-blocking), so playback continues while other apps run. Mutually exclusive
+ * with app streaming (ac97_stream_write) — whichever starts last wins. */
+static int16_t        *bg_buf;
+static long            bg_frames, bg_pos;
+static volatile int    bg_active;
 
 void ac97_stream_start(void) {
     if (!inited || stream_on) return;
@@ -186,6 +201,7 @@ int ac97_stream_write(const int16_t *frames, int nframes) {
     if (!inited) return 0;
     if (!stream_on) ac97_stream_start();
     if (!stream_on) return 0;
+    bg_active = 0;                  /* app streaming (e.g. DOOM) preempts background music */
     int wrote = 0;
     for (int i = 0; i < nframes; i++) {
         uint32_t next = (s_head + 1) % STREAM_FRAMES;
@@ -204,9 +220,54 @@ int ac97_stream_avail(void) {                           /* free frames in the ri
     return (int)(STREAM_FRAMES - 1 - used);
 }
 
+/* Background playback: take ownership of `pcm` (nframes of 48 kHz stereo) and
+ * stream it from the pump. Non-blocking; replaces any current song. */
+void ac97_play_bg(int16_t *pcm, long nframes) {
+    if (!inited || !pcm || nframes <= 0) return;
+    ac97_stream_start();                 /* ensure the engine is running */
+    uint64_t fl; __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    int16_t *old = bg_buf;               /* swap under cli — the pump runs in the IRQ */
+    bg_active = 0;
+    bg_buf = pcm; bg_frames = nframes; bg_pos = 0;
+    s_head = s_tail;                     /* drop any stale app-stream data */
+    bg_active = 1;
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+    if (old) kfree(old);                 /* now unreferenced — safe to free */
+}
+
+void ac97_stop_bg(void) {
+    uint64_t fl; __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    int16_t *old = bg_buf;
+    bg_active = 0; bg_buf = 0;
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+    if (old) kfree(old);
+}
+
+/* Decode a WAV and play it in the background (non-blocking). 0/-1. */
+int ac97_play_wav_bg(const uint8_t *d, int len) {
+    if (!inited) return -1;
+    long n; int16_t *pcm = wav_decode(d, len, &n);
+    if (!pcm) return -1;
+    ac97_play_bg(pcm, n);                /* transfers ownership */
+    return 0;
+}
+
 /* Timer-IRQ hook: refill finished buffers from the software ring, advance LVI. */
 void ac97_pump(void) {
     if (!stream_on) return;
+
+    /* background music: top up the software ring from the decoded song */
+    if (bg_active && bg_buf) {
+        while (bg_pos < bg_frames) {
+            uint32_t next = (s_head + 1) % STREAM_FRAMES;
+            if (next == s_tail) break;                   /* ring full */
+            sbuf[s_head * 2]     = bg_buf[bg_pos * 2];
+            sbuf[s_head * 2 + 1] = bg_buf[bg_pos * 2 + 1];
+            s_head = next; bg_pos++;
+        }
+        if (bg_pos >= bg_frames) bg_active = 0;          /* finished (buffer freed on next play/stop) */
+    }
+
     int civ = inb(nabm + PO_CIV);
     while (last_civ != civ) {                           /* buffers the device finished */
         int16_t *dst = (int16_t *)(uintptr_t)buf_phys[last_civ];

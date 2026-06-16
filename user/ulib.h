@@ -54,6 +54,8 @@ long sys_playwav(const char *name);              /* play a .wav file (16-bit PCM
 int  sys_pcm_stream(const void *frames, int nframes);  /* queue stereo PCM (non-blocking); accepted */
 int  sys_pcm_avail(void);                        /* free frames in the streaming ring */
 int  sys_mouse(int *x, int *y);   /* cursor relative to the gfx canvas (-1 outside); returns button bits */
+long sys_playbg(const char *name);   /* play a .wav in the background (non-blocking); 0/-1 */
+void sys_audiostop(void);            /* stop background audio */
 
 /* dynamic memory (a first-fit free list over sbrk) */
 void *malloc(unsigned long n);

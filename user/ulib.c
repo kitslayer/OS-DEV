@@ -85,6 +85,8 @@ int  sys_mouse(int *x, int *y) {
     if (y) *y = (int)(short)((v >> 16) & 0xFFFF);
     return (int)((v >> 32) & 0x7);
 }
+long sys_playbg(const char *name) { return do_syscall(SYS_playbg, (long)name, 0, 0); }
+void sys_audiostop(void) { do_syscall(SYS_audiostop, 0, 0, 0); }
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);
 }

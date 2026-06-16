@@ -13,6 +13,12 @@ void ac97_play(const int16_t *frames, int nframes);
  * 48 kHz stereo, and play it (blocking). Returns 0 on success, -1 on a bad WAV. */
 int  ac97_play_wav(const uint8_t *data, int len);
 
+/* Background (non-blocking) playback: decode + stream a WAV from the timer pump,
+ * so it keeps playing while other apps run. ac97_play_bg takes ownership of pcm. */
+int  ac97_play_wav_bg(const uint8_t *data, int len);
+void ac97_play_bg(int16_t *pcm, long nframes);
+void ac97_stop_bg(void);
+
 /* Non-blocking streaming: queue 48 kHz stereo frames into a ring the timer IRQ
  * feeds to the device continuously (DOOM's mixer uses this). */
 void ac97_stream_start(void);

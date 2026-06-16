@@ -115,7 +115,7 @@ static int run_command(char *line, char *cwd) {
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        run: apps run<prog> js<file>\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
+            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)\n");
@@ -1384,12 +1384,15 @@ static int run_command(char *line, char *cwd) {
                 print("apps: "); print(b); print("\n");
                 print("(launch: run <name>, or the F9 Apps menu)\n");
             } else print("apps: (none)\n");
-        } else if (startswith(line, "play ")) {            /* play a .wav file via AC'97 */
+        } else if (startswith(line, "play ")) {            /* play a .wav in the background (non-blocking) */
             char *f = line + 5; while (*f == ' ') f++;
             char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0;
             if (!fn[0]) print("usage: play <file.wav>\n");
-            else { print("play: "); print(fn); print(" ...\n");
-                   print(sys_playwav(fn) == 0 ? "play: done\n" : "play: not a 16-bit PCM WAV (or no file)\n"); }
+            else print(sys_playbg(fn) == 0 ? "play: started in the background ('stop' to halt)\n"
+                                           : "play: not a 16-bit PCM WAV (or no file)\n");
+        } else if (streq(line, "stop")) {                  /* stop background audio */
+            sys_audiostop();
+            print("stopped\n");
         } else if (startswith(line, "tone")) {             /* play a tone via AC'97: tone [hz] [ms] */
             const char *p = line + 4; while (*p == ' ') p++;
             int hz = 0; while (*p >= '0' && *p <= '9') hz = hz * 10 + (*p++ - '0');

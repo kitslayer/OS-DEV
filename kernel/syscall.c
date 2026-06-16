@@ -446,6 +446,18 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mouse:
         r->rax = (uint64_t)app_get_mouse();
         break;
+    case SYS_playbg: {
+        __asm__ volatile("sti");                  /* the file read can be slow; stay preemptible */
+        uint8_t *wb = kmalloc(8 * 1024 * 1024);
+        long n = wb ? vfs_read((const char *)r->rdi, wb, 8 * 1024 * 1024) : -1;
+        int rc = (n > 0) ? ac97_play_wav_bg(wb, (int)n) : -1;
+        if (wb) kfree(wb);                         /* decoded copy is independent of this buffer */
+        r->rax = (uint64_t)(int64_t)rc;
+        break;
+    }
+    case SYS_audiostop:
+        ac97_stop_bg();
+        break;
     case SYS_playwav: {
         __asm__ volatile("sti");
         uint8_t *wb = kmalloc(8 * 1024 * 1024);   /* the .wav file (<= 8 MB) */
