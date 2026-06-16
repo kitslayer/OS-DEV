@@ -48,7 +48,7 @@ path's memory-safety).
 | `x509test`| cert DER parser fuzz |
 | `nettest` | packet parser + OOO reassembly fuzz |
 | `fstest`  | FAT32 read (corrupt/cyclic images) + write (heavy-churn) — locks M435 + the cycle/depth caps |
-| `kattest` | crypto vs RFC/FIPS known-answer vectors (SHA-256/384/512, HMAC, HKDF, AES, AES-GCM, ChaCha20-Poly1305 + forged-tag reject, X25519) |
+| `kattest` | crypto vs RFC/FIPS known-answer vectors (SHA-256/384/512, HMAC, HKDF, AES, AES-GCM, ChaCha20-Poly1305 + forged-tag reject, X25519) + signature verify (ECDSA P-256/384, RSA-2048 PKCS#1 — valid accepted, tampered rejected) |
 
 Each is verified to catch a reintroduced bug (e.g. removing fat32's dir-recursion
 depth caps trips an ASan stack-overflow; any crypto-output change fails its

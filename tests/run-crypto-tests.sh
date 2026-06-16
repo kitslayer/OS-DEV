@@ -10,10 +10,11 @@ cd "$(dirname "$0")/.."
 CC=${CC:-gcc}
 SAN="-fsanitize=address,undefined -fno-sanitize-recover=all"
 echo "building from-scratch crypto KATs (ASan+UBSan)..."
-$CC -std=gnu11 -O1 $SAN -fno-stack-protector -Ikernel -Ikernel/include \
+$CC -std=gnu11 -O1 $SAN -fno-stack-protector -Ikernel -Ikernel/include -Itests/crypto \
     tests/crypto/crypto_test.c \
     kernel/sha256.c kernel/sha512.c kernel/aes.c kernel/aesgcm.c \
     kernel/chachapoly.c kernel/hkdf.c kernel/x25519.c \
+    kernel/ecdsa.c kernel/rsa.c kernel/bignum.c \
     -o /tmp/osdev_crypto_test
 echo "running crypto known-answer tests..."
 if /tmp/osdev_crypto_test; then
