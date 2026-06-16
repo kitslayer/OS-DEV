@@ -1,6 +1,20 @@
 # What's next
 
-> **Status (470 milestones).** (M470: **JS `Proxy` (get/set traps)** — `new Proxy(target,handler)`;
+> **Status (471 milestones).** (M471: **FAT32 directory growth** — `add_entry` (kernel/fat32.c) now
+> GROWS a full directory's cluster chain instead of failing: tracks the chain tail `last`, allocs a
+> fresh cluster, zeroes all its slots, writes the entry in slot 0, then `fat_set(last,newcl)` links it
+> (write-before-link so a chain-walk never sees an uninit cluster) — the same chain-extension fat32_write
+> uses for file data. Fixes the "file creation fails past a full root dir" limitation (deferred issue
+> (b)), newly relevant since pipes/redirect create files. Fwd-declared alloc_cluster/fat_set. fstest
+> gained a Phase 3: create 100 distinct files (forces ~7 dir-cluster growths) + read every one back
+> (ASan/UBSan). SHIP-reviewed (no corruption: tail-tracking, zeroing incl. sec_per_clus==1 edge,
+> write-before-link, both FAT copies, walk_dir follows the extended chain, non-full path unchanged) +
+> in-OS (25 files via `>`, first+last read back, 0 faults). NOTE: this is the SAFE FAT-write fix; the
+> OTHER deferred FAT issue — "heavy repeated writes corrupt fat.img across BOOTS" (issue (a)) — is a
+> subtler cross-boot/persistence concern (fstest's in-memory single-run write stress is ASan-clean, so
+> it's not an in-run OOB; cause unclear) and STAYS deferred. No rmdir, so a grown dir never shrinks
+> (pre-existing). Files: kernel/fat32.c, tests/fs/fs_test.c.
+> M470: **JS `Proxy` (get/set traps)** — `new Proxy(target,handler)`;
 > property read fires handler.get(target,key,proxy) at eval_member_get, write fires handler.set at the
 > assign sites (both depth-guarded via call_function_this); trap-less proxy = transparent target r/w;
 > enumeration/JSON/in/delete deproxy to the target; V_PROXY is NOT obj_keyed so vals[0/1] never leak.

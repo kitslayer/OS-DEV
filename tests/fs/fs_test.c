@@ -170,6 +170,31 @@ int main(void) {
     }
     printf("  write-path: %ld create/write/delete/mkdir ops clean\n", WOPS);
 
-    printf("PASS: FAT32 read+write paths, ASan/UBSan clean (corrupt-FAT fuzz + write stress)\n");
+    /* ---- Phase 3: directory growth (full-root-dir extension) ----
+     * Create many distinct files so the root directory must grow past its
+     * initial single cluster (16 entries here), then read each back and verify
+     * its content — proving add_entry now extends a full dir chain (previously
+     * creation simply failed once the directory filled). */
+    build_valid_image();
+    if (fat32_mount() != 0) { printf("FAIL: remount for dir-growth\n"); return 1; }
+    const int NF = 100;
+    int created = 0, verified = 0;
+    for (int i = 0; i < NF; i++) {
+        char nm[16], body[24];
+        snprintf(nm, sizeof nm, "G%d.TXT", i);
+        int bl = snprintf(body, sizeof body, "body-%d", i);
+        if (fat32_write(nm, body, (unsigned long)bl) >= 0) created++;
+    }
+    for (int i = 0; i < NF; i++) {
+        char nm[16], body[24], rb[64];
+        snprintf(nm, sizeof nm, "G%d.TXT", i);
+        int bl = snprintf(body, sizeof body, "body-%d", i);
+        long n = fat32_read(nm, rb, sizeof rb);
+        if (n == (long)bl) { int ok = 1; for (int k = 0; k < bl; k++) if (rb[k] != body[k]) { ok = 0; break; } if (ok) verified++; }
+    }
+    printf("  dir-growth: created %d/%d distinct files (forces add_entry chain growth), %d read back & verified\n", created, NF, verified);
+    if (created != NF || verified != NF) { printf("FAIL: dir-growth lost files (created %d, verified %d, want %d)\n", created, verified, NF); return 1; }
+
+    printf("PASS: FAT32 read+write paths, ASan/UBSan clean (corrupt-FAT fuzz + write stress + dir growth)\n");
     return 0;
 }

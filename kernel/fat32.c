@@ -177,12 +177,16 @@ static int resolve(const char *path, uint32_t *dir, const char **leaf) {
     }
 }
 
+static uint32_t alloc_cluster(void);              /* fwd: add_entry grows a full dir chain */
+static void     fat_set(uint32_t cl, uint32_t val);
+
 /* Append a directory entry (name83/attr/first-cluster/size) into directory
- * cluster `dircl`, reusing the first free or deleted slot. 0 on success. */
+ * cluster `dircl`, reusing the first free or deleted slot, growing the dir's
+ * cluster chain if it is completely full. 0 on success. */
 static int add_entry(uint32_t dircl, const uint8_t name83[11], uint8_t attr,
                      uint32_t first, uint32_t size) {
     uint8_t sec[SECSZ];
-    uint32_t cl = dircl, steps = 0;
+    uint32_t cl = dircl, steps = 0, last = dircl;
     while (cl < EOC) {
         uint32_t firsts = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
@@ -201,9 +205,29 @@ static int add_entry(uint32_t dircl, const uint8_t name83[11], uint8_t attr,
                 }
             }
         }
+        last = cl;
         cl = fat_step(cl, &steps);
     }
-    return -1;
+    /* The directory is full. A FAT32 directory is an ordinary cluster chain
+     * (unlike FAT12/16's fixed-size root), so grow it: allocate a fresh cluster,
+     * zero every 32-byte slot (so they read as free) and place this entry in the
+     * first slot, THEN link it onto the chain — writing the cluster before
+     * linking means a concurrent chain-walk never sees an uninitialised cluster.
+     * Mirrors fat32_write's data-chain growth. */
+    uint32_t newcl = alloc_cluster();
+    if (newcl == 0) return -1;                       /* disk full */
+    uint32_t firsts = cluster_to_sector(newcl);
+    uint8_t z[SECSZ];
+    for (int i = 0; i < SECSZ; i++) z[i] = 0;
+    for (uint32_t s = 1; s < sec_per_clus; s++) ata_write(firsts + s, 1, z);   /* zero the rest of the cluster */
+    for (int i = 0; i < 11; i++) z[i] = name83[i];   /* the entry, in slot 0 (the rest of z stays zero = free slots) */
+    z[11] = attr;
+    z[20] = first >> 16; z[21] = first >> 24;
+    z[26] = first;       z[27] = first >> 8;
+    z[28] = size; z[29] = size >> 8; z[30] = size >> 16; z[31] = size >> 24;
+    ata_write(firsts, 1, z);
+    fat_set(last, newcl);                            /* link the new cluster onto the dir chain */
+    return 0;
 }
 
 /* ---- VFS: list ---- */
