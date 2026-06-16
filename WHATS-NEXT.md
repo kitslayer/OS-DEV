@@ -1,6 +1,16 @@
 # What's next
 
-> **Status (472 milestones).** (M472: **JS iterator protocol — spread + Array.from** — completes M469:
+> **Status (473 milestones).** (M473: **Shell filename globbing (`*`/`?`)** — the shell expands wildcard
+> patterns against the directory before parsing operators: `cat *.txt`, `grep PAT *.htm`, `wc *.svg`.
+> `glob_match` (case-insensitive — FAT is 8.3-uppercase; `*`=any run, `?`=one char, recursion bounded by
+> the short filename) + `glob_expand` (tokenize line; for a token with `*`/`?`, scan the sys_list listing
+> ["NAME size" per line], substitute matches; no-match→literal; bounded into a 1024 buf). Wired in main()
+> BEFORE the redirect/pipe parse, but ONLY when the line actually contains `*`/`?` (else cmd=line
+> verbatim → no whitespace-collapse for normal commands like echo). Operators |/>/>> pass through (no
+> wildcard). Userspace, additive. Verified in-OS (`cat *.txt`→3 files concatenated; `grep Milestone *.txt`
+> →MOTD.TXT match; `cat *.zzz`→literal→"no such file") + 7 suites. Shell now has pipes + redirect + glob.
+> Files: user/shell.c only.
+> M472: **JS iterator protocol — spread + Array.from** — completes M469:
 > `[...obj]` (array-literal spread eval, case N_ARRAY) + `Array.from(obj)` now consult a plain object's
 > `[Symbol.iterator]` (before, only for-of did — an inconsistency). New `iter_collect(it,dest,mapfn,hasfn)`
 > helper (fwd-decl before case N_ARRAY, defined after from_push) mirrors the for-of drive EXACTLY (same

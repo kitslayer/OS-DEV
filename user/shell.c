@@ -1487,6 +1487,64 @@ static void run_pipe(char *line, char *cwd, const char *rfile, int append) {
     sys_delete("PIPE.TMP");                     /* best-effort cleanup of the scratch file */
 }
 
+/* Filename globbing. glob_match: case-insensitive shell wildcard match — '*' is
+ * any run (including empty), '?' is exactly one char. Recursion is bounded by
+ * the (short, <=12-char) filename, so it can't overflow the stack. */
+static char gl_lc(char c){ return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+static int glob_match(const char *p, const char *s){
+    while (*p) {
+        if (*p == '*') {
+            p++;
+            if (!*p) return 1;                          /* trailing '*' matches the rest */
+            for (; *s; s++) if (glob_match(p, s)) return 1;
+            return glob_match(p, s);                    /* '*' as empty at the end */
+        }
+        if (*p == '?') { if (!*s) return 0; p++; s++; continue; }
+        if (gl_lc(*p) != gl_lc(*s)) return 0;
+        p++; s++;
+    }
+    return *s == 0;
+}
+/* Expand any '*'/'?' token in `src` against the current directory into `dst`
+ * (other tokens pass through verbatim); a pattern with no match is left literal,
+ * as a shell does. Output is length-bounded by dstsz (a huge match set truncates
+ * rather than overflowing). Reuses sys_list — the same listing `ls` prints, one
+ * "NAME size" per line — so the first whitespace-delimited field is the name. */
+static void glob_expand(const char *src, char *dst, int dstsz){
+    static char listing[2048];
+    long ln = sys_list(listing, sizeof listing - 1); if (ln < 0) ln = 0; listing[ln] = 0;
+    int dp = 0;
+    const char *p = src;
+    while (*p) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        const char *ts = p; while (*p && *p != ' ') p++; int tl = (int)(p - ts);
+        int isglob = 0; for (int i = 0; i < tl; i++) if (ts[i] == '*' || ts[i] == '?') { isglob = 1; break; }
+        int appended = 0;
+        if (isglob) {
+            char pat[64]; int pl = tl < 63 ? tl : 63; for (int i = 0; i < pl; i++) pat[i] = ts[i]; pat[pl] = 0;
+            const char *q = listing;
+            while (*q) {
+                char name[64]; int ni = 0;
+                while (*q && *q != ' ' && *q != '\n' && *q != '\r' && ni < 63) name[ni++] = *q++;
+                name[ni] = 0;
+                while (*q && *q != '\n') q++; if (*q) q++;          /* advance to the next line */
+                if (ni && name[ni-1] != '/' && glob_match(pat, name)) {   /* skip dir entries (shown as NAME/) */
+                    for (int i = 0; i < ni && dp < dstsz - 1; i++) dst[dp++] = name[i];
+                    if (dp < dstsz - 1) dst[dp++] = ' ';
+                    appended = 1;
+                }
+            }
+        }
+        if (!appended) {                                   /* non-glob token, or a glob with no match: keep literal */
+            for (int i = 0; i < tl && dp < dstsz - 1; i++) dst[dp++] = ts[i];
+            if (dp < dstsz - 1) dst[dp++] = ' ';
+        }
+    }
+    if (dp > 0 && dst[dp-1] == ' ') dp--;                  /* trim the trailing separator */
+    dst[dp] = 0;
+}
+
 int main(void) {
     print("\n");
     print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
@@ -1498,12 +1556,22 @@ int main(void) {
         print("osdev:"); print(cwd); print("$ ");
         readline(line, sizeof(line));
 
+        /* expand filename globs (*.txt, foo?) against the directory before parsing
+         * operators; tokens with no wildcard (and the operators | > >>) pass through.
+         * Only rewrite the line when a wildcard is actually present, so an ordinary
+         * command (incl. its exact spacing) is untouched. */
+        static char gline[1024];
+        char *cmd = line;
+        for (int i = 0; line[i]; i++) if (line[i] == '*' || line[i] == '?') {
+            glob_expand(line, gline, sizeof gline); cmd = gline; break;
+        }
+
         /* output redirection: "cmd > file" (overwrite) or "cmd >> file" (append).
          * Strip it off; the command part (possibly a pipeline) is captured to the file. */
         const char *rfile = 0; int append = 0;
-        for (int i = 0; line[i]; i++) if (line[i] == '>') {
-            if (line[i+1] == '>') { append = 1; rfile = &line[i+2]; } else { rfile = &line[i+1]; }
-            line[i] = 0;                            /* end the command part */
+        for (int i = 0; cmd[i]; i++) if (cmd[i] == '>') {
+            if (cmd[i+1] == '>') { append = 1; rfile = &cmd[i+2]; } else { rfile = &cmd[i+1]; }
+            cmd[i] = 0;                              /* end the command part */
             while (*rfile == ' ') rfile++;          /* skip spaces before the filename */
             char *fe = (char *)rfile; while (*fe) fe++; while (fe > rfile && fe[-1] == ' ') *--fe = 0;
             if (!*rfile) rfile = 0;                 /* "cmd >" with no filename: ignore the redirect */
@@ -1511,17 +1579,17 @@ int main(void) {
         }
 
         int piped = 0;                              /* a '|' anywhere -> run as a pipeline */
-        for (int i = 0; line[i]; i++) if (line[i] == '|') { piped = 1; break; }
+        for (int i = 0; cmd[i]; i++) if (cmd[i] == '|') { piped = 1; break; }
 
-        if (piped) run_pipe(line, cwd, rfile, append);
+        if (piped) run_pipe(cmd, cwd, rfile, append);
         else if (rfile) {                           /* redirect a single command's output to a file */
             static char rbuf[8192];
             cap_begin(rbuf, sizeof rbuf);
-            run_command(line, cwd);
+            run_command(cmd, cwd);
             unsigned long rlen = cap_end();
             write_redirect(rfile, rbuf, rlen, append);
         }
-        else if (run_command(line, cwd)) break;     /* run_command returns 1 only for "exit" */
+        else if (run_command(cmd, cwd)) break;      /* run_command returns 1 only for "exit" */
     }
     return 0;
 }
