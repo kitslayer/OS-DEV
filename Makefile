@@ -79,7 +79,7 @@ $(BUILD)/%.o: %.asm
 # own ELF; the kernel embeds them all (see kernel/asm/user_blob.asm).
 USER_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
                -mgeneral-regs-only -std=gnu11 -O2 -Wall -Ikernel/include
-USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/doom.elf
+USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/doom.elf $(BUILD)/quake.elf
 
 $(BUILD)/user_%.o: user/%.c
 	@mkdir -p $(BUILD)
@@ -109,6 +109,29 @@ $(BUILD)/doom/%.o: user/doom/%.c Makefile
 $(BUILD)/doom.elf: $(DOOM_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld
 	$(LD) -T user/user.ld -o $@ $(DOOM_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (DOOM)"
+
+# --- Quake (vendored quakegeneric) -------------------------------------------
+# Same shape as DOOM_CFLAGS: floating point on (Quake is FP-heavy) so drop
+# -mgeneral-regs-only and add SSE; -w silences the legacy warnings; -fcommon
+# tolerates the engine's tentative-definition globals. The shim headers in
+# user/quake/include stand in for libc; -Iuser/quake lets the engine .c files
+# resolve their own cross-included headers. The engine renders at vid_null.c's
+# 320x240, which is what quakegeneric.h's RES_X/RES_Y default to.
+QUAKE_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
+                -std=gnu11 -O2 -w -fcommon -msse2 -mfpmath=sse \
+                -Iuser/quake/include -Iuser/quake -Ikernel/include \
+                -DQUAKEGENERIC_RESX=320 -DQUAKEGENERIC_RESY=240 -DNORMALUNIX
+
+QUAKE_SRCS := $(wildcard user/quake/*.c)
+QUAKE_OBJS := $(patsubst user/quake/%.c,$(BUILD)/quake/%.o,$(QUAKE_SRCS))
+
+$(BUILD)/quake/%.o: user/quake/%.c Makefile
+	@mkdir -p $(BUILD)/quake
+	$(CC) $(QUAKE_CFLAGS) -c $< -o $@
+
+$(BUILD)/quake.elf: $(QUAKE_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld
+	$(LD) -T user/user.ld -o $@ $(QUAKE_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (Quake)"
 
 # the embedded blob depends on every program ELF
 $(BUILD)/kernel/asm/user_blob.o: $(USER_ELFS)
