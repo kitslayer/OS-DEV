@@ -1,6 +1,19 @@
 # What's next
 
-> **Status (474 milestones).** (M474: **Shell command sequencing (`;`)** — `cmd1 ; cmd2 ; cmd3` runs each
+> **Status (475 milestones).** (M475: **Expanded TLS trusted-root store (5→13 CAs)** — added 8 common
+> roots to kernel/rootca.c's ROOT_CAS[]: USERTrust RSA, DigiCert Global Root CA (G1) + G3 (EC), Amazon
+> Root CA 1, GlobalSign R3, GTS Root R1, Sectigo ECC E46, ISRG Root X2 (EC). Each = the root's public key
+> in x509_cert.key form (RSA → RSAPublicKey DER via `openssl rsa -RSAPublicKey_out -outform DER`; EC →
+> the uncompressed P-384 point parsed from `openssl pkey -pubin -text`), extracted from
+> /etc/ssl/certs/ca-certificates.crt by a python script (the SAME pipeline + format as the existing 5
+> roots). So the full cert-path validation now ANCHORS (TLS*) for the bulk of the real HTTPS web. SAFE
+> by construction: anchoring is INFORMATIONAL (tls.c logs chain_anchored, the gate enforces only
+> hostname+validity), and a mis-extracted key just fails to match — it can NEVER falsely validate (no
+> regression possible). Verified: build + 7 suites + in-OS (https://example.com still loads + cert-info
+> 'i' → "anchored" via SSL.com = no regression; new roots anchor by-construction, same format). Bloat
+> ~2.4KB key data. NOTE: still NOT a fatal enforcement gate (would reject un-baked-root sites → break
+> risk; full enforcement needs ~all ~140 roots = bloat). File: kernel/rootca.c only.
+> M474: **Shell command sequencing (`;`)** — `cmd1 ; cmd2 ; cmd3` runs each
 > in turn. Refactor: the per-line dispatch (glob→redirect→pipe→run) moved into `run_line(seg,cwd)`
 > (returns 1 only for "exit"); main's loop splits the line on `;`, TRIMS each segment's leading space
 > (else a non-piped 2nd segment " echo x" → "unknown command"; run_pipe already trimmed internally so
