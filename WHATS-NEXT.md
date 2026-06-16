@@ -1,6 +1,17 @@
 # What's next
 
-> **Status (479 milestones).** (M479: **BMP decoder — VIEW a screenshot in the browser** — a from-scratch
+> **Status (480 milestones).** (M480: **Inline `data:` image URIs (base64)** — the browser now decodes
+> `<img src="data:image/...;base64,…">` images embedded in the page, completing the image-source story
+> (`file:`/`http:`/`https:`/`data:`). New bounded `b64_decode` in browser.c (every write guarded vs the
+> out cap, every read within input — untrusted-safe like the decoders) → feeds the existing inline-image
+> slot path, which sniffs format by magic, so ALL five decoders (PNG/GIF/JPEG/SVG/BMP) work from a data:
+> payload. Strictly additive: a data: `<img>` used to fall back to a dead `[img]` link, and any parse/
+> decode failure still does (graceful); reuses the M479 BMP decoder. Baked `dataimg.htm` demo embeds a
+> 16×16 BMP. Verified in-OS: `browse file:dataimg.htm` → red/green/blue/yellow quadrants in the right
+> places (proves base64→BMP→RGBA end-to-end), scaled width=128. Files: kernel/browser.c, tools/mkfatfs.c.
+> **On-theme (the browser is the crown jewel): data: images appear on the real web; this + M478/M479 form
+> a coherent image arc — capture to BMP, view a BMP, decode an embedded BMP.**)
+> M479: **BMP decoder — VIEW a screenshot in the browser** — a from-scratch
 > decoder (`kernel/bmp.c`) for uncompressed BI_RGB Windows BMPs (24-/32-/8-bit palettized, bottom-up or
 > top-down → RGBA, A=255), wired into the browser's `decode_image` dispatch — closes the loop with M478:
 > the OS can now both SAVE and VIEW a screenshot. Untrusted-byte safe (every pixel/palette read bounded

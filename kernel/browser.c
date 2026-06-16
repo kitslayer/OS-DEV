@@ -47,6 +47,7 @@
 #define IMG_SLOTS 6                 /* inline images decoded per page */
 #define IMG_READ_MAX 131072         /* scratch to read a local image file */
 #define LOCAL_IMG_MAX (1024*1024)   /* transient buffer for a full-page local image (a 24-bit BMP screenshot is ~576 KB > RAW_MAX) */
+#define DATA_URI_B64_MAX 262144     /* max base64 length of an inline data: image URI we'll decode */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
 #define REMOTE_IMG_MAX 3            /* remote <img> URLs prefetched per page (best-effort) */
 
@@ -143,6 +144,7 @@ static void drop_image_slots(browser_t *b);  /* fwd: free inline images */
 static void drop_remote_imgs(browser_t *b);  /* fwd: free prefetched remote-image bytes */
 static int  decode_local_to_slot(browser_t *b, const char *path);  /* fwd */
 static int  decode_bytes_to_slot(browser_t *b, const uint8_t *data, int len);  /* fwd: decode an in-memory image blob into an inline slot */
+static int  b64_decode(const char *in, int inlen, uint8_t *out, int cap);       /* fwd: base64 -> bytes (for data: image URIs) */
 static int  is_chunked(const char *raw, int hdr_end);   /* fwd: chunked transfer-encoding? */
 static int  dechunk(char *body, int len);               /* fwd: de-chunk an HTTP body in place */
 
@@ -1020,6 +1022,34 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                         b->toks[b->ntok++] = (tok_t){ (uint16_t)aw, (uint16_t)ah, (uint16_t)slot, STY_NORMAL, TK_IMG };
                         emit_break(b, TK_BREAK);
                         shown = 1;
+                    }
+                }
+                if (!shown && srcl > 7 && src[0]=='d'&&src[1]=='a'&&src[2]=='t'&&src[3]=='a'&&src[4]==':') {
+                    /* data:[<mediatype>][;base64],<bytes> — decode the embedded
+                     * image inline (only the ;base64 form, universal for images). */
+                    int comma = -1;
+                    for (int i = 5; i < srcl; i++) if (src[i] == ',') { comma = i; break; }
+                    int isb64 = 0;
+                    for (int i = 5; comma >= 0 && i + 7 <= comma; i++)
+                        if (src[i]==';'&&src[i+1]=='b'&&src[i+2]=='a'&&src[i+3]=='s'&&
+                            src[i+4]=='e'&&src[i+5]=='6'&&src[i+6]=='4') { isb64 = 1; break; }
+                    int enclen = comma >= 0 ? srcl - (comma + 1) : 0;
+                    if (isb64 && !b->n_hidden && enclen > 0 && enclen <= DATA_URI_B64_MAX) {
+                        int cap = enclen / 4 * 3 + 4;
+                        uint8_t *bin = kmalloc((unsigned long)cap);
+                        if (bin) {
+                            int blen = b64_decode(src + comma + 1, enclen, bin, cap);
+                            int slot = blen > 0 ? decode_bytes_to_slot(b, bin, blen) : -1;
+                            kfree(bin);                       /* decode_bytes_to_slot copied/decoded already */
+                            if (slot >= 0 && b->ntok + 2 < TOK_MAX) {
+                                int aw = attr_int(attrs, attrlen, "width");
+                                int ah = attr_int(attrs, attrlen, "height");
+                                emit_break(b, TK_BREAK);
+                                b->toks[b->ntok++] = (tok_t){ (uint16_t)aw, (uint16_t)ah, (uint16_t)slot, STY_NORMAL, TK_IMG };
+                                emit_break(b, TK_BREAK);
+                                shown = 1;
+                            }
+                        }
                     }
                 }
                 if (!shown && !b->loading) {
@@ -2528,6 +2558,41 @@ static void drop_remote_imgs(browser_t *b) {
 /* Decode a PNG/GIF blob into a freshly kmalloc'd RGBA buffer (caller frees).
  * Bounds the dimensions, allocates exactly what's needed, frees its own
  * scratch. Returns the RGBA buffer and sets ow/oh, or NULL on any failure. */
+/* base64 alphabet value of one char, or -1 if not a base64 digit. */
+static int b64val(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+/* Decode base64 `in` (inlen bytes) into `out` (cap bytes). Skips ASCII
+ * whitespace; stops at '=' padding or the first non-alphabet byte. Returns the
+ * decoded length, or -1 on output overflow. Bounded for untrusted input (the
+ * payload of a data: image URI): every write is guarded against `cap` and every
+ * read stays within [in, in+inlen). */
+static int b64_decode(const char *in, int inlen, uint8_t *out, int cap) {
+    unsigned acc = 0;
+    int nbits = 0, op = 0;
+    for (int i = 0; i < inlen; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
+        if (c == '=') break;
+        int v = b64val(c);
+        if (v < 0) break;
+        acc = (acc << 6) | (unsigned)v;
+        nbits += 6;
+        if (nbits >= 8) {
+            nbits -= 8;
+            if (op >= cap) return -1;
+            out[op++] = (uint8_t)((acc >> nbits) & 0xff);
+        }
+    }
+    return op;
+}
+
 static uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
     /* JPEG (FF D8 FF ...): probe for dimensions + scratch size, then decode */
     if (len >= 4 && data[0]==0xFF && data[1]==0xD8 && data[2]==0xFF) {
