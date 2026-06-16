@@ -40,6 +40,8 @@ void   app_set_rawkb(int on);          /* caller opts into raw make/break key ev
 int    app_get_rawkb(app_t *a);        /* WM: is this app in raw keyboard mode? */
 void   app_key_raw(app_t *a, unsigned short ev);  /* WM: deliver a raw key event */
 int    app_sys_getkbevent(void);       /* next raw key event for the caller, or -1 */
+void   app_set_mouse(app_t *a, int x, int y, int btn);  /* WM: canvas-relative cursor + buttons */
+long   app_get_mouse(void);            /* SYS_mouse: packed x|y|buttons for the caller */
 void   app_sys_clear(void);             /* clear the calling app's screen */
 void   app_setcolor(int idx);           /* set the calling app's text colour (palette 0-15) */
 void   app_sys_exit(void);              /* does not return */

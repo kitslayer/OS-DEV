@@ -79,6 +79,12 @@ void sys_pcm(const void *frames, int nframes) { do_syscall(SYS_pcm, (long)frames
 long sys_playwav(const char *name) { return do_syscall(SYS_playwav, (long)name, 0, 0); }
 int  sys_pcm_stream(const void *frames, int nframes) { return (int)do_syscall(SYS_pcm_stream, (long)frames, nframes, 0); }
 int  sys_pcm_avail(void) { return (int)do_syscall(SYS_pcm_avail, 0, 0, 0); }
+int  sys_mouse(int *x, int *y) {
+    long v = do_syscall(SYS_mouse, 0, 0, 0);
+    if (x) *x = (int)(short)(v & 0xFFFF);          /* sign-extend 16-bit (-1 = outside) */
+    if (y) *y = (int)(short)((v >> 16) & 0xFFFF);
+    return (int)((v >> 32) & 0x7);
+}
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);
 }

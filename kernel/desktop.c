@@ -661,6 +661,20 @@ void desktop_run(void) {
 
         int mx = mouse_x(), my = mouse_y(), btn = mouse_buttons(), left = btn & 1;
 
+        /* feed the focused graphics app its cursor position (canvas-relative,
+         * undoing the integer upscale) + buttons, so apps can use the mouse */
+        if (win_count > 0) {
+            window_t *fw = &windows[win_count - 1];
+            uint32_t *cb; int gw, gh;
+            if (!fw->minimized && fw->kind == KIND_APP && fw->app &&
+                app_gfx_get((app_t *)fw->app, &cb, &gw, &gh)) {
+                int s = gfx_scale(gw, gh);
+                int rx = (mx - (fw->x + 6)) / s, ry = (my - (fw->y + TITLEBAR_H + 6)) / s;
+                if (rx < 0 || ry < 0 || rx >= gw || ry >= gh) { rx = -1; ry = -1; }
+                app_set_mouse((app_t *)fw->app, rx, ry, btn);
+            }
+        }
+
         if (left && !(prev_btn & 1)) {
             int ty = screen_h - TASKBAR_H, mh = MENU_N*MENU_ITEM_H + 4, my0 = ty - mh;
             if (menu_open) {

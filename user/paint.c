@@ -1,90 +1,84 @@
 /*
- * paint.c — an ASCII-art canvas, a userspace program.
+ * paint.c — a graphical mouse-driven paint program.
  *
- * Move a cursor with the arrows; any printable key stamps that glyph at the
- * cursor (and steps right, wrapping), in the current brush colour. Tab cycles
- * the colour, Backspace rubs out, and ESC saves the picture to PAINT.TXT and
- * quits. A small creative tool that shows off the per-cell colour palette (M311).
+ * The first app to use the mouse: it opens a pixel canvas (the graphics window
+ * API), reads the cursor + buttons with sys_mouse(), and paints where you drag.
+ * Keys 1-8 pick a colour, +/- change the brush size, c clears, q/Esc quits.
+ * Pure integer math (no FPU).
  */
 #include "ulib.h"
 
-#define W 42
-#define H 14
+#define W 300
+#define H 200
+#define BG 0x101018u
 
-static char         canv[H][W];
-static unsigned char canc[H][W];
-static int cx, cy;
-static int brush = 2;          /* palette colour 1..15 (start red) */
+static unsigned int *cv;
 
-static void save(void) {
-    char buf[H * (W + 1) + 1]; int p = 0;
-    for (int y = 0; y < H; y++) {
-        int end = W; while (end > 0 && canv[y][end - 1] == ' ') end--;   /* trim trailing blanks */
-        for (int x = 0; x < end; x++) buf[p++] = canv[y][x];
-        buf[p++] = '\n';
+static const unsigned int palette[8] = {
+    0xF0F0F0, 0xFF4040, 0x40E060, 0x4090FF, 0xFFD040, 0xFF60D0, 0x40E0E0, 0x101018,
+};
+
+static void putpx(int x, int y, unsigned int c) {
+    if (x >= 0 && x < W && y >= 0 && y < H) cv[y * W + x] = c;
+}
+static void disc(int cx, int cy, int r, unsigned int c) {     /* filled round brush */
+    for (int dy = -r; dy <= r; dy++)
+        for (int dx = -r; dx <= r; dx++)
+            if (dx * dx + dy * dy <= r * r) putpx(cx + dx, cy + dy, c);
+}
+static int iabs(int v) { return v < 0 ? -v : v; }
+static void stroke(int x0, int y0, int x1, int y1, int r, unsigned int c) {
+    int dx = iabs(x1 - x0), sx = x0 < x1 ? 1 : -1;            /* Bresenham line of discs */
+    int dy = -iabs(y1 - y0), sy = y0 < y1 ? 1 : -1, err = dx + dy;
+    for (;;) {
+        disc(x0, y0, r, c);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
     }
-    sys_writefile("PAINT.TXT", buf, (unsigned long)p);
 }
 
-static void render(void) {
-    sys_clear();
-    /* status line */
-    sys_setcolor(8); print(" paint  ");
-    char nb[8]; int q = 0; nb[q++] = (char)('0' + (cy + 1) / 10 % 10); nb[q++] = (char)('0' + (cy + 1) % 10);
-    nb[q++] = ','; nb[q++] = (char)('0' + (cx + 1) / 10 % 10); nb[q++] = (char)('0' + (cx + 1) % 10); nb[q] = 0;
-    print(nb);
-    print("  brush "); sys_setcolor(brush); print("##");
-    sys_setcolor(8); print("  Tab=col BS=del ESC=save&quit\n");
-
-    for (int y = 0; y < H; y++) {
-        for (int x = 0; x < W; x++) {
-            char ch = canv[y][x];
-            if (x == cx && y == cy) {                 /* cursor cell, highlighted white */
-                sys_setcolor(1);
-                char cb[2] = { ch == ' ' ? '_' : ch, 0 }; print(cb);
-            } else {
-                sys_setcolor(ch == ' ' ? 0 : canc[y][x]);
-                char cb[2] = { ch, 0 }; print(cb);
-            }
-        }
-        print("\n");
+static void draw_palette(int sel) {
+    for (int p = 0; p < 8; p++) {                            /* colour swatches, top-left */
+        int x0 = 3 + p * 16, y0 = 3;
+        for (int y = 0; y < 12; y++)
+            for (int x = 0; x < 14; x++) cv[(y0 + y) * W + (x0 + x)] = palette[p];
+        if (p == sel)                                        /* white outline on the selected one */
+            for (int x = -1; x < 15; x++) { putpx(x0 + x, y0 - 1, 0xFFFFFF); putpx(x0 + x, y0 + 12, 0xFFFFFF); }
     }
-    sys_setcolor(0);
 }
 
 int main(void) {
-    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) { canv[y][x] = ' '; canc[y][x] = 0; }
-    /* load an existing picture so it can be re-edited (colour isn't stored, so it loads green) */
-    char fb[H * (W + 2) + 4];
-    long n = sys_readfile("PAINT.TXT", fb, sizeof(fb) - 1);
-    if (n > 0) {
-        int x = 0, y = 0;
-        for (long i = 0; i < n && y < H; i++) {
-            char c = fb[i];
-            if (c == '\n') { x = 0; y++; }
-            else { if (x < W && c != '\r') canv[y][x] = c; x++; }
-        }
-    }
-    cx = cy = 0;
-    render();
+    if (sys_gfx_init(W, H) < 0) { print("paint: graphics init failed\n"); return 1; }
+    cv = malloc((unsigned long)W * H * 4);
+    if (!cv) { print("paint: out of memory\n"); return 1; }
+    for (int i = 0; i < W * H; i++) cv[i] = BG;
+
+    int col = 1, brush = 2, lx = -1, ly = -1;
+    draw_palette(col);
     for (;;) {
         int k = sys_pollkey();
-        if (k < 0) { sys_sleep(15); continue; }
-        if (k == 27) { save(); return 0; }                          /* ESC: save + quit */
-        else if (k == 9) brush = brush % 15 + 1;                    /* Tab: next colour */
-        else if (k == 0x11) { if (cy > 0) cy--; }                   /* arrows: move */
-        else if (k == 0x12) { if (cy < H - 1) cy++; }
-        else if (k == 0x13) { if (cx > 0) cx--; }
-        else if (k == 0x14) { if (cx < W - 1) cx++; }
-        else if (k == 8 || k == 127) {                             /* Backspace: step back + erase */
-            if (cx > 0) cx--; else if (cy > 0) { cy--; cx = W - 1; }
-            canv[cy][cx] = ' '; canc[cy][cx] = 0;
-        }
-        else if (k >= 32 && k <= 126) {                            /* printable: stamp + advance */
-            canv[cy][cx] = (char)k; canc[cy][cx] = (unsigned char)brush;
-            if (++cx >= W) { cx = 0; if (cy < H - 1) cy++; }
-        }
-        else continue;
-        render();
+        if (k == 'q' || k == 27) { free(cv); return 0; }
+        else if (k >= '1' && k <= '8') col = k - '1';
+        else if (k == 'c') { for (int i = 0; i < W * H; i++) cv[i] = BG; }
+        else if (k == '+' || k == '=') { if (brush < 20) brush++; }
+        else if (k == '-' || k == '_') { if (brush > 1) brush--; }
+
+        int x, y;
+        int b = sys_mouse(&x, &y);
+        if ((b & 1) && x >= 0 && y >= 0) {                   /* left button: paint */
+            if (lx < 0) { lx = x; ly = y; }
+            stroke(lx, ly, x, y, brush, palette[col]);
+            lx = x; ly = y;
+        } else if ((b & 2) && x >= 0 && y >= 0) {            /* right button: erase */
+            if (lx < 0) { lx = x; ly = y; }
+            stroke(lx, ly, x, y, brush + 2, BG);
+            lx = x; ly = y;
+        } else { lx = ly = -1; }
+
+        draw_palette(col);
+        sys_gfx_blit(cv);
+        sys_sleep(12);
     }
 }

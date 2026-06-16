@@ -53,6 +53,7 @@ void sys_pcm(const void *frames, int nframes);   /* play 16-bit stereo PCM @ 48 
 long sys_playwav(const char *name);              /* play a .wav file (16-bit PCM); 0/-1 */
 int  sys_pcm_stream(const void *frames, int nframes);  /* queue stereo PCM (non-blocking); accepted */
 int  sys_pcm_avail(void);                        /* free frames in the streaming ring */
+int  sys_mouse(int *x, int *y);   /* cursor relative to the gfx canvas (-1 outside); returns button bits */
 
 /* dynamic memory (a first-fit free list over sbrk) */
 void *malloc(unsigned long n);

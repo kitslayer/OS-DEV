@@ -49,6 +49,7 @@ struct app {
     int       rawkb;                     /* raw keyboard mode (games get make/break events) */
     volatile unsigned short rawiq[64];   /* raw key-event queue (WM fills, app drains) */
     volatile int rqh, rqt;
+    volatile int ms_x, ms_y, ms_btn;     /* cursor relative to the gfx canvas (-1 outside) + buttons */
     char     grid[APP_ROWS][APP_COLS];
     uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
     uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
@@ -430,6 +431,23 @@ int  app_get_rawkb(app_t *a) { return a && a->rawkb; }
 void app_key_raw(app_t *a, unsigned short ev) {
     int n = (a->rqh + 1) % 64;
     if (n != a->rqt) { a->rawiq[a->rqh] = ev; a->rqh = n; }   /* drop on overflow */
+}
+
+/* WM: store the cursor position (relative to the gfx canvas; -1,-1 if outside)
+ * and button bitmask for an app, each frame, for the focused window. */
+void app_set_mouse(app_t *a, int x, int y, int btn) {
+    if (!a) return;
+    a->ms_x = x; a->ms_y = y; a->ms_btn = btn;
+}
+
+/* SYS_mouse: pack the caller's last cursor state — x in bits 0-15 (signed),
+ * y in 16-31, buttons in 32-34. ulib unpacks it. */
+long app_get_mouse(void) {
+    struct app *a = cur();
+    if (!a) return 0;
+    return ((long)(a->ms_btn & 0x7) << 32)
+         | ((long)(a->ms_y & 0xFFFF) << 16)
+         | ((long)(a->ms_x & 0xFFFF));
 }
 
 /* SYS_getkbevent: next raw key event for the caller, or -1 if none (non-blocking). */

@@ -443,6 +443,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_pcm_avail:
         r->rax = (uint64_t)(int64_t)ac97_stream_avail();
         break;
+    case SYS_mouse:
+        r->rax = (uint64_t)app_get_mouse();
+        break;
     case SYS_playwav: {
         __asm__ volatile("sti");
         uint8_t *wb = kmalloc(8 * 1024 * 1024);   /* the .wav file (<= 8 MB) */
