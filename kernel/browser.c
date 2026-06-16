@@ -1453,11 +1453,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int se = i; i++;                             /* selector is [ss,se); step past '{' */
         int ds = i; while (i < n && s[i] != '}') i++;   /* declaration block [ds,de) */
         int de = i; if (i < n) i++;                  /* step past '}' */
-        while (ss < se && (s[ss]==' '||s[ss]=='\t'||s[ss]=='\n'||s[ss]=='\r')) ss++;   /* trim selector */
-        while (se > ss && (s[se-1]==' '||s[se-1]=='\t'||s[se-1]=='\n'||s[se-1]=='\r')) se--;
-        int sl = se - ss; if (sl <= 0 || sl >= 40) continue;          /* empty or too long -> skip */
-        char selbuf[40]; for (int k = 0; k < sl; k++) selbuf[k] = s[ss+k]; selbuf[sl] = 0;
-        sel_t sel; if (!sel_parse(selbuf, &sel)) continue;            /* unsupported selector -> skip */
+        /* parse the declaration block once (shared by all comma-grouped selectors) */
         uint32_t col = parse_style_color(s + ds, de - ds);           /* reuse the reviewed value parsers */
         int tsv = parse_style_textstyle(s + ds, de - ds);
         int ulv = parse_style_underline(s + ds, de - ds);
@@ -1466,7 +1462,17 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int alv = parse_style_align(s + ds, de - ds);
         int szv = parse_style_fontsize(s + ds, de - ds);
         int dnv = parse_style_display(s + ds, de - ds);
-        if (col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv) {  /* keep rules that set something we render */
+        if (!(col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv)) continue;   /* nothing we render */
+        /* a selector list "a, b, c" -> one rule per simple sub-selector that parses */
+        int p = ss;
+        while (p < se && b->n_css < CSS_MAX) {
+            int cs2 = p; while (p < se && s[p] != ',') p++;          /* one sub-selector [cs2, ce2) */
+            int ce2 = p; if (p < se) p++;                            /* step past ',' */
+            while (cs2 < ce2 && (s[cs2]==' '||s[cs2]=='\t'||s[cs2]=='\n'||s[cs2]=='\r')) cs2++;       /* trim */
+            while (ce2 > cs2 && (s[ce2-1]==' '||s[ce2-1]=='\t'||s[ce2-1]=='\n'||s[ce2-1]=='\r')) ce2--;
+            int sl = ce2 - cs2; if (sl <= 0 || sl >= 40) continue;   /* empty or too long -> skip this part */
+            char selbuf[40]; for (int k = 0; k < sl; k++) selbuf[k] = s[cs2+k]; selbuf[sl] = 0;
+            sel_t sel; if (!sel_parse(selbuf, &sel)) continue;       /* unsupported selector -> skip this part */
             b->css_sel[b->n_css] = sel;
             b->css_color[b->n_css] = col;
             b->css_style[b->n_css] = (int16_t)tsv;

@@ -1,6 +1,11 @@
 # What's next
 
-> **Status (458 milestones).** (M458: **CSS `visibility:hidden` + hidden `<img>`** — completes hiding
+> **Status (459 milestones).** (M459: **comma-grouped CSS selectors** — `h1, h2, .title { }`-style
+> rules (ubiquitous in real CSS) were dropped (sel_parse rejects the comma). capture_css now parses
+> the decls once + adds one rule per comma sub-selector that parses. Additive (single selector = 1-elem
+> list), bounded by CSS_MAX, no matching/render change. Verified in-OS (`.g1, .g2, em {…}` colours all
+> three; others unregressed).
+> M458: **CSS `visibility:hidden` + hidden `<img>`** — completes hiding
 > (M454/455): `visibility:hidden` (inline/`<style>`) hides like display:none via the same scope (1 line
 > in parse_style_display); a void `<img>` with its own display:none/visibility:hidden/hidden renders
 > nothing (the deferred standalone-hidden-img case). Additive, no render-loop change. Verified in-OS.

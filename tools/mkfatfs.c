@@ -636,6 +636,7 @@ static const struct {
         "  .b { font-weight: bold }\n"
         "  .hl { background-color: #ffe000 }\n"
         "  .code { background: #eaeaea; color: #a00000 }\n"
+        "  .g1, .g2, em { color: #cc00cc; font-weight: bold }\n"
         "</style>"
         "<h1>CSS &lt;style&gt; blocks</h1>"
         "<p>A <code>&lt;style&gt;</code> block in the page now drives a small CSS engine: simple rules (<code>tag</code>, <code>.class</code>, <code>#id</code>) set <code>color</code> / <code>font-weight</code> / <code>font-style</code> / <code>background-color</code>, cascading under inline <code>style=</code>.</p>"
@@ -645,6 +646,7 @@ static const struct {
         "<p class=\"warn\">This is a bold red warning &mdash; <code>.warn</code> wins over <code>p</code> (later rule).</p>"
         "<p class=\"b\">This whole paragraph is bold <i>and</i> gray &mdash; the <code>.b</code> rule (bold) cascades with the <code>p</code> rule (gray) on one element.</p>"
         "<p style=\"color: #0000cc\">Inline <code>style=\"color:blue\"</code> overrides the <code>p</code> rule &mdash; this line is blue.</p>"
+        "<p>A comma-grouped rule <code>.g1, .g2, em { color:#cc00cc; font-weight:bold }</code> colours all of: <span class=\"g1\">class g1</span>, <span class=\"g2\">class g2</span>, and <em>an em element</em> &mdash; magenta bold.</p>"
         "<p>Background colours: <span class=\"hl\">a .hl-highlighted run</span>, some <span class=\"code\">inline code</span> (grey bg, red text), an inline <span style=\"background-color:#b3e5ff\">light-blue span</span>, <span style=\"background:#222222;color:#ffffff\">white-on-dark</span>, and a <mark>&lt;mark&gt; element</mark>.</p>" },
     { "ALIGN   HTM", "<title>CSS text-align</title><style> .c{text-align:center} .r{text-align:right} </style>"
         "<h1 style=\"text-align:center\">Centered heading</h1>"
