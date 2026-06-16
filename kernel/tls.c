@@ -78,6 +78,11 @@ int tls_chain_anchored(void) { return g_chain_anchored; }
 static int g_host_match = -2;
 int tls_host_match(void) { return g_host_match; }
 
+/* leaf-cert identity of the most recent tls_get (for the browser's cert-info display). */
+static char g_leaf_cn[64], g_leaf_expiry[24];
+const char *tls_leaf_cn(void)     { return g_leaf_cn; }
+const char *tls_leaf_expiry(void) { return g_leaf_expiry; }
+
 /* tiny RNG for ephemeral key + randoms (seeded by the caller). */
 static uint32_t g_rng = 0x1234abcd;
 static void rng_seed(uint32_t s) { g_rng = s ? s : 1; }
@@ -284,6 +289,10 @@ static int tls_capture_leaf_key(tls *t, const uint8_t *m, int mlen, const char *
         t->leaf_key_alg = certs[0].key_alg;
     }
 
+    /* snapshot the leaf identity for the browser's cert-info display ('i' key) */
+    { int k = 0; while (certs[0].subject_cn[k] && k < (int)sizeof(g_leaf_cn)-1) { g_leaf_cn[k] = certs[0].subject_cn[k]; k++; } g_leaf_cn[k] = 0;
+      k = 0; while (certs[0].not_after[k] && k < (int)sizeof(g_leaf_expiry)-1) { g_leaf_expiry[k] = certs[0].not_after[k]; k++; } g_leaf_expiry[k] = 0; }
+
     /* HOSTNAME VERIFICATION: does the leaf cert's SAN/CN actually name this host?
      * 1 = match, 0 = DEFINITIVE mismatch (we saw the cert's whole name set), -1 =
      * uncertain (no host, or the SAN list was larger than we store — fail open so a
@@ -389,6 +398,7 @@ static int tls_verify_certverify(tls *t, const uint8_t *m, int mlen, const uint8
 static int tls_get_inner(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) {
     rng_seed(seed);
     g_cert_status = -2; g_chain_anchored = 0; g_host_match = -2;   /* clear stale results */
+    g_leaf_cn[0] = 0; g_leaf_expiry[0] = 0;
     uint8_t ip[4];
     if (dns_resolve(host, ip) != 0) return -1;
     tcp_conn tcp;

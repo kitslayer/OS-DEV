@@ -81,6 +81,8 @@ struct browser {
     volatile int http_n;                                 /* http_get result      */
     int     cert_status;                                 /* TLS CertVerify: -2 n/a, 0 ok, -1 fail */
     int     chain_ok;                                    /* 1 = chain anchored to a trusted root */
+    int     host_match;                                  /* TLS hostname match: -2 n/a, 1 ok, 0 mismatch */
+    char    cert_cn[48], cert_expiry[16];                /* leaf cert identity, for the 'i' cert-info display */
     volatile int want;                                   /* load queued (worker busy) */
     char    cur[URL_MAX];                                /* currently shown URL */
     char    hist[16][URL_MAX]; int histn;                /* back stack          */
@@ -2306,6 +2308,13 @@ static void worker_fetch(browser_t *b) {
     else            n = http_get(host, path, b->raw, RAW_MAX - 1);
     b->cert_status = https ? tls_cert_status() : -2;   /* surface TLS cert result in the UI */
     b->chain_ok = https ? tls_chain_anchored() : 0;
+    b->host_match = https ? tls_host_match() : -2;
+    b->cert_cn[0] = b->cert_expiry[0] = 0;
+    if (https && n > 0) {                              /* snapshot the leaf identity for the 'i' display */
+        const char *cn = tls_leaf_cn(), *ex = tls_leaf_expiry();
+        int k = 0; while (cn[k] && k < (int)sizeof(b->cert_cn)-1) { b->cert_cn[k] = cn[k]; k++; } b->cert_cn[k] = 0;
+        k = 0; while (ex[k] && k < (int)sizeof(b->cert_expiry)-1) { b->cert_expiry[k] = ex[k]; k++; } b->cert_expiry[k] = 0;
+    }
     b->http_n = n;
     if (n > 0) { b->rawlen = n; b->raw[n] = 0; }
     /* Best-effort inline-image prefetch (worker-side; does its own blocking
@@ -3329,6 +3338,19 @@ void browser_key(browser_t *b, int c) {
     case 's':           browser_save(b);   break;   /* save page to PAGE.TXT */
     case 'u':           if (!b->img) { b->viewsource = !b->viewsource; b->scroll = 0;  /* toggle raw HTML */
                             set_status(b, b->viewsource ? "source" : ""); } break;
+    case 'i': {         /* cert info: identity + validity of the current HTTPS page */
+        if (b->cert_status == -2) { set_status(b, "not HTTPS"); break; }
+        char s[40]; int p = 0;
+        for (const char *cn = b->cert_cn[0] ? b->cert_cn : "?"; *cn && p < 18; cn++) s[p++] = *cn;
+        const char *tail = " exp";
+        for (const char *t = tail; *t && p < (int)sizeof s - 1; t++) s[p++] = *t;
+        for (int k = 0; k < 6 && b->cert_expiry[k] && p < (int)sizeof s - 1; k++) s[p++] = b->cert_expiry[k];  /* YYMMDD */
+        /* a loaded HTTPS page already passed hostname + validity enforcement;
+         * "anchored" also means the chain reached a trusted root in our store. */
+        const char *vfy = b->chain_ok ? " anchored" : (b->host_match == 1 ? " verified" : " ?");
+        for (const char *v = vfy; *v && p < (int)sizeof s - 1; v++) s[p++] = *v;
+        s[p] = 0; set_status(b, s);
+        break; }
     case 'a':           browser_bookmark(b); break; /* add current URL to SITES */
     case '/': case 'e': b->editing = 1; b->edit_fresh = 1;    break;
     case '\\':          b->finding = 1; b->findq[0] = 0; b->find_tok = -1; set_status(b, "find: "); break;

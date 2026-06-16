@@ -1,6 +1,11 @@
 # What's next
 
-> **Status (452 milestones).** (M452: **TLS cert validity-period enforcement** — `x509.c` parses
+> **Status (453 milestones).** (M453: **browser cert-info display** — press `i` on an HTTPS page →
+> the status shows the leaf cert's CN + expiry (YYMMDD) + a verification word (`anchored`/`verified`).
+> `tls.c` exposes `tls_leaf_cn`/`tls_leaf_expiry`; browser snapshots CN/expiry/host_match per HTTPS
+> load. Safe read-only "padlock details" surfacing M451/M452. Verified in-OS (example.com →
+> "example.com exp260829 anchored").
+> M452: **TLS cert validity-period enforcement** — `x509.c` parses
 > notBefore + adds `x509_time_cmp` (UTCTime YY-pivot + GeneralizedTime; unparseable→0/no-opinion);
 > `tls.c` reads the RTC and REJECTS an expired/not-yet-valid leaf cert before the request. Guarded:
 > enforced only if RTC year ≥ 2020 (unset clock fails open), unparseable date fails open — a bad

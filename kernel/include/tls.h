@@ -19,3 +19,8 @@ int tls_chain_anchored(void);
 /* leaf-certificate hostname match of the most recent tls_get: -2 = n/a, 1 = the cert's
  * SAN/CN matches the requested host, 0 = mismatch (the connection was rejected). */
 int tls_host_match(void);
+
+/* leaf-certificate identity of the most recent tls_get (for a cert-info display):
+ * the subject commonName and the notAfter (expiry) string; "" if none. */
+const char *tls_leaf_cn(void);
+const char *tls_leaf_expiry(void);
