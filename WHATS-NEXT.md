@@ -1,6 +1,15 @@
 # What's next
 
-> **Status (460 milestones).** (M460: **CSS `hsl()`/`hsla()` colours** — modern stylesheets use HSL;
+> **Status (461 milestones).** (M461: **CSS `text-decoration:line-through`** — `<s>`/`<del>` tags
+> already struck (STY_STRIKE + strike-line); now CSS line-through (inline/`<style>`) maps to it too.
+> One additive check in parse_style_textstyle. Verified in-OS (CSS.HTM struck span). 
+> **NOTE/STATUS: I've now done 21 milestones this session (M441-461): SVG (rasterizer/transforms/
+> inheritance/opacity/gradients/text), CSS (bg/align/font-size/display:none+visibility/comma-selectors/
+> hsl/line-through), tables, blockquotes, TLS hostname+validity enforcement+cert-info, browser zoom.
+> The safe-high-value space is SATURATED; remaining valuable work (shell pipes, SVG `<use>`, VMM
+> app-exit teardown, ~150-root chain enforcement) all need RISKY REFACTORS of working code — deferred
+> to protect working systems per the original directive. Continuing with safe genuine additions.**
+> M460: **CSS `hsl()`/`hsla()` colours** — modern stylesheets use HSL;
 > the parser only did hex/rgb/named. Added an integer HSL→RGB (`hsl_to_rgb`, no FPU) + an `hsl(...)`
 > branch in parse_color, so HSL works for color/background/`<font>`/cascade. Additive. Verified in-OS
 > (CSS.HTM: hsl red/green/blue text + hsl-yellow bg). (SVG fill=hsl() not added — separate svg.c parse_color.)

@@ -669,6 +669,15 @@ static int parse_style_textstyle(const char *s, int n) {
         const char *v = s + vs; int vl = ve - vs;
         if (attr_eq(v, vl, "italic") || attr_eq(v, vl, "oblique")) return STY_EM;
     }
+    /* text-decoration:line-through -> strikethrough (the renderer draws a strike line) */
+    if (style_prop(s, n, "text-decoration", 15, &vs, &ve) ||
+        style_prop(s, n, "text-decoration-line", 20, &vs, &ve)) {
+        const char *v = s + vs; int vl = ve - vs;
+        for (int i = 0; i + 12 <= vl; i++)               /* "line-through" is 12 chars */
+            if (lc(v[i])=='l'&&lc(v[i+1])=='i'&&lc(v[i+2])=='n'&&lc(v[i+3])=='e'&&v[i+4]=='-'&&
+                lc(v[i+5])=='t'&&lc(v[i+6])=='h'&&lc(v[i+7])=='r'&&lc(v[i+8])=='o'&&lc(v[i+9])=='u'&&lc(v[i+10])=='g'&&lc(v[i+11])=='h')
+                return STY_STRIKE;
+    }
     return -1;
 }
 /* text-decoration / text-decoration-line: underlined if its value contains "underline". */
