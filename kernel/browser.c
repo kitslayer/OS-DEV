@@ -2928,6 +2928,44 @@ static int url_ends(const char *u, const char *ext) {
     return 1;
 }
 
+/* CSV -> an HTML <table>, so the browser can view local .csv data files. Bounded
+ * for untrusted input: every write capped, every read within `len`. Handles RFC-
+ * 4180 quoting ("" is a literal quote; commas inside quotes are not delimiters);
+ * the first row becomes the <th> header. Embedded newlines inside quotes aren't
+ * supported (rows split on '\n') — a documented simplification. */
+static int csv_to_html(const char *s, int len, char *out, int cap) {
+    int p = 0, i = 0, row = 0;
+    md_put(out, &p, cap, "<table>");
+    while (i < len) {
+        md_put(out, &p, cap, "<tr>");
+        int eol = 0;
+        while (!eol) {
+            md_put(out, &p, cap, row == 0 ? "<th>" : "<td>");
+            if (i < len && s[i] == '"') {                /* quoted field */
+                i++;
+                while (i < len) {
+                    if (s[i] == '"') {
+                        if (i + 1 < len && s[i + 1] == '"') { md_esc(out, &p, cap, '"'); i += 2; }
+                        else { i++; break; }             /* closing quote */
+                    } else { md_esc(out, &p, cap, s[i]); i++; }
+                }
+            } else {                                     /* bare field */
+                while (i < len && s[i] != ',' && s[i] != '\n' && s[i] != '\r')
+                    { md_esc(out, &p, cap, s[i]); i++; }
+            }
+            md_put(out, &p, cap, row == 0 ? "</th>" : "</td>");
+            if (i < len && s[i] == ',') i++;             /* another field follows */
+            else eol = 1;                                /* newline or EOF ends the row */
+        }
+        md_put(out, &p, cap, "</tr>");
+        while (i < len && s[i] != '\n') i++;             /* consume to end of line */
+        if (i < len) i++;                                /* and the '\n' */
+        row++;
+    }
+    md_put(out, &p, cap, "</table>");
+    return p;
+}
+
 /* Request an async load of b->url. If the worker is busy, remember the intent
  * (b->want) and retry from browser_poll(), so a load is never silently dropped. */
 static void browser_navigate(browser_t *b) {
@@ -2974,6 +3012,15 @@ static void browser_navigate(browser_t *b) {
                 b->bodyoff = 0; b->bodylen = hlen;
                 parse_html(b, b->raw, hlen);
                 set_status(b, "markdown");
+                return;
+            }
+            if (url_ends(b->url, ".csv")) {                  /* CSV -> an HTML table */
+                int hlen = csv_to_html((const char *)big, (int)bn, b->raw, RAW_MAX - 1);
+                kfree(big);
+                b->raw[hlen] = 0; b->rawlen = hlen;
+                b->bodyoff = 0; b->bodylen = hlen;
+                parse_html(b, b->raw, hlen);
+                set_status(b, "csv");
                 return;
             }
             long cp = bn < RAW_MAX - 1 ? bn : RAW_MAX - 1;   /* not an image: keep (capped) for text/HTML */

@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (484 milestones).** (M484: **GFM markdown: tables + images** — extends M482's `md_to_html` with
+> **Status (485 milestones).** (M485: **CSV files render as tables (`.csv`)** — a local `.csv` opens as an
+> HTML `<table>` via `csv_to_html` (same safe pattern as markdown: convert → parse_html, reuses md_put/
+> md_esc). RFC-4180 quoting: a `"`-quoted field may contain commas, `""` = a literal quote; first row =
+> `<th>` header. Bounded (writes capped, reads within len; rows split on `\n` — embedded newlines in quotes
+> unsupported, documented). Additive: only file: URLs ending `.csv`. Baked data.csv demo + index link.
+> Verified in-OS: `browse file:data.csv` → table renders, and the quoted field "Designer, UX" stays ONE
+> cell (proves quote handling). File: kernel/browser.c, tools/mkfatfs.c. **Rounds out local-document
+> support: HTML / text / Markdown / CSV / images. Safe + fully locally verifiable.**)
+> M484: **GFM markdown: tables + images** — extends M482's `md_to_html` with
 > `![alt](url)` images (emit `<img src>`, flows through the inline-image path → a .md can embed file:/data:/
 > remote images, tying the whole image arc together) and GFM tables (a `| a | b |` line + a `|---|` separator
 > next line → `<table>` with `<th>`/`<td>`; `md_table_row` treats `|` as a pure delimiter, trims cell spaces).
