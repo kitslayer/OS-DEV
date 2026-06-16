@@ -120,7 +120,7 @@ static int run_command(char *line, char *cwd) {
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)\n");
         } else if (streq(line, "ls")) {
-            char buf[1024];
+            char buf[8192];                 /* hold a full directory (~90+ files) */
             sys_list(buf, sizeof(buf));
             print(buf);
         } else if (startswith(line, "cat ")) {
@@ -1608,7 +1608,7 @@ static int glob_match(const char *pat, const char *s){
  * rather than overflowing). Reuses sys_list — the same listing `ls` prints, one
  * "NAME size" per line — so the first whitespace-delimited field is the name. */
 static void glob_expand(const char *src, char *dst, int dstsz){
-    static char listing[2048];
+    static char listing[8192];   /* hold a full directory so globs match every file */
     long ln = sys_list(listing, sizeof listing - 1); if (ln < 0) ln = 0; listing[ln] = 0;
     int dp = 0;
     const char *p = src;

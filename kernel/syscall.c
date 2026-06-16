@@ -103,11 +103,11 @@ void syscall_dispatch(struct registers *r) {
         /* Format the root directory into the user buffer: "name  size\n". */
         char       *buf = (char *)r->rsi;
         uint64_t    max = r->rdx;
-        vfs_dirent  ents[32];
-        int         count = vfs_list(ents, 32);
+        static vfs_dirent ents[256];   /* static (not stack): 256*sizeof too big for the 16KB kernel stack */
+        int         count = vfs_list(ents, 256);
         uint64_t    n = 0;
         for (int i = 0; i < count; i++) {
-            for (int j = 0; ents[i].name[j] && n < max - 1; j++)
+            for (int j = 0; j < 63 && ents[i].name[j] && n < max - 1; j++)   /* j<63: defensive name bound */
                 buf[n++] = ents[i].name[j];
             while (n < max - 1 && (n == 0 || buf[n - 1] != '\n')) {
                 buf[n++] = ' ';

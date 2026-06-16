@@ -1,6 +1,15 @@
 # What's next
 
-> **Status (493 milestones).** (M493: **`tar` — extract `.tar` + `.tar.gz`** — completes the archive suite
+> **Status (494 milestones).** (M494: **`ls` shows the whole directory (was capped at 32)** — a real bug:
+> SYS_list enumerated only 32 entries (vfs_dirent ents[32] on the stack), so with ~100 files now on the
+> disk (~60 INDEX-linked .htm demos + baked images/archives + SHOT screenshots + extracted files) `ls`,
+> GLOB expansion, and the browser file list all silently saw ~1/3. Fix: cap 32→256 using a STATIC array
+> (256*68B too big for the 16KB kernel stack; concurrent-ls race is benign — bounded + NUL-terminated
+> names) + a defensive j<63 name bound; shell ls buffer 1024→8192 + glob listing 2048→8192. Verified
+> in-OS: `ls | wc -l` → 108 (was 32); `ls | grep TGZ` → finds TEST.TGZ (previously invisible). Files:
+> kernel/syscall.c, user/shell.c. **A quality/bug-fix found while testing the archive work — the disk grew
+> past the old cap. "Improve what needs it most." 17 milestones this session (M478-494).**)
+> M493: **`tar` — extract `.tar` + `.tar.gz`** — completes the archive suite
 > (.gz/.zip/.tar.gz). kernel/tar.c: simple ustar 512-byte-header parsing (name@0, octal size@124, type@156),
 > bounded (data span checked vs len, walk always advances), I wrote it directly (simple). SYS_untar(41):
 > if the file starts with the gzip magic (1f 8b) → gz_inflate first → tar_extract — so .tar.gz/.tgz works
