@@ -181,9 +181,13 @@ tartest:
 heaptest:
 	@tests/run-heap-tests.sh
 
+# Host-side regression + fuzz test of the WAV header parser (ASan+UBSan).
+wavtest:
+	@tests/run-wav-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest)"
 
 clean:
 	rm -rf $(BUILD)
