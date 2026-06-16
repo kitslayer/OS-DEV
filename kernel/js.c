@@ -2733,7 +2733,12 @@ static val nat_obj_getPrototypeOf(val *a, int n){ if (n>=1 && (a[0].t==V_OBJ||a[
 static val nat_obj_setPrototypeOf(val *a, int n){ if (n>=1 && a[0].t==V_OBJ && a[0].o) a[0].o->proto = (n>=2 && a[1].t==V_OBJ && a[1].o) ? a[1].o : 0; return n? a[0] : UND(); }
 static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
     if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
-    for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++) obj_set(a[0].o, a[i].o->keys[j], a[i].o->vals[j]);
+    for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++){
+        val sv=a[i].o->vals[j]; if(is_accessor(sv)) sv=fire_getter(sv,a[i]);   /* read source via getter (M427) */
+        const char *key=a[i].o->keys[j]; val cur;
+        if(obj_get(a[0].o,key,&cur) && is_accessor(cur)){ val st=cur.o->vals[1]; if(st.t!=V_UNDEF) call_function_this(st,a[0],&sv,1); }   /* fire target's setter; getter-only target ignores the write */
+        else obj_set(a[0].o, key, sv);
+    }
     return a[0];
 }
 static int64_t nat_sign_v(int64_t x){ return x>0?1:x<0?-1:0; }
