@@ -959,6 +959,7 @@ static const struct {
     { "TEST    ZIP", "tools/test.zip" },  /* a zip archive: extract in-OS with: unzip TEST.ZIP */
     { "TEST    TGZ", "tools/test.tgz" },  /* a .tar.gz tarball: extract in-OS with: tar TEST.TGZ */
     { "DOOM1   WAD", "tools/DOOM1.WAD" }, /* the shareware DOOM IWAD (~4 MB): play in-OS with: run doom */
+    { "MUSIC   WAV", "tools/MUSIC.WAV" }, /* a C-major-scale tune: play in-OS with: play MUSIC.WAV */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 

@@ -56,6 +56,7 @@
 #define SYS_setkbmode 46 /* (raw)           -> 1 = raw make/break key events, 0 = cooked */
 #define SYS_getkbevent 47 /* ()             -> next raw key event, or -1 (non-blocking) */
 #define SYS_pcm    48   /* (frames, nframes) -> play 16-bit stereo PCM at 48 kHz (blocks) */
+#define SYS_playwav 49  /* (name)          -> play a .wav file (16-bit PCM); 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

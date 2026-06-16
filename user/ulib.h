@@ -50,6 +50,7 @@ int  sys_gfx_blit(const void *pixels); /* copy w*h pixels (0x00RRGGBB) to the wi
 void sys_setkbmode(int raw);         /* 1 = raw make/break key events, 0 = cooked ASCII */
 int  sys_getkbevent(void);           /* next raw key event (scancode|0x100 released|0x200 ext), or -1 */
 void sys_pcm(const void *frames, int nframes);   /* play 16-bit stereo PCM @ 48 kHz (blocks) */
+long sys_playwav(const char *name);              /* play a .wav file (16-bit PCM); 0/-1 */
 
 /* dynamic memory (a first-fit free list over sbrk) */
 void *malloc(unsigned long n);

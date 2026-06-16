@@ -19,6 +19,7 @@
 #include "pmm.h"
 #include "timer.h"
 #include "console.h"
+#include "kheap.h"
 #include "string.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -115,4 +116,47 @@ void ac97_play(const int16_t *frames, int nframes) {
         for (int i = 0; i < 200000 && !(inb(nabm + PO_SR) & SR_DCH); i++) { }
         outb(nabm + PO_CR, 0);                        /* stop */
     }
+}
+
+/* little-endian helpers over a byte buffer */
+static uint32_t rd32(const uint8_t *p) { return p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24; }
+static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1]<<8); }
+
+int ac97_play_wav(const uint8_t *d, int len) {
+    if (!inited || len < 44) return -1;
+    if (d[0]!='R'||d[1]!='I'||d[2]!='F'||d[3]!='F'||d[8]!='W'||d[9]!='A'||d[10]!='V'||d[11]!='E')
+        return -1;
+
+    int channels = 0, rate = 0, bits = 0;
+    const uint8_t *pcm = 0; long pcmlen = 0;
+    int off = 12;
+    while (off + 8 <= len) {                          /* walk the RIFF chunks */
+        const uint8_t *id = d + off;
+        uint32_t csz = rd32(d + off + 4);
+        const uint8_t *body = d + off + 8;
+        if (off + 8 + (long)csz > len) csz = (uint32_t)(len - (off + 8));   /* clamp to buffer */
+        if (id[0]=='f'&&id[1]=='m'&&id[2]=='t'&&id[3]==' ' && csz >= 16) {
+            channels = rd16(body + 2); rate = (int)rd32(body + 4); bits = rd16(body + 14);
+        } else if (id[0]=='d'&&id[1]=='a'&&id[2]=='t'&&id[3]=='a') {
+            pcm = body; pcmlen = csz;
+        }
+        off += 8 + csz + (csz & 1);                   /* chunks are word-aligned */
+    }
+    if (!pcm || bits != 16 || channels < 1 || channels > 2 || rate <= 0) return -1;
+
+    long in_frames = pcmlen / (2 * channels);
+    const int16_t *in = (const int16_t *)pcm;
+    long out_frames = in_frames * 48000 / rate;       /* resample to the AC'97's 48 kHz */
+    if (out_frames <= 0) return -1;
+    int16_t *out = kmalloc((size_t)out_frames * 4);
+    if (!out) return -1;
+    for (long i = 0; i < out_frames; i++) {
+        long si = i * rate / 48000;                   /* nearest-neighbour */
+        if (si >= in_frames) si = in_frames - 1;
+        if (channels == 2) { out[i*2] = in[si*2]; out[i*2+1] = in[si*2+1]; }
+        else               { out[i*2] = out[i*2+1] = in[si]; }
+    }
+    ac97_play(out, (int)out_frames);
+    kfree(out);
+    return 0;
 }

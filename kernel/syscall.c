@@ -437,6 +437,15 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* ac97_play blocks on the timer */
         ac97_play((const int16_t *)r->rdi, (int)r->rsi);
         break;
+    case SYS_playwav: {
+        __asm__ volatile("sti");
+        uint8_t *wb = kmalloc(8 * 1024 * 1024);   /* the .wav file (<= 8 MB) */
+        long n = wb ? vfs_read((const char *)r->rdi, wb, 8 * 1024 * 1024) : -1;
+        int rc = (n > 0) ? ac97_play_wav(wb, (int)n) : -1;
+        if (wb) kfree(wb);
+        r->rax = (uint64_t)(int64_t)rc;
+        break;
+    }
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;
