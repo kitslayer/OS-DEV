@@ -1,6 +1,19 @@
 # What's next
 
-> **Status (491 milestones).** (M491: **PNG screenshots — from-scratch PNG ENCODER** — kernel/png_encode.c
+> **Status (492 milestones).** (M492: **`unzip` — extract `.zip` archives** — completes the archive story
+> (.gz single → .zip multi-file). kernel/zip.c parses via the CENTRAL DIRECTORY (authoritative index),
+> reuses `inflate` (zip method 8 = raw DEFLATE; 0 = stored), bounds-checks EVERY attacker-controlled
+> offset/size in 64-bit (no wrap). DELEGATED to a subagent (intricate format + fuzzing, non-cyber) →
+> reviewed (in_bounds on all reads, EOCD backward-scan bounded, central-dir walk capped by count AND span,
+> inflate output bounded by scratchcap) → integrated. SYS_unzip(40) + a kernel emit callback that 8.3-
+> mangles each path + vfs_writes; shell `unzip <f.zip>`. New ziptest in `make check` (exact extraction incl.
+> a system-`zip` archive w/ comment+subdir + truncation/corruption fuzz, ASan clean). Verified in-OS:
+> `unzip TEST.ZIP` → 3 files extracted byte-exact (stored + a 2400-byte deflate entry, confirmed via disk).
+> Files: kernel/zip.c, zip.h, syscall.c, shell.c, ulib.*, Makefile, tools/test.zip, tests/zip/*.
+> **10 host suites now. Compression/archive arc complete: gunzip + gzip + unzip + PNG, all from-scratch,
+> all reusing the inflate/deflate core. Three intricate algorithms (deflate/png/zip) via subagents +
+> my review this session — exactly the directive's "use subagents for hard work + run reviews".**)
+> M491: **PNG screenshots — from-scratch PNG ENCODER** — kernel/png_encode.c
 > (filter-0 scanlines → zlib[raw_deflate body + Adler-32] → IHDR/IDAT/IEND chunks + CRC-32), fully bounded.
 > DELEGATED to a subagent (intricate, non-cyber) → reviewed (every out-write via bounded pe_put, IDAT
 > length-patch + CRC guarded by the oom check first, integer-overflow guarded) → integrated. fb_save_png

@@ -47,6 +47,7 @@
 #define SYS_screenshot 37 /* (name)         -> save the screen to a BMP file; 0/-1 */
 #define SYS_gunzip 38   /* (insrc, outname) -> decompress a .gz file; output bytes, or -1 */
 #define SYS_gzip   39   /* (insrc, outname) -> gzip-compress a file; output bytes, or -1 */
+#define SYS_unzip  40   /* (zipname)        -> extract a .zip to 8.3 files; files written, or -1 */
 
 #define SYSCALL_VECTOR 0x80
 

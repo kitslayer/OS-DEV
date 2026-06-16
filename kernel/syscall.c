@@ -28,7 +28,37 @@
 #include "string.h"
 #include "kheap.h"
 #include "inflate.h"
+#include "zip.h"
 #include <stdint.h>
+
+/* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
+ * (basename, upper-cased, <=8 chars + '.' + <=3-char ext) and writes it via the
+ * VFS, counting successes in ctx. */
+struct unzip_ctx { int written; };
+static void unzip_emit(void *vctx, const char *name, int namelen,
+                       const uint8_t *data, int datalen) {
+    struct unzip_ctx *c = (struct unzip_ctx *)vctx;
+    int base = 0;
+    for (int i = 0; i < namelen; i++) if (name[i] == '/') base = i + 1;   /* drop directories */
+    int dot = -1;
+    for (int i = base; i < namelen; i++) if (name[i] == '.') dot = i;
+    int nend = (dot >= 0) ? dot : namelen;
+    char fn[13]; int p = 0;
+    for (int i = base; i < nend && p < 8; i++) {
+        char ch = name[i]; if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
+        fn[p++] = ch;
+    }
+    if (dot >= 0) {
+        fn[p++] = '.';
+        for (int i = dot + 1; i < namelen && p < 12; i++) {
+            char ch = name[i]; if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
+            fn[p++] = ch;
+        }
+    }
+    fn[p] = 0;
+    if (p == 0 || (p == 1 && fn[0] == '.')) return;          /* nothing usable */
+    if (vfs_write(fn, data, (unsigned long)datalen) >= 0) c->written++;
+}
 
 static void put2(char *p, int v) { p[0] = '0' + (v / 10) % 10; p[1] = '0' + v % 10; }
 
@@ -280,6 +310,18 @@ void syscall_dispatch(struct registers *r) {
         if (dl > 0 && vfs_write(outname, out, (unsigned long)dl) < 0) dl = -1;
         kfree(in); kfree(out);
         r->rax = (uint64_t)(int64_t)dl;
+        break;
+    }
+    case SYS_unzip: {
+        const char *zn = (const char *)r->rdi;
+        uint8_t *zbuf = kmalloc(1048576);       /* the .zip archive (<= 1 MB) */
+        uint8_t *scr = kmalloc(1048576);        /* one decompressed entry at a time (<= 1 MB) */
+        if (!zbuf || !scr) { if (zbuf) kfree(zbuf); if (scr) kfree(scr); r->rax = (uint64_t)-1; break; }
+        long zl = vfs_read(zn, zbuf, 1048576);
+        struct unzip_ctx uc = { 0 };
+        int cnt = zl > 0 ? zip_extract(zbuf, (int)zl, unzip_emit, &uc, scr, 1048576) : -1;
+        kfree(zbuf); kfree(scr);
+        r->rax = (uint64_t)(int64_t)(cnt < 0 ? -1 : uc.written);   /* files actually written */
         break;
     }
     case SYS_crypt: {

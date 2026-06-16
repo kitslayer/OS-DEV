@@ -144,9 +144,13 @@ deflatetest:
 pngenctest:
 	@tests/run-pngenc-tests.sh
 
+# Host-side extraction + corrupt-input fuzz of the ZIP extractor (ASan+UBSan).
+ziptest:
+	@tests/run-zip-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest)"
 
 clean:
 	rm -rf $(BUILD)
