@@ -938,10 +938,68 @@ static rnode *rx_atom(rparse *P){
         rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} if(e=='n')n->c='\n'; else if(e=='t')n->c='\t'; else if(e=='r')n->c='\r'; else n->c=e; return n; }
     P->pos++; rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} n->c=c; return n;
 }
+/* `{n,m}` support is implemented by EXPANDING the bounded quantifier in the
+ * PARSER into the existing node types (a{2,4} -> a a a? a?, a{2,} -> a a a*,
+ * a{3} -> a a a). This deliberately leaves the compiler + the recursive
+ * backtracking matcher — the depth/step-budget-bounded code reviews scrutinised —
+ * COMPLETELY UNTOUCHED; repetitions inherit the existing greedy/backtrack
+ * semantics. The count is capped (RE_MAXREP) so the digit parse can't overflow,
+ * and the expansion is further bounded by RE_MAXPROG at emit + arena OOM, so a
+ * huge bound (e.g. a{1,99999}) fails gracefully ("too complex") rather than
+ * exploding. A `{` that isn't a well-formed quantifier stays a literal char. */
+#define RE_MAXREP 1000
+static rnode *rx_clone(rnode *n, int depth){
+    if(!n) return 0;
+    if(depth > 400) return 0;                         /* atom depth is rx_alt-capped at 400; bound the clone too */
+    rnode *c=rx_node(n->type); if(!c) return 0;
+    c->c=n->c; c->cls=n->cls; c->group=n->group;      /* cls is read-only after parse -> shareable */
+    if(n->a){ c->a=rx_clone(n->a,depth+1); if(!c->a) return 0; }
+    if(n->b){ c->b=rx_clone(n->b,depth+1); if(!c->b) return 0; }
+    return c;
+}
+static rnode *rx_cat2(rnode *a, rnode *b){ if(!a) return b; if(!b) return a; rnode *c=rx_node(RN_CAT); if(!c) return 0; c->a=a; c->b=b; return c; }
+/* Build the {n1,n2} expansion of `atom` (n2<0 means open-ended {n1,}). Uses the
+ * original `atom` once and clones for the rest. Sets P->err + returns 0 on OOM. */
+static rnode *rx_expand_rep(rparse *P, rnode *atom, int n1, int n2){
+    rnode *result=0; int used=0;
+    for(int i=0;i<n1;i++){                            /* n1 mandatory copies */
+        rnode *cp = used?rx_clone(atom,0):atom; used=1;
+        if(!cp){ P->err=1; return 0; }
+        result=rx_cat2(result,cp); if(!result){ P->err=1; return 0; }
+    }
+    if(n2<0){                                         /* open {n1,}: append a STAR */
+        rnode *base = used?rx_clone(atom,0):atom; used=1;
+        if(!base){ P->err=1; return 0; }
+        rnode *st=rx_node(RN_STAR); if(!st){ P->err=1; return 0; } st->a=base;
+        result=rx_cat2(result,st); if(!result){ P->err=1; return 0; }
+    } else {                                          /* bounded {n1,n2}: (n2-n1) optional copies */
+        for(int i=n1;i<n2;i++){
+            rnode *base = used?rx_clone(atom,0):atom; used=1;
+            if(!base){ P->err=1; return 0; }
+            rnode *opt=rx_node(RN_OPT); if(!opt){ P->err=1; return 0; } opt->a=base;
+            result=rx_cat2(result,opt); if(!result){ P->err=1; return 0; }
+        }
+    }
+    return result ? result : rx_node(RN_EMPTY);        /* {0} / {0,0} -> empty */
+}
 static rnode *rx_rep(rparse *P){
     rnode *a=rx_atom(P); if(!a) return 0;
     while(P->pos<P->len){ int c=P->p[P->pos];
         if(c=='*'||c=='+'||c=='?'){ P->pos++; rnode *q=rx_node(c=='*'?RN_STAR:c=='+'?RN_PLUS:RN_OPT); if(!q){P->err=1;return 0;} q->a=a; a=q; }
+        else if(c=='{'){                              /* {n} / {n,} / {n,m}; else literal { */
+            int save=P->pos; P->pos++;
+            int n1=0,n2=-1,have=0;
+            while(P->pos<P->len && P->p[P->pos]>='0'&&P->p[P->pos]<='9'){ n1=n1*10+(P->p[P->pos]-'0'); if(n1>RE_MAXREP)n1=RE_MAXREP; P->pos++; have=1; }
+            if(!have){ P->pos=save; break; }          /* { not followed by a digit -> literal */
+            if(P->pos<P->len && P->p[P->pos]==','){ P->pos++;
+                if(P->pos<P->len && P->p[P->pos]>='0'&&P->p[P->pos]<='9'){ n2=0; while(P->pos<P->len && P->p[P->pos]>='0'&&P->p[P->pos]<='9'){ n2=n2*10+(P->p[P->pos]-'0'); if(n2>RE_MAXREP)n2=RE_MAXREP; P->pos++; } }
+                else n2=-1;                            /* {n,} open-ended */
+            } else n2=n1;                              /* {n} exact */
+            if(!(P->pos<P->len && P->p[P->pos]=='}')){ P->pos=save; break; }  /* no } -> literal { */
+            if(n2>=0 && n2<n1){ P->pos=save; break; } /* {3,2} invalid -> literal */
+            P->pos++;                                  /* past } */
+            a=rx_expand_rep(P,a,n1,n2); if(!a){ P->err=1; return 0; }
+        }
         else break; }
     return a;
 }

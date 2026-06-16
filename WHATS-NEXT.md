@@ -1,6 +1,10 @@
 # What's next
 
-> **Status (437 milestones).** (M424–437: more shell tools — `cmp`/`paste`/`comm`/`diff`
+> **Status (438 milestones).** (M438: **JS regex bounded quantifiers `{n}`/`{n,}`/`{n,m}`**
+> — a real architectural feature done safely by EXPANDING in the parser into existing
+> nodes (`a{2,4}`→`a a a? a?`), so the audited matcher/compiler stay byte-for-byte
+> unchanged; count-capped + RE_MAXPROG-bounded + ReDoS-safe; reviewed SHIP (3M-iter
+> ASan fuzz) + verified in-OS. M424–437: more shell tools — `cmp`/`paste`/`comm`/`diff`
 > (the file-compare set: byte / sorted-set / LCS line-edit), `cut -f` (delimited fields,
 > completing `cut`), `strings`, `basename`/`dirname`; a JS-engine correctness
 > sweep found by probing — getters now fire in value-iteration too
