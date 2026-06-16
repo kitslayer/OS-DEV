@@ -132,9 +132,13 @@ fstest:
 kattest:
 	@tests/run-crypto-tests.sh
 
+# Host-side fuzz test of the SVG rasterizer over adversarial/truncated XML (ASan+UBSan).
+svgtest:
+	@tests/run-svg-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest)"
 
 clean:
 	rm -rf $(BUILD)

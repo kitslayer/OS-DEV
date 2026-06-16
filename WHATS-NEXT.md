@@ -1,6 +1,12 @@
 # What's next
 
-> **Status (440 milestones).** (M440: CSS `text-transform:uppercase/lowercase` — inline `style=`
+> **Status (441 milestones).** (M441: **from-scratch SVG rasterizer** (`kernel/svg.c`, 846 lines,
+> integer-only/no-FPU) — decodes a useful SVG subset (rect/circle/ellipse/line/poly*/path with
+> beziers, solid fills, viewBox, even-odd scanline fill + stroke) to RGBA, plugged into
+> `decode_image` so local+remote SVGs render inline (the M439 `.svg`-skip is lifted); SHIP-reviewed
+> + 520k author fuzz (3 UB fixed) + ~12M independent adversarial iters; new `make check` suite
+> #7 `svgtest`; verified end-to-end in-OS (SVGT.HTM → blue square/yellow circle/red triangle).
+> M440: CSS `text-transform:uppercase/lowercase` — inline `style=`
 > + `<style>`-rule cascade, emit-time case-fold into the render pool (so `.textContent` stays
 > original), composes with the color/weight/style/underline scope stack; verified in-OS (NEST.HTM). M439: **inline remote images** — the browser now fetches
 > + decodes remote PNG/GIF/JPEG `<img>` inline (was: links). Designed via a Plan subagent

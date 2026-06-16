@@ -20,6 +20,7 @@
 #include "png.h"
 #include "gif.h"
 #include "jpeg.h"
+#include "svg.h"
 #include "tls.h"
 #include "js.h"
 #include "console.h"
@@ -2035,14 +2036,13 @@ static void collect_remote_imgs(browser_t *b) {
         if (ae >= len) break;                             /* unterminated tag -> stop */
         const char *src; int srcl;
         if (find_attr(h + as, ae - as, "src", &src, &srcl) && srcl > 0 && srcl <= 95) {
-            /* our decoders handle PNG/GIF/JPEG only — skip a src whose extension is a
-             * format we can't decode (SVG/WebP/AVIF/ICO, common on the modern web) so we
-             * don't waste a fetch + pre-paint latency on an image that would just fall
-             * back to a link. Extension-less srcs are still tried (may be a real image). */
+            /* our decoders handle PNG/GIF/JPEG/SVG — skip a src whose extension is a
+             * format we still can't decode (WebP/AVIF/ICO) so we don't waste a fetch +
+             * pre-paint latency on an image that would just fall back to a link.
+             * Extension-less srcs are still tried (may be a real image). */
             int pe = srcl; for (int x = 0; x < srcl; x++) if (src[x] == '?') { pe = x; break; }
             int unsup = 0;
             if (pe >= 4) { const char *e = src + pe - 4;
-                if (e[0]=='.' && lc(e[1])=='s'&&lc(e[2])=='v'&&lc(e[3])=='g') unsup = 1;       /* .svg */
                 if (e[0]=='.' && lc(e[1])=='i'&&lc(e[2])=='c'&&lc(e[3])=='o') unsup = 1; }     /* .ico */
             if (!unsup && pe >= 5) { const char *e = src + pe - 5;
                 if (e[0]=='.' && lc(e[1])=='w'&&lc(e[2])=='e'&&lc(e[3])=='b'&&lc(e[4])=='p') unsup = 1;   /* .webp */
@@ -2256,6 +2256,26 @@ static uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
         kfree(scr);
         if (r != 0) { kfree(rgba); return 0; }
         return rgba;
+    }
+    /* SVG (text XML): detect "<svg" within the first chunk, then rasterize. svg_decode
+     * caps W,H<=512, so a 1 MB worst-case buffer holds any output; shrink to exact after. */
+    { int issvg = 0, lim = len < 512 ? len : 512;
+      for (int i = 0; i + 4 <= lim; i++)
+          if (data[i]=='<' && (data[i+1]|32)=='s' && (data[i+2]|32)=='v' && (data[i+3]|32)=='g') { issvg = 1; break; }
+      if (issvg) {
+          long ocap = 512L*512*4, scap = 256*1024;
+          uint8_t *rgba = kmalloc((unsigned long)ocap);
+          uint8_t *scr  = kmalloc((unsigned long)scap);
+          if (!rgba || !scr) { if (rgba) kfree(rgba); if (scr) kfree(scr); return 0; }
+          int w = 0, h = 0;
+          int r = svg_decode(data, len, rgba, (int)ocap, scr, (int)scap, &w, &h);
+          kfree(scr);
+          if (r != 0 || w <= 0 || h <= 0) { kfree(rgba); return 0; }
+          long exact = (long)w * h * 4;            /* shrink the 1 MB worst-case buffer to exactly W*H*4 */
+          uint8_t *fit = kmalloc((unsigned long)exact);
+          if (fit) { memcpy(fit, rgba, (unsigned long)exact); kfree(rgba); *ow = w; *oh = h; return fit; }
+          *ow = w; *oh = h; return rgba;           /* shrink alloc failed: the big buffer is still valid */
+      }
     }
     static const uint8_t pngsig[8] = {0x89,'P','N','G',0x0D,0x0A,0x1A,0x0A};
     int ispng = 0, isgif = 0;
