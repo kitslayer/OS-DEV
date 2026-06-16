@@ -4,4 +4,5 @@
 
 void     timer_init(uint32_t hz);   /* program the PIT and install IRQ0 handler */
 uint64_t timer_ticks(void);         /* ticks since boot */
+uint64_t timer_ms(void);            /* milliseconds since boot (monotonic) */
 void     timer_wait(uint64_t ticks);/* busy-sleep this many ticks (hlt-based) */

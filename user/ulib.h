@@ -44,6 +44,7 @@ long sys_untar(const char *tarname);
 void sys_sleep(int ms);
 void sys_setcolor(int color);   /* text colour for subsequent output: palette index 0-15 (0 = default) */
 void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, or (void*)-1 */
+unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
 
 /* dynamic memory (a first-fit free list over sbrk) */
 void *malloc(unsigned long n);

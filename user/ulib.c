@@ -70,6 +70,7 @@ long sys_unzip(const char *zipname) { return do_syscall(SYS_unzip, (long)zipname
 long sys_untar(const char *tarname) { return do_syscall(SYS_untar, (long)tarname, 0, 0); }
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }
 void *sbrk(long inc) { return (void *)do_syscall(SYS_sbrk, inc, 0, 0); }
+unsigned long sys_uptime_ms(void) { return (unsigned long)do_syscall(SYS_uptime_ms, 0, 0, 0); }
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);
 }

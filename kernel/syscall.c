@@ -417,6 +417,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_sbrk:
         r->rax = app_sbrk((long)r->rdi);   /* grow the heap; old break, or (uint64_t)-1 */
         break;
+    case SYS_uptime_ms:
+        r->rax = timer_ms();               /* monotonic milliseconds since boot */
+        break;
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

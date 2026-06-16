@@ -20,6 +20,7 @@
 #define PIT_FREQUENCY 1193182u
 
 static volatile uint64_t ticks;
+static uint32_t          tick_hz = 100;   /* IRQ0 frequency, set by timer_init */
 
 static void timer_handler(struct registers *r) {
     (void)r;
@@ -29,6 +30,7 @@ static void timer_handler(struct registers *r) {
 
 void timer_init(uint32_t hz) {
     uint32_t divisor = PIT_FREQUENCY / hz;
+    tick_hz = hz;
 
     /* command 0x36: channel 0, access lobyte+hibyte, mode 3 (square wave). */
     outb(PIT_COMMAND, 0x36);
@@ -40,6 +42,13 @@ void timer_init(uint32_t hz) {
 
 uint64_t timer_ticks(void) {
     return ticks;
+}
+
+/* Milliseconds since boot, derived from the tick count and the PIT frequency.
+ * Monotonic; resolution is one tick (10 ms at the default 100 Hz) — coarse but
+ * ample for frame pacing (e.g. DOOM's DG_GetTicksMs). */
+uint64_t timer_ms(void) {
+    return ticks * 1000ull / tick_hz;
 }
 
 void timer_wait(uint64_t n) {

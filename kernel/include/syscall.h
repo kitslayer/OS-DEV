@@ -50,6 +50,7 @@
 #define SYS_unzip  40   /* (zipname)        -> extract a .zip to 8.3 files; files written, or -1 */
 #define SYS_untar  41   /* (tarname)        -> extract a .tar/.tar.gz to 8.3 files; files written, or -1 */
 #define SYS_sbrk   42   /* (inc)            -> grow the heap by inc bytes; old break, or (void*)-1 */
+#define SYS_uptime_ms 43 /* ()              -> milliseconds since boot (monotonic) */
 
 #define SYSCALL_VECTOR 0x80
 
