@@ -1,6 +1,17 @@
 # What's next
 
-> **Status (482 milestones).** (M482: **Markdown rendering in the browser (`.md` files)** — the browser
+> **Status (483 milestones).** (M483: **Wordle (new game app)** — guess a hidden 5-letter word in 6
+> tries; each guess coloured green (right letter+spot) / yellow (in word, wrong spot) / grey (absent) via
+> the standard TWO-PASS scoring (greens claim positions first, then yellows from leftovers — so duplicate
+> letters score correctly). ~110-word baked list, clock-seeded xorshift PRNG, Enter=new round on game end.
+> STRICTLY ADDITIVE (zero risk): a new ring-3 ELF (user/wordle.c) wired into the 5 registration points —
+> Makefile USER_ELFS, kernel/asm/user_blob.asm (incbin), kernel/app.c (extern + progs[]), desktop.c menu[].
+> `run wordle` or Apps→Wordle. Verified in-OS: launched + focused, accepted typed guesses, scored/coloured
+> them (green+grey clearly distinct), guess count 3/6, grid + dot-rows rendered, stable. Uses the colored-
+> text app API (sys_setcolor palette: 0=green, 3=yellow, 8=grey) like paint.c. **A new app is the safest
+> possible addition — found after confirming images/shell/JS-stdlib/browser-core were saturated; the user
+> explicitly wants "as many cool features as you can."**)
+> M482: **Markdown rendering in the browser (`.md` files)** — the browser
 > renders local Markdown: a from-scratch markdown→HTML converter (`md_to_html` in browser.c) turns a `.md`
 > file into HTML, fed to the existing battle-tested `parse_html` (so it inherits all the styling). Handles
 > # headings, bold/italic, inline `code`, ``` fences, -/* /+ and N. lists, > quotes, [text](url) links,

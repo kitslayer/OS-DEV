@@ -72,6 +72,7 @@ static const struct menu_item menu[] = {
     { "Hangman", KIND_APP, "hangman" }, { "Adventure", KIND_APP, "adv" },
     { "Tic-Tac-Toe", KIND_APP, "ttt" }, { "Blackjack", KIND_APP, "bj" }, { "Typing", KIND_APP, "typing" },
     { "Simon", KIND_APP, "simon" }, { "Connect 4", KIND_APP, "c4" },
+    { "Wordle", KIND_APP, "wordle" },
     { "Paint", KIND_APP, "paint" }, { "Piano", KIND_APP, "piano" }, { "Jukebox", KIND_APP, "jukebox" },
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Monitor", KIND_SYSMON, 0 },
