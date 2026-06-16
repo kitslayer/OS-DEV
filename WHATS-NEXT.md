@@ -1,6 +1,16 @@
 # What's next
 
-> **Status (462 milestones).** (M462: **SVG `<use>`/`<symbol>` reuse** — `<use href="#id" x= y=>`
+> **Status (463 milestones).** (M463: **Shell pipes (`cmd1 | cmd2`)** — the userspace shell now
+> does UNIX-style N-stage pipelines (`ls | grep TXT`, `cat f | wc`). The command dispatch was
+> extracted into `run_command(line,cwd)` (whole if/else chain wrapped in `do{…}while(0)` so its
+> dispatch-level `continue`s keep meaning — a plain command runs byte-for-byte as before — and "exit"
+> returns 1); `print()` in ulib got an opt-in capture mode (off for every other program); `run_pipe`
+> captures each stage to PIPE.TMP that the next stage reads as its trailing file arg (so grep/wc/sort/
+> head/… consume piped data unchanged). Implemented via a subagent (do-while(0) trick eliminated the
+> continue-conversion risk), then I reviewed (run_command/run_pipe/ulib all sound) + all 7 suites +
+> in-OS verified (ls|grep filters, echo|wc counts 1/3/12). Cosmetic: wc-style commands echo "PIPE.TMP"
+> as the filename — inherent to the temp-file model. Userspace-isolated/recoverable.
+> M462: **SVG `<use>`/`<symbol>` reuse** — `<use href="#id" x= y=>`
 > (+ `xlink:href`) instantiates a defined element (shape, or `<symbol>`/`<g>`, usually in `<defs>`)
 > at an offset. The render loop was extracted into `render_region(ctx,p,end,depth)` (behaviour-
 > preserving at depth 0 — the 10 unit tests lock it byte-for-byte); `find_def` locates the span

@@ -41,6 +41,8 @@ void sys_setcolor(int color);   /* text colour for subsequent output: palette in
 
 /* convenience */
 void          print(const char *s);
+void          cap_begin(char *buf, unsigned long max);  /* redirect print() into buf (length-capped, NUL-terminated) */
+unsigned long cap_end(void);                            /* stop capturing; returns captured byte count */
 int           readline(char *buf, int max);   /* reads a line, strips '\n', NUL-terminates */
 unsigned long ustrlen(const char *s);
 int           streq(const char *a, const char *b);

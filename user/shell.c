@@ -86,17 +86,18 @@ static void cmd_cal(void) {                          /* current month, today hig
     cmd_cal_ym(y, m, today);
 }
 
-int main(void) {
-    print("\n");
-    print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
-    print("  type 'help' for commands\n\n");
-
-    char line[128];
-    char cwd[128]; cwd[0] = '/'; cwd[1] = 0;       /* display path (kernel tracks the real cwd) */
-    for (;;) {
-        print("osdev:"); print(cwd); print("$ ");
-        readline(line, sizeof(line));
-
+/*
+ * Dispatch one command line. Returns 1 if the shell should exit (the "exit"
+ * command), else 0. `cwd` is the display path (an array in main); cd/pwd mutate
+ * it in place and the changes persist via the pointer.
+ *
+ * The whole if/else-if chain is wrapped in `do { ... } while (0);` so that the
+ * original dispatch-level `continue;` (used to skip to the next command) still
+ * does exactly that — it jumps to the `while (0)` and falls out of the block —
+ * without disturbing any `continue` inside a command's own for/while loop.
+ */
+static int run_command(char *line, char *cwd) {
+    do {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
@@ -1393,11 +1394,93 @@ int main(void) {
             else { print("wrote "); print(fname); print("\n"); }
         } else if (streq(line, "exit")) {
             print("bye!\n");
-            return 0;
+            return 1;                  /* signal main()'s loop to stop */
         } else {
             print("unknown command: ");
             print(line);
             print("  (try 'help')\n");
         }
+    } while (0);
+    return 0;
+}
+
+/*
+ * Run a pipeline: split `line` on the first '|' into two commands and feed the
+ * first command's captured output to the second as a trailing file argument.
+ *
+ * Model: capture cmd1's output into a buffer (cap_begin/cap_end), write it to
+ * a temp file, then run `cmd2 PIPE.TMP`. This needs no per-command stdin
+ * support — the file-reading commands (grep/wc/sort/head/tail/cat/nl/...) read
+ * their last argument via sys_readfile, which now reads the piped data.
+ *
+ * Supports N stages by looping: each stage after the first reads PIPE.TMP and
+ * its output replaces it for the next '|'. Buffers are fixed-size; oversized
+ * intermediate output truncates (length-capped capture, NUL-terminated).
+ */
+static void run_pipe(char *line, char *cwd) {
+    static char pbuf[8192];            /* captured output of one stage (static: too big for the stack) */
+    char cmd[160];                     /* the current stage's command line (cmd2 + " PIPE.TMP") */
+    const char *seg = line;            /* start of the current segment */
+    int first = 1;
+
+    for (;;) {
+        /* find the end of this segment: next unescaped '|' or end of string */
+        const char *bar = seg;
+        while (*bar && *bar != '|') bar++;
+
+        /* copy the segment into cmd[], trimming leading/trailing spaces */
+        const char *s = seg;
+        while (*s == ' ') s++;                 /* skip leading spaces */
+        const char *e = bar;
+        while (e > s && (e[-1] == ' ')) e--;    /* trim trailing spaces */
+        int ci = 0;
+        while (s < e && ci < 158) cmd[ci++] = *s++;
+        cmd[ci] = 0;
+
+        if (!first && ci > 0) {                /* append the piped-in temp file as the last argument */
+            const char *suf = " PIPE.TMP";
+            for (int i = 0; suf[i] && ci < 159; i++) cmd[ci++] = suf[i];
+            cmd[ci] = 0;
+        }
+
+        int last = (*bar != '|');              /* this is the final stage */
+
+        if (ci == 0) {
+            /* empty stage (e.g. "ls |" or "| grep"): nothing to run.
+             * For the last stage, fall through so PIPE.TMP gets cleaned up. */
+        } else if (last) {
+            run_command(cmd, cwd);             /* final stage: print to the screen */
+        } else {
+            cap_begin(pbuf, sizeof pbuf);      /* intermediate stage: capture its output */
+            run_command(cmd, cwd);
+            unsigned long len = cap_end();
+            sys_writefile("PIPE.TMP", pbuf, len);
+        }
+
+        if (last) break;
+        seg = bar + 1;
+        first = 0;
     }
+
+    sys_delete("PIPE.TMP");                     /* best-effort cleanup of the scratch file */
+}
+
+int main(void) {
+    print("\n");
+    print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
+    print("  type 'help' for commands\n\n");
+
+    char line[128];
+    char cwd[128]; cwd[0] = '/'; cwd[1] = 0;       /* display path (kernel tracks the real cwd) */
+    for (;;) {
+        print("osdev:"); print(cwd); print("$ ");
+        readline(line, sizeof(line));
+
+        int piped = 0;                              /* a '|' anywhere -> run as a pipeline */
+        for (int i = 0; line[i]; i++) if (line[i] == '|') { piped = 1; break; }
+
+        if (piped) run_pipe(line, cwd);
+        else if (run_command(line, cwd)) break;     /* run_command returns 1 only for "exit" */
+    }
+    return 0;
 }

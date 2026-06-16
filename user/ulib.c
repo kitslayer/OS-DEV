@@ -94,7 +94,34 @@ unsigned long ustrlen(const char *s) {
     return n;
 }
 
-void print(const char *s) { sys_write(1, s, ustrlen(s)); }
+/* Output capture: when a capture buffer is installed (via cap_begin), print()
+ * appends to it instead of writing to fd 1. Used by the shell to grab one
+ * command's output and feed it to the next stage of a pipe. Off by default —
+ * g_capbuf is NULL for every other program and the whole boot, so print() is
+ * byte-for-byte the plain sys_write path until a caller opts in. */
+static char         *g_capbuf = 0;     /* destination buffer, or NULL = not capturing */
+static unsigned long  g_caplen = 0;    /* bytes written so far */
+static unsigned long  g_capmax = 0;    /* buffer capacity (incl. room for the NUL) */
+
+void cap_begin(char *buf, unsigned long max) {
+    g_capbuf = buf; g_caplen = 0; g_capmax = max;
+    if (max) buf[0] = '\0';            /* start empty + NUL-terminated */
+}
+unsigned long cap_end(void) {          /* stop capturing; return the captured length */
+    unsigned long n = g_caplen;
+    g_capbuf = 0; g_caplen = 0; g_capmax = 0;
+    return n;
+}
+
+void print(const char *s) {
+    if (g_capbuf) {                    /* capture mode: append, length-capped + NUL-terminated */
+        unsigned long i = 0;
+        while (s[i] && g_caplen + 1 < g_capmax) g_capbuf[g_caplen++] = s[i++];
+        if (g_capmax) g_capbuf[g_caplen] = '\0';
+        return;
+    }
+    sys_write(1, s, ustrlen(s));
+}
 
 int readline(char *buf, int max) {
     long n = sys_read(0, buf, (unsigned long)(max - 1));
