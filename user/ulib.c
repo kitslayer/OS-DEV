@@ -64,6 +64,7 @@ long sys_sha512(const char *name, void *hexbuf, unsigned long max) { return do_s
 long sys_crypt(const char *name, const char *pass) { return do_syscall(SYS_crypt, (long)name, (long)pass, 0); }
 long sys_js(const char *src, void *out, unsigned long max) { return do_syscall(SYS_js, (long)src, (long)out, (long)max); }
 long sys_screenshot(const char *name) { return do_syscall(SYS_screenshot, (long)name, 0, 0); }
+long sys_gunzip(const char *insrc, const char *outname) { return do_syscall(SYS_gunzip, (long)insrc, (long)outname, 0); }
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);

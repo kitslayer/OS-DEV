@@ -165,3 +165,24 @@ int inflate(const uint8_t *src, int srclen, uint8_t *dst, int dstcap) {
     } while (!final);
     return s.outpos;
 }
+
+/* gzip (RFC 1952) wrapper around inflate(): a 10-byte header, optional fields
+ * selected by the flag byte, the raw DEFLATE body, then an 8-byte trailer
+ * (CRC32 + ISIZE) that inflate() simply ignores. Every header read is bounded
+ * against `len`, so a truncated/adversarial header can't over-read. */
+int gz_inflate(const uint8_t *gz, int len, uint8_t *dst, int dstcap) {
+    if (len < 18) return -1;                          /* 10 hdr + >=0 body + 8 trailer */
+    if (gz[0] != 0x1f || gz[1] != 0x8b || gz[2] != 8) return -1;   /* magic + DEFLATE method */
+    int flg = gz[3];
+    int p = 10;
+    if (flg & 0x04) {                                 /* FEXTRA: 2-byte length + that many bytes */
+        if (p + 2 > len) return -1;
+        int xlen = gz[p] | (gz[p + 1] << 8);
+        p += 2 + xlen;
+    }
+    if (flg & 0x08) { while (p < len && gz[p]) p++; p++; }   /* FNAME: NUL-terminated */
+    if (flg & 0x10) { while (p < len && gz[p]) p++; p++; }   /* FCOMMENT: NUL-terminated */
+    if (flg & 0x02) p += 2;                                  /* FHCRC: 2-byte header CRC */
+    if (p < 0 || p >= len) return -1;                 /* header ran off the end */
+    return inflate(gz + p, len - p, dst, dstcap);     /* DEFLATE body (trailer ignored) */
+}

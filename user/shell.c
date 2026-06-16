@@ -101,7 +101,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> gunzip<f.gz> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1354,6 +1354,26 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "run ")) {
             if (sys_spawn(line + 4) < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
             else { print("launched "); print(line + 4); print("\n"); }
+        } else if (startswith(line, "gunzip ")) {          /* decompress a .gz file (reuses the DEFLATE decoder) */
+            char src[64]; int i = 0; char *p = line + 7;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && i < 63) src[i++] = *p++;
+            src[i] = 0;
+            while (*p == ' ') p++;
+            char dst[64]; int j = 0;
+            if (*p) { while (*p && *p != ' ' && j < 63) dst[j++] = *p++; dst[j] = 0; }
+            else {                                          /* no DST given: strip a trailing .gz, else "OUT" */
+                int L = 0; while (src[L]) L++;
+                if (L > 3 && src[L-3]=='.' && (src[L-2]=='g'||src[L-2]=='G') && (src[L-1]=='z'||src[L-1]=='Z')) {
+                    for (int k = 0; k < L-3; k++) dst[k] = src[k]; dst[L-3] = 0;
+                } else { dst[0]='O'; dst[1]='U'; dst[2]='T'; dst[3]=0; }
+            }
+            if (src[0] == 0) print("usage: gunzip <file.gz> [out]\n");
+            else {
+                long n = sys_gunzip(src, dst);
+                if (n < 0) print("gunzip: failed (not a .gz, too big, or missing)\n");
+                else { char nb[12]; itoa_simple((int)n, nb); print("gunzip: wrote "); print(dst); print(" ("); print(nb); print(" bytes)\n"); }
+            }
         } else if (startswith(line, "cp ") || startswith(line, "mv ")) {
             int move = (line[0] == 'm');
             char src[64]; int i = 0; char *p = line + 3;

@@ -9,3 +9,9 @@
 #include <stdint.h>
 
 int inflate(const uint8_t *src, int srclen, uint8_t *dst, int dstcap);
+
+/* Decompress a gzip stream (RFC 1952): validate the magic + method, skip the
+ * header (incl. optional FEXTRA/FNAME/FCOMMENT/FHCRC fields), then inflate the
+ * DEFLATE body into `dst`. Returns decoded length, or -1 on bad/short input.
+ * Bounded: every header read is guarded against `len`. */
+int gz_inflate(const uint8_t *gz, int len, uint8_t *dst, int dstcap);

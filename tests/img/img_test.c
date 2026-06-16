@@ -17,6 +17,7 @@ int png_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int
 int gif_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
 int bmp_decode (const uint8_t *, int, uint8_t *, int, int *, int *);
 int inflate    (const uint8_t *, int, uint8_t *, int);   /* raw DEFLATE */
+int gz_inflate (const uint8_t *, int, uint8_t *, int);   /* gzip wrapper */
 
 static uint8_t obuf[4u << 20], sbuf[4u << 20];   /* 4 MB each (BSS) */
 
@@ -69,6 +70,24 @@ int main(void) {
         run_all(f, n);
     }
 
+    /* 3b. gzip round-trip: a real gzip stream (python: gzip.compress("Hello from
+     *     a gzip file! ...")) must decompress to the exact original bytes. */
+    {
+        static const uint8_t gz[] = {
+            0x1f,0x8b,0x08,0x00,0x00,0x00,0x00,0x00,0x02,0xff,0xf3,0x48,0xcd,0xc9,0xc9,0x57,
+            0x48,0x2b,0xca,0xcf,0x55,0x48,0x54,0x48,0xaf,0xca,0x2c,0x50,0x48,0xcb,0xcc,0x49,
+            0x55,0x54,0xf0,0x0f,0xd6,0x75,0x71,0x0d,0x53,0x48,0x4e,0xcc,0x53,0xc8,0xcb,0x2f,
+            0x57,0x48,0x49,0x4d,0xce,0xcf,0x2d,0x28,0x4a,0x2d,0x2e,0x56,0xd0,0x4b,0xaf,0x52,
+            0x28,0xcf,0x2c,0xc9,0x50,0xc8,0x2c,0x29,0x56,0xc8,0x2f,0xcf,0x53,0x70,0x71,0x75,
+            0xf3,0x71,0x0c,0x71,0x05,0xab,0x49,0x49,0x2d,0xd2,0xe3,0x02,0x00,0x46,0x8a,0x1f,
+            0x3f,0x54,0x00,0x00,0x00 };
+        static const char exp[] = "Hello from a gzip file! OS-DEV can now decompress .gz with its own DEFLATE decoder.\n";
+        int n = gz_inflate(gz, (int)sizeof gz, obuf, sizeof obuf);
+        int explen = (int)(sizeof exp - 1);
+        if (n != explen) { printf("FAIL: gz_inflate length %d != %d\n", n, explen); return 1; }
+        for (int i = 0; i < explen; i++) if (obuf[i] != (uint8_t)exp[i]) { printf("FAIL: gz_inflate byte %d\n", i); return 1; }
+    }
+
     /* 4. Direct DEFLATE fuzz: random streams straight into inflate(). The PNG
      *    path reaches inflate only shallowly (PNG header parsing rejects most
      *    random bytes first), so this directly exercises the huffman-table and
@@ -77,6 +96,16 @@ int main(void) {
         int n = 1 + (int)(xr() % 80);
         for (int j = 0; j < n; j++) f[j] = (uint8_t)xr();
         inflate(f, n, obuf, sizeof obuf);
+    }
+
+    /* 4b. gzip-header fuzz: a valid magic (1f 8b 08) + random flags/fields/body,
+     *     so the header-skip (FEXTRA/FNAME/FCOMMENT/FHCRC) runs against truncated
+     *     and adversarial input — the gz_inflate over-read vectors. */
+    for (int i = 0; i < ITERS; i++) {
+        int n = 3 + (int)(xr() % 80);
+        for (int j = 0; j < n; j++) f[j] = (uint8_t)xr();
+        f[0] = 0x1f; f[1] = 0x8b; f[2] = 0x08;
+        gz_inflate(f, n, obuf, sizeof obuf);
     }
 
     /* 5. BMP correctness: a 2x2 24-bit bottom-up BMP with four known colours
@@ -109,6 +138,6 @@ int main(void) {
         int w, h; bmp_decode(f, n, obuf, sizeof obuf, &w, &h);
     }
 
-    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + %d decoder + %d DEFLATE + %d BMP fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS);
+    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + gzip round-trip + %d decoder + %d DEFLATE + %d BMP + %d gzip fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS, ITERS);
     return 0;
 }

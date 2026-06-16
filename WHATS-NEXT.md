@@ -1,6 +1,16 @@
 # What's next
 
-> **Status (487 milestones).** (M487: **F12 screenshots auto-number** — F12 now saves SHOT0.BMP, SHOT1.BMP,
+> **Status (488 milestones).** (M488: **`gunzip` — .gz decompression** — shell `gunzip <f.gz> [out]` +
+> SYS_gunzip(38) decompress a gzip file by REUSING the fuzz-tested DEFLATE `inflate`; only a thin bounded
+> wrapper `gz_inflate` (kernel/inflate.c: magic/method check, skip header + optional FEXTRA/FNAME/FCOMMENT/
+> FHCRC, inflate body, ignore trailer) is new. SAFE + additive (new syscall+command, no working-system
+> touch; kmalloc'd 256KB-in/1MB-out transient buffers). imgtest gained a real gzip round-trip (exact
+> 84-byte output) + 120K gzip-header fuzz (ASan/UBSan clean). Baked tools/hello.gz (mkfatfs hostfiles).
+> Verified in-OS: `gunzip HELLO.GZ` → wrote HELLO (84 bytes); `cat HELLO` → exact text. Files:
+> kernel/inflate.c, kernel/syscall.c, user/shell.c, user/ulib.c, tools/mkfatfs.c, tools/hello.gz.
+> **The best safe+valuable find post-saturation: real new capability (.gz) reusing proven fuzzed code,
+> fully host- AND in-OS-verified, zero risk to working systems. (.gz fits 8.3, unlike the reverted .json.)**)
+> M487: **F12 screenshots auto-number** — F12 now saves SHOT0.BMP, SHOT1.BMP,
 > … (a static counter) instead of overwriting SHOT.BMP, so successive captures aren't lost. Zero-risk
 > self-contained change to the F12 handler (shell `screenshot [file]` unchanged). Verified in-OS: 3× F12 →
 > SHOT0/1/2.BMP all valid, no overwrite. File: kernel/desktop.c. **NOTE: hit the 8.3 FILENAME LIMIT this

@@ -45,6 +45,7 @@
 #define SYS_apps   35   /* (buf, len)       -> registered app names, space-separated; bytes */
 #define SYS_sha512 36   /* (name, hexbuf)   -> SHA-512 of a file as 128 hex chars; 0/-1 */
 #define SYS_screenshot 37 /* (name)         -> save the screen to a BMP file; 0/-1 */
+#define SYS_gunzip 38   /* (insrc, outname) -> decompress a .gz file; output bytes, or -1 */
 
 #define SYSCALL_VECTOR 0x80
 

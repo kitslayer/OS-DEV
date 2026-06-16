@@ -26,6 +26,8 @@
 #include "sha512.h"
 #include "aes.h"
 #include "string.h"
+#include "kheap.h"
+#include "inflate.h"
 #include <stdint.h>
 
 static void put2(char *p, int v) { p[0] = '0' + (v / 10) % 10; p[1] = '0' + v % 10; }
@@ -252,6 +254,18 @@ void syscall_dispatch(struct registers *r) {
     case SYS_screenshot:
         r->rax = (uint64_t)(int64_t)fb_save_bmp((const char *)r->rdi);   /* save the screen to a BMP */
         break;
+    case SYS_gunzip: {
+        const char *insrc = (const char *)r->rdi, *outname = (const char *)r->rsi;
+        uint8_t *in = kmalloc(262144);          /* the .gz input (<= 256 KB) */
+        uint8_t *out = kmalloc(1048576);        /* decompressed output (<= 1 MB) */
+        if (!in || !out) { if (in) kfree(in); if (out) kfree(out); r->rax = (uint64_t)-1; break; }
+        long gn = vfs_read(insrc, in, 262144);
+        long dl = gn > 0 ? gz_inflate(in, (int)gn, out, 1048576) : -1;
+        if (dl > 0 && vfs_write(outname, out, (unsigned long)dl) < 0) dl = -1;
+        kfree(in); kfree(out);
+        r->rax = (uint64_t)(int64_t)dl;
+        break;
+    }
     case SYS_crypt: {
         const char *name = (const char *)r->rdi, *pass = (const char *)r->rsi;
         static uint8_t cbuf[16384];
