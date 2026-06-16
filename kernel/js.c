@@ -403,6 +403,15 @@ static node *parse_primary(lexer *L) {
             node *staticblk=mknode(N_BLOCK); staticblk->list=aalloc(sizeof(node*)*32); staticblk->nlist=0;  /* static members -> co->statics */
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,";")) { advance(L); continue; }   /* stray semicolons between members */
+                if (peek_punc(L,"[")) {   /* computed method key: class C { [expr](params){body} } — e.g. [Symbol.iterator](){…} (M-symbol) */
+                    advance(L); node *key=parse_assign(L); expect_punc(L,"]");
+                    if (peek_punc(L,"(")) {
+                        node *fn=mknode(N_FUNC); fn->b=key;   /* fn->b = computed key expr (str stays NULL -> not "constructor", keyed via keystr at class-build) */
+                        parse_fn_params(L,fn); fn->a=parse_stmt(L);
+                        if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
+                    } else { skip_semi(L); }   /* computed FIELD [expr]=v: unsupported (rare); skip safely */
+                    continue;
+                }
                 token mn=advance(L);                              /* member name (incl. "constructor") */
                 int is_static=0;                                  /* `static <name>`: class-level member (co->statics) */
                 if (mn.len==6 && memcmp(mn.s,"static",6)==0 && peek(L).type==T_IDENT) { is_static=1; mn=advance(L); }
@@ -761,7 +770,11 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR, V_CLASSLIST /* obj->kind markers only; the val.t stays V_OBJ */ };
+       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR, V_CLASSLIST,
+       /* V_SYMBOL is a real val.t (a primitive), unlike the markers above which are
+        * only obj->kind tags. A symbol carries a unique id in val.num and an optional
+        * description string in val.str. (M-symbol) */
+       V_SYMBOL };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -795,6 +808,16 @@ static val UND(void){ val v; v.t=V_UNDEF; v.num=0; v.str=0; v.o=0; return v; }
 static val NUM(int64_t x){ val v=UND(); v.t=V_NUM; v.num=x; return v; }
 static val BOOLV(int b){ val v=UND(); v.t=V_BOOL; v.num=b?1:0; return v; }
 static val STRV(const char *s){ val v=UND(); v.t=V_STR; v.str=s?s:""; return v; }
+/* ---- ES6 Symbol (M-symbol) ----
+ * A symbol is a primitive identity: equal iff same id. `id` lives in val.num, the
+ * optional description (for Symbol(desc) / val_to_str) in val.str.
+ * Well-known symbols reserve LOW fixed ids (so Symbol.iterator === Symbol.iterator
+ * is stable across calls); Symbol() hands out ids from g_sym_next, which STARTS
+ * above the reserved range so a user symbol can never collide with a well-known one. */
+#define SYM_ID_ITERATOR 1          /* Symbol.iterator (fixed well-known id) */
+#define SYM_ID_FIRST    16         /* Symbol() ids start here, above all well-knowns */
+static int64_t g_sym_next = SYM_ID_FIRST;
+static val SYMV(int64_t id, const char *desc){ val v=UND(); v.t=V_SYMBOL; v.num=id; v.str=desc; return v; }
 static val g_throwval;        /* value of the in-flight `throw` (when g_threw) */
 
 static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
@@ -847,6 +870,38 @@ static char *i64_to_str(int64_t v) {
     if (neg) tmp[i++]='-';
     char *s=aalloc(i+1); if(!s) return ""; for(int j=0;j<i;j++) s[j]=tmp[i-1-j]; s[i]=0; return s;
 }
+/* ---- symbol-keyed property support (M-symbol) ----
+ * A V_SYMBOL used as a computed property key is encoded to a reserved internal
+ * STRING key "@@sym:<id>", then stored via the ordinary string-keyed obj_get/obj_set
+ * — so the property machinery is entirely unchanged; only the computed-key path
+ * translates the symbol first. These internal keys are HIDDEN from every enumeration
+ * (Object.keys, for-in, JSON.stringify, Object.values/entries/assign, structuredClone)
+ * via is_internal_key() below.
+ *
+ * COLLISION NOTE (theoretical): a user could literally write obj["@@sym:1"]=v, which
+ * would land in the same slot and also be hidden from enumeration. "@@sym:" is the
+ * conventional prefix and the hiding is what matters; a normal program never writes it.
+ *
+ * SYM_KEY_MAX bounds the formatted key: "@@sym:" (6) + up to 20 digits for a 64-bit
+ * id + NUL = 27; 32 is comfortable. The id is non-negative (counter from SYM_ID_FIRST,
+ * well-knowns from 1), so no '-' sign. Formatting is length-bounded by construction. */
+#define SYM_KEY_MAX 32
+static const char *val_to_str(val v); /* fwd (keystr below coerces a non-symbol key) */
+static const char *sym_key(int64_t id){
+    char buf[SYM_KEY_MAX]; int p=0;
+    buf[p++]='@'; buf[p++]='@'; buf[p++]='s'; buf[p++]='y'; buf[p++]='m'; buf[p++]=':';
+    const char *d = i64_to_str(id < 0 ? 0 : id);   /* clamp defensively; ids are >=1 */
+    while (*d && p < SYM_KEY_MAX-1) buf[p++]=*d++;
+    buf[p]=0;
+    return intern(buf, p);   /* stable, NUL-terminated arena copy (obj_set stores the pointer) */
+}
+/* True for any reserved internal key (the "@@" namespace, currently only "@@sym:").
+ * Enumeration sites skip these so symbol-keyed (and any future internal) props stay hidden. */
+static int is_internal_key(const char *k){ return k && k[0]=='@' && k[1]=='@'; }
+/* Translate a computed-member key value to its property-string: a symbol -> its
+ * "@@sym:<id>" encoding, anything else -> the usual val_to_str. Used at the two
+ * computed-key sites (obj[k] read and obj[k]=v write). */
+static const char *keystr(val k){ return k.t==V_SYMBOL ? sym_key(k.num) : val_to_str(k); }
 /* Integer exponentiation for the `**` and `**=` operators (exponent capped at 63
  * to bound the loop; matches the existing Math.pow semantics). */
 static int64_t i_pow(int64_t b, int64_t e){ int64_t r=1; for (int64_t i=0;i<e && i<63;i++) r*=b; return r; }
@@ -878,6 +933,7 @@ static int val_equal(val a, val b) {
         case V_UNDEF: case V_NULL: return 1;
         case V_NUM: case V_BOOL: return a.num==b.num;
         case V_STR: return a.str && b.str && strcmp(a.str,b.str)==0;
+        case V_SYMBOL: return a.num==b.num;   /* symbols: equal iff same id (M-symbol). a.t==b.t already checked, so a symbol is never == a non-symbol */
         default: return a.o==b.o;   /* V_OBJ/V_ARR/V_FUN/V_NATIVE: identity */
     }
 }
@@ -1147,6 +1203,16 @@ static const char *val_to_str_inner(val v) {
         case V_NUM: return i64_to_str(v.num);
         case V_STR: return v.str;
         case V_FUN: case V_NATIVE: return "function";
+        case V_SYMBOL: {   /* "Symbol(desc)" — kernel-safe: do NOT throw (spec throws on String(symbol)) (M-symbol) */
+            const char *d = v.str ? v.str : "";
+            long dl = (long)strlen(d);
+            char *buf = aalloc(dl + 9);   /* "Symbol(" (7) + desc + ")" (1) + NUL (1) */
+            if (!buf) return "Symbol()";
+            int p=0; const char *pre="Symbol(";
+            while (*pre) buf[p++]=*pre++;
+            for (long i=0;i<dl;i++) buf[p++]=d[i];
+            buf[p++]=')'; buf[p]=0; return buf;
+        }
         case V_ARR: {
             /* two passes: stringify each element, sum the REAL lengths (a wrong
              * n*24 estimate would overflow the buffer for long element strings),
@@ -1410,6 +1476,7 @@ static int loose_eq(val a, val b) {
     if (a.t==b.t) return val_equal(a,b);
     if ((a.t==V_NULL||a.t==V_UNDEF) && (b.t==V_NULL||b.t==V_UNDEF)) return 1;
     if (a.t==V_NULL||a.t==V_UNDEF||b.t==V_NULL||b.t==V_UNDEF) return 0;
+    if (a.t==V_SYMBOL||b.t==V_SYMBOL) return 0;   /* a symbol == only the SAME symbol (handled by a.t==b.t above); never loosely-equal to any other type — don't fall through to the numeric coercion below (M-symbol) */
     int aobj=(a.t==V_OBJ||a.t==V_ARR||a.t==V_FUN||a.t==V_NATIVE), bobj=(b.t==V_OBJ||b.t==V_ARR||b.t==V_FUN||b.t==V_NATIVE);
     if (aobj && bobj) return a.o==b.o;                    /* two objects of any val-types: reference identity ({}==[] -> false) (M271 review fix) */
     if (aobj) return loose_eq(STRV(val_to_str(a)), b);    /* object/function vs primitive: coerce to a string, re-compare (one bounded step) */
@@ -1446,7 +1513,7 @@ static val eval_expr_inner(node *n, env *e) {
                     if (obj_get(o,key,&cur) && is_accessor(cur)) acc=cur.o;       /* fill the other slot of an existing accessor */
                     else { acc=new_accessor(); if(!acc){ g_oom=1; break; } obj_set(o,key,obj_val(acc)); }
                     acc->vals[pr->op=='g'?0:1] = eval_expr(pr->a,e);              /* getter->[0], setter->[1] */
-                } else { const char *key = pr->b ? val_to_str(eval_expr(pr->b,e)) : node_name(pr);   /* pr->b = computed key */
+                } else { const char *key = pr->b ? keystr(eval_expr(pr->b,e)) : node_name(pr);   /* pr->b = computed key; symbol -> "@@sym:<id>" so {[Symbol.iterator]:fn} works (M-symbol) */
                     obj_set(o, key, eval_expr(pr->a,e)); }
             }
             val r=UND(); r.t=V_OBJ; r.o=o; return r; }
@@ -1458,12 +1525,12 @@ static val eval_expr_inner(node *n, env *e) {
         case N_UNARY: {
             if (n->op=='t') {
                 if (n->a->type==N_IDENT && !env_find(e, node_name(n->a))) return STRV("undefined");   /* `typeof undeclaredVar` -> "undefined" (don't throw — the feature-detection idiom) */
-                val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":(v.t==V_FUN||v.t==V_NATIVE||(v.t==V_OBJ&&v.o&&v.o->kind==V_BOUND))?"function":"object"; return STRV(ty); }
+                val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":v.t==V_SYMBOL?"symbol":(v.t==V_FUN||v.t==V_NATIVE||(v.t==V_OBJ&&v.o&&v.o->kind==V_BOUND))?"function":"object"; return STRV(ty); }
             if (n->op=='d') {   /* delete obj.x / obj[k]: remove an own property, evaluate to true */
                 node *t=n->a;
                 if (t->type==N_MEMBER) { val r=eval_expr(t->a,e); if(r.t==V_OBJ&&r.o) obj_delete(r.o,node_name(t)); }
                 else if (t->type==N_INDEX) { val r=eval_expr(t->a,e); val k=eval_expr(t->b,e);
-                    if(r.t==V_OBJ&&r.o) obj_delete(r.o,val_to_str(k));
+                    if(r.t==V_OBJ&&r.o) obj_delete(r.o,keystr(k));   /* delete obj[sym] -> "@@sym:<id>" (M-symbol) */
                     else if(r.t==V_ARR&&r.o){ int i=(int)to_num(k); if(i>=0&&i<r.o->n) r.o->vals[i]=UND(); } }
                 return BOOLV(1);
             }
@@ -1488,7 +1555,7 @@ static val eval_expr_inner(node *n, env *e) {
             else if (t->type==N_INDEX) {             /* arr[i]++ / o[k]++ */
                 recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
                 if (recv.t==V_ARR && recv.o) { int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) slot=&recv.o->vals[i]; }
-                else if (recv.t==V_OBJ && obj_keyed(recv.o)) { const char *key=val_to_str(idx);
+                else if (recv.t==V_OBJ && obj_keyed(recv.o)) { const char *key=keystr(idx);   /* symbol key -> "@@sym:<id>" (M-symbol) */
                     for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
                     if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
                 }
@@ -1593,7 +1660,7 @@ static val eval_expr_inner(node *n, env *e) {
                     }
                     if (!g_oom && (int)i < recv.o->n) recv.o->vals[(int)i]=rhs;
                 }
-                else if (recv.t==V_OBJ && recv.o) { const char *key=val_to_str(idx); val cur; if(obj_get(recv.o,key,&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } /* own setter */ else { val acc; if(recv.o->proto && proto_find_accessor(recv.o->proto,key,&acc)){ val s=acc.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } else obj_set(recv.o, key, rhs); } }   /* inherited setter or own data (M263) */
+                else if (recv.t==V_OBJ && recv.o) { const char *key=keystr(idx); val cur; if(obj_get(recv.o,key,&cur)&&is_accessor(cur)){ val s=cur.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } /* own setter */ else { val acc; if(recv.o->proto && proto_find_accessor(recv.o->proto,key,&acc)){ val s=acc.o->vals[1]; if(s.t!=V_UNDEF) call_function_this(s,recv,&rhs,1); } else obj_set(recv.o, key, rhs); } }   /* inherited setter or own data; symbol key -> "@@sym:<id>" (M-symbol) */
                 return rhs; }
             rt_err("invalid assignment target"); return UND();
         }
@@ -1612,7 +1679,7 @@ static val eval_expr_inner(node *n, env *e) {
             val idx=eval_expr(n->b,e);
             if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
             if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
-            if (recv.t==V_OBJ && recv.o){ const char *ik=val_to_str(idx); val out; if(obj_get(recv.o,ik,&out)){ if(is_accessor(out)) return fire_getter(out,recv); return out; } if(recv.o->proto){ val pv; if(proto_lookup(recv.o->proto,ik,recv,&pv)) return pv; } }   /* inherited (M263) */
+            if (recv.t==V_OBJ && recv.o){ const char *ik=keystr(idx); val out; if(obj_get(recv.o,ik,&out)){ if(is_accessor(out)) return fire_getter(out,recv); return out; } if(recv.o->proto){ val pv; if(proto_lookup(recv.o->proto,ik,recv,&pv)) return pv; } }   /* inherited (M263); symbol key -> "@@sym:<id>" (M-symbol) */
             return UND(); }
         case N_CALL: {
             /* method call a.b(...) needs the receiver for string/array methods */
@@ -1687,14 +1754,18 @@ static val eval_expr_inner(node *n, env *e) {
                 if (has_parent && parentC.o->home_proto) { obj *pp=parentC.o->home_proto; for(int i=0;i<pp->n && !g_oom;i++) obj_set(P,pp->keys[i],pp->vals[i]); }
             }
             for (int i=0;i<n->nlist && !g_oom;i++){ node *m=n->list[i];
-                if (strcmp(node_name(m),"constructor")==0){ ctor_node=m; continue; }
+                /* mkey = the method's property key: a computed [expr] method (m->b set) is
+                 * evaluated now and symbol-encoded via keystr; otherwise the interned name.
+                 * A computed-key method has str==NULL so it can never be "constructor". (M-symbol) */
+                const char *mkey = m->b ? keystr(eval_expr(m->b,e)) : node_name(m);
+                if (!m->b && strcmp(mkey,"constructor")==0){ ctor_node=m; continue; }
                 obj *fo=new_obj(V_FUN); if(!fo){ g_oom=1; return UND(); } fo->fn=m; fo->scope=e; fo->super_class=parent_obj;
                 val fv=UND(); fv.t=V_FUN; fv.o=fo;
                 if (m->op=='g' || m->op=='s') {   /* accessor method -> merge into an accessor in P[name] (fresh copy so overriding a parent's accessor doesn't mutate it) */
                     obj *acc=new_accessor(); if(!acc){ g_oom=1; return UND(); }
-                    val cur; if (obj_get(P,node_name(m),&cur) && is_accessor(cur)){ acc->vals[0]=cur.o->vals[0]; acc->vals[1]=cur.o->vals[1]; }
-                    acc->vals[m->op=='g'?0:1]=fv; obj_set(P, node_name(m), obj_val(acc));
-                } else obj_set(P, node_name(m), fv);
+                    val cur; if (obj_get(P,mkey,&cur) && is_accessor(cur)){ acc->vals[0]=cur.o->vals[0]; acc->vals[1]=cur.o->vals[1]; }
+                    acc->vals[m->op=='g'?0:1]=fv; obj_set(P, mkey, obj_val(acc));
+                } else obj_set(P, mkey, fv);
             }
             obj *ctor_super=parent_obj;   /* own ctor: super is this class's parent */
             if (!ctor_node && has_parent) { ctor_node = parentC.o->fn; ctor_super = parentC.o->super_class; }  /* inherited ctor: its super is the GRANDparent (where it was defined) */
@@ -1826,6 +1897,60 @@ static comp eval_stmt_inner(node *n, env *e) {
                     val cv=UND(); cv.t=V_ARR; cv.o=pair;
                     if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
                     comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+            } else if (it.t==V_OBJ && it.o && it.o->kind==V_OBJ) {
+                /* ----- ES6 iterator protocol (M-symbol) -----
+                 * A plain object is iterable iff it has a callable obj[Symbol.iterator].
+                 * Call it (this=obj) to get an iterator, then repeatedly call iterator.next()
+                 * (this=iterator) -> {value, done}; stop when done is truthy, binding value
+                 * to the loop target each step (same break/continue/return handling as the
+                 * V_ARR branch). Absent/non-callable [Symbol.iterator] -> iterate nothing.
+                 *
+                 * TERMINATION SAFETY (kernel, untrusted input): each next() RETURNS, so the
+                 * recursion depth guard does NOT bound this loop — a misbehaving iterator that
+                 * never yields done:true must not hang the kernel. Two co-guards make
+                 * termination unconditional:
+                 *   1. FOROF_ITER_MAX — a hard iteration cap (catchable rt_err). This is the
+                 *      decisive guard: a JS next() that allocates nothing per call (so it never
+                 *      trips OOM) is still stopped here. The cap bounds ONLY custom iterables;
+                 *      arrays/strings/sets/maps use their own branches above, so legitimate
+                 *      large iterations are unaffected.
+                 *   2. g_oom — every JS next() call allocates a call frame in the arena (no GC),
+                 *      so a runaway ALLOCATING iterator trips graceful OOM and the loop breaks on
+                 *      g_oom (OOM is NOT masked: it propagates as the engine's real OOM, it is
+                 *      just an additional early stop).
+                 * Reachability: an allocating next() consumes ~0.5 KB of arena per call, so on the
+                 * default 16 MB arena only tens of thousands of calls fit from a FRESH arena, and
+                 * far fewer once a long script has already consumed most of it (no GC). The cap is
+                 * therefore set LOW ENOUGH (2,000) to stay a REACHABLE, exercised guard — the
+                 * regression suite hits it at exactly 2,000 even though the suite has already used
+                 * ~14 MB by then — while remaining far larger than any realistic CUSTOM iterable
+                 * (arrays/strings/sets/maps use their own uncapped branches above; this branch only
+                 * bounds user-defined [Symbol.iterator] objects). A non-allocating iterator (which
+                 * OOM would never catch) is also stopped here, which is the cap's core purpose. */
+                #define FOROF_ITER_MAX 2000
+                val itfn = eval_member_get(it, sym_key(SYM_ID_ITERATOR));
+                int callable = (itfn.t==V_FUN || itfn.t==V_NATIVE || (itfn.t==V_OBJ && itfn.o && itfn.o->kind==V_BOUND));
+                if (callable && !g_err && !g_oom) {
+                    val iter = call_function_this(itfn, it, 0, 0);
+                    if (iter.t==V_OBJ && iter.o && !g_err && !g_oom) {
+                        val nextfn = eval_member_get(iter, "next");   /* fetch next ONCE: every real iterator exposes a fixed `next` data method. (Re-reading it per step, as the spec's GetMethod does, would add a member-get allocation per iteration and lower the OOM/cap headroom for no practical gain.) */
+                        int ncall = (nextfn.t==V_FUN || nextfn.t==V_NATIVE || (nextfn.t==V_OBJ && nextfn.o && nextfn.o->kind==V_BOUND));
+                        long guard=0;
+                        while (ncall) {
+                            if (g_err || g_oom) break;
+                            if (++guard > FOROF_ITER_MAX) { rt_err("for-of: iterator did not terminate"); break; }
+                            val res = call_function_this(nextfn, iter, 0, 0);
+                            if (g_err || g_oom) break;
+                            if (res.t!=V_OBJ || !res.o) break;                     /* result must be an object; otherwise stop */
+                            if (truthy(eval_member_get(res, "done"))) break;       /* done:truthy -> finished */
+                            val cv = eval_member_get(res, "value");
+                            if (g_err || g_oom) break;
+                            if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
+                            comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c;
+                        }
+                    }
+                }
+                #undef FOROF_ITER_MAX
             }
             return CN();
         }
@@ -1857,6 +1982,7 @@ static comp eval_stmt_inner(node *n, env *e) {
             const char *vn=node_name(n); env_define(fe, vn, UND());
             if (it.t==V_OBJ && obj_keyed(it.o)) {   /* keyed objects only (Date/Map/Set/arrays have no enumerable own keys here) */
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
+                    if(is_internal_key(it.o->keys[i])) continue;   /* hide @@ symbol keys from for-in (M-symbol) */
                     val *slot=env_find(fe,vn); if(slot) *slot=STRV(it.o->keys[i]);
                     comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_ARR && it.o) {
@@ -2633,7 +2759,7 @@ static val nat_obj_keys(val *a, int n){
     obj *r = new_obj(V_ARR); if(!r) return UND();
     if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) {   /* keyed objects only (Date/Map/Set have no enumerable own keys) */
         obj *o=a[0].o;
-        for (int i=0;i<o->n;i++) arr_push_val(r, STRV(o->keys[i]));
+        for (int i=0;i<o->n;i++){ if(is_internal_key(o->keys[i])) continue; arr_push_val(r, STRV(o->keys[i])); }   /* hide symbol-keyed (@@) props (M-symbol) */
     }
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
@@ -2659,7 +2785,8 @@ static void json_val(val v, int depth){
             if(v.o && v.o->kind==V_DATE){ js_appq(val_to_str(v)); break; }   /* a Date serializes as its string */
             if(!obj_keyed(v.o) || v.o->n==0){ js_app("{}"); break; }          /* map/set/empty: no enumerable props */
             js_app("{");
-            for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); val pv=v.o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,v); json_val(pv, depth+1); } js_nl(depth); js_app("}"); break;  /* fire getters during serialization (M425) — targeted to JSON, not the global obj_get hot path */
+            { int wrote=0; for(int i=0;i<v.o->n;i++){ if(is_internal_key(v.o->keys[i])) continue;   /* hide @@ symbol keys; `wrote` (not i) drives the comma so no dangling separator (M-symbol) */
+                if(wrote){ js_app(","); } wrote=1; js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); val pv=v.o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,v); json_val(pv, depth+1); } if(wrote){ js_nl(depth); } } js_app("}"); break;  /* fire getters during serialization (M425) — targeted to JSON, not the global obj_get hot path */
         default:     js_app("null"); break;   /* undefined/null/function */
     }
     g_depth--;
@@ -2716,12 +2843,13 @@ static val nat_json_parse(val *a, int n){ if(!n || a[0].t!=V_STR) return UND(); 
 /* ---- Object.values / Object.entries, Array.isArray / Array.from ---- */
 static val nat_obj_values(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
-    if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){ val pv=a[0].o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,a[0]); arr_push_val(r, pv); }   /* fire getters (M426, same pattern as the M425 JSON fix) */
+    if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){ if(is_internal_key(a[0].o->keys[i])) continue; val pv=a[0].o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,a[0]); arr_push_val(r, pv); }   /* fire getters (M426); hide @@ symbol keys (M-symbol) */
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
 static val nat_obj_entries(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
     if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){
+        if(is_internal_key(a[0].o->keys[i])) continue;   /* hide @@ symbol keys (M-symbol) */
         obj *pair=new_obj(V_ARR); if(!pair) break; arr_push_val(pair, STRV(a[0].o->keys[i])); val gv=a[0].o->vals[i]; if(is_accessor(gv)) gv=fire_getter(gv,a[0]); arr_push_val(pair, gv);   /* fire getters (M426) */
         val pv=UND(); pv.t=V_ARR; pv.o=pair; arr_push_val(r, pv); }
     val v=UND(); v.t=V_ARR; v.o=r; return v;
@@ -2773,7 +2901,7 @@ static val nat_obj_getOwnPropertyDescriptor(val *a, int n){
 }
 static val nat_obj_getOwnPropertyDescriptors(val *a, int n){   /* {key: descriptor} for every own key (reuses the singular form) (M279) */
     obj *r=new_obj(V_OBJ); if(!r){g_oom=1;return UND();}
-    if (n>=1 && a[0].t==V_OBJ && obj_keyed(a[0].o)) { obj*o=a[0].o; for(int i=0;i<o->n && !g_oom;i++){ val da[2]={ a[0], STRV(o->keys[i]) }; obj_set(r, o->keys[i], nat_obj_getOwnPropertyDescriptor(da,2)); } }
+    if (n>=1 && a[0].t==V_OBJ && obj_keyed(a[0].o)) { obj*o=a[0].o; for(int i=0;i<o->n && !g_oom;i++){ if(is_internal_key(o->keys[i])) continue; val da[2]={ a[0], STRV(o->keys[i]) }; obj_set(r, o->keys[i], nat_obj_getOwnPropertyDescriptor(da,2)); } }   /* hide @@ symbol keys (M-symbol) */
     return obj_val(r);
 }
 /* Object.defineProperties(obj, descriptors): defineProperty for each own key of the descriptors
@@ -2796,6 +2924,7 @@ static val nat_obj_setPrototypeOf(val *a, int n){ if (n>=1 && a[0].t==V_OBJ && a
 static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
     if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
     for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++){
+        if(is_internal_key(a[i].o->keys[j])) continue;   /* don't copy @@ symbol keys (M-symbol) */
         val sv=a[i].o->vals[j]; if(is_accessor(sv)) sv=fire_getter(sv,a[i]);   /* read source via getter (M427) */
         const char *key=a[i].o->keys[j]; val cur;
         if(obj_get(a[0].o,key,&cur) && is_accessor(cur)){ val st=cur.o->vals[1]; if(st.t!=V_UNDEF) call_function_this(st,a[0],&sv,1); }   /* fire target's setter; getter-only target ignores the write */
@@ -2855,7 +2984,7 @@ static val sclone(val v, sclone_pair *seen, int *nseen, int cap, int depth) {
     if (*nseen < cap) { seen[*nseen].from=v.o; seen[*nseen].to=c; (*nseen)++; }                                  /* register before recursing (cycles) */
     val cv=UND(); cv.t=v.t; cv.o=c;
     if (v.t==V_ARR) { for(int i=0;i<v.o->n && !g_oom && !g_err;i++) arr_push_val(c, sclone(v.o->vals[i], seen, nseen, cap, depth+1)); }
-    else { for(int i=0;i<v.o->n && !g_oom && !g_err;i++) obj_set(c, v.o->keys[i], sclone(v.o->vals[i], seen, nseen, cap, depth+1)); }
+    else { for(int i=0;i<v.o->n && !g_oom && !g_err;i++){ if(is_internal_key(v.o->keys[i])) continue; obj_set(c, v.o->keys[i], sclone(v.o->vals[i], seen, nseen, cap, depth+1)); } }   /* skip @@ symbol keys (M-symbol) */
     return cv;
 }
 static val nat_structured_clone(val *a, int n){ if(!n) return UND(); sclone_pair seen[128]; int nseen=0; return sclone(a[0], seen, &nseen, 128, 0); }
@@ -2871,6 +3000,16 @@ static val nat_reflect_set(val *a, int n){ if(n<3 || a[0].t!=V_OBJ || !obj_keyed
     obj_set(o,k,a[2]); return BOOLV(1); }
 static val nat_reflect_deleteProperty(val *a, int n){ if(n<2 || a[0].t!=V_OBJ || !a[0].o) return BOOLV(0); return BOOLV(obj_delete(a[0].o, val_to_str(a[1]))); }
 static val nat_reflect_ownKeys(val *a, int n){ return nat_obj_keys(a,n); }   /* own enumerable keys (= Object.keys) */
+
+/* Symbol(desc): called as a FUNCTION (not `new`), returns a fresh unique symbol.
+ * Each call takes the next id from the monotonic counter (which starts above the
+ * reserved well-known ids), so Symbol() !== Symbol(). The optional description is
+ * interned into the arena so it outlives the args[] frame. (M-symbol) */
+static val nat_Symbol(val *a, int n){
+    const char *desc = 0;
+    if (n && a[0].t!=V_UNDEF) { const char *s=val_to_str(a[0]); desc=intern(s,(int)strlen(s)); }
+    return SYMV(g_sym_next++, desc);
+}
 
 static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
@@ -2936,6 +3075,11 @@ static void install_globals(env *g) {
         g_array_ctor=arrc; env_define(g,"Array",obj_val_native(arrc)); } }
     /* JSON (stringify) */
     obj *json=new_obj(V_OBJ); def_native(json,"stringify",nat_json_stringify); def_native(json,"parse",nat_json_parse); env_define(g,"JSON",obj_val(json));
+    /* Symbol(desc) -> fresh unique symbol; Symbol.iterator is the fixed well-known symbol
+     * (read off the side statics, like Number.MAX_SAFE_INTEGER). (M-symbol) */
+    { obj *symc=new_obj(V_NATIVE); if(symc){ symc->native=nat_Symbol;
+        obj *sst=new_obj(V_OBJ); if(sst){ obj_set(sst,"iterator",SYMV(SYM_ID_ITERATOR,"Symbol.iterator")); symc->statics=sst; }
+        env_define(g,"Symbol",obj_val_native(symc)); } }
     /* global functions */
     obj *pi=new_obj(V_NATIVE); pi->native=nat_parseInt; env_define(g,"parseInt",obj_val_native(pi));
     obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));

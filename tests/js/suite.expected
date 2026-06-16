@@ -258,4 +258,12 @@ true false
 255 42
 -- regex bounded quantifiers {n,m} (M438) --
 aaa false xabcy
+-- Symbol + iterator protocol (M-symbol) --
+true true true
+true a,b {"a":1,"b":2}
+ab symbol
+1,2,3,4
+0,1,2
+terminated=true hitcap=true
+noiter=0
 -- done --

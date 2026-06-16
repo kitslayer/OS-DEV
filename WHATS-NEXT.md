@@ -1,6 +1,19 @@
 # What's next
 
-> **Status (468 milestones).** (M468: **Shell output redirection `>` / `>>`** — `cmd > file` (overwrite)
+> **Status (469 milestones).** (M469: **JS `Symbol` + iterator protocol** — new V_SYMBOL primitive
+> (typeof "symbol", unique id, equality by id; symbol-keyed props encoded as "@@sym:<id>" + hidden from
+> Object.keys/for-in/JSON/etc.), `Symbol`/`Symbol.iterator` globals, and `for…of` now consults a plain
+> object's `[Symbol.iterator]()` → CUSTOM ITERABLES work (call it → iterator → loop next()→{value,done}).
+> Untrusted-input safety: the for-of loop is hard-capped (FOROF_ITER_MAX=2000, CATCHABLE rt_err) +
+> g_err/g_oom-guarded each step + each next() is depth-guarded — can't hang/overflow the kernel.
+> Subagent-implemented (found+fixed a loose_eq bug: Symbol()==0 → false), then I reviewed + SHIP-review
+> subagent (bounds/termination/additive all confirmed; sym_key buf ≤26/32; 8 enumeration sites hide
+> @@sym) + jstest PASS (Symbol/custom-iterable/class-iterable/adversarial cases) + in-OS (js ITER.JS →
+> "typeof symbol sum 10", a [Symbol.iterator]() range summed by for-of). KNOWN (pre-existing, unrelated):
+> object literals as ternary branches `c?{..}:{..}` mis-parse; spread/Array.from don't invoke
+> [Symbol.iterator] on plain objects (only for-of does). Baked ITER.JS demo. Files: kernel/js.c,
+> tests/js/suite.js+.expected, tools/mkfatfs.c.
+> M468: **Shell output redirection `>` / `>>`** — `cmd > file` (overwrite)
 > + `cmd >> file` (append), composing with M463 pipes (`ls | grep TXT > found.txt`). Reuses the M463
 > opt-in print-capture: main() parses+strips a trailing `>`/`>>`+filename, then the command (single OR
 > a pipeline whose final stage is captured) runs under cap_begin/cap_end and the bytes go to the file

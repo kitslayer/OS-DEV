@@ -282,4 +282,12 @@ print('5'*2, '5'-2, [5]+3, 0.5);  // 10 3 53 0 (string<->num arithmetic; [5]->"5
 print(parseInt("0xff"), parseInt("  42abc"));  // 255 42 (hex prefix; leading ws + trailing junk)
 print("-- regex bounded quantifiers {n,m} (M438) --");
 print((/a{2,3}/.exec("aaaa")||["x"])[0], /\d{3}/.test("12"), (/x\w{2,4}y/.exec("xabcy")||["?"])[0]);  // aaa false xabcy (greedy {2,3} caps at 3; {3} needs exactly 3; {2,4} matches abc)
+print("-- Symbol + iterator protocol (M-symbol) --");
+print(typeof Symbol() === "symbol", Symbol() !== Symbol(), Symbol.iterator === Symbol.iterator);  // true true true (typeof symbol; Symbol() is unique each call; Symbol.iterator is a stable well-known symbol)
+var _sk=Symbol(); var _so={a:1,b:2}; _so[_sk]=42; print(_so[_sk]===42, Object.keys(_so).join(","), JSON.stringify(_so));  // true a,b {"a":1,"b":2} (symbol-keyed prop is retrievable but hidden from Object.keys + JSON)
+var _sf=""; for(var _sik in _so) _sf+=_sik; print(_sf, typeof Symbol.iterator);  // ab symbol (symbol key hidden from for-in too; Symbol.iterator is itself a symbol)
+var _rng={from:1,to:4,[Symbol.iterator](){var c=this.from,l=this.to;return { next(){ return c<=l?{value:c++,done:false}:{value:0,done:true}; } };}}; var _rc=[]; for(var _rv of _rng) _rc.push(_rv); print(_rc.join(","));  // 1,2,3,4 (custom iterable via object-literal [Symbol.iterator] + manual {next()} iterator in for-of)
+class _Counter { constructor(n){ this.n=n; } [Symbol.iterator](){ var i=0,n=this.n; return { next(){ return i<n?{value:i++,done:false}:{value:0,done:true}; } }; } } var _cc=[]; for(var _cv of new _Counter(3)) _cc.push(_cv); print(_cc.join(","));  // 0,1,2 (class with a computed [Symbol.iterator]() method is iterable)
+var _inf={value:7,done:false}; var _adv={[Symbol.iterator](){ return { next(){ return _inf; } }; }}; var _ac=0,_at=false; try { for(var _az of _adv){ _ac++; } _at=true; } catch(_ae){ _at=true; } print("terminated="+_at, "hitcap="+(_ac===2000));  // terminated=true hitcap=true (adversarial iterator never sets done:true -> the 2000 iteration cap stops it; no hang)
+var _none={a:1}; var _nc=0; for(var _nw of _none) _nc++; print("noiter="+_nc);  // noiter=0 (a plain object with no [Symbol.iterator] iterates nothing in for-of; no crash)
 print("-- done --");
