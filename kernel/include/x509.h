@@ -16,6 +16,7 @@ typedef struct {
     int            key_alg;                  /* X509_KEY_RSA / X509_KEY_EC / OTHER */
     const uint8_t *key;  size_t key_len;     /* the public key BIT STRING contents */
     char           subject_cn[64];           /* subject commonName, "" if none */
+    char           not_before[24];           /* validity notBefore (UTCTime/GeneralizedTime) */
     char           not_after[24];            /* validity notAfter (UTCTime/GeneralizedTime) */
     const uint8_t *tbs;  size_t tbs_len;     /* tbsCertificate DER (the signed region) */
     const uint8_t *sig;  size_t sig_len;     /* signatureValue contents (BIT STRING, no unused-bits byte) */
@@ -28,6 +29,12 @@ typedef struct {
 /* Parse a DER certificate, filling `out`. Returns 0 on success, -1 on malformed
  * input. Pointers in `out` alias into `der` (no copy); bounds-checked. */
 int x509_parse(const uint8_t *der, size_t len, x509_cert *out);
+
+/* Compare a certificate time string (UTCTime "YYMMDDHHMMSSZ" or GeneralizedTime
+ * "YYYYMMDDHHMMSSZ") against a given wall-clock time. Returns <0 if the cert time is
+ * before (Y,M,D,h,mi,s), >0 if after, 0 if equal OR the string is unparseable (so an
+ * unparseable date is treated as "no opinion" — fail open). */
+int x509_time_cmp(const char *t, int Y, int M, int D, int h, int mi, int s);
 
 /* 1 if `host` matches the certificate's identity (RFC 6125): against the SAN
  * dNSNames if any are present (CN ignored), else the subject CN; case-insensitive,

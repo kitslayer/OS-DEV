@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (451 milestones).** (M451: **TLS hostname verification (ENFORCED)** — the client
+> **Status (452 milestones).** (M452: **TLS cert validity-period enforcement** — `x509.c` parses
+> notBefore + adds `x509_time_cmp` (UTCTime YY-pivot + GeneralizedTime; unparseable→0/no-opinion);
+> `tls.c` reads the RTC and REJECTS an expired/not-yet-valid leaf cert before the request. Guarded:
+> enforced only if RTC year ≥ 2020 (unset clock fails open), unparseable date fails open — a bad
+> RTC can't break all HTTPS. x509test unit-tests x509_time_cmp. Verified in-OS BOTH ways: clock 2026
+> → example.com loads; VM clock forced to 2040 (`-rtc base=`) → same cert EXPIRED + ABORT/refused.
+> Completes cert validation: chain + hostname (M451) + validity period.
+> M451: **TLS hostname verification (ENFORCED)** — the client
 > validated/anchored the cert chain but never checked the cert named the host (any valid cert for
 > any domain was accepted = MITM hole). Now `x509.c` parses subjectAltName dNSNames (new bounded
 > `find_san` over the `[3]` extensions) + `host_matches_cert` (RFC 6125: SAN-authoritative, no CN

@@ -28,6 +28,7 @@
 #include "x509.h"
 #include "ecdsa.h"
 #include "rsa.h"
+#include "rtc.h"
 #include "sha512.h"
 #include "rootca.h"
 #include "string.h"
@@ -62,6 +63,7 @@ typedef struct {
     uint8_t   leaf_key[1100]; int leaf_key_len, leaf_key_alg;
     int       chain_anchored;        /* chain top verified against a trusted root CA */
     int       host_ok;               /* leaf-cert hostname match: 1 match, 0 definitive mismatch, -1 unknown */
+    int       cert_time_ok;          /* leaf-cert validity period: 1 valid, 0 expired/not-yet-valid, -1 unknown */
 } tls;
 
 /* CertificateVerify result of the most recent handshake, for the browser UI:
@@ -296,6 +298,23 @@ static int tls_capture_leaf_key(tls *t, const uint8_t *m, int mlen, const char *
                 t->host_ok == 1 ? "MATCH" : t->host_ok == 0 ? "MISMATCH" : "uncertain");
     }
 
+    /* VALIDITY PERIOD: reject an expired / not-yet-valid leaf cert. Only enforced when
+     * the wall clock is plausibly set (RTC year >= 2020) — an unset clock fails open
+     * (cert_time_ok stays -1) so a missing/garbage RTC can't break all of HTTPS. An
+     * unparseable date also fails open (x509_time_cmp returns 0 -> treated as in-range). */
+    {
+        struct rtc_time now; rtc_now(&now);
+        if (now.year >= 2020) {
+            int aft = x509_time_cmp(certs[0].not_after,  now.year, now.month, now.day, now.hour, now.min, now.sec);
+            int bef = x509_time_cmp(certs[0].not_before, now.year, now.month, now.day, now.hour, now.min, now.sec);
+            t->cert_time_ok = (aft >= 0 && bef <= 0) ? 1 : 0;   /* now within [notBefore, notAfter] */
+            if (t->cert_time_ok == 0)
+                kprintf("[tls] cert validity: %s (notBefore %s notAfter %s, now %d-%02d-%02d)\n",
+                        bef > 0 ? "NOT YET VALID" : "EXPIRED",
+                        certs[0].not_before, certs[0].not_after, now.year, now.month, now.day);
+        }
+    }
+
     /* chain-internal verification (NON-FATAL, logged): each cert is signed by the
      * next one up. This proves the presented chain is self-consistent; it does NOT
      * yet check the top against a trusted root CA (that's the remaining step before
@@ -380,6 +399,7 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
      * sys_https) — never two tls_get_inner() at once. */
     static tls T; memset(&T, 0, sizeof(T)); T.tcp = &tcp;
     T.host_ok = -1;                 /* unknown until the leaf cert is parsed (0 = mismatch is meaningful) */
+    T.cert_time_ok = -1;            /* unknown until validity is checked against a sane clock */
 
     /* --- ephemeral X25519 key --- */
     uint8_t priv[32], cpub[32];
@@ -562,8 +582,9 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
      * list larger than we store) fails open as informational, so a legitimate site is
      * never wrongly rejected. Chain-to-root anchoring stays informational (the baked
      * root set is incomplete) — see docs/438. */
-    if (T.host_ok == 0) {
-        kprintf("[tls] ABORT: leaf certificate does not match host %s — refusing\n", host);
+    if (T.host_ok == 0 || T.cert_time_ok == 0) {
+        kprintf("[tls] ABORT: leaf certificate %s for host %s — refusing\n",
+                T.host_ok == 0 ? "does not match" : "is expired/not-yet-valid", host);
         tcp_close(&tcp);
         return -1;
     }

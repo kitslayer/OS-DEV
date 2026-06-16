@@ -161,6 +161,23 @@ int host_matches_cert(const char *host, const x509_cert *cert) {
     return 0;
 }
 
+/* parse two ASCII digits at s (caller guarantees both are digits) */
+static int dig2(const char *s) { return (s[0]-'0')*10 + (s[1]-'0'); }
+
+int x509_time_cmp(const char *t, int Y, int M, int D, int h, int mi, int s) {
+    int n = 0; while (t[n] >= '0' && t[n] <= '9') n++;   /* count leading digits */
+    int cy, i;
+    if (n >= 14)      { cy = dig2(t)*100 + dig2(t+2); i = 4; }            /* GeneralizedTime YYYY */
+    else if (n >= 12) { int yy = dig2(t); cy = yy < 50 ? 2000+yy : 1900+yy; i = 2; }  /* UTCTime YY (RFC 5280 pivot) */
+    else return 0;                                                       /* unparseable -> no opinion */
+    /* offsets i..i+9 are all within the counted digit run (n >= i+10) */
+    int cm = dig2(t+i), cd = dig2(t+i+2), ch = dig2(t+i+4), cmin = dig2(t+i+6), cs = dig2(t+i+8);
+    /* compare lexicographically by field, most-significant first */
+    long ct = ((((long)cy*100 + cm)*100 + cd)*100 + ch)*100 + cmin; ct = ct*100 + cs;
+    long nt = ((((long)Y *100 + M )*100 + D )*100 + h )*100 + mi;   nt = nt*100 + s;
+    return ct < nt ? -1 : ct > nt ? 1 : 0;
+}
+
 int x509_parse(const uint8_t *der, size_t len, x509_cert *out) {
     memset(out, 0, sizeof(*out));
     const uint8_t *p = der, *end = der + len;
@@ -182,12 +199,16 @@ int x509_parse(const uint8_t *der, size_t len, x509_cert *out) {
 
     if (tlv(&q, qend, &tag, &f, &fl) != 0 || tag != T_SEQ) return -1;  /* validity */
     {   const uint8_t *vp = f, *vend = f + fl; int vt; const uint8_t *vc; size_t vcl;
-        if (tlv(&vp, vend, &vt, &vc, &vcl) == 0)                       /* notBefore */
+        if (tlv(&vp, vend, &vt, &vc, &vcl) == 0) {                     /* notBefore */
+            int n = (int)vcl; if (n > (int)sizeof(out->not_before) - 1) n = sizeof(out->not_before) - 1;
+            for (int i = 0; i < n; i++) out->not_before[i] = (char)vc[i];
+            out->not_before[n] = 0;
             if (tlv(&vp, vend, &vt, &vc, &vcl) == 0) {                 /* notAfter */
-                int n = (int)vcl; if (n > (int)sizeof(out->not_after) - 1) n = sizeof(out->not_after) - 1;
+                n = (int)vcl; if (n > (int)sizeof(out->not_after) - 1) n = sizeof(out->not_after) - 1;
                 for (int i = 0; i < n; i++) out->not_after[i] = (char)vc[i];
                 out->not_after[n] = 0;
             }
+        }
     }
 
     if (tlv(&q, qend, &tag, &f, &fl) != 0 || tag != T_SEQ) return -1;  /* subject Name */

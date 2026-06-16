@@ -47,6 +47,22 @@ int main(void) {
     CHECK(host_matches_cert("other.test", &c) == 1, "SAN present: other.test matches");
     CHECK(host_matches_cert("match.test", &c) == 0, "SAN present: CN match.test NOT consulted");
 
+    /* ---- x509_time_cmp: cert validity-period comparison ---- */
+    CHECK(x509_time_cmp("260830040342Z", 2026,6,16,0,0,0) > 0, "time: UTCTime 2026-08 after now 2026-06");
+    CHECK(x509_time_cmp("260830040342Z", 2027,1,1,0,0,0) < 0, "time: UTCTime 2026-08 before now 2027");
+    CHECK(x509_time_cmp("260830040342Z", 2026,8,30,4,3,42) == 0, "time: exact equal");
+    CHECK(x509_time_cmp("20260830040342Z", 2026,6,16,0,0,0) > 0, "time: GeneralizedTime after");
+    CHECK(x509_time_cmp("20260830040342Z", 2030,1,1,0,0,0) < 0, "time: GeneralizedTime before now 2030");
+    CHECK(x509_time_cmp("490101000000Z", 2026,1,1,0,0,0) > 0, "time: UTCTime YY=49 -> 2049 (future)");
+    CHECK(x509_time_cmp("500101000000Z", 2026,1,1,0,0,0) < 0, "time: UTCTime YY=50 -> 1950 (past)");
+    CHECK(x509_time_cmp("garbage", 2026,1,1,0,0,0) == 0, "time: unparseable -> no opinion (0)");
+    CHECK(x509_time_cmp("", 2026,1,1,0,0,0) == 0, "time: empty -> no opinion (0)");
+    /* the real certs are valid 2026-06..2036; check a 'now' inside and outside that window */
+    x509_parse(cert_match, cert_match_len, &c);
+    CHECK(x509_time_cmp(c.not_after,  2026,6,18,0,0,0) > 0, "time: cert_match not expired at 2026-06-18");
+    CHECK(x509_time_cmp(c.not_before, 2026,6,18,0,0,0) < 0, "time: cert_match already valid at 2026-06-18");
+    CHECK(x509_time_cmp(c.not_after,  2040,1,1,0,0,0) < 0, "time: cert_match expired by 2040");
+
     /* Crafted adversarial DER — the classic length-field attacks. */
     static const uint8_t c1[] = { 0x30,0x84,0xFF,0xFF,0xFF,0xFF };  /* SEQ claiming a 4 GB body, none present */
     static const uint8_t c2[] = { 0x30,0x82,0x01,0x00 };           /* SEQ claiming 256 bytes, truncated */
