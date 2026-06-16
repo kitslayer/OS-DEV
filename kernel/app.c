@@ -175,6 +175,26 @@ void app_render(app_t *a, int px, int py) {
 
 int app_alive(app_t *a) { return a && a->used && !a->exited; }
 
+/* Reclaim a self-exited app's resources. Called by the window manager from ITS
+ * own context (not the app's), so it can free the app's task_t + 256 KB kernel
+ * stack and release the apps[] slot — lifting the per-boot spawn cap for apps
+ * that exit cleanly. Only acts once the task is fully dead (off-CPU; see
+ * task_free), so a still-running task is never freed under it. Returns 1 when
+ * the slot is free (the WM may then drop the window), 0 if the app exited but
+ * its task isn't off-CPU yet (retry next pass). NOTE: the app's address space
+ * (a->cr3 — page tables + user frames, ~tens of KB) is intentionally NOT freed
+ * yet; that needs page-table teardown with an active-CR3 guard and is deferred.
+ * A reaped slot gets a fresh cr3 on the next app_spawn (memset + vmm_create). */
+int app_reap(app_t *a) {
+    if (!a) return 1;
+    if (a->used && a->exited && (!a->task || a->task->state == TASK_DEAD)) {
+        if (a->task) task_free(a->task);
+        a->task = 0;
+        a->used = 0;
+    }
+    return !a->used;
+}
+
 /* WM polls this: returns 1 (and clears) if the app's grid changed since asked. */
 int app_dirty_clear(app_t *a) { int d = a->gdirty; a->gdirty = 0; return d; }
 

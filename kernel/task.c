@@ -180,6 +180,20 @@ void task_exit(void) {
     /* unreachable */
 }
 
+/* Free a dead task's kernel stack and its task_t. ONLY safe on a task that has
+ * exited (state==TASK_DEAD), been unlinked from the ready ring (task_exit does
+ * that), and is no longer executing on its stack — i.e. reaped from a DIFFERENT
+ * task's context. A task can't free its own stack (it's running on it), so a
+ * separate reaper calls this once the task is off-CPU. Observing TASK_DEAD from
+ * another task is sufficient proof of off-CPU: task_exit sets DEAD with
+ * interrupts disabled and only leaves that region via its final context_switch,
+ * so no other task can run (and observe DEAD) while this task still executes. */
+void task_free(task_t *t) {
+    if (!t) return;
+    if (t->stack_base) kfree((void *)t->stack_base);
+    kfree(t);
+}
+
 int task_current_id(void) {
     return current->id;
 }

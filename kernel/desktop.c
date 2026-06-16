@@ -638,9 +638,13 @@ void desktop_run(void) {
             w->maximized = 0;                         /* a manual resize un-maximizes */
         }
 
-        /* reap windows whose app has exited */
+        /* reap windows whose app has exited: free the app's task/stack/slot
+         * (only once its task is fully off-CPU), then drop the window. If it
+         * exited but isn't off-CPU yet, app_reap returns 0 — leave the window
+         * for the next pass so we never drop it without reclaiming the slot. */
         for (int i = win_count - 1; i >= 0; i--)
             if (windows[i].kind == KIND_APP && !app_alive((app_t *)windows[i].app)) {
+                if (!app_reap((app_t *)windows[i].app)) continue;
                 remove_window(i); dirty = 1;
                 dragging = resizing = -1;             /* the array shifted: drop any active gesture */
             }

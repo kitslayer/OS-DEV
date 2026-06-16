@@ -24,6 +24,7 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
 void    schedule(void);                    /* switch to the next ready task */
 void    task_yield(void);                  /* voluntarily give up the CPU */
 void    task_exit(void);                   /* end the current thread (no return) */
+void    task_free(task_t *t);              /* free a DEAD, unlinked, off-CPU task (reaper only) */
 int     task_current_id(void);
 task_t *task_self(void);                   /* the currently running task */
 void    task_block(void);                  /* block current task until woken */

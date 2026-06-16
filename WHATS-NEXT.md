@@ -1,6 +1,19 @@
 # What's next
 
-> **Status (463 milestones).** (M463: **Shell pipes (`cmd1 | cmd2`)** — the userspace shell now
+> **Status (464 milestones).** (M464: **App-exit resource reclamation** — a ring-3 app that exits
+> cleanly now has its `task_t` + 256 KB kernel stack freed and its `apps[]` slot released (was: all
+> leaked → 8-spawns/boot hard cap). New `task_free` (task.c) + `app_reap` (app.c); the WM reap loop
+> (desktop.c) frees from its own task only once the dead app's task is `TASK_DEAD` — set interrupts-off
+> and only left via the final context_switch, so observing it from another task proves off-CPU (no
+> UAF). The WM drops the window only after the slot is reclaimed (no dropped-window leak). I designed
+> it after reading vmm/task/app/desktop, then SHIP-reviewed (off-CPU invariant airtight) + all 7 suites
+> + in-OS verified (10 spawn+exit shell cycles, 0 faults, 0 spawn failures — old code fails at #8).
+> DEFERRED (documented, not session-length): freeing the app's address space (a->cr3 page tables +
+> user frames — needs an active-CR3 guard) and forced termination of X-closed (orphaned, still-running)
+> apps. NEXT surfaced by the review: the kernel heap (kmalloc/kfree) has NO locking — an IF-on desktop
+> kfree can be preempted by an app's IF-clear syscall kmalloc over a half-edited free list (pre-existing
+> latent; M464 widens it a hair). Wrapping kmalloc/kfree/kzalloc in irq_save/irq_restore would close it.
+> M463: **Shell pipes (`cmd1 | cmd2`)** — the userspace shell now
 > does UNIX-style N-stage pipelines (`ls | grep TXT`, `cat f | wc`). The command dispatch was
 > extracted into `run_command(line,cwd)` (whole if/else chain wrapped in `do{…}while(0)` so its
 > dispatch-level `continue`s keep meaning — a plain command runs byte-for-byte as before — and "exit"
