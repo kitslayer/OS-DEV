@@ -278,4 +278,13 @@ hi:px
 recterminated=true
 object {}
 deepchain=77
+-- iterable spread + Array.from(customIterable) (M-iter) --
+1,2,3,4 4
+5,6,7,8 4
+10,20,30
+0 0
+3 0,1
+0 spreadNoCrash
+9,8,7 a,b 1,2
+spreadterminated=true spreadcap=true
 -- done --

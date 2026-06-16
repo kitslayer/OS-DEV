@@ -302,4 +302,14 @@ var _pm=new Proxy({greet(){ return "hi:"+this.who; }, who:"px"}, {}); print(_pm.
 var _rec; _rec=new Proxy({}, { get(t,k){ return _rec[k]; } }); var _rt=false; try { var _rz=_rec.boom; _rt=true; } catch(_re){ _rt=true; } print("recterminated="+_rt);  // recterminated=true (adversarial self-recursive get trap: MAXDEPTH stops it -> catchable error, NO stack overflow/hang)
 var _pbad=new Proxy(5, 9); print(typeof _pbad, JSON.stringify(_pbad));  // object {} (non-object target/handler don't crash: target/handler default to empty objects)
 var _dc={deep:77}; for(var _i=0;_i<300;_i++) _dc=new Proxy(_dc, {}); print("deepchain="+_dc.deep);  // deepchain=77 (300 nested trap-less proxies: the GET fall-through walks the chain ITERATIVELY -> no guard-page-less kernel-stack overflow)
+print("-- iterable spread + Array.from(customIterable) (M-iter) --");
+function _Range(f,t){ return { from:f, to:t, [Symbol.iterator](){ var c=this.from,l=this.to; return { next(){ return c<=l?{value:c++,done:false}:{value:0,done:true}; } }; } }; }
+print([..._Range(1,4)].join(","), [..._Range(1,4)].length);  // 1,2,3,4 4 (array-literal spread now drives a plain object's [Symbol.iterator] + manual {next()})
+print(Array.from(_Range(5,8)).join(","), Array.from(_Range(5,8)).length);  // 5,6,7,8 4 (Array.from(customIterable) drives the same protocol)
+print(Array.from(_Range(1,3), function(x){ return x*10; }).join(","));  // 10,20,30 (Array.from's map fn is applied to each yielded value)
+print(Array.from(_Range(0,-1)).length, [..._Range(0,-1)].length);  // 0 0 (an iterable yielding nothing -> empty array, NOT the array-like {length} fallthrough)
+print(Array.from({length:3}).length, Array.from({length:2},function(_z,i){return i;}).join(","));  // 3 0,1 (a NON-iterable plain object still hits the array-like {length:n} path; map fn over indices)
+var _msp={a:1,b:2}; print([..._msp].length, "spreadNoCrash");  // 0 spreadNoCrash (spread of a non-iterable plain object appends nothing -> empty, no crash)
+print([...[9,8,7]].join(","), [..."ab"].join(","), [...new Set([1,1,2])].join(","));  // 9,8,7 a,b 1,2 (regression: array / string / Set spread unchanged)
+var _scnt=0; var _sadv={[Symbol.iterator](){ return { next(){ _scnt++; return {value:1,done:false}; } }; }}; var _sat=false; try { var _sr=[..._sadv]; _sat=true; } catch(_se){ _sat=true; } print("spreadterminated="+_sat, "spreadcap="+(_scnt===2000));  // spreadterminated=true spreadcap=true (adversarial never-done iterable hits the 2000 cap in spread -> next() called exactly 2000x then catchable error, no hang)
 print("-- done --");

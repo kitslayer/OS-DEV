@@ -1279,6 +1279,7 @@ static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names
  * for a plain call); arrow functions (node->prefix==1) deliberately do NOT bind
  * one, so `this` resolves lexically up the scope chain to the enclosing function. */
 static val call_function_this(val fn, val thisv, val *args, int nargs);   /* fwd: call_bound recurses into it */
+static int iter_collect(val it, obj *dest, val mapfn, int hasfn);   /* fwd: drives the [Symbol.iterator] protocol for array-spread / Array.from (defined after from_push) */
 static void register_handler(obj *el, const char *type, val fn);   /* fwd: el.onclick=fn / addEventListener -> the per-page handler registry */
 static void unregister_handler(obj *el, const char *type);          /* fwd: el.onclick=null / removeEventListener */
 /* Does this function body reference `arguments`? (skips nested functions — they have their
@@ -1565,6 +1566,7 @@ static val eval_expr_inner(node *n, env *e) {
                     else if (sv.t==V_STR){ const char*s=sv.str; for(int j=0;s[j] && !g_oom;j++){ char*c=aalloc(2); if(c){c[0]=s[j];c[1]=0;} arr_push_val(o, STRV(c?c:"")); } }
                     else if (sv.t==V_OBJ && sv.o && sv.o->kind==V_SET){ for(int j=0;j<sv.o->n && !g_oom;j++) arr_push_val(o, sv.o->vals[j]); }   /* [...set] */
                     else if (sv.t==V_OBJ && sv.o && sv.o->kind==V_MAP){ for(int j=0;j+1<sv.o->n && !g_oom;j+=2){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,sv.o->vals[j]); arr_push_val(p,sv.o->vals[j+1]); val pv=UND();pv.t=V_ARR;pv.o=p; arr_push_val(o,pv); } }   /* [...map] -> [[k,v],...] */
+                    else if (sv.t==V_OBJ && sv.o) iter_collect(sv, o, UND(), 0);   /* [...customIterable]: drive [Symbol.iterator] (no-op for a non-iterable plain object) (M-iter) */
                 } else arr_push_val(o, eval_expr(el,e));
             }
             val r=UND(); r.t=V_ARR; r.o=o; return r; }
@@ -3028,6 +3030,38 @@ static int64_t nat_sign_v(int64_t x){ return x>0?1:x<0?-1:0; }
 static val nat_sign(val *a, int n){ return NUM(n?nat_sign_v(to_num(a[0])):0); }
 /* push `e` onto r, applying the optional Array.from map function (e, index) */
 static void from_push(obj *r, val e, val fn, int hasfn){ if(hasfn){ val ca[2]={e,NUM(r->n)}; e=call_function(fn,ca,2); } arr_push_val(r,e); }
+/* Drive the ES6 iterator protocol on `it` and append each yielded value to `dest` via
+ * from_push (so an Array.from map fn is applied; array-spread passes hasfn=0). This is the
+ * SHARED engine for [...customIterable] and Array.from(customIterable) — it mirrors the
+ * for-of loop's iterator-drive EXACTLY: same callable test (V_FUN/V_NATIVE/V_BOUND), same
+ * fetch-next-ONCE, the SAME hard cap (2000, the FOROF_ITER_MAX value), and the same
+ * g_err/g_oom checks EVERY iteration so a runaway/allocating user iterator can neither hang
+ * nor OOM the kernel (no GC, untrusted input). Returns 1 iff `it` had a CALLABLE
+ * [Symbol.iterator] (it was iterable); returns 0 (appending NOTHING) otherwise, so callers
+ * can safely use it as an `else if` condition that falls through for non-iterables. */
+static int iter_collect(val it, obj *dest, val mapfn, int hasfn){
+    val itfn = eval_member_get(it, sym_key(SYM_ID_ITERATOR));
+    int callable = (itfn.t==V_FUN || itfn.t==V_NATIVE || (itfn.t==V_OBJ && itfn.o && itfn.o->kind==V_BOUND));
+    if (!callable) return 0;                                /* not iterable -> caller falls through (nothing appended) */
+    if (g_err || g_oom) return 1;
+    val iter = call_function_this(itfn, it, 0, 0);          /* @@iterator() -> the iterator object */
+    if (iter.t!=V_OBJ || !iter.o || g_err || g_oom) return 1;
+    val nextfn = eval_member_get(iter, "next");             /* fetch `next` ONCE (as the for-of loop does) */
+    int ncall = (nextfn.t==V_FUN || nextfn.t==V_NATIVE || (nextfn.t==V_OBJ && nextfn.o && nextfn.o->kind==V_BOUND));
+    long guard=0;
+    while (ncall) {
+        if (g_err || g_oom) break;
+        if (++guard > 2000) { rt_err("iterator did not terminate"); break; }   /* hard cap == FOROF_ITER_MAX: guaranteed termination on untrusted iterators */
+        val res = call_function_this(nextfn, iter, 0, 0);
+        if (g_err || g_oom) break;
+        if (res.t!=V_OBJ || !res.o) break;                  /* result must be an object; otherwise stop */
+        if (truthy(eval_member_get(res, "done"))) break;    /* done:truthy -> finished */
+        val cv = eval_member_get(res, "value");
+        if (g_err || g_oom) break;
+        from_push(dest, cv, mapfn, hasfn);                  /* append (applying the Array.from map fn when hasfn) */
+    }
+    return 1;                                               /* it WAS iterable (even if zero-length / it errored mid-stream) */
+}
 static val nat_array_from(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
     val fn = n>1?a[1]:UND(); int hasfn=(fn.t==V_FUN||fn.t==V_NATIVE);
@@ -3035,6 +3069,7 @@ static val nat_array_from(val *a, int n){
     else if (n && a[0].t==V_OBJ && a[0].o && a[0].o->kind==V_SET) for (int i=0;i<a[0].o->n && !g_oom;i++) from_push(r, a[0].o->vals[i], fn, hasfn);   /* Array.from(set) — dedup idiom */
     else if (n && a[0].t==V_OBJ && a[0].o && a[0].o->kind==V_MAP) for (int i=0;i+1<a[0].o->n && !g_oom;i+=2){ obj*p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,a[0].o->vals[i]); arr_push_val(p,a[0].o->vals[i+1]); val pv=UND();pv.t=V_ARR;pv.o=p; from_push(r, pv, fn, hasfn); }
     else if (n && a[0].t==V_STR) { const char*s=a[0].str; for (int i=0;s[i] && !g_oom;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} from_push(r, STRV(c?c:""), fn, hasfn); } }
+    else if (n && a[0].t==V_OBJ && a[0].o && iter_collect(a[0], r, fn, hasfn)) { }   /* custom iterable: drive [Symbol.iterator] (applies the map fn). Returns 0 (no-op) for a non-iterable -> falls through to the array-like branch. (M-iter) */
     else if (n && a[0].t==V_OBJ && a[0].o && obj_keyed(a[0].o)) {   /* array-like {length:n}: Array.from({length:3}) -> [undefined x3] (pairs with .fill / a map fn) */
         val lv; int64_t len = obj_get(a[0].o,"length",&lv) ? to_num(lv) : 0;
         if (len<0) len=0; if (len>1000000) len=1000000;   /* bound a malicious {length:1e18} */

@@ -1,6 +1,18 @@
 # What's next
 
-> **Status (471 milestones).** (M471: **FAT32 directory growth** — `add_entry` (kernel/fat32.c) now
+> **Status (472 milestones).** (M472: **JS iterator protocol — spread + Array.from** — completes M469:
+> `[...obj]` (array-literal spread eval, case N_ARRAY) + `Array.from(obj)` now consult a plain object's
+> `[Symbol.iterator]` (before, only for-of did — an inconsistency). New `iter_collect(it,dest,mapfn,hasfn)`
+> helper (fwd-decl before case N_ARRAY, defined after from_push) mirrors the for-of drive EXACTLY (same
+> callable checks, fetch-next-once, SAME 2000 cap + g_err/g_oom guards → untrusted runaway can't hang),
+> appends via from_push (so Array.from's map fn applies); returns 1 if iterable / 0 WITHOUT appending
+> (safe in an else-if). Array.from's iterable branch precedes the array-like `{length:n}` branch.
+> Strictly additive (arrays/strings/sets/maps/array-likes/non-iterables unchanged). Subagent-built, I
+> reviewed (iter_collect = faithful copy of the M469-reviewed for-of drive: capped, no-append-on-0,
+> bounds-safe) + jstest PASS (custom-iterable spread/Array.from/map-fn + regressions + adversarial cap
+> "spreadcap=true") + 7 suites + in-OS (ITER.JS: `[...range]`→"1-2-3-4", Array.from→4). The iterator
+> protocol is now CONSISTENT across for-of/spread/Array.from. Files: kernel/js.c, tests/js/suite.*, mkfatfs.c.
+> M471: **FAT32 directory growth** — `add_entry` (kernel/fat32.c) now
 > GROWS a full directory's cluster chain instead of failing: tracks the chain tail `last`, allocs a
 > fresh cluster, zeroes all its slots, writes the entry in slot 0, then `fat_set(last,newcl)` links it
 > (write-before-link so a chain-walk never sees an uninit cluster) — the same chain-extension fat32_write
