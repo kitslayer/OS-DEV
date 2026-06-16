@@ -55,6 +55,18 @@ static uint32_t fat_step(uint32_t cl, uint32_t *steps) {
     return fat_next(cl);
 }
 
+/* A legitimate data cluster is in [2, total_clusters+2). A corrupt/cyclic FAT can
+ * aim a chain at an out-of-range cluster that's still < EOC; treating that as
+ * end-of-chain stops a wrong/garbage read (the LBA would wrap to 28 bits or the
+ * drive would error). The read path is memory-safe regardless (every read targets
+ * the fixed-size sector buffer), so this is robustness/correctness, not a memory
+ * fix — and it also rejects cluster 0/1 (so an empty file's first-cluster-0 can't
+ * underflow cluster_to_sector). total_clusters==0 (pre-mount) falls back to the
+ * old cl<EOC test. */
+static int cluster_in_range(uint32_t cl) {
+    return cl >= 2 && cl < EOC && (!total_clusters || cl < total_clusters + 2);
+}
+
 /* Turn an 8.3 directory name (11 bytes, space-padded) into "NAME.EXT". */
 static void format_83(const uint8_t *raw, char *out) {
     int n = 0;
@@ -91,7 +103,7 @@ static int walk_dir(uint32_t cl, dir_visit_fn visit, void *ctx) {
     int count = 0;
     uint32_t steps = 0;
 
-    while (cl < EOC) {
+    while (cluster_in_range(cl)) {
         uint32_t first = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
             if (ata_read(first + s, 1, sec) < 0)
@@ -233,7 +245,7 @@ static long fat32_read(const char *name, void *buf, unsigned long max) {
     unsigned long written = 0;
     uint32_t cl = cl0, steps = 0;
 
-    while (cl < EOC && remaining > 0) {
+    while (cluster_in_range(cl) && remaining > 0) {
         uint32_t first = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus && remaining > 0; s++) {
             if (ata_read(first + s, 1, sec) < 0)

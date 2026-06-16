@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (434 milestones).** (M424–434: more shell tools — `cmp`/`paste`/`comm`
+> **Status (435 milestones).** (M424–435: more shell tools — `cmp`/`paste`/`comm`
 > (the file-compare set), `strings`, `basename`/`dirname`; a JS-engine correctness
 > sweep found by probing — getters now fire in value-iteration too
 > (`JSON.stringify`/`Object.values`/`entries`/`assign`/spread, M425–428) and
@@ -9,7 +9,10 @@
 > M422 high-level tokenizer review, a granular bound-by-bound pass over every
 > self-contained HTML/CSS sub-parser (`decode_entity`/`parse_color`/the inline-`style=`
 > parsers/`sel_parse`/the attr helpers), independently reviewed **bounds-safe**, with
-> one `decode_entity` defense-in-depth guard; plus committed ASan/UBSan fuzz harnesses
+> one `decode_entity` defense-in-depth guard; and the safety review was extended to the
+> **disk** trust boundary (M435) — a `cluster_in_range` guard on the FAT32 read loops
+> (`walk_dir`/`fat32_read`) rejects corrupt out-of-range cluster numbers (strictly
+> additive, reviewed SHIP; also closes a latent cluster-0 underflow); plus committed ASan/UBSan fuzz harnesses
 > for the kernel's untrusted-input parsers — `make check` = jstest + imgtest + x509test
 > + nettest, each verified to catch a reintroduced OOB. M387–423: the JS-engine / browser-demo / shell
 > spaces were saturated with verified increments — a 15-page interactive browser
