@@ -23,8 +23,11 @@
  *   style="fill:..;stroke:.." are honoured. Colours: #rgb, #rrggbb, rgb(r,g,b),
  *   a small named-colour set, none, currentColor(->black). Default fill = black.
  *
- * Ignored (skipped gracefully): <text>/<image>/<use>/<defs>/gradients/filters,
- *   CSS classes, transforms beyond viewBox, opacity/fill-rule overrides.
+ * <use href="#id" x= y=> (also xlink:href) instantiates a previously-defined
+ *   element — a shape, or a <symbol>/<g> of shapes (usually in <defs>) — at the
+ *   given offset; recursion is depth-capped so self/cyclic refs terminate.
+ * Ignored (skipped gracefully): <image>/filters, CSS classes, transforms beyond
+ *   viewBox (per-element + <g> transforms ARE honoured), fill-rule overrides.
  *
  * BOUNDS-SAFETY (untrusted input, no stack guard page):
  *   - Every scan loop is bounded by `len`; the tag scanner always advances.
@@ -51,6 +54,7 @@
 #define SVG_MAX_GROUPS 16       /* transform-stack depth for nested <g> (capped) */
 #define SVG_MAX_GRADS  8        /* gradient definitions collected (capped) */
 #define SVG_MAX_STOPS  8        /* color stops per gradient (capped) */
+#define SVG_MAX_USE    4        /* <use> recursion depth cap (self/cyclic -> terminates) */
 
 /* ---- 16.16 signed fixed-point ------------------------------------------ */
 typedef int32_t fx;            /* value = real * 65536 */
@@ -452,6 +456,9 @@ typedef struct {
     /* gradient definitions, collected in a pre-pass and referenced by fill=url(#id). */
     grad_t  grads[SVG_MAX_GRADS];
     int     ngrad;
+    /* full document bounds (set in svg_decode) so <use href="#id"> can locate a
+     * referenced definition anywhere in the markup via find_def(). */
+    const char *doc, *docend;
 } ctx_t;
 
 /* Map a user-space coord (16.16) to device (pixel) fixed-point. The subtraction
@@ -1173,6 +1180,106 @@ static void collect_gradients(ctx_t *c, const uint8_t *data, int len) {
     }
 }
 
+/* ---- <use href="#id"> support: find a referenced definition ------------- *
+ * Scan [doc,docend) for the FIRST element carrying id="..." (or id='...') equal
+ * to id[0..idlen). On a match set *dstart to that element's '<' and *dend to one
+ * past the end of the element: for a self-closing/void element that's just past
+ * its '>'; for a container (e.g. <g>/<symbol>) it's one past the matching close
+ * tag, found by counting same-named open/close tags (depth-balanced). Returns 1
+ * on success, 0 if no such id. Every scan is bounded by docend (no OOB), and the
+ * close-tag search is bounded by SVG_MAX_TAGS (anti-hang on malformed markup). */
+static int find_def(const char *doc, const char *docend, const char *id, int idlen,
+                    const char **dstart, const char **dend) {
+    if (idlen <= 0) return 0;
+    const char *p = doc;
+    int tags = 0;
+    while (p < docend && tags++ < SVG_MAX_TAGS) {
+        if (*p != '<') { p++; continue; }
+        const char *tag = p + 1;
+        if (tag >= docend) break;
+        if (*tag == '!' || *tag == '?') {            /* comment / PI: skip to '>' */
+            const char *q = tag;
+            if (tag + 3 < docend && tag[0]=='!' && tag[1]=='-' && tag[2]=='-') {
+                q = tag + 3;
+                while (q + 2 < docend && !(q[0]=='-'&&q[1]=='-'&&q[2]=='>')) q++;
+                p = (q + 2 < docend) ? q + 3 : docend;
+            } else { while (q < docend && *q != '>') q++; p = (q < docend) ? q + 1 : docend; }
+            continue;
+        }
+        const char *name = tag;
+        if (*name == '/') { p = tag; while (p < docend && *p != '>') p++; p = (p<docend)?p+1:docend; continue; }
+        const char *ne = name;
+        while (ne < docend && !is_space((unsigned char)*ne) && *ne != '>' && *ne != '/') ne++;
+        int nlen = (int)(ne - name);
+        const char *tend = ne;
+        while (tend < docend && *tend != '>') tend++;
+        const char *body_e = tend;
+        const char *next = (tend < docend) ? tend + 1 : docend;
+
+        /* does THIS element's id="..." match? (get_attr is bounded by body_e) */
+        char idv[64];
+        if (nlen > 0 && get_attr(name, body_e, "id", idv, sizeof idv)) {
+            int n = (int)strlen(idv);
+            if (n == idlen) {
+                int m = 1;
+                for (int i = 0; i < idlen; i++) if (idv[i] != id[i]) { m = 0; break; }
+                if (m) {
+                    *dstart = p;                     /* the element's '<' */
+                    int self_closing = (body_e > name && body_e[-1] == '/');
+                    if (self_closing) { *dend = next; return 1; }   /* void: end of its tag */
+                    /* container: scan forward for the depth-balanced close tag of
+                     * the SAME element name; bounded by docend + SVG_MAX_TAGS. */
+                    int depth = 1, t2 = 0;
+                    const char *q = next;
+                    while (q < docend && t2++ < SVG_MAX_TAGS) {
+                        if (*q != '<') { q++; continue; }
+                        const char *t = q + 1;
+                        if (t >= docend) break;
+                        if (*t == '!' || *t == '?') {     /* comment / PI: skip */
+                            const char *r = t;
+                            if (t + 3 < docend && t[0]=='!' && t[1]=='-' && t[2]=='-') {
+                                r = t + 3;
+                                while (r + 2 < docend && !(r[0]=='-'&&r[1]=='-'&&r[2]=='>')) r++;
+                                q = (r + 2 < docend) ? r + 3 : docend;
+                            } else { while (r < docend && *r != '>') r++; q = (r < docend) ? r + 1 : docend; }
+                            continue;
+                        }
+                        int clo = 0; const char *nm = t;
+                        if (*nm == '/') { clo = 1; nm++; }
+                        const char *nme = nm;
+                        while (nme < docend && !is_space((unsigned char)*nme) && *nme != '>' && *nme != '/') nme++;
+                        int nl2 = (int)(nme - nm);
+                        const char *te = nme;
+                        while (te < docend && *te != '>') te++;
+                        const char *qbody_e = te;
+                        const char *qnext = (te < docend) ? te + 1 : docend;
+                        int same = (nl2 == nlen);
+                        if (same) for (int i = 0; i < nlen; i++)
+                            if (lc((unsigned char)nm[i]) != lc((unsigned char)name[i])) { same = 0; break; }
+                        if (same) {
+                            if (clo) { depth--; if (depth == 0) { *dend = qnext; return 1; } }
+                            else if (!(qbody_e > nm && qbody_e[-1] == '/')) depth++;  /* nested open (not self-closing) */
+                        }
+                        q = qnext;
+                    }
+                    *dend = docend;                  /* unterminated container -> to EOF */
+                    return 1;
+                }
+            }
+        }
+        p = next;
+    }
+    return 0;
+}
+
+/* The element-walk render loop, factored out so <use href="#id"> can re-enter it
+ * on a referenced definition span. Renders every element in [p,end): shapes are
+ * built + rasterized; <g> maintains the transform+paint stack; <defs> content is
+ * skipped (in_defs); <use> instantiates a definition (translated by x,y) by a
+ * bounded, depth-capped recursive call. Behaviour for an ordinary top-level SVG
+ * is byte-for-byte the old in-line loop (depth 0, no <use>). */
+static void render_region(ctx_t *c, const char *p, const char *end, int depth);
+
 /* ------------------------------------------------------------------------ */
 int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                uint8_t *scratch, int scratch_cap, int *ow, int *oh) {
@@ -1228,10 +1335,21 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
     /* clear bitmap to fully-transparent black */
     memset(out, 0, (long)C.W * C.H * 4);
 
-    /* Walk every element after the <svg> tag (bounded). For each shape tag,
-     * build its geometry and rasterize. The scanner finds '<name ...>' spans;
-     * it never reads past `end` and always advances. */
-    const char *p = svg_e < end ? svg_e + 1 : end;
+    /* document bounds for <use href="#id"> definition lookups (find_def). */
+    C.doc = s; C.docend = end;
+
+    /* Walk every element after the <svg> tag. render_region holds the actual
+     * element loop so a <use> can re-enter it on a referenced definition span. */
+    render_region(&C, svg_e < end ? svg_e + 1 : end, end, 0);
+
+    *ow = C.W; *oh = C.H;
+    return 0;
+}
+
+/* The factored-out element-walk loop (see the forward decl above). [p,end) is the
+ * region to render; depth bounds <use> recursion. For depth 0 / no <use> this is
+ * byte-for-byte the original in-line svg_decode loop. */
+static void render_region(ctx_t *c, const char *p, const char *end, int depth) {
     int tags = 0;
     int in_defs = 0;       /* skip everything inside <defs>...</defs> */
     while (p < end && tags++ < SVG_MAX_TAGS) {
@@ -1273,41 +1391,76 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
 
         if (IS("defs")) { if (closing) in_defs = 0; else in_defs = 1; p = next; continue; }
         if (IS("svg") && closing) break;            /* </svg> ends it */
+        /* A <symbol> only paints when instantiated via <use>: during the normal
+         * top-level walk (depth 0) skip its whole subtree like <defs>. When it is
+         * the wrapper opening a <use>-rendered region (depth > 0) it falls through
+         * to the <g> path below and acts as a transparent group (renders children).
+         * (<defs>/<symbol> share the in_defs skip; render_region's own in_defs
+         * starts 0, so a def span beginning AT <symbol id=…> is not pre-skipped.) */
+        if (IS("symbol") && depth == 0) { if (closing) in_defs = 0; else in_defs = 1; p = next; continue; }
         if (in_defs) { p = next; continue; }        /* skip ALL defs content (incl. <g>) */
 
-        if (IS("g")) {                              /* group: maintain the transform stack */
+        if (IS("g") || IS("symbol")) {              /* group / used <symbol>: transform+paint stack */
             if (closing) {                          /* </g>: pop -> restore parent CTM + paint */
-                if (C.gdepth > 0) {
-                    C.gdepth--;
-                    if (C.gdepth < SVG_MAX_GROUPS) {
-                        for (int i = 0; i < 6; i++) C.m[i] = C.gstack[C.gdepth][i];
-                        C.in_fill = C.fillstk[C.gdepth];
-                        C.in_stroke = C.strokestk[C.gdepth];
-                        C.in_swid = C.swidstk[C.gdepth];
-                        C.in_alpha = C.alphastk[C.gdepth];
+                if (c->gdepth > 0) {
+                    c->gdepth--;
+                    if (c->gdepth < SVG_MAX_GROUPS) {
+                        for (int i = 0; i < 6; i++) c->m[i] = c->gstack[c->gdepth][i];
+                        c->in_fill = c->fillstk[c->gdepth];
+                        c->in_stroke = c->strokestk[c->gdepth];
+                        c->in_swid = c->swidstk[c->gdepth];
+                        c->in_alpha = c->alphastk[c->gdepth];
                     }
                 }
             } else if (!(body_e > name && body_e[-1] == '/')) {   /* <g ...> (not self-closing) */
-                if (C.gdepth < SVG_MAX_GROUPS) {    /* save CTM+paint, then apply this group's */
-                    for (int i = 0; i < 6; i++) C.gstack[C.gdepth][i] = C.m[i];
-                    C.fillstk[C.gdepth] = C.in_fill;
-                    C.strokestk[C.gdepth] = C.in_stroke;
-                    C.swidstk[C.gdepth] = C.in_swid;
-                    C.alphastk[C.gdepth] = C.in_alpha;
+                if (c->gdepth < SVG_MAX_GROUPS) {    /* save CTM+paint, then apply this group's */
+                    for (int i = 0; i < 6; i++) c->gstack[c->gdepth][i] = c->m[i];
+                    c->fillstk[c->gdepth] = c->in_fill;
+                    c->strokestk[c->gdepth] = c->in_stroke;
+                    c->swidstk[c->gdepth] = c->in_swid;
+                    c->alphastk[c->gdepth] = c->in_alpha;
                     char tf[256];
                     if (get_attr(name, body_e, "transform", tf, sizeof tf)) {
                         fx tm[6]; parse_transform(tf, (int)strlen(tf), tm);
-                        mat_mul(C.m, C.m, tm);
+                        mat_mul(c->m, c->m, tm);
                     }
                     /* the group's own fill/stroke/stroke-width update the inherited paint;
                      * its opacity multiplies into the inherited group-opacity. */
-                    read_paint(&C, name, body_e, &C.in_fill, &C.in_stroke, &C.in_swid, 0);
-                    C.in_alpha = C.in_alpha * alpha_attr(name, body_e, "opacity") / 255;
+                    read_paint(c, name, body_e, &c->in_fill, &c->in_stroke, &c->in_swid, 0);
+                    c->in_alpha = c->in_alpha * alpha_attr(name, body_e, "opacity") / 255;
                 }
-                C.gdepth++;                         /* unconditional: keeps push/pop balanced past the cap */
+                c->gdepth++;                         /* unconditional: keeps push/pop balanced past the cap */
             }
             p = next; continue;
         }
+
+        if (IS("use")) {                            /* <use href="#id" x= y=>: instantiate a def */
+            if (!closing && depth < SVG_MAX_USE) {
+                char hv[128];
+                int have = get_attr(name, body_e, "href", hv, sizeof hv) ||
+                           get_attr(name, body_e, "xlink:href", hv, sizeof hv);
+                if (have) {
+                    const char *id = hv; if (*id == '#') id++;
+                    int idlen = (int)strlen(id);
+                    const char *ds = 0, *de = 0;
+                    if (idlen > 0 && find_def(c->doc, c->docend, id, idlen, &ds, &de)) {
+                        char v[48]; fx ux = 0, uy = 0;
+                        if (get_attr(name,body_e,"x",v,sizeof v)) { const char*q=v; ux = parse_num(&q,v+strlen(v)); }
+                        if (get_attr(name,body_e,"y",v,sizeof v)) { const char*q=v; uy = parse_num(&q,v+strlen(v)); }
+                        fx saved[6]; for (int i = 0; i < 6; i++) saved[i] = c->m[i];
+                        fx t[6]; set_identity(t); t[4] = ux; t[5] = uy;   /* translate(x,y) */
+                        mat_mul(c->m, c->m, t);
+                        /* the referenced span starts AT its element (e.g. <g id=...> or a
+                         * bare shape), so render_region's own in_defs starts 0 and it
+                         * renders; a <symbol>/<g> wrapper renders its children. */
+                        render_region(c, ds, de, depth + 1);
+                        for (int i = 0; i < 6; i++) c->m[i] = saved[i];   /* restore CTM */
+                    }
+                }
+            }
+            p = next; continue;
+        }
+
         if (closing) { p = next; continue; }
 
         color_t fill, stroke; fx swid;
@@ -1315,58 +1468,58 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
         fx shape_saved[6]; int shape_tf = 0;
         { char tf[256];
           if (get_attr(name, body_e, "transform", tf, sizeof tf)) {
-              for (int i = 0; i < 6; i++) shape_saved[i] = C.m[i];
+              for (int i = 0; i < 6; i++) shape_saved[i] = c->m[i];
               fx tm[6]; parse_transform(tf, (int)strlen(tf), tm);
-              mat_mul(C.m, C.m, tm);
+              mat_mul(c->m, c->m, tm);
               shape_tf = 1;
           } }
 
         if (IS("rect")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
-            build_rect(&C, name, body_e);
-            raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);
+            build_rect(c, name, body_e);
+            raster_shape(c, fill, stroke, fx_mul(swid, c->sx), 1);
         } else if (IS("circle")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);
             char v[48]; fx cx=0,cy=0,r=0;
             if (get_attr(name,body_e,"cx",v,sizeof v)) { const char*q=v; cx=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"cy",v,sizeof v)) { const char*q=v; cy=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"r",v,sizeof v))  { const char*q=v; r =parse_num(&q,v+strlen(v)); }
-            build_ellipse(&C, cx, cy, r, r);
-            raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
+            build_ellipse(c, cx, cy, r, r);
+            raster_shape(c, fill, stroke, fx_mul(swid, c->sx), 1);
         } else if (IS("ellipse")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);
             char v[48]; fx cx=0,cy=0,rx=0,ry=0;
             if (get_attr(name,body_e,"cx",v,sizeof v)) { const char*q=v; cx=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"cy",v,sizeof v)) { const char*q=v; cy=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"rx",v,sizeof v)) { const char*q=v; rx=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"ry",v,sizeof v)) { const char*q=v; ry=parse_num(&q,v+strlen(v)); }
-            build_ellipse(&C, cx, cy, rx, ry);
-            raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
+            build_ellipse(c, cx, cy, rx, ry);
+            raster_shape(c, fill, stroke, fx_mul(swid, c->sx), 1);
         } else if (IS("line")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);
             char v[48]; fx x1=0,y1=0,x2=0,y2=0;
             if (get_attr(name,body_e,"x1",v,sizeof v)) { const char*q=v; x1=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"y1",v,sizeof v)) { const char*q=v; y1=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"x2",v,sizeof v)) { const char*q=v; x2=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"y2",v,sizeof v)) { const char*q=v; y2=parse_num(&q,v+strlen(v)); }
-            reset_shape(&C); push_user(&C, x1,y1); push_user(&C, x2,y2);
+            reset_shape(c); push_user(c, x1,y1); push_user(c, x2,y2);
             /* a <line> defaults to stroke=black if none given (else invisible) */
             if (!stroke.set) parse_color("black", &stroke, 1);
-            raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 0);
+            raster_shape(c, fill, stroke, fx_mul(swid, c->sx), 0);
         } else if (IS("polyline")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
-            build_points(&C, name, body_e);
-            raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 0);
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);
+            build_points(c, name, body_e);
+            raster_shape(c, fill, stroke, fx_mul(swid, c->sx), 0);
         } else if (IS("polygon")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
-            build_points(&C, name, body_e);
-            raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);
+            build_points(c, name, body_e);
+            raster_shape(c, fill, stroke, fx_mul(swid, c->sx), 1);
         } else if (IS("path")) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);
-            build_path(&C, name, body_e);
-            raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);
+            build_path(c, name, body_e);
+            raster_shape(c, fill, stroke, fx_mul(swid, c->sx), 1);
         } else if (IS("text") && !closing) {
-            read_paint(&C, name, body_e, &fill, &stroke, &swid, 1);   /* text uses the fill colour */
+            read_paint(c, name, body_e, &fill, &stroke, &swid, 1);   /* text uses the fill colour */
             char v[64]; fx tx = 0, ty = 0, fsz = fx_from_int(16);     /* default font-size 16 */
             if (get_attr(name, body_e, "x", v, sizeof v)) { const char *q=v; tx = parse_num(&q, v+strlen(v)); }
             if (get_attr(name, body_e, "y", v, sizeof v)) { const char *q=v; ty = parse_num(&q, v+strlen(v)); }
@@ -1383,16 +1536,13 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                 buf[bn++] = ch;
             }
             buf[bn] = 0;
-            draw_text(&C, tx, ty, fsz, buf, bn, fill);
+            draw_text(c, tx, ty, fsz, buf, bn, fill);
         }
-        /* else: <image>, <use>, unknown -> skipped (<g> handled above; the text content
+        /* else: <image>, unknown -> skipped (<g>/<use> handled above; the text content
          * after a <text> tag is plain text and is skipped by the tag scanner) */
 
-        if (shape_tf) for (int i = 0; i < 6; i++) C.m[i] = shape_saved[i];   /* restore CTM */
+        if (shape_tf) for (int i = 0; i < 6; i++) c->m[i] = shape_saved[i];   /* restore CTM */
         #undef IS
         p = next;
     }
-
-    *ow = C.W; *oh = C.H;
-    return 0;
 }

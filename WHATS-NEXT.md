@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (461 milestones).** (M461: **CSS `text-decoration:line-through`** — `<s>`/`<del>` tags
+> **Status (462 milestones).** (M462: **SVG `<use>`/`<symbol>` reuse** — `<use href="#id" x= y=>`
+> (+ `xlink:href`) instantiates a defined element (shape, or `<symbol>`/`<g>`, usually in `<defs>`)
+> at an offset. The render loop was extracted into `render_region(ctx,p,end,depth)` (behaviour-
+> preserving at depth 0 — the 10 unit tests lock it byte-for-byte); `find_def` locates the span
+> (depth-matching the close), `<use>` renders it under translate(x,y), recursion depth-capped (<4,
+> self/cyclic terminate). Implemented via a subagent, then I reviewed (find_def/`<use>` bounds-safe)
+> + svgtest PASS (11 unit tests + fuzz + 2M-iter focused) + in-OS verified (USE.SVG: a `<g id=star>`
+> `<use>`d 4× → 4 stars). **SVG decoder now fully comprehensive.**
+> M461: **CSS `text-decoration:line-through`** — `<s>`/`<del>` tags
 > already struck (STY_STRIKE + strike-line); now CSS line-through (inline/`<style>`) maps to it too.
 > One additive check in parse_style_textstyle. Verified in-OS (CSS.HTM struck span). 
 > **NOTE/STATUS: I've now done 21 milestones this session (M441-461): SVG (rasterizer/transforms/

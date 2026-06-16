@@ -307,6 +307,78 @@ static void test_text(void) {
     }
 }
 
+/* --- test 11: <use>/<symbol> element reuse ------------------------------- */
+static void test_use(void) {
+    /* (a) a <g> def in <defs>, instantiated at an offset via href="#id". The def
+     *     itself (inside <defs>) must NOT render in place; the <use> renders it
+     *     translated by (x,y). */
+    {
+        const char *svg =
+            "<svg width='60' height='60'>"
+            "<defs><g id='box'><rect x='0' y='0' width='10' height='10' fill='red'/></g></defs>"
+            "<use href='#box' x='30' y='30'/>"
+            "</svg>";
+        int w, h;
+        int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                           obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        CHECK(r == 0 && w == 60 && h == 60, "use: <g> def decode 60x60");
+        if (r == 0) {
+            const uint8_t *u = px(w, 35, 35);   /* used instance: rect[0,10] + (30,30) -> [30,40] */
+            CHECK(u[0]>200 && u[1]<60 && u[2]<60 && u[3]>200, "use: instance drawn red at (35,35)");
+            const uint8_t *o = px(w, 5, 5);     /* the def in <defs> must NOT render in place */
+            CHECK(o[3]==0, "use: def location (5,5) stays empty");
+            const uint8_t *e = px(w, 50, 50);   /* outside the translated instance */
+            CHECK(e[3]==0, "use: (50,50) outside instance transparent");
+        }
+    }
+    /* (b) a bare <symbol> def reused twice at two offsets (and xlink:href spelling). */
+    {
+        const char *svg =
+            "<svg width='80' height='40'>"
+            "<defs><symbol id='dot'><circle cx='5' cy='5' r='4' fill='blue'/></symbol></defs>"
+            "<use xlink:href='#dot' x='10' y='10'/>"   /* -> center (15,15) */
+            "<use href='#dot' x='50' y='10'/>"         /* -> center (55,15) */
+            "</svg>";
+        int w, h;
+        int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                           obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        CHECK(r == 0 && w == 80 && h == 40, "use: <symbol> twice decode 80x40");
+        if (r == 0) {
+            const uint8_t *a = px(w, 15, 15);   /* first instance */
+            CHECK(a[2]>200 && a[0]<60 && a[3]>200, "use: symbol instance 1 blue at (15,15)");
+            const uint8_t *b = px(w, 55, 15);   /* second instance (xlink vs href both work) */
+            CHECK(b[2]>200 && b[0]<60 && b[3]>200, "use: symbol instance 2 blue at (55,15)");
+            const uint8_t *mid = px(w, 35, 20); /* between the two -> empty */
+            CHECK(mid[3]==0, "use: gap between symbol instances transparent");
+            const uint8_t *def = px(w, 5, 5);   /* symbol content not rendered in place */
+            CHECK(def[3]==0, "use: <symbol> def not rendered in place");
+        }
+    }
+    /* (c) a <use> referencing a shape that lives OUTSIDE <defs> (forward ref to a
+     *     later element id). The original still renders at its own spot AND the
+     *     <use> renders a translated copy; an undefined id renders nothing. */
+    {
+        const char *svg =
+            "<svg width='60' height='60'>"
+            "<rect id='sq' x='0' y='0' width='10' height='10' fill='green'/>"  /* renders at origin */
+            "<use href='#sq' x='40' y='40'/>"                                  /* + a copy at (40,40) */
+            "<use href='#nope' x='20' y='20'/>"                                /* undefined -> nothing */
+            "</svg>";
+        int w, h;
+        int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                           obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        CHECK(r == 0 && w == 60 && h == 60, "use: forward-ref decode 60x60");
+        if (r == 0) {
+            const uint8_t *orig = px(w, 5, 5);    /* original shape at its own location */
+            CHECK(orig[1]>100 && orig[0]<60 && orig[3]>200, "use: original shape renders at origin");
+            const uint8_t *copy = px(w, 45, 45);  /* translated copy */
+            CHECK(copy[1]>100 && copy[0]<60 && copy[3]>200, "use: copy renders at (45,45)");
+            const uint8_t *none = px(w, 25, 25);  /* undefined id -> nothing here */
+            CHECK(none[3]==0, "use: undefined href renders nothing");
+        }
+    }
+}
+
 /* --- fuzz harness -------------------------------------------------------- */
 static uint32_t rs = 0x5EED1234u;
 static uint32_t xr(void) { rs ^= rs<<13; rs ^= rs>>17; rs ^= rs<<5; return rs; }
@@ -322,6 +394,7 @@ int main(void) {
     test_opacity();
     test_gradient();
     test_text();
+    test_use();
 
     /* Valid seeds to mutate during fuzzing. */
     const char *seeds[] = {
@@ -388,6 +461,12 @@ int main(void) {
             "</radialGradient>","<stop offset='","' stop-color='","' stop-opacity='","fill='url(#",
             "url(#g)","' gradientUnits='userSpaceOnUse","' cx='","' r='","</stop>",
             "<text x='","' y='","' font-size='","'>","</text>","ABCabc 123 xyz!",
+            /* <use>/<symbol> element-reuse fragments: ids, href/xlink:href, #refs,
+             * self-referential + cyclic + nested -> must terminate (depth cap) and
+             * never OOB on a missing/garbage id or an unterminated container. */
+            "<use href='#","<use xlink:href='#","<symbol id='","</symbol>",
+            "id='","' x='","' y='","#a","#b","#self","#missing","'/>","' href='#a'/>",
+            "<g id='","<defs><g id='a'>","</g></defs>","<use href='#a' x='5' y='5'/>",
         };
         int nfr = (int)(sizeof frag / sizeof frag[0]);
         for (unsigned seed = 1; seed <= 16; seed++) {
@@ -435,6 +514,32 @@ int main(void) {
         /* deeply nested / unterminated tags */
         const char *un = "<svg width='10' height='10'><rect x='0' y='0' width='5' height='5' fill='#abc'";
         svg_decode((const uint8_t*)un, (int)strlen(un), obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        /* <use> recursion must terminate via the depth cap (no infinite recursion): */
+        /*  - a <g> that <use>s itself */
+        const char *self = "<svg width='20' height='20'>"
+            "<defs><g id='s'><rect x='0' y='0' width='4' height='4' fill='red'/>"
+            "<use href='#s' x='2' y='2'/></g></defs><use href='#s' x='0' y='0'/></svg>";
+        svg_decode((const uint8_t*)self, (int)strlen(self), obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        /*  - a mutually-recursive cycle a -> b -> a */
+        const char *cyc = "<svg width='20' height='20'><defs>"
+            "<g id='a'><rect width='4' height='4' fill='red'/><use href='#b' x='1' y='1'/></g>"
+            "<g id='b'><rect width='4' height='4' fill='blue'/><use href='#a' x='1' y='1'/></g>"
+            "</defs><use href='#a'/></svg>";
+        svg_decode((const uint8_t*)cyc, (int)strlen(cyc), obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        /*  - a <use> referencing an UNTERMINATED container (find_def -> docend) */
+        const char *udef = "<svg width='20' height='20'><defs><g id='g'>"
+            "<rect width='5' height='5' fill='green'/><use href='#g' x='2' y='2'/>";
+        svg_decode((const uint8_t*)udef, (int)strlen(udef), obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        /*  - a deeply NESTED <use> chain u0->u1->...->u9 (each id used by the prior) */
+        {
+            static char ub[4096]; int un2 = 0;
+            un2 += sprintf(ub+un2, "<svg width='40' height='40'><defs>");
+            for (int i = 0; i < 10; i++)
+                un2 += sprintf(ub+un2, "<g id='u%d'><rect width='3' height='3' fill='red'/>"
+                                       "<use href='#u%d' x='1' y='1'/></g>", i, i+1);
+            un2 += sprintf(ub+un2, "</defs><use href='#u0' x='0' y='0'/></svg>");
+            svg_decode((const uint8_t*)ub, un2, obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+        }
         /* tiny scratch -> must reject cleanly */
         int r2 = svg_decode((const uint8_t*)seeds[0], (int)strlen(seeds[0]),
                             obuf, sizeof obuf, sbuf, 16, &w, &h);
@@ -446,7 +551,7 @@ int main(void) {
     }
 
     if (fails == 0)
-        printf("svgtest: 10 unit tests (transforms + inheritance + opacity + gradients + text) + %d random + %d "
+        printf("svgtest: 11 unit tests (transforms + inheritance + opacity + gradients + text + use/symbol) + %d random + %d "
                "mutation + 320000 structured fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
     else
         printf("svgtest: %d FAILURE(S)\n", fails);
