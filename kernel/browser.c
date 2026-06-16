@@ -128,7 +128,7 @@ struct browser {
     struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
-    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
@@ -703,7 +703,8 @@ static int is_void_tag(const char *t) {
  * and find the cascaded color/text-style for one element from those rules. */
 static void capture_css(browser_t *b, const char *s, int n);
 static int  css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
-                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg, int *align);
+                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
+                      int *align, int *size, int *hidden);
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
@@ -733,7 +734,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         }
     } else if (!is_void_tag(tag)) {
         uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0;
-        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al);   /* <style> rules first (lower priority) */
+        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide);   /* <style> rules first (lower priority) */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
             uint32_t ic = parse_style_color(st, stl);  if (ic) c = ic;
@@ -1456,7 +1457,9 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int trv = parse_style_transform(s + ds, de - ds);
         uint32_t bgv = parse_style_bg(s + ds, de - ds);
         int alv = parse_style_align(s + ds, de - ds);
-        if (col || tsv >= 0 || ulv || trv || bgv || alv) {  /* keep only rules that set something we render */
+        int szv = parse_style_fontsize(s + ds, de - ds);
+        int dnv = parse_style_display(s + ds, de - ds);
+        if (col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv) {  /* keep rules that set something we render */
             b->css_sel[b->n_css] = sel;
             b->css_color[b->n_css] = col;
             b->css_style[b->n_css] = (int16_t)tsv;
@@ -1464,6 +1467,8 @@ static void capture_css(browser_t *b, const char *s, int n) {
             b->css_transform[b->n_css] = (uint8_t)trv;
             b->css_bg[b->n_css] = bgv;
             b->css_align[b->n_css] = (uint8_t)alv;
+            b->css_size[b->n_css] = (uint8_t)szv;
+            b->css_disp[b->n_css] = (uint8_t)dnv;
             b->n_css++;
         }
     }
@@ -1472,7 +1477,8 @@ static void capture_css(browser_t *b, const char *s, int n) {
  * #id / [attr]) sets *color / *textstyle, later rules winning per property (source order).
  * Returns 1 if any rule matched. Matching mirrors sel_match_all's per-element checks. */
 static int css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
-                     uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg, int *align) {
+                     uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
+                     int *align, int *size, int *hidden) {
     int hit = 0;
     for (int r = 0; r < b->n_css; r++) {
         const sel_t *s = &b->css_sel[r];
@@ -1486,6 +1492,8 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         if (b->css_transform[r]) *transform = b->css_transform[r];
         if (b->css_bg[r]) *bg = b->css_bg[r];
         if (b->css_align[r]) *align = b->css_align[r];
+        if (b->css_size[r]) *size = b->css_size[r];
+        if (b->css_disp[r]) *hidden = 1;
         hit = 1;
     }
     return hit;

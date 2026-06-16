@@ -1,6 +1,12 @@
 # What's next
 
-> **Status (454 milestones).** (M454: **CSS `display:none` + `hidden` attr** — an element with inline
+> **Status (455 milestones).** (M455: **`display:none` + `font-size` from `<style>` rules** — M448/M454
+> did these inline; now the `<style>` cascade does too, so `.hidden{display:none}` (ubiquitous utility
+> classes) + `.big{font-size:2rem}` work. capture_css parses font-size/display into 2 new rule columns;
+> css_match reports them (a display:none rule raises the same n_hidden scope; a font-size rule sets the
+> per-token scale, inline overriding). Additive. Verified in-OS (HIDE.HTM: `.gone` hidden, `.big`
+> enlarged, + the inline cases).
+> M454: **CSS `display:none` + `hidden` attr** — an element with inline
 > `display:none` (or the HTML5 `hidden` attr) suppresses itself + all content (text/bullets/hr/img).
 > An `n_hidden` counter raised/lowered by the existing tag-depth-matched sc[] scope stack (composes
 > with nesting); every emit primitive (emit_word/emit_break/hr+img token pushes) + the text-accum loop
