@@ -1545,6 +1545,41 @@ static void glob_expand(const char *src, char *dst, int dstsz){
     dst[dp] = 0;
 }
 
+/* Run one command line (a single ';'-separated segment): expand filename globs,
+ * then peel off output redirection and pipelines, then dispatch. Returns 1 only
+ * when the shell should exit (the "exit" command). */
+static int run_line(char *line, char *cwd) {
+    static char gline[1024];
+    char *cmd = line;
+    for (int i = 0; line[i]; i++) if (line[i] == '*' || line[i] == '?') {
+        glob_expand(line, gline, sizeof gline); cmd = gline; break;
+    }
+
+    const char *rfile = 0; int append = 0;
+    for (int i = 0; cmd[i]; i++) if (cmd[i] == '>') {
+        if (cmd[i+1] == '>') { append = 1; rfile = &cmd[i+2]; } else { rfile = &cmd[i+1]; }
+        cmd[i] = 0;
+        while (*rfile == ' ') rfile++;
+        char *fe = (char *)rfile; while (*fe) fe++; while (fe > rfile && fe[-1] == ' ') *--fe = 0;
+        if (!*rfile) rfile = 0;
+        break;
+    }
+
+    int piped = 0;
+    for (int i = 0; cmd[i]; i++) if (cmd[i] == '|') { piped = 1; break; }
+
+    if (piped) { run_pipe(cmd, cwd, rfile, append); return 0; }
+    if (rfile) {
+        static char rbuf[8192];
+        cap_begin(rbuf, sizeof rbuf);
+        run_command(cmd, cwd);
+        unsigned long rlen = cap_end();
+        write_redirect(rfile, rbuf, rlen, append);
+        return 0;
+    }
+    return run_command(cmd, cwd);                /* 1 only for "exit" */
+}
+
 int main(void) {
     print("\n");
     print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
@@ -1556,40 +1591,17 @@ int main(void) {
         print("osdev:"); print(cwd); print("$ ");
         readline(line, sizeof(line));
 
-        /* expand filename globs (*.txt, foo?) against the directory before parsing
-         * operators; tokens with no wildcard (and the operators | > >>) pass through.
-         * Only rewrite the line when a wildcard is actually present, so an ordinary
-         * command (incl. its exact spacing) is untouched. */
-        static char gline[1024];
-        char *cmd = line;
-        for (int i = 0; line[i]; i++) if (line[i] == '*' || line[i] == '?') {
-            glob_expand(line, gline, sizeof gline); cmd = gline; break;
+        /* split the line into ';'-separated commands and run each in turn
+         * (each handles its own globbing / redirection / pipeline). */
+        char *seg = line; int doexit = 0;
+        while (seg && !doexit) {
+            char *semi = seg; while (*semi && *semi != ';') semi++;
+            int more = (*semi == ';'); if (more) *semi = 0;
+            while (*seg == ' ') seg++;              /* trim leading space so a non-piped command still matches */
+            if (*seg && run_line(seg, cwd)) doexit = 1;   /* skip empty segments; run_line returns 1 only for "exit" */
+            seg = more ? semi + 1 : 0;
         }
-
-        /* output redirection: "cmd > file" (overwrite) or "cmd >> file" (append).
-         * Strip it off; the command part (possibly a pipeline) is captured to the file. */
-        const char *rfile = 0; int append = 0;
-        for (int i = 0; cmd[i]; i++) if (cmd[i] == '>') {
-            if (cmd[i+1] == '>') { append = 1; rfile = &cmd[i+2]; } else { rfile = &cmd[i+1]; }
-            cmd[i] = 0;                              /* end the command part */
-            while (*rfile == ' ') rfile++;          /* skip spaces before the filename */
-            char *fe = (char *)rfile; while (*fe) fe++; while (fe > rfile && fe[-1] == ' ') *--fe = 0;
-            if (!*rfile) rfile = 0;                 /* "cmd >" with no filename: ignore the redirect */
-            break;
-        }
-
-        int piped = 0;                              /* a '|' anywhere -> run as a pipeline */
-        for (int i = 0; cmd[i]; i++) if (cmd[i] == '|') { piped = 1; break; }
-
-        if (piped) run_pipe(cmd, cwd, rfile, append);
-        else if (rfile) {                           /* redirect a single command's output to a file */
-            static char rbuf[8192];
-            cap_begin(rbuf, sizeof rbuf);
-            run_command(cmd, cwd);
-            unsigned long rlen = cap_end();
-            write_redirect(rfile, rbuf, rlen, append);
-        }
-        else if (run_command(cmd, cwd)) break;      /* run_command returns 1 only for "exit" */
+        if (doexit) break;
     }
     return 0;
 }

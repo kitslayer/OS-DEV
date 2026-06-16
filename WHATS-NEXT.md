@@ -1,6 +1,15 @@
 # What's next
 
-> **Status (473 milestones).** (M473: **Shell filename globbing (`*`/`?`)** — the shell expands wildcard
+> **Status (474 milestones).** (M474: **Shell command sequencing (`;`)** — `cmd1 ; cmd2 ; cmd3` runs each
+> in turn. Refactor: the per-line dispatch (glob→redirect→pipe→run) moved into `run_line(seg,cwd)`
+> (returns 1 only for "exit"); main's loop splits the line on `;`, TRIMS each segment's leading space
+> (else a non-piped 2nd segment " echo x" → "unknown command"; run_pipe already trimmed internally so
+> the pipe path worked — that's how the bug surfaced), skips empties, run_line's each, breaks on exit.
+> `;` binds lower than `|`/`>` (each segment handles its own). Verified in-OS (echo a;echo b;echo c →
+> a/b/c; echo a ; ls|grep TXT → both; single cmd unaffected) + 7 suites. **Shell command-line operator
+> set COMPLETE: pipes `|` (M463) + redirect `>`/`>>` (M468) + glob `*`/`?` (M473) + sequence `;` (M474).**
+> File: user/shell.c only.
+> M473: **Shell filename globbing (`*`/`?`)** — the shell expands wildcard
 > patterns against the directory before parsing operators: `cat *.txt`, `grep PAT *.htm`, `wc *.svg`.
 > `glob_match` (case-insensitive — FAT is 8.3-uppercase; `*`=any run, `?`=one char, recursion bounded by
 > the short filename) + `glob_expand` (tokenize line; for a token with `*`/`?`, scan the sys_list listing
