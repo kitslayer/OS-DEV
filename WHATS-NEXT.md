@@ -1,6 +1,10 @@
 # What's next
 
-> **Status (456 milestones).** (M456: **SVG `<text>`** — svg.c renders `<text>` with the kernel 8×16
+> **Status (457 milestones).** (M457: **browser content zoom** — `+`/`-`/`0` scale page text 1×–4×
+> (persists across navigation). Multiplies the per-token `sc`/line-height the renderer already
+> computes (headings/font-size/bold all scale) + the wrap reflows. Additive (zoom 1 = unchanged).
+> Verified in-OS (text file ~3× + reflowed). Note: images don't zoom (text-only).
+> M456: **SVG `<text>`** — svg.c renders `<text>` with the kernel 8×16
 > bitmap font (`font_glyphs`, isolated; svgtest stubs it), each glyph scaled to `font-size` device px
 > + `fill`-coloured, anchor through transform/viewBox map (translate/scale positioning; no glyph
 > rotation). Bounded (blend_px clamps every px + char/height caps) → fuzz-safe. svgtest +text unit

@@ -83,6 +83,7 @@ struct browser {
     int     chain_ok;                                    /* 1 = chain anchored to a trusted root */
     int     host_match;                                  /* TLS hostname match: -2 n/a, 1 ok, 0 mismatch */
     char    cert_cn[48], cert_expiry[16];                /* leaf cert identity, for the 'i' cert-info display */
+    int     zoom;                                        /* content zoom multiplier (1..4), persists across navigation */
     volatile int want;                                   /* load queued (worker busy) */
     char    cur[URL_MAX];                                /* currently shown URL */
     char    hist[16][URL_MAX]; int histn;                /* back stack          */
@@ -3084,9 +3085,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             continue;
         }
 
+        int zm = b->zoom > 0 ? b->zoom : 1;                 /* content zoom (1..4) */
         int tsc = (t < TOK_MAX) ? b->tokscale[t] : 0;       /* CSS font-size override (0 = use style default) */
-        int sc = tsc ? tsc : scale_for(tk->style);
-        int lh = tsc ? (16 * tsc + 2) : lineh_for(tk->style);
+        int sc = (tsc ? tsc : scale_for(tk->style)) * zm;
+        int lh = (tsc ? (16 * tsc + 2) : lineh_for(tk->style)) * zm;
         int wpx = tk->len * GW * sc; if (wpx > cr - cl) wpx = cr - cl;
         if (cx + wpx > cr && cx > cl) { cy += curlh; cx = cl; curlh = 18; }
         if (lh > curlh) curlh = lh;
@@ -3107,7 +3109,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                     tok_t *pk = &b->toks[u];
                     if (pk->type != TK_WORD) break;          /* break/para/hr/img end the line */
                     int pts = (u < TOK_MAX) ? b->tokscale[u] : 0;
-                    int ps = pts ? pts : scale_for(pk->style);
+                    int ps = (pts ? pts : scale_for(pk->style)) * zm;
                     int pw = pk->len * GW * ps; if (pw > avail) pw = avail;
                     if (probe + pw > cr && probe > ls) break;  /* would wrap -> line ends here */
                     endx = probe + pw; probe = endx + GW * ps;
@@ -3354,6 +3356,9 @@ void browser_key(browser_t *b, int c) {
     case 'k': case 0x11: b->scroll -= 40;  break;          /* k / up-arrow   */
     case 'g':           b->scroll = 0;     break;   /* top */
     case 'G':           b->scroll = 1 << 24; break; /* bottom (render clamps to maxscroll) */
+    case '+': case '=': if (b->zoom < 4) b->zoom++; set_status(b, b->zoom>1?"zoom in":""); break;   /* content zoom */
+    case '-': case '_': if (b->zoom > 1) b->zoom--; set_status(b, b->zoom>1?"zoom out":"1x"); break;
+    case '0':           b->zoom = 1; set_status(b, "1x"); break;   /* reset zoom */
     case 'h':           copy_url(b->url, "home"); browser_navigate(b); break;  /* start page */
     case 'r':           browser_navigate(b); break;
     case 's':           browser_save(b);   break;   /* save page to PAGE.TXT */
@@ -3406,6 +3411,7 @@ browser_t *browser_create(const char *url) {
     browser_init();                          /* ensure the fetch worker exists */
     browser_t *b = kzalloc(sizeof(browser_t));
     if (!b) return NULL;
+    b->zoom  = 1;                            /* default 1x (zoom persists across pages) */
     b->raw   = kmalloc(RAW_MAX);
     b->text  = kmalloc(TEXT_MAX);
     b->toks  = kmalloc(sizeof(tok_t) * TOK_MAX);
