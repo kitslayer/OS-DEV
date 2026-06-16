@@ -120,6 +120,7 @@ static void keyboard_handler(struct registers *r) {
     if (sc == 0x40) { input_push(0x17); return; }   /* F6 -> WM: snap window right   */
     if (sc == 0x42) { input_push(0x1A); return; }   /* F8 -> WM: close focused window */
     if (sc == 0x43) { input_push(0x19); return; }   /* F9 -> WM: toggle Apps menu    */
+    if (sc == 0x58) { input_push(0x1C); return; }   /* F12 -> WM: screenshot         */
     if (sc < 128) {
         char c = shift_down ? keymap_shift[sc] : keymap[sc];
         if (c)

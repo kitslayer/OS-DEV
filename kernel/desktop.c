@@ -14,6 +14,7 @@
  */
 #include "desktop.h"
 #include "fb.h"
+#include "speaker.h"
 #include "font.h"
 #include "mouse.h"
 #include "usb.h"
@@ -150,7 +151,7 @@ static void draw_content(const window_t *w) {
         const char *L[] = { "Welcome to OS-DEV!", "",
             "A from-scratch x86_64 OS", "with its own desktop.", "",
             "- drag the title bar to move", "- drag the corner to resize",
-            "- Apps menu (click or F9) runs apps", "- F2 switch F3 min F4 max F5/6 tile" };
+            "- Apps menu (click or F9) runs apps", "- F2 switch F4 max F5/6 tile  F12 shot" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) draw_text(bx, by+i*18, L[i], 0x202028);
         break;
     }
@@ -585,6 +586,10 @@ void desktop_run(void) {
                         remove_window(fi);       /* browser/files/etc: drop immediately */
                     dragging = resizing = -1; dirty = 1;
                 }
+                continue;
+            }
+            if (k == 0x1C) {                    /* F12: screenshot the whole screen to SHOT.BMP */
+                if (fb_save_bmp("SHOT.BMP") == 0) beep(1800, 30);   /* brief confirmation tone */
                 continue;
             }
             window_t *top = &windows[win_count - 1];

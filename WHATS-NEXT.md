@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (480 milestones).** (M480: **Inline `data:` image URIs (base64)** — the browser now decodes
+> **Status (481 milestones).** (M481: **Global screenshot hotkey (F12)** — press F12 anywhere on the
+> desktop to save the whole screen to `SHOT.BMP` (+ a short beep), so the M478 capture is reachable from
+> any focused app, not just the shell. keyboard.c maps F12 (scancode 0x58, was unused) to a new WM code
+> 0x1C; desktop.c handles it by calling `fb_save_bmp` directly (kernel-side, no syscall) and swallowing
+> the key. Strictly additive (F12 did nothing before). Welcome-window hint + GUIDE.TXT updated. Verified
+> in-OS: F12 at the desktop writes a valid 512×384 BMP (extracted from the disk = the full desktop,
+> windows/taskbar/cursor, colours right), desktop stays stable. Files: kernel/keyboard.c, kernel/desktop.c.
+> **Caps the image arc (M478 save / M479 view / M480 embed / M481 hotkey) — a coherent, complete feature.**)
+> M480: **Inline `data:` image URIs (base64)** — the browser now decodes
 > `<img src="data:image/...;base64,…">` images embedded in the page, completing the image-source story
 > (`file:`/`http:`/`https:`/`data:`). New bounded `b64_decode` in browser.c (every write guarded vs the
 > out cap, every read within input — untrusted-safe like the decoders) → feeds the existing inline-image
