@@ -1,65 +1,69 @@
 /*
- * jukebox.c — plays built-in melodies on the PC speaker, a userspace program.
+ * jukebox.c — a music player for the .WAV files on disk, a userspace program.
  *
- * Where the piano plays live keys, the jukebox plays whole tunes: press a number
- * and it beeps the melody note by note (sys_beep blocks for each note's length).
- * A second non-interactive sound app to go with the matrix screensaver. Tunes are
- * note-strings (c d e f g a b lowercase = octave 4, C = the octave above, space =
- * a rest). q quits; any key during a tune stops it. Ring-3.
+ * Lists every .WAV file on the FAT32 disk; press its number to play it through
+ * the AC'97 codec in the BACKGROUND (sys_playbg) — so the music keeps going
+ * while you use other windows, and even after you quit the jukebox. [s] stops,
+ * [q] quits. (The old jukebox beeped tunes on the PC speaker; now it plays real
+ * audio.) Text-grid UI, ring-3.
  */
 #include "ulib.h"
 
-static const char *NAMES[] = { "Scale", "Twinkle Twinkle", "Ode to Joy", "Happy Birthday",
-                               "Mary Had a Lamb", "Jingle Bells" };
-static const char *TUNES[] = {
-    "cdefgabC",
-    "ccggaag ffeeddc",
-    "eefggfeddccdeed",
-    "ccdcfe ccdcgf",
-    "edcdeee ddd egg",
-    "eee eee egcde",
-};
-#define NT ((int)(sizeof(NAMES) / sizeof(NAMES[0])))
+#define MAXW 12
+static char wavs[MAXW][16];
+static int  nwav;
 
-static int freq_of(char c) {
-    switch (c) {
-        case 'c': return 262; case 'd': return 294; case 'e': return 330; case 'f': return 349;
-        case 'g': return 392; case 'a': return 440; case 'b': return 494; case 'C': return 523;
-        default:  return 0;   /* rest */
+/* collect the names of every .WAV file from the directory listing */
+static void scan_wavs(void) {
+    static char buf[8192];
+    sys_list(buf, sizeof(buf));
+    nwav = 0;
+    char *p = buf;
+    while (*p && nwav < MAXW) {
+        while (*p == ' ') p++;                       /* skip leading spaces */
+        char nm[16]; int k = 0;
+        while (*p && *p != ' ' && *p != '\n' && k < 15) nm[k++] = *p++;
+        nm[k] = 0;
+        while (*p && *p != '\n') p++;                /* to the end of the line */
+        if (*p == '\n') p++;
+        if (k >= 4 && nm[k-4] == '.' &&
+            (nm[k-3]|32) == 'w' && (nm[k-2]|32) == 'a' && (nm[k-1]|32) == 'v') {
+            for (int j = 0; j <= k; j++) wavs[nwav][j] = nm[j];
+            nwav++;
+        }
     }
 }
 
-static void menu(int playing) {     /* playing = tune index, or -1 */
+static void draw(int playing) {
     sys_clear();
-    sys_setcolor(4); print("  OS-DEV Jukebox\n\n");
-    sys_setcolor(8); print("  press a number to play a tune:\n");
-    for (int i = 0; i < NT; i++) {
-        sys_setcolor(3); char b[6]; b[0] = ' '; b[1] = ' '; b[2] = (char)('1' + i); b[3] = ' '; b[4] = ' '; b[5] = 0;
-        print(b);
-        sys_setcolor(i == playing ? 9 : 1); print(NAMES[i]); print("\n");
+    sys_setcolor(4); print("  == Jukebox ==   real .WAV playback (AC'97)\n\n"); sys_setcolor(0);
+    if (nwav == 0) print("  (no .WAV files on disk)\n");
+    for (int i = 0; i < nwav; i++) {
+        char line[40]; int p = 0;
+        line[p++] = ' '; line[p++] = ' ';
+        line[p++] = (char)('1' + i); line[p++] = ')'; line[p++] = ' ';
+        for (int j = 0; wavs[i][j] && p < 34; j++) line[p++] = wavs[i][j];
+        if (i == playing) { line[p++] = ' '; line[p++] = '<'; line[p++] = '<'; }
+        line[p] = 0;
+        if (i == playing) sys_setcolor(3);           /* green for the playing track */
+        print(line); print("\n");
+        if (i == playing) sys_setcolor(0);
     }
-    if (playing >= 0) { sys_setcolor(9); print("\n  now playing: "); print(NAMES[playing]); print(" ...\n"); }
-    sys_setcolor(8); print("\n  q to quit  (any key stops a tune)\n");
-    sys_setcolor(0);
-}
-
-static void play(int t) {
-    const char *tune = TUNES[t];
-    menu(t);
-    for (int i = 0; tune[i]; i++) {
-        int f = freq_of(tune[i]);
-        if (f) sys_beep(f, 280); else sys_sleep(160);   /* a note, or a rest */
-        int k = sys_pollkey();
-        if (k >= 0) return;                             /* any key stops the tune */
-    }
+    print("\n  [1-9] play   [s] stop   [q] quit (music keeps playing)\n");
 }
 
 int main(void) {
-    menu(-1);
+    scan_wavs();
+    int playing = -1;
+    draw(playing);
     for (;;) {
         int k = sys_pollkey();
-        if (k < 0) { sys_sleep(20); continue; }
-        if (k == 'q' || k == 27) return 0;
-        if (k >= '1' && k < '1' + NT) { play(k - '1'); menu(-1); }
+        if (k < 0) { sys_sleep(30); continue; }
+        if (k == 'q' || k == 27) return 0;           /* leaving doesn't stop the music */
+        else if (k == 's') { sys_audiostop(); playing = -1; draw(playing); }
+        else if (k >= '1' && k <= '9') {
+            int i = k - '1';
+            if (i < nwav && sys_playbg(wavs[i]) == 0) { playing = i; draw(playing); }
+        }
     }
 }
