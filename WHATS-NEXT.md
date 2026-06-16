@@ -1,6 +1,15 @@
 # What's next
 
-> **Status (475 milestones).** (M475: **Expanded TLS trusted-root store (5→13 CAs)** — added 8 common
+> **Status (476 milestones).** (M476: **Shell `help` documents the 4 command-line operators** — added
+> a line to the `help` text listing `| > >> *.txt ? ;` (pipe/write/append/glob/sequence) so the M463/
+> M468/M473/M474 operators are discoverable. Tiny user/shell.c help-text change; build + 7 suites + in-OS
+> (`help` shows the syntax lines). **SATURATION NOTE: after 36 milestones this session the achievable
+> safe+high-value work is exhausted — remaining items are architectural CEILINGS (real lazy generators
+> + CSS layout need a different interpreter/renderer arch), BLOAT/break-risk (fatal cert enforcement
+> needs ~all ~140 roots), REGRESSION-risk (gzip-advertise could break proven-working sites + live-verify
+> is flaky), or SUBTLER/risky (FAT cross-boot corruption). Cross-app clipboard needs webpage text
+> selection for real value (token renderer has none). Keep any further work SMALL+SAFE+verified.**)
+> M475: **Expanded TLS trusted-root store (5→13 CAs)** — added 8 common
 > roots to kernel/rootca.c's ROOT_CAS[]: USERTrust RSA, DigiCert Global Root CA (G1) + G3 (EC), Amazon
 > Root CA 1, GlobalSign R3, GTS Root R1, Sectigo ECC E46, ISRG Root X2 (EC). Each = the root's public key
 > in x509_cert.key form (RSA → RSAPublicKey DER via `openssl rsa -RSAPublicKey_out -outform DER`; EC →

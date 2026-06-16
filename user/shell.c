@@ -110,6 +110,7 @@ static int run_command(char *line, char *cwd) {
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
+            print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)\n");
         } else if (streq(line, "ls")) {
             char buf[1024];
             sys_list(buf, sizeof(buf));
