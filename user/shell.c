@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> paste<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> paste<f1 f2> comm<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1149,6 +1149,39 @@ int main(void) {
                         t[q++] = '\t';
                         for (k = s2; k < e2 && q < 158; k++) t[q++] = c2[k];  /* file2's line */
                         t[q] = 0; print("  "); print(t); print("\n");
+                    }
+                }
+            }
+        } else if (startswith(line, "comm ")) {           /* comm F1 F2 (sorted) -> < only-in-1, > only-in-2, = in-both */
+            static char c1[2048], c2[2048];
+            const char *p = line + 5; while (*p == ' ') p++;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            while (*p == ' ') p++;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            if (!f1[0] || !f2[0]) { print("usage: comm <file1> <file2>  (sorted; < only-1, > only-2, = both)\n"); }
+            else {
+                long n1 = sys_readfile(f1, c1, sizeof(c1));
+                long n2 = sys_readfile(f2, c2, sizeof(c2));
+                if (n1 < 0)      { print("comm: no such file: "); print(f1); print("\n"); }
+                else if (n2 < 0) { print("comm: no such file: "); print(f2); print("\n"); }
+                else {
+                    long i1 = 0, i2 = 0;
+                    while (i1 < n1 || i2 < n2) {
+                        int haveA = i1 < n1, haveB = i2 < n2;     /* peek each line WITHOUT advancing the cursor */
+                        long a_s = i1, a_e = i1; if (haveA) { while (a_e < n1 && c1[a_e] != '\n') a_e++; }
+                        long b_s = i2, b_e = i2; if (haveB) { while (b_e < n2 && c2[b_e] != '\n') b_e++; }
+                        long a_next = a_e < n1 ? a_e + 1 : a_e, b_next = b_e < n2 ? b_e + 1 : b_e;
+                        int rel;                                  /* <0: only-A, >0: only-B, 0: both */
+                        if (haveA && !haveB) rel = -1;
+                        else if (!haveA && haveB) rel = 1;
+                        else { long la = a_e - a_s, lb = b_e - b_s, m = la < lb ? la : lb; rel = 0;
+                            for (long k = 0; k < m; k++) if (c1[a_s+k] != c2[b_s+k]) { rel = c1[a_s+k] < c2[b_s+k] ? -1 : 1; break; }
+                            if (rel == 0 && la != lb) rel = la < lb ? -1 : 1; }
+                        char t[160]; long k, q = 0; long s = rel > 0 ? b_s : a_s, e = rel > 0 ? b_e : a_e; char *src = rel > 0 ? c2 : c1;
+                        for (k = s; k < e && q < 157; k++) t[q++] = src[k]; t[q] = 0;
+                        print(rel < 0 ? "  < " : rel > 0 ? "  > " : "  = "); print(t); print("\n");
+                        if (rel <= 0) i1 = a_next;                /* advance the file(s) whose line was emitted */
+                        if (rel >= 0) i2 = b_next;
                     }
                 }
             }
