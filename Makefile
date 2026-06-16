@@ -124,9 +124,13 @@ x509test:
 nettest:
 	@tests/run-net-tests.sh
 
+# Host-side fuzz test of the FAT32 read path over corrupt/cyclic on-disk structures (ASan+UBSan).
+fstest:
+	@tests/run-fs-tests.sh
+
 # Run every host-side regression/fuzz suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest)"
+check: jstest imgtest x509test nettest fstest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest)"
 
 clean:
 	rm -rf $(BUILD)

@@ -1,0 +1,148 @@
+/*
+ * fs_test.c — host-side fuzz test of the FAT32 READ path (ASan + UBSan).
+ *
+ * #includes fat32.c to reach the static walk_dir / fat32_read / fat32_list /
+ * fat32_find / fat32_tree / cluster_in_range / fat_step, and stubs fat32.c's
+ * only external deps — the disk (ata_read/ata_write serve a small in-memory
+ * image) and vfs_register. It builds ONE valid minimal FAT32 image, confirms it
+ * reads correctly, then FUZZES corrupted copies of the metadata region (BPB +
+ * FAT + root directory + the first few clusters) and re-runs list/read/find/tree
+ * under ASan/UBSan.
+ *
+ * Locks the disk-trust-boundary robustness verified in M435 + earlier:
+ *   - cluster_in_range (M435): a corrupt cluster (large-but-<EOC, or 0/1) must
+ *     end the chain, never wrap/OOB,
+ *   - fat_step's step-count cycle guard: a cyclic FAT must not hang,
+ *   - find_rec/tree_rec depth caps: a cyclic DIRECTORY tree must not recurse
+ *     unbounded,
+ *   - the dir-entry / path-buffer bounds.
+ * A corrupt/cyclic FAT must never out-of-bounds or hang. Exit 0 = pass.
+ */
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+
+/* ---- in-memory disk (256 KB) ---- */
+#define SS 512
+#define DISK_SECTORS 256
+static uint8_t g_disk[DISK_SECTORS * SS];
+
+/* ---- stubs for fat32.c's only external symbols ---- */
+#include "vfs.h"
+#include "ata.h"
+int ata_read(uint32_t lba, uint8_t count, void *buf) {
+    /* mimic a real drive: an out-of-range LBA errors (so the stub never reads
+     * past g_disk, and a runaway chain walk terminates at the disk edge). */
+    if ((uint64_t)lba + count > DISK_SECTORS) return -1;
+    memcpy(buf, g_disk + (uint64_t)lba * SS, (size_t)count * SS);
+    return 0;
+}
+int ata_write(uint32_t lba, uint8_t count, const void *buf) {
+    if ((uint64_t)lba + count > DISK_SECTORS) return -1;
+    memcpy(g_disk + (uint64_t)lba * SS, buf, (size_t)count * SS);
+    return 0;
+}
+void vfs_register(struct vfs_ops *ops) { (void)ops; }
+
+#include "fat32.c"   /* the static walk_dir / fat32_read / cluster_in_range / ... */
+
+/* ---- image geometry (must match fat32.c's BPB-derived layout) ---- */
+#define RESERVED   1
+#define NUM_FATS   1
+#define FATSZ      2                          /* FAT sectors (256 entries) */
+#define SPC        1                          /* sectors per cluster */
+#define FAT_SEC    RESERVED                   /* FAT #1 starts here (sector 1) */
+#define DATA_SEC   (RESERVED + NUM_FATS*FATSZ)/* sector 3 == cluster 2 */
+#define META_BYTES (8 * SS)                   /* BPB + FAT + root dir + a few clusters */
+
+static void w16(uint8_t *p, uint16_t v) { p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); }
+static void w32(uint8_t *p, uint32_t v) { p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); p[2]=(uint8_t)(v>>16); p[3]=(uint8_t)(v>>24); }
+static uint32_t clus_sec(uint32_t cl) { return DATA_SEC + (cl-2)*SPC; }
+static void mk_fat_set(uint32_t cl, uint32_t val) { w32(g_disk + FAT_SEC*SS + cl*4, val & 0x0FFFFFFFu); }
+static void dir_ent(uint32_t dir_cl, int idx, const char *name83, uint8_t attr, uint32_t first, uint32_t size) {
+    uint8_t *e = g_disk + clus_sec(dir_cl)*SS + idx*32;
+    memcpy(e, name83, 11);
+    e[11] = attr;
+    w16(e+20, (uint16_t)(first >> 16));    /* first-cluster high word */
+    w16(e+26, (uint16_t)(first & 0xFFFF)); /* first-cluster low word */
+    w32(e+28, size);
+}
+
+static void build_valid_image(void) {
+    memset(g_disk, 0, sizeof(g_disk));
+    uint8_t *bs = g_disk;
+    w16(bs+11, SS);             /* bytes per sector */
+    bs[13] = SPC;              /* sectors per cluster */
+    w16(bs+14, RESERVED);      /* reserved sectors */
+    bs[16] = NUM_FATS;
+    w32(bs+36, FATSZ);         /* FAT size (32) */
+    w32(bs+44, 2);             /* root cluster */
+    w32(bs+32, DISK_SECTORS);  /* total sectors (32) */
+    w16(bs+510, 0xAA55);       /* boot signature */
+
+    /* FAT: [0]/[1] reserved; [2] root (1 cluster); TEST.TXT = 3->4; SUB = 5 */
+    mk_fat_set(0, 0x0FFFFFF8); mk_fat_set(1, 0x0FFFFFFF);
+    mk_fat_set(2, 0x0FFFFFFF);
+    mk_fat_set(3, 4); mk_fat_set(4, 0x0FFFFFFF);
+    mk_fat_set(5, 0x0FFFFFFF);
+
+    /* root directory (cluster 2): a file, a subdir, then end-of-dir */
+    dir_ent(2, 0, "TEST    TXT", 0x20, 3, 600);
+    dir_ent(2, 1, "SUB        ", 0x10, 5, 0);
+    /* slot 2 left 0x00 -> end of directory */
+
+    /* subdir (cluster 5): "." ".." then end */
+    dir_ent(5, 0, ".          ", 0x10, 5, 0);
+    dir_ent(5, 1, "..         ", 0x10, 2, 0);
+
+    /* TEST.TXT data: cluster 3 all 'A', cluster 4 all 'B' (size 600 = 512+88) */
+    memset(g_disk + clus_sec(3)*SS, 'A', SS);
+    memset(g_disk + clus_sec(4)*SS, 'B', SS);
+}
+
+/* xorshift fuzz rng */
+static uint32_t rs = 0x9e3779b9u;
+static uint32_t xr(void) { rs ^= rs<<13; rs ^= rs>>17; rs ^= rs<<5; return rs; }
+
+int main(void) {
+    /* ---- baseline: the valid image reads correctly ---- */
+    build_valid_image();
+    if (fat32_mount() != 0)            { printf("FAIL: mount of valid image\n"); return 1; }
+    vfs_dirent ents[16];
+    int n = fat32_list(ents, 16);
+    if (n < 2)                         { printf("FAIL: want >=2 root entries, got %d\n", n); return 1; }
+    static char rb[1024];
+    long got = fat32_read("TEST.TXT", rb, sizeof(rb));
+    if (got != 600)                    { printf("FAIL: TEST.TXT read %ld, want 600\n", got); return 1; }
+    if (rb[0]!='A'||rb[511]!='A'||rb[512]!='B'||rb[599]!='B') { printf("FAIL: TEST.TXT content\n"); return 1; }
+    if (fat32_read("SUB", rb, sizeof(rb)) != -1)              { printf("FAIL: read of a dir should be -1\n"); return 1; }
+    printf("baseline OK: %d root entries, TEST.TXT=600B correct, dir-read rejected\n", n);
+
+    /* ---- fuzz: corrupt the metadata region, re-mount, re-read ---- */
+    static uint8_t pristine[sizeof(g_disk)];
+    build_valid_image();
+    memcpy(pristine, g_disk, sizeof(g_disk));
+
+    const long ITERS = 12000;
+    for (long it = 0; it < ITERS; it++) {
+        memcpy(g_disk, pristine, META_BYTES);          /* restore just the metadata */
+        int K = 1 + (int)(xr() % 10);
+        for (int k = 0; k < K; k++) g_disk[xr() % META_BYTES] = (uint8_t)xr();
+
+        if (fat32_mount() != 0) continue;              /* corrupt BPB -> graceful reject */
+
+        vfs_dirent fe[32];
+        int m = fat32_list(fe, 32);
+        char fb[2048];
+        fat32_read("TEST.TXT", fb, sizeof(fb));
+        fat32_read("SUB",      fb, sizeof(fb));
+        for (int i = 0; i < m && i < 8; i++)           /* read each listed name */
+            fat32_read(fe[i].name, fb, sizeof(fb));
+        char tb[4096];
+        fat32_find("T", tb, sizeof(tb));               /* recursive name search */
+        char trb[4096];
+        fat32_tree(trb, sizeof(trb));                  /* recursive tree walk */
+    }
+    printf("PASS: %ld fuzz iters, ASan/UBSan clean (corrupt FAT/dir never OOB or hung)\n", ITERS);
+    return 0;
+}
