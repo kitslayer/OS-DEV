@@ -266,6 +266,18 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)dl;
         break;
     }
+    case SYS_gzip: {
+        const char *insrc = (const char *)r->rdi, *outname = (const char *)r->rsi;
+        uint8_t *in = kmalloc(262144);          /* input (<= 256 KB) */
+        uint8_t *out = kmalloc(524288);         /* compressed output (<= 512 KB; fixed-Huffman can expand) */
+        if (!in || !out) { if (in) kfree(in); if (out) kfree(out); r->rax = (uint64_t)-1; break; }
+        long gn = vfs_read(insrc, in, 262144);
+        long dl = gn >= 0 ? gz_deflate(in, (int)gn, out, 524288) : -1;   /* empty input is a valid gzip */
+        if (dl > 0 && vfs_write(outname, out, (unsigned long)dl) < 0) dl = -1;
+        kfree(in); kfree(out);
+        r->rax = (uint64_t)(int64_t)dl;
+        break;
+    }
     case SYS_crypt: {
         const char *name = (const char *)r->rdi, *pass = (const char *)r->rsi;
         static uint8_t cbuf[16384];

@@ -136,9 +136,13 @@ kattest:
 svgtest:
 	@tests/run-svg-tests.sh
 
+# Host-side round-trip test of the DEFLATE/gzip compressor vs the decoder (ASan+UBSan).
+deflatetest:
+	@tests/run-deflate-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest)"
 
 clean:
 	rm -rf $(BUILD)

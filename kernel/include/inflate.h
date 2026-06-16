@@ -15,3 +15,14 @@ int inflate(const uint8_t *src, int srclen, uint8_t *dst, int dstcap);
  * DEFLATE body into `dst`. Returns decoded length, or -1 on bad/short input.
  * Bounded: every header read is guarded against `len`. */
 int gz_inflate(const uint8_t *gz, int len, uint8_t *dst, int dstcap);
+
+/* Compressor (kernel/deflate.c), the encoding counterpart to the above.
+ *
+ * gz_deflate: compress src[0..len) into a complete gzip stream (10-byte header,
+ *   a single fixed-Huffman DEFLATE block, then an 8-byte CRC32+ISIZE trailer)
+ *   written to out[0..outcap). Returns the total bytes written, or -1 if the
+ *   output would exceed outcap. Every write is bounded against outcap.
+ * raw_deflate: same DEFLATE body with no gzip wrapper (for callers that frame
+ *   it themselves); returns bytes written or -1 on overflow. */
+int gz_deflate (const uint8_t *src, int len, uint8_t *out, int outcap);
+int raw_deflate(const uint8_t *src, int len, uint8_t *out, int outcap);

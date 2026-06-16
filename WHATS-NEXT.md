@@ -1,6 +1,19 @@
 # What's next
 
-> **Status (489 milestones).** (M489: **`base64 -d` decode + encode-redirect fix** — the shell's base64 was
+> **Status (490 milestones).** (M490: **`gzip` — from-scratch DEFLATE COMPRESSOR** — completes the
+> compression story (had gunzip/decompress, now compress). New kernel/deflate.c (encoding counterpart to
+> inflate.c): LZ77 (3-byte hash-chain, 32KB window, MAX_CHAIN=128 anti-blowup) + fixed-Huffman + CRC32,
+> fully bounded (every write vs outcap). `gzip <file> [out.gz]` + SYS_gzip(39). DELEGATED to a subagent
+> (hard/intricate, NON-cyber so not blocked) then I reviewed (bit-ordering mirrors inflate's reader,
+> canonical codes built via the §3.2.2 procedure so they can't drift from the decoder, LZ77 reads proven
+> in-bounds) + integrated. New `deflatetest` suite in `make check`: round-trips vs the decoder over
+> empty/repetitive/random/text ≤200KB (ASan/UBSan clean) + outcap-bounds + **system `gunzip -t` interop**
+> (proves CRC/format real). Verified in-OS: `gzip README.TXT; gunzip README.GZ DEC; cmp` → "files are
+> identical" (a full from-scratch compress→decompress round-trip). Files: kernel/deflate.c, inflate.h,
+> syscall.c, shell.c, ulib.*, Makefile, tests/deflate/*. **Substantial from-scratch algorithm (per the
+> directive: don't decline for complexity; use subagents for hard work). 8 host suites now. Could later
+> enable PNG screenshots (smaller than BMP) — deflate is the prerequisite, now done.**)
+> M489: **`base64 -d` decode + encode-redirect fix** — the shell's base64 was
 > ENCODE-only; added `base64 -d <file> [out]` to DECODE base64→bytes (skips whitespace, stops at `=`/invalid,
 > bounded static bufs, b64v helper). ALSO fixed a real pre-existing bug found while testing: `base64 F > OUT`
 > failed because the encode passed `readfile` the filename WITH the redirect's trailing space ("MOTD.TXT ")
