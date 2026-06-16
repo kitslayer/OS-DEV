@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> paste<f1 f2> comm<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1183,6 +1183,52 @@ int main(void) {
                         if (rel <= 0) i1 = a_next;                /* advance the file(s) whose line was emitted */
                         if (rel >= 0) i2 = b_next;
                     }
+                }
+            }
+        } else if (startswith(line, "diff ")) {           /* diff F1 F2 -> LCS line edit script: '- ' removed from F1, '+ ' added in F2, '  ' unchanged */
+            static char d1[2048], d2[2048];
+            const char *p = line + 5; while (*p == ' ') p++;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            while (*p == ' ') p++;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            if (!f1[0] || !f2[0]) { print("usage: diff <file1> <file2>  (line edit: - removed, + added)\n"); }
+            else {
+                long n1 = sys_readfile(f1, d1, sizeof(d1)), n2 = sys_readfile(f2, d2, sizeof(d2));
+                if (n1 < 0) { print("diff: "); print(f1); print(": no such file\n"); }
+                else if (n2 < 0) { print("diff: "); print(f2); print(": no such file\n"); }
+                else {
+                    static int as[129], ae[129], bs[129], be[129];
+                    static short L[129][129];                       /* LCS lengths; capped at 128 lines/file */
+                    int na = 0, nb = 0, i;
+                    for (i = 0; i < n1 && na < 128; na++) { as[na] = i; while (i < n1 && d1[i] != '\n') i++; ae[na] = i; if (i < n1) i++; }
+                    for (i = 0; i < n2 && nb < 128; nb++) { bs[nb] = i; while (i < n2 && d2[i] != '\n') i++; be[nb] = i; if (i < n2) i++; }
+                    for (int a = na; a >= 0; a--) for (int b = nb; b >= 0; b--) {
+                        if (a == na || b == nb) { L[a][b] = 0; continue; }
+                        int la = ae[a]-as[a], lb = be[b]-bs[b], eq = (la == lb), k;
+                        for (k = 0; eq && k < la; k++) if (d1[as[a]+k] != d2[bs[b]+k]) eq = 0;
+                        if (eq) L[a][b] = (short)(L[a+1][b+1] + 1);
+                        else    L[a][b] = L[a+1][b] >= L[a][b+1] ? L[a+1][b] : L[a][b+1];
+                    }
+                    int a = 0, b = 0, diffs = 0;
+                    while (a < na || b < nb) {
+                        char t[160]; int k, q = 0; int eq = 0;
+                        if (a < na && b < nb) {
+                            int la = ae[a]-as[a], lb = be[b]-bs[b]; eq = (la == lb);
+                            for (k = 0; eq && k < la; k++) if (d1[as[a]+k] != d2[bs[b]+k]) eq = 0;
+                        }
+                        if (a < na && b < nb && eq) {                              /* unchanged: context */
+                            for (k = as[a]; k < ae[a] && q < 157; k++) t[q++] = d1[k]; t[q] = 0;
+                            print("  "); print(t); print("\n"); a++; b++;
+                        } else if (b >= nb || (a < na && L[a+1][b] >= L[a][b+1])) { /* removed from F1 */
+                            for (k = as[a]; k < ae[a] && q < 157; k++) t[q++] = d1[k]; t[q] = 0;
+                            print("- "); print(t); print("\n"); a++; diffs++;
+                        } else {                                                   /* added in F2 */
+                            for (k = bs[b]; k < be[b] && q < 157; k++) t[q++] = d2[k]; t[q] = 0;
+                            print("+ "); print(t); print("\n"); b++; diffs++;
+                        }
+                    }
+                    if (!diffs) print("(files are identical)\n");
+                    if (na >= 128 || nb >= 128) print("(diff truncated at 128 lines/file)\n");
                 }
             }
         } else if (startswith(line, "get ")) {

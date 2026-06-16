@@ -1,7 +1,7 @@
 # What's next
 
-> **Status (435 milestones).** (M424–435: more shell tools — `cmp`/`paste`/`comm`
-> (the file-compare set), `strings`, `basename`/`dirname`; a JS-engine correctness
+> **Status (436 milestones).** (M424–436: more shell tools — `cmp`/`paste`/`comm`/`diff`
+> (the file-compare set: byte / sorted-set / LCS line-edit), `strings`, `basename`/`dirname`; a JS-engine correctness
 > sweep found by probing — getters now fire in value-iteration too
 > (`JSON.stringify`/`Object.values`/`entries`/`assign`/spread, M425–428) and
 > `to_num(Date)` returns the epoch so Date arithmetic/comparison work (M429); the
