@@ -100,7 +100,7 @@ int main(void) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -320,29 +320,48 @@ int main(void) {
                 if (oi > 0 && fout[oi-1] != '\n') fout[oi++] = '\n';
                 fout[oi] = 0; print(fout);
             }
-        } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE : keep a 1-based char range of each line */
+        } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE (char range) | cut -fN[-M] [-dX] FILE (delimited fields, default tab) */
             static char buf[2048];
-            const char *p = line + 4; while (*p == ' ') p++;
-            if (p[0] != '-' || p[1] != 'c') { print("usage: cut -cN[-M] <file>  (e.g. cut -c1-5 FILE)\n"); }
-            else {
-                p += 2;
-                int from = 0, to = 0, openend = 0;
-                while (*p >= '0' && *p <= '9') { if (from < 100000000) from = from * 10 + (*p - '0'); p++; }   /* cap: no int overflow on absurd N */
-                if (*p == '-') { p++; if (*p >= '0' && *p <= '9') { while (*p >= '0' && *p <= '9') { if (to < 100000000) to = to * 10 + (*p - '0'); p++; } } else openend = 1; }
-                else to = from;                            /* -cN alone = just column N */
+            const char *p = line + 4;
+            int mode = 0, from = 0, to = 0, openend = 0; char delim = '\t';
+            while (1) {                                    /* parse leading -c/-f/-d flags, any order */
                 while (*p == ' ') p++;
-                if (from < 1) from = 1;
+                if (*p != '-') break;
+                char fl = p[1]; p += 2;
+                if (fl == 'c' || fl == 'f') {
+                    mode = fl; from = 0; to = 0; openend = 0;
+                    while (*p >= '0' && *p <= '9') { if (from < 100000000) from = from * 10 + (*p - '0'); p++; }   /* cap: no int overflow on absurd N */
+                    if (*p == '-') { p++; if (*p >= '0' && *p <= '9') { while (*p >= '0' && *p <= '9') { if (to < 100000000) to = to * 10 + (*p - '0'); p++; } } else openend = 1; }
+                    else to = from;                        /* -cN / -fN alone = just that column/field */
+                } else if (fl == 'd') { if (*p) delim = *p++; }   /* single-char field delimiter */
+                else break;                                /* unknown flag */
+            }
+            while (*p == ' ') p++;
+            if (from < 1) from = 1;
+            if (mode != 'c' && mode != 'f') { print("usage: cut -cN[-M] <file>  |  cut -fN[-M] [-dX] <file>  (fields; default delim = tab)\n"); }
+            else {
                 long n = sys_readfile(p, buf, sizeof(buf) - 1);
                 if (n < 0) { print("cut: no such file: "); print(p); print("\n"); }
                 else {
                     buf[n] = 0;
-                    char out[256]; int oi = 0, col = 0;
+                    char out[256]; int oi = 0, col = 0, field = 1, dirty = 0;
                     for (long k = 0; k < n; k++) {
-                        if (buf[k] == '\n') { out[oi] = 0; print(out); print("\n"); oi = 0; col = 0; continue; }
-                        col++;
-                        if (col >= from && (openend || col <= to) && oi < 255) out[oi++] = buf[k];
+                        char c = buf[k];
+                        if (c == '\n') { out[oi] = 0; print(out); print("\n"); oi = 0; col = 0; field = 1; dirty = 0; continue; }
+                        dirty = 1;
+                        if (mode == 'c') {                            /* char range */
+                            col++;
+                            if (col >= from && (openend || col <= to) && oi < 255) out[oi++] = c;
+                        } else if (c == delim) {                      /* field sep: emit delim only BETWEEN two selected fields (keeps empty fields) */
+                            int s1 = field >= from && (openend || field <= to);
+                            int s2 = field + 1 >= from && (openend || field + 1 <= to);
+                            if (s1 && s2 && oi < 255) out[oi++] = delim;
+                            field++;
+                        } else if (field >= from && (openend || field <= to) && oi < 255) {
+                            out[oi++] = c;                            /* field content */
+                        }
                     }
-                    if (col > 0) { out[oi] = 0; print(out); print("\n"); }   /* trailing line w/o newline, even if its slice is empty */
+                    if (dirty) { out[oi] = 0; print(out); print("\n"); }   /* trailing line w/o newline */
                 }
             }
         } else if (streq(line, "js") || startswith(line, "js ")) {
