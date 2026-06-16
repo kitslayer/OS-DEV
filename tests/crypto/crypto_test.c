@@ -79,6 +79,16 @@ int main(void) {
       check("HKDF expand (RFC5869 #1)", okm,
         "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865", 42); }
 
+    /* --- TLS 1.3 key schedule (RFC 8448 / RFC 8446 §7.1): early secret + Derive-Secret --- */
+    { uint8_t zeros[32] = {0}, early[32], eh[32], derived[32];
+      hkdf_extract(zeros, 32, zeros, 32, early);            /* Early Secret = HKDF-Extract(0, 0) */
+      check("TLS1.3 early secret (RFC8448)", early,
+        "33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a", 32);
+      sha256((const uint8_t *)"", 0, eh);                   /* transcript hash of "" */
+      tls13_derive_secret(early, "derived", eh, derived);   /* Derive-Secret(ES, "derived", "") */
+      check("TLS1.3 Derive-Secret 'derived'", derived,
+        "6f2615a108c702c5678f54fc9dbab69716c076189c48250cebeac3576c3611ba", 32); }
+
     /* --- AES-128 single block (FIPS-197 appendix C.1) --- */
     { H(k, "000102030405060708090a0b0c0d0e0f"); H(buf, "00112233445566778899aabbccddeeff");
       aes128_encrypt_block(buf, k);
@@ -144,6 +154,6 @@ int main(void) {
       else { printf("  FAIL: RSA-2048 accepted tampered sig\n"); g_fails++; } }
 
     if (g_fails) { printf("FAIL: %d crypto KAT(s) mismatched\n", g_fails); return 1; }
-    printf("PASS: all crypto KATs match (SHA-256/384/512, HMAC, HKDF, AES, AES-GCM, ChaCha20-Poly1305, X25519, ECDSA P-256/384, RSA-2048)\n");
+    printf("PASS: all crypto KATs match (SHA-256/384/512, HMAC, HKDF, TLS1.3-KDF, AES, AES-GCM, ChaCha20-Poly1305, X25519, ECDSA P-256/384, RSA-2048)\n");
     return 0;
 }
