@@ -1,6 +1,16 @@
 # What's next
 
-> **Status (483 milestones).** (M483: **Wordle (new game app)** — guess a hidden 5-letter word in 6
+> **Status (484 milestones).** (M484: **GFM markdown: tables + images** — extends M482's `md_to_html` with
+> `![alt](url)` images (emit `<img src>`, flows through the inline-image path → a .md can embed file:/data:/
+> remote images, tying the whole image arc together) and GFM tables (a `| a | b |` line + a `|---|` separator
+> next line → `<table>` with `<th>`/`<td>`; `md_table_row` treats `|` as a pure delimiter, trims cell spaces).
+> Still bounded + non-recursive: the table body consumes consecutive `|`-containing lines then leaves the
+> first non-table line for the main loop; every read within the line, every write capped. readme.md demo
+> gained a table + an image. Verified in-OS: `browse file:readme.md` (scroll down) shows the table (bold
+> header, aligned cols: Feature/Status x Browser/JavaScript/Markdown) + the inline striped test.png image.
+> File: kernel/browser.c, tools/mkfatfs.c. **Builds on the freshly-shipped M482 — safe + FULLY LOCALLY
+> verifiable (no network), and integrates the image work into markdown.**)
+> M483: **Wordle (new game app)** — guess a hidden 5-letter word in 6
 > tries; each guess coloured green (right letter+spot) / yellow (in word, wrong spot) / grey (absent) via
 > the standard TWO-PASS scoring (greens claim positions first, then yellows from leftovers — so duplicate
 > letters score correctly). ~110-word baked list, clock-seeded xorshift PRNG, Enter=new round on game end.

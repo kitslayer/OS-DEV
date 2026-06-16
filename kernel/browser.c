@@ -2765,6 +2765,21 @@ static void md_inline(char *o, int *p, int cap, const char *s, int len) {  /* sp
             md_put(o, p, cap, "</code>");
             i = j < len ? j + 1 : j; continue;
         }
+        if (c == '!' && i + 1 < len && s[i + 1] == '[') {        /* ![alt](url) image */
+            int t = i + 2; while (t < len && s[t] != ']') t++;
+            if (t + 1 < len && s[t + 1] == '(') {
+                int u = t + 2; while (u < len && s[u] != ')') u++;
+                if (u < len) {
+                    md_put(o, p, cap, "<img src=\"");
+                    for (int k = t + 2; k < u; k++) md_esc(o, p, cap, s[k]);
+                    md_put(o, p, cap, "\" alt=\"");
+                    for (int k = i + 2; k < t; k++) md_esc(o, p, cap, s[k]);
+                    md_put(o, p, cap, "\">");
+                    i = u + 1; continue;
+                }
+            }
+            md_esc(o, p, cap, c); i++; continue;
+        }
         if (c == '[') {                                          /* [text](url) */
             int t = i + 1; while (t < len && s[t] != ']') t++;
             if (t + 1 < len && s[t + 1] == '(') {
@@ -2786,6 +2801,22 @@ static void md_inline(char *o, int *p, int cap, const char *s, int len) {  /* sp
     }
     if (bold) md_put(o, p, cap, "</b>");                         /* close any span left open at line end */
     if (ital) md_put(o, p, cap, "</i>");
+}
+/* Emit one GFM table row; cells are the runs of text between '|' delimiters. */
+static void md_table_row(char *o, int *p, int cap, const char *s, int len, int hdr) {
+    md_put(o, p, cap, "<tr>");
+    int i = 0;
+    while (i < len) {
+        if (s[i] == '|') { i++; continue; }                  /* '|' is just a delimiter */
+        int cs = i; while (i < len && s[i] != '|') i++;
+        int ce = i;
+        while (cs < ce && s[cs] == ' ') cs++;                /* trim surrounding spaces */
+        while (ce > cs && (s[ce - 1] == ' ' || s[ce - 1] == '\r')) ce--;
+        md_put(o, p, cap, hdr ? "<th>" : "<td>");
+        md_inline(o, p, cap, s + cs, ce - cs);
+        md_put(o, p, cap, hdr ? "</th>" : "</td>");
+    }
+    md_put(o, p, cap, "</tr>");
 }
 static int md_to_html(const char *md, int mdlen, char *out, int cap) {
     int p = 0, in_pre = 0, list = 0 /* 0 none, 1 ul, 2 ol */, para = 0, i = 0;
@@ -2848,6 +2879,31 @@ static int md_to_html(const char *md, int mdlen, char *out, int cap) {
               if (list != 2) { if (list == 1) md_put(out, &p, cap, "</ul>"); md_put(out, &p, cap, "<ol>"); list = 2; }
               md_put(out, &p, cap, "<li>"); md_inline(out, &p, cap, T + d + 2, tn - d - 2); md_put(out, &p, cap, "</li>");
               continue;
+          } }
+        { int haspipe = 0; for (int k = 0; k < tn; k++) if (T[k] == '|') { haspipe = 1; break; }   /* GFM table */
+          if (haspipe) {
+              int ns = i, ne = i; while (ne < mdlen && md[ne] != '\n') ne++;   /* peek the next line */
+              int sep = (ne > ns), dash = 0;                 /* is it a |---|:-: separator row? */
+              for (int k = ns; k < ne; k++) { char ch = md[k];
+                  if (ch == '-') dash = 1;
+                  else if (ch != ':' && ch != '|' && ch != ' ' && ch != '\t' && ch != '\r') { sep = 0; break; } }
+              if (sep && dash) {
+                  if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+                  if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; }
+                  md_put(out, &p, cap, "<table>");
+                  md_table_row(out, &p, cap, T, tn, 1);      /* the header row */
+                  i = ne; if (i < mdlen) i++;                /* consume the separator line */
+                  while (i < mdlen) {                        /* body: consecutive lines containing '|' */
+                      int rs = i, re = i; while (re < mdlen && md[re] != '\n') re++;
+                      int rl = re; if (rl > rs && md[rl - 1] == '\r') rl--;
+                      int has = 0; for (int k = rs; k < rl; k++) if (md[k] == '|') { has = 1; break; }
+                      if (!has) break;                       /* a non-table line ends it (left for the main loop) */
+                      md_table_row(out, &p, cap, md + rs, rl - rs, 0);
+                      i = re; if (i < mdlen) i++;
+                  }
+                  md_put(out, &p, cap, "</table>");
+                  continue;
+              }
           } }
         if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; }   /* paragraph text */
         if (!para) { md_put(out, &p, cap, "<p>"); para = 1; } else md_putc(out, &p, cap, ' ');
