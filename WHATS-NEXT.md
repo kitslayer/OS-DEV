@@ -1,6 +1,13 @@
 # What's next
 
-> **Status (445 milestones).** (M445: **SVG gradients** — `<linearGradient>`/`<radialGradient>`
+> **Status (446 milestones).** (M446: **CSS `background-color`** — `background-color` (+ the
+> `background:` shorthand colour) from inline `style=` and `<style>` rules paints an inline
+> highlight behind a text run, composing with the color/weight/style/underline scope stack +
+> cascade. A per-token `tokbg[]` + `curbg` scope field (mirroring `tokcolor`) feed the renderer's
+> existing per-glyph background (what `<mark>`/link-selection use); explicit bg beats `<mark>`'s
+> default, UI highlights beat content. Additive, reuses M434-reviewed `style_prop`/`parse_color`.
+> Verified in-OS (CSS.HTM: `.hl`/`.code` rules + inline spans + `<mark>`; existing CSS unregressed).
+> M445: **SVG gradients** — `<linearGradient>`/`<radialGradient>`
 > (multiple `<stop>`s, `stop-opacity`, `gradientUnits`) referenced by `fill=url(#id)`, evaluated
 > per-pixel in the scanline fill (integer/16.16, Newton int-sqrt for radial, no FPU). A pre-pass
 > collects defs (forward refs + `<defs>` resolve); objectBoundingBox (default) maps to the shape

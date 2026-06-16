@@ -111,13 +111,15 @@ struct browser {
     int      curul;                                      /* underline in effect (text-decoration:underline / <u>/<ins>); independent of style, so it composes */
     uint8_t  tokul[TOK_MAX];                             /* per-token underline flag */
     int      curtransform;                               /* text-transform in effect: 0=none, 1=uppercase, 2=lowercase (applied emit-time to b->text, so .textContent — read from b->raw — stays original) */
+    uint32_t curbg;                                      /* CSS background-color in effect (0=none, else 0x01000000|rgb) */
+    uint32_t tokbg[TOK_MAX];                             /* per-token background colour (drawn as an inline highlight behind the text) */
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor; int savestyle, setstyle, saveul, savetransform; } sc[SC_MAX];  /* nested style scopes (color/font-weight/font-style/underline/transform), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
-    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
@@ -169,6 +171,7 @@ static void emit_word(browser_t *b, int start, int style, int link) {
     if (len <= 0 || b->ntok >= TOK_MAX) return;
     b->tokcolor[b->ntok] = b->curcolor;                  /* <font color> override (0 = none) */
     b->tokul[b->ntok] = (uint8_t)b->curul;               /* underline (text-decoration / <u>) */
+    b->tokbg[b->ntok] = b->curbg;                        /* background-color highlight (0 = none) */
     b->toks[b->ntok++] = (tok_t){ (uint16_t)start, (uint16_t)len,
                                   (uint16_t)link, (uint8_t)style, TK_WORD };
 }
@@ -630,6 +633,17 @@ static int parse_style_transform(const char *s, int n) {
     if (attr_eq(v, vl, "lowercase")) return 2;
     return 0;
 }
+/* background-color / background (shorthand): the colour drawn behind the text (0 = none).
+ * `background` (10) matches only the shorthand (`background:` — the `:` boundary means it
+ * never matches `background-color`), and parse_color reads the leading colour token, so a
+ * `background: #fff url(..)` shorthand still yields #fff. */
+static uint32_t parse_style_bg(const char *s, int n) {
+    int vs, ve;
+    if (style_prop(s, n, "background-color", 16, &vs, &ve) ||
+        style_prop(s, n, "background", 10, &vs, &ve))
+        return parse_color(s + vs, ve - vs);
+    return 0;
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -641,7 +655,7 @@ static int is_void_tag(const char *t) {
  * and find the cascaded color/text-style for one element from those rules. */
 static void capture_css(browser_t *b, const char *s, int n);
 static int  css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
-                      uint32_t *color, int *textstyle, int *underline, int *transform);
+                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg);
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
@@ -660,27 +674,30 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             if (--b->sc[b->sc_sp-1].depth == 0) {
                 int sp = --b->sc_sp;
                 b->curcolor = b->sc[sp].savecolor;
+                b->curbg = b->sc[sp].savebg;
                 b->curul = b->sc[sp].saveul;
                 b->curtransform = b->sc[sp].savetransform;
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0;
-        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr);   /* <style> rules first (lower priority) */
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0;
+        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg);   /* <style> rules first (lower priority) */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
             uint32_t ic = parse_style_color(st, stl);  if (ic) c = ic;
             int its = parse_style_textstyle(st, stl);  if (its >= 0) ts = its;
             if (parse_style_underline(st, stl)) ul = 1;
             int itr = parse_style_transform(st, stl);  if (itr) tr = itr;   /* text-transform (inline only) */
+            uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
         }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr) {                    /* styled element -> push a frame */
+        if (c || apply_ts || ul || tr || bg) {              /* styled element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].savecolor = b->curcolor; if (c) b->curcolor = c;
+                b->sc[sp].savebg = b->curbg; if (bg) b->curbg = bg;
                 b->sc[sp].saveul = b->curul; if (ul) b->curul = 1;
                 b->sc[sp].savetransform = b->curtransform; if (tr) b->curtransform = tr;
                 b->sc[sp].savestyle = *style; b->sc[sp].setstyle = -1;
@@ -994,6 +1011,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
     b->find_tok = -1;                                    /* clear any find highlight */
     b->curcolor = 0;                                     /* default text colour */
+    b->curbg = 0;                                        /* no background-color in effect */
     b->curul = 0;                                        /* no underline in effect */
     b->curtransform = 0;                                 /* no text-transform in effect */
     b->viewsource = 0;                                   /* show the rendered page, not source */
@@ -1256,12 +1274,14 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int tsv = parse_style_textstyle(s + ds, de - ds);
         int ulv = parse_style_underline(s + ds, de - ds);
         int trv = parse_style_transform(s + ds, de - ds);
-        if (col || tsv >= 0 || ulv || trv) {         /* keep only rules that set something we render */
+        uint32_t bgv = parse_style_bg(s + ds, de - ds);
+        if (col || tsv >= 0 || ulv || trv || bgv) {  /* keep only rules that set something we render */
             b->css_sel[b->n_css] = sel;
             b->css_color[b->n_css] = col;
             b->css_style[b->n_css] = (int16_t)tsv;
             b->css_ul[b->n_css] = (uint8_t)ulv;
             b->css_transform[b->n_css] = (uint8_t)trv;
+            b->css_bg[b->n_css] = bgv;
             b->n_css++;
         }
     }
@@ -1270,7 +1290,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
  * #id / [attr]) sets *color / *textstyle, later rules winning per property (source order).
  * Returns 1 if any rule matched. Matching mirrors sel_match_all's per-element checks. */
 static int css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
-                     uint32_t *color, int *textstyle, int *underline, int *transform) {
+                     uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg) {
     int hit = 0;
     for (int r = 0; r < b->n_css; r++) {
         const sel_t *s = &b->css_sel[r];
@@ -1282,6 +1302,7 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         if (b->css_style[r] >= 0) *textstyle = b->css_style[r];
         if (b->css_ul[r]) *underline = 1;
         if (b->css_transform[r]) *transform = b->css_transform[r];
+        if (b->css_bg[r]) *bg = b->css_bg[r];
         hit = 1;
     }
     return hit;
@@ -2884,7 +2905,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             uint32_t fg = color_for(tk->style);
             if (tk->style != STY_LINK && (b->tokcolor[t] & 0x01000000))   /* <font color> override */
                 fg = b->tokcolor[t] & 0xFFFFFF;
-            uint32_t wbg = selected ? 0xFFE9A8 : (current ? 0x7FC0FF : (matched ? 0xCDE8FF : (tk->style == STY_MARK ? 0xFFF080 : BG)));
+            /* content background: explicit CSS background-color wins over the <mark> default */
+            uint32_t cbg = (b->tokbg[t] & 0x01000000) ? (b->tokbg[t] & 0xFFFFFF)
+                         : (tk->style == STY_MARK ? 0xFFF080 : BG);
+            uint32_t wbg = selected ? 0xFFE9A8 : (current ? 0x7FC0FF : (matched ? 0xCDE8FF : cbg));
             int maxc = (cr - cx) / (GW * sc); if (maxc < 0) maxc = 0;
             int dl = tk->len > maxc ? maxc : tk->len;      /* clip to content width (no h-scroll) */
             int drawpx = dl * GW * sc;
