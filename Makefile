@@ -39,6 +39,10 @@ DISKFLAGS := -drive file=$(BUILD)/fat.img,format=raw,if=ide
 NICFLAGS  := -netdev user,id=net0 -device e1000,netdev=net0
 # A UHCI USB controller + an absolute pointing device (tablet).
 USBFLAGS  := -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0
+# An Intel AC'97 audio codec. Override the host backend if needed:
+#   make run AUDIODEV=sdl   (or alsa, pa, none)
+AUDIODEV  ?= pa
+AUDIOFLAGS := -device AC97,audiodev=snd0 -audiodev $(AUDIODEV),id=snd0
 
 C_SRCS  := $(shell find kernel -name '*.c')
 ASM_SRCS:= $(shell find boot kernel -name '*.asm')
@@ -119,7 +123,7 @@ $(KERNEL): $(KERNEL64)
 
 # Interactive: opens a QEMU window so you can see the VGA output.
 run: $(KERNEL) $(DISK)
-	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) -serial stdio
+	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
 
 # Headless smoke test: no window, capture serial, kill after a few seconds.
 # Used to confirm the kernel boots without needing a display.

@@ -24,6 +24,7 @@
 #include "mouse.h"
 #include "usb.h"
 #include "speaker.h"
+#include "ac97.h"
 #include "desktop.h"
 #include <stdint.h>
 
@@ -127,6 +128,8 @@ void kmain(uint64_t mb_info) {
     kprintf("[ ok ] PCI devices on the bus:\n");
     pci_enumerate();
     kprintf("\n");
+
+    ac97_init();      /* bring up AC'97 audio (no-op if the device is absent) */
 
     net_demo();
 

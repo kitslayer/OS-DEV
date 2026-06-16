@@ -55,6 +55,7 @@
 #define SYS_gfx_blit 45 /* (pixels)         -> copy w*h XRGB pixels to the window; 0/-1 */
 #define SYS_setkbmode 46 /* (raw)           -> 1 = raw make/break key events, 0 = cooked */
 #define SYS_getkbevent 47 /* ()             -> next raw key event, or -1 (non-blocking) */
+#define SYS_pcm    48   /* (frames, nframes) -> play 16-bit stereo PCM at 48 kHz (blocks) */
 
 #define SYSCALL_VECTOR 0x80
 

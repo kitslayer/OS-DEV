@@ -30,6 +30,7 @@
 #include "inflate.h"
 #include "zip.h"
 #include "tar.h"
+#include "ac97.h"
 #include <stdint.h>
 
 /* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
@@ -431,6 +432,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_getkbevent:
         r->rax = (uint64_t)(int64_t)app_sys_getkbevent();
+        break;
+    case SYS_pcm:
+        __asm__ volatile("sti");           /* ac97_play blocks on the timer */
+        ac97_play((const int16_t *)r->rdi, (int)r->rsi);
         break;
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
