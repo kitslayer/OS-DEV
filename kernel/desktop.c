@@ -147,6 +147,15 @@ static void win_min(const window_t *w, int *mw, int *mh) {
     else { *mw = 170; *mh = 110; }
 }
 
+/* Integer upscale for a small graphics canvas, so e.g. DOOM's native 320x200
+ * shows in a comfortable 640x400 window (crisp nearest-neighbour, and it keeps
+ * DOOM on its correct 1:1 render path rather than its buggy internal scaler). */
+static int gfx_scale(int gw, int gh) {
+    int s = 1;
+    while ((s + 1) * gw <= 700 && (s + 1) * gh <= 520) s++;
+    return s;
+}
+
 static void draw_content(const window_t *w) {
     int bx = w->x + 8, by = w->y + TITLEBAR_H + 8;
     switch (w->kind) {
@@ -184,11 +193,17 @@ static void draw_content(const window_t *w) {
     case KIND_APP: {
         uint32_t *cb; int gw, gh;
         if (w->app && app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) {
-            /* graphics mode: blit the app's pixel canvas 1:1 into the body */
-            int dx = bx - 2, dy = by - 2;
+            /* graphics mode: blit the app's pixel canvas into the body, scaled
+             * up by an integer factor (nearest-neighbour) for small canvases. */
+            int s = gfx_scale(gw, gh), dx = bx - 2, dy = by - 2;
             for (int yy = 0; yy < gh; yy++)
-                for (int xx = 0; xx < gw; xx++)
-                    fb_pixel(dx + xx, dy + yy, cb[yy * gw + xx] & 0xFFFFFF);
+                for (int xx = 0; xx < gw; xx++) {
+                    uint32_t px = cb[yy * gw + xx] & 0xFFFFFF;
+                    if (s == 1) { fb_pixel(dx + xx, dy + yy, px); continue; }
+                    for (int oy = 0; oy < s; oy++)
+                        for (int ox = 0; ox < s; ox++)
+                            fb_pixel(dx + xx * s + ox, dy + yy * s + oy, px);
+                }
         } else if (w->app) app_render((app_t *)w->app, bx - 2, by - 2);
         break;
     }
@@ -553,7 +568,7 @@ void desktop_run(void) {
                 /* a graphics-mode app sizes its window to its canvas (+ borders) */
                 uint32_t *cb; int gw, gh;
                 if (app_gfx_get((app_t *)windows[i].app, &cb, &gw, &gh)) {
-                    int dw = gw + 12, dh = gh + TITLEBAR_H + 12;
+                    int s = gfx_scale(gw, gh), dw = s * gw + 12, dh = s * gh + TITLEBAR_H + 12;
                     if (windows[i].w != dw || windows[i].h != dh) {
                         windows[i].w = dw; windows[i].h = dh;
                         if (windows[i].x + dw > screen_w) windows[i].x = screen_w - dw;

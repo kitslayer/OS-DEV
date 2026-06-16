@@ -98,7 +98,7 @@ DOOM_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
 DOOM_SRCS := $(wildcard user/doom/*.c)
 DOOM_OBJS := $(patsubst user/doom/%.c,$(BUILD)/doom/%.o,$(DOOM_SRCS))
 
-$(BUILD)/doom/%.o: user/doom/%.c
+$(BUILD)/doom/%.o: user/doom/%.c Makefile
 	@mkdir -p $(BUILD)/doom
 	$(CC) $(DOOM_CFLAGS) -c $< -o $@
 
