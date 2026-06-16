@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (486 milestones).** (M486: **Markdown autolinks + strikethrough** — rounds out `md_inline`: a
+> **Status (487 milestones).** (M487: **F12 screenshots auto-number** — F12 now saves SHOT0.BMP, SHOT1.BMP,
+> … (a static counter) instead of overwriting SHOT.BMP, so successive captures aren't lost. Zero-risk
+> self-contained change to the F12 handler (shell `screenshot [file]` unchanged). Verified in-OS: 3× F12 →
+> SHOT0/1/2.BMP all valid, no overwrite. File: kernel/desktop.c. **NOTE: hit the 8.3 FILENAME LIMIT this
+> session — a `.json` viewer was written then reverted because a 4-char extension can't be stored on the
+> 8.3 FAT disk (only ≤3-char exts: .md/.csv/.htm fit). Long-filename (VFAT/LFN) support would lift this but
+> risks the working FAT write path — deferred. Genuine saturation: 10 milestones M478–487 this session
+> (screenshot save/view/embed/hotkey, markdown+GFM, CSV, Wordle); remaining items are ceilings or FS-risk.**)
+> M486: **Markdown autolinks + strikethrough** — rounds out `md_inline`: a
 > bare `http(s)://` URL → a clickable `<a>` (bounded scheme-prefix probe + scan to whitespace/delimiter),
 > and `~~text~~` → `<s>` (flat toggle like bold/italic; the renderer already draws a strike-line for STY_
 > STRIKE). Both isolated to the inline scanner — non-recursive, bounds-checked, no touch to anything risky.
