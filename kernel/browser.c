@@ -2738,6 +2738,140 @@ static int decode_local_to_slot(browser_t *b, const char *path) {
     return s;
 }
 
+/* ---- Markdown -> HTML (a useful subset), so the browser can render .md files.
+ * Output goes to the normal HTML renderer (parse_html), which already tolerates
+ * malformed markup. Bounded + NON-RECURSIVE (untrusted input, no kernel guard
+ * page): every write is capped against `cap`, every read bounded by the line
+ * length, and inline emphasis uses flat toggles instead of recursion. Handles
+ * headings, bold, italic, inline code, fenced code blocks, bullet and numbered
+ * lists, blockquotes, links, horizontal rules, and paragraphs. */
+static void md_put(char *o, int *p, int cap, const char *s) { while (*s && *p < cap) o[(*p)++] = *s++; }
+static void md_putc(char *o, int *p, int cap, char c) { if (*p < cap) o[(*p)++] = c; }
+static void md_esc(char *o, int *p, int cap, char c) {            /* escape HTML metachars */
+    if (c == '<') md_put(o, p, cap, "&lt;");
+    else if (c == '>') md_put(o, p, cap, "&gt;");
+    else if (c == '&') md_put(o, p, cap, "&amp;");
+    else md_putc(o, p, cap, c);
+}
+static void md_inline(char *o, int *p, int cap, const char *s, int len) {  /* spans within one line */
+    int bold = 0, ital = 0;
+    for (int i = 0; i < len; ) {
+        char c = s[i];
+        if (c == '\\' && i + 1 < len) { md_esc(o, p, cap, s[i + 1]); i += 2; continue; }   /* backslash escape */
+        if (c == '`') {                                          /* `code` */
+            int j = i + 1; while (j < len && s[j] != '`') j++;
+            md_put(o, p, cap, "<code>");
+            for (int k = i + 1; k < j; k++) md_esc(o, p, cap, s[k]);
+            md_put(o, p, cap, "</code>");
+            i = j < len ? j + 1 : j; continue;
+        }
+        if (c == '[') {                                          /* [text](url) */
+            int t = i + 1; while (t < len && s[t] != ']') t++;
+            if (t + 1 < len && s[t + 1] == '(') {
+                int u = t + 2; while (u < len && s[u] != ')') u++;
+                if (u < len) {
+                    md_put(o, p, cap, "<a href=\"");
+                    for (int k = t + 2; k < u; k++) md_esc(o, p, cap, s[k]);
+                    md_put(o, p, cap, "\">");
+                    for (int k = i + 1; k < t; k++) md_esc(o, p, cap, s[k]);
+                    md_put(o, p, cap, "</a>");
+                    i = u + 1; continue;
+                }
+            }
+            md_esc(o, p, cap, c); i++; continue;
+        }
+        if (c == '*' && i + 1 < len && s[i + 1] == '*') { md_put(o, p, cap, bold ? "</b>" : "<b>"); bold = !bold; i += 2; continue; }
+        if (c == '*' || c == '_') { md_put(o, p, cap, ital ? "</i>" : "<i>"); ital = !ital; i++; continue; }
+        md_esc(o, p, cap, c); i++;
+    }
+    if (bold) md_put(o, p, cap, "</b>");                         /* close any span left open at line end */
+    if (ital) md_put(o, p, cap, "</i>");
+}
+static int md_to_html(const char *md, int mdlen, char *out, int cap) {
+    int p = 0, in_pre = 0, list = 0 /* 0 none, 1 ul, 2 ol */, para = 0, i = 0;
+    while (i < mdlen) {
+        int ls = i; while (i < mdlen && md[i] != '\n') i++;      /* line is [ls, le) */
+        int le = i; if (i < mdlen) i++;                          /* consume '\n' */
+        if (le > ls && md[le - 1] == '\r') le--;                 /* strip CR */
+        const char *L = md + ls; int n = le - ls;
+        if (n >= 3 && L[0] == '`' && L[1] == '`' && L[2] == '`') {   /* ``` fence toggles <pre> */
+            if (!in_pre) { if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+                           if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; }
+                           md_put(out, &p, cap, "<pre>"); in_pre = 1; }
+            else { md_put(out, &p, cap, "</pre>"); in_pre = 0; }
+            continue;
+        }
+        if (in_pre) { for (int k = 0; k < n; k++) md_esc(out, &p, cap, L[k]); md_putc(out, &p, cap, '\n'); continue; }
+        int blank = 1; for (int k = 0; k < n; k++) if (L[k] != ' ' && L[k] != '\t') { blank = 0; break; }
+        if (blank) { if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+                     if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; } continue; }
+        int b0 = 0; while (b0 < n && L[b0] == ' ') b0++;
+        const char *T = L + b0; int tn = n - b0;
+        if (tn >= 3) {                                           /* --- *** ___ horizontal rule */
+            char hc = T[0];
+            if (hc == '-' || hc == '*' || hc == '_') {
+                int all = 1, cnt = 0;
+                for (int k = 0; k < tn; k++) { if (T[k] == hc) cnt++; else if (T[k] != ' ') { all = 0; break; } }
+                if (all && cnt >= 3) { if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+                                       if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; }
+                                       md_put(out, &p, cap, "<hr>"); continue; }
+            }
+        }
+        if (T[0] == '#') {                                       /* # .. ###### heading */
+            int h = 0; while (h < tn && h < 6 && T[h] == '#') h++;
+            if (h < tn && T[h] == ' ') {
+                if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+                if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; }
+                char tag[3] = { 'h', (char)('0' + h), 0 };
+                md_putc(out, &p, cap, '<'); md_put(out, &p, cap, tag); md_putc(out, &p, cap, '>');
+                md_inline(out, &p, cap, T + h + 1, tn - h - 1);
+                md_put(out, &p, cap, "</"); md_put(out, &p, cap, tag); md_putc(out, &p, cap, '>');
+                continue;
+            }
+        }
+        if (T[0] == '>') {                                       /* > blockquote */
+            if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+            if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; }
+            int s2 = 1; if (s2 < tn && T[s2] == ' ') s2++;
+            md_put(out, &p, cap, "<blockquote>"); md_inline(out, &p, cap, T + s2, tn - s2); md_put(out, &p, cap, "</blockquote>");
+            continue;
+        }
+        if (tn >= 2 && (T[0] == '-' || T[0] == '*' || T[0] == '+') && T[1] == ' ') {   /* - * + bullet */
+            if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+            if (list != 1) { if (list == 2) md_put(out, &p, cap, "</ol>"); md_put(out, &p, cap, "<ul>"); list = 1; }
+            md_put(out, &p, cap, "<li>"); md_inline(out, &p, cap, T + 2, tn - 2); md_put(out, &p, cap, "</li>");
+            continue;
+        }
+        { int d = 0; while (d < tn && T[d] >= '0' && T[d] <= '9') d++;                  /* N. ordered item */
+          if (d > 0 && d + 1 < tn && T[d] == '.' && T[d + 1] == ' ') {
+              if (para) { md_put(out, &p, cap, "</p>"); para = 0; }
+              if (list != 2) { if (list == 1) md_put(out, &p, cap, "</ul>"); md_put(out, &p, cap, "<ol>"); list = 2; }
+              md_put(out, &p, cap, "<li>"); md_inline(out, &p, cap, T + d + 2, tn - d - 2); md_put(out, &p, cap, "</li>");
+              continue;
+          } }
+        if (list) { md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>"); list = 0; }   /* paragraph text */
+        if (!para) { md_put(out, &p, cap, "<p>"); para = 1; } else md_putc(out, &p, cap, ' ');
+        md_inline(out, &p, cap, T, tn);
+    }
+    if (in_pre) md_put(out, &p, cap, "</pre>");
+    if (para)   md_put(out, &p, cap, "</p>");
+    if (list)   md_put(out, &p, cap, list == 1 ? "</ul>" : "</ol>");
+    return p;
+}
+/* case-insensitive: does NUL-terminated `u` end with `ext`? */
+static int url_ends(const char *u, const char *ext) {
+    int lu = 0; while (u[lu]) lu++;
+    int le = 0; while (ext[le]) le++;
+    if (lu < le) return 0;
+    for (int i = 0; i < le; i++) {
+        char a = u[lu - le + i], b = ext[i];
+        if (a >= 'A' && a <= 'Z') a += 32;
+        if (b >= 'A' && b <= 'Z') b += 32;
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
 /* Request an async load of b->url. If the worker is busy, remember the intent
  * (b->want) and retry from browser_poll(), so a load is never silently dropped. */
 static void browser_navigate(browser_t *b) {
@@ -2777,6 +2911,15 @@ static void browser_navigate(browser_t *b) {
             long bn = vfs_read(b->url + 5, big, LOCAL_IMG_MAX);
             if (bn < 0) { kfree(big); b->ntok = 0; set_status(b, "file not found"); return; }
             if (try_image(b, big, (int)bn)) { kfree(big); set_status(b, "image"); return; }
+            if (url_ends(b->url, ".md")) {                   /* Markdown -> HTML, then render normally */
+                int hlen = md_to_html((const char *)big, (int)bn, b->raw, RAW_MAX - 1);
+                kfree(big);
+                b->raw[hlen] = 0; b->rawlen = hlen;
+                b->bodyoff = 0; b->bodylen = hlen;
+                parse_html(b, b->raw, hlen);
+                set_status(b, "markdown");
+                return;
+            }
             long cp = bn < RAW_MAX - 1 ? bn : RAW_MAX - 1;   /* not an image: keep (capped) for text/HTML */
             memcpy(b->raw, big, (size_t)cp);
             kfree(big);

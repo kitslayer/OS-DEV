@@ -1,6 +1,20 @@
 # What's next
 
-> **Status (481 milestones).** (M481: **Global screenshot hotkey (F12)** — press F12 anywhere on the
+> **Status (482 milestones).** (M482: **Markdown rendering in the browser (`.md` files)** — the browser
+> renders local Markdown: a from-scratch markdown→HTML converter (`md_to_html` in browser.c) turns a `.md`
+> file into HTML, fed to the existing battle-tested `parse_html` (so it inherits all the styling). Handles
+> # headings, bold/italic, inline `code`, ``` fences, -/* /+ and N. lists, > quotes, [text](url) links,
+> --- rules, paragraphs. BOUNDED + NON-RECURSIVE (untrusted input, no kernel guard page): every write
+> capped vs cap, every read bounded by line length, inline emphasis = flat toggles (no recursion). Reuses
+> the M479 big-buffer local-file path: read .md into the transient buffer, convert into b->raw, parse_html.
+> Additive — only file: URLs ending .md take the path; low-mem fallback = plain text. Baked readme.md demo
+> + index link. GOTCHA fixed: the function's doc comment literally contained `*` `/` sequences (in the
+> markdown syntax it described) that closed the block comment early — reworded. Verified in-OS:
+> `browse file:readme.md` → heading/bold/italic/code/fenced/bullet/quote/link/hr/ordered-list all render
+> (status "markdown"). File: kernel/browser.c, tools/mkfatfs.c. **Substantial + safe + on-theme (extends
+> the browser north star to a new doc format) — found after confirming images/shell/JS-stdlib/apps are
+> saturated.**)
+> M481: **Global screenshot hotkey (F12)** — press F12 anywhere on the
 > desktop to save the whole screen to `SHOT.BMP` (+ a short beep), so the M478 capture is reachable from
 > any focused app, not just the shell. keyboard.c maps F12 (scancode 0x58, was unused) to a new WM code
 > 0x1C; desktop.c handles it by calling `fb_save_bmp` directly (kernel-side, no syscall) and swallowing
