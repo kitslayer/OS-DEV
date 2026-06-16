@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define SECTOR        512
-#define TOTAL_SECTORS 8192          /* 4 MiB image */
+#define TOTAL_SECTORS 32768         /* 16 MiB image (holds the ~4 MB DOOM IWAD + demos) */
 #define RESERVED      32
 #define NUM_FATS      2
 #define SPC           1             /* sectors per cluster */
@@ -958,6 +958,7 @@ static const struct {
     { "HELLO   GZ ", "tools/hello.gz" },  /* a gzip file: decompress in-OS with: gunzip HELLO.GZ */
     { "TEST    ZIP", "tools/test.zip" },  /* a zip archive: extract in-OS with: unzip TEST.ZIP */
     { "TEST    TGZ", "tools/test.tgz" },  /* a .tar.gz tarball: extract in-OS with: tar TEST.TGZ */
+    { "DOOM1   WAD", "tools/DOOM1.WAD" }, /* the shareware DOOM IWAD (~4 MB): play in-OS with: run doom */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 
