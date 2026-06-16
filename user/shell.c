@@ -109,7 +109,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1387,6 +1387,34 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "run ")) {
             if (sys_spawn(line + 4) < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
             else { print("launched "); print(line + 4); print("\n"); }
+        } else if (startswith(line, "file ")) {            /* identify a file's type by its magic bytes */
+            char *f = line + 5; while (*f == ' ') f++;
+            char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0;
+            if (!fn[0]) print("usage: file <name>\n");
+            else {
+                static unsigned char b[512];
+                long n = sys_readfile(fn, b, sizeof(b));
+                if (n < 0) print("file: no such file\n");
+                else {
+                    const char *t;
+                    if (n>=8 && b[0]==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G') t = "PNG image";
+                    else if (n>=4 && b[0]=='G'&&b[1]=='I'&&b[2]=='F'&&b[3]=='8') t = "GIF image";
+                    else if (n>=3 && b[0]==0xFF&&b[1]==0xD8&&b[2]==0xFF) t = "JPEG image";
+                    else if (n>=2 && b[0]=='B'&&b[1]=='M') t = "BMP image";
+                    else if (n>=4 && b[0]=='<'&&(b[1]|32)=='s'&&(b[2]|32)=='v'&&(b[3]|32)=='g') t = "SVG image";
+                    else if (n>=2 && b[0]==0x1F&&b[1]==0x8B) t = "gzip compressed data";
+                    else if (n>=4 && b[0]=='P'&&b[1]=='K'&&b[2]==3&&b[3]==4) t = "Zip archive";
+                    else if (n>262 && b[257]=='u'&&b[258]=='s'&&b[259]=='t'&&b[260]=='a'&&b[261]=='r') t = "tar archive";
+                    else if (n>=4 && b[0]==0x7F&&b[1]=='E'&&b[2]=='L'&&b[3]=='F') t = "ELF executable";
+                    else {
+                        int txt = 1;             /* printable -> text, else binary data */
+                        for (long i = 0; i < n; i++) { unsigned char c = b[i];
+                            if (!(c=='\n'||c=='\r'||c=='\t'||(c>=32&&c<127))) { txt = 0; break; } }
+                        t = txt ? "ASCII text" : "data";
+                    }
+                    print(fn); print(": "); print(t); print("\n");
+                }
+            }
         } else if (startswith(line, "tar ")) {             /* extract a .tar / .tar.gz archive */
             char *t = line + 4; while (*t == ' ') t++;
             char tn[64]; int ti = 0; while (*t && *t != ' ' && ti < 63) tn[ti++] = *t++; tn[ti] = 0;
