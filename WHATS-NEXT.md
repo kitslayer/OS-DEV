@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (446 milestones).** (M446: **CSS `background-color`** — `background-color` (+ the
+> **Status (447 milestones).** (M447: **CSS `text-align: center`/`right`** — inline `style=` +
+> `<style>` rules + the `<center>` tag + the `align=` attr now center/right-align text. The
+> single-pass word-wrapper does a bounded line-width look-ahead at each line start (replicating
+> the wrap test), then offsets `cx`. Per-token `tokalign[]` + a `curalign` scope (mirroring M446
+> `tokbg`); a line takes its first token's alignment. Additive (left = zero offset, existing pages
+> byte-identical); the look-ahead is ntok-bounded and only moves `cx` within `[cl,cr)` (can't
+> corrupt). Verified in-OS (ALIGN.HTM: centered heading + per-line-centered paragraph + right-align
+> + `.c`/`.r` rules + `<center>` + `align=`; left baseline unchanged).
+> M446: **CSS `background-color`** — `background-color` (+ the
 > `background:` shorthand colour) from inline `style=` and `<style>` rules paints an inline
 > highlight behind a text run, composing with the color/weight/style/underline scope stack +
 > cascade. A per-token `tokbg[]` + `curbg` scope field (mirroring `tokcolor`) feed the renderer's

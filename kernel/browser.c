@@ -113,13 +113,15 @@ struct browser {
     int      curtransform;                               /* text-transform in effect: 0=none, 1=uppercase, 2=lowercase (applied emit-time to b->text, so .textContent — read from b->raw — stays original) */
     uint32_t curbg;                                      /* CSS background-color in effect (0=none, else 0x01000000|rgb) */
     uint32_t tokbg[TOK_MAX];                             /* per-token background colour (drawn as an inline highlight behind the text) */
+    int      curalign;                                   /* text-align in effect: 0=left, 1=center, 2=right */
+    uint8_t  tokalign[TOK_MAX];                          /* per-token text-align (a line takes its first token's value) */
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
-    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
@@ -172,6 +174,7 @@ static void emit_word(browser_t *b, int start, int style, int link) {
     b->tokcolor[b->ntok] = b->curcolor;                  /* <font color> override (0 = none) */
     b->tokul[b->ntok] = (uint8_t)b->curul;               /* underline (text-decoration / <u>) */
     b->tokbg[b->ntok] = b->curbg;                        /* background-color highlight (0 = none) */
+    b->tokalign[b->ntok] = (uint8_t)b->curalign;         /* text-align (0=left/1=center/2=right) */
     b->toks[b->ntok++] = (tok_t){ (uint16_t)start, (uint16_t)len,
                                   (uint16_t)link, (uint8_t)style, TK_WORD };
 }
@@ -644,6 +647,15 @@ static uint32_t parse_style_bg(const char *s, int n) {
         return parse_color(s + vs, ve - vs);
     return 0;
 }
+/* text-align: 1 = center, 2 = right, 0 = left/justify/other (the default flow). */
+static int parse_style_align(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "text-align", 10, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs;
+    if (attr_eq(v, vl, "center")) return 1;
+    if (attr_eq(v, vl, "right"))  return 2;
+    return 0;
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -655,7 +667,7 @@ static int is_void_tag(const char *t) {
  * and find the cascaded color/text-style for one element from those rules. */
 static void capture_css(browser_t *b, const char *s, int n);
 static int  css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
-                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg);
+                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg, int *align);
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
@@ -677,12 +689,13 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->curbg = b->sc[sp].savebg;
                 b->curul = b->sc[sp].saveul;
                 b->curtransform = b->sc[sp].savetransform;
+                b->curalign = b->sc[sp].savealign;
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0;
-        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg);   /* <style> rules first (lower priority) */
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0;
+        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al);   /* <style> rules first (lower priority) */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
             uint32_t ic = parse_style_color(st, stl);  if (ic) c = ic;
@@ -690,16 +703,22 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             if (parse_style_underline(st, stl)) ul = 1;
             int itr = parse_style_transform(st, stl);  if (itr) tr = itr;   /* text-transform (inline only) */
             uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
+            int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
         }
+        if (tageq(tag, "center")) al = 1;                   /* the legacy <center> tag */
+        { const char *av; int avl;                          /* and the legacy align= attribute (div, p, headings, td) */
+          if (find_attr(attrs, attrlen, "align", &av, &avl)) {
+              if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg) {              /* styled element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al) {        /* styled element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].savecolor = b->curcolor; if (c) b->curcolor = c;
                 b->sc[sp].savebg = b->curbg; if (bg) b->curbg = bg;
                 b->sc[sp].saveul = b->curul; if (ul) b->curul = 1;
                 b->sc[sp].savetransform = b->curtransform; if (tr) b->curtransform = tr;
+                b->sc[sp].savealign = b->curalign; if (al) b->curalign = al;
                 b->sc[sp].savestyle = *style; b->sc[sp].setstyle = -1;
                 if (apply_ts) { *style = ts; b->sc[sp].setstyle = ts; }
                 int i = 0; while (tag[i] && i < 15) { b->sc[sp].tag[i] = tag[i]; i++; } b->sc[sp].tag[i] = 0;
@@ -1012,6 +1031,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->find_tok = -1;                                    /* clear any find highlight */
     b->curcolor = 0;                                     /* default text colour */
     b->curbg = 0;                                        /* no background-color in effect */
+    b->curalign = 0;                                     /* default left alignment */
     b->curul = 0;                                        /* no underline in effect */
     b->curtransform = 0;                                 /* no text-transform in effect */
     b->viewsource = 0;                                   /* show the rendered page, not source */
@@ -1275,13 +1295,15 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int ulv = parse_style_underline(s + ds, de - ds);
         int trv = parse_style_transform(s + ds, de - ds);
         uint32_t bgv = parse_style_bg(s + ds, de - ds);
-        if (col || tsv >= 0 || ulv || trv || bgv) {  /* keep only rules that set something we render */
+        int alv = parse_style_align(s + ds, de - ds);
+        if (col || tsv >= 0 || ulv || trv || bgv || alv) {  /* keep only rules that set something we render */
             b->css_sel[b->n_css] = sel;
             b->css_color[b->n_css] = col;
             b->css_style[b->n_css] = (int16_t)tsv;
             b->css_ul[b->n_css] = (uint8_t)ulv;
             b->css_transform[b->n_css] = (uint8_t)trv;
             b->css_bg[b->n_css] = bgv;
+            b->css_align[b->n_css] = (uint8_t)alv;
             b->n_css++;
         }
     }
@@ -1290,7 +1312,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
  * #id / [attr]) sets *color / *textstyle, later rules winning per property (source order).
  * Returns 1 if any rule matched. Matching mirrors sel_match_all's per-element checks. */
 static int css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
-                     uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg) {
+                     uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg, int *align) {
     int hit = 0;
     for (int r = 0; r < b->n_css; r++) {
         const sel_t *s = &b->css_sel[r];
@@ -1303,6 +1325,7 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         if (b->css_ul[r]) *underline = 1;
         if (b->css_transform[r]) *transform = b->css_transform[r];
         if (b->css_bg[r]) *bg = b->css_bg[r];
+        if (b->css_align[r]) *align = b->css_align[r];
         hit = 1;
     }
     return hit;
@@ -2890,6 +2913,26 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         int wpx = tk->len * GW * sc; if (wpx > cr - cl) wpx = cr - cl;
         if (cx + wpx > cr && cx > cl) { cy += curlh; cx = cl; curlh = 18; }
         if (lh > curlh) curlh = lh;
+        /* text-align: at a line start, look ahead over the words that will fit on
+         * this line (replicating the wrap test) and shift cx for center/right.
+         * align 0 (left, the default) -> no shift, so left-aligned pages are
+         * byte-for-byte unchanged; bounded by ntok, can only move cx within [cl,cr). */
+        if (cx == cl) {
+            int al = (t < TOK_MAX) ? b->tokalign[t] : 0;
+            if (al) {
+                int avail = cr - cl, probe = cl, endx = cl;
+                for (int u = t; u < b->ntok; u++) {
+                    tok_t *pk = &b->toks[u];
+                    if (pk->type != TK_WORD) break;          /* break/para/hr/img end the line */
+                    int ps = scale_for(pk->style);
+                    int pw = pk->len * GW * ps; if (pw > avail) pw = avail;
+                    if (probe + pw > cr && probe > cl) break;  /* would wrap -> line ends here */
+                    endx = probe + pw; probe = endx + GW * ps;
+                }
+                int off = (al == 1) ? (avail - (endx - cl)) / 2 : (avail - (endx - cl));
+                if (off > 0) cx = cl + off;
+            }
+        }
 
         /* record every link's content-space y (even off-screen) so keyboard
          * link selection can scroll it into view */

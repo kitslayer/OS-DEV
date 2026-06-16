@@ -645,6 +645,15 @@ static const struct {
         "<p class=\"b\">This whole paragraph is bold <i>and</i> gray &mdash; the <code>.b</code> rule (bold) cascades with the <code>p</code> rule (gray) on one element.</p>"
         "<p style=\"color: #0000cc\">Inline <code>style=\"color:blue\"</code> overrides the <code>p</code> rule &mdash; this line is blue.</p>"
         "<p>Background colours: <span class=\"hl\">a .hl-highlighted run</span>, some <span class=\"code\">inline code</span> (grey bg, red text), an inline <span style=\"background-color:#b3e5ff\">light-blue span</span>, <span style=\"background:#222222;color:#ffffff\">white-on-dark</span>, and a <mark>&lt;mark&gt; element</mark>.</p>" },
+    { "ALIGN   HTM", "<title>CSS text-align</title><style> .c{text-align:center} .r{text-align:right} </style>"
+        "<h1 style=\"text-align:center\">Centered heading</h1>"
+        "<p style=\"text-align:center\">This whole paragraph is centered via inline <code>text-align:center</code>, and it wraps across several lines so you can see that each wrapped line is individually centered within the content column rather than just the first.</p>"
+        "<p style=\"text-align:right\">This paragraph is right-aligned (inline <code>text-align:right</code>), also wrapping to show each line flush to the right edge.</p>"
+        "<p class=\"c\">Centered by a <code>.c</code> &lt;style&gt; class rule.</p>"
+        "<p class=\"r\">Right-aligned by a <code>.r</code> class rule.</p>"
+        "<center>The legacy &lt;center&gt; tag also centers.</center>"
+        "<p align=\"right\">And the old <code>align=\"right\"</code> attribute works too.</p>"
+        "<p>This last paragraph is normal left-aligned flow for comparison.</p>" },
     { "NEST    HTM", "<title>Nested style scopes</title><style>\n"
         "  p { color: #333333 }\n"
         "  .red { color: #cc0000 }\n"
