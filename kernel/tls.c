@@ -7,10 +7,14 @@
  * transcript is small), so no streaming SHA is needed.
  *
  * Server authentication: the server Finished is verified (proving it holds the
- * handshake secret derived from the ECDH), which protects the handshake against
- * tampering. Full certificate-chain / CertificateVerify validation is a TODO
- * layered on top (the X.509 + RSA/ECDSA verifiers exist); until then this is an
- * UNAUTHENTICATED (encrypted but MITM-vulnerable) channel — fine for a demo.
+ * handshake secret derived from the ECDH). The certificate chain is also
+ * validated with the from-scratch X.509 + RSA/ECDSA verifiers — CertificateVerify
+ * (the leaf key signs the transcript), each issuer link, and anchoring to a
+ * baked-in trusted root. This is currently INFORMATIONAL, not ENFORCING: the
+ * result is logged and surfaced to the UI (TLS* anchored / TLS+ leaf-key-only /
+ * TLS? failed), but a failure is non-fatal — enforcing would need a full (~150)
+ * trusted-root set baked in, not a handful (see docs/438). So the hooks are all
+ * present; flipping to enforce is a root-set + fatal-gate change.
  *
  * Host-tested against `openssl s_server -tls1_3`.
  */
@@ -501,9 +505,11 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
         memmove(hsbuf, hsbuf + o, hslen - o); hslen -= o;       /* keep the remainder */
     }
     /* The CertificateVerify signature proves the server holds the private key for
-     * the leaf cert it presented. We verify the signature but do NOT yet validate
-     * the cert CHAIN to a trust anchor, so this is logged, not enforced (no MITM
-     * protection until chain validation is added). */
+     * the leaf cert it presented; we verify it here. The cert CHAIN (issuer links
+     * + anchoring to a baked-in trusted root) is validated separately above. The
+     * combined result is logged + surfaced to the UI, but is INFORMATIONAL not
+     * ENFORCING — a failure is non-fatal (enforcing needs a full root set + a
+     * fatal gate; see docs/438). */
     kprintf("[tls] CertificateVerify: %s\n",
             cv_ok == 0 ? "signature OK (leaf key proven)"
                        : cv_ok == -2 ? "absent" : "FAILED/unsupported");
