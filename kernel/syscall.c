@@ -29,6 +29,7 @@
 #include "kheap.h"
 #include "inflate.h"
 #include "zip.h"
+#include "tar.h"
 #include <stdint.h>
 
 /* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
@@ -322,6 +323,27 @@ void syscall_dispatch(struct registers *r) {
         int cnt = zl > 0 ? zip_extract(zbuf, (int)zl, unzip_emit, &uc, scr, 1048576) : -1;
         kfree(zbuf); kfree(scr);
         r->rax = (uint64_t)(int64_t)(cnt < 0 ? -1 : uc.written);   /* files actually written */
+        break;
+    }
+    case SYS_untar: {
+        const char *tn = (const char *)r->rdi;
+        uint8_t *buf = kmalloc(1048576);        /* the .tar or .tar.gz file (<= 1 MB) */
+        if (!buf) { r->rax = (uint64_t)-1; break; }
+        long fl = vfs_read(tn, buf, 1048576);
+        if (fl <= 0) { kfree(buf); r->rax = (uint64_t)-1; break; }
+        struct unzip_ctx uc = { 0 };
+        int cnt;
+        if (fl > 2 && buf[0] == 0x1f && buf[1] == 0x8b) {   /* .tar.gz: gunzip the tar first */
+            uint8_t *tar = kmalloc(4194304);    /* decompressed tar (<= 4 MB) */
+            if (!tar) { kfree(buf); r->rax = (uint64_t)-1; break; }
+            int tl = gz_inflate(buf, (int)fl, tar, 4194304);
+            cnt = tl > 0 ? tar_extract(tar, tl, unzip_emit, &uc) : -1;
+            kfree(tar);
+        } else {
+            cnt = tar_extract(buf, (int)fl, unzip_emit, &uc);
+        }
+        kfree(buf);
+        r->rax = (uint64_t)(int64_t)(cnt < 0 ? -1 : uc.written);
         break;
     }
     case SYS_crypt: {

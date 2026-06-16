@@ -1,6 +1,17 @@
 # What's next
 
-> **Status (492 milestones).** (M492: **`unzip` — extract `.zip` archives** — completes the archive story
+> **Status (493 milestones).** (M493: **`tar` — extract `.tar` + `.tar.gz`** — completes the archive suite
+> (.gz/.zip/.tar.gz). kernel/tar.c: simple ustar 512-byte-header parsing (name@0, octal size@124, type@156),
+> bounded (data span checked vs len, walk always advances), I wrote it directly (simple). SYS_untar(41):
+> if the file starts with the gzip magic (1f 8b) → gz_inflate first → tar_extract — so .tar.gz/.tgz works
+> in ONE step. REUSES gz_inflate + the unzip_emit 8.3-mangling callback (minimal new code). shell `tar <f>`.
+> New tartest in `make check` (python-tarfile archive extracted exactly + truncation/corruption/garbage
+> fuzz, ASan clean). Verified in-OS: `tar TEST.TGZ` → 3 files byte-exact (incl. an 800-byte deflate-in-tar
+> entry, confirmed via disk). Files: kernel/tar.c, tar.h, syscall.c, shell.c, ulib.*, Makefile, tools/
+> test.tgz, tests/tar/*. **11 host suites. ARCHIVE/COMPRESSION SUITE COMPLETE: gunzip/gzip/unzip/tar+PNG,
+> all from-scratch on one inflate/deflate core. This session (M478-493, 16 milestones): image arc, markdown
+> +GFM, CSV, Wordle, and the whole compression/archive subsystem — far past the prior 'saturation'.**)
+> M492: **`unzip` — extract `.zip` archives** — completes the archive story
 > (.gz single → .zip multi-file). kernel/zip.c parses via the CENTRAL DIRECTORY (authoritative index),
 > reuses `inflate` (zip method 8 = raw DEFLATE; 0 = stored), bounds-checks EVERY attacker-controlled
 > offset/size in 64-bit (no wrap). DELEGATED to a subagent (intricate format + fuzzing, non-cyber) →

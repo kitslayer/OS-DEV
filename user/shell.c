@@ -109,7 +109,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1387,6 +1387,15 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "run ")) {
             if (sys_spawn(line + 4) < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
             else { print("launched "); print(line + 4); print("\n"); }
+        } else if (startswith(line, "tar ")) {             /* extract a .tar / .tar.gz archive */
+            char *t = line + 4; while (*t == ' ') t++;
+            char tn[64]; int ti = 0; while (*t && *t != ' ' && ti < 63) tn[ti++] = *t++; tn[ti] = 0;
+            if (tn[0] == 0) print("usage: tar <file.tar|file.tgz>\n");
+            else {
+                long n = sys_untar(tn);
+                if (n < 0) print("tar: failed (not a tar, too big, or missing)\n");
+                else { char nb[12]; itoa_simple((int)n, nb); print("tar: extracted "); print(nb); print(" file(s)\n"); }
+            }
         } else if (startswith(line, "unzip ")) {           /* extract a .zip archive (reuses the DEFLATE decoder) */
             char *z = line + 6; while (*z == ' ') z++;
             char zn[64]; int zi = 0; while (*z && *z != ' ' && zi < 63) zn[zi++] = *z++; zn[zi] = 0;

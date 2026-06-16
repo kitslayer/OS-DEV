@@ -148,9 +148,13 @@ pngenctest:
 ziptest:
 	@tests/run-zip-tests.sh
 
+# Host-side extraction + corrupt-input fuzz of the tar (ustar) extractor (ASan+UBSan).
+tartest:
+	@tests/run-tar-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest)"
 
 clean:
 	rm -rf $(BUILD)

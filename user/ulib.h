@@ -40,6 +40,7 @@ long sys_screenshot(const char *name);
 long sys_gunzip(const char *insrc, const char *outname);
 long sys_gzip(const char *insrc, const char *outname);
 long sys_unzip(const char *zipname);
+long sys_untar(const char *tarname);
 void sys_sleep(int ms);
 void sys_setcolor(int color);   /* text colour for subsequent output: palette index 0-15 (0 = default) */
 

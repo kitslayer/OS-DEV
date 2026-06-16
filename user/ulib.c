@@ -67,6 +67,7 @@ long sys_screenshot(const char *name) { return do_syscall(SYS_screenshot, (long)
 long sys_gunzip(const char *insrc, const char *outname) { return do_syscall(SYS_gunzip, (long)insrc, (long)outname, 0); }
 long sys_gzip(const char *insrc, const char *outname) { return do_syscall(SYS_gzip, (long)insrc, (long)outname, 0); }
 long sys_unzip(const char *zipname) { return do_syscall(SYS_unzip, (long)zipname, 0, 0); }
+long sys_untar(const char *tarname) { return do_syscall(SYS_untar, (long)tarname, 0, 0); }
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);
