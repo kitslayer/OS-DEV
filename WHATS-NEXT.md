@@ -1,6 +1,14 @@
 # What's next
 
-> **Status (442 milestones).** (M442: **SVG affine transforms** — `kernel/svg.c` now honours
+> **Status (443 milestones).** (M443: **SVG paint inheritance** — shapes inherit
+> `fill`/`stroke`/`stroke-width` from a `fill=`/`stroke=` on the root `<svg>` or an enclosing
+> `<g>` (was: always black), per-shape values override, `inherit` keyword honoured. A paint
+> stack parallel to (and sharing the depth of) the M442 transform stack; strictly additive
+> (no ancestor paint = the exact old defaults, byte-for-byte). svgtest gained an inheritance
+> unit test + fuzz; SHIP-reviewed (3M+ adversarial iters). Verified in-OS (ICON.SVG → a green
+> hexagon inheriting the root `<svg fill>`, white dot overriding). This is how single-colour
+> icon sets work (set `fill` once on `<svg>`). 
+> M442: **SVG affine transforms** — `kernel/svg.c` now honours
 > `transform=` on shapes and `<g>` groups (translate/scale/rotate/matrix/skewX/skewY, composed
 > left-to-right) via a depth-16 transform-matrix stack; each user point runs through the current
 > 2×3 matrix before the viewBox→pixel map. All 16.16 fixed-point (no FPU), overflow-clamped;

@@ -421,6 +421,12 @@ typedef struct {
     fx   m[6];
     fx   gstack[SVG_MAX_GROUPS][6];
     int  gdepth;
+    /* current INHERITED paint (seeded by <svg>, overridden by <g>, used as the
+     * default when a shape omits fill/stroke/stroke-width) + its group stack. */
+    color_t in_fill, in_stroke;
+    fx      in_swid;
+    color_t fillstk[SVG_MAX_GROUPS], strokestk[SVG_MAX_GROUPS];
+    fx      swidstk[SVG_MAX_GROUPS];
 } ctx_t;
 
 /* Map a user-space coord (16.16) to device (pixel) fixed-point. The subtraction
@@ -763,27 +769,38 @@ static void build_path(ctx_t *c, const char *s, const char *e) {
     }
 }
 
-/* ---- presentation attrs (fill / stroke / stroke-width) ----------------- */
-static void read_paint(const char *s, const char *e, color_t *fill, color_t *stroke, fx *swid) {
+/* case-insensitive whole-string compare (small helper for the "inherit" keyword). */
+static int ieq(const char *a, const char *b) {
+    while (*a && *b) { if (lc((unsigned char)*a) != lc((unsigned char)*b)) return 0; a++; b++; }
+    return *a == 0 && *b == 0;
+}
+
+/* ---- presentation attrs (fill / stroke / stroke-width) ----------------- *
+ * Resolves each property: a shape's own `style=` overrides its attr, which
+ * overrides the INHERITED value (c->in_*). The SVG initial values (opaque-black
+ * fill, unset stroke, stroke-width 1) live in c->in_* and are unchanged unless a
+ * <svg>/<g> ancestor set them — so an SVG with no inherited paint renders exactly
+ * as before. "inherit" explicitly takes the inherited value. */
+static void read_paint(ctx_t *c, const char *s, const char *e,
+                       color_t *fill, color_t *stroke, fx *swid) {
     char style[1024]; style[0] = 0;
     get_attr(s, e, "style", style, sizeof style);
     char v[256];
 
-    /* fill: style overrides attr overrides default(black). */
-    int got = 0;
-    if (get_style(style, "fill", v, sizeof v)) { parse_color(v, fill, 1); got = 1; }
-    if (!got && get_attr(s, e, "fill", v, sizeof v)) { parse_color(v, fill, 1); got = 1; }
-    if (!got) parse_color("", fill, 1);            /* default: opaque black, set=1 */
+    if (get_style(style, "fill", v, sizeof v) || get_attr(s, e, "fill", v, sizeof v)) {
+        if (ieq(v, "inherit")) *fill = c->in_fill;
+        else parse_color(v, fill, 1);
+    } else *fill = c->in_fill;
 
-    /* stroke: default unset. */
-    if (get_style(style, "stroke", v, sizeof v)) parse_color(v, stroke, 0);
-    else if (get_attr(s, e, "stroke", v, sizeof v)) parse_color(v, stroke, 0);
-    else parse_color("", stroke, 0);
+    if (get_style(style, "stroke", v, sizeof v) || get_attr(s, e, "stroke", v, sizeof v)) {
+        if (ieq(v, "inherit")) *stroke = c->in_stroke;
+        else parse_color(v, stroke, 0);
+    } else *stroke = c->in_stroke;
 
-    /* stroke-width: default 1 (user units). */
-    *swid = FX_ONE;
-    if (get_style(style, "stroke-width", v, sizeof v)) { const char*p=v; *swid = parse_num(&p, v+strlen(v)); }
-    else if (get_attr(s, e, "stroke-width", v, sizeof v)) { const char*p=v; *swid = parse_num(&p, v+strlen(v)); }
+    if (get_style(style, "stroke-width", v, sizeof v) || get_attr(s, e, "stroke-width", v, sizeof v)) {
+        if (ieq(v, "inherit")) *swid = c->in_swid;
+        else { const char *p = v; *swid = parse_num(&p, v + strlen(v)); }
+    } else *swid = c->in_swid;
     /* scale stroke width into device px (use sx; aspect ignored) — done by caller via swid*sx */
 }
 
@@ -877,6 +894,13 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
     C.py = (fx *)(scratch + (long)SVG_MAX_PTS * sizeof(fx));
     if (read_svg_tag(&C, svg_s, svg_e, out_cap) != 0) return -1;
 
+    /* SVG initial paint (fill black/opaque, stroke none, stroke-width 1), then let
+     * the <svg> element's own fill/stroke seed the inherited paint for descendants. */
+    parse_color("", &C.in_fill, 1);
+    parse_color("", &C.in_stroke, 0);
+    C.in_swid = FX_ONE;
+    read_paint(&C, svg_s, svg_e, &C.in_fill, &C.in_stroke, &C.in_swid);
+
     /* clear bitmap to fully-transparent black */
     memset(out, 0, (long)C.W * C.H * 4);
 
@@ -928,20 +952,29 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
         if (in_defs) { p = next; continue; }        /* skip ALL defs content (incl. <g>) */
 
         if (IS("g")) {                              /* group: maintain the transform stack */
-            if (closing) {                          /* </g>: pop -> restore parent CTM */
+            if (closing) {                          /* </g>: pop -> restore parent CTM + paint */
                 if (C.gdepth > 0) {
                     C.gdepth--;
-                    if (C.gdepth < SVG_MAX_GROUPS)
+                    if (C.gdepth < SVG_MAX_GROUPS) {
                         for (int i = 0; i < 6; i++) C.m[i] = C.gstack[C.gdepth][i];
+                        C.in_fill = C.fillstk[C.gdepth];
+                        C.in_stroke = C.strokestk[C.gdepth];
+                        C.in_swid = C.swidstk[C.gdepth];
+                    }
                 }
             } else if (!(body_e > name && body_e[-1] == '/')) {   /* <g ...> (not self-closing) */
-                if (C.gdepth < SVG_MAX_GROUPS) {    /* save CTM, compose this group's transform */
+                if (C.gdepth < SVG_MAX_GROUPS) {    /* save CTM+paint, then apply this group's */
                     for (int i = 0; i < 6; i++) C.gstack[C.gdepth][i] = C.m[i];
+                    C.fillstk[C.gdepth] = C.in_fill;
+                    C.strokestk[C.gdepth] = C.in_stroke;
+                    C.swidstk[C.gdepth] = C.in_swid;
                     char tf[256];
                     if (get_attr(name, body_e, "transform", tf, sizeof tf)) {
                         fx tm[6]; parse_transform(tf, (int)strlen(tf), tm);
                         mat_mul(C.m, C.m, tm);
                     }
+                    /* the group's own fill/stroke/stroke-width update the inherited paint */
+                    read_paint(&C, name, body_e, &C.in_fill, &C.in_stroke, &C.in_swid);
                 }
                 C.gdepth++;                         /* unconditional: keeps push/pop balanced past the cap */
             }
@@ -961,11 +994,11 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
           } }
 
         if (IS("rect")) {
-            read_paint(name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid);
             build_rect(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("circle")) {
-            read_paint(name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid);
             char v[48]; fx cx=0,cy=0,r=0;
             if (get_attr(name,body_e,"cx",v,sizeof v)) { const char*q=v; cx=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"cy",v,sizeof v)) { const char*q=v; cy=parse_num(&q,v+strlen(v)); }
@@ -973,7 +1006,7 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             build_ellipse(&C, cx, cy, r, r);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("ellipse")) {
-            read_paint(name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid);
             char v[48]; fx cx=0,cy=0,rx=0,ry=0;
             if (get_attr(name,body_e,"cx",v,sizeof v)) { const char*q=v; cx=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"cy",v,sizeof v)) { const char*q=v; cy=parse_num(&q,v+strlen(v)); }
@@ -982,7 +1015,7 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             build_ellipse(&C, cx, cy, rx, ry);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("line")) {
-            read_paint(name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid);
             char v[48]; fx x1=0,y1=0,x2=0,y2=0;
             if (get_attr(name,body_e,"x1",v,sizeof v)) { const char*q=v; x1=parse_num(&q,v+strlen(v)); }
             if (get_attr(name,body_e,"y1",v,sizeof v)) { const char*q=v; y1=parse_num(&q,v+strlen(v)); }
@@ -993,15 +1026,15 @@ int svg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
             if (!stroke.set) parse_color("black", &stroke, 1);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 0);
         } else if (IS("polyline")) {
-            read_paint(name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid);
             build_points(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 0);
         } else if (IS("polygon")) {
-            read_paint(name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid);
             build_points(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         } else if (IS("path")) {
-            read_paint(name, body_e, &fill, &stroke, &swid);
+            read_paint(&C, name, body_e, &fill, &stroke, &swid);
             build_path(&C, name, body_e);
             raster_shape(&C, fill, stroke, fx_mul(swid, C.sx), 1);
         }

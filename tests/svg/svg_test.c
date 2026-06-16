@@ -185,6 +185,38 @@ static void test_transform(void) {
     }
 }
 
+/* --- test 7: paint inheritance (<svg>/<g> fill, override, "inherit") ----- */
+static void test_inherit(void) {
+    const char *svg =
+        "<svg width='100' height='100' fill='#ff0000'>"               /* root fill = red */
+        "<rect x='0' y='0' width='20' height='20'/>"                  /* inherits red */
+        "<g fill='#0000ff'>"                                          /* group fill = blue */
+          "<rect x='30' y='0' width='20' height='20'/>"               /* inherits blue */
+          "<rect x='60' y='0' width='20' height='20' fill='#00ff00'/>"/* own green overrides */
+          "<g fill='inherit'>"                                        /* explicit inherit -> blue */
+            "<rect x='30' y='30' width='20' height='20'/>"
+          "</g>"
+        "</g>"
+        "<rect x='0' y='60' width='20' height='20'/>"                 /* after </g>: back to red */
+        "</svg>";
+    int w, h;
+    int r = svg_decode((const uint8_t*)svg, (int)strlen(svg),
+                       obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+    CHECK(r == 0 && w == 100 && h == 100, "inherit: decode 100x100");
+    if (r == 0) {
+        const uint8_t *a = px(w, 10, 10);   /* root <svg fill> inherited */
+        CHECK(a[0]>200 && a[1]<60 && a[2]<60 && a[3]>200, "inherit: root <svg fill> -> red");
+        const uint8_t *b2 = px(w, 40, 10);  /* <g fill> inherited */
+        CHECK(b2[2]>200 && b2[0]<60 && b2[3]>200, "inherit: <g fill> -> blue");
+        const uint8_t *c2 = px(w, 70, 10);  /* shape's own fill overrides the group */
+        CHECK(c2[1]>200 && c2[0]<60 && c2[2]<60 && c2[3]>200, "inherit: own fill overrides -> green");
+        const uint8_t *d = px(w, 40, 40);   /* fill='inherit' takes the group's blue */
+        CHECK(d[2]>200 && d[0]<60 && d[3]>200, "inherit: fill='inherit' -> blue");
+        const uint8_t *e2 = px(w, 10, 70);  /* inherited paint restored after </g> */
+        CHECK(e2[0]>200 && e2[1]<60 && e2[2]<60 && e2[3]>200, "inherit: paint restored after </g> -> red");
+    }
+}
+
 /* --- fuzz harness -------------------------------------------------------- */
 static uint32_t rs = 0x5EED1234u;
 static uint32_t xr(void) { rs ^= rs<<13; rs ^= rs>>17; rs ^= rs<<5; return rs; }
@@ -196,6 +228,7 @@ int main(void) {
     test_polygon_stroke();
     test_misc();
     test_transform();
+    test_inherit();
 
     /* Valid seeds to mutate during fuzzing. */
     const char *seeds[] = {
@@ -256,6 +289,7 @@ int main(void) {
             ",","/>","</svg>","<ellipse rx='","' r='","' cy='","   ",
             "<g transform='","translate(","scale(","rotate(","matrix(","skewX(",
             "skewY(",")","'>","</g>","' transform='rotate(",
+            "<g fill='","' fill='","stroke='","' fill='inherit'","#abc","' stroke-width='",
         };
         int nfr = (int)(sizeof frag / sizeof frag[0]);
         for (unsigned seed = 1; seed <= 16; seed++) {
@@ -304,8 +338,8 @@ int main(void) {
     }
 
     if (fails == 0)
-        printf("svgtest: 6 unit tests (incl. transforms) + %d random + %d mutation + 320000 structured "
-               "fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
+        printf("svgtest: 7 unit tests (incl. transforms + paint inheritance) + %d random + %d mutation "
+               "+ 320000 structured fuzz iters + adversarial cases — ASan/UBSan clean, PASS\n", ITERS, ITERS);
     else
         printf("svgtest: %d FAILURE(S)\n", fails);
     return fails ? 1 : 0;
