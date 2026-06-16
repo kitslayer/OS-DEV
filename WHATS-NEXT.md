@@ -1,6 +1,21 @@
 # What's next
 
-> **Status (469 milestones).** (M469: **JS `Symbol` + iterator protocol** — new V_SYMBOL primitive
+> **Status (470 milestones).** (M470: **JS `Proxy` (get/set traps)** — `new Proxy(target,handler)`;
+> property read fires handler.get(target,key,proxy) at eval_member_get, write fires handler.set at the
+> assign sites (both depth-guarded via call_function_this); trap-less proxy = transparent target r/w;
+> enumeration/JSON/in/delete deproxy to the target; V_PROXY is NOT obj_keyed so vals[0/1] never leak.
+> Additive (one is_proxy branch per site; non-proxy unchanged). Arena bumped 16→20MB BSS (suite's no-GC
+> peak). **SHIP-review CAUGHT A CRITICAL BUG: the trap-less GET fall-through `return eval_member_get(target)`
+> RECURSED, so a nested-proxy chain (new Proxy(aProxy,{})×N, ~250) overflowed the guard-page-less kernel
+> stack (untrusted script → kernel corruption; reproduced under ulimit -s 256). FIXED: walk the trap-less
+> chain ITERATIVELY (bounded loop, cap 4M >> any arena-buildable chain, so one-pass; stops at non-proxy
+> or trap-having → final read recurses ≤1 guarded level). Added a 300-deep-chain jstest case (was
+> missing).** jstest PASS (get/set/trapless/enum/typeof/method/self-recursive/deep-chain, ASan/UBSan) +
+> 7 suites + in-OS (js PROXY.JS → "got:bar"/"foo=5"/"chain 9", 200-deep chain, 0 faults). Baked PROXY.JS.
+> **GENERATORS = the only major modern-JS feature left, and it's a tree-walker CEILING (real lazy
+> generators need eval suspension; an eager hack mis-orders side effects) — document, don't force it.**
+> Files: kernel/js.c, tests/js/suite.js+.expected, tools/mkfatfs.c.
+> M469: **JS `Symbol` + iterator protocol** — new V_SYMBOL primitive
 > (typeof "symbol", unique id, equality by id; symbol-keyed props encoded as "@@sym:<id>" + hidden from
 > Object.keys/for-in/JSON/etc.), `Symbol`/`Symbol.iterator` globals, and `for…of` now consults a plain
 > object's `[Symbol.iterator]()` → CUSTOM ITERABLES work (call it → iterator → loop next()→{value,done}).

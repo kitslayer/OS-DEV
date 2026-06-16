@@ -266,4 +266,16 @@ ab symbol
 0,1,2
 terminated=true hitcap=true
 noiter=0
+-- Proxy get/set traps (M-proxy) --
+1 DFLT 1,DFLT
+42 recvIsProxy=true
+s=5,bad=-1 s=5 bad=undefined
+7 99 3 3
+a,b,c 1,2,3 {"a":1,"b":2,"c":3}
+a,b ab object
+true,false false
+hi:px
+recterminated=true
+object {}
+deepchain=77
 -- done --

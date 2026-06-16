@@ -48,8 +48,11 @@ static void out_str(const char *s) {
  * 12 MB: the single-run regression suite (no GC -> every alloc accumulates until
  * the run ends) crossed 8 MB once querySelector(All) tests were added; 12 MB
  * restores headroom for the suite's continued growth and for heavy real pages.
+ * 20 MB: the suite's peak crept to ~16.1 MB once the Proxy get/set-trap cases were
+ * added (the adversarial self-recursive trap allocates a new_env per MAXDEPTH frame),
+ * just past the prior 16 MB cap; 20 MB restores ~4 MB of headroom. (M-proxy)
  * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
-#define JS_ARENA   (16384 * 1024)
+#define JS_ARENA   (20480 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -771,6 +774,11 @@ static node *parse_program(lexer *L) {
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
        V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR, V_CLASSLIST,
+       /* V_PROXY (ES6 Proxy, get/set traps): like V_ACCESSOR/V_BOUND its val.t stays
+        * V_OBJ — only obj->kind is V_PROXY. The target lives in vals[0], the handler in
+        * vals[1] (n==2). is_proxy/proxy_target/proxy_handler below; NOT obj_keyed, so its
+        * vals[] are never iterated as property keys (no internal-layout leak). (M-proxy) */
+       V_PROXY,
        /* V_SYMBOL is a real val.t (a primitive), unlike the markers above which are
         * only obj->kind tags. A symbol carries a unique id in val.num and an optional
         * description string in val.str. (M-symbol) */
@@ -1426,11 +1434,41 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
 static int  is_accessor(val v){ return v.t==V_OBJ && v.o && v.o->kind==V_ACCESSOR; }
 static obj *new_accessor(void){ obj *a=new_obj(V_ACCESSOR); if(a){ a->vals[0]=UND(); a->vals[1]=UND(); a->n=2; } return a; }
 static val  fire_getter(val acc, val recv){ val g=acc.o->vals[0]; if(g.t==V_UNDEF) return UND(); return call_function_this(g, recv, 0, 0); }
+#define JS_PROTO_MAX 1000   /* shared cap: proto-chain walks (proto_lookup) AND the proxy deproxy() guard below */
+/* ES6 Proxy (M-proxy). A V_PROXY obj holds the target in vals[0] and the handler in
+ * vals[1] (n==2); its val.t stays V_OBJ (like V_ACCESSOR/V_BOUND). is_proxy() is the
+ * single branch the hot member-get/set/enumeration sites add — false for every normal
+ * object, so non-proxy paths are byte-for-byte unchanged. The get/set traps go through
+ * call_function_this, so a self-recursive handler is bounded by MAXDEPTH (graceful
+ * "[js error: max call depth]", never a C-stack overflow). target/handler are the only
+ * slots, and only ever read as objects, so no vals[] layout ever leaks as a property. */
+static int  is_proxy(val v){ return v.t==V_OBJ && v.o && v.o->kind==V_PROXY; }
+static val  proxy_target(val v){ return (v.o && v.o->n>0) ? v.o->vals[0] : UND(); }
+static val  proxy_handler(val v){ return (v.o && v.o->n>1) ? v.o->vals[1] : UND(); }
+/* Resolve a value to a proxy's target if it is a proxy (one hop is enough: new Proxy()
+ * always wraps a non-proxy target here, but a guard keeps it total). Used by the
+ * enumeration/JSON pass-through sites so a trap-less proxy behaves like its target and
+ * never exposes vals[0]/vals[1]. (M-proxy) */
+static val  deproxy(val v){ int g=0; while(is_proxy(v) && ++g<=JS_PROTO_MAX) v=proxy_target(v); return v; }
+/* The SET trap, shared by the member-assign and index-assign write sites. `prox` must be
+ * a V_PROXY. If handler.set is callable, fire handler.set(target, key, value, proxy) and
+ * let the handler decide whether/how to mutate the target; otherwise write the property
+ * straight onto the TARGET (a trap-less proxy is a transparent write-through). The call is
+ * depth-guarded (call_function_this), so a self-recursive set handler hits MAXDEPTH rather
+ * than overflowing. Always "handles" the write — the caller just returns rhs. (M-proxy) */
+static void proxy_set(val prox, const char *key, val value){
+    val target=proxy_target(prox), handler=proxy_handler(prox), trap;
+    if (handler.t==V_OBJ && handler.o && obj_get(handler.o,"set",&trap) && (trap.t==V_FUN||trap.t==V_NATIVE||(trap.t==V_OBJ&&trap.o&&trap.o->kind==V_BOUND))) {
+        val targs[4] = { target, STRV(key), value, prox };   /* handler.set(target, key, value, proxy); proxy is `this` */
+        call_function_this(trap, prox, targs, 4);            /* depth-guarded; return value (trap's bool) is discarded — non-strict semantics */
+        return;
+    }
+    if (target.t==V_OBJ && target.o) obj_set(target.o, key, value);   /* no set handler: write straight through to the target */
+}
 /* Prototype chain (M263). Walk starts AFTER an own-property miss; on a hit, an inherited
  * accessor fires with `this`=recv (the ORIGINAL receiver, not the holder). Cycle-capped
  * (a.__proto__=b; b.__proto__=a) so it can never infinite-loop. ONLY the evaluator's member
  * sites call this -- obj_get stays own-only, so in/delete/enumeration never walk the chain. */
-#define JS_PROTO_MAX 1000
 static int proto_lookup(obj *start, const char *name, val recv, val *out) {
     int guard=0;
     for (obj *p=start; p && ++guard<=JS_PROTO_MAX; p=p->proto) {
@@ -1452,6 +1490,32 @@ static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_ARR && recv.o) {        /* recv.o can be NULL if a producing method hit OOM */
         if (strcmp(name,"length")==0) return NUM(recv.o->n);
         /* arrays store elements in vals[] with keys[] unused — no named-property lookup here */
+    }
+    if (recv.t==V_OBJ && recv.o && recv.o->kind==V_PROXY) {   /* ES6 Proxy GET trap (M-proxy): runs BEFORE any normal lookup */
+        val target=proxy_target(recv), handler=proxy_handler(recv), trap;
+        if (handler.t==V_OBJ && handler.o && obj_get(handler.o,"get",&trap) && (trap.t==V_FUN||trap.t==V_NATIVE||(trap.t==V_OBJ&&trap.o&&trap.o->kind==V_BOUND))) {
+            val targs[3] = { target, STRV(name), recv };   /* handler.get(target, key, proxy); proxy is `this` */
+            return call_function_this(trap, recv, targs, 3);   /* depth-guarded -> self-recursive trap hits MAXDEPTH, never overflows */
+        }
+        /* No get handler: transparently read the TARGET. The target may itself be a
+         * proxy (proxies are nestable via `new Proxy(aProxy,…)`), so walk a chain of
+         * trap-LESS proxies ITERATIVELY (bounded by JS_PROTO_MAX) rather than recursing
+         * eval_member_get — a deep nested trap-less chain would otherwise overflow the
+         * guard-page-less kernel stack. Stop at the first non-proxy or trap-HAVING proxy;
+         * the final read recurses at most one guarded trap-fire deep. */
+        val t = target; long pg = 0;
+        /* cap far above any arena-buildable chain (each proxy+handler costs ~hundreds
+         * of bytes, so the 20 MB arena OOMs at tens of thousands) so a real acyclic
+         * chain is fully walked in ONE pass -> the final read recurses at most one
+         * guarded trap-fire deep; the cap only defends against a hypothetical cycle. */
+        while (t.t==V_OBJ && t.o && t.o->kind==V_PROXY && ++pg < 4000000) {
+            val h = proxy_handler(t), tr;
+            if (h.t==V_OBJ && h.o && obj_get(h.o,"get",&tr) &&
+                (tr.t==V_FUN||tr.t==V_NATIVE||(tr.t==V_OBJ&&tr.o&&tr.o->kind==V_BOUND)))
+                break;                       /* this proxy HAS a get trap: recurse once to fire it (guarded) */
+            t = proxy_target(t);             /* trap-less proxy: transparent, walk through */
+        }
+        return eval_member_get(t, name);
     }
     if (recv.t==V_OBJ && recv.o) {
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
@@ -1528,9 +1592,9 @@ static val eval_expr_inner(node *n, env *e) {
                 val v=eval_expr(n->a,e); const char*ty= v.t==V_UNDEF?"undefined":v.t==V_NULL?"object":v.t==V_BOOL?"boolean":v.t==V_NUM?"number":v.t==V_STR?"string":v.t==V_SYMBOL?"symbol":(v.t==V_FUN||v.t==V_NATIVE||(v.t==V_OBJ&&v.o&&v.o->kind==V_BOUND))?"function":"object"; return STRV(ty); }
             if (n->op=='d') {   /* delete obj.x / obj[k]: remove an own property, evaluate to true */
                 node *t=n->a;
-                if (t->type==N_MEMBER) { val r=eval_expr(t->a,e); if(r.t==V_OBJ&&r.o) obj_delete(r.o,node_name(t)); }
-                else if (t->type==N_INDEX) { val r=eval_expr(t->a,e); val k=eval_expr(t->b,e);
-                    if(r.t==V_OBJ&&r.o) obj_delete(r.o,keystr(k));   /* delete obj[sym] -> "@@sym:<id>" (M-symbol) */
+                if (t->type==N_MEMBER) { val r=deproxy(eval_expr(t->a,e)); if(r.t==V_OBJ&&r.o) obj_delete(r.o,node_name(t)); }   /* delete proxy.x -> deletes on the TARGET (no trap) (M-proxy) */
+                else if (t->type==N_INDEX) { val r=deproxy(eval_expr(t->a,e)); val k=eval_expr(t->b,e);
+                    if(r.t==V_OBJ&&r.o) obj_delete(r.o,keystr(k));   /* delete obj[sym] -> "@@sym:<id>" (M-symbol); proxy -> target (M-proxy) */
                     else if(r.t==V_ARR&&r.o){ int i=(int)to_num(k); if(i>=0&&i<r.o->n) r.o->vals[i]=UND(); } }
                 return BOOLV(1);
             }
@@ -1585,6 +1649,7 @@ static val eval_expr_inner(node *n, env *e) {
                 case 'g': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)>=0); return BOOLV(x>=y);
                 case 'P': return NUM(i_pow(x,y));   /* x ** y (integer, matches Math.pow) */
                 case 'I':   /* `in`: own-OR-inherited property on objects (walks the proto chain, non-firing — M264), valid-index test on arrays */
+                    b=deproxy(b);   /* `key in proxy` -> test the TARGET (no has trap) (M-proxy) */
                     if (b.t==V_OBJ && b.o) { const char *k=val_to_str(a); val tmp; if (obj_get(b.o,k,&tmp)) return BOOLV(1);
                         int g=0; for (obj *p=b.o->proto; p && ++g<=JS_PROTO_MAX; p=p->proto) if (obj_get(p,k,&tmp)) return BOOLV(1); return BOOLV(0); }
                     if (b.t==V_ARR && b.o) return BOOLV(x>=0 && x<b.o->n);
@@ -1626,6 +1691,7 @@ static val eval_expr_inner(node *n, env *e) {
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
+                if (is_proxy(recv)) { proxy_set(recv, node_name(t), rhs); return rhs; }   /* proxy.prop = v -> SET trap (M-proxy) */
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) {
                     const char *pn = node_name(t);
                     if (pn[0]=='o' && pn[1]=='n') {
@@ -1646,6 +1712,7 @@ static val eval_expr_inner(node *n, env *e) {
                     else obj_set(recv.o, wk, rhs);                                                                                                                    /* own data prop (shadows inherited data) */
                 } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
+                if (is_proxy(recv)) { proxy_set(recv, keystr(idx), rhs); return rhs; }   /* proxy[key] = v -> SET trap (M-proxy) */
                 if (recv.t==V_ARR && recv.o) {
                     long i = to_num(idx);
                     if (i < 0 || i > (1<<24)) { rt_err("array index out of range"); return rhs; }
@@ -1679,6 +1746,7 @@ static val eval_expr_inner(node *n, env *e) {
             val idx=eval_expr(n->b,e);
             if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
             if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
+            if (is_proxy(recv)) return eval_member_get(recv, keystr(idx));   /* proxy[key]: route through eval_member_get's GET trap (M-proxy) */
             if (recv.t==V_OBJ && recv.o){ const char *ik=keystr(idx); val out; if(obj_get(recv.o,ik,&out)){ if(is_accessor(out)) return fire_getter(out,recv); return out; } if(recv.o->proto){ val pv; if(proto_lookup(recv.o->proto,ik,recv,&pv)) return pv; } }   /* inherited (M263); symbol key -> "@@sym:<id>" (M-symbol) */
             return UND(); }
         case N_CALL: {
@@ -1700,6 +1768,11 @@ static val eval_expr_inner(node *n, env *e) {
             if (callee->type==N_MEMBER) {
                 val recv=eval_expr(callee->a,e); const char *m=node_name(callee);
                 if (callee->prefix && (recv.t==V_UNDEF||recv.t==V_NULL)) return UND();   /* obj?.method() short-circuit */
+                if (is_proxy(recv)) {   /* proxy.method(...): resolve the method via the GET trap, then call it with `this`=proxy (M-proxy) */
+                    val fn=eval_member_get(recv,m);
+                    if (callee->prefix && (fn.t==V_UNDEF||fn.t==V_NULL)) return UND();
+                    return call_function_this(fn,recv,args,na);   /* depth-guarded; non-callable fn -> graceful rt_err("not a function") */
+                }
                 /* universal toString()/valueOf() for strings, arrays, plain objects (M275).
                  * Excludes Number/Boolean (eval_number_method keeps the radix-aware toString) and
                  * the kind-marked objects (Map/Set/Date/Regex/Element keep their own methods, e.g.
@@ -1979,6 +2052,7 @@ static comp eval_stmt_inner(node *n, env *e) {
         }
         case N_FORIN: {
             val it=eval_expr(n->a,e); env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
+            it=deproxy(it);   /* for-in over a proxy enumerates the TARGET's keys (no ownKeys trap; never exposes vals[0]/vals[1]) (M-proxy) */
             const char *vn=node_name(n); env_define(fe, vn, UND());
             if (it.t==V_OBJ && obj_keyed(it.o)) {   /* keyed objects only (Date/Map/Set/arrays have no enumerable own keys here) */
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
@@ -2234,6 +2308,19 @@ static val nat_set(val *args, int nargs){
         else if (src.t==V_STR) { const char*s=src.str; for(int i=0;s[i]&&!g_oom;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} val cv=STRV(c?c:""); eval_set_method(sv,"add",&cv,1); } }
     }
     return sv;
+}
+/* new Proxy(target, handler) (M-proxy): build a V_PROXY obj with target in vals[0],
+ * handler in vals[1] (n==2), val.t==V_OBJ. Both are EXPECTED to be objects; to never
+ * crash on untrusted input, a non-object target/handler is replaced by a fresh empty
+ * V_OBJ (so trap lookups simply miss and reads/writes pass through to an empty target).
+ * Dispatched from N_NEW exactly like new Map()/new Set() (the ctor is a V_NATIVE). */
+static val nat_proxy(val *args, int nargs){
+    obj *p=new_obj(V_PROXY); if(!p){ g_oom=1; return UND(); }
+    val target = (nargs>0 && args[0].t==V_OBJ && args[0].o) ? args[0] : obj_val(new_obj(V_OBJ));
+    val handler= (nargs>1 && args[1].t==V_OBJ && args[1].o) ? args[1] : obj_val(new_obj(V_OBJ));
+    if(g_oom){ return UND(); }                       /* the fallback new_obj()s may have OOM'd */
+    p->vals[0]=target; p->vals[1]=handler; p->n=2;   /* cap is 4 from new_obj, so n=2 fits without realloc */
+    return obj_val(p);
 }
 
 static val eval_map_method(val recv, const char *name, val *args, int nargs) {
@@ -2757,6 +2844,7 @@ static val nat_SyntaxError(val *a, int n){ return make_error("SyntaxError",a,n);
 /* ---- Object.keys(o) -> array of key strings ---- */
 static val nat_obj_keys(val *a, int n){
     obj *r = new_obj(V_ARR); if(!r) return UND();
+    if (n) a[0]=deproxy(a[0]);   /* Object.keys(proxy) -> the TARGET's keys (no ownKeys trap; never leaks vals[0]/vals[1]) (M-proxy) */
     if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) {   /* keyed objects only (Date/Map/Set have no enumerable own keys) */
         obj *o=a[0].o;
         for (int i=0;i<o->n;i++){ if(is_internal_key(o->keys[i])) continue; arr_push_val(r, STRV(o->keys[i])); }   /* hide symbol-keyed (@@) props (M-symbol) */
@@ -2782,6 +2870,7 @@ static void json_val(val v, int depth){
         case V_ARR:  if(v.o->n==0){ js_app("[]"); break; } js_app("[");
             for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("]"); break;
         case V_OBJ:
+            if(is_proxy(v)){ val tv=deproxy(v); if(tv.t!=V_OBJ){ json_val(tv,depth); break; } v=tv; }   /* JSON.stringify(proxy) serializes the TARGET; never the proxy's vals[] (M-proxy) */
             if(v.o && v.o->kind==V_DATE){ js_appq(val_to_str(v)); break; }   /* a Date serializes as its string */
             if(!obj_keyed(v.o) || v.o->n==0){ js_app("{}"); break; }          /* map/set/empty: no enumerable props */
             js_app("{");
@@ -2843,11 +2932,13 @@ static val nat_json_parse(val *a, int n){ if(!n || a[0].t!=V_STR) return UND(); 
 /* ---- Object.values / Object.entries, Array.isArray / Array.from ---- */
 static val nat_obj_values(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
+    if (n) a[0]=deproxy(a[0]);   /* Object.values(proxy) -> the TARGET's values (M-proxy) */
     if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){ if(is_internal_key(a[0].o->keys[i])) continue; val pv=a[0].o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,a[0]); arr_push_val(r, pv); }   /* fire getters (M426); hide @@ symbol keys (M-symbol) */
     val v=UND(); v.t=V_ARR; v.o=r; return v;
 }
 static val nat_obj_entries(val *a, int n){
     obj *r=new_obj(V_ARR); if(!r) return UND();
+    if (n) a[0]=deproxy(a[0]);   /* Object.entries(proxy) -> the TARGET's entries (M-proxy) */
     if (n && a[0].t==V_OBJ && obj_keyed(a[0].o)) for (int i=0;i<a[0].o->n;i++){
         if(is_internal_key(a[0].o->keys[i])) continue;   /* hide @@ symbol keys (M-symbol) */
         obj *pair=new_obj(V_ARR); if(!pair) break; arr_push_val(pair, STRV(a[0].o->keys[i])); val gv=a[0].o->vals[i]; if(is_accessor(gv)) gv=fire_getter(gv,a[0]); arr_push_val(pair, gv);   /* fire getters (M426) */
@@ -2923,6 +3014,7 @@ static val nat_obj_getPrototypeOf(val *a, int n){ if (n>=1 && (a[0].t==V_OBJ||a[
 static val nat_obj_setPrototypeOf(val *a, int n){ if (n>=1 && a[0].t==V_OBJ && a[0].o) a[0].o->proto = (n>=2 && a[1].t==V_OBJ && a[1].o) ? a[1].o : 0; return n? a[0] : UND(); }
 static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources) -> target */
     if (!n || a[0].t!=V_OBJ || !a[0].o) return n?a[0]:UND();
+    for (int i=1;i<n;i++) a[i]=deproxy(a[i]);   /* a proxy source contributes its TARGET's own props (M-proxy) */
     for (int i=1;i<n;i++) if (a[i].t==V_OBJ && obj_keyed(a[i].o)) for (int j=0;j<a[i].o->n;j++){
         if(is_internal_key(a[i].o->keys[j])) continue;   /* don't copy @@ symbol keys (M-symbol) */
         val sv=a[i].o->vals[j]; if(is_accessor(sv)) sv=fire_getter(sv,a[i]);   /* read source via getter (M427) */
@@ -3070,6 +3162,7 @@ static void install_globals(env *g) {
     { obj *wm=new_obj(V_NATIVE); if(wm){ wm->native=nat_map; val v=UND(); v.t=V_NATIVE; v.o=wm; env_define(g,"WeakMap",v); } }   /* WeakMap: backed by Map (no GC, so weak refs are moot) -- distinct ctor for instanceof (M273) */
     { obj *ws=new_obj(V_NATIVE); if(ws){ ws->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=ws; env_define(g,"WeakSet",v); } }   /* WeakSet: backed by Set (M273) */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
+    { obj *px=new_obj(V_NATIVE); if(px){ px->native=nat_proxy; val v=UND(); v.t=V_NATIVE; v.o=px; env_define(g,"Proxy",v); } }   /* new Proxy(target,handler) — get/set traps (M-proxy) */
     { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */
         obj *ast=new_obj(V_OBJ); if(ast){ def_native(ast,"isArray",nat_array_isArray); def_native(ast,"from",nat_array_from); def_native(ast,"of",nat_array_of); arrc->statics=ast; }
         g_array_ctor=arrc; env_define(g,"Array",obj_val_native(arrc)); } }
