@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define SECTOR        512
-#define TOTAL_SECTORS 32768         /* 16 MiB image (holds the ~4 MB DOOM IWAD + demos) */
+#define TOTAL_SECTORS 131072        /* 64 MiB image (DOOM IWAD ~4 MB + Quake pak ~18 MB + demos) */
 #define RESERVED      32
 #define NUM_FATS      2
 #define SPC           1             /* sectors per cluster */
@@ -963,6 +963,7 @@ static const struct {
     { "TUNE2   WAV", "tools/TUNE2.WAV" }, /* an arpeggio (for the jukebox playlist) */
     { "TUNE3   WAV", "tools/TUNE3.WAV" }, /* a little melody (for the jukebox playlist) */
     { "WALL    PNG", "tools/WALL.PNG" },  /* the desktop wallpaper (1024x768), loaded by the WM */
+    { "PAK0    PAK", "tools/PAK0.PAK" },  /* shareware Quake data (~18 MB): play in-OS with: run quake */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 
