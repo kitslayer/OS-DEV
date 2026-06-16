@@ -647,6 +647,7 @@ static const struct {
         "<p class=\"b\">This whole paragraph is bold <i>and</i> gray &mdash; the <code>.b</code> rule (bold) cascades with the <code>p</code> rule (gray) on one element.</p>"
         "<p style=\"color: #0000cc\">Inline <code>style=\"color:blue\"</code> overrides the <code>p</code> rule &mdash; this line is blue.</p>"
         "<p>A comma-grouped rule <code>.g1, .g2, em { color:#cc00cc; font-weight:bold }</code> colours all of: <span class=\"g1\">class g1</span>, <span class=\"g2\">class g2</span>, and <em>an em element</em> &mdash; magenta bold.</p>"
+        "<p>HSL colours: <span style=\"color:hsl(0,85%,45%)\">hsl red</span>, <span style=\"color:hsl(120,60%,35%)\">hsl green</span>, <span style=\"color:hsl(240,75%,55%)\">hsl blue</span>, and <span style=\"background:hsl(50,95%,80%)\">an hsl-yellow background</span>.</p>"
         "<p>Background colours: <span class=\"hl\">a .hl-highlighted run</span>, some <span class=\"code\">inline code</span> (grey bg, red text), an inline <span style=\"background-color:#b3e5ff\">light-blue span</span>, <span style=\"background:#222222;color:#ffffff\">white-on-dark</span>, and a <mark>&lt;mark&gt; element</mark>.</p>" },
     { "ALIGN   HTM", "<title>CSS text-align</title><style> .c{text-align:center} .r{text-align:right} </style>"
         "<h1 style=\"text-align:center\">Centered heading</h1>"

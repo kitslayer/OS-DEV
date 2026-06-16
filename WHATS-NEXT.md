@@ -1,6 +1,10 @@
 # What's next
 
-> **Status (459 milestones).** (M459: **comma-grouped CSS selectors** — `h1, h2, .title { }`-style
+> **Status (460 milestones).** (M460: **CSS `hsl()`/`hsla()` colours** — modern stylesheets use HSL;
+> the parser only did hex/rgb/named. Added an integer HSL→RGB (`hsl_to_rgb`, no FPU) + an `hsl(...)`
+> branch in parse_color, so HSL works for color/background/`<font>`/cascade. Additive. Verified in-OS
+> (CSS.HTM: hsl red/green/blue text + hsl-yellow bg). (SVG fill=hsl() not added — separate svg.c parse_color.)
+> M459: **comma-grouped CSS selectors** — `h1, h2, .title { }`-style
 > rules (ubiquitous in real CSS) were dropped (sel_parse rejects the comma). capture_css now parses
 > the decls once + adds one rule per comma sub-selector that parses. Additive (single selector = 1-elem
 > list), bounded by CSS_MAX, no matching/render change. Verified in-OS (`.g1, .g2, em {…}` colours all
