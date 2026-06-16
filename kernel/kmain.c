@@ -27,6 +27,8 @@
 #include "desktop.h"
 #include <stdint.h>
 
+extern void fpu_init(void);      /* kernel/asm/fpu.asm: enable x87 + SSE */
+
 /* --- preemption demo: a worker that never yields -------------------------- */
 static volatile uint64_t spin_count;
 static volatile int       demo_stop;
@@ -97,6 +99,7 @@ void kmain(uint64_t mb_info) {
 
     gdt_init();
     interrupts_init();
+    fpu_init();                    /* enable x87 + SSE so userspace can use floating point */
     timer_init(100);
     keyboard_init();
     interrupts_enable();
