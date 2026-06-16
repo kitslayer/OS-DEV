@@ -771,6 +771,11 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "df")) {
             char b[96]; long n = sys_df(b, sizeof(b));
             if (n > 0) { b[n] = 0; print(b); } else print("df: no disk\n");
+        } else if (streq(line, "screenshot") || startswith(line, "screenshot ")) {
+            const char *fn = line + 10; while (*fn == ' ') fn++;   /* optional filename arg */
+            if (!*fn) fn = "SHOT.BMP";
+            if (sys_screenshot(fn) < 0) print("screenshot: failed\n");
+            else { print("saved screen to "); print(fn); print("\n"); }
         } else if (streq(line, "mem")) {
             char buf[128];
             sys_sysinfo(buf, sizeof(buf));

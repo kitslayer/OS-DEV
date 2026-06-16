@@ -12,6 +12,7 @@
 #include "console.h"
 #include "app.h"
 #include "vfs.h"
+#include "fb.h"
 #include "rtc.h"
 #include "speaker.h"
 #include "pmm.h"
@@ -248,6 +249,9 @@ void syscall_dispatch(struct registers *r) {
         hx[128] = 0; r->rax = 0;
         break;
     }
+    case SYS_screenshot:
+        r->rax = (uint64_t)(int64_t)fb_save_bmp((const char *)r->rdi);   /* save the screen to a BMP */
+        break;
     case SYS_crypt: {
         const char *name = (const char *)r->rdi, *pass = (const char *)r->rsi;
         static uint8_t cbuf[16384];

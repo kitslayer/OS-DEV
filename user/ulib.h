@@ -36,6 +36,7 @@ long sys_sha256(const char *name, void *hexbuf, unsigned long max);
 long sys_sha512(const char *name, void *hexbuf, unsigned long max);
 long sys_crypt(const char *name, const char *pass);
 long sys_js(const char *src, void *out, unsigned long max);
+long sys_screenshot(const char *name);
 void sys_sleep(int ms);
 void sys_setcolor(int color);   /* text colour for subsequent output: palette index 0-15 (0 = default) */
 

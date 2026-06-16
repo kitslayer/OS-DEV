@@ -1,6 +1,16 @@
 # What's next
 
-> **Status (477 milestones).** (M477: **Glob matcher hardened vs catastrophic backtracking** — a PERIODIC
+> **Status (478 milestones).** (M478: **Screenshot to BMP (`screenshot [file]`)** — new `SYS_screenshot`
+> syscall + shell command (default `SHOT.BMP`) saves the live desktop to a 24-bit BMP on the FAT32 disk,
+> downscaled 2× (≤512×384, ~576 KB). KEY FIX found in testing: the first cut read the back buffer
+> (`target`) and caught it MID-COMPOSE (captured the wallpaper gradient only, windows missing) — switched
+> to read the *presented* framebuffer (`lfb`), always a complete composited frame. Emits bottom-up BGR
+> rows. Strictly additive (one self-contained `fb_save_bmp` + a syscall; no draw-path change). Verified
+> end-to-end: extracted SHOT.BMP from the disk image = a valid 512×384 BMP matching QEMU's own screendump
+> pixel-for-pixel (windows, green shell text, blue title bars, colours/BGR-order all correct) + 7 suites.
+> File: kernel/fb.c. **(This also incidentally re-confirmed M471 FAT dir-growth in practice — SHOT.BMP is
+> the 87th root-dir file, living in an extended dir cluster.)**
+> M477: **Glob matcher hardened vs catastrophic backtracking** — a PERIODIC
 > REVIEW of the shell command-line arc (M463/M468/M473/M474) found glob_match (M473) was depth-bounded
 > (no stack overflow) BUT time-EXPONENTIAL: `*a*a*a*…*b` vs a long non-matching name → billions of calls
 > (the `for(;*s;s++) if(glob_match(p,s))` retries the tail at every suffix, no memo) → `cat *a*a*…*b`
