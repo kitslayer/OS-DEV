@@ -1378,7 +1378,7 @@ static val eval_expr_inner(node *n, env *e) {
         case N_OBJECT: { obj *o=new_obj(V_OBJ); if(!o) return UND();
             for(int i=0;i<n->nlist && !g_oom;i++){ node*pr=n->list[i];
                 if (pr->type==N_SPREAD){ val sv=eval_expr(pr->a,e);
-                    if (sv.t==V_OBJ && obj_keyed(sv.o)){ for(int j=0;j<sv.o->n && !g_oom;j++) obj_set(o, sv.o->keys[j], sv.o->vals[j]); }
+                    if (sv.t==V_OBJ && obj_keyed(sv.o)){ for(int j=0;j<sv.o->n && !g_oom;j++){ val pv=sv.o->vals[j]; if(is_accessor(pv)) pv=fire_getter(pv,sv); obj_set(o, sv.o->keys[j], pv); } }   /* spread copies the [[Get]] value, firing source getters once (M428) */
                 } else if (pr->op=='g' || pr->op=='s') {   /* accessor half: merge get/set for one key into a V_ACCESSOR */
                     const char *key = node_name(pr); val cur; obj *acc;
                     if (obj_get(o,key,&cur) && is_accessor(cur)) acc=cur.o;       /* fill the other slot of an existing accessor */
