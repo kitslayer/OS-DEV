@@ -1,6 +1,17 @@
 # What's next
 
-> **Status (476 milestones).** (M476: **Shell `help` documents the 4 command-line operators** — added
+> **Status (477 milestones).** (M477: **Glob matcher hardened vs catastrophic backtracking** — a PERIODIC
+> REVIEW of the shell command-line arc (M463/M468/M473/M474) found glob_match (M473) was depth-bounded
+> (no stack overflow) BUT time-EXPONENTIAL: `*a*a*a*…*b` vs a long non-matching name → billions of calls
+> (the `for(;*s;s++) if(glob_match(p,s))` retries the tail at every suffix, no memo) → `cat *a*a*…*b`
+> HANGS the shell forever (ReDoS-style, paid per non-matching file). FIX: replaced the recursive matcher
+> with the standard ITERATIVE two-pointer (star/mark backtrack) matcher — O(pat×name), no recursion, no
+> blowup. Verified in-OS (cat *.txt still globs; `cat *a*a*a*a*a*a*a*a*a*b`→instant "no such file"; echo
+> after → shell responsive) + 7 suites. **The review's other 5 items (glob_expand/run_pipe/write_redirect/
+> run_line/ulib-capture bounds) were confirmed SAFE — only glob_match had the bug.** Validates running
+> periodic reviews (my self-audit checked recursion DEPTH, missed TIME). Same spirit as the engine's
+> ReDoS-safe regex. File: user/shell.c.
+> M476: **Shell `help` documents the 4 command-line operators** — added
 > a line to the `help` text listing `| > >> *.txt ? ;` (pipe/write/append/glob/sequence) so the M463/
 > M468/M473/M474 operators are discoverable. Tiny user/shell.c help-text change; build + 7 suites + in-OS
 > (`help` shows the syntax lines). **SATURATION NOTE: after 36 milestones this session the achievable

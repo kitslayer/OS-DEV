@@ -1489,22 +1489,21 @@ static void run_pipe(char *line, char *cwd, const char *rfile, int append) {
 }
 
 /* Filename globbing. glob_match: case-insensitive shell wildcard match — '*' is
- * any run (including empty), '?' is exactly one char. Recursion is bounded by
- * the (short, <=12-char) filename, so it can't overflow the stack. */
+ * any run (including empty), '?' is exactly one char. Iterative two-pointer
+ * (star/backtrack) matcher: O(len(pat)*len(name)), NOT recursive — so an
+ * adversarial pattern like "*a*a*a*…*b" can't cause catastrophic exponential
+ * backtracking (which the recursive form did, hanging the shell). */
 static char gl_lc(char c){ return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
-static int glob_match(const char *p, const char *s){
-    while (*p) {
-        if (*p == '*') {
-            p++;
-            if (!*p) return 1;                          /* trailing '*' matches the rest */
-            for (; *s; s++) if (glob_match(p, s)) return 1;
-            return glob_match(p, s);                    /* '*' as empty at the end */
-        }
-        if (*p == '?') { if (!*s) return 0; p++; s++; continue; }
-        if (gl_lc(*p) != gl_lc(*s)) return 0;
-        p++; s++;
+static int glob_match(const char *pat, const char *s){
+    const char *star = 0, *mark = 0;   /* last '*' seen in pat, and where to resume `s` */
+    while (*s) {
+        if (*pat == '*') { star = pat++; mark = s; }                 /* record it; try matching empty first */
+        else if (*pat == '?' || gl_lc(*pat) == gl_lc(*s)) { pat++; s++; }   /* consume one */
+        else if (star) { pat = star + 1; s = ++mark; }               /* backtrack: '*' eats one more char */
+        else return 0;                                               /* mismatch, no '*' to stretch */
     }
-    return *s == 0;
+    while (*pat == '*') pat++;                                       /* trailing '*'s match empty */
+    return *pat == 0;
 }
 /* Expand any '*'/'?' token in `src` against the current directory into `dst`
  * (other tokens pass through verbatim); a pattern with no match is left literal,
