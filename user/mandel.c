@@ -1,87 +1,86 @@
 /*
- * mandel.c — a Mandelbrot set explorer, a userspace program.
+ * mandel.c — a graphical Mandelbrot explorer with mouse zoom.
  *
- * Escape-time rendering as text art: for each grid cell the complex point c is
- * iterated z = z*z + c until |z| > 2 (escape) or an iteration cap; the escape
- * speed picks a shading character. Userspace apps are built -mgeneral-regs-only
- * (no FPU/SSE), so all the maths is fixed-point Q16.16 with 64-bit products.
- * Arrow keys pan, +/- zoom, r resets. Runs ring-3 on the app text grid.
+ * Renders the escape-time fractal to a pixel canvas (the graphics window API).
+ * Left-click zooms in centred on the cursor, right-click zooms out, r resets,
+ * q quits. Userspace is built without the FPU, so the iteration is Q*.28 fixed
+ * point in int64 — high enough precision for several zoom levels. (Click-driven:
+ * a frame is only re-rendered after you zoom, since escape-time is heavy.)
  */
 #include "ulib.h"
 
-#define W 43                   /* one less than APP_COLS (44) so a row + '\n' doesn't auto-wrap */
-#define H 15
-#define SH 16                 /* fixed-point: value = real * 65536 */
-#define ONE (1 << SH)
-#define MAXIT 90
+#define W   320
+#define H   240
+#define SH  28                       /* fixed-point: value = real * 2^28 */
+#define ONE (1LL << SH)
+#define MAXIT 150
 
-/* shading by escape speed: few iterations (fast escape) -> light, many -> dense */
-static const char PAL[] = " .,:;-=+ico*OX#%@";
-#define NPAL ((int)sizeof(PAL) - 2)   /* exclude the trailing NUL; last index = in-set */
+static unsigned int *cv;
+static long long cx, cy, scale;      /* centre (Q.28) and units-per-pixel (Q.28) */
 
-/* view: top-left corner (cx0,cy0) and span across the grid, all Q16.16 */
-static long cx0, cy0, spanx, spany;
-
-static void reset_view(void) {
-    cx0 = -163840; spanx = 229376;   /* x in [-2.5, 1.0]  (Q16.16: 2.5*65536, 3.5*65536) */
-    cy0 =  -91750; spany = 183500;   /* y in [-1.4, 1.4]  (1.4*65536, 2.8*65536) */
+static void reset(void) {
+    cx = -3LL * ONE / 4;             /* centre ~ (-0.75, 0) */
+    cy = 0;
+    scale = (3LL * ONE) / W;         /* ~3.0 wide across the canvas */
 }
 
-/* iterations before escape for c = (cr,ci) Q16.16; MAXIT if it stays bounded */
-static int escape(long cr, long ci) {
-    long zr = 0, zi = 0;
+/* iterations before |z|^2 > 4 for c=(cr,ci) Q.28; MAXIT if bounded */
+static int escape(long long cr, long long ci) {
+    long long zr = 0, zi = 0;
     for (int i = 0; i < MAXIT; i++) {
-        long long zr2 = ((long long)zr * zr) >> SH;
-        long long zi2 = ((long long)zi * zi) >> SH;
-        if (zr2 + zi2 > ((long long)4 << SH)) return i;     /* |z|^2 > 4 */
-        long long t = zr2 - zi2 + cr;                       /* zr' = zr^2 - zi^2 + cr */
-        zi = (long)((((long long)zr * zi) >> (SH - 1)) + ci);/* zi' = 2*zr*zi + ci */
-        zr = (long)t;
+        long long zr2 = (zr * zr) >> SH;
+        long long zi2 = (zi * zi) >> SH;
+        if (zr2 + zi2 > (4LL << SH)) return i;
+        zi = ((zr * zi) >> (SH - 1)) + ci;     /* 2*zr*zi + ci */
+        zr = zr2 - zi2 + cr;                   /* zr^2 - zi^2 + cr */
     }
     return MAXIT;
 }
 
+/* iteration count -> a smooth-ish rainbow colour (in-set = black) */
+static unsigned int colour(int it) {
+    if (it >= MAXIT) return 0x000000;
+    int r = (it * 8)  & 255;
+    int g = (it * 5 + 80)  & 255;
+    int b = (it * 11 + 160) & 255;
+    return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+}
+
 static void render(void) {
-    sys_clear();
-    sys_setcolor(8);                       /* help line in grey */
-    print(" arrows pan   +/- zoom   r reset   q quit\n");
     for (int py = 0; py < H; py++) {
-        long ci = cy0 + (long)((long long)py * spany / H);
+        long long ci = cy + (long long)(py - H / 2) * scale;
         for (int px = 0; px < W; px++) {
-            long cr = cx0 + (long)((long long)px * spanx / W);
-            int it = escape(cr, ci);
-            char ch; int col;
-            if (it >= MAXIT) { ch = PAL[NPAL]; col = 0; }                  /* in the set: '@', green */
-            else { ch = PAL[it * NPAL / MAXIT]; col = 1 + (it * 14) / MAXIT; }  /* escape band -> colour by speed */
-            sys_setcolor(col);
-            sys_write(1, &ch, 1);
+            long long cr = cx + (long long)(px - W / 2) * scale;
+            cv[py * W + px] = colour(escape(cr, ci));
         }
-        sys_write(1, "\n", 1);
     }
-    sys_setcolor(0);
+    sys_gfx_blit(cv);
 }
 
 int main(void) {
-    reset_view();
+    if (sys_gfx_init(W, H) < 0) { print("mandel: graphics init failed\n"); return 1; }
+    cv = malloc((unsigned long)W * H * 4);
+    if (!cv) { print("mandel: out of memory\n"); return 1; }
+    reset();
     render();
+
+    int pb = 0;                                  /* previous button state (edge detect) */
     for (;;) {
         int k = sys_pollkey();
-        if (k < 0) { sys_sleep(20); continue; }
-        if (k == 'q' || k == 27) return 0;
-        else if (k == 'r') reset_view();
-        else if (k == 0x13) cx0 -= spanx / 6;                    /* left  */
-        else if (k == 0x14) cx0 += spanx / 6;                    /* right */
-        else if (k == 0x11) cy0 -= spany / 6;                    /* up    */
-        else if (k == 0x12) cy0 += spany / 6;                    /* down  */
-        else if (k == '+' || k == '=') {                         /* zoom in: keep centre fixed */
-            long nx = spanx * 3 / 5, ny = spany * 3 / 5;
-            cx0 += (spanx - nx) / 2; cy0 += (spany - ny) / 2; spanx = nx; spany = ny;
+        if (k == 'q' || k == 27) { free(cv); return 0; }
+        if (k == 'r') { reset(); render(); }
+
+        int mx, my, b = sys_mouse(&mx, &my);
+        if ((b & 1) && !(pb & 1) && mx >= 0) {       /* left click: zoom in on cursor */
+            cx += (long long)(mx - W / 2) * scale;
+            cy += (long long)(my - H / 2) * scale;
+            scale = scale / 2;
+            render();
+        } else if ((b & 2) && !(pb & 2)) {           /* right click: zoom out */
+            scale = scale * 2;
+            render();
         }
-        else if (k == '-' || k == '_') {                         /* zoom out */
-            long nx = spanx * 5 / 3, ny = spany * 5 / 3;
-            cx0 -= (nx - spanx) / 2; cy0 -= (ny - spany) / 2; spanx = nx; spany = ny;
-        }
-        else continue;
-        render();
+        pb = b;
+        sys_sleep(20);
     }
 }
