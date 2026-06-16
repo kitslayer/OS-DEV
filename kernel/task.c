@@ -176,6 +176,18 @@ void task_exit(void) {
     task_t *next = dead->next;
     next->state = TASK_RUNNING;
     current = next;
+
+    /* Load next's address space + kernel stack BEFORE switching, mirroring
+     * switch_to_next. Otherwise the dead task's CR3 stays loaded under `next`,
+     * which is unsafe the moment that CR3 is reclaimed (vmm_destroy on an app
+     * exit) — `next` would be running on freed page tables. With this, an app's
+     * CR3 is never the active one by the time the WM reaps it. */
+    if (next->cr3 && next->cr3 != active_cr3) {
+        active_cr3 = next->cr3;
+        load_cr3(next->cr3);
+    }
+    if (next->kstack_top)
+        tss_set_rsp0(next->kstack_top);
     context_switch(&dead->rsp, next->rsp);   /* dead->rsp save is discarded */
     /* unreachable */
 }

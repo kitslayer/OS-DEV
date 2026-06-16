@@ -112,6 +112,56 @@ uint64_t vmm_create_address_space(void) {
     return newp;
 }
 
+/*
+ * Tear down an address space built by vmm_create_address_space: free the app's
+ * private user mappings (frames + their page tables) and the private PML4/PDPT
+ * pages, leaving the shared kernel identity map and the higher half intact.
+ *
+ * Safety rests on a property of vmm_create_address_space + next_table:
+ * vmm_create copies boot's PDPT entries verbatim, and next_table only ever
+ * *writes* a PDPT/PD slot when it was not-present (allocating a fresh table).
+ * So a PDPT entry that DIFFERS from boot's is provably a private, app-allocated
+ * PD — the shared kernel PDs are byte-identical copies and are skipped. User
+ * mappings all live above boot's low identity map (user.ld bases apps at 1 GiB,
+ * stack at 0x50000000), i.e. under PDPT slots boot leaves empty, so the whole
+ * user footprint is reclaimed. Only call on a NON-ACTIVE space (asserted via the
+ * CR3 guard below); the desktop reaper that calls this runs in the kernel PML4.
+ */
+void vmm_destroy_address_space(uint64_t cr3) {
+    cr3 &= ADDR_MASK;
+    if (!cr3 || cr3 == kernel_pml4) return;          /* never the kernel's own */
+    if (cr3 == (read_cr3() & ADDR_MASK)) return;     /* never the active space  */
+
+    uint64_t *pml4  = phys_to_table(cr3);
+    uint64_t *bpml4 = phys_to_table(kernel_pml4);
+
+    /* The user/private region lives only under PML4[0]; [1..255] are zero and
+     * [256..511] are the shared higher half — never touched. */
+    uint64_t pml4e = pml4[0];
+    if ((pml4e & PTE_PRESENT) && (pml4e & ADDR_MASK) != (bpml4[0] & ADDR_MASK)) {
+        uint64_t pdpt_phys = pml4e & ADDR_MASK;
+        uint64_t *pdpt  = phys_to_table(pdpt_phys);
+        uint64_t *bpdpt = phys_to_table(bpml4[0] & ADDR_MASK);
+        for (int i = 0; i < 512; i++) {
+            if (!(pdpt[i] & PTE_PRESENT)) continue;
+            if ((pdpt[i] & ADDR_MASK) == (bpdpt[i] & ADDR_MASK)) continue;  /* shared boot PD */
+            if (pdpt[i] & PTE_HUGE) continue;                              /* 1 GiB page (n/a for user) */
+            uint64_t *pd = phys_to_table(pdpt[i] & ADDR_MASK);
+            for (int j = 0; j < 512; j++) {
+                if (!(pd[j] & PTE_PRESENT)) continue;
+                if (pd[j] & PTE_HUGE) continue;                            /* 2 MiB page (n/a for user) */
+                uint64_t *pt = phys_to_table(pd[j] & ADDR_MASK);
+                for (int k = 0; k < 512; k++)
+                    if (pt[k] & PTE_PRESENT) pmm_free_frame(pt[k] & ADDR_MASK);  /* user frame */
+                pmm_free_frame(pd[j] & ADDR_MASK);                         /* the PT page */
+            }
+            pmm_free_frame(pdpt[i] & ADDR_MASK);                          /* the PD page */
+        }
+        pmm_free_frame(pdpt_phys);                                       /* the private PDPT page */
+    }
+    pmm_free_frame(cr3);                                                 /* the PML4 page */
+}
+
 int vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);

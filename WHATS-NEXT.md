@@ -1,6 +1,18 @@
 # What's next
 
-> **Status (465 milestones).** (M465: **Kernel-heap interrupt-safety** — `kmalloc`/`kfree` (kheap.c)
+> **Status (466 milestones).** (M466: **App address-space reclamation (full teardown)** — completes
+> M464. New `vmm_destroy_address_space` (vmm.c) frees an exited app's page tables AND user frames
+> (ELF+stack, ~59 frames/app), called from app_reap. PROVABLY SAFE: vmm_create copies boot's PDPT
+> verbatim + next_table only writes not-present slots ⇒ a PDPT entry DIFFERING from boot's is always
+> app-private; free exactly those (+ private PML4/PDPT pages), skip the shared low map + higher half.
+> ROOT-CAUSE FIX in task_exit: it left the dead task's CR3 loaded under `next` (only swapped rsp), so
+> the reaper saw the dying space active and the guard refused to free (diagnosed via temp kprintf:
+> active==dead-cr3); task_exit now loads next->cr3 like switch_to_next, so the WM reaps in kernel_pml4
+> and frees. Both SHIP-reviewed; verified in-OS: free memory returns to the EXACT boot baseline (102
+> MiB) after 12 spawn+exit cycles (dropped to 96 before), 0 faults. The app-exit leak is fully closed.
+> Remaining deferred: forced-kill of X-closed orphaned apps (task still running — risky), ~150-root TLS
+> chain enforcement (bulky), FAT32 write-robustness (fragile).
+> M465: **Kernel-heap interrupt-safety** — `kmalloc`/`kfree` (kheap.c)
 > now bracket their shared-free-list edit with irq_save(cli)/irq_restore, closing the pre-existing
 > latent race the M464 review surfaced (an IF-on WM `kfree` preempted by an app's IF-clear syscall
 > `kmalloc` over a half-linked list). Restores the caller's prior IF state (safe on/off), nests across

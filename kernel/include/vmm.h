@@ -29,6 +29,7 @@ int      vmm_map(uint64_t virt, uint64_t phys, uint64_t flags);
  * PML4 that shares the kernel's mappings (code, heap, MMIO, higher half) but
  * has a private low user region. map_to maps into a specific address space. */
 uint64_t vmm_create_address_space(void);
+void     vmm_destroy_address_space(uint64_t cr3);  /* free a non-active app space (frames+tables) */
 int      vmm_map_to(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags);
 int      vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags);
 void     vmm_unmap(uint64_t virt);

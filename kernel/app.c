@@ -181,15 +181,16 @@ int app_alive(app_t *a) { return a && a->used && !a->exited; }
  * that exit cleanly. Only acts once the task is fully dead (off-CPU; see
  * task_free), so a still-running task is never freed under it. Returns 1 when
  * the slot is free (the WM may then drop the window), 0 if the app exited but
- * its task isn't off-CPU yet (retry next pass). NOTE: the app's address space
- * (a->cr3 — page tables + user frames, ~tens of KB) is intentionally NOT freed
- * yet; that needs page-table teardown with an active-CR3 guard and is deferred.
- * A reaped slot gets a fresh cr3 on the next app_spawn (memset + vmm_create). */
+ * its task isn't off-CPU yet (retry next pass). Frees the task_t + kernel stack,
+ * the app's address space (a->cr3 — page tables + user frames, via
+ * vmm_destroy_address_space), and the apps[] slot. */
 int app_reap(app_t *a) {
     if (!a) return 1;
     if (a->used && a->exited && (!a->task || a->task->state == TASK_DEAD)) {
         if (a->task) task_free(a->task);
         a->task = 0;
+        vmm_destroy_address_space(a->cr3);   /* free page tables + user frames */
+        a->cr3 = 0;
         a->used = 0;
     }
     return !a->used;
