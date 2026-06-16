@@ -51,6 +51,8 @@ void sys_setkbmode(int raw);         /* 1 = raw make/break key events, 0 = cooke
 int  sys_getkbevent(void);           /* next raw key event (scancode|0x100 released|0x200 ext), or -1 */
 void sys_pcm(const void *frames, int nframes);   /* play 16-bit stereo PCM @ 48 kHz (blocks) */
 long sys_playwav(const char *name);              /* play a .wav file (16-bit PCM); 0/-1 */
+int  sys_pcm_stream(const void *frames, int nframes);  /* queue stereo PCM (non-blocking); accepted */
+int  sys_pcm_avail(void);                        /* free frames in the streaming ring */
 
 /* dynamic memory (a first-fit free list over sbrk) */
 void *malloc(unsigned long n);

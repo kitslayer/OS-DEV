@@ -12,3 +12,11 @@ void ac97_play(const int16_t *frames, int nframes);
 /* Parse a RIFF/WAVE buffer (16-bit PCM, mono or stereo, any rate), resample to
  * 48 kHz stereo, and play it (blocking). Returns 0 on success, -1 on a bad WAV. */
 int  ac97_play_wav(const uint8_t *data, int len);
+
+/* Non-blocking streaming: queue 48 kHz stereo frames into a ring the timer IRQ
+ * feeds to the device continuously (DOOM's mixer uses this). */
+void ac97_stream_start(void);
+void ac97_stream_stop(void);
+int  ac97_stream_write(const int16_t *frames, int nframes);  /* queue; returns accepted */
+int  ac97_stream_avail(void);                                /* free frames in the ring */
+void ac97_pump(void);                                        /* timer-IRQ refill hook */

@@ -14,6 +14,7 @@
 #include "interrupts.h"
 #include "io.h"
 #include "task.h"
+#include "ac97.h"
 
 #define PIT_CH0_DATA 0x40
 #define PIT_COMMAND  0x43
@@ -25,6 +26,7 @@ static uint32_t          tick_hz = 100;   /* IRQ0 frequency, set by timer_init *
 static void timer_handler(struct registers *r) {
     (void)r;
     ticks++;
+    ac97_pump();       /* keep the audio DMA fed (no-op unless streaming) */
     sched_tick();      /* preempt the running thread (no-op if <2 tasks) */
 }
 

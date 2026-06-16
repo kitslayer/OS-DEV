@@ -89,6 +89,7 @@ int ac97_init(void) {
 
 void ac97_play(const int16_t *frames, int nframes) {
     if (!inited || nframes <= 0) return;
+    ac97_stream_stop();    /* blocking playback and streaming both own PCM-out */
 
     /* Fill the buffer pool + BDL, at most NUM_BUF * BUF_FRAMES frames per batch. */
     int total = nframes, pos = 0;
@@ -159,4 +160,83 @@ int ac97_play_wav(const uint8_t *d, int len) {
     ac97_play(out, (int)out_frames);
     kfree(out);
     return 0;
+}
+
+/* ---- streaming: a non-blocking PCM ring kept fed from the timer IRQ --------
+ * The 32 BDL buffers are run as a continuous loop; ac97_pump() (called each
+ * timer tick) refills the buffers the device just finished from a software ring
+ * the producer writes via ac97_stream_write(), and keeps LVI one buffer behind
+ * CIV so the engine never halts. Underruns play silence. This is what DOOM's
+ * sound mixer feeds. */
+#define STREAM_FRAMES 48000          /* 1 second of stereo ring */
+static int16_t        *sbuf;
+static volatile uint32_t s_head, s_tail;   /* producer / consumer, in frames */
+static volatile int    stream_on;
+static int             last_civ;
+
+void ac97_stream_start(void) {
+    if (!inited || stream_on) return;
+    if (!sbuf) { sbuf = kmalloc(STREAM_FRAMES * 4); if (!sbuf) return; }
+    s_head = s_tail = 0;
+    outb(nabm + PO_CR, CR_RR);
+    for (int i = 0; i < 100000 && (inb(nabm + PO_CR) & CR_RR); i++) { }
+    for (int i = 0; i < NUM_BUF; i++) {                 /* all buffers silent + full */
+        memset((void *)(uintptr_t)buf_phys[i], 0, BUF_FRAMES * 4);
+        bdl[i].addr = (uint32_t)buf_phys[i];
+        bdl[i].samples = BUF_FRAMES * 2;
+        bdl[i].ctrl = 0;
+    }
+    outl(nabm + PO_BDBAR, (uint32_t)bdl_phys);
+    last_civ = 0;
+    outb(nabm + PO_LVI, NUM_BUF - 1);
+    outb(nabm + PO_CR, CR_RPBM);                        /* run continuously */
+    stream_on = 1;
+}
+
+void ac97_stream_stop(void) {
+    if (!stream_on) return;
+    stream_on = 0;
+    outb(nabm + PO_CR, 0);
+}
+
+/* Queue interleaved stereo frames; returns how many were accepted (drops the
+ * rest if the ring is full). Non-blocking. Starts the stream on first use. */
+int ac97_stream_write(const int16_t *frames, int nframes) {
+    if (!inited) return 0;
+    if (!stream_on) ac97_stream_start();
+    if (!stream_on) return 0;
+    int wrote = 0;
+    for (int i = 0; i < nframes; i++) {
+        uint32_t next = (s_head + 1) % STREAM_FRAMES;
+        if (next == s_tail) break;                      /* ring full */
+        sbuf[s_head * 2]     = frames[i * 2];
+        sbuf[s_head * 2 + 1] = frames[i * 2 + 1];
+        s_head = next;
+        wrote++;
+    }
+    return wrote;
+}
+
+int ac97_stream_avail(void) {                           /* free frames in the ring */
+    if (!sbuf) return STREAM_FRAMES - 1;
+    uint32_t used = (s_head - s_tail + STREAM_FRAMES) % STREAM_FRAMES;
+    return (int)(STREAM_FRAMES - 1 - used);
+}
+
+/* Timer-IRQ hook: refill finished buffers from the software ring, advance LVI. */
+void ac97_pump(void) {
+    if (!stream_on) return;
+    int civ = inb(nabm + PO_CIV);
+    while (last_civ != civ) {                           /* buffers the device finished */
+        int16_t *dst = (int16_t *)(uintptr_t)buf_phys[last_civ];
+        for (int f = 0; f < (int)BUF_FRAMES; f++) {
+            if (s_tail != s_head) {
+                dst[f * 2]     = sbuf[s_tail * 2];
+                dst[f * 2 + 1] = sbuf[s_tail * 2 + 1];
+                s_tail = (s_tail + 1) % STREAM_FRAMES;
+            } else { dst[f * 2] = dst[f * 2 + 1] = 0; }  /* underrun: silence */
+        }
+        last_civ = (last_civ + 1) % NUM_BUF;
+    }
+    outb(nabm + PO_LVI, (uint8_t)((civ + NUM_BUF - 1) % NUM_BUF));   /* stay one behind CIV */
 }

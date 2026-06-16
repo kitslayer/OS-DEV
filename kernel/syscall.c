@@ -437,6 +437,12 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* ac97_play blocks on the timer */
         ac97_play((const int16_t *)r->rdi, (int)r->rsi);
         break;
+    case SYS_pcm_stream:
+        r->rax = (uint64_t)(int64_t)ac97_stream_write((const int16_t *)r->rdi, (int)r->rsi);
+        break;
+    case SYS_pcm_avail:
+        r->rax = (uint64_t)(int64_t)ac97_stream_avail();
+        break;
     case SYS_playwav: {
         __asm__ volatile("sti");
         uint8_t *wb = kmalloc(8 * 1024 * 1024);   /* the .wav file (<= 8 MB) */

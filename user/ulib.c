@@ -77,6 +77,8 @@ void sys_setkbmode(int raw) { do_syscall(SYS_setkbmode, raw, 0, 0); }
 int  sys_getkbevent(void) { return (int)do_syscall(SYS_getkbevent, 0, 0, 0); }
 void sys_pcm(const void *frames, int nframes) { do_syscall(SYS_pcm, (long)frames, nframes, 0); }
 long sys_playwav(const char *name) { return do_syscall(SYS_playwav, (long)name, 0, 0); }
+int  sys_pcm_stream(const void *frames, int nframes) { return (int)do_syscall(SYS_pcm_stream, (long)frames, nframes, 0); }
+int  sys_pcm_avail(void) { return (int)do_syscall(SYS_pcm_avail, 0, 0, 0); }
 long sys_resolve(const char *host, void *buf, unsigned long len) {
     return do_syscall(SYS_resolve, (long)host, (long)buf, (long)len);
 }
