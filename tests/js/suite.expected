@@ -330,4 +330,6 @@ comp=15/5 diff=1000000
 idxobj=1 incobj=true idxmiss=-1
 idxnull=1 idxnum=1 lastobj=2
 utcY=1970 utcDay=1 loc=string
+-- regex named capture groups (?<name>…) (M543) --
+ng=01/2024 ngtest=true noncap=true
 -- done --

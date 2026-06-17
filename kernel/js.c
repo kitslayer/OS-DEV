@@ -998,7 +998,11 @@ static rnode *rx_class(rparse *P){
 static rnode *rx_atom(rparse *P){
     if(P->pos>=P->len) return rx_node(RN_EMPTY);
     int c=(unsigned char)P->p[P->pos];
-    if(c=='('){ P->pos++; if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') P->pos+=2; int gi=(P->ngroup<RE_MAXGROUP)?++P->ngroup:0; rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1; rnode *g=rx_node(RN_GROUP); if(!g){P->err=1;return 0;} g->a=body; g->group=gi; return g; }
+    if(c=='('){ P->pos++;
+        if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') P->pos+=2;   /* (?: non-capturing */
+        else if(P->pos+2<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]=='<' && P->p[P->pos+2]!='=' && P->p[P->pos+2]!='!'){   /* (?<name>… named capture: skip the name, treat as a numbered group */
+            P->pos+=2; while(P->pos<P->len && P->p[P->pos]!='>') P->pos++; if(P->pos<P->len) P->pos++; }
+        int gi=(P->ngroup<RE_MAXGROUP)?++P->ngroup:0; rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1; rnode *g=rx_node(RN_GROUP); if(!g){P->err=1;return 0;} g->a=body; g->group=gi; return g; }
     if(c=='['){ P->pos++; return rx_class(P); }
     if(c=='.'){ P->pos++; return rx_node(RN_ANY); }
     if(c=='^'){ P->pos++; return rx_node(RN_BOL); }
