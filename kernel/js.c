@@ -3563,6 +3563,7 @@ static int hdom_tag(const char *id, char *out, int max){ (void)id; if(max<=0)ret
 /* mock removeAttribute: clear the class store entry (so a later hasAttribute("class") reads false) */
 static void hdom_rmattr_at(int off, const char *attr){ if(strcmp(attr,"class")) return; for(int i=0;i<hcls_n;i++) if(hcls_off[i]==off){ hcls_val[i][0]=0; return; } }
 static void hdom_rmattr(const char *id, const char *attr){ (void)id; (void)attr; }   /* id handles: no id-class store in the mock */
+#ifndef JS_NO_MAIN   /* a host harness embedding js.c (e.g. tests/jsonfuzz) defines this to supply its own main */
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -3580,4 +3581,5 @@ int main(int argc, char **argv) {
     fputs(outb, stdout);
     return r<0?1:0;
 }
+#endif /* JS_NO_MAIN */
 #endif
