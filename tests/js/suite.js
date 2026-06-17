@@ -312,4 +312,10 @@ print(Array.from({length:3}).length, Array.from({length:2},function(_z,i){return
 var _msp={a:1,b:2}; print([..._msp].length, "spreadNoCrash");  // 0 spreadNoCrash (spread of a non-iterable plain object appends nothing -> empty, no crash)
 print([...[9,8,7]].join(","), [..."ab"].join(","), [...new Set([1,1,2])].join(","));  // 9,8,7 a,b 1,2 (regression: array / string / Set spread unchanged)
 var _scnt=0; var _sadv={[Symbol.iterator](){ return { next(){ _scnt++; return {value:1,done:false}; } }; }}; var _sat=false; try { var _sr=[..._sadv]; _sat=true; } catch(_se){ _sat=true; } print("spreadterminated="+_sat, "spreadcap="+(_scnt===2000));  // spreadterminated=true spreadcap=true (adversarial never-done iterable hits the 2000 cap in spread -> next() called exactly 2000x then catchable error, no hang)
+print("-- Infinity sentinel + toFixed padding + flat(Infinity) (M529) --");
+print("inf="+(5<Infinity), "posinf="+(Number.POSITIVE_INFINITY>9e18));  // inf=true posinf=true (Infinity is an INT64_MAX sentinel; comparisons work)
+var _mn=Infinity; [3,1,2,5].forEach(function(x){ if(x<_mn) _mn=x; }); print("min="+_mn);  // min=1 (the canonical `let min=Infinity` reduce idiom now works instead of aborting)
+print("fix2="+(5).toFixed(2), "fix0="+(255).toFixed(0), "negfix="+(-7).toFixed(3));  // fix2=5.00 fix0=255 negfix=-7.000 (integer engine: toFixed pads k decimal places)
+print("price=$"+(1234).toFixed(2));  // price=$1234.00 (currency formatting now renders cents)
+print("flatinf="+[1,[2,[3,[4]]]].flat(Infinity).length, "flat1="+[1,[2,[3]]].flat().length);  // flatinf=4 flat1=3 (flat(Infinity) deep-flattens; default depth still 1)
 print("-- done --");

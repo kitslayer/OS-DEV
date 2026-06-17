@@ -287,4 +287,10 @@ deepchain=77
 0 spreadNoCrash
 9,8,7 a,b 1,2
 spreadterminated=true spreadcap=true
+-- Infinity sentinel + toFixed padding + flat(Infinity) (M529) --
+inf=true posinf=true
+min=1
+fix2=5.00 fix0=255 negfix=-7.000
+price=$1234.00
+flatinf=4 flat1=3
 -- done --

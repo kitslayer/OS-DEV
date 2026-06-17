@@ -2095,7 +2095,19 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
         char*r=aalloc(i+1); if(!r) return STRV("");
         for(int j=0;j<i;j++){ r[j]=tmp[i-1-j]; } r[i]=0; return STRV(r);
     }
-    if (strcmp(name,"toFixed")==0) return STRV(val_to_str(recv));   /* integer: no fractional part */
+    if (strcmp(name,"toFixed")==0) {                 /* integer engine: value is whole, but
+                                                      * format-correctly pad k decimal places so
+                                                      * e.g. (5).toFixed(2) -> "5.00" (currency). */
+        int k = nargs ? (int)to_num(args[0]) : 0;
+        if (k <= 0) return STRV(val_to_str(recv));
+        if (k > 100) k = 100;
+        const char *istr = val_to_str(recv);
+        int il = (int)strlen(istr);
+        char *r = aalloc(il + 1 + k + 1); if(!r) return STRV("");
+        int p=0; for(int j=0;j<il;j++) r[p++]=istr[j];
+        r[p++]='.'; for(int j=0;j<k;j++) r[p++]='0'; r[p]=0;
+        return STRV(r);
+    }
     if (strcmp(name,"valueOf")==0) return recv;
     if (strcmp(name,"toLocaleString")==0){   /* group integer digits in 3s with commas: 1234567 -> "1,234,567" (M278) */
         char d[24]; int dn=0; int neg=v<0; unsigned long long u=neg?(unsigned long long)(-(v+1))+1ULL:(unsigned long long)v;
@@ -2222,7 +2234,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         val v=UND(); v.t=V_ARR; v.o=rem; return v; }
     if (strcmp(name,"fill")==0){ val fv=nargs?args[0]:UND(); int st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):o->n; if(st<0)st+=o->n; if(en<0)en+=o->n; if(st<0)st=0; if(en>o->n)en=o->n; for(int i=st;i<en;i++) o->vals[i]=fv; return recv; }
     if (strcmp(name,"lastIndexOf")==0){ for(int i=o->n-1;i>=0;i--){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if((x.t==V_NUM||x.t==V_BOOL)&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
-    if (strcmp(name,"flat")==0){ int depth=nargs?(int)to_num(args[0]):1; if(depth<0)depth=0; if(depth>64)depth=64; obj*r=new_obj(V_ARR); if(!r) return UND(); flat_into(r,o,depth); val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"flat")==0){ long long dd=nargs?(long long)to_num(args[0]):1; int depth=dd<0?0:(dd>64?64:(int)dd); /* clamp via int64 so flat(Infinity) -> 64, not a truncated negative */ obj*r=new_obj(V_ARR); if(!r) return UND(); flat_into(r,o,depth); val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
     if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"filter")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) arr_push_val(r,o->vals[i]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -3213,10 +3225,15 @@ static void install_globals(env *g) {
     obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));
     obj *sf=new_obj(V_NATIVE); sf->native=nat_String;   env_define(g,"String",obj_val_native(sf));
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
-    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); nf->statics=nst; }
+    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); obj_set(nst,"POSITIVE_INFINITY",NUM(INT64_MAX)); obj_set(nst,"NEGATIVE_INFINITY",NUM(-INT64_MAX)); obj_set(nst,"MAX_VALUE",NUM(INT64_MAX)); nf->statics=nst; }
       obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); def_native(sst,"fromCodePoint",nat_str_fromCharCode); sf->statics=sst; } }   /* String.fromCharCode/fromCodePoint (ASCII: same) via side-statics; Number/String stay V_NATIVE */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
+    /* Infinity: this engine's numbers are int64 (no FPU), so there is no true
+     * IEEE infinity — but INT64_MAX is a faithful sentinel for the common uses
+     * (`let min = Infinity; if (x < min) …`, `arr.flat(Infinity)`), and defining
+     * it stops the many scripts that reference Infinity from aborting outright. */
+    env_define(g,"Infinity",NUM(INT64_MAX));
     { obj *e=new_obj(V_NATIVE); e->native=nat_Error;       env_define(g,"Error",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_TypeError;   env_define(g,"TypeError",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_RangeError;  env_define(g,"RangeError",obj_val_native(e)); }
