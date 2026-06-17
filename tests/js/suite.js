@@ -344,4 +344,7 @@ var _fo=[]; for(let x of [10,20,30]) _fo.push(()=>x); print("foflet="+_fo.map(g=
 var _fod=[]; for(let [a,b] of [[1,2],[3,4]]) _fod.push(()=>a+b); print("fofdestr="+_fod.map(g=>g()).join(","));  // fofdestr=3,7 (destructuring for-of closures capture per iteration)
 var _fi=[]; for(let k in {a:1,b:2}) _fi.push(()=>k); print("filet="+_fi.map(g=>g()).join(","));  // filet=a,b (for-in let closures)
 var _fov=[]; for(var y of [1,2,3]) _fov.push(()=>y); print("fofvar="+_fov[0]());  // fofvar=3 (for-of var stays shared)
+print("-- array elision / holes [1,,3] (M536) --");
+print("holelen="+[1,,3].length, "holeval="+([1,,3][1]), "holejoin="+[1,,3].join(","));  // holelen=3 holeval=undefined holejoin=1,,3 (a sparse-array hole parses as an undefined element instead of a syntax error)
+print("lead="+[,1].length, "dbl="+[,,].length, "trail="+[1,2,].length);  // lead=2 dbl=2 trail=2 (leading/double holes count; a trailing comma still does NOT add an element)
 print("-- done --");

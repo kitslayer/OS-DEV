@@ -306,7 +306,8 @@ static node **parse_list(lexer *L, const char *close, int *count) {
     node **arr = aalloc(sizeof(node*) * 64); int n = 0;
     while (!peek_punc(L, close) && peek(L).type != T_EOF && !g_err && !g_oom) {
         node *el;
-        if (peek_punc(L,"...")) { advance(L); el=mknode(N_SPREAD); el->a=parse_assign(L); }  /* ...spread */
+        if (peek_punc(L,",")) el=mknode(N_UNDEF);   /* elision: `[1,,3]` -> a hole (undefined); the comma is consumed below */
+        else if (peek_punc(L,"...")) { advance(L); el=mknode(N_SPREAD); el->a=parse_assign(L); }  /* ...spread */
         else el=parse_assign(L);
         if (arr && n < 64) arr[n++] = el;
         if (peek_punc(L, ",")) advance(L); else break;
