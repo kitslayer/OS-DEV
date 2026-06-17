@@ -362,4 +362,6 @@ class MyErr extends Error { constructor(m,c){ super(m); this.name="MyErr"; this.
 var _me; try { throw new MyErr("oops",404); } catch(e){ _me=e; }
 print("ce="+_me.name+":"+_me.message+":"+_me.code, "isErr="+(_me instanceof Error), "isMy="+(_me instanceof MyErr));  // ce=MyErr:oops:404 isErr=true isMy=true (extends a native base; super(m) sets message; instanceof both ways)
 print("estr="+new Error("boom").toString(), "ecoerce="+(""+new TypeError("bad")));  // estr=Error: boom ecoerce=TypeError: bad (Error stringifies as "name: message")
+print("-- JSON.stringify array replacer (allowlist) (M545) --");
+print("repl="+JSON.stringify({a:1,b:2,c:3},["a","c"]), "nest="+JSON.stringify({a:1,b:{a:2,x:9}},["a","b"]), "none="+JSON.stringify({a:1,b:2}));  // repl={"a":1,"c":3} nest={"a":1,"b":{"a":2}} none={"a":1,"b":2} (an array 2nd arg is a key allowlist applied at every depth; no replacer = all keys)
 print("-- done --");

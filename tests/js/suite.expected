@@ -335,4 +335,6 @@ ng=01/2024 ngtest=true noncap=true
 -- class extends Error + Error.toString (M544) --
 ce=MyErr:oops:404 isErr=true isMy=true
 estr=Error: boom ecoerce=TypeError: bad
+-- JSON.stringify array replacer (allowlist) (M545) --
+repl={"a":1,"c":3} nest={"a":1,"b":{"a":2}} none={"a":1,"b":2}
 -- done --
