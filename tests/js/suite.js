@@ -339,4 +339,9 @@ var _lc=[]; for(let i=0;i<3;i++) _lc.push(()=>i); print("letclo="+_lc.map(g=>g()
 var _vc=[]; for(var j=0;j<3;j++) _vc.push(()=>j); print("varclo="+_vc[0]()+","+_vc[2]());  // varclo=3,3 (`var` stays function-scoped: all closures share one j)
 var _ln=[]; for(let i=0;i<2;i++) for(let j=0;j<2;j++) _ln.push(()=>i+""+j); print("nestlet="+_ln.map(g=>g()).join(","));  // nestlet=00,01,10,11 (nested let loops each capture independently)
 var _ls=0; for(let i=0;i<100000;i++) _ls+=1; print("letbig="+_ls);  // letbig=100000 (no-closure let loop reuses one env: no per-iteration alloc, no arena OOM)
+print("-- let per-iteration binding in for-of / for-in (M535) --");
+var _fo=[]; for(let x of [10,20,30]) _fo.push(()=>x); print("foflet="+_fo.map(g=>g()).join(","));  // foflet=10,20,30 (for-of let: fresh binding per element)
+var _fod=[]; for(let [a,b] of [[1,2],[3,4]]) _fod.push(()=>a+b); print("fofdestr="+_fod.map(g=>g()).join(","));  // fofdestr=3,7 (destructuring for-of closures capture per iteration)
+var _fi=[]; for(let k in {a:1,b:2}) _fi.push(()=>k); print("filet="+_fi.map(g=>g()).join(","));  // filet=a,b (for-in let closures)
+var _fov=[]; for(var y of [1,2,3]) _fov.push(()=>y); print("fofvar="+_fov[0]());  // fofvar=3 (for-of var stays shared)
 print("-- done --");

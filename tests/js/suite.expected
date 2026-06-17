@@ -314,4 +314,9 @@ letclo=0,1,2
 varclo=3,3
 nestlet=00,01,10,11
 letbig=100000
+-- let per-iteration binding in for-of / for-in (M535) --
+foflet=10,20,30
+fofdestr=3,7
+filet=a,b
+fofvar=3
 -- done --

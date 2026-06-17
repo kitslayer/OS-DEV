@@ -739,11 +739,12 @@ static node *parse_stmt(lexer *L) {
         advance(L); expect_punc(L,"(");
         /* for (x of iterable) — detect the contextual `of` with bounded lookahead */
         lexsave sv = lex_save(L);
+        int fe_blk = peek_kw(L,"let")||peek_kw(L,"const");   /* block-scoped loop var -> fresh per iteration */
         if (peek_kw(L,"var")||peek_kw(L,"let")||peek_kw(L,"const")) advance(L);
         if (peek_punc(L,"[")||peek_punc(L,"{")) {   /* for (var [a,b] of ...) — destructuring loop var */
             node *pat=parse_primary(L); token kw=peek(L);
             if (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='o' && kw.s[1]=='f') {
-                advance(L); node *fo=mknode(N_FOROF); fo->c=pat;
+                advance(L); node *fo=mknode(N_FOROF); fo->c=pat; fo->num=fe_blk;
                 fo->a=parse_expr(L); expect_punc(L,")"); fo->b=parse_stmt(L); g_depth--; return fo; }
         } else {
             token v = peek(L);
@@ -751,7 +752,7 @@ static node *parse_stmt(lexer *L) {
                 int isof = (kw.type==T_IDENT && kw.len==2 && kw.s[0]=='o' && kw.s[1]=='f');
                 int isin = ((kw.type==T_IDENT||kw.type==T_KW) && kw.len==2 && kw.s[0]=='i' && kw.s[1]=='n');   /* `in` is now a keyword */
                 if (isof || isin) {
-                    advance(L); node *fo=mknode(isof?N_FOROF:N_FORIN); fo->str=intern(v.s,v.len); fo->slen=v.len;
+                    advance(L); node *fo=mknode(isof?N_FOROF:N_FORIN); fo->num=fe_blk; fo->str=intern(v.s,v.len); fo->slen=v.len;
                     fo->a=parse_expr(L); expect_punc(L,")"); fo->b=parse_stmt(L); g_depth--; return fo; }
             }
         }
@@ -1917,6 +1918,20 @@ static int node_has_func(node *n, int depth){
     return 0;
 }
 
+/* Run one for-of/for-in body iteration, binding `cv` to the loop target. With a
+ * block-scoped (let/const) loop var AND a closure in the body, each iteration
+ * gets a fresh env so the closure captures this step's value; otherwise the
+ * shared `fe` is reused (no per-iteration allocation, as for `var`). */
+static comp eval_stmt(node *n, env *e);
+static comp foreach_step(node *n, env *e, env *fe, const char *vn, int per_iter, val cv){
+    env *ie = fe;
+    if(per_iter){ ie=new_env(e); if(!ie){ g_oom=1; return CN(); } }
+    if(n->c) bind_pattern(n->c, cv, ie);
+    else if(per_iter) env_define(ie, vn, cv);
+    else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
+    return eval_stmt(n->b, ie);
+}
+
 static comp eval_stmt_inner(node *n, env *e) {
     if (g_err || g_oom) return CN();
     switch (n->type) {
@@ -1979,26 +1994,23 @@ static comp eval_stmt_inner(node *n, env *e) {
         case N_FOROF: {
             val it=eval_expr(n->a,e); env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
             const char *vn = n->c ? 0 : node_name(n);   /* n->c is a destructuring pattern, else a plain name */
+            int per_iter = (n->num && node_has_func(n->b,0));   /* let/const + a closure in the body -> fresh binding per iteration */
             if (vn) env_define(fe, vn, UND());
             if (it.t==V_ARR && it.o) {
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
-                    if (n->c) bind_pattern(n->c, it.o->vals[i], fe); else { val *slot=env_find(fe,vn); if(slot) *slot=it.o->vals[i]; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+                    comp c=foreach_step(n,e,fe,vn,per_iter,it.o->vals[i]); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_STR) {
                 int l=(int)strlen(it.str);
                 for (int i=0;i<l && !g_err && !g_oom;i++){ char*ch=aalloc(2); if(ch){ch[0]=it.str[i];ch[1]=0;} val cv=STRV(ch?ch:"");
-                    if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+                    comp c=foreach_step(n,e,fe,vn,per_iter,cv); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_OBJ && it.o && it.o->kind==V_SET) {
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val cv=it.o->vals[i];
-                    if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+                    comp c=foreach_step(n,e,fe,vn,per_iter,cv); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_OBJ && it.o && it.o->kind==V_MAP) {
                 for (int i=0;i+1<it.o->n && !g_err && !g_oom;i+=2){             /* each entry is a fresh [k,v] array */
                     obj *pair=new_obj(V_ARR); if(!pair){ g_oom=1; break; } arr_push_val(pair,it.o->vals[i]); arr_push_val(pair,it.o->vals[i+1]);
                     val cv=UND(); cv.t=V_ARR; cv.o=pair;
-                    if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+                    comp c=foreach_step(n,e,fe,vn,per_iter,cv); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_OBJ && it.o && it.o->kind==V_OBJ) {
                 /* ----- ES6 iterator protocol (M-symbol) -----
                  * A plain object is iterable iff it has a callable obj[Symbol.iterator].
@@ -2047,8 +2059,7 @@ static comp eval_stmt_inner(node *n, env *e) {
                             if (truthy(eval_member_get(res, "done"))) break;       /* done:truthy -> finished */
                             val cv = eval_member_get(res, "value");
                             if (g_err || g_oom) break;
-                            if (n->c) bind_pattern(n->c, cv, fe); else { val *slot=env_find(fe,vn); if(slot) *slot=cv; }
-                            comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c;
+                            comp c=foreach_step(n,e,fe,vn,per_iter,cv); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c;
                         }
                     }
                 }
@@ -2083,14 +2094,14 @@ static comp eval_stmt_inner(node *n, env *e) {
             val it=eval_expr(n->a,e); env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
             it=deproxy(it);   /* for-in over a proxy enumerates the TARGET's keys (no ownKeys trap; never exposes vals[0]/vals[1]) (M-proxy) */
             const char *vn=node_name(n); env_define(fe, vn, UND());
+            int per_iter = (n->num && node_has_func(n->b,0));   /* let/const + a closure -> fresh binding per iteration */
             if (it.t==V_OBJ && obj_keyed(it.o)) {   /* keyed objects only (Date/Map/Set/arrays have no enumerable own keys here) */
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
                     if(is_internal_key(it.o->keys[i])) continue;   /* hide @@ symbol keys from for-in (M-symbol) */
-                    val *slot=env_find(fe,vn); if(slot) *slot=STRV(it.o->keys[i]);
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+                    comp c=foreach_step(n,e,fe,vn,per_iter,STRV(it.o->keys[i])); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_ARR && it.o) {
-                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){ val *slot=env_find(fe,vn); if(slot) *slot=NUM(i);   /* array indices */
-                    comp c=eval_stmt(n->b,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+                for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
+                    comp c=foreach_step(n,e,fe,vn,per_iter,NUM(i)); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             }
             return CN();
         }
