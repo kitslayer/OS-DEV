@@ -326,4 +326,9 @@ print("ra-nong="+"a1b2".replaceAll(/\d/, "_"), "rep1="+"a1b2".replace(/\d/, "_")
 print("-- JSON.stringify omits undefined/function object props (M531) --");
 print("u="+JSON.stringify({a:undefined,b:1}), "f="+JSON.stringify({g:function(){},b:2}), "empty="+JSON.stringify({a:undefined}));  // u={"b":1} f={"b":2} empty={} (undefined/function OBJECT properties are omitted per spec)
 print("arr="+JSON.stringify([1,undefined,3]), "nest="+JSON.stringify({o:{a:undefined,b:2}}));  // arr=[1,null,3] nest={"o":{"b":2}} (array elements still become null; omission is recursive)
+print("-- regex lazy quantifiers + split capture groups + join undefined/null (M532) --");
+print("lazy="+"<a><b>".match(/<.+?>/)[0], "lazyg="+"<a><b><c>".match(/<.+?>/g).join(","), "greedy="+"<a><b>".match(/<.+>/)[0]);  // lazy=<a> lazyg=<a>,<b>,<c> greedy=<a><b> (`+?` is non-greedy; bare `+` still greedy)
+print("html="+"<p>hi</p>".replace(/<.+?>/g,""));  // html=hi (the canonical lazy-tag-strip idiom)
+print("splitcap="+"a1b2c".split(/(\d)/).join("|"), "splitlim="+"a1b2c3".split(/\d/,2).join("|"));  // splitcap=a|1|b|2|c splitlim=a|b (split splices captured groups; honors the limit)
+print("joinu="+[1,undefined,3].join(","), "joinn="+[null,2].join("-"));  // joinu=1,,3 joinn=-2 (Array.join renders undefined/null elements as "")
 print("-- done --");

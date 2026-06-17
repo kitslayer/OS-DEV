@@ -963,7 +963,7 @@ typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int las
 
 enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
 typedef struct rnode rnode;
-struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; };
+struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; int lazy; };
 typedef struct { const char *p; int len, pos; int ngroup; int err; int depth; } rparse;
 
 static rnode *rx_node(int t){ rnode *n=aalloc(sizeof(rnode)); if(!n) return 0; memset(n,0,sizeof(*n)); n->type=t; return n; }
@@ -1051,7 +1051,9 @@ static rnode *rx_expand_rep(rparse *P, rnode *atom, int n1, int n2){
 static rnode *rx_rep(rparse *P){
     rnode *a=rx_atom(P); if(!a) return 0;
     while(P->pos<P->len){ int c=P->p[P->pos];
-        if(c=='*'||c=='+'||c=='?'){ P->pos++; rnode *q=rx_node(c=='*'?RN_STAR:c=='+'?RN_PLUS:RN_OPT); if(!q){P->err=1;return 0;} q->a=a; a=q; }
+        if(c=='*'||c=='+'||c=='?'){ P->pos++; rnode *q=rx_node(c=='*'?RN_STAR:c=='+'?RN_PLUS:RN_OPT); if(!q){P->err=1;return 0;} q->a=a;
+            if(P->pos<P->len && P->p[P->pos]=='?'){ P->pos++; q->lazy=1; }   /* `*?` `+?` `??`: non-greedy — try the shorter match first */
+            a=q; }
         else if(c=='{'){                              /* {n} / {n,} / {n,m}; else literal { */
             int save=P->pos; P->pos++;
             int n1=0,n2=-1,have=0;
@@ -1097,9 +1099,10 @@ static void rx_compile(remit *E, rnode *n){
         case RN_EMPTY: break;
         case RN_CAT: rx_compile(E,n->a); rx_compile(E,n->b); break;
         case RN_GROUP: if(n->group){ rx_emit(E,I_SAVE,2*n->group,0,0,0); rx_compile(E,n->a); rx_emit(E,I_SAVE,2*n->group+1,0,0,0); } else rx_compile(E,n->a); break;
-        case RN_STAR: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); rx_emit(E,I_JMP,0,l1,0,0); E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; break; }
-        case RN_PLUS: { int l1=E->pc; rx_compile(E,n->a); int sp=rx_emit(E,I_SPLIT,0,l1,0,0); E->prog[sp].y=E->pc; break; }
-        case RN_OPT: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; break; }
+        /* I_SPLIT tries .x before .y, so greedy = body-first, lazy = exit-first (swap x/y). */
+        case RN_STAR: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); rx_emit(E,I_JMP,0,l1,0,0); if(n->lazy){ E->prog[l1].x=E->pc; E->prog[l1].y=l1+1; } else { E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; } break; }
+        case RN_PLUS: { int l1=E->pc; rx_compile(E,n->a); int sp=rx_emit(E,I_SPLIT,0,0,0,0); if(n->lazy){ E->prog[sp].x=E->pc; E->prog[sp].y=l1; } else { E->prog[sp].x=l1; E->prog[sp].y=E->pc; } break; }
+        case RN_OPT: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); if(n->lazy){ E->prog[l1].x=E->pc; E->prog[l1].y=l1+1; } else { E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; } break; }
         case RN_ALT: { int l1=rx_emit(E,I_SPLIT,0,0,0,0); rx_compile(E,n->a); int j=rx_emit(E,I_JMP,0,0,0,0); E->prog[l1].x=l1+1; E->prog[l1].y=E->pc; rx_compile(E,n->b); E->prog[j].x=E->pc; break; }
     }
 }
@@ -2184,8 +2187,13 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         r[p]=0; return STRV(r); }
     if (strcmp(name,"split")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]); obj*arr=new_obj(V_ARR); if(!arr) return UND(); int caps[2*(RE_MAXGROUP+1)]; int start=0,pos=0;
         while(pos<=len){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom) break; if(caps[1]==caps[0]){ pos++; continue; }   /* skip zero-width to make progress */
-            char*p=aalloc(caps[0]-start+1); if(p){memcpy(p,s+start,caps[0]-start);p[caps[0]-start]=0;} arr_push_val(arr,STRV(p?p:"")); start=caps[1]; pos=caps[1]; }
-        char*p=aalloc(len-start+1); if(p){memcpy(p,s+start,len-start);p[len-start]=0;} arr_push_val(arr,STRV(p?p:"")); val v=UND();v.t=V_ARR;v.o=arr;return v; }
+            char*p=aalloc(caps[0]-start+1); if(p){memcpy(p,s+start,caps[0]-start);p[caps[0]-start]=0;} arr_push_val(arr,STRV(p?p:""));
+            for(int g=1; g<=re->ngroup; g++){ int gs=caps[2*g],ge=caps[2*g+1];   /* per spec: captured groups are spliced into the result */
+                if(gs>=0&&ge>=gs){ char*gp=aalloc(ge-gs+1); if(gp){memcpy(gp,s+gs,ge-gs);gp[ge-gs]=0;} arr_push_val(arr,STRV(gp?gp:"")); } else arr_push_val(arr,UND()); }
+            start=caps[1]; pos=caps[1]; }
+        char*p=aalloc(len-start+1); if(p){memcpy(p,s+start,len-start);p[len-start]=0;} arr_push_val(arr,STRV(p?p:""));
+        if (nargs>1) { int lim=(int)to_num(args[1]); if(lim>=0 && arr->n>lim) arr->n=lim; }   /* split(re, limit) */
+        val v=UND();v.t=V_ARR;v.o=arr;return v; }
     if (strcmp(name,"split")==0){ obj*arr=new_obj(V_ARR); if(!arr) return UND(); const char*sep=nargs?val_to_str(args[0]):0; int sl=sep?(int)strlen(sep):-1;
         if(sl<0){ arr_push_val(arr,STRV(s)); }                       /* no separator: whole string */
         else if(sl==0){ for(int i=0;i<len;i++){ char*c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} arr_push_val(arr,STRV(c?c:"")); } }  /* "" -> chars */
@@ -2209,7 +2217,8 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"join")==0){
         const char*sep=nargs?val_to_str(args[0]):","; long sl=(long)strlen(sep);
         const char **parts=aalloc((long)sizeof(char*)*(o->n>0?o->n:1)); if(!parts) return STRV("");
-        long total=0; for(int i=0;i<o->n;i++){ parts[i]=val_to_str(o->vals[i]); total+=(long)strlen(parts[i]); if(i) total+=sl; }
+        long total=0; for(int i=0;i<o->n;i++){ val ev=o->vals[i]; parts[i]=(ev.t==V_UNDEF||ev.t==V_NULL)?"":val_to_str(ev);   /* per spec: undefined/null elements join as "" */
+            total+=(long)strlen(parts[i]); if(i) total+=sl; }
         char*buf=aalloc(total+1); if(!buf) return STRV(""); int p=0;
         for(int i=0;i<o->n;i++){ if(i){ for(long k=0;k<sl;k++) buf[p++]=sep[k]; } const char*v=parts[i]; while(*v) buf[p++]=*v++; }
         buf[p]=0; return STRV(buf);

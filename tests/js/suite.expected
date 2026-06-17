@@ -301,4 +301,9 @@ ra-nong=a_b_ rep1=a_b2
 -- JSON.stringify omits undefined/function object props (M531) --
 u={"b":1} f={"b":2} empty={}
 arr=[1,null,3] nest={"o":{"b":2}}
+-- regex lazy quantifiers + split capture groups + join undefined/null (M532) --
+lazy=<a> lazyg=<a>,<b>,<c> greedy=<a><b>
+html=hi
+splitcap=a|1|b|2|c splitlim=a|b
+joinu=1,,3 joinn=-2
 -- done --
