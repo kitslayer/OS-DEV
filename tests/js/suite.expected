@@ -326,4 +326,8 @@ lead=2 dbl=2 trail=2
 epoch=1970-0-1 iso=1970-01-01T00:00:00.000Z
 y2024=2024 day=1 rt=1704067200000
 comp=15/5 diff=1000000
+-- indexOf/includes by ===  + Date getUTC*/toLocale* (M542) --
+idxobj=1 incobj=true idxmiss=-1
+idxnull=1 idxnum=1 lastobj=2
+utcY=1970 utcDay=1 loc=string
 -- done --

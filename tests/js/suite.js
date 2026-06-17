@@ -351,4 +351,8 @@ print("-- new Date(ms) / component ctor / toISOString (M541) --");
 print("epoch="+new Date(0).getFullYear()+"-"+new Date(0).getMonth()+"-"+new Date(0).getDate(), "iso="+new Date(0).toISOString());  // epoch=1970-0-1 iso=1970-01-01T00:00:00.000Z (Date(ms) honors the timestamp; was snapshotting "now")
 print("y2024="+new Date(1704067200000).getFullYear(), "day="+new Date(1704067200000).getDay(), "rt="+new Date(1704067200000).getTime());  // y2024=2024 day=1 rt=1704067200000 (getTime round-trips; 2024-01-01 was a Monday)
 print("comp="+new Date(2024,5,15).getDate()+"/"+new Date(2024,5,15).getMonth(), "diff="+(new Date(2000000).getTime()-new Date(1000000).getTime()));  // comp=15/5 diff=1000000 (component constructor + date arithmetic)
+print("-- indexOf/includes by ===  + Date getUTC*/toLocale* (M542) --");
+var _io={a:1}; print("idxobj="+[1,_io,2].indexOf(_io), "incobj="+[1,_io].includes(_io), "idxmiss="+[{}].indexOf({}));  // idxobj=1 incobj=true idxmiss=-1 (array search uses === so objects match by identity, not value)
+print("idxnull="+[1,null,2].indexOf(null), "idxnum="+[1,2,3].indexOf(2), "lastobj="+[_io,1,_io].lastIndexOf(_io));  // idxnull=1 idxnum=1 lastobj=2 (null/number still found; lastIndexOf by identity too)
+print("utcY="+new Date(0).getUTCFullYear(), "utcDay="+new Date(1704067200000).getUTCDay(), "loc="+typeof new Date(0).toLocaleDateString());  // utcY=1970 utcDay=1 loc=string (no timezone: getUTC*==local; toLocale* render a valid string)
 print("-- done --");

@@ -53,8 +53,10 @@ static void out_str(const char *s) {
  * just past the prior 16 MB cap; 20 MB restores ~4 MB of headroom. (M-proxy)
  * 26 MB: the suite's peak reached ~22.1 MB after the M529/M530 method cases; 26 MB
  * restores the ~4 MB headroom (and gives heavy real pages more room). (M530)
+ * 32 MB: the suite's peak reached ~26.7 MB after the M531-M542 cases; 32 MB
+ * restores ~5 MB headroom. (M542)
  * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
-#define JS_ARENA   (26624 * 1024)
+#define JS_ARENA   (32768 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -2257,8 +2259,8 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         for(int i=0;i<o->n;i++){ if(i){ for(long k=0;k<sl;k++) buf[p++]=sep[k]; } const char*v=parts[i]; while(*v) buf[p++]=*v++; }
         buf[p]=0; return STRV(buf);
     }
-    if (strcmp(name,"indexOf")==0){ int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from+=o->n; if(from<0)from=0; for(int i=from;i<o->n;i++){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if(x.t==V_NUM&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
-    if (strcmp(name,"includes")==0){ int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from+=o->n; if(from<0)from=0; for(int i=from;i<o->n;i++){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if((x.t==V_NUM||x.t==V_BOOL)&&x.num==args[0].num) return BOOLV(1); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return BOOLV(1);} } return BOOLV(0); }
+    if (strcmp(name,"indexOf")==0){ int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from+=o->n; if(from<0)from=0; for(int i=from;i<o->n;i++) if(nargs && val_equal(o->vals[i],args[0])) return NUM(i); return NUM(-1); }   /* strict (===): also finds objects by identity, null, undefined */
+    if (strcmp(name,"includes")==0){ int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from+=o->n; if(from<0)from=0; for(int i=from;i<o->n;i++) if(nargs && val_equal(o->vals[i],args[0])) return BOOLV(1); return BOOLV(0); }
     if (strcmp(name,"concat")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<o->n;i++) arr_push_val(r,o->vals[i]); for(int a=0;a<nargs;a++){ if(args[a].t==V_ARR&&args[a].o){ for(int i=0;i<args[a].o->n;i++) arr_push_val(r,args[a].o->vals[i]); } else arr_push_val(r,args[a]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"fill")==0){ val fv=nargs>0?args[0]:UND(); int a=nargs>1?(int)to_num(args[1]):0, b=nargs>2?(int)to_num(args[2]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; for(int i=a;i<b;i++) o->vals[i]=fv; return recv; }   /* fill existing slots [start,end) */
     if (strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0, b=nargs>1?(int)to_num(args[1]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=a;i<b;i++) arr_push_val(r,o->vals[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -2281,7 +2283,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         for(int i=0;i<nins;i++) o->vals[start+i]=args[2+i]; o->n=newn;
         val v=UND(); v.t=V_ARR; v.o=rem; return v; }
     if (strcmp(name,"fill")==0){ val fv=nargs?args[0]:UND(); int st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):o->n; if(st<0)st+=o->n; if(en<0)en+=o->n; if(st<0)st=0; if(en>o->n)en=o->n; for(int i=st;i<en;i++) o->vals[i]=fv; return recv; }
-    if (strcmp(name,"lastIndexOf")==0){ for(int i=o->n-1;i>=0;i--){ val x=o->vals[i]; if(nargs&&x.t==args[0].t){ if((x.t==V_NUM||x.t==V_BOOL)&&x.num==args[0].num) return NUM(i); if(x.t==V_STR&&strcmp(x.str,args[0].str)==0) return NUM(i);} } return NUM(-1); }
+    if (strcmp(name,"lastIndexOf")==0){ for(int i=o->n-1;i>=0;i--) if(nargs && val_equal(o->vals[i],args[0])) return NUM(i); return NUM(-1); }   /* strict (===) */
     if (strcmp(name,"flat")==0){ long long dd=nargs?(long long)to_num(args[0]):1; int depth=dd<0?0:(dd>64?64:(int)dd); /* clamp via int64 so flat(Infinity) -> 64, not a truncated negative */ obj*r=new_obj(V_ARR); if(!r) return UND(); flat_into(r,o,depth); val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
     if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -2878,6 +2880,12 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
         b[p++]='.'; b[p++]='0'; b[p++]='0'; b[p++]='0'; b[p++]='Z'; b[p]=0;
         return STRV(b);
     }
+    /* no timezone in this engine, so the UTC getters equal the local ones: getUTCX -> getX */
+    if(name[0]=='g'&&name[1]=='e'&&name[2]=='t'&&name[3]=='U'&&name[4]=='T'&&name[5]=='C'){ char ln[28]; ln[0]='g';ln[1]='e';ln[2]='t'; int j=3; for(const char*p=name+6;*p&&j<27;p++) ln[j++]=*p; ln[j]=0; return eval_date_method(recv,ln,args,nargs); }
+    /* the toLocale / toDate / toTime / toUTC string variants: render a valid date string (no locale/zone formatting) */
+    if(strcmp(name,"toLocaleString")==0||strcmp(name,"toLocaleDateString")==0||strcmp(name,"toLocaleTimeString")==0||
+       strcmp(name,"toDateString")==0||strcmp(name,"toTimeString")==0||strcmp(name,"toUTCString")==0||strcmp(name,"toGMTString")==0)
+        return STRV(val_to_str(recv));
     rt_err("unknown Date method"); return UND();
 }
 
