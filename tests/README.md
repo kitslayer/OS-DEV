@@ -10,7 +10,7 @@ cases + deterministic fuzzing.
 ## Running
 
 ```sh
-make check       # run all 19 suites (~40s total)
+make check       # run all 20 suites (~40s total)
 make jstest      # JS engine      — tests/js/suite.js vs the golden output
 make imgtest     # image decoders — tests/img/img_test.c   (jpeg/png/gif/bmp/inflate)
 make x509test    # X.509 parser   — tests/x509/x509_test.c
@@ -30,6 +30,7 @@ make kheaptest   # kernel heap    — tests/kheap/kheap_test.c (kmalloc/kfree sp
 make jsonfuzztest # JSON.parse     — tests/jsonfuzz (untrusted/malformed/deep server JSON)
 make regexfuzztest # regex engine  — tests/regexfuzz (ReDoS shapes + malformed patterns, compile+search)
 make jssrcfuzztest # JS source     — tests/jssrcfuzz (full parse+run pipeline on adversarial script source)
+make htmlentfuzztest # HTML entities — tests/htmlentfuzz (decode_entity over untrusted/malformed page bytes)
 ```
 
 `make test` is a *different* target — the headless QEMU boot smoke test.
@@ -59,6 +60,7 @@ disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
 | `jsonfuzztest` | `kernel/js.c` (`nat_json_parse`) | The engine's `JSON.parse` parses untrusted server/API JSON in-kernel. Drives the parser directly (js.c #included with `JS_NO_MAIN`) over every truncated prefix + single-byte corruption of a rich document, 300k random punctuation-biased buffers, and 1..5000-deep bracket nesting (must hit the depth guard, not overflow); valid documents confirm correct parsing. Exactly-sized buffers so any over-read red-zones. |
 | `regexfuzztest` | `kernel/js.c` (`re_compile`/`re_search`) | The regex engine compiles untrusted patterns and runs them on untrusted strings (historically the source of two critical matcher stack-overflows). ReDoS shapes (`(a+)+$`, `(a*)*`, deep groups, huge `{n,m}`, unterminated classes) against long `a` runs + 200k random pattern/subject pairs; the step-budget + depth guard must keep every run bounded with no OOB/overflow/hang. |
 | `jssrcfuzztest` | `kernel/js.c` (`js_run_doc`) | The full parse+run pipeline on untrusted SOURCE — the browser's `<script>`/`javascript:`. Truncations + sampled corruptions of a rich script, 200k random token-biased buffers, and 1..4000-deep nesting through the lexer/parser (MAXDEPTH guard) and the loop/recursion/arena run guards; adversarial source must fail gracefully, never OOB/overflow/hang. |
+| `htmlentfuzztest` | `kernel/htmlentity.c` (`decode_entity`) | The HTML character-reference decoder reads untrusted page bytes (`&amp;`, `&#NNN;`, `&#xHH;`, named). Known entities decode correctly; then every truncated prefix + single-byte corruption of a battery (incl. huge/overflowing numeric refs and bare `&`/`&#`/`&#x`) + 300k random entity-char-biased buffers, in exactly-sized buffers so any over-read red-zones. |
 | `svgtest`  | `kernel/svg.c` | The from-scratch integer-only SVG rasterizer (parses untrusted web XML in-kernel). 8 unit cases that must render correctly (rect, viewBox scaling, circle + cubic-bezier path, stroked polygon, named colors, **affine transforms** — `<g>`-group + per-shape `translate`/`scale`/`rotate`/`matrix`, nested-group composition, and the CTM correctly restored after `</g>` — **paint inheritance** — `fill`/`stroke` inherited from the root `<svg>`/enclosing `<g>`, per-shape override, the `inherit` keyword, and inherited paint restored after `</g>` — **and opacity** — `fill-opacity`/`opacity` per shape, group `<g opacity>` inherited, group×element compounding, and `in_alpha` restored after `</g>` — **and gradients** — a linear red→blue across the box + a radial white→black centre→edge, exercising the `<defs>` pre-pass, `fill=url(#id)` resolution and per-pixel evaluation) plus ~520k in-suite fuzz iterations: 100k random bytes, 100k mutations of valid SVG, 320k structured (random shape/path/attr/**transform**/**fill**/**opacity**/**gradient** trees), and adversarial inputs (deep nesting, huge coordinate counts, a huge-coordinate gradient that would overflow the projection's int64 intermediate if unclamped, truncation) — plus a separate **6M-iteration gradient-focused fuzz** run during review. Locks bounds-safety on the scanline-fill crossings buffer, the per-shape point list in caller scratch, the `<g>` transform + paint + opacity stacks, the gradient table/stop caps + the `grad_color_at` fixed-point, and `parse_num` against the UB bugs the author fuzz first caught (negative shifts, `num<<16` int64 overflow). |
 
 ## Validated to catch regressions
@@ -78,6 +80,7 @@ Each fuzz harness is **verified to fail** when its guard is removed:
 - `jsonfuzztest` aborts (ASan heap-buffer-overflow at `jp_string`) if the string scanner's `jp_end` bound is removed (an unterminated string over-reads).
 - `regexfuzztest` aborts (ASan stack-overflow in `re_run`) if the matcher's `depth>900` guard is removed (a pathological pattern recurses unbounded).
 - `jssrcfuzztest` exercises the same ASan red-zone + termination-guard machinery proven by the two above on the full lexer/parser/eval pipeline.
+- `htmlentfuzztest` aborts (ASan buffer-overflow in `decode_entity`) if its `n < maxlen` scan bound is removed (an entity with no `;` then reads past the input).
 
 ## Not covered here
 

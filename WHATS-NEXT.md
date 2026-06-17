@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (539 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
+> **Status (546 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
 > games as windowed ring-3 apps: **DOOM** (graphics, keyboard, mouselook, sound effects, and music) and
 > **Quake** — the true-3D successor, software-rendered (actual Half-Life is a closed Win32/GoldSrc title
 > needing a GPU and proprietary assets, so Quake is the realistic "modern game"). Both load their shareware
@@ -14,6 +14,20 @@
 > game ports reused the proven approach: vendor (doomgeneric / quakegeneric) + a platform layer over the
 > syscalls + a from-scratch libc shim, with subagents doing the bulk under review. **The "best little
 > from-scratch OS" now runs DOOM and Quake — alongside its own browser, TLS stack, and JS engine.**
+> **(M541-M546) More JS compat + untrusted-parser fuzzing.** Continuing the host-verifiable arc:
+> **M541** `new Date(ms)` / `new Date(y,mo,d,…)` honor their argument (were snapshotting "now") +
+> real `toISOString`; **M542** array `indexOf`/`includes`/`lastIndexOf` match objects by identity
+> (`===`, also null/undefined) + Date `getUTC*`/`toLocale*`; **M543** regex named capture groups
+> `(?<name>…)`; **M544** `class X extends Error` (custom error classes — super(msg) sets message,
+> instanceof both ways) + `Error.toString`; **M545** `JSON.stringify` array replacer (key allowlist).
+> Then **M546** extracted the HTML entity decoder (`decode_entity`, untrusted page bytes) into
+> kernel/htmlentity.c and fuzzed it — the 4th untrusted-parser fuzz suite this arc after JSON.parse,
+> the regex engine, and the full JS source pipeline (M537-M539). `make check` is now **20 suites**,
+> each new fuzzer verified as a real oracle (removing a bound → ASan abort at the exact line). The JS
+> engine probed clean across ~130 features/edges; the one common remaining gap, ToPrimitive calling a
+> user object's valueOf/toString, is deferred as too risky to land without in-guest verification (it
+> touches the coercion core); generators stay the architectural ceiling. All host-verified; QEMU
+> remained environment-blocked all session.
 > **(M529-M539) JS engine real-site compatibility + untrusted-input fuzzing.** Continuing the
 > QEMU-blocked session in host-verifiable territory, a deep pass on the from-scratch JS engine (which
 > powers the browser) — probed against ~110 modern features/edges, found + fixed 8 real gaps, each
