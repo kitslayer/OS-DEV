@@ -12,7 +12,13 @@ echo "building host ELF loader (ASan+UBSan)..."
 $CC -std=gnu11 -O1 -g $SAN -fno-stack-protector -Ikernel -Ikernel/include \
     tests/elf/elf_test.c -o /tmp/osdev_elf_test
 echo "running ELF-loader regression + fuzz..."
-if /tmp/osdev_elf_test; then
+# If the app binaries have been built, also load every shipped ELF through the
+# loader as a regression guard (the test runs the synthetic suite either way).
+REAL=""
+for e in build/*.elf; do
+    [ -f "$e" ] && [ "$e" != "build/kernel.elf" ] && [ "$e" != "build/kernel32.elf" ] && REAL="$REAL $e"
+done
+if /tmp/osdev_elf_test $REAL; then
     echo "PASS: ELF loader (validators + load round-trip, fuzz/corrupt safe, ASan/UBSan clean)"
 else
     echo "FAIL: ELF-loader test aborted (ASan/UBSan caught a memory error or a check failed)"; exit 1

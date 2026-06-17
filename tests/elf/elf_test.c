@@ -199,10 +199,38 @@ static void test_fuzz(void) {
            fails ? "FAILURES" : "all clean");
 }
 
-int main(void) {
+/* Load a real shipped app binary through the kernel's loader and confirm it is
+ * accepted and laid out in the user range — a regression guard that every ELF
+ * the OS ships stays loadable (catches a linker-script/toolchain change that
+ * would push a segment out of range or otherwise trip the validators). */
+static void test_real_elf(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { printf("  (skip %s: %s)\n", path, "cannot open"); return; }
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    if (sz <= 0) { fclose(f); printf("  (skip %s: empty)\n", path); return; }
+    uint8_t *buf = malloc((size_t)sz);          /* exact size: ASan red-zones overreads */
+    if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) { fclose(f); free(buf); return; }
+    fclose(f);
+
+    uint64_t entry = elf_load(buf, (uint64_t)sz);
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s rejected by elf_load", path);
+    CHECK(entry != 0, msg);
+    snprintf(msg, sizeof(msg), "%s entry out of user range", path);
+    CHECK(entry >= PG && entry < ELF_VADDR_MAX, msg);
+
+    unmap_all();   /* release this app's pages before the next (all load at 0x40000000) */
+    free(buf);
+}
+
+int main(int argc, char **argv) {
     test_regression();
     test_fuzz();
+    int reals = 0;
+    for (int i = 1; i < argc; i++) { test_real_elf(argv[i]); reals++; }
+    if (reals) printf("real binaries: loaded %d shipped app ELF(s) through elf_load\n", reals);
     if (fails) { printf("FAIL: %d check(s) failed\n", fails); return 1; }
-    printf("PASS: ELF64 loader (validators + load round-trip, fuzz/corrupt safe, ASan/UBSan clean)\n");
+    printf("PASS: ELF64 loader (validators + load round-trip%s, fuzz/corrupt safe, ASan/UBSan clean)\n",
+           reals ? " + real app binaries" : "");
     return 0;
 }
