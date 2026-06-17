@@ -35,6 +35,14 @@ static void fuzz_one(const unsigned char *data, int len) {
     decode_entity(b, len, &out);   /* result ignored; memory safety only */
     free(b);
 }
+/* same, for decode_utf8 — exercises the maxlen<1 guard and continuation reads */
+static void fuzz_utf8(const unsigned char *data, int len) {
+    char *b = malloc(len);                 /* exactly len bytes: len==0 makes an s[0] read an OOB */
+    if (len) memcpy(b, data, len);
+    unsigned cp = 0; int adv = decode_utf8(b, len, &cp);
+    CHECK(adv >= 0 && adv <= 4, "utf8 adv out of range");
+    free(b);
+}
 
 int main(void) {
     /* ---- regression ---- */
@@ -53,7 +61,15 @@ int main(void) {
     expect("&#zz;", 0, 0);             /* non-numeric after &# */
     expect("&", 0, 0);                 /* bare '&' */
     expect("&#99999999;", 11, ' ');    /* huge numeric ref: clamped, decodes to a char */
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (named + numeric + malformed)");
+    /* decode_utf8 regression */
+    { unsigned cp; int adv;
+      adv=decode_utf8("A",1,&cp);            CHECK(adv==1 && cp=='A', "utf8 ascii");
+      adv=decode_utf8("\xC3\xA9",2,&cp);     CHECK(adv==2 && cp==0xE9, "utf8 2-byte (é)");
+      adv=decode_utf8("\xE2\x80\x99",3,&cp); CHECK(adv==3 && cp==0x2019, "utf8 3-byte (rsquo)");
+      adv=decode_utf8("\xC3",1,&cp);         CHECK(adv==1, "utf8 truncated -> lead byte");
+      adv=decode_utf8("\xC3\x41",2,&cp);     CHECK(adv==1, "utf8 bad continuation -> lead byte");
+      adv=decode_utf8("",0,&cp);             CHECK(adv==0, "utf8 maxlen<1 guard"); }
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (entity named/numeric/malformed + utf8)");
 
     /* ---- fuzz: truncations + single-byte corruptions of a battery ---- */
     const char *bank[] = {
@@ -81,7 +97,15 @@ int main(void) {
         fuzz_one(tmp, len);
     }
 
-    printf("fuzz: truncations + single-byte corruptions + 300000 random -> %s\n",
+    /* ---- decode_utf8 fuzz: every length 0..6 of random high bytes ---- */
+    for (int trial = 0; trial < 300000; trial++) {
+        int len = rand() % 7;                         /* includes len==0 -> the maxlen<1 guard */
+        unsigned char tmp[7];
+        for (int i = 0; i < len; i++) tmp[i] = (trial & 1) ? (unsigned char)(0x80 + rand()%0x80) : (unsigned char)rand();
+        fuzz_utf8(tmp, len);
+    }
+
+    printf("fuzz: entity truncations/corruptions + 300000 random + 300000 utf8 -> %s\n",
            fails ? "FAILURES" : "all clean");
     if (fails) { printf("FAIL: %d check(s) failed\n", fails); return 1; }
     printf("PASS: HTML entity decoder (named/numeric/malformed fuzz, ASan/UBSan clean)\n");

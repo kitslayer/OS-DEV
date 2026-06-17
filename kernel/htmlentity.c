@@ -54,6 +54,25 @@ char uni_to_ascii(unsigned v) {
     }
 }
 
+int decode_utf8(const char *s, int maxlen, unsigned *cp) {
+    if (maxlen < 1) { *cp = 0; return 0; }                /* defensive: read s[0] only after this */
+    unsigned char c0 = (unsigned char)s[0];
+    int need; unsigned v;
+    if      (c0 < 0xC0) { *cp = c0; return 1; }            /* ASCII or stray continuation */
+    else if (c0 < 0xE0) { need = 1; v = c0 & 0x1F; }
+    else if (c0 < 0xF0) { need = 2; v = c0 & 0x0F; }
+    else if (c0 < 0xF8) { need = 3; v = c0 & 0x07; }
+    else                { *cp = c0; return 1; }
+    if (1 + need > maxlen) { *cp = c0; return 1; }         /* truncated */
+    for (int k = 1; k <= need; k++) {
+        unsigned char ck = (unsigned char)s[k];
+        if ((ck & 0xC0) != 0x80) { *cp = c0; return 1; }   /* bad continuation */
+        v = (v << 6) | (ck & 0x3F);
+    }
+    *cp = v;
+    return 1 + need;
+}
+
 int decode_entity(const char *s, int maxlen, char *out) {
     if (maxlen < 2) return 0;   /* shortest decodable entity is >=2 chars; also makes the s[1] read below in-bounds regardless of caller (defense-in-depth: callers already pass s[0]=='&') */
     int n = 0; while (n < maxlen && n < 12 && s[n] != ';') n++;

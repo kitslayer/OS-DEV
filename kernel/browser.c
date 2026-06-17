@@ -235,27 +235,6 @@ static int copy_decoded(char *dst, int dstmax, const char *src, int srclen) {
     return p;
 }
 
-/* Decode one UTF-8 sequence at s[0] (s[0] >= 0x80). Writes the codepoint to *cp
- * and returns bytes consumed (1-4). Real pages emit UTF-8 directly (smart quotes,
- * dashes, accents) rather than entities, so the text loop folds these to ASCII via
- * uni_to_ascii. Malformed/overlong sequences fall back to a 1-byte Latin-1 read. */
-static int decode_utf8(const char *s, int maxlen, unsigned *cp) {
-    unsigned char c0 = (unsigned char)s[0];
-    int need; unsigned v;
-    if      (c0 < 0xC0) { *cp = c0; return 1; }            /* ASCII or stray continuation */
-    else if (c0 < 0xE0) { need = 1; v = c0 & 0x1F; }
-    else if (c0 < 0xF0) { need = 2; v = c0 & 0x0F; }
-    else if (c0 < 0xF8) { need = 3; v = c0 & 0x07; }
-    else                { *cp = c0; return 1; }
-    if (1 + need > maxlen) { *cp = c0; return 1; }         /* truncated */
-    for (int k = 1; k <= need; k++) {
-        unsigned char ck = (unsigned char)s[k];
-        if ((ck & 0xC0) != 0x80) { *cp = c0; return 1; }   /* bad continuation */
-        v = (v << 6) | (ck & 0x3F);
-    }
-    *cp = v;
-    return 1 + need;
-}
 
 /* Find attribute `name`="..." (or '...' or bare) within an attribute slice.
  * The name must start at a token boundary (so "href" won't match inside another
