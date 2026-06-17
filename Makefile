@@ -43,6 +43,9 @@ USBFLAGS  := -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0
 #   make run AUDIODEV=sdl   (or alsa, pa, none)
 AUDIODEV  ?= pa
 AUDIOFLAGS := -device AC97,audiodev=snd0 -audiodev $(AUDIODEV),id=snd0
+# Same AC'97 codec, but with the null backend so the headless smoke test can
+# exercise the audio bring-up without depending on a host sound server.
+TESTAUDIOFLAGS := -device AC97,audiodev=snd0 -audiodev none,id=snd0
 
 C_SRCS  := $(shell find kernel -name '*.c')
 ASM_SRCS:= $(shell find boot kernel -name '*.asm')
@@ -152,7 +155,7 @@ run: $(KERNEL) $(DISK)
 # Used to confirm the kernel boots without needing a display.
 test: $(KERNEL) $(DISK)
 	@echo "--- booting headless, capturing COM1 (5s) ---"
-	@timeout 5 $(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) \
+	@timeout 5 $(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(TESTAUDIOFLAGS) \
 	    -display none -serial stdio ; \
 	    echo "--- qemu exited ---"
 
