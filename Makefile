@@ -213,9 +213,14 @@ wavtest:
 elftest:
 	@tests/run-elf-tests.sh
 
+# Host-side regression + fuzz test of the HTTP/1.x response parsers (ASan+UBSan):
+# chunked-transfer decode + header scans over untrusted/truncated server bytes.
+httptest:
+	@tests/run-http-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest)"
 
 clean:
 	rm -rf $(BUILD)

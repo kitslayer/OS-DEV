@@ -30,6 +30,7 @@
 #include "task.h"
 #include "timer.h"
 #include "vfs.h"
+#include "http.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -145,8 +146,6 @@ static void drop_remote_imgs(browser_t *b);  /* fwd: free prefetched remote-imag
 static int  decode_local_to_slot(browser_t *b, const char *path);  /* fwd */
 static int  decode_bytes_to_slot(browser_t *b, const uint8_t *data, int len);  /* fwd: decode an in-memory image blob into an inline slot */
 static int  b64_decode(const char *in, int inlen, uint8_t *out, int cap);       /* fwd: base64 -> bytes (for data: image URIs) */
-static int  is_chunked(const char *raw, int hdr_end);   /* fwd: chunked transfer-encoding? */
-static int  dechunk(char *body, int len);               /* fwd: de-chunk an HTTP body in place */
 
 /* ---- small helpers ---- */
 static int lc(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
@@ -2387,8 +2386,8 @@ static void collect_remote_imgs(browser_t *b) {
                             for (int x = 0; x + 3 < n; x++)
                                 if (scratch[x]=='\r'&&scratch[x+1]=='\n'&&scratch[x+2]=='\r'&&scratch[x+3]=='\n') { bo = x + 4; break; }
                             int blen = n - bo;
-                            if (bo > 0 && is_chunked((const char *)scratch, bo))
-                                blen = dechunk((char *)scratch + bo, blen);
+                            if (bo > 0 && http_is_chunked((const char *)scratch, bo))
+                                blen = http_dechunk((char *)scratch + bo, blen, RAW_MAX);
                             if (blen > 0) {
                                 uint8_t *data = kmalloc((unsigned long)blen);
                                 if (data) {
@@ -3112,80 +3111,6 @@ void browser_go(browser_t *b, const char *url) {  /* navigate to a given URL */
 static void goto_href(browser_t *b, const char *href, int suppress_push);  /* fwd */
 static int tok_matches(browser_t *b, tok_t *tk);                            /* fwd (in-page find) */
 
-/* Does the response advertise "Transfer-Encoding: chunked"? Scans only the
- * header region [0, hdr_end) (case-insensitive). HTTP/1.1 servers (and CDNs)
- * often chunk the body even when we asked in HTTP/1.0; without decoding it, the
- * chunk-size hex lines render as garbage interleaved in the page. */
-static int is_chunked(const char *raw, int hdr_end) {
-    const char *key = "transfer-encoding:";
-    for (int i = 0; i + 18 < hdr_end; i++) {
-        if (i && raw[i-1] != '\n') continue;          /* only at line starts */
-        int j = 0;
-        while (key[j] && lc(raw[i+j]) == key[j]) j++;
-        if (key[j]) continue;
-        for (int k = i + 18; k < hdr_end && raw[k] != '\n'; k++)   /* scan the value */
-            if (k + 6 < hdr_end && lc(raw[k])=='c' && lc(raw[k+1])=='h' &&
-                lc(raw[k+2])=='u' && lc(raw[k+3])=='n' && lc(raw[k+4])=='k' &&
-                lc(raw[k+5])=='e' && lc(raw[k+6])=='d')
-                return 1;
-        return 0;
-    }
-    return 0;
-}
-
-/* Decode an HTTP chunked-transfer body in place. `body` points at the first
- * chunk-size line; `len` is the bytes available. Returns the decoded length.
- * Each chunk is "<hexsize>[;ext]CRLF <data> CRLF", terminated by a 0-size chunk.
- * Tolerant of truncation (we may have stopped mid-stream on the time budget). */
-static int dechunk(char *body, int len) {
-    int in = 0, out = 0;
-    while (in < len) {
-        unsigned sz = 0; int sawdigit = 0;            /* parse the hex size (unsigned) */
-        while (in < len && body[in] != '\r' && body[in] != '\n' && body[in] != ';') {
-            char c = body[in]; int d;
-            if (c >= '0' && c <= '9') d = c - '0';
-            else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
-            else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
-            else break;                               /* not a hex digit: stop */
-            if (sz > (unsigned)RAW_MAX) sz = (unsigned)RAW_MAX;  /* cap so sz*16 can't overflow */
-            else sz = sz * 16u + (unsigned)d;
-            sawdigit = 1; in++;
-        }
-        if (!sawdigit) break;                         /* malformed framing */
-        while (in < len && body[in] != '\n') in++;    /* skip rest of size line */
-        if (in < len) in++;                           /* step past the '\n' (in <= len) */
-        if (sz == 0) break;                           /* final (0-size) chunk */
-        unsigned room = (unsigned)(len - in);         /* headroom; never form in+sz (overflow) */
-        if (sz > room) sz = room;                     /* truncated: take what we got */
-        if (sz == 0) break;
-        memmove(body + out, body + in, (size_t)sz);   /* compact (out <= in) */
-        out += (int)sz; in += (int)sz;
-        while (in < len && (body[in] == '\r' || body[in] == '\n')) in++;  /* trailing CRLF */
-    }
-    return out;
-}
-
-/* Find the value of a "Location:" header in an HTTP response. */
-static int find_loc(const char *raw, int n, char *out, int max) {
-    for (int i = 0; i + 9 < n; i++) {
-        if (i == 0 || raw[i-1] == '\n') {
-            const char *h = "location:";
-            int j = 0;
-            while (h[j] && lc(raw[i+j]) == h[j]) j++;
-            if (!h[j]) {
-                int k = i + 9;
-                while (k < n && (raw[k] == ' ' || raw[k] == '\t')) k++;
-                int o = 0;
-                while (k < n && raw[k] != '\r' && raw[k] != '\n' && o < max - 1) out[o++] = raw[k++];
-                out[o] = 0;
-                return 1;
-            }
-        }
-        if (i + 3 < n && raw[i]=='\r' && raw[i+1]=='\n' && raw[i+2]=='\r' && raw[i+3]=='\n') break;
-    }
-    return 0;
-}
-
 int browser_poll(browser_t *b) {
     int changed = 0;
     /* animated GIF: advance to the next frame once its delay (centiseconds, and
@@ -3209,7 +3134,7 @@ int browser_poll(browser_t *b) {
 
     if (n > 12 && b->raw[9] == '3') {               /* HTTP/1.x 3xx: follow Location */
         char loc[URL_MAX];
-        if (b->redirects < 5 && find_loc(b->raw, n, loc, sizeof(loc))) {
+        if (b->redirects < 5 && http_find_loc(b->raw, n, loc, sizeof(loc))) {
             b->redirects++;
             set_status(b, "redirect...");
             goto_href(b, loc, 1);                   /* follow, replacing history */
@@ -3222,8 +3147,8 @@ int browser_poll(browser_t *b) {
     for (int i = 0; i + 3 < n; i++)
         if (b->raw[i]=='\r'&&b->raw[i+1]=='\n'&&b->raw[i+2]=='\r'&&b->raw[i+3]=='\n') { bodyoff = i + 4; break; }
     int bodylen = n - bodyoff;
-    if (bodyoff > 0 && is_chunked(b->raw, bodyoff))      /* de-chunk before parsing */
-        bodylen = dechunk(b->raw + bodyoff, bodylen);
+    if (bodyoff > 0 && http_is_chunked(b->raw, bodyoff))      /* de-chunk before parsing */
+        bodylen = http_dechunk(b->raw + bodyoff, bodylen, RAW_MAX);
     if (try_image(b, (const uint8_t *)(b->raw + bodyoff), bodylen)) {  /* an image? */
         set_status(b, "image"); return 1;
     }
