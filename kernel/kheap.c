@@ -24,6 +24,12 @@
 #define KHEAP_BASE        0xFFFF900000000000ull
 #define KHEAP_GROW_PAGES  16                       /* grow 64 KiB at a time */
 
+/* The heap's base virtual address. A variable (initialized to the fixed
+ * higher-half base) rather than a bare constant only so the host heap test can
+ * point the allocator at a real arena it can write to — the kernel never
+ * changes it, so kernel behavior is identical to the constant. */
+static uint64_t kheap_base = KHEAP_BASE;
+
 typedef struct block {
     uint64_t      size;     /* usable payload bytes, excluding this header */
     struct block *next;
@@ -46,7 +52,11 @@ static inline uint64_t align_page(uint64_t x) {
  * are safe whether the caller already had interrupts off (syscalls) or on. */
 static inline uint64_t irq_save(void) {
     uint64_t fl;
+#ifdef KHEAP_HOST_TEST
+    __asm__ volatile("pushfq; pop %0" : "=r"(fl) :: "memory");  /* host: cli is privileged (ring 3) */
+#else
     __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+#endif
     return fl;
 }
 static inline void irq_restore(uint64_t fl) {
@@ -61,10 +71,10 @@ static void map_range(uint64_t from, uint64_t to) {
 
 void kheap_init(void) {
     uint64_t bytes = KHEAP_GROW_PAGES * PAGE_SIZE;
-    map_range(KHEAP_BASE, KHEAP_BASE + bytes);
-    heap_end = KHEAP_BASE + bytes;
+    map_range(kheap_base, kheap_base + bytes);
+    heap_end = kheap_base + bytes;
 
-    head = (block_t *)KHEAP_BASE;
+    head = (block_t *)kheap_base;
     head->size = bytes - sizeof(block_t);
     head->next = NULL;
     head->free = 1;
