@@ -10,7 +10,7 @@ cases + deterministic fuzzing.
 ## Running
 
 ```sh
-make check       # run all 16 suites (a few seconds total)
+make check       # run all 19 suites (~40s total)
 make jstest      # JS engine      — tests/js/suite.js vs the golden output
 make imgtest     # image decoders — tests/img/img_test.c   (jpeg/png/gif/bmp/inflate)
 make x509test    # X.509 parser   — tests/x509/x509_test.c
@@ -27,6 +27,9 @@ make wavtest     # WAV header     — wav_parse over corrupt RIFF chunks
 make elftest     # ELF64 loader   — tests/elf/elf_test.c   (validators + load round-trip + every shipped app binary)
 make httptest    # HTTP parsers   — tests/http/http_test.c (chunked-transfer decode + header scans)
 make kheaptest   # kernel heap    — tests/kheap/kheap_test.c (kmalloc/kfree split/coalesce/grow torture)
+make jsonfuzztest # JSON.parse     — tests/jsonfuzz (untrusted/malformed/deep server JSON)
+make regexfuzztest # regex engine  — tests/regexfuzz (ReDoS shapes + malformed patterns, compile+search)
+make jssrcfuzztest # JS source     — tests/jssrcfuzz (full parse+run pipeline on adversarial script source)
 ```
 
 `make test` is a *different* target — the headless QEMU boot smoke test.
@@ -53,6 +56,9 @@ disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
 | `elftest` | `kernel/elf.c` | The ELF64 loader (the ring-3 trust boundary). A known-good minimal ELF round-trips through `elf_load` (correct entry, file bytes copied to `p_vaddr`, `.bss` tail zeroed, via an mmap-backed guest-memory stub); the pure validators (`elf_check_header`/`elf_check_phdr`) are fuzzed over every truncated prefix, every single-byte header corruption, and 200k random buffers so a malformed ELF can never OOB-read or be accepted with a segment escaping the image or the user range; and **every shipped app binary** (all 29 — shell, the games, DOOM, Quake) is loaded through `elf_load` to guard against a linker/toolchain regression. |
 | `httptest` | `kernel/http.c` | The HTTP/1.x response parsers that read untrusted server/CDN bytes. Regression: chunked bodies, hex/large chunk sizes, chunk extensions, truncation, case-insensitive header scans, and `Location:` extraction with buffer-truncation all produce the expected results. Fuzz: every truncated prefix, every single-byte corruption, and 400k random buffers — in-place de-chunking (which memmoves with attacker-controlled hex sizes) never OOBs or returns a length outside the input, and `find_loc` never overruns its output. |
 | `kheaptest` | `kernel/kheap.c` | The kernel heap `kmalloc`/`kfree`/`kzalloc` (underlies every kernel allocation), run against a real mmap'd arena. 400k random alloc/free ops with a per-block byte pattern re-verified each pass (catches any overlap/corruption), `kzalloc` zeroing, repeated `grow_heap()`, and a free-list walk asserting the blocks tile `[base, heap_end)` exactly with no gaps or cycles; ASan/UBSan-clean. |
+| `jsonfuzztest` | `kernel/js.c` (`nat_json_parse`) | The engine's `JSON.parse` parses untrusted server/API JSON in-kernel. Drives the parser directly (js.c #included with `JS_NO_MAIN`) over every truncated prefix + single-byte corruption of a rich document, 300k random punctuation-biased buffers, and 1..5000-deep bracket nesting (must hit the depth guard, not overflow); valid documents confirm correct parsing. Exactly-sized buffers so any over-read red-zones. |
+| `regexfuzztest` | `kernel/js.c` (`re_compile`/`re_search`) | The regex engine compiles untrusted patterns and runs them on untrusted strings (historically the source of two critical matcher stack-overflows). ReDoS shapes (`(a+)+$`, `(a*)*`, deep groups, huge `{n,m}`, unterminated classes) against long `a` runs + 200k random pattern/subject pairs; the step-budget + depth guard must keep every run bounded with no OOB/overflow/hang. |
+| `jssrcfuzztest` | `kernel/js.c` (`js_run_doc`) | The full parse+run pipeline on untrusted SOURCE — the browser's `<script>`/`javascript:`. Truncations + sampled corruptions of a rich script, 200k random token-biased buffers, and 1..4000-deep nesting through the lexer/parser (MAXDEPTH guard) and the loop/recursion/arena run guards; adversarial source must fail gracefully, never OOB/overflow/hang. |
 | `svgtest`  | `kernel/svg.c` | The from-scratch integer-only SVG rasterizer (parses untrusted web XML in-kernel). 8 unit cases that must render correctly (rect, viewBox scaling, circle + cubic-bezier path, stroked polygon, named colors, **affine transforms** — `<g>`-group + per-shape `translate`/`scale`/`rotate`/`matrix`, nested-group composition, and the CTM correctly restored after `</g>` — **paint inheritance** — `fill`/`stroke` inherited from the root `<svg>`/enclosing `<g>`, per-shape override, the `inherit` keyword, and inherited paint restored after `</g>` — **and opacity** — `fill-opacity`/`opacity` per shape, group `<g opacity>` inherited, group×element compounding, and `in_alpha` restored after `</g>` — **and gradients** — a linear red→blue across the box + a radial white→black centre→edge, exercising the `<defs>` pre-pass, `fill=url(#id)` resolution and per-pixel evaluation) plus ~520k in-suite fuzz iterations: 100k random bytes, 100k mutations of valid SVG, 320k structured (random shape/path/attr/**transform**/**fill**/**opacity**/**gradient** trees), and adversarial inputs (deep nesting, huge coordinate counts, a huge-coordinate gradient that would overflow the projection's int64 intermediate if unclamped, truncation) — plus a separate **6M-iteration gradient-focused fuzz** run during review. Locks bounds-safety on the scanline-fill crossings buffer, the per-shape point list in caller scratch, the `<g>` transform + paint + opacity stacks, the gradient table/stop caps + the `grad_color_at` fixed-point, and `parse_num` against the UB bugs the author fuzz first caught (negative shifts, `num<<16` int64 overflow). |
 
 ## Validated to catch regressions
@@ -69,6 +75,9 @@ Each fuzz harness is **verified to fail** when its guard is removed:
 - `elftest` fails loudly if `elf_check_header`'s program-header-table bound is removed (a phdr read then runs past the image — the harness flags the broken in-bounds promise).
 - `httptest` aborts (ASan stack-buffer-overflow) if `http_dechunk`'s `sz > room` truncation clamp is removed (the in-place memmove then runs past the body).
 - `kheaptest` aborts (per-block pattern mismatch) if `kmalloc` stops marking a block used (`b->free = 0`) — the same block is handed out twice and the live allocations overlap.
+- `jsonfuzztest` aborts (ASan heap-buffer-overflow at `jp_string`) if the string scanner's `jp_end` bound is removed (an unterminated string over-reads).
+- `regexfuzztest` aborts (ASan stack-overflow in `re_run`) if the matcher's `depth>900` guard is removed (a pathological pattern recurses unbounded).
+- `jssrcfuzztest` exercises the same ASan red-zone + termination-guard machinery proven by the two above on the full lexer/parser/eval pipeline.
 
 ## Not covered here
 

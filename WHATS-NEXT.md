@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (527 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
+> **Status (539 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
 > games as windowed ring-3 apps: **DOOM** (graphics, keyboard, mouselook, sound effects, and music) and
 > **Quake** — the true-3D successor, software-rendered (actual Half-Life is a closed Win32/GoldSrc title
 > needing a GPU and proprietary assets, so Quake is the realistic "modern game"). Both load their shareware
@@ -14,6 +14,25 @@
 > game ports reused the proven approach: vendor (doomgeneric / quakegeneric) + a platform layer over the
 > syscalls + a from-scratch libc shim, with subagents doing the bulk under review. **The "best little
 > from-scratch OS" now runs DOOM and Quake — alongside its own browser, TLS stack, and JS engine.**
+> **(M529-M539) JS engine real-site compatibility + untrusted-input fuzzing.** Continuing the
+> QEMU-blocked session in host-verifiable territory, a deep pass on the from-scratch JS engine (which
+> powers the browser) — probed against ~110 modern features/edges, found + fixed 8 real gaps, each
+> locked into the `jstest` golden: **M529** `Infinity` was an undefined-variable THROW (now an INT64_MAX
+> sentinel — the engine is integer-only) + `toFixed` decimal padding + `flat(Infinity)`; **M530**
+> `normalize`/`concat`/`toLocale*` + `replaceAll(regex)` (+ arena 20→26 MB as the suite grew); **M531**
+> `JSON.stringify` omits undefined/function object props (was emitting null — could corrupt server
+> payloads); **M532** regex **lazy quantifiers** (`/<.+?>/`), `split()` capture-group splicing, and
+> `Array.join` rendering undefined/null as `""`; **M533** `Math.max()/min()` identity elements + global
+> `isFinite`; **M534/M535** **`let`/`const` per-iteration binding** in `for`/`for-of`/`for-in` (the
+> defining reason `let` exists — closures in loops now capture each iteration; with a closure-detection
+> optimization so big loops stay allocation-free on the GC-less arena); **M536** array elision `[1,,3]`
+> (was a parse-abort). Generators (`function*`) remain the one documented unsupported feature (need
+> coroutines a tree-walker can't provide; an eager hack would hang the kernel on an infinite generator).
+> Then **M537-M539** fuzzed every untrusted-input path in js.c under ASan/UBSan — `JSON.parse`, the
+> **regex** engine (ReDoS shapes + malformed patterns; this engine's history records 2 critical matcher
+> stack-overflows), and the **full source parse+run pipeline** — each #including js.c via a new
+> `JS_NO_MAIN` guard, each verified as a real oracle (removing a bound → ASan abort at the exact line).
+> `make check` is now **19 suites**. All host-verified; QEMU stayed environment-blocked all session.
 > **(M522-M527) Robustness + trust-boundary hardening.** A focused session on
 > the parts where a bug is silent kernel corruption. **M522:** the Apps menu had
 > grown to 34 entries and overflowed the top of the screen (clipping Browser/
