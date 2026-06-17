@@ -318,4 +318,9 @@ var _mn=Infinity; [3,1,2,5].forEach(function(x){ if(x<_mn) _mn=x; }); print("min
 print("fix2="+(5).toFixed(2), "fix0="+(255).toFixed(0), "negfix="+(-7).toFixed(3));  // fix2=5.00 fix0=255 negfix=-7.000 (integer engine: toFixed pads k decimal places)
 print("price=$"+(1234).toFixed(2));  // price=$1234.00 (currency formatting now renders cents)
 print("flatinf="+[1,[2,[3,[4]]]].flat(Infinity).length, "flat1="+[1,[2,[3]]].flat().length);  // flatinf=4 flat1=3 (flat(Infinity) deep-flattens; default depth still 1)
+print("-- string methods: normalize/concat/toLocale*, replaceAll(regex) (M530) --");
+print("norm="+"abc".normalize("NFC"), "concat="+"a".concat("b","c"), "concatnum="+"x".concat(1,2));  // norm=abc concat=abc concatnum=x12 (normalize is identity for ASCII; concat joins args, coercing numbers)
+print("lu="+"abc".toLocaleUpperCase(), "ll="+"ABC".toLocaleLowerCase());  // lu=ABC ll=abc (toLocale* alias the ASCII case mappers)
+print("ra-fn="+"a1b2".replaceAll(/\d/g, m=>"#"), "ra-grp="+"x1y2".replaceAll(/(\w)(\d)/g, "$2$1"));  // ra-fn=a#b# ra-grp=1x2y (replaceAll now drives a regex with a callback / $-group template)
+print("ra-nong="+"a1b2".replaceAll(/\d/, "_"), "rep1="+"a1b2".replace(/\d/, "_"));  // ra-nong=a_b_ rep1=a_b2 (replaceAll replaces every match regardless of /g; replace(re) without /g still replaces only the first)
 print("-- done --");

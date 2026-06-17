@@ -51,8 +51,10 @@ static void out_str(const char *s) {
  * 20 MB: the suite's peak crept to ~16.1 MB once the Proxy get/set-trap cases were
  * added (the adversarial self-recursive trap allocates a new_env per MAXDEPTH frame),
  * just past the prior 16 MB cap; 20 MB restores ~4 MB of headroom. (M-proxy)
+ * 26 MB: the suite's peak reached ~22.1 MB after the M529/M530 method cases; 26 MB
+ * restores the ~4 MB headroom (and gives heavy real pages more room). (M530)
  * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
-#define JS_ARENA   (20480 * 1024)
+#define JS_ARENA   (26624 * 1024)
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -2125,8 +2127,10 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
     if (strcmp(name,"charCodeAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }
     if (strcmp(name,"codePointAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }   /* = charCodeAt for ASCII (M278) */
     if (strcmp(name,"localeCompare")==0){ const char*o=nargs?val_to_str(args[0]):""; int c=strcmp(s,o); return NUM(c<0?-1:c>0?1:0); }   /* ASCII collation (M278) */
-    if (strcmp(name,"toUpperCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='a'&&s[i]<='z')?s[i]-32:s[i]; r[len]=0; return STRV(r); }
-    if (strcmp(name,"toLowerCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='A'&&s[i]<='Z')?s[i]+32:s[i]; r[len]=0; return STRV(r); }
+    if (strcmp(name,"toUpperCase")==0||strcmp(name,"toLocaleUpperCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='a'&&s[i]<='z')?s[i]-32:s[i]; r[len]=0; return STRV(r); }
+    if (strcmp(name,"toLowerCase")==0||strcmp(name,"toLocaleLowerCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='A'&&s[i]<='Z')?s[i]+32:s[i]; r[len]=0; return STRV(r); }
+    if (strcmp(name,"normalize")==0) return recv;   /* ASCII has no composed forms: NFC/NFD/… are identity */
+    if (strcmp(name,"concat")==0){ int tot=len; for(int i=0;i<nargs;i++) tot+=(int)strlen(val_to_str(args[i])); char*r=aalloc(tot+1); if(!r) return STRV(""); int p=0; for(int j=0;j<len;j++) r[p++]=s[j]; for(int i=0;i<nargs;i++){ const char*a=val_to_str(args[i]); for(int j=0;a[j];j++) r[p++]=a[j]; } r[p]=0; return STRV(r); }
     if (strcmp(name,"substring")==0||strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0; int b=nargs>1?(int)to_num(args[1]):len;
         if (name[1]=='l') { if(a<0)a+=len; if(b<0)b+=len; }   /* slice (name[1]=='l') counts negatives from the end; substring clamps to 0 */
         if(a<0)a=0; if(b<0)b=0; if(a>len)a=len; if(b>len)b=len;
@@ -2151,7 +2155,8 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         if(re&&re->ok){ int caps[2*(RE_MAXGROUP+1)]; int pos=0;
             while(pos<=len && !g_oom && !g_err){ int st=re_search(re,s,len,pos,caps); if(st<0) break; arr_push_val(out, re_result(re,s,caps)); pos = caps[1]>caps[0]?caps[1]:caps[1]+1; } }
         val r=UND(); r.t=V_ARR; r.o=out; return r; }
-    if (strcmp(name,"replace")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]);
+    if ((strcmp(name,"replace")==0||strcmp(name,"replaceAll")==0) && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]);
+        int all = strcmp(name,"replaceAll")==0;   /* replaceAll(re,…): replace every match regardless of the /g flag */
         int has_fn = nargs>1 && (args[1].t==V_FUN||args[1].t==V_NATIVE);   /* str.replace(re, (m,g1,…)=>…) */
         const char *repl = (nargs>1 && !has_fn) ? val_to_str(args[1]) : "";
         int caps[2*(RE_MAXGROUP+1)]; sbuild b; memset(&b,0,sizeof(b)); int pos=0;
@@ -2162,7 +2167,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
                 val rv=call_function(args[1], fa, na); const char *rs=val_to_str(rv); sb_put(&b, rs, (int)strlen(rs)); }
             else sb_expand(&b, repl, s, caps, re->ngroup);
             pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(caps[1]==caps[0] && caps[0]<len) sb_put(&b, s+caps[0], 1);   /* zero-width: emit a char, advance */
-            if(!re->global){ break; } }
+            if(!re->global && !all){ break; } }
         sb_put(&b, s+pos, len-pos); if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
     if (strcmp(name,"replace")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]),*to=val_to_str(args[1]); int fl=(int)strlen(from),tl=(int)strlen(to); if(fl==0) return STRV(s); for(int i=0;i+fl<=len;i++){ if(memcmp(s+i,from,fl)==0){ char*r=aalloc((long)len-fl+tl+1); if(!r) return STRV(""); memcpy(r,s,i); memcpy(r+i,to,tl); memcpy(r+i+tl,s+i+fl,len-i-fl); r[len-fl+tl]=0; return STRV(r); } } return STRV(s); }
     if (strcmp(name,"replaceAll")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]),*to=val_to_str(args[1]); int fl=(int)strlen(from),tl=(int)strlen(to); if(fl==0) return STRV(s);

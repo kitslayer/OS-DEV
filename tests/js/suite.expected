@@ -293,4 +293,9 @@ min=1
 fix2=5.00 fix0=255 negfix=-7.000
 price=$1234.00
 flatinf=4 flat1=3
+-- string methods: normalize/concat/toLocale*, replaceAll(regex) (M530) --
+norm=abc concat=abc concatnum=x12
+lu=ABC ll=abc
+ra-fn=a#b# ra-grp=1x2y
+ra-nong=a_b_ rep1=a_b2
 -- done --
