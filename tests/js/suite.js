@@ -331,4 +331,7 @@ print("lazy="+"<a><b>".match(/<.+?>/)[0], "lazyg="+"<a><b><c>".match(/<.+?>/g).j
 print("html="+"<p>hi</p>".replace(/<.+?>/g,""));  // html=hi (the canonical lazy-tag-strip idiom)
 print("splitcap="+"a1b2c".split(/(\d)/).join("|"), "splitlim="+"a1b2c3".split(/\d/,2).join("|"));  // splitcap=a|1|b|2|c splitlim=a|b (split splices captured groups; honors the limit)
 print("joinu="+[1,undefined,3].join(","), "joinn="+[null,2].join("-"));  // joinu=1,,3 joinn=-2 (Array.join renders undefined/null elements as "")
+print("-- Math.max()/min() empty = -+Infinity + global isFinite (M533) --");
+print("maxe="+(Math.max()===-Infinity), "mine="+(Math.min()===Infinity), "maxa="+Math.max(3,7,2));  // maxe=true mine=true maxa=7 (Math.max()/min() with no args are the identity elements)
+print("minreduce="+[5,3,8,1].reduce((m,x)=>Math.min(m,x), Infinity), "fin="+isFinite(42));  // minreduce=1 fin=true (the `reduce(...,Infinity)` min idiom works; global isFinite defined)
 print("-- done --");

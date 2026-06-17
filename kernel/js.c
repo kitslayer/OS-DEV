@@ -2815,8 +2815,8 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
 /* ---- Math (integer; the kernel has no FPU) ---- */
 static int64_t iabs64(int64_t x){ return x < 0 ? -x : x; }
 static val nat_abs(val *a, int n){ return NUM(n ? iabs64(to_num(a[0])) : 0); }
-static val nat_max(val *a, int n){ if(!n) return UND(); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v>m)m=v;} return NUM(m); }
-static val nat_min(val *a, int n){ if(!n) return UND(); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v<m)m=v;} return NUM(m); }
+static val nat_max(val *a, int n){ if(!n) return NUM(-INT64_MAX); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v>m)m=v;} return NUM(m); }   /* Math.max() = -Infinity */
+static val nat_min(val *a, int n){ if(!n) return NUM(INT64_MAX); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v<m)m=v;} return NUM(m); }   /* Math.min() = +Infinity */
 static val nat_ident(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }   /* floor/ceil/round are identity on ints */
 static int64_t i_sqrt(int64_t x){ if(x<1) return 0; int64_t lo=0, hi=(x<2?x:x/2+1); if(hi>3037000499LL) hi=3037000499LL; while(lo<hi){ int64_t mid=lo+(hi-lo+1)/2; if(mid<=x/mid) lo=mid; else hi=mid-1; } return lo; }
 static val nat_sqrt(val *a, int n){ return NUM(i_sqrt(n?to_num(a[0]):0)); }
@@ -2857,6 +2857,7 @@ static val nat_String(val *a, int n){ return STRV(n ? val_to_str(a[0]) : ""); }
 static val nat_Number(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }
 static val nat_Boolean(val *a, int n){ return BOOLV(n ? truthy(a[0]) : 0); }
 static val nat_isNaN(val *a, int n){ (void)a; (void)n; return BOOLV(0); }          /* integer Number is never NaN */
+static val nat_isFinite(val *a, int n){ (void)a; (void)n; return BOOLV(1); }        /* ...and (the int model has no IEEE inf) always finite */
 static val nat_num_isInteger(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }    /* every Number is an integer here */
 static val nat_num_isFinite(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }     /* ...and finite */
 static val nat_num_isSafeInteger(val *a, int n){ if(!n||a[0].t!=V_NUM) return BOOLV(0); int64_t x=a[0].num; return BOOLV(x>=-9007199254740991LL && x<=9007199254740991LL); }
@@ -3245,6 +3246,7 @@ static void install_globals(env *g) {
       obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); def_native(sst,"fromCodePoint",nat_str_fromCharCode); sf->statics=sst; } }   /* String.fromCharCode/fromCodePoint (ASCII: same) via side-statics; Number/String stay V_NATIVE */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
+    { obj *fin=new_obj(V_NATIVE); fin->native=nat_isFinite; env_define(g,"isFinite",obj_val_native(fin)); }
     /* Infinity: this engine's numbers are int64 (no FPU), so there is no true
      * IEEE infinity — but INT64_MAX is a faithful sentinel for the common uses
      * (`let min = Infinity; if (x < min) …`, `arr.flat(Infinity)`), and defining

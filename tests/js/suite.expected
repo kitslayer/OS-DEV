@@ -306,4 +306,7 @@ lazy=<a> lazyg=<a>,<b>,<c> greedy=<a><b>
 html=hi
 splitcap=a|1|b|2|c splitlim=a|b
 joinu=1,,3 joinn=-2
+-- Math.max()/min() empty = -+Infinity + global isFinite (M533) --
+maxe=true mine=true maxa=7
+minreduce=1 fin=true
 -- done --
