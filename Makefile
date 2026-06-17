@@ -230,9 +230,13 @@ jsonfuzztest:
 regexfuzztest:
 	@tests/run-regexfuzz-tests.sh
 
+# Host-side fuzz of the full JS parse+run pipeline on untrusted/malformed source (ASan+UBSan).
+jssrcfuzztest:
+	@tests/run-jssrcfuzz-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest)"
 
 clean:
 	rm -rf $(BUILD)
