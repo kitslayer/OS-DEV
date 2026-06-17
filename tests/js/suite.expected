@@ -332,4 +332,7 @@ idxnull=1 idxnum=1 lastobj=2
 utcY=1970 utcDay=1 loc=string
 -- regex named capture groups (?<name>…) (M543) --
 ng=01/2024 ngtest=true noncap=true
+-- class extends Error + Error.toString (M544) --
+ce=MyErr:oops:404 isErr=true isMy=true
+estr=Error: boom ecoerce=TypeError: bad
 -- done --

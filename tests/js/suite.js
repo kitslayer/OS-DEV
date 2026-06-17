@@ -357,4 +357,9 @@ print("idxnull="+[1,null,2].indexOf(null), "idxnum="+[1,2,3].indexOf(2), "lastob
 print("utcY="+new Date(0).getUTCFullYear(), "utcDay="+new Date(1704067200000).getUTCDay(), "loc="+typeof new Date(0).toLocaleDateString());  // utcY=1970 utcDay=1 loc=string (no timezone: getUTC*==local; toLocale* render a valid string)
 print("-- regex named capture groups (?<name>…) (M543) --");
 print("ng="+"2024-01".replace(/(?<y>\d+)-(?<m>\d+)/, "$2/$1"), "ngtest="+/(?<a>\d{3})-(?<b>\d{4})/.test("555-1234"), "noncap="+/(?:ab)+/.test("abab"));  // ng=01/2024 ngtest=true noncap=true (named groups compile + capture as numbered; $1/$2 work; non-capturing unchanged)
+print("-- class extends Error + Error.toString (M544) --");
+class MyErr extends Error { constructor(m,c){ super(m); this.name="MyErr"; this.code=c; } }
+var _me; try { throw new MyErr("oops",404); } catch(e){ _me=e; }
+print("ce="+_me.name+":"+_me.message+":"+_me.code, "isErr="+(_me instanceof Error), "isMy="+(_me instanceof MyErr));  // ce=MyErr:oops:404 isErr=true isMy=true (extends a native base; super(m) sets message; instanceof both ways)
+print("estr="+new Error("boom").toString(), "ecoerce="+(""+new TypeError("bad")));  // estr=Error: boom ecoerce=TypeError: bad (Error stringifies as "name: message")
 print("-- done --");

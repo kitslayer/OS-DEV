@@ -1255,6 +1255,20 @@ static const char *val_to_str_inner(val v) {
                 for (int f=1; f<6; f++){ b[p++]=(f<3)?'-':(f==3)?' ':':'; int x=(int)v.o->vals[f].num; b[p++]='0'+(x/10)%10; b[p++]='0'+x%10; }
                 b[p]=0; return b;
             }
+            /* an Error-like object (string name + message) stringifies as "name: message"
+             * (covers `new Error(m)` and `class X extends Error`); else generic. */
+            if (v.o && obj_keyed(v.o)) {
+                const char *nm=0,*msg=0;
+                for (int i=0;i<v.o->n;i++) if (v.o->keys[i] && v.o->vals[i].t==V_STR) {
+                    if (!strcmp(v.o->keys[i],"name")) nm=v.o->vals[i].str;
+                    else if (!strcmp(v.o->keys[i],"message")) msg=v.o->vals[i].str;
+                }
+                if (nm && msg) {
+                    if (!msg[0]) return nm;
+                    long ln=(long)strlen(nm)+2+(long)strlen(msg); char*b=aalloc(ln+1);
+                    if (b){ int p=0; for(const char*s=nm;*s;)b[p++]=*s++; b[p++]=':'; b[p++]=' '; for(const char*s=msg;*s;)b[p++]=*s++; b[p]=0; return b; }
+                }
+            }
             return "[object Object]";
     }
     return "";
@@ -1772,7 +1786,14 @@ static val eval_expr_inner(node *n, env *e) {
              * parent constructor), invoked with the current `this`. */
             if (callee->type==N_SUPER) {
                 val *sup=env_find(e,"@super"), *th=env_find(e,"this");
-                if (!sup || sup->t!=V_FUN) { rt_err("super outside a derived constructor"); return UND(); }
+                if (!sup || !sup->o) { rt_err("super outside a derived constructor"); return UND(); }
+                if (sup->o->native) {   /* native base (e.g. Error): run it, copy its props onto `this` (so super(msg) sets this.message) */
+                    val made = sup->o->native(args, na);
+                    if (th && th->t==V_OBJ && th->o && made.t==V_OBJ && made.o)
+                        for (int i=0;i<made.o->n && !g_oom;i++) obj_set(th->o, made.o->keys[i], made.o->vals[i]);
+                    return UND();
+                }
+                if (sup->t!=V_FUN) { rt_err("super outside a derived constructor"); return UND(); }
                 call_function_this(*sup, th?*th:UND(), args, na); return UND();
             }
             if (callee->type==N_MEMBER && callee->a->type==N_SUPER) {
@@ -1839,7 +1860,7 @@ static val eval_expr_inner(node *n, env *e) {
             obj *P=new_obj(V_OBJ); if(!P){ g_oom=1; return UND(); }
             node *ctor_node=0; val parentC=UND(); int has_parent=0; obj *parent_obj=0;
             if (n->a) {
-                parentC=eval_expr(n->a,e); has_parent=(parentC.t==V_FUN); if(has_parent) parent_obj=parentC.o;
+                parentC=eval_expr(n->a,e); has_parent=(parentC.t==V_FUN || parentC.t==V_NATIVE); if(has_parent) parent_obj=parentC.o;   /* a native base (e.g. class X extends Error) is a valid parent too */
                 if (has_parent && parentC.o->home_proto) { obj *pp=parentC.o->home_proto; for(int i=0;i<pp->n && !g_oom;i++) obj_set(P,pp->keys[i],pp->vals[i]); }
             }
             for (int i=0;i<n->nlist && !g_oom;i++){ node *m=n->list[i];
