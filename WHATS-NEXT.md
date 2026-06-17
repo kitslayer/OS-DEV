@@ -1,6 +1,20 @@
 # What's next
 
-> **Status (503 milestones) — DOOM RUNS.** OS-DEV now runs **id Software's DOOM** (the shareware
+> **Status (519 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
+> games as windowed ring-3 apps: **DOOM** (graphics, keyboard, mouselook, sound effects, and music) and
+> **Quake** — the true-3D successor, software-rendered (actual Half-Life is a closed Win32/GoldSrc title
+> needing a GPU and proprietary assets, so Quake is the realistic "modern game"). Both load their shareware
+> data from the OS's own 64 MiB FAT32 disk, and they run **concurrently** (M519 added FXSAVE/FXRSTOR FP
+> state save so two floating-point apps don't corrupt each other). Getting here (M495-M519, ~25 milestones)
+> built whole new subsystems: a **userspace heap** (malloc/sbrk, fuzz-tested), a **graphics window API**
+> (real per-window pixel canvases — the end of text-grid-only apps), **raw make/break keyboard** + **mouse**
+> (absolute + relative/mouselook), **FPU/SSE**, an **AC'97 audio stack** (PCM, a WAV parser [fuzz-tested],
+> streaming, **background music**, a real WAV **jukebox**, DOOM SFX + a MUS music synth), and a **ms clock**.
+> Plus polish: a mouse paint app, a mouse-zoom Mandelbrot, and a disk-loaded desktop wallpaper. The two
+> game ports reused the proven approach: vendor (doomgeneric / quakegeneric) + a platform layer over the
+> syscalls + a from-scratch libc shim, with subagents doing the bulk under review. **The "best little
+> from-scratch OS" now runs DOOM and Quake — alongside its own browser, TLS stack, and JS engine.**
+> **(M495-M504) DOOM:** OS-DEV runs **id Software's DOOM** (the shareware
 > doomgeneric port) as a windowed ring-3 app: it loads the IWAD from our own FAT32 disk, renders E1M1 in a
 > crisp 640x400 window at ~70 fps, and is keyboard-playable through its menus into a live game. Getting
 > there meant building six new OS capabilities first, each shipped + verified on its own (M496-M501):
