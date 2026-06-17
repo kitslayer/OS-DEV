@@ -322,4 +322,8 @@ fofvar=3
 -- array elision / holes [1,,3] (M536) --
 holelen=3 holeval=undefined holejoin=1,,3
 lead=2 dbl=2 trail=2
+-- new Date(ms) / component ctor / toISOString (M541) --
+epoch=1970-0-1 iso=1970-01-01T00:00:00.000Z
+y2024=2024 day=1 rt=1704067200000
+comp=15/5 diff=1000000
 -- done --

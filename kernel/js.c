@@ -2804,16 +2804,39 @@ static int64_t days_from_civil(int64_t y, int64_t m, int64_t d){
     int64_t doe = yoe*365 + yoe/4 - yoe/100 + doy;
     return era*146097 + doe - 719468;
 }
+/* inverse of days_from_civil: epoch day count -> year / month(1-12) / day. */
+static void civil_from_days(int64_t z, int64_t *yr, int64_t *mo, int64_t *dy){
+    z += 719468;
+    int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    int64_t doe = z - era*146097;                                   /* [0, 146096] */
+    int64_t yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;  /* [0, 399]   */
+    int64_t y = yoe + era*400;
+    int64_t doy = doe - (365*yoe + yoe/4 - yoe/100);                /* [0, 365]   */
+    int64_t mp = (5*doy + 2)/153;                                   /* [0, 11]    */
+    int64_t d = doy - (153*mp+2)/5 + 1;                             /* [1, 31]    */
+    int64_t m = mp < 10 ? mp+3 : mp-9;                              /* [1, 12]    */
+    *yr = y + (m <= 2); *mo = m; *dy = d;
+}
 /* Date() / new Date() -> a V_DATE object holding [year,month,day,hour,min,sec] in
  * vals[0..5] (read from the RTC at construction). Methods via eval_date_method;
  * val_to_str renders "YYYY-MM-DD HH:MM:SS" so it still prints/coerces like before. */
 static val nat_date(val *a, int n){
-    (void)a; (void)n; int y,mo,d,h,mi,s;
+    int64_t y,mo,d,h,mi,s;
+    if(n==1 && a[0].t==V_NUM){              /* new Date(epochMs) — honor the timestamp, don't snapshot "now" */
+        int64_t ms=a[0].num, secs=ms/1000; if(ms<0 && ms%1000) secs--;     /* floor toward -inf */
+        int64_t days=secs/86400, tod=secs-days*86400; if(tod<0){ tod+=86400; days--; }
+        civil_from_days(days,&y,&mo,&d); h=tod/3600; mi=(tod%3600)/60; s=tod%60;
+    } else if(n>=2){                        /* new Date(year, month0, day[, h, m, s]) */
+        y=(int64_t)to_num(a[0]); mo=(int64_t)to_num(a[1])+1;               /* JS month arg is 0-based */
+        d = n>2?(int64_t)to_num(a[2]):1; h = n>3?(int64_t)to_num(a[3]):0;
+        mi= n>4?(int64_t)to_num(a[4]):0; s = n>5?(int64_t)to_num(a[5]):0;
+    } else {                                /* new Date() / new Date("string") — current time (string parse unsupported) */
 #ifndef JS_HOSTTEST
     struct rtc_time t; rtc_now(&t); y=t.year; mo=t.month; d=t.day; h=t.hour; mi=t.min; s=t.sec;
 #else
     y=2026; mo=6; d=13; h=12; mi=0; s=0;
 #endif
+    }
     obj *o=new_obj(V_DATE); if(!o){ g_oom=1; return UND(); }
     arr_push_val(o,NUM(y)); arr_push_val(o,NUM(mo)); arr_push_val(o,NUM(d)); arr_push_val(o,NUM(h)); arr_push_val(o,NUM(mi)); arr_push_val(o,NUM(s));
     return obj_val(o);
@@ -2842,7 +2865,19 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
     if(strcmp(name,"setHours")==0)   { if(nargs) o->vals[3]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
     if(strcmp(name,"setMinutes")==0) { if(nargs) o->vals[4]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
     if(strcmp(name,"setSeconds")==0) { if(nargs) o->vals[5]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
-    if(strcmp(name,"toString")==0||strcmp(name,"toISOString")==0) return STRV(val_to_str(recv));
+    if(strcmp(name,"toString")==0) return STRV(val_to_str(recv));
+    if(strcmp(name,"toISOString")==0||strcmp(name,"toJSON")==0){   /* "YYYY-MM-DDTHH:MM:SS.000Z" (UTC; ms always 000 at second resolution) */
+        char *b=aalloc(28); if(!b) return STRV("");
+        int64_t Y=o->vals[0].num,Mo=o->vals[1].num,D=o->vals[2].num,H=o->vals[3].num,Mi=o->vals[4].num,S=o->vals[5].num; int p=0;
+        b[p++]='0'+(int)((Y/1000)%10); b[p++]='0'+(int)((Y/100)%10); b[p++]='0'+(int)((Y/10)%10); b[p++]='0'+(int)(Y%10); b[p++]='-';
+        b[p++]='0'+(int)((Mo/10)%10); b[p++]='0'+(int)(Mo%10); b[p++]='-';
+        b[p++]='0'+(int)((D/10)%10); b[p++]='0'+(int)(D%10); b[p++]='T';
+        b[p++]='0'+(int)((H/10)%10); b[p++]='0'+(int)(H%10); b[p++]=':';
+        b[p++]='0'+(int)((Mi/10)%10); b[p++]='0'+(int)(Mi%10); b[p++]=':';
+        b[p++]='0'+(int)((S/10)%10); b[p++]='0'+(int)(S%10);
+        b[p++]='.'; b[p++]='0'; b[p++]='0'; b[p++]='0'; b[p++]='Z'; b[p]=0;
+        return STRV(b);
+    }
     rt_err("unknown Date method"); return UND();
 }
 
