@@ -674,8 +674,9 @@ static node *parse_block(lexer *L) {
 }
 
 static node *parse_var(lexer *L) {
+    int block_scoped = peek_kw(L,"let") || peek_kw(L,"const");   /* vs function-scoped `var` */
     advance(L);  /* var/let/const */
-    node *n=mknode(N_VAR); n->list=aalloc(sizeof(node*)*32); n->nlist=0;
+    node *n=mknode(N_VAR); n->num=block_scoped; n->list=aalloc(sizeof(node*)*32); n->nlist=0;
     for (;;) {
         node *decl=mknode(N_PROP);
         if (peek_punc(L,"[")||peek_punc(L,"{")) { decl->b=parse_primary(L); }   /* [..]/{..} destructuring pattern */
@@ -1904,6 +1905,18 @@ static comp CN(void){ comp c; c.kind=C_NORMAL; c.v=UND(); c.label=0; return c; }
  * a labeled one only to its matching label. intern() does NOT dedup, so compare with strcmp. */
 static int label_here(comp c, const char *lbl){ return c.label==0 || (lbl && strcmp(c.label,lbl)==0); }
 
+/* Does this subtree contain a function/arrow? Used by `for(let …)` to decide
+ * whether a fresh per-iteration binding is observable: only a closure can
+ * capture the loop variable, so without one we reuse a single env (no per-
+ * iteration allocation — important on the GC-less arena for big loops). */
+static int node_has_func(node *n, int depth){
+    if(!n || depth>500) return 0;
+    if(n->type==N_FUNC) return 1;
+    if(node_has_func(n->a,depth+1)||node_has_func(n->b,depth+1)||node_has_func(n->c,depth+1)||node_has_func(n->d,depth+1)) return 1;
+    for(int i=0;i<n->nlist;i++) if(node_has_func(n->list[i],depth+1)) return 1;
+    return 0;
+}
+
 static comp eval_stmt_inner(node *n, env *e) {
     if (g_err || g_oom) return CN();
     switch (n->type) {
@@ -1946,10 +1959,19 @@ static comp eval_stmt_inner(node *n, env *e) {
         case N_FOR: {
             env *fe=new_env(e); if(!fe){ g_oom=1; return CN(); }
             if(n->a){ if(n->a->type==N_VAR) eval_stmt(n->a,fe); else eval_expr(n->a,fe); }
+            /* `for(let …)` gives each iteration a FRESH binding of the loop vars
+             * so a closure made in the body captures that iteration's value — but
+             * only bother (allocating an env per iteration) when the body actually
+             * has a closure; otherwise reuse fe, identical to a `var` loop. */
+            int per_iter = (n->a && n->a->type==N_VAR && n->a->num && node_has_func(n->d,0));
             int guard=0;
-            while (!n->b || truthy(eval_expr(n->b,fe))) {
+            for(;;){
+                env *ie=fe;
+                if(per_iter){ ie=new_env(e); if(!ie){ g_oom=1; break; } for(int k=0;k<fe->n;k++) env_define(ie, fe->keys[k], fe->vals[k]); }
+                if(n->b && !truthy(eval_expr(n->b,ie))) break;
                 if(++guard>5000000){rt_err("loop limit");break;}
-                comp c=eval_stmt(n->d,fe); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; if(g_err) break;
+                comp c=eval_stmt(n->d,ie); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; if(g_err) break;
+                if(per_iter){ for(int k=0;k<fe->n;k++) fe->vals[k]=ie->vals[k]; }   /* copy any body mutation back before the update */
                 if(n->c) eval_expr(n->c,fe);
             }
             return CN();

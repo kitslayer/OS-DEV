@@ -334,4 +334,9 @@ print("joinu="+[1,undefined,3].join(","), "joinn="+[null,2].join("-"));  // join
 print("-- Math.max()/min() empty = -+Infinity + global isFinite (M533) --");
 print("maxe="+(Math.max()===-Infinity), "mine="+(Math.min()===Infinity), "maxa="+Math.max(3,7,2));  // maxe=true mine=true maxa=7 (Math.max()/min() with no args are the identity elements)
 print("minreduce="+[5,3,8,1].reduce((m,x)=>Math.min(m,x), Infinity), "fin="+isFinite(42));  // minreduce=1 fin=true (the `reduce(...,Infinity)` min idiom works; global isFinite defined)
+print("-- let per-iteration binding in for-loops (M534) --");
+var _lc=[]; for(let i=0;i<3;i++) _lc.push(()=>i); print("letclo="+_lc.map(g=>g()).join(","));  // letclo=0,1,2 (each iteration's `let i` is a fresh binding the closure captures)
+var _vc=[]; for(var j=0;j<3;j++) _vc.push(()=>j); print("varclo="+_vc[0]()+","+_vc[2]());  // varclo=3,3 (`var` stays function-scoped: all closures share one j)
+var _ln=[]; for(let i=0;i<2;i++) for(let j=0;j<2;j++) _ln.push(()=>i+""+j); print("nestlet="+_ln.map(g=>g()).join(","));  // nestlet=00,01,10,11 (nested let loops each capture independently)
+var _ls=0; for(let i=0;i<100000;i++) _ls+=1; print("letbig="+_ls);  // letbig=100000 (no-closure let loop reuses one env: no per-iteration alloc, no arena OOM)
 print("-- done --");
