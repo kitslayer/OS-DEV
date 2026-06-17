@@ -37,6 +37,7 @@ static void fuzz_one(const unsigned char *data, int len) {
 }
 /* same, for decode_utf8 — exercises the maxlen<1 guard and continuation reads */
 static void fuzz_utf8(const unsigned char *data, int len) {
+    if (len < 0) return;                   /* precondition; also stops GCC inferring malloc(rand()%7) could be negative (->huge) */
     char *b = malloc(len);                 /* exactly len bytes: len==0 makes an s[0] read an OOB */
     if (len) memcpy(b, data, len);
     unsigned cp = 0; int adv = decode_utf8(b, len, &cp);
