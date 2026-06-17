@@ -54,48 +54,79 @@ static inline uint64_t page_up(uint64_t x)   { return (x + PAGE_SIZE - 1) & ~(ui
  * rejects any p_vaddr aimed at kernel/higher-half memory. */
 #define ELF_VADDR_MAX 0x50000000ull
 
-uint64_t elf_load(const void *image, uint64_t maxsz) {
-    const Elf64_Ehdr *eh = image;
+/* A validated PT_LOAD segment: file bytes [file_off, file_off+filesz) of the
+ * image map to [vaddr, vaddr+memsz), the tail beyond filesz being zero (.bss). */
+typedef struct { uint64_t vaddr, memsz, file_off, filesz; } elf_seg_t;
 
+/* Validate the ELF header and locate the program-header table. On success,
+ * fills the phoff/phnum/phentsize/entry out-params and returns 1; else 0. Reads only
+ * the fixed header, fully bounds-checked against maxsz — and guarantees the
+ * whole program-header table lies within the image, so a later per-header read
+ * of sizeof(Elf64_Phdr) bytes at any index can't run past the buffer. Pure: no
+ * memory is mapped or written, which is what lets it be fuzzed on the host. */
+static int elf_check_header(const void *image, uint64_t maxsz,
+                            uint64_t *phoff, uint16_t *phnum,
+                            uint16_t *phentsize, uint64_t *entry) {
+    const Elf64_Ehdr *eh = image;
     if (maxsz < sizeof(Elf64_Ehdr)) return 0;
     if (eh->e_ident[0] != 0x7F || eh->e_ident[1] != 'E' ||
         eh->e_ident[2] != 'L'  || eh->e_ident[3] != 'F')
         return 0;
-    /* the program-header table must lie within the image */
+    /* stride must hold a full header, and the table must lie within the image */
     if (eh->e_phentsize < sizeof(Elf64_Phdr)) return 0;
     if (eh->e_phoff > maxsz ||
         (uint64_t)eh->e_phnum * eh->e_phentsize > maxsz - eh->e_phoff)
         return 0;
+    *phoff = eh->e_phoff; *phnum = eh->e_phnum;
+    *phentsize = eh->e_phentsize; *entry = eh->e_entry;
+    return 1;
+}
 
-    for (uint16_t i = 0; i < eh->e_phnum; i++) {
-        const Elf64_Phdr *ph = (const Elf64_Phdr *)
-            ((const uint8_t *)image + eh->e_phoff + (uint64_t)i * eh->e_phentsize);
-        if (ph->p_type != PT_LOAD)
-            continue;
+/* Validate program header #i (the header table must already be validated by
+ * elf_check_header). Returns 1 = loadable, *seg filled; 0 = skip (not PT_LOAD);
+ * -1 = malformed, reject the whole image. Checks the segment against the image
+ * bounds and the user address range. Pure: reads only header bytes. */
+static int elf_check_phdr(const void *image, uint64_t maxsz, uint64_t phoff,
+                          uint16_t phentsize, uint16_t i, elf_seg_t *seg) {
+    const Elf64_Phdr *ph = (const Elf64_Phdr *)
+        ((const uint8_t *)image + phoff + (uint64_t)i * phentsize);
+    if (ph->p_type != PT_LOAD) return 0;
+    if (ph->p_offset > maxsz || ph->p_filesz > maxsz - ph->p_offset) return -1;
+    if (ph->p_memsz < ph->p_filesz) return -1;
+    if (ph->p_vaddr < PAGE_SIZE) return -1;                         /* no null page */
+    if (ph->p_memsz > ELF_VADDR_MAX || ph->p_vaddr > ELF_VADDR_MAX - ph->p_memsz)
+        return -1;                                                  /* fits below the stack, no overflow */
+    seg->vaddr = ph->p_vaddr; seg->memsz = ph->p_memsz;
+    seg->file_off = ph->p_offset; seg->filesz = ph->p_filesz;
+    return 1;
+}
 
-        /* validate the segment against the image and the user address range */
-        if (ph->p_offset > maxsz || ph->p_filesz > maxsz - ph->p_offset) return 0;
-        if (ph->p_memsz < ph->p_filesz) return 0;
-        if (ph->p_vaddr < PAGE_SIZE) return 0;                         /* no null page */
-        if (ph->p_memsz > ELF_VADDR_MAX || ph->p_vaddr > ELF_VADDR_MAX - ph->p_memsz)
-            return 0;                                                  /* fits below the stack, no overflow */
+uint64_t elf_load(const void *image, uint64_t maxsz) {
+    uint64_t phoff, entry; uint16_t phnum, phentsize;
+    if (!elf_check_header(image, maxsz, &phoff, &phnum, &phentsize, &entry))
+        return 0;
+
+    for (uint16_t i = 0; i < phnum; i++) {
+        elf_seg_t s;
+        int r = elf_check_phdr(image, maxsz, phoff, phentsize, i, &s);
+        if (r == 0) continue;      /* not a loadable segment */
+        if (r < 0)  return 0;      /* malformed segment: reject the image */
 
         /* Map every page this segment touches as a user page (once). */
-        uint64_t start = page_down(ph->p_vaddr);
-        uint64_t end   = page_up(ph->p_vaddr + ph->p_memsz);
+        uint64_t start = page_down(s.vaddr);
+        uint64_t end   = page_up(s.vaddr + s.memsz);
         for (uint64_t v = start; v < end; v += PAGE_SIZE) {
             if (!vmm_translate(v)) {
                 uint64_t frame = pmm_alloc_frame();
+                if (!frame) return 0;              /* out of memory: fail cleanly */
                 vmm_map(v, frame, PTE_WRITABLE | PTE_USER);
                 memset((void *)v, 0, PAGE_SIZE);   /* zero -> covers .bss */
             }
         }
 
         /* Copy the file-backed part of the segment into place. */
-        memcpy((void *)ph->p_vaddr,
-               (const uint8_t *)image + ph->p_offset,
-               ph->p_filesz);
+        memcpy((void *)s.vaddr, (const uint8_t *)image + s.file_off, s.filesz);
     }
 
-    return eh->e_entry;
+    return entry;
 }

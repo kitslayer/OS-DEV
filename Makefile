@@ -208,9 +208,14 @@ heaptest:
 wavtest:
 	@tests/run-wav-tests.sh
 
+# Host-side regression + fuzz test of the ELF64 loader (ASan+UBSan): the ring-3
+# trust boundary — a malformed program must never OOB-read or escape its range.
+elftest:
+	@tests/run-elf-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest)"
 
 clean:
 	rm -rf $(BUILD)
