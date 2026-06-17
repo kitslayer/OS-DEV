@@ -2894,7 +2894,9 @@ static void json_val(val v, int depth){
             if(!obj_keyed(v.o) || v.o->n==0){ js_app("{}"); break; }          /* map/set/empty: no enumerable props */
             js_app("{");
             { int wrote=0; for(int i=0;i<v.o->n;i++){ if(is_internal_key(v.o->keys[i])) continue;   /* hide @@ symbol keys; `wrote` (not i) drives the comma so no dangling separator (M-symbol) */
-                if(wrote){ js_app(","); } wrote=1; js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); val pv=v.o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,v); json_val(pv, depth+1); } if(wrote){ js_nl(depth); } } js_app("}"); break;  /* fire getters during serialization (M425) — targeted to JSON, not the global obj_get hot path */
+                val pv=v.o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,v);   /* fire getters during serialization (M425) — targeted to JSON, not the global obj_get hot path */
+                if(pv.t==V_UNDEF||pv.t==V_FUN||pv.t==V_NATIVE||pv.t==V_SYMBOL) continue;   /* per spec: undefined/function/symbol object properties are OMITTED (only array elements become null) */
+                if(wrote){ js_app(","); } wrote=1; js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); json_val(pv, depth+1); } if(wrote){ js_nl(depth); } } js_app("}"); break;
         default:     js_app("null"); break;   /* undefined/null/function */
     }
     g_depth--;

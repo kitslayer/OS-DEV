@@ -323,4 +323,7 @@ print("norm="+"abc".normalize("NFC"), "concat="+"a".concat("b","c"), "concatnum=
 print("lu="+"abc".toLocaleUpperCase(), "ll="+"ABC".toLocaleLowerCase());  // lu=ABC ll=abc (toLocale* alias the ASCII case mappers)
 print("ra-fn="+"a1b2".replaceAll(/\d/g, m=>"#"), "ra-grp="+"x1y2".replaceAll(/(\w)(\d)/g, "$2$1"));  // ra-fn=a#b# ra-grp=1x2y (replaceAll now drives a regex with a callback / $-group template)
 print("ra-nong="+"a1b2".replaceAll(/\d/, "_"), "rep1="+"a1b2".replace(/\d/, "_"));  // ra-nong=a_b_ rep1=a_b2 (replaceAll replaces every match regardless of /g; replace(re) without /g still replaces only the first)
+print("-- JSON.stringify omits undefined/function object props (M531) --");
+print("u="+JSON.stringify({a:undefined,b:1}), "f="+JSON.stringify({g:function(){},b:2}), "empty="+JSON.stringify({a:undefined}));  // u={"b":1} f={"b":2} empty={} (undefined/function OBJECT properties are omitted per spec)
+print("arr="+JSON.stringify([1,undefined,3]), "nest="+JSON.stringify({o:{a:undefined,b:2}}));  // arr=[1,null,3] nest={"o":{"b":2}} (array elements still become null; omission is recursive)
 print("-- done --");

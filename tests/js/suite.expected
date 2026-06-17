@@ -298,4 +298,7 @@ norm=abc concat=abc concatnum=x12
 lu=ABC ll=abc
 ra-fn=a#b# ra-grp=1x2y
 ra-nong=a_b_ rep1=a_b2
+-- JSON.stringify omits undefined/function object props (M531) --
+u={"b":1} f={"b":2} empty={}
+arr=[1,null,3] nest={"o":{"b":2}}
 -- done --
