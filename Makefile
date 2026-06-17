@@ -241,9 +241,16 @@ jssrcfuzztest:
 htmlentfuzztest:
 	@tests/run-htmlentfuzz-tests.sh
 
-# Run every host-side regression/fuzz/KAT suite ('test' above is the headless boot smoke test).
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest)"
+# In-guest boot assertion: boots the real kernel headless and asserts every
+# bring-up marker is present with no crash (exercises the whole driver stack,
+# not one .c in isolation). SKIPs cleanly if QEMU is absent.
+boottest: $(KERNEL) $(DISK)
+	@tests/run-boot-tests.sh
+
+# Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertion.
+# ('test' above is the human-readable headless boot; 'boottest' is its asserted form.)
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest boottest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + boottest)"
 
 clean:
 	rm -rf $(BUILD)
