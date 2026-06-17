@@ -1,6 +1,6 @@
 # What's next
 
-> **Status (519 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
+> **Status (527 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
 > games as windowed ring-3 apps: **DOOM** (graphics, keyboard, mouselook, sound effects, and music) and
 > **Quake** — the true-3D successor, software-rendered (actual Half-Life is a closed Win32/GoldSrc title
 > needing a GPU and proprietary assets, so Quake is the realistic "modern game"). Both load their shareware
@@ -14,6 +14,29 @@
 > game ports reused the proven approach: vendor (doomgeneric / quakegeneric) + a platform layer over the
 > syscalls + a from-scratch libc shim, with subagents doing the bulk under review. **The "best little
 > from-scratch OS" now runs DOOM and Quake — alongside its own browser, TLS stack, and JS engine.**
+> **(M522-M527) Robustness + trust-boundary hardening.** A focused session on
+> the parts where a bug is silent kernel corruption. **M522:** the Apps menu had
+> grown to 34 entries and overflowed the top of the screen (clipping Browser/
+> Shell/Clock off-screen, unreachable) — reworked into a 2-column menu (render +
+> mouse hit-testing + keyboard left/right column nav), headroom now ~60 entries.
+> **M523:** the ELF64 loader (the ring-3 trust boundary) had no host test and
+> interleaved untrusted-header validation with the page-mapping writes — split
+> out pure `elf_check_header`/`elf_check_phdr` validators (added an OOM guard so
+> a failed frame alloc never maps physical 0) and added an ASan/UBSan fuzz suite
+> (truncations + corruptions + 200k random buffers + a full load round-trip via
+> an mmap-backed guest-memory stub). **M525:** that suite now also loads every
+> shipped app binary (all 29) through `elf_load` as a linker/toolchain
+> regression guard. **M524:** extracted the HTTP/1.x response parsers (chunked
+> decode — which memmoves with attacker-controlled hex sizes — + header scans)
+> from browser.c into a testable `http.c` and fuzzed them (regression + 400k
+> random). **M526:** the kernel heap (`kmalloc`/`kfree`, underlies every kernel
+> allocation) was untestable on host (higher-half base) — parameterized the base
+> (kernel-neutral) and added a 400k-op torture test with per-block pattern +
+> free-list tiling invariants. **M527:** brought tests/README current (13->16
+> suites; each new harness verified to fail when its guard is removed). All 16
+> host suites pass. *In-guest QEMU verification was blocked this session — the
+> environment terminates QEMU (SIGSTKFLT) on launch — so this session stayed in
+> host-verifiable territory; the M522 menu fix is verified by inspection + build.*
 > **(M495-M504) DOOM:** OS-DEV runs **id Software's DOOM** (the shareware
 > doomgeneric port) as a windowed ring-3 app: it loads the IWAD from our own FAT32 disk, renders E1M1 in a
 > crisp 640x400 window at ~70 fps, and is keyboard-playable through its menus into a live game. Getting
