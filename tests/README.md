@@ -10,14 +10,23 @@ cases + deterministic fuzzing.
 ## Running
 
 ```sh
-make check       # run all seven suites (~6s total)
-make jstest      # JS engine     — tests/js/suite.js vs the golden output
-make imgtest     # image decoders — tests/img/img_test.c  (jpeg/png/gif/inflate)
+make check       # run all 16 suites (a few seconds total)
+make jstest      # JS engine      — tests/js/suite.js vs the golden output
+make imgtest     # image decoders — tests/img/img_test.c   (jpeg/png/gif/bmp/inflate)
 make x509test    # X.509 parser   — tests/x509/x509_test.c
-make nettest     # TCP/IP stack   — tests/net/net_test.c  (packet parse + reassembly)
-make fstest      # FAT32 driver   — tests/fs/fs_test.c    (corrupt/cyclic on-disk structures + write stress)
+make nettest     # TCP/IP stack   — tests/net/net_test.c   (packet parse + reassembly)
+make fstest      # FAT32 driver   — tests/fs/fs_test.c     (corrupt/cyclic on-disk structures + write stress)
 make kattest     # crypto KAT     — tests/crypto/crypto_test.c (RFC/FIPS known-answer vectors)
-make svgtest     # SVG rasterizer — tests/svg/svg_test.c    (shapes/paths + adversarial XML fuzz)
+make svgtest     # SVG rasterizer — tests/svg/svg_test.c   (shapes/paths + adversarial XML fuzz)
+make deflatetest # DEFLATE/gzip   — compressor vs the decoder, round-trip
+make pngenctest  # PNG encoder    — encoder vs the decoder, round-trip
+make ziptest     # ZIP extractor  — extraction + corrupt-input fuzz
+make tartest     # tar extractor  — extraction + corrupt-input fuzz
+make heaptest    # userspace malloc — umalloc.c alloc/free regression
+make wavtest     # WAV header     — wav_parse over corrupt RIFF chunks
+make elftest     # ELF64 loader   — tests/elf/elf_test.c   (validators + load round-trip + every shipped app binary)
+make httptest    # HTTP parsers   — tests/http/http_test.c (chunked-transfer decode + header scans)
+make kheaptest   # kernel heap    — tests/kheap/kheap_test.c (kmalloc/kfree split/coalesce/grow torture)
 ```
 
 `make test` is a *different* target — the headless QEMU boot smoke test.
@@ -35,6 +44,15 @@ disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
 | `nettest` | `kernel/net.c` | 150k random Ethernet/IPv4/TCP frames through `tcp_recv_seg`, and 150k crafted `seq`/`dlen` through the 96 KB `ooo_store` reassembly buffer (far-future/past/wraparound). Stubs the NIC + timer. |
 | `fstest`  | `kernel/fat32.c` | **Read path:** a valid minimal FAT32 image then 12k corrupted copies (BPB/FAT/root-dir bytes randomized) through `mount`/`list`/`read`/`find`/`tree` — locks the M435 `cluster_in_range` guard, the cluster-chain cycle guard, and the dir-recursion depth caps (a corrupt/cyclic FAT must never OOB or hang). **Write path:** 8k accumulating `write`/`delete`/`mkdir` ops (the "heavy repeated writes" scenario) — confirms `alloc_cluster`/`add_entry`/`write_fat`/chain-extension are memory-safe (its known fragility is logical/persistence, not OOB). `#include`s fat32.c and stubs the disk (`ata_read`/`ata_write` → an in-memory image) + `vfs_register`. |
 | `kattest`  | `sha256.c` `sha512.c` `aes.c` `aesgcm.c` `chachapoly.c` `hkdf.c` `x25519.c` | **Known-answer** (not fuzz): checks each from-scratch crypto primitive against its published vector — SHA-256/384/512 (FIPS 180-4), HMAC-SHA256 (RFC 4231), HKDF (RFC 5869), AES-128 block (FIPS-197), AES-128-GCM (GCM spec TC1/2), ChaCha20-Poly1305 (RFC 8439 §2.8.2, incl. forged-tag rejection), X25519 (RFC 7748 §5.2/6.1), and **signature verify** — ECDSA P-256/P-384 + RSA-2048 PKCS#1 (vectors openssl-generated + independently re-verified; valid sig accepted, tampered sig rejected), covering the X.509 cert-path-validation crypto. The crypto .c files are compiled as separate translation units (no static collisions); mem* resolves to libc. Locks the TLS 1.3 crypto foundation against silent regression. |
+| `deflatetest` | `kernel/deflate.c` `kernel/inflate.c` | Round-trips the from-scratch DEFLATE/gzip compressor through the decoder (literal/fixed/dynamic-Huffman + LZ77 matches) and confirms byte-exact recovery; ASan/UBSan-clean. |
+| `pngenctest` | `kernel/png_encode.c` `kernel/png.c` | Round-trips the PNG encoder through the decoder over assorted dimensions/patterns (filters + zlib wrapping), asserting pixel-exact recovery; ASan/UBSan-clean. |
+| `ziptest` | `kernel/zip.c` `kernel/inflate.c` | Exact extraction of a multi-entry ZIP (stored + deflated, subdirs, empty/large files) vs the originals, plus a system-`zip`-built archive, plus fuzz: all truncated prefixes, single-byte corruptions, 80k multi-byte mutations, and random buffers must extract cleanly or fail without OOB. |
+| `tartest` | `kernel/tar.c` | Exact extraction of a ustar archive vs the originals, plus truncation + single-byte-corruption + 20k random-buffer fuzz; corrupt input must never OOB. |
+| `heaptest` | `user/umalloc.c` | Regression of the userspace first-fit allocator (malloc/free/calloc/realloc over an sbrk-backed arena): split/coalesce/reuse correctness, ASan/UBSan-clean. |
+| `wavtest` | `kernel/wav.c` | The RIFF/WAVE header parser `wav_parse` (walks untrusted chunk data): valid mono/stereo headers parse correctly, plus a fuzz pass over truncated/corrupt RIFF chunks that must never OOB. |
+| `elftest` | `kernel/elf.c` | The ELF64 loader (the ring-3 trust boundary). A known-good minimal ELF round-trips through `elf_load` (correct entry, file bytes copied to `p_vaddr`, `.bss` tail zeroed, via an mmap-backed guest-memory stub); the pure validators (`elf_check_header`/`elf_check_phdr`) are fuzzed over every truncated prefix, every single-byte header corruption, and 200k random buffers so a malformed ELF can never OOB-read or be accepted with a segment escaping the image or the user range; and **every shipped app binary** (all 29 — shell, the games, DOOM, Quake) is loaded through `elf_load` to guard against a linker/toolchain regression. |
+| `httptest` | `kernel/http.c` | The HTTP/1.x response parsers that read untrusted server/CDN bytes. Regression: chunked bodies, hex/large chunk sizes, chunk extensions, truncation, case-insensitive header scans, and `Location:` extraction with buffer-truncation all produce the expected results. Fuzz: every truncated prefix, every single-byte corruption, and 400k random buffers — in-place de-chunking (which memmoves with attacker-controlled hex sizes) never OOBs or returns a length outside the input, and `find_loc` never overruns its output. |
+| `kheaptest` | `kernel/kheap.c` | The kernel heap `kmalloc`/`kfree`/`kzalloc` (underlies every kernel allocation), run against a real mmap'd arena. 400k random alloc/free ops with a per-block byte pattern re-verified each pass (catches any overlap/corruption), `kzalloc` zeroing, repeated `grow_heap()`, and a free-list walk asserting the blocks tile `[base, heap_end)` exactly with no gaps or cycles; ASan/UBSan-clean. |
 | `svgtest`  | `kernel/svg.c` | The from-scratch integer-only SVG rasterizer (parses untrusted web XML in-kernel). 8 unit cases that must render correctly (rect, viewBox scaling, circle + cubic-bezier path, stroked polygon, named colors, **affine transforms** — `<g>`-group + per-shape `translate`/`scale`/`rotate`/`matrix`, nested-group composition, and the CTM correctly restored after `</g>` — **paint inheritance** — `fill`/`stroke` inherited from the root `<svg>`/enclosing `<g>`, per-shape override, the `inherit` keyword, and inherited paint restored after `</g>` — **and opacity** — `fill-opacity`/`opacity` per shape, group `<g opacity>` inherited, group×element compounding, and `in_alpha` restored after `</g>` — **and gradients** — a linear red→blue across the box + a radial white→black centre→edge, exercising the `<defs>` pre-pass, `fill=url(#id)` resolution and per-pixel evaluation) plus ~520k in-suite fuzz iterations: 100k random bytes, 100k mutations of valid SVG, 320k structured (random shape/path/attr/**transform**/**fill**/**opacity**/**gradient** trees), and adversarial inputs (deep nesting, huge coordinate counts, a huge-coordinate gradient that would overflow the projection's int64 intermediate if unclamped, truncation) — plus a separate **6M-iteration gradient-focused fuzz** run during review. Locks bounds-safety on the scanline-fill crossings buffer, the per-shape point list in caller scratch, the `<g>` transform + paint + opacity stacks, the gradient table/stop caps + the `grad_color_at` fixed-point, and `parse_num` against the UB bugs the author fuzz first caught (negative shifts, `num<<16` int64 overflow). |
 
 ## Validated to catch regressions
@@ -48,6 +66,9 @@ Each fuzz harness is **verified to fail** when its guard is removed:
 - `kattest` is itself the regression check — any change to a primitive's output fails the byte-exact vector comparison; the AEAD forged-tag case also verifies the reject path.
 - `jstest` diffs against the golden, so any output change fails.
 - `svgtest` aborts (ASan/UBSan) if a bounds guard is removed (e.g. the scanline crossings cap or the point-list cap) and fails loudly if a unit case stops rendering its expected pixels; UBSan also re-catches the original `parse_num` negative-shift/overflow if reintroduced.
+- `elftest` fails loudly if `elf_check_header`'s program-header-table bound is removed (a phdr read then runs past the image — the harness flags the broken in-bounds promise).
+- `httptest` aborts (ASan stack-buffer-overflow) if `http_dechunk`'s `sz > room` truncation clamp is removed (the in-place memmove then runs past the body).
+- `kheaptest` aborts (per-block pattern mismatch) if `kmalloc` stops marking a block used (`b->free = 0`) — the same block is handed out twice and the live allocations overlap.
 
 ## Not covered here
 
