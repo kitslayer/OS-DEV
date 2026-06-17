@@ -17,13 +17,27 @@
 #include "kheap.h"
 #include "interrupts.h"
 #include "gdt.h"
+#include "string.h"
 
 #define STACK_SIZE 16384
+#define FXSZ       512                 /* FXSAVE area size */
 
 static task_t *current;
 static int     next_id;
 
 extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
+extern void fpu_save(void *area16);            /* FXSAVE  (kernel/asm/fpu.asm) */
+extern void fpu_restore(const void *area16);   /* FXRSTOR */
+extern uint8_t fpu_template[];                 /* a clean FP state, captured at boot */
+
+/* 16-byte-aligned FXSAVE pointer inside a task's over-allocated fxbuf. */
+static inline void *fxptr(task_t *t) {
+    return (void *)(((uintptr_t)t->fxbuf + 15) & ~(uintptr_t)15);
+}
+static void fx_alloc(task_t *t) {              /* give a task its own FP save area */
+    t->fxbuf = kmalloc(FXSZ + 16);
+    if (t->fxbuf) memcpy(fxptr(t), fpu_template, FXSZ);
+}
 
 static uint64_t active_cr3;     /* the address space currently loaded in CR3 */
 
@@ -59,6 +73,7 @@ void sched_init(void) {
     t->next = t;                /* a ring of one */
     t->cr3 = read_cr3();        /* task 0 runs in the kernel's address space */
     active_cr3 = t->cr3;
+    fx_alloc(t);
     current = t;
 }
 
@@ -76,6 +91,8 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
     t->state = TASK_READY;
     t->cr3 = cr3;             /* set BEFORE the ring insert: no startup race */
     t->proc = proc;
+
+    fx_alloc(t);
 
     uint8_t *stack = kmalloc(stack_size);
     t->stack_base = (uint64_t)stack;
@@ -126,6 +143,8 @@ static void switch_to_next(void) {
     }
     if (next->kstack_top)
         tss_set_rsp0(next->kstack_top);     /* traps from ring 3 land here */
+    if (prev->fxbuf) fpu_save(fxptr(prev));     /* preserve FP/SSE across the switch */
+    if (next->fxbuf) fpu_restore(fxptr(next));
     context_switch(&prev->rsp, next->rsp);
 }
 
@@ -188,6 +207,7 @@ void task_exit(void) {
     }
     if (next->kstack_top)
         tss_set_rsp0(next->kstack_top);
+    if (next->fxbuf) fpu_restore(fxptr(next));   /* the dead task's FP state is discarded */
     context_switch(&dead->rsp, next->rsp);   /* dead->rsp save is discarded */
     /* unreachable */
 }
@@ -203,6 +223,7 @@ void task_exit(void) {
 void task_free(task_t *t) {
     if (!t) return;
     if (t->stack_base) kfree((void *)t->stack_base);
+    if (t->fxbuf) kfree(t->fxbuf);
     kfree(t);
 }
 

@@ -14,6 +14,7 @@ typedef struct task {
     void         *proc;        /* opaque per-task data (userspace app, if any) */
     int           id;
     task_state_t  state;
+    uint8_t      *fxbuf;       /* FXSAVE area (512B + slack, aligned to 16 at use) */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */
