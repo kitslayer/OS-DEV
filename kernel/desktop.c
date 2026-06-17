@@ -83,13 +83,14 @@ static const struct menu_item menu[] = {
     { "Files", KIND_FILES, 0 }, { "Welcome", KIND_WELCOME, 0 },
     { "About", KIND_ABOUT, 0 },
 };
-/* CAPACITY: one column rendered upward from the taskbar fits ~30 entries at
- * 1024x768 (my0 = ty - (MENU_N*MENU_ITEM_H + 4) goes negative at N>=31, clipping
- * the top off-screen — graceful, no fault, but unreadable). Add a 2-column or
- * scrolling menu before exceeding that. Currently 29. */
+/* The Apps menu is laid out in 2 columns rendered upward from the taskbar, so
+ * MENU_PERCOL*MENU_ITEM_H must fit the screen height (17*24+4 = 412px << 734).
+ * That holds ~2*30 = 60 entries before the per-column height clips. */
 #define MENU_N      (int)(sizeof(menu) / sizeof(menu[0]))
 #define MENU_W      150
 #define MENU_ITEM_H 24
+#define MENU_COLS   2
+#define MENU_PERCOL ((MENU_N + MENU_COLS - 1) / MENU_COLS)
 #define TB_CHIPW    124                 /* taskbar window-chip width */
 #define TB_CHIPGAP  6
 #define TB_CHIPX0   (start_x + start_w + 10)
@@ -396,14 +397,15 @@ static void render_scene(void) {
     draw_text(clkx + 14, start_y + 4, clk, 0x9FC0F0);
 
     if (menu_open) {
-        int mh = MENU_N * MENU_ITEM_H + 4, my0 = ty - mh;
-        fb_fill_rect(start_x, my0, MENU_W, mh, 0x1E1E2A);
-        box(start_x, my0, MENU_W, mh, 0x2D6CDF);
+        int mh = MENU_PERCOL * MENU_ITEM_H + 4, mw = MENU_COLS * MENU_W, my0 = ty - mh;
+        fb_fill_rect(start_x, my0, mw, mh, 0x1E1E2A);
+        box(start_x, my0, mw, mh, 0x2D6CDF);
         for (int i = 0; i < MENU_N; i++) {
-            int iy = my0 + 4 + i * MENU_ITEM_H;
+            int col = i / MENU_PERCOL, row = i % MENU_PERCOL;
+            int ix = start_x + col * MENU_W, iy = my0 + 4 + row * MENU_ITEM_H;
             if (i == menu_sel)                                   /* keyboard highlight */
-                fb_fill_rect(start_x + 2, iy, MENU_W - 4, MENU_ITEM_H, 0x2D4A8A);
-            draw_text(start_x + 12, iy + 2, menu[i].label, i == menu_sel ? 0xFFFFFF : 0xD0D8F0);
+                fb_fill_rect(ix + 2, iy, MENU_W - 4, MENU_ITEM_H, 0x2D4A8A);
+            draw_text(ix + 12, iy + 2, menu[i].label, i == menu_sel ? 0xFFFFFF : 0xD0D8F0);
         }
     }
 }
@@ -625,6 +627,8 @@ void desktop_run(void) {
             if (menu_open) {                    /* menu has keyboard focus while open */
                 if (k == 0x11) { menu_sel = (menu_sel + MENU_N - 1) % MENU_N; dirty = 1; }      /* up */
                 else if (k == 0x12) { menu_sel = (menu_sel + 1) % MENU_N; dirty = 1; }          /* down */
+                else if (k == 0x13) { menu_sel = (menu_sel + MENU_N - MENU_PERCOL) % MENU_N; dirty = 1; } /* left col */
+                else if (k == 0x14) { menu_sel = (menu_sel + MENU_PERCOL) % MENU_N; dirty = 1; }          /* right col */
                 else if (k == '\n' || k == '\r') { int s = menu_sel; menu_open = 0; dirty = 1;
                                                    spawn_app(menu[s].kind, menu[s].prog); }
                 else if (k == 27) { menu_open = 0; dirty = 1; }                                 /* Esc */
@@ -715,11 +719,14 @@ void desktop_run(void) {
         }
 
         if (left && !(prev_btn & 1)) {
-            int ty = screen_h - TASKBAR_H, mh = MENU_N*MENU_ITEM_H + 4, my0 = ty - mh;
+            int ty = screen_h - TASKBAR_H, mh = MENU_PERCOL*MENU_ITEM_H + 4;
+            int mw = MENU_COLS*MENU_W, my0 = ty - mh;
             if (menu_open) {
-                if (in_rect(mx, my, start_x, my0, MENU_W, mh)) {
-                    int idx = (my - (my0 + 4)) / MENU_ITEM_H;
-                    if (idx >= 0 && idx < MENU_N) spawn_app(menu[idx].kind, menu[idx].prog);
+                if (in_rect(mx, my, start_x, my0, mw, mh)) {
+                    int col = (mx - start_x) / MENU_W, row = (my - (my0 + 4)) / MENU_ITEM_H;
+                    int idx = col * MENU_PERCOL + row;
+                    if (col >= 0 && col < MENU_COLS && row >= 0 && idx >= 0 && idx < MENU_N)
+                        spawn_app(menu[idx].kind, menu[idx].prog);
                 }
                 menu_open = 0; dirty = 1;
             } else if (in_rect(mx, my, start_x, start_y, start_w, start_h)) {
