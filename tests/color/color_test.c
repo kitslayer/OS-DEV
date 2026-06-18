@@ -43,6 +43,9 @@ int main(void) {
     expect("rgb(50%,0,0)", 0x017F0000);           /* 50% of 255 = 127 (integer division) */
     expect("red", 0x01CC0000);
     expect("STEELBLUE", 0x013672A0);               /* case-insensitive named */
+    expect("white", 0x01FFFFFF);                    /* the most common keyword — was missing before M588 */
+    expect("lightgray", 0x01D3D3D3);
+    expect("aqua", 0x01008B8B);
     expect("notacolor", 0);
     expect("", 0);
     expect("#", 0);                                /* bare # */

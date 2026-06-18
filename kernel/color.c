@@ -101,6 +101,12 @@ uint32_t parse_color(const char *v, int vl) {
         {"coral",0xD0522D},{"salmon",0xC0593B},{"turquoise",0x209888},{"tan",0x8B7355},
         {"darkred",0x8B0000},{"darkblue",0x00008B},{"darkgreen",0x006400},{"darkgray",0x595959},
         {"darkgrey",0x595959},{"slategray",0x5A6A78},{"slategrey",0x5A6A78},{"steelblue",0x3672A0},
+        /* common CSS keywords that were missing — `white` especially is everywhere */
+        {"white",0xFFFFFF},{"whitesmoke",0xF5F5F5},{"aqua",0x008B8B},{"fuchsia",0xB000B0},
+        {"lightgray",0xD3D3D3},{"lightgrey",0xD3D3D3},{"lightblue",0xADD8E6},{"lightgreen",0x90C878},
+        {"lightyellow",0xF8F8C0},{"skyblue",0x6CA6CD},{"hotpink",0xD0508A},{"khaki",0xBDB76B},
+        {"beige",0xD8D0B8},{"chocolate",0xA0522D},{"firebrick",0xB02020},{"forestgreen",0x228B22},
+        {"royalblue",0x4060D0},{"orchid",0xB060B0},{"sienna",0xA0522D},{"plum",0xC080C0},
     };
     char buf[16]; int p = 0;
     for (int i = 0; i < vl && p < 15; i++) buf[p++] = (char)lc(v[i]);
