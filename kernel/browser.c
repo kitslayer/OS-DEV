@@ -1843,7 +1843,40 @@ static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-han
     b->raw[live_end+delta]=0;
     parse_html(b,b->raw+b->bodyoff,b->bodylen);
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); }
+/* fetch() backing for page JS (M685): a blocking GET (HTTP or, for https://, TLS) into a
+ * scratch buffer, returning just the response BODY + the parsed status. Runs synchronously
+ * on the same thread that already fetched the page, AFTER that fetch completed, so the
+ * net/TLS stack is idle (a JS fetch is just another sequential get, like the per-page
+ * image fetches). Its own kmalloc'd scratch — never b->raw — so it can't clobber the page
+ * being rendered. */
+static int browser_fetch(const char *url, char *out, int outmax, int *status) {
+    if (!url || outmax <= 0) return -1;
+    char host[96];
+    const char *path = url_split(url, host, sizeof(host));
+    int https = startsw(url, "https://");
+    char *raw = kmalloc(RAW_MAX);
+    if (!raw) return -1;
+    int n = https ? tls_get(host, path, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
+                  : http_get(host, path, raw, RAW_MAX - 1);
+    if (n <= 0) { kfree(raw); return -1; }                   /* DNS/connect/TLS/read failure -> fetch() rejects */
+    raw[n] = 0;
+    int st = 0;                                              /* parse "HTTP/1.x NNN ..." */
+    { const char *sp = raw; while (*sp && *sp != ' ') sp++; while (*sp == ' ') sp++;
+      for (int d = 0; d < 3 && sp[d] >= '0' && sp[d] <= '9'; d++) st = st*10 + (sp[d]-'0'); }
+    *status = st ? st : 200;
+    const char *body = raw; int j;                           /* skip headers: find CRLFCRLF (or LFLF) */
+    for (j = 0; j+1 < n; j++) {
+        if (j+3 < n && raw[j]=='\r' && raw[j+1]=='\n' && raw[j+2]=='\r' && raw[j+3]=='\n') { body = raw+j+4; break; }
+        if (raw[j]=='\n' && raw[j+1]=='\n') { body = raw+j+2; break; }
+    }
+    int blen = n - (int)(body - raw);
+    if (blen < 0) blen = 0;
+    if (blen > outmax) blen = outmax;
+    memcpy(out, body, (unsigned long)blen);
+    kfree(raw);
+    return blen;
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
