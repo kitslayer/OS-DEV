@@ -62,6 +62,12 @@ int main(void) {
     expect("&#zz;", 0, 0);             /* non-numeric after &# */
     expect("&", 0, 0);                 /* bare '&' */
     expect("&#99999999;", 11, ' ');    /* huge numeric ref: clamped, decodes to a char */
+    expect("&le;", 4, '<'); expect("&ge;", 4, '>'); expect("&asymp;", 7, '~');   /* math entities (M591) */
+    /* uni_to_ascii math/arrow folds (M591): common technical-page symbols -> nearest ASCII */
+    CHECK(uni_to_ascii(0x2264)=='<' && uni_to_ascii(0x2265)=='>', "uni <= >= -> < >");
+    CHECK(uni_to_ascii(0x2192)=='>' && uni_to_ascii(0x2190)=='<', "uni arrows -> > <");
+    CHECK(uni_to_ascii(0x2248)=='~' && uni_to_ascii(0x2212)=='-', "uni approx/minus -> ~ -");
+    CHECK(uni_to_ascii(0x00E9)=='e' && uni_to_ascii(0x2014)=='-', "uni existing folds intact (é, em-dash)");
     /* decode_utf8 regression */
     { unsigned cp; int adv;
       adv=decode_utf8("A",1,&cp);            CHECK(adv==1 && cp=='A', "utf8 ascii");

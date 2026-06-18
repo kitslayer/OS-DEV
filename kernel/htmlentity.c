@@ -28,6 +28,14 @@ char uni_to_ascii(unsigned v) {
         case 0x00AB: case 0x00BB: return '"';                 /* « » */
         case 0x00B0: return 'o';                              /* ° degree (approx) */
         case 0x20AC: return 'E';                              /* € (approx) */
+        /* common math + arrow symbols -> nearest ASCII (matches the &rarr;/&le; etc.
+         * entity folds); without these they'd vanish to a space on technical pages */
+        case 0x2192: case 0x21D2: return '>';                 /* → ⇒ */
+        case 0x2190: case 0x21D0: return '<';                 /* ← ⇐ */
+        case 0x2191: return '^';  case 0x2193: return 'v';    /* ↑ ↓ */
+        case 0x2264: return '<';  case 0x2265: return '>';    /* ≤ ≥ */
+        case 0x2248: return '~';                              /* ≈ approx */
+        case 0x2212: return '-';                              /* − minus */
     }
     /* Fold Latin-1 Supplement accented letters to their base ASCII letter so
      * numeric refs like &#233; (é) render as 'e' instead of a blank. */
@@ -120,6 +128,9 @@ int decode_entity(const char *s, int maxlen, char *out) {
     if (ent_is(s, len, "&uarr;") ) { *out = '^'; return len; }
     if (ent_is(s, len, "&darr;") ) { *out = 'v'; return len; }
     if (ent_is(s, len, "&harr;") || ent_is(s, len, "&minus;")) { *out = '-'; return len; }
+    if (ent_is(s, len, "&le;")  ) { *out = '<'; return len; }   /* ≤ ≥ ≈ -> nearest ASCII (match the codepoint fold) */
+    if (ent_is(s, len, "&ge;")  ) { *out = '>'; return len; }
+    if (ent_is(s, len, "&asymp;")) { *out = '~'; return len; }
     if (ent_is(s, len, "&plusmn;")) { *out = '+'; return len; }
     if (ent_is(s, len, "&prime;") ) { *out = '\''; return len; }
     if (ent_is(s, len, "&Prime;") ) { *out = '"'; return len; }
