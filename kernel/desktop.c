@@ -60,6 +60,7 @@ static uint32_t *backbuffer;
 static uint32_t *scenebuf;          /* cached rendered scene (no cursor) */
 static int screen_w, screen_h;
 static int spawn_n, menu_open, menu_sel;   /* menu_sel: keyboard-highlighted item */
+static int help_open;                       /* F1: keyboard-shortcut help overlay */
 static int start_x = 8, start_y, start_w = 110, start_h = 24;
 
 struct menu_item { const char *label; int kind; const char *prog; };
@@ -173,7 +174,7 @@ static void draw_content(const window_t *w) {
         const char *L[] = { "Welcome to OS-DEV!", "",
             "A from-scratch x86_64 OS", "with its own desktop.", "",
             "- drag the title bar to move", "- drag the corner to resize",
-            "- Apps menu (click or F9) runs apps", "- F2 switch F4 max F5/6 tile  F12 shot" };
+            "- Apps menu (click or F9) runs apps", "- press F1 for all keyboard shortcuts" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) draw_text(bx, by+i*18, L[i], 0x202028);
         break;
     }
@@ -408,6 +409,35 @@ static void render_scene(void) {
             draw_text(ix + 12, iy + 2, menu[i].label, i == menu_sel ? 0xFFFFFF : 0xD0D8F0);
         }
     }
+
+    /* F1 help overlay: a centered panel listing every keyboard shortcut + the
+     * mouse gestures. Drawn last so it sits on top of everything. */
+    if (help_open) {
+        static const char *H[] = {
+            "F1    this help",        "F2    switch window",
+            "F3    minimize",         "F4    maximize / restore",
+            "F5    snap left",        "F6    snap right",
+            "F8    close window",     "F9    Apps menu",
+            "F12   screenshot to disk",
+            "",
+            "Mouse: drag the title bar to move a window,",
+            "drag the bottom-right corner to resize,",
+            "click [x] to close, click a taskbar chip to",
+            "raise (or restore) that window.",
+            "",
+            "Press Esc or F1 to close this help.",
+        };
+        int n = (int)(sizeof(H) / sizeof(H[0]));
+        int pw = 380, ph = n * 18 + 40;
+        int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
+        fb_fill_rect(px, py, pw, ph, 0x16161F);
+        box(px, py, pw, ph, 0x2D6CDF);
+        vgrad(px, py, pw, 26, 0x3A78D8, 0x2C66D6);            /* title bar */
+        fb_fill_rect(px, py, pw, 1, lerp(0x3A78D8, 0xFFFFFF, 1, 2));
+        draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Keyboard Shortcuts", 0xFFFFFF);
+        for (int i = 0; i < n; i++)
+            draw_text(px + 16, py + 34 + i * 18, H[i], 0xCFD8EC);
+    }
 }
 
 /* Last position at which we painted the cursor into the back buffer, so a
@@ -620,6 +650,14 @@ void desktop_run(void) {
 
         int k;
         while ((k = input_trygetchar()) >= 0) {
+            if (k == 0x1D) {                    /* F1: toggle the keyboard-shortcut help overlay */
+                help_open = !help_open; if (help_open) menu_open = 0; dirty = 1;
+                continue;
+            }
+            if (help_open) {                    /* help overlay has focus: Esc/F1 close, swallow the rest */
+                if (k == 27) { help_open = 0; dirty = 1; }
+                continue;
+            }
             if (k == 0x19) {                    /* F9: toggle the Apps menu (keyboard) */
                 menu_open = !menu_open; menu_sel = 0; dirty = 1;
                 continue;

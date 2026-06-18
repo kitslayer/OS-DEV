@@ -139,6 +139,7 @@ static void keyboard_handler(struct registers *r) {
         shift_down = true;
         return;
     }
+    if (sc == 0x3B) { input_push(0x1D); return; }   /* F1 -> WM: keyboard-shortcut help */
     if (sc == 0x3C) { input_push(0x0E); return; }   /* F2 -> WM: cycle window focus  */
     if (sc == 0x3D) { input_push(0x18); return; }   /* F3 -> WM: minimize window     */
     if (sc == 0x3E) { input_push(0x0F); return; }   /* F4 -> WM: maximize/restore    */
