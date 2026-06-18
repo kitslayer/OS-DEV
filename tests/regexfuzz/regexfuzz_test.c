@@ -59,6 +59,19 @@ int main(void) {
     CHECK(matches("a{2,3}", "aaa", 0) == 1, "bounded quantifier");
     CHECK(matches("xyz", "abc", 0) == 0, "no match");
     CHECK(matches("(?:ab)+", "abab", 0) == 1, "non-capturing group");
+    /* new constructs (M642-M646): assert correct matching, not just no-crash */
+    CHECK(matches("cat\\b", "cat cats", 0) == 1, "\\b word boundary");
+    CHECK(matches("\\bcat", "scatter", 0) == 0, "\\b: no boundary mid-word");
+    CHECK(matches("(ab)\\1", "abab", 0) == 1, "backreference matches");
+    CHECK(matches("(ab)\\1", "abcd", 0) == 0, "backreference no-match");
+    CHECK(matches("foo(?=bar)", "foobar", 0) == 1, "positive lookahead");
+    CHECK(matches("foo(?=bar)", "foobaz", 0) == 0, "positive lookahead fail");
+    CHECK(matches("foo(?!bar)", "foobaz", 0) == 1, "negative lookahead");
+    CHECK(matches("^b$", "a\nb", 0) == 0, "^$ string-anchored without m");
+    CHECK(matches("^b$", "a\nb", "m") == 1, "^$ per-line with m flag");
+    CHECK(matches("a.b", "a\nb", 0) == 0, ". excludes newline without s");
+    CHECK(matches("a.b", "a\nb", "s") == 1, ". matches newline with s flag");
+    CHECK(matches("\\x41", "A", 0) == 1, "\\xHH hex escape");
     CHECK(matches("HELLO", "hello", "i") == 1, "case-insensitive flag");
     CHECK(matches("<.+?>", "<a><b>", 0) == 1, "lazy quantifier compiles+runs");
     printf("regression: %s\n", fails ? "FAILURES" : "ok (known patterns match correctly)");
@@ -67,7 +80,10 @@ int main(void) {
     const char *evil[] = {
         "(a+)+$", "(a*)*", "(a|a)*b", "(.*)*", "(a+)+(b+)+",
         "a{1,1000000}", "((((((((((a))))))))))", "[a-", "\\", "(", ")", "[", "*", "+?", "a**",
-        "(?:", "\\d{0,}", "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)", "(?:x){5,2}", 0 };
+        "(?:", "\\d{0,}", "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)", "(?:x){5,2}",
+        /* new constructs (M642-M646): backrefs + lookahead recursion under ReDoS shapes */
+        "(a+)\\1", "(a+)+\\1", "((a)\\2)+", "(?=(a+)+)", "(?!a)*", "(?=.*a)(?=.*b)c",
+        "\\b(a+)+\\b", "(?:a+)+$", "\\1", "(?=", "(?!", "a{2,3}\\b\\B", 0 };
     for (int i = 0; evil[i]; i++) {
         char aaa[256]; for (int k = 0; k < 255; k++) aaa[k] = 'a'; aaa[255] = 0;
         fuzz_one(evil[i], (int)strlen(evil[i]), aaa, 255, 0);
@@ -76,9 +92,9 @@ int main(void) {
 
     /* ---- fuzz: random patterns biased to regex metachars x random subjects ---- */
     srand(1313);
-    const char *meta = "()[]{}|.*+?^$\\-,0123abc";
+    const char *meta = "()[]{}|.*+?^$\\-,0123abc=!:xB";   /* =!: -> (?= (?! (?: ; x -> \x ; B -> \B (M642-M646) */
     int mlen = (int)strlen(meta);
-    const char *flagset[] = { 0, "i", "g", "gi" };
+    const char *flagset[] = { 0, "i", "g", "gi", "m", "s", "ms", "gms" };
     for (int trial = 0; trial < 200000; trial++) {
         int plen = rand() % 24;
         char pat[24];
@@ -86,7 +102,7 @@ int main(void) {
         int slen = rand() % 48;
         char subj[48];
         for (int i = 0; i < slen; i++) subj[i] = (trial & 2) ? (char)('a' + rand() % 3) : (char)rand();
-        fuzz_one(pat, plen, subj, slen, flagset[rand() % 4]);
+        fuzz_one(pat, plen, subj, slen, flagset[rand() % 8]);
     }
 
     printf("fuzz: ReDoS shapes + 200000 random pattern/subject pairs -> %s\n",
