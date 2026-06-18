@@ -37,6 +37,22 @@ import argparse, json, os, socket, subprocess, sys, tempfile, time, shutil
 
 SCREEN_W, SCREEN_H = 1024, 768          # the desktop's mode (boot console is 640x480)
 
+# Map a literal character to its HMP `sendkey` name (so `type` can send URLs,
+# paths, code, etc. — not just lowercase words). Returns None for unknown chars.
+_UNSHIFTED = {" ": "spc", ".": "dot", "/": "slash", "-": "minus", "=": "equal",
+              ";": "semicolon", "'": "apostrophe", ",": "comma", "`": "grave_accent",
+              "[": "bracket_left", "]": "bracket_right", "\\": "backslash", "\t": "tab"}
+_SHIFTED = {":": "semicolon", "?": "slash", "_": "minus", "+": "equal", "\"": "apostrophe",
+            "(": "9", ")": "0", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5",
+            "^": "6", "&": "7", "*": "8", "<": "comma", ">": "dot", "~": "grave_accent",
+            "{": "bracket_left", "}": "bracket_right", "|": "backslash"}
+def char_keyname(ch):
+    if ch.islower() or ch.isdigit():       return ch
+    if ch.isupper():                        return "shift-" + ch.lower()
+    if ch in _UNSHIFTED:                    return _UNSHIFTED[ch]
+    if ch in _SHIFTED:                      return "shift-" + _SHIFTED[ch]
+    return None
+
 class Mon:
     """A QEMU HMP monitor over a unix socket (text commands)."""
     def __init__(self, path):
@@ -150,7 +166,8 @@ def main():
             if   op == "key":      mon.cmd("sendkey " + t[1])
             elif op == "type":
                 for ch in c[len("type"):].strip():
-                    mon.cmd("sendkey " + ({" ": "spc", ".": "dot", "/": "slash", "-": "minus"}.get(ch, ch)))
+                    k = char_keyname(ch)
+                    if k: mon.cmd("sendkey " + k)
             elif op == "click":    qmp.click(int(t[1]), int(t[2]))
             elif op == "dblclick": qmp.click(int(t[1]), int(t[2]), 2)
             elif op == "move":     qmp.move(int(t[1]), int(t[2]))
