@@ -29,6 +29,16 @@ static const uint8_t g_mac[6] = { 2, 0, 0, 0, 0, 1 };
 const uint8_t *e1000_mac(void) { return g_mac; }
 int e1000_send(const void *frame, uint16_t len) { (void)frame; return len; }
 void kprintf(const char *fmt, ...) { (void)fmt; }
+/* net.c's net_demo() calls into tls.c for the boot HTTPS self-test; stub it out
+ * here (this suite fuzzes the packet/reassembly path, not TLS). */
+int tls_get(const char *h, const char *p, uint8_t *o, int m, uint32_t s) {
+    (void)h; (void)p; (void)o; (void)m; (void)s; return -1;
+}
+int tls_cert_status(void)    { return -2; }
+int tls_chain_anchored(void) { return 0; }
+int tls_host_match(void)     { return -2; }
+const char *tls_leaf_cn(void)     { return ""; }
+const char *tls_leaf_expiry(void) { return ""; }
 
 #include "net.c"   /* the static tcp_recv_seg / ooo_store + the reassembly globals */
 
