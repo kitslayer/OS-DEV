@@ -1,5 +1,12 @@
 # What's next
 
+> **(M741) Checkers — highlights the computer's last move (incl. multi-jumps).** Mirroring chess M740,
+> `user/checkers.c` tracks the CPU's move — the first from-square and the final landing square of its slide or
+> jump chain — and renders both in a distinct colour, so you can follow what it did (multi-jump captures were
+> especially hard to read mid-board). App-only change (not test-coupled; last full `make check` at M739
+> green). Verified in-guest: with the cursor moved aside, the CPU's reply shows its origin and destination
+> highlighted, isolated from the cursor.
+
 > **(M740) Chess — highlights the computer's last move.** After the CPU replied it was hard to see what it
 > played (you had to diff the board). Now `user/chess.c` tracks the last move's from/to squares and renders
 > them in bright cyan — the vacated square as a `*`, the moved piece in cyan — for both your move and the

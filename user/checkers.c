@@ -15,6 +15,7 @@
 static int b[8][8];                 /* 0 empty; you: 1 man 2 king (move up); cpu: -1 man -2 king (move down) */
 static int cr = 5, cc = 0, sr = -1, sc = -1;   /* cursor + selected square */
 static int turn = 1;                /* 1 = you, -1 = cpu */
+static int lfr=-1, lfc=-1, ltr=-1, ltc=-1;   /* CPU's last move from/to (highlighted) */
 static int over, youwin;
 static const char *msg;
 
@@ -97,6 +98,7 @@ static void check_end(void) {
 
 /* CPU: greedy — must capture if able (and continue multi-jumps); else a random legal slide. */
 static void cpu_turn(void) {
+    int fr0=-1, fc0=-1, tr1=-1, tc1=-1;          /* first-from + last-to, for the highlight */
     for (;;) {
         if (side_has_jump(-1)) {
             /* find any cpu piece that can jump, prefer continuing a chain */
@@ -107,7 +109,7 @@ static void cpu_turn(void) {
                     if (in(lr,lc)&&enemy(b[mr][mc],-1)&&b[lr][lc]==0){ fr=r;fc=c;tr=lr;tc=lc;break; } }
             }
             if (fr<0) break;
-            do_move(fr,fc,tr,tc);
+            if (fr0<0){ fr0=fr; fc0=fc; } do_move(fr,fc,tr,tc); tr1=tr; tc1=tc;
             if (piece_can_jump(tr,tc)) {                 /* multi-jump continuation */
                 /* re-select the same piece next loop by leaving it; simplest: loop again, it'll be found */
                 continue;
@@ -123,10 +125,12 @@ static void cpu_turn(void) {
             }
             if (m==0) break;
             int p = (int)(rnd()%(unsigned)m);
+            fr0=fr[p]; fc0=fc[p]; tr1=tr[p]; tc1=tc[p];
             do_move(fr[p],fc[p],tr[p],tc[p]);
             break;
         }
     }
+    if (fr0>=0){ lfr=fr0; lfc=fc0; ltr=tr1; ltc=tc1; }
     turn = 1;
     if (!over) { check_end(); if (!over) msg = side_has_jump(1) ? "Your move - you MUST jump" : "Your move"; }
 }
@@ -142,8 +146,10 @@ static void render(void) {
         for (int c = 0; c < 8; c++) {
             int v = b[r][c], isj, cur=(r==cr&&c==cc), selpc=(r==sr&&c==sc);
             int dest = (sr>=0) && legal_dest(sr,sc,r,c,mj,&isj);
+            int islast = (r==lfr&&c==lfc) || (r==ltr&&c==ltc);
             char ch = v==1?'o':v==2?'O':v==-1?'x':v==-2?'X':(dest?'*':((r+c)&1?'.':' '));
             int col = v>0?2:v<0?7:(dest?10:8);
+            if (islast && !dest) col = 14;                /* CPU's last move: yellow */
             if (selpc) col = 11; else if (cur) col = 15;
             sys_setcolor(col);
             char cell[4]; cell[0]=cur?'[':selpc?'(':' '; cell[1]=ch; cell[2]=cur?']':selpc?')':' '; cell[3]=0;
@@ -160,7 +166,7 @@ static void reset(void) {
         if ((r+c)&1) { if (r<3) b[r][c]=-1; else if (r>4) b[r][c]=1; else b[r][c]=0; }
         else b[r][c]=0;
     }
-    cr=5; cc=0; sr=sc=-1; turn=1; over=0; youwin=0; msg="Your move";
+    cr=5; cc=0; sr=sc=-1; turn=1; over=0; youwin=0; lfr=lfc=ltr=ltc=-1; msg="Your move";
 }
 
 int main(void) {
