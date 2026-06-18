@@ -1,18 +1,21 @@
 # What's next
 
-> **(M566, M580-M581) Browser untrusted-parser fuzzing trilogy — extracted + fuzzed.** The browser parses
-> a hostile server's bytes on the guard-page-less kernel stack; the cleanly-separable parsers are now
-> lifted into their own `.c` and host-fuzzed under ASan/UBSan (the M524/M546 pattern), each verified as a
-> real oracle (loosen a bound → ASan abort at the exact line): **M566** `htmlattr.c`
-> (`find_attr`/`has_attr`/`attr_int` — tag attribute scanners); **M580** `url.c` (`url_split`/
-> `resolve_img_url` — address bar / `<a href>` / `<img src>` / redirects, into fixed buffers); **M581**
-> `color.c` (`parse_color` — `#hex`/`rgb()`/`hsl()`/named, with clamped integer math). Each extraction is
-> verbatim (diffed byte-identical) and verified behavior-preserving in-guest — the browser still navigates
-> to https://example.com and renders its CSS-colored home page identically. The main `parse_html`
-> tokenizer stays too coupled to `browser_t` to fuzz in isolation, so it's guarded end-to-end by
-> `browsertest` instead. `make check` is now **26 suites** (23 host + 3 in-guest). Marquee features
-> re-confirmed in-guest by framebuffer screenshot this session: the desktop, the browser (home + real
-> HTTPS), Mandelbrot, the System Monitor, every window gesture — and **DOOM** (E1M1 + HUD).
+> **(M566, M580-M585) Browser untrusted-parser fuzzing — every scanner extracted + fuzzed, 2 CSS fixes.**
+> The browser parses a hostile server's bytes on the guard-page-less kernel stack; all the cleanly-
+> separable scanners are now lifted into their own `.c` and host-fuzzed under ASan/UBSan (the M524/M546
+> pattern), each a verified oracle (loosen a bound → ASan abort at the exact line): **M566** `htmlattr.c`
+> (tag attribute scanners); **M580** `url.c` (`url_split`/`resolve_img_url` — address bar/`<a href>`/
+> `<img src>`/redirects); **M581** `color.c` (`parse_color` — `#hex`/`rgb()`/`hsl()`/named, clamped int
+> math); **M583** `cssprop.c` (`style_prop` — the inline-style declaration scanner all per-property style
+> helpers build on). Each extraction is verbatim (diffed byte-identical) and verified behavior-preserving
+> in-guest. The review/fuzz then surfaced + fixed two real CSS-correctness gaps in `style_prop`: **M584**
+> it now accepts whitespace before the `:` (valid CSS `prop : value`), and **M585** it honors the cascade
+> (a later duplicate declaration wins, `color:red;color:blue` → blue) — both purely additive (home page
+> renders byte-identically). The main `parse_html` tokenizer stays too coupled to `browser_t` to fuzz in
+> isolation, so it's guarded end-to-end by `browsertest`. `make check` is now **27 suites** (24 host + 3
+> in-guest). Marquee features re-confirmed in-guest by framebuffer screenshot this session: the desktop,
+> the browser (home + real HTTPS), Mandelbrot, the System Monitor, every window gesture — and **DOOM**
+> (E1M1 + HUD).
 
 > **(M574-M578) JS engine — closed the documented gaps; coercion + regex + JSON now spec-complete.**
 > With QEMU back (so each change is verifiable in-guest), a focused pass finished the JS engine's long-tail:
