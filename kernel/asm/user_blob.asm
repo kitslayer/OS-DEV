@@ -1,9 +1,11 @@
 ; user_blob.asm — embed the compiled userspace program ELFs into the kernel.
 ;
-; We have no general program loader from disk yet, so each user program rides
-; along inside the kernel binary. The build links user/<prog>.c into
-; build/<prog>.elf; here we incbin them and export start symbols the kernel's
-; program registry (kernel/app.c) reads.
+; The built-in apps ride along inside the kernel binary so they're always
+; available without a disk. (The kernel can ALSO load an ELF from the FAT32
+; disk at runtime -- `run NAME.ELF`, via app_spawn_from_file in kernel/app.c --
+; but these embedded ones need no filesystem.) The build links user/<prog>.c
+; into build/<prog>.elf; here we incbin them and export the start symbols the
+; kernel's program registry (kernel/app.c) reads.
 
 section .rodata
 global shell_elf_start, shell_elf_end

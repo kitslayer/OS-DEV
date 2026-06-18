@@ -1,5 +1,14 @@
 # What's next
 
+> **(M731) Docs/correctness — the disk ELF loader is real (the embed comment was stale).** `kernel/app.c`
+> already has `app_spawn_from_file()`, wired in `kernel/syscall.c` so `run NAME.ELF` falls back to loading an
+> ELF straight from the FAT32 disk when the name isn't a built-in; `mkfatfs` even ships `CALC.ELF` for it and
+> `GUIDE.TXT` documents `run NAME.ELF`. But `user_blob.asm` still claimed *"we have no general program loader
+> from disk yet"* — corrected that comment to describe reality (the embedded apps need no disk; the kernel
+> also loads ELFs from disk at runtime). Verified in-guest: `run calc.elf` opens a window titled **calc.elf**
+> (loaded from disk via the path-as-title path, not the embedded "Calc"), which also confirms the M720/M722
+> `fat32_read` perf rewrite reads binary files correctly.
+
 > **(M730) New game — Frogger (cross the traffic).** `user/frogger.c`: hop your frog upward across lanes of
 > cars, each lane scrolling at its own speed and direction, to reach the goal bank at the top (+10, then start
 > again from the bottom). Touch a car and you lose a life; three lives, best saved to FROGGER.HI. Real-time —
