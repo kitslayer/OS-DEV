@@ -341,4 +341,8 @@ repl={"a":1,"c":3} nest={"a":1,"b":{"a":2}} none={"a":1,"b":2}
 tpc=custom! tps=custom! tpt=xcustom!
 tpcls=$5 tpjoin=$1|$2
 tpplain=[object Object] tprec=[object Object]
+-- ToPrimitive: a user object's valueOf() in numeric coercion (M576) --
+vosub=4 vonum=7 vouny=9
+volt=true vowins=5 vostr=8
+vocls=42 vorec=0 voplain=0
 -- done --

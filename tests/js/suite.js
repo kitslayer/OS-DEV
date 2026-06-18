@@ -370,4 +370,9 @@ print("tpc="+(""+_tp), "tps="+String(_tp), "tpt="+`x${_tp}`);  // tpc=custom! tp
 class _Money { constructor(c){ this.c=c; } toString(){ return "$"+this.c; } }
 print("tpcls="+(""+new _Money(5)), "tpjoin="+[new _Money(1),new _Money(2)].join("|"));  // tpcls=$5 tpjoin=$1|$2 (inherited class toString via the proto chain; Array.join coerces each element)
 print("tpplain="+(""+{a:1}), "tprec="+(""+{toString:function(){return this;}}));  // tpplain=[object Object] tprec=[object Object] (no toString -> unchanged; a toString returning the object falls through, bounded, no hang)
+print("-- ToPrimitive: a user object's valueOf() in numeric coercion (M576) --");
+print("vosub="+({valueOf:function(){return 5;}}-1), "vonum="+Number({valueOf:function(){return 7;}}), "vouny="+(+{valueOf:function(){return 9;}}));  // vosub=4 vonum=7 vouny=9 (valueOf drives - / Number() / unary +)
+print("volt="+({valueOf:function(){return 10;}}<20), "vowins="+({valueOf:function(){return 5;},toString:function(){return "99";}}-0), "vostr="+({toString:function(){return "8";}}-0));  // volt=true vowins=5 vostr=8 (valueOf wins; with no valueOf, toString is parsed)
+class _Temp { valueOf(){ return 42; } }
+print("vocls="+(new _Temp()-0), "vorec="+({valueOf:function(){return this;}}-0), "voplain="+({a:1}*3));  // vocls=42 vorec=0 voplain=0 (inherited class valueOf; valueOf->object falls through bounded; no valueOf/toString -> 0 unchanged)
 print("-- done --");

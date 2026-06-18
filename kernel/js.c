@@ -930,13 +930,38 @@ static int truthy(val v) {
     }
 }
 static int64_t days_from_civil(int64_t y, int64_t m, int64_t d);   /* fwd (defined near Date) — lets to_num(Date) return the epoch, so date2-date1 works (M429) */
+/* fwd (defined below): to_num's ToPrimitive(number) path invokes a user object's
+ * valueOf/toString via the same depth-guarded getter call path. */
+static int proto_lookup(obj *start, const char *name, val recv, val *out);
+static val call_function_this(val fn, val thisv, val *args, int nargs);
 static int64_t to_num(val v) {
     switch (v.t) {
         case V_NUM: case V_BOOL: return v.num;
         case V_STR: { int64_t x=0; const char*s=v.str; int neg=0; if(*s=='-'){neg=1;s++;} while(*s>='0'&&*s<='9'){x=x*10+(*s-'0');s++;} return neg?-x:x; }
-        case V_OBJ: if (v.o && v.o->kind==V_DATE && v.o->n>=6)   /* Date -> epoch ms, matching getTime (M429) */
-                        return (days_from_civil(v.o->vals[0].num, v.o->vals[1].num, v.o->vals[2].num)*86400 + v.o->vals[3].num*3600 + v.o->vals[4].num*60 + v.o->vals[5].num)*1000;
-                    return 0;   /* other objects: 0 (full ToNumber via toString is integer-engine-limited — no NaN) */
+        case V_OBJ:
+            if (v.o && v.o->kind==V_DATE && v.o->n>=6)   /* Date -> epoch ms, matching getTime (M429) */
+                return (days_from_civil(v.o->vals[0].num, v.o->vals[1].num, v.o->vals[2].num)*86400 + v.o->vals[3].num*3600 + v.o->vals[4].num*60 + v.o->vals[5].num)*1000;
+            /* ToPrimitive(number hint): a user object's valueOf() wins, else its
+             * toString() (own or inherited). Invoked via the depth-guarded getter
+             * call path, so a valueOf that recurses is bounded by MAXDEPTH; a result
+             * that's still an object is skipped, falling through to 0 (integer engine,
+             * no NaN). Objects with neither are 0, as before — so existing coercion is
+             * unchanged. A string result is parsed by recursing into to_num. */
+            if (v.o) {
+                static const char *names[2] = { "valueOf", "toString" };
+                for (int k=0; k<2; k++) {
+                    val fn;
+                    if (obj_get(v.o, names[k], &fn) ||
+                        (v.o->proto && proto_lookup(v.o->proto, names[k], v, &fn))) {
+                        if (fn.t==V_FUN || fn.t==V_NATIVE || (fn.t==V_OBJ && fn.o && fn.o->kind==V_BOUND)) {
+                            val r = call_function_this(fn, v, 0, 0);
+                            if (r.t != V_OBJ && r.t != V_ARR && r.t != V_FUN && r.t != V_NATIVE)
+                                return to_num(r);
+                        }
+                    }
+                }
+            }
+            return 0;
         default: return 0;
     }
 }
@@ -1216,10 +1241,6 @@ static val nat_regexp(val *args, int nargs){
     const char *fl  = nargs>1? val_to_str(args[1]) : "";
     return make_regex_val(pat, fl);
 }
-/* fwd (defined below): used by val_to_str_inner's ToPrimitive path to invoke a
- * user object's own/inherited toString(), both depth-guarded against recursion. */
-static int proto_lookup(obj *start, const char *name, val recv, val *out);
-static val call_function_this(val fn, val thisv, val *args, int nargs);
 static const char *val_to_str_inner(val v) {
     if (v.t == V_OBJ && v.o && v.o->kind == V_BOUND) return "function";   /* a bound function */
     switch (v.t) {
