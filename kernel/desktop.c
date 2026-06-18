@@ -374,11 +374,19 @@ static void render_scene(void) {
     box(start_x, start_y, start_w, start_h, 0x18345E);
     draw_text(start_x + 14, start_y + 4, "Apps", 0xFFFFFF);
 
-    /* real-time clock (RTC) in a recessed pill on the right */
+    /* real-time clock (RTC) in a recessed pill on the right: date + time, so the
+     * day is visible at a glance without opening the Calendar app. */
     struct rtc_time tm; rtc_now(&tm);
-    char clk[9];
-    u2(tm.hour, clk); clk[2]=':'; u2(tm.min, clk+3); clk[5]=':'; u2(tm.sec, clk+6); clk[8]=0;
-    int clkw = 88, clkx = screen_w - clkw - 8;
+    char clk[24]; int q = 0;                                  /* "YYYY-MM-DD  HH:MM:SS" */
+    clk[q++]='0'+(tm.year/1000)%10; clk[q++]='0'+(tm.year/100)%10;
+    clk[q++]='0'+(tm.year/10)%10;   clk[q++]='0'+tm.year%10;
+    clk[q++]='-'; u2((uint64_t)tm.month, clk+q); q+=2;
+    clk[q++]='-'; u2((uint64_t)tm.day,   clk+q); q+=2;
+    clk[q++]=' '; clk[q++]=' ';
+    u2((uint64_t)tm.hour, clk+q); q+=2; clk[q++]=':';
+    u2((uint64_t)tm.min,  clk+q); q+=2; clk[q++]=':';
+    u2((uint64_t)tm.sec,  clk+q); q+=2; clk[q]=0;
+    int clkw = 20 * font_width + 26, clkx = screen_w - clkw - 8;
 
     /* one chip per open window (the focused one — topmost — is highlighted) */
     for (int i = 0; i < win_count; i++) {
