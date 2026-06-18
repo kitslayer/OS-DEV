@@ -337,4 +337,8 @@ ce=MyErr:oops:404 isErr=true isMy=true
 estr=Error: boom ecoerce=TypeError: bad
 -- JSON.stringify array replacer (allowlist) (M545) --
 repl={"a":1,"c":3} nest={"a":1,"b":{"a":2}} none={"a":1,"b":2}
+-- ToPrimitive: a user object's toString() in string coercion (M574) --
+tpc=custom! tps=custom! tpt=xcustom!
+tpcls=$5 tpjoin=$1|$2
+tpplain=[object Object] tprec=[object Object]
 -- done --

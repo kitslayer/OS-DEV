@@ -387,7 +387,9 @@ static int run_command(char *line, char *cwd) {
                     "var a=[3,1,2]; a.push(4); print(\"array: len \"+a.length+\" = [\"+a.join(\",\")+\"]\");\n"
                     "var o={name:\"OS-DEV\", year:2026}; print(o.name+\" \"+o.year);\n"
                     "function fact(n){ return n<=1?1:n*fact(n-1); } print(\"6! = \"+fact(6));\n"
-                    "print(\"2^10 = \"+(1<<10)+\", 17%5 = \"+(17%5));\n";
+                    "print(\"2^10 = \"+(1<<10)+\", 17%5 = \"+(17%5));\n"
+                    "class Money{ constructor(c){ this.c=c; } toString(){ return \"$\"+this.c; } }\n"
+                    "print(\"toString: \"+new Money(42));\n";
                 int i = 0; while (demo[i] && i < (int)sizeof(src) - 1) { src[i] = demo[i]; i++; } src[i] = 0;
                 have = 1;
             } else if (startswith(line, "js -e ")) {     /* inline: js -e <code> */

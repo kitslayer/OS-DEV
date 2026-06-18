@@ -364,4 +364,10 @@ print("ce="+_me.name+":"+_me.message+":"+_me.code, "isErr="+(_me instanceof Erro
 print("estr="+new Error("boom").toString(), "ecoerce="+(""+new TypeError("bad")));  // estr=Error: boom ecoerce=TypeError: bad (Error stringifies as "name: message")
 print("-- JSON.stringify array replacer (allowlist) (M545) --");
 print("repl="+JSON.stringify({a:1,b:2,c:3},["a","c"]), "nest="+JSON.stringify({a:1,b:{a:2,x:9}},["a","b"]), "none="+JSON.stringify({a:1,b:2}));  // repl={"a":1,"c":3} nest={"a":1,"b":{"a":2}} none={"a":1,"b":2} (an array 2nd arg is a key allowlist applied at every depth; no replacer = all keys)
+print("-- ToPrimitive: a user object's toString() in string coercion (M574) --");
+var _tp = { toString: function(){ return "custom!"; } };
+print("tpc="+(""+_tp), "tps="+String(_tp), "tpt="+`x${_tp}`);  // tpc=custom! tps=custom! tpt=xcustom! (own toString wins for + / String() / template literal)
+class _Money { constructor(c){ this.c=c; } toString(){ return "$"+this.c; } }
+print("tpcls="+(""+new _Money(5)), "tpjoin="+[new _Money(1),new _Money(2)].join("|"));  // tpcls=$5 tpjoin=$1|$2 (inherited class toString via the proto chain; Array.join coerces each element)
+print("tpplain="+(""+{a:1}), "tprec="+(""+{toString:function(){return this;}}));  // tpplain=[object Object] tprec=[object Object] (no toString -> unchanged; a toString returning the object falls through, bounded, no hang)
 print("-- done --");

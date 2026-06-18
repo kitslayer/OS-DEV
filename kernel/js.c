@@ -1216,6 +1216,10 @@ static val nat_regexp(val *args, int nargs){
     const char *fl  = nargs>1? val_to_str(args[1]) : "";
     return make_regex_val(pat, fl);
 }
+/* fwd (defined below): used by val_to_str_inner's ToPrimitive path to invoke a
+ * user object's own/inherited toString(), both depth-guarded against recursion. */
+static int proto_lookup(obj *start, const char *name, val recv, val *out);
+static val call_function_this(val fn, val thisv, val *args, int nargs);
 static const char *val_to_str_inner(val v) {
     if (v.t == V_OBJ && v.o && v.o->kind == V_BOUND) return "function";   /* a bound function */
     switch (v.t) {
@@ -1254,6 +1258,22 @@ static const char *val_to_str_inner(val v) {
                 b[p++]='0'+(y/1000)%10; b[p++]='0'+(y/100)%10; b[p++]='0'+(y/10)%10; b[p++]='0'+y%10;
                 for (int f=1; f<6; f++){ b[p++]=(f<3)?'-':(f==3)?' ':':'; int x=(int)v.o->vals[f].num; b[p++]='0'+(x/10)%10; b[p++]='0'+x%10; }
                 b[p]=0; return b;
+            }
+            /* ToPrimitive: a user object's OWN or inherited toString() (a function,
+             * e.g. `{toString(){…}}` or a `class` method) wins over the generic
+             * fallbacks below. Invoked via call_function_this exactly like an
+             * inherited getter — so a toString that recurses or returns the object
+             * is bounded by MAXDEPTH (and we only USE a primitive result), never an
+             * OOB or hang. Plain objects with no toString fall straight through, so
+             * existing stringification (incl. the Error-like case) is unchanged. */
+            if (v.o) {
+                val ts; int got = obj_get(v.o, "toString", &ts) ||
+                                  (v.o->proto && proto_lookup(v.o->proto, "toString", v, &ts));
+                if (got && (ts.t==V_FUN || ts.t==V_NATIVE || (ts.t==V_OBJ && ts.o && ts.o->kind==V_BOUND))) {
+                    val r = call_function_this(ts, v, 0, 0);
+                    if (r.t != V_OBJ && r.t != V_ARR && r.t != V_FUN && r.t != V_NATIVE)
+                        return val_to_str(r);   /* primitive result -> use it; else fall through */
+                }
             }
             /* an Error-like object (string name + message) stringifies as "name: message"
              * (covers `new Error(m)` and `class X extends Error`); else generic. */
