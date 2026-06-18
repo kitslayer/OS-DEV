@@ -1,5 +1,14 @@
 # What's next
 
+> **(M713) A from-scratch raycaster — pseudo-3D in the framebuffer.** `user/raycast.c` renders a
+> Wolfenstein-style first-person maze: one ray per screen column is marched across a 16×16 grid (DDA) to the
+> first wall and drawn as a vertical slice whose height is 1/distance, coloured by cell and shaded by distance
+> + which side was hit, over a sky/floor split. Arrows or WASD walk and turn (with wall collision); reach the
+> green exit to escape. Built with SSE (its own Makefile rule, like DOOM/Quake) so the ray geometry can use
+> float + a small Taylor `sin`/`cos` (no libm); input drains the raw make/break queue with the same
+> same-frame-tap latch as the NES so both quick taps and held keys move. Verified in-guest: the 3D corridor
+> renders, walking advances the view, turning rotates it. All 29 `make check` suites still green.
+
 > **(M712) Two more games — Battleship and Pig.** **Battleship** (`user/battleship.c`): two 8×8 seas, both
 > fleets (5/4/3/3/2) auto-placed at random; you fire at the hidden enemy sea (a crosshair you move) while a
 > hunt-then-target CPU (random shots until a hit, then it works the neighbouring cells) fires back at yours —
