@@ -1,5 +1,12 @@
 # What's next
 
+> **(M738) New game — Dots and Boxes vs the computer.** `user/dotsbox.c`: a 4×4-box grid (16 boxes on a 9×9
+> dot/edge lattice). Move the `+` cursor with the arrows and Space to draw the edge under it; complete a box's
+> fourth side to claim it (Y) and move again. The CPU completes any box it can (chaining its extra turns),
+> else plays a "safe" edge that doesn't hand you a third side, else gives up the least it must. Pure-additive
+> ulib app (last full `make check` at M737 green; kernel boots+runs it). Verified in-guest: edges draw, the
+> CPU replies, and box completion + scoring + extra-turn chaining all work (it ran a chain to 7 boxes).
+
 > **(M737) New game — Mancala (Kalah) vs the computer.** `user/mancala.c`: the classic sow-and-capture
 > game. Pick a pit (1-6), seeds sow counterclockwise skipping the opponent's store; landing in your own store
 > earns another turn, and landing the last seed in an empty pit on your side captures it plus the pit
