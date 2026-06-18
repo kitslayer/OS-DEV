@@ -308,25 +308,30 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_gunzip: {
         const char *insrc = (const char *)r->rdi, *outname = (const char *)r->rsi;
-        uint8_t *in = kmalloc(262144);          /* the .gz input (<= 256 KB) */
-        uint8_t *out = kmalloc(1048576);        /* decompressed output (<= 1 MB) */
-        if (!in || !out) { if (in) kfree(in); if (out) kfree(out); r->rax = (uint64_t)-1; break; }
-        long gn = vfs_read(insrc, in, 262144);
-        long dl = gn > 0 ? gz_inflate(in, (int)gn, out, 1048576) : -1;
+        uint8_t *in = 0; long gn = read_whole_file(insrc, &in);   /* whole .gz, not a 256KB prefix */
+        if (gn < 0) { r->rax = (uint64_t)-1; break; }
+        if (gn < 18) { kfree(in); r->rax = (uint64_t)-1; break; }   /* too short to be gzip */
+        /* gzip trailer's ISIZE (last 4 bytes) = original size mod 2^32 — size the output to it */
+        size_t isize = (size_t)((uint32_t)in[gn-4] | ((uint32_t)in[gn-3]<<8) |
+                                ((uint32_t)in[gn-2]<<16) | ((uint32_t)in[gn-1]<<24));
+        if (isize == 0) isize = 1;
+        if (isize > (32u << 20)) { kfree(in); r->rax = (uint64_t)-1; break; }   /* implausible/too large */
+        uint8_t *out = kmalloc(isize);
+        long dl = out ? gz_inflate(in, (int)gn, out, (int)isize) : -1;
         if (dl > 0 && vfs_write(outname, out, (unsigned long)dl) < 0) dl = -1;
-        kfree(in); kfree(out);
+        if (out) kfree(out); kfree(in);
         r->rax = (uint64_t)(int64_t)dl;
         break;
     }
     case SYS_gzip: {
         const char *insrc = (const char *)r->rdi, *outname = (const char *)r->rsi;
-        uint8_t *in = kmalloc(262144);          /* input (<= 256 KB) */
-        uint8_t *out = kmalloc(524288);         /* compressed output (<= 512 KB; fixed-Huffman can expand) */
-        if (!in || !out) { if (in) kfree(in); if (out) kfree(out); r->rax = (uint64_t)-1; break; }
-        long gn = vfs_read(insrc, in, 262144);
-        long dl = gn >= 0 ? gz_deflate(in, (int)gn, out, 524288) : -1;   /* empty input is a valid gzip */
+        uint8_t *in = 0; long gn = read_whole_file(insrc, &in);   /* whole input, not a 256KB prefix */
+        if (gn < 0) { r->rax = (uint64_t)-1; break; }
+        size_t ocap = (size_t)gn + (size_t)gn / 2 + 1024;   /* >= fixed-Huffman worst case (~input*9/8) */
+        uint8_t *out = kmalloc(ocap);
+        long dl = out ? gz_deflate(in, (int)gn, out, (int)ocap) : -1;   /* empty input is a valid gzip */
         if (dl > 0 && vfs_write(outname, out, (unsigned long)dl) < 0) dl = -1;
-        kfree(in); kfree(out);
+        if (out) kfree(out); kfree(in);
         r->rax = (uint64_t)(int64_t)dl;
         break;
     }
