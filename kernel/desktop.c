@@ -104,7 +104,7 @@ static const struct menu_item menu[] = {
 #define MENU_N      (int)(sizeof(menu) / sizeof(menu[0]))
 #define MENU_W      150
 #define MENU_ITEM_H 24
-#define MENU_COLS   2
+#define MENU_COLS   3
 #define MENU_PERCOL ((MENU_N + MENU_COLS - 1) / MENU_COLS)
 #define TB_CHIPW    124                 /* taskbar window-chip width */
 #define TB_CHIPGAP  6

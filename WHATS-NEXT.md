@@ -1,5 +1,12 @@
 # What's next
 
+> **(M717) Apps menu: 2 → 3 columns.** This session's ~13 new game apps had filled the two-column Apps menu
+> to the screen's bottom edge. The menu layout is fully parameterized, so bumping `MENU_COLS` to 3 (a one-line
+> change in `desktop.c`) reflows the render, keyboard navigation, and click hit-testing together: all 48
+> entries now show in three tidy 16-item columns (shorter than before, with headroom for ~36 more). Verified
+> in-guest — the menu renders in three columns and arrow-nav + Enter still launch the right app (Down → Right
+> → Blackjack). All 29 `make check` suites still green.
+
 > **(M716) Two more games — Tron and Space Invaders.** **Tron light cycles** (`user/tron.c`): you vs a CPU
 > that steers greedily (straight while safe, else turn to an open side); both leave solid trails on a 40×15
 > arena, run into any trail or wall and you're out, last one riding wins; real-time. **Space Invaders**
