@@ -1,5 +1,10 @@
 # What's next
 
+> **(M734) Docs — README front page caught up.** The headline still said "720+ milestones / forty-plus apps /
+> ~thirty games" and the M706+ recap pre-dated the recent work. Bumped to 730+ milestones / fifty-plus apps /
+> ~forty games and added the additions since: the **Game Boy emulator** (Peanut-GB), **Chess** (alpha-beta
+> AI), Checkers, Gomoku, Frogger, Lunar Lander, Yahtzee, Flappy, and the on-disk ELF loader (`run NAME.ELF`).
+
 > **(M733) Chess AI plays sensibly now — piece-square tables.** The depth-3 search was material-only, so it
 > answered 1.e4 with the passive 1...Na6 — any equal-material move scored the same. Added Michniewski's
 > simplified piece-square tables to `evaluate()` (centre control, development, advanced pawns, a tucked-away
