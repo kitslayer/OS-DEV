@@ -34,6 +34,7 @@
 #include "htmlentity.h"
 #include "htmlattr.h"
 #include "url.h"
+#include "cssel.h"   /* sel_t + sel_parse (CSS simple-selector parser; host-fuzzed) — M688 */
 #include "color.h"
 #include "cssprop.h"
 #include <stdint.h>
@@ -63,7 +64,7 @@ enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = im
 typedef struct { uint16_t off, len, link; uint8_t style, type; } tok_t;
 typedef struct { uint16_t off, len; } href_t;            /* slice into hrefs[] */
 typedef struct { int16_t x, y, w, h; uint16_t link; } lrec_t;  /* a clickable rect */
-typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32]; } sel_t;  /* one simple CSS selector (tag/.class/#id/[attr]) */
+/* sel_t (one simple CSS selector: tag/.class/#id/[attr]) now lives in cssel.h (M688). */
 
 #define CSS_MAX 24                  /* simple style rules captured from <style> blocks per page */
 #define SC_MAX  16                  /* max nesting depth of active style scopes (color/weight) */
@@ -1249,20 +1250,7 @@ static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
  * same byte coordinates the id-keyed splice code already uses) — so id-less
  * matches become addressable WITHOUT changing the id path. */
 #define QSA_MAX 256
-static int sel_parse(const char *s, sel_t *o) {
-    o->tag[0]=o->cls[0]=o->id[0]=o->attr[0]=0;
-    int i=0, k=0;
-    while (s[i] && dom_alnum(s[i]) && k<15) { o->tag[k++]=(char)lc(s[i]); i++; }   /* leading tag name (lowercased) */
-    o->tag[k]=0;
-    while (s[i]) {
-        if (s[i]=='.')      { i++; k=0; while (s[i] && (dom_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->cls[k++]=s[i++]; o->cls[k]=0; }
-        else if (s[i]=='#') { i++; k=0; while (s[i] && (dom_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->id[k++]=s[i++];  o->id[k]=0;  }
-        else if (s[i]=='[') { i++; k=0; while (s[i] && s[i]!=']' && s[i]!='=' && k<31) o->attr[k++]=(char)lc(s[i++]); o->attr[k]=0;   /* [attr] presence (value, if any, ignored) */
-                              while (s[i] && s[i]!=']') i++; if (s[i]==']') i++; }
-        else return 0;   /* an unsupported combinator/char -> fail closed (no match) */
-    }
-    return (o->tag[0]||o->cls[0]||o->id[0]||o->attr[0]);
-}
+/* sel_parse now lives in cssel.h (M688) so it can be host-fuzzed; included at the top. */
 /* Word-boundary class match within a class="..." value (space-separated tokens). */
 static int class_has(const char *v, int vl, const char *cls) {
     int cl=0; while (cls[cl]) cl++; if (cl==0) return 0;
