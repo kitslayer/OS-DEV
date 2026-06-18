@@ -1,5 +1,18 @@
 # What's next
 
+> **(M671-M674) Shell matcher host-testing + the last big JS gap (generators).** **M671-M673** extracted the
+> shell's two pure matchers — the `grep` regex (`^ $ . * [..] \`) and the filename glob (`*`/`?`) — into
+> `user/shgrep.h` and host-tested them (a 28th suite: regression + 500k fuzz, ASan/UBSan), bringing them into
+> the codebase's extract-for-testability pattern (cssprop/url/htmlentity/…). **M674** then implemented JS
+> **generators** (`function*` / `yield` / `yield*`), which had been a parse-abort that killed the entire page
+> script. EAGER model: calling a generator runs its body to completion, collects every `yield` into an array,
+> and returns that array (iterable via `for-of`, `[...]`, `.map`). Covers the common finite-generator uses; an
+> infinite generator errors cleanly (arena-OOM, no hang) and manual `.next()` / the yield-expression value
+> aren't modelled (eager has no resume point). All changes are GATED — `g_in_gen` keeps `yield` an ordinary
+> identifier outside a generator body, `is_gen` gates the eval — so non-generator code is byte-identical
+> (jstest golden unchanged, jssrcfuzz clean). Generator METHODS (`class C { *g(){} }`) are the one remaining
+> piece (use a `function*` expression or an explicit `.next()` iterator instead).
+
 > **(M660) The probing generalized past JS: the browser's URL resolver didn't canonicalize `./`/`../`.**
 > `resolve_img_url` concatenated a relative `<img src>`/`<a href>` onto the base directory without RFC 3986
 > remove_dot_segments, so `../up.png` on `http://a.com/dir/sub/p.html` became `…/dir/sub/../up.png` (a strict
@@ -49,7 +62,7 @@
 > hoisting/expressions unchanged). **M654** class private fields `#x` were a no-op AND a privacy leak (`#x=5`
 > wrote the public `x`, `this.#x` read undefined) — the lexer now keeps a leading `#` as part of the
 > identifier, so declaration + access agree on "#x" and it stays distinct from public `x`. (Generators
-> `function*` remain unsupported — a much larger coroutine feature.) **Still more (M656-M658):** **M656**
+> `function*` were unsupported at this point — later added in M674, eager model.) **Still more (M656-M658):** **M656**
 > built-in Error subtypes (TypeError/RangeError/SyntaxError) are now `instanceof Error` (their ctors'
 > parent_class links to Error), so the `catch(e){ if (e instanceof Error) … }` guard works; **M657**
 > `JSON.stringify` honors a *function* replacer (was array-allowlist-only — `(k,v)=>…` now transforms/drops
@@ -280,8 +293,8 @@
 > `toString` (verified in-guest once QEMU was back; golden unchanged + fuzz-clean + the depth-guarded
 > getter call path), and **M576 then landed the `valueOf` half** (numeric coercion in `to_num`:
 > `obj-1`/`Number(obj)`/`+obj`/comparisons; valueOf wins, toString-parse fallback) — so **ToPrimitive is
-> now complete**. Generators remain the sole documented JS ceiling. All four-way verified (host + golden +
-> fuzz + in-guest).
+> now complete**. Generators were then the sole documented JS ceiling (added M674, eager model). All four-way
+> verified (host + golden + fuzz + in-guest).
 > **(M529-M539) JS engine real-site compatibility + untrusted-input fuzzing.** Continuing the
 > QEMU-blocked session in host-verifiable territory, a deep pass on the from-scratch JS engine (which
 > powers the browser) — probed against ~110 modern features/edges, found + fixed 8 real gaps, each
@@ -294,8 +307,9 @@
 > `isFinite`; **M534/M535** **`let`/`const` per-iteration binding** in `for`/`for-of`/`for-in` (the
 > defining reason `let` exists — closures in loops now capture each iteration; with a closure-detection
 > optimization so big loops stay allocation-free on the GC-less arena); **M536** array elision `[1,,3]`
-> (was a parse-abort). Generators (`function*`) remain the one documented unsupported feature (need
-> coroutines a tree-walker can't provide; an eager hack would hang the kernel on an infinite generator).
+> (was a parse-abort). Generators (`function*`) were then the one unsupported feature (the concern noted here —
+> "an eager hack would hang on an infinite generator" — was exactly what M674 resolved: the eager model errors
+> via arena-OOM, never hangs).
 > Then **M537-M539** fuzzed every untrusted-input path in js.c under ASan/UBSan — `JSON.parse`, the
 > **regex** engine (ReDoS shapes + malformed patterns; this engine's history records 2 critical matcher
 > stack-overflows), and the **full source parse+run pipeline** — each #including js.c via a new
