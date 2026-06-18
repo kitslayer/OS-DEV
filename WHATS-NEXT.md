@@ -1,7 +1,7 @@
 # What's next
 
-> **(M634-M637) Test-hardening: lock in this session's fixes + fuzz the untrusted-input parser paths the
-> existing fuzzers couldn't reach.** The data-loss bug class (below) was fixed + verified in-guest but had no
+> **(M634-M640) Test-hardening + a JS correctness fix: lock in this session's fixes, fuzz the untrusted-input
+> parser paths the existing fuzzers couldn't reach, and fix a bitwise-operator divergence.** The data-loss bug class (below) was fixed + verified in-guest but had no
 > host regression coverage, and an audit of the image decoders found them robust *by reading* yet under-fuzzed
 > where it matters. **M634** adds host regressions (fs_test, which `#include`s fat32.c) for the two FS bugs:
 > `rm <non-empty-dir>` is refused with NO cluster leak (df-checked — full reclaim only after a proper delete),
@@ -17,7 +17,18 @@
 > masks a write past the per-pixel cap, while tight malloc'd buffers put an ASan redzone right at the boundary;
 > (2) small image dims so the output bound is hit constantly. The decoders all proved clean (the audit was
 > right — they bound every dimension, table index, and output write); the lasting value is regression coverage
-> for the exact paths a remote image/page can drive. All 27 suites green.
+> for the exact paths a remote image/page can drive. **M639** extends this to the *animated*-GIF compositor
+> (`gif_decode_anim` — multi-frame, the GCE, disposal restore-to-background, the per-frame snapshot; web-
+> reachable yet previously undeclared in the harness): a known 3-frame decode + 120k mutated-frame iters into
+> exact-size buffers (verified genuine — weakening the per-frame `il+iw>W` bound aborts in `gif_decode_anim`).
+> **M640** is a real correctness fix the engine-probing turned up: the JS engine's `& | ^ << >>` operated in
+> the raw int64 number while `>>>` (M269) used JS 32-bit semantics, so `1<<31` (gave 2147483648, not
+> -2147483648), `1<<32` (no shift-count mask), and `0xFFFFFFFF|0` (gave 4294967295, not -1) diverged from
+> every real JS engine and broke the idioms browser scripts depend on (`x|0` int-coercion, `(r<<16)|(g<<8)|b`
+> packing, 32-bit string hashes). All bitwise ops now coerce operands to int32 + mask the shift count to & 31
+> (arithmetic stays exact int64, like JS doubles); the canonical int32 hash of "hello" (99162322) now computes.
+> Safe — the only bitwise in the tree is suite.js with int32-range values (golden byte-identical), no app uses
+> JS bitwise. All 27 suites green (incl. the in-guest browser that runs the engine).
 
 > **(M603-M630) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
 > via in-guest verification.** Verifying the FAT32 write path (a cp/edit/save round-trip) led into the
