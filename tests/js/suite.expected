@@ -356,4 +356,6 @@ rvdel=1,true rvnone=5
 16744512 99162322
 -- regex word boundaries \b \B (M642) --
 word two,words cat A Cat
+-- regex backreferences \1..\9 (M643) --
+true false hi hi true
 -- done --

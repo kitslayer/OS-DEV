@@ -989,13 +989,13 @@ static int val_equal(val a, val b) {
  * overflowing the kernel stack (verified on `(a+)+$`). Supports literals, . ,
  * [classes] (ranges, negation, \d\w\s\D\W\S), * + ? (greedy), | , (capture
  * groups), ^ $, escapes; flags i (ignore case) and g (global). */
-enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_WORDB, I_NWORDB, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
+enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_WORDB, I_NWORDB, I_BACKREF, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
 typedef struct { int op; int c; int x, y; unsigned char *cls; } reinst;
 #define RE_MAXPROG 512
 #define RE_MAXGROUP 9
 typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int lastIndex; const char *source; int ok; const char *gnames[RE_MAXGROUP+1]; } regex;
 
-enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
+enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_BACKREF, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
 typedef struct rnode rnode;
 struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; int lazy; };
 typedef struct { const char *p; int len, pos; int ngroup; int err; int depth; const char *gnames[RE_MAXGROUP+1]; } rparse;
@@ -1045,6 +1045,7 @@ static rnode *rx_atom(rparse *P){
         if(e=='d'||e=='w'||e=='s'){ rnode *n=rx_node(RN_CLASS); if(!n){P->err=1;return 0;} n->cls=aalloc(32); if(!n->cls){P->err=1;return 0;} memset(n->cls,0,32); cls_class(n->cls,e); n->c=0; return n; }
         if(e=='D'||e=='W'||e=='S'){ rnode *n=rx_node(RN_CLASS); if(!n){P->err=1;return 0;} n->cls=aalloc(32); if(!n->cls){P->err=1;return 0;} memset(n->cls,0,32); cls_class(n->cls,e+32); n->c=1; return n; }
         if(e=='b'||e=='B'){ rnode *n=rx_node(e=='b'?RN_WORDB:RN_NWORDB); if(!n){P->err=1;return 0;} return n; }   /* \b word boundary, \B non-boundary (zero-width) */
+        if(e>='1'&&e<='9'){ rnode *n=rx_node(RN_BACKREF); if(!n){P->err=1;return 0;} n->c=e-'0'; return n; }   /* \1..\9 backreference to a capture group */
         rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} if(e=='n')n->c='\n'; else if(e=='t')n->c='\t'; else if(e=='r')n->c='\r'; else n->c=e; return n; }
     P->pos++; rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} n->c=c; return n;
 }
@@ -1142,6 +1143,7 @@ static void rx_compile(remit *E, rnode *n){
         case RN_EOL: rx_emit(E,I_EOL,0,0,0,0); break;
         case RN_WORDB: rx_emit(E,I_WORDB,0,0,0,0); break;
         case RN_NWORDB: rx_emit(E,I_NWORDB,0,0,0,0); break;
+        case RN_BACKREF: rx_emit(E,I_BACKREF,n->c,0,0,0); break;
         case RN_EMPTY: break;
         case RN_CAT: rx_compile(E,n->a); rx_compile(E,n->b); break;
         case RN_GROUP: if(n->group){ rx_emit(E,I_SAVE,2*n->group,0,0,0); rx_compile(E,n->a); rx_emit(E,I_SAVE,2*n->group+1,0,0,0); } else rx_compile(E,n->a); break;
@@ -1187,6 +1189,13 @@ static int re_run(regex *re,int pc,const char*s,int slen,int sp,int*caps,long*bu
             case I_WORDB: case I_NWORDB: {   /* \b / \B : zero-width word boundary (transition between \w and non-\w) */
                 int bw=(sp>0)&&rx_isword((unsigned char)s[sp-1]); int aw=(sp<slen)&&rx_isword((unsigned char)s[sp]);
                 int bnd=(bw!=aw); if(in->op==I_WORDB ? bnd : !bnd){ pc++; continue; } return 0; }
+            case I_BACKREF: {   /* \1..\9 : match the same text the group captured */
+                int g=in->c, st=-1, en=-1;
+                if(g>=1 && g<=RE_MAXGROUP){ st=caps[2*g]; en=caps[2*g+1]; }
+                if(st<0 || en<0 || en<st){ pc++; continue; }   /* group didn't participate -> matches empty (JS) */
+                int blen=en-st; if(sp+blen>slen) return 0;
+                for(int k=0;k<blen;k++) if(!rx_eqc((unsigned char)s[sp+k],(unsigned char)s[st+k],re->icase)) return 0;
+                sp+=blen; pc++; continue; }
             case I_JMP: pc=in->x; continue;
             case I_SPLIT: { int r=re_run(re,in->x,s,slen,sp,caps,budget,depth+1); if(r!=0) return r; pc=in->y; continue; }
             case I_SAVE: { int idx=in->c; int old=(idx<2*(RE_MAXGROUP+1))?caps[idx]:-1; if(idx<2*(RE_MAXGROUP+1)) caps[idx]=sp;

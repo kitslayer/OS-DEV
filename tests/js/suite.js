@@ -389,4 +389,6 @@ print(1<<31, 1<<32, 0xFFFFFFFF|0, 2147483648|0);  // -2147483648 1 -1 -214748364
 print((255<<16)|(128<<8)|64, (function(){var h=0,s="hello";for(var i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return h;})());  // 16744512 99162322 (RGB pack + canonical int32 string hash; impossible under the old int64 bitwise)
 print("-- regex word boundaries \\b \\B (M642) --");
 print("a word here".match(/\bword\b/)[0], "two words!".match(/\b\w+\b/g).join(","), "scatter".match(/\Bcat/)[0], "a cat".replace(/\b\w/g,function(c){return c.toUpperCase();}));  // word two,words cat A Cat (\b boundary, \B non-boundary, title-case via \b\w)
+print("-- regex backreferences \\1..\\9 (M643) --");
+print(/(ab)\1/.test("abab"), /(ab)\1/.test("abcd"), "hi hi bye".match(/(\w+) \1/)[0], /(a)(b)\2\1/.test("abba"));  // true false hi hi true (\1 backref incl. backtracking + multi-group)
 print("-- done --");
