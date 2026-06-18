@@ -3887,8 +3887,10 @@ static void js_drain_timers(void){
 static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
     /* setTimeout/setInterval (deferred-callback queue) + clearTimeout/clearInterval */
-    { obj *st=new_obj(V_NATIVE); st->native=nat_setTimeout;   val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"setTimeout",v);  env_define(g,"setInterval",v); }
-    { obj *ct=new_obj(V_NATIVE); ct->native=nat_clearTimeout; val v=UND(); v.t=V_NATIVE; v.o=ct; env_define(g,"clearTimeout",v); env_define(g,"clearInterval",v); }
+    { obj *st=new_obj(V_NATIVE); st->native=nat_setTimeout;   val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"setTimeout",v);  env_define(g,"setInterval",v);
+      env_define(g,"requestAnimationFrame",v); env_define(g,"queueMicrotask",v); }   /* rAF/microtask: same deferred-callback queue */
+    { obj *ct=new_obj(V_NATIVE); ct->native=nat_clearTimeout; val v=UND(); v.t=V_NATIVE; v.o=ct; env_define(g,"clearTimeout",v); env_define(g,"clearInterval",v);
+      env_define(g,"cancelAnimationFrame",v); }
     /* console.log */
     obj *log=new_obj(V_NATIVE); log->native=native_print; val lv=UND(); lv.t=V_NATIVE; lv.o=log;
     obj *con=new_obj(V_OBJ); obj_set(con,"log",lv); obj_set(con,"warn",lv); obj_set(con,"error",lv); obj_set(con,"info",lv); obj_set(con,"debug",lv);   /* all print; page scripts use warn/error too */

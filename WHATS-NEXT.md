@@ -1,5 +1,10 @@
 # What's next
 
+> **(M746) JS engine — `requestAnimationFrame`/`queueMicrotask`/`cancelAnimationFrame`.** Real pages drive
+> animation with `requestAnimationFrame` and defer work with `queueMicrotask`; both were `undefined`. Wired
+> them to the M745 deferred-callback queue (rAF/queueMicrotask enqueue like a 0-delay timer, so they fire
+> first; cancelAnimationFrame cancels by id). `tests/js/timers.js` extended to cover them. 29/29 green.
+
 > **(M745) JS engine — `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval`.** The engine had no timers
 > at all (`typeof setTimeout` was `undefined`), so any real-world page that defers work with
 > `setTimeout(fn, …)` — extremely common — aborted on "not defined". Added a deferred-callback queue in

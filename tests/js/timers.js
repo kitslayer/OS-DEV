@@ -9,5 +9,8 @@ var id = setTimeout(function(){ print("CANCELLED-must-not-print"); }, 50);
 clearTimeout(id);
 setTimeout(function(){ print("B-delay-20"); setTimeout(function(){ print("D-chained"); }, 5); }, 20);
 print("setInterval is " + typeof setInterval + ", clearInterval is " + typeof clearInterval);
+print("rAF=" + typeof requestAnimationFrame + " qm=" + typeof queueMicrotask + " caf=" + typeof cancelAnimationFrame);
+requestAnimationFrame(function(){ print("raf-fired"); });
+queueMicrotask(function(){ print("microtask-fired"); });
 print("end-of-main");
 setTimeout(function(){ print("-- done --"); }, 9999999);
