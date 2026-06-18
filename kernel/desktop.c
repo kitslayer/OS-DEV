@@ -432,7 +432,9 @@ static void render_scene(void) {
             "F8    close window",     "F9    Apps menu",
             "F12   screenshot to disk",
             "",
-            "Mouse: drag the title bar to move a window,",
+            "Mouse: drag the title bar to move a window",
+            "(double-click it, or drag to the top edge, to",
+            "maximize; drag to a side edge to tile that half),",
             "drag the bottom-right corner to resize,",
             "click [x] to close, click a taskbar chip to",
             "raise (or restore) that window.",
@@ -829,7 +831,19 @@ void desktop_run(void) {
                 }
             }
         } else if (!left) {
-            dragging = resizing = -1;
+            /* aero-snap: release a dragged window against a screen edge to tile it
+             * (top -> maximize, left/right -> that half). Only when it actually
+             * moved (drag_ox/oy set on press) so a plain click never snaps. */
+            if (dragging >= 0) {
+                int moved = (mx - drag_ox > 3 || drag_ox - mx > 3 ||
+                             my - drag_oy > 3 || drag_oy - my > 3);
+                if (moved) {
+                    if (my <= 2)                    { if (!windows[dragging].maximized) toggle_maximize(dragging); }
+                    else if (mx <= 2)               snap_window(dragging, 0);
+                    else if (mx >= screen_w - 2)    snap_window(dragging, 1);
+                }
+            }
+            dragging = resizing = -1; dirty = 1;
         }
 
         if (dragging >= 0 && left) {
