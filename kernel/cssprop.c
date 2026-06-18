@@ -20,6 +20,8 @@ int style_prop(const char *s, int n, const char *prop, int plen, int *vs, int *v
         int k = c + 1; while (k < n && (s[k]==' '||s[k]=='\t')) k++;   /* ws after ':' */
         int a = k; while (k < n && s[k] != ';' && s[k] != '}') k++;          /* value to ';' or end */
         int e = k; while (e > a && (s[e-1]==' '||s[e-1]=='\t')) e--;          /* trim trailing ws */
+        for (int j = a; j < e; j++) if (s[j] == '!') { e = j; break; }       /* drop a trailing `!important` priority marker (a '!' starts it; none of our value types use '!' otherwise) */
+        while (e > a && (s[e-1]==' '||s[e-1]=='\t')) e--;                     /* re-trim ws before the '!' */
         fa = a; fe = e; found = 1;   /* keep scanning: a LATER declaration of the same property wins (CSS cascade) */
     }
     if (found) { *vs = fa; *ve = fe; return 1; }

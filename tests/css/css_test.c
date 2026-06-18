@@ -48,6 +48,8 @@ int main(void) {
     expect("background:#fff url(x)", "background", "#fff url(x)"); /* shorthand value to end */
     expect("a:1;b:2", "b", "2");                               /* 2nd decl, after ';' boundary */
     expect("color:red;color:blue", "color", "blue");           /* CSS cascade: a later duplicate wins */
+    expect("color:red !important", "color", "red");            /* !important priority marker stripped from the value */
+    expect("font-weight:bold!important;", "font-weight", "bold");
     printf("regression: %s\n", fails ? "FAILURES" : "ok (style_prop boundary + value span)");
 
     /* ---- fuzz: truncations + single-byte corruptions of a battery ---- */
