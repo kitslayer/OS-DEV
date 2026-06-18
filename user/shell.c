@@ -1400,11 +1400,11 @@ static int run_command(char *line, char *cwd) {
             int k = 0; while (*p && *p != ' ' && k < 31) out[k++] = *p++; out[k] = 0;
             if (host[0] == 0 || out[0] == 0) { print("usage: wget [http(s)://]<host>[/path] <outfile>\n"); }
             else {
-                static char wbuf[16384];
+                char *wbuf = malloc(1u << 20);           /* 1MB download buffer (was a fixed 16KB) */
                 print(secure ? "downloading https://" : "downloading http://"); print(host); print(path); print(" ...\n");
-                long n = secure ? sys_https(host, path, wbuf, sizeof(wbuf))
-                                : sys_http(host, path, wbuf, sizeof(wbuf));
-                if (n < 0) { print("wget: failed (no net/DNS/connect)\n"); }
+                long n = !wbuf ? -1 : (secure ? sys_https(host, path, wbuf, (1u << 20) - 1)
+                                              : sys_http(host, path, wbuf, (1u << 20) - 1));
+                if (n < 0) { print("wget: failed (no net/DNS/connect, or out of memory)\n"); }
                 else {
                     int bo = 0;                              /* skip HTTP headers -> body */
                     for (int t = 0; t + 3 < (int)n; t++)
@@ -1416,6 +1416,7 @@ static int run_command(char *line, char *cwd) {
                         print("saved "); print(num); print(" bytes to "); print(out); print("\n");
                     }
                 }
+                free(wbuf);
             }
         } else if (startswith(line, "browse ")) {
             sys_browse(line + 7);
