@@ -1,5 +1,12 @@
 # What's next
 
+> **(M740) Chess — highlights the computer's last move.** After the CPU replied it was hard to see what it
+> played (you had to diff the board). Now `user/chess.c` tracks the last move's from/to squares and renders
+> them in bright cyan — the vacated square as a `*`, the moved piece in cyan — for both your move and the
+> CPU's, so the post-reply board points right at the CPU's move. App-only change (chess.c isn't test-coupled;
+> last full `make check` at M739 green). Verified in-guest: after 1.e4 the CPU's 1...Nf6 shows a cyan `*` on
+> g8 and a cyan knight on f6.
+
 > **(M739) New game — Missile Command (mouse-driven, in the framebuffer).** `user/missile.c`: defend six
 > cities from descending missiles — move the mouse to aim the crosshair and click to detonate an interceptor,
 > whose expanding blast destroys any missile it touches. A missile that reaches the ground takes out the

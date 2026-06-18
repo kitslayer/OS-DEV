@@ -24,6 +24,7 @@ static int  cr, cc;            /* cursor row/col */
 static int  sel;               /* selected square index, or -1 */
 static int  over;              /* game ended */
 static int  crights;           /* castling rights bitmask: 1=WK 2=WQ 4=BK 8=BQ */
+static int  lfrom = -1, lto = -1;   /* last move's from/to squares (highlighted) */
 static const char *msg;
 
 typedef struct { unsigned char from, to, promo; } Move;
@@ -46,7 +47,7 @@ static void reset(void) {
         bd[6*8 + c] = 'P';               /* white pawns */
         bd[7*8 + c] = (char)(back[c] - 32); /* white back rank, uppercase */
     }
-    crights = 15; cr = 6; cc = 4; sel = -1; over = 0; msg = "Your move (White).";
+    crights = 15; cr = 6; cc = 4; sel = -1; over = 0; lfrom = lto = -1; msg = "Your move (White).";
 }
 
 static int pval(char p) {
@@ -344,6 +345,7 @@ static int cpu_move(void) {
         if (sc > best) { best = sc; bi = i; }
     }
     apply(mv[bi], bak);
+    lfrom = mv[bi].from; lto = mv[bi].to;
     return 1;
 }
 
@@ -360,13 +362,16 @@ static void render(void) {
     for (int r = 0; r < 8; r++) {
         print("  "); sys_setcolor(8); putn(8 - r); print(" "); sys_setcolor(0);
         for (int c = 0; c < 8; c++) {
-            char p = bd[r*8 + c];
-            int iscur = (r == cr && c == cc), issel = (sel == r*8 + c);
-            if (issel)      sys_setcolor(10);                 /* picked piece: green   */
-            else if (iscur) sys_setcolor(14);                 /* cursor: yellow        */
-            else if (empty(p)) sys_setcolor(8);               /* empty: dim            */
+            int idx = r*8 + c;
+            char p = bd[idx];
+            int iscur = (r == cr && c == cc), issel = (sel == idx);
+            int islast = (idx == lfrom || idx == lto);
+            if (issel)        sys_setcolor(10);               /* picked piece: green    */
+            else if (iscur)   sys_setcolor(14);               /* cursor: yellow         */
+            else if (islast)  sys_setcolor(11);               /* last move: bright cyan */
+            else if (empty(p)) sys_setcolor(8);               /* empty: dim             */
             else sys_setcolor(is_w(p) ? 15 : 12);             /* White bright / Black red */
-            char two[3]; two[0] = empty(p) ? '.' : p; two[1] = ' '; two[2] = 0;
+            char two[3]; two[0] = empty(p) ? (idx == lfrom ? '*' : '.') : p; two[1] = ' '; two[2] = 0;
             print(two);
         }
         sys_setcolor(0); print("\n");
@@ -419,6 +424,7 @@ int main(void) {
                 Move mv[256]; int n = gen_legal(1, mv), done = 0;
                 for (int i = 0; i < n; i++) if (mv[i].from == sel && mv[i].to == idx) {
                     char bak[65]; apply(mv[i], bak);
+                    lfrom = mv[i].from; lto = mv[i].to;
                     sel = -1; done = 1;
                     sys_beep(660, 40);
                     check_state(0);                       /* is Black (to move) mated? */
