@@ -195,6 +195,55 @@ int main(void) {
     printf("  dir-growth: created %d/%d distinct files (forces add_entry chain growth), %d read back & verified\n", created, NF, verified);
     if (created != NF || verified != NF) { printf("FAIL: dir-growth lost files (created %d, verified %d, want %d)\n", created, verified, NF); return 1; }
 
-    printf("PASS: FAT32 read+write paths, ASan/UBSan clean (corrupt-FAT fuzz + write stress + dir growth)\n");
+    /* ---- Phase 4: regression — rm of a NON-EMPTY directory is refused, with
+     * NO cluster leak (M624). The old fat32_delete freed only the directory's
+     * own cluster chain, orphaning every child file's clusters (silent FAT
+     * leak). Now it refuses a non-empty dir, so: df must be unchanged by the
+     * refused delete, the child must stay readable, and a proper delete (child
+     * then dir) must reclaim every cluster back to the starting free count. */
+    build_valid_image();
+    if (fat32_mount() != 0) { printf("FAIL: remount for rm-nonempty-dir\n"); return 1; }
+    uint64_t f0, tot;
+    fat32_df(&f0, &tot);
+    if (fat32_mkdir("RMDIR") != 0)            { printf("FAIL: mkdir RMDIR\n"); return 1; }
+    static char cdata[1500];                  /* >1 cluster so a leak spans several */
+    for (size_t i = 0; i < sizeof(cdata); i++) cdata[i] = (char)('A' + (i % 26));
+    if (fat32_write("RMDIR/CHILD.TXT", cdata, sizeof(cdata)) < 0) { printf("FAIL: write RMDIR/CHILD.TXT\n"); return 1; }
+    uint64_t f1; fat32_df(&f1, &tot);
+    if (f1 >= f0)                             { printf("FAIL: dir+child consumed no space (%llu->%llu)\n", (unsigned long long)f0, (unsigned long long)f1); return 1; }
+    if (fat32_delete("RMDIR") != -1)          { printf("FAIL: rm of NON-EMPTY dir must be refused (-1)\n"); return 1; }
+    uint64_t f2; fat32_df(&f2, &tot);
+    if (f2 != f1)                             { printf("FAIL: refused dir-delete changed free space — leak/early-free (%llu vs %llu)\n", (unsigned long long)f2, (unsigned long long)f1); return 1; }
+    char crb[1600];
+    long cn = fat32_read("RMDIR/CHILD.TXT", crb, sizeof(crb));
+    if (cn != (long)sizeof(cdata) || crb[0] != 'A' || crb[1499] != cdata[1499]) { printf("FAIL: child unreadable after refused dir-delete (got %ld)\n", cn); return 1; }
+    if (fat32_delete("RMDIR/CHILD.TXT") != 0) { printf("FAIL: delete child\n"); return 1; }
+    if (fat32_delete("RMDIR") != 0)           { printf("FAIL: delete now-empty dir\n"); return 1; }
+    uint64_t f3; fat32_df(&f3, &tot);
+    if (f3 != f0)                             { printf("FAIL: clusters not fully reclaimed (%llu, want %llu)\n", (unsigned long long)f3, (unsigned long long)f0); return 1; }
+    printf("  rm-nonempty-dir (M624): refused (-1), no leak, child survived, full reclaim (free %llu->%llu->%llu)\n",
+           (unsigned long long)f0, (unsigned long long)f1, (unsigned long long)f3);
+
+    /* ---- Phase 5: regression — the READ path finds a name that 8.3-TRUNCATES
+     * (M630). dir_find used to compare only the formatted display name (ieq), so
+     * a file written "dl.html" (stored 8.3 "DL      HTM") was findable by
+     * delete/mkdir (which to_83 the leaf) but NOT by read -> "no such file".
+     * dir_find now also matches the to_83 form, so a long name whose formatted
+     * 8.3 differs from it still reads back. */
+    build_valid_image();
+    if (fat32_mount() != 0) { printf("FAIL: remount for 8.3 read\n"); return 1; }
+    const char *body = "<html>truncated-name body</html>";
+    unsigned long blen = strlen(body);
+    char eb[64];
+    /* (a) extension truncated: "dl.html" -> "DL      HTM" (formatted "DL.HTM" != "dl.html") */
+    if (fat32_write("dl.html", body, blen) < 0)               { printf("FAIL: write dl.html\n"); return 1; }
+    if (fat32_read("dl.html", eb, sizeof(eb)) != (long)blen)  { printf("FAIL: read 'dl.html' by long name (M630 regression)\n"); return 1; }
+    if (fat32_read("DL.HTM", eb, sizeof(eb)) != (long)blen)   { printf("FAIL: read 'DL.HTM' by its 8.3 name\n"); return 1; }
+    /* (b) base truncated: "verylongname.txt" -> "VERYLONG TXT" (formatted "VERYLONG.TXT") */
+    if (fat32_write("verylongname.txt", body, blen) < 0)              { printf("FAIL: write verylongname.txt\n"); return 1; }
+    if (fat32_read("verylongname.txt", eb, sizeof(eb)) != (long)blen) { printf("FAIL: read 'verylongname.txt' by long name (M630)\n"); return 1; }
+    printf("  8.3-read (M630): 'dl.html'->DL.HTM and 'verylongname.txt'->VERYLONG.TXT both readable by long name\n");
+
+    printf("PASS: FAT32 read+write paths, ASan/UBSan clean (corrupt-FAT fuzz + write stress + dir growth + rm-nonempty-dir + 8.3-read regressions)\n");
     return 0;
 }
