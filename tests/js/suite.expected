@@ -360,4 +360,6 @@ word two,words cat A Cat
 true false hi hi true
 -- regex m (multiline) + s (dotall) flags (M644) --
 a a,b false true
+-- regex (?:) non-capturing + \xHH (M645) --
+1 catfish true A B
 -- done --

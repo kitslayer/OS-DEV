@@ -1030,11 +1030,11 @@ static rnode *rx_atom(rparse *P){
     if(P->pos>=P->len) return rx_node(RN_EMPTY);
     int c=(unsigned char)P->p[P->pos];
     if(c=='('){ P->pos++;
-        const char *gnm=0; int gnl=0;   /* (?<name>… capture name span, if present */
-        if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') P->pos+=2;   /* (?: non-capturing */
+        const char *gnm=0; int gnl=0; int noncap=0;   /* (?<name>… capture name span, if present */
+        if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') { P->pos+=2; noncap=1; }   /* (?: non-capturing: skip ?: AND don't allocate a group */
         else if(P->pos+2<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]=='<' && P->p[P->pos+2]!='=' && P->p[P->pos+2]!='!'){   /* (?<name>… named capture: capture the name, treat as a numbered group */
             P->pos+=2; gnm=P->p+P->pos; while(P->pos<P->len && P->p[P->pos]!='>') P->pos++; gnl=(int)(P->p+P->pos-gnm); if(P->pos<P->len) P->pos++; }
-        int gi=(P->ngroup<RE_MAXGROUP)?++P->ngroup:0;
+        int gi=noncap ? 0 : ((P->ngroup<RE_MAXGROUP)?++P->ngroup:0);
         if(gnm && gi>0 && gnl>0){ char *nm=aalloc(gnl+1); if(nm){ memcpy(nm,gnm,gnl); nm[gnl]=0; P->gnames[gi]=nm; } }   /* group# -> name, for match.groups (M577) */
         rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1; rnode *g=rx_node(RN_GROUP); if(!g){P->err=1;return 0;} g->a=body; g->group=gi; return g; }
     if(c=='['){ P->pos++; return rx_class(P); }
@@ -1046,6 +1046,11 @@ static rnode *rx_atom(rparse *P){
         if(e=='D'||e=='W'||e=='S'){ rnode *n=rx_node(RN_CLASS); if(!n){P->err=1;return 0;} n->cls=aalloc(32); if(!n->cls){P->err=1;return 0;} memset(n->cls,0,32); cls_class(n->cls,e+32); n->c=1; return n; }
         if(e=='b'||e=='B'){ rnode *n=rx_node(e=='b'?RN_WORDB:RN_NWORDB); if(!n){P->err=1;return 0;} return n; }   /* \b word boundary, \B non-boundary (zero-width) */
         if(e>='1'&&e<='9'){ rnode *n=rx_node(RN_BACKREF); if(!n){P->err=1;return 0;} n->c=e-'0'; return n; }   /* \1..\9 backreference to a capture group */
+        if(e=='x' && P->pos+1<P->len){   /* \xHH hex escape */
+            int a=(unsigned char)P->p[P->pos], b=(unsigned char)P->p[P->pos+1];
+            int va=(a>='0'&&a<='9')?a-'0':(a>='a'&&a<='f')?a-'a'+10:(a>='A'&&a<='F')?a-'A'+10:-1;
+            int vb=(b>='0'&&b<='9')?b-'0':(b>='a'&&b<='f')?b-'a'+10:(b>='A'&&b<='F')?b-'A'+10:-1;
+            if(va>=0&&vb>=0){ P->pos+=2; rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} n->c=(va<<4)|vb; return n; } }
         rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} if(e=='n')n->c='\n'; else if(e=='t')n->c='\t'; else if(e=='r')n->c='\r'; else n->c=e; return n; }
     P->pos++; rnode *n=rx_node(RN_CHAR); if(!n){P->err=1;return 0;} n->c=c; return n;
 }
