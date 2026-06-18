@@ -16,6 +16,7 @@ int jpeg_probe (const uint8_t *, int, int *, int *, long *);
 int jpeg_decode(const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
 int png_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
 int gif_decode (const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
+int gif_decode_anim(const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *, int *, int);
 int bmp_decode (const uint8_t *, int, uint8_t *, int, int *, int *);
 int inflate    (const uint8_t *, int, uint8_t *, int);   /* raw DEFLATE */
 int gz_inflate (const uint8_t *, int, uint8_t *, int);   /* gzip wrapper */
@@ -52,6 +53,29 @@ static int build_gif(uint8_t *g, int iw, int ih) {
     g[p++]=iw&0xFF; g[p++]=(iw>>8)&0xFF;                 /* image w */
     g[p++]=ih&0xFF; g[p++]=(ih>>8)&0xFF;                 /* image h */
     g[p++]=0;                                            /* no local table, no interlace */
+    return p;
+}
+
+/* Build a valid animated GIF89a: a 2x2 canvas with `nf` full-canvas frames (all
+ * palette index 0), each preceded by a Graphic Control Extension carrying
+ * disposal method `disp` + a delay, reusing the 2x2 LZW (04 00 05). Exercises
+ * gif_decode_anim's multi-frame compositing + disposal. Returns the length. */
+static int build_anim(uint8_t *g, int nf, int disp) {
+    int p = 0;
+    g[p++]='G'; g[p++]='I'; g[p++]='F'; g[p++]='8'; g[p++]='9'; g[p++]='a';
+    g[p++]=2; g[p++]=0; g[p++]=2; g[p++]=0;                    /* logical screen 2x2 */
+    g[p++]=0x80|0x01; g[p++]=0; g[p++]=0;                      /* GCT present, 4 colours */
+    g[p++]=0x10; g[p++]=0x20; g[p++]=0x30; for (int i=0;i<9;i++) g[p++]=0;
+    for (int f = 0; f < nf; f++) {
+        g[p++]=0x21; g[p++]=0xF9; g[p++]=0x04;                 /* Graphic Control Extension */
+        g[p++]=(uint8_t)(disp<<2); g[p++]=0x03; g[p++]=0x00;   /* packed (disposal), delay=3cs */
+        g[p++]=0x00; g[p++]=0x00;                              /* transparent idx, sub-block terminator */
+        g[p++]=0x2C; g[p++]=0; g[p++]=0; g[p++]=0; g[p++]=0;   /* image separator, left=0 top=0 */
+        g[p++]=2; g[p++]=0; g[p++]=2; g[p++]=0;                /* iw=2 ih=2 */
+        g[p++]=0;                                              /* no local table, not interlaced */
+        g[p++]=2; g[p++]=3; g[p++]=0x04; g[p++]=0x00; g[p++]=0x05; g[p++]=0;  /* LZW + terminator */
+    }
+    g[p++]=0x3B;                                               /* trailer */
     return p;
 }
 
@@ -243,6 +267,31 @@ int main(void) {
             if (tscr && tout) gif_decode(g, p, tout, iw*ih*4, tscr, iw*ih, &w2, &h2);
             free(tscr); free(tout);
         }
+
+        /* (d) animated GIF: gif_decode_anim composites multiple frames honouring
+         *     disposal methods — web-reachable yet otherwise unfuzzed. Decode a
+         *     known 3-frame anim, then fuzz the frame/LZW bytes. The header
+         *     (offset 0..24) is kept intact so W*H stays 2x2 and the W*H*5 canvas
+         *     +index scratch / max_frames*W*H*4 output stay correctly sized —
+         *     any composite/snapshot over-write then trips an ASan red-zone. */
+        int delays[3];
+        int alen = build_anim(g, 3, 2);              /* 3 frames, disposal = restore-to-bg */
+        int fr = gif_decode_anim(g, alen, obuf, 3*2*2*4, sbuf, 20, &w2, &h2, delays, 3);
+        if (fr != 3 || w2 != 2 || h2 != 2 || obuf[0] != 0x10 || delays[0] != 3) {
+            printf("FAIL: animated GIF decode (frames=%d w=%d h=%d px0=%d d0=%d)\n",
+                   fr, w2, h2, obuf[0], delays[0]);
+            return 1;
+        }
+        uint8_t *aout = malloc(4*2*2*4), *ascr = malloc(20);   /* exact: 4 frames, W*H*5 */
+        for (int i = 0; i < ITERS && aout && ascr; i++) {
+            int nf = 1 + (int)(xr() % 4), disp = (int)(xr() % 4);
+            int len = build_anim(g, nf, disp);
+            int K = 1 + (int)(xr() % 6);
+            for (int k = 0; k < K; k++) g[25 + (int)(xr() % (len - 25))] = (uint8_t)xr();
+            int ww, hh, dl[4];
+            gif_decode_anim(g, len, aout, 4*2*2*4, ascr, 20, &ww, &hh, dl, 4);
+        }
+        free(aout); free(ascr);
     }
 
     /* 8. JPEG Huffman/IDCT path. Like GIF LZW, the magic-only prefix fuzz can't
@@ -346,6 +395,6 @@ int main(void) {
         free(pout);
     }
 
-    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + GIF 2x2 LZW + JPEG 8x8 + PNG colours + gzip round-trip + %d decoder + %d DEFLATE + %d BMP + %d gzip + %d GIF-LZW + %d JPEG-scan + %d PNG-scan fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS, ITERS, ITERS, ITERS, ITERS);
+    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + GIF 2x2 LZW + GIF anim + JPEG 8x8 + PNG colours + gzip round-trip + %d decoder + %d DEFLATE + %d BMP + %d gzip + %d GIF-LZW + %d GIF-anim + %d JPEG-scan + %d PNG-scan fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS, ITERS, ITERS, ITERS, ITERS, ITERS);
     return 0;
 }
