@@ -1,5 +1,13 @@
 # What's next
 
+> **(M714) The raycaster is now a first-person SHOOTER.** Extends `user/raycast.c` with billboarded enemy
+> orbs and combat: each column's wall distance is kept in a depth buffer, and living enemies are transformed
+> into camera space, projected to a screen column + size (1/depth), and drawn as shaded ellipses only where a
+> nearer wall doesn't occlude them (drawn far-to-near). A white crosshair marks the centre; Space fires at the
+> nearest enemy under it that isn't behind a wall (short cooldown). Enemies slowly home in (a touch beeps +
+> respawns them). Verified in-guest: an enemy orb renders down the corridor under the crosshair, and firing
+> destroys it. All 29 `make check` suites still green.
+
 > **(M713) A from-scratch raycaster — pseudo-3D in the framebuffer.** `user/raycast.c` renders a
 > Wolfenstein-style first-person maze: one ray per screen column is marched across a 16×16 grid (DDA) to the
 > first wall and drawn as a vertical slice whose height is 1/distance, coloured by cell and shaded by distance
