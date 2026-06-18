@@ -1,5 +1,21 @@
 # What's next
 
+> **(M556-M561) Desktop-environment polish — driven + verified in-guest.** With QEMU back (above), used
+> the new full headless control — keyboard via HMP `sendkey` AND mouse via QMP `input-send-event`
+> (absolute tablet, 0..32767), plus `screendump` — to improve the DE the user actually asked for ("idc
+> about music i want a good DE") and *visually verify each change*. **M558** F1 keyboard-shortcut help
+> overlay (the WM had grown F2/F3/F4/F5/F6/F8/F9/F12 but they weren't all surfaced anywhere). **M559**
+> taskbar clock now shows date + time (`YYYY-MM-DD HH:MM:SS`), not just time. **M560** fixed the chip
+> hit-test that M559's wider clock pill broke (extracted one `clk_pill_w()` so render + hit-test can't
+> drift). **M561** double-click the title bar to maximize/restore — which exposed and fixed a pre-existing
+> drag bug (a bare title-bar click cleared the `maximized` flag without restoring geometry; now the move
+> handler acts only past a 3px threshold, and dragging a maximized window restores its size and follows
+> the cursor). **M556** also fixed a stale `tls.h` comment + **M557** a host-build break (the `nettest`
+> harness needed TLS stubs after M555 added a tls_get call to net.c). Confirmed in-guest this arc: the
+> desktop, browser start page, Mandelbrot, the help overlay, snap-tiling, maximize/restore, and window
+> dragging all render/behave correctly. **The screenshot+input workflow is the durable win** — any
+> graphical regression is now reproducible and reviewable headlessly.
+
 > **(M549-M555) QEMU is UNBLOCKED — in-guest verification restored + gated.** The single biggest
 > change this session wasn't a feature, it was discovering that **QEMU runs again** (v10.2.2). The
 > previous ~30 milestones (M520-M548) all landed "host-verifiable only" because earlier sessions hit
