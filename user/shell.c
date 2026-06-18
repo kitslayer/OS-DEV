@@ -225,20 +225,26 @@ static int run_command(char *line, char *cwd) {
             }
             if (!any) print("usage: tail <file>...\n");
         } else if (startswith(line, "tac ")) {           /* print a file's lines in reverse order */
-            static char buf[2048];
-            long n = sys_readfile(line + 4, buf, sizeof(buf) - 1);
-            if (n < 0) { print("tac: no such file: "); print(line + 4); print("\n"); }
+            long n; char *buf = slurp(line + 4, &n);
+            if (!buf) { print("tac: no such file: "); print(line + 4); print("\n"); }
             else {
                 buf[n] = 0;
-                static int starts[1024]; int ns = 0; starts[ns++] = 0;   /* 1024 >= max lines in a 2047-byte buffer */
-                for (long i = 0; i < n; i++) if (buf[i] == '\n' && ns < 1024) starts[ns++] = (int)(i + 1);
-                for (int k = ns - 1; k >= 0; k--) {
-                    int s = starts[k]; if (s >= (int)n) continue;     /* skip empty trailing line */
-                    int e = s; while (e < (int)n && buf[e] != '\n') e++;
-                    char save = buf[e]; buf[e] = 0;
-                    print(buf + s); print("\n");
-                    buf[e] = save;
+                int cap = 1; for (long i = 0; i < n; i++) if (buf[i] == '\n') cap++;   /* one slot per line (was fixed 1024) */
+                int *starts = malloc((unsigned long)cap * sizeof(int));
+                if (!starts) print("tac: out of memory\n");
+                else {
+                    int ns = 0; starts[ns++] = 0;
+                    for (long i = 0; i < n; i++) if (buf[i] == '\n' && ns < cap) starts[ns++] = (int)(i + 1);
+                    for (int k = ns - 1; k >= 0; k--) {
+                        int s = starts[k]; if (s >= (int)n) continue;     /* skip empty trailing line */
+                        int e = s; while (e < (int)n && buf[e] != '\n') e++;
+                        char save = buf[e]; buf[e] = 0;
+                        print(buf + s); print("\n");
+                        buf[e] = save;
+                    }
+                    free(starts);
                 }
+                free(buf);
             }
         } else if (startswith(line, "uniq ")) {           /* drop adjacent duplicate lines */
             long n; char *buf = slurp(line + 5, &n);
@@ -1191,13 +1197,12 @@ static int run_command(char *line, char *cwd) {
                 free(b1); free(b2);
             }
         } else if (startswith(line, "strings ")) {        /* strings FILE -> runs of >=4 printable chars */
-            static char buf[2048];
             const char *p = line + 8; while (*p == ' ') p++;
             char name[64]; int j = 0; while (*p && *p != ' ' && j < 63) name[j++] = *p++; name[j] = 0;
             if (!name[0]) { print("usage: strings <file>\n"); }
             else {
-                long n = sys_readfile(name, buf, sizeof(buf));
-                if (n < 0) { print("strings: no such file: "); print(name); print("\n"); }
+                long n; char *buf = slurp(name, &n);
+                if (!buf) { print("strings: no such file: "); print(name); print("\n"); }
                 else {
                     char run[80]; int rl = 0;
                     for (long i = 0; i < n; i++) {
@@ -1207,6 +1212,7 @@ static int run_command(char *line, char *cwd) {
                     }
                     if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); }   /* trailing run */
                 }
+                free(buf);
             }
         } else if (startswith(line, "basename ")) {       /* basename PATH -> the last component */
             const char *p = line + 9; while (*p == ' ') p++;
