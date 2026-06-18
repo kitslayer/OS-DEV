@@ -47,6 +47,8 @@ global sokoban_elf_start, sokoban_elf_end
 global battleship_elf_start, battleship_elf_end
 global pig_elf_start, pig_elf_end
 global raycast_elf_start, raycast_elf_end
+global tron_elf_start, tron_elf_end
+global spaceinv_elf_start, spaceinv_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -211,5 +213,13 @@ pig_elf_end:
 raycast_elf_start:
     incbin "build/raycast.elf"
 raycast_elf_end:
+
+tron_elf_start:
+    incbin "build/tron.elf"
+tron_elf_end:
+
+spaceinv_elf_start:
+    incbin "build/spaceinv.elf"
+spaceinv_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

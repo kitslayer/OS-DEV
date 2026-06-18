@@ -1,5 +1,13 @@
 # What's next
 
+> **(M716) Two more games — Tron and Space Invaders.** **Tron light cycles** (`user/tron.c`): you vs a CPU
+> that steers greedily (straight while safe, else turn to an open side); both leave solid trails on a 40×15
+> arena, run into any trail or wall and you're out, last one riding wins; real-time. **Space Invaders**
+> (`user/spaceinv.c`): a 3×8 invader block marches and drops + reverses at the edges (speeding up as you thin
+> it) and occasionally shoots back; slide the cannon and clear them before they land — three lives. Both
+> verified in-guest (Tron: trails + a dodged head-on; Invaders: formation + cannon). All 29 `make check`
+> suites still green.
+
 > **(M715) NES sound — APU wired to the streaming PCM ring.** The NES app's audio callback
 > (`user/nes/nes_osdev.c`) now converts libxnes's per-sample float (requested at 48 kHz, the kernel's PCM
 > rate) to 16-bit stereo and flushes the batch to `sys_pcm_stream` once per frame (~800 samples/frame,
