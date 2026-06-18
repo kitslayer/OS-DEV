@@ -1,5 +1,15 @@
 # What's next
 
+> **(M599) Real bug found by in-guest verification: Quake didn't launch in the default RAM config.** While
+> screenshot-verifying the marquee features, DOOM rendered but **Quake produced no window and no crash** —
+> its init silently failed. Root cause: Quake needs its 18 MB PAK + a multi-MB hunk on top of the kernel
+> (whose BSS now includes the 40 MB JS arena), which QEMU's **~128 MB default can't satisfy** — the alloc
+> fails and Quake exits cleanly (window reaped, no fault). DOOM (4 MB WAD) fit, so only Quake broke. Fix:
+> `-m 256M` everywhere the OS launches (Makefile run/test, the three in-guest test scripts, osdrive.py).
+> Confirmed in-guest: Quake now renders E1M1 + HUD, **and DOOM+Quake run concurrently** (the M519 feature,
+> now actually exercised). All 27 suites green at 256M. A clean example of verification surfacing a real,
+> high-value regression that host tests couldn't.
+
 > **(M590-M592) Real-page rendering polish + DE touch, found by reviewing/rendering real sites.** Continuing
 > the content-parser review: **M590** the browser now honors the `font:` shorthand (`style="font: bold
 > 14px Arial"` previously set neither weight nor size); **M591** `uni_to_ascii` folds common math/arrow
