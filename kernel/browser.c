@@ -32,6 +32,7 @@
 #include "vfs.h"
 #include "http.h"
 #include "htmlentity.h"
+#include "htmlattr.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -149,7 +150,8 @@ static int  decode_bytes_to_slot(browser_t *b, const uint8_t *data, int len);  /
 static int  b64_decode(const char *in, int inlen, uint8_t *out, int cap);       /* fwd: base64 -> bytes (for data: image URIs) */
 
 /* ---- small helpers ---- */
-static int lc(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
+/* lc() + the attribute scanners (find_attr/has_attr/attr_int/find_href) now live
+ * in htmlattr.c so they can be fuzzed in isolation (M566). */
 static int tageq(const char *t, const char *lit) {
     int i = 0; while (t[i] && lit[i]) { if (t[i] != lit[i]) return 0; i++; }
     return t[i] == lit[i];
@@ -236,38 +238,6 @@ static int copy_decoded(char *dst, int dstmax, const char *src, int srclen) {
 }
 
 
-/* Find attribute `name`="..." (or '...' or bare) within an attribute slice.
- * The name must start at a token boundary (so "href" won't match inside another
- * attribute or value). */
-static int find_attr(const char *a, int n, const char *name, const char **val, int *vlen) {
-    int nl = 0; while (name[nl]) nl++;
-    for (int i = 0; i + nl <= n; i++) {
-        if (i > 0 && a[i-1] != ' ' && a[i-1] != '\t') continue;  /* attr boundary */
-        int m = 0; while (m < nl && lc(a[i+m]) == name[m]) m++;
-        if (m != nl) continue;
-        int k = i + nl; while (k < n && (a[k]==' '||a[k]=='\t')) k++;
-        if (k < n && a[k] == '=') {
-            k++; while (k < n && (a[k]==' '||a[k]=='\t')) k++;
-            char q = 0; if (k < n && (a[k]=='"'||a[k]=='\'')) { q = a[k]; k++; }
-            int s = k;
-            while (k < n && (q ? a[k]!=q : (a[k]!=' '&&a[k]!='\t'&&a[k]!='>'))) k++;
-            *val = a + s; *vlen = k - s; return 1;
-        }
-    }
-    return 0;
-}
-/* Is a (possibly valueless) boolean attribute present? e.g. `checked`, `disabled`. */
-static int has_attr(const char *a, int n, const char *name) {
-    int nl = 0; while (name[nl]) nl++;
-    for (int i = 0; i + nl <= n; i++) {
-        if (i > 0 && a[i-1] != ' ' && a[i-1] != '\t') continue;       /* attr boundary */
-        int m = 0; while (m < nl && lc(a[i+m]) == name[m]) m++;
-        if (m != nl) continue;
-        int k = i + nl;                                               /* must be a complete token */
-        if (k >= n || a[k]==' ' || a[k]=='\t' || a[k]=='=' || a[k]=='>' || a[k]=='/') return 1;
-    }
-    return 0;
-}
 /* Format an <ol> item number n in the given type into out[<max]: '1' decimal,
  * 'a'/'A' alphabetic (a,b,…,z,aa,…), 'i'/'I' roman (1–3999). */
 static void fmt_li_num(int n, char fmt, char *out, int max) {
@@ -287,17 +257,6 @@ static void fmt_li_num(int n, char fmt, char *out, int max) {
         while (k && p < max - 1) out[p++] = tmp[--k];
     }
     out[p] = 0;
-}
-/* Parse a numeric attribute (e.g. width="48"); 0 if absent/non-numeric. */
-static int attr_int(const char *a, int n, const char *name) {
-    const char *v; int vl;
-    if (!find_attr(a, n, name, &v, &vl)) return 0;
-    int x = 0, i = 0;
-    while (i < vl && v[i] >= '0' && v[i] <= '9') { x = x * 10 + (v[i] - '0'); if (x > 8192) return 8192; i++; }
-    return x;
-}
-static int find_href(const char *a, int n, const char **val, int *vlen) {
-    return find_attr(a, n, "href", val, vlen);
 }
 
 /* Store an href slice, returning its link id (or NO_LINK if full/empty). */

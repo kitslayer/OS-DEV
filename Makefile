@@ -241,6 +241,10 @@ jssrcfuzztest:
 htmlentfuzztest:
 	@tests/run-htmlentfuzz-tests.sh
 
+# Host-side fuzz of the HTML attribute scanners over untrusted/malformed tag bytes (ASan+UBSan).
+htmlattrtest:
+	@tests/run-htmlattr-tests.sh
+
 # In-guest boot assertion: boots the real kernel headless and asserts every
 # bring-up marker is present with no crash (exercises the whole driver stack,
 # not one .c in isolation). SKIPs cleanly if QEMU is absent.
@@ -255,8 +259,8 @@ gfxtest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest boottest gfxtest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + boottest + gfxtest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest boottest gfxtest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + boottest + gfxtest)"
 
 clean:
 	rm -rf $(BUILD)
