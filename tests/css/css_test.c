@@ -47,6 +47,7 @@ int main(void) {
     expect("colorx:1", "color", NULL);                         /* not a boundary (needs ':') */
     expect("background:#fff url(x)", "background", "#fff url(x)"); /* shorthand value to end */
     expect("a:1;b:2", "b", "2");                               /* 2nd decl, after ';' boundary */
+    expect("color:red;color:blue", "color", "blue");           /* CSS cascade: a later duplicate wins */
     printf("regression: %s\n", fails ? "FAILURES" : "ok (style_prop boundary + value span)");
 
     /* ---- fuzz: truncations + single-byte corruptions of a battery ---- */
