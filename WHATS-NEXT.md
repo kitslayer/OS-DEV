@@ -1,5 +1,14 @@
 # What's next
 
+> **(M725) Game Boy emulator — a whole second console, via vendored Peanut-GB.** Same recipe as the NES:
+> `user/gb/` vendors **Peanut-GB** (an MIT single-header DMG emulator — CPU/PPU/MBC) behind `gb_osdev.c`, which
+> reads the chosen `.gb` off the disk, serves it through Peanut-GB's ROM/cart-RAM callbacks, maps each 2-bit
+> LCD shade to the classic DMG green into a 160×144 framebuffer (`sys_gfx_blit`), and drives the joypad byte
+> (active-low) from raw scancodes with the same same-frame-tap latch as the NES. A `.gb` picker handles
+> multiple ROMs. Ships **Libbet and the Magic Floor** (`tools/libbet.gb`, Zlib, by Damian Yerrick) — a real GB
+> puzzle game. Verified in-guest: libbet's intro renders in DMG green and input advances into the playfield
+> (the "Combo / 0% / 0/04" HUD). All 29 `make check` suites green.
+
 > **(M724) New game — Flappy Bird (with a persistent high score).** `user/flappy.c`: tap Space to flap the
 > bird up against gravity and thread the gaps in the scrolling pipes; one point per pipe cleared, best saved
 > to `FLAPPY.HI` (shown as `hi N`). Integer "sub-row" physics (no floating point, so it uses the generic user

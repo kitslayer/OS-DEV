@@ -968,6 +968,7 @@ static const struct {
     { "PAK0    PAK", "tools/PAK0.PAK" },  /* shareware Quake data (~18 MB): play in-OS with: run quake */
     { "NOVA    NES", "tools/nova.nes" },  /* Nova the Squirrel (GPLv3 homebrew NES game): play with: run nes */
     { "240P    NES", "tools/240p.nes" },  /* 240p test suite (GPLv3, by Tepples): a video/sound test ROM */
+    { "LIBBET  GB ", "tools/libbet.gb" }, /* Libbet and the Magic Floor (Zlib, by Tepples): a Game Boy game */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 
