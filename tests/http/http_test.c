@@ -67,6 +67,11 @@ static void test_find_loc(void) {
     char small[8];
     CHECK(http_find_loc(r3, (int)strlen(r3), small, (int)sizeof(small)) == 1 &&
           strlen(small) < sizeof(small), "Location overran small buffer");
+    /* leading AND trailing OWS around the value are trimmed (RFC 7230), so the
+     * redirect URL has no stray spaces that would break the follow-up fetch */
+    const char *r4 = "HTTP/1.1 302\r\nLocation:   https://e.com/y  \r\n\r\n";
+    CHECK(http_find_loc(r4, (int)strlen(r4), out, sizeof(out)) == 1 &&
+          strcmp(out, "https://e.com/y") == 0, "Location OWS not trimmed");
 }
 
 static void fuzz_dechunk(void) {

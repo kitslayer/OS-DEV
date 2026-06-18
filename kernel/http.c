@@ -69,6 +69,7 @@ int http_find_loc(const char *raw, int n, char *out, int max) {
                 int o = 0;
                 while (k < n && raw[k] != '\r' && raw[k] != '\n' && o < max - 1) out[o++] = raw[k++];
                 out[o] = 0;
+                while (o > 0 && (out[o-1] == ' ' || out[o-1] == '\t')) out[--o] = 0;   /* trim trailing OWS (RFC 7230) so the redirect URL has no spaces */
                 return 1;
             }
         }
