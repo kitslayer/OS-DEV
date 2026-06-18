@@ -26,6 +26,16 @@
 > useful subset: classes, quantifiers, greedy/lazy, alternation, named + non-capturing groups, backrefs, all
 > anchors + word boundaries, both flags, and lookahead. Safe throughout (only suite.js uses regex/bitwise, all
 > small/int32-range; shell grep has its own matcher); all 27 suites green incl. the in-guest browser.
+> **Probing kept paying out (M652-M654, beyond regex):** **M652** the `new Date(y,m,d,…)` constructor stored
+> its args raw while getTime/getDay used the exact civil calendar — so getDate/getMonth disagreed and the
+> common `new Date(y,m+1,0)` "last day of month" idiom returned 0; now it normalises via a civil round-trip
+> (month overflow carries the year, day 0 = last of prev month, 2100 correctly not a leap year). **M653**
+> function declarations weren't hoisted, so a call textually before `function f(){…}` threw "undefined
+> variable"; the block/program executor now defines them in a pre-pass (forward refs + that pattern work; var
+> hoisting/expressions unchanged). **M654** class private fields `#x` were a no-op AND a privacy leak (`#x=5`
+> wrote the public `x`, `this.#x` read undefined) — the lexer now keeps a leading `#` as part of the
+> identifier, so declaration + access agree on "#x" and it stays distinct from public `x`. (Generators
+> `function*` remain unsupported — a much larger coroutine feature.) Each fix is golden-locked.
 
 > **(M634-M640) Test-hardening + a JS correctness fix: lock in this session's fixes, fuzz the untrusted-input
 > parser paths the existing fuzzers couldn't reach, and fix a bitwise-operator divergence.** The data-loss bug class (below) was fixed + verified in-guest but had no
