@@ -78,6 +78,7 @@ static const struct menu_item menu[] = {
     { "Graphics Demo", KIND_APP, "gfxdemo" },
     { "DOOM", KIND_APP, "doom" },
     { "Quake", KIND_APP, "quake" },
+    { "NES", KIND_APP, "nes" },
     { "Paint", KIND_APP, "paint" }, { "Piano", KIND_APP, "piano" }, { "Jukebox", KIND_APP, "jukebox" },
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Monitor", KIND_SYSMON, 0 },

@@ -1,5 +1,26 @@
 # What's next
 
+> **(M706) NES emulator — a whole console, via vendored libxnes + a thin platform shim.** Following the
+> DOOM/Quake recipe (vendor a portable core + a small OS shim + a freely-licensed game on the FAT disk),
+> `user/nes/` now hosts **libxnes** (a pure-C99 NES core — CPU/PPU/APU/DMA/controller/cartridge + mapper
+> bank-switchers, **MIT**) behind `nes_osdev.c`: it reads `GAME.NES` off the disk, opens a 256×240 window,
+> and loops `drain raw scancodes → joypad 1 / step one frame / blit` (`xnes_get_pixel` is already
+> `0x00RRGGBB` → straight into `sys_gfx_blit`; timing via `sys_uptime_ms`/`sys_sleep`; audio is a no-op sink
+> for now, sound to follow like DOOM did). The shipped game is **Nova the Squirrel** (GPLv3 homebrew by
+> NovaSquirrel, mapper 1/MMC1, CHR-RAM). Booting it took two fixes to libxnes itself, isolated by
+> host-testing the core against the ROM (0 → thousands of rendered pixels, then visually confirmed as the
+> title screen): **(1)** `xnes_mapper1_init` never set MMC1's power-on PRG mode, so both PRG slots mapped
+> bank 0 and the reset vector at `$FFFC` read the wrong bank (blank screen) — now it powers up PRG-mode 3
+> (last 16K bank fixed at `$C000`), the de-facto hardware default the reset-bit path already applied;
+> **(2)** the NES-2.0 header branch lacked the CHR-RAM fallback the iNES-1.0 branch had, so a 0-CHR-ROM cart
+> got a zero-length CHR buffer — now an 8 KB writable CHR window. A third, OS-side subtlety: the NES samples
+> controller *state* once per frame, so a synthetic/quick key tap (QEMU's ~100 ms `sendkey` can collapse into
+> a single emulated frame) would net to "released" and miss an edge-triggered "Press Start" — the shim now
+> latches a same-frame tap as pressed for one frame while genuine holds pass through. Verified headlessly
+> (`osdrive`): title → Main Menu (Start) → Level-Select world map with the character moving. All 29
+> `make check` suites still green. The MMC1 + CHR-RAM fixes light up a large slice of the real NES library
+> (Zelda, Metroid, Mega Man 2, …), so more `.nes` games are now nearly free to add.
+
 > **(M687-M700) Spec-compliance probing arc — ~14 wrong-answer fixes the crash-fuzzers can't see.** After
 > the async/Promise/fetch arc, semantic probing (build the engine `-DJS_HOSTTEST`, diff edge cases against
 > spec) kept paying out — each a value real code depends on, none a crash: **Promise.any** + **thenable

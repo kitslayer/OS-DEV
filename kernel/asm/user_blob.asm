@@ -35,6 +35,7 @@ global wordle_elf_start, wordle_elf_end
 global gfxdemo_elf_start, gfxdemo_elf_end
 global doom_elf_start, doom_elf_end
 global quake_elf_start, quake_elf_end
+global nes_elf_start, nes_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -151,5 +152,9 @@ doom_elf_end:
 quake_elf_start:
     incbin "build/quake.elf"
 quake_elf_end:
+
+nes_elf_start:
+    incbin "build/nes.elf"
+nes_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

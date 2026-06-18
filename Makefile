@@ -86,7 +86,7 @@ $(BUILD)/%.o: %.asm
 # own ELF; the kernel embeds them all (see kernel/asm/user_blob.asm).
 USER_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
                -mgeneral-regs-only -std=gnu11 -O2 -Wall -Ikernel/include
-USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/doom.elf $(BUILD)/quake.elf
+USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/doom.elf $(BUILD)/quake.elf $(BUILD)/nes.elf
 
 $(BUILD)/user_%.o: user/%.c
 	@mkdir -p $(BUILD)
@@ -139,6 +139,28 @@ $(BUILD)/quake/%.o: user/quake/%.c Makefile
 $(BUILD)/quake.elf: $(QUAKE_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld
 	$(LD) -T user/user.ld -o $@ $(QUAKE_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (Quake)"
+
+# --- NES (vendored libxnes + a platform shim) --------------------------------
+# Same shape as DOOM_CFLAGS: floating point on (libxnes's audio sample path is
+# float) so drop -mgeneral-regs-only and add SSE; -w silences the vendored
+# core's legacy warnings; -fcommon tolerates its tentative-definition globals.
+# -Iuser/nes lets the core's <xnes.h>/<cpu.h>/... resolve; -Iuser/nes/include
+# supplies the libc shim headers (GCC provides <stdint.h>/<stdarg.h>/<limits.h>
+# freestanding). The emulator renders a 256x240 XRGB framebuffer.
+NES_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
+              -std=gnu11 -O2 -w -fcommon -msse2 -mfpmath=sse \
+              -Iuser/nes -Iuser/nes/include -Ikernel/include
+
+NES_SRCS := $(wildcard user/nes/*.c)
+NES_OBJS := $(patsubst user/nes/%.c,$(BUILD)/nes/%.o,$(NES_SRCS))
+
+$(BUILD)/nes/%.o: user/nes/%.c Makefile
+	@mkdir -p $(BUILD)/nes
+	$(CC) $(NES_CFLAGS) -c $< -o $@
+
+$(BUILD)/nes.elf: $(NES_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld
+	$(LD) -T user/user.ld -o $@ $(NES_OBJS) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (NES)"
 
 # the embedded blob depends on every program ELF
 $(BUILD)/kernel/asm/user_blob.o: $(USER_ELFS)
