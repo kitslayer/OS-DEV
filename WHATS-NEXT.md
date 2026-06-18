@@ -1,5 +1,19 @@
 # What's next
 
+> **(M566, M580-M581) Browser untrusted-parser fuzzing trilogy — extracted + fuzzed.** The browser parses
+> a hostile server's bytes on the guard-page-less kernel stack; the cleanly-separable parsers are now
+> lifted into their own `.c` and host-fuzzed under ASan/UBSan (the M524/M546 pattern), each verified as a
+> real oracle (loosen a bound → ASan abort at the exact line): **M566** `htmlattr.c`
+> (`find_attr`/`has_attr`/`attr_int` — tag attribute scanners); **M580** `url.c` (`url_split`/
+> `resolve_img_url` — address bar / `<a href>` / `<img src>` / redirects, into fixed buffers); **M581**
+> `color.c` (`parse_color` — `#hex`/`rgb()`/`hsl()`/named, with clamped integer math). Each extraction is
+> verbatim (diffed byte-identical) and verified behavior-preserving in-guest — the browser still navigates
+> to https://example.com and renders its CSS-colored home page identically. The main `parse_html`
+> tokenizer stays too coupled to `browser_t` to fuzz in isolation, so it's guarded end-to-end by
+> `browsertest` instead. `make check` is now **26 suites** (23 host + 3 in-guest). Marquee features
+> re-confirmed in-guest by framebuffer screenshot this session: the desktop, the browser (home + real
+> HTTPS), Mandelbrot, the System Monitor, every window gesture — and **DOOM** (E1M1 + HUD).
+
 > **(M574-M578) JS engine — closed the documented gaps; coercion + regex + JSON now spec-complete.**
 > With QEMU back (so each change is verifiable in-guest), a focused pass finished the JS engine's long-tail:
 > **M574** ToPrimitive `toString` (string coercion of objects/classes: `""+o`, `String(o)`, template
