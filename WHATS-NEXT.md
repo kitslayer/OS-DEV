@@ -1,6 +1,6 @@
 # What's next
 
-> **(M549-M553) QEMU is UNBLOCKED — in-guest verification restored + gated.** The single biggest
+> **(M549-M555) QEMU is UNBLOCKED — in-guest verification restored + gated.** The single biggest
 > change this session wasn't a feature, it was discovering that **QEMU runs again** (v10.2.2). The
 > previous ~30 milestones (M520-M548) all landed "host-verifiable only" because earlier sessions hit
 > a QEMU launch failure (SIGSTKFLT) that made in-guest testing impossible. That premise is now stale.
@@ -15,10 +15,19 @@
 > — captures the VGA framebuffer via the QEMU monitor's `screendump` and asserts the desktop actually
 > painted (1024×768, ≥40 colors, no all-black hang), covering desktop.c/fb.c/fbcon.c/font.c/vga.c which
 > had *zero* in-guest coverage; **M553** made `boottest`'s real-internet GET non-fatal so the gate stays
-> green offline. **M551** cleaned up a GCC `malloc`-size false-positive in the M548 fuzzer. `make check`
+> green offline. **M551** cleaned up a GCC `malloc`-size false-positive in the M548 fuzzer. Then **M555** added a
+> boot-time **TLS 1.3 HTTPS self-test**: the kernel now does a real HTTPS GET to example.com alongside
+> the existing HTTP one, and in-guest it completes the *whole* from-scratch handshake — parses the 4-cert
+> chain (example.com → Cloudflare ECC CA → SSL.com Transit → SSL.com ECC Root), matches the hostname,
+> verifies 3/3 issuer signatures, anchors to a trusted root, passes `CertificateVerify`, and fetches the
+> page (`200 OK`). The crown-jewel TLS stack (X25519, AES-GCM/ChaCha20-Poly1305, X.509 path validation,
+> ECDSA/RSA over our own bignum) is now verified end-to-end at every boot (a soft `boottest` marker),
+> and `boottest` polls COM1 to exit ~when the desktop launches (~5s) with a 25s safety net. `make check`
 > is now **22 suites** (20 host + 2 in-guest); both new in-guest tests SKIP cleanly where QEMU/socat/
 > python3 are absent. The framebuffer-screenshot + HMP-input-injection technique (drive the Apps menu via
-> `sendkey`, then `screendump`) is now a general way to verify *any* graphical feature headlessly.
+> `sendkey`, then `screendump`) is now a general way to verify *any* graphical feature headlessly — used
+> this session to confirm the desktop, the CSS-styled browser start page, and the Mandelbrot app all
+> render correctly in-guest.
 
 > **Status (546 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
 > games as windowed ring-3 apps: **DOOM** (graphics, keyboard, mouselook, sound effects, and music) and

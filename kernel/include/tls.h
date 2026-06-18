@@ -9,7 +9,7 @@ int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t 
 
 /* CertificateVerify result of the most recent tls_get: -2 = none/absent,
  * 0 = signature verified (server proved leaf-key possession), -1 = failed.
- * (The full presented chain is parsed + logged; chain-to-root validation is TODO.) */
+ * (Chain-to-root path validation is done separately -- see tls_chain_anchored.) */
 int tls_cert_status(void);
 
 /* 1 if the most recent tls_get's certificate chain anchored to a trusted root CA
