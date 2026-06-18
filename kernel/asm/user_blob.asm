@@ -55,6 +55,7 @@ global gb_elf_start, gb_elf_end
 global lander_elf_start, lander_elf_end
 global yahtzee_elf_start, yahtzee_elf_end
 global checkers_elf_start, checkers_elf_end
+global gomoku_elf_start, gomoku_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -251,5 +252,9 @@ yahtzee_elf_end:
 checkers_elf_start:
     incbin "build/checkers.elf"
 checkers_elf_end:
+
+gomoku_elf_start:
+    incbin "build/gomoku.elf"
+gomoku_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -1,5 +1,12 @@
 # What's next
 
+> **(M729) New game — Gomoku (Five in a Row) vs the computer.** `user/gomoku.c`: place stones on an 11×11
+> board, first to five in a row in any direction wins; you're X, the CPU is O. The CPU plays a heuristic — for
+> every empty point it weighs the line it would build for itself against the line it would deny you
+> (run-length²), slightly favouring blocks and the centre, so it both attacks and defends. Additive ulib app
+> (kernel rebuilds clean; no test-coupled code touched). Verified in-guest: the board renders, you place X,
+> and the CPU answers with O near your stones.
+
 > **(M728) New game — Checkers vs the computer.** `user/checkers.c`: standard American draughts on an 8×8
 > board — men move/capture one diagonal forward, kings both ways, capturing is **mandatory** and multi-jumps
 > must be continued, and a man reaching the far row is crowned. Pick a piece (Space) then a destination (legal
