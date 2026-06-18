@@ -351,4 +351,7 @@ nuidx=2 nugroups=undefined plainarr=undefined
 -- JSON.parse reviver (M578) --
 rvmul=10 rvnest=4 rvarr=2,4,6
 rvdel=1,true rvnone=5
+-- bitwise int32 semantics (M640) --
+-2147483648 1 -1 -2147483648
+16744512 99162322
 -- done --

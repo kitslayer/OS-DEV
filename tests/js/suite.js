@@ -384,4 +384,7 @@ print("-- JSON.parse reviver (M578) --");
 print("rvmul="+JSON.parse('{"a":1,"b":2}',function(k,v){return typeof v==="number"?v*10:v;}).a, "rvnest="+JSON.parse('{"o":{"x":3}}',function(k,v){return typeof v==="number"?v+1:v;}).o.x, "rvarr="+JSON.parse('[1,2,3]',function(k,v){return typeof v==="number"?v*2:v;}).join(","));  // rvmul=10 rvnest=4 rvarr=2,4,6 (reviver transforms each value, post-order, incl. nested + array)
 var _rvd=JSON.parse('{"a":1,"b":2}',function(k,v){return k==="b"?undefined:v;});
 print("rvdel="+_rvd.a+","+(_rvd.b===undefined), "rvnone="+JSON.parse('{"a":5}').a);  // rvdel=1,true rvnone=5 (returning undefined deletes the key; no reviver = unchanged)
+print("-- bitwise int32 semantics (M640) --");
+print(1<<31, 1<<32, 0xFFFFFFFF|0, 2147483648|0);  // -2147483648 1 -1 -2147483648 (operands ToInt32, shift count & 31, like real JS)
+print((255<<16)|(128<<8)|64, (function(){var h=0,s="hello";for(var i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return h;})());  // 16744512 99162322 (RGB pack + canonical int32 string hash; impossible under the old int64 bitwise)
 print("-- done --");

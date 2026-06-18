@@ -1758,8 +1758,13 @@ static val eval_expr_inner(node *n, env *e) {
                     for (obj *c=a.o->ctor_class; c; c=c->parent_class) if (c==b.o) return BOOLV(1);
                     if (b.o->fn_proto) { int g=0; for (obj *p=a.o->proto; p && ++g<=JS_PROTO_MAX; p=p->proto) if (p==b.o->fn_proto) return BOOLV(1); }   /* Object.create(F.prototype) instanceof F */
                     return BOOLV(0);
-                case '&': return NUM(x&y); case '|': return NUM(x|y); case '^': return NUM(x^y);
-                case 'L': return NUM((int64_t)((uint64_t)x<<(y&63))); case 'R': return NUM(x>>(y&63));
+                /* bitwise ops follow JS: operands are coerced to int32 (ToInt32 = low 32 bits,
+                 * signed), the shift count is masked to & 31, and the result is int32 (sign-
+                 * extended back to the int64 number). >>> uses uint32. This matches the M269 >>>
+                 * path, so e.g. 1<<31 = -2147483648 and 0xFFFFFFFF|0 = -1, like real JS — what
+                 * browser scripts (|0 int-coercion, (r<<16)|(g<<8)|b packing, hashes) expect. */
+                case '&': return NUM((int64_t)((int32_t)x & (int32_t)y)); case '|': return NUM((int64_t)((int32_t)x | (int32_t)y)); case '^': return NUM((int64_t)((int32_t)x ^ (int32_t)y));
+                case 'L': return NUM((int64_t)(int32_t)((uint32_t)(int32_t)x << (y&31))); case 'R': return NUM((int64_t)((int32_t)x >> (y&31)));
                 case 'U': return NUM((int64_t)((uint32_t)x >> (y&31)));   /* >>> unsigned (32-bit, JS semantics): -1>>>0 = 4294967295 (M269) */
                 case '=': return BOOLV(val_equal(a,b));    /* === strict: val_equal is exactly it (same-type required incl. object identity; fixes 1===true which was true) (M271) */
                 case '!': return BOOLV(!val_equal(a,b));    /* !== strict */
@@ -1781,8 +1786,8 @@ static val eval_expr_inner(node *n, env *e) {
                 if (n->op!='=') { val cur=eval_expr(t,e); int64_t x=to_num(cur),y=to_num(rhs);
                     if (n->op=='+'&&(cur.t>=V_STR||rhs.t>=V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs);   /* += concat matches binary + (M420) */ int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
                     else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): n->op=='%'?(y?x%y:0):
-                                   n->op=='&'?x&y: n->op=='|'?x|y: n->op=='^'?x^y:
-                                   n->op=='L'?(int64_t)((uint64_t)x<<(y&63)): n->op=='R'?(x>>(y&63)): n->op=='U'?(int64_t)((uint32_t)x>>(y&31)):
+                                   n->op=='&'?(int64_t)((int32_t)x&(int32_t)y): n->op=='|'?(int64_t)((int32_t)x|(int32_t)y): n->op=='^'?(int64_t)((int32_t)x^(int32_t)y):
+                                   n->op=='L'?(int64_t)(int32_t)((uint32_t)(int32_t)x<<(y&31)): n->op=='R'?(int64_t)((int32_t)x>>(y&31)): n->op=='U'?(int64_t)((uint32_t)x>>(y&31)):
                                    n->op=='P'?i_pow(x,y): 0); }
             }
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
