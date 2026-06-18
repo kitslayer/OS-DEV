@@ -1,5 +1,22 @@
 # What's next
 
+> **(M640-M646) JS-engine semantic completeness via host probing — fuzzing finds crashes, probing finds
+> WRONG ANSWERS.** The image-decoder audit proved the parsers were memory-safe; this arc asked the other
+> question: does the JS engine compute the RIGHT result? Building it `-DJS_HOSTTEST` and diffing ~90 edge cases
+> against integer-JS semantics found one real bug, then a whole cluster in the regex engine (whose regexfuzz
+> only catches crashes, not wrong matches) — all fixed + locked in the golden suite. **M640** bitwise
+> `& | ^ << >>` ran in raw int64 while `>>>` (M269) already used JS 32-bit semantics — now all coerce operands
+> to int32 + mask the shift count (the canonical int32 "hello" hash 99162322 now computes; arithmetic stays
+> exact int64). Then the regex engine: **M642** `\b`/`\B` word boundaries (were literal 'b'); **M643**
+> `\1`..`\9` backreferences (were literal digits — now real, incl. backtracking `/(\w+) \1/`); **M644** the `m`
+> (multiline) + `s` (dotall) flags, fixing a genuine bug where `^`/`$` were ALWAYS multiline (`/^world$/`
+> wrongly matched "hello\nworld"); **M645** `(?:)` non-capturing groups (were capturing, mis-numbering `$1`) +
+> `\xHH` hex escapes; **M646** lookahead `(?=)`/`(?!)` (zero-width, via the VM's own recursion — the
+> `/^(?=.*\d)\w+$/` password idiom now works). The engine went from "common features only" to a genuinely
+> useful subset: classes, quantifiers, greedy/lazy, alternation, named + non-capturing groups, backrefs, all
+> anchors + word boundaries, both flags, and lookahead. Safe throughout (only suite.js uses regex/bitwise, all
+> small/int32-range; shell grep has its own matcher); all 27 suites green incl. the in-guest browser.
+
 > **(M634-M640) Test-hardening + a JS correctness fix: lock in this session's fixes, fuzz the untrusted-input
 > parser paths the existing fuzzers couldn't reach, and fix a bitwise-operator divergence.** The data-loss bug class (below) was fixed + verified in-guest but had no
 > host regression coverage, and an audit of the image decoders found them robust *by reading* yet under-fuzzed
