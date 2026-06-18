@@ -17,6 +17,22 @@ static void itoa_simple(int v, char *out) {
     while (i > 0) out[j++] = tmp[--i];
     out[j] = '\0';
 }
+
+/* Read an entire file into a malloc'd, NUL-terminated buffer (caller free()s).
+ * The read API has no size query, so grow the buffer until the read no longer
+ * fills it — commands then see the whole file, not a fixed 2KB prefix. *len gets
+ * the length; returns 0 on missing file / >=32MB / OOM. */
+static char *slurp(const char *name, long *len) {
+    unsigned long cap = 65536;
+    char *b = malloc(cap);
+    long n = b ? sys_readfile(name, b, cap - 1) : -1;
+    while (b && n == (long)(cap - 1) && cap < (32UL << 20)) {   /* read filled the buffer: file may be larger */
+        cap <<= 1; free(b); b = malloc(cap);
+        if (b) n = sys_readfile(name, b, cap - 1);
+    }
+    if (!b || n < 0 || n == (long)(cap - 1)) { free(b); *len = -1; return 0; }
+    b[n] = 0; *len = n; return b;
+}
 static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }   /* ASCII lowercase */
 static int b64v(char c) {                 /* base64 digit -> value, or -1 */
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -124,7 +140,6 @@ static int run_command(char *line, char *cwd) {
             sys_list(buf, sizeof(buf));
             print(buf);
         } else if (startswith(line, "cat ")) {
-            char buf[2048];
             const char *p = line + 4; int any = 0;
             while (*p) {                                  /* concatenate each space-separated file */
                 while (*p == ' ') p++;
@@ -132,13 +147,12 @@ static int run_command(char *line, char *cwd) {
                 char name[64]; int i = 0;
                 while (*p && *p != ' ' && i < 63) name[i++] = *p++;
                 name[i] = '\0'; any = 1;
-                long n = sys_readfile(name, buf, sizeof(buf) - 1);
-                if (n < 0) { print("cat: no such file: "); print(name); print("\n"); }
-                else { buf[n] = '\0'; print(buf); }
+                long n; char *buf = slurp(name, &n);
+                if (!buf) { print("cat: no such file: "); print(name); print("\n"); }
+                else { print(buf); free(buf); }
             }
             if (!any) print("usage: cat <file>...\n");
         } else if (startswith(line, "head ")) {
-            char buf[2048];
             const char *p = line + 5;
             while (*p == ' ') p++;
             int cnt = 20;                                  /* default; -N sets the line count */
@@ -152,13 +166,14 @@ static int run_command(char *line, char *cwd) {
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                 name[j] = '\0'; any = 1;
-                long n = sys_readfile(name, buf, sizeof(buf) - 1);
-                if (n < 0) { print("head: no such file: "); print(name); print("\n"); continue; }
+                long n; char *buf = slurp(name, &n);
+                if (!buf) { print("head: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 int i = 0, lines = 0;
                 for (; i < n && lines < cnt; i++) if (buf[i] == '\n') lines++;
                 buf[i] = '\0'; print(buf);
                 if (i < n) print("...\n");
+                free(buf);
             }
             if (!any) print("usage: head <file>...\n");
         } else if (startswith(line, "nl ")) {
@@ -712,7 +727,6 @@ static int run_command(char *line, char *cwd) {
                 else if (!hits) print("  (no matches)\n");
             }
         } else if (startswith(line, "wc ")) {
-            static char buf[2048];
             const char *p = line + 3; char num[12];
             int tl = 0, tw = 0, nfiles = 0; long tb = 0;
             int wl = 0, ww = 0, wcb = 0;                   /* -l/-w/-c: which counts to show (no flag = all three) */
@@ -731,8 +745,8 @@ static int run_command(char *line, char *cwd) {
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                 name[j] = 0;
-                long n = sys_readfile(name, buf, sizeof(buf));
-                if (n < 0) { print("wc: no such file: "); print(name); print("\n"); continue; }
+                long n; char *buf = slurp(name, &n);
+                if (!buf) { print("wc: no such file: "); print(name); print("\n"); continue; }
                 int lines = 0, words = 0, inword = 0;
                 for (long i = 0; i < n; i++) {
                     char c = buf[i];
@@ -745,6 +759,7 @@ static int run_command(char *line, char *cwd) {
                 if (wcb) { print("  bytes "); itoa_simple((int)n, num); print(num); }
                 print("  "); print(name); print("\n");
                 tl += lines; tw += words; tb += n; nfiles++;
+                free(buf);
             }
             if (nfiles > 1) {
                 if (wl) { print("  lines "); itoa_simple(tl, num); print(num); }
