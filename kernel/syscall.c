@@ -86,6 +86,24 @@ static int u32_to_dec(uint32_t v, char *out) {
     return n;
 }
 
+/* Read an entire file into a freshly kmalloc'd buffer. The read API has no size
+ * query, so grow the buffer (re-reading) until the read no longer fills it —
+ * the whole file is returned, not a fixed-size prefix. Returns the length (and
+ * sets *out, which the caller kfree's), or -1 on missing file / >=32MB / OOM. */
+static long read_whole_file(const char *name, uint8_t **out) {
+    size_t cap = 65536;
+    uint8_t *buf = kmalloc(cap);
+    long n = buf ? vfs_read(name, buf, cap) : -1;
+    while (buf && n == (long)cap && cap < (32u << 20)) {   /* filled the buffer: file may be larger */
+        cap <<= 1; kfree(buf); buf = kmalloc(cap);
+        if (buf) n = vfs_read(name, buf, cap);
+    }
+    if (!buf) return -1;
+    if (n < 0 || n == (long)cap) { kfree(buf); return -1; }   /* read error, or file >= 32MB */
+    *out = buf;
+    return n;
+}
+
 void syscall_dispatch(struct registers *r) {
     switch (r->rax) {
     case SYS_write:
@@ -263,10 +281,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sha256: {
         if ((int)r->rdx < 65) { r->rax = (uint64_t)-1; break; }   /* need room for 64 hex + NUL */
-        static uint8_t fbuf[16384];
-        long fn = vfs_read((const char *)r->rdi, fbuf, sizeof(fbuf));
+        uint8_t *fbuf; long fn = read_whole_file((const char *)r->rdi, &fbuf);   /* whole file, not a 16KB prefix */
         if (fn < 0) { r->rax = (uint64_t)-1; break; }
-        uint8_t dg[32]; sha256(fbuf, (size_t)fn, dg);
+        uint8_t dg[32]; sha256(fbuf, (size_t)fn, dg); kfree(fbuf);
         char *hx = (char *)r->rsi; const char *H = "0123456789abcdef";
         for (int i = 0; i < 32; i++) { hx[i*2] = H[dg[i]>>4]; hx[i*2+1] = H[dg[i]&0xF]; }
         hx[64] = 0; r->rax = 0;
@@ -274,10 +291,9 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_sha512: {
         if ((int)r->rdx < 129) { r->rax = (uint64_t)-1; break; }   /* need room for 128 hex + NUL */
-        static uint8_t fbuf512[16384];                             /* hashes only the first 16 KB of a larger file (matches SYS_sha256) */
-        long fn = vfs_read((const char *)r->rdi, fbuf512, sizeof(fbuf512));
+        uint8_t *fbuf; long fn = read_whole_file((const char *)r->rdi, &fbuf);   /* whole file, not a 16KB prefix */
         if (fn < 0) { r->rax = (uint64_t)-1; break; }
-        uint8_t dg[64]; sha512(fbuf512, (size_t)fn, dg);
+        uint8_t dg[64]; sha512(fbuf, (size_t)fn, dg); kfree(fbuf);
         char *hx = (char *)r->rsi; const char *H = "0123456789abcdef";
         for (int i = 0; i < 64; i++) { hx[i*2] = H[dg[i]>>4]; hx[i*2+1] = H[dg[i]&0xF]; }
         hx[128] = 0; r->rax = 0;

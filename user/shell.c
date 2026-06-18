@@ -628,10 +628,17 @@ static int run_command(char *line, char *cwd) {
             char hex[136];
             if (sys_sha512(line + 7, hex, sizeof(hex)) < 0) print("sha512: no such file\n");
             else { print("  "); print(hex); print("\n"); }
-        } else if (startswith(line, "crc32 ")) {       /* CRC-32 (IEEE 802.3, as in zip/gzip/png); first 16 KB, matching sha256/512 */
-            static unsigned char cbuf[16384];
-            long n = sys_readfile(line + 6, cbuf, sizeof(cbuf));
-            if (n < 0) { print("crc32: no such file: "); print(line + 6); print("\n"); }
+        } else if (startswith(line, "crc32 ")) {       /* CRC-32 (IEEE 802.3, as in zip/gzip/png) over the whole file */
+            unsigned long cap = 65536;
+            unsigned char *cbuf = malloc(cap);
+            long n = cbuf ? sys_readfile(line + 6, cbuf, cap) : -1;
+            while (cbuf && n == (long)cap && cap < (32UL << 20)) {   /* read filled the buffer: file may be larger */
+                cap <<= 1; free(cbuf); cbuf = malloc(cap);
+                if (cbuf) n = sys_readfile(line + 6, cbuf, cap);
+            }
+            if (!cbuf)               print("crc32: file too large (out of memory)\n");
+            else if (n < 0)          { print("crc32: no such file: "); print(line + 6); print("\n"); }
+            else if (n == (long)cap) print("crc32: file too large\n");
             else {
                 unsigned c = 0xFFFFFFFFu;
                 for (long i = 0; i < n; i++) {
@@ -644,6 +651,7 @@ static int run_command(char *line, char *cwd) {
                 hex[8] = 0;
                 print("  "); print(hex); print("\n");
             }
+            free(cbuf);
         } else if (startswith(line, "grep ")) {
             char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0, cc = 0, vv = 0;
             while (*p == ' ') p++;
