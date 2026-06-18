@@ -1,5 +1,11 @@
 # What's next
 
+> **(M730) New game — Frogger (cross the traffic).** `user/frogger.c`: hop your frog upward across lanes of
+> cars, each lane scrolling at its own speed and direction, to reach the goal bank at the top (+10, then start
+> again from the bottom). Touch a car and you lose a life; three lives, best saved to FROGGER.HI. Real-time —
+> the lanes scroll on a tick, you hop on a keypress. Verified in-guest (lanes render with traffic, the frog
+> hops, a collision squashes it and costs a life). 29/29 suites green.
+
 > **(M729) New game — Gomoku (Five in a Row) vs the computer.** `user/gomoku.c`: place stones on an 11×11
 > board, first to five in a row in any direction wins; you're X, the CPU is O. The CPU plays a heuristic — for
 > every empty point it weighs the line it would build for itself against the line it would deny you
