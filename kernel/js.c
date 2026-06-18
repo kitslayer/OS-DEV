@@ -1275,6 +1275,8 @@ static void sb_expand(sbuild *b, const char *repl, const char *s, int *caps, int
     for(int i=0;i<rl;i++){ if(repl[i]=='$' && i+1<rl){ char d=repl[i+1];
         if(d=='&'){ sb_put(b, s+caps[0], caps[1]-caps[0]); i++; continue; }
         if(d=='$'){ sb_put(b,"$",1); i++; continue; }
+        if(d=='`'){ sb_put(b, s, caps[0]); i++; continue; }                       /* $` : text before the match */
+        if(d=='\''){ sb_put(b, s+caps[1], (int)strlen(s+caps[1])); i++; continue; }  /* $' : text after the match */
         if(d>='1'&&d<='9'){ int g=d-'0'; if(g<=ngroup){ int a=caps[2*g],e=caps[2*g+1]; if(a>=0&&e>=a) sb_put(b,s+a,e-a); } i++; continue; } }
         sb_put(b, repl+i, 1); }
 }

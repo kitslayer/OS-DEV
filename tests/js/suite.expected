@@ -376,4 +376,6 @@ true true false boom
 {"a":1,"c":3} {"o":{"x":1}}
 -- ToNumber: leading whitespace + 0x hex + sign (M658) --
 7 16 9 5 10
+-- String.replace $` and $' patterns (M667) --
+xxy xyy ab[ab|cd|e]e
 -- done --
