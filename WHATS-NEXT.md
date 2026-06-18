@@ -1,5 +1,12 @@
 # What's next
 
+> **(M724) New game — Flappy Bird (with a persistent high score).** `user/flappy.c`: tap Space to flap the
+> bird up against gravity and thread the gaps in the scrolling pipes; one point per pipe cleared, best saved
+> to `FLAPPY.HI` (shown as `hi N`). Integer "sub-row" physics (no floating point, so it uses the generic user
+> build rule), a 12-row field that fits the text grid, real-time pacing. Wired into the app registry + Apps
+> menu. Verified in-guest (the `score/hi` header, bird, and start prompt render; flapping lifts the bird and
+> pipes scroll in). All 29 `make check` suites green.
+
 > **(M723) Persistent high scores for the new games (+ a Space Invaders layout fix).** Matching the OS's
 > existing `*.HI` convention (SNAKE.HI / TETRIS.HI): **Space Invaders** now keeps a high score (`SPACEINV.HI`,
 > shown as `hi N`, saved when beaten) and **15-Puzzle** keeps a fewest-moves best (`FIFTEEN.HI`, shown as

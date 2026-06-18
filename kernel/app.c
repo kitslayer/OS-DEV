@@ -93,7 +93,8 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             quake_elf_start[], nes_elf_start[], reversi_elf_start[], lights_elf_start[],
             fifteen_elf_start[], mastermind_elf_start[], pong_elf_start[], halflife_elf_start[],
             memory_elf_start[], sokoban_elf_start[], battleship_elf_start[], pig_elf_start[],
-            raycast_elf_start[], tron_elf_start[], spaceinv_elf_start[], asteroids_elf_start[];
+            raycast_elf_start[], tron_elf_start[], spaceinv_elf_start[], asteroids_elf_start[],
+            flappy_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -139,6 +140,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "tron",   tron_elf_start,   "Tron" },
     { "spaceinv", spaceinv_elf_start, "Space Invaders" },
     { "asteroids", asteroids_elf_start, "Asteroids" },
+    { "flappy", flappy_elf_start, "Flappy" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 

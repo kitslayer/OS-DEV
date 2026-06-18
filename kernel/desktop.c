@@ -93,6 +93,7 @@ static const struct menu_item menu[] = {
     { "Tron", KIND_APP, "tron" },
     { "Space Invaders", KIND_APP, "spaceinv" },
     { "Asteroids", KIND_APP, "asteroids" },
+    { "Flappy", KIND_APP, "flappy" },
     { "Paint", KIND_APP, "paint" }, { "Piano", KIND_APP, "piano" }, { "Jukebox", KIND_APP, "jukebox" },
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Monitor", KIND_SYSMON, 0 },
