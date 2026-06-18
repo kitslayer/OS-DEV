@@ -1,5 +1,13 @@
 # What's next
 
+> **(M719) Asteroids — a vector arcade game in the framebuffer.** `user/asteroids.c`: rotate/thrust a ship
+> with wrap-around momentum physics, fire bullets, and blast asteroids that split (big → two medium → two
+> small → gone); clearing the field spawns a bigger wave; three lives, a collision costs one. Drawn with a
+> Bresenham line routine (ship triangle, octagon rocks, dot bullets) over a starfield; built with SSE for the
+> float physics + a Taylor sin/cos, raw input with the same-frame-tap latch. Verified in-guest: ship + rocks
+> + lives render, and rotating/thrusting/firing turns the ship and launches bullets while the rocks drift.
+> All 29 `make check` suites still green.
+
 > **(M718) Freedoom — a complete libre game on the DOOM engine, via a WAD picker.** The vendored engine
 > already recognises Freedoom (`d_iwad.c` lists `freedoom1.wad`; `d_main.c` keys off the `FREEDOOM` lump), so
 > this ships **Freedoom Phase 1** (GPL/BSD, `tools/freedoom1.wad`, ~27 MB — it fits the existing 64 MB disk)

@@ -92,6 +92,7 @@ static const struct menu_item menu[] = {
     { "Raycaster", KIND_APP, "raycast" },
     { "Tron", KIND_APP, "tron" },
     { "Space Invaders", KIND_APP, "spaceinv" },
+    { "Asteroids", KIND_APP, "asteroids" },
     { "Paint", KIND_APP, "paint" }, { "Piano", KIND_APP, "piano" }, { "Jukebox", KIND_APP, "jukebox" },
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Monitor", KIND_SYSMON, 0 },

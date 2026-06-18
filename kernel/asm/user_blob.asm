@@ -49,6 +49,7 @@ global pig_elf_start, pig_elf_end
 global raycast_elf_start, raycast_elf_end
 global tron_elf_start, tron_elf_end
 global spaceinv_elf_start, spaceinv_elf_end
+global asteroids_elf_start, asteroids_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -221,5 +222,9 @@ tron_elf_end:
 spaceinv_elf_start:
     incbin "build/spaceinv.elf"
 spaceinv_elf_end:
+
+asteroids_elf_start:
+    incbin "build/asteroids.elf"
+asteroids_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
