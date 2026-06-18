@@ -60,6 +60,7 @@ global checkers_elf_start, checkers_elf_end
 global gomoku_elf_start, gomoku_elf_end
 global frogger_elf_start, frogger_elf_end
 global chess_elf_start, chess_elf_end
+global vpoker_elf_start, vpoker_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -268,5 +269,9 @@ frogger_elf_end:
 chess_elf_start:
     incbin "build/chess.elf"
 chess_elf_end:
+
+vpoker_elf_start:
+    incbin "build/vpoker.elf"
+vpoker_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

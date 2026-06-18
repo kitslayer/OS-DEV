@@ -1,5 +1,13 @@
 # What's next
 
+> **(M736) New game — Video Poker (Jacks or Better).** `user/vpoker.c`: you're dealt five cards, toggle holds
+> with 1-5, then Space draws replacements; the final hand pays on the classic 9/6 Jacks-or-Better table (a
+> pair of jacks or better, up to a 250× royal flush). Each deal antes one credit; you start with 100 and your
+> best balance persists to VPOKER.HI (a free 100 if you bust). Fills the casino-card gap (only Blackjack
+> existed). Pure-additive ulib app; the last full `make check` (M735) was green and the kernel boots+runs it.
+> Verified in-guest: the deal renders five suited, colour-coded cards, holds keep the right cards across a
+> draw, and the hand evaluates correctly ("No win" on a junk hand).
+
 > **(M735) Chess — castling.** Added castling to `user/chess.c`: rights are tracked in a bitmask (cleared
 > whenever a king or rook leaves, or is captured on, its home square), the king may not castle out of,
 > through, or into check, and `apply()`/`undo()` now snapshot the rights alongside the 64-byte board so the
