@@ -35,6 +35,14 @@ static char *slurp(const char *name, long *len) {
 }
 static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }   /* ASCII lowercase */
 
+/* parse a leading (optionally signed) integer from a line, for `sort -n`. */
+static long sort_numval(const char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+    int neg = 0; if (*s == '-') { neg = 1; s++; }
+    long v = 0; while (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); s++; }
+    return neg ? -v : v;
+}
+
 /* A tiny regex matcher for grep: ^ $ . * and \<char> escapes (Kernighan/Pike
  * style). A pattern with no metacharacters behaves like the old literal
  * substring search, so existing greps are unaffected; `ci` folds case. */
@@ -325,13 +333,14 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "sort ")) {
-            const char *fp = line + 5; int rev = 0;        /* -r: reverse (descending) */
+            const char *fp = line + 5; int rev = 0, nsort = 0;  /* -r: reverse (descending); -n: numeric */
             while (*fp == ' ') fp++;
             while (fp[0] == '-' && fp[1] && fp[1] != ' ') {
                 int t, valid = 1;
-                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'r') valid = 0;
+                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'r' && fp[t] != 'n') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a filename) */
-                rev = 1; fp += t; while (*fp == ' ') fp++;
+                for (t = 1; fp[t] && fp[t] != ' '; t++) { if (fp[t] == 'r') rev = 1; else nsort = 1; }
+                fp += t; while (*fp == ' ') fp++;
             }
             long n; char *buf = slurp(fp, &n);
             if (!buf) { print("sort: no such file: "); print(fp); print("\n"); }
@@ -350,9 +359,15 @@ static int run_command(char *line, char *cwd) {
                     for (int i = 1; i < nl; i++) {                 /* insertion sort (byte order) */
                         char *key = lns[i]; int j = i - 1;
                         while (j >= 0) {
-                            const char *a = lns[j], *b = key;
-                            while (*a && *a == *b) { a++; b++; }
-                            int cmp = (int)(unsigned char)*a - (int)(unsigned char)*b;
+                            int cmp;
+                            if (nsort) {                       /* -n: compare by leading integer value */
+                                long va = sort_numval(lns[j]), vb = sort_numval(key);
+                                cmp = (va < vb) ? -1 : (va > vb) ? 1 : 0;
+                            } else {                           /* byte order */
+                                const char *a = lns[j], *b = key;
+                                while (*a && *a == *b) { a++; b++; }
+                                cmp = (int)(unsigned char)*a - (int)(unsigned char)*b;
+                            }
                             if (rev) cmp = -cmp;
                             if (cmp <= 0) break;                   /* lns[j] already in order vs key */
                             lns[j+1] = lns[j]; j--;
