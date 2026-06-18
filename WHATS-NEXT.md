@@ -1,5 +1,14 @@
 # What's next
 
+> **(M742) New game — Pac-Man (maze chase).** `user/pacman.c`: eat every dot while dodging four ghosts; grab
+> a power pellet (O) and they turn blue for a few seconds — touch them then and they flee to the pen for 200
+> points. Clear the maze to win; lose three lives and it's over. Continuous movement with turn-queuing (your
+> steer applies as soon as the way is clear); ghosts chase greedily (flee when frightened) at ~75% of your
+> speed so you can escape. The maze uses regular wall pillars so every corridor is connected (no dot can be
+> stranded). 29/29 suites green. Verified in-guest: the maze/dots/pellets render, Pac eats dots (+score),
+> ghosts chase, and a catch costs a life and resets to start. Pac-Man and Chess were the two iconic games the
+> set was missing — both now in.
+
 > **(M741) Checkers — highlights the computer's last move (incl. multi-jumps).** Mirroring chess M740,
 > `user/checkers.c` tracks the CPU's move — the first from-square and the final landing square of its slide or
 > jump chain — and renders both in a distinct colour, so you can follow what it did (multi-jump captures were
