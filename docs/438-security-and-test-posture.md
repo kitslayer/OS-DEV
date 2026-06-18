@@ -39,7 +39,27 @@ Everything else reviewed came back bounds-safe (the rest of the browser/CSS
 parsers, the TLS/X.509 path, the image decoders, the ELF loader, the FAT32 write
 path's memory-safety).
 
-## Committed test coverage — `make check` (6 suites, ~5 s, ASan+UBSan)
+## Committed test coverage — `make check` (24 suites; ~75 s)
+
+Grown well past the original six. The full, current list (with what each locks)
+lives in [../tests/README.md](../tests/README.md); the shape now:
+
+- **21 host-side ASan/UBSan suites** — each compiles the *real* kernel `.c` on
+  the host and fuzzes it. The original six (below) plus, over the years:
+  `svgtest`, `deflatetest`, `pngenctest`, `ziptest`, `tartest`, `wavtest`,
+  `heaptest` (userspace malloc), `kheaptest` (kernel heap), `elftest` (the ring-3
+  loader + every shipped binary), `httptest` (chunked decode), and the
+  untrusted-parser fuzzers `jsonfuzztest` / `regexfuzztest` / `jssrcfuzztest` /
+  `htmlentfuzztest` / `htmlattrtest` (the browser's HTML attribute scanners).
+- **3 in-guest QEMU suites** (added once QEMU could run again — see WHATS-NEXT):
+  `boottest` boots the real kernel headless and asserts all 9 bring-up markers
+  with no crash; `gfxtest` captures the VGA framebuffer and asserts the desktop
+  painted; `browsertest` launches the Browser from the Apps menu and asserts its
+  home page rendered — the end-to-end guard for `parse_html`, which is too
+  coupled to fuzz in isolation. The boot also runs a live **TLS 1.3 HTTPS**
+  self-test (real example.com) — full handshake + chain-to-root + CertificateVerify.
+
+The original six:
 
 | Suite | Locks |
 |---|---|
@@ -50,18 +70,28 @@ path's memory-safety).
 | `fstest`  | FAT32 read (corrupt/cyclic images) + write (heavy-churn) — locks M435 + the cycle/depth caps |
 | `kattest` | crypto vs RFC/FIPS known-answer vectors (SHA-256/384/512, HMAC, HKDF, AES, AES-GCM, ChaCha20-Poly1305 + forged-tag reject, X25519) + signature verify (ECDSA P-256/384, RSA-2048 PKCS#1 — valid accepted, tampered rejected) |
 
-Each is verified to catch a reintroduced bug (e.g. removing fat32's dir-recursion
-depth caps trips an ASan stack-overflow; any crypto-output change fails its
-vector; the image PoC aborts if the DRI guard is removed). `make test` is a
-*separate* headless boot smoke test, not these.
+Each fuzz suite is verified to catch a reintroduced bug (e.g. removing fat32's
+dir-recursion depth caps trips an ASan stack-overflow; any crypto-output change
+fails its vector; the image PoC aborts if the DRI guard is removed; loosening
+`find_attr`'s slice bound trips an ASan overflow). `make test` is the same
+headless boot as `boottest` but prints the COM1 log for a human instead of
+asserting markers.
 
 ## Honest known limits (not bugs — documented design choices)
 
-- **Cert validation is informational, not enforcing.** The chain is built,
-  issuer links + `CertificateVerify` are checked, and anchoring to a baked-in
-  root is *reported* (`TLS✱`/`TLS+`/`TLS?`), but a failure isn't fatal —
-  enforcement needs ~150 baked roots + a fatal gate (deferred to protect live
-  browsing).
+- **Cert validation: hostname + validity are ENFORCED; chain-to-root anchoring
+  is reported.** Since M451 the leaf cert's **SAN/CN must name the host** and it
+  must be **within its validity period** — a definitive hostname mismatch
+  (`host_ok==0`) or an expired/not-yet-valid cert (`cert_time_ok==0`) makes
+  `tls_get_inner` *reject the connection before sending the request* (tls.c:595;
+  both fail *open* only when genuinely uncertain — a mega-SAN cert we can't fully
+  read, or an unset RTC < year 2020 — so the checks can't break all of HTTPS).
+  `CertificateVerify` (leaf-key possession) and the chain's internal issuer links
+  are verified; anchoring the chain top to one of the ~13 baked-in trusted roots
+  is *reported* (`TLS✱`/`TLS+`/`TLS?`) but not itself fatal — full root-store
+  enforcement (a fatal gate over ~150 roots) stays deferred to protect live
+  browsing. The live boot HTTPS self-test (M555) exercises all of this against
+  real example.com every boot.
 - **Integer JavaScript** — no FPU, so no float/NaN/Infinity: `0.5 → 0`,
   `1/0 → 0` (guarded, no `#DE`), `undefined + 1 → 1`. Intentional.
 - **Regex** — backreferences, lookahead, and `{n,m}` are unsupported; they
