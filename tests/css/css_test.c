@@ -40,6 +40,9 @@ int main(void) {
     expect("color: blue ;", "color", "blue");                 /* ws-trimmed, stops at ';' */
     expect("background-color:#fff;color:red", "color", "red"); /* not matched inside background-color */
     expect("font-weight:bold;color:#0f0", "font-weight", "bold");
+    expect("font:bold 14px Arial", "font", "bold 14px Arial");  /* `font:` shorthand value (M590) */
+    expect("font-size:14px", "font", NULL);                     /* `font` must NOT match `font-size` (prefix, not the `:` boundary) */
+    expect("font-family:serif", "font", NULL);
     expect("text-align:center", "text-align", "center");
     expect("text-align : center", "text-align", "center");     /* ws before AND after ':' (valid CSS) */
     expect("color red", "color", NULL);                        /* name + ws but no ':' -> no match */

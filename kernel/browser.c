@@ -388,6 +388,16 @@ static int parse_style_textstyle(const char *s, int n) {
         const char *v = s + vs; int vl = ve - vs;
         if (attr_eq(v, vl, "italic") || attr_eq(v, vl, "oblique")) return STY_EM;
     }
+    /* `font:` shorthand (when the explicit properties above aren't set): a "bold"
+     * or "italic" token in the value. Substring (font families rarely contain
+     * them); bold wins, mirroring the single-enum precedence above. */
+    if (style_prop(s, n, "font", 4, &vs, &ve)) {
+        const char *v = s + vs; int vl = ve - vs;
+        for (int i = 0; i + 4 <= vl; i++)
+            if ((v[i]|32)=='b'&&(v[i+1]|32)=='o'&&(v[i+2]|32)=='l'&&(v[i+3]|32)=='d') return STY_BOLD;
+        for (int i = 0; i + 6 <= vl; i++)
+            if ((v[i]|32)=='i'&&(v[i+1]|32)=='t'&&(v[i+2]|32)=='a'&&(v[i+3]|32)=='l'&&(v[i+4]|32)=='i'&&(v[i+5]|32)=='c') return STY_EM;
+    }
     /* text-decoration:line-through -> strikethrough (the renderer draws a strike line) */
     if (style_prop(s, n, "text-decoration", 15, &vs, &ve) ||
         style_prop(s, n, "text-decoration-line", 20, &vs, &ve)) {
@@ -441,10 +451,10 @@ static int parse_style_align(const char *s, int n) {
 /* font-size -> a glyph-scale bucket: 3 (≈ ≥28px / ≥175% / ≥1.8em), 2 (≈ ≥19px / ≥119% /
  * ≥1.2em), else 0 (no override). The bitmap font has no sub-1x, so this only enlarges;
  * small sizes just fall through to the default 1x. Reads the leading integer of the value. */
-static int parse_style_fontsize(const char *s, int n) {
-    int vs, ve;
-    if (!style_prop(s, n, "font-size", 9, &vs, &ve)) return 0;
-    const char *v = s + vs; int vl = ve - vs, i = 0, num = 0, seen = 0;
+/* A single CSS <size> token (e.g. "16px", "1.5em", "120%", "large") -> a glyph-
+ * scale bucket: 3 (large), 2 (medium), 0 (default 1x). */
+static int size_bucket(const char *v, int vl) {
+    int i = 0, num = 0, seen = 0;
     while (i < vl && v[i] >= '0' && v[i] <= '9') { num = num*10 + (v[i]-'0'); i++; seen = 1; }
     if (!seen) {                                            /* keywords: large/x-large/… */
         if (attr_eq(v, vl, "large") || attr_eq(v, vl, "larger")) return 2;
@@ -458,6 +468,29 @@ static int parse_style_fontsize(const char *s, int n) {
     if (ul >= 2 && (u[0]|32)=='e' && (u[1]|32)=='m')                     return num >= 2 ? 3 : num >= 1 ? 2 : 0;
     if (ul >= 3 && (u[0]|32)=='r' && (u[1]|32)=='e' && (u[2]|32)=='m')   return num >= 2 ? 3 : num >= 1 ? 2 : 0;
     return num >= 28 ? 3 : num >= 19 ? 2 : 0;                            /* px / pt / unitless */
+}
+/* In a `font:` shorthand value, find the offset of the <size> token — a digit run
+ * with a unit (a '%' or a letter immediately after), which distinguishes the size
+ * (16px) from a unitless numeric weight (600). -1 if none. */
+static int font_size_off(const char *v, int vl) {
+    for (int i = 0; i < vl; i++) {
+        if (v[i] < '0' || v[i] > '9') continue;
+        if (i > 0 && v[i-1] >= '0' && v[i-1] <= '9') continue;       /* mid-number */
+        int j = i; while (j < vl && v[j] >= '0' && v[j] <= '9') j++;
+        if (j < vl && v[j] == '.') { j++; while (j < vl && v[j] >= '0' && v[j] <= '9') j++; }
+        char c = (j < vl) ? v[j] : 0;
+        if (c == '%' || ((c|32) >= 'a' && (c|32) <= 'z')) return i;   /* has a unit -> it's the size */
+    }
+    return -1;
+}
+static int parse_style_fontsize(const char *s, int n) {
+    int vs, ve;
+    if (style_prop(s, n, "font-size", 9, &vs, &ve)) return size_bucket(s + vs, ve - vs);
+    if (style_prop(s, n, "font", 4, &vs, &ve)) {              /* `font:` shorthand -> find its size token */
+        int off = font_size_off(s + vs, ve - vs);
+        if (off >= 0) return size_bucket(s + vs + off, ve - vs - off);
+    }
+    return 0;
 }
 /* returns 1 if the element should be hidden: display:none OR visibility:hidden.
  * (In this box-model-less renderer visibility:hidden can't preserve the element's
