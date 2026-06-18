@@ -1,5 +1,12 @@
 # What's next
 
+> **(M733) Chess AI plays sensibly now — piece-square tables.** The depth-3 search was material-only, so it
+> answered 1.e4 with the passive 1...Na6 — any equal-material move scored the same. Added Michniewski's
+> simplified piece-square tables to `evaluate()` (centre control, development, advanced pawns, a tucked-away
+> king), small enough never to outweigh a real capture but enough to break ties toward good squares. App-only
+> change (no kernel/test-coupled code). Verified in-guest: the CPU now answers 1.e4 with the developing
+> 1...Nf6 instead of 1...Na6.
+
 > **(M732) New game — Chess vs the computer (full legal-move rules + an alpha-beta AI).** `user/chess.c`:
 > every piece moves by the real rules, you may not leave your own king in check, pawns auto-promote to a queen
 > on the last rank, and the game ends on checkmate or stalemate. You play White (bottom); the CPU plays Black

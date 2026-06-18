@@ -200,12 +200,83 @@ static int gen_legal(int white, Move *out) {
     return n;
 }
 
+/* Piece-square tables (Michniewski's simplified set) in this file's board
+ * layout: row 0 = top = rank 8, so a White piece reads pst[idx] directly and a
+ * Black piece reads the vertically-mirrored square. They nudge the otherwise
+ * material-only search toward sensible squares — centre control, development,
+ * advanced pawns, a tucked-away king — without ever outweighing a real capture. */
+static const int PST_P[64] = {
+     0,  0,  0,  0,  0,  0,  0,  0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+     5,  5, 10, 25, 25, 10,  5,  5,
+     0,  0,  0, 20, 20,  0,  0,  0,
+     5, -5,-10,  0,  0,-10, -5,  5,
+     5, 10, 10,-20,-20, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0 };
+static const int PST_N[64] = {
+   -50,-40,-30,-30,-30,-30,-40,-50,
+   -40,-20,  0,  0,  0,  0,-20,-40,
+   -30,  0, 10, 15, 15, 10,  0,-30,
+   -30,  5, 15, 20, 20, 15,  5,-30,
+   -30,  0, 15, 20, 20, 15,  0,-30,
+   -30,  5, 10, 15, 15, 10,  5,-30,
+   -40,-20,  0,  5,  5,  0,-20,-40,
+   -50,-40,-30,-30,-30,-30,-40,-50 };
+static const int PST_B[64] = {
+   -20,-10,-10,-10,-10,-10,-10,-20,
+   -10,  0,  0,  0,  0,  0,  0,-10,
+   -10,  0,  5, 10, 10,  5,  0,-10,
+   -10,  5,  5, 10, 10,  5,  5,-10,
+   -10,  0, 10, 10, 10, 10,  0,-10,
+   -10, 10, 10, 10, 10, 10, 10,-10,
+   -10,  5,  0,  0,  0,  0,  5,-10,
+   -20,-10,-10,-10,-10,-10,-10,-20 };
+static const int PST_R[64] = {
+     0,  0,  0,  0,  0,  0,  0,  0,
+     5, 10, 10, 10, 10, 10, 10,  5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+     0,  0,  0,  5,  5,  0,  0,  0 };
+static const int PST_Q[64] = {
+   -20,-10,-10, -5, -5,-10,-10,-20,
+   -10,  0,  0,  0,  0,  0,  0,-10,
+   -10,  0,  5,  5,  5,  5,  0,-10,
+    -5,  0,  5,  5,  5,  5,  0, -5,
+     0,  0,  5,  5,  5,  5,  0, -5,
+   -10,  5,  5,  5,  5,  5,  0,-10,
+   -10,  0,  5,  0,  0,  0,  0,-10,
+   -20,-10,-10, -5, -5,-10,-10,-20 };
+static const int PST_K[64] = {
+   -30,-40,-40,-50,-50,-40,-40,-30,
+   -30,-40,-40,-50,-50,-40,-40,-30,
+   -30,-40,-40,-50,-50,-40,-40,-30,
+   -30,-40,-40,-50,-50,-40,-40,-30,
+   -20,-30,-30,-40,-40,-30,-30,-20,
+   -10,-20,-20,-20,-20,-20,-20,-10,
+    20, 20,  0,  0,  0,  0, 20, 20,
+    20, 30, 10,  0,  0, 10, 30, 20 };
+
+static const int *pst_for(char P) {
+    switch (P) {
+        case 'P': return PST_P; case 'N': return PST_N; case 'B': return PST_B;
+        case 'R': return PST_R; case 'Q': return PST_Q; case 'K': return PST_K;
+    }
+    return 0;
+}
+
 static int evaluate(void) {           /* + good for White, - for Black */
     int s = 0;
     for (int i = 0; i < 64; i++) {
         char p = bd[i];
         if (empty(p)) continue;
-        s += is_w(p) ? pval(p) : -pval(p);
+        const int *t = pst_for(up(p));
+        int idx = is_w(p) ? i : ((7 - i/8) * 8 + i % 8);   /* Black reads the mirrored square */
+        int v = pval(p) + (t ? t[idx] : 0);
+        s += is_w(p) ? v : -v;
     }
     return s;
 }
