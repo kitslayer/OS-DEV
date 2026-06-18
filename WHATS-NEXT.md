@@ -1,5 +1,13 @@
 # What's next
 
+> **(M712) Two more games — Battleship and Pig.** **Battleship** (`user/battleship.c`): two 8×8 seas, both
+> fleets (5/4/3/3/2) auto-placed at random; you fire at the hidden enemy sea (a crosshair you move) while a
+> hunt-then-target CPU (random shots until a hit, then it works the neighbouring cells) fires back at yours —
+> sink all 17 enemy cells to win. **Pig** (`user/pig.c`): the push-your-luck dice game — roll to build a turn
+> total, but a 1 wipes it and ends your turn; hold to bank it; first to 100, and the CPU holds once it has 20.
+> Both verified in-guest (Battleship: shots + AI reply scored on both seas; Pig: rolls accumulate the turn
+> total). All 29 `make check` suites still green.
+
 > **(M711) NES is now a multi-game console — a ROM picker.** The NES app (`user/nes/nes_osdev.c`) enumerates
 > the `.nes` files on the FAT disk (`sys_list`) and, if there's more than one, shows a pickable text menu
 > (up/down + Enter) before switching to graphics — so any `.nes` dropped on the disk just appears, no rebuild.

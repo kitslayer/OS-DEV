@@ -44,6 +44,8 @@ global pong_elf_start, pong_elf_end
 global halflife_elf_start, halflife_elf_end
 global memory_elf_start, memory_elf_end
 global sokoban_elf_start, sokoban_elf_end
+global battleship_elf_start, battleship_elf_end
+global pig_elf_start, pig_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -196,5 +198,13 @@ memory_elf_end:
 sokoban_elf_start:
     incbin "build/sokoban.elf"
 sokoban_elf_end:
+
+battleship_elf_start:
+    incbin "build/battleship.elf"
+battleship_elf_end:
+
+pig_elf_start:
+    incbin "build/pig.elf"
+pig_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

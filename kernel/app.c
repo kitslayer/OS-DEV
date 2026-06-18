@@ -92,7 +92,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             c4_elf_start[], wordle_elf_start[], gfxdemo_elf_start[], doom_elf_start[],
             quake_elf_start[], nes_elf_start[], reversi_elf_start[], lights_elf_start[],
             fifteen_elf_start[], mastermind_elf_start[], pong_elf_start[], halflife_elf_start[],
-            memory_elf_start[], sokoban_elf_start[];
+            memory_elf_start[], sokoban_elf_start[], battleship_elf_start[], pig_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -132,6 +132,8 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "halflife", halflife_elf_start, "Half-Life" },
     { "memory", memory_elf_start, "Memory" },
     { "sokoban", sokoban_elf_start, "Sokoban" },
+    { "battleship", battleship_elf_start, "Battleship" },
+    { "pig",    pig_elf_start,    "Pig" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
