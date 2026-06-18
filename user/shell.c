@@ -7,6 +7,7 @@
  * program talking to our OS exactly the way `sh` talks to Linux.
  */
 #include "ulib.h"
+#include "shgrep.h"   /* gr_match(): the grep regex matcher (^ $ . * [..] \), host-tested by tests/shgrep */
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
@@ -33,8 +34,6 @@ static char *slurp(const char *name, long *len) {
     if (!b || n < 0 || n == (long)(cap - 1)) { free(b); *len = -1; return 0; }
     b[n] = 0; *len = n; return b;
 }
-static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }   /* ASCII lowercase */
-
 /* parse a leading (optionally signed) integer from a line, for `sort -n`. */
 static long sort_numval(const char *s) {
     while (*s == ' ' || *s == '\t') s++;
@@ -43,60 +42,7 @@ static long sort_numval(const char *s) {
     return neg ? -v : v;
 }
 
-/* A tiny regex matcher for grep: ^ $ . * and \<char> escapes (Kernighan/Pike
- * style). A pattern with no metacharacters behaves like the old literal
- * substring search, so existing greps are unaffected; `ci` folds case. */
-static int gr_matchhere(const char *re, const char *t, int ci);
-/* length of a [..] class starting at re[0]=='[' (a leading ] is a literal member) */
-static int gr_classlen(const char *re) {
-    int i = 1; if (re[i] == '^') i++; if (re[i] == ']') i++;
-    while (re[i] && re[i] != ']') i++;
-    return re[i] == ']' ? i + 1 : i;
-}
-/* is `ch` a member of the [..] class at `re`? handles ranges a-z, negation [^..], case-fold */
-static int gr_inclass(const char *re, int ch, int ci) {
-    int i = 1, neg = 0, ok = 0;
-    if (re[i] == '^') { neg = 1; i++; }
-    for (; re[i] && re[i] != ']'; i++) {
-        if (re[i+1] == '-' && re[i+2] && re[i+2] != ']') {
-            int lo = (unsigned char)re[i], hi = (unsigned char)re[i+2]; i += 2;
-            int c = ci ? lc((char)ch) : ch;
-            if ((ci ? lc((char)lo) : lo) <= c && c <= (ci ? lc((char)hi) : hi)) ok = 1;
-        } else if (ci ? lc((char)ch) == lc(re[i]) : ch == (unsigned char)re[i]) ok = 1;
-    }
-    return neg ? !ok : ok;
-}
-static int gr_matchstar(int c, const char *re, const char *t, int ci) {
-    do { if (gr_matchhere(re, t, ci)) return 1; }
-    while (*t && (c == '.' || (ci ? lc(*t) == lc((char)c) : (unsigned char)*t == (unsigned char)c)) && (t++, 1));
-    return 0;
-}
-static int gr_matchhere(const char *re, const char *t, int ci) {
-    if (re[0] == '\0') return 1;
-    if (re[0] == '[') {                                            /* [..] character class, incl. [..]* */
-        int cl = gr_classlen(re);
-        if (re[cl] == '*') { const char *rest = re + cl + 1;
-            do { if (gr_matchhere(rest, t, ci)) return 1; } while (*t && gr_inclass(re, (unsigned char)*t, ci) && (t++, 1));
-            return 0; }
-        if (*t && gr_inclass(re, (unsigned char)*t, ci)) return gr_matchhere(re + cl, t + 1, ci);
-        return 0;
-    }
-    if (re[0] == '\\' && re[1]) {                                  /* escaped literal: \. \* \^ … */
-        if (re[2] == '*') return gr_matchstar((unsigned char)re[1], re + 3, t, ci);
-        if (*t && (ci ? lc(*t) == lc(re[1]) : *t == re[1])) return gr_matchhere(re + 2, t + 1, ci);
-        return 0;
-    }
-    if (re[1] == '*') return gr_matchstar((unsigned char)re[0], re + 2, t, ci);
-    if (re[0] == '$' && re[1] == '\0') return *t == '\0';
-    if (*t && (re[0] == '.' || (ci ? lc(*t) == lc(re[0]) : (unsigned char)*t == (unsigned char)re[0])))
-        return gr_matchhere(re + 1, t + 1, ci);
-    return 0;
-}
-static int gr_match(const char *re, const char *t, int ci) {     /* match anywhere (^ anchors to start) */
-    if (re[0] == '^') return gr_matchhere(re + 1, t, ci);
-    do { if (gr_matchhere(re, t, ci)) return 1; } while (*t++);
-    return 0;
-}
+/* (the grep regex matcher gr_match() now lives in shgrep.h, #included above) */
 static int b64v(char c) {                 /* base64 digit -> value, or -1 */
     if (c >= 'A' && c <= 'Z') return c - 'A';
     if (c >= 'a' && c <= 'z') return c - 'a' + 26;
