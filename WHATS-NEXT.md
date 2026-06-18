@@ -10,8 +10,11 @@
 > infinite generator errors cleanly (arena-OOM, no hang) and manual `.next()` / the yield-expression value
 > aren't modelled (eager has no resume point). All changes are GATED — `g_in_gen` keeps `yield` an ordinary
 > identifier outside a generator body, `is_gen` gates the eval — so non-generator code is byte-identical
-> (jstest golden unchanged, jssrcfuzz clean). Generator METHODS (`class C { *g(){} }`) are the one remaining
-> piece (use a `function*` expression or an explicit `.next()` iterator instead).
+> (jstest golden unchanged, jssrcfuzz clean). **M676** then added generator METHODS (`class C { *g(){} }`,
+> object `{ *g(){} }`, and computed `*[Symbol.iterator](){…}`) plus taught the iterator-protocol consumers
+> (spread / for-of / Array.from) to accept a generator's array result — so `*[Symbol.iterator]()` custom
+> iterables drive `[...obj]` / `for (x of obj)`. Generators are now comprehensive; only manual `.next()` /
+> two-way `yield` values are out of scope (inherent to the eager, resume-point-free model).
 
 > **(M660) The probing generalized past JS: the browser's URL resolver didn't canonicalize `./`/`../`.**
 > `resolve_img_url` concatenated a relative `<img src>`/`<a href>` onto the base directory without RFC 3986
