@@ -1,6 +1,6 @@
 # What's next
 
-> **(M603-M622) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
+> **(M603-M627) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
 > via in-guest verification.** Verifying the FAT32 write path (a cp/edit/save round-trip) led into the
 > shell's file commands and exposed a pervasive pattern: **fixed-size buffers silently truncating anything
 > larger.** Consequences ranged from **silent data loss** — cp/mv truncated copies to 4KB (and mv then
@@ -17,11 +17,15 @@
 > (trailing space) and broke FAT32 lookups / streq commands — redirection only worked written tight
 > (`cmd>file`). The pipe/redirect capture buffer also grew from a fixed 8KB to a growable heap buffer.
 > Also **M603**: ~38 more CSS named colours (real pages rendered tomato/dodgerblue/limegreen as no colour).
-> By M622 EVERY shell file command handles whole files (M617-M619 tac/strings/tr/cut/fold, fold printing
-> each wrapped line as it goes; M621 comm/paste; M622 diff's input). The one remaining cap — diff's 128-line
-> LCS table — diff REPORTS ("(diff truncated at 128 lines/file)"), so it's honest, not silent: **no silent
-> truncation remains.** A clean example of verification cascading — one round-trip test surfaced a whole
-> class plus an adjacent parsing bug. All 27 suites green throughout.
+> By M627 EVERY file-touching shell command handles whole files (M617-M619 tac/strings/tr/cut/fold, fold
+> printing each wrapped line as it goes; M621 comm/paste; M622 diff's input; M625 base64 encode/decode;
+> M626 the `js` command's source file + 1MB output; M627 todo's read-modify-write list). The one remaining
+> cap — diff's 128-line LCS table — diff REPORTS it ("(diff truncated at 128 lines/file)"), so it's honest,
+> not silent: **no silent truncation remains.** Verifying subdirectories then surfaced an unrelated FS bug:
+> **M624** `rm <non-empty-dir>` deleted the directory but freed only ITS clusters, orphaning every child
+> file's clusters (silent FAT corruption / space leak) — now it refuses a non-empty directory (df confirms
+> clusters are freed exactly on delete). A clean cascade: one round-trip test surfaced a whole class plus
+> two adjacent bugs (redirect parsing, rm-dir leak). All 27 suites green throughout.
 
 > **(M599) Real bug found by in-guest verification: Quake didn't launch in the default RAM config.** While
 > screenshot-verifying the marquee features, DOOM rendered but **Quake produced no window and no crash** —
