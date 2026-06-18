@@ -618,6 +618,8 @@ void desktop_run(void) {
     int dragging = -1, resizing = -1, gdx = 0, gdy = 0;
     int prev_btn = 0, prev_x = -1, prev_y = -1;
     uint64_t last_sec = (uint64_t)-1;
+    uint64_t last_tb_click = 0; int last_tb_x = -100, last_tb_y = -100;  /* double-click-to-maximize */
+    int drag_ox = 0, drag_oy = 0;        /* where a title-bar drag began (move-threshold + restore) */
 
     render_scene();
     present_frame();
@@ -803,7 +805,22 @@ void desktop_run(void) {
                     } else {
                         raise_window(i);
                         window_t *t = &windows[win_count - 1];
-                        if (my < t->y + TITLEBAR_H) { dragging = win_count - 1; gdx = mx - t->x; gdy = my - t->y; }
+                        if (my < t->y + TITLEBAR_H) {
+                            /* a second title-bar click within ~0.4s near the first =
+                             * double-click -> maximize/restore (the F4 toggle). Otherwise
+                             * begin a move drag and arm the double-click timer. */
+                            uint64_t now = timer_ticks();
+                            int near = (mx - last_tb_x < 8 && last_tb_x - mx < 8 &&
+                                        my - last_tb_y < 8 && last_tb_y - my < 8);
+                            if (now - last_tb_click < 40 && near) {
+                                toggle_maximize(win_count - 1);
+                                last_tb_click = 0;            /* consume: a 3rd click starts fresh */
+                            } else {
+                                dragging = win_count - 1; gdx = mx - t->x; gdy = my - t->y;
+                                drag_ox = mx; drag_oy = my;
+                                last_tb_click = now; last_tb_x = mx; last_tb_y = my;
+                            }
+                        }
                         else if (t->kind == KIND_BROWSER && t->app)
                             browser_click((browser_t *)t->app, mx - t->x,
                                           my - (t->y + TITLEBAR_H), t->w, t->h - TITLEBAR_H);
@@ -816,8 +833,20 @@ void desktop_run(void) {
         }
 
         if (dragging >= 0 && left) {
-            windows[dragging].x = mx - gdx; windows[dragging].y = my - gdy;
-            windows[dragging].maximized = 0;          /* a manual move un-maximizes */
+            /* Only treat it as a move once the cursor actually leaves the press
+             * point (a few px). A bare click on the title bar then does NOT move
+             * or un-maximize the window -- which is what lets a double-click
+             * maximize/restore land cleanly, and matches normal DE behavior. */
+            int moved = (mx - drag_ox > 3 || drag_ox - mx > 3 ||
+                         my - drag_oy > 3 || drag_oy - my > 3);
+            if (moved) {
+                window_t *w = &windows[dragging];
+                if (w->maximized) {                   /* dragging a maximized window restores its */
+                    toggle_maximize(dragging);        /* pre-max size, then re-grabs at the title  */
+                    gdx = w->w / 2; gdy = TITLEBAR_H / 2; /* center so it follows the cursor */
+                }
+                w->x = mx - gdx; w->y = my - gdy;
+            }
         }
         if (resizing >= 0 && left) {
             window_t *w = &windows[resizing];
