@@ -38,6 +38,9 @@ global quake_elf_start, quake_elf_end
 global nes_elf_start, nes_elf_end
 global reversi_elf_start, reversi_elf_end
 global lights_elf_start, lights_elf_end
+global fifteen_elf_start, fifteen_elf_end
+global mastermind_elf_start, mastermind_elf_end
+global pong_elf_start, pong_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -166,5 +169,17 @@ reversi_elf_end:
 lights_elf_start:
     incbin "build/lights.elf"
 lights_elf_end:
+
+fifteen_elf_start:
+    incbin "build/fifteen.elf"
+fifteen_elf_end:
+
+mastermind_elf_start:
+    incbin "build/mastermind.elf"
+mastermind_elf_end:
+
+pong_elf_start:
+    incbin "build/pong.elf"
+pong_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -1,5 +1,13 @@
 # What's next
 
+> **(M708) Three more games — 15-Puzzle, Mastermind, Pong.** **15-Puzzle** (`user/fifteen.c`): 4×4 sliding
+> tiles shuffled by random legal slides (always solvable); arrows slide a tile into the gap; move counter.
+> **Mastermind** (`user/mastermind.c`): crack a 4-peg / 6-colour code in 10 guesses with the standard
+> black (`#` = right colour & spot) / white (`o` = right colour, wrong spot) two-pass scoring; type 1-6,
+> Backspace erases, Enter submits. **Pong** (`user/pong.c`): real-time against a ball-tracking CPU paddle
+> (Up/Down or W/S), wall + paddle bounces, first to 7. All additive ulib apps wired into the registry +
+> Apps menu; each verified in-guest. All 29 `make check` suites still green.
+
 > **(M707) Two new games — Reversi and Lights Out.** Additive ring-3 ulib apps wired into the embedded-app
 > registry + the Apps menu. **Reversi/Othello** (`user/reversi.c`): full 8×8 disc-flip logic in all 8
 > directions, pass-when-no-move handling, majority-wins endgame, and a positional-greedy AI (seeks corners,
