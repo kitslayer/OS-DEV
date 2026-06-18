@@ -1,5 +1,17 @@
 # What's next
 
+> **(M687-M696) Spec-compliance probing arc — ~10 wrong-answer fixes the crash-fuzzers can't see.** After
+> the async/Promise/fetch arc, semantic probing (build the engine `-DJS_HOSTTEST`, diff edge cases against
+> spec) kept paying out — each a value real code depends on, none a crash: **Promise.any** + **thenable
+> assimilation** (`Promise.resolve`/`await` a `{then}` object now runs its `.then`) (M687); **JSON.stringify**
+> `toJSON()` hook + the ±Infinity sentinel → `null` (M691); **Array** `lastIndexOf(x, fromIndex)` honored its
+> fromIndex (was ignored) + `[].reduce(fn)` with no init throws (M692); **ToNumber** `0b`/`0o` string prefixes
+> (joined the existing `0x`) (M693); **String** `startsWith`/`endsWith` honor their position arg + `repeat(-1)`
+> throws (M694); **`new Date(string)` + `Date.parse`** (ISO date-string parsing, M695); **regex replace
+> `$<name>`** named-group substitution (M696). Golden-locked in `tests/js/suite-promise.js` (the fresh-arena
+> overflow suite — `suite.js` is ~350KB from its 40MB cap). The recurring lesson: FUZZING finds crashes,
+> PROBING finds wrong answers — pair them. **BigInt** (arbitrary precision) remains the main JS gap.
+
 > **(M679-M682) async / Promise runtime — the other big JS frontier, on a SYNCHRONOUS-resolution model.**
 > The OS has no event loop and its I/O is blocking, so Promises settle eagerly: an executor runs immediately,
 > resolve/reject settle on the spot, and `.then`/`await` read an ALREADY-settled state — covering the common
