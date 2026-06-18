@@ -401,8 +401,8 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (streq(line, "js") || startswith(line, "js ")) {
-            static char src[8192];
-            static char out[8192];
+            static char src[8192];                   /* demo / inline code (the shell line is <=128 bytes) */
+            char *jsrc = src, *filesrc = 0;
             int have = 0;
             if (streq(line, "js")) {                 /* no file: run a built-in demo */
                 const char *demo =
@@ -425,11 +425,16 @@ static int run_command(char *line, char *cwd) {
                 int i = 0; while (code[i] && i < (int)sizeof(src) - 1) { src[i] = code[i]; i++; } src[i] = 0;
                 have = 1;
             } else {
-                long n = sys_readfile(line + 3, src, sizeof(src) - 1);
-                if (n < 0) { print("js: no such file: "); print(line + 3); print("\n"); }
-                else { src[n] = 0; have = 1; }
+                long n; filesrc = slurp(line + 3, &n);   /* whole JS file (was capped at 8KB) */
+                if (!filesrc) { print("js: no such file: "); print(line + 3); print("\n"); }
+                else { jsrc = filesrc; have = 1; }
             }
-            if (have) { sys_js(src, out, sizeof(out) - 1); out[sizeof(out) - 1] = 0; print(out); }
+            if (have) {
+                char *out = malloc(1u << 20);            /* 1MB JS output buffer (was 8KB) */
+                if (out) { sys_js(jsrc, out, (1u << 20) - 1); out[(1u << 20) - 1] = 0; print(out); free(out); }
+                else print("js: out of memory\n");
+            }
+            free(filesrc);                               /* free(NULL) safe */
         } else if (streq(line, "beep")) {
             sys_beep(880, 150);
             print("beep!\n");
