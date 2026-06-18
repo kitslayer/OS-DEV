@@ -397,4 +397,6 @@ print("-- regex (?:) non-capturing + \\xHH (M645) --");
 print("a1b".match(/(?:a)(\d)(?:b)/)[1], "catfish".match(/(?:cat|dog)fish/)[0], /\x41/.test("A"), "A B".match(/\x41\x20\x42/)[0]);  // 1 catfish true A B (?: doesn't capture; \xHH hex char)
 print("-- regex lookahead (?=) (?!) (M646) --");
 print("foobar".match(/foo(?=bar)/)[0], "100px".match(/\d+(?=px)/)[0], /^(?=.*\d)\w+$/.test("abc123"), "a1 ab".match(/a(?!\d)/g).join(","));  // foo 100 true a (zero-width positive/negative lookahead)
+print("-- Date constructor normalization (M652) --");
+print(new Date(2024,2,0).getDate(), new Date(2023,1,29).getMonth()+"/"+new Date(2023,1,29).getDate(), new Date(2024,12,1).getFullYear(), new Date(2100,1,29).getMonth());  // 29 2/1 2025 2 (last-day-of-month idiom; Feb29 non-leap rolls; month overflow; 2100 not leap)
 print("-- done --");

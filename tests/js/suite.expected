@@ -364,4 +364,6 @@ a a,b false true
 1 catfish true A B
 -- regex lookahead (?=) (?!) (M646) --
 foo 100 true a
+-- Date constructor normalization (M652) --
+29 2/1 2025 2
 -- done --

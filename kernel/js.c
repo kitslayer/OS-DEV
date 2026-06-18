@@ -2962,6 +2962,15 @@ static val nat_date(val *a, int n){
         y=(int64_t)to_num(a[0]); mo=(int64_t)to_num(a[1])+1;               /* JS month arg is 0-based */
         d = n>2?(int64_t)to_num(a[2]):1; h = n>3?(int64_t)to_num(a[3]):0;
         mi= n>4?(int64_t)to_num(a[4]):0; s = n>5?(int64_t)to_num(a[5]):0;
+        /* Normalize out-of-range parts like JS: fold the month into [1,12] (carrying
+         * the year — new Date(y,12,…) is next January), then round-trip the whole
+         * instant through the civil calendar so day/hour/min/sec overflow settles —
+         * incl. day 0 = the last day of the previous month, so the common
+         * `new Date(y, m+1, 0)` "last day of month" idiom and date arithmetic work. */
+        int64_t mo0=mo-1; y += mo0/12; mo0 %= 12; if(mo0<0){ mo0+=12; y--; } mo=mo0+1;
+        int64_t secs = days_from_civil(y,mo,d)*86400 + h*3600 + mi*60 + s;
+        int64_t nd = secs/86400, tod = secs - nd*86400; if(tod<0){ tod+=86400; nd--; }
+        civil_from_days(nd,&y,&mo,&d); h=tod/3600; mi=(tod%3600)/60; s=tod%60;
     } else {                                /* new Date() / new Date("string") — current time (string parse unsupported) */
 #ifndef JS_HOSTTEST
     struct rtc_time t; rtc_now(&t); y=t.year; mo=t.month; d=t.day; h=t.hour; mi=t.min; s=t.sec;
