@@ -1831,37 +1831,50 @@ static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-han
  * being rendered. */
 static int browser_fetch(const char *url, const char *method, const char *ctype, const char *reqbody, char *out, int outmax, int *status) {
     if (!url || outmax <= 0) return -1;
-    char host[96];
-    const char *path = url_split(url, host, sizeof(host));
-    int https = startsw(url, "https://");
+    char cur[URL_MAX]; { int i=0; while (url[i] && i<URL_MAX-1) { cur[i]=url[i]; i++; } cur[i]=0; }
     int is_post = method && (method[0]=='P' || method[0]=='p');
     int reqlen = is_post && reqbody ? (int)strlen(reqbody) : 0;
     char *raw = kmalloc(RAW_MAX);
     if (!raw) return -1;
-    int n;
-    if (is_post)
-        n = https ? tls_post(host, path, ctype, reqbody, reqlen, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
-                  : http_post(host, path, ctype, reqbody, reqlen, raw, RAW_MAX - 1);
-    else
-        n = https ? tls_get(host, path, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
-                  : http_get(host, path, raw, RAW_MAX - 1);
-    if (n <= 0) { kfree(raw); return -1; }                   /* DNS/connect/TLS/read failure -> fetch() rejects */
-    raw[n] = 0;
-    int st = 0;                                              /* parse "HTTP/1.x NNN ..." */
-    { const char *sp = raw; while (*sp && *sp != ' ') sp++; while (*sp == ' ') sp++;
-      for (int d = 0; d < 3 && sp[d] >= '0' && sp[d] <= '9'; d++) st = st*10 + (sp[d]-'0'); }
-    *status = st ? st : 200;
-    const char *body = raw; int j;                           /* skip headers: find CRLFCRLF (or LFLF) */
-    for (j = 0; j+1 < n; j++) {
-        if (j+3 < n && raw[j]=='\r' && raw[j+1]=='\n' && raw[j+2]=='\r' && raw[j+3]=='\n') { body = raw+j+4; break; }
-        if (raw[j]=='\n' && raw[j+1]=='\n') { body = raw+j+2; break; }
+    for (int hop = 0; hop < 6; hop++) {                      /* follow up to 5 redirects, mirroring the page fetch (M705) */
+        char host[96];
+        const char *path = url_split(cur, host, sizeof(host));
+        int https = startsw(cur, "https://");
+        int n;
+        if (is_post)
+            n = https ? tls_post(host, path, ctype, reqbody, reqlen, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
+                      : http_post(host, path, ctype, reqbody, reqlen, raw, RAW_MAX - 1);
+        else
+            n = https ? tls_get(host, path, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
+                      : http_get(host, path, raw, RAW_MAX - 1);
+        if (n <= 0) { kfree(raw); return -1; }                   /* DNS/connect/TLS/read failure -> fetch() rejects */
+        raw[n] = 0;
+        int st = 0;                                              /* parse "HTTP/1.x NNN ..." */
+        { const char *sp = raw; while (*sp && *sp != ' ') sp++; while (*sp == ' ') sp++;
+          for (int d = 0; d < 3 && sp[d] >= '0' && sp[d] <= '9'; d++) st = st*10 + (sp[d]-'0'); }
+        if (st >= 300 && st < 400 && hop < 5) {                  /* 3xx: resolve Location against the current URL and re-fetch as GET */
+            char loc[URL_MAX], next[URL_MAX];
+            if (http_find_loc(raw, n, loc, sizeof(loc)) && resolve_img_url(cur, loc, (int)strlen(loc), next, sizeof(next))) {
+                int i=0; while (next[i] && i<URL_MAX-1) { cur[i]=next[i]; i++; } cur[i]=0;
+                is_post = 0; reqlen = 0; reqbody = 0;            /* a redirect is followed with GET (302/303 semantics), dropping the body */
+                continue;
+            }
+        }
+        *status = st ? st : 200;
+        const char *body = raw; int j;                           /* skip headers: find CRLFCRLF (or LFLF) */
+        for (j = 0; j+1 < n; j++) {
+            if (j+3 < n && raw[j]=='\r' && raw[j+1]=='\n' && raw[j+2]=='\r' && raw[j+3]=='\n') { body = raw+j+4; break; }
+            if (raw[j]=='\n' && raw[j+1]=='\n') { body = raw+j+2; break; }
+        }
+        int blen = n - (int)(body - raw);
+        if (blen < 0) blen = 0;
+        if (blen > outmax) blen = outmax;
+        memcpy(out, body, (unsigned long)blen);
+        kfree(raw);
+        return blen;
     }
-    int blen = n - (int)(body - raw);
-    if (blen < 0) blen = 0;
-    if (blen > outmax) blen = outmax;
-    memcpy(out, body, (unsigned long)blen);
     kfree(raw);
-    return blen;
+    return -1;                                                   /* too many redirects */
 }
 static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
