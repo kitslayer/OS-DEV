@@ -132,10 +132,15 @@ static int walk_dir(uint32_t cl, dir_visit_fn visit, void *ctx) {
 
 /* Find an entry by name within directory cluster `cl`. Returns 1 + its first
  * cluster / dir-flag / size, or 0 if not present. */
-struct dfind { const char *want; uint32_t fc, size; int isdir, found; };
+static void to_83(const char *name, uint8_t out[11]);   /* fwd: 8.3-normalize a leaf for matching */
+struct dfind { const char *want; const uint8_t *want83; uint32_t fc, size; int isdir, found; };
 static int dfind_visit(const uint8_t *e, const char *name, void *ctx) {
     struct dfind *c = ctx;
-    if (ieq(name, c->want)) {
+    int eq = ieq(name, c->want);                 /* normal/case-insensitive name + "." / ".." */
+    if (!eq) {                                   /* also match a leaf that 8.3-truncates to this entry */
+        eq = 1; for (int i = 0; i < 11; i++) if (e[i] != c->want83[i]) { eq = 0; break; }  /* e.g. "dl.html" -> DL.HTM */
+    }
+    if (eq) {
         c->fc = (uint32_t)rd16(e + 26) | ((uint32_t)rd16(e + 20) << 16);
         c->size = rd32(e + 28);
         c->isdir = (e[11] & 0x10) ? 1 : 0;
@@ -145,7 +150,8 @@ static int dfind_visit(const uint8_t *e, const char *name, void *ctx) {
     return 0;
 }
 static int dir_find(uint32_t cl, const char *name, uint32_t *fc, int *isdir, uint32_t *size) {
-    struct dfind c = { name, 0, 0, 0, 0 };
+    uint8_t want83[11]; to_83(name, want83);     /* match the 8.3-truncated form too, like write/delete do */
+    struct dfind c = { name, want83, 0, 0, 0, 0 };
     walk_dir(cl, dfind_visit, &c);
     if (!c.found) return 0;
     if (fc) *fc = c.fc; if (isdir) *isdir = c.isdir; if (size) *size = c.size;
