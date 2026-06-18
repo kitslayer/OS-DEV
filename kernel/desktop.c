@@ -142,6 +142,10 @@ static uint32_t wallpaper_at(int x, int y) {
     return lerp(WP_TOP, WP_BOT, yy, wp_h - 1);
 }
 static void u2(uint64_t v, char *o) { o[0]='0'+(v/10)%10; o[1]='0'+v%10; o[2]=0; }
+/* Width of the taskbar clock pill ("YYYY-MM-DD  HH:MM:SS" = 20 chars + padding).
+ * Used by BOTH the renderer and the chip hit-test so they agree on where the
+ * clock starts (otherwise a click in the clock area mis-hits a window chip). */
+static int clk_pill_w(void) { return 20 * font_width + 26; }
 static int unum(uint64_t v, char *o) {           /* general unsigned -> string; returns len */
     char t[24]; int i = 0;
     if (!v) t[i++] = '0';
@@ -386,7 +390,7 @@ static void render_scene(void) {
     u2((uint64_t)tm.hour, clk+q); q+=2; clk[q++]=':';
     u2((uint64_t)tm.min,  clk+q); q+=2; clk[q++]=':';
     u2((uint64_t)tm.sec,  clk+q); q+=2; clk[q]=0;
-    int clkw = 20 * font_width + 26, clkx = screen_w - clkw - 8;
+    int clkw = clk_pill_w(), clkx = screen_w - clkw - 8;
 
     /* one chip per open window (the focused one — topmost — is highlighted) */
     for (int i = 0; i < win_count; i++) {
@@ -778,7 +782,7 @@ void desktop_run(void) {
             } else if (in_rect(mx, my, start_x, start_y, start_w, start_h)) {
                 menu_open = 1; menu_sel = 0; dirty = 1;  /* reset kbd highlight to top */
             } else if (my >= start_y) {                 /* a taskbar window chip? */
-                int clkx = screen_w - 88 - 8;
+                int clkx = screen_w - clk_pill_w() - 8;
                 for (int i = 0; i < win_count; i++) {
                     int cx = TB_CHIPX0 + i * (TB_CHIPW + TB_CHIPGAP);
                     if (cx + TB_CHIPW > clkx - 8) break;
