@@ -819,9 +819,11 @@ void desktop_run(void) {
                 menu_open = 0; dirty = 1;
             } else if (in_rect(mx, my, start_x, start_y, start_w, start_h)) {
                 menu_open = 1; menu_sel = 0; dirty = 1;  /* reset kbd highlight to top */
-            } else if (my >= start_y) {                 /* a taskbar window chip? */
+            } else if (my >= start_y) {                 /* the taskbar row */
                 int clkx = screen_w - clk_pill_w() - 8;
-                for (int i = 0; i < win_count; i++) {
+                if (mx >= clkx) {                        /* clicking the clock opens the Calendar */
+                    spawn_app(KIND_APP, "calendar"); dirty = 1;
+                } else for (int i = 0; i < win_count; i++) {     /* else a window chip? */
                     int cx = TB_CHIPX0 + i * (TB_CHIPW + TB_CHIPGAP);
                     if (cx + TB_CHIPW > clkx - 8) break;
                     if (mx >= cx && mx < cx + TB_CHIPW) { raise_window(i); dragging = resizing = -1; dirty = 1; break; }
