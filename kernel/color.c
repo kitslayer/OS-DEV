@@ -107,6 +107,17 @@ uint32_t parse_color(const char *v, int vl) {
         {"lightyellow",0xF8F8C0},{"skyblue",0x6CA6CD},{"hotpink",0xD0508A},{"khaki",0xBDB76B},
         {"beige",0xD8D0B8},{"chocolate",0xA0522D},{"firebrick",0xB02020},{"forestgreen",0x228B22},
         {"royalblue",0x4060D0},{"orchid",0xB060B0},{"sienna",0xA0522D},{"plum",0xC080C0},
+        /* more common keywords real pages use (M603) — were parsing to nothing */
+        {"tomato",0xE0503C},{"orangered",0xE03000},{"darkorange",0xD07000},{"dodgerblue",0x2C7BE0},
+        {"deepskyblue",0x10A0D0},{"cornflowerblue",0x5080D0},{"mediumblue",0x0000C8},{"midnightblue",0x101060},
+        {"limegreen",0x40B040},{"seagreen",0x2E8B57},{"mediumseagreen",0x40B070},{"darkcyan",0x008080},
+        {"springgreen",0x20C070},{"yellowgreen",0x90B020},{"olivedrab",0x708020},
+        {"deeppink",0xD03080},{"palevioletred",0xC07090},{"mediumpurple",0x9070C0},{"darkviolet",0x9000C0},
+        {"gainsboro",0xDCDCDC},{"lightcoral",0xE08080},{"rosybrown",0xB08888},{"peru",0xC0853F},
+        {"saddlebrown",0x8B4513},{"goldenrod",0xC0900C},{"darkslategray",0x2F4F4F},{"darkslategrey",0x2F4F4F},
+        {"dimgray",0x696969},{"dimgrey",0x696969},{"lightslategray",0x778899},
+        {"ivory",0xF8F8E8},{"azure",0xE8F8F8},{"lavender",0xE6E6FA},{"aliceblue",0xF0F8FF},
+        {"ghostwhite",0xF8F8FF},{"cornsilk",0xF8F4DC},{"seashell",0xF8F0EC},{"mintcream",0xF0FAF4},
     };
     char buf[16]; int p = 0;
     for (int i = 0; i < vl && p < 15; i++) buf[p++] = (char)lc(v[i]);

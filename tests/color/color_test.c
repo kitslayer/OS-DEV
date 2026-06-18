@@ -46,6 +46,10 @@ int main(void) {
     expect("white", 0x01FFFFFF);                    /* the most common keyword — was missing before M588 */
     expect("lightgray", 0x01D3D3D3);
     expect("aqua", 0x01008B8B);
+    expect("tomato", 0x01E0503C);                   /* M603 additions */
+    expect("dodgerblue", 0x012C7BE0);
+    expect("LavendeR", 0x01E6E6FA);                 /* case-insensitive */
+    expect("cornflowerblue", 0x015080D0);           /* 14 chars — within the buf[16] cap */
     expect("notacolor", 0);
     expect("", 0);
     expect("#", 0);                                /* bare # */
