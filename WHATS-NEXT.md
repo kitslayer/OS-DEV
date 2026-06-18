@@ -1,6 +1,6 @@
 # What's next
 
-> **(M566, M580-M585) Browser untrusted-parser fuzzing — every scanner extracted + fuzzed, 2 CSS fixes.**
+> **(M566, M580-M588) Browser untrusted-parser fuzzing — every scanner extracted + fuzzed, 4 CSS fixes.**
 > The browser parses a hostile server's bytes on the guard-page-less kernel stack; all the cleanly-
 > separable scanners are now lifted into their own `.c` and host-fuzzed under ASan/UBSan (the M524/M546
 > pattern), each a verified oracle (loosen a bound → ASan abort at the exact line): **M566** `htmlattr.c`
@@ -8,10 +8,14 @@
 > `<img src>`/redirects); **M581** `color.c` (`parse_color` — `#hex`/`rgb()`/`hsl()`/named, clamped int
 > math); **M583** `cssprop.c` (`style_prop` — the inline-style declaration scanner all per-property style
 > helpers build on). Each extraction is verbatim (diffed byte-identical) and verified behavior-preserving
-> in-guest. The review/fuzz then surfaced + fixed two real CSS-correctness gaps in `style_prop`: **M584**
-> it now accepts whitespace before the `:` (valid CSS `prop : value`), and **M585** it honors the cascade
-> (a later duplicate declaration wins, `color:red;color:blue` → blue) — both purely additive (home page
-> renders byte-identically). The main `parse_html` tokenizer stays too coupled to `browser_t` to fuzz in
+> in-guest. The review/fuzz then surfaced + fixed **four** real CSS-rendering gaps (all in the shared
+> path, so they fix both inline `style=""` and `<style>` rules): **M584** `style_prop` accepts whitespace
+> before the `:` (valid CSS `prop : value`); **M585** it honors the cascade (a later duplicate wins,
+> `color:red;color:blue` → blue); **M587** it strips the `!important` priority marker (`color:red
+> !important` was silently dropped — the value failed every parser); **M588** added `white` (!) + ~19
+> common named colours (`white`/`aqua`/`lightgray`/… were missing, so `color:white` parsed to nothing).
+> All purely additive — the home page renders byte-identically; each locked by a regression case + the
+> fuzzers staying ASan/UBSan-clean. The main `parse_html` tokenizer stays too coupled to `browser_t` to fuzz in
 > isolation, so it's guarded end-to-end by `browsertest`. `make check` is now **27 suites** (24 host + 3
 > in-guest). Marquee features re-confirmed in-guest by framebuffer screenshot this session: the desktop,
 > the browser (home + real HTTPS), Mandelbrot, the System Monitor, every window gesture — and **DOOM**
