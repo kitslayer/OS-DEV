@@ -142,6 +142,7 @@ static uint32_t wallpaper_at(int x, int y) {
     return lerp(WP_TOP, WP_BOT, yy, wp_h - 1);
 }
 static void u2(uint64_t v, char *o) { o[0]='0'+(v/10)%10; o[1]='0'+v%10; o[2]=0; }
+static int lc_ascii(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }   /* ASCII lowercase */
 /* Width of the taskbar clock pill ("YYYY-MM-DD  HH:MM:SS" = 20 chars + padding).
  * Used by BOTH the renderer and the chip hit-test so they agree on where the
  * clock starts (otherwise a click in the clock area mis-hits a window chip). */
@@ -708,6 +709,15 @@ void desktop_run(void) {
                 else if (k == '\n' || k == '\r') { int s = menu_sel; menu_open = 0; dirty = 1;
                                                    spawn_app(menu[s].kind, menu[s].prog); }
                 else if (k == 27) { menu_open = 0; dirty = 1; }                                 /* Esc */
+                else if ((k >= 'a' && k <= 'z') || (k >= 'A' && k <= 'Z') || (k >= '0' && k <= '9')) {
+                    /* type-to-jump: hop to the next menu item whose label starts with this
+                     * letter (wrapping), so a 34-entry menu is fast from the keyboard. */
+                    int c = lc_ascii(k);
+                    for (int n = 1; n <= MENU_N; n++) {
+                        int j = (menu_sel + n) % MENU_N;
+                        if (lc_ascii(menu[j].label[0]) == c) { menu_sel = j; dirty = 1; break; }
+                    }
+                }
                 continue;                       /* swallow all keys while the menu is up */
             }
             if (k == 0x0E) {                    /* F2: cycle focus to the next window */
