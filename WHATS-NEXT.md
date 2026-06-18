@@ -1,5 +1,17 @@
 # What's next
 
+> **(M562-M566) Tooling + more window gestures + browser-parser fuzz — continuing the in-guest arc.**
+> **M563** promoted the throwaway driving scripts into a committed tool, `tools/osdrive.py`
+> (boot headless, inject keys + absolute-mouse clicks/drags, screenshot) — the durable enabler for all of
+> the below. **M564** aero-snap: drag a window to the top edge to maximize or a side edge to tile that
+> half (completing F4/F5/F6/double-click). **M565** made the F1 help overlay modal to the mouse. **M566**
+> (security, not DE) extracted the browser's HTML attribute scanners — `find_attr`/`has_attr`/`attr_int`/
+> `find_href`, which walk a hostile server's tag bytes — into `kernel/htmlattr.c` and host-fuzzed them
+> (400k random + truncations/corruptions, ASan/UBSan, verified oracle), the M524/M546 pattern; `make check`
+> is now **23 suites**. Verified in-guest with osdrive this arc: the browser renders its home page AND
+> navigates to a real **https://example.com** over the from-scratch TLS stack, the System Monitor, and
+> every window gesture (maximize/restore/tile/drag) — all by framebuffer screenshot, no display.
+
 > **(M556-M561) Desktop-environment polish — driven + verified in-guest.** With QEMU back (above), used
 > the new full headless control — keyboard via HMP `sendkey` AND mouse via QMP `input-send-event`
 > (absolute tablet, 0..32767), plus `screendump` — to improve the DE the user actually asked for ("idc
