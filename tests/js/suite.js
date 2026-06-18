@@ -403,4 +403,6 @@ print("-- function declaration hoisting (M653) --");
 print((function(){return early();function early(){return "hoisted";}})(), (function(){function isE(n){return n==0||isO(n-1);}function isO(n){return n!=0&&isE(n-1);}return isE(4);})());  // hoisted true (forward call before declaration; mutual recursion)
 print("-- class private fields #x (M654) --");
 print((function(){class E{#x=5;#dbl(){return this.#x*2;} run(){return this.#dbl();} pub(){return this.x;}} var e=new E(); return e.run()+","+(e.pub()===undefined);})());  // 10,true (#x + #method work; #x not visible as public x)
+print("-- Error subtype hierarchy (M656) --");
+print(new TypeError("x") instanceof Error, new RangeError("y") instanceof Error, new TypeError("z") instanceof RangeError, new TypeError("boom").message);  // true true false boom (built-in error subtypes chain to Error; siblings don't)
 print("-- done --");

@@ -370,4 +370,6 @@ foo 100 true a
 hoisted true
 -- class private fields #x (M654) --
 10,true
+-- Error subtype hierarchy (M656) --
+true true false boom
 -- done --

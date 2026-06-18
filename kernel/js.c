@@ -3515,10 +3515,13 @@ static void install_globals(env *g) {
      * (`let min = Infinity; if (x < min) …`, `arr.flat(Infinity)`), and defining
      * it stops the many scripts that reference Infinity from aborting outright. */
     env_define(g,"Infinity",NUM(INT64_MAX));
-    { obj *e=new_obj(V_NATIVE); e->native=nat_Error;       env_define(g,"Error",obj_val_native(e)); }
-    { obj *e=new_obj(V_NATIVE); e->native=nat_TypeError;   env_define(g,"TypeError",obj_val_native(e)); }
-    { obj *e=new_obj(V_NATIVE); e->native=nat_RangeError;  env_define(g,"RangeError",obj_val_native(e)); }
-    { obj *e=new_obj(V_NATIVE); e->native=nat_SyntaxError; env_define(g,"SyntaxError",obj_val_native(e)); }
+    /* Error + its subtypes: link each subtype's ctor parent_class to Error so
+     * `new TypeError(...) instanceof Error` is true (the instanceof chain walks
+     * ctor_class -> parent_class), matching JS's Error hierarchy. */
+    obj *errc=new_obj(V_NATIVE); errc->native=nat_Error; env_define(g,"Error",obj_val_native(errc));
+    { obj *e=new_obj(V_NATIVE); e->native=nat_TypeError;   e->parent_class=errc; env_define(g,"TypeError",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_RangeError;  e->parent_class=errc; env_define(g,"RangeError",obj_val_native(e)); }
+    { obj *e=new_obj(V_NATIVE); e->native=nat_SyntaxError; e->parent_class=errc; env_define(g,"SyntaxError",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURIComponent; env_define(g,"encodeURIComponent",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=uri_decode;             env_define(g,"decodeURIComponent",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_encodeURI;          env_define(g,"encodeURI",obj_val_native(e)); }
