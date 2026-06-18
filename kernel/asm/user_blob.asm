@@ -52,6 +52,7 @@ global spaceinv_elf_start, spaceinv_elf_end
 global asteroids_elf_start, asteroids_elf_end
 global flappy_elf_start, flappy_elf_end
 global gb_elf_start, gb_elf_end
+global lander_elf_start, lander_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -236,5 +237,9 @@ flappy_elf_end:
 gb_elf_start:
     incbin "build/gb.elf"
 gb_elf_end:
+
+lander_elf_start:
+    incbin "build/lander.elf"
+lander_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -1,5 +1,13 @@
 # What's next
 
+> **(M726) New game — Lunar Lander (vector, in the framebuffer).** `user/lander.c`: ride gravity down and set
+> the lander on the green pad gently — the main engine (Up) burns fuel and pushes up, side thrusters
+> (Left/Right) nudge horizontally; land on the pad slow and near-vertical to win, else crash. A starfield +
+> jagged terrain with a highlighted pad, a fuel gauge, and the lander tinted white/amber by descent speed
+> (green/red on land/crash). Built with SSE for the float physics; raw make/break input with the same
+> same-frame-tap latch as the other graphics apps. Verified in-guest (the lander descends over the terrain;
+> thrust + fuel work). All 29 `make check` suites green.
+
 > **(M725) Game Boy emulator — a whole second console, via vendored Peanut-GB.** Same recipe as the NES:
 > `user/gb/` vendors **Peanut-GB** (an MIT single-header DMG emulator — CPU/PPU/MBC) behind `gb_osdev.c`, which
 > reads the chosen `.gb` off the disk, serves it through Peanut-GB's ROM/cart-RAM callbacks, maps each 2-bit
