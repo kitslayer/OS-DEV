@@ -37,7 +37,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "booting kernel headless (framebuffer capture via QEMU monitor)..."
-timeout -s KILL 30 "$QEMU" -no-reboot -no-shutdown -kernel "$KERNEL" \
+timeout -s KILL 40 "$QEMU" -no-reboot -no-shutdown -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \
@@ -51,10 +51,14 @@ i=0; while [ ! -S "$SOCK" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
 if [ ! -S "$SOCK" ]; then echo "FAIL: QEMU monitor socket never appeared"; cat "$TMP/qemu.err"; exit 1; fi
 
 # Wait until the kernel hands off to the desktop (then it paints immediately).
+# Generous window (~25s, early-exit on the marker): an offline host's boot-time
+# network self-test hits TCP timeouts before the desktop, so a tight cap would
+# false-fail. Online the marker appears in ~3s and the loop exits at once.
 got=0; i=0
-while [ $i -lt 40 ]; do
+while [ $i -lt 50 ]; do
     if grep -q "launching the desktop" "$SLOG" 2>/dev/null; then got=1; break; fi
-    sleep 0.3; i=$((i+1))
+    kill -0 "$QPID" 2>/dev/null || break        # QEMU exited (crash): stop waiting
+    sleep 0.5; i=$((i+1))
 done
 if [ "$got" -ne 1 ]; then echo "FAIL: never reached desktop launch"; tail -5 "$SLOG" 2>/dev/null; exit 1; fi
 

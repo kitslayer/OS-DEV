@@ -25,7 +25,7 @@ cleanup() { rc=$?; [ -n "$QPID" ] && { kill -9 "$QPID" 2>/dev/null || true; wait
 trap cleanup EXIT
 
 echo "booting + launching the browser (Apps menu -> Browser), capturing framebuffer..."
-timeout -s KILL 30 "$QEMU" -no-reboot -no-shutdown -kernel "$KERNEL" \
+timeout -s KILL 40 "$QEMU" -no-reboot -no-shutdown -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \
@@ -37,11 +37,11 @@ QPID=$!
 i=0; while [ ! -S "$SOCK" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
 if [ ! -S "$SOCK" ]; then echo "FAIL: QEMU monitor socket never appeared"; cat "$TMP/qemu.err"; exit 1; fi
 
-got=0; i=0
-while [ $i -lt 40 ]; do
+got=0; i=0          # ~25s, early-exit on the marker (offline boots delay the desktop; see run-gfx-tests.sh)
+while [ $i -lt 50 ]; do
     grep -q "launching the desktop" "$SLOG" 2>/dev/null && { got=1; break; }
     kill -0 "$QPID" 2>/dev/null || break
-    sleep 0.3; i=$((i+1))
+    sleep 0.5; i=$((i+1))
 done
 if [ "$got" -ne 1 ]; then echo "FAIL: never reached desktop launch"; exit 1; fi
 sleep 2
