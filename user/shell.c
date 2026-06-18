@@ -188,7 +188,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nr] nl tac uniq[-c] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incv,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort[-nru] nl tac uniq[-c] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incv,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -351,13 +351,13 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "sort ")) {
-            const char *fp = line + 5; int rev = 0, nsort = 0;  /* -r: reverse (descending); -n: numeric */
+            const char *fp = line + 5; int rev = 0, nsort = 0, uniq_f = 0;  /* -r reverse, -n numeric, -u unique */
             while (*fp == ' ') fp++;
             while (fp[0] == '-' && fp[1] && fp[1] != ' ') {
                 int t, valid = 1;
-                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'r' && fp[t] != 'n') valid = 0;
+                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'r' && fp[t] != 'n' && fp[t] != 'u') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a filename) */
-                for (t = 1; fp[t] && fp[t] != ' '; t++) { if (fp[t] == 'r') rev = 1; else nsort = 1; }
+                for (t = 1; fp[t] && fp[t] != ' '; t++) { if (fp[t] == 'r') rev = 1; else if (fp[t] == 'n') nsort = 1; else uniq_f = 1; }
                 fp += t; while (*fp == ' ') fp++;
             }
             long n; char *buf = slurp(fp, &n);
@@ -392,7 +392,12 @@ static int run_command(char *line, char *cwd) {
                         }
                         lns[j+1] = key;
                     }
-                    for (int i = 0; i < nl; i++) { print(lns[i]); print("\n"); }
+                    const char *prevl = 0;
+                    for (int i = 0; i < nl; i++) {
+                        if (uniq_f && prevl && streq(prevl, lns[i])) continue;   /* -u: drop adjacent duplicates */
+                        print(lns[i]); print("\n");
+                        prevl = lns[i];
+                    }
                     free(lns);
                 }
                 free(buf);
