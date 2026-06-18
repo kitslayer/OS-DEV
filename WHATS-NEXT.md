@@ -1,5 +1,24 @@
 # What's next
 
+> **(M634-M637) Test-hardening: lock in this session's fixes + fuzz the untrusted-input parser paths the
+> existing fuzzers couldn't reach.** The data-loss bug class (below) was fixed + verified in-guest but had no
+> host regression coverage, and an audit of the image decoders found them robust *by reading* yet under-fuzzed
+> where it matters. **M634** adds host regressions (fs_test, which `#include`s fat32.c) for the two FS bugs:
+> `rm <non-empty-dir>` is refused with NO cluster leak (df-checked — full reclaim only after a proper delete),
+> and a name that 8.3-truncates ("dl.html"→DL.HTM, "verylongname.txt"→VERYLONG.TXT) reads back by its long
+> name. **M635-M637** fix a shared gap in the image fuzzer: it prepends only a format magic + ≤91 random
+> bytes, so the decoders' deepest untrusted-input code never ran (it needs a structurally valid header first).
+> Now a real header is built and the *compressed payload* fuzzed: **M635** GIF LZW (variable-width codes, the
+> dictionary, the KwKwK self-reference, the sub-block chain), **M636** JPEG Huffman→dequant→IDCT→YCbCr (a real
+> embedded 8×8 baseline JPEG, its entropy scan mutated), **M637** PNG recon_filters (all 5 filter types) +
+> expand_px (per colour type), via a STORED-deflate IDAT so inflate is a memcpy and the decode always reaches
+> recon+expand on bytes we control. Two techniques made these TRUE tests, each verified by planting an OOB and
+> watching the suite go red then restoring it: (1) buffers sized to the EXACT image — a shared 4MB scratch
+> masks a write past the per-pixel cap, while tight malloc'd buffers put an ASan redzone right at the boundary;
+> (2) small image dims so the output bound is hit constantly. The decoders all proved clean (the audit was
+> right — they bound every dimension, table index, and output write); the lasting value is regression coverage
+> for the exact paths a remote image/page can drive. All 27 suites green.
+
 > **(M603-M630) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
 > via in-guest verification.** Verifying the FAT32 write path (a cp/edit/save round-trip) led into the
 > shell's file commands and exposed a pervasive pattern: **fixed-size buffers silently truncating anything
