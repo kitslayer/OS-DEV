@@ -1,5 +1,14 @@
 # What's next
 
+> **(M660) The probing generalized past JS: the browser's URL resolver didn't canonicalize `./`/`../`.**
+> `resolve_img_url` concatenated a relative `<img src>`/`<a href>` onto the base directory without RFC 3986
+> remove_dot_segments, so `../up.png` on `http://a.com/dir/sub/p.html` became `…/dir/sub/../up.png` (a strict
+> server/CDN 404s on a literal `../`). Added an in-place `norm_path` (collapse `/./`, pop a segment per `/../`
+> clamped at root, leave `?query`/`#frag` verbatim) applied in all three branches (absolute / protocol-relative
+> / relative). Unit-tested standalone over 18 cases; urltest's 400k fuzz stays clean (norm_path only shrinks
+> within the bounded buffer); regression cases added. (Probing the colour parser, by contrast, found the muted
+> named palette — red=CC0000 etc. — is a deliberate, test-locked design choice, not a bug: left as-is.)
+
 > **(M649-M650) Shell `grep` gained regex (was literal-substring only).** `grep '^foo'` used to search for the
 > four characters "^foo"; `grep 'a.c'` wanted a literal dot. Added the compact Kernighan/Pike matcher: `^`/`$`
 > anchors, `.` any-char, `*` zero-or-more, `[..]` classes (ranges, negation, leading-`]` literal), and `\`
