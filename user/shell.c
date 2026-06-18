@@ -310,15 +310,14 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "tr ")) {              /* tr -d CHARS FILE (delete) | tr OLD NEW FILE (replace one char) */
-            static char buf[2048];
             const char *p = line + 3; while (*p == ' ') p++;
             if (p[0] == '-' && p[1] == 'd' && p[2] == ' ') {
                 p += 3; while (*p == ' ') p++;
                 char del[16]; int dn = 0;
                 while (*p && *p != ' ' && dn < 15) del[dn++] = *p++;
                 while (*p == ' ') p++;
-                long n = sys_readfile(p, buf, sizeof(buf) - 1);
-                if (n < 0) { print("tr: no such file: "); print(p); print("\n"); }
+                long n; char *buf = slurp(p, &n);
+                if (!buf) { print("tr: no such file: "); print(p); print("\n"); }
                 else {
                     long oi = 0;
                     for (long i = 0; i < n; i++) {
@@ -326,14 +325,14 @@ static int run_command(char *line, char *cwd) {
                         for (int j = 0; j < dn; j++) if (buf[i] == del[j]) { drop = 1; break; }
                         if (!drop) buf[oi++] = buf[i];          /* compact in place (oi <= i) */
                     }
-                    buf[oi] = 0; print(buf);
+                    buf[oi] = 0; print(buf); free(buf);
                 }
             } else {
                 char oldc = *p; if (oldc) p++; while (*p == ' ') p++;
                 char newc = *p; if (newc) p++; while (*p == ' ') p++;
-                long n = sys_readfile(p, buf, sizeof(buf) - 1);
-                if (n < 0 || !oldc || !newc) { print("usage: tr OLD NEW FILE  |  tr -d CHARS FILE\n"); }
-                else { buf[n] = 0; for (long i = 0; i < n; i++) if (buf[i] == oldc) buf[i] = newc; print(buf); }
+                long n; char *buf = slurp(p, &n);
+                if (!buf || !oldc || !newc) { print("usage: tr OLD NEW FILE  |  tr -d CHARS FILE\n"); if (buf) free(buf); }
+                else { buf[n] = 0; for (long i = 0; i < n; i++) if (buf[i] == oldc) buf[i] = newc; print(buf); free(buf); }
             }
         } else if (startswith(line, "fold ")) {           /* fold [-w]N FILE : wrap each line at N columns (default 60) */
             static char buf[2048], fout[2400];
@@ -359,7 +358,6 @@ static int run_command(char *line, char *cwd) {
                 fout[oi] = 0; print(fout);
             }
         } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE (char range) | cut -fN[-M] [-dX] FILE (delimited fields, default tab) */
-            static char buf[2048];
             const char *p = line + 4;
             int mode = 0, from = 0, to = 0, openend = 0; char delim = '\t';
             while (1) {                                    /* parse leading -c/-f/-d flags, any order */
@@ -378,8 +376,8 @@ static int run_command(char *line, char *cwd) {
             if (from < 1) from = 1;
             if (mode != 'c' && mode != 'f') { print("usage: cut -cN[-M] <file>  |  cut -fN[-M] [-dX] <file>  (fields; default delim = tab)\n"); }
             else {
-                long n = sys_readfile(p, buf, sizeof(buf) - 1);
-                if (n < 0) { print("cut: no such file: "); print(p); print("\n"); }
+                long n; char *buf = slurp(p, &n);
+                if (!buf) { print("cut: no such file: "); print(p); print("\n"); }
                 else {
                     buf[n] = 0;
                     char out[256]; int oi = 0, col = 0, field = 1, dirty = 0;
@@ -401,6 +399,7 @@ static int run_command(char *line, char *cwd) {
                     }
                     if (dirty) { out[oi] = 0; print(out); print("\n"); }   /* trailing line w/o newline */
                 }
+                free(buf);
             }
         } else if (streq(line, "js") || startswith(line, "js ")) {
             static char src[8192];
