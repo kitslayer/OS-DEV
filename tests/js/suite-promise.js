@@ -65,4 +65,6 @@ print("-- String startsWith/endsWith position + repeat(-1) throws (M694) --");
 print("hello".startsWith("llo",2), "hello".endsWith("ell",4), "hello".startsWith("he",1), "hello".endsWith("lo"), (function(){try{"x".repeat(-1);return "no";}catch(e){return "threw";}})());   // true true false true threw (startsWith honors the start position; endsWith treats the string as ending at endPos; repeat(neg)->RangeError)
 print("-- Date string parsing: new Date(str) + Date.parse (M695) --");
 print(new Date("2024-01-15").getFullYear(), Date.parse("2024-01-01T00:00:00.000Z"), Date.parse("1970-01-02"), new Date("2024-03-20T10:30:45").getMonth(), new Date("2024-03-20T10:30:45").getHours());   // 2024 1704067200000 86400000 2 10 (ISO date/datetime parse; trailing .sss/Z accepted+ignored as UTC)
+print("-- regex replace $<name> named-group substitution (M696) --");
+print("2024-01".replace(/(?<y>\d+)-(?<m>\d+)/,"$<m>/$<y>"), "a1 b2".replace(/(?<L>[a-z])(?<N>[0-9])/g,"$<N>$<L>"), "ab".replace(/(?<f>a)(b)/,"$<f>-$2"));   // 01/2024 1a 2b a-b ($<name> substitutes the named capture; mixes with $2; works under /g)
 print("-- done --");

@@ -1347,14 +1347,22 @@ static regex *rx_of(val v){ return (v.t==V_OBJ && v.o && v.o->kind==V_REGEX) ? (
 /* a growable string builder on the arena (no realloc/free; grows by doubling) */
 typedef struct { char *buf; int len, cap; } sbuild;
 static void sb_put(sbuild *b, const char *s, int n){ if(n<0) return; if(b->len+n+1>b->cap){ int nc=b->cap*2; if(nc<b->len+n+16) nc=b->len+n+16; char*nb=aalloc(nc); if(!nb){g_oom=1;return;} if(b->buf) memcpy(nb,b->buf,b->len); b->buf=nb; b->cap=nc; } if(b->buf){ memcpy(b->buf+b->len,s,n); b->len+=n; } }
-/* expand a replacement template ($&=whole match, $1..$9=group, $$=$) into b */
-static void sb_expand(sbuild *b, const char *repl, const char *s, int *caps, int ngroup){
+/* expand a replacement template ($&=whole match, $1..$9=group, $<name>=named group,
+ * $`/$'=before/after, $$=$) into b. gnames (group#->name, or NULL) drives $<name>. */
+static void sb_expand(sbuild *b, const char *repl, const char *s, int *caps, int ngroup, const char **gnames){
     int rl=(int)strlen(repl);
     for(int i=0;i<rl;i++){ if(repl[i]=='$' && i+1<rl){ char d=repl[i+1];
         if(d=='&'){ sb_put(b, s+caps[0], caps[1]-caps[0]); i++; continue; }
         if(d=='$'){ sb_put(b,"$",1); i++; continue; }
         if(d=='`'){ sb_put(b, s, caps[0]); i++; continue; }                       /* $` : text before the match */
         if(d=='\''){ sb_put(b, s+caps[1], (int)strlen(s+caps[1])); i++; continue; }  /* $' : text after the match */
+        if(d=='<' && gnames){   /* $<name> : named-group substitution (M696) */
+            int j=i+2, nl=0; while(j<rl && repl[j]!='>'){ j++; nl++; }
+            if(j<rl){ const char *nm=repl+i+2;
+                for(int g=1; g<=ngroup; g++){ if(gnames[g] && (int)strlen(gnames[g])==nl && memcmp(gnames[g],nm,nl)==0){ int a=caps[2*g],e=caps[2*g+1]; if(a>=0&&e>=a) sb_put(b,s+a,e-a); break; } }
+                i=j; continue;   /* skip through the closing '>' */
+            }
+        }
         if(d>='1'&&d<='9'){ int g=d-'0'; if(g<=ngroup){ int a=caps[2*g],e=caps[2*g+1]; if(a>=0&&e>=a) sb_put(b,s+a,e-a); } i++; continue; } }
         sb_put(b, repl+i, 1); }
 }
@@ -2483,7 +2491,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
             if(has_fn){ val fa[RE_MAXGROUP+1]; int na=0;                    /* pass (match, g1, …, gN) */
                 for(int gi=0; gi<=re->ngroup && na<RE_MAXGROUP+1; gi++){ int a=caps[2*gi],e=caps[2*gi+1]; if(a>=0&&e>=a){ char*m=aalloc(e-a+1); if(m){memcpy(m,s+a,e-a);m[e-a]=0;} fa[na++]=STRV(m?m:""); } else fa[na++]=UND(); }
                 val rv=call_function(args[1], fa, na); const char *rs=val_to_str(rv); sb_put(&b, rs, (int)strlen(rs)); }
-            else sb_expand(&b, repl, s, caps, re->ngroup);
+            else sb_expand(&b, repl, s, caps, re->ngroup, re->gnames);
             pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(caps[1]==caps[0] && caps[0]<len) sb_put(&b, s+caps[0], 1);   /* zero-width: emit a char, advance */
             if(!re->global && !all){ break; } }
         sb_put(&b, s+pos, len-pos); if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
