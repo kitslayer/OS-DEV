@@ -1,5 +1,15 @@
 # What's next
 
+> **(M649-M650) Shell `grep` gained regex (was literal-substring only).** `grep '^foo'` used to search for the
+> four characters "^foo"; `grep 'a.c'` wanted a literal dot. Added the compact Kernighan/Pike matcher: `^`/`$`
+> anchors, `.` any-char, `*` zero-or-more, `[..]` classes (ranges, negation, leading-`]` literal), and `\`
+> escapes, honouring the existing `-i` case fold. A pattern with no metacharacters still behaves exactly like
+> the old substring search, so existing greps are unchanged. Verified two ways: a standalone host harness
+> (~37 cases incl. ranges/negation/`[..]*`/escape/case-insensitive, ASan/UBSan clean) and in-guest
+> (`ls > gf.txt` then `grep ^R` -> only R-prefixed names, `5$` -> only lines ending in 5, `HEL.O` via `.`,
+> `RE*GEX` via `*`, `^[RT]` via class+anchor). The matcher is bounded by pattern length (matchstar iterates,
+> never recurses on the text), so no deep recursion on long lines.
+
 > **(M640-M646) JS-engine semantic completeness via host probing — fuzzing finds crashes, probing finds
 > WRONG ANSWERS.** The image-decoder audit proved the parsers were memory-safe; this arc asked the other
 > question: does the JS engine compute the RIGHT result? Building it `-DJS_HOSTTEST` and diffing ~90 edge cases
