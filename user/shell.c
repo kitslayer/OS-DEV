@@ -1625,11 +1625,16 @@ static int run_command(char *line, char *cwd) {
  * ">>" (append reads the existing contents first, capped to the buffer). */
 static void write_redirect(const char *file, const char *buf, unsigned long len, int append) {
     if (append) {
-        static char abuf[8192];
-        long old = sys_readfile(file, abuf, sizeof abuf - 1);
-        unsigned long total = old > 0 ? (unsigned long)old : 0;
-        for (unsigned long i = 0; i < len && total < sizeof abuf; i++) abuf[total++] = buf[i];
-        sys_writefile(file, abuf, total);
+        long oldlen; char *old = slurp(file, &oldlen);     /* read the WHOLE existing file (was capped at 8KB) */
+        unsigned long ol = (old && oldlen > 0) ? (unsigned long)oldlen : 0;
+        char *combined = malloc(ol + len + 1);
+        if (combined) {
+            for (unsigned long i = 0; i < ol;  i++) combined[i]      = old[i];
+            for (unsigned long i = 0; i < len; i++) combined[ol + i] = buf[i];
+            sys_writefile(file, combined, ol + len);       /* existing + appended */
+            free(combined);
+        }
+        free(old);                                         /* free(NULL) is safe */
     } else {
         sys_writefile(file, buf, len);
     }
