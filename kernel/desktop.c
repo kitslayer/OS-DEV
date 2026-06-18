@@ -97,6 +97,7 @@ static const struct menu_item menu[] = {
     { "Game Boy", KIND_APP, "gb" },
     { "Lunar Lander", KIND_APP, "lander" },
     { "Yahtzee", KIND_APP, "yahtzee" },
+    { "Checkers", KIND_APP, "checkers" },
     { "Paint", KIND_APP, "paint" }, { "Piano", KIND_APP, "piano" }, { "Jukebox", KIND_APP, "jukebox" },
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Monitor", KIND_SYSMON, 0 },

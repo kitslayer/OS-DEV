@@ -1,5 +1,13 @@
 # What's next
 
+> **(M728) New game — Checkers vs the computer.** `user/checkers.c`: standard American draughts on an 8×8
+> board — men move/capture one diagonal forward, kings both ways, capturing is **mandatory** and multi-jumps
+> must be continued, and a man reaching the far row is crowned. Pick a piece (Space) then a destination (legal
+> targets marked `*`); the CPU plays greedily (captures when able, continuing multi-jumps). Take all the CPU's
+> pieces or leave it with no move to win. Verified in-guest: the board renders, selecting a piece shows its
+> legal moves, a slide executes, the CPU replies, and the mandatory-jump rule is enforced ("you MUST jump").
+> All 29 `make check` suites green.
+
 > **(M727) New game — Yahtzee (with a persistent best).** `user/yahtzee.c`: solo Yahtzee — each of 13 turns,
 > roll the five dice, hold any (1-5) and re-roll up to twice (r), then assign them to one of the 13 scoring
 > categories (arrows to an empty row, Enter to score); the scorecard shows each empty row's potential score
