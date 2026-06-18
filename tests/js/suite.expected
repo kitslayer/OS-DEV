@@ -358,4 +358,6 @@ rvdel=1,true rvnone=5
 word two,words cat A Cat
 -- regex backreferences \1..\9 (M643) --
 true false hi hi true
+-- regex m (multiline) + s (dotall) flags (M644) --
+a a,b false true
 -- done --

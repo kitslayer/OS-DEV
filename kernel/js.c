@@ -217,7 +217,7 @@ static token lex_next_raw(lexer *L) {
                 L->pos++; }
             int plen=L->pos-pstart;
             if (L->pos<L->len && s[L->pos]=='/') L->pos++;   /* closing / */
-            int64_t fb=0; while (L->pos<L->len && is_id(s[L->pos])) { char f=s[L->pos]; if(f=='g')fb|=1; else if(f=='i')fb|=2; L->pos++; }
+            int64_t fb=0; while (L->pos<L->len && is_id(s[L->pos])) { char f=s[L->pos]; if(f=='g')fb|=1; else if(f=='i')fb|=2; else if(f=='m')fb|=4; else if(f=='s')fb|=8; L->pos++; }
             t.type=T_REGEX; t.s=s+pstart; t.len=plen; t.num=fb; return t;
         }
     }
@@ -993,7 +993,7 @@ enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_WORDB, I_NWORDB, I_BACKREF, I_SAV
 typedef struct { int op; int c; int x, y; unsigned char *cls; } reinst;
 #define RE_MAXPROG 512
 #define RE_MAXGROUP 9
-typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int lastIndex; const char *source; int ok; const char *gnames[RE_MAXGROUP+1]; } regex;
+typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int multiline; int dotall; int lastIndex; const char *source; int ok; const char *gnames[RE_MAXGROUP+1]; } regex;
 
 enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_BACKREF, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
 typedef struct rnode rnode;
@@ -1156,7 +1156,7 @@ static void rx_compile(remit *E, rnode *n){
 }
 static regex *re_compile(const char *pat, const char *flags){
     regex *re=aalloc(sizeof(regex)); if(!re) return 0; memset(re,0,sizeof(*re));
-    if(flags) for(const char*f=flags;*f;f++){ if(*f=='i')re->icase=1; else if(*f=='g')re->global=1; }
+    if(flags) for(const char*f=flags;*f;f++){ if(*f=='i')re->icase=1; else if(*f=='g')re->global=1; else if(*f=='m')re->multiline=1; else if(*f=='s')re->dotall=1; }
     re->source=pat?pat:"";
     rparse P; memset(&P,0,sizeof(P)); P.p=pat?pat:""; P.len=(int)strlen(P.p);
     rnode *tree=rx_alt(&P);
@@ -1180,12 +1180,12 @@ static int re_run(regex *re,int pc,const char*s,int slen,int sp,int*caps,long*bu
         reinst *in=&re->prog[pc];
         switch(in->op){
             case I_CHAR: if(sp<slen && rx_eqc((unsigned char)s[sp],in->c,re->icase)){ sp++; pc++; continue; } return 0;
-            case I_ANY: if(sp<slen && s[sp]!='\n'){ sp++; pc++; continue; } return 0;
+            case I_ANY: if(sp<slen && (re->dotall || s[sp]!='\n')){ sp++; pc++; continue; } return 0;   /* . matches \n only with the s (dotall) flag */
             case I_CLASS: { if(sp>=slen) return 0; unsigned char ch=(unsigned char)s[sp]; int hit=(in->cls[ch>>3]>>(ch&7))&1;
                 if(re->icase && !hit){ int o=(ch>='a'&&ch<='z')?ch-32:(ch>='A'&&ch<='Z')?ch+32:ch; hit=(in->cls[(o&0xff)>>3]>>(o&7))&1; }
                 if(in->c) hit=!hit; if(hit){ sp++; pc++; continue; } return 0; }
-            case I_BOL: if(sp==0 || s[sp-1]=='\n'){ pc++; continue; } return 0;
-            case I_EOL: if(sp==slen || s[sp]=='\n'){ pc++; continue; } return 0;
+            case I_BOL: if(sp==0 || (re->multiline && s[sp-1]=='\n')){ pc++; continue; } return 0;   /* ^ anchors string start; also after \n only with the m (multiline) flag */
+            case I_EOL: if(sp==slen || (re->multiline && s[sp]=='\n')){ pc++; continue; } return 0;   /* $ anchors string end; also before \n only with m */
             case I_WORDB: case I_NWORDB: {   /* \b / \B : zero-width word boundary (transition between \w and non-\w) */
                 int bw=(sp>0)&&rx_isword((unsigned char)s[sp-1]); int aw=(sp<slen)&&rx_isword((unsigned char)s[sp]);
                 int bnd=(bw!=aw); if(in->op==I_WORDB ? bnd : !bnd){ pc++; continue; } return 0; }
@@ -1666,7 +1666,7 @@ static val eval_expr_inner(node *n, env *e) {
     switch (n->type) {
         case N_NUM: return NUM(n->num);
         case N_STR: return STRV(n->str);
-        case N_REGEX: { char fl[3]; int k=0; if(n->num&1)fl[k++]='g'; if(n->num&2)fl[k++]='i'; fl[k]=0; return make_regex_val(node_name(n), intern(fl,k)); }   /* intern: flags must be arena-stable, not a dead stack buffer */
+        case N_REGEX: { char fl[5]; int k=0; if(n->num&1)fl[k++]='g'; if(n->num&2)fl[k++]='i'; if(n->num&4)fl[k++]='m'; if(n->num&8)fl[k++]='s'; fl[k]=0; return make_regex_val(node_name(n), intern(fl,k)); }   /* intern: flags must be arena-stable, not a dead stack buffer */
         case N_BOOL: return BOOLV((int)n->num);
         case N_NULL: { val v=UND(); v.t=V_NULL; return v; }
         case N_UNDEF: return UND();

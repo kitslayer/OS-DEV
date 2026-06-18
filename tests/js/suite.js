@@ -391,4 +391,6 @@ print("-- regex word boundaries \\b \\B (M642) --");
 print("a word here".match(/\bword\b/)[0], "two words!".match(/\b\w+\b/g).join(","), "scatter".match(/\Bcat/)[0], "a cat".replace(/\b\w/g,function(c){return c.toUpperCase();}));  // word two,words cat A Cat (\b boundary, \B non-boundary, title-case via \b\w)
 print("-- regex backreferences \\1..\\9 (M643) --");
 print(/(ab)\1/.test("abab"), /(ab)\1/.test("abcd"), "hi hi bye".match(/(\w+) \1/)[0], /(a)(b)\2\1/.test("abba"));  // true false hi hi true (\1 backref incl. backtracking + multi-group)
+print("-- regex m (multiline) + s (dotall) flags (M644) --");
+print("a\nb".match(/^\w/g).join(","), "a\nb".match(/^\w/gm).join(","), /a.b/.test("a\nb"), /a.b/s.test("a\nb"));  // a a,b false true (^ is string-anchored without m; . excludes \n without s)
 print("-- done --");
