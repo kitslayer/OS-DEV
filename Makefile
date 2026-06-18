@@ -247,10 +247,16 @@ htmlentfuzztest:
 boottest: $(KERNEL) $(DISK)
 	@tests/run-boot-tests.sh
 
-# Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertion.
-# ('test' above is the human-readable headless boot; 'boottest' is its asserted form.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest boottest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + boottest)"
+# In-guest GRAPHICAL assertion: boots, lets the desktop paint, captures the VGA
+# framebuffer via the QEMU monitor and asserts it rendered (compositor / fb /
+# font / vga.c -- no other in-guest coverage). SKIPs if QEMU/socat/python3 absent.
+gfxtest: $(KERNEL) $(DISK)
+	@tests/run-gfx-tests.sh
+
+# Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
+# ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest boottest gfxtest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + boottest + gfxtest)"
 
 clean:
 	rm -rf $(BUILD)
