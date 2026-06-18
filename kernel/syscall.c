@@ -365,16 +365,13 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_crypt: {
         const char *name = (const char *)r->rdi, *pass = (const char *)r->rsi;
-        static uint8_t cbuf[16384];
-        long cn = vfs_read(name, cbuf, sizeof(cbuf));
-        if (cn < 0) { r->rax = (uint64_t)-1; break; }
-        if (cn >= (long)sizeof(cbuf)) {          /* too big for our buffer: refuse, */
-            r->rax = (uint64_t)-2;               /* don't truncate (would lose data) */
-            break;
-        }
+        uint8_t *cbuf; long cn = read_whole_file(name, &cbuf);   /* whole file (was capped at 16KB) */
+        if (cn < 0) { r->rax = (uint64_t)-1; break; }            /* missing / >=32MB / OOM */
         uint8_t kd[32]; sha256((const uint8_t *)pass, strlen(pass), kd);  /* key||nonce */
         aes128_ctr(cbuf, (size_t)cn, kd, kd + 16);
-        r->rax = (uint64_t)(int64_t)vfs_write(name, cbuf, (unsigned long)cn);
+        long w = vfs_write(name, cbuf, (unsigned long)cn);
+        kfree(cbuf);
+        r->rax = (uint64_t)(int64_t)w;
         break;
     }
     case SYS_df: {
