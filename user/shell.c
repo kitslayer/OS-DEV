@@ -109,7 +109,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir cd pwd basename<p> dirname<p> tree find grep file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort nl tac uniq cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1531,6 +1531,12 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "rm ")) {
             if (sys_delete(line + 3) < 0) print("rm: no such file\n");
             else { print("removed "); print(line + 3); print("\n"); }
+        } else if (startswith(line, "touch ")) {
+            const char *name = line + 6;
+            char probe[1];
+            if (sys_readfile(name, probe, 1) >= 0) { }          /* exists: leave content (no mtime API) */
+            else if (sys_writefile(name, "", 0) < 0) print("touch: failed\n");
+            else { print("created "); print(name); print("\n"); }
         } else if (startswith(line, "edit ")) {
             char fname[32]; int i = 0;
             for (char *q = line + 5; *q && i < 31; q++) fname[i++] = *q;
