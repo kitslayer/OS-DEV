@@ -23,7 +23,11 @@ CFLAGS  := -std=gnu11 -ffreestanding -nostdlib \
 ASFLAGS := -f elf64
 LDFLAGS := -n -T linker.ld
 
-QEMUFLAGS := -no-reboot -no-shutdown
+# -m 256M: QEMU's ~128M default starves the heaviest app — Quake needs its 18 MB
+# PAK + a multi-MB hunk on top of the kernel (incl. the 40 MB JS arena), so it
+# silently fails to launch at 128M but runs fine at 256M (DOOM, lighter, works at
+# either). 256M comfortably fits the whole app suite, even DOOM+Quake at once.
+QEMUFLAGS := -no-reboot -no-shutdown -m 256M
 
 # --- sources ----------------------------------------------------------------
 BUILD   := build

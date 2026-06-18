@@ -128,7 +128,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix="osdrive.")
     mon_sock, qmp_sock, slog, ppm = (os.path.join(tmp, n) for n in
                                      ("mon.sock", "qmp.sock", "serial.log", "shot.ppm"))
-    qp = subprocess.Popen([qemu, "-no-reboot", "-no-shutdown", "-kernel", args.kernel,
+    qp = subprocess.Popen([qemu, "-no-reboot", "-no-shutdown", "-m", "256M", "-kernel", args.kernel,
         "-drive", "file=%s,format=raw,if=ide" % args.disk,
         "-netdev", "user,id=net0", "-device", "e1000,netdev=net0",
         "-device", "piix3-usb-uhci,id=uhci", "-device", "usb-tablet,bus=uhci.0",

@@ -32,7 +32,7 @@ echo "booting kernel headless under QEMU (COM1 capture)..."
 # burning a fixed cap. The 25s timeout is a generous safety net -- the boot does
 # a real TLS 1.3 HTTPS handshake (bignum-heavy under TCG) before the desktop, so
 # a tight cap would be flaky. SIGKILL because -no-shutdown ignores SIGTERM.
-timeout -s KILL 25 "$QEMU" -no-reboot -no-shutdown -kernel "$KERNEL" \
+timeout -s KILL 25 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \
