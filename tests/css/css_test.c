@@ -41,7 +41,8 @@ int main(void) {
     expect("background-color:#fff;color:red", "color", "red"); /* not matched inside background-color */
     expect("font-weight:bold;color:#0f0", "font-weight", "bold");
     expect("text-align:center", "text-align", "center");
-    expect("text-align : center", "text-align", NULL);         /* current behavior: ':' must immediately follow the name (no space before) */
+    expect("text-align : center", "text-align", "center");     /* ws before AND after ':' (valid CSS) */
+    expect("color red", "color", NULL);                        /* name + ws but no ':' -> no match */
     expect("x:1", "color", NULL);                              /* absent */
     expect("colorx:1", "color", NULL);                         /* not a boundary (needs ':') */
     expect("background:#fff url(x)", "background", "#fff url(x)"); /* shorthand value to end */
