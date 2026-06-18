@@ -1,5 +1,25 @@
 # What's next
 
+> **(M549-M553) QEMU is UNBLOCKED — in-guest verification restored + gated.** The single biggest
+> change this session wasn't a feature, it was discovering that **QEMU runs again** (v10.2.2). The
+> previous ~30 milestones (M520-M548) all landed "host-verifiable only" because earlier sessions hit
+> a QEMU launch failure (SIGSTKFLT) that made in-guest testing impossible. That premise is now stale.
+> The OS boots end-to-end (preemption, isolation, PCI, e1000 networking incl. a real HTTP GET to
+> example.com, FAT32, USB tablet), the **desktop paints** (verified by framebuffer screenshot), and the
+> **browser renders its CSS-styled start page** — and the **shell window confirms ring-3 userspace
+> actually executes in-guest**, all captured headlessly. Turned this back into a *gate*, not a one-off:
+> **M549** the `make test` smoke boot now exercises the AC'97 audio bring-up (`-audiodev none`, no host
+> sound server); **M550** added `boottest` — boots the real `kernel32.elf` headless and asserts all 9
+> bring-up markers print with no crash (the whole driver stack, vs the host suites' one-`.c`-in-isolation
+> model), verified as a real oracle (`QEMU=true` → every marker MISSING → FAIL); **M552** added `gfxtest`
+> — captures the VGA framebuffer via the QEMU monitor's `screendump` and asserts the desktop actually
+> painted (1024×768, ≥40 colors, no all-black hang), covering desktop.c/fb.c/fbcon.c/font.c/vga.c which
+> had *zero* in-guest coverage; **M553** made `boottest`'s real-internet GET non-fatal so the gate stays
+> green offline. **M551** cleaned up a GCC `malloc`-size false-positive in the M548 fuzzer. `make check`
+> is now **22 suites** (20 host + 2 in-guest); both new in-guest tests SKIP cleanly where QEMU/socat/
+> python3 are absent. The framebuffer-screenshot + HMP-input-injection technique (drive the Apps menu via
+> `sendkey`, then `screendump`) is now a general way to verify *any* graphical feature headlessly.
+
 > **Status (546 milestones) — DOOM *and* QUAKE RUN, with sound.** OS-DEV now runs two real id Software
 > games as windowed ring-3 apps: **DOOM** (graphics, keyboard, mouselook, sound effects, and music) and
 > **Quake** — the true-3D successor, software-rendered (actual Half-Life is a closed Win32/GoldSrc title

@@ -10,7 +10,7 @@ cases + deterministic fuzzing.
 ## Running
 
 ```sh
-make check       # run all 20 suites (~40s total)
+make check       # run all 22 suites (20 host + 2 in-guest; ~60s total)
 make jstest      # JS engine      — tests/js/suite.js vs the golden output
 make imgtest     # image decoders — tests/img/img_test.c   (jpeg/png/gif/bmp/inflate)
 make x509test    # X.509 parser   — tests/x509/x509_test.c
@@ -31,9 +31,15 @@ make jsonfuzztest # JSON.parse     — tests/jsonfuzz (untrusted/malformed/deep 
 make regexfuzztest # regex engine  — tests/regexfuzz (ReDoS shapes + malformed patterns, compile+search)
 make jssrcfuzztest # JS source     — tests/jssrcfuzz (full parse+run pipeline on adversarial script source)
 make htmlentfuzztest # HTML entities — tests/htmlentfuzz (decode_entity over untrusted/malformed page bytes)
+make boottest    # in-guest boot  — boots the real kernel headless, asserts every bring-up marker (no crash)
+make gfxtest     # in-guest gfx   — captures the VGA framebuffer, asserts the desktop actually painted
 ```
 
-`make test` is a *different* target — the headless QEMU boot smoke test.
+The last two boot the real kernel under QEMU (unlike the host suites, which
+`#include` one `.c` in isolation). They **SKIP cleanly** if QEMU — or, for
+`gfxtest`, `socat`/`python3` — is unavailable, so the host-only gate still
+passes. `make test` is a related target — the same headless boot but printing
+the COM1 log for a human to read, rather than asserting markers.
 
 You can also run the JS suite inside the OS: `js suite.js` (if copied onto the
 disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
@@ -62,6 +68,8 @@ disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
 | `jssrcfuzztest` | `kernel/js.c` (`js_run_doc`) | The full parse+run pipeline on untrusted SOURCE — the browser's `<script>`/`javascript:`. Truncations + sampled corruptions of a rich script, 200k random token-biased buffers, and 1..4000-deep nesting through the lexer/parser (MAXDEPTH guard) and the loop/recursion/arena run guards; adversarial source must fail gracefully, never OOB/overflow/hang. |
 | `htmlentfuzztest` | `kernel/htmlentity.c` (`decode_entity`) | The HTML character-reference decoder reads untrusted page bytes (`&amp;`, `&#NNN;`, `&#xHH;`, named). Known entities decode correctly; then every truncated prefix + single-byte corruption of a battery (incl. huge/overflowing numeric refs and bare `&`/`&#`/`&#x`) + 300k random entity-char-biased buffers, in exactly-sized buffers so any over-read red-zones. |
 | `svgtest`  | `kernel/svg.c` | The from-scratch integer-only SVG rasterizer (parses untrusted web XML in-kernel). 8 unit cases that must render correctly (rect, viewBox scaling, circle + cubic-bezier path, stroked polygon, named colors, **affine transforms** — `<g>`-group + per-shape `translate`/`scale`/`rotate`/`matrix`, nested-group composition, and the CTM correctly restored after `</g>` — **paint inheritance** — `fill`/`stroke` inherited from the root `<svg>`/enclosing `<g>`, per-shape override, the `inherit` keyword, and inherited paint restored after `</g>` — **and opacity** — `fill-opacity`/`opacity` per shape, group `<g opacity>` inherited, group×element compounding, and `in_alpha` restored after `</g>` — **and gradients** — a linear red→blue across the box + a radial white→black centre→edge, exercising the `<defs>` pre-pass, `fill=url(#id)` resolution and per-pixel evaluation) plus ~520k in-suite fuzz iterations: 100k random bytes, 100k mutations of valid SVG, 320k structured (random shape/path/attr/**transform**/**fill**/**opacity**/**gradient** trees), and adversarial inputs (deep nesting, huge coordinate counts, a huge-coordinate gradient that would overflow the projection's int64 intermediate if unclamped, truncation) — plus a separate **6M-iteration gradient-focused fuzz** run during review. Locks bounds-safety on the scanline-fill crossings buffer, the per-shape point list in caller scratch, the `<g>` transform + paint + opacity stacks, the gradient table/stop caps + the `grad_color_at` fixed-point, and `parse_num` against the UB bugs the author fuzz first caught (negative shifts, `num<<16` int64 overflow). |
+| `boottest` | the **whole kernel + driver stack** (`tests/run-boot-tests.sh`) | Unlike every row above (which `#include`s one `.c` in isolation), this boots the *real* `build/kernel32.elf` headless under QEMU, captures COM1, and asserts all 9 required bring-up markers print in order with no crash: core bring-up (PMM/VMM/IDT), the preemptive scheduler, per-process address-space isolation, PCI enumeration, the e1000+ARP+ICMP stack (ping to the SLIRP gateway), FAT32 mount, AC'97 audio bring-up, USB UHCI+tablet, and reaching `desktop_run()`; and that no `panic`/`unhandled exception`/`page fault`/`#GP` appears anywhere. A real HTTP GET to live example.com is checked informationally (non-fatal — offline hosts stay green). Re-established now that QEMU runs again (a SIGSTKFLT launch failure had blocked in-guest verification for many milestones). |
+| `gfxtest`  | the **compositor / framebuffer / font stack** (`desktop.c`/`fb.c`/`fbcon.c`/`font.c`/`vga.c`) | The serial boot above proves the kernel *reached* the desktop, not that anything *painted*. This boots headless, waits for the desktop hand-off, captures the emulated VGA framebuffer via the QEMU monitor's `screendump` (HMP over a unix socket driven by `socat`), and asserts the PPM looks like a real painted desktop: 1024×768 (the desktop mode-set ran, not the 640×480 console), ≥40 distinct colors, and no single color >98% (catches an all-black hang). Retries the screendump to absorb paint-timing jitter. |
 
 ## Validated to catch regressions
 
@@ -81,6 +89,8 @@ Each fuzz harness is **verified to fail** when its guard is removed:
 - `regexfuzztest` aborts (ASan stack-overflow in `re_run`) if the matcher's `depth>900` guard is removed (a pathological pattern recurses unbounded).
 - `jssrcfuzztest` exercises the same ASan red-zone + termination-guard machinery proven by the two above on the full lexer/parser/eval pipeline.
 - `htmlentfuzztest` aborts (ASan buffer-overflow in `decode_entity`) if its `n < maxlen` scan bound is removed (an entity with no `;` then reads past the input).
+- `boottest` fails (lists the missing marker, exit 1) if any bring-up step stops printing its marker — verified by pointing `QEMU=true` at it (empty boot log → every marker MISSING).
+- `gfxtest`'s `ppm_check.py` is verified as a real oracle: an all-black 1024×768 frame → FAIL (1 distinct color), a 640×480 console frame → FAIL (resolution below the desktop mode), a real painted desktop → PASS.
 
 ## Not covered here
 
