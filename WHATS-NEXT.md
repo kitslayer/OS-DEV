@@ -15,7 +15,15 @@
 > Tests live in a SEPARATE golden run (`tests/js/suite-promise.js`, fresh arena) because the monolithic
 > `suite.js` runs one 40MB arena to completion with only ~350KB headroom — appending there OOMs an unrelated
 > case mid-run. Out of scope (inherent to the model): true concurrency / a never-resolved promise stays
-> pending; real microtask ordering. **BigInt** (arbitrary precision) is now the main remaining JS gap.
+> pending; real microtask ordering. **M684-M685** then made it usable for real network code: a `fetch(url)`
+> global returning `Promise<Response>` (`{status, ok, text(), json()}`), capability-injected like storage/DOM
+> (`js_set_fetch`), with the browser wiring `http_get`/`tls_get` (HTTP + HTTPS) via `browser_fetch` (its own
+> scratch, never `b->raw`; parses the status line + strips headers). An HTTP error status resolves with
+> `ok=false`; only a network failure rejects. Page scripts run on the main thread AFTER the worker fetched the
+> page, so a JS fetch is a sequential blocking get (UI freezes for its duration — the sync-model cost). The JS
+> half is host-tested via a mock backing; the real-network in-guest path mirrors the proven `worker_fetch` /
+> `net_demo` code (not automatable — external reachability is non-deterministic). **BigInt** (arbitrary
+> precision) is now the main remaining JS gap.
 
 > **(M671-M674) Shell matcher host-testing + the last big JS gap (generators).** **M671-M673** extracted the
 > shell's two pure matchers — the `grep` regex (`^ $ . * [..] \`) and the filename glob (`*`/`?`) — into
