@@ -401,4 +401,6 @@ print("-- Date constructor normalization (M652) --");
 print(new Date(2024,2,0).getDate(), new Date(2023,1,29).getMonth()+"/"+new Date(2023,1,29).getDate(), new Date(2024,12,1).getFullYear(), new Date(2100,1,29).getMonth());  // 29 2/1 2025 2 (last-day-of-month idiom; Feb29 non-leap rolls; month overflow; 2100 not leap)
 print("-- function declaration hoisting (M653) --");
 print((function(){return early();function early(){return "hoisted";}})(), (function(){function isE(n){return n==0||isO(n-1);}function isO(n){return n!=0&&isE(n-1);}return isE(4);})());  // hoisted true (forward call before declaration; mutual recursion)
+print("-- class private fields #x (M654) --");
+print((function(){class E{#x=5;#dbl(){return this.#x*2;} run(){return this.#dbl();} pub(){return this.x;}} var e=new E(); return e.run()+","+(e.pub()===undefined);})());  // 10,true (#x + #method work; #x not visible as public x)
 print("-- done --");

@@ -192,11 +192,14 @@ static token lex_next_raw(lexer *L) {
         t.type=T_TEMPLATE; t.s=s+start; t.len=i-start; L->pos = (i<L->len)? i+1 : i;
         return t;
     }
-    /* identifier / keyword */
-    if (is_id_start(c)) {
-        int start = L->pos; while (L->pos<L->len && is_id(s[L->pos])) L->pos++;
+    /* identifier / keyword (a leading # begins a private class field/method name,
+     * kept as part of the name so `#x` declaration + `this.#x` access agree and
+     * stay distinct from a public `x`) */
+    if (is_id_start(c) || (c=='#' && L->pos+1<L->len && is_id_start((unsigned char)s[L->pos+1]))) {
+        int start = L->pos; if (c=='#') L->pos++;   /* keep the leading # */
+        while (L->pos<L->len && is_id(s[L->pos])) L->pos++;
         t.s = s+start; t.len = L->pos-start; t.type = T_IDENT;
-        for (int i=0; kw[i]; i++) { int kl=(int)strlen(kw[i]); if (kl==t.len && memcmp(kw[i],t.s,kl)==0) { t.type=T_KW; break; } }
+        if (s[start] != '#') for (int i=0; kw[i]; i++) { int kl=(int)strlen(kw[i]); if (kl==t.len && memcmp(kw[i],t.s,kl)==0) { t.type=T_KW; break; } }
         return t;
     }
     /* regex literal /pattern/flags — `/` starts one unless the previous token ends an

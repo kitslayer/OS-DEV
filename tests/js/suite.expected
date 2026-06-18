@@ -368,4 +368,6 @@ foo 100 true a
 29 2/1 2025 2
 -- function declaration hoisting (M653) --
 hoisted true
+-- class private fields #x (M654) --
+10,true
 -- done --
