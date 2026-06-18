@@ -309,26 +309,44 @@ static int run_command(char *line, char *cwd) {
                 }
                 free(buf);
             }
-        } else if (startswith(line, "uniq ")) {           /* drop adjacent duplicate lines */
-            long n; char *buf = slurp(line + 5, &n);
-            if (!buf) { print("uniq: no such file: "); print(line + 5); print("\n"); }
+        } else if (startswith(line, "uniq ")) {           /* drop adjacent duplicate lines; -c prefixes a run count */
+            const char *fp = line + 5; int countf = 0;     /* -c: prefix each line with its occurrence count */
+            while (*fp == ' ') fp++;
+            while (fp[0] == '-' && fp[1] && fp[1] != ' ') {
+                int t, valid = 1;
+                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'c') valid = 0;
+                if (!valid) break;                          /* not a flag token (e.g. a filename) */
+                countf = 1; fp += t; while (*fp == ' ') fp++;
+            }
+            long n; char *buf = slurp(fp, &n);
+            if (!buf) { print("uniq: no such file: "); print(fp); print("\n"); }
             else {
                 buf[n] = 0;
-                int ps = -1, pl = -1, ls = 0;              /* previous printed line [ps, ps+pl) */
+                int rs = -1, rl = 0, ls = 0, count = 0;    /* current run's first line [rs,rs+rl); occurrence count */
                 for (long k = 0; k <= n; k++) {
                     if (k == n || buf[k] == '\n') {
                         int len = (int)(k - ls);
-                        if (k == n && len == 0) { ls = (int)k + 1; continue; }   /* skip empty trailing */
-                        int same = (pl == len);
-                        if (same) for (int j = 0; j < len; j++) if (buf[ls + j] != buf[ps + j]) { same = 0; break; }
-                        if (!same) {
-                            char save = buf[k]; buf[k] = 0;
-                            print(buf + ls); print("\n");
-                            buf[k] = save;
-                            ps = ls; pl = len;
+                        if (k == n && len == 0) break;      /* no trailing empty line */
+                        int same = (rs >= 0 && rl == len);
+                        if (same) for (int j = 0; j < len; j++) if (buf[ls + j] != buf[rs + j]) { same = 0; break; }
+                        if (same) count++;
+                        else {
+                            if (rs >= 0) {                  /* emit the run that just ended */
+                                char save = buf[rs + rl]; buf[rs + rl] = 0;
+                                if (countf) { char cb[12]; itoa_simple(count, cb); print("  "); print(cb); print(" "); }
+                                print(buf + rs); print("\n");
+                                buf[rs + rl] = save;
+                            }
+                            rs = ls; rl = len; count = 1;
                         }
                         ls = (int)k + 1;
                     }
+                }
+                if (rs >= 0) {                              /* emit the final run */
+                    char save = buf[rs + rl]; buf[rs + rl] = 0;
+                    if (countf) { char cb[12]; itoa_simple(count, cb); print("  "); print(cb); print(" "); }
+                    print(buf + rs); print("\n");
+                    buf[rs + rl] = save;
                 }
                 free(buf);
             }
