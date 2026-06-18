@@ -197,7 +197,6 @@ static int run_command(char *line, char *cwd) {
                 }
             }
         } else if (startswith(line, "tail ")) {
-            char buf[2048];
             const char *p = line + 5;
             while (*p == ' ') p++;
             int cnt = 20;                                  /* default; -N sets the line count */
@@ -211,8 +210,8 @@ static int run_command(char *line, char *cwd) {
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                 name[j] = '\0'; any = 1;
-                long n = sys_readfile(name, buf, sizeof(buf) - 1);
-                if (n < 0) { print("tail: no such file: "); print(name); print("\n"); continue; }
+                long n; char *buf = slurp(name, &n);
+                if (!buf) { print("tail: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 buf[n] = '\0';
                 int total = 0;
@@ -222,6 +221,7 @@ static int run_command(char *line, char *cwd) {
                 int i = 0, sk = 0;
                 while (i < n && sk < skip) { if (buf[i++] == '\n') sk++; }
                 print(buf + i);
+                free(buf);
             }
             if (!any) print("usage: tail <file>...\n");
         } else if (startswith(line, "tac ")) {           /* print a file's lines in reverse order */
@@ -683,7 +683,6 @@ static int run_command(char *line, char *cwd) {
             while (*p == ' ') p++;
             if (pat[0] == 0 || *p == 0) { print("usage: grep [-incv] <pattern> <file>...\n"); }
             else {
-                static char buf[2048];
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
                 while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fcount++; while (*cq && *cq != ' ') cq++; }
                 int hits = 0;
@@ -693,8 +692,8 @@ static int run_command(char *line, char *cwd) {
                     char name[64]; int j = 0;
                     while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                     name[j] = 0;
-                    long n = sys_readfile(name, buf, sizeof(buf) - 1);   /* -1 so buf[n]=0 can't write past the array */
-                    if (n < 0) { print("grep: no such file: "); print(name); print("\n"); continue; }
+                    long n; char *buf = slurp(name, &n);
+                    if (!buf) { print("grep: no such file: "); print(name); print("\n"); continue; }
                     buf[n] = 0;
                     int ls = 0, lno = 0;
                     for (long k = 0; k <= n; k++) {
@@ -722,6 +721,7 @@ static int run_command(char *line, char *cwd) {
                             ls = (int)k + 1;
                         }
                     }
+                    free(buf);
                 }
                 if (cc) { char cb[12]; itoa_simple(hits, cb); print("  "); print(cb); print("\n"); }
                 else if (!hits) print("  (no matches)\n");
@@ -769,14 +769,13 @@ static int run_command(char *line, char *cwd) {
             }
             if (nfiles == 0) print("usage: wc [-lwc] <file>...\n");
         } else if (startswith(line, "hexdump ")) {
-            static char buf[512];
-            long n = sys_readfile(line + 8, buf, sizeof(buf));
-            if (n < 0) { print("hexdump: no such file\n"); }
+            long n; char *buf = slurp(line + 8, &n);
+            if (!buf) { print("hexdump: no such file\n"); }
             else {
                 const char *H = "0123456789abcdef";
                 for (long off = 0; off < n; off += 8) {
-                    char h[48]; int p = 0;
-                    for (int s = 12; s >= 0; s -= 4) h[p++] = H[(off >> s) & 0xF];
+                    char h[56]; int p = 0;
+                    for (int s = 28; s >= 0; s -= 4) h[p++] = H[(off >> s) & 0xF];   /* 8-hex-digit offset (files can exceed 64KB now) */
                     h[p++] = ' '; h[p++] = ' ';
                     for (int i = 0; i < 8; i++) {
                         if (off + i < n) { unsigned char c = (unsigned char)buf[off+i];
@@ -793,6 +792,7 @@ static int run_command(char *line, char *cwd) {
                     print(h);
                 }
             }
+            free(buf);
         } else if (startswith(line, "find ")) {
             static char fb[2048];
             long n = sys_find(line + 5, fb, sizeof(fb));
