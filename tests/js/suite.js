@@ -405,4 +405,6 @@ print("-- class private fields #x (M654) --");
 print((function(){class E{#x=5;#dbl(){return this.#x*2;} run(){return this.#dbl();} pub(){return this.x;}} var e=new E(); return e.run()+","+(e.pub()===undefined);})());  // 10,true (#x + #method work; #x not visible as public x)
 print("-- Error subtype hierarchy (M656) --");
 print(new TypeError("x") instanceof Error, new RangeError("y") instanceof Error, new TypeError("z") instanceof RangeError, new TypeError("boom").message);  // true true false boom (built-in error subtypes chain to Error; siblings don't)
+print("-- JSON.stringify function replacer (M657) --");
+print(JSON.stringify({a:1,b:2,c:3},function(k,v){return k==="b"?undefined:v;}), JSON.stringify({o:{x:1,secret:9}},function(k,v){return k==="secret"?undefined:v;}));  // {"a":1,"c":3} {"o":{"x":1}} (fn replacer drops/transforms at every depth; undefined omits)
 print("-- done --");

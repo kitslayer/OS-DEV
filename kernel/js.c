@@ -3120,6 +3120,8 @@ static int json_allowed(const char *k){
     for(int i=0;i<g_json_allow->n;i++){ val e=g_json_allow->vals[i]; if(e.t==V_STR && e.str && strcmp(e.str,k)==0) return 1; }
     return 0;
 }
+static val g_json_replfn; static int g_json_hasrepl;   /* function replacer: repl(key,value) transforms each node */
+static val json_repl(const char *key, val v){ if(!g_json_hasrepl) return v; val ra[2]={STRV(key), v}; return call_function(g_json_replfn, ra, 2); }
 static void js_nl(int depth){ if(!g_json_pretty) return; js_app("\n"); for(int i=0;i<depth && i<64;i++) js_app(g_json_unit); }
 static void json_val(val v, int depth){
     if(++g_depth>MAXDEPTH){ g_depth--; js_app("null"); return; }
@@ -3137,6 +3139,7 @@ static void json_val(val v, int depth){
             { int wrote=0; for(int i=0;i<v.o->n;i++){ if(is_internal_key(v.o->keys[i])) continue;   /* hide @@ symbol keys; `wrote` (not i) drives the comma so no dangling separator (M-symbol) */
                 if(!json_allowed(v.o->keys[i])) continue;   /* array replacer: only allowlisted keys (applies at every depth) */
                 val pv=v.o->vals[i]; if(is_accessor(pv)) pv=fire_getter(pv,v);   /* fire getters during serialization (M425) — targeted to JSON, not the global obj_get hot path */
+                pv = json_repl(v.o->keys[i], pv);   /* function replacer: transform/drop each value (M657) */
                 if(pv.t==V_UNDEF||pv.t==V_FUN||pv.t==V_NATIVE||pv.t==V_SYMBOL) continue;   /* per spec: undefined/function/symbol object properties are OMITTED (only array elements become null) */
                 if(wrote){ js_app(","); } wrote=1; js_nl(depth+1); js_appq(v.o->keys[i]); js_app(g_json_pretty?": ":":"); json_val(pv, depth+1); } if(wrote){ js_nl(depth); } } js_app("}"); break;
         default:     js_app("null"); break;   /* undefined/null/function */
@@ -3145,12 +3148,15 @@ static void json_val(val v, int depth){
 }
 static val nat_json_stringify(val *a, int n){ if(!n) return UND(); char *buf=aalloc(16384); if(!buf) return STRV("");
     g_json=buf; g_json_pos=0; g_json_cap=16384; g_json_pretty=0; g_json_unit[0]=0;
-    g_json_allow = (n>1 && a[1].t==V_ARR && a[1].o) ? a[1].o : 0;   /* an array replacer is a key allowlist (function replacers unsupported) */
+    g_json_allow = (n>1 && a[1].t==V_ARR && a[1].o) ? a[1].o : 0;   /* an array replacer is a key allowlist */
+    g_json_hasrepl = (n>1 && (a[1].t==V_FUN || a[1].t==V_NATIVE));   /* a function replacer transforms each (key,value) */
+    if(g_json_hasrepl) g_json_replfn = a[1];
     if(n>2){ val sp=a[2];                         /* a[1]: array replacer (allowlist) handled above; a[2] is the indent */
         if(sp.t==V_NUM){ int k=(int)sp.num; if(k<0)k=0; if(k>10)k=10; for(int i=0;i<k;i++) g_json_unit[i]=' '; g_json_unit[k]=0; if(k>0) g_json_pretty=1; }
         else if(sp.t==V_STR){ int i=0; for(; sp.str[i] && i<15; i++) g_json_unit[i]=sp.str[i]; g_json_unit[i]=0; if(i>0) g_json_pretty=1; }
     }
-    json_val(a[0], 0); buf[g_json_pos]=0; return STRV(buf); }
+    json_val(json_repl("", a[0]), 0);   /* the replacer also sees the top-level value with key "" */
+    buf[g_json_pos]=0; return STRV(buf); }
 
 /* ---- JSON.parse (recursive descent; bounded + depth-guarded) ---- */
 static const char *jp, *jp_end; static int jp_err;

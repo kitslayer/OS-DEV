@@ -372,4 +372,6 @@ hoisted true
 10,true
 -- Error subtype hierarchy (M656) --
 true true false boom
+-- JSON.stringify function replacer (M657) --
+{"a":1,"c":3} {"o":{"x":1}}
 -- done --
