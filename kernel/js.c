@@ -642,14 +642,17 @@ static node *parse_cond(lexer *L) {
 
 /* Build an arrow function N_FUNC from already-parsed params; parses the body
  * (a `{ }` block, or an expression that becomes an implicit `return`). */
-static node *make_arrow(lexer *L, node **params, int np) {
+static node *make_arrow(lexer *L, node **params, int np, int is_async) {
     node *fn = mknode(N_FUNC);
     fn->prefix = 1;   /* mark as arrow: inherits `this` lexically (no own binding) */
+    fn->is_async = is_async;
     fn->list = aalloc((long)sizeof(node*) * (np>0?np:1)); fn->nlist = np;
     for (int i=0;i<np;i++) fn->list[i]=params[i];
+    int sa = g_in_async; g_in_async = is_async;   /* `await` is valid in the body iff this arrow is async (M681) */
     if (peek_punc(L,"{")) { fn->a = parse_stmt(L); }
     else { node *ret=mknode(N_RETURN); ret->a=parse_assign(L);
            node *blk=mknode(N_BLOCK); blk->list=aalloc(sizeof(node*)); if(blk->list){blk->list[0]=ret; blk->nlist=1;} fn->a=blk; }
+    g_in_async = sa;
     return fn;
 }
 
@@ -667,14 +670,24 @@ static node *parse_assign(lexer *L) {
             g_depth--; return y;
         }
     }
-    /* arrow functions: `x => body` and `(a, b, ...) => body`. Detected with bounded
-     * lookahead (save/restore the lexer) so a plain `(expr)` isn't misparsed. */
+    /* arrow functions: `x => body`, `(a, b, ...) => body`, plus the `async` forms
+     * `async x => …` / `async (…) => …`. Detected with bounded lookahead (save/restore
+     * the lexer) so a plain `(expr)`, a call `async(...)`, or `async` as a bare
+     * identifier isn't misparsed. (async forms: M681) */
     token t0 = peek(L);
+    int a_async = 0; lexsave a_sv = lex_save(L);
+    if (t0.type==T_IDENT && t0.len==5 && memcmp(t0.s,"async",5)==0) {
+        advance(L);                                  /* tentatively consume `async` */
+        token nx = peek(L);
+        if (nx.type==T_IDENT || (nx.type==T_PUNC && tok_is(nx,"("))) { a_async = 1; t0 = nx; }   /* maybe `async x =>` / `async (...) =>` */
+        else lex_restore(L, a_sv);                   /* `async` followed by something else -> not an async arrow */
+    }
     if (t0.type==T_IDENT) {
         lexsave sv = lex_save(L); token id = advance(L);
         if (peek_punc(L,"=>")) { advance(L); node *p=mknode(N_IDENT); p->str=intern(id.s,id.len); p->slen=id.len;
-                                 node *ps[1]={p}; node *fn=make_arrow(L,ps,1); g_depth--; return fn; }
+                                 node *ps[1]={p}; node *fn=make_arrow(L,ps,1,a_async); g_depth--; return fn; }
         lex_restore(L, sv);
+        if (a_async) lex_restore(L, a_sv);            /* consumed `async` but no arrow -> give it all back */
     } else if (t0.type==T_PUNC && tok_is(t0,"(")) {
         lexsave sv = lex_save(L); advance(L);
         node *ps[16]; int np=0, ok=1;
@@ -689,8 +702,9 @@ static node *parse_assign(lexer *L) {
             if(np<16){ node *id=mknode(N_IDENT); id->str=intern(p.s,p.len); id->slen=p.len; if(rest) id->op='.'; ps[np++]=id; }
             if(rest) break;   /* ...rest is the last param */
             if(peek_punc(L,",")) advance(L); else break; }
-        if (ok && peek_punc(L,")")) { advance(L); if (peek_punc(L,"=>")) { advance(L); node *fn=make_arrow(L,ps,np); g_depth--; return fn; } }
+        if (ok && peek_punc(L,")")) { advance(L); if (peek_punc(L,"=>")) { advance(L); node *fn=make_arrow(L,ps,np,a_async); g_depth--; return fn; } }
         lex_restore(L, sv);
+        if (a_async) lex_restore(L, a_sv);            /* `async (...)` with no arrow -> a call to `async`; give it all back */
     }
     node *left = parse_cond(L);
     token t = peek(L);

@@ -29,4 +29,9 @@ print((function(){async function f(){try{await Promise.reject("X");return "no";}
 print((function(){async function f(){var a=await Promise.resolve(1);var b=await Promise.resolve(a+1);return a+b;}var o="?";f().then(function(v){o=v;});return o;})());  // 3 (sequential awaits)
 print((function(){async function f(){return await Promise.resolve(10)+5;}var o="?";f().then(function(v){o=v;});return o;})());  // 15 (await binds tighter than +)
 print((function(){var async=5;var await=3;return async+await;})());  // 8 (async/await remain ordinary identifiers outside an async body)
+print("-- async arrows (M681) --");
+print((function(){var f=async()=>42;var o="?";f().then(function(v){o=v;});return o;})());  // 42 (async () => expr)
+print((function(){var f=async x=>await Promise.resolve(x*2);var o="?";f(10).then(function(v){o=v;});return o;})());  // 20 (async x => await …)
+print((function(){var f=async(a,b)=>await Promise.resolve(a+b);var o="?";f(3,4).then(function(v){o=v;});return o;})());  // 7 (async (a,b) => …)
+print((function(){function async(x){return x*3;}return async(5);})());  // 15 (a function named `async` is still callable — `async(5)` is NOT mis-parsed as an arrow)
 print("-- done --");
