@@ -1282,16 +1282,15 @@ static int run_command(char *line, char *cwd) {
                 free(c1); free(c2);
             }
         } else if (startswith(line, "diff ")) {           /* diff F1 F2 -> LCS line edit script: '- ' removed from F1, '+ ' added in F2, '  ' unchanged */
-            static char d1[2048], d2[2048];
             const char *p = line + 5; while (*p == ' ') p++;
             char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
             while (*p == ' ') p++;
             char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
             if (!f1[0] || !f2[0]) { print("usage: diff <file1> <file2>  (line edit: - removed, + added)\n"); }
             else {
-                long n1 = sys_readfile(f1, d1, sizeof(d1)), n2 = sys_readfile(f2, d2, sizeof(d2));
-                if (n1 < 0) { print("diff: "); print(f1); print(": no such file\n"); }
-                else if (n2 < 0) { print("diff: "); print(f2); print(": no such file\n"); }
+                long n1, n2; char *d1 = slurp(f1, &n1); char *d2 = slurp(f2, &n2);   /* whole files; the LCS still caps lines (warned below) */
+                if (!d1) { print("diff: "); print(f1); print(": no such file\n"); }
+                else if (!d2) { print("diff: "); print(f2); print(": no such file\n"); }
                 else {
                     static int as[129], ae[129], bs[129], be[129];
                     static short L[129][129];                       /* LCS lengths; capped at 128 lines/file */
@@ -1326,6 +1325,7 @@ static int run_command(char *line, char *cwd) {
                     if (!diffs) print("(files are identical)\n");
                     if (na >= 128 || nb >= 128) print("(diff truncated at 128 lines/file)\n");
                 }
+                free(d1); free(d2);
             }
         } else if (startswith(line, "get ")) {
             char host[64], path[160]; int i = 0; char *p = line + 4;
