@@ -345,4 +345,7 @@ tpplain=[object Object] tprec=[object Object]
 vosub=4 vonum=7 vouny=9
 volt=true vowins=5 vostr=8
 vocls=42 vorec=0 voplain=0
+-- regex match.groups (named captures) + match.index (M577) --
+ng=2024/01/15 ngidx=0 ngpos=20240115
+nuidx=2 nugroups=undefined plainarr=undefined
 -- done --

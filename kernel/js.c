@@ -813,6 +813,7 @@ struct obj {
                         * N_NEW runs them up the parent_class chain before the constructor */
     obj *statics;      /* a class ctor's static methods/fields as a V_OBJ (Class.method / Class.field) */
     void *rx;          /* compiled regex (struct regex*) when kind==V_REGEX */
+    obj *match_props;  /* a regex match-result V_ARR's named props (.index, .groups) as a keyed V_OBJ; NULL otherwise (M577) */
     obj *proto;        /* [[Prototype]] chain parent; NULL = none (every pre-M263 object, Object.create(null)) */
     obj *fn_proto;     /* a plain function's `.prototype` object (becomes each `new F()` instance's proto). Stored in a field, NOT a keyed prop, because functions aren't obj_keyed */
 };
@@ -989,12 +990,12 @@ enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
 typedef struct { int op; int c; int x, y; unsigned char *cls; } reinst;
 #define RE_MAXPROG 512
 #define RE_MAXGROUP 9
-typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int lastIndex; const char *source; int ok; } regex;
+typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int lastIndex; const char *source; int ok; const char *gnames[RE_MAXGROUP+1]; } regex;
 
 enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
 typedef struct rnode rnode;
 struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; int lazy; };
-typedef struct { const char *p; int len, pos; int ngroup; int err; int depth; } rparse;
+typedef struct { const char *p; int len, pos; int ngroup; int err; int depth; const char *gnames[RE_MAXGROUP+1]; } rparse;
 
 static rnode *rx_node(int t){ rnode *n=aalloc(sizeof(rnode)); if(!n) return 0; memset(n,0,sizeof(*n)); n->type=t; return n; }
 static rnode *rx_alt(rparse *P);
@@ -1024,10 +1025,13 @@ static rnode *rx_atom(rparse *P){
     if(P->pos>=P->len) return rx_node(RN_EMPTY);
     int c=(unsigned char)P->p[P->pos];
     if(c=='('){ P->pos++;
+        const char *gnm=0; int gnl=0;   /* (?<name>… capture name span, if present */
         if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') P->pos+=2;   /* (?: non-capturing */
-        else if(P->pos+2<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]=='<' && P->p[P->pos+2]!='=' && P->p[P->pos+2]!='!'){   /* (?<name>… named capture: skip the name, treat as a numbered group */
-            P->pos+=2; while(P->pos<P->len && P->p[P->pos]!='>') P->pos++; if(P->pos<P->len) P->pos++; }
-        int gi=(P->ngroup<RE_MAXGROUP)?++P->ngroup:0; rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1; rnode *g=rx_node(RN_GROUP); if(!g){P->err=1;return 0;} g->a=body; g->group=gi; return g; }
+        else if(P->pos+2<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]=='<' && P->p[P->pos+2]!='=' && P->p[P->pos+2]!='!'){   /* (?<name>… named capture: capture the name, treat as a numbered group */
+            P->pos+=2; gnm=P->p+P->pos; while(P->pos<P->len && P->p[P->pos]!='>') P->pos++; gnl=(int)(P->p+P->pos-gnm); if(P->pos<P->len) P->pos++; }
+        int gi=(P->ngroup<RE_MAXGROUP)?++P->ngroup:0;
+        if(gnm && gi>0 && gnl>0){ char *nm=aalloc(gnl+1); if(nm){ memcpy(nm,gnm,gnl); nm[gnl]=0; P->gnames[gi]=nm; } }   /* group# -> name, for match.groups (M577) */
+        rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1; rnode *g=rx_node(RN_GROUP); if(!g){P->err=1;return 0;} g->a=body; g->group=gi; return g; }
     if(c=='['){ P->pos++; return rx_class(P); }
     if(c=='.'){ P->pos++; return rx_node(RN_ANY); }
     if(c=='^'){ P->pos++; return rx_node(RN_BOL); }
@@ -1148,6 +1152,7 @@ static regex *re_compile(const char *pat, const char *flags){
     rnode *tree=rx_alt(&P);
     if(P.err || P.pos!=P.len){ re->ok=0; return re; }
     re->ngroup=P.ngroup;
+    for(int g=1; g<=P.ngroup && g<=RE_MAXGROUP; g++) re->gnames[g]=P.gnames[g];   /* named-capture names -> match.groups (M577) */
     remit E; E.prog=aalloc((long)sizeof(reinst)*RE_MAXPROG); if(!E.prog){re->ok=0;return re;} E.pc=0; E.err=0;
     rx_emit(&E,I_SAVE,0,0,0,0); rx_compile(&E,tree); rx_emit(&E,I_SAVE,1,0,0,0); rx_emit(&E,I_MATCH,0,0,0,0);
     if(E.err){ re->ok=0; return re; }
@@ -1190,13 +1195,28 @@ static int re_search(regex *re,const char*s,int slen,int start,int*caps){
     }
     return -1;
 }
-/* build the [fullMatch, g1, g2, …] result array (with an .index property) from caps */
+/* build the [fullMatch, g1, g2, …] result array from caps, with .index and (when
+ * the pattern has named groups) .groups attached via the array's match_props
+ * side-object so `m.index` / `m.groups.name` work (M577). */
 static val re_result(regex *re,const char*s,int*caps){
     obj *a=new_obj(V_ARR); if(!a){ g_oom=1; return UND(); }
     for(int g=0; g<=re->ngroup; g++){ int st=caps[2*g], en=caps[2*g+1];
         if(st>=0 && en>=st){ char*m=aalloc(en-st+1); if(m){ memcpy(m,s+st,en-st); m[en-st]=0; } arr_push_val(a, STRV(m?m:"")); }
         else arr_push_val(a, UND()); }
-    /* note: JS exposes a .index on this array; arrays here can't carry named props, so it's omitted */
+    obj *mp=new_obj(V_OBJ);
+    if(mp){
+        obj_set(mp,"index",NUM(caps[0]));
+        int named=0; for(int g=1; g<=re->ngroup; g++) if(re->gnames[g]){ named=1; break; }
+        if(named){
+            obj *gr=new_obj(V_OBJ);
+            if(gr){ for(int g=1; g<=re->ngroup; g++) if(re->gnames[g]){
+                        int st=caps[2*g], en=caps[2*g+1];
+                        if(st>=0 && en>=st){ char*m=aalloc(en-st+1); if(m){ memcpy(m,s+st,en-st); m[en-st]=0; } obj_set(gr,re->gnames[g],STRV(m?m:"")); }
+                        else obj_set(gr,re->gnames[g],UND()); }
+                val gv=UND(); gv.t=V_OBJ; gv.o=gr; obj_set(mp,"groups",gv); }
+        } else obj_set(mp,"groups",UND());   /* no named groups -> .groups is undefined (per spec) */
+        a->match_props=mp;
+    }
     val r=UND(); r.t=V_ARR; r.o=a; return r;
 }
 static regex *rx_of(val v){ return (v.t==V_OBJ && v.o && v.o->kind==V_REGEX) ? (regex*)v.o->rx : 0; }
@@ -1559,7 +1579,10 @@ static val eval_member_get(val recv, const char *name) {
     if (recv.t==V_STR) { if (strcmp(name,"length")==0) return NUM((int64_t)strlen(recv.str)); }
     if (recv.t==V_ARR && recv.o) {        /* recv.o can be NULL if a producing method hit OOM */
         if (strcmp(name,"length")==0) return NUM(recv.o->n);
-        /* arrays store elements in vals[] with keys[] unused — no named-property lookup here */
+        /* a regex match-result array carries .index / .groups in match_props (M577);
+         * only set on match results, so ordinary arrays are unaffected. */
+        if (recv.o->match_props) { val out; if (obj_get(recv.o->match_props, name, &out)) return out; }
+        /* else: arrays store elements in vals[] with keys[] unused — no named-property lookup */
     }
     if (recv.t==V_OBJ && recv.o && recv.o->kind==V_PROXY) {   /* ES6 Proxy GET trap (M-proxy): runs BEFORE any normal lookup */
         val target=proxy_target(recv), handler=proxy_handler(recv), trap;

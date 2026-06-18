@@ -390,7 +390,8 @@ static int run_command(char *line, char *cwd) {
                     "print(\"2^10 = \"+(1<<10)+\", 17%5 = \"+(17%5));\n"
                     "class Money{ constructor(c){ this.c=c; } toString(){ return \"$\"+this.c; } }\n"
                     "print(\"toString: \"+new Money(42));\n"
-                    "var temp={valueOf:function(){return 20;}}; print(\"valueOf: \"+(temp*2+5));\n";
+                    "var temp={valueOf:function(){return 20;}}; print(\"valueOf: \"+(temp*2+5));\n"
+                    "var dm=\"2026-06-18\".match(/(?<y>\\d+)-(?<mo>\\d+)/); print(\"regex groups: \"+dm.groups.y+\"/\"+dm.groups.mo);\n";
                 int i = 0; while (demo[i] && i < (int)sizeof(src) - 1) { src[i] = demo[i]; i++; } src[i] = 0;
                 have = 1;
             } else if (startswith(line, "js -e ")) {     /* inline: js -e <code> */

@@ -90,8 +90,10 @@
 > touches the coercion core). **[Update: M574 landed the toString half](#)** — string coercion (`""+o`,
 > `String(o)`, template literals, `Array.join`, `print`) now calls a user object's own/inherited
 > `toString` (verified in-guest once QEMU was back; golden unchanged + fuzz-clean + the depth-guarded
-> getter call path); the `valueOf` half (numeric coercion) stays deferred, and generators stay the
-> architectural ceiling. All host-verified; QEMU was environment-blocked *that* session (M541-M546).
+> getter call path), and **M576 then landed the `valueOf` half** (numeric coercion in `to_num`:
+> `obj-1`/`Number(obj)`/`+obj`/comparisons; valueOf wins, toString-parse fallback) — so **ToPrimitive is
+> now complete**. Generators remain the sole documented JS ceiling. All four-way verified (host + golden +
+> fuzz + in-guest).
 > **(M529-M539) JS engine real-site compatibility + untrusted-input fuzzing.** Continuing the
 > QEMU-blocked session in host-verifiable territory, a deep pass on the from-scratch JS engine (which
 > powers the browser) — probed against ~110 modern features/edges, found + fixed 8 real gaps, each

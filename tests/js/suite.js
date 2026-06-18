@@ -375,4 +375,9 @@ print("vosub="+({valueOf:function(){return 5;}}-1), "vonum="+Number({valueOf:fun
 print("volt="+({valueOf:function(){return 10;}}<20), "vowins="+({valueOf:function(){return 5;},toString:function(){return "99";}}-0), "vostr="+({toString:function(){return "8";}}-0));  // volt=true vowins=5 vostr=8 (valueOf wins; with no valueOf, toString is parsed)
 class _Temp { valueOf(){ return 42; } }
 print("vocls="+(new _Temp()-0), "vorec="+({valueOf:function(){return this;}}-0), "voplain="+({a:1}*3));  // vocls=42 vorec=0 voplain=0 (inherited class valueOf; valueOf->object falls through bounded; no valueOf/toString -> 0 unchanged)
+print("-- regex match.groups (named captures) + match.index (M577) --");
+var _mg = "2024-01-15".match(/(?<y>\d+)-(?<mo>\d+)-(?<d>\d+)/);
+print("ng="+_mg.groups.y+"/"+_mg.groups.mo+"/"+_mg.groups.d, "ngidx="+_mg.index, "ngpos="+_mg[1]+_mg[2]+_mg[3]);  // ng=2024/01/15 ngidx=0 ngpos=20240115 (named via .groups; .index; positional still works)
+var _mu = "xx42".match(/(\d+)/);
+print("nuidx="+_mu.index, "nugroups="+_mu.groups, "plainarr="+[1,2,3].groups);  // nuidx=2 nugroups=undefined plainarr=undefined (no names -> .groups undefined; ordinary arrays unaffected)
 print("-- done --");
