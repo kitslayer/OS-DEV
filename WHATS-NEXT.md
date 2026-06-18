@@ -86,9 +86,12 @@
 > the regex engine, and the full JS source pipeline (M537-M539). `make check` is now **20 suites**,
 > each new fuzzer verified as a real oracle (removing a bound → ASan abort at the exact line). The JS
 > engine probed clean across ~130 features/edges; the one common remaining gap, ToPrimitive calling a
-> user object's valueOf/toString, is deferred as too risky to land without in-guest verification (it
-> touches the coercion core); generators stay the architectural ceiling. All host-verified; QEMU
-> remained environment-blocked all session.
+> user object's valueOf/toString, was deferred as too risky to land without in-guest verification (it
+> touches the coercion core). **[Update: M574 landed the toString half](#)** — string coercion (`""+o`,
+> `String(o)`, template literals, `Array.join`, `print`) now calls a user object's own/inherited
+> `toString` (verified in-guest once QEMU was back; golden unchanged + fuzz-clean + the depth-guarded
+> getter call path); the `valueOf` half (numeric coercion) stays deferred, and generators stay the
+> architectural ceiling. All host-verified; QEMU was environment-blocked *that* session (M541-M546).
 > **(M529-M539) JS engine real-site compatibility + untrusted-input fuzzing.** Continuing the
 > QEMU-blocked session in host-verifiable territory, a deep pass on the from-scratch JS engine (which
 > powers the browser) — probed against ~110 modern features/edges, found + fixed 8 real gaps, each
