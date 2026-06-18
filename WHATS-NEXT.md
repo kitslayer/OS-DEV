@@ -1,5 +1,22 @@
 # What's next
 
+> **(M679-M682) async / Promise runtime — the other big JS frontier, on a SYNCHRONOUS-resolution model.**
+> The OS has no event loop and its I/O is blocking, so Promises settle eagerly: an executor runs immediately,
+> resolve/reject settle on the spot, and `.then`/`await` read an ALREADY-settled state — covering the common
+> synchronous-fetch patterns (`.then` chains, `await fetch()`, `Promise.all` over settled work) without a
+> microtask queue. **M679** Promise core: new obj kind `V_PROMISE` (state+value in the promise's own `vals[]`
+> so the shared `obj` struct grows by ZERO bytes — a +1 `val` field there overflowed the 40MB arena);
+> resolve/reject capture their promise as a `V_BOUND` bound-arg (natives get no self pointer), so a stored
+> resolver works; `then`/`catch`/`finally` with rejection propagation + returned-promise flattening;
+> `Promise.resolve`/`reject`/`all`/`race`/`allSettled`; `instanceof Promise`. **M680** `async function` +
+> `await` (gated by `g_in_async` so they stay ordinary identifiers elsewhere; `await` is a unary prefix, and an
+> awaited rejection re-throws so `try/catch` works). **M681** async arrows, **M682** async methods (a shared
+> marker disambiguates `async m(){}` from a member named `async`). All gated → non-async code byte-identical.
+> Tests live in a SEPARATE golden run (`tests/js/suite-promise.js`, fresh arena) because the monolithic
+> `suite.js` runs one 40MB arena to completion with only ~350KB headroom — appending there OOMs an unrelated
+> case mid-run. Out of scope (inherent to the model): true concurrency / a never-resolved promise stays
+> pending; real microtask ordering. **BigInt** (arbitrary precision) is now the main remaining JS gap.
+
 > **(M671-M674) Shell matcher host-testing + the last big JS gap (generators).** **M671-M673** extracted the
 > shell's two pure matchers — the `grep` regex (`^ $ . * [..] \`) and the filename glob (`*`/`?`) — into
 > `user/shgrep.h` and host-tested them (a 28th suite: regression + 500k fuzz, ASan/UBSan), bringing them into
