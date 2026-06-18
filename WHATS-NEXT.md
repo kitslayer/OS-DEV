@@ -7,8 +7,11 @@
 > fails and Quake exits cleanly (window reaped, no fault). DOOM (4 MB WAD) fit, so only Quake broke. Fix:
 > `-m 256M` everywhere the OS launches (Makefile run/test, the three in-guest test scripts, osdrive.py).
 > Confirmed in-guest: Quake now renders E1M1 + HUD, **and DOOM+Quake run concurrently** (the M519 feature,
-> now actually exercised). All 27 suites green at 256M. A clean example of verification surfacing a real,
-> high-value regression that host tests couldn't.
+> now actually exercised). All 27 suites green at 256M. **M601** then fixed the *silent*-ness that made
+> this hard to find: `app_spawn_named` now logs load failures, and `app_sbrk` logs OOM — launching Quake
+> at 128M now prints `[app] 'Quake' out of memory: sbrk(33558528) failed …` (its ~32 MB hunk), instead of
+> nothing. A clean example of verification surfacing a real, high-value regression host tests couldn't —
+> plus a diagnostic so the next one isn't silent.
 
 > **(M590-M592) Real-page rendering polish + DE touch, found by reviewing/rendering real sites.** Continuing
 > the content-parser review: **M590** the browser now honors the `font:` shorthand (`style="font: bold
