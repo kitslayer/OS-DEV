@@ -1775,9 +1775,11 @@ static val eval_member_get(val recv, const char *name) {
         if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); if(strcmp(name,"nextElementSibling")==0) return sibling_handle(recv.o,1); if(strcmp(name,"previousElementSibling")==0) return sibling_handle(recv.o,-1); static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
         if (recv.o->proto) { val pv; if (proto_lookup(recv.o->proto, name, recv, &pv)) return pv; }   /* inherited property/method (M263) */
+        if (strcmp(name,"constructor")==0 && recv.o->ctor_class) { val cv=UND(); cv.o=recv.o->ctor_class; cv.t=(recv.o->ctor_class->kind==V_NATIVE)?V_NATIVE:V_FUN; return cv; }   /* obj.constructor -> the constructor `new` used (unless one was set explicitly, found above) (M699) */
     }
     if ((recv.t==V_FUN||recv.t==V_NATIVE) && recv.o) {
         if (recv.t==V_FUN && strcmp(name,"prototype")==0) { if (!recv.o->fn_proto) { recv.o->fn_proto=new_obj(V_OBJ); if(!recv.o->fn_proto){ g_oom=1; return UND(); } } return obj_val(recv.o->fn_proto); }   /* lazy F.prototype, in a field (functions aren't obj_keyed) (M263) */
+        if (recv.t==V_FUN && strcmp(name,"name")==0) return STRV(recv.o->fn && recv.o->fn->str ? recv.o->fn->str : "");   /* fn.name / Class.name (the declared name, "" if anonymous) — so obj.constructor.name works (M699) */
         for (obj *k=recv.o; k; k=k->parent_class) if (k->statics) { val out; if (obj_get(k->statics,name,&out)) return out; }   /* Class.staticField / Number.isInteger / static method as a value (inherited up the chain) */
     }
     return UND();
@@ -2131,8 +2133,10 @@ static val eval_expr_inner(node *n, env *e) {
                 } else obj_set(P, mkey, fv);
             }
             obj *ctor_super=parent_obj;   /* own ctor: super is this class's parent */
-            if (!ctor_node && has_parent) { ctor_node = parentC.o->fn; ctor_super = parentC.o->super_class; }  /* inherited ctor: its super is the GRANDparent (where it was defined) */
+            int inherited_ctor=0;
+            if (!ctor_node && has_parent) { ctor_node = parentC.o->fn; ctor_super = parentC.o->super_class; inherited_ctor=1; }  /* inherited ctor: its super is the GRANDparent (where it was defined) */
             if (!ctor_node) { node *em=mknode(N_FUNC); em->list=aalloc(sizeof(node*)); em->nlist=0; em->a=mknode(N_BLOCK); ctor_node=em; }
+            if (!inherited_ctor && n->str) ctor_node->str = n->str;   /* Class.name: tag this class's own/synthesized ctor node with the class name, so co->fn->str feeds eval_member_get's .name (don't mutate an inherited parent node) (M699) */
             obj *co=new_obj(V_FUN); if(!co){ g_oom=1; return UND(); } co->fn=ctor_node; co->scope=e; co->home_proto=P; co->super_class=ctor_super; co->parent_class=parent_obj; co->fields=n->b;
             val cv=UND(); cv.t=V_FUN; cv.o=co;
             if (n->str) env_define(e, node_name(n), cv);   /* bind the class name first so statics can reference it */

@@ -69,4 +69,6 @@ print("-- regex replace $<name> named-group substitution (M696) --");
 print("2024-01".replace(/(?<y>\d+)-(?<m>\d+)/,"$<m>/$<y>"), "a1 b2".replace(/(?<L>[a-z])(?<N>[0-9])/g,"$<N>$<L>"), "ab".replace(/(?<f>a)(b)/,"$<f>-$2"));   // 01/2024 1a 2b a-b ($<name> substitutes the named capture; mixes with $2; works under /g)
 print("-- classic prototype inheritance (B.prototype = Object.create(A.prototype)) (M698) --");
 print((function(){function A(n){this.n=n;}A.prototype.speak=function(){return this.n+" sound";};function B(n){A.call(this,n);}B.prototype=Object.create(A.prototype);B.prototype.speak=function(){return this.n+" bark";};var b=new B("Rex");return b.speak()+"|"+(b instanceof A)+"|"+(b instanceof B);})());   // Rex bark|true|true (reassigning .prototype reroutes new-instance [[Prototype]]; the inherited chain + instanceof both walk to the grandparent)
+print("-- obj.constructor + fn/class .name (M699) --");
+print((function(){function A(){}return new A().constructor===A;})(), (function(){class Dog{}return new Dog().constructor.name;})(), (function foo(){}).name, (function(){class A{} class B extends A{constructor(){super();}} return new B().constructor.name;})());   // true Dog foo B (new X().constructor is the constructor; fn/class .name is the declared name; a subclass with its own ctor keeps its name)
 print("-- done --");
