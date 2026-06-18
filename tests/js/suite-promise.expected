@@ -61,4 +61,6 @@ true true false true threw
 2024 1704067200000 86400000 2 10
 -- regex replace $<name> named-group substitution (M696) --
 01/2024 1a 2b a-b
+-- classic prototype inheritance (B.prototype = Object.create(A.prototype)) (M698) --
+Rex bark|true|true
 -- done --

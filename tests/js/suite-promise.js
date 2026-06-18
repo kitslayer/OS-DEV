@@ -67,4 +67,6 @@ print("-- Date string parsing: new Date(str) + Date.parse (M695) --");
 print(new Date("2024-01-15").getFullYear(), Date.parse("2024-01-01T00:00:00.000Z"), Date.parse("1970-01-02"), new Date("2024-03-20T10:30:45").getMonth(), new Date("2024-03-20T10:30:45").getHours());   // 2024 1704067200000 86400000 2 10 (ISO date/datetime parse; trailing .sss/Z accepted+ignored as UTC)
 print("-- regex replace $<name> named-group substitution (M696) --");
 print("2024-01".replace(/(?<y>\d+)-(?<m>\d+)/,"$<m>/$<y>"), "a1 b2".replace(/(?<L>[a-z])(?<N>[0-9])/g,"$<N>$<L>"), "ab".replace(/(?<f>a)(b)/,"$<f>-$2"));   // 01/2024 1a 2b a-b ($<name> substitutes the named capture; mixes with $2; works under /g)
+print("-- classic prototype inheritance (B.prototype = Object.create(A.prototype)) (M698) --");
+print((function(){function A(n){this.n=n;}A.prototype.speak=function(){return this.n+" sound";};function B(n){A.call(this,n);}B.prototype=Object.create(A.prototype);B.prototype.speak=function(){return this.n+" bark";};var b=new B("Rex");return b.speak()+"|"+(b instanceof A)+"|"+(b instanceof B);})());   // Rex bark|true|true (reassigning .prototype reroutes new-instance [[Prototype]]; the inherited chain + instanceof both walk to the grandparent)
 print("-- done --");

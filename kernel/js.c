@@ -1983,6 +1983,7 @@ static val eval_expr_inner(node *n, env *e) {
                     }
                     dom_prop(recv.o, pn, val_to_str(rhs), 0, 0); return rhs;   /* el.textContent/innerHTML/value = … -> mutate the page */
                 }
+                if (recv.t==V_FUN && recv.o && strcmp(node_name(t),"prototype")==0 && rhs.t==V_OBJ && rhs.o) { recv.o->fn_proto = rhs.o; return rhs; }   /* F.prototype = obj : reassign the [[Prototype]] each `new F()` gets, so the classic `B.prototype=Object.create(A.prototype)` inheritance chain works (M698) */
                 if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
                 if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ const char *wk=node_name(t); val cur;
                     if(recv.t==V_ARR && strcmp(wk,"length")==0){ int nl=(int)to_num(rhs); if(nl<0)nl=0; if(nl>(1<<24)){ rt_err("array length too large"); return rhs; }
