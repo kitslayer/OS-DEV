@@ -10,7 +10,7 @@ cases + deterministic fuzzing.
 ## Running
 
 ```sh
-make check       # run all 23 suites (21 host + 2 in-guest; ~60s total)
+make check       # run all 24 suites (21 host + 3 in-guest; ~75s total)
 make jstest      # JS engine      — tests/js/suite.js vs the golden output
 make imgtest     # image decoders — tests/img/img_test.c   (jpeg/png/gif/bmp/inflate)
 make x509test    # X.509 parser   — tests/x509/x509_test.c
@@ -34,6 +34,7 @@ make htmlentfuzztest # HTML entities — tests/htmlentfuzz (decode_entity over u
 make htmlattrtest # HTML attrs    — tests/htmlattr (find_attr/has_attr/attr_int over untrusted tag bytes)
 make boottest    # in-guest boot  — boots the real kernel headless, asserts every bring-up marker (no crash)
 make gfxtest     # in-guest gfx   — captures the VGA framebuffer, asserts the desktop actually painted
+make browsertest # in-guest web   — launches the Browser from the Apps menu, asserts its home page rendered
 ```
 
 The last two boot the real kernel under QEMU (unlike the host suites, which
@@ -78,6 +79,7 @@ disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
 | `svgtest`  | `kernel/svg.c` | The from-scratch integer-only SVG rasterizer (parses untrusted web XML in-kernel). 8 unit cases that must render correctly (rect, viewBox scaling, circle + cubic-bezier path, stroked polygon, named colors, **affine transforms** — `<g>`-group + per-shape `translate`/`scale`/`rotate`/`matrix`, nested-group composition, and the CTM correctly restored after `</g>` — **paint inheritance** — `fill`/`stroke` inherited from the root `<svg>`/enclosing `<g>`, per-shape override, the `inherit` keyword, and inherited paint restored after `</g>` — **and opacity** — `fill-opacity`/`opacity` per shape, group `<g opacity>` inherited, group×element compounding, and `in_alpha` restored after `</g>` — **and gradients** — a linear red→blue across the box + a radial white→black centre→edge, exercising the `<defs>` pre-pass, `fill=url(#id)` resolution and per-pixel evaluation) plus ~520k in-suite fuzz iterations: 100k random bytes, 100k mutations of valid SVG, 320k structured (random shape/path/attr/**transform**/**fill**/**opacity**/**gradient** trees), and adversarial inputs (deep nesting, huge coordinate counts, a huge-coordinate gradient that would overflow the projection's int64 intermediate if unclamped, truncation) — plus a separate **6M-iteration gradient-focused fuzz** run during review. Locks bounds-safety on the scanline-fill crossings buffer, the per-shape point list in caller scratch, the `<g>` transform + paint + opacity stacks, the gradient table/stop caps + the `grad_color_at` fixed-point, and `parse_num` against the UB bugs the author fuzz first caught (negative shifts, `num<<16` int64 overflow). |
 | `boottest` | the **whole kernel + driver stack** (`tests/run-boot-tests.sh`) | Unlike every row above (which `#include`s one `.c` in isolation), this boots the *real* `build/kernel32.elf` headless under QEMU, captures COM1, and asserts all 9 required bring-up markers print in order with no crash: core bring-up (PMM/VMM/IDT), the preemptive scheduler, per-process address-space isolation, PCI enumeration, the e1000+ARP+ICMP stack (ping to the SLIRP gateway), FAT32 mount, AC'97 audio bring-up, USB UHCI+tablet, and reaching `desktop_run()`; and that no `panic`/`unhandled exception`/`page fault`/`#GP` appears anywhere. Two **internet-dependent** checks are informational (non-fatal — offline hosts stay green): a real HTTP GET to live example.com, and — exercising the whole **from-scratch TLS 1.3 stack** end to end — a real HTTPS GET whose `certverify=ok` confirms X25519 ECDHE + AEAD + X.509 chain validation to a trusted root + ECDSA/RSA `CertificateVerify`. Re-established now that QEMU runs again (a SIGSTKFLT launch failure had blocked in-guest verification for many milestones). |
 | `gfxtest`  | the **compositor / framebuffer / font stack** (`desktop.c`/`fb.c`/`fbcon.c`/`font.c`/`vga.c`) | The serial boot above proves the kernel *reached* the desktop, not that anything *painted*. This boots headless, waits for the desktop hand-off, captures the emulated VGA framebuffer via the QEMU monitor's `screendump` (HMP over a unix socket driven by `socat`), and asserts the PPM looks like a real painted desktop: 1024×768 (the desktop mode-set ran, not the 640×480 console), ≥40 distinct colors, and no single color >98% (catches an all-black hang). Retries the screendump to absorb paint-timing jitter. |
+| `browsertest` | the **browser HTML render pipeline** (`browser.c`'s `parse_html` + CSS + font/layout) | `parse_html` walks untrusted page bytes but is too coupled to `browser_t` to fuzz in isolation, so it's guarded end-to-end instead: boot, open the Apps menu (`sendkey f9`) and launch the Browser (`sendkey ret` — it's item 0), then assert its built-in **network-free** home page actually rendered — `screendump` shows ≥50k pure-white pixels (a white-backgrounded page), which the dark desktop never has (~900). Covers the menu→`spawn_browser`→`parse_html`→CSS→font/layout path. |
 
 ## Validated to catch regressions
 
@@ -100,6 +102,7 @@ Each fuzz harness is **verified to fail** when its guard is removed:
 - `htmlattrtest` aborts (ASan heap-buffer-overflow in `find_attr`) if its `i + nl <= n` loop bound is loosened to `i < n` (the name compare then reads past the slice) — verified.
 - `boottest` fails (lists the missing marker, exit 1) if any bring-up step stops printing its marker — verified by pointing `QEMU=true` at it (empty boot log → every marker MISSING).
 - `gfxtest`'s `ppm_check.py` is verified as a real oracle: an all-black 1024×768 frame → FAIL (1 distinct color), a 640×480 console frame → FAIL (resolution below the desktop mode), a real painted desktop → PASS.
+- `browsertest`'s white-pixel assertion is verified as a real oracle: a colorful-but-no-white frame (40k colors, passes the diversity/hang checks) → FAIL on `--white 50000` (0 white pixels); the rendered home page → PASS (~236k). So if the browser failed to launch/render, the still-dark desktop (~900 white) fails it.
 
 ## Not covered here
 

@@ -257,10 +257,16 @@ boottest: $(KERNEL) $(DISK)
 gfxtest: $(KERNEL) $(DISK)
 	@tests/run-gfx-tests.sh
 
+# In-guest BROWSER assertion: launch the Browser from the Apps menu and assert
+# its (network-free) home page rendered -- the end-to-end guard for parse_html,
+# which is too coupled to fuzz in isolation. SKIPs if QEMU/socat/python3 absent.
+browsertest: $(KERNEL) $(DISK)
+	@tests/run-browser-tests.sh
+
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest boottest gfxtest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + boottest + gfxtest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest boottest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + boottest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

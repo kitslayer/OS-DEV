@@ -12,10 +12,18 @@ def die(msg):
     print("  gfx-check: " + msg)
     sys.exit(1)
 
-path = sys.argv[1]
-min_w = int(sys.argv[2]) if len(sys.argv) > 2 else 1024
-min_h = int(sys.argv[3]) if len(sys.argv) > 3 else 768
-min_colors = int(sys.argv[4]) if len(sys.argv) > 4 else 40
+argv = sys.argv[1:]
+# Optional: --white N requires at least N pure-white (>=246 on all channels)
+# pixels -- used to assert a white-backgrounded page (e.g. the browser) painted,
+# vs the dark desktop which has almost none.
+min_white = 0
+if argv and argv[0] == "--white":
+    min_white = int(argv[1]); argv = argv[2:]
+
+path = argv[0]
+min_w = int(argv[1]) if len(argv) > 1 else 1024
+min_h = int(argv[2]) if len(argv) > 2 else 768
+min_colors = int(argv[3]) if len(argv) > 3 else 40
 
 try:
     with open(path, "rb") as f:
@@ -69,6 +77,15 @@ if distinct < min_colors:
     die("only %d distinct colors (< %d): screen looks blank/unpainted" % (distinct, min_colors))
 if top_share > 0.98:
     die("%.1f%% of the screen is one color: looks like an all-black hang" % (100 * top_share))
+
+if min_white:
+    white = 0
+    for off in range(0, w * h * 3, 3):
+        if pixels[off] >= 246 and pixels[off+1] >= 246 and pixels[off+2] >= 246:
+            white += 1
+    print("  gfx-check: %d pure-white pixels (need >= %d)" % (white, min_white))
+    if white < min_white:
+        die("only %d white pixels (< %d): the expected white-page content did not render" % (white, min_white))
 
 print("  gfx-check: OK (painted desktop)")
 sys.exit(0)
