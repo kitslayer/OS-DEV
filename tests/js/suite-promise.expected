@@ -1,0 +1,19 @@
+-- Promise: construct + then/catch/finally --
+42
+20
+caught:boom
+oops
+a1,b2
+got:E
+fin,v5
+-- Promise: statics --
+1,2,3
+rej:X
+first
+fulfilled,rejected
+-- Promise: identity + flatten + captured resolver --
+true true
+function
+11
+resolver-callable-after-executor
+-- done --

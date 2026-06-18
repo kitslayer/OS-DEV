@@ -1,0 +1,24 @@
+// Promise (synchronous-resolution model, M679) — a SECOND golden run, kept separate
+// from suite.js because that one shares a single 40MB arena run-to-completion with only
+// ~350KB headroom; this file gets its own fresh arena (js_run_doc resets g_arena_off),
+// so Promise coverage can be comprehensive without starving the main suite. Ends with
+// "-- done --" so the harness can detect a truncated (arena-OOM) run.
+print("-- Promise: construct + then/catch/finally --");
+print((function(){var o="?";new Promise(function(res){res(42);}).then(function(v){o=v;});return o;})());  // 42
+print((function(){var o="?";Promise.resolve(10).then(function(v){return v*2;}).then(function(v){o=v;});return o;})());  // 20 (then-chain transform)
+print((function(){var o="?";new Promise(function(r,j){j("boom");}).catch(function(e){o="caught:"+e;});return o;})());  // caught:boom
+print((function(){var o="?";new Promise(function(){throw "oops";}).catch(function(e){o=e;});return o;})());  // oops (executor throw -> rejection)
+print((function(){var log=[];Promise.resolve(1).then(function(v){log.push("a"+v);return v+1;}).catch(function(){log.push("C");}).then(function(v){log.push("b"+v);});return log.join(",");})());  // a1,b2 (catch skipped on success)
+print((function(){var o="?";Promise.reject("E").then(function(){o="F";}).catch(function(e){o="got:"+e;});return o;})());  // got:E (rejection propagates through then with no onRejected)
+print((function(){var log=[];Promise.resolve(5).finally(function(){log.push("fin");}).then(function(v){log.push("v"+v);});return log.join(",");})());  // fin,v5 (finally runs, value passes through)
+print("-- Promise: statics --");
+print((function(){var o="?";Promise.all([Promise.resolve(1),2,Promise.resolve(3)]).then(function(a){o=a.join(",");});return o;})());  // 1,2,3 (non-promise members pass through)
+print((function(){var o="?";Promise.all([Promise.resolve(1),Promise.reject("X")]).then(function(){o="F";}).catch(function(e){o="rej:"+e;});return o;})());  // rej:X (first rejection short-circuits)
+print((function(){var o="?";Promise.race([Promise.resolve("first"),Promise.resolve("second")]).then(function(v){o=v;});return o;})());  // first
+print((function(){var o="?";Promise.allSettled([Promise.resolve(1),Promise.reject("e")]).then(function(a){o=a.map(function(r){return r.status;}).join(",");});return o;})());  // fulfilled,rejected
+print("-- Promise: identity + flatten + captured resolver --");
+print((Promise.resolve(1) instanceof Promise)+" "+(new Promise(function(r){r(1);}) instanceof Promise));  // true true
+print(typeof Promise);  // function
+print((function(){var o="?";Promise.resolve(1).then(function(v){return Promise.resolve(v+10);}).then(function(v){o=v;});return o;})());  // 11 (a returned promise is adopted/flattened)
+print((function(){var r;new Promise(function(res){r=res;});var o="?";r(7);return "resolver-callable-after-executor";})());  // resolver-callable-after-executor (the resolver carries its promise as a bound arg)
+print("-- done --");

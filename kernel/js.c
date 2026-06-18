@@ -814,7 +814,13 @@ enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
        /* V_SYMBOL is a real val.t (a primitive), unlike the markers above which are
         * only obj->kind tags. A symbol carries a unique id in val.num and an optional
         * description string in val.str. (M-symbol) */
-       V_SYMBOL };
+       V_SYMBOL,
+       /* V_PROMISE (synchronous-resolution model, M679): an obj->kind tag like V_MAP —
+        * its val.t stays V_OBJ (so typeof is "object", method dispatch goes via the
+        * V_OBJ branch). To add ZERO bytes to every obj, state+value live in the promise's
+        * own vals[]: vals[0]=NUM(state) (0=pending,1=fulfilled,2=rejected), vals[1]=value/
+        * reason (see pstate/pvalue/pset). Not obj_keyed, so vals[] is never walked as props. */
+       V_PROMISE };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -865,7 +871,7 @@ static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; mems
 static obj *g_gen_arr;   /* eval: the active generator's yield-collection array (NULL outside a generator body) */
 /* The built-in Array/Object constructor objects, recorded at setup so `instanceof`
  * can recognise array/object literals against them (they have no ctor_class link). M419 */
-static obj *g_array_ctor, *g_object_ctor;
+static obj *g_array_ctor, *g_object_ctor, *g_promise_ctor;
 
 /* True only for objects whose keys[]/vals[] are real keyed properties (V_OBJ and
  * V_REGEX, which use obj_set). V_ARR/V_MAP/V_SET/V_DATE store data in vals[] via
@@ -1583,6 +1589,8 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs);
 static val eval_number_method(val recv, const char *name, val *args, int nargs);
 static val eval_map_method(val recv, const char *name, val *args, int nargs);
 static val eval_set_method(val recv, const char *name, val *args, int nargs);
+static val eval_promise_method(val recv, const char *name, val *args, int nargs);   /* Promise.prototype then/catch/finally (M679) */
+static int is_callable(val v){ return v.t==V_FUN || v.t==V_NATIVE || (v.t==V_OBJ && v.o && v.o->kind==V_BOUND); }
 static val eval_date_method(val recv, const char *name, val *args, int nargs);
 static val eval_element_method(val recv, const char *name, val *args, int nargs);
 static val eval_classlist_method(val recv, const char *name, val *args, int nargs);
@@ -1978,6 +1986,7 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_NUM || recv.t==V_BOOL) return eval_number_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_MAP) return eval_map_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_SET) return eval_set_method(recv,m,args,na);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_PROMISE) return eval_promise_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX) return eval_regex_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_DATE) return eval_date_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) return eval_element_method(recv,m,args,na);
@@ -2538,6 +2547,143 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         if(count>0) memmove(&o->vals[tgt], &o->vals[st], (size_t)count*sizeof(val));   /* memmove handles overlapping ranges */
         return recv; }
     rt_err("unknown array method"); return UND();
+}
+
+/* ---- Promise (M679): a SYNCHRONOUS-resolution model ----
+ * The OS has no event loop and its I/O (fetch/network) is blocking, so this models
+ * Promises with eager, synchronous settlement: an executor runs immediately, resolve/
+ * reject settle the promise on the spot, and .then/await read an ALREADY-settled state.
+ * This faithfully covers the common synchronous-fetch patterns (await fetch(); .then
+ * chains; Promise.all over settled work) without a microtask queue. The cost: there is
+ * no genuine concurrency — a promise that is never resolved synchronously stays pending
+ * forever (its .then never fires), and ordering across "parallel" awaits is sequential.
+ *
+ * A promise carries the captured `this` (the promise) to its resolve/reject as a BOUND
+ * argument (V_BOUND vals[2]), since native fns receive no self pointer. State + value
+ * live in obj->promise_state / promise_val. */
+/* State+value live in the promise's own vals[] (vals[0]=NUM(state), vals[1]=value)
+ * so a Promise adds NO bytes to the shared obj struct (a long script allocates
+ * millions of objs; +1 field there overflowed the 40MB arena). */
+static int  pstate(obj *p){ return p && p->n>=1 ? (int)p->vals[0].num : 0; }
+static val  pvalue(obj *p){ return p && p->n>=2 ? p->vals[1] : UND(); }
+static void pset(obj *p, int st, val v){ if (p && p->n>=2){ p->vals[0]=NUM(st); p->vals[1]=v; } }
+static val make_promise(int state, val v){
+    obj *p=new_obj(V_PROMISE); if(!p){ g_oom=1; return UND(); }
+    arr_push_val(p, NUM(state)); arr_push_val(p, v);   /* vals[0]=state, vals[1]=value */
+    p->ctor_class=g_promise_ctor;                      /* ctor_class -> instanceof Promise */
+    return obj_val(p);
+}
+/* Snapshot the in-flight throw/runtime-error as a catchable value, then clear it
+ * (the rejection is now captured in a promise). Mirrors N_TRY's catch-binding. */
+static val take_pending_error(void){
+    val r = g_threw ? g_throwval : STRV(intern(g_errmsg[0]?g_errmsg:"error", (int)strlen(g_errmsg[0]?g_errmsg:"error")));
+    g_err=0; g_threw=0; g_errmsg[0]=0; return r;
+}
+static val promise_resolve_native(val *args, int nargs){
+    if (nargs<1 || args[0].t!=V_OBJ || !args[0].o || args[0].o->kind!=V_PROMISE) return UND();
+    obj *p=args[0].o; if (pstate(p)!=0) return UND();   /* settle at most once */
+    val v = nargs>1 ? args[1] : UND();
+    if (v.t==V_OBJ && v.o && v.o->kind==V_PROMISE) pset(p, pstate(v.o), pvalue(v.o));   /* resolve(thenable): adopt its state */
+    else pset(p, 1, v);
+    return UND();
+}
+static val promise_reject_native(val *args, int nargs){
+    if (nargs<1 || args[0].t!=V_OBJ || !args[0].o || args[0].o->kind!=V_PROMISE) return UND();
+    obj *p=args[0].o; if (pstate(p)!=0) return UND();
+    pset(p, 2, nargs>1 ? args[1] : UND());
+    return UND();
+}
+/* A resolve/reject function bound to `promise`: a V_BOUND whose [0]=native, [2]=promise,
+ * so calling it invokes native([promise, ...callArgs]) (see call_bound). */
+static val make_resolver(val (*fn)(val*,int), obj *promise){
+    obj *nat=new_obj(V_NATIVE); if(!nat){ g_oom=1; return UND(); } nat->native=fn;
+    obj *bf=new_obj(V_BOUND);  if(!bf){ g_oom=1; return UND(); }
+    arr_push_val(bf, obj_val_native(nat));   /* [0] the native */
+    arr_push_val(bf, UND());                 /* [1] this (unused) */
+    arr_push_val(bf, obj_val(promise));      /* [2] bound: the promise */
+    return obj_val(bf);
+}
+/* Run a then/catch handler on `arg`; settle the chained promise from its result
+ * (a returned promise is adopted; a throw becomes a rejection). */
+static val run_reaction(val cb, val arg){
+    val r = call_function(cb, &arg, 1);
+    if (g_err) return make_promise(2, take_pending_error());
+    if (r.t==V_OBJ && r.o && r.o->kind==V_PROMISE) return r;   /* flatten a returned promise */
+    return make_promise(1, r);
+}
+static val nat_promise(val *args, int nargs){
+    val pv = make_promise(0, UND()); if (g_oom) return UND();   /* pending */
+    obj *p = pv.o;
+    val resolve=make_resolver(promise_resolve_native, p);
+    val reject =make_resolver(promise_reject_native, p);
+    if (g_oom) return UND();
+    if (nargs>0 && is_callable(args[0])){
+        val exa[2]={ resolve, reject };
+        call_function(args[0], exa, 2);
+        if (g_err){ val reason=take_pending_error(); if (pstate(p)==0) pset(p, 2, reason); }   /* executor threw -> reject */
+    }
+    return pv;
+}
+static val eval_promise_method(val recv, const char *m, val *args, int na){
+    obj *p=recv.o; int st=pstate(p); val pv=pvalue(p);
+    val onF = na>0?args[0]:UND(), onR = na>1?args[1]:UND();
+    if (strcmp(m,"then")==0){
+        if (st==1) return is_callable(onF) ? run_reaction(onF, pv) : make_promise(1, pv);
+        if (st==2) return is_callable(onR) ? run_reaction(onR, pv) : make_promise(2, pv);   /* unhandled rejection propagates */
+        return make_promise(0, UND());   /* still pending: chain stays pending */
+    }
+    if (strcmp(m,"catch")==0){
+        if (st==2) return is_callable(onF) ? run_reaction(onF, pv) : make_promise(2, pv);
+        return make_promise(st, pv);     /* fulfilled/pending pass straight through */
+    }
+    if (strcmp(m,"finally")==0){
+        if (is_callable(onF)){ call_function(onF, 0, 0); if (g_err) return make_promise(2, take_pending_error()); }
+        return make_promise(st, pv);     /* finally observes but does not alter the settlement */
+    }
+    rt_err("no such Promise method"); return UND();
+}
+static val nat_promise_resolve(val *args, int nargs){
+    val v = nargs>0?args[0]:UND();
+    if (v.t==V_OBJ && v.o && v.o->kind==V_PROMISE) return v;   /* Promise.resolve(promise) === that promise */
+    return make_promise(1, v);
+}
+static val nat_promise_reject(val *args, int nargs){ return make_promise(2, nargs>0?args[0]:UND()); }
+/* Promise.all: fulfilled with [values] once all settle; rejected with the FIRST
+ * rejection reason. Non-promise array members are taken as already-fulfilled. */
+static val nat_promise_all(val *args, int nargs){
+    obj *out=new_obj(V_ARR); if(!out){ g_oom=1; return UND(); }
+    if (nargs>0 && args[0].t==V_ARR && args[0].o){
+        obj *a=args[0].o;
+        for (int i=0;i<a->n && !g_oom;i++){
+            val e=a->vals[i];
+            if (e.t==V_OBJ && e.o && e.o->kind==V_PROMISE){
+                if (pstate(e.o)==2) return make_promise(2, pvalue(e.o));   /* short-circuit on first rejection */
+                arr_push_val(out, pstate(e.o)==1 ? pvalue(e.o) : UND());
+            } else arr_push_val(out, e);
+        }
+    }
+    val av=UND(); av.t=V_ARR; av.o=out; return make_promise(1, av);
+}
+static val nat_promise_race(val *args, int nargs){   /* first settled; sync model -> the first member */
+    if (nargs>0 && args[0].t==V_ARR && args[0].o && args[0].o->n>0){
+        val e=args[0].o->vals[0];
+        if (e.t==V_OBJ && e.o && e.o->kind==V_PROMISE) return make_promise(pstate(e.o), pvalue(e.o));
+        return make_promise(1, e);
+    }
+    return make_promise(0, UND());
+}
+static val nat_promise_allSettled(val *args, int nargs){
+    obj *out=new_obj(V_ARR); if(!out){ g_oom=1; return UND(); }
+    if (nargs>0 && args[0].t==V_ARR && args[0].o){
+        obj *a=args[0].o;
+        for (int i=0;i<a->n && !g_oom;i++){
+            val e=a->vals[i]; obj *rec=new_obj(V_OBJ); if(!rec){ g_oom=1; break; }
+            if (e.t==V_OBJ && e.o && e.o->kind==V_PROMISE && pstate(e.o)==2){ obj_set(rec,"status",STRV("rejected")); obj_set(rec,"reason",pvalue(e.o)); }
+            else { val fv=(e.t==V_OBJ && e.o && e.o->kind==V_PROMISE)?pvalue(e.o):e; obj_set(rec,"status",STRV("fulfilled")); obj_set(rec,"value",fv); }
+            arr_push_val(out, obj_val(rec));
+        }
+    }
+    val av=UND(); av.t=V_ARR; av.o=out; return make_promise(1, av);
 }
 
 /* ---- Map & Set ----
@@ -3550,6 +3696,9 @@ static void install_globals(env *g) {
     { obj *ws=new_obj(V_NATIVE); if(ws){ ws->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=ws; env_define(g,"WeakSet",v); } }   /* WeakSet: backed by Set (M273) */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
     { obj *px=new_obj(V_NATIVE); if(px){ px->native=nat_proxy; val v=UND(); v.t=V_NATIVE; v.o=px; env_define(g,"Proxy",v); } }   /* new Proxy(target,handler) — get/set traps (M-proxy) */
+    { obj *pc=new_obj(V_NATIVE); if(pc){ pc->native=nat_promise; g_promise_ctor=pc;   /* Promise (synchronous-resolution model, M679) */
+        obj *pst=new_obj(V_OBJ); if(pst){ def_native(pst,"resolve",nat_promise_resolve); def_native(pst,"reject",nat_promise_reject); def_native(pst,"all",nat_promise_all); def_native(pst,"race",nat_promise_race); def_native(pst,"allSettled",nat_promise_allSettled); pc->statics=pst; }
+        val v=UND(); v.t=V_NATIVE; v.o=pc; env_define(g,"Promise",v); } }
     { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */
         obj *ast=new_obj(V_OBJ); if(ast){ def_native(ast,"isArray",nat_array_isArray); def_native(ast,"from",nat_array_from); def_native(ast,"of",nat_array_of); arrc->statics=ast; }
         g_array_ctor=arrc; env_define(g,"Array",obj_val_native(arrc)); } }
@@ -3871,6 +4020,7 @@ int main(int argc, char **argv) {
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
+    if (getenv("JS_ARENA_REPORT")) fprintf(stderr, "ARENA_END=%d / %d (headroom %d)\n", g_arena_off, JS_ARENA, JS_ARENA-g_arena_off);
     return r<0?1:0;
 }
 #endif /* JS_NO_MAIN */
