@@ -6,6 +6,8 @@
  * (up to `max` bytes). `seed` seeds the ephemeral-key RNG. Returns bytes
  * received, or -1 on error. */
 int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t seed);
+/* HTTPS POST: sends `body` (bodylen) with Content-Type `ctype`; raw response into out. -1 on error. (M702) */
+int tls_post(const char *host, const char *path, const char *ctype, const char *body, int bodylen, uint8_t *out, int max, uint32_t seed);
 
 /* CertificateVerify result of the most recent tls_get: -2 = none/absent,
  * 0 = signature verified (server proved leaf-key possession), -1 = failed.

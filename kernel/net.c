@@ -598,6 +598,42 @@ int http_get(const char *host, const char *path, char *out, int max) {
     return total;
 }
 
+/* HTTP POST over plain TCP (M702). Sends the headers (with Content-Type + Content-Length)
+ * then the body as a second write — so an arbitrary body size isn't bounded by the small
+ * request buffer. Returns the raw response length (headers+body), or -1 on failure. */
+int http_post(const char *host, const char *path, const char *ctype,
+              const char *body, int bodylen, char *out, int max) {
+    if (max <= 0) return 0;
+    if (bodylen < 0) bodylen = 0;
+    uint8_t ip[4];
+    if (dns_resolve(host, ip) != 0) return -1;
+    tcp_conn c;
+    if (tcp_connect(&c, ip, 80) != 0) return -1;
+
+    char clen[12]; { unsigned b = (unsigned)bodylen; int t = 0; char tmp[12];
+        do { tmp[t++] = (char)('0' + b % 10); b /= 10; } while (b && t < 11);
+        int ci = 0; while (t) clen[ci++] = tmp[--t]; clen[ci] = 0; }
+    char req[640]; int rl = 0;
+    const char *parts[] = { "POST ", path, " HTTP/1.0\r\nHost: ", host,
+                            "\r\nContent-Type: ", ctype ? ctype : "text/plain",
+                            "\r\nContent-Length: ", clen,
+                            "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
+    for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
+        for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = *s;
+    tcp_write(&c, (uint8_t *)req, rl);
+    if (bodylen > 0) tcp_write(&c, (uint8_t *)body, bodylen);
+
+    int total = 0;
+    uint64_t budget = timer_ticks() + 600;
+    while (c.up && total < max && timer_ticks() < budget) {
+        int n = tcp_read(&c, (uint8_t *)out + total, max - total, 60);
+        if (n < 0) break;
+        total += n;
+    }
+    tcp_close(&c);
+    return total;
+}
+
 void net_demo(void) {
     if (e1000_init() != 0) {
         kprintf("[net] no e1000 NIC found.\n\n");

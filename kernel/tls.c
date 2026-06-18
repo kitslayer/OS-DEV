@@ -395,7 +395,8 @@ static int tls_verify_certverify(tls *t, const uint8_t *m, int mlen, const uint8
 }
 
 /* full client. Returns response length into `out`, or -1. */
-static int tls_get_inner(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) {
+static int tls_get_inner(const char *host, const char *path, uint8_t *out, int max, uint32_t seed,
+                         const char *method, const char *ctype, const char *body, int bodylen) {   /* method NULL/"GET" => GET (byte-identical to before); "POST" => send body (M702) */
     rng_seed(seed);
     g_cert_status = -2; g_chain_anchored = 0; g_host_match = -2;   /* clear stale results */
     g_leaf_cn[0] = 0; g_leaf_expiry[0] = 0;
@@ -600,12 +601,25 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
     }
 
     /* --- send the HTTP request, read the response --- */
-    char req[512]; int rl = 0;
-    const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
-                            "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
-    for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
-        for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = (char)*s;
+    char req[640]; int rl = 0;
+    int is_post = method && (method[0]=='P' || method[0]=='p');
+    if (is_post) {
+        if (bodylen < 0) bodylen = 0;
+        char clen[12]; { unsigned b=(unsigned)bodylen; int t=0; char tmp[12]; do{ tmp[t++]=(char)('0'+b%10); b/=10; }while(b && t<11); int ci=0; while(t) clen[ci++]=tmp[--t]; clen[ci]=0; }
+        const char *parts[] = { "POST ", path, " HTTP/1.0\r\nHost: ", host,
+                                "\r\nContent-Type: ", ctype ? ctype : "text/plain",
+                                "\r\nContent-Length: ", clen,
+                                "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
+        for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
+            for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = (char)*s;
+    } else {                       /* GET: byte-identical to the original request (no regression) */
+        const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
+                                "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
+        for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
+            for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = (char)*s;
+    }
     if (write_enc(&T, REC_APP, (uint8_t *)req, rl) != 0) { tcp_close(&tcp); return -1; }
+    if (is_post && bodylen > 0 && write_enc(&T, REC_APP, (uint8_t *)body, bodylen) != 0) { tcp_close(&tcp); return -1; }
 
     int total = 0;
     for (;;) {
@@ -636,12 +650,23 @@ static inline void tls_irq_restore(uint64_t f) {
     __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
 }
 
+static volatile int g_tls_busy = 0;   /* one TLS op (get OR post) at a time — they share the big static buffers */
 int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) {
-    static volatile int busy = 0;
     uint64_t f = tls_irq_save();
-    if (busy) { tls_irq_restore(f); return -1; }   /* another tls_get in flight */
-    busy = 1; tls_irq_restore(f);
-    int r = tls_get_inner(host, path, out, max, seed);
-    busy = 0;
+    if (g_tls_busy) { tls_irq_restore(f); return -1; }   /* another TLS op in flight */
+    g_tls_busy = 1; tls_irq_restore(f);
+    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0);
+    g_tls_busy = 0;
+    return r;
+}
+/* HTTPS POST (M702): same handshake/record path as tls_get; only the plaintext request
+ * (POST + Content-Type/Length + body) differs. -1 on failure or if a TLS op is in flight. */
+int tls_post(const char *host, const char *path, const char *ctype,
+             const char *body, int bodylen, uint8_t *out, int max, uint32_t seed) {
+    uint64_t f = tls_irq_save();
+    if (g_tls_busy) { tls_irq_restore(f); return -1; }
+    g_tls_busy = 1; tls_irq_restore(f);
+    int r = tls_get_inner(host, path, out, max, seed, "POST", ctype, body, bodylen);
+    g_tls_busy = 0;
     return r;
 }

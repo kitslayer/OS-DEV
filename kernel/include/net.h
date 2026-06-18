@@ -15,6 +15,8 @@ int dns_resolve(const char *host, uint8_t out_ip[4]);
 /* HTTP/1.0 GET http://host/path -> raw response into out (max bytes).
  * Returns bytes received, or -1 on error. */
 int http_get(const char *host, const char *path, char *out, int max);
+/* HTTP/1.0 POST: sends `body` (bodylen) with Content-Type `ctype`; raw response into out. -1 on error. (M702) */
+int http_post(const char *host, const char *path, const char *ctype, const char *body, int bodylen, char *out, int max);
 
 /* A minimal TCP stream connection (one at a time; used by HTTP and TLS). */
 typedef struct {
