@@ -1470,6 +1470,7 @@ static const char *val_to_str(val v) {
 static val make_promise(int state, val v);
 static val take_pending_error(void);
 static int pstate(obj *p); static val pvalue(obj *p);
+static val nat_promise_resolve(val *args, int nargs);   /* fwd: `await x` assimilates a thenable like Promise.resolve(x) (M687) */
 
 /* ---- environments ---- */
 static env *new_env(env *parent){ env *e=aalloc(sizeof(env)); if(!e) return 0; e->cap=4; e->keys=aalloc(sizeof(char*)*e->cap); e->vals=aalloc(sizeof(val)*e->cap); if(!e->keys||!e->vals){ g_oom=1; return 0; } e->n=0; e->parent=parent; return e; }
@@ -1834,6 +1835,9 @@ static val eval_expr_inner(node *n, env *e) {
         case N_AWAIT: {   /* `await expr` (M680): unwrap a settled promise; rejection re-throws its reason */
             val v = n->a ? eval_expr(n->a, e) : UND();
             if (g_err) return UND();
+            if (v.t==V_OBJ && v.o && v.o->kind!=V_PROMISE && obj_keyed(v.o)) {   /* await x === await Promise.resolve(x): assimilate a thenable (M687) */
+                val tf; if (obj_get(v.o, "then", &tf) && is_callable(tf)) { val ra[1]={v}; v = nat_promise_resolve(ra, 1); if (g_err) return UND(); }
+            }
             if (v.t==V_OBJ && v.o && v.o->kind==V_PROMISE) {
                 if (pstate(v.o)==2) {   /* awaiting a rejected promise throws its reason (like N_THROW) */
                     val rv = pvalue(v.o);
@@ -2654,12 +2658,25 @@ static val take_pending_error(void){
     val r = g_threw ? g_throwval : STRV(intern(g_errmsg[0]?g_errmsg:"error", (int)strlen(g_errmsg[0]?g_errmsg:"error")));
     g_err=0; g_threw=0; g_errmsg[0]=0; return r;
 }
+static val make_resolver(val (*fn)(val*,int), val carried);   /* fwd: assimilation builds resolve/reject for the thenable */
+static val promise_reject_native(val *args, int nargs);       /* fwd: thenable's reject path */
 static val promise_resolve_native(val *args, int nargs){
     if (nargs<1 || args[0].t!=V_OBJ || !args[0].o || args[0].o->kind!=V_PROMISE) return UND();
     obj *p=args[0].o; if (pstate(p)!=0) return UND();   /* settle at most once */
     val v = nargs>1 ? args[1] : UND();
-    if (v.t==V_OBJ && v.o && v.o->kind==V_PROMISE) pset(p, pstate(v.o), pvalue(v.o));   /* resolve(thenable): adopt its state */
-    else pset(p, 1, v);
+    if (v.t==V_OBJ && v.o && v.o->kind==V_PROMISE) { pset(p, pstate(v.o), pvalue(v.o)); return UND(); }   /* adopt another promise's state */
+    if (v.t==V_OBJ && v.o && obj_keyed(v.o)) {          /* thenable assimilation (M687): resolve(x) where x.then is callable */
+        val thenfn;
+        if (obj_get(v.o, "then", &thenfn) && is_callable(thenfn)) {
+            val resolve=make_resolver(promise_resolve_native, obj_val(p));   /* the thenable drives our settle */
+            val reject =make_resolver(promise_reject_native, obj_val(p));
+            val ta[2]={resolve, reject};
+            call_function_this(thenfn, v, ta, 2);        /* x.then(resolve, reject) — runs synchronously in this model */
+            if (g_err && pstate(p)==0) pset(p, 2, take_pending_error());   /* then() itself threw -> reject */
+            return UND();
+        }
+    }
+    pset(p, 1, v);   /* a plain value (or a non-thenable object) */
     return UND();
 }
 static val promise_reject_native(val *args, int nargs){
@@ -2722,9 +2739,31 @@ static val eval_promise_method(val recv, const char *m, val *args, int na){
 static val nat_promise_resolve(val *args, int nargs){
     val v = nargs>0?args[0]:UND();
     if (v.t==V_OBJ && v.o && v.o->kind==V_PROMISE) return v;   /* Promise.resolve(promise) === that promise */
-    return make_promise(1, v);
+    val pv = make_promise(0, UND()); if (g_oom) return UND();
+    val ra[2] = { pv, v };
+    promise_resolve_native(ra, 2);   /* settle pv with v — fulfils a plain value, assimilates a thenable (M687) */
+    return pv;
 }
 static val nat_promise_reject(val *args, int nargs){ return make_promise(2, nargs>0?args[0]:UND()); }
+/* Promise.any: the first FULFILMENT wins; if all reject, reject with an AggregateError-
+ * like object carrying every reason in .errors (M687). */
+static val nat_promise_any(val *args, int nargs){
+    obj *errs=new_obj(V_ARR); if(!errs){ g_oom=1; return UND(); }
+    if (nargs>0 && args[0].t==V_ARR && args[0].o){
+        obj *a=args[0].o;
+        for (int i=0;i<a->n && !g_oom;i++){
+            val e=a->vals[i];
+            if (e.t==V_OBJ && e.o && e.o->kind==V_PROMISE){
+                if (pstate(e.o)==1) return make_promise(1, pvalue(e.o));   /* first fulfilment */
+                arr_push_val(errs, pstate(e.o)==2 ? pvalue(e.o) : UND());
+            } else return make_promise(1, e);                              /* a non-promise fulfils immediately */
+        }
+    }
+    obj *agg=new_obj(V_OBJ); if(!agg){ g_oom=1; return UND(); }            /* all rejected */
+    obj_set(agg,"name",STRV("AggregateError")); obj_set(agg,"message",STRV("All promises were rejected"));
+    val ev=UND(); ev.t=V_ARR; ev.o=errs; obj_set(agg,"errors",ev);
+    return make_promise(2, obj_val(agg));
+}
 /* Promise.all: fulfilled with [values] once all settle; rejected with the FIRST
  * rejection reason. Non-promise array members are taken as already-fulfilled. */
 static val nat_promise_all(val *args, int nargs){
@@ -3809,7 +3848,7 @@ static void install_globals(env *g) {
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
     { obj *px=new_obj(V_NATIVE); if(px){ px->native=nat_proxy; val v=UND(); v.t=V_NATIVE; v.o=px; env_define(g,"Proxy",v); } }   /* new Proxy(target,handler) — get/set traps (M-proxy) */
     { obj *pc=new_obj(V_NATIVE); if(pc){ pc->native=nat_promise; g_promise_ctor=pc;   /* Promise (synchronous-resolution model, M679) */
-        obj *pst=new_obj(V_OBJ); if(pst){ def_native(pst,"resolve",nat_promise_resolve); def_native(pst,"reject",nat_promise_reject); def_native(pst,"all",nat_promise_all); def_native(pst,"race",nat_promise_race); def_native(pst,"allSettled",nat_promise_allSettled); pc->statics=pst; }
+        obj *pst=new_obj(V_OBJ); if(pst){ def_native(pst,"resolve",nat_promise_resolve); def_native(pst,"reject",nat_promise_reject); def_native(pst,"all",nat_promise_all); def_native(pst,"any",nat_promise_any); def_native(pst,"race",nat_promise_race); def_native(pst,"allSettled",nat_promise_allSettled); pc->statics=pst; }
         val v=UND(); v.t=V_NATIVE; v.o=pc; env_define(g,"Promise",v); } }
     { obj *f=new_obj(V_NATIVE); if(f){ f->native=nat_fetch; env_define(g,"fetch",obj_val_native(f)); } }   /* fetch(url) -> Promise<Response> (M684); functional once js_set_fetch wires a backing */
     { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */

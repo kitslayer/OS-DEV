@@ -46,4 +46,9 @@ print((function(){var o="?";fetch("http://x/404").then(function(r){o=r.status+",
 print((function(){var o="?";fetch("http://x/json").then(function(r){return r.json();}).then(function(j){o=j.a+","+j.b.join("-");});return o;})());  // 1,2-3 (Response.json())
 print((function(){async function f(){var r=await fetch("http://x/");return await r.text();}var o="?";f().then(function(t){o=t;});return o;})());  // hello from fetch (await fetch + await r.text())
 print((function(){var o="?";fetch("http://x/fail").then(function(){o="F";}).catch(function(){o="caught";});return o;})());  // caught (a network failure rejects)
+print("-- Promise.any + thenable assimilation (M687) --");
+print((function(){var o="?";Promise.any([Promise.reject("a"),Promise.resolve("b"),Promise.resolve("c")]).then(function(v){o=v;});return o;})());  // b (first fulfilment wins)
+print((function(){var o="?";Promise.any([Promise.reject("x"),Promise.reject("y")]).catch(function(e){o=e.name+":"+e.errors.join(",");});return o;})());  // AggregateError:x,y (all reject -> AggregateError.errors)
+print((function(){var o="?";Promise.resolve({then:function(res){res(77);}}).then(function(v){o=v;});return o;})());  // 77 (Promise.resolve assimilates a thenable {then})
+print((function(){async function f(){return await {then:function(res){res(55);}};}var o="?";f().then(function(v){o=v;});return o;})());  // 55 (await x === await Promise.resolve(x): assimilates a thenable)
 print("-- done --");
