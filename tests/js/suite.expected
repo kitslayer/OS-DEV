@@ -354,4 +354,6 @@ rvdel=1,true rvnone=5
 -- bitwise int32 semantics (M640) --
 -2147483648 1 -1 -2147483648
 16744512 99162322
+-- regex word boundaries \b \B (M642) --
+word two,words cat A Cat
 -- done --

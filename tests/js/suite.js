@@ -387,4 +387,6 @@ print("rvdel="+_rvd.a+","+(_rvd.b===undefined), "rvnone="+JSON.parse('{"a":5}').
 print("-- bitwise int32 semantics (M640) --");
 print(1<<31, 1<<32, 0xFFFFFFFF|0, 2147483648|0);  // -2147483648 1 -1 -2147483648 (operands ToInt32, shift count & 31, like real JS)
 print((255<<16)|(128<<8)|64, (function(){var h=0,s="hello";for(var i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return h;})());  // 16744512 99162322 (RGB pack + canonical int32 string hash; impossible under the old int64 bitwise)
+print("-- regex word boundaries \\b \\B (M642) --");
+print("a word here".match(/\bword\b/)[0], "two words!".match(/\b\w+\b/g).join(","), "scatter".match(/\Bcat/)[0], "a cat".replace(/\b\w/g,function(c){return c.toUpperCase();}));  // word two,words cat A Cat (\b boundary, \B non-boundary, title-case via \b\w)
 print("-- done --");
