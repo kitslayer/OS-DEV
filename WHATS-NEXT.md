@@ -1,5 +1,15 @@
 # What's next
 
+> **(M590-M592) Real-page rendering polish + DE touch, found by reviewing/rendering real sites.** Continuing
+> the content-parser review: **M590** the browser now honors the `font:` shorthand (`style="font: bold
+> 14px Arial"` previously set neither weight nor size); **M591** `uni_to_ascii` folds common math/arrow
+> symbols (≤ ≥ ≈ → ← ↑ ↓ −) to nearest-ASCII instead of dropping them to a space (they appear on technical
+> pages) + the matching `&le;`/`&ge;`/`&asymp;` entities. **M592** (DE) clicking the taskbar clock opens
+> the Calendar. Verified in-guest over real TLS: **example.com** and **danluu.com** (a content-rich blog,
+> 21 KB) render correctly; an **unreachable** host (gnu.org, blocked from this sandbox) fails *gracefully*
+> ("failed" status, no hang/crash) — confirming robust network handling, not a bug. `make check` stays
+> **27 suites**, all green.
+
 > **(M566, M580-M588) Browser untrusted-parser fuzzing — every scanner extracted + fuzzed, 4 CSS fixes.**
 > The browser parses a hostile server's bytes on the guard-page-less kernel stack; all the cleanly-
 > separable scanners are now lifted into their own `.c` and host-fuzzed under ASan/UBSan (the M524/M546
