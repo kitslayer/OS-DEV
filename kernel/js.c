@@ -248,7 +248,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD, N_REGEX };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD, N_REGEX, N_YIELD };
 
 typedef struct node node;
 struct node {
@@ -257,9 +257,11 @@ struct node {
     node **list; int nlist;
     int prefix;   /* for N_UPDATE: prefix vs postfix */
     const char *label;   /* labeled stmt: a loop's own label; or a break/continue target. NULL=none (memset-zeroed by mknode) (M280) */
+    int is_gen;   /* N_FUNC: 1 if a `function*` generator (eager-evaluated). zero-init by mknode. */
 };
 
 static int g_depth;            /* recursion guard (parser + eval + val_to_str + calls) */
+static int g_in_gen;           /* parser: nonzero while inside a `function*` body, so `yield` parses as N_YIELD */
 /* The largest C frame per nesting level is eval_expr (~1.5 KB, measured via
  * objdump); the worst case (~120 × 1.5 KB ≈ 185 KB) stays within the 256 KB
  * kernel stacks BOTH entry paths run on — the ring-3 SYS_js task stack AND the
@@ -397,10 +399,13 @@ static node *parse_primary(lexer *L) {
         if (tok_is(t,"undefined")) { advance(L); return mknode(N_UNDEF); }
         if (tok_is(t,"function")) {
             advance(L); node *n=mknode(N_FUNC);
+            if (peek_punc(L,"*")) { advance(L); n->is_gen=1; }   /* function* generator */
             token name = peek(L);
             if (name.type==T_IDENT) { advance(L); n->str=intern(name.s,name.len); n->slen=name.len; }
             parse_fn_params(L, n);
+            int sg = g_in_gen; g_in_gen = n->is_gen;   /* `yield` is contextual to this generator body */
             n->a = parse_stmt(L);   /* body block */
+            g_in_gen = sg;
             return n;
         }
         if (tok_is(t,"typeof")) { advance(L); node *n=mknode(N_UNARY); n->op='t'; n->a=parse_primary(L); return n; }
@@ -627,6 +632,18 @@ static node *make_arrow(lexer *L, node **params, int np) {
 
 static node *parse_assign(lexer *L) {
     if (++g_depth > MAXDEPTH) { rt_err("max recursion"); g_depth--; return mknode(N_UNDEF); }
+    if (g_in_gen) {                              /* inside a `function*` body: `yield [*] [expr]` */
+        token yt = peek(L);
+        if (yt.type==T_IDENT && yt.len==5 && memcmp(yt.s,"yield",5)==0) {
+            advance(L);                          /* consume `yield` */
+            node *y = mknode(N_YIELD);
+            if (peek_punc(L,"*")) { advance(L); y->op='*'; }   /* yield* delegate (spreads an iterable) */
+            token nt = peek(L);                  /* operand optional: `yield` / `yield;` -> yield undefined */
+            if (!(nt.type==T_EOF || (nt.type==T_PUNC && (tok_is(nt,";")||tok_is(nt,")")||tok_is(nt,"]")||tok_is(nt,"}")||tok_is(nt,",")||tok_is(nt,":")))))
+                y->a = parse_assign(L);
+            g_depth--; return y;
+        }
+    }
     /* arrow functions: `x => body` and `(a, b, ...) => body`. Detected with bounded
      * lookahead (save/restore the lexer) so a plain `(expr)` isn't misparsed. */
     token t0 = peek(L);
@@ -843,6 +860,7 @@ static val SYMV(int64_t id, const char *desc){ val v=UND(); v.t=V_SYMBOL; v.num=
 static val g_throwval;        /* value of the in-flight `throw` (when g_threw) */
 
 static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
+static obj *g_gen_arr;   /* eval: the active generator's yield-collection array (NULL outside a generator body) */
 /* The built-in Array/Object constructor objects, recorded at setup so `instanceof`
  * can recognise array/object literals against them (they have no ctor_class link). M419 */
 static obj *g_array_ctor, *g_object_ctor;
@@ -1474,6 +1492,15 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
         if (def->num==1) { int taken=0; for(int i=0;i<fe->n;i++) if(strcmp(fe->keys[i],"arguments")==0){taken=1;break;}   /* a param named `arguments` wins -- don't clobber it */
             if(!taken){ obj *ao=new_obj(V_ARR); if(ao){ for(int i=0;i<nargs && !g_oom;i++) arr_push_val(ao,args[i]); val av=UND(); av.t=V_ARR; av.o=ao; env_define(fe,"arguments",av); } } }   /* V_ARR val (obj_val would tag it V_OBJ) */
     }
+    if (def->is_gen) {                          /* generator: eager-run the body, collecting each yield */
+        obj *ga = new_obj(V_ARR);
+        obj *saved = g_gen_arr; g_gen_arr = ga;
+        if (ga) eval_stmt(def->a, fe);          /* N_YIELD appends to g_gen_arr; the body's return is discarded */
+        g_gen_arr = saved;
+        g_depth--;
+        val rv = UND(); if (ga) { rv.t = V_ARR; rv.o = ga; }
+        return rv;                              /* an array — iterable via for-of / [...spread] / .forEach */
+    }
     comp c = eval_stmt(def->a, fe);
     g_depth--;
     return c.kind==C_RETURN ? c.v : UND();
@@ -1724,6 +1751,14 @@ static val eval_expr_inner(node *n, env *e) {
             }
             val r=UND(); r.t=V_OBJ; r.o=o; return r; }
         case N_FUNC: { obj *o=new_obj(V_FUN); if(!o) return UND(); o->fn=n; o->scope=e; val r=UND(); r.t=V_FUN; r.o=o; if(n->str){ env_define(e,node_name(n),r); } return r; }
+        case N_YIELD: {   /* eager generators: append the yielded value(s) to the active collection array */
+            val v = n->a ? eval_expr(n->a, e) : UND();
+            if (g_gen_arr) {
+                if (n->op=='*' && v.t==V_ARR && v.o) { for (int i=0; i<v.o->n && !g_oom; i++) arr_push_val(g_gen_arr, v.o->vals[i]); }  /* yield* spreads an iterable */
+                else arr_push_val(g_gen_arr, v);
+            }
+            return UND();   /* eager mode has no .next() argument, so `x = yield e` gives undefined */
+        }
         case N_COND: return truthy(eval_expr(n->a,e)) ? eval_expr(n->b,e) : eval_expr(n->c,e);
         case N_LOGICAL: { val l=eval_expr(n->a,e);
             if(n->op=='N') return (l.t==V_UNDEF||l.t==V_NULL) ? eval_expr(n->b,e) : l;   /* ?? : only null/undefined fall through */

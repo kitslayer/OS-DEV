@@ -411,4 +411,6 @@ print("-- ToNumber: leading whitespace + 0x hex + sign (M658) --");
 print(Number("  7  "), Number("0x10"), +"  9  ", Number("+5"), "  10  "-0);  // 7 16 9 5 10 (string->number skips whitespace, parses hex, honors +/-; trailing-lenient + concat unchanged)
 print("-- String.replace $` and $' patterns (M667) --");
 print("xby".replace(/b/,"$`"), "xby".replace(/b/,"$'"), "abcde".replace(/cd/,"[$`|$&|$']"));  // xxy xyy ab[ab|cd|e]e (before-match / after-match replacement patterns)
+print("-- generators function*/yield (eager) (M674) --");
+print((function(){function* g(){yield 1;yield 2;yield 3;}return [...g()].join(",");})(), (function(){function* r(n){for(let i=0;i<n;i++)yield i;}return [...r(4)].join(",");})(), (function(){function* g(){yield* [1,2];yield 3;}return [...g()].join(",");})(), (function(){var y=5;return y+1;})());  // 1,2,3 0,1,2,3 1,2,3 6 (spread/loop/yield*; `yield` is a normal var outside a generator)
 print("-- done --");

@@ -378,4 +378,6 @@ true true false boom
 7 16 9 5 10
 -- String.replace $` and $' patterns (M667) --
 xxy xyy ab[ab|cd|e]e
+-- generators function*/yield (eager) (M674) --
+1,2,3 0,1,2,3 1,2,3 6
 -- done --
