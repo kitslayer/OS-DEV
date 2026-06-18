@@ -389,6 +389,19 @@ static node *parse_tagged(node *tag, const char *raw, int len) {
     return call;
 }
 
+/* In a class/object member position, consume a leading `async` IFF it marks an async
+ * method (i.e. it's followed by a method name, `*`, or `[`) — NOT a member literally
+ * named `async` (`async(){}` / `async: v` / `async = v` / shorthand `{async}`). Returns
+ * 1 if it consumed an async marker. (M682) */
+static int parse_async_method_marker(lexer *L) {
+    token cur = peek(L);
+    if (!(cur.type==T_IDENT && cur.len==5 && memcmp(cur.s,"async",5)==0)) return 0;
+    lexsave sv = lex_save(L); advance(L);
+    token nx = peek(L);
+    if (nx.type==T_IDENT || nx.type==T_KW || nx.type==T_STR || (nx.type==T_PUNC && (tok_is(nx,"*")||tok_is(nx,"[")))) return 1;
+    lex_restore(L, sv); return 0;
+}
+
 static node *parse_primary(lexer *L) {
     token t = peek(L);
     if (t.type == T_TEMPLATE) { advance(L); return parse_template(t.s, t.len); }
@@ -439,12 +452,13 @@ static node *parse_primary(lexer *L) {
             node *staticblk=mknode(N_BLOCK); staticblk->list=aalloc(sizeof(node*)*32); staticblk->nlist=0;  /* static members -> co->statics */
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,";")) { advance(L); continue; }   /* stray semicolons between members */
+                int asyncm = parse_async_method_marker(L);   /* `async method(){…}` (M682) */
                 int genm = 0; if (peek_punc(L,"*")) { advance(L); genm = 1; }   /* *method(){…} : generator method */
                 if (peek_punc(L,"[")) {   /* computed method key: class C { [expr](params){body} } — e.g. [Symbol.iterator](){…} (M-symbol) */
                     advance(L); node *key=parse_assign(L); expect_punc(L,"]");
                     if (peek_punc(L,"(")) {
-                        node *fn=mknode(N_FUNC); fn->b=key; fn->is_gen=genm;   /* fn->b = computed key expr (str stays NULL -> not "constructor", keyed via keystr at class-build) */
-                        parse_fn_params(L,fn); { int sg=g_in_gen; g_in_gen=genm; fn->a=parse_stmt(L); g_in_gen=sg; }
+                        node *fn=mknode(N_FUNC); fn->b=key; fn->is_gen=genm; fn->is_async=asyncm;   /* fn->b = computed key expr (str stays NULL -> not "constructor", keyed via keystr at class-build) */
+                        parse_fn_params(L,fn); { int sg=g_in_gen, sa=g_in_async; g_in_gen=genm; g_in_async=asyncm; fn->a=parse_stmt(L); g_in_gen=sg; g_in_async=sa; }
                         if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
                     } else { skip_semi(L); }   /* computed FIELD [expr]=v: unsupported (rare); skip safely */
                     continue;
@@ -466,9 +480,9 @@ static node *parse_primary(lexer *L) {
                     }
                 }
                 if (peek_punc(L,"(")) {                           /* method:  name(params){body} */
-                    node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len; fn->is_gen=genm;
+                    node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len; fn->is_gen=genm; fn->is_async=asyncm;
                     parse_fn_params(L, fn);
-                    { int sg=g_in_gen; g_in_gen=genm; fn->a = parse_stmt(L); g_in_gen=sg; }
+                    { int sg=g_in_gen, sa=g_in_async; g_in_gen=genm; g_in_async=asyncm; fn->a = parse_stmt(L); g_in_gen=sg; g_in_async=sa; }
                     if (is_static) { node *pr=mknode(N_PROP); pr->str=fn->str; pr->slen=fn->slen; pr->a=fn;
                                      if (staticblk->list && staticblk->nlist<32) staticblk->list[staticblk->nlist++]=pr; }
                     else if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
@@ -515,10 +529,11 @@ static node *parse_primary(lexer *L) {
             advance(L); node *n=mknode(N_OBJECT); n->list=aalloc(sizeof(node*)*64); n->nlist=0;
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,"...")) { advance(L); node *sp=mknode(N_SPREAD); sp->a=parse_assign(L); if(n->list && n->nlist<64) n->list[n->nlist++]=sp; if(peek_punc(L,",")) advance(L); continue; }  /* {...obj} */
+                int asyncm = parse_async_method_marker(L);   /* { async m(){…} } (M682) */
                 int genm = 0; if (peek_punc(L,"*")) { advance(L); genm = 1; }   /* { *m(){…} } : generator method */
                 if (peek_punc(L,"[")) {   /* computed key: {[expr]: value} or computed method {[expr](){…}} (pr->b = key expr) */
                     advance(L); node *pr=mknode(N_PROP); pr->b=parse_assign(L); expect_punc(L,"]");
-                    if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); fn->is_gen=genm; parse_fn_params(L,fn); { int sg=g_in_gen; g_in_gen=genm; fn->a=parse_stmt(L); g_in_gen=sg; } pr->a=fn; }   /* {[e](){…}} */
+                    if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); fn->is_gen=genm; fn->is_async=asyncm; parse_fn_params(L,fn); { int sg=g_in_gen, sa=g_in_async; g_in_gen=genm; g_in_async=asyncm; fn->a=parse_stmt(L); g_in_gen=sg; g_in_async=sa; } pr->a=fn; }   /* {[e](){…}} */
                     else { expect_punc(L,":"); pr->a=parse_assign(L); }                                                       /* {[e]: value} */
                     if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
                     if (peek_punc(L,",")) advance(L); else break;
@@ -543,7 +558,7 @@ static node *parse_primary(lexer *L) {
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
-                else if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); fn->is_gen=genm; parse_fn_params(L,fn); { int sg=g_in_gen; g_in_gen=genm; fn->a=parse_stmt(L); g_in_gen=sg; } pr->a=fn; }   /* method shorthand: name(args){…} */
+                else if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); fn->is_gen=genm; fn->is_async=asyncm; parse_fn_params(L,fn); { int sg=g_in_gen, sa=g_in_async; g_in_gen=genm; g_in_async=asyncm; fn->a=parse_stmt(L); g_in_gen=sg; g_in_async=sa; } pr->a=fn; }   /* method shorthand: name(args){…} */
                 else if (peek_punc(L,"=")) { advance(L); node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; node *as=mknode(N_ASSIGN); as->op='='; as->a=id; as->b=parse_assign(L); pr->a=as; }   /* {x = default} (destructuring) */
                 else { node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; pr->a=id; }   /* {x} shorthand == {x:x} */
                 if (n->list && n->nlist<64) n->list[n->nlist++]=pr;

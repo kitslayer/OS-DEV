@@ -34,4 +34,10 @@ print((function(){var f=async()=>42;var o="?";f().then(function(v){o=v;});return
 print((function(){var f=async x=>await Promise.resolve(x*2);var o="?";f(10).then(function(v){o=v;});return o;})());  // 20 (async x => await …)
 print((function(){var f=async(a,b)=>await Promise.resolve(a+b);var o="?";f(3,4).then(function(v){o=v;});return o;})());  // 7 (async (a,b) => …)
 print((function(){function async(x){return x*3;}return async(5);})());  // 15 (a function named `async` is still callable — `async(5)` is NOT mis-parsed as an arrow)
+print("-- async methods (M682) --");
+print((function(){class C{async m(){return 5;}}var o="?";new C().m().then(function(v){o=v;});return o;})());  // 5 (class async method)
+print((function(){class C{constructor(){this.n=7;}async get(){return await Promise.resolve(this.n);}}var o="?";new C().get().then(function(v){o=v;});return o;})());  // 7 (async method: await + correct this)
+print((function(){var obj={async go(){return await Promise.resolve(42);}};var o="?";obj.go().then(function(v){o=v;});return o;})());  // 42 (object async method)
+print((function(){class C{async m(){throw "e";}}var o="?";new C().m().catch(function(e){o=e;});return o;})());  // e (async method throw -> rejection)
+print((function(){var obj={async(){return 3;}};return obj.async();})());  // 3 (a method NAMED `async` is NOT an async method)
 print("-- done --");
