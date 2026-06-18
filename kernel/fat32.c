@@ -269,23 +269,50 @@ static long fat32_read(const char *name, void *buf, unsigned long max) {
     uint32_t cl0, size; int isdir;
     if (!dir_find(dir, leaf, &cl0, &isdir, &size) || isdir) return -1;
 
-    uint8_t sec[SECSZ];
     uint8_t *dst = buf;
     uint32_t remaining = size;
+    if (remaining > max) remaining = max;            /* never write past the caller's buffer */
     unsigned long written = 0;
     uint32_t cl = cl0, steps = 0;
 
+    /* A sequential chain walk hits the same FAT sector for 128 consecutive
+     * clusters, so cache it (local to this call -> no staleness vs. writes), and
+     * read each run of physically-contiguous clusters in one multi-sector
+     * transfer straight into the destination instead of a sector at a time.
+     * This turns a multi-MB read from tens of thousands of single-sector PIO
+     * commands into a few hundred. */
+    uint8_t  fatbuf[SECSZ]; uint32_t fatbuf_sec = 0xFFFFFFFFu;
+    uint8_t  tail[SECSZ];
+
     while (cluster_in_range(cl) && remaining > 0) {
-        uint32_t first = cluster_to_sector(cl);
-        for (uint32_t s = 0; s < sec_per_clus && remaining > 0; s++) {
-            if (ata_read(first + s, 1, sec) < 0)
-                return (long)written;
-            uint32_t chunk = remaining < SECSZ ? remaining : SECSZ;
-            for (uint32_t i = 0; i < chunk && written < max; i++)
-                dst[written++] = sec[i];
-            remaining -= chunk;
+        uint32_t run_start = cl, run_len = 1;
+        for (;;) {                                   /* coalesce a contiguous, chain-linked run */
+            uint32_t off = cl * 4, fsec = fat_start + off / SECSZ;
+            if (fsec != fatbuf_sec) {
+                if (ata_read(fsec, 1, fatbuf) < 0) { cl = EOC; goto have_run; }
+                fatbuf_sec = fsec;
+            }
+            uint32_t next = rd32(fatbuf + (off % SECSZ)) & 0x0FFFFFFF;
+            if (total_clusters && ++steps > total_clusters + 2) next = EOC;   /* cycle guard */
+            if (next == cl + 1 && cluster_in_range(next) && run_len < 2048) { cl = next; run_len++; continue; }
+            cl = next;                               /* the cluster to continue from after this run */
+            break;
         }
-        cl = fat_step(cl, &steps);
+    have_run:;
+        uint32_t lba = cluster_to_sector(run_start);
+        uint32_t run_sectors = run_len * sec_per_clus;
+        while (run_sectors > 0 && remaining >= SECSZ) {           /* whole sectors, in bulk */
+            uint32_t cnt = run_sectors < 255 ? run_sectors : 255; /* count is a uint8 (0 != 256 here) */
+            if ((unsigned long)cnt * SECSZ > remaining) cnt = remaining / SECSZ;
+            if (ata_read(lba, (uint8_t)cnt, dst + written) < 0) return (long)written;
+            written += (unsigned long)cnt * SECSZ; remaining -= cnt * SECSZ;
+            lba += cnt; run_sectors -= cnt;
+        }
+        if (run_sectors > 0 && remaining > 0) {                   /* final partial sector */
+            if (ata_read(lba, 1, tail) < 0) return (long)written;
+            for (uint32_t i = 0; i < remaining; i++) dst[written++] = tail[i];
+            remaining = 0;
+        }
     }
     return (long)written;
 }

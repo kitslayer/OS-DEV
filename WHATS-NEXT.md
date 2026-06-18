@@ -1,5 +1,17 @@
 # What's next
 
+> **(M720) Much faster file reads — `fat32_read` does multi-sector, contiguous-run I/O.** Loading a big file
+> (e.g. Freedoom's 27 MB WAD) was reading the disk one 512-byte sector at a time *and* re-reading a FAT sector
+> for every cluster (the same FAT sector up to 128× on a sequential walk) — ~108k single-sector PIO commands
+> for 27 MB (~10-15 s). `fat32_read` now (a) caches the current FAT sector for the chain walk (local to the
+> call, so no staleness vs. writes), (b) coalesces physically-contiguous, chain-linked clusters into runs, and
+> (c) reads each run in ≤255-sector `ata_read` bursts straight into the destination (a bounce buffer only for
+> the final partial sector) — a few hundred commands instead of ~108k. The cycle guard + `cluster_in_range`
+> checks are preserved, and `remaining` is clamped to the caller's `max` so the destination can't overrun.
+> This speeds up every file read (boot assets, DOOM/Quake/Freedoom loads, the browser's local pages). Verified
+> in-guest: the Freedoom title now renders by ~6 s (was still a black screen at 7 s), and all 29 `make check`
+> suites stay green — including `fstest`, whose corruption-fuzzer drives this exact read path.
+
 > **(M719) Asteroids — a vector arcade game in the framebuffer.** `user/asteroids.c`: rotate/thrust a ship
 > with wrap-around momentum physics, fire bullets, and blast asteroids that split (big → two medium → two
 > small → gone); clearing the field spawns a bigger wave; three lives, a collision costs one. Drawn with a
