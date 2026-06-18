@@ -188,7 +188,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nru] nl tac uniq[-c] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incv,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold\n");
+            print("files:  ls cat head tail sort[-nru] nl tac uniq[-c] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incv,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -349,6 +349,28 @@ static int run_command(char *line, char *cwd) {
                     buf[rs + rl] = save;
                 }
                 free(buf);
+            }
+        } else if (startswith(line, "seq ")) {             /* seq [first [incr]] last -> one number per line */
+            const char *p = line + 4; while (*p == ' ') p++;
+            long arg[3]; int na = 0;
+            while (*p && na < 3) {
+                int neg = 0; if (*p == '-') { neg = 1; p++; }
+                if (*p < '0' || *p > '9') break;
+                long v = 0; while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+                arg[na++] = neg ? -v : v;
+                while (*p == ' ') p++;
+            }
+            long first = 1, incr = 1, last = 0;
+            if (na == 1) last = arg[0];
+            else if (na == 2) { first = arg[0]; last = arg[1]; }
+            else if (na == 3) { first = arg[0]; incr = arg[1]; last = arg[2]; }
+            if (na < 1 || na > 3 || incr == 0) { print("usage: seq [first [incr]] last\n"); }
+            else {
+                char num[16]; long cnt = 0;
+                for (long v = first; (incr > 0) ? (v <= last) : (v >= last); v += incr) {
+                    if (++cnt > 1000000) break;             /* safety cap on output */
+                    itoa_simple((int)v, num); print(num); print("\n");
+                }
             }
         } else if (startswith(line, "sort ")) {
             const char *fp = line + 5; int rev = 0, nsort = 0, uniq_f = 0;  /* -r reverse, -n numeric, -u unique */
