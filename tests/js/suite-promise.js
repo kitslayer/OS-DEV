@@ -40,4 +40,10 @@ print((function(){class C{constructor(){this.n=7;}async get(){return await Promi
 print((function(){var obj={async go(){return await Promise.resolve(42);}};var o="?";obj.go().then(function(v){o=v;});return o;})());  // 42 (object async method)
 print((function(){class C{async m(){throw "e";}}var o="?";new C().m().catch(function(e){o=e;});return o;})());  // e (async method throw -> rejection)
 print((function(){var obj={async(){return 3;}};return obj.async();})());  // 3 (a method NAMED `async` is NOT an async method)
+print("-- fetch(url) -> Promise<Response> (M684; host mock) --");
+print((function(){var o="?";fetch("http://x/").then(function(r){return r.text();}).then(function(t){o=t;});return o;})());  // hello from fetch (fetch -> .text())
+print((function(){var o="?";fetch("http://x/404").then(function(r){o=r.status+","+r.ok;}).catch(function(){o="REJ";});return o;})());  // 404,false (an HTTP error status RESOLVES with ok=false; it does not reject)
+print((function(){var o="?";fetch("http://x/json").then(function(r){return r.json();}).then(function(j){o=j.a+","+j.b.join("-");});return o;})());  // 1,2-3 (Response.json())
+print((function(){async function f(){var r=await fetch("http://x/");return await r.text();}var o="?";f().then(function(t){o=t;});return o;})());  // hello from fetch (await fetch + await r.text())
+print((function(){var o="?";fetch("http://x/fail").then(function(){o="F";}).catch(function(){o="caught";});return o;})());  // caught (a network failure rejects)
 print("-- done --");

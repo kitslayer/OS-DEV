@@ -2668,14 +2668,16 @@ static val promise_reject_native(val *args, int nargs){
     pset(p, 2, nargs>1 ? args[1] : UND());
     return UND();
 }
-/* A resolve/reject function bound to `promise`: a V_BOUND whose [0]=native, [2]=promise,
- * so calling it invokes native([promise, ...callArgs]) (see call_bound). */
-static val make_resolver(val (*fn)(val*,int), obj *promise){
+/* A native bound to a captured value: a V_BOUND whose [0]=native, [2]=carried, so
+ * calling it invokes native([carried, ...callArgs]) (see call_bound). Used for
+ * resolve/reject (carry the promise) and Response.text/json (carry the body) — natives
+ * receive no self pointer, so this is how a "native closure" carries state. */
+static val make_resolver(val (*fn)(val*,int), val carried){
     obj *nat=new_obj(V_NATIVE); if(!nat){ g_oom=1; return UND(); } nat->native=fn;
     obj *bf=new_obj(V_BOUND);  if(!bf){ g_oom=1; return UND(); }
     arr_push_val(bf, obj_val_native(nat));   /* [0] the native */
     arr_push_val(bf, UND());                 /* [1] this (unused) */
-    arr_push_val(bf, obj_val(promise));      /* [2] bound: the promise */
+    arr_push_val(bf, carried);               /* [2] bound: the captured value */
     return obj_val(bf);
 }
 /* Run a then/catch handler on `arg`; settle the chained promise from its result
@@ -2689,8 +2691,8 @@ static val run_reaction(val cb, val arg){
 static val nat_promise(val *args, int nargs){
     val pv = make_promise(0, UND()); if (g_oom) return UND();   /* pending */
     obj *p = pv.o;
-    val resolve=make_resolver(promise_resolve_native, p);
-    val reject =make_resolver(promise_reject_native, p);
+    val resolve=make_resolver(promise_resolve_native, obj_val(p));
+    val reject =make_resolver(promise_reject_native, obj_val(p));
     if (g_oom) return UND();
     if (nargs>0 && is_callable(args[0])){
         val exa[2]={ resolve, reject };
@@ -2759,6 +2761,41 @@ static val nat_promise_allSettled(val *args, int nargs){
         }
     }
     val av=UND(); av.t=V_ARR; av.o=out; return make_promise(1, av);
+}
+
+/* ---- fetch() (M684): JS-initiated HTTP, on the synchronous-resolution Promise model ----
+ * The host/browser registers g_fetch (js_set_fetch) — a BLOCKING get that fills `out` with
+ * the response body, sets *status to the HTTP status, and returns the body length (or <0 on
+ * a network error). fetch(url) runs that get synchronously, then returns an already-settled
+ * Promise<Response>, so both `fetch(url).then(r=>…)` and `await fetch(url)` work without an
+ * event loop. Response = { status, ok, text():Promise<string>, json():Promise<any> } — text/
+ * json carry the body via make_resolver's bound-arg trick. Like real fetch, an HTTP error
+ * status (404…) still RESOLVES (ok=false); only a network failure rejects. */
+static int (*g_fetch)(const char *url, char *out, int outmax, int *status);
+static val nat_json_parse(val *a, int n);   /* fwd: Response.json() parses the body */
+static val fetch_text_native(val *args, int nargs){ return make_promise(1, nargs>0?args[0]:STRV("")); }   /* args[0]=bound body */
+static val fetch_json_native(val *args, int nargs){
+    val body = nargs>0 ? args[0] : STRV("");
+    val parsed = nat_json_parse(&body, 1);
+    if (g_err) return make_promise(2, take_pending_error());   /* malformed JSON -> rejected promise */
+    return make_promise(1, parsed);
+}
+static val nat_fetch(val *args, int nargs){
+    if (nargs<1 || args[0].t!=V_STR) return make_promise(2, STRV("fetch: a URL string is required"));
+    if (!g_fetch) return make_promise(2, STRV("fetch: no network backing"));   /* not wired (e.g. host without js_set_fetch) */
+    int cap = 131072; char *buf = aalloc(cap); if (!buf) { g_oom=1; return UND(); }
+    int status = 0;
+    int n = g_fetch(args[0].str, buf, cap-1, &status);
+    if (n < 0) return make_promise(2, STRV("fetch failed: network error"));   /* DNS/connect/read failure -> reject */
+    if (n > cap-1) n = cap-1;
+    buf[n] = 0;
+    val body = STRV(buf);                                /* buf is arena-allocated -> persists for the run */
+    obj *resp = new_obj(V_OBJ); if (!resp) { g_oom=1; return UND(); }
+    obj_set(resp, "status", NUM(status));
+    obj_set(resp, "ok", BOOLV(status>=200 && status<300));
+    obj_set(resp, "text", make_resolver(fetch_text_native, body));   /* r.text() -> Promise<body> */
+    obj_set(resp, "json", make_resolver(fetch_json_native, body));   /* r.json() -> Promise<parsed> */
+    return make_promise(1, obj_val(resp));
 }
 
 /* ---- Map & Set ----
@@ -3774,6 +3811,7 @@ static void install_globals(env *g) {
     { obj *pc=new_obj(V_NATIVE); if(pc){ pc->native=nat_promise; g_promise_ctor=pc;   /* Promise (synchronous-resolution model, M679) */
         obj *pst=new_obj(V_OBJ); if(pst){ def_native(pst,"resolve",nat_promise_resolve); def_native(pst,"reject",nat_promise_reject); def_native(pst,"all",nat_promise_all); def_native(pst,"race",nat_promise_race); def_native(pst,"allSettled",nat_promise_allSettled); pc->statics=pst; }
         val v=UND(); v.t=V_NATIVE; v.o=pc; env_define(g,"Promise",v); } }
+    { obj *f=new_obj(V_NATIVE); if(f){ f->native=nat_fetch; env_define(g,"fetch",obj_val_native(f)); } }   /* fetch(url) -> Promise<Response> (M684); functional once js_set_fetch wires a backing */
     { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */
         obj *ast=new_obj(V_OBJ); if(ast){ def_native(ast,"isArray",nat_array_isArray); def_native(ast,"from",nat_array_from); def_native(ast,"of",nat_array_of); arrc->statics=ast; }
         g_array_ctor=arrc; env_define(g,"Array",obj_val_native(arrc)); } }
@@ -3878,6 +3916,11 @@ int js_run(const char *src, char *out, int outmax) {
 /* The browser registers a localStorage backing store before running page JS. */
 void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *)) {
     g_ls_get = get; g_ls_set = set;
+}
+/* The browser registers a blocking HTTP backing for fetch() (M684): fills out/+status,
+ * returns body length or <0 on a network error. NULL (default) -> fetch() rejects. */
+void js_set_fetch(int (*fn)(const char *url, char *out, int outmax, int *status)) {
+    g_fetch = fn;
 }
 /* The browser registers DOM read/mutate callbacks for getElementById handles. */
 void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const char *, const char *, int)) {
@@ -4080,6 +4123,16 @@ static int hdom_tag(const char *id, char *out, int max){ (void)id; if(max<=0)ret
 static void hdom_rmattr_at(int off, const char *attr){ if(strcmp(attr,"class")) return; for(int i=0;i<hcls_n;i++) if(hcls_off[i]==off){ hcls_val[i][0]=0; return; } }
 static void hdom_rmattr(const char *id, const char *attr){ (void)id; (void)attr; }   /* id handles: no id-class store in the mock */
 #ifndef JS_NO_MAIN   /* a host harness embedding js.c (e.g. tests/jsonfuzz) defines this to supply its own main */
+/* mock fetch backing for host tests: canned bodies keyed off the URL (no real network).
+ * "/json" -> a JSON object; "/fail" -> a network error (<0); anything else -> a text body. */
+static int hfetch(const char *url, char *out, int outmax, int *status) {
+    if (strstr(url, "fail")) return -1;                       /* simulate a network error -> reject */
+    const char *body = strstr(url, "json") ? "{\"a\":1,\"b\":[2,3]}" : "hello from fetch";
+    *status = strstr(url, "404") ? 404 : 200;
+    int n=0; while (body[n] && n<outmax-1) { out[n]=body[n]; n++; } out[n]=0;
+    return n;
+}
+
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -4093,6 +4146,7 @@ int main(int argc, char **argv) {
     js_set_dom_tag(hdom_tag, hdom_tag_at);   /* mock element.tagName for host tests */
     js_set_dom_rmattr(hdom_rmattr, hdom_rmattr_at);    /* mock removeAttribute for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
+    js_set_fetch(hfetch);                                /* mock network for fetch() tests (M684) */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
     if (getenv("JS_ARENA_REPORT")) fprintf(stderr, "ARENA_END=%d / %d (headroom %d)\n", g_arena_off, JS_ARENA, JS_ARENA-g_arena_off);

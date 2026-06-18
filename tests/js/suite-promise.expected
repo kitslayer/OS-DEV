@@ -35,4 +35,10 @@ handled:X
 42
 e
 3
+-- fetch(url) -> Promise<Response> (M684; host mock) --
+hello from fetch
+404,false
+1,2-3
+hello from fetch
+caught
 -- done --
