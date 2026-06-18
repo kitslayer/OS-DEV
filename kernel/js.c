@@ -1026,6 +1026,8 @@ static int64_t to_num(val v) {
             int64_t x=0;
             if(s[0]=='0' && (s[1]=='x'||s[1]=='X')){ s+=2;            /* 0x.. hex (Number("0x10")===16) */
                 for(;;){ char c=*s; int d; if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; x=x*16+d; s++; } }
+            else if(s[0]=='0' && (s[1]=='b'||s[1]=='B')){ s+=2; while(*s=='0'||*s=='1'){ x=x*2+(*s-'0'); s++; } }   /* 0b.. binary (Number("0b101")===5) (M693) */
+            else if(s[0]=='0' && (s[1]=='o'||s[1]=='O')){ s+=2; while(*s>='0'&&*s<='7'){ x=x*8+(*s-'0'); s++; } }   /* 0o.. octal (Number("0o17")===15) (M693) */
             else while(*s>='0'&&*s<='9'){ x=x*10+(*s-'0'); s++; }
             return neg?-x:x; }
         case V_OBJ:

@@ -59,4 +59,6 @@ print(JSON.stringify({n:Infinity,m:-Infinity,ok:5}));            // {"n":null,"m
 print("-- Array.lastIndexOf(fromIndex) + reduce-of-empty throws (M692) --");
 print([1,2,3,2,1].lastIndexOf(2,2), [1,2,3,2,1].lastIndexOf(2,-3), [1,2,3,2,1].lastIndexOf(2), [1,2,3,2,1].lastIndexOf(9));   // 1 1 3 -1 (lastIndexOf searches backward from fromIndex; neg fromIndex is from the end)
 print((function(){try{[].reduce(function(a,b){return a+b;});return "no";}catch(e){return "threw";}})(), [].reduce(function(a,b){return a+b;},0), [10,20].reduce(function(a,b){return a+b;}));   // threw 0 30 (empty+no-init throws; empty+init returns init; normal reduce)
+print("-- ToNumber 0b / 0o string prefixes (M693) --");
+print(Number("0b101"), Number("0o17"), Number("0B11"), +"0xff", +"  0b1111  ");   // 5 15 3 255 15 (binary/octal join the existing 0x hex parse; +coercion + surrounding whitespace too)
 print("-- done --");
