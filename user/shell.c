@@ -1765,24 +1765,10 @@ static void run_pipe(char *line, char *cwd, const char *rfile, int append) {
     sys_delete("PIPE.TMP");                     /* best-effort cleanup of the scratch file */
 }
 
-/* Filename globbing. glob_match: case-insensitive shell wildcard match — '*' is
- * any run (including empty), '?' is exactly one char. Iterative two-pointer
- * (star/backtrack) matcher: O(len(pat)*len(name)), NOT recursive — so an
- * adversarial pattern like "*a*a*a*…*b" can't cause catastrophic exponential
- * backtracking (which the recursive form did, hanging the shell). */
-static char gl_lc(char c){ return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
-static int glob_match(const char *pat, const char *s){
-    const char *star = 0, *mark = 0;   /* last '*' seen in pat, and where to resume `s` */
-    while (*s) {
-        if (*pat == '*') { star = pat++; mark = s; }                 /* record it; try matching empty first */
-        else if (*pat == '?' || gl_lc(*pat) == gl_lc(*s)) { pat++; s++; }   /* consume one */
-        else if (star) { pat = star + 1; s = ++mark; }               /* backtrack: '*' eats one more char */
-        else return 0;                                               /* mismatch, no '*' to stretch */
-    }
-    while (*pat == '*') pat++;                                       /* trailing '*'s match empty */
-    return *pat == 0;
-}
-/* Expand any '*'/'?' token in `src` against the current directory into `dst`
+/* glob_match() (filename '*'/'?' globbing, iterative star/backtrack — no
+ * catastrophic recursion) now lives in shgrep.h alongside gr_match, host-tested
+ * by tests/shgrep.
+ * Expand any '*'/'?' token in `src` against the current directory into `dst`
  * (other tokens pass through verbatim); a pattern with no match is left literal,
  * as a shell does. Output is length-bounded by dstsz (a huge match set truncates
  * rather than overflowing). Reuses sys_list — the same listing `ls` prints, one

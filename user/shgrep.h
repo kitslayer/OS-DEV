@@ -61,4 +61,19 @@ static int gr_match(const char *re, const char *t, int ci) {     /* match anywhe
     return 0;
 }
 
+/* Filename globbing for `ls *.txt` etc.: '*' (any run, greedy with backtrack),
+ * '?' (exactly one char), case-insensitive literals. Iterative (no recursion):
+ * `star`/`mark` record the last '*' so a failed tail re-stretches it. */
+static int glob_match(const char *pat, const char *s) {
+    const char *star = 0, *mark = 0;
+    while (*s) {
+        if (*pat == '*') { star = pat++; mark = s; }                 /* try matching empty first */
+        else if (*pat == '?' || gr_lc(*pat) == gr_lc(*s)) { pat++; s++; }
+        else if (star) { pat = star + 1; s = ++mark; }               /* backtrack: '*' eats one more */
+        else return 0;
+    }
+    while (*pat == '*') pat++;                                        /* trailing '*'s match empty */
+    return *pat == 0;
+}
+
 #endif

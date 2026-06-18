@@ -18,6 +18,9 @@ static int fails = 0;
 static void M(const char *re, const char *t, int ci, int exp, const char *m) {
     CHECK(gr_match(re, t, ci) == exp, m);
 }
+static void G(const char *pat, const char *s, int exp, const char *m) {
+    CHECK(glob_match(pat, s) == exp, m);
+}
 
 int main(void) {
     /* ---- literal (no metacharacters) behaves like substring search ---- */
@@ -77,6 +80,32 @@ int main(void) {
         gr_match(pat, txt, rand() & 1);   /* ASan/UBSan catch any over-read; bounded by pattern length */
     }
     printf("fuzz: 300000 random pattern/text pairs -> %s\n", fails ? "FAILURES" : "all clean (bounded, no OOB)");
+
+    /* ---- glob_match: filename '*'/'?' wildcards (case-insensitive) ---- */
+    G("*.txt", "a.txt", 1, "glob *.txt match");
+    G("*.txt", "a.png", 0, "glob *.txt no-match");
+    G("a?c", "abc", 1, "glob ? one char");
+    G("a?c", "ac", 0, "glob ? needs a char");
+    G("*", "", 1, "glob * matches empty");
+    G("*", "anything", 1, "glob * matches all");
+    G("a*", "a", 1, "glob trailing * empty");
+    G("*c", "abc", 1, "glob leading *");
+    G("a*b*c", "axbyc", 1, "glob multi-star");
+    G("a*b*c", "axyc", 0, "glob multi-star no-match");
+    G("*.TXT", "file.txt", 1, "glob case-insensitive");
+    G("?*", "", 0, "glob ?* needs >=1");
+    G("a*a", "aa", 1, "glob a*a empty middle");
+    printf("glob: %s\n", fails ? "FAILURES" : "ok (*/?/case-insensitive/backtrack)");
+    /* glob fuzz: the iterative star/backtrack must stay bounded + never OOB */
+    for (int trial = 0; trial < 200000; trial++) {
+        char pat[16], txt[20];
+        int pl = rand() % 15; for (int i = 0; i < pl; i++) pat[i] = (trial & 1) ? "*?ab."[rand() % 5] : (char)('a' + rand() % 3);
+        pat[pl] = 0;
+        int tl = rand() % 19; for (int i = 0; i < tl; i++) txt[i] = (char)('a' + rand() % 3);
+        txt[tl] = 0;
+        glob_match(pat, txt);
+    }
+    printf("glob fuzz: 200000 pairs -> %s\n", fails ? "FAILURES" : "all clean (bounded, no OOB)");
 
     if (fails) { printf("FAIL: %d check(s)\n", fails); return 1; }
     printf("PASS: shell grep matcher (semantics + ASan/UBSan-clean fuzz)\n");
