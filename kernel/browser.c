@@ -35,6 +35,7 @@
 #include "htmlattr.h"
 #include "url.h"
 #include "color.h"
+#include "cssprop.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -370,22 +371,8 @@ static uint32_t parse_style_color(const char *s, int n) {
     }
     return 0;
 }
-/* Find a lowercase CSS property `prop` (length plen) at a property boundary in an inline
- * style string and return its trimmed value span [*vs,*ve); 1 if found. Bounded read-only. */
-static int style_prop(const char *s, int n, const char *prop, int plen, int *vs, int *ve) {
-    for (int i = 0; i + plen + 1 <= n; i++) {                /* room for prop + ':' */
-        int m = 1;
-        for (int j = 0; j < plen; j++) if (lc(s[i+j]) != prop[j]) { m = 0; break; }
-        if (!m || s[i+plen] != ':') continue;
-        char before = (i > 0) ? s[i-1] : ' ';                /* must start a property (not a hyphen-suffix like -weight) */
-        if (!(before==' '||before==';'||before=='\t'||before=='\n'||before=='"'||before=='\'')) continue;
-        int k = i + plen + 1; while (k < n && (s[k]==' '||s[k]=='\t')) k++;   /* ws after ':' */
-        int a = k; while (k < n && s[k] != ';' && s[k] != '}') k++;          /* value to ';' or end */
-        int e = k; while (e > a && (s[e-1]==' '||s[e-1]=='\t')) e--;          /* trim trailing ws */
-        *vs = a; *ve = e; return 1;
-    }
-    return 0;
-}
+/* style_prop (the inline-style property scanner) now lives in cssprop.c so it can
+ * be fuzzed in isolation (M583). */
 /* Map an inline style's font-weight/font-style to the renderer's text-style enum:
  * font-weight bold/bolder/600..900 -> STY_BOLD; font-style italic/oblique -> STY_EM; else -1.
  * (The renderer's style is a single enum, so bold takes precedence when both are set.) */
