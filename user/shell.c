@@ -1226,17 +1226,15 @@ static int run_command(char *line, char *cwd) {
             else if (last == 0) print("  /\n");                        /* "/file" -> "/" */
             else { path[last] = 0; print("  "); print(path); print("\n"); }
         } else if (startswith(line, "paste ")) {          /* paste F1 F2 -> each file's line i, side by side (tab-joined) */
-            static char c1[2048], c2[2048];
             const char *p = line + 6; while (*p == ' ') p++;
             char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
             while (*p == ' ') p++;
             char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
             if (!f1[0] || !f2[0]) { print("usage: paste <file1> <file2>\n"); }
             else {
-                long n1 = sys_readfile(f1, c1, sizeof(c1));
-                long n2 = sys_readfile(f2, c2, sizeof(c2));
-                if (n1 < 0)      { print("paste: no such file: "); print(f1); print("\n"); }
-                else if (n2 < 0) { print("paste: no such file: "); print(f2); print("\n"); }
+                long n1, n2; char *c1 = slurp(f1, &n1); char *c2 = slurp(f2, &n2);
+                if (!c1)      { print("paste: no such file: "); print(f1); print("\n"); }
+                else if (!c2) { print("paste: no such file: "); print(f2); print("\n"); }
                 else {
                     long i1 = 0, i2 = 0;
                     while (i1 < n1 || i2 < n2) {
@@ -1249,19 +1247,18 @@ static int run_command(char *line, char *cwd) {
                         t[q] = 0; print("  "); print(t); print("\n");
                     }
                 }
+                free(c1); free(c2);
             }
         } else if (startswith(line, "comm ")) {           /* comm F1 F2 (sorted) -> < only-in-1, > only-in-2, = in-both */
-            static char c1[2048], c2[2048];
             const char *p = line + 5; while (*p == ' ') p++;
             char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
             while (*p == ' ') p++;
             char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
             if (!f1[0] || !f2[0]) { print("usage: comm <file1> <file2>  (sorted; < only-1, > only-2, = both)\n"); }
             else {
-                long n1 = sys_readfile(f1, c1, sizeof(c1));
-                long n2 = sys_readfile(f2, c2, sizeof(c2));
-                if (n1 < 0)      { print("comm: no such file: "); print(f1); print("\n"); }
-                else if (n2 < 0) { print("comm: no such file: "); print(f2); print("\n"); }
+                long n1, n2; char *c1 = slurp(f1, &n1); char *c2 = slurp(f2, &n2);
+                if (!c1)      { print("comm: no such file: "); print(f1); print("\n"); }
+                else if (!c2) { print("comm: no such file: "); print(f2); print("\n"); }
                 else {
                     long i1 = 0, i2 = 0;
                     while (i1 < n1 || i2 < n2) {
@@ -1282,6 +1279,7 @@ static int run_command(char *line, char *cwd) {
                         if (rel >= 0) i2 = b_next;
                     }
                 }
+                free(c1); free(c2);
             }
         } else if (startswith(line, "diff ")) {           /* diff F1 F2 -> LCS line edit script: '- ' removed from F1, '+ ' added in F2, '  ' unchanged */
             static char d1[2048], d2[2048];
