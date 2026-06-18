@@ -1,6 +1,6 @@
 # What's next
 
-> **(M603-M619) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
+> **(M603-M622) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
 > via in-guest verification.** Verifying the FAT32 write path (a cp/edit/save round-trip) led into the
 > shell's file commands and exposed a pervasive pattern: **fixed-size buffers silently truncating anything
 > larger.** Consequences ranged from **silent data loss** — cp/mv truncated copies to 4KB (and mv then
@@ -17,10 +17,11 @@
 > (trailing space) and broke FAT32 lookups / streq commands — redirection only worked written tight
 > (`cmd>file`). The pipe/redirect capture buffer also grew from a fixed 8KB to a growable heap buffer.
 > Also **M603**: ~38 more CSS named colours (real pages rendered tomato/dodgerblue/limegreen as no colour).
-> By M619 the whole single-file command set is done (tac/strings/tr/cut/fold too — fold now prints each
-> wrapped line as it goes rather than buffering all output); only the obscure two-file comm/paste and diff
-> (a 128-line LCS table) still cap. A clean example of verification cascading — one round-trip test surfaced
-> a whole class plus an adjacent parsing bug. All 27 suites green throughout.
+> By M622 EVERY shell file command handles whole files (M617-M619 tac/strings/tr/cut/fold, fold printing
+> each wrapped line as it goes; M621 comm/paste; M622 diff's input). The one remaining cap — diff's 128-line
+> LCS table — diff REPORTS ("(diff truncated at 128 lines/file)"), so it's honest, not silent: **no silent
+> truncation remains.** A clean example of verification cascading — one round-trip test surfaced a whole
+> class plus an adjacent parsing bug. All 27 suites green throughout.
 
 > **(M599) Real bug found by in-guest verification: Quake didn't launch in the default RAM config.** While
 > screenshot-verifying the marquee features, DOOM rendered but **Quake produced no window and no crash** —
