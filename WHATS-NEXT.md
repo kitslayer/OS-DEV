@@ -8,6 +8,11 @@
 > / relative). Unit-tested standalone over 18 cases; urltest's 400k fuzz stays clean (norm_path only shrinks
 > within the bounded buffer); regression cases added. (Probing the colour parser, by contrast, found the muted
 > named palette — red=CC0000 etc. — is a deliberate, test-locked design choice, not a bug: left as-is.)
+> **More shell text-tool flags (M664-M665):** `sort -n` (numeric: 1,2,3,10,20 not the lexicographic
+> 1,10,2,20,3) and `uniq -c` (prefix each run with its count, the `sort|uniq -c` tally idiom) — both verified
+> in-guest. **M662:** `http_find_loc` now trims trailing OWS from the `Location:` value (RFC 7230) so a
+> redirect URL has no stray spaces. **M663:** pngenc test now validates png_encode output is a *standard* PNG
+> (magic + chunk CRCs + zlib IDAT, via Python stdlib), mirroring the deflate runner's system-gunzip check.
 
 > **(M649-M650) Shell `grep` gained regex (was literal-substring only).** `grep '^foo'` used to search for the
 > four characters "^foo"; `grep 'a.c'` wanted a literal dot. Added the compact Kernighan/Pike matcher: `^`/`$`
