@@ -3307,6 +3307,21 @@ static void civil_from_days(int64_t z, int64_t *yr, int64_t *mo, int64_t *dy){
     int64_t m = mp < 10 ? mp+3 : mp-9;                              /* [1, 12]    */
     *yr = y + (m <= 2); *mo = m; *dy = d;
 }
+/* Parse an ISO-8601-ish date string "YYYY-MM-DD[THH:MM:SS[.sss]][Z]" into components
+ * (the trailing fractional seconds + Z/timezone are accepted but ignored — this engine
+ * treats everything as UTC). Returns 1 on a usable parse, 0 otherwise. (M695) */
+static int parse_iso(const char *s, int64_t *yr, int64_t *mo, int64_t *dy, int64_t *hh, int64_t *mi, int64_t *se){
+    while(*s==' '||*s=='\t') s++;
+    if(!(*s>='0'&&*s<='9')) return 0;
+    int64_t Y=0,M=1,D=1,H=0,Mi=0,S=0;
+    while(*s>='0'&&*s<='9'){ Y=Y*10+(*s-'0'); s++; }
+    if(*s=='-'){ s++; if(!(*s>='0'&&*s<='9')) return 0; M=0; while(*s>='0'&&*s<='9'){ M=M*10+(*s-'0'); s++; }
+        if(*s=='-'){ s++; if(!(*s>='0'&&*s<='9')) return 0; D=0; while(*s>='0'&&*s<='9'){ D=D*10+(*s-'0'); s++; } } }
+    if(*s=='T'||*s==' '){ s++; if(*s>='0'&&*s<='9'){ H=0; while(*s>='0'&&*s<='9'){ H=H*10+(*s-'0'); s++; }
+        if(*s==':'){ s++; Mi=0; while(*s>='0'&&*s<='9'){ Mi=Mi*10+(*s-'0'); s++; }
+            if(*s==':'){ s++; S=0; while(*s>='0'&&*s<='9'){ S=S*10+(*s-'0'); s++; } } } } }
+    *yr=Y; *mo=M; *dy=D; *hh=H; *mi=Mi; *se=S; return 1;
+}
 /* Date() / new Date() -> a V_DATE object holding [year,month,day,hour,min,sec] in
  * vals[0..5] (read from the RTC at construction). Methods via eval_date_method;
  * val_to_str renders "YYYY-MM-DD HH:MM:SS" so it still prints/coerces like before. */
@@ -3329,7 +3344,9 @@ static val nat_date(val *a, int n){
         int64_t secs = days_from_civil(y,mo,d)*86400 + h*3600 + mi*60 + s;
         int64_t nd = secs/86400, tod = secs - nd*86400; if(tod<0){ tod+=86400; nd--; }
         civil_from_days(nd,&y,&mo,&d); h=tod/3600; mi=(tod%3600)/60; s=tod%60;
-    } else {                                /* new Date() / new Date("string") — current time (string parse unsupported) */
+    } else if(n>=1 && a[0].t==V_STR && parse_iso(a[0].str,&y,&mo,&d,&h,&mi,&s)){
+        /* new Date("YYYY-MM-DD[THH:MM:SS]") — parse the ISO string (M695) */
+    } else {                                /* new Date() / an unparseable string — current time */
 #ifndef JS_HOSTTEST
     struct rtc_time t; rtc_now(&t); y=t.year; mo=t.month; d=t.day; h=t.hour; mi=t.min; s=t.sec;
 #else
@@ -3347,6 +3364,12 @@ static val nat_date_now(val *a, int n){ (void)a; (void)n; int y,mo,d,h,mi,s;   /
     y=2026; mo=6; d=13; h=12; mi=0; s=0;
 #endif
     int64_t z=days_from_civil(y,mo,d); return NUM((z*86400 + (int64_t)h*3600 + mi*60 + s)*1000); }
+static val nat_date_parse(val *a, int n){   /* Date.parse("YYYY-MM-DD…") -> epoch ms (M695) */
+    int64_t y,mo,d,h,mi,s;
+    if(n>=1 && a[0].t==V_STR && parse_iso(a[0].str,&y,&mo,&d,&h,&mi,&s))
+        return NUM((days_from_civil(y,mo,d)*86400 + h*3600 + mi*60 + s)*1000);
+    return NUM(0);   /* unparseable -> 0 (this engine has no NaN) */
+}
 static val eval_date_method(val recv, const char *name, val *args, int nargs){
     (void)args;(void)nargs; obj *o=recv.o; if(!o || o->n<6) return UND();
     if(strcmp(name,"getFullYear")==0) return o->vals[0];
@@ -3893,7 +3916,7 @@ static void install_globals(env *g) {
     { obj *e=new_obj(V_NATIVE); e->native=nat_decodeURI;          env_define(g,"decodeURI",obj_val_native(e)); }
     { obj *e=new_obj(V_NATIVE); e->native=nat_structured_clone; env_define(g,"structuredClone",obj_val_native(e)); }   /* deep clone w/ cycle preservation (M266) */
     obj *dt=new_obj(V_NATIVE); dt->native=nat_date;     env_define(g,"Date",obj_val_native(dt));   /* Date() -> wall-clock string */
-    { obj *dst=new_obj(V_OBJ); if(dst){ def_native(dst,"now",nat_date_now); dt->statics=dst; } }   /* Date.now() */
+    { obj *dst=new_obj(V_OBJ); if(dst){ def_native(dst,"now",nat_date_now); def_native(dst,"parse",nat_date_parse); dt->statics=dst; } }   /* Date.now() / Date.parse() */
 }
 
 /* =========================== entry point =========================== */

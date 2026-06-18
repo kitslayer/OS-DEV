@@ -63,4 +63,6 @@ print("-- ToNumber 0b / 0o string prefixes (M693) --");
 print(Number("0b101"), Number("0o17"), Number("0B11"), +"0xff", +"  0b1111  ");   // 5 15 3 255 15 (binary/octal join the existing 0x hex parse; +coercion + surrounding whitespace too)
 print("-- String startsWith/endsWith position + repeat(-1) throws (M694) --");
 print("hello".startsWith("llo",2), "hello".endsWith("ell",4), "hello".startsWith("he",1), "hello".endsWith("lo"), (function(){try{"x".repeat(-1);return "no";}catch(e){return "threw";}})());   // true true false true threw (startsWith honors the start position; endsWith treats the string as ending at endPos; repeat(neg)->RangeError)
+print("-- Date string parsing: new Date(str) + Date.parse (M695) --");
+print(new Date("2024-01-15").getFullYear(), Date.parse("2024-01-01T00:00:00.000Z"), Date.parse("1970-01-02"), new Date("2024-03-20T10:30:45").getMonth(), new Date("2024-03-20T10:30:45").getHours());   // 2024 1704067200000 86400000 2 10 (ISO date/datetime parse; trailing .sss/Z accepted+ignored as UTC)
 print("-- done --");
