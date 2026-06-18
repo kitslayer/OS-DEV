@@ -731,8 +731,9 @@ static const struct {
         "Crypto: <code>sha256 FILE</code>, <code>sha512 FILE</code>, <code>crypt</code>, <code>base64</code>. "
         "Also: <code>apps</code>, <code>js</code>, <code>cal</code>, <code>date</code>, <code>mem</code>, <code>ps</code>, <code>df</code>, <code>beep</code>, <code>morse TEXT</code>, <code>factor N</code>, <code>clear</code>. Type <code>help</code> in the shell for the full list.</p>"
         "<h2>Keyboard</h2>"
-        "<p>Desktop: <span class=\"key\">F2</span> cycle windows, <span class=\"key\">F3</span> minimise, <span class=\"key\">F4</span> maximise, <span class=\"key\">F5</span>/<span class=\"key\">F6</span> tile, <span class=\"key\">F9</span> Apps menu.</p>"
-        "<p>Browser: <span class=\"key\">Tab</span>/<span class=\"key\">n</span> next link, <span class=\"key\">p</span> previous, <span class=\"key\">Enter</span> follow, <span class=\"key\">Backspace</span> back, <span class=\"key\">h</span> home, <span class=\"key\">s</span> save, <span class=\"key\">a</span> bookmark, <span class=\"key\">\\</span> find text.</p>"
+        "<p>Desktop: <span class=\"key\">F1</span> shortcut help, <span class=\"key\">F2</span> cycle windows, <span class=\"key\">F3</span> minimise, <span class=\"key\">F4</span> maximise, <span class=\"key\">F5</span>/<span class=\"key\">F6</span> tile left/right, <span class=\"key\">F8</span> close, <span class=\"key\">F9</span> Apps menu (type a letter to jump), <span class=\"key\">F12</span> screenshot to disk.</p>"
+        "<p>Mouse: drag a title bar to move (double-click it, or drag to the top edge, to maximise; drag to a side edge to tile); drag the bottom-right corner to resize; click the clock for the calendar.</p>"
+        "<p>Browser: <span class=\"key\">e</span>/<span class=\"key\">/</span> edit the address, <span class=\"key\">Tab</span>/<span class=\"key\">n</span> next link, <span class=\"key\">p</span> previous, <span class=\"key\">Enter</span> follow, <span class=\"key\">Backspace</span> back, <span class=\"key\">h</span> home, <span class=\"key\">s</span> save, <span class=\"key\">a</span> bookmark, <span class=\"key\">\\</span> find text.</p>"
         "</body></html>" },
     { "JSDEEP  HTM", "<h1>Deep recursion guard</h1>"
         "<p>This page's script recurses 500 deep on purpose. The interpreter must"
