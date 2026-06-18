@@ -989,13 +989,13 @@ static int val_equal(val a, val b) {
  * overflowing the kernel stack (verified on `(a+)+$`). Supports literals, . ,
  * [classes] (ranges, negation, \d\w\s\D\W\S), * + ? (greedy), | , (capture
  * groups), ^ $, escapes; flags i (ignore case) and g (global). */
-enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_WORDB, I_NWORDB, I_BACKREF, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
+enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_WORDB, I_NWORDB, I_BACKREF, I_AHEAD, I_AHEADEND, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
 typedef struct { int op; int c; int x, y; unsigned char *cls; } reinst;
 #define RE_MAXPROG 512
 #define RE_MAXGROUP 9
 typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int multiline; int dotall; int lastIndex; const char *source; int ok; const char *gnames[RE_MAXGROUP+1]; } regex;
 
-enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_BACKREF, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
+enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_BACKREF, RN_AHEAD, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
 typedef struct rnode rnode;
 struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; int lazy; };
 typedef struct { const char *p; int len, pos; int ngroup; int err; int depth; const char *gnames[RE_MAXGROUP+1]; } rparse;
@@ -1030,6 +1030,10 @@ static rnode *rx_atom(rparse *P){
     if(P->pos>=P->len) return rx_node(RN_EMPTY);
     int c=(unsigned char)P->p[P->pos];
     if(c=='('){ P->pos++;
+        if(P->pos+1<P->len && P->p[P->pos]=='?' && (P->p[P->pos+1]=='='||P->p[P->pos+1]=='!')){   /* (?= lookahead, (?! negative lookahead (zero-width) */
+            int neg=(P->p[P->pos+1]=='!'); P->pos+=2;
+            rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1;
+            rnode *la=rx_node(RN_AHEAD); if(!la){P->err=1;return 0;} la->a=body; la->c=neg; return la; }
         const char *gnm=0; int gnl=0; int noncap=0;   /* (?<name>… capture name span, if present */
         if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') { P->pos+=2; noncap=1; }   /* (?: non-capturing: skip ?: AND don't allocate a group */
         else if(P->pos+2<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]=='<' && P->p[P->pos+2]!='=' && P->p[P->pos+2]!='!'){   /* (?<name>… named capture: capture the name, treat as a numbered group */
@@ -1149,6 +1153,9 @@ static void rx_compile(remit *E, rnode *n){
         case RN_WORDB: rx_emit(E,I_WORDB,0,0,0,0); break;
         case RN_NWORDB: rx_emit(E,I_NWORDB,0,0,0,0); break;
         case RN_BACKREF: rx_emit(E,I_BACKREF,n->c,0,0,0); break;
+        /* (?= )/(?! ): emit I_AHEAD, the body, then I_AHEADEND; patch I_AHEAD.x to the
+         * instruction after the body so a successful (zero-width) assertion resumes there. */
+        case RN_AHEAD: { int a=rx_emit(E,I_AHEAD,n->c,0,0,0); rx_compile(E,n->a); rx_emit(E,I_AHEADEND,0,0,0,0); E->prog[a].x=E->pc; break; }
         case RN_EMPTY: break;
         case RN_CAT: rx_compile(E,n->a); rx_compile(E,n->b); break;
         case RN_GROUP: if(n->group){ rx_emit(E,I_SAVE,2*n->group,0,0,0); rx_compile(E,n->a); rx_emit(E,I_SAVE,2*n->group+1,0,0,0); } else rx_compile(E,n->a); break;
@@ -1201,6 +1208,10 @@ static int re_run(regex *re,int pc,const char*s,int slen,int sp,int*caps,long*bu
                 int blen=en-st; if(sp+blen>slen) return 0;
                 for(int k=0;k<blen;k++) if(!rx_eqc((unsigned char)s[sp+k],(unsigned char)s[st+k],re->icase)) return 0;
                 sp+=blen; pc++; continue; }
+            case I_AHEAD: {   /* (?=…)/(?!…): does the body match at sp? zero-width — sp unchanged on success */
+                int r=re_run(re,pc+1,s,slen,sp,caps,budget,depth+1); if(r==-2) return -2;
+                if((r>0) != (in->c!=0)){ pc=in->x; continue; } return 0; }   /* in->c = negate flag */
+            case I_AHEADEND: return 1;   /* terminal success for a lookahead sub-match */
             case I_JMP: pc=in->x; continue;
             case I_SPLIT: { int r=re_run(re,in->x,s,slen,sp,caps,budget,depth+1); if(r!=0) return r; pc=in->y; continue; }
             case I_SAVE: { int idx=in->c; int old=(idx<2*(RE_MAXGROUP+1))?caps[idx]:-1; if(idx<2*(RE_MAXGROUP+1)) caps[idx]=sp;

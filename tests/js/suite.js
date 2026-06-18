@@ -395,4 +395,6 @@ print("-- regex m (multiline) + s (dotall) flags (M644) --");
 print("a\nb".match(/^\w/g).join(","), "a\nb".match(/^\w/gm).join(","), /a.b/.test("a\nb"), /a.b/s.test("a\nb"));  // a a,b false true (^ is string-anchored without m; . excludes \n without s)
 print("-- regex (?:) non-capturing + \\xHH (M645) --");
 print("a1b".match(/(?:a)(\d)(?:b)/)[1], "catfish".match(/(?:cat|dog)fish/)[0], /\x41/.test("A"), "A B".match(/\x41\x20\x42/)[0]);  // 1 catfish true A B (?: doesn't capture; \xHH hex char)
+print("-- regex lookahead (?=) (?!) (M646) --");
+print("foobar".match(/foo(?=bar)/)[0], "100px".match(/\d+(?=px)/)[0], /^(?=.*\d)\w+$/.test("abc123"), "a1 ab".match(/a(?!\d)/g).join(","));  // foo 100 true a (zero-width positive/negative lookahead)
 print("-- done --");
