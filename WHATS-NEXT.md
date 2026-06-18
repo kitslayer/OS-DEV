@@ -1,5 +1,26 @@
 # What's next
 
+> **(M603-M615) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
+> via in-guest verification.** Verifying the FAT32 write path (a cp/edit/save round-trip) led into the
+> shell's file commands and exposed a pervasive pattern: **fixed-size buffers silently truncating anything
+> larger.** Consequences ranged from **silent data loss** — cp/mv truncated copies to 4KB (and mv then
+> deleted the source); the editor (ESC always saves) rewrote any file >8KB as just its first 8KB; `>>`
+> append rewrote the target as its first 8KB — to **wrong-but-authoritative results** — sha256/sha512/crc32
+> hashed only the first 16KB; `cmp` reported "files are identical" for files that differed past 2KB;
+> wc/grep/tail/sort/nl/uniq/hexdump processed only a 0.5–8KB prefix; gzip/gunzip/crypt capped at 16–256KB.
+> Each now handles the whole file (a kernel `read_whole_file()` + a shell `slurp()`: a heap buffer that
+> doubles until the read no longer fills it, capped at 32MB; sort/nl/uniq also lost their fixed line caps),
+> every fix verified in-guest against host tools / file sizes (e.g. sha256 of WALL.PNG matches `sha256sum`;
+> `cmp` of two 14KB copies differing only at the end now reports the diff; `cat *.htm > f` captures all
+> 71KB; gzip→gunzip of a 430KB WAV round-trips byte-identical). A **separate parsing bug** surfaced
+> alongside: redirect parsing left the space before `>` in the command, so `cmd arg > file` passed `arg `
+> (trailing space) and broke FAT32 lookups / streq commands — redirection only worked written tight
+> (`cmd>file`). The pipe/redirect capture buffer also grew from a fixed 8KB to a growable heap buffer.
+> Also **M603**: ~38 more CSS named colours (real pages rendered tomato/dodgerblue/limegreen as no colour).
+> Remaining (rare, noted): tac/fold/cut/tr/strings still cap (output buffers / secondary line arrays). A
+> clean example of verification cascading — one round-trip test surfaced a whole class plus an adjacent
+> parsing bug. All 27 suites green throughout.
+
 > **(M599) Real bug found by in-guest verification: Quake didn't launch in the default RAM config.** While
 > screenshot-verifying the marquee features, DOOM rendered but **Quake produced no window and no crash** —
 > its init silently failed. Root cause: Quake needs its 18 MB PAK + a multi-MB hunk on top of the kernel
