@@ -35,7 +35,14 @@
 > hoisting/expressions unchanged). **M654** class private fields `#x` were a no-op AND a privacy leak (`#x=5`
 > wrote the public `x`, `this.#x` read undefined) — the lexer now keeps a leading `#` as part of the
 > identifier, so declaration + access agree on "#x" and it stays distinct from public `x`. (Generators
-> `function*` remain unsupported — a much larger coroutine feature.) Each fix is golden-locked.
+> `function*` remain unsupported — a much larger coroutine feature.) **Still more (M656-M658):** **M656**
+> built-in Error subtypes (TypeError/RangeError/SyntaxError) are now `instanceof Error` (their ctors'
+> parent_class links to Error), so the `catch(e){ if (e instanceof Error) … }` guard works; **M657**
+> `JSON.stringify` honors a *function* replacer (was array-allowlist-only — `(k,v)=>…` now transforms/drops
+> each node at every depth); **M658** `ToNumber(string)` skips leading whitespace, parses a `0x` hex prefix,
+> and honors a leading `+`/`-` (`Number("  7  ")` was 0, `Number("0x10")` was 0), while keeping the engine's
+> lenient trailing-char behavior + string `+` concat. Each fix is golden-locked — ~13 real JS/regex
+> correctness bugs from one probing arc, none of which the crash-fuzzers could see.
 
 > **(M634-M640) Test-hardening + a JS correctness fix: lock in this session's fixes, fuzz the untrusted-input
 > parser paths the existing fuzzers couldn't reach, and fix a bitwise-operator divergence.** The data-loss bug class (below) was fixed + verified in-guest but had no
