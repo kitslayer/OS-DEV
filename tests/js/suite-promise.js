@@ -61,4 +61,6 @@ print([1,2,3,2,1].lastIndexOf(2,2), [1,2,3,2,1].lastIndexOf(2,-3), [1,2,3,2,1].l
 print((function(){try{[].reduce(function(a,b){return a+b;});return "no";}catch(e){return "threw";}})(), [].reduce(function(a,b){return a+b;},0), [10,20].reduce(function(a,b){return a+b;}));   // threw 0 30 (empty+no-init throws; empty+init returns init; normal reduce)
 print("-- ToNumber 0b / 0o string prefixes (M693) --");
 print(Number("0b101"), Number("0o17"), Number("0B11"), +"0xff", +"  0b1111  ");   // 5 15 3 255 15 (binary/octal join the existing 0x hex parse; +coercion + surrounding whitespace too)
+print("-- String startsWith/endsWith position + repeat(-1) throws (M694) --");
+print("hello".startsWith("llo",2), "hello".endsWith("ell",4), "hello".startsWith("he",1), "hello".endsWith("lo"), (function(){try{"x".repeat(-1);return "no";}catch(e){return "threw";}})());   // true true false true threw (startsWith honors the start position; endsWith treats the string as ending at endPos; repeat(neg)->RangeError)
 print("-- done --");

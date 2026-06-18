@@ -55,4 +55,6 @@ AggregateError:x,y
 threw 0 30
 -- ToNumber 0b / 0o string prefixes (M693) --
 5 15 3 255 15
+-- String startsWith/endsWith position + repeat(-1) throws (M694) --
+true true false true threw
 -- done --
