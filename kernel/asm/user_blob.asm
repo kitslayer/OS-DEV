@@ -41,6 +41,7 @@ global lights_elf_start, lights_elf_end
 global fifteen_elf_start, fifteen_elf_end
 global mastermind_elf_start, mastermind_elf_end
 global pong_elf_start, pong_elf_end
+global halflife_elf_start, halflife_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -181,5 +182,9 @@ mastermind_elf_end:
 pong_elf_start:
     incbin "build/pong.elf"
 pong_elf_end:
+
+halflife_elf_start:
+    incbin "build/halflife.elf"
+halflife_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

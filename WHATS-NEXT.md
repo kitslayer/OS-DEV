@@ -1,5 +1,13 @@
 # What's next
 
+> **(M709) "Half-Life: Black Mesa" — a tribute survival shooter.** The real Half-Life can't run here (a
+> closed GoldSrc/Win32 engine needing a GPU and proprietary assets; Quake is this OS's GoldSrc-family
+> ceiling), so this is an honest original homage on the text grid (`user/halflife.c`): after the resonance
+> cascade, a HEV-suited scientist survives a swarm of headcrabs that spawn from the edges and chase — arrows
+> move/aim, Space fires a bullet in your facing direction, contact drains the HEV suit, and the spawn rate +
+> enemy speed ramp with your kill score. Adds a "Half-Life" entry to the Apps menu. Verified in-guest (HUD +
+> HEV bar, player, headcrabs chasing, firing). All 29 `make check` suites still green.
+
 > **(M708) Three more games — 15-Puzzle, Mastermind, Pong.** **15-Puzzle** (`user/fifteen.c`): 4×4 sliding
 > tiles shuffled by random legal slides (always solvable); arrows slide a tile into the gap; move counter.
 > **Mastermind** (`user/mastermind.c`): crack a 4-peg / 6-colour code in 10 guesses with the standard
