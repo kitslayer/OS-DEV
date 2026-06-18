@@ -1,6 +1,6 @@
 # What's next
 
-> **(M687-M696) Spec-compliance probing arc — ~10 wrong-answer fixes the crash-fuzzers can't see.** After
+> **(M687-M700) Spec-compliance probing arc — ~14 wrong-answer fixes the crash-fuzzers can't see.** After
 > the async/Promise/fetch arc, semantic probing (build the engine `-DJS_HOSTTEST`, diff edge cases against
 > spec) kept paying out — each a value real code depends on, none a crash: **Promise.any** + **thenable
 > assimilation** (`Promise.resolve`/`await` a `{then}` object now runs its `.then`) (M687); **JSON.stringify**
@@ -8,9 +8,16 @@
 > fromIndex (was ignored) + `[].reduce(fn)` with no init throws (M692); **ToNumber** `0b`/`0o` string prefixes
 > (joined the existing `0x`) (M693); **String** `startsWith`/`endsWith` honor their position arg + `repeat(-1)`
 > throws (M694); **`new Date(string)` + `Date.parse`** (ISO date-string parsing, M695); **regex replace
-> `$<name>`** named-group substitution (M696). Golden-locked in `tests/js/suite-promise.js` (the fresh-arena
-> overflow suite — `suite.js` is ~350KB from its 40MB cap). The recurring lesson: FUZZING finds crashes,
-> PROBING finds wrong answers — pair them. **BigInt** (arbitrary precision) remains the main JS gap.
+> `$<name>`** named-group substitution (M696). Then the OBJECT MODEL: **`B.prototype = Object.create(A.prototype)`**
+> classic inheritance (reassigning `.prototype` was silently dropped, so new instances + `instanceof` lost the
+> chain) (M698); **`obj.constructor`** + **`fn`/`Class.name`** (`new X().constructor.name`) (M699);
+> **`new.target`** (abstract-class guard / factory / arrow-inherits) (M700). Golden-locked in
+> `tests/js/suite-promise.js` (the fresh-arena overflow suite — `suite.js` is ~350KB from its 40MB cap).
+> Recurring lesson: FUZZING finds crashes, PROBING finds wrong answers — pair them. Two consecutive zero-yield
+> batches (control-flow, collections) confirmed those areas comprehensive. Remaining JS gaps are
+> architectural/large: **BigInt** (arbitrary precision), and `extends` a native built-in like `Array`/`Map`
+> (the copy-based class model can't make an instance a native-typed object — `extends Error` works because
+> Error instances are plain).
 
 > **(M679-M682) async / Promise runtime — the other big JS frontier, on a SYNCHRONOUS-resolution model.**
 > The OS has no event loop and its I/O is blocking, so Promises settle eagerly: an executor runs immediately,
