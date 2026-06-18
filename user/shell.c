@@ -1518,15 +1518,27 @@ static int run_command(char *line, char *cwd) {
             while (*p == ' ') p++;
             if (src[0] == 0 || *p == 0) { print("usage: "); print(move?"mv":"cp"); print(" <src> <dst>\n"); }
             else {
-                static char buf[4096];
-                long n = sys_readfile(src, buf, sizeof(buf));
-                if (n < 0) print("no such file\n");
+                /* file size is unknown (no stat syscall): read into a heap buffer,
+                 * doubling it until the read no longer fills it. Fixes the old
+                 * fixed 4KB buffer that silently truncated files >4KB (and, for
+                 * mv, deleted the source after a short copy — data loss). */
+                unsigned long cap = 65536;
+                char *buf = malloc(cap);
+                long n = buf ? sys_readfile(src, buf, cap) : -1;
+                while (buf && n == (long)cap && cap < (32UL << 20)) {  /* read filled the buffer: file may be larger */
+                    cap <<= 1; free(buf); buf = malloc(cap);
+                    if (buf) n = sys_readfile(src, buf, cap);
+                }
+                if (!buf)                print("cp/mv: file too large (out of memory)\n");
+                else if (n < 0)          print("no such file\n");
+                else if (n == (long)cap) print("cp/mv: file too large to copy\n");
                 else if (sys_writefile(p, buf, (unsigned long)n) < 0) print("write failed\n");
                 else {
-                    if (move) sys_delete(src);
+                    if (move && !streq(src, p)) sys_delete(src);   /* never delete when src==dst */
                     print(move ? "moved " : "copied "); print(src);
                     print(" -> "); print(p); print("\n");
                 }
+                free(buf);
             }
         } else if (startswith(line, "rm ")) {
             if (sys_delete(line + 3) < 0) print("rm: no such file\n");
