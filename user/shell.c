@@ -1572,7 +1572,7 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "rm ")) {
-            if (sys_delete(line + 3) < 0) print("rm: no such file\n");
+            if (sys_delete(line + 3) < 0) print("rm: no such file, or directory not empty\n");
             else { print("removed "); print(line + 3); print("\n"); }
         } else if (startswith(line, "touch ")) {
             const char *name = line + 6;

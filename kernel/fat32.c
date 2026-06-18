@@ -503,6 +503,14 @@ static int fat32_chdir(const char *path) {
     return 0;
 }
 
+/* visit() that flags a directory as non-empty on its first real entry (not . / ..) */
+static int dir_nonempty_visit(const uint8_t *e, const char *name, void *ctx) {
+    (void)e;
+    if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0))) return 0;  /* skip . and .. */
+    *(int *)ctx = 1;
+    return 1;                                  /* a real entry — stop the walk */
+}
+
 static long fat32_delete(const char *name) {
     uint32_t dir; const char *leaf;
     if (resolve(name, &dir, &leaf) < 0 || !leaf[0]) return -1;
@@ -522,7 +530,11 @@ static long fat32_delete(const char *name) {
                 for (int i = 0; i < 11; i++) if (e[i] != want[i]) { eq = 0; break; }
                 if (!eq) continue;
                 uint32_t fc = (uint32_t)rd16(e + 26) | ((uint32_t)rd16(e + 20) << 16);
-                free_chain(fc);              /* free the file's cluster chain (guarded) */
+                if (e[11] & 0x10) {          /* a directory: refuse unless empty, else its children's clusters would leak */
+                    int nonempty = 0; walk_dir(fc, dir_nonempty_visit, &nonempty);
+                    if (nonempty) return -1;
+                }
+                free_chain(fc);              /* free the cluster chain (guarded) */
                 e[0] = 0xE5;                 /* mark the dir entry deleted */
                 ata_write(firsts + s, 1, sec);
                 return 0;
