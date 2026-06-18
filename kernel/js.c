@@ -422,11 +422,12 @@ static node *parse_primary(lexer *L) {
             node *staticblk=mknode(N_BLOCK); staticblk->list=aalloc(sizeof(node*)*32); staticblk->nlist=0;  /* static members -> co->statics */
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,";")) { advance(L); continue; }   /* stray semicolons between members */
+                int genm = 0; if (peek_punc(L,"*")) { advance(L); genm = 1; }   /* *method(){…} : generator method */
                 if (peek_punc(L,"[")) {   /* computed method key: class C { [expr](params){body} } — e.g. [Symbol.iterator](){…} (M-symbol) */
                     advance(L); node *key=parse_assign(L); expect_punc(L,"]");
                     if (peek_punc(L,"(")) {
-                        node *fn=mknode(N_FUNC); fn->b=key;   /* fn->b = computed key expr (str stays NULL -> not "constructor", keyed via keystr at class-build) */
-                        parse_fn_params(L,fn); fn->a=parse_stmt(L);
+                        node *fn=mknode(N_FUNC); fn->b=key; fn->is_gen=genm;   /* fn->b = computed key expr (str stays NULL -> not "constructor", keyed via keystr at class-build) */
+                        parse_fn_params(L,fn); { int sg=g_in_gen; g_in_gen=genm; fn->a=parse_stmt(L); g_in_gen=sg; }
                         if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
                     } else { skip_semi(L); }   /* computed FIELD [expr]=v: unsupported (rare); skip safely */
                     continue;
@@ -448,9 +449,9 @@ static node *parse_primary(lexer *L) {
                     }
                 }
                 if (peek_punc(L,"(")) {                           /* method:  name(params){body} */
-                    node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len;
+                    node *fn=mknode(N_FUNC); fn->str=intern(mn.s,mn.len); fn->slen=mn.len; fn->is_gen=genm;
                     parse_fn_params(L, fn);
-                    fn->a = parse_stmt(L);
+                    { int sg=g_in_gen; g_in_gen=genm; fn->a = parse_stmt(L); g_in_gen=sg; }
                     if (is_static) { node *pr=mknode(N_PROP); pr->str=fn->str; pr->slen=fn->slen; pr->a=fn;
                                      if (staticblk->list && staticblk->nlist<32) staticblk->list[staticblk->nlist++]=pr; }
                     else if (cls->list && cls->nlist<32) cls->list[cls->nlist++]=fn;
@@ -497,9 +498,10 @@ static node *parse_primary(lexer *L) {
             advance(L); node *n=mknode(N_OBJECT); n->list=aalloc(sizeof(node*)*64); n->nlist=0;
             while (!peek_punc(L,"}") && peek(L).type!=T_EOF && !g_err && !g_oom) {
                 if (peek_punc(L,"...")) { advance(L); node *sp=mknode(N_SPREAD); sp->a=parse_assign(L); if(n->list && n->nlist<64) n->list[n->nlist++]=sp; if(peek_punc(L,",")) advance(L); continue; }  /* {...obj} */
+                int genm = 0; if (peek_punc(L,"*")) { advance(L); genm = 1; }   /* { *m(){…} } : generator method */
                 if (peek_punc(L,"[")) {   /* computed key: {[expr]: value} or computed method {[expr](){…}} (pr->b = key expr) */
                     advance(L); node *pr=mknode(N_PROP); pr->b=parse_assign(L); expect_punc(L,"]");
-                    if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); parse_fn_params(L,fn); fn->a=parse_stmt(L); pr->a=fn; }   /* {[e](){…}} */
+                    if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); fn->is_gen=genm; parse_fn_params(L,fn); { int sg=g_in_gen; g_in_gen=genm; fn->a=parse_stmt(L); g_in_gen=sg; } pr->a=fn; }   /* {[e](){…}} */
                     else { expect_punc(L,":"); pr->a=parse_assign(L); }                                                       /* {[e]: value} */
                     if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
                     if (peek_punc(L,",")) advance(L); else break;
@@ -524,7 +526,7 @@ static node *parse_primary(lexer *L) {
                 token k=advance(L); node *pr=mknode(N_PROP);
                 pr->str=intern(k.s,k.len); pr->slen=k.len;
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
-                else if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); parse_fn_params(L,fn); fn->a=parse_stmt(L); pr->a=fn; }   /* method shorthand: name(args){…} */
+                else if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); fn->is_gen=genm; parse_fn_params(L,fn); { int sg=g_in_gen; g_in_gen=genm; fn->a=parse_stmt(L); g_in_gen=sg; } pr->a=fn; }   /* method shorthand: name(args){…} */
                 else if (peek_punc(L,"=")) { advance(L); node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; node *as=mknode(N_ASSIGN); as->op='='; as->a=id; as->b=parse_assign(L); pr->a=as; }   /* {x = default} (destructuring) */
                 else { node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; pr->a=id; }   /* {x} shorthand == {x:x} */
                 if (n->list && n->nlist<64) n->list[n->nlist++]=pr;
@@ -2232,7 +2234,11 @@ static comp eval_stmt_inner(node *n, env *e) {
                 int callable = (itfn.t==V_FUN || itfn.t==V_NATIVE || (itfn.t==V_OBJ && itfn.o && itfn.o->kind==V_BOUND));
                 if (callable && !g_err && !g_oom) {
                     val iter = call_function_this(itfn, it, 0, 0);
-                    if (iter.t==V_OBJ && iter.o && !g_err && !g_oom) {
+                    if (iter.t==V_ARR && iter.o && !g_err && !g_oom) {   /* eager generator as [Symbol.iterator]: iterate its collected values */
+                        for (int i=0;i<iter.o->n && !g_oom;i++) {
+                            comp c=foreach_step(n,e,fe,vn,per_iter,iter.o->vals[i]); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c;
+                        }
+                    } else if (iter.t==V_OBJ && iter.o && !g_err && !g_oom) {
                         val nextfn = eval_member_get(iter, "next");   /* fetch next ONCE: every real iterator exposes a fixed `next` data method. (Re-reading it per step, as the spec's GetMethod does, would add a member-get allocation per iteration and lower the OOM/cap headroom for no practical gain.) */
                         int ncall = (nextfn.t==V_FUN || nextfn.t==V_NATIVE || (nextfn.t==V_OBJ && nextfn.o && nextfn.o->kind==V_BOUND));
                         long guard=0;
@@ -3387,6 +3393,10 @@ static int iter_collect(val it, obj *dest, val mapfn, int hasfn){
     if (!callable) return 0;                                /* not iterable -> caller falls through (nothing appended) */
     if (g_err || g_oom) return 1;
     val iter = call_function_this(itfn, it, 0, 0);          /* @@iterator() -> the iterator object */
+    if (iter.t==V_ARR && iter.o) {                          /* eager generator as [Symbol.iterator]: iterate its collected values */
+        for (int i=0;i<iter.o->n && !g_oom;i++) from_push(dest, iter.o->vals[i], mapfn, hasfn);
+        return 1;
+    }
     if (iter.t!=V_OBJ || !iter.o || g_err || g_oom) return 1;
     val nextfn = eval_member_get(iter, "next");             /* fetch `next` ONCE (as the for-of loop does) */
     int ncall = (nextfn.t==V_FUN || nextfn.t==V_NATIVE || (nextfn.t==V_OBJ && nextfn.o && nextfn.o->kind==V_BOUND));

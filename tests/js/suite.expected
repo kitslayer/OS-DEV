@@ -380,4 +380,6 @@ true true false boom
 xxy xyy ab[ab|cd|e]e
 -- generators function*/yield (eager) (M674) --
 1,2,3 0,1,2,3 1,2,3 6
+-- generator methods + [Symbol.iterator] iterables (M676) --
+1,2 0,1,4,9 5
 -- done --

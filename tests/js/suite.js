@@ -413,4 +413,6 @@ print("-- String.replace $` and $' patterns (M667) --");
 print("xby".replace(/b/,"$`"), "xby".replace(/b/,"$'"), "abcde".replace(/cd/,"[$`|$&|$']"));  // xxy xyy ab[ab|cd|e]e (before-match / after-match replacement patterns)
 print("-- generators function*/yield (eager) (M674) --");
 print((function(){function* g(){yield 1;yield 2;yield 3;}return [...g()].join(",");})(), (function(){function* r(n){for(let i=0;i<n;i++)yield i;}return [...r(4)].join(",");})(), (function(){function* g(){yield* [1,2];yield 3;}return [...g()].join(",");})(), (function(){var y=5;return y+1;})());  // 1,2,3 0,1,2,3 1,2,3 6 (spread/loop/yield*; `yield` is a normal var outside a generator)
+print("-- generator methods + [Symbol.iterator] iterables (M676) --");
+print((function(){class C{*g(){yield 1;yield 2;}}return [...new C().g()].join(",");})(), (function(){class R{constructor(n){this.n=n;}*[Symbol.iterator](){for(let i=0;i<this.n;i++)yield i*i;}}return [...new R(4)].join(",");})(), (function(){var s=0;class R{*[Symbol.iterator](){yield 2;yield 3;}}for(var x of new R())s+=x;return s;})());  // 1,2 0,1,4,9 5 (class/obj gen methods; *[Symbol.iterator] drives spread + for-of)
 print("-- done --");
