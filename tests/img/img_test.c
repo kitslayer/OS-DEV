@@ -55,6 +55,37 @@ static int build_gif(uint8_t *g, int iw, int ih) {
     return p;
 }
 
+static int wbe32(uint8_t *p, uint32_t v) { p[0]=v>>24; p[1]=v>>16; p[2]=v>>8; p[3]=v; return 4; }
+
+/* Build a valid 8x8 PNG (8-bit, given colour type 0/2/4/6) whose IDAT is a
+ * single STORED (uncompressed) deflate block — so inflate is effectively a
+ * memcpy and the decode ALWAYS reaches recon_filters + expand_px on bytes we
+ * control (CRCs are not checked by png.c). The scanlines (a filter byte + grey
+ * pixels per row) are written plainly so the caller can fuzz them in place.
+ * Returns total length; *scan_off = first scanline byte; *rawn = raw_need. */
+static int build_png(uint8_t *g, int color, int *scan_off, int *rawn) {
+    int bpp = (color==0)?1 : (color==2)?3 : (color==4)?2 : 4;
+    int W=8, H=8, raw=(W*bpp+1)*H, p=0;
+    static const uint8_t sig[8] = {0x89,'P','N','G',0x0d,0x0a,0x1a,0x0a};
+    for (int i=0;i<8;i++) g[p++]=sig[i];
+    p+=wbe32(g+p,13); g[p++]='I';g[p++]='H';g[p++]='D';g[p++]='R';   /* IHDR */
+    p+=wbe32(g+p,W); p+=wbe32(g+p,H);
+    g[p++]=8; g[p++]=(uint8_t)color; g[p++]=0; g[p++]=0; g[p++]=0;   /* depth, colour, comp, filter, interlace */
+    p+=wbe32(g+p,0);                                                 /* CRC (ignored) */
+    int idat = 2 + 5 + raw;
+    p+=wbe32(g+p,idat); g[p++]='I';g[p++]='D';g[p++]='A';g[p++]='T'; /* IDAT */
+    g[p++]=0x78; g[p++]=0x01;                                        /* zlib header */
+    g[p++]=0x01;                                                     /* BFINAL=1, BTYPE=0 (stored) */
+    g[p++]=raw&0xFF; g[p++]=(raw>>8)&0xFF;                           /* LEN */
+    g[p++]=(~raw)&0xFF; g[p++]=((~raw)>>8)&0xFF;                     /* NLEN = ~LEN */
+    *scan_off = p;
+    for (int y=0;y<H;y++) { g[p++]=0; for (int x=0;x<W*bpp;x++) g[p++]=0x80; }  /* filter None + grey */
+    p+=wbe32(g+p,0);                                                 /* IDAT CRC (ignored) */
+    p+=wbe32(g+p,0); g[p++]='I';g[p++]='E';g[p++]='N';g[p++]='D'; p+=wbe32(g+p,0);  /* IEND */
+    *rawn = raw;
+    return p;
+}
+
 int main(void) {
     /* 1. M422 regression: a DRI (0xDD) claiming segment length 2 or 3 (body 0/1
      *    bytes) at EOF must NOT make rd16 read past data+len. Without the
@@ -276,6 +307,45 @@ int main(void) {
         free(jout); free(jscr);
     }
 
-    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + GIF 2x2 LZW + JPEG 8x8 + gzip round-trip + %d decoder + %d DEFLATE + %d BMP + %d gzip + %d GIF-LZW + %d JPEG-scan fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS, ITERS, ITERS, ITERS);
+    /* 9. PNG recon-filter / pixel-expand path. inflate is fuzzed directly
+     *    (section 4), but the PNG-specific recon_filters (the 5 filter types)
+     *    and expand_px (per colour type) run only after a valid IHDR + zlib
+     *    IDAT, which random bytes don't produce. build_png() wraps the
+     *    scanlines in a STORED deflate block (inflate becomes a memcpy), so the
+     *    decode always reaches recon+expand on bytes we control. The output
+     *    buffer is sized to exactly 8x8 RGBA (256B) so an expand_px / output
+     *    over-write trips an ASan redzone. */
+    {
+        static uint8_t pg[2048];
+        static const int colors[4] = {0, 2, 4, 6};   /* grey, RGB, grey+A, RGBA */
+
+        /* (a) every colour type decodes through recon+expand to grey pixels. */
+        for (int ci = 0; ci < 4; ci++) {
+            int so, rn, w, h;
+            int len = build_png(pg, colors[ci], &so, &rn);
+            int r = png_decode(pg, len, obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
+            if (r != 0 || w != 8 || h != 8 || obuf[0] != 0x80) {
+                printf("FAIL: PNG colour %d decode (r=%d w=%d h=%d px0=%d)\n",
+                       colors[ci], r, w, h, obuf[0]);
+                return 1;
+            }
+        }
+
+        /* (b) fuzz the scanlines (filter byte + pixels) of a random colour type,
+         *     into a 256B output sized exactly to 8x8 RGBA. Mutated filter bytes
+         *     exercise recon cases 0..4 + invalid (graceful -1); pixel bytes
+         *     drive expand_px; the tight output catches any over-write. */
+        uint8_t *pout = malloc(8*8*4);
+        for (int i = 0; i < ITERS && pout; i++) {
+            int so, rn, w, h;
+            int len = build_png(pg, colors[xr() & 3], &so, &rn);
+            int K = 1 + (int)(xr() % 8);
+            for (int k = 0; k < K; k++) pg[so + (int)(xr() % rn)] = (uint8_t)xr();
+            png_decode(pg, len, pout, 8*8*4, sbuf, sizeof sbuf, &w, &h);
+        }
+        free(pout);
+    }
+
+    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + GIF 2x2 LZW + JPEG 8x8 + PNG colours + gzip round-trip + %d decoder + %d DEFLATE + %d BMP + %d gzip + %d GIF-LZW + %d JPEG-scan + %d PNG-scan fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS, ITERS, ITERS, ITERS, ITERS);
     return 0;
 }
