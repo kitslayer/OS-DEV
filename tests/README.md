@@ -41,6 +41,12 @@ The last two boot the real kernel under QEMU (unlike the host suites, which
 passes. `make test` is a related target — the same headless boot but printing
 the COM1 log for a human to read, rather than asserting markers.
 
+For *interactive* headless debugging, `tools/osdrive.py` drives the booted
+desktop — inject keys (HMP `sendkey`) and absolute-mouse clicks/drags (QMP
+`input-send-event`), and grab framebuffer screenshots — e.g.
+`tools/osdrive.py --out /tmp -c 'key f9; key ret; sleep 2; shot browser.png'`.
+This is how the M558–M561 desktop changes were verified without a display.
+
 You can also run the JS suite inside the OS: `js suite.js` (if copied onto the
 disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
 
