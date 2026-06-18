@@ -1,5 +1,15 @@
 # What's next
 
+> **(M739) New game — Missile Command (mouse-driven, in the framebuffer).** `user/missile.c`: defend six
+> cities from descending missiles — move the mouse to aim the crosshair and click to detonate an interceptor,
+> whose expanding blast destroys any missile it touches. A missile that reaches the ground takes out the
+> nearest city; when all six are gone the sky turns red (r restarts, Esc quits), and the waves speed up. A
+> graphics + **mouse** app — the first arcade game driven by the mouse — so it has its own SSE build rule.
+> 29/29 suites green. Verified in-guest: the cities/battery/descending-missiles render, the crosshair tracks
+> the mouse, and a held click detonates a (lingering) blast. (osdrive's instant `click` is too brief for the
+> once-per-frame `sys_mouse` poll — the mouse analogue of the keyboard same-frame-tap — but a real press
+> registers; `drag` confirms it.)
+
 > **(M738) New game — Dots and Boxes vs the computer.** `user/dotsbox.c`: a 4×4-box grid (16 boxes on a 9×9
 > dot/edge lattice). Move the `+` cursor with the arrows and Space to draw the edge under it; complete a box's
 > fourth side to claim it (Y) and move again. The CPU completes any box it can (chaining its extra turns),

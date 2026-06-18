@@ -63,6 +63,7 @@ global chess_elf_start, chess_elf_end
 global vpoker_elf_start, vpoker_elf_end
 global mancala_elf_start, mancala_elf_end
 global dotsbox_elf_start, dotsbox_elf_end
+global missile_elf_start, missile_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -283,5 +284,9 @@ mancala_elf_end:
 dotsbox_elf_start:
     incbin "build/dotsbox.elf"
 dotsbox_elf_end:
+
+missile_elf_start:
+    incbin "build/missile.elf"
+missile_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
