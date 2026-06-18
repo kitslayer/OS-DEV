@@ -380,4 +380,8 @@ var _mg = "2024-01-15".match(/(?<y>\d+)-(?<mo>\d+)-(?<d>\d+)/);
 print("ng="+_mg.groups.y+"/"+_mg.groups.mo+"/"+_mg.groups.d, "ngidx="+_mg.index, "ngpos="+_mg[1]+_mg[2]+_mg[3]);  // ng=2024/01/15 ngidx=0 ngpos=20240115 (named via .groups; .index; positional still works)
 var _mu = "xx42".match(/(\d+)/);
 print("nuidx="+_mu.index, "nugroups="+_mu.groups, "plainarr="+[1,2,3].groups);  // nuidx=2 nugroups=undefined plainarr=undefined (no names -> .groups undefined; ordinary arrays unaffected)
+print("-- JSON.parse reviver (M578) --");
+print("rvmul="+JSON.parse('{"a":1,"b":2}',function(k,v){return typeof v==="number"?v*10:v;}).a, "rvnest="+JSON.parse('{"o":{"x":3}}',function(k,v){return typeof v==="number"?v+1:v;}).o.x, "rvarr="+JSON.parse('[1,2,3]',function(k,v){return typeof v==="number"?v*2:v;}).join(","));  // rvmul=10 rvnest=4 rvarr=2,4,6 (reviver transforms each value, post-order, incl. nested + array)
+var _rvd=JSON.parse('{"a":1,"b":2}',function(k,v){return k==="b"?undefined:v;});
+print("rvdel="+_rvd.a+","+(_rvd.b===undefined), "rvnone="+JSON.parse('{"a":5}').a);  // rvdel=1,true rvnone=5 (returning undefined deletes the key; no reviver = unchanged)
 print("-- done --");

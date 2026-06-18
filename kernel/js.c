@@ -56,7 +56,10 @@ static void out_str(const char *s) {
  * 32 MB: the suite's peak reached ~26.7 MB after the M531-M542 cases; 32 MB
  * restores ~5 MB headroom. (M542)
  * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
-#define JS_ARENA   (32768 * 1024)
+#define JS_ARENA   (40960 * 1024)   /* 40 MB. The parser builds the whole script's AST in the arena
+                                     * before running it, and there's no GC (one run, then recycle), so a
+                                     * big script (e.g. the growing jstest suite) needs headroom. Bumped
+                                     * 20->26->32->40 as the suite grew; safe in the 127 MiB guest. */
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -3132,7 +3135,37 @@ static val json_parse_val(void){
     else jp_err=1;
     g_depth--; return r;
 }
-static val nat_json_parse(val *a, int n){ if(!n || a[0].t!=V_STR) return UND(); const char *s=a[0].str; jp=s; jp_end=s+strlen(s); jp_err=0; val r=json_parse_val(); if(jp_err){ rt_err("JSON.parse: invalid JSON"); return UND(); } return r; }
+/* JSON.parse reviver (InternalizeJSONProperty): post-order walk — recurse into a
+ * value's children first (replacing each by the reviver's return, deleting on
+ * undefined), then call reviver.call(holder, key, value). Bounded by the parsed
+ * structure's depth (json_parse_val depth-limits) and call_function_this's
+ * MAXDEPTH guard, so it can't overrun the stack. (M578) */
+static val json_revive(val v, val holder, const char *key, val reviver){
+    if (v.t==V_OBJ && v.o && obj_keyed(v.o)) {
+        for (int i=0; i<v.o->n; ) {
+            const char *ck=v.o->keys[i];
+            val nv=json_revive(v.o->vals[i], v, ck, reviver);
+            if (nv.t==V_UNDEF) obj_delete(v.o, ck);     /* delete -> shifts down; don't advance i */
+            else { v.o->vals[i]=nv; i++; }
+        }
+    } else if (v.t==V_ARR && v.o) {
+        for (int i=0; i<v.o->n; i++)
+            v.o->vals[i]=json_revive(v.o->vals[i], v, i64_to_str(i), reviver);   /* index as string key */
+    }
+    val args[2]={ STRV(key), v };
+    return call_function_this(reviver, holder, args, 2);
+}
+static val nat_json_parse(val *a, int n){
+    if(!n || a[0].t!=V_STR) return UND();
+    const char *s=a[0].str; jp=s; jp_end=s+strlen(s); jp_err=0;
+    val r=json_parse_val(); if(jp_err){ rt_err("JSON.parse: invalid JSON"); return UND(); }
+    if (n>1 && (a[1].t==V_FUN||a[1].t==V_NATIVE||(a[1].t==V_OBJ&&a[1].o&&a[1].o->kind==V_BOUND))) {
+        obj *root=new_obj(V_OBJ); if(!root) return r;   /* spec root holder { "": result } */
+        obj_set(root,"",r); val rv=UND(); rv.t=V_OBJ; rv.o=root;
+        r=json_revive(r, rv, "", a[1]);
+    }
+    return r;
+}
 
 /* ---- Object.values / Object.entries, Array.isArray / Array.from ---- */
 static val nat_obj_values(val *a, int n){
