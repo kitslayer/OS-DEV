@@ -9,6 +9,15 @@
 > 21 KB) render correctly; an **unreachable** host (gnu.org, blocked from this sandbox) fails *gracefully*
 > ("failed" status, no hang/crash) — confirming robust network handling, not a bug. `make check` stays
 > **27 suites**, all green.
+>
+> **(M594-M595) Tooling + shell completeness.** **M594** `tools/osdrive.py`'s `type` now sends uppercase
+> + full punctuation (`:` `?` `(` …) via shift-combos, so it can type URLs/code, not just lowercase
+> words. **M595** the shell gained `touch` (the one missing common file-op; creates a 0-byte file,
+> never truncates an existing one). With osdrive able to type URLs, the browser's **address-bar
+> navigation** path is now verified too (`e` → type `file:table.htm` → Enter renders it) — so every
+> browser input path is confirmed in-guest: link-click, address-bar typing, page-script (`document.write`,
+> ASCII table), and **interactive onclick→JS→DOM→re-render with persistent state** (Rock-Paper-Scissors:
+> click → CPU `Math.random` move → score persists), alongside inline `data:` images and real-TLS sites.
 
 > **(M566, M580-M588) Browser untrusted-parser fuzzing — every scanner extracted + fuzzed, 4 CSS fixes.**
 > The browser parses a hostile server's bytes on the guard-page-less kernel stack; all the cleanly-
