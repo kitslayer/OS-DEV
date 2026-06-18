@@ -607,12 +607,12 @@ static int run_command(char *line, char *cwd) {
             char dst[64]; int di = 0;
             if (*q) { while (*q && *q != ' ' && di < 63) dst[di++] = *q++; dst[di] = 0; }
             else { dst[0]='O'; dst[1]='U'; dst[2]='T'; dst[3]=0; }
-            static char inb[4096], outb[3072];
-            long n = src[0] ? sys_readfile(src, inb, sizeof(inb)) : -1;
-            if (n < 0) print("base64: no such file (usage: base64 -d <file> [out])\n");
+            long n = -1; char *inb = src[0] ? slurp(src, &n) : 0;
+            char *outb = inb ? malloc((unsigned long)n + 1) : 0;   /* decoded output is <= 3/4 of the base64 input */
+            if (!inb || !outb) print("base64: no such file (usage: base64 -d <file> [out])\n");
             else {
                 unsigned acc = 0; int nbits = 0, op = 0;
-                for (long i = 0; i < n && op < (int)sizeof(outb); i++) {
+                for (long i = 0; i < n; i++) {
                     char c = inb[i];
                     if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
                     if (c == '=') break;
@@ -623,12 +623,12 @@ static int run_command(char *line, char *cwd) {
                 if (sys_writefile(dst, outb, (unsigned long)op) < 0) print("base64: write failed\n");
                 else { char nb[12]; itoa_simple(op, nb); print("base64: wrote "); print(dst); print(" ("); print(nb); print(" bytes)\n"); }
             }
+            free(inb); free(outb);
         } else if (startswith(line, "base64 ")) {
             char *a = line + 7; while (*a == ' ') a++;     /* trim spaces so `base64 F > OUT` works */
             char fn[64]; int fi = 0; while (*a && *a != ' ' && fi < 63) fn[fi++] = *a++; fn[fi] = 0;
-            static char buf[1536];
-            long n = fn[0] ? sys_readfile(fn, buf, sizeof(buf)) : -1;
-            if (n < 0) { print("base64: no such file\n"); }
+            long n = -1; char *buf = fn[0] ? slurp(fn, &n) : 0;
+            if (!buf) { print("base64: no such file\n"); }
             else {
                 static const char *B =
                     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -644,6 +644,7 @@ static int run_command(char *line, char *cwd) {
                     if (col >= 40) { ln[col] = '\n'; ln[col+1] = 0; print(ln); col = 0; }
                 }
                 if (col) { ln[col] = '\n'; ln[col+1] = 0; print(ln); }
+                free(buf);
             }
         } else if (startswith(line, "sha256 ")) {
             char hex[72];
