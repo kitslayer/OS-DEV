@@ -8,12 +8,12 @@
  */
 #include "ulib.h"
 
-#define MAXDOC 8192               /* editable file size (each editor process has its own copy) */
+#define MAXDOC 65536              /* editable file size (each editor process has its own copy) */
 #define EDCOLS 44                 /* must match the app text grid */
 #define EDVIS  16                 /* visible text rows (grid is 17; 1 is the status line) */
 
 static char doc[MAXDOC];
-static int  dlen, cur;
+static int  dlen, cur, readonly;  /* readonly: file exceeded the buffer — view only, never save (would truncate it) */
 static char fname[40];
 
 static void itoa_i(int v, char *o) {
@@ -25,12 +25,12 @@ static void itoa_i(int v, char *o) {
 }
 
 static void insert(char c) {
-    if (dlen >= MAXDOC - 1) return;
+    if (readonly || dlen >= MAXDOC - 1) return;
     for (int i = dlen; i > cur; i--) doc[i] = doc[i-1];
     doc[cur++] = c; dlen++;
 }
 static void backspace(void) {
-    if (cur == 0) return;
+    if (readonly || cur == 0) return;
     for (int i = cur - 1; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--; cur--;
 }
@@ -83,7 +83,7 @@ static void render(const char *msg) {
     char st[96]; int p = 0;
     const char *a = "EDIT "; while (*a) st[p++] = *a++;
     for (int i = 0; fname[i] && p < 30; i++) st[p++] = fname[i];
-    a = "  ESC=save&quit  "; while (*a) st[p++] = *a++;
+    a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC=save&quit  "; while (*a) st[p++] = *a++;
     char nb[12]; itoa_i(dlen, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];
     a = "b  "; while (*a) st[p++] = *a++;
     itoa_i(ln, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* line */
@@ -98,9 +98,9 @@ static void render(const char *msg) {
     int crow = row_of(cur);
     int start = crow - EDVIS / 2; if (start < 0) start = 0;
     int off = row_offset(start);
-    static char out[MAXDOC + 8];           /* off the stack (a process-local BSS scratch) */
+    static char out[2048];                 /* off the stack; only ever holds the EDVIS visible rows */
     int o = 0, row = 0, col = 0;
-    for (int i = off; i <= dlen && row < EDVIS && o < MAXDOC + 4; i++) {
+    for (int i = off; i <= dlen && row < EDVIS && o < (int)sizeof(out) - 4; i++) {
         if (i == cur) out[o++] = '|';
         if (i < dlen) {
             char ch = doc[i];
@@ -121,14 +121,16 @@ int main(void) {
                          fname[4] = '.'; fname[5] = 'T'; fname[6] = 'X'; fname[7] = 'T'; fname[8] = 0; }
     long n = sys_readfile(fname, doc, MAXDOC - 1);
     dlen = (n > 0) ? (int)n : 0;
+    readonly = (n >= MAXDOC - 1);    /* read filled the buffer: the file is larger -> view only (saving would truncate it) */
     cur = dlen;
 
     render(0);
     for (;;) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
-        if (k == 27) {                              /* ESC: save and quit */
-            if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
+        if (k == 27) {                              /* ESC: save and quit (read-only if the file was too large) */
+            if (readonly) render("\n[not saved: file too large to edit]");
+            else if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
             else { render("\n[saved - bye]"); }
             sys_sleep(400);
             return 0;
