@@ -177,9 +177,8 @@ static int run_command(char *line, char *cwd) {
             }
             if (!any) print("usage: head <file>...\n");
         } else if (startswith(line, "nl ")) {
-            static char buf[8192];
-            long n = sys_readfile(line + 3, buf, sizeof(buf) - 1);
-            if (n < 0) { print("nl: no such file: "); print(line + 3); print("\n"); }
+            long n; char *buf = slurp(line + 3, &n);
+            if (!buf) { print("nl: no such file: "); print(line + 3); print("\n"); }
             else {
                 int ln = 1, start = 0; char num[12];
                 for (int i = 0; i < (int)n; i++) {
@@ -195,6 +194,7 @@ static int run_command(char *line, char *cwd) {
                     itoa_simple(ln, num);
                     print("  "); print(num); print("  "); print(buf + start); print("\n");
                 }
+                free(buf);
             }
         } else if (startswith(line, "tail ")) {
             const char *p = line + 5;
@@ -241,9 +241,8 @@ static int run_command(char *line, char *cwd) {
                 }
             }
         } else if (startswith(line, "uniq ")) {           /* drop adjacent duplicate lines */
-            static char buf[2048];
-            long n = sys_readfile(line + 5, buf, sizeof(buf) - 1);
-            if (n < 0) { print("uniq: no such file: "); print(line + 5); print("\n"); }
+            long n; char *buf = slurp(line + 5, &n);
+            if (!buf) { print("uniq: no such file: "); print(line + 5); print("\n"); }
             else {
                 buf[n] = 0;
                 int ps = -1, pl = -1, ls = 0;              /* previous printed line [ps, ps+pl) */
@@ -262,6 +261,7 @@ static int run_command(char *line, char *cwd) {
                         ls = (int)k + 1;
                     }
                 }
+                free(buf);
             }
         } else if (startswith(line, "sort ")) {
             const char *fp = line + 5; int rev = 0;        /* -r: reverse (descending) */
