@@ -1,5 +1,13 @@
 # What's next
 
+> **(M715) NES sound — APU wired to the streaming PCM ring.** The NES app's audio callback
+> (`user/nes/nes_osdev.c`) now converts libxnes's per-sample float (requested at 48 kHz, the kernel's PCM
+> rate) to 16-bit stereo and flushes the batch to `sys_pcm_stream` once per frame (~800 samples/frame,
+> consumed at 48 kHz) — the same non-blocking streaming path DOOM/Quake use. Verified headlessly for
+> stability: the emulator still loads a ROM, renders, and responds (Start → Main Menu) with the audio path
+> active, no crash/hang/perf regression over several seconds; audibility itself needs a host audio backend
+> (`make run`, not the headless `-audiodev none`). All 29 `make check` suites still green.
+
 > **(M714) The raycaster is now a first-person SHOOTER.** Extends `user/raycast.c` with billboarded enemy
 > orbs and combat: each column's wall distance is kept in a depth buffer, and living enemies are transformed
 > into camera space, projected to a screen column + size (1/depth), and drawn as shaded ellipses only where a

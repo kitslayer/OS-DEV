@@ -16,9 +16,10 @@ on the FAT disk.**
   frame → blit`. Framebuffer pixels are libxnes's `xnes_get_pixel` (already
   `0x00RRGGBB`) straight into `sys_gfx_blit`; input is raw PS/2 scancodes
   (`sys_setkbmode(1)` + `sys_getkbevent`) mapped to joypad 1; timing is
-  `sys_uptime_ms`/`sys_sleep`. Audio is a no-op sink for now (a follow-up will
-  wire it to `sys_pcm_stream`, mirroring how DOOM landed video first, sound
-  second).
+  `sys_uptime_ms`/`sys_sleep`. Audio converts libxnes's per-sample
+  float (requested at 48 kHz) to 16-bit stereo and streams it to
+  `sys_pcm_stream` once per frame (audible via `make run`; the headless test
+  harness uses `-audiodev none`).
 
 ## Local modifications to the vendored core (NOT upstream)
 

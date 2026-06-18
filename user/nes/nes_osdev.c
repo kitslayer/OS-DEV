@@ -34,6 +34,7 @@ extern long          sys_list(void *buf, unsigned long len);
 extern int           sys_pollkey(void);
 extern void          sys_setcolor(int color);
 extern void          sys_clear(void);
+extern int           sys_pcm_stream(const void *frames, int nframes);
 extern void          print(const char *s);
 
 #define NES_W 256
@@ -71,9 +72,24 @@ static uint8_t scancode_to_button(int sc, int ext)
     }
 }
 
-/* A no-op audio sink: keeps xnes's per-sample callback non-NULL so the APU has
- * somewhere to push to, without producing sound yet (wired up next step). */
-static void audio_sink(void *data, float v) { (void)data; (void)v; }
+/* Audio: libxnes calls this once per output sample (we ask for 48 kHz — the
+ * kernel's PCM rate) with a float roughly in [-1, 1]. Buffer it as 16-bit
+ * stereo and flush the batch to the kernel's non-blocking streaming ring once
+ * per video frame (~800 samples/frame at 60 Hz, which the ring consumes at
+ * 48 kHz). */
+#define ABUF 2048
+static short g_abuf[ABUF * 2];
+static int   g_an;
+static void audio_sink(void *data, float v) {
+    (void)data;
+    if (g_an < ABUF) {
+        int s = (int)(v * 9000.0f);
+        if (s > 32767) s = 32767;
+        if (s < -32768) s = -32768;
+        g_abuf[g_an*2] = (short)s; g_abuf[g_an*2 + 1] = (short)s;
+        g_an++;
+    }
+}
 
 /* The framebuffer we hand to sys_gfx_blit each frame (0x00RRGGBB pixels). */
 static uint32_t g_fb[NES_W * NES_H];
@@ -184,6 +200,7 @@ int main(void)
         sent = want;
 
         xnes_step_frame(ctx);
+        if (g_an) { sys_pcm_stream(g_abuf, g_an); g_an = 0; }   /* flush this frame's audio */
 
         for (int y = 0; y < NES_H; y++)
             for (int x = 0; x < NES_W; x++)
