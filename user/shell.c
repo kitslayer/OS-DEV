@@ -34,6 +34,34 @@ static char *slurp(const char *name, long *len) {
     b[n] = 0; *len = n; return b;
 }
 static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }   /* ASCII lowercase */
+
+/* A tiny regex matcher for grep: ^ $ . * and \<char> escapes (Kernighan/Pike
+ * style). A pattern with no metacharacters behaves like the old literal
+ * substring search, so existing greps are unaffected; `ci` folds case. */
+static int gr_matchhere(const char *re, const char *t, int ci);
+static int gr_matchstar(int c, const char *re, const char *t, int ci) {
+    do { if (gr_matchhere(re, t, ci)) return 1; }
+    while (*t && (c == '.' || (ci ? lc(*t) == lc((char)c) : (unsigned char)*t == (unsigned char)c)) && (t++, 1));
+    return 0;
+}
+static int gr_matchhere(const char *re, const char *t, int ci) {
+    if (re[0] == '\0') return 1;
+    if (re[0] == '\\' && re[1]) {                                  /* escaped literal: \. \* \^ … */
+        if (re[2] == '*') return gr_matchstar((unsigned char)re[1], re + 3, t, ci);
+        if (*t && (ci ? lc(*t) == lc(re[1]) : *t == re[1])) return gr_matchhere(re + 2, t + 1, ci);
+        return 0;
+    }
+    if (re[1] == '*') return gr_matchstar((unsigned char)re[0], re + 2, t, ci);
+    if (re[0] == '$' && re[1] == '\0') return *t == '\0';
+    if (*t && (re[0] == '.' || (ci ? lc(*t) == lc(re[0]) : (unsigned char)*t == (unsigned char)re[0])))
+        return gr_matchhere(re + 1, t + 1, ci);
+    return 0;
+}
+static int gr_match(const char *re, const char *t, int ci) {     /* match anywhere (^ anchors to start) */
+    if (re[0] == '^') return gr_matchhere(re + 1, t, ci);
+    do { if (gr_matchhere(re, t, ci)) return 1; } while (*t++);
+    return 0;
+}
 static int b64v(char c) {                 /* base64 digit -> value, or -1 */
     if (c >= 'A' && c <= 'Z') return c - 'A';
     if (c >= 'a' && c <= 'z') return c - 'a' + 26;
@@ -697,7 +725,7 @@ static int run_command(char *line, char *cwd) {
             while (*p && *p != ' ' && i < 39) pat[i++] = *p++;
             pat[i] = 0;
             while (*p == ' ') p++;
-            if (pat[0] == 0 || *p == 0) { print("usage: grep [-incv] <pattern> <file>...\n"); }
+            if (pat[0] == 0 || *p == 0) { print("usage: grep [-incv] <pattern> <file>...  (regex: ^ $ . * \\)\n"); }
             else {
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
                 while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fcount++; while (*cq && *cq != ' ') cq++; }
@@ -715,25 +743,20 @@ static int run_command(char *line, char *cwd) {
                     for (long k = 0; k <= n; k++) {
                         if (k == n || buf[k] == '\n') {
                             lno++;
-                            int found = 0;
-                            for (long a = ls; a < k && !found; a++) {
-                                int b = 0;
-                                while (a + b < k && pat[b] && (ci ? lc(buf[a+b]) == lc(pat[b]) : buf[a+b] == pat[b])) b++;
-                                if (!pat[b]) found = 1;
-                            }
+                            char save = buf[k]; buf[k] = 0;   /* NUL-terminate this line for matching + printing */
+                            int found = gr_match(pat, buf + ls, ci);   /* ^ $ . * + literal/escape (tiny regex) */
                             int hit = vv ? !found : found;   /* -v inverts: act on non-matching lines */
                             if (hit) {
                                 hits++;
                                 if (!cc) {                  /* -c: count only, don't print the line */
-                                    char save = buf[k]; buf[k] = 0;
                                     if (fcount > 1) print(name);
                                     if (fcount > 1 && nn) print(":");
                                     if (nn) { char ln_[12]; itoa_simple(lno, ln_); print(ln_); }
                                     if (fcount > 1 || nn) print(": "); else print("  ");
                                     print(buf + ls); print("\n");
-                                    buf[k] = save;
                                 }
                             }
+                            buf[k] = save;
                             ls = (int)k + 1;
                         }
                     }
