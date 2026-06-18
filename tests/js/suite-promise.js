@@ -21,4 +21,12 @@ print((Promise.resolve(1) instanceof Promise)+" "+(new Promise(function(r){r(1);
 print(typeof Promise);  // function
 print((function(){var o="?";Promise.resolve(1).then(function(v){return Promise.resolve(v+10);}).then(function(v){o=v;});return o;})());  // 11 (a returned promise is adopted/flattened)
 print((function(){var r;new Promise(function(res){r=res;});var o="?";r(7);return "resolver-callable-after-executor";})());  // resolver-callable-after-executor (the resolver carries its promise as a bound arg)
+print("-- async / await (M680) --");
+print((function(){async function f(){return 5;}var o="?";f().then(function(v){o=v;});return o;})());  // 5 (async fn returns a promise)
+print((function(){async function g(){var x=await Promise.resolve(10);return x*2;}var o="?";g().then(function(v){o=v;});return o;})());  // 20 (await unwraps)
+print((function(){async function h(){throw "err";}var o="?";h().catch(function(e){o=e;});return o;})());  // err (async throw -> rejection)
+print((function(){async function f(){try{await Promise.reject("X");return "no";}catch(e){return "handled:"+e;}}var o="?";f().then(function(v){o=v;});return o;})());  // handled:X (await of a rejection throws, caught by try/catch)
+print((function(){async function f(){var a=await Promise.resolve(1);var b=await Promise.resolve(a+1);return a+b;}var o="?";f().then(function(v){o=v;});return o;})());  // 3 (sequential awaits)
+print((function(){async function f(){return await Promise.resolve(10)+5;}var o="?";f().then(function(v){o=v;});return o;})());  // 15 (await binds tighter than +)
+print((function(){var async=5;var await=3;return async+await;})());  // 8 (async/await remain ordinary identifiers outside an async body)
 print("-- done --");

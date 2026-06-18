@@ -248,7 +248,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD, N_REGEX, N_YIELD };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD, N_REGEX, N_YIELD, N_AWAIT };
 
 typedef struct node node;
 struct node {
@@ -258,10 +258,12 @@ struct node {
     int prefix;   /* for N_UPDATE: prefix vs postfix */
     const char *label;   /* labeled stmt: a loop's own label; or a break/continue target. NULL=none (memset-zeroed by mknode) (M280) */
     int is_gen;   /* N_FUNC: 1 if a `function*` generator (eager-evaluated). zero-init by mknode. */
+    int is_async; /* N_FUNC: 1 if an `async function` (returns a Promise; body may `await`). M680 */
 };
 
 static int g_depth;            /* recursion guard (parser + eval + val_to_str + calls) */
 static int g_in_gen;           /* parser: nonzero while inside a `function*` body, so `yield` parses as N_YIELD */
+static int g_in_async;         /* parser: nonzero while inside an `async function` body, so `await` parses as N_AWAIT (M680) */
 /* The largest C frame per nesting level is eval_expr (~1.5 KB, measured via
  * objdump); the worst case (~120 × 1.5 KB ≈ 185 KB) stays within the 256 KB
  * kernel stacks BOTH entry paths run on — the ring-3 SYS_js task stack AND the
@@ -393,6 +395,21 @@ static node *parse_primary(lexer *L) {
     if (t.type == T_NUM) { advance(L); node *n=mknode(N_NUM); n->num=t.num; return n; }
     if (t.type == T_STR) { advance(L); node *n=mknode(N_STR); n->str=t.s; n->slen=t.len; return n; }
     if (t.type == T_REGEX) { advance(L); node *n=mknode(N_REGEX); n->str=intern(t.s,t.len); n->slen=t.len; n->num=t.num; return n; }   /* /pattern/flags; num bit0=g bit1=i */
+    if (t.type == T_IDENT && t.len==5 && memcmp(t.s,"async",5)==0) {   /* `async function …` (decl/expr); `async`-arrows are handled in parse_assign (M680) */
+        lexsave sv = lex_save(L); advance(L);
+        if (peek_kw(L,"function")) {
+            advance(L); node *n=mknode(N_FUNC); n->is_async=1;
+            if (peek_punc(L,"*")) { advance(L); n->is_gen=1; }   /* async function* (async generator) — rare; the body still collects yields eagerly */
+            token name = peek(L);
+            if (name.type==T_IDENT) { advance(L); n->str=intern(name.s,name.len); n->slen=name.len; }
+            parse_fn_params(L, n);
+            int sg=g_in_gen, sa=g_in_async; g_in_gen=n->is_gen; g_in_async=1;
+            n->a = parse_stmt(L);
+            g_in_gen=sg; g_in_async=sa;
+            return n;
+        }
+        lex_restore(L, sv);   /* not `async function` -> fall through, `async` is an ordinary identifier */
+    }
     if (t.type == T_KW) {
         if (tok_is(t,"true")||tok_is(t,"false")) { advance(L); node *n=mknode(N_BOOL); n->num=tok_is(t,"true"); return n; }
         if (tok_is(t,"null")) { advance(L); return mknode(N_NULL); }
@@ -561,6 +578,10 @@ static node *parse_postfix(lexer *L) {
 }
 
 static node *parse_unary_inner(lexer *L) {
+    if (g_in_async) {   /* inside an `async function`: `await expr` (a unary prefix, tighter than binary ops) (M680) */
+        token aw = peek(L);
+        if (aw.type==T_IDENT && aw.len==5 && memcmp(aw.s,"await",5)==0) { advance(L); node *u=mknode(N_AWAIT); u->a=parse_unary(L); return u; }
+    }
     if (peek_punc(L,"!")||peek_punc(L,"-")||peek_punc(L,"+")||peek_punc(L,"~")) { token o=advance(L); node *u=mknode(N_UNARY); u->op=o.s[0]; u->a=parse_unary(L); return u; }
     if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->prefix=1; u->a=parse_unary(L); return u; }
     if (peek_kw(L,"typeof")) { advance(L); node *u=mknode(N_UNARY); u->op='t'; u->a=parse_unary(L); return u; }
@@ -1415,6 +1436,12 @@ static const char *val_to_str(val v) {
     const char *s = val_to_str_inner(v); g_depth--; return s;
 }
 
+/* Promise helpers (defined with the Promise natives below) — forward-declared here so
+ * call_function_this can wrap an async function's result and N_AWAIT can read state (M680). */
+static val make_promise(int state, val v);
+static val take_pending_error(void);
+static int pstate(obj *p); static val pvalue(obj *p);
+
 /* ---- environments ---- */
 static env *new_env(env *parent){ env *e=aalloc(sizeof(env)); if(!e) return 0; e->cap=4; e->keys=aalloc(sizeof(char*)*e->cap); e->vals=aalloc(sizeof(val)*e->cap); if(!e->keys||!e->vals){ g_oom=1; return 0; } e->n=0; e->parent=parent; return e; }
 static void env_define(env *e, const char *key, val v) {
@@ -1511,6 +1538,12 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
     }
     comp c = eval_stmt(def->a, fe);
     g_depth--;
+    if (def->is_async) {                        /* async function: body result becomes a settled Promise (M680) */
+        if (g_err) return make_promise(2, take_pending_error());        /* a throw (incl. an awaited rejection) -> rejected promise */
+        val rv = c.kind==C_RETURN ? c.v : UND();
+        if (rv.t==V_OBJ && rv.o && rv.o->kind==V_PROMISE) return rv;    /* `return aPromise` -> adopt it */
+        return make_promise(1, rv);
+    }
     return c.kind==C_RETURN ? c.v : UND();
 }
 static val call_function(val fn, val *args, int nargs){ return call_function_this(fn, UND(), args, nargs); }
@@ -1768,6 +1801,19 @@ static val eval_expr_inner(node *n, env *e) {
                 else arr_push_val(g_gen_arr, v);
             }
             return UND();   /* eager mode has no .next() argument, so `x = yield e` gives undefined */
+        }
+        case N_AWAIT: {   /* `await expr` (M680): unwrap a settled promise; rejection re-throws its reason */
+            val v = n->a ? eval_expr(n->a, e) : UND();
+            if (g_err) return UND();
+            if (v.t==V_OBJ && v.o && v.o->kind==V_PROMISE) {
+                if (pstate(v.o)==2) {   /* awaiting a rejected promise throws its reason (like N_THROW) */
+                    val rv = pvalue(v.o);
+                    if (!g_err) { g_throwval=rv; g_threw=1; g_err=1; const char *s=val_to_str(rv); int i=0; while(s[i]&&i<127){g_errmsg[i]=s[i];i++;} g_errmsg[i]=0; }
+                    return UND();
+                }
+                return pvalue(v.o);   /* fulfilled -> its value (a still-pending promise yields undefined) */
+            }
+            return v;   /* await of a non-thenable -> the value itself */
         }
         case N_COND: return truthy(eval_expr(n->a,e)) ? eval_expr(n->b,e) : eval_expr(n->c,e);
         case N_LOGICAL: { val l=eval_expr(n->a,e);

@@ -16,4 +16,12 @@ true true
 function
 11
 resolver-callable-after-executor
+-- async / await (M680) --
+5
+20
+err
+handled:X
+3
+15
+8
 -- done --
