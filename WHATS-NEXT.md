@@ -41,8 +41,11 @@
 > `ok=false`; only a network failure rejects. Page scripts run on the main thread AFTER the worker fetched the
 > page, so a JS fetch is a sequential blocking get (UI freezes for its duration — the sync-model cost). The JS
 > half is host-tested via a mock backing; the real-network in-guest path mirrors the proven `worker_fetch` /
-> `net_demo` code (not automatable — external reachability is non-deterministic). **BigInt** (arbitrary
-> precision) is now the main remaining JS gap.
+> `net_demo` code (not automatable — external reachability is non-deterministic). **M702-M703** extended it to
+> **POST**: `fetch(url, {method, body, headers})` reads the options, and new `http_post`/`tls_post` send the
+> body (Content-Type from headers, default text/plain) over HTTP and HTTPS — the TLS GET path stays
+> byte-identical (a new POST branch shares the established session; no crypto change), so HTTPS GET can't
+> regress. fetch is now a usable HTTP client (GET+POST, Response.text/json, async/await, Promise.all).
 
 > **(M671-M674) Shell matcher host-testing + the last big JS gap (generators).** **M671-M673** extracted the
 > shell's two pure matchers — the `grep` regex (`^ $ . * [..] \`) and the filename glob (`*`/`?`) — into
