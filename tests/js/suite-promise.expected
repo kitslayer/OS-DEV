@@ -65,4 +65,6 @@ true true false true threw
 Rex bark|true|true
 -- obj.constructor + fn/class .name (M699) --
 true Dog foo B
+-- new.target meta-property (M700) --
+true true 1
 -- done --

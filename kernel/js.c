@@ -248,7 +248,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
        N_FUNC, N_CALL, N_MEMBER, N_INDEX, N_UNARY, N_UPDATE, N_BINARY, N_LOGICAL,
        N_ASSIGN, N_COND, N_VAR, N_IF, N_WHILE, N_FOR, N_BLOCK, N_RETURN,
        N_BREAK, N_CONTINUE, N_EXPR, N_PROGRAM, N_PROP, N_SWITCH, N_CASE, N_DOWHILE, N_FOROF,
-       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD, N_REGEX, N_YIELD, N_AWAIT };
+       N_TRY, N_THROW, N_FORIN, N_THIS, N_NEW, N_CLASS, N_SUPER, N_SPREAD, N_REGEX, N_YIELD, N_AWAIT, N_NEWTARGET };
 
 typedef struct node node;
 struct node {
@@ -508,6 +508,7 @@ static node *parse_primary(lexer *L) {
         }
         if (tok_is(t,"new")) {
             advance(L);
+            { lexsave sv=lex_save(L); if (peek_punc(L,".")) { advance(L); token mt=peek(L); if (mt.type==T_IDENT && mt.len==6 && memcmp(mt.s,"target",6)==0) { advance(L); return mknode(N_NEWTARGET); } lex_restore(L,sv); } }   /* new.target meta-property (M700) */
             node *callee = parse_primary(L);
             /* member chain (a.b.C / a[k]) binds to `new`, but a `(` opens the
              * constructor's own arg list — so we stop the chain before calls. */
@@ -916,6 +917,7 @@ static val STRV(const char *s){ val v=UND(); v.t=V_STR; v.str=s?s:""; return v; 
 static int64_t g_sym_next = SYM_ID_FIRST;
 static val SYMV(int64_t id, const char *desc){ val v=UND(); v.t=V_SYMBOL; v.num=id; v.str=desc; return v; }
 static val g_throwval;        /* value of the in-flight `throw` (when g_threw) */
+static val g_newtarget;       /* new.target — the constructor an active `new` is building; V_UNDEF (zero-init) outside construction (M700) */
 
 static obj *new_obj(int kind){ obj *o=aalloc(sizeof(obj)); if(!o) return 0; memset(o,0,sizeof(*o)); o->kind=kind; o->cap=4; o->keys=aalloc(sizeof(char*)*o->cap); o->vals=aalloc(sizeof(val)*o->cap); if(!o->keys||!o->vals){ g_oom=1; return 0; } return o; }
 static obj *g_gen_arr;   /* eval: the active generator's yield-collection array (NULL outside a generator body) */
@@ -2106,6 +2108,7 @@ static val eval_expr_inner(node *n, env *e) {
             return call_function(fn,args,na);
         }
         case N_THIS: { val *t=env_find(e,"this"); return t?*t:UND(); }
+        case N_NEWTARGET: return g_newtarget;   /* the constructor an active `new` is building, else undefined (M700) */
         case N_CLASS: {
             /* Build the method table P, then a constructor function value carrying
              * P in home_proto. `extends` copies the parent's methods into P first
@@ -2161,6 +2164,7 @@ static val eval_expr_inner(node *n, env *e) {
              * properties (we model methods by copying rather than a prototype chain) */
             if (ctor.o->home_proto) { obj *P=ctor.o->home_proto; for(int i=0;i<P->n && !g_oom;i++) obj_set(self,P->keys[i],P->vals[i]); }
             val selfv=obj_val(self);
+            val nt_saved=g_newtarget; g_newtarget=ctor;   /* new.target = the constructor being `new`'d, throughout field-init + the ctor (+ super) chain (M700) */
             /* run instance field initializers (this.x=init), parent-class first so a child can override */
             { obj *chain[32]; int cn=0; for (obj *k=ctor.o; k && cn<32; k=k->parent_class) chain[cn++]=k;
               for (int ci=cn-1; ci>=0 && !g_err && !g_oom; ci--) { obj *k=chain[ci];
@@ -2170,6 +2174,7 @@ static val eval_expr_inner(node *n, env *e) {
                       for (int si=0; si<k->fields->nlist && !g_err && !g_oom; si++) eval_stmt(k->fields->list[si], fe);
                   } } }
             val r=call_function_this(ctor, selfv, args, na);
+            g_newtarget=nt_saved;   /* restore (a nested `new` saved/restored its own; top level returns to V_UNDEF) */
             /* a constructor that explicitly returns an object overrides `this` */
             return (r.t==V_OBJ||r.t==V_ARR) ? r : selfv;
         }
