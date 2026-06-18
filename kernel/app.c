@@ -19,6 +19,7 @@
 #include "string.h"
 #include "vfs.h"
 #include "kheap.h"
+#include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
 #include <stdint.h>
 
 #define APP_COLS 44
@@ -374,6 +375,11 @@ uint64_t app_sbrk(long inc) {
                 vmm_unmap(u);
                 if (ph) pmm_free_frame(ph);
             }
+            /* Make memory exhaustion visible instead of a silent app death — this
+             * is the path Quake hit at 128 MB (M599). The app's malloc gets NULL
+             * next and usually exits, so this logs about once, not in a spin. */
+            kprintf("[app] '%s' out of memory: sbrk(%ld) failed, no free frames (increase QEMU -m?)\n",
+                    a->title ? a->title : "?", inc);
             return (uint64_t)-1;
         }
         vmm_map(v, frame, PTE_WRITABLE | PTE_USER);
@@ -589,9 +595,16 @@ int app_spawn_named(const char *name) {
     for (int i = 0; i < NPROGS; i++) {
         const char *a = progs[i].name, *b = name; int eq = 1;
         while (*a && *b) { if (*a++ != *b++) { eq = 0; break; } }
-        if (eq && !*a && !*b)
-            return app_spawn(progs[i].elf, progs[i].title, ~0ull) ? 0 : -1;  /* trusted embedded */
+        if (eq && !*a && !*b) {
+            if (app_spawn(progs[i].elf, progs[i].title, ~0ull)) return 0;  /* trusted embedded */
+            /* don't fail silently: a failed launch (no free app slot, or the ELF's
+             * frames/heap didn't fit) is otherwise invisible — no window, no log.
+             * (This is exactly how Quake's out-of-memory failure hid before M599.) */
+            kprintf("[app] '%s' failed to launch (no free slot, or out of memory loading it)\n", name);
+            return -1;
+        }
     }
+    kprintf("[app] no such program: '%s'\n", name);
     return -1;
 }
 
