@@ -366,4 +366,6 @@ a a,b false true
 foo 100 true a
 -- Date constructor normalization (M652) --
 29 2/1 2025 2
+-- function declaration hoisting (M653) --
+hoisted true
 -- done --

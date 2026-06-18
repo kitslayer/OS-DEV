@@ -2071,7 +2071,13 @@ static comp eval_stmt_inner(node *n, env *e) {
         case N_PROGRAM: case N_BLOCK: {
             env *be = (n->type==N_BLOCK)? new_env(e) : e;
             if (!be) { g_oom=1; return CN(); }
-            for (int i=0;i<n->nlist;i++){ comp c=eval_stmt(n->list[i],be); if(c.kind!=C_NORMAL||g_err||g_oom) return c; }
+            /* Hoist function declarations: define every `function name(){…}` in this
+             * block before any statement runs, so a call textually BEFORE the
+             * declaration resolves (standard JS). Skip them in the main pass below so
+             * each keeps a single identity. (var hoisting + expressions unaffected.) */
+            for (int i=0;i<n->nlist;i++){ node*s=n->list[i]; if(s && s->type==N_FUNC && s->str){ eval_expr(s,be); if(g_oom) return CN(); } }
+            for (int i=0;i<n->nlist;i++){ node*s=n->list[i]; if(s && s->type==N_FUNC && s->str) continue;   /* already hoisted */
+                comp c=eval_stmt(s,be); if(c.kind!=C_NORMAL||g_err||g_oom) return c; }
             return CN();
         }
         case N_VAR: { for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND();

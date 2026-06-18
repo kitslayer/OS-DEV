@@ -399,4 +399,6 @@ print("-- regex lookahead (?=) (?!) (M646) --");
 print("foobar".match(/foo(?=bar)/)[0], "100px".match(/\d+(?=px)/)[0], /^(?=.*\d)\w+$/.test("abc123"), "a1 ab".match(/a(?!\d)/g).join(","));  // foo 100 true a (zero-width positive/negative lookahead)
 print("-- Date constructor normalization (M652) --");
 print(new Date(2024,2,0).getDate(), new Date(2023,1,29).getMonth()+"/"+new Date(2023,1,29).getDate(), new Date(2024,12,1).getFullYear(), new Date(2100,1,29).getMonth());  // 29 2/1 2025 2 (last-day-of-month idiom; Feb29 non-leap rolls; month overflow; 2100 not leap)
+print("-- function declaration hoisting (M653) --");
+print((function(){return early();function early(){return "hoisted";}})(), (function(){function isE(n){return n==0||isO(n-1);}function isO(n){return n!=0&&isE(n-1);}return isE(4);})());  // hoisted true (forward call before declaration; mutual recursion)
 print("-- done --");
