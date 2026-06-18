@@ -1,5 +1,12 @@
 # What's next
 
+> **(M727) New game — Yahtzee (with a persistent best).** `user/yahtzee.c`: solo Yahtzee — each of 13 turns,
+> roll the five dice, hold any (1-5) and re-roll up to twice (r), then assign them to one of the 13 scoring
+> categories (arrows to an empty row, Enter to score); the scorecard shows each empty row's potential score
+> live. Standard scoring including the upper-section 63+ bonus (+35); best total saved to `YAHTZEE.HI`.
+> Verified in-guest (dice + live scorecard render; scoring a category fills it and starts the next turn).
+> All 29 `make check` suites green.
+
 > **(M726) New game — Lunar Lander (vector, in the framebuffer).** `user/lander.c`: ride gravity down and set
 > the lander on the green pad gently — the main engine (Up) burns fuel and pushes up, side thrusters
 > (Left/Right) nudge horizontally; land on the pad slow and near-vertical to win, else crash. A starfield +
