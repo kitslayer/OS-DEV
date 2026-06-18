@@ -960,6 +960,7 @@ static const struct {
     { "TEST    ZIP", "tools/test.zip" },  /* a zip archive: extract in-OS with: unzip TEST.ZIP */
     { "TEST    TGZ", "tools/test.tgz" },  /* a .tar.gz tarball: extract in-OS with: tar TEST.TGZ */
     { "DOOM1   WAD", "tools/DOOM1.WAD" }, /* the shareware DOOM IWAD (~4 MB): play in-OS with: run doom */
+    { "FREEDOM1WAD", "tools/freedoom1.wad" }, /* Freedoom Phase 1 (GPL/BSD, ~27 MB): a full libre Doom IWAD */
     { "MUSIC   WAV", "tools/MUSIC.WAV" }, /* a C-major-scale tune: play in-OS with: play MUSIC.WAV */
     { "TUNE2   WAV", "tools/TUNE2.WAV" }, /* an arpeggio (for the jukebox playlist) */
     { "TUNE3   WAV", "tools/TUNE3.WAV" }, /* a little melody (for the jukebox playlist) */

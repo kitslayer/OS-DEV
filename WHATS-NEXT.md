@@ -1,5 +1,14 @@
 # What's next
 
+> **(M718) Freedoom — a complete libre game on the DOOM engine, via a WAD picker.** The vendored engine
+> already recognises Freedoom (`d_iwad.c` lists `freedoom1.wad`; `d_main.c` keys off the `FREEDOOM` lump), so
+> this ships **Freedoom Phase 1** (GPL/BSD, `tools/freedoom1.wad`, ~27 MB — it fits the existing 64 MB disk)
+> and gives the DOOM app a WAD picker (`user/doom/doomgeneric_osdev.c`, mirroring the NES ROM picker): it
+> enumerates the `.wad` files on disk (`sys_list`) and, if there's more than one, shows a pickable text menu
+> before starting — so DOOM now plays the shareware IWAD *or* the full free game. Verified in-guest: the
+> picker lists DOOM1.WAD + FREEDOM1.WAD, and selecting Freedoom loads it (the 27 MB read takes ~10-15 s off
+> the emulated IDE disk) and renders the Freedoom title + main menu. All 29 `make check` suites still green.
+
 > **(M717) Apps menu: 2 → 3 columns.** This session's ~13 new game apps had filled the two-column Apps menu
 > to the screen's bottom edge. The menu layout is fully parameterized, so bumping `MENU_COLS` to 3 (a one-line
 > change in `desktop.c`) reflows the render, keyboard navigation, and click hit-testing together: all 48

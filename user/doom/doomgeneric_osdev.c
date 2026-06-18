@@ -33,8 +33,54 @@ extern void          sys_mouse_rel(int *dx, int *dy);
  * channels to 48 kHz stereo and feeds the kernel's streaming PCM ring.  Called
  * once per frame so the ~1-second ring stays topped up at ~70 fps. */
 extern void          osdev_sound_pump(void);
+extern long          sys_list(void *buf, unsigned long len);
+extern int           sys_pollkey(void);
+extern void          sys_setcolor(int color);
+extern void          sys_clear(void);
+extern void          print(const char *s);
 
 /* ----------------------------------------------------------------------- */
+
+/* ---- IWAD picker: list the .wad files on the FAT disk and choose one.
+ * The engine already knows Freedoom (d_iwad.c) and identifies the game from
+ * the WAD's lumps, so any IWAD on disk just works. */
+static char wad_names[16][16];
+static int  n_wads;
+static char upc(char c) { return (c >= 'a' && c <= 'z') ? (char)(c - 32) : c; }
+static void scan_wads(void) {
+    static char buf[8192];
+    long n = sys_list(buf, sizeof(buf)); if (n < 0) n = 0; buf[n] = 0;
+    n_wads = 0; int i = 0;
+    while (buf[i] && n_wads < 16) {
+        char nm[16]; int j = 0;
+        while (buf[i] && buf[i] != ' ' && buf[i] != '\n' && j < 15) nm[j++] = buf[i++];
+        nm[j] = 0;
+        while (buf[i] && buf[i] != '\n') i++;
+        if (buf[i] == '\n') i++;
+        if (j >= 4 && nm[j-4] == '.' && upc(nm[j-3]) == 'W' && upc(nm[j-2]) == 'A' && upc(nm[j-1]) == 'D') {
+            for (int k = 0; k <= j; k++) wad_names[n_wads][k] = nm[k];
+            n_wads++;
+        }
+    }
+}
+static int pick_wad(void) {
+    if (n_wads <= 1) return n_wads - 1;
+    int sel = 0;
+    for (;;) {
+        sys_clear();
+        sys_setcolor(4); print("\n  DOOM"); sys_setcolor(0); print("  - pick a WAD:\n\n");
+        for (int i = 0; i < n_wads; i++) {
+            if (i == sel) { sys_setcolor(11); print("   > "); } else { sys_setcolor(8); print("     "); }
+            print(wad_names[i]); print("\n");
+        }
+        sys_setcolor(0); print("\n  up/down move   Enter play   q quit\n");
+        int k; while ((k = sys_pollkey()) < 0) sys_sleep(20);
+        if      (k == 'q' || k == 'Q') return -2;
+        else if (k == 0x11) { if (sel > 0) sel--; }
+        else if (k == 0x12) { if (sel < n_wads - 1) sel++; }
+        else if (k == '\n' || k == '\r' || k == ' ') return sel;
+    }
+}
 
 void DG_Init(void)
 {
@@ -192,7 +238,12 @@ int DG_GetKey(int *pressed, unsigned char *doomKey)
 
 int main(void)
 {
-    char *argv[] = { "doom", "-iwad", "DOOM1.WAD" };
+    static char chosen[16] = "DOOM1.WAD";
+    scan_wads();
+    int idx = pick_wad();
+    if (idx == -2) return 0;                       /* user quit the picker */
+    if (idx >= 0) { int k = 0; while (wad_names[idx][k] && k < 15) { chosen[k] = wad_names[idx][k]; k++; } chosen[k] = 0; }
+    char *argv[] = { "doom", "-iwad", chosen };
     doomgeneric_Create(3, argv);
     for (;;) {
         /* mouselook: turn the player by the mouse's horizontal motion */
