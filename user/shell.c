@@ -141,7 +141,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] mem ps df history clear reboot exit\n");
+            print("        todo[ add T|done N|clear] mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)\n");
         } else if (streq(line, "ls")) {
@@ -904,6 +904,26 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "df")) {
             char b[96]; long n = sys_df(b, sizeof(b));
             if (n > 0) { b[n] = 0; print(b); } else print("df: no disk\n");
+        } else if (streq(line, "scores")) {
+            /* a personal leaderboard: the best each game saved to its *.HI file */
+            static const struct { const char *name, *file; } hs[] = {
+                {"Snake","SNAKE.HI"},{"Tetris","TETRIS.HI"},{"Breakout","BREAKOUT.HI"},
+                {"2048","2048.HI"},{"Minesweeper","MINES.HI"},{"Flappy","FLAPPY.HI"},
+                {"Space Invaders","SPACEINV.HI"},{"Frogger","FROGGER.HI"},{"15-Puzzle","FIFTEEN.HI"},
+                {"Maze","MAZE.HI"},{"Simon","SIMON.HI"},{"Blackjack","BJ.HI"},
+                {"Typing","TYPING.HI"},{"Yahtzee","YAHTZEE.HI"},{"Video Poker","VPOKER.HI"},
+            };
+            print("High scores (your bests):\n");
+            int any = 0;
+            for (int i = 0; i < (int)(sizeof(hs)/sizeof(hs[0])); i++) {
+                long n; char *b = slurp(hs[i].file, &n);
+                if (b && n > 0) {
+                    int j = 0; while (j < n && b[j] >= '0' && b[j] <= '9') j++; b[j] = 0;
+                    if (j > 0) { print("  "); print(hs[i].name); print(": "); print(b); print("\n"); any = 1; }
+                }
+                if (b) free(b);
+            }
+            if (!any) print("  (none yet - go set some!)\n");
         } else if (streq(line, "screenshot") || startswith(line, "screenshot ")) {
             const char *fn = line + 10; while (*fn == ' ') fn++;   /* optional filename arg */
             if (!*fn) fn = "SHOT.BMP";

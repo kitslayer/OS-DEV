@@ -1,5 +1,11 @@
 # What's next
 
+> **(M743) New shell command — `scores` (a personal leaderboard).** Fifteen games save a best to their own
+> `*.HI` file; `scores` reads them all and prints the ones you've set (skipping the rest), so you can see
+> every personal best at once. App-only change to `user/shell.c` (not test-coupled). Verified in-guest: on a
+> fresh disk it prints "(none yet)"; after `write`-ing a few `.HI` files it lists e.g. Snake: 4242, Tetris:
+> 18800, Video Poker: 315.
+
 > **(M742) New game — Pac-Man (maze chase).** `user/pacman.c`: eat every dot while dodging four ghosts; grab
 > a power pellet (O) and they turn blue for a few seconds — touch them then and they flee to the pen for 200
 > points. Clear the maze to win; lose three lives and it's over. Continuous movement with turn-queuing (your
