@@ -337,22 +337,19 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_unzip: {
         const char *zn = (const char *)r->rdi;
-        uint8_t *zbuf = kmalloc(1048576);       /* the .zip archive (<= 1 MB) */
-        uint8_t *scr = kmalloc(1048576);        /* one decompressed entry at a time (<= 1 MB) */
-        if (!zbuf || !scr) { if (zbuf) kfree(zbuf); if (scr) kfree(scr); r->rax = (uint64_t)-1; break; }
-        long zl = vfs_read(zn, zbuf, 1048576);
+        uint8_t *zbuf; long zl = read_whole_file(zn, &zbuf);   /* the whole .zip (was a fixed 1MB read) */
+        uint8_t *scr = (zl >= 0) ? kmalloc(1048576) : 0;       /* one decompressed entry at a time (<= 1 MB) */
+        if (zl < 0 || !scr) { if (zl >= 0) kfree(zbuf); if (scr) kfree(scr); r->rax = (uint64_t)-1; break; }
         struct unzip_ctx uc = { 0 };
-        int cnt = zl > 0 ? zip_extract(zbuf, (int)zl, unzip_emit, &uc, scr, 1048576) : -1;
+        int cnt = zip_extract(zbuf, (int)zl, unzip_emit, &uc, scr, 1048576);
         kfree(zbuf); kfree(scr);
         r->rax = (uint64_t)(int64_t)(cnt < 0 ? -1 : uc.written);   /* files actually written */
         break;
     }
     case SYS_untar: {
         const char *tn = (const char *)r->rdi;
-        uint8_t *buf = kmalloc(1048576);        /* the .tar or .tar.gz file (<= 1 MB) */
-        if (!buf) { r->rax = (uint64_t)-1; break; }
-        long fl = vfs_read(tn, buf, 1048576);
-        if (fl <= 0) { kfree(buf); r->rax = (uint64_t)-1; break; }
+        uint8_t *buf; long fl = read_whole_file(tn, &buf);   /* the whole .tar/.tar.gz (was a fixed 1MB read) */
+        if (fl <= 0) { if (fl == 0) kfree(buf); r->rax = (uint64_t)-1; break; }
         struct unzip_ctx uc = { 0 };
         int cnt;
         if (fl > 2 && buf[0] == 0x1f && buf[1] == 0x8b) {   /* .tar.gz: gunzip the tar first */
