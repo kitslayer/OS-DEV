@@ -506,7 +506,7 @@ static int run_command(char *line, char *cwd) {
                 print("\n");
             }
         } else if (streq(line, "todo") || startswith(line, "todo ")) {
-            static char buf[2048];
+            static char buf[16384];   /* read-modify-write list: generous so edits don't truncate it (~400 items) */
             long n = sys_readfile("TODO.TXT", buf, sizeof(buf) - 1);
             if (n < 0) n = 0;
             buf[n] = 0;
