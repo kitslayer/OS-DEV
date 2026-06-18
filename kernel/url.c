@@ -30,6 +30,31 @@ const char *url_split(const char *url, char *host, int hostsz) {
  * resolved against `base` (the page URL), keeping the page's scheme. file:/data:
  * srcs are rejected (returns 0). Writes a NUL-terminated URL into out[<outsz];
  * returns 1 on success, 0 if it can't be resolved or won't fit. */
+/* RFC 3986 remove_dot_segments, in place, on the path that starts with '/'.
+ * Collapses "/./" and "/foo/../" (clamped at root) so the resolved URL the
+ * client sends is canonical — a strict server/CDN may 404 on a literal "../".
+ * Stops at ?/# and copies the query/fragment verbatim. */
+static void norm_path(char *path) {
+    if (*path != '/') return;
+    char *w = path; const char *r = path;
+    *w++ = '/'; r++;                                          /* keep the leading '/' */
+    while (*r && *r != '?' && *r != '#') {
+        if (r[0]=='.' && (r[1]=='/' || r[1]==0)) { r += (r[1]=='/')?2:1; }            /* "." segment */
+        else if (r[0]=='.' && r[1]=='.' && (r[2]=='/' || r[2]==0)) { r += (r[2]=='/')?3:2;  /* ".." pops a segment */
+            if (w > path+1) { w--; w--; while (w>path && *w!='/') w--; w++; } }
+        else { while (*r && *r!='/' && *r!='?' && *r!='#') *w++=*r++; if (*r=='/') *w++=*r++; }
+    }
+    while (*r) *w++=*r++;
+    *w = 0;
+}
+/* point at the path ('/…') of "scheme://host/path", or the trailing NUL if none. */
+static char *url_path_start(char *u) {
+    char *p = u;
+    if (startsw(p,"https://")) p += 8; else if (startsw(p,"http://")) p += 7;
+    while (*p && *p != '/') p++;
+    return p;
+}
+
 int resolve_img_url(const char *base, const char *src, int srcl, char *out, int outsz) {
     if (srcl <= 0 || outsz < 2) return 0;
     /* reject file:/data: (and any scheme we don't fetch over the network) */
@@ -46,6 +71,7 @@ int resolve_img_url(const char *base, const char *src, int srcl, char *out, int 
         for (int i = 0; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
         if (p >= outsz - 1 && srcl > p) return 0;         /* would truncate -> skip */
         out[p] = 0;
+        norm_path(url_path_start(out));                   /* canonicalize ./ and ../ */
         return 1;
     }
     /* relative — resolve against `base`, keeping its scheme (mirrors goto_href) */
@@ -56,7 +82,7 @@ int resolve_img_url(const char *base, const char *src, int srcl, char *out, int 
     for (const char *s = scheme; *s && p < outsz - 1; s++) out[p++] = *s;   /* scheme prefix */
     if (srcl >= 2 && src[0] == '/' && src[1] == '/') {    /* protocol-relative //host/path */
         for (int i = 2; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
-        out[p] = 0; return p > 0;
+        out[p] = 0; norm_path(url_path_start(out)); return p > 0;
     }
     for (int i = 0; host[i] && p < outsz - 1; i++) out[p++] = host[i];
     if (srcl >= 1 && src[0] == '/') {                     /* absolute path */
@@ -71,5 +97,6 @@ int resolve_img_url(const char *base, const char *src, int srcl, char *out, int 
         for (int i = 0; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
     }
     out[p] = 0;
+    norm_path(url_path_start(out));                       /* canonicalize ./ and ../ (RFC 3986) */
     return p > 0;
 }

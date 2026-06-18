@@ -55,6 +55,12 @@ int main(void) {
     expect_img("https://e.com/x", "//cdn.com/a.png", 1, "https://cdn.com/a.png");        /* protocol-relative */
     expect_img("http://e.com/x", "data:image/png;base64,AAAA", 0, 0);                    /* data: rejected */
     expect_img("http://e.com/x", "file:///etc/passwd", 0, 0);                            /* file: rejected */
+    /* RFC 3986 ./ and ../ path normalization (M660): the resolved URL is canonical */
+    expect_img("http://e.com/a/b/p.html", "../up.png", 1, "http://e.com/a/up.png");        /* ../ pops a segment */
+    expect_img("http://e.com/a/b/c/p.html", "../../top.png", 1, "http://e.com/a/top.png"); /* two .. */
+    expect_img("http://e.com/d/p.html", "./here.png", 1, "http://e.com/d/here.png");       /* ./ removed */
+    expect_img("http://e.com/a/b/p.html", "../../../x.png", 1, "http://e.com/x.png");       /* .. clamped at root */
+    expect_img("http://e.com/x", "http://o.com/a/../b.png", 1, "http://o.com/b.png");       /* absolute also canonicalized */
     printf("regression: %s\n", fails ? "FAILURES" : "ok (url_split + resolve_img_url)");
 
     /* ---- fuzz: url_split with truncations + tiny host buffers ---- */
