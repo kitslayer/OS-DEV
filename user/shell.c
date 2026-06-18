@@ -335,7 +335,6 @@ static int run_command(char *line, char *cwd) {
                 else { buf[n] = 0; for (long i = 0; i < n; i++) if (buf[i] == oldc) buf[i] = newc; print(buf); free(buf); }
             }
         } else if (startswith(line, "fold ")) {           /* fold [-w]N FILE : wrap each line at N columns (default 60) */
-            static char buf[2048], fout[2400];
             const char *p = line + 5; while (*p == ' ') p++;
             int w = 0;
             if (p[0] == '-' && p[1] == 'w') p += 2;
@@ -343,19 +342,19 @@ static int run_command(char *line, char *cwd) {
             while (*p == ' ') p++;
             if (w < 1) w = 60;
             if (w > 200) w = 200;
-            long n = sys_readfile(p, buf, sizeof(buf) - 1);
-            if (n < 0) { print("fold: no such file: "); print(p); print("\n"); }
+            long n; char *buf = slurp(p, &n);
+            if (!buf) { print("fold: no such file: "); print(p); print("\n"); }
             else {
                 buf[n] = 0;
-                int oi = 0, col = 0;
-                for (long i = 0; i < n && oi < 2390; i++) {
+                char lbuf[202]; int li = 0, col = 0;       /* one physical line at a time (w <= 200) — flushed as we go, so no whole-output cap */
+                for (long i = 0; i < n; i++) {
                     char c = buf[i];
-                    if (c == '\n') { fout[oi++] = '\n'; col = 0; continue; }
-                    fout[oi++] = c; col++;
-                    if (col >= w && oi < 2390) { fout[oi++] = '\n'; col = 0; }
+                    if (c == '\n') { lbuf[li] = 0; print(lbuf); print("\n"); li = 0; col = 0; continue; }
+                    lbuf[li++] = c; col++;
+                    if (col >= w) { lbuf[li] = 0; print(lbuf); print("\n"); li = 0; col = 0; }
                 }
-                if (oi > 0 && fout[oi-1] != '\n') fout[oi++] = '\n';
-                fout[oi] = 0; print(fout);
+                if (li > 0) { lbuf[li] = 0; print(lbuf); print("\n"); }   /* trailing partial line */
+                free(buf);
             }
         } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE (char range) | cut -fN[-M] [-dX] FILE (delimited fields, default tab) */
             const char *p = line + 4;
