@@ -25,10 +25,12 @@ int js_fire_event(const char *id, const char *type, char *out, int outmax, void 
  * cleared automatically by js_run (the shell path). */
 void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *));
 
-/* Register a blocking HTTP backing for the JS fetch() global (M684): the callback fills
- * `out` (up to outmax) with the response body, sets *status to the HTTP status code, and
- * returns the body length, or <0 on a network error. Without it, fetch() rejects. */
-void js_set_fetch(int (*fn)(const char *url, char *out, int outmax, int *status));
+/* Register a blocking HTTP backing for the JS fetch() global (M684; method/body M703): the
+ * callback fills `out` (up to outmax) with the response body, sets *status to the HTTP
+ * status, and returns the body length, or <0 on a network error. method/ctype/body are
+ * NULL for a GET; for a POST they carry the request method, Content-Type, and body string.
+ * Without it, fetch() rejects. */
+void js_set_fetch(int (*fn)(const char *url, const char *method, const char *ctype, const char *body, char *out, int outmax, int *status));
 
 /* Register DOM callbacks for document.getElementById(id) handles:
  *  get(id, out, max, html) -> 1 if found, fills out with the element's

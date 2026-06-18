@@ -41,6 +41,8 @@ hello from fetch
 1,2-3
 hello from fetch
 caught
+-- fetch POST + options (M703; mock echoes POST <ctype>:<body>) --
+POST text/plain:hi POST application/json:{"a":1}
 -- Promise.any + thenable assimilation (M687) --
 b
 AggregateError:x,y

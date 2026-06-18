@@ -2830,7 +2830,7 @@ static val nat_promise_allSettled(val *args, int nargs){
  * event loop. Response = { status, ok, text():Promise<string>, json():Promise<any> } — text/
  * json carry the body via make_resolver's bound-arg trick. Like real fetch, an HTTP error
  * status (404…) still RESOLVES (ok=false); only a network failure rejects. */
-static int (*g_fetch)(const char *url, char *out, int outmax, int *status);
+static int (*g_fetch)(const char *url, const char *method, const char *ctype, const char *body, char *out, int outmax, int *status);   /* method/ctype/body NULL for a GET (M703) */
 static val nat_json_parse(val *a, int n);   /* fwd: Response.json() parses the body */
 static val fetch_text_native(val *args, int nargs){ return make_promise(1, nargs>0?args[0]:STRV("")); }   /* args[0]=bound body */
 static val fetch_json_native(val *args, int nargs){
@@ -2842,9 +2842,18 @@ static val fetch_json_native(val *args, int nargs){
 static val nat_fetch(val *args, int nargs){
     if (nargs<1 || args[0].t!=V_STR) return make_promise(2, STRV("fetch: a URL string is required"));
     if (!g_fetch) return make_promise(2, STRV("fetch: no network backing"));   /* not wired (e.g. host without js_set_fetch) */
+    const char *method=0, *ctype=0, *reqbody=0;   /* fetch(url, {method, body, headers}) (M703) */
+    if (nargs>1 && args[1].t==V_OBJ && args[1].o && obj_keyed(args[1].o)) {
+        val mv, bv, hv;
+        if (obj_get(args[1].o,"method",&mv) && mv.t==V_STR) method=mv.str;
+        if (obj_get(args[1].o,"body",&bv) && bv.t!=V_UNDEF && bv.t!=V_NULL) { const char *bs=val_to_str(bv); reqbody=intern(bs,(int)strlen(bs)); }   /* intern: stable through the call */
+        if (obj_get(args[1].o,"headers",&hv) && hv.t==V_OBJ && hv.o && obj_keyed(hv.o)) {
+            val cv; if ((obj_get(hv.o,"Content-Type",&cv)||obj_get(hv.o,"content-type",&cv)) && cv.t==V_STR) ctype=cv.str;
+        }
+    }
     int cap = 131072; char *buf = aalloc(cap); if (!buf) { g_oom=1; return UND(); }
     int status = 0;
-    int n = g_fetch(args[0].str, buf, cap-1, &status);
+    int n = g_fetch(args[0].str, method, ctype, reqbody, buf, cap-1, &status);
     if (n < 0) return make_promise(2, STRV("fetch failed: network error"));   /* DNS/connect/read failure -> reject */
     if (n > cap-1) n = cap-1;
     buf[n] = 0;
@@ -4003,7 +4012,7 @@ void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, 
 }
 /* The browser registers a blocking HTTP backing for fetch() (M684): fills out/+status,
  * returns body length or <0 on a network error. NULL (default) -> fetch() rejects. */
-void js_set_fetch(int (*fn)(const char *url, char *out, int outmax, int *status)) {
+void js_set_fetch(int (*fn)(const char *url, const char *method, const char *ctype, const char *body, char *out, int outmax, int *status)) {
     g_fetch = fn;
 }
 /* The browser registers DOM read/mutate callbacks for getElementById handles. */
@@ -4209,11 +4218,19 @@ static void hdom_rmattr(const char *id, const char *attr){ (void)id; (void)attr;
 #ifndef JS_NO_MAIN   /* a host harness embedding js.c (e.g. tests/jsonfuzz) defines this to supply its own main */
 /* mock fetch backing for host tests: canned bodies keyed off the URL (no real network).
  * "/json" -> a JSON object; "/fail" -> a network error (<0); anything else -> a text body. */
-static int hfetch(const char *url, char *out, int outmax, int *status) {
+static int hfetch(const char *url, const char *method, const char *ctype, const char *reqbody, char *out, int outmax, int *status) {
     if (strstr(url, "fail")) return -1;                       /* simulate a network error -> reject */
-    const char *body = strstr(url, "json") ? "{\"a\":1,\"b\":[2,3]}" : "hello from fetch";
     *status = strstr(url, "404") ? 404 : 200;
-    int n=0; while (body[n] && n<outmax-1) { out[n]=body[n]; n++; } out[n]=0;
+    int n=0;
+    if (method && (method[0]=='P'||method[0]=='p')) {         /* POST: echo "POST <ctype>:<body>" so tests can assert method/body/ctype reached the backing */
+        const char *pre="POST "; for (int i=0; pre[i] && n<outmax-1; i++) out[n++]=pre[i];
+        for (const char *c=ctype?ctype:"text/plain"; *c && n<outmax-1; c++) out[n++]=*c;
+        if (n<outmax-1) out[n++]=':';
+        for (const char *b=reqbody?reqbody:""; *b && n<outmax-1; b++) out[n++]=*b;
+        out[n]=0; return n;
+    }
+    const char *body = strstr(url, "json") ? "{\"a\":1,\"b\":[2,3]}" : "hello from fetch";
+    while (body[n] && n<outmax-1) { out[n]=body[n]; n++; } out[n]=0;
     return n;
 }
 

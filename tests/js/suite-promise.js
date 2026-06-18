@@ -47,6 +47,8 @@ print((function(){var o="?";fetch("http://x/404").then(function(r){o=r.status+",
 print((function(){var o="?";fetch("http://x/json").then(function(r){return r.json();}).then(function(j){o=j.a+","+j.b.join("-");});return o;})());  // 1,2-3 (Response.json())
 print((function(){async function f(){var r=await fetch("http://x/");return await r.text();}var o="?";f().then(function(t){o=t;});return o;})());  // hello from fetch (await fetch + await r.text())
 print((function(){var o="?";fetch("http://x/fail").then(function(){o="F";}).catch(function(){o="caught";});return o;})());  // caught (a network failure rejects)
+print("-- fetch POST + options (M703; mock echoes POST <ctype>:<body>) --");
+print((function(){var o="?";fetch("http://x/api",{method:"POST",body:"hi"}).then(function(r){return r.text();}).then(function(t){o=t;});return o;})(), (function(){var o="?";fetch("http://x/api",{method:"POST",body:'{"a":1}',headers:{"Content-Type":"application/json"}}).then(function(r){return r.text();}).then(function(t){o=t;});return o;})());  // POST text/plain:hi POST application/json:{"a":1} (method + body + Content-Type reach the backing; default ctype is text/plain)
 print("-- Promise.any + thenable assimilation (M687) --");
 print((function(){var o="?";Promise.any([Promise.reject("a"),Promise.resolve("b"),Promise.resolve("c")]).then(function(v){o=v;});return o;})());  // b (first fulfilment wins)
 print((function(){var o="?";Promise.any([Promise.reject("x"),Promise.reject("y")]).catch(function(e){o=e.name+":"+e.errors.join(",");});return o;})());  // AggregateError:x,y (all reject -> AggregateError.errors)

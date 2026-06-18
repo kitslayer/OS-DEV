@@ -1829,14 +1829,21 @@ static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-han
  * net/TLS stack is idle (a JS fetch is just another sequential get, like the per-page
  * image fetches). Its own kmalloc'd scratch — never b->raw — so it can't clobber the page
  * being rendered. */
-static int browser_fetch(const char *url, char *out, int outmax, int *status) {
+static int browser_fetch(const char *url, const char *method, const char *ctype, const char *reqbody, char *out, int outmax, int *status) {
     if (!url || outmax <= 0) return -1;
     char host[96];
     const char *path = url_split(url, host, sizeof(host));
     int https = startsw(url, "https://");
+    int is_post = method && (method[0]=='P' || method[0]=='p');
+    int reqlen = is_post && reqbody ? (int)strlen(reqbody) : 0;
     char *raw = kmalloc(RAW_MAX);
     if (!raw) return -1;
-    int n = https ? tls_get(host, path, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
+    int n;
+    if (is_post)
+        n = https ? tls_post(host, path, ctype, reqbody, reqlen, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
+                  : http_post(host, path, ctype, reqbody, reqlen, raw, RAW_MAX - 1);
+    else
+        n = https ? tls_get(host, path, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
                   : http_get(host, path, raw, RAW_MAX - 1);
     if (n <= 0) { kfree(raw); return -1; }                   /* DNS/connect/TLS/read failure -> fetch() rejects */
     raw[n] = 0;
