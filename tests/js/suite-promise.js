@@ -1,8 +1,9 @@
-// Promise (synchronous-resolution model, M679) — a SECOND golden run, kept separate
-// from suite.js because that one shares a single 40MB arena run-to-completion with only
-// ~350KB headroom; this file gets its own fresh arena (js_run_doc resets g_arena_off),
-// so Promise coverage can be comprehensive without starving the main suite. Ends with
-// "-- done --" so the harness can detect a truncated (arena-OOM) run.
+// SECOND golden run, kept separate from suite.js because that one shares a single 40MB
+// arena run-to-completion with only ~350KB headroom (its adversarial cap cases fill it),
+// so appending there OOMs an unrelated case mid-run. This file gets its OWN fresh arena
+// (js_run_doc resets g_arena_off), so newer/heavier features land here: Promises +
+// async/await/fetch (M679-M687), and other overflow golden. Ends with "-- done --" so the
+// harness can detect a truncated (arena-OOM) run.
 print("-- Promise: construct + then/catch/finally --");
 print((function(){var o="?";new Promise(function(res){res(42);}).then(function(v){o=v;});return o;})());  // 42
 print((function(){var o="?";Promise.resolve(10).then(function(v){return v*2;}).then(function(v){o=v;});return o;})());  // 20 (then-chain transform)
@@ -51,4 +52,8 @@ print((function(){var o="?";Promise.any([Promise.reject("a"),Promise.resolve("b"
 print((function(){var o="?";Promise.any([Promise.reject("x"),Promise.reject("y")]).catch(function(e){o=e.name+":"+e.errors.join(",");});return o;})());  // AggregateError:x,y (all reject -> AggregateError.errors)
 print((function(){var o="?";Promise.resolve({then:function(res){res(77);}}).then(function(v){o=v;});return o;})());  // 77 (Promise.resolve assimilates a thenable {then})
 print((function(){async function f(){return await {then:function(res){res(55);}};}var o="?";f().then(function(v){o=v;});return o;})());  // 55 (await x === await Promise.resolve(x): assimilates a thenable)
+print("-- JSON.stringify toJSON + non-finite (M691) --");
+print(JSON.stringify({a:1,toJSON:function(){return {b:2};}}));   // {"b":2} (toJSON hook replaces the value)
+print(JSON.stringify({x:{toJSON:function(){return "X";}}}));     // {"x":"X"} (nested toJSON)
+print(JSON.stringify({n:Infinity,m:-Infinity,ok:5}));            // {"n":null,"m":null,"ok":5} (the ±Infinity sentinel serializes as null)
 print("-- done --");

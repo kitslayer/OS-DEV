@@ -46,4 +46,8 @@ b
 AggregateError:x,y
 77
 55
+-- JSON.stringify toJSON + non-finite (M691) --
+{"b":2}
+{"x":"X"}
+{"n":null,"m":null,"ok":5}
 -- done --

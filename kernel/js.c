@@ -3474,13 +3474,15 @@ static void json_val(val v, int depth){
     if(++g_depth>MAXDEPTH){ g_depth--; js_app("null"); return; }
     switch(v.t){
         case V_BOOL: js_app(v.num?"true":"false"); break;
-        case V_NUM:  js_app(i64_to_str(v.num)); break;
+        case V_NUM:  if(v.num==INT64_MAX||v.num==-INT64_MAX) js_app("null"); else js_app(i64_to_str(v.num)); break;   /* non-finite (the ±Infinity sentinel) serializes as null, per JSON (M691) */
         case V_STR:  js_appq(v.str); break;
         case V_ARR:  if(v.o->n==0){ js_app("[]"); break; } js_app("[");
             for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("]"); break;
         case V_OBJ:
             if(is_proxy(v)){ val tv=deproxy(v); if(tv.t!=V_OBJ){ json_val(tv,depth); break; } v=tv; }   /* JSON.stringify(proxy) serializes the TARGET; never the proxy's vals[] (M-proxy) */
             if(v.o && v.o->kind==V_DATE){ js_appq(val_to_str(v)); break; }   /* a Date serializes as its string */
+            { val tj; if(obj_keyed(v.o) && obj_get(v.o,"toJSON",&tj) && is_callable(tj)){   /* toJSON() hook: serialize its result instead (M691) */
+                  val r=call_function_this(tj, v, 0, 0); json_val(r, depth); g_depth--; return; } }
             if(!obj_keyed(v.o) || v.o->n==0){ js_app("{}"); break; }          /* map/set/empty: no enumerable props */
             js_app("{");
             { int wrote=0; for(int i=0;i<v.o->n;i++){ if(is_internal_key(v.o->keys[i])) continue;   /* hide @@ symbol keys; `wrote` (not i) drives the comma so no dangling separator (M-symbol) */
