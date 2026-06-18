@@ -272,6 +272,28 @@ static void draw_content(const window_t *w) {
         for (int k=0;k<4;k++){ p+=unum(gw[k],net+p); if(k<3)net[p++]='.'; }
         net[p]=0;
         draw_text(bx, yb + 116, net, 0x303840);
+
+        /* Disk (FAT32 volume). vfs_df() scans the whole FAT (disk I/O), so cache
+         * it and refresh only every ~5s rather than on every render frame. */
+        static uint64_t df_free, df_total, df_at = (uint64_t)-1;
+        uint64_t nowt = timer_ticks();
+        if (df_at == (uint64_t)-1 || nowt - df_at > 500) { vfs_df(&df_free, &df_total); df_at = nowt; }
+        draw_text(bx, yb + 142, "Disk", 0x202028);
+        if (df_total) {
+            uint64_t dused = df_total > df_free ? df_total - df_free : 0;
+            int dpct = (int)(dused * 100 / df_total), yd = yb + 160;
+            fb_fill_rect(bx, yd, barw, 14, 0xDADEE6);
+            uint32_t dc = dpct < 70 ? 0x3CB371 : (dpct < 90 ? 0xE0A030 : 0xD64545);
+            fb_fill_rect(bx, yd, barw * dpct / 100, 14, dc);
+            box(bx, yd, barw, 14, 0x9098A4);
+            p = 0;
+            p += unum(dused/(1024*1024), line+p); line[p++]=' '; line[p++]='/'; line[p++]=' ';
+            p += unum(df_total/(1024*1024), line+p);
+            const char *du = " MiB used"; for (int i=0;du[i];i++) line[p++]=du[i]; line[p]=0;
+            draw_text(bx, yd + 20, line, 0x303840);
+        } else {
+            draw_text(bx, yb + 160, "no disk", 0x303840);
+        }
         break;
     }
     case KIND_ABOUT: {
@@ -593,7 +615,7 @@ static void spawn_app(int kind, const char *prog) {
     case KIND_FILES:   w.w=330; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;
     case KIND_WELCOME: w.w=360; w.h=206; w.body=0xF0F0F0; w.title="Welcome"; break;
     case KIND_ABOUT:   w.w=300; w.h=160; w.body=0xF4F0E8; w.title="About";   break;
-    case KIND_SYSMON:  w.w=320; w.h=240; w.body=0xF0F4F8; w.title="Monitor"; break;
+    case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="Monitor"; break;
     default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
     }
     windows[win_count++] = w;
