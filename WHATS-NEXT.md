@@ -1,5 +1,21 @@
 # What's next
 
+> **(M574-M578) JS engine — closed the documented gaps; coercion + regex + JSON now spec-complete.**
+> With QEMU back (so each change is verifiable in-guest), a focused pass finished the JS engine's long-tail:
+> **M574** ToPrimitive `toString` (string coercion of objects/classes: `""+o`, `String(o)`, template
+> literals, `Array.join`); **M576** ToPrimitive `valueOf` (numeric coercion: `obj-1`, `Number(obj)`, `+obj`,
+> comparisons; valueOf-first, toString-parse fallback) — together **completing ToPrimitive**, the one gap
+> prior sessions deferred *specifically* for lack of in-guest verification; **M577** `match.groups`
+> (named captures `(?<n>…)` were added in M543 but the names discarded) **and** `match.index` — via a new
+> `match_props` side-object on the result array, so positional `m[1]` and ordinary arrays are unaffected;
+> **M578** `JSON.parse` reviver (the symmetric counterpart to the stringify replacer) + an arena bump
+> (32→40 MB, the parser AST + the growing test suite). Each landed with the same rigor: host cases incl.
+> edges, the jstest golden UNCHANGED for every prior line, the relevant fuzzer (regex/json/source) clean,
+> and **verified in-guest** (the shell `js` demo now shows toString/valueOf/regex-groups/reviver from the
+> in-kernel engine). A broad re-probe (~30 modern features) now finds only architectural ceilings left —
+> generators/async/Promise (need coroutines + an event loop) and real BigInt (arbitrary precision); the
+> integer engine and the synchronous standard library are otherwise complete.
+
 > **(M562-M570) Tooling + window gestures + browser-parser fuzz + a gated browser test — the in-guest arc.**
 > **M563** promoted the throwaway driving scripts into a committed tool, `tools/osdrive.py`
 > (boot headless, inject keys + absolute-mouse clicks/drags, screenshot) — the durable enabler for all of
