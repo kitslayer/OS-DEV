@@ -1,6 +1,6 @@
 # What's next
 
-> **(M603-M627) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
+> **(M603-M630) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
 > via in-guest verification.** Verifying the FAT32 write path (a cp/edit/save round-trip) led into the
 > shell's file commands and exposed a pervasive pattern: **fixed-size buffers silently truncating anything
 > larger.** Consequences ranged from **silent data loss** — cp/mv truncated copies to 4KB (and mv then
@@ -24,8 +24,12 @@
 > not silent: **no silent truncation remains.** Verifying subdirectories then surfaced an unrelated FS bug:
 > **M624** `rm <non-empty-dir>` deleted the directory but freed only ITS clusters, orphaning every child
 > file's clusters (silent FAT corruption / space leak) — now it refuses a non-empty directory (df confirms
-> clusters are freed exactly on delete). A clean cascade: one round-trip test surfaced a whole class plus
-> two adjacent bugs (redirect parsing, rm-dir leak). All 27 suites green throughout.
+> clusters are freed exactly on delete). **M629** then bumped wget's fixed 16KB download buffer (it saved
+> files truncated) to 1MB; downloading a 20KB page surfaced yet another: **M630** the read path (dir_find)
+> didn't 8.3-normalize the lookup name the way write/delete do, so a file written as e.g. "dl.html" (stored
+> DL.HTM) couldn't be read back by that name — now it matches the truncated form too. A clean cascade: one
+> round-trip test surfaced a whole bug class plus several adjacent FS/parsing bugs. All 27 suites green
+> throughout.
 
 > **(M599) Real bug found by in-guest verification: Quake didn't launch in the default RAM config.** While
 > screenshot-verifying the marquee features, DOOM rendered but **Quake produced no window and no crash** —
