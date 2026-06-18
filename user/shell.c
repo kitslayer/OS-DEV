@@ -912,6 +912,7 @@ static int run_command(char *line, char *cwd) {
                 {"Space Invaders","SPACEINV.HI"},{"Frogger","FROGGER.HI"},{"15-Puzzle","FIFTEEN.HI"},
                 {"Maze","MAZE.HI"},{"Simon","SIMON.HI"},{"Blackjack","BJ.HI"},
                 {"Typing","TYPING.HI"},{"Yahtzee","YAHTZEE.HI"},{"Video Poker","VPOKER.HI"},
+                {"Pac-Man","PACMAN.HI"},
             };
             print("High scores (your bests):\n");
             int any = 0;

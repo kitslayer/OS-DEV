@@ -37,10 +37,13 @@ static char mz[ROWS][COLS];
 static int  pr, pc, pdx, pdy, wdx, wdy;            /* pac pos, dir, wanted dir */
 static int  gr[NG], gc[NG], gdx[NG], gdy[NG];      /* ghost pos + dir */
 static int  ghr[NG], ghc[NG];                      /* each ghost's home (pen) cell */
-static int  score, lives, dots, fright, tick, over, won;
+static int  score, lives, dots, fright, tick, over, won, best;
 static const char *msg;
 static unsigned rng;
 static unsigned rnd(void){ rng^=rng<<13; rng^=rng>>17; rng^=rng<<5; return rng; }
+
+static void load_hi(void){ char b[16]; long n=sys_readfile("PACMAN.HI",b,15); best=0; for(long i=0;i<n;i++){ if(b[i]<'0'||b[i]>'9')break; best=best*10+(b[i]-'0'); } }
+static void save_hi(void){ char t[12],b[12]; int i=0,n=0,v=best; if(!v)t[i++]='0'; while(v){t[i++]=(char)('0'+v%10);v/=10;} while(i)b[n++]=t[--i]; sys_writefile("PACMAN.HI",b,(unsigned long)n); }
 
 static int wall(int r, int c){ return r<0||r>=ROWS||c<0||c>=COLS||mz[r][c]=='#'; }
 
@@ -116,7 +119,8 @@ static void render(void) {
     sys_clear();
     sys_setcolor(4); print("  Pac-Man"); sys_setcolor(0);
     print("  score "); sys_setcolor(2); putn(score); sys_setcolor(0);
-    print("  lives "); sys_setcolor(12); putn(lives); sys_setcolor(0); print("\n");
+    print("  lives "); sys_setcolor(12); putn(lives);
+    sys_setcolor(0); print("  best "); sys_setcolor(14); putn(best); sys_setcolor(0); print("\n");
     for (int r = 0; r < ROWS; r++) {
         print(" ");
         for (int c = 0; c < COLS; c++) {
@@ -139,7 +143,7 @@ static void render(void) {
 
 int main(void) {
     rng = (unsigned)sys_uptime_ms() | 1u;
-    load(); render();
+    load_hi(); load(); render();
     unsigned long last = sys_uptime_ms();
     for (;;) {
         int k;
@@ -164,6 +168,7 @@ int main(void) {
                 collide();
                 if (fright > 0) fright--;
             }
+            if (over && score > best) { best = score; save_hi(); }
             render();
         }
         sys_sleep(15);

@@ -1,5 +1,10 @@
 # What's next
 
+> **(M744) Pac-Man — persistent high score, wired into `scores`.** Pac-Man now saves your best to PACMAN.HI
+> (like Snake/Tetris/…) and shows it in the HUD, and it's been added to the shell `scores` leaderboard. App-
+> only change (pacman.c + shell.c, neither test-coupled). Verified in-guest: with PACMAN.HI=1234 on disk,
+> Pac-Man's HUD loads **best 1234** and `scores` lists it.
+
 > **(M743) New shell command — `scores` (a personal leaderboard).** Fifteen games save a best to their own
 > `*.HI` file; `scores` reads them all and prints the ones you've set (skipping the rest), so you can see
 > every personal best at once. App-only change to `user/shell.c` (not test-coupled). Verified in-guest: on a
