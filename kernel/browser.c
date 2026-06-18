@@ -1252,15 +1252,7 @@ static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
 #define QSA_MAX 256
 /* sel_parse now lives in cssel.h (M688) so it can be host-fuzzed; included at the top. */
 /* Word-boundary class match within a class="..." value (space-separated tokens). */
-static int class_has(const char *v, int vl, const char *cls) {
-    int cl=0; while (cls[cl]) cl++; if (cl==0) return 0;
-    for (int i=0; i+cl<=vl; i++) {
-        if (i>0 && v[i-1]!=' ' && v[i-1]!='\t') continue;
-        int m=0; while (m<cl && v[i+m]==cls[m]) m++;
-        if (m==cl && (i+cl==vl || v[i+cl]==' ' || v[i+cl]=='\t')) return 1;
-    }
-    return 0;
-}
+/* class_has (word-boundary class-token match) now lives in cssel.h (M690). */
 /* Parse a <style> body into simple `selector { color / font-weight / font-style }` rules
  * (b->css_*). A selector that isn't a single simple selector (descendant, comma-grouped,
  * @-rule) fails sel_parse and is skipped. Bounded read-only over s[0..n); caps at CSS_MAX. */

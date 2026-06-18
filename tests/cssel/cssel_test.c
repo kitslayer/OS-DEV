@@ -46,6 +46,21 @@ static void fuzz_one(const unsigned char *data, int len) {
     free(s);
 }
 
+static void expect_cls(const char *v, const char *cls, int want) {
+    int r = class_has(v, (int)strlen(v), cls);
+    char m[160]; snprintf(m, sizeof(m), "class_has('%s','%s')=%d want=%d", v, cls, r, want);
+    CHECK(r == want, m);
+}
+
+/* class_has reads v[0..vl) (vl-bounded, never v[vl]) + the NUL-terminated cls; an
+ * exactly-sized v (NO NUL) red-zones any over-read past the class-attribute slice. */
+static void fuzz_cls(const unsigned char *data, int len, const char *cls) {
+    char *v = malloc(len ? (size_t)len : 1);
+    if (len) memcpy(v, data, (size_t)len);
+    (void)class_has(v, len, cls);   /* must not OOB regardless of result */
+    free(v);
+}
+
 int main(void) {
     /* --- regression: the matching contract the browser's css_match relies on --- */
     expect("div",        1, "div", "", "", "");
@@ -68,7 +83,19 @@ int main(void) {
     expect("div>p",      0, "", "", "", "");             /* `>` after tag -> fail closed */
     expect("a:hover",    0, "", "", "", "");             /* pseudo-class unsupported -> fail closed */
     expect("abcdefghijklmnopqrstuvwxyz", 0, "", "", "", "");   /* >15-char tag: overflow remainder hits else -> fail closed */
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (tag/class/id/attr + lowercase + =value-ignored + fail-closed + truncation)");
+    /* class_has: a class matches only as a whole space/tab-separated token */
+    expect_cls("foo", "foo", 1);
+    expect_cls("a foo b", "foo", 1);
+    expect_cls("foobar", "foo", 0);        /* prefix, not a whole token */
+    expect_cls("barfoo", "foo", 0);        /* suffix */
+    expect_cls("xfoo foox", "foo", 0);     /* partial at both ends */
+    expect_cls("foo bar", "bar", 1);       /* token at end */
+    expect_cls("foo\tbar", "bar", 1);      /* tab separator */
+    expect_cls("  foo  ", "foo", 1);       /* surrounding whitespace */
+    expect_cls("", "foo", 0);              /* empty class list */
+    expect_cls("foo", "", 0);              /* empty target class */
+    expect_cls("nav-link active", "active", 1);
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (tag/class/id/attr + lowercase + =value-ignored + fail-closed + truncation + class_has word-boundary)");
 
     /* --- fuzz: random + structured selectors over exactly-sized inputs (ASan-checked) --- */
     unsigned int seed = 0x5e1ec701u;
@@ -83,6 +110,10 @@ int main(void) {
                                     : (unsigned char)((seed >> 9) & 0xFF);   /* mix structured + raw bytes */
         }
         fuzz_one(buf, len);
+        char cls[8]; int cn = (int)((seed >> 3) % 7);   /* a short random target class */
+        for (int i = 0; i < cn; i++) { seed = seed * 1103515245u + 12345u; cls[i] = alpha[(seed >> 9) % (sizeof(alpha) - 1)]; }
+        cls[cn] = 0;
+        fuzz_cls(buf, len, cls);   /* class_has over the same exactly-sized slice + a random class */
         if (fails) { printf("  (fuzz stopped at iter %d)\n", it); break; }
     }
 

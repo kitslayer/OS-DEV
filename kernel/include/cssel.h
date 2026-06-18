@@ -36,4 +36,18 @@ static int sel_parse(const char *s, sel_t *o) {
     }
     return (o->tag[0]||o->cls[0]||o->id[0]||o->attr[0]);
 }
+
+/* Does the class-attribute value v[0..vl) contain `cls` as a whole space/tab-separated
+ * token? (So `.foo` matches class="a foo b" but NOT class="foobar".) The word-boundary
+ * test is the one piece of CSS class matching with real logic; reached for every .class
+ * selector. Bounded read-only over v[0..vl) and the NUL-terminated cls. (M690) */
+static int class_has(const char *v, int vl, const char *cls) {
+    int cl=0; while (cls[cl]) cl++; if (cl==0) return 0;
+    for (int i=0; i+cl<=vl; i++) {
+        if (i>0 && v[i-1]!=' ' && v[i-1]!='\t') continue;            /* must start at a token boundary */
+        int m=0; while (m<cl && v[i+m]==cls[m]) m++;
+        if (m==cl && (i+cl==vl || v[i+cl]==' ' || v[i+cl]=='\t')) return 1;   /* …and end at one */
+    }
+    return 0;
+}
 #endif
