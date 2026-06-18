@@ -11,7 +11,8 @@
  * up, then Space on a destination to move (Space on another of your pieces
  * re-picks). r starts a new game, q quits.
  *
- * Not modelled (rare, omitted for simplicity): castling and en-passant.
+ * Castling is supported (rights tracked, the king may not castle out of, through,
+ * or into check); en-passant is not modelled (rare).
  */
 #include "ulib.h"
 
@@ -22,6 +23,7 @@ static char bd[64];
 static int  cr, cc;            /* cursor row/col */
 static int  sel;               /* selected square index, or -1 */
 static int  over;              /* game ended */
+static int  crights;           /* castling rights bitmask: 1=WK 2=WQ 4=BK 8=BQ */
 static const char *msg;
 
 typedef struct { unsigned char from, to, promo; } Move;
@@ -44,7 +46,7 @@ static void reset(void) {
         bd[6*8 + c] = 'P';               /* white pawns */
         bd[7*8 + c] = (char)(back[c] - 32); /* white back rank, uppercase */
     }
-    cr = 6; cc = 4; sel = -1; over = 0; msg = "Your move (White).";
+    crights = 15; cr = 6; cc = 4; sel = -1; over = 0; msg = "Your move (White).";
 }
 
 static int pval(char p) {
@@ -161,6 +163,15 @@ static int gen_pseudo(int white, Move *list) {
                 if (empty(t) || side_of(t) != white)
                     list[n++] = (Move){ (unsigned char)(r*8+c), (unsigned char)(rr*8+cc2), 0 };
             }
+            if (c == 4 && ((white && r == 7) || (!white && r == 0))) {   /* castling */
+                int wk = white ? 1 : 4, wq = white ? 2 : 8;
+                if ((crights & wk) && empty(bd[r*8+5]) && empty(bd[r*8+6]) && up(bd[r*8+7]) == 'R'
+                    && !attacked(r,4,!white) && !attacked(r,5,!white) && !attacked(r,6,!white))
+                    list[n++] = (Move){ (unsigned char)(r*8+4), (unsigned char)(r*8+6), 0 };
+                if ((crights & wq) && empty(bd[r*8+1]) && empty(bd[r*8+2]) && empty(bd[r*8+3]) && up(bd[r*8+0]) == 'R'
+                    && !attacked(r,4,!white) && !attacked(r,3,!white) && !attacked(r,2,!white))
+                    list[n++] = (Move){ (unsigned char)(r*8+4), (unsigned char)(r*8+2), 0 };
+            }
         } else {   /* sliders: B, R, Q */
             const int (*dirs)[2]; int nd;
             if (P == 'B') { dirs = diag; nd = 4; }
@@ -180,18 +191,39 @@ static int gen_pseudo(int white, Move *list) {
     return n;
 }
 
+static void clr_rights_sq(int sq) {     /* a king/rook left or was captured on sq -> drop that right */
+    if (sq == 60) crights &= ~(1 | 2);  /* e1: White king */
+    if (sq == 4)  crights &= ~(4 | 8);  /* e8: Black king */
+    if (sq == 63) crights &= ~1;        /* h1 rook -> White kingside  */
+    if (sq == 56) crights &= ~2;        /* a1 rook -> White queenside */
+    if (sq == 7)  crights &= ~4;        /* h8 rook -> Black kingside  */
+    if (sq == 0)  crights &= ~8;        /* a8 rook -> Black queenside */
+}
+
+/* backup is 65 bytes: bytes 0..63 = board, byte 64 = castling rights. */
 static void apply(Move m, char *backup) {
     for (int i = 0; i < 64; i++) backup[i] = bd[i];
+    backup[64] = (char)crights;
     char p = bd[m.from];
+    if (up(p) == 'K') {                  /* a two-file king step is a castle: move the rook too */
+        int r = m.from / 8, fc = m.from % 8, tc = m.to % 8;
+        if (tc - fc == 2) { bd[r*8+5] = bd[r*8+7]; bd[r*8+7] = '.'; }   /* kingside  h->f */
+        if (fc - tc == 2) { bd[r*8+3] = bd[r*8+0]; bd[r*8+0] = '.'; }   /* queenside a->d */
+    }
     bd[m.to] = m.promo ? (char)m.promo : p;
     bd[m.from] = '.';
+    clr_rights_sq(m.from);
+    clr_rights_sq(m.to);
 }
-static void undo(char *backup) { for (int i = 0; i < 64; i++) bd[i] = backup[i]; }
+static void undo(char *backup) {
+    for (int i = 0; i < 64; i++) bd[i] = backup[i];
+    crights = (unsigned char)backup[64];
+}
 
 /* Legal moves = pseudo-legal that don't leave our own king in check. */
 static int gen_legal(int white, Move *out) {
     Move ps[256]; int np = gen_pseudo(white, ps), n = 0;
-    char bak[64];
+    char bak[65];
     for (int i = 0; i < np; i++) {
         apply(ps[i], bak);
         if (!in_check(white)) out[n++] = ps[i];
@@ -286,7 +318,7 @@ static int negamax(int depth, int alpha, int beta, int white) {
     if (depth == 0) return white ? evaluate() : -evaluate();
     Move mv[256]; int n = gen_legal(white, mv);
     if (n == 0) return in_check(white) ? -(MATE + depth) : 0;   /* mate (prefer slower) / stalemate */
-    char bak[64];
+    char bak[65];
     int best = -INF;
     for (int i = 0; i < n; i++) {
         apply(mv[i], bak);
@@ -303,7 +335,7 @@ static int negamax(int depth, int alpha, int beta, int white) {
 static int cpu_move(void) {
     Move mv[256]; int n = gen_legal(0, mv);
     if (n == 0) return 0;
-    char bak[64];
+    char bak[65];
     int best = -INF, bi = 0;
     for (int i = 0; i < n; i++) {
         apply(mv[i], bak);
@@ -386,7 +418,7 @@ int main(void) {
                 /* attempt the move sel -> idx if it's legal */
                 Move mv[256]; int n = gen_legal(1, mv), done = 0;
                 for (int i = 0; i < n; i++) if (mv[i].from == sel && mv[i].to == idx) {
-                    char bak[64]; apply(mv[i], bak);
+                    char bak[65]; apply(mv[i], bak);
                     sel = -1; done = 1;
                     sys_beep(660, 40);
                     check_state(0);                       /* is Black (to move) mated? */

@@ -1,5 +1,13 @@
 # What's next
 
+> **(M735) Chess — castling.** Added castling to `user/chess.c`: rights are tracked in a bitmask (cleared
+> whenever a king or rook leaves, or is captured on, its home square), the king may not castle out of,
+> through, or into check, and `apply()`/`undo()` now snapshot the rights alongside the 64-byte board so the
+> alpha-beta search treats castling correctly too. It's encoded as the king's two-file step — `apply()` spots
+> that and moves the rook to match (h→f kingside, a→d queenside). App-only change. Verified in-guest: after
+> e4/Nf3/Bc4, **O-O** moves the king to g1 and the rook to f1, and the CPU keeps playing legally. (En-passant
+> is still not modelled — rare.)
+
 > **(M734) Docs — README front page caught up.** The headline still said "720+ milestones / forty-plus apps /
 > ~thirty games" and the M706+ recap pre-dated the recent work. Bumped to 730+ milestones / fifty-plus apps /
 > ~forty games and added the additions since: the **Game Boy emulator** (Peanut-GB), **Chess** (alpha-beta
