@@ -3841,8 +3841,54 @@ static val nat_Symbol(val *a, int n){
     return SYMV(g_sym_next++, desc);
 }
 
+/* ---- setTimeout / setInterval: a deferred-callback queue ----
+ * The engine has no real event loop (its I/O is blocking and Promises resolve
+ * eagerly), so timers can't truly wait on a wall clock. We model them the only
+ * way a run-to-completion interpreter can: queue the callbacks, then once the
+ * top-level script finishes, run them in (delay, registration) order until the
+ * queue drains — so the huge amount of real-world JS that defers work with
+ * setTimeout(fn, …) actually executes instead of dying on "setTimeout is not
+ * defined". setInterval fires once (a synchronous engine can't loop forever).
+ * The queue is per-run (reset on entry, drained while the arena is still live). */
+#define JS_NTIMERS 256
+static struct { val fn; long delay; int id; int active; long seq; } g_timers[JS_NTIMERS];
+static int g_ntimers, g_timer_id, g_timer_seq;
+static int js_callable(val v){ return v.t==V_FUN || v.t==V_NATIVE || (v.t==V_OBJ && v.o && v.o->kind==V_BOUND); }
+
+static val nat_setTimeout(val *a, int n){
+    if (n < 1 || !js_callable(a[0]) || g_ntimers >= JS_NTIMERS) return NUM(0);
+    long d = (n >= 2 && a[1].t==V_NUM) ? a[1].num : 0;
+    int id = ++g_timer_id;
+    g_timers[g_ntimers].fn = a[0]; g_timers[g_ntimers].delay = d < 0 ? 0 : d;
+    g_timers[g_ntimers].id = id; g_timers[g_ntimers].active = 1; g_timers[g_ntimers].seq = g_timer_seq++;
+    g_ntimers++;
+    return NUM(id);
+}
+static val nat_clearTimeout(val *a, int n){
+    if (n >= 1 && a[0].t==V_NUM)
+        for (int i=0;i<g_ntimers;i++) if (g_timers[i].id==(int)a[0].num) g_timers[i].active=0;
+    return UND();
+}
+/* Run queued timers in (delay, seq) order; callbacks may queue more. Bounded so a
+ * self-rescheduling setTimeout / setInterval can't spin forever. */
+static void js_drain_timers(void){
+    int budget = 100000;
+    while (budget-- > 0 && !g_err && !g_oom) {
+        int best = -1;
+        for (int i=0;i<g_ntimers;i++) if (g_timers[i].active)
+            if (best<0 || g_timers[i].delay<g_timers[best].delay ||
+                (g_timers[i].delay==g_timers[best].delay && g_timers[i].seq<g_timers[best].seq)) best=i;
+        if (best<0) break;
+        val fn = g_timers[best].fn; g_timers[best].active = 0;
+        call_function_this(fn, UND(), 0, 0);
+    }
+}
+
 static void install_globals(env *g) {
     obj *p=new_obj(V_NATIVE); p->native=native_print; val pv=UND(); pv.t=V_NATIVE; pv.o=p; env_define(g,"print",pv);
+    /* setTimeout/setInterval (deferred-callback queue) + clearTimeout/clearInterval */
+    { obj *st=new_obj(V_NATIVE); st->native=nat_setTimeout;   val v=UND(); v.t=V_NATIVE; v.o=st; env_define(g,"setTimeout",v);  env_define(g,"setInterval",v); }
+    { obj *ct=new_obj(V_NATIVE); ct->native=nat_clearTimeout; val v=UND(); v.t=V_NATIVE; v.o=ct; env_define(g,"clearTimeout",v); env_define(g,"clearInterval",v); }
     /* console.log */
     obj *log=new_obj(V_NATIVE); log->native=native_print; val lv=UND(); lv.t=V_NATIVE; lv.o=log;
     obj *con=new_obj(V_OBJ); obj_set(con,"log",lv); obj_set(con,"warn",lv); obj_set(con,"error",lv); obj_set(con,"info",lv); obj_set(con,"debug",lv);   /* all print; page scripts use warn/error too */
@@ -3977,7 +4023,7 @@ static int js_run_impl(const char *src, char *out, int outmax, int mode) {
 
     int reuse = (mode == 2 && g_page_env);             /* an event reusing the live page env */
     if (!reuse) g_arena_off = 0;                       /* events keep the arena so the env survives */
-    g_oom=0; g_err=0; g_errmsg[0]=0; g_depth=0;
+    g_oom=0; g_err=0; g_errmsg[0]=0; g_depth=0; g_ntimers=0; g_timer_seq=0;
     g_out=out; g_out_cap=outmax; g_out_len=0; if(outmax) out[0]=0;
 
     lexer L; memset(&L,0,sizeof(L)); L.src=src; L.len=(int)strlen(src); L.pos=0;
@@ -3988,6 +4034,7 @@ static int js_run_impl(const char *src, char *out, int outmax, int mode) {
         if (g) {
             if (!reuse) { install_globals(g); if (mode >= 1) g_page_env = g; }   /* persist on page-begin (1) AND a script-less page's first event (mode 2, no env yet) so its later clicks share state */
             eval_stmt(prog, g);
+            js_drain_timers();      /* run setTimeout/setInterval callbacks the script queued */
         }
     }
     if (g_oom) rt_err("out of memory (arena)");

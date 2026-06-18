@@ -1,5 +1,15 @@
 # What's next
 
+> **(M745) JS engine — `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval`.** The engine had no timers
+> at all (`typeof setTimeout` was `undefined`), so any real-world page that defers work with
+> `setTimeout(fn, …)` — extremely common — aborted on "not defined". Added a deferred-callback queue in
+> `kernel/js.c`: timers are queued during the run, then (the engine has no event loop — its I/O is blocking
+> and Promises resolve eagerly) drained after the top-level script in (delay, registration) order, with
+> callbacks free to queue more, bounded so a self-rescheduling timer can't spin forever. `setInterval` fires
+> once (a synchronous engine can't loop a wall clock); `clearTimeout`/`clearInterval` cancel by id. New
+> `tests/js/timers.js` golden (ordering + chaining + cancellation), wired into `make check`. 29/29 suites
+> green; verified in-guest (`js` runs a `setTimeout` callback). Not games — a real browser/JS capability.
+
 > **(M744) Pac-Man — persistent high score, wired into `scores`.** Pac-Man now saves your best to PACMAN.HI
 > (like Snake/Tetris/…) and shows it in the HUD, and it's been added to the shell `scores` leaderboard. App-
 > only change (pacman.c + shell.c, neither test-coupled). Verified in-guest: with PACMAN.HI=1234 on disk,

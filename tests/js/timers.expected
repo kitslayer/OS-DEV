@@ -1,0 +1,8 @@
+start
+setInterval is function, clearInterval is function
+end-of-main
+A-delay-10
+B-delay-20
+D-chained
+C-delay-100
+-- done --
