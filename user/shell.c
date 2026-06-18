@@ -1154,17 +1154,16 @@ static int run_command(char *line, char *cwd) {
             out[oi] = 0;
             print("  "); print(out); print("\n");
         } else if (startswith(line, "cmp ")) {            /* cmp F1 F2 -> identical, or the first differing line */
-            static char b1[2048], b2[2048];
             const char *p = line + 4; while (*p == ' ') p++;
             char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
             while (*p == ' ') p++;
             char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
             if (!f1[0] || !f2[0]) { print("usage: cmp <file1> <file2>\n"); }
             else {
-                long n1 = sys_readfile(f1, b1, sizeof(b1));
-                long n2 = sys_readfile(f2, b2, sizeof(b2));
-                if (n1 < 0)      { print("cmp: no such file: "); print(f1); print("\n"); }
-                else if (n2 < 0) { print("cmp: no such file: "); print(f2); print("\n"); }
+                long n1; char *b1 = slurp(f1, &n1);
+                long n2; char *b2 = slurp(f2, &n2);
+                if (!b1)      { print("cmp: no such file: "); print(f1); print("\n"); }
+                else if (!b2) { print("cmp: no such file: "); print(f2); print("\n"); }
                 else {
                     long i1 = 0, i2 = 0; int lineno = 1, differ = 0;
                     while (i1 < n1 || i2 < n2) {
@@ -1183,6 +1182,7 @@ static int run_command(char *line, char *cwd) {
                     }
                     if (!differ) print("  files are identical\n");
                 }
+                free(b1); free(b2);
             }
         } else if (startswith(line, "strings ")) {        /* strings FILE -> runs of >=4 printable chars */
             static char buf[2048];
