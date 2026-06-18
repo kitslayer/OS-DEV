@@ -1,5 +1,13 @@
 # What's next
 
+> **(M737) New game — Mancala (Kalah) vs the computer.** `user/mancala.c`: the classic sow-and-capture
+> game. Pick a pit (1-6), seeds sow counterclockwise skipping the opponent's store; landing in your own store
+> earns another turn, and landing the last seed in an empty pit on your side captures it plus the pit
+> opposite. When a side empties, the other sweeps its leftovers — most seeds wins. The CPU plays a greedy
+> heuristic (prefers extra-turn moves, then captures, then seeds banked, chaining its extra turns). 29/29
+> suites green. Verified in-guest, including **seed conservation** (always 48 on the board) after a full
+> exchange — strong evidence the sow/capture math is right.
+
 > **(M736) New game — Video Poker (Jacks or Better).** `user/vpoker.c`: you're dealt five cards, toggle holds
 > with 1-5, then Space draws replacements; the final hand pays on the classic 9/6 Jacks-or-Better table (a
 > pair of jacks or better, up to a 250× royal flush). Each deal antes one credit; you start with 100 and your
