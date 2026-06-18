@@ -10,6 +10,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 int jpeg_probe (const uint8_t *, int, int *, int *, long *);
 int jpeg_decode(const uint8_t *, int, uint8_t *, int, uint8_t *, int, int *, int *);
@@ -31,6 +32,27 @@ static void run_all(const uint8_t *d, int n) {
     png_decode (d, n, obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
     gif_decode (d, n, obuf, sizeof obuf, sbuf, sizeof sbuf, &w, &h);
     bmp_decode (d, n, obuf, sizeof obuf, &w, &h);
+}
+
+/* Build a valid GIF89a up to (but not including) the LZW data: a 4-colour
+ * global colour table (colour 0 = 0x10,0x20,0x30), one image covering the whole
+ * logical screen, no local table, not interlaced. Returns the byte count; the
+ * caller appends the LZW min-code-size byte + sub-blocks. Lets the GIF fuzz
+ * reach lzw_decode, which the magic-only prefix fuzz cannot (it needs a
+ * structurally valid header first). */
+static int build_gif(uint8_t *g, int iw, int ih) {
+    int p = 0;
+    g[p++]='G'; g[p++]='I'; g[p++]='F'; g[p++]='8'; g[p++]='9'; g[p++]='a';
+    g[p++]=iw&0xFF; g[p++]=(iw>>8)&0xFF;                 /* logical screen w */
+    g[p++]=ih&0xFF; g[p++]=(ih>>8)&0xFF;                 /* logical screen h */
+    g[p++]=0x80|0x01; g[p++]=0; g[p++]=0;                /* GCT present, 4 colours */
+    g[p++]=0x10; g[p++]=0x20; g[p++]=0x30;               /* colour 0 */
+    for (int i = 0; i < 9; i++) g[p++]=0;                /* colours 1..3 */
+    g[p++]=0x2C; g[p++]=0; g[p++]=0; g[p++]=0; g[p++]=0; /* image separator + left/top */
+    g[p++]=iw&0xFF; g[p++]=(iw>>8)&0xFF;                 /* image w */
+    g[p++]=ih&0xFF; g[p++]=(ih>>8)&0xFF;                 /* image h */
+    g[p++]=0;                                            /* no local table, no interlace */
+    return p;
 }
 
 int main(void) {
@@ -138,6 +160,60 @@ int main(void) {
         int w, h; bmp_decode(f, n, obuf, sizeof obuf, &w, &h);
     }
 
-    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + gzip round-trip + %d decoder + %d DEFLATE + %d BMP + %d gzip fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS, ITERS);
+    /* 7. GIF LZW path. The magic-only prefix fuzz (section 3) can't reach
+     *    lzw_decode — it needs a structurally valid header first — so the GIF
+     *    decoder's trickiest untrusted-input code (variable-width codes, the
+     *    dictionary, KwKwK, the sub-block chain) was effectively unfuzzed.
+     *    build_gif() gives a real header; here we (a) decode a known 2x2 to
+     *    prove the harness reaches LZW, (b) reject oversized dimensions, and
+     *    (c) fuzz the compressed sub-block stream under ASan/UBSan. */
+    {
+        static uint8_t g[300];
+        int w2, h2;
+
+        /* (a) known-good 2x2, all palette index 0 -> colour (0x10,0x20,0x30).
+         *     LZW (min code size 2): CLEAR, 0,0,0,0, END packs to 04 00 05. */
+        int p = build_gif(g, 2, 2);
+        g[p++]=2;                                        /* LZW min code size */
+        g[p++]=3; g[p++]=0x04; g[p++]=0x00; g[p++]=0x05; /* one 3-byte sub-block */
+        g[p++]=0;                                        /* block terminator */
+        int r = gif_decode(g, p, obuf, sizeof obuf, sbuf, sizeof sbuf, &w2, &h2);
+        if (!(r == 0 && w2 == 2 && h2 == 2 &&
+              obuf[0]==0x10 && obuf[1]==0x20 && obuf[2]==0x30 && obuf[3]==255 &&
+              obuf[12]==0x10 && obuf[13]==0x20 && obuf[14]==0x30 && obuf[15]==255)) {
+            printf("FAIL: GIF 2x2 LZW decode wrong (r=%d w=%d h=%d px0=%d,%d,%d)\n",
+                   r, w2, h2, obuf[0], obuf[1], obuf[2]);
+            return 1;
+        }
+
+        /* (b) valid header, oversized dimensions -> graceful reject (the
+         *     decompression-bomb / dimension-overflow guard), never an overflow. */
+        p = build_gif(g, 5000, 5000);
+        if (gif_decode(g, p, obuf, sizeof obuf, sbuf, sizeof sbuf, &w2, &h2) != -1) {
+            printf("FAIL: GIF 5000x5000 dimensions not rejected\n"); return 1;
+        }
+
+        /* (c) fuzz the LZW sub-block stream behind a valid header. Two things
+         *     make this actually exercise the bounds: (1) SMALL randomised dims
+         *     (idx_cap 1..64) so the per-pixel output bound (out < idx_cap) is
+         *     hit constantly while the dictionary / prefix-walk / KwKwK /
+         *     code_size logic still runs; (2) scratch + output buffers malloc'd
+         *     to the EXACT image size — the kernel sizes scratch to iw*ih, so a
+         *     4MB static buffer would mask a write past the cap; tight malloc'd
+         *     buffers give ASan redzones right at the boundary. */
+        for (int i = 0; i < ITERS; i++) {
+            int iw = 1 + (int)(xr() % 8), ih = 1 + (int)(xr() % 8);
+            p = build_gif(g, iw, ih);
+            g[p++] = (uint8_t)(2 + (xr() % 7));          /* min code size 2..8 (valid) */
+            int payload = (int)(xr() % (sizeof g - (unsigned)p));
+            for (int j = 0; j < payload; j++) g[p++] = (uint8_t)xr();
+            uint8_t *tscr = malloc((size_t)iw * ih);     /* indices: exactly iw*ih */
+            uint8_t *tout = malloc((size_t)iw * ih * 4); /* RGBA: exactly iw*ih*4 */
+            if (tscr && tout) gif_decode(g, p, tout, iw*ih*4, tscr, iw*ih, &w2, &h2);
+            free(tscr); free(tout);
+        }
+    }
+
+    printf("imgtest: M422 DRI PoC + truncated headers + BMP 2x2 + GIF 2x2 LZW + gzip round-trip + %d decoder + %d DEFLATE + %d BMP + %d gzip + %d GIF-LZW fuzz iters — ASan/UBSan clean\n", ITERS, ITERS, ITERS, ITERS, ITERS);
     return 0;
 }
