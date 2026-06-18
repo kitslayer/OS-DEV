@@ -1617,8 +1617,9 @@ static int run_command(char *line, char *cwd) {
  * their last argument via sys_readfile, which now reads the piped data.
  *
  * Supports N stages by looping: each stage after the first reads PIPE.TMP and
- * its output replaces it for the next '|'. Buffers are fixed-size; oversized
- * intermediate output truncates (length-capped capture, NUL-terminated).
+ * its output replaces it for the next '|'. The capture buffer grows on demand
+ * (cap_begin/cap_end over a heap buffer, up to 32MB), so a stage's output is no
+ * longer truncated at a fixed size.
  */
 /* Write a command's captured output to a file: overwrite for ">", append for
  * ">>" (append reads the existing contents first, capped to the buffer). */
@@ -1635,7 +1636,6 @@ static void write_redirect(const char *file, const char *buf, unsigned long len,
 }
 
 static void run_pipe(char *line, char *cwd, const char *rfile, int append) {
-    static char pbuf[8192];            /* captured output of one stage (static: too big for the stack) */
     char cmd[160];                     /* the current stage's command line (cmd2 + " PIPE.TMP") */
     const char *seg = line;            /* start of the current segment */
     int first = 1;
@@ -1667,18 +1667,18 @@ static void run_pipe(char *line, char *cwd, const char *rfile, int append) {
              * For the last stage, fall through so PIPE.TMP gets cleaned up. */
         } else if (last) {
             if (rfile) {                       /* final stage redirected to a file */
-                cap_begin(pbuf, sizeof pbuf);
+                cap_begin();
                 run_command(cmd, cwd);
-                unsigned long rlen = cap_end();
-                write_redirect(rfile, pbuf, rlen, append);
+                unsigned long rlen; char *cb = cap_end(&rlen);
+                if (cb) { write_redirect(rfile, cb, rlen, append); free(cb); }
             } else {
                 run_command(cmd, cwd);         /* final stage: print to the screen */
             }
         } else {
-            cap_begin(pbuf, sizeof pbuf);      /* intermediate stage: capture its output */
+            cap_begin();                       /* intermediate stage: capture its output */
             run_command(cmd, cwd);
-            unsigned long len = cap_end();
-            sys_writefile("PIPE.TMP", pbuf, len);
+            unsigned long len; char *cb = cap_end(&len);
+            if (cb) { sys_writefile("PIPE.TMP", cb, len); free(cb); }
         }
 
         if (last) break;
@@ -1760,6 +1760,7 @@ static int run_line(char *line, char *cwd) {
     for (int i = 0; cmd[i]; i++) if (cmd[i] == '>') {
         if (cmd[i+1] == '>') { append = 1; rfile = &cmd[i+2]; } else { rfile = &cmd[i+1]; }
         cmd[i] = 0;
+        while (i > 0 && cmd[i-1] == ' ') cmd[--i] = 0;   /* trim spaces before '>' so "cmd arg > f" doesn't pass "arg " (trailing space) on */
         while (*rfile == ' ') rfile++;
         char *fe = (char *)rfile; while (*fe) fe++; while (fe > rfile && fe[-1] == ' ') *--fe = 0;
         if (!*rfile) rfile = 0;
@@ -1771,11 +1772,10 @@ static int run_line(char *line, char *cwd) {
 
     if (piped) { run_pipe(cmd, cwd, rfile, append); return 0; }
     if (rfile) {
-        static char rbuf[8192];
-        cap_begin(rbuf, sizeof rbuf);
+        cap_begin();
         run_command(cmd, cwd);
-        unsigned long rlen = cap_end();
-        write_redirect(rfile, rbuf, rlen, append);
+        unsigned long rlen; char *cb = cap_end(&rlen);
+        if (cb) { write_redirect(rfile, cb, rlen, append); free(cb); }
         return 0;
     }
     return run_command(cmd, cwd);                /* 1 only for "exit" */

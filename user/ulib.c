@@ -131,21 +131,34 @@ static char         *g_capbuf = 0;     /* destination buffer, or NULL = not capt
 static unsigned long  g_caplen = 0;    /* bytes written so far */
 static unsigned long  g_capmax = 0;    /* buffer capacity (incl. room for the NUL) */
 
-void cap_begin(char *buf, unsigned long max) {
-    g_capbuf = buf; g_caplen = 0; g_capmax = max;
-    if (max) buf[0] = '\0';            /* start empty + NUL-terminated */
+void cap_begin(void) {                 /* capture print() into a growable heap buffer */
+    g_capmax = 65536;
+    g_capbuf = malloc(g_capmax);
+    g_caplen = 0;
+    if (g_capbuf) g_capbuf[0] = '\0';
+    else g_capmax = 0;                 /* malloc failed: capture off, print() falls through to the screen */
 }
-unsigned long cap_end(void) {          /* stop capturing; return the captured length */
-    unsigned long n = g_caplen;
+char *cap_end(unsigned long *outlen) { /* stop; hand the malloc'd buffer to the caller (which frees it) */
+    char *b = g_capbuf;
+    if (outlen) *outlen = g_caplen;
     g_capbuf = 0; g_caplen = 0; g_capmax = 0;
-    return n;
+    return b;
 }
 
 void print(const char *s) {
-    if (g_capbuf) {                    /* capture mode: append, length-capped + NUL-terminated */
+    if (g_capbuf) {                    /* capture mode: append, growing the buffer as output accumulates */
         unsigned long i = 0;
-        while (s[i] && g_caplen + 1 < g_capmax) g_capbuf[g_caplen++] = s[i++];
-        if (g_capmax) g_capbuf[g_caplen] = '\0';
+        while (s[i]) {
+            if (g_caplen + 1 >= g_capmax) {            /* full: double the buffer (cap at 32MB) */
+                if (g_capmax >= (32u << 20)) break;    /* refuse to grow past 32MB (truncate gracefully) */
+                unsigned long nc = g_capmax << 1;
+                char *nb = realloc(g_capbuf, nc);
+                if (!nb) break;                        /* OOM: keep what we captured so far */
+                g_capbuf = nb; g_capmax = nc;
+            }
+            g_capbuf[g_caplen++] = s[i++];
+        }
+        g_capbuf[g_caplen] = '\0';
         return;
     }
     sys_write(1, s, ustrlen(s));
