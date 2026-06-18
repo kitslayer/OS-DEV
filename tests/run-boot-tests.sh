@@ -17,26 +17,36 @@ QEMU=${QEMU:-qemu-system-x86_64}
 KERNEL=build/kernel32.elf
 DISK=build/fat.img
 LOG=$(mktemp /tmp/osdev_boot.XXXXXX.log)
-trap 'rm -f "$LOG"' EXIT
+QPID=""
+cleanup() { rc=$?; [ -n "$QPID" ] && { kill -9 "$QPID" 2>/dev/null || true; wait "$QPID" 2>/dev/null || true; }; rm -f "$LOG"; exit "$rc"; }
+trap cleanup EXIT
 
 if ! command -v "$QEMU" >/dev/null 2>&1; then
     echo "SKIP: boot test ($QEMU not found)"
     exit 0
 fi
 
-echo "booting kernel headless under QEMU (COM1 capture, 12s cap)..."
-# SIGKILL after the cap: a plain SIGTERM can leave QEMU hanging with -no-shutdown.
-# GNU timeout re-raises the kill signal on itself so the parent's wait-status
-# shows the signal, which the shell would then print as a noisy "Killed" line.
-# Run it backgrounded and wait on it: a non-interactive shell doesn't report the
-# termination of a waited-for background job. QEMU's output is captured to $LOG.
-timeout -s KILL 12 "$QEMU" -no-reboot -no-shutdown -kernel "$KERNEL" \
+echo "booting kernel headless under QEMU (COM1 capture)..."
+# Capture COM1 to a file and poll it: kill QEMU as soon as the boot finishes
+# (the "launching the desktop" hand-off is the last marker) rather than always
+# burning a fixed cap. The 25s timeout is a generous safety net -- the boot does
+# a real TLS 1.3 HTTPS handshake (bignum-heavy under TCG) before the desktop, so
+# a tight cap would be flaky. SIGKILL because -no-shutdown ignores SIGTERM.
+timeout -s KILL 25 "$QEMU" -no-reboot -no-shutdown -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \
     -device AC97,audiodev=snd0 -audiodev none,id=snd0 \
-    -display none -serial stdio >"$LOG" 2>&1 &
-wait $! 2>/dev/null || true
+    -display none -serial file:"$LOG" >/dev/null 2>&1 &
+QPID=$!
+i=0
+while [ $i -lt 50 ]; do
+    grep -q "launching the desktop" "$LOG" 2>/dev/null && break
+    kill -0 "$QPID" 2>/dev/null || break    # QEMU exited (crash, or a stubbed binary): stop waiting
+    sleep 0.5; i=$((i+1))
+done
+sleep 0.3   # let the last few lines flush
+kill -9 "$QPID" 2>/dev/null || true; wait "$QPID" 2>/dev/null || true; QPID=""
 
 fail=0
 
@@ -63,6 +73,7 @@ require "each process has its own address"   "per-process address-space isolatio
 require "PCI devices on the bus"             "PCI enumeration"
 require "Networking works!"                  "e1000 + ARP + ICMP echo (SLIRP gateway)"
 softrequire "200 OK"                         "TCP/HTTP GET to real example.com (needs internet)"
+softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chain validated + certverify (needs internet)"
 require "mounted FAT32 volume"               "FAT32 mount"
 require "AC'97 audio: NAM="                  "AC'97 audio bring-up"
 require "USB tablet active"                  "USB UHCI + tablet"

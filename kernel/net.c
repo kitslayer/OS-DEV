@@ -16,6 +16,7 @@
 #include "timer.h"
 #include "console.h"
 #include "string.h"
+#include "tls.h"
 #include <stdint.h>
 
 static const uint8_t  OUR_IP[4]  = {10, 0, 2, 15};
@@ -637,5 +638,26 @@ void net_demo(void) {
         kprintf("[net] HTTP GET example.com -> %d bytes, status: %s\n\n", n, page);
     } else {
         kprintf("[net] HTTP GET example.com failed (no internet route?)\n\n");
+    }
+
+    /* Prove the from-scratch TLS 1.3 stack end to end: a real HTTPS GET exercises
+     * the handshake (X25519 key share), the AEAD record layer (AES-GCM/ChaCha20),
+     * X.509 chain parsing + path validation to a trusted root, hostname matching,
+     * and the CertificateVerify signature check (ECDSA/RSA over our own bignum).
+     * Non-fatal: an offline host or a blocked :443 just reports failure. */
+    static uint8_t tpage[4096];
+    int tn = tls_get("example.com", "/", tpage, sizeof(tpage) - 1, (uint32_t)timer_ticks());
+    if (tn > 0) {
+        tpage[tn] = 0;
+        int eol = 0; while (eol < tn && tpage[eol] != '\r' && tpage[eol] != '\n') eol++;
+        tpage[eol] = 0;
+        kprintf("[tls] HTTPS GET example.com -> %d bytes, status: %s\n", tn, (char *)tpage);
+        kprintf("[tls] cert CN=%s expires %s | chain=%s host=%s certverify=%s\n\n",
+                tls_leaf_cn(), tls_leaf_expiry(),
+                tls_chain_anchored()      ? "trusted-root" : "UNVERIFIED",
+                tls_host_match() == 1 ? "match" : tls_host_match() == 0 ? "MISMATCH" : "n/a",
+                tls_cert_status() == 0  ? "ok"   : "FAIL");
+    } else {
+        kprintf("[tls] HTTPS GET example.com failed (no internet route, blocked :443, or handshake error)\n\n");
     }
 }
