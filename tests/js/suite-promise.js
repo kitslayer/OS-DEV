@@ -56,4 +56,7 @@ print("-- JSON.stringify toJSON + non-finite (M691) --");
 print(JSON.stringify({a:1,toJSON:function(){return {b:2};}}));   // {"b":2} (toJSON hook replaces the value)
 print(JSON.stringify({x:{toJSON:function(){return "X";}}}));     // {"x":"X"} (nested toJSON)
 print(JSON.stringify({n:Infinity,m:-Infinity,ok:5}));            // {"n":null,"m":null,"ok":5} (the ±Infinity sentinel serializes as null)
+print("-- Array.lastIndexOf(fromIndex) + reduce-of-empty throws (M692) --");
+print([1,2,3,2,1].lastIndexOf(2,2), [1,2,3,2,1].lastIndexOf(2,-3), [1,2,3,2,1].lastIndexOf(2), [1,2,3,2,1].lastIndexOf(9));   // 1 1 3 -1 (lastIndexOf searches backward from fromIndex; neg fromIndex is from the end)
+print((function(){try{[].reduce(function(a,b){return a+b;});return "no";}catch(e){return "threw";}})(), [].reduce(function(a,b){return a+b;},0), [10,20].reduce(function(a,b){return a+b;}));   // threw 0 30 (empty+no-init throws; empty+init returns init; normal reduce)
 print("-- done --");

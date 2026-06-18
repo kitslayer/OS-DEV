@@ -50,4 +50,7 @@ AggregateError:x,y
 {"b":2}
 {"x":"X"}
 {"n":null,"m":null,"ok":5}
+-- Array.lastIndexOf(fromIndex) + reduce-of-empty throws (M692) --
+1 1 3 -1
+threw 0 30
 -- done --

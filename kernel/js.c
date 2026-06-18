@@ -2560,7 +2560,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         for(int i=0;i<nins;i++) o->vals[start+i]=args[2+i]; o->n=newn;
         val v=UND(); v.t=V_ARR; v.o=rem; return v; }
     if (strcmp(name,"fill")==0){ val fv=nargs?args[0]:UND(); int st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):o->n; if(st<0)st+=o->n; if(en<0)en+=o->n; if(st<0)st=0; if(en>o->n)en=o->n; for(int i=st;i<en;i++) o->vals[i]=fv; return recv; }
-    if (strcmp(name,"lastIndexOf")==0){ for(int i=o->n-1;i>=0;i--) if(nargs && val_equal(o->vals[i],args[0])) return NUM(i); return NUM(-1); }   /* strict (===) */
+    if (strcmp(name,"lastIndexOf")==0){ int start=o->n-1; if(nargs>1){ int fi=(int)to_num(args[1]); if(fi<0) fi+=o->n; if(fi<start) start=fi; } /* search backward from fromIndex (M692) */ for(int i=start;i>=0;i--) if(nargs && val_equal(o->vals[i],args[0])) return NUM(i); return NUM(-1); }   /* strict (===) */
     if (strcmp(name,"flat")==0){ long long dd=nargs?(long long)to_num(args[0]):1; int depth=dd<0?0:(dd>64?64:(int)dd); /* clamp via int64 so flat(Infinity) -> 64, not a truncated negative */ obj*r=new_obj(V_ARR); if(!r) return UND(); flat_into(r,o,depth); val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
     if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -2573,9 +2573,9 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"findIndex")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) return NUM(i); } return NUM(-1); }
     if (strcmp(name,"some")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) return BOOLV(1); } return BOOLV(0); }
     if (strcmp(name,"every")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(!truthy(call_function(args[0],ca,2))) return BOOLV(0); } return BOOLV(1); }
-    if (strcmp(name,"reduce")==0){ if(!nargs) return UND(); int i=0; val acc; if(nargs>1) acc=args[1]; else { if(o->n==0) return UND(); acc=o->vals[0]; i=1; }
+    if (strcmp(name,"reduce")==0){ if(!nargs) return UND(); int i=0; val acc; if(nargs>1) acc=args[1]; else { if(o->n==0){ rt_err("Reduce of empty array with no initial value"); return UND(); } acc=o->vals[0]; i=1; }   /* M692: empty + no init throws (per spec) */
         for(; i<o->n && !g_err && !g_oom; i++){ val ca[3]={acc,o->vals[i],NUM(i)}; acc=call_function(args[0],ca,3); } return acc; }
-    if (strcmp(name,"reduceRight")==0){ if(!nargs) return UND(); int i=o->n-1; val acc; if(nargs>1) acc=args[1]; else { if(o->n==0) return UND(); acc=o->vals[o->n-1]; i=o->n-2; }
+    if (strcmp(name,"reduceRight")==0){ if(!nargs) return UND(); int i=o->n-1; val acc; if(nargs>1) acc=args[1]; else { if(o->n==0){ rt_err("Reduce of empty array with no initial value"); return UND(); } acc=o->vals[o->n-1]; i=o->n-2; }
         for(; i>=0 && !g_err && !g_oom; i--){ val ca[3]={acc,o->vals[i],NUM(i)}; acc=call_function(args[0],ca,3); } return acc; }
     if (strcmp(name,"sort")==0){   /* in-place insertion sort: comparator if given, else string order (JS default) */
         int havecmp = (nargs && (args[0].t==V_FUN || args[0].t==V_NATIVE));
