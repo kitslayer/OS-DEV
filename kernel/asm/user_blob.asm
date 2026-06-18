@@ -42,6 +42,8 @@ global fifteen_elf_start, fifteen_elf_end
 global mastermind_elf_start, mastermind_elf_end
 global pong_elf_start, pong_elf_end
 global halflife_elf_start, halflife_elf_end
+global memory_elf_start, memory_elf_end
+global sokoban_elf_start, sokoban_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -186,5 +188,13 @@ pong_elf_end:
 halflife_elf_start:
     incbin "build/halflife.elf"
 halflife_elf_end:
+
+memory_elf_start:
+    incbin "build/memory.elf"
+memory_elf_end:
+
+sokoban_elf_start:
+    incbin "build/sokoban.elf"
+sokoban_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

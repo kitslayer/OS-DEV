@@ -1,5 +1,12 @@
 # What's next
 
+> **(M710) Two more games — Memory and Sokoban.** **Memory/Concentration** (`user/memory.c`): a 4×4 board of
+> 8 letter pairs, Fisher-Yates shuffled; flip two cards a turn, matches stay face-up, tries counted, clear to
+> win. **Sokoban** (`user/sokoban.c`): push every crate onto a goal (no pulling, no double-pushes); 3 bundled
+> open-room levels (no corner traps, each hand-verified solvable), push counter, r restart / n next. Both
+> additive ulib apps wired into the registry + Apps menu; verified in-guest (Sokoban level 1 solved on
+> camera; Memory card flip). All 29 `make check` suites still green.
+
 > **(M709) "Half-Life: Black Mesa" — a tribute survival shooter.** The real Half-Life can't run here (a
 > closed GoldSrc/Win32 engine needing a GPU and proprietary assets; Quake is this OS's GoldSrc-family
 > ceiling), so this is an honest original homage on the text grid (`user/halflife.c`): after the resonance
