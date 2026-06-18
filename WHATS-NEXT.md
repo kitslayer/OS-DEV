@@ -1,6 +1,6 @@
 # What's next
 
-> **(M603-M615) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
+> **(M603-M619) A systematic data-loss/correctness bug class — found + fixed across the whole file surface
 > via in-guest verification.** Verifying the FAT32 write path (a cp/edit/save round-trip) led into the
 > shell's file commands and exposed a pervasive pattern: **fixed-size buffers silently truncating anything
 > larger.** Consequences ranged from **silent data loss** — cp/mv truncated copies to 4KB (and mv then
@@ -9,7 +9,7 @@
 > hashed only the first 16KB; `cmp` reported "files are identical" for files that differed past 2KB;
 > wc/grep/tail/sort/nl/uniq/hexdump processed only a 0.5–8KB prefix; gzip/gunzip/crypt capped at 16–256KB.
 > Each now handles the whole file (a kernel `read_whole_file()` + a shell `slurp()`: a heap buffer that
-> doubles until the read no longer fills it, capped at 32MB; sort/nl/uniq also lost their fixed line caps),
+> doubles until the read no longer fills it, capped at 32MB; sort/nl/uniq/tac also lost their fixed line caps),
 > every fix verified in-guest against host tools / file sizes (e.g. sha256 of WALL.PNG matches `sha256sum`;
 > `cmp` of two 14KB copies differing only at the end now reports the diff; `cat *.htm > f` captures all
 > 71KB; gzip→gunzip of a 430KB WAV round-trips byte-identical). A **separate parsing bug** surfaced
@@ -17,9 +17,10 @@
 > (trailing space) and broke FAT32 lookups / streq commands — redirection only worked written tight
 > (`cmd>file`). The pipe/redirect capture buffer also grew from a fixed 8KB to a growable heap buffer.
 > Also **M603**: ~38 more CSS named colours (real pages rendered tomato/dodgerblue/limegreen as no colour).
-> Remaining (rare, noted): tac/fold/cut/tr/strings still cap (output buffers / secondary line arrays). A
-> clean example of verification cascading — one round-trip test surfaced a whole class plus an adjacent
-> parsing bug. All 27 suites green throughout.
+> By M619 the whole single-file command set is done (tac/strings/tr/cut/fold too — fold now prints each
+> wrapped line as it goes rather than buffering all output); only the obscure two-file comm/paste and diff
+> (a 128-line LCS table) still cap. A clean example of verification cascading — one round-trip test surfaced
+> a whole class plus an adjacent parsing bug. All 27 suites green throughout.
 
 > **(M599) Real bug found by in-guest verification: Quake didn't launch in the default RAM config.** While
 > screenshot-verifying the marquee features, DOOM rendered but **Quake produced no window and no crash** —
