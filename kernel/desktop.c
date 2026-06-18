@@ -772,7 +772,9 @@ void desktop_run(void) {
             }
         }
 
-        if (left && !(prev_btn & 1)) {
+        if (left && !(prev_btn & 1) && help_open) {
+            help_open = 0; dirty = 1;        /* the help overlay is modal: a click anywhere dismisses it */
+        } else if (left && !(prev_btn & 1)) {
             int ty = screen_h - TASKBAR_H, mh = MENU_PERCOL*MENU_ITEM_H + 4;
             int mw = MENU_COLS*MENU_W, my0 = ty - mh;
             if (menu_open) {
