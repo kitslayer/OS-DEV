@@ -29,6 +29,7 @@ static uint32_t cwd_cluster;   /* current directory (for relative paths) */
 static uint32_t num_fats;
 static uint32_t fat_sectors;   /* sectors per FAT */
 static uint32_t total_clusters; /* count of data clusters on the volume */
+static uint32_t alloc_hint = 2; /* where the next free-cluster scan starts (set on free) */
 
 static uint16_t rd16(const uint8_t *p) { return p[0] | p[1] << 8; }
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
@@ -335,17 +336,25 @@ static void fat_set(uint32_t cl, uint32_t val) {
 
 /* Find a free cluster, mark it end-of-chain, and return it (0 = disk full). */
 static uint32_t alloc_cluster(void) {
-    uint8_t sec[SECSZ];
-    uint32_t per = SECSZ / 4;
-    for (uint32_t s = 0; s < fat_sectors; s++) {
-        if (ata_read(fat_start + s, 1, sec) < 0) return 0;
-        for (uint32_t e = 0; e < per; e++) {
-            uint32_t cl = s * per + e;
-            if (cl < 2) continue;
-            if ((rd32(sec + e * 4) & 0x0FFFFFFF) == 0) {
-                fat_set(cl, EOC);
-                return cl;
-            }
+    uint8_t sec[SECSZ]; uint32_t cached = 0xFFFFFFFFu;
+    uint32_t span = total_clusters ? total_clusters : fat_sectors * (SECSZ / 4);
+    if (span == 0) return 0;
+    uint32_t start = alloc_hint < 2 ? 2 : alloc_hint;
+    /* Scan [start..) then wrap to cluster 2, covering every data cluster exactly
+     * once. Starting where the previous allocation ended (and caching the FAT
+     * sector across the scan) makes a sequential write O(n) instead of
+     * rescanning the whole FAT per cluster — and it allocates contiguously,
+     * which the run-coalescing reader then loads fast. Still returns only a
+     * genuinely free (entry==0) cluster, so the worst a stale hint can do is a
+     * false "disk full", never a clobber. */
+    for (uint32_t n = 0; n < span; n++) {
+        uint32_t cl = 2 + (((start - 2) + n) % span);
+        uint32_t off = cl * 4, fsec = fat_start + off / SECSZ;
+        if (fsec != cached) { if (ata_read(fsec, 1, sec) < 0) return 0; cached = fsec; }
+        if ((rd32(sec + (off % SECSZ)) & 0x0FFFFFFF) == 0) {
+            fat_set(cl, EOC);
+            alloc_hint = cl + 1;
+            return cl;
         }
     }
     return 0;
@@ -379,7 +388,12 @@ static void to_83(const char *name, uint8_t out[11]) {
 /* Free a whole cluster chain back to the FAT. */
 static void free_chain(uint32_t cl) {
     uint32_t steps = 0;
-    while (cl >= 2 && cl < EOC) { uint32_t nx = fat_step(cl, &steps); fat_set(cl, 0); cl = nx; }
+    while (cl >= 2 && cl < EOC) {
+        uint32_t nx = fat_step(cl, &steps);
+        fat_set(cl, 0);
+        if (cl < alloc_hint) alloc_hint = cl;     /* let the next allocation reuse freed space */
+        cl = nx;
+    }
 }
 
 static long fat32_delete(const char *name);          /* forward decl */
@@ -624,6 +638,7 @@ int fat32_mount(void) {
     uint32_t tot_sec = rd16(bs + 19) ? rd16(bs + 19) : rd32(bs + 32);  /* 16- or 32-bit count */
     uint32_t meta = reserved + num_fats * fat_sectors;
     total_clusters = (tot_sec > meta) ? (tot_sec - meta) / sec_per_clus : 0;
+    alloc_hint = 2;
 
     vfs_register(&fat32_ops);
     return 0;

@@ -1,5 +1,16 @@
 # What's next
 
+> **(M722) Faster file writes — `alloc_cluster` uses a free-cluster hint instead of rescanning the FAT.**
+> Saving a file allocated clusters one at a time, and each `alloc_cluster` rescanned the FAT from the start
+> for the first free entry — O(n²) for an n-cluster file (a 576 KB screenshot = 1152 clusters rescanned the
+> whole FAT ~1152×). Allocation now starts each scan at a remembered hint (where the last one ended, with
+> wraparound) and caches the FAT sector across the scan: a sequential write is O(n), and the clusters come out
+> **contiguous** — which the run-coalescing reader (M720) then loads fast. It still returns only a genuinely
+> free (entry==0) cluster, so a stale hint can at worst cause a false "disk full", never a clobber, and
+> `free_chain` lowers the hint so freed space is reused. Verified: in-guest a 4 MB `cp` round-trips
+> byte-identical (`cmp` → "files are identical"), and all 29 `make check` suites stay green (incl. fstest's
+> 8k-op write/delete/mkdir fuzz and the exact-reclaim `df` regression).
+
 > **(M720) Much faster file reads — `fat32_read` does multi-sector, contiguous-run I/O.** Loading a big file
 > (e.g. Freedoom's 27 MB WAD) was reading the disk one 512-byte sector at a time *and* re-reading a FAT sector
 > for every cluster (the same FAT sector up to 128× on a sequential walk) — ~108k single-sector PIO commands
