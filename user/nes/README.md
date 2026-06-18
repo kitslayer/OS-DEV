@@ -41,8 +41,11 @@ work; they were verified on the host before integrating.
 Shipped as `GAME.NES` on the FAT disk (see `tools/nova.nes`, registered in
 `tools/mkfatfs.c`). **Nova the Squirrel** is an open-source (**GPLv3**) NES
 platformer by NovaSquirrel — https://github.com/NovaSquirrel/NovaTheSquirrel
-(mapper 1 / MMC1, 256 KB, CHR-RAM). The emulator is ROM-agnostic; drop any
-supported `.nes` in as `GAME.NES` to play something else.
+(mapper 1 / MMC1, 256 KB, CHR-RAM). The emulator is ROM-agnostic: on
+launch it lists every `.nes` on the disk (`sys_list`) and, if there's more than
+one, shows a pickable menu — so dropping another `.nes` on the disk just makes
+it appear. A second freely-licensed ROM ships alongside it: the **240p Test
+Suite** (`tools/240p.nes`, GPLv3, by Damian Yerrick / Artemio Urbina; mapper 2).
 
 ## Controls
 

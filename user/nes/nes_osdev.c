@@ -30,6 +30,10 @@ extern int           sys_getkbevent(void);
 extern unsigned long sys_uptime_ms(void);
 extern void          sys_sleep(int ms);
 extern long          sys_readfile(const char *name, void *buf, unsigned long len);
+extern long          sys_list(void *buf, unsigned long len);
+extern int           sys_pollkey(void);
+extern void          sys_setcolor(int color);
+extern void          sys_clear(void);
 extern void          print(const char *s);
 
 #define NES_W 256
@@ -79,10 +83,63 @@ static uint32_t g_fb[NES_W * NES_H];
  * regardless. */
 static unsigned char g_rom[1024 * 1024];
 
+/* ---- ROM picker: list the .nes files on the FAT disk and choose one --------
+ * The emulator is ROM-agnostic; any .nes dropped on the disk shows up here. */
+static char rom_names[16][16];
+static int  n_roms;
+
+static char up(char c) { return (c >= 'a' && c <= 'z') ? (char)(c - 32) : c; }
+
+static void scan_roms(void) {
+    static char buf[8192];
+    long n = sys_list(buf, sizeof(buf));
+    if (n < 0) n = 0;
+    buf[n] = 0;
+    n_roms = 0;
+    int i = 0;
+    while (buf[i] && n_roms < 16) {
+        char nm[16]; int j = 0;
+        while (buf[i] && buf[i] != ' ' && buf[i] != '\n' && j < 15) nm[j++] = buf[i++];
+        nm[j] = 0;
+        while (buf[i] && buf[i] != '\n') i++;       /* skip the "  size" column */
+        if (buf[i] == '\n') i++;
+        if (j >= 4 && nm[j-4] == '.' && up(nm[j-3]) == 'N' && up(nm[j-2]) == 'E' && up(nm[j-1]) == 'S') {
+            for (int k = 0; k <= j; k++) rom_names[n_roms][k] = nm[k];
+            n_roms++;
+        }
+    }
+}
+
+/* returns the chosen index, -1 if none on disk, -2 if the user quit */
+static int pick_rom(void) {
+    if (n_roms <= 1) return n_roms - 1;
+    int sel = 0;
+    for (;;) {
+        sys_clear();
+        sys_setcolor(4); print("\n  NES"); sys_setcolor(0); print("  - pick a ROM:\n\n");
+        for (int i = 0; i < n_roms; i++) {
+            if (i == sel) { sys_setcolor(11); print("   > "); }
+            else          { sys_setcolor(8);  print("     "); }
+            print(rom_names[i]); print("\n");
+        }
+        sys_setcolor(0); print("\n  up/down move   Enter play   q quit\n");
+        int k; while ((k = sys_pollkey()) < 0) sys_sleep(20);
+        if      (k == 'q' || k == 'Q') return -2;
+        else if (k == 0x11) { if (sel > 0) sel--; }
+        else if (k == 0x12) { if (sel < n_roms - 1) sel++; }
+        else if (k == '\n' || k == '\r' || k == ' ') return sel;
+    }
+}
+
 int main(void)
 {
-    long n = sys_readfile("GAME.NES", g_rom, sizeof(g_rom));
-    if (n <= 0) { print("nes: cannot read GAME.NES from disk\n"); return 1; }
+    scan_roms();
+    int idx = pick_rom();
+    if (idx == -2) return 0;                          /* user quit the picker */
+    if (idx < 0) { print("nes: no .nes ROM found on disk\n"); return 1; }
+
+    long n = sys_readfile(rom_names[idx], g_rom, sizeof(g_rom));
+    if (n <= 0) { print("nes: cannot read the ROM from disk\n"); return 1; }
 
     struct xnes_ctx_t *ctx = xnes_ctx_alloc(g_rom, (size_t)n);
     if (!ctx) { print("nes: not a valid iNES ROM (or unsupported mapper)\n"); return 1; }

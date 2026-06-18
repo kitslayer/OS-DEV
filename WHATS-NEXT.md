@@ -1,5 +1,13 @@
 # What's next
 
+> **(M711) NES is now a multi-game console — a ROM picker.** The NES app (`user/nes/nes_osdev.c`) enumerates
+> the `.nes` files on the FAT disk (`sys_list`) and, if there's more than one, shows a pickable text menu
+> (up/down + Enter) before switching to graphics — so any `.nes` dropped on the disk just appears, no rebuild.
+> Ships a second freely-licensed ROM beside Nova the Squirrel: the **240p Test Suite** (GPLv3, by Damian
+> Yerrick / Artemio Urbina — `tools/240p.nes`, mapper 2 / UNROM). Verified in-guest: the picker lists
+> NOVA.NES + 240P.NES, and selecting 240P renders its graphically rich main screen — exercising a second
+> mapper through the same core. All 29 `make check` suites still green.
+
 > **(M710) Two more games — Memory and Sokoban.** **Memory/Concentration** (`user/memory.c`): a 4×4 board of
 > 8 letter pairs, Fisher-Yates shuffled; flip two cards a turn, matches stay face-up, tries counted, clear to
 > win. **Sokoban** (`user/sokoban.c`): push every crate onto a goal (no pulling, no double-pushes); 3 bundled

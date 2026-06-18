@@ -965,7 +965,8 @@ static const struct {
     { "TUNE3   WAV", "tools/TUNE3.WAV" }, /* a little melody (for the jukebox playlist) */
     { "WALL    PNG", "tools/WALL.PNG" },  /* the desktop wallpaper (1024x768), loaded by the WM */
     { "PAK0    PAK", "tools/PAK0.PAK" },  /* shareware Quake data (~18 MB): play in-OS with: run quake */
-    { "GAME    NES", "tools/nova.nes" },  /* Nova the Squirrel (GPLv3 homebrew NES game): play with: run nes */
+    { "NOVA    NES", "tools/nova.nes" },  /* Nova the Squirrel (GPLv3 homebrew NES game): play with: run nes */
+    { "240P    NES", "tools/240p.nes" },  /* 240p test suite (GPLv3, by Tepples): a video/sound test ROM */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 
