@@ -11,7 +11,7 @@
 #include "ulib.h"
 
 #define W 40
-#define H 15
+#define H 12                        /* field rows; header+field+footer must fit the 17-row grid */
 #define IR 3
 #define IC 8
 
@@ -21,6 +21,7 @@ static int px;                      /* cannon x (on row H-1) */
 static int pbx, pby, pbon;          /* player bullet */
 static int ibx[6], iby[6], ibn;     /* invader bullets */
 static int score, lives, over, won;
+static int hi, saved;               /* persisted high score (SPACEINV.HI) */
 static unsigned long t_inv, t_fire;
 
 static unsigned rng;
@@ -33,11 +34,22 @@ static void putn(int n) {
     char s[8]; int j = 0; while (i) s[j++] = t[--i]; s[j] = 0; print(s);
 }
 
+static void load_hi(void) {
+    char b[16]; long n = sys_readfile("SPACEINV.HI", b, sizeof(b) - 1);
+    hi = 0; for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; hi = hi * 10 + (b[i] - '0'); }
+}
+static void save_hi(void) {
+    char t[12], b[12]; int i = 0, n = 0, v = hi;
+    if (v == 0) t[i++] = '0'; while (v) { t[i++] = (char)('0' + v % 10); v /= 10; }
+    while (i) b[n++] = t[--i];
+    sys_writefile("SPACEINV.HI", b, (unsigned long)n);
+}
+
 static void reset(void) {
     for (int r = 0; r < IR; r++) for (int c = 0; c < IC; c++) alive[r][c] = 1;
     nalive = IR * IC;
     bx = 2; by = 1; bdir = 1; px = W/2; pbon = 0; ibn = 0;
-    score = 0; lives = 3; over = 0; won = 0;
+    score = 0; lives = 3; over = 0; won = 0; saved = 0;
     t_inv = t_fire = sys_uptime_ms();
 }
 
@@ -79,8 +91,9 @@ static int hit_invader(int x, int y) {
 static void render(void) {
     sys_clear();
     sys_setcolor(4); print("\n  Space Invaders"); sys_setcolor(0);
-    print("   score "); sys_setcolor(3); putn(score); sys_setcolor(0);
-    print("   lives "); sys_setcolor(2); putn(lives); sys_setcolor(0); print("\n\n");
+    print("  score "); sys_setcolor(3); putn(score); sys_setcolor(0);
+    print("  hi "); sys_setcolor(14); putn(hi); sys_setcolor(0);
+    print("  lives "); sys_setcolor(2); putn(lives); sys_setcolor(0); print("\n\n");
     static char fld[H][W + 1];
     for (int y = 0; y < H; y++) { for (int x = 0; x < W; x++) fld[y][x] = ' '; fld[y][W] = 0; }
     for (int r = 0; r < IR; r++) for (int c = 0; c < IC; c++) if (alive[r][c]) {
@@ -106,6 +119,7 @@ static void render(void) {
 
 int main(void) {
     rng = (unsigned)sys_uptime_ms() | 1u;
+    load_hi();
     reset();
     render();
     for (;;) {
@@ -132,6 +146,10 @@ int main(void) {
             int period = 250 + nalive * 12;             /* faster as fewer remain */
             if (now - t_inv >= (unsigned long)period) { step_invaders(); t_inv = now; }
             if (now - t_fire >= 900) { fire_invader(); t_fire = now; }
+            render();
+        } else if (!saved) {                 /* game just ended: record a new high score */
+            saved = 1;
+            if (score > hi) { hi = score; save_hi(); }
             render();
         }
         sys_sleep(45);

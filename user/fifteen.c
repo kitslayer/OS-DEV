@@ -11,6 +11,7 @@
 #define N 4
 static int g[N][N];                 /* 0 = the gap */
 static int br, bc, moves, won;
+static int best;                    /* fewest moves to solve, persisted (FIFTEEN.HI); 0 = none yet */
 
 static unsigned rng;
 static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
@@ -20,6 +21,17 @@ static void putn(int n) {
     if (n == 0) { print("0"); return; }
     while (n) { t[i++] = (char)('0' + n % 10); n /= 10; }
     char s[8]; int j = 0; while (i) s[j++] = t[--i]; s[j] = 0; print(s);
+}
+
+static void load_best(void) {
+    char b[16]; long n = sys_readfile("FIFTEEN.HI", b, sizeof(b) - 1);
+    best = 0; for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best * 10 + (b[i] - '0'); }
+}
+static void save_best(void) {
+    char t[12], b[12]; int i = 0, n = 0, v = best;
+    if (v == 0) t[i++] = '0'; while (v) { t[i++] = (char)('0' + v % 10); v /= 10; }
+    while (i) b[n++] = t[--i];
+    sys_writefile("FIFTEEN.HI", b, (unsigned long)n);
 }
 
 static int solved(void) {
@@ -49,7 +61,8 @@ static void shuffle(void) {
 static void render(void) {
     sys_clear();
     sys_setcolor(4); print("\n  15-Puzzle"); sys_setcolor(0);
-    print("       moves="); putn(moves); print("\n\n");
+    print("    moves="); putn(moves);
+    print("  best="); if (best) putn(best); else print("-"); print("\n\n");
     for (int r = 0; r < N; r++) {
         print("     ");
         for (int c = 0; c < N; c++) {
@@ -71,6 +84,7 @@ static void render(void) {
 
 int main(void) {
     rng = (unsigned)sys_uptime_ms() | 1u;
+    load_best();
     shuffle();
     render();
     for (;;) {
@@ -86,7 +100,7 @@ int main(void) {
         else if (k == 0x14) did = slide_gap_to(br, bc - 1);   /* Right */
         if (did) {
             moves++;
-            if (solved()) { won = 1; sys_beep(880, 120); sys_beep(1320, 140); }
+            if (solved()) { won = 1; if (best == 0 || moves < best) { best = moves; save_best(); } sys_beep(880, 120); sys_beep(1320, 140); }
             render();
         }
     }

@@ -1,5 +1,14 @@
 # What's next
 
+> **(M723) Persistent high scores for the new games (+ a Space Invaders layout fix).** Matching the OS's
+> existing `*.HI` convention (SNAKE.HI / TETRIS.HI): **Space Invaders** now keeps a high score (`SPACEINV.HI`,
+> shown as `hi N`, saved when beaten) and **15-Puzzle** keeps a fewest-moves best (`FIFTEEN.HI`, shown as
+> `best=N`, saved on a faster solve). Adding the Space Invaders `hi` field surfaced a pre-existing bug — its
+> header had been scrolling off the top of the 17-row text grid since M716 (the field was too tall) — so the
+> field was shrunk and the full `score / hi / lives` header now shows. Verified in-guest (both display and
+> play; persistence reuses snake's proven load/save). Isolated to two user-space games (no kernel or
+> test-coupled code touched).
+
 > **(M722) Faster file writes — `alloc_cluster` uses a free-cluster hint instead of rescanning the FAT.**
 > Saving a file allocated clusters one at a time, and each `alloc_cluster` rescanned the FAT from the start
 > for the first free entry — O(n²) for an n-cluster file (a 576 KB screenshot = 1152 clusters rescanned the
