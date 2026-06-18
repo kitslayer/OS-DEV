@@ -1,5 +1,14 @@
 # What's next
 
+> **(M732) New game — Chess vs the computer (full legal-move rules + an alpha-beta AI).** `user/chess.c`:
+> every piece moves by the real rules, you may not leave your own king in check, pawns auto-promote to a queen
+> on the last rank, and the game ends on checkmate or stalemate. You play White (bottom); the CPU plays Black
+> with a depth-3 negamax + alpha-beta search over material. Arrows move the cursor, Space picks one of your
+> pieces then its destination (Space elsewhere re-picks), r starts a new game, q quits. (Castling and
+> en-passant are deliberately not modelled.) The biggest gap in the board-game set — TTT, Connect-4, Reversi,
+> Checkers, Gomoku and Battleship existed, but no Chess. Verified in-guest: the board renders in the start
+> position, **e2-e4** plays, and the CPU answers with a legal developing move (Nb8-a6). 29/29 suites green.
+
 > **(M731) Docs/correctness — the disk ELF loader is real (the embed comment was stale).** `kernel/app.c`
 > already has `app_spawn_from_file()`, wired in `kernel/syscall.c` so `run NAME.ELF` falls back to loading an
 > ELF straight from the FAT32 disk when the name isn't a built-in; `mkfatfs` even ships `CALC.ELF` for it and
