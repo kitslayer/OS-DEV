@@ -374,4 +374,6 @@ hoisted true
 true true false boom
 -- JSON.stringify function replacer (M657) --
 {"a":1,"c":3} {"o":{"x":1}}
+-- ToNumber: leading whitespace + 0x hex + sign (M658) --
+7 16 9 5 10
 -- done --

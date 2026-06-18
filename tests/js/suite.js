@@ -407,4 +407,6 @@ print("-- Error subtype hierarchy (M656) --");
 print(new TypeError("x") instanceof Error, new RangeError("y") instanceof Error, new TypeError("z") instanceof RangeError, new TypeError("boom").message);  // true true false boom (built-in error subtypes chain to Error; siblings don't)
 print("-- JSON.stringify function replacer (M657) --");
 print(JSON.stringify({a:1,b:2,c:3},function(k,v){return k==="b"?undefined:v;}), JSON.stringify({o:{x:1,secret:9}},function(k,v){return k==="secret"?undefined:v;}));  // {"a":1,"c":3} {"o":{"x":1}} (fn replacer drops/transforms at every depth; undefined omits)
+print("-- ToNumber: leading whitespace + 0x hex + sign (M658) --");
+print(Number("  7  "), Number("0x10"), +"  9  ", Number("+5"), "  10  "-0);  // 7 16 9 5 10 (string->number skips whitespace, parses hex, honors +/-; trailing-lenient + concat unchanged)
 print("-- done --");

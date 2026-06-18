@@ -944,7 +944,14 @@ static val call_function_this(val fn, val thisv, val *args, int nargs);
 static int64_t to_num(val v) {
     switch (v.t) {
         case V_NUM: case V_BOOL: return v.num;
-        case V_STR: { int64_t x=0; const char*s=v.str; int neg=0; if(*s=='-'){neg=1;s++;} while(*s>='0'&&*s<='9'){x=x*10+(*s-'0');s++;} return neg?-x:x; }
+        case V_STR: { const char*s=v.str;
+            while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++;   /* JS ToNumber skips leading whitespace */
+            int neg=0; if(*s=='-'){neg=1;s++;} else if(*s=='+'){s++;}
+            int64_t x=0;
+            if(s[0]=='0' && (s[1]=='x'||s[1]=='X')){ s+=2;            /* 0x.. hex (Number("0x10")===16) */
+                for(;;){ char c=*s; int d; if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; x=x*16+d; s++; } }
+            else while(*s>='0'&&*s<='9'){ x=x*10+(*s-'0'); s++; }
+            return neg?-x:x; }
         case V_OBJ:
             if (v.o && v.o->kind==V_DATE && v.o->n>=6)   /* Date -> epoch ms, matching getTime (M429) */
                 return (days_from_civil(v.o->vals[0].num, v.o->vals[1].num, v.o->vals[2].num)*86400 + v.o->vals[3].num*3600 + v.o->vals[4].num*60 + v.o->vals[5].num)*1000;
