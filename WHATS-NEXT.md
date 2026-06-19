@@ -1,5 +1,12 @@
 # What's next
 
+> **(M751) Browser — CSS horizontal indent (`margin-left` / `padding-left`).** Completes box-model spacing in
+> both axes: a block's left margin/padding now indents its whole content (wrapped lines included), reusing the
+> `curindent`/`tokindent` machinery `<blockquote>` uses — saved/restored on the style-scope stack so nested
+> indents compose. Inline `style=` for now. Golden-safe (no margin-left in the test pages). `make check`
+> 29/29; verified in-guest — `<p style="margin-left:48px">` shifts the whole paragraph right, wrapped lines
+> too. With M748–M750 the browser now does CSS box-model spacing (margin + padding) in both axes.
+
 > **(M750) Browser — CSS vertical padding (rounds out the box-model spacing).** Extended the M748/M749 path:
 > a block's top space now sums `margin-top` + `padding-top` (or the `margin`/`padding` shorthands' top value),
 > so the very common `padding`-spaced containers render with their intended room. Renamed

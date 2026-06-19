@@ -137,7 +137,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none */
@@ -519,6 +519,15 @@ static int parse_style_vspace(const char *s, int n) {
     else if (style_prop(s, n, "padding", 7, &vs, &ve)) m += parse_px_val(s + vs, ve - vs);   /* padding adds inner top space too */
     return m > 200 ? 200 : m;
 }
+/* Left indent a block contributes (margin-left + padding-left), in px, so indented
+ * content (nested sections, quoted blocks) renders shifted right. Hooks the same
+ * curindent mechanism <blockquote> uses; the shorthand's left value isn't decoded. */
+static int parse_style_hspace(const char *s, int n) {
+    int m = 0, vs, ve;
+    if (style_prop(s, n, "margin-left", 11, &vs, &ve))  m += parse_px_val(s + vs, ve - vs);
+    if (style_prop(s, n, "padding-left", 12, &vs, &ve)) m += parse_px_val(s + vs, ve - vs);
+    return m > 200 ? 200 : m;
+}
 /* returns 1 if the element should be hidden: display:none OR visibility:hidden.
  * (In this box-model-less renderer visibility:hidden can't preserve the element's
  * space, so it hides the content like display:none — fine for reader-mode.) */
@@ -565,12 +574,13 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->curtransform = b->sc[sp].savetransform;
                 b->curalign = b->sc[sp].savealign;
                 b->curscale = b->sc[sp].savescale;
+                b->curindent = b->sc[sp].saveindent;
                 if (b->sc[sp].hidden && b->n_hidden > 0) b->n_hidden--;   /* leaving a display:none element */
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -584,6 +594,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
             int imv = parse_style_vspace(st, stl); if (imv) b->pending_vmargin = (uint16_t)imv;  /* CSS vertical margin+padding -> block spacing */
+            int iml = parse_style_hspace(st, stl); if (iml) ml = iml;                            /* CSS left margin/padding -> indent */
         }
         if (has_attr(attrs, attrlen, "hidden")) hide = 1;   /* the HTML5 `hidden` attribute */
         if (tageq(tag, "big")) { if (!fs) fs = 2; }         /* <big> -> 2x */
@@ -600,7 +611,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
               if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg || al || fs || hide) {  /* styled/hidden element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml) {  /* styled/hidden/indented element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
@@ -610,6 +621,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].savetransform = b->curtransform; if (tr) b->curtransform = tr;
                 b->sc[sp].savealign = b->curalign; if (al) b->curalign = al;
                 b->sc[sp].savescale = b->curscale; if (fs) b->curscale = fs;
+                b->sc[sp].saveindent = b->curindent; if (ml) b->curindent += ml;   /* CSS left indent (margin/padding-left) */
                 b->sc[sp].savestyle = *style; b->sc[sp].setstyle = -1;
                 if (apply_ts) { *style = ts; b->sc[sp].setstyle = ts; }
                 int i = 0; while (tag[i] && i < 15) { b->sc[sp].tag[i] = tag[i]; i++; } b->sc[sp].tag[i] = 0;
