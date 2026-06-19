@@ -43,6 +43,7 @@ void browser_sel_begin(browser_t *b, int rx, int ry);
 void browser_sel_extend(browser_t *b, int rx, int ry);
 void browser_sel_clear(browser_t *b);
 int  browser_sel_commit(browser_t *b, char *out, int max);  /* -> out (len), 0 if not a drag */
+int  browser_sel_word(browser_t *b, int rx, int ry, char *out, int max);  /* double-click: 1 word -> out */
 /* Draggable scrollbar (coords relative to the browser origin). */
 int  browser_in_scrollbar(browser_t *b, int rx, int ry, int w, int h);
 void browser_scroll_track(browser_t *b, int ry, int h);

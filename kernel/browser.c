@@ -3535,6 +3535,18 @@ void browser_sel_extend(browser_t *b, int rx, int ry) {
     if (t >= 0) { if (b->tsel0 < 0) b->tsel0 = t; b->tsel1 = t; }
 }
 void browser_sel_clear(browser_t *b) { if (b) b->tsel0 = b->tsel1 = -1; }
+/* Double-click: select the single word token under (rx,ry) and copy it to `out`. */
+int browser_sel_word(browser_t *b, int rx, int ry, char *out, int max) {
+    if (!b) return 0;
+    int t = browser_hit_word(b, rx, ry);
+    if (t < 0 || t >= b->ntok) { b->tsel0 = b->tsel1 = -1; return 0; }
+    b->tsel0 = b->tsel1 = t;                            /* highlight just this word */
+    tok_t *tk = &b->toks[t];
+    int n = 0;
+    for (int k = 0; k < tk->len && n < max - 1; k++) out[n++] = b->text[tk->off + k];
+    out[n] = 0;
+    return n;
+}
 
 /* ---- draggable scrollbar (coords relative to the browser's x,y origin) ---- */
 int browser_in_scrollbar(browser_t *b, int rx, int ry, int w, int h) {

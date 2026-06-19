@@ -977,12 +977,23 @@ void desktop_run(void) {
                         }
                         else if (t->kind == KIND_BROWSER && t->app) {
                             int rbx = mx - t->x, rby = my - (t->y + TITLEBAR_H);
-                            if (browser_in_scrollbar((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
+                            uint64_t now = timer_ticks();
+                            int near = (mx - last_body_x < 8 && last_body_x - mx < 8 &&
+                                        my - last_body_y < 8 && last_body_y - my < 8);
+                            if (now - last_body_click < 40 && near) {     /* double-click: select the word */
+                                char wb[256];
+                                int n = browser_sel_word((browser_t *)t->app, rbx, rby, wb, sizeof wb);
+                                if (n > 0) clip_set(wb, n);
+                                last_body_click = 0;
+                            } else if (browser_in_scrollbar((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
                                 browser_scroll_track((browser_t *)t->app, rby, t->h - TITLEBAR_H);
                                 bsbdrag = win_count - 1;
-                            } else if (!browser_click((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
-                                browser_sel_begin((browser_t *)t->app, rbx, rby);   /* plain content: start text selection */
-                                bselecting = win_count - 1;
+                            } else {
+                                last_body_click = now; last_body_x = mx; last_body_y = my;
+                                if (!browser_click((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
+                                    browser_sel_begin((browser_t *)t->app, rbx, rby);   /* plain content: start text selection */
+                                    bselecting = win_count - 1;
+                                }
                             }
                         }
                         else if (t->kind == KIND_FILES)

@@ -1,5 +1,12 @@
 # What's next
 
+> **(M772) Browser — double-click word-select.** Matches the terminal's M765: double-clicking a word in a
+> page selects it (highlighted) and copies it to the clipboard. New `browser_sel_word(b,rx,ry,out,max)` (hit
+> the word token, highlight it, extract). The WM detects a double-click in the browser body (reusing the
+> `last_body_click` timer + proximity) before the scrollbar/link/drag paths. `make check` 29/29. Verified
+> in-guest: double-click "from-scratch" on the start page → middle-click the address bar pastes it. Selection
+> is now consistent across terminal + browser (drag-range + word + copy; paste everywhere).
+
 > **(M771) Editor — PgUp/PgDn + wheel paging.** The editor couldn't page long files: PgUp/PgDn (0x15/0x16)
 > were swallowed by the terminal-scrollback intercept before reaching it, and the wheel did nothing there.
 > Now `app_key` only intercepts 0x15/0x16 for ordinary terminals; a full-screen self-drawing app (`caret_off`,
