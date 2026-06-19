@@ -287,7 +287,19 @@ void app_render(app_t *a, int px, int py, int focused) {
             fb_glyph(px + c * font_width, py + r * font_height, ch, fg, 0x0A0A0A);
         }
     }
-    if (a->view > 0)                                /* scrolled-up indicator (top-right) */
+    /* Scrollback scrollbar on the right edge (only when there's scrollback): a
+     * dark track with a thumb whose size = visible/total and whose position
+     * tracks `view`. Gives the wheel/PgUp scrollback visible feedback. */
+    if (a->sb_count > 0) {
+        int total = a->sb_count + APP_ROWS;
+        int sbx = px + APP_COLS * font_width + 1;
+        int trackh = APP_ROWS * font_height;
+        fb_fill_rect(sbx, py, 3, trackh, 0x202428);
+        int th = trackh * APP_ROWS / total; if (th < 8) th = 8;
+        int top = a->sb_count - a->view;                       /* first visible logical row */
+        int ty = py + (trackh - th) * top / (a->sb_count ? a->sb_count : 1);
+        fb_fill_rect(sbx, ty, 3, th, 0x6A7480);
+    } else if (a->view > 0)                          /* (fallback) scrolled-up indicator */
         fb_glyph(px + (APP_COLS - 1) * font_width, py, '^', 0xFFD060, 0x0A0A0A);
     /* Text selection highlight (white on blue), drawn over the cells. Linear,
      * line-spanning: the first row runs from c0, the last to c1, rows between

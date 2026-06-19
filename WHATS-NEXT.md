@@ -1,5 +1,13 @@
 # What's next
 
+> **(M764) Terminal — scrollback scrollbar.** The terminal had scrollback (PgUp/PgDn + the M759 wheel) but
+> only a tiny `^` indicator. Added a real scrollbar on the right edge of the text grid: a dark track with a
+> thumb sized to visible/total rows and positioned by `view`, so you can see how much history exists and
+> where you are — parity with the browser, completing the terminal scrolling UX (line editor + scrollback +
+> wheel + scrollbar). Only shown when `sb_count > 0` (the `^` is the fallback), so golden-safe. ~10 lines in
+> `app_render`; `make check` 29/29. Verified in-guest: after `help`, the thumb sits at the bottom (live), and
+> wheel-up moves it to the top (start of history).
+
 > **(M763) Browser — right-click a link to copy its URL.** Closes the browser→clipboard direction (M760/M761
 > covered terminal↔terminal and terminal→browser). Right-clicking a link copies its href to the shared
 > clipboard (status: "link copied"), skipping internal pseudo-links (javascript:/submit:/event:). Low-risk:
