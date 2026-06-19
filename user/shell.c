@@ -129,6 +129,44 @@ static void cmd_cal(void) {                          /* current month, today hig
  * does exactly that — it jumps to the `while (0)` and falls out of the block —
  * without disturbing any `continue` inside a command's own for/while loop.
  */
+/* ---- shell variables: `set NAME=value` (or `export`), use as $NAME / ${NAME},
+ * `unset NAME`, `set`/`env` list them. Persist for the shell process's lifetime. ---- */
+static struct { char name[24], val[160]; } g_vars[24];
+static int g_nvars;
+static int vchar(char c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'; }
+static const char *vget(const char *n, int nl){
+    for (int i=0;i<g_nvars;i++){ int j=0; while(j<nl && g_vars[i].name[j] && g_vars[i].name[j]==n[j]) j++;
+        if (j==nl && g_vars[i].name[j]==0) return g_vars[i].val; }
+    return 0;
+}
+static void vset(const char *n, int nl, const char *v){
+    if (nl<1) return; if (nl>23) nl=23;
+    int slot=-1;
+    for (int i=0;i<g_nvars && slot<0;i++){ int j=0; while(j<nl && g_vars[i].name[j]==n[j]) j++; if (j==nl && g_vars[i].name[j]==0) slot=i; }
+    if (slot<0){ if (g_nvars>=24) return; slot=g_nvars++; int k=0; for(;k<nl;k++) g_vars[slot].name[k]=n[k]; g_vars[slot].name[k]=0; }
+    int k=0; for(;v[k] && k<159;k++) g_vars[slot].val[k]=v[k]; g_vars[slot].val[k]=0;
+}
+static void vunset(const char *n){
+    int nl=0; while(n[nl] && n[nl]!=' ') nl++;
+    for (int i=0;i<g_nvars;i++){ int j=0; while(j<nl && g_vars[i].name[j]==n[j]) j++;
+        if (j==nl && g_vars[i].name[j]==0){ g_vars[i]=g_vars[--g_nvars]; return; } }
+}
+/* Expand $NAME / ${NAME} in src into dst; returns 1 if a '$' appeared (dst is then the result). */
+static int expand_vars(const char *src, char *dst, int cap){
+    int has=0; for (int i=0;src[i];i++) if (src[i]=='$'){ has=1; break; }
+    if (!has) return 0;
+    int o=0;
+    for (int i=0; src[i] && o<cap-1; ){
+        if (src[i]=='$'){
+            int br=(src[i+1]=='{'); int s=i+1+br, e=s; while (src[e] && vchar(src[e])) e++;
+            const char *v=(e>s)?vget(src+s,e-s):0;
+            if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
+            i = e + ((br && src[e]=='}')?1:0);
+        } else dst[o++]=src[i++];
+    }
+    dst[o]=0; return 1;
+}
+
 static int run_command(char *line, char *cwd) {
     do {
         if (line[0] == '\0') {
@@ -144,6 +182,17 @@ static int run_command(char *line, char *cwd) {
             print("        todo[ add T|done N|clear] mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)\n");
+            print("        set NAME=val (variables) $NAME / ${NAME}   unset NAME   env\n");
+        } else if (startswith(line, "set ") || startswith(line, "export ")) {
+            const char *p = line + (line[1]=='x' ? 7 : 4); while (*p == ' ') p++;   /* skip "set "/"export " */
+            int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
+            if (p[nl] == '=' && nl > 0) vset(p, nl, p + nl + 1);                    /* value = rest of line (may contain spaces) */
+            else print("usage: set NAME=value\n");
+        } else if (streq(line, "set") || streq(line, "env")) {                       /* list all variables */
+            for (int i = 0; i < g_nvars; i++) { print(g_vars[i].name); print("="); print(g_vars[i].val); print("\n"); }
+            if (g_nvars == 0) print("(no variables set)\n");
+        } else if (startswith(line, "unset ")) {
+            const char *p = line + 6; while (*p == ' ') p++; vunset(p);
         } else if (streq(line, "ls")) {
             char buf[8192];                 /* hold a full directory (~90+ files) */
             sys_list(buf, sizeof(buf));
@@ -1833,10 +1882,11 @@ static void glob_expand(const char *src, char *dst, int dstsz){
  * then peel off output redirection and pipelines, then dispatch. Returns 1 only
  * when the shell should exit (the "exit" command). */
 static int run_line(char *line, char *cwd) {
-    static char gline[1024];
+    static char gline[1024], vline[1024];
     char *cmd = line;
-    for (int i = 0; line[i]; i++) if (line[i] == '*' || line[i] == '?') {
-        glob_expand(line, gline, sizeof gline); cmd = gline; break;
+    if (expand_vars(cmd, vline, sizeof vline)) cmd = vline;   /* $NAME / ${NAME} variable expansion (before glob/pipe/redirect) */
+    for (int i = 0; cmd[i]; i++) if (cmd[i] == '*' || cmd[i] == '?') {
+        glob_expand(cmd, gline, sizeof gline); cmd = gline; break;
     }
 
     const char *rfile = 0; int append = 0;

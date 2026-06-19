@@ -1,5 +1,12 @@
 # What's next
 
+> **(M756) Shell — environment variables.** `set NAME=value` (or `export NAME=value`) stores a variable;
+> `$NAME` / `${NAME}` expand in any command line (before glob/pipe/redirect); `unset NAME` removes one;
+> `set`/`env` list them. They persist for the shell process's lifetime. A real scripting power-feature the
+> shell lacked, and a distinct subsystem from the browser run. App-only (`user/shell.c`, not test-coupled);
+> `make check` 29/29. Verified in-guest: `set GREET=hello world; echo $GREET` → "hello world"; `set
+> DIR=README.TXT; cat $DIR` opens the file; `env` lists both.
+
 > **(M755) Browser — full-width block backgrounds.** `background-color` on a block element (div / p / h1-6 /
 > section / li / …) now fills the whole line band (cl→cr, respecting any indent), not just behind the text —
 > distinct from an inline element's bg (`<mark>`, `<span>`), which stays a text highlight. Block-ness is
