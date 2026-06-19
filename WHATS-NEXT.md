@@ -1,5 +1,12 @@
 # What's next
 
+> **(M754) Desktop — click a file in the Files window to open it.** The Files window was keyboard-only
+> (up/down + Enter); a mouse click on a file row did nothing (the click handler routed body clicks to the
+> browser but had no Files case). Added `files_click()`: a click maps the cursor's y to the file row
+> (mirroring the render layout + scroll offset), selects it, and opens it through the shared Enter path
+> (`file:NAME` in a browser window). A distinct, non-browser UX fix. `make check` 29/29; verified in-guest —
+> clicking `MARGIN.HTM` highlights it and opens it in a browser.
+
 > **(M753) Browser — `margin`/`padding` shorthand horizontal value.** The shorthand only contributed its top
 > value (vertical) before; `parse_style_hspace` now decodes the shorthand's left value too (4 tokens → 4th,
 > 2–3 → 2nd, 1 → all sides), so the ubiquitous `margin: V H` form (and `margin: Npx` all-sides) indents the

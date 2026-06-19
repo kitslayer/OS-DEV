@@ -632,6 +632,22 @@ static void files_key(window_t *w, int k) {
     }
 }
 
+/* A click in the Files window body: pick the file row under the cursor, select
+ * it, and open it (the mouse equivalent of arrowing to it and pressing Enter).
+ * `my` is the screen y of the click; the row math mirrors the KIND_FILES render. */
+static void files_click(window_t *w, int my) {
+    static vfs_dirent e[256]; int n = vfs_list(e, 256);
+    if (n <= 0) return;
+    int by = w->y + TITLEBAR_H + 8;                    /* body content origin (matches draw) */
+    int rows = (w->h - TITLEBAR_H - 30) / 18; if (rows < 1) rows = 1;
+    int top = (w->fsel >= rows) ? w->fsel - rows + 1 : 0;   /* same scroll as the render */
+    if (my < by + 22) return;                          /* clicked the header line, not a file */
+    int row = top + (my - (by + 22)) / 18;
+    if (row < 0 || row >= n) return;                   /* clicked below the last file */
+    w->fsel = row;
+    files_key(w, '\n');                                /* select + open via the shared Enter path */
+}
+
 static void spawn_app(int kind, const char *prog) {
     if (kind == KIND_APP)     { app_spawn_named(prog); return; }  /* WM drains it */
     if (kind == KIND_BROWSER) { spawn_browser(0); return; }
@@ -890,6 +906,8 @@ void desktop_run(void) {
                         else if (t->kind == KIND_BROWSER && t->app)
                             browser_click((browser_t *)t->app, mx - t->x,
                                           my - (t->y + TITLEBAR_H), t->w, t->h - TITLEBAR_H);
+                        else if (t->kind == KIND_FILES)
+                            files_click(t, my);          /* click a file row -> select + open it */
                     }
                     dirty = 1; break;
                 }
