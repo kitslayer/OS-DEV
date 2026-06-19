@@ -1,5 +1,12 @@
 # What's next
 
+> **(M752) Browser — CSS horizontal indent from `<style>` rules.** Mirroring M749, `capture_css`/`css_match`
+> now carry a per-rule left indent (`css_indent[]`), so `margin-left`/`padding-left` from a stylesheet class
+> (e.g. `.ind{margin-left:40px}`) indents the matched blocks — inline `style=` still overriding. With
+> M748–M751 the browser's CSS box-model **spacing is now complete**: margin + padding, both axes, from inline
+> styles and `<style>` rules. `MARGIN.HTM` gains a `.ind` example. `make check` 29/29; verified in-guest
+> (a `<p class="ind">` is indented by the stylesheet rule).
+
 > **(M751) Browser — CSS horizontal indent (`margin-left` / `padding-left`).** Completes box-model spacing in
 > both axes: a block's left margin/padding now indents its whole content (wrapped lines included), reusing the
 > `curindent`/`tokindent` machinery `<blockquote>` uses — saved/restored on the style-scope stack so nested
