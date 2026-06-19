@@ -490,6 +490,12 @@ static void render_scene(void) {
             "click [x] to close, click a taskbar chip to",
             "raise (or restore) that window.",
             "",
+            "Wheel scrolls the window under the cursor.",
+            "In a terminal: drag (or double-click a word)",
+            "to select + copy; middle-click pastes.",
+            "In the browser: right-click a link to copy",
+            "its URL; middle-click pastes into the bar.",
+            "",
             "Press Esc or F1 to close this help.",
         };
         int n = (int)(sizeof(H) / sizeof(H[0]));

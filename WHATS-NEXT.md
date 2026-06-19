@@ -1,5 +1,11 @@
 # What's next
 
+> **(M766) F1 help — document the new mouse gestures.** The session added a lot of mouse UX (wheel scroll,
+> terminal drag/word selection + middle-click paste, browser right-click link copy) that was undiscoverable.
+> Extended the F1 keyboard-shortcuts overlay with a mouse section: "Wheel scrolls the window under the
+> cursor", terminal select/copy/paste, and browser link-copy/paste. Pure UI text; the panel auto-sizes to
+> the line count. `make check` 29/29. Verified in-guest: F1 shows the new lines, rendered cleanly.
+
 > **(M765) Terminal — double-click word-select.** Completes the M760 selection UX (which was drag-only):
 > double-clicking a cell selects the whitespace-delimited word under it and copies it to the clipboard — so
 > a word or URL can be grabbed without precise dragging. New `app_sel_word(a,row,col)` (expands over
