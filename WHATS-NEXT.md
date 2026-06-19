@@ -1,5 +1,13 @@
 # What's next
 
+> **(M777) Host-test the shell `$((expr))` evaluator.** Extracted the M762 arithmetic evaluator out of
+> shell.c into a shared header `user/shmath.h` (the verbatim-extraction pattern, like cssprop/url/shgrep): a
+> pure recursive-descent integer evaluator whose only shell dependency is the `sh_var()` variable-lookup
+> hook the includer supplies. shell.c now `#include`s it and provides `sh_var` (via `vget`); behaviour is
+> byte-identical. Added `tests/shmath` — 25 regression asserts (precedence, parens, hex, unary, /0, vars,
+> associativity) + 300k random-expression fuzz iterations under ASan/UBSan — wired into `make check` as
+> `shmathtest` (now 30 host suites). Verified in-guest unchanged: `$((2+3*4))`→14, `set N=6; $((N*N+1))`→37.
+
 > **(M776) Paste-buffer race hardening.** `app_paste` now zeroes `paste_len` before refilling the per-app
 > paste buffer, so if a second paste arrives while the first is still draining, `iq_get` can't read a
 > half-overwritten buffer (it sees `paste_pos < paste_len == 0` → skips it until the refill sets the new
