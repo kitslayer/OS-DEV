@@ -48,6 +48,7 @@ unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
 int  sys_gfx_init(int w, int h);     /* enter graphics mode: a w*h XRGB pixel canvas; 0/-1 */
 int  sys_gfx_blit(const void *pixels); /* copy w*h pixels (0x00RRGGBB) to the window; 0/-1 */
 void sys_setkbmode(int raw);         /* 1 = raw make/break key events, 0 = cooked ASCII */
+void sys_caret(int on);              /* 1 = show system caret (default), 0 = this app draws its own */
 int  sys_getkbevent(void);           /* next raw key event (scancode|0x100 released|0x200 ext), or -1 */
 void sys_pcm(const void *frames, int nframes);   /* play 16-bit stereo PCM @ 48 kHz (blocks) */
 long sys_playwav(const char *name);              /* play a .wav file (16-bit PCM); 0/-1 */

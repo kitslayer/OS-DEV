@@ -63,6 +63,7 @@
 #define SYS_playbg 53   /* (name)          -> play a .wav in the background (non-blocking); 0/-1 */
 #define SYS_audiostop 54 /* ()             -> stop background audio */
 #define SYS_mouse_rel 55 /* ()             -> packed relative motion dx|0-31 dy|32-63 (mouselook) */
+#define SYS_caret  56   /* (on)            -> 1 = show system caret (default), 0 = app draws its own */
 
 #define SYSCALL_VECTOR 0x80
 

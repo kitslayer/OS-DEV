@@ -445,6 +445,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_setkbmode:
         app_set_rawkb((int)r->rdi);
         break;
+    case SYS_caret:
+        app_set_caret((int)r->rdi);
+        break;
     case SYS_getkbevent:
         r->rax = (uint64_t)(int64_t)app_sys_getkbevent();
         break;

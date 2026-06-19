@@ -34,6 +34,11 @@ static void backspace(void) {
     for (int i = cur - 1; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--; cur--;
 }
+static void del_fwd(void) {                 /* Delete key: remove the char at the cursor */
+    if (readonly || cur >= dlen) return;
+    for (int i = cur; i < dlen - 1; i++) doc[i] = doc[i+1];
+    dlen--;
+}
 
 /* up/down move to the same column in the adjacent line (split on '\n'). */
 static void move_vert(int down) {
@@ -116,7 +121,8 @@ static void render(const char *msg) {
 
 int main(void) {
     print("\n  file to edit: ");
-    readline(fname, sizeof(fname));
+    readline(fname, sizeof(fname));    /* prompt keeps the system caret (it's a readline) */
+    sys_caret(0);                      /* editor body draws its own '|' cursor; hide the block caret */
     if (fname[0] == 0) { fname[0] = 'N'; fname[1] = 'O'; fname[2] = 'T'; fname[3] = 'E';
                          fname[4] = '.'; fname[5] = 'T'; fname[6] = 'X'; fname[7] = 'T'; fname[8] = 0; }
     long n = sys_readfile(fname, doc, MAXDOC - 1);
@@ -137,10 +143,17 @@ int main(void) {
         }
         else if (k == '\n' || k == '\r') insert('\n');
         else if (k == 8 || k == 127)     backspace();
+        else if (k == 0x04)              del_fwd();        /* Delete: forward-delete  */
         else if (k == 0x13) { if (cur > 0) cur--; }       /* left  */
         else if (k == 0x14) { if (cur < dlen) cur++; }    /* right */
         else if (k == 0x11) move_vert(0);                 /* up    */
         else if (k == 0x12) move_vert(1);                 /* down  */
+        else if (k == 0x01) { while (cur > 0 && doc[cur-1] != '\n') cur--; }    /* Home: line start */
+        else if (k == 0x05) { while (cur < dlen && doc[cur] != '\n') cur++; }   /* End:  line end   */
+        else if (k == '\t') {                             /* Tab: spaces to the next 4-col stop */
+            int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;
+            for (int sp = 4 - ((cur - ls) % 4); sp > 0; sp--) insert(' ');
+        }
         else if (k >= 32 && k < 127) insert((char)k);
         render(0);
     }

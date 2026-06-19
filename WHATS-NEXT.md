@@ -1,5 +1,13 @@
 # What's next
 
+> **(M758) Editor — Home/End/Delete/Tab + system-caret opt-out.** The full-screen editor only had arrow
+> keys + backspace. Now it uses M757's new keycodes: Home/End jump to the start/end of the current line,
+> Delete forward-deletes the char at the cursor, and Tab inserts spaces to the next 4-column stop. Also
+> added a small `sys_caret(on)` syscall (SYS_caret 56) so a full-screen app that draws its own cursor can
+> hide the system block caret — the editor calls `sys_caret(0)` after its filename prompt, so the prompt
+> keeps the caret but the body shows only its own `|` (no double cursor). `make check` 29/29. Verified
+> in-guest: Home+insert, Delete, End+append, Tab→4 spaces; and the editor body shows a single cursor.
+
 > **(M757) Terminal — real line editor + visible caret.** The kernel's cooked-input read (`app_sys_read`)
 > only ever appended/backspaced at the end of the line, and the terminal drew no caret at all. Now: a green
 > block caret on the focused terminal at the live cursor (threaded `focused` through `draw_window` →

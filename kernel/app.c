@@ -67,6 +67,7 @@ struct app {
     char     hist[HIST_N][96];           /* recent input lines (for up/down) */
     int      hist_n, hist_pos;
     volatile int gdirty;                 /* grid changed -> WM should repaint */
+    int      caret_off;                  /* 1 = suppress the system caret (app draws its own) */
 };
 
 static struct app apps[MAX_APPS];
@@ -249,7 +250,7 @@ void app_render(app_t *a, int px, int py, int focused) {
     /* Block caret on the focused window at the live cursor, when it's in view
      * (hidden while scrolled up into the scrollback). Drawn over the cell so it
      * tracks left/right/home/end edits, not just the end of the line. */
-    if (focused && !a->gfx) {
+    if (focused && !a->gfx && !a->caret_off) {
         int cr = a->cy + a->view;
         if (cr >= 0 && cr < APP_ROWS && a->cx >= 0 && a->cx < APP_COLS) {
             char ch = a->grid[a->cy][a->cx];
@@ -533,6 +534,9 @@ int app_gfx_get(app_t *a, uint32_t **buf, int *w, int *h) {
  * + extended) to this app instead of, or alongside, the cooked ASCII it still
  * gets. DOOM needs key-down AND key-up for held movement/fire. */
 void app_set_rawkb(int on) { struct app *a = cur(); if (a) a->rawkb = on ? 1 : 0; }
+/* SYS_caret: a full-screen text app that draws its own cursor (e.g. the editor)
+ * opts out of the system block caret so the two don't both show. */
+void app_set_caret(int on) { struct app *a = cur(); if (a) a->caret_off = on ? 0 : 1; }
 int  app_get_rawkb(app_t *a) { return a && a->rawkb; }
 
 /* WM: deliver one raw key event to a raw-mode app's queue. */
