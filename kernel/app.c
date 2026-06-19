@@ -622,6 +622,20 @@ void app_sel_extend(app_t *a, int row, int col) {
 }
 void app_sel_clear(app_t *a) { if (a && a->sel_on) { a->sel_on = 0; a->gdirty = 1; } }
 
+/* Double-click: select the whitespace-delimited word at (row,col) and copy it. */
+void app_sel_word(app_t *a, int row, int col) {
+    if (!a || row < 0 || row >= APP_ROWS) return;
+    if (col < 0) col = 0;
+    if (col >= APP_COLS) col = APP_COLS - 1;
+    if (app_cell(a, row, col) == ' ') { app_sel_clear(a); return; }   /* clicked whitespace */
+    int s = col, e = col;
+    while (s > 0 && app_cell(a, row, s - 1) != ' ') s--;
+    while (e < APP_COLS - 1 && app_cell(a, row, e + 1) != ' ') e++;
+    a->sel_r0 = a->sel_r1 = row; a->sel_c0 = s; a->sel_c1 = e + 1;
+    a->sel_on = 1; a->gdirty = 1;
+    app_sel_commit(a);                                  /* -> clipboard */
+}
+
 /* Release: extract the selected cells (trailing spaces trimmed per line, rows
  * joined with '\n') into the clipboard. The highlight stays until next input. */
 void app_sel_commit(app_t *a) {

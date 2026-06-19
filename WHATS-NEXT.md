@@ -1,5 +1,13 @@
 # What's next
 
+> **(M765) Terminal — double-click word-select.** Completes the M760 selection UX (which was drag-only):
+> double-clicking a cell selects the whitespace-delimited word under it and copies it to the clipboard — so
+> a word or URL can be grabbed without precise dragging. New `app_sel_word(a,row,col)` (expands over
+> non-spaces, then `app_sel_commit`); the WM detects a double-click in a text-app body via a short timer +
+> proximity test (mirroring the titlebar's maximize double-click), else falls back to drag-select. `make
+> check` 29/29. Verified in-guest: double-click `COPYPASTE` selects exactly the word (tight bounds) →
+> middle-click pastes it. Terminal selection now = drag-range + word + middle-click paste.
+
 > **(M764) Terminal — scrollback scrollbar.** The terminal had scrollback (PgUp/PgDn + the M759 wheel) but
 > only a tiny `^` indicator. Added a real scrollbar on the right edge of the text grid: a dark track with a
 > thumb sized to visible/total rows and positioned by `view`, so you can see how much history exists and

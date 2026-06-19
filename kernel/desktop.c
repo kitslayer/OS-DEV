@@ -689,6 +689,7 @@ void desktop_run(void) {
     int prev_btn = 0, prev_x = -1, prev_y = -1;
     uint64_t last_sec = (uint64_t)-1;
     uint64_t last_tb_click = 0; int last_tb_x = -100, last_tb_y = -100;  /* double-click-to-maximize */
+    uint64_t last_body_click = 0; int last_body_x = -100, last_body_y = -100;  /* double-click-to-word-select */
     int drag_ox = 0, drag_oy = 0;        /* where a title-bar drag began (move-threshold + restore) */
 
     render_scene();
@@ -968,11 +969,21 @@ void desktop_run(void) {
                         else if (t->kind == KIND_FILES)
                             files_click(t, my);          /* click a file row -> select + open it */
                         else if (t->kind == KIND_APP && t->app) {
-                            uint32_t *cb; int gw, gh;    /* text app: start a drag-selection */
+                            uint32_t *cb; int gw, gh;    /* text app: word-select (double) or drag-select */
                             if (!app_gfx_get((app_t *)t->app, &cb, &gw, &gh)) {
                                 int px = t->x + 6, py = t->y + TITLEBAR_H + 6;
-                                app_sel_begin((app_t *)t->app, (my - py) / font_height, (mx - px) / font_width);
-                                selecting = win_count - 1;
+                                int row = (my - py) / font_height, col = (mx - px) / font_width;
+                                uint64_t now = timer_ticks();
+                                int near = (mx - last_body_x < 8 && last_body_x - mx < 8 &&
+                                            my - last_body_y < 8 && last_body_y - my < 8);
+                                if (now - last_body_click < 40 && near) {     /* double-click: select the word */
+                                    app_sel_word((app_t *)t->app, row, col);
+                                    selecting = -1; last_body_click = 0;
+                                } else {                                      /* single: begin a drag-selection */
+                                    app_sel_begin((app_t *)t->app, row, col);
+                                    selecting = win_count - 1;
+                                    last_body_click = now; last_body_x = mx; last_body_y = my;
+                                }
                             }
                         }
                     }

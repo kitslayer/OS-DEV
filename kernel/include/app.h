@@ -31,6 +31,7 @@ void   app_sel_begin(app_t *a, int row, int col);   /* start a selection at the 
 void   app_sel_extend(app_t *a, int row, int col);  /* drag the selection end */
 void   app_sel_commit(app_t *a);                    /* release: copy the selection to the clipboard */
 void   app_sel_clear(app_t *a);                     /* drop the highlight */
+void   app_sel_word(app_t *a, int row, int col);    /* double-click: select+copy the word at a cell */
 void   app_paste(app_t *a);                         /* inject the clipboard into the input queue */
 void   clip_set(const char *s, int n);              /* set the system clipboard */
 int    clip_get(char *out, int max);                /* read it (NUL-terminated); returns length */
