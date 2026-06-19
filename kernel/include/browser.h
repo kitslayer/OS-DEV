@@ -38,6 +38,11 @@ void browser_key(browser_t *b, int c);
 void browser_paste(browser_t *b, const char *s, int n);
 /* Right-click: copy the URL of the link under (rx,ry) into out; returns its length or 0. */
 int  browser_rclick(browser_t *b, int rx, int ry, char *out, int max);
+/* Mouse text selection (WM-driven): begin/extend a word-range, commit copies it. */
+void browser_sel_begin(browser_t *b, int rx, int ry);
+void browser_sel_extend(browser_t *b, int rx, int ry);
+void browser_sel_clear(browser_t *b);
+int  browser_sel_commit(browser_t *b, char *out, int max);  /* -> out (len), 0 if not a drag */
 
 /* A click inside the window body, relative to its top-left. Returns 1 if the
  * browser consumed it (so the WM knows to repaint). */

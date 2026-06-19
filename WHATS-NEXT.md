@@ -1,5 +1,16 @@
 # What's next
 
+> **(M767) Browser text selection — the clipboard capstone.** Drag across page text to select it (word
+> granularity, highlighted white-on-blue) and copy to the shared clipboard on release. The render loop now
+> records a per-visible-word rect (`b->wrec`, reusing `lrec_t` with `.link` = token index) for hit-testing,
+> and highlights tokens in `[tsel0,tsel1]`. New `browser_sel_begin/extend/commit/clear` + `browser_hit_word`;
+> `browser_sel_commit` joins selected words with spaces (newline at block breaks), trimming. Low-risk: a left
+> press over a **link** still follows it (browser_click returns 1); selection starts only on non-link content
+> (browser_click now returns 0 there — its return was previously ignored). Selection clears on reparse.
+> `make check` 29/29 (golden-safe: highlight only when a selection exists). Verified in-guest: drag a line on
+> the start page → words highlight → middle-click the address bar pastes the exact text. **The clipboard is
+> now universal + bidirectional:** terminal↔terminal, terminal↔browser, browser text/links → anywhere.
+
 > **(M766) F1 help — document the new mouse gestures.** The session added a lot of mouse UX (wheel scroll,
 > terminal drag/word selection + middle-click paste, browser right-click link copy) that was undiscoverable.
 > Extended the F1 keyboard-shortcuts overlay with a mouse section: "Wheel scrolls the window under the

@@ -80,6 +80,8 @@ struct browser {
     char   *hrefs; int hreflen;
     href_t *links; int nlink;
     lrec_t *lrec;  int nlrec;                            /* rebuilt each render */
+    lrec_t *wrec;  int nwrec;                            /* per-visible-word rects (.link = token idx) for text selection */
+    int     tsel0, tsel1;                                /* selected token range (-1 = none); set by mouse drag */
     int     sel;                                         /* keyboard-selected link id (NO_LINK = none) */
     int     linky[LINK_MAX];                             /* content-space y of each link (for scroll-into-view) */
     int     scroll, content_h, view_h;
@@ -1089,6 +1091,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->form_action[0] = 0;                               /* no <form> action open yet */
     b->anc_n = 0;                                        /* fresh #fragment anchor table */
     b->sel = NO_LINK;                                    /* no link selected on a fresh page */
+    b->tsel0 = b->tsel1 = -1;                            /* drop any text selection on reparse */
     b->find_tok = -1;                                    /* clear any find highlight */
     b->curcolor = 0;                                     /* default text colour */
     b->curbg = 0;                                        /* no background-color in effect */
@@ -2097,7 +2100,7 @@ static void free_buffers(browser_t *b) {
     else if (b->img) kfree(b->img);
     for (int i = 0; i < b->nimg; i++) if (b->imgs[i]) kfree(b->imgs[i]);
     drop_remote_imgs(b);                           /* prefetched remote-image bytes */
-    kfree(b->lrec); kfree(b->links); kfree(b->hrefs);
+    kfree(b->lrec); kfree(b->wrec); kfree(b->links); kfree(b->hrefs);
     kfree(b->scripts);
     kfree(b->toks); kfree(b->text); kfree(b->raw); kfree(b);
 }
@@ -3160,6 +3163,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     b->view_h = cb - ct;
     int cx = cl, cy = ct - b->scroll, curlh = 18;
     b->nlrec = 0;
+    b->nwrec = 0;
 
     if (b->loading) { fb_text(cl, ct + 12, "Loading...", 0x4A6A9A, 2); return; }
 
@@ -3297,6 +3301,14 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             int maxc = (cr - cx) / (GW * sc); if (maxc < 0) maxc = 0;
             int dl = tk->len > maxc ? maxc : tk->len;      /* clip to content width (no h-scroll) */
             int drawpx = dl * GW * sc;
+            /* mouse text selection: highlight selected word tokens (white on blue) */
+            if (b->tsel0 >= 0 && tk->type == TK_WORD) {
+                int a0 = b->tsel0, z0 = b->tsel1; if (z0 < a0) { int sw = a0; a0 = z0; z0 = sw; }
+                if (t >= a0 && t <= z0) { wbg = 0x2C66D6; fg = 0xFFFFFF; }
+            }
+            if (tk->type == TK_WORD && b->nwrec < LREC_MAX)   /* record the word's rect for hit-testing */
+                b->wrec[b->nwrec++] = (lrec_t){ (int16_t)(cx - x), (int16_t)(cy - y),
+                                                (int16_t)drawpx, (int16_t)lh, (uint16_t)t };
             int yo = tk->style == STY_SUB ? 5 : tk->style == STY_SUP ? -4 : 0;   /* sub/superscript vertical shift */
             put_word(cx, cy + yo, b->text + tk->off, dl, fg, wbg, sc);
             if (tk->style == STY_BOLD) {                   /* faux-bold: transparent 1px overstrike */
@@ -3505,6 +3517,44 @@ int browser_rclick(browser_t *b, int rx, int ry, char *out, int max) {
     return 0;
 }
 
+/* ---- mouse text selection (WM-driven; word granularity) ------------------ */
+static int browser_hit_word(browser_t *b, int rx, int ry) {
+    for (int i = 0; i < b->nwrec; i++) {
+        lrec_t *W = &b->wrec[i];
+        if (rx >= W->x && rx < W->x + W->w && ry >= W->y && ry < W->y + W->h) return W->link;
+    }
+    return -1;
+}
+void browser_sel_begin(browser_t *b, int rx, int ry) {
+    if (!b) return;
+    b->tsel0 = b->tsel1 = browser_hit_word(b, rx, ry);   /* -1 if not on a word */
+}
+void browser_sel_extend(browser_t *b, int rx, int ry) {
+    if (!b) return;
+    int t = browser_hit_word(b, rx, ry);
+    if (t >= 0) { if (b->tsel0 < 0) b->tsel0 = t; b->tsel1 = t; }
+}
+void browser_sel_clear(browser_t *b) { if (b) b->tsel0 = b->tsel1 = -1; }
+/* Release: copy the selected token range to `out` (words joined by spaces, a
+ * newline at each block break). Returns the length, or 0 for a non-drag click. */
+int browser_sel_commit(browser_t *b, char *out, int max) {
+    if (!b || b->tsel0 < 0 || b->tsel1 < 0 || b->tsel0 == b->tsel1) return 0;   /* need a real span */
+    int a = b->tsel0, z = b->tsel1; if (z < a) { int t = a; a = z; z = t; }
+    int n = 0;
+    for (int t = a; t <= z && t < b->ntok && n < max - 1; t++) {
+        tok_t *tk = &b->toks[t];
+        if (tk->type == TK_WORD) {
+            if (n > 0 && out[n-1] != '\n' && n < max - 1) out[n++] = ' ';
+            for (int k = 0; k < tk->len && n < max - 1; k++) out[n++] = b->text[tk->off + k];
+        } else if ((tk->type == TK_BREAK || tk->type == TK_PARA) && n > 0 && out[n-1] != '\n' && n < max - 1) {
+            out[n++] = '\n';
+        }
+    }
+    while (n > 0 && (out[n-1] == ' ' || out[n-1] == '\n')) n--;   /* trim trailing whitespace */
+    out[n] = 0;
+    return n;
+}
+
 void browser_key(browser_t *b, int c) {
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
         if (c == '\n' || c == '\r' || c == 27) {
@@ -3604,10 +3654,10 @@ int browser_click(browser_t *b, int rx, int ry, int w, int h) {
         lrec_t *L = &b->lrec[i];
         if (rx >= L->x && rx < L->x + L->w && ry >= L->y && ry < L->y + L->h) {
             browser_follow(b, L->link);
-            return 1;
+            return 1;                                    /* consumed */
         }
     }
-    return 1;
+    return 0;   /* plain content click: not consumed -> the WM may start a text selection */
 }
 
 browser_t *browser_create(const char *url) {
@@ -3621,11 +3671,13 @@ browser_t *browser_create(const char *url) {
     b->hrefs = kmalloc(HREF_MAX);
     b->links = kmalloc(sizeof(href_t) * LINK_MAX);
     b->lrec  = kmalloc(sizeof(lrec_t) * LREC_MAX);
+    b->wrec  = kmalloc(sizeof(lrec_t) * LREC_MAX);
+    b->tsel0 = b->tsel1 = -1;
     b->scripts = kmalloc(SCRIPT_MAX);
     if (!url || !url[0]) url = "home";        /* open the start page by default */
     int i = 0; while (url[i] && i < URL_MAX-1) { b->url[i] = url[i]; i++; }
     b->url[i] = 0;
-    if (b->raw && b->text && b->toks && b->hrefs && b->links && b->lrec && b->scripts)
+    if (b->raw && b->text && b->toks && b->hrefs && b->links && b->lrec && b->wrec && b->scripts)
         browser_navigate(b);
     else set_status(b, "nomem");
     return b;

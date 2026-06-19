@@ -691,7 +691,8 @@ void desktop_run(void) {
                                          * window below; spawn more via Apps) */
 
     int dragging = -1, resizing = -1, gdx = 0, gdy = 0;
-    int selecting = -1;                  /* window index whose text we're drag-selecting */
+    int selecting = -1;                  /* window index whose text we're drag-selecting (terminal) */
+    int bselecting = -1;                 /* window index whose text we're drag-selecting (browser) */
     int prev_btn = 0, prev_x = -1, prev_y = -1;
     uint64_t last_sec = (uint64_t)-1;
     uint64_t last_tb_click = 0; int last_tb_x = -100, last_tb_y = -100;  /* double-click-to-maximize */
@@ -969,9 +970,13 @@ void desktop_run(void) {
                                 last_tb_click = now; last_tb_x = mx; last_tb_y = my;
                             }
                         }
-                        else if (t->kind == KIND_BROWSER && t->app)
-                            browser_click((browser_t *)t->app, mx - t->x,
-                                          my - (t->y + TITLEBAR_H), t->w, t->h - TITLEBAR_H);
+                        else if (t->kind == KIND_BROWSER && t->app) {
+                            int rbx = mx - t->x, rby = my - (t->y + TITLEBAR_H);
+                            if (!browser_click((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
+                                browser_sel_begin((browser_t *)t->app, rbx, rby);   /* plain content: start text selection */
+                                bselecting = win_count - 1;
+                            }
+                        }
                         else if (t->kind == KIND_FILES)
                             files_click(t, my);          /* click a file row -> select + open it */
                         else if (t->kind == KIND_APP && t->app) {
@@ -1009,16 +1014,27 @@ void desktop_run(void) {
                     else if (mx >= screen_w - 2)    snap_window(dragging, 1);
                 }
             }
-            if (selecting >= 0) {                  /* finished a text drag-selection: copy it */
+            if (selecting >= 0) {                  /* finished a terminal text drag-selection: copy it */
                 app_sel_commit((app_t *)windows[selecting].app); selecting = -1; dirty = 1;
+            }
+            if (bselecting >= 0) {                 /* finished a browser text drag-selection: copy it */
+                char sbuf[2048];
+                int n = browser_sel_commit((browser_t *)windows[bselecting].app, sbuf, sizeof sbuf);
+                if (n > 0) clip_set(sbuf, n);
+                bselecting = -1; dirty = 1;
             }
             dragging = resizing = -1; dirty = 1;
         }
 
-        if (selecting >= 0 && left) {              /* dragging a text selection: extend it */
+        if (selecting >= 0 && left) {              /* dragging a terminal text selection: extend it */
             window_t *w = &windows[selecting];
             int px = w->x + 6, py = w->y + TITLEBAR_H + 6;
             app_sel_extend((app_t *)w->app, (my - py) / font_height, (mx - px) / font_width);
+            dirty = 1;
+        }
+        if (bselecting >= 0 && left) {             /* dragging a browser text selection: extend it */
+            window_t *w = &windows[bselecting];
+            browser_sel_extend((browser_t *)w->app, mx - w->x, my - (w->y + TITLEBAR_H));
             dirty = 1;
         }
         if (dragging >= 0 && left) {
