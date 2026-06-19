@@ -1,5 +1,10 @@
 # What's next
 
+> **(M784) Shell help — document line editing.** Added an `edit:` line to `help` listing the
+> line-editing keys (arrows, Home/End, Del, up/down history, Tab completion) and the M782 Ctrl kills
+> (`^W`/`^U`/`^K`) + `^C` cancel — so the terminal's editing power is discoverable. Pure doc string; `make
+> check` 30/30; verified in-guest.
+
 > **(M783) Editor — Ctrl-S save / Ctrl-Q quit (now that Ctrl exists).** With M782's Ctrl support, the editor
 > finally gets the save/quit options it lacked: Ctrl-S saves and keeps editing ("[saved]"), Ctrl-Q quits
 > *without* saving (abandon changes) — ESC still saves & quits. Closes the real gap where ESC was the only
