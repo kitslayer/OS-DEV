@@ -626,6 +626,18 @@ void app_sel_extend(app_t *a, int row, int col) {
 }
 void app_sel_clear(app_t *a) { if (a && a->sel_on) { a->sel_on = 0; a->gdirty = 1; } }
 
+/* Scroll so the scrollbar thumb sits at fraction num/den down its track (0 =
+ * top = oldest scrollback, den = bottom = live). For click/drag on the bar. */
+void app_scroll_frac(app_t *a, int num, int den) {
+    if (!a || den <= 0) return;
+    if (num < 0) num = 0;
+    if (num > den) num = den;
+    int v = a->sb_count * (den - num) / den;            /* top of track -> view = sb_count */
+    if (v < 0) v = 0;
+    if (v > a->sb_count) v = a->sb_count;
+    if (v != a->view) { a->view = v; a->gdirty = 1; }
+}
+
 /* Double-click: select the whitespace-delimited word at (row,col) and copy it. */
 void app_sel_word(app_t *a, int row, int col) {
     if (!a || row < 0 || row >= APP_ROWS) return;

@@ -1,5 +1,13 @@
 # What's next
 
+> **(M769) Terminal scrollbar — click + drag to scroll.** The M764 scrollbar was indicator-only but looks
+> interactive. Now clicking anywhere on its track jumps the scrollback to that position, and dragging the bar
+> scrolls continuously. New `app_scroll_frac(a, num, den)` maps a track fraction to `view` (top = oldest,
+> bottom = live). The WM hit-tests the scrollbar column on left-press (a few px of slop for grabbing),
+> starts an `sbdrag` gesture, and the grip/title-bar/selection paths are unaffected (grip is checked first;
+> the bar sits just right of the text). `make check` 29/29. Verified in-guest: click the track top → jumps to
+> the banner; drag down → back to the live prompt.
+
 > **(M768) Long-paste correctness — paste buffer + bigger shell line.** Two caps truncated long pastes (e.g.
 > a multi-line browser selection): `app_paste` injected via the 128-entry key queue (excess dropped), and the
 > shell read into a 128-byte line. Fixed both: each app now has a `pastebuf[CLIP_MAX]` that `iq_get` drains

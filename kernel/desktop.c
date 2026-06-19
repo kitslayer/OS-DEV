@@ -693,6 +693,7 @@ void desktop_run(void) {
     int dragging = -1, resizing = -1, gdx = 0, gdy = 0;
     int selecting = -1;                  /* window index whose text we're drag-selecting (terminal) */
     int bselecting = -1;                 /* window index whose text we're drag-selecting (browser) */
+    int sbdrag = -1;                     /* window index whose terminal scrollbar we're dragging */
     int prev_btn = 0, prev_x = -1, prev_y = -1;
     uint64_t last_sec = (uint64_t)-1;
     uint64_t last_tb_click = 0; int last_tb_x = -100, last_tb_y = -100;  /* double-click-to-maximize */
@@ -980,9 +981,15 @@ void desktop_run(void) {
                         else if (t->kind == KIND_FILES)
                             files_click(t, my);          /* click a file row -> select + open it */
                         else if (t->kind == KIND_APP && t->app) {
-                            uint32_t *cb; int gw, gh;    /* text app: word-select (double) or drag-select */
+                            uint32_t *cb; int gw, gh;    /* text app: scrollbar / word-select / drag-select */
                             if (!app_gfx_get((app_t *)t->app, &cb, &gw, &gh)) {
                                 int px = t->x + 6, py = t->y + TITLEBAR_H + 6;
+                                int sbx = px + app_cols() * font_width + 1, trackh = app_rows() * font_height;
+                                if (mx >= sbx - 4 && mx <= sbx + 6 && my >= py && my < py + trackh) {
+                                    app_scroll_frac((app_t *)t->app, my - py, trackh);   /* click the scrollbar */
+                                    sbdrag = win_count - 1;
+                                    dirty = 1; break;
+                                }
                                 int row = (my - py) / font_height, col = (mx - px) / font_width;
                                 uint64_t now = timer_ticks();
                                 int near = (mx - last_body_x < 8 && last_body_x - mx < 8 &&
@@ -1023,9 +1030,15 @@ void desktop_run(void) {
                 if (n > 0) clip_set(sbuf, n);
                 bselecting = -1; dirty = 1;
             }
-            dragging = resizing = -1; dirty = 1;
+            dragging = resizing = -1; sbdrag = -1; dirty = 1;
         }
 
+        if (sbdrag >= 0 && left) {                 /* dragging the terminal scrollbar */
+            window_t *w = &windows[sbdrag];
+            int py = w->y + TITLEBAR_H + 6, trackh = app_rows() * font_height;
+            app_scroll_frac((app_t *)w->app, my - py, trackh);
+            dirty = 1;
+        }
         if (selecting >= 0 && left) {              /* dragging a terminal text selection: extend it */
             window_t *w = &windows[selecting];
             int px = w->x + 6, py = w->y + TITLEBAR_H + 6;
