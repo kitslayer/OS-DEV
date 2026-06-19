@@ -1,5 +1,11 @@
 # What's next
 
+> **(M775) Browser paste — insert at the caret.** Consistency fix for M773/M774: middle-click paste now
+> inserts the clipboard at the caret (`url_cur` for the address bar, `field_cur` for a focused field) instead
+> of always appending — control chars skipped, caret left after the inserted text. `make check` 29/29.
+> Verified in-guest: copy "from-scratch", type "X" in the address bar, Home, paste → "from-scratchX" (caret
+> respected). Line editing + clipboard now behave consistently across terminal, address bar, and form fields.
+
 > **(M774) Browser form fields — mid-line editing.** Completes "line editing everywhere" (terminal M757,
 > address bar M773, now form inputs). The focused `<input>`'s `|` cursor now sits at `b->field_cur` within
 > the value (not just the end): left/right move it, Home/End jump, Delete removes at it, Backspace before it,

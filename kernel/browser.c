@@ -3483,20 +3483,29 @@ static void make_search_url(char *url) {
  * field values are single-line. */
 void browser_paste(browser_t *b, const char *s, int n) {
     if (!b || n <= 0) return;
-    if (b->focus_id[0]) {                               /* append to the focused field */
+    if (b->focus_id[0]) {                               /* insert at the focused field's caret */
         const char *cur = in_get(b, b->focus_id);
         char t[96]; int k = 0;
-        if (cur) while (cur[k] && k < 94) { t[k] = cur[k]; k++; }
-        for (int i = 0; i < n && k < 94; i++) if (s[i] >= 32 && s[i] < 127) t[k++] = s[i];
-        t[k] = 0; in_set(b, b->focus_id, t);
+        if (cur) while (cur[k] && k < 95) { t[k] = cur[k]; k++; }
+        t[k] = 0;
+        int fc = b->field_cur; if (fc < 0) fc = 0; if (fc > k) fc = k;
+        for (int i = 0; i < n && k < 94; i++) {         /* shift the tail right, drop in each char */
+            char ch = s[i]; if (ch < 32 || ch >= 127) continue;
+            for (int j = k; j > fc; j--) t[j] = t[j-1];
+            t[fc++] = ch; t[++k] = 0;
+        }
+        b->field_cur = fc; in_set(b, b->focus_id, t);
         if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen);
-    } else {                                            /* paste into the address bar */
-        if (!b->editing) { b->editing = 1; b->url[0] = 0; }  /* a fresh paste replaces the bar */
+    } else {                                            /* paste into the address bar (at the caret) */
+        if (!b->editing) { b->editing = 1; b->url[0] = 0; b->url_cur = 0; }  /* a fresh paste replaces the bar */
         b->edit_fresh = 0;
-        int len = (int)strlen(b->url);
-        for (int i = 0; i < n && len < URL_MAX - 1; i++) if (s[i] >= 32 && s[i] < 127) b->url[len++] = s[i];
-        b->url[len] = 0;
-        b->url_cur = len;                               /* caret after the pasted text */
+        int len = (int)strlen(b->url), uc = b->url_cur; if (uc > len) uc = len;
+        for (int i = 0; i < n && len < URL_MAX - 1; i++) {
+            char ch = s[i]; if (ch < 32 || ch >= 127) continue;
+            for (int j = len; j > uc; j--) b->url[j] = b->url[j-1];
+            b->url[uc++] = ch; b->url[++len] = 0;
+        }
+        b->url_cur = uc;                                /* caret after the pasted text */
     }
 }
 
