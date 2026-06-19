@@ -147,6 +147,7 @@ struct browser {
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
+    int     field_cur;                                          /* caret index within the focused field's value */
     char    form_action[URL_MAX];                               /* current <form action>; empty = submit to the current page */
 };
 
@@ -801,12 +802,14 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             if (is_hidden) return;                       /* hidden fields are submittable but not drawn */
             const char *stored = idbuf[0] ? in_get(b, idbuf) : 0;   /* typed / scripted / seeded .value */
             int focused = idbuf[0] && streqs(b->focus_id, idbuf);
-            char s[100]; int p = 0; s[p++] = '[';
-            if (stored)                                                                 { for (int i=0; stored[i] && p<94; i++) s[p++]= is_pw ? '*' : stored[i]; }
-            else if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0)             { for (int i=0; i<vl && p<94; i++) s[p++]= is_pw ? '*' : v[i]; }
-            else if (find_attr(attrs, attrlen, "placeholder", &v, &vl) && vl > 0)       { for (int i=0; i<vl && p<94; i++) s[p++]=v[i]; }
+            char s[100]; int p = 0; s[p++] = '['; int cursored = 0;
+            if (stored)                                                                 { int sl=(int)strlen(stored), fc=b->field_cur; if(fc<0)fc=0; if(fc>sl)fc=sl;
+                                                                                          for (int i=0; i<sl && p<92; i++) { if(focused&&i==fc){s[p++]='|';cursored=1;} if(p<92) s[p++]= is_pw ? '*' : stored[i]; }
+                                                                                          if (focused && !cursored && p<92) { s[p++]='|'; cursored=1; } }
+            else if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0)             { for (int i=0; i<vl && p<92; i++) s[p++]= is_pw ? '*' : v[i]; }
+            else if (find_attr(attrs, attrlen, "placeholder", &v, &vl) && vl > 0)       { for (int i=0; i<vl && p<92; i++) s[p++]=v[i]; }
             else                                                                        { s[p++]='_'; s[p++]='_'; s[p++]='_'; s[p++]='_'; }
-            if (focused) s[p++] = '|';                   /* a cursor on the focused field */
+            if (focused && !cursored) s[p++] = '|';      /* a cursor on the focused field */
             s[p++] = ']'; s[p] = 0;
             if (idbuf[0]) { int lk = add_input_link(b, idbuf);   /* a field with an id is focusable (Enter to type) */
                 if (lk != NO_LINK) emit_literal_link(b, s, lk); else emit_literal(b, s, STY_EM); }
@@ -3050,6 +3053,7 @@ static void browser_follow(browser_t *b, int id) {
         for (int i = 0; i < n; i++) b->focus_id[i] = hp[6 + i];
         b->focus_id[n] = 0;
         if (!in_get(b, b->focus_id)) in_set(b, b->focus_id, "");   /* ensure a store slot exists */
+        { const char *fv = in_get(b, b->focus_id); b->field_cur = fv ? (int)strlen(fv) : 0; }   /* caret at end */
         set_status(b, "type into the field, Enter when done");
         parse_html(b, b->raw + b->bodyoff, b->bodylen);  /* re-render to show the focus cursor */
         return;
@@ -3601,15 +3605,36 @@ void browser_key(browser_t *b, int c) {
             set_status(b, "");
             if (!fire_onchange(b, fid)) parse_html(b, b->raw + b->bodyoff, b->bodylen);   /* onchange fires on blur; it re-renders */
         }
-        else if (c == 8 || c == 127) {                  /* backspace */
-            const char *cur = in_get(b, b->focus_id);
-            if (cur && cur[0]) { char t[96]; int n=0; while(cur[n]&&n<95){t[n]=cur[n];n++;} t[n-1]=0; in_set(b, b->focus_id, t);
-                if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen); }
-        } else if (c >= 32 && c < 127) {                /* a printable char */
+        else if (c == 0x13 || c == 0x14 || c == 0x01 || c == 0x05) {   /* caret: left/right/Home/End */
+            const char *cur = in_get(b, b->focus_id); int n = cur ? (int)strlen(cur) : 0;
+            if (b->field_cur > n) b->field_cur = n;
+            if (c == 0x13) { if (b->field_cur > 0) b->field_cur--; }
+            else if (c == 0x14) { if (b->field_cur < n) b->field_cur++; }
+            else if (c == 0x01) b->field_cur = 0;
+            else b->field_cur = n;
+            parse_html(b, b->raw + b->bodyoff, b->bodylen);            /* re-render to move the caret */
+        }
+        else if (c == 8 || c == 127 || c == 0x04) {     /* backspace (before caret) / Delete (at caret) */
             const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
-            if (cur) while (cur[n] && n<94) { t[n]=cur[n]; n++; }
-            if (n < 94) { t[n++]=(char)c; t[n]=0; in_set(b, b->focus_id, t);
-                if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen); }   /* oninput fires per keystroke */
+            if (cur) while (cur[n] && n<95) { t[n]=cur[n]; n++; } t[n]=0;
+            if (b->field_cur > n) b->field_cur = n;
+            int del = (c == 0x04) ? b->field_cur : b->field_cur - 1;
+            if (del >= 0 && del < n) {
+                for (int i = del; i < n; i++) t[i] = t[i+1];
+                if (c != 0x04) b->field_cur--;
+                in_set(b, b->focus_id, t);
+                if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen);
+            }
+        } else if (c >= 32 && c < 127) {                /* insert a printable char at the caret */
+            const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
+            if (cur) while (cur[n] && n<94) { t[n]=cur[n]; n++; } t[n]=0;
+            if (b->field_cur > n) b->field_cur = n;
+            if (n < 94) {
+                for (int i = n; i > b->field_cur; i--) t[i] = t[i-1];
+                t[b->field_cur] = (char)c; t[n+1] = 0; b->field_cur++;
+                in_set(b, b->focus_id, t);
+                if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen);   /* oninput fires per keystroke */
+            }
         }
         return;
     }

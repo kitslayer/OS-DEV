@@ -1,5 +1,12 @@
 # What's next
 
+> **(M774) Browser form fields — mid-line editing.** Completes "line editing everywhere" (terminal M757,
+> address bar M773, now form inputs). The focused `<input>`'s `|` cursor now sits at `b->field_cur` within
+> the value (not just the end): left/right move it, Home/End jump, Delete removes at it, Backspace before it,
+> printable keys insert at it; the field render places `|` mid-value and the focus path sets the caret to the
+> value's end. `make check` 29/29. Verified in-guest on `file:form.htm`: focus the name field, type "World",
+> Home, type "Hello-" → `[Hello-|World]` (inserted at the start, caret mid-value).
+
 > **(M773) Browser address bar — mid-line editing.** The URL bar was append/backspace-only (fixing a typo
 > near the start meant retyping) — the same gap the terminal had before M757. Added a caret (`b->url_cur`):
 > left/right move it, Home/End jump, Delete removes at the caret, Backspace before it, printable keys insert
