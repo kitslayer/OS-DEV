@@ -25,6 +25,15 @@ int    app_dirty_clear(app_t *a);                /* 1 if the grid changed (WM po
 int    app_sys_pollkey(void);                    /* non-blocking key for the caller */
 void   app_render(app_t *a, int px, int py, int focused); /* draw text grid (+caret if focused) */
 void   app_key(app_t *a, char c);              /* deliver one keystroke        */
+
+/* Mouse-driven text selection + clipboard (WM calls these; row/col are visible cells). */
+void   app_sel_begin(app_t *a, int row, int col);   /* start a selection at the anchor cell */
+void   app_sel_extend(app_t *a, int row, int col);  /* drag the selection end */
+void   app_sel_commit(app_t *a);                    /* release: copy the selection to the clipboard */
+void   app_sel_clear(app_t *a);                     /* drop the highlight */
+void   app_paste(app_t *a);                         /* inject the clipboard into the input queue */
+void   clip_set(const char *s, int n);              /* set the system clipboard */
+int    clip_get(char *out, int max);                /* read it (NUL-terminated); returns length */
 int    app_cols(void);
 int    app_rows(void);
 

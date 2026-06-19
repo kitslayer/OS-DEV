@@ -1,5 +1,16 @@
 # What's next
 
+> **(M760) System clipboard — terminal text selection + middle-click paste.** The OS had no clipboard and
+> no way to select text. Now: left-drag in a terminal selects a linear, line-spanning range (highlighted
+> white-on-blue, extracted from the scrollback/live grid exactly as drawn, trailing spaces trimmed per line)
+> and copies it to a shared kernel clipboard on release; middle-click pastes the clipboard into the text app
+> under the cursor (X11 primary-selection style — injected into its input queue, so a shell runs each pasted
+> line). One buffer (`clip_set`/`clip_get` in app.c) shared by every window, so text carries between them.
+> New app APIs: `app_sel_begin/extend/commit/clear`, `app_paste`; WM drives them from a `selecting` drag
+> state + a middle-button handler; typing clears the highlight. Added `mclick X Y` to osdrive. `make check`
+> 29/29. Verified in-guest: `echo COPYPASTE` → drag-select the output → middle-click at the prompt pastes
+> "COPYPASTE". Future: browser text selection feeds the same clipboard.
+
 > **(M759) Mouse wheel scrolling.** The pointer had no wheel at all. Now the wheel scrolls whichever window
 > the cursor is over: the browser (via `browser_key` arrow-scroll) and any text app's scrollback (via
 > `app_key` PgUp/PgDn). Two input paths feed one shared accumulator (`mouse_add_wheel`/`mouse_read_wheel`):

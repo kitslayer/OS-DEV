@@ -27,6 +27,7 @@ Commands (one per line, or ';'-separated with -c):
     drag X0 Y0 X1 Y1     press at (X0,Y0), move to (X1,Y1), release
     move X Y             move the pointer to (X,Y) without clicking
     wheel X Y N          scroll the wheel at (X,Y): N>0 up, N<0 down
+    mclick X Y           middle-click at (X,Y) (clipboard paste)
     sleep SECS           wait (float ok)
     shot FILE            screendump -> FILE (.png via PIL if available, else .ppm)
     wait-text STR        wait (up to boot-timeout) for STR to appear on COM1
@@ -95,6 +96,12 @@ class Qmp:
         for k in range(1, 11):
             self._ev(self._abs(x0 + (x1 - x0) * k // 10, y0 + (y1 - y0) * k // 10)); time.sleep(0.04)
         self._ev([{"type": "btn", "data": {"down": False, "button": "left"}}])
+    def mclick(self, x, y):
+        # middle-click at (x,y) — used for clipboard paste
+        self._ev(self._abs(x, y)); time.sleep(0.06)
+        self._ev([{"type": "btn", "data": {"down": True, "button": "middle"}}])
+        self._ev([{"type": "btn", "data": {"down": False, "button": "middle"}}])
+        time.sleep(0.05)
     def wheel(self, x, y, n):
         # scroll the wheel at (x,y): n>0 = up, n<0 = down
         self._ev(self._abs(x, y)); time.sleep(0.06)
@@ -182,6 +189,7 @@ def main():
             elif op == "move":     qmp.move(int(t[1]), int(t[2]))
             elif op == "drag":     qmp.drag(int(t[1]), int(t[2]), int(t[3]), int(t[4]))
             elif op == "wheel":    qmp.wheel(int(t[1]), int(t[2]), int(t[3]))   # x y n (n>0 up, <0 down)
+            elif op == "mclick":   qmp.mclick(int(t[1]), int(t[2]))             # middle-click (paste)
             elif op == "sleep":    time.sleep(float(t[1]))
             elif op == "wait-text":
                 ok = wait_for(c[len("wait-text"):].strip(), args.boot_timeout)

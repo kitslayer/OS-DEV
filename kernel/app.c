@@ -68,6 +68,9 @@ struct app {
     int      hist_n, hist_pos;
     volatile int gdirty;                 /* grid changed -> WM should repaint */
     int      caret_off;                  /* 1 = suppress the system caret (app draws its own) */
+    int      sel_on;                     /* a text selection is shown/in progress */
+    int      sel_r0, sel_c0;             /* selection anchor (visible-grid cell) */
+    int      sel_r1, sel_c1;             /* selection end (visible-grid cell) */
 };
 
 static struct app apps[MAX_APPS];
@@ -231,6 +234,45 @@ static void emit_range(struct app *a, const char *buf, unsigned i, unsigned j) {
     for (; i < j; i++) grid_putc(a, buf[i]);
 }
 
+/* ---- system clipboard (one buffer shared by every app) -------------------
+ * Set by a terminal text selection, read by middle-click paste — so text can
+ * be carried between windows (e.g. a URL from the browser into the shell). */
+#define CLIP_MAX 2048
+static char g_clip[CLIP_MAX];
+static int  g_clip_len;
+void clip_set(const char *s, int n) {
+    if (n < 0) n = 0;
+    if (n > CLIP_MAX - 1) n = CLIP_MAX - 1;
+    for (int i = 0; i < n; i++) g_clip[i] = s[i];
+    g_clip[n] = 0; g_clip_len = n;
+}
+int clip_get(char *out, int max) {
+    int n = g_clip_len;
+    if (n > max - 1) n = max - 1;
+    for (int i = 0; i < n; i++) out[i] = g_clip[i];
+    if (max > 0) out[n] = 0;
+    return n;
+}
+
+/* The character currently displayed at visible row r, column c — reading from
+ * the scrollback or the live grid exactly as app_render does, so selection
+ * highlighting and text extraction match what's on screen. */
+static char app_cell(struct app *a, int r, int c) {
+    if (r < 0 || r >= APP_ROWS || c < 0 || c >= APP_COLS) return ' ';
+    int L = (a->sb_count - a->view) + r;
+    if (L >= 0 && L < a->sb_count) return a->sb[L][c];
+    if (L >= a->sb_count && (L - a->sb_count) < APP_ROWS) return a->grid[L - a->sb_count][c];
+    return ' ';
+}
+
+/* Order the selection so (r0,c0) is the top-left end and (r1,c1) the bottom-right. */
+static void sel_ordered(struct app *a, int *r0, int *c0, int *r1, int *c1) {
+    *r0 = a->sel_r0; *c0 = a->sel_c0; *r1 = a->sel_r1; *c1 = a->sel_c1;
+    if (*r1 < *r0 || (*r1 == *r0 && *c1 < *c0)) {
+        int tr = *r0, tc = *c0; *r0 = *r1; *c0 = *c1; *r1 = tr; *c1 = tc;
+    }
+}
+
 void app_render(app_t *a, int px, int py, int focused) {
     /* Show a 17-row window into [scrollback ... live grid], scrolled up by view. */
     for (int r = 0; r < APP_ROWS; r++) {
@@ -247,6 +289,18 @@ void app_render(app_t *a, int px, int py, int focused) {
     }
     if (a->view > 0)                                /* scrolled-up indicator (top-right) */
         fb_glyph(px + (APP_COLS - 1) * font_width, py, '^', 0xFFD060, 0x0A0A0A);
+    /* Text selection highlight (white on blue), drawn over the cells. Linear,
+     * line-spanning: the first row runs from c0, the last to c1, rows between
+     * are full-width — matching app_sel_commit's extraction. */
+    if (a->sel_on) {
+        int r0, c0, r1, c1; sel_ordered(a, &r0, &c0, &r1, &c1);
+        for (int r = r0; r <= r1 && r < APP_ROWS; r++) {
+            if (r < 0) continue;
+            int cs = (r == r0) ? c0 : 0, ce = (r == r1) ? c1 : APP_COLS;
+            for (int c = cs; c < ce && c < APP_COLS; c++)
+                fb_glyph(px + c * font_width, py + r * font_height, app_cell(a, r, c), 0xFFFFFF, 0x2C66D6);
+        }
+    }
     /* Block caret on the focused window at the live cursor, when it's in view
      * (hidden while scrolled up into the scrollback). Drawn over the cell so it
      * tracks left/right/home/end edits, not just the end of the line. */
@@ -538,6 +592,55 @@ void app_set_rawkb(int on) { struct app *a = cur(); if (a) a->rawkb = on ? 1 : 0
  * opts out of the system block caret so the two don't both show. */
 void app_set_caret(int on) { struct app *a = cur(); if (a) a->caret_off = on ? 0 : 1; }
 int  app_get_rawkb(app_t *a) { return a && a->rawkb; }
+
+/* ---- text selection + paste (driven by the WM's mouse handling) ---------- */
+static int clampc(int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); }
+
+void app_sel_begin(app_t *a, int row, int col) {
+    if (!a) return;
+    a->sel_r0 = a->sel_r1 = clampc(row, APP_ROWS - 1);
+    a->sel_c0 = a->sel_c1 = clampc(col, APP_COLS);
+    a->sel_on = 1; a->gdirty = 1;
+}
+void app_sel_extend(app_t *a, int row, int col) {
+    if (!a || !a->sel_on) return;
+    a->sel_r1 = clampc(row, APP_ROWS - 1);
+    a->sel_c1 = clampc(col, APP_COLS);
+    a->gdirty = 1;
+}
+void app_sel_clear(app_t *a) { if (a && a->sel_on) { a->sel_on = 0; a->gdirty = 1; } }
+
+/* Release: extract the selected cells (trailing spaces trimmed per line, rows
+ * joined with '\n') into the clipboard. The highlight stays until next input. */
+void app_sel_commit(app_t *a) {
+    if (!a || !a->sel_on) return;
+    if (a->sel_r0 == a->sel_r1 && a->sel_c0 == a->sel_c1) {   /* a plain click, not a drag */
+        app_sel_clear(a); return;                             /* clear highlight, keep the clipboard */
+    }
+    int r0, c0, r1, c1; sel_ordered(a, &r0, &c0, &r1, &c1);
+    char buf[CLIP_MAX]; int n = 0;
+    for (int r = r0; r <= r1 && r < APP_ROWS && n < CLIP_MAX - 1; r++) {
+        if (r < 0) continue;
+        int cs = (r == r0) ? c0 : 0, ce = (r == r1) ? c1 : APP_COLS;
+        int lineend = n;
+        for (int c = cs; c < ce && c < APP_COLS && n < CLIP_MAX - 1; c++) {
+            char ch = app_cell(a, r, c);
+            buf[n++] = ch;
+            if (ch != ' ') lineend = n;          /* remember last non-blank for trimming */
+        }
+        n = lineend;                              /* trim trailing spaces */
+        if (r < r1 && n < CLIP_MAX - 1) buf[n++] = '\n';
+    }
+    clip_set(buf, n);
+}
+
+/* Middle-click paste: feed the clipboard into the app's input queue as if typed
+ * (newlines included — for a shell, a multi-line paste runs each line). */
+void app_paste(app_t *a) {
+    if (!a) return;
+    char buf[CLIP_MAX]; int n = clip_get(buf, sizeof buf);
+    for (int i = 0; i < n; i++) app_key(a, buf[i]);
+}
 
 /* WM: deliver one raw key event to a raw-mode app's queue. */
 void app_key_raw(app_t *a, unsigned short ev) {

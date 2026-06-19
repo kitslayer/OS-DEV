@@ -685,6 +685,7 @@ void desktop_run(void) {
                                          * window below; spawn more via Apps) */
 
     int dragging = -1, resizing = -1, gdx = 0, gdy = 0;
+    int selecting = -1;                  /* window index whose text we're drag-selecting */
     int prev_btn = 0, prev_x = -1, prev_y = -1;
     uint64_t last_sec = (uint64_t)-1;
     uint64_t last_tb_click = 0; int last_tb_x = -100, last_tb_y = -100;  /* double-click-to-maximize */
@@ -812,7 +813,7 @@ void desktop_run(void) {
             }
             window_t *top = &windows[win_count - 1];
             if (top->minimized) { /* no visible focused window: swallow the key */ }
-            else if (top->kind == KIND_APP && top->app) { app_key((app_t *)top->app, (char)k); dirty = 1; }
+            else if (top->kind == KIND_APP && top->app) { app_sel_clear((app_t *)top->app); app_key((app_t *)top->app, (char)k); dirty = 1; }
             else if (top->kind == KIND_BROWSER && top->app) { browser_key((browser_t *)top->app, k); dirty = 1; }
             else if (top->kind == KIND_FILES) { files_key(top, k); dirty = 1; }
         }
@@ -869,6 +870,20 @@ void desktop_run(void) {
                     }
                 }
                 break;                                   /* only the topmost window the cursor is over */
+            }
+        }
+
+        /* Middle-click: paste the clipboard into the text app under the cursor
+         * (X11 primary-selection style — no focus change needed). */
+        if ((btn & 4) && !(prev_btn & 4)) {
+            for (int i = win_count - 1; i >= 0; i--) {
+                window_t *w = &windows[i];
+                if (w->minimized || !in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
+                if (w->kind == KIND_APP && w->app) {
+                    uint32_t *cb; int gw, gh;
+                    if (!app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) { app_paste((app_t *)w->app); dirty = 1; }
+                }
+                break;
             }
         }
 
@@ -932,6 +947,14 @@ void desktop_run(void) {
                                           my - (t->y + TITLEBAR_H), t->w, t->h - TITLEBAR_H);
                         else if (t->kind == KIND_FILES)
                             files_click(t, my);          /* click a file row -> select + open it */
+                        else if (t->kind == KIND_APP && t->app) {
+                            uint32_t *cb; int gw, gh;    /* text app: start a drag-selection */
+                            if (!app_gfx_get((app_t *)t->app, &cb, &gw, &gh)) {
+                                int px = t->x + 6, py = t->y + TITLEBAR_H + 6;
+                                app_sel_begin((app_t *)t->app, (my - py) / font_height, (mx - px) / font_width);
+                                selecting = win_count - 1;
+                            }
+                        }
                     }
                     dirty = 1; break;
                 }
@@ -949,9 +972,18 @@ void desktop_run(void) {
                     else if (mx >= screen_w - 2)    snap_window(dragging, 1);
                 }
             }
+            if (selecting >= 0) {                  /* finished a text drag-selection: copy it */
+                app_sel_commit((app_t *)windows[selecting].app); selecting = -1; dirty = 1;
+            }
             dragging = resizing = -1; dirty = 1;
         }
 
+        if (selecting >= 0 && left) {              /* dragging a text selection: extend it */
+            window_t *w = &windows[selecting];
+            int px = w->x + 6, py = w->y + TITLEBAR_H + 6;
+            app_sel_extend((app_t *)w->app, (my - py) / font_height, (mx - px) / font_width);
+            dirty = 1;
+        }
         if (dragging >= 0 && left) {
             /* Only treat it as a move once the cursor actually leaves the press
              * point (a few px). A bare click on the title bar then does NOT move
