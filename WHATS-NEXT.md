@@ -1,5 +1,15 @@
 # What's next
 
+> **(M748) Browser — CSS vertical margins (first box-model spacing).** The renderer was explicitly
+> "box-model-less"; now block elements honour `margin-top` and the `margin` shorthand's top value (px/em,
+> capped at 120). Parsed from inline `style=` into a per-tag `pending_vmargin` that `emit_break` folds onto
+> the block break's spacing field (`tok.off`), which the layout adds to the vertical advance — and since
+> content height derives from that same cursor, scrolling tracks it automatically. Golden-safe: the test
+> pages use no margins, so `off` stays 0 and rendering is byte-identical (csstest/browsertest unchanged). Key
+> fix: consecutive block breaks (`</p><p>`) merge, so the margin had to be carried onto the *merged* break,
+> not just a fresh one. New `MARGIN.HTM` demo. `make check` 29/29; verified in-guest — `margin-top:60px`
+> shows a big gap, `:10px` a small one, `div margin:40px` spaces it. (CSS-rule margins via `<style>` next.)
+
 > **(M747) JS engine — `globalThis` / `self`.** Modern JS and UMD-style libraries lean on the universal
 > global object (`typeof globalThis`, `globalThis.X`, `self.X`); both were `undefined`, so that code broke.
 > Built a global object at the end of `install_globals` that exposes every global defined above as a property

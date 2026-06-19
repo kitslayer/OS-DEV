@@ -83,6 +83,7 @@ struct browser {
     int     sel;                                         /* keyboard-selected link id (NO_LINK = none) */
     int     linky[LINK_MAX];                             /* content-space y of each link (for scroll-into-view) */
     int     scroll, content_h, view_h;
+    uint16_t pending_vmargin;   /* CSS vertical margin (px) to add before the next block break */
     char    status[40];
     char    title[64];                                   /* <title> -> window bar */
     volatile int loading;                                /* fetch in flight     */
@@ -199,13 +200,15 @@ static void emit_word(browser_t *b, int start, int style, int link) {
                                   (uint16_t)link, (uint8_t)style, TK_WORD };
 }
 static void emit_break(browser_t *b, int type) {
+    uint16_t m = b->pending_vmargin; b->pending_vmargin = 0;   /* CSS margin for this block, if any (consume once) */
     if (b->ntok == 0 || b->n_hidden > 0) return;         /* no leading blank lines / display:none */
     tok_t *last = &b->toks[b->ntok - 1];
     if (last->type == TK_WORD) {
         if (b->ntok >= TOK_MAX) return;
-        b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, (uint8_t)type };
-    } else if (last->type == TK_BREAK && type == TK_PARA) {
-        last->type = TK_PARA;                            /* upgrade, don't stack */
+        b->toks[b->ntok++] = (tok_t){ m, 0, NO_LINK, STY_NORMAL, (uint8_t)type };   /* off = extra vertical px */
+    } else {                                             /* consecutive break: merge, don't stack */
+        if (last->type == TK_BREAK && type == TK_PARA) last->type = TK_PARA;   /* upgrade BREAK->PARA */
+        if (m > last->off) last->off = m;                /* carry the larger CSS margin onto the merged break */
     }
 }
 /* Emit a literal word (e.g. a list bullet) by appending it to the text pool. */
@@ -493,6 +496,25 @@ static int parse_style_fontsize(const char *s, int n) {
     }
     return 0;
 }
+/* Vertical margin (margin-top, or the `margin` shorthand's first/top value) in px,
+ * so the otherwise box-model-less renderer can honour author spacing between blocks.
+ * Only px and em (~16px) are read; capped so a stray huge value can't blow up layout. */
+static int parse_px_val(const char *v, int vl) {
+    int i = 0, num = 0, seen = 0;
+    while (i < vl && (v[i] == ' ' || v[i] == '\t')) i++;
+    while (i < vl && v[i] >= '0' && v[i] <= '9') { num = num*10 + (v[i]-'0'); i++; seen = 1; }
+    if (!seen) return 0;
+    if (i < vl && v[i] == '.') { i++; while (i < vl && v[i] >= '0' && v[i] <= '9') i++; }  /* skip fraction */
+    const char *u = v + i; int ul = vl - i;
+    if (ul >= 2 && (u[0]|32)=='e' && (u[1]|32)=='m') num *= 16;          /* em -> ~16px */
+    return num > 120 ? 120 : num;                                        /* cap */
+}
+static int parse_style_margin_v(const char *s, int n) {
+    int vs, ve;
+    if (style_prop(s, n, "margin-top", 10, &vs, &ve)) return parse_px_val(s + vs, ve - vs);
+    if (style_prop(s, n, "margin", 6, &vs, &ve))      return parse_px_val(s + vs, ve - vs);  /* shorthand: 1st value = top */
+    return 0;
+}
 /* returns 1 if the element should be hidden: display:none OR visibility:hidden.
  * (In this box-model-less renderer visibility:hidden can't preserve the element's
  * space, so it hides the content like display:none — fine for reader-mode.) */
@@ -518,6 +540,7 @@ static int  css_match(browser_t *b, const char *tag, const char *attrs, int attr
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
+    b->pending_vmargin = 0;   /* per-tag: cleared each call; set below from CSS margin, consumed by the next emit_break */
     /* inline onclick="CODE": make the element's content a clickable javascript: link,
      * scoped to the element (depth-counted so nested same-name tags don't end it early). */
     if (b->oc_depth > 0 && tageq(tag, b->oc_tag)) {
@@ -555,6 +578,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
+            int imv = parse_style_margin_v(st, stl); if (imv) b->pending_vmargin = (uint16_t)imv;  /* CSS vertical margin -> block spacing */
         }
         if (has_attr(attrs, attrlen, "hidden")) hide = 1;   /* the HTML5 `hidden` attribute */
         if (tageq(tag, "big")) { if (!fs) fs = 2; }         /* <big> -> 2x */
@@ -3123,8 +3147,8 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     } else {
     for (int t = 0; t < b->ntok; t++) {
         tok_t *tk = &b->toks[t];
-        if (tk->type == TK_BREAK) { cy += curlh; cx = cl; curlh = 18; continue; }
-        if (tk->type == TK_PARA)  { cy += curlh + 8; cx = cl; curlh = 18; continue; }
+        if (tk->type == TK_BREAK) { cy += curlh + tk->off; cx = cl; curlh = 18; continue; }
+        if (tk->type == TK_PARA)  { cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_HR) {
             cy += curlh;
             if (cy + 4 >= ct && cy + 4 <= cb) fb_fill_rect(cl, cy + 4, cr - cl, 1, 0xC8CED8);
