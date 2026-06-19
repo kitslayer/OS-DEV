@@ -3480,6 +3480,31 @@ void browser_paste(browser_t *b, const char *s, int n) {
     }
 }
 
+/* Right-click: copy the URL of the link under the cursor into `out` (the WM then
+ * puts it on the clipboard). Returns the href length, or 0 if not over a real
+ * link. Internal pseudo-links (javascript:/submit:/event:) are skipped. */
+int browser_rclick(browser_t *b, int rx, int ry, char *out, int max) {
+    if (!b || ry < ADDR_H || max < 2) return 0;
+    for (int i = 0; i < b->nlrec; i++) {
+        lrec_t *L = &b->lrec[i];
+        if (rx >= L->x && rx < L->x + L->w && ry >= L->y && ry < L->y + L->h) {
+            int id = L->link;
+            if (id < 0 || id >= b->nlink) return 0;
+            const char *h = b->hrefs + b->links[id].off; int hl = b->links[id].len;
+            static const char *skip[] = { "javascript:", "submit:", "event:" };
+            for (int s = 0; s < 3; s++) {
+                int sl = 0; while (skip[s][sl]) sl++;
+                if (hl >= sl) { int m = 1; for (int k = 0; k < sl; k++) if (lc(h[k]) != skip[s][k]) { m = 0; break; } if (m) return 0; }
+            }
+            int n = 0; for (; n < hl && n < max - 1; n++) out[n] = h[n];
+            out[n] = 0;
+            set_status(b, "link copied");
+            return n;
+        }
+    }
+    return 0;
+}
+
 void browser_key(browser_t *b, int c) {
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
         if (c == '\n' || c == '\r' || c == 27) {

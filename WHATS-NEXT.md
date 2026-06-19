@@ -1,5 +1,14 @@
 # What's next
 
+> **(M763) Browser — right-click a link to copy its URL.** Closes the browser→clipboard direction (M760/M761
+> covered terminal↔terminal and terminal→browser). Right-clicking a link copies its href to the shared
+> clipboard (status: "link copied"), skipping internal pseudo-links (javascript:/submit:/event:). Low-risk:
+> right-click was unused, so the delicate left-click-follows-link path is untouched; full arbitrary-text
+> selection in pages (needs per-token hit-test rects) is still future. New `browser_rclick(b,rx,ry,out,max)`
+> returns the href; the WM (`clip_set`) stores it. Added `rclick X Y` to osdrive. `make check` 29/29.
+> Verified in-guest: right-click `https://example.com` on the start page → "link copied" → middle-click the
+> address bar pastes it. The clipboard now flows terminal↔terminal, terminal→browser, and browser→anywhere.
+
 > **(M762) Shell — arithmetic expansion `$((expr))`.** Builds on the M756 env vars to make the shell
 > scriptable: `$((...))` evaluates an integer expression and substitutes the result, anywhere on a line
 > (expanded alongside `$NAME`, before glob/pipe/redirect). A small recursive-descent evaluator (in

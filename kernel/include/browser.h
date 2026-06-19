@@ -36,6 +36,8 @@ void browser_render(browser_t *b, int x, int y, int w, int h);
 void browser_key(browser_t *b, int c);
 /* Middle-click paste: clipboard text into the focused field or the address bar. */
 void browser_paste(browser_t *b, const char *s, int n);
+/* Right-click: copy the URL of the link under (rx,ry) into out; returns its length or 0. */
+int  browser_rclick(browser_t *b, int rx, int ry, char *out, int max);
 
 /* A click inside the window body, relative to its top-left. Returns 1 if the
  * browser consumed it (so the WM knows to repaint). */

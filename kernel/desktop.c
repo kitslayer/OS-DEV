@@ -893,6 +893,20 @@ void desktop_run(void) {
             }
         }
 
+        /* Right-click a browser link: copy its URL to the clipboard. */
+        if ((btn & 2) && !(prev_btn & 2)) {
+            for (int i = win_count - 1; i >= 0; i--) {
+                window_t *w = &windows[i];
+                if (w->minimized || !in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
+                if (w->kind == KIND_BROWSER && w->app) {
+                    char lb[1024];
+                    int n = browser_rclick((browser_t *)w->app, mx - w->x, my - (w->y + TITLEBAR_H), lb, sizeof lb);
+                    if (n > 0) { clip_set(lb, n); dirty = 1; }
+                }
+                break;
+            }
+        }
+
         if (left && !(prev_btn & 1) && help_open) {
             help_open = 0; dirty = 1;        /* the help overlay is modal: a click anywhere dismisses it */
         } else if (left && !(prev_btn & 1)) {
