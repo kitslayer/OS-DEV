@@ -73,6 +73,7 @@ struct browser {
     char    url[URL_MAX];
     int     editing;
     int     edit_fresh;                                  /* just entered the address bar: first keystroke replaces the URL */
+    int     url_cur;                                     /* caret index in the address bar (for left/right editing) */
     int     viewsource;                                  /* 'u': show raw HTML instead of rendering */
     char   *raw;  int rawlen;
     char   *text; int textlen;
@@ -3152,10 +3153,12 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     fb_fill_rect(fx, fy, fw, 16, 0xFFFFFF);
     box(fx - 1, fy - 1, fw + 2, 18, b->editing ? 0x2C66D6 : 0xB4BCC8);
     int maxc = (fw - 6) / GW, ulen = (int)strlen(b->url);
-    int from = (ulen > maxc) ? ulen - maxc : 0;
-    for (int i = from; i < ulen; i++)
+    int cur = b->editing ? b->url_cur : ulen;            /* keep the caret in view */
+    if (cur < 0) cur = 0; if (cur > ulen) cur = ulen;
+    int from = (cur > maxc) ? cur - maxc : 0;            /* scroll so the caret is visible */
+    for (int i = from; i < ulen && (i - from) <= maxc; i++)
         fb_glyph(fx + 4 + (i - from)*GW, fy, b->url[i], 0x102030, 0xFFFFFF);
-    if (b->editing) fb_fill_rect(fx + 4 + (ulen - from)*GW, fy + 1, 1, 14, 0x2C66D6);
+    if (b->editing) fb_fill_rect(fx + 4 + (cur - from)*GW, fy + 1, 1, 14, 0x2C66D6);
     put_word(x + w - 78, fy, b->status, (int)strlen(b->status), 0x55606E, 0xE7EAF0, 1);
 
     /* content */
@@ -3489,6 +3492,7 @@ void browser_paste(browser_t *b, const char *s, int n) {
         int len = (int)strlen(b->url);
         for (int i = 0; i < n && len < URL_MAX - 1; i++) if (s[i] >= 32 && s[i] < 127) b->url[len++] = s[i];
         b->url[len] = 0;
+        b->url_cur = len;                               /* caret after the pasted text */
     }
 }
 
@@ -3620,11 +3624,25 @@ void browser_key(browser_t *b, int c) {
         return;
     }
     if (b->editing) {
+        int n = (int)strlen(b->url);
+        if (b->url_cur > n) b->url_cur = n;
         if (c == '\n' || c == '\r') { b->editing = 0; if (looks_like_search(b->url)) make_search_url(b->url); browser_navigate(b); }
         else if (c == 27)            { b->editing = 0; }
-        else if (c == 8 || c == 127) { b->edit_fresh = 0; int n = (int)strlen(b->url); if (n) b->url[n-1] = 0; }   /* editing the existing URL */
-        else if (c >= 32 && c < 127) { if (b->edit_fresh) { b->url[0] = 0; b->edit_fresh = 0; }   /* first keystroke replaces the shown URL */
-                                       int n = (int)strlen(b->url); if (n < URL_MAX-1) { b->url[n]=(char)c; b->url[n+1]=0; } }
+        else if (c == 0x13) { b->edit_fresh = 0; if (b->url_cur > 0) b->url_cur--; }              /* left  */
+        else if (c == 0x14) { b->edit_fresh = 0; if (b->url_cur < n) b->url_cur++; }              /* right */
+        else if (c == 0x01) { b->edit_fresh = 0; b->url_cur = 0; }                                /* Home  */
+        else if (c == 0x05) { b->edit_fresh = 0; b->url_cur = n; }                                /* End   */
+        else if (c == 0x04) { b->edit_fresh = 0;                                                  /* Delete (at caret) */
+            if (b->url_cur < n) { for (int i = b->url_cur; i < n; i++) b->url[i] = b->url[i+1]; } }
+        else if (c == 8 || c == 127) { b->edit_fresh = 0;                                         /* backspace (before caret) */
+            if (b->url_cur > 0) { for (int i = b->url_cur - 1; i < n; i++) b->url[i] = b->url[i+1]; b->url_cur--; } }
+        else if (c >= 32 && c < 127) {                                                            /* insert at caret */
+            if (b->edit_fresh) { b->url[0] = 0; b->url_cur = 0; n = 0; b->edit_fresh = 0; }       /* first keystroke replaces */
+            if (n < URL_MAX-1) {
+                for (int i = n; i > b->url_cur; i--) b->url[i] = b->url[i-1];                      /* shift right */
+                b->url[b->url_cur++] = (char)c; b->url[n+1] = 0;
+            }
+        }
         return;
     }
     if (c == 8 || c == 127) { browser_back(b); return; }   /* Backspace = Back */
@@ -3673,7 +3691,7 @@ int browser_click(browser_t *b, int rx, int ry, int w, int h) {
     (void)w; (void)h;
     if (ry < ADDR_H) {
         if (rx >= 6 && rx < 24) browser_back(b);          /* the Back button */
-        else { b->editing = 1; b->edit_fresh = 1; }       /* edit the address */
+        else { b->editing = 1; b->edit_fresh = 1; b->url_cur = (int)strlen(b->url); }  /* edit the address */
         return 1;
     }
     b->editing = 0;

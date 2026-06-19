@@ -1,5 +1,13 @@
 # What's next
 
+> **(M773) Browser address bar — mid-line editing.** The URL bar was append/backspace-only (fixing a typo
+> near the start meant retyping) — the same gap the terminal had before M757. Added a caret (`b->url_cur`):
+> left/right move it, Home/End jump, Delete removes at the caret, Backspace before it, printable keys insert
+> at it; the bar scrolls to keep the caret visible and draws it at its position. Entry points
+> (`browser_click` on the bar, `browser_paste`) set the caret. `make check` 29/29. Verified in-guest: type
+> `example.com`, Home, type `go-` → `go-example.com` (inserted at the start, caret mid-string). Form-field
+> mid-line editing is still future (same pattern, per-field cursor).
+
 > **(M772) Browser — double-click word-select.** Matches the terminal's M765: double-clicking a word in a
 > page selects it (highlighted) and copies it to the clipboard. New `browser_sel_word(b,rx,ry,out,max)` (hit
 > the word token, highlight it, extract). The WM detects a double-click in the browser body (reusing the
