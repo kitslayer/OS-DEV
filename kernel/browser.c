@@ -3535,6 +3535,21 @@ void browser_sel_extend(browser_t *b, int rx, int ry) {
     if (t >= 0) { if (b->tsel0 < 0) b->tsel0 = t; b->tsel1 = t; }
 }
 void browser_sel_clear(browser_t *b) { if (b) b->tsel0 = b->tsel1 = -1; }
+
+/* ---- draggable scrollbar (coords relative to the browser's x,y origin) ---- */
+int browser_in_scrollbar(browser_t *b, int rx, int ry, int w, int h) {
+    if (!b || b->content_h <= b->view_h) return 0;     /* no scrollbar when it all fits */
+    int sbx = w - 6, ct = ADDR_H + 6, cb = h - 8;
+    return rx >= sbx - 4 && rx <= sbx + 6 && ry >= ct && ry <= cb;
+}
+void browser_scroll_track(browser_t *b, int ry, int h) {
+    if (!b) return;
+    int ct = ADDR_H + 6, cb = h - 8, track = cb - ct;
+    if (track <= 0) return;
+    int maxscroll = b->content_h - b->view_h; if (maxscroll < 0) maxscroll = 0;
+    int pos = ry - ct; if (pos < 0) pos = 0; if (pos > track) pos = track;
+    b->scroll = maxscroll * pos / track;               /* render clamps */
+}
 /* Release: copy the selected token range to `out` (words joined by spaces, a
  * newline at each block break). Returns the length, or 0 for a non-drag click. */
 int browser_sel_commit(browser_t *b, char *out, int max) {

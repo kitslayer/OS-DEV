@@ -1,5 +1,13 @@
 # What's next
 
+> **(M770) Browser scrollbar — click + drag to scroll.** The symmetric counterpart to M769: the browser's
+> right-edge scrollbar is now interactive. Click the track to jump, drag to scroll. New
+> `browser_in_scrollbar(b,rx,ry,w,h)` (hit-test, only when content overflows) + `browser_scroll_track(b,ry,h)`
+> (maps track-y → `b->scroll`, render clamps); the WM checks the scrollbar before the link/select path and
+> drives a `bsbdrag` gesture. `make check` 29/29. Verified in-guest: click the bottom of the bar → page
+> footer; drag up → page top. Scrolling is now consistent across terminal + browser: wheel, keyboard, and a
+> click/drag scrollbar.
+
 > **(M769) Terminal scrollbar — click + drag to scroll.** The M764 scrollbar was indicator-only but looks
 > interactive. Now clicking anywhere on its track jumps the scrollback to that position, and dragging the bar
 > scrolls continuously. New `app_scroll_frac(a, num, den)` maps a track fraction to `view` (top = oldest,

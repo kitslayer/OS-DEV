@@ -694,6 +694,7 @@ void desktop_run(void) {
     int selecting = -1;                  /* window index whose text we're drag-selecting (terminal) */
     int bselecting = -1;                 /* window index whose text we're drag-selecting (browser) */
     int sbdrag = -1;                     /* window index whose terminal scrollbar we're dragging */
+    int bsbdrag = -1;                    /* window index whose browser scrollbar we're dragging */
     int prev_btn = 0, prev_x = -1, prev_y = -1;
     uint64_t last_sec = (uint64_t)-1;
     uint64_t last_tb_click = 0; int last_tb_x = -100, last_tb_y = -100;  /* double-click-to-maximize */
@@ -973,7 +974,10 @@ void desktop_run(void) {
                         }
                         else if (t->kind == KIND_BROWSER && t->app) {
                             int rbx = mx - t->x, rby = my - (t->y + TITLEBAR_H);
-                            if (!browser_click((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
+                            if (browser_in_scrollbar((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
+                                browser_scroll_track((browser_t *)t->app, rby, t->h - TITLEBAR_H);
+                                bsbdrag = win_count - 1;
+                            } else if (!browser_click((browser_t *)t->app, rbx, rby, t->w, t->h - TITLEBAR_H)) {
                                 browser_sel_begin((browser_t *)t->app, rbx, rby);   /* plain content: start text selection */
                                 bselecting = win_count - 1;
                             }
@@ -1030,13 +1034,18 @@ void desktop_run(void) {
                 if (n > 0) clip_set(sbuf, n);
                 bselecting = -1; dirty = 1;
             }
-            dragging = resizing = -1; sbdrag = -1; dirty = 1;
+            dragging = resizing = -1; sbdrag = -1; bsbdrag = -1; dirty = 1;
         }
 
         if (sbdrag >= 0 && left) {                 /* dragging the terminal scrollbar */
             window_t *w = &windows[sbdrag];
             int py = w->y + TITLEBAR_H + 6, trackh = app_rows() * font_height;
             app_scroll_frac((app_t *)w->app, my - py, trackh);
+            dirty = 1;
+        }
+        if (bsbdrag >= 0 && left) {                 /* dragging the browser scrollbar */
+            window_t *w = &windows[bsbdrag];
+            browser_scroll_track((browser_t *)w->app, my - (w->y + TITLEBAR_H), w->h - TITLEBAR_H);
             dirty = 1;
         }
         if (selecting >= 0 && left) {              /* dragging a terminal text selection: extend it */

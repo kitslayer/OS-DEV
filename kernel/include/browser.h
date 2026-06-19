@@ -43,6 +43,9 @@ void browser_sel_begin(browser_t *b, int rx, int ry);
 void browser_sel_extend(browser_t *b, int rx, int ry);
 void browser_sel_clear(browser_t *b);
 int  browser_sel_commit(browser_t *b, char *out, int max);  /* -> out (len), 0 if not a drag */
+/* Draggable scrollbar (coords relative to the browser origin). */
+int  browser_in_scrollbar(browser_t *b, int rx, int ry, int w, int h);
+void browser_scroll_track(browser_t *b, int ry, int h);
 
 /* A click inside the window body, relative to its top-left. Returns 1 if the
  * browser consumed it (so the WM knows to repaint). */
