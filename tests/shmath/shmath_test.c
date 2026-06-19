@@ -50,10 +50,28 @@ int main(void) {
     CHECK("100-10-10", 80);         /* left-associative subtraction */
     CHECK("64/4/2", 8);             /* left-associative division */
 
+    /* --- bitwise / shift / power (bash $(()) operators + precedence) --- */
+    CHECK("1<<4", 16);              /* shift left */
+    CHECK("256>>2", 64);            /* shift right */
+    CHECK("0xff & 0x0f", 15);       /* bitwise AND */
+    CHECK("12 | 3", 15);            /* bitwise OR */
+    CHECK("5 ^ 3", 6);              /* bitwise XOR (NOT power) */
+    CHECK("~0", -1);                /* bitwise NOT */
+    CHECK("~5", -6);
+    CHECK("2**8", 256);             /* power */
+    CHECK("2**3**2", 512);          /* power is right-associative: 2**(3**2)=2**9 */
+    CHECK("3*2**3", 24);            /* ** binds tighter than * : 3*(2**3) */
+    CHECK("1+2<<3", 24);            /* + before << : (1+2)<<3 = 24 */
+    CHECK("1<<2|1", 5);             /* << before | : (1<<2)|1 = 5 */
+    CHECK("0xf0 | 0x0f & 0x33", 0xf3); /* & before | : 0xf0 | (0x0f & 0x33) = 0xf0|0x03 */
+    CHECK("(1|2)&6", 2);            /* parens override : (3)&6 = 2 */
+    CHECK("2**0", 1);
+    CHECK("10 % 3", 1);
+
     /* --- fuzz: random short expressions must never crash, trap (ASan/UBSan),
      * or hang. sh_eval consumes a bounded string left-to-right and always
      * terminates, so a violation here is a real bug. --- */
-    const char *cs = "0123456789+-*/%()xab $\t";
+    const char *cs = "0123456789+-*/%()xab $\t<>&^|~";
     unsigned seed = 0x9e3779b9u;
     for (int it = 0; it < 300000; it++) {
         char buf[33];

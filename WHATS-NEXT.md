@@ -1,5 +1,13 @@
 # What's next
 
+> **(M779) Shell `$((expr))` — full bitwise/shift/power operators (bash-compatible).** Extended the shared
+> evaluator (`user/shmath.h`) from `+ - * / %` to bash's whole `$(())` operator set + precedence: `**`
+> (power, right-assoc), `* / %`, `+ -`, `<< >>`, `&`, `^` (XOR), `|`, and unary `~`. Hardened all arithmetic
+> to be overflow-safe (unsigned-wrap, defined behaviour) after the host fuzz immediately caught **real
+> signed-overflow UB** in the power loop — div/0 and `MIN/-1` and out-of-range shifts now yield 0/wrap with
+> no UB. Extended `tests/shmath` (17 new asserts + fuzz alphabet `<>&^|~`); 300k iterations ASan/UBSan-clean.
+> `make check` 30/30; verified in-guest: `$((1<<4))`→16, `$((0xff&0x0f))`→15, `$((2**8))`→256, `$((100>>2))`→25.
+
 > **(M778) Editor — line-of-total in the status bar.** The status line now shows `L<current>/<total> C<col>`
 > (total = logical line count) instead of bare `line:col`, so you can see your position in a long file —
 > pairing with the M771 PgUp/PgDn paging. Safe display-only change (no effect on the wrap/scroll/cursor
