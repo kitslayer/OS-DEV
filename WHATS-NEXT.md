@@ -1,5 +1,14 @@
 # What's next
 
+> **(M782) Keyboard — Ctrl modifier + readline shortcuts in the terminal.** The OS had no Ctrl key at all
+> (the cooked-keycode space was claimed by arrows + WM F-keys). Added `ctrl_down` tracking (LCtrl scancode
+> 0x1D) and encode Ctrl+letter as `0x80|(letter&0x1f)` (0x81–0x9A) — a clean range that doesn't collide with
+> the existing codes. The line editor (`app_sys_read`) maps them to readline shortcuts: Ctrl-A/E (home/end),
+> Ctrl-B/F (left/right), Ctrl-P/N (history), Ctrl-D/H (delete/backspace) via remap to existing codes, plus
+> new Ctrl-K (kill to end), Ctrl-U (kill line), Ctrl-W (kill word), Ctrl-C (abandon line, prints `^C`).
+> Benefits every `readline` caller (shell, calc, adv); unblocks future Ctrl shortcuts in the editor. `make
+> check` 30/30. Verified in-guest: Ctrl-W/U/K kills + Ctrl-C cancel all work.
+
 > **(M781) Build — `-fwrapv` for the OS-authored userspace.** The user apps compiled *without* `-fwrapv`
 > (only the kernel had it), so signed overflow was UB under `-O2` — the latent class M779's fuzz exposed in
 > the shell evaluator, and which calc's parse/power/`*` paths share. Added `-fwrapv` to `USER_CFLAGS` so all

@@ -37,6 +37,7 @@ static const char keymap_shift[128] = {
 
 #define SC_LSHIFT 0x2A
 #define SC_RSHIFT 0x36
+#define SC_LCTRL  0x1D
 #define SC_RELEASE 0x80
 
 /* ---- shared input ring buffer ----------------------------------------- */
@@ -93,6 +94,7 @@ int input_getchar(void) {
 /* ---- the keyboard IRQ ------------------------------------------------- */
 
 static bool shift_down;
+static bool ctrl_down;
 
 static void keyboard_handler(struct registers *r) {
     (void)r;
@@ -136,10 +138,16 @@ static void keyboard_handler(struct registers *r) {
         uint8_t code = sc & 0x7F;
         if (code == SC_LSHIFT || code == SC_RSHIFT)
             shift_down = false;
+        if (code == SC_LCTRL)
+            ctrl_down = false;
         return;
     }
     if (sc == SC_LSHIFT || sc == SC_RSHIFT) {
         shift_down = true;
+        return;
+    }
+    if (sc == SC_LCTRL) {            /* Ctrl held: letters become 0x81..0x9A (see below) */
+        ctrl_down = true;
         return;
     }
     if (sc == 0x3B) { input_push(0x1D); return; }   /* F1 -> WM: keyboard-shortcut help */
@@ -153,8 +161,13 @@ static void keyboard_handler(struct registers *r) {
     if (sc == 0x58) { input_push(0x1C); return; }   /* F12 -> WM: screenshot         */
     if (sc < 128) {
         char c = shift_down ? keymap_shift[sc] : keymap[sc];
-        if (c)
+        if (c) {
+            if (ctrl_down) {        /* Ctrl+letter -> 0x81..0x9A (apps read these as readline shortcuts) */
+                char lo = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+                if (lo >= 'a' && lo <= 'z') c = (char)(0x80 | (lo & 0x1f));
+            }
             input_push(c);
+        }
     }
 }
 

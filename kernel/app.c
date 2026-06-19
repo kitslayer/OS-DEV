@@ -435,6 +435,44 @@ int app_sys_read(char *buf, unsigned max) {
         int c = iq_get(a);
         if (c < 0) { task_block(); irq_restore(f); continue; }  /* sleep until woken (incl. by a kill request) */
         irq_restore(f);
+        /* Ctrl+letter arrives as 0x81..0x9A. Map the readline navigation aliases
+         * onto the existing key codes; the kill/cancel ones are handled below. */
+        switch (c) {
+            case 0x81: c = 0x01; break;   /* Ctrl-A -> Home   */
+            case 0x85: c = 0x05; break;   /* Ctrl-E -> End    */
+            case 0x82: c = 0x13; break;   /* Ctrl-B -> left   */
+            case 0x86: c = 0x14; break;   /* Ctrl-F -> right  */
+            case 0x90: c = 0x11; break;   /* Ctrl-P -> prev (history up)   */
+            case 0x8e: c = 0x12; break;   /* Ctrl-N -> next (history down) */
+            case 0x84: c = 0x04; break;   /* Ctrl-D -> Delete */
+            case 0x88: c = 0x08; break;   /* Ctrl-H -> backspace */
+        }
+        if (c == 0x83) {                  /* Ctrl-C: abandon the current line */
+            cursor_fwd(a, (int)(n - cur_i));
+            grid_putc(a, '^'); grid_putc(a, 'C'); grid_putc(a, '\n');
+            buf[0] = 0; return 0;
+        }
+        if (c == 0x8b || c == 0x95 || c == 0x97) {   /* Ctrl-K / Ctrl-U / Ctrl-W: kill operations */
+            unsigned oldlen = n, oldcur = cur_i;
+            if (c == 0x8b) { n = cur_i; }                          /* kill to end of line */
+            else if (c == 0x95) {                                  /* kill the whole line */
+                for (unsigned k = cur_i; k < n; k++) buf[k - cur_i] = buf[k];
+                n -= cur_i; cur_i = 0;
+            } else {                                               /* Ctrl-W: kill the word before the caret */
+                unsigned ws = cur_i;
+                while (ws > 0 && buf[ws-1] == ' ') ws--;
+                while (ws > 0 && buf[ws-1] != ' ') ws--;
+                unsigned del = cur_i - ws;
+                for (unsigned k = cur_i; k < n; k++) buf[k - del] = buf[k];
+                n -= del; cur_i = ws;
+            }
+            cursor_back(a, (int)oldcur);                           /* repaint: start -> content -> blank tail */
+            emit_range(a, buf, 0, n);
+            for (unsigned k = n; k < oldlen; k++) grid_putc(a, ' ');
+            cursor_back(a, (int)((oldlen > n ? oldlen : n) - cur_i));
+            continue;
+        }
+        if (c >= 0x80) continue;          /* any other Ctrl-combo: ignore (don't echo) */
         if (c == '\n' || c == '\r') {
             cursor_fwd(a, (int)(n - cur_i)); cur_i = n;  /* commit from end of line */
             if (n > 0) {                            /* save this line to history */
