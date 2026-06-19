@@ -684,7 +684,8 @@ void app_sel_commit(app_t *a) {
  * (newlines included — for a shell, a multi-line paste runs each line). */
 void app_paste(app_t *a) {
     if (!a) return;
-    int n = clip_get(a->pastebuf, sizeof a->pastebuf);   /* into the app's paste buffer... */
+    a->paste_len = 0;                                    /* stop any in-flight drain before we refill */
+    int n = clip_get(a->pastebuf, sizeof a->pastebuf);   /* fill the app's paste buffer... */
     a->paste_pos = 0;
     a->paste_len = n;                                    /* ...set last so iq_get sees a complete buffer */
     if (a->view) { a->view = 0; a->gdirty = 1; }         /* a paste returns to the live view */

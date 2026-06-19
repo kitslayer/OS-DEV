@@ -1,5 +1,10 @@
 # What's next
 
+> **(M776) Paste-buffer race hardening.** `app_paste` now zeroes `paste_len` before refilling the per-app
+> paste buffer, so if a second paste arrives while the first is still draining, `iq_get` can't read a
+> half-overwritten buffer (it sees `paste_pos < paste_len == 0` → skips it until the refill sets the new
+> length). Tiny correctness fix to the M768 buffer. `make check` 29/29; normal paste verified unchanged.
+
 > **(M775) Browser paste — insert at the caret.** Consistency fix for M773/M774: middle-click paste now
 > inserts the clipboard at the caret (`url_cur` for the address bar, `field_cur` for a focused field) instead
 > of always appending — control chars skipped, caret left after the inserted text. `make check` 29/29.
