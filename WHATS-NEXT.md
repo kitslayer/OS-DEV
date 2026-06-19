@@ -1,5 +1,14 @@
 # What's next
 
+> **(M755) Browser — full-width block backgrounds.** `background-color` on a block element (div / p / h1-6 /
+> section / li / …) now fills the whole line band (cl→cr, respecting any indent), not just behind the text —
+> distinct from an inline element's bg (`<mark>`, `<span>`), which stays a text highlight. Block-ness is
+> decided by the element's tag (`is_block_tag`) and marked with a spare bg flag bit (`0x02000000`); the render
+> paints the band at each line start (the `cx==cl` point, after `ls`/indent is known). Real sites' coloured
+> cards/sections/headers now render as boxes. `make check` 29/29 (the browser goldens are parser/presence
+> checks, unaffected); verified in-guest — `div{background:#cfe8ff}` shows a full-width band, an inline span
+> bg stays behind its text.
+
 > **(M754) Desktop — click a file in the Files window to open it.** The Files window was keyboard-only
 > (up/down + Enter); a mouse click on a file row did nothing (the click handler routed body clicks to the
 > browser but had no Files case). Added `files_click()`: a click maps the cursor's y to the file row

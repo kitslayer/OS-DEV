@@ -560,6 +560,18 @@ static int is_void_tag(const char *t) {
            tageq(t,"link")||tageq(t,"area")||tageq(t,"col")||tageq(t,"base")||tageq(t,"wbr")||
            tageq(t,"embed")||tageq(t,"source");
 }
+/* HTML block-level elements: a background-color on one fills the whole line band
+ * (an inline element's bg only highlights behind its text). */
+static int is_block_tag(const char *t) {
+    return tageq(t,"div")||tageq(t,"p")||tageq(t,"section")||tageq(t,"article")||
+           tageq(t,"header")||tageq(t,"footer")||tageq(t,"nav")||tageq(t,"main")||
+           tageq(t,"aside")||tageq(t,"blockquote")||tageq(t,"ul")||tageq(t,"ol")||
+           tageq(t,"li")||tageq(t,"dl")||tageq(t,"dd")||tageq(t,"dt")||tageq(t,"table")||
+           tageq(t,"tr")||tageq(t,"td")||tageq(t,"th")||tageq(t,"figure")||tageq(t,"form")||
+           tageq(t,"fieldset")||tageq(t,"pre")||tageq(t,"address")||tageq(t,"details")||
+           tageq(t,"summary")||tageq(t,"figcaption")||
+           (t[0]=='h' && t[1]>='1' && t[1]<='6' && t[2]==0);
+}
 /* <style> support (defined after sel_parse): parse a <style> body into b->css_* rules,
  * and find the cascaded color/text-style for one element from those rules. */
 static void capture_css(browser_t *b, const char *s, int n);
@@ -632,7 +644,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 int sp = b->sc_sp;
                 b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
                 b->sc[sp].savecolor = b->curcolor; if (c) b->curcolor = c;
-                b->sc[sp].savebg = b->curbg; if (bg) b->curbg = bg;
+                b->sc[sp].savebg = b->curbg; if (bg) b->curbg = is_block_tag(tag) ? (bg | 0x02000000u) : bg;   /* mark block bg = full-width */
                 b->sc[sp].saveul = b->curul; if (ul) b->curul = 1;
                 b->sc[sp].savetransform = b->curtransform; if (tr) b->curtransform = tr;
                 b->sc[sp].savealign = b->curalign; if (al) b->curalign = al;
@@ -3260,6 +3272,8 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 if (off < 0) off = 0;
                 cx = ls + off;
             } else cx = ls;
+            if ((b->tokbg[t] & 0x02000000) && cy + lh > ct && cy < cb)   /* block background: paint the full line band before the words */
+                fb_fill_rect(ls, cy, cr - ls, lh, b->tokbg[t] & 0xFFFFFF);
         }
 
         /* record every link's content-space y (even off-screen) so keyboard
