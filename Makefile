@@ -18,7 +18,7 @@ QEMU    := qemu-system-x86_64
 CFLAGS  := -std=gnu11 -ffreestanding -nostdlib \
            -fno-stack-protector -fno-pic -fno-pie \
            -mno-red-zone -mgeneral-regs-only -fwrapv \
-           -Wall -Wextra -Ikernel/include -O2 -g
+           -Wall -Wextra -Ikernel/include -O2 -g -MMD -MP
 
 ASFLAGS := -f elf64
 LDFLAGS := -n -T linker.ld
@@ -69,7 +69,7 @@ $(BUILD)/mkfatfs: tools/mkfatfs.c
 $(DISK): $(BUILD)/mkfatfs
 	$(BUILD)/mkfatfs $@
 
-$(BUILD)/%.o: %.c
+$(BUILD)/%.o: %.c Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -85,10 +85,10 @@ $(BUILD)/%.o: %.asm
 # Each user program (shell, clock, ...) is linked with the shared ulib into its
 # own ELF; the kernel embeds them all (see kernel/asm/user_blob.asm).
 USER_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
-               -mgeneral-regs-only -std=gnu11 -O2 -Wall -Ikernel/include
+               -mgeneral-regs-only -std=gnu11 -O2 -Wall -Ikernel/include -MMD -MP
 USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/doom.elf $(BUILD)/quake.elf $(BUILD)/nes.elf $(BUILD)/reversi.elf $(BUILD)/lights.elf $(BUILD)/fifteen.elf $(BUILD)/mastermind.elf $(BUILD)/pong.elf $(BUILD)/halflife.elf $(BUILD)/memory.elf $(BUILD)/sokoban.elf $(BUILD)/battleship.elf $(BUILD)/pig.elf $(BUILD)/raycast.elf $(BUILD)/tron.elf $(BUILD)/spaceinv.elf $(BUILD)/asteroids.elf $(BUILD)/flappy.elf $(BUILD)/gb.elf $(BUILD)/lander.elf $(BUILD)/yahtzee.elf $(BUILD)/checkers.elf $(BUILD)/gomoku.elf $(BUILD)/frogger.elf $(BUILD)/chess.elf $(BUILD)/vpoker.elf $(BUILD)/mancala.elf $(BUILD)/dotsbox.elf $(BUILD)/missile.elf $(BUILD)/pacman.elf
 
-$(BUILD)/user_%.o: user/%.c
+$(BUILD)/user_%.o: user/%.c Makefile
 	@mkdir -p $(BUILD)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -371,3 +371,11 @@ check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenc
 
 clean:
 	rm -rf $(BUILD)
+
+# Header-dependency tracking: -MMD (in the *CFLAGS) drops a .d next to each .o
+# listing every header it included; pulling those in here means editing a header
+# rebuilds exactly the objects that include it. Without this, a header edit
+# silently shipped a stale .o — e.g. extending shmath.h didn't rebuild shell.o
+# until a manual `touch` (M780). Placed last so the included .d rules can't
+# hijack the default goal; missing on a clean tree -> ignored.
+-include $(shell find $(BUILD) -name '*.d' 2>/dev/null)

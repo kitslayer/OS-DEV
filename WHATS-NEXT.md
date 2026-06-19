@@ -1,5 +1,13 @@
 # What's next
 
+> **(M780) Build — header-dependency tracking.** The Makefile didn't track header deps, so editing a header
+> left objects stale — M779's `shmath.h` change needed a manual `touch shell.c` to take effect (a real
+> ship-the-wrong-binary hazard). Added `-MMD -MP` to the kernel + user CFLAGS (gcc drops a `.d` beside each
+> `.o`), `-include`d every `build/**.d` at the *end* of the Makefile (so the generated rules can't hijack the
+> default goal), and made the `%.o` rules depend on the Makefile too (CFLAGS changes now rebuild). Verified:
+> a clean build emits 117 `.d`; touching `shmath.h` rebuilds only `user_shell.o`, touching `app.h` rebuilds
+> exactly the 4 kernel files that include it; `make check` 30/30.
+
 > **(M779) Shell `$((expr))` — full bitwise/shift/power operators (bash-compatible).** Extended the shared
 > evaluator (`user/shmath.h`) from `+ - * / %` to bash's whole `$(())` operator set + precedence: `**`
 > (power, right-assoc), `* / %`, `+ -`, `<< >>`, `&`, `^` (XOR), `|`, and unary `~`. Hardened all arithmetic
