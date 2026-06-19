@@ -45,12 +45,28 @@ static void mouse_command(uint8_t cmd) {
 
 static int      mx, my, buttons;
 static volatile int rel_dx, rel_dy;        /* raw motion since the last mouse_read_rel */
-static uint8_t  packet[3];
+static volatile int wheel_accum;           /* scroll-wheel ticks since the last mouse_read_wheel */
+static uint8_t  packet[4];
 static int      phase;
+static int      wheel_mode;                /* 1 = IntelliMouse: 4-byte packets with a Z (wheel) axis */
 
 int mouse_x(void)       { return mx; }
 int mouse_y(void)       { return my; }
 int mouse_buttons(void) { return buttons; }
+
+/* Wheel ticks accumulated since the previous call (read + clear). Positive =
+ * wheel rolled up/away, negative = down/toward — the compositor maps these to
+ * scrolling whichever window is under the cursor. */
+int mouse_read_wheel(void) {
+    uint64_t fl; __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    int w = wheel_accum; wheel_accum = 0;
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+    return w;
+}
+
+/* Feed wheel ticks from another input source (the USB tablet reports the wheel
+ * in its HID packet, since osdrive/`make run` use usb-tablet, not PS/2). */
+void mouse_add_wheel(int dz) { wheel_accum += dz; }
 
 /* Relative motion accumulated since the previous call (read + clear). Used for
  * mouselook in games, where absolute clamped-to-screen position can't turn past
@@ -73,6 +89,14 @@ void mouse_set_abs(int x, int y, int b) {
 
 static void handle_packet(void) {
     buttons = packet[0] & 0x07;
+
+    /* IntelliMouse 4th byte: a signed 4-bit Z (wheel) delta in the low nibble
+     * (the high nibble carries buttons 4/5 on 5-button mice — ignored here). */
+    if (wheel_mode) {
+        int z = packet[3] & 0x0F;
+        if (z & 0x08) z |= ~0x0F;            /* sign-extend the 4-bit value */
+        wheel_accum += z;
+    }
 
     /* Bits 6/7 are the X/Y overflow flags. On a fast flick the delta exceeds
      * what fits in one byte; the reported values are then garbage. Using them
@@ -109,10 +133,21 @@ static void mouse_handler(struct registers *r) {
     case 1:
         packet[1] = data; phase = 2; break;
     case 2:
-        packet[2] = data; phase = 0;
+        packet[2] = data;
+        if (wheel_mode) { phase = 3; break; }   /* one more byte (Z axis) to come */
+        phase = 0;
+        handle_packet();
+        break;
+    case 3:
+        packet[3] = data; phase = 0;
         handle_packet();
         break;
     }
+}
+
+/* Read one byte the mouse sent back (e.g. a device-ID reply), or -1 on timeout. */
+static int mouse_read_byte(void) {
+    return ps2_wait_out() ? inb(PS2_DATA) : -1;
 }
 
 void mouse_init(void) {
@@ -127,6 +162,16 @@ void mouse_init(void) {
     ps2_wait_in(); outb(PS2_DATA, cfg);
 
     mouse_command(0xF6);                      /* set defaults */
+
+    /* IntelliMouse "knock": the magic sample-rate sequence 200/100/80 makes a
+     * wheel mouse switch its device ID from 0x00 to 0x03 and start sending a
+     * 4th (Z-axis) byte. If the ID comes back 0x03, enable wheel mode. */
+    mouse_command(0xF3); mouse_command(200);
+    mouse_command(0xF3); mouse_command(100);
+    mouse_command(0xF3); mouse_command(80);
+    mouse_command(0xF2);                       /* get device ID */
+    wheel_mode = (mouse_read_byte() == 0x03);
+
     mouse_command(0xE6);                      /* scaling 1:1 (linear, not 2:1 accel) */
     mouse_command(0xE8); mouse_command(0x02); /* resolution = 4 counts/mm */
     mouse_command(0xF3); mouse_command(0x3C); /* sample rate = 60 reports/s */

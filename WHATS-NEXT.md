@@ -1,5 +1,15 @@
 # What's next
 
+> **(M759) Mouse wheel scrolling.** The pointer had no wheel at all. Now the wheel scrolls whichever window
+> the cursor is over: the browser (via `browser_key` arrow-scroll) and any text app's scrollback (via
+> `app_key` PgUp/PgDn). Two input paths feed one shared accumulator (`mouse_add_wheel`/`mouse_read_wheel`):
+> the USB tablet's HID packet carries the wheel in byte 5 (what `make run`/osdrive actually use), and the
+> PS/2 driver now does the IntelliMouse sample-rate knock (200/100/80 → device id 0x03 → 4-byte packets with
+> a Z axis) for real-hardware/PS-2 configs. The compositor polls the accumulator each frame and routes ticks
+> to the topmost non-minimized window under the cursor (gfx apps skipped). Added a `wheel X Y N` command to
+> osdrive for testing. `make check` 29/29. Verified in-guest: wheel scrolls the browser both ways and the
+> shell scrollback (`^` indicator).
+
 > **(M758) Editor — Home/End/Delete/Tab + system-caret opt-out.** The full-screen editor only had arrow
 > keys + backspace. Now it uses M757's new keycodes: Home/End jump to the start/end of the current line,
 > Delete forward-deletes the char at the cursor, and Tab inserts spaces to the next 4-column stop. Also

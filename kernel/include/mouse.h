@@ -6,6 +6,8 @@ int  mouse_x(void);
 int  mouse_y(void);
 int  mouse_buttons(void);     /* bit0 left, bit1 right, bit2 middle */
 void mouse_read_rel(int *dx, int *dy);  /* raw motion since last call (read+clear); for mouselook */
+int  mouse_read_wheel(void);  /* scroll-wheel ticks since last call (read+clear); +up / -down */
+void mouse_add_wheel(int dz);  /* feed wheel ticks from another source (e.g. the USB tablet) */
 
 /* Set the pointer to an absolute position (used by the USB tablet, which
  * reports absolute coordinates instead of relative motion). */

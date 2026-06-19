@@ -848,6 +848,30 @@ void desktop_run(void) {
             }
         }
 
+        /* Mouse wheel: scroll the topmost non-minimized window under the cursor.
+         * wheel > 0 = rolled up (show content above); reused for the browser's
+         * arrow-scroll and a text app's PgUp/PgDn scrollback. */
+        int wheel = mouse_read_wheel();
+        if (wheel) {
+            int up = wheel > 0, ticks = up ? wheel : -wheel;
+            if (ticks > 8) ticks = 8;                    /* clamp a violent spin */
+            for (int i = win_count - 1; i >= 0; i--) {
+                window_t *w = &windows[i];
+                if (w->minimized || !in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
+                if (w->kind == KIND_BROWSER && w->app) {
+                    for (int t = 0; t < ticks * 3; t++) browser_key((browser_t *)w->app, up ? 0x11 : 0x12);
+                    dirty = 1;
+                } else if (w->kind == KIND_APP && w->app) {
+                    uint32_t *cb; int gw, gh;             /* text apps only (skip gfx canvases) */
+                    if (!app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) {
+                        for (int t = 0; t < ticks; t++) app_key((app_t *)w->app, up ? 0x15 : 0x16);
+                        dirty = 1;
+                    }
+                }
+                break;                                   /* only the topmost window the cursor is over */
+            }
+        }
+
         if (left && !(prev_btn & 1) && help_open) {
             help_open = 0; dirty = 1;        /* the help overlay is modal: a click anywhere dismisses it */
         } else if (left && !(prev_btn & 1)) {

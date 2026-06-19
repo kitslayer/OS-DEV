@@ -263,6 +263,8 @@ void usb_tablet_poll(void) {
         int x = rx * (fb_width() - 1) / 32767;
         int y = ry * (fb_height() - 1) / 32767;
         mouse_set_abs(x, y, buttons);
+        if (actlen >= 6 && report_buf[5])         /* 6th byte: signed wheel delta (+up / -down) */
+            mouse_add_wheel((int)(int8_t)report_buf[5]);
     }
 
     int_toggle ^= 1;                          /* re-arm with toggled data bit */
