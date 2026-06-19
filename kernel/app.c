@@ -28,6 +28,7 @@
 #define IQ_SIZE  128
 #define MAX_APPS 8
 #define HIST_N   32          /* command-history depth (up/down recall) */
+#define CLIP_MAX 2048        /* system clipboard + per-app paste buffer size */
 
 #define USTACK_BASE  0x50000000ull
 #define USTACK_PAGES 128             /* 512 KiB user stack — DOOM's BSP renderer recurses deeply */
@@ -71,6 +72,8 @@ struct app {
     int      sel_on;                     /* a text selection is shown/in progress */
     int      sel_r0, sel_c0;             /* selection anchor (visible-grid cell) */
     int      sel_r1, sel_c1;             /* selection end (visible-grid cell) */
+    char     pastebuf[CLIP_MAX];         /* middle-click paste text, drained before the key queue */
+    volatile int paste_len, paste_pos;   /* so a long paste isn't capped by the small key queue */
 };
 
 static struct app apps[MAX_APPS];
@@ -237,7 +240,6 @@ static void emit_range(struct app *a, const char *buf, unsigned i, unsigned j) {
 /* ---- system clipboard (one buffer shared by every app) -------------------
  * Set by a terminal text selection, read by middle-click paste — so text can
  * be carried between windows (e.g. a URL from the browser into the shell). */
-#define CLIP_MAX 2048
 static char g_clip[CLIP_MAX];
 static int  g_clip_len;
 void clip_set(const char *s, int n) {
@@ -382,6 +384,8 @@ void app_key(app_t *a, char c) {
     task_wake(a->task);          /* unblock the app if it's waiting in read() */
 }
 static int iq_get(struct app *a) {
+    if (a->paste_pos < a->paste_len)            /* drain a pending paste first (not capped by IQ_SIZE) */
+        return (unsigned char)a->pastebuf[a->paste_pos++];
     if (a->ih == a->it) return -1;
     char c = a->iq[a->it]; a->it = (a->it + 1) % IQ_SIZE; return (unsigned char)c;
 }
@@ -664,8 +668,11 @@ void app_sel_commit(app_t *a) {
  * (newlines included — for a shell, a multi-line paste runs each line). */
 void app_paste(app_t *a) {
     if (!a) return;
-    char buf[CLIP_MAX]; int n = clip_get(buf, sizeof buf);
-    for (int i = 0; i < n; i++) app_key(a, buf[i]);
+    int n = clip_get(a->pastebuf, sizeof a->pastebuf);   /* into the app's paste buffer... */
+    a->paste_pos = 0;
+    a->paste_len = n;                                    /* ...set last so iq_get sees a complete buffer */
+    if (a->view) { a->view = 0; a->gdirty = 1; }         /* a paste returns to the live view */
+    task_wake(a->task);                                  /* unblock it if waiting in read() */
 }
 
 /* WM: deliver one raw key event to a raw-mode app's queue. */

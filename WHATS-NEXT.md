@@ -1,5 +1,13 @@
 # What's next
 
+> **(M768) Long-paste correctness — paste buffer + bigger shell line.** Two caps truncated long pastes (e.g.
+> a multi-line browser selection): `app_paste` injected via the 128-entry key queue (excess dropped), and the
+> shell read into a 128-byte line. Fixed both: each app now has a `pastebuf[CLIP_MAX]` that `iq_get` drains
+> *before* the key queue (so a paste up to 2 KB isn't capped by `IQ_SIZE`, and it's delivered to both
+> `app_sys_read` and `sys_pollkey` callers — shell, editor, calc, adv); and the shell's input line grew
+> 128 → 1024 (long URLs for `wget`, long pastes). `make check` 29/29. Verified in-guest: drag-select a big
+> browser paragraph → paste into the shell → the full ~290-char text lands (previously cut at ~128).
+
 > **(M767) Browser text selection — the clipboard capstone.** Drag across page text to select it (word
 > granularity, highlighted white-on-blue) and copy to the shared clipboard on release. The render loop now
 > records a per-visible-word rect (`b->wrec`, reusing `lrec_t` with `.link` = token index) for hit-testing,

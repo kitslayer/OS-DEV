@@ -1976,7 +1976,7 @@ int main(void) {
     print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
     print("  type 'help' for commands\n\n");
 
-    char line[128];
+    char line[1024];                               /* command line: roomy enough for long URLs + pastes */
     char cwd[128]; cwd[0] = '/'; cwd[1] = 0;       /* display path (kernel tracks the real cwd) */
     for (;;) {
         print("osdev:"); print(cwd); print("$ ");
