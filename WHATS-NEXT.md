@@ -1,5 +1,12 @@
 # What's next
 
+> **(M783) Editor — Ctrl-S save / Ctrl-Q quit (now that Ctrl exists).** With M782's Ctrl support, the editor
+> finally gets the save/quit options it lacked: Ctrl-S saves and keeps editing ("[saved]"), Ctrl-Q quits
+> *without* saving (abandon changes) — ESC still saves & quits. Closes the real gap where ESC was the only
+> exit (no way to save-and-continue or to discard a bad edit). Status hint updated to `ESC/^S=save ^Q=quit`.
+> `make check` 30/30. Verified in-guest: Ctrl-S → "[saved]" + still editing (5b written); Ctrl-Q → editor
+> closes, the later unsaved keystroke discarded.
+
 > **(M782) Keyboard — Ctrl modifier + readline shortcuts in the terminal.** The OS had no Ctrl key at all
 > (the cooked-keycode space was claimed by arrows + WM F-keys). Added `ctrl_down` tracking (LCtrl scancode
 > 0x1D) and encode Ctrl+letter as `0x80|(letter&0x1f)` (0x81–0x9A) — a clean range that doesn't collide with

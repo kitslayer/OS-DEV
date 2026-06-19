@@ -89,7 +89,7 @@ static void render(const char *msg) {
     char st[96]; int p = 0;
     const char *a = "EDIT "; while (*a) st[p++] = *a++;
     for (int i = 0; fname[i] && p < 30; i++) st[p++] = fname[i];
-    a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC=save&quit  "; while (*a) st[p++] = *a++;
+    a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC/^S=save ^Q=quit  "; while (*a) st[p++] = *a++;
     char nb[12]; itoa_i(dlen, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];
     a = "b  L"; while (*a) st[p++] = *a++;
     itoa_i(ln, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* current line */
@@ -143,6 +143,15 @@ int main(void) {
             else { render("\n[saved - bye]"); }
             sys_sleep(400);
             return 0;
+        }
+        else if (k == 0x93) {                       /* Ctrl-S: save, keep editing */
+            if (readonly) render("\n[not saved: file too large]");
+            else if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
+            else render("\n[saved]");
+            sys_sleep(300); render(0);
+        }
+        else if (k == 0x91) {                       /* Ctrl-Q: quit WITHOUT saving */
+            render("\n[quit - changes not saved]"); sys_sleep(350); return 0;
         }
         else if (k == '\n' || k == '\r') insert('\n');
         else if (k == 8 || k == 127)     backspace();
