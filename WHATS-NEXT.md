@@ -1,5 +1,13 @@
 # What's next
 
+> **(M771) Editor — PgUp/PgDn + wheel paging.** The editor couldn't page long files: PgUp/PgDn (0x15/0x16)
+> were swallowed by the terminal-scrollback intercept before reaching it, and the wheel did nothing there.
+> Now `app_key` only intercepts 0x15/0x16 for ordinary terminals; a full-screen self-drawing app (`caret_off`,
+> e.g. the editor) receives them as keys. The editor pages by EDVIS-1 (15) lines on PgUp/PgDn; the wheel,
+> routed via a new `app_caret_hidden()` accessor, sends arrow keys (3 lines/tick) to such apps and scrollback
+> to terminals. `make check` 29/29. Verified in-guest: open a 60-line file → 2× PgUp jumps from line 61 to
+> line 31.
+
 > **(M770) Browser scrollbar — click + drag to scroll.** The symmetric counterpart to M769: the browser's
 > right-edge scrollbar is now interactive. Click the track to jump, drag to scroll. New
 > `browser_in_scrollbar(b,rx,ry,w,h)` (hit-test, only when content overflows) + `browser_scroll_track(b,ry,h)`

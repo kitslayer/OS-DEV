@@ -875,7 +875,10 @@ void desktop_run(void) {
                 } else if (w->kind == KIND_APP && w->app) {
                     uint32_t *cb; int gw, gh;             /* text apps only (skip gfx canvases) */
                     if (!app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) {
-                        for (int t = 0; t < ticks; t++) app_key((app_t *)w->app, up ? 0x15 : 0x16);
+                        if (app_caret_hidden((app_t *)w->app))   /* editor etc.: scroll its own view a few lines */
+                            for (int t = 0; t < ticks * 3; t++) app_key((app_t *)w->app, up ? 0x11 : 0x12);
+                        else                                     /* terminal: PgUp/PgDn into the scrollback */
+                            for (int t = 0; t < ticks; t++) app_key((app_t *)w->app, up ? 0x15 : 0x16);
                         dirty = 1;
                     }
                 }

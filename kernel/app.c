@@ -370,11 +370,14 @@ int app_dirty_clear(app_t *a) { int d = a->gdirty; a->gdirty = 0; return d; }
 
 /* ---- input queue (filled by the WM, drained by SYS_read) ---- */
 void app_key(app_t *a, char c) {
-    if (c == 0x15) {             /* PgUp: scroll into the scrollback history */
+    /* PgUp/PgDn scroll the scrollback for ordinary terminals; a full-screen app
+     * that draws its own view (caret_off, e.g. the editor) gets them as keys to
+     * page its own content instead. */
+    if (c == 0x15 && !a->caret_off) {        /* PgUp: scroll into the scrollback history */
         if (a->view < a->sb_count) { a->view += 4; if (a->view > a->sb_count) a->view = a->sb_count; a->gdirty = 1; }
         return;                  /* a UI control — the program never sees it */
     }
-    if (c == 0x16) {             /* PgDn: scroll back toward the live bottom */
+    if (c == 0x16 && !a->caret_off) {        /* PgDn: scroll back toward the live bottom */
         if (a->view > 0) { a->view -= 4; if (a->view < 0) a->view = 0; a->gdirty = 1; }
         return;
     }
@@ -607,6 +610,7 @@ void app_set_rawkb(int on) { struct app *a = cur(); if (a) a->rawkb = on ? 1 : 0
 /* SYS_caret: a full-screen text app that draws its own cursor (e.g. the editor)
  * opts out of the system block caret so the two don't both show. */
 void app_set_caret(int on) { struct app *a = cur(); if (a) a->caret_off = on ? 0 : 1; }
+int  app_caret_hidden(app_t *a) { return a && a->caret_off; }   /* WM: full-screen self-drawing app? */
 int  app_get_rawkb(app_t *a) { return a && a->rawkb; }
 
 /* ---- text selection + paste (driven by the WM's mouse handling) ---------- */

@@ -49,6 +49,7 @@ int    app_gfx_blit(const uint32_t *pixels);  /* copy the caller's pixels to the
 int    app_gfx_get(app_t *a, uint32_t **buf, int *w, int *h);  /* WM: canvas + dims; 1/0 */
 void   app_set_rawkb(int on);          /* caller opts into raw make/break key events */
 void   app_set_caret(int on);          /* 1 = show system caret (default), 0 = app draws its own */
+int    app_caret_hidden(app_t *a);     /* WM: 1 if this app draws its own view (full-screen) */
 int    app_get_rawkb(app_t *a);        /* WM: is this app in raw keyboard mode? */
 void   app_key_raw(app_t *a, unsigned short ev);  /* WM: deliver a raw key event */
 int    app_sys_getkbevent(void);       /* next raw key event for the caller, or -1 */

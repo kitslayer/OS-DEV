@@ -148,6 +148,8 @@ int main(void) {
         else if (k == 0x14) { if (cur < dlen) cur++; }    /* right */
         else if (k == 0x11) move_vert(0);                 /* up    */
         else if (k == 0x12) move_vert(1);                 /* down  */
+        else if (k == 0x15) { for (int i = 0; i < EDVIS - 1; i++) move_vert(0); }  /* PgUp / wheel up   */
+        else if (k == 0x16) { for (int i = 0; i < EDVIS - 1; i++) move_vert(1); }  /* PgDn / wheel down */
         else if (k == 0x01) { while (cur > 0 && doc[cur-1] != '\n') cur--; }    /* Home: line start */
         else if (k == 0x05) { while (cur < dlen && doc[cur] != '\n') cur++; }   /* End:  line end   */
         else if (k == '\t') {                             /* Tab: spaces to the next 4-col stop */
