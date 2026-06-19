@@ -3458,6 +3458,28 @@ static void make_search_url(char *url) {
     copy_url(url, q);
 }
 
+/* Middle-click paste (WM passes the clipboard text): into the focused <input>
+ * field if one is focused, otherwise into the address bar (entering edit mode,
+ * appending to what's there). Control chars / newlines are dropped — URLs and
+ * field values are single-line. */
+void browser_paste(browser_t *b, const char *s, int n) {
+    if (!b || n <= 0) return;
+    if (b->focus_id[0]) {                               /* append to the focused field */
+        const char *cur = in_get(b, b->focus_id);
+        char t[96]; int k = 0;
+        if (cur) while (cur[k] && k < 94) { t[k] = cur[k]; k++; }
+        for (int i = 0; i < n && k < 94; i++) if (s[i] >= 32 && s[i] < 127) t[k++] = s[i];
+        t[k] = 0; in_set(b, b->focus_id, t);
+        if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen);
+    } else {                                            /* paste into the address bar */
+        if (!b->editing) { b->editing = 1; b->url[0] = 0; }  /* a fresh paste replaces the bar */
+        b->edit_fresh = 0;
+        int len = (int)strlen(b->url);
+        for (int i = 0; i < n && len < URL_MAX - 1; i++) if (s[i] >= 32 && s[i] < 127) b->url[len++] = s[i];
+        b->url[len] = 0;
+    }
+}
+
 void browser_key(browser_t *b, int c) {
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
         if (c == '\n' || c == '\r' || c == 27) {

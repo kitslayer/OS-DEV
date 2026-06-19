@@ -882,6 +882,12 @@ void desktop_run(void) {
                 if (w->kind == KIND_APP && w->app) {
                     uint32_t *cb; int gw, gh;
                     if (!app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) { app_paste((app_t *)w->app); dirty = 1; }
+                } else if (w->kind == KIND_BROWSER && w->app) {
+                    char cbuf[512]; int n = clip_get(cbuf, sizeof cbuf);
+                    browser_t *bp = (browser_t *)w->app;
+                    raise_window(i);                     /* focus it so Enter submits after the paste */
+                    if (n > 0) browser_paste(bp, cbuf, n);
+                    dirty = 1;
                 }
                 break;
             }

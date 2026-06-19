@@ -1,5 +1,14 @@
 # What's next
 
+> **(M761) Clipboard paste into the browser (cross-app copy/paste).** Completes M760's clipboard across app
+> types: middle-clicking a browser window pastes the clipboard into the focused `<input>` field, or (none
+> focused) into the address bar — entering edit mode, replacing its contents on a fresh paste — and raises
+> the window so Enter submits. New `browser_paste(b, s, n)` (drops control chars / newlines, single-line);
+> the WM reads the clipboard (`clip_get`) and hands the text to it, so browser.c needs no app.h. `make check`
+> 29/29. Verified in-guest: `echo example.com` → drag-select in the shell → middle-click the browser → the
+> address bar reads "example.com", ready for Enter. Still future: selecting text *in* the browser (needs a
+> per-token x array for hit-testing) to copy from pages.
+
 > **(M760) System clipboard — terminal text selection + middle-click paste.** The OS had no clipboard and
 > no way to select text. Now: left-drag in a terminal selects a linear, line-spanning range (highlighted
 > white-on-blue, extracted from the scrollback/live grid exactly as drawn, trailing spaces trimmed per line)

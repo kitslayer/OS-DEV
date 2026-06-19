@@ -34,6 +34,8 @@ void browser_render(browser_t *b, int x, int y, int w, int h);
 
 /* Deliver a keystroke (address-bar editing, or scroll keys when browsing). */
 void browser_key(browser_t *b, int c);
+/* Middle-click paste: clipboard text into the focused field or the address bar. */
+void browser_paste(browser_t *b, const char *s, int n);
 
 /* A click inside the window body, relative to its top-left. Returns 1 if the
  * browser consumed it (so the WM knows to repaint). */
