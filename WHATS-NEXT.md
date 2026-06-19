@@ -1,5 +1,13 @@
 # What's next
 
+> **(M762) Shell — arithmetic expansion `$((expr))`.** Builds on the M756 env vars to make the shell
+> scriptable: `$((...))` evaluates an integer expression and substitutes the result, anywhere on a line
+> (expanded alongside `$NAME`, before glob/pipe/redirect). A small recursive-descent evaluator (in
+> shell.c) handles `+ - * / %`, unary minus, parentheses, decimal/`0x` literals, and variable names (bare
+> or `$`-prefixed, via the same `vget`); integer-only like the rest of the OS, with `/0` and `%0` → 0.
+> App-only; `make check` 29/29. Verified in-guest: `$((2+3))`→5, `$((10*4-2))`→38 (precedence),
+> `$(((2+3)*4))`→20 (parens), `set X=7; $((X*X))`→49 (variables), `$((100/7))`→14 (integer division).
+
 > **(M761) Clipboard paste into the browser (cross-app copy/paste).** Completes M760's clipboard across app
 > types: middle-clicking a browser window pastes the clipboard into the focused `<input>` field, or (none
 > focused) into the address bar — entering edit mode, replacing its contents on a fresh paste — and raises

@@ -151,13 +151,70 @@ static void vunset(const char *n){
     for (int i=0;i<g_nvars;i++){ int j=0; while(j<nl && g_vars[i].name[j]==n[j]) j++;
         if (j==nl && g_vars[i].name[j]==0){ g_vars[i]=g_vars[--g_nvars]; return; } }
 }
-/* Expand $NAME / ${NAME} in src into dst; returns 1 if a '$' appeared (dst is then the result). */
+/* --- integer arithmetic for $((expr)): recursive descent over + - * / % and
+ * parens, integers (decimal or 0x hex), and variable names (bare or $-prefixed,
+ * looked up via vget). Integer-only, like the rest of the OS; /0 and %0 give 0. */
+static long str2long(const char *s){
+    long sign=1; while(*s==' ')s++; if(*s=='-'){sign=-1;s++;}
+    long v=0;
+    if(s[0]=='0'&&(s[1]=='x'||s[1]=='X')){ s+=2; for(;;){int d;char c=*s;
+        if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; v=v*16+d; s++; } }
+    else while(*s>='0'&&*s<='9'){ v=v*10+(*s-'0'); s++; }
+    return sign*v;
+}
+static void askip(const char **p){ while(**p==' '||**p=='\t') (*p)++; }
+static long aexpr(const char **p);
+static long afactor(const char **p){
+    askip(p);
+    if(**p=='-'){ (*p)++; return -afactor(p); }
+    if(**p=='+'){ (*p)++; return  afactor(p); }
+    if(**p=='('){ (*p)++; long v=aexpr(p); askip(p); if(**p==')')(*p)++; return v; }
+    if(**p=='$') (*p)++;                              /* allow $X inside arithmetic */
+    if(**p>='0'&&**p<='9'){ const char *s=*p; long v;
+        if(s[0]=='0'&&(s[1]=='x'||s[1]=='X')){ v=0; s+=2; for(;;){int d;char c=*s;
+            if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; v=v*16+d; s++; } }
+        else { v=0; while(*s>='0'&&*s<='9'){ v=v*10+(*s-'0'); s++; } }
+        *p=s; return v; }
+    if(vchar(**p)){ const char *s=*p; int nl=0; while(vchar(s[nl]))nl++;   /* identifier -> variable */
+        const char *val=vget(s,nl); *p=s+nl; return val?str2long(val):0; }
+    return 0;
+}
+static long aterm(const char **p){
+    long v=afactor(p);
+    for(;;){ askip(p); char c=**p;
+        if(c=='*'){ (*p)++; v*=afactor(p); }
+        else if(c=='/'){ (*p)++; long d=afactor(p); v = d? v/d : 0; }
+        else if(c=='%'){ (*p)++; long d=afactor(p); v = d? v%d : 0; }
+        else break; }
+    return v;
+}
+static long aexpr(const char **p){
+    long v=aterm(p);
+    for(;;){ askip(p); char c=**p;
+        if(c=='+'){ (*p)++; v+=aterm(p); }
+        else if(c=='-'){ (*p)++; v-=aterm(p); }
+        else break; }
+    return v;
+}
+
+/* Expand $NAME / ${NAME} and $((expr)) in src into dst; returns 1 if a '$'
+ * appeared (dst is then the result). */
 static int expand_vars(const char *src, char *dst, int cap){
     int has=0; for (int i=0;src[i];i++) if (src[i]=='$'){ has=1; break; }
     if (!has) return 0;
     int o=0;
     for (int i=0; src[i] && o<cap-1; ){
-        if (src[i]=='$'){
+        if (src[i]=='$' && src[i+1]=='(' && src[i+2]=='('){        /* $((expr)) arithmetic */
+            const char *q = src + i + 3;
+            long val = aexpr(&q);
+            askip(&q); if (*q==')') q++; if (*q==')') q++;          /* consume the closing )) */
+            char tmp[24]; int ti=0; int neg = val<0;
+            unsigned long uv = neg ? (unsigned long)(-val) : (unsigned long)val;
+            if (uv==0) tmp[ti++]='0'; while(uv){ tmp[ti++]=(char)('0'+uv%10); uv/=10; }
+            if (neg) tmp[ti++]='-';
+            while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
+            i = (int)(q - src);
+        } else if (src[i]=='$'){                                    /* $NAME / ${NAME} */
             int br=(src[i+1]=='{'); int s=i+1+br, e=s; while (src[e] && vchar(src[e])) e++;
             const char *v=(e>s)?vget(src+s,e-s):0;
             if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
@@ -182,7 +239,7 @@ static int run_command(char *line, char *cwd) {
             print("        todo[ add T|done N|clear] mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)\n");
-            print("        set NAME=val (variables) $NAME / ${NAME}   unset NAME   env\n");
+            print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
             const char *p = line + (line[1]=='x' ? 7 : 4); while (*p == ' ') p++;   /* skip "set "/"export " */
             int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
