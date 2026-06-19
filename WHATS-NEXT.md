@@ -1,5 +1,11 @@
 # What's next
 
+> **(M778) Editor — line-of-total in the status bar.** The status line now shows `L<current>/<total> C<col>`
+> (total = logical line count) instead of bare `line:col`, so you can see your position in a long file —
+> pairing with the M771 PgUp/PgDn paging. Safe display-only change (no effect on the wrap/scroll/cursor
+> model; a per-line gutter would have needed reworking the grid-auto-wrap path, deferred). `make check` 30/30.
+> Verified in-guest: README.TXT shows `L3/3 C1`.
+
 > **(M777) Host-test the shell `$((expr))` evaluator.** Extracted the M762 arithmetic evaluator out of
 > shell.c into a shared header `user/shmath.h` (the verbatim-extraction pattern, like cssprop/url/shgrep): a
 > pure recursive-descent integer evaluator whose only shell dependency is the `sh_var()` variable-lookup

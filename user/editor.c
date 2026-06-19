@@ -85,15 +85,18 @@ static void render(const char *msg) {
     int ln = 1, lst = 0;
     for (int i = 0; i < cur && i < dlen; i++) if (doc[i] == '\n') { ln++; lst = i + 1; }
     int cl = (cur - lst) + 1;
+    int total = 1; for (int i = 0; i < dlen; i++) if (doc[i] == '\n') total++;   /* line count */
     char st[96]; int p = 0;
     const char *a = "EDIT "; while (*a) st[p++] = *a++;
     for (int i = 0; fname[i] && p < 30; i++) st[p++] = fname[i];
     a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC=save&quit  "; while (*a) st[p++] = *a++;
     char nb[12]; itoa_i(dlen, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];
-    a = "b  "; while (*a) st[p++] = *a++;
-    itoa_i(ln, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* line */
-    st[p++] = ':';
-    itoa_i(cl, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* col */
+    a = "b  L"; while (*a) st[p++] = *a++;
+    itoa_i(ln, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* current line */
+    st[p++] = '/';
+    itoa_i(total, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i]; /* of total lines */
+    a = " C"; while (*a) st[p++] = *a++;
+    itoa_i(cl, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* column */
     st[p] = 0;
     sys_setcolor(4); print(st); print("\n"); sys_setcolor(0);   /* status line: cyan */
 
