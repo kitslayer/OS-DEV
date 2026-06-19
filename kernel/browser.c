@@ -522,10 +522,26 @@ static int parse_style_vspace(const char *s, int n) {
 /* Left indent a block contributes (margin-left + padding-left), in px, so indented
  * content (nested sections, quoted blocks) renders shifted right. Hooks the same
  * curindent mechanism <blockquote> uses; the shorthand's left value isn't decoded. */
+/* The left value of a 1-4 token `margin`/`padding` shorthand: 4 tokens -> 4th
+ * (top right bottom left), 2 or 3 -> 2nd (the horizontal value), 1 -> 1st (all sides). */
+static int shorthand_left(const char *v, int vl) {
+    int st[4], n = 0, i = 0;
+    while (i < vl && n < 4) {
+        while (i < vl && (v[i] == ' ' || v[i] == '\t')) i++;
+        if (i >= vl) break;
+        st[n++] = i;
+        while (i < vl && v[i] != ' ' && v[i] != '\t') i++;
+    }
+    if (n < 1) return 0;
+    int li = (n >= 4) ? 3 : (n >= 2) ? 1 : 0;
+    return parse_px_val(v + st[li], vl - st[li]);
+}
 static int parse_style_hspace(const char *s, int n) {
     int m = 0, vs, ve;
     if (style_prop(s, n, "margin-left", 11, &vs, &ve))  m += parse_px_val(s + vs, ve - vs);
+    else if (style_prop(s, n, "margin", 6, &vs, &ve))   m += shorthand_left(s + vs, ve - vs);   /* `margin: V H` etc. */
     if (style_prop(s, n, "padding-left", 12, &vs, &ve)) m += parse_px_val(s + vs, ve - vs);
+    else if (style_prop(s, n, "padding", 7, &vs, &ve))  m += shorthand_left(s + vs, ve - vs);
     return m > 200 ? 200 : m;
 }
 /* returns 1 if the element should be hidden: display:none OR visibility:hidden.

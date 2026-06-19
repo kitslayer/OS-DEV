@@ -1,5 +1,12 @@
 # What's next
 
+> **(M753) Browser — `margin`/`padding` shorthand horizontal value.** The shorthand only contributed its top
+> value (vertical) before; `parse_style_hspace` now decodes the shorthand's left value too (4 tokens → 4th,
+> 2–3 → 2nd, 1 → all sides), so the ubiquitous `margin: V H` form (and `margin: Npx` all-sides) indents the
+> block. Parse-only, golden-safe. `MARGIN.HTM` gains a `margin:6px 60px` example. `make check` 29/29; verified
+> in-guest (a `margin:40px` div is now indented, and `margin:6px 60px` indents 60px). The browser's CSS
+> box-model spacing — margin + padding, both axes, inline + `<style>` rules + shorthands — is comprehensive.
+
 > **(M752) Browser — CSS horizontal indent from `<style>` rules.** Mirroring M749, `capture_css`/`css_match`
 > now carry a per-rule left indent (`css_indent[]`), so `margin-left`/`padding-left` from a stylesheet class
 > (e.g. `.ind{margin-left:40px}`) indents the matched blocks — inline `style=` still overriding. With
