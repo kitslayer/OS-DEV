@@ -509,11 +509,15 @@ static int parse_px_val(const char *v, int vl) {
     if (ul >= 2 && (u[0]|32)=='e' && (u[1]|32)=='m') num *= 16;          /* em -> ~16px */
     return num > 120 ? 120 : num;                                        /* cap */
 }
-static int parse_style_margin_v(const char *s, int n) {
-    int vs, ve;
-    if (style_prop(s, n, "margin-top", 10, &vs, &ve)) return parse_px_val(s + vs, ve - vs);
-    if (style_prop(s, n, "margin", 6, &vs, &ve))      return parse_px_val(s + vs, ve - vs);  /* shorthand: 1st value = top */
-    return 0;
+/* Total top vertical space a block contributes in this box-model-less renderer:
+ * margin-top + padding-top (or the `margin`/`padding` shorthands' top value). px/em. */
+static int parse_style_vspace(const char *s, int n) {
+    int m = 0, vs, ve;
+    if (style_prop(s, n, "margin-top", 10, &vs, &ve))  m += parse_px_val(s + vs, ve - vs);
+    else if (style_prop(s, n, "margin", 6, &vs, &ve))  m += parse_px_val(s + vs, ve - vs);   /* shorthand: 1st value = top */
+    if (style_prop(s, n, "padding-top", 11, &vs, &ve)) m += parse_px_val(s + vs, ve - vs);
+    else if (style_prop(s, n, "padding", 7, &vs, &ve)) m += parse_px_val(s + vs, ve - vs);   /* padding adds inner top space too */
+    return m > 200 ? 200 : m;
 }
 /* returns 1 if the element should be hidden: display:none OR visibility:hidden.
  * (In this box-model-less renderer visibility:hidden can't preserve the element's
@@ -579,7 +583,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
-            int imv = parse_style_margin_v(st, stl); if (imv) b->pending_vmargin = (uint16_t)imv;  /* CSS vertical margin -> block spacing */
+            int imv = parse_style_vspace(st, stl); if (imv) b->pending_vmargin = (uint16_t)imv;  /* CSS vertical margin+padding -> block spacing */
         }
         if (has_attr(attrs, attrlen, "hidden")) hide = 1;   /* the HTML5 `hidden` attribute */
         if (tageq(tag, "big")) { if (!fs) fs = 2; }         /* <big> -> 2x */
@@ -1300,7 +1304,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int alv = parse_style_align(s + ds, de - ds);
         int szv = parse_style_fontsize(s + ds, de - ds);
         int dnv = parse_style_display(s + ds, de - ds);
-        int mgv = parse_style_margin_v(s + ds, de - ds);
+        int mgv = parse_style_vspace(s + ds, de - ds);
         if (!(col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv || mgv)) continue;   /* nothing we render */
         /* a selector list "a, b, c" -> one rule per simple sub-selector that parses */
         int p = ss;

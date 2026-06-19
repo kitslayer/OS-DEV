@@ -1,5 +1,12 @@
 # What's next
 
+> **(M750) Browser — CSS vertical padding (rounds out the box-model spacing).** Extended the M748/M749 path:
+> a block's top space now sums `margin-top` + `padding-top` (or the `margin`/`padding` shorthands' top value),
+> so the very common `padding`-spaced containers render with their intended room. Renamed
+> `parse_style_margin_v` → `parse_style_vspace`; same inline + `<style>`-rule cascade and golden-safety.
+> `MARGIN.HTM` gains a padding example. `make check` 29/29; verified in-guest (`padding-top:45px` shows the
+> gap). Browser vertical box-model spacing now covers margin + padding, inline and from stylesheets.
+
 > **(M749) Browser — CSS margins from `<style>` rules (not just inline).** Extended M748: `capture_css` +
 > `css_match` now carry a per-rule vertical margin (`css_margin[]`), so `margin-top` / the `margin` shorthand
 > from a `<style>` block (tag / `.class` / `#id` / `[attr]` selectors) spaces block elements — with an inline
