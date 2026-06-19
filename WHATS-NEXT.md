@@ -1,5 +1,13 @@
 # What's next
 
+> **(M747) JS engine — `globalThis` / `self`.** Modern JS and UMD-style libraries lean on the universal
+> global object (`typeof globalThis`, `globalThis.X`, `self.X`); both were `undefined`, so that code broke.
+> Built a global object at the end of `install_globals` that exposes every global defined above as a property
+> (Math, JSON, Object, Array, String, the timer functions, console, document, fetch, window/location when in
+> a page, …), with `self === globalThis` and `globalThis.globalThis === globalThis`. window/location are
+> browser-only so they're skipped at the shell. Verified host (`globalThis.JSON.stringify`,
+> `globalThis.setTimeout`, UMD detection) + suite golden updated; `make check` 29/29 green.
+
 > **(M746) JS engine — `requestAnimationFrame`/`queueMicrotask`/`cancelAnimationFrame`.** Real pages drive
 > animation with `requestAnimationFrame` and defer work with `queueMicrotask`; both were `undefined`. Wired
 > them to the M745 deferred-callback queue (rAF/queueMicrotask enqueue like a 0-delay timer, so they fire

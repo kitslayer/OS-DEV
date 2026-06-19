@@ -3992,6 +3992,30 @@ static void install_globals(env *g) {
     { obj *e=new_obj(V_NATIVE); e->native=nat_structured_clone; env_define(g,"structuredClone",obj_val_native(e)); }   /* deep clone w/ cycle preservation (M266) */
     obj *dt=new_obj(V_NATIVE); dt->native=nat_date;     env_define(g,"Date",obj_val_native(dt));   /* Date() -> wall-clock string */
     { obj *dst=new_obj(V_OBJ); if(dst){ def_native(dst,"now",nat_date_now); def_native(dst,"parse",nat_date_parse); dt->statics=dst; } }   /* Date.now() / Date.parse() */
+
+    /* globalThis / self: the universal global object that modern JS and UMD-style
+     * libraries reference (typeof globalThis, globalThis.X, self.X). Build a plain
+     * object exposing the globals defined above as properties so globalThis.JSON,
+     * globalThis.setTimeout, etc. resolve, with self === globalThis (and
+     * globalThis.globalThis === globalThis). window/location are browser-only, so
+     * env_find returns NULL for them at the shell and they're simply skipped. */
+    { obj *gt = new_obj(V_OBJ);
+      if (gt) {
+        static const char *gn[] = {
+            "print","parseInt","parseFloat","isNaN","isFinite","Infinity",
+            "setTimeout","clearTimeout","setInterval","clearInterval",
+            "requestAnimationFrame","cancelAnimationFrame","queueMicrotask",
+            "Math","JSON","Object","Array","String","Number","Boolean","Date",
+            "Map","Set","WeakMap","WeakSet","Promise","Proxy","Reflect","Symbol","RegExp",
+            "Error","TypeError","RangeError","SyntaxError",
+            "console","document","localStorage","fetch","window","location",
+            "encodeURI","decodeURI","encodeURIComponent","decodeURIComponent","structuredClone", 0 };
+        for (int i = 0; gn[i]; i++) { val *v = env_find(g, gn[i]); if (v) obj_set(gt, gn[i], *v); }
+        val gtv = obj_val(gt);
+        obj_set(gt, "globalThis", gtv); obj_set(gt, "self", gtv);
+        env_define(g, "globalThis", gtv); env_define(g, "self", gtv);
+      }
+    }
 }
 
 /* =========================== entry point =========================== */

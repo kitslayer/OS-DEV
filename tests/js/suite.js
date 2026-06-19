@@ -417,4 +417,6 @@ print("-- generator methods + [Symbol.iterator] iterables (M676) --");
 print((function(){class C{*g(){yield 1;yield 2;}}return [...new C().g()].join(",");})(), (function(){class R{constructor(n){this.n=n;}*[Symbol.iterator](){for(let i=0;i<this.n;i++)yield i*i;}}return [...new R(4)].join(",");})(), (function(){var s=0;class R{*[Symbol.iterator](){yield 2;yield 3;}}for(var x of new R())s+=x;return s;})());  // 1,2 0,1,4,9 5 (class/obj gen methods; *[Symbol.iterator] drives spread + for-of)
 print("-- generator edge cases (M678) --");
 print((function(){function* g(){try{yield 1;yield 2;}finally{yield 9;}}return [...g()].join(",");})(), (function(){function* g(){if(true)yield 1;else yield 2;yield 3;}return [...g()].join(",");})(), (function(){function* g(){var r=yield 1;yield r===undefined;}return [...g()].join(",");})());  // 1,2,9 1,3 1,true (try/finally + conditional yield + yield-value is undefined in the eager model)
+print("-- globalThis / self (M747) --");
+print(typeof globalThis, typeof self, self===globalThis, globalThis.globalThis===globalThis, typeof globalThis.JSON, globalThis.Math.max(2,9), (typeof globalThis!=="undefined"));  // object object true true object 9 true (universal global object exposes the globals as properties)
 print("-- done --");
