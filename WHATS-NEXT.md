@@ -1,5 +1,12 @@
 # What's next
 
+> **(M749) Browser — CSS margins from `<style>` rules (not just inline).** Extended M748: `capture_css` +
+> `css_match` now carry a per-rule vertical margin (`css_margin[]`), so `margin-top` / the `margin` shorthand
+> from a `<style>` block (tag / `.class` / `#id` / `[attr]` selectors) spaces block elements — with an inline
+> `style=` margin still overriding the rule (correct cascade). This is the form real sites actually use.
+> `MARGIN.HTM` extended with a `.gap{margin-top:55px}` rule. Golden-safe (the css test pages set no margins).
+> `make check` 29/29; verified in-guest — a `<p class="gap">` shows the stylesheet-driven gap above it.
+
 > **(M748) Browser — CSS vertical margins (first box-model spacing).** The renderer was explicitly
 > "box-model-less"; now block elements honour `margin-top` and the `margin` shorthand's top value (px/em,
 > capped at 120). Parsed from inline `style=` into a per-tag `pending_vmargin` that `emit_break` folds onto
