@@ -27,6 +27,7 @@
 #define SB_ROWS  48          /* scrollback: ~3 screens of history */
 #define IQ_SIZE  128
 #define MAX_APPS 8
+#define HIST_N   32          /* command-history depth (up/down recall) */
 
 #define USTACK_BASE  0x50000000ull
 #define USTACK_PAGES 128             /* 512 KiB user stack — DOOM's BSP renderer recurses deeply */
@@ -63,7 +64,7 @@ struct app {
     volatile int ih, it;
     volatile int exited;
     volatile int kill;                   /* WM asked this app to close: it self-exits at its input wait */
-    char     hist[6][96];                /* recent input lines (for up/down) */
+    char     hist[HIST_N][96];           /* recent input lines (for up/down) */
     int      hist_n, hist_pos;
     volatile int gdirty;                 /* grid changed -> WM should repaint */
 };
@@ -211,7 +212,25 @@ static void grid_putc(struct app *a, char ch) {
     if (++a->cx >= APP_COLS) grid_nl(a);
 }
 
-void app_render(app_t *a, int px, int py) {
+/* Move the echo cursor over already-painted cells (no clearing), for in-line
+ * editing (left/right/home/end). Wrapping mirrors grid_putc/grid_erase. */
+static void cursor_back(struct app *a, int k) {
+    while (k-- > 0) {
+        if (a->cx > 0) a->cx--;
+        else if (a->cy > 0) { a->cy--; a->cx = APP_COLS - 1; }
+    }
+    a->gdirty = 1;
+}
+static void cursor_fwd(struct app *a, int k) {
+    while (k-- > 0)
+        if (++a->cx >= APP_COLS) { a->cx = 0; if (++a->cy >= APP_ROWS) grid_scroll(a); }
+    a->gdirty = 1;
+}
+static void emit_range(struct app *a, const char *buf, unsigned i, unsigned j) {
+    for (; i < j; i++) grid_putc(a, buf[i]);
+}
+
+void app_render(app_t *a, int px, int py, int focused) {
     /* Show a 17-row window into [scrollback ... live grid], scrolled up by view. */
     for (int r = 0; r < APP_ROWS; r++) {
         int L = (a->sb_count - a->view) + r;        /* logical row in the combined buffer */
@@ -227,6 +246,17 @@ void app_render(app_t *a, int px, int py) {
     }
     if (a->view > 0)                                /* scrolled-up indicator (top-right) */
         fb_glyph(px + (APP_COLS - 1) * font_width, py, '^', 0xFFD060, 0x0A0A0A);
+    /* Block caret on the focused window at the live cursor, when it's in view
+     * (hidden while scrolled up into the scrollback). Drawn over the cell so it
+     * tracks left/right/home/end edits, not just the end of the line. */
+    if (focused && !a->gfx) {
+        int cr = a->cy + a->view;
+        if (cr >= 0 && cr < APP_ROWS && a->cx >= 0 && a->cx < APP_COLS) {
+            char ch = a->grid[a->cy][a->cx];
+            fb_glyph(px + a->cx * font_width, py + cr * font_height,
+                     (ch && ch != ' ') ? ch : ' ', 0x0A0A0A, 0x33FF66);
+        }
+    }
 }
 
 int app_alive(app_t *a) { return a && a->used && !a->exited; }
@@ -321,7 +351,8 @@ static unsigned hist_recall(struct app *a, char *buf, unsigned max, unsigned cur
 
 int app_sys_read(char *buf, unsigned max) {
     struct app *a = cur();
-    unsigned n = 0;
+    unsigned n = 0;                                 /* line length          */
+    unsigned cur_i = 0;                             /* caret index in [0,n] */
     int cx0 = a->cx, cy0 = a->cy;                   /* where the input starts */
     a->hist_pos = a->hist_n;                        /* start just past the newest */
     while (n < max) {
@@ -331,28 +362,55 @@ int app_sys_read(char *buf, unsigned max) {
         if (c < 0) { task_block(); irq_restore(f); continue; }  /* sleep until woken (incl. by a kill request) */
         irq_restore(f);
         if (c == '\n' || c == '\r') {
+            cursor_fwd(a, (int)(n - cur_i)); cur_i = n;  /* commit from end of line */
             if (n > 0) {                            /* save this line to history */
                 int len = n < 95 ? (int)n : 95, slot;
-                if (a->hist_n < 6) slot = a->hist_n++;
-                else { for (int k = 1; k < 6; k++) memcpy(a->hist[k-1], a->hist[k], 96); slot = 5; }
+                if (a->hist_n < HIST_N) slot = a->hist_n++;
+                else { for (int k = 1; k < HIST_N; k++) memcpy(a->hist[k-1], a->hist[k], 96); slot = HIST_N - 1; }
                 for (int i = 0; i < len; i++) a->hist[slot][i] = buf[i];
                 a->hist[slot][len] = 0;
             }
             grid_putc(a, '\n'); buf[n++] = '\n'; break;
         }
-        if (c == '\b' || c == 127) {
-            if (n > 0) { n--; grid_erase(a, 1, cx0, cy0); }
+        if (c == '\b' || c == 127) {                /* backspace: delete char before caret */
+            if (cur_i > 0) {
+                for (unsigned i = cur_i; i < n; i++) buf[i-1] = buf[i];
+                n--; cur_i--;
+                cursor_back(a, 1);
+                emit_range(a, buf, cur_i, n); grid_putc(a, ' ');
+                cursor_back(a, (int)(n - cur_i) + 1);
+            }
             continue;
         }
+        if (c == 0x04) {                            /* Delete: delete char at caret */
+            if (cur_i < n) {
+                for (unsigned i = cur_i + 1; i < n; i++) buf[i-1] = buf[i];
+                n--;
+                emit_range(a, buf, cur_i, n); grid_putc(a, ' ');
+                cursor_back(a, (int)(n - cur_i) + 1);
+            }
+            continue;
+        }
+        if (c == 0x13) { if (cur_i > 0) { cursor_back(a, 1); cur_i--; } continue; }       /* left  */
+        if (c == 0x14) { if (cur_i < n) { cursor_fwd(a, 1); cur_i++; } continue; }        /* right */
+        if (c == 0x01) { if (cur_i > 0) { cursor_back(a, (int)cur_i); cur_i = 0; } continue; }      /* Home */
+        if (c == 0x05) { if (cur_i < n) { cursor_fwd(a, (int)(n - cur_i)); cur_i = n; } continue; } /* End  */
         if (c == 0x11) {                            /* up-arrow: older command */
-            if (a->hist_pos > 0) n = hist_recall(a, buf, max, n, --a->hist_pos, cx0, cy0);
+            if (a->hist_pos > 0) {
+                cursor_fwd(a, (int)(n - cur_i));
+                n = hist_recall(a, buf, max, n, --a->hist_pos, cx0, cy0); cur_i = n;
+            }
             continue;
         }
         if (c == 0x12) {                            /* down-arrow: newer command */
-            if (a->hist_pos < a->hist_n) n = hist_recall(a, buf, max, n, ++a->hist_pos, cx0, cy0);
+            if (a->hist_pos < a->hist_n) {
+                cursor_fwd(a, (int)(n - cur_i));
+                n = hist_recall(a, buf, max, n, ++a->hist_pos, cx0, cy0); cur_i = n;
+            }
             continue;
         }
         if (c == '\t') {                            /* Tab: complete a filename from the cwd */
+            cursor_fwd(a, (int)(n - cur_i)); cur_i = n;   /* completion acts at end of line */
             int ws = (int)n; while (ws > 0 && buf[ws-1] != ' ') ws--;
             int plen = (int)n - ws, slash = 0;
             for (int i = ws; i < (int)n; i++) if (buf[i] == '/') slash = 1;
@@ -377,10 +435,16 @@ int app_sys_read(char *buf, unsigned max) {
                     }
                 }
             }
+            cur_i = n;
             continue;
         }
         if (c < 32) continue;                       /* other control keys: ignore */
-        grid_putc(a, (char)c); buf[n++] = (char)c;  /* echo */
+        if (n + 1 < max) {                          /* printable: insert at the caret */
+            for (unsigned i = n; i > cur_i; i--) buf[i] = buf[i-1];
+            buf[cur_i] = (char)c; n++;
+            emit_range(a, buf, cur_i, n); cur_i++;
+            cursor_back(a, (int)(n - cur_i));       /* park caret just after the new char */
+        }
     }
     return (int)n;
 }

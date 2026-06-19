@@ -1,5 +1,15 @@
 # What's next
 
+> **(M757) Terminal — real line editor + visible caret.** The kernel's cooked-input read (`app_sys_read`)
+> only ever appended/backspaced at the end of the line, and the terminal drew no caret at all. Now: a green
+> block caret on the focused terminal at the live cursor (threaded `focused` through `draw_window` →
+> `draw_content` → `app_render`); left/right arrows move the caret within the line; Home/End jump to the
+> ends; Delete removes the char at the caret and Backspace the one before it — both work mid-line, repainting
+> the tail; printable keys insert at the caret. New keycodes: Home→0x01, End→0x05, Delete→0x04 (keyboard.c).
+> Command history deepened 6 → 32 entries. Benefits every `readline` caller (shell, calc, editor, adv).
+> Kernel-side (keyboard.c / app.c / desktop.c / app.h); `make check` 29/29. Verified in-guest: typed `echo
+> Hllo`, ←←← then `e` → `echo Hello` → "Hello"; `echo XOK` → del 'X' → "OK"; Home+Delete; up-arrow recall.
+
 > **(M756) Shell — environment variables.** `set NAME=value` (or `export NAME=value`) stores a variable;
 > `$NAME` / `${NAME}` expand in any command line (before glob/pipe/redirect); `unset NAME` removes one;
 > `set`/`env` list them. They persist for the shell process's lifetime. A real scripting power-feature the

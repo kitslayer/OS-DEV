@@ -23,7 +23,7 @@ int    app_reap(app_t *a);                       /* free a self-exited app's tas
 void   app_request_kill(app_t *a);               /* ask a running app to close (it self-exits) */
 int    app_dirty_clear(app_t *a);                /* 1 if the grid changed (WM poll) */
 int    app_sys_pollkey(void);                    /* non-blocking key for the caller */
-void   app_render(app_t *a, int px, int py);   /* draw the app's text grid    */
+void   app_render(app_t *a, int px, int py, int focused); /* draw text grid (+caret if focused) */
 void   app_key(app_t *a, char c);              /* deliver one keystroke        */
 int    app_cols(void);
 int    app_rows(void);

@@ -123,6 +123,9 @@ static void keyboard_handler(struct registers *r) {
             case 0x4D: c = 0x14; break;   /* right     */
             case 0x49: c = 0x15; break;   /* page up   */
             case 0x51: c = 0x16; break;   /* page down */
+            case 0x47: c = 0x01; break;   /* home   -> ^A (line start) */
+            case 0x4F: c = 0x05; break;   /* end    -> ^E (line end)   */
+            case 0x53: c = 0x04; break;   /* delete -> ^D (fwd delete) */
             }
             if (c) input_push(c);
         }

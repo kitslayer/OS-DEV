@@ -200,7 +200,7 @@ static int gfx_scale(int gw, int gh) {
     return s;
 }
 
-static void draw_content(const window_t *w) {
+static void draw_content(const window_t *w, int focused) {
     int bx = w->x + 8, by = w->y + TITLEBAR_H + 8;
     switch (w->kind) {
     case KIND_WELCOME: {
@@ -248,7 +248,7 @@ static void draw_content(const window_t *w) {
                         for (int ox = 0; ox < s; ox++)
                             fb_pixel(dx + xx * s + ox, dy + yy * s + oy, px);
                 }
-        } else if (w->app) app_render((app_t *)w->app, bx - 2, by - 2);
+        } else if (w->app) app_render((app_t *)w->app, bx - 2, by - 2, focused);
         break;
     }
     case KIND_BROWSER:
@@ -347,7 +347,7 @@ static void draw_window(const window_t *w, int focused) {
 
     /* body */
     fb_fill_rect(x, y, ww, hh, w->body);
-    draw_content(w);
+    draw_content(w, focused);
 
     /* gradient title bar (brighter when focused) with a top sheen line */
     uint32_t t0 = focused ? 0x5B9BF0 : 0x646B79;
