@@ -1,5 +1,12 @@
 # What's next
 
+> **(M781) Build — `-fwrapv` for the OS-authored userspace.** The user apps compiled *without* `-fwrapv`
+> (only the kernel had it), so signed overflow was UB under `-O2` — the latent class M779's fuzz exposed in
+> the shell evaluator, and which calc's parse/power/`*` paths share. Added `-fwrapv` to `USER_CFLAGS` so all
+> OS-authored apps' signed arithmetic wraps (defined), same rationale as the kernel; ported games keep their
+> own CFLAGS. All 231 user objects rebuilt (via M780's dep tracking), `make check` 30/30, calc verified
+> in-guest (`2+3*4`=14, `0xff&0x0f`=15, `2^10`=1024).
+
 > **(M780) Build — header-dependency tracking.** The Makefile didn't track header deps, so editing a header
 > left objects stale — M779's `shmath.h` change needed a manual `touch shell.c` to take effect (a real
 > ship-the-wrong-binary hazard). Added `-MMD -MP` to the kernel + user CFLAGS (gcc drops a `.d` beside each
