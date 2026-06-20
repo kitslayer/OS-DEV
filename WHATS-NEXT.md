@@ -1,5 +1,12 @@
 # What's next
 
+> **(M786) Terminal — Ctrl-L clear screen (keep the prompt).** Completes the readline Ctrl set: Ctrl-L
+> clears the terminal but keeps the current prompt + partial input at the top (bash behaviour, better than
+> the `clear` command which drops the line). Implemented in `app_sys_read` by moving the input's grid rows
+> (`cy0..cy`) to the top and blanking the rest. `make check` 30/30. Verified in-guest: a screen full of `help`
+> + a typed `echo hello` → Ctrl-L → just `osdev:/$ echo hello` at the top → Enter runs it. The terminal now
+> has the full readline shortcut set (A/E/B/F/P/N/D/H/K/U/W/C/L) atop M782's Ctrl support.
+
 > **(M785) Editor — Ctrl-F incremental find.** With Ctrl support (M782), the editor now has search: Ctrl-F
 > opens a `find: <query>_` prompt at the bottom, you type the string (backspace edits, Esc cancels), and
 > Enter jumps the cursor to the next match after the caret (wrapping to the top, "[not found]" otherwise);

@@ -472,6 +472,18 @@ int app_sys_read(char *buf, unsigned max) {
             cursor_back(a, (int)((oldlen > n ? oldlen : n) - cur_i));
             continue;
         }
+        if (c == 0x8c) {                  /* Ctrl-L: clear the screen, keep the current line at the top */
+            int oy = cy0, span = a->cy - cy0; if (span < 0) span = 0;
+            for (int r = 0; r <= span && oy + r < APP_ROWS; r++)   /* move the prompt+input rows up */
+                for (int col = 0; col < APP_COLS; col++) {
+                    a->grid[r][col] = a->grid[oy + r][col];
+                    a->gcol[r][col] = a->gcol[oy + r][col];
+                }
+            for (int r = span + 1; r < APP_ROWS; r++)              /* blank everything below */
+                for (int col = 0; col < APP_COLS; col++) { a->grid[r][col] = ' '; a->gcol[r][col] = 0; }
+            a->cy -= oy; cy0 = 0; a->view = 0; a->gdirty = 1;
+            continue;
+        }
         if (c >= 0x80) continue;          /* any other Ctrl-combo: ignore (don't echo) */
         if (c == '\n' || c == '\r') {
             cursor_fwd(a, (int)(n - cur_i)); cur_i = n;  /* commit from end of line */
