@@ -1,5 +1,15 @@
 # What's next
 
+> **(M794) Baked-in files — build-date timestamps.** Completes the M792/M793 timestamps arc: `mkfatfs`
+> (the host tool that writes the FAT32 disk) never set the dir-entry date/time fields, so the ~115 baked
+> system files always showed dateless in `ls`/Files while only runtime-created files had dates. Now mkfatfs
+> stamps every entry's create/write/access fields (offsets 14–25) with the build date, packed in the same
+> FAT format the kernel reads. The build date comes from `SOURCE_DATE_EPOCH` when set (so reproducible
+> builds stay reproducible) else the wall-clock build time, via `gmtime`. Result: *every* file now carries a
+> date — no more dateless rows. `make check` 30/30. Verified in-guest: `ls` shows `INTER.PNG 14178
+> 2026-06-20 04:52`, `FREEDOM1.WAD 28795076 2026-06-20 04:52`, etc. for the baked files, and the Files
+> window shows `PRE.HTM (284b) 2026-06-20` likewise.
+
 > **(M793) Files app — date column.** Extends M792's timestamps to the GUI: the Files window now shows
 > `NAME  (size)  YYYY-MM-DD` for timestamped files (baked files with date 0 show name+size only, unchanged),
 > widened 330 → 380 px to fit. Same FAT-date unpack as `ls`, reading the new `vfs_dirent.date`. `make check`

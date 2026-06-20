@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define SECTOR        512
 #define TOTAL_SECTORS 131072        /* 64 MiB image (DOOM IWAD ~4 MB + Quake pak ~18 MB + demos) */
@@ -1062,6 +1063,26 @@ int main(int argc, char **argv) {
     /* Lay each file out as a chain of clusters (multi-cluster supported),
      * starting right after the root directory clusters. */
     uint32_t next_cluster = 2 + rootcl;
+
+    /* Stamp every baked file with the build date/time, packed in FAT format,
+     * so `ls` and the Files app show a date for system files too (not just
+     * runtime-created ones).  SOURCE_DATE_EPOCH is honoured for reproducible
+     * builds; otherwise the wall-clock build time is used. */
+    uint16_t fdate, ftime;
+    {
+        time_t now;
+        const char *sde = getenv("SOURCE_DATE_EPOCH");
+        if (sde && *sde) now = (time_t)strtoll(sde, NULL, 10);
+        else             now = time(NULL);
+        struct tm tmv, *tm = gmtime(&now);
+        if (tm) tmv = *tm; else memset(&tmv, 0, sizeof tmv);
+        int y = tmv.tm_year + 1900 - 1980;
+        if (y < 0) y = 0;
+        if (y > 127) y = 127;
+        fdate = (uint16_t)((y << 9) | ((tmv.tm_mon + 1) << 5) | tmv.tm_mday);
+        ftime = (uint16_t)((tmv.tm_hour << 11) | (tmv.tm_min << 5) | (tmv.tm_sec / 2));
+    }
+
     for (int i = 0; i < ne; i++) {
         uint32_t len = ent[i].len;
         uint32_t need = len ? (len + CLUSTER_BYTES - 1) / CLUSTER_BYTES : 1;
@@ -1084,6 +1105,11 @@ int main(int argc, char **argv) {
                           + (i % DIR_PER_CLUSTER) * 32;
         memcpy(de, ent[i].name83, 11);
         de[11] = 0x20;                            /* attribute: archive */
+        put16(de + 14, ftime);                    /* create time */
+        put16(de + 16, fdate);                    /* create date */
+        put16(de + 18, fdate);                    /* last access date */
+        put16(de + 22, ftime);                    /* write time */
+        put16(de + 24, fdate);                    /* write date */
         put16(de + 20, (uint16_t)(first >> 16));     /* first cluster high */
         put16(de + 26, (uint16_t)(first & 0xFFFF));  /* first cluster low */
         put32(de + 28, len);                      /* file size */
