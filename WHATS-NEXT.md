@@ -1,5 +1,16 @@
 # What's next
 
+> **(M878) Shell — `return [N]` to exit a function early (guard clauses).** The last missing core piece of
+> the M873-M877 function system. A `g_returning` flag set by the `return` builtin (`return N` sets `$?` to
+> N; bare `return` keeps the last status) is honored by every body executor — the `run_input_line` segment
+> loop, the `while`/`for` loops, and (transitively) `if` branches — so it unwinds out of nested constructs,
+> and is consumed at the function boundary in the call dispatch (so it stops the function, not the whole
+> shell). It also ends a sourced script (`source_file`), and a stray top-level `return` is cleared each
+> interactive line so it can't wedge the prompt. Verified in-guest: a guard `if [ $1 -gt 5 ]; then return 1; fi`
+> (→ `$?`=1, body after skipped), bare early `return`, and `return $i` from inside a `for` loop (stops the
+> loop AND the function with `$?`=i) all behave correctly; a top-level `return 5` just sets `$?` and the
+> shell continues. Help line added; `make check` green (33 suites); shell.c warnings 11.
+
 > **(M877) Tests — extracted the shell's `;` statement splitter into `shsplit.h` + host fuzz (33rd suite).**
 > The M876 splitter (the construct-depth-aware scan + `word_at`) was pure string logic with no safety net
 > beyond boottest + manual in-guest — exactly the gap the project notes flag. Lifted it verbatim into

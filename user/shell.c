@@ -26,6 +26,7 @@ static void itoa_simple(int v, char *out) {
  * (command-not-found, a missing file via slurp(), cd/mkdir failure, `false`)
  * set it to 1. */
 static int g_status;
+static int g_returning;     /* set by `return` (in a function/sourced script); honored by the body executors, cleared at the boundary */
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
 static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
@@ -332,6 +333,7 @@ static int run_command(char *line, char *cwd) {
               for (int z = pn; z < 9; z++) { char pname[2] = { (char)('1' + z), 0 }; vset(pname, 1, ""); }   /* clear unused params */
               { char cb[12]; itoa_simple(pn, cb); vset("#", 1, cb); }   /* $# = arg count */
               g_func_depth++; run_input_line(bc, cwd); g_func_depth--;
+              g_returning = 0;                 /* `return` unwinds only to here (the function boundary) */
               for (int s = 0; s < 11; s++) {   /* restore caller's params (revert this call's scope) */
                   char nm[2] = { pn1[s], 0 };
                   if (had[s]) vset(nm, 1, saved[s]); else vunset(nm);
@@ -360,6 +362,7 @@ static int run_command(char *line, char *cwd) {
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
             print("        name() { cmds; }   (define a function; call `name args` with $1..$9 $# $@ bound)\n");
+            print("        return [N]         (from a function: stop it now, set $? to N)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
@@ -2292,6 +2295,10 @@ static int run_command(char *line, char *cwd) {
             long n = sys_writefile(fname, p, ustrlen(p));
             if (n < 0) print("write: failed\n");
             else { print("wrote "); print(fname); print("\n"); }
+        } else if (streq(line, "return") || startswith(line, "return ")) {
+            const char *a = line + 6; while (*a == ' ') a++;   /* `return [N]`: set $? to N (bare return keeps the last status) */
+            if (*a) g_status = (int)sh_str2long(a);
+            g_returning = 1;           /* stop the enclosing function body / sourced script */
         } else if (streq(line, "exit")) {
             print("bye!\n");
             return 1;                  /* signal main()'s loop to stop */
@@ -2600,6 +2607,7 @@ static int run_for(char *line, char *cwd) {
         *we = wsave;
         int bi = 0; for (const char *b = body; *b && bi < 1023; b++) bodybuf[bi++] = *b; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;       /* fresh copy: run_input_line edits it in place */
+        if (g_returning) break;                             /* `return` inside the loop body */
         w = we;
     }
     return doexit;
@@ -2666,6 +2674,7 @@ static int run_while(char *line, char *cwd) {
         if (g_status != 0) break;                          /* COND false -> stop */
         int bi = 0; for (const char *c = body; *c && bi < 1023; c++) bodybuf[bi++] = *c; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;
+        if (g_returning) break;                            /* `return` inside the loop body */
         iters++;
     }
     return doexit;
@@ -2706,6 +2715,7 @@ static int run_input_line(char *line, char *cwd) {
             else                                rc = run_andor(seg, cwd);
             if (rc) doexit = 1;
         }
+        if (g_returning) break;        /* `return` stops the rest of this line */
         seg = more ? semi + 1 : 0;
     }
     return doexit;
@@ -2725,8 +2735,10 @@ static void source_file(const char *fn, char *cwd, int silent) {
         int more = (*nl == '\n'); if (more) *nl = 0;
         char *t = ln; while (*t == ' ' || *t == '\t') t++;
         if (*t && *t != '#') run_input_line(t, cwd);   /* skip blanks + # comments */
+        if (g_returning) break;                        /* `return` ends the sourced script */
         ln = more ? nl + 1 : 0;
     }
+    g_returning = 0;       /* consume: return unwinds only to the end of this source */
     source_depth--;
     free(txt);
 }
@@ -2761,6 +2773,7 @@ int main(void) {
 
         /* run the line: a `for` loop, or a ';'-separated list of && / || pipelines */
         if (run_input_line(line, cwd)) break;
+        g_returning = 0;     /* a bare `return` at the interactive prompt must not wedge the next line */
     }
     return 0;
 }
