@@ -1,5 +1,11 @@
 # What's next
 
+> **(M855) Shell — `sort -f` (fold case) for case-insensitive sorting.** Added `-f` to `sort` (alongside
+> `-nru`): comparisons lowercase both sides, and `-uf` dedups case-insensitively (via a small `sort_foldeq`
+> using the grep matcher's `gr_lc`). Verified in-guest on mixed-case lines: plain `sort` →
+> `Mango, Zebra, apple, banana` (byte order, uppercase first); `sort -f` → `apple, banana, Mango, Zebra`.
+> `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M854) Shell — `grep -l` lists only the filenames that match.** With `-l` (combinable, e.g. `grep -il`),
 > grep prints each file's name once if any line matches and moves on, instead of the matching lines —
 > bash's "which files contain this?" idiom. Composes with `-e` (`grep -l -e a -e b *.txt`) and `-v`, and
