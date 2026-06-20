@@ -1,5 +1,15 @@
 # What's next
 
+> **(M807) Editor — find & replace (Ctrl-R).** The editor had find (Ctrl-F) and go-to-line (Ctrl-G) but no
+> replace — a glaring gap now that text files open straight into it from the Files app (M806). Ctrl-R runs a
+> two-phase prompt (`replace:` then `with:`) and replaces every occurrence in one pass, reporting `[N
+> replaced]`. Each replacement goes through the existing `del_fwd`/`insert` so it's undoable, and the scan
+> advances past inserted text so a replacement containing the search term can't loop; variable-length
+> replacements track `dlen` correctly. `render_prompt` was generalized to take the query buffer (so the
+> `with:` phase shows the replacement, not the search term). `make check` 30/30. Verified in-guest:
+> `foo bar foo baz foo` with foo→XXX gave `XXX bar XXX baz XXX` `[3 replaced]`; `aa bb aa cc aa` with aa→Z
+> gave `Z bb Z cc Z` (14b→11b), confirming length-changing replacement.
+
 > **(M806) App launch arguments + Files opens text files in the editor.** Added a reusable launch-argument
 > mechanism: a spawned app can carry a one-shot string (e.g. a filename). `app_spawn_named_arg(name, arg)`
 > stashes a pending arg that `app_spawn` copies into the new app's struct (race-free — each app gets its own

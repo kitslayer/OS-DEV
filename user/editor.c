@@ -17,6 +17,7 @@ static int  dlen, cur, readonly;  /* readonly: file exceeded the buffer — view
 static int  sel_anchor = -1;      /* selection mark (Ctrl-B); -1 = none. Selection spans [min, max](anchor,cur) */
 static char fname[40];
 static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
+static char replq[40]; static int replacing;          /* Ctrl-R replace: replacement text + mode (1=typing search, 2=typing replacement) */
 
 /* ---- undo (Ctrl-Z) -------------------------------------------------------
  * A log of single-character edits, newest last. Each op remembers the char,
@@ -289,11 +290,31 @@ static void render(const char *msg) {
     if (msg) print(msg);
 }
 
-/* Show the doc with a "<label><query>_" prompt at the bottom (Ctrl-F / Ctrl-G). */
-static void render_prompt(const char *label) {
-    char m[64]; int p = 0; m[p++] = '\n';
-    for (const char *a = label; *a && p < 40; a++) m[p++] = *a;
-    for (int i = 0; findq[i] && p < 60; i++) m[p++] = findq[i];
+/* Replace every occurrence of findq with replq (Ctrl-R). Each edit goes through
+ * del_fwd/insert so it's undoable; returns the number replaced. */
+static int replace_all(void) {
+    int flen = 0; while (findq[flen]) flen++;
+    int rlen = 0; while (replq[rlen]) rlen++;
+    if (flen == 0 || readonly) return 0;
+    int count = 0, pos = 0;
+    while (pos <= dlen - flen) {
+        int m = 1; for (int i = 0; i < flen; i++) if (doc[pos+i] != findq[i]) { m = 0; break; }
+        if (!m) { pos++; continue; }
+        cur = pos;
+        for (int i = 0; i < flen; i++) del_fwd();
+        for (int i = 0; i < rlen; i++) insert(replq[i]);
+        undo_break();
+        pos += rlen;                 /* skip the inserted text so replq containing findq can't loop */
+        count++;
+    }
+    return count;
+}
+
+/* Show the doc with a "<label><query>_" prompt at the bottom (Ctrl-F/G/R). */
+static void render_prompt(const char *label, const char *query) {
+    char m[80]; int p = 0; m[p++] = '\n';
+    for (const char *a = label; *a && p < 50; a++) m[p++] = *a;
+    for (int i = 0; query[i] && p < 76; i++) m[p++] = query[i];
     m[p++] = '_'; m[p] = 0;
     render(m);
 }
@@ -329,8 +350,8 @@ int main(void) {
                 else render("\n[not found]");
             }
             else if (k == 27) { finding = 0; render(0); }            /* Esc: cancel find */
-            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("find: "); }
-            else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("find: "); }
+            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("find: ", findq); }
+            else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("find: ", findq); }
             continue;
         }
         if (goting) {                               /* Ctrl-G go-to-line: type a number, Enter jumps */
@@ -346,8 +367,28 @@ int main(void) {
                 render(0);
             }
             else if (k == 27) { goting = 0; render(0); }             /* Esc: cancel */
-            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("goto line: "); }
-            else if (k >= '0' && k <= '9' && fl < 8) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("goto line: "); }
+            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("goto line: ", findq); }
+            else if (k >= '0' && k <= '9' && fl < 8) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("goto line: ", findq); }
+            continue;
+        }
+        if (replacing) {                            /* Ctrl-R: phase 1 type the search, phase 2 the replacement */
+            char *q = (replacing == 1) ? findq : replq;
+            const char *lbl = (replacing == 1) ? "replace: " : "with: ";
+            int fl = 0; while (q[fl]) fl++;
+            if (k == '\n' || k == '\r') {
+                if (replacing == 1) { replacing = 2; replq[0] = 0; render_prompt("with: ", replq); }
+                else {
+                    replacing = 0;
+                    int c = replace_all();
+                    char m[40]; int p = 0; m[p++] = '\n'; m[p++] = '[';
+                    char nb[12]; itoa_i(c, nb); for (int i = 0; nb[i]; i++) m[p++] = nb[i];
+                    const char *s = " replaced]"; for (int i = 0; s[i]; i++) m[p++] = s[i]; m[p] = 0;
+                    render(m);
+                }
+            }
+            else if (k == 27) { replacing = 0; render(0); }          /* Esc: cancel */
+            else if (k == 8 || k == 127) { if (fl > 0) q[fl-1] = 0; render_prompt(lbl, q); }
+            else if (k >= 32 && k < 127 && fl < 39) { q[fl] = (char)k; q[fl+1] = 0; render_prompt(lbl, q); }
             continue;
         }
         if (k == 27) {                              /* ESC: save and quit (read-only if the file was too large) */
@@ -366,8 +407,9 @@ int main(void) {
         else if (k == 0x91) {                       /* Ctrl-Q: quit WITHOUT saving */
             render("\n[quit - changes not saved]"); sys_sleep(350); return 0;
         }
-        else if (k == 0x86) { finding = 1; render_prompt("find: "); }    /* Ctrl-F: find (keeps the last query) */
-        else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: "); }  /* Ctrl-G: go to line */
+        else if (k == 0x86) { finding = 1; render_prompt("find: ", findq); }    /* Ctrl-F: find (keeps the last query) */
+        else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: ", findq); }  /* Ctrl-G: go to line */
+        else if (k == 0x92) { replacing = 1; findq[0] = 0; render_prompt("replace: ", findq); } /* Ctrl-R: find & replace */
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
         else if (k == 0x99) redo();                       /* Ctrl-Y: redo */
         else if (k == 0x82) sel_anchor = (sel_anchor < 0) ? cur : -1;  /* Ctrl-B: set/clear selection mark */
