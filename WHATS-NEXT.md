@@ -1,5 +1,11 @@
 # What's next
 
+> **(M793) Files app — date column.** Extends M792's timestamps to the GUI: the Files window now shows
+> `NAME  (size)  YYYY-MM-DD` for timestamped files (baked files with date 0 show name+size only, unchanged),
+> widened 330 → 380 px to fit. Same FAT-date unpack as `ls`, reading the new `vfs_dirent.date`. `make check`
+> 30/30. Verified in-guest: re-created README.TXT (so it gets today's date) shows `README.TXT (3b) 2026-06-20`
+> in row 1; the other baked files show no date.
+
 > **(M792) Filesystem — file timestamps in `ls`.** The FAT32 driver never wrote the dir-entry date/time
 > fields (always 0) and `ls` showed only name+size. Now `add_entry` stamps create/write/access time from the
 > RTC (`fat_now()` packs `rtc_now()` into FAT16 date/time), `vfs_dirent` carries `date`/`time`, the list

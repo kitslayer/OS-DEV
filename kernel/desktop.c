@@ -229,7 +229,15 @@ static void draw_content(const window_t *w, int focused) {
             if (!s) num[k++]='0';
             while (s) { num[k++]='0'+s%10; s/=10; }
             while (k) line[p++]=num[--k];
-            line[p++]='b'; line[p++]=')'; line[p]=0;
+            line[p++]='b'; line[p++]=')';
+            if (e[i].date && p < 36) {                 /* last-write date (YYYY-MM-DD) for stamped files */
+                int yr=(e[i].date>>9)+1980, mo=(e[i].date>>5)&15, dy=e[i].date&31;
+                line[p++]=' ';
+                line[p++]='0'+(yr/1000)%10; line[p++]='0'+(yr/100)%10; line[p++]='0'+(yr/10)%10; line[p++]='0'+yr%10;
+                line[p++]='-'; line[p++]='0'+(mo/10)%10; line[p++]='0'+mo%10;
+                line[p++]='-'; line[p++]='0'+(dy/10)%10; line[p++]='0'+dy%10;
+            }
+            line[p]=0;
             draw_text(bx, ry, line, 0x303840);
         }
         break;
@@ -663,7 +671,7 @@ static void spawn_app(int kind, const char *prog) {
     window_t w = { 0 };
     w.x = x; w.y = y; w.kind = kind;
     switch (kind) {
-    case KIND_FILES:   w.w=330; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;
+    case KIND_FILES:   w.w=380; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;
     case KIND_WELCOME: w.w=360; w.h=206; w.body=0xF0F0F0; w.title="Welcome"; break;
     case KIND_ABOUT:   w.w=300; w.h=160; w.body=0xF4F0E8; w.title="About";   break;
     case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="Monitor"; break;
