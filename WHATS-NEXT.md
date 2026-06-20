@@ -1,5 +1,15 @@
 # What's next
 
+> **(M804) Shell — `for` loops.** Completes the scripting arc (M799 `&&`/`||`, M803 `source`) with the one
+> control-flow primitive that had no equivalent: `for VAR in WORDS; do CMDS; done` (single line). WORDS get
+> `$var` and glob expansion then split on whitespace; the body runs once per word with VAR bound. To make this
+> work both interactively and inside sourced scripts, the per-line handling was unified into one
+> `run_input_line` (used by `main` and `source`) that runs a `for` loop or else the `;`-split `&&`/`||` list —
+> so `for` nests and composes with everything (pipes, redirection, `$?`). Per-loop buffers are stack-local so
+> nested loops don't clobber each other. `make check` 30/30. Verified in-guest: `for i in 1 2 3; do echo
+> num-$i; done` → num-1/2/3; `for x in A B; do for y in 1 2; do echo $x$y; done; done` → A1/A2/B1/B2 (nested);
+> `for f in *.GZ; do echo found-$f; done` → found-HELLO.GZ (glob); and normal commands still run.
+
 > **(M803) Shell — `source` (run a script file).** The shell can now run shell commands from a file with
 > `source file` (or `. file`), turning the editor + shell into a real scripting environment. Each line goes
 > through the exact same `;` split + `&&`/`||` layer as interactive input, so scripts get the full feature set

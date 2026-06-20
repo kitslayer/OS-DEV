@@ -27,9 +27,12 @@ static void itoa_simple(int v, char *out) {
 static int g_status;
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 
-/* Forward decl: `source` (a builtin in run_command) runs each script line back
- * through the &&/|| layer. Defined far below, after run_line. */
+/* Forward decls: `source` and `for` run lines/bodies back through the executor.
+ * Defined far below, after run_line. run_input_line handles one logical line
+ * (a `for ...; do ...; done` loop, else a ';'-split list of && / || commands). */
 static int run_andor(char *seg, char *cwd);
+static int run_input_line(char *line, char *cwd);
+static int run_for(char *line, char *cwd);
 
 /* Read an entire file into a malloc'd, NUL-terminated buffer (caller free()s).
  * The read API has no size query, so grow the buffer until the read no longer
@@ -217,6 +220,7 @@ static int run_command(char *line, char *cwd) {
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
+            print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  Tab=complete  ^W/^U/^K=kill  ^C=cancel\n");
@@ -780,16 +784,7 @@ static int run_command(char *line, char *cwd) {
                         char *nl = ln; while (*nl && *nl != '\n') nl++;
                         int more = (*nl == '\n'); if (more) *nl = 0;
                         char *t = ln; while (*t == ' ' || *t == '\t') t++;
-                        if (*t && *t != '#') {                 /* skip blanks + comments */
-                            char *seg = t;
-                            while (seg) {                      /* ';' split, like the main loop */
-                                char *semi = seg; while (*semi && *semi != ';') semi++;
-                                int sm = (*semi == ';'); if (sm) *semi = 0;
-                                while (*seg == ' ') seg++;
-                                if (*seg) run_andor(seg, cwd);
-                                seg = sm ? semi + 1 : 0;
-                            }
-                        }
+                        if (*t && *t != '#') run_input_line(t, cwd);   /* skip blanks + # comments */
                         ln = more ? nl + 1 : 0;
                     }
                     source_depth--;
@@ -2032,6 +2027,67 @@ static int run_andor(char *seg, char *cwd) {
     return exitflag;
 }
 
+/* for VAR in WORDS; do BODY; done  (one line). WORDS get $var + glob expansion,
+ * then BODY runs once per word with VAR bound to it. Buffers are on the stack so
+ * nested loops don't clobber each other. */
+static int run_for(char *line, char *cwd) {
+    char *p = line + 3; while (*p == ' ') p++;             /* skip "for" */
+    char var[32]; int vi = 0;
+    while (*p && *p != ' ' && vi < 31) var[vi++] = *p++;
+    var[vi] = 0;
+    while (*p == ' ') p++;
+    if (!(p[0]=='i' && p[1]=='n' && (p[2]==' '||p[2]==0))) { print("for: syntax: for V in WORDS; do CMDS; done\n"); g_status=1; return 0; }
+    p += 2; while (*p == ' ') p++;
+    char *list = p, *semi = p; while (*semi && *semi != ';') semi++;
+    if (*semi != ';') { print("for: missing ';' before do\n"); g_status=1; return 0; }
+    *semi = 0;
+    char *q = semi + 1; while (*q == ' ') q++;
+    if (!(q[0]=='d' && q[1]=='o' && (q[2]==' '||q[2]==0))) { print("for: missing 'do'\n"); g_status=1; return 0; }
+    q += 2; while (*q == ' ') q++;
+    char *body = q;
+    int blen = (int)ustrlen(body);
+    while (blen > 0 && body[blen-1]==' ') body[--blen]=0;
+    if (!(blen >= 4 && streq(body+blen-4, "done"))) { print("for: missing 'done'\n"); g_status=1; return 0; }
+    blen -= 4; while (blen>0 && body[blen-1]==' ') blen--;   /* drop "done" + a trailing "; " */
+    if (blen>0 && body[blen-1]==';') blen--;
+    while (blen>0 && body[blen-1]==' ') blen--;
+    body[blen] = 0;
+    char elist[1024], glist[1024], bodybuf[1024];
+    char *lst = list;
+    if (expand_vars(lst, elist, sizeof elist)) lst = elist;
+    for (int i=0; lst[i]; i++) if (lst[i]=='*' || lst[i]=='?') { glob_expand(lst, glist, sizeof glist); lst = glist; break; }
+    int doexit = 0;
+    char *w = lst;
+    while (*w && !doexit) {
+        while (*w == ' ') w++;
+        if (!*w) break;
+        char *we = w; while (*we && *we != ' ') we++;
+        char wsave = *we; *we = 0;
+        vset(var, vi, w);                                   /* bind the loop variable */
+        *we = wsave;
+        int bi = 0; for (const char *b = body; *b && bi < 1023; b++) bodybuf[bi++] = *b; bodybuf[bi] = 0;
+        if (run_input_line(bodybuf, cwd)) doexit = 1;       /* fresh copy: run_input_line edits it in place */
+        w = we;
+    }
+    return doexit;
+}
+
+/* Run one logical input line: a `for` loop, else a ';'-separated list of
+ * && / || pipelines. Returns 1 if it ran the `exit` builtin. */
+static int run_input_line(char *line, char *cwd) {
+    char *t = line; while (*t == ' ') t++;
+    if (startswith(t, "for ")) return run_for(t, cwd);
+    char *seg = line; int doexit = 0;
+    while (seg && !doexit) {
+        char *semi = seg; while (*semi && *semi != ';') semi++;
+        int more = (*semi == ';'); if (more) *semi = 0;
+        while (*seg == ' ') seg++;
+        if (*seg && run_andor(seg, cwd)) doexit = 1;
+        seg = more ? semi + 1 : 0;
+    }
+    return doexit;
+}
+
 int main(void) {
     print("\n");
     print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
@@ -2059,17 +2115,8 @@ int main(void) {
         { int ne = 0; for (int i = 0; line[i]; i++) if (line[i] != ' ') { ne = 1; break; }
           if (ne) { int i = 0; for (; line[i] && i < 1023; i++) lastcmd[i] = line[i]; lastcmd[i] = 0; } }
 
-        /* split the line into ';'-separated commands and run each in turn
-         * (each handles its own globbing / redirection / pipeline). */
-        char *seg = line; int doexit = 0;
-        while (seg && !doexit) {
-            char *semi = seg; while (*semi && *semi != ';') semi++;
-            int more = (*semi == ';'); if (more) *semi = 0;
-            while (*seg == ' ') seg++;              /* trim leading space so a non-piped command still matches */
-            if (*seg && run_andor(seg, cwd)) doexit = 1;  /* skip empty segments; handles && / || within the segment */
-            seg = more ? semi + 1 : 0;
-        }
-        if (doexit) break;
+        /* run the line: a `for` loop, or a ';'-separated list of && / || pipelines */
+        if (run_input_line(line, cwd)) break;
     }
     return 0;
 }
