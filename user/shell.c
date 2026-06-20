@@ -1216,9 +1216,13 @@ static int run_command(char *line, char *cwd) {
             print("pid = ");
             print(num);
             print("\n");
+        } else if (streq(line, "echo")) {
+            print("\n");                                  /* bare echo: a blank line */
         } else if (startswith(line, "echo ")) {
-            print(line + 5);
-            print("\n");
+            const char *a = line + 5;
+            if (streq(a, "-n")) { }                       /* echo -n: print nothing, no newline */
+            else if (startswith(a, "-n ")) print(a + 3);  /* echo -n TEXT: no trailing newline (good for prompts before `read`) */
+            else { print(a); print("\n"); }
         } else if (startswith(line, "cowsay ")) {         /* the classic: a cow speaks your message */
             const char *msg = line + 7; int len = 0; while (msg[len]) len++;
             print(" "); for (int i = 0; i < len + 2; i++) print("_"); print("\n");

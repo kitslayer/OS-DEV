@@ -1,5 +1,10 @@
 # What's next
 
+> **(M827) Shell — `echo -n` and bare `echo`.** `echo` always appended a newline. Added `-n` to suppress the
+> trailing newline (`echo -n "Name: "; read x` keeps the input on the prompt line) and made bare `echo`
+> (no args) print a blank line, both standard behaviours. `make check` 30/30. Verified in-guest: `echo -n
+> name:` left the next prompt on the same line; `echo plain` still printed a newline.
+
 > **(M826) Editor — select all (Ctrl-A).** The editor had mark-based selection (Ctrl-B + move) but no
 > select-all, a standard, frequently-used shortcut. Ctrl-A now sets the mark at the start and the cursor at
 > the end, selecting the whole buffer — then Ctrl-C/Ctrl-X copy/cut everything. Listed in the Ctrl-H help.
