@@ -1,5 +1,15 @@
 # What's next
 
+> **(M900) Shell — `${#VAR}` length + `${VAR#pat}`/`${VAR%pat}` glob prefix/suffix strip.** Completes the
+> common sh parameter-expansion set (on top of M893's `${VAR:-default}`/`${VAR:+alt}`), giving inline
+> string/path manipulation without a subshell: `${#VAR}` = length, `${VAR#pat}`/`${VAR##pat}` strip the
+> shortest/longest matching **glob** prefix, `${VAR%pat}`/`${VAR%%pat}` the suffix (reusing `glob_match`).
+> So `${path##*/}` = basename, `${path%/*}` = dirname, `${f%.*}` = drop extension, `${#s}` = length — all
+> the standard idioms. Additive in `expand_vars`: plain `$NAME`/`${NAME}`/`${VAR:-…}` go through the
+> unchanged paths (no regression). Verified in-guest: `${#hello}`→5, `${f%.gz}`→`archive.tar`,
+> `${f%%.*}`→`archive`, `${p##*/}`→`bin`, `${p%/*}`→`/usr/local`, and `$x`/`${x}`/`${x:-def}`/`${y:-fb}`
+> still correct. `make check` green (35 suites); shell.c warnings 11.
+
 > **(M899) Editor — edit files up to 256 KB (was 64 KB read-only).** Completes this fire's "handle large
 > content" theme (M897/M898 render + navigate large web pages): the editor's `doc` buffer was a fixed 64 KB
 > (`MAXDOC`), so anything bigger — a downloaded/saved web page, a big log, a long script — opened read-only

@@ -306,24 +306,52 @@ static int expand_vars(const char *src, char *dst, int cap){
             const char *v = vget(src+i+1, 1);
             if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
             i += 2;
-        } else if (src[i]=='$'){                                    /* $NAME / ${NAME} / ${NAME:-word} / ${NAME:+word} */
-            int br=(src[i+1]=='{'); int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
-            const char *v=(e>s)?vget(src+s,e-s):0;
-            if (br && src[e]==':' && (src[e+1]=='-' || src[e+1]=='+')) {   /* ${VAR:-word} default / ${VAR:+word} alt (literal word) */
-                int plus=(src[e+1]=='+'), set=(v && v[0]);
-                int ws=e+2, we=ws; while (src[we] && src[we]!='}') we++;
-                const char *w=src+ws; int wl=we-ws;
-                if (plus) {
-                    if (set) { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; }     /* :+ -> word only when set */
-                } else if (set) {
-                    for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];                  /* :- -> the value when set */
+        } else if (src[i]=='$'){                                    /* $NAME / ${NAME} / ${NAME:-w} / ${NAME:+w} / ${#NAME} / ${NAME#pat} / ${NAME%pat} */
+            int br=(src[i+1]=='{');
+            if (br && src[i+2]=='#') {                              /* ${#NAME} = length of NAME; ${#} = arg count */
+                int ns=i+3, ne=ns; while (src[ne] && sh_vchar(src[ne])) ne++;
+                if (ne > ns) {
+                    const char *v=vget(src+ns, ne-ns);
+                    int len=0; if (v) while (v[len]) len++;
+                    char tmp[12]; int ti=0; if (!len) tmp[ti++]='0'; while (len) { tmp[ti++]=(char)('0'+len%10); len/=10; }
+                    while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
                 } else {
-                    for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k];                  /* :- -> word when unset/empty */
+                    const char *v=vget("#",1);
+                    if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
                 }
-                i = (src[we]=='}') ? we+1 : we;
+                i = (src[ne]=='}') ? ne+1 : ne;
             } else {
-                if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
-                i = e + ((br && src[e]=='}')?1:0);
+                int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
+                const char *v=(e>s)?vget(src+s,e-s):0;
+                if (br && src[e]==':' && (src[e+1]=='-' || src[e+1]=='+')) {   /* ${VAR:-word} default / ${VAR:+word} alt (literal word) */
+                    int plus=(src[e+1]=='+'), set=(v && v[0]);
+                    int ws=e+2, we=ws; while (src[we] && src[we]!='}') we++;
+                    const char *w=src+ws; int wl=we-ws;
+                    if (plus) { if (set) { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; } }
+                    else if (set) { for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k]; }
+                    else { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; }
+                    i = (src[we]=='}') ? we+1 : we;
+                } else if (br && (src[e]=='#' || src[e]=='%') && e>s) {   /* ${NAME#pat}/##/%/%% : strip a glob prefix/suffix */
+                    char op=src[e]; int lng=(src[e+1]==op); int ps=e+1+lng, pe=ps;
+                    while (src[pe] && src[pe]!='}') pe++;
+                    char pat[80]; int pl=0; for (int k=ps; k<pe && pl<79; k++) pat[pl++]=src[k]; pat[pl]=0;
+                    char vb[260]; int vl=0; if (v) for (int k=0; v[k] && vl<259; k++) vb[vl++]=v[k]; vb[vl]=0;
+                    int keepStart=0, keepLen=vl;
+                    if (op=='%') {                                  /* strip the shortest (%) or longest (%%) matching suffix */
+                        int best=-1;
+                        for (int sl=0; sl<=vl; sl++) if (glob_match(pat, vb+vl-sl)) { best=sl; if (!lng) break; }
+                        if (best>=0) keepLen=vl-best;
+                    } else {                                        /* strip the shortest (#) or longest (##) matching prefix */
+                        int best=-1;
+                        for (int q=0; q<=vl; q++) { char sv=vb[q]; vb[q]=0; int m=glob_match(pat, vb); vb[q]=sv; if (m) { best=q; if (!lng) break; } }
+                        if (best>=0) { keepStart=best; keepLen=vl-best; }
+                    }
+                    for (int k=0; k<keepLen && o<cap-1; k++) dst[o++]=vb[keepStart+k];
+                    i = (src[pe]=='}') ? pe+1 : pe;
+                } else {
+                    if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
+                    i = e + ((br && src[e]=='}')?1:0);
+                }
             }
         } else dst[o++]=src[i++];
     }
