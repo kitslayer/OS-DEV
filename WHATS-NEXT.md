@@ -1,5 +1,10 @@
 # What's next
 
+> **(M823) Shell — `cd -` (previous directory).** Completes the `cd` conveniences (home from M822, now
+> previous). `cd -` swaps to the directory you were in before the last `cd` and prints it (bash behaviour);
+> every successful `cd` records where it came from in a per-shell `prevcwd`. `make check` 30/30. Verified
+> in-guest: `cd dd`, `cd /`, then `cd -` returned to `/dd` (printed it; `pwd` confirmed).
+
 > **(M822) Shell — `cd` with no argument goes home.** Standard shell convenience that was missing: bare `cd`
 > (and `cd ~`) now return to the root directory, instead of erroring as an unknown command. `make check`
 > 30/30. Verified in-guest: `mkdir cdtest; cd cdtest` (prompt → `/cdtest`), then `cd` → prompt back to `/`,

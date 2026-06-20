@@ -26,6 +26,8 @@ static void itoa_simple(int v, char *out) {
  * set it to 1. */
 static int g_status;
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
+static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
+static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
 
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
@@ -1072,23 +1074,34 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "mkdir ")) {
             if (sys_mkdir(line + 6) < 0) { print("mkdir: failed (exists?)\n"); g_status = 1; }
             else { print("created "); print(line + 6); print("/\n"); }
+        } else if (streq(line, "cd -")) {                        /* swap to the previous directory */
+            if (!prevcwd[0]) { print("cd: no previous directory\n"); g_status = 1; }
+            else {
+                char tmp[128]; scpy(tmp, cwd);
+                if (sys_chdir(prevcwd) < 0) { print("cd: previous directory gone\n"); g_status = 1; }
+                else { scpy(cwd, prevcwd); scpy(prevcwd, tmp); print(cwd); print("\n"); }
+            }
         } else if (streq(line, "cd") || streq(line, "cd ~")) {   /* cd with no arg -> home (root) */
+            scpy(prevcwd, cwd);
             sys_chdir("/"); cwd[0] = '/'; cwd[1] = 0;
         } else if (startswith(line, "cd ")) {
             char *path = line + 3;
             if (sys_chdir(path) < 0) { print("cd: no such directory\n"); g_status = 1; }
-            else if (streq(path, "/")) { cwd[0] = '/'; cwd[1] = 0; }
-            else if (streq(path, "..")) {
-                int n = (int)ustrlen(cwd);
-                while (n > 1 && cwd[n-1] != '/') n--;
-                if (n <= 1) { cwd[0] = '/'; cwd[1] = 0; } else cwd[n-1] = 0;
-            } else if (path[0] == '/') {
-                int i = 0; while (path[i] && i < 126) { cwd[i] = path[i]; i++; } cwd[i] = 0;
-            } else {
-                int n = (int)ustrlen(cwd);
-                if (n > 0 && cwd[n-1] != '/' && n < 126) cwd[n++] = '/';
-                int i = 0; while (path[i] && n < 126) cwd[n++] = path[i++];
-                cwd[n] = 0;
+            else {
+                scpy(prevcwd, cwd);                              /* remember where we came from */
+                if (streq(path, "/")) { cwd[0] = '/'; cwd[1] = 0; }
+                else if (streq(path, "..")) {
+                    int n = (int)ustrlen(cwd);
+                    while (n > 1 && cwd[n-1] != '/') n--;
+                    if (n <= 1) { cwd[0] = '/'; cwd[1] = 0; } else cwd[n-1] = 0;
+                } else if (path[0] == '/') {
+                    int i = 0; while (path[i] && i < 126) { cwd[i] = path[i]; i++; } cwd[i] = 0;
+                } else {
+                    int n = (int)ustrlen(cwd);
+                    if (n > 0 && cwd[n-1] != '/' && n < 126) cwd[n++] = '/';
+                    int i = 0; while (path[i] && n < 126) cwd[n++] = path[i++];
+                    cwd[n] = 0;
+                }
             }
         } else if (streq(line, "ps")) {
             char buf[512];
