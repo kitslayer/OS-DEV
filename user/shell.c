@@ -9,6 +9,7 @@
 #include "ulib.h"
 #include "shgrep.h"   /* gr_match(): the grep regex matcher (^ $ . * [..] \), host-tested by tests/shgrep */
 #include "shmath.h"   /* sh_eval(): the $((expr)) integer evaluator, host-tested by tests/shmath */
+#include "shsplit.h"  /* sh_next_sep(): the ';' statement splitter (construct-aware), host-tested by tests/shsplit */
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
@@ -2670,16 +2671,6 @@ static int run_while(char *line, char *cwd) {
     return doexit;
 }
 
-/* Is keyword `kw` a whole word at p? (the caller has already established that p is
- * at a command position.) Lets the ';'-splitter keep `if…fi` / `while…done` /
- * `for…done` constructs intact so they can follow a ';' or live in a function body. */
-static int word_at(const char *p, const char *kw) {
-    int i = 0; while (kw[i] && p[i] == kw[i]) i++;
-    if (kw[i]) return 0;
-    char a = p[i];
-    return a == 0 || a == ' ' || a == ';';
-}
-
 /* Run one logical input line: a ';'-separated list, where each item may be a
  * `for`/`while`/`if` construct or a && / || pipeline. The splitter tracks
  * control-construct nesting so a construct's internal ';'s aren't break points.
@@ -2704,23 +2695,7 @@ static int run_input_line(char *line, char *cwd) {
       } }
     char *seg = line; int doexit = 0;
     while (seg && !doexit) {
-        /* find the next top-level ';': skip $( ... ) / $(( ... )), and stay inside
-         * if…fi / while…done / for…done (cd tracks construct depth; atcmd marks a
-         * command position, where a leading keyword opens/closes a construct). */
-        char *semi = seg; int pd = 0, cd = 0, atcmd = 1;
-        while (*semi) {
-            if (semi[0] == '$' && semi[1] == '(') { pd++; semi += 2; atcmd = 0; continue; }
-            if (pd > 0) { if (*semi == '(') pd++; else if (*semi == ')') pd--; semi++; continue; }
-            if (*semi == ';') { if (cd == 0) break; semi++; atcmd = 1; continue; }
-            if (*semi == ' ') { semi++; continue; }
-            if (atcmd) {
-                if (word_at(semi, "if") || word_at(semi, "for") || word_at(semi, "while")) cd++;
-                else if ((word_at(semi, "fi") || word_at(semi, "done")) && cd > 0) cd--;
-            }
-            int nextcmd = word_at(semi, "then") || word_at(semi, "do") || word_at(semi, "else");
-            while (*semi && *semi != ' ' && *semi != ';') semi++;   /* skip this whole token */
-            atcmd = nextcmd;
-        }
+        char *semi = seg + sh_next_sep(seg);   /* next top-level ';' (skips $() and stays inside if…fi/while…done/for…done) */
         int more = (*semi == ';'); if (more) *semi = 0;
         while (*seg == ' ') seg++;
         if (*seg) {

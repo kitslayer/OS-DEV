@@ -1,5 +1,16 @@
 # What's next
 
+> **(M877) Tests — extracted the shell's `;` statement splitter into `shsplit.h` + host fuzz (33rd suite).**
+> The M876 splitter (the construct-depth-aware scan + `word_at`) was pure string logic with no safety net
+> beyond boottest + manual in-guest — exactly the gap the project notes flag. Lifted it verbatim into
+> `user/shsplit.h` as `sh_next_sep(seg)` (returns the offset of the next top-level `;`, or of the `\0`),
+> shrinking `run_input_line`'s loop to a one-line call. Added `tests/shsplit/` (ASan+UBSan): 24 segmentation
+> regressions (`;` lists, `$()`/`$(())` protecting inner `;`, nested `if`/`while`/`for`…`fi`/`done`, and
+> keyword-in-argument-position guards like `echo fi` / `ifconfig` that must NOT open a construct) + a 400k
+> random-char fuzz asserting `sh_next_sep` always returns an in-range offset pointing at `;` or `\0` and
+> that full segmentation terminates. Behaviour verified unchanged in-guest (recursion + mid-line for-loop).
+> Follows the shgrep/shmath extraction pattern; `make check` now 33 suites, shell.c warnings 11.
+
 > **(M876) Shell — functions get local positional-param scope + control constructs work after `;` / in
 > function bodies.** Two parser fixes that, with M875, make recursive and looping functions actually work.
 > (1) *Scope*: a function call now saves the caller's `$1`..`$9`/`$@`/`$#` before binding its own and
