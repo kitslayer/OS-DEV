@@ -1,5 +1,11 @@
 # What's next
 
+> **(M825) Browser — home-page shortcut hint.** Now that the browser has a `?` key reference (M821) and
+> Ctrl-F find (M820), the start page advertises them: a line under the title reads "Press ? (or Ctrl-F to
+> find) for keyboard shortcuts." so users discover the controls instead of having to guess the vim-style
+> keys. One line added to `build_home`. `make check` 30/30. Verified in-guest: the home page renders the hint
+> under the OS-DEV Browser heading.
+
 > **(M824) Editor — unsaved-changes indicator.** Standard editor cue that was missing: a `*` now appears
 > before the filename in the status (`EDIT *mod.txt`) whenever the buffer has been modified since the last
 > save, so you can tell at a glance whether you need to save. The `dirty` flag is set by every buffer

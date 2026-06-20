@@ -2287,6 +2287,7 @@ static void build_home(browser_t *b) {
          "<style> h1 { color: #2C66D6 }  dd { color: #555555 }  "
          ".new { color: #006400; font-weight: bold } </style></head><body>"
          "<h1>OS-DEV Browser</h1>"
+         "<p>Press <b>?</b> (or Ctrl-F to find) for keyboard shortcuts.</p>"
          "<p class=\"new\">This very page is rendered + styled by the from-scratch HTML/CSS engine. "
          "The OS runs <b>id Software's DOOM and Quake</b> as windowed apps (with sound), plus thirty-odd "
          "more &mdash; a piano, a music jukebox, a maze, a Mandelbrot explorer, an ASCII paint, a text "
