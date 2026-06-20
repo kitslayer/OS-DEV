@@ -1,5 +1,12 @@
 # What's next
 
+> **(M861) Shell — `cut` accepts non-contiguous field/char lists (`-f1,3`).** `cut` only did one contiguous
+> range, so `cut -d, -f1,3` (common for CSV column picking) wasn't possible. The spec now parses a comma list
+> of `N`/`N-M` ranges into arrays (a `cut_sel` helper tests membership), and the field separator is emitted
+> *before each selected field after the first* (an `out_any` flag) — which joins non-adjacent fields with the
+> delimiter and preserves empty selected fields. Verified in-guest on `a,b,c,d`: `-f1,3` → `a,c`, `-f1` →
+> `a`, `-f2-4` → `b,c,d` (single + range unchanged). `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M860) Shell — `<` input redirect.** `wc -l < FILE` printed a confusing `wc: no such file: <` (the `<`
 > and file were passed as literal args). Since these commands read a file argument, `cmd … < file` is now
 > rewritten to `cmd … file` (the rewrite is never longer than the original, so it edits the line in place);

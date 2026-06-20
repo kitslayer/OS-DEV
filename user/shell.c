@@ -91,6 +91,11 @@ static int tr_expand(const char **pp, char *out, int max) {
     *pp = s;
     return o;
 }
+/* `cut` field/char selection: is position n in any of the nr ranges? (oe[i] = open-ended) */
+static int cut_sel(int n, const int *rf, const int *rt, const int *oe, int nr) {
+    for (int i = 0; i < nr; i++) if (n >= rf[i] && (oe[i] || n <= rt[i])) return 1;
+    return 0;
+}
 
 /* (the grep regex matcher gr_match() now lives in shgrep.h, #included above) */
 static int b64v(char c) {                 /* base64 digit -> value, or -1 */
@@ -591,42 +596,45 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (startswith(line, "cut ")) {            /* cut -cN[-M] FILE (char range) | cut -fN[-M] [-dX] FILE (delimited fields, default tab) */
             const char *p = line + 4;
-            int mode = 0, from = 0, to = 0, openend = 0; char delim = '\t';
+            int mode = 0, nr = 0; int rfrom[8], rto[8], roe[8]; char delim = '\t';
             while (1) {                                    /* parse leading -c/-f/-d flags, any order */
                 while (*p == ' ') p++;
                 if (*p != '-') break;
                 char fl = p[1]; p += 2;
-                if (fl == 'c' || fl == 'f') {
-                    mode = fl; from = 0; to = 0; openend = 0;
-                    while (*p >= '0' && *p <= '9') { if (from < 100000000) from = from * 10 + (*p - '0'); p++; }   /* cap: no int overflow on absurd N */
-                    if (*p == '-') { p++; if (*p >= '0' && *p <= '9') { while (*p >= '0' && *p <= '9') { if (to < 100000000) to = to * 10 + (*p - '0'); p++; } } else openend = 1; }
-                    else to = from;                        /* -cN / -fN alone = just that column/field */
+                if (fl == 'c' || fl == 'f') {              /* -cLIST / -fLIST : comma list of N or N-M ranges (e.g. 1,3-5) */
+                    mode = fl; nr = 0;
+                    for (;;) {
+                        int rf = 0, rt = 0, oe = 0;
+                        while (*p >= '0' && *p <= '9') { if (rf < 100000000) rf = rf * 10 + (*p - '0'); p++; }   /* cap: no int overflow on absurd N */
+                        if (*p == '-') { p++; if (*p >= '0' && *p <= '9') { while (*p >= '0' && *p <= '9') { if (rt < 100000000) rt = rt * 10 + (*p - '0'); p++; } } else oe = 1; }
+                        else rt = rf;                      /* N alone = just that column/field */
+                        if (rf < 1) rf = 1;
+                        if (nr < 8) { rfrom[nr] = rf; rto[nr] = rt; roe[nr] = oe; nr++; }
+                        if (*p == ',') p++; else break;    /* another range in the list? */
+                    }
                 } else if (fl == 'd') { if (*p) delim = *p++; }   /* single-char field delimiter */
                 else break;                                /* unknown flag */
             }
             while (*p == ' ') p++;
-            if (from < 1) from = 1;
-            if (mode != 'c' && mode != 'f') { print("usage: cut -cN[-M] <file>  |  cut -fN[-M] [-dX] <file>  (fields; default delim = tab)\n"); }
+            if ((mode != 'c' && mode != 'f') || nr == 0) { print("usage: cut -cLIST <file>  |  cut -fLIST [-dX] <file>   (LIST: N, N-M, or 1,3-5; fields default to tab)\n"); }
             else {
                 long n; char *buf = slurp(p, &n);
                 if (!buf) { print("cut: no such file: "); print(p); print("\n"); }
                 else {
                     buf[n] = 0;
-                    char out[256]; int oi = 0, col = 0, field = 1, dirty = 0;
+                    char out[256]; int oi = 0, col = 0, field = 1, dirty = 0, out_any = 0;
                     for (long k = 0; k < n; k++) {
                         char c = buf[k];
-                        if (c == '\n') { out[oi] = 0; print(out); print("\n"); oi = 0; col = 0; field = 1; dirty = 0; continue; }
+                        if (c == '\n') { out[oi] = 0; print(out); print("\n"); oi = 0; col = 0; field = 1; dirty = 0; out_any = 0; continue; }
                         dirty = 1;
-                        if (mode == 'c') {                            /* char range */
+                        if (mode == 'c') {                            /* char list */
                             col++;
-                            if (col >= from && (openend || col <= to) && oi < 255) out[oi++] = c;
-                        } else if (c == delim) {                      /* field sep: emit delim only BETWEEN two selected fields (keeps empty fields) */
-                            int s1 = field >= from && (openend || field <= to);
-                            int s2 = field + 1 >= from && (openend || field + 1 <= to);
-                            if (s1 && s2 && oi < 255) out[oi++] = delim;
+                            if (cut_sel(col, rfrom, rto, roe, nr) && oi < 255) out[oi++] = c;
+                        } else if (c == delim) {                      /* field sep: emit the output delim before the NEXT selected field — joins non-adjacent fields and keeps empty ones */
                             field++;
-                        } else if (field >= from && (openend || field <= to) && oi < 255) {
-                            out[oi++] = c;                            /* field content */
+                            if (cut_sel(field, rfrom, rto, roe, nr) && out_any && oi < 255) out[oi++] = delim;
+                        } else if (cut_sel(field, rfrom, rto, roe, nr) && oi < 255) {
+                            out[oi++] = c; out_any = 1;               /* field content */
                         }
                     }
                     if (dirty) { out[oi] = 0; print(out); print("\n"); }   /* trailing line w/o newline */
