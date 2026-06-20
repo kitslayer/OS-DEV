@@ -28,6 +28,7 @@ static int g_status;
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
 static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
+static int nargs(const char *s) { int n = 0; while (*s) { while (*s == ' ') s++; if (!*s) break; n++; while (*s && *s != ' ') s++; } return n; }
 
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
@@ -1871,6 +1872,37 @@ static int run_command(char *line, char *cwd) {
                 long n = sys_gunzip(src, dst);
                 if (n < 0) print("gunzip: failed (not a .gz, too big, or missing)\n");
                 else { char nb[12]; itoa_simple((int)n, nb); print("gunzip: wrote "); print(dst); print(" ("); print(nb); print(" bytes)\n"); }
+            }
+        } else if ((startswith(line, "cp ") || startswith(line, "mv ")) && nargs(line + 3) > 2) {
+            /* multi-file: cp/mv SRC... DESTDIR  (e.g. `cp *.txt backup`). The 2-arg
+             * form is handled by the next branch, untouched. The last token is the
+             * destination, which must be an existing directory; mv deletes each
+             * source only after its copy succeeds. */
+            int move = (line[0] == 'm');
+            char tbuf[256]; int tn = 0; char *av[16]; int ac = 0;
+            const char *q = line + 3;
+            while (*q && ac < 16) {
+                while (*q == ' ') q++;
+                if (!*q) break;
+                av[ac++] = tbuf + tn;
+                while (*q && *q != ' ' && tn < 255) tbuf[tn++] = *q++;
+                tbuf[tn++] = 0;
+            }
+            const char *dest = av[ac - 1];
+            int destdir = 0;
+            if (sys_chdir(dest) >= 0) { destdir = 1; sys_chdir(cwd); }
+            if (!destdir) { print(move?"mv":"cp"); print(": target is not a directory: "); print(dest); print("\n"); g_status = 1; }
+            else for (int s = 0; s < ac - 1; s++) {
+                const char *srcf = av[s];
+                long n; char *buf = slurp(srcf, &n);
+                if (!buf) { print(move?"mv":"cp"); print(": no such file: "); print(srcf); print("\n"); continue; }
+                const char *base = srcf; for (const char *t = srcf; *t; t++) if (*t == '/') base = t + 1;
+                char dpath[160]; int d = 0; for (const char *t = dest; *t && d < 158; t++) dpath[d++] = *t;
+                if (d > 0 && dpath[d-1] != '/' && d < 158) dpath[d++] = '/';
+                for (const char *t = base; *t && d < 159; t++) dpath[d++] = *t; dpath[d] = 0;
+                if (sys_writefile(dpath, buf, (unsigned long)n) < 0) { print(move?"mv":"cp"); print(": write failed: "); print(dpath); print("\n"); g_status = 1; }
+                else { if (move) sys_delete(srcf); print(move?"moved ":"copied "); print(srcf); print(" -> "); print(dpath); print("\n"); }
+                free(buf);
             }
         } else if (startswith(line, "cp ") || startswith(line, "mv ")) {
             int move = (line[0] == 'm');

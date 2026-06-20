@@ -1,5 +1,13 @@
 # What's next
 
+> **(M838) Shell — multi-file `cp`/`mv` into a directory.** The last FS-command gap: `cp SRC... DESTDIR`
+> (e.g. `cp *.txt backup`) and the `mv` form. Done as a *separate* branch that triggers only for >2 arguments
+> (via a small `nargs` token-count), so the heavily-used and data-loss-sensitive 2-arg `cp`/`mv` handler
+> (M832/M833) is left completely untouched. The last token must be an existing directory; each source is
+> copied to `dir/basename`, and for `mv` the source is deleted *only after* its copy succeeds. `make check`
+> 30/30. Verified in-guest: `cp m1.txt m2.txt bak` put both in bak; `mv m1.txt m2.txt bak` moved both and
+> `ls m1.txt` confirmed the source was gone (content safe in bak — no data loss).
+
 > **(M837) Shell — `crc32` multi-file (and simplified).** Completes the multi-arg consistency pass: `crc32`
 > now checksums each space-separated file (`crc32 *.png`) with the filename in the output (`<crc>  <name>`,
 > matching M835's sha256/sha512). Rewrote its hand-rolled grow-the-buffer read to use the shared `slurp()`
