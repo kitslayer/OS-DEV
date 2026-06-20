@@ -577,6 +577,30 @@ int app_sys_read(char *buf, unsigned max) {
                     for (int k = 0; k < cpl && n + 1 < max; k++) {
                         grid_putc(a, e[fmi].name[k]); buf[n++] = e[fmi].name[k];
                     }
+                } else if (nm > 1) {               /* already at the common prefix: list the candidates,
+                                                    * then redraw the prompt + line (bash's second Tab) */
+                    char psave[APP_COLS]; uint8_t csave[APP_COLS];
+                    int pn = cx0 < APP_COLS ? cx0 : APP_COLS;
+                    for (int k = 0; k < pn; k++) { psave[k] = a->grid[cy0][k]; csave[k] = a->gcol[cy0][k]; }
+                    grid_putc(a, '\n');
+                    for (int i = 0; i < ne; i++) {
+                        int ok = 1;
+                        for (int k = 0; k < plen; k++) {
+                            char a1 = buf[ws+k], b1 = e[i].name[k];
+                            if (a1 >= 'A' && a1 <= 'Z') a1 += 32;
+                            if (b1 >= 'A' && b1 <= 'Z') b1 += 32;
+                            if (a1 != b1) { ok = 0; break; }
+                        }
+                        if (!ok) continue;
+                        for (int k = 0; e[i].name[k]; k++) grid_putc(a, e[i].name[k]);
+                        grid_putc(a, ' '); grid_putc(a, ' ');
+                    }
+                    grid_putc(a, '\n');
+                    uint8_t savecol = a->curcol;   /* repaint the prompt in its original colours */
+                    for (int k = 0; k < pn; k++) { a->curcol = csave[k]; grid_putc(a, psave[k]); }
+                    a->curcol = savecol;
+                    cx0 = a->cx; cy0 = a->cy;       /* input restarts after the redrawn prompt */
+                    emit_range(a, buf, 0, n);
                 }
             }
             cur_i = n;

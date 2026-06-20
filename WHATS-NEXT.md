@@ -1,5 +1,13 @@
 # What's next
 
+> **(M843) Shell — a second Tab lists the completion candidates.** M842 made the first Tab extend to the
+> common prefix, but then it dead-ended (e.g. `cat README.` with no way to see what's there). Now an
+> ambiguous Tab — when the word is already at the common prefix and several entries match — lists the
+> matching names on a fresh line and repaints the prompt + current input beneath, exactly like bash's second
+> Tab. The prompt text is read back out of the terminal grid (the kernel line editor doesn't know the shell's
+> prompt string), so it survives the redraw verbatim. Verified in-guest: `cat READ`→Tab→`cat README.`→Tab
+> listed `README.TXT  README.MD` then restored the line. `make check` 31/31.
+
 > **(M842) Shell — Tab completes to the longest common prefix.** The terminal line editor (in `app.c`)
 > already completed a *unique* filename on Tab, but the moment two cwd entries shared a prefix it went dead —
 > the help text promised "Tab=complete" yet ambiguous cases did nothing. Now Tab extends the word to the
