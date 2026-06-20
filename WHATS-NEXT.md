@@ -1,5 +1,11 @@
 # What's next
 
+> **(M790) Shell — `!!` repeat last command.** Classic history expansion: `!!` re-runs the previous command;
+> trailing text is appended, so `!! | grep x` / `!! > f` compose. The shell keeps the last non-blank line and
+> echoes the expansion before running it. App-only (a few lines in `main` + a help entry); `make check` 30/30.
+> Verified in-guest: `echo hello world` → `!!` repeats it → `!! | wc` runs "echo hello world | wc" (1 line, 2
+> words).
+
 > **(M789) Editor — Ctrl-G go-to-line.** Complements M785's find (search by content) with jump-by-number:
 > Ctrl-G opens a `goto line: N_` prompt (digits only), Enter moves the caret to the start of that line. Reuses
 > the find-mode plumbing — `render_find` generalized to `render_prompt(label)`, a `goting` flag sharing the

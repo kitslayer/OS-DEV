@@ -197,7 +197,7 @@ static int run_command(char *line, char *cwd) {
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
-            print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)\n");
+            print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  Tab=complete  ^W/^U/^K=kill  ^C=cancel\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
@@ -1938,9 +1938,25 @@ int main(void) {
 
     char line[1024];                               /* command line: roomy enough for long URLs + pastes */
     char cwd[128]; cwd[0] = '/'; cwd[1] = 0;       /* display path (kernel tracks the real cwd) */
+    char lastcmd[1024]; lastcmd[0] = 0;            /* previous command, for `!!` */
     for (;;) {
         print("osdev:"); print(cwd); print("$ ");
         readline(line, sizeof(line));
+
+        /* `!!` (optionally followed by more, e.g. `!! | grep x`) re-runs the
+         * previous command with the trailing text appended; echo the expansion. */
+        if (line[0] == '!' && line[1] == '!') {
+            if (!lastcmd[0]) { print("!!: no previous command\n"); continue; }
+            char exp[1024]; int p = 0;
+            for (int i = 0; lastcmd[i] && p < 1023; i++) exp[p++] = lastcmd[i];
+            for (int i = 2; line[i] && p < 1023; i++) exp[p++] = line[i];
+            exp[p] = 0;
+            int i = 0; for (; exp[i] && i < 1023; i++) line[i] = exp[i]; line[i] = 0;
+            print(line); print("\n");
+        }
+        /* remember this command (non-blank) so the next `!!` can repeat it */
+        { int ne = 0; for (int i = 0; line[i]; i++) if (line[i] != ' ') { ne = 1; break; }
+          if (ne) { int i = 0; for (; line[i] && i < 1023; i++) lastcmd[i] = line[i]; lastcmd[i] = 0; } }
 
         /* split the line into ';'-separated commands and run each in turn
          * (each handles its own globbing / redirection / pipeline). */
