@@ -1,5 +1,16 @@
 # What's next
 
+> **(M885) Shell — `local NAME[=val]` function-scoped variables.** Closes the last footgun in the function
+> system: named (non-positional) vars were global, so `f() { x=5; }` clobbered the caller's `x`. `local`
+> declares a var private to the current function call — it saves the caller's value onto a small stack
+> (`g_localsave`, 64 slots) and the function dispatch restores everything pushed during its body when the
+> call returns (a per-frame `localmark` makes it nest, like the M876 positional-param save/restore). Plain
+> assignment in a function still affects the global (POSIX sh default); `local x` opts into scoping.
+> Verified in-guest: `x=global; f(){ local x=inside; …}; f; echo $x` → still `global`; the no-`local`
+> contrast leaks (`y=changed`); and nested `outer(){ local a=1; inner; …}` / `inner(){ local a=2; …}` over
+> a global `a=0` prints `2 / 1 / 0` (each frame restores its own). Composes with `return` (restore runs
+> unconditionally after the body). Help line added; `make check` green (34 suites); shell.c warnings 11.
+
 > **(M884) Tests — extracted the calculator's expression evaluator into `calceval.h` + host fuzz (34th suite).**
 > `calc.c` had its own recursive-descent evaluator (`^` for power, `& | << >> ~`, `0x` hex — distinct from
 > the shell's `$(())`/shmath: different operators, no variables, signed accumulation relying on the OS's

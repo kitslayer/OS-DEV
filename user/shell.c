@@ -284,6 +284,12 @@ static void alias_del(const char *n){
 /* user-defined functions: `NAME() { body }` — body is a ;-list run with $1..$9 bound to the call args. */
 static struct { char name[24], body[256]; } g_func[16];
 static int g_nfunc, g_func_depth;   /* g_func_depth caps recursion */
+/* `local NAME[=val]` in a function: save the caller's value here; the function
+ * dispatch restores everything pushed during its body when the call returns, so a
+ * function's locals don't leak to (or clobber) the caller. A per-frame mark on the
+ * stack makes this nest correctly. */
+static struct { char name[24], val[160]; char had; } g_localsave[64];
+static int g_nlocalsave;
 static const char *func_get(const char *n, int nl){
     for (int i=0;i<g_nfunc;i++){ int j=0; while(j<nl && g_func[i].name[j] && g_func[i].name[j]==n[j]) j++;
         if (j==nl && g_func[i].name[j]==0) return g_func[i].body; }
@@ -362,8 +368,14 @@ static int run_command(char *line, char *cwd) {
               }
               for (int z = pn; z < 9; z++) { char pname[2] = { (char)('1' + z), 0 }; vset(pname, 1, ""); }   /* clear unused params */
               { char cb[12]; itoa_simple(pn, cb); vset("#", 1, cb); }   /* $# = arg count */
+              int localmark = g_nlocalsave;    /* `local` decls in the body restore down to here on return */
               g_func_depth++; run_input_line(bc, cwd); g_func_depth--;
               g_returning = 0;                 /* `return` unwinds only to here (the function boundary) */
+              while (g_nlocalsave > localmark) {   /* restore vars this call declared `local` (newest first) */
+                  g_nlocalsave--;
+                  if (g_localsave[g_nlocalsave].had) vset(g_localsave[g_nlocalsave].name, (int)ustrlen(g_localsave[g_nlocalsave].name), g_localsave[g_nlocalsave].val);
+                  else vunset(g_localsave[g_nlocalsave].name);
+              }
               for (int s = 0; s < 11; s++) {   /* restore caller's params (revert this call's scope) */
                   char nm[2] = { pn1[s], 0 };
                   if (had[s]) vset(nm, 1, saved[s]); else vunset(nm);
@@ -400,6 +412,7 @@ static int run_command(char *line, char *cwd) {
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
             print("        name() { cmds; }   (define a function; call `name args` with $1..$9 $# $@ bound)\n");
             print("        return [N]         (from a function: stop it now, set $? to N)\n");
+            print("        local NAME[=val]   (function-scoped variable; restored when the function returns)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        NAME=val (or set NAME=val)  $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
@@ -409,6 +422,24 @@ static int run_command(char *line, char *cwd) {
             int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
             if (p[nl] == '=' && nl > 0) vset(p, nl, p + nl + 1);                    /* value = rest of line (may contain spaces) */
             else print("usage: set NAME=value\n");
+        } else if (startswith(line, "local ")) {       /* local NAME[=val] ... : function-scoped vars (restored on return) */
+            const char *p = line + 6;
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
+                if (nl == 0) { p++; continue; }
+                char vbuf[160]; const char *val = ""; const char *vp = p + nl;
+                if (*vp == '=') { int vi = 0; const char *q = vp + 1; while (*q && *q != ' ' && vi < 159) vbuf[vi++] = *q++; vbuf[vi] = 0; val = vbuf; vp = q; }
+                if (g_func_depth > 0 && g_nlocalsave < 64) {   /* remember the caller's value so the function boundary can restore it */
+                    const char *ov = vget(p, nl); int s = g_nlocalsave++;
+                    int k = 0; for (; k < nl && k < 23; k++) g_localsave[s].name[k] = p[k];
+                    g_localsave[s].name[k] = 0; g_localsave[s].had = ov ? 1 : 0;
+                    if (ov) { int j = 0; while (ov[j] && j < 159) { g_localsave[s].val[j] = ov[j]; j++; } g_localsave[s].val[j] = 0; }
+                }
+                vset(p, nl, val);
+                p = vp;
+            }
         } else if (streq(line, "set") || streq(line, "env")) {                       /* list all variables */
             for (int i = 0; i < g_nvars; i++) { print(g_vars[i].name); print("="); print(g_vars[i].val); print("\n"); }
             if (g_nvars == 0) print("(no variables set)\n");
