@@ -1207,7 +1207,7 @@ static int run_command(char *line, char *cwd) {
                 pats[0][i] = 0; if (i) npat = 1;
                 while (*p == ' ') p++;
             }
-            if (npat == 0 || *p == 0) { print("usage: grep [-incvlo] [-e pat] [-A/B/C N]... <pattern> <file>...  (regex: ^ $ . * [..] \\)\n"); }
+            if (npat == 0 || *p == 0) { print("usage: grep [-incvlo] [-e pat] [-A/B/C N]... <pattern> <file>...  (regex: ^ $ . * [..] \\)\n"); g_status = 1; }
             else {
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
                 while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fcount++; while (*cq && *cq != ' ') cq++; }
@@ -1278,6 +1278,7 @@ static int run_command(char *line, char *cwd) {
                 if (ll) { /* -l already printed the matching filenames; no summary line */ }
                 else if (cc) { char cb[12]; itoa_simple(hits, cb); print("  "); print(cb); print("\n"); }
                 else if (!hits && !cap_active()) print("  (no matches)\n");   /* screen-only note; would otherwise pollute a pipe/$() */
+                g_status = hits ? 0 : 1;          /* exit status like real grep: 0 if any line matched, else 1 */
             }
         } else if (startswith(line, "wc ")) {
             const char *p = line + 3; char num[12];

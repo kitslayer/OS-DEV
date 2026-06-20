@@ -1,5 +1,15 @@
 # What's next
 
+> **(M886) Shell — `grep` now sets `$?` (0 on match, 1 on no-match), so `grep … && …` works.** Found by
+> testing pipe exit-status propagation: `echo hi | grep xyz; echo $?` printed `0` even though nothing
+> matched. The `grep` builtin counted hits but never set `g_status`, so it kept `run_command`'s default 0.
+> Now it sets `g_status = hits ? 0 : 1` at the end (and `1` on a usage error) — matching real grep, where
+> the exit status drives `if grep …` / `grep … && …` / `… || …`. Verified in-guest: `echo hi | grep xyz`
+> → `$?`=1, `grep hi` → `$?`=0, `echo test | grep es && echo AND-ran` runs, `… | grep zzz || echo OR-ran`
+> runs. (Known minor limit, deferred: the pipe model appends the scratch file as the next stage's last arg,
+> so piping into a *non-filter* like `true`/`echo` mis-handles it — rare; real pipes target filters.)
+> `make check` green (34 suites); shell.c warnings 11.
+
 > **(M885) Shell — `local NAME[=val]` function-scoped variables.** Closes the last footgun in the function
 > system: named (non-positional) vars were global, so `f() { x=5; }` clobbered the caller's `x`. `local`
 > declares a var private to the current function call — it saves the caller's value onto a small stack
