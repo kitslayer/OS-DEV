@@ -1,5 +1,13 @@
 # What's next
 
+> **(M808) Shell — command aliases.** `alias name=value` defines a shortcut, expanded on a command's first
+> word in `run_line` (one level only, so `a`→`b`→`a` can't loop); the rest of the line is appended, so
+> `alias g=echo` then `g hi there` runs `echo hi there`. `alias` with no args lists them, `alias name` shows
+> one, `unalias name` removes it. Storage mirrors the existing shell-variable table (16 aliases). Because
+> expansion sits in `run_line`, aliases work everywhere — interactively, in scripts, and inside `for`/`if`
+> bodies. `make check` 30/30. Verified in-guest: `alias g=echo` → `g hello world` printed `hello world`;
+> `alias` listed `g='echo'`; after `unalias g`, `g` was unknown again.
+
 > **(M807) Editor — find & replace (Ctrl-R).** The editor had find (Ctrl-F) and go-to-line (Ctrl-G) but no
 > replace — a glaring gap now that text files open straight into it from the Files app (M806). Ctrl-R runs a
 > two-phase prompt (`replace:` then `with:`) and replaces every occurrence in one pass, reporting `[N

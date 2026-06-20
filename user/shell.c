@@ -167,6 +167,27 @@ static void vunset(const char *n){
     for (int i=0;i<g_nvars;i++){ int j=0; while(j<nl && g_vars[i].name[j]==n[j]) j++;
         if (j==nl && g_vars[i].name[j]==0){ g_vars[i]=g_vars[--g_nvars]; return; } }
 }
+
+/* ---- command aliases: `alias name=value`, expanded on the first word ------ */
+static struct { char name[16], val[160]; } g_alias[16];
+static int g_nalias;
+static const char *alias_get(const char *n, int nl){
+    for (int i=0;i<g_nalias;i++){ int j=0; while(j<nl && g_alias[i].name[j] && g_alias[i].name[j]==n[j]) j++;
+        if (j==nl && g_alias[i].name[j]==0) return g_alias[i].val; }
+    return 0;
+}
+static void alias_set(const char *n, int nl, const char *v){
+    if (nl<1) return; if (nl>15) nl=15;
+    int slot=-1;
+    for (int i=0;i<g_nalias && slot<0;i++){ int j=0; while(j<nl && g_alias[i].name[j]==n[j]) j++; if (j==nl && g_alias[i].name[j]==0) slot=i; }
+    if (slot<0){ if (g_nalias>=16) return; slot=g_nalias++; int k=0; for(;k<nl;k++) g_alias[slot].name[k]=n[k]; g_alias[slot].name[k]=0; }
+    int k=0; for(;v[k] && k<159;k++) g_alias[slot].val[k]=v[k]; g_alias[slot].val[k]=0;
+}
+static void alias_del(const char *n){
+    int nl=0; while(n[nl] && n[nl]!=' ') nl++;
+    for (int i=0;i<g_nalias;i++){ int j=0; while(j<nl && g_alias[i].name[j]==n[j]) j++;
+        if (j==nl && g_alias[i].name[j]==0){ g_alias[i]=g_alias[--g_nalias]; return; } }
+}
 /* The $((expr)) evaluator (sh_eval, sh_vchar, sh_askip, …) now lives in
  * shmath.h, host-tested by tests/shmath; the sh_var hook above resolves names. */
 
@@ -222,6 +243,7 @@ static int run_command(char *line, char *cwd) {
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
+            print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  Tab=complete  ^W/^U/^K=kill  ^C=cancel\n");
@@ -752,6 +774,16 @@ static int run_command(char *line, char *cwd) {
             /* exit status 0 (already set) — useful with && / || */
         } else if (streq(line, "false")) {
             g_status = 1;                          /* exit status 1 — useful with && / || */
+        } else if (streq(line, "alias")) {         /* list aliases */
+            for (int i = 0; i < g_nalias; i++) { print(g_alias[i].name); print("='"); print(g_alias[i].val); print("'\n"); }
+            if (!g_nalias) print("(no aliases)\n");
+        } else if (startswith(line, "alias ")) {   /* alias name=value  (or `alias name` to show one) */
+            const char *p = line + 6; while (*p == ' ') p++;
+            int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
+            if (p[nl] == '=' && nl > 0) alias_set(p, nl, p + nl + 1);
+            else { const char *v = alias_get(p, nl); if (v) { print(p); print("='"); print(v); print("'\n"); } else { print("alias: not set\n"); g_status = 1; } }
+        } else if (startswith(line, "unalias ")) {
+            const char *p = line + 8; while (*p == ' ') p++; alias_del(p);
         } else if (streq(line, "clip")) {          /* print the system clipboard (GUI selection -> shell) */
             char cb[2048]; int n = sys_clip_get(cb, sizeof cb);
             if (n <= 0) print("(clipboard empty)\n");
@@ -1969,9 +2001,17 @@ static void glob_expand(const char *src, char *dst, int dstsz){
  * then peel off output redirection and pipelines, then dispatch. Returns 1 only
  * when the shell should exit (the "exit" command). */
 static int run_line(char *line, char *cwd) {
-    static char gline[1024], vline[1024];
+    static char gline[1024], vline[1024], aline[1024];
     char *cmd = line;
     if (expand_vars(cmd, vline, sizeof vline)) cmd = vline;   /* $NAME / ${NAME} variable expansion (before glob/pipe/redirect) */
+    /* alias expansion: if the first word is an alias, substitute its value
+     * (one level only, so a -> b -> a can't loop). */
+    { int wl = 0; while (cmd[wl] && cmd[wl] != ' ') wl++;
+      const char *av = wl ? alias_get(cmd, wl) : 0;
+      if (av) { int o = 0;
+          for (int i = 0; av[i] && o < 1023; i++) aline[o++] = av[i];
+          for (int i = wl; cmd[i] && o < 1023; i++) aline[o++] = cmd[i];
+          aline[o] = 0; cmd = aline; } }
     for (int i = 0; cmd[i]; i++) if (cmd[i] == '*' || cmd[i] == '?') {
         glob_expand(cmd, gline, sizeof gline); cmd = gline; break;
     }
