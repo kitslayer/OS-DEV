@@ -1,5 +1,16 @@
 # What's next
 
+> **(M803) Shell — `source` (run a script file).** The shell can now run shell commands from a file with
+> `source file` (or `. file`), turning the editor + shell into a real scripting environment. Each line goes
+> through the exact same `;` split + `&&`/`||` layer as interactive input, so scripts get the full feature set
+> (pipes, redirection, globbing, variables, arithmetic, `$?`); blank lines and `#` comments are skipped, and
+> a depth guard (8) stops a script that sources itself. The filename is copied out of the command line before
+> iterating because the nested execution reuses `run_line`'s static expand/glob buffers — a forward
+> declaration of `run_andor` lets the `source` builtin call back into the executor. `make check` 30/30.
+> Verified in-guest: wrote a 4-line script in the editor (`echo FROMSCRIPT` / `set V=42` / `echo V-is-$V` /
+> `true && echo CHAINED-OK`), then `source sc.sh` printed `FROMSCRIPT`, `V-is-42` (variable set in an earlier
+> line and expanded later), and `CHAINED-OK` (`&&` honoured in the script).
+
 > **(M802) Editor — visual selection (Ctrl-B mark + highlight).** Builds on M800's line clipboard with true
 > range selection. Ctrl-B sets/clears a mark at the cursor; moving the caret then defines a selection
 > `[min,max](anchor,cur)`, drawn in yellow by splitting the visible-text print into before/selection/after

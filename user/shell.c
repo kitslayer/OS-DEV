@@ -25,6 +25,11 @@ static void itoa_simple(int v, char *out) {
  * (command-not-found, a missing file via slurp(), cd/mkdir failure, `false`)
  * set it to 1. */
 static int g_status;
+static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
+
+/* Forward decl: `source` (a builtin in run_command) runs each script line back
+ * through the &&/|| layer. Defined far below, after run_line. */
+static int run_andor(char *seg, char *cwd);
 
 /* Read an entire file into a malloc'd, NUL-terminated buffer (caller free()s).
  * The read API has no size query, so grow the buffer until the read no longer
@@ -211,6 +216,7 @@ static int run_command(char *line, char *cwd) {
             print("        todo[ add T|done N|clear] clip[ file] mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
+            print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  Tab=complete  ^W/^U/^K=kill  ^C=cancel\n");
@@ -754,6 +760,41 @@ static int run_command(char *line, char *cwd) {
                 sys_clip_set(buf, len); free(buf);
                 char nb[12]; itoa_simple(len, nb);
                 print("copied "); print(nb); print(" bytes to clipboard\n");
+            }
+        } else if (startswith(line, "source ") || startswith(line, ". ")) {
+            /* Run shell commands from a file: each line goes through the same
+             * ';' split + &&/|| layer as interactive input. '#' lines and blank
+             * lines are skipped. The filename is copied out first because the
+             * nested run_line() reuses run_line's static expand/glob buffers. */
+            char fn[128]; const char *p = line + (line[0] == '.' ? 2 : 7);
+            while (*p == ' ') p++;
+            int fi = 0; while (*p && *p != ' ' && fi < 127) fn[fi++] = *p++; fn[fi] = 0;
+            if (source_depth >= 8) { print("source: nested too deep\n"); g_status = 1; }
+            else {
+                long n; char *txt = slurp(fn, &n);
+                if (!txt) { print("source: no such file: "); print(fn); print("\n"); g_status = 1; }
+                else {
+                    source_depth++;
+                    char *ln = txt;
+                    while (ln && *ln) {
+                        char *nl = ln; while (*nl && *nl != '\n') nl++;
+                        int more = (*nl == '\n'); if (more) *nl = 0;
+                        char *t = ln; while (*t == ' ' || *t == '\t') t++;
+                        if (*t && *t != '#') {                 /* skip blanks + comments */
+                            char *seg = t;
+                            while (seg) {                      /* ';' split, like the main loop */
+                                char *semi = seg; while (*semi && *semi != ';') semi++;
+                                int sm = (*semi == ';'); if (sm) *semi = 0;
+                                while (*seg == ' ') seg++;
+                                if (*seg) run_andor(seg, cwd);
+                                seg = sm ? semi + 1 : 0;
+                            }
+                        }
+                        ln = more ? nl + 1 : 0;
+                    }
+                    source_depth--;
+                    free(txt);
+                }
             }
         } else if (startswith(line, "crypt ")) {
             char *p = line + 6, fn[32]; int i = 0;
