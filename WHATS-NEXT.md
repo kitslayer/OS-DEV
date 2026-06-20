@@ -1,5 +1,14 @@
 # What's next
 
+> **(M847) Tests — extract the Tab-completion core and unit-test it.** The trickiest part of M842–845 — the
+> case-insensitive longest-common-prefix scan over the candidate names — was lifted verbatim from the kernel
+> line editor into `kernel/complete.h` (`complete_match` + `complete_scan`), mirroring the shgrep/shmath/
+> cssprop extraction pattern. `app.c` now calls those helpers (verified in-guest: byte-identical Tab
+> behaviour — unique fill, common-prefix extend, and candidate list all unchanged), and a new host suite,
+> `completetest`, exercises them under ASan+UBSan: prefix matching, unique vs multi-match prefixes,
+> variable-length names, case-insensitivity, directory `/` exclusion, and the empty-word case. `make check`
+> is now 32 suites; all pass.
+
 > **(M846) Shell — `help` documents the richer Tab completion.** M842–845 turned Tab from "complete a unique
 > name" into prefix-extension + candidate-listing + empty-word listing, but `help` still only said
 > "Tab=complete" — an undiscoverable feature is an incomplete one. Split the crowded `edit:` line and added a

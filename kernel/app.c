@@ -19,6 +19,7 @@
 #include "string.h"
 #include "vfs.h"
 #include "kheap.h"
+#include "complete.h"
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
 #include <stdint.h>
 
@@ -549,32 +550,10 @@ int app_sys_read(char *buf, unsigned max) {
                  * name starts with the typed word (case-insensitive). A unique
                  * match fills in the whole name; several matches advance to the
                  * point where they first disagree — bash's default Tab. */
-                vfs_dirent e[32]; int ne = vfs_list(e, 32), fmi = -1, nm = 0, cpl = 0;
-                for (int i = 0; i < ne; i++) {
-                    int ok = 1;
-                    for (int k = 0; k < plen; k++) {
-                        char a1 = buf[ws+k], b1 = e[i].name[k];
-                        if (a1 >= 'A' && a1 <= 'Z') a1 += 32;
-                        if (b1 >= 'A' && b1 <= 'Z') b1 += 32;
-                        if (a1 != b1) { ok = 0; break; }
-                    }
-                    if (!ok) continue;
-                    nm++;
-                    if (fmi < 0) {                  /* first match seeds the prefix with its whole name */
-                        fmi = i;
-                        while (e[i].name[cpl] && e[i].name[cpl] != '/') cpl++;
-                    } else {                        /* later matches shrink it to where they still agree */
-                        int k = 0;
-                        while (k < cpl && e[i].name[k]) {
-                            char a1 = e[fmi].name[k], b1 = e[i].name[k];
-                            if (a1 >= 'A' && a1 <= 'Z') a1 += 32;
-                            if (b1 >= 'A' && b1 <= 'Z') b1 += 32;
-                            if (a1 != b1) break;
-                            k++;
-                        }
-                        cpl = k;
-                    }
-                }
+                vfs_dirent e[32]; int ne = vfs_list(e, 32);
+                const char *names[32];
+                for (int i = 0; i < ne; i++) names[i] = e[i].name;
+                int nm, fmi, cpl = complete_scan(names, ne, buf + ws, plen, &nm, &fmi);
                 if (nm >= 1 && cpl > plen) {        /* extend the word to the common prefix (canonical case) */
                     grid_erase(a, plen, cx0, cy0); n -= (unsigned)plen;
                     for (int k = 0; k < cpl && n + 1 < max; k++) {
@@ -591,14 +570,7 @@ int app_sys_read(char *buf, unsigned max) {
                     for (int k = 0; k < pn; k++) { psave[k] = a->grid[cy0][k]; csave[k] = a->gcol[cy0][k]; }
                     grid_putc(a, '\n');
                     for (int i = 0; i < ne; i++) {
-                        int ok = 1;
-                        for (int k = 0; k < plen; k++) {
-                            char a1 = buf[ws+k], b1 = e[i].name[k];
-                            if (a1 >= 'A' && a1 <= 'Z') a1 += 32;
-                            if (b1 >= 'A' && b1 <= 'Z') b1 += 32;
-                            if (a1 != b1) { ok = 0; break; }
-                        }
-                        if (!ok) continue;
+                        if (!complete_match(e[i].name, buf + ws, plen)) continue;
                         for (int k = 0; e[i].name[k]; k++) grid_putc(a, e[i].name[k]);
                         grid_putc(a, ' '); grid_putc(a, ' ');
                     }
