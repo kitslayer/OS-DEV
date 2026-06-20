@@ -27,7 +27,10 @@ static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-
 #define UNDO_MAX 16384
 struct uop { int pos, grp; unsigned char ch, kind; };   /* kind: 0=insert 1=backspace 2=delete-fwd */
 static struct uop ulog[UNDO_MAX];
-static int un, ugrp, uexpect = -1, ulast_kind = -1;
+static int un, umax, ugrp, uexpect = -1, ulast_kind = -1;
+/* un = ops currently applied; umax = ops in the log (>= un). Undo decrements un
+ * but leaves the ops in place, so [un, umax) is the redo region; a fresh edit
+ * truncates it (umax = un). */
 
 static void undo_record(int pos, char ch, int kind) {
     if (un >= UNDO_MAX) {                       /* log full: drop the oldest half */
@@ -39,6 +42,7 @@ static void undo_record(int pos, char ch, int kind) {
     ulog[un].pos = pos; ulog[un].grp = ugrp;
     ulog[un].ch = (unsigned char)ch; ulog[un].kind = (unsigned char)kind;
     un++;
+    umax = un;                                  /* a new edit invalidates the redo region */
     ulast_kind = kind;
     uexpect = (kind == 0) ? pos + 1 : (kind == 1) ? pos - 1 : pos;   /* next contiguous pos */
 }
@@ -66,6 +70,27 @@ static void undo(void) {
     }
     if (cur > dlen) cur = dlen;
     ulast_kind = -1; uexpect = -1;              /* the undo itself is a group boundary */
+}
+
+static void redo(void) {
+    if (un >= umax) return;                     /* nothing undone to re-apply */
+    int g = ulog[un].grp;
+    while (un < umax && ulog[un].grp == g) {    /* re-apply the whole group, oldest first */
+        struct uop *o = &ulog[un++];
+        if (o->kind == 0) {                     /* insertion: put the char back at pos */
+            if (dlen < MAXDOC - 1) {
+                for (int i = dlen; i > o->pos; i--) doc[i] = doc[i-1];
+                doc[o->pos] = (char)o->ch; dlen++;
+            }
+            cur = o->pos + 1;
+        } else if (o->pos < dlen) {             /* deletion: remove the char at pos again */
+            for (int i = o->pos; i < dlen - 1; i++) doc[i] = doc[i+1];
+            dlen--;
+            cur = o->pos;
+        }
+    }
+    if (cur > dlen) cur = dlen;
+    ulast_kind = -1; uexpect = -1;              /* redo is a group boundary too */
 }
 
 /* First offset >= start where findq occurs in doc, or -1. */
@@ -262,6 +287,7 @@ int main(void) {
         else if (k == 0x86) { finding = 1; render_prompt("find: "); }    /* Ctrl-F: find (keeps the last query) */
         else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: "); }  /* Ctrl-G: go to line */
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
+        else if (k == 0x99) redo();                       /* Ctrl-Y: redo */
         else if (k == '\n' || k == '\r') { insert('\n'); undo_break(); }   /* newline ends an undo group */
         else if (k == 8 || k == 127)     backspace();
         else if (k == 0x04)              del_fwd();        /* Delete: forward-delete  */

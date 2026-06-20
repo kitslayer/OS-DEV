@@ -1,5 +1,13 @@
 # What's next
 
+> **(M798) Editor — redo (Ctrl-Y).** Completes the undo/redo pair from M797. The undo log already kept popped
+> ops in place above the `un` cursor, so redo needed no separate stack — just a high-water mark `umax` (the
+> number of ops in the log; `[un, umax)` is the redo region). Undo decrements `un` and leaves the ops;
+> `redo()` re-applies the group at `un` forward (oldest-first) and advances `un`; a fresh edit sets
+> `umax = un`, discarding any redoable ops so you can't redo across new history. Ctrl-Y (0x99) drives it.
+> `make check` 30/30. Verified in-guest: `AAAA`⏎`BBBB`, undo×2 to empty, redo×2 restored both (9b); and the
+> invalidation case — typed `XX`, undo, typed `Y`, Ctrl-Y correctly did nothing (doc stays `Y`).
+
 > **(M797) Editor — undo (Ctrl-Z).** The text editor had no undo at all — a glaring omission for an editor.
 > Added an operation-log undo: every single-character insert/backspace/forward-delete is recorded (char,
 > position, kind), and consecutive same-kind edits at adjacent positions share a "group" so one Ctrl-Z
