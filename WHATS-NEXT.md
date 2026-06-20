@@ -1,5 +1,12 @@
 # What's next
 
+> **(M785) Editor — Ctrl-F incremental find.** With Ctrl support (M782), the editor now has search: Ctrl-F
+> opens a `find: <query>_` prompt at the bottom, you type the string (backspace edits, Esc cancels), and
+> Enter jumps the cursor to the next match after the caret (wrapping to the top, "[not found]" otherwise);
+> repeat Ctrl-F+Enter to step through matches. New `find_from()` substring scan + `render_find()`; a `finding`
+> mode at the top of the key loop. `make check` 30/30. Verified in-guest: in a 60-line file, Ctrl-F "42" →
+> cursor jumps to line 42 (view recentred). Completes the editor's core capabilities.
+
 > **(M784) Shell help — document line editing.** Added an `edit:` line to `help` listing the
 > line-editing keys (arrows, Home/End, Del, up/down history, Tab completion) and the M782 Ctrl kills
 > (`^W`/`^U`/`^K`) + `^C` cancel — so the terminal's editing power is discoverable. Pure doc string; `make

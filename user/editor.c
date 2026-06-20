@@ -15,6 +15,18 @@
 static char doc[MAXDOC];
 static int  dlen, cur, readonly;  /* readonly: file exceeded the buffer — view only, never save (would truncate it) */
 static char fname[40];
+static char findq[40]; static int finding;   /* Ctrl-F incremental find: query buffer + mode flag */
+
+/* First offset >= start where findq occurs in doc, or -1. */
+static int find_from(int start) {
+    int ql = 0; while (findq[ql]) ql++;
+    if (ql == 0 || start < 0) return -1;
+    for (int i = start; i + ql <= dlen; i++) {
+        int j = 0; while (j < ql && doc[i + j] == findq[j]) j++;
+        if (j == ql) return i;
+    }
+    return -1;
+}
 
 static void itoa_i(int v, char *o) {
     char t[12]; int i = 0;
@@ -122,6 +134,15 @@ static void render(const char *msg) {
     if (msg) print(msg);
 }
 
+/* Show the doc with a "find: <query>_" prompt at the bottom (Ctrl-F mode). */
+static void render_find(void) {
+    char m[64]; int p = 0;
+    const char *a = "\nfind: "; while (*a) m[p++] = *a++;
+    for (int i = 0; findq[i] && p < 60; i++) m[p++] = findq[i];
+    m[p++] = '_'; m[p] = 0;
+    render(m);
+}
+
 int main(void) {
     print("\n  file to edit: ");
     readline(fname, sizeof(fname));    /* prompt keeps the system caret (it's a readline) */
@@ -137,6 +158,20 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
+        if (finding) {                              /* Ctrl-F find mode: edit the query, Enter searches */
+            int fl = 0; while (findq[fl]) fl++;
+            if (k == '\n' || k == '\r') {
+                finding = 0;
+                int pos = find_from(cur + 1);       /* next match after the caret... */
+                if (pos < 0) pos = find_from(0);    /* ...else wrap to the top */
+                if (pos >= 0) { cur = pos; render(0); }
+                else render("\n[not found]");
+            }
+            else if (k == 27) { finding = 0; render(0); }            /* Esc: cancel find */
+            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_find(); }
+            else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_find(); }
+            continue;
+        }
         if (k == 27) {                              /* ESC: save and quit (read-only if the file was too large) */
             if (readonly) render("\n[not saved: file too large to edit]");
             else if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
@@ -153,6 +188,7 @@ int main(void) {
         else if (k == 0x91) {                       /* Ctrl-Q: quit WITHOUT saving */
             render("\n[quit - changes not saved]"); sys_sleep(350); return 0;
         }
+        else if (k == 0x86) { finding = 1; render_find(); }   /* Ctrl-F: find (keeps the last query) */
         else if (k == '\n' || k == '\r') insert('\n');
         else if (k == 8 || k == 127)     backspace();
         else if (k == 0x04)              del_fwd();        /* Delete: forward-delete  */
