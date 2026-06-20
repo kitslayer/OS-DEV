@@ -40,9 +40,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define RAW_MAX   262144        /* response/image fetch buffer (256 KB) */
-#define TEXT_MAX  49152         /* token text pool (< 65536: token off is uint16) */
-#define TOK_MAX   7000
+#define RAW_MAX   524288        /* response/image fetch buffer (512 KB) — large real pages (e.g. Wikipedia) exceed 256 KB */
+#define TEXT_MAX  65000         /* token text pool (< 65536: token off is uint16; this is the safe max under that) */
+#define TOK_MAX   9500          /* rendered tokens; sized to fill the larger TEXT_MAX (~7 bytes of text/token) */
 #define SCRIPT_MAX 16384        /* concatenated inline <script> text run per page */
 #define HREF_MAX  8192
 #define LINK_MAX  512
@@ -2196,7 +2196,7 @@ static void collect_remote_imgs(browser_t *b) {
                                 if (scratch[x]=='\r'&&scratch[x+1]=='\n'&&scratch[x+2]=='\r'&&scratch[x+3]=='\n') { bo = x + 4; break; }
                             int blen = n - bo;
                             if (bo > 0 && http_is_chunked((const char *)scratch, bo))
-                                blen = http_dechunk((char *)scratch + bo, blen, RAW_MAX);
+                                blen = http_dechunk((char *)scratch + bo, blen, IMG_READ_MAX);   /* bound = the actual scratch buffer, not RAW_MAX */
                             if (blen > 0) {
                                 uint8_t *data = kmalloc((unsigned long)blen);
                                 if (data) {

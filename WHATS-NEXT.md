@@ -1,5 +1,17 @@
 # What's next
 
+> **(M895) Browser — larger page capacity so big real pages aren't truncated.** With QEMU user-mode
+> networking reaching the real internet, testing revealed the flagship browser hard-caps the page fetch at
+> 256 KB (`RAW_MAX`): `en.wikipedia.org/wiki/Unix` fetched exactly `262143b` (256 KB−1) and was cut off.
+> Bumped the (all-heap, `kzalloc`/`kmalloc`) capacities: `RAW_MAX` 256 KB→512 KB (fetch/DOM buffer),
+> `TEXT_MAX` 49152→65000 (token text pool — the safe max under the uint16 token offset), `TOK_MAX`
+> 7000→9500 (rendered tokens, sized to fill the larger text pool). Now the same article fetches its full
+> `338552b` (no truncation) and renders ~1.3× more text. Also a defensive fix: the remote-`<img>` scratch
+> de-chunk bound was `RAW_MAX` but the buffer is `IMG_READ_MAX` (128 KB) — corrected to `IMG_READ_MAX` so
+> it's right regardless of `RAW_MAX`. (Rendering beyond ~64 KB of text needs widening the `tok_t` offset
+> from uint16 to uint32 — a riskier kernel-side change deferred for supervised context.) Verified in-guest:
+> Wikipedia fetches 338 KB, OS boots fine (memory OK), real pages render. `make check` green (35 suites).
+
 > **(M894) Demo — `DEMO.SH` showcases the complete control-flow + expansion set.** Rounded out the bundled
 > `source DEMO.SH` to demonstrate this session's later additions: a `grade()` function using `elif`
 > (`echo elif: 85 grades $(grade 85)` → B), a `case red in red) … ;; *) … esac` (→ matched red), and
