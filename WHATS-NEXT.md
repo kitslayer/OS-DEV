@@ -1,5 +1,11 @@
 # What's next
 
+> **(M862) Shell — `head -c N` / `tail -c N` (byte mode).** head/tail only counted lines (`-N`); added `-c N`
+> for the first/last N *bytes* (binary inspection, byte-precise slicing). Shares the existing per-file loop
+> and the screen-only `...` hint. Verified in-guest on `abcdefghij`: `head -c 4` → `abcd`, `tail -c 4` →
+> `hij` (last 4 bytes incl. newline), `head -2` (line mode) unchanged. `make check` 32 suites; shell.c
+> warnings unchanged (11).
+
 > **(M861) Shell — `cut` accepts non-contiguous field/char lists (`-f1,3`).** `cut` only did one contiguous
 > range, so `cut -d, -f1,3` (common for CSV column picking) wasn't possible. The spec now parses a comma list
 > of `N`/`N-M` ranges into arrays (a `cut_sel` helper tests membership), and the field separator is emitted

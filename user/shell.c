@@ -331,8 +331,9 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "head ")) {
             const char *p = line + 5;
             while (*p == ' ') p++;
-            int cnt = 20;                                  /* default; -N sets the line count */
-            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
+            int cnt = 20, bytes = 0;                       /* -N lines (default 20); -c N = first N bytes */
+            if (*p == '-' && p[1] == 'c') { bytes = 1; p += 2; while (*p == ' ') p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
+            else if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
             const char *cq = p; int fc = 0;                /* count files -> name headers only if >1 */
             while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
             int any = 0;
@@ -345,10 +346,11 @@ static int run_command(char *line, char *cwd) {
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("head: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
-                int i = 0, lines = 0;
-                for (; i < n && lines < cnt; i++) if (buf[i] == '\n') lines++;
+                int i;
+                if (bytes) i = (int)(n < cnt ? n : cnt);       /* -c: first cnt bytes */
+                else { i = 0; int lines = 0; for (; i < n && lines < cnt; i++) if (buf[i] == '\n') lines++; }
                 buf[i] = '\0'; print(buf);
-                if (i < n && !cap_active()) print("...\n");   /* "more lines" hint for the screen; never into a pipe/$() data stream */
+                if (i < n && !cap_active()) print("...\n");   /* "more" hint for the screen; never into a pipe/$() data stream */
                 free(buf);
             }
             if (!any) print("usage: head <file>...\n");
@@ -375,8 +377,9 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "tail ")) {
             const char *p = line + 5;
             while (*p == ' ') p++;
-            int cnt = 20;                                  /* default; -N sets the line count */
-            if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
+            int cnt = 20, bytes = 0;                       /* -N lines (default 20); -c N = last N bytes */
+            if (*p == '-' && p[1] == 'c') { bytes = 1; p += 2; while (*p == ' ') p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
+            else if (*p == '-' && p[1] >= '0' && p[1] <= '9') { p++; cnt = 0; while (*p >= '0' && *p <= '9' && cnt < 100000000) cnt = cnt * 10 + (*p++ - '0'); if (cnt < 1) cnt = 20; while (*p == ' ') p++; }
             const char *cq = p; int fc = 0;
             while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fc++; while (*cq && *cq != ' ') cq++; }
             int any = 0;
@@ -390,13 +393,18 @@ static int run_command(char *line, char *cwd) {
                 if (!buf) { print("tail: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 buf[n] = '\0';
-                int total = 0;
-                for (int i = 0; i < n; i++) if (buf[i] == '\n') total++;
-                if (n > 0 && buf[n - 1] != '\n') total++;
-                int skip = total > cnt ? total - cnt : 0;     /* keep the last cnt lines */
-                int i = 0, sk = 0;
-                while (i < n && sk < skip) { if (buf[i++] == '\n') sk++; }
-                print(buf + i);
+                if (bytes) {                                  /* -c: last cnt bytes */
+                    int start = (int)(n > cnt ? n - cnt : 0);
+                    print(buf + start);
+                } else {
+                    int total = 0;
+                    for (int i = 0; i < n; i++) if (buf[i] == '\n') total++;
+                    if (n > 0 && buf[n - 1] != '\n') total++;
+                    int skip = total > cnt ? total - cnt : 0;     /* keep the last cnt lines */
+                    int i = 0, sk = 0;
+                    while (i < n && sk < skip) { if (buf[i++] == '\n') sk++; }
+                    print(buf + i);
+                }
                 free(buf);
             }
             if (!any) print("usage: tail <file>...\n");
