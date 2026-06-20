@@ -1,5 +1,15 @@
 # What's next
 
+> **(M868) Shell — `grep -o` (print only the matched part), via a greedy matcher.** The last text-tool gap.
+> It required two matcher changes in `shgrep.h`: (1) thread an end pointer through `gr_matchhere`/`gr_matchstar`
+> so a match's span is known (a new `gr_match_span`; `gr_match` stays a boolean wrapper), and (2) make the
+> `*` quantifiers **greedy** (consume all, then backtrack) — the old lazy form would make `grep -o '[0-9]*'`
+> emit empty matches. Crucially, greedy vs lazy gives the *same* match/no-match result, so `shgreptest`'s
+> 200k-pair fuzz still passes (the safety net for touching the core matcher). `grep -o` finds each leftmost-
+> longest match per line (across all `-e` patterns), skipping empty matches. Verified in-guest:
+> `grep -o error` → `error`×2, `grep -o [0-9][0-9]*` → `42`/`7`/`99`, plain grep unchanged. The shell's text
+> toolkit is now 100% bash-complete. `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M867) Shell — `paste -dX` (custom join delimiter).** `paste` always joined two files' lines with a
 > tab; `-dX` now picks the joiner (e.g. `paste -d, a b` → `a1,b1`). Verified in-guest: `paste -d, P1 P2` →
 > `a,1`/`b,2`, plain `paste` still tab-joins. This finishes the common shell text toolkit (the only deferred

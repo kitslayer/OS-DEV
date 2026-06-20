@@ -8,7 +8,7 @@
 
 static char gr_lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
 
-static int gr_matchhere(const char *re, const char *t, int ci);
+static int gr_matchhere(const char *re, const char *t, int ci, const char **endp);  /* endp (or NULL): where the match ended, for grep -o */
 
 /* length of a [..] class starting at re[0]=='[' (a leading ] is a literal member) */
 static int gr_classlen(const char *re) {
@@ -29,36 +29,52 @@ static int gr_inclass(const char *re, int ch, int ci) {
     }
     return neg ? !ok : ok;
 }
-static int gr_matchstar(int c, const char *re, const char *t, int ci) {
-    do { if (gr_matchhere(re, t, ci)) return 1; }
-    while (*t && (c == '.' || (ci ? gr_lc(*t) == gr_lc((char)c) : (unsigned char)*t == (unsigned char)c)) && (t++, 1));
+/* `c*`: greedy — consume every c, then backtrack so the rest matches at the
+ * longest point first (so grep -o reports the longest match). Boolean result is
+ * identical to a lazy quantifier — a match exists or it doesn't either way. */
+static int gr_matchstar(int c, const char *re, const char *t, int ci, const char **endp) {
+    const char *start = t;
+    while (*t && (c == '.' || (ci ? gr_lc(*t) == gr_lc((char)c) : (unsigned char)*t == (unsigned char)c))) t++;
+    for (;;) {
+        if (gr_matchhere(re, t, ci, endp)) return 1;
+        if (t == start) break;
+        t--;
+    }
     return 0;
 }
-static int gr_matchhere(const char *re, const char *t, int ci) {
-    if (re[0] == '\0') return 1;
+static int gr_matchhere(const char *re, const char *t, int ci, const char **endp) {
+    if (re[0] == '\0') { if (endp) *endp = t; return 1; }
     if (re[0] == '[') {                                            /* [..] character class, incl. [..]* */
         int cl = gr_classlen(re);
-        if (re[cl] == '*') { const char *rest = re + cl + 1;
-            do { if (gr_matchhere(rest, t, ci)) return 1; } while (*t && gr_inclass(re, (unsigned char)*t, ci) && (t++, 1));
+        if (re[cl] == '*') { const char *rest = re + cl + 1, *start = t;
+            while (*t && gr_inclass(re, (unsigned char)*t, ci)) t++;   /* greedy */
+            for (;;) { if (gr_matchhere(rest, t, ci, endp)) return 1; if (t == start) break; t--; }
             return 0; }
-        if (*t && gr_inclass(re, (unsigned char)*t, ci)) return gr_matchhere(re + cl, t + 1, ci);
+        if (*t && gr_inclass(re, (unsigned char)*t, ci)) return gr_matchhere(re + cl, t + 1, ci, endp);
         return 0;
     }
     if (re[0] == '\\' && re[1]) {                                  /* escaped literal: \. \* \^ … */
-        if (re[2] == '*') return gr_matchstar((unsigned char)re[1], re + 3, t, ci);
-        if (*t && (ci ? gr_lc(*t) == gr_lc(re[1]) : *t == re[1])) return gr_matchhere(re + 2, t + 1, ci);
+        if (re[2] == '*') return gr_matchstar((unsigned char)re[1], re + 3, t, ci, endp);
+        if (*t && (ci ? gr_lc(*t) == gr_lc(re[1]) : *t == re[1])) return gr_matchhere(re + 2, t + 1, ci, endp);
         return 0;
     }
-    if (re[1] == '*') return gr_matchstar((unsigned char)re[0], re + 2, t, ci);
-    if (re[0] == '$' && re[1] == '\0') return *t == '\0';
+    if (re[1] == '*') return gr_matchstar((unsigned char)re[0], re + 2, t, ci, endp);
+    if (re[0] == '$' && re[1] == '\0') { if (*t == '\0') { if (endp) *endp = t; return 1; } return 0; }
     if (*t && (re[0] == '.' || (ci ? gr_lc(*t) == gr_lc(re[0]) : (unsigned char)*t == (unsigned char)re[0])))
-        return gr_matchhere(re + 1, t + 1, ci);
+        return gr_matchhere(re + 1, t + 1, ci, endp);
     return 0;
 }
 static int gr_match(const char *re, const char *t, int ci) {     /* match anywhere (^ anchors to start) */
-    if (re[0] == '^') return gr_matchhere(re + 1, t, ci);
-    do { if (gr_matchhere(re, t, ci)) return 1; } while (*t++);
+    const char *e;
+    if (re[0] == '^') return gr_matchhere(re + 1, t, ci, &e);
+    do { if (gr_matchhere(re, t, ci, &e)) return 1; } while (*t++);
     return 0;
+}
+/* grep -o: leftmost match's span [*ms, *me). With the greedy matcher this is the
+ * leftmost-longest match at that start. Returns 1 if a match was found. */
+static int gr_match_span(const char *re, const char *t, int ci, const char **ms, const char **me) {
+    if (re[0] == '^') { const char *e; if (gr_matchhere(re + 1, t, ci, &e)) { *ms = t; *me = e; return 1; } return 0; }
+    for (;; t++) { const char *e; if (gr_matchhere(re, t, ci, &e)) { *ms = t; *me = e; return 1; } if (!*t) return 0; }
 }
 
 /* Filename globbing for `ls *.txt` etc.: '*' (any run, greedy with backtrack),
