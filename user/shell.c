@@ -453,11 +453,26 @@ static int run_command(char *line, char *cwd) {
             char buf[8192];                 /* hold a full directory (~90+ files) */
             sys_list(buf, sizeof(buf));
             print(buf);
-        } else if (startswith(line, "ls ")) {     /* ls <dir>: briefly cd there, list, restore cwd */
-            const char *dir = line + 3; while (*dir == ' ') dir++;
-            char buf[8192];
-            if (sys_chdir(dir) < 0) { print("ls: no such directory: "); print(dir); print("\n"); g_status = 1; }
-            else { sys_list(buf, sizeof buf); print(buf); sys_chdir(cwd); }
+        } else if (startswith(line, "ls ")) {     /* ls <name>...: list each dir's contents, name each file (glob-friendly: `ls *.txt`) */
+            const char *p = line + 3; char buf[8192];
+            int nargs = 0;
+            { const char *q = p; while (*q) { while (*q == ' ') q++; if (!*q) break; nargs++; while (*q && *q != ' ') q++; } }
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0;
+                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                name[j] = 0;
+                if (sys_chdir(name) >= 0) {                    /* a directory: list its contents (header only when several args) */
+                    if (nargs > 1) { print(name); print(":\n"); }
+                    sys_list(buf, sizeof buf); print(buf);
+                    sys_chdir(cwd);
+                } else {
+                    char b;
+                    if (sys_readfile(name, &b, 1) >= 0) { print(name); print("\n"); }   /* an existing file: just its name */
+                    else { print("ls: no such file: "); print(name); print("\n"); g_status = 1; }
+                }
+            }
         } else if (startswith(line, "cat ")) {
             const char *p = line + 4; int any = 0;
             while (*p) {                                  /* concatenate each space-separated file */

@@ -1,5 +1,14 @@
 # What's next
 
+> **(M887) Shell — `ls` handles multiple args / globs / files (`ls *.txt`, `ls FILE`).** Found by testing
+> `ls *.TXT | wc -l`: it printed `ls: no such directory: README.TXT HELLO.TXT MOTD.TXT GUIDE.TXT` — `ls`
+> took the *entire* rest of the line as one directory name, so a glob expansion (or any multi-name list, or
+> a plain file) failed. Rewrote the `ls <args>` branch to walk space-separated names: a directory is listed
+> (`sys_chdir`+`sys_list`, with a `name:` header only when several args are given), an existing file just
+> prints its name (`sys_readfile` probe), else a per-name "no such file" error. Now `ls *.txt`, `ls FILE`,
+> `ls dir1 dir2`, and the ubiquitous `ls *.ext | wc -l` all work; single-`ls`/`ls dir` unregressed.
+> Verified in-guest. `make check` green (34 suites); shell.c warnings 11.
+
 > **(M886) Shell — `grep` now sets `$?` (0 on match, 1 on no-match), so `grep … && …` works.** Found by
 > testing pipe exit-status propagation: `echo hi | grep xyz; echo $?` printed `0` even though nothing
 > matched. The `grep` builtin counted hits but never set `g_status`, so it kept `run_command`'s default 0.
