@@ -1,5 +1,11 @@
 # What's next
 
+> **(M830) Shell — `rm` removes multiple files.** `rm` only deleted a single name, so `rm a b` (or a
+> glob-expanded `rm *.tmp`) failed by treating the whole argument as one filename. It now loops over each
+> space-separated file, deleting each and reporting per-file (failures set `$?`). `make check` 30/30. Verified
+> in-guest: created RA.TMP/RB.TMP/RC.LOG, `rm RA.TMP RB.TMP` removed both, and `ls RA.TMP` confirmed it was
+> gone.
+
 > **(M829) Docs — README reflects the shell & editor.** Completes the docs-accuracy pass (Welcome M815,
 > About M817). The baked `README.MD` (rendered live by the browser's Markdown engine) listed desktop / JS /
 > browser / Markdown but omitted the scriptable shell and the text editor — major hand-written components.

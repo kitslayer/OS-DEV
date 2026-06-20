@@ -1876,8 +1876,17 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "rm ")) {
-            if (sys_delete(line + 3) < 0) print("rm: no such file, or directory not empty\n");
-            else { print("removed "); print(line + 3); print("\n"); }
+            const char *p = line + 3; int any = 0;       /* remove each space-separated file (so `rm *.tmp` / `rm a b` work) */
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0;
+                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                name[j] = 0; any = 1;
+                if (sys_delete(name) < 0) { print("rm: no such file, or dir not empty: "); print(name); print("\n"); g_status = 1; }
+                else { print("removed "); print(name); print("\n"); }
+            }
+            if (!any) print("usage: rm <file>...\n");
         } else if (startswith(line, "touch ")) {
             const char *name = line + 6;
             char probe[1];
