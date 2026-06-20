@@ -1,5 +1,11 @@
 # What's next
 
+> **(M832) Shell — `cp`/`mv` into a directory.** `cp SRC DST` / `mv SRC DST` treated DST as a literal target
+> name, so `cp file dir/` made a *file* called `dir` rather than `dir/file`. Now, when DST is an existing
+> directory (detected with the same transient chdir-test as `ls <dir>`), the destination becomes
+> `DST/basename(SRC)`. `make check` 30/30. Verified in-guest: `mkdir cpdir; echo content > cpf.txt;
+> cp cpf.txt cpdir` reported `copied cpf.txt -> cpdir/cpf.txt`, and `ls cpdir` showed `CPF.TXT` inside.
+
 > **(M831) Shell — `mkdir`/`touch` accept multiple names.** Like `rm` (M830), both were single-argument, so
 > `mkdir a b c` / `touch a b c` failed by treating the whole argument as one name. Both now loop over each
 > space-separated name, creating each and reporting per-name (failures set `$?`). `make check` 30/30. Verified

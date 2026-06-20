@@ -1876,11 +1876,23 @@ static int run_command(char *line, char *cwd) {
                 if (!buf)                print("cp/mv: file too large (out of memory)\n");
                 else if (n < 0)          print("no such file\n");
                 else if (n == (long)cap) print("cp/mv: file too large to copy\n");
-                else if (sys_writefile(p, buf, (unsigned long)n) < 0) print("write failed\n");
                 else {
-                    if (move && !streq(src, p)) sys_delete(src);   /* never delete when src==dst */
-                    print(move ? "moved " : "copied "); print(src);
-                    print(" -> "); print(p); print("\n");
+                    /* If the destination is a directory, copy into it as dir/basename(src). */
+                    char dst[128]; int isdir = 0;
+                    if (sys_chdir(p) >= 0) { isdir = 1; sys_chdir(cwd); }
+                    if (isdir) {
+                        const char *base = src; for (const char *s = src; *s; s++) if (*s == '/') base = s + 1;
+                        int d = 0; for (const char *s = p; *s && d < 126; s++) dst[d++] = *s;
+                        if (d > 0 && dst[d-1] != '/' && d < 126) dst[d++] = '/';
+                        for (const char *s = base; *s && d < 127; s++) dst[d++] = *s;
+                        dst[d] = 0;
+                    } else { int d = 0; for (const char *s = p; *s && d < 127; s++) dst[d++] = *s; dst[d] = 0; }
+                    if (sys_writefile(dst, buf, (unsigned long)n) < 0) print("write failed\n");
+                    else {
+                        if (move && !streq(src, dst)) sys_delete(src);   /* never delete when src==dst */
+                        print(move ? "moved " : "copied "); print(src);
+                        print(" -> "); print(dst); print("\n");
+                    }
                 }
                 free(buf);
             }
