@@ -3748,7 +3748,7 @@ void browser_key(browser_t *b, int c) {
         break; }
     case 'a':           browser_bookmark(b); break; /* add current URL to SITES */
     case '/': case 'e': b->editing = 1; b->edit_fresh = 1;    break;
-    case '\\':          b->finding = 1; b->findq[0] = 0; b->find_tok = -1; set_status(b, "find: "); break;
+    case '\\': case 0x86: b->finding = 1; b->findq[0] = 0; b->find_tok = -1; set_status(b, "find: "); break;  /* \ or Ctrl-F */
     case '<':            browser_back(b);    break; /* back    (also Backspace) */
     case '>':            browser_forward(b); break; /* forward */
     case '\t': case 'n': select_link(b, +1); break; /* next link (keyboard nav) */

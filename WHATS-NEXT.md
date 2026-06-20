@@ -1,5 +1,10 @@
 # What's next
 
+> **(M820) Browser — Ctrl-F find alias.** The browser's in-page find was bound to vim-style `\`, which most
+> users won't guess. Added Ctrl-F (0x86) as an alias for the same find mode, so the universal find key works.
+> One-line change to the key dispatch. `make check` 30/30. Verified in-guest: launched the browser, pressed
+> Ctrl-F, and the `find:` prompt appeared.
+
 > **(M819) Editor — open another file in place (Ctrl-O).** Completes the editor's file management
 > (open/save/save-as). Ctrl-O prompts `open:`, saves the current file first (unless read-only, to avoid
 > writing truncated data), then loads the typed file into the buffer. Factored the load path into a
