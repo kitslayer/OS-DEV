@@ -312,6 +312,12 @@ static int run_command(char *line, char *cwd) {
           const char *fb = wl ? func_get(line, wl) : 0;
           if (fb && g_func_depth < 8) {
               char bc[256]; int bi = 0; while (fb[bi] && bi < 255) { bc[bi] = fb[bi]; bi++; } bc[bi] = 0;   /* snapshot the body */
+              static const char pn1[11] = {'1','2','3','4','5','6','7','8','9','@','#'};   /* save caller's params so a nested call gets local scope */
+              char saved[11][160]; char had[11];
+              for (int s = 0; s < 11; s++) {
+                  char nm[2] = { pn1[s], 0 }; const char *ov = vget(nm, 1); had[s] = ov ? 1 : 0;
+                  if (ov) { int k = 0; while (ov[k] && k < 159) { saved[s][k] = ov[k]; k++; } saved[s][k] = 0; }
+              }
               const char *a = line + wl; while (*a == ' ') a++;   /* bind $1..$9 to the call args */
               vset("@", 1, a);                                    /* $@ = all args; $# = count (set below) */
               int pn = 0;
@@ -325,6 +331,10 @@ static int run_command(char *line, char *cwd) {
               for (int z = pn; z < 9; z++) { char pname[2] = { (char)('1' + z), 0 }; vset(pname, 1, ""); }   /* clear unused params */
               { char cb[12]; itoa_simple(pn, cb); vset("#", 1, cb); }   /* $# = arg count */
               g_func_depth++; run_input_line(bc, cwd); g_func_depth--;
+              for (int s = 0; s < 11; s++) {   /* restore caller's params (revert this call's scope) */
+                  char nm[2] = { pn1[s], 0 };
+                  if (had[s]) vset(nm, 1, saved[s]); else vunset(nm);
+              }
               continue;
           } }
         if (line[0] == '\0') {
@@ -2660,8 +2670,20 @@ static int run_while(char *line, char *cwd) {
     return doexit;
 }
 
-/* Run one logical input line: a `for`/`while` loop or `if`, else a ';'-separated
- * list of && / || pipelines. Returns 1 if it ran the `exit` builtin. */
+/* Is keyword `kw` a whole word at p? (the caller has already established that p is
+ * at a command position.) Lets the ';'-splitter keep `if…fi` / `while…done` /
+ * `for…done` constructs intact so they can follow a ';' or live in a function body. */
+static int word_at(const char *p, const char *kw) {
+    int i = 0; while (kw[i] && p[i] == kw[i]) i++;
+    if (kw[i]) return 0;
+    char a = p[i];
+    return a == 0 || a == ' ' || a == ';';
+}
+
+/* Run one logical input line: a ';'-separated list, where each item may be a
+ * `for`/`while`/`if` construct or a && / || pipeline. The splitter tracks
+ * control-construct nesting so a construct's internal ';'s aren't break points.
+ * Returns 1 if it ran the `exit` builtin. */
 static int run_input_line(char *line, char *cwd) {
     char *t = line; while (*t == ' ') t++;
     if (startswith(t, "js -e ")) { run_js_inline(t + 6); g_status = 0; return 0; }   /* literal code (its >|&; are JS, not shell) */
@@ -2680,21 +2702,35 @@ static int run_input_line(char *line, char *cwd) {
               }
           }
       } }
-    if (startswith(t, "for "))   return run_for(t, cwd);
-    if (startswith(t, "while ")) return run_while(t, cwd);
-    if (startswith(t, "if "))    return run_if(t, cwd);
     char *seg = line; int doexit = 0;
     while (seg && !doexit) {
-        char *semi = seg; int pd = 0;                  /* find the next top-level ';', skipping $( ... ) / $(( ... )) */
+        /* find the next top-level ';': skip $( ... ) / $(( ... )), and stay inside
+         * if…fi / while…done / for…done (cd tracks construct depth; atcmd marks a
+         * command position, where a leading keyword opens/closes a construct). */
+        char *semi = seg; int pd = 0, cd = 0, atcmd = 1;
         while (*semi) {
-            if (semi[0] == '$' && semi[1] == '(') { pd++; semi += 2; continue; }
+            if (semi[0] == '$' && semi[1] == '(') { pd++; semi += 2; atcmd = 0; continue; }
             if (pd > 0) { if (*semi == '(') pd++; else if (*semi == ')') pd--; semi++; continue; }
-            if (*semi == ';') break;
-            semi++;
+            if (*semi == ';') { if (cd == 0) break; semi++; atcmd = 1; continue; }
+            if (*semi == ' ') { semi++; continue; }
+            if (atcmd) {
+                if (word_at(semi, "if") || word_at(semi, "for") || word_at(semi, "while")) cd++;
+                else if ((word_at(semi, "fi") || word_at(semi, "done")) && cd > 0) cd--;
+            }
+            int nextcmd = word_at(semi, "then") || word_at(semi, "do") || word_at(semi, "else");
+            while (*semi && *semi != ' ' && *semi != ';') semi++;   /* skip this whole token */
+            atcmd = nextcmd;
         }
         int more = (*semi == ';'); if (more) *semi = 0;
         while (*seg == ' ') seg++;
-        if (*seg && run_andor(seg, cwd)) doexit = 1;
+        if (*seg) {
+            int rc;
+            if (startswith(seg, "for "))        rc = run_for(seg, cwd);
+            else if (startswith(seg, "while ")) rc = run_while(seg, cwd);
+            else if (startswith(seg, "if "))    rc = run_if(seg, cwd);
+            else                                rc = run_andor(seg, cwd);
+            if (rc) doexit = 1;
+        }
         seg = more ? semi + 1 : 0;
     }
     return doexit;

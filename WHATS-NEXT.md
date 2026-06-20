@@ -1,5 +1,20 @@
 # What's next
 
+> **(M876) Shell — functions get local positional-param scope + control constructs work after `;` / in
+> function bodies.** Two parser fixes that, with M875, make recursive and looping functions actually work.
+> (1) *Scope*: a function call now saves the caller's `$1`..`$9`/`$@`/`$#` before binding its own and
+> restores them after the body returns, so a nested call no longer clobbers the caller's args (`outer A`
+> calling `inner X Y` left `$1` = `X`; now it stays `A`). (2) *Control flow*: the `;`-splitter in
+> `run_input_line` only recognised `if`/`while`/`for` as the *first* statement of a line — after a `;`
+> (e.g. inside a function body) the construct's own `;`s split it into bogus commands ("unknown command:
+> then …"). The splitter now tracks construct nesting (a `word_at` keyword check at command positions:
+> `if`/`for`/`while` open, `fi`/`done` close, `then`/`do`/`else` re-arm) so a construct's internal `;`s
+> aren't break points, and each top-level segment is dispatched to `run_for`/`run_while`/`run_if`/`run_andor`.
+> Verified in-guest: `r() { echo enter=$1; if [ $1 -gt 1 ]; then r $(($1 - 1)); fi; echo leave=$1; }; r 3`
+> → `enter=3/2/1, leave=1/2/3` (recursion + scope + arithmetic + if-in-body all at once);
+> `count() { for i in a b; do echo $1-$i; done; }; count P` → `P-a/P-b`; `echo START; for …; done; echo END`
+> works. Plain `;` lists and whole-line loops unregressed. shell.c warnings 11; `make check` green (32 suites).
+
 > **(M875) Shell — `$1`..`$9` (positional params) now work inside `$((…))` arithmetic.** A pre-existing
 > bug found while testing M874's functions: `sh_factor` (in `shmath.h`) skipped a leading `$` and then,
 > seeing a digit, parsed it as a numeric *literal* — so `$(($1 - 1))` evaluated as `1 - 1 = 0` regardless
