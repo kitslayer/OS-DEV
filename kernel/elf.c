@@ -46,6 +46,9 @@ typedef struct {
 } __attribute__((packed)) Elf64_Phdr;
 
 #define PT_LOAD 1
+#define PF_X 0x1   /* segment is executable */
+#define PF_W 0x2   /* segment is writable   */
+#define PF_R 0x4   /* segment is readable    */
 
 static inline uint64_t page_down(uint64_t x) { return x & ~(uint64_t)(PAGE_SIZE - 1); }
 static inline uint64_t page_up(uint64_t x)   { return (x + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1); }
@@ -56,7 +59,7 @@ static inline uint64_t page_up(uint64_t x)   { return (x + PAGE_SIZE - 1) & ~(ui
 
 /* A validated PT_LOAD segment: file bytes [file_off, file_off+filesz) of the
  * image map to [vaddr, vaddr+memsz), the tail beyond filesz being zero (.bss). */
-typedef struct { uint64_t vaddr, memsz, file_off, filesz; } elf_seg_t;
+typedef struct { uint64_t vaddr, memsz, file_off, filesz; uint32_t flags; } elf_seg_t;
 
 /* Validate the ELF header and locate the program-header table. On success,
  * fills the phoff/phnum/phentsize/entry out-params and returns 1; else 0. Reads only
@@ -98,6 +101,7 @@ static int elf_check_phdr(const void *image, uint64_t maxsz, uint64_t phoff,
         return -1;                                                  /* fits below the stack, no overflow */
     seg->vaddr = ph->p_vaddr; seg->memsz = ph->p_memsz;
     seg->file_off = ph->p_offset; seg->filesz = ph->p_filesz;
+    seg->flags = ph->p_flags;
     return 1;
 }
 
@@ -112,7 +116,8 @@ uint64_t elf_load(const void *image, uint64_t maxsz) {
         if (r == 0) continue;      /* not a loadable segment */
         if (r < 0)  return 0;      /* malformed segment: reject the image */
 
-        /* Map every page this segment touches as a user page (once). */
+        /* Map every page this segment touches as a user page (once), writable
+         * for now so we can copy/zero into it. */
         uint64_t start = page_down(s.vaddr);
         uint64_t end   = page_up(s.vaddr + s.memsz);
         for (uint64_t v = start; v < end; v += PAGE_SIZE) {
@@ -126,6 +131,18 @@ uint64_t elf_load(const void *image, uint64_t maxsz) {
 
         /* Copy the file-backed part of the segment into place. */
         memcpy((void *)s.vaddr, (const uint8_t *)image + s.file_off, s.filesz);
+
+        /* Re-protect with the segment's real permissions now the copy is done
+         * (W^X): code becomes read-only + executable, data writable + NX. The
+         * linker emits .text/.rodata page-aligned away from .data/.bss, so each
+         * page belongs to exactly one segment and these flags never conflict. */
+        uint64_t prot = PTE_USER;
+        if (s.flags & PF_W)    prot |= PTE_WRITABLE;
+        if (!(s.flags & PF_X)) prot |= PTE_NX;
+        for (uint64_t v = start; v < end; v += PAGE_SIZE) {
+            uint64_t phys = vmm_translate(v);
+            if (phys) vmm_map(v, phys & ~(uint64_t)(PAGE_SIZE - 1), prot);
+        }
     }
 
     return entry;

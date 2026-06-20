@@ -44,6 +44,10 @@ uint64_t vmm_translate(uint64_t virt) {
 int vmm_map(uint64_t virt, uint64_t phys, uint64_t flags) {
     (void)phys; (void)flags;
     uint64_t pg = virt & ~(PG - 1);
+    /* Re-mapping an already-mapped page (e.g. the loader's W^X re-protect pass)
+     * only rewrites the PTE flags in the real VMM — it never re-allocates or
+     * zeroes the frame. Model that by keeping the existing page contents. */
+    if (is_mapped(pg)) return 0;
     void *p = mmap((void *)pg, PG, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
     if (p == MAP_FAILED) { perror("mmap"); abort(); }

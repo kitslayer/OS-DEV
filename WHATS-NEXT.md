@@ -1,5 +1,19 @@
 # What's next
 
+> **(M796) Security — read-only code + NX data (W^X, part 2, complete).** Finishes what M795 started. Each
+> userspace program linked into a single RWX `PT_LOAD` segment (the ELF loader mapped the whole image
+> writable+executable), so every app's code was self-modifiable and its `.data`/`.bss` was executable — and
+> `ld` warned "LOAD segment with RWX permissions" once per app (58 warnings). Now `user.ld` uses explicit
+> `PHDRS` to split each app into a read-only+executable segment (`.text`/`.rodata`, FLAGS 0x5) and a
+> writable+NX segment (`.data`/`.bss`, FLAGS 0x6), page-aligned so no page is shared. The loader (`elf.c`)
+> carries `p_flags` per segment and, after the (writable) copy, re-protects each page to its real
+> permissions: code read-only+executable, data writable+non-executable. Result: the full W^X invariant holds
+> for userspace (no page is both writable and executable), and all 58 RWX linker warnings are gone (only the
+> ring-0 kernel ELF remains, a separate effort). Fixed the elftest stub's `vmm_map` to model re-mapping as
+> flags-only (it was re-`mmap`-ing and wiping copied bytes — a test artifact, not a loader bug). `make check`
+> 30/30 (elftest loads all 57 shipped apps through the new path). Verified in-guest: shell, the editor
+> (typed two lines), DOOM, and the browser all run normally with read-only code + NX data.
+
 > **(M795) Security — non-executable user stack & heap (W^X, part 1).** Userspace ran fully RWX: the ELF
 > loader and the stack/heap allocators mapped every ring-3 page `PTE_WRITABLE | PTE_USER` with no NX bit, so
 > injected data on the stack or heap was directly executable — the classic shellcode vector. The `PTE_NX`
