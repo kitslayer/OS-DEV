@@ -20,6 +20,12 @@ static void itoa_simple(int v, char *out) {
     out[j] = '\0';
 }
 
+/* Exit status of the last command (0 = success), exposed as $? and consumed by
+ * the && / || operators. run_command resets it to 0 on entry; failure paths
+ * (command-not-found, a missing file via slurp(), cd/mkdir failure, `false`)
+ * set it to 1. */
+static int g_status;
+
 /* Read an entire file into a malloc'd, NUL-terminated buffer (caller free()s).
  * The read API has no size query, so grow the buffer until the read no longer
  * fills it — commands then see the whole file, not a fixed 2KB prefix. *len gets
@@ -32,7 +38,7 @@ static char *slurp(const char *name, long *len) {
         cap <<= 1; free(b); b = malloc(cap);
         if (b) n = sys_readfile(name, b, cap - 1);
     }
-    if (!b || n < 0 || n == (long)(cap - 1)) { free(b); *len = -1; return 0; }
+    if (!b || n < 0 || n == (long)(cap - 1)) { free(b); *len = -1; g_status = 1; return 0; }
     b[n] = 0; *len = n; return b;
 }
 /* parse a leading (optionally signed) integer from a line, for `sort -n`. */
@@ -173,6 +179,12 @@ static int expand_vars(const char *src, char *dst, int cap){
             if (neg) tmp[ti++]='-';
             while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
             i = (int)(q - src);
+        } else if (src[i]=='$' && src[i+1]=='?'){                   /* $? -> last exit status */
+            char tmp[12]; int ti=0; unsigned uv=(unsigned)(g_status<0?0:g_status);
+            if (uv==0) tmp[ti++]='0';
+            while (uv){ tmp[ti++]=(char)('0'+uv%10); uv/=10; }
+            while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
+            i += 2;
         } else if (src[i]=='$'){                                    /* $NAME / ${NAME} */
             int br=(src[i+1]=='{'); int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
             const char *v=(e>s)?vget(src+s,e-s):0;
@@ -184,6 +196,7 @@ static int expand_vars(const char *src, char *dst, int cap){
 }
 
 static int run_command(char *line, char *cwd) {
+    g_status = 0;                          /* assume success; failure paths set $? = 1 */
     do {
         if (line[0] == '\0') {
             continue;
@@ -197,6 +210,7 @@ static int run_command(char *line, char *cwd) {
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
+            print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  Tab=complete  ^W/^U/^K=kill  ^C=cancel\n");
@@ -723,6 +737,10 @@ static int run_command(char *line, char *cwd) {
             else { print(line + 8); print(" -> "); print(ip); }
         } else if (streq(line, "pwd")) {
             print(cwd); print("\n");
+        } else if (streq(line, "true")) {
+            /* exit status 0 (already set) — useful with && / || */
+        } else if (streq(line, "false")) {
+            g_status = 1;                          /* exit status 1 — useful with && / || */
         } else if (startswith(line, "crypt ")) {
             char *p = line + 6, fn[32]; int i = 0;
             while (*p == ' ') p++;
@@ -940,11 +958,11 @@ static int run_command(char *line, char *cwd) {
             long n = sys_tree(tb, sizeof(tb));
             if (n <= 0) print("(empty)\n"); else { tb[n] = 0; print(tb); }
         } else if (startswith(line, "mkdir ")) {
-            if (sys_mkdir(line + 6) < 0) print("mkdir: failed (exists?)\n");
+            if (sys_mkdir(line + 6) < 0) { print("mkdir: failed (exists?)\n"); g_status = 1; }
             else { print("created "); print(line + 6); print("/\n"); }
         } else if (startswith(line, "cd ")) {
             char *path = line + 3;
-            if (sys_chdir(path) < 0) print("cd: no such directory\n");
+            if (sys_chdir(path) < 0) { print("cd: no such directory\n"); g_status = 1; }
             else if (streq(path, "/")) { cwd[0] = '/'; cwd[1] = 0; }
             else if (streq(path, "..")) {
                 int n = (int)ustrlen(cwd);
@@ -1760,6 +1778,7 @@ static int run_command(char *line, char *cwd) {
             print("unknown command: ");
             print(line);
             print("  (try 'help')\n");
+            g_status = 1;
         }
     } while (0);
     return 0;
@@ -1931,6 +1950,33 @@ static int run_line(char *line, char *cwd) {
     return run_command(cmd, cwd);                /* 1 only for "exit" */
 }
 
+/* Run a ';'-separated segment that may contain && / || operators, left to
+ * right, honouring each command's exit status ($?: 0 = success). A single |
+ * (pipe) or & is left intact for run_line — only the doubled forms are operators
+ * here, and they're matched on the raw text so arithmetic like $((a & b)) is
+ * untouched. Returns 1 if a command was the "exit" builtin. */
+static int run_andor(char *seg, char *cwd) {
+    char *p = seg;
+    int run_this = 1, exitflag = 0;
+    while (p) {
+        char *op = p; int oplen = 0;
+        while (*op) {
+            if ((op[0] == '&' && op[1] == '&') || (op[0] == '|' && op[1] == '|')) { oplen = 2; break; }
+            op++;
+        }
+        char opc = oplen ? op[0] : 0;
+        if (oplen) *op = 0;                            /* terminate this command */
+        while (*p == ' ') p++;                         /* trim leading spaces */
+        char *e = p; while (*e) e++;                   /* ...and trailing ones, so */
+        while (e > p && e[-1] == ' ') *--e = 0;        /* "true && .." matches streq("true") */
+        if (run_this && *p && run_line(p, cwd)) exitflag = 1;
+        if      (opc == '&') run_this = (g_status == 0);   /* &&: next runs only on success */
+        else if (opc == '|') run_this = (g_status != 0);   /* ||: next runs only on failure */
+        p = oplen ? op + oplen : 0;
+    }
+    return exitflag;
+}
+
 int main(void) {
     print("\n");
     print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
@@ -1965,7 +2011,7 @@ int main(void) {
             char *semi = seg; while (*semi && *semi != ';') semi++;
             int more = (*semi == ';'); if (more) *semi = 0;
             while (*seg == ' ') seg++;              /* trim leading space so a non-piped command still matches */
-            if (*seg && run_line(seg, cwd)) doexit = 1;   /* skip empty segments; run_line returns 1 only for "exit" */
+            if (*seg && run_andor(seg, cwd)) doexit = 1;  /* skip empty segments; handles && / || within the segment */
             seg = more ? semi + 1 : 0;
         }
         if (doexit) break;

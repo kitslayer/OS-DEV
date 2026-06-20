@@ -1,5 +1,17 @@
 # What's next
 
+> **(M799) Shell — `&&` / `||` conditional execution + `$?`.** The shell could chain with `;` and `|` but had
+> no conditional execution and no exit status. Added a `g_status` exit code (0 = success) reset at each
+> `run_command` and set to 1 on the real failure paths: command-not-found, a missing file (set once in the
+> shared `slurp()` helper, so it covers all ~20 file-reading commands), and `cd`/`mkdir` failure. New `true`
+> and `false` builtins give a deterministic status. `$?` expands to the last status, and a new `run_andor`
+> layer (between the `;` split and the pipe/redirect handling, matching bash precedence `;` < `&&`/`||` < `|`)
+> splits a segment on the doubled `&&`/`||` operators and runs left-to-right, honouring the carried status —
+> single `|`/`&` and arithmetic `$((a & b))` are untouched since only doubled forms match. `make check` 30/30.
+> Verified in-guest: `true && echo` runs, `false && echo` skips, `false || echo` runs, `true || echo` skips,
+> `$?` is 0 after success / 1 after `false`, `cat MISSING || echo` catches, `mkdir d && cd d && pwd` chains to
+> `/d`, and pipes/redirects still work.
+
 > **(M798) Editor — redo (Ctrl-Y).** Completes the undo/redo pair from M797. The undo log already kept popped
 > ops in place above the `un` cursor, so redo needed no separate stack — just a high-water mark `umax` (the
 > number of ops in the log; `[un, umax)` is the redo region). Undo decrements `un` and leaves the ops;
