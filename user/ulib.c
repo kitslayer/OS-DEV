@@ -136,7 +136,22 @@ static char         *g_capbuf = 0;     /* destination buffer, or NULL = not capt
 static unsigned long  g_caplen = 0;    /* bytes written so far */
 static unsigned long  g_capmax = 0;    /* buffer capacity (incl. room for the NUL) */
 
+/* Capture nests: cap_begin/cap_end save+restore the enclosing capture on a small
+ * stack, so a $(...) command substitution that runs another $(...) (e.g.
+ * `$(echo $(echo x))`) keeps the outer capture intact. 16 levels is far beyond
+ * the shell's cmdsub recursion cap, so the stack never fills in practice. */
+#define CAP_STACK 16
+static char         *g_capstk_buf[CAP_STACK];
+static unsigned long  g_capstk_len[CAP_STACK], g_capstk_max[CAP_STACK];
+static int            g_capsp = 0;
+
 void cap_begin(void) {                 /* capture print() into a growable heap buffer */
+    if (g_capsp < CAP_STACK) {         /* push the enclosing capture (if any) so it survives this one */
+        g_capstk_buf[g_capsp] = g_capbuf;
+        g_capstk_len[g_capsp] = g_caplen;
+        g_capstk_max[g_capsp] = g_capmax;
+        g_capsp++;
+    }
     g_capmax = 65536;
     g_capbuf = malloc(g_capmax);
     g_caplen = 0;
@@ -146,7 +161,12 @@ void cap_begin(void) {                 /* capture print() into a growable heap b
 char *cap_end(unsigned long *outlen) { /* stop; hand the malloc'd buffer to the caller (which frees it) */
     char *b = g_capbuf;
     if (outlen) *outlen = g_caplen;
-    g_capbuf = 0; g_caplen = 0; g_capmax = 0;
+    if (g_capsp > 0) {                 /* pop: restore the enclosing capture */
+        g_capsp--;
+        g_capbuf = g_capstk_buf[g_capsp];
+        g_caplen = g_capstk_len[g_capsp];
+        g_capmax = g_capstk_max[g_capsp];
+    } else { g_capbuf = 0; g_caplen = 0; g_capmax = 0; }
     return b;
 }
 

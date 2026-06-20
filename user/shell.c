@@ -2158,12 +2158,13 @@ static void glob_expand(const char *src, char *dst, int dstsz){
 
 /* Command substitution: replace each $(cmd) in `src` with the command's output
  * (trailing newlines stripped, internal newlines -> spaces for word splitting),
- * writing to `dst`. $((..)) arithmetic is left alone. One level only (a single
- * capture buffer, guarded by in_cmdsub). Returns 1 if any substitution happened.
+ * writing to `dst`. $((..)) arithmetic is left alone. Substitutions nest — e.g.
+ * `$(echo $(echo x))` — up to a recursion cap; cap_begin/cap_end stack the output
+ * buffers. Returns 1 if any substitution happened.
  * Shared by run_line (whole command) and run_for (the word list). */
 static int in_cmdsub;
 static int cmdsub_expand(const char *src, char *dst, int dstsz, char *cwd) {
-    if (in_cmdsub) return 0;
+    if (in_cmdsub >= 8) return 0;          /* runaway-recursion guard (CAP_STACK has the headroom) */
     int has = 0;
     for (int i = 0; src[i]; i++) if (src[i]=='$' && src[i+1]=='(' && src[i+2]!='(') { has = 1; break; }
     if (!has) return 0;
@@ -2173,8 +2174,8 @@ static int cmdsub_expand(const char *src, char *dst, int dstsz, char *cwd) {
             int depth = 1, j = i + 2, s = j;
             while (src[j] && depth) { if (src[j]=='(') depth++; else if (src[j]==')') { depth--; if (!depth) break; } j++; }
             char inner[1024]; int ii = 0; for (int k = s; k < j && ii < 1023; k++) inner[ii++] = src[k]; inner[ii] = 0;
-            in_cmdsub = 1; cap_begin(); run_andor(inner, cwd);
-            unsigned long clen; char *cb = cap_end(&clen); in_cmdsub = 0;
+            in_cmdsub++; cap_begin(); run_andor(inner, cwd);
+            unsigned long clen; char *cb = cap_end(&clen); in_cmdsub--;
             if (cb) {
                 while (clen > 0 && cb[clen-1] == '\n') clen--;
                 for (unsigned long k = 0; k < clen && o < dstsz-1; k++) dst[o++] = cb[k]=='\n' ? ' ' : cb[k];
@@ -2191,9 +2192,15 @@ static int cmdsub_expand(const char *src, char *dst, int dstsz, char *cwd) {
  * then peel off output redirection and pipelines, then dispatch. Returns 1 only
  * when the shell should exit (the "exit" command). */
 static int run_line(char *line, char *cwd) {
-    static char gline[1024], vline[1024], aline[1024], subline[1024];
+    static char gline[1024], vline[1024], aline[1024];
+    /* cmdsub_expand recurses back through run_line (a nested $(...)), so its dst
+     * can't be one shared static buffer — the inner call would clobber the outer
+     * one mid-build. Index by the cmdsub depth (in_cmdsub) instead. gline/vline/
+     * aline stay shared: run_line touches them only after cmdsub_expand returns. */
+    static char subline[9][1024];
+    int sbi = in_cmdsub < 9 ? in_cmdsub : 8;
     char *cmd = line;
-    if (cmdsub_expand(cmd, subline, sizeof subline, cwd)) cmd = subline;   /* $(...) command substitution */
+    if (cmdsub_expand(cmd, subline[sbi], sizeof subline[0], cwd)) cmd = subline[sbi];   /* $(...) command substitution */
     if (expand_vars(cmd, vline, sizeof vline)) cmd = vline;   /* $NAME / ${NAME} variable expansion (before glob/pipe/redirect) */
     /* alias expansion: if the first word is an alias, substitute its value
      * (one level only, so a -> b -> a can't loop). */

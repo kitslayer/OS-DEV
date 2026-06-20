@@ -1,5 +1,15 @@
 # What's next
 
+> **(M849) Shell — nested command substitution `$(… $(…) …)` now works.** It silently produced wrong output
+> (`$(echo $(echo deep))` gave `(echo deep)`): the `in_cmdsub` guard hard-blocked the inner `$()`, and
+> `expand_vars` then mangled the leftover `$(` into `(`. Two fixes: (1) `cap_begin`/`cap_end` now stack their
+> output buffers (`user/ulib.c`), so an inner substitution's capture no longer clobbers the outer's, and
+> `in_cmdsub` became a depth counter (cap 8) instead of a hard block; (2) the real subtlety — `run_line`'s
+> `subline` (the substitution dst) was a single `static` buffer, but `cmdsub_expand` recurses back through
+> `run_line`, so a nested `$()` overwrote the outer build mid-flight. It's now indexed by recursion depth.
+> Verified in-guest: `$(echo $(echo deep))`→`deep`, `$(echo $(echo $(echo x3)))`→`x3`,
+> `a-$(echo b)-$(echo $(echo c))`→`a-b-c`. `make check` 32 suites.
+
 > **(M848) Shell — `$(())` gains relational/logical/ternary operators (and a command-sub split bug fix).**
 > The arithmetic evaluator (`user/shmath.h`) stopped at bitwise `|`; it now matches bash's full set —
 > `< <= > >=`, `== !=`, `&&`, `||`, the `?:` ternary, and unary `!` — so scripts can write `max=$((a>b?a:b))`.
