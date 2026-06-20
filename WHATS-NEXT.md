@@ -1,5 +1,13 @@
 # What's next
 
+> **(M842) Shell — Tab completes to the longest common prefix.** The terminal line editor (in `app.c`)
+> already completed a *unique* filename on Tab, but the moment two cwd entries shared a prefix it went dead —
+> the help text promised "Tab=complete" yet ambiguous cases did nothing. Now Tab extends the word to the
+> longest common prefix of every matching entry (case-insensitive match, canonical case emitted), which is
+> bash's default behaviour; a unique match still fills the whole name. Verified in-guest: `cat MO`+Tab →
+> `cat MOTD.TXT` (unique, full); `cat READ`+Tab → `cat README.` (the shared prefix of README.TXT and
+> README.MD — previously a no-op). `make check` 31/31.
+
 > **(M841) QA — fix a `-Wmisleading-indentation` warning introduced this session.** A sweep of the build
 > output found one new warning I'd added in M838 (multi-file cp/mv): the `dpath[d] = 0;` path terminator
 > trailed a `for` loop on the same line. Split onto its own line — no behaviour change. The warning count is

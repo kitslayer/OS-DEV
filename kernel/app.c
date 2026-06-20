@@ -542,7 +542,11 @@ int app_sys_read(char *buf, unsigned max) {
             int plen = (int)n - ws, slash = 0;
             for (int i = ws; i < (int)n; i++) if (buf[i] == '/') slash = 1;
             if (plen > 0 && !slash) {
-                vfs_dirent e[32]; int ne = vfs_list(e, 32), mi = -1, nm = 0;
+                /* Complete to the longest common prefix of every cwd entry whose
+                 * name starts with the typed word (case-insensitive). A unique
+                 * match fills in the whole name; several matches advance to the
+                 * point where they first disagree — bash's default Tab. */
+                vfs_dirent e[32]; int ne = vfs_list(e, 32), fmi = -1, nm = 0, cpl = 0;
                 for (int i = 0; i < ne; i++) {
                     int ok = 1;
                     for (int k = 0; k < plen; k++) {
@@ -551,14 +555,27 @@ int app_sys_read(char *buf, unsigned max) {
                         if (b1 >= 'A' && b1 <= 'Z') b1 += 32;
                         if (a1 != b1) { ok = 0; break; }
                     }
-                    if (ok) { nm++; mi = i; }
+                    if (!ok) continue;
+                    nm++;
+                    if (fmi < 0) {                  /* first match seeds the prefix with its whole name */
+                        fmi = i;
+                        while (e[i].name[cpl] && e[i].name[cpl] != '/') cpl++;
+                    } else {                        /* later matches shrink it to where they still agree */
+                        int k = 0;
+                        while (k < cpl && e[i].name[k]) {
+                            char a1 = e[fmi].name[k], b1 = e[i].name[k];
+                            if (a1 >= 'A' && a1 <= 'Z') a1 += 32;
+                            if (b1 >= 'A' && b1 <= 'Z') b1 += 32;
+                            if (a1 != b1) break;
+                            k++;
+                        }
+                        cpl = k;
+                    }
                 }
-                if (nm == 1) {                      /* unique match: replace with canonical name */
+                if (nm >= 1 && cpl > plen) {        /* extend the word to the common prefix (canonical case) */
                     grid_erase(a, plen, cx0, cy0); n -= (unsigned)plen;
-                    for (int k = 0; e[mi].name[k] && n + 1 < max; k++) {
-                        char ch = e[mi].name[k];
-                        if (ch == '/') continue;    /* drop the directory marker */
-                        grid_putc(a, ch); buf[n++] = (char)ch;
+                    for (int k = 0; k < cpl && n + 1 < max; k++) {
+                        grid_putc(a, e[fmi].name[k]); buf[n++] = e[fmi].name[k];
                     }
                 }
             }
