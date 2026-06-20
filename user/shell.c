@@ -107,6 +107,16 @@ static int cut_sel(int n, const int *rf, const int *rt, const int *oe, int nr) {
     for (int i = 0; i < nr; i++) if (n >= rf[i] && (oe[i] || n <= rt[i])) return 1;
     return 0;
 }
+/* Print one grep result line with its prefix. `sep` is ':' for a match, '-' for
+ * a context line (grep -A/-B/-C). Mirrors the inline prefix logic exactly. */
+static void grep_emit(const char *name, int fcount, int nn, int lno, const char *linetext, char sep) {
+    char s2[3] = { sep, ' ', 0 };
+    if (fcount > 1) print(name);
+    if (fcount > 1 && nn) { char s1[2] = { sep, 0 }; print(s1); }
+    if (nn) { char ln_[12]; itoa_simple(lno, ln_); print(ln_); }
+    if (fcount > 1 || nn) print(s2); else print("  ");
+    print(linetext); print("\n");
+}
 
 /* (the grep regex matcher gr_match() now lives in shgrep.h, #included above) */
 static int b64v(char c) {                 /* base64 digit -> value, or -1 */
@@ -281,7 +291,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1044,7 +1054,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (!any) print("usage: crc32 <file>...\n");
         } else if (startswith(line, "grep ")) {
-            char *p = line + 5; char pats[8][40]; int npat = 0, ci = 0, nn = 0, cc = 0, vv = 0, ll = 0;
+            char *p = line + 5; char pats[8][40]; int npat = 0, ci = 0, nn = 0, cc = 0, vv = 0, ll = 0, actx = 0, bctx = 0;  /* -A/-B/-C N: after/before context lines */
             while (*p == ' ') p++;
             while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insens), -n (line#s), -c (count), -v (invert); combinable as -in. -e <pat> adds a pattern: a line matches ANY (the alternation the tiny regex lacks, and avoids the shell `|` = pipe clash) */
                 if (p[1] == '-' && (p[2] == ' ' || p[2] == 0)) { p += 2; while (*p == ' ') p++; break; }  /* "--": end of flags (pattern may then start with '-') */
@@ -1052,6 +1062,15 @@ static int run_command(char *line, char *cwd) {
                     p += 2; while (*p == ' ') p++;
                     int q = 0; while (*p && *p != ' ') { if (npat < 8 && q < 39) pats[npat][q++] = *p; p++; }
                     if (npat < 8) { pats[npat][q] = 0; npat++; }
+                    while (*p == ' ') p++;
+                    continue;
+                }
+                if ((p[1] == 'A' || p[1] == 'B' || p[1] == 'C') && (p[2] == ' ' || (p[2] >= '0' && p[2] <= '9'))) {   /* -A/-B/-C N: after/before/both context lines */
+                    char which = p[1]; p += 2; while (*p == ' ') p++;
+                    int v = 0; while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+                    if (v > 16) v = 16;                          /* before-context ring cap */
+                    if (which == 'A' || which == 'C') actx = v;
+                    if (which == 'B' || which == 'C') bctx = v;
                     while (*p == ' ') p++;
                     continue;
                 }
@@ -1066,7 +1085,7 @@ static int run_command(char *line, char *cwd) {
                 pats[0][i] = 0; if (i) npat = 1;
                 while (*p == ' ') p++;
             }
-            if (npat == 0 || *p == 0) { print("usage: grep [-incvl] [-e pat]... <pattern> <file>...  (regex: ^ $ . * [..] \\)\n"); }
+            if (npat == 0 || *p == 0) { print("usage: grep [-incvl] [-e pat] [-A/B/C N]... <pattern> <file>...  (regex: ^ $ . * [..] \\)\n"); }
             else {
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
                 while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fcount++; while (*cq && *cq != ' ') cq++; }
@@ -1081,6 +1100,8 @@ static int run_command(char *line, char *cwd) {
                     if (!buf) { print("grep: no such file: "); print(name); print("\n"); continue; }
                     buf[n] = 0;
                     int ls = 0, lno = 0;
+                    int after = 0, last_printed = 0;            /* -A/-C after-context counter; lno dedup */
+                    int bls[16], bend[16], blno[16], bn = 0;    /* -B/-C before-context ring of recent lines */
                     for (long k = 0; k <= n; k++) {
                         if (k == n || buf[k] == '\n') {
                             lno++;
@@ -1092,12 +1113,21 @@ static int run_command(char *line, char *cwd) {
                                 hits++;
                                 if (ll) { print(name); print("\n"); buf[k] = save; break; }   /* -l: this file matches; name once, next file */
                                 if (!cc) {                  /* -c: count only, don't print the line */
-                                    if (fcount > 1) print(name);
-                                    if (fcount > 1 && nn) print(":");
-                                    if (nn) { char ln_[12]; itoa_simple(lno, ln_); print(ln_); }
-                                    if (fcount > 1 || nn) print(": "); else print("  ");
-                                    print(buf + ls); print("\n");
+                                    for (int z = 0; z < bn; z++) if (blno[z] > last_printed) {   /* -B/-C: print buffered before-context */
+                                        char bs = buf[bend[z]]; buf[bend[z]] = 0;
+                                        grep_emit(name, fcount, nn, blno[z], buf + bls[z], '-');
+                                        buf[bend[z]] = bs; last_printed = blno[z];
+                                    }
+                                    grep_emit(name, fcount, nn, lno, buf + ls, ':');   /* the matching line */
+                                    last_printed = lno; after = actx;
                                 }
+                            } else if (after > 0 && !cc) {  /* -A/-C: print an after-context line */
+                                grep_emit(name, fcount, nn, lno, buf + ls, '-');
+                                last_printed = lno; after--;
+                            }
+                            if (bctx > 0) {                 /* remember this line for any later match's before-context */
+                                if (bn < bctx) { bls[bn] = ls; bend[bn] = (int)k; blno[bn] = lno; bn++; }
+                                else { for (int z = 1; z < bctx; z++) { bls[z-1] = bls[z]; bend[z-1] = bend[z]; blno[z-1] = blno[z]; } bls[bctx-1] = ls; bend[bctx-1] = (int)k; blno[bctx-1] = lno; }
                             }
                             buf[k] = save;
                             ls = (int)k + 1;

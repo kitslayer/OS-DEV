@@ -1,5 +1,12 @@
 # What's next
 
+> **(M866) Shell — `grep -A/-B/-C N` (context lines).** grep can now print N lines of context around each
+> match: `-A` after, `-B` before, `-C` both — the common idiom for reading matches in context. A shared
+> `grep_emit` helper prints a line with its prefix (`:` for a match, `-` for context); `-A` is an
+> after-counter, `-B`/`-C` keep a small ring of recent lines (capped 16) and a `last_printed` line number
+> avoids double-printing overlapping context. Verified in-guest: `-A1` → match + next line, `-B1` → prev +
+> match, `-C1` → both, plain grep unchanged. `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M865) Shell — `wc -L` (longest line length).** Added the standard `-L` to wc (length of the longest
 > line). The default-to-all check now excludes `-L`, so `wc -L` reports just the longest (not all counts).
 > Verified in-guest: `wc -L W.TXT` → `longest 13` for a file whose longest line is `a-longer-line`; plain
