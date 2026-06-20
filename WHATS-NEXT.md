@@ -1,5 +1,12 @@
 # What's next
 
+> **(M853) Shell — `grep -e pat` (repeatable) for multi-pattern OR matching.** The tiny regex engine has no
+> `|` alternation, and even if it did, `grep 'a|b'` is unusable from a shell with no quoting (the `|` is a
+> pipe). `grep -e error -e warning FILE` now matches a line if it hits ANY of the `-e` patterns — bash's
+> idiom for alternation, and it dodges the metacharacter clash. Single-pattern `grep pat FILE` is unchanged.
+> Verified in-guest on a 4-line file: `grep -e apple -e cherry` → `apple`+`cherry` only; `grep banana` →
+> `banana`. `make check` 32 suites; shell.c warning count unchanged (11).
+
 > **(M852) Shell — the `js` demo showcases arrow functions + chained array methods.** The built-in demo (bare
 > `js`) only exercised old-style `function` declarations, under-selling the engine. Added a line —
 > `[1,2,3,4,5].map(x=>x*x).filter(x=>x>4).join(",")` → `9,16,25` — so the showcase reflects the engine's
