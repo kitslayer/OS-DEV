@@ -617,6 +617,7 @@ static int run_command(char *line, char *cwd) {
                     "function fib(n){ return n<2 ? n : fib(n-1)+fib(n-2); }\n"
                     "var s=\"fib: \"; for (var i=0;i<12;i++) s+=fib(i)+\" \"; print(s);\n"
                     "var a=[3,1,2]; a.push(4); print(\"array: len \"+a.length+\" = [\"+a.join(\",\")+\"]\");\n"
+                    "print(\"arrows: \"+[1,2,3,4,5].map(x=>x*x).filter(x=>x>4).join(\",\"));\n"
                     "var o={name:\"OS-DEV\", year:2026}; print(o.name+\" \"+o.year);\n"
                     "function fact(n){ return n<=1?1:n*fact(n-1); } print(\"6! = \"+fact(6));\n"
                     "print(\"2^10 = \"+(1<<10)+\", 17%5 = \"+(17%5));\n"

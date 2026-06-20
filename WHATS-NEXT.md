@@ -1,5 +1,11 @@
 # What's next
 
+> **(M852) Shell — the `js` demo showcases arrow functions + chained array methods.** The built-in demo (bare
+> `js`) only exercised old-style `function` declarations, under-selling the engine. Added a line —
+> `[1,2,3,4,5].map(x=>x*x).filter(x=>x>4).join(",")` → `9,16,25` — so the showcase reflects the engine's
+> modern capabilities (confirmed this session: arrows, `map`/`filter` chains, comparators all work; the
+> browser even runs interactive arrow-using pages like RPS.HTM). `make check` 32 suites; verified in-guest.
+
 > **(M851) Shell — `js -e <code>` receives its code verbatim (arrows, comparisons, `&&` now work).** Inline
 > JS silently failed on anything containing a shell metacharacter: `js -e console.log((x=>x*2)(5))` produced
 > nothing because the `>` in the arrow `=>` was parsed as an output redirect, truncating the code (the
