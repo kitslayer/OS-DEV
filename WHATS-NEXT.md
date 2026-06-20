@@ -1,5 +1,13 @@
 # What's next
 
+> **(M874) Shell — `$#` (arg count) and `$@` (all args) inside functions.** Completes M873's functions
+> so they can be variadic. `expand_vars` gains a special-case (right after `$?`) for `$#`/`$@` that reads
+> the value via `vget`; the function dispatch in `run_command` sets `$@` to the full arg string (captured
+> before the `$1`..`$9` bind loop) and `$#` to the parameter count (after clearing unused slots). Verified
+> in-guest: `args() { echo count=$# all=$@; }` then `args a b c` → `count=3 all=a b c`, `args solo` →
+> `count=1 all=solo`. Help line updated to list `$# $@`. Build clean (shell.c warnings 11, no regression);
+> `make check` green (32 suites).
+
 > **(M873) Shell — user-defined functions `name() { … }` with `$1`..`$9`.** The biggest scripting feature
 > added this turn. A one-line definition `greet() { echo hi $1; }` is parsed in `run_input_line` (detect
 > `NAME()` then `{`…`}`, store the body in a 16-slot table) and called as `greet world`: `run_command`

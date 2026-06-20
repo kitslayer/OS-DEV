@@ -291,6 +291,10 @@ static int expand_vars(const char *src, char *dst, int cap){
             while (uv){ tmp[ti++]=(char)('0'+uv%10); uv/=10; }
             while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
             i += 2;
+        } else if (src[i]=='$' && (src[i+1]=='#' || src[i+1]=='@')){ /* $# arg count, $@ all args (set on a function call) */
+            const char *v = vget(src+i+1, 1);
+            if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
+            i += 2;
         } else if (src[i]=='$'){                                    /* $NAME / ${NAME} */
             int br=(src[i+1]=='{'); int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
             const char *v=(e>s)?vget(src+s,e-s):0;
@@ -309,6 +313,7 @@ static int run_command(char *line, char *cwd) {
           if (fb && g_func_depth < 8) {
               char bc[256]; int bi = 0; while (fb[bi] && bi < 255) { bc[bi] = fb[bi]; bi++; } bc[bi] = 0;   /* snapshot the body */
               const char *a = line + wl; while (*a == ' ') a++;   /* bind $1..$9 to the call args */
+              vset("@", 1, a);                                    /* $@ = all args; $# = count (set below) */
               int pn = 0;
               while (*a && pn < 9) {
                   char pname[2] = { (char)('1' + pn), 0 };
@@ -318,6 +323,7 @@ static int run_command(char *line, char *cwd) {
                   pn++;
               }
               for (int z = pn; z < 9; z++) { char pname[2] = { (char)('1' + z), 0 }; vset(pname, 1, ""); }   /* clear unused params */
+              { char cb[12]; itoa_simple(pn, cb); vset("#", 1, cb); }   /* $# = arg count */
               g_func_depth++; run_input_line(bc, cwd); g_func_depth--;
               continue;
           } }
@@ -342,7 +348,7 @@ static int run_command(char *line, char *cwd) {
             print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
-            print("        name() { cmds; }   (define a function; call `name args` with $1..$9 bound)\n");
+            print("        name() { cmds; }   (define a function; call `name args` with $1..$9 $# $@ bound)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
