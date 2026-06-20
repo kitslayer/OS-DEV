@@ -255,7 +255,8 @@ static int run_command(char *line, char *cwd) {
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
-            print("edit:   arrows move  Home/End  Del  up/down=history  Tab=complete  ^W/^U/^K=kill  ^C=cancel\n");
+            print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
+            print("        Tab completes a filename (longest common prefix); a 2nd Tab lists the matches\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
             const char *p = line + (line[1]=='x' ? 7 : 4); while (*p == ' ') p++;   /* skip "set "/"export " */
             int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;

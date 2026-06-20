@@ -1,5 +1,11 @@
 # What's next
 
+> **(M846) Shell — `help` documents the richer Tab completion.** M842–845 turned Tab from "complete a unique
+> name" into prefix-extension + candidate-listing + empty-word listing, but `help` still only said
+> "Tab=complete" — an undiscoverable feature is an incomplete one. Split the crowded `edit:` line and added a
+> dedicated line: "Tab completes a filename (longest common prefix); a 2nd Tab lists the matches". Verified
+> in-guest that it renders. `make check` 31/31.
+
 > **(M845) Shell — Tab on an empty argument lists every file.** `cmd <Tab>` with the cursor on a blank
 > argument now lists all cwd entries (or extends to their common prefix, if any) — bash's empty-word
 > completion. The guard widened from `plen > 0` to `plen > 0 || ws > 0`, reusing all the M842–844 machinery;
