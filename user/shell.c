@@ -1855,12 +1855,12 @@ static int run_command(char *line, char *cwd) {
             char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
             while (*p == ' ') p++;
             char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
-            if (!f1[0] || !f2[0]) { print("usage: cmp <file1> <file2>\n"); }
+            if (!f1[0] || !f2[0]) { print("usage: cmp <file1> <file2>\n"); g_status = 2; }
             else {
                 long n1; char *b1 = slurp(f1, &n1);
                 long n2; char *b2 = slurp(f2, &n2);
-                if (!b1)      { print("cmp: no such file: "); print(f1); print("\n"); }
-                else if (!b2) { print("cmp: no such file: "); print(f2); print("\n"); }
+                if (!b1)      { print("cmp: no such file: "); print(f1); print("\n"); g_status = 2; }
+                else if (!b2) { print("cmp: no such file: "); print(f2); print("\n"); g_status = 2; }
                 else {
                     long i1 = 0, i2 = 0; int lineno = 1, differ = 0;
                     while (i1 < n1 || i2 < n2) {
@@ -1878,6 +1878,7 @@ static int run_command(char *line, char *cwd) {
                         lineno++;
                     }
                     if (!differ) print("  files are identical\n");
+                    g_status = differ ? 1 : 0;          /* exit status like real cmp: 0 same, 1 differ */
                 }
                 free(b1); free(b2);
             }
@@ -1978,11 +1979,11 @@ static int run_command(char *line, char *cwd) {
             char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
             while (*p == ' ') p++;
             char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
-            if (!f1[0] || !f2[0]) { print("usage: diff <file1> <file2>  (line edit: - removed, + added)\n"); }
+            if (!f1[0] || !f2[0]) { print("usage: diff <file1> <file2>  (line edit: - removed, + added)\n"); g_status = 2; }
             else {
                 long n1, n2; char *d1 = slurp(f1, &n1); char *d2 = slurp(f2, &n2);   /* whole files; the LCS still caps lines (warned below) */
-                if (!d1) { print("diff: "); print(f1); print(": no such file\n"); }
-                else if (!d2) { print("diff: "); print(f2); print(": no such file\n"); }
+                if (!d1) { print("diff: "); print(f1); print(": no such file\n"); g_status = 2; }
+                else if (!d2) { print("diff: "); print(f2); print(": no such file\n"); g_status = 2; }
                 else {
                     static int as[129], ae[129], bs[129], be[129];
                     static short L[129][129];                       /* LCS lengths; capped at 128 lines/file */
@@ -2016,6 +2017,7 @@ static int run_command(char *line, char *cwd) {
                     }
                     if (!diffs) print("(files are identical)\n");
                     if (na >= 128 || nb >= 128) print("(diff truncated at 128 lines/file)\n");
+                    g_status = diffs ? 1 : 0;           /* exit status like real diff: 0 same, 1 differ */
                 }
                 free(d1); free(d2);
             }

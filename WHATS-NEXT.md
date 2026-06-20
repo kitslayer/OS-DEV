@@ -1,5 +1,13 @@
 # What's next
 
+> **(M888) Shell — `cmp` and `diff` set `$?` (0 same, 1 differ, 2 error), so `if cmp …` works.** Same class
+> as the M886 grep fix, applied to the comparison commands: both computed a `differ`/`diffs` result but never
+> set `g_status`, so `cmp a b && echo same` always said "same" and `if diff …` always took the then-branch.
+> Now each sets `g_status` (identical → 0, differ → 1, missing-file/usage → 2, matching real cmp/diff).
+> Verified in-guest: `cmp A B && echo SAME1` (identical) runs; `cmp A C && … || echo DIFFER` takes the ||;
+> `diff A C; echo $?` → 1. `make check` green (34 suites); shell.c warnings 11. (Checked the other
+> status-driven commands: `test`/`[` already set it; `find` correctly stays 0 like real find.)
+
 > **(M887) Shell — `ls` handles multiple args / globs / files (`ls *.txt`, `ls FILE`).** Found by testing
 > `ls *.TXT | wc -l`: it printed `ls: no such directory: README.TXT HELLO.TXT MOTD.TXT GUIDE.TXT` — `ls`
 > took the *entire* rest of the line as one directory name, so a glob expansion (or any multi-name list, or
