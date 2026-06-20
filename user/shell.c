@@ -273,6 +273,11 @@ static int run_command(char *line, char *cwd) {
             char buf[8192];                 /* hold a full directory (~90+ files) */
             sys_list(buf, sizeof(buf));
             print(buf);
+        } else if (startswith(line, "ls ")) {     /* ls <dir>: briefly cd there, list, restore cwd */
+            const char *dir = line + 3; while (*dir == ' ') dir++;
+            char buf[8192];
+            if (sys_chdir(dir) < 0) { print("ls: no such directory: "); print(dir); print("\n"); g_status = 1; }
+            else { sys_list(buf, sizeof buf); print(buf); sys_chdir(cwd); }
         } else if (startswith(line, "cat ")) {
             const char *p = line + 4; int any = 0;
             while (*p) {                                  /* concatenate each space-separated file */

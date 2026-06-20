@@ -1,5 +1,11 @@
 # What's next
 
+> **(M828) Shell — `ls <dir>`.** `ls` only listed the current directory; `ls <dir>` now lists another one.
+> Since the kernel's directory listing is cwd-relative, the shell briefly `chdir`s into the target, lists,
+> then restores the cwd (synchronous, so nothing observes the transient change) — no FS-layer change needed.
+> `make check` 30/30. Verified in-guest: created `/ld/inld.txt`, returned to `/`, and `ls ld` showed
+> `INLD.TXT 3 2026-06-20 08:19` (with its timestamp) while `pwd` confirmed the cwd was still `/`.
+
 > **(M827) Shell — `echo -n` and bare `echo`.** `echo` always appended a newline. Added `-n` to suppress the
 > trailing newline (`echo -n "Name: "; read x` keeps the input on the prompt line) and made bare `echo`
 > (no args) print a blank line, both standard behaviours. `make check` 30/30. Verified in-guest: `echo -n
