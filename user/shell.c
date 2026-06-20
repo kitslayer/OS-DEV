@@ -253,7 +253,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nruf] nl tac uniq[-c] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nruf] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -406,13 +406,14 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "uniq ")) {           /* drop adjacent duplicate lines; -c prefixes a run count */
-            const char *fp = line + 5; int countf = 0;     /* -c: prefix each line with its occurrence count */
+            const char *fp = line + 5; int countf = 0, dflag = 0, uflag = 0;   /* -c count, -d only duplicated runs, -u only non-repeated runs */
             while (*fp == ' ') fp++;
             while (fp[0] == '-' && fp[1] && fp[1] != ' ') {
                 int t, valid = 1;
-                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'c') valid = 0;
+                for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'c' && fp[t] != 'd' && fp[t] != 'u') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a filename) */
-                countf = 1; fp += t; while (*fp == ' ') fp++;
+                for (t = 1; fp[t] && fp[t] != ' '; t++) { if (fp[t] == 'c') countf = 1; else if (fp[t] == 'd') dflag = 1; else uflag = 1; }
+                fp += t; while (*fp == ' ') fp++;
             }
             long n; char *buf = slurp(fp, &n);
             if (!buf) { print("uniq: no such file: "); print(fp); print("\n"); }
@@ -427,7 +428,7 @@ static int run_command(char *line, char *cwd) {
                         if (same) for (int j = 0; j < len; j++) if (buf[ls + j] != buf[rs + j]) { same = 0; break; }
                         if (same) count++;
                         else {
-                            if (rs >= 0) {                  /* emit the run that just ended */
+                            if (rs >= 0 && (dflag ? count > 1 : uflag ? count == 1 : 1)) {  /* emit the ended run (-d: dups only, -u: non-repeated only) */
                                 char save = buf[rs + rl]; buf[rs + rl] = 0;
                                 if (countf) { char cb[12]; itoa_simple(count, cb); print("  "); print(cb); print(" "); }
                                 print(buf + rs); print("\n");
@@ -438,7 +439,7 @@ static int run_command(char *line, char *cwd) {
                         ls = (int)k + 1;
                     }
                 }
-                if (rs >= 0) {                              /* emit the final run */
+                if (rs >= 0 && (dflag ? count > 1 : uflag ? count == 1 : 1)) {   /* emit the final run (-d/-u filter) */
                     char save = buf[rs + rl]; buf[rs + rl] = 0;
                     if (countf) { char cb[12]; itoa_simple(count, cb); print("  "); print(cb); print(" "); }
                     print(buf + rs); print("\n");

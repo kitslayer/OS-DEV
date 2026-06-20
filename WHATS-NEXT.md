@@ -1,5 +1,11 @@
 # What's next
 
+> **(M856) Shell — `uniq -d` / `-u` (only duplicated / only non-repeated lines).** Completed the classic
+> `sort | uniq` filter set: `-d` emits a run only when it repeats (count > 1), `-u` only when it doesn't
+> (count == 1); both compose with `-c`. Verified in-guest on apple,apple,banana,cherry,cherry,date:
+> `uniq -d` → `apple, cherry`; `uniq -u` → `banana, date`. `make check` 32 suites; shell.c warnings
+> unchanged (11).
+
 > **(M855) Shell — `sort -f` (fold case) for case-insensitive sorting.** Added `-f` to `sort` (alongside
 > `-nru`): comparisons lowercase both sides, and `-uf` dedups case-insensitively (via a small `sort_foldeq`
 > using the grep matcher's `gr_lc`). Verified in-guest on mixed-case lines: plain `sort` →
