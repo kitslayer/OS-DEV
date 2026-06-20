@@ -937,30 +937,27 @@ static int run_command(char *line, char *cwd) {
                 else { print("  "); print(hex); print("  "); print(fn); print("\n"); }
             }
             if (!any) print("usage: sha512 <file>...\n");
-        } else if (startswith(line, "crc32 ")) {       /* CRC-32 (IEEE 802.3, as in zip/gzip/png) over the whole file */
-            unsigned long cap = 65536;
-            unsigned char *cbuf = malloc(cap);
-            long n = cbuf ? sys_readfile(line + 6, cbuf, cap) : -1;
-            while (cbuf && n == (long)cap && cap < (32UL << 20)) {   /* read filled the buffer: file may be larger */
-                cap <<= 1; free(cbuf); cbuf = malloc(cap);
-                if (cbuf) n = sys_readfile(line + 6, cbuf, cap);
-            }
-            if (!cbuf)               print("crc32: file too large (out of memory)\n");
-            else if (n < 0)          { print("crc32: no such file: "); print(line + 6); print("\n"); }
-            else if (n == (long)cap) print("crc32: file too large\n");
-            else {
+        } else if (startswith(line, "crc32 ")) {       /* CRC-32 (IEEE 802.3, as in zip/gzip/png) over each file */
+            const char *fp = line + 6; int any = 0;
+            while (*fp) {
+                while (*fp == ' ') fp++;
+                if (!*fp) break;
+                char fn[64]; int j = 0; while (*fp && *fp != ' ' && j < 63) fn[j++] = *fp++; fn[j] = 0;
+                any = 1;
+                long cn; char *cbuf = slurp(fn, &cn);   /* slurp grows the buffer + sets $? on a missing file */
+                if (!cbuf) { print("crc32: no such file: "); print(fn); print("\n"); continue; }
                 unsigned c = 0xFFFFFFFFu;
-                for (long i = 0; i < n; i++) {
-                    c ^= cbuf[i];
+                for (long i = 0; i < cn; i++) {
+                    c ^= (unsigned char)cbuf[i];
                     for (int k = 0; k < 8; k++) c = (c >> 1) ^ ((c & 1) ? 0xEDB88320u : 0u);
                 }
-                c ^= 0xFFFFFFFFu;
+                c ^= 0xFFFFFFFFu; free(cbuf);
                 char hex[9]; const char *hd = "0123456789abcdef";
                 for (int i = 0; i < 8; i++) hex[i] = hd[(c >> ((7 - i) * 4)) & 0xF];
                 hex[8] = 0;
-                print("  "); print(hex); print("\n");
+                print("  "); print(hex); print("  "); print(fn); print("\n");
             }
-            free(cbuf);
+            if (!any) print("usage: crc32 <file>...\n");
         } else if (startswith(line, "grep ")) {
             char *p = line + 5, pat[40]; int i = 0, ci = 0, nn = 0, cc = 0, vv = 0;
             while (*p == ' ') p++;

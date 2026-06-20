@@ -1,5 +1,13 @@
 # What's next
 
+> **(M837) Shell — `crc32` multi-file (and simplified).** Completes the multi-arg consistency pass: `crc32`
+> now checksums each space-separated file (`crc32 *.png`) with the filename in the output (`<crc>  <name>`,
+> matching M835's sha256/sha512). Rewrote its hand-rolled grow-the-buffer read to use the shared `slurp()`
+> helper (which also sets `$?` on a missing file), shrinking the code. All file commands now take multiple
+> names: rm/mkdir/touch/file/sha256/sha512/crc32, plus cat/head/tail/wc/grep (already multi) and cp/mv into a
+> dir. `make check` 30/30. Verified in-guest: `crc32 HELLO.TXT MOTD.TXT` → `636a4fb6 HELLO.TXT` /
+> `cfe1109c MOTD.TXT`.
+
 > **(M836) Shell — `run <prog> [arg]` (open the GUI editor on a file).** Completes the "open a file in the
 > editor" story (Files→editor was M806): you can now do `run editor README.TXT` from the shell to launch the
 > windowed editor already opened on that file. `SYS_spawn` gained an optional arg in `rsi` (routed to M806's
