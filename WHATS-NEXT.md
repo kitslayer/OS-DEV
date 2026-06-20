@@ -1,5 +1,15 @@
 # What's next
 
+> **(M851) Shell — `js -e <code>` receives its code verbatim (arrows, comparisons, `&&` now work).** Inline
+> JS silently failed on anything containing a shell metacharacter: `js -e console.log((x=>x*2)(5))` produced
+> nothing because the `>` in the arrow `=>` was parsed as an output redirect, truncating the code (the
+> `function(){}` forms worked only because they have no `>`). The engine was never at fault — `jstest`
+> exercises arrows and passes. Fix: intercept `js -e ` at the top of `run_input_line` (before the
+> `;`/`&&`/`|`/redirect/glob processing) and hand the rest of the line to the engine literally. Every entry
+> path (interactive, `source`, and `$()`) goes through `run_input_line`, so capture via `$(js -e …)` still
+> works. Verified in-guest: `[1,2,3,4].map(x=>x*x).filter(x=>x>3).join('-')`→`4-9-16`, `(x=>x*2)(5)`→`10`,
+> `sort((a,b)=>a-b)`→`1,2,5,8`, `$(js -e console.log(7*6))`→`42`. `make check` 32 suites.
+
 > **(M850) Shell — command substitution runs a full statement list (`;`, `for`/`while`/`if`).** `$(...)`
 > evaluated its body with `run_andor`, which only knows `&&`/`||` — so `$(echo a; echo b)` captured the
 > literal `; echo b` and `$(for …)` errored. It now uses `run_input_line` (the same entry interactive lines

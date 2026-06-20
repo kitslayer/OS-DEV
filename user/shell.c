@@ -54,6 +54,20 @@ static char *slurp(const char *name, long *len) {
     if (!b || n < 0 || n == (long)(cap - 1)) { free(b); *len = -1; g_status = 1; return 0; }
     b[n] = 0; *len = n; return b;
 }
+
+/* Run inline JS for `js -e <code>`. Intercepted early (in run_input_line) so the
+ * code reaches the engine VERBATIM — JS's >, <, |, &, ; are operators here, not
+ * shell metacharacters, and must not be redirected/piped/split/globbed away
+ * (e.g. an arrow `x => x*2` contains a `>`). Output is still capturable with
+ * $(...). */
+static void run_js_inline(const char *code) {
+    char *out = malloc(1u << 20);                /* 1MB output buffer */
+    if (!out) { print("js: out of memory\n"); return; }
+    sys_js(code, out, (1u << 20) - 1);
+    out[(1u << 20) - 1] = 0;
+    print(out);
+    free(out);
+}
 /* parse a leading (optionally signed) integer from a line, for `sort -n`. */
 static long sort_numval(const char *s) {
     while (*s == ' ' || *s == '\t') s++;
@@ -2384,6 +2398,7 @@ static int run_while(char *line, char *cwd) {
  * list of && / || pipelines. Returns 1 if it ran the `exit` builtin. */
 static int run_input_line(char *line, char *cwd) {
     char *t = line; while (*t == ' ') t++;
+    if (startswith(t, "js -e ")) { run_js_inline(t + 6); g_status = 0; return 0; }   /* literal code (its >|&; are JS, not shell) */
     if (startswith(t, "for "))   return run_for(t, cwd);
     if (startswith(t, "while ")) return run_while(t, cwd);
     if (startswith(t, "if "))    return run_if(t, cwd);
