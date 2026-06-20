@@ -7,10 +7,12 @@
 #include <string.h>
 #include "shmath.h"
 
-/* stubbed variable table for the test: a=2, b=3, ten=10, anything else = 0 */
+/* stubbed variable table for the test: a=2, b=3, ten=10, $1=7 (a positional
+ * param: digit name), anything else = 0 */
 static long sh_var(const char *name, int len) {
     if (len == 1 && name[0] == 'a') return 2;
     if (len == 1 && name[0] == 'b') return 3;
+    if (len == 1 && name[0] == '1') return 7;
     if (len == 3 && !strncmp(name, "ten", 3)) return 10;
     return 0;
 }
@@ -42,6 +44,9 @@ int main(void) {
     CHECK("a+b", 5);                /* bare variable names */
     CHECK("a*b+1", 7);
     CHECK("$a+$b", 5);              /* $-prefixed names */
+    CHECK("$1", 7);                 /* $1..$9 positional params: a digit after $ is a variable, not literal 1 */
+    CHECK("$1 - 1", 6);             /* the recursive-function idiom `r $(($1 - 1))` */
+    CHECK("$1 * $a", 14);           /* 7 * 2 */
     CHECK("ten*ten", 100);
     CHECK("nosuch+1", 1);           /* unknown variable -> 0 */
     CHECK("  3  +  4 ", 7);         /* surrounding whitespace */

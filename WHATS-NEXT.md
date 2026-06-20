@@ -1,5 +1,13 @@
 # What's next
 
+> **(M875) Shell — `$1`..`$9` (positional params) now work inside `$((…))` arithmetic.** A pre-existing
+> bug found while testing M874's functions: `sh_factor` (in `shmath.h`) skipped a leading `$` and then,
+> seeing a digit, parsed it as a numeric *literal* — so `$(($1 - 1))` evaluated as `1 - 1 = 0` regardless
+> of `$1`'s value (`$y`/bare `ten` worked because they hit the identifier branch). Fix: a digit right after
+> `$` is now a one-char variable name resolved via `sh_var`/`vget` (the positional param), not a literal.
+> This is exactly the recursive-function idiom `r $(($1 - 1))`. Added host-test cases (`$1`, `$1 - 1`,
+> `$1 * $a`) + a digit entry in the stub var table; `make check` green incl. shmathtest's 300k fuzz.
+
 > **(M874) Shell — `$#` (arg count) and `$@` (all args) inside functions.** Completes M873's functions
 > so they can be variadic. `expand_vars` gains a special-case (right after `$?`) for `$#`/`$@` that reads
 > the value via `vget`; the function dispatch in `run_command` sets `$@` to the full arg string (captured

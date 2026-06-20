@@ -44,7 +44,10 @@ static long sh_factor(const char **p) {
     if (**p == '~') { (*p)++; return ~sh_factor(p); }    /* bitwise NOT */
     if (**p == '!' && (*p)[1] != '=') { (*p)++; return !sh_factor(p); }   /* logical NOT -> 1/0 (not !=) */
     if (**p == '(') { (*p)++; long v = sh_ternary(p); sh_askip(p); if (**p == ')') (*p)++; return v; }
-    if (**p == '$') (*p)++;                              /* allow $X inside arithmetic */
+    if (**p == '$') { (*p)++;                            /* $-prefixed name -> variable, even $1..$9: a digit after $ is a positional param, not a literal */
+        if (sh_vchar(**p)) { const char *s = *p; int nl = 0; while (sh_vchar(s[nl])) nl++;
+            *p = s + nl; return sh_var(s, nl); }
+        return 0; }                                      /* lone $ -> 0 */
     if (**p >= '0' && **p <= '9') { const char *s = *p; unsigned long v = 0;   /* unsigned: overflow wraps */
         if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
             s += 2;
