@@ -17,6 +17,57 @@ static int  dlen, cur, readonly;  /* readonly: file exceeded the buffer — view
 static char fname[40];
 static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
 
+/* ---- undo (Ctrl-Z) -------------------------------------------------------
+ * A log of single-character edits, newest last. Each op remembers the char,
+ * where it happened, and whether it was an insertion or a deletion, so it can
+ * be reversed. Consecutive same-kind edits at adjacent positions share a
+ * 'group', so one Ctrl-Z reverts a whole typed (or deleted) run rather than a
+ * single character. Continuity is judged purely on the (absolute) edit
+ * position, so moving the caret naturally starts a new undo group. */
+#define UNDO_MAX 16384
+struct uop { int pos, grp; unsigned char ch, kind; };   /* kind: 0=insert 1=backspace 2=delete-fwd */
+static struct uop ulog[UNDO_MAX];
+static int un, ugrp, uexpect = -1, ulast_kind = -1;
+
+static void undo_record(int pos, char ch, int kind) {
+    if (un >= UNDO_MAX) {                       /* log full: drop the oldest half */
+        int keep = UNDO_MAX / 2;
+        for (int i = 0; i < keep; i++) ulog[i] = ulog[un - keep + i];
+        un = keep;
+    }
+    if (!(un > 0 && kind == ulast_kind && pos == uexpect)) ugrp++;   /* discontinuity -> new group */
+    ulog[un].pos = pos; ulog[un].grp = ugrp;
+    ulog[un].ch = (unsigned char)ch; ulog[un].kind = (unsigned char)kind;
+    un++;
+    ulast_kind = kind;
+    uexpect = (kind == 0) ? pos + 1 : (kind == 1) ? pos - 1 : pos;   /* next contiguous pos */
+}
+
+/* Force the next edit to begin a fresh undo group (e.g. after a newline, so
+ * Ctrl-Z reverts a line at a time rather than the whole typing session). */
+static void undo_break(void) { ulast_kind = -1; uexpect = -1; }
+
+static void undo(void) {
+    if (un == 0) return;
+    int g = ulog[un - 1].grp;
+    while (un > 0 && ulog[un - 1].grp == g) {   /* reverse the whole top group, newest first */
+        struct uop *o = &ulog[--un];
+        if (o->kind == 0) {                     /* was an insertion: delete the char at pos */
+            if (o->pos < dlen) {
+                for (int i = o->pos; i < dlen - 1; i++) doc[i] = doc[i+1];
+                dlen--;
+            }
+            cur = o->pos;
+        } else if (dlen < MAXDOC - 1) {         /* was a deletion: re-insert the char at pos */
+            for (int i = dlen; i > o->pos; i--) doc[i] = doc[i-1];
+            doc[o->pos] = (char)o->ch; dlen++;
+            cur = o->pos + 1;
+        }
+    }
+    if (cur > dlen) cur = dlen;
+    ulast_kind = -1; uexpect = -1;              /* the undo itself is a group boundary */
+}
+
 /* First offset >= start where findq occurs in doc, or -1. */
 static int find_from(int start) {
     int ql = 0; while (findq[ql]) ql++;
@@ -38,16 +89,19 @@ static void itoa_i(int v, char *o) {
 
 static void insert(char c) {
     if (readonly || dlen >= MAXDOC - 1) return;
+    undo_record(cur, c, 0);
     for (int i = dlen; i > cur; i--) doc[i] = doc[i-1];
     doc[cur++] = c; dlen++;
 }
 static void backspace(void) {
     if (readonly || cur == 0) return;
+    undo_record(cur - 1, doc[cur - 1], 1);
     for (int i = cur - 1; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--; cur--;
 }
 static void del_fwd(void) {                 /* Delete key: remove the char at the cursor */
     if (readonly || cur >= dlen) return;
+    undo_record(cur, doc[cur], 2);
     for (int i = cur; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--;
 }
@@ -101,7 +155,7 @@ static void render(const char *msg) {
     char st[96]; int p = 0;
     const char *a = "EDIT "; while (*a) st[p++] = *a++;
     for (int i = 0; fname[i] && p < 30; i++) st[p++] = fname[i];
-    a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC/^S=save ^Q=quit  "; while (*a) st[p++] = *a++;
+    a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC/^S=save ^Q=quit ^Z=undo  "; while (*a) st[p++] = *a++;
     char nb[12]; itoa_i(dlen, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];
     a = "b  L"; while (*a) st[p++] = *a++;
     itoa_i(ln, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* current line */
@@ -207,7 +261,8 @@ int main(void) {
         }
         else if (k == 0x86) { finding = 1; render_prompt("find: "); }    /* Ctrl-F: find (keeps the last query) */
         else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: "); }  /* Ctrl-G: go to line */
-        else if (k == '\n' || k == '\r') insert('\n');
+        else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
+        else if (k == '\n' || k == '\r') { insert('\n'); undo_break(); }   /* newline ends an undo group */
         else if (k == 8 || k == 127)     backspace();
         else if (k == 0x04)              del_fwd();        /* Delete: forward-delete  */
         else if (k == 0x13) { if (cur > 0) cur--; }       /* left  */

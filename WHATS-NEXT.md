@@ -1,5 +1,16 @@
 # What's next
 
+> **(M797) Editor — undo (Ctrl-Z).** The text editor had no undo at all — a glaring omission for an editor.
+> Added an operation-log undo: every single-character insert/backspace/forward-delete is recorded (char,
+> position, kind), and consecutive same-kind edits at adjacent positions share a "group" so one Ctrl-Z
+> reverts a whole typed or deleted run instead of one character. Continuity is judged on the absolute edit
+> position, so moving the caret naturally starts a new group; a newline also ends a group, giving
+> line-at-a-time undo rather than one Ctrl-Z wiping the whole session. The log holds 16384 ops and drops its
+> oldest half when full. Memory-efficient (no buffer snapshots), and the doc model (flat `doc[]`/`dlen`/`cur`)
+> made reversal trivial. Status line now advertises `^Z=undo` (still fits two grid rows). `make check` 30/30.
+> Verified in-guest: typed `AAAA`⏎`BBBB` then Ctrl-Z removed `BBBB` (9b→5b), Ctrl-Z again removed `AAAA`+nl
+> (5b→0b); and typed `HELLO`, backspaced twice to `HEL`, Ctrl-Z restored `HELLO`.
+
 > **(M796) Security — read-only code + NX data (W^X, part 2, complete).** Finishes what M795 started. Each
 > userspace program linked into a single RWX `PT_LOAD` segment (the ELF loader mapped the whole image
 > writable+executable), so every app's code was self-modifiable and its `.data`/`.bss` was executable — and
