@@ -1056,9 +1056,16 @@ static int run_command(char *line, char *cwd) {
             }
             if (nfiles == 0) print("usage: wc [-lwc] <file>...\n");
         } else if (startswith(line, "hexdump ")) {
-            long n; char *buf = slurp(line + 8, &n);
-            if (!buf) { print("hexdump: no such file\n"); }
-            else {
+            const char *fp = line + 8; int any = 0, fc = 0;
+            { const char *cq = fp; while (*cq) { while (*cq==' ') cq++; if (!*cq) break; fc++; while (*cq && *cq!=' ') cq++; } }
+            while (*fp) {
+                while (*fp == ' ') fp++;
+                if (!*fp) break;
+                char name[64]; int j = 0; while (*fp && *fp != ' ' && j < 63) name[j++] = *fp++; name[j] = 0;
+                any = 1;
+                long n; char *buf = slurp(name, &n);
+                if (!buf) { print("hexdump: no such file: "); print(name); print("\n"); continue; }
+                if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 const char *H = "0123456789abcdef";
                 for (long off = 0; off < n; off += 8) {
                     char h[56]; int p = 0;
@@ -1078,8 +1085,9 @@ static int run_command(char *line, char *cwd) {
                     h[p++] = '\n'; h[p] = 0;
                     print(h);
                 }
+                free(buf);
             }
-            free(buf);
+            if (!any) print("usage: hexdump <file>...\n");
         } else if (startswith(line, "find ")) {
             static char fb[2048];
             long n = sys_find(line + 5, fb, sizeof(fb));

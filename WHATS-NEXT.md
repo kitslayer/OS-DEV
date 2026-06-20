@@ -1,5 +1,12 @@
 # What's next
 
+> **(M840) Shell — `hexdump` dumps multiple files.** The last single-file inspection command: `hexdump
+> FILE...` now dumps each, with a `==> name <==` header before each when several are given. This completes
+> the multi-file set — every inspection command (cat/head/tail/wc/grep/file/sha256/sha512/crc32/strings/
+> hexdump) and creation/deletion command (rm/mkdir/touch) takes multiple names, and cp/mv handle a directory
+> destination (single and multi-source). `make check` 30/30. Verified in-guest: `hexdump HELLO.TXT MOTD.TXT`
+> dumped both under their headers.
+
 > **(M839) Shell — `strings` scans multiple files.** `strings FILE...` now extracts printable runs from each
 > space-separated file, printing a `==> name <==` header before each when more than one is given (matching
 > `head`/`tail`). Handy for `strings *.elf`. `make check` 30/30. Verified in-guest: `strings HELLO.TXT
