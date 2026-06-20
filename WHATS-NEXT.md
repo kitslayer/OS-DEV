@@ -1,5 +1,11 @@
 # What's next
 
+> **(M816) Shell — `read` builtin (interactive input).** The shell could produce output (echo) and capture
+> command output (`$()`), but had no way to read *user* input into a variable — so scripts couldn't be
+> interactive. `read VAR` now reads one line via `readline` and stores it in VAR, so a script can prompt and
+> branch on the answer. `make check` 30/30. Verified in-guest: `read NAME`, typed `Alice`, then
+> `echo hello $NAME` → `hello Alice`. Completes the shell's I/O story (echo out, `read` in, `$()` capture).
+
 > **(M815) Welcome window — onboarding refresh.** The desktop's Welcome window (the first thing a user sees)
 > just said "a from-scratch OS with its own desktop" plus drag hints — it undersold everything built since.
 > Rewrote it to point newcomers at the headline capabilities: the Browser (real web over HTTPS + JS), the
