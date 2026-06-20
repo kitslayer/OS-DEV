@@ -1767,13 +1767,15 @@ static int run_command(char *line, char *cwd) {
             if (sys_spawn(line + 4) < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
             else { print("launched "); print(line + 4); print("\n"); }
         } else if (startswith(line, "file ")) {            /* identify a file's type by its magic bytes */
-            char *f = line + 5; while (*f == ' ') f++;
-            char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0;
-            if (!fn[0]) print("usage: file <name>\n");
-            else {
+            char *f = line + 5; int any = 0;
+            while (*f) {                                 /* identify each space-separated file */
+                while (*f == ' ') f++;
+                if (!*f) break;
+                char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0;
+                any = 1;
                 static unsigned char b[512];
                 long n = sys_readfile(fn, b, sizeof(b));
-                if (n < 0) print("file: no such file\n");
+                if (n < 0) { print(fn); print(": no such file\n"); g_status = 1; }
                 else {
                     const char *t;
                     if (n>=8 && b[0]==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G') t = "PNG image";
@@ -1794,6 +1796,7 @@ static int run_command(char *line, char *cwd) {
                     print(fn); print(": "); print(t); print("\n");
                 }
             }
+            if (!any) print("usage: file <name>...\n");
         } else if (startswith(line, "tar ")) {             /* extract a .tar / .tar.gz archive */
             char *t = line + 4; while (*t == ' ') t++;
             char tn[64]; int ti = 0; while (*t && *t != ' ' && ti < 63) tn[ti++] = *t++; tn[ti] = 0;

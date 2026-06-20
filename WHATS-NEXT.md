@@ -1,5 +1,10 @@
 # What's next
 
+> **(M834) Shell — `file` identifies multiple files.** `file` only inspected one name; `file a b c` (or a
+> glob-expanded `file *`) now identifies each space-separated file in turn — handy for surveying a directory's
+> many file types. Same loop pattern as the M830/M831 multi-arg commands. `make check` 30/30. Verified
+> in-guest: `file README.TXT INTER.PNG DOOM1.WAD` reported `ASCII text` / `PNG image` / `data`.
+
 > **(M833) Shell — clearer `cp`/`mv` error on a directory source.** Copying a directory (no `-r` support) read
 > it as a file and failed with a misleading "no such file". `cp`/`mv` now detect a directory source (the same
 > chdir-test as M832) and report "cp: NAME is a directory". `make check` 30/30. Verified in-guest:
