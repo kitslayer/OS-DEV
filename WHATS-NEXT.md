@@ -1,5 +1,12 @@
 # What's next
 
+> **(M844) Shell — Tab adds a trailing space after a unique file, keeps `/` for a directory.** Finishing the
+> completion polish: when Tab resolves a word to a single entry it now appends a space (so you can type the
+> next argument straight away) or, if the entry is a directory, the `/` (so it reads as a path). Multi-match
+> prefix extension stays bare. Verified in-guest: `cat MO`→Tab→`cat MOTD.TXT ` then `HEL`→Tab→
+> `cat MOTD.TXT HELLO.TXT ` — two filenames completed back-to-back with no manual spaces, like bash.
+> `make check` 31/31.
+
 > **(M843) Shell — a second Tab lists the completion candidates.** M842 made the first Tab extend to the
 > common prefix, but then it dead-ended (e.g. `cat README.` with no way to see what's there). Now an
 > ambiguous Tab — when the word is already at the common prefix and several entries match — lists the

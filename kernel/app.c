@@ -577,6 +577,10 @@ int app_sys_read(char *buf, unsigned max) {
                     for (int k = 0; k < cpl && n + 1 < max; k++) {
                         grid_putc(a, e[fmi].name[k]); buf[n++] = e[fmi].name[k];
                     }
+                    if (nm == 1 && n + 1 < max) {   /* unique: '/' to descend a dir, else a space for the next arg */
+                        char tail = e[fmi].name[cpl] == '/' ? '/' : ' ';
+                        grid_putc(a, tail); buf[n++] = tail;
+                    }
                 } else if (nm > 1) {               /* already at the common prefix: list the candidates,
                                                     * then redraw the prompt + line (bash's second Tab) */
                     char psave[APP_COLS]; uint8_t csave[APP_COLS];
