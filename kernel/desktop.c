@@ -341,8 +341,10 @@ static void draw_content(const window_t *w, int focused) {
     }
     case KIND_ABOUT: {
         const char *L[] = { "OS-DEV", "", "x86_64, built from scratch", "",
-            "kernel . memory . tasks", "userspace . FAT32 . TCP",
-            "TLS 1.3 . HTTPS web browser" };
+            "kernel . memory . tasks",
+            "FAT32 . TCP . TLS 1.3",
+            "JS engine . web browser",
+            "scriptable shell . editor" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) draw_text(bx, by + i*16, L[i], 0x202028);
         break;
     }
@@ -698,7 +700,7 @@ static void spawn_app(int kind, const char *prog) {
     switch (kind) {
     case KIND_FILES:   w.w=380; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;
     case KIND_WELCOME: w.w=360; w.h=290; w.body=0xF0F0F0; w.title="Welcome"; break;
-    case KIND_ABOUT:   w.w=300; w.h=160; w.body=0xF4F0E8; w.title="About";   break;
+    case KIND_ABOUT:   w.w=300; w.h=178; w.body=0xF4F0E8; w.title="About";   break;
     case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="Monitor"; break;
     default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
     }

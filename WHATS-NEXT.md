@@ -1,5 +1,13 @@
 # What's next
 
+> **(M817) About window — accurate component list.** Companion to the M815 Welcome refresh. The About box
+> listed only "kernel / FAT32 / TCP / TLS / web browser" — omitting the from-scratch JavaScript engine and
+> the scriptable shell + editor (major hand-written components). Updated it to read kernel/memory/tasks,
+> FAT32/TCP/TLS 1.3, JS engine + web browser, scriptable shell + editor, and grew the box 160 → 178 px to fit.
+> (Also vetted a browser-window-title idea and found it already exists — `desktop.c` keeps each browser
+> window's title synced to the page `<title>` every frame — so no redundant change was made.) `make check`
+> 30/30. Verified in-guest: the About window renders the full component list cleanly.
+
 > **(M816) Shell — `read` builtin (interactive input).** The shell could produce output (echo) and capture
 > command output (`$()`), but had no way to read *user* input into a variable — so scripts couldn't be
 > interactive. `read VAR` now reads one line via `readline` and stores it in VAR, so a script can prompt and
