@@ -19,6 +19,7 @@ static char fname[40];
 static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
 static char replq[40]; static int replacing;          /* Ctrl-R replace: replacement text + mode (1=typing search, 2=typing replacement) */
 static int helping;                                   /* Ctrl-H: key-list overlay shown */
+static int saving_as;                                 /* Ctrl-W: typing a new filename to save under */
 
 /* ---- undo (Ctrl-Z) -------------------------------------------------------
  * A log of single-character edits, newest last. Each op remembers the char,
@@ -316,7 +317,7 @@ static void render_help(void) {
     sys_clear();
     sys_setcolor(4); print("EDITOR KEYS  (any key returns)\n"); sys_setcolor(0);
     print("arrows Home End PgUp PgDn   move\n");
-    print("^S save    ^Q quit    ESC save+quit\n");
+    print("^S save    ^W save as   ^Q quit   ESC save+quit\n");
     print("^Z undo    ^Y redo\n");
     print("^F find    ^R replace  ^G go to line\n");
     print("^B set mark, then move to select\n");
@@ -406,6 +407,22 @@ int main(void) {
             else if (k >= 32 && k < 127 && fl < 39) { q[fl] = (char)k; q[fl+1] = 0; render_prompt(lbl, q); }
             continue;
         }
+        if (saving_as) {                            /* Ctrl-W: type a new filename, Enter saves to it */
+            int fl = 0; while (findq[fl]) fl++;
+            if (k == '\n' || k == '\r') {
+                saving_as = 0;
+                if (findq[0]) {
+                    int i = 0; for (; findq[i] && i < (int)sizeof(fname)-1; i++) fname[i] = findq[i]; fname[i] = 0;
+                    if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
+                    else render("\n[saved]");
+                    sys_sleep(400); render(0);
+                } else render(0);
+            }
+            else if (k == 27) { saving_as = 0; render(0); }
+            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("save as: ", findq); }
+            else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("save as: ", findq); }
+            continue;
+        }
         if (k == 27) {                              /* ESC: save and quit (read-only if the file was too large) */
             if (readonly) render("\n[not saved: file too large to edit]");
             else if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
@@ -426,6 +443,7 @@ int main(void) {
         else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: ", findq); }  /* Ctrl-G: go to line */
         else if (k == 0x88) { helping = 1; render_help(); continue; }   /* Ctrl-H: key-list overlay (skip the trailing render) */
         else if (k == 0x92) { replacing = 1; findq[0] = 0; render_prompt("replace: ", findq); } /* Ctrl-R: find & replace */
+        else if (k == 0x97 && !readonly) { saving_as = 1; findq[0] = 0; render_prompt("save as: ", findq); } /* Ctrl-W: save as */
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
         else if (k == 0x99) redo();                       /* Ctrl-Y: redo */
         else if (k == 0x82) sel_anchor = (sel_anchor < 0) ? cur : -1;  /* Ctrl-B: set/clear selection mark */

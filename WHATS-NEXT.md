@@ -1,5 +1,14 @@
 # What's next
 
+> **(M818) Editor — Save As (Ctrl-W).** The editor could only save back to the file it opened (or the
+> launch-arg name); there was no way to save the buffer under a *new* name (save a copy, or name a
+> never-saved buffer). Ctrl-W now prompts `save as:`, writes the document to the typed filename, and switches
+> the editor to editing that file (so further `^S`/ESC save there). Guarded off in read-only mode (the file
+> was truncated on load, so saving it would lose data). Reuses the find/replace prompt + mode-flag pattern;
+> listed in the Ctrl-H help. `make check` 30/30. Verified in-guest: opened `orig.txt`, typed
+> `SAVEAS-CONTENT`, Ctrl-W → `COPYFILE.TXT` → the title bar switched to `EDIT COPYFILE.TXT` and the 14-byte
+> file was written.
+
 > **(M817) About window — accurate component list.** Companion to the M815 Welcome refresh. The About box
 > listed only "kernel / FAT32 / TCP / TLS / web browser" — omitting the from-scratch JavaScript engine and
 > the scriptable shell + editor (major hand-written components). Updated it to read kernel/memory/tasks,
