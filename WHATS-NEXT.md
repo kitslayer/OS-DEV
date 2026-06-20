@@ -1,5 +1,16 @@
 # What's next
 
+> **(M884) Tests — extracted the calculator's expression evaluator into `calceval.h` + host fuzz (34th suite).**
+> `calc.c` had its own recursive-descent evaluator (`^` for power, `& | << >> ~`, `0x` hex — distinct from
+> the shell's `$(())`/shmath: different operators, no variables, signed accumulation relying on the OS's
+> `-fwrapv`) and it was the one arithmetic evaluator in the OS with *no* host coverage. Lifted it verbatim
+> into `user/calceval.h` (exposing `calc_eval(s, &err)`), shrinking `calc.c` to I/O + `main`. Added
+> `tests/calc/` (ASan+UBSan + **-fwrapv** to match the OS build, so the intended signed wraparound isn't a
+> UBSan false-positive): ~40 regression cases (precedence, parens, `^` right-assoc, hex, bitwise, and the
+> error paths — `2+`, `(2+3`, `5/0`, trailing junk, `0x`) + a 400k random-expression fuzz asserting no
+> crash/hang/UB. Verified in-guest the app still computes (`(2+3)*4 - 0xa` → `10`, `2^10` → `1024 0x400`).
+> Follows the shgrep/shmath/shsplit extraction pattern; `make check` now 34 suites; calc.c builds clean.
+
 > **(M883) Demo — `DEMO.SH` now showcases functions, `$#`/`$@`, `return`, and bare assignment.** The bundled
 > scripting demo (`source DEMO.SH`) predated this session's work — it used `set i=…` and never showed
 > functions, the headline new feature. Modernized it to demonstrate the full capability: a `greet world`

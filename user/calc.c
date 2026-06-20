@@ -8,101 +8,7 @@
  * shell and the clock, all running as isolated windowed processes.
  */
 #include "ulib.h"
-
-#define LONG_MIN (-9223372036854775807L - 1)   /* freestanding: no limits.h */
-static const char *cur;          /* the parse cursor */
-static int err;
-static long expr(void);
-static long bor(void);          /* the lowest-precedence level (bitwise OR) — the eval entry */
-
-static void skipws(void) { while (*cur == ' ' || *cur == '\t') cur++; }
-
-static long factor(void) {
-    skipws();
-    if (*cur == '(') {
-        cur++;
-        long v = bor();
-        skipws();
-        if (*cur == ')') cur++; else err = 1;
-        return v;
-    }
-    if (*cur == '-') { cur++; return -factor(); }
-    if (*cur == '~') { cur++; return ~factor(); }   /* bitwise NOT */
-    long v = 0; int any = 0;
-    if (cur[0] == '0' && (cur[1] == 'x' || cur[1] == 'X')) {          /* hex literal: 0x... */
-        cur += 2;
-        for (;;) {
-            char c = *cur; int d;
-            if (c >= '0' && c <= '9') d = c - '0';
-            else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
-            else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
-            else break;
-            v = v * 16 + d; cur++; any = 1;
-        }
-    } else {
-        while (*cur >= '0' && *cur <= '9') { v = v * 10 + (*cur - '0'); cur++; any = 1; }
-    }
-    if (!any) err = 1;
-    return v;
-}
-
-static long power(void) {               /* right-associative ^, binds tighter than * / % */
-    long b = factor();
-    skipws();
-    if (*cur == '^') {
-        cur++;
-        long e = power();
-        if (e < 0) return 0;            /* integer: x^(negative) rounds to 0 */
-        long r = 1;
-        for (long i = 0; i < e && i < 64; i++) r *= b;   /* capped to bound the loop */
-        return r;
-    }
-    return b;
-}
-
-static long term(void) {
-    long v = power();
-    for (;;) {
-        skipws();
-        if (*cur == '*') { cur++; v *= power(); }
-        else if (*cur == '/') { cur++; long d = power(); if (d == 0 || (d == -1 && v == LONG_MIN)) err = 1; else v /= d; }
-        else if (*cur == '%') { cur++; long d = power(); if (d == 0 || (d == -1 && v == LONG_MIN)) err = 1; else v %= d; }
-        else break;
-    }
-    return v;
-}
-
-static long expr(void) {
-    long v = term();
-    for (;;) {
-        skipws();
-        if (*cur == '+') { cur++; v += term(); }
-        else if (*cur == '-') { cur++; v -= term(); }
-        else break;
-    }
-    return v;
-}
-
-static long shift(void) {       /* << >> ; looser than + - */
-    long v = expr();
-    for (;;) {
-        skipws();
-        if (cur[0] == '<' && cur[1] == '<') { cur += 2; long s = expr(); v = (s >= 0 && s < 64) ? v << s : 0; }
-        else if (cur[0] == '>' && cur[1] == '>') { cur += 2; long s = expr(); v = (s >= 0 && s < 64) ? v >> s : 0; }
-        else break;
-    }
-    return v;
-}
-static long band(void) {        /* bitwise AND */
-    long v = shift();
-    for (;;) { skipws(); if (*cur == '&') { cur++; v &= shift(); } else break; }
-    return v;
-}
-static long bor(void) {         /* bitwise OR (lowest precedence) */
-    long v = band();
-    for (;;) { skipws(); if (*cur == '|') { cur++; v |= band(); } else break; }
-    return v;
-}
+#include "calceval.h"   /* the recursive-descent evaluator (calc_eval), host-tested by tests/calc */
 
 static void itoa_l(long v, char *out) {
     char t[24]; int i = 0, neg = v < 0;
@@ -132,10 +38,8 @@ int main(void) {
         readline(line, sizeof(line));
         if (line[0] == '\0') continue;
         if (streq(line, "q") || streq(line, "quit") || streq(line, "exit")) break;
-        cur = line; err = 0;
-        long r = bor();
-        skipws();
-        if (err || *cur) { sys_setcolor(2); print("  ? syntax error\n"); sys_setcolor(0); }   /* error: red */
+        int e; long r = calc_eval(line, &e);
+        if (e) { sys_setcolor(2); print("  ? syntax error\n"); sys_setcolor(0); }   /* error: red */
         else { char b[24]; itoa_l(r, b); print("  = "); sys_setcolor(3); print(b); sys_setcolor(0);  /* decimal: yellow */
                char h[24]; itoa_hex(r, h); sys_setcolor(8); print("  "); print(h); sys_setcolor(0); print("\n"); }  /* hex: grey */
     }
