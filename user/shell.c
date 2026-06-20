@@ -79,6 +79,17 @@ static int sort_foldeq(const char *a, const char *b) {   /* case-insensitive str
     while (*a && gr_lc(*a) == gr_lc(*b)) { a++; b++; }
     return gr_lc(*a) == gr_lc(*b);
 }
+/* sort -kN: pointer to the start of whitespace-delimited field k (1-based) — the
+ * key compares from there to end of line, like `sort -kN`. Past the last field
+ * it returns the terminating NUL (empty key). */
+static const char *sort_field(const char *s, int k) {
+    for (int f = 1; f < k && *s; f++) {
+        while (*s == ' ' || *s == '\t') s++;
+        while (*s && *s != ' ' && *s != '\t') s++;
+    }
+    while (*s == ' ' || *s == '\t') s++;
+    return s;
+}
 /* Expand a `tr` SET token (literal chars + a-z ranges) into out[]; advance *pp past it. */
 static int tr_expand(const char **pp, char *out, int max) {
     const char *s = *pp; int o = 0;
@@ -270,7 +281,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nruf] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nrufk] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -495,9 +506,16 @@ static int run_command(char *line, char *cwd) {
                 }
             }
         } else if (startswith(line, "sort ")) {
-            const char *fp = line + 5; int rev = 0, nsort = 0, uniq_f = 0, fold = 0;  /* -r reverse, -n numeric, -u unique, -f fold case */
+            const char *fp = line + 5; int rev = 0, nsort = 0, uniq_f = 0, fold = 0, kf = 0;  /* -r rev, -n numeric, -u unique, -f fold, -kN sort by field N */
             while (*fp == ' ') fp++;
             while (fp[0] == '-' && fp[1] && fp[1] != ' ') {
+                if (fp[1] == 'k') {                         /* -kN / -k N : sort by whitespace field N (compared to end of line) */
+                    fp += 2; while (*fp == ' ') fp++;
+                    kf = 0; while (*fp >= '0' && *fp <= '9') kf = kf * 10 + (*fp++ - '0');
+                    if (kf < 1) kf = 1;
+                    while (*fp == ' ') fp++;
+                    continue;
+                }
                 int t, valid = 1;
                 for (t = 1; fp[t] && fp[t] != ' '; t++) if (fp[t] != 'r' && fp[t] != 'n' && fp[t] != 'u' && fp[t] != 'f') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a filename) */
@@ -522,15 +540,17 @@ static int run_command(char *line, char *cwd) {
                         char *key = lns[i]; int j = i - 1;
                         while (j >= 0) {
                             int cmp;
+                            const char *ka = kf ? sort_field(lns[j], kf) : lns[j];   /* -kN: compare starting at field N */
+                            const char *kb = kf ? sort_field(key, kf) : key;
                             if (nsort) {                       /* -n: compare by leading integer value */
-                                long va = sort_numval(lns[j]), vb = sort_numval(key);
+                                long va = sort_numval(ka), vb = sort_numval(kb);
                                 cmp = (va < vb) ? -1 : (va > vb) ? 1 : 0;
                             } else if (fold) {                 /* -f: case-insensitive byte order */
-                                const char *a = lns[j], *b = key;
+                                const char *a = ka, *b = kb;
                                 while (*a && gr_lc(*a) == gr_lc(*b)) { a++; b++; }
                                 cmp = (int)(unsigned char)gr_lc(*a) - (int)(unsigned char)gr_lc(*b);
                             } else {                           /* byte order */
-                                const char *a = lns[j], *b = key;
+                                const char *a = ka, *b = kb;
                                 while (*a && *a == *b) { a++; b++; }
                                 cmp = (int)(unsigned char)*a - (int)(unsigned char)*b;
                             }

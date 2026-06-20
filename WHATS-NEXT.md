@@ -1,5 +1,12 @@
 # What's next
 
+> **(M863) Shell — `sort -kN` (sort by column).** `sort` only compared whole lines; `sort -k2` now compares
+> from whitespace field N to end of line (bash's default key), composing with `-n`/`-r`/`-f`. A `sort_field`
+> helper returns the field-N offset; the three compare branches use it. Verified in-guest on
+> `apple 30 / banana 10 / cherry 20`: `sort -k2 -n` → `banana 10, cherry 20, apple 30` (by numeric 2nd
+> column); plain `sort` (whole line) unchanged. This completes the common text-tool flag set. `make check`
+> 32 suites; shell.c warnings unchanged (11).
+
 > **(M862) Shell — `head -c N` / `tail -c N` (byte mode).** head/tail only counted lines (`-N`); added `-c N`
 > for the first/last N *bytes* (binary inspection, byte-precise slicing). Shares the existing per-file loop
 > and the screen-only `...` hint. Verified in-guest on `abcdefghij`: `head -c 4` → `abcd`, `tail -c 4` →
