@@ -1,5 +1,13 @@
 # What's next
 
+> **(M815) Welcome window — onboarding refresh.** The desktop's Welcome window (the first thing a user sees)
+> just said "a from-scratch OS with its own desktop" plus drag hints — it undersold everything built since.
+> Rewrote it to point newcomers at the headline capabilities: the Browser (real web over HTTPS + JS), the
+> scriptable Shell (for/if/while), the Editor (undo/redo, find & replace), and the 60+ apps/games/demos, plus
+> the F9/F1 entry points. Grew the window 206 → 290 px so all lines fit without clipping (kept each line ≤ ~40
+> chars for the body width). `make check` 30/30 (gfxtest still paints the desktop). Verified in-guest: the
+> Welcome window renders all lines cleanly when raised to the front.
+
 > **(M814) Baked `DEMO.SH` scripting showcase.** Caps the shell-scripting arc (M799–M812) with a runnable,
 > discoverable demo baked onto the disk by `mkfatfs`: `source DEMO.SH` exercises comments, `echo`, variables,
 > `$((arithmetic))`, `$(command substitution)`, aliases, `for`, `if`/`test`, and `while` in one go — both a

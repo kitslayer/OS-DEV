@@ -205,9 +205,15 @@ static void draw_content(const window_t *w, int focused) {
     switch (w->kind) {
     case KIND_WELCOME: {
         const char *L[] = { "Welcome to OS-DEV!", "",
-            "A from-scratch x86_64 OS", "with its own desktop.", "",
-            "- drag the title bar to move", "- drag the corner to resize",
-            "- Apps menu (click or F9) runs apps", "- press F1 for all keyboard shortcuts" };
+            "A from-scratch x86_64 OS: kernel, FAT32",
+            "disk, desktop and apps, all hand-built.", "",
+            "Open the Apps menu (F9) and try:",
+            "- Browser: the real web over HTTPS + JS",
+            "- Shell: scriptable (for / if / while)",
+            "- Editor: undo/redo, find & replace",
+            "- 60+ apps, games and demos", "",
+            "Drag the title bar or corner to move.",
+            "F9 = Apps menu     F1 = all shortcuts" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) draw_text(bx, by+i*18, L[i], 0x202028);
         break;
     }
@@ -691,7 +697,7 @@ static void spawn_app(int kind, const char *prog) {
     w.x = x; w.y = y; w.kind = kind;
     switch (kind) {
     case KIND_FILES:   w.w=380; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;
-    case KIND_WELCOME: w.w=360; w.h=206; w.body=0xF0F0F0; w.title="Welcome"; break;
+    case KIND_WELCOME: w.w=360; w.h=290; w.body=0xF0F0F0; w.title="Welcome"; break;
     case KIND_ABOUT:   w.w=300; w.h=160; w.body=0xF4F0E8; w.title="About";   break;
     case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="Monitor"; break;
     default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
@@ -712,7 +718,7 @@ void desktop_run(void) {
     load_wallpaper();                    /* WALL.PNG from disk, else the gradient */
     start_y = screen_h - TASKBAR_H + 5;
 
-    windows[win_count++] = (window_t){ 60, 70, 360, 206, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0 };
+    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0 };
     windows[win_count++] = (window_t){ 60, 300, 330, 200, 0xE8ECF4, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0 };
     app_spawn_named("shell");           /* a real ring-3 shell (WM gives it a
                                          * window below; spawn more via Apps) */
