@@ -2975,7 +2975,22 @@ int browser_poll(browser_t *b) {
     if (!b->need_parse) return changed;
     b->need_parse = 0;
     int n = b->http_n;
-    if (n <= 0) { b->ntok = 0; set_status(b, "failed"); b->redirects = 0; return 1; }
+    if (n <= 0) {                               /* fetch failed (DNS/connect/TLS): render a clear error page, not a blank one */
+        b->ntok = 0; b->redirects = 0;
+        if (b->raw) {
+            int p = 0; char *o = b->raw;
+            const char *e1 = "<h2>Could not load page</h2><p>Could not reach <b>";
+            const char *e2 = "</b>.</p><p>The host may not exist, the connection or TLS handshake failed, or the site refused our request. Check the address and your connection, then try again.</p>";
+            for (const char *q = e1;     *q && p < RAW_MAX - 1; q++) o[p++] = *q;
+            for (const char *q = b->url; *q && p < RAW_MAX - 1; q++) o[p++] = *q;
+            for (const char *q = e2;     *q && p < RAW_MAX - 1; q++) o[p++] = *q;
+            o[p] = 0;
+            b->bodyoff = 0; b->bodylen = p;
+            parse_html(b, o, p);                /* header-less HTML, like the local home page */
+        }
+        set_status(b, "failed");
+        return 1;
+    }
 
     if (n > 12 && b->raw[9] == '3') {               /* HTTP/1.x 3xx: follow Location */
         char loc[URL_MAX];

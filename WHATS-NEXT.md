@@ -1,5 +1,14 @@
 # What's next
 
+> **(M896) Browser — a clear error page on a failed fetch (was a blank page).** Found by browsing a bad
+> domain over the (real, working) network: the browser showed only a tiny "failed" status with a fully
+> blank body — confusing, and failures are common (typos, offline, TLS-incompatible sites). The parse path
+> short-circuited on `http_n <= 0` (`b->ntok = 0; return`), never rendering anything. Now that branch builds
+> a small header-less error page into `b->raw` ("Could not load page" + the URL + a one-line cause/next-step
+> hint) and `parse_html`s it (exactly like the local home page), then still sets the "failed" status.
+> Verified in-guest: `browse nonexistent-zzz-99999.example` now shows the error message; `browse example.com`
+> still loads normally (success path untouched). `make check` green (35 suites).
+
 > **(M895) Browser — larger page capacity so big real pages aren't truncated.** With QEMU user-mode
 > networking reaching the real internet, testing revealed the flagship browser hard-caps the page fetch at
 > 256 KB (`RAW_MAX`): `en.wikipedia.org/wiki/Unix` fetched exactly `262143b` (256 KB−1) and was cut off.
