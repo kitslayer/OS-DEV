@@ -193,6 +193,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_setcolor:
         app_setcolor((int)r->rdi);
         break;
+    case SYS_clip_get:
+        r->rax = (uint64_t)(int64_t)clip_get((char *)r->rdi, (int)r->rsi);
+        break;
+    case SYS_clip_set:
+        clip_set((const char *)r->rdi, (int)r->rsi);
+        break;
     case SYS_writefile:
         r->rax = (uint64_t)vfs_write((const char *)r->rdi, (const void *)r->rsi, r->rdx);
         break;

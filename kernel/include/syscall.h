@@ -64,6 +64,8 @@
 #define SYS_audiostop 54 /* ()             -> stop background audio */
 #define SYS_mouse_rel 55 /* ()             -> packed relative motion dx|0-31 dy|32-63 (mouselook) */
 #define SYS_caret  56   /* (on)            -> 1 = show system caret (default), 0 = app draws its own */
+#define SYS_clip_get 57 /* (buf, max)      -> copy the system clipboard into buf; returns length */
+#define SYS_clip_set 58 /* (buf, len)      -> set the system clipboard from buf; 0 */
 
 #define SYSCALL_VECTOR 0x80
 

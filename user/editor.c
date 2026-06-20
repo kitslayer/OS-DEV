@@ -131,6 +131,36 @@ static void del_fwd(void) {                 /* Delete key: remove the char at th
     dlen--;
 }
 
+/* ---- line clipboard: Ctrl-C copy / Ctrl-X cut / Ctrl-V paste --------------
+ * Operates on whole lines (no selection UI) via the shared system clipboard,
+ * so a line can be carried to the shell/browser too. Cut/paste go through
+ * del_fwd()/insert(), so they're undoable and coalesce into one group. */
+static void line_bounds(int *ls, int *le) {
+    int s = cur; while (s > 0 && doc[s-1] != '\n') s--;
+    int e = cur; while (e < dlen && doc[e] != '\n') e++;
+    if (e < dlen) e++;                          /* include the trailing newline */
+    *ls = s; *le = e;
+}
+static void copy_line(void) {
+    int ls, le; line_bounds(&ls, &le);
+    sys_clip_set(doc + ls, le - ls);
+}
+static void cut_line(void) {
+    if (readonly) return;
+    int ls, le; line_bounds(&ls, &le);
+    sys_clip_set(doc + ls, le - ls);
+    cur = ls;
+    for (int i = 0; i < le - ls; i++) del_fwd();
+    undo_break();
+}
+static void paste_clip(void) {
+    if (readonly) return;
+    char buf[2048];
+    int n = sys_clip_get(buf, sizeof buf);
+    for (int i = 0; i < n; i++) insert(buf[i]);
+    undo_break();
+}
+
 /* up/down move to the same column in the adjacent line (split on '\n'). */
 static void move_vert(int down) {
     int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;
@@ -288,6 +318,9 @@ int main(void) {
         else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: "); }  /* Ctrl-G: go to line */
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
         else if (k == 0x99) redo();                       /* Ctrl-Y: redo */
+        else if (k == 0x83) copy_line();                  /* Ctrl-C: copy current line */
+        else if (k == 0x98) cut_line();                   /* Ctrl-X: cut current line  */
+        else if (k == 0x96) paste_clip();                 /* Ctrl-V: paste clipboard   */
         else if (k == '\n' || k == '\r') { insert('\n'); undo_break(); }   /* newline ends an undo group */
         else if (k == 8 || k == 127)     backspace();
         else if (k == 0x04)              del_fwd();        /* Delete: forward-delete  */

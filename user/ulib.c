@@ -75,6 +75,8 @@ int  sys_gfx_init(int w, int h) { return (int)do_syscall(SYS_gfx_init, w, h, 0);
 int  sys_gfx_blit(const void *pixels) { return (int)do_syscall(SYS_gfx_blit, (long)pixels, 0, 0); }
 void sys_setkbmode(int raw) { do_syscall(SYS_setkbmode, raw, 0, 0); }
 void sys_caret(int on) { do_syscall(SYS_caret, on, 0, 0); }
+int  sys_clip_get(char *buf, int max) { return (int)do_syscall(SYS_clip_get, (long)buf, max, 0); }
+void sys_clip_set(const char *buf, int len) { do_syscall(SYS_clip_set, (long)buf, len, 0); }
 int  sys_getkbevent(void) { return (int)do_syscall(SYS_getkbevent, 0, 0, 0); }
 void sys_pcm(const void *frames, int nframes) { do_syscall(SYS_pcm, (long)frames, nframes, 0); }
 long sys_playwav(const char *name) { return do_syscall(SYS_playwav, (long)name, 0, 0); }

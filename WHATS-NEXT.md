@@ -1,5 +1,16 @@
 # What's next
 
+> **(M800) Editor — line copy/cut/paste via the system clipboard (Ctrl-C/X/V).** The editor could receive
+> pastes (middle-click flows through the same `iq_get` as pollkey) but had no way to *copy* text out. The
+> kernel already had a shared system clipboard (`g_clip`, set by terminal selection, read by middle-click)
+> but it wasn't reachable from a userspace app. Added two syscalls — `SYS_clip_get(buf,max)` /
+> `SYS_clip_set(buf,len)` (57/58) wrapping the existing `clip_get`/`clip_set` — plus `sys_clip_get`/
+> `sys_clip_set` ulib wrappers, usable by any app. The editor now does line-oriented Ctrl-C (copy current
+> line, incl. its newline), Ctrl-X (cut), Ctrl-V (paste) — cut/paste route through `del_fwd`/`insert` so
+> they're undoable and coalesce to one undo group. Because it's the *system* clipboard, text crosses apps.
+> `make check` 30/30. Verified in-guest: `DUP` → Ctrl-C, Ctrl-V×2 = `DUPDUPDUP`; Ctrl-X emptied it; Ctrl-V
+> restored it; and a line copied in the editor pasted into the shell via middle-click (`XCLIPTEST`).
+
 > **(M799) Shell — `&&` / `||` conditional execution + `$?`.** The shell could chain with `;` and `|` but had
 > no conditional execution and no exit status. Added a `g_status` exit code (0 = success) reset at each
 > `run_command` and set to 1 on the real failure paths: command-not-found, a missing file (set once in the
