@@ -1,5 +1,11 @@
 # What's next
 
+> **(M789) Editor — Ctrl-G go-to-line.** Complements M785's find (search by content) with jump-by-number:
+> Ctrl-G opens a `goto line: N_` prompt (digits only), Enter moves the caret to the start of that line. Reuses
+> the find-mode plumbing — `render_find` generalized to `render_prompt(label)`, a `goting` flag sharing the
+> query buffer. Essential for long files / compiler line references. `make check` 30/30. Verified in-guest:
+> in a 60-line file, Ctrl-G "25" → caret jumps to line 25 (view recentred).
+
 > **(M788) Browser — Forward toolbar button.** Completes M787's Forward UI: added a `>` button next to the
 > `<` Back button in the toolbar (each greyed when its stack is empty), shifting the address field right to
 > fit it. Clicking `>` goes forward; the `browser_click` toolbar hit-test gained the `rx 26..44` region.

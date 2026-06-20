@@ -15,7 +15,7 @@
 static char doc[MAXDOC];
 static int  dlen, cur, readonly;  /* readonly: file exceeded the buffer — view only, never save (would truncate it) */
 static char fname[40];
-static char findq[40]; static int finding;   /* Ctrl-F incremental find: query buffer + mode flag */
+static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
 
 /* First offset >= start where findq occurs in doc, or -1. */
 static int find_from(int start) {
@@ -134,10 +134,10 @@ static void render(const char *msg) {
     if (msg) print(msg);
 }
 
-/* Show the doc with a "find: <query>_" prompt at the bottom (Ctrl-F mode). */
-static void render_find(void) {
-    char m[64]; int p = 0;
-    const char *a = "\nfind: "; while (*a) m[p++] = *a++;
+/* Show the doc with a "<label><query>_" prompt at the bottom (Ctrl-F / Ctrl-G). */
+static void render_prompt(const char *label) {
+    char m[64]; int p = 0; m[p++] = '\n';
+    for (const char *a = label; *a && p < 40; a++) m[p++] = *a;
     for (int i = 0; findq[i] && p < 60; i++) m[p++] = findq[i];
     m[p++] = '_'; m[p] = 0;
     render(m);
@@ -168,8 +168,25 @@ int main(void) {
                 else render("\n[not found]");
             }
             else if (k == 27) { finding = 0; render(0); }            /* Esc: cancel find */
-            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_find(); }
-            else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_find(); }
+            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("find: "); }
+            else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("find: "); }
+            continue;
+        }
+        if (goting) {                               /* Ctrl-G go-to-line: type a number, Enter jumps */
+            int fl = 0; while (findq[fl]) fl++;
+            if (k == '\n' || k == '\r') {
+                goting = 0;
+                int target = 0; for (int i = 0; findq[i]; i++) target = target * 10 + (findq[i] - '0');
+                if (target > 0) {                   /* move the caret to the start of line `target` */
+                    int ln = 1, pos = 0;
+                    while (pos < dlen && ln < target) { if (doc[pos] == '\n') ln++; pos++; }
+                    cur = pos;
+                }
+                render(0);
+            }
+            else if (k == 27) { goting = 0; render(0); }             /* Esc: cancel */
+            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("goto line: "); }
+            else if (k >= '0' && k <= '9' && fl < 8) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("goto line: "); }
             continue;
         }
         if (k == 27) {                              /* ESC: save and quit (read-only if the file was too large) */
@@ -188,7 +205,8 @@ int main(void) {
         else if (k == 0x91) {                       /* Ctrl-Q: quit WITHOUT saving */
             render("\n[quit - changes not saved]"); sys_sleep(350); return 0;
         }
-        else if (k == 0x86) { finding = 1; render_find(); }   /* Ctrl-F: find (keeps the last query) */
+        else if (k == 0x86) { finding = 1; render_prompt("find: "); }    /* Ctrl-F: find (keeps the last query) */
+        else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: "); }  /* Ctrl-G: go to line */
         else if (k == '\n' || k == '\r') insert('\n');
         else if (k == 8 || k == 127)     backspace();
         else if (k == 0x04)              del_fwd();        /* Delete: forward-delete  */
