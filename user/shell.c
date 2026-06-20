@@ -291,7 +291,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1690,12 +1690,14 @@ static int run_command(char *line, char *cwd) {
             if (last < 0) print("  .\n");                              /* no slash -> current dir */
             else if (last == 0) print("  /\n");                        /* "/file" -> "/" */
             else { path[last] = 0; print("  "); print(path); print("\n"); }
-        } else if (startswith(line, "paste ")) {          /* paste F1 F2 -> each file's line i, side by side (tab-joined) */
+        } else if (startswith(line, "paste ")) {          /* paste F1 F2 -> each file's line i, side by side (default tab; -dX picks the joiner) */
             const char *p = line + 6; while (*p == ' ') p++;
+            char delim = '\t';
+            if (p[0] == '-' && p[1] == 'd') { p += 2; while (*p == ' ') p++; if (*p) delim = *p++; while (*p == ' ') p++; }
             char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
             while (*p == ' ') p++;
             char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
-            if (!f1[0] || !f2[0]) { print("usage: paste <file1> <file2>\n"); }
+            if (!f1[0] || !f2[0]) { print("usage: paste [-dX] <file1> <file2>\n"); }
             else {
                 long n1, n2; char *c1 = slurp(f1, &n1); char *c2 = slurp(f2, &n2);
                 if (!c1)      { print("paste: no such file: "); print(f1); print("\n"); }
@@ -1707,7 +1709,7 @@ static int run_command(char *line, char *cwd) {
                         long s2 = i2; while (i2 < n2 && c2[i2] != '\n') i2++; long e2 = i2; if (i2 < n2) i2++;
                         char t[160]; long k, q = 0;
                         for (k = s1; k < e1 && q < 78; k++) t[q++] = c1[k];   /* file1's line */
-                        t[q++] = '\t';
+                        t[q++] = delim;
                         for (k = s2; k < e2 && q < 158; k++) t[q++] = c2[k];  /* file2's line */
                         t[q] = 0; print("  "); print(t); print("\n");
                     }

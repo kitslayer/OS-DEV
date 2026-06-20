@@ -1,5 +1,11 @@
 # What's next
 
+> **(M867) Shell — `paste -dX` (custom join delimiter).** `paste` always joined two files' lines with a
+> tab; `-dX` now picks the joiner (e.g. `paste -d, a b` → `a1,b1`). Verified in-guest: `paste -d, P1 P2` →
+> `a,1`/`b,2`, plain `paste` still tab-joins. This finishes the common shell text toolkit (the only deferred
+> piece is `grep -o`, which needs a greedy-matcher rewrite — the current matcher is lazy). `make check` 32
+> suites; shell.c warnings unchanged (11).
+
 > **(M866) Shell — `grep -A/-B/-C N` (context lines).** grep can now print N lines of context around each
 > match: `-A` after, `-B` before, `-C` both — the common idiom for reading matches in context. A shared
 > `grep_emit` helper prints a line with its prefix (`:` for a match, `-` for context); `-A` is an
