@@ -249,6 +249,22 @@ static void alias_del(const char *n){
     for (int i=0;i<g_nalias;i++){ int j=0; while(j<nl && g_alias[i].name[j]==n[j]) j++;
         if (j==nl && g_alias[i].name[j]==0){ g_alias[i]=g_alias[--g_nalias]; return; } }
 }
+/* user-defined functions: `NAME() { body }` — body is a ;-list run with $1..$9 bound to the call args. */
+static struct { char name[24], body[256]; } g_func[16];
+static int g_nfunc, g_func_depth;   /* g_func_depth caps recursion */
+static const char *func_get(const char *n, int nl){
+    for (int i=0;i<g_nfunc;i++){ int j=0; while(j<nl && g_func[i].name[j] && g_func[i].name[j]==n[j]) j++;
+        if (j==nl && g_func[i].name[j]==0) return g_func[i].body; }
+    return 0;
+}
+static void func_set(const char *n, int nl, const char *body){
+    if (nl<1) return;
+    if (nl>23) nl=23;
+    int slot=-1;
+    for (int i=0;i<g_nfunc && slot<0;i++){ int j=0; while(j<nl && g_func[i].name[j]==n[j]) j++; if (j==nl && g_func[i].name[j]==0) slot=i; }
+    if (slot<0){ if (g_nfunc>=16) return; slot=g_nfunc++; int k=0; for(;k<nl;k++) g_func[slot].name[k]=n[k]; g_func[slot].name[k]=0; }
+    int k=0; for(;body[k] && k<255;k++) g_func[slot].body[k]=body[k]; g_func[slot].body[k]=0;
+}
 /* The $((expr)) evaluator (sh_eval, sh_vchar, sh_askip, …) now lives in
  * shmath.h, host-tested by tests/shmath; the sh_var hook above resolves names. */
 
@@ -288,6 +304,23 @@ static int expand_vars(const char *src, char *dst, int cap){
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
     do {
+        { int wl = 0; while (line[wl] && line[wl] != ' ') wl++;   /* a user-defined function shadows builtins (bash behaviour) */
+          const char *fb = wl ? func_get(line, wl) : 0;
+          if (fb && g_func_depth < 8) {
+              char bc[256]; int bi = 0; while (fb[bi] && bi < 255) { bc[bi] = fb[bi]; bi++; } bc[bi] = 0;   /* snapshot the body */
+              const char *a = line + wl; while (*a == ' ') a++;   /* bind $1..$9 to the call args */
+              int pn = 0;
+              while (*a && pn < 9) {
+                  char pname[2] = { (char)('1' + pn), 0 };
+                  char pv[64]; int pi = 0; while (*a && *a != ' ' && pi < 63) pv[pi++] = *a++;
+                  pv[pi] = 0; vset(pname, 1, pv);
+                  while (*a == ' ') a++;
+                  pn++;
+              }
+              for (int z = pn; z < 9; z++) { char pname[2] = { (char)('1' + z), 0 }; vset(pname, 1, ""); }   /* clear unused params */
+              g_func_depth++; run_input_line(bc, cwd); g_func_depth--;
+              continue;
+          } }
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
@@ -309,6 +342,7 @@ static int run_command(char *line, char *cwd) {
             print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
+            print("        name() { cmds; }   (define a function; call `name args` with $1..$9 bound)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
@@ -2625,6 +2659,21 @@ static int run_while(char *line, char *cwd) {
 static int run_input_line(char *line, char *cwd) {
     char *t = line; while (*t == ' ') t++;
     if (startswith(t, "js -e ")) { run_js_inline(t + 6); g_status = 0; return 0; }   /* literal code (its >|&; are JS, not shell) */
+    { const char *q = t; while (*q && *q != ' ' && *q != '(') q++;   /* function definition: NAME() { body } */
+      if (q > t && *q == '(' && q[1] == ')') {
+          const char *b = q + 2; while (*b == ' ') b++;
+          if (*b == '{') {
+              const char *body = b + 1; while (*body == ' ') body++;
+              const char *last = 0; for (const char *e = body; *e; e++) if (*e == '}') last = e;
+              if (last) {
+                  char bb[256]; int bi = 0; for (const char *c = body; c < last && bi < 255; c++) bb[bi++] = *c;
+                  while (bi > 0 && (bb[bi-1] == ' ' || bb[bi-1] == ';')) bi--;   /* trim trailing ; / space */
+                  bb[bi] = 0;
+                  func_set(t, (int)(q - t), bb); g_status = 0;
+                  return 0;
+              }
+          }
+      } }
     if (startswith(t, "for "))   return run_for(t, cwd);
     if (startswith(t, "while ")) return run_while(t, cwd);
     if (startswith(t, "if "))    return run_if(t, cwd);

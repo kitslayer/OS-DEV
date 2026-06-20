@@ -1,5 +1,17 @@
 # What's next
 
+> **(M873) Shell — user-defined functions `name() { … }` with `$1`..`$9`.** The biggest scripting feature
+> added this turn. A one-line definition `greet() { echo hi $1; }` is parsed in `run_input_line` (detect
+> `NAME()` then `{`…`}`, store the body in a 16-slot table) and called as `greet world`: `run_command`
+> checks the function table *before* the builtin dispatch (so a function shadows a builtin, like bash), binds
+> `$1`..`$9` to the call args (unused ones cleared so a prior call can't leak in), runs the body through
+> `run_input_line`, and a depth counter caps recursion at 8. The committed OS was never at risk (committed
+> only after build + `make check` + in-guest passed). Verified in-guest: `greet world`→`hi world`,
+> `info alice 42`→`name=alice num=42`, a multi-command body `m(){ echo one-$1; echo two-$1; }; m X`→
+> `one-X`/`two-X`, and builtins still work. Limitation: one-line defs only (the shell is line-oriented), and
+> params are global (nested calls don't perfectly scope) — noted for a future refinement. `make check` 32
+> suites; shell.c warnings unchanged (11).
+
 > **(M872) Shell — `xargs` (build a command from piped input).** `cmd | xargs CMD` appends the piped
 > whitespace-separated tokens to CMD and runs it (the classic `find pat | xargs rm` idiom) — assembled into
 > a line and dispatched through `run_input_line`. Verified in-guest: `echo apple banana cherry | xargs echo
