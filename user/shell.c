@@ -1077,8 +1077,17 @@ static int run_command(char *line, char *cwd) {
             long n = sys_tree(tb, sizeof(tb));
             if (n <= 0) print("(empty)\n"); else { tb[n] = 0; print(tb); }
         } else if (startswith(line, "mkdir ")) {
-            if (sys_mkdir(line + 6) < 0) { print("mkdir: failed (exists?)\n"); g_status = 1; }
-            else { print("created "); print(line + 6); print("/\n"); }
+            const char *p = line + 6; int any = 0;       /* make each space-separated directory */
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0;
+                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                name[j] = 0; any = 1;
+                if (sys_mkdir(name) < 0) { print("mkdir: failed (exists?): "); print(name); print("\n"); g_status = 1; }
+                else { print("created "); print(name); print("/\n"); }
+            }
+            if (!any) print("usage: mkdir <dir>...\n");
         } else if (streq(line, "cd -")) {                        /* swap to the previous directory */
             if (!prevcwd[0]) { print("cd: no previous directory\n"); g_status = 1; }
             else {
@@ -1888,11 +1897,19 @@ static int run_command(char *line, char *cwd) {
             }
             if (!any) print("usage: rm <file>...\n");
         } else if (startswith(line, "touch ")) {
-            const char *name = line + 6;
-            char probe[1];
-            if (sys_readfile(name, probe, 1) >= 0) { }          /* exists: leave content (no mtime API) */
-            else if (sys_writefile(name, "", 0) < 0) print("touch: failed\n");
-            else { print("created "); print(name); print("\n"); }
+            const char *p = line + 6; int any = 0;       /* touch each space-separated file */
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0;
+                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                name[j] = 0; any = 1;
+                char probe[1];
+                if (sys_readfile(name, probe, 1) >= 0) { }      /* exists: leave content (no mtime API) */
+                else if (sys_writefile(name, "", 0) < 0) { print("touch: failed: "); print(name); print("\n"); g_status = 1; }
+                else { print("created "); print(name); print("\n"); }
+            }
+            if (!any) print("usage: touch <file>...\n");
         } else if (startswith(line, "edit ")) {
             char fname[32]; int i = 0;
             for (char *q = line + 5; *q && i < 31; q++) fname[i++] = *q;

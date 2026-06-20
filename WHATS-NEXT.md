@@ -1,5 +1,11 @@
 # What's next
 
+> **(M831) Shell — `mkdir`/`touch` accept multiple names.** Like `rm` (M830), both were single-argument, so
+> `mkdir a b c` / `touch a b c` failed by treating the whole argument as one name. Both now loop over each
+> space-separated name, creating each and reporting per-name (failures set `$?`). `make check` 30/30. Verified
+> in-guest: `mkdir md1 md2 md3` created MD1//MD2//MD3/ and `touch tf1 tf2` created TF1/TF2, all visible in
+> `ls` with timestamps.
+
 > **(M830) Shell — `rm` removes multiple files.** `rm` only deleted a single name, so `rm a b` (or a
 > glob-expanded `rm *.tmp`) failed by treating the whole argument as one filename. It now loops over each
 > space-separated file, deleting each and reporting per-file (failures set `$?`). `make check` 30/30. Verified
