@@ -1,5 +1,14 @@
 # What's next
 
+> **(M898) Browser — bigger link budget so large pages' body links stay clickable.** Companion to M897:
+> now that long pages render their full body, their cross-reference links should be followable, but the
+> href URL pool was only `HREF_MAX`=8KB (~200 links) and `LINK_MAX`=512 — so links past the nav/ToC dropped
+> to plain (un-clickable) text. Raised `HREF_MAX` 8192→32768 (still < 65536, so `href_t.off` stays uint16-
+> safe; `add_href` already caps at it) and `LINK_MAX` 512→2000. ~4× more of a long article's links are now
+> clickable. Verified in-guest: after scrolling deep into `en.wikipedia.org/wiki/Unix`, clicking the
+> "History of Unix" link in the body navigated to `/wiki/History_of_Unix`. Small heap bump (~42KB/window);
+> `make check` green (35 suites); no small-page regression.
+
 > **(M897) Browser — widen `tok_t.off` to uint32 so large real pages render their full body, not just the nav.**
 > The render was capped at ~64KB of token text (`TEXT_MAX < 65536`) because the per-token text-pool offset
 > `tok_t.off` was uint16 — so a big page like Wikipedia rendered only its nav/ToC, truncating the article
