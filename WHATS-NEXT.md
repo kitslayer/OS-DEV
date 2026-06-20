@@ -1,5 +1,13 @@
 # What's next
 
+> **(M859) Shell — decorative output (`head` "...", `grep` "(no matches)") no longer pollutes pipes/`$()`.**
+> A real bug found by adversarial testing: `head` prints a `...` "more lines" hint and `grep` a "(no matches)"
+> note, both to stdout — so `seq 1 9 | head -3 | wc -l` returned **4** (the `...` counted as a line) and
+> `$(seq 1 9 | head -2)` yielded `1 2 ...`. Added `cap_active()` to ulib (true while `print()` is being
+> captured for a pipe stage or `$()`); `head`, `grep`, and `find` now suppress the hint when captured but
+> still show it on the screen (`seq 1 9 | head -3` as the final stage still prints `...`). Verified: `wc -l`
+> → 3, `$(… head -2)` → `1 2`, `$(find NOSUCHPATTERN)` → empty (was `(no matches)`). `make check` 32 suites.
+
 > **(M858) Shell — `tr` handles character sets and `a-z` ranges.** `tr` only did single-char replace, so the
 > canonical `tr a-z A-Z` (case conversion) silently did nothing useful. A new `tr_expand` helper expands a
 > SET token (literal chars + `a-z` ranges); `tr SET1 SET2 FILE` now maps each SET1 char to the SET2 char at

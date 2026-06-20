@@ -169,6 +169,7 @@ char *cap_end(unsigned long *outlen) { /* stop; hand the malloc'd buffer to the 
     } else { g_capbuf = 0; g_caplen = 0; g_capmax = 0; }
     return b;
 }
+int cap_active(void) { return g_capbuf != 0; }   /* is print() being captured (a pipe stage or $())? — so commands can suppress decorative output that would pollute the data */
 
 void print(const char *s) {
     if (g_capbuf) {                    /* capture mode: append, growing the buffer as output accumulates */

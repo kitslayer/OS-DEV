@@ -78,6 +78,7 @@ void *memmove(void *dst, const void *src, unsigned long n);
 void          print(const char *s);
 void          cap_begin(void);                          /* redirect print() into a growable heap buffer */
 char         *cap_end(unsigned long *outlen);           /* stop capturing; returns the malloc'd buffer (caller frees) + byte count */
+int           cap_active(void);                         /* nonzero if print() is being captured (pipe stage / $()) — suppress decorative output */
 int           readline(char *buf, int max);   /* reads a line, strips '\n', NUL-terminates */
 unsigned long ustrlen(const char *s);
 int           streq(const char *a, const char *b);

@@ -343,7 +343,7 @@ static int run_command(char *line, char *cwd) {
                 int i = 0, lines = 0;
                 for (; i < n && lines < cnt; i++) if (buf[i] == '\n') lines++;
                 buf[i] = '\0'; print(buf);
-                if (i < n) print("...\n");
+                if (i < n && !cap_active()) print("...\n");   /* "more lines" hint for the screen; never into a pipe/$() data stream */
                 free(buf);
             }
             if (!any) print("usage: head <file>...\n");
@@ -1065,7 +1065,7 @@ static int run_command(char *line, char *cwd) {
                 }
                 if (ll) { /* -l already printed the matching filenames; no summary line */ }
                 else if (cc) { char cb[12]; itoa_simple(hits, cb); print("  "); print(cb); print("\n"); }
-                else if (!hits) print("  (no matches)\n");
+                else if (!hits && !cap_active()) print("  (no matches)\n");   /* screen-only note; would otherwise pollute a pipe/$() */
             }
         } else if (startswith(line, "wc ")) {
             const char *p = line + 3; char num[12];
@@ -1145,7 +1145,7 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "find ")) {
             static char fb[2048];
             long n = sys_find(line + 5, fb, sizeof(fb));
-            if (n > 0) { fb[n] = 0; print(fb); } else print("(no matches)\n");
+            if (n > 0) { fb[n] = 0; print(fb); } else if (!cap_active()) print("(no matches)\n");   /* hint, not data: keep it out of `for f in $(find ...)` */
         } else if (streq(line, "tree")) {
             static char tb[2048];
             long n = sys_tree(tb, sizeof(tb));
