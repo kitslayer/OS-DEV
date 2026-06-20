@@ -137,9 +137,21 @@ enable_paging:
     or eax, 1 << 5
     mov cr4, eax
 
+    ; Probe NX support (CPUID 0x80000001, EDX bit 20) before programming EFER.
+    ; Setting EFER.NXE on a CPU without NX would #GP (triple-fault), so guard it.
+    ; The multiboot pointer is already saved to memory, so clobbering regs is OK.
+    mov eax, 0x80000001
+    cpuid
+    and edx, 1 << 20                ; isolate the NX feature bit
+    mov ebx, edx                    ; stash it (ebx survives rdmsr/wrmsr)
+
     mov ecx, 0xC0000080             ; EFER MSR
     rdmsr
     or eax, 1 << 8                  ; set LME (long mode enable)
+    test ebx, ebx                   ; NX supported?
+    jz .skip_nxe
+    or eax, 1 << 11                 ; set NXE -> the no-execute PTE bit (W^X)
+.skip_nxe:
     wrmsr
 
     mov eax, cr0                    ; enable paging (CR0.PG)

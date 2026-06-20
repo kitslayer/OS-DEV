@@ -605,7 +605,7 @@ uint64_t app_sbrk(long inc) {
                     a->title ? a->title : "?", inc);
             return (uint64_t)-1;
         }
-        vmm_map(v, frame, PTE_WRITABLE | PTE_USER);
+        vmm_map(v, frame, PTE_WRITABLE | PTE_USER | PTE_NX);   /* heap: data, never code (W^X) */
     }
     a->heap_end = newend;
     return old;
@@ -867,7 +867,7 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     }
     for (int i = 0; i < USTACK_PAGES; i++)
         vmm_map(USTACK_BASE + (uint64_t)i * PAGE_SIZE, pmm_alloc_frame(),
-                PTE_WRITABLE | PTE_USER);
+                PTE_WRITABLE | PTE_USER | PTE_NX);   /* stack: non-executable (W^X) */
     a->ustack = USTACK_BASE + USTACK_PAGES * PAGE_SIZE;
 
     __asm__ volatile("mov %0, %%cr3" : : "r"(old) : "memory");

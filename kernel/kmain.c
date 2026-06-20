@@ -64,7 +64,7 @@ static void isolation_demo(void) {
     iso_live = 3;
     for (int i = 0; i < 3; i++) {
         uint64_t cr3 = vmm_create_address_space();
-        vmm_map_to(cr3, 0x40000000, pmm_alloc_frame(), PTE_WRITABLE | PTE_USER);
+        vmm_map_to(cr3, 0x40000000, pmm_alloc_frame(), PTE_WRITABLE | PTE_USER | PTE_NX);
         task_create(iso_worker, cr3, 0);
     }
     while (iso_live > 0)

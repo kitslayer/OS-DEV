@@ -1,5 +1,18 @@
 # What's next
 
+> **(M795) Security — non-executable user stack & heap (W^X, part 1).** Userspace ran fully RWX: the ELF
+> loader and the stack/heap allocators mapped every ring-3 page `PTE_WRITABLE | PTE_USER` with no NX bit, so
+> injected data on the stack or heap was directly executable — the classic shellcode vector. The `PTE_NX`
+> flag was defined but unusable because boot.asm never set EFER.NXE (bit 63 in a PTE is reserved until NXE is
+> on, so it would have faulted). Fixed: boot.asm now CPUID-probes NX (leaf 0x80000001 EDX bit 20) and enables
+> EFER.NXE alongside LME (guarded so a hypothetical NX-less CPU just skips it instead of triple-faulting),
+> and the user stack (app.c), heap/`sbrk` (app.c), and the isolation-demo page (kmain.c) are now mapped NX.
+> Leaf-only NX is correct (the CPU ORs NX up the walk; intermediates stay executable so code still runs).
+> Code pages are untouched — text stays executable — so this is a clean, low-risk half of W^X; making `.text`
+> read-only + `.data` NX (the linker/loader segment split that clears the 58 RWX-segment linker warnings) is
+> part 2. `make check` 30/30. Verified in-guest: boots fine (NXE no triple-fault), and shell, the browser
+> (full JS interpreter on the NX heap), and DOOM (id's zone allocator + framebuffer) all run normally.
+
 > **(M794) Baked-in files — build-date timestamps.** Completes the M792/M793 timestamps arc: `mkfatfs`
 > (the host tool that writes the FAT32 disk) never set the dir-entry date/time fields, so the ~115 baked
 > system files always showed dateless in `ls`/Files while only runtime-created files had dates. Now mkfatfs
