@@ -1,5 +1,14 @@
 # What's next
 
+> **(M814) Baked `DEMO.SH` scripting showcase.** Caps the shell-scripting arc (M799–M812) with a runnable,
+> discoverable demo baked onto the disk by `mkfatfs`: `source DEMO.SH` exercises comments, `echo`, variables,
+> `$((arithmetic))`, `$(command substitution)`, aliases, `for`, `if`/`test`, and `while` in one go — both a
+> live demonstration (the features were otherwise only in `help`) and an end-to-end integration check. Kept
+> the only `*` inside `$(())` so it isn't glob-expanded. The file count auto-updated (117 → 118 baked files).
+> `make check` 30/30. Verified in-guest: `source DEMO.SH` printed variable `OS-DEV`, arithmetic `42`, cmd-sub
+> `it-works`, the alias line, `for-loop n is 1/2/3`, the if/test line, and `while-loop i is 1/2/3`; the file
+> shows in the Files window as `DEMO.SH (502b)`.
+
 > **(M813) Editor — Ctrl-H key-reference overlay.** The editor accumulated a rich key set (undo/redo,
 > find/replace, go-to-line, mark+selection, copy/cut/paste) that the one-line status couldn't advertise. Ctrl-H
 > now shows a full-screen key reference; any key returns to editing (and isn't inserted, since the dismiss
