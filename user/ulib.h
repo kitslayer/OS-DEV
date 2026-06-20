@@ -51,6 +51,7 @@ void sys_setkbmode(int raw);         /* 1 = raw make/break key events, 0 = cooke
 void sys_caret(int on);              /* 1 = show system caret (default), 0 = this app draws its own */
 int  sys_clip_get(char *buf, int max);     /* copy the system clipboard into buf; returns length */
 void sys_clip_set(const char *buf, int len); /* set the system clipboard (shared with middle-click paste) */
+int  sys_getarg(char *buf, int max);       /* copy this app's launch argument into buf; returns length */
 int  sys_getkbevent(void);           /* next raw key event (scancode|0x100 released|0x200 ext), or -1 */
 void sys_pcm(const void *frames, int nframes);   /* play 16-bit stereo PCM @ 48 kHz (blocks) */
 long sys_playwav(const char *name);              /* play a .wav file (16-bit PCM); 0/-1 */

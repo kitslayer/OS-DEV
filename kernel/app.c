@@ -74,10 +74,13 @@ struct app {
     int      sel_r1, sel_c1;             /* selection end (visible-grid cell) */
     char     pastebuf[CLIP_MAX];         /* middle-click paste text, drained before the key queue */
     volatile int paste_len, paste_pos;   /* so a long paste isn't capped by the small key queue */
+    char     launch_arg[128];            /* optional launch argument (e.g. a filename for the editor) */
 };
 
 static struct app apps[MAX_APPS];
 static int next_pid = 100;
+static char g_pend_arg[128];             /* arg for the next app_spawn, copied into its launch_arg */
+static int  g_have_pend;
 
 /* text-colour palette for apps (index 0 = the default green, so an app that never
  * calls SYS_setcolor renders byte-identically). Vivid hues on the dark app background. */
@@ -847,6 +850,10 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
     a->titlebuf[ti] = 0;
     a->title = a->titlebuf;
+    if (g_have_pend) {                    /* consume a pending launch arg (one-shot, race-free) */
+        int ai = 0; while (g_pend_arg[ai] && ai < 127) { a->launch_arg[ai] = g_pend_arg[ai]; ai++; }
+        a->launch_arg[ai] = 0; g_have_pend = 0;
+    }
     grid_clear(a);
     a->cr3 = vmm_create_address_space();
 
@@ -912,6 +919,26 @@ int app_spawn_named(const char *name) {
     }
     kprintf("[app] no such program: '%s'\n", name);
     return -1;
+}
+
+/* Launch a registered program with a one-shot launch argument (e.g. a filename
+ * the app reads via SYS_getarg). The arg is copied into the new app's struct. */
+int app_spawn_named_arg(const char *name, const char *arg) {
+    int ai = 0; if (arg) while (arg[ai] && ai < 127) { g_pend_arg[ai] = arg[ai]; ai++; }
+    g_pend_arg[ai] = 0; g_have_pend = 1;
+    int rc = app_spawn_named(name);
+    if (rc < 0) g_have_pend = 0;          /* spawn failed: don't leak the arg to the next app */
+    return rc;
+}
+
+/* Copy the calling app's launch argument into out (NUL-terminated); returns its
+ * length, or 0 if it was launched without one. */
+int app_getarg(char *out, int max) {
+    struct app *a = cur();
+    int n = 0;
+    if (a) while (a->launch_arg[n] && n < max - 1) { out[n] = a->launch_arg[n]; n++; }
+    if (max > 0) out[n] = 0;
+    return n;
 }
 
 /* List the registered program names, space-separated, into buf (for the shell's

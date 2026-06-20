@@ -199,6 +199,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_clip_set:
         clip_set((const char *)r->rdi, (int)r->rsi);
         break;
+    case SYS_getarg:
+        r->rax = (uint64_t)(int64_t)app_getarg((char *)r->rdi, (int)r->rsi);
+        break;
     case SYS_writefile:
         r->rax = (uint64_t)vfs_write((const char *)r->rdi, (const void *)r->rsi, r->rdx);
         break;

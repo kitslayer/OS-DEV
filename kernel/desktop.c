@@ -625,23 +625,42 @@ static void spawn_browser(const char *url) {
                                        KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0 };
 }
 
+/* Is `name` a plain-text / source file we'd rather edit than view? (case-
+ * insensitive extension match; FAT names are upper-case). */
+static int files_editable(const char *name, int len) {
+    int dot = -1; for (int i = 0; i < len; i++) if (name[i] == '.') dot = i;
+    if (dot < 0) return 0;
+    static const char *exts[] = { "TXT","MD","C","H","SH","LOG","CFG","INI","JS","ASM","JSON", 0 };
+    for (int i = 0; exts[i]; i++) {
+        const char *a = name + dot + 1, *b = exts[i]; int eq = 1;
+        while (*a && *b) { char ca = (*a >= 'a' && *a <= 'z') ? *a - 32 : *a; if (ca != *b) { eq = 0; break; } a++; b++; }
+        if (eq && !*a && !*b) return 1;
+    }
+    return 0;
+}
+
 /* Keyboard navigation for the read-only Files window: up/down move the
- * selection, Enter opens the highlighted file in a browser window (file:NAME). */
+ * selection, Enter opens the highlighted file — text/source files in the
+ * editor (so you can edit them), everything else in a browser window. */
 static void files_key(window_t *w, int k) {
     static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* match the render cap; static (BSS), safe single-threaded (M421) */
     if (n <= 0) return;
     if (w->fsel >= n) w->fsel = n - 1;
     if (k == 0x11)       { if (w->fsel > 0)     w->fsel--; }   /* up   */
     else if (k == 0x12)  { if (w->fsel < n - 1) w->fsel++; }   /* down */
-    else if (k == '\n' || k == '\r') {                         /* open in browser */
+    else if (k == '\n' || k == '\r') {
         const char *name = e[w->fsel].name;
         int len = 0; while (name[len]) len++;
         if (len > 0 && name[len-1] != '/') {                   /* skip directories */
-            char url[32]; int p = 0; const char *pre = "file:";
-            while (*pre) url[p++] = *pre++;
-            for (int j = 0; name[j] && p < (int)sizeof(url) - 1; j++) url[p++] = name[j];
-            url[p] = 0;
-            spawn_browser(url);
+            if (files_editable(name, len)) {
+                app_spawn_named_arg("editor", name);           /* edit text/source files */
+            } else {
+                char url[32]; int p = 0; const char *pre = "file:";
+                while (*pre) url[p++] = *pre++;
+                for (int j = 0; name[j] && p < (int)sizeof(url) - 1; j++) url[p++] = name[j];
+                url[p] = 0;
+                spawn_browser(url);                            /* view everything else */
+            }
         }
     }
 }

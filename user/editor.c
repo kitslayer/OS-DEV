@@ -299,8 +299,14 @@ static void render_prompt(const char *label) {
 }
 
 int main(void) {
-    print("\n  file to edit: ");
-    readline(fname, sizeof(fname));    /* prompt keeps the system caret (it's a readline) */
+    /* If launched with a filename argument (e.g. from the Files app), open it
+     * directly; otherwise prompt for one. */
+    if (sys_getarg(fname, sizeof(fname)) <= 0) {
+        print("\n  file to edit: ");
+        readline(fname, sizeof(fname));    /* prompt keeps the system caret (it's a readline) */
+    } else {
+        print("\n  editing "); print(fname); print("\n");
+    }
     sys_caret(0);                      /* editor body draws its own '|' cursor; hide the block caret */
     if (fname[0] == 0) { fname[0] = 'N'; fname[1] = 'O'; fname[2] = 'T'; fname[3] = 'E';
                          fname[4] = '.'; fname[5] = 'T'; fname[6] = 'X'; fname[7] = 'T'; fname[8] = 0; }

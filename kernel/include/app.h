@@ -12,6 +12,8 @@ typedef struct app app_t;
 
 app_t      *app_spawn(const void *elf, const char *title, uint64_t elfsz);  /* run an ELF as a process */
 int         app_spawn_named(const char *name);   /* launch a registered program; 0/-1 */
+int         app_spawn_named_arg(const char *name, const char *arg);  /* launch with a one-shot arg */
+int         app_getarg(char *out, int max);      /* read the calling app's launch arg; returns length */
 int         app_list_names(char *buf, int max);  /* space-separated prog names; bytes written */
 int         app_spawn_from_file(const char *path);/* load + run an ELF from a FAT32 file */
 app_t      *app_take_pending(void);              /* next app awaiting a window (WM)    */

@@ -1,5 +1,15 @@
 # What's next
 
+> **(M806) App launch arguments + Files opens text files in the editor.** Added a reusable launch-argument
+> mechanism: a spawned app can carry a one-shot string (e.g. a filename). `app_spawn_named_arg(name, arg)`
+> stashes a pending arg that `app_spawn` copies into the new app's struct (race-free — each app gets its own
+> copy), and `SYS_getarg`/`sys_getarg` let the app read it. The editor now opens that filename directly
+> (skipping its prompt) when launched with an arg, and the GUI Files window routes by extension: text/source
+> files (TXT, MD, C, H, SH, LOG, CFG, INI, JS, ASM, JSON) open in the editor for editing, everything else
+> keeps opening in the browser for viewing. `make check` 30/30. Verified in-guest: clicking `README.TXT` in
+> Files opened it in the editor (`EDIT README.TXT`, content loaded, editable); clicking `PRE.HTM` opened it in
+> the browser (rendered) as before.
+
 > **(M805) Shell — `if`/`then`/`else`/`fi`.** Completes shell control flow alongside M804's `for`. `if COND;
 > then CMDS; [else CMDS;] fi` (one line) runs COND, and its exit status (`$?`) picks the branch; THEN/ELSE are
 > full `;`-separated lists and can nest, all via the same `run_input_line` so `if` composes with `for`, pipes,
