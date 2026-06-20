@@ -53,6 +53,8 @@ static const struct {
                      "echo elif: 85 grades $(grade 85)\n"
                      "case red in red) echo case: matched red;; *) echo case: other;; esac\n"
                      "echo default param is ${MISSING:-a-fallback}\n"
+                     "path=/usr/local/bin\n"
+                     "echo basename ${path##*/} dirname ${path%/*} length ${#path}\n"
                      "for n in 1 2 3; do echo for-loop n is $n; done\n"
                      "if test 10 -gt 3; then echo if-test ten is greater than three; fi\n"
                      "i=1\n"

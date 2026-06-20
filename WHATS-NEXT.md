@@ -1,5 +1,11 @@
 # What's next
 
+> **(M901) Shell — document + showcase the M900 parameter expansions.** Updated the `help` line to list the
+> new forms (`${#N} ${N#pfx} ${N%sfx}` alongside `${N:-def}`/`${N:+alt}`), and added a line to the bundled
+> `DEMO.SH`: `path=/usr/local/bin; echo basename ${path##*/} dirname ${path%/*} length ${#path}` → prints
+> `basename bin dirname /usr/local length 14`. So `source DEMO.SH` now demonstrates inline basename/dirname/
+> length too. Verified in-guest. `make check` green (35 suites).
+
 > **(M900) Shell — `${#VAR}` length + `${VAR#pat}`/`${VAR%pat}` glob prefix/suffix strip.** Completes the
 > common sh parameter-expansion set (on top of M893's `${VAR:-default}`/`${VAR:+alt}`), giving inline
 > string/path manipulation without a subshell: `${#VAR}` = length, `${VAR#pat}`/`${VAR##pat}` strip the

@@ -430,7 +430,7 @@ static int run_command(char *line, char *cwd) {
             print("        return [N]         (from a function: stop it now, set $? to N)\n");
             print("        local NAME[=val]   (function-scoped variable; restored when the function returns)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
-            print("        NAME=val (or set NAME=val)  $NAME / ${NAME} / ${NAME:-def} / ${NAME:+alt}   $((expr))   unset NAME   env\n");
+            print("        NAME=val (or set NAME=val)  $NAME ${NAME} ${N:-def} ${N:+alt} ${#N} ${N#pfx} ${N%sfx}  $((expr))  unset NAME  env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
             print("        Tab completes a filename (longest common prefix); a 2nd Tab lists the matches\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
