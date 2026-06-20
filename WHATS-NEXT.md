@@ -1,5 +1,11 @@
 # What's next
 
+> **(M854) Shell — `grep -l` lists only the filenames that match.** With `-l` (combinable, e.g. `grep -il`),
+> grep prints each file's name once if any line matches and moves on, instead of the matching lines —
+> bash's "which files contain this?" idiom. Composes with `-e` (`grep -l -e a -e b *.txt`) and `-v`, and
+> suppresses the `-c` count / "(no matches)" line. Line grep is unchanged. Verified in-guest:
+> `grep -l apple A.TXT B.TXT C.TXT` → `A.TXT` `C.TXT` (B.TXT has only banana). `make check` 32 suites.
+
 > **(M853) Shell — `grep -e pat` (repeatable) for multi-pattern OR matching.** The tiny regex engine has no
 > `|` alternation, and even if it did, `grep 'a|b'` is unusable from a shell with no quoting (the `|` is a
 > pipe). `grep -e error -e warning FILE` now matches a line if it hits ANY of the `-e` patterns — bash's

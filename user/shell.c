@@ -249,7 +249,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nru] nl tac uniq[-c] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incve,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nru] nl tac uniq[-c] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -976,7 +976,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (!any) print("usage: crc32 <file>...\n");
         } else if (startswith(line, "grep ")) {
-            char *p = line + 5; char pats[8][40]; int npat = 0, ci = 0, nn = 0, cc = 0, vv = 0;
+            char *p = line + 5; char pats[8][40]; int npat = 0, ci = 0, nn = 0, cc = 0, vv = 0, ll = 0;
             while (*p == ' ') p++;
             while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insens), -n (line#s), -c (count), -v (invert); combinable as -in. -e <pat> adds a pattern: a line matches ANY (the alternation the tiny regex lacks, and avoids the shell `|` = pipe clash) */
                 if (p[1] == '-' && (p[2] == ' ' || p[2] == 0)) { p += 2; while (*p == ' ') p++; break; }  /* "--": end of flags (pattern may then start with '-') */
@@ -988,9 +988,9 @@ static int run_command(char *line, char *cwd) {
                     continue;
                 }
                 int t, valid = 1;
-                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n' && p[t] != 'c' && p[t] != 'v') valid = 0;
+                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n' && p[t] != 'c' && p[t] != 'v' && p[t] != 'l') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a pattern starting with '-') */
-                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else if (p[t] == 'n') nn = 1; else if (p[t] == 'c') cc = 1; else vv = 1; }
+                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else if (p[t] == 'n') nn = 1; else if (p[t] == 'c') cc = 1; else if (p[t] == 'v') vv = 1; else ll = 1; }   /* -l: list matching filenames only */
                 p += t; while (*p == ' ') p++;
             }
             if (npat == 0) {                                /* no -e given: the first non-flag word is the pattern */
@@ -998,7 +998,7 @@ static int run_command(char *line, char *cwd) {
                 pats[0][i] = 0; if (i) npat = 1;
                 while (*p == ' ') p++;
             }
-            if (npat == 0 || *p == 0) { print("usage: grep [-incv] [-e pat]... <pattern> <file>...  (regex: ^ $ . * [..] \\)\n"); }
+            if (npat == 0 || *p == 0) { print("usage: grep [-incvl] [-e pat]... <pattern> <file>...  (regex: ^ $ . * [..] \\)\n"); }
             else {
                 const char *cq = p; int fcount = 0;               /* count files: prefix names only if >1 */
                 while (*cq) { while (*cq == ' ') cq++; if (!*cq) break; fcount++; while (*cq && *cq != ' ') cq++; }
@@ -1022,6 +1022,7 @@ static int run_command(char *line, char *cwd) {
                             int hit = vv ? !found : found;   /* -v inverts: act on non-matching lines */
                             if (hit) {
                                 hits++;
+                                if (ll) { print(name); print("\n"); buf[k] = save; break; }   /* -l: this file matches; name once, next file */
                                 if (!cc) {                  /* -c: count only, don't print the line */
                                     if (fcount > 1) print(name);
                                     if (fcount > 1 && nn) print(":");
@@ -1036,7 +1037,8 @@ static int run_command(char *line, char *cwd) {
                     }
                     free(buf);
                 }
-                if (cc) { char cb[12]; itoa_simple(hits, cb); print("  "); print(cb); print("\n"); }
+                if (ll) { /* -l already printed the matching filenames; no summary line */ }
+                else if (cc) { char cb[12]; itoa_simple(hits, cb); print("  "); print(cb); print("\n"); }
                 else if (!hits) print("  (no matches)\n");
             }
         } else if (startswith(line, "wc ")) {
