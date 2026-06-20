@@ -1,5 +1,12 @@
 # What's next
 
+> **(M845) Shell — Tab on an empty argument lists every file.** `cmd <Tab>` with the cursor on a blank
+> argument now lists all cwd entries (or extends to their common prefix, if any) — bash's empty-word
+> completion. The guard widened from `plen > 0` to `plen > 0 || ws > 0`, reusing all the M842–844 machinery;
+> a wholly empty line (no command yet) still does nothing. Verified in-guest: `cat `→Tab listed the whole
+> directory across several wrapped rows and repainted the prompt — also a good stress test of the listing
+> redraw with 32 candidates. `make check` 31/31.
+
 > **(M844) Shell — Tab adds a trailing space after a unique file, keeps `/` for a directory.** Finishing the
 > completion polish: when Tab resolves a word to a single entry it now appends a space (so you can type the
 > next argument straight away) or, if the entry is a directory, the `/` (so it reads as a path). Multi-match

@@ -541,7 +541,10 @@ int app_sys_read(char *buf, unsigned max) {
             int ws = (int)n; while (ws > 0 && buf[ws-1] != ' ') ws--;
             int plen = (int)n - ws, slash = 0;
             for (int i = ws; i < (int)n; i++) if (buf[i] == '/') slash = 1;
-            if (plen > 0 && !slash) {
+            /* Complete when there is a word to extend (plen>0) or an empty
+             * argument after a command (ws>0) — `cmd <Tab>` lists every file,
+             * like bash. A wholly empty line (ws==0, plen==0) does nothing. */
+            if ((plen > 0 || ws > 0) && !slash) {
                 /* Complete to the longest common prefix of every cwd entry whose
                  * name starts with the typed word (case-insensitive). A unique
                  * match fills in the whole name; several matches advance to the
