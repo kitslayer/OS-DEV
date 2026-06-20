@@ -916,13 +916,27 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "sha256 ")) {
-            char hex[72];
-            if (sys_sha256(line + 7, hex, sizeof(hex)) < 0) print("sha256: no such file\n");
-            else { print("  "); print(hex); print("\n"); }
+            const char *p = line + 7; int any = 0;       /* hash each space-separated file */
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char fn[64]; int j = 0; while (*p && *p != ' ' && j < 63) fn[j++] = *p++; fn[j] = 0;
+                any = 1; char hex[72];
+                if (sys_sha256(fn, hex, sizeof hex) < 0) { print("sha256: no such file: "); print(fn); print("\n"); g_status = 1; }
+                else { print("  "); print(hex); print("  "); print(fn); print("\n"); }
+            }
+            if (!any) print("usage: sha256 <file>...\n");
         } else if (startswith(line, "sha512 ")) {
-            char hex[136];
-            if (sys_sha512(line + 7, hex, sizeof(hex)) < 0) print("sha512: no such file\n");
-            else { print("  "); print(hex); print("\n"); }
+            const char *p = line + 7; int any = 0;
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char fn[64]; int j = 0; while (*p && *p != ' ' && j < 63) fn[j++] = *p++; fn[j] = 0;
+                any = 1; char hex[136];
+                if (sys_sha512(fn, hex, sizeof hex) < 0) { print("sha512: no such file: "); print(fn); print("\n"); g_status = 1; }
+                else { print("  "); print(hex); print("  "); print(fn); print("\n"); }
+            }
+            if (!any) print("usage: sha512 <file>...\n");
         } else if (startswith(line, "crc32 ")) {       /* CRC-32 (IEEE 802.3, as in zip/gzip/png) over the whole file */
             unsigned long cap = 65536;
             unsigned char *cbuf = malloc(cap);

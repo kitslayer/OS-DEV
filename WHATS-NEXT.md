@@ -1,5 +1,10 @@
 # What's next
 
+> **(M835) Shell — `sha256`/`sha512` hash multiple files.** Both hashed only one file; `sha256 a b` (or a
+> glob-expanded `sha256 *.iso`) now hashes each in turn, and the output gained the filename after the digest
+> (`<hash>  <name>`, the standard `sha256sum` format) so batch checksums are usable. `make check` 30/30.
+> Verified in-guest: `sha256 HELLO.TXT MOTD.TXT` printed two distinct digests each tagged with its filename.
+
 > **(M834) Shell — `file` identifies multiple files.** `file` only inspected one name; `file a b c` (or a
 > glob-expanded `file *`) now identifies each space-separated file in turn — handy for surveying a directory's
 > many file types. Same loop pattern as the M830/M831 multi-arg commands. `make check` 30/30. Verified
