@@ -8,7 +8,7 @@
  */
 #include "ulib.h"
 
-#define MAXDOC 65536              /* editable file size (each editor process has its own copy) */
+#define MAXDOC 262144             /* editable file size 256 KB (each editor process has its own copy); large downloaded/saved web pages exceed 64 KB */
 #define EDCOLS 44                 /* must match the app text grid */
 #define EDVIS  16                 /* visible text rows (grid is 17; 1 is the status line) */
 

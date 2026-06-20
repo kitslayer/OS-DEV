@@ -1,5 +1,14 @@
 # What's next
 
+> **(M899) Editor — edit files up to 256 KB (was 64 KB read-only).** Completes this fire's "handle large
+> content" theme (M897/M898 render + navigate large web pages): the editor's `doc` buffer was a fixed 64 KB
+> (`MAXDOC`), so anything bigger — a downloaded/saved web page, a big log, a long script — opened read-only
+> ("[RO: file too big]"). Raised `MAXDOC` 65536→262144 (256 KB). The buffer is the editor's own per-process
+> BSS (userspace ELF), so it just costs ~192 KB more zeroed BSS per editor instance — no kernel/heap impact,
+> and edit ops (insert/delete shift the buffer) stay sub-millisecond at this size. Verified in-guest: a
+> ~106 KB file (`seq 1 20000`) opens **editable** (no RO flag), and typing + Ctrl-S saved — `tail -2` shows
+> the inserted text persisted. `make check` green (35 suites).
+
 > **(M898) Browser — bigger link budget so large pages' body links stay clickable.** Companion to M897:
 > now that long pages render their full body, their cross-reference links should be followable, but the
 > href URL pool was only `HREF_MAX`=8KB (~200 links) and `LINK_MAX`=512 — so links past the nav/ToC dropped
