@@ -1,5 +1,10 @@
 # What's next
 
+> **(M839) Shell — `strings` scans multiple files.** `strings FILE...` now extracts printable runs from each
+> space-separated file, printing a `==> name <==` header before each when more than one is given (matching
+> `head`/`tail`). Handy for `strings *.elf`. `make check` 30/30. Verified in-guest: `strings HELLO.TXT
+> MOTD.TXT` printed both files' strings under their headers.
+
 > **(M838) Shell — multi-file `cp`/`mv` into a directory.** The last FS-command gap: `cp SRC... DESTDIR`
 > (e.g. `cp *.txt backup`) and the `mv` form. Done as a *separate* branch that triggers only for >2 arguments
 > (via a small `nargs` token-count), so the heavily-used and data-loss-sensitive 2-arg `cp`/`mv` handler

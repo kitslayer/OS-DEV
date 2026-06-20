@@ -1518,24 +1518,27 @@ static int run_command(char *line, char *cwd) {
                 }
                 free(b1); free(b2);
             }
-        } else if (startswith(line, "strings ")) {        /* strings FILE -> runs of >=4 printable chars */
-            const char *p = line + 8; while (*p == ' ') p++;
-            char name[64]; int j = 0; while (*p && *p != ' ' && j < 63) name[j++] = *p++; name[j] = 0;
-            if (!name[0]) { print("usage: strings <file>\n"); }
-            else {
+        } else if (startswith(line, "strings ")) {        /* strings FILE... -> runs of >=4 printable chars */
+            const char *p = line + 8; int any = 0, fc = 0;
+            { const char *cq = p; while (*cq) { while (*cq==' ') cq++; if (!*cq) break; fc++; while (*cq && *cq!=' ') cq++; } }
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char name[64]; int j = 0; while (*p && *p != ' ' && j < 63) name[j++] = *p++; name[j] = 0;
+                any = 1;
                 long n; char *buf = slurp(name, &n);
-                if (!buf) { print("strings: no such file: "); print(name); print("\n"); }
-                else {
-                    char run[80]; int rl = 0;
-                    for (long i = 0; i < n; i++) {
-                        char c = buf[i];
-                        if (c >= 32 && c < 127) { if (rl < 79) run[rl++] = c; }   /* printable ASCII */
-                        else { if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); } rl = 0; }
-                    }
-                    if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); }   /* trailing run */
+                if (!buf) { print("strings: no such file: "); print(name); print("\n"); continue; }
+                if (fc > 1) { print("==> "); print(name); print(" <==\n"); }   /* header when listing several */
+                char run[80]; int rl = 0;
+                for (long i = 0; i < n; i++) {
+                    char c = buf[i];
+                    if (c >= 32 && c < 127) { if (rl < 79) run[rl++] = c; }   /* printable ASCII */
+                    else { if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); } rl = 0; }
                 }
+                if (rl >= 4) { run[rl] = 0; print("  "); print(run); print("\n"); }   /* trailing run */
                 free(buf);
             }
+            if (!any) print("usage: strings <file>...\n");
         } else if (startswith(line, "basename ")) {       /* basename PATH -> the last component */
             const char *p = line + 9; while (*p == ' ') p++;
             char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0;
