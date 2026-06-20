@@ -2174,7 +2174,7 @@ static int cmdsub_expand(const char *src, char *dst, int dstsz, char *cwd) {
             int depth = 1, j = i + 2, s = j;
             while (src[j] && depth) { if (src[j]=='(') depth++; else if (src[j]==')') { depth--; if (!depth) break; } j++; }
             char inner[1024]; int ii = 0; for (int k = s; k < j && ii < 1023; k++) inner[ii++] = src[k]; inner[ii] = 0;
-            in_cmdsub++; cap_begin(); run_andor(inner, cwd);
+            in_cmdsub++; cap_begin(); run_input_line(inner, cwd);   /* run_input_line (not run_andor) so a `;` list and for/while/if work inside $() */
             unsigned long clen; char *cb = cap_end(&clen); in_cmdsub--;
             if (cb) {
                 while (clen > 0 && cb[clen-1] == '\n') clen--;

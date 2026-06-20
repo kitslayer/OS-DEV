@@ -1,5 +1,12 @@
 # What's next
 
+> **(M850) Shell — command substitution runs a full statement list (`;`, `for`/`while`/`if`).** `$(...)`
+> evaluated its body with `run_andor`, which only knows `&&`/`||` — so `$(echo a; echo b)` captured the
+> literal `; echo b` and `$(for …)` errored. It now uses `run_input_line` (the same entry interactive lines
+> use), so a `;`-separated list and the control-flow keywords work inside a substitution. Verified in-guest:
+> `$(echo a; echo b)`→`a b`, `$(for i in 1 2 3; do echo $i; done)`→`1 2 3`, `$(echo one; echo $(echo two))`→
+> `one two`. `make check` 32 suites.
+
 > **(M849) Shell — nested command substitution `$(… $(…) …)` now works.** It silently produced wrong output
 > (`$(echo $(echo deep))` gave `(echo deep)`): the `in_cmdsub` guard hard-blocked the inner `$()`, and
 > `expand_vars` then mangled the leftover `$(` into `(`. Two fixes: (1) `cap_begin`/`cap_end` now stack their
