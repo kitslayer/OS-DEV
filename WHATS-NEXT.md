@@ -1,5 +1,12 @@
 # What's next
 
+> **(M860) Shell — `<` input redirect.** `wc -l < FILE` printed a confusing `wc: no such file: <` (the `<`
+> and file were passed as literal args). Since these commands read a file argument, `cmd … < file` is now
+> rewritten to `cmd … file` (the rewrite is never longer than the original, so it edits the line in place);
+> it composes with `>` (`sort -r < in > out`). Verified in-guest: `wc -l < DATA.CSV` → 5,
+> `sort -r < DATA.CSV > SORTED.TXT` produced the reverse-sorted file. `make check` 32 suites; shell.c
+> warnings unchanged (11).
+
 > **(M859) Shell — decorative output (`head` "...", `grep` "(no matches)") no longer pollutes pipes/`$()`.**
 > A real bug found by adversarial testing: `head` prints a `...` "more lines" hint and `grep` a "(no matches)"
 > note, both to stdout — so `seq 1 9 | head -3 | wc -l` returned **4** (the `...` counted as a line) and

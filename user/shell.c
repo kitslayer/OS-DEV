@@ -273,7 +273,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] mem ps df scores history clear reboot exit\n");
-            print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   $(cmd) (substitute)\n");
+            print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
             print("        .SHRC in / is auto-run at shell start (put aliases/set/etc. there)\n");
@@ -2275,6 +2275,18 @@ static int run_line(char *line, char *cwd) {
         while (*rfile == ' ') rfile++;
         char *fe = (char *)rfile; while (*fe) fe++; while (fe > rfile && fe[-1] == ' ') *--fe = 0;
         if (!*rfile) rfile = 0;
+        break;
+    }
+
+    /* Input redirect `cmd < file`: our commands read a file argument, so rewrite
+     * it to `cmd file` (append the input file as a trailing arg). The result is
+     * never longer than the original, so it rewrites cmd[] in place safely. */
+    for (int i = 0; cmd[i]; i++) if (cmd[i] == '<') {
+        char *infile = &cmd[i+1]; while (*infile == ' ') infile++;
+        char fcopy[160]; int fc = 0; while (infile[fc] && infile[fc] != ' ' && fc < 159) { fcopy[fc] = infile[fc]; fc++; } fcopy[fc] = 0;
+        cmd[i] = 0;
+        while (i > 0 && cmd[i-1] == ' ') cmd[--i] = 0;   /* trim spaces before '<' */
+        if (fcopy[0]) { int e = i; if (e < 1022) cmd[e++] = ' '; for (int k = 0; fcopy[k] && e < 1022; k++) cmd[e++] = fcopy[k]; cmd[e] = 0; }
         break;
     }
 
