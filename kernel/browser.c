@@ -112,6 +112,7 @@ struct browser {
     int     finding;                                     /* in-page find: typing a query */
     char    findq[40];                                   /* the find query */
     int     find_tok;                                    /* highlighted match token (-1 none) */
+    int     help_on;                                     /* '?' key-reference overlay shown */
     int     toky[TOK_MAX];                               /* content-space y of every token (scroll-to) */
     char    anc_id[32][32]; uint16_t anc_tok[32]; int anc_n;   /* id -> token index, for #fragment scroll-to */
     uint8_t det_open[16];                                      /* <details> open state by index (0xFF=unseeded), persists across re-renders */
@@ -3211,6 +3212,22 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
 
     if (b->loading) { fb_text(cl, ct + 12, "Loading...", 0x4A6A9A, 2); return; }
 
+    if (b->help_on) {                               /* '?' key-reference overlay (any key returns) */
+        int ly = ct + 6;
+        fb_text(cl, ly, "BROWSER KEYS  (any key returns)", 0x2C66D6, 2); ly += 28;
+        const char *L[] = {
+            "h home    r reload    < back    > forward",
+            "Ctrl-F or \\  find     e or /  edit address",
+            "Tab / n  next link     Enter  follow link",
+            "+ -  zoom     0  reset     g top     G bottom",
+            "space / b  page     j k  scroll a line",
+            "s  save page    u  view source    a  bookmark",
+            "i  certificate info     ?  this help",
+        };
+        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) { fb_text(cl, ly, L[i], 0x202830, 1); ly += 20; }
+        return;
+    }
+
     if (b->viewsource) {                            /* 'u': raw HTML source, wrapped */
         int maxcols = (cr - cl) / GW; if (maxcols < 1) maxcols = 1;
         int cyv = ct - b->scroll, col = 0;
@@ -3637,6 +3654,7 @@ int browser_sel_commit(browser_t *b, char *out, int max) {
 }
 
 void browser_key(browser_t *b, int c) {
+    if (b->help_on) { b->help_on = 0; return; }         /* any key dismisses the help overlay */
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
         if (c == '\n' || c == '\r' || c == 27) {
             char fid[32]; { int k=0; while (b->focus_id[k] && k<31) { fid[k]=b->focus_id[k]; k++; } fid[k]=0; }   /* the field losing focus */
@@ -3749,6 +3767,7 @@ void browser_key(browser_t *b, int c) {
     case 'a':           browser_bookmark(b); break; /* add current URL to SITES */
     case '/': case 'e': b->editing = 1; b->edit_fresh = 1;    break;
     case '\\': case 0x86: b->finding = 1; b->findq[0] = 0; b->find_tok = -1; set_status(b, "find: "); break;  /* \ or Ctrl-F */
+    case '?': case 0x88: b->help_on = 1; break;     /* ? or Ctrl-H: key-reference overlay */
     case '<':            browser_back(b);    break; /* back    (also Backspace) */
     case '>':            browser_forward(b); break; /* forward */
     case '\t': case 'n': select_link(b, +1); break; /* next link (keyboard nav) */

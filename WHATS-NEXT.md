@@ -1,5 +1,12 @@
 # What's next
 
+> **(M821) Browser — `?` key-reference overlay.** Like the editor's Ctrl-H (M813), the browser had a dozen
+> powerful single-key shortcuts (h/r/s/u/i/a, `<`/`>`, find, zoom, scroll, links) that were completely
+> undiscoverable. `?` (or Ctrl-H) now shows a full-window key reference; any key returns. Reuses the existing
+> early-return overlay pattern in `browser_render` (next to the "Loading…" one) and a dismiss-first check in
+> `browser_key`. `make check` 30/30. Verified in-guest: pressed `?` in the browser and the BROWSER KEYS
+> overlay listed every shortcut.
+
 > **(M820) Browser — Ctrl-F find alias.** The browser's in-page find was bound to vim-style `\`, which most
 > users won't guess. Added Ctrl-F (0x86) as an alias for the same find mode, so the universal find key works.
 > One-line change to the key dispatch. `make check` 30/30. Verified in-guest: launched the browser, pressed
