@@ -1,5 +1,10 @@
 # What's next
 
+> **(M889) Desktop — Welcome window mentions shell functions.** Small discoverability fix: the Welcome
+> panel advertised "Shell: scriptable (for / if / while)" but functions — this session's headline addition —
+> weren't surfaced. Now reads "Shell: scriptable (functions, loops, $())". Verified in-guest; `make check`
+> green (34 suites).
+
 > **(M888) Shell — `cmp` and `diff` set `$?` (0 same, 1 differ, 2 error), so `if cmp …` works.** Same class
 > as the M886 grep fix, applied to the comparison commands: both computed a `differ`/`diffs` result but never
 > set `g_status`, so `cmp a b && echo same` always said "same" and `if diff …` always took the then-branch.

@@ -209,7 +209,7 @@ static void draw_content(const window_t *w, int focused) {
             "disk, desktop and apps, all hand-built.", "",
             "Open the Apps menu (F9) and try:",
             "- Browser: the real web over HTTPS + JS",
-            "- Shell: scriptable (for / if / while)",
+            "- Shell: scriptable (functions, loops, $())",
             "- Editor: undo/redo, find & replace",
             "- 60+ apps, games and demos", "",
             "Drag the title bar or corner to move.",
