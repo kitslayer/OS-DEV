@@ -1,5 +1,16 @@
 # What's next
 
+> **(M812) Shell — command substitution `$(cmd)`.** The capstone shell feature: `$(cmd)` runs a command and
+> splices its output into the line (trailing newlines stripped, internal newlines → spaces for word
+> splitting). Implemented as `cmdsub_expand` (reusing the existing `cap_begin`/`cap_end` output capture +
+> `run_andor`), run first in `run_line` and also on a `for` loop's word list — so `for f in $(cmd)` iterates a
+> command's output, `set X=$(cmd)` captures it, and `echo $(cmd)` interpolates. `$((..))` arithmetic is left
+> for the existing pass; one level only (single capture buffer, guarded). `make check` 30/30. Verified
+> in-guest: `echo sub=$(echo hello)` → `sub=hello`; `set X=$(echo world); echo got-$X` → `got-world`;
+> `for f in $(echo a b c); do echo item-$f; done` → item-a/item-b/item-c. With this the shell has the full
+> bash-like toolkit: vars, arithmetic, `$?`, `$()`, pipes, redirection, globbing, `&&`/`||`, if/for/while,
+> test, source, .SHRC, aliases.
+
 > **(M811) Shell — `while` loops.** Completes shell control flow (if / for / while). `while COND; do CMDS;
 > done` re-runs COND each pass (so `$var`s re-expand) and loops while it succeeds (`$? == 0`), pairing
 > naturally with the M810 `test` builtin for counting loops. To stay safe it's bounded at 100000 iterations

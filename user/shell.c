@@ -240,7 +240,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] mem ps df scores history clear reboot exit\n");
-            print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
+            print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
             print("        .SHRC in / is auto-run at shell start (put aliases/set/etc. there)\n");
@@ -2021,12 +2021,44 @@ static void glob_expand(const char *src, char *dst, int dstsz){
     dst[dp] = 0;
 }
 
+/* Command substitution: replace each $(cmd) in `src` with the command's output
+ * (trailing newlines stripped, internal newlines -> spaces for word splitting),
+ * writing to `dst`. $((..)) arithmetic is left alone. One level only (a single
+ * capture buffer, guarded by in_cmdsub). Returns 1 if any substitution happened.
+ * Shared by run_line (whole command) and run_for (the word list). */
+static int in_cmdsub;
+static int cmdsub_expand(const char *src, char *dst, int dstsz, char *cwd) {
+    if (in_cmdsub) return 0;
+    int has = 0;
+    for (int i = 0; src[i]; i++) if (src[i]=='$' && src[i+1]=='(' && src[i+2]!='(') { has = 1; break; }
+    if (!has) return 0;
+    int o = 0;
+    for (int i = 0; src[i] && o < dstsz-1; ) {
+        if (src[i]=='$' && src[i+1]=='(' && src[i+2]!='(') {
+            int depth = 1, j = i + 2, s = j;
+            while (src[j] && depth) { if (src[j]=='(') depth++; else if (src[j]==')') { depth--; if (!depth) break; } j++; }
+            char inner[1024]; int ii = 0; for (int k = s; k < j && ii < 1023; k++) inner[ii++] = src[k]; inner[ii] = 0;
+            in_cmdsub = 1; cap_begin(); run_andor(inner, cwd);
+            unsigned long clen; char *cb = cap_end(&clen); in_cmdsub = 0;
+            if (cb) {
+                while (clen > 0 && cb[clen-1] == '\n') clen--;
+                for (unsigned long k = 0; k < clen && o < dstsz-1; k++) dst[o++] = cb[k]=='\n' ? ' ' : cb[k];
+                free(cb);
+            }
+            i = (src[j]==')') ? j + 1 : j;
+        } else dst[o++] = src[i++];
+    }
+    dst[o] = 0;
+    return 1;
+}
+
 /* Run one command line (a single ';'-separated segment): expand filename globs,
  * then peel off output redirection and pipelines, then dispatch. Returns 1 only
  * when the shell should exit (the "exit" command). */
 static int run_line(char *line, char *cwd) {
-    static char gline[1024], vline[1024], aline[1024];
+    static char gline[1024], vline[1024], aline[1024], subline[1024];
     char *cmd = line;
+    if (cmdsub_expand(cmd, subline, sizeof subline, cwd)) cmd = subline;   /* $(...) command substitution */
     if (expand_vars(cmd, vline, sizeof vline)) cmd = vline;   /* $NAME / ${NAME} variable expansion (before glob/pipe/redirect) */
     /* alias expansion: if the first word is an alias, substitute its value
      * (one level only, so a -> b -> a can't loop). */
@@ -2117,8 +2149,9 @@ static int run_for(char *line, char *cwd) {
     if (blen>0 && body[blen-1]==';') blen--;
     while (blen>0 && body[blen-1]==' ') blen--;
     body[blen] = 0;
-    char elist[1024], glist[1024], bodybuf[1024];
+    char elist[1024], glist[1024], bodybuf[1024], sublist[1024];
     char *lst = list;
+    if (cmdsub_expand(lst, sublist, sizeof sublist, cwd)) lst = sublist;   /* for f in $(cmd) */
     if (expand_vars(lst, elist, sizeof elist)) lst = elist;
     for (int i=0; lst[i]; i++) if (lst[i]=='*' || lst[i]=='?') { glob_expand(lst, glist, sizeof glist); lst = glist; break; }
     int doexit = 0;
