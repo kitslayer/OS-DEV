@@ -41,8 +41,8 @@
 #include <stddef.h>
 
 #define RAW_MAX   524288        /* response/image fetch buffer (512 KB) — large real pages (e.g. Wikipedia) exceed 256 KB */
-#define TEXT_MAX  65000         /* token text pool (< 65536: token off is uint16; this is the safe max under that) */
-#define TOK_MAX   9500          /* rendered tokens; sized to fill the larger TEXT_MAX (~7 bytes of text/token) */
+#define TEXT_MAX  131072        /* token text pool (128 KB; tok_t.off is uint32 now, so no 64KB ceiling) */
+#define TOK_MAX   16000         /* rendered tokens; sized to fill TEXT_MAX (~8 bytes of text/token) */
 #define SCRIPT_MAX 16384        /* concatenated inline <script> text run per page */
 #define HREF_MAX  8192
 #define LINK_MAX  512
@@ -61,7 +61,7 @@
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = image slot */
 
-typedef struct { uint16_t off, len, link; uint8_t style, type; } tok_t;
+typedef struct { uint32_t off; uint16_t len, link; uint8_t style, type; } tok_t;  /* off is uint32 so TEXT_MAX can exceed 64KB (len<=word, link<LINK_MAX stay uint16) */
 typedef struct { uint16_t off, len; } href_t;            /* slice into hrefs[] */
 typedef struct { int16_t x, y, w, h; uint16_t link; } lrec_t;  /* a clickable rect */
 /* sel_t (one simple CSS selector: tag/.class/#id/[attr]) now lives in cssel.h (M688). */
@@ -202,7 +202,7 @@ static void emit_word(browser_t *b, int start, int style, int link) {
     b->tokalign[b->ntok] = (uint8_t)b->curalign;         /* text-align (0=left/1=center/2=right) */
     b->tokscale[b->ntok] = (uint8_t)b->curscale;         /* font-size scale override (0=none) */
     b->tokindent[b->ntok] = (uint8_t)(b->curindent > 255 ? 255 : b->curindent);   /* left-indent px */
-    b->toks[b->ntok++] = (tok_t){ (uint16_t)start, (uint16_t)len,
+    b->toks[b->ntok++] = (tok_t){ (uint32_t)start, (uint16_t)len,
                                   (uint16_t)link, (uint8_t)style, TK_WORD };
 }
 static void emit_break(browser_t *b, int type) {

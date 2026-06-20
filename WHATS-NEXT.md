@@ -1,5 +1,19 @@
 # What's next
 
+> **(M897) Browser — widen `tok_t.off` to uint32 so large real pages render their full body, not just the nav.**
+> The render was capped at ~64KB of token text (`TEXT_MAX < 65536`) because the per-token text-pool offset
+> `tok_t.off` was uint16 — so a big page like Wikipedia rendered only its nav/ToC, truncating the article
+> prose. A re-analysis (deeper than the earlier "deferred, too interdependent" note) showed the change is
+> actually **contained**: the clickable-rect arrays (`lrec`/`wrec`) only hold *visible* tokens with
+> screen-relative int16 coords (gated on `cy>=ct && cy+lh<=cb`), the hrefs pool is capped at `HREF_MAX`
+> (8KB, well under uint16), and `linky`/`toky` are already `int[]` — so **only `tok_t.off`** can exceed
+> 65535. Widened it to uint32 (`len`≤word-length and `link`<`LINK_MAX` stay uint16), fixed the one
+> truncating cast (`(uint16_t)start`→`(uint32_t)`), and raised `TEXT_MAX` 65000→131072 (128KB) and `TOK_MAX`
+> 9500→16000. **Pages under the old cap render byte-identically** (offsets < 65536 are the same value);
+> only larger pages newly render more — no crash risk (off is a bounded text-pool index). Verified in-guest:
+> scrolling deep into `en.wikipedia.org/wiki/Unix` now shows the Overview prose + History section (was
+> truncated); example.com renders identically; OS boots fine (~1MB/window heap). `make check` green (35).
+
 > **(M896) Browser — a clear error page on a failed fetch (was a blank page).** Found by browsing a bad
 > domain over the (real, working) network: the browser showed only a tiny "failed" status with a fully
 > blank body — confusing, and failures are common (typos, offline, TLS-incompatible sites). The parse path
