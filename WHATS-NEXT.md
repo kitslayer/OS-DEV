@@ -1,5 +1,14 @@
 # What's next
 
+> **(M819) Editor — open another file in place (Ctrl-O).** Completes the editor's file management
+> (open/save/save-as). Ctrl-O prompts `open:`, saves the current file first (unless read-only, to avoid
+> writing truncated data), then loads the typed file into the buffer. Factored the load path into a
+> `load_file()` helper (used by startup and Ctrl-O) that resets per-file state — buffer, cursor, read-only
+> flag, undo history, and selection mark — so undo can't bleed across files. A non-existent name opens an
+> empty buffer (create-on-save). Listed in the Ctrl-H help. `make check` 30/30. Verified in-guest: edited
+> `orig2.txt`, Ctrl-O → `HELLO.TXT` → the title bar switched to `EDIT HELLO.TXT` and showed its 42-byte
+> contents ("Hello from a real file on a virtual disk!").
+
 > **(M818) Editor — Save As (Ctrl-W).** The editor could only save back to the file it opened (or the
 > launch-arg name); there was no way to save the buffer under a *new* name (save a copy, or name a
 > never-saved buffer). Ctrl-W now prompts `save as:`, writes the document to the typed filename, and switches

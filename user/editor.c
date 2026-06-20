@@ -20,6 +20,7 @@ static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-
 static char replq[40]; static int replacing;          /* Ctrl-R replace: replacement text + mode (1=typing search, 2=typing replacement) */
 static int helping;                                   /* Ctrl-H: key-list overlay shown */
 static int saving_as;                                 /* Ctrl-W: typing a new filename to save under */
+static int opening;                                   /* Ctrl-O: typing a filename to open in place */
 
 /* ---- undo (Ctrl-Z) -------------------------------------------------------
  * A log of single-character edits, newest last. Each op remembers the char,
@@ -317,7 +318,7 @@ static void render_help(void) {
     sys_clear();
     sys_setcolor(4); print("EDITOR KEYS  (any key returns)\n"); sys_setcolor(0);
     print("arrows Home End PgUp PgDn   move\n");
-    print("^S save    ^W save as   ^Q quit   ESC save+quit\n");
+    print("^S save  ^W save as  ^O open  ^Q quit  ESC save+quit\n");
     print("^Z undo    ^Y redo\n");
     print("^F find    ^R replace  ^G go to line\n");
     print("^B set mark, then move to select\n");
@@ -334,6 +335,16 @@ static void render_prompt(const char *label, const char *query) {
     render(m);
 }
 
+/* Load `fname` into the buffer and reset per-file state (undo history, mark). */
+static void load_file(void) {
+    long n = sys_readfile(fname, doc, MAXDOC - 1);
+    dlen = (n > 0) ? (int)n : 0;
+    readonly = (n >= MAXDOC - 1);    /* read filled the buffer: the file is larger -> view only */
+    cur = dlen;
+    un = umax = 0; ulast_kind = -1; uexpect = -1;   /* undo history is per-file */
+    sel_anchor = -1;
+}
+
 int main(void) {
     /* If launched with a filename argument (e.g. from the Files app), open it
      * directly; otherwise prompt for one. */
@@ -346,10 +357,7 @@ int main(void) {
     sys_caret(0);                      /* editor body draws its own '|' cursor; hide the block caret */
     if (fname[0] == 0) { fname[0] = 'N'; fname[1] = 'O'; fname[2] = 'T'; fname[3] = 'E';
                          fname[4] = '.'; fname[5] = 'T'; fname[6] = 'X'; fname[7] = 'T'; fname[8] = 0; }
-    long n = sys_readfile(fname, doc, MAXDOC - 1);
-    dlen = (n > 0) ? (int)n : 0;
-    readonly = (n >= MAXDOC - 1);    /* read filled the buffer: the file is larger -> view only (saving would truncate it) */
-    cur = dlen;
+    load_file();
 
     render(0);
     for (;;) {
@@ -423,6 +431,22 @@ int main(void) {
             else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("save as: ", findq); }
             continue;
         }
+        if (opening) {                              /* Ctrl-O: type a filename, Enter saves current then loads it */
+            int fl = 0; while (findq[fl]) fl++;
+            if (k == '\n' || k == '\r') {
+                opening = 0;
+                if (findq[0]) {
+                    if (!readonly) sys_writefile(fname, doc, (unsigned long)dlen);   /* save current first */
+                    int i = 0; for (; findq[i] && i < (int)sizeof(fname)-1; i++) fname[i] = findq[i]; fname[i] = 0;
+                    load_file();
+                }
+                render(0);
+            }
+            else if (k == 27) { opening = 0; render(0); }
+            else if (k == 8 || k == 127) { if (fl > 0) findq[fl-1] = 0; render_prompt("open: ", findq); }
+            else if (k >= 32 && k < 127 && fl < 39) { findq[fl] = (char)k; findq[fl+1] = 0; render_prompt("open: ", findq); }
+            continue;
+        }
         if (k == 27) {                              /* ESC: save and quit (read-only if the file was too large) */
             if (readonly) render("\n[not saved: file too large to edit]");
             else if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
@@ -444,6 +468,7 @@ int main(void) {
         else if (k == 0x88) { helping = 1; render_help(); continue; }   /* Ctrl-H: key-list overlay (skip the trailing render) */
         else if (k == 0x92) { replacing = 1; findq[0] = 0; render_prompt("replace: ", findq); } /* Ctrl-R: find & replace */
         else if (k == 0x97 && !readonly) { saving_as = 1; findq[0] = 0; render_prompt("save as: ", findq); } /* Ctrl-W: save as */
+        else if (k == 0x8f) { opening = 1; findq[0] = 0; render_prompt("open: ", findq); }   /* Ctrl-O: open another file */
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
         else if (k == 0x99) redo();                       /* Ctrl-Y: redo */
         else if (k == 0x82) sel_anchor = (sel_anchor < 0) ? cur : -1;  /* Ctrl-B: set/clear selection mark */
