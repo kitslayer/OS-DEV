@@ -1,5 +1,16 @@
 # What's next
 
+> **(M882) Shell — bare `NAME=value` assignment (sh-style), so `x=$(cmd)` works.** Found by testing
+> `x=$(greet)`: it printed `unknown command: x=hello` because the only assignment path was `set NAME=val`;
+> a bare `x=5` fell through to the not-found branch. Real sh/bash assign with bare `NAME=value`, and the
+> ubiquitous `x=$(cmd)` / `x=$((expr))` idioms need it. Added a check at the top of `run_command`'s
+> dispatch (after the function-call shadow, before the builtins): if the first token is a valid identifier
+> immediately followed by `=`, it's an assignment (`vset(NAME, rest-of-line)`); no builtin's first word
+> contains `=`, and `echo a=b` is unaffected because its first token is `echo`. The RHS is already
+> expanded by the time `run_command` sees it, so `$()`/`$(())`/`$VAR` all work. Verified in-guest:
+> `x=5`, `y=$(greet)` → `hello`, `n=$((6*7))` → `42`, `msg=hi there` → `hi there`, and `echo a=b` stays
+> literal. `set NAME=val` still works. `make check` green (33 suites); shell.c warnings 11.
+
 > **(M881) Shell — `cd` normalizes `.`/`..`/`//` so the prompt matches the real directory.** Found by
 > adversarial path testing: `cd ../..` from `/aa/bb` left the prompt showing `/aa/bb/../..` (the kernel cwd
 > was correct — files still worked — but the displayed path was wrong). The old `cd` only special-cased

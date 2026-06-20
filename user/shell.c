@@ -370,6 +370,13 @@ static int run_command(char *line, char *cwd) {
               }
               continue;
           } }
+        /* bare NAME=value assignment (sh-style; no `set` prefix). NAME is a valid
+         * identifier and '=' follows it directly — no builtin's first word has '='. */
+        if (line[0] == '_' || (line[0] >= 'a' && line[0] <= 'z') || (line[0] >= 'A' && line[0] <= 'Z')) {
+            int k = 1;
+            while (line[k] == '_' || (line[k] >= 'a' && line[k] <= 'z') || (line[k] >= 'A' && line[k] <= 'Z') || (line[k] >= '0' && line[k] <= '9')) k++;
+            if (line[k] == '=') { vset(line, k, line + k + 1); continue; }   /* value = rest of line (already expanded) */
+        }
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
@@ -394,7 +401,7 @@ static int run_command(char *line, char *cwd) {
             print("        name() { cmds; }   (define a function; call `name args` with $1..$9 $# $@ bound)\n");
             print("        return [N]         (from a function: stop it now, set $? to N)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
-            print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
+            print("        NAME=val (or set NAME=val)  $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
             print("        Tab completes a filename (longest common prefix); a 2nd Tab lists the matches\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
