@@ -1,5 +1,14 @@
 # What's next
 
+> **(M890) Tests — extracted the `cd` path resolver into `normpath.h` + host fuzz (35th suite).** The M881
+> `cd` normaliser was the last pure helper added this session without host coverage — and path handling is
+> exactly where M881's bug lived. Lifted it into `user/normpath.h`, made self-contained (inlined its two
+> trivial `streq`/`scpy` uses, behaviour-identical), and `shell.c` now `#include`s it. Added `tests/normpath/`
+> (ASan+UBSan): ~20 regressions (absolute vs relative, `.`/`..` with root-floor, `//` collapse, trailing
+> slash, and a mix like `../../x/./y/../z` → `/x/z`) + a 400k random base+arg fuzz asserting the result is
+> always a NUL-terminated absolute path within 128 bytes. Verified `cd` unchanged in-guest (`/p/q` →
+> `cd ../..` → `/`). `make check` now 35 suites; shell.c warnings 11.
+
 > **(M889) Desktop — Welcome window mentions shell functions.** Small discoverability fix: the Welcome
 > panel advertised "Shell: scriptable (for / if / while)" but functions — this session's headline addition —
 > weren't surfaced. Now reads "Shell: scriptable (functions, loops, $())". Verified in-guest; `make check`
