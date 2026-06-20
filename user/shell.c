@@ -1072,6 +1072,8 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "mkdir ")) {
             if (sys_mkdir(line + 6) < 0) { print("mkdir: failed (exists?)\n"); g_status = 1; }
             else { print("created "); print(line + 6); print("/\n"); }
+        } else if (streq(line, "cd") || streq(line, "cd ~")) {   /* cd with no arg -> home (root) */
+            sys_chdir("/"); cwd[0] = '/'; cwd[1] = 0;
         } else if (startswith(line, "cd ")) {
             char *path = line + 3;
             if (sys_chdir(path) < 0) { print("cd: no such directory\n"); g_status = 1; }

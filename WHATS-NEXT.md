@@ -1,5 +1,10 @@
 # What's next
 
+> **(M822) Shell — `cd` with no argument goes home.** Standard shell convenience that was missing: bare `cd`
+> (and `cd ~`) now return to the root directory, instead of erroring as an unknown command. `make check`
+> 30/30. Verified in-guest: `mkdir cdtest; cd cdtest` (prompt → `/cdtest`), then `cd` → prompt back to `/`,
+> `pwd` confirms `/`.
+
 > **(M821) Browser — `?` key-reference overlay.** Like the editor's Ctrl-H (M813), the browser had a dozen
 > powerful single-key shortcuts (h/r/s/u/i/a, `<`/`>`, find, zoom, scroll, links) that were completely
 > undiscoverable. `?` (or Ctrl-H) now shows a full-window key reference; any key returns. Reuses the existing
