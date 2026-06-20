@@ -1,5 +1,13 @@
 # What's next
 
+> **(M810) Shell — `test` / `[ ]` builtin.** Gives `if` (and the upcoming `while`) real conditions instead of
+> just command exit status. `test EXPR` / `[ EXPR ]` sets `$?` (0 = true) and supports numeric comparisons
+> (`-eq -ne -lt -gt -le -ge`), string `=`/`!=`, non-empty (`STR`) / `-z` / `-n`, file existence (`-e`/`-f`,
+> via a 1-byte `sys_readfile` probe), and a leading `!` to negate. Args are tokenized after the usual
+> variable expansion, and the `[` form drops a trailing `]`. `make check` 30/30. Verified in-guest:
+> `test 5 -lt 10` → `$?=0`; `if test 3 -eq 3` → THREE-EQ; `if [ abc = abc ]` → STR-EQ; `if test -f
+> README.TXT` → HAS-README; `if test ! -f NOPE.TXT` → NO-NOPE.
+
 > **(M809) Shell — `.SHRC` startup file.** Makes shell setup persistent: at startup the shell auto-runs
 > `.SHRC` from the root (silently if absent), so aliases, `set` variables, and a banner can be defined once
 > and apply to every new shell. The `source` builtin's body was factored into a reusable

@@ -245,6 +245,7 @@ static int run_command(char *line, char *cwd) {
             print("        .SHRC in / is auto-run at shell start (put aliases/set/etc. there)\n");
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
+            print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
@@ -776,6 +777,42 @@ static int run_command(char *line, char *cwd) {
             /* exit status 0 (already set) — useful with && / || */
         } else if (streq(line, "false")) {
             g_status = 1;                          /* exit status 1 — useful with && / || */
+        } else if (startswith(line, "test ") || (line[0] == '[' && line[1] == ' ')) {
+            /* test EXPR / [ EXPR ] -> set $? (0 = true). Args are already
+             * variable-expanded by run_line. Supports: STR (non-empty),
+             * -z/-n STR, -e/-f FILE, A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B,
+             * and a leading ! to negate. */
+            const char *p = line + (line[0] == '[' ? 1 : 4);
+            char *av[12]; static char tok[256]; int ac = 0, ti = 0;
+            while (*p && ac < 12) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                av[ac++] = tok + ti;
+                while (*p && *p != ' ' && ti < 255) tok[ti++] = *p++;
+                tok[ti++] = 0;
+            }
+            if (line[0] == '[' && ac > 0 && streq(av[ac-1], "]")) ac--;   /* drop closing ] */
+            int neg = 0, i0 = 0;
+            if (ac > 0 && streq(av[0], "!")) { neg = 1; i0 = 1; }
+            int rem = ac - i0, res = 0;
+            if (rem == 1) res = (av[i0][0] != 0);
+            else if (rem == 2) {
+                const char *op = av[i0], *a = av[i0+1];
+                if (streq(op, "-z")) res = (a[0] == 0);
+                else if (streq(op, "-n")) res = (a[0] != 0);
+                else if (streq(op, "-e") || streq(op, "-f")) { char b; res = (sys_readfile(a, &b, 1) >= 0); }
+            }
+            else if (rem == 3) {
+                const char *a = av[i0], *op = av[i0+1], *b = av[i0+2];
+                if (streq(op, "=")) res = streq(a, b);
+                else if (streq(op, "!=")) res = !streq(a, b);
+                else { long x = sh_str2long(a), y = sh_str2long(b);
+                    if (streq(op, "-eq")) res = (x == y); else if (streq(op, "-ne")) res = (x != y);
+                    else if (streq(op, "-lt")) res = (x < y); else if (streq(op, "-gt")) res = (x > y);
+                    else if (streq(op, "-le")) res = (x <= y); else if (streq(op, "-ge")) res = (x >= y); }
+            }
+            if (neg) res = !res;
+            g_status = res ? 0 : 1;
         } else if (streq(line, "alias")) {         /* list aliases */
             for (int i = 0; i < g_nalias; i++) { print(g_alias[i].name); print("='"); print(g_alias[i].val); print("'\n"); }
             if (!g_nalias) print("(no aliases)\n");
