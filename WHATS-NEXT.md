@@ -1,5 +1,14 @@
 # What's next
 
+> **(M801) Shell — `clip` command (clipboard ↔ shell).** With the clipboard syscalls from M800 in place, the
+> shell can now bridge the GUI clipboard and the command line. `clip` with no argument prints the system
+> clipboard to stdout (so a URL or text selected in the browser, a word from the terminal, or a line from the
+> editor can be `clip > file`'d or `clip | grep`'d); `clip <file>` sets the clipboard from a file, which —
+> because the shell's pipeline feeds a stage its input as a trailing file argument — means `cmd | clip` copies
+> any command's output to the clipboard for pasting into the browser/editor. Reuses the shared `slurp()` and
+> the `sys_clip_get`/`sys_clip_set` wrappers; capped at the 2 KB clipboard. `make check` 30/30. Verified
+> in-guest: `echo HELLOCLIP | clip` → "copied 10 bytes", `clip` → `HELLOCLIP`, `clip | grep CLIP` piped fine.
+
 > **(M800) Editor — line copy/cut/paste via the system clipboard (Ctrl-C/X/V).** The editor could receive
 > pastes (middle-click flows through the same `iq_get` as pollkey) but had no way to *copy* text out. The
 > kernel already had a shared system clipboard (`g_clip`, set by terminal selection, read by middle-click)

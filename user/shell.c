@@ -208,7 +208,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] mem ps df scores history clear reboot exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
@@ -741,6 +741,20 @@ static int run_command(char *line, char *cwd) {
             /* exit status 0 (already set) — useful with && / || */
         } else if (streq(line, "false")) {
             g_status = 1;                          /* exit status 1 — useful with && / || */
+        } else if (streq(line, "clip")) {          /* print the system clipboard (GUI selection -> shell) */
+            char cb[2048]; int n = sys_clip_get(cb, sizeof cb);
+            if (n <= 0) print("(clipboard empty)\n");
+            else { cb[n] = 0; print(cb); if (cb[n-1] != '\n') print("\n"); }
+        } else if (startswith(line, "clip ")) {    /* clip <file>: set the clipboard from a file (or a pipe) */
+            const char *fn = line + 5; while (*fn == ' ') fn++;
+            long n; char *buf = slurp(fn, &n);
+            if (!buf) { print("clip: no such file: "); print(fn); print("\n"); }
+            else {
+                int len = (int)n; if (len > 2047) len = 2047;
+                sys_clip_set(buf, len); free(buf);
+                char nb[12]; itoa_simple(len, nb);
+                print("copied "); print(nb); print(" bytes to clipboard\n");
+            }
         } else if (startswith(line, "crypt ")) {
             char *p = line + 6, fn[32]; int i = 0;
             while (*p == ' ') p++;
