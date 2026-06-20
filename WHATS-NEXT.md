@@ -1,5 +1,14 @@
 # What's next
 
+> **(M809) Shell — `.SHRC` startup file.** Makes shell setup persistent: at startup the shell auto-runs
+> `.SHRC` from the root (silently if absent), so aliases, `set` variables, and a banner can be defined once
+> and apply to every new shell. The `source` builtin's body was factored into a reusable
+> `source_file(name, cwd, silent)` (used by both `source` and the startup hook), and `.SHRC` round-trips
+> through FAT (both write and read normalize via `to_83`). `make check` 30/30 (the test disk is rebuilt
+> without a `.SHRC`, so boot stays silent). Verified in-guest: wrote `.SHRC` with `echo`, `alias hi=echo`, and
+> `set V=fromshrc` in the editor, then a newly-launched shell printed the banner on start and had the alias
+> (`hi ALIAS-WORKS` → `ALIAS-WORKS`) and variable (`echo V-is-$V` → `V-is-fromshrc`) already active.
+
 > **(M808) Shell — command aliases.** `alias name=value` defines a shortcut, expanded on a command's first
 > word in `run_line` (one level only, so `a`→`b`→`a` can't loop); the rest of the line is appended, so
 > `alias g=echo` then `g hi there` runs `echo hi there`. `alias` with no args lists them, `alias name` shows

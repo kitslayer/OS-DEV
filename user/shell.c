@@ -33,6 +33,7 @@ static int source_depth;   /* recursion guard for `source` (scripts sourcing scr
 static int run_andor(char *seg, char *cwd);
 static int run_input_line(char *line, char *cwd);
 static int run_for(char *line, char *cwd);
+static void source_file(const char *fn, char *cwd, int silent);   /* run shell commands from a file */
 
 /* Read an entire file into a malloc'd, NUL-terminated buffer (caller free()s).
  * The read API has no size query, so grow the buffer until the read no longer
@@ -241,6 +242,7 @@ static int run_command(char *line, char *cwd) {
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
+            print("        .SHRC in / is auto-run at shell start (put aliases/set/etc. there)\n");
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
@@ -806,24 +808,7 @@ static int run_command(char *line, char *cwd) {
             char fn[128]; const char *p = line + (line[0] == '.' ? 2 : 7);
             while (*p == ' ') p++;
             int fi = 0; while (*p && *p != ' ' && fi < 127) fn[fi++] = *p++; fn[fi] = 0;
-            if (source_depth >= 8) { print("source: nested too deep\n"); g_status = 1; }
-            else {
-                long n; char *txt = slurp(fn, &n);
-                if (!txt) { print("source: no such file: "); print(fn); print("\n"); g_status = 1; }
-                else {
-                    source_depth++;
-                    char *ln = txt;
-                    while (ln && *ln) {
-                        char *nl = ln; while (*nl && *nl != '\n') nl++;
-                        int more = (*nl == '\n'); if (more) *nl = 0;
-                        char *t = ln; while (*t == ' ' || *t == '\t') t++;
-                        if (*t && *t != '#') run_input_line(t, cwd);   /* skip blanks + # comments */
-                        ln = more ? nl + 1 : 0;
-                    }
-                    source_depth--;
-                    free(txt);
-                }
-            }
+            source_file(fn, cwd, 0);
         } else if (startswith(line, "crypt ")) {
             char *p = line + 6, fn[32]; int i = 0;
             while (*p == ' ') p++;
@@ -2162,6 +2147,26 @@ static int run_input_line(char *line, char *cwd) {
     return doexit;
 }
 
+/* Run shell commands from a file: each non-blank, non-'#' line goes through the
+ * same executor as interactive input. `silent` suppresses the not-found message
+ * (used for the optional startup .shrc). */
+static void source_file(const char *fn, char *cwd, int silent) {
+    if (source_depth >= 8) { if (!silent) print("source: nested too deep\n"); g_status = 1; return; }
+    long n; char *txt = slurp(fn, &n);
+    if (!txt) { if (!silent) { print("source: no such file: "); print(fn); print("\n"); g_status = 1; } return; }
+    source_depth++;
+    char *ln = txt;
+    while (ln && *ln) {
+        char *nl = ln; while (*nl && *nl != '\n') nl++;
+        int more = (*nl == '\n'); if (more) *nl = 0;
+        char *t = ln; while (*t == ' ' || *t == '\t') t++;
+        if (*t && *t != '#') run_input_line(t, cwd);   /* skip blanks + # comments */
+        ln = more ? nl + 1 : 0;
+    }
+    source_depth--;
+    free(txt);
+}
+
 int main(void) {
     print("\n");
     print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
@@ -2170,6 +2175,7 @@ int main(void) {
     char line[1024];                               /* command line: roomy enough for long URLs + pastes */
     char cwd[128]; cwd[0] = '/'; cwd[1] = 0;       /* display path (kernel tracks the real cwd) */
     char lastcmd[1024]; lastcmd[0] = 0;            /* previous command, for `!!` */
+    source_file(".SHRC", cwd, 1); g_status = 0;    /* run the startup rc file if it exists (aliases, set, banner) */
     for (;;) {
         print("osdev:"); print(cwd); print("$ ");
         readline(line, sizeof(line));
