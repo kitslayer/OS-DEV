@@ -1,5 +1,11 @@
 # What's next
 
+> **(M841) QA — fix a `-Wmisleading-indentation` warning introduced this session.** A sweep of the build
+> output found one new warning I'd added in M838 (multi-file cp/mv): the `dpath[d] = 0;` path terminator
+> trailed a `for` loop on the same line. Split onto its own line — no behaviour change. The warning count is
+> back to the long-standing baseline (46, all dense one-liner style that predates this work). `make check`
+> 31/31.
+
 > **(M840) Shell — `hexdump` dumps multiple files.** The last single-file inspection command: `hexdump
 > FILE...` now dumps each, with a `==> name <==` header before each when several are given. This completes
 > the multi-file set — every inspection command (cat/head/tail/wc/grep/file/sha256/sha512/crc32/strings/

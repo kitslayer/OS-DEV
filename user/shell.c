@@ -1910,7 +1910,8 @@ static int run_command(char *line, char *cwd) {
                 const char *base = srcf; for (const char *t = srcf; *t; t++) if (*t == '/') base = t + 1;
                 char dpath[160]; int d = 0; for (const char *t = dest; *t && d < 158; t++) dpath[d++] = *t;
                 if (d > 0 && dpath[d-1] != '/' && d < 158) dpath[d++] = '/';
-                for (const char *t = base; *t && d < 159; t++) dpath[d++] = *t; dpath[d] = 0;
+                for (const char *t = base; *t && d < 159; t++) dpath[d++] = *t;
+                dpath[d] = 0;
                 if (sys_writefile(dpath, buf, (unsigned long)n) < 0) { print(move?"mv":"cp"); print(": write failed: "); print(dpath); print("\n"); g_status = 1; }
                 else { if (move) sys_delete(srcf); print(move?"moved ":"copied "); print(srcf); print(" -> "); print(dpath); print("\n"); }
                 free(buf);
