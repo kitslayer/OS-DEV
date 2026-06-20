@@ -281,7 +281,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1111,17 +1111,17 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (startswith(line, "wc ")) {
             const char *p = line + 3; char num[12];
-            int tl = 0, tw = 0, nfiles = 0; long tb = 0;
-            int wl = 0, ww = 0, wcb = 0;                   /* -l/-w/-c: which counts to show (no flag = all three) */
+            int tl = 0, tw = 0, nfiles = 0, tL = 0; long tb = 0;
+            int wl = 0, ww = 0, wcb = 0, wL = 0;           /* -l/-w/-c counts (none = all three); -L = longest line length */
             while (*p == ' ') p++;
             while (p[0] == '-' && p[1] && p[1] != ' ') {
                 int t, valid = 1;
-                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'l' && p[t] != 'w' && p[t] != 'c') valid = 0;
+                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'l' && p[t] != 'w' && p[t] != 'c' && p[t] != 'L') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a filename) */
-                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'l') wl = 1; else if (p[t] == 'w') ww = 1; else wcb = 1; }
+                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'l') wl = 1; else if (p[t] == 'w') ww = 1; else if (p[t] == 'c') wcb = 1; else wL = 1; }
                 p += t; while (*p == ' ') p++;
             }
-            if (!wl && !ww && !wcb) { wl = ww = wcb = 1; }
+            if (!wl && !ww && !wcb && !wL) { wl = ww = wcb = 1; }   /* no flag at all = lines+words+bytes (not -L) */
             while (*p) {                                   /* count each space-separated file */
                 while (*p == ' ') p++;
                 if (!*p) break;
@@ -1130,24 +1130,28 @@ static int run_command(char *line, char *cwd) {
                 name[j] = 0;
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("wc: no such file: "); print(name); print("\n"); continue; }
-                int lines = 0, words = 0, inword = 0;
+                int lines = 0, words = 0, inword = 0, longest = 0, cur = 0;
                 for (long i = 0; i < n; i++) {
                     char c = buf[i];
-                    if (c == '\n') lines++;
+                    if (c == '\n') { lines++; if (cur > longest) longest = cur; cur = 0; }
+                    else cur++;
                     if (c == ' ' || c == '\t' || c == '\n' || c == '\r') inword = 0;
                     else if (!inword) { inword = 1; words++; }
                 }
+                if (cur > longest) longest = cur;             /* last line without a trailing newline */
                 if (wl) { print("  lines "); itoa_simple(lines, num); print(num); }
                 if (ww) { print("  words "); itoa_simple(words, num); print(num); }
                 if (wcb) { print("  bytes "); itoa_simple((int)n, num); print(num); }
+                if (wL) { print("  longest "); itoa_simple(longest, num); print(num); }
                 print("  "); print(name); print("\n");
-                tl += lines; tw += words; tb += n; nfiles++;
+                tl += lines; tw += words; tb += n; nfiles++; if (longest > tL) tL = longest;
                 free(buf);
             }
             if (nfiles > 1) {
                 if (wl) { print("  lines "); itoa_simple(tl, num); print(num); }
                 if (ww) { print("  words "); itoa_simple(tw, num); print(num); }
                 if (wcb) { print("  bytes "); itoa_simple((int)tb, num); print(num); }
+                if (wL) { print("  longest "); itoa_simple(tL, num); print(num); }
                 print("  total\n");
             }
             if (nfiles == 0) print("usage: wc [-lwc] <file>...\n");

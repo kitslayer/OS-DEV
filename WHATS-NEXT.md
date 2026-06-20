@@ -1,5 +1,10 @@
 # What's next
 
+> **(M865) Shell — `wc -L` (longest line length).** Added the standard `-L` to wc (length of the longest
+> line). The default-to-all check now excludes `-L`, so `wc -L` reports just the longest (not all counts).
+> Verified in-guest: `wc -L W.TXT` → `longest 13` for a file whose longest line is `a-longer-line`; plain
+> `wc` still shows lines/words/bytes. `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M864) Shell — `sort -tX` (field delimiter) completes column sorting for CSV.** `sort -k` split on
 > whitespace only, so it couldn't sort CSV; `-tX` sets the field delimiter (`sort_field` now takes it).
 > `sort -t, -k2 -n DATA` sorts comma-separated data by the numeric 2nd column. Verified in-guest on
