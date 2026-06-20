@@ -1,5 +1,11 @@
 # What's next
 
+> **(M788) Browser — Forward toolbar button.** Completes M787's Forward UI: added a `>` button next to the
+> `<` Back button in the toolbar (each greyed when its stack is empty), shifting the address field right to
+> fit it. Clicking `>` goes forward; the `browser_click` toolbar hit-test gained the `rx 26..44` region.
+> `make check` 30/30. Verified in-guest: navigate home→list, click `<` (back to home, `<` greys / `>`
+> activates), click `>` (forward to list, buttons swap). Back/Forward now have both buttons and keys.
+
 > **(M787) Browser — Forward navigation.** The browser had a Back stack but no Forward. Added a `fwd[16]`
 > stack: Back now pushes the page it leaves onto it, a new `browser_forward()` (mirrors `browser_back` —
 > local + network paths, `claim_fetch`, undo-on-bail) pops it and pushes the current page back onto the Back

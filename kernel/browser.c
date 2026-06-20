@@ -3183,11 +3183,14 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     fb_fill_rect(x, y, w, ADDR_H, 0xE7EAF0);
     fb_fill_rect(x, y + ADDR_H - 1, w, 1, 0x9AA3B2);
     int fy = y + 7;
-    /* Back button (greyed when there's no history) */
+    /* Back + Forward buttons (each greyed when its stack is empty) */
     uint32_t bbc = (b->histn > 0) ? 0x2C66D6 : 0xAAB2BE;
+    uint32_t ffc = (b->fwdn  > 0) ? 0x2C66D6 : 0xAAB2BE;
     fb_fill_rect(x + 6, fy - 1, 18, 18, 0xF4F6FA); box(x + 6, fy - 1, 18, 18, 0xB4BCC8);
     put_word(x + 11, fy, "<", 1, bbc, 0xF4F6FA, 1);
-    int fx = x + 30, fw = w - 112;
+    fb_fill_rect(x + 26, fy - 1, 18, 18, 0xF4F6FA); box(x + 26, fy - 1, 18, 18, 0xB4BCC8);
+    put_word(x + 31, fy, ">", 1, ffc, 0xF4F6FA, 1);
+    int fx = x + 50, fw = w - 132;
     fb_fill_rect(fx, fy, fw, 16, 0xFFFFFF);
     box(fx - 1, fy - 1, fw + 2, 18, b->editing ? 0x2C66D6 : 0xB4BCC8);
     int maxc = (fw - 6) / GW, ulen = (int)strlen(b->url);
@@ -3761,6 +3764,7 @@ int browser_click(browser_t *b, int rx, int ry, int w, int h) {
     (void)w; (void)h;
     if (ry < ADDR_H) {
         if (rx >= 6 && rx < 24) browser_back(b);          /* the Back button */
+        else if (rx >= 26 && rx < 44) browser_forward(b); /* the Forward button */
         else { b->editing = 1; b->edit_fresh = 1; b->url_cur = (int)strlen(b->url); }  /* edit the address */
         return 1;
     }
