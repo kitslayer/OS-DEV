@@ -1,5 +1,11 @@
 # What's next
 
+> **(M871) Shell — `tee` (split a pipe to a file).** `cmd | tee FILE...` writes the piped data to each FILE
+> and passes it on down the pipe — the standard way to capture an intermediate stage. Uses the shell's pipe
+> convention (the input is the appended last arg; the earlier args are the targets). Verified in-guest:
+> `echo hello-world | tee SAVED.TXT` shows the text and writes the file; `seq 1 3 | tee N.TXT | wc -l` → 3
+> (passed through) with N.TXT holding 1/2/3. `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M870) Shell — `sleep N` (scripting delays).** Another standard command that was missing; `sleep N[.M]`
 > pauses N seconds (plus optional tenths) via the existing `sys_sleep`, capped at 300s so a typo can't hang
 > the terminal unbreakably. Verified in-guest: `echo before-sleep`, `sleep 1`, `echo after-sleep` all run in

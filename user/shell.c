@@ -291,7 +291,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n>\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1443,6 +1443,23 @@ static int run_command(char *line, char *cwd) {
             ms *= 1000;
             if (*p == '.' && p[1] >= '0' && p[1] <= '9') ms += (p[1] - '0') * 100;   /* .N tenths of a second */
             if (ms > 0) sys_sleep((int)ms);
+        } else if (startswith(line, "tee ")) {            /* cmd | tee FILE... : write the piped input to each FILE and pass it through */
+            const char *p = line + 4; while (*p == ' ') p++;
+            char tav[8][64]; int tac = 0;                 /* targets + (last, appended by the pipe) the input file */
+            while (*p && tac < 8) {
+                int q = 0; while (*p && *p != ' ' && q < 63) tav[tac][q++] = *p++;
+                tav[tac][q] = 0; tac++;
+                while (*p == ' ') p++;
+            }
+            if (tac < 2) print("usage: cmd | tee <file>...\n");   /* the piped input is the appended last arg */
+            else {
+                long n; char *buf = slurp(tav[tac - 1], &n);      /* last arg = the piped input */
+                if (buf) {
+                    for (int i = 0; i < tac - 1; i++) sys_writefile(tav[i], buf, (unsigned long)n);   /* fan out to each file */
+                    buf[n] = 0; print(buf);                       /* and pass it on down the pipe */
+                    free(buf);
+                }
+            }
         } else if (startswith(line, "cowsay ")) {         /* the classic: a cow speaks your message */
             const char *msg = line + 7; int len = 0; while (msg[len]) len++;
             print(" "); for (int i = 0; i < len + 2; i++) print("_"); print("\n");
