@@ -1,5 +1,12 @@
 # What's next
 
+> **(M829) Docs — README reflects the shell & editor.** Completes the docs-accuracy pass (Welcome M815,
+> About M817). The baked `README.MD` (rendered live by the browser's Markdown engine) listed desktop / JS /
+> browser / Markdown but omitted the scriptable shell and the text editor — major hand-written components.
+> Added them to both the Features list and the capabilities table. `make check` 30/30. Verified in-guest:
+> navigated the browser to `file:readme.md` and the rendered page now lists "A scriptable shell (for/if/while,
+> pipes, command substitution)" and "A text editor (undo/redo, find & replace, clipboard)".
+
 > **(M828) Shell — `ls <dir>`.** `ls` only listed the current directory; `ls <dir>` now lists another one.
 > Since the kernel's directory listing is cwd-relative, the shell briefly `chdir`s into the target, lists,
 > then restores the cwd (synchronous, so nothing observes the transient change) — no FS-layer change needed.
