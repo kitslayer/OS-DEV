@@ -3244,7 +3244,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
         }
     } else {
-    for (int t = 0; t < b->ntok; t++) {
+    for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
         if (tk->type == TK_BREAK) { cy += curlh + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_PARA)  { cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }

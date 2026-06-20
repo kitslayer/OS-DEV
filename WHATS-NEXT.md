@@ -1,5 +1,12 @@
 # What's next
 
+> **(M791) Browser render — fix a potential out-of-bounds token access (`-Warray-bounds`).** The render loop
+> ran `t < b->ntok` but the per-token arrays are `[TOK_MAX]`; the compiler couldn't prove `t < TOK_MAX`, and
+> the `b->tokbg[t]` block-background read lacked the `t < TOK_MAX` guard its siblings (`tokscale`/`tokindent`/
+> `tokalign`) carried — a real OOB read if `ntok` ever reached `TOK_MAX` on adversarial HTML. Bounded the loop
+> `t < b->ntok && t < TOK_MAX`, making every per-token access provably in-bounds (and defensively capping the
+> loop). Clears the only `-Warray-bounds` warning in the tree. `make check` 30/30 (browsertest renders fine).
+
 > **(M790) Shell — `!!` repeat last command.** Classic history expansion: `!!` re-runs the previous command;
 > trailing text is appended, so `!! | grep x` / `!! > f` compose. The shell keeps the last non-blank line and
 > echoes the expansion before running it. App-only (a few lines in `main` + a help entry); `make check` 30/30.
