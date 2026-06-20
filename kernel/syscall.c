@@ -126,16 +126,24 @@ void syscall_dispatch(struct registers *r) {
         int         count = vfs_list(ents, 256);
         uint64_t    n = 0;
         for (int i = 0; i < count; i++) {
+            if (n >= max - 1) break;
             for (int j = 0; j < 63 && ents[i].name[j] && n < max - 1; j++)   /* j<63: defensive name bound */
                 buf[n++] = ents[i].name[j];
-            while (n < max - 1 && (n == 0 || buf[n - 1] != '\n')) {
-                buf[n++] = ' ';
-                char num[12];
-                int  ln = u32_to_dec(ents[i].size, num);
-                for (int k = 0; k < ln && n < max - 1; k++) buf[n++] = num[k];
-                if (n < max - 1) buf[n++] = '\n';
-                break;
+            if (n < max - 1) buf[n++] = ' ';
+            char num[12];
+            int  ln = u32_to_dec(ents[i].size, num);
+            for (int k = 0; k < ln && n < max - 1; k++) buf[n++] = num[k];
+            if (ents[i].date && n + 18 < max) {       /* "  YYYY-MM-DD HH:MM" for timestamped files */
+                int yr = (ents[i].date >> 9) + 1980, mo = (ents[i].date >> 5) & 15, dy = ents[i].date & 31;
+                int hh = (ents[i].time >> 11) & 31,  mi = (ents[i].time >> 5) & 63;
+                buf[n++] = ' '; buf[n++] = ' ';
+                buf[n++] = '0'+(yr/1000)%10; buf[n++]='0'+(yr/100)%10; buf[n++]='0'+(yr/10)%10; buf[n++]='0'+yr%10;
+                buf[n++] = '-'; buf[n++]='0'+(mo/10)%10; buf[n++]='0'+mo%10;
+                buf[n++] = '-'; buf[n++]='0'+(dy/10)%10; buf[n++]='0'+dy%10;
+                buf[n++] = ' '; buf[n++]='0'+(hh/10)%10; buf[n++]='0'+hh%10;
+                buf[n++] = ':'; buf[n++]='0'+(mi/10)%10; buf[n++]='0'+mi%10;
             }
+            if (n < max - 1) buf[n++] = '\n';
         }
         buf[n] = '\0';
         r->rax = n;

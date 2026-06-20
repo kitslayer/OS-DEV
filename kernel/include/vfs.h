@@ -12,6 +12,7 @@
 typedef struct {
     char     name[64];
     uint32_t size;
+    uint16_t date, time;     /* FAT-packed last-write date/time (0 = unset) */
 } vfs_dirent;
 
 struct vfs_ops {

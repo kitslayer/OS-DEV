@@ -1,5 +1,14 @@
 # What's next
 
+> **(M792) Filesystem — file timestamps in `ls`.** The FAT32 driver never wrote the dir-entry date/time
+> fields (always 0) and `ls` showed only name+size. Now `add_entry` stamps create/write/access time from the
+> RTC (`fat_now()` packs `rtc_now()` into FAT16 date/time), `vfs_dirent` carries `date`/`time`, the list
+> visitor reads the write timestamp, and `SYS_list` appends `  YYYY-MM-DD HH:MM` — but only for stamped files,
+> so baked-in disk files (date 0) still show cleanly. Precise field writes (offsets 14–25 only), no risk to
+> name/cluster/size. Added a `rtc_now` stub to `tests/fs` (the host suite #includes fat32.c — coupling
+> handled). `make check` 30/30. Verified in-guest: `echo hi > DATED.TXT; ls` → `DATED.TXT 3  2026-06-20 04:40`
+> (matching the clock), baked files unchanged.
+
 > **(M791) Browser render — fix a potential out-of-bounds token access (`-Warray-bounds`).** The render loop
 > ran `t < b->ntok` but the per-token arrays are `[TOK_MAX]`; the compiler couldn't prove `t < TOK_MAX`, and
 > the `b->tokbg[t]` block-background read lacked the `t < TOK_MAX` guard its siblings (`tokscale`/`tokindent`/

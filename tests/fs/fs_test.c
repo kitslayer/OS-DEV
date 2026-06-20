@@ -43,6 +43,10 @@ int ata_write(uint32_t lba, uint8_t count, const void *buf) {
     return 0;
 }
 void vfs_register(struct vfs_ops *ops) { (void)ops; }
+#include "rtc.h"
+void rtc_now(struct rtc_time *t) {   /* fixed clock so timestamps in created entries are deterministic */
+    t->year = 2026; t->month = 6; t->day = 20; t->hour = 12; t->min = 0; t->sec = 0;
+}
 
 #include "fat32.c"   /* the static walk_dir / fat32_read / cluster_in_range / ... */
 

@@ -15,6 +15,7 @@
 #include "fat32.h"
 #include "vfs.h"
 #include "ata.h"
+#include "rtc.h"
 #include <stdint.h>
 
 #define SECSZ 512
@@ -33,6 +34,15 @@ static uint32_t alloc_hint = 2; /* where the next free-cluster scan starts (set 
 
 static uint16_t rd16(const uint8_t *p) { return p[0] | p[1] << 8; }
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
+
+/* Current wall-clock packed into FAT16 date/time fields (date = y-1980<<9|mon<<5|day,
+ * time = hour<<11|min<<5|sec/2), for stamping new directory entries. */
+static void fat_now(uint16_t *date, uint16_t *time) {
+    struct rtc_time t; rtc_now(&t);
+    int y = t.year - 1980; if (y < 0) y = 0; if (y > 127) y = 127;
+    *date = (uint16_t)((y << 9) | ((t.month & 15) << 5) | (t.day & 31));
+    *time = (uint16_t)(((t.hour & 31) << 11) | ((t.min & 63) << 5) | ((t.sec / 2) & 31));
+}
 
 static uint32_t cluster_to_sector(uint32_t cl) {
     return data_start + (cl - 2) * sec_per_clus;
@@ -207,6 +217,10 @@ static int add_entry(uint32_t dircl, const uint8_t name83[11], uint8_t attr,
                     e[20] = first >> 16; e[21] = first >> 24;
                     e[26] = first;       e[27] = first >> 8;
                     e[28] = size; e[29] = size >> 8; e[30] = size >> 16; e[31] = size >> 24;
+                    { uint16_t fd, ft; fat_now(&fd, &ft);     /* stamp create/write/access time */
+                      e[14] = ft; e[15] = ft >> 8; e[16] = fd; e[17] = fd >> 8;   /* create */
+                      e[18] = fd; e[19] = fd >> 8;                                /* access */
+                      e[22] = ft; e[23] = ft >> 8; e[24] = fd; e[25] = fd >> 8; } /* write  */
                     ata_write(firsts + s, 1, sec);
                     return 0;
                 }
@@ -252,6 +266,8 @@ static int list_visit(const uint8_t *e, const char *name, void *ctx) {
     if (e[11] & 0x10) c->out[c->n].name[i++] = '/';   /* mark directories */
     c->out[c->n].name[i] = '\0';
     c->out[c->n].size = rd32(e + 28);
+    c->out[c->n].time = rd16(e + 22);     /* last-write time/date (FAT-packed) */
+    c->out[c->n].date = rd16(e + 24);
     c->n++;
     return 0;
 }
