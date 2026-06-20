@@ -291,7 +291,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1405,6 +1405,38 @@ static int run_command(char *line, char *cwd) {
             if (streq(a, "-n")) { }                       /* echo -n: print nothing, no newline */
             else if (startswith(a, "-n ")) print(a + 3);  /* echo -n TEXT: no trailing newline (good for prompts before `read`) */
             else { print(a); print("\n"); }
+        } else if (startswith(line, "printf ")) {         /* printf FMT [args]: \n \t \r \\ escapes + %s %d %c %% (FMT cycles over the args) */
+            const char *p = line + 7; while (*p == ' ') p++;
+            char fmt[256]; int fi = 0; while (*p && *p != ' ' && fi < 255) fmt[fi++] = *p++; fmt[fi] = 0;
+            while (*p == ' ') p++;
+            static char abuf[512]; char *av[32]; int ac = 0, bi = 0;   /* split the trailing words into args */
+            while (*p && ac < 32) {
+                av[ac++] = abuf + bi;
+                while (*p && *p != ' ' && bi < 511) abuf[bi++] = *p++;
+                if (bi < 512) abuf[bi++] = 0;
+                while (*p == ' ') p++;
+            }
+            int has_spec = 0;
+            for (const char *f = fmt; *f; f++) if (*f == '%' && f[1] && f[1] != '%') has_spec = 1;
+            int ai = 0;
+            for (;;) {
+                int start_ai = ai;
+                for (const char *f = fmt; *f; f++) {
+                    if (*f == '\\' && f[1]) {
+                        f++;
+                        char c = (*f == 'n') ? '\n' : (*f == 't') ? '\t' : (*f == 'r') ? '\r' : *f;   /* \\ and others -> the char itself */
+                        char s[2] = { c, 0 }; print(s);
+                    } else if (*f == '%' && f[1]) {
+                        f++;
+                        if (*f == '%') print("%");
+                        else if (*f == 's') { print(ai < ac ? av[ai] : ""); if (ai < ac) ai++; }
+                        else if (*f == 'd' || *f == 'i') { char nb[12]; itoa_simple(ai < ac ? (int)sh_str2long(av[ai]) : 0, nb); print(nb); if (ai < ac) ai++; }
+                        else if (*f == 'c') { char s[2] = { (char)(ai < ac ? av[ai][0] : 0), 0 }; print(s); if (ai < ac) ai++; }
+                        else { char s[2] = { *f, 0 }; print("%"); print(s); }   /* unknown spec: print literally */
+                    } else { char s[2] = { *f, 0 }; print(s); }
+                }
+                if (!(has_spec && ai < ac && ai > start_ai)) break;   /* cycle the format while args remain and a pass consumed one */
+            }
         } else if (startswith(line, "cowsay ")) {         /* the classic: a cow speaks your message */
             const char *msg = line + 7; int len = 0; while (msg[len]) len++;
             print(" "); for (int i = 0; i < len + 2; i++) print("_"); print("\n");

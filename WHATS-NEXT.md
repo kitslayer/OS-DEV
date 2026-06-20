@@ -1,5 +1,13 @@
 # What's next
 
+> **(M869) Shell — `printf` (a standard command that was entirely missing).** `printf FMT [args]` interprets
+> `\n`/`\t`/`\r`/`\\` escapes and `%s`/`%d`/`%c`/`%%` specifiers, and cycles the format over the remaining
+> args (bash semantics) — `printf '[%s]\n' a b c` → `[a]\n[b]\n[c]\n`. Self-contained new builtin (a guard
+> stops the cycle when a pass consumes no arg, so an unknown spec can't loop). Single-word formats work
+> without quoting (the common case); multi-word formats need quoting (deferred). Verified in-guest:
+> `printf hello\nworld\n` → two lines, `printf %s-%s=%d\n a b 42` → `a-b=42`, `printf [%s]\n one two three`
+> → three bracketed lines. `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M868) Shell — `grep -o` (print only the matched part), via a greedy matcher.** The last text-tool gap.
 > It required two matcher changes in `shgrep.h`: (1) thread an end pointer through `gr_matchhere`/`gr_matchstar`
 > so a match's span is known (a new `gr_match_span`; `gr_match` stays a boolean wrapper), and (2) make the
