@@ -1,5 +1,15 @@
 # What's next
 
+> **(M891) Shell — `elif` (multi-way `if`).** Previously deferred for parsing risk, but done **safely and
+> additively**: in `run_if`, after isolating COND/then-body, if the body contains `; elif ` the else-branch
+> is rebuilt as a nested `if <rest>; fi` string and run via `run_input_line` (which re-dispatches it to
+> `run_if`), so an `elif` chain peels one level per recursion. The no-`elif` path is byte-identical — plain
+> `if` / `if-else` is untouched (no regression), and the only fragility (a nested `if…fi` *inside* a
+> then-body that also has `elif`) is the same pre-existing limitation `run_if` already had, not a new one.
+> Verified in-guest: `if … elif … else …` picks the right branch; a `grade()` function (`grade 95`→A,
+> `85`→B, `50`→F) works; plain `if` unregressed. Help line updated. `make check` green (35 suites);
+> shell.c warnings 11.
+
 > **(M890) Tests — extracted the `cd` path resolver into `normpath.h` + host fuzz (35th suite).** The M881
 > `cd` normaliser was the last pure helper added this session without host coverage — and path handling is
 > exactly where M881's bug lived. Lifted it into `user/normpath.h`, made self-contained (inlined its two

@@ -379,7 +379,7 @@ static int run_command(char *line, char *cwd) {
             print("        read VAR: read a line of input into VAR (for interactive scripts)\n");
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        while COND; do CMDS; done   (loops while COND succeeds; Ctrl-C to stop)\n");
-            print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
+            print("        if COND; then CMDS; [elif COND; then CMDS;]... [else CMDS;] fi   (status picks the branch)\n");
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
             print("        name() { cmds; }   (define a function; call `name args` with $1..$9 $# $@ bound)\n");
@@ -2684,9 +2684,21 @@ static int run_if(char *line, char *cwd) {
     if (blen>0 && body[blen-1]==';') blen--;
     while (blen>0 && body[blen-1]==' ') blen--;
     body[blen] = 0;
-    char *els = sh_substr(body, "; else");
     char *thenb = body, *elseb = 0;
-    if (els) { *els = 0; elseb = els + 6; while (*elseb == ' ') elseb++; }
+    char elsebuf[1024];
+    char *eif = sh_substr(body, "; elif ");                /* elif: the else-branch becomes a nested `if`, recursed via run_input_line */
+    if (eif) {
+        *eif = 0;                                          /* thenb = body up to "; elif" */
+        const char *rest = eif + 7;                        /* "COND2; then BODY2 [; elif …] [; else …]" */
+        int bi = 0; const char *pre = "if ";
+        while (*pre) elsebuf[bi++] = *pre++;
+        while (*rest && bi < 1019) elsebuf[bi++] = *rest++;
+        const char *suf = "; fi"; while (*suf && bi < 1023) elsebuf[bi++] = *suf++;
+        elsebuf[bi] = 0; elseb = elsebuf;
+    } else {
+        char *els = sh_substr(body, "; else");
+        if (els) { *els = 0; elseb = els + 6; while (*elseb == ' ') elseb++; }
+    }
     run_input_line(p, cwd);                                /* run COND -> sets g_status */
     if (g_status == 0) return run_input_line(thenb, cwd);
     if (elseb)         return run_input_line(elseb, cwd);
