@@ -1,5 +1,11 @@
 # What's next
 
+> **(M826) Editor — select all (Ctrl-A).** The editor had mark-based selection (Ctrl-B + move) but no
+> select-all, a standard, frequently-used shortcut. Ctrl-A now sets the mark at the start and the cursor at
+> the end, selecting the whole buffer — then Ctrl-C/Ctrl-X copy/cut everything. Listed in the Ctrl-H help.
+> `make check` 30/30. Verified in-guest: typed `ALLOFTHIS`, Ctrl-A highlighted it all, Ctrl-X emptied the
+> buffer (0b).
+
 > **(M825) Browser — home-page shortcut hint.** Now that the browser has a `?` key reference (M821) and
 > Ctrl-F find (M820), the start page advertises them: a line under the title reads "Press ? (or Ctrl-F to
 > find) for keyboard shortcuts." so users discover the controls instead of having to guess the vim-style

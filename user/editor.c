@@ -325,7 +325,7 @@ static void render_help(void) {
     print("^S save  ^W save as  ^O open  ^Q quit  ESC save+quit\n");
     print("^Z undo    ^Y redo\n");
     print("^F find    ^R replace  ^G go to line\n");
-    print("^B set mark, then move to select\n");
+    print("^B set mark, then move to select   ^A select all\n");
     print("^C copy    ^X cut      ^V paste\n");
     print("Tab = spaces   Del = delete forward\n");
 }
@@ -476,6 +476,7 @@ int main(void) {
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
         else if (k == 0x99) redo();                       /* Ctrl-Y: redo */
         else if (k == 0x82) sel_anchor = (sel_anchor < 0) ? cur : -1;  /* Ctrl-B: set/clear selection mark */
+        else if (k == 0x81) { sel_anchor = 0; cur = dlen; }            /* Ctrl-A: select all */
         else if (k == 0x83) do_copy();                    /* Ctrl-C: copy selection (or line) */
         else if (k == 0x98) do_cut();                     /* Ctrl-X: cut selection (or line)  */
         else if (k == 0x96) paste_clip();                 /* Ctrl-V: paste clipboard   */
