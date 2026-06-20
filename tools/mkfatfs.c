@@ -36,17 +36,23 @@ static const struct {
     { "MOTD    TXT", "Milestone 10 reached: VFS + FAT32 + ATA driver.\nTry: ls   and   cat hello.txt\n" },
     { "DEMO    SH ", "# OS-DEV shell scripting demo -- run it with:  source DEMO.SH\n"
                      "echo == OS-DEV shell scripting ==\n"
-                     "set OS=OS-DEV\n"
-                     "echo variable OS is $OS\n"
+                     "OS=OS-DEV\n"
+                     "echo variable OS is $OS  (bare NAME=value, sh-style)\n"
                      "echo arithmetic six times seven is $((6 * 7))\n"
                      "echo ternary the larger of 8 and 3 is $((8 > 3 ? 8 : 3))\n"
                      "echo command substitution says $(echo it-works)\n"
                      "alias say=echo\n"
                      "say aliases work too\n"
+                     "greet() { echo hello $1 -- from a function; }\n"
+                     "greet world\n"
+                     "args() { echo function got $# args: $@; }\n"
+                     "args alpha beta gamma\n"
+                     "pos() { if test $1 -gt 0; then return 0; fi; return 1; }\n"
+                     "pos 5 && echo return-value works: 5 is positive\n"
                      "for n in 1 2 3; do echo for-loop n is $n; done\n"
                      "if test 10 -gt 3; then echo if-test ten is greater than three; fi\n"
-                     "set i=1\n"
-                     "while test $i -le 3; do echo while-loop i is $i; set i=$((i+1)); done\n"
+                     "i=1\n"
+                     "while test $i -le 3; do echo while-loop i is $i; i=$((i + 1)); done\n"
                      "echo == demo complete -- type help for more ==\n" },
     { "PRE     HTM", "<h2>Preformatted</h2><p>This paragraph is normal flow: whitespace    collapses and the text wraps to the window width as usual.</p><pre>function hello() {\n    return 1 + 2;      // spaces   kept\n\n    blank line above is preserved\n}</pre><p>Back to normal flow after the pre block.</p>" },
     { "MARGIN  HTM", "<style>.gap{margin-top:55px} .ind{margin-left:40px}</style><h2>CSS margins</h2><p>Para 1 &mdash; no margin, default spacing.</p><p style=\"margin-top:60px\">Para 2 has inline <b>margin-top:60px</b> &mdash; a big gap should sit above it.</p><p style=\"margin-top:10px\">Para 3 has margin-top:10px &mdash; a small gap.</p><p>Para 4 &mdash; no margin again.</p><p class=\"gap\">Para 5 uses a <b>&lt;style&gt; rule</b> <code>.gap{margin-top:55px}</code> &mdash; a big gap from a stylesheet rule, not inline.</p><p style=\"padding-top:45px\">Para 6 has <b>padding-top:45px</b> &mdash; inner top space (also lifts it down).</p><p style=\"margin-left:48px\">Para 7 has <b>margin-left:48px</b> &mdash; this whole paragraph is indented to the right, and wrapped lines stay indented too, just like a blockquote.</p><p class=\"ind\">Para 8 is indented by a <b>&lt;style&gt; rule</b> <code>.ind{margin-left:40px}</code> &mdash; a stylesheet class, not inline.</p><div style=\"margin:40px\">A div with <b>margin:40px</b> (all sides &mdash; spaced above AND indented).</div><p style=\"margin:6px 60px\">Para 9 uses the <b>margin:6px 60px</b> shorthand (vertical horizontal) &mdash; indented 60px from a 2-value shorthand.</p><div style=\"background:#cfe8ff\">This div has <b>background:#cfe8ff</b> &mdash; the colour fills the whole line band (a block background), not just behind the words.</div><p>An inline <span style=\"background:#ffe080\">highlighted span</span> background stays behind its text only.</p>" },

@@ -1,5 +1,14 @@
 # What's next
 
+> **(M883) Demo — `DEMO.SH` now showcases functions, `$#`/`$@`, `return`, and bare assignment.** The bundled
+> scripting demo (`source DEMO.SH`) predated this session's work — it used `set i=…` and never showed
+> functions, the headline new feature. Modernized it to demonstrate the full capability: a `greet world`
+> function, an `args alpha beta gamma` function printing `$#`/`$@`, a `pos` guard-clause function with
+> `return` used as `pos 5 && echo …`, bare `OS=OS-DEV` / `i=$((i + 1))` assignment, alongside the existing
+> arithmetic/ternary/`$()`/alias/for/if/while lines. Verified in-guest: `source DEMO.SH` runs all of it
+> cleanly end-to-end (`hello world -- from a function`, `function got 3 args: alpha beta gamma`,
+> `return-value works: 5 is positive`, …). Also regenerated a clean `fat.img`. `make check` green (33 suites).
+
 > **(M882) Shell — bare `NAME=value` assignment (sh-style), so `x=$(cmd)` works.** Found by testing
 > `x=$(greet)`: it printed `unknown command: x=hello` because the only assignment path was `set NAME=val`;
 > a bare `x=5` fell through to the not-found branch. Real sh/bash assign with bare `NAME=value`, and the
