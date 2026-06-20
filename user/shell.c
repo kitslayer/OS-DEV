@@ -1183,7 +1183,7 @@ static int run_command(char *line, char *cwd) {
                                 }
                             } else if (hit) {
                                 hits++;
-                                if (ll) { print(name); print("\n"); buf[k] = save; break; }   /* -l: this file matches; name once, next file */
+                                if (ll) { print(streq(name, "PIPE.TMP") ? "(standard input)" : name); print("\n"); buf[k] = save; break; }   /* -l: this file matches; name once (piped input has no real name), next file */
                                 if (!cc) {                  /* -c: count only, don't print the line */
                                     for (int z = 0; z < bn; z++) if (blno[z] > last_printed) {   /* -B/-C: print buffered before-context */
                                         char bs = buf[bend[z]]; buf[bend[z]] = 0;

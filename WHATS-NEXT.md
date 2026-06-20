@@ -1,5 +1,11 @@
 # What's next
 
+> **(M880) Shell — `grep -l` in a pipe prints `(standard input)`, not the `PIPE.TMP` scratch name.** The
+> same leak class as M879: `cmd | grep -l pat` named the internal pipe temp file on a match. It now prints
+> `(standard input)` for piped input (matching real grep) while `grep -l pat realfile` still names the file.
+> Verified: `greet | grep -l hello` → `(standard input)`; 3-stage function pipe `greet | sort | head -1` and
+> `greet | grep -c o` → `2` all correct. `make check` green (33 suites); shell.c warnings 11.
+
 > **(M879) Shell — `wc` no longer leaks the internal `PIPE.TMP` name into piped output.** Found by testing
 > the new functions across other features: `greet | wc -l` printed `lines 2  PIPE.TMP`, exposing the pipe's
 > scratch file. The pipe model appends the temp file as the next stage's last arg, and `wc` (unlike
