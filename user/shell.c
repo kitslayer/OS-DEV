@@ -79,15 +79,15 @@ static int sort_foldeq(const char *a, const char *b) {   /* case-insensitive str
     while (*a && gr_lc(*a) == gr_lc(*b)) { a++; b++; }
     return gr_lc(*a) == gr_lc(*b);
 }
-/* sort -kN: pointer to the start of whitespace-delimited field k (1-based) — the
- * key compares from there to end of line, like `sort -kN`. Past the last field
- * it returns the terminating NUL (empty key). */
-static const char *sort_field(const char *s, int k) {
+/* sort -kN: pointer to the start of field k (1-based) — the key compares from
+ * there to end of line, like `sort -kN`. Fields are whitespace-delimited, or
+ * split on `d` when `sort -td` was given. Past the last field returns NUL. */
+static const char *sort_field(const char *s, int k, char d) {
     for (int f = 1; f < k && *s; f++) {
-        while (*s == ' ' || *s == '\t') s++;
-        while (*s && *s != ' ' && *s != '\t') s++;
+        if (d) { while (*s && *s != d) s++; if (*s == d) s++; }            /* custom delimiter */
+        else { while (*s == ' ' || *s == '\t') s++; while (*s && *s != ' ' && *s != '\t') s++; }
     }
-    while (*s == ' ' || *s == '\t') s++;
+    if (!d) while (*s == ' ' || *s == '\t') s++;   /* whitespace mode skips leading blanks of field k */
     return s;
 }
 /* Expand a `tr` SET token (literal chars + a-z ranges) into out[]; advance *pp past it. */
@@ -281,7 +281,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufk] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvel,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwc] tr fold seq[a b c]\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -506,13 +506,19 @@ static int run_command(char *line, char *cwd) {
                 }
             }
         } else if (startswith(line, "sort ")) {
-            const char *fp = line + 5; int rev = 0, nsort = 0, uniq_f = 0, fold = 0, kf = 0;  /* -r rev, -n numeric, -u unique, -f fold, -kN sort by field N */
+            const char *fp = line + 5; int rev = 0, nsort = 0, uniq_f = 0, fold = 0, kf = 0; char sdelim = 0;  /* -r rev, -n num, -u uniq, -f fold, -kN field N, -tX delim */
             while (*fp == ' ') fp++;
             while (fp[0] == '-' && fp[1] && fp[1] != ' ') {
-                if (fp[1] == 'k') {                         /* -kN / -k N : sort by whitespace field N (compared to end of line) */
+                if (fp[1] == 'k') {                         /* -kN / -k N : sort by field N (compared to end of line) */
                     fp += 2; while (*fp == ' ') fp++;
                     kf = 0; while (*fp >= '0' && *fp <= '9') kf = kf * 10 + (*fp++ - '0');
                     if (kf < 1) kf = 1;
+                    while (*fp == ' ') fp++;
+                    continue;
+                }
+                if (fp[1] == 't') {                         /* -tX / -t X : field delimiter for -k (default: whitespace) */
+                    fp += 2; while (*fp == ' ') fp++;
+                    if (*fp) sdelim = *fp++;
                     while (*fp == ' ') fp++;
                     continue;
                 }
@@ -540,8 +546,8 @@ static int run_command(char *line, char *cwd) {
                         char *key = lns[i]; int j = i - 1;
                         while (j >= 0) {
                             int cmp;
-                            const char *ka = kf ? sort_field(lns[j], kf) : lns[j];   /* -kN: compare starting at field N */
-                            const char *kb = kf ? sort_field(key, kf) : key;
+                            const char *ka = kf ? sort_field(lns[j], kf, sdelim) : lns[j];   /* -kN: compare starting at field N */
+                            const char *kb = kf ? sort_field(key, kf, sdelim) : key;
                             if (nsort) {                       /* -n: compare by leading integer value */
                                 long va = sort_numval(ka), vb = sort_numval(kb);
                                 cmp = (va < vb) ? -1 : (va > vb) ? 1 : 0;

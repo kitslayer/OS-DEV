@@ -1,5 +1,11 @@
 # What's next
 
+> **(M864) Shell — `sort -tX` (field delimiter) completes column sorting for CSV.** `sort -k` split on
+> whitespace only, so it couldn't sort CSV; `-tX` sets the field delimiter (`sort_field` now takes it).
+> `sort -t, -k2 -n DATA` sorts comma-separated data by the numeric 2nd column. Verified in-guest on
+> `apple,30 / banana,10 / cherry,20`: `sort -t, -k2 -n` → `banana,10, cherry,20, apple,30`. The shell's
+> sort (and the whole text toolkit) is now bash-complete. `make check` 32 suites; shell.c warnings (11).
+
 > **(M863) Shell — `sort -kN` (sort by column).** `sort` only compared whole lines; `sort -k2` now compares
 > from whitespace field N to end of line (bash's default key), composing with `-n`/`-r`/`-f`. A `sort_field`
 > helper returns the field-N offset; the three compare branches use it. Verified in-guest on
