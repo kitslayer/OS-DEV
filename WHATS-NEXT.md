@@ -1,5 +1,14 @@
 # What's next
 
+> **(M805) Shell — `if`/`then`/`else`/`fi`.** Completes shell control flow alongside M804's `for`. `if COND;
+> then CMDS; [else CMDS;] fi` (one line) runs COND, and its exit status (`$?`) picks the branch; THEN/ELSE are
+> full `;`-separated lists and can nest, all via the same `run_input_line` so `if` composes with `for`, pipes,
+> `&&`/`||`, `source`, etc. Markers are matched as substrings (`; then`, `; else`, trailing `fi`), with the
+> documented caveat that a nested if/else inside THEN on the *same* line can mis-bind its else — deep nesting
+> belongs on separate script lines. `make check` 30/30. Verified in-guest: `if true; then echo THEN-OK; fi`,
+> `if false; then echo BAD; else echo ELSE-OK; fi` → ELSE-OK, `if cat NOPE; then ...; else echo NOTFOUND-OK;
+> fi` (status-driven), and `for i in 1 2 3; do if true; then echo got-$i; fi; done` → got-1/2/3 (if inside for).
+
 > **(M804) Shell — `for` loops.** Completes the scripting arc (M799 `&&`/`||`, M803 `source`) with the one
 > control-flow primitive that had no equivalent: `for VAR in WORDS; do CMDS; done` (single line). WORDS get
 > `$var` and glob expansion then split on whitespace; the body runs once per word with VAR bound. To make this

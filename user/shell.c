@@ -221,6 +221,7 @@ static int run_command(char *line, char *cwd) {
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
+            print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        set NAME=val (variables) $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  Tab=complete  ^W/^U/^K=kill  ^C=cancel\n");
@@ -2072,11 +2073,44 @@ static int run_for(char *line, char *cwd) {
     return doexit;
 }
 
-/* Run one logical input line: a `for` loop, else a ';'-separated list of
- * && / || pipelines. Returns 1 if it ran the `exit` builtin. */
+/* First occurrence of needle in haystack (for the if/then/else markers). */
+static char *sh_substr(char *h, const char *n) {
+    for (; *h; h++) { int i = 0; while (n[i] && h[i] == n[i]) i++; if (!n[i]) return h; }
+    return 0;
+}
+
+/* if COND; then THEN; [else ELSE;] fi  (one line). COND's exit status ($?)
+ * picks the branch. THEN/ELSE may be ';'-separated lists (and nest), but a
+ * nested if/else *inside* THEN on the same line can mis-bind its else — keep
+ * deep nesting on separate lines (via source) or use && / ||. */
+static int run_if(char *line, char *cwd) {
+    char *p = line + 2; while (*p == ' ') p++;             /* skip "if" */
+    char *thn = sh_substr(p, "; then");
+    if (!thn) { print("if: missing '; then'\n"); g_status = 1; return 0; }
+    *thn = 0;                                              /* COND = p */
+    char *body = thn + 6; while (*body == ' ') body++;
+    int blen = (int)ustrlen(body);
+    while (blen > 0 && body[blen-1] == ' ') body[--blen] = 0;
+    if (!(blen >= 2 && streq(body+blen-2, "fi"))) { print("if: missing 'fi'\n"); g_status = 1; return 0; }
+    blen -= 2; while (blen>0 && body[blen-1]==' ') blen--;   /* drop "fi" + a trailing "; " */
+    if (blen>0 && body[blen-1]==';') blen--;
+    while (blen>0 && body[blen-1]==' ') blen--;
+    body[blen] = 0;
+    char *els = sh_substr(body, "; else");
+    char *thenb = body, *elseb = 0;
+    if (els) { *els = 0; elseb = els + 6; while (*elseb == ' ') elseb++; }
+    run_input_line(p, cwd);                                /* run COND -> sets g_status */
+    if (g_status == 0) return run_input_line(thenb, cwd);
+    if (elseb)         return run_input_line(elseb, cwd);
+    return 0;
+}
+
+/* Run one logical input line: a `for` loop or `if`, else a ';'-separated list
+ * of && / || pipelines. Returns 1 if it ran the `exit` builtin. */
 static int run_input_line(char *line, char *cwd) {
     char *t = line; while (*t == ' ') t++;
     if (startswith(t, "for ")) return run_for(t, cwd);
+    if (startswith(t, "if "))  return run_if(t, cwd);
     char *seg = line; int doexit = 0;
     while (seg && !doexit) {
         char *semi = seg; while (*semi && *semi != ';') semi++;
