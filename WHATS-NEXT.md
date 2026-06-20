@@ -1,5 +1,11 @@
 # What's next
 
+> **(M833) Shell — clearer `cp`/`mv` error on a directory source.** Copying a directory (no `-r` support) read
+> it as a file and failed with a misleading "no such file". `cp`/`mv` now detect a directory source (the same
+> chdir-test as M832) and report "cp: NAME is a directory". `make check` 30/30. Verified in-guest:
+> `cp srcd dest` (a dir) printed "cp: srcd is a directory", while `cp okf.txt copied.txt` still copied
+> normally (no regression).
+
 > **(M832) Shell — `cp`/`mv` into a directory.** `cp SRC DST` / `mv SRC DST` treated DST as a literal target
 > name, so `cp file dir/` made a *file* called `dir` rather than `dir/file`. Now, when DST is an existing
 > directory (detected with the same transient chdir-test as `ls <dir>`), the destination becomes

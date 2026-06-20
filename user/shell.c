@@ -1861,6 +1861,10 @@ static int run_command(char *line, char *cwd) {
             src[i] = 0;
             while (*p == ' ') p++;
             if (src[0] == 0 || *p == 0) { print("usage: "); print(move?"mv":"cp"); print(" <src> <dst>\n"); }
+            else if (sys_chdir(src) >= 0) {        /* src is a directory: cp/mv of dirs isn't supported (no -r) */
+                sys_chdir(cwd);
+                print(move ? "mv" : "cp"); print(": "); print(src); print(" is a directory\n"); g_status = 1;
+            }
             else {
                 /* file size is unknown (no stat syscall): read into a heap buffer,
                  * doubling it until the read no longer fills it. Fixes the old
