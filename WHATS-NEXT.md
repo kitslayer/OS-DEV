@@ -1,5 +1,11 @@
 # What's next
 
+> **(M857) Demo — `DEMO.SH` showcases the new `$(())` ternary.** The baked scripting demo covered
+> variables/arithmetic/`$()`/aliases/for/if/while but predated M848's operator additions; added a line
+> `$((8 > 3 ? 8 : 3))` so the showcase reflects the now-bash-complete arithmetic. Doubles as an end-to-end
+> scripting integration test — verified in-guest that `source DEMO.SH` runs every construct, printing
+> "ternary the larger of 8 and 3 is 8". `make check` 32 suites.
+
 > **(M856) Shell — `uniq -d` / `-u` (only duplicated / only non-repeated lines).** Completed the classic
 > `sort | uniq` filter set: `-d` emits a run only when it repeats (count > 1), `-u` only when it doesn't
 > (count == 1); both compose with `-c`. Verified in-guest on apple,apple,banana,cherry,cherry,date:

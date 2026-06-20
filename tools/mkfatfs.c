@@ -39,6 +39,7 @@ static const struct {
                      "set OS=OS-DEV\n"
                      "echo variable OS is $OS\n"
                      "echo arithmetic six times seven is $((6 * 7))\n"
+                     "echo ternary the larger of 8 and 3 is $((8 > 3 ? 8 : 3))\n"
                      "echo command substitution says $(echo it-works)\n"
                      "alias say=echo\n"
                      "say aliases work too\n"
