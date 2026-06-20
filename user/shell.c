@@ -291,7 +291,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f>\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1458,6 +1458,30 @@ static int run_command(char *line, char *cwd) {
                     for (int i = 0; i < tac - 1; i++) sys_writefile(tav[i], buf, (unsigned long)n);   /* fan out to each file */
                     buf[n] = 0; print(buf);                       /* and pass it on down the pipe */
                     free(buf);
+                }
+            }
+        } else if (startswith(line, "xargs ")) {          /* cmd | xargs CMD : append the piped tokens to CMD and run it (e.g. find pat | xargs rm) */
+            const char *p = line + 6; while (*p == ' ') p++;
+            const char *lastw = 0, *scan = p;             /* the last word is the piped input file (appended by the pipe) */
+            while (*scan) { while (*scan == ' ') scan++; if (!*scan) break; lastw = scan; while (*scan && *scan != ' ') scan++; }
+            if (!lastw || lastw == p) { print("usage: cmd | xargs <command>...\n"); }   /* need a command before the appended input */
+            else {
+                char infile[64]; int q = 0; while (lastw[q] && lastw[q] != ' ' && q < 63) { infile[q] = lastw[q]; q++; } infile[q] = 0;
+                long n; char *buf = slurp(infile, &n);
+                if (buf) {
+                    buf[n] = 0;
+                    char built[1024]; int bo = 0;
+                    for (const char *c = p; c < lastw && bo < 1000; c++) built[bo++] = *c;   /* the command (everything before the input) */
+                    while (bo > 0 && built[bo-1] == ' ') bo--;
+                    const char *w = buf;                  /* append each whitespace-separated input token */
+                    while (*w && bo < 1000) {
+                        while (*w == ' ' || *w == '\n' || *w == '\t' || *w == '\r') w++;
+                        if (!*w) break;
+                        built[bo++] = ' ';
+                        while (*w && *w != ' ' && *w != '\n' && *w != '\t' && *w != '\r' && bo < 1000) built[bo++] = *w++;
+                    }
+                    built[bo] = 0; free(buf);
+                    run_input_line(built, cwd);           /* run the assembled command line */
                 }
             }
         } else if (startswith(line, "cowsay ")) {         /* the classic: a cow speaks your message */

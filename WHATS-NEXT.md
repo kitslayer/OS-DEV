@@ -1,5 +1,12 @@
 # What's next
 
+> **(M872) Shell — `xargs` (build a command from piped input).** `cmd | xargs CMD` appends the piped
+> whitespace-separated tokens to CMD and runs it (the classic `find pat | xargs rm` idiom) — assembled into
+> a line and dispatched through `run_input_line`. Verified in-guest: `echo apple banana cherry | xargs echo
+> fruits:` → `fruits: apple banana cherry`, `seq 1 4 | xargs echo nums:` → `nums: 1 2 3 4`. With printf,
+> sleep, tee and xargs added this session, the shell's common standard-command set is complete (remaining
+> misses — expr/which/type/yes — are redundant or need a command table). `make check` 32 suites; warnings (11).
+
 > **(M871) Shell — `tee` (split a pipe to a file).** `cmd | tee FILE...` writes the piped data to each FILE
 > and passes it on down the pipe — the standard way to capture an intermediate stage. Uses the shell's pipe
 > convention (the input is the appended last arg; the earlier args are the targets). Verified in-guest:
