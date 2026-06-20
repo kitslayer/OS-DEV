@@ -25,6 +25,7 @@ const char *browser_title(browser_t *b);
 
 /* Navigate back to the previous page in history (no-op if none). */
 void        browser_back(browser_t *b);
+void        browser_forward(browser_t *b);
 
 /* Navigate to a given URL (pushes the current page onto the back stack). */
 void        browser_go(browser_t *b, const char *url);

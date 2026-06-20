@@ -101,7 +101,8 @@ struct browser {
     volatile int want;                                   /* load queued (worker busy) */
     char    cur[URL_MAX];                                /* currently shown URL */
     char    hist[16][URL_MAX]; int histn;                /* back stack          */
-    int     is_back;                                     /* this nav is a Back  */
+    char    fwd[16][URL_MAX];  int fwdn;                 /* forward stack (pages backed out of) */
+    int     is_back;                                     /* this nav is a Back/Forward (skip hist push + fwd clear) */
     int     redirects;                                   /* HTTP 3xx hop count  */
     int     listdepth;                                   /* nested <ul>/<ol> depth */
     char    listtype[8];                                 /* 'u' or 'o' per level */
@@ -2333,7 +2334,7 @@ static void build_home(browser_t *b) {
     HAPP("</dl><hr>"
          "<p>This browser renders <b>bold</b> and <i>italic</i> text. Type a host "
          "(or file:NAME) and Enter, or click a link. Keyboard: Tab/n next link, "
-         "p previous, Enter to follow, Backspace to go back, s to save, a to bookmark, "
+         "p previous, Enter to follow, Backspace or &lt; to go back, &gt; forward, s to save, a to bookmark, "
          "\\ to find text. Bookmarks live in a SITES file (one URL per line).</p></body></html>");
     #undef HAPP
     b->bodyoff = 0; b->bodylen = p;   /* start page body region (for click-time JS) */
@@ -2801,6 +2802,7 @@ static void browser_navigate(browser_t *b) {
     b->form_action[0] = 0;            /* and no carried-over form action */
     js_page_reset();                  /* drop the previous page's persistent JS globals */
     memset(b->det_open, 0xFF, sizeof(b->det_open));   /* <details> states unseeded until first render */
+    if (!b->is_back) b->fwdn = 0;     /* a fresh navigation invalidates the forward stack */
 
     if (streqs(b->url, "home") || !b->url[0]) {       /* built-in start page, no net */
         if (b->loading) { set_status(b, "busy, retry"); return; }
@@ -2880,6 +2882,7 @@ static void browser_navigate(browser_t *b) {
 
 void browser_back(browser_t *b) {
     if (!b || b->histn <= 0) return;
+    if (b->cur[0] && b->fwdn < 16) copy_url(b->fwd[b->fwdn++], b->cur);   /* leaving page -> forward stack */
     const char *dest = b->hist[b->histn - 1];  /* peek the destination */
 
     if (streqs(dest, "home") || !dest[0] || startsw(dest, "file:")) {
@@ -2904,6 +2907,37 @@ void browser_back(browser_t *b) {
     b->histn--;                                /* pop only after a successful claim */
     b->is_back = 0;
     js_page_reset();                           /* this branch skips browser_navigate; drop the previous page's JS env so a script-less backed-to page doesn't reuse it */
+    copy_url(b->cur, b->url);
+    b->ntok = 0; b->nlrec = 0; b->scroll = 0;
+    set_status(b, "loading...");
+}
+
+/* Forward: re-visit a page that Back left on the forward stack. Mirrors
+ * browser_back but pops `fwd` and pushes the current page onto `hist` (so Back
+ * returns here); the rest of the forward stack is kept for repeated Forwards. */
+void browser_forward(browser_t *b) {
+    if (!b || b->fwdn <= 0) return;
+    const char *dest = b->fwd[b->fwdn - 1];    /* peek the destination */
+    int pushed = (b->cur[0] && b->histn < 16); /* push the page we're leaving onto Back */
+    if (pushed) copy_url(b->hist[b->histn++], b->cur);
+
+    if (streqs(dest, "home") || !dest[0] || startsw(dest, "file:")) {
+        uint64_t f = irq_save();
+        if (g_busy || g_req) { irq_restore(f); if (pushed) b->histn--; return; }  /* fetch in flight: bail, undo */
+        b->loading = 0;
+        irq_restore(f);
+        b->fwdn--;
+        copy_url(b->url, dest);
+        b->is_back = 1;                        /* navigate must not re-push hist or clear fwd */
+        browser_navigate(b);
+        return;
+    }
+
+    copy_url(b->url, dest);
+    if (!claim_fetch(b)) { copy_url(b->url, b->cur); if (pushed) b->histn--; return; }  /* lost race: undo */
+    b->fwdn--;
+    b->is_back = 0;
+    js_page_reset();
     copy_url(b->cur, b->url);
     b->ntok = 0; b->nlrec = 0; b->scroll = 0;
     set_status(b, "loading...");
@@ -3712,6 +3746,8 @@ void browser_key(browser_t *b, int c) {
     case 'a':           browser_bookmark(b); break; /* add current URL to SITES */
     case '/': case 'e': b->editing = 1; b->edit_fresh = 1;    break;
     case '\\':          b->finding = 1; b->findq[0] = 0; b->find_tok = -1; set_status(b, "find: "); break;
+    case '<':            browser_back(b);    break; /* back    (also Backspace) */
+    case '>':            browser_forward(b); break; /* forward */
     case '\t': case 'n': select_link(b, +1); break; /* next link (keyboard nav) */
     case 'p':            select_link(b, -1); break; /* previous link */
     case '\n': case '\r':                            /* follow the selected link */

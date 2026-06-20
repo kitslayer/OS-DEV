@@ -1,5 +1,12 @@
 # What's next
 
+> **(M787) Browser — Forward navigation.** The browser had a Back stack but no Forward. Added a `fwd[16]`
+> stack: Back now pushes the page it leaves onto it, a new `browser_forward()` (mirrors `browser_back` —
+> local + network paths, `claim_fetch`, undo-on-bail) pops it and pushes the current page back onto the Back
+> stack, and a fresh navigation clears the forward stack (`if (!is_back) fwdn=0` in `browser_navigate`).
+> Bound to keys: `<` = back (also Backspace), `>` = forward; start-page help updated. `make check` 30/30.
+> Verified in-guest: home → file:list.htm → `<` returns to home → `>` returns to list.htm.
+
 > **(M786) Terminal — Ctrl-L clear screen (keep the prompt).** Completes the readline Ctrl set: Ctrl-L
 > clears the terminal but keeps the current prompt + partial input at the top (bash behaviour, better than
 > the `clear` command which drops the line). Implemented in `app_sys_read` by moving the input's grid rows
