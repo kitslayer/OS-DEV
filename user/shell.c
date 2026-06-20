@@ -40,6 +40,7 @@ static int nargs(const char *s) { int n = 0; while (*s) { while (*s == ' ') s++;
 static int run_andor(char *seg, char *cwd);
 static int run_input_line(char *line, char *cwd);
 static int run_for(char *line, char *cwd);
+static int run_case(char *line, char *cwd);
 static int run_while(char *line, char *cwd);
 static void source_file(const char *fn, char *cwd, int silent);   /* run shell commands from a file */
 
@@ -380,6 +381,7 @@ static int run_command(char *line, char *cwd) {
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        while COND; do CMDS; done   (loops while COND succeeds; Ctrl-C to stop)\n");
             print("        if COND; then CMDS; [elif COND; then CMDS;]... [else CMDS;] fi   (status picks the branch)\n");
+            print("        case WORD in PAT) CMDS;; PAT2|PAT3) CMDS;; *) CMDS;; esac   (glob-match dispatch)\n");
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
             print("        name() { cmds; }   (define a function; call `name args` with $1..$9 $# $@ bound)\n");
@@ -2705,6 +2707,50 @@ static int run_if(char *line, char *cwd) {
     return 0;
 }
 
+/* case WORD in PAT) CMDS;; PAT2|PAT3) CMDS;; *) CMDS;; esac
+ * Expands $vars in WORD, then runs the FIRST arm whose '|'-separated glob pattern
+ * (* ? literals, via glob_match) matches WORD. No fall-through; no match -> $? = 0. */
+static int run_case(char *line, char *cwd) {
+    char *p = line + 4; while (*p == ' ') p++;             /* skip "case" */
+    char *inkw = sh_substr(p, " in ");
+    if (!inkw) { print("case: missing 'in'\n"); g_status = 1; return 0; }
+    *inkw = 0;                                             /* WORD = p */
+    char wordbuf[256]; char *word = p;
+    if (expand_vars(p, wordbuf, sizeof wordbuf)) word = wordbuf;   /* $x -> its value */
+    while (*word == ' ') word++;
+    { int wl = (int)ustrlen(word); while (wl > 0 && word[wl-1] == ' ') word[--wl] = 0; }
+    char *body = inkw + 4; while (*body == ' ') body++;    /* arms, up to a trailing "esac" */
+    int blen = (int)ustrlen(body);
+    while (blen > 0 && body[blen-1] == ' ') body[--blen] = 0;
+    if (!(blen >= 4 && streq(body + blen - 4, "esac"))) { print("case: missing 'esac'\n"); g_status = 1; return 0; }
+    blen -= 4; while (blen > 0 && body[blen-1] == ' ') blen--;
+    body[blen] = 0;
+    g_status = 0;                                          /* no match -> success, like sh */
+    char *arm = body;
+    while (arm && *arm) {
+        char *sep = sh_substr(arm, ";;"); char *next = 0;  /* this arm ends at the next ";;" */
+        if (sep) { *sep = 0; next = sep + 2; }
+        while (*arm == ' ' || *arm == ';') arm++;          /* trim leading sep/space */
+        char *rp = arm; while (*rp && *rp != ')') rp++;    /* ')' splits patterns from commands */
+        if (*rp == ')') {
+            *rp = 0; char *cmds = rp + 1;
+            int hit = 0; char *pat = arm;                  /* patterns are '|'-separated globs */
+            while (pat && !hit) {
+                char *bar = pat; while (*bar && *bar != '|') bar++;
+                char psave = *bar; if (*bar) *bar = 0;
+                char *pp = pat; while (*pp == ' ') pp++;
+                { int pl = (int)ustrlen(pp); while (pl > 0 && pp[pl-1] == ' ') pp[--pl] = 0; }
+                if (glob_match(pp, word)) hit = 1;
+                if (psave) *bar = psave;
+                pat = psave ? bar + 1 : 0;
+            }
+            if (hit) { run_input_line(cmds, cwd); return 0; }   /* first match wins; stop */
+        }
+        arm = next;
+    }
+    return 0;
+}
+
 /* while COND; do BODY; done  (one line). Re-runs COND each pass and loops while
  * it succeeds ($? == 0). Bounded at 100000 iterations and interruptible with
  * Ctrl-C / Esc so a runaway loop can't hang the shell. */
@@ -2772,6 +2818,7 @@ static int run_input_line(char *line, char *cwd) {
             if (startswith(seg, "for "))        rc = run_for(seg, cwd);
             else if (startswith(seg, "while ")) rc = run_while(seg, cwd);
             else if (startswith(seg, "if "))    rc = run_if(seg, cwd);
+            else if (startswith(seg, "case "))  rc = run_case(seg, cwd);
             else                                rc = run_andor(seg, cwd);
             if (rc) doexit = 1;
         }

@@ -1,7 +1,7 @@
 /* shsplit.h — the shell's statement splitter: given a logical input line, find
  * the next top-level ';' that ends a statement. It skips ';' inside command/
  * arithmetic substitution ($( ) and $(( )) ) and inside control constructs
- * (if…fi / while…done / for…done), so a construct's own ';'s aren't break points
+ * (if…fi / while…done / for…done / case…esac), so a construct's own ';'s aren't break points
  * and constructs can follow a ';' or live in a function body. Pure (no syscalls),
  * so it's host-unit-tested by tests/shsplit; user/shell.c #includes it and
  * run_input_line walks segments with it. */
@@ -29,8 +29,8 @@ static int sh_next_sep(const char *seg) {
         if (*semi == ';') { if (cd == 0) break; semi++; atcmd = 1; continue; }
         if (*semi == ' ') { semi++; continue; }
         if (atcmd) {
-            if (word_at(semi, "if") || word_at(semi, "for") || word_at(semi, "while")) cd++;
-            else if ((word_at(semi, "fi") || word_at(semi, "done")) && cd > 0) cd--;
+            if (word_at(semi, "if") || word_at(semi, "for") || word_at(semi, "while") || word_at(semi, "case")) cd++;
+            else if ((word_at(semi, "fi") || word_at(semi, "done") || word_at(semi, "esac")) && cd > 0) cd--;
         }
         int nextcmd = word_at(semi, "then") || word_at(semi, "do") || word_at(semi, "else");
         while (*semi && *semi != ' ' && *semi != ';') semi++;   /* skip this whole token */

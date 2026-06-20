@@ -51,6 +51,10 @@ int main(void) {
     CHECK("if a; then if b; then c; fi; fi; d", "if a; then if b; then c; fi; fi| d");  /* nested if */
     CHECK("echo a; for i in 1 2; do echo $i; done; echo b",
           "echo a| for i in 1 2; do echo $i; done| echo b");
+    CHECK("case $x in a) echo A;; b) echo B;; esac",          /* case…esac: the ; and ;; arm seps are internal */
+          "case $x in a) echo A;; b) echo B;; esac");
+    CHECK("case $x in a) echo A;; esac; echo done",           /* …and a top-level ';' after esac still breaks */
+          "case $x in a) echo A;; esac| echo done");
 
     /* --- a keyword in ARGUMENT position must NOT open/close a construct --- */
     CHECK("echo fi; echo done", "echo fi| echo done");

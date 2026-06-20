@@ -1,5 +1,15 @@
 # What's next
 
+> **(M892) Shell — `case WORD in PAT) … ;; *) … ;; esac` (glob-match dispatch).** Completes the control-flow
+> set (if/elif/else, while, for, case). Two parts: (1) taught the `shsplit.h` statement splitter that
+> `case` opens / `esac` closes a construct (so the arms' `;`/`;;` stay internal) — pre-verified safe by
+> shsplittest (added case/esac cases; 400k fuzz still clean, no regression to the other constructs); (2) a
+> new `run_case` that `$`-expands WORD, strips `case`…`in`…`esac`, splits the arms on `;;`, splits each arm
+> at `)` into `|`-separated glob patterns + commands, and runs the FIRST arm whose pattern `glob_match`es
+> WORD (no fall-through; no match → `$?`=0). Verified in-guest: exact match, `f*` glob, `a|b|x` alternatives,
+> `*` catch-all, `$1` in a `color()` function (`color r`→red, `color z`→unknown). Help line added.
+> `make check` green (35 suites); shell.c warnings 11.
+
 > **(M891) Shell — `elif` (multi-way `if`).** Previously deferred for parsing risk, but done **safely and
 > additively**: in `run_if`, after isolating COND/then-body, if the body contains `; elif ` the else-branch
 > is rebuilt as a nested `if <rest>; fi` string and run via `run_input_line` (which re-dispatches it to
