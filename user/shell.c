@@ -1245,7 +1245,8 @@ static int run_command(char *line, char *cwd) {
                 if (ww) { print("  words "); itoa_simple(words, num); print(num); }
                 if (wcb) { print("  bytes "); itoa_simple((int)n, num); print(num); }
                 if (wL) { print("  longest "); itoa_simple(longest, num); print(num); }
-                print("  "); print(name); print("\n");
+                if (!streq(name, "PIPE.TMP")) { print("  "); print(name); }   /* don't echo the internal pipe scratch file's name (`cmd | wc`) */
+                print("\n");
                 tl += lines; tw += words; tb += n; nfiles++; if (longest > tL) tL = longest;
                 free(buf);
             }

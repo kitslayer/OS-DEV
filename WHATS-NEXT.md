@@ -1,5 +1,14 @@
 # What's next
 
+> **(M879) Shell — `wc` no longer leaks the internal `PIPE.TMP` name into piped output.** Found by testing
+> the new functions across other features: `greet | wc -l` printed `lines 2  PIPE.TMP`, exposing the pipe's
+> scratch file. The pipe model appends the temp file as the next stage's last arg, and `wc` (unlike
+> grep/head/tail/hexdump/strings, which only print a name for multiple files) *always* echoed its filename.
+> Fix: `wc` skips printing the name when it is the `PIPE.TMP` scratch file — keyed off the actual arg, so a
+> real `wc README.TXT` still shows the name and a function stage running `wc realfile` is unaffected.
+> Verified: `greet | wc -l` → `lines 2`, `greet | wc` → `lines 2 words 2 bytes 12`, `wc -l README.TXT` →
+> still names the file. `make check` green (33 suites); shell.c warnings 11.
+
 > **(M878) Shell — `return [N]` to exit a function early (guard clauses).** The last missing core piece of
 > the M873-M877 function system. A `g_returning` flag set by the `return` builtin (`return N` sets `$?` to
 > N; bare `return` keeps the last status) is honored by every body executor — the `run_input_line` segment
