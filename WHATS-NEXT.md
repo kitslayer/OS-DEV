@@ -1,5 +1,12 @@
 # What's next
 
+> **(M858) Shell — `tr` handles character sets and `a-z` ranges.** `tr` only did single-char replace, so the
+> canonical `tr a-z A-Z` (case conversion) silently did nothing useful. A new `tr_expand` helper expands a
+> SET token (literal chars + `a-z` ranges); `tr SET1 SET2 FILE` now maps each SET1 char to the SET2 char at
+> the same index (shorter SET2's last char repeats), and `tr -d SET` deletes a whole set. Verified in-guest
+> on "hello world": `tr a-z A-Z` → `HELLO WORLD`, `tr -d aeiou` → `hll wrld`, `tr a-y b-z` → `ifmmp xpsme`
+> (Caesar +1). `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M857) Demo — `DEMO.SH` showcases the new `$(())` ternary.** The baked scripting demo covered
 > variables/arithmetic/`$()`/aliases/for/if/while but predated M848's operator additions; added a line
 > `$((8 > 3 ? 8 : 3))` so the showcase reflects the now-bash-complete arithmetic. Doubles as an end-to-end

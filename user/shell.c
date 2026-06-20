@@ -79,6 +79,18 @@ static int sort_foldeq(const char *a, const char *b) {   /* case-insensitive str
     while (*a && gr_lc(*a) == gr_lc(*b)) { a++; b++; }
     return gr_lc(*a) == gr_lc(*b);
 }
+/* Expand a `tr` SET token (literal chars + a-z ranges) into out[]; advance *pp past it. */
+static int tr_expand(const char **pp, char *out, int max) {
+    const char *s = *pp; int o = 0;
+    while (*s && *s != ' ' && o < max) {
+        if (s[1] == '-' && s[2] && s[2] != ' ' && (unsigned char)s[2] >= (unsigned char)s[0]) {
+            for (int c = (unsigned char)s[0]; c <= (unsigned char)s[2] && o < max; c++) out[o++] = (char)c;
+            s += 3;
+        } else out[o++] = *s++;
+    }
+    *pp = s;
+    return o;
+}
 
 /* (the grep regex matcher gr_match() now lives in shgrep.h, #included above) */
 static int b64v(char c) {                 /* base64 digit -> value, or -1 */
@@ -525,12 +537,11 @@ static int run_command(char *line, char *cwd) {
                 }
                 free(buf);
             }
-        } else if (startswith(line, "tr ")) {              /* tr -d CHARS FILE (delete) | tr OLD NEW FILE (replace one char) */
+        } else if (startswith(line, "tr ")) {              /* tr -d SET FILE (delete) | tr SET1 SET2 FILE (translate); SETs take a-z ranges */
             const char *p = line + 3; while (*p == ' ') p++;
             if (p[0] == '-' && p[1] == 'd' && p[2] == ' ') {
                 p += 3; while (*p == ' ') p++;
-                char del[16]; int dn = 0;
-                while (*p && *p != ' ' && dn < 15) del[dn++] = *p++;
+                char del[128]; int dn = tr_expand(&p, del, 128);   /* SET to delete (chars + ranges) */
                 while (*p == ' ') p++;
                 long n; char *buf = slurp(p, &n);
                 if (!buf) { print("tr: no such file: "); print(p); print("\n"); }
@@ -544,11 +555,17 @@ static int run_command(char *line, char *cwd) {
                     buf[oi] = 0; print(buf); free(buf);
                 }
             } else {
-                char oldc = *p; if (oldc) p++; while (*p == ' ') p++;
-                char newc = *p; if (newc) p++; while (*p == ' ') p++;
+                char s1[128], s2[128];
+                int n1 = tr_expand(&p, s1, 128); while (*p == ' ') p++;   /* SET1 */
+                int n2 = tr_expand(&p, s2, 128); while (*p == ' ') p++;   /* SET2 (shorter set: last char repeats) */
                 long n; char *buf = slurp(p, &n);
-                if (!buf || !oldc || !newc) { print("usage: tr OLD NEW FILE  |  tr -d CHARS FILE\n"); if (buf) free(buf); }
-                else { buf[n] = 0; for (long i = 0; i < n; i++) if (buf[i] == oldc) buf[i] = newc; print(buf); free(buf); }
+                if (!buf || n1 == 0 || n2 == 0) { print("usage: tr SET1 SET2 FILE  |  tr -d SET FILE   (SETs: chars or a-z ranges)\n"); if (buf) free(buf); }
+                else {
+                    buf[n] = 0;
+                    for (long i = 0; i < n; i++)
+                        for (int j = 0; j < n1; j++) if (buf[i] == s1[j]) { buf[i] = s2[j < n2 ? j : n2 - 1]; break; }
+                    print(buf); free(buf);
+                }
             }
         } else if (startswith(line, "fold ")) {           /* fold [-w]N FILE : wrap each line at N columns (default 60) */
             const char *p = line + 5; while (*p == ' ') p++;
