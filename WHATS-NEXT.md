@@ -1,5 +1,10 @@
 # What's next
 
+> **(M870) Shell — `sleep N` (scripting delays).** Another standard command that was missing; `sleep N[.M]`
+> pauses N seconds (plus optional tenths) via the existing `sys_sleep`, capped at 300s so a typo can't hang
+> the terminal unbreakably. Verified in-guest: `echo before-sleep`, `sleep 1`, `echo after-sleep` all run in
+> order with the pause between. `make check` 32 suites; shell.c warnings unchanged (11).
+
 > **(M869) Shell — `printf` (a standard command that was entirely missing).** `printf FMT [args]` interprets
 > `\n`/`\t`/`\r`/`\\` escapes and `%s`/`%d`/`%c`/`%%` specifiers, and cycles the format over the remaining
 > args (bash semantics) — `printf '[%s]\n' a b c` → `[a]\n[b]\n[c]\n`. Self-contained new builtin (a guard

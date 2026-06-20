@@ -291,7 +291,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args>\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1437,6 +1437,12 @@ static int run_command(char *line, char *cwd) {
                 }
                 if (!(has_spec && ai < ac && ai > start_ai)) break;   /* cycle the format while args remain and a pass consumed one */
             }
+        } else if (startswith(line, "sleep ")) {          /* sleep N[.M] : pause N seconds (capped at 300s so a typo can't hang forever) */
+            const char *p = line + 6; while (*p == ' ') p++;
+            long ms = 0; while (*p >= '0' && *p <= '9') { ms = ms * 10 + (*p++ - '0'); if (ms > 300) ms = 300; }
+            ms *= 1000;
+            if (*p == '.' && p[1] >= '0' && p[1] <= '9') ms += (p[1] - '0') * 100;   /* .N tenths of a second */
+            if (ms > 0) sys_sleep((int)ms);
         } else if (startswith(line, "cowsay ")) {         /* the classic: a cow speaks your message */
             const char *msg = line + 7; int len = 0; while (msg[len]) len++;
             print(" "); for (int i = 0; i < len + 2; i++) print("_"); print("\n");
