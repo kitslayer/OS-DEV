@@ -1,5 +1,12 @@
 # What's next
 
+> **(M824) Editor — unsaved-changes indicator.** Standard editor cue that was missing: a `*` now appears
+> before the filename in the status (`EDIT *mod.txt`) whenever the buffer has been modified since the last
+> save, so you can tell at a glance whether you need to save. The `dirty` flag is set by every buffer
+> mutation (insert/backspace/delete and undo/redo) and cleared on a successful save (`^S`/`^W`) and on
+> open/load. `make check` 30/30. Verified in-guest: typing showed `EDIT *mod.txt`; after `^S` it became
+> `EDIT mod.txt`.
+
 > **(M823) Shell — `cd -` (previous directory).** Completes the `cd` conveniences (home from M822, now
 > previous). `cd -` swaps to the directory you were in before the last `cd` and prints it (bash behaviour);
 > every successful `cd` records where it came from in a per-shell `prevcwd`. `make check` 30/30. Verified

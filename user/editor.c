@@ -21,6 +21,7 @@ static char replq[40]; static int replacing;          /* Ctrl-R replace: replace
 static int helping;                                   /* Ctrl-H: key-list overlay shown */
 static int saving_as;                                 /* Ctrl-W: typing a new filename to save under */
 static int opening;                                   /* Ctrl-O: typing a filename to open in place */
+static int dirty;                                     /* buffer modified since the last save (shown as * in the status) */
 
 /* ---- undo (Ctrl-Z) -------------------------------------------------------
  * A log of single-character edits, newest last. Each op remembers the char,
@@ -75,6 +76,7 @@ static void undo(void) {
     }
     if (cur > dlen) cur = dlen;
     ulast_kind = -1; uexpect = -1;              /* the undo itself is a group boundary */
+    dirty = 1;
 }
 
 static void redo(void) {
@@ -96,6 +98,7 @@ static void redo(void) {
     }
     if (cur > dlen) cur = dlen;
     ulast_kind = -1; uexpect = -1;              /* redo is a group boundary too */
+    dirty = 1;
 }
 
 /* First offset >= start where findq occurs in doc, or -1. */
@@ -119,21 +122,21 @@ static void itoa_i(int v, char *o) {
 
 static void insert(char c) {
     if (readonly || dlen >= MAXDOC - 1) return;
-    sel_anchor = -1;
+    sel_anchor = -1; dirty = 1;
     undo_record(cur, c, 0);
     for (int i = dlen; i > cur; i--) doc[i] = doc[i-1];
     doc[cur++] = c; dlen++;
 }
 static void backspace(void) {
     if (readonly || cur == 0) return;
-    sel_anchor = -1;
+    sel_anchor = -1; dirty = 1;
     undo_record(cur - 1, doc[cur - 1], 1);
     for (int i = cur - 1; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--; cur--;
 }
 static void del_fwd(void) {                 /* Delete key: remove the char at the cursor */
     if (readonly || cur >= dlen) return;
-    sel_anchor = -1;
+    sel_anchor = -1; dirty = 1;
     undo_record(cur, doc[cur], 2);
     for (int i = cur; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--;
@@ -246,7 +249,8 @@ static void render(const char *msg) {
     int total = 1; for (int i = 0; i < dlen; i++) if (doc[i] == '\n') total++;   /* line count */
     char st[96]; int p = 0;
     const char *a = "EDIT "; while (*a) st[p++] = *a++;
-    for (int i = 0; fname[i] && p < 30; i++) st[p++] = fname[i];
+    if (dirty) st[p++] = '*';                  /* unsaved-changes indicator */
+    for (int i = 0; fname[i] && p < 31; i++) st[p++] = fname[i];
     a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC/^S=save ^Q=quit ^H=help  "; while (*a) st[p++] = *a++;
     char nb[12]; itoa_i(dlen, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];
     a = "b  L"; while (*a) st[p++] = *a++;
@@ -342,7 +346,7 @@ static void load_file(void) {
     readonly = (n >= MAXDOC - 1);    /* read filled the buffer: the file is larger -> view only */
     cur = dlen;
     un = umax = 0; ulast_kind = -1; uexpect = -1;   /* undo history is per-file */
-    sel_anchor = -1;
+    sel_anchor = -1; dirty = 0;
 }
 
 int main(void) {
@@ -422,7 +426,7 @@ int main(void) {
                 if (findq[0]) {
                     int i = 0; for (; findq[i] && i < (int)sizeof(fname)-1; i++) fname[i] = findq[i]; fname[i] = 0;
                     if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
-                    else render("\n[saved]");
+                    else { render("\n[saved]"); dirty = 0; }
                     sys_sleep(400); render(0);
                 } else render(0);
             }
@@ -457,7 +461,7 @@ int main(void) {
         else if (k == 0x93) {                       /* Ctrl-S: save, keep editing */
             if (readonly) render("\n[not saved: file too large]");
             else if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
-            else render("\n[saved]");
+            else { render("\n[saved]"); dirty = 0; }
             sys_sleep(300); render(0);
         }
         else if (k == 0x91) {                       /* Ctrl-Q: quit WITHOUT saving */
