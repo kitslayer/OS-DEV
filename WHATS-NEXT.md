@@ -1,5 +1,13 @@
 # What's next
 
+> **(M894) Demo — `DEMO.SH` showcases the complete control-flow + expansion set.** Rounded out the bundled
+> `source DEMO.SH` to demonstrate this session's later additions: a `grade()` function using `elif`
+> (`echo elif: 85 grades $(grade 85)` → B), a `case red in red) … ;; *) … esac` (→ matched red), and
+> `${MISSING:-a-fallback}` parameter defaulting — alongside the existing functions/`$#`/`$@`/`return`/bare-
+> assignment/arithmetic/`$()`/alias/for/if/while lines. So the demo now exercises the whole shell in one
+> runnable script. Verified in-guest: `source DEMO.SH` runs all of it cleanly end-to-end. Disk regenerated;
+> `make check` green (35 suites). This also serves as the end-to-end regression check for M891/M892/M893.
+
 > **(M893) Shell — `${VAR:-default}` / `${VAR:+alt}` parameter expansion.** The common sh defaulting forms,
 > on top of the existing `${NAME}`. In `expand_vars`'s `${…}` branch: after the name, if `:-`/`:+` follows,
 > read the literal word up to `}` — `:-` substitutes the word when VAR is unset/empty (else the value),
