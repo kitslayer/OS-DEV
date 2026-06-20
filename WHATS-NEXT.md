@@ -1,5 +1,13 @@
 # What's next
 
+> **(M811) Shell — `while` loops.** Completes shell control flow (if / for / while). `while COND; do CMDS;
+> done` re-runs COND each pass (so `$var`s re-expand) and loops while it succeeds (`$? == 0`), pairing
+> naturally with the M810 `test` builtin for counting loops. To stay safe it's bounded at 100000 iterations
+> and polls `sys_pollkey` each pass so Ctrl-C / Esc can stop a runaway loop — the shell can't hang. Same
+> single-line parse + stack-local buffers as `for`, routed through `run_input_line` so it nests and composes.
+> `make check` 30/30. Verified in-guest: `set i=0; while test $i -lt 3; do echo n=$i; set i=$((i+1)); done` →
+> n=0/n=1/n=2; `while false; do echo NEVER; done` printed nothing and the shell continued.
+
 > **(M810) Shell — `test` / `[ ]` builtin.** Gives `if` (and the upcoming `while`) real conditions instead of
 > just command exit status. `test EXPR` / `[ EXPR ]` sets `$?` (0 = true) and supports numeric comparisons
 > (`-eq -ne -lt -gt -le -ge`), string `=`/`!=`, non-empty (`STR`) / `-z` / `-n`, file existence (`-e`/`-f`,

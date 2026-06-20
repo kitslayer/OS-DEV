@@ -33,6 +33,7 @@ static int source_depth;   /* recursion guard for `source` (scripts sourcing scr
 static int run_andor(char *seg, char *cwd);
 static int run_input_line(char *line, char *cwd);
 static int run_for(char *line, char *cwd);
+static int run_while(char *line, char *cwd);
 static void source_file(const char *fn, char *cwd, int silent);   /* run shell commands from a file */
 
 /* Read an entire file into a malloc'd, NUL-terminated buffer (caller free()s).
@@ -244,6 +245,7 @@ static int run_command(char *line, char *cwd) {
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
             print("        .SHRC in / is auto-run at shell start (put aliases/set/etc. there)\n");
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
+            print("        while COND; do CMDS; done   (loops while COND succeeds; Ctrl-C to stop)\n");
             print("        if COND; then CMDS; [else CMDS;] fi   (COND's exit status picks the branch)\n");
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
             print("        alias name=value   unalias name   (shortcuts, expanded on the first word)\n");
@@ -2167,12 +2169,47 @@ static int run_if(char *line, char *cwd) {
     return 0;
 }
 
-/* Run one logical input line: a `for` loop or `if`, else a ';'-separated list
- * of && / || pipelines. Returns 1 if it ran the `exit` builtin. */
+/* while COND; do BODY; done  (one line). Re-runs COND each pass and loops while
+ * it succeeds ($? == 0). Bounded at 100000 iterations and interruptible with
+ * Ctrl-C / Esc so a runaway loop can't hang the shell. */
+static int run_while(char *line, char *cwd) {
+    char *p = line + 5; while (*p == ' ') p++;             /* skip "while" */
+    char *cond = p, *semi = p; while (*semi && *semi != ';') semi++;
+    if (*semi != ';') { print("while: missing ';' before do\n"); g_status = 1; return 0; }
+    *semi = 0;
+    char *q = semi + 1; while (*q == ' ') q++;
+    if (!(q[0]=='d' && q[1]=='o' && (q[2]==' '||q[2]==0))) { print("while: missing 'do'\n"); g_status = 1; return 0; }
+    q += 2; while (*q == ' ') q++;
+    char *body = q;
+    int blen = (int)ustrlen(body);
+    while (blen > 0 && body[blen-1]==' ') body[--blen]=0;
+    if (!(blen >= 4 && streq(body+blen-4, "done"))) { print("while: missing 'done'\n"); g_status = 1; return 0; }
+    blen -= 4; while (blen>0 && body[blen-1]==' ') blen--;
+    if (blen>0 && body[blen-1]==';') blen--;
+    while (blen>0 && body[blen-1]==' ') blen--;
+    body[blen] = 0;
+    int doexit = 0, iters = 0;
+    char condbuf[1024], bodybuf[1024];
+    while (!doexit) {
+        if (iters >= 100000) { print("\nwhile: stopped at 100000 iterations\n"); break; }
+        int k = sys_pollkey(); if (k == 0x83 || k == 27) { print("\n^C\n"); break; }   /* Ctrl-C / Esc */
+        int ci = 0; for (const char *c = cond; *c && ci < 1023; c++) condbuf[ci++] = *c; condbuf[ci] = 0;
+        run_input_line(condbuf, cwd);
+        if (g_status != 0) break;                          /* COND false -> stop */
+        int bi = 0; for (const char *c = body; *c && bi < 1023; c++) bodybuf[bi++] = *c; bodybuf[bi] = 0;
+        if (run_input_line(bodybuf, cwd)) doexit = 1;
+        iters++;
+    }
+    return doexit;
+}
+
+/* Run one logical input line: a `for`/`while` loop or `if`, else a ';'-separated
+ * list of && / || pipelines. Returns 1 if it ran the `exit` builtin. */
 static int run_input_line(char *line, char *cwd) {
     char *t = line; while (*t == ' ') t++;
-    if (startswith(t, "for ")) return run_for(t, cwd);
-    if (startswith(t, "if "))  return run_if(t, cwd);
+    if (startswith(t, "for "))   return run_for(t, cwd);
+    if (startswith(t, "while ")) return run_while(t, cwd);
+    if (startswith(t, "if "))    return run_if(t, cwd);
     char *seg = line; int doexit = 0;
     while (seg && !doexit) {
         char *semi = seg; while (*semi && *semi != ';') semi++;
