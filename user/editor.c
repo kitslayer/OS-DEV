@@ -18,6 +18,7 @@ static int  sel_anchor = -1;      /* selection mark (Ctrl-B); -1 = none. Selecti
 static char fname[40];
 static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
 static char replq[40]; static int replacing;          /* Ctrl-R replace: replacement text + mode (1=typing search, 2=typing replacement) */
+static int helping;                                   /* Ctrl-H: key-list overlay shown */
 
 /* ---- undo (Ctrl-Z) -------------------------------------------------------
  * A log of single-character edits, newest last. Each op remembers the char,
@@ -244,7 +245,7 @@ static void render(const char *msg) {
     char st[96]; int p = 0;
     const char *a = "EDIT "; while (*a) st[p++] = *a++;
     for (int i = 0; fname[i] && p < 30; i++) st[p++] = fname[i];
-    a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC/^S=save ^Q=quit ^Z=undo  "; while (*a) st[p++] = *a++;
+    a = readonly ? "  ESC=quit [RO: file too big]  " : "  ESC/^S=save ^Q=quit ^H=help  "; while (*a) st[p++] = *a++;
     char nb[12]; itoa_i(dlen, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];
     a = "b  L"; while (*a) st[p++] = *a++;
     itoa_i(ln, nb); for (int i = 0; nb[i]; i++) st[p++] = nb[i];   /* current line */
@@ -310,6 +311,19 @@ static int replace_all(void) {
     return count;
 }
 
+/* Full-screen key reference (Ctrl-H toggles it; any key dismisses). */
+static void render_help(void) {
+    sys_clear();
+    sys_setcolor(4); print("EDITOR KEYS  (any key returns)\n"); sys_setcolor(0);
+    print("arrows Home End PgUp PgDn   move\n");
+    print("^S save    ^Q quit    ESC save+quit\n");
+    print("^Z undo    ^Y redo\n");
+    print("^F find    ^R replace  ^G go to line\n");
+    print("^B set mark, then move to select\n");
+    print("^C copy    ^X cut      ^V paste\n");
+    print("Tab = spaces   Del = delete forward\n");
+}
+
 /* Show the doc with a "<label><query>_" prompt at the bottom (Ctrl-F/G/R). */
 static void render_prompt(const char *label, const char *query) {
     char m[80]; int p = 0; m[p++] = '\n';
@@ -340,6 +354,7 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
+        if (helping) { helping = 0; render(0); continue; }   /* any key dismisses the help overlay */
         if (finding) {                              /* Ctrl-F find mode: edit the query, Enter searches */
             int fl = 0; while (findq[fl]) fl++;
             if (k == '\n' || k == '\r') {
@@ -409,6 +424,7 @@ int main(void) {
         }
         else if (k == 0x86) { finding = 1; render_prompt("find: ", findq); }    /* Ctrl-F: find (keeps the last query) */
         else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: ", findq); }  /* Ctrl-G: go to line */
+        else if (k == 0x88) { helping = 1; render_help(); continue; }   /* Ctrl-H: key-list overlay (skip the trailing render) */
         else if (k == 0x92) { replacing = 1; findq[0] = 0; render_prompt("replace: ", findq); } /* Ctrl-R: find & replace */
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
         else if (k == 0x99) redo();                       /* Ctrl-Y: redo */

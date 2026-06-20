@@ -1,5 +1,13 @@
 # What's next
 
+> **(M813) Editor — Ctrl-H key-reference overlay.** The editor accumulated a rich key set (undo/redo,
+> find/replace, go-to-line, mark+selection, copy/cut/paste) that the one-line status couldn't advertise. Ctrl-H
+> now shows a full-screen key reference; any key returns to editing (and isn't inserted, since the dismiss
+> path `continue`s before the edit dispatch). The status hint trades `^Z=undo` for `^H=help` (same width, and
+> help lists `^Z` anyway) so the whole feature set is discoverable. `make check` 30/30. Verified in-guest:
+> opened README.TXT from Files, Ctrl-H showed the key list, and pressing a key returned to the unchanged
+> document (90b, no stray character inserted).
+
 > **(M812) Shell — command substitution `$(cmd)`.** The capstone shell feature: `$(cmd)` runs a command and
 > splices its output into the line (trailing newlines stripped, internal newlines → spaces for word
 > splitting). Implemented as `cmdsub_expand` (reusing the existing `cap_begin`/`cap_end` output capture +
