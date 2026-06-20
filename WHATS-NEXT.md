@@ -1,5 +1,15 @@
 # What's next
 
+> **(M848) Shell — `$(())` gains relational/logical/ternary operators (and a command-sub split bug fix).**
+> The arithmetic evaluator (`user/shmath.h`) stopped at bitwise `|`; it now matches bash's full set —
+> `< <= > >=`, `== !=`, `&&`, `||`, the `?:` ternary, and unary `!` — so scripts can write `max=$((a>b?a:b))`.
+> Adding `&&`/`||` exposed a real bug: `run_andor` (and `run_input_line`'s `;` split) scanned for the
+> command operators without skipping `$( … )`, so `$((a && b))` *and even* `$(echo a && echo b)` command
+> substitution were split mid-expression. Both splitters now track `$(`-paren depth and ignore operators
+> inside a substitution. `shmath_test.c` gained ~30 cases for the new operators and fuzzes them too;
+> verified in-guest: `$((10==10 && 3<5))`→1, `$(echo a && echo b)`→`a b`, `$((2>1?100:0))`→100. `make check`
+> 32 suites.
+
 > **(M847) Tests — extract the Tab-completion core and unit-test it.** The trickiest part of M842–845 — the
 > case-insensitive longest-common-prefix scan over the candidate names — was lifted verbatim from the kernel
 > line editor into `kernel/complete.h` (`complete_match` + `complete_scan`), mirroring the shgrep/shmath/

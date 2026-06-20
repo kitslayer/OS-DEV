@@ -68,10 +68,43 @@ int main(void) {
     CHECK("2**0", 1);
     CHECK("10 % 3", 1);
 
+    /* --- relational / equality / logical / ternary / unary ! (bash $(())) --- */
+    CHECK("3 < 5", 1);
+    CHECK("5 < 3", 0);
+    CHECK("5 > 3", 1);
+    CHECK("3 <= 3", 1);
+    CHECK("3 >= 4", 0);
+    CHECK("7 == 7", 1);
+    CHECK("7 != 7", 0);
+    CHECK("3 != 4", 1);
+    CHECK("2+2 == 4", 1);           /* + before == : (2+2)==4 */
+    CHECK("1 < 2 == 1", 1);         /* < before == : (1<2)==1 */
+    CHECK("1 << 3 == 8", 1);        /* << before == (relational/equality sit below shift) */
+    CHECK("1 && 1", 1);             /* logical AND -> 1/0 */
+    CHECK("1 && 0", 0);
+    CHECK("5 && 3", 1);             /* nonzero operands -> 1 */
+    CHECK("0 || 0", 0);             /* logical OR -> 1/0 */
+    CHECK("0 || 7", 1);
+    CHECK("1 || 1/0", 1);           /* /0 -> 0, so 1 || 0 = 1 (no trap) */
+    CHECK("1 == 1 && 2 == 2", 1);   /* == before && */
+    CHECK("0 && 1 || 1", 1);        /* && before || : (0&&1)||1 = 1 */
+    CHECK("!0", 1);                 /* logical NOT */
+    CHECK("!5", 0);
+    CHECK("!!5", 1);
+    CHECK("!0 && 1", 1);            /* unary ! binds tighter than && */
+    CHECK("5 > 3 ? 10 : 20", 10);   /* ternary true */
+    CHECK("5 < 3 ? 10 : 20", 20);   /* ternary false */
+    CHECK("a > b ? a : b", 3);      /* a=2,b=3 -> max = 3 */
+    CHECK("a < b ? b - a : a - b", 1);  /* |a-b| via ternary */
+    CHECK("1 ? 2 ? 3 : 4 : 5", 3);  /* nested ternary in the then-branch */
+    CHECK("0 ? 1 : 1 ? 2 : 3", 2);  /* right-associative else-branch */
+    CHECK("(2>1) + (3>2)", 2);      /* relations are 1/0, so addable */
+    CHECK("1 < 2 && 2 < 3", 1);
+
     /* --- fuzz: random short expressions must never crash, trap (ASan/UBSan),
      * or hang. sh_eval consumes a bounded string left-to-right and always
      * terminates, so a violation here is a real bug. --- */
-    const char *cs = "0123456789+-*/%()xab $\t<>&^|~";
+    const char *cs = "0123456789+-*/%()xab $\t<>=!?:&^|~";
     unsigned seed = 0x9e3779b9u;
     for (int it = 0; it < 300000; it++) {
         char buf[33];

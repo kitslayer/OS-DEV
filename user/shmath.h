@@ -1,7 +1,8 @@
 /* shmath.h — the shell's integer arithmetic evaluator for $((expr)): recursive
- * descent with bash's $(()) operator set and precedence — unary - + ~, **
- * (power), * / %, + -, << >> (shift), & (and), ^ (xor), | (or) — plus
- * parentheses, decimal/0x literals, and variable names (bare or $-prefixed).
+ * descent with bash's $(()) operator set and precedence — unary - + ~ !, **
+ * (power), * / %, + -, << >> (shift), < <= > >= (relational), == != (equality),
+ * & (and), ^ (xor), | (or), && (logical and), || (logical or), ?: (ternary) —
+ * plus parentheses, decimal/0x literals, and variable names (bare or $-prefixed).
  * Integer-only (no FPU), like the rest of the OS; division/modulo by zero and
  * out-of-range shifts yield 0, ** is loop-capped. Pure except for sh_var()
  * (variable lookup), which the includer provides — so it is host-unit-tested by
@@ -35,13 +36,14 @@ static long sh_str2long(const char *s) {
     return (long)(neg ? 0UL - v : v);
 }
 static void sh_askip(const char **p) { while (**p == ' ' || **p == '\t') (*p)++; }
-static long sh_or(const char **p);                      /* lowest-precedence level (the entry) */
+static long sh_ternary(const char **p);                 /* lowest-precedence level (the entry) */
 static long sh_factor(const char **p) {
     sh_askip(p);
     if (**p == '-') { (*p)++; return (long)(0UL - (unsigned long)sh_factor(p)); }   /* defined for LONG_MIN */
     if (**p == '+') { (*p)++; return  sh_factor(p); }
     if (**p == '~') { (*p)++; return ~sh_factor(p); }    /* bitwise NOT */
-    if (**p == '(') { (*p)++; long v = sh_or(p); sh_askip(p); if (**p == ')') (*p)++; return v; }
+    if (**p == '!' && (*p)[1] != '=') { (*p)++; return !sh_factor(p); }   /* logical NOT -> 1/0 (not !=) */
+    if (**p == '(') { (*p)++; long v = sh_ternary(p); sh_askip(p); if (**p == ')') (*p)++; return v; }
     if (**p == '$') (*p)++;                              /* allow $X inside arithmetic */
     if (**p >= '0' && **p <= '9') { const char *s = *p; unsigned long v = 0;   /* unsigned: overflow wraps */
         if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
@@ -95,9 +97,27 @@ static long sh_shift(const char **p) {                  /* << >> */
         else break; }
     return v;
 }
-static long sh_band(const char **p) {                   /* bitwise & (not &&) */
+static long sh_relational(const char **p) {             /* < <= > >= (sits just above the shift level) */
     long v = sh_shift(p);
-    for (;;) { sh_askip(p); if (**p == '&' && (*p)[1] != '&') { (*p)++; v &= sh_shift(p); } else break; }
+    for (;;) { sh_askip(p);
+        if      ((*p)[0] == '<' && (*p)[1] == '=') { (*p) += 2; v = (v <= sh_shift(p)); }
+        else if ((*p)[0] == '>' && (*p)[1] == '=') { (*p) += 2; v = (v >= sh_shift(p)); }
+        else if ((*p)[0] == '<' && (*p)[1] != '<') { (*p)++;    v = (v <  sh_shift(p)); }   /* '<' but not '<<' */
+        else if ((*p)[0] == '>' && (*p)[1] != '>') { (*p)++;    v = (v >  sh_shift(p)); }   /* '>' but not '>>' */
+        else break; }
+    return v;
+}
+static long sh_equality(const char **p) {               /* == != */
+    long v = sh_relational(p);
+    for (;;) { sh_askip(p);
+        if      ((*p)[0] == '=' && (*p)[1] == '=') { (*p) += 2; v = (v == sh_relational(p)); }
+        else if ((*p)[0] == '!' && (*p)[1] == '=') { (*p) += 2; v = (v != sh_relational(p)); }
+        else break; }
+    return v;
+}
+static long sh_band(const char **p) {                   /* bitwise & (not &&) */
+    long v = sh_equality(p);
+    for (;;) { sh_askip(p); if (**p == '&' && (*p)[1] != '&') { (*p)++; v &= sh_equality(p); } else break; }
     return v;
 }
 static long sh_bxor(const char **p) {                   /* bitwise ^ */
@@ -110,9 +130,33 @@ static long sh_or(const char **p) {                     /* bitwise | (not ||) */
     for (;;) { sh_askip(p); if (**p == '|' && (*p)[1] != '|') { (*p)++; v |= sh_bxor(p); } else break; }
     return v;
 }
+static long sh_land(const char **p) {                   /* logical && -> 1/0 */
+    long v = sh_or(p);
+    for (;;) { sh_askip(p);
+        if ((*p)[0] == '&' && (*p)[1] == '&') { (*p) += 2; long r = sh_or(p); v = (v != 0 && r != 0); }
+        else break; }
+    return v;
+}
+static long sh_lor(const char **p) {                    /* logical || -> 1/0 */
+    long v = sh_land(p);
+    for (;;) { sh_askip(p);
+        if ((*p)[0] == '|' && (*p)[1] == '|') { (*p) += 2; long r = sh_land(p); v = (v != 0 || r != 0); }
+        else break; }
+    return v;
+}
+static long sh_ternary(const char **p) {                /* cond ? then : else (right-associative) */
+    long c = sh_lor(p); sh_askip(p);
+    if (**p == '?') { (*p)++;
+        long a = sh_ternary(p); sh_askip(p);            /* then-branch (stops at ':') */
+        if (**p == ':') (*p)++;
+        long b = sh_ternary(p);                         /* else-branch */
+        return c ? a : b; }
+    return c;
+}
 /* Public entry: evaluate the expression at *p, advancing *p past what it ate.
- * Precedence (high->low): unary - + ~, ** , * / %, + -, << >>, &, ^, | — bash's
- * $(()) order (note: ^ is XOR here, like bash; the calc app uses ^ for power). */
-static long sh_eval(const char **p) { return sh_or(p); }
+ * Precedence (high->low): unary - + ~ !, ** , * / %, + -, << >>, < <= > >=,
+ * == !=, &, ^, |, &&, ||, ?: — bash's $(()) order (note: ^ is XOR here, like
+ * bash; the calc app uses ^ for power, via its own evaluator). */
+static long sh_eval(const char **p) { return sh_ternary(p); }
 
 #endif /* SHMATH_H */

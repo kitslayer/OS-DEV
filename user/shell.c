@@ -2241,8 +2241,10 @@ static int run_andor(char *seg, char *cwd) {
     char *p = seg;
     int run_this = 1, exitflag = 0;
     while (p) {
-        char *op = p; int oplen = 0;
+        char *op = p; int oplen = 0, pd = 0;
         while (*op) {
+            if (op[0] == '$' && op[1] == '(') { pd++; op += 2; continue; }   /* enter $( or $(( : its &&/|| are arithmetic/command-sub, not ours */
+            if (pd > 0) { if (*op == '(') pd++; else if (*op == ')') pd--; op++; continue; }
             if ((op[0] == '&' && op[1] == '&') || (op[0] == '|' && op[1] == '|')) { oplen = 2; break; }
             op++;
         }
@@ -2380,7 +2382,13 @@ static int run_input_line(char *line, char *cwd) {
     if (startswith(t, "if "))    return run_if(t, cwd);
     char *seg = line; int doexit = 0;
     while (seg && !doexit) {
-        char *semi = seg; while (*semi && *semi != ';') semi++;
+        char *semi = seg; int pd = 0;                  /* find the next top-level ';', skipping $( ... ) / $(( ... )) */
+        while (*semi) {
+            if (semi[0] == '$' && semi[1] == '(') { pd++; semi += 2; continue; }
+            if (pd > 0) { if (*semi == '(') pd++; else if (*semi == ')') pd--; semi++; continue; }
+            if (*semi == ';') break;
+            semi++;
+        }
         int more = (*semi == ';'); if (more) *semi = 0;
         while (*seg == ' ') seg++;
         if (*seg && run_andor(seg, cwd)) doexit = 1;
