@@ -14,6 +14,7 @@
 
 static char doc[MAXDOC];
 static int  dlen, cur, readonly;  /* readonly: file exceeded the buffer — view only, never save (would truncate it) */
+static int  sel_anchor = -1;      /* selection mark (Ctrl-B); -1 = none. Selection spans [min, max](anchor,cur) */
 static char fname[40];
 static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
 
@@ -114,18 +115,21 @@ static void itoa_i(int v, char *o) {
 
 static void insert(char c) {
     if (readonly || dlen >= MAXDOC - 1) return;
+    sel_anchor = -1;
     undo_record(cur, c, 0);
     for (int i = dlen; i > cur; i--) doc[i] = doc[i-1];
     doc[cur++] = c; dlen++;
 }
 static void backspace(void) {
     if (readonly || cur == 0) return;
+    sel_anchor = -1;
     undo_record(cur - 1, doc[cur - 1], 1);
     for (int i = cur - 1; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--; cur--;
 }
 static void del_fwd(void) {                 /* Delete key: remove the char at the cursor */
     if (readonly || cur >= dlen) return;
+    sel_anchor = -1;
     undo_record(cur, doc[cur], 2);
     for (int i = cur; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--;
@@ -159,6 +163,35 @@ static void paste_clip(void) {
     int n = sys_clip_get(buf, sizeof buf);
     for (int i = 0; i < n; i++) insert(buf[i]);
     undo_break();
+}
+
+/* If a selection is active (Ctrl-B mark + cursor moved), fill its byte range
+ * [s0,s1) and return 1; else return 0. */
+static int sel_bounds(int *s0, int *s1) {
+    if (sel_anchor < 0) return 0;
+    int a = sel_anchor, b = cur;
+    if (a > b) { int t = a; a = b; b = t; }
+    if (a < 0) a = 0;
+    if (b > dlen) b = dlen;
+    *s0 = a; *s1 = b;
+    return b > a;
+}
+/* Ctrl-C: copy the selection if any, else the current line. */
+static void do_copy(void) {
+    int s0, s1;
+    if (sel_bounds(&s0, &s1)) { sys_clip_set(doc + s0, s1 - s0); sel_anchor = -1; }
+    else copy_line();
+}
+/* Ctrl-X: cut the selection if any, else the current line (undoable). */
+static void do_cut(void) {
+    if (readonly) return;
+    int s0, s1;
+    if (sel_bounds(&s0, &s1)) {
+        sys_clip_set(doc + s0, s1 - s0);
+        cur = s0;
+        for (int i = 0; i < s1 - s0; i++) del_fwd();   /* del_fwd also clears the mark */
+        undo_break();
+    } else cut_line();
 }
 
 /* up/down move to the same column in the adjacent line (split on '\n'). */
@@ -227,9 +260,12 @@ static void render(const char *msg) {
     int crow = row_of(cur);
     int start = crow - EDVIS / 2; if (start < 0) start = 0;
     int off = row_offset(start);
+    int s0 = 0, s1 = 0, sel = sel_bounds(&s0, &s1);   /* active selection byte range, if any */
     static char out[2048];                 /* off the stack; only ever holds the EDVIS visible rows */
-    int o = 0, row = 0, col = 0;
+    int o = 0, row = 0, col = 0, os0 = -1, os1 = -1;
     for (int i = off; i <= dlen && row < EDVIS && o < (int)sizeof(out) - 4; i++) {
+        if (sel && i == s0) os0 = o;       /* record where the selection starts/ends in the output... */
+        if (sel && i == s1) os1 = o;       /* ...before the cursor mark so the caret isn't highlighted */
         if (i == cur) out[o++] = '|';
         if (i < dlen) {
             char ch = doc[i];
@@ -239,7 +275,17 @@ static void render(const char *msg) {
         }
     }
     out[o] = 0;
-    print(out);
+    if (sel) {                             /* selection may run off the top/bottom of the window */
+        if (os0 < 0 && os1 >= 0) os0 = 0;
+        if (os0 >= 0 && os1 < 0) os1 = o;
+    }
+    if (sel && os0 >= 0 && os1 > os0) {    /* print before | selection (yellow) | after */
+        char c = out[os0]; out[os0] = 0; print(out); out[os0] = c;
+        sys_setcolor(3);
+        c = out[os1]; out[os1] = 0; print(out + os0); out[os1] = c;
+        sys_setcolor(0);
+        print(out + os1);
+    } else print(out);
     if (msg) print(msg);
 }
 
@@ -318,8 +364,9 @@ int main(void) {
         else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: "); }  /* Ctrl-G: go to line */
         else if (k == 0x9a) undo();                       /* Ctrl-Z: undo last edit group */
         else if (k == 0x99) redo();                       /* Ctrl-Y: redo */
-        else if (k == 0x83) copy_line();                  /* Ctrl-C: copy current line */
-        else if (k == 0x98) cut_line();                   /* Ctrl-X: cut current line  */
+        else if (k == 0x82) sel_anchor = (sel_anchor < 0) ? cur : -1;  /* Ctrl-B: set/clear selection mark */
+        else if (k == 0x83) do_copy();                    /* Ctrl-C: copy selection (or line) */
+        else if (k == 0x98) do_cut();                     /* Ctrl-X: cut selection (or line)  */
         else if (k == 0x96) paste_clip();                 /* Ctrl-V: paste clipboard   */
         else if (k == '\n' || k == '\r') { insert('\n'); undo_break(); }   /* newline ends an undo group */
         else if (k == 8 || k == 127)     backspace();

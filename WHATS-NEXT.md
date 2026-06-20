@@ -1,5 +1,15 @@
 # What's next
 
+> **(M802) Editor — visual selection (Ctrl-B mark + highlight).** Builds on M800's line clipboard with true
+> range selection. Ctrl-B sets/clears a mark at the cursor; moving the caret then defines a selection
+> `[min,max](anchor,cur)`, drawn in yellow by splitting the visible-text print into before/selection/after
+> segments (the caret is excluded from the highlight, and a selection running off the top/bottom of the
+> window is clamped to the visible region). Ctrl-C/Ctrl-X now copy/cut the selection when one is active
+> (falling back to the whole-line behaviour otherwise); cut reuses `del_fwd` so it's undoable. Any edit
+> (insert/backspace/delete) clears the mark. `make check` 30/30. Verified in-guest: `SELECT THIS PART` with a
+> 6-char mark shows `SELECT` highlighted yellow; copying `HELLO` from `HELLO WORLD` and pasting gave
+> `HELLO WORLDHELLO`; and cutting `AAA` from `AAABBB` left `BBB`.
+
 > **(M801) Shell — `clip` command (clipboard ↔ shell).** With the clipboard syscalls from M800 in place, the
 > shell can now bridge the GUI clipboard and the command line. `clip` with no argument prints the system
 > clipboard to stdout (so a URL or text selected in the browser, a word from the terminal, or a line from the
