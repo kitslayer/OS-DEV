@@ -23,6 +23,7 @@ long sys_resolve(const char *host, void *buf, unsigned long len);
 long sys_http(const char *host, const char *path, void *buf, unsigned long max);
 long sys_https(const char *host, const char *path, void *buf, unsigned long max);
 long sys_spawn(const char *name);
+long sys_spawn_arg(const char *name, const char *arg);   /* launch with an arg (e.g. `run editor FILE`) */
 long sys_browse(const char *url);
 long sys_mkdir(const char *path);
 long sys_chdir(const char *path);

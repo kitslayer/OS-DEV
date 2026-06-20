@@ -1,5 +1,13 @@
 # What's next
 
+> **(M836) Shell — `run <prog> [arg]` (open the GUI editor on a file).** Completes the "open a file in the
+> editor" story (Files→editor was M806): you can now do `run editor README.TXT` from the shell to launch the
+> windowed editor already opened on that file. `SYS_spawn` gained an optional arg in `rsi` (routed to M806's
+> `app_spawn_named_arg`); `sys_spawn_arg` is the new ulib wrapper; and `run` parses `prog` + an optional arg,
+> falling back to plain `sys_spawn` (so `run snake`, disk `.elf`s, etc. are unchanged). `make check` 30/30.
+> Verified in-guest: `run editor README.TXT` opened a new Editor window titled `EDIT README.TXT` with the
+> file's contents loaded.
+
 > **(M835) Shell — `sha256`/`sha512` hash multiple files.** Both hashed only one file; `sha256 a b` (or a
 > glob-expanded `sha256 *.iso`) now hashes each in turn, and the output gained the filename after the digest
 > (`<hash>  <name>`, the standard `sha256sum` format) so batch checksums are usable. `make check` 30/30.

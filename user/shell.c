@@ -1777,9 +1777,14 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
                 print("tone: played\n");
             }
-        } else if (startswith(line, "run ")) {
-            if (sys_spawn(line + 4) < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
-            else { print("launched "); print(line + 4); print("\n"); }
+        } else if (startswith(line, "run ")) {           /* run <prog> [arg] — e.g. `run editor README.TXT` */
+            const char *p = line + 4; while (*p == ' ') p++;
+            char prog[64]; int pi = 0; while (*p && *p != ' ' && pi < 63) prog[pi++] = *p++; prog[pi] = 0;
+            while (*p == ' ') p++;
+            char arg[64]; int ai = 0; while (*p && *p != ' ' && ai < 63) arg[ai++] = *p++; arg[ai] = 0;
+            long rc = arg[0] ? sys_spawn_arg(prog, arg) : sys_spawn(prog);
+            if (rc < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
+            else { print("launched "); print(prog); print("\n"); }
         } else if (startswith(line, "file ")) {            /* identify a file's type by its magic bytes */
             char *f = line + 5; int any = 0;
             while (*f) {                                 /* identify each space-separated file */

@@ -210,7 +210,8 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_spawn: {
         const char *nm = (const char *)r->rdi;
-        int rc = app_spawn_named(nm);              /* a built-in program? */
+        const char *arg = (const char *)r->rsi;    /* optional launch arg (e.g. a filename for the editor) */
+        int rc = (arg && arg[0]) ? app_spawn_named_arg(nm, arg) : app_spawn_named(nm);  /* a built-in program? */
         if (rc < 0) rc = app_spawn_from_file(nm);  /* else try loading it from disk */
         r->rax = (uint64_t)(int64_t)rc;
         break;
