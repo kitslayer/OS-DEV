@@ -306,11 +306,25 @@ static int expand_vars(const char *src, char *dst, int cap){
             const char *v = vget(src+i+1, 1);
             if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
             i += 2;
-        } else if (src[i]=='$'){                                    /* $NAME / ${NAME} */
+        } else if (src[i]=='$'){                                    /* $NAME / ${NAME} / ${NAME:-word} / ${NAME:+word} */
             int br=(src[i+1]=='{'); int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
             const char *v=(e>s)?vget(src+s,e-s):0;
-            if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
-            i = e + ((br && src[e]=='}')?1:0);
+            if (br && src[e]==':' && (src[e+1]=='-' || src[e+1]=='+')) {   /* ${VAR:-word} default / ${VAR:+word} alt (literal word) */
+                int plus=(src[e+1]=='+'), set=(v && v[0]);
+                int ws=e+2, we=ws; while (src[we] && src[we]!='}') we++;
+                const char *w=src+ws; int wl=we-ws;
+                if (plus) {
+                    if (set) { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; }     /* :+ -> word only when set */
+                } else if (set) {
+                    for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];                  /* :- -> the value when set */
+                } else {
+                    for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k];                  /* :- -> word when unset/empty */
+                }
+                i = (src[we]=='}') ? we+1 : we;
+            } else {
+                if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
+                i = e + ((br && src[e]=='}')?1:0);
+            }
         } else dst[o++]=src[i++];
     }
     dst[o]=0; return 1;
@@ -388,7 +402,7 @@ static int run_command(char *line, char *cwd) {
             print("        return [N]         (from a function: stop it now, set $? to N)\n");
             print("        local NAME[=val]   (function-scoped variable; restored when the function returns)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
-            print("        NAME=val (or set NAME=val)  $NAME / ${NAME}   $((expr)) arithmetic   unset NAME   env\n");
+            print("        NAME=val (or set NAME=val)  $NAME / ${NAME} / ${NAME:-def} / ${NAME:+alt}   $((expr))   unset NAME   env\n");
             print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
             print("        Tab completes a filename (longest common prefix); a 2nd Tab lists the matches\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {

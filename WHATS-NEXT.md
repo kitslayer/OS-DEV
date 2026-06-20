@@ -1,5 +1,14 @@
 # What's next
 
+> **(M893) Shell — `${VAR:-default}` / `${VAR:+alt}` parameter expansion.** The common sh defaulting forms,
+> on top of the existing `${NAME}`. In `expand_vars`'s `${…}` branch: after the name, if `:-`/`:+` follows,
+> read the literal word up to `}` — `:-` substitutes the word when VAR is unset/empty (else the value),
+> `:+` substitutes the word only when VAR is set+non-empty. Plain `$NAME`/`${NAME}` is unchanged (no
+> regression). Works for positional params too (e.g. `${1:-world}` in a function). Verified in-guest:
+> `${undef:-fallback}`→`fallback`, `${name:-stranger}`→`Alice` (set), `${x:+present}`→empty (unset),
+> `${y:+yes}`→`yes` (set), and `greet(){ echo hi ${1:-world}; }` → `hi world` / `hi Bob`. (Word is literal —
+> no nested expansion inside it, a deliberate simplification.) Help line updated; `make check` green (35).
+
 > **(M892) Shell — `case WORD in PAT) … ;; *) … ;; esac` (glob-match dispatch).** Completes the control-flow
 > set (if/elif/else, while, for, case). Two parts: (1) taught the `shsplit.h` statement splitter that
 > `case` opens / `esac` closes a construct (so the arms' `;`/`;;` stay internal) — pre-verified safe by
