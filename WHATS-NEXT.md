@@ -1,5 +1,15 @@
 # What's next
 
+> **(M881) Shell — `cd` normalizes `.`/`..`/`//` so the prompt matches the real directory.** Found by
+> adversarial path testing: `cd ../..` from `/aa/bb` left the prompt showing `/aa/bb/../..` (the kernel cwd
+> was correct — files still worked — but the displayed path was wrong). The old `cd` only special-cased
+> exact `/`, exact `..`, and absolute paths; any other relative path was appended verbatim. Replaced the
+> ad-hoc cases with a `normpath(base, arg, out)` helper that seeds a component stack from the base (for
+> relative args), walks the arg dropping `.` and popping on `..`, and rebuilds a clean absolute path —
+> handling `cd ../..`, `cd ../sib`, `cd ./x`, `cd a/b/c`, `//`, etc. Also trims stray spaces around the arg.
+> Verified in-guest: `cd ../..` → `/`, `cd ../bb` → `/aa/bb`, `cd .` stays, and a relative write after a
+> normalized `cd` lands in the right place (display ↔ kernel cwd agree). `make check` green (33); warnings 11.
+
 > **(M880) Shell — `grep -l` in a pipe prints `(standard input)`, not the `PIPE.TMP` scratch name.** The
 > same leak class as M879: `cmd | grep -l pat` named the internal pipe temp file on a match. It now prints
 > `(standard input)` for piped input (matching real grep) while `grep -l pat realfile` still names the file.

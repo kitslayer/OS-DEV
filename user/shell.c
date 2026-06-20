@@ -30,6 +30,36 @@ static int g_returning;     /* set by `return` (in a function/sourced script); h
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
 static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
+
+/* Resolve `arg` (absolute, or relative to `base`) into a clean absolute path in
+ * `out` (<=128 bytes), collapsing '.', '..' and '//' — so the shell's displayed
+ * cwd matches what the kernel resolved (e.g. `cd ../..` from /aa/bb -> /). The
+ * kernel already normalizes on chdir; this keeps the prompt string in sync. */
+static void normpath(const char *base, const char *arg, char *out) {
+    char comps[16][32]; int nc = 0;
+    const char *srcs[2]; int ns = 0;
+    if (arg[0] != '/') srcs[ns++] = base;     /* relative: seed from base first */
+    srcs[ns++] = arg;
+    for (int s = 0; s < ns; s++) {
+        const char *p = srcs[s];
+        while (*p) {
+            while (*p == '/') p++;
+            if (!*p) break;
+            char c[32]; int l = 0;
+            while (*p && *p != '/' && l < 31) c[l++] = *p++;
+            c[l] = 0;
+            if (streq(c, ".")) continue;
+            if (streq(c, "..")) { if (nc > 0) nc--; continue; }
+            if (nc < 16) { scpy(comps[nc], c); nc++; }
+        }
+    }
+    int o = 0; out[o++] = '/';
+    for (int i = 0; i < nc; i++) {
+        if (i > 0 && o < 126) out[o++] = '/';
+        for (int k = 0; comps[i][k] && o < 126; k++) out[o++] = comps[i][k];
+    }
+    out[o] = 0;
+}
 static int nargs(const char *s) { int n = 0; while (*s) { while (*s == ' ') s++; if (!*s) break; n++; while (*s && *s != ' ') s++; } return n; }
 
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
@@ -1322,23 +1352,12 @@ static int run_command(char *line, char *cwd) {
             scpy(prevcwd, cwd);
             sys_chdir("/"); cwd[0] = '/'; cwd[1] = 0;
         } else if (startswith(line, "cd ")) {
-            char *path = line + 3;
+            char *path = line + 3; while (*path == ' ') path++;            /* skip extra spaces after `cd` */
+            { int pl = (int)ustrlen(path); while (pl > 0 && path[pl-1] == ' ') path[--pl] = 0; }   /* trim trailing spaces */
             if (sys_chdir(path) < 0) { print("cd: no such directory\n"); g_status = 1; }
             else {
                 scpy(prevcwd, cwd);                              /* remember where we came from */
-                if (streq(path, "/")) { cwd[0] = '/'; cwd[1] = 0; }
-                else if (streq(path, "..")) {
-                    int n = (int)ustrlen(cwd);
-                    while (n > 1 && cwd[n-1] != '/') n--;
-                    if (n <= 1) { cwd[0] = '/'; cwd[1] = 0; } else cwd[n-1] = 0;
-                } else if (path[0] == '/') {
-                    int i = 0; while (path[i] && i < 126) { cwd[i] = path[i]; i++; } cwd[i] = 0;
-                } else {
-                    int n = (int)ustrlen(cwd);
-                    if (n > 0 && cwd[n-1] != '/' && n < 126) cwd[n++] = '/';
-                    int i = 0; while (path[i] && n < 126) cwd[n++] = path[i++];
-                    cwd[n] = 0;
-                }
+                char np[128]; normpath(cwd, path, np); scpy(cwd, np);   /* normalize . / .. / // (display path matches the kernel cwd) */
             }
         } else if (streq(line, "ps")) {
             char buf[512];
