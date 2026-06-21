@@ -686,7 +686,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].depth = 1;
                 b->sc[sp].hasborder = 0;
                 if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), (uint16_t)((bd >> 24) & 0xF), NO_LINK, (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color, len=sides, style=width */
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), (uint16_t)((bd >> 24) & 0xF), (uint16_t)b->curindent, (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color, len=sides, link=left-indent, style=width */
                     b->sc[sp].hasborder = 1;
                 }
                 b->sc_sp++;
@@ -3309,19 +3309,20 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
         }
     } else {
-    int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16], bsp = 0;   /* CSS border boxes: y_top+sides pushed on OPEN, rect stroked on CLOSE */
+    int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16]; int bstk_i[16], bsp = 0;   /* CSS border boxes: y_top+sides+left-indent pushed on OPEN, rect stroked on CLOSE */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
-        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { bstk_y[bsp] = cy; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = tk->len ? tk->len : 15; bsp++; } continue; }
+        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = tk->len ? tk->len : 15; bstk_i[bsp] = tk->link; bsp++; } continue; }   /* y_top includes 4px top padding */
         if (tk->type == TK_BORDER_CLOSE) {
-            if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh, w = bstk_w[bsp], sd = bstk_s[bsp]; uint32_t bc = bstk_c[bsp];   /* sd: 1=top 2=right 4=bottom 8=left */
+            if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh + 3, w = bstk_w[bsp], sd = bstk_s[bsp]; uint32_t bc = bstk_c[bsp];   /* sd: 1=top 2=right 4=bottom 8=left; +3 bottom padding */
+                int xl = cl + bstk_i[bsp];                                          /* left edge follows the block's own indent (blockquote / margin-left) */
                 int yy0 = y0 < ct ? ct : y0, yy1 = y1 > cb ? cb : y1;
                 if (yy1 > yy0) {
-                    if (sd & 8) fb_fill_rect(cl, yy0, w, yy1 - yy0, bc);             /* left edge (viewport-clipped) */
-                    if (sd & 2) fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc);         /* right edge */
+                    if (sd & 8) fb_fill_rect(xl, yy0, w, yy1 - yy0, bc);            /* left edge (viewport-clipped) */
+                    if (sd & 2) fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc);        /* right edge */
                 }
-                if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(cl, y0, cr - cl, w, bc);                /* top edge */
-                if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(cl, y1 - w, cr - cl, w, bc);     /* bottom edge */
+                if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(xl, y0, cr - xl, w, bc);                /* top edge */
+                if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(xl, y1 - w, cr - xl, w, bc);     /* bottom edge */
             }
             continue;
         }

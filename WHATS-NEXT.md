@@ -1,5 +1,13 @@
 # What's next
 
+> **(M915) Browser — borders follow the block's indent + a little vertical padding.** M910's border always
+> spanned the full content width (`cl..cr`), so an indented bordered block (`blockquote`, `margin-left`) drew
+> its box full-width instead of around its actual text. Now the `TK_BORDER_OPEN` marker carries the block's
+> left indent in its (previously unused) `link` field, and the render strokes the box from `cl+indent..cr` —
+> so an indented bordered div's box hugs its text. Also nudged the box ~4px above / ~3px below the text so it
+> isn't cramped. Verified in-guest (`BORDER.HTM`: a `margin-left:50px` bordered div whose box starts 50px in,
+> next to the full-width boxes). Golden-safe (indent 0 → unchanged); `make check` green (35 suites).
+
 > **(M914) JS engine — hyperbolic Math (`sinh`/`cosh`/`tanh`).** The last gap in the now-floating-point Math
 > object: derived from `js_exp` (`sinh=(eˣ−e⁻ˣ)/2`, `cosh=(eˣ+e⁻ˣ)/2`, `tanh` via `(e²ˣ−1)/(e²ˣ+1)` with a
 > `|x|>20`→±1 guard for overflow). Verified on host (`cosh(1)=1.543080634815244`, `tanh(1)=0.7615941559557649`,
