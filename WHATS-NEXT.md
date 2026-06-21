@@ -1,5 +1,14 @@
 # What's next
 
+> **(M919) JS engine — `Object.is` handles NaN/-0 (float-migration correctness).** With real IEEE doubles
+> (M906), `Object.is` was still just `===`, so `Object.is(NaN,NaN)` was `false` (its whole reason to exist is
+> to be `true`) and `Object.is(0,-0)` was `true` (should be `false`). Now the number path special-cases both:
+> both-NaN → true, and `+0`/`-0` distinguished via `1/x` (`+Inf` vs `-Inf`); everything else stays `===`.
+> Verified on host (`Object.is(NaN,NaN)`=true, `(0,-0)`=false, `(-Inf,Inf)`=false, object identity, all matching
+> V8). Also refreshed the stale "integer engine, no FPU" comments on `Math` and the RNG. `make check` green
+> (35 suites). This wraps the float-migration correctness sweep (random, toFixed, parseFloat, JSON, isNaN,
+> isFinite, Object.is all now float-correct).
+
 > **(M918) JS engine — `Math.random()` returns real `[0,1)`.** It was still returning the old integer-engine
 > range `[0, 2^31)`, so every standard idiom was broken: `Math.random() < 0.5` was always false,
 > `Math.random() * 100` was astronomical, `Math.floor(Math.random()*n)` never indexed. Now the no-arg form

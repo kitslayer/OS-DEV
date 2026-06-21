@@ -3580,7 +3580,7 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
     rt_err("unknown Date method"); return UND();
 }
 
-/* ---- Math (integer; the kernel has no FPU) ---- */
+/* ---- Math (real IEEE-754 doubles; js.o is built with SSE — M906) ---- */
 static val nat_abs(val *a, int n){ return NUM(n ? js_fabs(to_num(a[0])) : 0); }
 static val nat_max(val *a, int n){ if(!n) return NUM(-JS_INF); double m=to_num(a[0]); for(int i=1;i<n;i++){double v=to_num(a[i]); if(js_isnan(v)) return NUM(JS_NAN); if(v>m)m=v;} return NUM(m); }   /* Math.max() = -Infinity */
 static val nat_min(val *a, int n){ if(!n) return NUM(JS_INF);  double m=to_num(a[0]); for(int i=1;i<n;i++){double v=to_num(a[i]); if(js_isnan(v)) return NUM(JS_NAN); if(v<m)m=v;} return NUM(m); }   /* Math.min() = +Infinity */
@@ -3833,7 +3833,15 @@ static val nat_obj_fromEntries(val *a, int n){
 }
 static val nat_obj_freeze(val *a, int n){ if(n && a[0].t==V_OBJ && a[0].o) a[0].o->frozen=1; return n?a[0]:UND(); }
 static val nat_obj_isFrozen(val *a, int n){ if(!n || a[0].t!=V_OBJ || !a[0].o) return BOOLV(1); return BOOLV(a[0].o->frozen!=0); }   /* non-objects are "frozen" per spec */
-static val nat_object_is(val *a, int n){ return BOOLV(val_equal(n>0?a[0]:UND(), n>1?a[1]:UND())); }   /* Object.is: with no NaN/-0 in an integer engine, this is exactly strict (===) equality (val_equal) */
+static val nat_object_is(val *a, int n){   /* Object.is: like === but Object.is(NaN,NaN)=true and Object.is(+0,-0)=false (M919, real IEEE doubles) */
+    val x = n>0?a[0]:UND(), y = n>1?a[1]:UND();
+    if (x.t==V_NUM && y.t==V_NUM) {
+        if (js_isnan(x.num) && js_isnan(y.num)) return BOOLV(1);                      /* both NaN -> true (unlike ===) */
+        if (x.num==0.0 && y.num==0.0) return BOOLV((1.0/x.num)==(1.0/y.num));         /* +0 vs -0: 1/+0=+Inf, 1/-0=-Inf */
+        return BOOLV(x.num==y.num);
+    }
+    return BOOLV(val_equal(x, y));
+}
 static val nat_obj_hasOwn(val *a, int n){ if(n<2 || !a[0].o) return BOOLV(0); val tmp;   /* Object.hasOwn(obj, key) (M274) */
     if (a[0].t==V_OBJ && obj_keyed(a[0].o)) return BOOLV(obj_get(a[0].o, val_to_str(a[1]), &tmp));
     if (a[0].t==V_ARR) { const char *k=val_to_str(a[1]); if(strcmp(k,"length")==0) return BOOLV(1); int i=(int)to_num(a[1]); return BOOLV(i>=0 && i<a[0].o->n); }
