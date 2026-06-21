@@ -1,5 +1,15 @@
 # What's next
 
+> **(M935) Editor — auto-indent on Enter.** Paired with M934's highlighting to make the editor a real code
+> editor: pressing Enter now reproduces the current line's leading whitespace on the new line (so nested code
+> keeps its indentation instead of snapping back to column 0), and adds one extra 4-space level when the line
+> ends with an open bracket `{`/`(`/`[`. Implemented as `newline_indent()` (snapshots the leading run of spaces/
+> tabs, scans back for a trailing opener, then inserts `\n` + that indent); all the inserts coalesce into one
+> undo group, so a single Ctrl-Z removes the whole indented newline. Only the interactive Enter key uses it —
+> paste and find&replace still insert raw `\n` so they preserve their source's own indentation. Verified
+> in-guest (typing `void f() {` ⏎ `if (ready) {` ⏎ stepped to 4- then 8-space indents). `make check` green
+> (35 suites).
+
 > **(M934) Editor — multi-language syntax highlighting (C, JS, shell, HTML).** The editor rendered every file
 > in one colour; for a from-scratch dev OS whose own source is C/JS/shell/HTML, highlighting is a big
 > day-to-day win and the first non-browser feature in 24 milestones. A small from-scratch tokeniser

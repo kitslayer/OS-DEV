@@ -142,6 +142,21 @@ static void del_fwd(void) {                 /* Delete key: remove the char at th
     dlen--;
 }
 
+/* Enter with auto-indent: insert a newline, then reproduce the current line's
+ * leading whitespace on the new line (so code keeps its indentation), plus one
+ * extra 4-space level when the line ended with an open bracket {([. All the
+ * inserts coalesce into one undo group. */
+static void newline_indent(void) {
+    char ind[64]; int ni = 0;
+    int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;          /* start of the current line */
+    while (ls + ni < cur && ni < 63 && (doc[ls+ni] == ' ' || doc[ls+ni] == '\t')) { ind[ni] = doc[ls+ni]; ni++; }
+    int extra = 0;                                                   /* indent one more level after a trailing {([ */
+    for (int j = cur - 1; j >= ls; j--) { char c = doc[j]; if (c == ' ' || c == '\t') continue; if (c == '{' || c == '(' || c == '[') extra = 4; break; }
+    insert('\n');
+    for (int i = 0; i < ni; i++) insert(ind[i]);
+    for (int i = 0; i < extra; i++) insert(' ');
+}
+
 /* ---- line clipboard: Ctrl-C copy / Ctrl-X cut / Ctrl-V paste --------------
  * Operates on whole lines (no selection UI) via the shared system clipboard,
  * so a line can be carried to the shell/browser too. Cut/paste go through
@@ -592,7 +607,7 @@ int main(void) {
         else if (k == 0x83) do_copy();                    /* Ctrl-C: copy selection (or line) */
         else if (k == 0x98) do_cut();                     /* Ctrl-X: cut selection (or line)  */
         else if (k == 0x96) paste_clip();                 /* Ctrl-V: paste clipboard   */
-        else if (k == '\n' || k == '\r') { insert('\n'); undo_break(); }   /* newline ends an undo group */
+        else if (k == '\n' || k == '\r') { newline_indent(); undo_break(); }   /* newline (auto-indented) ends an undo group */
         else if (k == 8 || k == 127)     backspace();
         else if (k == 0x04)              del_fwd();        /* Delete: forward-delete  */
         else if (k == 0x13) { if (cur > 0) cur--; }       /* left  */
