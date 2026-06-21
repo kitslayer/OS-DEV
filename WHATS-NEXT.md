@@ -1,5 +1,21 @@
 # What's next
 
+> **(M934) Editor — multi-language syntax highlighting (C, JS, shell, HTML).** The editor rendered every file
+> in one colour; for a from-scratch dev OS whose own source is C/JS/shell/HTML, highlighting is a big
+> day-to-day win and the first non-browser feature in 24 milestones. A small from-scratch tokeniser
+> (`hl_run`) colours the visible window byte-by-byte — keywords blue, strings orange, comments grey, numbers
+> purple, C `#`-directives teal — picked by file extension (`detect_lang`: `.c/.h`→C, `.js`→JS, `.sh`→shell,
+> `.htm`→HTML; anything else → plain, so `.txt` etc. render exactly as before). It reuses the editor's existing
+> coloured-run print path (the one that drew the yellow selection): the build loop now fills a parallel
+> `hlc[]` colour per output byte, and the printer emits maximal same-colour runs with an active selection still
+> overriding to yellow. Correctness across the scroll window comes from a **seed pass**: before colouring the
+> visible window, `hl_run` scans `[0,off)` to recover the tokeniser state at the top of the view, so a block
+> comment / HTML tag / attribute string / string literal opened *above* the viewport keeps its colour
+> (7 carried states incl. a dedicated HTML attribute-value mode so a viewport that starts mid-attribute is
+> right). Verified in-guest: `SAMPLE.C` (new demo file — all five C classes incl. multi-line `/* */` and `#include`/`#define`),
+> and `BORDER.HTM` (blue tags, orange attribute values, green text). Behaviour-safe (plain text → every byte
+> colour 0 → previous rendering); `make check` green (35 suites).
+
 > **(M933) Browser — `max-width` centered columns (readable article layout).** The ubiquitous
 > `max-width:Npx; margin:0 auto` pattern (blogs/docs/news constrain body text to a centered column) was
 > ignored — content ran the full window width. Now a block with `max-width` emits `TK_MAXW_OPEN`/`CLOSE`

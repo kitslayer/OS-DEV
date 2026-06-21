@@ -968,6 +968,27 @@ static const struct {
         "print(\"redos: \" + new RegExp(\"(a+)+$\").test(\"aaaaaaaaaaaaaaaaaaaaX\"));\n"  /* step-budget, no hang */
         "print(\"normal: \" + \"id-42\".replace(new RegExp(\"(\\\\w+)-(\\\\d+)\"), \"$2:$1\"));\n"
         "print(\"SURVIVED\");\n" },
+    { "SAMPLE  C  ", "/* sample.c -- open in the editor to see C syntax highlighting.\n"
+                     "   keywords are blue, strings orange, comments grey,\n"
+                     "   numbers purple, and #directives teal. */\n"
+                     "#include <stdio.h>\n"
+                     "#define MAX 100      // a line comment\n"
+                     "\n"
+                     "/* greet the world a few times, then sum 0..n-1 */\n"
+                     "static int sum(int n) {\n"
+                     "    int total = 0;\n"
+                     "    for (int i = 0; i < n; i++)\n"
+                     "        total += i;          /* running total */\n"
+                     "    return total;\n"
+                     "}\n"
+                     "\n"
+                     "int main(void) {\n"
+                     "    const char *msg = \"hello, OS-DEV\\n\";\n"
+                     "    for (int k = 0; k < 3; k++)\n"
+                     "        printf(\"%s\", msg);\n"
+                     "    printf(\"sum(10) = %d, MAX = %d\\n\", sum(10), MAX);\n"
+                     "    return 0xFF & 1;\n"
+                     "}\n" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)

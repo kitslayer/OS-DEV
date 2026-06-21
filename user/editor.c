@@ -240,6 +240,92 @@ static int row_offset(int target) {
     return dlen;
 }
 
+/* ---- syntax highlighting -------------------------------------------------
+ * Picks a language from the filename extension and colours the visible window
+ * of `doc` one byte at a time. Palette indices (see kernel app_palette):
+ *   0 default (green) · 6 keyword (blue) · 7 string (orange) · 8 comment (grey)
+ *   10 C preprocessor (teal) · 11 number (purple).  hl_lang 0 = plain (no
+ *   colour), 1 = C, 2 = shell, 3 = HTML, 4 = JS. */
+static int hl_lang;                  /* set by detect_lang() in load_file() */
+static unsigned char vcol[2048];     /* colour per byte of the visible window */
+
+static int hl_isids(char c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='_'; }
+static int hl_isid (char c){ return hl_isids(c)||(c>='0'&&c<='9'); }
+static int hl_isdig(char c){ return c>='0'&&c<='9'; }
+static int hl_eqi(const char*a,const char*b){
+    while(*a&&*b){ char x=*a,y=*b; if(x>='a'&&x<='z')x-=32; if(y>='a'&&y<='z')y-=32; if(x!=y)return 0; a++;b++; }
+    return *a==0&&*b==0;
+}
+/* True if doc[i] is the first non-blank char on its line (for C `#` directives). */
+static int hl_linestart(int i){ int j=i; while(j>0&&(doc[j-1]==' '||doc[j-1]=='\t'))j--; return j==0||doc[j-1]=='\n'; }
+/* True if doc[i] is at a word boundary (for a shell `#` comment). */
+static int hl_prews(int i){ return i==0||doc[i-1]==' '||doc[i-1]=='\t'||doc[i-1]=='\n'; }
+
+static const char *hl_kw(void){
+    if(hl_lang==1) return " auto break case char const continue default do double else enum extern float for goto if inline int long register return short signed sizeof static struct switch typedef union unsigned void volatile while ";
+    if(hl_lang==4) return " async await break case catch class const continue debugger default delete do else export extends false finally for function if import in instanceof let new null of return static super switch this throw true try typeof undefined var void while yield ";
+    if(hl_lang==2) return " if then else elif fi for while until do done case esac in function return break continue local select time ";
+    return " ";
+}
+static int hl_iskw(const char*w,int wl){
+    const char*L=hl_kw(); int i=0;
+    while(L[i]){ while(L[i]==' ')i++; if(!L[i])break; int s=i; while(L[i]&&L[i]!=' ')i++;
+        if(i-s==wl){ int m=1; for(int j=0;j<wl;j++) if(L[s+j]!=w[j]){m=0;break;} if(m)return 1; } }
+    return 0;
+}
+
+/* Tokenise doc[start,end). When write, store each byte's colour into vcol[idx-start].
+ * Carries multi-line state (block/HTML comment, HTML tag, string) via the mode/delim
+ * so a [0,off) pass seeds the state for the visible-window pass. Modes: 0 normal,
+ * 1 line comment, 2 block comment, 3 string, 4 HTML tag, 5 HTML comment,
+ * 6 HTML attribute-value string. */
+static void hl_run(int start,int end,int write,int *pmode,char *pdelim){
+    int mode=*pmode, lang=hl_lang; char delim=*pdelim; int i=start;
+    #define PUT(idx,cc) do{ if(write){ int _x=(idx)-start; if(_x>=0&&_x<2048) vcol[_x]=(unsigned char)(cc); } }while(0)
+    while(i<end){
+        char c=doc[i];
+        if(mode==1){ PUT(i,8); if(c=='\n') mode=0; i++; continue; }
+        if(mode==2){ PUT(i,8); if(c=='*'&&i+1<end&&doc[i+1]=='/'){ PUT(i+1,8); i+=2; mode=0; continue; } i++; continue; }
+        if(mode==5){ PUT(i,8); if(c=='-'&&i+2<end&&doc[i+1]=='-'&&doc[i+2]=='>'){ PUT(i+1,8); PUT(i+2,8); i+=3; mode=0; continue; } i++; continue; }
+        if(mode==3){ PUT(i,7);
+            if(c=='\\'&&i+1<end){ PUT(i+1,7); i+=2; continue; }
+            if(c==delim){ mode=0; i++; continue; }
+            if(c=='\n'&&delim!='`'){ mode=0; i++; continue; }   /* non-template string ends at EOL */
+            i++; continue; }
+        if(mode==6){ PUT(i,7); if(c==delim) mode=4; i++; continue; }   /* HTML attribute value string */
+        if(mode==4){
+            if(c=='"'||c=='\''){ delim=c; mode=6; PUT(i,7); i++; continue; }
+            PUT(i,6); if(c=='>') mode=0; i++; continue; }
+        /* mode 0: normal */
+        if(lang==3){
+            if(c=='<'){ if(i+3<end&&doc[i+1]=='!'&&doc[i+2]=='-'&&doc[i+3]=='-'){ PUT(i,8); mode=5; i++; continue; } PUT(i,6); mode=4; i++; continue; }
+            PUT(i,0); i++; continue; }
+        if((lang==1||lang==4)&&c=='/'&&i+1<end&&doc[i+1]=='/'){ PUT(i,8); PUT(i+1,8); i+=2; mode=1; continue; }
+        if((lang==1||lang==4)&&c=='/'&&i+1<end&&doc[i+1]=='*'){ PUT(i,8); PUT(i+1,8); i+=2; mode=2; continue; }
+        if(lang==2&&c=='#'&&hl_prews(i)){ mode=1; continue; }
+        if(lang==1&&c=='#'&&hl_linestart(i)){ while(i<end&&doc[i]!='\n'){ PUT(i,10); i++; } continue; }
+        if(c=='"'||c=='\''||((lang==1||lang==4)&&c=='`')){ delim=c; mode=3; PUT(i,7); i++; continue; }
+        if(hl_isdig(c)&&!(i>0&&hl_isid(doc[i-1]))){ while(i<end&&(hl_isid(doc[i])||doc[i]=='.')){ PUT(i,11); i++; } continue; }
+        if(hl_isids(c)){ int s=i; while(i<end&&hl_isid(doc[i])) i++; int cc=hl_iskw(doc+s,i-s)?6:0; for(int k=s;k<i;k++) PUT(k,cc); continue; }
+        PUT(i,0); i++;
+    }
+    *pmode=mode; *pdelim=delim;
+    #undef PUT
+}
+
+/* Choose the highlighter language from fname's extension (FAT 8.3 -> uppercase). */
+static void detect_lang(void){
+    int n=0; while(fname[n]) n++;
+    int d=-1; for(int i=0;i<n;i++) if(fname[i]=='.') d=i;
+    hl_lang=0;
+    if(d<0) return;
+    const char *e=fname+d+1;
+    if(hl_eqi(e,"c")||hl_eqi(e,"h")) hl_lang=1;
+    else if(hl_eqi(e,"js")) hl_lang=4;
+    else if(hl_eqi(e,"sh")) hl_lang=2;
+    else if(hl_eqi(e,"htm")||hl_eqi(e,"html")) hl_lang=3;
+}
+
 static void render(const char *msg) {
     sys_clear();
     /* cursor line:col (1-based) for the status line */
@@ -269,15 +355,28 @@ static void render(const char *msg) {
     int start = crow - EDVIS / 2; if (start < 0) start = 0;
     int off = row_offset(start);
     int s0 = 0, s1 = 0, sel = sel_bounds(&s0, &s1);   /* active selection byte range, if any */
+    /* Syntax highlighting: colour the visible window of `doc` into vcol[], seeded
+     * by a scan of [0,off) so a block comment / HTML tag / string opened earlier
+     * colours correctly. hl_lang==0 -> all default (plain text renders as before). */
+    int vn = 0;
+    if (hl_lang) {
+        int mode = 0; char delim = 0;
+        hl_run(0, off, 0, &mode, &delim);              /* seed: tokeniser state at `off` */
+        vn = dlen - off; if (vn > 2046) vn = 2046;
+        for (int z = 0; z < vn; z++) vcol[z] = 0;
+        hl_run(off, off + vn, 1, &mode, &delim);       /* colour the visible window */
+    }
     static char out[2048];                 /* off the stack; only ever holds the EDVIS visible rows */
+    static signed char hlc[2048];          /* parallel colour for each out[] byte */
     int o = 0, row = 0, col = 0, os0 = -1, os1 = -1;
     for (int i = off; i <= dlen && row < EDVIS && o < (int)sizeof(out) - 4; i++) {
         if (sel && i == s0) os0 = o;       /* record where the selection starts/ends in the output... */
         if (sel && i == s1) os1 = o;       /* ...before the cursor mark so the caret isn't highlighted */
-        if (i == cur) out[o++] = '|';
+        if (i == cur) { out[o] = '|'; hlc[o] = 0; o++; }
         if (i < dlen) {
             char ch = doc[i];
-            out[o++] = ch;
+            int cc = (hl_lang && i - off >= 0 && i - off < vn) ? vcol[i - off] : 0;
+            out[o] = ch; hlc[o] = (signed char)cc; o++;
             if (ch == '\n') { row++; col = 0; }
             else if (++col == EDCOLS) { row++; col = 0; }
         }
@@ -287,13 +386,25 @@ static void render(const char *msg) {
         if (os0 < 0 && os1 >= 0) os0 = 0;
         if (os0 >= 0 && os1 < 0) os1 = o;
     }
-    if (sel && os0 >= 0 && os1 > os0) {    /* print before | selection (yellow) | after */
-        char c = out[os0]; out[os0] = 0; print(out); out[os0] = c;
-        sys_setcolor(3);
-        c = out[os1]; out[os1] = 0; print(out + os0); out[os1] = c;
-        sys_setcolor(0);
-        print(out + os1);
-    } else print(out);
+    /* Print out[] in maximal same-colour runs; an active selection overrides to
+     * yellow (3) within [os0,os1). With hl_lang==0 every byte is colour 0, so this
+     * reduces to the previous default-text / yellow-selection rendering. */
+    int k = 0;
+    while (k < o) {
+        int c = hlc[k];
+        if (sel && k >= os0 && k < os1) c = 3;
+        int e = k + 1;
+        while (e < o) {
+            int ce = hlc[e];
+            if (sel && e >= os0 && e < os1) ce = 3;
+            if (ce != c) break;
+            e++;
+        }
+        sys_setcolor(c);
+        char sv = out[e]; out[e] = 0; print(out + k); out[e] = sv;
+        k = e;
+    }
+    sys_setcolor(0);
     if (msg) print(msg);
 }
 
@@ -347,6 +458,7 @@ static void load_file(void) {
     cur = dlen;
     un = umax = 0; ulast_kind = -1; uexpect = -1;   /* undo history is per-file */
     sel_anchor = -1; dirty = 0;
+    detect_lang();                   /* choose syntax highlighting from the extension */
 }
 
 int main(void) {
