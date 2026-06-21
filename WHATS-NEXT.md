@@ -1,5 +1,18 @@
 # What's next
 
+> **(M910) Browser — CSS `border` on block elements (the first real box-layout feature).** The token-stream
+> renderer is single-pass and never knew a block's bottom edge until its close tag — so a border couldn't be
+> drawn the way block backgrounds are (per-line bands that read as one fill; a per-line *outline* would box
+> every wrapped line). Solved with **deferred-draw marker tokens**: a bordered block emits `TK_BORDER_OPEN`
+> (carrying color+width) at its scope-push and `TK_BORDER_CLOSE` at its scope-pop, bracketing its content
+> tokens. During render a small stack records `y_top` on OPEN and strokes the full rectangle (4 viewport-
+> clipped edges, `cl..cr` wide) on CLOSE — so a block that wraps across many lines gets **one** outline, and
+> nested borders each get their own (stack depth 16). `parse_style_border` reads the `border:` shorthand
+> (px width + `#hex` colour, default 1px/grey; inline `style=` for now). Verified in-guest with a new
+> `BORDER.HTM` (one red box around 4 wrapping lines; nested blue+green boxes). Fully **additive** — pages with
+> no border emit no markers and render byte-identically, so `make check` (incl. browsertest + CSS goldens)
+> stays green (35 suites). Foundation for `flexbox` (also needs block-extent tracking).
+
 > **(M909) JS engine — `JSON.parse` of real numbers (fractions + exponents).** The JSON number tokenizer was
 > integer-only: it dropped the fraction and choked on exponents, so `JSON.parse('{"price":3.99}')` returned
 > `3` and `JSON.parse('{"x":1.5e3}')` threw "invalid JSON" — fatal for real web APIs, which return JSON floats

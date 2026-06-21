@@ -59,7 +59,8 @@
 #define REMOTE_IMG_MAX 3            /* remote <img> URLs prefetched per page (best-effort) */
 
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
-enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG };   /* TK_IMG: link field = image slot */
+enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG,     /* TK_IMG: link field = image slot */
+       TK_BORDER_OPEN, TK_BORDER_CLOSE };             /* CSS border: OPEN carries off=color(24b), style=width; bracket a block's tokens, drawn as one rect at render (M910) */
 
 typedef struct { uint32_t off; uint16_t len, link; uint8_t style, type; } tok_t;  /* off is uint32 so TEXT_MAX can exceed 64KB (len<=word, link<LINK_MAX stay uint16) */
 typedef struct { uint16_t off, len; } href_t;            /* slice into hrefs[] */
@@ -142,7 +143,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none */
@@ -449,6 +450,21 @@ static uint32_t parse_style_bg(const char *s, int n) {
         return parse_color(s + vs, ve - vs);
     return 0;
 }
+/* CSS border (inline style="border:..."). Returns (width<<24)|color, 0 if none.
+ * Pulls a px width and a #hex colour out of the shorthand; defaults 1px / grey.
+ * style_prop matches "border:" exactly (not border-width/-top), so this is the shorthand. */
+static uint32_t parse_style_border(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "border", 6, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs;
+    int width = 1;
+    for (int i = 0; i + 1 < vl; i++)
+        if (v[i] >= '0' && v[i] <= '9') { int w = 0, j = i; while (j < vl && v[j] >= '0' && v[j] <= '9') { w = w*10 + (v[j]-'0'); j++; } if (j < vl && v[j] == 'p') { width = w; break; } }
+    width = width < 1 ? 1 : (width > 8 ? 8 : width);
+    uint32_t color = 0x666666;                                  /* default medium grey */
+    for (int i = 0; i < vl; i++) if (v[i] == '#') { color = parse_color(v + i, vl - i); break; }
+    return ((uint32_t)width << 24) | (color & 0xFFFFFFu);
+}
 /* text-align: 1 = center, 2 = right, 0 = left/justify/other (the default flow). */
 static int parse_style_align(const char *s, int n) {
     int vs, ve;
@@ -611,10 +627,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->curindent = b->sc[sp].saveindent;
                 if (b->sc[sp].hidden && b->n_hidden > 0) b->n_hidden--;   /* leaving a display:none element */
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
+                if (b->sc[sp].hasborder && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };   /* close the border box opened by this frame */
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -624,6 +641,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             if (parse_style_underline(st, stl)) ul = 1;
             int itr = parse_style_transform(st, stl);  if (itr) tr = itr;   /* text-transform (inline only) */
             uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
+            bd = parse_style_border(st, stl);                                /* border (shorthand) */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -645,7 +663,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
               if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml) {  /* styled/hidden/indented element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml || bd) {  /* styled/hidden/indented/bordered element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
@@ -660,6 +678,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (apply_ts) { *style = ts; b->sc[sp].setstyle = ts; }
                 int i = 0; while (tag[i] && i < 15) { b->sc[sp].tag[i] = tag[i]; i++; } b->sc[sp].tag[i] = 0;
                 b->sc[sp].depth = 1;
+                b->sc[sp].hasborder = 0;
+                if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), 0, NO_LINK, (uint8_t)(bd >> 24), TK_BORDER_OPEN };
+                    b->sc[sp].hasborder = 1;
+                }
                 b->sc_sp++;
             }   /* stack full: skip (no scope) — graceful, never overflows */
         } else if (b->sc_sp > 0 && tageq(tag, b->sc[b->sc_sp-1].tag)) {
@@ -3277,8 +3300,19 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
         }
     } else {
+    int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16], bsp = 0;   /* CSS border boxes: y_top pushed on OPEN, rect stroked on CLOSE */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
+        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { bstk_y[bsp] = cy; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bsp++; } continue; }
+        if (tk->type == TK_BORDER_CLOSE) {
+            if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh, w = bstk_w[bsp]; uint32_t bc = bstk_c[bsp];
+                int yy0 = y0 < ct ? ct : y0, yy1 = y1 > cb ? cb : y1;
+                if (yy1 > yy0) { fb_fill_rect(cl, yy0, w, yy1 - yy0, bc); fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc); }   /* left + right edges (viewport-clipped) */
+                if (y0 >= ct && y0 <= cb) fb_fill_rect(cl, y0, cr - cl, w, bc);                /* top edge */
+                if (y1 - w >= ct && y1 - w <= cb) fb_fill_rect(cl, y1 - w, cr - cl, w, bc);     /* bottom edge */
+            }
+            continue;
+        }
         if (tk->type == TK_BREAK) { cy += curlh + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_PARA)  { cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_HR) {
