@@ -1,5 +1,11 @@
 # What's next
 
+> **(M905) Shell — `rm -f` (force: ignore missing files).** Found by an integration test: `rm` treated `-f` as
+> a filename, so `rm -f X` errored on the flag and on a missing `X`. Added `-f`: skip the flag token, and a
+> missing file is silently ignored (no message, no `$?=1`) — the standard scripting idiom for "remove if it
+> exists". Only `-f` (the shell has no recursive remove, so `-rf` is deliberately not accepted — it would
+> dangerously mask a real "dir not empty" failure). Verified: `rm -f MISSING` → `$?`=0. `make check` green.
+
 > **(M904) Shell — `break` and `continue` for `for`/`while` loops.** Loop control was missing: you couldn't
 > early-exit a loop or skip an iteration. Added both, mirroring the existing `return`/`g_returning` mechanism:
 > a `g_loopbrk` flag (1=break, 2=continue) set by the builtins and consumed by the innermost loop, plus a

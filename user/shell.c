@@ -2381,17 +2381,19 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
         } else if (startswith(line, "rm ")) {
-            const char *p = line + 3; int any = 0;       /* remove each space-separated file (so `rm *.tmp` / `rm a b` work) */
+            const char *p = line + 3; int any = 0, force = 0;   /* remove each space-separated file (so `rm *.tmp` / `rm a b` work); -f ignores missing */
             while (*p) {
                 while (*p == ' ') p++;
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = 0; any = 1;
-                if (sys_delete(name) < 0) { print("rm: no such file, or dir not empty: "); print(name); print("\n"); g_status = 1; }
+                name[j] = 0;
+                if (streq(name, "-f")) { force = 1; continue; }   /* -f: force (no error / no $?=1 when a file is missing) */
+                any = 1;
+                if (sys_delete(name) < 0) { if (!force) { print("rm: no such file, or dir not empty: "); print(name); print("\n"); g_status = 1; } }
                 else { print("removed "); print(name); print("\n"); }
             }
-            if (!any) print("usage: rm <file>...\n");
+            if (!any && !force) print("usage: rm <file>...\n");
         } else if (startswith(line, "touch ")) {
             const char *p = line + 6; int any = 0;       /* touch each space-separated file */
             while (*p) {
