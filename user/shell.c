@@ -2645,10 +2645,10 @@ static int run_line(char *line, char *cwd) {
           for (int i = 0; av[i] && o < 1023; i++) aline[o++] = av[i];
           for (int i = wl; cmd[i] && o < 1023; i++) aline[o++] = cmd[i];
           aline[o] = 0; cmd = aline; } }
-    if (!(cmd[0] == '(' && cmd[1] == '(')) {   /* skip glob for a (( expr )) arithmetic command, whose * is multiply not a wildcard */
-        for (int i = 0; cmd[i]; i++) if (cmd[i] == '*' || cmd[i] == '?') {
-            glob_expand(cmd, gline, sizeof gline); cmd = gline; break;
-        }
+    if (cmd[0] == '(' && cmd[1] == '(')        /* (( expr )) arithmetic command: bypass glob/redirect/pipe — its */
+        return run_command(cmd, cwd);          /* < > | * << >> are operators, not shell metacharacters */
+    for (int i = 0; cmd[i]; i++) if (cmd[i] == '*' || cmd[i] == '?') {
+        glob_expand(cmd, gline, sizeof gline); cmd = gline; break;
     }
 
     const char *rfile = 0; int append = 0;

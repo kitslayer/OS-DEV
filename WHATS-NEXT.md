@@ -1,5 +1,13 @@
 # What's next
 
+> **(M925) Shell — fix `(( ))` comparisons (`<`/`>`/`|`) in if/while conditions.** M924's `(( ))` only skipped
+> *glob*, so the comparison operators still got mangled: `while ((i < 4))` read `<` as input redirection and
+> exited immediately, and `if ((x > 5))` matched for the wrong reason (the `>` redirected). The real fix:
+> intercept a leading `((` at the top of `run_line` (right after variable expansion, before glob/redirect/pipe)
+> and dispatch it straight to `run_command` — so none of `< > | * << >>` are treated as shell metacharacters,
+> only as arithmetic operators (mirrors how `js -e` is intercepted early). Verified in-guest:
+> `while ((i < 4)); do …; ((i++)); done`→`i=0..3`, `if ((x > 5))`→big, `((y = 6 * 7))`→42. `make check` green.
+
 > **(M924) Shell — `(( expr ))` arithmetic command.** Completes the arithmetic constructs (`$((…))`,
 > `for ((;;))`, and now the standalone command). Reuses `sh_do_assign` (now returning the value) for
 > `((i++))`, `((x = a*b))`, `((sum += n))`, and sets `$?` = (value≠0 ? 0 : 1) so `((n > 5)) && cmd` works as a
