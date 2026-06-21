@@ -1,5 +1,13 @@
 # What's next
 
+> **(M911) Browser — CSS `border` from `<style>` rules (not just inline).** Extends M910 to stylesheet rules
+> (`.card { border: 2px solid #80c }`), which real pages use far more than inline `style=`. Followed the CSS-
+> engine's established add-a-property pattern: a `css_border[CSS_MAX]` array, parsed in `capture_css` via the
+> same `parse_style_border`, surfaced through a new `*border` out-param on `css_match` (rule sets it, an inline
+> `border:` then overrides — correct cascade). Verified in-guest (`BORDER.HTM` now has a purple `.card` box from
+> a stylesheet rule next to the inline red/blue/green boxes). Golden-safe — the CSS test pages set no borders,
+> so `css*test`/browsertest are byte-identical; `make check` green (35 suites).
+
 > **(M910) Browser — CSS `border` on block elements (the first real box-layout feature).** The token-stream
 > renderer is single-pass and never knew a block's bottom edge until its close tag — so a border couldn't be
 > drawn the way block backgrounds are (per-line bands that read as one fill; a per-line *outline* would box
