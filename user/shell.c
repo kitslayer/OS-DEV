@@ -40,6 +40,8 @@ static void utoa_base(unsigned long v, int base, int upper, char *out) {
  * set it to 1. */
 static int g_status;
 static int g_returning;     /* set by `return` (in a function/sourced script); honored by the body executors, cleared at the boundary */
+static int g_loopbrk;       /* 0=none, 1=break, 2=continue: set by break/continue, consumed by the innermost for/while */
+static int g_loopdepth;     /* for/while loops currently running; break/continue only fire when >0 (else they're no-ops) */
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
 static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
@@ -435,6 +437,7 @@ static int run_command(char *line, char *cwd) {
             print("        read VAR: read a line of input into VAR (for interactive scripts)\n");
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        while COND; do CMDS; done   (loops while COND succeeds; Ctrl-C to stop)\n");
+            print("        break / continue   (exit / skip to next iteration of the innermost loop)\n");
             print("        if COND; then CMDS; [elif COND; then CMDS;]... [else CMDS;] fi   (status picks the branch)\n");
             print("        case WORD in PAT) CMDS;; PAT2|PAT3) CMDS;; *) CMDS;; esac   (glob-match dispatch)\n");
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
@@ -2430,6 +2433,9 @@ static int run_command(char *line, char *cwd) {
             const char *a = line + 6; while (*a == ' ') a++;   /* `return [N]`: set $? to N (bare return keeps the last status) */
             if (*a) g_status = (int)sh_str2long(a);
             g_returning = 1;           /* stop the enclosing function body / sourced script */
+        } else if (streq(line, "break") || streq(line, "continue")) {
+            if (g_loopdepth > 0) g_loopbrk = (line[0] == 'b') ? 1 : 2;   /* consumed by the innermost loop; no-op outside one */
+            g_status = 0;
         } else if (streq(line, "exit")) {
             print("bye!\n");
             return 1;                  /* signal main()'s loop to stop */
@@ -2729,6 +2735,7 @@ static int run_for(char *line, char *cwd) {
     for (int i=0; lst[i]; i++) if (lst[i]=='*' || lst[i]=='?') { glob_expand(lst, glist, sizeof glist); lst = glist; break; }
     int doexit = 0;
     char *w = lst;
+    g_loopdepth++;
     while (*w && !doexit) {
         while (*w == ' ') w++;
         if (!*w) break;
@@ -2739,8 +2746,10 @@ static int run_for(char *line, char *cwd) {
         int bi = 0; for (const char *b = body; *b && bi < 1023; b++) bodybuf[bi++] = *b; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;       /* fresh copy: run_input_line edits it in place */
         if (g_returning) break;                             /* `return` inside the loop body */
+        if (g_loopbrk) { int brk = (g_loopbrk == 1); g_loopbrk = 0; if (brk) break; }   /* break stops; continue advances */
         w = we;
     }
+    g_loopdepth--;
     return doexit;
 }
 
@@ -2853,6 +2862,7 @@ static int run_while(char *line, char *cwd) {
     body[blen] = 0;
     int doexit = 0, iters = 0;
     char condbuf[1024], bodybuf[1024];
+    g_loopdepth++;
     while (!doexit) {
         if (iters >= 100000) { print("\nwhile: stopped at 100000 iterations\n"); break; }
         int k = sys_pollkey(); if (k == 0x83 || k == 27) { print("\n^C\n"); break; }   /* Ctrl-C / Esc */
@@ -2862,8 +2872,10 @@ static int run_while(char *line, char *cwd) {
         int bi = 0; for (const char *c = body; *c && bi < 1023; c++) bodybuf[bi++] = *c; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;
         if (g_returning) break;                            /* `return` inside the loop body */
+        if (g_loopbrk) { int brk = (g_loopbrk == 1); g_loopbrk = 0; if (brk) break; }   /* break stops; continue re-tests COND */
         iters++;
     }
+    g_loopdepth--;
     return doexit;
 }
 
@@ -2903,7 +2915,7 @@ static int run_input_line(char *line, char *cwd) {
             else                                rc = run_andor(seg, cwd);
             if (rc) doexit = 1;
         }
-        if (g_returning) break;        /* `return` stops the rest of this line */
+        if (g_returning || g_loopbrk) break;   /* `return`, or `break`/`continue`, stops the rest of this line */
         seg = more ? semi + 1 : 0;
     }
     return doexit;
@@ -2926,7 +2938,7 @@ static void source_file(const char *fn, char *cwd, int silent) {
         if (g_returning) break;                        /* `return` ends the sourced script */
         ln = more ? nl + 1 : 0;
     }
-    g_returning = 0;       /* consume: return unwinds only to the end of this source */
+    g_returning = 0; g_loopbrk = 0;   /* consume: return/break unwind only to the end of this source */
     source_depth--;
     free(txt);
 }
@@ -2961,7 +2973,7 @@ int main(void) {
 
         /* run the line: a `for` loop, or a ';'-separated list of && / || pipelines */
         if (run_input_line(line, cwd)) break;
-        g_returning = 0;     /* a bare `return` at the interactive prompt must not wedge the next line */
+        g_returning = 0; g_loopbrk = 0;   /* a stray `return`/`break` at the prompt must not wedge the next line */
     }
     return 0;
 }

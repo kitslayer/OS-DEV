@@ -1,5 +1,14 @@
 # What's next
 
+> **(M904) Shell — `break` and `continue` for `for`/`while` loops.** Loop control was missing: you couldn't
+> early-exit a loop or skip an iteration. Added both, mirroring the existing `return`/`g_returning` mechanism:
+> a `g_loopbrk` flag (1=break, 2=continue) set by the builtins and consumed by the innermost loop, plus a
+> `g_loopdepth` guard so a stray `break`/`continue` at the prompt or outside a loop is a harmless no-op (never
+> wedges the next command). The body executor stops the rest of the line when the flag is set, so `break`
+> inside an `if` inside a loop works. Verified in-guest: `break` stops at the right iteration, `continue`
+> skips it, a nested inner `break` leaves the outer loop running (`1a 2a`), `while true; …; break` exits, and
+> a bare `break` at the prompt is a no-op. `make check` green (35 suites).
+
 > **(M903) Shell — `test`/`[ ]` gains `-d` (directory), `-s` (non-empty file), and correct `-e`/`-f` for dirs.**
 > `[ -d PATH ]` is the standard idiom for "is a directory" and was missing (it silently fell through to false).
 > Added it (and `-s` = non-empty regular file) using the `sys_chdir`-then-restore pattern the shell already
