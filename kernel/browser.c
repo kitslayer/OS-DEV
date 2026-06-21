@@ -620,7 +620,7 @@ static int is_block_tag(const char *t) {
 static void capture_css(browser_t *b, const char *s, int n);
 static int  css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
                       uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
-                      int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border);
+                      int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border, int *flex);
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
@@ -654,7 +654,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         }
     } else if (!is_void_tag(tag)) {
         uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0;
-        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd);   /* <style> rules first (lower priority) */
+        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
@@ -1405,6 +1405,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int alv = parse_style_align(s + ds, de - ds);
         int szv = parse_style_fontsize(s + ds, de - ds);
         int dnv = parse_style_display(s + ds, de - ds);
+        if (parse_style_flex(s + ds, de - ds)) dnv = 2;             /* display:flex from a rule (1=none, 2=flex) */
         int mgv = parse_style_vspace(s + ds, de - ds);
         int hsv = parse_style_hspace(s + ds, de - ds);
         uint32_t bdv = parse_style_border(s + ds, de - ds);          /* border: shorthand from a stylesheet rule */
@@ -1440,7 +1441,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
  * Returns 1 if any rule matched. Matching mirrors sel_match_all's per-element checks. */
 static int css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
-                     int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border) {
+                     int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border, int *flex) {
     int hit = 0;
     for (int r = 0; r < b->n_css; r++) {
         const sel_t *s = &b->css_sel[r];
@@ -1455,7 +1456,7 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         if (b->css_bg[r]) *bg = b->css_bg[r];
         if (b->css_align[r]) *align = b->css_align[r];
         if (b->css_size[r]) *size = b->css_size[r];
-        if (b->css_disp[r]) *hidden = 1;
+        if (b->css_disp[r] == 1) *hidden = 1; else if (b->css_disp[r] == 2) *flex = 1;   /* 1=display:none, 2=display:flex */
         if (b->css_margin[r]) *margin = b->css_margin[r];
         if (b->css_indent[r]) *indent = b->css_indent[r];
         if (b->css_border[r]) *border = b->css_border[r];

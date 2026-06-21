@@ -1,5 +1,13 @@
 # What's next
 
+> **(M928) Browser — `display:flex` from `<style>` rules (not just inline).** Most flex containers use a class
+> (`.row { display:flex }`), so extended M927 to stylesheet rules, mirroring the border CSS-rule path (M911):
+> `capture_css` encodes flex as `css_disp == 2` (1 = `display:none`), and `css_match` gained an `int *flex`
+> out-param (so a rule sets it; inline `style=` then overrides). Verified in-guest (`FLEX.HTM`: a
+> `<div class="row">` with `.row{display:flex}` from a `<style>` block lays `Red/Green/Blue` in a row, next to
+> the inline-flex example). Golden-safe (no flex rule → `css_disp` is 0/1, unchanged); `make check` green
+> (35 suites). Flex now works both inline and via stylesheets — the common case.
+
 > **(M927) Browser — `display:flex` row layout (the last deferred big item).** The single-pass renderer stacks
 > every block vertically; flex needs children laid in a row. Done additively with the same marker-token trick
 > as `border`: a `display:flex` block emits `TK_FLEX_OPEN`/`TK_FLEX_CLOSE` around its children, and the render
