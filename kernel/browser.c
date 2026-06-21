@@ -607,6 +607,15 @@ static int parse_style_gap(const char *s, int n) {
     if (style_prop(s, n, "column-gap", 10, &vs, &ve)) return parse_px_val(s + vs, ve - vs);
     return 0;
 }
+/* justify-content along the main (row) axis: 1 = center, 2 = end/right, 0 = start (default). */
+static int parse_style_justify(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "justify-content", 15, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs;
+    if (attr_eq(v, vl, "center")) return 1;
+    if (attr_eq(v, vl, "flex-end") || attr_eq(v, vl, "end") || attr_eq(v, vl, "right")) return 2;
+    return 0;   /* flex-start / space-* (distribution needs per-gap measurement, not yet) -> start */
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -664,7 +673,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -677,6 +686,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             uint32_t ibd = parse_style_border(st, stl); if (ibd) bd = ibd;   /* inline border overrides a <style> rule */
             if (parse_style_flex(st, stl)) flex = 1;                          /* display:flex */
             fgap = parse_style_gap(st, stl);                                  /* flex gap (px) */
+            fjust = parse_style_justify(st, stl);                             /* justify-content: 1 center, 2 end */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -721,7 +731,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 }
                 b->sc[sp].hasflex = 0;
                 if (flex && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* flex container: lay its children in a row */
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)fgap, 0, NO_LINK, 0, TK_FLEX_OPEN };   /* off = gap px (0 = default) */
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)fgap, 0, NO_LINK, (uint8_t)fjust, TK_FLEX_OPEN };   /* off = gap px (0 = default); style = justify (1 center, 2 end) */
                     b->sc[sp].hasflex = 1;
                 }
                 b->sc_sp++;
@@ -3366,7 +3376,23 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
             continue;
         }
-        if (tk->type == TK_FLEX_OPEN)  { if (cx > cl) { cy += curlh; cx = cl; curlh = 18; } flex_depth++; flex_gap = tk->off ? (int)tk->off : 18; continue; }   /* start the row on its own line; per-container gap */
+        if (tk->type == TK_FLEX_OPEN)  {
+            if (cx > cl) { cy += curlh; cx = cl; curlh = 18; }   /* start the row on its own line */
+            flex_depth++; flex_gap = tk->off ? (int)tk->off : 18;   /* per-container gap */
+            if (tk->style) {   /* justify-content (1 center, 2 end): forward-scan THIS row's width, then offset cx */
+                int z = b->zoom > 0 ? b->zoom : 1, rw = 0, d2 = 1;
+                for (int u = t + 1; u < b->ntok && u < TOK_MAX && d2 > 0; u++) {
+                    tok_t *tu = &b->toks[u];
+                    if (tu->type == TK_FLEX_OPEN) d2++;
+                    else if (tu->type == TK_FLEX_CLOSE) d2--;
+                    else if (d2 == 1 && tu->type == TK_WORD) rw += (tu->len + 1) * GW * z;   /* word + space (base size) */
+                    else if (d2 == 1 && (tu->type == TK_BREAK || tu->type == TK_PARA)) rw += flex_gap;
+                }
+                int avail = cr - cl;
+                if (rw > 0 && rw < avail) cx = cl + ((tk->style == 1) ? (avail - rw) / 2 : (avail - rw));   /* center / end */
+            }
+            continue;
+        }
         if (tk->type == TK_FLEX_CLOSE) { if (flex_depth > 0) flex_depth--; cy += curlh; cx = cl; curlh = 18; continue; }   /* end the row */
         if (tk->type == TK_BREAK) { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + tk->off; cx = cl; curlh = 18; continue; }   /* in flex: break -> horizontal gap between items */
         if (tk->type == TK_PARA)  { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }

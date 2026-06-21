@@ -1,5 +1,15 @@
 # What's next
 
+> **(M931) Browser — flex `justify-content: center` / `flex-end`.** The first main-axis alignment, which needs
+> the row's width up front. Got it with a bounded forward-scan at `TK_FLEX_OPEN`: sum the direct children's
+> word widths (`(len+1)·GW·zoom`) + gaps until the matching `TK_FLEX_CLOSE` (depth-tracked so nested flex
+> isn't counted), then offset the start `cx` by `(avail−rowWidth)/2` for center or `avail−rowWidth` for end
+> (only when the row fits). The mode rides in the `TK_FLEX_OPEN` marker's `style` field (1 center, 2 end);
+> `space-*` distribution maps to start for now (needs per-gap spreading). Verified in-guest (`FLEX.HTM`:
+> `justify-content:center` centers `One/Two/Three`, `flex-end` right-aligns them, content after renders
+> normally). Additive (start/no-justify unchanged); `make check` green (35 suites). Remaining flex: `space-
+> between/around`, `align-items` (cross-axis), `flex-grow` — all need fuller item measurement.
+
 > **(M930) Browser — flex `gap`.** The flex row used a fixed 18px between items; now it honours the CSS `gap`
 > (and `column-gap`) value. The gap px is parsed in the push, carried in the `TK_FLEX_OPEN` marker's `off`
 > field, and the render uses it as the per-container item spacing (0 → 18px default; set per flex container).
