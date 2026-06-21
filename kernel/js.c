@@ -1033,6 +1033,38 @@ static double js_pow(double b, double e){
     if (b<0.0) return JS_NAN;                                  /* negative base, fractional exp -> NaN */
     return js_exp(e*js_ln(b));                                 /* general b^e = exp(e*ln b) */
 }
+/* ---- trig (range-reduced Taylor; ~12-15 digits over the reduced range) ---- */
+static double js_sin(double x){
+    if (!js_isfinite(x)) return JS_NAN;
+    double twopi=6.283185307179586, pi=3.141592653589793;
+    x = js_fmod(x, twopi); if (x>pi) x-=twopi; else if (x<-pi) x+=twopi;   /* reduce to [-pi, pi] */
+    double term=x, sum=x, x2=x*x;
+    for (int i=1;i<=12;i++){ term *= -x2/((double)(2*i)*(2*i+1)); sum += term; }   /* x - x^3/3! + x^5/5! - .. */
+    return sum;
+}
+static double js_cos(double x){ return js_isfinite(x) ? js_sin(x + 1.5707963267948966) : JS_NAN; }   /* cos x = sin(x + pi/2) */
+static double js_tan(double x){ double c=js_cos(x); return c==0.0 ? JS_NAN : js_sin(x)/c; }
+static double js_atan(double x){             /* arctan, result in (-pi/2, pi/2) */
+    if (js_isnan(x)) return JS_NAN;
+    if (js_isinf(x)) return x<0 ? -1.5707963267948966 : 1.5707963267948966;
+    int neg=x<0; if(neg) x=-x;
+    /* halve the argument until small (atan(x)=2*atan(x/(1+sqrt(1+x^2)))) so the Taylor
+     * series converges fast — a plain series at x~1 (Leibniz) is far too slow. */
+    int halvings=0; while (x > 0.2 && halvings < 60){ x = x/(1.0 + js_sqrt(1.0 + x*x)); halvings++; }
+    double term=x, sum=x, x2=x*x;
+    for (int i=1;i<=14;i++){ term *= -x2; sum += term/(2*i+1); }   /* x - x^3/3 + x^5/5 - .. */
+    while (halvings-- > 0) sum *= 2.0;
+    return neg ? -sum : sum;
+}
+static double js_atan2(double y, double x){  /* full-quadrant angle of (x,y) */
+    if (x>0.0) return js_atan(y/x);
+    if (x<0.0) return js_atan(y/x) + (y>=0.0 ? 3.141592653589793 : -3.141592653589793);
+    if (y>0.0) return 1.5707963267948966;
+    if (y<0.0) return -1.5707963267948966;
+    return 0.0;
+}
+static double js_asin(double x){ if (x<-1.0||x>1.0) return JS_NAN; if (x==1.0) return 1.5707963267948966; if (x==-1.0) return -1.5707963267948966; return js_atan(x/js_sqrt(1.0-x*x)); }
+static double js_acos(double x){ if (x<-1.0||x>1.0) return JS_NAN; return 1.5707963267948966 - js_asin(x); }
 /* JS ToInt32: NaN/Inf -> 0; truncate toward zero; take low 32 bits (signed). */
 static int32_t to_i32(double d){
     if (!js_isfinite(d)) return 0;
@@ -3555,6 +3587,13 @@ static val nat_pow(val *a, int n){ double b=n>0?to_num(a[0]):0, e=n>1?to_num(a[1
 static val nat_log(val *a, int n){ return NUM(js_ln(n?to_num(a[0]):0)); }                          /* natural log */
 static val nat_exp(val *a, int n){ return NUM(js_exp(n?to_num(a[0]):0)); }
 static val nat_log10(val *a, int n){ return NUM(js_ln(n?to_num(a[0]):0)/2.302585092994046); }       /* log base 10 */
+static val nat_sin(val *a, int n){ return NUM(js_sin(n?to_num(a[0]):0)); }
+static val nat_cos(val *a, int n){ return NUM(js_cos(n?to_num(a[0]):0)); }
+static val nat_tan(val *a, int n){ return NUM(js_tan(n?to_num(a[0]):0)); }
+static val nat_atan(val *a, int n){ return NUM(js_atan(n?to_num(a[0]):0)); }
+static val nat_atan2(val *a, int n){ return NUM(js_atan2(n>0?to_num(a[0]):0, n>1?to_num(a[1]):0)); }
+static val nat_asin(val *a, int n){ return NUM(js_asin(n?to_num(a[0]):0)); }
+static val nat_acos(val *a, int n){ return NUM(js_acos(n?to_num(a[0]):0)); }
 /* Math.random(): the engine is integer-only (no FPU), so there is no [0,1) float.
  * Math.random(n) returns a uniform integer in [0,n) -- a die/range; the no-arg
  * form returns [0, 2^31) (use `% n`). xorshift64, lazily seeded from the CPU's
@@ -4044,6 +4083,8 @@ static void install_globals(env *g) {
     def_native(math,"hypot",nat_hypot); def_native(math,"log2",nat_log2);
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
     def_native(math,"log",nat_log); def_native(math,"exp",nat_exp); def_native(math,"log10",nat_log10);
+    def_native(math,"sin",nat_sin); def_native(math,"cos",nat_cos); def_native(math,"tan",nat_tan);
+    def_native(math,"atan",nat_atan); def_native(math,"atan2",nat_atan2); def_native(math,"asin",nat_asin); def_native(math,"acos",nat_acos);
     obj_set(math,"PI",NUM(3.141592653589793)); obj_set(math,"E",NUM(2.718281828459045));               /* Math constants (real doubles now) */
     obj_set(math,"LN2",NUM(0.6931471805599453)); obj_set(math,"LN10",NUM(2.302585092994046));
     obj_set(math,"LOG2E",NUM(1.4426950408889634)); obj_set(math,"LOG10E",NUM(0.4342944819032518));

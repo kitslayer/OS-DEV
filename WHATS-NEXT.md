@@ -1,5 +1,13 @@
 # What's next
 
+> **(M907) JS engine — trigonometry (`Math.sin/cos/tan/asin/acos/atan/atan2`).** Completes the transcendental
+> `Math` now that numbers are real doubles (M906): `sin`/`cos`/`tan` via a range-reduced Taylor series (reduce
+> to `[-π, π]`, 12 terms → ~15 digits), and `atan` via half-angle argument reduction
+> (`atan(x)=2·atan(x/(1+√(1+x²)))` until the argument is small, so a slow Leibniz series near x=1 is avoided —
+> `Math.atan(1)*4` is `3.141592653589793`, i.e. π). `atan2` builds the full-quadrant angle; `asin`/`acos`
+> derive from `atan`. All self-contained (no libm). Verified on host (`Math.sin(0)`=0, `cos(π)`=-1,
+> `sin(π/6)`≈0.5, `atan(1)*4`=π, `asin(1)`=π/2) and `make check` green (35 suites).
+
 > **(M906) JS engine — real IEEE-754 floating point (no longer integer-only).** The from-scratch JS engine's
 > number type went from `int64_t` to `double` throughout (`val`/`node`/`token`), so `7/2` is `3.5` (not `3`),
 > `1/0` is `Infinity`, `0/0` is `NaN`, and `3.14`, `1e-3`, `0.1+0.2` are real fractionals. This needed the
