@@ -1055,8 +1055,8 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "test ") || (line[0] == '[' && line[1] == ' ')) {
             /* test EXPR / [ EXPR ] -> set $? (0 = true). Args are already
              * variable-expanded by run_line. Supports: STR (non-empty),
-             * -z/-n STR, -e/-f FILE, A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B,
-             * and a leading ! to negate. */
+             * -z/-n STR, -e/-f/-d/-s FILE, A -eq/-ne/-lt/-gt/-le/-ge B,
+             * A =/!= B, and a leading ! to negate. */
             const char *p = line + (line[0] == '[' ? 1 : 4);
             char *av[12]; static char tok[256]; int ac = 0, ti = 0;
             while (*p && ac < 12) {
@@ -1075,7 +1075,15 @@ static int run_command(char *line, char *cwd) {
                 const char *op = av[i0], *a = av[i0+1];
                 if (streq(op, "-z")) res = (a[0] == 0);
                 else if (streq(op, "-n")) res = (a[0] != 0);
-                else if (streq(op, "-e") || streq(op, "-f")) { char b; res = (sys_readfile(a, &b, 1) >= 0); }
+                else {                                       /* file tests: read 1 byte (rf>=0 = readable, rf = bytes so 0 if empty);
+                                                             * chdir-able = directory (restore cwd after) */
+                    char b; long rf = sys_readfile(a, &b, 1);
+                    int isdir = 0; if (sys_chdir(a) >= 0) { isdir = 1; sys_chdir(cwd); }
+                    if (streq(op, "-d")) res = isdir;                          /* directory */
+                    else if (streq(op, "-e")) res = (rf >= 0) || isdir;       /* exists: file or dir */
+                    else if (streq(op, "-f")) res = (rf >= 0) && !isdir;      /* regular file (readable, not a dir) */
+                    else if (streq(op, "-s")) res = (rf >= 1) && !isdir;      /* non-empty regular file */
+                }
             }
             else if (rem == 3) {
                 const char *a = av[i0], *op = av[i0+1], *b = av[i0+2];

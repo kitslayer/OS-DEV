@@ -1,5 +1,13 @@
 # What's next
 
+> **(M903) Shell — `test`/`[ ]` gains `-d` (directory), `-s` (non-empty file), and correct `-e`/`-f` for dirs.**
+> `[ -d PATH ]` is the standard idiom for "is a directory" and was missing (it silently fell through to false).
+> Added it (and `-s` = non-empty regular file) using the `sys_chdir`-then-restore pattern the shell already
+> uses elsewhere to detect directories. Also fixed `-e`/`-f`, which both used `sys_readfile` and so couldn't
+> tell a directory apart: `-e` now matches a file **or** a directory, and `-f` is true only for a regular
+> file (readable and not chdir-able). Verified in-guest (`[ -f DIR ]`→false, `[ -d DIR ]`→true, `[ -d FILE ]`
+> →false, `pwd` unchanged afterward); `make check` green (35 suites).
+
 > **(M902) Shell — proper `printf`: hex/octal/unsigned + width/zero-pad/left-align, and negative numbers.**
 > `printf` now handles `%x`/`%X`/`%o`/`%u` (32-bit, like `%d`; previously printed literally) plus
 > `%[-][0][width]` flags, so formatted output works: `printf [%5d]\n 42` → `[   42]`, `printf [%-5d]\n 42`
