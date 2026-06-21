@@ -468,8 +468,15 @@ static uint32_t parse_style_border(const char *s, int n) {
     for (int i = 0; i + 1 < vl; i++)
         if (v[i] >= '0' && v[i] <= '9') { int w = 0, j = i; while (j < vl && v[j] >= '0' && v[j] <= '9') { w = w*10 + (v[j]-'0'); j++; } if (j < vl && v[j] == 'p') { width = w; break; } }
     width = width < 1 ? 1 : (width > 15 ? 15 : width);          /* 4-bit width */
-    uint32_t color = 0x666666;                                  /* default medium grey */
-    for (int i = 0; i < vl; i++) if (v[i] == '#') { color = parse_color(v + i, vl - i); break; }
+    uint32_t color = 0x666666; int found = 0;                   /* default medium grey */
+    for (int i = 0; i < vl && !found; ) {                        /* scan each token for a colour (#hex, rgb(), or a name like "red") */
+        while (i < vl && (v[i]==' '||v[i]=='\t')) i++;
+        int ts = i; while (i < vl && v[i]!=' ' && v[i]!='\t') i++;
+        if (i <= ts) continue;
+        uint32_t pc = parse_color(v + ts, i - ts);              /* parse_color reads the leading token of what we pass */
+        if (pc != 0) { color = pc; found = 1; }                 /* any non-black colour token wins (width/style words parse to 0) */
+        else if (v[ts]=='#' || (i-ts==5 && memcmp(v+ts,"black",5)==0)) { color = 0; found = 1; }   /* explicit black / #000 */
+    }
     return ((uint32_t)(width & 0xF) << 28) | ((uint32_t)(sides & 0xF) << 24) | (color & 0xFFFFFFu);
 }
 /* text-align: 1 = center, 2 = right, 0 = left/justify/other (the default flow). */

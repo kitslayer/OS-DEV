@@ -1,5 +1,13 @@
 # What's next
 
+> **(M917) Browser — named/`rgb()` colours in CSS borders.** `parse_style_border` only scanned for `#hex`, so
+> `border:1px solid black` (named colour — extremely common) fell back to grey. `parse_color` reads the
+> *leading* token, so on `"1px solid red"` it saw `"1px"` and failed. Now the border parser scans each
+> whitespace-delimited token and takes the first that `parse_color` resolves to a real colour (width/style
+> words like `solid`/`dashed` parse to 0 and are skipped), with explicit `black`/`#000` handled too. Verified
+> in-guest (`BORDER.HTM`: a box with `border:2px solid blue` now renders blue, not grey). `make check` green
+> (35 suites).
+
 > **(M916) Browser — horizontal padding inside full border boxes.** Completes the border box model (M910-M915):
 > a full box's text now insets `BORDER_PAD` (6px) on both sides instead of hugging the edges. Left inset reuses
 > the parse-time `curindent`/`tokindent` path (added *after* the marker captures the box's true left edge, so
