@@ -1086,10 +1086,11 @@ static char *num_to_str(double d){
     double x=d; if (x<0){ buf[p++]='-'; x=-x; }
     int e=0; double t=x;                                                 /* normalize: t in [1,10), value = t*10^e */
     while (t>=10.0){ t*=0.1; e++; } while (t<1.0){ t*=10.0; e--; }
-    char dig[18]; int nd=0;                                              /* 16 significant digits */
-    for (int i=0;i<16;i++){ int c=(int)t; if(c<0)c=0; if(c>9)c=9; dig[nd++]=(char)('0'+c); t=(t-c)*10.0; }
-    if ((int)t>=5){ int i=nd-1;                                          /* round to 16 figs */
-        for(;;){ if(dig[i]<'9'){ dig[i]++; break; } dig[i]='0'; if(i==0){ for(int j=nd;j>0;j--) dig[j]=dig[j-1]; dig[0]='1'; e++; nd++; break; } i--; } }
+    char dig[18]; int nd=0;                                              /* 15 significant digits via ONE integer scaling (stays < 2^53 -> exact; avoids the per-digit (t-c)*10 drift that printed 9876.5 as 9876.500000000002) */
+    double sc = js_floor(t * 1e14 + 0.5);                                /* t in [1,10) -> a 15-digit integer */
+    if (sc >= 1e15) { sc *= 0.1; e++; }                                  /* rounded up to 10.x -> renormalize */
+    int64_t iv = (int64_t)sc;
+    { char tmp[20]; int tn=0; int64_t z=iv; if(z==0) tmp[tn++]='0'; while(z){ tmp[tn++]=(char)('0'+(int)(z%10)); z/=10; } while(tn<15) tmp[tn++]='0'; for(int i=tn-1;i>=0;i--) dig[nd++]=tmp[i]; }
     while (nd>1 && dig[nd-1]=='0') nd--;                                 /* trim trailing zeros */
     if (e< -6 || e>=21){                                                 /* exponential notation */
         buf[p++]=dig[0];
@@ -2591,11 +2592,15 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
         r[p]=0; return STRV(r);
     }
     if (strcmp(name,"valueOf")==0) return recv;
-    if (strcmp(name,"toLocaleString")==0){   /* group integer digits in 3s with commas: 1234567 -> "1,234,567" (M278) */
-        char d[24]; int dn=0; int neg=v<0; unsigned long long u=neg?(unsigned long long)(-(v+1))+1ULL:(unsigned long long)v;
-        if(u==0)d[dn++]='0'; while(u){ d[dn++]='0'+(int)(u%10); u/=10; }
-        char out[40]; int oi=0; if(neg)out[oi++]='-';
-        for(int i=dn-1;i>=0;i--){ out[oi++]=d[i]; if(i>0 && i%3==0) out[oi++]=','; }
+    if (strcmp(name,"toLocaleString")==0){   /* group integer digits in 3s with commas, keeping any fraction: 1234567 -> "1,234,567", 1234.5 -> "1,234.5" (M278, M920) */
+        double dv = to_num(recv);
+        if (js_isnan(dv) || js_isinf(dv)) return STRV(num_to_str(dv));
+        const char *ns = num_to_str(dv);                          /* "1234.5" / "-1234" / "1e21" */
+        int neg = ns[0]=='-', si = neg?1:0, dot = si;
+        while (ns[dot] && ns[dot]!='.' && ns[dot]!='e' && ns[dot]!='E') dot++;   /* integer part is [si, dot) */
+        char out[80]; int oi=0; if(neg && oi<79) out[oi++]='-';
+        for (int i=si; i<dot && oi<76; i++){ out[oi++]=ns[i]; int rem=dot-1-i; if(rem>0 && rem%3==0) out[oi++]=','; }   /* thousands separators */
+        for (int i=dot; ns[i] && oi<79; i++) out[oi++]=ns[i];     /* append ".frac" / "eXX" unchanged */
         out[oi]=0; char*r=aalloc(oi+1); if(!r) return STRV(""); memcpy(r,out,oi+1); return STRV(r);
     }
     rt_err("no such number method"); return UND();

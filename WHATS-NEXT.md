@@ -1,5 +1,15 @@
 # What's next
 
+> **(M920) JS engine — fix `num_to_str` precision drift + `toLocaleString` keeps the fraction.** Some floats
+> printed with spurious trailing digits: `9876.5`→`"9876.500000000002"`, `99.99`→`"99.99000000000002"`,
+> `8.8`→`"8.800000000000001"`. Cause: the formatter extracted 16 digits one at a time via `(t-c)*10`, which
+> accumulates floating-point error. Replaced it with a single integer scaling — `round(t·10¹⁴)` gives a
+> 15-digit integer that stays under 2^53 (so it's exact), and the digits come straight out with no drift.
+> Now `9876.5`/`99.99`/`8.8` print exactly; precision is 15 sig-figs (e.g. `Math.PI`→`3.14159265358979`).
+> Also fixed `Number.toLocaleString` to keep the fractional part (`(1234.5).toLocaleString()`→`"1,234.5"`,
+> `(1234567.89)`→`"1,234,567.89"` — was dropping decimals, wrong for money). Verified on host; suite-promise
+> golden updated for the 15-fig change; `make check` green (35 suites).
+
 > **(M919) JS engine — `Object.is` handles NaN/-0 (float-migration correctness).** With real IEEE doubles
 > (M906), `Object.is` was still just `===`, so `Object.is(NaN,NaN)` was `false` (its whole reason to exist is
 > to be `true`) and `Object.is(0,-0)` was `true` (should be `false`). Now the number path special-cases both:

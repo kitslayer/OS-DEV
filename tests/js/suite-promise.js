@@ -79,7 +79,7 @@ print("-- floating point (M906-M909): real IEEE-754 doubles --");
 print(3.14 * 2, 7 / 2, 10 / 4, 1 / 8);                                       // 6.28 3.5 2.5 0.125
 print(1 / 0, -1 / 0, 0 / 0, isFinite(1 / 0), Number.isNaN(0 / 0));           // Infinity -Infinity NaN false true
 print(Math.floor(3.7), Math.ceil(3.2), Math.round(2.5), Math.trunc(-3.9), Math.sqrt(16));   // 3 4 3 -3 4
-print(Math.atan(1) * 4, Math.sin(0), Math.cos(0), Math.PI);                  // 3.141592653589793 0 1 3.141592653589793
+print(Math.atan(1) * 4, Math.sin(0), Math.cos(0), Math.PI);                  // 3.14159265358979 0 1 3.14159265358979 (~pi; num_to_str prints 15 sig figs)
 print((3.14159).toFixed(2), (5).toFixed(2), (1234.5678).toFixed(2));         // 3.14 5.00 1234.57
 print(parseFloat("3.14abc"), parseFloat("1e3"), parseFloat("abc"));          // 3.14 1000 NaN
 var _jf = JSON.parse('{"price":3.99,"rate":-0.5,"big":1.5e3}'); print(_jf.price, _jf.rate, _jf.big, JSON.stringify(_jf));   // 3.99 -0.5 1500 {"price":3.99,"rate":-0.5,"big":1500}
