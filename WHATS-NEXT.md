@@ -1,5 +1,16 @@
 # What's next
 
+> **(M936) Editor — matching-bracket highlight.** Completes the code-editor triad (highlight + auto-indent +
+> bracket-match). When the caret sits on, or just after, a bracket `()[]{}`, the editor tints both it and its
+> partner pink (palette 5) so you can see scope and catch mismatches at a glance. `match_bracket()` is a naive
+> depth scan (forward for openers, backward for closers; doesn't skip brackets inside strings/comments — fine
+> for an editor aid). It reuses the M934 colour pipeline: the two matched positions are written into `vcol[]`
+> (the per-byte colour array) after the syntax pass, so it composes with highlighting and the yellow selection,
+> and it now works in **any** file (the colour array is always populated, not just for recognised languages —
+> previously it was gated on `hl_lang`). Verified deterministically in-guest: with the caret after the `)` of
+> `total = arr(one, two, three)`, a pixel scan found exactly two pink glyph columns (the `(` and `)`), nothing
+> else. `make check` green (35 suites).
+
 > **(M935) Editor — auto-indent on Enter.** Paired with M934's highlighting to make the editor a real code
 > editor: pressing Enter now reproduces the current line's leading whitespace on the new line (so nested code
 > keeps its indentation instead of snapping back to column 0), and adds one extra 4-space level when the line

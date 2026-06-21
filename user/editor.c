@@ -341,6 +341,23 @@ static void detect_lang(void){
     else if(hl_eqi(e,"htm")||hl_eqi(e,"html")) hl_lang=3;
 }
 
+static int is_bracket(char c){ return c=='('||c==')'||c=='['||c==']'||c=='{'||c=='}'; }
+/* Position of the bracket matching the one at `pos`, or -1. Naive depth scan
+ * (doesn't skip brackets in strings/comments -- good enough for an editor aid). */
+static int match_bracket(int pos){
+    char c = doc[pos];
+    const char *opn = "([{", *cls = ")]}";
+    int dir = 0; char want = 0;
+    for (int i = 0; i < 3; i++){ if (c==opn[i]){ dir=1; want=cls[i]; break; } if (c==cls[i]){ dir=-1; want=opn[i]; break; } }
+    if (!dir) return -1;
+    int depth = 0;
+    for (int i = pos; i >= 0 && i < dlen; i += dir){
+        if (doc[i]==c) depth++;
+        else if (doc[i]==want && --depth==0) return i;
+    }
+    return -1;
+}
+
 static void render(const char *msg) {
     sys_clear();
     /* cursor line:col (1-based) for the status line */
@@ -373,13 +390,24 @@ static void render(const char *msg) {
     /* Syntax highlighting: colour the visible window of `doc` into vcol[], seeded
      * by a scan of [0,off) so a block comment / HTML tag / string opened earlier
      * colours correctly. hl_lang==0 -> all default (plain text renders as before). */
-    int vn = 0;
+    int vn = dlen - off; if (vn > 2046) vn = 2046; if (vn < 0) vn = 0;
+    for (int z = 0; z < vn; z++) vcol[z] = 0;
     if (hl_lang) {
         int mode = 0; char delim = 0;
         hl_run(0, off, 0, &mode, &delim);              /* seed: tokeniser state at `off` */
-        vn = dlen - off; if (vn > 2046) vn = 2046;
-        for (int z = 0; z < vn; z++) vcol[z] = 0;
         hl_run(off, off + vn, 1, &mode, &delim);       /* colour the visible window */
+    }
+    /* Matching-bracket highlight: if the caret sits on (or just after) a bracket,
+     * tint it and its partner pink (5). Works in any file, plain text included. */
+    {
+        int bp = -1;
+        if (cur < dlen && is_bracket(doc[cur])) bp = cur;
+        else if (cur > 0 && is_bracket(doc[cur-1])) bp = cur - 1;
+        if (bp >= 0) {
+            int mp = match_bracket(bp);
+            if (bp - off >= 0 && bp - off < vn) vcol[bp - off] = 5;
+            if (mp >= 0 && mp - off >= 0 && mp - off < vn) vcol[mp - off] = 5;
+        }
     }
     static char out[2048];                 /* off the stack; only ever holds the EDVIS visible rows */
     static signed char hlc[2048];          /* parallel colour for each out[] byte */
@@ -390,7 +418,7 @@ static void render(const char *msg) {
         if (i == cur) { out[o] = '|'; hlc[o] = 0; o++; }
         if (i < dlen) {
             char ch = doc[i];
-            int cc = (hl_lang && i - off >= 0 && i - off < vn) ? vcol[i - off] : 0;
+            int cc = (i - off >= 0 && i - off < vn) ? vcol[i - off] : 0;
             out[o] = ch; hlc[o] = (signed char)cc; o++;
             if (ch == '\n') { row++; col = 0; }
             else if (++col == EDCOLS) { row++; col = 0; }
