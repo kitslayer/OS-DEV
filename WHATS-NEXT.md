@@ -1,5 +1,14 @@
 # What's next
 
+> **(M932) Browser — flex `justify-content: space-between` (and space-around/evenly).** Extended M931's
+> forward-scan to track item-widths (`ww`) and the gap count (`nb`) separately. For `space-between` the inter-
+> item gap is widened to fill the row — `flex_gap = (avail − ww) / nb` — so items spread edge-to-edge; center/
+> end still offset the whole row by `total = ww + nb·flex_gap`. (`space-around`/`evenly` map to the same
+> distribution for now.) Verified in-guest (`FLEX.HTM`: `space-between` puts `Left` at the left edge, `Right`
+> at the right, `Middle` between). Additive; `make check` green (35 suites). Flexbox now covers the common
+> cases — row/column, inline+stylesheet, gap, and justify center/end/space-between; `align-items` (cross-axis)
+> and `flex-grow` (item sizing) remain, needing fuller per-item measurement.
+
 > **(M931) Browser — flex `justify-content: center` / `flex-end`.** The first main-axis alignment, which needs
 > the row's width up front. Got it with a bounded forward-scan at `TK_FLEX_OPEN`: sum the direct children's
 > word widths (`(len+1)·GW·zoom`) + gaps until the matching `TK_FLEX_CLOSE` (depth-tracked so nested flex
