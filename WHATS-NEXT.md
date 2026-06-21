@@ -1,5 +1,14 @@
 # What's next
 
+> **(M909) JS engine — `JSON.parse` of real numbers (fractions + exponents).** The JSON number tokenizer was
+> integer-only: it dropped the fraction and choked on exponents, so `JSON.parse('{"price":3.99}')` returned
+> `3` and `JSON.parse('{"x":1.5e3}')` threw "invalid JSON" — fatal for real web APIs, which return JSON floats
+> everywhere. Rewrote the number branch to parse a full `int.frac[eE±exp]` into a double (matching M906).
+> Now `JSON.parse('{"price":3.99,"rate":-0.5,"big":1.5e3}')` → `3.99 -0.5 1500`, and stringify round-trips
+> (`{"price":3.99,...}`). Also added a floating-point regression block to `suite-promise.js` (fresh arena)
+> locking in M906–M909 (arithmetic, `Infinity`/`NaN`, `Math.*` incl. trig, `toFixed`, `parseFloat`, JSON
+> floats). `make check` green (35 suites).
+
 > **(M908) JS engine — real `Number.prototype.toFixed` + real `parseFloat`.** Two integer-era stubs that only
 > become meaningful with M906's doubles. `toFixed(k)` now rounds to k decimals (`(3.14159).toFixed(2)`→`"3.14"`,
 > `(1234.5678).toFixed(2)`→`"1234.57"`, `(2.5).toFixed(0)`→`"3"`, negatives + `"5.00"` padding) by scaling by

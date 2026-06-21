@@ -69,4 +69,12 @@ Rex bark|true|true
 true Dog foo B
 -- new.target meta-property (M700) --
 true true 1
+-- floating point (M906-M909): real IEEE-754 doubles --
+6.28 3.5 2.5 0.125
+Infinity -Infinity NaN false true
+3 4 3 -3 4
+3.141592653589793 0 1 3.141592653589793
+3.14 5.00 1234.57
+3.14 1000 NaN
+3.99 -0.5 1500 {"price":3.99,"rate":-0.5,"big":1500}
 -- done --

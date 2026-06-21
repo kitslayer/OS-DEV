@@ -3757,9 +3757,10 @@ static val json_parse_val(void){
     else if(*jp=='t'){ r=BOOLV(1); while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
     else if(*jp=='f'){ r=BOOLV(0); while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
     else if(*jp=='n'){ r.t=V_NULL; while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
-    else if(*jp=='-' || (*jp>='0'&&*jp<='9')){ int neg=0; if(*jp=='-'){ neg=1; jp++; } int64_t v=0;
-        while(jp<jp_end && *jp>='0'&&*jp<='9'){ v=(int64_t)((uint64_t)v*10+(unsigned)(*jp-'0')); jp++; }
-        if(jp<jp_end && *jp=='.'){ jp++; while(jp<jp_end && *jp>='0'&&*jp<='9') jp++; }   /* integer Number: drop fraction */
+    else if(*jp=='-' || (*jp>='0'&&*jp<='9')){ int neg=0; if(*jp=='-'){ neg=1; jp++; } double v=0;   /* JSON number -> double (M908: real fraction + exponent) */
+        while(jp<jp_end && *jp>='0'&&*jp<='9'){ v=v*10.0+(*jp-'0'); jp++; }
+        if(jp<jp_end && *jp=='.'){ jp++; double f=0.1; while(jp<jp_end && *jp>='0'&&*jp<='9'){ v+=(*jp-'0')*f; f*=0.1; jp++; } }
+        if(jp<jp_end && (*jp=='e'||*jp=='E')){ jp++; int eneg=0; if(jp<jp_end&&(*jp=='+'||*jp=='-')){ eneg=(*jp=='-'); jp++; } int ex=0; while(jp<jp_end && *jp>='0'&&*jp<='9'){ ex=ex*10+(*jp-'0'); jp++; } v*=js_pow(10.0, eneg?-(double)ex:(double)ex); }
         r=NUM(neg?-v:v); }
     else jp_err=1;
     g_depth--; return r;
