@@ -2552,8 +2552,8 @@ static comp eval_stmt(node *n, env *e) {
 }
 
 /* ---- builtin methods + globals ---- */
-/* methods on number/bool primitives: (255).toString(16) -> "ff". The kernel is
- * integer-only (no FPU), so toFixed just renders the integer (decimals dropped). */
+/* methods on number/bool primitives: (255).toString(16) -> "ff", (3.14159).toFixed(2) -> "3.14".
+ * Numbers are real doubles (M906); toString's radix path uses the integer value. */
 static val eval_number_method(val recv, const char *name, val *args, int nargs) {
     long long v=(long long)to_num(recv);
     if (strcmp(name,"toString")==0) {
@@ -2566,18 +2566,26 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
         char*r=aalloc(i+1); if(!r) return STRV("");
         for(int j=0;j<i;j++){ r[j]=tmp[i-1-j]; } r[i]=0; return STRV(r);
     }
-    if (strcmp(name,"toFixed")==0) {                 /* integer engine: value is whole, but
-                                                      * format-correctly pad k decimal places so
-                                                      * e.g. (5).toFixed(2) -> "5.00" (currency). */
+    if (strcmp(name,"toFixed")==0) {                 /* round to k decimals: (3.14159).toFixed(2) -> "3.14" */
         int k = nargs ? (int)to_num(args[0]) : 0;
-        if (k <= 0) return STRV(val_to_str(recv));
-        if (k > 100) k = 100;
-        const char *istr = val_to_str(recv);
-        int il = (int)strlen(istr);
-        char *r = aalloc(il + 1 + k + 1); if(!r) return STRV("");
-        int p=0; for(int j=0;j<il;j++) r[p++]=istr[j];
-        r[p++]='.'; for(int j=0;j<k;j++) r[p++]='0'; r[p]=0;
-        return STRV(r);
+        if (k < 0) k = 0; if (k > 100) k = 100;
+        double d = to_num(recv);
+        if (js_isnan(d)) return STRV("NaN");
+        if (js_isinf(d)) return STRV(d<0?"-Infinity":"Infinity");
+        int neg = d < 0; if (neg) d = -d;
+        double scale = 1.0; for (int j=0;j<k;j++) scale *= 10.0;
+        double scaled = js_floor(d*scale + 0.5);     /* round half up, to an integer-valued double */
+        char digs[420]; int nd=0;                    /* extract decimal digits of `scaled` */
+        if (scaled < 1.0) digs[nd++]='0';
+        else { char tmp[420]; int tn=0; double t=scaled;
+               while (t>=1.0 && tn<419){ double q=js_floor(t/10.0); int dg=(int)(t-q*10.0); tmp[tn++]=(char)('0'+dg); t=q; }
+               for (int j=tn-1;j>=0;j--) digs[nd++]=tmp[j]; }
+        char *r = aalloc(nd + k + 4); if(!r) return STRV(""); int p=0;
+        if (neg && !(scaled==0.0)) r[p++]='-';        /* -0 -> "0.00" not "-0.00" */
+        if (k==0) { for(int j=0;j<nd;j++) r[p++]=digs[j]; }
+        else if (nd<=k) { r[p++]='0'; r[p++]='.'; for(int j=0;j<k-nd;j++) r[p++]='0'; for(int j=0;j<nd;j++) r[p++]=digs[j]; }
+        else { int il=nd-k; for(int j=0;j<il;j++) r[p++]=digs[j]; r[p++]='.'; for(int j=il;j<nd;j++) r[p++]=digs[j]; }
+        r[p]=0; return STRV(r);
     }
     if (strcmp(name,"valueOf")==0) return recv;
     if (strcmp(name,"toLocaleString")==0){   /* group integer digits in 3s with commas: 1234567 -> "1,234,567" (M278) */
@@ -3621,6 +3629,20 @@ static val nat_parseInt(val *a, int n){                                         
         if(d>=radix) break; v=v*radix+d; any=1; }
     return NUM(any?(neg?-v:v):0);
 }
+static val nat_parseFloat(val *a, int n){                                          /* parseFloat(str): leading float prefix -> double, else NaN */
+    if(!n) return NUM(JS_NAN);
+    const char *s=val_to_str(a[0]);
+    while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++;
+    int neg=0; if(*s=='+') s++; else if(*s=='-'){ neg=1; s++; }
+    if(s[0]=='I'&&s[1]=='n'&&s[2]=='f'&&s[3]=='i'&&s[4]=='n'&&s[5]=='i'&&s[6]=='t'&&s[7]=='y') return NUM(neg?-JS_INF:JS_INF);
+    int any=0; double x=0;
+    while(*s>='0'&&*s<='9'){ x=x*10.0+(*s-'0'); s++; any=1; }
+    if(*s=='.'){ s++; double f=0.1; while(*s>='0'&&*s<='9'){ x+=(*s-'0')*f; f*=0.1; s++; any=1; } }
+    if(!any) return NUM(JS_NAN);                                                   /* no leading digits -> NaN (unlike parseInt's 0) */
+    if(*s=='e'||*s=='E'){ const char *p=s+1; int eneg=0; if(*p=='+')p++; else if(*p=='-'){eneg=1;p++;}
+        if(*p>='0'&&*p<='9'){ int en=0; while(*p>='0'&&*p<='9'){en=en*10+(*p-'0');p++;} x*=js_pow(10.0,eneg?-(double)en:(double)en); } }
+    return NUM(neg?-x:x);
+}
 static val nat_String(val *a, int n){ return STRV(n ? val_to_str(a[0]) : ""); }
 static val nat_Number(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }
 static val nat_Boolean(val *a, int n){ return BOOLV(n ? truthy(a[0]) : 0); }
@@ -4115,10 +4137,10 @@ static void install_globals(env *g) {
         env_define(g,"Symbol",obj_val_native(symc)); } }
     /* global functions */
     obj *pi=new_obj(V_NATIVE); pi->native=nat_parseInt; env_define(g,"parseInt",obj_val_native(pi));
-    obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));
+    obj *pf=new_obj(V_NATIVE); pf->native=nat_parseFloat; env_define(g,"parseFloat",obj_val_native(pf));
     obj *sf=new_obj(V_NATIVE); sf->native=nat_String;   env_define(g,"String",obj_val_native(sf));
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
-    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); obj_set(nst,"POSITIVE_INFINITY",NUM(JS_INF)); obj_set(nst,"NEGATIVE_INFINITY",NUM(-JS_INF)); obj_set(nst,"MAX_VALUE",NUM(1.7976931348623157e308)); obj_set(nst,"MIN_VALUE",NUM(5e-324)); obj_set(nst,"EPSILON",NUM(2.220446049250313e-16)); obj_set(nst,"NaN",NUM(JS_NAN)); nf->statics=nst; }
+    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseFloat); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); obj_set(nst,"POSITIVE_INFINITY",NUM(JS_INF)); obj_set(nst,"NEGATIVE_INFINITY",NUM(-JS_INF)); obj_set(nst,"MAX_VALUE",NUM(1.7976931348623157e308)); obj_set(nst,"MIN_VALUE",NUM(5e-324)); obj_set(nst,"EPSILON",NUM(2.220446049250313e-16)); obj_set(nst,"NaN",NUM(JS_NAN)); nf->statics=nst; }
       obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); def_native(sst,"fromCodePoint",nat_str_fromCharCode); sf->statics=sst; } }   /* String.fromCharCode/fromCodePoint (ASCII: same) via side-statics; Number/String stay V_NATIVE */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));

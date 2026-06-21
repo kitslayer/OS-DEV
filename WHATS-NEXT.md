@@ -1,5 +1,14 @@
 # What's next
 
+> **(M908) JS engine — real `Number.prototype.toFixed` + real `parseFloat`.** Two integer-era stubs that only
+> become meaningful with M906's doubles. `toFixed(k)` now rounds to k decimals (`(3.14159).toFixed(2)`→`"3.14"`,
+> `(1234.5678).toFixed(2)`→`"1234.57"`, `(2.5).toFixed(0)`→`"3"`, negatives + `"5.00"` padding) by scaling by
+> 10^k, rounding half-up, and laying out the digits with the decimal point placed from the right — was just
+> padding the integer with zeros. `parseFloat` was aliased to `parseInt` (so it truncated); it now parses a
+> real leading float prefix incl. fraction/exponent/`Infinity` (`parseFloat("3.14abc")`→`3.14`,
+> `parseFloat("1e3")`→`1000`, `parseFloat(".5")`→`0.5`, `parseFloat("abc")`→`NaN`). Verified on host; `make
+> check` green (35 suites).
+
 > **(M907) JS engine — trigonometry (`Math.sin/cos/tan/asin/acos/atan/atan2`).** Completes the transcendental
 > `Math` now that numbers are real doubles (M906): `sin`/`cos`/`tan` via a range-reduced Taylor series (reduce
 > to `[-π, π]`, 12 terms → ~15 digits), and `atan` via half-angle argument reduction
