@@ -2592,6 +2592,35 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
         else { int il=nd-k; for(int j=0;j<il;j++) r[p++]=digs[j]; r[p++]='.'; for(int j=il;j<nd;j++) r[p++]=digs[j]; }
         r[p]=0; return STRV(r);
     }
+    if (strcmp(name,"toExponential")==0 || strcmp(name,"toPrecision")==0) {
+        int prec = strcmp(name,"toPrecision")==0;                /* 1 = toPrecision, 0 = toExponential */
+        double dv = to_num(recv);
+        if (js_isnan(dv)) return STRV("NaN");
+        if (js_isinf(dv)) return STRV(dv<0?"-Infinity":"Infinity");
+        if (prec && !nargs) return STRV(num_to_str(dv));         /* toPrecision() with no arg == toString */
+        int k = nargs ? (int)to_num(args[0]) : 6;                /* toExponential default 6 frac digits */
+        if (k < 1 && prec) k = 1; if (k < 0) k = 0; if (k > 17) k = 17;
+        int ndig = prec ? k : k+1;                               /* total significant digits to produce */
+        char *r = aalloc(48); if(!r) return STRV(""); int p=0;
+        if (dv < 0) { r[p++]='-'; dv=-dv; }
+        int e = 0;
+        if (dv != 0.0) { double t=dv; while(t>=10.0){t*=0.1;e++;} while(t<1.0){t*=10.0;e--;} dv=t; }   /* dv in [1,10) */
+        double scl=1.0; for(int j=0;j<ndig-1;j++) scl*=10.0;
+        double sc = js_floor(dv*scl + 0.5); if (sc >= 10.0*scl){ sc*=0.1; e++; }   /* ndig-digit integer */
+        char dg[20]; int dn=0; { char tmp[20]; int tn=0; int64_t z=(int64_t)sc; if(z==0)tmp[tn++]='0'; while(z){tmp[tn++]=(char)('0'+(int)(z%10));z/=10;} while(tn<ndig)tmp[tn++]='0'; for(int i=tn-1;i>=0;i--) dg[dn++]=tmp[i]; }
+        if (!prec || e < -6 || e >= ndig) {                      /* exponential form: d.dddde±XX */
+            r[p++]=dg[0];
+            if (ndig>1){ r[p++]='.'; for(int i=1;i<ndig;i++) r[p++]=(i<dn)?dg[i]:'0'; }
+            r[p++]='e'; r[p++]=(e<0)?'-':'+'; int ae=e<0?-e:e;
+            char eb[4]; int en=0; if(ae==0)eb[en++]='0'; while(ae){eb[en++]=(char)('0'+ae%10);ae/=10;} while(en>0) r[p++]=eb[--en];
+        } else if (e >= 0) {                                     /* toPrecision fixed, point after e+1 digits */
+            for(int i=0;i<=e;i++) r[p++]=(i<dn)?dg[i]:'0';
+            if (ndig>e+1){ r[p++]='.'; for(int i=e+1;i<ndig;i++) r[p++]=(i<dn)?dg[i]:'0'; }
+        } else {                                                 /* toPrecision fixed, 0.00ddd */
+            r[p++]='0'; r[p++]='.'; for(int i=0;i<-e-1;i++) r[p++]='0'; for(int i=0;i<ndig;i++) r[p++]=(i<dn)?dg[i]:'0';
+        }
+        r[p]=0; return STRV(r);
+    }
     if (strcmp(name,"valueOf")==0) return recv;
     if (strcmp(name,"toLocaleString")==0){   /* group integer digits in 3s with commas, keeping any fraction: 1234567 -> "1,234,567", 1234.5 -> "1,234.5" (M278, M920) */
         double dv = to_num(recv);

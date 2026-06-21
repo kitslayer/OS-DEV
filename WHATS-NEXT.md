@@ -1,5 +1,14 @@
 # What's next
 
+> **(M922) JS engine — `Number.toExponential` + `toPrecision` (Number prototype complete).** The last two
+> Number formatting methods, sharing one implementation: normalize to `[1,10)`, scale to N significant digits
+> via the proven integer-scaling (`round(t·10ⁿ⁻¹)`, drift-free), then lay out the digits. `toExponential(k)`
+> always uses `d.ddde±XX` (k fraction digits, default 6); `toPrecision(p)` produces p significant figures,
+> choosing fixed vs exponential per spec (`e < -6 || e >= p` → exponential) and keeping trailing zeros
+> (`(1.5).toPrecision(3)`→`"1.50"`). Verified on host against V8: `(12345).toExponential(2)`=`"1.23e+4"`,
+> `(123.456).toPrecision(4)`=`"123.5"`, `(123456).toPrecision(3)`=`"1.23e+5"`, `(42).toPrecision(5)`=`"42.000"`.
+> `make check` green (35 suites). The from-scratch JS number/Math support is now comprehensive and consistent.
+
 > **(M921) JS engine — `(3.14).toString()` keeps the fraction.** The `Number.prototype.toString` method always
 > used the integer radix-conversion path, so `(3.14).toString()`→`"3"` and `(10.5).toString()`→`"10"` — even
 > though `String(3.14)` and `""+3.14` (which go through `num_to_str`) correctly gave `"3.14"`. Now base-10
