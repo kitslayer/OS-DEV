@@ -1,5 +1,12 @@
 # What's next
 
+> **(M926) Demo — `DEMO.SH` showcases the C-style for + `(( ))` arithmetic command.** Added two lines to the
+> bundled scripting demo: `for ((k=1; k<=3; k++)); do echo c-style-for k is $k; done` and
+> `((sq = 6 * 7)); echo arithmetic command: 6 times 7 is $sq`. So `source DEMO.SH` now demonstrates the
+> complete shell control-flow + arithmetic set (functions, `if`/`elif`/`case`, `for`-in/`while`/C-style-`for`,
+> `$(())`/`(( ))`, parameter expansion) and doubles as a composition regression check. Verified in-guest — the
+> whole demo runs cleanly through to "demo complete", including `c-style-for k is 1/2/3` and `…6 times 7 is 42`.
+
 > **(M925) Shell — fix `(( ))` comparisons (`<`/`>`/`|`) in if/while conditions.** M924's `(( ))` only skipped
 > *glob*, so the comparison operators still got mangled: `while ((i < 4))` read `<` as input redirection and
 > exited immediately, and `if ((x > 5))` matched for the wrong reason (the `>` redirected). The real fix:
