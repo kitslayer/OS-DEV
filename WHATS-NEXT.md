@@ -1,5 +1,14 @@
 # What's next
 
+> **(M916) Browser — horizontal padding inside full border boxes.** Completes the border box model (M910-M915):
+> a full box's text now insets `BORDER_PAD` (6px) on both sides instead of hugging the edges. Left inset reuses
+> the parse-time `curindent`/`tokindent` path (added *after* the marker captures the box's true left edge, so
+> the border stays put and only the text moves in). Right inset is a render-time `render_rpad` the markers
+> push on a full-box OPEN and pop on CLOSE; the word-wrap and justify tests use `cr - render_rpad`, so text
+> wraps short of the right border. Only full boxes (all four sides) pad — a `border-bottom` divider doesn't
+> inset text. Golden-safe: `render_rpad` is 0 outside a box, so non-bordered content wraps identically;
+> `make check` green (35 suites). Verified in-guest (`BORDER.HTM` boxes now have breathing room on all sides).
+
 > **(M915) Browser — borders follow the block's indent + a little vertical padding.** M910's border always
 > spanned the full content width (`cl..cr`), so an indented bordered block (`blockquote`, `margin-left`) drew
 > its box full-width instead of around its actual text. Now the `TK_BORDER_OPEN` marker carries the block's

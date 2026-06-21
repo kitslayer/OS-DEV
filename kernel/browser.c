@@ -61,6 +61,7 @@
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG,     /* TK_IMG: link field = image slot */
        TK_BORDER_OPEN, TK_BORDER_CLOSE };             /* CSS border: OPEN carries off=color(24b), style=width; bracket a block's tokens, drawn as one rect at render (M910) */
+#define BORDER_PAD 6                                   /* px of padding between a full border box and its text (both axes, M916) */
 
 typedef struct { uint32_t off; uint16_t len, link; uint8_t style, type; } tok_t;  /* off is uint32 so TEXT_MAX can exceed 64KB (len<=word, link<LINK_MAX stay uint16) */
 typedef struct { uint16_t off, len; } href_t;            /* slice into hrefs[] */
@@ -686,8 +687,9 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].depth = 1;
                 b->sc[sp].hasborder = 0;
                 if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), (uint16_t)((bd >> 24) & 0xF), (uint16_t)b->curindent, (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color, len=sides, link=left-indent, style=width */
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), (uint16_t)((bd >> 24) & 0xF), (uint16_t)b->curindent, (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color, len=sides, link=left-indent(pre-padding), style=width */
                     b->sc[sp].hasborder = 1;
+                    if (((bd >> 24) & 0xF) == 15) b->curindent += BORDER_PAD;   /* full box: inset its text (left); the marker already captured the box's left edge */
                 }
                 b->sc_sp++;
             }   /* stack full: skip (no scope) — graceful, never overflows */
@@ -3310,11 +3312,13 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         }
     } else {
     int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16]; int bstk_i[16], bsp = 0;   /* CSS border boxes: y_top+sides+left-indent pushed on OPEN, rect stroked on CLOSE */
+    int render_rpad = 0;   /* right-edge inset while inside full border boxes, so their text wraps short of the box (M916 horizontal padding) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
-        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = tk->len ? tk->len : 15; bstk_i[bsp] = tk->link; bsp++; } continue; }   /* y_top includes 4px top padding */
+        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right */
         if (tk->type == TK_BORDER_CLOSE) {
             if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh + 3, w = bstk_w[bsp], sd = bstk_s[bsp]; uint32_t bc = bstk_c[bsp];   /* sd: 1=top 2=right 4=bottom 8=left; +3 bottom padding */
+                if (sd == 15 && render_rpad >= BORDER_PAD) render_rpad -= BORDER_PAD;   /* leaving a full box: undo its wrap-right inset */
                 int xl = cl + bstk_i[bsp];                                          /* left edge follows the block's own indent (blockquote / margin-left) */
                 int yy0 = y0 < ct ? ct : y0, yy1 = y1 > cb ? cb : y1;
                 if (yy1 > yy0) {
@@ -3372,7 +3376,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         int sc = (tsc ? tsc : scale_for(tk->style)) * zm;
         int lh = (tsc ? (16 * tsc + 2) : lineh_for(tk->style)) * zm;
         int wpx = tk->len * GW * sc; if (wpx > cr - cl) wpx = cr - cl;
-        if (cx + wpx > cr && cx > cl) { cy += curlh; cx = cl; curlh = 18; }
+        if (cx + wpx > cr - render_rpad && cx > cl) { cy += curlh; cx = cl; curlh = 18; }
         if (lh > curlh) curlh = lh;
         /* at a line start (cx==cl): apply the line's left-indent (<blockquote>) and, for
          * center/right text-align, look ahead over the words that fit on the line
@@ -3393,7 +3397,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                     int pts = (u < TOK_MAX) ? b->tokscale[u] : 0;
                     int ps = (pts ? pts : scale_for(pk->style)) * zm;
                     int pw = pk->len * GW * ps; if (pw > avail) pw = avail;
-                    if (probe + pw > cr && probe > ls) break;  /* would wrap -> line ends here */
+                    if (probe + pw > cr - render_rpad && probe > ls) break;  /* would wrap -> line ends here */
                     endx = probe + pw; probe = endx + GW * ps;
                 }
                 int off = (al == 1) ? (avail - (endx - ls)) / 2 : (avail - (endx - ls));
