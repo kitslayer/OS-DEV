@@ -3480,6 +3480,7 @@ static void browser_save(browser_t *b) {
     int p = 0;
     for (int t = 0; t < b->ntok && p < cap - 8; t++) {
         tok_t *tk = &b->toks[t];
+        if (tk->type == TK_BORDER_OPEN || tk->type == TK_BORDER_CLOSE) continue;   /* structural markers, not text (off is a colour, not a text offset) */
         if (tk->type == TK_WORD) {
             for (int i = 0; i < tk->len && p < cap - 2; i++) out[p++] = b->text[tk->off + i];
             out[p++] = ' ';

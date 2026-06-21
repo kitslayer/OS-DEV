@@ -1,5 +1,14 @@
 # What's next
 
+> **(M913) Browser — keep CSS-border markers out of saved page text (+ audit).** The `TK_BORDER_OPEN/CLOSE`
+> marker tokens (M910) carry a colour in their `off` field, not a text-pool offset, so any code that treats a
+> token as a word would misread the text pool. `browser_save` (the `s` "save as PAGE.TXT" path) was emitting a
+> stray newline per marker via its catch-all `else`; now it skips them. Audited **all** token-text paths for
+> the same hazard and confirmed each is safe: the render loop `continue`s on the markers before `put_word`;
+> `tok_matches`/find is only called under a `TK_WORD` guard; word-copy uses the word-only hit-test rects; and
+> selection-copy already gates on `TK_WORD`. So the markers can never cause an out-of-bounds text read. `make
+> check` green (35 suites).
+
 > **(M912) Browser — individual border sides (`border-top/right/bottom/left`).** Extends M910/M911 so a block
 > can have just one edge — the common pattern for section dividers (`border-bottom`) and rules (`border-top`),
 > used all over real pages. `parse_style_border` now also matches the four per-side properties and packs a
