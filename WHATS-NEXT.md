@@ -1,5 +1,14 @@
 # What's next
 
+> **(M930) Browser — flex `gap`.** The flex row used a fixed 18px between items; now it honours the CSS `gap`
+> (and `column-gap`) value. The gap px is parsed in the push, carried in the `TK_FLEX_OPEN` marker's `off`
+> field, and the render uses it as the per-container item spacing (0 → 18px default; set per flex container).
+> Verified in-guest (`FLEX.HTM`: a `display:flex; gap:40px` row spaces Apple/Banana/Cherry noticeably wider
+> than the default-gap `.row`). Inline `style=` gap for now (CSS-rule `gap` would need another `css_*` array —
+> minor follow-up). `make check` green (35 suites). Flexbox now covers row/column, inline/stylesheet, and gap
+> — the layout properties that don't need item-width measurement; `justify-content`/`align-items`/`flex-grow`
+> (which do) remain the bigger deferred flex work.
+
 > **(M929) Browser — `flex-direction:column` (vertical flex).** M927's flex was row-only, so a
 > `display:flex; flex-direction:column` container (very common — vertical layouts, sidebars, stacked cards)
 > rendered its children as a horizontal row, which is wrong. Since a column flex stacks children vertically —

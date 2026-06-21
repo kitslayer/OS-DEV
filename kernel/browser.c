@@ -600,6 +600,13 @@ static int parse_style_flex(const char *s, int n) {
     if (style_prop(s, n, "flex-direction", 14, &vs, &ve) && attr_eq(s + vs, ve - vs, "column")) return 0;
     return 1;
 }
+/* flex `gap` / `column-gap` in px (0 = use the default item spacing). */
+static int parse_style_gap(const char *s, int n) {
+    int vs, ve;
+    if (style_prop(s, n, "gap", 3, &vs, &ve)) return parse_px_val(s + vs, ve - vs);
+    if (style_prop(s, n, "column-gap", 10, &vs, &ve)) return parse_px_val(s + vs, ve - vs);
+    return 0;
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -657,7 +664,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -669,6 +676,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
             uint32_t ibd = parse_style_border(st, stl); if (ibd) bd = ibd;   /* inline border overrides a <style> rule */
             if (parse_style_flex(st, stl)) flex = 1;                          /* display:flex */
+            fgap = parse_style_gap(st, stl);                                  /* flex gap (px) */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -713,7 +721,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 }
                 b->sc[sp].hasflex = 0;
                 if (flex && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* flex container: lay its children in a row */
-                    b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, 0, TK_FLEX_OPEN };
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)fgap, 0, NO_LINK, 0, TK_FLEX_OPEN };   /* off = gap px (0 = default) */
                     b->sc[sp].hasflex = 1;
                 }
                 b->sc_sp++;
@@ -3340,6 +3348,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16]; int bstk_i[16], bsp = 0;   /* CSS border boxes: y_top+sides+left-indent pushed on OPEN, rect stroked on CLOSE */
     int render_rpad = 0;   /* right-edge inset while inside full border boxes, so their text wraps short of the box (M916 horizontal padding) */
     int flex_depth = 0;    /* >0 while inside a display:flex container: child block-breaks become horizontal gaps (M927) */
+    int flex_gap = 18;     /* px gap between flex items (from CSS `gap`, M930; 18 default) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
         if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right */
@@ -3357,10 +3366,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
             continue;
         }
-        if (tk->type == TK_FLEX_OPEN)  { if (cx > cl) { cy += curlh; cx = cl; curlh = 18; } flex_depth++; continue; }   /* start the row on its own line */
+        if (tk->type == TK_FLEX_OPEN)  { if (cx > cl) { cy += curlh; cx = cl; curlh = 18; } flex_depth++; flex_gap = tk->off ? (int)tk->off : 18; continue; }   /* start the row on its own line; per-container gap */
         if (tk->type == TK_FLEX_CLOSE) { if (flex_depth > 0) flex_depth--; cy += curlh; cx = cl; curlh = 18; continue; }   /* end the row */
-        if (tk->type == TK_BREAK) { if (flex_depth > 0) { if (cx > cl) cx += 18; continue; } cy += curlh + tk->off; cx = cl; curlh = 18; continue; }   /* in flex: break -> horizontal gap between items */
-        if (tk->type == TK_PARA)  { if (flex_depth > 0) { if (cx > cl) cx += 18; continue; } cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
+        if (tk->type == TK_BREAK) { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + tk->off; cx = cl; curlh = 18; continue; }   /* in flex: break -> horizontal gap between items */
+        if (tk->type == TK_PARA)  { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_HR) {
             cy += curlh;
             if (cy + 4 >= ct && cy + 4 <= cb) fb_fill_rect(cl, cy + 4, cr - cl, 1, 0xC8CED8);
