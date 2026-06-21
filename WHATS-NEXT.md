@@ -1,5 +1,14 @@
 # What's next
 
+> **(M923) Shell — C-style `for ((init; cond; incr))` loops.** Completes the loop set (alongside `for V in
+> WORDS` and `while`). Feasible without touching the host-tested `shmath.h`: `sh_eval` already resolves bare
+> names, so the condition (`i<5`) and RHS expressions (`s+j`) evaluate directly; only the assignment is new —
+> a small `sh_do_assign` handles `VAR=expr`, `VAR++`/`--`, and `VAR+=expr` (and `-=`,`*=`,`/=`,`%=`) via `vset`.
+> `run_for_carith` parses the `((…))`, runs init once, loops while the condition is non-zero, runs the body
+> (honouring `break`/`continue`/`return` + a 100k-iteration cap + Ctrl-C), then the increment. The construct
+> splitter already keeps `for ((…)); do … done` together. Verified in-guest: `for ((i=0;i<5;i++))`→`0..4`,
+> a `j+=1` sum→`10`, `for ((k=3;k>0;k--))`→countdown. `make check` green (35 suites).
+
 > **(M922) JS engine — `Number.toExponential` + `toPrecision` (Number prototype complete).** The last two
 > Number formatting methods, sharing one implementation: normalize to `[1,10)`, scale to N significant digits
 > via the proven integer-scaling (`round(t·10ⁿ⁻¹)`, drift-free), then lay out the digits. `toExponential(k)`

@@ -2708,8 +2708,63 @@ static int run_andor(char *seg, char *cwd) {
 /* for VAR in WORDS; do BODY; done  (one line). WORDS get $var + glob expansion,
  * then BODY runs once per word with VAR bound to it. Buffers are on the stack so
  * nested loops don't clobber each other. */
+/* Evaluate one C-style-for assignment piece: VAR=expr / VAR++ / VAR-- / VAR+=expr (and -=,*=,/=,%=).
+ * Read parts use sh_eval (which resolves bare names); the assignment itself goes through vset. */
+static void sh_do_assign(const char *e) {
+    while (*e == ' ') e++;
+    const char *vs = e; int vl = 0; while (sh_vchar(e[vl])) vl++;
+    if (vl == 0) { const char *q = e; if (*q) sh_eval(&q); return; }   /* no lvalue -> just evaluate */
+    const char *op = e + vl; while (*op == ' ') op++;
+    char num[16];
+    if (op[0]=='+' && op[1]=='+') { itoa_simple((int)(sh_var(vs,vl)+1), num); vset(vs,vl,num); return; }   /* i++ */
+    if (op[0]=='-' && op[1]=='-') { itoa_simple((int)(sh_var(vs,vl)-1), num); vset(vs,vl,num); return; }   /* i-- */
+    if (op[0]=='=' && op[1]!='=') { const char *q=op+1; long r=sh_eval(&q); itoa_simple((int)r,num); vset(vs,vl,num); return; }   /* i=expr */
+    if (op[1]=='=' && (op[0]=='+'||op[0]=='-'||op[0]=='*'||op[0]=='/'||op[0]=='%')) {                       /* i+=expr etc. */
+        const char *q=op+2; long r=sh_eval(&q), cur=sh_var(vs,vl), nv;
+        switch(op[0]){ case '+':nv=cur+r;break; case '-':nv=cur-r;break; case '*':nv=cur*r;break; case '/':nv=r?cur/r:0;break; default:nv=r?cur%r:0; }
+        itoa_simple((int)nv,num); vset(vs,vl,num); return;
+    }
+    { const char *q=e; sh_eval(&q); }                                  /* bare expression */
+}
+/* C-style loop: for ((init; cond; incr)); do CMDS; done. `p` points at the "((".
+ * cond is a read-only sh_eval (empty == true); init/incr are assignments. */
+static int run_for_carith(char *p, char *cwd) {
+    char *close = 0; for (char *q = p + 2; *q; q++) if (q[0]==')' && q[1]==')') { close = q; break; }
+    if (!close) { print("for: missing '))'\n"); g_status=1; return 0; }
+    *close = 0;
+    char *init = p + 2, *cond, *incr, *s1 = init, *s2;
+    while (*s1 && *s1 != ';') s1++;
+    if (*s1 != ';') { print("for: ((init; cond; incr))\n"); g_status=1; return 0; }
+    *s1 = 0; cond = s1 + 1; s2 = cond;
+    while (*s2 && *s2 != ';') s2++;
+    if (*s2 != ';') { print("for: ((init; cond; incr))\n"); g_status=1; return 0; }
+    *s2 = 0; incr = s2 + 1;
+    char *a = close + 2; while (*a == ' ') a++; if (*a == ';') a++; while (*a == ' ') a++;
+    if (!(a[0]=='d' && a[1]=='o' && (a[2]==' '||a[2]==0))) { print("for: missing 'do'\n"); g_status=1; return 0; }
+    char *body = a + 2; while (*body == ' ') body++;
+    int blen = (int)ustrlen(body); while (blen>0 && body[blen-1]==' ') body[--blen]=0;
+    if (!(blen >= 4 && streq(body+blen-4, "done"))) { print("for: missing 'done'\n"); g_status=1; return 0; }
+    blen -= 4; while (blen>0 && body[blen-1]==' ') blen--; if (blen>0 && body[blen-1]==';') blen--; while (blen>0 && body[blen-1]==' ') blen--;
+    body[blen] = 0;
+    sh_do_assign(init);                                                /* run init once */
+    int doexit = 0, iters = 0; char bodybuf[1024];
+    g_loopdepth++;
+    while (!doexit) {
+        if (iters++ >= 100000) { print("\nfor: stopped at 100000 iterations\n"); break; }
+        int k = sys_pollkey(); if (k == 0x83 || k == 27) { print("\n^C\n"); break; }   /* Ctrl-C / Esc */
+        { const char *q = cond; while (*q == ' ') q++; long cv = *q ? sh_eval(&q) : 1; if (!cv) break; }   /* empty cond = forever */
+        int bi = 0; for (const char *c = body; *c && bi < 1023; c++) bodybuf[bi++] = *c; bodybuf[bi] = 0;
+        if (run_input_line(bodybuf, cwd)) doexit = 1;
+        if (g_returning) break;
+        if (g_loopbrk) { int brk = (g_loopbrk == 1); g_loopbrk = 0; if (brk) break; }
+        sh_do_assign(incr);
+    }
+    g_loopdepth--;
+    return doexit;
+}
 static int run_for(char *line, char *cwd) {
     char *p = line + 3; while (*p == ' ') p++;             /* skip "for" */
+    if (p[0] == '(' && p[1] == '(') return run_for_carith(p, cwd);   /* C-style for ((init; cond; incr)) */
     char var[32]; int vi = 0;
     while (*p && *p != ' ' && vi < 31) var[vi++] = *p++;
     var[vi] = 0;
