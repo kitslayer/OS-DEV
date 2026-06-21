@@ -1,5 +1,12 @@
 # What's next
 
+> **(M914) JS engine — hyperbolic Math (`sinh`/`cosh`/`tanh`).** The last gap in the now-floating-point Math
+> object: derived from `js_exp` (`sinh=(eˣ−e⁻ˣ)/2`, `cosh=(eˣ+e⁻ˣ)/2`, `tanh` via `(e²ˣ−1)/(e²ˣ+1)` with a
+> `|x|>20`→±1 guard for overflow). Verified on host (`cosh(1)=1.543080634815244`, `tanh(1)=0.7615941559557649`,
+> all matching V8). Math is now complete: abs/min/max/floor/ceil/round/trunc, sqrt/cbrt/hypot, pow/exp/log/
+> log2/log10, sin/cos/tan/asin/acos/atan/atan2, sinh/cosh/tanh, sign/clz32/imul/random + PI/E/LN2/LN10/LOG2E/
+> LOG10E/SQRT2/SQRT1_2. `make check` green (35 suites).
+
 > **(M913) Browser — keep CSS-border markers out of saved page text (+ audit).** The `TK_BORDER_OPEN/CLOSE`
 > marker tokens (M910) carry a colour in their `off` field, not a text-pool offset, so any code that treats a
 > token as a word would misread the text pool. `browser_save` (the `s` "save as PAGE.TXT" path) was emitting a

@@ -1065,6 +1065,9 @@ static double js_atan2(double y, double x){  /* full-quadrant angle of (x,y) */
 }
 static double js_asin(double x){ if (x<-1.0||x>1.0) return JS_NAN; if (x==1.0) return 1.5707963267948966; if (x==-1.0) return -1.5707963267948966; return js_atan(x/js_sqrt(1.0-x*x)); }
 static double js_acos(double x){ if (x<-1.0||x>1.0) return JS_NAN; return 1.5707963267948966 - js_asin(x); }
+static double js_sinh(double x){ double e=js_exp(x); return (e - 1.0/e)*0.5; }
+static double js_cosh(double x){ double e=js_exp(x); return (e + 1.0/e)*0.5; }
+static double js_tanh(double x){ if (x>20.0) return 1.0; if (x<-20.0) return -1.0; double e=js_exp(2.0*x); return (e-1.0)/(e+1.0); }
 /* JS ToInt32: NaN/Inf -> 0; truncate toward zero; take low 32 bits (signed). */
 static int32_t to_i32(double d){
     if (!js_isfinite(d)) return 0;
@@ -3602,6 +3605,9 @@ static val nat_atan(val *a, int n){ return NUM(js_atan(n?to_num(a[0]):0)); }
 static val nat_atan2(val *a, int n){ return NUM(js_atan2(n>0?to_num(a[0]):0, n>1?to_num(a[1]):0)); }
 static val nat_asin(val *a, int n){ return NUM(js_asin(n?to_num(a[0]):0)); }
 static val nat_acos(val *a, int n){ return NUM(js_acos(n?to_num(a[0]):0)); }
+static val nat_sinh(val *a, int n){ return NUM(js_sinh(n?to_num(a[0]):0)); }
+static val nat_cosh(val *a, int n){ return NUM(js_cosh(n?to_num(a[0]):0)); }
+static val nat_tanh(val *a, int n){ return NUM(js_tanh(n?to_num(a[0]):0)); }
 /* Math.random(): the engine is integer-only (no FPU), so there is no [0,1) float.
  * Math.random(n) returns a uniform integer in [0,n) -- a die/range; the no-arg
  * form returns [0, 2^31) (use `% n`). xorshift64, lazily seeded from the CPU's
@@ -4108,6 +4114,7 @@ static void install_globals(env *g) {
     def_native(math,"log",nat_log); def_native(math,"exp",nat_exp); def_native(math,"log10",nat_log10);
     def_native(math,"sin",nat_sin); def_native(math,"cos",nat_cos); def_native(math,"tan",nat_tan);
     def_native(math,"atan",nat_atan); def_native(math,"atan2",nat_atan2); def_native(math,"asin",nat_asin); def_native(math,"acos",nat_acos);
+    def_native(math,"sinh",nat_sinh); def_native(math,"cosh",nat_cosh); def_native(math,"tanh",nat_tanh);
     obj_set(math,"PI",NUM(3.141592653589793)); obj_set(math,"E",NUM(2.718281828459045));               /* Math constants (real doubles now) */
     obj_set(math,"LN2",NUM(0.6931471805599453)); obj_set(math,"LN10",NUM(2.302585092994046));
     obj_set(math,"LOG2E",NUM(1.4426950408889634)); obj_set(math,"LOG10E",NUM(0.4342944819032518));
