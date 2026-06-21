@@ -1,5 +1,16 @@
 # What's next
 
+> **(M927) Browser — `display:flex` row layout (the last deferred big item).** The single-pass renderer stacks
+> every block vertically; flex needs children laid in a row. Done additively with the same marker-token trick
+> as `border`: a `display:flex` block emits `TK_FLEX_OPEN`/`TK_FLEX_CLOSE` around its children, and the render
+> loop keeps a `flex_depth` — while >0, a child's block-break becomes a horizontal **gap** (18px) instead of a
+> line advance, so the children flow in a row (wrapping at the right edge); `TK_FLEX_CLOSE` ends the row. Both
+> inline `style="display:flex"` and `inline-flex` are recognised. Verified in-guest with `FLEX.HTM`: three
+> divs render **side by side** under flex, and **stack vertically** without it (same markup) — proving it's
+> additive (`flex_depth` is 0 outside a flex container, so all existing pages render identically; `make check`
+> green, 35 suites). This is basic flex-row (no `justify-content`/`align`/`grow`/explicit-`wrap` yet), but it's
+> the core horizontal-layout primitive the renderer lacked. CSS-rule `display:flex` (via `<style>`) is next.
+
 > **(M926) Demo — `DEMO.SH` showcases the C-style for + `(( ))` arithmetic command.** Added two lines to the
 > bundled scripting demo: `for ((k=1; k<=3; k++)); do echo c-style-for k is $k; done` and
 > `((sq = 6 * 7)); echo arithmetic command: 6 times 7 is $sq`. So `source DEMO.SH` now demonstrates the

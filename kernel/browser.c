@@ -60,7 +60,8 @@
 
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG,     /* TK_IMG: link field = image slot */
-       TK_BORDER_OPEN, TK_BORDER_CLOSE };             /* CSS border: OPEN carries off=color(24b), style=width; bracket a block's tokens, drawn as one rect at render (M910) */
+       TK_BORDER_OPEN, TK_BORDER_CLOSE,               /* CSS border: OPEN carries off=color(24b), style=width; bracket a block's tokens, drawn as one rect at render (M910) */
+       TK_FLEX_OPEN, TK_FLEX_CLOSE };                 /* display:flex: bracket a container; inside, child block-breaks become horizontal gaps (row layout) (M927) */
 #define BORDER_PAD 6                                   /* px of padding between a full border box and its text (both axes, M916) */
 
 typedef struct { uint32_t off; uint16_t len, link; uint8_t style, type; } tok_t;  /* off is uint32 so TEXT_MAX can exceed 64KB (len<=word, link<LINK_MAX stay uint16) */
@@ -144,7 +145,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border */
@@ -589,6 +590,12 @@ static int parse_style_display(const char *s, int n) {
     if (style_prop(s, n, "visibility", 10, &vs, &ve) && attr_eq(s + vs, ve - vs, "hidden")) return 1;
     return 0;
 }
+/* display:flex / inline-flex -> 1 (lay direct children in a row). */
+static int parse_style_flex(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "display", 7, &vs, &ve)) return 0;
+    return attr_eq(s + vs, ve - vs, "flex") || attr_eq(s + vs, ve - vs, "inline-flex");
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -642,10 +649,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (b->sc[sp].hidden && b->n_hidden > 0) b->n_hidden--;   /* leaving a display:none element */
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
                 if (b->sc[sp].hasborder && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };   /* close the border box opened by this frame */
+                if (b->sc[sp].hasflex && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_FLEX_CLOSE };   /* end the flex row */
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -656,6 +664,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int itr = parse_style_transform(st, stl);  if (itr) tr = itr;   /* text-transform (inline only) */
             uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
             uint32_t ibd = parse_style_border(st, stl); if (ibd) bd = ibd;   /* inline border overrides a <style> rule */
+            if (parse_style_flex(st, stl)) flex = 1;                          /* display:flex */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -677,7 +686,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
               if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml || bd) {  /* styled/hidden/indented/bordered element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml || bd || flex) {  /* styled/hidden/indented/bordered/flex element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
@@ -697,6 +706,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                     b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), (uint16_t)((bd >> 24) & 0xF), (uint16_t)b->curindent, (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color, len=sides, link=left-indent(pre-padding), style=width */
                     b->sc[sp].hasborder = 1;
                     if (((bd >> 24) & 0xF) == 15) b->curindent += BORDER_PAD;   /* full box: inset its text (left); the marker already captured the box's left edge */
+                }
+                b->sc[sp].hasflex = 0;
+                if (flex && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* flex container: lay its children in a row */
+                    b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, 0, TK_FLEX_OPEN };
+                    b->sc[sp].hasflex = 1;
                 }
                 b->sc_sp++;
             }   /* stack full: skip (no scope) — graceful, never overflows */
@@ -3320,6 +3334,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     } else {
     int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16]; int bstk_i[16], bsp = 0;   /* CSS border boxes: y_top+sides+left-indent pushed on OPEN, rect stroked on CLOSE */
     int render_rpad = 0;   /* right-edge inset while inside full border boxes, so their text wraps short of the box (M916 horizontal padding) */
+    int flex_depth = 0;    /* >0 while inside a display:flex container: child block-breaks become horizontal gaps (M927) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
         if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right */
@@ -3337,8 +3352,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
             continue;
         }
-        if (tk->type == TK_BREAK) { cy += curlh + tk->off; cx = cl; curlh = 18; continue; }
-        if (tk->type == TK_PARA)  { cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
+        if (tk->type == TK_FLEX_OPEN)  { if (cx > cl) { cy += curlh; cx = cl; curlh = 18; } flex_depth++; continue; }   /* start the row on its own line */
+        if (tk->type == TK_FLEX_CLOSE) { if (flex_depth > 0) flex_depth--; cy += curlh; cx = cl; curlh = 18; continue; }   /* end the row */
+        if (tk->type == TK_BREAK) { if (flex_depth > 0) { if (cx > cl) cx += 18; continue; } cy += curlh + tk->off; cx = cl; curlh = 18; continue; }   /* in flex: break -> horizontal gap between items */
+        if (tk->type == TK_PARA)  { if (flex_depth > 0) { if (cx > cl) cx += 18; continue; } cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_HR) {
             cy += curlh;
             if (cy + 4 >= ct && cy + 4 <= cb) fb_fill_rect(cl, cy + 4, cr - cl, 1, 0xC8CED8);
@@ -3492,7 +3509,8 @@ static void browser_save(browser_t *b) {
     int p = 0;
     for (int t = 0; t < b->ntok && p < cap - 8; t++) {
         tok_t *tk = &b->toks[t];
-        if (tk->type == TK_BORDER_OPEN || tk->type == TK_BORDER_CLOSE) continue;   /* structural markers, not text (off is a colour, not a text offset) */
+        if (tk->type == TK_BORDER_OPEN || tk->type == TK_BORDER_CLOSE ||
+            tk->type == TK_FLEX_OPEN   || tk->type == TK_FLEX_CLOSE) continue;   /* structural markers, not text */
         if (tk->type == TK_WORD) {
             for (int i = 0; i < tk->len && p < cap - 2; i++) out[p++] = b->text[tk->off + i];
             out[p++] = ' ';
