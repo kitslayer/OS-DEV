@@ -1,5 +1,11 @@
 # What's next
 
+> **(M921) JS engine — `(3.14).toString()` keeps the fraction.** The `Number.prototype.toString` method always
+> used the integer radix-conversion path, so `(3.14).toString()`→`"3"` and `(10.5).toString()`→`"10"` — even
+> though `String(3.14)` and `""+3.14` (which go through `num_to_str`) correctly gave `"3.14"`. Now base-10
+> `toString()` routes through `num_to_str` (full float); only a non-10 radix (`(255).toString(16)`→`"ff"`)
+> uses the integer path. Fixes a common explicit-conversion inconsistency. `make check` green (35 suites).
+
 > **(M920) JS engine — fix `num_to_str` precision drift + `toLocaleString` keeps the fraction.** Some floats
 > printed with spurious trailing digits: `9876.5`→`"9876.500000000002"`, `99.99`→`"99.99000000000002"`,
 > `8.8`→`"8.800000000000001"`. Cause: the formatter extracted 16 digits one at a time via `(t-c)*10`, which

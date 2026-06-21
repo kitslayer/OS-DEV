@@ -2557,11 +2557,12 @@ static comp eval_stmt(node *n, env *e) {
 
 /* ---- builtin methods + globals ---- */
 /* methods on number/bool primitives: (255).toString(16) -> "ff", (3.14159).toFixed(2) -> "3.14".
- * Numbers are real doubles (M906); toString's radix path uses the integer value. */
+ * Numbers are real doubles (M906); toString() base-10 = full float, a non-10 radix uses the integer value. */
 static val eval_number_method(val recv, const char *name, val *args, int nargs) {
     long long v=(long long)to_num(recv);
     if (strcmp(name,"toString")==0) {
         int radix=nargs?(int)to_num(args[0]):10; if(radix<2||radix>36) radix=10;
+        if (radix==10) return STRV(num_to_str(to_num(recv)));   /* base 10: full float formatting ((3.14).toString() === "3.14"), not the integer-only radix path */
         char tmp[72]; int i=0; int neg=v<0;
         unsigned long long u = neg ? (unsigned long long)(-(v+1))+1ULL : (unsigned long long)v;
         if(u==0) tmp[i++]='0';
