@@ -1,5 +1,13 @@
 # What's next
 
+> **(M929) Browser — `flex-direction:column` (vertical flex).** M927's flex was row-only, so a
+> `display:flex; flex-direction:column` container (very common — vertical layouts, sidebars, stacked cards)
+> rendered its children as a horizontal row, which is wrong. Since a column flex stacks children vertically —
+> exactly the default block flow — `parse_style_flex` now returns 0 when `flex-direction:column` is set, so the
+> container simply isn't switched into horizontal flex mode and its children stack as normal. Verified in-guest
+> (`FLEX.HTM`: a `flex-direction:column` block renders `Top/Middle/Bottom` stacked vertically, while the row
+> flex above it stays horizontal). `make check` green (35 suites). Flex now honours row vs column.
+
 > **(M928) Browser — `display:flex` from `<style>` rules (not just inline).** Most flex containers use a class
 > (`.row { display:flex }`), so extended M927 to stylesheet rules, mirroring the border CSS-rule path (M911):
 > `capture_css` encodes flex as `css_disp == 2` (1 = `display:none`), and `css_match` gained an `int *flex`

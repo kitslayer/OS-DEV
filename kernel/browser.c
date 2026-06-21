@@ -590,11 +590,15 @@ static int parse_style_display(const char *s, int n) {
     if (style_prop(s, n, "visibility", 10, &vs, &ve) && attr_eq(s + vs, ve - vs, "hidden")) return 1;
     return 0;
 }
-/* display:flex / inline-flex -> 1 (lay direct children in a row). */
+/* display:flex / inline-flex -> 1 (lay direct children in a ROW). flex-direction:column -> 0:
+ * a column flex stacks children vertically, which is already the default block flow, so we don't
+ * switch to (horizontal) flex mode for it — that keeps a column layout from rendering as a row. */
 static int parse_style_flex(const char *s, int n) {
     int vs, ve;
     if (!style_prop(s, n, "display", 7, &vs, &ve)) return 0;
-    return attr_eq(s + vs, ve - vs, "flex") || attr_eq(s + vs, ve - vs, "inline-flex");
+    if (!(attr_eq(s + vs, ve - vs, "flex") || attr_eq(s + vs, ve - vs, "inline-flex"))) return 0;
+    if (style_prop(s, n, "flex-direction", 14, &vs, &ve) && attr_eq(s + vs, ve - vs, "column")) return 0;
+    return 1;
 }
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
