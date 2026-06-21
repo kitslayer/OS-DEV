@@ -1,5 +1,14 @@
 # What's next
 
+> **(M902) Shell — proper `printf`: hex/octal/unsigned + width/zero-pad/left-align, and negative numbers.**
+> `printf` now handles `%x`/`%X`/`%o`/`%u` (32-bit, like `%d`; previously printed literally) plus
+> `%[-][0][width]` flags, so formatted output works: `printf [%5d]\n 42` → `[   42]`, `printf [%-5d]\n 42`
+> → `[42   ]`, `printf [%05d]\n -42` → `[-0042]` (zero-pad keeps the sign ahead of the zeros). With arg
+> cycling this gives hex colors with no quoting needed: `printf rgb=%02x%02x%02x\n 255 128 0` → `rgb=ff8000`.
+> Also fixed `itoa_simple` (was `while (v > 0)`, so negatives produced an empty string): `printf %d -42` →
+> `-42` and `seq -2 2` → `-2 -1 0 1 2` now print correctly (negatives were blank before). Verified in-guest;
+> `make check` green (35 suites).
+
 > **(M901) Shell — document + showcase the M900 parameter expansions.** Updated the `help` line to list the
 > new forms (`${#N} ${N#pfx} ${N%sfx}` alongside `${N:-def}`/`${N:+alt}`), and added a line to the bundled
 > `DEMO.SH`: `path=/usr/local/bin; echo basename ${path##*/} dirname ${path%/*} length ${#path}` → prints

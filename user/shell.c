@@ -13,9 +13,22 @@
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
-    int i = 0;
+    int i = 0, neg = (v < 0);
+    unsigned uv = neg ? (unsigned)(-(long)v) : (unsigned)v;   /* via long so INT_MIN is safe */
+    if (uv == 0) tmp[i++] = '0';
+    while (uv) { tmp[i++] = (char)('0' + uv % 10); uv /= 10; }
+    int j = 0;
+    if (neg) out[j++] = '-';
+    while (i > 0) out[j++] = tmp[--i];
+    out[j] = '\0';
+}
+
+/* Unsigned -> base-2..16 string (for printf %x/%X/%o/%u). */
+static void utoa_base(unsigned long v, int base, int upper, char *out) {
+    const char *digs = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+    char tmp[24]; int i = 0;
     if (v == 0) tmp[i++] = '0';
-    while (v > 0) { tmp[i++] = (char)('0' + v % 10); v /= 10; }
+    while (v) { tmp[i++] = digs[v % (unsigned)base]; v /= (unsigned)base; }
     int j = 0;
     while (i > 0) out[j++] = tmp[--i];
     out[j] = '\0';
@@ -1549,7 +1562,7 @@ static int run_command(char *line, char *cwd) {
             if (streq(a, "-n")) { }                       /* echo -n: print nothing, no newline */
             else if (startswith(a, "-n ")) print(a + 3);  /* echo -n TEXT: no trailing newline (good for prompts before `read`) */
             else { print(a); print("\n"); }
-        } else if (startswith(line, "printf ")) {         /* printf FMT [args]: \n \t \r \\ escapes + %s %d %c %% (FMT cycles over the args) */
+        } else if (startswith(line, "printf ")) {         /* printf FMT [args]: \n \t \r \\ escapes + %s %d/%i %x/%X %o %u %c %% (FMT cycles over the args) */
             const char *p = line + 7; while (*p == ' ') p++;
             char fmt[256]; int fi = 0; while (*p && *p != ' ' && fi < 255) fmt[fi++] = *p++; fmt[fi] = 0;
             while (*p == ' ') p++;
@@ -1572,11 +1585,29 @@ static int run_command(char *line, char *cwd) {
                         char s[2] = { c, 0 }; print(s);
                     } else if (*f == '%' && f[1]) {
                         f++;
-                        if (*f == '%') print("%");
-                        else if (*f == 's') { print(ai < ac ? av[ai] : ""); if (ai < ac) ai++; }
-                        else if (*f == 'd' || *f == 'i') { char nb[12]; itoa_simple(ai < ac ? (int)sh_str2long(av[ai]) : 0, nb); print(nb); if (ai < ac) ai++; }
-                        else if (*f == 'c') { char s[2] = { (char)(ai < ac ? av[ai][0] : 0), 0 }; print(s); if (ai < ac) ai++; }
-                        else { char s[2] = { *f, 0 }; print("%"); print(s); }   /* unknown spec: print literally */
+                        if (*f == '%') { print("%"); }
+                        else {                                       /* %[-][0][width](s|d|i|c|x|X|o|u) */
+                            int left = 0, zero = 0, width = 0;
+                            while (*f == '-' || *f == '0') { if (*f == '-') left = 1; else zero = 1; f++; }
+                            while (*f >= '0' && *f <= '9' && width < 256) { width = width*10 + (*f - '0'); f++; }
+                            char vs[80]; int vl = 0, consumed = 0, numeric = 0;
+                            if (*f == 's') { const char *a = ai < ac ? av[ai] : ""; while (a[vl] && vl < 79) { vs[vl] = a[vl]; vl++; } vs[vl] = 0; consumed = 1; }
+                            else if (*f == 'c') { vs[0] = (char)(ai < ac ? av[ai][0] : 0); vs[1] = 0; vl = (vs[0] != 0); consumed = 1; }
+                            else if (*f == 'd' || *f == 'i') { itoa_simple(ai < ac ? (int)sh_str2long(av[ai]) : 0, vs); while (vs[vl]) vl++; consumed = 1; numeric = 1; }
+                            else if (*f == 'x' || *f == 'X' || *f == 'o' || *f == 'u') {   /* hex / octal / unsigned (32-bit, like %d) */
+                                unsigned long uv = ai < ac ? (unsigned long)(unsigned)(int)sh_str2long(av[ai]) : 0;
+                                int base = (*f == 'o') ? 8 : (*f == 'u') ? 10 : 16;
+                                utoa_base(uv, base, *f == 'X', vs); while (vs[vl]) vl++; consumed = 1; numeric = 1;
+                            }
+                            else { vs[0] = '%'; vs[1] = *f; vs[2] = 0; vl = 2; }   /* unknown spec: literal */
+                            int pad = width > vl ? width - vl : 0;
+                            if (left) { print(vs); for (int k = 0; k < pad; k++) print(" "); }
+                            else if (zero && numeric) {              /* keep the sign ahead of the zero padding */
+                                if (vs[0] == '-') { print("-"); for (int k = 0; k < pad; k++) print("0"); print(vs + 1); }
+                                else { for (int k = 0; k < pad; k++) print("0"); print(vs); }
+                            } else { for (int k = 0; k < pad; k++) print(" "); print(vs); }
+                            if (consumed && ai < ac) ai++;
+                        }
                     } else { char s[2] = { *f, 0 }; print(s); }
                 }
                 if (!(has_spec && ai < ac && ai > start_ai)) break;   /* cycle the format while args remain and a pass consumed one */
