@@ -3608,17 +3608,17 @@ static val nat_acos(val *a, int n){ return NUM(js_acos(n?to_num(a[0]):0)); }
 static val nat_sinh(val *a, int n){ return NUM(js_sinh(n?to_num(a[0]):0)); }
 static val nat_cosh(val *a, int n){ return NUM(js_cosh(n?to_num(a[0]):0)); }
 static val nat_tanh(val *a, int n){ return NUM(js_tanh(n?to_num(a[0]):0)); }
-/* Math.random(): the engine is integer-only (no FPU), so there is no [0,1) float.
- * Math.random(n) returns a uniform integer in [0,n) -- a die/range; the no-arg
- * form returns [0, 2^31) (use `% n`). xorshift64, lazily seeded from the CPU's
- * cycle counter so it varies across boots. */
+/* Math.random(): the no-arg form returns a real double in [0,1) (standard, M917 — the
+ * engine has IEEE doubles since M906; M918). Math.random(n) is a kept non-standard extension
+ * returning a uniform integer in [0,n) (a die/range). xorshift64, lazily seeded from the
+ * CPU's cycle counter so it varies across boots. */
 static uint64_t js_rng_state = 0;
 static val nat_random(val *a, int n){
     if(js_rng_state == 0){ uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); js_rng_state = (((uint64_t)hi<<32) | lo) | 1ull; }
     js_rng_state ^= js_rng_state << 13; js_rng_state ^= js_rng_state >> 7; js_rng_state ^= js_rng_state << 17;
     uint64_t r = js_rng_state;
-    if(n >= 1){ int64_t m = to_num(a[0]); return NUM(m > 0 ? (int64_t)(r % (uint64_t)m) : 0); }   /* Math.random(n) -> [0,n) */
-    return NUM((int64_t)(r & 0x7FFFFFFFull));                                                     /* Math.random()  -> [0,2^31) */
+    if(n >= 1){ int64_t m = (int64_t)to_num(a[0]); return NUM(m > 0 ? (double)(int64_t)(r % (uint64_t)m) : 0.0); }   /* Math.random(n) -> [0,n) integer (non-standard extension, kept) */
+    return NUM((double)(r >> 11) * (1.0 / 9007199254740992.0));                                   /* Math.random() -> [0,1) real (53-bit; 2^53) */
 }
 
 /* ---- global functions ---- */

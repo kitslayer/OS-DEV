@@ -1,5 +1,13 @@
 # What's next
 
+> **(M918) JS engine — `Math.random()` returns real `[0,1)`.** It was still returning the old integer-engine
+> range `[0, 2^31)`, so every standard idiom was broken: `Math.random() < 0.5` was always false,
+> `Math.random() * 100` was astronomical, `Math.floor(Math.random()*n)` never indexed. Now the no-arg form
+> returns a real double in `[0,1)` (top 53 bits of the xorshift64 state ÷ 2^53). Kept the non-standard
+> `Math.random(n)` → `[0,n)` integer extension for back-compat. Verified on host (10000 samples all in
+> `[0,1)`, uniform with mean ~0.5; die-roll and coin-flip idioms work). Random isn't golden-tested (non-
+> deterministic), and `make check` stays green (35 suites).
+
 > **(M917) Browser — named/`rgb()` colours in CSS borders.** `parse_style_border` only scanned for `#hex`, so
 > `border:1px solid black` (named colour — extremely common) fell back to grey. `parse_color` reads the
 > *leading* token, so on `"1px solid red"` it saw `"1px"` and failed. Now the border parser scans each
