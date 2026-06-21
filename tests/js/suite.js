@@ -154,7 +154,7 @@ print(_ca,_cb,_cc,_cd,_ce,_cf);
 var _cs="a"; _cs+="b"; var _co={n:8}; _co.n|=1; print(_cs,_co.n);
 print("-- num-literals --");
 print(0b1010, 0o17, 1e3, 0xFF, 5E2, 0b11111111);
-print(0b1010 + 0o17 + 0xF, 3.7, 1e-3);
+print(0b1010 + 0o17 + 0xF, 3.7, 1e-3);   // 40 3.7 0.001 (fractional + negative-exponent literals are real doubles now)
 print(1_000_000, 0xFF_FF, 0b1010_1010);
 print("-- stdlib --");
 print([1,2,3,4].fill(0).join(","), [1,2,3,4].fill(9,1,3).join(","));
@@ -274,11 +274,11 @@ function _IC(){} print(new _IC() instanceof _IC, new _IC() instanceof Object);  
 print(new Map() instanceof Map, _ar instanceof Map);  // true false (native ctor unchanged; array is not a Map)
 print([1,2]+[3], 1+[2,3], "o="+_ob);  // 1,23 12,3 o=[object Object] (M420: object operands string-concat via ToPrimitive)
 print(2+3, [1,2,3].reduce(function(a,b){return a+b;},0), "n="+5);  // 5 6 n=5 (numeric path unregressed)
-print("-- integer arithmetic / div-by-zero safety --");
-print(7/2, 10/0, 0/0, 0-7%3, 2147483647+1);  // 3 0 0 -1 2147483648 (integer division truncates; div-by-zero GUARDED to 0 — no #DE crash; modulo; 64-bit so no 32-bit overflow)
-print("-- coercion edges (ToPrimitive / ToNumber, integer engine) --");
+print("-- arithmetic / real division / div-by-zero (IEEE-754) --");
+print(7/2, 10/0, 0/0, 0-7%3, 2147483647+1);  // 3.5 Infinity NaN -1 2147483648 (real division; 1/0->Infinity, 0/0->NaN; modulo; no 32-bit overflow)
+print("-- coercion edges (ToPrimitive / ToNumber) --");
 print("["+([]+[])+"]", []+{}, +[], null+1, undefined+1, true+true);  // [] [object Object] 0 1 1 2 (empty array->""; array/object->string; +[]->0; null/undefined->0 [no NaN]; bool->num)
-print('5'*2, '5'-2, [5]+3, 0.5);  // 10 3 53 0 (string<->num arithmetic; [5]->"5" then +3 concats; fractional literal truncates)
+print('5'*2, '5'-2, [5]+3, 0.5);  // 10 3 53 0.5 (string<->num arithmetic; [5]->"5" then +3 concats; 0.5 is a real fractional literal)
 print(parseInt("0xff"), parseInt("  42abc"));  // 255 42 (hex prefix; leading ws + trailing junk)
 print("-- regex bounded quantifiers {n,m} (M438) --");
 print((/a{2,3}/.exec("aaaa")||["x"])[0], /\d{3}/.test("12"), (/x\w{2,4}y/.exec("xabcy")||["?"])[0]);  // aaa false xabcy (greedy {2,3} caps at 3; {3} needs exactly 3; {2,4} matches abc)

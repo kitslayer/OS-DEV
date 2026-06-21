@@ -1,5 +1,22 @@
 # What's next
 
+> **(M906) JS engine — real IEEE-754 floating point (no longer integer-only).** The from-scratch JS engine's
+> number type went from `int64_t` to `double` throughout (`val`/`node`/`token`), so `7/2` is `3.5` (not `3`),
+> `1/0` is `Infinity`, `0/0` is `NaN`, and `3.14`, `1e-3`, `0.1+0.2` are real fractionals. This needed the
+> kernel to let js.o use the FPU: a Makefile rule builds **just** `build/kernel/js.o` with `-msse2 -mfpmath=sse`
+> (dropping `-mgeneral-regs-only`) — safe because the kernel already enables SSE at boot (`fpu_init`) and the
+> scheduler saves/restores FP state for **every** task (`task.c` `fx_alloc`), so the engine's xmm use survives
+> context switches. New self-contained math helpers (no libm/libcall): `js_sqrt`/`js_cbrt` (Newton),
+> `js_pow` (exact integer exponents, else `exp(e·ln b)`), `js_ln`/`js_exp` (range-reduced series), `to_i32`
+> (JS ToInt32 for the bitwise ops), and `num_to_str` (double→string, ~16 sig figs, trims zeros, spells out
+> `NaN`/`Infinity`). `Math` is now real: `floor`/`ceil`/`round`/`trunc`/`sqrt`/`cbrt`/`hypot`/`log`/`exp`/
+> `log2`/`log10`/`abs`/`sign`, plus the constants `PI`/`E`/`LN2`/`LN10`/`LOG2E`/`LOG10E`/`SQRT2`/`SQRT1_2`;
+> `Infinity`/`NaN` globals, `Number.POSITIVE_INFINITY`/`MAX_VALUE`/`EPSILON`, and correct `isNaN`/`isFinite`/
+> `Number.isInteger`. Fixed `Array.flat(Infinity)` (was UB casting Infinity→int). Bumped the JS arena 40→44 MB
+> (doubles format a touch heavier; the suite sat at the cap). Verified end-to-end in-guest (`js -e` float
+> arithmetic, `Math.*`, a float-accumulating loop) and on the host (`make check`: all 35 suites green, ASan/
+> UBSan-clean jstest with updated goldens). This was a long-deferred "big" item — now done.
+
 > **(M905) Shell — `rm -f` (force: ignore missing files).** Found by an integration test: `rm` treated `-f` as
 > a filename, so `rm -f X` errored on the flag and on a missing `X`. Added `-f`: skip the flag token, and a
 > missing file is silently ignored (no message, no `$?=1`) — the standard scripting idiom for "remove if it

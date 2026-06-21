@@ -56,10 +56,11 @@ static void out_str(const char *s) {
  * 32 MB: the suite's peak reached ~26.7 MB after the M531-M542 cases; 32 MB
  * restores ~5 MB headroom. (M542)
  * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
-#define JS_ARENA   (40960 * 1024)   /* 40 MB. The parser builds the whole script's AST in the arena
+#define JS_ARENA   (45056 * 1024)   /* 44 MB. The parser builds the whole script's AST in the arena
                                      * before running it, and there's no GC (one run, then recycle), so a
                                      * big script (e.g. the growing jstest suite) needs headroom. Bumped
-                                     * 20->26->32->40 as the suite grew; safe in the 127 MiB guest. */
+                                     * 20->26->32->40->44 as the suite grew (M906: real doubles format a
+                                     * little heavier than the old int path); safe in the 256 MiB guest. */
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -98,7 +99,8 @@ static void rt_err(const char *m) {
 
 /* =========================== lexer =========================== */
 enum { T_EOF, T_NUM, T_STR, T_IDENT, T_PUNC, T_KW, T_TEMPLATE, T_REGEX };
-typedef struct { int type; int64_t num; const char *s; int len; } token;
+/* token.num is a double: number literals are IEEE-754 (the engine is no longer integer-only). */
+typedef struct { int type; double num; const char *s; int len; } token;
 
 static const char *kw[] = { "var","let","const","function","return","if","else",
     "while","for","true","false","null","undefined","break","continue","typeof",
@@ -117,7 +119,7 @@ static int is_id(int c){ return is_id_start(c)||(c>='0'&&c<='9'); }
 static int is_digit(int c){ return c>='0'&&c<='9'; }
 
 static token lex_next_raw(lexer *L) {
-    token t; t.type = T_EOF; t.s = 0; t.len = 0; t.num = 0;
+    token t; t.type = T_EOF; t.s = 0; t.len = 0; t.num = 0.0;
     const char *s = L->src;
     /* skip whitespace + comments */
     for (;;) {
@@ -144,21 +146,21 @@ static token lex_next_raw(lexer *L) {
             L->pos += 2;   /* octal 0o17 */
             while (L->pos<L->len && ((s[L->pos]>='0'&&s[L->pos]<='7')||s[L->pos]=='_')) { if(s[L->pos]!='_') v = v*8 + (s[L->pos]-'0'); L->pos++; }
         } else {
-            while (L->pos<L->len && (is_digit(s[L->pos])||s[L->pos]=='_')) { if(s[L->pos]!='_') v = v*10 + (s[L->pos]-'0'); L->pos++; }   /* `_` digit separators */
-            /* skip a fractional part if present (we truncate to int) */
-            if (L->pos<L->len && s[L->pos]=='.') { L->pos++; while (L->pos<L->len && is_digit(s[L->pos])) L->pos++; }
-            /* exponent 1e3 -> 1000 (integer engine; a fractional mantissa is already truncated,
-             * and a negative exponent floors to 0). Back off if `e` isn't a real exponent. */
-            if (L->pos<L->len && (s[L->pos]=='e'||s[L->pos]=='E')) {
+            /* decimal: integer [ . fraction ] [ (e|E)[+|-]exponent ] -> double (IEEE-754) */
+            double dv=0;
+            while (L->pos<L->len && (is_digit(s[L->pos])||s[L->pos]=='_')) { if(s[L->pos]!='_') dv = dv*10.0 + (s[L->pos]-'0'); L->pos++; }   /* `_` digit separators */
+            if (L->pos<L->len && s[L->pos]=='.') { L->pos++; double f=0.1; while (L->pos<L->len && (is_digit(s[L->pos])||s[L->pos]=='_')) { if(s[L->pos]!='_'){ dv += (s[L->pos]-'0')*f; f*=0.1; } L->pos++; } }
+            if (L->pos<L->len && (s[L->pos]=='e'||s[L->pos]=='E')) {            /* 1e3, 2.5e-4, … (back off if `e` starts an identifier) */
                 int save=L->pos; L->pos++;
                 int neg=0; if (L->pos<L->len && (s[L->pos]=='+'||s[L->pos]=='-')) { neg=(s[L->pos]=='-'); L->pos++; }
                 if (L->pos<L->len && is_digit(s[L->pos])) {
-                    int exp=0; while (L->pos<L->len && is_digit(s[L->pos])) { exp=exp*10+(s[L->pos]-'0'); if(exp>18)exp=18; L->pos++; }
-                    if (neg) v = 0; else for (int k=0;k<exp;k++) v*=10;
-                } else L->pos=save;   /* a bare `e` that starts an identifier — not an exponent */
+                    int exp=0; while (L->pos<L->len && is_digit(s[L->pos])) { exp=exp*10+(s[L->pos]-'0'); if(exp>308)exp=308; L->pos++; }
+                    double p=1.0; for (int k=0;k<exp;k++) p*=10.0; dv = neg ? dv/p : dv*p;
+                } else L->pos=save;
             }
+            t.type=T_NUM; t.num=dv; return t;
         }
-        t.type=T_NUM; t.num=v; return t;
+        t.type=T_NUM; t.num=v; return t;   /* hex / binary / octal: integer value */
     }
     /* string */
     if (c=='"' || c=='\'') {
@@ -252,7 +254,7 @@ enum { N_NUM, N_STR, N_BOOL, N_NULL, N_UNDEF, N_IDENT, N_ARRAY, N_OBJECT,
 
 typedef struct node node;
 struct node {
-    int type; int64_t num; int op /*single-char or coded*/; const char *str; int slen;
+    int type; double num; int op /*single-char or coded*/; const char *str; int slen;
     node *a, *b, *c, *d;
     node **list; int nlist;
     int prefix;   /* for N_UPDATE: prefix vs postfix */
@@ -876,7 +878,7 @@ typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
 
-struct val { int t; int64_t num; const char *str; obj *o; };
+struct val { int t; double num; const char *str; obj *o; };   /* num is IEEE-754 double (V_NUM); also holds V_BOOL 0/1 and a V_SYMBOL id (< 2^53) */
 
 struct obj {
     int kind;
@@ -903,7 +905,7 @@ struct obj {
 struct env { const char **keys; val *vals; int n, cap; env *parent; };
 
 static val UND(void){ val v; v.t=V_UNDEF; v.num=0; v.str=0; v.o=0; return v; }
-static val NUM(int64_t x){ val v=UND(); v.t=V_NUM; v.num=x; return v; }
+static val NUM(double x){ val v=UND(); v.t=V_NUM; v.num=x; return v; }
 static val BOOLV(int b){ val v=UND(); v.t=V_BOOL; v.num=b?1:0; return v; }
 static val STRV(const char *s){ val v=UND(); v.t=V_STR; v.str=s?s:""; return v; }
 /* ---- ES6 Symbol (M-symbol) ----
@@ -970,6 +972,106 @@ static char *i64_to_str(int64_t v) {
     if (neg) tmp[i++]='-';
     char *s=aalloc(i+1); if(!s) return ""; for(int j=0;j<i;j++) s[j]=tmp[i-1-j]; s[i]=0; return s;
 }
+
+/* ---- IEEE-754 double helpers (the engine's numbers are doubles; js.o is built with SSE) ---- */
+#define JS_INF (__builtin_inf())
+#define JS_NAN (__builtin_nan(""))
+static int js_isnan(double x){ return x != x; }
+static int js_isfinite(double x){ return (x - x) == 0.0; }   /* finite -> 0; inf/nan -> nan != 0 */
+static int js_isinf(double x){ return js_isfinite(x) ? 0 : !js_isnan(x); }
+static double js_trunc(double x){            /* toward zero */
+    if (!js_isfinite(x)) return x;
+    if (x >= 4503599627370496.0 || x <= -4503599627370496.0) return x;   /* >= 2^52: already integral */
+    return (double)(int64_t)x;
+}
+static double js_floor(double x){ double t=js_trunc(x); return (js_isfinite(x) && t>x) ? t-1.0 : t; }
+static double js_ceil (double x){ double t=js_trunc(x); return (js_isfinite(x) && t<x) ? t+1.0 : t; }
+static double js_round(double x){ return js_isfinite(x) ? js_floor(x+0.5) : x; }   /* JS Math.round = floor(x+0.5) */
+static double js_fabs (double x){ return x<0 ? -x : x; }
+static double js_fmod (double a, double b){   /* JS %: sign of a; a - b*trunc(a/b); x%0 and Inf%y -> NaN */
+    if (js_isnan(a) || js_isnan(b) || js_isinf(a) || b==0.0) return JS_NAN;
+    if (js_isinf(b)) return a;
+    return a - js_trunc(a/b)*b;
+}
+static double js_sqrt(double x){             /* Newton; no libm/libcall (freestanding kernel + host) */
+    if (x < 0.0) return JS_NAN;
+    if (x == 0.0 || !js_isfinite(x)) return x;   /* 0, +Inf, NaN pass through */
+    double g = x > 1.0 ? x : 1.0;
+    for (int i=0;i<64;i++){ double ng=0.5*(g + x/g); if (ng==g) break; g=ng; }
+    return g;
+}
+static double js_cbrt(double x){
+    if (x==0.0 || !js_isfinite(x)) return x;
+    int neg = x<0; double a = neg?-x:x, g = a>1.0?a:1.0;
+    for (int i=0;i<80;i++){ double ng=(2.0*g + a/(g*g))/3.0; if (ng==g) break; g=ng; }
+    return neg?-g:g;
+}
+static double js_ln(double x){               /* natural log; x>0 */
+    if (x<=0.0) return x==0.0 ? -JS_INF : JS_NAN;
+    int k=0; while (x>=2.0){ x*=0.5; k++; } while (x<1.0){ x*=2.0; k--; }   /* x = m*2^k, m in [1,2) */
+    double t=(x-1.0)/(x+1.0), t2=t*t, term=t, sum=0.0;                      /* ln(m)=2*(t+t^3/3+t^5/5+..) */
+    for (int i=1;i<=25;i+=2){ sum += term/i; term *= t2; }
+    return 2.0*sum + (double)k*0.69314718055994530942;
+}
+static double js_exp(double x){
+    if (x==0.0) return 1.0;
+    if (js_isinf(x)) return x<0 ? 0.0 : JS_INF;
+    double ln2=0.69314718055994530942; double kf=js_round(x/ln2); int k=(int)kf;   /* x = k*ln2 + r */
+    double r=x-kf*ln2, term=1.0, sum=1.0;
+    for (int i=1;i<=20;i++){ term *= r/i; sum += term; }
+    double p=1.0; if (k>=0){ for(int i=0;i<k;i++) p*=2.0; } else { for(int i=0;i<-k;i++) p*=0.5; }
+    return sum*p;
+}
+static double js_pow(double b, double e){
+    if (e==0.0) return 1.0;
+    if (e==js_trunc(e) && e>=-1024.0 && e<=1024.0){            /* integer exponent: exact repeated multiply */
+        int neg=e<0; int64_t n=(int64_t)(neg?-e:e); double r=1.0;
+        for (int64_t i=0;i<n;i++) r*=b;
+        return neg ? 1.0/r : r;
+    }
+    if (b==0.0) return 0.0;
+    if (b<0.0) return JS_NAN;                                  /* negative base, fractional exp -> NaN */
+    return js_exp(e*js_ln(b));                                 /* general b^e = exp(e*ln b) */
+}
+/* JS ToInt32: NaN/Inf -> 0; truncate toward zero; take low 32 bits (signed). */
+static int32_t to_i32(double d){
+    if (!js_isfinite(d)) return 0;
+    if (d>=9.2e18 || d<=-9.2e18){ double two32=4294967296.0; d -= js_trunc(d/two32)*two32; }
+    return (int32_t)(uint32_t)(int64_t)d;
+}
+/* double -> string, JS Number-to-string-ish: integers print exactly; otherwise up to 16
+ * significant digits with trailing zeros trimmed; NaN/Infinity spelled out. Not a full
+ * shortest-round-trip dtoa, but it renders the common cases (3.14, 0.5, 2/3, 1e21) cleanly. */
+static char *num_to_str(double d){
+    if (js_isnan(d)) return "NaN";
+    if (js_isinf(d)) return d<0 ? "-Infinity" : "Infinity";
+    if (d==0.0) return "0";                                              /* String(-0) === "0" */
+    if (d==js_trunc(d) && d>=-9.0e18 && d<=9.0e18) return i64_to_str((int64_t)d);   /* integral & exact */
+    char *buf=aalloc(40); if(!buf) return "0"; int p=0;
+    double x=d; if (x<0){ buf[p++]='-'; x=-x; }
+    int e=0; double t=x;                                                 /* normalize: t in [1,10), value = t*10^e */
+    while (t>=10.0){ t*=0.1; e++; } while (t<1.0){ t*=10.0; e--; }
+    char dig[18]; int nd=0;                                              /* 16 significant digits */
+    for (int i=0;i<16;i++){ int c=(int)t; if(c<0)c=0; if(c>9)c=9; dig[nd++]=(char)('0'+c); t=(t-c)*10.0; }
+    if ((int)t>=5){ int i=nd-1;                                          /* round to 16 figs */
+        for(;;){ if(dig[i]<'9'){ dig[i]++; break; } dig[i]='0'; if(i==0){ for(int j=nd;j>0;j--) dig[j]=dig[j-1]; dig[0]='1'; e++; nd++; break; } i--; } }
+    while (nd>1 && dig[nd-1]=='0') nd--;                                 /* trim trailing zeros */
+    if (e< -6 || e>=21){                                                 /* exponential notation */
+        buf[p++]=dig[0];
+        if (nd>1){ buf[p++]='.'; for(int i=1;i<nd;i++) buf[p++]=dig[i]; }
+        buf[p++]='e'; buf[p++]=(e<0)?'-':'+'; int ae=e<0?-e:e;
+        char eb[4]; int en=0; if(ae==0) eb[en++]='0'; while(ae){ eb[en++]=(char)('0'+ae%10); ae/=10; }
+        while(en>0) buf[p++]=eb[--en];
+    } else if (e>=0){                                                    /* d d d . d d  (point after e+1 digits) */
+        for (int i=0;i<=e;i++) buf[p++]= (i<nd)?dig[i]:'0';
+        if (nd>e+1){ buf[p++]='.'; for (int i=e+1;i<nd;i++) buf[p++]=dig[i]; }
+    } else {                                                             /* 0.00..ddd  (-1>=e>=-6) */
+        buf[p++]='0'; buf[p++]='.';
+        for (int i=0;i<(-e-1);i++) buf[p++]='0';
+        for (int i=0;i<nd;i++) buf[p++]=dig[i];
+    }
+    buf[p]=0; return buf;
+}
 /* ---- symbol-keyed property support (M-symbol) ----
  * A V_SYMBOL used as a computed property key is encoded to a reserved internal
  * STRING key "@@sym:<id>", then stored via the ordinary string-keyed obj_get/obj_set
@@ -1001,10 +1103,7 @@ static int is_internal_key(const char *k){ return k && k[0]=='@' && k[1]=='@'; }
 /* Translate a computed-member key value to its property-string: a symbol -> its
  * "@@sym:<id>" encoding, anything else -> the usual val_to_str. Used at the two
  * computed-key sites (obj[k] read and obj[k]=v write). */
-static const char *keystr(val k){ return k.t==V_SYMBOL ? sym_key(k.num) : val_to_str(k); }
-/* Integer exponentiation for the `**` and `**=` operators (exponent capped at 63
- * to bound the loop; matches the existing Math.pow semantics). */
-static int64_t i_pow(int64_t b, int64_t e){ int64_t r=1; for (int64_t i=0;i<e && i<63;i++) r*=b; return r; }
+static const char *keystr(val k){ return k.t==V_SYMBOL ? sym_key((int64_t)k.num) : val_to_str(k); }   /* symbol id lives in num (< 2^53) */
 static const char *val_to_str(val v); /* fwd */
 static int truthy(val v) {
     switch (v.t) {
@@ -1019,18 +1118,20 @@ static int64_t days_from_civil(int64_t y, int64_t m, int64_t d);   /* fwd (defin
  * valueOf/toString via the same depth-guarded getter call path. */
 static int proto_lookup(obj *start, const char *name, val recv, val *out);
 static val call_function_this(val fn, val thisv, val *args, int nargs);
-static int64_t to_num(val v) {
+static double to_num(val v) {
     switch (v.t) {
         case V_NUM: case V_BOOL: return v.num;
         case V_STR: { const char*s=v.str;
             while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++;   /* JS ToNumber skips leading whitespace */
             int neg=0; if(*s=='-'){neg=1;s++;} else if(*s=='+'){s++;}
-            int64_t x=0;
-            if(s[0]=='0' && (s[1]=='x'||s[1]=='X')){ s+=2;            /* 0x.. hex (Number("0x10")===16) */
-                for(;;){ char c=*s; int d; if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; x=x*16+d; s++; } }
-            else if(s[0]=='0' && (s[1]=='b'||s[1]=='B')){ s+=2; while(*s=='0'||*s=='1'){ x=x*2+(*s-'0'); s++; } }   /* 0b.. binary (Number("0b101")===5) (M693) */
-            else if(s[0]=='0' && (s[1]=='o'||s[1]=='O')){ s+=2; while(*s>='0'&&*s<='7'){ x=x*8+(*s-'0'); s++; } }   /* 0o.. octal (Number("0o17")===15) (M693) */
-            else while(*s>='0'&&*s<='9'){ x=x*10+(*s-'0'); s++; }
+            if(s[0]=='0' && (s[1]=='x'||s[1]=='X')){ int64_t x=0; s+=2;   /* 0x.. hex (Number("0x10")===16) */
+                for(;;){ char c=*s; int d; if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; x=x*16+d; s++; } return neg?-(double)x:(double)x; }
+            if(s[0]=='0' && (s[1]=='b'||s[1]=='B')){ int64_t x=0; s+=2; while(*s=='0'||*s=='1'){ x=x*2+(*s-'0'); s++; } return neg?-(double)x:(double)x; }   /* 0b.. binary (M693) */
+            if(s[0]=='0' && (s[1]=='o'||s[1]=='O')){ int64_t x=0; s+=2; while(*s>='0'&&*s<='7'){ x=x*8+(*s-'0'); s++; } return neg?-(double)x:(double)x; }   /* 0o.. octal (M693) */
+            double x=0;            /* decimal: integer . fraction [e exponent]; a non-numeric string -> 0 (as the old integer engine did) */
+            while(*s>='0'&&*s<='9'){ x=x*10.0+(*s-'0'); s++; }
+            if(*s=='.'){ s++; double f=0.1; while(*s>='0'&&*s<='9'){ x+=(*s-'0')*f; f*=0.1; s++; } }
+            if(*s=='e'||*s=='E'){ s++; int eneg=0; if(*s=='+')s++; else if(*s=='-'){eneg=1;s++;} int ex=0,ed=0; while(*s>='0'&&*s<='9'){ ex=ex*10+(*s-'0'); s++; ed=1; } if(ed) x*=js_pow(10.0, eneg?-(double)ex:(double)ex); }
             return neg?-x:x; }
         case V_OBJ:
             if (v.o && v.o->kind==V_DATE && v.o->n>=6)   /* Date -> epoch ms, matching getTime (M429) */
@@ -1403,7 +1504,7 @@ static const char *val_to_str_inner(val v) {
         case V_UNDEF: return "undefined";
         case V_NULL: return "null";
         case V_BOOL: return v.num?"true":"false";
-        case V_NUM: return i64_to_str(v.num);
+        case V_NUM: return num_to_str(v.num);
         case V_STR: return v.str;
         case V_FUN: case V_NATIVE: return "function";
         case V_SYMBOL: {   /* "Symbol(desc)" — kernel-safe: do NOT throw (spec throws on String(symbol)) (M-symbol) */
@@ -1772,7 +1873,7 @@ static val eval_member_get(val recv, const char *name) {
     }
     if (recv.t==V_OBJ && recv.o) {
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
-        if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM(recv.o->n/2);   /* entries are [k,v] pairs */
+        if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM((double)(recv.o->n/2));   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
         if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); if(strcmp(name,"nextElementSibling")==0) return sibling_handle(recv.o,1); if(strcmp(name,"previousElementSibling")==0) return sibling_handle(recv.o,-1); static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
@@ -1808,7 +1909,7 @@ static val eval_expr_inner(node *n, env *e) {
     switch (n->type) {
         case N_NUM: return NUM(n->num);
         case N_STR: return STRV(n->str);
-        case N_REGEX: { char fl[5]; int k=0; if(n->num&1)fl[k++]='g'; if(n->num&2)fl[k++]='i'; if(n->num&4)fl[k++]='m'; if(n->num&8)fl[k++]='s'; fl[k]=0; return make_regex_val(node_name(n), intern(fl,k)); }   /* intern: flags must be arena-stable, not a dead stack buffer */
+        case N_REGEX: { char fl[5]; int k=0; int rf=(int)n->num; if(rf&1)fl[k++]='g'; if(rf&2)fl[k++]='i'; if(rf&4)fl[k++]='m'; if(rf&8)fl[k++]='s'; fl[k]=0; return make_regex_val(node_name(n), intern(fl,k)); }   /* intern: flags must be arena-stable, not a dead stack buffer */
         case N_BOOL: return BOOLV((int)n->num);
         case N_NULL: { val v=UND(); v.t=V_NULL; return v; }
         case N_UNDEF: return UND();
@@ -1882,7 +1983,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (n->op=='!') return BOOLV(!truthy(v));
             if (n->op=='-') return NUM(-to_num(v));
             if (n->op=='+') return NUM(to_num(v));
-            if (n->op=='~') return NUM(~to_num(v));
+            if (n->op=='~') return NUM((double)(~to_i32(to_num(v))));   /* JS ~ : ToInt32 then bitwise NOT */
             if (n->op=='v') return UND();   /* void: operand already evaluated for side effects, yield undefined */
             return UND();
         }
@@ -1917,17 +2018,17 @@ static val eval_expr_inner(node *n, env *e) {
         case N_BINARY: {
             val a=eval_expr(n->a,e), b=eval_expr(n->b,e);
             if (n->op=='+') { if (a.t>=V_STR||b.t>=V_STR) { const char*sa=val_to_str(a),*sb=val_to_str(b);   /* concat if either is a string OR an object (V_STR..V_NATIVE are all >= V_STR): ToPrimitive stringifies objects (M420) */ int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(!s) return UND(); memcpy(s,sa,la); memcpy(s+la,sb,lb); s[la+lb]=0; return STRV(s); } return NUM(to_num(a)+to_num(b)); }
-            int64_t x=to_num(a), y=to_num(b);
+            double x=to_num(a), y=to_num(b);
             switch (n->op) {
                 case '-': return NUM(x-y);
                 case '*': return NUM(x*y);
-                case '/': return NUM(y?x/y:0);
-                case '%': return NUM(y?x%y:0);
+                case '/': return NUM(x/y);                 /* real division; IEEE x/0 -> +/-Infinity, 0/0 -> NaN */
+                case '%': return NUM(js_fmod(x,y));        /* remainder (sign of x); x%0 -> NaN */
                 case '<': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)<0);  return BOOLV(x<y);   /* two strings compare lexically; else numeric (M267) */
                 case '>': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)>0);  return BOOLV(x>y);
                 case 'l': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)<=0); return BOOLV(x<=y);
                 case 'g': if(a.t==V_STR&&b.t==V_STR) return BOOLV(strcmp(a.str,b.str)>=0); return BOOLV(x>=y);
-                case 'P': return NUM(i_pow(x,y));   /* x ** y (integer, matches Math.pow) */
+                case 'P': return NUM(js_pow(x,y));   /* x ** y (real Math.pow) */
                 case 'I':   /* `in`: own-OR-inherited property on objects (walks the proto chain, non-firing — M264), valid-index test on arrays */
                     b=deproxy(b);   /* `key in proxy` -> test the TARGET (no has trap) (M-proxy) */
                     if (b.t==V_OBJ && b.o) { const char *k=val_to_str(a); val tmp; if (obj_get(b.o,k,&tmp)) return BOOLV(1);
@@ -1946,9 +2047,9 @@ static val eval_expr_inner(node *n, env *e) {
                  * extended back to the int64 number). >>> uses uint32. This matches the M269 >>>
                  * path, so e.g. 1<<31 = -2147483648 and 0xFFFFFFFF|0 = -1, like real JS — what
                  * browser scripts (|0 int-coercion, (r<<16)|(g<<8)|b packing, hashes) expect. */
-                case '&': return NUM((int64_t)((int32_t)x & (int32_t)y)); case '|': return NUM((int64_t)((int32_t)x | (int32_t)y)); case '^': return NUM((int64_t)((int32_t)x ^ (int32_t)y));
-                case 'L': return NUM((int64_t)(int32_t)((uint32_t)(int32_t)x << (y&31))); case 'R': return NUM((int64_t)((int32_t)x >> (y&31)));
-                case 'U': return NUM((int64_t)((uint32_t)x >> (y&31)));   /* >>> unsigned (32-bit, JS semantics): -1>>>0 = 4294967295 (M269) */
+                case '&': return NUM((double)(to_i32(x) & to_i32(y))); case '|': return NUM((double)(to_i32(x) | to_i32(y))); case '^': return NUM((double)(to_i32(x) ^ to_i32(y)));
+                case 'L': return NUM((double)(int32_t)((uint32_t)to_i32(x) << (to_i32(y)&31))); case 'R': return NUM((double)(to_i32(x) >> (to_i32(y)&31)));
+                case 'U': return NUM((double)((uint32_t)to_i32(x) >> (to_i32(y)&31)));   /* >>> unsigned (32-bit, JS semantics): -1>>>0 = 4294967295 (M269) */
                 case '=': return BOOLV(val_equal(a,b));    /* === strict: val_equal is exactly it (same-type required incl. object identity; fixes 1===true which was true) (M271) */
                 case '!': return BOOLV(!val_equal(a,b));    /* !== strict */
                 case 'e': return BOOLV(loose_eq(a,b));      /* == loose abstract equality (M271) */
@@ -1966,12 +2067,12 @@ static val eval_expr_inner(node *n, env *e) {
                 rhs = eval_expr(n->b,e);
             } else {
                 rhs = eval_expr(n->b,e);
-                if (n->op!='=') { val cur=eval_expr(t,e); int64_t x=to_num(cur),y=to_num(rhs);
+                if (n->op!='=') { val cur=eval_expr(t,e); double x=to_num(cur),y=to_num(rhs);
                     if (n->op=='+'&&(cur.t>=V_STR||rhs.t>=V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs);   /* += concat matches binary + (M420) */ int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
-                    else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?(y?x/y:0): n->op=='%'?(y?x%y:0):
-                                   n->op=='&'?(int64_t)((int32_t)x&(int32_t)y): n->op=='|'?(int64_t)((int32_t)x|(int32_t)y): n->op=='^'?(int64_t)((int32_t)x^(int32_t)y):
-                                   n->op=='L'?(int64_t)(int32_t)((uint32_t)(int32_t)x<<(y&31)): n->op=='R'?(int64_t)((int32_t)x>>(y&31)): n->op=='U'?(int64_t)((uint32_t)x>>(y&31)):
-                                   n->op=='P'?i_pow(x,y): 0); }
+                    else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?x/y: n->op=='%'?js_fmod(x,y):
+                                   n->op=='&'?(double)(to_i32(x)&to_i32(y)): n->op=='|'?(double)(to_i32(x)|to_i32(y)): n->op=='^'?(double)(to_i32(x)^to_i32(y)):
+                                   n->op=='L'?(double)(int32_t)((uint32_t)to_i32(x)<<(to_i32(y)&31)): n->op=='R'?(double)(to_i32(x)>>(to_i32(y)&31)): n->op=='U'?(double)((uint32_t)to_i32(x)>>(to_i32(y)&31)):
+                                   n->op=='P'?js_pow(x,y): 0.0); }
             }
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
@@ -2581,7 +2682,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         val v=UND(); v.t=V_ARR; v.o=rem; return v; }
     if (strcmp(name,"fill")==0){ val fv=nargs?args[0]:UND(); int st=nargs>1?(int)to_num(args[1]):0, en=nargs>2?(int)to_num(args[2]):o->n; if(st<0)st+=o->n; if(en<0)en+=o->n; if(st<0)st=0; if(en>o->n)en=o->n; for(int i=st;i<en;i++) o->vals[i]=fv; return recv; }
     if (strcmp(name,"lastIndexOf")==0){ int start=o->n-1; if(nargs>1){ int fi=(int)to_num(args[1]); if(fi<0) fi+=o->n; if(fi<start) start=fi; } /* search backward from fromIndex (M692) */ for(int i=start;i>=0;i--) if(nargs && val_equal(o->vals[i],args[0])) return NUM(i); return NUM(-1); }   /* strict (===) */
-    if (strcmp(name,"flat")==0){ long long dd=nargs?(long long)to_num(args[0]):1; int depth=dd<0?0:(dd>64?64:(int)dd); /* clamp via int64 so flat(Infinity) -> 64, not a truncated negative */ obj*r=new_obj(V_ARR); if(!r) return UND(); flat_into(r,o,depth); val v=UND(); v.t=V_ARR; v.o=r; return v; }
+    if (strcmp(name,"flat")==0){ double dd=nargs?to_num(args[0]):1; int depth=(js_isnan(dd)||dd<=0)?0:((js_isinf(dd)||dd>64)?64:(int)dd); /* flat(Infinity) -> 64 (deep); check non-finite BEFORE the (int) cast (UB on Inf) */ obj*r=new_obj(V_ARR); if(!r) return UND(); flat_into(r,o,depth); val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"forEach")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; call_function(args[0],ca,2); } return UND(); }
     if (strcmp(name,"map")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; arr_push_val(r,call_function(args[0],ca,2)); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"filter")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) arr_push_val(r,o->vals[i]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -3437,19 +3538,23 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
 }
 
 /* ---- Math (integer; the kernel has no FPU) ---- */
-static int64_t iabs64(int64_t x){ return x < 0 ? -x : x; }
-static val nat_abs(val *a, int n){ return NUM(n ? iabs64(to_num(a[0])) : 0); }
-static val nat_max(val *a, int n){ if(!n) return NUM(-INT64_MAX); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v>m)m=v;} return NUM(m); }   /* Math.max() = -Infinity */
-static val nat_min(val *a, int n){ if(!n) return NUM(INT64_MAX); int64_t m=to_num(a[0]); for(int i=1;i<n;i++){int64_t v=to_num(a[i]); if(v<m)m=v;} return NUM(m); }   /* Math.min() = +Infinity */
-static val nat_ident(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }   /* floor/ceil/round are identity on ints */
-static int64_t i_sqrt(int64_t x){ if(x<1) return 0; int64_t lo=0, hi=(x<2?x:x/2+1); if(hi>3037000499LL) hi=3037000499LL; while(lo<hi){ int64_t mid=lo+(hi-lo+1)/2; if(mid<=x/mid) lo=mid; else hi=mid-1; } return lo; }
-static val nat_sqrt(val *a, int n){ return NUM(i_sqrt(n?to_num(a[0]):0)); }
-static val nat_hypot(val *a, int n){ int64_t s=0; for(int i=0;i<n;i++){ int64_t v=to_num(a[i]); s+=v*v; } return NUM(i_sqrt(s)); }   /* floor(sqrt(sum of squares)) */
-static val nat_log2(val *a, int n){ int64_t x=n?to_num(a[0]):0; if(x<1) return NUM(0); int64_t r=0; while(x>1){ x>>=1; r++; } return NUM(r); }   /* floor(log2 x) = index of the high bit */
-static val nat_cbrt(val *a, int n){ int64_t x=n?to_num(a[0]):0; int neg=x<0; uint64_t ux=neg?(uint64_t)(-(x+1))+1:(uint64_t)x; int64_t lo=0,hi=2097152; while(lo<hi){ int64_t mid=lo+(hi-lo+1)/2; if((uint64_t)mid*(uint64_t)mid*(uint64_t)mid<=ux) lo=mid; else hi=mid-1; } return NUM(neg?-lo:lo); }   /* integer cube root (hi^3 stays within uint64) */
-static val nat_clz32(val *a, int n){ uint32_t u=(uint32_t)(n?to_num(a[0]):0); if(!u) return NUM(32); int c=0; while(!(u&0x80000000u)){ u<<=1; c++; } return NUM(c); }   /* count leading zeros in 32 bits */
-static val nat_imul(val *a, int n){ uint32_t x=(uint32_t)(n>0?to_num(a[0]):0), y=(uint32_t)(n>1?to_num(a[1]):0); return NUM((int32_t)(x*y)); }   /* 32-bit integer multiply */
-static val nat_pow(val *a, int n){ int64_t b=n>0?to_num(a[0]):0, e=n>1?to_num(a[1]):0; int64_t r=1; for(int64_t i=0;i<e && i<63;i++) r*=b; return NUM(r); }
+static val nat_abs(val *a, int n){ return NUM(n ? js_fabs(to_num(a[0])) : 0); }
+static val nat_max(val *a, int n){ if(!n) return NUM(-JS_INF); double m=to_num(a[0]); for(int i=1;i<n;i++){double v=to_num(a[i]); if(js_isnan(v)) return NUM(JS_NAN); if(v>m)m=v;} return NUM(m); }   /* Math.max() = -Infinity */
+static val nat_min(val *a, int n){ if(!n) return NUM(JS_INF);  double m=to_num(a[0]); for(int i=1;i<n;i++){double v=to_num(a[i]); if(js_isnan(v)) return NUM(JS_NAN); if(v<m)m=v;} return NUM(m); }   /* Math.min() = +Infinity */
+static val nat_floor(val *a, int n){ return NUM(n?js_floor(to_num(a[0])):0); }
+static val nat_ceil (val *a, int n){ return NUM(n?js_ceil (to_num(a[0])):0); }
+static val nat_round(val *a, int n){ return NUM(n?js_round(to_num(a[0])):0); }
+static val nat_trunc(val *a, int n){ return NUM(n?js_trunc(to_num(a[0])):0); }
+static val nat_sqrt(val *a, int n){ double x=n?to_num(a[0]):0; return NUM(js_sqrt(x)); }   /* hardware sqrtsd — exact for perfect squares */
+static val nat_hypot(val *a, int n){ double s=0; for(int i=0;i<n;i++){ double v=to_num(a[i]); s+=v*v; } return NUM(js_sqrt(s)); }
+static val nat_log2(val *a, int n){ return NUM(js_ln(n?to_num(a[0]):0)/0.69314718055994530942); }   /* real log2; exact for powers of two */
+static val nat_cbrt(val *a, int n){ return NUM(js_cbrt(n?to_num(a[0]):0)); }
+static val nat_clz32(val *a, int n){ uint32_t u=(uint32_t)to_i32(n?to_num(a[0]):0); if(!u) return NUM(32); int c=0; while(!(u&0x80000000u)){ u<<=1; c++; } return NUM(c); }   /* count leading zeros in 32 bits */
+static val nat_imul(val *a, int n){ int32_t x=to_i32(n>0?to_num(a[0]):0), y=to_i32(n>1?to_num(a[1]):0); return NUM((double)(int32_t)((uint32_t)x*(uint32_t)y)); }   /* 32-bit integer multiply */
+static val nat_pow(val *a, int n){ double b=n>0?to_num(a[0]):0, e=n>1?to_num(a[1]):0; return NUM(js_pow(b,e)); }
+static val nat_log(val *a, int n){ return NUM(js_ln(n?to_num(a[0]):0)); }                          /* natural log */
+static val nat_exp(val *a, int n){ return NUM(js_exp(n?to_num(a[0]):0)); }
+static val nat_log10(val *a, int n){ return NUM(js_ln(n?to_num(a[0]):0)/2.302585092994046); }       /* log base 10 */
 /* Math.random(): the engine is integer-only (no FPU), so there is no [0,1) float.
  * Math.random(n) returns a uniform integer in [0,n) -- a die/range; the no-arg
  * form returns [0, 2^31) (use `% n`). xorshift64, lazily seeded from the CPU's
@@ -3480,11 +3585,11 @@ static val nat_parseInt(val *a, int n){                                         
 static val nat_String(val *a, int n){ return STRV(n ? val_to_str(a[0]) : ""); }
 static val nat_Number(val *a, int n){ return NUM(n ? to_num(a[0]) : 0); }
 static val nat_Boolean(val *a, int n){ return BOOLV(n ? truthy(a[0]) : 0); }
-static val nat_isNaN(val *a, int n){ (void)a; (void)n; return BOOLV(0); }          /* integer Number is never NaN */
-static val nat_isFinite(val *a, int n){ (void)a; (void)n; return BOOLV(1); }        /* ...and (the int model has no IEEE inf) always finite */
-static val nat_num_isInteger(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }    /* every Number is an integer here */
-static val nat_num_isFinite(val *a, int n){ return BOOLV(n && a[0].t==V_NUM); }     /* ...and finite */
-static val nat_num_isSafeInteger(val *a, int n){ if(!n||a[0].t!=V_NUM) return BOOLV(0); int64_t x=a[0].num; return BOOLV(x>=-9007199254740991LL && x<=9007199254740991LL); }
+static val nat_isNaN(val *a, int n){ return BOOLV(n && js_isnan(to_num(a[0]))); }                  /* global isNaN: coerce to number, then test */
+static val nat_isFinite(val *a, int n){ return BOOLV(n && js_isfinite(to_num(a[0]))); }            /* global isFinite: coerce to number, then test */
+static val nat_num_isInteger(val *a, int n){ return BOOLV(n && a[0].t==V_NUM && js_isfinite(a[0].num) && a[0].num==js_trunc(a[0].num)); }   /* Number.isInteger: no coercion */
+static val nat_num_isFinite(val *a, int n){ return BOOLV(n && a[0].t==V_NUM && js_isfinite(a[0].num)); }     /* Number.isFinite: no coercion */
+static val nat_num_isSafeInteger(val *a, int n){ if(!n||a[0].t!=V_NUM) return BOOLV(0); double x=a[0].num; return BOOLV(js_isfinite(x) && x==js_trunc(x) && x>=-9007199254740991.0 && x<=9007199254740991.0); }
 static val nat_str_fromCharCode(val *a, int n){ char *r=aalloc(n+1); if(!r) return STRV(""); for(int i=0;i<n;i++) r[i]=(char)((int64_t)to_num(a[i])&0xFF); r[n]=0; return STRV(r); }
 /* Error constructors: `new Error("msg")` / `Error("msg")` -> an object with .message and .name.
  * (Engine-thrown runtime errors are still caught as their message string; this is for user code.) */
@@ -3526,7 +3631,7 @@ static void json_val(val v, int depth){
     if(++g_depth>MAXDEPTH){ g_depth--; js_app("null"); return; }
     switch(v.t){
         case V_BOOL: js_app(v.num?"true":"false"); break;
-        case V_NUM:  if(v.num==INT64_MAX||v.num==-INT64_MAX) js_app("null"); else js_app(i64_to_str(v.num)); break;   /* non-finite (the ±Infinity sentinel) serializes as null, per JSON (M691) */
+        case V_NUM:  if(!js_isfinite(v.num)) js_app("null"); else js_app(num_to_str(v.num)); break;   /* NaN/Infinity serialize as null, per JSON (M691) */
         case V_STR:  js_appq(v.str); break;
         case V_ARR:  if(v.o->n==0){ js_app("[]"); break; } js_app("[");
             for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("]"); break;
@@ -3725,8 +3830,7 @@ static val nat_obj_assign(val *a, int n){   /* Object.assign(target, ...sources)
     }
     return a[0];
 }
-static int64_t nat_sign_v(int64_t x){ return x>0?1:x<0?-1:0; }
-static val nat_sign(val *a, int n){ return NUM(n?nat_sign_v(to_num(a[0])):0); }
+static val nat_sign(val *a, int n){ if(!n) return NUM(0); double x=to_num(a[0]); return NUM(js_isnan(x)?JS_NAN: x>0?1.0: x<0?-1.0: x); }   /* sign: 1/-1/0 (preserves -0 and NaN) */
 /* push `e` onto r, applying the optional Array.from map function (e, index) */
 static void from_push(obj *r, val e, val fn, int hasfn){ if(hasfn){ val ca[2]={e,NUM(r->n)}; e=call_function(fn,ca,2); } arr_push_val(r,e); }
 /* Drive the ES6 iterator protocol on `it` and append each yielded value to `dest` via
@@ -3935,10 +4039,15 @@ static void install_globals(env *g) {
     /* Math */
     obj *math=new_obj(V_OBJ);
     def_native(math,"abs",nat_abs); def_native(math,"max",nat_max); def_native(math,"min",nat_min);
-    def_native(math,"floor",nat_ident); def_native(math,"ceil",nat_ident); def_native(math,"round",nat_ident); def_native(math,"trunc",nat_ident);
+    def_native(math,"floor",nat_floor); def_native(math,"ceil",nat_ceil); def_native(math,"round",nat_round); def_native(math,"trunc",nat_trunc);
     def_native(math,"sqrt",nat_sqrt); def_native(math,"pow",nat_pow); def_native(math,"sign",nat_sign); def_native(math,"random",nat_random);
     def_native(math,"hypot",nat_hypot); def_native(math,"log2",nat_log2);
     def_native(math,"cbrt",nat_cbrt); def_native(math,"clz32",nat_clz32); def_native(math,"imul",nat_imul);
+    def_native(math,"log",nat_log); def_native(math,"exp",nat_exp); def_native(math,"log10",nat_log10);
+    obj_set(math,"PI",NUM(3.141592653589793)); obj_set(math,"E",NUM(2.718281828459045));               /* Math constants (real doubles now) */
+    obj_set(math,"LN2",NUM(0.6931471805599453)); obj_set(math,"LN10",NUM(2.302585092994046));
+    obj_set(math,"LOG2E",NUM(1.4426950408889634)); obj_set(math,"LOG10E",NUM(0.4342944819032518));
+    obj_set(math,"SQRT2",NUM(1.4142135623730951)); obj_set(math,"SQRT1_2",NUM(0.7071067811865476));
     env_define(g,"Math",obj_val(math));
     /* Object (Object.keys) */
     obj *objc=new_obj(V_OBJ); def_native(objc,"keys",nat_obj_keys); def_native(objc,"values",nat_obj_values); def_native(objc,"entries",nat_obj_entries); def_native(objc,"assign",nat_obj_assign); def_native(objc,"fromEntries",nat_obj_fromEntries); def_native(objc,"getOwnPropertyNames",nat_obj_keys); def_native(objc,"freeze",nat_obj_freeze); def_native(objc,"isFrozen",nat_obj_isFrozen); def_native(objc,"is",nat_object_is); def_native(objc,"hasOwn",nat_obj_hasOwn); def_native(objc,"defineProperty",nat_obj_defineProperty); def_native(objc,"defineProperties",nat_obj_defineProperties); def_native(objc,"getOwnPropertyDescriptor",nat_obj_getOwnPropertyDescriptor); def_native(objc,"getOwnPropertyDescriptors",nat_obj_getOwnPropertyDescriptors); def_native(objc,"create",nat_obj_create); def_native(objc,"getPrototypeOf",nat_obj_getPrototypeOf); def_native(objc,"setPrototypeOf",nat_obj_setPrototypeOf); g_object_ctor=objc; env_define(g,"Object",obj_val(objc));
@@ -3968,16 +4077,15 @@ static void install_globals(env *g) {
     obj *pf=new_obj(V_NATIVE); pf->native=nat_parseInt; env_define(g,"parseFloat",obj_val_native(pf));
     obj *sf=new_obj(V_NATIVE); sf->native=nat_String;   env_define(g,"String",obj_val_native(sf));
     obj *nf=new_obj(V_NATIVE); nf->native=nat_Number;   env_define(g,"Number",obj_val_native(nf));
-    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); obj_set(nst,"POSITIVE_INFINITY",NUM(INT64_MAX)); obj_set(nst,"NEGATIVE_INFINITY",NUM(-INT64_MAX)); obj_set(nst,"MAX_VALUE",NUM(INT64_MAX)); nf->statics=nst; }
+    { obj *nst=new_obj(V_OBJ); if(nst){ def_native(nst,"isInteger",nat_num_isInteger); def_native(nst,"isFinite",nat_num_isFinite); def_native(nst,"isNaN",nat_isNaN); def_native(nst,"isSafeInteger",nat_num_isSafeInteger); def_native(nst,"parseInt",nat_parseInt); def_native(nst,"parseFloat",nat_parseInt); obj_set(nst,"MAX_SAFE_INTEGER",NUM(9007199254740991LL)); obj_set(nst,"MIN_SAFE_INTEGER",NUM(-9007199254740991LL)); obj_set(nst,"POSITIVE_INFINITY",NUM(JS_INF)); obj_set(nst,"NEGATIVE_INFINITY",NUM(-JS_INF)); obj_set(nst,"MAX_VALUE",NUM(1.7976931348623157e308)); obj_set(nst,"MIN_VALUE",NUM(5e-324)); obj_set(nst,"EPSILON",NUM(2.220446049250313e-16)); obj_set(nst,"NaN",NUM(JS_NAN)); nf->statics=nst; }
       obj *sst=new_obj(V_OBJ); if(sst){ def_native(sst,"fromCharCode",nat_str_fromCharCode); def_native(sst,"fromCodePoint",nat_str_fromCharCode); sf->statics=sst; } }   /* String.fromCharCode/fromCodePoint (ASCII: same) via side-statics; Number/String stay V_NATIVE */
     obj *bf=new_obj(V_NATIVE); bf->native=nat_Boolean;  env_define(g,"Boolean",obj_val_native(bf));
     obj *nan=new_obj(V_NATIVE); nan->native=nat_isNaN;  env_define(g,"isNaN",obj_val_native(nan));
     { obj *fin=new_obj(V_NATIVE); fin->native=nat_isFinite; env_define(g,"isFinite",obj_val_native(fin)); }
-    /* Infinity: this engine's numbers are int64 (no FPU), so there is no true
-     * IEEE infinity — but INT64_MAX is a faithful sentinel for the common uses
-     * (`let min = Infinity; if (x < min) …`, `arr.flat(Infinity)`), and defining
-     * it stops the many scripts that reference Infinity from aborting outright. */
-    env_define(g,"Infinity",NUM(INT64_MAX));
+    /* Infinity / NaN: real IEEE-754 values now that numbers are doubles (js.o is built
+     * with SSE). 1/0 -> Infinity, 0/0 -> NaN, Math.max() -> -Infinity, etc. */
+    env_define(g,"Infinity",NUM(JS_INF));
+    env_define(g,"NaN",NUM(JS_NAN));
     /* Error + its subtypes: link each subtype's ctor parent_class to Error so
      * `new TypeError(...) instanceof Error` is true (the instanceof chain walks
      * ctor_class -> parent_class), matching JS's Error hierarchy. */

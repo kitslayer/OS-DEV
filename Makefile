@@ -73,6 +73,15 @@ $(BUILD)/%.o: %.c Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# js.o uses real IEEE-754 doubles (M906), which need SSE — so drop -mgeneral-regs-only
+# and add SSE for this one translation unit (an exact-target rule overrides the %.o rule).
+# Safe in the kernel: fpu_init() enables x87+SSE at boot, and the scheduler saves/restores
+# FP/SSE state for EVERY task (task.c fx_alloc in sched_init + task_create_stack), so the
+# JS engine's xmm use survives context switches. No libm/libcall (js_sqrt/js_pow are local).
+$(BUILD)/kernel/js.o: kernel/js.c Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -msse2 -mfpmath=sse -c $< -o $@
+
 # -fwrapv is in CFLAGS above (global): the kernel parses untrusted input (network,
 # disk, images, TLS, HTML, JS) with signed arithmetic, so signed overflow must be
 # defined (wrapping) rather than UB under -O2 across the whole kernel.
