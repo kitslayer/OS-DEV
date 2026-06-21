@@ -1,5 +1,16 @@
 # What's next
 
+> **(M933) Browser — `max-width` centered columns (readable article layout).** The ubiquitous
+> `max-width:Npx; margin:0 auto` pattern (blogs/docs/news constrain body text to a centered column) was
+> ignored — content ran the full window width. Now a block with `max-width` emits `TK_MAXW_OPEN`/`CLOSE`
+> markers; at render the loop narrows + centers the content edges for that block (`cl += off; cr -= off`,
+> `off = (cr−cl−maxwidth)/2`, pushed on a 16-deep stack and restored on close), so text, wrapping, borders and
+> nested flex all lay out inside the centered column. Needed a dedicated `max-width` parser — the shared
+> `parse_px_val` caps at 120px (right for margins, far too small for a column), so widths were clamped to a
+> sliver. Verified in-guest (`MAXW.HTM`: a `max-width:380px` block is a centered ~380px column between two
+> full-width paragraphs). Additive (`mxsp` stack is empty without max-width → identical); `make check` green
+> (35 suites).
+
 > **(M932) Browser — flex `justify-content: space-between` (and space-around/evenly).** Extended M931's
 > forward-scan to track item-widths (`ww`) and the gap count (`nb`) separately. For `space-between` the inter-
 > item gap is widened to fill the row — `flex_gap = (avail − ww) / nb` — so items spread edge-to-edge; center/

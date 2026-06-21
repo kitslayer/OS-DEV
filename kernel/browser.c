@@ -61,7 +61,8 @@
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG,     /* TK_IMG: link field = image slot */
        TK_BORDER_OPEN, TK_BORDER_CLOSE,               /* CSS border: OPEN carries off=color(24b), style=width; bracket a block's tokens, drawn as one rect at render (M910) */
-       TK_FLEX_OPEN, TK_FLEX_CLOSE };                 /* display:flex: bracket a container; inside, child block-breaks become horizontal gaps (row layout) (M927) */
+       TK_FLEX_OPEN, TK_FLEX_CLOSE,                   /* display:flex: bracket a container; inside, child block-breaks become horizontal gaps (row layout) (M927) */
+       TK_MAXW_OPEN, TK_MAXW_CLOSE };                 /* max-width: OPEN off=px; narrows+centres cl..cr for the block (readable column) (M933) */
 #define BORDER_PAD 6                                   /* px of padding between a full border box and its text (both axes, M916) */
 
 typedef struct { uint32_t off; uint16_t len, link; uint8_t style, type; } tok_t;  /* off is uint32 so TEXT_MAX can exceed 64KB (len<=word, link<LINK_MAX stay uint16) */
@@ -145,7 +146,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border */
@@ -617,6 +618,17 @@ static int parse_style_justify(const char *s, int n) {
     if (attr_eq(v, vl, "space-between") || attr_eq(v, vl, "space-around") || attr_eq(v, vl, "space-evenly")) return 3;
     return 0;   /* flex-start / other -> start */
 }
+/* max-width in px (0 = none). Used to narrow + centre a block into a readable column
+ * (the `max-width:Npx; margin:0 auto` pattern); centring is assumed (the common case). */
+static int parse_style_maxwidth(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "max-width", 9, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs, i = 0, num = 0;   /* own parse: parse_px_val caps at 120, too small for a column width */
+    while (i < vl && v[i] == ' ') i++;
+    while (i < vl && v[i] >= '0' && v[i] <= '9') { num = num*10 + (v[i]-'0'); i++; }
+    if (i + 1 < vl && (v[i]|32) == 'e' && (v[i+1]|32) == 'm') num *= 16;   /* em -> ~16px */
+    return num > 4000 ? 4000 : num;                                       /* sane upper cap */
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -671,10 +683,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
                 if (b->sc[sp].hasborder && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };   /* close the border box opened by this frame */
                 if (b->sc[sp].hasflex && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_FLEX_CLOSE };   /* end the flex row */
+                if (b->sc[sp].hasmaxw && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_MAXW_CLOSE };   /* restore full width */
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -688,6 +701,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             if (parse_style_flex(st, stl)) flex = 1;                          /* display:flex */
             fgap = parse_style_gap(st, stl);                                  /* flex gap (px) */
             fjust = parse_style_justify(st, stl);                             /* justify-content: 1 center, 2 end */
+            mw = parse_style_maxwidth(st, stl);                               /* max-width (px) -> centred column */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -709,7 +723,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
               if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml || bd || flex) {  /* styled/hidden/indented/bordered/flex element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml || bd || flex || mw) {  /* styled/hidden/indented/bordered/flex/max-width element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
@@ -734,6 +748,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (flex && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* flex container: lay its children in a row */
                     b->toks[b->ntok++] = (tok_t){ (uint32_t)fgap, 0, NO_LINK, (uint8_t)fjust, TK_FLEX_OPEN };   /* off = gap px (0 = default); style = justify (1 center, 2 end) */
                     b->sc[sp].hasflex = 1;
+                }
+                b->sc[sp].hasmaxw = 0;
+                if (mw > 0 && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* max-width: narrow + centre this block */
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)mw, 0, NO_LINK, 0, TK_MAXW_OPEN };
+                    b->sc[sp].hasmaxw = 1;
                 }
                 b->sc_sp++;
             }   /* stack full: skip (no scope) — graceful, never overflows */
@@ -3360,6 +3379,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     int render_rpad = 0;   /* right-edge inset while inside full border boxes, so their text wraps short of the box (M916 horizontal padding) */
     int flex_depth = 0;    /* >0 while inside a display:flex container: child block-breaks become horizontal gaps (M927) */
     int flex_gap = 18;     /* px gap between flex items (from CSS `gap`, M930; 18 default) */
+    int mxoff[16], mxsp = 0;   /* max-width: cl/cr inset per active container, restored on close (M933) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
         if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right */
@@ -3400,6 +3420,13 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             continue;
         }
         if (tk->type == TK_FLEX_CLOSE) { if (flex_depth > 0) flex_depth--; cy += curlh; cx = cl; curlh = 18; continue; }   /* end the row */
+        if (tk->type == TK_MAXW_OPEN)  {   /* narrow + centre the content column for this block */
+            if (cx > cl) { cy += curlh; curlh = 18; }
+            int mwv = (int)tk->off, off = (cr - cl > mwv) ? (cr - cl - mwv) / 2 : 0;
+            if (mxsp < 16) { mxoff[mxsp++] = off; cl += off; cr -= off; }
+            cx = cl; continue;
+        }
+        if (tk->type == TK_MAXW_CLOSE) { if (mxsp > 0) { int off = mxoff[--mxsp]; cl -= off; cr += off; } cy += curlh; cx = cl; curlh = 18; continue; }   /* restore full width */
         if (tk->type == TK_BREAK) { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + tk->off; cx = cl; curlh = 18; continue; }   /* in flex: break -> horizontal gap between items */
         if (tk->type == TK_PARA)  { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_HR) {
@@ -3556,7 +3583,8 @@ static void browser_save(browser_t *b) {
     for (int t = 0; t < b->ntok && p < cap - 8; t++) {
         tok_t *tk = &b->toks[t];
         if (tk->type == TK_BORDER_OPEN || tk->type == TK_BORDER_CLOSE ||
-            tk->type == TK_FLEX_OPEN   || tk->type == TK_FLEX_CLOSE) continue;   /* structural markers, not text */
+            tk->type == TK_FLEX_OPEN   || tk->type == TK_FLEX_CLOSE ||
+            tk->type == TK_MAXW_OPEN   || tk->type == TK_MAXW_CLOSE) continue;   /* structural markers, not text */
         if (tk->type == TK_WORD) {
             for (int i = 0; i < tk->len && p < cap - 2; i++) out[p++] = b->text[tk->off + i];
             out[p++] = ' ';
