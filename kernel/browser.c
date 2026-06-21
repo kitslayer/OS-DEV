@@ -450,20 +450,26 @@ static uint32_t parse_style_bg(const char *s, int n) {
         return parse_color(s + vs, ve - vs);
     return 0;
 }
-/* CSS border (inline style="border:..."). Returns (width<<24)|color, 0 if none.
- * Pulls a px width and a #hex colour out of the shorthand; defaults 1px / grey.
- * style_prop matches "border:" exactly (not border-width/-top), so this is the shorthand. */
+/* CSS border. Returns (width<<28)|(sides<<24)|color, 0 if none. `sides` is a bitmask
+ * (1=top 2=right 4=bottom 8=left, 15=all from the `border` shorthand). Pulls a px width
+ * and a #hex colour from the value; defaults 1px / grey. style_prop matches each property
+ * name up to ':' exactly, so "border" never matches "border-top". One width/colour per box. */
 static uint32_t parse_style_border(const char *s, int n) {
-    int vs, ve;
-    if (!style_prop(s, n, "border", 6, &vs, &ve)) return 0;
-    const char *v = s + vs; int vl = ve - vs;
+    int vs, ve, sides = 0, vstart = -1, vend = -1;
+    if (style_prop(s, n, "border", 6, &vs, &ve))         { sides  = 15; vstart = vs; vend = ve; }
+    if (style_prop(s, n, "border-top", 10, &vs, &ve))    { sides |= 1;  if (vstart < 0) { vstart = vs; vend = ve; } }
+    if (style_prop(s, n, "border-right", 12, &vs, &ve))  { sides |= 2;  if (vstart < 0) { vstart = vs; vend = ve; } }
+    if (style_prop(s, n, "border-bottom", 13, &vs, &ve)) { sides |= 4;  if (vstart < 0) { vstart = vs; vend = ve; } }
+    if (style_prop(s, n, "border-left", 11, &vs, &ve))   { sides |= 8;  if (vstart < 0) { vstart = vs; vend = ve; } }
+    if (!sides || vstart < 0) return 0;
+    const char *v = s + vstart; int vl = vend - vstart;
     int width = 1;
     for (int i = 0; i + 1 < vl; i++)
         if (v[i] >= '0' && v[i] <= '9') { int w = 0, j = i; while (j < vl && v[j] >= '0' && v[j] <= '9') { w = w*10 + (v[j]-'0'); j++; } if (j < vl && v[j] == 'p') { width = w; break; } }
-    width = width < 1 ? 1 : (width > 8 ? 8 : width);
+    width = width < 1 ? 1 : (width > 15 ? 15 : width);          /* 4-bit width */
     uint32_t color = 0x666666;                                  /* default medium grey */
     for (int i = 0; i < vl; i++) if (v[i] == '#') { color = parse_color(v + i, vl - i); break; }
-    return ((uint32_t)width << 24) | (color & 0xFFFFFFu);
+    return ((uint32_t)(width & 0xF) << 28) | ((uint32_t)(sides & 0xF) << 24) | (color & 0xFFFFFFu);
 }
 /* text-align: 1 = center, 2 = right, 0 = left/justify/other (the default flow). */
 static int parse_style_align(const char *s, int n) {
@@ -680,7 +686,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].depth = 1;
                 b->sc[sp].hasborder = 0;
                 if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), 0, NO_LINK, (uint8_t)(bd >> 24), TK_BORDER_OPEN };
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), (uint16_t)((bd >> 24) & 0xF), NO_LINK, (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color, len=sides, style=width */
                     b->sc[sp].hasborder = 1;
                 }
                 b->sc_sp++;
@@ -3303,16 +3309,19 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
         }
     } else {
-    int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16], bsp = 0;   /* CSS border boxes: y_top pushed on OPEN, rect stroked on CLOSE */
+    int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16], bsp = 0;   /* CSS border boxes: y_top+sides pushed on OPEN, rect stroked on CLOSE */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
-        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { bstk_y[bsp] = cy; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bsp++; } continue; }
+        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { bstk_y[bsp] = cy; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = tk->len ? tk->len : 15; bsp++; } continue; }
         if (tk->type == TK_BORDER_CLOSE) {
-            if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh, w = bstk_w[bsp]; uint32_t bc = bstk_c[bsp];
+            if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh, w = bstk_w[bsp], sd = bstk_s[bsp]; uint32_t bc = bstk_c[bsp];   /* sd: 1=top 2=right 4=bottom 8=left */
                 int yy0 = y0 < ct ? ct : y0, yy1 = y1 > cb ? cb : y1;
-                if (yy1 > yy0) { fb_fill_rect(cl, yy0, w, yy1 - yy0, bc); fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc); }   /* left + right edges (viewport-clipped) */
-                if (y0 >= ct && y0 <= cb) fb_fill_rect(cl, y0, cr - cl, w, bc);                /* top edge */
-                if (y1 - w >= ct && y1 - w <= cb) fb_fill_rect(cl, y1 - w, cr - cl, w, bc);     /* bottom edge */
+                if (yy1 > yy0) {
+                    if (sd & 8) fb_fill_rect(cl, yy0, w, yy1 - yy0, bc);             /* left edge (viewport-clipped) */
+                    if (sd & 2) fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc);         /* right edge */
+                }
+                if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(cl, y0, cr - cl, w, bc);                /* top edge */
+                if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(cl, y1 - w, cr - cl, w, bc);     /* bottom edge */
             }
             continue;
         }

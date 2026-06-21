@@ -1,5 +1,14 @@
 # What's next
 
+> **(M912) Browser — individual border sides (`border-top/right/bottom/left`).** Extends M910/M911 so a block
+> can have just one edge — the common pattern for section dividers (`border-bottom`) and rules (`border-top`),
+> used all over real pages. `parse_style_border` now also matches the four per-side properties and packs a
+> 4-bit sides mask into the border value (`width<<28 | sides<<24 | color`); the `border` shorthand = all sides.
+> The mask rides in the `TK_BORDER_OPEN` marker's `len` field, and the render stroke only draws the edges the
+> mask sets. Verified in-guest (`BORDER.HTM`: a red `border-bottom` divider under one block, a green
+> `border-top` rule above another, plus the existing full red/blue/green/purple boxes). Additive + golden-safe;
+> `make check` green (35 suites).
+
 > **(M911) Browser — CSS `border` from `<style>` rules (not just inline).** Extends M910 to stylesheet rules
 > (`.card { border: 2px solid #80c }`), which real pages use far more than inline `style=`. Followed the CSS-
 > engine's established add-a-property pattern: a `css_border[CSS_MAX]` array, parsed in `capture_css` via the
