@@ -1,5 +1,13 @@
 # What's next
 
+> **(M924) Shell — `(( expr ))` arithmetic command.** Completes the arithmetic constructs (`$((…))`,
+> `for ((;;))`, and now the standalone command). Reuses `sh_do_assign` (now returning the value) for
+> `((i++))`, `((x = a*b))`, `((sum += n))`, and sets `$?` = (value≠0 ? 0 : 1) so `((n > 5)) && cmd` works as a
+> condition. Needed one fix: `run_line` was glob-expanding the `*` in `((x = 6 * 7))` (multiply read as a
+> wildcard), so glob is now skipped for a leading `((` — like `$(())`, arithmetic `*` is multiply.
+> Verified in-guest: `((y = 6 * 7))`→42, `((p = a*a + b*b))`→25, `((n>5)) &&`→runs, and C-style for + `((sq=i*i))`
+> → a squares table. `make check` green (35 suites); warnings at baseline.
+
 > **(M923) Shell — C-style `for ((init; cond; incr))` loops.** Completes the loop set (alongside `for V in
 > WORDS` and `while`). Feasible without touching the host-tested `shmath.h`: `sh_eval` already resolves bare
 > names, so the condition (`i<5`) and RHS expressions (`s+j`) evaluate directly; only the assignment is new —

@@ -56,6 +56,7 @@ static int run_andor(char *seg, char *cwd);
 static int run_input_line(char *line, char *cwd);
 static int run_for(char *line, char *cwd);
 static int run_case(char *line, char *cwd);
+static long sh_do_assign(const char *e);   /* (( expr )) / C-style-for assignment; defined below */
 static int run_while(char *line, char *cwd);
 static void source_file(const char *fn, char *cwd, int silent);   /* run shell commands from a file */
 
@@ -438,6 +439,7 @@ static int run_command(char *line, char *cwd) {
             print("        for V in WORDS; do CMDS; done   (loop: WORDS get glob/$var expansion)\n");
             print("        while COND; do CMDS; done   (loops while COND succeeds; Ctrl-C to stop)\n");
             print("        break / continue   (exit / skip to next iteration of the innermost loop)\n");
+            print("        for ((i=0;i<N;i++)); do CMDS; done   (C-style loop)   (( expr ))  (arithmetic: i++, x=a*b; sets $?)\n");
             print("        if COND; then CMDS; [elif COND; then CMDS;]... [else CMDS;] fi   (status picks the branch)\n");
             print("        case WORD in PAT) CMDS;; PAT2|PAT3) CMDS;; *) CMDS;; esac   (glob-match dispatch)\n");
             print("        test/[ ]: A -eq/-ne/-lt/-gt/-le/-ge B, A =/!= B, -z/-n S, -e/-f F, ! EXPR\n");
@@ -2438,6 +2440,14 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "break") || streq(line, "continue")) {
             if (g_loopdepth > 0) g_loopbrk = (line[0] == 'b') ? 1 : 2;   /* consumed by the innermost loop; no-op outside one */
             g_status = 0;
+        } else if (line[0] == '(' && line[1] == '(') {     /* (( expr )) arithmetic command: do assignment / eval; $? = (value != 0) ? 0 : 1 */
+            char ex[256]; int el = 0; const char *q = line + 2;
+            while (*q && el < 255) ex[el++] = *q++;
+            while (el > 0 && ex[el-1] == ' ') el--;
+            if (el >= 2 && ex[el-1] == ')' && ex[el-2] == ')') el -= 2;   /* drop the closing )) */
+            ex[el] = 0;
+            long v = sh_do_assign(ex);
+            g_status = v ? 0 : 1;
         } else if (streq(line, "exit")) {
             print("bye!\n");
             return 1;                  /* signal main()'s loop to stop */
@@ -2635,8 +2645,10 @@ static int run_line(char *line, char *cwd) {
           for (int i = 0; av[i] && o < 1023; i++) aline[o++] = av[i];
           for (int i = wl; cmd[i] && o < 1023; i++) aline[o++] = cmd[i];
           aline[o] = 0; cmd = aline; } }
-    for (int i = 0; cmd[i]; i++) if (cmd[i] == '*' || cmd[i] == '?') {
-        glob_expand(cmd, gline, sizeof gline); cmd = gline; break;
+    if (!(cmd[0] == '(' && cmd[1] == '(')) {   /* skip glob for a (( expr )) arithmetic command, whose * is multiply not a wildcard */
+        for (int i = 0; cmd[i]; i++) if (cmd[i] == '*' || cmd[i] == '?') {
+            glob_expand(cmd, gline, sizeof gline); cmd = gline; break;
+        }
     }
 
     const char *rfile = 0; int append = 0;
@@ -2710,21 +2722,21 @@ static int run_andor(char *seg, char *cwd) {
  * nested loops don't clobber each other. */
 /* Evaluate one C-style-for assignment piece: VAR=expr / VAR++ / VAR-- / VAR+=expr (and -=,*=,/=,%=).
  * Read parts use sh_eval (which resolves bare names); the assignment itself goes through vset. */
-static void sh_do_assign(const char *e) {
+static long sh_do_assign(const char *e) {
     while (*e == ' ') e++;
     const char *vs = e; int vl = 0; while (sh_vchar(e[vl])) vl++;
-    if (vl == 0) { const char *q = e; if (*q) sh_eval(&q); return; }   /* no lvalue -> just evaluate */
+    if (vl == 0) { const char *q = e; return *q ? sh_eval(&q) : 0; }   /* no lvalue -> just evaluate */
     const char *op = e + vl; while (*op == ' ') op++;
     char num[16];
-    if (op[0]=='+' && op[1]=='+') { itoa_simple((int)(sh_var(vs,vl)+1), num); vset(vs,vl,num); return; }   /* i++ */
-    if (op[0]=='-' && op[1]=='-') { itoa_simple((int)(sh_var(vs,vl)-1), num); vset(vs,vl,num); return; }   /* i-- */
-    if (op[0]=='=' && op[1]!='=') { const char *q=op+1; long r=sh_eval(&q); itoa_simple((int)r,num); vset(vs,vl,num); return; }   /* i=expr */
+    if (op[0]=='+' && op[1]=='+') { long o=sh_var(vs,vl); itoa_simple((int)(o+1), num); vset(vs,vl,num); return o; }   /* i++ (post: old value) */
+    if (op[0]=='-' && op[1]=='-') { long o=sh_var(vs,vl); itoa_simple((int)(o-1), num); vset(vs,vl,num); return o; }   /* i-- */
+    if (op[0]=='=' && op[1]!='=') { const char *q=op+1; long r=sh_eval(&q); itoa_simple((int)r,num); vset(vs,vl,num); return r; }   /* i=expr */
     if (op[1]=='=' && (op[0]=='+'||op[0]=='-'||op[0]=='*'||op[0]=='/'||op[0]=='%')) {                       /* i+=expr etc. */
         const char *q=op+2; long r=sh_eval(&q), cur=sh_var(vs,vl), nv;
         switch(op[0]){ case '+':nv=cur+r;break; case '-':nv=cur-r;break; case '*':nv=cur*r;break; case '/':nv=r?cur/r:0;break; default:nv=r?cur%r:0; }
-        itoa_simple((int)nv,num); vset(vs,vl,num); return;
+        itoa_simple((int)nv,num); vset(vs,vl,num); return nv;
     }
-    { const char *q=e; sh_eval(&q); }                                  /* bare expression */
+    { const char *q=e; return sh_eval(&q); }                           /* bare expression (e.g. a comparison i<5) */
 }
 /* C-style loop: for ((init; cond; incr)); do CMDS; done. `p` points at the "((".
  * cond is a read-only sh_eval (empty == true); init/incr are assignments. */
