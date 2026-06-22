@@ -1078,6 +1078,7 @@ static int run_command(char *line, char *cwd) {
             while (*p && ac < 12) {
                 while (*p == ' ') p++;
                 if (!*p) break;
+                if (ti >= 255) break;        /* no room for another token + its NUL: stop (else tok[ti++]=0 writes past tok[256] + stores a dangling av[]) */
                 av[ac++] = tok + ti;
                 while (*p && *p != ' ' && ti < 255) tok[ti++] = *p++;
                 tok[ti++] = 0;
@@ -1598,6 +1599,7 @@ static int run_command(char *line, char *cwd) {
             while (*p == ' ') p++;
             static char abuf[512]; char *av[32]; int ac = 0, bi = 0;   /* split the trailing words into args */
             while (*p && ac < 32) {
+                if (bi >= 511) break;        /* no room for another arg + its NUL: stop (else av[] gets a dangling abuf+512 fed to sh_unprot_buf) */
                 av[ac++] = abuf + bi;
                 while (*p && *p != ' ' && bi < 511) abuf[bi++] = *p++;
                 if (bi < 512) abuf[bi++] = 0;
@@ -2336,6 +2338,7 @@ static int run_command(char *line, char *cwd) {
             while (*q && ac < 16) {
                 while (*q == ' ') q++;
                 if (!*q) break;
+                if (tn >= 255) break;        /* no room for another token + its NUL: stop (else tbuf[tn++]=0 writes past tbuf[256] + stores a dangling av[]) */
                 av[ac++] = tbuf + tn;
                 while (*q && *q != ' ' && tn < 255) tbuf[tn++] = *q++;
                 tbuf[tn++] = 0;
