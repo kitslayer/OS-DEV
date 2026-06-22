@@ -267,9 +267,12 @@ int dns_resolve(const char *host, uint8_t out_ip[4]) {
     uint64_t deadline = timer_ticks() + 500;
     while (timer_ticks() < deadline) {
         int len = recv_timeout(buf, sizeof(buf), 20);
-        if (len < 42 || get16(buf + 12) != 0x0800 || buf[14 + 9] != 17) continue;
-        uint8_t *d = buf + 42;                 /* DNS payload */
-        int dmax = len - 42;                   /* bytes available in d[] (adversarial) */
+        if (len < 42 || get16(buf + 12) != 0x0800 || buf[14 + 9] != 17) continue;   /* IPv4/UDP */
+        int ihl = (buf[14] & 0x0F) * 4;        /* honor the real IP header length (IP options -> IHL>5); SLIRP uses 20 so this is a no-op there, but real routers may not */
+        int doff = 14 + ihl + 8;               /* eth(14) + IP(ihl) + UDP(8) -> DNS payload (was hardcoded 42 = IHL 5) */
+        if (ihl < 20 || len < doff + 12) continue;
+        uint8_t *d = buf + doff;               /* DNS payload */
+        int dmax = len - doff;                 /* bytes available in d[] (adversarial) */
         if (dmax < 12 || get16(d) != 0x2A2A) continue;
         int an = get16(d + 6);
         if (an < 1) continue;

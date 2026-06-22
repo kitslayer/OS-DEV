@@ -1,5 +1,15 @@
 # What's next
 
+> **(M982) net — DNS reply parse honors the real IP header length (9th review P3-1).** The DNS-response parser
+> hardcoded the DNS payload at `buf+42` (eth 14 + IP 20 + UDP 8), assuming IHL=5; an IP header carrying options
+> (IHL>5) puts the UDP/DNS payload further along, so hostname resolution would silently fail (timeout) on such a
+> network. Now it computes `ihl` from the header (mirroring `tcp_recv_seg`, which already did this) and reads the
+> payload at `14 + ihl + 8`, bounding `len`/`dmax` against it. **No-op on SLIRP/QEMU** (IHL=5 → offset 42, byte-
+> identical) — verified by boottest's live example.com resolve→connect→TLS still succeeding; net.c warnings 0; all
+> 37 `make check` suites pass. It's real-hardware robustness (a router using IP options). The remaining 9th-review
+> P3s are cosmetic/benign under SLIRP and left noted: the ICMP echo-reply IHL (just a 3-ping counter), the ICMP
+> id/seq match, and the ARP same-IP cache overwrite. See [[os-dev-project]].
+
 > **(M981) TCP/net — three connection state-machine fixes (9th review subagent, net.c).** The review confirmed the
 > packet parse + out-of-order reassembly are solid (the nettest fuzzer's domain) and found the real bugs in the
 > connection lifecycle: **(P2-2, permanent hang) the FIN-honored checks used `c->theirseq == fin_at`** — so if
