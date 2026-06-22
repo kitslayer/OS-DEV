@@ -20,6 +20,7 @@ global breakout_elf_start, breakout_elf_end
 global mines_elf_start, mines_elf_end
 global sudoku_elf_start, sudoku_elf_end
 global calendar_elf_start, calendar_elf_end
+global timer_elf_start, timer_elf_end
 global mandel_elf_start, mandel_elf_end
 global piano_elf_start, piano_elf_end
 global maze_elf_start, maze_elf_end
@@ -113,6 +114,10 @@ sudoku_elf_end:
 calendar_elf_start:
     incbin "build/calendar.elf"
 calendar_elf_end:
+
+timer_elf_start:
+    incbin "build/timer.elf"
+timer_elf_end:
 
 mandel_elf_start:
     incbin "build/mandel.elf"
