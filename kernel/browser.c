@@ -999,6 +999,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                         int aw = attr_int(attrs, attrlen, "width");
                         int ah = attr_int(attrs, attrlen, "height");
                         emit_break(b, TK_BREAK);
+                        b->tokalign[b->ntok] = (uint8_t)b->curalign;   /* honour enclosing text-align when centred/right */
                         b->toks[b->ntok++] = (tok_t){ (uint16_t)aw, (uint16_t)ah, (uint16_t)slot, STY_NORMAL, TK_IMG };
                         emit_break(b, TK_BREAK);
                         shown = 1;
@@ -1025,6 +1026,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                                 int aw = attr_int(attrs, attrlen, "width");
                                 int ah = attr_int(attrs, attrlen, "height");
                                 emit_break(b, TK_BREAK);
+                                b->tokalign[b->ntok] = (uint8_t)b->curalign;   /* honour enclosing text-align when centred/right */
                                 b->toks[b->ntok++] = (tok_t){ (uint16_t)aw, (uint16_t)ah, (uint16_t)slot, STY_NORMAL, TK_IMG };
                                 emit_break(b, TK_BREAK);
                                 shown = 1;
@@ -1050,6 +1052,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                             int aw = attr_int(attrs, attrlen, "width");
                             int ah = attr_int(attrs, attrlen, "height");
                             emit_break(b, TK_BREAK);
+                            b->tokalign[b->ntok] = (uint8_t)b->curalign;   /* honour enclosing text-align when centred/right */
                             b->toks[b->ntok++] = (tok_t){ (uint16_t)aw, (uint16_t)ah, (uint16_t)slot, STY_NORMAL, TK_IMG };
                             emit_break(b, TK_BREAK);
                             shown = 1;
@@ -3817,6 +3820,17 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 if (destw > maxw && destw > 0) { desth = (int)((long)desth * maxw / destw); destw = maxw; }
                 if (desth > IMG_MAX_H && desth > 0) { destw = (int)((long)destw * IMG_MAX_H / desth); desth = IMG_MAX_H; }
                 if (cx > cl) { cy += curlh; cx = cl; }   /* drop to a fresh line */
+                /* block image honours the enclosing text-align: centre/right shift the
+                 * blit x within [cl, cr] (same offset math as the word path). align 0
+                 * (left, the default) -> x0 == cl, so existing pages are byte-identical;
+                 * clamped >= cl so a too-wide image stays pinned left. */
+                int x0 = cl;
+                int ialn = (t < TOK_MAX) ? b->tokalign[t] : 0;
+                if (ialn) {
+                    int ioff = (ialn == 1) ? (cr - cl - destw) / 2 : (cr - cl - destw);
+                    if (ioff < 0) ioff = 0;
+                    x0 = cl + ioff;
+                }
                 if (t < TOK_MAX) b->toky[t] = cy - (ct - b->scroll);
                 for (int dy = 0; dy < desth; dy++) {
                     int py = cy + dy;
@@ -3830,7 +3844,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                         int r  = (pp[0]*a + 255*(255-a)) / 255;
                         int g  = (pp[1]*a + 255*(255-a)) / 255;
                         int bl = (pp[2]*a + 255*(255-a)) / 255;
-                        fb_pixel(cl + dx, py, ((uint32_t)r<<16)|((uint32_t)g<<8)|(uint32_t)bl);
+                        fb_pixel(x0 + dx, py, ((uint32_t)r<<16)|((uint32_t)g<<8)|(uint32_t)bl);
                     }
                 }
                 cy += desth + 6; cx = cl; curlh = 18;
