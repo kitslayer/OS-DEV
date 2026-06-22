@@ -1,5 +1,17 @@
 # What's next
 
+> **(M978) Tests — regression-lock tonight's JS engine fixes in the jstest suite.** The M958–M967 fixes
+> (sort-sign comparator, `switch` `===`-identity, static-field `++`, NaN as a Map/Set/`includes` key, strict
+> `JSON.parse`, NaN/Infinity `toString(radix)`, `var` function-scoping + hoisting, `Number(non-numeric)`→NaN) were
+> each verified via `-DJS_HOSTTEST` repros, but those are ephemeral — none were added to the permanent
+> `tests/js/suite.js`, so a future change could silently reintroduce any of them. Added six `print()` regression
+> cases covering all nine fixes (golden regenerated from the now-fixed engine, so the correct behavior is captured),
+> e.g. `[5,4,3,2,1].sort((a,b)=>(a-b)/10)`→`1,2,3,4,5`, `new Set([NaN,NaN]).size`→1 with `NaN===NaN`→false,
+> `JSON.parse("1 x")` throws, `{var y=7} y`→7 / `{let z=1} typeof z`→undefined, `Number("12abc")`→NaN. `make
+> jstest` green (ASan/UBSan clean, ran to completion, matches golden); all 37 `make check` suites pass. These fixes
+> are now regression-locked alongside the kheap double-free/backward-coalesce cases (M972–M974). See
+> [[js-and-web-app-ceiling]].
+
 > **(M977) Scheduler — dedicated idle task as a guaranteed runnable floor (kernel review #1; the review is now
 > fully addressed).** `switch_to_next` skipped DEAD/BLOCKED and stopped at `next==prev`, so a task that blocked
 > itself when nothing else was runnable kept executing past `task_block()` still marked BLOCKED (masked only

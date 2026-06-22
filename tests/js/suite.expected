@@ -386,4 +386,16 @@ xxy xyy ab[ab|cd|e]e
 1,2,9 1,3 1,true
 -- globalThis / self (M747) --
 object object true true object 9 true
+-- M958 sort sign / switch identity / static ++ --
+1,2,3,4,5 1,2,3 ok self 1
+-- M959 NaN as Map/Set/includes key (SameValueZero) vs strict === --
+1 true 7 false -1
+-- M959 strict JSON.parse (trailing garbage / bad literal throw) --
+threw threw 3 42
+-- M960 NaN/Infinity toString(radix) --
+ff NaN Infinity -1010
+-- M965/M966 var function-scope + hoisting --
+7 3 undefined undefined,5 undefined
+-- M967 Number(non-numeric string) -> NaN --
+true true true 42 Infinity -3.5
 -- done --

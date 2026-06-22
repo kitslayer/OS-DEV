@@ -419,4 +419,16 @@ print("-- generator edge cases (M678) --");
 print((function(){function* g(){try{yield 1;yield 2;}finally{yield 9;}}return [...g()].join(",");})(), (function(){function* g(){if(true)yield 1;else yield 2;yield 3;}return [...g()].join(",");})(), (function(){function* g(){var r=yield 1;yield r===undefined;}return [...g()].join(",");})());  // 1,2,9 1,3 1,true (try/finally + conditional yield + yield-value is undefined in the eager model)
 print("-- globalThis / self (M747) --");
 print(typeof globalThis, typeof self, self===globalThis, globalThis.globalThis===globalThis, typeof globalThis.JSON, globalThis.Math.max(2,9), (typeof globalThis!=="undefined"));  // object object true true object 9 true (universal global object exposes the globals as properties)
+print("-- M958 sort sign / switch identity / static ++ --");
+print([5,4,3,2,1].sort((a,b)=>(a-b)/10).join(","), [3,1,2].toSorted((a,b)=>(a-b)/9).join(","), (function(){var a={},b={};switch(a){case b:return "WRONG";default:return "ok";}})(), (function(){var a={};switch(a){case a:return "self";default:return "no";}})(), (function(){class C{static n=0;}C.n++;return C.n;})());  // 1,2,3,4,5 1,2,3 ok self 1 (fractional comparator sorts; switch uses === identity; static field ++)
+print("-- M959 NaN as Map/Set/includes key (SameValueZero) vs strict === --");
+print(new Set([NaN,NaN]).size, [NaN].includes(NaN), (function(){var m=new Map();m.set(NaN,7);return m.get(NaN);})(), NaN===NaN, [NaN].indexOf(NaN));  // 1 true 7 false -1 (NaN findable as a key/member; === and indexOf stay strict)
+print("-- M959 strict JSON.parse (trailing garbage / bad literal throw) --");
+print((function(){try{JSON.parse("1 x");return "ok";}catch(e){return "threw";}})(), (function(){try{JSON.parse("truX");return "ok";}catch(e){return "threw";}})(), JSON.parse("[1,2,3]").length, JSON.parse("  42  "));  // threw threw 3 42 (rejects trailing junk + misspelled literals; valid JSON incl. whitespace still parses)
+print("-- M960 NaN/Infinity toString(radix) --");
+print((255).toString(16), (NaN).toString(16), (Infinity).toString(2), (-10).toString(2));  // ff NaN Infinity -1010 (no 64-bit garbage for NaN/Infinity in a non-10 radix)
+print("-- M965/M966 var function-scope + hoisting --");
+print((function(){{var y=7;}return y;})(), (function(){for(var i=0;i<3;i++){}return i;})(), (function(){{let z=1;}return typeof z;})(), (function(){var r=typeof x;x=5;var x;return r+","+x;})(), (function(){if(false){var w=1;}return typeof w;})());  // 7 3 undefined undefined,5 undefined (var survives its block; let stays block-scoped; hoisting; bare `var x` doesn't reset)
+print("-- M967 Number(non-numeric string) -> NaN --");
+print(isNaN(Number("12abc")), isNaN(Number("x")), isNaN("abc"), Number("42"), Number("Infinity"), Number("  -3.5  "));  // true true true 42 Infinity -3.5 (a non-wholly-numeric string is NaN; Infinity recognized; valid numbers unaffected)
 print("-- done --");
