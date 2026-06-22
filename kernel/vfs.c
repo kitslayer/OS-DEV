@@ -48,3 +48,7 @@ void vfs_df(uint64_t *freeb, uint64_t *totalb) {
 long vfs_find(const char *want, char *out, int max) {
     return (fs && fs->find) ? fs->find(want, out, max) : -1;
 }
+
+long vfs_rename(const char *path, const char *newname) {
+    return (fs && fs->rename) ? fs->rename(path, newname) : -1;
+}

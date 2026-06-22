@@ -612,6 +612,73 @@ static long fat32_delete(const char *name) {
     return -1;
 }
 
+/* Does `name` fit the FS's 8.3 write format (<=8 base + optional '.' + <=3 ext,
+ * non-empty)? to_83() SILENTLY truncates an over-long name, so the rename path
+ * must reject it up front rather than rename to a surprising shorter name. */
+static int name_fits_83(const char *name) {
+    int base = 0, ext = 0, i = 0;
+    while (name[i] && name[i] != '.') { base++; i++; }
+    if (name[i] == '.') { i++; while (name[i]) { ext++; i++; } }
+    if (base == 0 || base > 8 || ext > 3) return 0;   /* "", "TOOLONGNAME", ".x", "a.exten" all rejected */
+    return 1;
+}
+
+/* Rename an entry IN PLACE: change ONLY the 11-byte 8.3 name field of `path`'s
+ * directory entry to `newname`. The FAT, cluster chain, attributes, size and
+ * date stamps are all left untouched (rename is purely a name change), so it
+ * works identically for a file or a directory. Returns 0 on success, -1 on a
+ * bad/over-long name, a name collision (refuse to clobber), or a missing target.
+ *
+ * Mirrors fat32_delete's read-modify-write: it scans the directory's cluster
+ * chain a sector at a time, and on the matching 32-byte entry overwrites bytes
+ * [0..10] (the name) in the in-memory sector buffer and writes back ONLY that
+ * one sector — every other byte of that entry and every other entry in the
+ * sector is preserved exactly. */
+static long fat32_rename(const char *path, const char *newname) {
+    if (!name_fits_83(newname)) return -1;            /* 8.3-write only: reject empty / over-long */
+    uint8_t new83[11];
+    to_83(newname, new83);
+
+    uint32_t dir; const char *leaf;
+    if (resolve(path, &dir, &leaf) < 0 || !leaf[0]) return -1;
+    /* a trailing '/' (the listing marks dirs with one) is not part of the name */
+    char baseleaf[16]; int bn = 0;
+    for (int i = 0; leaf[i] && bn < 15; i++) baseleaf[bn++] = leaf[i];
+    if (bn > 0 && baseleaf[bn-1] == '/') bn--;
+    baseleaf[bn] = 0;
+    if (bn == 0) return -1;
+    uint8_t want[11];
+    to_83(baseleaf, want);
+
+    /* Refuse to clobber: if an entry with the target name already exists in this
+     * directory, do nothing (a rename onto an existing name would otherwise
+     * create a duplicate-named entry — the kind of ambiguity the rest of the FS
+     * avoids). dir_find matches case-insensitively + the 8.3-truncated form. */
+    if (dir_find(dir, newname, 0, 0, 0)) return -1;
+
+    uint8_t sec[SECSZ];
+    uint32_t cl = dir, steps = 0;
+    while (cluster_in_range(cl)) {            /* corrupt-chain-safe, exactly like fat32_delete's scan */
+        uint32_t firsts = cluster_to_sector(cl);
+        for (uint32_t s = 0; s < sec_per_clus; s++) {
+            if (ata_read(firsts + s, 1, sec) < 0) return -1;
+            for (int off = 0; off < SECSZ; off += 32) {
+                uint8_t *e = sec + off;
+                if (e[0] == 0x00 || e[0] == 0xE5 || e[11] == 0x0F || (e[11] & 0x08))
+                    continue;
+                int eq = 1;
+                for (int i = 0; i < 11; i++) if (e[i] != want[i]) { eq = 0; break; }
+                if (!eq) continue;
+                for (int i = 0; i < 11; i++) e[i] = new83[i];   /* the ONLY mutation: bytes [0..10] (name) */
+                ata_write(firsts + s, 1, sec);                  /* write back ONLY this sector */
+                return 0;
+            }
+        }
+        cl = fat_step(cl, &steps);
+    }
+    return -1;                               /* target not found */
+}
+
 /* Report free + total bytes on the volume (counts unallocated FAT entries). */
 static void fat32_df(uint64_t *freeb, uint64_t *totalb) {
     uint8_t sec[SECSZ];
@@ -630,7 +697,8 @@ static void fat32_df(uint64_t *freeb, uint64_t *totalb) {
 
 static struct vfs_ops fat32_ops = { fat32_list, fat32_read, fat32_write,
                                     fat32_delete, fat32_mkdir, fat32_chdir,
-                                    fat32_tree, fat32_df, fat32_find };
+                                    fat32_tree, fat32_df, fat32_find,
+                                    fat32_rename };
 
 int fat32_mount(void) {
     uint8_t bs[SECSZ];

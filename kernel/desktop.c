@@ -51,6 +51,9 @@ typedef struct {
     int sx, sy, sw, sh;   /* saved geometry to restore from maximize */
     int fsel;             /* KIND_FILES: selected row (keyboard nav) */
     int fconfirm;         /* KIND_FILES: a delete is armed, awaiting a 2nd d/y (else any key cancels) */
+    int editing;          /* KIND_FILES: 0=none, 1=rename, 2=new-folder (a text-input modal) */
+    char editbuf[16];     /* the typed name (8.3 = max 12 chars + NUL) */
+    int editlen;          /* chars in editbuf */
     int minimized;        /* F3: hidden to its taskbar chip (last field; the
                              positional struct literals below init every field) */
 } window_t;
@@ -226,7 +229,15 @@ static void draw_content(const window_t *w, int focused) {
     }
     case KIND_FILES: {
         static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* static (BSS): ~18KB won't fit the 16KB guard-page-less stack; single-threaded render makes it safe. Browse ALL disk files, not just the first 32 (M421) */
-        if (w->fconfirm && w->fsel >= 0 && w->fsel < n) {      /* a delete is armed: replace the header with a bright confirm prompt */
+        if (w->editing) {                                      /* a text-input is open: prompt + the typed name + a cursor */
+            char pr[48]; int p = 0;
+            const char *a = w->editing == 1 ? "Rename to: " : "New folder: ";
+            while (*a && p < (int)sizeof(pr) - 1) pr[p++] = *a++;
+            for (int j = 0; w->editbuf[j] && p < (int)sizeof(pr) - 2; j++) pr[p++] = w->editbuf[j];
+            pr[p++] = '_';                                     /* a simple text cursor */
+            pr[p] = 0;
+            draw_text(bx, by, pr, 0x1060C0);                   /* distinct blue: an input prompt, not the file list */
+        } else if (w->fconfirm && w->fsel >= 0 && w->fsel < n) {  /* a delete is armed: replace the header with a bright confirm prompt */
             char pr[64]; int p = 0; const char *a = "Delete ";
             while (*a) pr[p++] = *a++;
             for (int j = 0; e[w->fsel].name[j] && p < 28; j++) pr[p++] = e[w->fsel].name[j];
@@ -235,7 +246,7 @@ static void draw_content(const window_t *w, int focused) {
             pr[p] = 0;
             draw_text(bx, by, pr, 0xC01010);                   /* bright red: this action destroys a file */
         } else {
-            draw_text(bx, by, "FAT32 disk (/) - up/down  Enter open  d delete  w wallpaper", 0x202028);
+            draw_text(bx, by, "FAT32 (/) up/down Enter open  d del  r rename  n new-folder  w wallpaper", 0x202028);
         }
         int rows = (w->h - TITLEBAR_H - 30) / 18;          /* rows that fit in the body */
         if (rows < 1) rows = 1;
@@ -568,7 +579,8 @@ static void render_scene(void) {
             "In the browser: right-click a link to copy",
             "its URL; middle-click pastes into the bar.",
             "In Files: Enter opens, d deletes (press d/y",
-            "again to confirm), w sets an image as wallpaper.",
+            "again to confirm), r renames, n makes a new",
+            "folder, w sets an image as wallpaper.",
             "",
             "Press Esc or F1 to close this help.",
         };
@@ -710,7 +722,7 @@ static void make_app_window(app_t *a) {
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
     windows[win_count++] = (window_t){ x, y,
         app_cols()*font_width + 14, app_rows()*font_height + TITLEBAR_H + 14,
-        0x0A0A0A, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0,0 };  /* maximized,sx,sy,sw,sh,fsel,fconfirm,minimized */
+        0x0A0A0A, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* maximized,sx,sy,sw,sh,fsel,fconfirm, editing,editbuf,editlen, minimized */
 }
 
 /* Open a browser window at `url` (NULL -> its default). */
@@ -719,7 +731,7 @@ static void spawn_browser(const char *url) {
     spawn_n++;
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
     windows[win_count++] = (window_t){ x, y, 620, 460, 0xFFFFFF, "Browser",
-                                       KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0,0 };
+                                       KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0, 0,{0},0, 0 };
 }
 
 /* Is `name` a plain-text / source file we'd rather edit than view? (case-
@@ -758,6 +770,42 @@ static int files_is_image(const char *name, int len) {
  * after a delete. */
 static void files_key(window_t *w, int k) {
     static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* match the render cap; static (BSS), safe single-threaded (M421) */
+
+    if (w->editing) {                                         /* a rename / new-folder text-input is open */
+        if (k == 27) { w->editing = 0; return; }               /* Esc cancels: leave the name untouched */
+        if (k == '\n' || k == '\r') {                          /* Enter commits */
+            w->editbuf[w->editlen] = 0;
+            if (w->editlen > 0) {                              /* empty input is a no-op (vfs_rename/mkdir would reject it anyway) */
+                if (w->editing == 1) {                         /* rename the selected entry */
+                    if (n > 0 && w->fsel >= 0 && w->fsel < n) {
+                        char old[64]; int p = 0;
+                        for (int j = 0; e[w->fsel].name[j] && p < (int)sizeof(old) - 1; j++) old[p++] = e[w->fsel].name[j];
+                        if (p > 0 && old[p-1] == '/') p--;     /* the listing marks dirs with a trailing '/' */
+                        old[p] = 0;
+                        vfs_rename(old, w->editbuf);           /* -1 (bad name / clobber / missing) leaves the disk unchanged */
+                    }
+                } else {                                       /* editing == 2: make a new folder */
+                    vfs_mkdir(w->editbuf);                     /* -1 on a bad name / existing entry: no-op */
+                }
+            }
+            w->editing = 0;
+            n = vfs_list(e, 256);                              /* re-list so the new/renamed entry shows + the clamp is correct */
+            if (w->fsel >= n) w->fsel = n - 1;
+            if (w->fsel < 0)  w->fsel = 0;
+            return;
+        }
+        if (k == 8 || k == 0x7F) {                             /* Backspace / Delete: drop the last char */
+            if (w->editlen > 0) w->editbuf[--w->editlen] = 0;
+            return;
+        }
+        if (k >= ' ' && k < 0x7F && w->editlen < 12) {         /* printable: append (8.3 = max 12 chars), upper-cased like the FS stores */
+            char c = (k >= 'a' && k <= 'z') ? (char)(k - 32) : (char)k;
+            w->editbuf[w->editlen++] = c;
+            w->editbuf[w->editlen] = 0;
+        }
+        return;                                                /* swallow every key while editing — don't fall through to nav */
+    }
+
     if (n <= 0) { w->fconfirm = 0; return; }
     if (w->fsel >= n) w->fsel = n - 1;
     if (w->fsel < 0)  w->fsel = 0;
@@ -789,6 +837,17 @@ static void files_key(window_t *w, int k) {
         int len = 0; while (name[len]) len++;
         if (len > 0 && files_is_image(name, len))
             desktop_set_wallpaper(name);                       /* visible bg change is the feedback; a decode failure is a no-op */
+    }
+    else if (k == 'r') {                                       /* rename: open a text-input pre-filled with the selected name */
+        int p = 0;
+        for (int j = 0; e[w->fsel].name[j] && p < 12; j++) w->editbuf[p++] = e[w->fsel].name[j];
+        if (p > 0 && w->editbuf[p-1] == '/') p--;              /* drop the dir-marker '/' so the buffer holds just the name */
+        w->editbuf[p] = 0; w->editlen = p;
+        w->editing = 1;
+    }
+    else if (k == 'n') {                                       /* new folder: open an empty text-input */
+        w->editbuf[0] = 0; w->editlen = 0;
+        w->editing = 2;
     }
     else if (k == '\n' || k == '\r') {
         const char *name = e[w->fsel].name;
@@ -854,8 +913,8 @@ void desktop_run(void) {
     load_wallpaper();                    /* WALL.PNG from disk, else the gradient */
     start_y = screen_h - TASKBAR_H + 5;
 
-    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0,0 };
-    windows[win_count++] = (window_t){ 60, 300, 500, 200, 0xE8ECF4, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0,0 };
+    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
+    windows[win_count++] = (window_t){ 60, 300, 500, 200, 0xE8ECF4, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
     app_spawn_named("shell");           /* a real ring-3 shell (WM gives it a
                                          * window below; spawn more via Apps) */
 
