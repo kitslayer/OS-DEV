@@ -1,5 +1,23 @@
 # What's next
 
+> **(M955) Browser — fix three DOM/parse bugs found by a read-only code-review subagent.** I ran a subagent to
+> scrutinize the recently-added interactivity (textarea/select/.checked/attribute-props/title/submit) for
+> memory-safety and logic bugs; it found the buffers all correctly bounded but surfaced three wrong-output bugs,
+> now fixed + verified in-guest (new demo `qsval.htm`, which self-reports on load):
+> **(P1, the big one) `querySelector(...).value`/`.checked` silently did nothing.** A `#id`-string handle worked
+> (it routes to the id-keyed field store), but a *position* handle from any tag/class/attribute selector
+> (`querySelector('input')`, `.querySelectorAll('.x')[i]`) routed `.value`/`.checked` through
+> `browser_dom_get_at`/`_set_at`, which hard-returned for those props — reads gave `""`, writes were no-ops. Fix:
+> a new `dom_id_at()` resolves the matched element's `id` and delegates to the id-keyed `browser_dom_get`/`_set`
+> (an id-less match still can't be tracked — the store has no other key, same as the renderer). Now
+> `querySelector('input').value` reads `hi`, `…value='ZZ'` writes, `querySelector('.box').checked=true` ticks the
+> box. **(P2) raw-text close-tags matched a prefix, not a whole tag** — a `<textarea>`/`<select>`/`<script>` body
+> containing the substring `</textareas>` / `</selecting>` ended capture early. Fix: after the name, require a tag
+> terminator (`> / space / tab / nl`). **(P3) `sel_vals[8][256]` truncated long option lists**, breaking the
+> selcyc click round-trip (a cut value never matched `in_get`, so cycling jumped to option 0). Enlarged to `[512]`
+> — the worst case is 16 options × 31 chars + 15 `'\n'` = 511 — and bumped the join guards to `o<511`. browser.c
+> warnings held at 6; all 37 `make check` suites green. See [[browser-render-engine]].
+
 > **(M954) Shell quoting — complete the last unswept file/SET readers (chokepoint unprotect).** The M950 sweep
 > left a handful of commands that read a *quoted* argument without revealing its bit-7 sentinels — benign (a stray
 > high-bit byte, never a crash) but incomplete. Fixed at the natural chokepoint: `slurp()` (the one function every

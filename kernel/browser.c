@@ -154,7 +154,8 @@ struct browser {
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
-    char    sel_ids[8][32]; char sel_vals[8][256]; int sel_n;   /* <select>s: id + its option values ('\n'-joined), so a click cycles to the next */
+    char    sel_ids[8][32]; char sel_vals[8][512]; int sel_n;   /* <select>s: id + its option values ('\n'-joined), so a click cycles to the next.
+                                                                 * 512 holds the worst case: 16 options x 31 chars + 15 '\n' = 511 + NUL (was 256 -> truncated long lists, breaking selcyc round-trip) */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
     int     field_cur;                                          /* caret index within the focused field's value */
     char    form_action[URL_MAX];                               /* current <form action>; empty = submit to the current page */
@@ -239,6 +240,9 @@ static void emit_literal_link(browser_t *b, const char *s, int link) {
 static const char *in_get(browser_t *b, const char *id);   /* fwd: <input> field value lookup */
 static void in_set(browser_t *b, const char *id, const char *val);          /* fwd */
 static void in_name_set(browser_t *b, const char *id, const char *name);    /* fwd */
+static int dom_attr_region_at(browser_t *b, int off, int *as, int *ae);     /* fwd: position-handle id resolution */
+static int browser_dom_get(const char *id, char *out, int max, int html);   /* fwd */
+static void browser_dom_set(const char *id, const char *value, int html);   /* fwd */
 
 
 /* Copy up to `dstmax` chars of src[0..srclen) into dst, decoding HTML entities as
@@ -1307,8 +1311,15 @@ static void parse_html(browser_t *b, const char *body, int len) {
              * tag scan can run past </script> and the block is never closed/captured. */
             if (inscript || instyle || intextarea || inselect) {
                 const char *ct = inscript ? "/script" : instyle ? "/style" : intextarea ? "/textarea" : "/select";
+                int ctlen = 0; while (ct[ctlen]) ctlen++;
                 int match = (i+1 < len && body[i+1] == '/');
-                if (match) for (int z = 0; ct[z]; z++) { if (i+1+z >= len || lc(body[i+1+z]) != ct[z]) { match = 0; break; } }
+                if (match) for (int z = 0; z < ctlen; z++) { if (i+1+z >= len || lc(body[i+1+z]) != ct[z]) { match = 0; break; } }
+                if (match) {                          /* require a tag terminator AFTER the name: `</script>`/`</script >` yes,
+                                                       * `</scripting>` / `</selected>` no — else raw capture ends early on a
+                                                       * substring (a textarea/select body containing `</selecting>` etc.). */
+                    char e = (i+1+ctlen < len) ? body[i+1+ctlen] : '>';   /* at EOL: treat as the implicit close */
+                    if (!(e=='>' || e==' ' || e=='\t' || e=='\n' || e=='\r' || e=='/')) match = 0;
+                }
                 if (!match) continue;                 /* '<' is script/style content; skip it */
             }
             if (wstart >= 0) { emit_word(b, wstart, style, curlink); wstart = -1; }
@@ -1390,7 +1401,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
                             if (sel_name[0]) in_name_set(b, sel_id, sel_name);
                             if (b->sel_n < 8) {                                        /* remember the option order for click-cycling */
                                 int k=0; while (sel_id[k] && k<31) { b->sel_ids[b->sel_n][k]=sel_id[k]; k++; } b->sel_ids[b->sel_n][k]=0;
-                                int o=0; for (int v=0; v<nopt; v++) { if (v && o<255) b->sel_vals[b->sel_n][o++]='\n'; for (int c=0; vals[v][c] && o<255; c++) b->sel_vals[b->sel_n][o++]=vals[v][c]; }
+                                int o=0; for (int v=0; v<nopt; v++) { if (v && o<511) b->sel_vals[b->sel_n][o++]='\n'; for (int c=0; vals[v][c] && o<511; c++) b->sel_vals[b->sel_n][o++]=vals[v][c]; }
                                 b->sel_vals[b->sel_n][o]=0; b->sel_n++;
                             }
                             char disp[56]; int p=0; disp[p++]='['; disp[p++]=' ';      /* render "[ Label v]" as a focusable link */
@@ -1697,11 +1708,29 @@ static int dom_find_at(browser_t *b, int off, int *is, int *ie) {
     }
     return 0;
 }
-/* Read a position-addressed element's textContent/innerHTML (html 0/1). The
- * .value path (html 2) is keyed by id, so a position handle can't address it. */
+/* Resolve the id="" of the element whose opening '<' is at byte `off` into idbuf
+ * (NUL-terminated). Returns 1 only on a non-empty id — the .value/.checked store is
+ * id-keyed (see in_set / the input renderer at idbuf), so an id-less element can't
+ * be addressed there at all. Lets a position handle (querySelector) reach that store. */
+static int dom_id_at(browser_t *b, int off, char *idbuf, int max) {
+    if (max) idbuf[0] = 0;
+    int as, ae; if (!dom_attr_region_at(b, off, &as, &ae)) return 0;
+    const char *v; int vl;
+    if (!find_attr(b->raw + as, ae - as, "id", &v, &vl)) return 0;
+    int n = vl; if (n > max - 1) n = max - 1; if (n < 0) n = 0;
+    memcpy(idbuf, v, n); idbuf[n] = 0; return idbuf[0] != 0;
+}
+/* Read a position-addressed element's textContent/innerHTML (html 0/1), or — for
+ * .value (html 2) / .checked (html 4) — resolve the element's id and delegate to the
+ * id-keyed store, so `document.querySelector('input').value` works, not just
+ * getElementById. (An id-less match still can't be tracked; the store has no key.) */
 static int browser_dom_get_at(int off, char *out, int max, int html) {
     browser_t *b = g_ls_b; if (max) out[0] = 0; if (!b) return 0;
-    if (html == 2 || html == 4) return 0;   /* .value/.checked are keyed by id, not position */
+    if (html == 2 || html == 4) {
+        char idbuf[32];
+        if (!dom_id_at(b, off, idbuf, sizeof idbuf)) return 0;   /* no id -> untracked (matches the renderer) */
+        return browser_dom_get(idbuf, out, max, html);
+    }
     int is, ie; if (!dom_find_at(b, off, &is, &ie)) return 0;
     int len = ie - is; if (len > max - 1) len = max - 1; if (len < 0) len = 0;
     memcpy(out, b->raw + is, len); out[len] = 0; return 1;
@@ -2033,7 +2062,13 @@ static void browser_dom_setattr(const char *id, const char *attr, const char *va
  * always within bounds (memory-safe). Single-match writes are exact. */
 static void browser_dom_set_at(int off, const char *value, int html) {
     browser_t *b = g_ls_b; if (!b) return;
-    if (html == 2 || html == 4) return;   /* .value/.checked are keyed by id; not position-addressable */
+    if (html == 2 || html == 4) {         /* .value/.checked: resolve the element's id and delegate to the id-keyed
+                                           * store (so `querySelector('input').value = x` writes, not just by-id) */
+        char idbuf[32];
+        if (!dom_id_at(b, off, idbuf, sizeof idbuf)) return;   /* no id -> untracked (matches the renderer) */
+        browser_dom_set(idbuf, value, html);
+        return;
+    }
     if (html == 3) {         /* remove(): off IS the opening '<'; splice [off, past-close) */
         int is, ie; if (!dom_find_at(b, off, &is, &ie)) return;
         const char *r = b->raw; int bodyend = b->bodyoff + b->bodylen;
