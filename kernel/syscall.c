@@ -16,6 +16,7 @@
 #include "rtc.h"
 #include "speaker.h"
 #include "pmm.h"
+#include "vmm.h"
 #include "timer.h"
 #include "task.h"
 #include "io.h"
@@ -32,6 +33,15 @@
 #include "tar.h"
 #include "ac97.h"
 #include <stdint.h>
+
+/* Validate a user-supplied syscall pointer argument: the range [p, p+n) must
+ * lie entirely within the calling app's own user (PTE_USER) pages. A syscall
+ * runs in ring 0 with the app's CR3 active, where kernel memory is mapped and
+ * writable — so without this an app could hand a kernel pointer to a handler
+ * and have the kernel read or (worse) write its own memory. On failure the
+ * handler returns -1 instead of touching the bogus address. `n` is the exact
+ * number of bytes the handler will access through the pointer. */
+static int ubuf(uint64_t p, uint64_t n) { return vmm_user_ok(p, n); }
 
 /* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
  * (basename, upper-cased, <=8 chars + '.' + <=3-char ext) and writes it via the
@@ -108,11 +118,13 @@ void syscall_dispatch(struct registers *r) {
     switch (r->rax) {
     case SYS_write:
         /* stdout goes to the calling app's window text grid */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         app_sys_write((const char *)r->rsi, (unsigned)r->rdx);
         r->rax = r->rdx;
         break;
     case SYS_read:
         /* a line of input from the app's window (blocks until Enter) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)app_sys_read((char *)r->rsi, (unsigned)r->rdx);
         break;
     case SYS_getpid:
@@ -122,6 +134,7 @@ void syscall_dispatch(struct registers *r) {
         /* Format the root directory into the user buffer: "name  size\n". */
         char       *buf = (char *)r->rsi;
         uint64_t    max = r->rdx;
+        if (max == 0 || !ubuf((uint64_t)buf, max)) { r->rax = (uint64_t)-1; break; }  /* max==0 would underflow `max-1` below */
         static vfs_dirent ents[256];   /* static (not stack): 256*sizeof too big for the 16KB kernel stack */
         int         count = vfs_list(ents, 256);
         uint64_t    n = 0;
@@ -153,6 +166,7 @@ void syscall_dispatch(struct registers *r) {
         const char *name = (const char *)r->rdi;
         void       *buf  = (void *)r->rsi;
         uint64_t    max  = r->rdx;
+        if (!ubuf((uint64_t)buf, max)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)vfs_read(name, buf, max);
         break;
     }
@@ -160,6 +174,7 @@ void syscall_dispatch(struct registers *r) {
         /* write "YYYY-MM-DD HH:MM:SS\n" into the user buffer */
         char *buf = (char *)r->rsi;
         if (r->rdx >= 21) {
+            if (!ubuf(r->rsi, 21)) { r->rax = (uint64_t)-1; break; }
             struct rtc_time tm; rtc_now(&tm);
             put2(buf+0, tm.year/100); put2(buf+2, tm.year%100); buf[4]='-';
             put2(buf+5, tm.month); buf[7]='-'; put2(buf+8, tm.day); buf[10]=' ';
@@ -175,6 +190,7 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sysinfo: {
         char *b = (char *)r->rsi; int max = (int)r->rdx, n = 0;
+        if (max <= 0 || !ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
         n = sappend(b, n, max, "RAM:    ");
         n = snum(b, n, max, pmm_free_bytes() / (1024*1024));
         n = sappend(b, n, max, " MiB free / ");
@@ -194,15 +210,19 @@ void syscall_dispatch(struct registers *r) {
         app_setcolor((int)r->rdi);
         break;
     case SYS_clip_get:
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)clip_get((char *)r->rdi, (int)r->rsi);
         break;
     case SYS_clip_set:
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
         clip_set((const char *)r->rdi, (int)r->rsi);
         break;
     case SYS_getarg:
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_getarg((char *)r->rdi, (int)r->rsi);
         break;
     case SYS_writefile:
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)vfs_write((const char *)r->rdi, (const void *)r->rsi, r->rdx);
         break;
     case SYS_delete:
@@ -229,11 +249,13 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)net_ping_host((const char *)r->rdi);
         break;
     case SYS_apps:
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_list_names((char *)r->rdi, (int)r->rsi);
         break;
     case SYS_netinfo: {                    /* our IP/MAC/gateway/DNS as aligned text */
         char *b = (char *)r->rdi; int max = (int)r->rsi;
         if (max < 128) { r->rax = (uint64_t)-1; break; }   /* worst case ~96 B; require headroom */
+        if (!ubuf(r->rdi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
         const uint8_t *ip = net_ip(), *gw = net_gateway(), *dns = net_dns(), *m = net_mac();
         static const char H[] = "0123456789abcdef";
         int n = 0;
@@ -260,12 +282,14 @@ void syscall_dispatch(struct registers *r) {
         break;
     }
     case SYS_http:
+        if (!ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }   /* response buffer */
         __asm__ volatile("sti");           /* TCP needs the timer running */
         r->rax = (uint64_t)(int64_t)http_get((const char *)r->rdi,
                                              (const char *)r->rsi,
                                              (char *)r->rdx, (int)r->r10);
         break;
     case SYS_https:
+        if (!ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }   /* response buffer */
         __asm__ volatile("sti");           /* TLS/TCP need the timer running */
         r->rax = (uint64_t)(int64_t)tls_get((const char *)r->rdi,
                                             (const char *)r->rsi,
@@ -277,6 +301,7 @@ void syscall_dispatch(struct registers *r) {
         r->rax = 0;
         break;
     case SYS_js:
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }   /* result buffer */
         __asm__ volatile("sti");           /* keep the timer live during long scripts */
         r->rax = (uint64_t)(int64_t)js_run((const char *)r->rdi,
                                            (char *)r->rsi, (int)r->rdx);
@@ -288,17 +313,20 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)vfs_chdir((const char *)r->rdi);
         break;
     case SYS_tree:
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_tree((char *)r->rsi, (int)r->rdx);
         break;
     case SYS_pollkey:
         r->rax = (uint64_t)(int64_t)app_sys_pollkey();
         break;
     case SYS_find:
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }   /* result buffer (rdi search term left to phase 2) */
         r->rax = (uint64_t)(int64_t)vfs_find((const char *)r->rdi,
                                              (char *)r->rsi, (int)r->rdx);
         break;
     case SYS_sha256: {
         if ((int)r->rdx < 65) { r->rax = (uint64_t)-1; break; }   /* need room for 64 hex + NUL */
+        if (!ubuf(r->rsi, 65)) { r->rax = (uint64_t)-1; break; }  /* hex output buffer */
         uint8_t *fbuf; long fn = read_whole_file((const char *)r->rdi, &fbuf);   /* whole file, not a 16KB prefix */
         if (fn < 0) { r->rax = (uint64_t)-1; break; }
         uint8_t dg[32]; sha256(fbuf, (size_t)fn, dg); kfree(fbuf);
@@ -309,6 +337,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_sha512: {
         if ((int)r->rdx < 129) { r->rax = (uint64_t)-1; break; }   /* need room for 128 hex + NUL */
+        if (!ubuf(r->rsi, 129)) { r->rax = (uint64_t)-1; break; }  /* hex output buffer */
         uint8_t *fbuf; long fn = read_whole_file((const char *)r->rdi, &fbuf);   /* whole file, not a 16KB prefix */
         if (fn < 0) { r->rax = (uint64_t)-1; break; }
         uint8_t dg[64]; sha512(fbuf, (size_t)fn, dg); kfree(fbuf);
@@ -397,6 +426,7 @@ void syscall_dispatch(struct registers *r) {
     case SYS_df: {
         uint64_t fb, tb; vfs_df(&fb, &tb);
         char *b = (char *)r->rsi; int max = (int)r->rdx, p = 0;
+        if (max > 0 && !ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
         p = sappend(b, p, max, "  disk: ");
         p = snum(b, p, max, fb / 1024);
         p = sappend(b, p, max, " KiB free / ");
@@ -410,6 +440,7 @@ void syscall_dispatch(struct registers *r) {
         task_info_t ti[16];
         int cnt = task_snapshot(ti, 16);
         char *b = (char *)r->rsi; int max = (int)r->rdx, p = 0;
+        if (max > 0 && !ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
         static const char *st[4] = { "ready", "run  ", "block", "dead " };
         for (int i = 0; i < cnt; i++) {
             if (ti[i].state == 3) continue;          /* skip dead tasks */
@@ -426,6 +457,7 @@ void syscall_dispatch(struct registers *r) {
         break;
     }
     case SYS_history:
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)app_sys_history((char *)r->rsi, (int)r->rdx);
         break;
     case SYS_resolve: {
@@ -434,6 +466,7 @@ void syscall_dispatch(struct registers *r) {
         char *buf = (char *)r->rsi; int max = (int)r->rdx;
         uint8_t ip[4];
         if (max <= 0) { r->rax = (uint64_t)-1; break; }
+        if (!ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
         if (dns_resolve(host, ip) == 0) {
             int n = 0;
             for (int i = 0; i < 4; i++) {

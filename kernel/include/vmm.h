@@ -34,5 +34,6 @@ int      vmm_map_to(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t f
 int      vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags);
 void     vmm_unmap(uint64_t virt);
 uint64_t vmm_translate(uint64_t virt);   /* physical address, or 0 if unmapped */
+int      vmm_user_ok(uint64_t ptr, uint64_t len);  /* is [ptr,ptr+len) user-accessible (PTE_USER) in the current space? for syscall arg validation */
 
 static inline void *hhdm(uint64_t phys) { return (void *)(HHDM_BASE + phys); }

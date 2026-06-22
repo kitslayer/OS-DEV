@@ -211,6 +211,39 @@ uint64_t vmm_translate(uint64_t virt) {
     return (pt[PT_IDX(virt)] & ADDR_MASK) | (virt & 0xFFF);
 }
 
+/*
+ * Is the whole range [ptr, ptr+len) accessible to the CURRENT (user) address
+ * space — i.e. mapped and PTE_USER at every paging level? A ring-0 syscall
+ * handler runs with the calling app's CR3 active, where the kernel's higher
+ * half and low identity map are mapped (and writable in ring 0) but NOT marked
+ * USER. So validating PTE_USER on every page an app hands to a syscall stops it
+ * from steering the kernel into reading/writing kernel memory through a forged
+ * pointer. Returns 1 if every page is user-accessible, 0 otherwise (unmapped,
+ * supervisor-only, or a length that wraps the address space).
+ */
+int vmm_user_ok(uint64_t ptr, uint64_t len) {
+    if (len == 0) return 1;                       /* empty range touches nothing */
+    uint64_t end = ptr + len;
+    if (end < ptr) return 0;                      /* address wrap */
+    uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
+    for (uint64_t v = ptr & ~(uint64_t)(PAGE_SIZE - 1); v < end; v += PAGE_SIZE) {
+        uint64_t e = pml4[PML4_IDX(v)];
+        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
+        uint64_t *pdpt = phys_to_table(e & ADDR_MASK);
+        e = pdpt[PDPT_IDX(v)];
+        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
+        if (e & PTE_HUGE) continue;               /* 1 GiB user page covers v */
+        uint64_t *pd = phys_to_table(e & ADDR_MASK);
+        e = pd[PD_IDX(v)];
+        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
+        if (e & PTE_HUGE) continue;               /* 2 MiB user page covers v */
+        uint64_t *pt = phys_to_table(e & ADDR_MASK);
+        e = pt[PT_IDX(v)];
+        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
+    }
+    return 1;
+}
+
 /* Build the higher-half direct map: map all physical RAM at HHDM_BASE using
  * cheap 2 MiB pages, so the kernel can touch any frame via hhdm(phys). */
 void vmm_init(void) {
