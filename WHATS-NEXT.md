@@ -1,5 +1,21 @@
 # What's next
 
+> **(M965) JS engine — `var` is now function-scoped, not block-scoped (review #4, part 1).** `N_VAR` eval ignored
+> the var-vs-`let`/`const` flag (`n->num`) and `env_define`d into the *current* env — which inside a block is a
+> fresh block env that's discarded at the block's end. So `function f(){ { var y=7; } return y; }` threw
+> "undefined variable" (and `for(var i…){}` then reading `i` did too) — breaking very common older JS. Fix: an
+> `env` now carries a `func_scope` flag (set on the env `call_function_this` makes for each call; the global env,
+> with `parent==0`, is the natural top boundary), and a `var` declaration defines into `env_func_scope(e)` — the
+> nearest function/global env walking up — while `let`/`const` keep defining into the block env. So a `var` in a
+> block/loop survives to the rest of the function, but does **not** leak across a function boundary, and `let`/
+> `const` stay block-scoped. Verified on host: `{ var y=7 } y`→7, `for(var i…){} i`→3, top-level `{var b=2} b`→2,
+> a `var` inside a called function is invisible outside it, and `let`/`const` in a block read back `undefined` —
+> while jstest's full var/let/const suite stays green (no regression). js.c warnings held at 17; all 37 `make
+> check` suites pass. **Remaining (#4 part 2, smaller/rarer):** true *hoisting* — `print(x); var x=5` (use before
+> the declaration line) and a `var` in a branch that never runs still read as not-defined rather than `undefined`;
+> that needs a body pre-pass that walks the AST (into blocks/if/loops, stopping at nested functions) defining each
+> `var` name `undefined` up front. See [[js-and-web-app-ceiling]].
+
 > **(M964) FAT32 — corrupt/malformed-disk hardening (the deferred M963 review batch).** Mirrored the read path's
 > safety onto the write/alloc paths so a corrupted on-disk structure can't steer a WRITE to the wrong sector or
 > orphan/cross-free clusters: (1) the `add_entry`, `fat32_delete` and `free_chain` chain-walk loops now bound on

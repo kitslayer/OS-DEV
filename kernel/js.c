@@ -902,7 +902,7 @@ struct obj {
     obj *fn_proto;     /* a plain function's `.prototype` object (becomes each `new F()` instance's proto). Stored in a field, NOT a keyed prop, because functions aren't obj_keyed */
 };
 
-struct env { const char **keys; val *vals; int n, cap; env *parent; };
+struct env { const char **keys; val *vals; int n, cap; env *parent; int func_scope; };   /* func_scope=1 marks a function (or the global) boundary: `var` hoists to here, not into inner blocks */
 
 static val UND(void){ val v; v.t=V_UNDEF; v.num=0; v.str=0; v.o=0; return v; }
 static val NUM(double x){ val v=UND(); v.t=V_NUM; v.num=x; return v; }
@@ -1629,7 +1629,11 @@ static int pstate(obj *p); static val pvalue(obj *p);
 static val nat_promise_resolve(val *args, int nargs);   /* fwd: `await x` assimilates a thenable like Promise.resolve(x) (M687) */
 
 /* ---- environments ---- */
-static env *new_env(env *parent){ env *e=aalloc(sizeof(env)); if(!e) return 0; e->cap=4; e->keys=aalloc(sizeof(char*)*e->cap); e->vals=aalloc(sizeof(val)*e->cap); if(!e->keys||!e->vals){ g_oom=1; return 0; } e->n=0; e->parent=parent; return e; }
+static env *new_env(env *parent){ env *e=aalloc(sizeof(env)); if(!e) return 0; e->cap=4; e->keys=aalloc(sizeof(char*)*e->cap); e->vals=aalloc(sizeof(val)*e->cap); if(!e->keys||!e->vals){ g_oom=1; return 0; } e->n=0; e->parent=parent; e->func_scope=0; return e; }
+/* The nearest function-or-global env walking up from `e` — where a `var` (not let/const) is defined,
+ * so a `var` inside a block/loop is visible in the rest of the enclosing function (the global env, with
+ * parent==0, is the boundary at top level). */
+static env *env_func_scope(env *e){ while (e->parent && !e->func_scope) e = e->parent; return e; }
 static void env_define(env *e, const char *key, val v) {
     for (int i=0;i<e->n;i++) if (strcmp(e->keys[i],key)==0){ e->vals[i]=v; return; }
     if (e->n>=e->cap){ int nc=e->cap*2; const char**nk=aalloc(sizeof(char*)*nc); val*nv=aalloc(sizeof(val)*nc); if(!nk||!nv){g_oom=1;return;} memcpy(nk,e->keys,sizeof(char*)*e->n); memcpy(nv,e->vals,sizeof(val)*e->n); e->keys=nk; e->vals=nv; e->cap=nc; }
@@ -1692,6 +1696,7 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
     if (++g_depth > MAXDEPTH) { rt_err("max call depth"); g_depth--; return UND(); }
     env *fe = new_env(fn.o->scope);
     if (!fe) { g_oom=1; g_depth--; return UND(); }     /* arena exhausted: bail, don't deref NULL */
+    fe->func_scope = 1;                                /* this is a function boundary: `var` in the body hoists here, not into inner blocks */
     node *def = fn.o->fn;
     if (!def->prefix) {                                /* non-arrow gets its own `this` (+ `super` if a class member) */
         env_define(fe, "this", thisv);
@@ -2390,8 +2395,9 @@ static comp eval_stmt_inner(node *n, env *e) {
                 comp c=eval_stmt(s,be); if(c.kind!=C_NORMAL||g_err||g_oom) return c; }
             return CN();
         }
-        case N_VAR: { for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND();
-            if (d->b) bind_pattern(d->b, v, e); else env_define(e,node_name(d),v); } return CN(); }
+        case N_VAR: { env *te = n->num ? e : env_func_scope(e);   /* let/const stay block-scoped (e); var is function-scoped, so it survives its block */
+            for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND();
+            if (d->b) bind_pattern(d->b, v, te); else env_define(te,node_name(d),v); } return CN(); }
         case N_FUNC: { eval_expr(n,e); return CN(); }
         case N_EXPR: { eval_expr(n->a,e); return CN(); }
         case N_IF: { if (truthy(eval_expr(n->a,e))) return eval_stmt(n->b,e); else if (n->c) return eval_stmt(n->c,e); return CN(); }
