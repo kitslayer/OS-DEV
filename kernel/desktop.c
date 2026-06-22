@@ -66,7 +66,8 @@ static int screen_w, screen_h;
 static int spawn_n, menu_open, menu_sel;   /* menu_sel: keyboard-highlighted item */
 static int help_open;                       /* F1: keyboard-shortcut help overlay */
 static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher overlay (sw_sel: highlighted window) */
-static int ctx_open, ctx_x, ctx_y, ctx_win; /* right-click title-bar menu (ctx_win is always the topmost window, win_count-1) */
+static int ctx_open, ctx_x, ctx_y, ctx_win; /* right-click menu (window kind: ctx_win is always the topmost window, win_count-1) */
+static int ctx_kind;                        /* 0 = window title-bar menu (ctx_win), 1 = desktop-background menu */
 static int start_x = 8, start_y, start_w = 110, start_h = 24;
 
 struct menu_item { const char *label; int kind; const char *prog; };
@@ -130,10 +131,15 @@ static const struct menu_item menu[] = {
 #define TB_CHIPW    124                 /* taskbar window-chip width */
 #define TB_CHIPGAP  6
 #define TB_CHIPX0   (start_x + start_w + 10)
-/* Right-click title-bar context menu: 5 rows, sized like a slim Apps menu. Row 0's
- * label is Maximize or Restore depending on the window's `maximized` flag. */
-#define CTX_ROWS    5
-#define CTX_W       128
+/* Right-click context menus, sized like a slim Apps menu. Two kinds share the same
+ * popup machinery (ctx_kind): the window title-bar menu (5 rows; row 0's label is
+ * Maximize or Restore depending on the window's `maximized` flag) and the desktop-
+ * background menu (3 rows). Row count + width are per-kind via ctx_nrows()/ctx_w();
+ * the row height is shared. */
+#define CTX_ROWS    5                       /* window menu */
+#define CTX_W       128                     /* window menu */
+#define CTX_DESK_ROWS 3                     /* desktop menu: Show Desktop / Show All Windows / Change Wallpaper */
+#define CTX_DESK_W  160                     /* desktop menu: wider so "Show All Windows" fits */
 #define CTX_ROW_H   22
 
 static void draw_text(int x, int y, const char *s, uint32_t fg) {
@@ -490,13 +496,18 @@ int desktop_set_wallpaper(const char *name) {
     return 0;
 }
 
-/* Context-menu hit-test: which row (0..CTX_ROWS-1) is at cursor (px,py), or -1 if
- * outside the popup. Shared by the renderer's hover highlight and the click
+/* Row count + width of the currently-open context menu (per ctx_kind). Shared by
+ * the open/render/hit-test so the popup is always sized for whichever kind is up. */
+static int ctx_nrows(void) { return ctx_kind == 1 ? CTX_DESK_ROWS : CTX_ROWS; }
+static int ctx_w(void)     { return ctx_kind == 1 ? CTX_DESK_W    : CTX_W;     }
+
+/* Context-menu hit-test: which row (0..ctx_nrows()-1) is at cursor (px,py), or -1
+ * if outside the popup. Shared by the renderer's hover highlight and the click
  * handler so they always agree on the row boundaries (cf. clk_pill_w). */
 static int ctx_row_at(int px, int py) {
-    if (px < ctx_x || px >= ctx_x + CTX_W) return -1;
+    if (px < ctx_x || px >= ctx_x + ctx_w()) return -1;
     int r = (py - (ctx_y + 2)) / CTX_ROW_H;
-    return (r >= 0 && r < CTX_ROWS) ? r : -1;
+    return (r >= 0 && r < ctx_nrows()) ? r : -1;
 }
 
 /* Render the whole scene (wallpaper, windows, taskbar — but NOT the cursor)
@@ -570,24 +581,29 @@ static void render_scene(void) {
         }
     }
 
-    /* Right-click title-bar context menu: a small popup at the click point with
-     * 5 actions, drawn on top of the windows (like the Apps menu). ctx_win always
-     * names the topmost window, so a closed/reordered window can't leave a stale
-     * row — render is skipped if it's no longer valid. The row under the cursor is
-     * highlighted (same colours as the Apps menu's keyboard highlight). */
-    if (ctx_open && ctx_win >= 0 && ctx_win < win_count) {
-        const char *rows[CTX_ROWS] = {
-            windows[ctx_win].maximized ? "Restore" : "Maximize",
+    /* Right-click context menu: a small popup at the click point, drawn on top of
+     * the windows (like the Apps menu). Two kinds share this block (ctx_kind): the
+     * window title-bar menu (ctx_win names the topmost window, so a closed/reordered
+     * window can't leave a stale row — render is skipped if it's no longer valid)
+     * and the desktop-background menu (no window dependency). The row under the
+     * cursor is highlighted (same colours as the Apps menu's keyboard highlight). */
+    if (ctx_open && (ctx_kind == 1 || (ctx_win >= 0 && ctx_win < win_count))) {
+        static const char *desk_rows[CTX_DESK_ROWS] = {
+            "Show Desktop", "Show All Windows", "Change Wallpaper",
+        };
+        const char *win_rows[CTX_ROWS] = {
+            windows[ctx_kind == 0 ? ctx_win : 0].maximized ? "Restore" : "Maximize",
             "Minimize", "Snap Left", "Snap Right", "Close",
         };
-        int ch = CTX_ROWS * CTX_ROW_H + 4;
-        fb_fill_rect(ctx_x, ctx_y, CTX_W, ch, 0x1E1E2A);
-        box(ctx_x, ctx_y, CTX_W, ch, 0x2D6CDF);
+        const char **rows = (ctx_kind == 1) ? desk_rows : win_rows;
+        int nr = ctx_nrows(), cw = ctx_w(), ch = nr * CTX_ROW_H + 4;
+        fb_fill_rect(ctx_x, ctx_y, cw, ch, 0x1E1E2A);
+        box(ctx_x, ctx_y, cw, ch, 0x2D6CDF);
         int sel = ctx_row_at(mouse_x(), mouse_y());          /* row under the cursor (-1 = none) */
-        for (int i = 0; i < CTX_ROWS; i++) {
+        for (int i = 0; i < nr; i++) {
             int iy = ctx_y + 2 + i * CTX_ROW_H;
             if (i == sel)                                        /* hover highlight */
-                fb_fill_rect(ctx_x + 2, iy, CTX_W - 4, CTX_ROW_H, 0x2D4A8A);
+                fb_fill_rect(ctx_x + 2, iy, cw - 4, CTX_ROW_H, 0x2D4A8A);
             draw_text(ctx_x + 12, iy + 3, rows[i], i == sel ? 0xFFFFFF : 0xD0D8F0);
         }
     }
@@ -611,6 +627,8 @@ static void render_scene(void) {
             "raise (or restore) that window.",
             "Right-click a title bar for a menu (maximize,",
             "minimize, snap left/right, close).",
+            "Right-click the desktop for a menu (show",
+            "desktop, show all windows, change wallpaper).",
             "",
             "Wheel scrolls the window under the cursor.",
             "In a terminal: drag (or double-click a word)",
@@ -774,6 +792,42 @@ static int ctx_action(int idx, int row) {
             else
                 remove_window(idx);                              /* browser/files/etc: drop immediately */
             return 1;
+    }
+    return 0;
+}
+
+static int files_is_image(const char *name, int len);   /* defined below (shared with the Files 'w' key) */
+
+/* Run the desktop-background context-menu row `row`. Returns 1 if it reordered the
+ * window array (so the caller drops any active mouse gesture), 0 otherwise.
+ *   0 Show Desktop      minimize EVERY window (no last-window guard, unlike F3)
+ *   1 Show All Windows  restore every minimized window
+ *   2 Change Wallpaper  cycle to the next image file on disk */
+static int ctx_desktop_action(int row) {
+    switch (row) {
+        case 0:                                                  /* Show Desktop: minimize EVERY window */
+            for (int i = 0; i < win_count; i++)                  /* a flag-only pass (no array mutation, */
+                windows[i].minimized = 1;                        /* so none is skipped); z-order among */
+            return 0;                                            /* hidden windows is irrelevant, so no sink */
+        case 1:                                                  /* Show All Windows: restore every minimized one */
+            for (int i = 0; i < win_count; i++)                  /* flag-only pass too: raise_window would */
+                windows[i].minimized = 0;                        /* shift the array mid-iteration and skip */
+            return 0;                                            /* one; z-order is preserved (all visible) */
+        case 2: {                                                /* Change Wallpaper: cycle to the next image on disk */
+            static int wp_idx;
+            static vfs_dirent e[256]; int n = vfs_list(e, 256);  /* static (BSS), safe single-threaded (cf. files_key) */
+            if (n <= 0) return 0;
+            for (int step = 0; step < n; step++) {               /* try each candidate from wp_idx onward; */
+                int i = (wp_idx + step) % n;                     /* a non-image / decode failure is skipped */
+                const char *name = e[i].name;
+                int len = 0; while (name[len]) len++;
+                if (len > 0 && files_is_image(name, len) && desktop_set_wallpaper(name) == 0) {
+                    wp_idx = (i + 1) % n;                        /* next call starts past the one we just set */
+                    return 0;
+                }
+            }
+            return 0;                                            /* no usable image: no-op */
+        }
     }
     return 0;
 }
@@ -1039,8 +1093,8 @@ void desktop_run(void) {
 
         int k;
         while ((k = input_trygetchar()) >= 0) {
-            if (ctx_open) {                     /* context menu is modal: Esc closes it, swallow the */
-                if (k == 27) { ctx_open = 0; dirty = 1; }   /* rest so no F-key reorders under it (ctx_win stays valid) */
+            if (ctx_open) {                     /* context menu (either kind) is modal: Esc closes it, swallow */
+                if (k == 27) { ctx_open = 0; dirty = 1; }   /* the rest so no F-key reorders under it */
                 continue;
             }
             if (k == 0x1D) {                    /* F1: toggle the keyboard-shortcut help overlay */
@@ -1227,45 +1281,68 @@ void desktop_run(void) {
             }
         }
 
-        /* Right-click: a window's TITLE BAR opens the context menu (Maximize/
-         * Restore, Minimize, Snap Left/Right, Close); browser CONTENT still copies
-         * a link's URL. A right-click while the menu is open just dismisses it. */
+        /* Right-click: a window's TITLE BAR opens the window context menu (Maximize/
+         * Restore, Minimize, Snap Left/Right, Close); browser CONTENT still copies a
+         * link's URL; the EMPTY desktop (no window under the cursor) opens the
+         * desktop-background menu (Show Desktop / Show All Windows / Change
+         * Wallpaper). A right-click while any menu is open just dismisses it. */
         if ((btn & 2) && !(prev_btn & 2)) {
             if (ctx_open) {
                 ctx_open = 0; dirty = 1;                 /* a second right-click dismisses, no action */
-            } else for (int i = win_count - 1; i >= 0; i--) {
-                window_t *w = &windows[i];
-                if (w->minimized || !in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
-                if (my < w->y + TITLEBAR_H) {            /* on the title bar -> open the context menu */
-                    raise_window(i);                     /* normal title interaction: focus it first */
-                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;   /* array reordered */
-                    ctx_win = win_count - 1;             /* now topmost; the menu always targets the top window */
-                    int ch = CTX_ROWS * CTX_ROW_H + 4;
-                    ctx_x = mx; if (ctx_x > screen_w - CTX_W) ctx_x = screen_w - CTX_W; if (ctx_x < 0) ctx_x = 0;
+            } else {
+                int hit = 0;                             /* did the click land on a (visible) window? */
+                for (int i = win_count - 1; i >= 0; i--) {
+                    window_t *w = &windows[i];
+                    if (w->minimized || !in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
+                    hit = 1;
+                    if (my < w->y + TITLEBAR_H) {        /* on the title bar -> open the window menu (ctx_kind 0) */
+                        raise_window(i);                 /* normal title interaction: focus it first */
+                        dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;   /* array reordered */
+                        ctx_kind = 0;
+                        ctx_win = win_count - 1;          /* now topmost; the menu always targets the top window */
+                        int ch = ctx_nrows() * CTX_ROW_H + 4, cw = ctx_w();
+                        ctx_x = mx; if (ctx_x > screen_w - cw) ctx_x = screen_w - cw; if (ctx_x < 0) ctx_x = 0;
+                        ctx_y = my; if (ctx_y > screen_h - TASKBAR_H - ch) ctx_y = screen_h - TASKBAR_H - ch; if (ctx_y < 0) ctx_y = 0;
+                        ctx_open = 1; dirty = 1;
+                    } else if (w->kind == KIND_BROWSER && w->app) {   /* browser content: copy a link's URL */
+                        char lb[1024];
+                        int n = browser_rclick((browser_t *)w->app, mx - w->x, my - (w->y + TITLEBAR_H), lb, sizeof lb);
+                        if (n > 0) { clip_set(lb, n); dirty = 1; }
+                    }
+                    break;
+                }
+                /* fell through the loop with no window under the cursor -> desktop
+                 * menu (only when over the desktop proper, not the taskbar) */
+                if (!hit && my < screen_h - TASKBAR_H) {
+                    ctx_kind = 1; ctx_win = -1;
+                    int ch = ctx_nrows() * CTX_ROW_H + 4, cw = ctx_w();
+                    ctx_x = mx; if (ctx_x > screen_w - cw) ctx_x = screen_w - cw; if (ctx_x < 0) ctx_x = 0;
                     ctx_y = my; if (ctx_y > screen_h - TASKBAR_H - ch) ctx_y = screen_h - TASKBAR_H - ch; if (ctx_y < 0) ctx_y = 0;
                     ctx_open = 1; dirty = 1;
-                } else if (w->kind == KIND_BROWSER && w->app) {   /* browser content: copy a link's URL */
-                    char lb[1024];
-                    int n = browser_rclick((browser_t *)w->app, mx - w->x, my - (w->y + TITLEBAR_H), lb, sizeof lb);
-                    if (n > 0) { clip_set(lb, n); dirty = 1; }
                 }
-                break;
             }
         }
 
         if (left && !(prev_btn & 1) && help_open) {
             help_open = 0; dirty = 1;        /* the help overlay is modal: a click anywhere dismisses it */
         } else if (left && !(prev_btn & 1) && ctx_open) {
-            /* the context menu is modal: a click on a row runs that action on
-             * ctx_win, a click anywhere else just dismisses it. Either way the
-             * window beneath is NOT actioned. Re-validate ctx_win (a window may
-             * have been reaped since the menu opened) so a stale index is never
-             * used; closing the menu before acting also keeps Close safe. */
-            int row = ctx_row_at(mx, my);
+            /* the context menu is modal: a click on a row runs that action, a click
+             * anywhere else just dismisses it. Either way the window beneath is NOT
+             * actioned. Close the menu BEFORE acting (so Close/minimize can't act on
+             * a stale popup). The window kind re-validates ctx_win (a window may have
+             * been reaped since the menu opened) so a stale index is never used; the
+             * desktop kind has no window dependency. */
+            int row = ctx_row_at(mx, my), kind = ctx_kind, win = ctx_win;
             ctx_open = 0; dirty = 1;
-            if (row >= 0 && ctx_win >= 0 && ctx_win < win_count)
-                if (ctx_action(ctx_win, row))   /* reordered/removed the array: drop any active gesture */
+            if (row >= 0) {
+                int reordered = 0;
+                if (kind == 1)                  /* desktop-background menu */
+                    reordered = ctx_desktop_action(row);
+                else if (win >= 0 && win < win_count)   /* window menu */
+                    reordered = ctx_action(win, row);
+                if (reordered)                  /* reordered/removed the array: drop any active gesture */
                     dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
+            }
         } else if (left && !(prev_btn & 1)) {
             int ty = screen_h - TASKBAR_H, mh = MENU_PERCOL*MENU_ITEM_H + 4;
             int mw = MENU_COLS*MENU_W, my0 = ty - mh;
