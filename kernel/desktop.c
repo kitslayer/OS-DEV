@@ -68,6 +68,11 @@ static int help_open;                       /* F1: keyboard-shortcut help overla
 static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher overlay (sw_sel: highlighted window) */
 static int ctx_open, ctx_x, ctx_y, ctx_win; /* right-click menu (window kind: ctx_win is always the topmost window, win_count-1) */
 static int ctx_kind;                        /* 0 = window title-bar menu (ctx_win), 1 = desktop-background menu */
+/* Close every modal overlay. Called by each overlay's open path so at most one is
+ * ever up at a time (the open paths are otherwise asymmetric — e.g. F1 is handled
+ * before the switcher's modal key-swallow, so F1-while-switcher would leave both
+ * open; a right-click while a menu is up would stack a context menu on top). */
+static void close_overlays(void) { menu_open = help_open = sw_open = ctx_open = 0; }
 static int start_x = 8, start_y, start_w = 110, start_h = 24;
 
 struct menu_item { const char *label; int kind; const char *prog; };
@@ -1098,7 +1103,7 @@ void desktop_run(void) {
                 continue;
             }
             if (k == 0x1D) {                    /* F1: toggle the keyboard-shortcut help overlay */
-                help_open = !help_open; if (help_open) menu_open = 0; dirty = 1;
+                int o = help_open; close_overlays(); help_open = !o; dirty = 1;   /* one overlay at a time */
                 continue;
             }
             if (help_open) {                    /* help overlay has focus: Esc/F1 close, swallow the rest */
@@ -1106,8 +1111,8 @@ void desktop_run(void) {
                 continue;
             }
             if (k == 0x1E) {                    /* F7: toggle the Alt-Tab window switcher overlay */
-                sw_open = !sw_open;
-                if (sw_open) { menu_open = 0; sw_sel = win_count - 1; }   /* start on the focused (topmost) window */
+                int o = sw_open; close_overlays(); sw_open = !o;          /* one overlay at a time */
+                if (sw_open) sw_sel = win_count - 1;                      /* start on the focused (topmost) window */
                 dirty = 1;
                 continue;
             }
@@ -1126,7 +1131,7 @@ void desktop_run(void) {
                 continue;                       /* swallow all keys while the switcher is up */
             }
             if (k == 0x19) {                    /* F9: toggle the Apps menu (keyboard) */
-                menu_open = !menu_open; menu_sel = 0; dirty = 1;
+                int o = menu_open; close_overlays(); menu_open = !o; menu_sel = 0; dirty = 1;   /* one overlay at a time */
                 continue;
             }
             if (menu_open) {                    /* menu has keyboard focus while open */
@@ -1287,8 +1292,8 @@ void desktop_run(void) {
          * desktop-background menu (Show Desktop / Show All Windows / Change
          * Wallpaper). A right-click while any menu is open just dismisses it. */
         if ((btn & 2) && !(prev_btn & 2)) {
-            if (ctx_open) {
-                ctx_open = 0; dirty = 1;                 /* a second right-click dismisses, no action */
+            if (ctx_open || menu_open || help_open || sw_open) {
+                close_overlays(); dirty = 1;             /* a right-click dismisses any open overlay, no new menu */
             } else {
                 int hit = 0;                             /* did the click land on a (visible) window? */
                 for (int i = win_count - 1; i >= 0; i--) {
