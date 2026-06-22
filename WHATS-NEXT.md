@@ -1,5 +1,18 @@
 # What's next
 
+> **(M943) Browser — `document.title` get/set + page titles in the window bar & taskbar.** Page JS can now read
+> and change the document title, and — as a real desktop improvement — browser windows now show the page
+> `<title>` in their title bar and taskbar chip (was always "Browser"). js.c gets the document object pointer
+> (`g_doc_obj`) so `document.title` reads bridge to the page `<title>` and writes bridge back (new `js_set_title`
+> hook → `browser_get_title`/`browser_set_title`); desktop.c draws a browser window's title from
+> `browser_title()` (the page title, falling back to "Browser"). The subtle part: a JS title set has to survive
+> the `parse_html` re-render that the same handler usually triggers (which re-captures `<title>` and would
+> clobber it) — so the set is stored as a `title_js` override that takes precedence until navigation (mirroring
+> how input `.value`s persist across re-renders but reset per page). Additive: a page with no `<title>` and no
+> `document.title=` still shows "Browser" (golden home page + `browsertest` unchanged). New `TITLE.HTM` demo.
+> Verified in-guest: the bar shows "My Page" from `<title>`; `read` → `title=[My Page]`; `set` → bar + taskbar +
+> read-back all become "Changed!" (override survives the re-render). `make check` green (36 suites).
+
 > **(M942) Browser — `<textarea>` (the README's named #1 frontier item).** A real multi-line form field in the
 > token-stream renderer. The parser captures `<textarea>`'s inner text as raw content (mirroring the
 > `<script>`/`<style>` path: a new `intextarea` raw-text mode + a `</textarea>` close that seeds the value and

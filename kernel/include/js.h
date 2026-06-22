@@ -25,6 +25,9 @@ int js_fire_event(const char *id, const char *type, char *out, int outmax, void 
  * cleared automatically by js_run (the shell path). */
 void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *));
 
+/* Register document.title get/set (reads/writes the page <title> + window bar). */
+void js_set_title(int (*get)(char *, int), void (*set)(const char *));
+
 /* Register a blocking HTTP backing for the JS fetch() global (M684; method/body M703): the
  * callback fills `out` (up to outmax) with the response body, sets *status to the HTTP
  * status, and returns the body length, or <0 on a network error. method/ctype/body are

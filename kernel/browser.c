@@ -93,6 +93,7 @@ struct browser {
     uint16_t pending_vmargin;   /* CSS vertical margin (px) to add before the next block break */
     char    status[40];
     char    title[64];                                   /* <title> -> window bar */
+    char    title_js[64]; int title_js_set;              /* document.title override (persists across re-renders like input values; reset on navigate) */
     volatile int loading;                                /* fetch in flight     */
     volatile int need_parse;                             /* worker -> WM: parse  */
     volatile int closed;                                 /* window closed mid-fetch */
@@ -2134,7 +2135,19 @@ static int browser_fetch(const char *url, const char *method, const char *ctype,
     kfree(raw);
     return -1;                                                   /* too many redirects */
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); }
+/* document.title get/set: read/write the page <title> (the window bar reads it on
+ * the next paint, which the triggering click already schedules). */
+static int browser_get_title(char *out, int max) {
+    browser_t *b = g_ls_b; if (max) out[0] = 0; if (!b) return 0;
+    const char *t = b->title_js_set ? b->title_js : b->title;
+    int i = 0; while (t[i] && i < max - 1) { out[i] = t[i]; i++; } out[i] = 0; return 1;
+}
+static void browser_set_title(const char *v) {
+    browser_t *b = g_ls_b; if (!b) return;
+    int i = 0; while (v[i] && i < 63) { b->title_js[i] = v[i]; i++; } b->title_js[i] = 0;
+    b->title_js_set = 1;                                 /* survives the parse_html re-render that follows */
+}
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
@@ -2975,6 +2988,7 @@ static void browser_navigate(browser_t *b) {
     b->bodyoff = 0; b->bodylen = 0;   /* clean baseline; HTML paths set the real region */
     b->ls_n = 0;                      /* fresh localStorage per page */
     b->in_n = 0; b->focus_id[0] = 0;  /* fresh input-field state per page */
+    b->title_js_set = 0;              /* drop any document.title override on navigate (new page) */
     b->form_action[0] = 0;            /* and no carried-over form action */
     js_page_reset();                  /* drop the previous page's persistent JS globals */
     memset(b->det_open, 0xFF, sizeof(b->det_open));   /* <details> states unseeded until first render */
@@ -4092,5 +4106,6 @@ void browser_destroy(browser_t *b) {
 }
 
 const char *browser_title(browser_t *b) {
+    if (b && b->title_js_set && b->title_js[0]) return b->title_js;   /* document.title override */
     return (b && b->title[0]) ? b->title : "Browser";
 }

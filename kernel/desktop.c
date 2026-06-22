@@ -370,7 +370,8 @@ static void draw_window(const window_t *w, int focused) {
     uint32_t t1 = focused ? 0x2C66D6 : 0x434A57;
     vgrad(x, y, ww, TITLEBAR_H, t0, t1);
     fb_fill_rect(x, y, ww, 1, lerp(t0, 0xFFFFFF, 1, 3));   /* highlight */
-    draw_text(x + 10, y + (TITLEBAR_H - font_height) / 2 + 1, w->title, 0xFFFFFF);
+    const char *titletext = (w->kind == KIND_BROWSER && w->app) ? browser_title((browser_t *)w->app) : w->title;   /* browser windows show the page <title> / document.title */
+    draw_text(x + 10, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, 0xFFFFFF);
 
     /* close button: a rounded-ish red chip */
     int cbx = x + ww - 21, cby = y + 6;

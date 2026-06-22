@@ -1811,6 +1811,9 @@ static val children_array(obj *el);   /* fwd: el.children -> array of position h
 static val parent_handle(obj *el);     /* fwd: el.parentElement -> a position handle or null */
 static val sibling_handle(obj *el, int dir);   /* fwd: el.next/previousElementSibling -> a position handle or null */
 static int dom_prop(obj *el, const char *name, const char *setval, char *out, int outmax);   /* DOM element read/write */
+static obj *g_doc_obj;                          /* the `document` object, so document.title can bridge to the page */
+static int  (*g_get_title)(char *out, int max); /* document.title get -> the browser's <title> */
+static void (*g_set_title)(const char *v);      /* document.title set -> update <title> + the window bar */
 
 /* Accessor properties (getters/setters). An accessor is a V_ACCESSOR obj stored
  * AS the property value (its val.t stays V_OBJ, like V_BOUND), holding getter in
@@ -1908,6 +1911,7 @@ static val eval_member_get(val recv, const char *name) {
         return eval_member_get(t, name);
     }
     if (recv.t==V_OBJ && recv.o) {
+        if (recv.o == g_doc_obj && strcmp(name,"title")==0) { char tb[80]; tb[0]=0; if (g_get_title) g_get_title(tb,(int)sizeof tb); return STRV(intern(tb,(int)strlen(tb))); }   /* document.title -> the page <title> */
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM((double)(recv.o->n/2));   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
@@ -2114,6 +2118,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
             if (t->type==N_MEMBER) { val recv=eval_expr(t->a,e);
                 if (is_proxy(recv)) { proxy_set(recv, node_name(t), rhs); return rhs; }   /* proxy.prop = v -> SET trap (M-proxy) */
+                if (recv.t==V_OBJ && recv.o==g_doc_obj && strcmp(node_name(t),"title")==0) { if (g_set_title) g_set_title(val_to_str(rhs)); return rhs; }   /* document.title = … */
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) {
                     const char *pn = node_name(t);
                     if (pn[0]=='o' && pn[1]=='n') {
@@ -4134,7 +4139,7 @@ static void install_globals(env *g) {
     def_native(doc,"querySelectorAll",nat_querySelectorAll);
     def_native(doc,"getElementsByTagName",nat_getElementsByTagName);
     def_native(doc,"getElementsByClassName",nat_getElementsByClassName);
-    val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv);
+    val docv=UND(); docv.t=V_OBJ; docv.o=doc; env_define(g,"document",docv); g_doc_obj=doc;   /* remember it for document.title */
     /* window.location: a read-only snapshot of the current page URL, parsed into
      * href/protocol/host/pathname/search so page JS can inspect it (e.g. ?query). */
     { obj *loc=new_obj(V_OBJ);
@@ -4310,11 +4315,16 @@ int js_run(const char *src, char *out, int outmax) {
     g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
     g_ls_get = 0; g_ls_set = 0;           /* and no persistent storage */
     g_dom_get = 0; g_dom_set = 0; g_dom_getattr = 0; g_dom_setattr = 0;   /* and no DOM (no page) */
+    g_get_title = 0; g_set_title = 0;     /* and no page <title> bridge */
     g_page_env = 0;                       /* shell `js`: never reuse a page env */
     g_location_url[0] = 0;                /* shell `js`: window.location is empty */
     return js_run_impl(src, out, outmax, 0);
 }
 
+/* The browser registers document.title get/set (reads/writes the page <title>). */
+void js_set_title(int (*get)(char *, int), void (*set)(const char *)) {
+    g_get_title = get; g_set_title = set;
+}
 /* The browser registers a localStorage backing store before running page JS. */
 void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *)) {
     g_ls_get = get; g_ls_set = set;

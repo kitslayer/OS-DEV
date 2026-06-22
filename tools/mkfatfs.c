@@ -406,6 +406,12 @@ static const struct {
         "<p><button onclick=\"document.getElementById('o').textContent='len='+document.getElementById('ta').value.length+' first='+document.getElementById('ta').value.split('\\n')[0]\">[ read .value ]</button></p>"
         "<p id=\"o\">click read .value</p>"
         "<p>The box's text is a real multi-line value: JS reads it via <code>.value</code> and a form submits <code>msg=</code>&lt;text&gt;.</p>" },
+    { "TITLE   HTM", "<title>My Page</title>"
+        "<h1>document.title</h1>"
+        "<p>The window title bar shows this page's <code>&lt;title&gt;</code> (\"My Page\"). The buttons read and change <code>document.title</code> live.</p>"
+        "<p><button onclick=\"document.getElementById('o').textContent='title=['+document.title+']'\">[ read title ]</button> "
+        "<button onclick=\"document.title='Changed!';document.getElementById('o').textContent='now title=['+document.title+']'\">[ set title ]</button></p>"
+        "<p id=\"o\">click read title</p>" },
     { "ONCHG   HTM", "<h1>onchange handler</h1>"
         "<p>An input's <code>onchange</code> runs JavaScript the moment its value changes &mdash; no button needed. Tab/n to the box and Enter to toggle it:</p>"
         "<p><input id=\"agree\" type=\"checkbox\" onchange=\"document.getElementById('msg').textContent = document.getElementById('agree').value=='on' ? 'Thanks for agreeing!' : 'You unchecked it.'\"> I agree to the terms</p>"
