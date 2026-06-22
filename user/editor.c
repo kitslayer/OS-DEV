@@ -526,6 +526,7 @@ static int replace_all(void) {
     while (pos <= dlen - flen) {
         int m = 1; for (int i = 0; i < flen; i++) if (doc[pos+i] != findq[i]) { m = 0; break; }
         if (!m) { pos++; continue; }
+        if (dlen - flen + rlen > MAXDOC - 1) break;   /* this replacement wouldn't fit -> stop cleanly, never a partial (match deleted but replacement truncated at the cap) */
         cur = pos;
         for (int i = 0; i < flen; i++) del_fwd();
         for (int i = 0; i < rlen; i++) insert(replq[i]);
@@ -645,6 +646,7 @@ int main(void) {
                 saving_as = 0;
                 if (findq[0]) {
                     int i = 0; for (; findq[i] && i < (int)sizeof(fname)-1; i++) fname[i] = findq[i]; fname[i] = 0;
+                    detect_lang();                   /* "save as foo.css" -> re-pick syntax highlighting for the new extension */
                     if (sys_writefile(fname, doc, (unsigned long)dlen) < 0) render("\n[save failed]");
                     else { render("\n[saved]"); dirty = 0; }
                     sys_sleep(400); render(0);
@@ -660,9 +662,12 @@ int main(void) {
             if (k == '\n' || k == '\r') {
                 opening = 0;
                 if (findq[0]) {
-                    if (!readonly) sys_writefile(fname, doc, (unsigned long)dlen);   /* save current first */
-                    int i = 0; for (; findq[i] && i < (int)sizeof(fname)-1; i++) fname[i] = findq[i]; fname[i] = 0;
-                    load_file();
+                    if (!readonly && sys_writefile(fname, doc, (unsigned long)dlen) < 0) {   /* save current first; if it FAILS (disk full / unwritable), abort — don't clobber the unsaved buffer by loading over it */
+                        render("\n[save failed - open cancelled]"); sys_sleep(400);
+                    } else {
+                        int i = 0; for (; findq[i] && i < (int)sizeof(fname)-1; i++) fname[i] = findq[i]; fname[i] = 0;
+                        load_file();
+                    }
                 }
                 render(0);
             }

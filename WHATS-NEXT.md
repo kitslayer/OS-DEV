@@ -1,5 +1,22 @@
 # What's next
 
+> **(M961) Editor — fix a data-loss path + a near-cap truncation, found by a read-only review subagent.** A fourth
+> review subagent audited `user/editor.c` (edit buffer, file I/O, the `hl_run` highlighter, auto-indent) and
+> reported the **core is solid** — 2M-op edit fuzz + 1.2M-op highlighter fuzz under ASan, no crash/OOB/cursor-desync;
+> the 256 KB cap errs safe (a too-large file is flagged read-only, so save never silently truncates). The genuine
+> findings, now fixed: **(P2, real data loss) Ctrl-O discarded unsaved edits if the pre-open save failed.** The
+> "save current, then load the new file" path ignored `sys_writefile`'s return and called `load_file()`
+> unconditionally — so on a full/unwritable disk it clobbered the buffer with the just-failed-to-save content gone.
+> Now it checks the return (like every other save site) and aborts the open with `[save failed - open cancelled]`
+> instead of loading. **(P2) `replace_all` (Ctrl-R) could half-apply near the 256 KB cap** — it `del_fwd`s the match
+> then `insert`s the replacement, but `insert` silently no-ops at the cap, leaving a match deleted + replacement
+> truncated. Added a pre-check (`dlen-flen+rlen > MAXDOC-1` → stop cleanly, never a partial). **(P3) Ctrl-W "save as
+> foo.css"** now calls `detect_lang()` so highlighting matches the new extension. editor.c warnings still 0; all 37
+> `make check` suites pass; verified in-guest (opened README.TXT — loads, highlights, edits). **Left as-is (safe,
+> not data-loss):** block indent/dedent on a >1024-line selection processes only the first 1024 (incomplete but
+> bounds-guarded); the read-only threshold is off-by-one for a file of *exactly* 262143 B (refuses cleanly); binary
+> NULs render truncated but save verbatim; the per-keystroke highlighter seed-pass is O(dlen) on huge files.
+
 > **(M960) JS engine — `(NaN/Infinity).toString(radix)` no longer emits garbage (review #10).** The base-10
 > `toString` routed through `num_to_str` (correct: `"NaN"`/`"Infinity"`), but a non-10 radix did
 > `(long long)to_num(recv)` first — and casting `NaN`/`±Infinity` to integer yields the "integer indefinite"
