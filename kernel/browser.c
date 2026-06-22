@@ -64,7 +64,8 @@ enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STR
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG,     /* TK_IMG: link field = image slot */
        TK_BORDER_OPEN, TK_BORDER_CLOSE,               /* CSS border: OPEN carries off=color(24b), style=width; bracket a block's tokens, drawn as one rect at render (M910) */
        TK_FLEX_OPEN, TK_FLEX_CLOSE,                   /* display:flex: bracket a container; inside, child block-breaks become horizontal gaps (row layout) (M927) */
-       TK_MAXW_OPEN, TK_MAXW_CLOSE };                 /* max-width: OPEN off=px; narrows+centres cl..cr for the block (readable column) (M933) */
+       TK_MAXW_OPEN, TK_MAXW_CLOSE,                   /* max-width: OPEN off=px; narrows+centres cl..cr for the block (readable column) (M933) */
+       TK_BG_OPEN, TK_BG_CLOSE };                     /* block background-color: OPEN off=rgb(24b); a forward-scan at OPEN fills ONE contiguous rect behind the whole block before its content paints (M993) */
 #define BORDER_PAD 6                                   /* px of padding between a full border box and its text (both axes, M916) */
 
 typedef struct { uint32_t off; uint16_t len, link; uint8_t style, type; } tok_t;  /* off is uint32 so TEXT_MAX can exceed 64KB (len<=word, link<LINK_MAX stay uint16) */
@@ -149,7 +150,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex), a stack so nested styled elements compose */
+    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex/block-bg), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border */
@@ -703,6 +704,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (b->sc[sp].hasborder && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };   /* close the border box opened by this frame */
                 if (b->sc[sp].hasflex && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_FLEX_CLOSE };   /* end the flex row */
                 if (b->sc[sp].hasmaxw && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_MAXW_CLOSE };   /* restore full width */
+                if (b->sc[sp].hasbg && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BG_CLOSE };   /* end the block-bg fill region */
             }
         }
     } else if (!is_void_tag(tag)) {
@@ -772,6 +774,11 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (mw > 0 && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* max-width: narrow + centre this block */
                     b->toks[b->ntok++] = (tok_t){ (uint32_t)mw, 0, NO_LINK, 0, TK_MAXW_OPEN };
                     b->sc[sp].hasmaxw = 1;
+                }
+                b->sc[sp].hasbg = 0;
+                if (bg && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* block background: bracket the block so render fills ONE contiguous rect behind it */
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bg & 0xFFFFFFu), 0, NO_LINK, 0, TK_BG_OPEN };
+                    b->sc[sp].hasbg = 1;
                 }
                 b->sc_sp++;
             }   /* stack full: skip (no scope) — graceful, never overflows */
@@ -3603,6 +3610,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     int flex_depth = 0;    /* >0 while inside a display:flex container: child block-breaks become horizontal gaps (M927) */
     int flex_gap = 18;     /* px gap between flex items (from CSS `gap`, M930; 18 default) */
     int mxoff[16], mxsp = 0;   /* max-width: cl/cr inset per active container, restored on close (M933) */
+    int bgsp = 0;   /* block-bg nesting depth: counted so a nested TK_BG_OPEN's forward-scan stops at ITS matching close (M993) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
         if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right */
@@ -3650,6 +3658,62 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             cx = cl; continue;
         }
         if (tk->type == TK_MAXW_CLOSE) { if (mxsp > 0) { int off = mxoff[--mxsp]; cl -= off; cr += off; } cy += curlh; cx = cl; curlh = 18; continue; }   /* restore full width */
+        if (tk->type == TK_BG_OPEN) {
+            /* Forward-scan to the matching TK_BG_CLOSE, faithfully mirroring the main loop's
+             * vertical advance, to find this block's y_bottom. Then fill ONE contiguous rect
+             * behind the whole block BEFORE its content paints (correct z-order; covers para
+             * spacing, <hr>/images and empty lines that a per-line band would leave gapped).
+             * Local copies (sc?/scl/scr/slh) so the real cursor is untouched; bias toward NOT
+             * overestimating (an overestimate would paint over the FOLLOWING block's bg). */
+            uint32_t col = tk->off & 0xFFFFFFu;
+            int scy = cy, scx = cx, slh = curlh, scl = cl, scr = cr;
+            int srp = render_rpad, sfd = flex_depth, sfg = flex_gap, depth = 1;
+            int smxoff[16], smxsp = 0;
+            int sbfull[16], sbsp = 0;   /* per nested border: was it a full box (so undo its wrap-right inset on close), mirroring the real loop's render_rpad bookkeeping */
+            for (int u = t + 1; u < b->ntok && u < TOK_MAX && depth > 0; u++) {
+                tok_t *tu = &b->toks[u];
+                if (tu->type == TK_BG_OPEN) { depth++; continue; }
+                if (tu->type == TK_BG_CLOSE) { depth--; continue; }
+                if (tu->type == TK_BORDER_OPEN) { int full = (tu->len ? tu->len : 15) == 15; if (sbsp < 16) sbfull[sbsp++] = full; if (full) srp += BORDER_PAD; continue; }
+                if (tu->type == TK_BORDER_CLOSE) { if (sbsp > 0 && sbfull[--sbsp] && srp >= BORDER_PAD) srp -= BORDER_PAD; continue; }   /* edges stroked after content (no vertical advance); undo the full-box wrap-right inset, like the real loop */
+                if (tu->type == TK_FLEX_OPEN)  { if (scx > scl) { scy += slh; scx = scl; slh = 18; } sfd++; sfg = tu->off ? (int)tu->off : 18; continue; }
+                if (tu->type == TK_FLEX_CLOSE) { if (sfd > 0) sfd--; scy += slh; scx = scl; slh = 18; continue; }
+                if (tu->type == TK_MAXW_OPEN)  { if (scx > scl) { scy += slh; slh = 18; } int mwv = (int)tu->off, off = (scr - scl > mwv) ? (scr - scl - mwv) / 2 : 0; if (smxsp < 16) { smxoff[smxsp++] = off; scl += off; scr -= off; } scx = scl; continue; }
+                if (tu->type == TK_MAXW_CLOSE) { if (smxsp > 0) { int off = smxoff[--smxsp]; scl -= off; scr += off; } scy += slh; scx = scl; slh = 18; continue; }
+                if (tu->type == TK_BREAK) { if (sfd > 0) { if (scx > scl) scx += sfg; continue; } scy += slh + tu->off; scx = scl; slh = 18; continue; }
+                if (tu->type == TK_PARA)  { if (sfd > 0) { if (scx > scl) scx += sfg; continue; } scy += slh + 8 + tu->off; scx = scl; slh = 18; continue; }
+                if (tu->type == TK_HR)    { scy += slh; scy += 12; scx = scl; slh = 18; continue; }
+                if (tu->type == TK_IMG)   {
+                    int idx = tu->link;
+                    if (idx >= 0 && idx < b->nimg && b->imgs[idx]) {
+                        int iw = b->imgsw[idx], ih = b->imgsh[idx];
+                        int aw = tu->off, ah = tu->len, maxw = scr - scl, destw, desth;
+                        if (aw > 0 || ah > 0) { destw = aw > 0 ? aw : (int)((long)ah * iw / (ih ? ih : 1)); desth = ah > 0 ? ah : (int)((long)aw * ih / (iw ? iw : 1)); }
+                        else { destw = iw; desth = ih; }
+                        if (destw > maxw && destw > 0) { desth = (int)((long)desth * maxw / destw); destw = maxw; }
+                        if (desth > IMG_MAX_H && desth > 0) { destw = (int)((long)destw * IMG_MAX_H / desth); desth = IMG_MAX_H; }
+                        if (scx > scl) { scy += slh; scx = scl; }
+                        scy += desth + 6; scx = scl; slh = 18;
+                    }
+                    continue;
+                }
+                /* TK_WORD: replicate scale/line-height, wrap test, and cx advance */
+                int zm2 = b->zoom > 0 ? b->zoom : 1;
+                int tsc2 = (u < TOK_MAX) ? b->tokscale[u] : 0;
+                int sc2 = (tsc2 ? tsc2 : scale_for(tu->style)) * zm2;
+                int lh2 = (tsc2 ? (16 * tsc2 + 2) : lineh_for(tu->style)) * zm2;
+                int wpx2 = tu->len * GW * sc2; if (wpx2 > scr - scl) wpx2 = scr - scl;
+                if (scx + wpx2 > scr - srp && scx > scl) { scy += slh; scx = scl; slh = 18; }
+                if (lh2 > slh) slh = lh2;
+                scx += wpx2 + GW * sc2;
+            }
+            int y_bottom = scy + slh;   /* bottom of the last line of the block */
+            int yy0 = cy < ct ? ct : cy, yy1 = y_bottom > cb ? cb : y_bottom;
+            if (yy1 > yy0) fb_fill_rect(cl, yy0, cr - cl, yy1 - yy0, col);
+            if (bgsp < 16) bgsp++;
+            continue;
+        }
+        if (tk->type == TK_BG_CLOSE) { if (bgsp > 0) bgsp--; continue; }
         if (tk->type == TK_BREAK) { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + tk->off; cx = cl; curlh = 18; continue; }   /* in flex: break -> horizontal gap between items */
         if (tk->type == TK_PARA)  { if (flex_depth > 0) { if (cx > cl) cx += flex_gap; continue; } cy += curlh + 8 + tk->off; cx = cl; curlh = 18; continue; }
         if (tk->type == TK_HR) {
@@ -3724,8 +3788,8 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 if (off < 0) off = 0;
                 cx = ls + off;
             } else cx = ls;
-            if ((b->tokbg[t] & 0x02000000) && cy + lh > ct && cy < cb)   /* block background: paint the full line band before the words */
-                fb_fill_rect(ls, cy, cr - ls, lh, b->tokbg[t] & 0xFFFFFF);
+            /* block background (0x02000000) is now painted as ONE contiguous rect by the
+             * TK_BG_OPEN forward-scan above — no per-line band here (it left vertical gaps). */
         }
 
         /* record every link's content-space y (even off-screen) so keyboard
@@ -3807,7 +3871,8 @@ static void browser_save(browser_t *b) {
         tok_t *tk = &b->toks[t];
         if (tk->type == TK_BORDER_OPEN || tk->type == TK_BORDER_CLOSE ||
             tk->type == TK_FLEX_OPEN   || tk->type == TK_FLEX_CLOSE ||
-            tk->type == TK_MAXW_OPEN   || tk->type == TK_MAXW_CLOSE) continue;   /* structural markers, not text */
+            tk->type == TK_MAXW_OPEN   || tk->type == TK_MAXW_CLOSE ||
+            tk->type == TK_BG_OPEN     || tk->type == TK_BG_CLOSE) continue;   /* structural markers, not text */
         if (tk->type == TK_WORD) {
             for (int i = 0; i < tk->len && p < cap - 2; i++) out[p++] = b->text[tk->off + i];
             out[p++] = ' ';
