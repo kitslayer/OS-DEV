@@ -26,7 +26,7 @@ static void itoa_u(unsigned v, char *o) {
 static void load_best(void) {
     char b[16]; long n = sys_readfile("2048.HI", b, sizeof(b) - 1);
     best = 0;
-    for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9') break; best = best * 10 + (b[i] - '0'); }
+    for (long i = 0; i < n; i++) { if (b[i] < '0' || b[i] > '9' || best >= 100000000u) break; best = best * 10 + (b[i] - '0'); }   /* cap: a corrupt .HI can't wrap the unsigned score */
 }
 static void save_best(void) {
     char b[12]; itoa_u(best, b);
