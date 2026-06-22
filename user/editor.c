@@ -157,6 +157,69 @@ static void newline_indent(void) {
     for (int i = 0; i < extra; i++) insert(' ');
 }
 
+static int sel_bounds(int *s0, int *s1);   /* fwd: defined below, used by block_indent */
+
+/* Raw insert/delete at an arbitrary position (undoable). Unlike insert()/del_fwd()
+ * they leave cur and sel_anchor for the caller to fix up — used by block_indent. */
+static void ins_at(int pos, char ch) {
+    if (dlen >= MAXDOC - 1 || pos < 0 || pos > dlen) return;
+    undo_record(pos, ch, 0);
+    for (int i = dlen; i > pos; i--) doc[i] = doc[i-1];
+    doc[pos] = ch; dlen++;
+}
+static void del_at(int pos) {
+    if (pos < 0 || pos >= dlen) return;
+    undo_record(pos, doc[pos], 2);
+    for (int i = pos; i < dlen - 1; i++) doc[i] = doc[i+1];
+    dlen--;
+}
+/* Tab / Shift-Tab block indent (dedent=0) or dedent (dedent=1): operate on every
+ * line touched by the selection, or just the current line when there's no
+ * selection. Indent adds 4 spaces at each line start; dedent removes a leading
+ * tab or up to 4 leading spaces. cur + the selection are kept over the same text. */
+static void block_indent(int dedent) {
+    if (readonly) return;
+    static int starts[1024], removed[1024];
+    int s0, s1;
+    if (!sel_bounds(&s0, &s1)) { s0 = s1 = cur; }
+    int lo = s0; while (lo > 0 && doc[lo-1] != '\n') lo--;       /* start of the first line */
+    int nstarts = 0, p = lo;
+    for (;;) {                                                  /* collect the line starts in range */
+        if (!(p < s1 || nstarts == 0)) break;
+        if (nstarts < 1024) starts[nstarts++] = p;
+        while (p < dlen && doc[p] != '\n') p++;
+        if (p >= dlen) break;
+        p++;
+    }
+    int oa = sel_anchor, oc = cur, na = oa, nc = oc;
+    if (!dedent) {
+        for (int i = nstarts - 1; i >= 0; i--)                  /* reverse: lower line starts stay valid */
+            for (int k = 0; k < 4; k++) ins_at(starts[i] + k, ' ');
+        for (int i = 0; i < nstarts; i++) {                     /* shift cur/anchor by the spaces inserted before them */
+            if (oa > starts[i]) na += 4;                        /* anchor at a line start stays, so the selection covers the new indent */
+            if (oc >= starts[i]) nc += 4;
+        }
+    } else {
+        for (int i = 0; i < nstarts; i++) {                     /* measure removals up front (original offsets) */
+            int s = starts[i], rm = 0;
+            if (s < dlen && doc[s] == '\t') rm = 1;
+            else while (rm < 4 && s + rm < dlen && doc[s+rm] == ' ') rm++;
+            removed[i] = rm;
+        }
+        for (int i = nstarts - 1; i >= 0; i--)
+            for (int k = 0; k < removed[i]; k++) del_at(starts[i]);
+        for (int i = 0; i < nstarts; i++) {
+            int s = starts[i], rm = removed[i];
+            if (oa >= s + rm) na -= rm; else if (oa > s) na -= (oa - s);
+            if (oc >= s + rm) nc -= rm; else if (oc > s) nc -= (oc - s);
+        }
+    }
+    if (sel_anchor >= 0) sel_anchor = na < 0 ? 0 : na;
+    cur = nc < 0 ? 0 : (nc > dlen ? dlen : nc);
+    dirty = 1;
+    undo_break();
+}
+
 /* ---- line clipboard: Ctrl-C copy / Ctrl-X cut / Ctrl-V paste --------------
  * Operates on whole lines (no selection UI) via the shared system clipboard,
  * so a line can be carried to the shell/browser too. Cut/paste go through
@@ -481,7 +544,7 @@ static void render_help(void) {
     print("^F find    ^R replace  ^G go to line\n");
     print("^B set mark, then move to select   ^A select all\n");
     print("^C copy    ^X cut      ^V paste\n");
-    print("Tab = spaces   Del = delete forward\n");
+    print("Tab indent (selection)  Shift-Tab dedent   Del fwd-delete\n");
 }
 
 /* Show the doc with a "<label><query>_" prompt at the bottom (Ctrl-F/G/R). */
@@ -646,10 +709,16 @@ int main(void) {
         else if (k == 0x16) { for (int i = 0; i < EDVIS - 1; i++) move_vert(1); }  /* PgDn / wheel down */
         else if (k == 0x01) { while (cur > 0 && doc[cur-1] != '\n') cur--; }    /* Home: line start */
         else if (k == 0x05) { while (cur < dlen && doc[cur] != '\n') cur++; }   /* End:  line end   */
-        else if (k == '\t') {                             /* Tab: spaces to the next 4-col stop */
-            int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;
-            for (int sp = 4 - ((cur - ls) % 4); sp > 0; sp--) insert(' ');
+        else if (k == '\t') {                             /* Tab */
+            int t0, t1, multi = 0;                        /* multi-line selection -> block-indent it */
+            if (sel_bounds(&t0, &t1)) for (int i = t0; i < t1; i++) if (doc[i] == '\n') { multi = 1; break; }
+            if (multi) block_indent(0);
+            else {                                        /* else: spaces to the next 4-col stop */
+                int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;
+                for (int sp = 4 - ((cur - ls) % 4); sp > 0; sp--) insert(' ');
+            }
         }
+        else if (k == 0x9b) block_indent(1);              /* Shift-Tab: dedent line / selection */
         else if (k >= 32 && k < 127) insert((char)k);
         render(0);
     }

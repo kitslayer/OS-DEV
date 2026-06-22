@@ -1,5 +1,18 @@
 # What's next
 
+> **(M938) Editor — Tab/Shift-Tab block indent & dedent.** The last core code-editing operation: with a
+> multi-line selection, Tab indents every selected line by 4 spaces and Shift-Tab dedents them (removing a
+> leading tab or up to 4 spaces); with no selection Shift-Tab dedents the current line, and plain Tab keeps its
+> insert-spaces-to-next-stop behaviour. Needed a small kernel change — the keyboard driver mapped both Tab and
+> Shift+Tab to `\t`, so Shift+Tab now emits a distinct backtab code (0x9B) which the editor reads as dedent.
+> `block_indent()` collects the line starts in range and edits in reverse (so lower offsets stay valid), via
+> new `ins_at`/`del_at` raw-position helpers, then fixes up the caret and re-anchors the selection so it keeps
+> covering the same lines (you can Tab repeatedly to add levels). Verified in-guest: select-all + Tab → 4-space
+> indent (selection preserved), Tab again → 8, Shift-Tab → back to 4 (byte counts 11→23→35→23 confirm). The
+> keyboard change is isolated to Shift+Tab (plain Tab, shell completion unaffected); `make check` green
+> (35 suites). The editor is now a complete code editor: highlighting + auto-indent + bracket-match + block
+> indent/dedent.
+
 > **(M937) Shell — brace expansion `{a,b,c}` and ranges `{1..N}` / `{a..z}`.** A common bash convenience that
 > was missing: `echo file{a,b,c}.txt` → `filea.txt fileb.txt filec.txt`, `echo {1..5}` → `1 2 3 4 5`,
 > `mkdir {src,bin,doc}`, descending `x{9..6}` → `x9 x8 x7 x6`, char ranges `{a..e}`, and the cartesian product
