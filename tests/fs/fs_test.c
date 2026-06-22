@@ -122,6 +122,25 @@ int main(void) {
     if (fat32_read("SUB", rb, sizeof(rb)) != -1)              { printf("FAIL: read of a dir should be -1\n"); return 1; }
     printf("baseline OK: %d root entries, TEST.TXT=600B correct, dir-read rejected\n", n);
 
+    /* ---- rename: the in-place 8.3 name-field change (M1007 fat32_rename) ----
+     * On the baseline image (TEST.TXT=600B + SUB dir). A rename must change ONLY
+     * the name (data + size preserved), clear the old name, refuse to clobber an
+     * existing name, reject non-8.3 names, fail on a missing source, and work for
+     * a directory. This locks in the data-safety of the FS's only rename path. */
+    if (fat32_rename("TEST.TXT", "REN.TXT") != 0)            { printf("FAIL: rename TEST.TXT->REN.TXT\n"); return 1; }
+    got = fat32_read("REN.TXT", rb, sizeof(rb));
+    if (got != 600)                                          { printf("FAIL: REN.TXT read %ld, want 600 (rename changed size)\n", got); return 1; }
+    if (rb[0]!='A'||rb[511]!='A'||rb[512]!='B'||rb[599]!='B'){ printf("FAIL: REN.TXT content (rename corrupted data)\n"); return 1; }
+    if (fat32_read("TEST.TXT", rb, sizeof(rb)) != -1)        { printf("FAIL: old name TEST.TXT still present after rename\n"); return 1; }
+    if (fat32_rename("REN.TXT", "SUB") != -1)                { printf("FAIL: rename onto existing name SUB should be refused\n"); return 1; }
+    if (fat32_read("REN.TXT", rb, sizeof(rb)) != 600)        { printf("FAIL: REN.TXT lost after a refused clobber\n"); return 1; }
+    if (fat32_rename("REN.TXT", "ABCDEFGHI") != -1)          { printf("FAIL: rename to a >8-char base should be refused\n"); return 1; }
+    if (fat32_rename("REN.TXT", "X.LONGX")   != -1)          { printf("FAIL: rename to a >3-char ext should be refused\n"); return 1; }
+    if (fat32_rename("NOPE.TXT", "X.TXT")    != -1)          { printf("FAIL: rename of a missing file should be -1\n"); return 1; }
+    if (fat32_rename("SUB", "SUB2") != 0)                    { printf("FAIL: rename dir SUB->SUB2\n"); return 1; }
+    if (fat32_read("SUB2", rb, sizeof(rb)) != -1)            { printf("FAIL: SUB2 should still be a (read-rejected) dir after rename\n"); return 1; }
+    printf("  rename OK: data-preserving, clobber + bad-name + missing refused, dir rename\n");
+
     /* ---- fuzz: corrupt the metadata region, re-mount, re-read ---- */
     static uint8_t pristine[sizeof(g_disk)];
     build_valid_image();
@@ -164,15 +183,16 @@ int main(void) {
         char nm[4]; nm[0]='F'; nm[1]=(char)('0' + (xr()%8)); nm[2]=0;   /* F0..F7 */
         char dn[4]; dn[0]='D'; dn[1]=(char)('0' + (xr()%4)); dn[2]=0;   /* D0..D3 */
         char rb2[2048];
-        switch (xr() % 6) {
+        switch (xr() % 7) {
             case 0: case 1: fat32_write(nm, wdata, xr() % (sizeof(wdata)+1)); break;  /* create/overwrite 0..1600B */
             case 2: fat32_delete(nm); break;
             case 3: fat32_mkdir(dn); break;
             case 4: fat32_read(nm, rb2, sizeof(rb2)); break;
             case 5: { vfs_dirent fe2[32]; fat32_list(fe2, 32); char tb2[4096]; fat32_tree(tb2, sizeof(tb2)); } break;
+            case 6: { char nm2[4]; nm2[0]='F'; nm2[1]=(char)('0'+(xr()%8)); nm2[2]=0; fat32_rename(nm, nm2); } break;  /* rename F?->F? (clobber/missing/valid mix) */
         }
     }
-    printf("  write-path: %ld create/write/delete/mkdir ops clean\n", WOPS);
+    printf("  write-path: %ld create/write/delete/mkdir/rename ops clean\n", WOPS);
 
     /* ---- Phase 3: directory growth (full-root-dir extension) ----
      * Create many distinct files so the root directory must grow past its
