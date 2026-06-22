@@ -353,7 +353,7 @@ static int row_offset(int target) {
  * of `doc` one byte at a time. Palette indices (see kernel app_palette):
  *   0 default (green) · 6 keyword (blue) · 7 string (orange) · 8 comment (grey)
  *   10 C preprocessor (teal) · 11 number (purple).  hl_lang 0 = plain (no
- *   colour), 1 = C, 2 = shell, 3 = HTML, 4 = JS, 5 = CSS. */
+ *   colour), 1 = C, 2 = shell, 3 = HTML, 4 = JS, 5 = CSS, 6 = Markdown. */
 static int hl_lang;                  /* set by detect_lang() in load_file() */
 static unsigned char vcol[2048];     /* colour per byte of the visible window */
 
@@ -408,6 +408,16 @@ static void hl_run(int start,int end,int write,int *pmode,char *pdelim){
         if(lang==3){
             if(c=='<'){ if(i+3<end&&doc[i+1]=='!'&&doc[i+2]=='-'&&doc[i+3]=='-'){ PUT(i,8); mode=5; i++; continue; } PUT(i,6); mode=4; i++; continue; }
             PUT(i,0); i++; continue; }
+        if(lang==6){   /* Markdown: single-line-stateless, every scan bounded by `end` */
+            if(c=='#'&&hl_linestart(i)){ while(i<end&&doc[i]!='\n'){ PUT(i,6); i++; } continue; }   /* ATX header: whole line blue */
+            if(c=='>'&&hl_linestart(i)){ while(i<end&&doc[i]!='\n'){ PUT(i,8); i++; } continue; }    /* blockquote: whole line grey */
+            if((c=='-'||c=='*'||c=='+')&&hl_linestart(i)&&i+1<end&&(doc[i+1]==' '||doc[i+1]=='\t')){ PUT(i,6); i++; continue; }   /* bullet marker */
+            if(hl_isdig(c)&&hl_linestart(i)){ int j=i; while(j<end&&hl_isdig(doc[j])) j++; if(j<end&&doc[j]=='.'&&j+1<end&&(doc[j+1]==' '||doc[j+1]=='\t')){ while(i<=j){ PUT(i,6); i++; } continue; } }   /* "1." ordered marker */
+            if(c=='`'){ PUT(i,7); i++; while(i<end&&doc[i]!='`'&&doc[i]!='\n'){ PUT(i,7); i++; } if(i<end&&doc[i]=='`'){ PUT(i,7); i++; } continue; }   /* inline code: `...` orange, within line */
+            if(c=='*'||c=='_'){ char m=c; PUT(i,11); i++; if(i<end&&doc[i]==m){ PUT(i,11); i++; }   /* ** or * (also __ / _) emphasis: purple, ends at delim or EOL */
+                while(i<end&&doc[i]!=m&&doc[i]!='\n'){ PUT(i,11); i++; }
+                if(i<end&&doc[i]==m){ PUT(i,11); i++; if(i<end&&doc[i]==m){ PUT(i,11); i++; } } continue; }
+            PUT(i,0); i++; continue; }
         if((lang==1||lang==4)&&c=='/'&&i+1<end&&doc[i+1]=='/'){ PUT(i,8); PUT(i+1,8); i+=2; mode=1; continue; }
         if((lang==1||lang==4||lang==5)&&c=='/'&&i+1<end&&doc[i+1]=='*'){ PUT(i,8); PUT(i+1,8); i+=2; mode=2; continue; }   /* block comment (C/JS/CSS) */
         if(lang==5&&c=='#'){ PUT(i,11); i++; while(i<end&&hl_isid(doc[i])){ PUT(i,11); i++; } continue; }   /* CSS #hex colour */
@@ -434,6 +444,7 @@ static void detect_lang(void){
     else if(hl_eqi(e,"sh")) hl_lang=2;
     else if(hl_eqi(e,"htm")||hl_eqi(e,"html")) hl_lang=3;
     else if(hl_eqi(e,"css")) hl_lang=5;
+    else if(hl_eqi(e,"md")||hl_eqi(e,"markdown")) hl_lang=6;
 }
 
 static int is_bracket(char c){ return c=='('||c==')'||c=='['||c==']'||c=='{'||c=='}'; }
