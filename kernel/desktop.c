@@ -26,7 +26,7 @@
 #include "net.h"
 #include "vfs.h"
 #include "rtc.h"
-#include "png.h"
+#include "image.h"   /* decode_image(): any format the OS decodes (PNG/BMP/JPEG/GIF/SVG) */
 #include "string.h"
 #include "pmm.h"
 #include "task.h"
@@ -410,22 +410,20 @@ static void draw_window(const window_t *w, int focused) {
  * buffer (caller owns it), or NULL on any failure (missing / undecodable / OOM).
  * All scratch is freed before returning; no partial allocation is leaked.
  *
- * The decode scratch is sized to screen-pixel-count bytes, so the source may be
- * up to screen_w*screen_h pixels (a too-large source is rejected by the decoder
- * as a buffer overflow -> NULL, leaving the caller's wallpaper untouched). */
+ * decode_image() (browser.c) dispatches on the magic bytes to png/bmp/jpeg/gif/
+ * svg_decode and returns the image at its NATIVE w*h, so any format the OS reads
+ * works here — including a source larger than the screen (capped 2048x2048/1M
+ * px by the decoder; oversize -> NULL, leaving the caller's wallpaper untouched). */
 static uint32_t *decode_wallpaper(const char *name) {
     long npix = (long)screen_w * screen_h;
     uint8_t *file = kmalloc(512 * 1024);
     if (!file) return NULL;
     long n = vfs_read(name, file, 512 * 1024);
     if (n <= 0) { kfree(file); return NULL; }
-    uint8_t *rgba = kmalloc((size_t)npix * 4);
-    uint8_t *scratch = kmalloc((size_t)npix * 4 + 8192);   /* inflated+unfiltered scanlines */
-    if (!rgba || !scratch) { kfree(file); if (rgba) kfree(rgba); if (scratch) kfree(scratch); return NULL; }
     int w = 0, h = 0;
-    int rc = png_decode(file, (int)n, rgba, (int)(npix * 4), scratch, (int)(npix * 4 + 8192), &w, &h);
-    kfree(file); kfree(scratch);
-    if (rc != 0 || w <= 0 || h <= 0) { kfree(rgba); return NULL; }
+    uint8_t *rgba = decode_image(file, (int)n, &w, &h);     /* native-size RGBA (we own it) */
+    kfree(file);
+    if (!rgba || w <= 0 || h <= 0) { if (rgba) kfree(rgba); return NULL; }
     uint32_t *bmp = kmalloc((size_t)npix * 4);
     if (!bmp) { kfree(rgba); return NULL; }
     for (int dy = 0; dy < screen_h; dy++) {                 /* nearest-neighbour scale to screen */

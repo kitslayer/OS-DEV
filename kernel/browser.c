@@ -22,6 +22,7 @@
 #include "jpeg.h"
 #include "svg.h"
 #include "bmp.h"
+#include "image.h"   /* decode_image() — defined below; shared with desktop.c wallpaper */
 #include "tls.h"
 #include "js.h"
 #include "console.h"
@@ -2792,7 +2793,7 @@ static int b64_decode(const char *in, int inlen, uint8_t *out, int cap) {
     return op;
 }
 
-static uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
+uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
     /* JPEG (FF D8 FF ...): probe for dimensions + scratch size, then decode */
     if (len >= 4 && data[0]==0xFF && data[1]==0xD8 && data[2]==0xFF) {
         int w, h; long need;
