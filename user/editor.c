@@ -445,6 +445,8 @@ static void detect_lang(void){
     else if(hl_eqi(e,"htm")||hl_eqi(e,"html")) hl_lang=3;
     else if(hl_eqi(e,"css")) hl_lang=5;
     else if(hl_eqi(e,"md")||hl_eqi(e,"markdown")) hl_lang=6;
+    else if(hl_eqi(e,"json")) hl_lang=4;                       /* JSON is a JS subset: reuse the JS highlighter */
+    else if(hl_eqi(e,"svg")||hl_eqi(e,"xml")) hl_lang=3;       /* tag-based markup: reuse the HTML highlighter */
 }
 
 static int is_bracket(char c){ return c=='('||c==')'||c=='['||c==']'||c=='{'||c=='}'; }
