@@ -51,6 +51,32 @@ pci_device_t pci_find(uint16_t vendor, uint16_t device) {
                     d.vendor_id = v; d.device_id = dv;
                     d.class_id = (cls >> 24) & 0xFF;
                     d.subclass = (cls >> 16) & 0xFF;
+                    d.prog_if  = (cls >> 8) & 0xFF;
+                    d.valid = 1;
+                    return d;
+                }
+            }
+        }
+    }
+    return d;
+}
+
+pci_device_t pci_find_class(uint8_t class_id, uint8_t subclass, uint8_t prog_if) {
+    pci_device_t d = {0};
+    for (int bus = 0; bus < 256; bus++) {
+        for (int slot = 0; slot < 32; slot++) {
+            for (int func = 0; func < 8; func++) {
+                uint32_t id = pci_read32(bus, slot, func, 0x00);
+                if ((id & 0xFFFF) == 0xFFFF)
+                    continue;
+                uint32_t cls = pci_read32(bus, slot, func, 0x08);
+                if (((cls >> 24) & 0xFF) == class_id &&
+                    ((cls >> 16) & 0xFF) == subclass &&
+                    ((cls >> 8)  & 0xFF) == prog_if) {
+                    d.bus = bus; d.slot = slot; d.func = func;
+                    d.vendor_id = id & 0xFFFF; d.device_id = id >> 16;
+                    d.class_id = class_id; d.subclass = subclass;
+                    d.prog_if  = prog_if;
                     d.valid = 1;
                     return d;
                 }

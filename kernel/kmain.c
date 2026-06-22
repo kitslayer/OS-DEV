@@ -19,6 +19,7 @@
 #include "fat32.h"
 #include "vfs.h"
 #include "pci.h"
+#include "ahci.h"
 #include "net.h"
 #include "fbcon.h"
 #include "mouse.h"
@@ -150,6 +151,12 @@ void kmain(uint64_t mb_info) {
     } else {
         kprintf("[warn] no FAT32 disk found (run with a disk image).\n\n");
     }
+
+    /* Bring up AHCI/SATA as an ADDITIONAL storage driver (the boot disk above
+     * stays on legacy ATA). No-op if no AHCI HBA + disk is attached. The
+     * self-test reads real sectors off the AHCI disk and logs their bytes. */
+    ahci_init();
+    ahci_selftest();
 
     /* Prefer the USB tablet (absolute pointer, tracks the host 1:1); fall back
      * to the relative PS/2 mouse if there's no tablet. */
