@@ -220,7 +220,13 @@ static void emit_break(browser_t *b, int type) {
     uint16_t m = b->pending_vmargin; b->pending_vmargin = 0;   /* CSS margin for this block, if any (consume once) */
     if (b->ntok == 0 || b->n_hidden > 0) return;         /* no leading blank lines / display:none */
     tok_t *last = &b->toks[b->ntok - 1];
-    if (last->type == TK_WORD) {
+    /* A block-bg / border CLOSE marker terminates a block's content but, unlike
+     * FLEX/MAXW close, does NOT advance the render cursor (it only strokes/decrements).
+     * So a block that follows one needs its OWN break appended AFTER the marker, else
+     * the next block's first words collapse onto the styled block's last line — inside
+     * its fill/box (M994). The break must stay after the marker so the block's height
+     * scan (which ends at its CLOSE) still measures only the block's own content. */
+    if (last->type == TK_WORD || last->type == TK_BORDER_CLOSE || last->type == TK_BG_CLOSE) {
         if (b->ntok >= TOK_MAX) return;
         b->toks[b->ntok++] = (tok_t){ m, 0, NO_LINK, STY_NORMAL, (uint8_t)type };   /* off = extra vertical px */
     } else {                                             /* consecutive break: merge, don't stack */
