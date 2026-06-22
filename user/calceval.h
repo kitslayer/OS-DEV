@@ -39,6 +39,10 @@
 
 static const char *cur;          /* the parse cursor */
 static int err;
+static double calc_ans = 0;       /* last result; the identifier `ans` reads it. The
+                                   * evaluator stays pure — the caller sets this (see
+                                   * user/calc.c: `calc_ans = r` after a successful eval)
+                                   * so the next expression can chain off the prior one. */
 static double bor(void);          /* the lowest-precedence level (bitwise OR) — the eval entry */
 
 static void skipws(void) { while (*cur == ' ' || *cur == '\t') cur++; }
@@ -95,6 +99,7 @@ static double factor(void) {
     if ((*cur >= 'a' && *cur <= 'z') || (*cur >= 'A' && *cur <= 'Z') || *cur == '_') {
         if (match_kw("pi")) return 3.14159265358979;
         if (match_kw("e"))  return 2.71828182845905;
+        if (match_kw("ans")) return calc_ans;             /* last result (settable by the caller) */
         if (match_kw("sqrt"))  return js_sqrt(call_arg());
         if (match_kw("sin"))   return js_sin(call_arg());
         if (match_kw("cos"))   return js_cos(call_arg());

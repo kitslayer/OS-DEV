@@ -99,6 +99,27 @@ int main(void) {
     CHECK_F("e", 2.71828182845905);
     CHECK_F("2*pi", 6.28318530717958);
 
+    /* --- `ans` last-result variable (calc_ans, set by the caller; the evaluator
+     * just reads it). Set a known value, then check it reads + composes; and
+     * confirm an expression NOT mentioning `ans` is unaffected by its value. --- */
+    calc_ans = 42.0;
+    CHECK_F("ans", 42);               /* bare ans -> the held value */
+    CHECK_F("ans+1", 43);
+    CHECK_F("ans*2", 84);
+    CHECK_F("ans-2", 40);
+    CHECK_F("ans/2", 21);
+    CHECK_F("ans*ans", 1764);         /* chains: 42*42 */
+    CHECK_F("2^3+ans", 50);           /* mixes with operators/precedence: 8+42 */
+    CHECK_F("3*4", 12);               /* an expression with no `ans` is unaffected */
+    CHECK_OK("ans");                  /* `ans` is a recognised identifier, not an error */
+    calc_ans = 16.0;
+    CHECK_F("sqrt(ans)", 4);          /* usable as a function argument */
+    CHECK_F("ans", 16);               /* picks up the updated value */
+    calc_ans = 0.0;                   /* default/startup state */
+    CHECK_F("ans", 0);
+    CHECK_F("ans+5", 5);
+    calc_ans = 0.0;                   /* leave it at the default for any later cases */
+
     /* --- hex literals + bitwise (& | << >> ~) : integer ops, result as double --- */
     CHECK_F("0xff", 255);
     CHECK_F("0x10+1", 17);
