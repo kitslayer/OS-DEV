@@ -61,6 +61,7 @@ static uint32_t *scenebuf;          /* cached rendered scene (no cursor) */
 static int screen_w, screen_h;
 static int spawn_n, menu_open, menu_sel;   /* menu_sel: keyboard-highlighted item */
 static int help_open;                       /* F1: keyboard-shortcut help overlay */
+static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher overlay (sw_sel: highlighted window) */
 static int start_x = 8, start_y, start_w = 110, start_h = 24;
 
 struct menu_item { const char *label; int kind; const char *prog; };
@@ -502,7 +503,8 @@ static void render_scene(void) {
             "F1    this help",        "F2    switch window",
             "F3    minimize",         "F4    maximize / restore",
             "F5    snap left",        "F6    snap right",
-            "F8    close window",     "F9    Apps menu",
+            "F7    window switcher",  "F8    close window",
+            "F9    Apps menu",
             "F12   screenshot to disk",
             "",
             "Mouse: drag the title bar to move a window",
@@ -530,6 +532,37 @@ static void render_scene(void) {
         draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Keyboard Shortcuts", 0xFFFFFF);
         for (int i = 0; i < n; i++)
             draw_text(px + 16, py + 34 + i * 18, H[i], 0xCFD8EC);
+    }
+
+    /* F7 window switcher: a centered panel listing every window (incl. minimized,
+     * marked "(min)") with the highlighted one selected; Enter raises+restores it.
+     * Drawn last so it sits on top of everything. */
+    if (sw_open) {
+        if (sw_sel >= win_count) sw_sel = win_count - 1;   /* a window closed while open: clamp */
+        if (sw_sel < 0) sw_sel = 0;
+        int rows = win_count > 0 ? win_count : 1;
+        int pw = 320, ph = rows * MENU_ITEM_H + 40;
+        int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
+        fb_fill_rect(px, py, pw, ph, 0x16161F);
+        box(px, py, pw, ph, 0x2D6CDF);
+        vgrad(px, py, pw, 26, 0x3A78D8, 0x2C66D6);            /* title bar */
+        fb_fill_rect(px, py, pw, 1, lerp(0x3A78D8, 0xFFFFFF, 1, 2));
+        draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Windows", 0xFFFFFF);
+        if (win_count == 0) {
+            draw_text(px + 16, py + 34, "(no windows)", 0x9FB0CC);
+        } else for (int i = 0; i < win_count; i++) {
+            int iy = py + 30 + i * MENU_ITEM_H;
+            if (i == sw_sel)                                  /* keyboard highlight (reuse menu colour) */
+                fb_fill_rect(px + 4, iy, pw - 8, MENU_ITEM_H, 0x2D4A8A);
+            char t[40]; int n = 0; const char *s = windows[i].title;
+            while (s && s[n] && n < 28) { t[n] = s[n]; n++; }
+            if (windows[i].minimized) {                       /* mark hidden windows */
+                const char *m = " (min)";
+                for (int j = 0; m[j] && n < (int)sizeof(t) - 1; j++) t[n++] = m[j];
+            }
+            t[n] = 0;
+            draw_text(px + 16, iy + 4, t, i == sw_sel ? 0xFFFFFF : 0xD0D8F0);
+        }
     }
 }
 
@@ -795,6 +828,26 @@ void desktop_run(void) {
             if (help_open) {                    /* help overlay has focus: Esc/F1 close, swallow the rest */
                 if (k == 27) { help_open = 0; dirty = 1; }
                 continue;
+            }
+            if (k == 0x1E) {                    /* F7: toggle the Alt-Tab window switcher overlay */
+                sw_open = !sw_open;
+                if (sw_open) { menu_open = 0; sw_sel = win_count - 1; }   /* start on the focused (topmost) window */
+                dirty = 1;
+                continue;
+            }
+            if (sw_open) {                      /* switcher has keyboard focus while open */
+                if (win_count > 0) {
+                    if (k == 0x11 || k == 0x13)      sw_sel = (sw_sel + win_count - 1) % win_count;   /* up/left -> prev */
+                    else if (k == 0x12 || k == 0x14) sw_sel = (sw_sel + 1) % win_count;               /* down/right -> next */
+                    else if (k == '\n' || k == '\r') {                    /* Enter: raise + restore it */
+                        raise_window(sw_sel);
+                        dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;   /* the array reordered: drop any active gesture */
+                        sw_open = 0;
+                    }
+                    else if (k == 27) sw_open = 0;                        /* Esc: cancel */
+                } else sw_open = 0;             /* nothing to switch to */
+                dirty = 1;
+                continue;                       /* swallow all keys while the switcher is up */
             }
             if (k == 0x19) {                    /* F9: toggle the Apps menu (keyboard) */
                 menu_open = !menu_open; menu_sel = 0; dirty = 1;
