@@ -887,15 +887,17 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     __asm__ volatile("mov %0, %%cr3" : : "r"(a->cr3) : "memory");
 
     a->entry = elf_load(elf, elfsz);
-    if (!a->entry) {                         /* bad ELF: don't spawn a null task */
-        __asm__ volatile("mov %0, %%cr3" : : "r"(old) : "memory");
-        __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
-        a->used = 0;
-        return 0;
+    if (!a->entry) goto fail_in_space;       /* bad ELF: don't spawn a null task */
+
+    for (int i = 0; i < USTACK_PAGES; i++) {
+        uint64_t frame = pmm_alloc_frame();  /* stack: non-executable (W^X) */
+        if (!frame) goto fail_in_space;      /* OOM: reclaim the partial space below */
+        if (vmm_map(USTACK_BASE + (uint64_t)i * PAGE_SIZE, frame,
+                    PTE_WRITABLE | PTE_USER | PTE_NX) != 0) {
+            pmm_free_frame(frame);
+            goto fail_in_space;
+        }
     }
-    for (int i = 0; i < USTACK_PAGES; i++)
-        vmm_map(USTACK_BASE + (uint64_t)i * PAGE_SIZE, pmm_alloc_frame(),
-                PTE_WRITABLE | PTE_USER | PTE_NX);   /* stack: non-executable (W^X) */
     a->ustack = USTACK_BASE + USTACK_PAGES * PAGE_SIZE;
 
     __asm__ volatile("mov %0, %%cr3" : : "r"(old) : "memory");
@@ -905,11 +907,27 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
      * its kernel stack, and SYS_https (shell get/wget) runs the TLS handshake +
      * bignum/RSA/ECDSA cert verification there — which overflows a small stack. */
     a->task = task_create_stack(app_trampoline, a->cr3, a, 256 * 1024);
+    if (!a->task) {                          /* couldn't create the task (OOM): don't queue a taskless app */
+        vmm_destroy_address_space(a->cr3);   /* CR3 already restored to `old` above, so this is safe */
+        a->used = 0;
+        return 0;
+    }
 
     /* queue it for the window manager to give it a window */
     int n = (pend_h + 1) % MAX_APPS;
     if (n != pend_t) { pending[pend_h] = a; pend_h = n; }
     return a;
+
+fail_in_space:
+    /* A failure while the app's CR3 was active (bad ELF, or OOM mapping the
+     * stack). Restore the caller's CR3 first, THEN tear down the partial address
+     * space — vmm_destroy_address_space refuses to free the active space, and
+     * leaving it mapped would leak the PML4/PDPT + every frame elf_load mapped. */
+    __asm__ volatile("mov %0, %%cr3" : : "r"(old) : "memory");
+    __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
+    vmm_destroy_address_space(a->cr3);
+    a->used = 0;
+    return 0;
 }
 
 /* Load and run an ELF program from a FAT32 file (e.g. `run calc.elf`). The ELF

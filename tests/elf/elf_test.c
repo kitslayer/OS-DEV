@@ -56,6 +56,7 @@ int vmm_map(uint64_t virt, uint64_t phys, uint64_t flags) {
 }
 static uint64_t g_frame = 0x100000;
 uint64_t pmm_alloc_frame(void) { g_frame += PG; return g_frame; }
+void pmm_free_frame(uint64_t phys) { (void)phys; }   /* elf.c frees a frame only on the (here-unreachable) vmm_map-failure path */
 
 static void unmap_all(void) {
     for (int i = 0; i < g_nmapped; i++) munmap((void *)g_mapped[i], PG);

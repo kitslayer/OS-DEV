@@ -124,7 +124,10 @@ uint64_t elf_load(const void *image, uint64_t maxsz) {
             if (!vmm_translate(v)) {
                 uint64_t frame = pmm_alloc_frame();
                 if (!frame) return 0;              /* out of memory: fail cleanly */
-                vmm_map(v, frame, PTE_WRITABLE | PTE_USER);
+                if (vmm_map(v, frame, PTE_WRITABLE | PTE_USER) != 0) {
+                    pmm_free_frame(frame);         /* OOM building a page table: don't memset an unmapped page */
+                    return 0;
+                }
                 memset((void *)v, 0, PAGE_SIZE);   /* zero -> covers .bss */
             }
         }
