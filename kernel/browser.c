@@ -57,6 +57,7 @@
 #define DATA_URI_B64_MAX 262144     /* max base64 length of an inline data: image URI we'll decode */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
 #define REMOTE_IMG_MAX 3            /* remote <img> URLs prefetched per page (best-effort) */
+#define IN_MAX    16                /* distinct form-field values stored per page (id-keyed: inputs/textareas/selects). was 8 -> a >8-field form silently dropped the extras from render + GET submit */
 
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG,     /* TK_IMG: link field = image slot */
@@ -151,8 +152,8 @@ struct browser {
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border */
-    char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
-    char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
+    char    in_id[IN_MAX][32]; char in_val[IN_MAX][96]; int in_n;   /* <input> field values, by id (the typed/scripted text) */
+    char    in_name[IN_MAX][32];                                /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
     char    sel_ids[8][32]; char sel_vals[8][512]; int sel_n;   /* <select>s: id + its option values ('\n'-joined), so a click cycles to the next.
                                                                  * 512 holds the worst case: 16 options x 31 chars + 15 '\n' = 511 + NUL (was 256 -> truncated long lists, breaking selcyc round-trip) */
@@ -1913,7 +1914,7 @@ static const char *in_get(browser_t *b, const char *id) {
 }
 static void in_set(browser_t *b, const char *id, const char *val) {
     int i; for (i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) break;
-    if (i == b->in_n) { if (b->in_n >= 8 || !id[0]) return; int j=0; while(id[j]&&j<31){b->in_id[i][j]=id[j];j++;} b->in_id[i][j]=0; b->in_name[i][0]=0; b->in_n++; }
+    if (i == b->in_n) { if (b->in_n >= IN_MAX || !id[0]) return; int j=0; while(id[j]&&j<31){b->in_id[i][j]=id[j];j++;} b->in_id[i][j]=0; b->in_name[i][0]=0; b->in_n++; }
     int j=0; while(val[j]&&j<95){b->in_val[i][j]=val[j];j++;} b->in_val[i][j]=0;
 }
 /* Record a field's name= (for GET submit) in the slot already created for its id. */

@@ -1,5 +1,15 @@
 # What's next
 
+> **(M956) Browser — raise the per-page form-field cap from 8 to 16 (P4 from the M955 review).** The id-keyed
+> field-value store (`in_id`/`in_val`/`in_name`, where every `<input>`/`<textarea>`/`<select>` value lives) was
+> fixed at 8 slots: a form with a 9th distinct named field silently dropped it from both rendering and the GET
+> submit (`in_set` returns once `in_n >= 8`). Replaced the bare `8` with a self-documenting `#define IN_MAX 16`
+> (struct decl + the cap), doubling capacity for ~512 bytes more on the heap-allocated `browser_t`. Verified
+> in-guest with new demo `fbig.htm` (ten fields, filled + read back on load): reports `f1=v1 f8=v8 f9=v9 f10=v10`
+> — the 9th/10th are kept now (they read back empty before). The per-value width (95 chars) and the separate
+> textarea/select sub-registries (8 each) are left as-is — rarely hit; a page with >8 *textareas* or >16 fields is
+> unusual. browser.c warnings held at 6; all 37 `make check` suites pass. See [[browser-render-engine]].
+
 > **(M955) Browser — fix three DOM/parse bugs found by a read-only code-review subagent.** I ran a subagent to
 > scrutinize the recently-added interactivity (textarea/select/.checked/attribute-props/title/submit) for
 > memory-safety and logic bugs; it found the buffers all correctly bounded but surfaced three wrong-output bugs,
