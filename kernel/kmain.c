@@ -30,6 +30,7 @@
 #include "fbcon.h"
 #include "mouse.h"
 #include "usb.h"
+#include "usb_storage.h"
 #include "speaker.h"
 #include "audio.h"
 #include "hda.h"
@@ -225,6 +226,15 @@ void kmain(uint64_t mb_info) {
         mouse_init();
         kprintf("[ ok ] PS/2 mouse on IRQ12 (relative fallback).\n");
     }
+
+    /* Bring up USB mass-storage (a USB flash disk) as an ADDITIONAL block device,
+     * sharing the one UHCI controller with the tablet above — boot still uses
+     * legacy ATA. No-op if no USB mass-storage device is attached (the tablet
+     * path is unaffected). The self-test READ-CAPACITYs it and reads real sectors
+     * off it via Bulk-Only Transport + SCSI, logging their bytes/checksum. */
+    usb_storage_init();
+    usb_storage_selftest();
+
     kprintf("[main] launching the desktop environment...\n");
     speaker_chime();              /* a little startup arpeggio */
     desktop_run();

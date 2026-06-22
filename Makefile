@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest usbstoragetest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -353,6 +353,19 @@ virtiogputest: $(KERNEL) $(DISK)
 svgatest: $(KERNEL) $(DISK)
 	@tests/run-svga-tests.sh
 
+# Headless in-guest assertion for the USB mass-storage driver (kernel/usb_storage.c):
+# attaches a USB flash disk as a usb-storage device ON THE SAME UHCI BUS as the
+# existing usb-tablet (-device usb-storage,bus=uhci.0,port=2 + -drive ...,if=none),
+# boots, and asserts the driver enumerated the Bulk-Only-Transport / SCSI device
+# (class 08 / subclass 06 / proto 50 + its bulk endpoints), READ CAPACITYd it,
+# read that disk's KNOWN per-sector content back over BOT (host-computed checksums
+# + marker), and the WRITE(10) round-trip. The boot disk stays on legacy ATA and
+# the USB tablet stays up (shared controller). SKIPs cleanly if QEMU/python3
+# absent. (Companion to `boottest`, which has no usb-storage -> the driver must
+# cleanly no-op there and the tablet must still come up.)
+usbstoragetest: $(KERNEL) $(DISK)
+	@tests/run-usb-storage-tests.sh
+
 # Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
 # instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
@@ -530,8 +543,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + virtiogputest + svgatest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest usbstoragetest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + virtiogputest + svgatest + usbstoragetest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)
