@@ -68,6 +68,7 @@
 #define SYS_clip_set 58 /* (buf, len)      -> set the system clipboard from buf; 0 */
 #define SYS_getarg  59  /* (buf, max)      -> copy this app's launch argument into buf; returns length */
 #define SYS_savebmp 60  /* (name, pixels, w, h) -> save a w*h 0x00RRGGBB canvas as a 24-bit BMP; 0/-1 */
+#define SYS_setwall 61  /* (name)          -> load image as the desktop wallpaper; 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

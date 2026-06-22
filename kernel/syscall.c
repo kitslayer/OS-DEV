@@ -32,6 +32,7 @@
 #include "zip.h"
 #include "tar.h"
 #include "ac97.h"
+#include "desktop.h"
 #include <stdint.h>
 
 /* Validate a user-supplied syscall pointer argument: the range [p, p+n) must
@@ -574,6 +575,14 @@ void syscall_dispatch(struct registers *r) {
                                                     (const uint32_t *)r->rsi, w, h);
         break;
     }
+    case SYS_setwall:
+        /* rdi=name: load that image as the desktop wallpaper. Validate the name
+         * string (the app's own pages) before the kernel reads it; the decode +
+         * atomic buffer swap happen with IF=0, so the WM render task never sees
+         * a half-updated wallpaper, and a failed load keeps the current one. */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)desktop_set_wallpaper((const char *)r->rdi);
+        break;
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

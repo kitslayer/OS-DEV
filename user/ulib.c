@@ -65,6 +65,7 @@ long sys_sha512(const char *name, void *hexbuf, unsigned long max) { return do_s
 long sys_crypt(const char *name, const char *pass) { return do_syscall(SYS_crypt, (long)name, (long)pass, 0); }
 long sys_js(const char *src, void *out, unsigned long max) { return do_syscall(SYS_js, (long)src, (long)out, (long)max); }
 long sys_screenshot(const char *name) { return do_syscall(SYS_screenshot, (long)name, 0, 0); }
+long sys_setwall(const char *name) { return do_syscall(SYS_setwall, (long)name, 0, 0); }
 long sys_savebmp(const char *name, const void *pixels, int w, int h) {
     long ret;
     register long r10 __asm__("r10") = (long)h;         /* 4th arg via r10 */

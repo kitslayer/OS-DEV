@@ -436,7 +436,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] mem ps df scores history clear reboot exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps df scores history clear reboot exit\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1510,6 +1510,12 @@ static int run_command(char *line, char *cwd) {
             if (!*fn) fn = "SHOT.BMP";
             if (sys_screenshot(fn) < 0) print("screenshot: failed\n");
             else { print("saved screen to "); print(fn); print("\n"); }
+        } else if (streq(line, "wallpaper") || startswith(line, "wallpaper ")) {
+            char *fn = line + 9; while (*fn == ' ') fn++;     /* image file to set as the desktop background */
+            sh_unprot_buf(fn);                                /* quoted filename (e.g. wallpaper "my pic.png") */
+            if (!*fn) print("usage: wallpaper <file>\n");
+            else if (sys_setwall(fn) < 0) { print("wallpaper: cannot load "); print(fn); print("\n"); }
+            else { print("wallpaper set to "); print(fn); print("\n"); }
         } else if (streq(line, "mem")) {
             char buf[128];
             sys_sysinfo(buf, sizeof(buf));

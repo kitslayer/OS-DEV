@@ -164,6 +164,7 @@ static const int corner[] = { 4, 2, 1, 1 };
 #define WP_BOT 0x081320
 static int wp_h;
 static uint32_t *wallpaper_bmp;   /* a screen-sized image loaded from disk, or NULL = gradient */
+static volatile int wallpaper_repaint;   /* set by desktop_set_wallpaper (off-task) to force a redraw */
 /* Background colour at (x,y): the loaded wallpaper if present, else the gradient. */
 static uint32_t wallpaper_at(int x, int y) {
     if (wallpaper_bmp && x >= 0 && x < screen_w && y >= 0 && y < screen_h)
@@ -403,27 +404,64 @@ static void draw_window(const window_t *w, int focused) {
     }
 }
 
-/* Load WALL.PNG from disk into a screen-sized 0x00RRGGBB bitmap, if present and
- * exactly the screen size. Any failure leaves wallpaper_bmp NULL (gradient). */
-static void load_wallpaper(void) {
+/* Decode image file `name` into a freshly-allocated screen-sized 0x00RRGGBB
+ * bitmap, scaling the decoded image (nearest-neighbour) to screen_w*screen_h so
+ * ANY image — not just a screen-exact one — works as wallpaper. Returns the
+ * buffer (caller owns it), or NULL on any failure (missing / undecodable / OOM).
+ * All scratch is freed before returning; no partial allocation is leaked.
+ *
+ * The decode scratch is sized to screen-pixel-count bytes, so the source may be
+ * up to screen_w*screen_h pixels (a too-large source is rejected by the decoder
+ * as a buffer overflow -> NULL, leaving the caller's wallpaper untouched). */
+static uint32_t *decode_wallpaper(const char *name) {
     long npix = (long)screen_w * screen_h;
     uint8_t *file = kmalloc(512 * 1024);
-    if (!file) return;
-    long n = vfs_read("WALL.PNG", file, 512 * 1024);
-    if (n <= 0) { kfree(file); return; }
+    if (!file) return NULL;
+    long n = vfs_read(name, file, 512 * 1024);
+    if (n <= 0) { kfree(file); return NULL; }
     uint8_t *rgba = kmalloc((size_t)npix * 4);
     uint8_t *scratch = kmalloc((size_t)npix * 4 + 8192);   /* inflated+unfiltered scanlines */
-    if (!rgba || !scratch) { kfree(file); if (rgba) kfree(rgba); if (scratch) kfree(scratch); return; }
+    if (!rgba || !scratch) { kfree(file); if (rgba) kfree(rgba); if (scratch) kfree(scratch); return NULL; }
     int w = 0, h = 0;
     int rc = png_decode(file, (int)n, rgba, (int)(npix * 4), scratch, (int)(npix * 4 + 8192), &w, &h);
     kfree(file); kfree(scratch);
-    if (rc != 0 || w != screen_w || h != screen_h) { kfree(rgba); return; }
+    if (rc != 0 || w <= 0 || h <= 0) { kfree(rgba); return NULL; }
     uint32_t *bmp = kmalloc((size_t)npix * 4);
-    if (!bmp) { kfree(rgba); return; }
-    for (long i = 0; i < npix; i++)                         /* RGBA bytes -> 0x00RRGGBB */
-        bmp[i] = ((uint32_t)rgba[i*4] << 16) | ((uint32_t)rgba[i*4+1] << 8) | rgba[i*4+2];
+    if (!bmp) { kfree(rgba); return NULL; }
+    for (int dy = 0; dy < screen_h; dy++) {                 /* nearest-neighbour scale to screen */
+        int sy = (int)((long)dy * h / screen_h);            /* src_y = dst_y * src_h / screen_h */
+        for (int dx = 0; dx < screen_w; dx++) {
+            int sx = (int)((long)dx * w / screen_w);        /* src_x = dst_x * src_w / screen_w */
+            const uint8_t *p = &rgba[((long)sy * w + sx) * 4];   /* RGBA bytes -> 0x00RRGGBB */
+            bmp[(long)dy * screen_w + dx] = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
+        }
+    }
     kfree(rgba);
-    wallpaper_bmp = bmp;
+    return bmp;
+}
+
+/* Load WALL.PNG into wallpaper_bmp at boot (now scaled to fit, so a non-screen-
+ * size WALL.PNG works too). Failure leaves wallpaper_bmp NULL, so wallpaper_at()
+ * falls back to the gradient. */
+static void load_wallpaper(void) {
+    wallpaper_bmp = decode_wallpaper("WALL.PNG");
+}
+
+/* Change the desktop wallpaper at runtime (the `wallpaper` shell builtin, via
+ * SYS_setwall). Decode-into-new-then-swap: a failed load NEVER disturbs the live
+ * wallpaper. The swap is a single pointer store; this runs inside a syscall with
+ * interrupts disabled (IF=0), so it is atomic w.r.t. the desktop render task —
+ * the renderer can never observe a half-updated wallpaper_bmp, and freeing the
+ * old buffer can't race a read of it. Returns 0 on success, -1 on any failure
+ * (the current wallpaper is kept). */
+int desktop_set_wallpaper(const char *name) {
+    uint32_t *next = decode_wallpaper(name);
+    if (!next) return -1;                                  /* keep the current wallpaper */
+    uint32_t *old = wallpaper_bmp;
+    wallpaper_bmp = next;                                  /* atomic swap (IF=0) */
+    kfree(old);                                            /* free(NULL) is a no-op (boot gradient) */
+    wallpaper_repaint = 1;                                 /* nudge the WM loop to redraw promptly */
+    return 0;
 }
 
 /* Render the whole scene (wallpaper, windows, taskbar — but NOT the cursor)
@@ -1212,6 +1250,7 @@ void desktop_run(void) {
 
         uint64_t sec = timer_ticks() / 100;
         if (sec != last_sec) { last_sec = sec; dirty = 1; }
+        if (wallpaper_repaint) { wallpaper_repaint = 0; dirty = 1; }   /* `wallpaper` builtin swapped the bg */
         int moved = (mx != prev_x || my != prev_y || btn != prev_btn);
         if (moved && (dragging >= 0 || resizing >= 0)) dirty = 1;  /* drag moves the scene */
 
