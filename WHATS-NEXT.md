@@ -1,5 +1,16 @@
 # What's next
 
+> **(M969) Window manager — two interaction-polish fixes (P3s from the M968 review).** (1) **A window could be
+> dropped with its title bar behind the taskbar (mouse-unreachable).** The drag-move set `w->y = my - gdy` with no
+> bottom clamp, so dragging to the bottom hid the title bar under the (later-drawn) taskbar. Now the dragged `y` is
+> clamped to `[0, screen_h - TASKBAR_H - TITLEBAR_H]` so the full title bar always stays on-screen and above the
+> taskbar — verified in-guest (dragged the Shell to the bottom → its title bar lands just above the taskbar, still
+> grabbable). (2) **The mouse wheel scrolled a background window while the Apps menu / help overlay was open** (those
+> are modal for the keyboard but the wheel handler wasn't gated). Now the wheel is still *drained* every frame but
+> only *acts* when `!menu_open && !help_open`. Both are tiny, safe changes; desktop.c warnings still 0; all 37
+> `make check` suites pass. (The remaining P3 — fixed-layout window content not clipped to a shrunken body — is left
+> for later; it needs a real fb clip-rect or per-kind min-height, lower value.) See [[os-dev-project]].
+
 > **(M968) Window manager — fix a crash + two stale-state bugs, found by a read-only review subagent.** A seventh
 > review subagent audited `kernel/desktop.c`; it confirmed the fb primitives all clip and the mouse stays
 > on-screen, and surfaced three real bugs (the rest were cosmetic): **(P1, crash) a cooked keystroke with NO

@@ -904,7 +904,7 @@ void desktop_run(void) {
          * wheel > 0 = rolled up (show content above); reused for the browser's
          * arrow-scroll and a text app's PgUp/PgDn scrollback. */
         int wheel = mouse_read_wheel();
-        if (wheel) {
+        if (wheel && !menu_open && !help_open) {   /* drain the wheel always, but the Apps menu / help overlay is modal: don't scroll a window behind it */
             int up = wheel > 0, ticks = up ? wheel : -wheel;
             if (ticks > 8) ticks = 8;                    /* clamp a violent spin */
             for (int i = win_count - 1; i >= 0; i--) {
@@ -1128,6 +1128,8 @@ void desktop_run(void) {
                     gdx = w->w / 2; gdy = TITLEBAR_H / 2; /* center so it follows the cursor */
                 }
                 w->x = mx - gdx; w->y = my - gdy;
+                if (w->y < 0) w->y = 0;                                                       /* keep the title bar on-screen at the top */
+                else if (w->y > screen_h - TASKBAR_H - TITLEBAR_H) w->y = screen_h - TASKBAR_H - TITLEBAR_H;   /* and above the taskbar (else it hides behind it -> mouse-unreachable) */
             }
         }
         if (resizing >= 0 && left) {
