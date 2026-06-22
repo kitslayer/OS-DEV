@@ -1,5 +1,18 @@
 # What's next
 
+> **(M937) Shell — brace expansion `{a,b,c}` and ranges `{1..N}` / `{a..z}`.** A common bash convenience that
+> was missing: `echo file{a,b,c}.txt` → `filea.txt fileb.txt filec.txt`, `echo {1..5}` → `1 2 3 4 5`,
+> `mkdir {src,bin,doc}`, descending `x{9..6}` → `x9 x8 x7 x6`, char ranges `{a..e}`, and the cartesian product
+> of adjacent groups (`{1,2}{3,4}` → `13 14 23 24`). Implemented as `expand_braces()`, a string-transform pass
+> in `run_line` after variable/alias expansion and before glob (matching bash's order). It repeatedly expands
+> the first eligible group (the repetition yields the cartesian product) into `bline[]`. **Safe + additive**:
+> a `{...}` is expanded only when it has no internal spaces, contains a top-level comma or a valid range, and
+> is not preceded by `$` — so `${VAR}` parameter expansion, `$(...)`, function bodies `f() { ...; }` and
+> command groups `{ cmd; }` are left untouched (verified in-guest: `greet() { echo hello $1; }` still works,
+> and `echo val=${x} list={1..3}` → `val=42 list=1 list=2 list=3` — both expansions coexist). Output growth is
+> bounded by the buffer + a pass guard, so a pathological `{1..999999}` can't blow up. Doesn't need the
+> (deferred) quoting infrastructure. Verified in-guest; `make check` green (35 suites).
+
 > **(M936) Editor — matching-bracket highlight.** Completes the code-editor triad (highlight + auto-indent +
 > bracket-match). When the caret sits on, or just after, a bracket `()[]{}`, the editor tints both it and its
 > partner pink (palette 5) so you can see scope and catch mismatches at a glance. `match_bracket()` is a naive
