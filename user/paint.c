@@ -5,7 +5,8 @@
  * API), reads the cursor + buttons with sys_mouse(), and paints where you drag.
  * Keys 1-8 pick a colour, +/- change the brush size, g flood-fills under the
  * cursor, b/l/r/o switch brush/line/rectangle/circle tools (the shape tools drag
- * with a live rubber-band preview), c clears, q/Esc quits.
+ * with a live rubber-band preview), c clears, s saves the canvas to PAINT.BMP,
+ * L loads PAINT.BMP back, q/Esc quits.
  * Pure integer math (no FPU).
  */
 #include "ulib.h"
@@ -13,6 +14,7 @@
 #define W 300
 #define H 200
 #define BG 0x101018u
+#define SAVEFILE "PAINT.BMP"
 
 static unsigned int *cv;
 
@@ -85,6 +87,43 @@ static void draw_palette(int sel) {
     }
 }
 
+/* Load SAVEFILE (a 24-bit BMP, the exact format sys_savebmp writes: bottom-up
+ * rows, each padded to a 4-byte boundary) back into the canvas. Parses the
+ * 54-byte header inline and bounds-checks everything: the file must be >= 54
+ * bytes and 24bpp, dimensions are clamped to W/H (never writing past cv), and a
+ * pixel is read only if it lies within the file buffer (so a truncated/forged
+ * file can't over-read). A missing/malformed file fails gracefully (returns 0,
+ * leaving the canvas untouched). Returns 1 if it loaded anything. */
+static int load_bmp(void) {
+    long cap = 54 + (long)W * 4 * H + 4 * H + 64;        /* header + worst-case (full-row pad) pixels */
+    unsigned char *buf = malloc((unsigned long)cap);
+    if (!buf) return 0;
+    long n = sys_readfile(SAVEFILE, buf, (unsigned long)cap);
+    if (n < 54 || buf[0] != 'B' || buf[1] != 'M') { free(buf); return 0; }   /* missing or not a BMP */
+    unsigned long off = (unsigned long)buf[10] | ((unsigned long)buf[11] << 8) |
+                        ((unsigned long)buf[12] << 16) | ((unsigned long)buf[13] << 24);
+    int iw = (int)((unsigned)buf[18] | ((unsigned)buf[19] << 8) |
+                   ((unsigned)buf[20] << 16) | ((unsigned)buf[21] << 24));
+    int ih = (int)((unsigned)buf[22] | ((unsigned)buf[23] << 8) |
+                   ((unsigned)buf[24] << 16) | ((unsigned)buf[25] << 24));
+    int bpp = (int)((unsigned)buf[28] | ((unsigned)buf[29] << 8));
+    if (bpp != 24 || iw <= 0 || ih <= 0 || off > (unsigned long)n) { free(buf); return 0; }
+    int cw = iw < W ? iw : W, ch = ih < H ? ih : H;      /* clamp to the canvas; never write past cv */
+    int stride = iw * 3; stride += (4 - (stride & 3)) & 3;   /* rows padded to 4 bytes */
+    for (int y = 0; y < ch; y++) {
+        long rowoff = (long)off + (long)(ih - 1 - y) * stride;   /* bottom-up */
+        for (int x = 0; x < cw; x++) {
+            long p = rowoff + (long)x * 3;
+            if (p + 2 >= n) continue;                    /* guard against a truncated file */
+            cv[y * W + x] = ((unsigned)buf[p+2] << 16) |  /* R */
+                            ((unsigned)buf[p+1] << 8)  |  /* G */
+                             (unsigned)buf[p];            /* B */
+        }
+    }
+    free(buf);
+    return 1;
+}
+
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("paint: graphics init failed\n"); return 1; }
     cv = malloc((unsigned long)W * H * 4);
@@ -94,6 +133,7 @@ int main(void) {
     int col = 1, brush = 2, lx = -1, ly = -1;
     int mode = 0, anchored = 0, ax = 0, ay = 0;          /* mode: 0 brush, 1 line, 2 rect; rubber-band anchor */
     unsigned int *bk = 0;                                /* canvas backup for shape preview (lazy) */
+    int notice = 0; unsigned int notecol = 0;            /* brief save/load flash (frames left + colour) */
     draw_palette(col);
     for (;;) {
         int k = sys_pollkey();
@@ -107,6 +147,14 @@ int main(void) {
         else if (k == 'l') mode = 1;                         /* line tool */
         else if (k == 'r') mode = 2;                         /* rectangle tool */
         else if (k == 'o') mode = 3;                         /* circle tool (drag out from centre) */
+        else if (k == 's') {                                 /* save the canvas to PAINT.BMP */
+            int ok = sys_savebmp(SAVEFILE, cv, W, H) == 0;
+            notice = 40; notecol = ok ? 0x40E060 : 0xFF4040;   /* green ok / red fail */
+        }
+        else if (k == 'L') {                                 /* load PAINT.BMP back into the canvas */
+            int ok = load_bmp();
+            notice = 40; notecol = ok ? 0x4090FF : 0xFF4040;   /* blue ok / red fail */
+        }
 
         int x, y;
         int b = sys_mouse(&x, &y);
@@ -139,7 +187,24 @@ int main(void) {
         } else { lx = ly = -1; anchored = 0; }               /* button up: end stroke / commit the shape */
 
         draw_palette(col);
-        sys_gfx_blit(cv);
+        /* Brief save/load flash: a small swatch in the top-right corner. Drawn
+         * over a saved copy of that region and restored right after the blit so
+         * it stays purely visual — it never gets baked into the canvas (a save
+         * taken while it shows captures the real drawing, not the indicator). */
+        if (notice > 0) {
+            unsigned int save[8 * 8];
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++) {
+                    save[y * 8 + x] = cv[y * W + (W - 9 + x)];
+                    cv[y * W + (W - 9 + x)] = notecol;
+                }
+            sys_gfx_blit(cv);
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++) cv[y * W + (W - 9 + x)] = save[y * 8 + x];
+            notice--;
+        } else {
+            sys_gfx_blit(cv);
+        }
         sys_sleep(12);
     }
 }

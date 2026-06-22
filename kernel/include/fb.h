@@ -6,6 +6,7 @@ int      fb_init(uint16_t width, uint16_t height);   /* set the video mode; 0 ok
 int      fb_width(void);
 int      fb_height(void);
 int      fb_save_bmp(const char *name);   /* screenshot the live screen to a 24-bit BMP file; 0/-1 */
+int      fb_save_bmp_buf(const char *name, const uint32_t *src, int w, int h);  /* save a caller's w*h 0x00RRGGBB buffer as a 24-bit BMP; 0/-1 */
 int      fb_save_png(const char *name);   /* screenshot the live screen to a PNG file; 0/-1 */
 
 void     fb_clear(uint32_t color);

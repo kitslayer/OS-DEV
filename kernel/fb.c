@@ -137,6 +137,50 @@ int fb_save_bmp(const char *name) {
     return vfs_write(name, g_shot, (unsigned long)total) < 0 ? -1 : 0;
 }
 
+/* Save a caller-supplied w*h 0x00RRGGBB buffer (e.g. a paint canvas) as a 24-bit
+ * BMP file — same on-disk format as fb_save_bmp (14-byte file header + 40-byte
+ * DIB, 24bpp BGR, bottom-up rows each padded to a 4-byte boundary) but full
+ * resolution (no downscale) and reading the caller's `src` instead of the live
+ * screen. The output size is caller-chosen, so the buffer is kmalloc'd (and
+ * freed) rather than a fixed BSS array; w*h is capped first so a bogus size
+ * can't request a huge or overflowing allocation. Returns 0 / -1. */
+int fb_save_bmp_buf(const char *name, const uint32_t *src, int w, int h) {
+    if (!src || w < 1 || h < 1) return -1;
+    if ((long)w * h > 4000000L) return -1;         /* cap before allocating (guards overflow/huge alloc) */
+    int row = w * 3;
+    int pad = (4 - (row & 3)) & 3;                 /* each scanline padded to a 4-byte boundary */
+    int stride = row + pad;
+    long datasz = (long)stride * h, total = 54 + datasz;
+    uint8_t *buf = kmalloc((unsigned long)total);
+    if (!buf) return -1;
+    uint8_t *hd = buf;
+    for (int i = 0; i < 54; i++) hd[i] = 0;
+    hd[0] = 'B'; hd[1] = 'M';
+    hd[2] = total; hd[3] = total >> 8; hd[4] = total >> 16; hd[5] = total >> 24;
+    hd[10] = 54;                                    /* pixel-data offset */
+    hd[14] = 40;                                    /* DIB (BITMAPINFOHEADER) size */
+    hd[18] = w; hd[19] = w >> 8; hd[20] = w >> 16; hd[21] = w >> 24;
+    hd[22] = h; hd[23] = h >> 8; hd[24] = h >> 16; hd[25] = h >> 24;
+    hd[26] = 1;                                     /* planes */
+    hd[28] = 24;                                    /* bits per pixel */
+    hd[34] = datasz; hd[35] = datasz >> 8; hd[36] = datasz >> 16; hd[37] = datasz >> 24;
+    uint8_t *px = buf + 54;
+    for (int oy = 0; oy < h; oy++) {
+        int iy = h - 1 - oy;                        /* BMP scanlines are bottom-up */
+        uint8_t *r = px + (long)oy * stride;
+        for (int ox = 0; ox < w; ox++) {
+            uint32_t c = src[(long)iy * w + ox];    /* 0x00RRGGBB */
+            r[ox*3+0] = c & 0xff;                   /* B */
+            r[ox*3+1] = (c >> 8) & 0xff;            /* G */
+            r[ox*3+2] = (c >> 16) & 0xff;           /* R */
+        }
+        for (int p = 0; p < pad; p++) r[row + p] = 0;   /* pad bytes */
+    }
+    int rc = vfs_write(name, buf, (unsigned long)total) < 0 ? -1 : 0;
+    kfree(buf);
+    return rc;
+}
+
 /* Save a screenshot as a PNG (our from-scratch png_encode + DEFLATE). Same
  * 2x-downscale as fb_save_bmp, but PNG rows are top-down and RGB, and the file
  * is far smaller (the screen compresses well). Buffers are transient kmalloc

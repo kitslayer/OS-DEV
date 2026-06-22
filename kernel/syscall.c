@@ -562,6 +562,18 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)rc;
         break;
     }
+    case SYS_savebmp: {
+        /* rdi=name, rsi=pixels, rdx=w, r10=h: save a w*h 0x00RRGGBB buffer as a
+         * 24-bit BMP. Validate the name string + the pixel buffer (w*h*4 bytes,
+         * the app's own pages) and require positive, sane dimensions before
+         * touching either — same ring3->ring0 pointer boundary as the others. */
+        int w = (int)r->rdx, h = (int)r->r10;
+        if (!ustr(r->rdi) || w <= 0 || h <= 0 || (long)w * h > 4000000L ||
+            !ubuf(r->rsi, (uint64_t)w * (uint64_t)h * 4)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)fb_save_bmp_buf((const char *)r->rdi,
+                                                    (const uint32_t *)r->rsi, w, h);
+        break;
+    }
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

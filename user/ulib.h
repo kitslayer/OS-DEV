@@ -38,6 +38,7 @@ long sys_sha512(const char *name, void *hexbuf, unsigned long max);
 long sys_crypt(const char *name, const char *pass);
 long sys_js(const char *src, void *out, unsigned long max);
 long sys_screenshot(const char *name);
+long sys_savebmp(const char *name, const void *pixels, int w, int h);   /* save a w*h 0x00RRGGBB canvas as a 24-bit BMP; 0/-1 */
 long sys_gunzip(const char *insrc, const char *outname);
 long sys_gzip(const char *insrc, const char *outname);
 long sys_unzip(const char *zipname);
