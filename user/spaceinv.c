@@ -100,7 +100,7 @@ static void render(void) {
         int x = inv_x(c), y = inv_y(r); if (x >= 0 && x < W && y >= 0 && y < H) fld[y][x] = 'W';
     }
     if (pbon && pby >= 0 && pby < H) fld[pby][pbx] = '|';
-    for (int i = 0; i < ibn; i++) if (iby[i] >= 0 && iby[i] < H) fld[iby[i]][ibx[i]] = '!';
+    for (int i = 0; i < ibn; i++) if (iby[i] >= 0 && iby[i] < H && ibx[i] >= 0 && ibx[i] < W) fld[iby[i]][ibx[i]] = '!';   /* guard x too: a just-hit bullet parks at ibx=-9 for one tick */
     fld[H-1][px] = '^';
     for (int y = 0; y < H; y++) {
         print("  ");
