@@ -86,6 +86,7 @@ task_t *task_create(void (*entry)(void), uint64_t cr3, void *proc) {
  * that would overflow the default 16 KB stack). */
 task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int stack_size) {
     task_t *t = kzalloc(sizeof(task_t));
+    if (!t) return 0;                        /* OOM: fail cleanly rather than deref NULL */
     t->id = next_id++;
     t->entry = entry;
     t->state = TASK_READY;
@@ -95,6 +96,14 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
     fx_alloc(t);
 
     uint8_t *stack = kmalloc(stack_size);
+    if (!stack || !t->fxbuf) {               /* OOM on the stack or FP save area: don't build a bogus stack frame
+                                              * (a NULL stack -> top at a wild low address -> triple-fault on first
+                                              * switch-in) or run with no FP save (XMM/x87 corruption between tasks). */
+        if (stack) kfree(stack);
+        if (t->fxbuf) kfree(t->fxbuf);
+        kfree(t);
+        return 0;
+    }
     t->stack_base = (uint64_t)stack;
 
     /* Build the initial stack so the first switch-in "returns" into the
@@ -228,7 +237,7 @@ void task_free(task_t *t) {
 }
 
 int task_current_id(void) {
-    return current->id;
+    return current ? current->id : 0;        /* NULL before sched_init (matches task_snapshot/sched_tick's guard) */
 }
 
 task_t *task_self(void) {
@@ -236,6 +245,7 @@ task_t *task_self(void) {
 }
 
 int task_count(void) {
+    if (!current) return 0;                  /* ring not built yet */
     int n = 0;
     task_t *t = current;
     do { if (t->state != TASK_DEAD) n++; t = t->next; } while (t != current);

@@ -434,8 +434,8 @@ int app_sys_read(char *buf, unsigned max) {
     int cx0 = a->cx, cy0 = a->cy;                   /* where the input starts */
     a->hist_pos = a->hist_n;                        /* start just past the newest */
     while (n < max) {
-        if (a->kill) { a->exited = 1; task_exit(); }  /* WM asked us to close: exit cleanly (WM then reaps) */
-        uint64_t f = irq_save();                    /* check-and-block atomically */
+        uint64_t f = irq_save();                    /* check kill + queue + block ATOMICALLY: if the kill check sat outside this region, a kill+task_wake from the WM landing between the check and task_block() would be lost (the wake no-ops on a not-yet-blocked task) -> the app sleeps forever and its window is never reaped */
+        if (a->kill) { irq_restore(f); a->exited = 1; task_exit(); }  /* WM asked us to close: exit cleanly (WM then reaps) */
         int c = iq_get(a);
         if (c < 0) { task_block(); irq_restore(f); continue; }  /* sleep until woken (incl. by a kill request) */
         irq_restore(f);

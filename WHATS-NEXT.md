@@ -1,5 +1,24 @@
 # What's next
 
+> **(M970) Kernel scheduler + heap — fix a window-leak race + OOM triple-fault (8th review subagent).** A review of
+> `task.c`/`kheap.c` (interrupt model confirmed: all IDT gates are interrupt gates, syscalls run IF-off,
+> `irq_save`/`irq_restore` is the guard) found several issues — most masked/not-currently-triggerable — and these
+> reachable/robustness ones, now fixed: **(P1/P2 leak) a closed app could block forever, never reaped.**
+> `app_sys_read` tested `a->kill` *outside* the `irq_save` block region, and `task_wake` is edge-triggered (acts
+> only on a `TASK_BLOCKED` task) — so a WM close (`app_request_kill` sets `kill` then `task_wake`) landing in the
+> window between the check and `task_block()` was lost; the app then slept forever with `kill` pending, and its
+> window + 256 KB stack were never reclaimed. Fixed by checking `kill` *inside* the `irq_save` region, atomic with
+> the block decision. **(P2 OOM → triple-fault) `task_create_stack` didn't check `kzalloc`/`kmalloc`** — on heap
+> exhaustion a NULL stack made `top = (0+size)&~15` a wild low address → a bogus initial frame → triple-fault on
+> first switch-in. Now it fails cleanly (frees the partial alloc + returns NULL). **(P2 consistency)
+> `task_current_id`/`task_count` now NULL-guard `current`** like `task_snapshot`/`sched_tick`. Verified: `make
+> check` (boottest boots the kernel) + in-guest (opened Calc, closed it with F8 → it exits and is reaped cleanly,
+> window gone, focus returns to the Shell). **Deferred to a focused session (heap-core / structural — riskier):**
+> #3 `kheap` has no double-free magic + only forward coalescing (silent double-free corruption + backward
+> fragmentation/bloat over time), #1 no dedicated idle task (masked only because the desktop task never blocks),
+> #5 `grow_heap` merge assumes the list tail is the physical tail, #7 no integer-overflow guard on size math. The
+> review confirmed `task_exit`/`context_switch`/the new-thread frame/EOI-ordering are all correct. See [[os-dev-project]].
+
 > **(M969) Window manager — two interaction-polish fixes (P3s from the M968 review).** (1) **A window could be
 > dropped with its title bar behind the taskbar (mouse-unreachable).** The drag-move set `w->y = my - gdy` with no
 > bottom clamp, so dragging to the bottom hid the title bar under the (later-drawn) taskbar. Now the dragged `y` is
