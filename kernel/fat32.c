@@ -417,7 +417,11 @@ static long fat32_delete(const char *name);          /* forward decl */
 static long fat32_write(const char *name, const void *data, unsigned long len) {
     uint32_t dir; const char *leaf;
     if (resolve(name, &dir, &leaf) < 0 || !leaf[0]) return -1;
-    fat32_delete(name);            /* replace, don't duplicate: drop any old copy */
+    { uint32_t fc; int isdir = 0; uint32_t sz;            /* refuse to overwrite a DIRECTORY with a file: else the */
+      if (dir_find(dir, leaf, &fc, &isdir, &sz) && isdir) /* fat32_delete below either fails on a non-empty dir (leaving a */
+          return -1;                                      /* duplicate same-name entry) or silently rmdir's an empty one. */
+    }
+    fat32_delete(name);            /* replace, don't duplicate: drop any old copy (a regular file) */
 
     uint32_t csize = sec_per_clus * SECSZ;
     uint32_t nclus = (uint32_t)((len + csize - 1) / csize);

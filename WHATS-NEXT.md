@@ -1,5 +1,24 @@
 # What's next
 
+> **(M963) FAT32 — `writefile` over a directory no longer corrupts the filesystem (data-loss bug, valid disk).** A
+> fifth review subagent audited the FAT32 write/alloc/delete paths + VFS and found the read-path fuzzer covers reads
+> well but the **write path had a data-loss bug reachable on a normal disk from an ordinary syscall**: `fat32_write`
+> unconditionally `fat32_delete`d the existing name then wrote a file. If the name was a **non-empty directory**,
+> `fat32_delete` correctly refused (returned -1) but `fat32_write` ignored that and added a second same-name entry —
+> a **directory and a file with the same name**, ambiguous resolution + orphaned clusters. If the name was an
+> **empty directory**, `fat32_delete` succeeded, so the write **silently deleted the directory**. Fix mirrors
+> `fat32_read`'s guard: `dir_find` the leaf first and **return -1 if it's a directory** (you can't overwrite a dir
+> with a file, like `cat > somedir` errors on Unix). Verified in-guest: `mkdir TD; echo hi > TD` is refused and `ls`
+> still shows `TD/` as a directory (no duplicate); normal file overwrite still works (`echo a>F; echo b>F; cat F`→
+> `b`). fat32.c warnings unchanged (1 pre-existing, in `dir_find`); fstest + all 37 `make check` suites pass.
+> **The subagent's other findings are corrupt/malformed-disk hardening (not valid-disk bugs), deferred as a batch:**
+> at mount `total_clusters` isn't clamped to the FAT's real capacity (a bad BPB → `alloc_cluster`/`df` walk FAT
+> entries that fall in the data region → wrong-sector write); `add_entry`/`fat32_delete`/`free_chain` use `cl<EOC`
+> loops instead of the read path's `cluster_in_range(cl)` (a corrupt chain with `sec_per_clus>=32` can uint32-wrap
+> `cluster_to_sector` to a live LBA); no `root_cluster` sanity check. All require a corrupted on-disk structure to
+> trigger (the kernel's drive bound makes them wrong-sector/wrong-result, not kernel-RAM OOB) — good defensive
+> follow-ups, lower priority than the valid-disk fix above.
+
 > **(M962) Editor — block indent/dedent now handles any selection size (was capped at 1024 lines).** The other
 > actionable item from the M961 editor review: `block_indent` collected every touched line's start into fixed
 > `starts[1024]`/`removed[1024]` arrays, so Tab/Shift-Tab on a >1024-line selection silently (de)indented only the
