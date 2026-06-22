@@ -19,6 +19,7 @@
 #include "fat32.h"
 #include "vfs.h"
 #include "partition.h"
+#include "ata.h"
 #include "pci.h"
 #include "ahci.h"
 #include "virtio_blk.h"
@@ -177,6 +178,15 @@ void kmain(uint64_t mb_info) {
      * partition table — a clean no-op. */
     partition_enumerate();
     kprintf("\n");
+
+    /* Prove the ADDITIVE bus-master IDE DMA path (kernel/ata.c) against the boot
+     * disk: the boot disk sits on the PIIX3 IDE controller (bus-master capable),
+     * so this DMA-reads a few of its sectors and compares them byte-for-byte
+     * against a PIO read of the same sectors, logging "DMA==PIO OK" per sector.
+     * This is purely additive: fat32/vfs/boot still use the PIO ata_read/write
+     * above; the DMA path is a separate, proven-identical capability. A clean
+     * no-op (logs "DMA unavailable") if no PIIX3 BMIDE controller is present. */
+    ata_dma_selftest();
 
     /* Bring up AHCI/SATA as an ADDITIONAL storage driver (the boot disk above
      * stays on legacy ATA). No-op if no AHCI HBA + disk is attached. The

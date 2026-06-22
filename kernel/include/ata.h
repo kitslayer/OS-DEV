@@ -47,3 +47,44 @@ const struct ata_drive_info *ata_drive(int drive);
 
 /* Convenience: reported sector count of drive `drive`, or 0 if absent. */
 uint64_t ata_drive_sectors(int drive);
+
+/* --- bus-master IDE DMA (PIIX3 "BMIDE") ------------------------------------ */
+
+/*
+ * An ADDITIVE DMA path alongside the PIO ata_read()/ata_write() above. The PIO
+ * functions stay the DEFAULT every existing caller (fat32/vfs/boot) uses; these
+ * DMA functions are a separate capability, proven byte-identical to PIO by
+ * ata_dma_selftest(). They use the PIIX3 IDE controller's bus-master interface
+ * (PCI 0x8086:0x7010, BAR4) + a PRD table to move sectors by DMA through an
+ * internal page-aligned bounce buffer (so `buf` needs no alignment).
+ *
+ * If the PIIX3 BMIDE controller/BAR isn't present, every call is a clean no-op
+ * that returns -1 — the boot path (PIO) is entirely unaffected.
+ */
+
+/* Read `count` 512-byte sectors at `lba` on drive `drive` (0..3) into `buf` via
+ * bus-master DMA. `count` must be in 1..ata_dma_max_sectors(); `buf` must hold
+ * count*512 bytes (no alignment constraint — DMA goes through an internal bounce
+ * buffer). Returns 0 on success, -1 on bad-arg / absent controller / absent
+ * drive / device error / timeout. */
+int ata_read_dma(int drive, uint32_t lba, uint32_t count, void *buf);
+
+/* Write `count` sectors from `buf` to `lba` on drive `drive` via bus-master DMA.
+ * Same argument rules as ata_read_dma. Returns 0 on success, -1 otherwise. */
+int ata_write_dma(int drive, uint32_t lba, uint32_t count, const void *buf);
+
+/* 1 if the PIIX3 bus-master IDE controller is present + set up (so the DMA path
+ * is usable), else 0. Idempotent (probes PCI once). */
+int ata_dma_available(void);
+
+/* Maximum sectors a single ata_read_dma/ata_write_dma call can move (the
+ * internal bounce-buffer cap). */
+uint32_t ata_dma_max_sectors(void);
+
+/* Boot-time verification: if the BMIDE controller is present, DMA-read a few low
+ * sectors of the boot disk (drive 0) and compare each byte-for-byte against a PIO
+ * read of the same sectors, logging "IDE DMA: sector N DMA==PIO OK" per sector
+ * (this is the proof the DMA path returns identical data to the trusted PIO
+ * path); then a DMA write round-trip on a scratch sector. No-op (logs "DMA
+ * unavailable") if no BMIDE controller is attached. */
+void ata_dma_selftest(void);

@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest usbstoragetest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -329,6 +329,18 @@ nvmetest: $(KERNEL) $(DISK)
 parttest: $(KERNEL) $(DISK)
 	@tests/run-partition-tests.sh
 
+# Headless in-guest assertion for the bus-master IDE DMA path (kernel/ata.c):
+# boots with the NORMAL IDE boot disk (-drive ...,if=ide, on the bus-master-capable
+# PIIX3 IDE controller) and asserts the kernel's DMA read path returned BYTE-
+# IDENTICAL data to the trusted PIO path -- ata_dma_selftest() DMA-reads a few of
+# the boot disk's sectors, PIO-reads the same, and logs "DMA==PIO OK" per sector
+# (plus a DMA write round-trip). The boot path (PIO ata_read/ata_write) is
+# untouched: FAT32 still mounts on legacy ATA via PIO. SKIPs cleanly if QEMU is
+# absent. (Companion to `boottest`, which uses the same disk but doesn't assert
+# the DMA==PIO comparison.)
+idedmatest: $(KERNEL) $(DISK)
+	@tests/run-ide-dma-tests.sh
+
 # Headless in-guest assertion for the virtio-gpu driver (kernel/virtio_gpu.c):
 # attaches a virtio-gpu device (-device virtio-gpu-pci) ALONGSIDE the std-VGA
 # display, boots, and asserts the driver brought the modern paravirtual 2D GPU
@@ -543,8 +555,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest usbstoragetest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + virtiogputest + svgatest + usbstoragetest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

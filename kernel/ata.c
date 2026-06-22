@@ -26,6 +26,10 @@
 #include "ata.h"
 #include "io.h"
 #include "console.h"
+#include "pci.h"
+#include "pmm.h"
+#include "vmm.h"
+#include "string.h"
 
 /* Per-bus command-block + control-block base ports. A drive's I/O base depends
  * only on its bus (primary/secondary); master vs slave is the DRV bit in the
@@ -179,6 +183,255 @@ int ata_write(uint32_t lba, uint8_t count, const void *buf) {
     return ata_write_drive(0, lba, count ? count : 256, buf);
 }
 
+/* ===========================================================================
+ * Bus-master IDE DMA (PIIX3 "BMIDE") — an ADDITIVE capability alongside the PIO
+ * path above. The PIO ata_read()/ata_write() stay the DEFAULT that fat32/vfs/
+ * boot use; this DMA path is separate and is proven byte-identical to PIO by
+ * ata_dma_selftest(), so a subtle DMA bug can never break the boot disk.
+ *
+ * The legacy IDE controller (PIIX3, PCI 0x8086:0x7010) can move sectors by DMA
+ * instead of the CPU-driven PIO loop: we hand it, in RAM, a Physical Region
+ * Descriptor table (PRDT) naming the buffer to fill, issue a READ DMA command to
+ * the drive exactly as PIO does the addressing, then set the bus master running
+ * and poll its status to completion. No IRQ is used (we poll, like ahci.c).
+ *
+ * BMIDE register file (16 bytes at BAR4): the PRIMARY channel at +0, the
+ * SECONDARY at +8. Per channel:
+ *   +0 Command  bit0 = start/stop the bus master; bit3 = direction
+ *               (1 = device->memory, i.e. a disk READ).
+ *   +2 Status   bit0 = active; bit1 = error; bit2 = IRQ. Write 1 to bits 1/2
+ *               to clear them.
+ *   +4 PRDT ptr u32 physical address of the PRD table (must be 4-byte aligned
+ *               and must not cross a 64 KiB boundary).
+ *
+ * DMA, like the other drivers, goes through a page-aligned BOUNCE buffer from
+ * pmm_alloc_frame() (identity-mapped low RAM: phys == virt). That removes any
+ * alignment requirement on the caller's buffer AND bounds every transfer to the
+ * fixed bounce size, so a single PRD always describes it. We cap a transfer at
+ * the bounce size (see ATA_DMA_BOUNCE_SECTORS below). The PRD table itself lives
+ * in its own pmm frame (4 KiB, far inside one 64 KiB window — never crosses it).
+ * ========================================================================== */
+
+/* PIIX3 IDE controller PCI id; BAR4 is the BMIDE I/O-port base. */
+#define PIIX3_IDE_VENDOR 0x8086
+#define PIIX3_IDE_DEVICE 0x7010
+
+/* Per-channel BMIDE register offsets from the channel base. */
+#define BMIDE_CMD    0       /* command  (bit0 start/stop, bit3 direction) */
+#define BMIDE_STATUS 2       /* status   (bit0 active, bit1 err, bit2 IRQ) */
+#define BMIDE_PRDT   4       /* PRDT physical pointer (u32) */
+
+#define BM_CMD_START 0x01    /* bit0: start the bus master engine */
+#define BM_CMD_READ  0x08    /* bit3: direction = device->memory (disk read) */
+
+#define BM_ST_ACTIVE 0x01    /* bit0: transfer in progress */
+#define BM_ST_ERR    0x02    /* bit1: DMA error (write 1 to clear) */
+#define BM_ST_IRQ    0x04    /* bit2: device raised its interrupt (write 1 to clear) */
+
+/* LBA48 read/write-DMA opcodes (we only need READ DMA for the proven path;
+ * WRITE DMA is the stretch goal). The LBA28 variants are 0xC8/0xCA. */
+#define CMD_READ_DMA       0xC8   /* LBA28 READ DMA  */
+#define CMD_READ_DMA_EXT   0x25   /* LBA48 READ DMA EXT */
+#define CMD_WRITE_DMA      0xCA   /* LBA28 WRITE DMA */
+#define CMD_WRITE_DMA_EXT  0x35   /* LBA48 WRITE DMA EXT */
+
+/* One 8-byte PRD entry: a physical region + byte count (0 means 64 KiB) + flags
+ * (bit15 of the flags word = EOT, end of table). */
+struct ata_prd {
+    uint32_t base;     /* physical base of the region */
+    uint16_t count;    /* byte count (0 == 64 KiB) */
+    uint16_t flags;    /* bit15 = EOT */
+} __attribute__((packed));
+
+#define PRD_EOT 0x8000
+
+/* Bounce-buffer cap. One 4 KiB frame = 8 sectors; we use a single page-aligned
+ * frame so a transfer is at most 8 KiB... but a 4 KiB frame is exactly 4 KiB, so
+ * the cap is 8 sectors. We keep it deliberately small (well under the 64 KiB a
+ * single PRD allows) — the selftest only reads a handful of sectors, and a small
+ * fixed bound is the safe choice for a capability that must never misbehave. */
+#define ATA_DMA_BOUNCE_SECTORS (PAGE_SIZE / SECTOR_SIZE)   /* 8 */
+
+/* BMIDE state, discovered once on first use. */
+static struct {
+    int      probed;       /* have we looked for the controller yet? */
+    int      present;      /* 1 if the PIIX3 BMIDE BAR4 was found + set up */
+    uint16_t bmide_base;   /* BAR4 I/O base (low flag bit masked off) */
+
+    struct ata_prd *prdt;  /* PRD table (its own pmm frame) */
+    uint64_t prdt_phys;    /* physical address of the PRD table */
+
+    uint8_t *bounce;       /* page-aligned DMA bounce buffer (pmm frame) */
+    uint64_t bounce_phys;  /* physical address of the bounce buffer */
+} g_bm;
+
+/* Channel base for a drive: primary drives (0,1) at BAR4+0, secondary (2,3) at
+ * BAR4+8. */
+static uint16_t bmide_channel(int drive) {
+    return (uint16_t)(g_bm.bmide_base + ((drive >= 2) ? 8 : 0));
+}
+
+/* Locate + set up the PIIX3 bus-master IDE controller. Idempotent: probes PCI
+ * once, allocates the PRD table + bounce frame, enables PCI bus mastering.
+ * Returns 1 if BMIDE is available, 0 if the controller/BAR is absent or setup
+ * failed (in which case the DMA path is a clean no-op). */
+static int ata_dma_setup(void) {
+    if (g_bm.probed)
+        return g_bm.present;
+    g_bm.probed = 1;
+    g_bm.present = 0;
+
+    pci_device_t dev = pci_find(PIIX3_IDE_VENDOR, PIIX3_IDE_DEVICE);
+    if (!dev.valid)
+        return 0;                       /* no PIIX3 IDE controller present */
+
+    uint32_t bar4 = pci_bar(&dev, 4);   /* pci_bar already masks the I/O flag bit */
+    if (bar4 == 0)
+        return 0;                       /* BMIDE BAR not assigned */
+
+    /* Bus mastering must be enabled for the controller to drive DMA. (This also
+     * sets memory-space enable, which is harmless for an I/O-mapped BMIDE.) */
+    pci_enable_bus_master(&dev);
+
+    /* The PRD table + bounce buffer come from the PMM (identity-mapped low RAM:
+     * phys == virt). A 4 KiB frame is page-aligned (the PRD table is far inside
+     * one 64 KiB window, so it never crosses one) and is the bounce buffer. */
+    uint64_t prdt_f = pmm_alloc_frame();
+    uint64_t bnc_f  = pmm_alloc_frame();
+    if (!prdt_f || !bnc_f) {
+        if (prdt_f) pmm_free_frame(prdt_f);
+        if (bnc_f)  pmm_free_frame(bnc_f);
+        return 0;
+    }
+    memset((void *)(uintptr_t)prdt_f, 0, PAGE_SIZE);
+    memset((void *)(uintptr_t)bnc_f,  0, PAGE_SIZE);
+
+    g_bm.prdt       = (struct ata_prd *)(uintptr_t)prdt_f;
+    g_bm.prdt_phys  = prdt_f;
+    g_bm.bounce     = (uint8_t *)(uintptr_t)bnc_f;
+    g_bm.bounce_phys = bnc_f;
+    g_bm.bmide_base = (uint16_t)bar4;
+    g_bm.present    = 1;
+    return 1;
+}
+
+/* The shared core of DMA read and write. Bounces one transfer (<= the bounce
+ * cap) through the page-aligned bounce frame and runs a READ/WRITE DMA on the
+ * given drive's channel. `write` copies the caller's data into the bounce first
+ * and uses WRITE DMA; a read copies the bounce back into `buf` after completion.
+ * Returns 0 on success, -1 on bad-arg / absent controller / device error /
+ * timeout. The PIO addressing sequence (drive-select + LBA28) is reused so the
+ * only thing that differs from PIO is the command + the data transfer. */
+static int ata_dma_xfer(int drive, uint32_t lba, uint32_t count, void *buf, int write) {
+    /* Validate: drive in range + actually present, count in (0, bounce cap],
+     * buffer non-NULL, controller available. */
+    if (!drive_ok(drive) || count == 0 || !buf)
+        return -1;
+    if (count > ATA_DMA_BOUNCE_SECTORS)
+        return -1;
+    if (!ata_dma_setup())
+        return -1;                      /* no BMIDE: clean no-op capability */
+    const struct ata_drive_info *info = ata_drive(drive);
+    if (!info || !info->present)
+        return -1;                      /* no disk in this slot */
+    /* Refuse access past the end of the disk (the IDENTIFYd capacity). */
+    if ((uint64_t)lba + count > info->sectors)
+        return -1;
+    /* LBA28 addressing only on this path (the selftest reads low sectors); a
+     * larger LBA would need the EXT command + the high LBA bytes. */
+    if ((uint64_t)lba + count > 0x0FFFFFFFull)
+        return -1;
+
+    uint16_t io   = ATA_DRIVES[drive].io;
+    uint8_t  slave = ATA_DRIVES[drive].slave;
+    uint16_t ch   = bmide_channel(drive);
+    uint32_t bytes = count * SECTOR_SIZE;
+
+    if (write)
+        memcpy(g_bm.bounce, buf, bytes);
+
+    /* Build the single PRD: the whole transfer in one region, EOT set. */
+    g_bm.prdt[0].base  = (uint32_t)g_bm.bounce_phys;
+    g_bm.prdt[0].count = (uint16_t)(bytes & 0xFFFF);   /* <= 4096, never 0 here */
+    g_bm.prdt[0].flags = PRD_EOT;
+
+    /* Make sure the bus master is stopped before we reprogram it, then point it
+     * at our PRD table and clear any latched error/IRQ status (write-1-to-clear). */
+    outb(ch + BMIDE_CMD, 0);
+    outl(ch + BMIDE_PRDT, (uint32_t)g_bm.prdt_phys);
+    outb(ch + BMIDE_STATUS, BM_ST_ERR | BM_ST_IRQ);
+
+    /* Set the transfer direction. For a READ the bus master writes memory
+     * (device->memory), so the direction bit is SET; for a WRITE it is clear.
+     * Set direction but leave the start bit (bit0) clear for now. */
+    outb(ch + BMIDE_CMD, write ? 0 : BM_CMD_READ);
+
+    /* Issue the ATA command with the standard PIO addressing sequence (this is
+     * the only place the two paths share — drive-select + LBA28 + sector count). */
+    if (wait_busy_clear(io) < 0)
+        return -1;
+    select_lba(io, slave, lba, (uint8_t)(count & 0xFF));   /* count<=8, never wraps to 0 */
+    outb(io + REG_COMMAND, write ? CMD_WRITE_DMA : CMD_READ_DMA);
+
+    /* Start the bus master: keep the direction bit, set bit0. The controller now
+     * DMAs as the drive streams data. */
+    outb(ch + BMIDE_CMD, (uint8_t)((write ? 0 : BM_CMD_READ) | BM_CMD_START));
+
+    /* Poll the BMIDE status to completion with a finite timeout. The transfer is
+     * done when the controller drops the active bit (and typically raises IRQ).
+     * We watch for the error bit and bail on it; we also bound the spin so an
+     * absent/stuck device can never hang the kernel. */
+    int err = 0;
+    int done = 0;
+    for (int i = 0; i < 10000000; i++) {
+        uint8_t st = inb(ch + BMIDE_STATUS);
+        if (st & BM_ST_ERR) { err = 1; break; }
+        /* Active clears when the data transfer has finished. The IRQ bit being
+         * set with active clear is the unambiguous "complete" signal; active
+         * clear alone is also complete (some controllers don't latch IRQ here). */
+        if (!(st & BM_ST_ACTIVE)) { done = 1; break; }
+    }
+
+    /* Stop the bus master regardless of outcome (clear the start bit). */
+    outb(ch + BMIDE_CMD, write ? 0 : BM_CMD_READ);
+
+    /* Re-read + clear the BMIDE status (ack IRQ / latch error). */
+    uint8_t fin = inb(ch + BMIDE_STATUS);
+    outb(ch + BMIDE_STATUS, BM_ST_ERR | BM_ST_IRQ);
+    if (fin & BM_ST_ERR)
+        err = 1;
+
+    /* Let the drive settle and check its task-file status/error register. */
+    if (wait_busy_clear(io) < 0)
+        return -1;
+    uint8_t ata_st = inb(io + REG_STATUS);
+    if ((ata_st & ST_ERR) || (ata_st & ST_BSY))
+        return -1;
+
+    if (err || !done)
+        return -1;                      /* DMA error or timed out: clean failure */
+
+    if (!write)
+        memcpy(buf, g_bm.bounce, bytes);
+    return 0;
+}
+
+int ata_read_dma(int drive, uint32_t lba, uint32_t count, void *buf) {
+    return ata_dma_xfer(drive, lba, count, buf, 0);
+}
+
+int ata_write_dma(int drive, uint32_t lba, uint32_t count, const void *buf) {
+    return ata_dma_xfer(drive, lba, count, (void *)buf, 1);
+}
+
+int ata_dma_available(void) {
+    return ata_dma_setup();
+}
+
+uint32_t ata_dma_max_sectors(void) {
+    return ATA_DMA_BOUNCE_SECTORS;
+}
+
 /* --- IDENTIFY-based enumeration -------------------------------------------- */
 
 /*
@@ -301,4 +554,106 @@ const struct ata_drive_info *ata_drive(int drive) {
 uint64_t ata_drive_sectors(int drive) {
     const struct ata_drive_info *info = ata_drive(drive);
     return (info && info->present) ? info->sectors : 0;
+}
+
+/* ---- boot-time verification: DMA read returns identical bytes to PIO ------ */
+
+/* Two static sector buffers (kernel BSS) to land the DMA read and the PIO read
+ * for the byte-for-byte comparison. The DMA path uses its own internal bounce
+ * frame, so these need no special alignment. */
+static uint8_t dma_buf[SECTOR_SIZE];
+static uint8_t pio_buf[SECTOR_SIZE];
+static uint8_t dma_saved[SECTOR_SIZE];
+static uint8_t dma_scratch[SECTOR_SIZE];
+static uint8_t dma_readback[SECTOR_SIZE];
+
+/*
+ * The proof that the bus-master DMA path returns the SAME data as the trusted
+ * PIO path: for a few low sectors of the boot disk (drive 0, which sits on the
+ * PIIX3 IDE controller and is therefore bus-master capable), DMA-read the sector
+ * and PIO-read the same sector, then memcmp the two. Logs "IDE DMA: sector N
+ * DMA==PIO OK" on a match (or a MISMATCH line). Then a DMA write round-trip on a
+ * scratch sector near the end of the disk: save it (PIO), DMA-write a marker,
+ * DMA-read it back + verify, PIO-read it back + verify, and restore the original
+ * (PIO) so the test image is untouched.
+ *
+ * A clean no-op (logs "DMA unavailable") if no PIIX3 BMIDE controller is present
+ * — boot is entirely unaffected (the boot path uses PIO regardless).
+ */
+void ata_dma_selftest(void) {
+    if (!ata_dma_available()) {
+        kprintf("[ata-dma] IDE DMA unavailable (no PIIX3 bus-master IDE "
+                "controller; PIO boot path intact).\n\n");
+        return;
+    }
+
+    const struct ata_drive_info *info = ata_drive(0);
+    if (!info || !info->present) {
+        kprintf("[ata-dma] IDE DMA unavailable (drive 0 absent; PIO boot path "
+                "intact).\n\n");
+        return;
+    }
+
+    kprintf("[ ok ] IDE bus-master DMA up: PIIX3 BMIDE found "
+            "(BAR4 I/O base 0x%x, %u-sector bounce) (boot stays on PIO).\n",
+            (unsigned)g_bm.bmide_base, (unsigned)ata_dma_max_sectors());
+
+    /* Per-sector DMA==PIO byte comparison on the first few sectors. */
+    int compared = 0, matched = 0;
+    uint32_t nsec = 3;
+    if (info->sectors < nsec) nsec = (uint32_t)info->sectors;
+    for (uint32_t lba = 0; lba < nsec; lba++) {
+        int dma_ok = (ata_read_dma(0, lba, 1, dma_buf) == 0);
+        int pio_ok = (ata_read_drive(0, lba, 1, pio_buf) == 0);
+        if (!dma_ok || !pio_ok) {
+            kprintf("[ata-dma] sector %u: %s read FAILED\n", lba,
+                    !dma_ok ? "DMA" : "PIO");
+            continue;
+        }
+        compared++;
+        if (memcmp(dma_buf, pio_buf, SECTOR_SIZE) == 0) {
+            matched++;
+            /* Show a checksum + the first 16 bytes so the read can also be eyeballed
+             * against known on-disk content (mirrors the other drivers' logs). */
+            uint32_t sum = 0;
+            for (int i = 0; i < SECTOR_SIZE; i++) sum += dma_buf[i];
+            kprintf("[ata-dma] IDE DMA: sector %u DMA==PIO OK (sum=%08x first16=",
+                    lba, sum);
+            for (int i = 0; i < 16; i++) kprintf("%02x ", dma_buf[i]);
+            kprintf(")\n");
+        } else {
+            kprintf("[ata-dma] IDE DMA: sector %u DMA!=PIO MISMATCH\n", lba);
+        }
+    }
+
+    /* DMA write round-trip on a scratch sector near the end of the disk (so the
+     * boot FAT32 region up front is never touched). Save it via PIO, DMA-write a
+     * marker, read it back (DMA and PIO) + verify, restore via PIO. Done only if
+     * the disk has room. A failure here is reported but never fatal to boot. */
+    if (info->sectors >= 8) {
+        uint32_t test_lba = (uint32_t)(info->sectors - 1);
+        if (ata_read_drive(0, test_lba, 1, dma_saved) == 0) {
+            for (int i = 0; i < SECTOR_SIZE; i++)
+                dma_scratch[i] = (uint8_t)(0xA5 ^ (i & 0xFF));
+            int ok = (ata_write_dma(0, test_lba, 1, dma_scratch) == 0);
+            memset(dma_readback, 0, sizeof(dma_readback));
+            ok = ok && (ata_read_dma(0, test_lba, 1, dma_readback) == 0);
+            ok = ok && (memcmp(dma_readback, dma_scratch, SECTOR_SIZE) == 0);
+            /* Cross-check the DMA write with a PIO read of the same sector. */
+            memset(pio_buf, 0, sizeof(pio_buf));
+            ok = ok && (ata_read_drive(0, test_lba, 1, pio_buf) == 0);
+            ok = ok && (memcmp(pio_buf, dma_scratch, SECTOR_SIZE) == 0);
+            ata_write_drive(0, test_lba, 1, dma_saved);   /* restore (PIO) */
+            kprintf("[ata-dma] IDE DMA write round-trip on sector %u: %s\n",
+                    test_lba,
+                    ok ? "DMA==PIO OK (wrote+read back+restored)" : "MISMATCH");
+        }
+    }
+
+    if (compared > 0 && compared == matched)
+        kprintf("[ ok ] IDE DMA self-test complete: %d/%d sectors DMA==PIO "
+                "(DMA path proven identical to PIO).\n\n", matched, compared);
+    else
+        kprintf("[ata-dma] IDE DMA self-test: %d/%d sectors matched "
+                "(see above).\n\n", matched, compared);
 }
