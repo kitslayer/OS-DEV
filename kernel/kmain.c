@@ -21,6 +21,7 @@
 #include "pci.h"
 #include "ahci.h"
 #include "virtio_blk.h"
+#include "virtio_net.h"
 #include "net.h"
 #include "fbcon.h"
 #include "mouse.h"
@@ -135,6 +136,13 @@ void kmain(uint64_t mb_info) {
     audio_init();     /* bring up audio: HDA if present, else AC'97 (no-op if neither) */
     kprintf("[ ok ] audio output: %s\n", audio_name());
     hda_selftest();   /* if HDA is active: prove the stream DMA advances (no-op otherwise) */
+
+    /* Bring up virtio-net (the paravirtual NIC) and log its MAC if present — a
+     * no-op if no virtio network device is attached. net_demo()'s nic_init()
+     * binds whichever NIC is present (e1000, then rtl8139, then this); the call
+     * here is idempotent and just surfaces the MAC before the stack demo runs. */
+    virtio_net_init();
+    virtio_net_selftest();
 
     net_demo();
 

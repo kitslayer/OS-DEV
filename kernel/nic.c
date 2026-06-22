@@ -12,11 +12,13 @@
  * Priority when several cards are present: e1000 first. It's the richer gigabit
  * part, it's what the headless test suite boots with, and preferring it keeps
  * the default path byte-identical to before this dispatcher existed. With only
- * an RTL8139 on the bus, the whole stack runs over the RTL8139 instead.
+ * an RTL8139 on the bus, the whole stack runs over the RTL8139; with only a
+ * virtio-net device, it runs over virtio-net (the paravirtual NIC).
  */
 #include "nic.h"
 #include "e1000.h"
 #include "rtl8139.h"
+#include "virtio_net.h"
 
 /* The bound driver: each field points at the active card's implementation. NULL
  * driver => nic_init() found no supported card (every call no-ops safely). */
@@ -40,6 +42,14 @@ int nic_init(void) {
         drv_send    = rtl8139_send;
         drv_receive = rtl8139_receive;
         drv_name    = "rtl8139";
+        return 0;
+    }
+    /* Otherwise the paravirtual virtio-net NIC, if present. */
+    if (virtio_net_init() == 0) {
+        drv_mac     = virtio_net_get_mac;
+        drv_send    = virtio_net_send;
+        drv_receive = virtio_net_poll_receive;
+        drv_name    = "virtio-net";
         return 0;
     }
     return -1;                /* no supported NIC on the bus */
