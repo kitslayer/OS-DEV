@@ -157,6 +157,16 @@ int main(void)
     long n = sys_readfile(rom_names[idx], g_rom, sizeof(g_rom));
     if (n <= 0) { print("nes: cannot read the ROM from disk\n"); return 1; }
 
+    /* Validate the iNES header's declared PRG/CHR sizes against what we actually read:
+     * the core (xnes_cartridge_alloc) memcpy's prg_rom/chr_rom by these header fields
+     * WITHOUT checking them against the buffer length, so a truncated/forged .nes that
+     * claims more PRG/CHR than the file holds would read past g_rom. Reject it here. */
+    if (n < 16 || g_rom[0] != 'N' || g_rom[1] != 'E' || g_rom[2] != 'S' || g_rom[3] != 0x1A) {
+        print("nes: not a valid iNES ROM\n"); return 1;
+    }
+    long need = 16 + ((g_rom[6] & 0x04) ? 512 : 0) + (long)g_rom[4] * 16384 + (long)g_rom[5] * 8192;
+    if (need > n) { print("nes: truncated/invalid iNES ROM (header overruns the file)\n"); return 1; }
+
     struct xnes_ctx_t *ctx = xnes_ctx_alloc(g_rom, (size_t)n);
     if (!ctx) { print("nes: not a valid iNES ROM (or unsupported mapper)\n"); return 1; }
     xnes_set_audio(ctx, 0, audio_sink, 48000);

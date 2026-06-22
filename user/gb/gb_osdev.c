@@ -30,14 +30,19 @@ extern void          print(const char *s);
 struct priv { uint8_t *rom; uint8_t *ram; };
 
 static uint8_t  g_rom[1024 * 1024];   /* GB ROM (libbet is 32 KB; most homebrew is well under 1 MB) */
-static uint8_t  g_ram[32 * 1024];     /* cartridge RAM (max for an MBC) */
+static uint8_t  g_ram[128 * 1024];    /* cartridge RAM: the real MBC max is 128 KB (16 x 8 KB banks, RAM-size code 0x04); a 32 KB buffer OOB-wrote up to 96 KB on any 64/128 KB-SRAM commercial cart */
 static uint32_t g_fb[GB_W * GB_H];
 /* the classic DMG green, shades 0 (lightest) .. 3 (darkest) */
 static const uint32_t g_pal[4] = { 0x9bbc0f, 0x8bac0f, 0x306230, 0x0f380f };
 
-static uint8_t cb_rom(struct gb_s *gb, const uint_fast32_t a) { return ((struct priv *)gb->direct.priv)->rom[a]; }
-static uint8_t cb_ram_r(struct gb_s *gb, const uint_fast32_t a) { return ((struct priv *)gb->direct.priv)->ram[a]; }
-static void    cb_ram_w(struct gb_s *gb, const uint_fast32_t a, const uint8_t v) { ((struct priv *)gb->direct.priv)->ram[a] = v; }
+/* Bound every cart access to its backing buffer. Peanut-GB banks ROM reads (up to
+ * ~8 MB) and RAM reads/writes (up to 128 KB) by the cartridge's HEADER-declared bank
+ * counts, so a large/malformed ROM must never index past g_rom/g_ram: OOB reads
+ * return open-bus 0xFF, OOB writes are dropped. g_ram now holds the 128 KB max so
+ * valid carts fit; g_rom caps at 1 MB so a bigger ROM runs truncated, not OOB. */
+static uint8_t cb_rom(struct gb_s *gb, const uint_fast32_t a) { return a < sizeof(g_rom) ? ((struct priv *)gb->direct.priv)->rom[a] : 0xFF; }
+static uint8_t cb_ram_r(struct gb_s *gb, const uint_fast32_t a) { return a < sizeof(g_ram) ? ((struct priv *)gb->direct.priv)->ram[a] : 0xFF; }
+static void    cb_ram_w(struct gb_s *gb, const uint_fast32_t a, const uint8_t v) { if (a < sizeof(g_ram)) ((struct priv *)gb->direct.priv)->ram[a] = v; }
 static void    cb_err(struct gb_s *gb, const enum gb_error_e e, const uint16_t a) { (void)gb; (void)e; (void)a; }
 
 static void draw_line(struct gb_s *gb, const uint8_t pixels[160], const uint_fast8_t line) {
