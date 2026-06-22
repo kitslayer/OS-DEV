@@ -244,6 +244,26 @@ int vmm_user_ok(uint64_t ptr, uint64_t len) {
     return 1;
 }
 
+/*
+ * Is the NUL-terminated string at `ptr` entirely within the current space's
+ * user pages, up to and including its terminator? Validates each page (via
+ * vmm_user_ok) before reading any byte of it, so the scan itself can't fault
+ * or run into kernel memory. Scans at most `max` bytes — a string with no NUL
+ * in range, or one that crosses into a non-user page, is rejected (returns 0).
+ * For syscall string arguments (filenames, hostnames) whose length isn't known
+ * up front.
+ */
+int vmm_user_str_ok(uint64_t ptr, uint64_t max) {
+    uint64_t scanned = 0;
+    while (scanned < max) {
+        uint64_t page = (ptr + scanned) & ~(uint64_t)(PAGE_SIZE - 1);
+        if (!vmm_user_ok(page, PAGE_SIZE)) return 0;       /* page not user-accessible */
+        for (uint64_t a = ptr + scanned; a < page + PAGE_SIZE && scanned < max; a++, scanned++)
+            if (*(const char *)a == 0) return 1;           /* terminator reached, every byte was user */
+    }
+    return 0;   /* no terminator within `max`: reject rather than read unbounded */
+}
+
 /* Build the higher-half direct map: map all physical RAM at HHDM_BASE using
  * cheap 2 MiB pages, so the kernel can touch any frame via hhdm(phys). */
 void vmm_init(void) {

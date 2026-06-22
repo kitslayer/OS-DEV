@@ -43,6 +43,13 @@
  * number of bytes the handler will access through the pointer. */
 static int ubuf(uint64_t p, uint64_t n) { return vmm_user_ok(p, n); }
 
+/* Validate a user-supplied NUL-terminated string argument (filename, hostname,
+ * URL, script): every byte up to the terminator must be in the app's own user
+ * pages. Bounds the scan generously (16 MiB) — longer than any real arg, but
+ * larger than a page-table walk needs to reject a non-terminated/forged string.
+ * A handler that reads a string from the arg checks this before dereferencing. */
+static int ustr(uint64_t p) { return vmm_user_str_ok(p, 16u << 20); }
+
 /* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
  * (basename, upper-cased, <=8 chars + '.' + <=3-char ext) and writes it via the
  * VFS, counting successes in ctx. */
@@ -166,7 +173,7 @@ void syscall_dispatch(struct registers *r) {
         const char *name = (const char *)r->rdi;
         void       *buf  = (void *)r->rsi;
         uint64_t    max  = r->rdx;
-        if (!ubuf((uint64_t)buf, max)) { r->rax = (uint64_t)-1; break; }
+        if (!ustr(r->rdi) || !ubuf((uint64_t)buf, max)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)vfs_read(name, buf, max);
         break;
     }
@@ -222,15 +229,17 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)app_getarg((char *)r->rdi, (int)r->rsi);
         break;
     case SYS_writefile:
-        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        if (!ustr(r->rdi) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)vfs_write((const char *)r->rdi, (const void *)r->rsi, r->rdx);
         break;
     case SYS_delete:
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)vfs_remove((const char *)r->rdi);
         break;
     case SYS_spawn: {
         const char *nm = (const char *)r->rdi;
         const char *arg = (const char *)r->rsi;    /* optional launch arg (e.g. a filename for the editor) */
+        if (!ustr(r->rdi) || (arg && !ustr(r->rsi))) { r->rax = (uint64_t)-1; break; }
         int rc = (arg && arg[0]) ? app_spawn_named_arg(nm, arg) : app_spawn_named(nm);  /* a built-in program? */
         if (rc < 0) rc = app_spawn_from_file(nm);  /* else try loading it from disk */
         r->rax = (uint64_t)(int64_t)rc;
@@ -245,6 +254,7 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)net_ping_gateway();
         break;
     case SYS_pinghost:
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         __asm__ volatile("sti");           /* DNS + ICMP both need the timer running */
         r->rax = (uint64_t)(int64_t)net_ping_host((const char *)r->rdi);
         break;
@@ -282,14 +292,14 @@ void syscall_dispatch(struct registers *r) {
         break;
     }
     case SYS_http:
-        if (!ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }   /* response buffer */
+        if (!ustr(r->rdi) || !ustr(r->rsi) || !ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }  /* host, path, response buf */
         __asm__ volatile("sti");           /* TCP needs the timer running */
         r->rax = (uint64_t)(int64_t)http_get((const char *)r->rdi,
                                              (const char *)r->rsi,
                                              (char *)r->rdx, (int)r->r10);
         break;
     case SYS_https:
-        if (!ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }   /* response buffer */
+        if (!ustr(r->rdi) || !ustr(r->rsi) || !ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }  /* host, path, response buf */
         __asm__ volatile("sti");           /* TLS/TCP need the timer running */
         r->rax = (uint64_t)(int64_t)tls_get((const char *)r->rdi,
                                             (const char *)r->rsi,
@@ -297,19 +307,22 @@ void syscall_dispatch(struct registers *r) {
                                             (uint32_t)timer_ticks());
         break;
     case SYS_browse:
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         app_browse((const char *)r->rdi);  /* WM opens the browser window */
         r->rax = 0;
         break;
     case SYS_js:
-        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }   /* result buffer */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }  /* script src + result buffer */
         __asm__ volatile("sti");           /* keep the timer live during long scripts */
         r->rax = (uint64_t)(int64_t)js_run((const char *)r->rdi,
                                            (char *)r->rsi, (int)r->rdx);
         break;
     case SYS_mkdir:
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_mkdir((const char *)r->rdi);
         break;
     case SYS_chdir:
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_chdir((const char *)r->rdi);
         break;
     case SYS_tree:
@@ -320,13 +333,13 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)app_sys_pollkey();
         break;
     case SYS_find:
-        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }   /* result buffer (rdi search term left to phase 2) */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }  /* search term + result buffer */
         r->rax = (uint64_t)(int64_t)vfs_find((const char *)r->rdi,
                                              (char *)r->rsi, (int)r->rdx);
         break;
     case SYS_sha256: {
         if ((int)r->rdx < 65) { r->rax = (uint64_t)-1; break; }   /* need room for 64 hex + NUL */
-        if (!ubuf(r->rsi, 65)) { r->rax = (uint64_t)-1; break; }  /* hex output buffer */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, 65)) { r->rax = (uint64_t)-1; break; }  /* filename + hex output */
         uint8_t *fbuf; long fn = read_whole_file((const char *)r->rdi, &fbuf);   /* whole file, not a 16KB prefix */
         if (fn < 0) { r->rax = (uint64_t)-1; break; }
         uint8_t dg[32]; sha256(fbuf, (size_t)fn, dg); kfree(fbuf);
@@ -337,7 +350,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_sha512: {
         if ((int)r->rdx < 129) { r->rax = (uint64_t)-1; break; }   /* need room for 128 hex + NUL */
-        if (!ubuf(r->rsi, 129)) { r->rax = (uint64_t)-1; break; }  /* hex output buffer */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, 129)) { r->rax = (uint64_t)-1; break; }  /* filename + hex output */
         uint8_t *fbuf; long fn = read_whole_file((const char *)r->rdi, &fbuf);   /* whole file, not a 16KB prefix */
         if (fn < 0) { r->rax = (uint64_t)-1; break; }
         uint8_t dg[64]; sha512(fbuf, (size_t)fn, dg); kfree(fbuf);
@@ -348,6 +361,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_screenshot: {
         const char *sn = (const char *)r->rdi;          /* a ".png" name -> PNG, else BMP */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         int L = 0; while (sn[L]) L++;
         int png = (L >= 4 && sn[L-4]=='.' && (sn[L-3]|32)=='p' && (sn[L-2]|32)=='n' && (sn[L-1]|32)=='g');
         r->rax = (uint64_t)(int64_t)(png ? fb_save_png(sn) : fb_save_bmp(sn));
@@ -355,6 +369,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_gunzip: {
         const char *insrc = (const char *)r->rdi, *outname = (const char *)r->rsi;
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         uint8_t *in = 0; long gn = read_whole_file(insrc, &in);   /* whole .gz, not a 256KB prefix */
         if (gn < 0) { r->rax = (uint64_t)-1; break; }
         if (gn < 18) { kfree(in); r->rax = (uint64_t)-1; break; }   /* too short to be gzip */
@@ -372,6 +387,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_gzip: {
         const char *insrc = (const char *)r->rdi, *outname = (const char *)r->rsi;
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         uint8_t *in = 0; long gn = read_whole_file(insrc, &in);   /* whole input, not a 256KB prefix */
         if (gn < 0) { r->rax = (uint64_t)-1; break; }
         size_t ocap = (size_t)gn + (size_t)gn / 2 + 1024;   /* >= fixed-Huffman worst case (~input*9/8) */
@@ -384,6 +400,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_unzip: {
         const char *zn = (const char *)r->rdi;
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         uint8_t *zbuf; long zl = read_whole_file(zn, &zbuf);   /* the whole .zip (was a fixed 1MB read) */
         uint8_t *scr = (zl >= 0) ? kmalloc(1048576) : 0;       /* one decompressed entry at a time (<= 1 MB) */
         if (zl < 0 || !scr) { if (zl >= 0) kfree(zbuf); if (scr) kfree(scr); r->rax = (uint64_t)-1; break; }
@@ -395,6 +412,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_untar: {
         const char *tn = (const char *)r->rdi;
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         uint8_t *buf; long fl = read_whole_file(tn, &buf);   /* the whole .tar/.tar.gz (was a fixed 1MB read) */
         if (fl <= 0) { if (fl == 0) kfree(buf); r->rax = (uint64_t)-1; break; }
         struct unzip_ctx uc = { 0 };
@@ -414,6 +432,7 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_crypt: {
         const char *name = (const char *)r->rdi, *pass = (const char *)r->rsi;
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         uint8_t *cbuf; long cn = read_whole_file(name, &cbuf);   /* whole file (was capped at 16KB) */
         if (cn < 0) { r->rax = (uint64_t)-1; break; }            /* missing / >=32MB / OOM */
         uint8_t kd[32]; sha256((const uint8_t *)pass, strlen(pass), kd);  /* key||nonce */
@@ -466,7 +485,7 @@ void syscall_dispatch(struct registers *r) {
         char *buf = (char *)r->rsi; int max = (int)r->rdx;
         uint8_t ip[4];
         if (max <= 0) { r->rax = (uint64_t)-1; break; }
-        if (!ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
+        if (!ustr(r->rdi) || !ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }  /* host + result buf */
         if (dns_resolve(host, ip) == 0) {
             int n = 0;
             for (int i = 0; i < 4; i++) {
@@ -503,10 +522,12 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)app_sys_getkbevent();
         break;
     case SYS_pcm:
+        if ((int)r->rsi > 0 && !ubuf(r->rdi, (uint64_t)(int)r->rsi * 4)) { r->rax = (uint64_t)-1; break; }  /* nframes stereo 16-bit = 4 B each */
         __asm__ volatile("sti");           /* ac97_play blocks on the timer */
         ac97_play((const int16_t *)r->rdi, (int)r->rsi);
         break;
     case SYS_pcm_stream:
+        if ((int)r->rsi > 0 && !ubuf(r->rdi, (uint64_t)(int)r->rsi * 4)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)ac97_stream_write((const int16_t *)r->rdi, (int)r->rsi);
         break;
     case SYS_pcm_avail:
@@ -519,6 +540,7 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)app_get_mouse_rel();
         break;
     case SYS_playbg: {
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         __asm__ volatile("sti");                  /* the file read can be slow; stay preemptible */
         uint8_t *wb = kmalloc(8 * 1024 * 1024);
         long n = wb ? vfs_read((const char *)r->rdi, wb, 8 * 1024 * 1024) : -1;
@@ -531,6 +553,7 @@ void syscall_dispatch(struct registers *r) {
         ac97_stop_bg();
         break;
     case SYS_playwav: {
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         __asm__ volatile("sti");
         uint8_t *wb = kmalloc(8 * 1024 * 1024);   /* the .wav file (<= 8 MB) */
         long n = wb ? vfs_read((const char *)r->rdi, wb, 8 * 1024 * 1024) : -1;

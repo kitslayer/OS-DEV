@@ -658,11 +658,14 @@ int app_gfx_init(int w, int h) {
 
 /* Copy the caller's w*h pixel buffer into the canvas and mark the window dirty.
  * The source lives in the app's address space (CR3 is the app's during the
- * syscall); the destination is exactly gfx_w*gfx_h*4, so the kernel can't be
- * overrun — an undersized/bad user pointer faults only the app. 0, or -1. */
+ * syscall) and is validated to be the app's own user pages before the read —
+ * otherwise a forged kernel pointer would have the kernel copy its own memory
+ * into the canvas and paint it on screen. The destination is exactly
+ * gfx_w*gfx_h*4 (kernel-allocated), so it can't be overrun. 0, or -1. */
 int app_gfx_blit(const uint32_t *pixels) {
     struct app *a = cur();
     if (!a || !a->gfx) return -1;
+    if (!vmm_user_ok((uint64_t)pixels, (uint64_t)a->gfx_w * (uint64_t)a->gfx_h * 4)) return -1;
     memcpy(a->gfx, pixels, (size_t)a->gfx_w * (size_t)a->gfx_h * 4);
     a->gdirty = 1;
     return 0;
