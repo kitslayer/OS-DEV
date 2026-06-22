@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -341,6 +341,18 @@ parttest: $(KERNEL) $(DISK)
 virtiogputest: $(KERNEL) $(DISK)
 	@tests/run-virtio-gpu-tests.sh
 
+# Headless in-guest assertion for the VMware SVGA-II driver (kernel/svga.c):
+# attaches a VMware SVGA-II device (-device vmware-svga) ALONGSIDE the std-VGA
+# display, boots, and asserts the driver confirmed SVGA_ID_2 over the I/O-port
+# index/value register file, read the linear framebuffer (BAR1) + command FIFO
+# (BAR2) addresses+sizes, set a mode, wrote a colour-band test pattern to the
+# framebuffer, emitted an SVGA_CMD_UPDATE into the FIFO + synced, and read the
+# registers back OK with no fault -- while the std-VGA boot display path
+# (gfxtest) stays unaffected. SKIPs cleanly if QEMU (or the vmware-svga device)
+# is absent. NOTE: distinct from `svgtest` (the SVG image rasterizer fuzz test).
+svgatest: $(KERNEL) $(DISK)
+	@tests/run-svga-tests.sh
+
 # Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
 # instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
@@ -518,8 +530,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + virtiogputest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest virtiogputest svgatest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + virtiogputest + svgatest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

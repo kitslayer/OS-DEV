@@ -25,6 +25,7 @@
 #include "nvme.h"
 #include "virtio_net.h"
 #include "virtio_gpu.h"
+#include "svga.h"
 #include "net.h"
 #include "fbcon.h"
 #include "mouse.h"
@@ -204,6 +205,17 @@ void kmain(uint64_t mb_info) {
      * asserts every command returned OK — the headless proof, like hda_selftest. */
     virtio_gpu_init();
     virtio_gpu_selftest();
+
+    /* Bring up VMware SVGA-II (PCI 0x15AD:0x0405) as YET ANOTHER additional
+     * display device — the boot display stays on the linear framebuffer
+     * (fb.c/bochs_vbe.c) above. No-op if no vmware-svga is attached. Driven
+     * through an I/O-port index/value register file + a linear framebuffer
+     * (BAR1) + a command FIFO (BAR2). The self-test confirms SVGA_ID_2, sets a
+     * mode, writes a colour-band test pattern to the framebuffer, emits an
+     * SVGA_CMD_UPDATE into the FIFO + syncs, and reads registers back to
+     * confirm — the headless proof, like virtio_gpu_selftest. */
+    svga_init();
+    svga_selftest();
 
     /* Prefer the USB tablet (absolute pointer, tracks the host 1:1); fall back
      * to the relative PS/2 mouse if there's no tablet. */
