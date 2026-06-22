@@ -89,6 +89,8 @@ static const struct menu_item menu[] = {
     { "Simon", KIND_APP, "simon" }, { "Connect 4", KIND_APP, "c4" },
     { "Wordle", KIND_APP, "wordle" },
     { "Graphics Demo", KIND_APP, "gfxdemo" },
+    { "3D Engine", KIND_APP, "scene3d" },
+    { "Demoscene", KIND_APP, "demoscene" },
     { "DOOM", KIND_APP, "doom" },
     { "Quake", KIND_APP, "quake" },
     { "NES", KIND_APP, "nes" },
