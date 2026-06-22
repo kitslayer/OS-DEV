@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -307,6 +307,16 @@ virtionettest: $(KERNEL) $(DISK)
 virtioblktest: $(KERNEL) $(DISK)
 	@tests/run-virtio-blk-tests.sh
 
+# Headless in-guest assertion for the NVMe driver (kernel/nvme.c): attaches a
+# SECOND disk over NVMe (-device nvme + -drive ...,if=none), boots, and asserts
+# the driver brought the controller up, IDENTIFYd namespace 1, read that disk's
+# KNOWN per-sector content back (host-computed checksums + marker), and the write
+# round-trip. The boot disk stays on legacy ATA. SKIPs cleanly if QEMU/python3
+# absent. (Companion to `boottest`, which has no NVMe disk -> the driver cleanly
+# no-ops there.)
+nvmetest: $(KERNEL) $(DISK)
+	@tests/run-nvme-tests.sh
+
 # Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
 # instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
@@ -484,8 +494,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

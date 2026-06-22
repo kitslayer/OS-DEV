@@ -21,6 +21,7 @@
 #include "pci.h"
 #include "ahci.h"
 #include "virtio_blk.h"
+#include "nvme.h"
 #include "virtio_net.h"
 #include "net.h"
 #include "fbcon.h"
@@ -176,6 +177,13 @@ void kmain(uint64_t mb_info) {
      * write round-trip) and logs their bytes. */
     virtio_blk_init();
     virtio_blk_selftest();
+
+    /* Bring up NVMe (modern PCIe storage) as YET ANOTHER additional storage
+     * driver — boot still uses legacy ATA above. No-op if no NVMe controller is
+     * attached. The self-test identifies namespace 1, reads real sectors off it
+     * (and does a write round-trip) and logs their bytes/checksum. */
+    nvme_init();
+    nvme_selftest();
 
     /* Prefer the USB tablet (absolute pointer, tracks the host 1:1); fall back
      * to the relative PS/2 mouse if there's no tablet. */
