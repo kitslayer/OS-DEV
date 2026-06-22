@@ -383,7 +383,8 @@ void syscall_dispatch(struct registers *r) {
         uint8_t *out = kmalloc(isize);
         long dl = out ? gz_inflate(in, (int)gn, out, (int)isize) : -1;
         if (dl > 0 && vfs_write(outname, out, (unsigned long)dl) < 0) dl = -1;
-        if (out) kfree(out); kfree(in);
+        if (out) kfree(out);
+        kfree(in);                          /* `in` is always allocated here: free unconditionally */
         r->rax = (uint64_t)(int64_t)dl;
         break;
     }
@@ -396,7 +397,8 @@ void syscall_dispatch(struct registers *r) {
         uint8_t *out = kmalloc(ocap);
         long dl = out ? gz_deflate(in, (int)gn, out, (int)ocap) : -1;   /* empty input is a valid gzip */
         if (dl > 0 && vfs_write(outname, out, (unsigned long)dl) < 0) dl = -1;
-        if (out) kfree(out); kfree(in);
+        if (out) kfree(out);
+        kfree(in);                          /* `in` is always allocated here: free unconditionally */
         r->rax = (uint64_t)(int64_t)dl;
         break;
     }

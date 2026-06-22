@@ -29,7 +29,10 @@ static void reset(void) {
 
 static int box_edges(int br, int bc) {      /* drawn sides of box (br,bc) */
     int r = 2*br + 1, c = 2*bc + 1, n = 0;
-    if (g[r-1][c]) n++; if (g[r+1][c]) n++; if (g[r][c-1]) n++; if (g[r][c+1]) n++;
+    if (g[r-1][c]) n++;
+    if (g[r+1][c]) n++;
+    if (g[r][c-1]) n++;
+    if (g[r][c+1]) n++;
     return n;
 }
 static int is_side(int er, int ec, int br, int bc) {
