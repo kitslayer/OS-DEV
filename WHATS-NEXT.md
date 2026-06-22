@@ -1,5 +1,17 @@
 # What's next
 
+> **(M939) Tests — extract brace expansion to `shbrace.h` + a 36th `make check` suite (ASan/UBSan fuzz).**
+> M937's brace expansion was only covered in-guest; the project host-fuzzes every pure shell parser
+> (shgrep/shmath/shsplit/normpath), so the new code should match. Lifted the seven functions verbatim into
+> `user/shbrace.h` (header-guarded), `#include`d from `shell.c` in place of the inline block (byte-identical
+> behaviour — re-verified in-guest: `{1..4}`, `file{a,b}.c`, `{1,2}{x,y}` all unchanged). Added
+> `tests/shbrace/shbrace_test.c`: ~25 regression cases (lists, ranges, step, char ranges, cartesian, nesting,
+> empty items, and the left-untouched safety cases — `${VAR}`, function bodies, `{}`, unbalanced) plus a
+> 2,000,000-iteration fuzz over brace-heavy random input asserting no crash / OOB / hang and that re-expanding
+> the output is a no-op (terminates). Building it under ASan+UBSan caught a wrong test expectation (the
+> word-preamble correctly attaches to every range item: `list={1..3}` → `list=1 list=2 list=3`), confirming
+> the implementation. Wired `shbracetest` into `make check` (now **36 suites**, all green).
+
 > **(M938) Editor — Tab/Shift-Tab block indent & dedent.** The last core code-editing operation: with a
 > multi-line selection, Tab indents every selected line by 4 spaces and Shift-Tab dedents them (removing a
 > leading tab or up to 4 spaces); with no selection Shift-Tab dedents the current line, and plain Tab keeps its
