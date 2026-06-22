@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -426,6 +426,23 @@ usbkbdtest: $(KERNEL) $(DISK)
 ehcitest: $(KERNEL) $(DISK)
 	@tests/run-ehci-tests.sh
 
+# Headless in-guest assertion for the xHCI (USB 3.0) host-controller driver
+# (kernel/xhci.c): attaches an xHCI controller (-device qemu-xhci) WITH a usb-storage
+# flash disk on ITS bus (-device usb-storage,bus=xhci.0) — a SEPARATE, additional
+# USB host alongside the existing UHCI controller + tablet AND the EHCI controller —
+# boots, and asserts the driver brought the USB 3.0 controller up (PCI class 0C/03/30
+# probe + HC reset + command/event TRB rings running), that the rings work end to end
+# (ENABLE SLOT returned a slot id), reset+detected a root port, ENUMERATED the device
+# over xHCI control transfers (ENABLE SLOT + ADDRESS DEVICE, device/config descriptors
+# read over the EP0 TRB ring, SET_CONFIGURATION), and — the stretch bulk path — read
+# SECTOR 0 over xHCI bulk (BOT/SCSI READ(10)) returning that disk's KNOWN content
+# (host-computed checksum + marker). The UHCI tablet + EHCI stay up and boot stays on
+# legacy ATA. SKIPs cleanly if QEMU/python3 absent (or the qemu-xhci device is missing).
+# (Companion to `boottest`, which has no xHCI controller -> the driver must cleanly
+# no-op there and UHCI + EHCI + the tablet stay up.)
+xhcitest: $(KERNEL) $(DISK)
+	@tests/run-xhci-tests.sh
+
 # Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
 # instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
@@ -603,8 +620,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + floppytest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + floppytest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

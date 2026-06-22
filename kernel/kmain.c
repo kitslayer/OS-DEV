@@ -35,6 +35,7 @@
 #include "usb_storage.h"
 #include "usb_kbd.h"
 #include "ehci.h"
+#include "xhci.h"
 #include "speaker.h"
 #include "audio.h"
 #include "hda.h"
@@ -278,6 +279,19 @@ void kmain(uint64_t mb_info) {
      * class) read over EHCI — the headless proof, like the storage self-tests. */
     ehci_init();
     ehci_selftest();
+
+    /* Bring up an xHCI (USB 3.0) host controller as an ADDITIONAL USB host — the
+     * UHCI + EHCI controllers above (with their tablet / mass-storage / keyboard)
+     * are untouched. No-op if no xHCI controller is attached. xhci_init() resets
+     * the HC, sets up the device-context base-address array + command ring + event
+     * ring, runs the controller, resets the first populated root port, ENABLE SLOT
+     * + ADDRESS DEVICE for the device behind it, and ENUMERATES it over EP0 control
+     * transfers (TRB rings); the self-test logs the HC version + slot/port counts,
+     * the ENABLE SLOT slot id, the port reset, and the enumerated device descriptor
+     * (idVendor/idProduct/class) read over xHCI — the headless proof, like the
+     * EHCI/storage self-tests. Completes the USB host-controller trilogy. */
+    xhci_init();
+    xhci_selftest();
 
     kprintf("[main] launching the desktop environment...\n");
     speaker_chime();              /* a little startup arpeggio */
