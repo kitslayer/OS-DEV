@@ -191,7 +191,9 @@ void print(const char *s) {
 }
 
 int readline(char *buf, int max) {
+    if (max <= 0) return 0;            /* no room even for a terminator (and max-1 would underflow) */
     long n = sys_read(0, buf, (unsigned long)(max - 1));
+    if (n < 0) n = 0;                  /* read rejected (e.g. the kernel refused the buffer): empty line, never buf[-1] */
     if (n > 0 && buf[n - 1] == '\n')
         n--;                       /* drop the trailing newline */
     buf[n] = '\0';
