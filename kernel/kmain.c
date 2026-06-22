@@ -18,6 +18,7 @@
 #include "task.h"
 #include "fat32.h"
 #include "vfs.h"
+#include "partition.h"
 #include "pci.h"
 #include "ahci.h"
 #include "virtio_blk.h"
@@ -165,6 +166,15 @@ void kmain(uint64_t mb_info) {
     } else {
         kprintf("[warn] no FAT32 disk found (run with a disk image).\n\n");
     }
+
+    /* Enumerate ALL legacy ATA drives (primary/secondary bus x master/slave) and
+     * parse each one's MBR/GPT partition table, logging every partition as a
+     * (drive, type, start-LBA, sectors) volume. This is purely additive: the boot
+     * mount above still reads the bare FAT32 off drive 0 at LBA 0. With no extra
+     * disks attached, only drive 0 is present and (being a bare FS) reports no
+     * partition table — a clean no-op. */
+    partition_enumerate();
+    kprintf("\n");
 
     /* Bring up AHCI/SATA as an ADDITIONAL storage driver (the boot disk above
      * stays on legacy ATA). No-op if no AHCI HBA + disk is attached. The
