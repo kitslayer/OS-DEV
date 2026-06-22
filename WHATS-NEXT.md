@@ -1,5 +1,21 @@
 # What's next
 
+> **(M966) JS engine — `var` hoisting + bare-`var` no-clobber (review #4, part 2 — `var` semantics now complete).**
+> Building on M965's function-scoping: added a `hoist_vars` pre-pass run once at each function/program entry that
+> walks the body's statements — descending into blocks/if/loops/switch/try but STOPPING at a nested function — and
+> defines every `var`-declared name as `undefined` in the function/global env up front (define-if-absent, so it
+> never clobbers a parameter, an earlier hoist, or a function declaration). So a `var` read before its line
+> (`x; var x=5`) or in a branch that never runs (`if(false){var x=1}; x`) now reads `undefined` instead of throwing
+> "undefined variable". This also surfaced + fixed a **latent pre-existing bug**: a bare `var x;` (no initializer)
+> unconditionally re-`env_define`d the name to `undefined`, so `function k(a){ var a; return a }` reset the
+> parameter (returned undefined instead of the arg), and `x=5; var x;` wiped the assignment — now a no-init `var`
+> is define-if-absent (never resets an existing binding). Verified host (16 cases incl. use-before-decl, never-taken
+> branch, param-not-clobbered, `let`/`const` still block-scoped) AND in-guest via the in-kernel engine
+> (`js -e …{var y=7} return y` → `7`; `…typeof x; x=5; var x` → `undefined 5`). The per-call walk added no jstest
+> slowdown (suite still ~same time). js.c warnings held at 17; all 37 `make check` suites pass. **`var` is now
+> fully correct** (function scope + hoisting). Remaining JS review items: #1 `to_num`→NaN (pervasive, deliberate-
+> choice), #3 >16-arg cap (kernel-stack). See [[js-and-web-app-ceiling]].
+
 > **(M965) JS engine — `var` is now function-scoped, not block-scoped (review #4, part 1).** `N_VAR` eval ignored
 > the var-vs-`let`/`const` flag (`n->num`) and `env_define`d into the *current* env — which inside a block is a
 > fresh block env that's discarded at the block's end. So `function f(){ { var y=7; } return y; }` threw

@@ -1651,6 +1651,7 @@ typedef struct { int kind; val v; const char *label; } comp;   /* label: target 
 static val eval_expr(node *n, env *e);
 static comp eval_stmt(node *n, env *e);
 static void bind_pattern(node *pat, val v, env *e);   /* destructuring (defined below) */
+static void hoist_vars(node *n, env *fe);             /* var-hoisting pre-pass (defined below, near eval_stmt) */
 
 static const char *node_name(node *n){ return n->str ? n->str : ""; }   /* names interned at parse time */
 
@@ -1718,6 +1719,7 @@ static val call_function_this(val fn, val thisv, val *args, int nargs) {
         if (def->num==1) { int taken=0; for(int i=0;i<fe->n;i++) if(strcmp(fe->keys[i],"arguments")==0){taken=1;break;}   /* a param named `arguments` wins -- don't clobber it */
             if(!taken){ obj *ao=new_obj(V_ARR); if(ao){ for(int i=0;i<nargs && !g_oom;i++) arr_push_val(ao,args[i]); val av=UND(); av.t=V_ARR; av.o=ao; env_define(fe,"arguments",av); } } }   /* V_ARR val (obj_val would tag it V_OBJ) */
     }
+    hoist_vars(def->a, fe);                     /* pre-define `var` names (undefined) so use-before-decl / a var in an un-taken branch reads undefined, not "undefined variable" */
     if (def->is_gen) {                          /* generator: eager-run the body, collecting each yield */
         obj *ga = new_obj(V_ARR);
         obj *saved = g_gen_arr; g_gen_arr = ga;
@@ -2380,6 +2382,34 @@ static comp foreach_step(node *n, env *e, env *fe, const char *vn, int per_iter,
     return eval_stmt(n->b, ie);
 }
 
+/* define-if-absent: a `var` re-declaration / a name already a param or a hoisted binding must NOT be reset. */
+static void hoist_def(env *fe, const char *nm){ if(!nm || !nm[0]) return; for(int k=0;k<fe->n;k++) if(strcmp(fe->keys[k],nm)==0) return; env_define(fe,nm,UND()); }
+/* Pre-pass run once at function/program entry: define every `var`-declared name (NOT let/const) as `undefined`
+ * in the function/global env `fe`, so a `var` read before its line — or in a branch that never executes — yields
+ * `undefined` (JS hoisting) instead of throwing "undefined variable". Walks statements, descending into
+ * blocks/if/loops/switch/try but STOPPING at a nested function (its vars belong to its own scope). */
+static void hoist_vars(node *n, env *fe){
+    if(!n) return;
+    switch(n->type){
+        case N_FUNC: return;                                  /* nested function: its own var scope */
+        case N_VAR:
+            if(!n->num) for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; if(d && !d->b) hoist_def(fe, node_name(d)); }   /* var, plain name (skip let/const + destructuring patterns) */
+            return;
+        case N_PROGRAM: case N_BLOCK:
+            for(int i=0;i<n->nlist;i++) hoist_vars(n->list[i],fe);
+            return;
+        case N_IF:                hoist_vars(n->b,fe); hoist_vars(n->c,fe); return;
+        case N_WHILE: case N_DOWHILE: hoist_vars(n->b,fe); return;
+        case N_FOR:               hoist_vars(n->a,fe); hoist_vars(n->d,fe); return;   /* a=init (maybe `for(var i…)`), d=body */
+        case N_FOROF: case N_FORIN:
+            if(!n->num && !n->c) hoist_def(fe, node_name(n));  /* for(var x of/in …): the plain loop var */
+            hoist_vars(n->b,fe); return;
+        case N_SWITCH:
+            for(int i=0;i<n->nlist;i++){ node*cl=n->list[i]; if(cl) for(int j=0;j<cl->nlist;j++) hoist_vars(cl->list[j],fe); } return;
+        case N_TRY:               hoist_vars(n->a,fe); hoist_vars(n->b,fe); hoist_vars(n->c,fe); return;
+        default: return;                                      /* expressions / return / break / etc. hold no var statements */
+    }
+}
 static comp eval_stmt_inner(node *n, env *e) {
     if (g_err || g_oom) return CN();
     switch (n->type) {
@@ -2396,8 +2426,11 @@ static comp eval_stmt_inner(node *n, env *e) {
             return CN();
         }
         case N_VAR: { env *te = n->num ? e : env_func_scope(e);   /* let/const stay block-scoped (e); var is function-scoped, so it survives its block */
-            for(int i=0;i<n->nlist;i++){ node*d=n->list[i]; val v = d->a?eval_expr(d->a,e):UND();
-            if (d->b) bind_pattern(d->b, v, te); else env_define(te,node_name(d),v); } return CN(); }
+            for(int i=0;i<n->nlist;i++){ node*d=n->list[i];
+                if (!d->a && !d->b && !n->num) { hoist_def(te, node_name(d)); continue; }   /* bare `var x;` (no init): keep any hoisted value / a same-named param — define undefined ONLY if absent, never reset */
+                val v = d->a?eval_expr(d->a,e):UND();
+                if (d->b) bind_pattern(d->b, v, te); else env_define(te,node_name(d),v); }
+            return CN(); }
         case N_FUNC: { eval_expr(n,e); return CN(); }
         case N_EXPR: { eval_expr(n->a,e); return CN(); }
         case N_IF: { if (truthy(eval_expr(n->a,e))) return eval_stmt(n->b,e); else if (n->c) return eval_stmt(n->c,e); return CN(); }
@@ -4318,6 +4351,7 @@ static int js_run_impl(const char *src, char *out, int outmax, int mode) {
         env *g = reuse ? g_page_env : new_env(0);
         if (g) {
             if (!reuse) { install_globals(g); if (mode >= 1) g_page_env = g; }   /* persist on page-begin (1) AND a script-less page's first event (mode 2, no env yet) so its later clicks share state */
+            hoist_vars(prog, g);                                                  /* top-level var hoisting (global env) */
             eval_stmt(prog, g);
             js_drain_timers();      /* run setTimeout/setInterval callbacks the script queued */
         }
