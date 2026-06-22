@@ -1,5 +1,14 @@
 # What's next
 
+> **(M975) WM — Monitor can't be shrunk below its content (M968 review P3, worst case).** The Monitor
+> (`KIND_SYSMON`) opens at 320×272 but `win_min` floored every non-app/browser window at 170×110, so dragging it
+> smaller drew its lower Memory/Network/Disk bars (laid out at fixed offsets ~content+200) past the window's bottom
+> edge (the fb clips to the screen so it's cosmetic bleed onto neighbours, not a crash). Gave `KIND_SYSMON` its own
+> `win_min` of 320×272 (= its open size — a fixed-layout info panel needn't shrink), which guarantees no bleed with
+> zero estimation and can't grow-on-resize (min == open). desktop.c warnings 0; all 37 `make check` suites pass.
+> The Welcome/About windows share the same (milder, short-text) fixed-layout pattern; a proper general fix is an fb
+> clip-rect (the review's suggestion) — both left as minor follow-ups. See [[os-dev-project]].
+
 > **(M974) Heap — `grow_heap` merges with its physical predecessor too (review #5; heap review now fully done).**
 > `grow_heap` appended the new region `nb` and merged it only with the list-tail `last` — but list order ≠ address
 > order, so when the tail wasn't physically last the merge was missed, leaving a split free pair at the grow
