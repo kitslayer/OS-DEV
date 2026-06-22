@@ -386,6 +386,13 @@ static const struct {
         "<p><button onclick=\"document.getElementById('out').textContent='news='+(document.getElementById('c1').value||'off')+'  beta='+(document.getElementById('c2').value||'off')+'  pro='+(document.getElementById('r2').value||'off')\">[ Read states ]</button></p>"
         "<p id=\"out\">(toggle the boxes, then read their states)</p>"
         "<p>A checked box submits <code>name=on</code> with the form; an unchecked one is omitted. Selecting a radio unchecks the others sharing its <code>name</code> (try Free, then Pro).</p>" },
+    { "CHKJS   HTM", "<h1>checkbox <code>.checked</code> (boolean DOM property)</h1>"
+        "<p><input id=\"cb\" type=\"checkbox\" checked> Enabled</p>"
+        "<p><button onclick=\"document.getElementById('o').textContent='checked='+document.getElementById('cb').checked\">[ read .checked ]</button> "
+        "<button onclick=\"document.getElementById('cb').checked=true;document.getElementById('o').textContent='set true'\">[ set true ]</button> "
+        "<button onclick=\"document.getElementById('cb').checked=false;document.getElementById('o').textContent='set false'\">[ set false ]</button></p>"
+        "<p id=\"o\">click read .checked</p>"
+        "<p>Reads return a real boolean (<code>true</code>/<code>false</code>), and assigning a boolean toggles the box.</p>" },
     { "ONCHG   HTM", "<h1>onchange handler</h1>"
         "<p>An input's <code>onchange</code> runs JavaScript the moment its value changes &mdash; no button needed. Tab/n to the box and Enter to toggle it:</p>"
         "<p><input id=\"agree\" type=\"checkbox\" onchange=\"document.getElementById('msg').textContent = document.getElementById('agree').value=='on' ? 'Thanks for agreeing!' : 'You unchecked it.'\"> I agree to the terms</p>"

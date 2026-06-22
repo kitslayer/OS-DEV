@@ -1,5 +1,17 @@
 # What's next
 
+> **(M940) Browser — `element.checked` DOM property (read + write) for checkboxes/radios.** On the README's
+> named "richer browser interactivity / more DOM APIs" frontier: page JS could read a checkbox's state only via
+> the stringy `.value` (`"on"`/`""`), but the idiomatic `if (cb.checked)` / `cb.checked = true` didn't work.
+> Added `.checked` as a real boolean: js.c's `dom_prop` maps it to a new bridge kind (4), and the element
+> get-path intercepts it to return a genuine `BOOLV` (so `'x='+cb.checked` → `x=true`, not `x=1`/`x=on`); the
+> set-path routes `cb.checked = <truthy>` to the store as `"on"`/`""` so the box re-renders `[x]`/`[ ]` and
+> submits `name=on` correctly. browser.c gained `html==4` to `browser_dom_get`/`_set` (id-keyed, like `.value`);
+> the position-handle `_at` variants treat it like `.value` (id-keyed, not position-addressable). Additive —
+> one new property name, every existing property byte-identical. New `CHKJS.HTM` demo. Verified in-guest:
+> read → `checked=true` when `[x]` / `checked=false` when `[ ]` (tracks clicks), and the set buttons toggle the
+> box both ways. `make check` green (36 suites).
+
 > **(M939) Tests — extract brace expansion to `shbrace.h` + a 36th `make check` suite (ASan/UBSan fuzz).**
 > M937's brace expansion was only covered in-guest; the project host-fuzzes every pure shell parser
 > (shgrep/shmath/shsplit/normpath), so the new code should match. Lifted the seven functions verbatim into

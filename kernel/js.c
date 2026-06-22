@@ -1911,7 +1911,7 @@ static val eval_member_get(val recv, const char *name) {
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM((double)(recv.o->n/2));   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
-        if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); if(strcmp(name,"nextElementSibling")==0) return sibling_handle(recv.o,1); if(strcmp(name,"previousElementSibling")==0) return sibling_handle(recv.o,-1); static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
+        if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); if(strcmp(name,"nextElementSibling")==0) return sibling_handle(recv.o,1); if(strcmp(name,"previousElementSibling")==0) return sibling_handle(recv.o,-1); if(strcmp(name,"checked")==0){ char cb[4]; cb[0]=0; dom_prop(recv.o,name,0,cb,sizeof cb); return BOOLV(cb[0]=='1'); } static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
         if (recv.o->proto) { val pv; if (proto_lookup(recv.o->proto, name, recv, &pv)) return pv; }   /* inherited property/method (M263) */
         if (strcmp(name,"constructor")==0 && recv.o->ctor_class) { val cv=UND(); cv.o=recv.o->ctor_class; cv.t=(recv.o->ctor_class->kind==V_NATIVE)?V_NATIVE:V_FUN; return cv; }   /* obj.constructor -> the constructor `new` used (unless one was set explicitly, found above) (M699) */
@@ -3258,8 +3258,9 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
         if (!setval && out) { out[0]=0; if (has_pos) { if(g_dom_tag_at) g_dom_tag_at(off, out, outmax); } else { if(g_dom_tag) g_dom_tag(id, out, outmax); } }
         return 1;
     }
-    int kind = -1;                                   /* 0=textContent, 1=innerHTML, 2=input .value */
+    int kind = -1;                                   /* 0=textContent, 1=innerHTML, 2=input .value, 4=checkbox .checked */
     if (strcmp(name,"value")==0) kind = 2;
+    else if (strcmp(name,"checked")==0) kind = 4;
     else if (strcmp(name,"innerHTML")==0) kind = 1;
     else if (strcmp(name,"textContent")==0 || strcmp(name,"innerText")==0) kind = 0;
     if (kind >= 0) {

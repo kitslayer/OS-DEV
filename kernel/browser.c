@@ -1564,7 +1564,7 @@ static int dom_find_at(browser_t *b, int off, int *is, int *ie) {
  * .value path (html 2) is keyed by id, so a position handle can't address it. */
 static int browser_dom_get_at(int off, char *out, int max, int html) {
     browser_t *b = g_ls_b; if (max) out[0] = 0; if (!b) return 0;
-    if (html == 2) return 0;
+    if (html == 2 || html == 4) return 0;   /* .value/.checked are keyed by id, not position */
     int is, ie; if (!dom_find_at(b, off, &is, &ie)) return 0;
     int len = ie - is; if (len > max - 1) len = max - 1; if (len < 0) len = 0;
     memcpy(out, b->raw + is, len); out[len] = 0; return 1;
@@ -1763,6 +1763,11 @@ static int browser_dom_get(const char *id, char *out, int max, int html) {
         const char *v = in_get(g_ls_b, id); if (!v) return 0;
         int i = 0; while (v[i] && i < max - 1) { out[i] = v[i]; i++; } out[i] = 0; return 1;
     }
+    if (html == 4) {   /* element.checked -> "1"/"0" from the checkbox/radio store ("on") */
+        const char *v = in_get(g_ls_b, id);
+        if (max) { out[0] = (v && streqs(v, "on")) ? '1' : '0'; if (max > 1) out[1] = 0; }
+        return 1;
+    }
     int is, ie; if (!dom_find(g_ls_b, id, &is, &ie)) return 0;
     int len = ie - is; if (len > max - 1) len = max - 1; if (len < 0) len = 0;
     memcpy(out, g_ls_b->raw + is, len); out[len] = 0; return 1;
@@ -1770,6 +1775,12 @@ static int browser_dom_get(const char *id, char *out, int max, int html) {
 static void browser_dom_set(const char *id, const char *value, int html) {
     browser_t *b = g_ls_b; if (!b) return;
     if (html == 2) { in_set(b, id, value); parse_html(b, b->raw + b->bodyoff, b->bodylen); return; }   /* element.value = … */
+    if (html == 4) {   /* element.checked = truthy -> store "on"/"" so the box renders [x] + submits name=on */
+        int on = value[0] && !streqs(value, "false") && !streqs(value, "0");
+        in_set(b, id, on ? "on" : "");
+        parse_html(b, b->raw + b->bodyoff, b->bodylen);
+        return;
+    }
     if (html == 3) {   /* element.remove(): splice the whole <tag id>…</tag> out of b->raw (full-span variant of the set below) */
         int is, ie; if (!dom_find(b, id, &is, &ie)) return;
         const char *r = b->raw; int lo = b->bodyoff;
@@ -1885,7 +1896,7 @@ static void browser_dom_setattr(const char *id, const char *attr, const char *va
  * always within bounds (memory-safe). Single-match writes are exact. */
 static void browser_dom_set_at(int off, const char *value, int html) {
     browser_t *b = g_ls_b; if (!b) return;
-    if (html == 2) return;   /* .value is keyed by id; not position-addressable */
+    if (html == 2 || html == 4) return;   /* .value/.checked are keyed by id; not position-addressable */
     if (html == 3) {         /* remove(): off IS the opening '<'; splice [off, past-close) */
         int is, ie; if (!dom_find_at(b, off, &is, &ie)) return;
         const char *r = b->raw; int bodyend = b->bodyoff + b->bodylen;
