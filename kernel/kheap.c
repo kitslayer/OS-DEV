@@ -102,11 +102,18 @@ static void grow_heap(uint64_t need_bytes) {
         last = last->next;
     last->next = nb;
 
-    /* If the previous last block was free and physically adjacent, merge. */
-    if (last->free &&
-        (uint8_t *)last + sizeof(block_t) + last->size == (uint8_t *)nb) {
-        last->size += sizeof(block_t) + nb->size;
-        last->next = nb->next;
+    /* Merge nb with its PHYSICAL predecessor (the block ending at the old
+     * heap_end) if that's free. Scan for it rather than assuming it's the
+     * list-tail `last` we just appended to — list order != address order, so the
+     * old `last`-only test missed the merge whenever the tail wasn't physically
+     * last, leaving a split free pair at the grow boundary (mirrors kfree). */
+    for (block_t *p = head; p; p = p->next) {
+        if (p->free && p != nb && (uint8_t *)p + sizeof(block_t) + p->size == (uint8_t *)nb) {
+            p->size += sizeof(block_t) + nb->size;
+            if (p->next == nb) p->next = nb->next;
+            else { block_t *lp = head; while (lp && lp->next != nb) lp = lp->next; if (lp) lp->next = nb->next; }
+            break;
+        }
     }
 }
 

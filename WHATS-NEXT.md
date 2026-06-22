@@ -1,5 +1,19 @@
 # What's next
 
+> **(M974) Heap — `grow_heap` merges with its physical predecessor too (review #5; heap review now fully done).**
+> `grow_heap` appended the new region `nb` and merged it only with the list-tail `last` — but list order ≠ address
+> order, so when the tail wasn't physically last the merge was missed, leaving a split free pair at the grow
+> boundary. Replaced the `last`-only test with the same physical-predecessor scan `kfree` now uses (M973): find the
+> free block ending exactly at the old `heap_end` and merge `nb` into it. So free space fully coalesces at
+> grow-time as well as free-time. Verified by the kheaptest torture (its occasional big alloc drives `grow_heap`;
+> tiling/no-overlap invariants hold) + boottest; kheap.c warnings 0. **The M970 heap review is now fully
+> addressed:** OOM-safe task creation (M970), input-overflow/zero guards (M971), double-free detection (M972),
+> backward coalescing at free-time (M973) and grow-time (M974). The heap is now double-free-detecting,
+> fully-coalescing, and input/OOM-guarded. **Only the scheduler's dedicated idle task (#1) stays deferred** — it
+> needs proper deprioritization logic (a naive idle in the round-robin would halve the desktop's time slice) and
+> there's no scheduler-torture harness (only boottest), so it's a careful fresh-session change, not a tail-of-
+> session one. See [[os-dev-project]].
+
 > **(M973) Heap — backward coalescing (completes M970 review #3).** `kfree` only merged *forward* (a freed block
 > with following free blocks), so freeing block N while N-1 was already free left two adjacent free blocks
 > unmerged — over a long run the heap fragments and `grow_heap`s even though contiguous free space exists. Added a
