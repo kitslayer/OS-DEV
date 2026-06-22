@@ -33,6 +33,7 @@
 #include "tar.h"
 #include "ac97.h"
 #include "desktop.h"
+#include "pci.h"
 #include <stdint.h>
 
 /* Validate a user-supplied syscall pointer argument: the range [p, p+n) must
@@ -120,6 +121,115 @@ static long read_whole_file(const char *name, uint8_t **out) {
     if (n < 0 || n == (long)cap) { kfree(buf); return -1; }   /* read error, or file >= 32MB */
     *out = buf;
     return n;
+}
+
+/* Append two lowercase hex digits of `v` (0..255). Used by the lspci formatter
+ * for the bus/slot/func and vendor:device:class fields. */
+static int shex2(char *d, int n, int max, uint8_t v) {
+    static const char hx[] = "0123456789abcdef";
+    if (n + 1 < max) d[n++] = hx[(v >> 4) & 0xF];
+    if (n + 1 < max) d[n++] = hx[v & 0xF];
+    return n;
+}
+static int shex4(char *d, int n, int max, uint16_t v) {
+    n = shex2(d, n, max, (uint8_t)(v >> 8));
+    n = shex2(d, n, max, (uint8_t)v);
+    return n;
+}
+
+/* Human-readable name for one PCI device, for the lspci listing. We pick a name
+ * by class (more useful than the vendor for "what is this"), refining a few
+ * subclasses; unknown classes fall back to the vendor name, then to "device".
+ * Just the common QEMU/PC hardware — anything unrecognized still shows as hex. */
+static const char *pci_class_name(uint8_t cls, uint8_t sub) {
+    switch (cls) {
+    case 0x00: return "unclassified";
+    case 0x01:                                  /* mass storage */
+        switch (sub) {
+        case 0x01: return "IDE controller";
+        case 0x06: return "SATA controller (AHCI)";
+        case 0x08: return "NVMe controller";
+        default:   return "storage controller";
+        }
+    case 0x02: return "Ethernet controller";
+    case 0x03: return "VGA display";
+    case 0x04:                                  /* multimedia */
+        return (sub == 0x01) ? "audio controller" : "multimedia controller";
+    case 0x05: return "memory controller";
+    case 0x06:                                  /* bridge */
+        switch (sub) {
+        case 0x00: return "host bridge";
+        case 0x01: return "ISA bridge";
+        case 0x04: return "PCI bridge";
+        case 0x80: return "bridge";
+        default:   return "bridge";
+        }
+    case 0x07: return "communication controller";
+    case 0x0C:                                  /* serial bus */
+        switch (sub) {
+        case 0x03: return "USB controller";
+        case 0x05: return "SMBus controller";
+        default:   return "serial bus controller";
+        }
+    default:   return 0;                        /* let the caller try the vendor */
+    }
+}
+static const char *pci_vendor_name(uint16_t v) {
+    switch (v) {
+    case 0x8086: return "Intel";
+    case 0x10EC: return "Realtek";
+    case 0x1AF4: return "Red Hat / virtio";
+    case 0x1B36: return "Red Hat";
+    case 0x1234: return "QEMU / Bochs";
+    case 0x80EE: return "VirtualBox";
+    case 0x1022: return "AMD";
+    case 0x106B: return "Apple";
+    default:     return 0;
+    }
+}
+
+/* Format the full PCI device list into [buf,max) as lines of the form
+ *   "BB:SS.F vendor:device class CC:SS  <name>\n"
+ * one per device. Returns the byte count written (NUL-terminated if room).
+ * Caller has already validated [buf,max) lies in the app's own pages. */
+static int pci_format(char *b, int max) {
+    pci_device_t devs[64];
+    int total = pci_collect(devs, 64);
+    int cnt = (total < 64) ? total : 64;            /* only `cnt` were stored */
+    int p = 0;
+    for (int i = 0; i < cnt; i++) {
+        pci_device_t *d = &devs[i];
+        p = shex2(b, p, max, d->bus);
+        p = sappend(b, p, max, ":");
+        p = shex2(b, p, max, d->slot);
+        p = sappend(b, p, max, ".");
+        if (p + 1 < max) b[p++] = (char)('0' + (d->func & 7));
+        p = sappend(b, p, max, " ");
+        p = shex4(b, p, max, d->vendor_id);
+        p = sappend(b, p, max, ":");
+        p = shex4(b, p, max, d->device_id);
+        p = sappend(b, p, max, " class ");
+        p = shex2(b, p, max, d->class_id);
+        p = sappend(b, p, max, ":");
+        p = shex2(b, p, max, d->subclass);
+        p = sappend(b, p, max, "  ");
+        const char *name = pci_class_name(d->class_id, d->subclass);
+        if (!name) name = pci_vendor_name(d->vendor_id);
+        if (!name) name = "device";
+        p = sappend(b, p, max, name);
+        /* tack the vendor on for recognized-class devices, so e.g. an Ethernet
+         * line reads "Ethernet controller (Intel)" — handy for picking drivers */
+        const char *vn = pci_vendor_name(d->vendor_id);
+        if (vn && pci_class_name(d->class_id, d->subclass)) {
+            p = sappend(b, p, max, " (");
+            p = sappend(b, p, max, vn);
+            p = sappend(b, p, max, ")");
+        }
+        p = sappend(b, p, max, "\n");
+    }
+    if (cnt == 0) p = sappend(b, p, max, "  (no PCI devices)\n");
+    if (p < max) b[p] = 0;
+    return p;
 }
 
 void syscall_dispatch(struct registers *r) {
@@ -586,6 +696,15 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)desktop_set_wallpaper((const char *)r->rdi);
         break;
+    case SYS_lspci: {
+        /* rdi=buf, rsi=len: format the PCI device list as text into the caller's
+         * buffer. Validate the buffer lies in the app's own pages before writing
+         * (the ring3->ring0 pointer boundary), exactly like SYS_ps / SYS_df. */
+        int max = (int)r->rsi;
+        if (max <= 0 || !ubuf(r->rdi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)pci_format((char *)r->rdi, max);
+        break;
+    }
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

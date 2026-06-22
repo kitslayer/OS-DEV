@@ -26,3 +26,9 @@ uint8_t  pci_irq_line(const pci_device_t *d);
 void     pci_enable_bus_master(const pci_device_t *d);
 
 void     pci_enumerate(void);   /* print every device (for inspection) */
+
+/* Collect all present devices into `out` (capped at `max`), honoring the multi-
+ * function header bit so single-function devices aren't probed at funcs 1-7.
+ * Returns the number present (may exceed `max`; only the first `max` are stored).
+ * Pass out=NULL to just count. Used by the lspci syscall. */
+int      pci_collect(pci_device_t *out, int max);

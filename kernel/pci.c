@@ -124,3 +124,38 @@ void pci_enumerate(void) {
         }
     }
 }
+
+/* Collect every present device into `out` (capped at `max`); return the count
+ * actually present (which may exceed `max` if the buffer filled). Same brute-
+ * force walk as pci_find, but it honors the multi-function header bit: a device
+ * is multi-function only if bit 7 of its header type (reg 0x0C, byte 2) is set,
+ * so for a single-function device we stop after func 0 instead of probing the
+ * phantom funcs 1-7 (which would alias func 0 and report duplicates). */
+int pci_collect(pci_device_t *out, int max) {
+    int n = 0;
+    for (int bus = 0; bus < 256; bus++) {
+        for (int slot = 0; slot < 32; slot++) {
+            for (int func = 0; func < 8; func++) {
+                uint32_t id = pci_read32(bus, slot, func, 0x00);
+                if ((id & 0xFFFF) == 0xFFFF)
+                    continue;
+                if (out && n < max) {
+                    uint32_t cls = pci_read32(bus, slot, func, 0x08);
+                    out[n].bus = bus; out[n].slot = slot; out[n].func = func;
+                    out[n].vendor_id = id & 0xFFFF; out[n].device_id = id >> 16;
+                    out[n].class_id = (cls >> 24) & 0xFF;
+                    out[n].subclass = (cls >> 16) & 0xFF;
+                    out[n].prog_if  = (cls >> 8) & 0xFF;
+                    out[n].valid = 1;
+                }
+                n++;
+                if (func == 0) {
+                    uint32_t hdr = pci_read32(bus, slot, 0, 0x0C);
+                    if (!((hdr >> 16) & 0x80))
+                        break;   /* single-function device: skip funcs 1-7 */
+                }
+            }
+        }
+    }
+    return n;
+}
