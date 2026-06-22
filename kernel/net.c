@@ -401,8 +401,9 @@ int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
     memcpy(c->ip, ip, 4);
     if (!arp_resolve(GW_IP, c->gw)) return -1;
     c->dport = port;
-    c->sport = (uint16_t)(40000 + (timer_ticks() & 0x3FFF));
-    c->myseq = (uint32_t)(timer_ticks() * 2654435761u) | 1;
+    static uint32_t conn_ctr = 0; conn_ctr++;   /* a monotonic per-connection nonce: the 100 Hz clock alone repeats across rapid reconnects (a browser's back-to-back sub-resource fetches), reusing port+ISN and risking a stale SYN-ACK/segment from the prior connection being accepted on the reused 4-tuple */
+    c->sport = (uint16_t)(40000 + ((timer_ticks() + conn_ctr * 2179u) & 0x3FFF));
+    c->myseq = ((uint32_t)(timer_ticks() * 2654435761u) ^ (conn_ctr * 0x9E3779B9u)) | 1;
     uint8_t buf[1600];
     for (int attempt = 0; attempt < 4; attempt++) {
         tcp_send_seg(c->gw, c->ip, c->sport, port, c->myseq, 0, TCP_SYN, 0, 0);
@@ -515,7 +516,7 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
     int total = 0;
     uint64_t deadline = timer_ticks() + ticks;
     ooo_drain(c, out, &total, max);          /* flush data buffered last call */
-    if (fin_seen && c->theirseq == fin_at) { /* all data up to the FIN delivered */
+    if (fin_seen && seq_le(fin_at, c->theirseq)) {   /* honor once theirseq REACHES OR PASSES the FIN (wrap-safe; `==` hung forever on any overshoot) */ /* all data up to the FIN delivered */
         c->theirseq = fin_at + 1;
         tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
         c->up = 0; return total > 0 ? total : -1;
@@ -555,7 +556,7 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
         /* Honour the FIN only once every byte up to it has been delivered. A FIN
          * that arrived out of order (gap still open) waits; the drain above + the
          * top-of-call check consume it as soon as theirseq reaches it. */
-        if (fin_seen && c->theirseq == fin_at) {
+        if (fin_seen && seq_le(fin_at, c->theirseq)) {   /* honor once theirseq REACHES OR PASSES the FIN (wrap-safe; `==` hung forever on any overshoot) */
             c->theirseq = fin_at + 1;
             tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
             c->up = 0;
@@ -566,6 +567,7 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
 }
 
 void tcp_close(tcp_conn *c) {
+    fin_seen = 0; fin_at = 0;     /* per-connection teardown: scrub the global peer-FIN state so a latched-but-unhonored FIN can't prematurely close the NEXT connection on a reused 4-tuple (was cleared only at the next tcp_connect) */
     if (!c->up) return;
     tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
     c->up = 0;

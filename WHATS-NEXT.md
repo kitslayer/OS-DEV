@@ -1,5 +1,21 @@
 # What's next
 
+> **(M981) TCP/net — three connection state-machine fixes (9th review subagent, net.c).** The review confirmed the
+> packet parse + out-of-order reassembly are solid (the nettest fuzzer's domain) and found the real bugs in the
+> connection lifecycle: **(P2-2, permanent hang) the FIN-honored checks used `c->theirseq == fin_at`** — so if
+> `theirseq` ever overshot the FIN's sequence (a retransmit/overlap accounting glitch), it could never equal it
+> again → the connection stayed half-closed forever (the HTTP/TLS read loops only exit on `n<0`). Fixed to the
+> wrap-safe `seq_le(fin_at, c->theirseq)` (honor once delivery reaches OR passes the FIN); still one-shot
+> (`c->up=0; return`). **(P2-1, cross-connection leak) the global `fin_seen`/`fin_at` were scrubbed only at the next
+> `tcp_connect`, not `tcp_close`** — a latched-but-unhonored FIN could prematurely close the *next* connection on a
+> reused 4-tuple; now cleared at the top of `tcp_close`. **(P2-3, port/ISN reuse) `sport`+`myseq` derived only from
+> the 100 Hz clock** — rapid reconnects (a browser's back-to-back sub-resource fetches) in the same tick reused the
+> 4-tuple+ISN, risking a stale SYN-ACK/segment being accepted; mixed a monotonic per-connection counter into both.
+> Verified: nettest (parse/reassembly fuzz, ASan/UBSan clean) + **boottest's live example.com TCP/HTTP + TLS 1.3
+> HTTPS** (connect → handshake → download → close all succeed with the fixes); net.c warnings 0; all 37 `make check`
+> suites pass. Lower review findings (P2-4 handshake-data-drop [recoverable], P3 DNS/ICMP hardcoded IHL=20 / ICMP
+> id-seq / ARP same-IP overwrite — all SLIRP-masked today) are documented robustness follow-ups. See [[os-dev-project]].
+
 > **(M980) fb/WM — general content clip-rect (the M968 review's recommended general fix, done safely).** Added an
 > optional framebuffer clip rectangle (`fb_set_clip`/`fb_reset_clip`) that `fb_pixel`/`fb_fill_rect`/`fb_glyph`/
 > `fb_glyph_fg` all honor in addition to the screen bounds; it defaults to the full screen, so it's a **no-op until
