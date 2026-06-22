@@ -1,5 +1,14 @@
 # What's next
 
+> **(M946) Paint — line & rectangle tools with rubber-band preview.** With fill (M945) done, added shape
+> tools so paint is a real drawing program: `b`/`l`/`r` pick brush / line / rectangle. In line or rect mode a
+> left-drag rubber-bands a live preview — on press it snapshots the canvas into a backup buffer + records the
+> anchor; each drag frame restores the backup and redraws the shape from anchor to cursor; release leaves the
+> final shape committed. Line is one `stroke`; rectangle is four edge strokes. Reuses the existing disc/Bresenham
+> primitives + the `cv[]` canvas buffer (the backup is one lazy `W*H*4` alloc, freed at quit). Verified
+> in-guest: `r` + drag draws a single clean rectangle outline (no smear → the backup/restore preview commits
+> correctly). `make check` green (36 suites).
+
 > **(M945) Paint — flood fill (paint bucket).** The paint app had only a freehand brush; added the classic
 > bucket-fill: hover over the canvas and press `g` to recolour the 4-connected region of the same colour as the
 > pixel under the cursor with the current palette colour. The app already keeps a local `cv[]` canvas buffer

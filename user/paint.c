@@ -4,7 +4,8 @@
  * The first app to use the mouse: it opens a pixel canvas (the graphics window
  * API), reads the cursor + buttons with sys_mouse(), and paints where you drag.
  * Keys 1-8 pick a colour, +/- change the brush size, g flood-fills under the
- * cursor with the current colour, c clears, q/Esc quits.
+ * cursor, b/l/r switch brush/line/rectangle tools (line & rect drag with a live
+ * rubber-band preview), c clears, q/Esc quits.
  * Pure integer math (no FPU).
  */
 #include "ulib.h"
@@ -77,27 +78,49 @@ int main(void) {
     for (int i = 0; i < W * H; i++) cv[i] = BG;
 
     int col = 1, brush = 2, lx = -1, ly = -1;
+    int mode = 0, anchored = 0, ax = 0, ay = 0;          /* mode: 0 brush, 1 line, 2 rect; rubber-band anchor */
+    unsigned int *bk = 0;                                /* canvas backup for shape preview (lazy) */
     draw_palette(col);
     for (;;) {
         int k = sys_pollkey();
-        if (k == 'q' || k == 27) { free(cv); return 0; }
+        if (k == 'q' || k == 27) { free(cv); free(bk); return 0; }
         else if (k >= '1' && k <= '8') col = k - '1';
         else if (k == 'c') { for (int i = 0; i < W * H; i++) cv[i] = BG; }
         else if (k == '+' || k == '=') { if (brush < 20) brush++; }
         else if (k == '-' || k == '_') { if (brush > 1) brush--; }
         else if (k == 'g') { int mx, my; sys_mouse(&mx, &my); fill(mx, my, palette[col]); }   /* flood fill under the cursor */
+        else if (k == 'b') mode = 0;                         /* brush (freehand) */
+        else if (k == 'l') mode = 1;                         /* line tool */
+        else if (k == 'r') mode = 2;                         /* rectangle tool */
 
         int x, y;
         int b = sys_mouse(&x, &y);
-        if ((b & 1) && x >= 0 && y >= 0) {                   /* left button: paint */
-            if (lx < 0) { lx = x; ly = y; }
-            stroke(lx, ly, x, y, brush, palette[col]);
-            lx = x; ly = y;
+        if ((b & 1) && x >= 0 && y >= 0) {                   /* left button */
+            if (mode == 0) {                                 /* brush: freehand stroke */
+                if (lx < 0) { lx = x; ly = y; }
+                stroke(lx, ly, x, y, brush, palette[col]);
+                lx = x; ly = y;
+            } else {                                         /* line/rect: rubber-band preview */
+                if (!anchored) {                             /* press: set anchor + back up the canvas */
+                    ax = x; ay = y; anchored = 1;
+                    if (!bk) bk = malloc((unsigned long)W * H * 4);
+                    if (bk) for (int i = 0; i < W * H; i++) bk[i] = cv[i];
+                } else if (bk) {                             /* drag: restore, then redraw the preview */
+                    for (int i = 0; i < W * H; i++) cv[i] = bk[i];
+                }
+                if (mode == 1) stroke(ax, ay, x, y, brush, palette[col]);   /* line */
+                else {                                       /* rectangle outline (4 edges) */
+                    stroke(ax, ay, x,  ay, brush, palette[col]);
+                    stroke(ax, y,  x,  y,  brush, palette[col]);
+                    stroke(ax, ay, ax, y,  brush, palette[col]);
+                    stroke(x,  ay, x,  y,  brush, palette[col]);
+                }
+            }
         } else if ((b & 2) && x >= 0 && y >= 0) {            /* right button: erase */
             if (lx < 0) { lx = x; ly = y; }
             stroke(lx, ly, x, y, brush + 2, BG);
             lx = x; ly = y;
-        } else { lx = ly = -1; }
+        } else { lx = ly = -1; anchored = 0; }               /* button up: end stroke / commit the shape */
 
         draw_palette(col);
         sys_gfx_blit(cv);
