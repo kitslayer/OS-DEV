@@ -1,5 +1,15 @@
 # What's next
 
+> **(M979) Tests — regression-lock the FAT32 write-over-directory data-loss fix (M963) in fstest.** That fix was
+> verified in-guest but not in the host suite, even though fstest `#include`s fat32.c and can drive it directly.
+> Added a Phase 4b: `mkdir WDIR`, then `writefile("WDIR", …)` must return -1 (refused), `WDIR` must still read as a
+> directory (-1) and still be usable (`writefile("WDIR/CHILD.TXT", …)` succeeds), and a normal `writefile("WFILE.TXT")`
+> + readback must still work — so a future regression of the guard (which would silently delete the dir or duplicate
+> its name) fails the suite. fstest green (ASan/UBSan clean) alongside its corrupt-FAT fuzz + the M624 rm-nonempty
+> case; all 37 `make check` suites pass. The host-testable data-integrity/correctness fixes from tonight are now
+> regression-locked (kheap double-free/coalesce M972–M974, JS engine M978, FAT write-over-dir M979); the
+> interactive editor/browser/WM fixes would need new host harnesses (a fresh-session effort). See [[os-dev-project]].
+
 > **(M978) Tests — regression-lock tonight's JS engine fixes in the jstest suite.** The M958–M967 fixes
 > (sort-sign comparator, `switch` `===`-identity, static-field `++`, NaN as a Map/Set/`includes` key, strict
 > `JSON.parse`, NaN/Infinity `toString(radix)`, `var` function-scoping + hoisting, `Number(non-numeric)`→NaN) were

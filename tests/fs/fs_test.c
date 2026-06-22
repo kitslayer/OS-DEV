@@ -228,6 +228,23 @@ int main(void) {
     printf("  rm-nonempty-dir (M624): refused (-1), no leak, child survived, full reclaim (free %llu->%llu->%llu)\n",
            (unsigned long long)f0, (unsigned long long)f1, (unsigned long long)f3);
 
+    /* ---- Phase 4b: writefile over a DIRECTORY is refused (M963). Without the
+     * guard, fat32_write deleted-then-wrote: over a NON-EMPTY dir the delete
+     * failed (-1) but the write proceeded anyway -> a duplicate same-name entry
+     * (a directory AND a file); over an EMPTY dir the delete succeeded -> the
+     * directory silently vanished. Now it refuses (-1), leaving the dir intact
+     * and still usable, while a normal file overwrite/create is unaffected. */
+    build_valid_image();
+    if (fat32_mount() != 0) { printf("FAIL: remount for write-over-dir\n"); return 1; }
+    char wd[4] = { 'h', 'i', 0, 0 };
+    if (fat32_mkdir("WDIR") != 0)                       { printf("FAIL: mkdir WDIR\n"); return 1; }
+    if (fat32_write("WDIR", wd, 2) != -1)               { printf("FAIL: writefile over a directory must be refused (-1)\n"); return 1; }
+    if (fat32_read("WDIR", crb, sizeof(crb)) != -1)     { printf("FAIL: WDIR must still be a directory (read -1)\n"); return 1; }
+    if (fat32_write("WDIR/CHILD.TXT", wd, 2) < 0)       { printf("FAIL: WDIR must still be a usable directory after the refused write\n"); return 1; }
+    if (fat32_write("WFILE.TXT", wd, 2) < 0)            { printf("FAIL: a normal file write after the refused dir-write must still succeed\n"); return 1; }
+    if (fat32_read("WFILE.TXT", crb, sizeof(crb)) != 2) { printf("FAIL: WFILE.TXT readback after refused dir-write\n"); return 1; }
+    printf("  write-over-dir (M963): refused (-1), directory intact + usable, normal writes OK\n");
+
     /* ---- Phase 5: regression — the READ path finds a name that 8.3-TRUNCATES
      * (M630). dir_find used to compare only the formatted display name (ieq), so
      * a file written "dl.html" (stored 8.3 "DL      HTM") was findable by
