@@ -1,5 +1,13 @@
 # What's next
 
+> **(M945) Paint — flood fill (paint bucket).** The paint app had only a freehand brush; added the classic
+> bucket-fill: hover over the canvas and press `g` to recolour the 4-connected region of the same colour as the
+> pixel under the cursor with the current palette colour. The app already keeps a local `cv[]` canvas buffer
+> (it blits it each frame), so the fill reads + rewrites pixels directly — a stack flood fill that recolours on
+> push (so each pixel is queued exactly once → the scratch stack is bounded by `W*H`, malloc'd + freed per
+> fill). Verified in-guest: `g` over the empty canvas floods it to the selected colour. `make check` green
+> (36 suites). A fresh non-browser/editor win after a long browser-forms run.
+
 > **(M944) Browser — `<select>`/`<option>` dropdown (the last form control).** Completes the form set
 > (text/password/checkbox/radio/textarea + now select). In the token-stream renderer a popup isn't practical, so
 > it's a **cycle-on-click** control: the select renders as a focusable `[ Label v]` link showing the chosen

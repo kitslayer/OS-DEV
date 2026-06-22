@@ -3,7 +3,8 @@
  *
  * The first app to use the mouse: it opens a pixel canvas (the graphics window
  * API), reads the cursor + buttons with sys_mouse(), and paints where you drag.
- * Keys 1-8 pick a colour, +/- change the brush size, c clears, q/Esc quits.
+ * Keys 1-8 pick a colour, +/- change the brush size, g flood-fills under the
+ * cursor with the current colour, c clears, q/Esc quits.
  * Pure integer math (no FPU).
  */
 #include "ulib.h"
@@ -39,6 +40,26 @@ static void stroke(int x0, int y0, int x1, int y1, int r, unsigned int c) {
     }
 }
 
+/* Flood fill (paint bucket): recolour the 4-connected region of the same colour
+ * as the seed pixel. Recolours on push so each pixel is queued once (stack <= W*H). */
+static void fill(int sx, int sy, unsigned int newc) {
+    if (sx < 0 || sx >= W || sy < 0 || sy >= H) return;
+    unsigned int target = cv[sy * W + sx];
+    if (target == newc) return;
+    int *stk = malloc((unsigned long)W * H * sizeof(int));
+    if (!stk) return;
+    int sp = 0;
+    cv[sy * W + sx] = newc; stk[sp++] = sy * W + sx;
+    while (sp > 0) {
+        int idx = stk[--sp], x = idx % W, y = idx / W;
+        if (x > 0     && cv[idx - 1] == target) { cv[idx - 1] = newc; stk[sp++] = idx - 1; }
+        if (x < W - 1 && cv[idx + 1] == target) { cv[idx + 1] = newc; stk[sp++] = idx + 1; }
+        if (y > 0     && cv[idx - W] == target) { cv[idx - W] = newc; stk[sp++] = idx - W; }
+        if (y < H - 1 && cv[idx + W] == target) { cv[idx + W] = newc; stk[sp++] = idx + W; }
+    }
+    free(stk);
+}
+
 static void draw_palette(int sel) {
     for (int p = 0; p < 8; p++) {                            /* colour swatches, top-left */
         int x0 = 3 + p * 16, y0 = 3;
@@ -64,6 +85,7 @@ int main(void) {
         else if (k == 'c') { for (int i = 0; i < W * H; i++) cv[i] = BG; }
         else if (k == '+' || k == '=') { if (brush < 20) brush++; }
         else if (k == '-' || k == '_') { if (brush > 1) brush--; }
+        else if (k == 'g') { int mx, my; sys_mouse(&mx, &my); fill(mx, my, palette[col]); }   /* flood fill under the cursor */
 
         int x, y;
         int b = sys_mouse(&x, &y);
