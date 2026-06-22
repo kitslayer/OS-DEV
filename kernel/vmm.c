@@ -42,10 +42,15 @@ static void invlpg(uint64_t virt) {
     __asm__ volatile("invlpg (%0)" : : "r"(virt) : "memory");
 }
 
-/* Return the next-level table, allocating + zeroing it if not present. */
+/* Return the next-level table, allocating + zeroing it if not present.
+ * Returns NULL if the PMM is out of frames: the alternative — mapping the
+ * frame-0 sentinel as a PRESENT page table — would silently alias whatever
+ * lives at physical 0 (the IVT / boot stubs) as live page tables. Callers must
+ * propagate the failure rather than walk into a half-built mapping. */
 static uint64_t *next_table(uint64_t *table, uint64_t idx, uint64_t flags) {
     if (!(table[idx] & PTE_PRESENT)) {
         uint64_t frame = pmm_alloc_frame();
+        if (!frame) return 0;            /* OOM — do not map frame 0 */
         memset(phys_to_table(frame), 0, PAGE_SIZE);
         /* Intermediate entries must allow the most permissive access any leaf
          * under them needs — so propagate USER, always allow WRITABLE. */
@@ -64,8 +69,11 @@ static uint64_t *next_table(uint64_t *table, uint64_t idx, uint64_t flags) {
 static int do_map(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t *pml4 = phys_to_table(pml4_phys);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);
+    if (!pdpt) return -1;
     uint64_t *pd   = next_table(pdpt, PDPT_IDX(virt), flags);
+    if (!pd) return -1;
     uint64_t *pt   = next_table(pd,   PD_IDX(virt),   flags);
+    if (!pt) return -1;
 
     pt[PT_IDX(virt)] = (phys & ADDR_MASK) | PTE_PRESENT | flags;
     invlpg(virt);
@@ -96,6 +104,7 @@ uint64_t vmm_create_address_space(void) {
     uint64_t *bpml4 = phys_to_table(kernel_pml4);
 
     uint64_t newp = pmm_alloc_frame();
+    if (!newp) return 0;                   /* OOM */
     uint64_t *npml4 = phys_to_table(newp);
     memset(npml4, 0, PAGE_SIZE);
 
@@ -104,6 +113,7 @@ uint64_t vmm_create_address_space(void) {
 
     uint64_t *bpdpt = phys_to_table(bpml4[0] & ADDR_MASK);
     uint64_t newpdpt = pmm_alloc_frame();
+    if (!newpdpt) { pmm_free_frame(newp); return 0; }   /* OOM — undo the PML4 */
     uint64_t *npdpt = phys_to_table(newpdpt);
     for (int i = 0; i < 512; i++)          /* share kernel identity + MMIO PDs */
         npdpt[i] = bpdpt[i];
@@ -165,7 +175,9 @@ void vmm_destroy_address_space(uint64_t cr3) {
 int vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);
+    if (!pdpt) return -1;
     uint64_t *pd   = next_table(pdpt, PDPT_IDX(virt), flags);
+    if (!pd) return -1;
 
     pd[PD_IDX(virt)] = (phys & ~0x1FFFFFull) | PTE_PRESENT | PTE_HUGE | flags;
     invlpg(virt);

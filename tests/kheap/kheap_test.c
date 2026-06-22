@@ -31,6 +31,7 @@ int vmm_map(uint64_t virt, uint64_t phys, uint64_t flags) {
 }
 static uint64_t g_frame = 0x200000;
 uint64_t pmm_alloc_frame(void) { g_frame += 4096; return g_frame; }
+void pmm_free_frame(uint64_t phys) { (void)phys; }   /* map_range frees a frame only on the (here-unreachable) vmm_map-failure path */
 
 #define KHEAP_HOST_TEST   /* neutralize the privileged cli in irq_save on the host */
 #include "kheap.c"

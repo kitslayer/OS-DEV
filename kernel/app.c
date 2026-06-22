@@ -876,6 +876,7 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     }
     grid_clear(a);
     a->cr3 = vmm_create_address_space();
+    if (!a->cr3) { a->used = 0; return 0; }   /* OOM: no address space — loading CR3=0 would triple-fault */
 
     /* Load the ELF + user stack into the app's address space. We switch CR3 to
      * it (interrupts off) so the loader's writes land in the right space. */

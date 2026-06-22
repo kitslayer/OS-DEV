@@ -65,10 +65,19 @@ static inline void irq_restore(uint64_t fl) {
     __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
 }
 
-/* Map [from, to) of heap virtual space to fresh physical frames. */
-static void map_range(uint64_t from, uint64_t to) {
-    for (uint64_t v = from; v < to; v += PAGE_SIZE)
-        vmm_map(v, pmm_alloc_frame(), PTE_WRITABLE);
+/* Map [from, to) of heap virtual space to fresh physical frames. Returns 0 on
+ * success, -1 on OOM (no frame, or vmm_map couldn't allocate a page table).
+ * Without the check, vmm_map would alias the frame-0 sentinel as a heap page —
+ * silently corrupting whatever lives at physical 0. On failure we free the frame
+ * that didn't map; any pages mapped earlier in this same call leak their frames,
+ * an acceptable cost on a path only reached when RAM is already exhausted. */
+static int map_range(uint64_t from, uint64_t to) {
+    for (uint64_t v = from; v < to; v += PAGE_SIZE) {
+        uint64_t frame = pmm_alloc_frame();
+        if (!frame) return -1;
+        if (vmm_map(v, frame, PTE_WRITABLE) != 0) { pmm_free_frame(frame); return -1; }
+    }
+    return 0;
 }
 
 void kheap_init(void) {
@@ -83,13 +92,15 @@ void kheap_init(void) {
     head->magic = 0;        /* free block: no live-allocation sentinel */
 }
 
-/* Add more mapped pages and append a free block covering them. */
-static void grow_heap(uint64_t need_bytes) {
+/* Add more mapped pages and append a free block covering them.
+ * Returns 0 on success, -1 on OOM (heap left exactly as it was, nothing appended). */
+static int grow_heap(uint64_t need_bytes) {
     uint64_t grow = align_page(need_bytes + sizeof(block_t));
     if (grow < KHEAP_GROW_PAGES * PAGE_SIZE)
         grow = KHEAP_GROW_PAGES * PAGE_SIZE;
 
-    map_range(heap_end, heap_end + grow);
+    if (map_range(heap_end, heap_end + grow) != 0)
+        return -1;              /* OOM: leave heap_end + the free list untouched */
     block_t *nb = (block_t *)heap_end;
     nb->size = grow - sizeof(block_t);
     nb->next = NULL;
@@ -115,6 +126,7 @@ static void grow_heap(uint64_t need_bytes) {
             break;
         }
     }
+    return 0;
 }
 
 void *kmalloc(size_t size) {
@@ -144,7 +156,7 @@ void *kmalloc(size_t size) {
         return p;
     }
 
-    grow_heap(need);
+    if (grow_heap(need) != 0) { irq_restore(f); return 0; }   /* OOM: report failure, don't recurse forever */
     void *p = kmalloc(size);   /* one retry; the new block will fit (nested
                                 * irq_save is a no-op while we hold IF off) */
     irq_restore(f);

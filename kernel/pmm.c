@@ -27,6 +27,22 @@ static uint64_t  used_frames;
 static uint64_t  bitmap_bytes;
 static uint64_t  next_hint;       /* where to start the next allocation scan */
 
+/* The bitmap is shared mutable state, and the allocator runs from more than one
+ * thread: kmalloc/sbrk on whatever task needs memory, and pmm_free_frame from
+ * the desktop task's app-reaper (vmm_destroy_address_space, interrupts ON). The
+ * bit twiddle below is a non-atomic read-modify-write of a whole byte, so a
+ * timer preempt mid-update could lose a concurrent alloc/free in the same byte
+ * and double-hand-out a frame. Guard the mutators the same way kheap.c does:
+ * save IF + cli on entry, restore on exit (nests correctly, cheap, short). */
+static inline uint64_t irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    return fl;
+}
+static inline void irq_restore(uint64_t fl) {
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
+
 static inline void bm_set(uint64_t f)   { bitmap[f >> 3] |=  (1u << (f & 7)); }
 static inline void bm_clear(uint64_t f) { bitmap[f >> 3] &= ~(1u << (f & 7)); }
 static inline int  bm_test(uint64_t f)  { return bitmap[f >> 3] & (1u << (f & 7)); }
@@ -110,11 +126,13 @@ void pmm_init(uint64_t mb_info_phys) {
 }
 
 uint64_t pmm_alloc_frame(void) {
+    uint64_t fl = irq_save();
     for (uint64_t i = next_hint; i < total_frames; i++) {
         if (!bm_test(i)) {
             bm_set(i);
             used_frames++;
             next_hint = i + 1;
+            irq_restore(fl);
             return i * PAGE_SIZE;
         }
     }
@@ -124,17 +142,21 @@ uint64_t pmm_alloc_frame(void) {
             bm_set(i);
             used_frames++;
             next_hint = i + 1;
+            irq_restore(fl);
             return i * PAGE_SIZE;
         }
     }
+    irq_restore(fl);
     return 0;   /* out of memory */
 }
 
 void pmm_free_frame(uint64_t phys) {
     uint64_t frame = phys / PAGE_SIZE;
+    uint64_t fl = irq_save();
     mark_free(frame);
     if (frame < next_hint)
         next_hint = frame;
+    irq_restore(fl);
 }
 
 uint64_t pmm_total_bytes(void) { return total_frames * PAGE_SIZE; }
