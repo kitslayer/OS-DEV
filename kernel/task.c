@@ -40,6 +40,7 @@ static void fx_alloc(task_t *t) {              /* give a task its own FP save ar
 }
 
 static uint64_t active_cr3;     /* the address space currently loaded in CR3 */
+static task_t *idle_task;       /* the scheduling floor: never blocks/exits, run ONLY when no other task is runnable (so a task that blocks itself when nothing else is ready hands off to this instead of spinning marked-BLOCKED). NULL until created -> switch_to_next falls back to its prior behavior. */
 
 static inline uint64_t read_cr3(void) {
     uint64_t v; __asm__ volatile("mov %%cr3, %0" : "=r"(v)); return v;
@@ -66,6 +67,10 @@ static void thread_trampoline(void) {
     task_exit();                /* if the entry function returns, end cleanly */
 }
 
+/* The idle task: a guaranteed-runnable floor. Halts with interrupts on so the
+ * timer can preempt it the instant any real task becomes runnable. */
+static void idle_loop(void) { for (;;) __asm__ volatile("sti; hlt"); }
+
 void sched_init(void) {
     task_t *t = kzalloc(sizeof(task_t));
     t->id = next_id++;
@@ -75,6 +80,7 @@ void sched_init(void) {
     active_cr3 = t->cr3;
     fx_alloc(t);
     current = t;
+    idle_task = task_create(idle_loop, read_cr3(), 0);   /* add the always-runnable floor (heap is up: kheap_init precedes sched_init) */
 }
 
 task_t *task_create(void (*entry)(void), uint64_t cr3, void *proc) {
@@ -133,10 +139,16 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
 static void switch_to_next(void) {
     task_t *prev = current;
     task_t *next = prev->next;
-    while (next != prev && (next->state == TASK_DEAD || next->state == TASK_BLOCKED))
+    /* Prefer a non-idle runnable task: skip DEAD/BLOCKED and the idle task. */
+    while (next != prev && (next->state == TASK_DEAD || next->state == TASK_BLOCKED || next == idle_task))
         next = next->next;
-    if (next == prev)
-        return;                 /* nothing else runnable */
+    if (next == prev) {                         /* no other non-idle task is runnable */
+        if (prev->state == TASK_RUNNING || prev->state == TASK_READY)
+            return;                             /* prev itself is still runnable (e.g. the desktop) -> keep it; idle stays parked */
+        if (!idle_task || prev == idle_task)
+            return;                             /* no floor available / already on it */
+        next = idle_task;                       /* prev blocked/exited and nothing else is ready -> run the idle floor (don't spin a BLOCKED prev) */
+    }
 
     if (prev->state == TASK_RUNNING)
         prev->state = TASK_READY;

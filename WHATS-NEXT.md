@@ -1,5 +1,20 @@
 # What's next
 
+> **(M977) Scheduler — dedicated idle task as a guaranteed runnable floor (kernel review #1; the review is now
+> fully addressed).** `switch_to_next` skipped DEAD/BLOCKED and stopped at `next==prev`, so a task that blocked
+> itself when nothing else was runnable kept executing past `task_block()` still marked BLOCKED (masked only
+> because the desktop task never blocks — "incidental, not structural" safety). Added an `idle_task` (a
+> `for(;;) sti; hlt` task, created in `sched_init` right after task 0) as an always-runnable floor. The catch a
+> naive idle would cause — alternating with the desktop and halving its time slice — is avoided by
+> **deprioritizing** it: the search loop skips `idle_task` too, so real tasks round-robin exactly as before, and
+> idle is selected *only* when no other task is runnable AND `prev` itself isn't (then a blocking task hands off to
+> idle instead of spinning). NULL-safe: if creation ever failed, `switch_to_next` falls back to its prior
+> behavior. Verified: boottest (boots + desktop) + browsertest (the Browser app runs) + an in-guest soak (Calc
+> computes `2+2=4` / `10*5=50` responsively while Welcome/Files/Shell/Calc/desktop all coexist — no jank or
+> starvation, confirming idle stays parked). task.c warnings 0; all 37 `make check` suites pass. **The M970 kernel
+> scheduler+heap review is now FULLY addressed** (M970 lost-wakeup + OOM, M971 input guards, M972 double-free
+> detection, M973/M974 backward coalescing, M977 idle floor). See [[os-dev-project]].
+
 > **(M976) WM — Welcome/About content-clip (completes the M968 review).** Same fix as M975's Monitor, applied to
 > the other two fixed-layout info panels: `KIND_WELCOME` (open 360×290) and `KIND_ABOUT` (open 300×178) now get a
 > `win_min` equal to their open size, so they can't be dragged smaller than their content and bleed text past the
