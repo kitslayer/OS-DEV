@@ -1,5 +1,24 @@
 # What's next
 
+> **(M968) Window manager — fix a crash + two stale-state bugs, found by a read-only review subagent.** A seventh
+> review subagent audited `kernel/desktop.c`; it confirmed the fb primitives all clip and the mouse stays
+> on-screen, and surfaced three real bugs (the rest were cosmetic): **(P1, crash) a cooked keystroke with NO
+> windows open dereferenced `windows[win_count-1]` = `windows[-1]`** (BSS garbage `kind`/`app` → a wild
+> `app_key()`/`browser_key()` call). Every F-key handler guarded `win_count>0` but this one didn't; you can close
+> all windows (nothing floors *closing*, only F3-minimize) then press a key. Fixed with the same `win_count>0`
+> guard. **(P2) the four window-index drag states** (`selecting`/`bselecting`/`sbdrag`/`bsbdrag`, holding the
+> window being text-selected or scrollbar-dragged) **weren't reset when the window array reorders or reaps** — only
+> `dragging`/`resizing` were. So if a background app exits mid-drag (the async reap loop shifts the array), the
+> stale index then points at a different — or reaped/freed — window's `app`/`browser`. Fixed by resetting all six
+> gesture states together at every reorder/reap/release site (`raise_window`/`sink_window`/taskbar-chip/reap-loop).
+> **(P2) an app launched while at the 16-window cap was leaked** — `make_app_window` rejected it *after* it was
+> drained from the pending queue, so the spawned ring-3 task became unreachable (no window → never reaped). Fixed
+> by draining the pending queue only while a window slot is free; a rejected app stays pending and gets a window
+> when one closes. Verified in-guest: closed all windows + typed keys → no crash, and the WM reopens windows
+> normally; `make check` green; desktop.c warnings still 0. P3s (fixed-layout window content not clipped to a
+> shrunken body, a window droppable behind the taskbar, the wheel scrolling under an open Apps menu) left as
+> minor/cosmetic. See [[os-dev-project]].
+
 > **(M967) JS engine — `Number(string)` returns NaN for non-numeric strings (review #1, the string part).** `to_num`
 > parsed a leading number and ignored the rest, and a wholly non-numeric string fell through to `0` (a documented
 > "old integer engine" holdover) — so `Number("12abc")`→12, `Number("5px")`→5, `Number("x")`→0, `isNaN("abc")`→false,

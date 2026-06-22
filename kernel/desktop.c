@@ -743,9 +743,12 @@ void desktop_run(void) {
         int dirty = 0;
         usb_tablet_poll();
 
-        /* give any newly-spawned program a window */
+        /* give any newly-spawned program a window — but only while there's a free
+         * window slot. At the cap, leave the app PENDING (don't drain it) so it isn't
+         * dropped-and-leaked; it gets a window once one closes (make_app_window's own
+         * cap check stays as a belt-and-braces guard). */
         app_t *na;
-        while ((na = app_take_pending())) { make_app_window(na); dirty = 1; }
+        while (win_count < MAX_WINDOWS && (na = app_take_pending())) { make_app_window(na); dirty = 1; }
 
         /* open browser windows requested by the shell (`browse <url>`) */
         char burl[160];
@@ -812,7 +815,7 @@ void desktop_run(void) {
                 continue;                       /* swallow all keys while the menu is up */
             }
             if (k == 0x0E) {                    /* F2: cycle focus to the next window */
-                if (win_count > 1) { raise_window(0); dragging = resizing = -1; dirty = 1; }
+                if (win_count > 1) { raise_window(0); dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1; dirty = 1; }
                 continue;
             }
             if (k == 0x0F) {                    /* F4: maximize/restore focused window */
@@ -825,7 +828,7 @@ void desktop_run(void) {
                 if (vis > 1) {
                     windows[win_count - 1].minimized = 1;
                     sink_window(win_count - 1); /* focus falls to the window below; F2 or */
-                    dragging = resizing = -1;   /* the array reordered: drop any active gesture */
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;   /* the array reordered: drop any active gesture */
                     dirty = 1;                  /* its taskbar chip restores it (raise_window) */
                 }
                 continue;
@@ -841,7 +844,7 @@ void desktop_run(void) {
                         app_request_kill((app_t *)windows[fi].app);  /* app self-exits; reap loop drops the window */
                     else
                         remove_window(fi);       /* browser/files/etc: drop immediately */
-                    dragging = resizing = -1; dirty = 1;
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1; dirty = 1;
                 }
                 continue;
             }
@@ -857,11 +860,13 @@ void desktop_run(void) {
                 if (fb_save_png(name) == 0) { beep(1800, 30); if (shot_n < 999) shot_n++; }   /* PNG: ~9 KB vs ~576 KB BMP */
                 continue;
             }
-            window_t *top = &windows[win_count - 1];
-            if (top->minimized) { /* no visible focused window: swallow the key */ }
-            else if (top->kind == KIND_APP && top->app) { app_sel_clear((app_t *)top->app); app_key((app_t *)top->app, (char)k); dirty = 1; }
-            else if (top->kind == KIND_BROWSER && top->app) { browser_key((browser_t *)top->app, k); dirty = 1; }
-            else if (top->kind == KIND_FILES) { files_key(top, k); dirty = 1; }
+            if (win_count > 0) {                          /* with NO windows there's no focus target -> swallow the key; else windows[win_count-1] is windows[-1] = BSS garbage -> a wild app_key() call (mirrors the F-key guards above) */
+                window_t *top = &windows[win_count - 1];
+                if (top->minimized) { /* no visible focused window: swallow the key */ }
+                else if (top->kind == KIND_APP && top->app) { app_sel_clear((app_t *)top->app); app_key((app_t *)top->app, (char)k); dirty = 1; }
+                else if (top->kind == KIND_BROWSER && top->app) { browser_key((browser_t *)top->app, k); dirty = 1; }
+                else if (top->kind == KIND_FILES) { files_key(top, k); dirty = 1; }
+            }
         }
 
         /* raw make/break key events -> the focused app, if it opted into raw mode
@@ -978,7 +983,7 @@ void desktop_run(void) {
                 } else for (int i = 0; i < win_count; i++) {     /* else a window chip? */
                     int cx = TB_CHIPX0 + i * (TB_CHIPW + TB_CHIPGAP);
                     if (cx + TB_CHIPW > clkx - 8) break;
-                    if (mx >= cx && mx < cx + TB_CHIPW) { raise_window(i); dragging = resizing = -1; dirty = 1; break; }
+                    if (mx >= cx && mx < cx + TB_CHIPW) { raise_window(i); dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1; dirty = 1; break; }
                 }
             } else {
                 for (int i = win_count - 1; i >= 0; i--) {
@@ -1084,7 +1089,7 @@ void desktop_run(void) {
                 if (n > 0) clip_set(sbuf, n);
                 bselecting = -1; dirty = 1;
             }
-            dragging = resizing = -1; sbdrag = -1; bsbdrag = -1; dirty = 1;
+            dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1; sbdrag = -1; bsbdrag = -1; dirty = 1;
         }
 
         if (sbdrag >= 0 && left) {                 /* dragging the terminal scrollbar */
@@ -1141,7 +1146,7 @@ void desktop_run(void) {
             if (windows[i].kind == KIND_APP && !app_alive((app_t *)windows[i].app)) {
                 if (!app_reap((app_t *)windows[i].app)) continue;
                 remove_window(i); dirty = 1;
-                dragging = resizing = -1;             /* the array shifted: drop any active gesture */
+                dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;             /* the array shifted: drop any active gesture */
             }
 
         uint64_t sec = timer_ticks() / 100;
