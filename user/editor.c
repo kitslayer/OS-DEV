@@ -59,6 +59,17 @@ static void undo_record(int pos, char ch, int kind) {
  * Ctrl-Z reverts a line at a time rather than the whole typing session). */
 static void undo_break(void) { ulast_kind = -1; uexpect = -1; }
 
+/* Re-label the most recent `n` undo ops as a single group, so one Ctrl-Z (or
+ * one Backspace's worth of undo) reverts them together. Used when a single
+ * keystroke produces a mixed run of edits the (kind,pos)-continuity rule would
+ * otherwise split — e.g. auto-dedent's leading-space deletes + the `}` insert. */
+static void undo_merge_last(int n) {
+    if (n <= 1 || n > un) return;
+    int g = ulog[un - 1].grp;
+    for (int i = un - n; i < un - 1; i++) ulog[i].grp = g;
+    undo_break();                               /* the merged run is itself a group boundary */
+}
+
 static void undo(void) {
     if (un == 0) return;
     int g = ulog[un - 1].grp;
@@ -174,6 +185,30 @@ static void del_at(int pos) {
     undo_record(pos, doc[pos], 2);
     for (int i = pos; i < dlen - 1; i++) doc[i] = doc[i+1];
     dlen--;
+}
+
+/* Auto-dedent: complement to newline_indent(). When the user interactively types
+ * a closing `}` and everything on the current line before the caret is whitespace,
+ * pull the line back one indent level (a leading tab, else up to 4 spaces removed
+ * immediately left of the caret, never past the line start) before inserting the
+ * `}` — so a `}` that opened a block ends up under its `if`/`for`/etc. rather than
+ * at the inner body indent. The deletes + the insert coalesce into one undo group,
+ * so a single Backspace/Ctrl-Z reverts the whole keystroke. Only `}` is handled
+ * (`)`/`]` close inline far more often than they sit alone on a line, where a
+ * dedent would just be noise). Returns 1 if it inserted the `}` (caller is done). */
+static int dedent_brace(void) {
+    if (readonly || dlen >= MAXDOC - 1) return 0;
+    int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;     /* start of the current line */
+    if (ls == cur) return 0;                                    /* caret at line start: nothing to dedent */
+    for (int i = ls; i < cur; i++) if (doc[i] != ' ' && doc[i] != '\t') return 0;  /* prefix must be whitespace-only */
+    int rm = 0;                                                 /* one level: a leading tab, else up to 4 spaces */
+    if (doc[cur-1] == '\t') rm = 1;
+    else while (rm < 4 && cur - 1 - rm >= ls && doc[cur-1-rm] == ' ') rm++;
+    int n0 = un;                                                /* undo ops before this keystroke */
+    for (int k = 0; k < rm; k++) { del_at(cur - 1); cur--; }    /* drop the whitespace just left of the caret */
+    insert('}');                                                /* then insert the brace as usual */
+    undo_merge_last(un - n0);                                   /* deletes + insert = one undo step */
+    return 1;
 }
 /* Tab / Shift-Tab block indent (dedent=0) or dedent (dedent=1): operate on every
  * line touched by the selection, or just the current line when there's no
@@ -754,6 +789,7 @@ int main(void) {
             }
         }
         else if (k == 0x9b) block_indent(1);              /* Shift-Tab: dedent line / selection */
+        else if (k == '}') { if (!dedent_brace()) insert('}'); }  /* `}` on a blank-prefix line auto-dedents one level first */
         else if (k >= 32 && k < 127) insert((char)k);
         render(0);
     }
