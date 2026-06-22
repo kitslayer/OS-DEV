@@ -188,7 +188,9 @@ static void win_min(const window_t *w, int *mw, int *mh) {
         *mw = app_cols() * font_width + 14;
         *mh = app_rows() * font_height + TITLEBAR_H + 14;
     } else if (w->kind == KIND_BROWSER) { *mw = 340; *mh = 240; }
-    else if (w->kind == KIND_SYSMON) { *mw = 320; *mh = 272; }   /* a fixed-layout info panel (= its open size): can't be shrunk below its Memory/Network/Disk content, which would otherwise draw past the bottom edge */
+    else if (w->kind == KIND_SYSMON)  { *mw = 320; *mh = 272; }  /* a fixed-layout info panel (= its open size): can't be shrunk below its Memory/Network/Disk content, which would otherwise draw past the bottom edge */
+    else if (w->kind == KIND_WELCOME) { *mw = 360; *mh = 290; }  /* likewise a fixed-layout panel pinned to its open size */
+    else if (w->kind == KIND_ABOUT)   { *mw = 300; *mh = 178; }  /* likewise */
     else { *mw = 170; *mh = 110; }
 }
 

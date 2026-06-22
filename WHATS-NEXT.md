@@ -1,5 +1,14 @@
 # What's next
 
+> **(M976) WM — Welcome/About content-clip (completes the M968 review).** Same fix as M975's Monitor, applied to
+> the other two fixed-layout info panels: `KIND_WELCOME` (open 360×290) and `KIND_ABOUT` (open 300×178) now get a
+> `win_min` equal to their open size, so they can't be dragged smaller than their content and bleed text past the
+> bottom edge. desktop.c warnings 0; all 37 `make check` suites pass. **This closes out the WM review entirely** —
+> every finding fixed: the no-windows keystroke crash (M968), the stale drag-index + orphan-app bugs (M968), the
+> window-behind-taskbar + wheel-under-menu polish (M969), and the content-clip for all three fixed-layout panels
+> (M975–M976). A general fb clip-rect (so any window's content is bounded to its body) remains the only WM item
+> left, deferred as a moderate fb-core change. See [[os-dev-project]].
+
 > **(M975) WM — Monitor can't be shrunk below its content (M968 review P3, worst case).** The Monitor
 > (`KIND_SYSMON`) opens at 320×272 but `win_min` floored every non-app/browser window at 170×110, so dragging it
 > smaller drew its lower Memory/Network/Disk bars (laid out at fixed offsets ~content+200) past the window's bottom
