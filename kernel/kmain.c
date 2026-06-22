@@ -33,6 +33,7 @@
 #include "usb.h"
 #include "usb_storage.h"
 #include "usb_kbd.h"
+#include "ehci.h"
 #include "speaker.h"
 #include "audio.h"
 #include "hda.h"
@@ -255,6 +256,17 @@ void kmain(uint64_t mb_info) {
      * tablet so USB keystrokes reach the shell/apps like PS/2 ones. */
     usb_kbd_init();
     usb_kbd_selftest();
+
+    /* Bring up an EHCI (USB 2.0) host controller as an ADDITIONAL USB host — the
+     * UHCI controller above (with its tablet / mass-storage / keyboard) is
+     * untouched. No-op if no EHCI controller is attached. ehci_init() resets the
+     * HC, builds the async (QH+qTD) schedule, routes the root ports to EHCI,
+     * resets the first populated high-speed port, and ENUMERATES the device behind
+     * it over control transfers; the self-test logs the HC version + port count,
+     * the port reset, and the enumerated device descriptor (idVendor/idProduct/
+     * class) read over EHCI — the headless proof, like the storage self-tests. */
+    ehci_init();
+    ehci_selftest();
 
     kprintf("[main] launching the desktop environment...\n");
     speaker_chime();              /* a little startup arpeggio */

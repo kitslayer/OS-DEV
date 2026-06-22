@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -391,6 +391,21 @@ usbstoragetest: $(KERNEL) $(DISK)
 usbkbdtest: $(KERNEL) $(DISK)
 	@tests/run-usb-kbd-tests.sh
 
+# Headless in-guest assertion for the EHCI (USB 2.0) host-controller driver
+# (kernel/ehci.c): attaches an EHCI controller (-device usb-ehci) WITH a usb-storage
+# flash disk on ITS bus (-device usb-storage,bus=ehci.0) — a SEPARATE, additional
+# USB host alongside the existing UHCI controller + tablet — boots, and asserts the
+# driver brought the USB 2.0 controller up (PCI class 0C/03/20 probe + HC reset +
+# async QH/qTD schedule running), reset+enabled a high-speed root port, ENUMERATED
+# the device over EHCI control transfers (device/config descriptors read, address
+# assigned, SET_CONFIGURATION), and — the stretch bulk path — read SECTOR 0 over
+# EHCI bulk (BOT/SCSI READ(10)) returning that disk's KNOWN content (host-computed
+# checksum + marker). The UHCI tablet stays up and boot stays on legacy ATA. SKIPs
+# cleanly if QEMU/python3 absent. (Companion to `boottest`, which has no EHCI
+# controller -> the driver must cleanly no-op there and UHCI + the tablet stay up.)
+ehcitest: $(KERNEL) $(DISK)
+	@tests/run-ehci-tests.sh
+
 # Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
 # instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
@@ -568,8 +583,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)
