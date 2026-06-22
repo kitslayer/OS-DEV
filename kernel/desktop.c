@@ -66,6 +66,7 @@ static int screen_w, screen_h;
 static int spawn_n, menu_open, menu_sel;   /* menu_sel: keyboard-highlighted item */
 static int help_open;                       /* F1: keyboard-shortcut help overlay */
 static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher overlay (sw_sel: highlighted window) */
+static int ctx_open, ctx_x, ctx_y, ctx_win; /* right-click title-bar menu (ctx_win is always the topmost window, win_count-1) */
 static int start_x = 8, start_y, start_w = 110, start_h = 24;
 
 struct menu_item { const char *label; int kind; const char *prog; };
@@ -129,6 +130,11 @@ static const struct menu_item menu[] = {
 #define TB_CHIPW    124                 /* taskbar window-chip width */
 #define TB_CHIPGAP  6
 #define TB_CHIPX0   (start_x + start_w + 10)
+/* Right-click title-bar context menu: 5 rows, sized like a slim Apps menu. Row 0's
+ * label is Maximize or Restore depending on the window's `maximized` flag. */
+#define CTX_ROWS    5
+#define CTX_W       128
+#define CTX_ROW_H   22
 
 static void draw_text(int x, int y, const char *s, uint32_t fg) {
     for (int i = 0; s[i]; i++)
@@ -484,6 +490,15 @@ int desktop_set_wallpaper(const char *name) {
     return 0;
 }
 
+/* Context-menu hit-test: which row (0..CTX_ROWS-1) is at cursor (px,py), or -1 if
+ * outside the popup. Shared by the renderer's hover highlight and the click
+ * handler so they always agree on the row boundaries (cf. clk_pill_w). */
+static int ctx_row_at(int px, int py) {
+    if (px < ctx_x || px >= ctx_x + CTX_W) return -1;
+    int r = (py - (ctx_y + 2)) / CTX_ROW_H;
+    return (r >= 0 && r < CTX_ROWS) ? r : -1;
+}
+
 /* Render the whole scene (wallpaper, windows, taskbar — but NOT the cursor)
  * into the cached scene buffer. This is the expensive part, so we only do it
  * when the scene actually changes; plain cursor moves reuse the cache. */
@@ -555,6 +570,28 @@ static void render_scene(void) {
         }
     }
 
+    /* Right-click title-bar context menu: a small popup at the click point with
+     * 5 actions, drawn on top of the windows (like the Apps menu). ctx_win always
+     * names the topmost window, so a closed/reordered window can't leave a stale
+     * row — render is skipped if it's no longer valid. The row under the cursor is
+     * highlighted (same colours as the Apps menu's keyboard highlight). */
+    if (ctx_open && ctx_win >= 0 && ctx_win < win_count) {
+        const char *rows[CTX_ROWS] = {
+            windows[ctx_win].maximized ? "Restore" : "Maximize",
+            "Minimize", "Snap Left", "Snap Right", "Close",
+        };
+        int ch = CTX_ROWS * CTX_ROW_H + 4;
+        fb_fill_rect(ctx_x, ctx_y, CTX_W, ch, 0x1E1E2A);
+        box(ctx_x, ctx_y, CTX_W, ch, 0x2D6CDF);
+        int sel = ctx_row_at(mouse_x(), mouse_y());          /* row under the cursor (-1 = none) */
+        for (int i = 0; i < CTX_ROWS; i++) {
+            int iy = ctx_y + 2 + i * CTX_ROW_H;
+            if (i == sel)                                        /* hover highlight */
+                fb_fill_rect(ctx_x + 2, iy, CTX_W - 4, CTX_ROW_H, 0x2D4A8A);
+            draw_text(ctx_x + 12, iy + 3, rows[i], i == sel ? 0xFFFFFF : 0xD0D8F0);
+        }
+    }
+
     /* F1 help overlay: a centered panel listing every keyboard shortcut + the
      * mouse gestures. Drawn last so it sits on top of everything. */
     if (help_open) {
@@ -572,6 +609,8 @@ static void render_scene(void) {
             "drag the bottom-right corner to resize,",
             "click [x] to close, click a taskbar chip to",
             "raise (or restore) that window.",
+            "Right-click a title bar for a menu (maximize,",
+            "minimize, snap left/right, close).",
             "",
             "Wheel scrolls the window under the cursor.",
             "In a terminal: drag (or double-click a word)",
@@ -712,6 +751,31 @@ static void remove_window(int idx) {
         browser_destroy((browser_t *)windows[idx].app);   /* free its buffers */
     for (int i = idx; i < win_count - 1; i++) windows[i] = windows[i + 1];
     win_count--;
+}
+
+/* Run the right-click context-menu row `row` on window `idx`. Each branch wraps
+ * the exact helper the matching F-key uses, so behaviour is identical. Returns 1
+ * if it reordered/removed the window array (the caller must then drop any active
+ * mouse gesture, as the F3/F8 paths do); 0 if geometry-only. `idx` must be valid. */
+static int ctx_action(int idx, int row) {
+    switch (row) {
+        case 0: toggle_maximize(idx); return 0;                  /* Maximize / Restore (F4) */
+        case 1: {                                                /* Minimize (F3) */
+            int vis = 0;                                         /* never hide the LAST visible window */
+            for (int i = 0; i < win_count; i++) if (!windows[i].minimized) vis++;
+            if (vis > 1) { windows[idx].minimized = 1; sink_window(idx); return 1; }
+            return 0;
+        }
+        case 2: snap_window(idx, 0); return 0;                   /* Snap Left (F5) */
+        case 3: snap_window(idx, 1); return 0;                   /* Snap Right (F6) */
+        case 4:                                                  /* Close (F8) */
+            if (windows[idx].kind == KIND_APP && windows[idx].app)
+                app_request_kill((app_t *)windows[idx].app);     /* app self-exits; reap loop drops the window */
+            else
+                remove_window(idx);                              /* browser/files/etc: drop immediately */
+            return 1;
+    }
+    return 0;
 }
 
 /* Give a freshly-spawned app a window (called by the WM as it drains the
@@ -975,6 +1039,10 @@ void desktop_run(void) {
 
         int k;
         while ((k = input_trygetchar()) >= 0) {
+            if (ctx_open) {                     /* context menu is modal: Esc closes it, swallow the */
+                if (k == 27) { ctx_open = 0; dirty = 1; }   /* rest so no F-key reorders under it (ctx_win stays valid) */
+                continue;
+            }
             if (k == 0x1D) {                    /* F1: toggle the keyboard-shortcut help overlay */
                 help_open = !help_open; if (help_open) menu_open = 0; dirty = 1;
                 continue;
@@ -1159,12 +1227,24 @@ void desktop_run(void) {
             }
         }
 
-        /* Right-click a browser link: copy its URL to the clipboard. */
+        /* Right-click: a window's TITLE BAR opens the context menu (Maximize/
+         * Restore, Minimize, Snap Left/Right, Close); browser CONTENT still copies
+         * a link's URL. A right-click while the menu is open just dismisses it. */
         if ((btn & 2) && !(prev_btn & 2)) {
-            for (int i = win_count - 1; i >= 0; i--) {
+            if (ctx_open) {
+                ctx_open = 0; dirty = 1;                 /* a second right-click dismisses, no action */
+            } else for (int i = win_count - 1; i >= 0; i--) {
                 window_t *w = &windows[i];
                 if (w->minimized || !in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
-                if (w->kind == KIND_BROWSER && w->app) {
+                if (my < w->y + TITLEBAR_H) {            /* on the title bar -> open the context menu */
+                    raise_window(i);                     /* normal title interaction: focus it first */
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;   /* array reordered */
+                    ctx_win = win_count - 1;             /* now topmost; the menu always targets the top window */
+                    int ch = CTX_ROWS * CTX_ROW_H + 4;
+                    ctx_x = mx; if (ctx_x > screen_w - CTX_W) ctx_x = screen_w - CTX_W; if (ctx_x < 0) ctx_x = 0;
+                    ctx_y = my; if (ctx_y > screen_h - TASKBAR_H - ch) ctx_y = screen_h - TASKBAR_H - ch; if (ctx_y < 0) ctx_y = 0;
+                    ctx_open = 1; dirty = 1;
+                } else if (w->kind == KIND_BROWSER && w->app) {   /* browser content: copy a link's URL */
                     char lb[1024];
                     int n = browser_rclick((browser_t *)w->app, mx - w->x, my - (w->y + TITLEBAR_H), lb, sizeof lb);
                     if (n > 0) { clip_set(lb, n); dirty = 1; }
@@ -1175,6 +1255,17 @@ void desktop_run(void) {
 
         if (left && !(prev_btn & 1) && help_open) {
             help_open = 0; dirty = 1;        /* the help overlay is modal: a click anywhere dismisses it */
+        } else if (left && !(prev_btn & 1) && ctx_open) {
+            /* the context menu is modal: a click on a row runs that action on
+             * ctx_win, a click anywhere else just dismisses it. Either way the
+             * window beneath is NOT actioned. Re-validate ctx_win (a window may
+             * have been reaped since the menu opened) so a stale index is never
+             * used; closing the menu before acting also keeps Close safe. */
+            int row = ctx_row_at(mx, my);
+            ctx_open = 0; dirty = 1;
+            if (row >= 0 && ctx_win >= 0 && ctx_win < win_count)
+                if (ctx_action(ctx_win, row))   /* reordered/removed the array: drop any active gesture */
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
         } else if (left && !(prev_btn & 1)) {
             int ty = screen_h - TASKBAR_H, mh = MENU_PERCOL*MENU_ITEM_H + 4;
             int mw = MENU_COLS*MENU_W, my0 = ty - mh;
@@ -1361,6 +1452,7 @@ void desktop_run(void) {
                 if (!app_reap((app_t *)windows[i].app)) continue;
                 remove_window(i); dirty = 1;
                 dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;             /* the array shifted: drop any active gesture */
+                if (ctx_open) ctx_open = 0;     /* a window vanished: close the menu so ctx_win can't go stale */
             }
 
         uint64_t sec = timer_ticks() / 100;
