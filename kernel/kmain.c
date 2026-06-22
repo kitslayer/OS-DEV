@@ -24,6 +24,7 @@
 #include "ahci.h"
 #include "virtio_blk.h"
 #include "nvme.h"
+#include "floppy.h"
 #include "virtio_net.h"
 #include "virtio_gpu.h"
 #include "svga.h"
@@ -209,6 +210,16 @@ void kmain(uint64_t mb_info) {
      * (and does a write round-trip) and logs their bytes/checksum. */
     nvme_init();
     nvme_selftest();
+
+    /* Bring up the legacy floppy controller (82077AA) as ANOTHER additional
+     * block device — boot still uses legacy ATA above. Unlike every other DMA
+     * driver here (which bus-master over PCI), the floppy moves its data through
+     * the legacy 8237 ISA DMA controller (channel 2 + a low-RAM bounce buffer
+     * that must not cross a 64 KiB boundary). No-op if no FDC/diskette is
+     * attached. The self-test resets+recalibrates the controller and ISA-DMA
+     * reads real sectors off the diskette, logging their bytes/checksum. */
+    floppy_init();
+    floppy_selftest();
 
     /* Bring up virtio-gpu (the modern paravirtual 2D GPU) as an ADDITIONAL
      * display device — the boot display stays on the linear framebuffer

@@ -35,6 +35,18 @@ SECTIONS
         *(.data*)
     }
 
+    /* Low-physical, page-aligned BSS placed BEFORE the big .bss arenas, so any
+     * buffer here is guaranteed to sit within the low 16 MiB of physical RAM.
+     * This is for ISA DMA (the 8237 / floppy), whose DMA controller can only
+     * address 24 bits (16 MiB): the kernel image's huge static arenas (the JS
+     * arena alone is 44 MiB) push kernel_end past 16 MiB, so NO free PMM frame
+     * is low enough — a reserved low buffer in the image is the way to get one.
+     * Kept tiny (a couple of pages) so it stays comfortably under 16 MiB even as
+     * .text/.rodata/.data grow. NOLOAD: zero-initialised at runtime like .bss. */
+    .lowbss (NOLOAD) : ALIGN(4K) {
+        *(.lowbss*)
+    }
+
     .bss : ALIGN(4K) {
         *(COMMON)
         *(.bss*)

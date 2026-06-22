@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -316,6 +316,18 @@ virtioblktest: $(KERNEL) $(DISK)
 # no-ops there.)
 nvmetest: $(KERNEL) $(DISK)
 	@tests/run-nvme-tests.sh
+
+# Headless in-guest assertion for the floppy controller driver (kernel/floppy.c):
+# attaches a 1.44 MB floppy image (-drive ...,if=floppy), boots, and asserts the
+# 82077AA driver RESET + RECALIBRATEd the controller and read that diskette's
+# KNOWN per-sector content back over ISA DMA (host-computed checksums + marker),
+# including a multi-sector read. Unlike the other DMA drivers (PCI bus-master),
+# the floppy moves data through the legacy 8237 ISA DMA controller (channel 2 +
+# a low-RAM, 64-KiB-bounded bounce buffer). The boot disk stays on legacy ATA.
+# SKIPs cleanly if QEMU/python3 absent. (Companion to `boottest`, which has no
+# floppy -> the driver must cleanly no-op there.)
+floppytest: $(KERNEL) $(DISK)
+	@tests/run-floppy-tests.sh
 
 # Headless in-guest assertion for ATA multi-drive enumeration + MBR/GPT partition
 # parsing (kernel/ata.c + kernel/partition.c): attaches a SECOND IDE disk with an
@@ -583,8 +595,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + floppytest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)
