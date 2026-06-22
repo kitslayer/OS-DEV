@@ -1,5 +1,20 @@
 # What's next
 
+> **(M967) JS engine — `Number(string)` returns NaN for non-numeric strings (review #1, the string part).** `to_num`
+> parsed a leading number and ignored the rest, and a wholly non-numeric string fell through to `0` (a documented
+> "old integer engine" holdover) — so `Number("12abc")`→12, `Number("5px")`→5, `Number("x")`→0, `isNaN("abc")`→false,
+> `Number("Infinity")`→0. Rewrote the `V_STR` case (only that case) to require the literal to be the WHOLE string:
+> after parsing (hex/bin/oct/decimal/exponent) it now checks that only trailing whitespace remains, requires at
+> least one digit, requires exponent digits after `e`, and recognizes `Infinity`/`-Infinity` — otherwise `NaN`.
+> Empty/whitespace string still →0 (per spec). Verified host (30+ cases): valid `42`/`3.14`/`-5`/`1e3`/`0x10`/`.5`/
+> `5.`/`  7  `/`0b101`/`0o17` still parse; `"x"`/`"12abc"`/`"5px"`/`"0xg"`/`"1e"`/`"."`/`"+"`→NaN; `Number("Infinity")`
+> →∞; `isNaN("abc")`→true; valid numeric strings still coerce in arithmetic (`"10"-1`→9) and loose-`==` (`"5"==5`
+> →true, `"5px"==5`→false now); `parseInt`/`parseFloat` (lenient by design) unchanged. js.c warnings held at 17; all
+> 37 `make check` suites pass (jstest doesn't rely on the old string→0). **Still deferred (the riskier rest of #1,
+> a fresh session): `undefined`→NaN and object→NaN** — left UNCHANGED (`undefined+1`→1, `Number({})`→0 still) because
+> flipping pervasive arithmetic on undefined/objects can surface page bugs as visible `NaN` and needs broad in-guest
+> demo re-verification. See [[js-and-web-app-ceiling]].
+
 > **(M966) JS engine — `var` hoisting + bare-`var` no-clobber (review #4, part 2 — `var` semantics now complete).**
 > Building on M965's function-scoping: added a `hoist_vars` pre-pass run once at each function/program entry that
 > walks the body's statements — descending into blocks/if/loops/switch/try but STOPPING at a nested function — and

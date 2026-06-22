@@ -1154,20 +1154,28 @@ static int64_t days_from_civil(int64_t y, int64_t m, int64_t d);   /* fwd (defin
  * valueOf/toString via the same depth-guarded getter call path. */
 static int proto_lookup(obj *start, const char *name, val recv, val *out);
 static val call_function_this(val fn, val thisv, val *args, int nargs);
+/* true iff the rest of `s` is only trailing whitespace (so the numeric literal was the WHOLE string). */
+static int tn_tail_ws(const char *s){ while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++; return *s==0; }
 static double to_num(val v) {
     switch (v.t) {
         case V_NUM: case V_BOOL: return v.num;
         case V_STR: { const char*s=v.str;
             while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++;   /* JS ToNumber skips leading whitespace */
+            if(!*s) return 0;                                  /* "" / all-whitespace -> 0 (per spec) */
             int neg=0; if(*s=='-'){neg=1;s++;} else if(*s=='+'){s++;}
-            if(s[0]=='0' && (s[1]=='x'||s[1]=='X')){ int64_t x=0; s+=2;   /* 0x.. hex (Number("0x10")===16) */
-                for(;;){ char c=*s; int d; if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; x=x*16+d; s++; } return neg?-(double)x:(double)x; }
-            if(s[0]=='0' && (s[1]=='b'||s[1]=='B')){ int64_t x=0; s+=2; while(*s=='0'||*s=='1'){ x=x*2+(*s-'0'); s++; } return neg?-(double)x:(double)x; }   /* 0b.. binary (M693) */
-            if(s[0]=='0' && (s[1]=='o'||s[1]=='O')){ int64_t x=0; s+=2; while(*s>='0'&&*s<='7'){ x=x*8+(*s-'0'); s++; } return neg?-(double)x:(double)x; }   /* 0o.. octal (M693) */
-            double x=0;            /* decimal: integer . fraction [e exponent]; a non-numeric string -> 0 (as the old integer engine did) */
-            while(*s>='0'&&*s<='9'){ x=x*10.0+(*s-'0'); s++; }
-            if(*s=='.'){ s++; double f=0.1; while(*s>='0'&&*s<='9'){ x+=(*s-'0')*f; f*=0.1; s++; } }
-            if(*s=='e'||*s=='E'){ s++; int eneg=0; if(*s=='+')s++; else if(*s=='-'){eneg=1;s++;} int ex=0,ed=0; while(*s>='0'&&*s<='9'){ ex=ex*10+(*s-'0'); s++; ed=1; } if(ed) x*=js_pow(10.0, eneg?-(double)ex:(double)ex); }
+            if(s[0]=='0' && (s[1]=='x'||s[1]=='X')){ int64_t x=0; int any=0; s+=2;   /* 0x.. hex (Number("0x10")===16) */
+                for(;;){ char c=*s; int d; if(c>='0'&&c<='9')d=c-'0'; else if(c>='a'&&c<='f')d=c-'a'+10; else if(c>='A'&&c<='F')d=c-'A'+10; else break; x=x*16+d; s++; any=1; }
+                if(!any || !tn_tail_ws(s)) return JS_NAN;
+                return neg?-(double)x:(double)x; }
+            if(s[0]=='0' && (s[1]=='b'||s[1]=='B')){ int64_t x=0; int any=0; s+=2; while(*s=='0'||*s=='1'){ x=x*2+(*s-'0'); s++; any=1; } if(!any||!tn_tail_ws(s)) return JS_NAN; return neg?-(double)x:(double)x; }   /* 0b.. binary (M693) */
+            if(s[0]=='0' && (s[1]=='o'||s[1]=='O')){ int64_t x=0; int any=0; s+=2; while(*s>='0'&&*s<='7'){ x=x*8+(*s-'0'); s++; any=1; } if(!any||!tn_tail_ws(s)) return JS_NAN; return neg?-(double)x:(double)x; }   /* 0o.. octal (M693) */
+            if(s[0]=='I'&&s[1]=='n'&&s[2]=='f'&&s[3]=='i'&&s[4]=='n'&&s[5]=='i'&&s[6]=='t'&&s[7]=='y'){ s+=8; if(!tn_tail_ws(s)) return JS_NAN; return neg?-JS_INF:JS_INF; }   /* Number("Infinity") (short-circuit && never reads past the NUL) */
+            double x=0; int any=0;            /* decimal: integer . fraction [e exponent] */
+            while(*s>='0'&&*s<='9'){ x=x*10.0+(*s-'0'); s++; any=1; }
+            if(*s=='.'){ s++; double f=0.1; while(*s>='0'&&*s<='9'){ x+=(*s-'0')*f; f*=0.1; s++; any=1; } }
+            if(!any) return JS_NAN;           /* no digits at all ("abc", ".", "+", "e5") -> NaN, not 0 */
+            if(*s=='e'||*s=='E'){ s++; int eneg=0; if(*s=='+')s++; else if(*s=='-'){eneg=1;s++;} int ex=0,ed=0; while(*s>='0'&&*s<='9'){ ex=ex*10+(*s-'0'); s++; ed=1; } if(!ed) return JS_NAN; x*=js_pow(10.0, eneg?-(double)ex:(double)ex); }   /* "1e" w/o exponent digits -> NaN */
+            if(!tn_tail_ws(s)) return JS_NAN; /* trailing garbage ("12abc", "5px") -> NaN, not a partial parse */
             return neg?-x:x; }
         case V_OBJ:
             if (v.o && v.o->kind==V_DATE && v.o->n>=6)   /* Date -> epoch ms, matching getTime (M429) */
