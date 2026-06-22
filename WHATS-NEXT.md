@@ -1,5 +1,18 @@
 # What's next
 
+> **(M944) Browser — `<select>`/`<option>` dropdown (the last form control).** Completes the form set
+> (text/password/checkbox/radio/textarea + now select). In the token-stream renderer a popup isn't practical, so
+> it's a **cycle-on-click** control: the select renders as a focusable `[ Label v]` link showing the chosen
+> option, and each click advances to the next option (wrapping). Parsing mirrors `<textarea>`: `<select>` is
+> captured as raw text, then `parse_select` extracts each `<option>`'s value (its `value` attr, else the label)
+> + label + `selected`; the chosen value lives in the input store (so `.value` reads it and the form submits
+> `name=value`), the option order is kept in `sel_vals` for cycling, and a new `selcyc:ID` link type drives the
+> click (mirrors the checkbox `check:` path: find the current value, set the next, re-render). Selection is
+> determined by the stored value (so a cycled choice sticks across re-renders), falling back to the `selected`
+> option then the first. Additive — no `<select>` → no change. New `SEL.HTM` demo. Verified in-guest: renders
+> the `selected` option ("Banana", `.value`→`b`); clicking cycles to "Cherry" (`.value`→`c`). `make check`
+> green (36 suites). **The browser's HTML form-control set is now complete.**
+
 > **(M943) Browser — `document.title` get/set + page titles in the window bar & taskbar.** Page JS can now read
 > and change the document title, and — as a real desktop improvement — browser windows now show the page
 > `<title>` in their title bar and taskbar chip (was always "Browser"). js.c gets the document object pointer

@@ -412,6 +412,12 @@ static const struct {
         "<p><button onclick=\"document.getElementById('o').textContent='title=['+document.title+']'\">[ read title ]</button> "
         "<button onclick=\"document.title='Changed!';document.getElementById('o').textContent='now title=['+document.title+']'\">[ set title ]</button></p>"
         "<p id=\"o\">click read title</p>" },
+    { "SEL     HTM", "<h1>select dropdown</h1>"
+        "<p>Click the dropdown to cycle through its options.</p>"
+        "<p>Fruit: <select id=\"f\" name=\"fruit\"><option value=\"a\">Apple</option><option value=\"b\" selected>Banana</option><option value=\"c\">Cherry</option></select></p>"
+        "<p><button onclick=\"document.getElementById('o').textContent='value='+document.getElementById('f').value\">[ read .value ]</button></p>"
+        "<p id=\"o\">click read .value</p>"
+        "<p>The chosen option's <code>value</code> is the field's <code>.value</code> and submits as <code>fruit=</code>&lt;value&gt;.</p>" },
     { "ONCHG   HTM", "<h1>onchange handler</h1>"
         "<p>An input's <code>onchange</code> runs JavaScript the moment its value changes &mdash; no button needed. Tab/n to the box and Enter to toggle it:</p>"
         "<p><input id=\"agree\" type=\"checkbox\" onchange=\"document.getElementById('msg').textContent = document.getElementById('agree').value=='on' ? 'Thanks for agreeing!' : 'You unchecked it.'\"> I agree to the terms</p>"

@@ -154,6 +154,7 @@ struct browser {
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
+    char    sel_ids[8][32]; char sel_vals[8][256]; int sel_n;   /* <select>s: id + its option values ('\n'-joined), so a click cycles to the next */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
     int     field_cur;                                          /* caret index within the focused field's value */
     char    form_action[URL_MAX];                               /* current <form action>; empty = submit to the current page */
@@ -299,6 +300,16 @@ static int add_input_link(browser_t *b, const char *id) {
 /* Store a "check:ID" link so following it toggles that checkbox/radio. */
 static int add_check_link(browser_t *b, const char *id) {
     const char *pfx = "check:"; int pl = 6; int il = 0; while (id[il]) il++;
+    if (il <= 0 || b->nlink >= LINK_MAX || b->hreflen + pl + il >= HREF_MAX) return NO_LINK;
+    int off = b->hreflen;
+    for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
+    for (int i = 0; i < il; i++) b->hrefs[b->hreflen++] = id[i];
+    b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + il) };
+    return b->nlink++;
+}
+/* Store a "selcyc:ID" link so following it cycles a <select> to its next option. */
+static int add_select_link(browser_t *b, const char *id) {
+    const char *pfx = "selcyc:"; int pl = 7; int il = 0; while (id[il]) il++;
     if (il <= 0 || b->nlink >= LINK_MAX || b->hreflen + pl + il >= HREF_MAX) return NO_LINK;
     int off = b->hreflen;
     for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
@@ -1221,12 +1232,38 @@ static void emit_textarea(browser_t *b, const char *id) {
     emit_break(b, TK_PARA);
 }
 
+/* Parse a <select>'s inner HTML into option value/label pairs. value = the
+ * `value` attr, else the label text. *defsel = index of the `selected` option, or -1. */
+static void parse_select(const char *html, int len, char vals[][32], char labs[][48], int max, int *nopt, int *defsel) {
+    int n = 0; *defsel = -1;
+    for (int i = 0; i + 7 <= len && n < max; ) {
+        if (!(html[i]=='<' && lc(html[i+1])=='o' && lc(html[i+2])=='p' && lc(html[i+3])=='t' &&
+              lc(html[i+4])=='i' && lc(html[i+5])=='o' && lc(html[i+6])=='n')) { i++; continue; }
+        int as = i + 7, j = as; char q = 0;                       /* scan the option tag's attrs to '>' */
+        while (j < len) { char c = html[j]; if (q) { if (c==q) q=0; } else if (c=='"'||c=='\'') q=c; else if (c=='>') break; j++; }
+        const char *vp; int vl; char vbuf[32]; vbuf[0]=0;
+        if (find_attr(html+as, j-as, "value", &vp, &vl)) { int m=vl>31?31:vl; for(int k=0;k<m;k++) vbuf[k]=vp[k]; vbuf[m]=0; }
+        int sel = has_attr(html+as, j-as, "selected");
+        int ls = (j<len) ? j+1 : len, le = ls; while (le < len && html[le] != '<') le++;   /* label = text up to next tag */
+        while (ls < le && (html[ls]==' '||html[ls]=='\n'||html[ls]=='\t')) ls++;
+        while (le > ls && (html[le-1]==' '||html[le-1]=='\n'||html[le-1]=='\t')) le--;
+        int lm = le-ls; if (lm>47) lm=47; if (lm<0) lm=0;
+        for (int k=0;k<lm;k++){ labs[n][k]=html[ls+k]; } labs[n][lm]=0;
+        if (vbuf[0]) { int k=0; while(vbuf[k]){vals[n][k]=vbuf[k];k++;} vals[n][k]=0; }
+        else { int k=0; while(labs[n][k] && k<31){vals[n][k]=labs[n][k];k++;} vals[n][k]=0; }
+        if (sel) *defsel = n;
+        n++; i = le;
+    }
+    *nopt = n;
+}
+
 static void parse_html(browser_t *b, const char *body, int len) {
     drop_image(b);                                       /* a page replaces any prior image */
     drop_image_slots(b);                                 /* and its inline images */
     b->textlen = b->ntok = b->hreflen = b->nlink = 0;
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
     b->ta_n = 0;                                         /* <textarea> id set rebuilt fresh each parse (values persist in the input store) */
+    b->sel_n = 0;                                        /* <select> option lists rebuilt fresh each parse */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
     b->sc_sp = 0;                                        /* no style scopes open yet */
     b->n_hidden = 0;                                     /* nothing hidden yet */
@@ -1257,6 +1294,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     int sc_start = -1;                                   /* offset where current <script> body began */
     int st_start = -1;                                   /* offset where current <style> body began */
     int intextarea = 0, ta_start = -1; char ta_id[32] = {0}, ta_name[32] = {0};   /* <textarea>: raw-text capture -> field value */
+    int inselect = 0, sel_start = -1; char sel_id[32] = {0}, sel_name[32] = {0};  /* <select>: raw-text capture -> option list */
     int det_n = 0, det_depth = 0, det_hide = 0, in_summary = 0, det_cur = 0;   /* <details>: index / nesting / suppress-depth / in-<summary> / current idx */
     int sum_link = NO_LINK, sum_style = STY_NORMAL;      /* saved link/style around a <summary> */
 
@@ -1267,8 +1305,8 @@ static void parse_html(browser_t *b, const char *body, int len) {
              * close tag (e.g. `i < 5`, or `<p>` inside a document.write string) must
              * be treated as content, NOT parsed as a tag — otherwise the (quote-aware)
              * tag scan can run past </script> and the block is never closed/captured. */
-            if (inscript || instyle || intextarea) {
-                const char *ct = inscript ? "/script" : instyle ? "/style" : "/textarea";
+            if (inscript || instyle || intextarea || inselect) {
+                const char *ct = inscript ? "/script" : instyle ? "/style" : intextarea ? "/textarea" : "/select";
                 int match = (i+1 < len && body[i+1] == '/');
                 if (match) for (int z = 0; ct[z]; z++) { if (i+1+z >= len || lc(body[i+1+z]) != ct[z]) { match = 0; break; } }
                 if (!match) continue;                 /* '<' is script/style content; skip it */
@@ -1332,6 +1370,39 @@ static void parse_html(browser_t *b, const char *body, int len) {
                     intextarea = 0; ta_start = -1; ta_id[0] = 0;
                 }
             }
+            else if (tageq(tag, "select")) {                     /* dropdown: a click cycles through its <option>s */
+                if (!closing) {
+                    inselect = 1; sel_start = j + 1;
+                    sel_id[0] = 0; sel_name[0] = 0;
+                    const char *av; int al;
+                    if (find_attr(body + astart, j - astart, "id",   &av, &al) && al > 0) { int n = al > 31 ? 31 : al; for (int k=0;k<n;k++){ sel_id[k]=av[k]; }   sel_id[n]=0; }
+                    if (find_attr(body + astart, j - astart, "name", &av, &al) && al > 0) { int n = al > 31 ? 31 : al; for (int k=0;k<n;k++){ sel_name[k]=av[k]; } sel_name[n]=0; }
+                } else {
+                    if (inselect && sel_start >= 0 && sel_id[0]) {
+                        char vals[16][32], labs[16][48]; int nopt = 0, defsel = -1;
+                        parse_select(body + sel_start, i - sel_start, vals, labs, 16, &nopt, &defsel);
+                        if (nopt > 0) {
+                            const char *cur = in_get(b, sel_id);
+                            int selidx = -1;
+                            if (cur) for (int k = 0; k < nopt; k++) if (streqs(vals[k], cur)) { selidx = k; break; }   /* keep a cycled/seeded choice */
+                            if (selidx < 0) selidx = (defsel >= 0) ? defsel : 0;
+                            if (!cur) in_set(b, sel_id, vals[selidx]);                 /* seed the default selection */
+                            if (sel_name[0]) in_name_set(b, sel_id, sel_name);
+                            if (b->sel_n < 8) {                                        /* remember the option order for click-cycling */
+                                int k=0; while (sel_id[k] && k<31) { b->sel_ids[b->sel_n][k]=sel_id[k]; k++; } b->sel_ids[b->sel_n][k]=0;
+                                int o=0; for (int v=0; v<nopt; v++) { if (v && o<255) b->sel_vals[b->sel_n][o++]='\n'; for (int c=0; vals[v][c] && o<255; c++) b->sel_vals[b->sel_n][o++]=vals[v][c]; }
+                                b->sel_vals[b->sel_n][o]=0; b->sel_n++;
+                            }
+                            char disp[56]; int p=0; disp[p++]='['; disp[p++]=' ';      /* render "[ Label v]" as a focusable link */
+                            for (int c=0; labs[selidx][c] && p<50; c++) disp[p++]=labs[selidx][c];
+                            disp[p++]=' '; disp[p++]='v'; disp[p++]=']'; disp[p]=0;
+                            int lk = add_select_link(b, sel_id);
+                            if (lk != NO_LINK) emit_literal_link(b, disp, lk); else emit_literal(b, disp, STY_EM);
+                        }
+                    }
+                    inselect = 0; sel_start = -1; sel_id[0] = 0;
+                }
+            }
             else if (tageq(tag, "svg")) insvg = !closing;        /* inline SVG: skip its guts */
             else if (tageq(tag, "title") && !insvg) intitle = !closing;  /* (svg <title> mustn't hijack) */
             else if (tageq(tag, "head")) inhead = !closing;
@@ -1371,7 +1442,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
             i = j;                                        /* loop ++ steps past '>' */
             continue;
         }
-        if (inscript || instyle || insvg || intextarea) continue;  /* never render script/style/svg/textarea body (emit_textarea handles it) */
+        if (inscript || instyle || insvg || intextarea || inselect) continue;  /* never render script/style/svg/textarea/select body (handled at the close tag) */
         if (det_hide && !in_summary) continue;        /* inside a collapsed <details>, outside its <summary> */
         if (b->n_hidden > 0) continue;                /* inside a display:none element (tags still tracked above) */
 
@@ -3323,6 +3394,31 @@ static void browser_follow(browser_t *b, int id) {
             }
         }
         if (!fire_onchange(b, cid)) parse_html(b, b->raw + b->bodyoff, b->bodylen);   /* onchange (if any) re-renders */
+        return;
+    }
+    int issel = (len > 7); if (issel) for (int k = 0; k < 7; k++) if (lc(hp[k]) != "selcyc:"[k]) { issel = 0; break; }
+    if (issel) {                                         /* cycle a <select> to its next option */
+        char sid[32]; int n = len - 7; if (n > 31) n = 31;
+        for (int i = 0; i < n; i++) sid[i] = hp[7 + i];
+        sid[n] = 0;
+        const char *vals = 0;                            /* this select's '\n'-joined option values */
+        for (int s = 0; s < b->sel_n; s++) if (streqs(b->sel_ids[s], sid)) { vals = b->sel_vals[s]; break; }
+        if (vals && vals[0]) {
+            char items[16][32]; int cnt = 0, sp = 0;     /* split the value list */
+            for (int i = 0; cnt < 16; i++) {
+                char c = vals[i];
+                if (c == '\n' || c == 0) {
+                    int il = i - sp; if (il > 31) il = 31;
+                    for (int k = 0; k < il; k++){ items[cnt][k] = vals[sp + k]; } items[cnt][il] = 0;
+                    cnt++; sp = i + 1;
+                    if (c == 0) break;
+                }
+            }
+            const char *cur = in_get(b, sid);            /* advance to the option after the current value (wrap) */
+            int curidx = -1; if (cur) for (int k = 0; k < cnt; k++) if (streqs(items[k], cur)) { curidx = k; break; }
+            if (cnt > 0) in_set(b, sid, items[(curidx + 1) % cnt]);   /* curidx<0 -> index 0 */
+            if (!fire_onchange(b, sid)) parse_html(b, b->raw + b->bodyoff, b->bodylen);
+        }
         return;
     }
     int issub = (len > 6); if (issub) for (int k = 0; k < 7; k++) if (lc(hp[k]) != "submit:"[k]) { issub = 0; break; }
