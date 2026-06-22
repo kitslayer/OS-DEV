@@ -50,8 +50,9 @@ typedef struct {
     int maximized;        /* F4 toggle: filling the screen */
     int sx, sy, sw, sh;   /* saved geometry to restore from maximize */
     int fsel;             /* KIND_FILES: selected row (keyboard nav) */
-    int minimized;        /* F3: hidden to its taskbar chip (must stay last:
-                             existing positional struct literals zero-fill it) */
+    int fconfirm;         /* KIND_FILES: a delete is armed, awaiting a 2nd d/y (else any key cancels) */
+    int minimized;        /* F3: hidden to its taskbar chip (last field; the
+                             positional struct literals below init every field) */
 } window_t;
 
 static window_t windows[MAX_WINDOWS];
@@ -224,8 +225,18 @@ static void draw_content(const window_t *w, int focused) {
         break;
     }
     case KIND_FILES: {
-        draw_text(bx, by, "FAT32 disk (/) - up/down, Enter opens:", 0x202028);
         static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* static (BSS): ~18KB won't fit the 16KB guard-page-less stack; single-threaded render makes it safe. Browse ALL disk files, not just the first 32 (M421) */
+        if (w->fconfirm && w->fsel >= 0 && w->fsel < n) {      /* a delete is armed: replace the header with a bright confirm prompt */
+            char pr[64]; int p = 0; const char *a = "Delete ";
+            while (*a) pr[p++] = *a++;
+            for (int j = 0; e[w->fsel].name[j] && p < 28; j++) pr[p++] = e[w->fsel].name[j];
+            const char *b = "?  d/y=confirm  any key=cancel";
+            for (int j = 0; b[j] && p < (int)sizeof(pr) - 1; j++) pr[p++] = b[j];
+            pr[p] = 0;
+            draw_text(bx, by, pr, 0xC01010);                   /* bright red: this action destroys a file */
+        } else {
+            draw_text(bx, by, "FAT32 disk (/) - up/down  Enter open  d delete  w wallpaper", 0x202028);
+        }
         int rows = (w->h - TITLEBAR_H - 30) / 18;          /* rows that fit in the body */
         if (rows < 1) rows = 1;
         int top = 0;                                       /* scroll so the selection stays visible */
@@ -556,6 +567,8 @@ static void render_scene(void) {
             "to select + copy; middle-click pastes.",
             "In the browser: right-click a link to copy",
             "its URL; middle-click pastes into the bar.",
+            "In Files: Enter opens, d deletes (press d/y",
+            "again to confirm), w sets an image as wallpaper.",
             "",
             "Press Esc or F1 to close this help.",
         };
@@ -697,7 +710,7 @@ static void make_app_window(app_t *a) {
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
     windows[win_count++] = (window_t){ x, y,
         app_cols()*font_width + 14, app_rows()*font_height + TITLEBAR_H + 14,
-        0x0A0A0A, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0 };  /* maximized,sx,sy,sw,sh,fsel,minimized */
+        0x0A0A0A, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0,0 };  /* maximized,sx,sy,sw,sh,fsel,fconfirm,minimized */
 }
 
 /* Open a browser window at `url` (NULL -> its default). */
@@ -706,7 +719,7 @@ static void spawn_browser(const char *url) {
     spawn_n++;
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
     windows[win_count++] = (window_t){ x, y, 620, 460, 0xFFFFFF, "Browser",
-                                       KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0 };
+                                       KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0,0 };
 }
 
 /* Is `name` a plain-text / source file we'd rather edit than view? (case-
@@ -723,15 +736,60 @@ static int files_editable(const char *name, int len) {
     return 0;
 }
 
-/* Keyboard navigation for the read-only Files window: up/down move the
- * selection, Enter opens the highlighted file — text/source files in the
- * editor (so you can edit them), everything else in a browser window. */
+/* Is `name` an image we can set as the wallpaper? (case-insensitive extension
+ * match — same formats decode_image() handles: PNG/BMP/JPG/JPEG/GIF/SVG.) */
+static int files_is_image(const char *name, int len) {
+    int dot = -1; for (int i = 0; i < len; i++) if (name[i] == '.') dot = i;
+    if (dot < 0) return 0;
+    static const char *exts[] = { "PNG","BMP","JPG","JPEG","GIF","SVG", 0 };
+    for (int i = 0; exts[i]; i++) {
+        const char *a = name + dot + 1, *b = exts[i]; int eq = 1;
+        while (*a && *b) { char ca = (*a >= 'a' && *a <= 'z') ? *a - 32 : *a; if (ca != *b) { eq = 0; break; } a++; b++; }
+        if (eq && !*a && !*b) return 1;
+    }
+    return 0;
+}
+
+/* Keyboard handling for the Files window. up/down move the selection; Enter
+ * opens the highlighted file (text/source -> editor, else a browser window).
+ * 'd'/Delete arms a two-key delete confirm (a second d/y commits it; ANY other
+ * key cancels it — so a stray 'd' is harmless); 'w' sets an image as the
+ * wallpaper. The dirent list is re-read each call, so it refreshes for free
+ * after a delete. */
 static void files_key(window_t *w, int k) {
     static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* match the render cap; static (BSS), safe single-threaded (M421) */
-    if (n <= 0) return;
+    if (n <= 0) { w->fconfirm = 0; return; }
     if (w->fsel >= n) w->fsel = n - 1;
+    if (w->fsel < 0)  w->fsel = 0;
+
+    if (w->fconfirm) {                                         /* a delete is armed */
+        if (k == 'd' || k == 'y' || k == 0x7F) {               /* second d/y (or Delete) -> commit */
+            char buf[64]; int p = 0;
+            for (int j = 0; e[w->fsel].name[j] && p < (int)sizeof(buf) - 1; j++) buf[p++] = e[w->fsel].name[j];
+            if (p > 0 && buf[p-1] == '/') p--;                 /* strip the listing's trailing '/' on dirs */
+            buf[p] = 0;
+            vfs_remove(buf);                                   /* deletes a file or empty dir; refuses a non-empty dir (no crash) */
+            w->fconfirm = 0;
+            n = vfs_list(e, 256);                              /* re-list so the clamp uses the post-delete count */
+            if (w->fsel >= n) w->fsel = n - 1;
+            if (w->fsel < 0)  w->fsel = 0;
+        } else {                                               /* ANY other key cancels; the key is otherwise ignored */
+            w->fconfirm = 0;
+        }
+        return;
+    }
+
     if (k == 0x11)       { if (w->fsel > 0)     w->fsel--; }   /* up   */
     else if (k == 0x12)  { if (w->fsel < n - 1) w->fsel++; }   /* down */
+    else if (k == 'd' || k == 0x7F) {                          /* arm the delete confirm (render shows the prompt) */
+        w->fconfirm = 1;
+    }
+    else if (k == 'w') {                                       /* set an image file as the desktop wallpaper */
+        const char *name = e[w->fsel].name;
+        int len = 0; while (name[len]) len++;
+        if (len > 0 && files_is_image(name, len))
+            desktop_set_wallpaper(name);                       /* visible bg change is the feedback; a decode failure is a no-op */
+    }
     else if (k == '\n' || k == '\r') {
         const char *name = e[w->fsel].name;
         int len = 0; while (name[len]) len++;
@@ -774,7 +832,7 @@ static void spawn_app(int kind, const char *prog) {
     window_t w = { 0 };
     w.x = x; w.y = y; w.kind = kind;
     switch (kind) {
-    case KIND_FILES:   w.w=380; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;
+    case KIND_FILES:   w.w=500; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
     case KIND_WELCOME: w.w=360; w.h=290; w.body=0xF0F0F0; w.title="Welcome"; break;
     case KIND_ABOUT:   w.w=300; w.h=178; w.body=0xF4F0E8; w.title="About";   break;
     case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="Monitor"; break;
@@ -796,8 +854,8 @@ void desktop_run(void) {
     load_wallpaper();                    /* WALL.PNG from disk, else the gradient */
     start_y = screen_h - TASKBAR_H + 5;
 
-    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0 };
-    windows[win_count++] = (window_t){ 60, 300, 330, 200, 0xE8ECF4, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0 };
+    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0,0 };
+    windows[win_count++] = (window_t){ 60, 300, 500, 200, 0xE8ECF4, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0,0 };
     app_spawn_named("shell");           /* a real ring-3 shell (WM gives it a
                                          * window below; spawn more via Apps) */
 
