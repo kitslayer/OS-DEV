@@ -60,7 +60,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 test rtl8139test jstest clean
+.PHONY: all run run-rtl8139 test rtl8139test virtioblktest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -274,6 +274,15 @@ run-rtl8139: $(KERNEL) $(DISK)
 rtl8139test: $(KERNEL) $(DISK)
 	@tests/run-rtl8139-tests.sh
 
+# Headless in-guest assertion for the virtio-blk driver (kernel/virtio_blk.c):
+# attaches a SECOND disk over legacy virtio (-device virtio-blk-pci,disable-
+# modern=on), boots, and asserts the driver read that disk's KNOWN per-sector
+# content back (host-computed checksums + marker) and the write round-trip. The
+# boot disk stays on legacy ATA. SKIPs cleanly if QEMU/python3 absent. (Companion
+# to `boottest`, which has no virtio disk -> the driver must cleanly no-op there.)
+virtioblktest: $(KERNEL) $(DISK)
+	@tests/run-virtio-blk-tests.sh
+
 # Headless smoke test: no window, capture serial, kill after a few seconds.
 # Used to confirm the kernel boots without needing a display.
 test: $(KERNEL) $(DISK)
@@ -436,8 +445,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtioblktest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtioblktest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

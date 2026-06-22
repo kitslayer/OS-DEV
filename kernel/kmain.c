@@ -20,6 +20,7 @@
 #include "vfs.h"
 #include "pci.h"
 #include "ahci.h"
+#include "virtio_blk.h"
 #include "net.h"
 #include "fbcon.h"
 #include "mouse.h"
@@ -157,6 +158,13 @@ void kmain(uint64_t mb_info) {
      * self-test reads real sectors off the AHCI disk and logs their bytes. */
     ahci_init();
     ahci_selftest();
+
+    /* Bring up virtio-blk (the paravirtual "fast VM disk") as ANOTHER additional
+     * storage driver — boot still uses legacy ATA above. No-op if no virtio block
+     * device is attached. The self-test reads real sectors off it (and does a
+     * write round-trip) and logs their bytes. */
+    virtio_blk_init();
+    virtio_blk_selftest();
 
     /* Prefer the USB tablet (absolute pointer, tracks the host 1:1); fall back
      * to the relative PS/2 mouse if there's no tablet. */
