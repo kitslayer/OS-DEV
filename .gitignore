@@ -6,3 +6,7 @@
 *.swp
 *~
 .DS_Store
+
+# Python bytecode cache (e.g. from importing tools/osdrive.py)
+__pycache__/
+*.pyc
