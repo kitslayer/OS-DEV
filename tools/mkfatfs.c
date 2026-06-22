@@ -1021,6 +1021,20 @@ static const struct {
                      "    printf(\"sum(10) = %d, MAX = %d\\n\", sum(10), MAX);\n"
                      "    return 0xFF & 1;\n"
                      "}\n" },
+    { "SAMPLE  CSS", "/* sample.css -- open in the editor to see CSS highlighting:\n"
+                     "   comments grey, strings orange, numbers + #hex colours purple. */\n"
+                     "body {\n"
+                     "    color: #33ff66;\n"
+                     "    background: #101018;\n"
+                     "    margin: 0 auto;\n"
+                     "    max-width: 760px;\n"
+                     "    font-family: \"monospace\";\n"
+                     "}\n"
+                     ".card {\n"
+                     "    border: 2px solid #4090ff;\n"
+                     "    padding: 12px;\n"
+                     "}\n"
+                     "#header { font-size: 24px; }\n" },
 };
 #define NUM_FILES (int)(sizeof(files) / sizeof(files[0]))
 #define CLUSTER_BYTES (SPC * SECTOR)

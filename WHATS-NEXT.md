@@ -1,5 +1,13 @@
 # What's next
 
+> **(M948) Editor — CSS syntax highlighting.** Completes the editor's source-language set (was C/JS/shell/HTML;
+> CSS is the language the OS's many `.htm` pages use in `<style>`). CSS (`hl_lang` 5, `.css`) reuses the
+> C-family machinery — `/* */` block comments (grey), strings (orange), numbers incl. `12px` (purple) — but
+> drops `//` line comments and keyword matching (CSS property/selector idents stay default), and adds `#hex`
+> colours (`#4090ff` → purple). Display-only (a highlighter bug can only mis-colour, never corrupt text or the
+> boot), so safe. New `SAMPLE.CSS` demo. Verified in-guest: numbers/`px`, `#hex` colours and the
+> `"monospace"` string all colour correctly. `make check` green (36 suites).
+
 > **(M947) Paint — circle tool (completes the shape set).** Added a circle/oval tool (`o`): drag out from the
 > centre and a midpoint-algorithm circle rubber-bands to the cursor radius (`isqrt` of dx²+dy², integer-only),
 > reusing M946's preview (backup/restore each drag frame) and the disc brush for thickness. Paint is now a

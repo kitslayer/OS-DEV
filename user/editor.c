@@ -323,7 +323,7 @@ static int row_offset(int target) {
  * of `doc` one byte at a time. Palette indices (see kernel app_palette):
  *   0 default (green) · 6 keyword (blue) · 7 string (orange) · 8 comment (grey)
  *   10 C preprocessor (teal) · 11 number (purple).  hl_lang 0 = plain (no
- *   colour), 1 = C, 2 = shell, 3 = HTML, 4 = JS. */
+ *   colour), 1 = C, 2 = shell, 3 = HTML, 4 = JS, 5 = CSS. */
 static int hl_lang;                  /* set by detect_lang() in load_file() */
 static unsigned char vcol[2048];     /* colour per byte of the visible window */
 
@@ -379,7 +379,8 @@ static void hl_run(int start,int end,int write,int *pmode,char *pdelim){
             if(c=='<'){ if(i+3<end&&doc[i+1]=='!'&&doc[i+2]=='-'&&doc[i+3]=='-'){ PUT(i,8); mode=5; i++; continue; } PUT(i,6); mode=4; i++; continue; }
             PUT(i,0); i++; continue; }
         if((lang==1||lang==4)&&c=='/'&&i+1<end&&doc[i+1]=='/'){ PUT(i,8); PUT(i+1,8); i+=2; mode=1; continue; }
-        if((lang==1||lang==4)&&c=='/'&&i+1<end&&doc[i+1]=='*'){ PUT(i,8); PUT(i+1,8); i+=2; mode=2; continue; }
+        if((lang==1||lang==4||lang==5)&&c=='/'&&i+1<end&&doc[i+1]=='*'){ PUT(i,8); PUT(i+1,8); i+=2; mode=2; continue; }   /* block comment (C/JS/CSS) */
+        if(lang==5&&c=='#'){ PUT(i,11); i++; while(i<end&&hl_isid(doc[i])){ PUT(i,11); i++; } continue; }   /* CSS #hex colour */
         if(lang==2&&c=='#'&&hl_prews(i)){ mode=1; continue; }
         if(lang==1&&c=='#'&&hl_linestart(i)){ while(i<end&&doc[i]!='\n'){ PUT(i,10); i++; } continue; }
         if(c=='"'||c=='\''||((lang==1||lang==4)&&c=='`')){ delim=c; mode=3; PUT(i,7); i++; continue; }
@@ -402,6 +403,7 @@ static void detect_lang(void){
     else if(hl_eqi(e,"js")) hl_lang=4;
     else if(hl_eqi(e,"sh")) hl_lang=2;
     else if(hl_eqi(e,"htm")||hl_eqi(e,"html")) hl_lang=3;
+    else if(hl_eqi(e,"css")) hl_lang=5;
 }
 
 static int is_bracket(char c){ return c=='('||c==')'||c=='['||c==']'||c=='{'||c=='}'; }
