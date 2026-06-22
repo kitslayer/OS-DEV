@@ -1096,10 +1096,21 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
     }
     if (tageq(tag, "p") || tageq(tag, "dt")) { emit_break(b, TK_PARA); return; }
     if (tageq(tag, "table")) { emit_break(b, TK_PARA); b->tdcount = 0; return; }
-    if (tageq(tag, "blockquote")) {                      /* indent the quoted block (incl. wrapped lines) */
+    if (tageq(tag, "blockquote")) {                      /* indent the quoted block + a left accent bar */
         emit_break(b, TK_PARA);
-        if (!closing) { if (b->curindent < 200) b->curindent += 24; }
-        else { b->curindent -= 24; if (b->curindent < 0) b->curindent = 0; }
+        if (!closing) {
+            if (b->curindent < 200) b->curindent += 24;
+            /* reuse the border marker (left-only, sides=8): a 3px grey bar in the indent
+             * gutter, left of the text — the universal blockquote convention. off=colour,
+             * len=sides, link=x-anchor (cl+link), style=width; drawn by the TK_BORDER_CLOSE
+             * handler, additive (no blockquote -> no token -> identical render). */
+            if (b->ntok < TOK_MAX && b->n_hidden == 0)
+                b->toks[b->ntok++] = (tok_t){ 0xC8CED8u, 8, (uint16_t)(b->curindent > 12 ? b->curindent - 12 : 0), 3, TK_BORDER_OPEN };
+        } else {
+            if (b->ntok < TOK_MAX && b->n_hidden == 0)
+                b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };
+            b->curindent -= 24; if (b->curindent < 0) b->curindent = 0;
+        }
         return;
     }
     if (tageq(tag, "div") || tageq(tag, "section") ||
