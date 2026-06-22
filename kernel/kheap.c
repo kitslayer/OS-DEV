@@ -30,10 +30,12 @@
  * changes it, so kernel behavior is identical to the constant. */
 static uint64_t kheap_base = KHEAP_BASE;
 
+#define BLK_MAGIC 0xA110C8EDu   /* "ALLOCED": set on an allocated block, cleared on free, so kfree detects a double-free / bad-pointer free instead of silently corrupting the list */
 typedef struct block {
     uint64_t      size;     /* usable payload bytes, excluding this header */
     struct block *next;
     uint32_t      free;
+    uint32_t      magic;    /* BLK_MAGIC iff currently allocated. Lives in what was struct padding (size 8 + next 8 + free 4 -> 20, padded to 24), so sizeof(block_t) is unchanged -> zero layout/alignment impact. */
 } block_t;
 
 static block_t  *head;
@@ -78,6 +80,7 @@ void kheap_init(void) {
     head->size = bytes - sizeof(block_t);
     head->next = NULL;
     head->free = 1;
+    head->magic = 0;        /* free block: no live-allocation sentinel */
 }
 
 /* Add more mapped pages and append a free block covering them. */
@@ -91,6 +94,7 @@ static void grow_heap(uint64_t need_bytes) {
     nb->size = grow - sizeof(block_t);
     nb->next = NULL;
     nb->free = 1;
+    nb->magic = 0;          /* free block */
     heap_end += grow;
 
     block_t *last = head;
@@ -121,11 +125,13 @@ void *kmalloc(size_t size) {
             block_t *nb = (block_t *)((uint8_t *)b + sizeof(block_t) + need);
             nb->size = b->size - need - sizeof(block_t);
             nb->free = 1;
+            nb->magic = 0;          /* the split-off remainder is a free block */
             nb->next = b->next;
             b->next = nb;
             b->size = need;
         }
         b->free = 0;
+        b->magic = BLK_MAGIC;       /* mark live so a double-free / bad-pointer free is caught in kfree */
         void *p = (uint8_t *)b + sizeof(block_t);
         irq_restore(f);
         return p;
@@ -150,6 +156,8 @@ void kfree(void *ptr) {
         return;
     uint64_t f = irq_save();
     block_t *b = (block_t *)((uint8_t *)ptr - sizeof(block_t));
+    if (b->magic != BLK_MAGIC) { irq_restore(f); return; }   /* not a live allocation: a double-free or a bad/interior pointer -> ignore it rather than write `free=1` into the middle of a live block / link garbage into the list */
+    b->magic = 0;            /* clear so a second free of this same pointer is detected */
     b->free = 1;
 
     /* Coalesce with following free, adjacent blocks. */

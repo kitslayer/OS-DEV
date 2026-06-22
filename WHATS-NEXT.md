@@ -1,5 +1,21 @@
 # What's next
 
+> **(M972) Heap — double-free / bad-pointer detection via a header magic (M970 review #3a).** `kfree` did
+> `b->free=1` with no validation, so a double-free wrote `free=1` into the middle of a live allocation (or linked
+> garbage into the list) and silently corrupted the heap; an interior/non-heap pointer did the same. The safe fix
+> (it turned out NOT to need a layout change): `block_t` was `{u64 size; block* next; u32 free}` = 20 bytes padded
+> to 24, so a `uint32_t magic` added after `free` **fills the existing padding — `sizeof(block_t)` stays 24, zero
+> alignment/size-math impact**. `kmalloc` sets `magic = BLK_MAGIC` on the block it returns (and clears it on the
+> split-off free remainder); `kfree` returns early (ignoring the free) if `magic != BLK_MAGIC`, then clears it — so
+> a double-free of the same pointer is caught (its magic was cleared by the first free) and a bad/interior pointer
+> is caught (its magic slot isn't `BLK_MAGIC`), each ignored rather than corrupting the list. Added a regression
+> case to `tests/kheap` (double-free + a stack-pointer free → both ignored, a tracked live block stays intact,
+> invariants hold, a later alloc still works) — passes under ASan/UBSan alongside the 400k-op torture; boottest +
+> all 37 `make check` suites green; kheap.c warnings 0. **Still deferred (the genuinely-algorithmic part, fresh
+> session): backward coalescing** — `kfree` only merges forward, and because list order ≠ address order, fixing it
+> safely wants an address-ordered free list (a coalescing bug would corrupt silently), so it's not a tail-of-session
+> change. Likewise the dedicated idle task. See [[os-dev-project]].
+
 > **(M971) Heap — `kmalloc` input-overflow + zero-size guards (the safe part of the M970 heap review).** The two
 > kmalloc-entry hardening items that DON'T touch the free-list/coalescing (so they can't break valid allocs): (a)
 > reject a `size` so large that `align16(size)` (`(size+15)&~15`) or the `need + sizeof(block_t) + 16` math would

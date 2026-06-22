@@ -122,6 +122,28 @@ int main(void) {
     for (int i = 0; i < nlive; i++) kfree(live[i].p);
     check_invariants();
 
+    /* A double-free and a bad/interior-pointer free are detected via BLK_MAGIC
+     * and IGNORED — never allowed to write `free=1` into a live block or link
+     * garbage into the list (the kheap header-magic, M972). */
+    {
+        uint8_t *a = kmalloc(100); CHECK(a != NULL, "df: kmalloc a");
+        uint8_t *b = kmalloc(100); CHECK(b != NULL, "df: kmalloc b");
+        if (b) fillpat(b, 100, 0x5A);
+        kfree(a);                              /* legitimate free */
+        kfree(a);                              /* DOUBLE free of the same pointer -> must be ignored */
+        check_invariants();
+        if (b) CHECK(chkpat(b, 100, 0x5A), "df: double-free corrupted a live block");
+        uint8_t junk[64] = {0};
+        kfree(junk + 32);                      /* a non-heap / interior pointer -> magic mismatch -> ignored */
+        check_invariants();
+        if (b) CHECK(chkpat(b, 100, 0x5A), "df: bad-pointer free corrupted a live block");
+        uint8_t *c = kmalloc(100); CHECK(c != NULL, "df: alloc after the double-free still works");
+        if (b) kfree(b);
+        if (c) kfree(c);
+        check_invariants();
+        printf("double-free/bad-pointer free: detected + ignored, heap intact\n");
+    }
+
     printf("torture: 400000 random alloc/free ops, pattern + tiling invariants -> %s\n",
            fails ? "FAILURES" : "all intact");
     if (fails) { printf("FAIL: %d check(s) failed\n", fails); return 1; }
