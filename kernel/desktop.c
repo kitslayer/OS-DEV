@@ -18,6 +18,7 @@
 #include "font.h"
 #include "mouse.h"
 #include "usb.h"
+#include "usb_kbd.h"
 #include "kheap.h"
 #include "keyboard.h"
 #include "timer.h"
@@ -1062,6 +1063,7 @@ void desktop_run(void) {
     for (;;) {
         int dirty = 0;
         usb_tablet_poll();
+        usb_kbd_poll();          /* feed any USB-keyboard keystrokes into the input queue */
 
         /* give any newly-spawned program a window — but only while there's a free
          * window slot. At the cap, leave the app PENDING (don't drain it) so it isn't

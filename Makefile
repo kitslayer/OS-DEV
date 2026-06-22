@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -378,6 +378,19 @@ svgatest: $(KERNEL) $(DISK)
 usbstoragetest: $(KERNEL) $(DISK)
 	@tests/run-usb-storage-tests.sh
 
+# Headless in-guest assertion for the USB HID boot-keyboard driver (kernel/usb_kbd.c):
+# attaches a usb-kbd ON THE SAME UHCI BUS as the existing usb-tablet (-device
+# usb-kbd,bus=uhci.0,port=2), boots, and asserts the driver enumerated the HID
+# boot keyboard (class 03 / subclass 01 = Boot / proto 01 = Keyboard + its
+# interrupt-IN endpoint), selected boot protocol (HID SET_PROTOCOL(0) ok), and
+# DECODED keystrokes injected via QEMU's `sendkey` monitor command over the
+# interrupt endpoint. The PS/2 keyboard stays the primary input and the USB tablet
+# stays up (shared controller). SKIPs cleanly if QEMU/socat absent. (Companion to
+# `boottest`, which has no usb-kbd -> the driver must cleanly no-op there and the
+# tablet + PS/2 keyboard must still come up.)
+usbkbdtest: $(KERNEL) $(DISK)
+	@tests/run-usb-kbd-tests.sh
+
 # Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
 # instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
@@ -555,8 +568,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

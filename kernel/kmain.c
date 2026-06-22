@@ -32,6 +32,7 @@
 #include "mouse.h"
 #include "usb.h"
 #include "usb_storage.h"
+#include "usb_kbd.h"
 #include "speaker.h"
 #include "audio.h"
 #include "hda.h"
@@ -244,6 +245,16 @@ void kmain(uint64_t mb_info) {
      * off it via Bulk-Only Transport + SCSI, logging their bytes/checksum. */
     usb_storage_init();
     usb_storage_selftest();
+
+    /* Bring up a USB HID boot keyboard, sharing the one UHCI controller with the
+     * tablet + mass-storage above (skipping the tablet's port, using the shared
+     * USB address allocator) — the PS/2 keyboard above stays the primary input.
+     * No-op if no USB keyboard is attached (PS/2 + tablet + storage unaffected).
+     * The self-test reports the enumerated HID boot keyboard + decodes any
+     * keystroke injected around boot, and the desktop polls it alongside the
+     * tablet so USB keystrokes reach the shell/apps like PS/2 ones. */
+    usb_kbd_init();
+    usb_kbd_selftest();
 
     kprintf("[main] launching the desktop environment...\n");
     speaker_chime();              /* a little startup arpeggio */

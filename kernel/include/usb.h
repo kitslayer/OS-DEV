@@ -57,3 +57,13 @@ int usb_control_xfer(uint8_t addr, uint16_t ep0_maxp, const uint8_t setup[8],
  * Returns 0 on success, -1 on error/stall/timeout. */
 int usb_bulk_xfer(uint8_t addr, uint8_t ep, uint16_t maxp, int *toggle,
                   void *buf, int len, int in, int *actual);
+
+/* A single INTERRUPT-IN transfer from device `addr`, endpoint `ep` (max packet
+ * `maxp`): read up to `len` bytes (1..64) into `buf`. The data toggle is threaded
+ * through *toggle. *actual receives the bytes received — 0 if the endpoint had
+ * nothing pending (a NAK), so a poll on an idle keyboard returns 0/empty cleanly
+ * WITHOUT spinning and without desyncing the toggle. Runs on a dedicated QH, so
+ * it never disturbs the tablet's live interrupt endpoint. Returns 0 on success
+ * (including the empty-poll case), -1 on stall/error/bad-arg. */
+int usb_interrupt_xfer(uint8_t addr, uint8_t ep, uint16_t maxp, int *toggle,
+                       void *buf, int len, int *actual);

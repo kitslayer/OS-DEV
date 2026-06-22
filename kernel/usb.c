@@ -19,13 +19,17 @@
  *
  * Layering: the controller bring-up (usb_uhci_init), root-port reset
  * (usb_uhci_reset_ports), USB-address allocator (usb_alloc_address), and the
- * generic control/bulk transfer primitives (usb_control_xfer / usb_bulk_xfer)
- * are exported via usb.h. The tablet path here, and kernel/usb_storage.c, are
- * both *clients* of that shared layer — so a USB flash disk and the tablet share
- * one UHCI controller without either disturbing the other. The transfer
- * primitives are serialized (each polls its TD chain to completion before
- * returning), and the tablet's interrupt endpoint lives on its own QH that the
- * controller walks every frame, so a bulk transfer on qh_bulk never perturbs it.
+ * generic control/bulk/interrupt transfer primitives (usb_control_xfer /
+ * usb_bulk_xfer / usb_interrupt_xfer) are exported via usb.h. The tablet path
+ * here, kernel/usb_storage.c (a flash disk), and kernel/usb_kbd.c (a HID boot
+ * keyboard) are all *clients* of that shared layer — so multiple devices share
+ * one UHCI controller without any disturbing another. The transfer primitives
+ * are serialized (each polls its TD chain to completion before returning), and
+ * the tablet's interrupt endpoint lives on its own QH that the controller walks
+ * every frame, so a bulk transfer on qh_bulk never perturbs it. usb_interrupt_xfer
+ * runs one interrupt-IN transfer on a SEPARATE dedicated QH (qh_intx) — distinct
+ * from the tablet's continuously-armed qh_int — so a polled keyboard read can't
+ * disturb the live tablet endpoint.
  */
 #include "usb.h"
 #include "pci.h"
@@ -70,11 +74,12 @@ struct uhci_qh {
 
 static uint16_t io;
 static uint32_t *framelist;
-static struct uhci_qh *qh_ctrl, *qh_int, *qh_bulk;
-static struct uhci_td *tds;        /* control transfer TD pool */
-static struct uhci_td *int_td;     /* interrupt endpoint TD     */
-static struct uhci_td *btds;       /* bulk transfer TD pool     */
-static uint8_t  *setup_buf, *data_buf, *report_buf, *bulk_buf;
+static struct uhci_qh *qh_ctrl, *qh_int, *qh_bulk, *qh_intx;
+static struct uhci_td *tds;        /* control transfer TD pool   */
+static struct uhci_td *int_td;     /* tablet interrupt endpoint TD */
+static struct uhci_td *btds;       /* bulk transfer TD pool      */
+static struct uhci_td *itds;       /* generic interrupt-IN TD pool (usb_interrupt_xfer) */
+static uint8_t  *setup_buf, *data_buf, *report_buf, *bulk_buf, *intx_buf;
 
 static int dev_addr, ep_in, ep_maxp, int_toggle, ready;
 
@@ -91,6 +96,11 @@ static int tablet_port = -1;       /* root-port index (0/1) the tablet owns */
  * the worst case. */
 #define CTRL_TD_COUNT 16
 #define BULK_TD_COUNT (USB_BULK_MAX / 64 + 4)
+/* A generic interrupt-IN transfer (usb_interrupt_xfer) moves one HID report,
+ * which fits in a single full-speed packet (<=64 bytes); a couple of TDs of
+ * slack lets it span packets if a future client uses a larger report. */
+#define INTX_TD_COUNT 4
+#define INTX_BUF_SIZE 64
 
 static uint16_t rd(uint16_t o)            { return inw(io + o); }
 static void     wr(uint16_t o, uint16_t v){ outw(io + o, v); }
@@ -242,6 +252,63 @@ int usb_bulk_xfer(uint8_t addr, uint8_t ep, uint16_t maxp, int *toggle,
     return 0;
 }
 
+/* A generic single INTERRUPT-IN transfer from device `addr`, endpoint `ep` (max
+ * packet `maxp`): read up to `len` bytes into `buf`. The data toggle is threaded
+ * through *toggle (read + updated). *actual receives the byte count actually
+ * received (0 if the endpoint had nothing pending — NAK). Runs on its OWN
+ * dedicated QH (qh_intx), so it never perturbs the tablet's continuously-armed
+ * interrupt endpoint (qh_int) nor control/bulk traffic. `len` must be 1..INTX_BUF_SIZE.
+ *
+ * Non-blocking-ish: the deadline is short, so a poll that finds nothing pending
+ * (the endpoint NAKs) times out cleanly and returns 0 with *actual == 0 — it does
+ * NOT spin. A stalled/absent endpoint (error bits set) returns -1. The data
+ * toggle is only advanced when a report was actually received, so a NAK doesn't
+ * desync the toggle. */
+int usb_interrupt_xfer(uint8_t addr, uint8_t ep, uint16_t maxp, int *toggle,
+                       void *buf, int len, int *actual) {
+    if (actual) *actual = 0;
+    if (!uhci_up || !qh_intx || maxp == 0 || len <= 0 || len > INTX_BUF_SIZE)
+        return -1;
+
+    int tg = toggle ? (*toggle & 1) : 0;
+    int n = 0, off = 0;
+    while (off < len && n < INTX_TD_COUNT) {
+        int chunk = len - off;
+        if (chunk > (int)maxp) chunk = maxp;
+        make_td(&itds[n], 0, PID_IN, addr, ep, (n == 0) ? tg : (tg ^ (n & 1)),
+                chunk, intx_buf + off);
+        off += chunk;
+        n++;
+    }
+    if (off < len)                               /* didn't fit the pool */
+        return -1;
+
+    int last = 0;
+    /* A short, finite bound (1 timer tick, ~10 ms at 100 Hz): an interrupt poll
+     * either has a report queued (the TD completes almost immediately) or the
+     * endpoint NAKs. The tick bound catches a pending report without spinning on
+     * an idle keyboard; a timeout here just means "no new report", reported as 0. */
+    int rc = run_qh_chain(qh_intx, itds, n, 1, &last);
+    if (rc != 0) {
+        /* Distinguish a clean "nothing pending" (TD still ACTIVE -> we unlinked it
+         * on timeout, no error bits) from a real stall/error (error bits set). */
+        for (int i = 0; i < n; i++)
+            if (itds[i].cs & TD_ERRMASK)
+                return -1;                       /* genuine stall/error */
+        return 0;                                /* no report this poll (NAK) */
+    }
+
+    int total = (n - 1) * (int)maxp + last;
+    if (total < 0) total = 0;
+    if (total > len) total = len;                /* never claim more than asked */
+    if (total > 0) {
+        memcpy(buf, intx_buf, (size_t)total);
+        if (toggle) *toggle = tg ^ 1;            /* advance toggle only on a real report */
+    }
+    if (actual) *actual = total;
+    return 0;
+}
+
 static int get_descriptor(int type, int index, void *out, int len) {
     uint8_t s[8] = { 0x80, 0x06, (uint8_t)index, (uint8_t)type,
                      0, 0, (uint8_t)len, (uint8_t)(len >> 8) };
@@ -307,12 +374,15 @@ int usb_uhci_init(void) {
     qh_int  = (struct uhci_qh *)(pool + 0);
     qh_ctrl = (struct uhci_qh *)(pool + 16);
     qh_bulk = (struct uhci_qh *)(pool + 32);
+    qh_intx = (struct uhci_qh *)(pool + 48);      /* dedicated polled interrupt-IN QH */
     tds     = (struct uhci_td *)(pool + 64);
     int_td  = (struct uhci_td *)(pool + 64 + CTRL_TD_COUNT * sizeof(struct uhci_td));
+    itds    = (struct uhci_td *)(pool + 64 + (CTRL_TD_COUNT + 1) * sizeof(struct uhci_td));
     btds    = (struct uhci_td *)(bpool);          /* BULK_TD_COUNT TDs in its own frame */
     setup_buf  = bufs + 0;
     data_buf   = bufs + 16;                        /* 304 bytes of control data stage */
     report_buf = bufs + 320;                       /* tablet HID report               */
+    intx_buf   = bufs + 384;                       /* generic interrupt-IN bounce buf (64B) */
     bulk_buf   = (uint8_t *)(uintptr_t)pmm_alloc_frame();   /* USB_BULK_MAX bounce buf */
     /* USB_BULK_MAX may exceed one frame; grab the rest contiguously (the PMM is a
      * simple bump allocator, so a fresh run is contiguous — verified, not assumed). */
@@ -326,7 +396,9 @@ int usb_uhci_init(void) {
         }
     }
 
-    qh_bulk->head = 1;                       /* terminate */
+    qh_intx->head = 1;                       /* terminate (last in the QH chain) */
+    qh_intx->element = 1;                    /* idle until usb_interrupt_xfer arms it */
+    qh_bulk->head = phys(qh_intx) | 2;       /* bulk -> polled interrupt-IN QH (Q bit) */
     qh_bulk->element = 1;
     qh_ctrl->head = phys(qh_bulk) | 2;       /* control -> bulk QH (Q bit) */
     qh_ctrl->element = 1;
