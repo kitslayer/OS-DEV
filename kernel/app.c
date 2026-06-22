@@ -110,7 +110,8 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             flappy_elf_start[], gb_elf_start[], lander_elf_start[], yahtzee_elf_start[],
             checkers_elf_start[], gomoku_elf_start[], frogger_elf_start[],
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
-            dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[];
+            dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
+            solitaire_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -170,6 +171,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "dotsbox", dotsbox_elf_start, "Dots and Boxes" },
     { "missile", missile_elf_start, "Missile Command" },
     { "pacman", pacman_elf_start, "Pac-Man" },
+    { "solitaire", solitaire_elf_start, "Solitaire" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
