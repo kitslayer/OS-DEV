@@ -2579,6 +2579,7 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
     if (strcmp(name,"toString")==0) {
         int radix=nargs?(int)to_num(args[0]):10; if(radix<2||radix>36) radix=10;
         if (radix==10) return STRV(num_to_str(to_num(recv)));   /* base 10: full float formatting ((3.14).toString() === "3.14"), not the integer-only radix path */
+        { double dv=to_num(recv); if (js_isnan(dv)||js_isinf(dv)) return STRV(num_to_str(dv)); }   /* NaN/Infinity have no radix form -> "NaN"/"Infinity" (was a 64-bit garbage string from the int cast) */
         char tmp[72]; int i=0; int neg=v<0;
         unsigned long long u = neg ? (unsigned long long)(-(v+1))+1ULL : (unsigned long long)v;
         if(u==0) tmp[i++]='0';

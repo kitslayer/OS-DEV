@@ -1,5 +1,16 @@
 # What's next
 
+> **(M960) JS engine — `(NaN/Infinity).toString(radix)` no longer emits garbage (review #10).** The base-10
+> `toString` routed through `num_to_str` (correct: `"NaN"`/`"Infinity"`), but a non-10 radix did
+> `(long long)to_num(recv)` first — and casting `NaN`/`±Infinity` to integer yields the "integer indefinite"
+> bit pattern, so `(NaN).toString(16)` printed `-8000000000000000` and `(Infinity).toString(2)` a 64-bit garbage
+> string. Added a `js_isnan`/`js_isinf` guard before the integer conversion that returns `num_to_str(dv)` (so
+> `NaN`/`Infinity`/`-Infinity`). Normal radix output unchanged (`(255).toString(16)`→`ff`, `(-10).toString(2)`→
+> `-1010`, `(0).toString(2)`→`0`). Zero regression risk — it only replaces previously-garbage output. js.c
+> warnings held at 17; all 37 `make check` suites pass. (Minor review items left as-is — fractional array index
+> `a[1.9]` and `a.length=2.5`→RangeError — they'd change established truncation behavior for negligible gain.)
+> See [[js-and-web-app-ceiling]].
+
 > **(M959) JS engine — NaN as a Map/Set/`includes` key + strict `JSON.parse` (review round 2).** Two more fixes
 > from the M958 review, host-verified: **(#7) `NaN` couldn't be a Map/Set key or found by `Array.includes`.**
 > Membership used `val_equal` (`===`), so `NaN !== NaN` meant `new Set([NaN,NaN]).size===2`, `map.get(NaN)===undefined`,
