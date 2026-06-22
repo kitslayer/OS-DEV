@@ -4,8 +4,8 @@
  * The first app to use the mouse: it opens a pixel canvas (the graphics window
  * API), reads the cursor + buttons with sys_mouse(), and paints where you drag.
  * Keys 1-8 pick a colour, +/- change the brush size, g flood-fills under the
- * cursor, b/l/r switch brush/line/rectangle tools (line & rect drag with a live
- * rubber-band preview), c clears, q/Esc quits.
+ * cursor, b/l/r/o switch brush/line/rectangle/circle tools (the shape tools drag
+ * with a live rubber-band preview), c clears, q/Esc quits.
  * Pure integer math (no FPU).
  */
 #include "ulib.h"
@@ -61,6 +61,20 @@ static void fill(int sx, int sy, unsigned int newc) {
     free(stk);
 }
 
+static int isqrt(int n) { if (n <= 0) return 0; int x = n, y = (x + 1) / 2; while (y < x) { x = y; y = (x + n / x) / 2; } return x; }
+/* Circle outline (midpoint algorithm), brush-thick via disc at each octant point. */
+static void circ(int cx, int cy, int rad, int br, unsigned int c) {
+    int x = rad, y = 0, err = 0;
+    while (x >= y) {
+        disc(cx + x, cy + y, br, c); disc(cx + y, cy + x, br, c);
+        disc(cx - y, cy + x, br, c); disc(cx - x, cy + y, br, c);
+        disc(cx - x, cy - y, br, c); disc(cx - y, cy - x, br, c);
+        disc(cx + y, cy - x, br, c); disc(cx + x, cy - y, br, c);
+        y++; if (err <= 0) err += 2 * y + 1;
+        if (err > 0) { x--; err -= 2 * x + 1; }
+    }
+}
+
 static void draw_palette(int sel) {
     for (int p = 0; p < 8; p++) {                            /* colour swatches, top-left */
         int x0 = 3 + p * 16, y0 = 3;
@@ -92,6 +106,7 @@ int main(void) {
         else if (k == 'b') mode = 0;                         /* brush (freehand) */
         else if (k == 'l') mode = 1;                         /* line tool */
         else if (k == 'r') mode = 2;                         /* rectangle tool */
+        else if (k == 'o') mode = 3;                         /* circle tool (drag out from centre) */
 
         int x, y;
         int b = sys_mouse(&x, &y);
@@ -109,6 +124,7 @@ int main(void) {
                     for (int i = 0; i < W * H; i++) cv[i] = bk[i];
                 }
                 if (mode == 1) stroke(ax, ay, x, y, brush, palette[col]);   /* line */
+                else if (mode == 3) circ(ax, ay, isqrt((x - ax) * (x - ax) + (y - ay) * (y - ay)), brush, palette[col]);   /* circle from centre */
                 else {                                       /* rectangle outline (4 edges) */
                     stroke(ax, ay, x,  ay, brush, palette[col]);
                     stroke(ax, y,  x,  y,  brush, palette[col]);

@@ -1,5 +1,11 @@
 # What's next
 
+> **(M947) Paint — circle tool (completes the shape set).** Added a circle/oval tool (`o`): drag out from the
+> centre and a midpoint-algorithm circle rubber-bands to the cursor radius (`isqrt` of dx²+dy², integer-only),
+> reusing M946's preview (backup/restore each drag frame) and the disc brush for thickness. Paint is now a
+> real drawing program: brush, flood-fill, line, rectangle, circle — each colour-/size-aware. Verified
+> in-guest: `o` + drag draws a clean single blue circle (no smear). `make check` green (36 suites).
+
 > **(M946) Paint — line & rectangle tools with rubber-band preview.** With fill (M945) done, added shape
 > tools so paint is a real drawing program: `b`/`l`/`r` pick brush / line / rectangle. In line or rect mode a
 > left-drag rubber-bands a live preview — on press it snapshots the canvas into a backup buffer + records the
