@@ -58,6 +58,7 @@
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
 #define REMOTE_IMG_MAX 3            /* remote <img> URLs prefetched per page (best-effort) */
 #define IN_MAX    16                /* distinct form-field values stored per page (id-keyed: inputs/textareas/selects). was 8 -> a >8-field form silently dropped the extras from render + GET submit */
+#define IN_VLEN   256               /* bytes per stored field value -> 255 chars (was 96/95): a real textarea / long input is no longer truncated. EVERY edit buffer below must be IN_VLEN with caps IN_VLEN-1 (plain copy) / IN_VLEN-2 (before an insert) so they never overflow */
 
 enum { STY_NORMAL, STY_H1, STY_H2, STY_LINK, STY_BOLD, STY_EM, STY_CODE, STY_STRIKE, STY_MARK, STY_SUB, STY_SUP };
 enum { TK_WORD, TK_BREAK, TK_PARA, TK_HR, TK_IMG,     /* TK_IMG: link field = image slot */
@@ -152,7 +153,7 @@ struct browser {
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border */
-    char    in_id[IN_MAX][32]; char in_val[IN_MAX][96]; int in_n;   /* <input> field values, by id (the typed/scripted text) */
+    char    in_id[IN_MAX][32]; char in_val[IN_MAX][IN_VLEN]; int in_n;   /* <input> field values, by id (the typed/scripted text) */
     char    in_name[IN_MAX][32];                                /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
     char    sel_ids[8][32]; char sel_vals[8][512]; int sel_n;   /* <select>s: id + its option values ('\n'-joined), so a click cycles to the next.
@@ -903,7 +904,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             /* seed a store slot from the value= attr (only if absent) so the field's
              * default is both shown and submittable; idempotent across re-renders. */
             if (idbuf[0] && !in_get(b, idbuf) && find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0) {
-                char vb[96]; int n = vl; if (n > 95) n = 95; for (int i=0;i<n;i++) vb[i]=v[i]; vb[n]=0;
+                char vb[IN_VLEN]; int n = vl; if (n > IN_VLEN-1) n = IN_VLEN-1; for (int i=0;i<n;i++) vb[i]=v[i]; vb[n]=0;
                 in_set(b, idbuf, vb);
             }
             if (idbuf[0]) {                              /* attach the name= for GET submit (if the slot exists) */
@@ -1372,7 +1373,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
                     if (intextarea && ta_start >= 0 && ta_id[0]) {
                         if (!in_get(b, ta_id)) {                 /* seed from the inner text (only if not already typed/scripted) */
                             int ss = ta_start; if (ss < i && body[ss] == '\n') ss++;   /* HTML strips a leading newline */
-                            char vb[96]; int n = i - ss; if (n > 95) n = 95; if (n < 0) n = 0;
+                            char vb[IN_VLEN]; int n = i - ss; if (n > IN_VLEN-1) n = IN_VLEN-1; if (n < 0) n = 0;
                             for (int k = 0; k < n; k++){ vb[k] = body[ss + k]; } vb[n] = 0;
                             in_set(b, ta_id, vb);
                         }
@@ -1915,7 +1916,7 @@ static const char *in_get(browser_t *b, const char *id) {
 static void in_set(browser_t *b, const char *id, const char *val) {
     int i; for (i = 0; i < b->in_n; i++) if (streqs(b->in_id[i], id)) break;
     if (i == b->in_n) { if (b->in_n >= IN_MAX || !id[0]) return; int j=0; while(id[j]&&j<31){b->in_id[i][j]=id[j];j++;} b->in_id[i][j]=0; b->in_name[i][0]=0; b->in_n++; }
-    int j=0; while(val[j]&&j<95){b->in_val[i][j]=val[j];j++;} b->in_val[i][j]=0;
+    int j=0; while(val[j]&&j<IN_VLEN-1){b->in_val[i][j]=val[j];j++;} b->in_val[i][j]=0;
 }
 /* Record a field's name= (for GET submit) in the slot already created for its id. */
 static void in_name_set(browser_t *b, const char *id, const char *name) {
@@ -3928,11 +3929,11 @@ void browser_paste(browser_t *b, const char *s, int n) {
     if (!b || n <= 0) return;
     if (b->focus_id[0]) {                               /* insert at the focused field's caret */
         const char *cur = in_get(b, b->focus_id);
-        char t[96]; int k = 0;
-        if (cur) while (cur[k] && k < 95) { t[k] = cur[k]; k++; }
+        char t[IN_VLEN]; int k = 0;
+        if (cur) while (cur[k] && k < IN_VLEN-1) { t[k] = cur[k]; k++; }
         t[k] = 0;
         int fc = b->field_cur; if (fc < 0) fc = 0; if (fc > k) fc = k;
-        for (int i = 0; i < n && k < 94; i++) {         /* shift the tail right, drop in each char */
+        for (int i = 0; i < n && k < IN_VLEN-2; i++) {  /* shift the tail right, drop in each char */
             char ch = s[i]; if (ch < 32 || ch >= 127) continue;
             for (int j = k; j > fc; j--) t[j] = t[j-1];
             t[fc++] = ch; t[++k] = 0;
@@ -4046,10 +4047,10 @@ void browser_key(browser_t *b, int c) {
     if (b->help_on) { b->help_on = 0; return; }         /* any key dismisses the help overlay */
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
         if ((c == '\n' || c == '\r') && is_textarea(b, b->focus_id)) {   /* textarea: Enter inserts a newline (not submit) */
-            const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
-            if (cur) { while (cur[n] && n<94) { t[n]=cur[n]; n++; } } t[n]=0;
+            const char *cur = in_get(b, b->focus_id); char t[IN_VLEN]; int n=0;
+            if (cur) { while (cur[n] && n<IN_VLEN-2) { t[n]=cur[n]; n++; } } t[n]=0;
             if (b->field_cur > n) b->field_cur = n;
-            if (n < 94) {
+            if (n < IN_VLEN-2) {
                 for (int i = n; i > b->field_cur; i--) t[i] = t[i-1];
                 t[b->field_cur] = '\n'; t[n+1] = 0; b->field_cur++;
                 in_set(b, b->focus_id, t);
@@ -4080,8 +4081,8 @@ void browser_key(browser_t *b, int c) {
             parse_html(b, b->raw + b->bodyoff, b->bodylen);            /* re-render to move the caret */
         }
         else if (c == 8 || c == 127 || c == 0x04) {     /* backspace (before caret) / Delete (at caret) */
-            const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
-            if (cur) while (cur[n] && n<95) { t[n]=cur[n]; n++; } t[n]=0;
+            const char *cur = in_get(b, b->focus_id); char t[IN_VLEN]; int n=0;
+            if (cur) while (cur[n] && n<IN_VLEN-1) { t[n]=cur[n]; n++; } t[n]=0;
             if (b->field_cur > n) b->field_cur = n;
             int del = (c == 0x04) ? b->field_cur : b->field_cur - 1;
             if (del >= 0 && del < n) {
@@ -4091,10 +4092,10 @@ void browser_key(browser_t *b, int c) {
                 if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen);
             }
         } else if (c >= 32 && c < 127) {                /* insert a printable char at the caret */
-            const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
-            if (cur) while (cur[n] && n<94) { t[n]=cur[n]; n++; } t[n]=0;
+            const char *cur = in_get(b, b->focus_id); char t[IN_VLEN]; int n=0;
+            if (cur) while (cur[n] && n<IN_VLEN-2) { t[n]=cur[n]; n++; } t[n]=0;
             if (b->field_cur > n) b->field_cur = n;
-            if (n < 94) {
+            if (n < IN_VLEN-2) {
                 for (int i = n; i > b->field_cur; i--) t[i] = t[i-1];
                 t[b->field_cur] = (char)c; t[n+1] = 0; b->field_cur++;
                 in_set(b, b->focus_id, t);

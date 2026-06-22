@@ -1,5 +1,18 @@
 # What's next
 
+> **(M957) Browser — raise the per-field value width from 95 to 255 chars (completes P4).** The other half of the
+> M955-review P4: every stored field value (`in_val`) was 96 bytes → 95 chars, far too short for a real
+> `<textarea>`. Introduced `#define IN_VLEN 256` and migrated the store plus *every* edit buffer to it — the catch
+> is that several scattered code paths copy a field value into a fixed local `t[96]` before editing (the
+> `browser_key` insert/newline/backspace paths, `browser_paste`, the `value=`/textarea-body seeds, `in_set`), and
+> raising the store width *without* raising those buffers would overflow them when reading a now-longer value. So
+> each was changed buffer-and-cap together, with a uniform invariant (every cap is `IN_VLEN-1` for a plain copy /
+> `IN_VLEN-2` before an insert, i.e. strictly `< IN_VLEN`, so reads/inserts can't overflow). Verified in-guest
+> (new demo `talen.htm`): a script fills a textarea with 150 `x` → reports `len=150` on load (was capped at 95),
+> and typing one more char into that 150-char field reports `len=151` (the keyboard path reads the long value into
+> the enlarged buffer safely). browser.c warnings held at 6; all 37 `make check` suites pass. (Single-line inputs
+> share the store so they also accept 255 now — harmless.) See [[browser-render-engine]].
+
 > **(M956) Browser — raise the per-page form-field cap from 8 to 16 (P4 from the M955 review).** The id-keyed
 > field-value store (`in_id`/`in_val`/`in_name`, where every `<input>`/`<textarea>`/`<select>` value lives) was
 > fixed at 8 slots: a form with a 9th distinct named field silently dropped it from both rendering and the GET
