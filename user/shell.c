@@ -11,6 +11,7 @@
 #include "shmath.h"   /* sh_eval(): the $((expr)) integer evaluator, host-tested by tests/shmath */
 #include "shsplit.h"  /* sh_next_sep(): the ';' statement splitter (construct-aware), host-tested by tests/shsplit */
 #include "shbrace.h"  /* expand_braces(): {a,b}/{1..N} brace expansion, host-tested by tests/shbrace */
+#include "shquote.h"  /* sh_quote_pass()/sh_unprot_buf(): "..." '...' quoting, host-tested by tests/shquote */
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
@@ -1572,7 +1573,8 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "echo")) {
             print("\n");                                  /* bare echo: a blank line */
         } else if (startswith(line, "echo ")) {
-            const char *a = line + 5;
+            char *a = line + 5;
+            sh_unprot_buf(a);                             /* reveal quoted spaces/metachars for output */
             if (streq(a, "-n")) { }                       /* echo -n: print nothing, no newline */
             else if (startswith(a, "-n ")) print(a + 3);  /* echo -n TEXT: no trailing newline (good for prompts before `read`) */
             else { print(a); print("\n"); }
@@ -2635,6 +2637,7 @@ static int run_line(char *line, char *cwd) {
      * aline stay shared: run_line touches them only after cmdsub_expand returns. */
     static char subline[9][1024];
     int sbi = in_cmdsub < 9 ? in_cmdsub : 8;
+    sh_quote_pass(line);                          /* strip "..."/'...' + protect their specials, before any expansion/splitting */
     char *cmd = line;
     if (cmdsub_expand(cmd, subline[sbi], sizeof subline[0], cwd)) cmd = subline[sbi];   /* $(...) command substitution */
     if (expand_vars(cmd, vline, sizeof vline)) cmd = vline;   /* $NAME / ${NAME} variable expansion (before glob/pipe/redirect) */
@@ -2699,8 +2702,10 @@ static int run_andor(char *seg, char *cwd) {
     char *p = seg;
     int run_this = 1, exitflag = 0;
     while (p) {
-        char *op = p; int oplen = 0, pd = 0;
+        char *op = p; int oplen = 0, pd = 0, q = 0;
         while (*op) {
+            if (q) { if (*op == q) q = 0; op++; continue; }                   /* inside "..."/'...': &&/|| are literal */
+            if (*op == '"' || *op == '\'') { q = *op; op++; continue; }
             if (op[0] == '$' && op[1] == '(') { pd++; op += 2; continue; }   /* enter $( or $(( : its &&/|| are arithmetic/command-sub, not ours */
             if (pd > 0) { if (*op == '(') pd++; else if (*op == ')') pd--; op++; continue; }
             if ((op[0] == '&' && op[1] == '&') || (op[0] == '|' && op[1] == '|')) { oplen = 2; break; }

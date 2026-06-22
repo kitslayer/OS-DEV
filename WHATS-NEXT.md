@@ -1,5 +1,23 @@
 # What's next
 
+> **(M949) Shell — POSIX quoting `"..."` / `'...'` (foundation): the most-requested shell feature, the last big
+> deferred shell item.** The blocker was always that arg parsing is decentralized (no central argv tokenizer).
+> Solved with a sentinel scheme (planned via a subagent): shell input is 7-bit ASCII, so `sh_quote_pass()`
+> (new `user/shquote.h`) strips the quote characters and PROTECTS the in-quote specials by setting bit 7 —
+> space, `; | & < > * ?` (both quote kinds), plus `( ) { } , $ \`` and the other-quote char inside single
+> quotes (fully literal), while double quotes leave `$`/`(`/`{` so `"$x"`/`"$(cmd)"`/`"${y}"` still expand. The
+> whole existing pipeline then treats sentinels as ordinary bytes (every splitter/glob/expander scans for the
+> *raw* ASCII special, which a high-bit byte is not), and each builtin calls `sh_unprot_buf()` on a token once
+> it's split out. Ran `sh_quote_pass` at the top of `run_line` (before all expansion); made the `;` splitter
+> (`sh_next_sep`) and the `&&`/`||` splitter (`run_andor`) quote-aware so those operators are literal inside
+> quotes. This commit wires the machinery + `echo`'s unprotect; **the per-command unprotect sweep (cat/grep/cp/
+> mv/… each `sh_unprot_buf` their tokens) is M950.** Strictly additive — no quotes → `sh_quote_pass` is a no-op
+> → byte-identical (DEMO.SH verified unchanged). New `shquotetest` (37th `make check` suite) fuzzes
+> `sh_quote_pass` 3M× under ASan/UBSan — already caught + fixed a nested-`$()` re-interpretation bug (the
+> other-quote char must be protected, not left literal). Verified in-guest: `echo "a b"`/`'a b'`→`a b`,
+> `"a;b"`→`a;b`, `"x|y"`→`x|y`, `'$x'`→`$x`, `x=5;"$x"`→`5`, `"a&&b"`→`a&&b`. `make check` green (37 suites);
+> shell.c warning baseline (11) held.
+
 > **(M948) Editor — CSS syntax highlighting.** Completes the editor's source-language set (was C/JS/shell/HTML;
 > CSS is the language the OS's many `.htm` pages use in `<style>`). CSS (`hl_lang` 5, `.css`) reuses the
 > C-family machinery — `/* */` block comments (grey), strings (orange), numbers incl. `12px` (purple) — but

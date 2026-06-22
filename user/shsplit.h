@@ -33,7 +33,10 @@ static int sh_next_sep(const char *seg) {
             else if ((word_at(semi, "fi") || word_at(semi, "done") || word_at(semi, "esac")) && cd > 0) cd--;
         }
         int nextcmd = word_at(semi, "then") || word_at(semi, "do") || word_at(semi, "else");
-        while (*semi && *semi != ' ' && *semi != ';') semi++;   /* skip this whole token */
+        while (*semi && *semi != ' ' && *semi != ';') {         /* skip this whole token, incl any "..."/'...' spans */
+            if (*semi == '"' || *semi == '\'') { char qq = *semi++; while (*semi && *semi != qq) semi++; if (*semi) semi++; }
+            else semi++;
+        }
         atcmd = nextcmd;
     }
     return (int)(semi - seg);
