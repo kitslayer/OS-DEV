@@ -1,5 +1,18 @@
 # What's next
 
+> **(M971) Heap — `kmalloc` input-overflow + zero-size guards (the safe part of the M970 heap review).** The two
+> kmalloc-entry hardening items that DON'T touch the free-list/coalescing (so they can't break valid allocs): (a)
+> reject a `size` so large that `align16(size)` (`(size+15)&~15`) or the `need + sizeof(block_t) + 16` math would
+> wrap — an overflow there under-allocates and the caller then overruns the heap; now such a request returns NULL
+> cleanly. (b) `kmalloc(0)` returned a 0-usable-byte block (the first write clobbers the next block's header); now
+> size 0 is bumped to a real minimum block. Both are pure entry-guards (no header/free-list/alignment change),
+> verified by `heaptest` + `kheaptest` (the allocator suites) + boottest all green; kheap.c warnings still 0. **The
+> free-list hardening from the review stays deferred (it touches the allocator core — careful fresh session):** add
+> a header magic so a double-free / bad-pointer free is detected instead of silently corrupting the list, and add
+> backward coalescing so the heap doesn't fragment/bloat over a long run (currently only forward-merges). Likewise
+> the dedicated idle task (#1) — both are core changes best done with full focus, not at the tail of a long session.
+> See [[os-dev-project]].
+
 > **(M970) Kernel scheduler + heap — fix a window-leak race + OOM triple-fault (8th review subagent).** A review of
 > `task.c`/`kheap.c` (interrupt model confirmed: all IDT gates are interrupt gates, syscalls run IF-off,
 > `irq_save`/`irq_restore` is the guard) found several issues — most masked/not-currently-triggerable — and these

@@ -107,6 +107,8 @@ static void grow_heap(uint64_t need_bytes) {
 }
 
 void *kmalloc(size_t size) {
+    if (size > (size_t)-1 - sizeof(block_t) - 32) return 0;   /* reject a size so large that align16()/the `need + header` math would wrap -> under-allocation -> heap overflow on use */
+    if (size == 0) size = 1;                                  /* malloc(0): hand back a real (min) block, not a 0-usable-byte one whose first write clobbers the next header */
     uint64_t need = align16(size);
     uint64_t f = irq_save();
 
