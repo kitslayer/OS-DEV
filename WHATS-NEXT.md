@@ -1,5 +1,19 @@
 # What's next
 
+> **(M953) Shell quoting — fix two interaction bugs (found by my own adversarial testing).** After M949–M952 I
+> stress-tested quoting combined with pipes/glob/for/cmdsub/brace and found two real bugs the review hadn't hit:
+> (1) `for f in "x y" z` iterated `["x"] [y"] [z]` — for/while/if/case are dispatched in `run_input_line`, which
+> bypassed `run_line`'s `sh_quote_pass`, so their word lists were never quote-processed. Fix: run `sh_quote_pass`
+> in `run_input_line` too (after the `js -e` intercept + func-def capture, before the `;`-split + construct
+> dispatch). (2) `echo "$(echo hi there)"` → "unknown command: echo hi there" — `sh_quote_pass` protected the
+> spaces *inside* the `$(...)` because it sat within double quotes, corrupting the inner command. Fix:
+> `sh_quote_pass` now copies `$(...)` spans verbatim (depth-tracked), even inside double quotes — the inner
+> command is separate and its own quoting is processed when it runs (its `run_line` still applies the pass).
+> Verified in-guest: `for f in "x y" z` → `[x y] [z]`, `echo "$(echo hi there)"` → `hi there`, plain
+> `for n in 1 2 3` unregressed. `shquotetest` updated (verbatim-`$()` cases; the "no quote survives" fuzz
+> assertion relaxed since quotes inside `$()` legitimately remain); 3M fuzz + `make check` green (37 suites);
+> baseline 11 held.
+
 > **(M952) Shell quoting — fix 5 missed unprotect sites (review-driven).** A read-only review subagent
 > scrutinized the M949/M950 quoting and confirmed the core machinery is clean (no regressions, unquoted input
 > byte-identical) but found 4 builtins that consume a filename/arg yet never called `sh_unprot_buf`, so a quoted

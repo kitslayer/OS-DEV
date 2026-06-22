@@ -2993,6 +2993,10 @@ static int run_input_line(char *line, char *cwd) {
               }
           }
       } }
+    sh_quote_pass(line);                       /* strip "..."/'...' + protect their specials BEFORE the ;-split and
+                                                * for/while/if/case dispatch, so quoting works in their word lists too
+                                                * (func defs above stored their body raw -> processed at call time;
+                                                * $(...) content is copied verbatim and quote-processed by its run_line) */
     char *seg = line; int doexit = 0;
     while (seg && !doexit) {
         char *semi = seg + sh_next_sep(seg);   /* next top-level ';' (skips $() and stays inside if…fi/while…done/for…done) */

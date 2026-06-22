@@ -45,6 +45,16 @@ static void sh_quote_pass(char *line) {
     char *r = line, *w = line; int q = 0;          /* q: 0 (none), '"' or '\'' */
     while (*r) {
         char c = *r;
+        /* $(...) command/arith substitution: copy it VERBATIM (depth-tracked), even
+         * inside double quotes — its content is a separate command whose own quoting
+         * is processed when it runs, so we must NOT protect its spaces. (Single quotes
+         * suppress substitution, so there $ is just protected below.) */
+        if (q != '\'' && c == '$' && r[1] == '(') {
+            *w++ = *r++; *w++ = *r++;              /* "$(" */
+            int depth = 1;
+            while (*r && depth) { if (*r == '(') depth++; else if (*r == ')') depth--; *w++ = *r++; }
+            continue;
+        }
         if (!q) {
             if (c == '"' || c == '\'') { q = c; r++; continue; }   /* open quote: drop it */
             *w++ = c; r++; continue;                                /* ordinary char */

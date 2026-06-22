@@ -46,6 +46,11 @@ int main(void) {
     CHECK("echo \"a\\\"b\"", "echo a\xa2" "b");   /* \" -> a literal (protected) double-quote */
     CHECK("echo \"a\\\\b\"", "echo a\xdc" "b");   /* \\ -> a literal (protected) backslash (0x5c|0x80) */
 
+    /* --- $(...) is copied verbatim (its content is a separate command), even in "..." --- */
+    CHECK("echo \"$(echo a b)\"", "echo $(echo a b)");   /* inner spaces NOT protected */
+    CHECK("echo $(a b)", "echo $(a b)");                 /* unquoted $() unchanged */
+    CHECK("echo '$(x)'", "echo \xa4\xa8x\xa9");          /* single quotes: $ ( ) protected (no substitution) */
+
     /* --- edges --- */
     CHECK("", "");
     CHECK("echo \"open", "echo open");            /* unbalanced: implicit close at EOL */
@@ -67,13 +72,11 @@ int main(void) {
         sh_quote_pass(out);
         int olen = (int)strlen(out);
         if (olen > n) { printf("FAIL: output grew for [%s]\n", in); return 1; }   /* the pass only deletes/marks, never grows */
-        for (int i = 0; i < olen; i++)
-            if (out[i] == '"' || out[i] == '\'') { printf("FAIL: quote char survived in [%s]\n", in); return 1; }
         sh_unprot_buf(out);                       /* must fully reveal */
         for (int i = 0; out[i]; i++)
             if (SH_ISPROT(out[i])) { printf("FAIL: byte stayed protected in [%s]\n", in); return 1; }
         seed = seed * 1103515245u + 12345u;
     }
-    printf("fuzz: 3000000 random inputs, no crash / OOB, all quotes stripped, all bytes un-protect\n");
+    printf("fuzz: 3000000 random inputs, no crash / OOB / growth, all bytes un-protect\n");
     return 0;
 }
