@@ -393,6 +393,13 @@ static const struct {
         "<button onclick=\"document.getElementById('cb').checked=false;document.getElementById('o').textContent='set false'\">[ set false ]</button></p>"
         "<p id=\"o\">click read .checked</p>"
         "<p>Reads return a real boolean (<code>true</code>/<code>false</code>), and assigning a boolean toggles the box.</p>" },
+    { "PROPJS  HTM", "<h1>DOM attribute properties</h1>"
+        "<p id=\"t\" class=\"hi there\">styled paragraph</p>"
+        "<p><a id=\"lnk\" href=\"file:README.TXT\">a link</a></p>"
+        "<p><button onclick=\"document.getElementById('o').textContent='cls=['+document.getElementById('t').className+'] href=['+document.getElementById('lnk').href+']'\">[ read props ]</button> "
+        "<button onclick=\"var e=document.getElementById('t');e.className='changed';document.getElementById('o').textContent='now cls=['+e.className+']'\">[ set className ]</button></p>"
+        "<p id=\"o\">click read props</p>"
+        "<p>el.className/href/src/name/title/alt/placeholder/type now reflect their HTML attribute (read + write).</p>" },
     { "ONCHG   HTM", "<h1>onchange handler</h1>"
         "<p>An input's <code>onchange</code> runs JavaScript the moment its value changes &mdash; no button needed. Tab/n to the box and Enter to toggle it:</p>"
         "<p><input id=\"agree\" type=\"checkbox\" onchange=\"document.getElementById('msg').textContent = document.getElementById('agree').value=='on' ? 'Thanks for agreeing!' : 'You unchecked it.'\"> I agree to the terms</p>"

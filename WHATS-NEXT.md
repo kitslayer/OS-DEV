@@ -1,5 +1,16 @@
 # What's next
 
+> **(M941) Browser — attribute-reflecting DOM properties (`element.className`/`href`/`src`/`name`/`title`/
+> `alt`/`placeholder`/`type`).** Continuing the "more DOM APIs" frontier: these common properties returned
+> `undefined` on live elements, so `link.href`, `img.src`, `el.className`, `input.placeholder` etc. didn't work
+> from page JS. Since `getAttribute`/`setAttribute` already work, `dom_prop` now maps each of these property
+> names to its HTML attribute (`className` → the `class` attribute; the rest are same-named) for both read and
+> write — `el.className` returns the class string and `el.className = "x"` rewrites it (re-rendering the page so
+> new styling applies). Reuses the existing id- and position-handle attribute bridges. Strictly additive (these
+> names previously fell through to `undefined`; every other property unchanged). New `PROPJS.HTM` demo. Verified
+> in-guest: read → `cls=[hi there] href=[file:README.TXT]`, and `className='changed'` round-trips to
+> `now cls=[changed]`. `make check` green (36 suites).
+
 > **(M940) Browser — `element.checked` DOM property (read + write) for checkboxes/radios.** On the README's
 > named "richer browser interactivity / more DOM APIs" frontier: page JS could read a checkbox's state only via
 > the stringy `.value` (`"on"`/`""`), but the idiomatic `if (cb.checked)` / `cb.checked = true` didn't work.

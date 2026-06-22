@@ -3258,6 +3258,19 @@ static int dom_prop(obj *el, const char *name, const char *setval, char *out, in
         if (!setval && out) { out[0]=0; if (has_pos) { if(g_dom_tag_at) g_dom_tag_at(off, out, outmax); } else { if(g_dom_tag) g_dom_tag(id, out, outmax); } }
         return 1;
     }
+    {   /* properties that directly reflect an HTML attribute (className -> class, the rest same-named),
+         * so el.className/href/src/name/title/alt/placeholder/type read+write via getAttribute/setAttribute */
+        const char *attr = 0;
+        if (strcmp(name,"className")==0) attr = "class";
+        else if (strcmp(name,"href")==0 || strcmp(name,"src")==0 || strcmp(name,"name")==0 ||
+                 strcmp(name,"title")==0 || strcmp(name,"alt")==0 || strcmp(name,"placeholder")==0 ||
+                 strcmp(name,"type")==0) attr = name;
+        if (attr) {
+            if (setval)   { if (has_pos) { if(g_dom_setattr_at) g_dom_setattr_at(off,attr,setval); } else { if(g_dom_setattr) g_dom_setattr(id,attr,setval); } }
+            else if (out) { out[0]=0; if (has_pos) { if(g_dom_getattr_at) g_dom_getattr_at(off,attr,out,outmax); } else { if(g_dom_getattr) g_dom_getattr(id,attr,out,outmax); } }
+            return 1;
+        }
+    }
     int kind = -1;                                   /* 0=textContent, 1=innerHTML, 2=input .value, 4=checkbox .checked */
     if (strcmp(name,"value")==0) kind = 2;
     else if (strcmp(name,"checked")==0) kind = 4;
