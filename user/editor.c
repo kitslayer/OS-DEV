@@ -10,6 +10,8 @@
 
 #define MAXDOC 262144             /* editable file size 256 KB (each editor process has its own copy); large downloaded/saved web pages exceed 64 KB */
 #define EDCOLS 44                 /* must match the app text grid */
+#define GUTTER 5                  /* left line-number gutter: 4 digits + 1 pad (good to 9999; wider numbers eat the pad) */
+#define EDTEXT (EDCOLS - GUTTER)  /* usable text columns to the right of the gutter (the wrap width) */
 #define EDVIS  16                 /* visible text rows (grid is 17; 1 is the status line) */
 
 static char doc[MAXDOC];
@@ -288,12 +290,14 @@ static void move_vert(int down) {
     }
 }
 
-/* Wrap-aware grid-row of doc position `pos` (a '\n' or hitting EDCOLS wraps). */
+/* Wrap-aware grid-row of doc position `pos` (a '\n' or hitting EDTEXT wraps).
+ * EDTEXT (not EDCOLS) is the wrap width because the gutter eats the left columns;
+ * this must agree with the render loop's wrap, or the scroll window mis-tracks. */
 static int row_of(int pos) {
     int row = 0, col = 0;
     for (int i = 0; i < pos && i < dlen; i++) {
         if (doc[i] == '\n') { row++; col = 0; }
-        else if (++col == EDCOLS) { row++; col = 0; }
+        else if (++col == EDTEXT) { row++; col = 0; }
     }
     return row;
 }
@@ -303,7 +307,7 @@ static int row_offset(int target) {
     int row = 0, col = 0;
     for (int i = 0; i < dlen; i++) {
         if (doc[i] == '\n') { row++; col = 0; }
-        else if (++col == EDCOLS) { row++; col = 0; }
+        else if (++col == EDTEXT) { row++; col = 0; }
         if (row == target) return i + 1;
     }
     return dlen;
@@ -414,6 +418,29 @@ static int match_bracket(int pos){
     return -1;
 }
 
+/* Left line-number gutter: append GUTTER cells to out[]/hlc[]. `lineno` > 0 is
+ * shown right-aligned (with a 1-col pad), `lineno` <= 0 leaves the field blank
+ * (a wrap-continuation row). The cells carry the GUT sentinel colour so the
+ * run-printer always renders them grey and a selection never tints them. The
+ * gutter is drawn by the editor itself, inline in its print() stream — there is
+ * no absolute positioning here, so the cursor '|' and selection markers, which
+ * are also emitted into this same stream, stay aligned automatically. */
+#define GUT_COL ((signed char)-2)   /* hlc[] sentinel: gutter cell -> always palette 8 (grey), never selected */
+static void emit_gutter(char *out, signed char *hlc, int *po, int lineno) {
+    char num[12]; int nl = 0;
+    if (lineno > 0) itoa_i(lineno, num); else num[0] = 0;
+    nl = 0; while (num[nl]) nl++;
+    int o = *po;
+    int pad = GUTTER - 1 - nl;          /* GUTTER-1 digit columns (1 col is the trailing pad) */
+    for (int i = 0; i < GUTTER - 1; i++) {            /* right-align the digits in the leading field */
+        int di = i - pad;                             /* index into num once we reach the number */
+        char ch = (lineno > 0 && di >= 0 && di < nl) ? num[di] : ' ';
+        out[o] = ch; hlc[o] = GUT_COL; o++;
+    }
+    out[o] = ' '; hlc[o] = GUT_COL; o++;              /* 1-column pad between gutter and text */
+    *po = o;
+}
+
 static void render(const char *msg) {
     sys_clear();
     /* cursor line:col (1-based) for the status line */
@@ -468,16 +495,24 @@ static void render(const char *msg) {
     static char out[2048];                 /* off the stack; only ever holds the EDVIS visible rows */
     static signed char hlc[2048];          /* parallel colour for each out[] byte */
     int o = 0, row = 0, col = 0, os0 = -1, os1 = -1;
-    for (int i = off; i <= dlen && row < EDVIS && o < (int)sizeof(out) - 4; i++) {
+    /* Line number of the first visible row, and whether that row starts a fresh
+     * document line (number shown) or is a wrap-continuation (blank gutter). */
+    int vline = 1; for (int i = 0; i < off && i < dlen; i++) if (doc[i] == '\n') vline++;
+    int line_start = (off == 0 || (off <= dlen && doc[off-1] == '\n'));
+    emit_gutter(out, hlc, &o, line_start ? vline : 0);   /* gutter for the first visible row */
+    for (int i = off; i <= dlen && row < EDVIS && o < (int)sizeof(out) - GUTTER - 4; i++) {
         if (sel && i == s0) os0 = o;       /* record where the selection starts/ends in the output... */
         if (sel && i == s1) os1 = o;       /* ...before the cursor mark so the caret isn't highlighted */
-        if (i == cur) { out[o] = '|'; hlc[o] = 0; o++; }
+        if (i == cur) { out[o] = '|'; hlc[o] = 0; o++; }   /* caret sits just after the gutter at col 0 */
         if (i < dlen) {
             char ch = doc[i];
             int cc = (i - off >= 0 && i - off < vn) ? vcol[i - off] : 0;
             out[o] = ch; hlc[o] = (signed char)cc; o++;
-            if (ch == '\n') { row++; col = 0; }
-            else if (++col == EDCOLS) { row++; col = 0; }
+            int wrapped = 0;
+            if (ch == '\n') { row++; col = 0; vline++; line_start = 1; }
+            else if (++col == EDTEXT) { row++; col = 0; line_start = 0; wrapped = 1; }
+            if ((ch == '\n' || wrapped) && row < EDVIS)   /* start the next row with its gutter */
+                emit_gutter(out, hlc, &o, line_start ? vline : 0);
         }
     }
     out[o] = 0;
@@ -486,16 +521,18 @@ static void render(const char *msg) {
         if (os0 >= 0 && os1 < 0) os1 = o;
     }
     /* Print out[] in maximal same-colour runs; an active selection overrides to
-     * yellow (3) within [os0,os1). With hl_lang==0 every byte is colour 0, so this
-     * reduces to the previous default-text / yellow-selection rendering. */
+     * yellow (3) within [os0,os1). Gutter cells (GUT_COL) are forced grey (8) and
+     * never tinted by a selection, so the numbers stay legible. With hl_lang==0
+     * every text byte is colour 0, so this reduces to the previous default-text /
+     * yellow-selection rendering with a grey gutter prefixed to each row. */
     int k = 0;
     while (k < o) {
-        int c = hlc[k];
-        if (sel && k >= os0 && k < os1) c = 3;
+        int c = hlc[k] == GUT_COL ? 8 : hlc[k];
+        if (hlc[k] != GUT_COL && sel && k >= os0 && k < os1) c = 3;
         int e = k + 1;
         while (e < o) {
-            int ce = hlc[e];
-            if (sel && e >= os0 && e < os1) ce = 3;
+            int ce = hlc[e] == GUT_COL ? 8 : hlc[e];
+            if (hlc[e] != GUT_COL && sel && e >= os0 && e < os1) ce = 3;
             if (ce != c) break;
             e++;
         }
