@@ -1,5 +1,18 @@
 # What's next
 
+> **(M954) Shell quoting — complete the last unswept file/SET readers (chokepoint unprotect).** The M950 sweep
+> left a handful of commands that read a *quoted* argument without revealing its bit-7 sentinels — benign (a stray
+> high-bit byte, never a crash) but incomplete. Fixed at the natural chokepoint: `slurp()` (the one function every
+> file-reading builtin funnels through — `cat`/`sort`/`uniq`/`cut`/`grep`/`wc`/…) now `sh_unprot_buf()`s the
+> filename once, so `cat "my file"` / `sort "a b.txt"` all work in a single place (guard-safe even on the lone
+> string-literal caller, scores' `"SNAKE.HI"`). Plus the three spots that don't go through `slurp`: `cd "my dir"`
+> (uses `sys_chdir`), and — newly *enabling* previously-impossible operations — `tr`'s SETs and `cut -dX`'s
+> delimiter, which `tr_expand`/the flag parser capture before the chokepoint. `tr -d ' '` (strip spaces),
+> `tr ' ' _` (space→underscore) and `cut -d' '` (space-delimited fields) were unreachable before — a bare space
+> arg is eaten by the `while(*p==' ')` skips; quoting it (`' '` → protected `\xa0`) now survives to the SET/delim,
+> then a count-based unprotect reveals it. Verified in-guest: `echo "a b c">SP.TXT; tr -d ' ' SP.TXT`→`abc`,
+> `cut -d' ' -f2 SP.TXT`→`b`. shell.c warnings held at 11. POSIX quoting is now comprehensive. See [[shell-quoting]].
+
 > **(M953) Shell quoting — fix two interaction bugs (found by my own adversarial testing).** After M949–M952 I
 > stress-tested quoting combined with pipes/glob/for/cmdsub/brace and found two real bugs the review hadn't hit:
 > (1) `for f in "x y" z` iterated `["x"] [y"] [z]` — for/while/if/case are dispatched in `run_input_line`, which

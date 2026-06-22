@@ -67,6 +67,10 @@ static void source_file(const char *fn, char *cwd, int silent);   /* run shell c
  * fills it — commands then see the whole file, not a fixed 2KB prefix. *len gets
  * the length; returns 0 on missing file / >=32MB / OOM. */
 static char *slurp(const char *name, long *len) {
+    sh_unprot_buf((char *)name);          /* a quoted filename ("my file") arrives with bit-7 sentinels — reveal them
+                                           * here, the one chokepoint every file-reading builtin funnels through.
+                                           * The guard in sh_unprot_buf never writes a sentinel-free byte, so this is
+                                           * safe even on the lone string-literal caller (scores' "SNAKE.HI"). */
     unsigned long cap = 65536;
     char *b = malloc(cap);
     long n = b ? sys_readfile(name, b, cap - 1) : -1;
@@ -764,6 +768,7 @@ static int run_command(char *line, char *cwd) {
             if (p[0] == '-' && p[1] == 'd' && p[2] == ' ') {
                 p += 3; while (*p == ' ') p++;
                 char del[128]; int dn = tr_expand(&p, del, 128);   /* SET to delete (chars + ranges) */
+                for (int z = 0; z < dn; z++) del[z] = SH_UNPROT(del[z]);   /* a quoted SET char (tr -d ' ') is protected */
                 while (*p == ' ') p++;
                 long n; char *buf = slurp(p, &n);
                 if (!buf) { print("tr: no such file: "); print(p); print("\n"); }
@@ -780,6 +785,8 @@ static int run_command(char *line, char *cwd) {
                 char s1[128], s2[128];
                 int n1 = tr_expand(&p, s1, 128); while (*p == ' ') p++;   /* SET1 */
                 int n2 = tr_expand(&p, s2, 128); while (*p == ' ') p++;   /* SET2 (shorter set: last char repeats) */
+                for (int z = 0; z < n1; z++) s1[z] = SH_UNPROT(s1[z]);    /* reveal quoted SET chars (tr ' ' _) */
+                for (int z = 0; z < n2; z++) s2[z] = SH_UNPROT(s2[z]);
                 long n; char *buf = slurp(p, &n);
                 if (!buf || n1 == 0 || n2 == 0) { print("usage: tr SET1 SET2 FILE  |  tr -d SET FILE   (SETs: chars or a-z ranges)\n"); if (buf) free(buf); }
                 else {
@@ -829,7 +836,7 @@ static int run_command(char *line, char *cwd) {
                         if (nr < 8) { rfrom[nr] = rf; rto[nr] = rt; roe[nr] = oe; nr++; }
                         if (*p == ',') p++; else break;    /* another range in the list? */
                     }
-                } else if (fl == 'd') { if (*p) delim = *p++; }   /* single-char field delimiter */
+                } else if (fl == 'd') { if (*p) delim = SH_UNPROT(*p++); }   /* single-char field delimiter (may be a quoted space: cut -d' ') */
                 else break;                                /* unknown flag */
             }
             while (*p == ' ') p++;
@@ -1457,6 +1464,7 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "cd ")) {
             char *path = line + 3; while (*path == ' ') path++;            /* skip extra spaces after `cd` */
             { int pl = (int)ustrlen(path); while (pl > 0 && path[pl-1] == ' ') path[--pl] = 0; }   /* trim trailing spaces */
+            sh_unprot_buf(path);                                           /* reveal a quoted dir name (cd "my dir") — chdir, not slurp */
             if (sys_chdir(path) < 0) { print("cd: no such directory\n"); g_status = 1; }
             else {
                 scpy(prevcwd, cwd);                              /* remember where we came from */
