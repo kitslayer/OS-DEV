@@ -1,5 +1,19 @@
 # What's next
 
+> **(M964) FAT32 — corrupt/malformed-disk hardening (the deferred M963 review batch).** Mirrored the read path's
+> safety onto the write/alloc paths so a corrupted on-disk structure can't steer a WRITE to the wrong sector or
+> orphan/cross-free clusters: (1) the `add_entry`, `fat32_delete` and `free_chain` chain-walk loops now bound on
+> `cluster_in_range(cl)` instead of `cl < EOC` — an out-of-range-but-`<EOC` chain value (which `cluster_to_sector`
+> can uint32-wrap to a *live* LBA when `sec_per_clus>=32`) stops the walk safely, exactly as `walk_dir` already
+> does on reads. (2) At mount, `total_clusters` is clamped to the FAT's real capacity (`fat_sectors*128 - 2`) — a
+> malformed BPB claiming more clusters than the FAT indexes otherwise makes `alloc_cluster`/`df` walk "FAT entries"
+> that physically fall inside the data region. (3) A `root_cluster < 2` BPB is rejected at mount (0/1 would
+> underflow `cluster_to_sector` into a huge LBA). All three are **no-ops on a well-formed disk** (a valid chain is
+> always in range; `total_clusters` is always ≤ FAT capacity; `root_cluster` is ≥2). Verified: fstest (corrupt-FAT
+> fuzz + valid write-stress/dir-growth/rm, ASan/UBSan clean) + boottest (real `fat.img` mounts) + in-guest
+> (`echo>Z.TXT; cat; mkdir ZD; rm Z.TXT; ls` all correct). fat32.c warnings unchanged (1 pre-existing). This closes
+> out the FAT review; the FS read **and** write paths are now both corrupt-input-hardened.
+
 > **(M963) FAT32 — `writefile` over a directory no longer corrupts the filesystem (data-loss bug, valid disk).** A
 > fifth review subagent audited the FAT32 write/alloc/delete paths + VFS and found the read-path fuzzer covers reads
 > well but the **write path had a data-loss bug reachable on a normal disk from an ordinary syscall**: `fat32_write`

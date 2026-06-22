@@ -204,7 +204,7 @@ static int add_entry(uint32_t dircl, const uint8_t name83[11], uint8_t attr,
                      uint32_t first, uint32_t size) {
     uint8_t sec[SECSZ];
     uint32_t cl = dircl, steps = 0, last = dircl;
-    while (cl < EOC) {
+    while (cluster_in_range(cl)) {            /* stop on a corrupt out-of-range chain value, not just EOC (mirrors the read path) */
         uint32_t firsts = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
             if (ata_read(firsts + s, 1, sec) < 0) return -1;
@@ -404,7 +404,7 @@ static void to_83(const char *name, uint8_t out[11]) {
 /* Free a whole cluster chain back to the FAT. */
 static void free_chain(uint32_t cl) {
     uint32_t steps = 0;
-    while (cl >= 2 && cl < EOC) {
+    while (cluster_in_range(cl)) {            /* a corrupt chain can't free FAT entries belonging to other files / a wild sector */
         uint32_t nx = fat_step(cl, &steps);
         fat_set(cl, 0);
         if (cl < alloc_hint) alloc_hint = cl;     /* let the next allocation reuse freed space */
@@ -585,7 +585,7 @@ static long fat32_delete(const char *name) {
     to_83(leaf, want);
     uint8_t sec[SECSZ];
     uint32_t cl = dir, steps = 0;
-    while (cl < EOC) {
+    while (cluster_in_range(cl)) {            /* corrupt-chain-safe (was cl < EOC, which a wild value steers to a bad sector) */
         uint32_t firsts = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
             if (ata_read(firsts + s, 1, sec) < 0) return -1;
@@ -658,6 +658,10 @@ int fat32_mount(void) {
     uint32_t tot_sec = rd16(bs + 19) ? rd16(bs + 19) : rd32(bs + 32);  /* 16- or 32-bit count */
     uint32_t meta = reserved + num_fats * fat_sectors;
     total_clusters = (tot_sec > meta) ? (tot_sec - meta) / sec_per_clus : 0;
+    uint32_t fatcap = fat_sectors * (SECSZ / 4);                 /* entries the FAT can actually index */
+    if (fatcap > 2 && total_clusters > fatcap - 2)
+        total_clusters = fatcap - 2;                             /* never claim more clusters than the FAT addresses — else a malformed BPB makes alloc_cluster/df walk FAT entries that fall inside the data region (wrong-sector write) */
+    if (root_cluster < 2) return -1;                            /* corrupt BPB: a root cluster of 0/1 would underflow cluster_to_sector */
     alloc_hint = 2;
 
     vfs_register(&fat32_ops);
