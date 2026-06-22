@@ -120,6 +120,7 @@ static const struct menu_item menu[] = {
     { "Pac-Man", KIND_APP, "pacman" },
     { "Solitaire", KIND_APP, "solitaire" },
     { "Gems", KIND_APP, "gems" },
+    { "FreeCell", KIND_APP, "freecell" },
     { "Paint", KIND_APP, "paint" }, { "Piano", KIND_APP, "piano" }, { "Jukebox", KIND_APP, "jukebox" },
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Timer", KIND_APP, "timer" },

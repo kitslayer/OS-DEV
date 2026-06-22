@@ -68,6 +68,7 @@ global missile_elf_start, missile_elf_end
 global pacman_elf_start, pacman_elf_end
 global solitaire_elf_start, solitaire_elf_end
 global gems_elf_start, gems_elf_end
+global freecell_elf_start, freecell_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -308,5 +309,9 @@ solitaire_elf_end:
 gems_elf_start:
     incbin "build/gems.elf"
 gems_elf_end:
+
+freecell_elf_start:
+    incbin "build/freecell.elf"
+freecell_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
