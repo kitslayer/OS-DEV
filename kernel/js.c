@@ -2036,6 +2036,10 @@ static val eval_expr_inner(node *n, env *e) {
                     for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
                     if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
                 }
+                else if (recv.t==V_FUN && recv.o && recv.o->statics) { const char *key=node_name(t); obj *st=recv.o->statics;   /* Class.staticField++ : the slot is in the side statics object (mirrors N_ASSIGN) */
+                    for (int i=0;i<st->n;i++) if(strcmp(st->keys[i],key)==0){ slot=&st->vals[i]; break; }
+                    if (!slot) { obj_set(st,key,NUM(0)); for (int i=0;i<st->n;i++) if(strcmp(st->keys[i],key)==0){ slot=&st->vals[i]; break; } }
+                }
             }
             else if (t->type==N_INDEX) {             /* arr[i]++ / o[k]++ */
                 recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
@@ -2401,7 +2405,7 @@ static comp eval_stmt_inner(node *n, env *e) {
                 val cv=eval_expr(cl->a,se); int eq;
                 if (disc.t==V_STR && cv.t==V_STR) eq=(strcmp(disc.str,cv.str)==0);
                 else if ((disc.t==V_NUM||disc.t==V_BOOL)&&(cv.t==V_NUM||cv.t==V_BOOL)) eq=(disc.num==cv.num);
-                else eq=(disc.t==cv.t && disc.num==cv.num);
+                else eq=(disc.t==cv.t && disc.o==cv.o);   /* objects/arrays/functions/null/undefined: switch uses ===, i.e. reference identity (was disc.num==cv.num, which is 0==0 for ALL objects -> any object case matched) */
                 if (eq){ matched=i; break; } }
             if (matched<0) matched=defidx;
             if (matched>=0) for (int i=matched;i<n->nlist;i++){ node*cl=n->list[i];
@@ -2785,7 +2789,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         int havecmp = (nargs && (args[0].t==V_FUN || args[0].t==V_NATIVE));
         for (int i=1; i<o->n && !g_err && !g_oom; i++){ val key=o->vals[i]; int j=i-1;
             while (j>=0){ int cmp;
-                if (havecmp){ val ca[2]={o->vals[j],key}; cmp=(int)to_num(call_function(args[0],ca,2)); }
+                if (havecmp){ val ca[2]={o->vals[j],key}; double cd=to_num(call_function(args[0],ca,2)); cmp=cd>0?1:(cd<0?-1:0); }   /* compare the SIGN of the comparator's result, not its int truncation: (a-b)/10 etc. must still sort */
                 else cmp=strcmp(val_to_str(o->vals[j]), val_to_str(key));
                 if (cmp>0){ o->vals[j+1]=o->vals[j]; j--; } else break; }
             o->vals[j+1]=key; }
@@ -2804,7 +2808,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         int havecmp = (nargs && (args[0].t==V_FUN || args[0].t==V_NATIVE));
         for (int i=1; i<r->n && !g_err && !g_oom; i++){ val key=r->vals[i]; int j=i-1;
             while (j>=0){ int cmp;
-                if (havecmp){ val ca[2]={r->vals[j],key}; cmp=(int)to_num(call_function(args[0],ca,2)); }
+                if (havecmp){ val ca[2]={r->vals[j],key}; double cd=to_num(call_function(args[0],ca,2)); cmp=cd>0?1:(cd<0?-1:0); }   /* compare the SIGN of the comparator's result, not its int truncation: (a-b)/10 etc. must still sort */
                 else cmp=strcmp(val_to_str(r->vals[j]), val_to_str(key));
                 if (cmp>0){ r->vals[j+1]=r->vals[j]; j--; } else break; }
             r->vals[j+1]=key; }

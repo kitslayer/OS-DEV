@@ -1,5 +1,21 @@
 # What's next
 
+> **(M958) JS engine — three evaluator correctness fixes from a read-only review subagent (round 1).** I ran a
+> subagent to scrutinize the interpreter core (number/string/array/object/scope/control-flow handling). It found
+> the parser/fuzzer memory-safety surface solid (no crashers) but surfaced ~14 *correctness* deviations vs V8, all
+> reproduced. This commit fixes three localized ones (each confirmed via the `-DJS_HOSTTEST` host build + a repro):
+> **(1) `Array.sort`/`toSorted` truncated the comparator result to `int`.** `cmp=(int)to_num(cmp_fn(...))` made any
+> comparator returning a value in `(-1,1)` collapse to `0` ("equal"), so `[5,4,3,2,1].sort((a,b)=>(a-b)/10)` came
+> back unsorted. Now compares the *sign* of the double. **(2) `switch` matched the wrong `case` for objects.** The
+> fallback `eq=(disc.num==cv.num)` is `0==0` for *all* objects, so `switch(objA){ case objB: }` matched any object
+> case; fixed to reference identity (`disc.o==cv.o`), the correct `===` semantics (string/number cases unchanged).
+> **(3) static class fields rejected `++`/`--`.** `N_UPDATE` only handled `V_OBJ` receivers; a class is a `V_FUN`
+> with statics in `recv.o->statics` (which `N_ASSIGN` already handled), so `C.n++` threw "invalid ++/-- target"
+> while `C.n+=1` worked — breaking the `static n=0; static inc(){return ++C.n}` counter idiom. Added the `V_FUN`
+> statics case to `N_UPDATE`, mirroring `N_ASSIGN`. js.c warnings held at 17; all 37 `make check` suites pass
+> (incl. jstest + the JS/regex/JSON fuzzers). Remaining review findings (to_num→NaN, >16 args, var-scoping, NaN
+> Map/Set keys, strict JSON.parse, …) are next. See [[js-and-web-app-ceiling]].
+
 > **(M957) Browser — raise the per-field value width from 95 to 255 chars (completes P4).** The other half of the
 > M955-review P4: every stored field value (`in_val`) was 96 bytes → 95 chars, far too short for a real
 > `<textarea>`. Introduced `#define IN_VLEN 256` and migrated the store plus *every* edit buffer to it — the catch
