@@ -116,6 +116,7 @@ struct browser {
     char    listtype[8];                                 /* 'u' or 'o' per level */
     int     listnum[8];                                  /* <ol> item counter per level */
     char    listfmt[8];                                  /* <ol type>: '1'/'a'/'A'/'i'/'I' per level */
+    char    listmark[8];                                  /* list-style-type per level: 0=default, 'N'=none, '-'/'*'/'+' bullet, '1'=decimal */
     int     tdcount;                                     /* cells emitted in the current <tr> */
     int     finding;                                     /* in-page find: typing a query */
     char    findq[40];                                   /* the find query */
@@ -153,7 +154,7 @@ struct browser {
     struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex/block-bg), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
-    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border / list-style-type */
     char    in_id[IN_MAX][32]; char in_val[IN_MAX][IN_VLEN]; int in_n;   /* <input> field values, by id (the typed/scripted text) */
     char    in_name[IN_MAX][32];                                /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
@@ -655,6 +656,32 @@ static int parse_style_maxwidth(const char *s, int n) {
     if (i + 1 < vl && (v[i]|32) == 'e' && (v[i+1]|32) == 'm') num *= 16;   /* em -> ~16px */
     return num > 4000 ? 4000 : num;                                       /* sane upper cap */
 }
+/* list-style-type (or the `list-style` shorthand) on a <ul>/<ol>. Returns a marker code
+ * for the list's items, applied per-<li>:
+ *   0   = not specified (caller keeps the depth-varied default bullet / <ol> numbering)
+ *  'N'  = none  -> suppress the marker entirely (the common nav-menu / link-list case)
+ *  '-'  = disc, '*' = circle, '+' = square  (the 8x16 font has no bullet glyphs, so the
+ *         three CSS bullet kinds map onto these ASCII markers — see kernel/font.c)
+ *  '1'  = decimal/numbered (lets a <ul> opt into numbering, or restores it on an <ol>)
+ * The shorthand `list-style:` can carry the type token anywhere (e.g. `none`, or
+ * `square inside`); we scan its space-separated words for a known keyword. */
+static int parse_style_listtype(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "list-style-type", 15, &vs, &ve) &&
+        !style_prop(s, n, "list-style", 10, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs;
+    for (int i = 0; i < vl; ) {                              /* walk space-separated words (shorthand may list several) */
+        while (i < vl && (v[i]==' '||v[i]=='\t')) i++;
+        int w = i; while (i < vl && v[i]!=' ' && v[i]!='\t') i++;
+        int wl = i - w; const char *p = v + w;
+        if      (attr_eq(p, wl, "none"))    return 'N';
+        else if (attr_eq(p, wl, "disc"))    return '-';
+        else if (attr_eq(p, wl, "circle"))  return '*';
+        else if (attr_eq(p, wl, "square"))  return '+';
+        else if (attr_eq(p, wl, "decimal")) return '1';
+    }
+    return 0;   /* a value we don't render (e.g. `url(...)`, `inside`, lower-roman) -> keep the default */
+}
 
 /* void (self-closing) elements have no close tag, so they can't open an onclick scope */
 static int is_void_tag(const char *t) {
@@ -680,6 +707,7 @@ static void capture_css(browser_t *b, const char *s, int n);
 static int  css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
                       uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
                       int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border, int *flex);
+static int  css_match_list(browser_t *b, const char *tag, const char *attrs, int attrlen);
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
@@ -1048,6 +1076,12 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->listfmt[b->listdepth] = fmt;
                 int st = (tag[0] == 'o') ? attr_int(attrs, attrlen, "start") : 0;   /* <ol start=N> */
                 b->listnum[b->listdepth] = st > 0 ? st - 1 : 0;
+                /* list-style-type for this list's items: a <style> rule first, then an
+                 * inline style= overrides it (the usual cascade). 0 = use the default. */
+                int lm = (b->n_css > 0) ? css_match_list(b, tag, attrs, attrlen) : 0;
+                const char *lsst; int lsstl;
+                if (find_attr(attrs, attrlen, "style", &lsst, &lsstl)) { int il = parse_style_listtype(lsst, lsstl); if (il) lm = il; }
+                b->listmark[b->listdepth] = (char)lm;
                 b->listdepth++;
             }
         } else if (b->listdepth > 0) b->listdepth--;
@@ -1062,12 +1096,25 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             char marker[24]; int p = 0;
             int depth = b->listdepth > 0 ? b->listdepth : 1;   /* indent: 2 spaces/level */
             for (int i = 0; i < depth && p < 18; i++) { marker[p++] = ' '; marker[p++] = ' '; }
-            if (b->listdepth > 0 && b->listtype[b->listdepth - 1] == 'o') {
-                int n = ++b->listnum[b->listdepth - 1];        /* numbered item, formatted per <ol type> */
-                char num[16]; fmt_li_num(n, b->listfmt[b->listdepth - 1], num, sizeof(num));
+            int lvl = b->listdepth - 1;                         /* current list level (-1 if a stray <li>) */
+            int mark = (lvl >= 0) ? b->listmark[lvl] : 0;       /* list-style-type: 0 default, 'N' none, '-'/'*'/'+' bullet, '1' decimal */
+            int numbered = (lvl >= 0 && b->listtype[lvl] == 'o' && mark != 'N'
+                            && mark != '-' && mark != '*' && mark != '+')   /* an <ol>, unless an explicit bullet/none overrides */
+                           || mark == '1';                                  /* or a list told to use decimal */
+            if (mark == 'N') {
+                /* list-style:none — suppress the marker entirely (keep the indent so nested
+                 * lists still step in). The bullet is the only thing dropped. */
+            } else if (numbered) {
+                int n = ++b->listnum[lvl];                      /* numbered item, formatted per <ol type> */
+                char num[16]; fmt_li_num(n, b->listfmt[lvl], num, sizeof(num));
                 for (int k = 0; num[k] && p < 22; k++) marker[p++] = num[k];
                 if (p < 23) marker[p++] = '.';
-            } else if (p < 23) marker[p++] = '-';              /* bulleted item */
+            } else if (p < 23) {                                /* bulleted item */
+                char bullet;
+                if (mark == '-' || mark == '*' || mark == '+') bullet = (char)mark;   /* explicit list-style-type: disc/circle/square */
+                else bullet = (depth <= 1) ? '-' : (depth == 2) ? '*' : '+';          /* default: vary by nesting depth (depth 1 keeps '-') */
+                marker[p++] = bullet;
+            }
             marker[p] = 0;
             emit_literal(b, marker, STY_NORMAL);
         }
@@ -1625,7 +1672,8 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int mgv = parse_style_vspace(s + ds, de - ds);
         int hsv = parse_style_hspace(s + ds, de - ds);
         uint32_t bdv = parse_style_border(s + ds, de - ds);          /* border: shorthand from a stylesheet rule */
-        if (!(col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv || mgv || hsv || bdv)) continue;   /* nothing we render */
+        int lsv = parse_style_listtype(s + ds, de - ds);             /* list-style-type from a stylesheet rule (applies to a <ul>/<ol>) */
+        if (!(col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv || mgv || hsv || bdv || lsv)) continue;   /* nothing we render */
         /* a selector list "a, b, c" -> one rule per simple sub-selector that parses */
         int p = ss;
         while (p < se && b->n_css < CSS_MAX) {
@@ -1648,6 +1696,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
             b->css_margin[b->n_css] = (uint8_t)mgv;
             b->css_indent[b->n_css] = (uint8_t)hsv;
             b->css_border[b->n_css] = bdv;
+            b->css_list[b->n_css] = (uint8_t)lsv;
             b->n_css++;
         }
     }
@@ -1679,6 +1728,23 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         hit = 1;
     }
     return hit;
+}
+/* list-style-type from the <style> rules for one <ul>/<ol> element (0 = none set).
+ * Kept separate from css_match so the marker is resolved only at the two list-open
+ * sites — it doesn't need to ride along the per-element text-style cascade. Later
+ * matching rules win (source order), mirroring css_match. */
+static int css_match_list(browser_t *b, const char *tag, const char *attrs, int attrlen) {
+    int mark = 0;
+    for (int r = 0; r < b->n_css; r++) {
+        if (!b->css_list[r]) continue;
+        const sel_t *s = &b->css_sel[r];
+        if (s->tag[0] && !tageq(tag, s->tag)) continue;
+        if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) continue; }
+        if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     continue; }
+        if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) continue;
+        mark = b->css_list[r];
+    }
+    return mark;
 }
 /* Scan the body region for elements matching `sel`; fill offs[] with the byte
  * offset of each matching opening '<'. Returns the count (bounded by max). */
