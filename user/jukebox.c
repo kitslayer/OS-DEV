@@ -9,7 +9,8 @@
  */
 #include "ulib.h"
 
-#define MAXW 12
+#define MAXW 9          /* the picker is single-key [1-9], so listing more than 9 just showed
+                         * unplayable rows with garbage labels ('1'+9 = ':'); cap to the playable range */
 static char wavs[MAXW][16];
 static int  nwav;
 
