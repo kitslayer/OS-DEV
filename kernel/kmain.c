@@ -23,6 +23,7 @@
 #include "virtio_blk.h"
 #include "nvme.h"
 #include "virtio_net.h"
+#include "virtio_gpu.h"
 #include "net.h"
 #include "fbcon.h"
 #include "mouse.h"
@@ -184,6 +185,15 @@ void kmain(uint64_t mb_info) {
      * (and does a write round-trip) and logs their bytes/checksum. */
     nvme_init();
     nvme_selftest();
+
+    /* Bring up virtio-gpu (the modern paravirtual 2D GPU) as an ADDITIONAL
+     * display device — the boot display stays on the linear framebuffer
+     * (fb.c/bochs_vbe.c) above. No-op if no virtio-gpu is attached. The self-test
+     * runs the full present cycle (CREATE_2D + ATTACH_BACKING + SET_SCANOUT done
+     * at init; then TRANSFER_TO_HOST_2D + RESOURCE_FLUSH of a test pattern) and
+     * asserts every command returned OK — the headless proof, like hda_selftest. */
+    virtio_gpu_init();
+    virtio_gpu_selftest();
 
     /* Prefer the USB tablet (absolute pointer, tracks the host 1:1); fall back
      * to the relative PS/2 mouse if there's no tablet. */

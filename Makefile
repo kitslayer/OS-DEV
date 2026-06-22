@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest virtiogputest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -317,6 +317,18 @@ virtioblktest: $(KERNEL) $(DISK)
 nvmetest: $(KERNEL) $(DISK)
 	@tests/run-nvme-tests.sh
 
+# Headless in-guest assertion for the virtio-gpu driver (kernel/virtio_gpu.c):
+# attaches a virtio-gpu device (-device virtio-gpu-pci) ALONGSIDE the std-VGA
+# display, boots, and asserts the driver brought the modern paravirtual 2D GPU
+# up (modern PCI handshake + control virtqueue), read scanout 0's resolution,
+# created+attached+scanned-out a backing resource, and ran the full present
+# cycle (TRANSFER_TO_HOST_2D + RESOURCE_FLUSH each returned OK) with no fault —
+# while the std-VGA boot display path (gfxtest) stays unaffected. SKIPs cleanly
+# if QEMU absent. (Companion to boottest/gfxtest, which have no virtio-gpu ->
+# the driver must cleanly no-op and the std-VGA desktop must still render.)
+virtiogputest: $(KERNEL) $(DISK)
+	@tests/run-virtio-gpu-tests.sh
+
 # Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
 # instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
@@ -494,8 +506,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest virtiogputest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + virtiogputest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)
