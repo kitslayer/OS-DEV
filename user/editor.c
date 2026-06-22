@@ -179,40 +179,31 @@ static void del_at(int pos) {
  * tab or up to 4 leading spaces. cur + the selection are kept over the same text. */
 static void block_indent(int dedent) {
     if (readonly) return;
-    static int starts[1024], removed[1024];
     int s0, s1;
     if (!sel_bounds(&s0, &s1)) { s0 = s1 = cur; }
     int lo = s0; while (lo > 0 && doc[lo-1] != '\n') lo--;       /* start of the first line */
-    int nstarts = 0, p = lo;
-    for (;;) {                                                  /* collect the line starts in range */
-        if (!(p < s1 || nstarts == 0)) break;
-        if (nstarts < 1024) starts[nstarts++] = p;
-        while (p < dlen && doc[p] != '\n') p++;
-        if (p >= dlen) break;
-        p++;
-    }
     int oa = sel_anchor, oc = cur, na = oa, nc = oc;
-    if (!dedent) {
-        for (int i = nstarts - 1; i >= 0; i--)                  /* reverse: lower line starts stay valid */
-            for (int k = 0; k < 4; k++) ins_at(starts[i] + k, ' ');
-        for (int i = 0; i < nstarts; i++) {                     /* shift cur/anchor by the spaces inserted before them */
-            if (oa > starts[i]) na += 4;                        /* anchor at a line start stays, so the selection covers the new indent */
-            if (oc >= starts[i]) nc += 4;
+    /* Walk each touched line's start from the LAST in range back to `lo`. Going
+     * backward means a mutation at a higher offset never invalidates a lower start
+     * still to come — so no fixed per-line array is needed (was capped at 1024
+     * lines, silently skipping the rest of a larger selection). */
+    int q = s1 - 1; if (q < lo) q = lo;                          /* last line start that is < s1 (or just `lo` when there's no selection) */
+    for (;;) {
+        int ls = q; while (ls > 0 && doc[ls-1] != '\n') ls--;   /* start of the line containing q (an original offset: all edits so far were above it) */
+        if (!dedent) {
+            for (int k = 0; k < 4; k++) ins_at(ls, ' ');        /* indent: 4 spaces at the line start */
+            if (oa > ls) na += 4;                               /* anchor exactly at a line start stays put, so the selection covers the new indent */
+            if (oc >= ls) nc += 4;
+        } else {
+            int rm = 0;                                         /* dedent: remove a leading tab, else up to 4 leading spaces */
+            if (ls < dlen && doc[ls] == '\t') rm = 1;
+            else while (rm < 4 && ls + rm < dlen && doc[ls+rm] == ' ') rm++;
+            for (int k = 0; k < rm; k++) del_at(ls);
+            if (oa >= ls + rm) na -= rm; else if (oa > ls) na -= (oa - ls);
+            if (oc >= ls + rm) nc -= rm; else if (oc > ls) nc -= (oc - ls);
         }
-    } else {
-        for (int i = 0; i < nstarts; i++) {                     /* measure removals up front (original offsets) */
-            int s = starts[i], rm = 0;
-            if (s < dlen && doc[s] == '\t') rm = 1;
-            else while (rm < 4 && s + rm < dlen && doc[s+rm] == ' ') rm++;
-            removed[i] = rm;
-        }
-        for (int i = nstarts - 1; i >= 0; i--)
-            for (int k = 0; k < removed[i]; k++) del_at(starts[i]);
-        for (int i = 0; i < nstarts; i++) {
-            int s = starts[i], rm = removed[i];
-            if (oa >= s + rm) na -= rm; else if (oa > s) na -= (oa - s);
-            if (oc >= s + rm) nc -= rm; else if (oc > s) nc -= (oc - s);
-        }
+        if (ls <= lo) break;                                    /* just processed the first line */
+        q = ls - 1;                                             /* step into the previous line */
     }
     if (sel_anchor >= 0) sel_anchor = na < 0 ? 0 : na;
     cur = nc < 0 ? 0 : (nc > dlen ? dlen : nc);

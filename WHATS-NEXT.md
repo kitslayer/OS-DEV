@@ -1,5 +1,17 @@
 # What's next
 
+> **(M962) Editor — block indent/dedent now handles any selection size (was capped at 1024 lines).** The other
+> actionable item from the M961 editor review: `block_indent` collected every touched line's start into fixed
+> `starts[1024]`/`removed[1024]` arrays, so Tab/Shift-Tab on a >1024-line selection silently (de)indented only the
+> first 1024. Rewrote it to walk the touched lines' starts from the LAST in range *backward* to the first — going
+> backward means each insert/delete is at a higher offset than the line starts still to come, so they never shift
+> (the same reason the old code processed the array in reverse), which removes the need to store them at all. No
+> fixed array → unlimited selection, and 8 KB of BSS freed. The per-line cursor/anchor math is unchanged (same
+> operations, just computed inline). Verified in-guest: a 2-line Tab-indent adds exactly 4 spaces to each line
+> (90→98 B) with the end-of-selection boundary correctly excluding the line that starts exactly at the selection
+> end; a Tab-then-Shift-Tab round-trip restores the file byte-for-byte (90→94→90) with the cursor back at column 1.
+> editor.c warnings still 0; all 37 `make check` suites pass.
+
 > **(M961) Editor — fix a data-loss path + a near-cap truncation, found by a read-only review subagent.** A fourth
 > review subagent audited `user/editor.c` (edit buffer, file I/O, the `hl_run` highlighter, auto-indent) and
 > reported the **core is solid** — 2M-op edit fuzz + 1.2M-op highlighter fuzz under ASan, no crash/OOB/cursor-desync;
