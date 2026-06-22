@@ -41,6 +41,9 @@ DISKFLAGS := -drive file=$(BUILD)/fat.img,format=raw,if=ide
 # An e1000 NIC on user-mode (SLIRP) networking: the gateway 10.0.2.2 answers
 # ARP and ICMP, which is how we test the network stack.
 NICFLAGS  := -netdev user,id=net0 -device e1000,netdev=net0
+# Same SLIRP network, but presenting a Realtek RTL8139 instead of the e1000 — to
+# exercise the second NIC driver (kernel/rtl8139.c). Used by `make run-rtl8139`.
+RTLNICFLAGS := -netdev user,id=net0 -device rtl8139,netdev=net0
 # A UHCI USB controller + an absolute pointing device (tablet).
 USBFLAGS  := -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0
 # An Intel AC'97 audio codec. Override the host backend if needed:
@@ -57,7 +60,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run test jstest clean
+.PHONY: all run run-rtl8139 test rtl8139test jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -258,6 +261,19 @@ $(KERNEL): $(KERNEL64)
 run: $(KERNEL) $(DISK)
 	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
 
+# Same as `run`, but with a Realtek RTL8139 NIC instead of the e1000 — boots the
+# whole stack over the second card driver (kernel/rtl8139.c) so you can watch the
+# serial log say "rtl8139 up" and ARP/ping/HTTP the SLIRP gateway over it.
+run-rtl8139: $(KERNEL) $(DISK)
+	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(RTLNICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
+
+# Headless in-guest assertion that the RTL8139 driver brings up the full stack:
+# boots with -device rtl8139 (no e1000) and asserts the network markers print
+# over it. SKIPs cleanly if QEMU is absent. (Companion to `boottest`, which
+# covers the e1000 path.)
+rtl8139test: $(KERNEL) $(DISK)
+	@tests/run-rtl8139-tests.sh
+
 # Headless smoke test: no window, capture serial, kill after a few seconds.
 # Used to confirm the kernel boots without needing a display.
 test: $(KERNEL) $(DISK)
@@ -420,8 +436,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

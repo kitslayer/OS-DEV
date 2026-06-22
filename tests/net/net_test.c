@@ -14,8 +14,10 @@
 #include <stdio.h>
 
 /* --- stubs for net.c's hardware/kernel dependencies --- */
+/* net.c reaches the NIC through the nic.c dispatcher (nic_send/receive/mac),
+ * so the harness stubs that seam rather than a concrete card driver. */
 static const uint8_t *g_pkt; static int g_pktlen, g_consumed;
-int e1000_receive(void *out, uint16_t max) {          /* feed one fuzz frame, then "none" */
+int nic_receive(void *out, uint16_t max) {            /* feed one fuzz frame, then "none" */
     if (g_consumed) return 0;
     g_consumed = 1;
     int n = g_pktlen; if (n > max) n = max;
@@ -24,10 +26,11 @@ int e1000_receive(void *out, uint16_t max) {          /* feed one fuzz frame, th
 }
 static uint64_t g_ticks;
 uint64_t timer_ticks(void) { return g_ticks++; }       /* increments -> deadline loops terminate */
-int e1000_init(void) { return 0; }
+int nic_init(void) { return 0; }
+const char *nic_name(void) { return "fuzz"; }
 static const uint8_t g_mac[6] = { 2, 0, 0, 0, 0, 1 };
-const uint8_t *e1000_mac(void) { return g_mac; }
-int e1000_send(const void *frame, uint16_t len) { (void)frame; return len; }
+const uint8_t *nic_mac(void) { return g_mac; }
+int nic_send(const void *frame, uint16_t len) { (void)frame; return len; }
 void kprintf(const char *fmt, ...) { (void)fmt; }
 /* net.c's net_demo() calls into tls.c for the boot HTTPS self-test; stub it out
  * here (this suite fuzzes the packet/reassembly path, not TLS). */

@@ -1,9 +1,11 @@
 /*
  * net.c — a tiny taste of a network stack: ARP + ICMP echo (ping).
  *
- * This is the protocol layer on top of the e1000 driver. We build raw packets
- * byte-by-byte in network (big-endian) order and hand them to the card, then
- * poll for replies. Two exchanges:
+ * This is the protocol layer on top of the NIC. It's card-agnostic: it builds
+ * raw packets byte-by-byte in network (big-endian) order and hands them to
+ * whichever card the nic.c dispatcher bound (the Intel e1000 or the Realtek
+ * RTL8139), via nic_send / nic_receive / nic_mac. Then it polls for replies.
+ * Two exchanges:
  *
  *   ARP  — "who has 10.0.2.2? tell 10.0.2.15" → the gateway answers with its
  *          MAC. (You must know a host's MAC before you can send it IP packets.)
@@ -12,7 +14,7 @@
  * Under QEMU's user-mode networking, the virtual gateway 10.0.2.2 answers both.
  */
 #include "net.h"
-#include "e1000.h"
+#include "nic.h"
 #include "timer.h"
 #include "console.h"
 #include "string.h"
@@ -25,7 +27,7 @@ static const uint8_t  BROADCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
 const uint8_t *net_ip(void)      { return OUR_IP; }
 const uint8_t *net_gateway(void) { return GW_IP; }
-const uint8_t *net_mac(void)     { return e1000_mac(); }
+const uint8_t *net_mac(void)     { return nic_mac(); }
 
 /* --- byte helpers (everything on the wire is big-endian) --- */
 static void put16(uint8_t *p, uint16_t v) { p[0] = v >> 8; p[1] = v; }
@@ -47,7 +49,7 @@ static uint16_t inet_checksum(const uint8_t *data, int len) {
 static int recv_timeout(uint8_t *buf, int max, uint64_t ticks) {
     uint64_t deadline = timer_ticks() + ticks;
     while (timer_ticks() < deadline) {
-        int len = e1000_receive(buf, max);
+        int len = nic_receive(buf, max);
         if (len > 0)
             return len;
     }
@@ -74,7 +76,7 @@ static int arp_resolve(const uint8_t *ip, uint8_t *out_mac) {
             memcpy(out_mac, arp_cache[i].mac, 6);
             return 1;
         }
-    const uint8_t *mac = e1000_mac();
+    const uint8_t *mac = nic_mac();
     uint8_t pkt[42];
 
     /* ethernet header */
@@ -90,7 +92,7 @@ static int arp_resolve(const uint8_t *ip, uint8_t *out_mac) {
     memcpy(pkt + 28, OUR_IP, 4);             /* sender IP */
     memset(pkt + 32, 0, 6);                  /* target MAC (unknown) */
     memcpy(pkt + 38, ip, 4);                 /* target IP */
-    e1000_send(pkt, sizeof(pkt));
+    nic_send(pkt, sizeof(pkt));
 
     /* Deadline-bounded, not a fixed try count: after a large transfer the RX ring
      * is full of stale TCP packets that recv_timeout returns instantly, so a fixed
@@ -118,7 +120,7 @@ static int arp_resolve(const uint8_t *ip, uint8_t *out_mac) {
 
 /* Send one ICMP echo request to `ip` (via `dst_mac`) and await the reply. */
 static int ping(const uint8_t *ip, const uint8_t *dst_mac, uint16_t seq) {
-    const uint8_t *mac = e1000_mac();
+    const uint8_t *mac = nic_mac();
     uint8_t pkt[42];                         /* 14 eth + 20 IP + 8 ICMP */
 
     /* ethernet */
@@ -149,7 +151,7 @@ static int ping(const uint8_t *ip, const uint8_t *dst_mac, uint16_t seq) {
     put16(icmp + 6, seq);                    /* sequence */
     put16(icmp + 2, inet_checksum(icmp, 8));
 
-    e1000_send(pkt, sizeof(pkt));
+    nic_send(pkt, sizeof(pkt));
 
     uint8_t buf[1600];
     uint64_t deadline = timer_ticks() + 200;   /* deadline-bounded (see arp_resolve) */
@@ -228,7 +230,7 @@ int dns_resolve(const char *host, uint8_t out_ip[4]) {
     uint8_t mac[6];
     if (!arp_resolve(DNS_IP, mac))
         return -1;
-    const uint8_t *me = e1000_mac();
+    const uint8_t *me = nic_mac();
 
     /* build the DNS query payload */
     uint8_t q[256]; int dl = 0;
@@ -258,7 +260,7 @@ int dns_resolve(const char *host, uint8_t out_ip[4]) {
     put16(ip + 10, inet_checksum(ip, 20));
     put16(udp + 0, 5353); put16(udp + 2, 53); put16(udp + 4, 8 + dl); put16(udp + 6, 0);
     memcpy(udp + 8, q, dl);
-    e1000_send(pkt, 34 + 8 + dl);
+    nic_send(pkt, 34 + 8 + dl);
 
     /* await + parse the response — deadline-bounded (see arp_resolve): a fixed try
      * count would be exhausted skipping stale TCP packets left in the RX ring by a
@@ -337,7 +339,7 @@ static void tcp_send_seg(const uint8_t *dmac, const uint8_t *dip,
                          uint32_t seq, uint32_t ack, uint8_t flags,
                          const uint8_t *data, int dlen) {
     uint8_t pkt[1600];
-    const uint8_t *me = e1000_mac();
+    const uint8_t *me = nic_mac();
     memcpy(pkt + 0, dmac, 6); memcpy(pkt + 6, me, 6); put16(pkt + 12, 0x0800);
     uint8_t *ip = pkt + 14, *tcp = pkt + 34;
 
@@ -357,7 +359,7 @@ static void tcp_send_seg(const uint8_t *dmac, const uint8_t *dip,
     put16(ip + 10, 0); memcpy(ip + 12, OUR_IP, 4); memcpy(ip + 16, dip, 4);
     put16(ip + 10, inet_checksum(ip, 20));
 
-    e1000_send(pkt, 34 + tcplen);
+    nic_send(pkt, 34 + tcplen);
 }
 
 /* Receive the next TCP segment for our connection (server dip:80 -> us:sport).
@@ -368,7 +370,7 @@ static int tcp_recv_seg(uint8_t *buf, int max, const uint8_t *dip,
                         uint8_t **tcp_out, int *dlen_out) {
     uint64_t deadline = timer_ticks() + ticks;
     while (timer_ticks() < deadline) {
-        int len = e1000_receive(buf, max);
+        int len = nic_receive(buf, max);
         if (len < 34) continue;
         if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 6) continue;   /* IPv4/TCP */
         if (memcmp(buf + 26, dip, 4) != 0) continue;                   /* from server */
@@ -640,13 +642,13 @@ int http_post(const char *host, const char *path, const char *ctype,
 }
 
 void net_demo(void) {
-    if (e1000_init() != 0) {
-        kprintf("[net] no e1000 NIC found.\n\n");
+    if (nic_init() != 0) {
+        kprintf("[net] no supported NIC found (tried e1000, rtl8139).\n\n");
         return;
     }
 
-    kprintf("[net] e1000 up. our MAC = ");
-    print_mac(e1000_mac());
+    kprintf("[net] %s up. our MAC = ", nic_name());
+    print_mac(nic_mac());
     kprintf(", IP = 10.0.2.15\n");
 
     uint8_t gw_mac[6];
