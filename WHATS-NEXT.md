@@ -1,5 +1,16 @@
 # What's next
 
+> **(M952) Shell quoting — fix 5 missed unprotect sites (review-driven).** A read-only review subagent
+> scrutinized the M949/M950 quoting and confirmed the core machinery is clean (no regressions, unquoted input
+> byte-identical) but found 4 builtins that consume a filename/arg yet never called `sh_unprot_buf`, so a quoted
+> argument leaked a high-bit sentinel byte into the syscall: `find` (`find "my doc"` substring never matched),
+> `edit`, `screenshot`, and `js <file>`. I fixed those and also caught a 5th the review didn't cover — the `>`
+> output-redirect target (`echo hi > "my file"`). Each now unprotects its filename/arg before use (the same
+> one-line pattern as the M950 sweep). Verified in-guest: `find "no match xyz"`/`find "EAD"` search correctly,
+> `echo "quoted out" > F; cat F` round-trips, `find "txt"` unregressed. `make check` green (37 suites); shell.c
+> warning baseline (11) held. Quoting coverage is now comprehensive (the only deliberately-unswept commands are
+> the rarely-quoted `cd`/`sort`/`uniq`/`cut`/`tr`, where a quoted arg is a benign sentinel, never a crash).
+
 > **(M951) Calc — floating-point scientific calculator (was integer-only).** The calc app evaluated only
 > integers; now it's a real scientific calculator: IEEE-754 doubles, decimal/scientific literals (`3.14`, `.5`,
 > `1e3`), functions `sqrt sin cos tan asin acos atan ln log exp abs floor ceil round`, constants `pi`/`e`, `^`

@@ -884,6 +884,7 @@ static int run_command(char *line, char *cwd) {
                 int i = 0; while (code[i] && i < (int)sizeof(src) - 1) { src[i] = code[i]; i++; } src[i] = 0;
                 have = 1;
             } else {
+                sh_unprot_buf(line + 3);                 /* quoted JS filename (e.g. js "my prog.js") */
                 long n; filesrc = slurp(line + 3, &n);   /* whole JS file (was capped at 8KB) */
                 if (!filesrc) { print("js: no such file: "); print(line + 3); print("\n"); }
                 else { jsrc = filesrc; have = 1; }
@@ -1424,6 +1425,7 @@ static int run_command(char *line, char *cwd) {
             if (!any) print("usage: hexdump <file>...\n");
         } else if (startswith(line, "find ")) {
             static char fb[2048];
+            sh_unprot_buf(line + 5);                      /* quoted multi-word substring (e.g. find "my doc") */
             long n = sys_find(line + 5, fb, sizeof(fb));
             if (n > 0) { fb[n] = 0; print(fb); } else if (!cap_active()) print("(no matches)\n");   /* hint, not data: keep it out of `for f in $(find ...)` */
         } else if (streq(line, "tree")) {
@@ -1494,7 +1496,8 @@ static int run_command(char *line, char *cwd) {
             }
             if (!any) print("  (none yet - go set some!)\n");
         } else if (streq(line, "screenshot") || startswith(line, "screenshot ")) {
-            const char *fn = line + 10; while (*fn == ' ') fn++;   /* optional filename arg */
+            char *fn = line + 10; while (*fn == ' ') fn++;   /* optional filename arg */
+            sh_unprot_buf(fn);                                /* quoted filename (e.g. screenshot "my shot.bmp") */
             if (!*fn) fn = "SHOT.BMP";
             if (sys_screenshot(fn) < 0) print("screenshot: failed\n");
             else { print("saved screen to "); print(fn); print("\n"); }
@@ -2426,7 +2429,7 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "edit ")) {
             char fname[32]; int i = 0;
             for (char *q = line + 5; *q && i < 31; q++) fname[i++] = *q;
-            fname[i] = 0;
+            fname[i] = 0; sh_unprot_buf(fname);               /* quoted filename (e.g. edit "my file") */
             print("-- editor: type lines, '.' on its own line to save --\n");
             char doc[1024], l[128]; int dl = 0;
             for (;;) {
@@ -2674,6 +2677,7 @@ static int run_line(char *line, char *cwd) {
         while (i > 0 && cmd[i-1] == ' ') cmd[--i] = 0;   /* trim spaces before '>' so "cmd arg > f" doesn't pass "arg " (trailing space) on */
         while (*rfile == ' ') rfile++;
         char *fe = (char *)rfile; while (*fe) fe++; while (fe > rfile && fe[-1] == ' ') *--fe = 0;
+        sh_unprot_buf((char *)rfile);                    /* quoted redirect target: cmd > "my file" */
         if (!*rfile) rfile = 0;
         break;
     }
