@@ -1,5 +1,22 @@
 # What's next
 
+> **(M959) JS engine — NaN as a Map/Set/`includes` key + strict `JSON.parse` (review round 2).** Two more fixes
+> from the M958 review, host-verified: **(#7) `NaN` couldn't be a Map/Set key or found by `Array.includes`.**
+> Membership used `val_equal` (`===`), so `NaN !== NaN` meant `new Set([NaN,NaN]).size===2`, `map.get(NaN)===undefined`,
+> `[NaN].includes(NaN)===false`. JS specifies *SameValueZero* for these (NaN equals NaN). Added a `same_value_zero()`
+> helper (defers to `val_equal` except both-NaN→true) and routed `Set` add/has/delete, `Map` set/get/has/delete and
+> `Array.includes` through it — while `===`/`!==`, `==`, `indexOf`/`lastIndexOf` and `Object.is` keep their exact
+> (correct) semantics. **(#6) `JSON.parse` accepted trailing garbage and misspelled literals.** It never checked
+> end-of-input after a complete value (`JSON.parse("1 x")`→`1`, `"[1,2] z"`→`[1,2]`) and the `true`/`false`/`null`
+> branches consumed any `[a-z]` run (`"truX"`→`true`). Fixed: match the literal spelling exactly, and require
+> `jp==jp_end` (after trailing whitespace) in `nat_json_parse`, else `SyntaxError`. Valid JSON — including a trailing
+> newline — still parses. js.c warnings held at 17; all 37 `make check` suites pass (incl. the JSON fuzzer).
+> **Remaining review findings, deliberately deferred to a focused session (higher blast radius):** #1 `to_num`→`NaN`
+> for undefined/non-numeric-string/object (pervasive coercion change — the engine's `to_num` comment notes the
+> current 0-return is an intentional "integer-engine" holdover, so flipping it needs broad in-guest re-verification),
+> #3 calls silently dropping args past 16 (the 16-cap guards the guard-page-less kernel stack — needs arena-alloc,
+> not a bigger stack array), #4 `var` not function-scoped/hoisted (needs a hoist pre-pass). See [[js-and-web-app-ceiling]].
+
 > **(M958) JS engine — three evaluator correctness fixes from a read-only review subagent (round 1).** I ran a
 > subagent to scrutinize the interpreter core (number/string/array/object/scope/control-flow handling). It found
 > the parser/fuzzer memory-safety surface solid (no crashers) but surfaced ~14 *correctness* deviations vs V8, all

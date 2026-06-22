@@ -1208,6 +1208,13 @@ static int val_equal(val a, val b) {
         default: return a.o==b.o;   /* V_OBJ/V_ARR/V_FUN/V_NATIVE: identity */
     }
 }
+/* SameValueZero: like === (val_equal) but NaN equals NaN — the equality that Map
+ * keys, Set members and Array.includes use, so a NaN key/element is findable.
+ * (+0/-0 already compare equal via ==; === keeps NaN!=NaN, as do indexOf/lastIndexOf.) */
+static int same_value_zero(val a, val b) {
+    if (a.t==V_NUM && b.t==V_NUM && js_isnan(a.num) && js_isnan(b.num)) return 1;
+    return val_equal(a, b);
+}
 
 /* =========================== regular expressions ===========================
  * A from-scratch regex: pattern -> tree -> a small instruction program, run by
@@ -2745,7 +2752,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         buf[p]=0; return STRV(buf);
     }
     if (strcmp(name,"indexOf")==0){ int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from+=o->n; if(from<0)from=0; for(int i=from;i<o->n;i++) if(nargs && val_equal(o->vals[i],args[0])) return NUM(i); return NUM(-1); }   /* strict (===): also finds objects by identity, null, undefined */
-    if (strcmp(name,"includes")==0){ int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from+=o->n; if(from<0)from=0; for(int i=from;i<o->n;i++) if(nargs && val_equal(o->vals[i],args[0])) return BOOLV(1); return BOOLV(0); }
+    if (strcmp(name,"includes")==0){ int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from+=o->n; if(from<0)from=0; for(int i=from;i<o->n;i++) if(nargs && same_value_zero(o->vals[i],args[0])) return BOOLV(1); return BOOLV(0); }   /* includes uses SameValueZero: [NaN].includes(NaN) is true (indexOf stays strict ===) */
     if (strcmp(name,"concat")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=0;i<o->n;i++) arr_push_val(r,o->vals[i]); for(int a=0;a<nargs;a++){ if(args[a].t==V_ARR&&args[a].o){ for(int i=0;i<args[a].o->n;i++) arr_push_val(r,args[a].o->vals[i]); } else arr_push_val(r,args[a]); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"fill")==0){ val fv=nargs>0?args[0]:UND(); int a=nargs>1?(int)to_num(args[1]):0, b=nargs>2?(int)to_num(args[2]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; for(int i=a;i<b;i++) o->vals[i]=fv; return recv; }   /* fill existing slots [start,end) */
     if (strcmp(name,"slice")==0){ int a=nargs>0?(int)to_num(args[0]):0, b=nargs>1?(int)to_num(args[1]):o->n; if(a<0)a+=o->n; if(b<0)b+=o->n; if(a<0)a=0; if(b>o->n)b=o->n; obj*r=new_obj(V_ARR); if(!r) return UND(); for(int i=a;i<b;i++) arr_push_val(r,o->vals[i]); val v=UND(); v.t=V_ARR; v.o=r; return v; }
@@ -3093,11 +3100,11 @@ static val nat_proxy(val *args, int nargs){
 static val eval_map_method(val recv, const char *name, val *args, int nargs) {
     obj *o=recv.o; val k = nargs>0?args[0]:UND();
     if (strcmp(name,"set")==0){ val v=nargs>1?args[1]:UND();
-        for(int i=0;i+1<o->n;i+=2) if(val_equal(o->vals[i],k)){ o->vals[i+1]=v; return recv; }
+        for(int i=0;i+1<o->n;i+=2) if(same_value_zero(o->vals[i],k)){ o->vals[i+1]=v; return recv; }
         arr_push_val(o,k); arr_push_val(o,v); return recv; }                  /* returns the map (chainable) */
-    if (strcmp(name,"get")==0){ for(int i=0;i+1<o->n;i+=2) if(val_equal(o->vals[i],k)) return o->vals[i+1]; return UND(); }
-    if (strcmp(name,"has")==0){ for(int i=0;i+1<o->n;i+=2) if(val_equal(o->vals[i],k)) return BOOLV(1); return BOOLV(0); }
-    if (strcmp(name,"delete")==0){ for(int i=0;i+1<o->n;i+=2) if(val_equal(o->vals[i],k)){ for(int j=i;j+2<o->n;j++) o->vals[j]=o->vals[j+2]; o->n-=2; return BOOLV(1); } return BOOLV(0); }
+    if (strcmp(name,"get")==0){ for(int i=0;i+1<o->n;i+=2) if(same_value_zero(o->vals[i],k)) return o->vals[i+1]; return UND(); }
+    if (strcmp(name,"has")==0){ for(int i=0;i+1<o->n;i+=2) if(same_value_zero(o->vals[i],k)) return BOOLV(1); return BOOLV(0); }
+    if (strcmp(name,"delete")==0){ for(int i=0;i+1<o->n;i+=2) if(same_value_zero(o->vals[i],k)){ for(int j=i;j+2<o->n;j++) o->vals[j]=o->vals[j+2]; o->n-=2; return BOOLV(1); } return BOOLV(0); }
     if (strcmp(name,"clear")==0){ o->n=0; return UND(); }
     if (strcmp(name,"forEach")==0){ if(nargs<1) return UND(); for(int i=0;i+1<o->n && !g_err && !g_oom;i+=2){ val cb[3]={o->vals[i+1],o->vals[i],recv}; call_function(args[0],cb,3); } return UND(); }
     if (strcmp(name,"keys")==0||strcmp(name,"values")==0){ obj *a=new_obj(V_ARR); if(!a){g_oom=1;return UND();} int off=(name[0]=='v')?1:0; for(int i=0;i+1<o->n && !g_oom;i+=2) arr_push_val(a,o->vals[i+off]); val r=UND(); r.t=V_ARR; r.o=a; return r; }
@@ -3106,9 +3113,9 @@ static val eval_map_method(val recv, const char *name, val *args, int nargs) {
 }
 static val eval_set_method(val recv, const char *name, val *args, int nargs) {
     obj *o=recv.o; val v = nargs>0?args[0]:UND();
-    if (strcmp(name,"add")==0){ for(int i=0;i<o->n;i++) if(val_equal(o->vals[i],v)) return recv; arr_push_val(o,v); return recv; }
-    if (strcmp(name,"has")==0){ for(int i=0;i<o->n;i++) if(val_equal(o->vals[i],v)) return BOOLV(1); return BOOLV(0); }
-    if (strcmp(name,"delete")==0){ for(int i=0;i<o->n;i++) if(val_equal(o->vals[i],v)){ for(int j=i;j+1<o->n;j++) o->vals[j]=o->vals[j+1]; o->n--; return BOOLV(1); } return BOOLV(0); }
+    if (strcmp(name,"add")==0){ for(int i=0;i<o->n;i++) if(same_value_zero(o->vals[i],v)) return recv; arr_push_val(o,v); return recv; }
+    if (strcmp(name,"has")==0){ for(int i=0;i<o->n;i++) if(same_value_zero(o->vals[i],v)) return BOOLV(1); return BOOLV(0); }
+    if (strcmp(name,"delete")==0){ for(int i=0;i<o->n;i++) if(same_value_zero(o->vals[i],v)){ for(int j=i;j+1<o->n;j++) o->vals[j]=o->vals[j+1]; o->n--; return BOOLV(1); } return BOOLV(0); }
     if (strcmp(name,"clear")==0){ o->n=0; return UND(); }
     if (strcmp(name,"forEach")==0){ if(nargs<1) return UND(); for(int i=0;i<o->n && !g_err && !g_oom;i++){ val cb[3]={o->vals[i],o->vals[i],recv}; call_function(args[0],cb,3); } return UND(); }
     if (strcmp(name,"values")==0||strcmp(name,"keys")==0){ obj *a=new_obj(V_ARR); if(!a){g_oom=1;return UND();} for(int i=0;i<o->n && !g_oom;i++) arr_push_val(a,o->vals[i]); val r=UND(); r.t=V_ARR; r.o=a; return r; }
@@ -3818,9 +3825,9 @@ static val json_parse_val(void){
             if(jp<jp_end && *jp==','){ jp++; continue; } if(jp<jp_end && *jp==']'){ jp++; } else jp_err=1; break; }
         val vv=UND(); vv.t=V_ARR; vv.o=o; r=vv; }
     else if(*jp=='"'){ r=STRV(jp_string()); }
-    else if(*jp=='t'){ r=BOOLV(1); while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
-    else if(*jp=='f'){ r=BOOLV(0); while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
-    else if(*jp=='n'){ r.t=V_NULL; while(jp<jp_end && *jp>='a' && *jp<='z') jp++; }
+    else if(*jp=='t'){ if(jp+4<=jp_end && jp[1]=='r'&&jp[2]=='u'&&jp[3]=='e'){ r=BOOLV(1); jp+=4; } else jp_err=1; }   /* exact spelling: "truX"/"tru" are invalid JSON, not `true` */
+    else if(*jp=='f'){ if(jp+5<=jp_end && jp[1]=='a'&&jp[2]=='l'&&jp[3]=='s'&&jp[4]=='e'){ r=BOOLV(0); jp+=5; } else jp_err=1; }
+    else if(*jp=='n'){ if(jp+4<=jp_end && jp[1]=='u'&&jp[2]=='l'&&jp[3]=='l'){ r.t=V_NULL; jp+=4; } else jp_err=1; }
     else if(*jp=='-' || (*jp>='0'&&*jp<='9')){ int neg=0; if(*jp=='-'){ neg=1; jp++; } double v=0;   /* JSON number -> double (M908: real fraction + exponent) */
         while(jp<jp_end && *jp>='0'&&*jp<='9'){ v=v*10.0+(*jp-'0'); jp++; }
         if(jp<jp_end && *jp=='.'){ jp++; double f=0.1; while(jp<jp_end && *jp>='0'&&*jp<='9'){ v+=(*jp-'0')*f; f*=0.1; jp++; } }
@@ -3852,7 +3859,7 @@ static val json_revive(val v, val holder, const char *key, val reviver){
 static val nat_json_parse(val *a, int n){
     if(!n || a[0].t!=V_STR) return UND();
     const char *s=a[0].str; jp=s; jp_end=s+strlen(s); jp_err=0;
-    val r=json_parse_val(); if(jp_err){ rt_err("JSON.parse: invalid JSON"); return UND(); }
+    val r=json_parse_val(); jp_ws(); if(jp_err || jp!=jp_end){ rt_err("JSON.parse: invalid JSON"); return UND(); }   /* reject trailing garbage after a complete value: `1 x` / `[1,2] z` are not valid JSON */
     if (n>1 && (a[1].t==V_FUN||a[1].t==V_NATIVE||(a[1].t==V_OBJ&&a[1].o&&a[1].o->kind==V_BOUND))) {
         obj *root=new_obj(V_OBJ); if(!root) return r;   /* spec root holder { "": result } */
         obj_set(root,"",r); val rv=UND(); rv.t=V_OBJ; rv.o=root;
