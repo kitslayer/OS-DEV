@@ -70,6 +70,7 @@ global solitaire_elf_start, solitaire_elf_end
 global gems_elf_start, gems_elf_end
 global columns_elf_start, columns_elf_end
 global freecell_elf_start, freecell_elf_end
+global spider_elf_start, spider_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -318,5 +319,9 @@ columns_elf_end:
 freecell_elf_start:
     incbin "build/freecell.elf"
 freecell_elf_end:
+
+spider_elf_start:
+    incbin "build/spider.elf"
+spider_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
