@@ -31,7 +31,7 @@
 #include "inflate.h"
 #include "zip.h"
 #include "tar.h"
-#include "ac97.h"
+#include "audio.h"
 #include "desktop.h"
 #include "pci.h"
 #include <stdint.h>
@@ -637,15 +637,15 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_pcm:
         if ((int)r->rsi > 0 && !ubuf(r->rdi, (uint64_t)(int)r->rsi * 4)) { r->rax = (uint64_t)-1; break; }  /* nframes stereo 16-bit = 4 B each */
-        __asm__ volatile("sti");           /* ac97_play blocks on the timer */
-        ac97_play((const int16_t *)r->rdi, (int)r->rsi);
+        __asm__ volatile("sti");           /* audio_play blocks on the timer */
+        audio_play((const int16_t *)r->rdi, (int)r->rsi);
         break;
     case SYS_pcm_stream:
         if ((int)r->rsi > 0 && !ubuf(r->rdi, (uint64_t)(int)r->rsi * 4)) { r->rax = (uint64_t)-1; break; }
-        r->rax = (uint64_t)(int64_t)ac97_stream_write((const int16_t *)r->rdi, (int)r->rsi);
+        r->rax = (uint64_t)(int64_t)audio_stream_write((const int16_t *)r->rdi, (int)r->rsi);
         break;
     case SYS_pcm_avail:
-        r->rax = (uint64_t)(int64_t)ac97_stream_avail();
+        r->rax = (uint64_t)(int64_t)audio_stream_avail();
         break;
     case SYS_mouse:
         r->rax = (uint64_t)app_get_mouse();
@@ -658,20 +658,20 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");                  /* the file read can be slow; stay preemptible */
         uint8_t *wb = kmalloc(8 * 1024 * 1024);
         long n = wb ? vfs_read((const char *)r->rdi, wb, 8 * 1024 * 1024) : -1;
-        int rc = (n > 0) ? ac97_play_wav_bg(wb, (int)n) : -1;
+        int rc = (n > 0) ? audio_play_wav_bg(wb, (int)n) : -1;
         if (wb) kfree(wb);                         /* decoded copy is independent of this buffer */
         r->rax = (uint64_t)(int64_t)rc;
         break;
     }
     case SYS_audiostop:
-        ac97_stop_bg();
+        audio_stop_bg();
         break;
     case SYS_playwav: {
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         __asm__ volatile("sti");
         uint8_t *wb = kmalloc(8 * 1024 * 1024);   /* the .wav file (<= 8 MB) */
         long n = wb ? vfs_read((const char *)r->rdi, wb, 8 * 1024 * 1024) : -1;
-        int rc = (n > 0) ? ac97_play_wav(wb, (int)n) : -1;
+        int rc = (n > 0) ? audio_play_wav(wb, (int)n) : -1;
         if (wb) kfree(wb);
         r->rax = (uint64_t)(int64_t)rc;
         break;

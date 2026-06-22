@@ -53,6 +53,12 @@ AUDIOFLAGS := -device AC97,audiodev=snd0 -audiodev $(AUDIODEV),id=snd0
 # Same AC'97 codec, but with the null backend so the headless smoke test can
 # exercise the audio bring-up without depending on a host sound server.
 TESTAUDIOFLAGS := -device AC97,audiodev=snd0 -audiodev none,id=snd0
+# An Intel HD Audio controller (`intel-hda`) with an output codec (`hda-output`)
+# instead of AC'97 — drives kernel/hda.c. The audiodev attaches to the codec
+# (hda-output), not the controller bus. Override the host backend like AUDIODEV.
+HDAAUDIOFLAGS := -device intel-hda -device hda-output,audiodev=snd0 -audiodev $(AUDIODEV),id=snd0
+# Same HDA pair on the null backend, for the headless hdatest (no host sound server).
+TESTHDAFLAGS := -device intel-hda -device hda-output,audiodev=snd0 -audiodev none,id=snd0
 
 C_SRCS  := $(shell find kernel -name '*.c')
 ASM_SRCS:= $(shell find boot kernel -name '*.asm')
@@ -60,7 +66,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 test rtl8139test virtioblktest jstest clean
+.PHONY: all run run-rtl8139 run-hda test rtl8139test virtioblktest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -283,6 +289,21 @@ rtl8139test: $(KERNEL) $(DISK)
 virtioblktest: $(KERNEL) $(DISK)
 	@tests/run-virtio-blk-tests.sh
 
+# Same as `run`, but with an Intel HD Audio controller (`intel-hda` + `hda-output`)
+# instead of AC'97 — boots the whole desktop over the HDA driver (kernel/hda.c).
+# Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
+# tone / DOOM all play through it.
+run-hda: $(KERNEL) $(DISK)
+	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(HDAAUDIOFLAGS) -serial stdio
+
+# Headless in-guest assertion that the HDA driver brings up an audio output path
+# AND its stream DMA actually advances: boots with -device intel-hda + hda-output
+# (no AC'97), asserts the controller reset + codec enum + output verbs succeeded
+# and the stream's DMA position register advances while a tone plays — with no
+# fault. SKIPs cleanly if QEMU is absent. (Companion to `boottest`, the AC'97 path.)
+hdatest: $(KERNEL) $(DISK)
+	@tests/run-hda-tests.sh
+
 # Headless smoke test: no window, capture serial, kill after a few seconds.
 # Used to confirm the kernel boots without needing a display.
 test: $(KERNEL) $(DISK)
@@ -445,8 +466,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtioblktest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtioblktest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtioblktest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtioblktest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

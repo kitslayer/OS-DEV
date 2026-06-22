@@ -26,7 +26,8 @@
 #include "mouse.h"
 #include "usb.h"
 #include "speaker.h"
-#include "ac97.h"
+#include "audio.h"
+#include "hda.h"
 #include "desktop.h"
 #include <stdint.h>
 
@@ -131,7 +132,9 @@ void kmain(uint64_t mb_info) {
     pci_enumerate();
     kprintf("\n");
 
-    ac97_init();      /* bring up AC'97 audio (no-op if the device is absent) */
+    audio_init();     /* bring up audio: HDA if present, else AC'97 (no-op if neither) */
+    kprintf("[ ok ] audio output: %s\n", audio_name());
+    hda_selftest();   /* if HDA is active: prove the stream DMA advances (no-op otherwise) */
 
     net_demo();
 
