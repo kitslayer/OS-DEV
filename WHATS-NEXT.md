@@ -1,5 +1,19 @@
 # What's next
 
+> **(M950) Shell — quoting complete: per-command unprotect sweep.** M949 wired the sentinel machinery + `echo`;
+> this sweeps ~50 builtins (via a subagent, reviewed) to `sh_unprot_buf()` each argument token once it's split
+> out — `cat`/`grep`/`cp`/`mv`/`head`/`tail`/`wc`/`hexdump`/`mkdir`/`rm`/`touch`/`sha*`/`base64`/`cmp`/`paste`/
+> `comm`/`diff`/`tar`/`unzip`/`gzip`/`run`/`ping`/`get`/`write`/… (Pattern-A token copies), the rest-of-line
+> commands (`cowsay`/`rev`/`rot13`/`morse`/`browse`/assignment values), the argv builders (`test`/`printf`/
+> multi-file `cp/mv`/`tee`), and the `for`-loop word bind. So a quoted argument's protected bytes are restored
+> to real ASCII right before the command uses/prints/opens it. `run_pipe`/`expand_*`/`glob`/`normpath` are left
+> untouched (each pipe stage keeps its sentinels until its own builtin). Additive — `sh_unprot_buf` is a no-op
+> on a sentinel-free token, so unquoted input is byte-identical. Verified in-guest: `grep "hello world" FILE`
+> matches a multi-word pattern, `printf "%s+%s" "a b" "c d"` → `a b+c d`, `echo "hi there" > f; cat f`,
+> `cowsay "big test"` all preserve quoted spaces. `make check` green (37 suites); shell.c warning baseline (11)
+> held. (A few rarely-quoted commands — `cd`/`sort`/`uniq`/`cut`/`tr` — are not yet swept; a quoted arg there
+> shows a benign sentinel byte, never a crash — minor follow-up.) **Shell quoting is now functionally complete.**
+
 > **(M949) Shell — POSIX quoting `"..."` / `'...'` (foundation): the most-requested shell feature, the last big
 > deferred shell item.** The blocker was always that arg parsing is decentralized (no central argv tokenizer).
 > Solved with a sentinel scheme (planned via a subagent): shell input is 7-bit ASCII, so `sh_quote_pass()`

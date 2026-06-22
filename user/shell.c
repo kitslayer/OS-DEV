@@ -420,7 +420,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '_' || (line[0] >= 'a' && line[0] <= 'z') || (line[0] >= 'A' && line[0] <= 'Z')) {
             int k = 1;
             while (line[k] == '_' || (line[k] >= 'a' && line[k] <= 'z') || (line[k] >= 'A' && line[k] <= 'Z') || (line[k] >= '0' && line[k] <= '9')) k++;
-            if (line[k] == '=') { vset(line, k, line + k + 1); continue; }   /* value = rest of line (already expanded) */
+            if (line[k] == '=') { sh_unprot_buf(line + k + 1); vset(line, k, line + k + 1); continue; }   /* value = rest of line (already expanded) */
         }
         if (line[0] == '\0') {
             continue;
@@ -456,7 +456,7 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
             const char *p = line + (line[1]=='x' ? 7 : 4); while (*p == ' ') p++;   /* skip "set "/"export " */
             int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
-            if (p[nl] == '=' && nl > 0) vset(p, nl, p + nl + 1);                    /* value = rest of line (may contain spaces) */
+            if (p[nl] == '=' && nl > 0) { sh_unprot_buf((char *)p + nl + 1); vset(p, nl, p + nl + 1); }   /* value = rest of line (may contain spaces) */
             else print("usage: set NAME=value\n");
         } else if (startswith(line, "local ")) {       /* local NAME[=val] ... : function-scoped vars (restored on return) */
             const char *p = line + 6;
@@ -466,7 +466,7 @@ static int run_command(char *line, char *cwd) {
                 int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
                 if (nl == 0) { p++; continue; }
                 char vbuf[160]; const char *val = ""; const char *vp = p + nl;
-                if (*vp == '=') { int vi = 0; const char *q = vp + 1; while (*q && *q != ' ' && vi < 159) vbuf[vi++] = *q++; vbuf[vi] = 0; val = vbuf; vp = q; }
+                if (*vp == '=') { int vi = 0; const char *q = vp + 1; while (*q && *q != ' ' && vi < 159) vbuf[vi++] = *q++; vbuf[vi] = 0; sh_unprot_buf(vbuf); val = vbuf; vp = q; }
                 if (g_func_depth > 0 && g_nlocalsave < 64) {   /* remember the caller's value so the function boundary can restore it */
                     const char *ov = vget(p, nl); int s = g_nlocalsave++;
                     int k = 0; for (; k < nl && k < 23; k++) g_localsave[s].name[k] = p[k];
@@ -480,11 +480,11 @@ static int run_command(char *line, char *cwd) {
             for (int i = 0; i < g_nvars; i++) { print(g_vars[i].name); print("="); print(g_vars[i].val); print("\n"); }
             if (g_nvars == 0) print("(no variables set)\n");
         } else if (startswith(line, "read ")) {                                       /* read a line of input into a variable */
-            const char *p = line + 5; while (*p == ' ') p++;
+            char *p = line + 5; while (*p == ' ') p++; sh_unprot_buf(p);
             int nl = 0; while (p[nl] && p[nl] != ' ') nl++;
             if (nl > 0) { char rb[256]; readline(rb, sizeof rb); vset(p, nl, rb); }
         } else if (startswith(line, "unset ")) {
-            const char *p = line + 6; while (*p == ' ') p++; vunset(p);
+            char *p = line + 6; while (*p == ' ') p++; sh_unprot_buf(p); vunset(p);
         } else if (streq(line, "ls")) {
             char buf[8192];                 /* hold a full directory (~90+ files) */
             sys_list(buf, sizeof(buf));
@@ -498,7 +498,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = 0;
+                name[j] = 0; sh_unprot_buf(name);
                 if (sys_chdir(name) >= 0) {                    /* a directory: list its contents (header only when several args) */
                     if (nargs > 1) { print(name); print(":\n"); }
                     sys_list(buf, sizeof buf); print(buf);
@@ -516,7 +516,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int i = 0;
                 while (*p && *p != ' ' && i < 63) name[i++] = *p++;
-                name[i] = '\0'; any = 1;
+                name[i] = '\0'; sh_unprot_buf(name); any = 1;
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("cat: no such file: "); print(name); print("\n"); }
                 else { print(buf); free(buf); }
@@ -536,7 +536,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = '\0'; any = 1;
+                name[j] = '\0'; sh_unprot_buf(name); any = 1;
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("head: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
@@ -582,7 +582,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = '\0'; any = 1;
+                name[j] = '\0'; sh_unprot_buf(name); any = 1;
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("tail: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
@@ -904,6 +904,7 @@ static int run_command(char *line, char *cwd) {
                 "-.","---",".--.","--.-",".-.","...","-","..-","...-",".--","-..-","-.--","--..",
                 "-----",".----","..---","...--","....-",".....","-....","--...","---..","----."
             };
+            sh_unprot_buf(line + 6);
             for (const char *p = line + 6; *p; p++) {
                 char c = *p;
                 if (c >= 'A' && c <= 'Z') c += 32;
@@ -949,7 +950,7 @@ static int run_command(char *line, char *cwd) {
                 print("\n");
             }
         } else if (startswith(line, "rev ")) {
-            const char *t = line + 4;
+            char *t = line + 4; sh_unprot_buf(t);
             char r[128]; int len = 0; while (t[len] && len < 127) len++;
             for (int i = 0; i < len; i++) r[i] = t[len - 1 - i];
             r[len] = 0;
@@ -1036,7 +1037,7 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "ping ")) {
             /* ping a host by name: resolve (also shows the IP), then ICMP-echo */
             char host[64]; char *p = line + 5; while (*p == ' ') p++;
-            int i = 0; while (*p && *p != ' ' && i < 63) host[i++] = *p++; host[i] = 0;
+            int i = 0; while (*p && *p != ' ' && i < 63) host[i++] = *p++; host[i] = 0; sh_unprot_buf(host);
             if (host[0] == 0) { print("usage: ping <host>\n"); }
             else {
                 char ip[40];
@@ -1050,7 +1051,7 @@ static int run_command(char *line, char *cwd) {
                 }
             }
         } else if (startswith(line, "resolve ")) {
-            char ip[40];
+            char ip[40]; sh_unprot_buf(line + 8);
             if (sys_resolve(line + 8, ip, sizeof(ip)) < 0) print("resolve: failed\n");
             else { print(line + 8); print(" -> "); print(ip); }
         } else if (streq(line, "pwd")) {
@@ -1073,6 +1074,7 @@ static int run_command(char *line, char *cwd) {
                 while (*p && *p != ' ' && ti < 255) tok[ti++] = *p++;
                 tok[ti++] = 0;
             }
+            for (int i = 0; i < ac; i++) sh_unprot_buf(av[i]);            /* restore quoted bytes in each arg */
             if (line[0] == '[' && ac > 0 && streq(av[ac-1], "]")) ac--;   /* drop closing ] */
             int neg = 0, i0 = 0;
             if (ac > 0 && streq(av[0], "!")) { neg = 1; i0 = 1; }
@@ -1109,16 +1111,16 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "alias ")) {   /* alias name=value  (or `alias name` to show one) */
             const char *p = line + 6; while (*p == ' ') p++;
             int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
-            if (p[nl] == '=' && nl > 0) alias_set(p, nl, p + nl + 1);
+            if (p[nl] == '=' && nl > 0) { sh_unprot_buf((char *)p + nl + 1); alias_set(p, nl, p + nl + 1); }
             else { const char *v = alias_get(p, nl); if (v) { print(p); print("='"); print(v); print("'\n"); } else { print("alias: not set\n"); g_status = 1; } }
         } else if (startswith(line, "unalias ")) {
-            const char *p = line + 8; while (*p == ' ') p++; alias_del(p);
+            char *p = line + 8; while (*p == ' ') p++; sh_unprot_buf(p); alias_del(p);
         } else if (streq(line, "clip")) {          /* print the system clipboard (GUI selection -> shell) */
             char cb[2048]; int n = sys_clip_get(cb, sizeof cb);
             if (n <= 0) print("(clipboard empty)\n");
             else { cb[n] = 0; print(cb); if (cb[n-1] != '\n') print("\n"); }
         } else if (startswith(line, "clip ")) {    /* clip <file>: set the clipboard from a file (or a pipe) */
-            const char *fn = line + 5; while (*fn == ' ') fn++;
+            char *fn = line + 5; while (*fn == ' ') fn++; sh_unprot_buf(fn);
             long n; char *buf = slurp(fn, &n);
             if (!buf) { print("clip: no such file: "); print(fn); print("\n"); }
             else {
@@ -1134,23 +1136,24 @@ static int run_command(char *line, char *cwd) {
              * nested run_line() reuses run_line's static expand/glob buffers. */
             char fn[128]; const char *p = line + (line[0] == '.' ? 2 : 7);
             while (*p == ' ') p++;
-            int fi = 0; while (*p && *p != ' ' && fi < 127) fn[fi++] = *p++; fn[fi] = 0;
+            int fi = 0; while (*p && *p != ' ' && fi < 127) fn[fi++] = *p++; fn[fi] = 0; sh_unprot_buf(fn);
             source_file(fn, cwd, 0);
         } else if (startswith(line, "crypt ")) {
             char *p = line + 6, fn[32]; int i = 0;
             while (*p == ' ') p++;
             while (*p && *p != ' ' && i < 31) fn[i++] = *p++;
-            fn[i] = 0;
+            fn[i] = 0; sh_unprot_buf(fn);
             while (*p == ' ') p++;
+            sh_unprot_buf(p);                                 /* the password may be quoted */
             if (fn[0] == 0 || *p == 0) print("usage: crypt <file> <pass>\n");
             else if (sys_crypt(fn, p) < 0) print("crypt: failed\n");
             else { print("crypt: "); print(fn); print(" (run again to reverse)\n"); }
         } else if (startswith(line, "base64 -d ")) {       /* decode base64 -> bytes, written to a file */
             char *q = line + 10; while (*q == ' ') q++;
-            char src[64]; int si = 0; while (*q && *q != ' ' && si < 63) src[si++] = *q++; src[si] = 0;
+            char src[64]; int si = 0; while (*q && *q != ' ' && si < 63) src[si++] = *q++; src[si] = 0; sh_unprot_buf(src);
             while (*q == ' ') q++;
             char dst[64]; int di = 0;
-            if (*q) { while (*q && *q != ' ' && di < 63) dst[di++] = *q++; dst[di] = 0; }
+            if (*q) { while (*q && *q != ' ' && di < 63) dst[di++] = *q++; dst[di] = 0; sh_unprot_buf(dst); }
             else { dst[0]='O'; dst[1]='U'; dst[2]='T'; dst[3]=0; }
             long n = -1; char *inb = src[0] ? slurp(src, &n) : 0;
             char *outb = inb ? malloc((unsigned long)n + 1) : 0;   /* decoded output is <= 3/4 of the base64 input */
@@ -1171,7 +1174,7 @@ static int run_command(char *line, char *cwd) {
             free(inb); free(outb);
         } else if (startswith(line, "base64 ")) {
             char *a = line + 7; while (*a == ' ') a++;     /* trim spaces so `base64 F > OUT` works */
-            char fn[64]; int fi = 0; while (*a && *a != ' ' && fi < 63) fn[fi++] = *a++; fn[fi] = 0;
+            char fn[64]; int fi = 0; while (*a && *a != ' ' && fi < 63) fn[fi++] = *a++; fn[fi] = 0; sh_unprot_buf(fn);
             long n = -1; char *buf = fn[0] ? slurp(fn, &n) : 0;
             if (!buf) { print("base64: no such file\n"); }
             else {
@@ -1196,7 +1199,7 @@ static int run_command(char *line, char *cwd) {
             while (*p) {
                 while (*p == ' ') p++;
                 if (!*p) break;
-                char fn[64]; int j = 0; while (*p && *p != ' ' && j < 63) fn[j++] = *p++; fn[j] = 0;
+                char fn[64]; int j = 0; while (*p && *p != ' ' && j < 63) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);
                 any = 1; char hex[72];
                 if (sys_sha256(fn, hex, sizeof hex) < 0) { print("sha256: no such file: "); print(fn); print("\n"); g_status = 1; }
                 else { print("  "); print(hex); print("  "); print(fn); print("\n"); }
@@ -1207,7 +1210,7 @@ static int run_command(char *line, char *cwd) {
             while (*p) {
                 while (*p == ' ') p++;
                 if (!*p) break;
-                char fn[64]; int j = 0; while (*p && *p != ' ' && j < 63) fn[j++] = *p++; fn[j] = 0;
+                char fn[64]; int j = 0; while (*p && *p != ' ' && j < 63) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);
                 any = 1; char hex[136];
                 if (sys_sha512(fn, hex, sizeof hex) < 0) { print("sha512: no such file: "); print(fn); print("\n"); g_status = 1; }
                 else { print("  "); print(hex); print("  "); print(fn); print("\n"); }
@@ -1218,7 +1221,7 @@ static int run_command(char *line, char *cwd) {
             while (*fp) {
                 while (*fp == ' ') fp++;
                 if (!*fp) break;
-                char fn[64]; int j = 0; while (*fp && *fp != ' ' && j < 63) fn[j++] = *fp++; fn[j] = 0;
+                char fn[64]; int j = 0; while (*fp && *fp != ' ' && j < 63) fn[j++] = *fp++; fn[j] = 0; sh_unprot_buf(fn);
                 any = 1;
                 long cn; char *cbuf = slurp(fn, &cn);   /* slurp grows the buffer + sets $? on a missing file */
                 if (!cbuf) { print("crc32: no such file: "); print(fn); print("\n"); continue; }
@@ -1242,7 +1245,7 @@ static int run_command(char *line, char *cwd) {
                 if (p[1] == 'e' && (p[2] == ' ' || p[2] == 0)) {   /* -e <pattern> (repeatable) */
                     p += 2; while (*p == ' ') p++;
                     int q = 0; while (*p && *p != ' ') { if (npat < 8 && q < 39) pats[npat][q++] = *p; p++; }
-                    if (npat < 8) { pats[npat][q] = 0; npat++; }
+                    if (npat < 8) { pats[npat][q] = 0; sh_unprot_buf(pats[npat]); npat++; }
                     while (*p == ' ') p++;
                     continue;
                 }
@@ -1263,7 +1266,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (npat == 0) {                                /* no -e given: the first non-flag word is the pattern */
                 int i = 0; while (*p && *p != ' ' && i < 39) pats[0][i++] = *p++;
-                pats[0][i] = 0; if (i) npat = 1;
+                pats[0][i] = 0; sh_unprot_buf(pats[0]); if (i) npat = 1;
                 while (*p == ' ') p++;
             }
             if (npat == 0 || *p == 0) { print("usage: grep [-incvlo] [-e pat] [-A/B/C N]... <pattern> <file>...  (regex: ^ $ . * [..] \\)\n"); g_status = 1; }
@@ -1276,7 +1279,7 @@ static int run_command(char *line, char *cwd) {
                     if (!*p) break;
                     char name[64]; int j = 0;
                     while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                    name[j] = 0;
+                    name[j] = 0; sh_unprot_buf(name);
                     long n; char *buf = slurp(name, &n);
                     if (!buf) { print("grep: no such file: "); print(name); print("\n"); continue; }
                     buf[n] = 0;
@@ -1357,7 +1360,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = 0;
+                name[j] = 0; sh_unprot_buf(name);
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("wc: no such file: "); print(name); print("\n"); continue; }
                 int lines = 0, words = 0, inword = 0, longest = 0, cur = 0;
@@ -1392,7 +1395,7 @@ static int run_command(char *line, char *cwd) {
             while (*fp) {
                 while (*fp == ' ') fp++;
                 if (!*fp) break;
-                char name[64]; int j = 0; while (*fp && *fp != ' ' && j < 63) name[j++] = *fp++; name[j] = 0;
+                char name[64]; int j = 0; while (*fp && *fp != ' ' && j < 63) name[j++] = *fp++; name[j] = 0; sh_unprot_buf(name);
                 any = 1;
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("hexdump: no such file: "); print(name); print("\n"); continue; }
@@ -1434,7 +1437,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = 0; any = 1;
+                name[j] = 0; sh_unprot_buf(name); any = 1;
                 if (sys_mkdir(name) < 0) { print("mkdir: failed (exists?): "); print(name); print("\n"); g_status = 1; }
                 else { print("created "); print(name); print("/\n"); }
             }
@@ -1580,7 +1583,7 @@ static int run_command(char *line, char *cwd) {
             else { print(a); print("\n"); }
         } else if (startswith(line, "printf ")) {         /* printf FMT [args]: \n \t \r \\ escapes + %s %d/%i %x/%X %o %u %c %% (FMT cycles over the args) */
             const char *p = line + 7; while (*p == ' ') p++;
-            char fmt[256]; int fi = 0; while (*p && *p != ' ' && fi < 255) fmt[fi++] = *p++; fmt[fi] = 0;
+            char fmt[256]; int fi = 0; while (*p && *p != ' ' && fi < 255) fmt[fi++] = *p++; fmt[fi] = 0; sh_unprot_buf(fmt);
             while (*p == ' ') p++;
             static char abuf[512]; char *av[32]; int ac = 0, bi = 0;   /* split the trailing words into args */
             while (*p && ac < 32) {
@@ -1589,6 +1592,7 @@ static int run_command(char *line, char *cwd) {
                 if (bi < 512) abuf[bi++] = 0;
                 while (*p == ' ') p++;
             }
+            for (int i = 0; i < ac; i++) sh_unprot_buf(av[i]);   /* restore quoted bytes in each arg */
             int has_spec = 0;
             for (const char *f = fmt; *f; f++) if (*f == '%' && f[1] && f[1] != '%') has_spec = 1;
             int ai = 0;
@@ -1639,7 +1643,7 @@ static int run_command(char *line, char *cwd) {
             char tav[8][64]; int tac = 0;                 /* targets + (last, appended by the pipe) the input file */
             while (*p && tac < 8) {
                 int q = 0; while (*p && *p != ' ' && q < 63) tav[tac][q++] = *p++;
-                tav[tac][q] = 0; tac++;
+                tav[tac][q] = 0; sh_unprot_buf(tav[tac]); tac++;
                 while (*p == ' ') p++;
             }
             if (tac < 2) print("usage: cmd | tee <file>...\n");   /* the piped input is the appended last arg */
@@ -1657,7 +1661,7 @@ static int run_command(char *line, char *cwd) {
             while (*scan) { while (*scan == ' ') scan++; if (!*scan) break; lastw = scan; while (*scan && *scan != ' ') scan++; }
             if (!lastw || lastw == p) { print("usage: cmd | xargs <command>...\n"); }   /* need a command before the appended input */
             else {
-                char infile[64]; int q = 0; while (lastw[q] && lastw[q] != ' ' && q < 63) { infile[q] = lastw[q]; q++; } infile[q] = 0;
+                char infile[64]; int q = 0; while (lastw[q] && lastw[q] != ' ' && q < 63) { infile[q] = lastw[q]; q++; } infile[q] = 0; sh_unprot_buf(infile);
                 long n; char *buf = slurp(infile, &n);
                 if (buf) {
                     buf[n] = 0;
@@ -1676,7 +1680,7 @@ static int run_command(char *line, char *cwd) {
                 }
             }
         } else if (startswith(line, "cowsay ")) {         /* the classic: a cow speaks your message */
-            const char *msg = line + 7; int len = 0; while (msg[len]) len++;
+            char *msg = line + 7; sh_unprot_buf(msg); int len = 0; while (msg[len]) len++;
             print(" "); for (int i = 0; i < len + 2; i++) print("_"); print("\n");
             print("< "); print(msg); print(" >\n");
             print(" "); for (int i = 0; i < len + 2; i++) print("-"); print("\n");
@@ -1778,7 +1782,7 @@ static int run_command(char *line, char *cwd) {
                 print("\n");
             }
         } else if (startswith(line, "rot13 ")) {          /* rot13 TEXT -> ROT13 (CLI companion to rot13.htm) */
-            const char *p = line + 6;
+            char *p = line + 6; sh_unprot_buf(p);
             char out[256]; int i = 0;
             while (*p && i < 255) {
                 char c = *p++;
@@ -1863,7 +1867,7 @@ static int run_command(char *line, char *cwd) {
                 printl(by); print(" B\n");
             }
         } else if (startswith(line, "unmorse ")) {        /* unmorse CODE -> text (reverse of morse; / = word space) */
-            const char *p = line + 8;
+            char *p = line + 8; sh_unprot_buf(p);
             static const char *codes[] = { ".-","-...","-.-.","-..",".","..-.","--.","....","..",".---","-.-",".-..","--","-.","---",".--.","--.-",".-.","...","-","..-","...-",".--","-..-","-.--","--..","-----",".----","..---","...--","....-",".....","-....","--...","---..","----." };
             static const char *letters = "abcdefghijklmnopqrstuvwxyz0123456789";
             char out[256]; int oi = 0;
@@ -1915,9 +1919,9 @@ static int run_command(char *line, char *cwd) {
             print("  "); print(out); print("\n");
         } else if (startswith(line, "cmp ")) {            /* cmp F1 F2 -> identical, or the first differing line */
             const char *p = line + 4; while (*p == ' ') p++;
-            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0; sh_unprot_buf(f1);
             while (*p == ' ') p++;
-            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0; sh_unprot_buf(f2);
             if (!f1[0] || !f2[0]) { print("usage: cmp <file1> <file2>\n"); g_status = 2; }
             else {
                 long n1; char *b1 = slurp(f1, &n1);
@@ -1951,7 +1955,7 @@ static int run_command(char *line, char *cwd) {
             while (*p) {
                 while (*p == ' ') p++;
                 if (!*p) break;
-                char name[64]; int j = 0; while (*p && *p != ' ' && j < 63) name[j++] = *p++; name[j] = 0;
+                char name[64]; int j = 0; while (*p && *p != ' ' && j < 63) name[j++] = *p++; name[j] = 0; sh_unprot_buf(name);
                 any = 1;
                 long n; char *buf = slurp(name, &n);
                 if (!buf) { print("strings: no such file: "); print(name); print("\n"); continue; }
@@ -1968,13 +1972,13 @@ static int run_command(char *line, char *cwd) {
             if (!any) print("usage: strings <file>...\n");
         } else if (startswith(line, "basename ")) {       /* basename PATH -> the last component */
             const char *p = line + 9; while (*p == ' ') p++;
-            char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0;
+            char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0; sh_unprot_buf(path);
             while (pl > 1 && path[pl-1] == '/') path[--pl] = 0;        /* strip trailing slashes (keep a lone "/") */
             int last = -1; for (int i = 0; i < pl; i++) if (path[i] == '/') last = i;
             print("  "); print(last >= 0 ? path + last + 1 : path); print("\n");
         } else if (startswith(line, "dirname ")) {        /* dirname PATH -> the directory part */
             const char *p = line + 8; while (*p == ' ') p++;
-            char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0;
+            char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0; sh_unprot_buf(path);
             int last = -1; for (int i = 0; i < pl; i++) if (path[i] == '/') last = i;
             if (last < 0) print("  .\n");                              /* no slash -> current dir */
             else if (last == 0) print("  /\n");                        /* "/file" -> "/" */
@@ -1983,9 +1987,9 @@ static int run_command(char *line, char *cwd) {
             const char *p = line + 6; while (*p == ' ') p++;
             char delim = '\t';
             if (p[0] == '-' && p[1] == 'd') { p += 2; while (*p == ' ') p++; if (*p) delim = *p++; while (*p == ' ') p++; }
-            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0; sh_unprot_buf(f1);
             while (*p == ' ') p++;
-            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0; sh_unprot_buf(f2);
             if (!f1[0] || !f2[0]) { print("usage: paste [-dX] <file1> <file2>\n"); }
             else {
                 long n1, n2; char *c1 = slurp(f1, &n1); char *c2 = slurp(f2, &n2);
@@ -2007,9 +2011,9 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (startswith(line, "comm ")) {           /* comm F1 F2 (sorted) -> < only-in-1, > only-in-2, = in-both */
             const char *p = line + 5; while (*p == ' ') p++;
-            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0; sh_unprot_buf(f1);
             while (*p == ' ') p++;
-            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0; sh_unprot_buf(f2);
             if (!f1[0] || !f2[0]) { print("usage: comm <file1> <file2>  (sorted; < only-1, > only-2, = both)\n"); }
             else {
                 long n1, n2; char *c1 = slurp(f1, &n1); char *c2 = slurp(f2, &n2);
@@ -2039,9 +2043,9 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (startswith(line, "diff ")) {           /* diff F1 F2 -> LCS line edit script: '- ' removed from F1, '+ ' added in F2, '  ' unchanged */
             const char *p = line + 5; while (*p == ' ') p++;
-            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0;
+            char f1[64]; int j = 0; while (*p && *p != ' ' && j < 63) f1[j++] = *p++; f1[j] = 0; sh_unprot_buf(f1);
             while (*p == ' ') p++;
-            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0;
+            char f2[64]; j = 0; while (*p && *p != ' ' && j < 63) f2[j++] = *p++; f2[j] = 0; sh_unprot_buf(f2);
             if (!f1[0] || !f2[0]) { print("usage: diff <file1> <file2>  (line edit: - removed, + added)\n"); g_status = 2; }
             else {
                 long n1, n2; char *d1 = slurp(f1, &n1); char *d2 = slurp(f2, &n2);   /* whole files; the LCS still caps lines (warned below) */
@@ -2091,11 +2095,12 @@ static int run_command(char *line, char *cwd) {
             if (startswith(p, "https://")) { secure = 1; p += 8; }
             else if (startswith(p, "http://")) { p += 7; }
             while (*p && *p != ' ' && *p != '/' && i < 63) host[i++] = *p++;
-            host[i] = 0;
+            host[i] = 0; sh_unprot_buf(host);
             if (*p == '/' || *p == ' ') {              /* optional path */
                 if (*p == ' ') p++;
                 int j = 0; while (*p && j < 159) path[j++] = *p++; path[j] = 0;
             } else { path[0] = '/'; path[1] = 0; }
+            sh_unprot_buf(path);
             if (host[0] == 0) { print("usage: get [http(s)://]<host>[/path]\n"); }
             else {
                 static char resp[8192];
@@ -2119,9 +2124,10 @@ static int run_command(char *line, char *cwd) {
             int secure = 0;
             if (startswith(p, "https://")) { secure = 1; p += 8; }
             else if (startswith(p, "http://")) { p += 7; }
-            while (*p && *p != ' ' && *p != '/' && i < 63) host[i++] = *p++; host[i] = 0;
+            while (*p && *p != ' ' && *p != '/' && i < 63) host[i++] = *p++; host[i] = 0; sh_unprot_buf(host);
             if (*p == '/') { int j = 0; while (*p && *p != ' ' && j < 159) path[j++] = *p++; path[j] = 0; }
             else { path[0] = '/'; path[1] = 0; }
+            sh_unprot_buf(path);
             if (host[0] == 0) { print("usage: headers [http(s)://]<host>[/path]\n"); }
             else {
                 static char resp[2048];
@@ -2144,11 +2150,12 @@ static int run_command(char *line, char *cwd) {
             int secure = 0;                            /* https:// -> download over TLS */
             if (startswith(p, "https://")) { secure = 1; p += 8; }
             else if (startswith(p, "http://")) { p += 7; }
-            int i = 0; while (*p && *p != ' ' && *p != '/' && i < 63) host[i++] = *p++; host[i] = 0;
+            int i = 0; while (*p && *p != ' ' && *p != '/' && i < 63) host[i++] = *p++; host[i] = 0; sh_unprot_buf(host);
             if (*p == '/') { int j = 0; while (*p && *p != ' ' && j < 159) path[j++] = *p++; path[j] = 0; }
             else { path[0] = '/'; path[1] = 0; }
+            sh_unprot_buf(path);
             while (*p == ' ') p++;
-            int k = 0; while (*p && *p != ' ' && k < 31) out[k++] = *p++; out[k] = 0;
+            int k = 0; while (*p && *p != ' ' && k < 31) out[k++] = *p++; out[k] = 0; sh_unprot_buf(out);
             if (host[0] == 0 || out[0] == 0) { print("usage: wget [http(s)://]<host>[/path] <outfile>\n"); }
             else {
                 char *wbuf = malloc(1u << 20);           /* 1MB download buffer (was a fixed 16KB) */
@@ -2170,6 +2177,7 @@ static int run_command(char *line, char *cwd) {
                 free(wbuf);
             }
         } else if (startswith(line, "browse ")) {
+            sh_unprot_buf(line + 7);
             sys_browse(line + 7);
             print("opening browser: "); print(line + 7); print("\n");
         } else if (streq(line, "apps")) {
@@ -2180,7 +2188,7 @@ static int run_command(char *line, char *cwd) {
             } else print("apps: (none)\n");
         } else if (startswith(line, "play ")) {            /* play a .wav in the background (non-blocking) */
             char *f = line + 5; while (*f == ' ') f++;
-            char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0;
+            char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0; sh_unprot_buf(fn);
             if (!fn[0]) print("usage: play <file.wav>\n");
             else print(sys_playbg(fn) == 0 ? "play: started in the background ('stop' to halt)\n"
                                            : "play: not a 16-bit PCM WAV (or no file)\n");
@@ -2210,9 +2218,9 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (startswith(line, "run ")) {           /* run <prog> [arg] — e.g. `run editor README.TXT` */
             const char *p = line + 4; while (*p == ' ') p++;
-            char prog[64]; int pi = 0; while (*p && *p != ' ' && pi < 63) prog[pi++] = *p++; prog[pi] = 0;
+            char prog[64]; int pi = 0; while (*p && *p != ' ' && pi < 63) prog[pi++] = *p++; prog[pi] = 0; sh_unprot_buf(prog);
             while (*p == ' ') p++;
-            char arg[64]; int ai = 0; while (*p && *p != ' ' && ai < 63) arg[ai++] = *p++; arg[ai] = 0;
+            char arg[64]; int ai = 0; while (*p && *p != ' ' && ai < 63) arg[ai++] = *p++; arg[ai] = 0; sh_unprot_buf(arg);
             long rc = arg[0] ? sys_spawn_arg(prog, arg) : sys_spawn(prog);
             if (rc < 0) print("run: no such program. type 'apps' for the list (or run a disk .elf)\n");
             else { print("launched "); print(prog); print("\n"); }
@@ -2221,7 +2229,7 @@ static int run_command(char *line, char *cwd) {
             while (*f) {                                 /* identify each space-separated file */
                 while (*f == ' ') f++;
                 if (!*f) break;
-                char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0;
+                char fn[64]; int fi = 0; while (*f && *f != ' ' && fi < 63) fn[fi++] = *f++; fn[fi] = 0; sh_unprot_buf(fn);
                 any = 1;
                 static unsigned char b[512];
                 long n = sys_readfile(fn, b, sizeof(b));
@@ -2249,7 +2257,7 @@ static int run_command(char *line, char *cwd) {
             if (!any) print("usage: file <name>...\n");
         } else if (startswith(line, "tar ")) {             /* extract a .tar / .tar.gz archive */
             char *t = line + 4; while (*t == ' ') t++;
-            char tn[64]; int ti = 0; while (*t && *t != ' ' && ti < 63) tn[ti++] = *t++; tn[ti] = 0;
+            char tn[64]; int ti = 0; while (*t && *t != ' ' && ti < 63) tn[ti++] = *t++; tn[ti] = 0; sh_unprot_buf(tn);
             if (tn[0] == 0) print("usage: tar <file.tar|file.tgz>\n");
             else {
                 long n = sys_untar(tn);
@@ -2258,7 +2266,7 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (startswith(line, "unzip ")) {           /* extract a .zip archive (reuses the DEFLATE decoder) */
             char *z = line + 6; while (*z == ' ') z++;
-            char zn[64]; int zi = 0; while (*z && *z != ' ' && zi < 63) zn[zi++] = *z++; zn[zi] = 0;
+            char zn[64]; int zi = 0; while (*z && *z != ' ' && zi < 63) zn[zi++] = *z++; zn[zi] = 0; sh_unprot_buf(zn);
             if (zn[0] == 0) print("usage: unzip <file.zip>\n");
             else {
                 long n = sys_unzip(zn);
@@ -2269,10 +2277,10 @@ static int run_command(char *line, char *cwd) {
             char src[64]; int i = 0; char *p = line + 5;
             while (*p == ' ') p++;
             while (*p && *p != ' ' && i < 63) src[i++] = *p++;
-            src[i] = 0;
+            src[i] = 0; sh_unprot_buf(src);
             while (*p == ' ') p++;
             char dst[64]; int j = 0;
-            if (*p) { while (*p && *p != ' ' && j < 63) dst[j++] = *p++; dst[j] = 0; }
+            if (*p) { while (*p && *p != ' ' && j < 63) dst[j++] = *p++; dst[j] = 0; sh_unprot_buf(dst); }
             else {                                          /* no DST: basename (drop ext) + ".GZ" */
                 int L = 0; while (src[L]) L++;
                 int dot = -1; for (int k = 0; k < L; k++) if (src[k] == '.') dot = k;
@@ -2290,10 +2298,10 @@ static int run_command(char *line, char *cwd) {
             char src[64]; int i = 0; char *p = line + 7;
             while (*p == ' ') p++;
             while (*p && *p != ' ' && i < 63) src[i++] = *p++;
-            src[i] = 0;
+            src[i] = 0; sh_unprot_buf(src);
             while (*p == ' ') p++;
             char dst[64]; int j = 0;
-            if (*p) { while (*p && *p != ' ' && j < 63) dst[j++] = *p++; dst[j] = 0; }
+            if (*p) { while (*p && *p != ' ' && j < 63) dst[j++] = *p++; dst[j] = 0; sh_unprot_buf(dst); }
             else {                                          /* no DST given: strip a trailing .gz, else "OUT" */
                 int L = 0; while (src[L]) L++;
                 if (L > 3 && src[L-3]=='.' && (src[L-2]=='g'||src[L-2]=='G') && (src[L-1]=='z'||src[L-1]=='Z')) {
@@ -2321,6 +2329,7 @@ static int run_command(char *line, char *cwd) {
                 while (*q && *q != ' ' && tn < 255) tbuf[tn++] = *q++;
                 tbuf[tn++] = 0;
             }
+            for (int i = 0; i < ac; i++) sh_unprot_buf(av[i]);   /* restore quoted bytes in each path */
             const char *dest = av[ac - 1];
             int destdir = 0;
             if (sys_chdir(dest) >= 0) { destdir = 1; sys_chdir(cwd); }
@@ -2343,8 +2352,9 @@ static int run_command(char *line, char *cwd) {
             char src[64]; int i = 0; char *p = line + 3;
             while (*p == ' ') p++;
             while (*p && *p != ' ' && i < 63) src[i++] = *p++;
-            src[i] = 0;
+            src[i] = 0; sh_unprot_buf(src);
             while (*p == ' ') p++;
+            sh_unprot_buf(p);                         /* destination may be quoted */
             if (src[0] == 0 || *p == 0) { print("usage: "); print(move?"mv":"cp"); print(" <src> <dst>\n"); }
             else if (sys_chdir(src) >= 0) {        /* src is a directory: cp/mv of dirs isn't supported (no -r) */
                 sys_chdir(cwd);
@@ -2392,7 +2402,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = 0;
+                name[j] = 0; sh_unprot_buf(name);
                 if (streq(name, "-f")) { force = 1; continue; }   /* -f: force (no error / no $?=1 when a file is missing) */
                 any = 1;
                 if (sys_delete(name) < 0) { if (!force) { print("rm: no such file, or dir not empty: "); print(name); print("\n"); g_status = 1; } }
@@ -2406,7 +2416,7 @@ static int run_command(char *line, char *cwd) {
                 if (!*p) break;
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
-                name[j] = 0; any = 1;
+                name[j] = 0; sh_unprot_buf(name); any = 1;
                 char probe[1];
                 if (sys_readfile(name, probe, 1) >= 0) { }      /* exists: leave content (no mtime API) */
                 else if (sys_writefile(name, "", 0) < 0) { print("touch: failed: "); print(name); print("\n"); g_status = 1; }
@@ -2431,8 +2441,9 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "write ")) {
             char *p = line + 6, fname[32]; int i = 0;
             while (*p && *p != ' ' && i < 31) fname[i++] = *p++;
-            fname[i] = 0;
+            fname[i] = 0; sh_unprot_buf(fname);
             if (*p == ' ') p++;
+            sh_unprot_buf(p);                            /* reveal quoted spaces/metachars in the content */
             long n = sys_writefile(fname, p, ustrlen(p));
             if (n < 0) print("write: failed\n");
             else { print("wrote "); print(fname); print("\n"); }
@@ -2817,6 +2828,7 @@ static int run_for(char *line, char *cwd) {
         if (!*w) break;
         char *we = w; while (*we && *we != ' ') we++;
         char wsave = *we; *we = 0;
+        sh_unprot_buf(w);                                   /* a quoted word: restore its protected bytes before binding */
         vset(var, vi, w);                                   /* bind the loop variable */
         *we = wsave;
         int bi = 0; for (const char *b = body; *b && bi < 1023; b++) bodybuf[bi++] = *b; bodybuf[bi] = 0;
