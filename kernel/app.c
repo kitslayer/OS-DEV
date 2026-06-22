@@ -371,6 +371,17 @@ void app_request_kill(app_t *a) {
     }
 }
 
+/* Honor a pending WM kill from a NON-blocking per-frame syscall (pollkey /
+ * gfx_blit / sleep). A polling or graphics app never calls the blocking
+ * app_sys_read where the kill is otherwise observed, so without this F8 / the
+ * window [x] / the context-menu Close couldn't close it (it'd only exit on its
+ * own quit key). Exit cleanly — the WM then reaps it — exactly as app_sys_read
+ * does on a->kill. Called every frame, so the close lands within ~one frame. */
+void app_kill_check(void) {
+    struct app *a = cur();
+    if (a && a->kill) { a->exited = 1; task_exit(); }
+}
+
 /* WM polls this: returns 1 (and clears) if the app's grid changed since asked. */
 int app_dirty_clear(app_t *a) { int d = a->gdirty; a->gdirty = 0; return d; }
 
@@ -400,7 +411,7 @@ static int iq_get(struct app *a) {
 }
 
 /* Non-blocking: next key for the calling app, or -1 if none (for games). */
-int app_sys_pollkey(void) { return iq_get(cur()); }
+int app_sys_pollkey(void) { app_kill_check(); return iq_get(cur()); }
 
 /* Save/disable + restore interrupts, to make "check queue then block" atomic
  * against the window manager delivering a key (closes a lost-wakeup race). */
@@ -665,6 +676,7 @@ int app_gfx_init(int w, int h) {
  * into the canvas and paint it on screen. The destination is exactly
  * gfx_w*gfx_h*4 (kernel-allocated), so it can't be overrun. 0, or -1. */
 int app_gfx_blit(const uint32_t *pixels) {
+    app_kill_check();                       /* WM close-request: exit before painting the next frame */
     struct app *a = cur();
     if (!a || !a->gfx) return -1;
     if (!vmm_user_ok((uint64_t)pixels, (uint64_t)a->gfx_w * (uint64_t)a->gfx_h * 4)) return -1;

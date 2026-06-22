@@ -247,6 +247,7 @@ void syscall_dispatch(struct registers *r) {
         break;
     }
     case SYS_sleep:
+        app_kill_check();                  /* WM close-request: a paced game exits instead of sleeping on */
         __asm__ volatile("sti");           /* timer drives the wait */
         timer_wait(r->rdi / 10 + 1);
         break;
