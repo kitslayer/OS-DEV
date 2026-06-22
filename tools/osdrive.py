@@ -38,7 +38,7 @@ f9 Apps menu, f12 screenshot-to-disk.
 """
 import argparse, json, os, socket, subprocess, sys, tempfile, time, shutil
 
-SCREEN_W, SCREEN_H = 1024, 768          # the desktop's mode (boot console is 640x480)
+SCREEN_W, SCREEN_H = 1280, 960          # the desktop's mode (set by the Bochs VBE driver at boot)
 
 # Map a literal character to its HMP `sendkey` name (so `type` can send URLs,
 # paths, code, etc. — not just lowercase words). Returns None for unknown chars.

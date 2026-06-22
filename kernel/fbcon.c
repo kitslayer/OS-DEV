@@ -19,7 +19,14 @@ static uint32_t fg = 0xD0D0D0, bg = 0x0A0A18;
 void fbcon_set_colors(unsigned f, unsigned b) { fg = f; bg = b; }
 
 int fbcon_init(void) {
-    if (fb_init(1024, 768) != 0)
+    /* Ask the Bochs DISPI driver for a 32-bpp linear mode. 1280x960 is a 4:3
+     * step up from the old 1024x768 that QEMU's std-VGA supports (its 16 MB of
+     * VGA memory holds the 4.9 MB framebuffer with room to spare). Because this
+     * runs at boot — before desktop_run() reads fb_width()/fb_height() — the
+     * whole desktop comes up at the new resolution with no live re-layout.
+     * If DISPI is absent (a config without std-VGA), fb_init returns -1 and we
+     * fall back to leaving the boot/VGA mode untouched (no black screen). */
+    if (fb_init(1280, 960) != 0)
         return -1;
     cols = fb_width() / font_width;
     rows = fb_height() / font_height;

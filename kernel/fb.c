@@ -17,46 +17,39 @@
 #include "io.h"
 #include "string.h"
 #include "vfs.h"
-#include "png.h"      /* png_encode */
-#include "kheap.h"    /* kmalloc/kfree for the transient PNG buffers */
-
-#define VBE_INDEX  0x01CE
-#define VBE_DATA   0x01CF
-#define VBE_XRES   1
-#define VBE_YRES   2
-#define VBE_BPP    3
-#define VBE_ENABLE 4
-#define VBE_ENABLED      0x01
-#define VBE_LFB_ENABLED  0x40
+#include "png.h"          /* png_encode */
+#include "kheap.h"        /* kmalloc/kfree for the transient PNG buffers */
+#include "bochs_vbe.h"    /* the DISPI mode-set driver fb_init delegates to */
 
 static volatile uint32_t *lfb;
 static uint32_t *target;      /* if set, draw here instead of the live screen */
 static int fb_w, fb_h;
 
-static void vbe_write(uint16_t index, uint16_t value) {
-    outw(VBE_INDEX, index);
-    outw(VBE_DATA, value);
-}
-
-int fb_init(uint16_t width, uint16_t height) {
-    pci_device_t vga = pci_find(0x1234, 0x1111);   /* QEMU std VGA */
-    if (!vga.valid)
-        return -1;
-
-    vbe_write(VBE_ENABLE, 0);
-    vbe_write(VBE_XRES, width);
-    vbe_write(VBE_YRES, height);
-    vbe_write(VBE_BPP, 32);
-    vbe_write(VBE_ENABLE, VBE_ENABLED | VBE_LFB_ENABLED);
-
-    uint64_t base = pci_bar(&vga, 0);               /* BAR0 = linear framebuffer */
-    uint64_t bytes = (uint64_t)width * height * 4;
+/* Re-point the framebuffer at a linear-framebuffer base of w*h 32-bpp pixels:
+ * identity-map the LFB region (PAGE_SIZE at a time) and update the dims + LFB
+ * pointer. Called by bochs_vbe_set_mode() after it programs the DISPI mode and
+ * locates the BAR0 base. The pitch is implicit — every draw indexes the LFB as
+ * y*fb_w + x — so the caller must have programmed VIRT_WIDTH = w to match.
+ * Mapping is idempotent (a re-set to the same BAR just re-maps the same pages),
+ * and fb_w/fb_h are updated LAST so a concurrent reader never sees a new size
+ * against an unmapped page. */
+void fb_repoint(uint64_t base, int w, int h) {
+    uint64_t bytes = (uint64_t)w * (uint64_t)h * 4u;
     for (uint64_t off = 0; off < bytes; off += PAGE_SIZE)
         vmm_map(base + off, base + off, PTE_WRITABLE);
-    lfb = (volatile uint32_t *)(uintptr_t)base;
-    fb_w = width;
-    fb_h = height;
-    return 0;
+    lfb  = (volatile uint32_t *)(uintptr_t)base;
+    fb_w = w;
+    fb_h = h;
+}
+
+/* Set a 32-bpp linear video mode of width*height via the Bochs DISPI driver,
+ * which programs the mode, locates the LFB (the VGA's BAR0), maps it, and
+ * re-points us at it. Returns 0 on success, -1 if DISPI is unavailable (no
+ * std-VGA) — in which case the caller keeps whatever mode was already set. The
+ * dedicated driver (bochs_vbe.c) owns the register sequence + validation; this
+ * stays as the entry point the console (fbcon_init) calls. */
+int fb_init(uint16_t width, uint16_t height) {
+    return bochs_vbe_set_mode(width, height);
 }
 
 int fb_width(void)  { return fb_w; }

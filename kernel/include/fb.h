@@ -3,6 +3,11 @@
 #include <stdint.h>
 
 int      fb_init(uint16_t width, uint16_t height);   /* set the video mode; 0 ok */
+/* Re-point the framebuffer at a new linear-framebuffer base of w*h 32-bpp
+ * pixels (maps the region + updates dims/LFB pointer). The DISPI driver
+ * (bochs_vbe.c) calls this after a mode-set; pitch is implicit (w*4), so the
+ * caller must program the hardware VIRT_WIDTH = w to match. */
+void     fb_repoint(uint64_t base, int w, int h);
 int      fb_width(void);
 int      fb_height(void);
 int      fb_save_bmp(const char *name);   /* screenshot the live screen to a 24-bit BMP file; 0/-1 */
