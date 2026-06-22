@@ -1,5 +1,19 @@
 # What's next
 
+> **(M942) Browser — `<textarea>` (the README's named #1 frontier item).** A real multi-line form field in the
+> token-stream renderer. The parser captures `<textarea>`'s inner text as raw content (mirroring the
+> `<script>`/`<style>` path: a new `intextarea` raw-text mode + a `</textarea>` close that seeds the value and
+> suppresses the body from normal page flow) and registers its id; `emit_textarea` renders each line of the
+> stored value as a focusable field token (click to focus) with the caret `|` drawn at `field_cur` on its line,
+> and a clickable placeholder when empty. The value lives in the existing `<input>` store, so `.value` reads it
+> and a form submits `name=value` for free; typing reuses the field-input path, and `browser_key` now inserts a
+> real `\n` on Enter when the focused field is a textarea (vs submit/blur for one-line inputs). Strictly
+> additive — no `<textarea>` on a page → no new tokens → byte-identical render (golden home page + `browsertest`
+> unchanged). New `TAREA.HTM` demo. Verified in-guest: renders the seeded text on two lines (no leaked copy);
+> click-focus + type + Enter builds a third line with the caret tracking; and `ta.value.length` → `23` /
+> `ta.value.split('\n')[0]` → `Hello there` (so `.value` carries the real newline). `make check` green
+> (36 suites). (Remaining form control: `<select>`/`<option>`, which needs a popup UI.)
+
 > **(M941) Browser — attribute-reflecting DOM properties (`element.className`/`href`/`src`/`name`/`title`/
 > `alt`/`placeholder`/`type`).** Continuing the "more DOM APIs" frontier: these common properties returned
 > `undefined` on live elements, so `link.href`, `img.src`, `el.className`, `input.placeholder` etc. didn't work

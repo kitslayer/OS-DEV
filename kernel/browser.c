@@ -152,6 +152,7 @@ struct browser {
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border */
     char    in_id[8][32]; char in_val[8][96]; int in_n;         /* <input> field values, by id (the typed/scripted text) */
     char    in_name[8][32];                                     /* each field's name= attr (parallel to in_id), for GET submit */
+    char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
     char    focus_id[32];                                       /* id of the focused input field (empty = none) */
     int     field_cur;                                          /* caret index within the focused field's value */
     char    form_action[URL_MAX];                               /* current <form action>; empty = submit to the current page */
@@ -1179,11 +1180,52 @@ static int render_table(browser_t *b, const char *s, int len) {
     return (tend < e) ? (int)(tend - s) : len;
 }
 
+/* True if `id` belongs to a <textarea> (vs a one-line <input>): controls whether
+ * Enter inserts a newline (textarea) or submits/blurs (input). */
+static int is_textarea(browser_t *b, const char *id) {
+    for (int i = 0; i < b->ta_n; i++) if (streqs(b->ta_ids[i], id)) return 1;
+    return 0;
+}
+/* Render a <textarea> as a focusable, multi-line field: each line of the stored
+ * value is a clickable field token (click to focus, then type — Enter adds a
+ * line), with the caret '|' drawn at field_cur on its line. Empty -> a clickable
+ * placeholder box. The value is the input store (in_get/in_set), so .value reads
+ * it and the form submits name=value like any field. */
+static void emit_textarea(browser_t *b, const char *id) {
+    const char *val = in_get(b, id);
+    int focused = streqs(b->focus_id, id);
+    int vlen = val ? (int)strlen(val) : 0;
+    int fc = b->field_cur; if (fc < 0) fc = 0; if (fc > vlen) fc = vlen;
+    int lk = add_input_link(b, id);
+    emit_break(b, TK_PARA);
+    if (vlen == 0) {                                     /* empty: a clickable placeholder */
+        emit_literal_link(b, focused ? "[|         ]" : "[ ......... ]", lk);
+        emit_break(b, TK_PARA);
+        return;
+    }
+    int ls = 0;
+    for (;;) {
+        int le = ls; while (le < vlen && val[le] != '\n') le++;   /* [ls,le) = this line (le at '\n' or end) */
+        char s[128]; int p = 0;
+        for (int k = ls; k <= le && p < 124; k++) {
+            if (focused && k == fc) s[p++] = '|';        /* caret on this line */
+            if (k < le) s[p++] = val[k];
+        }
+        s[p] = 0;
+        emit_literal_link(b, s, lk);
+        if (le >= vlen) break;                           /* that was the last line */
+        ls = le + 1;
+        emit_break(b, TK_BREAK);                         /* next line of the textarea */
+    }
+    emit_break(b, TK_PARA);
+}
+
 static void parse_html(browser_t *b, const char *body, int len) {
     drop_image(b);                                       /* a page replaces any prior image */
     drop_image_slots(b);                                 /* and its inline images */
     b->textlen = b->ntok = b->hreflen = b->nlink = 0;
     b->scriptlen = 0;                                    /* recaptured fresh each parse */
+    b->ta_n = 0;                                         /* <textarea> id set rebuilt fresh each parse (values persist in the input store) */
     b->oc_depth = 0;                                     /* no inline-onclick scope open yet */
     b->sc_sp = 0;                                        /* no style scopes open yet */
     b->n_hidden = 0;                                     /* nothing hidden yet */
@@ -1213,6 +1255,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     int inscript = 0, instyle = 0, intitle = 0, inhead = 0, inpre = 0, insvg = 0, wstart = -1;
     int sc_start = -1;                                   /* offset where current <script> body began */
     int st_start = -1;                                   /* offset where current <style> body began */
+    int intextarea = 0, ta_start = -1; char ta_id[32] = {0}, ta_name[32] = {0};   /* <textarea>: raw-text capture -> field value */
     int det_n = 0, det_depth = 0, det_hide = 0, in_summary = 0, det_cur = 0;   /* <details>: index / nesting / suppress-depth / in-<summary> / current idx */
     int sum_link = NO_LINK, sum_style = STY_NORMAL;      /* saved link/style around a <summary> */
 
@@ -1223,8 +1266,8 @@ static void parse_html(browser_t *b, const char *body, int len) {
              * close tag (e.g. `i < 5`, or `<p>` inside a document.write string) must
              * be treated as content, NOT parsed as a tag — otherwise the (quote-aware)
              * tag scan can run past </script> and the block is never closed/captured. */
-            if (inscript || instyle) {
-                const char *ct = inscript ? "/script" : "/style";
+            if (inscript || instyle || intextarea) {
+                const char *ct = inscript ? "/script" : instyle ? "/style" : "/textarea";
                 int match = (i+1 < len && body[i+1] == '/');
                 if (match) for (int z = 0; ct[z]; z++) { if (i+1+z >= len || lc(body[i+1+z]) != ct[z]) { match = 0; break; } }
                 if (!match) continue;                 /* '<' is script/style content; skip it */
@@ -1266,6 +1309,28 @@ static void parse_html(browser_t *b, const char *body, int len) {
                 else { if (instyle && st_start >= 0 && i > st_start) capture_css(b, body + st_start, i - st_start);
                        instyle = 0; st_start = -1; }
             }
+            else if (tageq(tag, "textarea")) {                   /* multi-line field: inner text is the value */
+                if (!closing) {
+                    intextarea = 1; ta_start = j + 1;            /* body starts after '>' */
+                    ta_id[0] = 0; ta_name[0] = 0;
+                    const char *av; int al;
+                    if (find_attr(body + astart, j - astart, "id",   &av, &al) && al > 0) { int n = al > 31 ? 31 : al; for (int k=0;k<n;k++){ ta_id[k]=av[k]; }   ta_id[n]=0; }
+                    if (find_attr(body + astart, j - astart, "name", &av, &al) && al > 0) { int n = al > 31 ? 31 : al; for (int k=0;k<n;k++){ ta_name[k]=av[k]; } ta_name[n]=0; }
+                    if (ta_id[0] && b->ta_n < 8) { int k=0; while (ta_id[k] && k<31) { b->ta_ids[b->ta_n][k]=ta_id[k]; k++; } b->ta_ids[b->ta_n][k]=0; b->ta_n++; }
+                } else {
+                    if (intextarea && ta_start >= 0 && ta_id[0]) {
+                        if (!in_get(b, ta_id)) {                 /* seed from the inner text (only if not already typed/scripted) */
+                            int ss = ta_start; if (ss < i && body[ss] == '\n') ss++;   /* HTML strips a leading newline */
+                            char vb[96]; int n = i - ss; if (n > 95) n = 95; if (n < 0) n = 0;
+                            for (int k = 0; k < n; k++){ vb[k] = body[ss + k]; } vb[n] = 0;
+                            in_set(b, ta_id, vb);
+                        }
+                        if (ta_name[0]) in_name_set(b, ta_id, ta_name);   /* submit name=value */
+                        emit_textarea(b, ta_id);
+                    }
+                    intextarea = 0; ta_start = -1; ta_id[0] = 0;
+                }
+            }
             else if (tageq(tag, "svg")) insvg = !closing;        /* inline SVG: skip its guts */
             else if (tageq(tag, "title") && !insvg) intitle = !closing;  /* (svg <title> mustn't hijack) */
             else if (tageq(tag, "head")) inhead = !closing;
@@ -1305,7 +1370,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
             i = j;                                        /* loop ++ steps past '>' */
             continue;
         }
-        if (inscript || instyle || insvg) continue;  /* never render script/style/svg */
+        if (inscript || instyle || insvg || intextarea) continue;  /* never render script/style/svg/textarea body (emit_textarea handles it) */
         if (det_hide && !in_summary) continue;        /* inside a collapsed <details>, outside its <summary> */
         if (b->n_hidden > 0) continue;                /* inside a display:none element (tags still tracked above) */
 
@@ -3834,6 +3899,18 @@ int browser_sel_commit(browser_t *b, char *out, int max) {
 void browser_key(browser_t *b, int c) {
     if (b->help_on) { b->help_on = 0; return; }         /* any key dismisses the help overlay */
     if (b->focus_id[0]) {                               /* typing into a focused <input> field */
+        if ((c == '\n' || c == '\r') && is_textarea(b, b->focus_id)) {   /* textarea: Enter inserts a newline (not submit) */
+            const char *cur = in_get(b, b->focus_id); char t[96]; int n=0;
+            if (cur) { while (cur[n] && n<94) { t[n]=cur[n]; n++; } } t[n]=0;
+            if (b->field_cur > n) b->field_cur = n;
+            if (n < 94) {
+                for (int i = n; i > b->field_cur; i--) t[i] = t[i-1];
+                t[b->field_cur] = '\n'; t[n+1] = 0; b->field_cur++;
+                in_set(b, b->focus_id, t);
+                if (!fire_handler(b, b->focus_id, "oninput")) parse_html(b, b->raw + b->bodyoff, b->bodylen);
+            }
+            return;
+        }
         if (c == '\n' || c == '\r' || c == 27) {
             char fid[32]; { int k=0; while (b->focus_id[k] && k<31) { fid[k]=b->focus_id[k]; k++; } fid[k]=0; }   /* the field losing focus */
             b->focus_id[0] = 0;                          /* leave typing mode */
