@@ -225,6 +225,24 @@ $(BUILD)/missile.elf: user/missile.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.
 	$(LD) -T user/user.ld -o $@ $(BUILD)/missile_app.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (Missile Command)"
 
+# --- calc (scientific calculator: now floating point, so SSE like the games) --
+# The generic user rule uses -mgeneral-regs-only (no float); the float evaluator
+# (user/calceval.h + user/dmath.h) needs SSE, so give calc its own rule. Keep
+# -fwrapv + -Wall so the OS-authored evaluator (calceval.h/calc.c) stays under
+# full warnings. The two -Wno- flags target ONLY user/dmath.h, which is copied
+# verbatim from kernel/js.c (already-tested math): -Wmisleading-indentation
+# fires on its one-line i64_to_str (js.c is itself non-clean under -Wextra), and
+# -Wstringop-overflow is a known GCC false positive on num_to_str's digit loop
+# (provably tn<=15<=sizeof tmp) seen only after inlining. calceval.h/calc.c are
+# warning-clean on their own. Object name (user_calc.o) matches the build.
+$(BUILD)/calc.elf: user/calc.c user/calceval.h user/dmath.h $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+	@mkdir -p $(BUILD)
+	$(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -fwrapv -Wall \
+	      -Wno-misleading-indentation -Wno-stringop-overflow \
+	      -msse2 -mfpmath=sse -Ikernel/include -c user/calc.c -o $(BUILD)/user_calc.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/user_calc.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (scientific calculator)"
+
 # the embedded blob depends on every program ELF
 $(BUILD)/kernel/asm/user_blob.o: $(USER_ELFS)
 

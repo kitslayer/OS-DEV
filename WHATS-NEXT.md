@@ -1,5 +1,18 @@
 # What's next
 
+> **(M951) Calc — floating-point scientific calculator (was integer-only).** The calc app evaluated only
+> integers; now it's a real scientific calculator: IEEE-754 doubles, decimal/scientific literals (`3.14`, `.5`,
+> `1e3`), functions `sqrt sin cos tan asin acos atan ln log exp abs floor ceil round`, constants `pi`/`e`, `^`
+> power, real `/` and `%`, with the bitwise ops `& | << >> ~` still working (operands truncate to 64-bit int,
+> JS-ToInt32-style). The double math is **copied verbatim** from the kernel JS engine's tested implementations
+> (new `user/dmath.h`: Newton `sqrt`, range-reduced Taylor trig, `ln`/`exp`/`pow`, and the 15-significant-digit
+> `dnum_to_str` formatter — so `sin(pi/2)` prints `1`, `log(1000)` prints `3`, not noisy tails). Userspace FP is
+> enabled via a dedicated SSE Makefile rule for calc (mirroring DOOM/raycast; the scheduler already saves FP per
+> task). Never traps on bad input: `1/0`→Infinity, `0/0`/`sqrt(-1)`→NaN (structural errors only set the error
+> flag). Built by an implementing subagent, then reviewed + verified in-guest by me (`sqrt(2)`, `sin(pi/2)`,
+> `2^10`, `log(1000)`, `7/2`→3.5, `5&3`→1 all correct). `calctest` (host regression + 400k ASan/UBSan fuzz)
+> updated for double semantics; `make check` green (37 suites).
+
 > **(M950) Shell — quoting complete: per-command unprotect sweep.** M949 wired the sentinel machinery + `echo`;
 > this sweeps ~50 builtins (via a subagent, reviewed) to `sh_unprot_buf()` each argument token once it's split
 > out — `cat`/`grep`/`cp`/`mv`/`head`/`tail`/`wc`/`hexdump`/`mkdir`/`rm`/`touch`/`sha*`/`base64`/`cmp`/`paste`/
