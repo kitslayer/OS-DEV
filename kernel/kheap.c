@@ -166,5 +166,20 @@ void kfree(void *ptr) {
         b->size += sizeof(block_t) + b->next->size;
         b->next = b->next->next;
     }
+
+    /* Coalesce BACKWARD too: a free block sitting physically immediately before b
+     * should absorb it. The list isn't address-ordered (kfree can splice in any
+     * order), so scan for the physical predecessor `p` and splice b out of the
+     * list. Without this, freeing N while N-1 is already free left two adjacent
+     * free blocks unmerged -> the heap fragments/grows over a long run even with
+     * free space available. (b==head has no predecessor, so it's never matched.) */
+    for (block_t *p = head; p; p = p->next) {
+        if (p->free && (uint8_t *)p + sizeof(block_t) + p->size == (uint8_t *)b) {
+            p->size += sizeof(block_t) + b->size;            /* p absorbs b's header + payload */
+            if (p->next == b) p->next = b->next;             /* unlink b (common case: p links to b) */
+            else { block_t *lp = head; while (lp && lp->next != b) lp = lp->next; if (lp) lp->next = b->next; }
+            break;                                           /* at most one physical predecessor */
+        }
+    }
     irq_restore(f);
 }

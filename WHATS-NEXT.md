@@ -1,5 +1,19 @@
 # What's next
 
+> **(M973) Heap — backward coalescing (completes M970 review #3).** `kfree` only merged *forward* (a freed block
+> with following free blocks), so freeing block N while N-1 was already free left two adjacent free blocks
+> unmerged — over a long run the heap fragments and `grow_heap`s even though contiguous free space exists. Added a
+> backward merge: after the forward pass, scan for the free block physically immediately before the freed one
+> (`p + sizeof + p->size == b`) and have it absorb `b`, splicing `b` out of the list. The scan is needed because
+> the free list isn't address-ordered (kfree splices in any order); `b == head` has no predecessor so it's never
+> matched. Verified with a new `tests/kheap` case (free X, then free its physical successor Y → Y merges back into
+> X, X's block grows — the forward-only path would have left them split) **plus** the 400k-op torture's tiling /
+> no-overlap invariants (a wrong merge would mis-tile or overlap → caught) **plus** boottest (the backward-coalesce
+> runs on every `kfree` at runtime), all ASan/UBSan clean; kheap.c warnings 0. **The heap review's #3 is now done**
+> (double-free magic M972 + backward coalescing M973). Remaining heap/scheduler items still deferred: the dedicated
+> idle task (#1, scheduler-structural) and `grow_heap`'s analogous list-tail-vs-physical-tail merge (#5, now largely
+> mitigated since the next adjacent `kfree` backward-merges it). See [[os-dev-project]].
+
 > **(M972) Heap — double-free / bad-pointer detection via a header magic (M970 review #3a).** `kfree` did
 > `b->free=1` with no validation, so a double-free wrote `free=1` into the middle of a live allocation (or linked
 > garbage into the list) and silently corrupted the heap; an interior/non-heap pointer did the same. The safe fix

@@ -74,6 +74,25 @@ int main(void) {
     kheap_base = (uint64_t)arena;
     kheap_init();
 
+    /* backward coalescing: freeing a block whose physical predecessor is already
+     * free must merge them (M972), else the heap fragments over a long run.
+     * (a pristine heap -> these three allocations are physically contiguous.) */
+    {
+        uint8_t *x = kmalloc(200), *y = kmalloc(200), *z = kmalloc(200);
+        CHECK(x && y && z, "bc: alloc");
+        if (x && y && z) {
+            block_t *bx = (block_t *)(x - sizeof(block_t));
+            uint64_t xsz = bx->size;
+            kfree(x);                  /* x becomes free */
+            kfree(y);                  /* y's physical predecessor x is free -> y must merge BACK into x */
+            CHECK(bx->free, "bc: merged block should be free");
+            CHECK(bx->size > xsz, "bc: y did not backward-merge into x (forward-only coalescing would leave them split)");
+            kfree(z);
+        }
+        check_invariants();
+        printf("backward-coalesce: a free predecessor absorbs a freed block\n");
+    }
+
     /* kzalloc returns zeroed memory */
     for (int t = 0; t < 64; t++) {
         size_t n = (size_t)(t * 37 + 1);
