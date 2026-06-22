@@ -62,7 +62,17 @@ int fb_init(uint16_t width, uint16_t height) {
 int fb_width(void)  { return fb_w; }
 int fb_height(void) { return fb_h; }
 
+/* Optional clip rectangle [x0,x1) x [y0,y1) in screen pixels, enforced by every
+ * draw primitive in addition to the screen bounds. Defaults to "everything"
+ * (0..INT_MAX) so it's a NO-OP until set — existing draws stay byte-identical.
+ * The WM narrows it to a window's body around draw_content so a window's content
+ * can never bleed past its edge onto a neighbour / the taskbar. */
+static int clip_x0 = 0, clip_y0 = 0, clip_x1 = 0x7fffffff, clip_y1 = 0x7fffffff;
+void fb_set_clip(int x0, int y0, int x1, int y1) { clip_x0 = x0; clip_y0 = y0; clip_x1 = x1; clip_y1 = y1; }
+void fb_reset_clip(void) { clip_x0 = 0; clip_y0 = 0; clip_x1 = 0x7fffffff; clip_y1 = 0x7fffffff; }
+
 void fb_pixel(int x, int y, uint32_t color) {
+    if (x < clip_x0 || x >= clip_x1 || y < clip_y0 || y >= clip_y1) return;   /* clip rect (no-op at the default full range) */
     if ((unsigned)x < (unsigned)fb_w && (unsigned)y < (unsigned)fb_h) {
         if (target) target[y * fb_w + x] = color;
         else        lfb[y * fb_w + x]    = color;
@@ -191,6 +201,10 @@ void fb_fill_rect(int x, int y, int w, int h, uint32_t color) {
     if (y < 0) { h += y; y = 0; }
     if (x + w > fb_w) w = fb_w - x;
     if (y + h > fb_h) h = fb_h - y;
+    if (x < clip_x0) { w -= (clip_x0 - x); x = clip_x0; }     /* intersect the clip rect (no-op at the default full range) */
+    if (y < clip_y0) { h -= (clip_y0 - y); y = clip_y0; }
+    if (x + w > clip_x1) w = clip_x1 - x;
+    if (y + h > clip_y1) h = clip_y1 - y;
     if (w <= 0 || h <= 0) return;
     uint32_t *dst = target ? target : (uint32_t *)lfb;
     for (int j = 0; j < h; j++) {
@@ -205,7 +219,8 @@ void fb_glyph(int x, int y, char c, uint32_t fg, uint32_t bg) {
     const unsigned char *g = font_glyphs[uc];
     /* fast path: the whole glyph is on-screen → write directly, no per-pixel
      * bounds test or target branch. This is the hot path for window text. */
-    if (x >= 0 && y >= 0 && x + font_width <= fb_w && y + font_height <= fb_h) {
+    if (x >= clip_x0 && y >= clip_y0 && x + font_width <= clip_x1 && y + font_height <= clip_y1 &&
+        x >= 0 && y >= 0 && x + font_width <= fb_w && y + font_height <= fb_h) {
         uint32_t *dst = target ? target : (uint32_t *)lfb;
         for (int row = 0; row < font_height; row++) {
             uint32_t *p = dst + (size_t)(y + row) * fb_w + x;
@@ -226,7 +241,8 @@ void fb_glyph_fg(int x, int y, char c, uint32_t fg) {
     unsigned char uc = (unsigned char)c;
     if (uc >= 128) uc = '?';
     const unsigned char *g = font_glyphs[uc];
-    if (x >= 0 && y >= 0 && x + font_width <= fb_w && y + font_height <= fb_h) {
+    if (x >= clip_x0 && y >= clip_y0 && x + font_width <= clip_x1 && y + font_height <= clip_y1 &&
+        x >= 0 && y >= 0 && x + font_width <= fb_w && y + font_height <= fb_h) {
         uint32_t *dst = target ? target : (uint32_t *)lfb;
         for (int row = 0; row < font_height; row++) {
             uint32_t *p = dst + (size_t)(y + row) * fb_w + x;

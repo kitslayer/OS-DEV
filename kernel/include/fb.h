@@ -12,6 +12,8 @@ void     fb_clear(uint32_t color);
 void     fb_pixel(int x, int y, uint32_t color);
 uint32_t fb_get_pixel(int x, int y);
 void     fb_fill_rect(int x, int y, int w, int h, uint32_t color);
+void     fb_set_clip(int x0, int y0, int x1, int y1);   /* bound draws to [x0,x1)x[y0,y1) screen px (default: whole screen) */
+void     fb_reset_clip(void);
 
 /* Draw character `c` (8x16 font) at pixel (x,y): set bits in fg, rest in bg. */
 void     fb_glyph(int x, int y, char c, uint32_t fg, uint32_t bg);

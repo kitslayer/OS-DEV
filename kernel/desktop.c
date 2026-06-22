@@ -366,7 +366,9 @@ static void draw_window(const window_t *w, int focused) {
 
     /* body */
     fb_fill_rect(x, y, ww, hh, w->body);
+    fb_set_clip(x, y, x + ww, y + hh);    /* bound this window's content to its rect — a long line / future layout can't bleed onto a neighbour or the taskbar (the per-kind min-sizes above are belt-and-braces) */
     draw_content(w, focused);
+    fb_reset_clip();
 
     /* gradient title bar (brighter when focused) with a top sheen line */
     uint32_t t0 = focused ? 0x5B9BF0 : 0x646B79;

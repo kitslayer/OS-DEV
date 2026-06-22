@@ -1,5 +1,19 @@
 # What's next
 
+> **(M980) fb/WM — general content clip-rect (the M968 review's recommended general fix, done safely).** Added an
+> optional framebuffer clip rectangle (`fb_set_clip`/`fb_reset_clip`) that `fb_pixel`/`fb_fill_rect`/`fb_glyph`/
+> `fb_glyph_fg` all honor in addition to the screen bounds; it defaults to the full screen, so it's a **no-op until
+> set** and existing draws stay byte-identical. `render_scene` narrows it to each window's rect around the
+> `draw_content` call, so a window's content (a long line, a future layout, an oversized panel) can't bleed past its
+> edge onto a neighbour or the taskbar. **The M975/M976 per-kind min-sizes are RETAINED as belt-and-braces:** a
+> first attempt that *relaxed* the mins and relied on the shrink-time clip for resizable info windows couldn't be
+> cleanly verified at this session depth (the corner-drag resize test mis-fired), so I reverted that and kept this
+> safe additive version — the clip future-proofs content-bounding while the mins still guarantee the fixed panels
+> can't be shrunk into a bleed. Verified: gfxtest + boottest + browsertest, plus in-guest the content-heavy Monitor
+> renders fully with the clip active (content within the body draws normally; additive default-no-op confirmed).
+> fb.c/desktop.c warnings 0; all 37 `make check` suites pass. (The resizable-info-window UX — relax the mins once
+> the shrink-clip is cleanly verified — is a small fresh-session follow-up.) See [[browser-render-engine]].
+
 > **(M979) Tests — regression-lock the FAT32 write-over-directory data-loss fix (M963) in fstest.** That fix was
 > verified in-guest but not in the host suite, even though fstest `#include`s fat32.c and can drive it directly.
 > Added a Phase 4b: `mkdir WDIR`, then `writefile("WDIR", …)` must return -1 (refused), `WDIR` must still read as a
