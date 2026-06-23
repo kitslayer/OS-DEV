@@ -869,6 +869,90 @@ int http_get(const char *host, const char *path, char *out, int max) {
     return total;
 }
 
+/* ===================================================================== *
+ *  /net/tcp — Plan 9 style "sockets as files" (M1110). No fd table: the
+ *  VFS routes /net/tcp/<...> here. Read /net/tcp/clone -> a connection slot
+ *  index; write "connect host!port" to /net/tcp/<n>/ctl; then read/write
+ *  /net/tcp/<n>/data. Wraps the existing tcp_connect/tcp_write/tcp_read.
+ * ===================================================================== */
+#define NETCONN_N 4
+static struct { int used, connected; tcp_conn c; } nconn[NETCONN_N];
+
+static int nfs_streq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
+/* parse a leading "<digits>/" off *sub, returning the index and advancing *sub past it; -1 if malformed */
+static int nfs_idx(const char **sub) {
+    const char *s = *sub; int n = 0, any = 0;
+    while (*s >= '0' && *s <= '9') { n = n * 10 + (*s - '0'); s++; any = 1; }
+    if (!any || *s != '/') return -1;
+    *sub = s + 1;
+    return n;
+}
+
+long netfs_read(const char *sub, void *buf, unsigned long max) {
+    if (nfs_streq(sub, "clone")) {                       /* allocate a connection slot */
+        for (int i = 0; i < NETCONN_N; i++) if (!nconn[i].used) {
+            nconn[i].used = 1; nconn[i].connected = 0;
+            char *b = (char *)buf; int p = 0;
+            if (i >= 10 && p < (int)max) b[p++] = (char)('0' + i / 10);
+            if (p < (int)max) b[p++] = (char)('0' + i % 10);
+            if (p < (int)max) b[p++] = '\n';
+            return p;
+        }
+        return -1;                                       /* all slots in use */
+    }
+    int idx = nfs_idx(&sub);
+    if (idx < 0 || idx >= NETCONN_N || !nconn[idx].used) return -1;
+    if (nfs_streq(sub, "data")) {
+        if (!nconn[idx].connected) return -1;
+        __asm__ volatile("sti");                         /* TCP read needs the timer for its timeout */
+        int n = tcp_read(&nconn[idx].c, buf, (int)max, 200);   /* up to ~2 s for data */
+        return n < 0 ? 0 : n;                            /* closed -> EOF (0) */
+    }
+    return -1;
+}
+
+long netfs_write(const char *sub, const void *buf, unsigned long len) {
+    int idx = nfs_idx(&sub);
+    if (idx < 0 || idx >= NETCONN_N || !nconn[idx].used) return -1;
+
+    if (nfs_streq(sub, "ctl")) {
+        char cmd[128]; unsigned long n = len < 127 ? len : 127;
+        for (unsigned long i = 0; i < n; i++) cmd[i] = ((const char *)buf)[i];
+        cmd[n] = 0;
+        while (n && (cmd[n-1] == '\n' || cmd[n-1] == '\r' || cmd[n-1] == ' ')) cmd[--n] = 0;
+        if (cmd[0]=='c'&&cmd[1]=='l'&&cmd[2]=='o') {     /* "close" */
+            if (nconn[idx].connected) { __asm__ volatile("sti"); tcp_close(&nconn[idx].c); }
+            nconn[idx].used = 0; nconn[idx].connected = 0;
+            return (long)len;
+        }
+        if (cmd[0]=='c'&&cmd[1]=='o'&&cmd[2]=='n') {     /* "connect host!port" */
+            char *h = cmd; while (*h && *h != ' ') h++; while (*h == ' ') h++;   /* skip "connect " */
+            char *bang = h; while (*bang && *bang != '!' && *bang != ':') bang++;   /* host!port or host:port */
+            if (*bang != '!' && *bang != ':') return -1;
+            *bang = 0;
+            uint16_t port = 0; for (char *p = bang + 1; *p >= '0' && *p <= '9'; p++) port = (uint16_t)(port * 10 + (*p - '0'));
+            if (!port) return -1;
+            uint8_t ip[4];
+            if (parse_ipv4(h, ip) != 0) {                /* a hostname -> resolve it */
+                __asm__ volatile("sti");
+                if (dns_resolve(h, ip) != 0) return -1;
+            }
+            __asm__ volatile("sti");                     /* the handshake needs the timer */
+            if (tcp_connect(&nconn[idx].c, ip, port) != 0) return -1;
+            nconn[idx].connected = 1;
+            return (long)len;
+        }
+        return -1;
+    }
+    if (nfs_streq(sub, "data")) {
+        if (!nconn[idx].connected) return -1;
+        __asm__ volatile("sti");
+        int w = tcp_write(&nconn[idx].c, (const uint8_t *)buf, (int)len);
+        return w < 0 ? -1 : w;
+    }
+    return -1;
+}
+
 /* HTTP POST over plain TCP (M702). Sends the headers (with Content-Type + Content-Length)
  * then the body as a second write — so an arbitrary body size isn't bounded by the small
  * request buffer. Returns the raw response length (headers+body), or -1 on failure. */

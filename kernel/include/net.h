@@ -39,3 +39,7 @@ int net_proc(char *buf, int max);   /* /proc/net: interface + ARP/DNS caches as 
 int net_dhcp(void);                 /* DHCP DORA handshake: lease IP/gateway/DNS from the server; 0/-1 */
 long net_tftp_get(const char *server, const char *filename, void *out, uint32_t max);  /* TFTP read; bytes/-1 */
 int  net_sntp(void);                /* SNTP: set the RTC from pool.ntp.org; 0/-1 */
+/* /net/tcp sockets-as-files (M1110): `sub` is the path after "/net/tcp/" —
+ * "clone", "<n>/ctl", or "<n>/data". Routed from vfs.c. */
+long netfs_read(const char *sub, void *buf, unsigned long max);
+long netfs_write(const char *sub, const void *buf, unsigned long len);
