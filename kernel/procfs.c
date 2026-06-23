@@ -183,8 +183,13 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
     uint64_t up = timer_ms(); if (up == 0) up = 1;
     uint64_t idle = task_idle_ms(); if (idle > up) idle = up;
     static const char *st[5] = { "ready", "run  ", "block", "dead ", "stop " };
+    uint64_t memt = pmm_total_bytes() / (1024 * 1024), memf = pmm_free_bytes() / (1024 * 1024);
     int p = sapp(b, 0, max, "uptime_ms ");  p = sdec(b, p, max, up);
     p = sapp(b, p, max, "  idle ");         p = sdec(b, p, max, (idle * 100) / up); p = sapp(b, p, max, "%\n");
+    p = sapp(b, p, max, "mem ");            p = sdec(b, p, max, memt - memf);
+    p = sapp(b, p, max, "/");               p = sdec(b, p, max, memt);
+    p = sapp(b, p, max, " MiB used  tasks "); p = sdec(b, p, max, (uint64_t)task_count());
+    p = sapp(b, p, max, "\n");
     p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  SWITCHES  NAME\n");
     for (int i = 0; i < cnt; i++) {
         if (ti[i].state == 3) continue;             /* skip dead */
