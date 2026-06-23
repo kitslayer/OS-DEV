@@ -250,7 +250,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_STDIO;
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
-    case SYS_sha256: case SYS_sha512: case SYS_cas_fetch:
+    case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
@@ -300,7 +300,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_sntp]="sntp",
-        [SYS_swapout]="swapout",
+        [SYS_swapout]="swapout",[SYS_losetup]="losetup",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -776,6 +776,17 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
         r->rax = (uint64_t)(int64_t)app_swap_out(r->rdi, r->rsi);
         break;
+    case SYS_losetup: {                    /* (path) -> mount a FS image file as a loop device */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        uint64_t cap = 4u * 1024 * 1024;   /* image size limit */
+        uint8_t *img = kmalloc(cap);
+        if (!img) { r->rax = (uint64_t)-1; break; }
+        long n = vfs_read((const char *)r->rdi, img, cap);
+        int idx = (n > 1024) ? blockdev_losetup(img, (uint64_t)n) : -1;
+        if (idx < 0) kfree(img);           /* not a recognised FS -> losetup kept nothing */
+        r->rax = (uint64_t)(int64_t)idx;
+        break;
+    }
     case SYS_ringbuf:                      /* (len): a magic mirrored ring buffer; base VA or 0 */
         r->rax = app_ringbuf(r->rdi);
         break;

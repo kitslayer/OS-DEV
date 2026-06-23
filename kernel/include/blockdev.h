@@ -105,3 +105,7 @@ int  blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max
 long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max);   /* read file at path */
 int  blockdev_mount_isdir(int i, const char *path);   /* is path a directory on mount i? */
 int  blockdev_mounts_format(char *out, int max);  /* list the mounts as text (the `mount` command) */
+/* losetup (M1107): register a loop mount backed by the RAM image `data` (len
+ * bytes; ownership transferred). Detects FAT32/ext2 and mounts it as the next
+ * /diskN. Returns the mount index, or -1. */
+int  blockdev_losetup(uint8_t *data, uint64_t len);

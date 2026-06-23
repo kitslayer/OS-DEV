@@ -28,6 +28,7 @@ long sys_madvise(void *addr, unsigned long len, int advice);
 long sys_alarm(unsigned long ticks);
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);
+long sys_losetup(const char *path);
 long sys_apps(void *buf, unsigned long len);
 long sys_resolve(const char *host, void *buf, unsigned long len);
 long sys_http(const char *host, const char *path, void *buf, unsigned long max);

@@ -425,9 +425,27 @@ static int collect_fat_starts(int i, uint64_t *starts, int max) {
  *     through bd_blk_read + the device-agnostic fatvol_list/fatvol_read. --- */
 #define FS_FAT  0
 #define FS_EXT2 1
-struct bd_mount { char name[8]; int dev; uint64_t start; int fstype; };
+struct bd_mount {
+    char name[8]; int dev; uint64_t start; int fstype;
+    int is_loop; uint8_t *loopbuf; uint64_t looplen;   /* loop device: a file image held in RAM (M1107) */
+};
 static struct bd_mount g_mount[8];
 static int g_nmount, g_mount_scanned;
+
+/* A blk_read_fn for a loop mount: serve 512-byte sectors from its in-RAM image.
+ * ctx is the mount index (so we can reach g_mount[idx].loopbuf). */
+static int loop_blk_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
+    int idx = (int)(intptr_t)ctx;
+    /* bound by the array, not g_nmount: during losetup the slot is set up
+     * (is_loop + loopbuf) and probed BEFORE g_nmount is incremented. */
+    if (idx < 0 || idx >= 8 || !g_mount[idx].is_loop || !g_mount[idx].loopbuf) return -1;
+    uint64_t off = lba * SECSZ, n = (uint64_t)count * SECSZ;
+    if (off + n > g_mount[idx].looplen) return -1;          /* past the image */
+    const uint8_t *src = g_mount[idx].loopbuf + off;
+    uint8_t *dst = (uint8_t *)buf;
+    for (uint64_t i = 0; i < n; i++) dst[i] = src[i];
+    return 0;
+}
 
 static void blockdev_mount_scan(void) {
     if (g_mount_scanned) return;
@@ -479,12 +497,17 @@ int blockdev_mount_index(const char *name) {     /* "disk2" -> index, else -1 */
 
 /* List the directory at `subpath` (relative to the volume root, "" = root) of
  * mount `i`. Subdirectory-aware (M1070). */
+/* The read fn + ctx for mount `i`: a loop device reads from RAM (ctx = the mount
+ * index), a hardware mount via the blockdev layer (ctx = the device index). */
+static blk_read_fn mount_rfn(int i) { return g_mount[i].is_loop ? loop_blk_read : bd_blk_read; }
+static void       *mount_ctx(int i) { return (void *)(intptr_t)(g_mount[i].is_loop ? i : g_mount[i].dev); }
+
 int blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return 0;
-    void *c = (void *)(intptr_t)g_mount[i].dev; uint64_t s = g_mount[i].start;
-    return g_mount[i].fstype == FS_EXT2 ? ext2_list_path(bd_blk_read, c, s, subpath ? subpath : "", out, max)
-                                        : fatvol_list_path(bd_blk_read, c, s, subpath ? subpath : "", out, max);
+    blk_read_fn r = mount_rfn(i); void *c = mount_ctx(i); uint64_t s = g_mount[i].start;
+    return g_mount[i].fstype == FS_EXT2 ? ext2_list_path(r, c, s, subpath ? subpath : "", out, max)
+                                        : fatvol_list_path(r, c, s, subpath ? subpath : "", out, max);
 }
 
 /* Read the file at `path` (relative to the volume root) of mount `i`. -1 if it
@@ -492,18 +515,39 @@ int blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max)
 long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return -1;
-    void *c = (void *)(intptr_t)g_mount[i].dev; uint64_t s = g_mount[i].start;
-    return g_mount[i].fstype == FS_EXT2 ? ext2_read_path(bd_blk_read, c, s, path ? path : "", buf, max)
-                                        : fatvol_read_path(bd_blk_read, c, s, path ? path : "", buf, max);
+    blk_read_fn r = mount_rfn(i); void *c = mount_ctx(i); uint64_t s = g_mount[i].start;
+    return g_mount[i].fstype == FS_EXT2 ? ext2_read_path(r, c, s, path ? path : "", buf, max)
+                                        : fatvol_read_path(r, c, s, path ? path : "", buf, max);
 }
 
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
 int blockdev_mount_isdir(int i, const char *path) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return 0;
-    void *c = (void *)(intptr_t)g_mount[i].dev; uint64_t s = g_mount[i].start;
-    return g_mount[i].fstype == FS_EXT2 ? ext2_isdir_path(bd_blk_read, c, s, path ? path : "")
-                                        : fatvol_isdir_path(bd_blk_read, c, s, path ? path : "");
+    blk_read_fn r = mount_rfn(i); void *c = mount_ctx(i); uint64_t s = g_mount[i].start;
+    return g_mount[i].fstype == FS_EXT2 ? ext2_isdir_path(r, c, s, path ? path : "")
+                                        : fatvol_isdir_path(r, c, s, path ? path : "");
+}
+
+/* losetup: register a loop mount backed by the file image `data` (len bytes,
+ * ownership transferred — freed never; loops are permanent for the session).
+ * Detects FAT32/ext2 in the image and mounts it as the next /diskN. Returns the
+ * mount index, or -1 (full, or not a recognised filesystem). M1107. */
+int blockdev_losetup(uint8_t *data, uint64_t len) {
+    blockdev_mount_scan();
+    if (g_nmount >= 8 || !data || len < 1024) return -1;
+    int i = g_nmount;
+    g_mount[i].is_loop = 1; g_mount[i].loopbuf = data; g_mount[i].looplen = len; g_mount[i].start = 0;
+    int fstype;
+    fatvol_dirent probe[1];
+    if (ext2_probe(loop_blk_read, (void *)(intptr_t)i, 0) == 0) fstype = FS_EXT2;
+    else if (fatvol_list(loop_blk_read, (void *)(intptr_t)i, 0, probe, 1) >= 0) fstype = FS_FAT;
+    else { g_mount[i].is_loop = 0; return -1; }              /* unrecognised -> don't mount */
+    g_mount[i].fstype = fstype;
+    g_mount[i].name[0]='d'; g_mount[i].name[1]='i'; g_mount[i].name[2]='s'; g_mount[i].name[3]='k';
+    g_mount[i].name[4] = (char)('1' + i); g_mount[i].name[5] = 0;
+    g_nmount++;
+    return i;
 }
 
 /* --- the headless browsing demo -------------------------------------------- */

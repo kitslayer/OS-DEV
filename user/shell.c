@@ -471,7 +471,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest madvisetest swaptest (mmap/ring/W^X/reclaim/swap demos)  alarmtest (SIGALRM)  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -1680,6 +1680,12 @@ static int run_command(char *line, char *cwd) {
             long n = sys_mounts(buf, sizeof(buf));
             if (n > 0) { buf[n] = 0; print(buf); print("  (cd into one to browse, e.g. cd /disk2)\n"); }
             else print("mount: no disk volumes\n");
+        } else if (startswith(line, "losetup ")) {  /* mount a FAT/ext2 image FILE as a loop block device */
+            const char *f = line + 8; while (*f == ' ') f++;
+            char fn[96]; int j = 0; while (*f && *f != ' ' && j < 95) fn[j++] = *f++; fn[j] = 0; sh_unprot_buf(fn);
+            long idx = sys_losetup(fn);
+            if (idx < 0) { print("losetup: not a FAT/ext2 image (or unreadable / too big)\n"); g_status = 1; }
+            else { print("losetup: mounted "); print(fn); print(" as /disk"); printl(idx + 1); print("  (cd /disk"); printl(idx + 1); print(" to browse)\n"); }
         } else if (streq(line, "dmesg")) {  /* the kernel log ring buffer, read back from /proc/kmsg */
             long n; char *b = slurp("/proc/kmsg", &n);
             if (b) { print(b); if (n > 0 && b[n - 1] != '\n') print("\n"); free(b); }
