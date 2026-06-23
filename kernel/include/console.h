@@ -15,3 +15,7 @@ void console_enable_gfx(void);   /* route output to the framebuffer console */
 
 void kprintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void kvprintf(const char *fmt, va_list ap);
+
+/* Copy the most recent kernel-log bytes (oldest-first, NUL-terminated) into
+ * out[max]; returns the byte count written. Backs /proc/kmsg (a `dmesg`). */
+int klog_copy(char *out, int max);

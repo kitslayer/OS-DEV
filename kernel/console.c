@@ -22,6 +22,38 @@
 
 static bool gfx_console;
 
+/* ---- kernel log ring buffer (M1071) -----------------------------------------
+ * Every byte that goes to the console is also captured into a fixed circular
+ * buffer, so userspace can read the kernel log back as /proc/kmsg (a `dmesg`)
+ * even after it has scrolled off-screen. Lock-free by design: a single
+ * monotonically-increasing head index + plain byte writes, so it is safe to
+ * call from IRQ / kprintf / panic context with no risk of deadlock. A reader
+ * may see a torn tail byte under a concurrent write; that is acceptable for a
+ * log. */
+#define KLOG_SIZE 65536
+static char klog[KLOG_SIZE];
+static volatile uint32_t klog_head;          /* total bytes ever written (wraps the buffer) */
+
+static void klog_putc(char c) {
+    klog[klog_head % KLOG_SIZE] = c;
+    klog_head++;
+}
+
+/* Copy the most recent log bytes (oldest-first) into out[max], NUL-terminated.
+ * Returns the number of bytes written (excluding the NUL). */
+int klog_copy(char *out, int max) {
+    if (!out || max <= 1) return 0;
+    uint32_t head  = klog_head;               /* snapshot the head once */
+    uint32_t avail = head < KLOG_SIZE ? head : KLOG_SIZE;
+    if (avail > (uint32_t)(max - 1)) avail = (uint32_t)(max - 1);
+    uint32_t start = head - avail;            /* oldest byte we will return */
+    int n = 0;
+    for (uint32_t i = 0; i < avail; i++)
+        out[n++] = klog[(start + i) % KLOG_SIZE];
+    out[n] = 0;
+    return n;
+}
+
 void console_init(void) {
     serial_init();
     vga_init();
@@ -36,6 +68,7 @@ void console_putc(char c) {
         fbcon_putc(c);       /* framebuffer console */
     else
         vga_putc(c);         /* legacy VGA text mode */
+    klog_putc(c);            /* capture into the kernel log ring (M1071) */
     if (c == '\n')
         serial_putc('\r');   /* terminals want CRLF; the screen doesn't care */
     serial_putc(c);

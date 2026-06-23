@@ -16,6 +16,7 @@
 #include "app.h"
 #include "blockdev.h"
 #include "interrupts.h"
+#include "console.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -172,6 +173,9 @@ static long gen_stat(char *b, int max) {
     p = sapp(b, p, max, "\n");
     b[p] = 0; return p;
 }
+static long gen_kmsg(char *b, int max) {        /* the kernel log ring buffer (dmesg) */
+    return klog_copy(b, max);
+}
 
 /* ---- /dev character devices ---------------------------------------------- */
 static uint64_t rng_state;
@@ -188,7 +192,7 @@ static const struct pf proc_files[] = {
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat },
     { "processes", gen_processes }, { "partitions", gen_partitions },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
-    { "interrupts", gen_interrupts },
+    { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg },
 };
 static const char *dev_files[] = { "null", "zero", "random", "full" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))
