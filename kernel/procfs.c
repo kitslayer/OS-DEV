@@ -218,6 +218,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             int st = 0; void *proc = proc_find(pid, &st);
             if (!proc) return -1;
             if (peq(file, "status"))  return gen_pid_status((char *)buf, (int)max, pid, st, proc);
+            if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "cmdline")) {
                 char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));
                 const char *arg = app_arg((app_t *)proc);

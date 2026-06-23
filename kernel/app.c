@@ -201,6 +201,38 @@ void       *app_task(app_t *a) { return a ? (void *)a->task : 0; }        /* the
 uint64_t    app_heap_bytes(app_t *a) { return (a && a->heap_end) ? a->heap_end - UHEAP_BASE : 0; }
 int         app_vma_count(app_t *a) { return a ? a->nvma : 0; }
 
+/* Format the app's user-space memory map (/proc/<pid>/maps): each region as a
+ * "0xSTART-0xEND perm [label]" line, like Linux. Bounded by `max`. */
+static int maps_hex(char *b, int p, int max, uint64_t v) {
+    char t[16]; int n = 0;
+    if (v == 0) t[n++] = '0';
+    while (v) { t[n++] = "0123456789abcdef"[v & 0xF]; v >>= 4; }
+    if (p < max - 1) b[p++] = '0';
+    if (p < max - 1) b[p++] = 'x';
+    while (n > 0 && p < max - 1) b[p++] = t[--n];
+    return p;
+}
+static int maps_str(char *b, int p, int max, const char *s) {
+    while (*s && p < max - 1) b[p++] = *s++;
+    return p;
+}
+int app_format_maps(app_t *a, char *b, int max) {
+    if (!a || max <= 0) return 0;
+    int p = 0;
+    if (a->heap_end > UHEAP_BASE) {     /* the program break heap */
+        p = maps_hex(b, p, max, UHEAP_BASE); p = maps_str(b, p, max, "-");
+        p = maps_hex(b, p, max, a->heap_end); p = maps_str(b, p, max, " rw-  [heap]\n");
+    }
+    for (int i = 0; i < a->nvma; i++) {  /* demand-paged mmap regions */
+        p = maps_hex(b, p, max, a->vma[i].start); p = maps_str(b, p, max, "-");
+        p = maps_hex(b, p, max, a->vma[i].start + a->vma[i].len); p = maps_str(b, p, max, " rw-  [mmap]\n");
+    }
+    p = maps_hex(b, p, max, USTACK_BASE);   /* the user stack region */
+    p = maps_str(b, p, max, "  rw-  [stack]\n");
+    if (p < max) b[p] = 0;
+    return p;
+}
+
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
 
 /* ---- text grid ---- */

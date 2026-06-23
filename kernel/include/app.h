@@ -24,6 +24,7 @@ const char *app_arg(app_t *a);          /* the app's launch argument (/proc/<pid
 void       *app_task(app_t *a);         /* the app's task_t* (cast in procfs for stop/cont) */
 uint64_t    app_heap_bytes(app_t *a);   /* heap size in bytes */
 int         app_vma_count(app_t *a);    /* number of mmap regions */
+int         app_format_maps(app_t *a, char *buf, int max);   /* /proc/<pid>/maps: memory regions as text */
 int    app_alive(app_t *a);
 int    app_reap(app_t *a);                       /* free a self-exited app's task+stack+slot (WM) */
 void   app_request_kill(app_t *a);               /* ask a running app to close (it self-exits) */
