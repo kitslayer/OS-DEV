@@ -55,7 +55,8 @@ static void gen_texture(int model) {
             int r, g, b;
             if (model == 0) { r = checker?70:45;  g = checker?150:110;  b = checker?240:200; if(grid){r=150;g=240;b=255;} }
             else if (model == 1) { r = checker?220:150; g = checker?150:95; b = checker?40:20; if(grid){r=255;g=225;b=130;} }
-            else { r = checker?200:60; g=60; b = checker?60:200; if(grid){r=240;g=240;b=240;} }
+            else if (model == 2) { r = checker?200:60; g=60; b = checker?60:200; if(grid){r=240;g=240;b=240;} }
+            else { r = checker?40:30; g = checker?210:150; b = checker?185:140; if(grid){r=120;g=255;b=230;} }  /* knot: teal */
             tex[v * TW + u] = ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
             if (u==TW/2 && v==TH/2) { br=r; bg=g; bb=b; }
         }
@@ -142,6 +143,38 @@ static void gen_cube(void) {
         for (int k = 0; k < 4; k++)
             addv(fv[f][k][0]*0.8f, fv[f][k][1]*0.8f, fv[f][k][2]*0.8f, fn[f][0],fn[f][1],fn[f][2], fuv[k][0],fuv[k][1]);
         addt(base,base+1,base+2); addt(base,base+2,base+3);
+    }
+}
+/* A (2,3) TORUS KNOT, rendered as a tube swept along the knot curve. The tube's
+ * cross-section frame is parallel-transported (project the previous normal onto
+ * the plane perpendicular to the new tangent) so it doesn't spin/kink along the
+ * curve. Outward = the cross-section offset, which is exactly the surface normal,
+ * so it lights + textures with the rest of the pipeline. */
+static void gen_knot(void) {
+    nverts = ntris = 0;
+    int NU = 140, NV = 14; float tubeR = 0.42f, scale = 0.34f;
+    float Nx = 0.0f, Ny = 1.0f, Nz = 0.0f;   /* transported normal (fixed up below) */
+    for (int i = 0; i <= NU; i++) {
+        float t = 2.0f*PI*i/NU, dt = 0.012f;
+        float cx=(2.0f+fcos(3*t))*fcos(2*t), cy=(2.0f+fcos(3*t))*fsin(2*t), cz=fsin(3*t);
+        float ax=(2.0f+fcos(3*(t+dt)))*fcos(2*(t+dt)), ay=(2.0f+fcos(3*(t+dt)))*fsin(2*(t+dt)), az=fsin(3*(t+dt));
+        float tx=ax-cx, ty=ay-cy, tz=az-cz;                    /* tangent (finite difference) */
+        float tl=fsqrt(tx*tx+ty*ty+tz*tz); if(tl<1e-5f)tl=1e-5f; tx/=tl; ty/=tl; tz/=tl;
+        float d=Nx*tx+Ny*ty+Nz*tz; Nx-=d*tx; Ny-=d*ty; Nz-=d*tz;   /* parallel transport */
+        float nl=fsqrt(Nx*Nx+Ny*Ny+Nz*Nz);
+        if (nl<1e-4f) { Nx=1.0f; Ny=0.0f; Nz=0.0f; d=Nx*tx+Ny*ty+Nz*tz; Nx-=d*tx; Ny-=d*ty; Nz-=d*tz; nl=fsqrt(Nx*Nx+Ny*Ny+Nz*Nz); }
+        Nx/=nl; Ny/=nl; Nz/=nl;
+        float Bx=ty*Nz-tz*Ny, By=tz*Nx-tx*Nz, Bz=tx*Ny-ty*Nx;     /* binormal = T x N */
+        for (int j = 0; j <= NV; j++) {
+            float a=2.0f*PI*j/NV, ca=fcos(a), sa=fsin(a);
+            float ox=Nx*ca+Bx*sa, oy=Ny*ca+By*sa, oz=Nz*ca+Bz*sa; /* outward (= surface normal) */
+            addv((cx+tubeR*ox)*scale, (cy+tubeR*oy)*scale, (cz+tubeR*oz)*scale,
+                 ox, oy, oz, (float)i/NU*9.0f, (float)j/NV*1.0f);
+        }
+    }
+    int stride = NV+1;
+    for (int i = 0; i < NU; i++) for (int j = 0; j < NV; j++) {
+        int p0=i*stride+j, p1=p0+1, p2=p0+stride, p3=p2+1; addt(p0,p2,p1); addt(p1,p2,p3);
     }
 }
 
@@ -250,7 +283,7 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k=='q'||k=='Q'||k==27) break;
-        if (k==' ') { model=(model+1)%3; if(model==0)gen_sphere(); else if(model==1)gen_torus(); else gen_cube(); gen_texture(model); }
+        if (k==' ') { model=(model+1)%4; if(model==0)gen_sphere(); else if(model==1)gen_torus(); else if(model==2)gen_cube(); else gen_knot(); gen_texture(model); }
         if (k=='+'||k=='=') { dist-=0.3f; if(dist<2.2f)dist=2.2f; }
         if (k=='-'||k=='_') { dist+=0.3f; if(dist>9.0f)dist=9.0f; }
         if (k=='r'||k=='R') autospin = autospin>0.5f?0.0f:1.0f;
