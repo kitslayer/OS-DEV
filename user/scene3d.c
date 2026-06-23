@@ -229,7 +229,7 @@ int main(void) {
     float fl=fsqrt(fxl*fxl+fyl*fyl+fzl*fzl); fxl/=fl; fyl/=fl; fzl/=fl;
     focal = 1.3f * (H * 0.5f);          /* perspective focal length (was missing!) */
 
-    static SV sv[MAXV];
+    static SV sv[MAXV], sv2[MAXV];
 
     for (;;) {
         int k = sys_pollkey();
@@ -308,6 +308,25 @@ int main(void) {
             float cross=(B.x-A.x)*(C.y-A.y)-(B.y-A.y)*(C.x-A.x);
             if (cross<=0) continue;
             raster(A,B,C);
+        }
+
+        /* --- a small textured "moon" orbiting the model (multi-object z-buffer) --- */
+        {
+            float oa=spin*1.7f, ms=spin*2.3f;
+            float ocx=1.95f*fcos(oa), ocz=1.95f*fsin(oa), ocy=0.45f;
+            float mc=fcos(ms), msn=fsin(ms), ccy=fcos(camYaw), scy=fsin(camYaw);
+            for (int i=0; i<nverts; i++) {
+                float sx=vx[i]*0.32f, syv=vy[i]*0.32f, sz=vz[i]*0.32f;
+                float wx=ocx + sx*mc - sz*msn, wz=ocz + sx*msn + sz*mc, wy=ocy + syv;
+                float wnx=nx[i]*mc - nz[i]*msn, wnz=nx[i]*msn + nz[i]*mc;
+                sv2[i]=project(wx,wy,wz, wnx,ny[i],wnz, tu[i],tv[i], ccy,scy, cxp,sxp, dist);
+            }
+            for (int t=0; t<ntris; t++) {
+                SV A=sv2[tri[t][0]], B=sv2[tri[t][1]], C=sv2[tri[t][2]];
+                float cross=(B.x-A.x)*(C.y-A.y)-(B.y-A.y)*(C.x-A.x);
+                if (cross<=0) continue;
+                raster(A,B,C);
+            }
         }
 
         sys_gfx_blit(fb);
