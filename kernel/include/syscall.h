@@ -74,6 +74,8 @@
 #define SYS_poweroff 64 /* ()              -> enter ACPI S5 (power the machine off); never returns */
 #define SYS_kill   65   /* (pid)           -> ask the app with this pid to close; 0 ok / -1 not found */
 #define SYS_mounts 66   /* (buf, max)      -> list the read-only disk mounts (/disk1..) as text; bytes */
+#define SYS_mmap   67   /* (len)           -> reserve a demand-paged anon region; base VA, or 0 */
+#define SYS_munmap 68   /* (addr, len)     -> free an mmap region; 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

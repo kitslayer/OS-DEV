@@ -1,0 +1,1677 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]:
+      - link "redlib." [ref=e4] [cursor=pointer]:
+        - /url: /
+      - group [ref=e5]:
+        - generic "Feeds" [ref=e6]
+    - generic [ref=e7]:
+      - link "reddit" [ref=e8] [cursor=pointer]:
+        - /url: "#popup"
+      - link "settings" [ref=e9] [cursor=pointer]:
+        - /url: /settings
+  - main [ref=e10]:
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e13]:
+          - textbox "Search redlib" [ref=e14]:
+            - /placeholder: Search
+            - text: doom OR signals OR mmap OR paging OR fork OR ext2
+          - generic [ref=e15]:
+            - generic [ref=e16]:
+              - checkbox "in r/osdev" [checked] [ref=e17]
+              - generic [ref=e18]: in r/osdev
+            - combobox "Sort results by" [ref=e19] [cursor=pointer]:
+              - option "Relevance"
+              - option "Hot"
+              - option "Top" [selected]
+              - option "New"
+              - option "Comments"
+            - combobox "Timeframe" [ref=e20] [cursor=pointer]:
+              - option "Hour"
+              - option "Day"
+              - option "Week"
+              - option "Month"
+              - option "Year" [selected]
+              - option "All"
+        - button [ref=e21] [cursor=pointer]:
+          - img [ref=e22]: →
+      - generic [ref=e24]:
+        - paragraph [ref=e25]:
+          - link "r/osdev" [ref=e26] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/HTFCirno2000" [ref=e27] [cursor=pointer]:
+            - /url: /u/HTFCirno2000
+          - text: • May 03 '26
+        - heading "Let's go back to reading OS Dev books instead of using an LLM" [level=2] [ref=e28]:
+          - link "Let's go back to reading OS Dev books instead of using an LLM" [ref=e29] [cursor=pointer]:
+            - /url: /r/osdev/comments/1t2x25g/lets_go_back_to_reading_os_dev_books_instead_of/
+        - link "Thumbnail gallery" [ref=e30] [cursor=pointer]:
+          - /url: /r/osdev/comments/1t2x25g/lets_go_back_to_reading_os_dev_books_instead_of/
+          - img "Thumbnail" [ref=e32]
+          - generic [ref=e33]: gallery
+        - generic "1273" [ref=e34]: 1.3k
+        - paragraph [ref=e37]: I guess we're posting books now. Here's my copy of the OG MINIX Text Book!
+        - link "42 comments" [ref=e39] [cursor=pointer]:
+          - /url: /r/osdev/comments/1t2x25g/lets_go_back_to_reading_os_dev_books_instead_of/
+      - generic [ref=e40]:
+        - paragraph [ref=e41]:
+          - link "r/osdev" [ref=e42] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/avaliosdev" [ref=e43] [cursor=pointer]:
+            - /url: /u/avaliosdev
+          - text: • Nov 03 '25
+        - heading "Running Minecraft on my hobby OS (Astral)" [level=2] [ref=e44]:
+          - link "Running Minecraft on my hobby OS (Astral)" [ref=e45] [cursor=pointer]:
+            - /url: /r/osdev/comments/1on20n8/running_minecraft_on_my_hobby_os_astral/
+        - link "Post image" [ref=e47] [cursor=pointer]:
+          - /url: /img/6jpb0nzspyyf1.png
+          - img "Post image" [ref=e48]
+        - generic "759" [ref=e49]
+        - generic [ref=e51]:
+          - paragraph [ref=e52]:
+            - text: Hello,
+            - link "r/osdev" [ref=e53] [cursor=pointer]:
+              - /url: /r/osdev
+            - text: "!"
+          - paragraph [ref=e54]: "Ever since I started working on my operating system, Astral, I have always wanted to be able to play cool games in it. I already had Doom, Quake and Ace of Penguins ported, but that didn't feel like enough. A few days ago, I started working towards a very ambitious project: getting Minecraft working on Astral."
+          - paragraph [ref=e55]:
+            - text: This is a very old version (Alpha 1.2.0) and some performance improvements are needed, but it does work. All of the game's mechanics work fine and things like saving and loading a world work perfectly as well. Here is a
+            - link "link" [ref=e56] [cursor=pointer]:
+              - /url: https://youtu.be/unWMgyj3GC8
+            - text: for a video of the game running.
+          - paragraph [ref=e57]:
+            - text: Check out
+            - link "this blog post" [ref=e58] [cursor=pointer]:
+              - /url: https://astral-os.org/posts/2025/10/31/astral-minecraft.html
+            - text: if you are interested in the more technical details.
+          - paragraph [ref=e59]: "About Astral: Astral is my toy unix-like operating system written in C. Notable features include:"
+          - list [ref=e60]:
+            - listitem [ref=e61]: Preemptible SMP kernel
+            - listitem [ref=e62]: Networking
+            - listitem [ref=e63]:
+              - text: Over 150 ports (including
+              - link "X.org" [ref=e64] [cursor=pointer]:
+                - /url: http://X.org
+              - text: ", GCC, QEMU, OpenJDK17) with package management (XBPS)"
+            - listitem [ref=e65]: Nearly fully self-hosting
+          - paragraph [ref=e66]:
+            - text: "Links:"
+            - link "Website" [ref=e67] [cursor=pointer]:
+              - /url: https://astral-os.org
+            - link "Github" [ref=e68] [cursor=pointer]:
+              - /url: https://github.com/mathewnd/astral
+        - link "49 comments" [ref=e70] [cursor=pointer]:
+          - /url: /r/osdev/comments/1on20n8/running_minecraft_on_my_hobby_os_astral/
+      - generic [ref=e71]:
+        - paragraph [ref=e72]:
+          - link "r/osdev" [ref=e73] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/portw" [ref=e74] [cursor=pointer]:
+            - /url: /u/portw
+          - text: • Aug 18 '25
+        - heading "I'm excited to share tinyOS, a 64-bit OS I built from scratch" [level=2] [ref=e75]:
+          - link "I'm excited to share tinyOS, a 64-bit OS I built from scratch" [ref=e76] [cursor=pointer]:
+            - /url: /r/osdev/comments/1mtoy12/im_excited_to_share_tinyos_a_64bit_os_i_built/
+        - generic "626" [ref=e79]
+        - generic [ref=e81]:
+          - paragraph [ref=e82]:
+            - text: Hey
+            - link "r/osdev" [ref=e83] [cursor=pointer]:
+              - /url: /r/osdev
+            - text: "!"
+          - paragraph [ref=e84]:
+            - text: "I've been a longtime lurker here, and I'm finally ready to share my hobby project:"
+            - strong [ref=e85]: tinyOS
+            - text: .
+          - paragraph [ref=e86]: It's a complete 64-bit operating system with a custom bootloader, kernel, and shell, written entirely in C (clang) and Assembly (NASM).
+          - paragraph [ref=e87]: "The project has been a huge learning experience, and I've implemented some of the core features:"
+          - list [ref=e88]:
+            - listitem [ref=e89]:
+              - text: A
+              - strong [ref=e90]: custom bootloader
+              - text: that goes from 16-bit real mode all the way to 64-bit long mode.
+            - listitem [ref=e91]:
+              - text: A
+              - strong [ref=e92]: monolithic kernel
+              - text: with a bitmap-based PMM, 4-level paging, and a simple heap allocator.
+            - listitem [ref=e93]:
+              - text: A
+              - strong [ref=e94]: round-robin scheduler
+              - text: that you can see in action with the live clock and rotating animation running as separate tasks.
+            - listitem [ref=e95]:
+              - text: An
+              - strong [ref=e96]: interactive shell
+              - text: with a few basic commands to poke around.
+          - paragraph [ref=e97]: I've learned so much from this community, and I'd love to hear any feedback or answer any questions you have. Thanks for checking it out!
+        - link "49 comments" [ref=e99] [cursor=pointer]:
+          - /url: /r/osdev/comments/1mtoy12/im_excited_to_share_tinyos_a_64bit_os_i_built/
+      - generic [ref=e100]:
+        - paragraph [ref=e101]:
+          - link "r/osdev" [ref=e102] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/L0rdCha0s" [ref=e103] [cursor=pointer]:
+            - /url: /u/L0rdCha0s
+          - text: • Dec 12 '25
+        - heading "After much battling with scheduler development and userland syscalls, AlixOS now runs doom!" [level=2] [ref=e104]:
+          - link "After much battling with scheduler development and userland syscalls, AlixOS now runs doom!" [ref=e105] [cursor=pointer]:
+            - /url: /r/osdev/comments/1pl5cpg/after_much_battling_with_scheduler_development/
+        - link "Post image" [ref=e107] [cursor=pointer]:
+          - /url: /img/aidn9siyou6g1.png
+          - img "Post image" [ref=e108]
+        - generic "419" [ref=e109]
+        - generic [ref=e111]:
+          - paragraph [ref=e112]:
+            - text: "As always, building in public:"
+            - link "https://github.com/L0rdCha0s/alix" [ref=e113] [cursor=pointer]:
+              - /url: https://github.com/L0rdCha0s/alix
+          - paragraph [ref=e114]: "Recent features include:"
+          - list [ref=e115]:
+            - listitem [ref=e116]: Lottery-based scheduler with priority ticket assignment
+            - listitem [ref=e117]: USB driver for keyboard/mouse
+            - listitem [ref=e118]: Migrated from rtl8139 networking to igb/e1000e
+            - listitem [ref=e119]: Sound driver (HDA) addition, and ATK-based MP3 player (with some help from minimp3 headers)
+            - listitem [ref=e120]: Dramatic extension of libc and syscalls
+            - listitem [ref=e121]: PNG decoder and improvements to JPG decoder
+            - listitem [ref=e122]: Hardening of process switching and stack/memory preservation on user-side faults (rather than pulling the whole kernel down)
+        - link "24 comments" [ref=e124] [cursor=pointer]:
+          - /url: /r/osdev/comments/1pl5cpg/after_much_battling_with_scheduler_development/
+      - generic [ref=e125]:
+        - paragraph [ref=e126]:
+          - link "r/osdev" [ref=e127] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/warothia" [ref=e128] [cursor=pointer]:
+            - /url: /u/warothia
+          - text: • Nov 27 '25
+        - heading "Got my hobby OS to serve real web pages" [level=2] [ref=e129]:
+          - link "Got my hobby OS to serve real web pages" [ref=e130] [cursor=pointer]:
+            - /url: /r/osdev/comments/1p80id3/got_my_hobby_os_to_serve_real_web_pages/
+        - generic "401" [ref=e133]
+        - generic [ref=e135]:
+          - paragraph [ref=e136]: "After a long break I finally came back to my OS project and got a full web server running: Ethernet/IP/ARP/UDP/TCP/DHCP/DNS, an HTTP engine, web engine with routing, and a userspace web server that can serve files from within the OS. Along the way I had to chase down a really evil bugs :D Where a broken terminal buffer was overwriting a lock in another process, and fix my E1000 driver to handle bursts of packets."
+          - paragraph [ref=e137]:
+            - text: "Code and more details can be found here:"
+            - link "https://oshub.org/projects/retros-32/posts/getting-a-webserver-running" [ref=e138] [cursor=pointer]:
+              - /url: https://oshub.org/projects/retros-32/posts/getting-a-webserver-running
+            - link "https://github.com/joexbayer/RetrOS-32" [ref=e139] [cursor=pointer]:
+              - /url: https://github.com/joexbayer/RetrOS-32
+        - link "21 comments" [ref=e141] [cursor=pointer]:
+          - /url: /r/osdev/comments/1p80id3/got_my_hobby_os_to_serve_real_web_pages/
+      - generic [ref=e142]:
+        - paragraph [ref=e143]:
+          - link "r/osdev" [ref=e144] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/hyenasky" [ref=e145] [cursor=pointer]:
+            - /url: /u/hyenasky
+          - text: • Jan 03 '26
+        - heading "I wrote a full multitasking OS in my custom programming language for my RISC architecture, and my friend ported it to x86 and ran it on real hardware!" [level=2] [ref=e146]:
+          - link "I wrote a full multitasking OS in my custom programming language for my RISC architecture, and my friend ported it to x86 and ran it on real hardware!" [ref=e147] [cursor=pointer]:
+            - /url: /r/osdev/comments/1q2fepj/i_wrote_a_full_multitasking_os_in_my_custom/
+        - generic:
+          - link "Post image":
+            - /url: /img/2dknlg8y01bg1.jpeg
+            - img "Post image"
+        - generic "384" [ref=e148]
+        - generic [ref=e150]:
+          - paragraph [ref=e151]:
+            - link "MINTIA" [ref=e152] [cursor=pointer]:
+              - /url: https://github.com/xrarch/mintia
+            - text: is an operating system I wrote in a custom programming language, for a custom RISC architecture, between 2020 and 2023. It has preemptive multitasking, demand paging, memory page swapping, protected memory, asynchronous IO, and all kinds of other goodies.
+          - paragraph [ref=e153]: A couple of months ago, my friend monkuous ported MINTIA to x86. He wrote a transpiler that converts my programming language dragonfruit to C, and then uses GCC to compile all of the source files to ELF objects. Then he wrote a program to convert ELF objects to my custom XLOFF format. He added i386 support to my custom linker, and used it to link the converted XLOFF objects into the final executables such as the kernel binary. Then he added i386 support to MINTIA's dynamic linker, wrote drivers for PC hardware, and booted it on an x86 laptop.
+          - paragraph [ref=e154]:
+            - text: Monkuous's MINTIA/386 port can be found
+            - link "here" [ref=e155] [cursor=pointer]:
+              - /url: https://github.com/monkuous/mintia386
+            - text: ", and you can find a prebuilt test image"
+            - link "here" [ref=e156] [cursor=pointer]:
+              - /url: https://github.com/xrarch/mintia/raw/refs/heads/main/build/mintia-PC-fre.img.zip
+            - text: (runnable with
+            - code [ref=e157]: qemu-system-i386 -M q35 mintia-pc-fre.img
+            - text: and the default password for
+            - code [ref=e158]: root
+            - text: is
+            - code [ref=e159]: mintia
+            - text: ).
+          - paragraph [ref=e160]:
+            - text: The development of MINTIA and it's successor project MINTIA2 is discussed on the unofficial
+            - link "OSDev discord" [ref=e161] [cursor=pointer]:
+              - /url: https://discord.gg/osdev
+            - text: .
+        - link "33 comments" [ref=e163] [cursor=pointer]:
+          - /url: /r/osdev/comments/1q2fepj/i_wrote_a_full_multitasking_os_in_my_custom/
+      - generic [ref=e164]:
+        - paragraph [ref=e165]:
+          - link "r/osdev" [ref=e166] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/emexos" [ref=e167] [cursor=pointer]:
+            - /url: /u/emexos
+          - text: • Mar 25 '26
+        - heading "we have a window system yay :D" [level=2] [ref=e168]:
+          - link "we have a window system yay :D" [ref=e169] [cursor=pointer]:
+            - /url: /r/osdev/comments/1s3jist/we_have_a_window_system_yay_d/
+        - generic "367" [ref=e172]
+        - generic [ref=e174]:
+          - paragraph [ref=e175]:
+            - text: for past 5 months im workin on emexOS well the emex kernel which is avery small 64 bit kernel written from scratch; for it to boot i use the limine bootloader cuz its literally the best working bootloader out there (and yeah i know theres grub... but eh...)
+            - text: literally every other hobby kernel/OS uses limine...
+          - paragraph [ref=e176]: the kernel still has a lot old stuff which i forgot to remove :(
+          - paragraph [ref=e177]:
+            - text: "well here are some links:"
+            - text: "github:"
+            - link "https://github.com/emexos/emexOS/tree/main" [ref=e178] [cursor=pointer]:
+              - /url: https://github.com/emexos/emexOS/tree/main
+            - text: "discord:"
+            - link "https://discord.gg/Cbeg3gJzC7" [ref=e179] [cursor=pointer]:
+              - /url: https://discord.gg/Cbeg3gJzC7
+            - text: "website (looks kinda shit ik) :"
+            - link "https://emexos.github.io/web/page/0/index.html" [ref=e180] [cursor=pointer]:
+              - /url: https://emexos.github.io/web/page/0/index.html
+        - link "44 comments" [ref=e182] [cursor=pointer]:
+          - /url: /r/osdev/comments/1s3jist/we_have_a_window_system_yay_d/
+      - generic [ref=e183]:
+        - paragraph [ref=e184]:
+          - link "r/osdev" [ref=e185] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/mrunix0" [ref=e186] [cursor=pointer]:
+            - /url: /u/mrunix0
+          - text: • Mar 23 '26
+        - heading "MONOLITH - My Operating System for x86_64" [level=2] [ref=e187]:
+          - link "MONOLITH - My Operating System for x86_64" [ref=e188] [cursor=pointer]:
+            - /url: /r/osdev/comments/1s1i5dg/monolith_my_operating_system_for_x86_64/
+        - generic:
+          - link "Post image":
+            - /url: /img/b0bnfyfkzsqg1.jpeg
+            - img "Post image"
+        - generic "351" [ref=e189]
+        - generic [ref=e191]:
+          - paragraph [ref=e192]: It currently has GUI, ring-0/ring-3 privilege separation, syscalls, a GUI, multitasking and can run Doom!
+          - paragraph [ref=e193]: "Feel free to check it:"
+          - paragraph [ref=e194]:
+            - link "https://codeberg.org/MONOLITH-Project/MONOLITH" [ref=e195] [cursor=pointer]:
+              - /url: https://codeberg.org/MONOLITH-Project/MONOLITH
+        - link "37 comments" [ref=e197] [cursor=pointer]:
+          - /url: /r/osdev/comments/1s1i5dg/monolith_my_operating_system_for_x86_64/
+      - generic [ref=e198]:
+        - paragraph [ref=e199]:
+          - link "r/osdev" [ref=e200] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/UnmappedStack" [ref=e201] [cursor=pointer]:
+            - /url: /u/UnmappedStack
+          - text: • Sep 27 '25
+        - heading "TacOS now runs a DOOM port and has a userspace window manager!" [level=2] [ref=e202]:
+          - link "TacOS now runs a DOOM port and has a userspace window manager!" [ref=e203] [cursor=pointer]:
+            - /url: /r/osdev/comments/1nro6pj/tacos_now_runs_a_doom_port_and_has_a_userspace/
+        - generic:
+          - link "Post image":
+            - /url: /img/uez3cznzjnrf1.png
+            - img "Post image"
+        - generic "343" [ref=e204]
+        - link "21 comments" [ref=e207] [cursor=pointer]:
+          - /url: /r/osdev/comments/1nro6pj/tacos_now_runs_a_doom_port_and_has_a_userspace/
+      - generic [ref=e208]:
+        - paragraph [ref=e209]:
+          - link "r/osdev" [ref=e210] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/EmptyFS" [ref=e211] [cursor=pointer]:
+            - /url: /u/EmptyFS
+          - text: • Sep 17 '25
+        - heading "SafaOS now has a WM! (1 year of progress)" [level=2] [ref=e212]:
+          - link "SafaOS now has a WM! (1 year of progress)" [ref=e213] [cursor=pointer]:
+            - /url: /r/osdev/comments/1nj5v82/safaos_now_has_a_wm_1_year_of_progress/
+        - generic:
+          - link "Post image":
+            - /url: /img/xzqmh6z28opf1.png
+            - img "Post image"
+        - generic "288" [ref=e214]
+        - generic [ref=e216]:
+          - paragraph [ref=e217]:
+            - text: another 2 or 3 months passed since
+            - link "my last post" [ref=e218] [cursor=pointer]:
+              - /url: /r/osdev/s/uoDrYRCd67
+            - text: ", SafaOS is 1 year and 2 months old now, and it can run a WM!"
+          - heading [level=1]
+          - paragraph [ref=e219]: "since the last post, in the kernel I implemented: - SMP - TLS - unix sockets - VTTYs (PTYs but with a different name and a few changes too far) - shared memory - mapping memory (similar to mmap but a lot different thanks to my resources system and is unfinished for stuff like files unfortunately only the framebuffer works) - this is all I remember"
+          - paragraph [ref=e220]: "in the userspace: - A WM - A high-level experimental GUI lib - All of the stuff in the screenshot"
+          - paragraph [ref=e221]: There is a tons of unix stuff getting into my kernel 🙃.
+          - paragraph [ref=e222]: You can find the latest changes in the GUI branch, I recommended booting it using the safa-helper like how the README says, currently you need both UEFI and the q35 machine to boot with qemu (which isn't intended, and are the default using the safa-helper) otherwise it won't go past mapping the kernel PageTable for some reason...
+          - paragraph [ref=e223]: also the terminal emulator lacks basic thing like scrolling and key modifiers, because I am too lazy I do have everything prepared for them tho.
+          - heading [level=1]
+          - paragraph [ref=e224]: I just finished with the dock unfortunately I rushed it a bit because school is soon, These are all the current GUI apps.
+          - paragraph [ref=e225]: There are a tons of bugs, also it gets laggy quickly with more threads I am not happy with my scheduler.
+          - paragraph [ref=e226]: but I am really happy with how far I have gotten and looking forward for more, you can expect windowed doom soon!
+        - link "28 comments" [ref=e228] [cursor=pointer]:
+          - /url: /r/osdev/comments/1nj5v82/safaos_now_has_a_wm_1_year_of_progress/
+      - generic [ref=e229]:
+        - paragraph [ref=e230]:
+          - link "r/osdev" [ref=e231] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/__UNNGH__" [ref=e232] [cursor=pointer]:
+            - /url: /u/__UNNGH__
+          - text: • Aug 02 '25
+        - heading "My operating system now runs DOOM and busybox!" [level=2] [ref=e233]:
+          - link "My operating system now runs DOOM and busybox!" [ref=e234] [cursor=pointer]:
+            - /url: /r/osdev/comments/1mfucyg/my_operating_system_now_runs_doom_and_busybox/
+        - link "Thumbnail gallery" [ref=e235] [cursor=pointer]:
+          - /url: /r/osdev/comments/1mfucyg/my_operating_system_now_runs_doom_and_busybox/
+          - generic:
+            - img "Thumbnail"
+          - generic [ref=e236]: gallery
+        - generic "274" [ref=e237]
+        - generic [ref=e239]:
+          - paragraph [ref=e240]: "After years of working on this project off and on, my operating system can finally run DOOM! I probably could have reached this milestone much sooner if I had focused on it, but I took the long road based on where my interests took me. The kernel is targeting x86_64, and it aims to be mostly compatible with the Linux syscall ABI so that the musl libc can be used for the system standard library. Many system calls still need to be implemented, but as it stands a couple of the busybox tools work, along with a handful of other system programs and of course the DOOM port. Here’s a brief list of some other notable things in the repo:"
+          - list [ref=e241]:
+            - listitem [ref=e242]: Custom UEFI bootloader built with EDK2
+            - listitem [ref=e243]: Build scripts to compile the complete cross-compilation toolchain
+            - listitem [ref=e244]: USB support. XHCI, HID keyboard/mouse and Mass storage devices
+            - listitem [ref=e245]: Basic in-kernel debugging (stack trace decoding) using libdwarf
+            - listitem [ref=e246]: TTY subsystem that enables you to connect to a user shell over a QEMU serial port
+            - listitem [ref=e247]: Improved GDB debugging with python scripting
+            - listitem [ref=e248]: A QEMU plugin for profiling guest execution
+          - paragraph [ref=e249]: This is not an exhaustive list but you can find a section of the README explaining the complete project structure. Though it aims to have a Linux compatible ABI, many parts of the OS and overall structure are greatly inspired by FreeBSD. I found their code base to be exceptionally well written and documented, and much easier to follow compared to Linux. In particular, the VFS, TTY and Kevents code are all based on FreeBSD.
+          - paragraph [ref=e250]: I read through a lot of open source operating systems and other hobby OS’s while working on this, so I’m sharing it with the hopes that my project might similarly be useful to others. I’m not done, far from it, but having reached this milestone I might finally take a break. Cheers
+          - paragraph [ref=e251]:
+            - text: "Github:"
+            - link "https://github.com/aar10n/osdev" [ref=e252] [cursor=pointer]:
+              - /url: https://github.com/aar10n/osdev
+        - link "7 comments" [ref=e254] [cursor=pointer]:
+          - /url: /r/osdev/comments/1mfucyg/my_operating_system_now_runs_doom_and_busybox/
+      - generic [ref=e255]:
+        - paragraph [ref=e256]:
+          - link "r/osdev" [ref=e257] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/avaliosdev" [ref=e258] [cursor=pointer]:
+            - /url: /u/avaliosdev
+          - text: • Apr 03 '26
+        - heading "Porting Wine to Astral" [level=2] [ref=e259]:
+          - link "Porting Wine to Astral" [ref=e260] [cursor=pointer]:
+            - /url: /r/osdev/comments/1sb3rm6/porting_wine_to_astral/
+        - link "Thumbnail gallery" [ref=e261] [cursor=pointer]:
+          - /url: /r/osdev/comments/1sb3rm6/porting_wine_to_astral/
+          - generic:
+            - img "Thumbnail"
+          - generic [ref=e262]: gallery
+        - generic "230" [ref=e263]
+        - generic [ref=e265]:
+          - paragraph [ref=e266]:
+            - text: Hello,
+            - link "r/osdev" [ref=e267] [cursor=pointer]:
+              - /url: /r/osdev
+            - text: "! A while back I posted about running Minecraft and Factorio in Astral. Since then I have been working on something that opens up a lot more possibilities: porting Wine."
+          - paragraph [ref=e268]: The goal was to run Cogmind, a 32-bit Windows-only roguelike. Getting there involved fixing up the existing Wine port and adding WoW64 support, so that 32-bit Windows binaries can run in a 64-bit process without needing a full 32-bit userspace. That also meant adding LDT support to the kernel. In the end, I was successful and was able to play it in Astral.
+          - paragraph [ref=e269]: Beyond Cogmind, FTL and Deltarune are fully playable and a handful of other games and programs partially work. There is still a lot of debugging and profiling ahead.
+          - paragraph [ref=e270]:
+            - text: Check out the
+            - link "blog post" [ref=e271] [cursor=pointer]:
+              - /url: https://astral-os.org/posts/2026/04/03/wine-on-astral.html
+            - text: for more!
+          - paragraph [ref=e272]: "Project links:"
+          - paragraph [ref=e273]:
+            - text: "Website:"
+            - link "https://astral-os.org" [ref=e274] [cursor=pointer]:
+              - /url: https://astral-os.org
+          - paragraph [ref=e275]:
+            - text: "Github:"
+            - link "https://github.com/mathewnd/astral" [ref=e276] [cursor=pointer]:
+              - /url: https://github.com/mathewnd/astral
+        - link "14 comments" [ref=e278] [cursor=pointer]:
+          - /url: /r/osdev/comments/1sb3rm6/porting_wine_to_astral/
+      - generic [ref=e279]:
+        - paragraph [ref=e280]:
+          - link "r/osdev" [ref=e281] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/widuruwana" [ref=e282] [cursor=pointer]:
+            - /url: /u/widuruwana
+          - text: • May 20 '26
+        - heading "Finally have a working Bootloader + Framebuffer" [level=2] [ref=e283]:
+          - link "Finally have a working Bootloader + Framebuffer" [ref=e284] [cursor=pointer]:
+            - /url: /r/osdev/comments/1tihq8v/finally_have_a_working_bootloader_framebuffer/
+        - generic:
+          - link "Post image":
+            - /url: /img/d9xclno5t92h1.jpeg
+            - img "Post image"
+        - generic "216" [ref=e285]
+        - link "19 comments" [ref=e288] [cursor=pointer]:
+          - /url: /r/osdev/comments/1tihq8v/finally_have_a_working_bootloader_framebuffer/
+      - generic [ref=e289]:
+        - paragraph [ref=e290]:
+          - link "r/osdev" [ref=e291] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/Main-Golf-5504" [ref=e292] [cursor=pointer]:
+            - /url: /u/Main-Golf-5504
+          - text: • Aug 21 '25
+        - heading "who needs sleep when you can make a (kinda) 3D engine?" [level=2] [ref=e293]:
+          - link "who needs sleep when you can make a (kinda) 3D engine?" [ref=e294] [cursor=pointer]:
+            - /url: /r/osdev/comments/1mwqatc/who_needs_sleep_when_you_can_make_a_kinda_3d/
+        - link "Thumbnail gallery" [ref=e295] [cursor=pointer]:
+          - /url: /r/osdev/comments/1mwqatc/who_needs_sleep_when_you_can_make_a_kinda_3d/
+          - generic:
+            - img "Thumbnail"
+          - generic [ref=e296]: gallery
+        - generic "204" [ref=e297]
+        - paragraph [ref=e300]:
+          - text: "src code:"
+          - link "https://github.com/FrostByte-OS/FrostByteOS" [ref=e301] [cursor=pointer]:
+            - /url: https://github.com/FrostByte-OS/FrostByteOS
+        - link "22 comments" [ref=e303] [cursor=pointer]:
+          - /url: /r/osdev/comments/1mwqatc/who_needs_sleep_when_you_can_make_a_kinda_3d/
+      - generic [ref=e304]:
+        - paragraph [ref=e305]:
+          - link "r/osdev" [ref=e306] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/KN_9296" [ref=e307] [cursor=pointer]:
+            - /url: /u/KN_9296
+          - text: • Jul 28 '25
+        - heading "PatchworkOS at 50k lines of code now with a constant-time scheduler, constant-time VMM, a tickless kernel, Linux-style VFS (dentry/inode caching, mounts, hardlinks), desktop overhaul, custom shell utils that utilize improved file flags, docs/stability/perf improvements, and so much more." [level=2] [ref=e308]:
+          - link "PatchworkOS at 50k lines of code now with a constant-time scheduler, constant-time VMM, a tickless kernel, Linux-style VFS (dentry/inode caching, mounts, hardlinks), desktop overhaul, custom shell utils that utilize improved file flags, docs/stability/perf improvements, and so much more." [ref=e309] [cursor=pointer]:
+            - /url: /r/osdev/comments/1mbkqrg/patchworkos_at_50k_lines_of_code_now_with_a/
+        - generic:
+          - link "Post image":
+            - /url: /img/gzeepcwl4nff1.png
+            - img "Post image"
+        - generic "202" [ref=e310]
+        - generic [ref=e312]:
+          - paragraph [ref=e313]: It's been a long while since my last post, but I've made lots of progress on PatchworkOS since then! I will go over some of the biggest changes, this might become a bit of an essay post.
+          - heading "The VFS" [level=2] [ref=e314]
+          - paragraph [ref=e315]: The old VFS worked entirely via string parsing, with each file system being responsible for traversing the path always starting from the root of that file system, it was also multiroot (e.g., "home:/usr/bin"). The idea was that this would make if far easier to implement new file systems as the VFS would be very unopinionated, but in practice it's just an endless amount of code duplication and very hard to follow spaghetti code. The system also completely lacked the ability to implement more advanced features like hard links.
+          - paragraph [ref=e316]: However, the new system is based of Linux's virtual file system, its single root, uses cached dentrys for path traversal, supports hard links, and of course mount points. I am honestly quite surprised by just how elegant this system is. At first the concept of dentrys and inodes seemed completely nonsensical, especially their names as an inode is in no way a node in a tree as I first assumed, but It's shocking just how many frustrating issues and spaghetti with the previous system just magically disappear and become obvious and intuitive.
+          - paragraph [ref=e317]: For example sysfs, which is used to make kernel resources available to user space (e.g., /proc, /dev, /net), is incredibly thin, all it does is create some wrappers around mounting file systems and creating dentrys, with the resource itself (e.g., a keyboard, pipe, etc.), managing the inode.
+          - heading "Scheduler and Tickless Kernel" [level=2] [ref=e318]
+          - paragraph [ref=e319]: The scheduler has seen some pretty big improvements, it's loosely based of the O(1) scheduler that Linux used to use. It's still lacking some features like proper CPU affinity or NUMA, but from testing it appears to be quite fair and handles both heavily loaded and unloaded situations rather well. For example DOOM remains playable even while pinning all CPUs to 100% usage.
+          - paragraph [ref=e320]: The kernel is now also tickless, meaning that the timer interrupt used for scheduling is longer periodic but instead only occurs when we need it to. Which means we get better power efficiency with true 0% CPU usage when nothing is happening and less latency as we don't need to wait for the next periodic interrupt instead the interrupt will happen more or less exactly when we need it.
+          - heading "Shell Utils / File Flags" [level=2] [ref=e321]
+          - paragraph [ref=e322]:
+            - text: PatchworkOS uses file flags that are embedded into the file path itself (e.g., myfile:flag1:flag2). As an example these flags could be used to create a directory like this
+            - code [ref=e323]: open("mydir:dir:create")
+            - text: . More examples can be found in the GitHub.
+          - paragraph [ref=e324]:
+            - text: Previously it used a different format for its path flags (e.g., myfile?flag1&flag2), the change was made to make managing the flags easier. Consider a
+            - code [ref=e325]: mkdir()
+            - text: function, this function would take in a path and then create a directory, it would most likely do so by appending the needed flags at the end of the path. If we in the past specified
+            - code [ref=e326]: mkdir("mydir?dir&create")
+            - text: then the
+            - code [ref=e327]: mkdir
+            - text: function would need to parse the given path to check what flags to add, it can't just add them to the end because then we would get "mydir?dir&create?dir&create" which is invalid because of the extra '?'.
+          - paragraph [ref=e328]: Now with the new format we just get "mydir:dir:create:dir:create" and since the kernel ignores duplicate flags this is perfectly valid. The new character also has the advantage that ':' is already a character that should be avoided in filenames, since windows reserves it, while the '?' and '&' would require reserving characters that are sometimes used in perfectly valid names.
+          - paragraph [ref=e329]:
+            - text: Finally, Patchwork now natively supports recursive file paths with the
+            - code [ref=e330]: recur
+            - text: flag, so when you get the contents of a directory, or delete a directory, specifying the
+            - code [ref=e331]: recur
+            - text: will recursively get/delete the contents of the directory, reducing the need for shell utilities to implement recursive traversal.
+          - separator [ref=e332]
+          - paragraph [ref=e333]: I think I will end it there. There are lots more stuff that has changed, the desktop has massive changes, sockets are completely new, lots of optimization, stability improvements, it hopefully doesn't crash every 5 seconds anymore, and much more.
+          - paragraph [ref=e334]: If you want more information you can of course check out the GitHub, and feel free to ask questions! If you find any issues, bugs or similar, please open an issue in the GitHub.
+          - paragraph [ref=e335]:
+            - text: "Github:"
+            - link "https://github.com/KaiNorberg/PatchworkOS" [ref=e336] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS
+        - link "23 comments" [ref=e338] [cursor=pointer]:
+          - /url: /r/osdev/comments/1mbkqrg/patchworkos_at_50k_lines_of_code_now_with_a/
+      - generic [ref=e339]:
+        - paragraph [ref=e340]:
+          - link "r/osdev" [ref=e341] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/luciferreeves" [ref=e342] [cursor=pointer]:
+            - /url: /u/luciferreeves
+          - text: • Dec 01 '25
+        - heading "Started building my own OS [Kernel Only as of now]" [level=2] [ref=e343]:
+          - link "Started building my own OS [Kernel Only as of now]" [ref=e344] [cursor=pointer]:
+            - /url: /r/osdev/comments/1pb8l7d/started_building_my_own_os_kernel_only_as_of_now/
+        - generic "197" [ref=e347]
+        - generic [ref=e349]:
+          - paragraph [ref=e350]:
+            - text: Hi
+            - link "r/osdev" [ref=e351] [cursor=pointer]:
+              - /url: /r/osdev
+            - text: ","
+          - paragraph [ref=e352]: I recently started writing my own OS called "akiba". I have previously tried to build small components like Hello World Kernel, my own bootloader, etc. learning from OS Dev Wiki and most of those were successful, but neither did I pursue a full OS, nor I published them on GitHub. I treated those as learning projects. I have finally taken this undertaking of writing an OS - I know the path is long and arduous, but I am firm that I am going to enjoy the journey.
+          - paragraph [ref=e353]: Before I tell you more about it, I would like to say its very much a hobby project and probably will never run on real hardware and this is all just for fun. The OS is UEFI only and uses GRUB as the bootloader (to save me the hassle of writing a bootloader so I can focus on other stuff - I could have written a custom bootloader, but maybe that can be a future thing)
+          - paragraph [ref=e354]:
+            - text: "Anyway, here's what I have until now:"
+            - text: "- A kernel called \"Mirai\" - the kernel itself is identity mapped, while other things and userspace (planned) run in the higher half."
+            - text: "- Physical Memory Manager - Bitmap based page tracking, 4KB page allocation/freeing"
+            - text: "- Page Table Manager - 4-level paging (PML4/PDPT/PD/PT) with dynamic page mapping"
+            - text: "- SLAB based Heap Allocator - inspired by Linux - O(1) allocation and free with Large allocation support"
+            - text: "- Interrupt Descriptor Table"
+            - text: "- Drivers: ATA, PS/2 Keyboard, AHCI, PCI, Serial, VGA (The filesystem used ATA earlier, now switched to AHCI)"
+            - text: "- FileSystem: Akiba File System (AFS) - inspired by FAT32, uses GPT Partition Scheme. Long Filename support to be added."
+            - text: "- Graphics: Supports 24-bit and 32-bit colour with PSF and PSF2 font rendering."
+            - text: "- A basic terminal"
+            - text: "- Akiba Shell (ASH)"
+          - paragraph [ref=e355]:
+            - text: "ASH only has 3 commands as of now:"
+            - text: "- mi (Short for mité, Japanese: to look) - used to view directories (called 'Stacks' in system) and files (called 'Units')"
+            - text: "- nav (Short for navigate) - used to navigate to any stack, if used without arguments lists current stack path (like pwd)"
+            - text: "- wipe - clears the screen"
+          - paragraph [ref=e356]:
+            - text: "The project is written in Zig, with a few lines of assembly to support booting. The project lives at:"
+            - link "https://github.com/AkibaOS/akiba" [ref=e357] [cursor=pointer]:
+              - /url: https://github.com/AkibaOS/akiba
+            - text: or
+            - link "https://git.shi.foo/akiba/" [ref=e358] [cursor=pointer]:
+              - /url: https://git.shi.foo/akiba/
+            - text: (mirrors of each other) although the readme is vastly lacking in build instructions to say the least.
+          - paragraph [ref=e359]: "For those who want to run can simply clone and run `make clean && make`. You might have to adjust `scripts/run.sh` a bit to change the path for OVMF code as I was using macOS and didn't write script for Linux as well. I do use Arch but haven't got to updating it for Linux. IDK how it works on Windows. I don't know Windows. I will try to keep you all posted about the update."
+          - paragraph [ref=e360]: Thank you for reading such a long first post.
+        - link "19 comments" [ref=e362] [cursor=pointer]:
+          - /url: /r/osdev/comments/1pb8l7d/started_building_my_own_os_kernel_only_as_of_now/
+      - generic [ref=e363]:
+        - paragraph [ref=e364]:
+          - link "r/osdev" [ref=e365] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/KN_9296" [ref=e366] [cursor=pointer]:
+            - /url: /u/KN_9296
+          - text: • Nov 27 '25
+        - heading "PatchworkOS is now Fully Modular with ACPI Aware Drivers, as always Completely From Scratch with Documentation Included" [level=2] [ref=e367]:
+          - link "PatchworkOS is now Fully Modular with ACPI Aware Drivers, as always Completely From Scratch with Documentation Included" [ref=e368] [cursor=pointer]:
+            - /url: /r/osdev/comments/1p88jb7/patchworkos_is_now_fully_modular_with_acpi_aware/
+        - generic:
+          - link "Post image":
+            - /url: /img/5qjaipul3u3g1.png
+            - img "Post image"
+        - generic "190" [ref=e369]
+        - generic [ref=e371]:
+          - paragraph [ref=e372]: Moving to a modular kernel has been something I've wanted to do for a very long time, but its one of those features that is very complex in practice and that, from the users perspective, does... nothing. Everything still looks the exact same even after almost a month of work. So, I've been delaying it. However, It's finally done.
+          - paragraph [ref=e373]: The implementation involves what can be considered a "runtime linker", which is capable of relocating the ELF object files that make up a module, resolving symbols between modules, handling dependencies and module events (load, device attach, etc.).
+          - paragraph [ref=e374]: The kernel is intended to be highly modular, even SMP bootstrapping is done by a module, meaning SMP could be disabled by simply not loading the SMP module. Module loading is automatic, including dependency resolution, and there is a generic system for loading modules as devices are attached, this system is completely generic and allows for modules to easily implement "device bus" drivers without modification of the kernel.
+          - paragraph [ref=e375]: Hopefully, this level of modularity makes the code easier to understand by letting you focus on the thing you are actually interested in, and being able to ignore other parts of the kernel.
+          - paragraph [ref=e376]:
+            - text: This system should also be very useful in the future, as it makes development far easier, no more adding random
+            - code [ref=e377]: "*_init()"
+            - text: functions everywhere, no more worrying about the order to initialize things in, and no more needing to manually check if a device exists before initializing its driver. All of it is just in a module.
+          - paragraph [ref=e378]:
+            - text: Of course, I can't go over everything here, so please check the
+            - link "README on GitHub" [ref=e379] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS
+            - text: "! If you are interested in knowing even more, the entire module system is (in my humble opinion) very well documented, along with the rest of the kernel."
+          - paragraph [ref=e380]: As always, I'd gladly answer any questions anyone might have. If bugs or other issues are found, feel free to open an issue!
+        - link "12 comments" [ref=e382] [cursor=pointer]:
+          - /url: /r/osdev/comments/1p88jb7/patchworkos_is_now_fully_modular_with_acpi_aware/
+      - generic [ref=e383]:
+        - paragraph [ref=e384]:
+          - link "r/osdev" [ref=e385] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/emexos" [ref=e386] [cursor=pointer]:
+            - /url: /u/emexos
+          - text: • Nov 25 '25
+        - heading "emexOS - a small 64-bit Operating System" [level=2] [ref=e387]:
+          - link "emexOS - a small 64-bit Operating System" [ref=e388] [cursor=pointer]:
+            - /url: /r/osdev/comments/1p6jmko/emexos_a_small_64bit_operating_system/
+        - link "Thumbnail gallery" [ref=e389] [cursor=pointer]:
+          - /url: /r/osdev/comments/1p6jmko/emexos_a_small_64bit_operating_system/
+          - generic:
+            - img "Thumbnail"
+          - generic [ref=e390]: gallery
+        - generic "182" [ref=e391]
+        - generic [ref=e393]:
+          - paragraph [ref=e394]: Hey there,
+          - paragraph [ref=e395]: I'm working on a 64-bit Operating System since a while and i posted a few weeks ago but there are much things which changed
+          - paragraph [ref=e396]: i started emexOS with customization and simplicity in mind, it should be Unix-like but currently theres not much which unix has but customization is already simple in just 1 file you can change themes and more
+          - paragraph [ref=e397]:
+            - text: "emexOS uses the limine bootloader and currently boots in UEFI (BIOS does also work) and has some simple but cool features the source code is available at:"
+            - link "https://github.com/emexos/emexOS1" [ref=e398] [cursor=pointer]:
+              - /url: https://github.com/emexos/emexOS1
+            - text: "and to joyn the discord use this link:"
+            - link "https://discord.gg/54awburN" [ref=e399] [cursor=pointer]:
+              - /url: https://discord.gg/54awburN
+            - text: "or message me on discord my account name is: emexos"
+          - paragraph [ref=e400]:
+            - text: "official Youtube Channel:"
+            - link "https://www.youtube.com/@emexSW" [ref=e401] [cursor=pointer]:
+              - /url: https://www.youtube.com/@emexSW
+          - paragraph [ref=e402]: feel free to join or contribute/fork the OS
+        - link "6 comments" [ref=e404] [cursor=pointer]:
+          - /url: /r/osdev/comments/1p6jmko/emexos_a_small_64bit_operating_system/
+      - generic [ref=e405]:
+        - paragraph [ref=e406]:
+          - link "r/osdev" [ref=e407] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/avaliosdev" [ref=e408] [cursor=pointer]:
+            - /url: /u/avaliosdev
+          - text: • 4d ago
+        - heading "how do I do paging?" [level=2] [ref=e409]:
+          - link "how do I do paging?" [ref=e410] [cursor=pointer]:
+            - /url: /r/osdev/comments/1u9hjhc/how_do_i_do_paging/
+        - generic:
+          - link "Post image":
+            - /url: /img/vur34yrjp38h1.png
+            - img "Post image"
+        - generic "178" [ref=e411]
+        - paragraph [ref=e414]: hello I am new to osdev I completed osdev barebones I compiled i686-elf-gcc and I have terminal how do I paging?
+        - link "33 comments" [ref=e416] [cursor=pointer]:
+          - /url: /r/osdev/comments/1u9hjhc/how_do_i_do_paging/
+      - generic [ref=e417]:
+        - paragraph [ref=e418]:
+          - link "r/osdev" [ref=e419] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/KN_9296" [ref=e420] [cursor=pointer]:
+            - /url: /u/KN_9296
+          - text: • Dec 15 '25
+        - 'heading "PatchworkOS: An Overview of the Everything Is a File Philosophy, Sockets, Spawning Processes, and Notes (signals)." [level=2] [ref=e421]':
+          - 'link "PatchworkOS: An Overview of the Everything Is a File Philosophy, Sockets, Spawning Processes, and Notes (signals)." [ref=e422] [cursor=pointer]':
+            - /url: /r/osdev/comments/1pnb7e5/patchworkos_an_overview_of_the_everything_is_a/
+        - generic:
+          - link "Post image":
+            - /url: /img/vje5x75r5e7g1.png
+            - img "Post image"
+        - generic "171" [ref=e423]
+        - generic [ref=e425]:
+          - paragraph [ref=e426]:
+            - link "PatchworkOS" [ref=e427] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS
+            - text: strictly follows the "everything is a file" philosophy in a way inspired by Plan9, this can often result in unorthodox APIs that seem overcomplicated at first, but the goal is to provide a simple, consistent and most importantly composable interface for all kernel subsystems, more on this later.
+          - paragraph [ref=e428]: Included below are some examples to familiarize yourself with the concept. We, of course, cannot cover everything, so the concepts presented here are the ones believed to provide the greatest insight into the philosophy.
+          - heading "Sockets" [level=2] [ref=e429]
+          - paragraph [ref=e430]: The first example is sockets, specifically how to create and use local seqpacket sockets.
+          - paragraph [ref=e431]:
+            - text: To create a local seqpacket socket, you open the
+            - code [ref=e432]: /net/local/seqpacket
+            - text: file. This is equivalent to calling
+            - code [ref=e433]: socket(AF_LOCAL, SOCK_SEQPACKET, 0)
+            - text: in POSIX systems. The opened file can be read to return the "ID" of the newly created socket which is a string that uniquely identifies the socket, more on this later.
+          - paragraph [ref=e434]: "PatchworkOS provides several helper functions to make file operations easier, but first we will show how to do it without any helpers:"
+          - paragraph [ref=e435]:
+            - code [ref=e436]: "c fd_t fd = open(\"/net/local/seqpacket\"); char id[32] = {0}; read(fd, id, 31); // ... do stuff ... close(fd);"
+          - paragraph [ref=e437]:
+            - text: Using the
+            - code [ref=e438]: sread()
+            - text: "helper which reads a null-terminated string from a file descriptor, we can simplify this to:"
+          - paragraph [ref=e439]:
+            - code [ref=e440]: c fd_t fd = open("/net/local/seqpacket"); char* id = sread(fd); close(fd); // ... do stuff ... free(id);
+          - paragraph [ref=e441]:
+            - text: Finally, using use the
+            - code [ref=e442]: sreadfile()
+            - text: "helper which reads a null-terminated string from a file from its path, we can simplify this even further to:"
+          - paragraph [ref=e443]:
+            - code [ref=e444]: c char* id = sreadfile("/net/local/seqpacket"); // ... do stuff ... free(id);
+          - blockquote [ref=e445]:
+            - paragraph [ref=e446]:
+              - text: Note that the socket will persist until the process that created it and all its children have exited. Additionally, for error handling, all functions will return either
+              - code [ref=e447]: "NULL"
+              - text: or
+              - code [ref=e448]: ERR
+              - text: on failure, depending on if they return a pointer or an integer type respectively. The per-thread
+              - code [ref=e449]: errno
+              - text: variable is used to indicate the specific error that occurred, both in user space and kernel space (however the actual variable is implemented differently in kernel space).
+          - paragraph [ref=e450]:
+            - text: Now that we have the ID, we can discuss what it actually is. The ID is the name of a directory in the
+            - code [ref=e451]: /net/local
+            - text: "directory, in which the following files exist:"
+          - list [ref=e452]:
+            - listitem [ref=e453]:
+              - code [ref=e454]: data
+              - text: ": Used to send and retrieve data"
+            - listitem [ref=e455]:
+              - code [ref=e456]: ctl
+              - text: ": Used to send commands"
+            - listitem [ref=e457]:
+              - code [ref=e458]: accept
+              - text: ": Used to accept incoming connections"
+          - paragraph [ref=e459]:
+            - text: So, for example, the sockets data file is located at
+            - code [ref=e460]: /net/local/[id]/data
+            - text: .
+          - paragraph [ref=e461]:
+            - text: Say we want to make our socket into a server, we would then use the
+            - code [ref=e462]: ctl
+            - text: file to send the
+            - code [ref=e463]: bind
+            - text: and
+            - code [ref=e464]: listen
+            - text: commands, this is similar to calling
+            - code [ref=e465]: bind()
+            - text: and
+            - code [ref=e466]: listen()
+            - text: in POSIX systems. In this case, we want to bind the server to the name
+            - code [ref=e467]: myserver
+            - text: .
+          - paragraph [ref=e468]: "Once again, we provide several helper functions to make this easier. First, without any helpers:"
+          - paragraph [ref=e469]:
+            - code [ref=e470]: "c char ctlPath[MAX_PATH] = {0}; snprintf(ctlPath, MAX_PATH, \"/net/local/%s/ctl\", id) fd_t ctl = open(ctlPath); const char* str = \"bind myserver && listen\"; // Note the use of && to send multiple commands. write(ctl, str, strlen(str)); close(ctl);"
+          - paragraph [ref=e471]:
+            - text: Using the
+            - code [ref=e472]: F()
+            - text: macro which allocates formatted strings on the stack and the
+            - code [ref=e473]: swrite()
+            - text: "helper that writes a null-terminated string to a file descriptor:"
+          - paragraph [ref=e474]:
+            - code [ref=e475]: c fd_t ctl = open(F("/net/local/%s/ctl", id)); swrite(ctl, "bind myserver && listen") close(ctl);
+          - paragraph [ref=e476]:
+            - text: Finally, using the
+            - code [ref=e477]: swritefile()
+            - text: "helper which writes a null-terminated string to a file from its path:"
+          - paragraph [ref=e478]:
+            - code [ref=e479]: c swritefile(F("/net/local/%s/ctl", id), "bind myserver && listen");
+          - paragraph [ref=e480]: "If we wanted to accept a connection using our newly created server, we just open its accept file:"
+          - paragraph [ref=e481]:
+            - code [ref=e482]: c fd_t fd = open(F("/net/local/%s/accept", id)); /// ... do stuff ... close(fd);
+          - paragraph [ref=e483]:
+            - text: The file descriptor returned when the accept file is opened can be used to send and receive data, just like when calling
+            - code [ref=e484]: accept()
+            - text: in POSIX systems.
+          - paragraph [ref=e485]:
+            - text: For the sake of completeness, to connect the server we just create a new socket and use the
+            - code [ref=e486]: connect
+            - text: "command:"
+          - paragraph [ref=e487]:
+            - code [ref=e488]: c char* id = sreadfile("/net/local/seqpacket"); swritefile(F("/net/local/%s/ctl", id), "connect myserver"); free(id);
+          - paragraph [ref=e489]:
+            - link "Documentation" [ref=e490] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/df/d65/group__module__net.html
+          - heading "File Flags?" [level=2] [ref=e491]
+          - paragraph [ref=e492]:
+            - text: You may have noticed that in the above section sections the
+            - code [ref=e493]: open()
+            - text: "function does not take in a flags argument. This is because flags are directly part of the file path so to create a non-blocking socket:"
+          - paragraph [ref=e494]:
+            - code [ref=e495]: c open("/net/local/seqpacket:nonblock");
+          - paragraph [ref=e496]:
+            - text: Multiple flags are allowed, just separate them with the
+            - code [ref=e497]: ":"
+            - text: character, this means flags can be easily appended to a path using the
+            - code [ref=e498]: F()
+            - text: macro. Each flag also has a shorthand version for which the
+            - code [ref=e499]: ":"
+            - text: character is omitted, for example to open a file as create and exclusive, you can do
+          - paragraph [ref=e500]:
+            - code [ref=e501]: c open("/some/path:create:exclusive");
+          - paragraph [ref=e502]: or
+          - paragraph [ref=e503]:
+            - code [ref=e504]: c open("/some/path:ce");
+          - paragraph [ref=e505]:
+            - text: For a full list of available flags, check the
+            - link "Documentation" [ref=e506] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/dd/de3/group__kernel__fs__path.html
+            - text: .
+          - heading "Permissions?" [level=2] [ref=e507]
+          - paragraph [ref=e508]: Permissions are also specified using file paths there are three possible permissions, read, write and execute. For example to open a file as read and write, you can do
+          - paragraph [ref=e509]:
+            - code [ref=e510]: c open("/some/path:read:write");
+          - paragraph [ref=e511]: or
+          - paragraph [ref=e512]:
+            - code [ref=e513]: c open("/some/path:rw");
+          - paragraph [ref=e514]: Permissions are inherited, you can't use a file with lower permissions to get a file with higher permissions. Consider the namespace section, if a directory was opened using only read permissions and that same directory was bound, then it would be impossible to open any files within that directory with any permissions other than read.
+          - paragraph [ref=e515]:
+            - text: For a full list of available permissions, check the
+            - link "Documentation" [ref=e516] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/dd/de3/group__kernel__fs__path.html
+            - text: .
+          - heading "Spawning Processes" [level=2] [ref=e517]
+          - paragraph [ref=e518]:
+            - text: Another example of the "everything is a file" philosophy is the
+            - code [ref=e519]: spawn()
+            - text: syscall used to create new processes. We will skip the usual debate on
+            - code [ref=e520]: fork()
+            - text: vs
+            - code [ref=e521]: spawn()
+            - text: and just focus on how
+            - code [ref=e522]: spawn()
+            - text: works in PatchworkOS as there are enough discussions about that online.
+          - paragraph [ref=e523]:
+            - text: The
+            - code [ref=e524]: spawn()
+            - text: "syscall takes in two arguments:"
+          - list [ref=e525]:
+            - listitem [ref=e526]:
+              - code [ref=e527]: const char** argv
+              - text: ": The argument vector, similar to POSIX systems except that the first argument is always the path to the executable."
+            - listitem [ref=e528]:
+              - code [ref=e529]: spawn_flags_t flags
+              - text: ": Flags controlling the creation of the new process, primarily what to inherit from the parent process."
+          - paragraph [ref=e530]:
+            - text: The system call may seem very small in comparison to, for example,
+            - code [ref=e531]: posix_spawn()
+            - text: or
+            - code [ref=e532]: CreateProcess()
+            - text: . This is intentional, trying to squeeze every possible combination of things one might want to do when creating a new process into a single syscall would be highly impractical, as those familiar with
+            - code [ref=e533]: CreateProcess()
+            - text: may know.
+          - paragraph [ref=e534]: PatchworkOS instead allows the creation of processes in a suspended state, allowing the parent process to modify the child process before it starts executing.
+          - paragraph [ref=e535]:
+            - text: As an example, let's say we wish to create a child such that its stdio is redirected to some file descriptors in the parent and create an environment variable
+            - code [ref=e536]: MY_VAR=my_value
+            - text: .
+          - paragraph [ref=e537]:
+            - text: First, let's pretend we have some set of file descriptors and spawn the new process in a suspended state using the
+            - code [ref=e538]: SPAWN_SUSPENDED
+            - text: flag
+          - paragraph [ref=e539]: "```c fd_t stdin = ...; fd_t stdout = ...; fd_t stderr = ...;"
+          - paragraph [ref=e540]: "const char* argv[] = {\"/bin/shell\", NULL}; pid_t child = spawn(argv, SPAWN_SUSPENDED); ```"
+          - paragraph [ref=e541]: At this point, the process exists but its stuck blocking before it is can load its executable. Additionally, the child process has inherited all file descriptors and environment variables from the parent process.
+          - paragraph [ref=e542]:
+            - text: Now we can redirect the stdio file descriptors in the child process using the
+            - code [ref=e543]: /proc/[pid]/ctl
+            - text: file, which just like the socket ctl file, allows us to send commands to control the process. In this case, we want to use two commands,
+            - code [ref=e544]: dup2
+            - text: to redirect the stdio file descriptors and
+            - code [ref=e545]: close
+            - text: to close the unneeded file descriptors.
+          - paragraph [ref=e546]:
+            - code [ref=e547]: c swritefile(F("/proc/%d/ctl", child), F("dup2 %d 0 && dup2 %d 1 && dup2 %d 2 && close 3 -1", stdin, stdout, stderr));
+          - blockquote [ref=e548]:
+            - paragraph [ref=e549]:
+              - text: Note that
+              - code [ref=e550]: close
+              - text: can either take one or two arguments. When two arguments are provided, it closes all file descriptors in the specified range. In our case
+              - code [ref=e551]: "-1"
+              - text: causes a underflow to the maximum file descriptor value, closing all file descriptors higher than or equal to the first argument.
+          - paragraph [ref=e552]:
+            - text: Next, we create the environment variable by creating a file in the child's
+            - code [ref=e553]: /proc/[pid]/env/
+            - text: "directory:"
+          - paragraph [ref=e554]:
+            - code [ref=e555]: c swritefile(F("/proc/%d/env/MY_VAR:create", child), "my_value");
+          - paragraph [ref=e556]:
+            - text: Finally, we can start the child process using the
+            - code [ref=e557]: start
+            - text: "command:"
+          - paragraph [ref=e558]:
+            - code [ref=e559]: c swritefile(F("/proc/%d/ctl", child), "start");
+          - paragraph [ref=e560]: At this point the child process will begin executing with its stdio redirected to the specified file descriptors and the environment variable set as expected.
+          - paragraph [ref=e561]:
+            - text: The advantages of this approach are numerous, we avoid COW issues with
+            - code [ref=e562]: fork()
+            - text: ", weirdness with"
+            - code [ref=e563]: vfork()
+            - text: ", system call bloat with"
+            - code [ref=e564]: CreateProcess()
+            - text: ", and we get a very flexible and powerful process creation system that can use any of the other file based APIs to modify the child process. In exchange, the only real price we pay is overhead from additional context switches, string parsing and path traversals, how much this matters in practice is debatable."
+          - paragraph [ref=e565]:
+            - text: For more on
+            - code [ref=e566]: spawn()
+            - text: ", check the"
+            - link "Userspace Process API Documentation" [ref=e567] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/d1/d10/group__libstd__sys__proc.html#gae41c1cb67e3bc823c6d0018e043022eb
+            - text: and for more information on the
+            - code [ref=e568]: /proc
+            - text: filesystem, check the
+            - link "Kernel Process Documentation" [ref=e569] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/da/d0f/group__kernel__proc.html
+            - text: .
+          - heading "Notes (Signals)" [level=2] [ref=e570]
+          - paragraph [ref=e571]: The next feature to discuss is the "notes" system. Notes are PatchworkOS's equivalent to POSIX signals which asynchronously send strings to processes.
+          - paragraph [ref=e572]: We will skip how to send and receive notes along with details like process groups (check the docs for that), instead focusing on the biggest advantage of the notes system, additional information.
+          - paragraph [ref=e573]: Let's take an example. Say we are debugging a segmentation fault in a program, which is a rather common scenario. In a usual POSIX environment, we might be told "Segmentation fault (core dumped)" or even worse "SIGSEGV", which is not very helpful. The core limitation is that signals are just integers, so we can't provide any additional information.
+          - paragraph [ref=e574]: "In PatchworkOS, a note is a string where the first word of the string is the note type and the rest is arbitrary data. So in our segmentation fault example, the shell might produce output like:"
+          - paragraph [ref=e575]:
+            - code [ref=e576]: "bash shell: pagefault at 0x40013b due to stack overflow at 0x7ffffff9af18"
+          - blockquote [ref=e577]:
+            - paragraph [ref=e578]: Note that the output provided is from the "stackoverflow" program which intentionally causes a stack overflow through recursion.
+          - paragraph [ref=e579]: All that happened is that the shell printed the exit status of the process, which is also a string and in this case is set to the note that killed the process. This is much more useful, we know the exact address and the reason for the fault.
+          - paragraph [ref=e580]:
+            - text: For more details, see the
+            - link "Notes Documentation" [ref=e581] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/d8/db1/group__kernel__ipc__note.html
+            - text: ","
+            - link "Standard Library Process Documentation" [ref=e582] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/d1/d10/group__libstd__sys__proc.html
+            - text: and the
+            - link "Kernel Process Documentation" [ref=e583] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/da/d0f/group__kernel__proc.html
+            - text: .
+          - heading "But why?" [level=2] [ref=e584]
+          - paragraph [ref=e585]: I'm sure you have heard many an argument for and against the "everything is a file" philosophy. So I won't go over everything, but the primary reason for using it in PatchworkOS is "emergent behavior" or "composability" whichever term you prefer.
+          - paragraph [ref=e586]:
+            - text: Take the
+            - code [ref=e587]: spawn()
+            - text: example, notice how there is no specialized system for setting up a child after it's been created? Instead, we have a set of small, simple building blocks that when added together form a more complex whole. That is emergent behavior, by keeping things simple and most importantly composable, we can create very complex behavior without needing to explicitly design it.
+          - paragraph [ref=e588]:
+            - text: Let's take another example, say you wanted to wait on multiple processes with a
+            - code [ref=e589]: waitpid()
+            - text: syscall. Well, that's not possible. So now we suddenly need a new system call. Meanwhile, in an "everything is a file system" we just have a pollable
+            - code [ref=e590]: /proc/[pid]/wait
+            - text: file that blocks until the process dies and returns the exit status, now any behavior that can be implemented with
+            - code [ref=e591]: poll()
+            - text: can be used while waiting on processes, including waiting on multiple processes at once, waiting on a keyboard and a process, waiting with a timeout, or any weird combination you can think of.
+          - paragraph [ref=e592]: Plus its fun.
+          - paragraph [ref=e593]:
+            - emphasis [ref=e594]: PS. For those who are interested, PatchworkOS will now accept donations through GitHub sponsors in exchange for nothing but my gratitude.
+        - link "18 comments" [ref=e596] [cursor=pointer]:
+          - /url: /r/osdev/comments/1pnb7e5/patchworkos_an_overview_of_the_everything_is_a/
+      - generic [ref=e597]:
+        - paragraph [ref=e598]:
+          - link "r/osdev" [ref=e599] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/Brick-Sigma" [ref=e600] [cursor=pointer]:
+            - /url: /u/Brick-Sigma
+          - text: • Sep 09 '25
+        - heading "Partially implemented a FAT 16 file system that allows me to swap out the second stage bootloader without rebuilding the entire project" [level=2] [ref=e601]:
+          - link "Partially implemented a FAT 16 file system that allows me to swap out the second stage bootloader without rebuilding the entire project" [ref=e602] [cursor=pointer]:
+            - /url: /r/osdev/comments/1ncttip/partially_implemented_a_fat_16_file_system_that/
+        - generic "165" [ref=e605]
+        - generic [ref=e607]:
+          - paragraph [ref=e608]: Hello there! I've spent the last couple of days reading and trying to understand the FAT file system layout, and after a couple of days of coding I've been able to "partially" implement the FAT 16 file system inside the 512 byte boot sector that can load up my second stage boot loader from the file system.
+          - paragraph [ref=e609]: I've definitely over engineered this, as I know most hobby OSes and even real operating systems would just hard code the location of the second stage boot loader to make loading it much quicker, however I like torturing myself and decided to try get the bootloader to search the root directory and find the second stage bootloader dynamically. The only advantage this serves is that I can edit and recompile my second stage bootloader and just replace it in the file system (like the video above), rather than recompiling the whole OS and packaging it into an ISO or burning it again and again onto my flash drive. Is it useful? A little, as I'm sure I'll eventually reach a point where I'll never have to touch the second or even first stage bootloader again after implementing the kernel and making sure everything is setup correctly, but it was quite cool to see it working.
+          - paragraph [ref=e610]: "I'm emphasizing on the \"partial\" implementation as it has a good number of caveats and limitations (due to trying to fit in the 512 bytes of the boot sector). Some of these include:"
+          - list [ref=e611]:
+            - listitem [ref=e612]: The second stage boot loader can only use a maximum of 24 clusters as I can only (at the moment) load a single sector for the FAT table, which is roughly 32 clusters (or 30 excluding the reserved clusters), which also gives the limitation of the second stage boot loader being under 12KB (though that isn't a real issue)
+            - listitem [ref=e613]: While it is possible to delete and replace the second stage bootloader, if you do it enough times or copy more files to the root directory the cluster index of the bootloader will go beyond index 15, and as mentioned before I only load the first 16 FAT entries so that would almost make it un-bootable, or crash at the very least.
+          - paragraph [ref=e614]:
+            - text: "Here's the link to my project's GitHub page:"
+            - link "https://github.com/BrickSigma/SteinerOS" [ref=e615] [cursor=pointer]:
+              - /url: https://github.com/BrickSigma/SteinerOS
+            - text: . I've tried my best to document a lot of the code, especially in the boot.s folder with my own thoughts and notes on the implementation, but I wouldn't mind any input it or the project structure as well to help move forward.
+          - paragraph [ref=e616]: I'm considering either upgrading it to FAT 32 for the sake of having a higher level disk system working. My previous (ad very first) post of my project was the game Pong running in the boot sector, and hopefully I can implement it again but in a C kernel once I get it running.
+          - paragraph [ref=e617]: "I do have a few questions though that I would like clarification on:"
+          - list [ref=e618]:
+            - listitem [ref=e619]: "I'm still yet to implement the kernel in C, and to do it I need to find the kernel image in the file system and load it to some address in memory greater than 2M. This can't be done using BIOS interrupts with LBA in real mode due to the addressing limitation, which means writing a FAT 16 parser in the second stage bootloader that can load the kernel. I'm thinking of doing it in C: basically once I enable 32-bit protected mode I simply call a C function (not the kernel) which can handle loading the kernel in with it's own FAT 16 parser, and then the kernel will have it's own implementation of parsing the file system as well. Is this the correct approach to take? Is it common to mix C with the second stage bootloader before jumping to the kernel?"
+            - listitem [ref=e620]: I've been reading on ELF files and executables as well for the kernel, would it be better to implement an ELF kernel (and an ELF parser in the second stage bootloader) rather than a flat file binary? I know ELF makes it easier to hook GDB to for debugging. Where can I read more about this?
+          - paragraph [ref=e621]: Thanks for reading and have an amazing day!
+        - link "9 comments" [ref=e623] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ncttip/partially_implemented_a_fat_16_file_system_that/
+      - generic [ref=e624]:
+        - paragraph [ref=e625]:
+          - link "r/osdev" [ref=e626] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/KN_9296" [ref=e627] [cursor=pointer]:
+            - /url: /u/KN_9296
+          - text: • Oct 28 '25
+        - heading "Lots of progress on PatchworkOS including a performance/stability overhaul of the kernel, the addition of several non-POSIX system calls, the groundwork for security, some new toys, and much more!" [level=2] [ref=e628]:
+          - link "Lots of progress on PatchworkOS including a performance/stability overhaul of the kernel, the addition of several non-POSIX system calls, the groundwork for security, some new toys, and much more!" [ref=e629] [cursor=pointer]:
+            - /url: /r/osdev/comments/1oieymp/lots_of_progress_on_patchworkos_including_a/
+        - link "Thumbnail gallery" [ref=e630] [cursor=pointer]:
+          - /url: /r/osdev/comments/1oieymp/lots_of_progress_on_patchworkos_including_a/
+          - generic:
+            - img "Thumbnail"
+          - generic [ref=e631]: gallery
+        - generic "162" [ref=e632]
+        - generic [ref=e634]:
+          - paragraph [ref=e635]: The past month or so has seen a large redo of large sections of the OS and the addition of a few more things. There are still vast sections of the OS I'm unhappy with, the Desktop Window Manager being a big one, and security still only exists as a list of ideas, but considering the OS is well over 80k lines now... I think this is a good "touch" point.
+          - heading "The Visible Stuff" [level=2] [ref=e636]
+          - paragraph [ref=e637]: Let's start with the things that can actually be seen. First, the terminal and shell have been redone, they should now work more or less as expected with STDIO redirection, piping, input editing, history navigation, the ability to (finally) kill processes using Control+C, exit status handling, partial ANSI support and the separation between the shell and terminal process now align with how its "expected" to be done. The terminal is just a dumb box that puts what it's given to the screen and send keyboard input to the shell, while the shell does the real work. Implementing this has been possible for a very long time I just had not gotten around to it, and so far its made my life significantly easier.
+          - paragraph [ref=e638]:
+            - text: For the terminal there are a few new programs, the obvious one is the
+            - code [ref=e639]: top
+            - text: program, shown in the first image, displaying CPU and memory usage, the previous version of this program was very simplistic and well... ugly. The help built-in is also new, and of course I added some color to
+            - code [ref=e640]: ls
+            - text: because of course I did.
+          - paragraph [ref=e641]: The Desktop Window Manager (DWM) has had a partial overhaul to solve the worst of its problems, large performance improvements being the big one, but security is still waiting for kernel level security to be fully implemented and stable.
+          - paragraph [ref=e642]:
+            - text: I've also added a
+            - code [ref=e643]: clock
+            - text: program, visible in the screenshot, it's at least slightly interesting, so I will mention it. It uses polygon rotation and fill to draw itself, each of the marks and hands has an array of points describing it as a polygon, this array is then rotated and translated to the correct position before being filled using an anti-aliased scan line approach. Reminds me of when I wanted to make a game engine a very long time ago and this kinda stuff would seem like magic, now its just... obvious. Maybe that's motivation for someone, it can be found
+            - link "here" [ref=e644] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS/blob/main/src/programs/clock/main.c
+            - text: .
+          - heading "The Invisible Stuff" [level=2] [ref=e645]
+          - paragraph [ref=e646]: As mentioned, most of the kernel has been redone. First, the entire overhaul began as I was working on the ACPI stuff and decided that the kernel stacks are simply using up too much memory, leading to me implementing dynamic kernel stacks, a system where instead of the entire kernel stack being mapped at once its mapped when a page fault occurs in the kernel stack in a system similar to dynamic user space stacks which were previously available and remain so.
+          - paragraph [ref=e647]:
+            - text: Dynamic kernel stacks are actually quite complex as if a page fault occurs, that page fault will need a stack in order to do... anything, but that page fault only occurs if the stack has run out, so we are stuck. The solution is to just have separate stacks for interrupt, exception, and double fault handling, discussed further in the
+            - link "Doxygen docs" [ref=e648] [cursor=pointer]:
+              - /url: https://kainorberg.github.io/PatchworkOS/html/db/d5e/group__kernel__cpu__tss.html
+            - text: and here in the
+            - link "code" [ref=e649] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS/blob/main/src/kernel/cpu/tss.h
+            - text: .
+          - paragraph [ref=e650]: The initialization process has been overhauled to be, hopefully, more stable and to get the scheduler stared earlier, which reduces the need for edge cases during boot.
+          - paragraph [ref=e651]: There is much more to talk about, but I suppose you will just have to check out the repo if you are still interested in more :)
+          - heading "New System Calls and Groundwork for Security" [level=2] [ref=e652]
+          - paragraph [ref=e653]:
+            - text: Finally, I want to talk about two new system calls
+            - code [ref=e654]: share()
+            - text: and
+            - code [ref=e655]: claim()
+            - text: . The idea is that these system calls let you send file descriptors over any kind of IPC, by generating a 128 bit one-time use key with an expiry time.
+          - paragraph [ref=e656]:
+            - text: Simply generate a key for a file descriptor using
+            - code [ref=e657]: share()
+            - text: send that to some other process and if the key hasn't expired, yet it can use
+            - code [ref=e658]: claim()
+            - text: to retrieve a file descriptor to the same file. It's a replacement for the at least in my mind, overcomplicated and hard to utilize cleanly
+            - code [ref=e659]: SCM_RIGHTS
+            - text: system. More details can be found in the
+            - link "README" [ref=e660] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS
+            - text: .
+          - paragraph [ref=e661]: In practice this is a foundation for a file based "capability style" security system. When combined with the new per-process namespace features and the planned read, write, execute, create permission system we should have a functioning security system that adheres to the "everything is a file" philosophy.
+          - paragraph [ref=e662]: I've just realized how much I've written, so I'm going to end this here.
+          - paragraph [ref=e663]: Of course, if you have any feedback, find any bugs (which considering how much code I've changed I'm sure there are at least a few), or just have something to say, then feel free to comment or open an issue!
+          - paragraph [ref=e664]:
+            - link "GitHub" [ref=e665] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS
+        - link "14 comments" [ref=e667] [cursor=pointer]:
+          - /url: /r/osdev/comments/1oieymp/lots_of_progress_on_patchworkos_including_a/
+      - generic [ref=e668]:
+        - paragraph [ref=e669]:
+          - link "r/osdev" [ref=e670] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/Recent-Extent5372" [ref=e671] [cursor=pointer]:
+            - /url: /u/Recent-Extent5372
+          - text: • Apr 01 '26
+        - 'heading "My first OS: Vystem" [level=2] [ref=e672]':
+          - 'link "My first OS: Vystem" [ref=e673] [cursor=pointer]':
+            - /url: /r/osdev/comments/1s9dnc4/my_first_os_vystem/
+        - generic "159" [ref=e676]
+        - generic [ref=e678]:
+          - paragraph [ref=e679]: Hello everyone,
+          - paragraph [ref=e680]: Today I’m finally releasing the first public version of Vystem, the OS project I’ve been building over the past few months.
+          - paragraph [ref=e681]: "My goal was mainly educational: I wanted to learn OS development by writing everything myself from scratch. Because of that, I ended up designing several custom components, including:"
+          - list [ref=e682]:
+            - listitem [ref=e683]: my own init filesystem
+            - listitem [ref=e684]: a bitmap font format
+            - listitem [ref=e685]: a simple executable file format used to load the kernel
+            - listitem [ref=e686]: a physical page allocator based on radix trees
+            - listitem [ref=e687]: a custom heap allocator
+            - listitem [ref=e688]: an extremely minimal libc
+          - paragraph [ref=e689]: I also wrote my own UEFI bootloader using EDK2, as well as the kernel itself.
+          - paragraph [ref=e690]: There is no external code inside the kernel. The only third-party code used in the bootloader is a set of cryptographic libraries adapted for a bare-metal environment.
+          - paragraph [ref=e691]: "At the moment, Vystem is still in its early stages, but it already includes:"
+          - list [ref=e692]:
+            - listitem [ref=e693]: cryptographic boot file integrity verification using a boot password
+            - listitem [ref=e694]: "two custom partition formats: InitFS and SignSyst, used to store system files and their signatures"
+            - listitem [ref=e695]: a custom executable format for a hybrid kernel design
+            - listitem [ref=e696]: a radix-tree-based physical page allocator
+            - listitem [ref=e697]: a simple but efficient heap design
+            - listitem [ref=e698]: a complete test and benchmark framework to evaluate both performance and subsystem reliability
+          - paragraph [ref=e699]: Vystem currently targets x86-64 systems with UEFI firmware.
+          - paragraph [ref=e700]:
+            - text: "I also wrote detailed documentation included in the repository:"
+            - link "lolo859/vystem" [ref=e701] [cursor=pointer]:
+              - /url: https://gitea.vystem.net/lolo859/vystem
+          - paragraph [ref=e702]: I did use AI occasionally for debugging, troubleshooting, and learning a few concepts I was unfamiliar with (like paging), but all the code and documentation were fully written by me.
+          - paragraph [ref=e703]: English is also not my first language, so please excuse me if there is any errors in the documentation.
+        - link "26 comments" [ref=e705] [cursor=pointer]:
+          - /url: /r/osdev/comments/1s9dnc4/my_first_os_vystem/
+      - generic [ref=e706]:
+        - paragraph [ref=e707]:
+          - link "r/osdev" [ref=e708] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/Candid_Bullfrog3665" [ref=e709] [cursor=pointer]:
+            - /url: /u/Candid_Bullfrog3665
+          - text: • Mar 18 '26
+        - heading "making some progress!! i can now handle hardware interrupts! :D" [level=2] [ref=e710]:
+          - link "making some progress!! i can now handle hardware interrupts! :D" [ref=e711] [cursor=pointer]:
+            - /url: /r/osdev/comments/1rxdkyg/making_some_progress_i_can_now_handle_hardware/
+        - generic:
+          - link "Post image":
+            - /url: /img/7eft1j2ntupg1.png
+            - img "Post image"
+        - generic "141" [ref=e712]
+        - generic [ref=e714]:
+          - paragraph [ref=e715]:
+            - text: this took me unbelievable long to make
+            - text: had some mistakes that made me think "am i really this dumb?"
+          - paragraph [ref=e716]: so far enjoying the process, im really loving being able to implement what i read! feels like another whole world and you always learn something you didnt know from pure theory
+        - link "8 comments" [ref=e718] [cursor=pointer]:
+          - /url: /r/osdev/comments/1rxdkyg/making_some_progress_i_can_now_handle_hardware/
+      - generic [ref=e719]:
+        - paragraph [ref=e720]:
+          - link "r/osdev" [ref=e721] [cursor=pointer]:
+            - /url: /r/osdev
+          - text: •
+          - link "u/KN_9296" [ref=e722] [cursor=pointer]:
+            - /url: /u/KN_9296
+          - text: • Mar 25 '26
+        - 'heading "PatchworkOS: A New Architecture, Async Direct I/O, True Capability Security, New Root Directory Concept and Userspace Components" [level=2] [ref=e723]':
+          - 'link "PatchworkOS: A New Architecture, Async Direct I/O, True Capability Security, New Root Directory Concept and Userspace Components" [ref=e724] [cursor=pointer]':
+            - /url: /r/osdev/comments/1s3da45/patchworkos_a_new_architecture_async_direct_io/
+        - link "Thumbnail gallery" [ref=e725] [cursor=pointer]:
+          - /url: /r/osdev/comments/1s3da45/patchworkos_a_new_architecture_async_direct_io/
+          - generic:
+            - img "Thumbnail"
+          - generic [ref=e726]: gallery
+        - generic "120" [ref=e727]
+        - generic [ref=e729]:
+          - paragraph [ref=e730]:
+            - text: It's been quite a while since the last update, and that's because a significant portion of
+            - link "PatchworkOS" [ref=e731] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS
+            - text: has been rewritten. So far the core architecture of the new design is more or less finalized, with a focus on async I/O, improving the capability security model, reducing ambient authority, stealing a few micro-kernel concept to move policy into userspace (such as userspace process loading and module management) and moving userspace into a flexible component based system.
+          - paragraph [ref=e732]: The rewrite is far from done, but below is an overview of what has been done so far. This can also be found in the README.
+          - heading "Philosophy" [level=2] [ref=e733]
+          - paragraph [ref=e734]: There are a few concepts that form the core of PatchworkOS, "everything is a file", asynchronous I/O, capability based security and others.
+          - heading "Everything is a File" [level=3] [ref=e735]
+          - paragraph [ref=e736]: The "everything is a file" philosophy means that almost all kernel resources are exposed as files, where a file is defined as an object that can be interacted with "like a file", as in it can be opened, read, written, and closed.
+          - blockquote [ref=e737]:
+            - paragraph [ref=e738]: The file concept is distinct from a "regular file", which is a specific type of file that is stored on a disk and is what most people think of when they hear the word "file".
+          - paragraph [ref=e739]: This can often result in unorthodox APIs that seem overcomplicated at first, but the goal is to provide a simple, consistent and most importantly composable interface for all kernel subsystems. The core argument is not that each individual API is better than its POSIX counterpart, but that they combine to form a system that is greater than the sum of its parts, allowing for behavior that was never explicitly designed for.
+          - paragraph [ref=e740]: Plus its fun.
+          - heading "I/O" [level=3] [ref=e741]
+          - paragraph [ref=e742]:
+            - text: The I/O system is designed with several modern I/O concepts in mind. For example, all open/walk operations use
+            - code [ref=e743]: openat()
+            - text: semantics, all I/O is vectored (uses scatter-gather lists), asynchronous and dispatched via an I/O Ring supporting timeouts and cancellation. All I/O is direct and (more or less) zero-copy.
+          - paragraph [ref=e744]: There are two components to asynchronous I/O, the I/O Ring and I/O Request Packets.
+          - paragraph [ref=e745]: The I/O Ring acts as the user-kernel space boundary and is made up of two circular queues mapped into userspace. The first queue is used by the userspace to submit I/O requests to the kernel. The second queue is used by the kernel to return the result of the I/O request. This system also features a virtual register system, allowing I/O Requests to store the result of their operation to a virtual register, which another I/O Request can read from into their arguments, allowing for several operations that may rely on the result of previous operations to be executed asynchronously.
+          - paragraph [ref=e746]: The I/O Request Packet (IRP) is a self-contained structure that contains all the information needed to perform an I/O operation. When the kernel receives a submission queue entry, it will parse it and create an I/O Request Packet. The I/O Request Packet will then be sent to the appropriate vnode (file system, device, etc.) for processing, once the I/O Request is completed, the kernel will write the result of the operation into the completion queue.
+          - paragraph [ref=e747]: If the target vnode can't complete the IRP immediately, it simply returns a "PENDING" status and the kernel continues without blocking.
+          - paragraph [ref=e748]: For reading or writing, the I/O Request Packet uses a Scatter Gather List, which is an array of entries, each containing a page frame number, offset and length. Since the kernel identity maps all of physical memory into its address space, it can directly read from or write to any buffers provided by userspace without needing to copy them into kernel space or map them.
+          - paragraph [ref=e749]:
+            - text: Built on top of this system are several layers of abstractions. For example, the
+            - code [ref=e750]: iowrite()
+            - text: function is a simple synchronous wrapper around the I/O ring and
+            - code [ref=e751]: fwrite()
+            - text: (provided by ANSI C) is a wrapper around
+            - code [ref=e752]: iowrite()
+            - text: that works as expected. Many helper functions are also provided, for example
+            - code [ref=e753]: iowritep()
+            - text: is a version of
+            - code [ref=e754]: iowrite()
+            - text: that will use the virtual register system to perform a walk, write and drop using a single system call.
+          - paragraph [ref=e755]:
+            - text: The "error" handling or status system allows for certain optimizations. For example, if a read is performed on a file such that no more data remains, the returned status will be an informational
+            - code [ref=e756]: EOF
+            - text: status. In certain cases, this means we can skip an additional read to check for EOF, potentially saving us a system call.
+          - paragraph [ref=e757]: The combination of this system and our "everything is a file" philosophy means that, since files are interacted with via async I/O and everything is a file, practically all operations can be asynchronous and dispatched via a I/O Ring.
+          - heading "Security" [level=3] [ref=e758]
+          - paragraph [ref=e759]: In PatchworkOS, there are no Access Control Lists, user IDs or similar mechanisms. Instead, PatchworkOS uses a capability security model based on file descriptors.
+          - paragraph [ref=e760]: A process can only access files that have been passed to it via file descriptors, and since everything is a file, this applies to practically everything in the system, including devices, IPC mechanisms, etc.
+          - heading "The .. Operator" [level=4] [ref=e761]:
+            - text: The
+            - code [ref=e762]: ..
+            - text: Operator
+          - paragraph [ref=e763]:
+            - text: The
+            - code [ref=e764]: ..
+            - text: or dotdot operator is a major security concern in a capability based system. Consider that if we pass a directory to a process that process could use
+            - code [ref=e765]: ..
+            - text: to access the parent directory and then the parent of the parent and so on. This vulnerability would effectively make capability based security meaningless.
+          - paragraph [ref=e766]:
+            - text: A tempting solution, used by other capability based systems, is to ban the use of
+            - code [ref=e767]: ..
+            - text: entirely and instead use string parsing to normalize paths (i.e. turning
+            - code [ref=e768]: a/b/..
+            - text: into
+            - code [ref=e769]: a
+            - text: ). There are two primary issues with this solution, relative paths and symlinks.
+          - paragraph [ref=e770]:
+            - text: As an example of a relative path, consider the path
+            - code [ref=e771]: ./..
+            - text: . The issue we encounter is that we may not know what
+            - code [ref=e772]: .
+            - text: refers to, requiring us to track the current working directory as a string. This is not only complex but also inefficient as we would need to parse the entire path string for every traversal and also start any path traversal from the root directory instead of being able to start from any file descriptor.
+          - paragraph [ref=e773]:
+            - text: We are still left with the problem of symlinks. Consider the path
+            - code [ref=e774]: a/b/../c
+            - text: ", if"
+            - code [ref=e775]: b
+            - text: is a symlink, and we proceed to normalize this path to
+            - code [ref=e776]: a/c
+            - text: ", we will end up accessing"
+            - code [ref=e777]: c
+            - text: within
+            - code [ref=e778]: a
+            - text: not within whatever directory the symlink points to, making symlinks pointless.
+          - paragraph [ref=e779]:
+            - text: There are alternative and superior solutions to this problem. However hopefully the point is clear, simply banning
+            - code [ref=e780]: ..
+            - text: is not a good solution due to the complexity and inefficiency it introduces, and the fact that symlinks become difficult to impossible to implement. That's not even mentioning the potential for race conditions when normalizing paths.
+          - paragraph [ref=e781]:
+            - text: The solution proposed by PatchworkOS comes from the realization that
+            - code [ref=e782]: ..
+            - text: is not inherently dangerous. Instead, it is only dangerous when it can be used to grant additional capabilities.
+          - paragraph [ref=e783]:
+            - text: As such we allow
+            - code [ref=e784]: ..
+            - text: if the process can prove that it already has a capability to reach the parent directory. For example, say we have a directory structure as described below.
+          - code [ref=e786]: / ├── a │ ├── b │ │ └── c
+          - paragraph [ref=e787]:
+            - text: Now let's say we have a process that wishes to open the
+            - code [ref=e788]: b
+            - text: directory and that has two file descriptors, one to the
+            - code [ref=e789]: c
+            - text: file (as in it has the capability to access
+            - code [ref=e790]: c
+            - text: ) and one to the
+            - code [ref=e791]: a
+            - text: directory (as in it has the capability to access
+            - code [ref=e792]: a
+            - text: ", the contents of"
+            - code [ref=e793]: a
+            - text: and the contents of all subdirectories).
+          - paragraph [ref=e794]:
+            - text: In this case, if we disallow the process from using
+            - code [ref=e795]: ..
+            - text: from
+            - code [ref=e796]: c
+            - text: to access
+            - code [ref=e797]: b
+            - text: ", we are not meaningfully preventing the process from accessing"
+            - code [ref=e798]: b
+            - text: ", since it can just use the"
+            - code [ref=e799]: a
+            - text: file descriptor to access
+            - code [ref=e800]: b
+            - text: directly. From this perspective, using
+            - code [ref=e801]: ..
+            - text: from
+            - code [ref=e802]: c
+            - text: is merely a more convenient way to access
+            - code [ref=e803]: b
+            - text: ", not that doing so actually grants any new capabilities to the process."
+          - paragraph [ref=e804]:
+            - text: However, if the process didn't have a file descriptor to
+            - code [ref=e805]: a
+            - text: then allowing it to use
+            - code [ref=e806]: ..
+            - text: from
+            - code [ref=e807]: c
+            - text: would grant additional capabilities and as such should not be allowed.
+          - paragraph [ref=e808]: All of this does however hinge on the ability for a process to prove that it has a capability to access the parent directory. The way this is done is closely tied to how PatchworkOS handles the "root directory."
+          - heading "The Root Directory" [level=4] [ref=e809]
+          - paragraph [ref=e810]: In PatchworkOS there is no global root or even local root. Instead, when a process walks a path it must always specify some file descriptor to be considered the root for that specific operation.
+          - paragraph [ref=e811]:
+            - text: This root file descriptor has three purposes. First, it is used to implement paths starting with
+            - code [ref=e812]: /
+            - text: ", letting paths start from the root file descriptor."
+          - paragraph [ref=e813]:
+            - text: Second, it is used by a process to provide the proof discussed in the
+            - code [ref=e814]: ..
+            - text: section. If the process tries to use
+            - code [ref=e815]: ..
+            - text: to access the parent directory, the kernel will check if the specified root can reach that parent directory, if it can, then
+            - code [ref=e816]: ..
+            - text: acts as expected, otherwise
+            - code [ref=e817]: ..
+            - text: becomes a no-op to replicate expected POSIX-like behavior (e.g
+            - code [ref=e818]: /../../
+            - text: is equivalent to
+            - code [ref=e819]: /
+            - text: ).
+          - paragraph [ref=e820]: Finally, the root file descriptor stores bindings. Within PatchworkOS, there is no namespace or per-process mountpoints. Instead, each file object stores a table of bindings. These bindings act as one would expect within POSIX, allowing a file to appear at a different path than its actual location within the filesystem hierarchy. When a bind is performed, that bind will only apply when walking paths from the file object whose binding table the bind was added to.
+          - paragraph [ref=e821]: In this system one can consider binding a file to be nothing more than a convenient way to pass multiple capabilities (file descriptors) within a single file descriptor, by binding paths within its binding table. It does also allow all the expected benefits of bindings or mounts from POSIX-like systems but from a different perspective.
+          - heading "Standard Library" [level=3] [ref=e822]
+          - paragraph [ref=e823]:
+            - text: The standard library (libstd) is a superset of the ANSI C standard library, meaning that headers such as
+            - code [ref=e824]: <stdio.h>
+            - text: and
+            - code [ref=e825]: <stdlib.h>
+            - text: are included while POSIX headers such as
+            - code [ref=e826]: <unistd.h>
+            - text: are not. Instead, the
+            - code [ref=e827]: sys
+            - text: directory provides a set of PatchworkOS-specific headers such as
+            - code [ref=e828]: <sys/io.h>
+            - text: and
+            - code [ref=e829]: <sys/proc.h>
+            - text: .
+          - paragraph [ref=e830]:
+            - text: Overall, an attempt is made to reuse and integrate our extensions cleanly without duplicating the ANSI sections of the standard library, for example the C11
+            - code [ref=e831]: <threads.h>
+            - text: header provides threading with
+            - code [ref=e832]: <sys/proc.h>
+            - text: intentionally mirroring its API.
+          - heading "Practical Examples" [level=2] [ref=e833]
+          - paragraph [ref=e834]: Included below are some practical examples of how to use the APIs provided by PatchworkOS, and how they differ from their POSIX counterparts. These examples are not meant to be comprehensive, but rather to provide an instinct and intuition for how PatchworkOS works.
+          - heading "Basic File I/O" [level=3] [ref=e835]
+          - paragraph [ref=e836]: For a basic example of file I/O, let's say we wanted to open a file, write "Hello, World!" to it and then close it.
+          - paragraph [ref=e837]: "In a POSIX system, we might write:"
+          - code [ref=e839]: int fd = open("/path/to/file", O_RDWR); write(fd, "Hello, World!", 13); close(fd);
+          - paragraph [ref=e840]: "Using the synchronous I/O wrappers in PatchworkOS, we would write:"
+          - code [ref=e842]: fd_t fd; iowalk(FDCWD, FDROOT, "/path/to/file:rw", &fd); size_t bytesWritten; iowrite(fd, IOBUF("Hello, World!", 13), IOCUR, &bytesWritten); iodrop(fd);
+          - paragraph [ref=e843]:
+            - text: We first open the file using
+            - code [ref=e844]: iowalk()
+            - text: ", specifying the default current working directory and root directory along with a path. Within the path we specify that we want \"read and write\" permissions ("
+            - code [ref=e845]: :rw
+            - text: see
+            - link "Path Flags and Payloads" [ref=e846] [cursor=pointer]:
+              - /url: "#Path%20Flags%20and%20Payloads"
+            - text: ).
+          - blockquote [ref=e847]:
+            - paragraph [ref=e848]: The term "walk" is used instead of "open" since all operations act on file descriptors and the ability to reach files relative to other files is a key part of the security model. As such, performing any operation on a file should be thought of as "walking" to it and then acting upon it, instead of merely "opening" it, after walking to a file we could walk to another file relative to it.
+          - paragraph [ref=e849]:
+            - text: Note that the
+            - code [ref=e850]: FDCWD
+            - text: and
+            - code [ref=e851]: FDROOT
+            - text: constants are just standard file descriptors like
+            - code [ref=e852]: STDIN
+            - text: ","
+            - code [ref=e853]: STDOUT
+            - text: and
+            - code [ref=e854]: STDERR
+            - text: (called
+            - code [ref=e855]: FDIN
+            - text: ","
+            - code [ref=e856]: FDOUT
+            - text: and
+            - code [ref=e857]: FDERR
+            - text: respectively). In PatchworkOS, the current working directory and root directory are just file descriptors like any other; an agreed upon convention that allows other processes to easily inherit them as needed.
+          - paragraph [ref=e858]:
+            - text: Then we write to the file using
+            - code [ref=e859]: iowrite()
+            - text: ", passing the file descriptor, a buffer containing the data to write (the"
+            - code [ref=e860]: iowrite()
+            - text: function actually expects an array of
+            - code [ref=e861]: iovec_t
+            - text: which the
+            - code [ref=e862]: IOBUF()
+            - text: macro creates on the stack for convenience) and the offset to write at (in this case
+            - code [ref=e863]: IOCUR
+            - text: to write at the current offset).
+          - paragraph [ref=e864]:
+            - text: Finally, we close the file using
+            - code [ref=e865]: iodrop()
+            - text: .
+          - blockquote [ref=e866]:
+            - paragraph [ref=e867]:
+              - text: The term "drop" is used instead of "close" to cleanly differentiate between closing a file and closing a file descriptor. We only use the terms "open" and "close" when referring to the underlying file (
+              - code [ref=e868]: file_t
+              - text: ), while using terms such as "grab" and "drop" when referring to file descriptors (
+              - code [ref=e869]: fd_t
+              - text: ).
+          - paragraph [ref=e870]:
+            - text: The
+            - code [ref=e871]: iowritet()
+            - text: ","
+            - code [ref=e872]: ioreadt()
+            - text: and
+            - code [ref=e873]: iowalkt()
+            - text: functions are also provided that expect an additional
+            - code [ref=e874]: clock_t timeout
+            - text: argument. There is also an event loop based abstraction around the I/O Ring itself provided via macros with the
+            - code [ref=e875]: Q
+            - text: suffix.
+          - heading "Path Flags and Payloads" [level=4] [ref=e876]
+          - paragraph [ref=e877]:
+            - text: A path can contain two additional optional segments, path flags and a payload. Path flags are appended after a
+            - code [ref=e878]: ":"
+            - text: character and can be written in two forms, either in full form or in short form with the short form being a single letter that can be specified in groups. For example,
+            - code [ref=e879]: /my/path:read:write:execute
+            - text: could also be written as
+            - code [ref=e880]: /my/path:rwx
+            - text: . Note that the order of the letters and duplicates are ignored.
+          - paragraph [ref=e881]:
+            - text: Beyond simple permission flags we have behavior flags such as
+            - code [ref=e882]: :append
+            - text: ","
+            - code [ref=e883]: :parents
+            - text: ","
+            - code [ref=e884]: :truncate
+            - text: ", etc. or creation flags,"
+            - code [ref=e885]: :create
+            - text: ","
+            - code [ref=e886]: :directory
+            - text: ","
+            - code [ref=e887]: :symlink
+            - text: and
+            - code [ref=e888]: :hardlink
+            - text: . With the simple
+            - code [ref=e889]: :create
+            - text: creating a regular file.
+          - paragraph [ref=e890]:
+            - text: The payload of a path is specified after a
+            - code [ref=e891]: "?"
+            - text: character, this payload is treated as a raw string and will be passed to the underlying filesystem, allowing it to handle the payload in any way it chooses. However, typically filesystems will expect an options list in the form of key-value pairs separated by
+            - code [ref=e892]: "&"
+            - text: characters.
+          - paragraph [ref=e893]:
+            - text: For example, we could create a symlink by walking the path
+            - code [ref=e894]: /my/path/to/source:symlink?/my/path/to/target
+            - text: .
+          - paragraph [ref=e895]:
+            - text: Another example is concatfs which is used to concatenate the contents of several directories into a single directory. It expects the targets of the concatenation to be specified in the payload to its clone file, for example
+            - code [ref=e896]: /sys/fs/concatfs/clone?targets=1,2,3,4
+            - text: where 1, 2, 3 and 4 are file descriptors.
+          - paragraph [ref=e897]: The primary intent behind the use of the flags and payload system is to allow for greater composability. With this system, any environment that can open a file, a Lua script, a shell, etc. can create any file, directory, symlink or hardlink with any permissions and flags without needing to rely on custom "PatchworkOS extensions".
+          - paragraph [ref=e898]: One can as an exercise imagine the potential of a basic "touch" shell utility with this system.
+          - heading "Process Creation" [level=3] [ref=e899]
+          - paragraph [ref=e900]: Let's say we wanted to create a process, redirect its standard I/O to a set of file descriptors and then execute a program.
+          - paragraph [ref=e901]: "In a POSIX system, we might write:"
+          - code [ref=e903]: "int in[2]; int out[2]; pipe(in); pipe(out); pid_t pid = fork(); if (pid == 0) { dup2(in[0], 0); dup2(out[1], 1); close(in[1]); close(out[0]); execl(\"/path/to/program\", \"program\", NULL); }"
+          - paragraph [ref=e904]: "Using the synchronous I/O wrappers in PatchworkOS, we would write:"
+          - code [ref=e906]: "fd_t in; fd_t out; iowalk(FDCWD, FDROOT, \"/dev/pipe/clone\", &in); iowalk(FDCWD, FDROOT, \"/dev/pipe/clone\", &out); proc_fd_t fds = {{.parent = in, .child = 0}, {.parent = out, .child = 1}}; fd_t proc; proc_create(FDCWD, FDROOT, PROC_ARGS(\"/path/to/program\"), &fds, ARRAY_SIZE(fds), PRIO_MAX_USER, PROC_DEFAULT, &proc);"
+          - paragraph [ref=e907]:
+            - text: We first create two pipes by opening the special file
+            - code [ref=e908]: /dev/pipe/clone
+            - text: twice.
+          - paragraph [ref=e909]:
+            - text: Then we create a new process using the
+            - code [ref=e910]: proc_create()
+            - text: function. This function takes in several arguments, first it takes in the root and current working directory to use when resolving paths, then it takes in a
+            - code [ref=e911]: proc_args_t
+            - text: structure containing the command line arguments for the process which we use the
+            - code [ref=e912]: PROC_ARGS()
+            - text: helper to construct. The second argument is an array of
+            - code [ref=e913]: proc_fd_t
+            - text: structures allowing us to pass file descriptors to the child, where each
+            - code [ref=e914]: proc_fd_t
+            - text: structure contains a parent file descriptor and a child file descriptor. The third argument is the size of this array which we use the
+            - code [ref=e915]: ARRAY_SIZE()
+            - text: helper to compute. The fourth and fifth arguments are the process's priority and flags, and the sixth argument is an output pointer for a file descriptor to the child's proc directory containing files for manipulating the child.
+          - paragraph [ref=e916]: "We could optimize the pipe creation by walking to the second pipe relative to the first one. This optimization can be applied any time we wish to open the same file multiple times:"
+          - code [ref=e918]: fd_t in; fd_t out; iowalk(FDCWD, FDROOT, "/dev/pipe/clone", &in); iowalk(in, FDROOT, ".", &out);
+          - paragraph [ref=e919]:
+            - text: It's important to note that
+            - code [ref=e920]: proc_create()
+            - text: is not a system call; it's a wrapper around the
+            - code [ref=e921]: /proc/clone
+            - text: file which when opened returns the root of the new processes proc directory. The kernel does nothing more than provide an empty address space that
+            - code [ref=e922]: proc_create()
+            - text: fills using the
+            - code [ref=e923]: mem
+            - text: file in the child's proc directory.
+          - paragraph [ref=e924]: A process will be freed when its reference count reaches zero, as such "killing" a process is merely freeing its threads to drop their references to the process.
+          - heading "Environment Variables" [level=3] [ref=e925]
+          - paragraph [ref=e926]:
+            - text: Environment variables are typically a set of key-value pairs that provide a simple way to configure programs. This concept of environment variables maps cleanly to a directory containing files, where the name of the file is the key and its contents are the value. As such, environment variables are provided via a binding in the
+            - code [ref=e927]: /env
+            - text: directory. This directory could either be a real directory, allowing the user to manage environment variables via the filesystem, or one could create a tmpfs instance and use that as the
+            - code [ref=e928]: /env
+            - text: directory.
+          - heading "Notes/Signals" [level=3] [ref=e929]
+          - paragraph [ref=e930]: Notes are PatchworkOS's equivalent to POSIX signals which asynchronously send strings to processes.
+          - paragraph [ref=e931]:
+            - text: In POSIX, if a page fault were to occur in a process running in some form of shell, we would usually receive a
+            - code [ref=e932]: SIGSEGV
+            - text: ", which is not very helpful. The core limitation is that signals are just integers, so we can't receive any additional information."
+          - paragraph [ref=e933]: "In PatchworkOS, a note is a string where the first word of the string is the note type and the rest is arbitrary data. As such, a page fault note might look like:"
+          - code [ref=e935]: "shell: pagefault at 0x40013b when reading present page at 0x7ffffff9af18"
+          - paragraph [ref=e936]: All that happened is that the shell printed the exit status of the process, which is also a string and in this case is set to the note that killed the process.
+          - heading "Mounting a Filesystem" [level=3] [ref=e937]
+          - paragraph [ref=e938]:
+            - text: There is no
+            - code [ref=e939]: mount()
+            - text: system call in PatchworkOS; instead filesystems are exposed via files which are used in combination with the
+            - code [ref=e940]: fdbind()
+            - text: function to mount filesystems.
+          - paragraph [ref=e941]:
+            - text: Filesystem files are exposed by "sysfs" as directories, for example,
+            - code [ref=e942]: /sys/fs/tmpfs
+            - text: is the filesystem directory for the tmpfs filesystem. Within these directories are "clone" files. Opening one of these clone files (for example
+            - code [ref=e943]: /sys/fs/tmpfs/clone
+            - text: ) gives us a file descriptor containing the root of a new instance of that filesystem (for more complex filesystems, for example a disk based one, additional parameters might be needed within the payload specified in
+            - code [ref=e944]: iowalk()
+            - text: when opening the filesystem file).
+          - paragraph [ref=e945]:
+            - text: Then we can use
+            - code [ref=e946]: fdbind()
+            - text: "to bind the root of the filesystem instance into our desired target:"
+          - code [ref=e948]: fd_t fs; fd_t target; iowalk(FDCWD, FDROOT, "/sys/fs/tmpfs/clone", &fs); iowalk(FDCWD, FDROOT, "/mnt/tmpfs", &target); fdbind(FDROOT, target, fs);
+          - heading "Components" [level=2] [ref=e949]
+          - paragraph [ref=e950]: In PatchworkOS, userspace is made up of "components". These components can be anything, executable programs, libraries, headers, or just data files.
+          - paragraph [ref=e951]:
+            - text: Each component is stored in a
+            - code [ref=e952]: /comp/<name>
+            - text: directory. Within each components directory are version directories written in the form
+            - code [ref=e953]: <x>.<y>.<z>
+            - text: (major.minor.patch).
+          - paragraph [ref=e954]:
+            - text: The actual component files are stored within the version directories, usually within subdirectories like
+            - code [ref=e955]: bin/
+            - text: ","
+            - code [ref=e956]: lib/
+            - text: ","
+            - code [ref=e957]: include/
+            - text: ", etc. In addition, there is a manifest file which describes the component, its dependencies, and what capabilities it requires."
+          - paragraph [ref=e958]: These manifests are written in a simple markup language made for PatchworkOS called S-expression CONfig (SCON), a parser is provided in libstd with the purpose of standardizing any configuration files used throughout the OS.
+          - paragraph [ref=e959]: "Included below is an example manifest file:"
+          - code [ref=e961]: (component (description "An example component.") (author "Kai Norberg") (license MIT) (launch bin/example) (dependencies (libstd 1.0.0) ) (capabilities /dev/fb /dev/kbd ) )
+          - heading "Launching Components" [level=3] [ref=e962]
+          - paragraph [ref=e963]:
+            - text: Any process can launch a component using the
+            - code [ref=e964]: comp_launch()
+            - text: function from libstd. This function will construct a new root file descriptor for the component, with all the directories and files within the components directory and any dependencies directories, being concatenated via concatfs into a set of standard directories such as
+            - code [ref=e965]: /bin
+            - text: ","
+            - code [ref=e966]: /lib
+            - text: ", etc. and with any additional files specified via the capabilities being bound to the expected locations."
+          - paragraph [ref=e967]:
+            - text: Let's take the component described above as an example. The libstd component provides a
+            - code [ref=e968]: lib/libstd.so
+            - text: file and let's also say that libother provides a
+            - code [ref=e969]: lib/libother.so
+            - text: file. In this case, the launched process would then find both
+            - code [ref=e970]: libstd.so
+            - text: and
+            - code [ref=e971]: libother.so
+            - text: in
+            - code [ref=e972]: /lib
+            - text: . It would also be able to access see the
+            - code [ref=e973]: /dev/fb/
+            - text: ","
+            - code [ref=e974]: /dev/kbd
+            - text: ", as those were specified directly."
+          - paragraph [ref=e975]:
+            - text: The
+            - code [ref=e976]: comp_launch()
+            - text: function will automatically handle versioning via Minimum Version Selection inspired by GO, this means that the system will always choose the lowest possible version of components that satisfies all dependencies. Meaning that the version specified in a manifest might not be the version that's loaded, instead the version specified is the minimum version.
+          - paragraph [ref=e977]: This ensures that the system is reproducible, that any updates have to be explicit ensuring that an update never breaks the system and that rollbacks are effortless (with the potential for some auto update system in the future) as the same set of dependencies will always result in the same environment, given the same manifests.
+          - paragraph [ref=e978]:
+            - text: This all has one rather large limitation, in that the parent process must have all the capabilities to be passed to the child. If the child needs a capability that the parent does not have, the
+            - code [ref=e979]: comp_launch()
+            - text: function will fail.
+          - heading "The Init Process" [level=3] [ref=e980]
+          - paragraph [ref=e981]:
+            - text: The one exception to this rule is the init process, which is special in that it is the only process "loaded" by the kernel (it is actually loaded by the bootloader and the kernel simply copies the executable into memory) since executable loading is handled in userspace. The init process is granted a
+            - code [ref=e982]: FDROOT
+            - text: file descriptor to the root of
+            - code [ref=e983]: sysfs
+            - text: from which it can acquire all capabilities. It uses these capabilities to load the RAM disk and setup userspace.
+          - paragraph [ref=e984]: This means that the security model forms a tree-like structure, with init having all capabilities and all child processes having some subset of those capabilities.
+          - heading "Modules" [level=2] [ref=e985]
+          - paragraph [ref=e986]: PatchworkOS uses a "modular" kernel design, meaning that instead of having one big kernel binary, the kernel is split into several smaller "modules" that can be loaded and unloaded at runtime.
+          - paragraph [ref=e987]: This is highly convenient for development, but it also has practical advantages, for example, there is no need to load a driver for a device that is not attached to the system, saving memory.
+          - blockquote [ref=e988]:
+            - paragraph [ref=e989]: While the kernel used by PatchworkOS is distinctly (and intentionally) not a micro-kernel, drivers are loaded into the kernel, it does share some design ideas with micro-kernel designs. We try to design the kernel such that it is only responsible for the mechanism required to perform some task while userspace is responsible for policy. For example, process and module loading is handled in userspace, and, as time goes on, the usage of 9P for services will most likely further reduce the size of the kernel.
+          - heading "The Module Manager (modman)" [level=3] [ref=e990]
+          - paragraph [ref=e991]:
+            - text: The module manager is a userspace component, being no different to any other component, that is granted two capabilities the
+            - code [ref=e992]: /dev/announce
+            - text: file and the
+            - code [ref=e993]: /sys/mod
+            - text: directory.
+          - paragraph [ref=e994]:
+            - text: The
+            - code [ref=e995]: /dev/announce
+            - text: "file allows the kernel to provide userspace with a stream of messages describing device state changes. Usually, a device being attached or detached. For example:"
+          - code [ref=e997]: 123456789 attach PNP0303 - _SB_.PCI0.SF8_.KBD_
+          - blockquote [ref=e998]:
+            - paragraph [ref=e999]: Details on this format can be found the <comp/core/kernel-headers/include/kernel/drivers/announce.h> file.
+          - paragraph [ref=e1000]:
+            - text: When the module manager receives a massage like the one above, it will look inside the
+            - code [ref=e1001]: /comp/.index/devices
+            - text: directory, in which there are subdirectories named after each device type, in this case this would be the
+            - code [ref=e1002]: /comp/.index/devices/PNP0303
+            - text: directory. Inside that subdirectory is a series of symlinks to components that provide kernel modules that are able to handle that device type.
+          - paragraph [ref=e1003]: Some modules may return a "DEFERRED" status, this would cause the module manager to defer the loading of that module and try again when any new device is attached.
+          - heading "Make your own Module" [level=3] [ref=e1004]
+          - paragraph [ref=e1005]: Making a module is intended to be as straightforward as possible. For the sake of demonstration, we will create a simple "Hello, World!" module.
+          - paragraph [ref=e1006]:
+            - text: Since kernel modules are just components, we must first create a new component. We begin by creating the
+            - code [ref=e1007]: comp/hello
+            - text: directory, in which we must create a
+            - code [ref=e1008]: manifest.scon
+            - text: "file for our component, to which we write the following code:"
+          - code [ref=e1010]: (component (description "Example Hello World module.") (author "Your name here") (license MIT) (module mod/hello.ko) )
+          - paragraph [ref=e1011]:
+            - text: This file specifies basic metadata about our component, most importantly that it provides a kernel module which the module manager can find at
+            - code [ref=e1012]: mod/hello.ko
+            - text: within our components directory.
+          - paragraph [ref=e1013]:
+            - text: Now we can create a
+            - code [ref=e1014]: hello.mk
+            - text: "file, in the same directory as the manifest file, to which we write the following code:"
+          - code [ref=e1016]: COMP_NAME = hello COMP_VERSION = 1.0.0 COMP_TYPE = module COMP_DEVICES = BOOT_ALWAYS include $(COMP_DIR)/Make.comp.defaults include $(COMP_DIR)/Make.comp.rules
+          - paragraph [ref=e1017]:
+            - text: This
+            - code [ref=e1018]: .mk
+            - text: file describes our component to the build system, giving it its name, version, type and most importantly what devices it can handle. In this case we specify
+            - code [ref=e1019]: BOOT_ALWAYS
+            - text: which is a special device that the module manager will pretend was attached during boot, allowing modules that specify it to always be loaded.
+          - blockquote [ref=e1020]:
+            - paragraph [ref=e1021]:
+              - text: Note that the
+              - code [ref=e1022]: hello.mk
+              - text: will cause the build system to create a symlink at
+              - code [ref=e1023]: /comp/.index/devices/BOOT_ALWAYS/hello
+              - text: pointing to our component at
+              - code [ref=e1024]: /comp/hello/1.0.0
+              - text: .
+          - paragraph [ref=e1025]:
+            - text: We are now able to write the actual module, we will create a
+            - code [ref=e1026]: src
+            - text: directory within
+            - code [ref=e1027]: comp/hello
+            - text: within which we create a
+            - code [ref=e1028]: hello.c
+            - text: "file containing the included code:"
+          - code [ref=e1030]: "#include <kernel/module/module.h> #include <kernel/log/log.h> status_t _module_procedure(const module_event_t* event) { switch (event->type) { case MODULE_EVENT_LOAD: LOG_INFO(\"Hello, World!\\n\"); break; default: break; } return OK; }"
+          - paragraph [ref=e1031]: "The final directory structure should look something like this:"
+          - code [ref=e1033]: / ├── comp │ ├── hello │ │ ├── src │ │ │ └── hello.c │ │ ├── manifest.scon │ │ └── hello.mk
+          - paragraph [ref=e1034]:
+            - text: We can now run the
+            - code [ref=e1035]: make all run
+            - text: command and should see a "Hello, World!" message within the kernels logs during boot.
+          - paragraph [ref=e1036]: If this didn't work, or bugs are encountered, please open an issue.
+          - heading "Future Plans" [level=2] [ref=e1037]
+          - paragraph [ref=e1038]: Now that the core of the new architecture more or less complete, the next steps will be fleshing out userspace. Starting with user accounts, some form of login manager and a new GUI.
+          - paragraph [ref=e1039]: User accounts should be rather straight forward, each account will have their own "home" and "env" directories which will be bound into the first process of that account, along with whatever other capabilities that account has been given.
+          - paragraph [ref=e1040]:
+            - text: The ideas for the login manager are still not finalized, but since
+            - link "Argon2id" [ref=e1041] [cursor=pointer]:
+              - /url: https://github.com/P-H-C/phc-winner-argon2
+            - text: has been ported to PatchworkOS we will be using that for password hashing.
+          - paragraph [ref=e1042]: Finally, there have been many ideas regarding the GUI. The core limitation that we have to grapple with is that implementing GPU support is, to put it mildly, wildly outside the scope of a project like this. Which limits us to CPU or software rendering.
+          - paragraph [ref=e1043]: Using CPU rending forces us to design the "aesthetic" of our GUI around what a CPU can render most efficiently. This is the primary reason for the Windows 9x inspired GUI we had before the rewrite as it consists of simple opaque rectangular shapes which is very efficient on CPU.
+          - paragraph [ref=e1044]: So far anything more complex has been deliberately avoided to not end up in a situation where only a high-end CPU can run this OS simply because of how slow the GUI is.
+          - paragraph [ref=e1045]: However, it seems possible that, if we were to accept the cost of implementing transparency (via SIMD) which would be a not-insignificant cost but could most likely be optimized to an acceptable level. We could potentially implement a GNOME inspired design, as it also consists of relatively simple, although rounded shapes, which could be cached. Effects like shadows would be a simple partially transparent gradient that would also be cached.
+          - paragraph [ref=e1046]: Only testing will decide if such an approach will be considered acceptably performant.
+          - paragraph [ref=e1047]:
+            - text: Of course, as always, if you have any questions, find issues, or anything else, please leave a comment or open an issue in the
+            - link "GitHub" [ref=e1048] [cursor=pointer]:
+              - /url: https://github.com/KaiNorberg/PatchworkOS
+            - text: .
+          - separator [ref=e1049]
+          - paragraph [ref=e1050]:
+            - emphasis [ref=e1051]:
+              - text: This is a cross-post from
+              - link "GitHub Discussions" [ref=e1052] [cursor=pointer]:
+                - /url: https://github.com/KaiNorberg/PatchworkOS/discussions/117
+              - text: .
+        - link "17 comments" [ref=e1054] [cursor=pointer]:
+          - /url: /r/osdev/comments/1s3da45/patchworkos_a_new_architecture_async_direct_io/
+      - link "NEXT" [ref=e1056] [cursor=pointer]:
+        - /url: "?q=doom OR signals OR mmap OR paging OR fork OR ext2&restrict_sr=on\n\t\t\t\t&sort=top&t=year\n\t\t\t\t&after=t3_1s3da45"
+  - contentinfo [ref=e1057]:
+    - paragraph [ref=e1059] [cursor=pointer]:
+      - text: v0.36.0
+      - link "ⓘ View instance info" [ref=e1060]:
+        - /url: /info
+      - link "<> Code" [ref=e1061]:
+        - /url: https://github.com/redlib-org/redlib

@@ -48,6 +48,10 @@ struct app {
     char        titlebuf[24];            /* persistent copy of the title */
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
+#define APP_MAXVMA 16
+    struct { uint64_t start, len; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions */
+    int      nvma;
+    uint64_t mmap_next;                  /* bump allocator for mmap addresses */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
     int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
     int       rawkb;                     /* raw keyboard mode (games get make/break events) */
@@ -740,6 +744,70 @@ uint64_t app_sbrk(long inc) {
     }
     a->heap_end = newend;
     return old;
+}
+
+/* --- mmap: demand-paged anonymous memory (M1063) ---------------------------
+ * SYS_mmap reserves a region in a private VA window; its pages are NOT mapped
+ * up front — the first touch of each page faults, and app_fault_handle (called
+ * from the #PF handler) lazily allocates + maps a zeroed frame. This is the
+ * core demand-paging mechanism, and the seed for file-backed mmap + COW/fork. */
+#define MMAP_BASE  0x60000000ull        /* above the 0x50000000 user stack, clear of the heap */
+#define MMAP_TOP   0x70000000ull
+
+uint64_t app_mmap(uint64_t len) {
+    struct app *a = cur();
+    if (!a || len == 0) return 0;
+    len = (len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
+    uint64_t addr = a->mmap_next;
+    if (addr + len > MMAP_TOP || addr + len < addr) return 0;
+    a->vma[a->nvma].start = addr;
+    a->vma[a->nvma].len   = len;
+    a->nvma++;
+    a->mmap_next = addr + len + PAGE_SIZE;          /* leave an unmapped guard gap */
+    return addr;
+}
+
+int app_munmap(uint64_t addr, uint64_t len) {
+    struct app *a = cur();
+    if (!a) return -1;
+    (void)len;
+    for (int i = 0; i < a->nvma; i++) {
+        if (a->vma[i].start == addr) {
+            for (uint64_t p = a->vma[i].start; p < a->vma[i].start + a->vma[i].len; p += PAGE_SIZE) {
+                uint64_t ph = vmm_translate(p);
+                if (ph) { vmm_unmap(p); pmm_free_frame(ph); }
+            }
+            a->vma[i] = a->vma[a->nvma - 1];
+            a->nvma--;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* #PF hook (called from the ring-3 path of the page-fault handler). If `cr2` is
+ * inside a reserved mmap region, map a fresh zeroed frame into the (active) app
+ * space and report it resolved so the instruction retries; else 0 = a real
+ * fault, and the app is terminated as before. */
+int app_fault_handle(uint64_t cr2) {
+    struct app *a = cur();
+    if (!a) return 0;
+    for (int i = 0; i < a->nvma; i++) {
+        if (cr2 >= a->vma[i].start && cr2 < a->vma[i].start + a->vma[i].len) {
+            uint64_t page = cr2 & ~(uint64_t)(PAGE_SIZE - 1);
+            if (vmm_translate(page)) return 1;          /* already mapped (race) -> retry */
+            uint64_t frame = pmm_alloc_frame();
+            if (!frame) return 0;                       /* OOM -> let it fault/die */
+            uint8_t *z = (uint8_t *)hhdm(frame);
+            for (int b = 0; b < PAGE_SIZE; b++) z[b] = 0; /* never leak stale RAM to userspace */
+            vmm_map(page, frame, PTE_WRITABLE | PTE_USER | PTE_NX);
+            __asm__ volatile("invlpg (%0)" : : "r"(page) : "memory");
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* ---- graphics mode: a per-app pixel canvas the WM composites --------------

@@ -1542,6 +1542,19 @@ static int run_command(char *line, char *cwd) {
             long n = sys_mounts(buf, sizeof(buf));
             if (n > 0) { buf[n] = 0; print(buf); print("  (cd into one to browse, e.g. cd /disk2)\n"); }
             else print("mount: no disk volumes\n");
+        } else if (streq(line, "mmaptest")) {  /* demonstrate demand-paged mmap (kernel maps pages lazily on fault) */
+            unsigned long len = 64 * 1024;     /* 16 pages, none mapped up front */
+            unsigned char *m = (unsigned char *)sys_mmap(len);
+            if (!m) { print("mmaptest: mmap failed\n"); g_status = 1; }
+            else {
+                for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)(i * 7 + 1);  /* first touch of each page demand-faults */
+                int ok = 1;
+                for (unsigned long i = 0; i < len; i++) if (m[i] != (unsigned char)(i * 7 + 1)) { ok = 0; break; }
+                print("mmap "); printl((long)(len / 4096)); print(" pages: ");
+                print(ok ? "demand-paged + verified OK\n" : "VERIFY FAILED\n");
+                sys_munmap(m, len); print("munmap: freed\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "scores")) {
             /* a personal leaderboard: the best each game saved to its *.HI file */
             static const struct { const char *name, *file; } hs[] = {

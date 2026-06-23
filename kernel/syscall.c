@@ -636,6 +636,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_sbrk:
         r->rax = app_sbrk((long)r->rdi);   /* grow the heap; old break, or (uint64_t)-1 */
         break;
+    case SYS_mmap:
+        r->rax = app_mmap(r->rdi);         /* reserve a demand-paged anon region; base VA or 0 */
+        break;
+    case SYS_munmap:
+        r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);
+        break;
     case SYS_uptime_ms:
         r->rax = timer_ms();               /* monotonic milliseconds since boot */
         break;

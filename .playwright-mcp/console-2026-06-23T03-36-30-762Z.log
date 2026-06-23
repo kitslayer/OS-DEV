@@ -1,0 +1,2 @@
+[     176ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://wiki.osdev.org/Page_Fault:0
+[     284ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447:0

@@ -87,6 +87,8 @@ long sys_unzip(const char *zipname) { return do_syscall(SYS_unzip, (long)zipname
 long sys_untar(const char *tarname) { return do_syscall(SYS_untar, (long)tarname, 0, 0); }
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }
 void *sbrk(long inc) { return (void *)do_syscall(SYS_sbrk, inc, 0, 0); }
+void *sys_mmap(unsigned long len) { long r = do_syscall(SYS_mmap, (long)len, 0, 0); return r ? (void *)r : 0; }
+long  sys_munmap(void *addr, unsigned long len) { return do_syscall(SYS_munmap, (long)addr, (long)len, 0); }
 unsigned long sys_uptime_ms(void) { return (unsigned long)do_syscall(SYS_uptime_ms, 0, 0, 0); }
 int  sys_gfx_init(int w, int h) { return (int)do_syscall(SYS_gfx_init, w, h, 0); }
 int  sys_gfx_blit(const void *pixels) { return (int)do_syscall(SYS_gfx_blit, (long)pixels, 0, 0); }

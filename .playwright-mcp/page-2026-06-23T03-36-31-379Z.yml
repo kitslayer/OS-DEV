@@ -1,0 +1,113 @@
+- generic [active] [ref=e1]:
+  - main [ref=e4]:
+    - heading "Page Fault" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - link "Jump to navigation" [ref=e7] [cursor=pointer]:
+        - /url: "#mw-head"
+      - link "Jump to search" [ref=e8] [cursor=pointer]:
+        - /url: "#searchInput"
+      - paragraph [ref=e11]:
+        - text: There is currently no text in this page. You can
+        - link "search for this page title" [ref=e12] [cursor=pointer]:
+          - /url: /Special:Search/Page_Fault
+        - text: in other pages, or
+        - link "search the related logs" [ref=e14] [cursor=pointer]:
+          - /url: https://wiki.osdev.org/index.php?title=Special:Log&page=Page_Fault
+        - text: ", but you do not have permission to create this page."
+  - generic:
+    - heading "Navigation menu" [level=2] [ref=e15]
+    - generic [ref=e16]:
+      - navigation "Personal tools" [ref=e17]:
+        - list [ref=e19]:
+          - listitem [ref=e20]:
+            - link "Log in" [ref=e21] [cursor=pointer]:
+              - /url: /index.php?title=Special:UserLogin&returnto=Page+Fault
+          - listitem [ref=e22]:
+            - link "☾ Dark mode" [ref=e23] [cursor=pointer]:
+              - /url: "#"
+      - navigation "Namespaces" [ref=e25]:
+        - list [ref=e26]:
+          - listitem [ref=e27]:
+            - link "Page" [ref=e28] [cursor=pointer]:
+              - /url: /index.php?title=Page_Fault&action=edit&redlink=1
+          - listitem [ref=e29]:
+            - link "Discussion" [ref=e30] [cursor=pointer]:
+              - /url: /Talk:Page_Fault
+      - search [ref=e32]:
+        - generic [ref=e33]:
+          - heading "Search" [level=3] [ref=e34]
+          - generic [ref=e36]:
+            - searchbox "Search OSDev Wiki" [ref=e37]
+            - button "Search" [ref=e38] [cursor=pointer]
+            - button "Go" [ref=e39] [cursor=pointer]
+    - generic [ref=e40]:
+      - banner [ref=e41]:
+        - link "Visit the main page" [ref=e42] [cursor=pointer]:
+          - /url: /Main_Page
+      - navigation "Navigation" [ref=e43]:
+        - list [ref=e45]:
+          - listitem [ref=e46]:
+            - link "Main Page" [ref=e47] [cursor=pointer]:
+              - /url: /Main_Page
+          - listitem [ref=e48]:
+            - link "Forums" [ref=e49] [cursor=pointer]:
+              - /url: http://forum.osdev.org/
+          - listitem [ref=e50]:
+            - link "FAQ" [ref=e51] [cursor=pointer]:
+              - /url: /Category:FAQ
+          - listitem [ref=e52]:
+            - link "OS Projects" [ref=e53] [cursor=pointer]:
+              - /url: /Projects
+          - listitem [ref=e54]:
+            - link "Random page" [ref=e55] [cursor=pointer]:
+              - /url: /Special:Random
+      - navigation "About" [ref=e56]:
+        - heading "About" [level=3] [ref=e57]
+        - list [ref=e59]:
+          - listitem [ref=e60]:
+            - link "This site" [ref=e61] [cursor=pointer]:
+              - /url: /OSDevWiki:About
+          - listitem [ref=e62]:
+            - link "Joining" [ref=e63] [cursor=pointer]:
+              - /url: /OSDevWiki:Joining
+          - listitem [ref=e64]:
+            - link "Editing help" [ref=e65] [cursor=pointer]:
+              - /url: /OSDevWiki:Editing
+          - listitem [ref=e66]:
+            - link "Recent changes" [ref=e67] [cursor=pointer]:
+              - /url: /Special:RecentChanges
+      - navigation "Tools" [ref=e68]:
+        - heading "Tools" [level=3] [ref=e69]
+        - list [ref=e71]:
+          - listitem [ref=e72]:
+            - link "What links here" [ref=e73] [cursor=pointer]:
+              - /url: /Special:WhatLinksHere/Page_Fault
+          - listitem [ref=e74]:
+            - link "Special pages" [ref=e75] [cursor=pointer]:
+              - /url: /Special:SpecialPages
+          - listitem [ref=e76]:
+            - link "Printable version" [ref=e77] [cursor=pointer]:
+              - /url: javascript:print();
+          - listitem [ref=e78]:
+            - link "Page information" [ref=e79] [cursor=pointer]:
+              - /url: /index.php?title=Page_Fault&action=info
+  - contentinfo [ref=e80]:
+    - list
+    - list:
+      - listitem [ref=e81]:
+        - link "Privacy policy" [ref=e82] [cursor=pointer]:
+          - /url: /OSDev_Wiki:Privacy_policy
+      - listitem [ref=e83]:
+        - link "About OSDev Wiki" [ref=e84] [cursor=pointer]:
+          - /url: /OSDev_Wiki:About
+      - listitem [ref=e85]:
+        - link "Disclaimers" [ref=e86] [cursor=pointer]:
+          - /url: /OSDev_Wiki:General_disclaimer
+      - listitem [ref=e87]:
+        - link "Mobile view" [ref=e88] [cursor=pointer]:
+          - /url: https://wiki.osdev.org/index.php?title=Page_Fault&mobileaction=toggle_view_mobile
+    - list [ref=e89]:
+      - listitem [ref=e90]:
+        - link "Powered by MediaWiki" [ref=e91] [cursor=pointer]:
+          - /url: https://www.mediawiki.org/
+          - img "Powered by MediaWiki" [ref=e92]
