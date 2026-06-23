@@ -234,6 +234,33 @@ int vmm_clear_accessed(uint64_t cr3) {
     return (int)n;
 }
 
+/* Read the raw leaf PTE for `virt` in the active space (0 if no page table walks
+ * there). Lets swap distinguish a not-present-but-swapped page (a software marker
+ * + slot packed into the entry) from a genuinely unmapped one. M1105. */
+uint64_t vmm_pte_raw(uint64_t virt) {
+    uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return 0;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT) || (pd[PD_IDX(virt)] & PTE_HUGE)) return 0;
+    uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
+    return pt[PT_IDX(virt)];
+}
+/* Set the raw leaf PTE for `virt` (the page table must already exist — true for
+ * a page being evicted, which was present). Used to write the swapped encoding. */
+void vmm_set_raw(uint64_t virt, uint64_t pte) {
+    uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT)) return;
+    uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
+    pt[PT_IDX(virt)] = pte;
+    invlpg(virt);
+}
+
 int vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);

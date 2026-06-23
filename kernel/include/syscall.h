@@ -94,6 +94,7 @@
 #define SYS_madvise 84  /* (addr,len,advice) -> MADV_DONTNEED(4): reclaim resident anon pages now; pages/-1 */
 #define SYS_alarm  85   /* (ticks) -> arm a periodic SIGALRM every `ticks` timer ticks (0 = disarm); 0 */
 #define SYS_sntp   86   /* ()      -> SNTP: set the wall clock from pool.ntp.org; 0/-1 */
+#define SYS_swapout 87  /* (addr,len) -> page out anon pages in range to swap (MADV_PAGEOUT); pages/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest (mmap/ring/W^X/reclaim demos)  alarmtest (SIGALRM)  wss[ pid] (working-set)\n");
+            print("vm:     mmaptest ringtest jittest madvisetest swaptest (mmap/ring/W^X/reclaim/swap demos)  alarmtest (SIGALRM)  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1727,6 +1727,24 @@ static int run_command(char *line, char *cwd) {
                 print(zeroed ? "  re-read after DONTNEED is ZERO -> pages reclaimed + re-faulted fresh\n"
                              : "  VERIFY FAILED: stale data survived DONTNEED\n");
                 if (!zeroed || dropped <= 0) g_status = 1;
+                sys_munmap(m, len);
+            }
+        } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
+            unsigned long len = 256 * 1024;       /* 64 pages */
+            unsigned char *m = (unsigned char *)sys_mmap(len);
+            if (!m) { print("swaptest: mmap failed\n"); g_status = 1; }
+            else {
+                for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)(i * 131 + 7);   /* fault in + fill a pattern */
+                long out = sys_swapout(m, len);
+                if (out < 0) print("swaptest: swap inactive (attach a writable non-boot disk to enable it)\n");
+                else {
+                    print("paged out "); printl(out); print(" pages to disk; reading them back...\n");
+                    int ok = 1;                    /* re-touch each page -> faults back in from swap */
+                    for (unsigned long i = 0; i < len; i++) if (m[i] != (unsigned char)(i * 131 + 7)) { ok = 0; break; }
+                    print(ok ? "  every page survived the disk round-trip -> swap works\n"
+                             : "  VERIFY FAILED: data corrupted across swap\n");
+                    if (!ok) g_status = 1;
+                }
                 sys_munmap(m, len);
             }
         } else if (streq(line, "alarmtest")) {  /* demonstrate SIGALRM: a periodic timer signal to a ring-3 handler */

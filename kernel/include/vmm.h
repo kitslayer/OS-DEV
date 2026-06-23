@@ -50,4 +50,11 @@ typedef struct { uint64_t resident, referenced, dirty, writable; } vmm_wss_t;
 void     vmm_wss(uint64_t cr3, vmm_wss_t *out);
 int      vmm_clear_accessed(uint64_t cr3);
 
+/* Raw leaf-PTE access (M1105, swap): read/write the exact entry so a
+ * not-present-but-swapped page (PTE_SWAP marker + a slot index) is distinct
+ * from an unmapped one. vmm_set_raw requires the page table to already exist. */
+#define PTE_SWAP (1ull << 9)   /* software bit: this not-present page is swapped out */
+uint64_t vmm_pte_raw(uint64_t virt);
+void     vmm_set_raw(uint64_t virt, uint64_t pte);
+
 static inline void *hhdm(uint64_t phys) { return (void *)(HHDM_BASE + phys); }

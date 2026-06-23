@@ -57,6 +57,7 @@ long sys_tftp(const char *filename, void *buf, unsigned long max) { return do_sy
 long sys_madvise(void *addr, unsigned long len, int advice) { return do_syscall(SYS_madvise, (long)addr, (long)len, advice); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }
 long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
+long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }
 long sys_apps(void *buf, unsigned long len) { return do_syscall(SYS_apps, (long)buf, (long)len, 0); }
 long sys_spawn(const char *name) { return do_syscall(SYS_spawn, (long)name, 0, 0); }
 long sys_spawn_arg(const char *name, const char *arg) { return do_syscall(SYS_spawn, (long)name, (long)arg, 0); }

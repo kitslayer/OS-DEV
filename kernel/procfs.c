@@ -28,6 +28,7 @@
 #include "cas.h"
 #include "fw.h"
 #include "notify.h"
+#include "swap.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -164,6 +165,9 @@ static long gen_fw(char *b, int max) {           /* packet-filter rules + hit co
 static long gen_notify(char *b, int max) {       /* notification objects + pending masks (M1101) */
     return notify_format(b, max);
 }
+static long gen_swaps(char *b, int max) {        /* swap device + page-out/in stats (M1105) */
+    return swap_format(b, max);
+}
 static long gen_filesystems(char *b, int max) {
     int p = sapp(b, 0, max, "nodev\tprocfs\nnodev\tdevfs\n      \tfat32\n");
     b[p] = 0; return p;
@@ -270,7 +274,7 @@ static const struct pf proc_files[] = {
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },
     { "profile", gen_profile }, { "ipc", gen_ipc }, { "binds", gen_binds },
     { "bcache", gen_bcache }, { "measure", gen_measure }, { "cas", gen_cas }, { "fw", gen_fw },
-    { "notify", gen_notify },
+    { "notify", gen_notify }, { "swaps", gen_swaps },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

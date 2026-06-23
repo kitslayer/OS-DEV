@@ -23,6 +23,7 @@
 #include "vfs.h"
 #include "kheap.h"
 #include "tmpfs.h"
+#include "swap.h"
 #include "complete.h"
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
 #include <stdint.h>
@@ -1054,6 +1055,20 @@ uint64_t app_ringbuf(uint64_t len) {
 int app_fault_handle(uint64_t cr2) {
     struct app *a = cur();
     if (!a) return 0;
+    uint64_t fpage = cr2 & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t pte = vmm_pte_raw(fpage);
+    if (!(pte & 1) && (pte & PTE_SWAP)) {           /* a swapped-out page (M1105): fault it back in */
+        int slot = (int)(pte >> 12);
+        uint64_t frame = pmm_alloc_frame();
+        if (!frame) return 0;                       /* OOM -> let it fault/die */
+        __asm__ volatile("sti");                    /* swap I/O may wait on an IRQ (virtio); kernel-only addrs, so re-entrancy-safe */
+        int rc = swap_in(slot, frame);
+        __asm__ volatile("cli");
+        if (rc < 0) { pmm_free_frame(frame); return 0; }
+        swap_release(slot);                         /* page is resident again; the slot is free */
+        vmm_map(fpage, frame, PTE_WRITABLE | PTE_USER | PTE_NX);   /* restores PRESENT + invlpg */
+        return 1;
+    }
     for (int i = 0; i < a->nvma; i++) {
         if (cr2 >= a->vma[i].start && cr2 < a->vma[i].start + a->vma[i].len) {
             uint64_t page = cr2 & ~(uint64_t)(PAGE_SIZE - 1);
@@ -1068,6 +1083,34 @@ int app_fault_handle(uint64_t cr2) {
         }
     }
     return 0;
+}
+
+/* Page out the anonymous (mmap) pages of [addr,addr+len) to swap (M1105): like
+ * Linux's MADV_PAGEOUT. Each resident, single-owner page in an mmap VMA is
+ * written to a swap slot, its PTE rewritten to the not-present swapped encoding
+ * (slot + PTE_SWAP), and its frame freed — reclaiming RAM now. The next touch
+ * faults it back via app_fault_handle. Shared/ring frames (refcount>0) and
+ * non-mmap pages (code/stack) are skipped. Returns the page count, or -1. */
+int app_swap_out(uint64_t addr, uint64_t len) {
+    struct app *a = cur();
+    if (!a || len == 0 || !swap_active()) return -1;
+    uint64_t start = addr & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    int n = 0;
+    for (uint64_t p = start; p < end; p += PAGE_SIZE) {
+        int in_vma = 0;
+        for (int i = 0; i < a->nvma; i++)
+            if (p >= a->vma[i].start && p < a->vma[i].start + a->vma[i].len) { in_vma = 1; break; }
+        if (!in_vma) continue;                       /* anon mmap regions only */
+        uint64_t phys = vmm_translate(p);
+        if (!phys || pmm_refcount(phys) != 0) continue;   /* not resident, or shared/mirrored -> skip */
+        int slot = swap_out(phys);
+        if (slot < 0) break;                         /* swap full / error */
+        vmm_set_raw(p, ((uint64_t)slot << 12) | PTE_SWAP);   /* PRESENT=0, marker + slot */
+        pmm_free_frame(phys);
+        n++;
+    }
+    return n;
 }
 
 /* --- ring-3 signals (M1067) ------------------------------------------------
