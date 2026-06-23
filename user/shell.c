@@ -2694,10 +2694,20 @@ static int run_command(char *line, char *cwd) {
             print("bye!\n");
             return 1;                  /* signal main()'s loop to stop */
         } else {
-            print("unknown command: ");
-            print(line);
-            print("  (try 'help')\n");
-            g_status = 1;
+            /* Not a builtin: fall back to launching a program of that name (so
+             * `cc DEMO.C`, `editor X.TXT`, `forth` etc. work without `run `).
+             * First token = program; optional second token = its launch arg. */
+            const char *p = line;
+            char prog[64]; int pi = 0; while (*p && *p != ' ' && pi < 63) prog[pi++] = *p++; prog[pi] = 0; sh_unprot_buf(prog);
+            while (*p == ' ') p++;
+            char arg[64]; int ai = 0; while (*p && *p != ' ' && ai < 63) arg[ai++] = *p++; arg[ai] = 0; sh_unprot_buf(arg);
+            long rc = arg[0] ? sys_spawn_arg(prog, arg) : sys_spawn(prog);
+            if (rc < 0) {
+                print("unknown command: ");
+                print(line);
+                print("  (try 'help')\n");
+                g_status = 1;
+            } else g_status = 0;
         }
     } while (0);
     return 0;

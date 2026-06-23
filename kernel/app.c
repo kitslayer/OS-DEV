@@ -140,7 +140,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -210,6 +210,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "spider", spider_elf_start, "Spider" },
     { "sandbox", sandbox_elf_start, "Sandbox (pledge demo)" },
     { "forth", forth_elf_start, "Forth" },
+    { "cc", cc_elf_start, "C Compiler" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
