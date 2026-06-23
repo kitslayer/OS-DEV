@@ -105,6 +105,9 @@
 #define SYS_exec   93   /* (name, arg) -> replace this process's program image with the registered program `name`; -1 on failure (no return on success) */
 #define SYS_unshare 94  /* () -> detach into a private mount namespace (later binds become private); 0/-1 */
 #define SYS_singlestep 95 /* (n) -> hardware single-step the next n user instructions; read the trace via /proc/<pid>/sstrace */
+#define SYS_seccomp       96 /* (nr) -> child: trap syscall `nr` to a supervisor (seccomp-notify) */
+#define SYS_seccomp_wait  97 /* (childpid, ev[4]) -> supervisor: block until the child parks; ev={nr,a,b,c}; 1/0/-1 */
+#define SYS_seccomp_reply 98 /* (childpid, run_real, retval) -> supervisor: allow(run_real=1)/deny/emulate; 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

@@ -30,6 +30,9 @@ long sys_waitpid(int pid, int *status) { return do_syscall(SYS_waitpid, pid, (lo
 long sys_exec(const char *name, const char *arg) { return do_syscall(SYS_exec, (long)name, (long)arg, 0); }
 long sys_unshare(void) { return do_syscall(SYS_unshare, 0, 0, 0); }
 long sys_singlestep(int n) { return do_syscall(SYS_singlestep, n, 0, 0); }
+long sys_seccomp(int nr) { return do_syscall(SYS_seccomp, nr, 0, 0); }
+long sys_seccomp_wait(int childpid, unsigned long *ev4) { return do_syscall(SYS_seccomp_wait, childpid, (long)ev4, 0); }
+long sys_seccomp_reply(int childpid, int run_real, long retval) { return do_syscall(SYS_seccomp_reply, childpid, run_real, retval); }
 long sys_list(void *buf, unsigned long len) {
     /* leading 0 so buf/len land in the same registers (rsi/rdx) the kernel
      * reads them from — matching the write/readfile arg layout. */

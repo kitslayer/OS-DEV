@@ -304,6 +304,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
+        [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -326,6 +327,14 @@ void syscall_dispatch(struct registers *r) {
                     app_sys_getpid(), app_title(self), (unsigned long)r->rax);
             app_sys_exit(-1);               /* terminate the violating app; does not return */
         }
+    }
+
+    /* seccomp-notify (M1124): a supervised process traps masked syscalls to its
+     * supervisor, which can deny or emulate them. Unsupervised apps unaffected. */
+    if (self && app_seccomp_traps(self, r->rax)) {
+        int run_real = 1;
+        long ret = app_seccomp_notify(self, r->rax, r->rdi, r->rsi, r->rdx, &run_real);
+        if (!run_real) { r->rax = (uint64_t)ret; goto sc_done; }   /* denied/emulated: skip the real syscall */
     }
 
     switch (r->rax) {
@@ -828,6 +837,21 @@ void syscall_dispatch(struct registers *r) {
     case SYS_singlestep:                   /* hardware single-step the next n user instructions (M1123) */
         r->rax = (uint64_t)(int64_t)app_singlestep(r, (int)r->rdi);
         break;
+    case SYS_seccomp:                      /* child: trap syscall `nr` to the supervisor (M1124) */
+        r->rax = (uint64_t)(int64_t)app_seccomp_arm((int)r->rdi);
+        break;
+    case SYS_seccomp_wait: {               /* supervisor: block until the child parks; fill ev[4] */
+        uint64_t *uev = (uint64_t *)r->rsi;
+        if (!ubuf(r->rsi, 4 * sizeof(uint64_t))) { r->rax = (uint64_t)-1; break; }
+        uint64_t kev[4] = {0,0,0,0};
+        long rc = app_seccomp_wait((int)r->rdi, kev);
+        if (rc > 0) for (int i = 0; i < 4; i++) uev[i] = kev[i];   /* copy out (supervisor's space active) */
+        r->rax = (uint64_t)rc;
+        break;
+    }
+    case SYS_seccomp_reply:                /* supervisor: deliver the verdict (M1124) */
+        r->rax = (uint64_t)(int64_t)app_seccomp_reply((int)r->rdi, (int)r->rsi, (long)r->rdx);
+        break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
         r->rax = 0;
@@ -989,6 +1013,7 @@ void syscall_dispatch(struct registers *r) {
         break;
     }
 
+sc_done:                      /* seccomp-notify lands here after denying/emulating a syscall (M1124) */
     if (traced) {             /* strace (M1084): one line to dmesg + the readable ring (M1118) */
         kprintf("[strace %d] %s(0x%lx, 0x%lx, 0x%lx) = 0x%lx\n",
                 app_sys_getpid(), syscall_name(tr_nr), tr_a, tr_b, tr_c, r->rax);

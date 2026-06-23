@@ -11,6 +11,10 @@ long sys_waitpid(int pid, int *status);  /* block until child (pid, or -1=any) e
 long sys_exec(const char *name, const char *arg);  /* replace this process's image with registered program `name`; -1 fail (M1121) */
 long sys_unshare(void);              /* detach into a private mount namespace (later binds are private); 0/-1 (M1122) */
 long sys_singlestep(int n);          /* hardware single-step the next n user instructions; read /proc/self/sstrace (M1123) */
+/* seccomp-notify: userspace syscall supervision (M1124) */
+long sys_seccomp(int nr);            /* child: trap syscall `nr` to a supervisor */
+long sys_seccomp_wait(int childpid, unsigned long *ev4);  /* supervisor: block until child parks; ev={nr,a,b,c}; 1/0/-1 */
+long sys_seccomp_reply(int childpid, int run_real, long retval);  /* supervisor: allow(run_real=1)/deny/emulate */
 long sys_list(void *buf, unsigned long len);
 long sys_readfile(const char *name, void *buf, unsigned long len);
 long sys_writefile(const char *name, const void *buf, unsigned long len);

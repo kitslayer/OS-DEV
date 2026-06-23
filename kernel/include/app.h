@@ -68,6 +68,12 @@ long     app_exec(struct registers *r, const char *name, const char *arg);  /* r
 long     app_singlestep(struct registers *r, int n);  /* hardware single-step the next n user instructions (M1123) */
 void     app_singlestep_trap(struct registers *r);    /* #DB handler: record the RIP, keep/stop stepping */
 int      app_sstep_get(app_t *a, uint64_t *out, int max);  /* copy the recorded single-step RIPs; returns count */
+/* seccomp-notify: userspace syscall supervision (M1124) */
+long     app_seccomp_arm(int nr);                          /* child: trap syscall `nr` to the supervisor */
+int      app_seccomp_traps(app_t *a, uint64_t nr);         /* does `a` trap syscall `nr`? */
+long     app_seccomp_notify(app_t *a, uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, int *run_real);  /* park the child */
+long     app_seccomp_wait(int childpid, uint64_t *ev4);    /* supervisor: block until the child parks; ev[4]={nr,a,b,c} */
+long     app_seccomp_reply(int childpid, int run_real, long retval);  /* supervisor: deliver the verdict */
 void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */
 int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */

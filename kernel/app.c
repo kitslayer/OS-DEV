@@ -116,6 +116,15 @@ struct app {
     uint64_t sstep_rips[APP_SSTEP_N];    /* hardware single-step instruction trace (M1123) */
     int      sstep_n;                    /* RIPs recorded so far */
     int      sstep_remaining;            /* instructions still to single-step (0 = not tracing) */
+    /* seccomp-notify: userspace syscall supervision (M1124). A supervisor (the
+     * parent) intercepts + can deny/emulate the child's masked syscalls. */
+    uint64_t sc_mask[2];                 /* which syscalls (0-127) trap to the supervisor */
+    int      sc_armed;                   /* 1 = this process is supervised */
+    volatile int sc_pending;             /* 1 = parked with a pending call awaiting a verdict */
+    volatile uint64_t sc_nr, sc_a, sc_b, sc_c;  /* the parked call (number + 3 args) */
+    volatile long sc_retval;             /* the verdict's return value (when not run-real) */
+    volatile int sc_run_real;            /* verdict: 1 = run the real syscall, 0 = use sc_retval */
+    void    *sc_sup;                     /* a supervisor task_t blocked in seccomp_wait */
 };
 
 static struct app apps[MAX_APPS];
@@ -158,7 +167,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -237,6 +246,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "execdemo", execdemo_elf_start, "fork+exec demo" },
     { "nstest", nstest_elf_start, "mount-namespace demo" },
     { "steptest", steptest_elf_start, "single-step demo" },
+    { "scnotify", scnotify_elf_start, "syscall-supervisor demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1959,6 +1969,57 @@ int app_sstep_get(app_t *a, uint64_t *out, int max) {       /* copy the recorded
     int n = a->sstep_n; if (n > max) n = max;
     for (int i = 0; i < n; i++) out[i] = a->sstep_rips[i];
     return n;
+}
+
+/* seccomp-notify (M1124): userspace syscall supervision. A child arms a set of
+ * syscalls; when it calls one, syscall_dispatch parks it (app_seccomp_notify)
+ * and a supervisor (typically the parent) reads the pending call
+ * (app_seccomp_wait) and replies with allow / deny / emulate
+ * (app_seccomp_reply). The two-way rendezvous runs interrupts-off (the syscall
+ * is an interrupt gate), so there's no lost wakeup — the mailbox discipline. */
+long app_seccomp_arm(int nr) {
+    struct app *a = cur();
+    if (!a || nr < 0 || nr >= 128) return -1;
+    a->sc_mask[nr >> 6] |= (1ull << (nr & 63));
+    a->sc_armed = 1;
+    return 0;
+}
+int app_seccomp_traps(app_t *a, uint64_t nr) {
+    return a && a->sc_armed && nr < 128 && (a->sc_mask[nr >> 6] & (1ull << (nr & 63))) != 0;
+}
+/* Park the calling (child) task with a pending notification; returns the verdict
+ * value, and sets *run_real to whether the real syscall should still run. */
+long app_seccomp_notify(app_t *a, uint64_t nr, uint64_t b1, uint64_t b2, uint64_t b3, int *run_real) {
+    a->sc_nr = nr; a->sc_a = b1; a->sc_b = b2; a->sc_c = b3;
+    a->sc_run_real = 1; a->sc_retval = 0;
+    a->sc_pending = 1;
+    if (a->sc_sup) { task_wake((task_t *)a->sc_sup); a->sc_sup = 0; }   /* wake a waiting supervisor */
+    task_block();                                       /* the child blocks until the supervisor replies */
+    *run_real = a->sc_run_real;
+    return a->sc_retval;
+}
+/* Supervisor: block until childpid parks, then fill ev[4] = {nr,a,b,c}. 1/0/-1. */
+long app_seccomp_wait(int childpid, uint64_t *ev) {
+    struct app *c = app_by_pid(childpid);
+    if (!c) return -1;                                  /* no such child */
+    if (!c->sc_pending) {                               /* block until the child parks (even if not armed yet) */
+        c->sc_sup = (void *)task_self();                /* register self as the waiter; the child's park wakes us */
+        task_block();
+        c->sc_sup = 0;
+    }
+    if (!c->sc_pending) return 0;                       /* stray wake (e.g. the child exited without parking) */
+    ev[0] = c->sc_nr; ev[1] = c->sc_a; ev[2] = c->sc_b; ev[3] = c->sc_c;
+    return 1;
+}
+/* Supervisor: deliver the verdict and resume the child. run_real!=0 lets the real
+ * syscall run; otherwise the child's syscall returns `retval`. 0/-1. */
+long app_seccomp_reply(int childpid, int run_real, long retval) {
+    struct app *c = app_by_pid(childpid);
+    if (!c || !c->sc_pending) return -1;
+    c->sc_run_real = run_real; c->sc_retval = retval;
+    c->sc_pending = 0;
+    if (c->task) task_wake((task_t *)c->task);          /* resume the child */
+    return 0;
 }
 
 /* Load and run an ELF program from a FAT32 file (e.g. `run calc.elf`). The ELF
