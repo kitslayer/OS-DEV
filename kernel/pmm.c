@@ -183,5 +183,14 @@ void pmm_addref(uint64_t phys) {
     irq_restore(fl);
 }
 
+/* The extra-reference count of a frame: 0 means single-owner (a normal
+ * allocation), >0 means it is mapped more than once (a shared/ring-mirror
+ * frame). Lets callers (e.g. madvise) avoid reclaiming a frame another mapping
+ * still needs. */
+int pmm_refcount(uint64_t phys) {
+    uint64_t frame = phys / PAGE_SIZE;
+    return frame < PMM_MAXREFS ? pmm_refs[frame] : 0;
+}
+
 uint64_t pmm_total_bytes(void) { return total_frames * PAGE_SIZE; }
 uint64_t pmm_free_bytes(void)  { return (total_frames - used_frames) * PAGE_SIZE; }

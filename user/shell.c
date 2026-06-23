@@ -465,7 +465,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest (mmap/ring/W^X demos)  wss[ pid] (working-set: resident/referenced/dirty pages via the CPU A/D bits)\n");
+            print("vm:     mmaptest ringtest jittest madvisetest (mmap/ring/W^X/reclaim demos)  wss[ pid] (working-set via the CPU A/D bits)\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1696,6 +1696,22 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "demand-paged + verified OK\n" : "VERIFY FAILED\n");
                 sys_munmap(m, len); print("munmap: freed\n");
                 if (!ok) g_status = 1;
+            }
+        } else if (streq(line, "madvisetest")) {  /* demonstrate madvise(MADV_DONTNEED): reclaim resident pages now */
+            unsigned long len = 256 * 1024;       /* 64 pages */
+            unsigned char *m = (unsigned char *)sys_mmap(len);
+            if (!m) { print("madvisetest: mmap failed\n"); g_status = 1; }
+            else {
+                for (unsigned long i = 0; i < len; i++) m[i] = 0xAB;   /* fault in + dirty every page */
+                print("touched "); printl((long)(len / 4096)); print(" pages (each byte = 0xAB)\n");
+                long dropped = sys_madvise(m, len, 4 /* MADV_DONTNEED */);
+                print("madvise(DONTNEED): reclaimed "); printl(dropped); print(" resident pages\n");
+                int zeroed = 1;                    /* re-touch: must re-fault as fresh ZERO pages */
+                for (unsigned long i = 0; i < len; i += 4096) if (m[i] != 0) { zeroed = 0; break; }
+                print(zeroed ? "  re-read after DONTNEED is ZERO -> pages reclaimed + re-faulted fresh\n"
+                             : "  VERIFY FAILED: stale data survived DONTNEED\n");
+                if (!zeroed || dropped <= 0) g_status = 1;
+                sys_munmap(m, len);
             }
         } else if (streq(line, "wss") || startswith(line, "wss ")) {  /* working-set size from the CPU's Accessed/Dirty PTE bits (/proc/<pid>/wss) */
             const char *who = "self"; int self = 1;

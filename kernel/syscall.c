@@ -264,7 +264,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_GFX;
     case SYS_spawn: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
         return PL_PROC;
-    case SYS_mmap: case SYS_munmap:
+    case SYS_mmap: case SYS_munmap: case SYS_madvise:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -298,7 +298,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
-        [SYS_tftp]="tftp",
+        [SYS_tftp]="tftp",[SYS_madvise]="madvise",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -762,6 +762,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);
+        break;
+    case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
+        r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);
         break;
     case SYS_ringbuf:                      /* (len): a magic mirrored ring buffer; base VA or 0 */
         r->rax = app_ringbuf(r->rdi);

@@ -953,6 +953,36 @@ int app_munmap(uint64_t addr, uint64_t len) {
     return -1;
 }
 
+/* madvise(MADV_DONTNEED) (M1099): reclaim the resident frames of [addr,addr+len)
+ * NOW, so RAM drops immediately and the next touch demand-faults a fresh zero
+ * page (app_fault_handle). The mmap VMA stays reserved. We only drop pages that
+ * are (a) inside an mmap region and (b) single-owner (pmm_refcount == 0) — so a
+ * shared/ring-mirror frame (mapped more than once, M1089) is never pulled out
+ * from under its other mapping. Other advices are accepted as no-ops. Returns
+ * the number of pages dropped, or -1 on a bad range. */
+#define MADV_DONTNEED 4
+int app_madvise(uint64_t addr, uint64_t len, int advice) {
+    struct app *a = cur();
+    if (!a || len == 0) return -1;
+    if (advice != MADV_DONTNEED) return 0;            /* NORMAL/WILLNEED/etc: harmless no-op */
+    uint64_t start = addr & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    int dropped = 0;
+    for (uint64_t p = start; p < end; p += PAGE_SIZE) {
+        int in_vma = 0;
+        for (int i = 0; i < a->nvma; i++)
+            if (p >= a->vma[i].start && p < a->vma[i].start + a->vma[i].len) { in_vma = 1; break; }
+        if (!in_vma) continue;                        /* only demand-paged mmap regions */
+        uint64_t ph = vmm_translate(p);
+        if (ph && pmm_refcount(ph) == 0) {            /* single-owner anon page: safe to reclaim */
+            vmm_unmap(p);
+            pmm_free_frame(ph);
+            dropped++;
+        }
+    }
+    return dropped;
+}
+
 /* mprotect (M1090): change the R/W/X protection of an already-mapped range in
  * the calling app (PROT_READ=1, PROT_WRITE=2, PROT_EXEC=4). Enables W^X and
  * write-then-execute JIT pages. The range must be the app's own user pages. */

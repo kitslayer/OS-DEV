@@ -57,6 +57,7 @@ uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous regi
 uint64_t app_ringbuf(uint64_t len);     /* a magic mirrored ring buffer: len frames mapped twice back-to-back */
 int      app_mprotect(uint64_t addr, uint64_t len, int prot);   /* change R/W/X of a mapped range (W^X/JIT); 0/-1 */
 int      app_munmap(uint64_t addr, uint64_t len);   /* free an mmap region; 0/-1 */
+int      app_madvise(uint64_t addr, uint64_t len, int advice);  /* MADV_DONTNEED(4): drop resident anon frames; pages dropped/-1 */
 int      app_fault_handle(uint64_t cr2);            /* #PF hook: lazily map an mmap page; 1 if handled */
 struct registers;                                   /* (interrupts.h) */
 void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */
