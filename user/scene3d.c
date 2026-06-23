@@ -2,8 +2,9 @@
  * scene3d.c — a real-time software 3D engine for OS-DEV. No GPU.
  *
  * A from-scratch perspective 3D renderer: a procedurally-generated, spinning,
- * lit + TEXTURED model (UV sphere / torus / cube) standing on a checkered FLOOR,
- * with an orbiting camera. Rasterized with a per-pixel Z-BUFFER and
+ * lit + TEXTURED centerpiece (UV sphere / torus / cube) ringed by a little
+ * ORRERY of tinted moons on tilted orbits, on a checkered FLOOR, with an
+ * orbiting camera. Rasterized with a per-pixel Z-BUFFER and
  * PERSPECTIVE-CORRECT texture + Gouraud-light interpolation (interpolate 1/z,
  * u/z, v/z, light/z; divide per pixel), plus backface culling and near-plane
  * culling. Built with SSE so the math is plain float (the generic user rule is
@@ -79,6 +80,16 @@ static float nx[MAXV], ny[MAXV], nz[MAXV];
 static float tu[MAXV], tv[MAXV];
 static int   tri[MAXT][3];
 static int   nverts, ntris;
+
+/* A dedicated sphere mesh for the orbiting satellites, snapshotted once at
+ * startup — so the moons stay round even when the centerpiece morphs to a
+ * torus or cube. */
+static float mvx[MAXV],mvy[MAXV],mvz[MAXV], mnx[MAXV],mny[MAXV],mnz[MAXV], mtu[MAXV],mtv[MAXV];
+static int   mtri[MAXT][3], mnv, mnt;
+
+/* Per-object colour tint, 0..256 per channel (256 = identity / no tint). Set
+ * per satellite so each moon has its own hue; reset to 256 for floor + model. */
+static int tintR=256, tintG=256, tintB=256;
 
 static int addv(float x, float y, float z, float a, float b, float c, float u, float w) {
     int i = nverts++;
@@ -201,6 +212,7 @@ static void raster(SV a, SV b, SV c) {
             float li=(lzl+(lzr-lzl)*tx)*w;
             unsigned tc = textured ? sample((uzl+(uzr-uzl)*tx)*w, (vzl+(vzr-vzl)*tx)*w) : flatcol;
             int R=(int)(((tc>>16)&255)*li), G=(int)(((tc>>8)&255)*li), B=(int)((tc&255)*li);
+            R=(R*tintR)>>8; G=(G*tintG)>>8; B=(B*tintB)>>8;   /* per-object tint (256 = identity) */
             if(R>255)R=255; if(G>255)G=255; if(B>255)B=255;
             row[x]=((unsigned)R<<16)|((unsigned)G<<8)|(unsigned)B;
         }
@@ -219,6 +231,10 @@ int main(void) {
 
     int model = 0;
     gen_sphere(); gen_texture(model);
+    /* snapshot the sphere as the satellite mesh (centerpiece can morph; moons stay round) */
+    for (int i=0;i<nverts;i++){ mvx[i]=vx[i];mvy[i]=vy[i];mvz[i]=vz[i]; mnx[i]=nx[i];mny[i]=ny[i];mnz[i]=nz[i]; mtu[i]=tu[i];mtv[i]=tv[i]; }
+    for (int t=0;t<ntris;t++){ mtri[t][0]=tri[t][0];mtri[t][1]=tri[t][1];mtri[t][2]=tri[t][2]; }
+    mnv=nverts; mnt=ntris;
 
     float spin=0.0f, autospin=1.0f;
     float camYaw=0.5f, camPitch=0.45f, dist=4.2f;
@@ -323,23 +339,44 @@ int main(void) {
             raster(A,B,C);
         }
 
-        /* --- a small textured "moon" orbiting the model (multi-object z-buffer) --- */
+        /* --- orbiting satellites: a little "orrery" of tinted spheres on tilted
+         *     orbits, each lit + textured + z-buffered against everything else --- */
         {
-            float oa=spin*1.7f, ms=spin*2.3f;
-            float ocx=1.95f*fcos(oa), ocz=1.95f*fsin(oa), ocy=0.45f;
-            float mc=fcos(ms), msn=fsin(ms), ccy=fcos(camYaw), scy=fsin(camYaw);
-            for (int i=0; i<nverts; i++) {
-                float sx=vx[i]*0.32f, syv=vy[i]*0.32f, sz=vz[i]*0.32f;
-                float wx=ocx + sx*mc - sz*msn, wz=ocz + sx*msn + sz*mc, wy=ocy + syv;
-                float wnx=nx[i]*mc - nz[i]*msn, wnz=nx[i]*msn + nz[i]*mc;
-                sv2[i]=project(wx,wy,wz, wnx,ny[i],wnz, tu[i],tv[i], ccy,scy, cxp,sxp, dist);
+            /* radius, orbitSpeed, phase, inclination, baseHeight, scale */
+            static const float sat[][6] = {
+                { 1.95f, 1.7f, 0.0f,  0.10f, 0.45f, 0.32f },
+                { 2.70f, 1.1f, 2.1f,  0.45f,-0.10f, 0.22f },
+                { 1.45f, 2.6f, 4.0f, -0.35f, 0.80f, 0.18f },
+                { 3.20f, 0.8f, 1.0f,  0.22f, 0.10f, 0.28f },
+            };
+            static const int sattint[][3] = {
+                {256,256,256}, {256,150,110}, {120,180,256}, {150,256,160},
+            };
+            int NS = (int)(sizeof(sat)/sizeof(sat[0]));
+            float ccy=fcos(camYaw), scy=fsin(camYaw);
+            for (int s=0; s<NS; s++) {
+                float radius=sat[s][0], ospeed=sat[s][1], phase=sat[s][2];
+                float incl=sat[s][3], hgt=sat[s][4], scl=sat[s][5];
+                float oa=spin*ospeed + phase, ci=fcos(incl), si=fsin(incl);
+                float px=radius*fcos(oa), pz0=radius*fsin(oa);            /* orbit in its own plane */
+                float ocx=px, ocy=hgt - si*pz0, ocz=ci*pz0;              /* tilt about X -> depth */
+                float ms=spin*(ospeed+1.3f), mc=fcos(ms), msn=fsin(ms);  /* self-spin */
+                tintR=sattint[s][0]; tintG=sattint[s][1]; tintB=sattint[s][2];
+                for (int i=0; i<mnv; i++) {
+                    float sx=mvx[i]*scl, syv=mvy[i]*scl, sz=mvz[i]*scl;
+                    float wx=ocx + sx*mc - sz*msn, wz=ocz + sx*msn + sz*mc, wy=ocy + syv;
+                    float wnx=mnx[i]*mc - mnz[i]*msn, wnz=mnx[i]*msn + mnz[i]*mc;
+                    sv2[i]=project(wx,wy,wz, wnx,mny[i],wnz, mtu[i],mtv[i], ccy,scy, cxp,sxp, dist);
+                }
+                for (int t=0; t<mnt; t++) {
+                    SV A=sv2[mtri[t][0]], B=sv2[mtri[t][1]], C=sv2[mtri[t][2]];
+                    float cross=(B.x-A.x)*(C.y-A.y)-(B.y-A.y)*(C.x-A.x);
+                    if (cross<=0) continue;                              /* backface */
+                    if (A.iz>4.0f||B.iz>4.0f||C.iz>4.0f) continue;       /* near-plane: drop too-close tris */
+                    raster(A,B,C);
+                }
             }
-            for (int t=0; t<ntris; t++) {
-                SV A=sv2[tri[t][0]], B=sv2[tri[t][1]], C=sv2[tri[t][2]];
-                float cross=(B.x-A.x)*(C.y-A.y)-(B.y-A.y)*(C.x-A.x);
-                if (cross<=0) continue;
-                raster(A,B,C);
-            }
+            tintR=tintG=tintB=256;   /* restore identity for the next frame's floor + model */
         }
 
         sys_gfx_blit(fb);
