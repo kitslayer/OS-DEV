@@ -35,3 +35,4 @@ const uint8_t *net_ip(void);        /* our IPv4 address (4 bytes) */
 const uint8_t *net_gateway(void);   /* the gateway IPv4 address (4 bytes) */
 const uint8_t *net_mac(void);       /* our 6-byte hardware (MAC) address */
 const uint8_t *net_dns(void);       /* the DNS resolver IPv4 address (4 bytes) */
+int net_proc(char *buf, int max);   /* /proc/net: interface + ARP/DNS caches as text; bytes written */

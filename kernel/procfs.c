@@ -19,6 +19,7 @@
 #include "console.h"
 #include "random.h"
 #include "ksyms.h"
+#include "net.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -178,6 +179,9 @@ static long gen_stat(char *b, int max) {
 static long gen_kmsg(char *b, int max) {        /* the kernel log ring buffer (dmesg) */
     return klog_copy(b, max);
 }
+static long gen_net(char *b, int max) {         /* interface + ARP/DNS caches (Linux /proc/net-ish) */
+    return net_proc(b, max);
+}
 static long gen_kallsyms(char *b, int max) {    /* the embedded kernel symbol table (addr + name per line) */
     int p = 0;
     for (int i = 0; i < ksyms_count && p < max - 24; i++) {
@@ -228,7 +232,7 @@ static const struct pf proc_files[] = {
     { "processes", gen_processes }, { "partitions", gen_partitions },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
-    { "kallsyms", gen_kallsyms },
+    { "kallsyms", gen_kallsyms }, { "net", gen_net },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

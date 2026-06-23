@@ -704,3 +704,58 @@ void net_demo(void) {
         kprintf("[tls] HTTPS GET example.com failed (no internet route, blocked :443, or handshake error)\n\n");
     }
 }
+
+/* --- /proc/net (M1080): the network state nothing else exposed -------------
+ * Interface (IP/MAC/gateway/DNS) plus the live ARP and DNS caches with their
+ * freshness — the kernel-side counterpart to Linux's /proc/net/{arp,…}. Pure
+ * read-only formatting over state already kept here; procfs.c routes it. */
+static int np_str(char *b, int p, int max, const char *s) { while (*s && p < max - 1) b[p++] = *s++; return p; }
+static int np_dec(char *b, int p, int max, uint64_t v) {
+    char t[20]; int n = 0; if (!v) t[n++] = '0';
+    while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+    while (n && p < max - 1) b[p++] = t[--n]; return p;
+}
+static int np_ip(char *b, int p, int max, const uint8_t *ip) {
+    for (int i = 0; i < 4; i++) { if (i && p < max - 1) b[p++] = '.'; p = np_dec(b, p, max, ip[i]); }
+    return p;
+}
+static int np_mac(char *b, int p, int max, const uint8_t *m) {
+    const char *hex = "0123456789abcdef";
+    for (int i = 0; i < 6; i++) {
+        if (i && p < max - 1) b[p++] = ':';
+        if (p < max - 1) b[p++] = hex[m[i] >> 4];
+        if (p < max - 1) b[p++] = hex[m[i] & 15];
+    }
+    return p;
+}
+
+int net_proc(char *b, int max) {
+    if (!b || max < 2) return 0;
+    uint64_t now = timer_ticks();
+    int p = 0;
+    p = np_str(b, p, max, "iface    ip ");   p = np_ip(b, p, max, net_ip());
+    p = np_str(b, p, max, "  mac ");          p = np_mac(b, p, max, net_mac());
+    p = np_str(b, p, max, "\ngateway  ");     p = np_ip(b, p, max, net_gateway());
+    p = np_str(b, p, max, "    dns ");        p = np_ip(b, p, max, net_dns());
+    p = np_str(b, p, max, "\nroute    default via ");  p = np_ip(b, p, max, net_gateway());
+    p = np_str(b, p, max, "\n\nARP cache (IP -> MAC):\n");
+    int any = 0;
+    for (int i = 0; i < ARP_CACHE_N; i++) if (arp_cache[i].used) {
+        p = np_str(b, p, max, "  ");  p = np_ip(b, p, max, arp_cache[i].ip);
+        p = np_str(b, p, max, "  ");  p = np_mac(b, p, max, arp_cache[i].mac);
+        p = np_str(b, p, max, now < arp_cache[i].exp ? "  fresh\n" : "  stale\n");
+        any = 1;
+    }
+    if (!any) p = np_str(b, p, max, "  (empty)\n");
+    p = np_str(b, p, max, "\nDNS cache (host -> IP):\n");
+    any = 0;
+    for (int i = 0; i < DNS_CACHE_N; i++) if (dns_cache[i].used) {
+        p = np_str(b, p, max, "  ");   p = np_str(b, p, max, dns_cache[i].host);
+        p = np_str(b, p, max, " -> "); p = np_ip(b, p, max, dns_cache[i].ip);
+        p = np_str(b, p, max, now < dns_cache[i].exp ? "  fresh\n" : "  stale\n");
+        any = 1;
+    }
+    if (!any) p = np_str(b, p, max, "  (empty)\n");
+    if (p < max) b[p] = 0;
+    return p;
+}
