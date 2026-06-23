@@ -9,16 +9,26 @@
 #include "vfs.h"
 #include "procfs.h"
 #include "blockdev.h"
+#include "tmpfs.h"
 
 static struct vfs_ops *fs;
 
-/* Synthetic /proc + /dev AND read-only secondary-disk mounts (/disk1, /disk2, …)
- * live alongside the mounted boot FS. Since the VFS is name-based, we just route
- * those paths before delegating to FAT32. A small cwd flag remembers when the
- * current directory is one of them. */
-static int synth_cwd;   /* 0 = boot FS, 1 = /proc, 2 = /dev, >=3 = mount (synth_cwd-3) */
+/* Synthetic /proc + /dev, a writable RAM /tmp, AND read-only secondary-disk
+ * mounts (/disk1, /disk2, …) all live alongside the mounted boot FS. Since the
+ * VFS is name-based, we route those paths before delegating to FAT32. A small
+ * cwd flag remembers which one the current directory is. */
+static int synth_cwd;   /* 0 = boot FS, 1 = /proc, 2 = /dev, 3 = /tmp, >=4 = mount (synth_cwd-4) */
 
 static int veq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
+static int vstarts(const char *s, const char *pre) { while (*pre) { if (*s++ != *pre++) return 0; } return 1; }
+
+/* Route a (possibly relative) name to the RAM /tmp filesystem. Returns 1 + the
+ * basename within /tmp if it targets /tmp, else 0. */
+static int tmp_path(const char *name, const char **base) {
+    if (name[0] == '/') { if (!vstarts(name, "/tmp/")) return 0; *base = name + 5; return **base != 0; }
+    if (synth_cwd == 3) { *base = name; return 1; }
+    return 0;
+}
 
 /* Resolve a (possibly relative) name to an absolute synthetic path. Returns 1
  * if it belongs to /proc or /dev (and fills out), else 0 (use the mounted FS). */
@@ -49,7 +59,7 @@ static int mount_path(const char *name, int *midx, const char **fname) {
         *midx = idx; *fname = (*p == '/') ? p + 1 : p;
         return 1;
     }
-    if (synth_cwd >= 3) { *midx = synth_cwd - 3; *fname = name; return 1; }
+    if (synth_cwd >= 4) { *midx = synth_cwd - 4; *fname = name; return 1; }
     return 0;
 }
 
@@ -58,10 +68,11 @@ void vfs_register(struct vfs_ops *ops) { fs = ops; }
 int vfs_list(vfs_dirent *out, int max) {
     if (synth_cwd == 1 || synth_cwd == 2)
         return procfs_list(synth_cwd == 1 ? "/proc" : "/dev", out, max);
-    if (synth_cwd >= 3) {                                  /* a mounted disk volume's root */
+    if (synth_cwd == 3) return tmpfs_list(out, max);       /* the RAM /tmp */
+    if (synth_cwd >= 4) {                                  /* a mounted disk volume's root */
         fatvol_dirent fe[64];
         int cap = max < 64 ? max : 64;
-        int n = blockdev_mount_list(synth_cwd - 3, fe, cap);
+        int n = blockdev_mount_list(synth_cwd - 4, fe, cap);
         for (int i = 0; i < n; i++) {
             int k = 0; while (fe[i].name[k] && k < 60) { out[i].name[k] = fe[i].name[k]; k++; }
             if (fe[i].is_dir) out[i].name[k++] = '/';     /* match fat32_list's dir marker */
@@ -74,20 +85,24 @@ int vfs_list(vfs_dirent *out, int max) {
 }
 
 long vfs_read(const char *name, void *buf, unsigned long max) {
-    char ap[96];
+    char ap[96]; const char *tb;
     if (synth_path(name, ap, sizeof ap)) return procfs_read(ap, buf, max);
+    if (tmp_path(name, &tb)) return tmpfs_read(tb, buf, max);
     int midx; const char *fname;
     if (mount_path(name, &midx, &fname)) return blockdev_mount_read(midx, fname, buf, max);
     return fs ? fs->read(name, buf, max) : -1;
 }
 
 long vfs_write(const char *name, const void *buf, unsigned long len) {
-    char ap[96];
+    char ap[96]; const char *tb;
     if (synth_path(name, ap, sizeof ap)) { long r = procfs_write(ap, buf, len); return r == -2 ? -1 : r; }
+    if (tmp_path(name, &tb)) return tmpfs_write(tb, buf, len);
     return (fs && fs->write) ? fs->write(name, buf, len) : -1;
 }
 
 long vfs_remove(const char *name) {
+    const char *tb;
+    if (tmp_path(name, &tb)) return tmpfs_remove(tb);
     return (fs && fs->remove) ? fs->remove(name) : -1;
 }
 
@@ -98,9 +113,10 @@ long vfs_mkdir(const char *path) {
 int vfs_chdir(const char *path) {
     if (veq(path, "/proc")) { synth_cwd = 1; return 0; }   /* enter synthetic dirs */
     if (veq(path, "/dev"))  { synth_cwd = 2; return 0; }
+    if (veq(path, "/tmp"))  { synth_cwd = 3; return 0; }   /* the RAM filesystem */
     if (path[0] == '/') {                                  /* enter a mounted disk: /diskN */
         int idx = blockdev_mount_index(path + 1);
-        if (idx >= 0) { synth_cwd = 3 + idx; return 0; }
+        if (idx >= 0) { synth_cwd = 4 + idx; return 0; }
     }
     synth_cwd = 0;                                          /* any other cd leaves them */
     return (fs && fs->chdir) ? fs->chdir(path) : -1;
