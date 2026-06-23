@@ -14,6 +14,7 @@
 #include "timer.h"
 #include "task.h"
 #include "app.h"
+#include "blockdev.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -132,6 +133,20 @@ static long gen_processes(char *b, int max) {
     }
     b[p] = 0; return p;
 }
+static long gen_partitions(char *b, int max) {   /* the block-device + FAT32-volume map (same data as `lsblk`) */
+    return blockdev_format(b, max);
+}
+static long gen_filesystems(char *b, int max) {
+    int p = sapp(b, 0, max, "nodev\tprocfs\nnodev\tdevfs\n      \tfat32\n");
+    b[p] = 0; return p;
+}
+static long gen_mounts(char *b, int max) {
+    int p = sapp(b, 0, max,
+        "fat32 / fat32 rw 0 0\n"
+        "procfs /proc procfs ro 0 0\n"
+        "devfs /dev devfs ro 0 0\n");
+    b[p] = 0; return p;
+}
 static long gen_stat(char *b, int max) {
     int p = sapp(b, 0, max, "processes ");
     p = sdec(b, p, max, (uint64_t)task_count());
@@ -154,7 +169,8 @@ struct pf { const char *name; long (*gen)(char *, int); };
 static const struct pf proc_files[] = {
     { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo },
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat },
-    { "processes", gen_processes },
+    { "processes", gen_processes }, { "partitions", gen_partitions },
+    { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
 };
 static const char *dev_files[] = { "null", "zero", "random", "full" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))
