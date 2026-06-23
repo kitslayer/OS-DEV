@@ -113,3 +113,11 @@ int           readline(char *buf, int max);   /* reads a line, strips '\n', NUL-
 unsigned long ustrlen(const char *s);
 int           streq(const char *a, const char *b);
 int           startswith(const char *s, const char *prefix);
+
+/* clock_gettime — reads the kernel's vDSO time page directly, with NO syscall
+ * (the page is mapped read-only into every process; the timer IRQ refreshes it
+ * under a seqlock). M1111. Returns 0. */
+#define CLOCK_REALTIME  0   /* wall clock: seconds since the Unix epoch (UTC) */
+#define CLOCK_MONOTONIC 1   /* steady time since boot (never jumps) */
+struct timespec { long tv_sec; long tv_nsec; };
+int clock_gettime(int clk, struct timespec *ts);

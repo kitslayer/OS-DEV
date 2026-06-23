@@ -17,6 +17,7 @@
 #include "audio.h"
 #include "profile.h"
 #include "app.h"
+#include "vdso.h"
 
 #define PIT_CH0_DATA 0x40
 #define PIT_COMMAND  0x43
@@ -27,6 +28,7 @@ static uint32_t          tick_hz = 100;   /* IRQ0 frequency, set by timer_init *
 
 static void timer_handler(struct registers *r) {
     ticks++;
+    vdso_tick(ticks);      /* refresh the userspace vDSO time page (syscall-free clock_gettime, M1111) */
     prof_tick(r->rip, r->cs);  /* sampling profiler: record the interrupted kernel RIP (M1086) */
     audio_pump();          /* keep the audio DMA fed (no-op unless streaming) */
     task_wake_sleepers();  /* wake any timed-sleep task whose deadline has passed (M1079) */

@@ -259,6 +259,36 @@ int startswith(const char *s, const char *prefix) {
     return 1;
 }
 
+/* clock_gettime — read the vDSO time page directly, no syscall (M1111). The page
+ * is mapped read-only at VDSO_ADDR in every process; the kernel timer IRQ writes
+ * it under a seqlock, so we retake the snapshot until `seq` is even and unchanged
+ * across the read (the standard seqlock reader). Layout mirrors kernel vdso.h. */
+#define VDSO_ADDR 0x80000000ull   /* keep in sync with kernel vdso.h */
+struct ul_vdso_time {
+    volatile unsigned seq;
+    unsigned          hz;
+    unsigned long     ticks;
+    unsigned long     mono_ns;
+    unsigned long     real_sec;
+    unsigned          real_nsec;
+    unsigned          _pad;
+};
+int clock_gettime(int clk, struct timespec *ts) {
+    volatile struct ul_vdso_time *vt = (volatile struct ul_vdso_time *)VDSO_ADDR;
+    unsigned long sec = 0, ns = 0;
+    for (int tries = 0; tries < 256; tries++) {
+        unsigned s1 = vt->seq;
+        __asm__ volatile("" ::: "memory");
+        if (clk == CLOCK_MONOTONIC) { sec = vt->mono_ns / 1000000000ull; ns = vt->mono_ns % 1000000000ull; }
+        else                        { sec = vt->real_sec;                ns = vt->real_nsec; }
+        __asm__ volatile("" ::: "memory");
+        unsigned s2 = vt->seq;
+        if (!(s1 & 1u) && s1 == s2) break;   /* stable, complete snapshot */
+    }
+    if (ts) { ts->tv_sec = (long)sec; ts->tv_nsec = (long)ns; }
+    return 0;
+}
+
 /* ---- freestanding mem primitives -------------------------------------- *
  * Word-at-a-time so GCC's loop-pattern pass doesn't rewrite a naive byte loop
  * into a call to memcpy/memset (which would be infinite recursion), mirroring

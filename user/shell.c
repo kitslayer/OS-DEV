@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest swaptest shmtest (mmap/ring/W^X/reclaim/swap/shared-mem)  alarmtest  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest swaptest shmtest (mmap/ring/W^X/reclaim/swap/shared-mem)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1776,6 +1776,22 @@ static int run_command(char *line, char *cwd) {
             sys_alarm(0);                        /* disarm */
             print("SIGALRM fired "); printl(g_alarm_fires); print(" times in ~1s (expected ~5)\n");
             if (g_alarm_fires < 3 || g_alarm_fires > 7) g_status = 1;
+        } else if (streq(line, "clockgt")) {  /* read the clock via the vDSO time page — NO syscall (M1111) */
+            struct timespec a, b, r;
+            clock_gettime(CLOCK_MONOTONIC, &a);
+            clock_gettime(CLOCK_REALTIME,  &r);
+            print("clock_gettime via the vDSO page @ 0x80000000 (read straight from RAM, no syscall):\n");
+            long ms = a.tv_nsec / 1000000;
+            print("  MONOTONIC: "); printl(a.tv_sec); print(".");
+            if (ms < 100) print("0"); if (ms < 10) print("0"); printl(ms);
+            print(" s since boot\n");
+            print("  REALTIME : "); printl(r.tv_sec); print(" Unix s (UTC) -- compare 'date'\n");
+            long start = sys_uptime_ms();
+            while (sys_uptime_ms() - start < 300) { }     /* let ~300ms pass (delay only; the clock reads below are syscall-free) */
+            clock_gettime(CLOCK_MONOTONIC, &b);
+            long dms = (b.tv_sec - a.tv_sec) * 1000 + (b.tv_nsec - a.tv_nsec) / 1000000;
+            print("  re-read MONOTONIC after ~300ms: advanced "); printl(dms); print(" ms\n");
+            if (dms < 150 || dms > 600 || r.tv_sec < 1700000000L) g_status = 1;
         } else if (streq(line, "wss") || startswith(line, "wss ")) {  /* working-set size from the CPU's Accessed/Dirty PTE bits (/proc/<pid>/wss) */
             const char *who = "self"; int self = 1;
             if (startswith(line, "wss ")) { const char *a = line + 4; while (*a == ' ') a++; if (*a) { who = a; self = 0; } }

@@ -17,6 +17,7 @@
 #include "kheap.h"
 #include "acpi.h"
 #include "random.h"
+#include "vdso.h"
 #include "measure.h"
 #include "task.h"
 #include "fat32.h"
@@ -128,6 +129,7 @@ void kmain(uint64_t mb_info) {
     kheap_init();
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
     random_init();                 /* seed the CSPRNG from RDSEED/RDRAND (TSC fallback) */
+    vdso_init();                   /* alloc the vDSO time page + seed the wall clock from the RTC (M1111) */
 
     /* Measured boot (M1096): fold the kernel's read-only image (.text+.rodata,
      * which includes every embedded app ELF) into PCR0 before anything runs.
