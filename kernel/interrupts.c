@@ -32,6 +32,8 @@ static const char *const exception_names[32] = {
 };
 
 static irq_handler_fn irq_handlers[16];
+static uint64_t irq_counts[16];                  /* IRQ fire tally (for /proc/interrupts) */
+uint64_t irq_count(int i) { return (i >= 0 && i < 16) ? irq_counts[i] : 0; }
 
 void interrupts_init(void) {
     idt_init();
@@ -105,6 +107,7 @@ void isr_dispatch(struct registers *r) {
 
     if (r->int_no >= 32 && r->int_no < 48) {
         uint8_t irq = (uint8_t)(r->int_no - 32);
+        irq_counts[irq]++;                       /* per-IRQ tally for /proc/interrupts */
         /* Acknowledge FIRST, then run the handler. This matters for preemption:
          * the timer handler context-switches away and won't return here until
          * this task runs again, so the EOI must already be sent or the PIC

@@ -15,6 +15,7 @@
 #include "task.h"
 #include "app.h"
 #include "blockdev.h"
+#include "interrupts.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -147,6 +148,22 @@ static long gen_mounts(char *b, int max) {
         "devfs /dev devfs ro 0 0\n");
     b[p] = 0; return p;
 }
+static long gen_interrupts(char *b, int max) {
+    static const char *names[16] = {
+        "timer", "keyboard", "cascade", "COM2", "COM1", "LPT2", "floppy", "LPT1",
+        "RTC", "irq9", "irq10", "irq11", "mouse", "FPU", "ATA0", "ATA1"
+    };
+    int p = sapp(b, 0, max, "  IRQ  COUNT       NAME\n");
+    for (int i = 0; i < 16; i++) {
+        uint64_t c = irq_count(i);
+        if (c == 0) continue;                          /* only IRQs that have fired */
+        p = sapp(b, p, max, "  "); p = sdec(b, p, max, (uint64_t)i);
+        p = sapp(b, p, max, "    "); p = sdec(b, p, max, c);
+        p = sapp(b, p, max, "    "); p = sapp(b, p, max, names[i]);
+        p = sapp(b, p, max, "\n");
+    }
+    b[p] = 0; return p;
+}
 static long gen_stat(char *b, int max) {
     int p = sapp(b, 0, max, "processes ");
     p = sdec(b, p, max, (uint64_t)task_count());
@@ -171,6 +188,7 @@ static const struct pf proc_files[] = {
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat },
     { "processes", gen_processes }, { "partitions", gen_partitions },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
+    { "interrupts", gen_interrupts },
 };
 static const char *dev_files[] = { "null", "zero", "random", "full" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

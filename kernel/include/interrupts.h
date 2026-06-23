@@ -22,6 +22,7 @@ struct registers {
 
 typedef void (*irq_handler_fn)(struct registers *regs);
 
+uint64_t irq_count(int i);                  /* times IRQ i has fired (for /proc/interrupts) */
 void interrupts_init(void);                 /* load IDT + remap the PIC */
 void interrupts_enable(void);               /* sti */
 void interrupts_disable(void);              /* cli */
