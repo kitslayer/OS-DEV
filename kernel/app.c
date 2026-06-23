@@ -15,6 +15,7 @@
 #include "vmm.h"
 #include "pmm.h"
 #include "elf.h"
+#include "measure.h"
 #include "fb.h"
 #include "font.h"
 #include "string.h"
@@ -1350,6 +1351,10 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
     a->titlebuf[ti] = 0;
     a->title = a->titlebuf;
+    /* Measured boot (M1096): fold this app's exact ELF image into PCR1 + the
+     * event log, in launch order. `elf` is kernel-accessible here (embedded
+     * .rodata or a kernel read buffer), before the CR3 switch below. */
+    measure_extend(PCR_APPS, elf, elf_image_size(elf, elfsz), a->title);
     if (g_have_pend) {                    /* consume a pending launch arg (one-shot, race-free) */
         int ai = 0; while (g_pend_arg[ai] && ai < 127) { a->launch_arg[ai] = g_pend_arg[ai]; ai++; }
         a->launch_arg[ai] = 0; g_have_pend = 0;

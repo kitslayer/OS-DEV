@@ -24,11 +24,13 @@ SECTIONS
     }
 
     .text : ALIGN(4K) {
+        _kimage_start = .;          /* start of the read-only code+rodata image (measured-boot, M1096) */
         *(.text*)
     }
 
     .rodata : ALIGN(4K) {
         *(.rodata*)
+        _kimage_end = .;            /* end of .text+.rodata: a deterministic span covering kernel code + the embedded app ELFs */
     }
 
     .data : ALIGN(4K) {

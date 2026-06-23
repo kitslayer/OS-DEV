@@ -17,6 +17,7 @@
 #include "kheap.h"
 #include "acpi.h"
 #include "random.h"
+#include "measure.h"
 #include "task.h"
 #include "fat32.h"
 #include "vfs.h"
@@ -127,6 +128,16 @@ void kmain(uint64_t mb_info) {
     kheap_init();
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
     random_init();                 /* seed the CSPRNG from RDSEED/RDRAND (TSC fallback) */
+
+    /* Measured boot (M1096): fold the kernel's read-only image (.text+.rodata,
+     * which includes every embedded app ELF) into PCR0 before anything runs.
+     * Each app then extends PCR1 at spawn, building a replayable attestation log. */
+    {
+        extern char _kimage_start[], _kimage_end[];
+        measure_init();
+        measure_extend(PCR_KERNEL, _kimage_start, (uint64_t)(_kimage_end - _kimage_start), "kernel");
+    }
+
     sched_init();
 
     /* Switch the console to the framebuffer: from here, all output renders

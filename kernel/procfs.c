@@ -24,6 +24,7 @@
 #include "fsevents.h"
 #include "profile.h"
 #include "mbox.h"
+#include "measure.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -148,6 +149,9 @@ static long gen_partitions(char *b, int max) {   /* the block-device + FAT32-vol
 static long gen_bcache(char *b, int max) {       /* the disk buffer-cache stats (M1095) */
     return blockdev_cache_format(b, max);
 }
+static long gen_measure(char *b, int max) {      /* measured-boot PCRs + event log (M1096) */
+    return measure_format(b, max);
+}
 static long gen_filesystems(char *b, int max) {
     int p = sapp(b, 0, max, "nodev\tprocfs\nnodev\tdevfs\n      \tfat32\n");
     b[p] = 0; return p;
@@ -253,7 +257,7 @@ static const struct pf proc_files[] = {
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },
     { "profile", gen_profile }, { "ipc", gen_ipc }, { "binds", gen_binds },
-    { "bcache", gen_bcache },
+    { "bcache", gen_bcache }, { "measure", gen_measure },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

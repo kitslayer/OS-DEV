@@ -457,7 +457,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest (mmap/ring/W^X demos)  wss[ pid] (working-set: resident/referenced/dirty pages via the CPU A/D bits)\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -1611,6 +1611,10 @@ static int run_command(char *line, char *cwd) {
             long n; char *b = slurp("/proc/kmsg", &n);
             if (b) { print(b); if (n > 0 && b[n - 1] != '\n') print("\n"); free(b); }
             else print("dmesg: kernel log unavailable\n");
+        } else if (streq(line, "measure")) {  /* measured-boot PCRs + attestation event log (/proc/measure) */
+            long n; char *b = slurp("/proc/measure", &n);
+            if (b) { print(b); free(b); }
+            else print("measure: unavailable\n");
         } else if (streq(line, "top")) {    /* live per-task CPU view (/proc/sched) until a key is pressed */
             int quit = 0;
             while (!quit) {

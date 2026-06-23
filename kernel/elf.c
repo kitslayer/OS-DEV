@@ -105,6 +105,24 @@ static int elf_check_phdr(const void *image, uint64_t maxsz, uint64_t phoff,
     return 1;
 }
 
+/* The on-disk byte extent of the ELF image: max(p_offset + p_filesz) over its
+ * PT_LOAD segments (and at least through the program-header table), capped at
+ * maxsz. A deterministic identity for the file's loadable content — used by
+ * measured-boot (M1096) to hash an app's image even when the caller passed
+ * maxsz = ~0 (a trusted embedded ELF). Returns 0 on an invalid header. */
+uint64_t elf_image_size(const void *image, uint64_t maxsz) {
+    uint64_t phoff, entry; uint16_t phnum, phentsize;
+    if (!elf_check_header(image, maxsz, &phoff, &phnum, &phentsize, &entry)) return 0;
+    uint64_t hi = phoff + (uint64_t)phnum * phentsize;   /* through the phdr table at minimum */
+    for (uint16_t i = 0; i < phnum; i++) {
+        elf_seg_t s;
+        if (elf_check_phdr(image, maxsz, phoff, phentsize, i, &s) != 1) continue;
+        uint64_t end = s.file_off + s.filesz;
+        if (end > hi) hi = end;
+    }
+    return hi > maxsz ? maxsz : hi;
+}
+
 uint64_t elf_load(const void *image, uint64_t maxsz) {
     uint64_t phoff, entry; uint16_t phnum, phentsize;
     if (!elf_check_header(image, maxsz, &phoff, &phnum, &phentsize, &entry))
