@@ -248,11 +248,24 @@ int main(void) {
         if (camPitch>1.45f)camPitch=1.45f; if (camPitch<0.05f)camPitch=0.05f;
         spin += 0.02f*autospin;
 
-        for (int y=0; y<H; y++) {                 /* gradient sky + clear z (1/z=0 == farthest) */
-            int sh=20 + y*55/H;
-            unsigned bg=((unsigned)(sh/3)<<16)|((unsigned)(sh/2)<<8)|(unsigned)(sh+25);
+        /* --- skybox: vertical gradient + a sun glow + faint stars --- (clears z: 1/z=0 = farthest) */
+        for (int y=0; y<H; y++) {
+            int gt = y*256/H;                            /* 0 (top) .. 255 (horizon) */
+            int sr = 10 + gt*70/256, sg = 14 + gt*95/256, sb = 46 + gt*78/256;  /* indigo -> warm teal */
+            int dys = y - H/5;
             unsigned *row=fb+(long)y*W; float *zr=zbuf+(long)y*W;
-            for (int x=0; x<W; x++){ row[x]=bg; zr[x]=0.0f; }
+            for (int x=0; x<W; x++) {
+                int r=sr, g=sg, b=sb;
+                int dxs = x - (W*3/4), d2 = dxs*dxs + dys*dys;   /* sun glow, upper-right */
+                if (d2 < 11000) { int gl=(11000-d2)*200/11000; r+=gl; g+=(gl*9)/10; b+=gl/2; }
+                if (y < H/3) {                                   /* faint stars in the upper sky */
+                    unsigned h=(unsigned)(x*1973 + y*9277); h^=h>>13; h*=0x5bd1e995u; h^=h>>15;
+                    if ((h & 1023u) == 0) { int s=150+(int)((h>>10)&63); r=s; g=s; b=s; }
+                }
+                if (r>255)r=255; if(g>255)g=255; if(b>255)b=255;
+                row[x]=((unsigned)r<<16)|((unsigned)g<<8)|(unsigned)b;
+                zr[x]=0.0f;
+            }
         }
 
         float cxp=fcos(camPitch), sxp=fsin(camPitch);
