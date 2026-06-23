@@ -8,6 +8,7 @@
  */
 #include "ulib.h"
 #include "shgrep.h"   /* gr_match(): the grep regex matcher (^ $ . * [..] \), host-tested by tests/shgrep */
+#include "shsed.h"    /* sed_sub(): the `sed s/RE/REPL/` substitution engine, host-tested by tests/shsed */
 #include "shmath.h"   /* sh_eval(): the $((expr)) integer evaluator, host-tested by tests/shmath */
 #include "shsplit.h"  /* sh_next_sep(): the ';' statement splitter (construct-aware), host-tested by tests/shsplit */
 #include "shbrace.h"  /* expand_braces(): {a,b}/{1..N} brace expansion, host-tested by tests/shbrace */
@@ -429,7 +430,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -794,6 +795,51 @@ static int run_command(char *line, char *cwd) {
                     for (long i = 0; i < n; i++)
                         for (int j = 0; j < n1; j++) if (buf[i] == s1[j]) { buf[i] = s2[j < n2 ? j : n2 - 1]; break; }
                     print(buf); free(buf);
+                }
+            }
+        } else if (startswith(line, "sed ")) {            /* sed 's/RE/REPL/[gi]' [file] : regex stream substitution (RE like grep: ^ $ . * [..] \) */
+            const char *p = line + 4; while (*p == ' ') p++;
+            char scr[256]; int sn = 0;                    /* the script (first arg; a quoted script's spaces arrive sentinel-protected) */
+            while (*p && *p != ' ' && sn < (int)sizeof(scr) - 1) scr[sn++] = SH_UNPROT(*p++);
+            scr[sn] = 0;
+            while (*p == ' ') p++;                         /* the rest is the file (a pipe appends PIPE.TMP) */
+            if (scr[0] != 's' || sn < 4) { print("usage: sed 's/RE/REPL/[gi]' [file]   (RE: ^ $ . * [..] \\)\n"); g_status = 2; }
+            else {
+                char delim = scr[1];
+                char re[160], repl[160]; int rn = 0, pn = 0;
+                const char *q = scr + 2;
+                while (*q && *q != delim && rn < (int)sizeof(re) - 2) {             /* RE up to the delimiter */
+                    if (*q == '\\' && q[1] == delim) { re[rn++] = delim; q += 2; }       /* \<delim> -> literal delim */
+                    else if (*q == '\\' && q[1]) { re[rn++] = '\\'; re[rn++] = q[1]; q += 2; }  /* keep \. \* \[ for the regex */
+                    else re[rn++] = *q++;
+                }
+                re[rn] = 0; if (*q == delim) q++;
+                while (*q && *q != delim && pn < (int)sizeof(repl) - 2) {           /* REPL up to the delimiter (escapes kept; sed_sub expands them) */
+                    if (*q == '\\' && q[1]) { repl[pn++] = '\\'; repl[pn++] = q[1]; q += 2; }
+                    else repl[pn++] = *q++;
+                }
+                repl[pn] = 0; if (*q == delim) q++;
+                int g = 0, ci = 0;
+                for (; *q; q++) { if (*q == 'g') g = 1; else if (*q == 'i' || *q == 'I') ci = 1; }
+                if (re[0] == '^') g = 0;                   /* ^ anchors to line start, so substitute once per line */
+                long n; char *buf = slurp(p, &n);
+                if (!buf) { print("sed: no such file: "); print(p); print("\n"); g_status = 2; }
+                else {
+                    long i = 0;
+                    while (i < n) {                        /* one line at a time, flushed (no whole-output cap) */
+                        long ls = i; while (i < n && buf[i] != '\n') i++;
+                        int had_nl = (i < n);
+                        char saved = buf[i]; buf[i] = 0;
+                        long osz = (i - ls + 1) * (pn + 2) + 64;   /* generous; sed_sub is bounds-safe regardless */
+                        if (osz > (1L << 20)) osz = 1L << 20;
+                        char *ob = malloc(osz);
+                        if (ob) { sed_sub(buf + ls, re, repl, g, ci, ob, osz); print(ob); free(ob); }
+                        if (had_nl) print("\n");
+                        buf[i] = saved;
+                        if (!had_nl) break;
+                        i++;
+                    }
+                    free(buf);
                 }
             }
         } else if (startswith(line, "fold ")) {           /* fold [-w]N FILE : wrap each line at N columns (default 60) */
