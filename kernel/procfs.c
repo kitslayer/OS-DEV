@@ -21,6 +21,7 @@
 #include "ksyms.h"
 #include "net.h"
 #include "fsevents.h"
+#include "profile.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -186,6 +187,9 @@ static long gen_net(char *b, int max) {         /* interface + ARP/DNS caches (L
 static long gen_fsevents(char *b, int max) {    /* recent filesystem mutations (inotify-style, M1085) */
     return fsevents_format(b, max);
 }
+static long gen_profile(char *b, int max) {     /* sampling profiler histogram (M1086) */
+    return prof_format(b, max);
+}
 static long gen_kallsyms(char *b, int max) {    /* the embedded kernel symbol table (addr + name per line) */
     int p = 0;
     for (int i = 0; i < ksyms_count && p < max - 24; i++) {
@@ -237,6 +241,7 @@ static const struct pf proc_files[] = {
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },
+    { "profile", gen_profile },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))
@@ -336,6 +341,11 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
         return -1;                                               /* other /dev nodes: read-only */
     }
     if (startswith(abs, "/proc/")) {
+        if (peq(abs + 6, "profile")) {                               /* echo on|off|reset > /proc/profile (M1086) */
+            char cmd[16]; int c = 0; const char *s = (const char *)buf;
+            for (unsigned long i = 0; i < len && c < 15 && s[i] && s[i] != '\n' && s[i] != ' '; i++) cmd[c++] = s[i];
+            cmd[c] = 0; prof_control(cmd); return (long)len;
+        }
         int pid; const char *file;
         if (proc_pid_path(abs, &pid, &file) && peq(file, "ctl")) {   /* echo CMD > /proc/<pid>/ctl */
             void *proc = proc_find(pid, 0);

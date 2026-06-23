@@ -15,6 +15,7 @@
 #include "io.h"
 #include "task.h"
 #include "audio.h"
+#include "profile.h"
 
 #define PIT_CH0_DATA 0x40
 #define PIT_COMMAND  0x43
@@ -24,8 +25,8 @@ static volatile uint64_t ticks;
 static uint32_t          tick_hz = 100;   /* IRQ0 frequency, set by timer_init */
 
 static void timer_handler(struct registers *r) {
-    (void)r;
     ticks++;
+    prof_tick(r->rip, r->cs);  /* sampling profiler: record the interrupted kernel RIP (M1086) */
     audio_pump();          /* keep the audio DMA fed (no-op unless streaming) */
     task_wake_sleepers();  /* wake any timed-sleep task whose deadline has passed (M1079) */
     sched_tick();          /* preempt the running thread (no-op if <2 tasks) */
