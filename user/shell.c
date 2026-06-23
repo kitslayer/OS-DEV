@@ -179,8 +179,23 @@ static void print_base(unsigned long n, int base) {   /* print n in base 2-16 */
     while (i) o[j++] = t[--i];
     o[j] = '\0'; print(o);
 }
-static unsigned shell_rng = 0;            /* lazily seeded from the clock on first use */
+static unsigned shell_rng = 0;            /* xorshift fallback, lazily clock-seeded */
+static unsigned char rng_cache[256];      /* batched CSPRNG bytes from sys_getrandom */
+static int rng_pos = (int)sizeof(rng_cache);
+static int rng_hw  = 1;                   /* 1 = kernel CSPRNG available, 0 = fell back */
 static unsigned shroll(void) {
+    if (rng_hw) {                         /* prefer the hardware-seeded kernel CSPRNG (M1072) */
+        if (rng_pos > (int)sizeof(rng_cache) - 4) {
+            if (sys_getrandom(rng_cache, sizeof rng_cache) == (long)sizeof rng_cache) rng_pos = 0;
+            else rng_hw = 0;              /* syscall unavailable: stop trying, use the fallback */
+        }
+        if (rng_hw) {
+            unsigned v = (unsigned)rng_cache[rng_pos] | ((unsigned)rng_cache[rng_pos+1] << 8) |
+                         ((unsigned)rng_cache[rng_pos+2] << 16) | ((unsigned)rng_cache[rng_pos+3] << 24);
+            rng_pos += 4;
+            return v;
+        }
+    }
     if (!shell_rng) {
         char tb[40]; long tn = sys_time(tb, sizeof(tb));
         shell_rng = 0x2545F491u;

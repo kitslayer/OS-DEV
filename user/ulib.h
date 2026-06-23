@@ -37,6 +37,7 @@ long sys_df(void *buf, unsigned long len);
 long sys_lspci(void *buf, unsigned long len);
 long sys_lsblk(void *buf, unsigned long len);
 long sys_mounts(void *buf, unsigned long len);
+long sys_getrandom(void *buf, unsigned long len);   /* fill buf with hardware-seeded CSPRNG bytes */
 long sys_find(const char *want, void *buf, unsigned long len);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);
 long sys_sha512(const char *name, void *hexbuf, unsigned long max);

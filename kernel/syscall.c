@@ -35,6 +35,7 @@
 #include "desktop.h"
 #include "pci.h"
 #include "blockdev.h"
+#include "random.h"
 #include "acpi.h"
 #include <stdint.h>
 
@@ -754,6 +755,13 @@ void syscall_dispatch(struct registers *r) {
         int max = (int)r->rsi;
         if (max <= 0 || !ubuf(r->rdi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)blockdev_mounts_format((char *)r->rdi, max);
+        break;
+    }
+    case SYS_getrandom: {                  /* rdi=buf, rsi=len: fill with CSPRNG bytes */
+        uint64_t len = r->rsi;
+        if (len == 0 || !ubuf(r->rdi, len)) { r->rax = (uint64_t)-1; break; }
+        random_bytes((void *)r->rdi, (size_t)len);
+        r->rax = len;
         break;
     }
     case SYS_exit:

@@ -57,6 +57,25 @@ static void chacha20_xor(uint8_t *out, const uint8_t *in, size_t len,
     }
 }
 
+/* Raw ChaCha20 keystream (no Poly1305) into out[len] — the stream-cipher core,
+ * exposed for the CSPRNG in kernel/random.c (/dev/random + getrandom). The AEAD
+ * path above is unchanged; this is purely additive. */
+void chacha20_keystream(uint8_t *out, size_t len, const uint8_t key[32],
+                        uint32_t counter, const uint8_t nonce[12]) {
+    uint32_t s[16], blk[16];
+    chacha_init(s, key, counter, nonce);
+    size_t off = 0;
+    while (off < len) {
+        chacha_block(blk, s);
+        s[12]++;
+        uint8_t ks[64];
+        for (int i = 0; i < 16; i++) { ks[4*i]=blk[i]; ks[4*i+1]=blk[i]>>8; ks[4*i+2]=blk[i]>>16; ks[4*i+3]=blk[i]>>24; }
+        size_t n = len - off; if (n > 64) n = 64;
+        for (size_t i = 0; i < n; i++) out[off+i] = ks[i];
+        off += n;
+    }
+}
+
 /* ---------------- Poly1305 (RFC 8439 §2.5) — donna 32-bit ------------------- */
 
 typedef struct { uint32_t r[5], h[5], pad[4]; } poly;

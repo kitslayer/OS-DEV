@@ -16,6 +16,7 @@
 #include "vmm.h"
 #include "kheap.h"
 #include "acpi.h"
+#include "random.h"
 #include "task.h"
 #include "fat32.h"
 #include "vfs.h"
@@ -125,6 +126,7 @@ void kmain(uint64_t mb_info) {
     vmm_init();
     kheap_init();
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
+    random_init();                 /* seed the CSPRNG from RDSEED/RDRAND (TSC fallback) */
     sched_init();
 
     /* Switch the console to the framebuffer: from here, all output renders

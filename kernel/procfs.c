@@ -17,6 +17,7 @@
 #include "blockdev.h"
 #include "interrupts.h"
 #include "console.h"
+#include "random.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -177,14 +178,6 @@ static long gen_kmsg(char *b, int max) {        /* the kernel log ring buffer (d
     return klog_copy(b, max);
 }
 
-/* ---- /dev character devices ---------------------------------------------- */
-static uint64_t rng_state;
-static uint64_t rng_next(void) {
-    if (!rng_state) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); rng_state = ((uint64_t)hi << 32 | lo) | 1; }
-    rng_state ^= rng_state << 13; rng_state ^= rng_state >> 7; rng_state ^= rng_state << 17;
-    return rng_state ^ timer_ms();
-}
-
 /* ---- the directory tables ------------------------------------------------- */
 struct pf { const char *name; long (*gen)(char *, int); };
 static const struct pf proc_files[] = {
@@ -194,7 +187,7 @@ static const struct pf proc_files[] = {
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg },
 };
-static const char *dev_files[] = { "null", "zero", "random", "full" };
+static const char *dev_files[] = { "null", "zero", "random", "urandom", "full" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))
 #define NDEV  (int)(sizeof(dev_files)/sizeof(dev_files[0]))
 
@@ -266,9 +259,9 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             for (unsigned long i = 0; i < n; i++) ((char *)buf)[i] = 0;
             return (long)n;
         }
-        if (peq(f, "random")) {                                 /* pseudo-random bytes */
+        if (peq(f, "random") || peq(f, "urandom")) {            /* CSPRNG bytes (hardware-seeded) */
             unsigned long n = max < 4096 ? max : 4096;
-            for (unsigned long i = 0; i < n; i++) ((unsigned char *)buf)[i] = (unsigned char)(rng_next() >> 11);
+            random_bytes(buf, n);
             return (long)n;
         }
     }

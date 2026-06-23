@@ -79,6 +79,7 @@
 #define SYS_signal 69   /* (signo, handler, restorer) -> install a ring-3 signal handler; 0 */
 #define SYS_raise  70   /* (signo)         -> deliver a signal to self (runs the handler, returns after) */
 #define SYS_sigreturn 71/* ()              -> return from a signal handler (restore the saved context) */
+#define SYS_getrandom 72/* (buf, len)      -> fill buf with CSPRNG bytes (hardware-seeded); bytes written */
 
 #define SYSCALL_VECTOR 0x80
 
