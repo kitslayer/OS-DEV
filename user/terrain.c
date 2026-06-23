@@ -125,6 +125,50 @@ static SV    gsv[(GD+1)*(GW+1)];
 #define FOG_START 28.0f
 #define FOG_END   (GD*STEP*0.95f)
 
+/* per-frame camera + fog state, so the tree pass can reuse project()/lighting */
+static float Cex,Cey,Cez,Ccy,Csy,Ccp,Csp;
+static unsigned Cfog;
+
+/* one flat-shaded, sun-lit, fogged triangle from world-space corners */
+static void tri3d(float x0,float y0,float z0, float x1,float y1,float z1,
+                  float x2,float y2,float z2, unsigned base) {
+    SV A=project(x0,y0,z0, Cex,Cey,Cez, Ccy,Csy,Ccp,Csp);
+    SV B=project(x1,y1,z1, Cex,Cey,Cez, Ccy,Csy,Ccp,Csp);
+    SV C=project(x2,y2,z2, Cex,Cey,Cez, Ccy,Csy,Ccp,Csp);
+    if (!A.ok||!B.ok||!C.ok) return;
+    float ux=x1-x0,uy=y1-y0,uz=z1-z0, vx=x2-x0,vy=y2-y0,vz=z2-z0;
+    float nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    float nl=fsqrt(nx*nx+ny*ny+nz*nz); if(nl<1e-4f)nl=1e-4f;
+    float diff=(nx*Lx+ny*Ly+nz*Lz)/nl; if(diff<0)diff=-diff;   /* two-sided (foliage) */
+    float lit=0.38f+0.66f*diff;
+    float izavg=(A.iz+B.iz+C.iz)*0.3333f, dist=(izavg>1e-5f)?1.0f/izavg:1e5f;
+    float fog=(dist-FOG_START)/(FOG_END-FOG_START); if(fog<0)fog=0; if(fog>1)fog=1;
+    int cr=(int)(((base>>16)&255)*lit), cg=(int)(((base>>8)&255)*lit), cb=(int)((base&255)*lit);
+    cr+=(int)(((int)((Cfog>>16)&255)-cr)*fog); cg+=(int)(((int)((Cfog>>8)&255)-cg)*fog); cb+=(int)(((int)(Cfog&255)-cb)*fog);
+    if(cr>255)cr=255; if(cg>255)cg=255; if(cb>255)cb=255;
+    raster(A,B,C, ((unsigned)cr<<16)|((unsigned)cg<<8)|(unsigned)cb);
+}
+
+/* a simple pine: a 4-sided trunk column + a 6-sided conical canopy */
+static void draw_tree(float bx, float bz, float ground, unsigned h) {
+    float fh = 2.3f + ((h>>12)&7)*0.18f;       /* canopy height varies a little per tree */
+    float t = 0.17f, fr = 1.05f, th = 1.0f;
+    float ty = ground, top = ty+th, apex = top+fh;
+    unsigned trunk = 0x6b4a2a;
+    unsigned leaf  = ((h>>16)&1) ? 0x2f7d34 : 0x357f3c;   /* two greens for variety */
+    float xs[4]={bx-t,bx+t,bx+t,bx-t}, zs[4]={bz-t,bz-t,bz+t,bz+t};
+    for (int i=0;i<4;i++){ int j=(i+1)&3;
+        tri3d(xs[i],ty,zs[i], xs[j],ty,zs[j], xs[j],top,zs[j], trunk);
+        tri3d(xs[i],ty,zs[i], xs[j],top,zs[j], xs[i],top,zs[i], trunk);
+    }
+    for (int i=0;i<6;i++){
+        float a0=2*PI*i/6, a1=2*PI*(i+1)/6;
+        tri3d(bx+fr*fcos(a0),top,bz+fr*fsin(a0),
+              bx+fr*fcos(a1),top,bz+fr*fsin(a1),
+              bx,apex,bz, leaf);
+    }
+}
+
 int main(void) {
     if (sys_gfx_init(W,H) < 0) { print("terrain: graphics init failed\n"); return 1; }
     fb   = malloc((unsigned long)W*H*4);
@@ -240,6 +284,29 @@ int main(void) {
                 raster(p00,p10,p01, c1);
                 raster(p10,p11,p01, c2);
             }
+        }
+
+        /* --- scatter low-poly pines on grassy ground (stable world-lattice
+         *     placement so they don't swim as the camera flies; z-buffered
+         *     against the terrain so hills hide the trees behind them) --- */
+        Cex=ex;Cey=ey;Cez=ez;Ccy=cy;Csy=sy;Ccp=cp;Csp=sp;Cfog=fogc;
+        {
+            float SP=5.5f;                              /* tree lattice spacing */
+            int ci=(int)(ex/SP), cj=(int)(ez/SP), rad=(int)(GD*STEP*0.8f/SP);
+            for (int dj=-rad; dj<=rad; dj++)
+                for (int di=-rad; di<=rad; di++) {
+                    int li=ci+di, lj=cj+dj;
+                    unsigned h=(unsigned)(li*73856093) ^ (unsigned)(lj*19349663);
+                    h^=h>>13; h*=0x5bd1e995u; h^=h>>15;
+                    if ((h&3u)!=0) continue;            /* ~1 in 4 cells has a tree */
+                    float jx=(((h>>4)&15)/15.0f-0.5f)*SP*0.7f, jz=(((h>>8)&15)/15.0f-0.5f)*SP*0.7f;
+                    float wx=(li+0.5f)*SP+jx, wz=(lj+0.5f)*SP+jz;
+                    float rel=(wx-ex)*sy+(wz-ez)*cy;    /* forward distance in camera frame */
+                    if (rel < -3.0f) continue;          /* behind the camera */
+                    float g=terr_h(wx,wz);
+                    if (g<0.4f || g>7.0f) continue;     /* grassy ground only (no water/snow) */
+                    draw_tree(wx, wz, g, h);
+                }
         }
 
         sys_gfx_blit(fb);
