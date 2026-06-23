@@ -107,6 +107,10 @@ struct app {
     int      uv_active;                  /* 1 once unveil() has been called (then file paths are checked) */
     int      uv_locked;                  /* 1 after unveil(NULL): no more unveils accepted */
     struct registers fork_frame;         /* a forked child's saved trap frame (rax=0); iret_to_user resumes it (M1116) */
+    int      parent;                     /* pid of the process that fork()ed us (0 = none) — for waitpid (M1117) */
+    int      exit_code;                  /* exit status, captured at SYS_exit */
+    int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
+    volatile int waiting;                /* this process is blocked in waitpid() */
 };
 
 static struct app apps[MAX_APPS];
@@ -529,6 +533,55 @@ void app_render(app_t *a, int px, int py, int focused) {
 
 int app_alive(app_t *a) { return a && a->used && !a->exited; }
 
+/* --- waitpid support (M1117) ---------------------------------------------- */
+static struct app *app_by_pid(int pid) {
+    for (int i = 0; i < MAX_APPS; i++) if (apps[i].used && apps[i].pid == pid) return &apps[i];
+    return 0;
+}
+static int app_pid_alive(int pid) {            /* a live (un-exited) process with this pid? */
+    struct app *a = app_by_pid(pid);
+    return a && !a->exited;
+}
+static void app_wake_waiter(int pid) {         /* wake a parent blocked in waitpid() */
+    struct app *a = app_by_pid(pid);
+    if (a && a->waiting && a->task) task_wake(a->task);
+}
+static void app_free_zombie_children(int ppid) {  /* a dying parent orphans its uncollected zombies */
+    for (int i = 0; i < MAX_APPS; i++)
+        if (apps[i].used && apps[i].zombie && apps[i].parent == ppid) apps[i].used = 0;
+}
+
+/* Block until a child (specific pid, or -1 = any) has exited, then collect it:
+ * read its exit status, free its (now-zombie) slot, and return its pid. -1 if the
+ * caller has no matching children. The forked child is turned into a zombie by
+ * app_reap (resources already freed), which also wakes us. The scan+block runs
+ * with interrupts off (the syscall is an interrupt gate), so a child that exits
+ * while we're parked can't lose its wakeup — same discipline as the mailbox. */
+long app_waitpid(int pid, int *status) {
+    struct app *me = cur();
+    if (!me) return -1;
+    for (;;) {
+        struct app *z = 0; int have = 0;
+        for (int i = 0; i < MAX_APPS; i++) {
+            struct app *c = &apps[i];
+            if (!c->used || c->parent != me->pid) continue;
+            if (pid > 0 && c->pid != pid) continue;
+            have = 1;
+            if (c->zombie) { z = c; break; }
+        }
+        if (z) {
+            int code = z->exit_code, cpid = z->pid;
+            z->used = 0; z->zombie = 0;            /* collect the zombie slot */
+            if (status) *status = code;
+            return cpid;
+        }
+        if (!have) return -1;                      /* no matching children to wait for */
+        me->waiting = 1;
+        task_block();                              /* woken by app_reap when a child zombifies */
+        me->waiting = 0;
+    }
+}
+
 /* Reclaim a self-exited app's resources. Called by the window manager from ITS
  * own context (not the app's), so it can free the app's task_t + 256 KB kernel
  * stack and release the apps[] slot — lifting the per-boot spawn cap for apps
@@ -540,12 +593,23 @@ int app_alive(app_t *a) { return a && a->used && !a->exited; }
  * vmm_destroy_address_space), and the apps[] slot. */
 int app_reap(app_t *a) {
     if (!a) return 1;
+    if (a->zombie) return 1;                  /* already reaped to a zombie: resources freed, slot kept for waitpid */
     if (a->used && a->exited && (!a->task || a->task->state == TASK_DEAD)) {
         if (a->task) task_free(a->task);
         a->task = 0;
         vmm_destroy_address_space(a->cr3);   /* free page tables + user frames */
         a->cr3 = 0;
         if (a->gfx) { kfree(a->gfx); a->gfx = 0; }   /* graphics canvas (kernel heap) */
+        /* A forked child whose parent is still alive becomes a collectable
+         * zombie (M1117): its resources are freed now, but the slot + exit_code
+         * linger until the parent waitpid()s it. Spawned apps (parent==0) and
+         * orphans free their slot immediately, exactly as before. */
+        if (a->parent && app_pid_alive(a->parent)) {
+            a->zombie = 1;
+            app_wake_waiter(a->parent);      /* wake the parent if it's blocked in waitpid */
+            return 1;                        /* window removable; slot persists as a zombie */
+        }
+        app_free_zombie_children(a->pid);    /* this app is leaving: orphan-free any zombies of its own */
         a->used = 0;
     }
     return !a->used;
@@ -1489,7 +1553,7 @@ int app_sys_getkbevent(void) {
 int  app_sys_getpid(void) { return cur()->pid; }
 void app_sys_clear(void)  { grid_clear(cur()); }
 void app_setcolor(int idx) { struct app *a = cur(); if (a) a->curcol = (uint8_t)(idx & 15); }
-void app_sys_exit(void)   { cur()->exited = 1; task_exit(); }
+void app_sys_exit(int code) { struct app *a = cur(); a->exit_code = code; a->exited = 1; task_exit(); }
 /* --- ELF core dump (M1104) -------------------------------------------------
  * When a ring-3 app dies on an unhandled fault, write an ET_CORE ELF to
  * /tmp/core capturing its registers (a PT_NOTE/NT_PRSTATUS) and its writable
@@ -1759,6 +1823,7 @@ long app_fork(struct registers *r) {
     for (int i = 0; i < APP_NUNVEIL; i++) a->uv[i] = p->uv[i];
     int li = 0; while (p->launch_arg[li] && li < 127) { a->launch_arg[li] = p->launch_arg[li]; li++; }
     a->launch_arg[li] = 0;
+    a->parent = p->pid;                                 /* so the parent can waitpid() us (M1117) */
     /* NOT inherited (POSIX): pending signals, alarms, strace, gfx-mode canvas. */
 
     /* The child's resume context: the parent's trap frame, but returning 0. */

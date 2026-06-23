@@ -25,14 +25,17 @@ int main(void) {
         // ---- child ----
         print("child: forked! I inherited shared="); pnum(shared); print("\n");
         shared = 222;                       // WRITE -> copy-on-write split (my private page now)
-        print("child: I set shared=222 in MY copy; exiting\n");
-        sys_sleep(8000);
-        return 0;
+        print("child: I set shared=222 in MY copy; exiting with code 7\n");
+        sys_sleep(600);                     // brief, so its window is visible before it exits
+        sys_exit(7);                        // a distinctive status the parent will collect
     }
 
     // ---- parent ----
     print("parent: child pid="); pnum(pid); print("\n");
-    sys_sleep(1200);                        // let the child run + write its copy
+    int status = -1;
+    long got = sys_waitpid(-1, &status);    // block until the child exits, collect its status
+    print("parent: waitpid reaped child="); pnum(got);
+    print(", status="); pnum(status); print("\n");
     print("parent: after the child wrote 222, MY shared is still=");
     pnum(shared);                            // expect 111 — COW kept the pages independent
     print(shared == 111 ? "  (COW isolation OK)\n" : "  (BROKEN: shared leaked!)\n");

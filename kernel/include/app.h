@@ -89,7 +89,8 @@ void   app_add_mouse_rel(app_t *a, int dx, int dy);  /* WM: accumulate relative 
 long   app_get_mouse_rel(void);        /* SYS_mouse_rel: packed dx|dy, read+cleared */
 void   app_sys_clear(void);             /* clear the calling app's screen */
 void   app_setcolor(int idx);           /* set the calling app's text colour (palette 0-15) */
-void   app_sys_exit(void);              /* does not return */
+void   app_sys_exit(int code);          /* records the exit status; does not return */
+long   app_waitpid(int pid, int *status); /* block until a child (pid, or -1=any) exits; returns its pid + *status (M1117) */
 void   app_fault_current(struct registers *r);  /* a ring-3 task faulted: dump a core, kill it, keep the kernel alive; no return */
 void   app_core_dump(struct registers *r);      /* write an ET_CORE ELF of the faulting app to /tmp/core (M1104) */
 
