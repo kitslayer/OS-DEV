@@ -27,6 +27,7 @@
  */
 #include "blockdev.h"
 #include "partition.h"
+#include "ext2.h"
 #include "ata.h"
 #include "ahci.h"
 #include "virtio_blk.h"
@@ -422,7 +423,9 @@ static int collect_fat_starts(int i, uint64_t *starts, int max) {
  *     browsable in the VFS as /disk1, /disk2, ... (M1061). Lazily built on the
  *     first query. Each mount is just (device index, volume start-LBA); reads go
  *     through bd_blk_read + the device-agnostic fatvol_list/fatvol_read. --- */
-struct bd_mount { char name[8]; int dev; uint64_t start; };
+#define FS_FAT  0
+#define FS_EXT2 1
+struct bd_mount { char name[8]; int dev; uint64_t start; int fstype; };
 static struct bd_mount g_mount[8];
 static int g_nmount, g_mount_scanned;
 
@@ -431,17 +434,27 @@ static void blockdev_mount_scan(void) {
     g_mount_scanned = 1;
     blockdev_init();                          /* make sure devices are registered */
     for (int i = 0; i < g_ndev && g_nmount < 8; i++) {
-        uint64_t starts[16];
+        uint64_t starts[17];
         int ns = collect_fat_starts(i, starts, 16);
+        /* Also consider LBA 0 for a table-less volume (e.g. a raw `mke2fs` image,
+         * which has no 0xAA55 signature so collect_fat_starts skips it). */
+        int have0 = 0; for (int v = 0; v < ns; v++) if (starts[v] == 0) have0 = 1;
+        if (!have0) starts[ns++] = 0;
         for (int v = 0; v < ns && g_nmount < 8; v++) {
-            /* only mount it if it really lists as FAT32 (an empty/bogus candidate
-             * gives 0; we still mount empties, but skip ones that fail to parse) */
+            int fstype;
             fatvol_dirent probe[1];
-            if (fatvol_list(bd_blk_read, (void *)(intptr_t)i, starts[v], probe, 1) < 0) continue;
+            /* Probe ext2 FIRST: its superblock-magic check is strict, whereas
+             * fatvol_list returns 0 (>=0) even for a non-FAT volume, which would
+             * otherwise misclaim an ext2 disk as an empty FAT one. */
+            if (ext2_probe(bd_blk_read, (void *)(intptr_t)i, starts[v]) == 0)
+                fstype = FS_EXT2;                                 /* an ext2 volume */
+            else if (fatvol_list(bd_blk_read, (void *)(intptr_t)i, starts[v], probe, 1) >= 0)
+                fstype = FS_FAT;                                  /* a FAT32 volume */
+            else continue;                                        /* neither -> skip */
             struct bd_mount *m = &g_mount[g_nmount];
             m->name[0]='d'; m->name[1]='i'; m->name[2]='s'; m->name[3]='k';
             m->name[4] = (char)('1' + g_nmount); m->name[5] = 0;   /* disk1..disk8 */
-            m->dev = i; m->start = starts[v];
+            m->dev = i; m->start = starts[v]; m->fstype = fstype;
             g_nmount++;
         }
     }
@@ -469,25 +482,28 @@ int blockdev_mount_index(const char *name) {     /* "disk2" -> index, else -1 */
 int blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return 0;
-    return fatvol_list_path(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start,
-                            subpath ? subpath : "", out, max);
+    void *c = (void *)(intptr_t)g_mount[i].dev; uint64_t s = g_mount[i].start;
+    return g_mount[i].fstype == FS_EXT2 ? ext2_list_path(bd_blk_read, c, s, subpath ? subpath : "", out, max)
+                                        : fatvol_list_path(bd_blk_read, c, s, subpath ? subpath : "", out, max);
 }
 
 /* Read the file at `path` (relative to the volume root) of mount `i`. -1 if it
- * is a directory / not found. Subdirectory-aware (M1070). */
+ * is a directory / not found. Subdirectory-aware (M1070); ext2 or FAT32. */
 long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return -1;
-    return fatvol_read_path(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start,
-                            path ? path : "", buf, max);
+    void *c = (void *)(intptr_t)g_mount[i].dev; uint64_t s = g_mount[i].start;
+    return g_mount[i].fstype == FS_EXT2 ? ext2_read_path(bd_blk_read, c, s, path ? path : "", buf, max)
+                                        : fatvol_read_path(bd_blk_read, c, s, path ? path : "", buf, max);
 }
 
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
 int blockdev_mount_isdir(int i, const char *path) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return 0;
-    return fatvol_isdir_path(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start,
-                             path ? path : "");
+    void *c = (void *)(intptr_t)g_mount[i].dev; uint64_t s = g_mount[i].start;
+    return g_mount[i].fstype == FS_EXT2 ? ext2_isdir_path(bd_blk_read, c, s, path ? path : "")
+                                        : fatvol_isdir_path(bd_blk_read, c, s, path ? path : "");
 }
 
 /* --- the headless browsing demo -------------------------------------------- */
