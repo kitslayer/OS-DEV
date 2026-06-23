@@ -620,6 +620,19 @@ void syscall_dispatch(struct registers *r) {
         acpi_poweroff();                   /* enter ACPI S5: power the machine off */
         for (;;) __asm__ volatile("hlt");
         break;
+    case SYS_kill: {                       /* ask the app with this pid to close (cooperative, like the X button) */
+        int pid = (int)r->rdi;
+        task_info_t ti[24];
+        int cnt = task_snapshot(ti, 24);
+        r->rax = (uint64_t)-1;
+        for (int i = 0; i < cnt; i++)
+            if (ti[i].id == pid && ti[i].proc && ti[i].state != 3) {
+                app_request_kill((app_t *)ti[i].proc);
+                r->rax = 0;
+                break;
+            }
+        break;
+    }
     case SYS_sbrk:
         r->rax = app_sbrk((long)r->rdi);   /* grow the heap; old break, or (uint64_t)-1 */
         break;

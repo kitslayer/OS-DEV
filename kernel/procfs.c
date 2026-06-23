@@ -12,6 +12,8 @@
 #include "procfs.h"
 #include "pmm.h"
 #include "timer.h"
+#include "task.h"
+#include "app.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -113,6 +115,23 @@ static long gen_loadavg(char *b, int max) {
     p = sapp(b, p, max, " 0\n");
     b[p] = 0; return p;
 }
+static long gen_processes(char *b, int max) {
+    task_info_t ti[24];
+    int cnt = task_snapshot(ti, 24);
+    static const char *st[4] = { "ready", "run  ", "block", "dead " };
+    int p = sapp(b, 0, max, "  PID  STATE  NAME\n");
+    for (int i = 0; i < cnt; i++) {
+        if (ti[i].state == 3) continue;                 /* skip dead */
+        p = sapp(b, p, max, "  ");
+        p = sdec(b, p, max, (uint64_t)ti[i].id);
+        p = sapp(b, p, max, "    ");
+        p = sapp(b, p, max, st[ti[i].state & 3]);
+        p = sapp(b, p, max, "  ");
+        p = sapp(b, p, max, ti[i].proc ? app_title((app_t *)ti[i].proc) : "(kernel)");
+        p = sapp(b, p, max, "\n");
+    }
+    b[p] = 0; return p;
+}
 static long gen_stat(char *b, int max) {
     int p = sapp(b, 0, max, "processes ");
     p = sdec(b, p, max, (uint64_t)task_count());
@@ -135,6 +154,7 @@ struct pf { const char *name; long (*gen)(char *, int); };
 static const struct pf proc_files[] = {
     { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo },
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat },
+    { "processes", gen_processes },
 };
 static const char *dev_files[] = { "null", "zero", "random", "full" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

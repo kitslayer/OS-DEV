@@ -16,6 +16,7 @@ long sys_sysinfo(void *buf, unsigned long len);
 void sys_clear(void);
 void sys_reboot(void);
 void sys_poweroff(void);   /* enter ACPI S5: power the machine off; never returns */
+long sys_kill(int pid);    /* ask the app with this pid to close; 0 ok / -1 not found */
 long sys_ping(void);
 long sys_ping_host(const char *host);
 long sys_netinfo(void *buf, unsigned long len);

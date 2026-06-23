@@ -72,6 +72,7 @@
 #define SYS_lspci  62   /* (buf, len)      -> PCI device list as text lines; bytes      */
 #define SYS_lsblk  63   /* (buf, len)      -> block devices + FAT32 volumes as text; bytes */
 #define SYS_poweroff 64 /* ()              -> enter ACPI S5 (power the machine off); never returns */
+#define SYS_kill   65   /* (pid)           -> ask the app with this pid to close; 0 ok / -1 not found */
 
 #define SYSCALL_VECTOR 0x80
 
