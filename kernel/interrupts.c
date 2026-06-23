@@ -17,6 +17,7 @@
 #include "console.h"
 #include "syscall.h"
 #include "app.h"
+#include "task.h"
 #include "ksyms.h"
 #include <stdint.h>
 
@@ -62,6 +63,10 @@ static void dump_registers(struct registers *r) {
 }
 
 void isr_dispatch(struct registers *r) {
+    /* Remember the most recent ring-3 trap frame for /proc/<pid>/regs (M1119):
+     * while a task is stopped, this stays valid (frozen on its kernel stack). */
+    if ((r->cs & 3) == 3) { task_t *ct = task_self(); if (ct) ct->uframe = r; }
+
     if (r->int_no == SYSCALL_VECTOR) {     /* int 0x80 from userspace */
         syscall_dispatch(r);
         return;

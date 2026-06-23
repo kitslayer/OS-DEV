@@ -4,6 +4,8 @@
 
 typedef enum { TASK_READY, TASK_RUNNING, TASK_BLOCKED, TASK_DEAD, TASK_STOPPED } task_state_t;
 
+struct registers;   /* (interrupts.h) — the trap frame, captured for /proc/<pid>/regs */
+
 typedef struct task {
     uint64_t      rsp;        /* saved stack pointer — MUST be the first field */
     struct task  *next;       /* circular ready-ring link */
@@ -19,6 +21,7 @@ typedef struct task {
     uint64_t      last_in;     /* timer_ms() when it last became `current`         */
     uint64_t      nswitch;     /* times it has been scheduled in (context switches) */
     uint64_t      wake_at;     /* if BLOCKED via task_sleep_ms: timer_ms() deadline (0 = not a timed sleep) */
+    struct registers *uframe;  /* most recent ring-3 trap frame (for /proc/<pid>/regs); valid while stopped (M1119) */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */
@@ -37,6 +40,7 @@ void    task_wake(task_t *t);              /* mark a blocked task runnable again
 void    task_sleep_ms(uint64_t ms);        /* sleep the current task off-CPU until the timer wakes it */
 void    task_wake_sleepers(void);          /* timer IRQ: wake tasks whose sleep deadline passed */
 void    task_copy_fpu(task_t *dst, task_t *src);   /* clone src's live FP/SSE state into dst (fork) */
+struct registers *task_uframe(task_t *t);  /* the task's most recent ring-3 trap frame, or 0 (M1119) */
 void    task_stop(task_t *t);              /* suspend another task (READY/RUNNING -> STOPPED); not self */
 void    task_cont(task_t *t);              /* resume a STOPPED task */
 int     task_count(void);                  /* number of live tasks */

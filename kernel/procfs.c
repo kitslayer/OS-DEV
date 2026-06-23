@@ -395,6 +395,30 @@ static long gen_pid_mem(char *b, int max, void *proc, const char *spec) {
     b[p] = 0; return p;
 }
 
+/* /proc/<pid>/regs: the ring-3 register file captured at the target's most recent
+ * trap (M1119). Most meaningful for a STOPPED task (its frame is frozen); for a
+ * running task it's the last trap (constantly changing). Pairs with /proc/<pid>/mem
+ * + ctl stop/cont to inspect a halted process. */
+static int rreg(char *b, int p, int max, const char *nm, uint64_t v) {
+    p = sapp(b, p, max, nm); p = sapp(b, p, max, "="); p = shexw(b, p, max, v, 16); return p;
+}
+static long gen_pid_regs(char *b, int max, void *proc) {
+    struct registers *r = task_uframe((task_t *)app_task((app_t *)proc));
+    if (!r) { int p = sapp(b, 0, max, "  (no saved trap frame — the task has not entered ring 3)\n"); if (p < max) b[p] = 0; return p; }
+    int p = 0;
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rip", r->rip); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rsp", r->rsp);    p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rbp", r->rbp); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rfl", r->rflags); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rax", r->rax); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rbx", r->rbx); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rcx", r->rcx); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rdx", r->rdx); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rsi", r->rsi); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "rdi", r->rdi); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r8 ", r->r8);  p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r9 ", r->r9);  p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r10", r->r10); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r11", r->r11); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r12", r->r12); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r13", r->r13); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r14", r->r14); p = sapp(b, p, max, "  "); p = rreg(b, p, max, "r15", r->r15); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "  "); p = rreg(b, p, max, "cs",  r->cs);  p = sapp(b, p, max, "  "); p = rreg(b, p, max, "ss",  r->ss);  p = sapp(b, p, max, "\n");
+    if (p < max) b[p] = 0; return p;
+}
+
 long procfs_read(const char *abs, void *buf, unsigned long max) {
     if (max == 0) return -1;
     if (startswith(abs, "/proc/")) {
@@ -406,6 +430,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */
+            if (peq(file, "regs"))   return gen_pid_regs((char *)buf, (int)max, proc);   /* ring-3 register file (M1119) */
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "cmdline")) {
                 char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));

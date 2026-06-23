@@ -49,6 +49,8 @@ void task_copy_fpu(task_t *dst, task_t *src) {
     memcpy(fxptr(dst), fxptr(src), FXSZ);
 }
 
+struct registers *task_uframe(task_t *t) { return t ? t->uframe : 0; }
+
 static uint64_t active_cr3;     /* the address space currently loaded in CR3 */
 static task_t *idle_task;       /* the scheduling floor: never blocks/exits, run ONLY when no other task is runnable (so a task that blocks itself when nothing else is ready hands off to this instead of spinning marked-BLOCKED). NULL until created -> switch_to_next falls back to its prior behavior. */
 
