@@ -1738,7 +1738,12 @@ static int run_command(char *line, char *cwd) {
             long ms = 0; while (*p >= '0' && *p <= '9') { ms = ms * 10 + (*p++ - '0'); if (ms > 300) ms = 300; }
             ms *= 1000;
             if (*p == '.' && p[1] >= '0' && p[1] <= '9') ms += (p[1] - '0') * 100;   /* .N tenths of a second */
-            if (ms > 0) sys_sleep((int)ms);
+            for (long slept = 0; slept < ms; ) {        /* chunked so Ctrl-C / Esc can interrupt, like the for/while loops */
+                int chunk = (ms - slept) > 50 ? 50 : (int)(ms - slept);
+                sys_sleep(chunk); slept += chunk;
+                int k = sys_pollkey();
+                if (k == 0x83 || k == 27) { print("^C\n"); g_status = 130; break; }
+            }
         } else if (startswith(line, "tee ")) {            /* cmd | tee FILE... : write the piped input to each FILE and pass it through */
             const char *p = line + 4; while (*p == ' ') p++;
             char tav[8][64]; int tac = 0;                 /* targets + (last, appended by the pipe) the input file */
