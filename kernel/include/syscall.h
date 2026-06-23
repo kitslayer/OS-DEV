@@ -97,6 +97,9 @@
 #define SYS_swapout 87  /* (addr,len) -> page out anon pages in range to swap (MADV_PAGEOUT); pages/-1 */
 #define SYS_losetup 88  /* (path) -> mount a FAT/ext2 image file as a loop block device; mount index (/disk<n+1>) or -1 */
 #define SYS_shm_open 89  /* (name, size) -> map a named shared-memory object into this app; base VA or 0 */
+#define SYS_futex  90   /* (uaddr, op, val) -> FUTEX_WAIT(0): block if *uaddr==val; FUTEX_WAKE(1): wake up to val waiters */
+#define FUTEX_WAIT 0
+#define FUTEX_WAKE 1
 
 #define SYSCALL_VECTOR 0x80
 

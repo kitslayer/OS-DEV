@@ -60,6 +60,7 @@ int      app_munmap(uint64_t addr, uint64_t len);   /* free an mmap region; 0/-1
 int      app_madvise(uint64_t addr, uint64_t len, int advice);  /* MADV_DONTNEED(4): drop resident anon frames; pages dropped/-1 */
 int      app_swap_out(uint64_t addr, uint64_t len);             /* page out anon pages in range to swap; pages/-1 (M1105) */
 uint64_t app_shm_open(const char *name, uint64_t size);         /* map a named shared-memory object; base VA or 0 (M1108) */
+long     app_futex(uint64_t uaddr, int op, int val);            /* FUTEX_WAIT/WAKE on a (possibly shared) user word (M1109) */
 int      app_fault_handle(uint64_t cr2);            /* #PF hook: lazily map an mmap page; 1 if handled */
 struct registers;                                   /* (interrupts.h) */
 void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */

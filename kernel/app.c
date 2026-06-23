@@ -25,6 +25,7 @@
 #include "tmpfs.h"
 #include "swap.h"
 #include "shm.h"
+#include "syscall.h"   /* FUTEX_WAIT / FUTEX_WAKE op constants */
 #include "complete.h"
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
 #include <stdint.h>
@@ -146,7 +147,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -218,6 +219,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "forth", forth_elf_start, "Forth" },
     { "cc", cc_elf_start, "C Compiler" },
     { "crash", crash_elf_start, "Crash (core-dump demo)" },
+    { "futex", futex_elf_start, "Futex demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1071,6 +1073,45 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
     a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
+}
+
+/* futex (M1109): a userspace fast mutex. The uncontended path is a userspace CAS
+ * (zero syscalls); only on contention does a task trap here. op 0 = WAIT(uaddr,
+ * val): if *uaddr still equals val, block until woken; op 1 = WAKE(uaddr, val):
+ * wake up to `val` waiters. Wait buckets are keyed by the word's PHYSICAL address,
+ * so a futex in shared memory (mapped at different VAs in two processes) matches.
+ * The WAIT compare+register+block is atomic against a concurrent WAKE because the
+ * syscall path runs interrupts-off on this single CPU (same guarantee as mbox). */
+#define FUTEX_NWAIT 32
+static struct { uint64_t key; void *task; int used; } g_futex[FUTEX_NWAIT];
+
+long app_futex(uint64_t uaddr, int op, int val) {
+    if (!vmm_user_ok(uaddr, 4)) return -1;
+    uint64_t phys = vmm_translate(uaddr & ~(uint64_t)(PAGE_SIZE - 1));
+    if (!phys) return -1;
+    uint64_t key = phys | (uaddr & (PAGE_SIZE - 1));        /* per-physical-word key */
+
+    if (op == FUTEX_WAIT) {
+        if (*(volatile int *)uaddr != val) return -1;       /* value changed -> EAGAIN, don't block */
+        int slot = -1;
+        for (int i = 0; i < FUTEX_NWAIT; i++) if (!g_futex[i].used) { slot = i; break; }
+        if (slot < 0) return -1;                            /* too many waiters */
+        g_futex[slot].key = key; g_futex[slot].task = task_self(); g_futex[slot].used = 1;
+        task_block();                                       /* woken by a WAKE, a kill, or a signal */
+        g_futex[slot].used = 0;                             /* reclaim our slot on resume (idempotent w/ WAKE) */
+        return 0;
+    }
+    if (op == FUTEX_WAKE) {
+        int woke = 0;
+        for (int i = 0; i < FUTEX_NWAIT && woke < val; i++)
+            if (g_futex[i].used && g_futex[i].key == key) {
+                g_futex[i].used = 0;
+                task_wake((task_t *)g_futex[i].task);
+                woke++;
+            }
+        return woke;
+    }
+    return -1;
 }
 
 /* #PF hook (called from the ring-3 path of the page-fault handler). If `cr2` is
