@@ -731,6 +731,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);
         break;
+    case SYS_ringbuf:                      /* (len): a magic mirrored ring buffer; base VA or 0 */
+        r->rax = app_ringbuf(r->rdi);
+        break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
         r->rax = 0;

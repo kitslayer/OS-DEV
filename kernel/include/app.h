@@ -53,6 +53,7 @@ int    app_sys_read(char *buf, unsigned max);
 int    app_sys_getpid(void);
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */
+uint64_t app_ringbuf(uint64_t len);     /* a magic mirrored ring buffer: len frames mapped twice back-to-back */
 int      app_munmap(uint64_t addr, uint64_t len);   /* free an mmap region; 0/-1 */
 int      app_fault_handle(uint64_t cr2);            /* #PF hook: lazily map an mmap page; 1 if handled */
 struct registers;                                   /* (interrupts.h) */

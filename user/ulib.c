@@ -93,6 +93,7 @@ long sys_untar(const char *tarname) { return do_syscall(SYS_untar, (long)tarname
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }
 void *sbrk(long inc) { return (void *)do_syscall(SYS_sbrk, inc, 0, 0); }
 void *sys_mmap(unsigned long len) { long r = do_syscall(SYS_mmap, (long)len, 0, 0); return r ? (void *)r : 0; }
+void *sys_ringbuf(unsigned long len) { long r = do_syscall(SYS_ringbuf, (long)len, 0, 0); return r ? (void *)r : 0; }
 long  sys_munmap(void *addr, unsigned long len) { return do_syscall(SYS_munmap, (long)addr, (long)len, 0); }
 /* Restorer trampoline: a signal handler returns HERE; we ask the kernel to
  * restore the pre-signal context (which iretq's elsewhere, so this never

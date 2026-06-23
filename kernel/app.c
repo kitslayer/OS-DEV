@@ -950,6 +950,50 @@ int app_munmap(uint64_t addr, uint64_t len) {
     return -1;
 }
 
+/* Magic (mirrored) ring buffer (M1089): reserve `len` bytes of physical frames
+ * and map them TWICE, back to back, so the region [base, base+2*len) has its
+ * second half alias the first. A wraparound queue then needs no split-handling
+ * or modulo — a read/write that crosses base+len continues seamlessly into the
+ * same frames. Mapped eagerly (no demand faults); each frame is pmm_addref'd for
+ * its second mapping so exit/munmap (which frees every PTE's frame) releases it
+ * exactly once. Returns the base VA, or 0. */
+uint64_t app_ringbuf(uint64_t len) {
+    struct app *a = cur();
+    if (!a || len == 0) return 0;
+    len = (len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t total = len * 2;
+    if (total < len) return 0;                       /* overflow */
+    if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
+    uint64_t base = a->mmap_next;
+    if (base + total > MMAP_TOP || base + total < base) return 0;
+    uint64_t mapped = 0;
+    for (uint64_t off = 0; off < len; off += PAGE_SIZE) {
+        uint64_t frame = pmm_alloc_frame();
+        if (!frame) {                                /* OOM: unwind what we mapped */
+            for (uint64_t u = 0; u < mapped; u += PAGE_SIZE) {
+                uint64_t ph = vmm_translate(base + u);
+                vmm_unmap(base + len + u); vmm_unmap(base + u);
+                if (ph) pmm_free_frame(ph);          /* drops the addref, then frees */
+            }
+            return 0;
+        }
+        uint8_t *z = (uint8_t *)hhdm(frame);
+        for (int b = 0; b < PAGE_SIZE; b++) z[b] = 0;
+        vmm_map(base + off, frame, PTE_WRITABLE | PTE_USER | PTE_NX);          /* primary */
+        pmm_addref(frame);
+        vmm_map(base + len + off, frame, PTE_WRITABLE | PTE_USER | PTE_NX);    /* mirror */
+        __asm__ volatile("invlpg (%0)" : : "r"(base + off) : "memory");
+        __asm__ volatile("invlpg (%0)" : : "r"(base + len + off) : "memory");
+        mapped += PAGE_SIZE;
+    }
+    a->vma[a->nvma].start = base;
+    a->vma[a->nvma].len   = total;
+    a->nvma++;
+    a->mmap_next = base + total + PAGE_SIZE;
+    return base;
+}
+
 /* #PF hook (called from the ring-3 path of the page-fault handler). If `cr2` is
  * inside a reserved mmap region, map a fresh zeroed frame into the (active) app
  * space and report it resolved so the instruction retries; else 0 = a real

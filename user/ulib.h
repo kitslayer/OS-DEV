@@ -58,6 +58,7 @@ void sys_sleep(int ms);
 void sys_setcolor(int color);   /* text colour for subsequent output: palette index 0-15 (0 = default) */
 void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, or (void*)-1 */
 void *sys_mmap(unsigned long len);              /* reserve a demand-paged anon region; base or 0 */
+void *sys_ringbuf(unsigned long len);           /* a magic mirrored ring buffer (mapped twice back-to-back); base or 0 */
 long  sys_munmap(void *addr, unsigned long len);/* free an mmap region; 0/-1 */
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */

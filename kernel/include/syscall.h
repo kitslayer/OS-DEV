@@ -84,6 +84,7 @@
 #define SYS_unveil 74   /* (path, perms)   -> limit filesystem visibility to path (perms "rwc"); 0/-1 */
 #define SYS_symlink 75  /* (linkpath, target) -> create a symlink under /tmp; 0/-1 */
 #define SYS_jail   76   /* (prog, promises, path) -> spawn prog pre-confined (pledge + optional unveil); 0/-1 */
+#define SYS_ringbuf 77  /* (len)           -> a magic mirrored ring buffer (len frames mapped twice); base VA or 0 */
 
 #define SYSCALL_VECTOR 0x80
 

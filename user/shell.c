@@ -1617,6 +1617,22 @@ static int run_command(char *line, char *cwd) {
                 sys_munmap(m, len); print("munmap: freed\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "ringtest")) {  /* demonstrate a magic mirrored ring buffer (one frame, two VAs) */
+            unsigned long n = 4096;
+            char *r = (char *)sys_ringbuf(n);
+            if (!r) { print("ringtest: ringbuf failed\n"); g_status = 1; }
+            else {
+                /* write "MAGIC" straddling the end: 'MAG' at [n-3,n), 'IC' lands at [n,n+2) -> the mirror of [0,2) */
+                r[n-3]='M'; r[n-2]='A'; r[n-1]='G'; r[n]='I'; r[n+1]='C';
+                char cont[6]; for (int i = 0; i < 5; i++) cont[i] = r[n-3+i]; cont[5] = 0;   /* contiguous read across the wrap */
+                char wrap[3]; wrap[0] = r[0]; wrap[1] = r[1]; wrap[2] = 0;                   /* offset 0 = the mirrored tail */
+                print("ring buffer "); printl((long)n); print(" bytes, frame mapped at TWO VAs:\n");
+                print("  wrote 'MAGIC' across the end; contiguous read at the wrap = '"); print(cont); print("'\n");
+                print("  reading offset 0 = '"); print(wrap); print("' (the wrapped tail, via the mirror)\n");
+                print(streq(cont, "MAGIC") && streq(wrap, "IC") ? "  OK: no split, the mirror aliases the same frame\n" : "  VERIFY FAILED\n");
+                if (!(streq(cont, "MAGIC") && streq(wrap, "IC"))) g_status = 1;
+                sys_munmap(r, n);
+            }
         } else if (streq(line, "sigtest")) {   /* demonstrate real signals: install a handler, raise it, resume */
             sys_signal(10, sig_demo_handler);
             print("sigtest: raising signal 10 to self...\n");

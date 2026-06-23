@@ -27,6 +27,15 @@ static uint64_t  used_frames;
 static uint64_t  bitmap_bytes;
 static uint64_t  next_hint;       /* where to start the next allocation scan */
 
+/* Per-frame EXTRA-reference count for shared frames (M1089): 0 = the common
+ * case (one mapping, free on the first pmm_free_frame); N>0 = the frame is
+ * mapped N+1 times (a magic ring buffer's double-mapping, or a future COW page),
+ * so the first N frees just decrement and only the last actually releases it.
+ * 0-initialized, so untouched frames keep the exact prior behaviour — the guard
+ * in pmm_free_frame is a no-op for them. */
+#define PMM_MAXREFS (1u << 18)    /* covers up to 1 GiB of RAM (256 KiB array) */
+static uint8_t  pmm_refs[PMM_MAXREFS];
+
 /* The bitmap is shared mutable state, and the allocator runs from more than one
  * thread: kmalloc/sbrk on whatever task needs memory, and pmm_free_frame from
  * the desktop task's app-reaper (vmm_destroy_address_space, interrupts ON). The
@@ -153,9 +162,24 @@ uint64_t pmm_alloc_frame(void) {
 void pmm_free_frame(uint64_t phys) {
     uint64_t frame = phys / PAGE_SIZE;
     uint64_t fl = irq_save();
+    if (frame < PMM_MAXREFS && pmm_refs[frame]) {   /* a shared frame: drop one reference, keep it allocated */
+        pmm_refs[frame]--;
+        irq_restore(fl);
+        return;
+    }
     mark_free(frame);
     if (frame < next_hint)
         next_hint = frame;
+    irq_restore(fl);
+}
+
+/* Add an extra reference to an already-allocated frame (so it survives the next
+ * pmm_free_frame). For frames mapped more than once. M1089. */
+void pmm_addref(uint64_t phys) {
+    uint64_t frame = phys / PAGE_SIZE;
+    if (frame >= PMM_MAXREFS) return;               /* >1 GiB: unref-counted (won't be double-mapped) */
+    uint64_t fl = irq_save();
+    pmm_refs[frame]++;
     irq_restore(fl);
 }
 
