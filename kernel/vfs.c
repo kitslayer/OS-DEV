@@ -12,6 +12,7 @@
 #include "tmpfs.h"
 #include "fsevents.h"
 #include "mbox.h"
+#include "notify.h"
 
 static struct vfs_ops *fs;
 
@@ -119,6 +120,14 @@ static int ipc_path(const char *name, const char **q) {
     return **q != 0;
 }
 
+/* Route an absolute /notify/<name> path to a notification object. Returns 1 +
+ * the object name if it targets /notify/, else 0. Absolute-only (no cwd). */
+static int notify_path(const char *name, const char **q) {
+    if (!vstarts(name, "/notify/")) return 0;
+    *q = name + 8;
+    return **q != 0;
+}
+
 /* Route a (possibly relative) name to the RAM /tmp filesystem. Returns 1 + the
  * basename within /tmp if it targets /tmp, else 0. */
 static int tmp_path(const char *name, const char **base) {
@@ -198,6 +207,7 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
     char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
     if (synth_path(name, ap, sizeof ap)) return procfs_read(ap, buf, max);
     if (ipc_path(name, &tb)) return mbox_read(tb, buf, max);   /* /ipc/<q>: dequeue a message (blocks if empty) */
+    if (notify_path(name, &tb)) return notify_wait(tb, buf, max);   /* /notify/<n>: block until signalled, return+clear the mask */
     if (tmp_path(name, &tb)) return tmpfs_read(tb, buf, max);
     int midx; char fpath[192];
     if (mount_path(name, &midx, fpath, sizeof fpath)) return blockdev_mount_read(midx, fpath, buf, max);
@@ -209,6 +219,7 @@ long vfs_write(const char *name, const void *buf, unsigned long len) {
     char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
     if (synth_path(name, ap, sizeof ap)) { long r = procfs_write(ap, buf, len); return r == -2 ? -1 : r; }
     if (ipc_path(name, &tb)) return mbox_write(tb, buf, len);   /* /ipc/<q>: enqueue a message */
+    if (notify_path(name, &tb)) return notify_signal(tb, buf, len);   /* /notify/<n>: OR bits into the mask + wake */
     long r;
     if (tmp_path(name, &tb)) r = tmpfs_write(tb, buf, len);
     else {
