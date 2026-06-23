@@ -59,6 +59,7 @@ struct app {
     struct registers sig_saved;          /* pre-signal context, restored by sigreturn */
     int      sig_in;                     /* 1 while a handler runs (no nesting) */
     volatile int pending_sig;            /* a signal raised asynchronously (e.g. Ctrl-C->SIGINT), delivered on the next return to ring 3 */
+    int      traced;                     /* 1 = log each syscall to dmesg (strace), toggled via /proc/<pid>/ctl */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
     int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
     int       rawkb;                     /* raw keyboard mode (games get make/break events) */
@@ -1016,6 +1017,10 @@ void app_request_signal(app_t *a, int signo) {
 /* If the app this trap returns to has an async signal pending AND we're heading
  * back to ring-3 code (never mid-syscall), deliver it now. Called from the
  * syscall return and the IRQ tail. Returns 1 if a handler was entered. M1083. */
+/* strace (M1084): toggle/read whether an app's syscalls are logged to dmesg. */
+void app_set_traced(app_t *a, int on) { struct app *ap = (struct app *)a; if (ap) ap->traced = on ? 1 : 0; }
+int  app_is_traced(app_t *a)          { struct app *ap = (struct app *)a; return ap ? ap->traced : 0; }
+
 int app_deliver_pending(struct registers *r) {
     task_t *t = task_self();                 /* called from the IRQ tail on EVERY irq, incl. before
                                               * sched_init (current==NULL) and on kernel tasks -> guard */

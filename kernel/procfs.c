@@ -342,6 +342,8 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
             if (peq(cmd, "kill")) { app_request_kill((app_t *)proc); return (long)len; }
             if (peq(cmd, "stop")) { task_stop((task_t *)app_task((app_t *)proc)); return (long)len; }
             if (peq(cmd, "cont")) { task_cont((task_t *)app_task((app_t *)proc)); return (long)len; }
+            if (peq(cmd, "trace"))   { app_set_traced((app_t *)proc, 1); return (long)len; }   /* strace -> dmesg (M1084) */
+            if (peq(cmd, "untrace")) { app_set_traced((app_t *)proc, 0); return (long)len; }
             return -1;                                            /* unknown command */
         }
         return -1;                                               /* /proc otherwise read-only */

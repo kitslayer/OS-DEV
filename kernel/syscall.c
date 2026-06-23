@@ -272,11 +272,44 @@ static uint32_t syscall_class(uint64_t nr) {
     }
 }
 
+/* Human-readable syscall names for the strace channel (M1084). Designated
+ * initialisers keep it in sync with syscall.h by number. */
+static const char *syscall_name(uint64_t n) {
+    static const char *const nm[] = {
+        [SYS_write]="write",[SYS_exit]="exit",[SYS_getpid]="getpid",[SYS_read]="read",
+        [SYS_list]="list",[SYS_readfile]="readfile",[SYS_time]="time",[SYS_beep]="beep",
+        [SYS_sysinfo]="sysinfo",[SYS_clear]="clear",[SYS_reboot]="reboot",[SYS_writefile]="writefile",
+        [SYS_ping]="ping",[SYS_resolve]="resolve",[SYS_delete]="delete",[SYS_spawn]="spawn",
+        [SYS_sleep]="sleep",[SYS_http]="http",[SYS_browse]="browse",[SYS_mkdir]="mkdir",
+        [SYS_chdir]="chdir",[SYS_tree]="tree",[SYS_ps]="ps",[SYS_pollkey]="pollkey",
+        [SYS_df]="df",[SYS_find]="find",[SYS_sha256]="sha256",[SYS_crypt]="crypt",
+        [SYS_history]="history",[SYS_https]="https",[SYS_js]="js",[SYS_setcolor]="setcolor",
+        [SYS_pinghost]="pinghost",[SYS_netinfo]="netinfo",[SYS_apps]="apps",[SYS_sha512]="sha512",
+        [SYS_screenshot]="screenshot",[SYS_gunzip]="gunzip",[SYS_gzip]="gzip",[SYS_unzip]="unzip",
+        [SYS_untar]="untar",[SYS_sbrk]="sbrk",[SYS_uptime_ms]="uptime_ms",[SYS_gfx_init]="gfx_init",
+        [SYS_gfx_blit]="gfx_blit",[SYS_setkbmode]="setkbmode",[SYS_getkbevent]="getkbevent",[SYS_pcm]="pcm",
+        [SYS_playwav]="playwav",[SYS_pcm_stream]="pcm_stream",[SYS_pcm_avail]="pcm_avail",[SYS_mouse]="mouse",
+        [SYS_playbg]="playbg",[SYS_audiostop]="audiostop",[SYS_mouse_rel]="mouse_rel",[SYS_caret]="caret",
+        [SYS_clip_get]="clip_get",[SYS_clip_set]="clip_set",[SYS_getarg]="getarg",[SYS_savebmp]="savebmp",
+        [SYS_setwall]="setwall",[SYS_lspci]="lspci",[SYS_lsblk]="lsblk",[SYS_poweroff]="poweroff",
+        [SYS_kill]="kill",[SYS_mounts]="mounts",[SYS_mmap]="mmap",[SYS_munmap]="munmap",
+        [SYS_signal]="signal",[SYS_raise]="raise",[SYS_sigreturn]="sigreturn",[SYS_getrandom]="getrandom",
+        [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
+    };
+    return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
+}
+
 void syscall_dispatch(struct registers *r) {
+    app_t *self = app_current();
+
+    /* strace (M1084): snapshot the call BEFORE the switch (args, in case a handler
+     * reuses the register slots); emitted after, with the result, if traced. */
+    int traced = app_is_traced(self);
+    uint64_t tr_nr = r->rax, tr_a = r->rdi, tr_b = r->rsi, tr_c = r->rdx;
+
     /* pledge() enforcement: a pledged app that calls a syscall outside its kept
      * classes is killed on the spot (like OpenBSD's SIGABRT). Unpledged apps —
      * every existing program — are unaffected. */
-    app_t *self = app_current();
     if (self && app_is_pledged(self)) {
         uint32_t need = syscall_class(r->rax);
         if (need && !(app_promises(self) & need)) {
@@ -846,6 +879,10 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)-1;
         break;
     }
+
+    if (traced)               /* strace (M1084): one line to dmesg per traced syscall */
+        kprintf("[strace %d] %s(0x%lx, 0x%lx, 0x%lx) = 0x%lx\n",
+                app_sys_getpid(), syscall_name(tr_nr), tr_a, tr_b, tr_c, r->rax);
 
     app_deliver_pending(r);   /* an async signal (e.g. Ctrl-C->SIGINT) raised during the syscall (M1083) */
 }
