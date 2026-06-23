@@ -24,6 +24,7 @@
 #include "kheap.h"
 #include "tmpfs.h"
 #include "swap.h"
+#include "shm.h"
 #include "complete.h"
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
 #include <stdint.h>
@@ -1044,6 +1045,30 @@ uint64_t app_ringbuf(uint64_t len) {
     a->vma[a->nvma].start = base;
     a->vma[a->nvma].len   = total;
     a->nvma++;
+    a->mmap_next = base + total + PAGE_SIZE;
+    return base;
+}
+
+/* Map the named shared-memory object `name` (created at `size` on first use)
+ * into the caller, returning its base VA (M1108). The object's frames live in
+ * the kernel SHM table; each mapping pmm_addref's them, so two mappings — here
+ * or in another process — share the same RAM, and teardown releases each ref
+ * (the frames persist at refcount 0, owned by the table). 0 on failure. */
+uint64_t app_shm_open(const char *name, uint64_t size) {
+    struct app *a = cur();
+    if (!a) return 0;
+    uint64_t *frames; int np;
+    if (shm_get(name, size, &frames, &np) < 0) return 0;
+    if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
+    uint64_t base = a->mmap_next, total = (uint64_t)np * PAGE_SIZE;
+    if (base + total > MMAP_TOP || base + total < base) return 0;
+    for (int p = 0; p < np; p++) {
+        vmm_map(base + (uint64_t)p * PAGE_SIZE, frames[p], PTE_WRITABLE | PTE_USER | PTE_NX);
+        pmm_addref(frames[p]);                       /* this mapping holds a ref on the shared frame */
+        __asm__ volatile("invlpg (%0)" : : "r"(base + (uint64_t)p * PAGE_SIZE) : "memory");
+    }
+    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
 }

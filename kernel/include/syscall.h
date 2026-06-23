@@ -96,6 +96,7 @@
 #define SYS_sntp   86   /* ()      -> SNTP: set the wall clock from pool.ntp.org; 0/-1 */
 #define SYS_swapout 87  /* (addr,len) -> page out anon pages in range to swap (MADV_PAGEOUT); pages/-1 */
 #define SYS_losetup 88  /* (path) -> mount a FAT/ext2 image file as a loop block device; mount index (/disk<n+1>) or -1 */
+#define SYS_shm_open 89  /* (name, size) -> map a named shared-memory object into this app; base VA or 0 */
 
 #define SYSCALL_VECTOR 0x80
 

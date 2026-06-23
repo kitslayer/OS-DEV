@@ -265,7 +265,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_GFX;
     case SYS_spawn: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
         return PL_PROC;
-    case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout:
+    case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -300,7 +300,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_sntp]="sntp",
-        [SYS_swapout]="swapout",[SYS_losetup]="losetup",
+        [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -775,6 +775,10 @@ void syscall_dispatch(struct registers *r) {
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
         r->rax = (uint64_t)(int64_t)app_swap_out(r->rdi, r->rsi);
+        break;
+    case SYS_shm_open:                     /* (name, size) -> map a named shared-memory object */
+        if (!ustr(r->rdi)) { r->rax = 0; break; }
+        r->rax = app_shm_open((const char *)r->rdi, r->rsi);
         break;
     case SYS_losetup: {                    /* (path) -> mount a FS image file as a loop device */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }

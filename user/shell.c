@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest swaptest (mmap/ring/W^X/reclaim/swap demos)  alarmtest (SIGALRM)  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest swaptest shmtest (mmap/ring/W^X/reclaim/swap/shared-mem)  alarmtest  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1752,6 +1752,19 @@ static int run_command(char *line, char *cwd) {
                     if (!ok) g_status = 1;
                 }
                 sys_munmap(m, len);
+            }
+        } else if (streq(line, "shmtest")) {  /* demonstrate named shared memory: two mappings, one backing */
+            char *a = (char *)sys_shm_open("demo", 4096);
+            char *b = (char *)sys_shm_open("demo", 4096);   /* second mapping of the same named object */
+            if (!a || !b) { print("shmtest: shm_open failed\n"); g_status = 1; }
+            else if (a == b) { print("shmtest: expected two distinct mappings\n"); g_status = 1; }
+            else {
+                a[0] = 'S'; a[1] = 'H'; a[2] = 'M'; a[3] = '!'; a[4] = 0;   /* write through mapping A */
+                int shared = (b[0] == 'S' && b[1] == 'H' && b[2] == 'M' && b[3] == '!');   /* read through mapping B */
+                print("shm_open(\"demo\") twice -> two VAs ("); printl((long)(a != b)); print(" distinct); ");
+                print(shared ? "wrote 'SHM!' via A, read it via B -> they share one backing\n"
+                             : "VERIFY FAILED: mappings are not shared\n");
+                if (!shared) g_status = 1;
             }
         } else if (streq(line, "alarmtest")) {  /* demonstrate SIGALRM: a periodic timer signal to a ring-3 handler */
             g_alarm_fires = 0;
