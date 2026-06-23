@@ -119,14 +119,14 @@ static long gen_loadavg(char *b, int max) {
 static long gen_processes(char *b, int max) {
     task_info_t ti[24];
     int cnt = task_snapshot(ti, 24);
-    static const char *st[4] = { "ready", "run  ", "block", "dead " };
+    static const char *st[5] = { "ready", "run  ", "block", "dead ", "stop " };
     int p = sapp(b, 0, max, "  PID  STATE  NAME\n");
     for (int i = 0; i < cnt; i++) {
         if (ti[i].state == 3) continue;                 /* skip dead */
         p = sapp(b, p, max, "  ");
         p = sdec(b, p, max, (uint64_t)ti[i].id);
         p = sapp(b, p, max, "    ");
-        p = sapp(b, p, max, st[ti[i].state & 3]);
+        p = sapp(b, p, max, st[(unsigned)ti[i].state < 5 ? ti[i].state : 0]);
         p = sapp(b, p, max, "  ");
         p = sapp(b, p, max, ti[i].proc ? app_title((app_t *)ti[i].proc) : "(kernel)");
         p = sapp(b, p, max, "\n");
@@ -183,9 +183,49 @@ int procfs_owns(const char *abs) {
     return startswith(abs, "/proc/") || startswith(abs, "/dev/") || procfs_is_dir(abs);
 }
 
+/* --- per-process /proc/<pid>/{status,cmdline,ctl} (Plan 9 / Linux style) --- */
+static int proc_pid_path(const char *abs, int *pid, const char **file) {
+    if (!startswith(abs, "/proc/")) return 0;
+    const char *p = abs + 6;
+    if (*p < '1' || *p > '9') return 0;          /* a pid starts 1-9; flat files start with a letter */
+    int n = 0; while (*p >= '0' && *p <= '9') { n = n * 10 + (*p - '0'); p++; }
+    if (*p != '/' || p[1] == 0) return 0;        /* must be "/proc/<pid>/<file>" */
+    *pid = n; *file = p + 1;
+    return 1;
+}
+static void *proc_find(int pid, int *state_out) {
+    task_info_t ti[24]; int cnt = task_snapshot(ti, 24);
+    for (int i = 0; i < cnt; i++)
+        if (ti[i].id == pid && ti[i].proc) { if (state_out) *state_out = ti[i].state; return ti[i].proc; }
+    return 0;
+}
+static long gen_pid_status(char *b, int max, int pid, int state, void *proc) {
+    static const char *st[5] = { "ready", "running", "blocked", "dead", "stopped" };
+    int p = 0;
+    p = sapp(b, p, max, "Name:\t");        p = sapp(b, p, max, app_title((app_t *)proc)); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "Pid:\t");         p = sdec(b, p, max, (uint64_t)pid);            p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "State:\t");       p = sapp(b, p, max, st[(state >= 0 && state < 5) ? state : 0]); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "HeapKB:\t");      p = sdec(b, p, max, app_heap_bytes((app_t *)proc) / 1024); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "MmapRegions:\t"); p = sdec(b, p, max, (uint64_t)app_vma_count((app_t *)proc)); p = sapp(b, p, max, "\n");
+    b[p] = 0; return p;
+}
+
 long procfs_read(const char *abs, void *buf, unsigned long max) {
     if (max == 0) return -1;
     if (startswith(abs, "/proc/")) {
+        int pid; const char *file;
+        if (proc_pid_path(abs, &pid, &file)) {            /* /proc/<pid>/... */
+            int st = 0; void *proc = proc_find(pid, &st);
+            if (!proc) return -1;
+            if (peq(file, "status"))  return gen_pid_status((char *)buf, (int)max, pid, st, proc);
+            if (peq(file, "cmdline")) {
+                char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));
+                const char *arg = app_arg((app_t *)proc);
+                if (arg && arg[0]) { p = sapp(bb, p, (int)max, " "); p = sapp(bb, p, (int)max, arg); }
+                p = sapp(bb, p, (int)max, "\n"); bb[p] = 0; return p;
+            }
+            return -1;                                    /* ctl is write-only; unknown file */
+        }
         const char *f = abs + 6;
         for (int i = 0; i < NPROC; i++)
             if (peq(f, proc_files[i].name)) return proc_files[i].gen((char *)buf, (int)max);
@@ -209,14 +249,27 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
 }
 
 long procfs_write(const char *abs, const void *buf, unsigned long len) {
-    (void)buf;
     if (startswith(abs, "/dev/")) {
         const char *f = abs + 5;
         if (peq(f, "null") || peq(f, "zero")) return (long)len;  /* discard, "succeed" */
         if (peq(f, "full")) return -1;                           /* always ENOSPC */
         return -1;                                               /* other /dev nodes: read-only */
     }
-    if (startswith(abs, "/proc/")) return -1;                    /* /proc is read-only */
+    if (startswith(abs, "/proc/")) {
+        int pid; const char *file;
+        if (proc_pid_path(abs, &pid, &file) && peq(file, "ctl")) {   /* echo CMD > /proc/<pid>/ctl */
+            void *proc = proc_find(pid, 0);
+            if (!proc) return -1;
+            char cmd[16]; int c = 0; const char *s = (const char *)buf;
+            for (unsigned long i = 0; i < len && c < 15 && s[i] && s[i] != '\n' && s[i] != ' '; i++) cmd[c++] = s[i];
+            cmd[c] = 0;
+            if (peq(cmd, "kill")) { app_request_kill((app_t *)proc); return (long)len; }
+            if (peq(cmd, "stop")) { task_stop((task_t *)app_task((app_t *)proc)); return (long)len; }
+            if (peq(cmd, "cont")) { task_cont((task_t *)app_task((app_t *)proc)); return (long)len; }
+            return -1;                                            /* unknown command */
+        }
+        return -1;                                               /* /proc otherwise read-only */
+    }
     return -2;                                                   /* not ours */
 }
 

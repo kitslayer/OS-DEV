@@ -2,7 +2,7 @@
 #pragma once
 #include <stdint.h>
 
-typedef enum { TASK_READY, TASK_RUNNING, TASK_BLOCKED, TASK_DEAD } task_state_t;
+typedef enum { TASK_READY, TASK_RUNNING, TASK_BLOCKED, TASK_DEAD, TASK_STOPPED } task_state_t;
 
 typedef struct task {
     uint64_t      rsp;        /* saved stack pointer — MUST be the first field */
@@ -30,6 +30,8 @@ int     task_current_id(void);
 task_t *task_self(void);                   /* the currently running task */
 void    task_block(void);                  /* block current task until woken */
 void    task_wake(task_t *t);              /* mark a blocked task runnable again */
+void    task_stop(task_t *t);              /* suspend another task (READY/RUNNING -> STOPPED); not self */
+void    task_cont(task_t *t);              /* resume a STOPPED task */
 int     task_count(void);                  /* number of live tasks */
 
 /* A snapshot of one task, for `ps`. */

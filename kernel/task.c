@@ -139,8 +139,9 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
 static void switch_to_next(void) {
     task_t *prev = current;
     task_t *next = prev->next;
-    /* Prefer a non-idle runnable task: skip DEAD/BLOCKED and the idle task. */
-    while (next != prev && (next->state == TASK_DEAD || next->state == TASK_BLOCKED || next == idle_task))
+    /* Prefer a non-idle runnable task: skip DEAD/BLOCKED/STOPPED and the idle task. */
+    while (next != prev && (next->state == TASK_DEAD || next->state == TASK_BLOCKED ||
+                            next->state == TASK_STOPPED || next == idle_task))
         next = next->next;
     if (next == prev) {                         /* no other non-idle task is runnable */
         if (prev->state == TASK_RUNNING || prev->state == TASK_READY)
@@ -200,6 +201,24 @@ void task_block(void) {
 void task_wake(task_t *t) {
     if (t && t->state == TASK_BLOCKED)
         t->state = TASK_READY;
+}
+
+/* Suspend a task (it leaves the run rotation until task_cont). Only a runnable,
+ * non-current task — never stop ourselves (that needs a yield) or a blocked task
+ * (it's already off-CPU; STOPPING it would lose the BLOCKED->READY wake path). */
+void task_stop(task_t *t) {
+    uint64_t f = irq_save();
+    if (t && t != current && (t->state == TASK_READY || t->state == TASK_RUNNING))
+        t->state = TASK_STOPPED;
+    irq_restore(f);
+}
+
+/* Resume a STOPPED task. */
+void task_cont(task_t *t) {
+    uint64_t f = irq_save();
+    if (t && t->state == TASK_STOPPED)
+        t->state = TASK_READY;
+    irq_restore(f);
 }
 
 void task_exit(void) {

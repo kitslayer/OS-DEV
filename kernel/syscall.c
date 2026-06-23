@@ -576,13 +576,13 @@ void syscall_dispatch(struct registers *r) {
         int cnt = task_snapshot(ti, 16);
         char *b = (char *)r->rsi; int max = (int)r->rdx, p = 0;
         if (max > 0 && !ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
-        static const char *st[4] = { "ready", "run  ", "block", "dead " };
+        static const char *st[5] = { "ready", "run  ", "block", "dead ", "stop " };
         for (int i = 0; i < cnt; i++) {
             if (ti[i].state == 3) continue;          /* skip dead tasks */
             p = sappend(b, p, max, "  [");
             p = snum(b, p, max, (uint64_t)ti[i].id);
             p = sappend(b, p, max, "] ");
-            p = sappend(b, p, max, st[ti[i].state & 3]);
+            p = sappend(b, p, max, st[(unsigned)ti[i].state < 5 ? ti[i].state : 0]);
             p = sappend(b, p, max, "  ");
             p = sappend(b, p, max, ti[i].proc ? app_title((app_t *)ti[i].proc) : "(kernel)");
             p = sappend(b, p, max, "\n");

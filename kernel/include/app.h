@@ -20,6 +20,10 @@ app_t      *app_take_pending(void);              /* next app awaiting a window (
 void        app_browse(const char *url);         /* queue a URL for a browser window   */
 int         app_take_browse(char *out, int max); /* WM claims a queued browse URL; 0/1 */
 const char *app_title(app_t *a);
+const char *app_arg(app_t *a);          /* the app's launch argument (/proc/<pid>/cmdline) */
+void       *app_task(app_t *a);         /* the app's task_t* (cast in procfs for stop/cont) */
+uint64_t    app_heap_bytes(app_t *a);   /* heap size in bytes */
+int         app_vma_count(app_t *a);    /* number of mmap regions */
 int    app_alive(app_t *a);
 int    app_reap(app_t *a);                       /* free a self-exited app's task+stack+slot (WM) */
 void   app_request_kill(app_t *a);               /* ask a running app to close (it self-exits) */

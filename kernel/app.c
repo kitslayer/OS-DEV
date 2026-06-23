@@ -196,6 +196,10 @@ extern void enter_user(uint64_t entry, uint64_t ustack);
 int app_cols(void) { return APP_COLS; }
 int app_rows(void) { return APP_ROWS; }
 const char *app_title(app_t *a) { return a->title; }
+const char *app_arg(app_t *a) { return a ? a->launch_arg : ""; }          /* /proc/<pid>/cmdline */
+void       *app_task(app_t *a) { return a ? (void *)a->task : 0; }        /* the task_t*, for /proc/<pid>/ctl stop/cont */
+uint64_t    app_heap_bytes(app_t *a) { return (a && a->heap_end) ? a->heap_end - UHEAP_BASE : 0; }
+int         app_vma_count(app_t *a) { return a ? a->nvma : 0; }
 
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
 
