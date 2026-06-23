@@ -67,6 +67,12 @@ static void source_file(const char *fn, char *cwd, int silent);   /* run shell c
  * The read API has no size query, so grow the buffer until the read no longer
  * fills it — commands then see the whole file, not a fixed 2KB prefix. *len gets
  * the length; returns 0 on missing file / >=32MB / OOM. */
+static int hexval(char c) {     /* a hex digit's value, or -1 */
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
 static char *slurp(const char *name, long *len) {
     sh_unprot_buf((char *)name);          /* a quoted filename ("my file") arrives with bit-7 sentinels — reveal them
                                            * here, the one chokepoint every file-reading builtin funnels through.
@@ -454,6 +460,7 @@ static int run_command(char *line, char *cwd) {
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP)\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
+            print("        cas store<file> (content-addressed store, SHA-256 key)  cas fetch<key>  cas (stats)\n");
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
@@ -1300,6 +1307,43 @@ static int run_command(char *line, char *cwd) {
                 else { print("  "); print(hex); print("  "); print(fn); print("\n"); }
             }
             if (!any) print("usage: sha512 <file>...\n");
+        } else if (streq(line, "cas") || startswith(line, "cas ")) {   /* content-addressed store: blobs keyed by SHA-256 */
+            const char *p = streq(line, "cas") ? "" : line + 4;
+            while (*p == ' ') p++;
+            if (startswith(p, "store ")) {                /* cas store FILE -> stores it, prints its SHA-256 key */
+                const char *f = p + 6; while (*f == ' ') f++;
+                char fn[64]; int j = 0; while (f[j] && f[j] != ' ' && j < 63) { fn[j] = f[j]; j++; } fn[j] = 0;
+                long n; char *buf = slurp(fn, &n);
+                if (!buf) { print("cas: no such file: "); print(fn); print("\n"); g_status = 1; }
+                else {
+                    unsigned char h[32];
+                    if (sys_cas_store(buf, (unsigned long)n, h) < 0) { print("cas: store full\n"); g_status = 1; }
+                    else {
+                        static const char *HX = "0123456789abcdef";
+                        char hex[66]; for (int i = 0; i < 32; i++) { hex[i*2] = HX[h[i] >> 4]; hex[i*2+1] = HX[h[i] & 15]; } hex[64] = '\n'; hex[65] = 0;
+                        print(hex);   /* bare key (== `sha256 FILE`), so `cas fetch $(cas store FILE)` round-trips */
+                    }
+                    free(buf);
+                }
+            } else if (startswith(p, "fetch ")) {         /* cas fetch <64-hex-key> -> prints the blob */
+                const char *hx = p + 6; while (*hx == ' ') hx++;
+                unsigned char h[32]; int ok = 1;
+                for (int i = 0; i < 32 && ok; i++) {
+                    int hi = hexval(hx[i*2]), lo = (hx[i*2] ? hexval(hx[i*2+1]) : -1);
+                    if (hi < 0 || lo < 0) ok = 0; else h[i] = (unsigned char)((hi << 4) | lo);
+                }
+                if (!ok) { print("cas: fetch needs a 64-hex-char key\n"); g_status = 1; }
+                else {
+                    unsigned long cap = 256 * 1024; char *out = malloc(cap);
+                    long n = out ? sys_cas_fetch(h, out, cap - 1) : -1;
+                    if (n < 0) { print("cas: not found / integrity check failed / too big\n"); g_status = 1; }
+                    else { out[n] = 0; print(out); }
+                    free(out);
+                }
+            } else {                                      /* cas -> store stats */
+                long n; char *b = slurp("/proc/cas", &n);
+                if (b) { print(b); free(b); } else print("cas: store unavailable\n");
+            }
         } else if (startswith(line, "crc32 ")) {       /* CRC-32 (IEEE 802.3, as in zip/gzip/png) over each file */
             const char *fp = line + 6; int any = 0;
             while (*fp) {

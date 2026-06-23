@@ -36,6 +36,7 @@
 #include "pci.h"
 #include "blockdev.h"
 #include "random.h"
+#include "cas.h"
 #include "acpi.h"
 #include <stdint.h>
 
@@ -248,11 +249,11 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_STDIO;
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
-    case SYS_sha256: case SYS_sha512:
+    case SYS_sha256: case SYS_sha512: case SYS_cas_fetch:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
-    case SYS_savebmp: case SYS_screenshot: case SYS_setwall:
+    case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp:
@@ -296,7 +297,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_signal]="signal",[SYS_raise]="raise",[SYS_sigreturn]="sigreturn",[SYS_getrandom]="getrandom",
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
-        [SYS_dhcp]="dhcp",
+        [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -464,6 +465,14 @@ void syscall_dispatch(struct registers *r) {
     case SYS_dhcp:
         __asm__ volatile("sti");           /* the DORA handshake needs the timer for its timeouts */
         r->rax = (uint64_t)(int64_t)net_dhcp();
+        break;
+    case SYS_cas_store:                    /* (buf, len, hash32) -> store; write the SHA-256 key */
+        if (!ubuf(r->rdi, r->rsi) || !ubuf(r->rdx, 32)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)cas_store((const void *)r->rdi, (uint32_t)r->rsi, (uint8_t *)r->rdx);
+        break;
+    case SYS_cas_fetch:                    /* (hash32, buf, max) -> fetch by key */
+        if (!ubuf(r->rdi, 32) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)cas_fetch((const uint8_t *)r->rdi, (void *)r->rsi, (uint32_t)r->rdx);
         break;
     case SYS_apps:
         if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }

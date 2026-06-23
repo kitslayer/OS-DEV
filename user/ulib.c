@@ -51,6 +51,8 @@ long sys_ping(void) { return do_syscall(SYS_ping, 0, 0, 0); }
 long sys_ping_host(const char *host) { return do_syscall(SYS_pinghost, (long)host, 0, 0); }
 long sys_netinfo(void *buf, unsigned long len) { return do_syscall(SYS_netinfo, (long)buf, (long)len, 0); }
 long sys_dhcp(void) { return do_syscall(SYS_dhcp, 0, 0, 0); }
+long sys_cas_store(const void *buf, unsigned long len, void *hash32) { return do_syscall(SYS_cas_store, (long)buf, (long)len, (long)hash32); }
+long sys_cas_fetch(const void *hash32, void *buf, unsigned long max) { return do_syscall(SYS_cas_fetch, (long)hash32, (long)buf, (long)max); }
 long sys_apps(void *buf, unsigned long len) { return do_syscall(SYS_apps, (long)buf, (long)len, 0); }
 long sys_spawn(const char *name) { return do_syscall(SYS_spawn, (long)name, 0, 0); }
 long sys_spawn_arg(const char *name, const char *arg) { return do_syscall(SYS_spawn, (long)name, (long)arg, 0); }
