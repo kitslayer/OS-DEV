@@ -13,3 +13,13 @@ long tmpfs_write(const char *name, const void *data, unsigned long len); /* crea
 long tmpfs_remove(const char *name);                                 /* 0, or -1 if absent */
 long tmpfs_symlink(const char *name, const char *target);            /* create a symlink; 0 or -1 */
 int  tmpfs_list(vfs_dirent *out, int max);                           /* fill out[]; returns count */
+
+/* Copy-on-write snapshots (Plan 9 "dump" fs): freeze the current tmpfs into a
+ * generation that shares buffers with the live files until they're overwritten.
+ * Routed by the VFS: read /snap (list), read /snap/<gen>/<name> (frozen file),
+ * write /snap/ctl ("create" / "drop <n>"). M1115. */
+long tmpfs_snap_create(void);                                        /* snapshot now; returns gen index or -1 */
+long tmpfs_snap_drop(int gen);                                       /* release a snapshot; 0 or -1 */
+long tmpfs_snap_read(int gen, const char *name, void *buf, unsigned long max);  /* frozen file bytes, or -1 */
+int  tmpfs_snap_list(char *out, int max);                            /* /snap: generations + file counts */
+long tmpfs_snap_control(const void *data, unsigned long len);        /* /snap/ctl: create / drop <n> */
