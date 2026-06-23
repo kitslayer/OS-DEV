@@ -45,3 +45,22 @@ void rtc_now(struct rtc_time *t) {
     t->sec = s; t->min = mi; t->hour = h;
     t->day = d; t->month = mo; t->year = 2000 + y;
 }
+
+static void cmos_write(uint8_t reg, uint8_t v) { outb(CMOS_ADDR, reg); outb(CMOS_DATA, v); }
+static uint8_t bin2bcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
+
+/* Write the CMOS clock (used by SNTP). Honours register B's BCD/binary flag and
+ * writes 24-hour (the QEMU/PC default, regB bit 1 set). Brackets the writes with
+ * the SET bit so the clock isn't read mid-update. Year is the low two digits
+ * (rtc_now reconstructs 2000+yy). */
+void rtc_set(const struct rtc_time *t) {
+    uint8_t regB = cmos(0x0B);
+    int bcd = !(regB & 0x04);
+    cmos_write(0x0B, regB | 0x80);                 /* SET: halt updates while we write */
+    int yy = t->year % 100;
+    int vals[6] = { t->sec, t->min, t->hour, t->day, t->month, yy };
+    uint8_t regs[6] = { 0x00, 0x02, 0x04, 0x07, 0x08, 0x09 };
+    for (int i = 0; i < 6; i++)
+        cmos_write(regs[i], bcd ? bin2bcd(vals[i]) : (uint8_t)vals[i]);
+    cmos_write(0x0B, (uint8_t)((regB | 0x02) & ~0x80));   /* clear SET, force 24-hour mode */
+}

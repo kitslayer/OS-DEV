@@ -40,6 +40,10 @@ int tls_get(const char *h, const char *p, uint8_t *o, int m, uint32_t s) {
 int tls_cert_status(void)    { return -2; }
 int tls_chain_anchored(void) { return 0; }
 int tls_host_match(void)     { return -2; }
+/* net.c's SNTP client (net_sntp) writes the CMOS clock; stub it (no hardware here).
+ * Forward-declare the tag at file scope so it's the SAME type net.c (via rtc.h) uses. */
+struct rtc_time;
+void rtc_set(const struct rtc_time *t) { (void)t; }
 const char *tls_leaf_cn(void)     { return ""; }
 const char *tls_leaf_expiry(void) { return ""; }
 

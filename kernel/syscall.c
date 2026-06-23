@@ -257,7 +257,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
-    case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp:
+    case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
@@ -299,7 +299,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
-        [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",
+        [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_sntp]="sntp",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -467,6 +467,10 @@ void syscall_dispatch(struct registers *r) {
     case SYS_dhcp:
         __asm__ volatile("sti");           /* the DORA handshake needs the timer for its timeouts */
         r->rax = (uint64_t)(int64_t)net_dhcp();
+        break;
+    case SYS_sntp:
+        __asm__ volatile("sti");           /* the query waits for a reply (needs the timer) */
+        r->rax = (uint64_t)(int64_t)net_sntp();
         break;
     case SYS_cas_store:                    /* (buf, len, hash32) -> store; write the SHA-256 key */
         if (!ubuf(r->rdi, r->rsi) || !ubuf(r->rdx, 32)) { r->rax = (uint64_t)-1; break; }

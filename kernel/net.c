@@ -19,6 +19,7 @@
 #include "console.h"
 #include "string.h"
 #include "tls.h"
+#include "rtc.h"
 #include <stdint.h>
 
 /* The SLIRP defaults — used as-is until a DHCP lease (net_dhcp) overwrites them. */
@@ -501,6 +502,63 @@ long net_tftp_get(const char *server_str, const char *filename, void *out, uint3
             udp_send_to(mac, srv, myport, tid, ack, 4);
         }
     }
+}
+
+/* ===================================================================== *
+ *  SNTP client (RFC 4330) — set the wall clock from a network time server.
+ *  One 48-byte UDP packet to :123; the reply's transmit timestamp (seconds
+ *  since 1900) at offset 40 converts to a civil date and is written to the RTC.
+ * ===================================================================== */
+
+/* Unix seconds (UTC) -> civil date, via Howard Hinnant's days_from_civil inverse. */
+static void unix_to_rtc(uint64_t u, struct rtc_time *t) {
+    t->sec = (int)(u % 60); u /= 60;
+    t->min = (int)(u % 60); u /= 60;
+    t->hour = (int)(u % 24); u /= 24;                /* u = days since 1970-01-01 */
+    long z = (long)u + 719468;                       /* shift epoch to 0000-03-01 */
+    long era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned doe = (unsigned)(z - era * 146097);                 /* day of era [0,146096] */
+    unsigned yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+    long y = (long)yoe + era * 400;
+    unsigned doy = doe - (365*yoe + yoe/4 - yoe/100);            /* day of year [0,365] */
+    unsigned mp = (5*doy + 2)/153;                              /* month, Mar=0 */
+    unsigned d  = doy - (153*mp + 2)/5 + 1;
+    unsigned m  = mp < 10 ? mp + 3 : mp - 9;
+    t->year = (int)(y + (m <= 2)); t->month = (int)m; t->day = (int)d;
+}
+
+/* Query pool.ntp.org and set the RTC. Returns 0 on success, -1 on failure
+ * (no DNS, no route, or no reply within the timeout). */
+int net_sntp(void) {
+    uint8_t srv[4];
+    if (dns_resolve("pool.ntp.org", srv) != 0) return -1;   /* resolve the server */
+    uint8_t mac[6];
+    if (!arp_resolve(GW_IP, mac)) return -1;                /* a public server routes via the gateway */
+
+    const uint16_t myport = 0x8300;
+    uint8_t pkt[48]; for (int i = 0; i < 48; i++) pkt[i] = 0;
+    pkt[0] = 0x23;                                           /* LI=0, VN=4, Mode=3 (client) */
+    udp_send_to(mac, srv, myport, 123, pkt, 48);
+
+    uint8_t buf[1600];
+    uint64_t deadline = timer_ticks() + 400;                /* ~4 s */
+    while (timer_ticks() < deadline) {
+        int len = recv_timeout(buf, sizeof buf, 50);
+        if (len < 14 + 20 + 8 + 48) continue;
+        if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 17) continue;   /* IPv4/UDP */
+        int ihl = (buf[14] & 0x0F) * 4; if (ihl < 20) continue;
+        uint8_t *udp = buf + 14 + ihl;
+        if (get16(udp + 2) != myport) continue;             /* to our client port */
+        uint8_t *ntp = udp + 8;
+        uint32_t secs = ((uint32_t)ntp[40] << 24) | ((uint32_t)ntp[41] << 16)
+                      | ((uint32_t)ntp[42] << 8)  | (uint32_t)ntp[43];
+        if (secs < 2208988800u) continue;                   /* before 1970 -> bogus */
+        struct rtc_time t;
+        unix_to_rtc((uint64_t)secs - 2208988800ull, &t);    /* NTP(1900) -> Unix(1970) */
+        rtc_set(&t);
+        return 0;
+    }
+    return -1;
 }
 
 /* ===================================================================== *

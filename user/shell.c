@@ -465,6 +465,7 @@ static int run_command(char *line, char *cwd) {
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]>\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
+            print("        sntp / ntpdate (set the wall clock from pool.ntp.org over UDP)\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        cas store<file> (content-addressed store, SHA-256 key)  cas fetch<key>  cas (stats)\n");
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
@@ -1902,6 +1903,16 @@ static int run_command(char *line, char *cwd) {
             char buf[24];
             sys_time(buf, sizeof(buf));
             print(buf);
+        } else if (streq(line, "sntp") || streq(line, "ntpdate")) {   /* set the wall clock from a network time server */
+            char before[24]; sys_time(before, sizeof before);
+            print("sntp: querying pool.ntp.org (UDP 123)...\n");
+            if (sys_sntp() < 0) { print("sntp: no reply (UDP 123 may be blocked)\n"); g_status = 1; }
+            else {
+                char after[24]; sys_time(after, sizeof after);
+                print("  before: "); print(before);
+                print("  after:  "); print(after);
+                print("  clock synced (UTC) from pool.ntp.org\n");
+            }
         } else if (streq(line, "ver")) {
             print("OS-DEV 0.1 (x86_64, built from scratch)\n");
         } else if (streq(line, "pid")) {
