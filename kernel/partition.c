@@ -357,6 +357,61 @@ int fatvol_list(blk_read_fn read, void *ctx, uint64_t start_lba,
     return n;
 }
 
+/* Read the file `name83` (11-byte space-padded 8.3) from the FAT32 volume at
+ * `start_lba` into `buf` (up to `max` bytes). Walks the root dir for the entry's
+ * start cluster + size, then its cluster chain copying data. Bounded by the
+ * cluster count + cycle guards, like fatvol_find/list. Returns bytes read, or
+ * -1 (not FAT32 / not found / it's a directory). Device-agnostic, read-only. */
+long fatvol_read(blk_read_fn read, void *ctx, uint64_t start_lba,
+                 const char name83[11], void *buf, unsigned long max) {
+    struct fatvol v;
+    if (!read || !buf || !fatvol_parse(read, ctx, start_lba, &v)) return -1;
+
+    uint32_t start_cl = 0, size = 0; int found = 0, end = 0;
+    uint32_t cl = v.root_clus, steps = 0;
+    while (cl >= 2 && cl < 0x0FFFFFF8 && (!v.total_clusters || cl < v.total_clusters + 2) && !found && !end) {
+        uint64_t first = v.data_start + (uint64_t)(cl - 2) * v.spc;
+        for (uint32_t s = 0; s < v.spc && !found && !end; s++) {
+            uint8_t dir[SECSZ];
+            if (read(ctx, first + s, 1, dir) < 0) return -1;
+            for (int off = 0; off < SECSZ; off += 32) {
+                const uint8_t *e = dir + off;
+                if (e[0] == 0x00) { end = 1; break; }             /* end of directory */
+                if (e[0] == 0xE5 || e[11] == 0x0F || (e[11] & 0x08)) continue;
+                int eq = 1;
+                for (int i = 0; i < 11; i++) if (e[i] != (uint8_t)name83[i]) { eq = 0; break; }
+                if (eq) {
+                    if (e[11] & 0x10) return -1;                  /* it's a subdirectory */
+                    start_cl = ((uint32_t)rd16(e + 20) << 16) | rd16(e + 26);
+                    size = rd32(e + 28);
+                    found = 1; break;
+                }
+            }
+        }
+        if (found || end) break;
+        cl = fatvol_next(read, ctx, &v, cl);
+        if (v.total_clusters && ++steps > v.total_clusters + 2) break;   /* cycle guard */
+    }
+    if (!found) return -1;
+
+    unsigned long want = size; if (want > max) want = max;
+    unsigned long got = 0;
+    uint32_t fcl = start_cl, fsteps = 0;
+    while (fcl >= 2 && fcl < 0x0FFFFFF8 && (!v.total_clusters || fcl < v.total_clusters + 2) && got < want) {
+        uint64_t first = v.data_start + (uint64_t)(fcl - 2) * v.spc;
+        for (uint32_t s = 0; s < v.spc && got < want; s++) {
+            uint8_t sec[SECSZ];
+            if (read(ctx, first + s, 1, sec) < 0) return (long)got;
+            unsigned long n = want - got; if (n > SECSZ) n = SECSZ;
+            for (unsigned long i = 0; i < n; i++) ((uint8_t *)buf)[got + i] = sec[i];
+            got += n;
+        }
+        fcl = fatvol_next(read, ctx, &v, fcl);
+        if (v.total_clusters && ++fsteps > v.total_clusters + 2) break;   /* cycle guard */
+    }
+    return (long)got;
+}
+
 /* ATA read adapter: a blk_read_fn that reads via ata_read_drive, with the drive
  * index packed into the ctx pointer (so partition_fat32_find keeps its old ATA-
  * only signature while sharing the generalized walk above). */

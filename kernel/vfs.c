@@ -8,13 +8,15 @@
  */
 #include "vfs.h"
 #include "procfs.h"
+#include "blockdev.h"
 
 static struct vfs_ops *fs;
 
-/* Synthetic /proc and /dev live alongside the mounted FS. Since the VFS is
- * name-based, we just route paths there before delegating to FAT32. A small cwd
- * flag remembers when the current directory is /proc or /dev. */
-static int synth_cwd;   /* 0 = mounted FS, 1 = /proc, 2 = /dev */
+/* Synthetic /proc + /dev AND read-only secondary-disk mounts (/disk1, /disk2, …)
+ * live alongside the mounted boot FS. Since the VFS is name-based, we just route
+ * those paths before delegating to FAT32. A small cwd flag remembers when the
+ * current directory is one of them. */
+static int synth_cwd;   /* 0 = boot FS, 1 = /proc, 2 = /dev, >=3 = mount (synth_cwd-3) */
 
 static int veq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 
@@ -34,16 +36,48 @@ static int synth_path(const char *name, char *out, int max) {
     return 1;
 }
 
+/* Route a (possibly relative) name to a mounted disk volume. Returns 1 + sets
+ * *midx (mount index) and *fname (the file within it) if it targets /disk<N>,
+ * else 0 (use /proc·/dev·boot FS). Mounts are root-only (no subdir paths). */
+static int mount_path(const char *name, int *midx, const char **fname) {
+    if (name[0] == '/') {
+        char comp[12]; int c = 0; const char *p = name + 1;
+        while (*p && *p != '/' && c < 11) comp[c++] = *p++;
+        comp[c] = 0;
+        int idx = blockdev_mount_index(comp);
+        if (idx < 0) return 0;
+        *midx = idx; *fname = (*p == '/') ? p + 1 : p;
+        return 1;
+    }
+    if (synth_cwd >= 3) { *midx = synth_cwd - 3; *fname = name; return 1; }
+    return 0;
+}
+
 void vfs_register(struct vfs_ops *ops) { fs = ops; }
 
 int vfs_list(vfs_dirent *out, int max) {
-    if (synth_cwd) return procfs_list(synth_cwd == 1 ? "/proc" : "/dev", out, max);
+    if (synth_cwd == 1 || synth_cwd == 2)
+        return procfs_list(synth_cwd == 1 ? "/proc" : "/dev", out, max);
+    if (synth_cwd >= 3) {                                  /* a mounted disk volume's root */
+        fatvol_dirent fe[64];
+        int cap = max < 64 ? max : 64;
+        int n = blockdev_mount_list(synth_cwd - 3, fe, cap);
+        for (int i = 0; i < n; i++) {
+            int k = 0; while (fe[i].name[k] && k < 60) { out[i].name[k] = fe[i].name[k]; k++; }
+            if (fe[i].is_dir) out[i].name[k++] = '/';     /* match fat32_list's dir marker */
+            out[i].name[k] = 0;
+            out[i].size = fe[i].size; out[i].date = 0; out[i].time = 0;
+        }
+        return n;
+    }
     return fs ? fs->list(out, max) : -1;
 }
 
 long vfs_read(const char *name, void *buf, unsigned long max) {
     char ap[96];
     if (synth_path(name, ap, sizeof ap)) return procfs_read(ap, buf, max);
+    int midx; const char *fname;
+    if (mount_path(name, &midx, &fname)) return blockdev_mount_read(midx, fname, buf, max);
     return fs ? fs->read(name, buf, max) : -1;
 }
 
@@ -64,6 +98,10 @@ long vfs_mkdir(const char *path) {
 int vfs_chdir(const char *path) {
     if (veq(path, "/proc")) { synth_cwd = 1; return 0; }   /* enter synthetic dirs */
     if (veq(path, "/dev"))  { synth_cwd = 2; return 0; }
+    if (path[0] == '/') {                                  /* enter a mounted disk: /diskN */
+        int idx = blockdev_mount_index(path + 1);
+        if (idx >= 0) { synth_cwd = 3 + idx; return 0; }
+    }
     synth_cwd = 0;                                          /* any other cd leaves them */
     return (fs && fs->chdir) ? fs->chdir(path) : -1;
 }

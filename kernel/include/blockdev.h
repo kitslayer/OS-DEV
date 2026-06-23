@@ -21,6 +21,7 @@
  */
 #pragma once
 #include <stdint.h>
+#include "partition.h"   /* fatvol_dirent, for the read-only mount registry below */
 
 #define BLOCKDEV_SECSZ   512   /* every registered device speaks 512-byte sectors */
 #define BLOCKDEV_MAX     8     /* cap on registered devices (4 ATA + 4 others)    */
@@ -70,3 +71,13 @@ void blockdev_enumerate(void);
  * lines. Returns the byte length written (NUL-terminated). Backs the userspace
  * `lsblk` shell command (SYS_lsblk). Read-only. */
 int blockdev_format(char *out, int max);
+
+/* --- read-only mount registry (M1061): every FAT32 volume found across all
+ *     block devices, exposed to the VFS as /disk1, /disk2, ... so any disk's
+ *     files are browsable, not just the boot volume. Lazily scanned. --- */
+int  blockdev_mount_count(void);                 /* number of mountable FAT32 volumes */
+const char *blockdev_mount_name(int i);          /* "disk1".."disk8", or NULL */
+int  blockdev_mount_index(const char *name);     /* "disk2" -> index, else -1 */
+int  blockdev_mount_list(int i, fatvol_dirent *out, int max);              /* list mount i's root dir */
+long blockdev_mount_read(int i, const char *name, void *buf, unsigned long max);  /* read a file from mount i */
+int  blockdev_mounts_format(char *out, int max);  /* list the mounts as text (the `mount` command) */

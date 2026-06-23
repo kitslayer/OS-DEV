@@ -100,6 +100,12 @@ int fatvol_find(blk_read_fn read, void *ctx, uint64_t start_lba,
 int fatvol_list(blk_read_fn read, void *ctx, uint64_t start_lba,
                 fatvol_dirent *out, int max);
 
+/* Read the 8.3 file `name83` (11 bytes, space-padded) from the FAT32 volume at
+ * `start_lba` into `buf` (<= max bytes). Returns bytes read, or -1. Read-only,
+ * device-agnostic, bounded — the counterpart of fatvol_list for file contents. */
+long fatvol_read(blk_read_fn read, void *ctx, uint64_t start_lba,
+                 const char name83[11], void *buf, unsigned long max);
+
 /* Probe all four ATA drives and log each present drive + its partition table
  * (scheme, and per-partition drive/type/start/size). The headless self-test. */
 void partition_enumerate(void);

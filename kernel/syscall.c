@@ -733,6 +733,12 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)blockdev_format((char *)r->rdi, max);
         break;
     }
+    case SYS_mounts: {                     /* rdi=buf, rsi=len: list the read-only /diskN mounts */
+        int max = (int)r->rsi;
+        if (max <= 0 || !ubuf(r->rdi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)blockdev_mounts_format((char *)r->rdi, max);
+        break;
+    }
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

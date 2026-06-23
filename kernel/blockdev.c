@@ -242,6 +242,74 @@ static int collect_fat_starts(int i, uint64_t *starts, int max) {
     return n;
 }
 
+/* --- read-only mount registry: every FAT32 volume across all block devices,
+ *     browsable in the VFS as /disk1, /disk2, ... (M1061). Lazily built on the
+ *     first query. Each mount is just (device index, volume start-LBA); reads go
+ *     through bd_blk_read + the device-agnostic fatvol_list/fatvol_read. --- */
+struct bd_mount { char name[8]; int dev; uint64_t start; };
+static struct bd_mount g_mount[8];
+static int g_nmount, g_mount_scanned;
+
+/* "greet.txt" -> the 11-byte space-padded uppercase 8.3 form fatvol_read wants. */
+static void name83_pad(const char *in, char out[11]) {
+    for (int i = 0; i < 11; i++) out[i] = ' ';
+    int i = 0, o = 0;
+    while (in[i] && in[i] != '.' && o < 8) { char c = in[i++]; out[o++] = (c>='a'&&c<='z') ? (char)(c-32) : c; }
+    while (in[i] && in[i] != '.') i++;
+    if (in[i] == '.') { i++; int e = 8; while (in[i] && e < 11) { char c = in[i++]; out[e++] = (c>='a'&&c<='z') ? (char)(c-32) : c; } }
+}
+
+static void blockdev_mount_scan(void) {
+    if (g_mount_scanned) return;
+    g_mount_scanned = 1;
+    blockdev_init();                          /* make sure devices are registered */
+    for (int i = 0; i < g_ndev && g_nmount < 8; i++) {
+        uint64_t starts[16];
+        int ns = collect_fat_starts(i, starts, 16);
+        for (int v = 0; v < ns && g_nmount < 8; v++) {
+            /* only mount it if it really lists as FAT32 (an empty/bogus candidate
+             * gives 0; we still mount empties, but skip ones that fail to parse) */
+            fatvol_dirent probe[1];
+            if (fatvol_list(bd_blk_read, (void *)(intptr_t)i, starts[v], probe, 1) < 0) continue;
+            struct bd_mount *m = &g_mount[g_nmount];
+            m->name[0]='d'; m->name[1]='i'; m->name[2]='s'; m->name[3]='k';
+            m->name[4] = (char)('1' + g_nmount); m->name[5] = 0;   /* disk1..disk8 */
+            m->dev = i; m->start = starts[v];
+            g_nmount++;
+        }
+    }
+}
+
+int blockdev_mount_count(void) { blockdev_mount_scan(); return g_nmount; }
+
+const char *blockdev_mount_name(int i) {
+    blockdev_mount_scan();
+    return (i >= 0 && i < g_nmount) ? g_mount[i].name : 0;
+}
+
+int blockdev_mount_index(const char *name) {     /* "disk2" -> index, else -1 */
+    blockdev_mount_scan();
+    for (int i = 0; i < g_nmount; i++) {
+        const char *a = g_mount[i].name, *b = name;
+        while (*a && *a == *b) { a++; b++; }
+        if (*a == 0 && *b == 0) return i;
+    }
+    return -1;
+}
+
+int blockdev_mount_list(int i, fatvol_dirent *out, int max) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return 0;
+    return fatvol_list(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start, out, max);
+}
+
+long blockdev_mount_read(int i, const char *name, void *buf, unsigned long max) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    char n83[11]; name83_pad(name, n83);
+    return fatvol_read(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start, n83, buf, max);
+}
+
 /* --- the headless browsing demo -------------------------------------------- */
 
 void blockdev_enumerate(void) {
@@ -350,6 +418,25 @@ int blockdev_format(char *out, int max) {
                 p = sapp(out, p, max, "\n");
             }
         }
+    }
+    if (p < max) out[p] = 0;
+    return p;
+}
+
+/* List the read-only disk mounts (/disk1, /disk2, ...) into `out` — backs the
+ * `mount` shell command so the secondary volumes are discoverable. */
+int blockdev_mounts_format(char *out, int max) {
+    blockdev_mount_scan();
+    int p = 0;
+    if (g_nmount == 0) { p = sapp(out, p, max, "no FAT32 disk volumes found\n"); if (p < max) out[p] = 0; return p; }
+    for (int i = 0; i < g_nmount; i++) {
+        p = sapp(out, p, max, "  /");
+        p = sapp(out, p, max, g_mount[i].name);
+        p = sapp(out, p, max, "  on ");
+        p = sapp(out, p, max, g_dev[g_mount[i].dev].name ? g_dev[g_mount[i].dev].name : "?");
+        p = sapp(out, p, max, " @ LBA ");
+        p = sdec(out, p, max, g_mount[i].start);
+        p = sapp(out, p, max, "  (read-only)\n");
     }
     if (p < max) out[p] = 0;
     return p;
