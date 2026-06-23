@@ -71,6 +71,7 @@
 #define SYS_setwall 61  /* (name)          -> load image as the desktop wallpaper; 0/-1 */
 #define SYS_lspci  62   /* (buf, len)      -> PCI device list as text lines; bytes      */
 #define SYS_lsblk  63   /* (buf, len)      -> block devices + FAT32 volumes as text; bytes */
+#define SYS_poweroff 64 /* ()              -> enter ACPI S5 (power the machine off); never returns */
 
 #define SYSCALL_VECTOR 0x80
 

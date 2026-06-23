@@ -45,6 +45,7 @@ long sys_sysinfo(void *buf, unsigned long len) { return do_syscall(SYS_sysinfo, 
 void sys_clear(void)  { do_syscall(SYS_clear, 0, 0, 0); }
 void sys_setcolor(int color) { do_syscall(SYS_setcolor, color, 0, 0); }
 void sys_reboot(void) { do_syscall(SYS_reboot, 0, 0, 0); }
+void sys_poweroff(void) { do_syscall(SYS_poweroff, 0, 0, 0); }
 long sys_ping(void) { return do_syscall(SYS_ping, 0, 0, 0); }
 long sys_ping_host(const char *host) { return do_syscall(SYS_pinghost, (long)host, 0, 0); }
 long sys_netinfo(void *buf, unsigned long len) { return do_syscall(SYS_netinfo, (long)buf, (long)len, 0); }

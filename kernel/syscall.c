@@ -35,6 +35,7 @@
 #include "desktop.h"
 #include "pci.h"
 #include "blockdev.h"
+#include "acpi.h"
 #include <stdint.h>
 
 /* Validate a user-supplied syscall pointer argument: the range [p, p+n) must
@@ -612,7 +613,11 @@ void syscall_dispatch(struct registers *r) {
         break;
     }
     case SYS_reboot:
-        outb(0x64, 0xFE);                  /* pulse the 8042 reset line */
+        acpi_reboot();                     /* ACPI reset register, else 8042 pulse */
+        for (;;) __asm__ volatile("hlt");
+        break;
+    case SYS_poweroff:
+        acpi_poweroff();                   /* enter ACPI S5: power the machine off */
         for (;;) __asm__ volatile("hlt");
         break;
     case SYS_sbrk:

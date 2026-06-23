@@ -24,6 +24,7 @@
 #include "timer.h"
 #include "app.h"
 #include "browser.h"
+#include "acpi.h"
 #include "net.h"
 #include "vfs.h"
 #include "rtc.h"
@@ -40,7 +41,7 @@
 #define GRIP        16
 
 enum { KIND_PLAIN, KIND_WELCOME, KIND_FILES, KIND_APP, KIND_CLOCK, KIND_ABOUT,
-       KIND_BROWSER, KIND_SYSMON };
+       KIND_BROWSER, KIND_SYSMON, KIND_POWEROFF, KIND_REBOOT };  /* power actions: not windows, they call ACPI */
 
 typedef struct {
     int x, y, w, h;
@@ -133,6 +134,7 @@ static const struct menu_item menu[] = {
     { "Monitor", KIND_SYSMON, 0 },
     { "Files", KIND_FILES, 0 }, { "Welcome", KIND_WELCOME, 0 },
     { "About", KIND_ABOUT, 0 },
+    { "Restart", KIND_REBOOT, 0 }, { "Shut Down", KIND_POWEROFF, 0 },
 };
 /* The Apps menu is laid out in 2 columns rendered upward from the taskbar, so
  * MENU_PERCOL*MENU_ITEM_H must fit the screen height (17*24+4 = 412px << 734).
@@ -1023,6 +1025,8 @@ static void files_click(window_t *w, int my) {
 static void spawn_app(int kind, const char *prog) {
     if (kind == KIND_APP)     { app_spawn_named(prog); return; }  /* WM drains it */
     if (kind == KIND_BROWSER) { spawn_browser(0); return; }
+    if (kind == KIND_POWEROFF) { acpi_poweroff(); return; }       /* ACPI S5 — the machine powers off */
+    if (kind == KIND_REBOOT)   { acpi_reboot();   return; }       /* ACPI reset (8042 fallback) */
     if (win_count >= MAX_WINDOWS) return;
     spawn_n++;
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
