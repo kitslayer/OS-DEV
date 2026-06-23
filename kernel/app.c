@@ -58,6 +58,7 @@ struct app {
     uint64_t sig_restorer;               /* ulib trampoline that calls sigreturn */
     struct registers sig_saved;          /* pre-signal context, restored by sigreturn */
     int      sig_in;                     /* 1 while a handler runs (no nesting) */
+    volatile int pending_sig;            /* a signal raised asynchronously (e.g. Ctrl-C->SIGINT), delivered on the next return to ring 3 */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
     int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
     int       rawkb;                     /* raw keyboard mode (games get make/break events) */
@@ -555,7 +556,12 @@ void app_kill_check(void) {
 int app_dirty_clear(app_t *a) { int d = a->gdirty; a->gdirty = 0; return d; }
 
 /* ---- input queue (filled by the WM, drained by SYS_read) ---- */
+#define SIGINT 2
 void app_key(app_t *a, char c) {
+    /* Ctrl-C (0x83): if this app installed a SIGINT handler, raise it asynchronously
+     * (interrupting even a runaway compute loop) instead of queueing the key. Opt-in,
+     * so the shell — which polls 0x83 to break its own loops — is unaffected. M1083. */
+    if ((unsigned char)c == 0x83 && a->sig_handler[SIGINT]) { app_request_signal(a, SIGINT); return; }
     /* PgUp/PgDn scroll the scrollback for ordinary terminals; a full-screen app
      * that draws its own view (caret_off, e.g. the editor) gets them as keys to
      * page its own content instead. */
@@ -992,6 +998,34 @@ int app_signal_deliver(struct registers *r, int signo) {
 void app_sigreturn(struct registers *r) {
     struct app *a = cur();
     if (a && a->sig_in) { *r = a->sig_saved; a->sig_in = 0; }   /* resume the interrupted context */
+}
+
+/* Raise a signal ASYNCHRONOUSLY on app `a` (e.g. the WM mapping Ctrl-C on the
+ * focused window to SIGINT). Opt-in: only if the app installed a handler for it
+ * — otherwise we leave the keystroke alone, so the shell's existing 0x83 loop-
+ * break and every non-handling app are unaffected. The pending signal is
+ * delivered when the app next returns to ring 3 (app_deliver_pending). M1083. */
+void app_request_signal(app_t *a, int signo) {
+    struct app *ap = (struct app *)a;
+    if (!ap || signo <= 0 || signo >= APP_NSIG) return;
+    if (!ap->sig_handler[signo]) return;     /* no handler installed -> not opted in */
+    ap->pending_sig = signo;
+    task_wake(ap->task);                     /* unblock it if it's parked in read() */
+}
+
+/* If the app this trap returns to has an async signal pending AND we're heading
+ * back to ring-3 code (never mid-syscall), deliver it now. Called from the
+ * syscall return and the IRQ tail. Returns 1 if a handler was entered. M1083. */
+int app_deliver_pending(struct registers *r) {
+    task_t *t = task_self();                 /* called from the IRQ tail on EVERY irq, incl. before
+                                              * sched_init (current==NULL) and on kernel tasks -> guard */
+    if (!t || !t->proc) return 0;
+    struct app *a = (struct app *)t->proc;
+    if (!a->pending_sig) return 0;
+    if ((r->cs & 3) != 3) return 0;          /* resuming kernel code (mid-syscall) -> defer */
+    int sig = a->pending_sig;
+    if (app_signal_deliver(r, sig)) { a->pending_sig = 0; return 1; }
+    return 0;                                 /* couldn't deliver yet (already in a handler) -> stay pending */
 }
 
 /* ---- graphics mode: a per-app pixel canvas the WM composites --------------

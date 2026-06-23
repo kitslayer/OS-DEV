@@ -846,4 +846,6 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)-1;
         break;
     }
+
+    app_deliver_pending(r);   /* an async signal (e.g. Ctrl-C->SIGINT) raised during the syscall (M1083) */
 }

@@ -19,6 +19,8 @@
 static long ds[DS_N];
 static int  dp;
 static int  err;                       /* set on stack underflow / bad word */
+static volatile int g_interrupted;     /* set by the SIGINT handler (Ctrl-C) to abort a runaway program */
+static void on_sigint(int s) { (void)s; g_interrupted = 1; }   /* async: just flag it; interp() checks each token */
 
 static void push(long v) { if (dp < DS_N) ds[dp++] = v; else err = 1; }
 static long pop(void)    { if (dp > 0) return ds[--dp]; err = 1; return 0; }
@@ -126,6 +128,7 @@ static int interp(const char *src, int depth) {
     int do_pc[32], do_sp = 0;                /* token index just after each DO */
 
     for (int pc = 0; pc < n && !err; pc++) {
+        if (g_interrupted) { err = 1; break; }     /* Ctrl-C: abort this (possibly runaway) program */
         const char *w = t[pc];
 
         long num;
@@ -270,6 +273,8 @@ static int interp(const char *src, int depth) {
 static char script[65536];             /* a loaded .fth file (BSS, not the stack) */
 
 int main(void) {
+    sys_signal(2, on_sigint);   /* SIGINT (Ctrl-C): the kernel raises it on the focused window (M1083) */
+
     /* `forth FILE.FTH` runs a script then exits (a real save-and-run toolchain).
      * Interpreted line by line, so keep each colon definition on one line. */
     char arg[128];
@@ -306,11 +311,13 @@ repl:;
     for (;;) {
         print("ok> ");
         int n = readline(line, sizeof line);
+        if (g_interrupted) { g_interrupted = 0; dp = 0; print("\n"); continue; }   /* Ctrl-C at the prompt */
         if (n <= 0) continue;
         if (ieq(line, "bye") || ieq(line, "quit") || ieq(line, "exit")) break;
         err = 0;
         interp(line, 0);
-        if (!err) print(" ok\n");
+        if (g_interrupted) { g_interrupted = 0; dp = 0; print("  ^C interrupted\n"); }   /* Ctrl-C aborted a runaway program */
+        else if (!err) print(" ok\n");
         else { dp = 0; print("\n"); }      /* on error, clear the stack for a clean prompt */
     }
     return 0;

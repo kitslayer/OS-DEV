@@ -118,5 +118,10 @@ void isr_dispatch(struct registers *r) {
         pic_send_eoi(irq);
         if (irq_handlers[irq])
             irq_handlers[irq](r);
+        /* On the way back to ring 3 (after the timer may have rescheduled us),
+         * deliver any async signal pending on the resuming app — this is what
+         * lets Ctrl-C interrupt a runaway ring-3 compute loop. No-op unless an
+         * app opted in with a SIGINT handler and has one pending. (M1083) */
+        app_deliver_pending(r);
     }
 }
