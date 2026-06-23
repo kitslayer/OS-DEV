@@ -37,6 +37,7 @@ global c4_elf_start, c4_elf_end
 global wordle_elf_start, wordle_elf_end
 global gfxdemo_elf_start, gfxdemo_elf_end
 global scene3d_elf_start, scene3d_elf_end
+global terrain_elf_start, terrain_elf_end
 global demoscene_elf_start, demoscene_elf_end
 global doom_elf_start, doom_elf_end
 global quake_elf_start, quake_elf_end
@@ -189,6 +190,10 @@ gfxdemo_elf_end:
 scene3d_elf_start:
     incbin "build/scene3d.elf"
 scene3d_elf_end:
+
+terrain_elf_start:
+    incbin "build/terrain.elf"
+terrain_elf_end:
 
 demoscene_elf_start:
     incbin "build/demoscene.elf"

@@ -90,6 +90,7 @@ static const struct menu_item menu[] = {
     { "Wordle", KIND_APP, "wordle" },
     { "Graphics Demo", KIND_APP, "gfxdemo" },
     { "3D Engine", KIND_APP, "scene3d" },
+    { "Terrain", KIND_APP, "terrain" },
     { "Demoscene", KIND_APP, "demoscene" },
     { "DOOM", KIND_APP, "doom" },
     { "Quake", KIND_APP, "quake" },
