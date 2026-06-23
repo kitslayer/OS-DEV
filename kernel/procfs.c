@@ -187,6 +187,10 @@ int procfs_owns(const char *abs) {
 static int proc_pid_path(const char *abs, int *pid, const char **file) {
     if (!startswith(abs, "/proc/")) return 0;
     const char *p = abs + 6;
+    if (startswith(p, "self/")) {                 /* /proc/self/... -> the calling task */
+        *pid = task_current_id(); *file = p + 5;
+        return **file != 0;
+    }
     if (*p < '1' || *p > '9') return 0;          /* a pid starts 1-9; flat files start with a letter */
     int n = 0; while (*p >= '0' && *p <= '9') { n = n * 10 + (*p - '0'); p++; }
     if (*p != '/' || p[1] == 0) return 0;        /* must be "/proc/<pid>/<file>" */
