@@ -235,7 +235,57 @@ static int pci_format(char *b, int max) {
     return p;
 }
 
+/* Which pledge() promise class a syscall needs (0 = always allowed even when
+ * pledged: exit, sigreturn, getpid, and pledge itself). See app.h for the bits. */
+static uint32_t syscall_class(uint64_t nr) {
+    switch (nr) {
+    case SYS_exit: case SYS_sigreturn: case SYS_getpid: case SYS_pledge: return 0;
+    case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
+    case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
+    case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
+    case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
+    case SYS_mouse_rel: case SYS_beep:
+        return PL_STDIO;
+    case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
+    case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
+    case SYS_sha256: case SYS_sha512:
+        return PL_RPATH;
+    case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
+    case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
+    case SYS_savebmp: case SYS_screenshot: case SYS_setwall:
+        return PL_WPATH;
+    case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
+    case SYS_pinghost: case SYS_netinfo:
+        return PL_INET;
+    case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
+    case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
+    case SYS_clip_get: case SYS_clip_set:
+        return PL_GFX;
+    case SYS_spawn: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
+        return PL_PROC;
+    case SYS_mmap: case SYS_munmap:
+        return PL_VM;
+    case SYS_poweroff: case SYS_reboot:
+        return PL_POWER;
+    default:
+        return 0;        /* unmapped -> always allowed (never brick on an unknown call) */
+    }
+}
+
 void syscall_dispatch(struct registers *r) {
+    /* pledge() enforcement: a pledged app that calls a syscall outside its kept
+     * classes is killed on the spot (like OpenBSD's SIGABRT). Unpledged apps —
+     * every existing program — are unaffected. */
+    app_t *self = app_current();
+    if (self && app_is_pledged(self)) {
+        uint32_t need = syscall_class(r->rax);
+        if (need && !(app_promises(self) & need)) {
+            kprintf("[pledge] pid %d (%s) called a syscall outside its pledge (sys %lu) -- killing\n",
+                    app_sys_getpid(), app_title(self), (unsigned long)r->rax);
+            app_sys_exit();                 /* terminate the violating app; does not return */
+        }
+    }
+
     switch (r->rax) {
     case SYS_write:
         /* stdout goes to the calling app's window text grid */
@@ -762,6 +812,13 @@ void syscall_dispatch(struct registers *r) {
         if (len == 0 || !ubuf(r->rdi, len)) { r->rax = (uint64_t)-1; break; }
         random_bytes((void *)r->rdi, (size_t)len);
         r->rax = len;
+        break;
+    }
+    case SYS_pledge: {                     /* rdi = promise string ("stdio rpath ...") */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        uint32_t mask;
+        if (app_pledge_parse((const char *)r->rdi, &mask) < 0) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_pledge(app_current(), mask);
         break;
     }
     case SYS_exit:

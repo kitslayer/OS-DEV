@@ -76,4 +76,23 @@ void   app_sys_clear(void);             /* clear the calling app's screen */
 void   app_setcolor(int idx);           /* set the calling app's text colour (palette 0-15) */
 void   app_sys_exit(void);              /* does not return */
 void   app_fault_current(void);         /* a ring-3 task faulted: kill it, keep the kernel alive; does not return */
+
+/* pledge() sandbox (M1074): a process voluntarily drops the right to make whole
+ * classes of syscalls; the dispatcher kills it if it then tries one. The class
+ * bits are the user ABI (named in the string passed to pledge()). */
+#define PL_STDIO (1u<<0)   /* basic I/O: read/write/time/sleep/poll/signal/sbrk/rng */
+#define PL_RPATH (1u<<1)   /* read the filesystem */
+#define PL_WPATH (1u<<2)   /* create / write / delete files */
+#define PL_INET  (1u<<3)   /* network */
+#define PL_GFX   (1u<<4)   /* graphics + audio + clipboard */
+#define PL_PROC  (1u<<5)   /* spawn / kill / process listing */
+#define PL_VM    (1u<<6)   /* mmap / munmap */
+#define PL_POWER (1u<<7)   /* power off / reboot */
+
+app_t   *app_current(void);             /* the app owning the running task, or NULL */
+int      app_pledge(app_t *a, uint32_t mask);   /* restrict promises (monotonic); 0/-1 */
+int      app_is_pledged(app_t *a);      /* 1 once pledge() has been called */
+uint32_t app_promises(app_t *a);        /* current promise bitmask */
+int      app_pledge_parse(const char *s, uint32_t *out);  /* names -> mask; 0 ok, -1 unknown name */
+int      app_pledge_format(uint32_t mask, char *buf, int max);  /* mask -> "stdio rpath ..."; bytes */
 int    app_sys_history(char *buf, int max);  /* the caller's command history */

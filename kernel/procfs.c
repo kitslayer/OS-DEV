@@ -247,6 +247,12 @@ static long gen_pid_status(char *b, int max, int pid, int state, void *proc) {
     p = sapp(b, p, max, "State:\t");       p = sapp(b, p, max, st[(state >= 0 && state < 5) ? state : 0]); p = sapp(b, p, max, "\n");
     p = sapp(b, p, max, "HeapKB:\t");      p = sdec(b, p, max, app_heap_bytes((app_t *)proc) / 1024); p = sapp(b, p, max, "\n");
     p = sapp(b, p, max, "MmapRegions:\t"); p = sdec(b, p, max, (uint64_t)app_vma_count((app_t *)proc)); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "Pledge:\t");
+    if (app_is_pledged((app_t *)proc)) {
+        char pl[64]; app_pledge_format(app_promises((app_t *)proc), pl, sizeof pl);
+        p = sapp(b, p, max, pl[0] ? pl : "(none)");
+    } else p = sapp(b, p, max, "(unrestricted)");
+    p = sapp(b, p, max, "\n");
     b[p] = 0; return p;
 }
 

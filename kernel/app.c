@@ -89,6 +89,8 @@ struct app {
     char     pastebuf[CLIP_MAX];         /* middle-click paste text, drained before the key queue */
     volatile int paste_len, paste_pos;   /* so a long paste isn't capped by the small key queue */
     char     launch_arg[128];            /* optional launch argument (e.g. a filename for the editor) */
+    uint32_t promises;                   /* pledge() promise bitmask (valid once pledged) */
+    int      pledged;                    /* 1 once pledge() has been called (then promises are enforced) */
 };
 
 static struct app apps[MAX_APPS];
@@ -126,7 +128,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[];
+            spider_elf_start[], sandbox_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -194,6 +196,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "columns", columns_elf_start, "Columns" },
     { "freecell", freecell_elf_start, "FreeCell" },
     { "spider", spider_elf_start, "Spider" },
+    { "sandbox", sandbox_elf_start, "Sandbox (pledge demo)" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -240,6 +243,62 @@ int app_format_maps(app_t *a, char *b, int max) {
 }
 
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
+
+/* --- pledge() sandbox (M1074) --------------------------------------------- */
+app_t *app_current(void) { return cur(); }
+
+/* Restrict the calling app's promises. Monotonic, like OpenBSD's pledge: the
+ * first call sets the set; later calls may only DROP promises (the new mask
+ * must be a subset of the current), never regain them. Returns 0 / -1. */
+int app_pledge(app_t *a, uint32_t mask) {
+    if (!a) return -1;
+    if (a->pledged && (mask & ~a->promises)) return -1;   /* tried to add a promise back */
+    a->promises = mask;
+    a->pledged  = 1;
+    return 0;
+}
+int      app_is_pledged(app_t *a) { return a && a->pledged; }
+uint32_t app_promises(app_t *a)   { return a ? a->promises : 0; }
+
+/* The promise name <-> bit table — the user ABI shared by SYS_pledge parsing
+ * and /proc/<pid>/status formatting. */
+static const struct { const char *name; uint32_t bit; } pledge_tab[] = {
+    {"stdio",PL_STDIO},{"rpath",PL_RPATH},{"wpath",PL_WPATH},{"inet",PL_INET},
+    {"gfx",PL_GFX},{"proc",PL_PROC},{"vm",PL_VM},{"power",PL_POWER},
+};
+#define PLEDGE_NTAB (int)(sizeof(pledge_tab)/sizeof(pledge_tab[0]))
+
+int app_pledge_parse(const char *s, uint32_t *out) {
+    uint32_t mask = 0;
+    while (*s) {
+        while (*s == ' ' || *s == '\t') s++;
+        if (!*s) break;
+        const char *w = s; int len = 0;
+        while (s[len] && s[len] != ' ' && s[len] != '\t') len++;
+        s += len;
+        int matched = 0;
+        for (int i = 0; i < PLEDGE_NTAB; i++) {
+            const char *n = pledge_tab[i].name; int j = 0;
+            while (j < len && n[j] && n[j] == w[j]) j++;
+            if (j == len && n[j] == 0) { mask |= pledge_tab[i].bit; matched = 1; break; }
+        }
+        if (!matched) return -1;                     /* unknown promise name */
+    }
+    *out = mask;
+    return 0;
+}
+
+int app_pledge_format(uint32_t mask, char *buf, int max) {
+    int p = 0;
+    for (int i = 0; i < PLEDGE_NTAB; i++)
+        if (mask & pledge_tab[i].bit) {
+            if (p && p < max - 1) buf[p++] = ' ';
+            const char *n = pledge_tab[i].name;
+            while (*n && p < max - 1) buf[p++] = *n++;
+        }
+    if (p < max) buf[p] = 0;
+    return p;
+}
 
 /* ---- text grid ---- */
 static void grid_clear(struct app *a) {
