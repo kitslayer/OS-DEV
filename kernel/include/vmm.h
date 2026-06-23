@@ -34,6 +34,7 @@ int      vmm_map_to(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t f
 int      vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags);
 void     vmm_unmap(uint64_t virt);
 uint64_t vmm_translate(uint64_t virt);   /* physical address, or 0 if unmapped */
+int      vmm_protect(uint64_t virt, uint64_t flags);  /* rewrite a mapped page's flags (mprotect); 0/-1 */
 int      vmm_user_ok(uint64_t ptr, uint64_t len);  /* is [ptr,ptr+len) user-accessible (PTE_USER) in the current space? for syscall arg validation */
 int      vmm_user_str_ok(uint64_t ptr, uint64_t max);  /* is the NUL-terminated string at ptr entirely in user pages (<= max bytes)? */
 

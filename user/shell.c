@@ -1633,6 +1633,21 @@ static int run_command(char *line, char *cwd) {
                 if (!(streq(cont, "MAGIC") && streq(wrap, "IC"))) g_status = 1;
                 sys_munmap(r, n);
             }
+        } else if (streq(line, "jittest")) {   /* W^X/JIT: write machine code into a page, mprotect r-x, run it */
+            unsigned char *code = (unsigned char *)sys_mmap(4096);
+            if (!code) { print("jittest: mmap failed\n"); g_status = 1; }
+            else {
+                static const unsigned char prog[] = { 0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3 };  /* mov eax,42 ; ret */
+                for (int i = 0; i < (int)sizeof prog; i++) code[i] = prog[i];
+                int pr = sys_mprotect(code, 4096, 1 | 4);     /* PROT_READ|PROT_EXEC: drop write, allow execute */
+                union { unsigned char *p; int (*fn)(void); } u; u.p = code;   /* call the freshly-written code */
+                int r = u.fn();
+                print("JIT: wrote 'mov eax,42; ret' to an mmap page, mprotect r-x (rc "); printl(pr);
+                print("), called it -> "); printl(r); print("\n");
+                print(r == 42 ? "  OK: executed JIT-compiled code from a W^X page\n" : "  VERIFY FAILED\n");
+                if (r != 42) g_status = 1;
+                sys_munmap(code, 4096);
+            }
         } else if (streq(line, "sigtest")) {   /* demonstrate real signals: install a handler, raise it, resume */
             sys_signal(10, sig_demo_handler);
             print("sigtest: raising signal 10 to self...\n");

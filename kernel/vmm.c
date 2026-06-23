@@ -197,6 +197,24 @@ void vmm_unmap(uint64_t virt) {
     invlpg(virt);
 }
 
+/* Rewrite the access flags of an already-mapped 4 KiB page, keeping its frame
+ * (for mprotect / W^X). `flags` are the new low bits (e.g. PTE_USER, plus maybe
+ * PTE_WRITABLE / PTE_NX); PTE_PRESENT is always set. Returns 0/-1. M1090. */
+int vmm_protect(uint64_t virt, uint64_t flags) {
+    uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return -1;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return -1;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT) || (pd[PD_IDX(virt)] & PTE_HUGE)) return -1;
+    uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
+    uint64_t e = pt[PT_IDX(virt)];
+    if (!(e & PTE_PRESENT)) return -1;
+    pt[PT_IDX(virt)] = (e & ADDR_MASK) | PTE_PRESENT | flags;   /* keep the frame, replace the flags */
+    invlpg(virt);
+    return 0;
+}
+
 uint64_t vmm_translate(uint64_t virt) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;

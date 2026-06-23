@@ -950,6 +950,22 @@ int app_munmap(uint64_t addr, uint64_t len) {
     return -1;
 }
 
+/* mprotect (M1090): change the R/W/X protection of an already-mapped range in
+ * the calling app (PROT_READ=1, PROT_WRITE=2, PROT_EXEC=4). Enables W^X and
+ * write-then-execute JIT pages. The range must be the app's own user pages. */
+int app_mprotect(uint64_t addr, uint64_t len, int prot) {
+    if (len == 0) return -1;
+    uint64_t a0 = addr & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t end = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    if (end <= a0 || !vmm_user_ok(a0, end - a0)) return -1;   /* must be the caller's mapped user pages */
+    uint64_t flags = PTE_USER;
+    if (prot & 0x2) flags |= PTE_WRITABLE;       /* PROT_WRITE  */
+    if (!(prot & 0x4)) flags |= PTE_NX;          /* not PROT_EXEC -> no-execute */
+    for (uint64_t p = a0; p < end; p += PAGE_SIZE)
+        if (vmm_protect(p, flags) < 0) return -1;
+    return 0;
+}
+
 /* Magic (mirrored) ring buffer (M1089): reserve `len` bytes of physical frames
  * and map them TWICE, back to back, so the region [base, base+2*len) has its
  * second half alias the first. A wraparound queue then needs no split-handling

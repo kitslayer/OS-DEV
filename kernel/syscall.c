@@ -734,6 +734,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_ringbuf:                      /* (len): a magic mirrored ring buffer; base VA or 0 */
         r->rax = app_ringbuf(r->rdi);
         break;
+    case SYS_mprotect:                     /* (addr, len, prot): change R/W/X of a mapped range */
+        r->rax = (uint64_t)(int64_t)app_mprotect(r->rdi, r->rsi, (int)r->rdx);
+        break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
         r->rax = 0;
