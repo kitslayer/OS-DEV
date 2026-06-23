@@ -208,7 +208,7 @@ static const struct pf proc_files[] = {
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
 };
-static const char *dev_files[] = { "null", "zero", "random", "urandom", "full" };
+static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))
 #define NDEV  (int)(sizeof(dev_files)/sizeof(dev_files[0]))
 
@@ -291,6 +291,8 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             random_bytes(buf, n);
             return (long)n;
         }
+        if (peq(f, "clipboard"))                                 /* the system clipboard as a file */
+            return (long)clip_get((char *)buf, (int)max);
     }
     return -1;
 }
@@ -300,6 +302,7 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
         const char *f = abs + 5;
         if (peq(f, "null") || peq(f, "zero")) return (long)len;  /* discard, "succeed" */
         if (peq(f, "full")) return -1;                           /* always ENOSPC */
+        if (peq(f, "clipboard")) { clip_set((const char *)buf, (int)len); return (long)len; }
         return -1;                                               /* other /dev nodes: read-only */
     }
     if (startswith(abs, "/proc/")) {
