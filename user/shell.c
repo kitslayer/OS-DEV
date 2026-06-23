@@ -458,6 +458,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
+            print("vm:     mmaptest ringtest jittest (mmap/ring/W^X demos)  wss[ pid] (working-set: resident/referenced/dirty pages via the CPU A/D bits)\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1626,6 +1627,25 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "demand-paged + verified OK\n" : "VERIFY FAILED\n");
                 sys_munmap(m, len); print("munmap: freed\n");
                 if (!ok) g_status = 1;
+            }
+        } else if (streq(line, "wss") || startswith(line, "wss ")) {  /* working-set size from the CPU's Accessed/Dirty PTE bits (/proc/<pid>/wss) */
+            const char *who = "self"; int self = 1;
+            if (startswith(line, "wss ")) { const char *a = line + 4; while (*a == ' ') a++; if (*a) { who = a; self = 0; } }
+            char path[48]; int p = 0;
+            const char *pre = "/proc/"; for (int i = 0; pre[i]; i++) path[p++] = pre[i];
+            for (int i = 0; who[i] && who[i] != ' ' && p < 42; i++) path[p++] = who[i];
+            const char *suf = "/wss"; for (int i = 0; suf[i]; i++) path[p++] = suf[i];
+            path[p] = 0;
+            long n; char *buf = slurp(path, &n);
+            if (!buf) { print("wss: no such pid (try 'ps')\n"); g_status = 1; }
+            else {
+                print(buf); free(buf);
+                if (self) {   /* prove the window reset: clear the Accessed bits, then re-read — Referenced collapses to the few pages touched since */
+                    sys_writefile("/proc/self/ctl", "clearref", 8);
+                    print("-- clearref: cleared Accessed bits; re-reading after minimal activity --\n");
+                    long n2; char *b2 = slurp(path, &n2);
+                    if (b2) { print(b2); free(b2); }
+                }
             }
         } else if (streq(line, "ringtest")) {  /* demonstrate a magic mirrored ring buffer (one frame, two VAs) */
             unsigned long n = 4096;

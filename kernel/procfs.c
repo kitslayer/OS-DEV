@@ -11,6 +11,7 @@
  */
 #include "procfs.h"
 #include "pmm.h"
+#include "vmm.h"
 #include "timer.h"
 #include "task.h"
 #include "app.h"
@@ -297,6 +298,20 @@ static long gen_pid_status(char *b, int max, int pid, int state, void *proc) {
     p = sapp(b, p, max, "\n");
     b[p] = 0; return p;
 }
+/* /proc/<pid>/wss: working-set size from the CPU's Accessed/Dirty PTE bits.
+ * "Referenced" counts pages touched since the last `clearref` (write it to ctl
+ * to reset the window) — the building block for an LRU/swap victim picker. */
+static long gen_pid_wss(char *b, int max, int pid, void *proc) {
+    vmm_wss_t w; vmm_wss(app_cr3((app_t *)proc), &w);
+    int p = 0;
+    p = sapp(b, p, max, "Pid:\t");          p = sdec(b, p, max, (uint64_t)pid);       p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "Resident:\t");     p = sdec(b, p, max, w.resident);          p = sapp(b, p, max, " pages\n");
+    p = sapp(b, p, max, "ResidentKB:\t");   p = sdec(b, p, max, w.resident * 4);      p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "Referenced:\t");   p = sdec(b, p, max, w.referenced);        p = sapp(b, p, max, " pages (accessed since clearref)\n");
+    p = sapp(b, p, max, "Dirty:\t");        p = sdec(b, p, max, w.dirty);             p = sapp(b, p, max, " pages (written)\n");
+    p = sapp(b, p, max, "Writable:\t");     p = sdec(b, p, max, w.writable);          p = sapp(b, p, max, " pages\n");
+    b[p] = 0; return p;
+}
 
 long procfs_read(const char *abs, void *buf, unsigned long max) {
     if (max == 0) return -1;
@@ -306,6 +321,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             int st = 0; void *proc = proc_find(pid, &st);
             if (!proc) return -1;
             if (peq(file, "status"))  return gen_pid_status((char *)buf, (int)max, pid, st, proc);
+            if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "cmdline")) {
                 char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));
@@ -365,6 +381,7 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
             if (peq(cmd, "cont")) { task_cont((task_t *)app_task((app_t *)proc)); return (long)len; }
             if (peq(cmd, "trace"))   { app_set_traced((app_t *)proc, 1); return (long)len; }   /* strace -> dmesg (M1084) */
             if (peq(cmd, "untrace")) { app_set_traced((app_t *)proc, 0); return (long)len; }
+            if (peq(cmd, "clearref")) { vmm_clear_accessed(app_cr3((app_t *)proc)); return (long)len; }  /* reset the /proc/<pid>/wss window (M1093) */
             return -1;                                            /* unknown command */
         }
         return -1;                                               /* /proc otherwise read-only */

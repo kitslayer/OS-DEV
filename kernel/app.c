@@ -221,6 +221,7 @@ int app_rows(void) { return APP_ROWS; }
 const char *app_title(app_t *a) { return a->title; }
 const char *app_arg(app_t *a) { return a ? a->launch_arg : ""; }          /* /proc/<pid>/cmdline */
 void       *app_task(app_t *a) { return a ? (void *)a->task : 0; }        /* the task_t*, for /proc/<pid>/ctl stop/cont */
+uint64_t    app_cr3(app_t *a) { return a ? a->cr3 : 0; }                  /* the app's address space, for /proc/<pid>/wss */
 uint64_t    app_heap_bytes(app_t *a) { return (a && a->heap_end) ? a->heap_end - UHEAP_BASE : 0; }
 int         app_vma_count(app_t *a) { return a ? a->nvma : 0; }
 

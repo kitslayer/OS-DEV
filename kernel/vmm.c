@@ -172,6 +172,68 @@ void vmm_destroy_address_space(uint64_t cr3) {
     pmm_free_frame(cr3);                                                 /* the PML4 page */
 }
 
+/*
+ * Walk every present ring-3 (PTE_USER) 4 KiB leaf in address space `cr3`. This
+ * is the read-only twin of vmm_destroy_address_space and rests on the same
+ * invariant: the app's private user region lives only under PML4[0], and a PDPT
+ * slot that DIFFERS from boot's is a private, app-allocated PD (the shared
+ * kernel PDs are byte-identical copies, skipped). For `clear`==0 it tallies
+ * into *w; for `clear`==1 it clears the Accessed bit on each leaf. Returns the
+ * resident-leaf count. Caller flushes the TLB if needed (see vmm_clear_accessed).
+ */
+static uint64_t walk_user_leaves(uint64_t cr3, vmm_wss_t *w, int clear) {
+    cr3 &= ADDR_MASK;
+    if (!cr3) return 0;
+    uint64_t *pml4  = phys_to_table(cr3);
+    uint64_t *bpml4 = phys_to_table(kernel_pml4);
+    uint64_t pml4e = pml4[0];
+    if (!(pml4e & PTE_PRESENT) || (pml4e & ADDR_MASK) == (bpml4[0] & ADDR_MASK)) return 0;
+    uint64_t *pdpt  = phys_to_table(pml4e & ADDR_MASK);
+    uint64_t *bpdpt = phys_to_table(bpml4[0] & ADDR_MASK);
+    uint64_t n = 0;
+    for (int i = 0; i < 512; i++) {
+        if (!(pdpt[i] & PTE_PRESENT)) continue;
+        if ((pdpt[i] & ADDR_MASK) == (bpdpt[i] & ADDR_MASK)) continue;  /* shared boot PD */
+        if (pdpt[i] & PTE_HUGE) continue;
+        uint64_t *pd = phys_to_table(pdpt[i] & ADDR_MASK);
+        for (int j = 0; j < 512; j++) {
+            if (!(pd[j] & PTE_PRESENT) || (pd[j] & PTE_HUGE)) continue;
+            uint64_t *pt = phys_to_table(pd[j] & ADDR_MASK);
+            for (int k = 0; k < 512; k++) {
+                uint64_t e = pt[k];
+                if (!(e & PTE_PRESENT) || !(e & PTE_USER)) continue;
+                n++;
+                if (clear) {
+                    if (e & PTE_ACCESSED) pt[k] = e & ~PTE_ACCESSED;
+                } else if (w) {
+                    w->resident++;
+                    if (e & PTE_ACCESSED) w->referenced++;
+                    if (e & PTE_DIRTY)    w->dirty++;
+                    if (e & PTE_WRITABLE) w->writable++;
+                }
+            }
+        }
+    }
+    return n;
+}
+
+void vmm_wss(uint64_t cr3, vmm_wss_t *out) {
+    if (!out) return;
+    out->resident = out->referenced = out->dirty = out->writable = 0;
+    walk_user_leaves(cr3, out, 0);
+}
+
+int vmm_clear_accessed(uint64_t cr3) {
+    uint64_t n = walk_user_leaves(cr3, 0, 1);
+    /* The CPU caches A=1 in the TLB; clearing the PTE alone won't make the next
+     * access re-set it unless we flush. A CR3 reload flushes the whole
+     * non-global TLB — needed only when clearing the ACTIVE space (self). For a
+     * non-active target, the scheduler's CR3 reload on the next switch flushes it. */
+    if ((cr3 & ADDR_MASK) == (read_cr3() & ADDR_MASK))
+        __asm__ volatile("mov %%cr3, %%rax; mov %%rax, %%cr3" ::: "rax", "memory");
+    return (int)n;
+}
+
 int vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);

@@ -15,6 +15,8 @@
 #define PTE_USER      (1ull << 2)   /* accessible from ring 3 */
 #define PTE_PWT       (1ull << 3)   /* write-through */
 #define PTE_PCD       (1ull << 4)   /* cache-disable (for MMIO) */
+#define PTE_ACCESSED  (1ull << 5)   /* CPU sets this on any access (read/write/exec) */
+#define PTE_DIRTY     (1ull << 6)   /* CPU sets this on a write */
 #define PTE_HUGE      (1ull << 7)   /* 2 MiB page at the PD level */
 #define PTE_NX        (1ull << 63)  /* no-execute */
 
@@ -37,5 +39,15 @@ uint64_t vmm_translate(uint64_t virt);   /* physical address, or 0 if unmapped *
 int      vmm_protect(uint64_t virt, uint64_t flags);  /* rewrite a mapped page's flags (mprotect); 0/-1 */
 int      vmm_user_ok(uint64_t ptr, uint64_t len);  /* is [ptr,ptr+len) user-accessible (PTE_USER) in the current space? for syscall arg validation */
 int      vmm_user_str_ok(uint64_t ptr, uint64_t max);  /* is the NUL-terminated string at ptr entirely in user pages (<= max bytes)? */
+
+/* Working-set introspection via the CPU-maintained Accessed/Dirty PTE bits.
+ * vmm_wss walks every present ring-3 leaf in address space `cr3` and tallies
+ * resident / referenced (A=1) / dirty (D=1) / writable page counts (safe on a
+ * non-active space — reads tables through the HHDM). vmm_clear_accessed resets
+ * the estimator window by clearing A on every such leaf (flushing the TLB if
+ * `cr3` is the active space); returns the number of pages cleared. M1093. */
+typedef struct { uint64_t resident, referenced, dirty, writable; } vmm_wss_t;
+void     vmm_wss(uint64_t cr3, vmm_wss_t *out);
+int      vmm_clear_accessed(uint64_t cr3);
 
 static inline void *hhdm(uint64_t phys) { return (void *)(HHDM_BASE + phys); }
