@@ -22,6 +22,7 @@
 #include "net.h"
 #include "fsevents.h"
 #include "profile.h"
+#include "mbox.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -190,6 +191,9 @@ static long gen_fsevents(char *b, int max) {    /* recent filesystem mutations (
 static long gen_profile(char *b, int max) {     /* sampling profiler histogram (M1086) */
     return prof_format(b, max);
 }
+static long gen_ipc(char *b, int max) {         /* named message queues + pending depth (M1087) */
+    return mbox_format(b, max);
+}
 static long gen_kallsyms(char *b, int max) {    /* the embedded kernel symbol table (addr + name per line) */
     int p = 0;
     for (int i = 0; i < ksyms_count && p < max - 24; i++) {
@@ -241,7 +245,7 @@ static const struct pf proc_files[] = {
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },
-    { "profile", gen_profile },
+    { "profile", gen_profile }, { "ipc", gen_ipc },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

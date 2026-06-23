@@ -11,6 +11,7 @@
 #include "blockdev.h"
 #include "tmpfs.h"
 #include "fsevents.h"
+#include "mbox.h"
 
 static struct vfs_ops *fs;
 
@@ -51,6 +52,14 @@ static void mount_sub_join(const char *cur, const char *rel, char *out, int max)
         for (int i = 0; i < len && p < max - 1; i++) out[p++] = c[i];
         out[p] = 0;
     }
+}
+
+/* Route an absolute /ipc/<name> path to a named message queue (mbox). Returns 1
+ * + the queue name if it targets /ipc/, else 0. Absolute-only (no cwd). */
+static int ipc_path(const char *name, const char **q) {
+    if (!vstarts(name, "/ipc/")) return 0;
+    *q = name + 5;
+    return **q != 0;
 }
 
 /* Route a (possibly relative) name to the RAM /tmp filesystem. Returns 1 + the
@@ -130,6 +139,7 @@ int vfs_list(vfs_dirent *out, int max) {
 long vfs_read(const char *name, void *buf, unsigned long max) {
     char ap[96]; const char *tb;
     if (synth_path(name, ap, sizeof ap)) return procfs_read(ap, buf, max);
+    if (ipc_path(name, &tb)) return mbox_read(tb, buf, max);   /* /ipc/<q>: dequeue a message (blocks if empty) */
     if (tmp_path(name, &tb)) return tmpfs_read(tb, buf, max);
     int midx; char fpath[192];
     if (mount_path(name, &midx, fpath, sizeof fpath)) return blockdev_mount_read(midx, fpath, buf, max);
@@ -139,6 +149,7 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
 long vfs_write(const char *name, const void *buf, unsigned long len) {
     char ap[96]; const char *tb;
     if (synth_path(name, ap, sizeof ap)) { long r = procfs_write(ap, buf, len); return r == -2 ? -1 : r; }
+    if (ipc_path(name, &tb)) return mbox_write(tb, buf, len);   /* /ipc/<q>: enqueue a message */
     long r;
     if (tmp_path(name, &tb)) r = tmpfs_write(tb, buf, len);
     else {
