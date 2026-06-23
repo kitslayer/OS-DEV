@@ -194,6 +194,9 @@ static long gen_profile(char *b, int max) {     /* sampling profiler histogram (
 static long gen_ipc(char *b, int max) {         /* named message queues + pending depth (M1087) */
     return mbox_format(b, max);
 }
+static long gen_binds(char *b, int max) {       /* active bind mounts (M1091) */
+    return vfs_binds_format(b, max);
+}
 static long gen_kallsyms(char *b, int max) {    /* the embedded kernel symbol table (addr + name per line) */
     int p = 0;
     for (int i = 0; i < ksyms_count && p < max - 24; i++) {
@@ -245,7 +248,7 @@ static const struct pf proc_files[] = {
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },
-    { "profile", gen_profile }, { "ipc", gen_ipc },
+    { "profile", gen_profile }, { "ipc", gen_ipc }, { "binds", gen_binds },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

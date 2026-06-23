@@ -27,6 +27,63 @@ static char mount_sub[128];
 static int veq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static int vstarts(const char *s, const char *pre) { while (*pre) { if (*s++ != *pre++) return 0; } return 1; }
 
+/* --- bind mounts (M1091): graft one path onto another in the namespace --------
+ * `bind FROM TO` makes the path TO also resolve to FROM (Plan 9 style). Because
+ * the VFS is pure name-routing, this is a single rewrite step applied to every
+ * absolute path BEFORE the /proc·/dev·/tmp·/diskN routing — TO and everything
+ * under it is transparently redirected to FROM. One pass only (no recursion), so
+ * even a cyclic bind can't loop. Global for now. */
+#define NBINDS 8
+static struct { char from[64], to[64]; int used; } binds[NBINDS];
+
+int vfs_bind(const char *from, const char *to) {
+    if (!from || !to || from[0] != '/' || to[0] != '/') return -1;
+    int slot = -1;
+    for (int i = 0; i < NBINDS; i++) if (!binds[i].used) { slot = i; break; }
+    if (slot < 0) return -1;
+    int i = 0; while (from[i] && i < 63) { binds[slot].from[i] = from[i]; i++; } binds[slot].from[i] = 0;
+    int j = 0; while (to[j] && j < 63) { binds[slot].to[j] = to[j]; j++; } binds[slot].to[j] = 0;
+    binds[slot].used = 1;
+    return 0;
+}
+
+/* Rewrite an absolute `name` through the longest-matching bind (TO -> FROM) into
+ * out[max]; returns `name` unchanged (not copied) if nothing matches. */
+static const char *bind_resolve(const char *name, char *out, int max) {
+    if (name[0] != '/') return name;                /* binds are absolute */
+    int best = -1, bestlen = 0;
+    for (int i = 0; i < NBINDS; i++) {
+        if (!binds[i].used) continue;
+        int tl = 0; while (binds[i].to[tl]) tl++;
+        if (!vstarts(name, binds[i].to)) continue;
+        if (name[tl] != 0 && name[tl] != '/') continue;   /* must match a whole component */
+        if (tl > bestlen) { best = i; bestlen = tl; }
+    }
+    if (best < 0) return name;
+    int p = 0; const char *f = binds[best].from;
+    while (*f && p < max - 1) out[p++] = *f++;
+    for (const char *rest = name + bestlen; *rest && p < max - 1; rest++) out[p++] = *rest;
+    out[p] = 0;
+    return out;
+}
+
+int vfs_binds_format(char *b, int max) {            /* backs /proc/binds */
+    int p = 0; const char *hdr = "  TO                    FROM\n";
+    while (*hdr && p < max - 1) b[p++] = *hdr++;
+    int any = 0;
+    for (int i = 0; i < NBINDS; i++) if (binds[i].used) {
+        if (p < max - 1) b[p++] = ' '; if (p < max - 1) b[p++] = ' ';
+        int tl = 0; const char *t = binds[i].to; while (*t && p < max - 1) { b[p++] = *t++; tl++; }
+        for (int k = tl; k < 22 && p < max - 1; k++) b[p++] = ' ';
+        const char *f = binds[i].from; while (*f && p < max - 1) b[p++] = *f++;
+        if (p < max - 1) b[p++] = '\n';
+        any = 1;
+    }
+    if (!any) { const char *m = "  (none — `bind <from> <to>`)\n"; while (*m && p < max - 1) b[p++] = *m++; }
+    if (p < max) b[p] = 0;
+    return p;
+}
+
 /* Join a relative path `rel` onto the volume-relative base `cur`, collapsing "."
  * and ".." components, into `out` (no leading '/', "" = the volume root). Used to
  * track the cwd as the user descends/ascends a mounted disk's subdirectories. */
@@ -138,6 +195,7 @@ int vfs_list(vfs_dirent *out, int max) {
 
 long vfs_read(const char *name, void *buf, unsigned long max) {
     char ap[96]; const char *tb;
+    char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
     if (synth_path(name, ap, sizeof ap)) return procfs_read(ap, buf, max);
     if (ipc_path(name, &tb)) return mbox_read(tb, buf, max);   /* /ipc/<q>: dequeue a message (blocks if empty) */
     if (tmp_path(name, &tb)) return tmpfs_read(tb, buf, max);
@@ -148,6 +206,7 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
 
 long vfs_write(const char *name, const void *buf, unsigned long len) {
     char ap[96]; const char *tb;
+    char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
     if (synth_path(name, ap, sizeof ap)) { long r = procfs_write(ap, buf, len); return r == -2 ? -1 : r; }
     if (ipc_path(name, &tb)) return mbox_write(tb, buf, len);   /* /ipc/<q>: enqueue a message */
     long r;
@@ -163,6 +222,7 @@ long vfs_write(const char *name, const void *buf, unsigned long len) {
 
 long vfs_remove(const char *name) {
     const char *tb;
+    char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
     long r;
     if (tmp_path(name, &tb)) r = tmpfs_remove(tb);
     else {
@@ -200,6 +260,7 @@ static void set_mount_sub(const char *sub) {
 }
 
 int vfs_chdir(const char *path) {
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);     /* bind mounts (M1091) */
     if (veq(path, "/proc")) { synth_cwd = 1; return 0; }   /* enter synthetic dirs */
     if (veq(path, "/dev"))  { synth_cwd = 2; return 0; }
     if (veq(path, "/tmp"))  { synth_cwd = 3; return 0; }   /* the RAM filesystem */

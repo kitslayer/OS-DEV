@@ -86,6 +86,7 @@
 #define SYS_jail   76   /* (prog, promises, path) -> spawn prog pre-confined (pledge + optional unveil); 0/-1 */
 #define SYS_ringbuf 77  /* (len)           -> a magic mirrored ring buffer (len frames mapped twice); base VA or 0 */
 #define SYS_mprotect 78 /* (addr, len, prot) -> change R/W/X of a mapped range (prot: 1=R 2=W 4=X); 0/-1 */
+#define SYS_bind   79   /* (from, to)      -> graft path FROM's subtree onto path TO (bind mount); 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

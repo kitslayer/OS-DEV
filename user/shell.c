@@ -1544,6 +1544,16 @@ static int run_command(char *line, char *cwd) {
             if (!prog[0] || !proms[0]) print("usage: jail <prog> <promise>...   (e.g. jail clock stdio rpath)\n");
             else if (sys_jail(prog, proms, "") < 0) { print("jail: failed (bad promise or no such prog)\n"); g_status = 1; }
             else { print("jailed "); print(prog); print(" -> pledge("); print(proms); print(")\n"); }
+        } else if (startswith(line, "bind ")) {   /* bind <from> <to>: graft FROM's subtree onto path TO (Plan 9) */
+            const char *p = line + 5; while (*p == ' ') p++;
+            char from[64]; int j = 0; while (*p && *p != ' ' && j < 63) from[j++] = *p++;
+            from[j] = 0; sh_unprot_buf(from);
+            while (*p == ' ') p++;
+            char to[64]; j = 0; while (*p && *p != ' ' && j < 63) to[j++] = *p++;
+            to[j] = 0; sh_unprot_buf(to);
+            if (!from[0] || !to[0]) print("usage: bind <from> <to>   (both absolute; e.g. bind /tmp /scratch)\n");
+            else if (sys_bind(from, to) < 0) { print("bind: failed (absolute paths only, table full?)\n"); g_status = 1; }
+            else { print("bound "); print(to); print(" -> "); print(from); print("\n"); }
         } else if (streq(line, "cd -")) {                        /* swap to the previous directory */
             if (!prevcwd[0]) { print("cd: no previous directory\n"); g_status = 1; }
             else {

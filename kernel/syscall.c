@@ -737,6 +737,10 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mprotect:                     /* (addr, len, prot): change R/W/X of a mapped range */
         r->rax = (uint64_t)(int64_t)app_mprotect(r->rdi, r->rsi, (int)r->rdx);
         break;
+    case SYS_bind:                         /* (from, to): graft FROM's subtree onto the path TO */
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_bind((const char *)r->rdi, (const char *)r->rsi);
+        break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
         r->rax = 0;

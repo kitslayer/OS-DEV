@@ -36,6 +36,8 @@ long vfs_write(const char *name, const void *buf, unsigned long len);
 long vfs_remove(const char *name);
 long vfs_mkdir(const char *path);                        /* make a directory */
 long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /tmp); 0/-1 */
+int  vfs_bind(const char *from, const char *to);         /* graft FROM's subtree onto the path TO; 0/-1 */
+int  vfs_binds_format(char *buf, int max);               /* list the active binds (backs /proc/binds) */
 int  vfs_chdir(const char *path);                        /* change current dir */
 long vfs_tree(char *out, int max);                       /* recursive listing */
 void vfs_df(uint64_t *freeb, uint64_t *totalb);          /* free + total bytes */
