@@ -104,6 +104,7 @@
 #define SYS_waitpid 92  /* (pid, int *status) -> block until child (pid, or -1=any) exits; returns its pid + *status; -1 if none */
 #define SYS_exec   93   /* (name, arg) -> replace this process's program image with the registered program `name`; -1 on failure (no return on success) */
 #define SYS_unshare 94  /* () -> detach into a private mount namespace (later binds become private); 0/-1 */
+#define SYS_singlestep 95 /* (n) -> hardware single-step the next n user instructions; read the trace via /proc/<pid>/sstrace */
 
 #define SYSCALL_VECTOR 0x80
 

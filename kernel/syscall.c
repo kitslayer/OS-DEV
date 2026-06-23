@@ -303,6 +303,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_sntp]="sntp",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
+        [SYS_singlestep]="singlestep",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -823,6 +824,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_unshare:                      /* detach into a private mount namespace (M1122) */
         r->rax = (uint64_t)(int64_t)vfs_unshare();
+        break;
+    case SYS_singlestep:                   /* hardware single-step the next n user instructions (M1123) */
+        r->rax = (uint64_t)(int64_t)app_singlestep(r, (int)r->rdi);
         break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);

@@ -84,6 +84,7 @@ global crashinfo_elf_start, crashinfo_elf_end
 global forktest_elf_start, forktest_elf_end
 global execdemo_elf_start, execdemo_elf_end
 global nstest_elf_start, nstest_elf_end
+global steptest_elf_start, steptest_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -388,5 +389,9 @@ execdemo_elf_end:
 nstest_elf_start:
     incbin "build/nstest.elf"
 nstest_elf_end:
+
+steptest_elf_start:
+    incbin "build/steptest.elf"
+steptest_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

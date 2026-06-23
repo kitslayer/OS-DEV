@@ -419,6 +419,19 @@ static long gen_pid_regs(char *b, int max, void *proc) {
     if (p < max) b[p] = 0; return p;
 }
 
+/* /proc/<pid>/sstrace: the hardware single-step instruction trace (M1123) — the
+ * RIPs recorded by the last sys_singlestep(n), oldest-first. */
+static long gen_pid_sstrace(char *b, int max, void *proc) {
+    uint64_t rips[64]; int n = app_sstep_get((app_t *)proc, rips, 64);
+    int p = sapp(b, 0, max, "  #  INSTRUCTION POINTER\n");
+    for (int i = 0; i < n; i++) {
+        p = sapp(b, p, max, "  "); p = sdec(b, p, max, (uint64_t)i); p = sapp(b, p, max, "  0x");
+        p = shexw(b, p, max, rips[i], 8); p = sapp(b, p, max, "\n");
+    }
+    if (!n) p = sapp(b, p, max, "  (none — sys_singlestep(n) first)\n");
+    if (p < max) b[p] = 0; return p;
+}
+
 long procfs_read(const char *abs, void *buf, unsigned long max) {
     if (max == 0) return -1;
     if (startswith(abs, "/proc/")) {
@@ -431,6 +444,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */
             if (peq(file, "regs"))   return gen_pid_regs((char *)buf, (int)max, proc);   /* ring-3 register file (M1119) */
+            if (peq(file, "sstrace")) return gen_pid_sstrace((char *)buf, (int)max, proc); /* single-step trace (M1123) */
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "cmdline")) {
                 char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));

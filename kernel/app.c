@@ -112,6 +112,10 @@ struct app {
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
     int      ns_id;                      /* mount-namespace id (0 = the shared/global namespace); unshare() detaches (M1122) */
+#define APP_SSTEP_N 64
+    uint64_t sstep_rips[APP_SSTEP_N];    /* hardware single-step instruction trace (M1123) */
+    int      sstep_n;                    /* RIPs recorded so far */
+    int      sstep_remaining;            /* instructions still to single-step (0 = not tracing) */
 };
 
 static struct app apps[MAX_APPS];
@@ -154,7 +158,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -232,6 +236,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "forktest", forktest_elf_start, "COW fork demo" },
     { "execdemo", execdemo_elf_start, "fork+exec demo" },
     { "nstest", nstest_elf_start, "mount-namespace demo" },
+    { "steptest", steptest_elf_start, "single-step demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1916,6 +1921,44 @@ fail:
     __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
     vmm_destroy_address_space(new_cr3);
     return -1;
+}
+
+/* Hardware single-step instruction trace (M1123). app_singlestep(n) arms the
+ * next `n` userspace instructions: it sets the x86 TRAP flag in the syscall's
+ * own return frame, so the iretq back to ring 3 traps after one instruction.
+ * Each #DB (app_singlestep_trap, from the IDT) records the RIP and re-arms TF
+ * until n instructions are traced, then clears it. The process reads its trace
+ * back via /proc/<pid>/sstrace — the instruction-level complement to the syscall
+ * strace ring (M1118), and the core of any single-step debugger. */
+#define RFLAGS_TF (1ull << 8)
+
+long app_singlestep(struct registers *r, int n) {
+    struct app *a = cur();
+    if (!a || !r) return -1;
+    if (n < 1) n = 1;
+    if (n > APP_SSTEP_N) n = APP_SSTEP_N;
+    a->sstep_n = 0;
+    a->sstep_remaining = n;
+    r->rflags |= RFLAGS_TF;                  /* trap after the first instruction back in ring 3 */
+    return n;
+}
+
+void app_singlestep_trap(struct registers *r) {
+    struct app *a = cur();
+    if (!a || a->sstep_remaining <= 0) {     /* not tracing (or a stray #DB): stop stepping, never kill */
+        if (r) r->rflags &= ~RFLAGS_TF;
+        return;
+    }
+    if (a->sstep_n < APP_SSTEP_N) a->sstep_rips[a->sstep_n++] = r->rip;
+    if (--a->sstep_remaining > 0) r->rflags |= RFLAGS_TF;   /* more to step */
+    else                          r->rflags &= ~RFLAGS_TF;  /* done */
+}
+
+int app_sstep_get(app_t *a, uint64_t *out, int max) {       /* copy the recorded RIPs; returns count */
+    if (!a || !out) return 0;
+    int n = a->sstep_n; if (n > max) n = max;
+    for (int i = 0; i < n; i++) out[i] = a->sstep_rips[i];
+    return n;
 }
 
 /* Load and run an ELF program from a FAT32 file (e.g. `run calc.elf`). The ELF

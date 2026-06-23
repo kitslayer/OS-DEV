@@ -65,6 +65,9 @@ int      app_fault_handle(uint64_t cr2, uint64_t err); /* #PF hook: COW copy / s
 struct registers;                                   /* (interrupts.h) */
 long     app_fork(struct registers *r);             /* COW fork: child returns 0, parent returns child pid; -1 fail (M1116) */
 long     app_exec(struct registers *r, const char *name, const char *arg);  /* replace this process's image in place; -1 fail (M1121) */
+long     app_singlestep(struct registers *r, int n);  /* hardware single-step the next n user instructions (M1123) */
+void     app_singlestep_trap(struct registers *r);    /* #DB handler: record the RIP, keep/stop stepping */
+int      app_sstep_get(app_t *a, uint64_t *out, int max);  /* copy the recorded single-step RIPs; returns count */
 void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */
 int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */
