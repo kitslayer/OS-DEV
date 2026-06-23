@@ -156,6 +156,15 @@ long vfs_mkdir(const char *path) {
     return (fs && fs->mkdir) ? fs->mkdir(path) : -1;
 }
 
+/* Create a symlink `linkpath` -> `target`. Only the RAM /tmp backend supports
+ * links (the synthetic /proc·/dev are read-only; FAT32 has no native symlink),
+ * so the link must live under /tmp. Returns 0 / -1 (M1081). */
+long vfs_symlink(const char *linkpath, const char *target) {
+    const char *base;
+    if (tmp_path(linkpath, &base)) return tmpfs_symlink(base, target);
+    return -1;
+}
+
 /* Copy a validated subpath into mount_sub (bounded). */
 static void set_mount_sub(const char *sub) {
     int i = 0; while (sub[i] && i < (int)sizeof mount_sub - 1) { mount_sub[i] = sub[i]; i++; }

@@ -450,7 +450,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
+            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
@@ -1518,6 +1518,20 @@ static int run_command(char *line, char *cwd) {
                 else { print("created "); print(name); print("/\n"); }
             }
             if (!any) print("usage: mkdir <dir>...\n");
+        } else if (startswith(line, "ln -s ") || startswith(line, "ln ")) {  /* ln -s TARGET LINK (symlink, /tmp only) */
+            const char *p = line + 3;
+            while (*p == ' ') p++;
+            if (p[0] == '-' && p[1] == 's') { p += 2; while (*p == ' ') p++; }   /* tolerate/skip -s */
+            char target[96]; int j = 0;
+            while (*p && *p != ' ' && j < 95) target[j++] = *p++;
+            target[j] = 0; sh_unprot_buf(target);
+            while (*p == ' ') p++;
+            char link[96]; j = 0;
+            while (*p && *p != ' ' && j < 95) link[j++] = *p++;
+            link[j] = 0; sh_unprot_buf(link);
+            if (!target[0] || !link[0]) print("usage: ln -s <target> <linkpath>   (linkpath must be under /tmp)\n");
+            else if (sys_symlink(link, target) < 0) { print("ln: failed (linkpath must be under /tmp)\n"); g_status = 1; }
+            else { print(link); print(" -> "); print(target); print("\n"); }
         } else if (streq(line, "cd -")) {                        /* swap to the previous directory */
             if (!prevcwd[0]) { print("cd: no previous directory\n"); g_status = 1; }
             else {

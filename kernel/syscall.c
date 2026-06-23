@@ -833,6 +833,11 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)app_unveil(self, (const char *)r->rdi, perms);
         break;
     }
+    case SYS_symlink:                      /* rdi = linkpath (under /tmp), rsi = target */
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_symlink((const char *)r->rdi, (const char *)r->rsi);
+        break;
     case SYS_exit:
         app_sys_exit();                    /* marks app dead + task_exit; no return */
         break;

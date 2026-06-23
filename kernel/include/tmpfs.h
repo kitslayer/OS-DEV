@@ -11,4 +11,5 @@
 long tmpfs_read(const char *name, void *buf, unsigned long max);      /* bytes, or -1 */
 long tmpfs_write(const char *name, const void *data, unsigned long len); /* create/replace; len or -1 */
 long tmpfs_remove(const char *name);                                 /* 0, or -1 if absent */
+long tmpfs_symlink(const char *name, const char *target);            /* create a symlink; 0 or -1 */
 int  tmpfs_list(vfs_dirent *out, int max);                           /* fill out[]; returns count */
