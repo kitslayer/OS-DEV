@@ -92,6 +92,7 @@
 #define SYS_cas_fetch 82 /* (hash32,buf,max) -> fetch a blob by its SHA-256 key; bytes/-1 */
 #define SYS_tftp   83   /* (server,file,buf,max) -> fetch a file over TFTP into buf; bytes/-1 */
 #define SYS_madvise 84  /* (addr,len,advice) -> MADV_DONTNEED(4): reclaim resident anon pages now; pages/-1 */
+#define SYS_alarm  85   /* (ticks) -> arm a periodic SIGALRM every `ticks` timer ticks (0 = disarm); 0 */
 
 #define SYSCALL_VECTOR 0x80
 

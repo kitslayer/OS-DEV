@@ -73,6 +73,11 @@ static int hexval(char c) {     /* a hex digit's value, or -1 */
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
+
+/* SIGALRM demo (M1102): the handler just counts fires (touches only this global,
+ * so running it on the shell's stack mid-loop is harmless). */
+static volatile int g_alarm_fires;
+static void sh_alarm_handler(int sig) { (void)sig; g_alarm_fires++; }
 static char *slurp(const char *name, long *len) {
     sh_unprot_buf((char *)name);          /* a quoted filename ("my file") arrives with bit-7 sentinels — reveal them
                                            * here, the one chokepoint every file-reading builtin funnels through.
@@ -466,7 +471,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest (mmap/ring/W^X/reclaim demos)  wss[ pid] (working-set via the CPU A/D bits)\n");
+            print("vm:     mmaptest ringtest jittest madvisetest (mmap/ring/W^X/reclaim demos)  alarmtest (SIGALRM)  wss[ pid] (working-set)\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1723,6 +1728,16 @@ static int run_command(char *line, char *cwd) {
                 if (!zeroed || dropped <= 0) g_status = 1;
                 sys_munmap(m, len);
             }
+        } else if (streq(line, "alarmtest")) {  /* demonstrate SIGALRM: a periodic timer signal to a ring-3 handler */
+            g_alarm_fires = 0;
+            sys_signal(14 /* SIGALRM */, sh_alarm_handler);
+            sys_alarm(20);                       /* fire every 20 ticks = 200ms at 100Hz */
+            print("armed SIGALRM every 200ms; spinning ~1s...\n");
+            long start = sys_uptime_ms();
+            while (sys_uptime_ms() - start < 1000) { }   /* busy ~1s; the alarm fires via the async-signal path */
+            sys_alarm(0);                        /* disarm */
+            print("SIGALRM fired "); printl(g_alarm_fires); print(" times in ~1s (expected ~5)\n");
+            if (g_alarm_fires < 3 || g_alarm_fires > 7) g_status = 1;
         } else if (streq(line, "wss") || startswith(line, "wss ")) {  /* working-set size from the CPU's Accessed/Dirty PTE bits (/proc/<pid>/wss) */
             const char *who = "self"; int self = 1;
             if (startswith(line, "wss ")) { const char *a = line + 4; while (*a == ' ') a++; if (*a) { who = a; self = 0; } }

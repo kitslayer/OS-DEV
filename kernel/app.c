@@ -11,6 +11,7 @@
  */
 #include "app.h"
 #include "task.h"
+#include "timer.h"
 #include "interrupts.h"   /* struct registers, for ring-3 signal delivery */
 #include "vmm.h"
 #include "pmm.h"
@@ -60,6 +61,7 @@ struct app {
     struct registers sig_saved;          /* pre-signal context, restored by sigreturn */
     int      sig_in;                     /* 1 while a handler runs (no nesting) */
     volatile int pending_sig;            /* a signal raised asynchronously (e.g. Ctrl-C->SIGINT), delivered on the next return to ring 3 */
+    uint64_t alarm_interval, alarm_next; /* SIGALRM (M1102): periodic timer; 0 interval = disarmed */
     int      traced;                     /* 1 = log each syscall to dmesg (strace), toggled via /proc/<pid>/ctl */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
     int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
@@ -1110,6 +1112,31 @@ void app_request_signal(app_t *a, int signo) {
     if (!ap->sig_handler[signo]) return;     /* no handler installed -> not opted in */
     ap->pending_sig = signo;
     task_wake(ap->task);                     /* unblock it if it's parked in read() */
+}
+
+#define SIGALRM 14
+/* Arm/disarm a periodic SIGALRM for the calling app (M1102): every `ticks`
+ * timer ticks, raise SIGALRM (delivered to a ring-3 handler via the same async
+ * path as Ctrl-C). ticks==0 disarms. Composes SYS_signal (M1067) + the IRQ-tail
+ * delivery (M1083) — no new delivery machinery. */
+void app_set_alarm(uint64_t ticks) {
+    struct app *a = cur();
+    if (!a) return;
+    a->alarm_interval = ticks;
+    a->alarm_next = ticks ? timer_ticks() + ticks : 0;
+}
+/* Called from the timer IRQ: if the CURRENT app's periodic alarm is due, raise
+ * SIGALRM (a no-op if it never installed a handler). Checking cur() keeps it
+ * cheap — an app times its own run while it is the one executing. */
+void app_alarm_tick(void) {
+    task_t *t = task_self();
+    if (!t || !t->proc) return;                  /* before sched_init / a kernel task */
+    struct app *a = (struct app *)t->proc;
+    if (!a->alarm_interval) return;
+    if (timer_ticks() >= a->alarm_next) {
+        a->alarm_next += a->alarm_interval;
+        app_request_signal(a, SIGALRM);          /* opt-in: only fires if a SIGALRM handler is installed */
+    }
 }
 
 /* If the app this trap returns to has an async signal pending AND we're heading

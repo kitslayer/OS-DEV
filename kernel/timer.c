@@ -16,6 +16,7 @@
 #include "task.h"
 #include "audio.h"
 #include "profile.h"
+#include "app.h"
 
 #define PIT_CH0_DATA 0x40
 #define PIT_COMMAND  0x43
@@ -29,6 +30,7 @@ static void timer_handler(struct registers *r) {
     prof_tick(r->rip, r->cs);  /* sampling profiler: record the interrupted kernel RIP (M1086) */
     audio_pump();          /* keep the audio DMA fed (no-op unless streaming) */
     task_wake_sleepers();  /* wake any timed-sleep task whose deadline has passed (M1079) */
+    app_alarm_tick();      /* raise SIGALRM if the current app's periodic alarm is due (M1102) */
     sched_tick();          /* preempt the running thread (no-op if <2 tasks) */
 }
 

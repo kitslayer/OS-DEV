@@ -244,6 +244,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
+    case SYS_alarm:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
         return PL_STDIO;
@@ -298,7 +299,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
-        [SYS_tftp]="tftp",[SYS_madvise]="madvise",
+        [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -786,6 +787,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sigreturn:                    /* return from a handler: restore the saved context */
         app_sigreturn(r);
+        break;
+    case SYS_alarm:                        /* (ticks): arm a periodic SIGALRM (0 = disarm) */
+        app_set_alarm(r->rdi);
+        r->rax = 0;
         break;
     case SYS_uptime_ms:
         r->rax = timer_ms();               /* monotonic milliseconds since boot */

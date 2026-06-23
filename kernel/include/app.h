@@ -65,6 +65,8 @@ int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the h
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */
 void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl-C->SIGINT); opt-in (needs a handler) */
 int  app_deliver_pending(struct registers *r);     /* deliver a pending async signal on return to ring 3; 1 if delivered */
+void app_set_alarm(uint64_t ticks);                /* SYS_alarm: arm a periodic SIGALRM every `ticks` ticks (0=disarm) */
+void app_alarm_tick(void);                         /* timer IRQ hook: raise SIGALRM if the current app's alarm is due */
 void app_set_traced(app_t *a, int on);             /* strace: log this app's syscalls to dmesg */
 int  app_is_traced(app_t *a);
 void app_jail_next(uint32_t promises, const char *path);   /* confine the NEXT spawned app (pledge + unveil) */
