@@ -42,7 +42,7 @@ static float    *zbuf;     /* W*H depth as 1/z (LARGER = nearer) */
 static unsigned *tex;      /* model texture */
 static unsigned *ftex;     /* floor texture (checker) */
 static unsigned *curtex;   /* the texture the rasterizer currently samples */
-static int textured = 1, show_floor = 1;
+static int textured = 1, show_floor = 1, shadowpass = 0;
 static unsigned flatcol = 0x8090a0;   /* model colour when texture is off */
 
 static void gen_texture(int model) {
@@ -189,6 +189,10 @@ static void raster(SV a, SV b, SV c) {
         float span=(xr-xl); if (span<0.001f) span=0.001f;
         unsigned *row=fb+(long)y*W; float *zr=zbuf+(long)y*W;
         for (int x=x0; x<x1; x++) {
+            if (shadowpass) {                  /* darken floor pixels under the cast shadow */
+                if (zr[x] > 1e-4f) { unsigned p=row[x]; row[x]=(p>>1)&0x7f7f7fu; }
+                continue;
+            }
             float tx=(x+0.5f-xl)/span;
             float iz=izl+(izr-izl)*tx;
             if (iz<=zr[x]) continue;           /* nearer = larger 1/z */
@@ -274,6 +278,24 @@ int main(void) {
                 raster(q0,q2,q1); raster(q0,q3,q2);
             }
             textured = saved_t;
+        }
+
+        /* --- shadow: project the model's silhouette onto the floor along the light --- */
+        if (show_floor) {
+            shadowpass = 1;
+            float cs=fcos(spin), ss=fsin(spin), ccy=fcos(camYaw), scy=fsin(camYaw);
+            float FY=-1.249f;
+            for (int t=0; t<ntris; t++) {
+                SV S[3];
+                for (int j=0; j<3; j++) {
+                    int vi=tri[t][j];
+                    float wx=vx[vi]*cs - vz[vi]*ss, wz=vx[vi]*ss + vz[vi]*cs, wy=vy[vi];
+                    float tt=(wy-FY)/ly;
+                    S[j]=project(wx - tt*lx, FY, wz - tt*lz, 0,1,0, 0,0, ccy,scy, cxp,sxp, dist);
+                }
+                raster(S[0],S[1],S[2]);
+            }
+            shadowpass = 0;
         }
 
         /* --- the model: spin + camera orbit --- */
