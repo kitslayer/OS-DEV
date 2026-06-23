@@ -165,6 +165,11 @@ static void printl(long v) {              /* print a (possibly large) integer */
     while (i) o[j++] = t[--i];
     o[j] = '\0'; print(o);
 }
+
+/* A demo signal handler for `sigtest` — runs in ring 3 when a signal is raised. */
+static void sig_demo_handler(int s) {
+    print("  [handler] caught signal "); printl(s); print(" in userspace, returning\n");
+}
 static void print_base(unsigned long n, int base) {   /* print n in base 2-16 */
     const char *dgt = "0123456789abcdef";
     char t[72]; int i = 0;
@@ -1555,6 +1560,11 @@ static int run_command(char *line, char *cwd) {
                 sys_munmap(m, len); print("munmap: freed\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "sigtest")) {   /* demonstrate real signals: install a handler, raise it, resume */
+            sys_signal(10, sig_demo_handler);
+            print("sigtest: raising signal 10 to self...\n");
+            sys_raise(10);
+            print("sigtest: main resumed after the handler returned (sigreturn OK)\n");
         } else if (streq(line, "scores")) {
             /* a personal leaderboard: the best each game saved to its *.HI file */
             static const struct { const char *name, *file; } hs[] = {

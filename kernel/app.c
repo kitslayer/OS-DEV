@@ -11,6 +11,7 @@
  */
 #include "app.h"
 #include "task.h"
+#include "interrupts.h"   /* struct registers, for ring-3 signal delivery */
 #include "vmm.h"
 #include "pmm.h"
 #include "elf.h"
@@ -52,6 +53,11 @@ struct app {
     struct { uint64_t start, len; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
+#define APP_NSIG 32
+    uint64_t sig_handler[APP_NSIG];      /* ring-3 signal handlers (0 = none) */
+    uint64_t sig_restorer;               /* ulib trampoline that calls sigreturn */
+    struct registers sig_saved;          /* pre-signal context, restored by sigreturn */
+    int      sig_in;                     /* 1 while a handler runs (no nesting) */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
     int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
     int       rawkb;                     /* raw keyboard mode (games get make/break events) */
@@ -844,6 +850,39 @@ int app_fault_handle(uint64_t cr2) {
         }
     }
     return 0;
+}
+
+/* --- ring-3 signals (M1067) ------------------------------------------------
+ * A registered handler runs on the app's own user stack; the interrupted
+ * context is saved kernel-side (sig_saved), so the user stack only needs the
+ * trampoline return address. When the handler returns it falls into the ulib
+ * trampoline, which calls SYS_sigreturn to restore the saved context. No
+ * nesting (sig_in guards). Dormant unless an app registers a handler. */
+void app_signal_set(int signo, uint64_t handler, uint64_t restorer) {
+    struct app *a = cur();
+    if (!a || signo <= 0 || signo >= APP_NSIG) return;
+    a->sig_handler[signo] = handler;
+    if (restorer) a->sig_restorer = restorer;
+}
+
+int app_signal_deliver(struct registers *r, int signo) {
+    struct app *a = cur();
+    if (!a || signo <= 0 || signo >= APP_NSIG) return 0;
+    if (!a->sig_handler[signo] || !a->sig_restorer || a->sig_in) return 0;
+    uint64_t nrsp = ((r->rsp - 128) & ~15ull) - 8;   /* skip red zone, 16-align, room for ret addr */
+    if (!vmm_user_ok(nrsp, 8)) return 0;             /* bad user stack -> don't deliver */
+    a->sig_saved = *r;                               /* save the interrupted context */
+    a->sig_in = 1;
+    *(volatile uint64_t *)nrsp = a->sig_restorer;    /* handler's return address -> trampoline */
+    r->rsp = nrsp;
+    r->rip = a->sig_handler[signo];
+    r->rdi = (uint64_t)signo;                        /* handler(int signo) */
+    return 1;
+}
+
+void app_sigreturn(struct registers *r) {
+    struct app *a = cur();
+    if (a && a->sig_in) { *r = a->sig_saved; a->sig_in = 0; }   /* resume the interrupted context */
 }
 
 /* ---- graphics mode: a per-app pixel canvas the WM composites --------------

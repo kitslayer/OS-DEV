@@ -76,6 +76,9 @@
 #define SYS_mounts 66   /* (buf, max)      -> list the read-only disk mounts (/disk1..) as text; bytes */
 #define SYS_mmap   67   /* (len)           -> reserve a demand-paged anon region; base VA, or 0 */
 #define SYS_munmap 68   /* (addr, len)     -> free an mmap region; 0/-1 */
+#define SYS_signal 69   /* (signo, handler, restorer) -> install a ring-3 signal handler; 0 */
+#define SYS_raise  70   /* (signo)         -> deliver a signal to self (runs the handler, returns after) */
+#define SYS_sigreturn 71/* ()              -> return from a signal handler (restore the saved context) */
 
 #define SYSCALL_VECTOR 0x80
 

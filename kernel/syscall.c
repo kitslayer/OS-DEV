@@ -642,6 +642,17 @@ void syscall_dispatch(struct registers *r) {
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);
         break;
+    case SYS_signal:                       /* (signo, handler, restorer): install a handler */
+        app_signal_set((int)r->rdi, r->rsi, r->rdx);
+        r->rax = 0;
+        break;
+    case SYS_raise:                        /* (signo): run the handler now; resume here after it returns */
+        r->rax = 0;
+        app_signal_deliver(r, (int)r->rdi);   /* if delivered, rewrites r to enter the handler */
+        break;
+    case SYS_sigreturn:                    /* return from a handler: restore the saved context */
+        app_sigreturn(r);
+        break;
     case SYS_uptime_ms:
         r->rax = timer_ms();               /* monotonic milliseconds since boot */
         break;

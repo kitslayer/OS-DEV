@@ -55,6 +55,10 @@ uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old brea
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */
 int      app_munmap(uint64_t addr, uint64_t len);   /* free an mmap region; 0/-1 */
 int      app_fault_handle(uint64_t cr2);            /* #PF hook: lazily map an mmap page; 1 if handled */
+struct registers;                                   /* (interrupts.h) */
+void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */
+int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
+void app_sigreturn(struct registers *r);            /* restore the pre-signal context */
 int    app_gfx_init(int w, int h);     /* put the caller in graphics mode (w*h pixel canvas) */
 int    app_gfx_blit(const uint32_t *pixels);  /* copy the caller's pixels to the canvas */
 int    app_gfx_get(app_t *a, uint32_t **buf, int *w, int *h);  /* WM: canvas + dims; 1/0 */
