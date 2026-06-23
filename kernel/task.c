@@ -202,14 +202,50 @@ void task_yield(void) {
  * can't be lost. */
 void task_block(void) {
     uint64_t f = irq_save();
+    current->wake_at = 0;          /* not a timed sleep -> the timer scan must ignore it */
     current->state = TASK_BLOCKED;
     switch_to_next();
     irq_restore(f);
 }
 
 void task_wake(task_t *t) {
-    if (t && t->state == TASK_BLOCKED)
+    if (t && t->state == TASK_BLOCKED) {
+        t->wake_at = 0;            /* cancel any pending timed wake */
         t->state = TASK_READY;
+    }
+}
+
+/* Sleep the current task for `ms`, off-CPU, until the timer wakes it (M1079) —
+ * the real, non-busy version of timer_wait(). Falls back to a HLT loop before
+ * the scheduler is up. The deadline is recorded in wake_at; task_wake_sleepers()
+ * (driven by the timer IRQ) flips us back to READY when it passes. */
+void task_sleep_ms(uint64_t ms) {
+    if (!current || current == idle_task) {       /* no scheduler / the idle floor: busy-wait */
+        uint64_t target = timer_ms() + ms;
+        while (timer_ms() < target) __asm__ volatile("sti; hlt");
+        return;
+    }
+    uint64_t f = irq_save();
+    current->wake_at = timer_ms() + ms;           /* 0 ms still parks until the next tick */
+    current->state = TASK_BLOCKED;
+    switch_to_next();                             /* yields; woken by the timer scan */
+    irq_restore(f);
+}
+
+/* Called from the timer IRQ (interrupts already off): wake every task whose
+ * timed-sleep deadline has passed. The ring is tiny, so a full scan per tick is
+ * cheap; only BLOCKED tasks with a non-zero wake_at are sleepers. */
+void task_wake_sleepers(void) {
+    if (!current) return;
+    uint64_t now = timer_ms();
+    task_t *t = current;
+    do {
+        if (t->state == TASK_BLOCKED && t->wake_at && t->wake_at <= now) {
+            t->wake_at = 0;
+            t->state = TASK_READY;
+        }
+        t = t->next;
+    } while (t != current);
 }
 
 /* Suspend a task (it leaves the run rotation until task_cont). Only a runnable,

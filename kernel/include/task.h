@@ -18,6 +18,7 @@ typedef struct task {
     uint64_t      run_ms;      /* total ms this task has been RUNNING (CPU time)   */
     uint64_t      last_in;     /* timer_ms() when it last became `current`         */
     uint64_t      nswitch;     /* times it has been scheduled in (context switches) */
+    uint64_t      wake_at;     /* if BLOCKED via task_sleep_ms: timer_ms() deadline (0 = not a timed sleep) */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */
@@ -33,6 +34,8 @@ int     task_current_id(void);
 task_t *task_self(void);                   /* the currently running task */
 void    task_block(void);                  /* block current task until woken */
 void    task_wake(task_t *t);              /* mark a blocked task runnable again */
+void    task_sleep_ms(uint64_t ms);        /* sleep the current task off-CPU until the timer wakes it */
+void    task_wake_sleepers(void);          /* timer IRQ: wake tasks whose sleep deadline passed */
 void    task_stop(task_t *t);              /* suspend another task (READY/RUNNING -> STOPPED); not self */
 void    task_cont(task_t *t);              /* resume a STOPPED task */
 int     task_count(void);                  /* number of live tasks */

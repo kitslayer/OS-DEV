@@ -26,8 +26,9 @@ static uint32_t          tick_hz = 100;   /* IRQ0 frequency, set by timer_init *
 static void timer_handler(struct registers *r) {
     (void)r;
     ticks++;
-    audio_pump();      /* keep the audio DMA fed (no-op unless streaming) */
-    sched_tick();      /* preempt the running thread (no-op if <2 tasks) */
+    audio_pump();          /* keep the audio DMA fed (no-op unless streaming) */
+    task_wake_sleepers();  /* wake any timed-sleep task whose deadline has passed (M1079) */
+    sched_tick();          /* preempt the running thread (no-op if <2 tasks) */
 }
 
 void timer_init(uint32_t hz) {
@@ -54,7 +55,9 @@ uint64_t timer_ms(void) {
 }
 
 void timer_wait(uint64_t n) {
-    uint64_t target = ticks + n;
-    while (ticks < target)
-        __asm__ volatile("hlt");   /* sleep until the next interrupt */
+    /* Real off-CPU sleep once the scheduler is up: the task blocks and the timer
+     * IRQ wakes it at the deadline, instead of spinning READY and re-HLTing every
+     * slice (which burned a slot and looked like CPU use in /proc/sched). M1079.
+     * task_sleep_ms falls back to a HLT loop before the scheduler exists. */
+    task_sleep_ms(n * 1000ull / tick_hz);
 }
