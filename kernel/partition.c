@@ -214,33 +214,50 @@ int partition_scan(int drive, partition_t *out, int max) {
  * This is the "multi-volume" proof: rather than rewiring the whole fat32.c
  * driver (which keeps one set of module-global BPB fields for the boot mount
  * and reads via the bare ata_read on drive 0), we do a small, self-contained,
- * read-only FAT32 walk *relative to a partition's start-LBA on any drive*. It
- * reads the partition's BPB, validates FAT32, then locates a file by 8.3 name in
- * the root directory and reports its size — proving the partition was located
- * correctly AND that its filesystem is genuinely readable, without touching the
- * boot mount's state. Every read targets a fixed 512-byte buffer and the cluster
- * walk is bounded by the cluster count, so a corrupt FS cannot run away.
+ * read-only FAT32 walk *relative to a volume's start-LBA*. It reads the volume's
+ * BPB, validates FAT32, then walks the root directory — proving the volume was
+ * located correctly AND that its filesystem is genuinely readable, without
+ * touching the boot mount's state. Every read targets a fixed 512-byte buffer
+ * and the cluster walk is bounded by the cluster count, so a corrupt FS cannot
+ * run away.
  *
- * Returns 1 + sets *out_size if `name83` (an 11-byte space-padded 8.3 name) is
- * found in the root directory; 0 if the volume is not FAT32 or the file is
- * absent. */
-int partition_fat32_find(int drive, uint64_t start_lba, const char name83[11],
-                         uint32_t *out_size) {
+ * The walk reads through a caller-supplied block-read callback (read, ctx) so the
+ * SAME logic works over ANY storage driver via kernel/blockdev.c, not just ATA.
+ * partition_fat32_find() (below) is the original ATA-only signature, kept as a
+ * thin wrapper so every existing ATA caller is unchanged.
+ */
+
+/* Parsed, validated FAT32 geometry — the fields the root-dir walk needs. */
+struct fatvol {
+    uint64_t fat_start;        /* absolute LBA of FAT #1 */
+    uint64_t data_start;       /* absolute LBA of cluster 2 */
+    uint32_t spc;              /* sectors per cluster (1..128) */
+    uint32_t root_clus;        /* first cluster of the root directory (>=2) */
+    uint32_t total_clusters;   /* data-cluster count (chain-walk bound; 0=unknown) */
+};
+
+/* Read the boot sector at absolute LBA `start_lba` via (read,ctx) and, if it is a
+ * valid FAT32 BPB, fill *v and return 1; else return 0. Every field is validated
+ * before use exactly as the boot mount (fat32.c) and the old ATA walk did. */
+static int fatvol_parse(blk_read_fn read, void *ctx, uint64_t start_lba,
+                        struct fatvol *v) {
     uint8_t bs[SECSZ];
-    if (ata_read_drive(drive, (uint32_t)start_lba, 1, bs) < 0) return 0;
+    if (read(ctx, start_lba, 1, bs) < 0)     return 0;
     if (rd16(bs + 510) != 0xAA55)            return 0;   /* boot signature */
     if (rd16(bs + 11) != SECSZ)              return 0;   /* bytes/sector */
     uint32_t spc = bs[13];
     if (spc == 0 || spc > 128)               return 0;   /* sectors/cluster */
-    uint32_t reserved   = rd16(bs + 14);
-    uint32_t num_fats   = bs[16];
+    uint32_t reserved    = rd16(bs + 14);
+    uint32_t num_fats    = bs[16];
     uint32_t fat_sectors = rd32(bs + 36);                /* FAT size 32 */
-    uint32_t root_clus  = rd32(bs + 44);
+    uint32_t root_clus   = rd32(bs + 44);
     if (fat_sectors == 0 || num_fats == 0)   return 0;   /* not FAT32 */
     if (root_clus < 2)                       return 0;
 
-    uint64_t fat_start  = start_lba + reserved;
-    uint64_t data_start = fat_start + (uint64_t)num_fats * fat_sectors;
+    v->fat_start  = start_lba + reserved;
+    v->data_start = v->fat_start + (uint64_t)num_fats * fat_sectors;
+    v->spc        = spc;
+    v->root_clus  = root_clus;
 
     /* Bound the cluster walk: derive the volume's cluster count from the BPB,
      * capped by what the FAT can actually index. */
@@ -249,14 +266,43 @@ int partition_fat32_find(int drive, uint64_t start_lba, const char name83[11],
     uint32_t total_clusters = (tot_sec > meta) ? (tot_sec - meta) / spc : 0;
     uint32_t fatcap = fat_sectors * (SECSZ / 4);
     if (fatcap > 2 && total_clusters > fatcap - 2) total_clusters = fatcap - 2;
+    v->total_clusters = total_clusters;
+    return 1;
+}
 
-    /* Walk the root directory's cluster chain looking for the 8.3 name. */
-    uint32_t cl = root_clus, steps = 0;
-    while (cl >= 2 && cl < 0x0FFFFFF8 && (!total_clusters || cl < total_clusters + 2)) {
-        uint64_t first = data_start + (uint64_t)(cl - 2) * spc;
-        for (uint32_t s = 0; s < spc; s++) {
+/* Step the root-dir cluster chain: read FAT[cl] via (read,ctx) and return the
+ * next cluster (masked to 28 bits), or EOC (0x0FFFFFF8) on a read error. */
+static uint32_t fatvol_next(blk_read_fn read, void *ctx, const struct fatvol *v,
+                            uint32_t cl) {
+    uint32_t fo = cl * 4;
+    uint8_t fsec[SECSZ];
+    if (read(ctx, v->fat_start + fo / SECSZ, 1, fsec) < 0) return 0x0FFFFFF8;
+    return rd32(fsec + (fo % SECSZ)) & 0x0FFFFFFF;
+}
+
+/* Turn an 11-byte 8.3 directory name (space-padded) into "NAME.EXT" in `out`
+ * (needs 13 bytes). Mirrors fat32.c's format_83 — for fatvol_list's output. */
+static void fatvol_name(const uint8_t *raw, char *out) {
+    int n = 0;
+    for (int i = 0; i < 8 && raw[i] != ' '; i++) out[n++] = (char)raw[i];
+    if (raw[8] != ' ') {
+        out[n++] = '.';
+        for (int i = 8; i < 11 && raw[i] != ' '; i++) out[n++] = (char)raw[i];
+    }
+    out[n] = '\0';
+}
+
+int fatvol_find(blk_read_fn read, void *ctx, uint64_t start_lba,
+                const char name83[11], uint32_t *out_size) {
+    struct fatvol v;
+    if (!read || !fatvol_parse(read, ctx, start_lba, &v)) return 0;
+
+    uint32_t cl = v.root_clus, steps = 0;
+    while (cl >= 2 && cl < 0x0FFFFFF8 && (!v.total_clusters || cl < v.total_clusters + 2)) {
+        uint64_t first = v.data_start + (uint64_t)(cl - 2) * v.spc;
+        for (uint32_t s = 0; s < v.spc; s++) {
             uint8_t dir[SECSZ];
-            if (ata_read_drive(drive, (uint32_t)(first + s), 1, dir) < 0) return 0;
+            if (read(ctx, first + s, 1, dir) < 0) return 0;
             for (int off = 0; off < SECSZ; off += 32) {
                 const uint8_t *e = dir + off;
                 if (e[0] == 0x00) return 0;          /* end of directory */
@@ -268,14 +314,62 @@ int partition_fat32_find(int drive, uint64_t start_lba, const char name83[11],
                 if (eq) { if (out_size) *out_size = rd32(e + 28); return 1; }
             }
         }
-        /* next cluster in the chain (read the FAT entry) */
-        uint32_t fo = cl * 4;
-        uint8_t fsec[SECSZ];
-        if (ata_read_drive(drive, (uint32_t)(fat_start + fo / SECSZ), 1, fsec) < 0) return 0;
-        cl = rd32(fsec + (fo % SECSZ)) & 0x0FFFFFFF;
-        if (total_clusters && ++steps > total_clusters + 2) break;   /* cycle guard */
+        cl = fatvol_next(read, ctx, &v, cl);
+        if (v.total_clusters && ++steps > v.total_clusters + 2) break;   /* cycle guard */
     }
     return 0;
+}
+
+int fatvol_list(blk_read_fn read, void *ctx, uint64_t start_lba,
+                fatvol_dirent *out, int max) {
+    if (!read || !out || max <= 0) return 0;
+    struct fatvol v;
+    if (!fatvol_parse(read, ctx, start_lba, &v)) return 0;
+
+    int n = 0;
+    uint32_t cl = v.root_clus, steps = 0;
+    while (cl >= 2 && cl < 0x0FFFFFF8 && (!v.total_clusters || cl < v.total_clusters + 2)
+           && n < max) {
+        uint64_t first = v.data_start + (uint64_t)(cl - 2) * v.spc;
+        for (uint32_t s = 0; s < v.spc && n < max; s++) {
+            uint8_t dir[SECSZ];
+            if (read(ctx, first + s, 1, dir) < 0) return n;
+            for (int off = 0; off < SECSZ && n < max; off += 32) {
+                const uint8_t *e = dir + off;
+                if (e[0] == 0x00) return n;           /* end of directory */
+                if (e[0] == 0xE5) continue;           /* deleted */
+                if (e[11] == 0x0F) continue;          /* LFN */
+                if (e[11] & 0x08) continue;           /* volume label */
+                char name[13];
+                fatvol_name(e, name);
+                /* Skip "." and ".." (only meaningful in subdirs, but be safe). */
+                if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0)))
+                    continue;
+                for (int i = 0; i < 13; i++) out[n].name[i] = name[i];
+                out[n].is_dir = (e[11] & 0x10) ? 1 : 0;
+                out[n].size   = out[n].is_dir ? 0 : rd32(e + 28);
+                n++;
+            }
+        }
+        cl = fatvol_next(read, ctx, &v, cl);
+        if (v.total_clusters && ++steps > v.total_clusters + 2) break;   /* cycle guard */
+    }
+    return n;
+}
+
+/* ATA read adapter: a blk_read_fn that reads via ata_read_drive, with the drive
+ * index packed into the ctx pointer (so partition_fat32_find keeps its old ATA-
+ * only signature while sharing the generalized walk above). */
+static int ata_blk_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
+    int drive = (int)(intptr_t)ctx;
+    if (lba >= LBA28_MAX) return -1;             /* PIO is LBA28-addressable */
+    return ata_read_drive(drive, (uint32_t)lba, count, buf);
+}
+
+int partition_fat32_find(int drive, uint64_t start_lba, const char name83[11],
+                         uint32_t *out_size) {
+    return fatvol_find(ata_blk_read, (void *)(intptr_t)drive, start_lba,
+                       name83, out_size);
 }
 
 /* --- the headless self-test ------------------------------------------------- */

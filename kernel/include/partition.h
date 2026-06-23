@@ -56,9 +56,49 @@ int partition_scheme(int drive);
  * BPB is FAT32, then find an 8.3 file (`name83`, 11 bytes, space-padded) in the
  * root directory. Returns 1 + sets *out_size if found; 0 otherwise. This proves
  * a partition's filesystem is readable from its offset, without touching the
- * boot-disk FAT32 mount's global state. */
+ * boot-disk FAT32 mount's global state. (A thin wrapper over fatvol_find() below
+ * using an ATA read callback — kept so existing ATA callers are unchanged.) */
 int partition_fat32_find(int drive, uint64_t start_lba, const char name83[11],
                          uint32_t *out_size);
+
+/* --- generic, device-agnostic read-only FAT32 walk --------------------------
+ *
+ * The self-contained FAT32 reader generalized to read through a caller-supplied
+ * block-read callback instead of a hardwired ata_read_drive(), so the SAME
+ * read-only walk works over ANY storage driver (ATA, AHCI, virtio-blk, NVMe, USB
+ * mass-storage) via kernel/blockdev.c. It never touches the boot-disk fat32.c /
+ * vfs.c mount state. Every field of the on-disk BPB/FAT is treated as untrusted:
+ * validated before use, every sector read targets a fixed 512-byte buffer, and
+ * the cluster-chain walk is bounded by the computed cluster count + a cycle guard.
+ *
+ * The callback reads `count` 512-byte sectors starting at absolute LBA `lba`
+ * (NOT relative to the volume) into `buf`; returns 0 on success, <0 on error.
+ * `ctx` is the caller's opaque handle (e.g. a block-device index). */
+typedef int (*blk_read_fn)(void *ctx, uint64_t lba, uint32_t count, void *buf);
+
+/* One root-directory entry returned by fatvol_list(): an 8.3 "NAME.EXT" name, the
+ * file size in bytes, and whether it is a subdirectory. */
+typedef struct {
+    char     name[13];   /* "NAME.EXT" + NUL (max 8 + '.' + 3 = 12, +NUL = 13) */
+    uint32_t size;       /* file size in bytes (0 for directories) */
+    int      is_dir;     /* 1 if a subdirectory, else 0 */
+} fatvol_dirent;
+
+/* Validate that the FAT32 volume whose boot sector is at absolute LBA `start_lba`
+ * (read via `read`/`ctx`) is FAT32, then find an 8.3 file (`name83`, 11 bytes,
+ * space-padded) in its root directory. Returns 1 + sets *out_size if found; 0 if
+ * not FAT32, unreadable, or absent. Device-agnostic counterpart of
+ * partition_fat32_find(). */
+int fatvol_find(blk_read_fn read, void *ctx, uint64_t start_lba,
+                const char name83[11], uint32_t *out_size);
+
+/* List the root directory of the FAT32 volume at absolute LBA `start_lba` (read
+ * via `read`/`ctx`) into `out` (up to `max` entries). Returns the number of
+ * entries written (>=0), or 0 if the volume is not FAT32 / unreadable. Skips LFN,
+ * volume-label, deleted and "."/".." entries. The scan is bounded by the volume's
+ * cluster count + a cycle guard and the output is capped at `max`. */
+int fatvol_list(blk_read_fn read, void *ctx, uint64_t start_lba,
+                fatvol_dirent *out, int max);
 
 /* Probe all four ATA drives and log each present drive + its partition table
  * (scheme, and per-partition drive/type/start/size). The headless self-test. */

@@ -70,7 +70,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest nvmetest floppytest parttest blockdevtest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -349,6 +349,21 @@ floppytest: $(KERNEL) $(DISK)
 parttest: $(KERNEL) $(DISK)
 	@tests/run-partition-tests.sh
 
+# Headless in-guest assertion for the generic block-device layer + read-only
+# multi-volume FAT32 browsing over ALL storage drivers (kernel/blockdev.c + the
+# device-agnostic fatvol_list/fatvol_find in kernel/partition.c): attaches a
+# SECOND disk over LEGACY virtio-blk whose content is a bare FAT32 filesystem with
+# KNOWN root files (GREET.TXT, NUMBERS.DAT) + a subdir, boots, and asserts
+# blockdev_enumerate() registered the virtio-blk device, MOUNTED its FAT32 volume
+# read-only, and LISTED those known entries (names + sizes) -> proving the disk is
+# browsable over a non-ATA driver, not just self-tested. The boot disk stays on
+# legacy ATA (bare FAT32) and the boot mount + fat32.c/vfs.c are untouched (this
+# layer is additive + read-only). SKIPs cleanly if QEMU/python3 absent. (Companion
+# to `boottest`, which has only the ATA boot disk -> it alone is registered + its
+# bare FAT32 listed, a clean no-fault path.)
+blockdevtest: $(KERNEL) $(DISK)
+	@tests/run-blockdev-tests.sh
+
 # Headless in-guest assertion for the bus-master IDE DMA path (kernel/ata.c):
 # boots with the NORMAL IDE boot disk (-drive ...,if=ide, on the bus-master-capable
 # PIIX3 IDE controller) and asserts the kernel's DMA read path returned BYTE-
@@ -620,8 +635,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest floppytest parttest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + floppytest + parttest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest kattest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest shgreptest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest rtl8139test virtionettest virtioblktest nvmetest floppytest parttest blockdevtest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + kattest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + shgreptest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + rtl8139test + virtionettest + virtioblktest + nvmetest + floppytest + parttest + blockdevtest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

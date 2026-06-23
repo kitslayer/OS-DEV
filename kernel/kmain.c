@@ -19,6 +19,7 @@
 #include "fat32.h"
 #include "vfs.h"
 #include "partition.h"
+#include "blockdev.h"
 #include "ata.h"
 #include "pci.h"
 #include "ahci.h"
@@ -258,6 +259,18 @@ void kmain(uint64_t mb_info) {
      * off it via Bulk-Only Transport + SCSI, logging their bytes/checksum. */
     usb_storage_init();
     usb_storage_selftest();
+
+    /* Generic block-device browsing across EVERY storage driver brought up above.
+     * Each driver (ATA/AHCI/virtio-blk/NVMe/USB-storage) only SELF-TESTED its raw
+     * sectors; this registers every present device behind one uniform read
+     * interface (kernel/blockdev.c) and then, for each, MOUNTS any FAT32 volume it
+     * carries (bare at LBA 0, or inside an MBR/GPT partition) READ-ONLY and LISTS
+     * its root directory — proving the disks are genuinely browsable, not just
+     * readable. Purely additive + read-only: the boot FAT32 mount (ATA primary
+     * master, LBA 0) above and fat32.c/vfs.c are untouched. A clean no-op listing
+     * if a device carries no FAT32. */
+    blockdev_enumerate();
+    kprintf("\n");
 
     /* Bring up a USB HID boot keyboard, sharing the one UHCI controller with the
      * tablet + mass-storage above (skipping the tablet's port, using the shared

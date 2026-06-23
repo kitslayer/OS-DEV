@@ -1,0 +1,66 @@
+/*
+ * blockdev.h — a generic block-device registry over every storage driver.
+ *
+ * Each storage driver in this kernel (ATA/IDE, AHCI/SATA, virtio-blk, NVMe, USB
+ * mass-storage) self-tests its own raw sectors at boot, but each exposes a
+ * different read signature, so kernel/partition.c's read-only FAT32 walk was
+ * wired to ATA alone. This layer abstracts them behind ONE uniform read
+ * interface so that walk (now fatvol_find/fatvol_list in partition.c) — and any
+ * future read-only consumer — works over EVERY disk, not just the ATA boot disk.
+ *
+ * A block device is a tiny vtable: { name, read(ctx,lba,count,buf), sectors, ctx }.
+ * blockdev_init() registers each PRESENT storage device, wrapping that driver's
+ * read function; blockdev_enumerate() then reads LBA 0 of each and, if it finds a
+ * FAT32 volume (bare, or inside an MBR/GPT partition), MOUNTS it read-only and
+ * LISTS its root directory — proving every driver's disk is browsable.
+ *
+ * This is purely ADDITIVE and READ-ONLY: it never writes a disk, never touches
+ * the boot FAT32 mount (kernel/fat32.c / kernel/vfs.c) or its global state, and a
+ * device's read() returning an error makes that volume be skipped cleanly. The
+ * boot disk's bare-FAT32 mount in kmain (ATA primary master, LBA 0) is unchanged.
+ */
+#pragma once
+#include <stdint.h>
+
+#define BLOCKDEV_SECSZ   512   /* every registered device speaks 512-byte sectors */
+#define BLOCKDEV_MAX     8     /* cap on registered devices (4 ATA + 4 others)    */
+
+/* One registered block device. `read` reads `count` 512-byte sectors at absolute
+ * LBA `lba` into `buf` (>= count*512 bytes), returning 0 on success / <0 on error;
+ * `ctx` is the driver-specific handle it was registered with (e.g. an ATA drive
+ * index or an AHCI disk index). `sectors` is the device capacity in 512-byte
+ * sectors, or 0 if the driver does not report one (then LBAs aren't range-checked
+ * here — the read function still bounds them, and the FAT walk stays bounded). */
+typedef struct {
+    const char *name;
+    int       (*read)(void *ctx, uint64_t lba, uint32_t count, void *buf);
+    uint64_t    sectors;
+    void       *ctx;
+} blockdev_t;
+
+/* Register every PRESENT storage device (ATA drives 0..3, the AHCI disk, virtio-
+ * blk, NVMe, USB mass-storage) into the registry, wrapping each driver's read.
+ * Idempotent: rebuilds the registry from scratch each call. Call AFTER the
+ * storage drivers have been brought up (ata_identify_all / ahci_init / etc.).
+ * Returns the number of devices registered. */
+int blockdev_init(void);
+
+/* Number of registered block devices (0 until blockdev_init() runs). */
+int blockdev_count(void);
+
+/* The i-th registered block device (0..blockdev_count()-1), or NULL if `i` is out
+ * of range. */
+blockdev_t *blockdev_get(int i);
+
+/* Read `count` 512-byte sectors at absolute LBA `lba` from device `i` into `buf`.
+ * Returns 0 on success, -1 on a bad index / unregistered device / driver error /
+ * (where the capacity is known) an out-of-range request. */
+int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf);
+
+/* The headless browsing demo: bring up the registry (blockdev_init), then for
+ * EACH registered device read LBA 0 and — if it is a bare FAT32 volume OR has an
+ * MBR/GPT partition table carrying FAT32 partitions — MOUNT each FAT32 volume
+ * read-only and LIST its root directory, logging the device name, the volume's
+ * start-LBA, and each entry's name + size. Read-only; never touches the boot
+ * mount. Call from kmain near partition_enumerate(). */
+void blockdev_enumerate(void);
