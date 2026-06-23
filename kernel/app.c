@@ -104,6 +104,11 @@ static struct app apps[MAX_APPS];
 static int next_pid = 100;
 static char g_pend_arg[128];             /* arg for the next app_spawn, copied into its launch_arg */
 static int  g_have_pend;
+/* A pending "jail" for the next app_spawn (M1088): pledge promises + an optional
+ * unveil prefix applied to the child BEFORE it runs (a parent-enforced sandbox). */
+static int      g_pend_jail;
+static uint32_t g_jail_promises;
+static char     g_jail_path[64];
 
 /* text-colour palette for apps (index 0 = the default green, so an app that never
  * calls SYS_setcolor renders byte-identically). Vivid hues on the dark app background. */
@@ -1017,6 +1022,16 @@ void app_request_signal(app_t *a, int signo) {
 /* If the app this trap returns to has an async signal pending AND we're heading
  * back to ring-3 code (never mid-syscall), deliver it now. Called from the
  * syscall return and the IRQ tail. Returns 1 if a handler was entered. M1083. */
+/* Arm a jail for the very next app_spawn (M1088): the child starts pledged to
+ * `promises` and, if `path` is non-empty, unveil-confined to that prefix (rw) —
+ * a parent-enforced sandbox the child can't escape (pledge only shrinks). */
+void app_jail_next(uint32_t promises, const char *path) {
+    g_jail_promises = promises;
+    int i = 0; if (path) while (path[i] && i < 63) { g_jail_path[i] = path[i]; i++; }
+    g_jail_path[i] = 0;
+    g_pend_jail = 1;
+}
+
 /* strace (M1084): toggle/read whether an app's syscalls are logged to dmesg. */
 void app_set_traced(app_t *a, int on) { struct app *ap = (struct app *)a; if (ap) ap->traced = on ? 1 : 0; }
 int  app_is_traced(app_t *a)          { struct app *ap = (struct app *)a; return ap ? ap->traced : 0; }
@@ -1276,6 +1291,14 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     if (g_have_pend) {                    /* consume a pending launch arg (one-shot, race-free) */
         int ai = 0; while (g_pend_arg[ai] && ai < 127) { a->launch_arg[ai] = g_pend_arg[ai]; ai++; }
         a->launch_arg[ai] = 0; g_have_pend = 0;
+    }
+    if (g_pend_jail) {                    /* consume a pending jail: confine the child before it runs (M1088) */
+        a->promises = g_jail_promises; a->pledged = 1;
+        if (g_jail_path[0]) {
+            int pi = 0; while (g_jail_path[pi] && pi < (int)sizeof a->uv[0].path - 1) { a->uv[0].path[pi] = g_jail_path[pi]; pi++; }
+            a->uv[0].path[pi] = 0; a->uv[0].perms = UV_R | UV_W; a->nuv = 1; a->uv_active = 1;
+        }
+        g_pend_jail = 0;
     }
     grid_clear(a);
     a->cr3 = vmm_create_address_space();

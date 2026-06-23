@@ -63,6 +63,7 @@ void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl
 int  app_deliver_pending(struct registers *r);     /* deliver a pending async signal on return to ring 3; 1 if delivered */
 void app_set_traced(app_t *a, int on);             /* strace: log this app's syscalls to dmesg */
 int  app_is_traced(app_t *a);
+void app_jail_next(uint32_t promises, const char *path);   /* confine the NEXT spawned app (pledge + unveil) */
 int    app_gfx_init(int w, int h);     /* put the caller in graphics mode (w*h pixel canvas) */
 int    app_gfx_blit(const uint32_t *pixels);  /* copy the caller's pixels to the canvas */
 int    app_gfx_get(app_t *a, uint32_t **buf, int *w, int *h);  /* WM: canvas + dims; 1/0 */

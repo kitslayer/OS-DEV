@@ -83,6 +83,7 @@
 #define SYS_pledge 73   /* (promises)      -> restrict this process to the named syscall classes; 0/-1 */
 #define SYS_unveil 74   /* (path, perms)   -> limit filesystem visibility to path (perms "rwc"); 0/-1 */
 #define SYS_symlink 75  /* (linkpath, target) -> create a symlink under /tmp; 0/-1 */
+#define SYS_jail   76   /* (prog, promises, path) -> spawn prog pre-confined (pledge + optional unveil); 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

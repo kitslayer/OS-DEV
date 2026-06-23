@@ -454,7 +454,7 @@ static int run_command(char *line, char *cwd) {
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
-            print("        run: apps run<prog> js<file>\n");
+            print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg lspci lsblk mount scores history clear reboot poweroff kill<pid> exit\n");
@@ -1532,6 +1532,18 @@ static int run_command(char *line, char *cwd) {
             if (!target[0] || !link[0]) print("usage: ln -s <target> <linkpath>   (linkpath must be under /tmp)\n");
             else if (sys_symlink(link, target) < 0) { print("ln: failed (linkpath must be under /tmp)\n"); g_status = 1; }
             else { print(link); print(" -> "); print(target); print("\n"); }
+        } else if (startswith(line, "jail ")) {   /* jail <prog> <promise>... : spawn prog pre-confined (pledge) */
+            const char *p = line + 5; while (*p == ' ') p++;
+            char prog[32]; int j = 0;
+            while (*p && *p != ' ' && j < 31) prog[j++] = *p++;
+            prog[j] = 0; sh_unprot_buf(prog);
+            while (*p == ' ') p++;
+            char proms[64]; int k = 0;
+            while (*p && k < 63) proms[k++] = *p++;
+            proms[k] = 0; sh_unprot_buf(proms);
+            if (!prog[0] || !proms[0]) print("usage: jail <prog> <promise>...   (e.g. jail clock stdio rpath)\n");
+            else if (sys_jail(prog, proms, "") < 0) { print("jail: failed (bad promise or no such prog)\n"); g_status = 1; }
+            else { print("jailed "); print(prog); print(" -> pledge("); print(proms); print(")\n"); }
         } else if (streq(line, "cd -")) {                        /* swap to the previous directory */
             if (!prevcwd[0]) { print("cd: no previous directory\n"); g_status = 1; }
             else {
