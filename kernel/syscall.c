@@ -302,7 +302,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_sntp]="sntp",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
-        [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",
+        [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -820,6 +820,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_bind:                         /* (from, to): graft FROM's subtree onto the path TO */
         if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_bind((const char *)r->rdi, (const char *)r->rsi);
+        break;
+    case SYS_unshare:                      /* detach into a private mount namespace (M1122) */
+        r->rax = (uint64_t)(int64_t)vfs_unshare();
         break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);

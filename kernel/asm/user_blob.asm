@@ -83,6 +83,7 @@ global nettcp_elf_start, nettcp_elf_end
 global crashinfo_elf_start, crashinfo_elf_end
 global forktest_elf_start, forktest_elf_end
 global execdemo_elf_start, execdemo_elf_end
+global nstest_elf_start, nstest_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -383,5 +384,9 @@ forktest_elf_end:
 execdemo_elf_start:
     incbin "build/execdemo.elf"
 execdemo_elf_end:
+
+nstest_elf_start:
+    incbin "build/nstest.elf"
+nstest_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

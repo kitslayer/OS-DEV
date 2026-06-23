@@ -16,6 +16,7 @@
 #include "eventfd.h"
 #include "pci.h"
 #include "net.h"
+#include "app.h"          /* app_current / app_ns_id — per-process mount namespaces (M1122) */
 
 static struct vfs_ops *fs;
 
@@ -31,55 +32,89 @@ static char mount_sub[128];
 static int veq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static int vstarts(const char *s, const char *pre) { while (*pre) { if (*s++ != *pre++) return 0; } return 1; }
 
-/* --- bind mounts (M1091): graft one path onto another in the namespace --------
- * `bind FROM TO` makes the path TO also resolve to FROM (Plan 9 style). Because
- * the VFS is pure name-routing, this is a single rewrite step applied to every
- * absolute path BEFORE the /proc·/dev·/tmp·/diskN routing — TO and everything
- * under it is transparently redirected to FROM. One pass only (no recursion), so
- * even a cyclic bind can't loop. Global for now. */
+/* --- bind mounts (M1091) + per-process mount namespaces (M1122) ---------------
+ * `bind FROM TO` makes the path TO also resolve to FROM (Plan 9 style): a single
+ * rewrite applied to every absolute path BEFORE the /proc·/dev·/tmp·/diskN
+ * routing. One pass only (no recursion), so even a cyclic bind can't loop.
+ *
+ * Bindings live in NUMBERED namespaces (M1122): ns[0] is the shared/global one
+ * every process starts in (so existing global binds are unchanged); unshare()
+ * gives the caller a private COPY it can modify without anyone else seeing it,
+ * and fork() inherits the parent's namespace id (shared until unshared). Each
+ * process's app_t carries only its ns_id; the tables live here. Containers fall
+ * out of fork + unshare + a private bind. */
 #define NBINDS 8
-static struct { char from[64], to[64]; int used; } binds[NBINDS];
+#define NNS    8
+struct bind_ent { char from[64], to[64]; int used; };
+static struct { struct bind_ent ent[NBINDS]; int alloc; } ns[NNS];   /* ns[0] = shared (always valid) */
+
+/* The bind table of the current process's namespace (ns[0] for kernel context). */
+static struct bind_ent *cur_ns(void) {
+    int id = 0;
+    app_t *a = app_current();
+    if (a) id = app_ns_id(a);
+    if (id < 0 || id >= NNS) id = 0;
+    return ns[id].ent;
+}
 
 int vfs_bind(const char *from, const char *to) {
     if (!from || !to || from[0] != '/' || to[0] != '/') return -1;
+    struct bind_ent *t = cur_ns();
     int slot = -1;
-    for (int i = 0; i < NBINDS; i++) if (!binds[i].used) { slot = i; break; }
+    for (int i = 0; i < NBINDS; i++) if (!t[i].used) { slot = i; break; }
     if (slot < 0) return -1;
-    int i = 0; while (from[i] && i < 63) { binds[slot].from[i] = from[i]; i++; } binds[slot].from[i] = 0;
-    int j = 0; while (to[j] && j < 63) { binds[slot].to[j] = to[j]; j++; } binds[slot].to[j] = 0;
-    binds[slot].used = 1;
+    int i = 0; while (from[i] && i < 63) { t[slot].from[i] = from[i]; i++; } t[slot].from[i] = 0;
+    int j = 0; while (to[j] && j < 63) { t[slot].to[j] = to[j]; j++; } t[slot].to[j] = 0;
+    t[slot].used = 1;
     return 0;
 }
 
-/* Rewrite an absolute `name` through the longest-matching bind (TO -> FROM) into
- * out[max]; returns `name` unchanged (not copied) if nothing matches. */
+/* unshare the mount namespace (M1122): copy the caller's current bindings into a
+ * fresh namespace slot and switch the caller to it, so later binds are private. */
+int vfs_unshare(void) {
+    app_t *a = app_current();
+    if (!a) return -1;
+    int cur = app_ns_id(a); if (cur < 0 || cur >= NNS) cur = 0;
+    int slot = -1;
+    for (int i = 1; i < NNS; i++) if (!ns[i].alloc) { slot = i; break; }
+    if (slot < 0) return -1;                                /* out of namespace slots */
+    for (int j = 0; j < NBINDS; j++) ns[slot].ent[j] = ns[cur].ent[j];   /* snapshot current bindings */
+    ns[slot].alloc = 1;
+    app_set_ns_id(a, slot);
+    return 0;
+}
+
+/* Rewrite an absolute `name` through the longest-matching bind (TO -> FROM) in
+ * the CURRENT namespace into out[max]; returns `name` unchanged if no match. */
 static const char *bind_resolve(const char *name, char *out, int max) {
     if (name[0] != '/') return name;                /* binds are absolute */
+    struct bind_ent *t = cur_ns();
     int best = -1, bestlen = 0;
     for (int i = 0; i < NBINDS; i++) {
-        if (!binds[i].used) continue;
-        int tl = 0; while (binds[i].to[tl]) tl++;
-        if (!vstarts(name, binds[i].to)) continue;
+        if (!t[i].used) continue;
+        int tl = 0; while (t[i].to[tl]) tl++;
+        if (!vstarts(name, t[i].to)) continue;
         if (name[tl] != 0 && name[tl] != '/') continue;   /* must match a whole component */
         if (tl > bestlen) { best = i; bestlen = tl; }
     }
     if (best < 0) return name;
-    int p = 0; const char *f = binds[best].from;
+    int p = 0; const char *f = t[best].from;
     while (*f && p < max - 1) out[p++] = *f++;
     for (const char *rest = name + bestlen; *rest && p < max - 1; rest++) out[p++] = *rest;
     out[p] = 0;
     return out;
 }
 
-int vfs_binds_format(char *b, int max) {            /* backs /proc/binds */
+int vfs_binds_format(char *b, int max) {            /* backs /proc/binds (the caller's namespace) */
+    struct bind_ent *t = cur_ns();
     int p = 0; const char *hdr = "  TO                    FROM\n";
     while (*hdr && p < max - 1) b[p++] = *hdr++;
     int any = 0;
-    for (int i = 0; i < NBINDS; i++) if (binds[i].used) {
+    for (int i = 0; i < NBINDS; i++) if (t[i].used) {
         if (p < max - 1) b[p++] = ' '; if (p < max - 1) b[p++] = ' ';
-        int tl = 0; const char *t = binds[i].to; while (*t && p < max - 1) { b[p++] = *t++; tl++; }
+        int tl = 0; const char *to = t[i].to; while (*to && p < max - 1) { b[p++] = *to++; tl++; }
         for (int k = tl; k < 22 && p < max - 1; k++) b[p++] = ' ';
-        const char *f = binds[i].from; while (*f && p < max - 1) b[p++] = *f++;
+        const char *f = t[i].from; while (*f && p < max - 1) b[p++] = *f++;
         if (p < max - 1) b[p++] = '\n';
         any = 1;
     }

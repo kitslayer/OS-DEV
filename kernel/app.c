@@ -111,6 +111,7 @@ struct app {
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
+    int      ns_id;                      /* mount-namespace id (0 = the shared/global namespace); unshare() detaches (M1122) */
 };
 
 static struct app apps[MAX_APPS];
@@ -153,7 +154,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -230,6 +231,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "crashinfo", crashinfo_elf_start, "Core-dump reader" },
     { "forktest", forktest_elf_start, "COW fork demo" },
     { "execdemo", execdemo_elf_start, "fork+exec demo" },
+    { "nstest", nstest_elf_start, "mount-namespace demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -281,6 +283,8 @@ static struct app *cur(void) { return (struct app *)task_self()->proc; }
 
 /* --- pledge() sandbox (M1074) --------------------------------------------- */
 app_t *app_current(void) { return cur(); }
+int  app_ns_id(app_t *a)        { return a ? a->ns_id : 0; }      /* mount-namespace id (M1122) */
+void app_set_ns_id(app_t *a, int id) { if (a) a->ns_id = id; }
 
 /* Restrict the calling app's promises. Monotonic, like OpenBSD's pledge: the
  * first call sets the set; later calls may only DROP promises (the new mask
@@ -1825,6 +1829,7 @@ long app_fork(struct registers *r) {
     int li = 0; while (p->launch_arg[li] && li < 127) { a->launch_arg[li] = p->launch_arg[li]; li++; }
     a->launch_arg[li] = 0;
     a->parent = p->pid;                                 /* so the parent can waitpid() us (M1117) */
+    a->ns_id  = p->ns_id;                               /* inherit the parent's mount namespace (shared; unshare detaches) (M1122) */
     /* NOT inherited (POSIX): pending signals, alarms, strace, gfx-mode canvas. */
 
     /* The child's resume context: the parent's trap frame, but returning 0. */

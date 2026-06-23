@@ -108,6 +108,8 @@ void   app_core_dump(struct registers *r);      /* write an ET_CORE ELF of the f
 #define PL_POWER (1u<<7)   /* power off / reboot */
 
 app_t   *app_current(void);             /* the app owning the running task, or NULL */
+int      app_ns_id(app_t *a);           /* the app's mount-namespace id (0 = shared) (M1122) */
+void     app_set_ns_id(app_t *a, int id);
 int      app_pledge(app_t *a, uint32_t mask);   /* restrict promises (monotonic); 0/-1 */
 int      app_is_pledged(app_t *a);      /* 1 once pledge() has been called */
 uint32_t app_promises(app_t *a);        /* current promise bitmask */
