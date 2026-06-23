@@ -18,6 +18,7 @@
 #include "interrupts.h"
 #include "gdt.h"
 #include "string.h"
+#include "timer.h"
 
 #define STACK_SIZE 16384
 #define FXSZ       512                 /* FXSAVE area size */
@@ -79,6 +80,7 @@ void sched_init(void) {
     t->cr3 = read_cr3();        /* task 0 runs in the kernel's address space */
     active_cr3 = t->cr3;
     fx_alloc(t);
+    t->last_in = timer_ms();    /* start CPU-time accounting for task 0 */
     current = t;
     idle_task = task_create(idle_loop, read_cr3(), 0);   /* add the always-runnable floor (heap is up: kheap_init precedes sched_init) */
 }
@@ -155,6 +157,13 @@ static void switch_to_next(void) {
         prev->state = TASK_READY;
     next->state = TASK_RUNNING;
     current = next;
+
+    /* CPU-time accounting: credit prev with the slice it just ran, and stamp
+     * next's switch-in time (for /proc/sched + a real `top`). */
+    uint64_t now = timer_ms();
+    prev->run_ms += now - prev->last_in;
+    next->last_in = now;
+    next->nswitch++;
 
     /* switch address space if the next task lives in a different one. Safe to
      * do here: kernel code, this stack (heap), and the GDT/IDT/TSS are mapped
@@ -235,6 +244,8 @@ void task_exit(void) {
     task_t *next = dead->next;
     next->state = TASK_RUNNING;
     current = next;
+    next->last_in = timer_ms();   /* stamp switch-in so its CPU time isn't over-counted from a stale last_in */
+    next->nswitch++;
 
     /* Load next's address space + kernel stack BEFORE switching, mirroring
      * switch_to_next. Otherwise the dead task's CR3 stays loaded under `next`,
@@ -290,12 +301,24 @@ int task_snapshot(task_info_t *out, int max) {
     int n = 0;
     if (current) {
         task_t *t = current;
+        uint64_t now = timer_ms();
         do {
             if (n >= max) break;
             out[n].id = t->id; out[n].state = (int)t->state; out[n].proc = t->proc;
+            uint64_t rm = t->run_ms;
+            if (t->state == TASK_RUNNING) rm += now - t->last_in;   /* include the in-progress slice */
+            out[n].run_ms = rm; out[n].nswitch = t->nswitch;
             n++; t = t->next;
         } while (t != current);
     }
     irq_restore(f);
     return n;
+}
+
+/* Total ms the idle task has run — the system's idle time, for `/proc/sched`. */
+uint64_t task_idle_ms(void) {
+    if (!idle_task) return 0;
+    uint64_t rm = idle_task->run_ms;
+    if (idle_task->state == TASK_RUNNING) rm += timer_ms() - idle_task->last_in;
+    return rm;
 }

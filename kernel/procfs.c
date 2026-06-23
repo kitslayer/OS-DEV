@@ -177,6 +177,27 @@ static long gen_stat(char *b, int max) {
 static long gen_kmsg(char *b, int max) {        /* the kernel log ring buffer (dmesg) */
     return klog_copy(b, max);
 }
+static long gen_sched(char *b, int max) {       /* per-task CPU time + system idle% (backs `top`) */
+    task_info_t ti[24];
+    int cnt = task_snapshot(ti, 24);
+    uint64_t up = timer_ms(); if (up == 0) up = 1;
+    uint64_t idle = task_idle_ms(); if (idle > up) idle = up;
+    static const char *st[5] = { "ready", "run  ", "block", "dead ", "stop " };
+    int p = sapp(b, 0, max, "uptime_ms ");  p = sdec(b, p, max, up);
+    p = sapp(b, p, max, "  idle ");         p = sdec(b, p, max, (idle * 100) / up); p = sapp(b, p, max, "%\n");
+    p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  SWITCHES  NAME\n");
+    for (int i = 0; i < cnt; i++) {
+        if (ti[i].state == 3) continue;             /* skip dead */
+        p = sapp(b, p, max, "  ");  p = sdec(b, p, max, (uint64_t)ti[i].id);
+        p = sapp(b, p, max, "    "); p = sapp(b, p, max, st[(unsigned)ti[i].state < 5 ? ti[i].state : 0]);
+        p = sapp(b, p, max, "  ");  p = sdec(b, p, max, ti[i].run_ms);
+        p = sapp(b, p, max, "    "); p = sdec(b, p, max, (ti[i].run_ms * 100) / up); p = sapp(b, p, max, "%");
+        p = sapp(b, p, max, "    "); p = sdec(b, p, max, ti[i].nswitch);
+        p = sapp(b, p, max, "  ");  p = sapp(b, p, max, ti[i].proc ? app_title((app_t *)ti[i].proc) : "(kernel)");
+        p = sapp(b, p, max, "\n");
+    }
+    b[p] = 0; return p;
+}
 
 /* ---- the directory tables ------------------------------------------------- */
 struct pf { const char *name; long (*gen)(char *, int); };
@@ -185,7 +206,7 @@ static const struct pf proc_files[] = {
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat },
     { "processes", gen_processes }, { "partitions", gen_partitions },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
-    { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg },
+    { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

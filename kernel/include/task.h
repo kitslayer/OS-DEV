@@ -15,6 +15,9 @@ typedef struct task {
     int           id;
     task_state_t  state;
     uint8_t      *fxbuf;       /* FXSAVE area (512B + slack, aligned to 16 at use) */
+    uint64_t      run_ms;      /* total ms this task has been RUNNING (CPU time)   */
+    uint64_t      last_in;     /* timer_ms() when it last became `current`         */
+    uint64_t      nswitch;     /* times it has been scheduled in (context switches) */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */
@@ -34,9 +37,10 @@ void    task_stop(task_t *t);              /* suspend another task (READY/RUNNIN
 void    task_cont(task_t *t);              /* resume a STOPPED task */
 int     task_count(void);                  /* number of live tasks */
 
-/* A snapshot of one task, for `ps`. */
-typedef struct { int id; int state; void *proc; } task_info_t;
+/* A snapshot of one task, for `ps` and `/proc/sched`. */
+typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitch; } task_info_t;
 int     task_snapshot(task_info_t *out, int max);   /* fill out[]; returns count */
+uint64_t task_idle_ms(void);                         /* ms the idle task has run (system idle time) */
 
 /* Called from the timer IRQ to preempt the running thread (no-op until the
  * scheduler is initialized and there's more than one task). */
