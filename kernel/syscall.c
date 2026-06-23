@@ -34,6 +34,7 @@
 #include "audio.h"
 #include "desktop.h"
 #include "pci.h"
+#include "blockdev.h"
 #include <stdint.h>
 
 /* Validate a user-supplied syscall pointer argument: the range [p, p+n) must
@@ -703,6 +704,15 @@ void syscall_dispatch(struct registers *r) {
         int max = (int)r->rsi;
         if (max <= 0 || !ubuf(r->rdi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)pci_format((char *)r->rdi, max);
+        break;
+    }
+    case SYS_lsblk: {
+        /* rdi=buf, rsi=len: format the block-device + FAT32-volume listing into
+         * the caller's buffer. Validate it lies in the app's own pages, like
+         * SYS_lspci / SYS_ps / SYS_df. */
+        int max = (int)r->rsi;
+        if (max <= 0 || !ubuf(r->rdi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)blockdev_format((char *)r->rdi, max);
         break;
     }
     case SYS_exit:

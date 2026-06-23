@@ -292,3 +292,65 @@ void blockdev_enumerate(void) {
     kprintf("[ ok ] blockdev browse: %d FAT32 volume(s) listed across %d device(s).\n",
             total_volumes, ndev);
 }
+
+/* --- text formatting for the userspace `lsblk` shell command (SYS_lsblk) ----
+ * Bounded string/decimal appenders, then the same browse as above but written to
+ * a caller buffer instead of the serial log. */
+static int sapp(char *b, int p, int max, const char *s) {
+    while (*s && p < max - 1) b[p++] = *s++;
+    return p;
+}
+static int sdec(char *b, int p, int max, uint64_t v) {
+    char t[24]; int n = 0;
+    if (v == 0) t[n++] = '0';
+    while (v && n < 24) { t[n++] = (char)('0' + (v % 10)); v /= 10; }
+    while (n && p < max - 1) b[p++] = t[--n];
+    return p;
+}
+
+int blockdev_format(char *out, int max) {
+    if (!out || max < 2) return 0;
+    int ndev = blockdev_init();
+    int p = 0;
+    p = sapp(out, p, max, "block devices: ");
+    p = sdec(out, p, max, (uint64_t)ndev);
+    p = sapp(out, p, max, " present\n");
+    for (int i = 0; i < ndev; i++) {
+        blockdev_t *d = blockdev_get(i);
+        if (!d) continue;
+        p = sapp(out, p, max, "  ");
+        p = sapp(out, p, max, d->name);
+        if (d->sectors) {
+            p = sapp(out, p, max, "  ");
+            p = sdec(out, p, max, d->sectors / 2048);
+            p = sapp(out, p, max, " MiB");
+        } else {
+            p = sapp(out, p, max, "  (size unknown)");
+        }
+        p = sapp(out, p, max, "\n");
+        uint64_t starts[16];
+        int nstart = collect_fat_starts(i, starts, 16);
+        for (int v = 0; v < nstart; v++) {
+            fatvol_dirent ents[32];
+            int n = fatvol_list(bd_blk_read, (void *)(intptr_t)i, starts[v], ents, 32);
+            if (n <= 0) continue;
+            p = sapp(out, p, max, "    FAT32 @ LBA ");
+            p = sdec(out, p, max, starts[v]);
+            p = sapp(out, p, max, ":\n");
+            for (int e = 0; e < n; e++) {
+                p = sapp(out, p, max, "      ");
+                p = sapp(out, p, max, ents[e].name);
+                if (ents[e].is_dir) {
+                    p = sapp(out, p, max, "/");
+                } else {
+                    p = sapp(out, p, max, "  (");
+                    p = sdec(out, p, max, ents[e].size);
+                    p = sapp(out, p, max, " bytes)");
+                }
+                p = sapp(out, p, max, "\n");
+            }
+        }
+    }
+    if (p < max) out[p] = 0;
+    return p;
+}

@@ -64,3 +64,9 @@ int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf);
  * start-LBA, and each entry's name + size. Read-only; never touches the boot
  * mount. Call from kmain near partition_enumerate(). */
 void blockdev_enumerate(void);
+
+/* Format the block-device + FAT32-volume browse (same content as
+ * blockdev_enumerate) into the caller's buffer `out` (capacity `max`), as text
+ * lines. Returns the byte length written (NUL-terminated). Backs the userspace
+ * `lsblk` shell command (SYS_lsblk). Read-only. */
+int blockdev_format(char *out, int max);
