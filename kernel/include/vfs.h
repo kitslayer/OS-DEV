@@ -39,6 +39,7 @@ long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /
 int  vfs_bind(const char *from, const char *to);         /* graft FROM's subtree onto the path TO; 0/-1 */
 int  vfs_binds_format(char *buf, int max);               /* list the active binds (backs /proc/binds) */
 int  vfs_unshare(void);                                  /* detach the caller into a private mount namespace; 0/-1 (M1122) */
+int  vfs_ready(const char *name);                        /* non-blocking: would a read of `name` not block? (fswait, M1125) */
 int  vfs_chdir(const char *path);                        /* change current dir */
 long vfs_tree(char *out, int max);                       /* recursive listing */
 void vfs_df(uint64_t *freeb, uint64_t *totalb);          /* free + total bytes */

@@ -187,6 +187,17 @@ static int event_path(const char *name, const char **q) {
     return **q != 0;
 }
 
+/* Non-blocking readiness of a path for fswait (M1125): would a read return
+ * without blocking? The blockable IPC objects answer truthfully; everything else
+ * (regular files, /proc, /dev) is treated as always-ready (its read won't park). */
+int vfs_ready(const char *name) {
+    const char *q;
+    if (event_path(name, &q))  return eventfd_ready(q);
+    if (notify_path(name, &q)) return notify_ready(q);
+    if (ipc_path(name, &q))    return mbox_ready(q);
+    return 1;
+}
+
 /* Route /pci (M1120): "/pci" or "/pci/" -> list (q=""), "/pci/<rest>" -> q. */
 static int pci_path(const char *name, const char **q) {
     if (!vstarts(name, "/pci")) return 0;

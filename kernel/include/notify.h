@@ -22,3 +22,4 @@ long notify_signal(const char *name, const void *data, unsigned long len);
 long notify_wait(const char *name, void *buf, unsigned long max);
 
 int  notify_format(char *out, int max);   /* /proc/notify: objects + pending masks */
+int  notify_ready(const char *name);      /* fswait peek: any bits pending? (M1125) */

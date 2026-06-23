@@ -58,6 +58,13 @@ long notify_wait(const char *name, void *buf, unsigned long max) {
     return p;
 }
 
+/* Non-blocking readiness peek for fswait (M1125): are any bits pending? Does NOT
+ * create the object or clear it. */
+int notify_ready(const char *name) {
+    for (int i = 0; i < NOTIFY_N; i++) if (nt[i].used && neq(nt[i].name, name)) return nt[i].bits != 0;
+    return 0;
+}
+
 static int sapp(char *b, int p, int max, const char *s) { while (*s && p < max - 1) b[p++] = *s++; return p; }
 static int sdec(char *b, int p, int max, uint64_t v) {
     char t[24]; int n = 0; if (!v) t[n++] = '0'; while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }

@@ -75,6 +75,13 @@ long eventfd_read(const char *name, void *buf, unsigned long max) {
     return p;
 }
 
+/* Non-blocking readiness peek for fswait (M1125): would a read return without
+ * blocking? (counter non-zero.) Does NOT create the object or drain it. */
+int eventfd_ready(const char *name) {
+    for (int i = 0; i < EVENT_N; i++) if (ev[i].used && eeq(ev[i].name, name)) return ev[i].count > 0;
+    return 0;
+}
+
 static int sapp(char *b, int p, int max, const char *s) { while (*s && p < max - 1) b[p++] = *s++; return p; }
 static int sdec(char *b, int p, int max, uint64_t v) {
     char t[24]; int n = 0; if (!v) t[n++] = '0'; while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }

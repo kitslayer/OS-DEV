@@ -305,6 +305,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
+        [SYS_fswait]="fswait",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -852,6 +853,28 @@ void syscall_dispatch(struct registers *r) {
     case SYS_seccomp_reply:                /* supervisor: deliver the verdict (M1124) */
         r->rax = (uint64_t)(int64_t)app_seccomp_reply((int)r->rdi, (int)r->rsi, (long)r->rdx);
         break;
+    case SYS_fswait: {                     /* block until one of n paths is readable (select/poll, M1125) */
+        const char *p = (const char *)r->rdi; int n = (int)r->rsi; long timeout = (long)r->rdx;
+        const char *names[8];
+        if (n < 1 || n > 8) { r->rax = (uint64_t)-1; break; }
+        int bad = 0;
+        for (int i = 0; i < n; i++) {       /* validate + collect the NUL-separated names */
+            if (!ustr((uint64_t)(uintptr_t)p)) { bad = 1; break; }
+            names[i] = p; while (*p) p++; p++;   /* advance past this name's NUL */
+        }
+        if (bad) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");            /* the poll loop sleeps on the timer */
+        uint64_t start = timer_ms();
+        long idx = -1;
+        for (;;) {
+            for (int i = 0; i < n; i++) if (vfs_ready(names[i])) { idx = i; break; }
+            if (idx >= 0) break;
+            if (timeout >= 0 && (long)(timer_ms() - start) >= timeout) break;   /* -1 = timeout */
+            task_sleep_ms(10);              /* off-CPU poll interval */
+        }
+        r->rax = (uint64_t)idx;
+        break;
+    }
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
         r->rax = 0;

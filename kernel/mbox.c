@@ -28,6 +28,13 @@ static struct mbox mb[MBOX_N];
 
 static int meq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 
+/* Non-blocking readiness peek for fswait (M1125): is a message queued? (ring not
+ * empty.) Does NOT create the queue. */
+int mbox_ready(const char *name) {
+    for (int i = 0; i < MBOX_N; i++) if (mb[i].used && meq(mb[i].name, name)) return mb[i].head != mb[i].tail;
+    return 0;
+}
+
 /* Find queue `name`, creating it on first use; NULL if the table is full. */
 static struct mbox *mbox_get(const char *name) {
     if (!name || !name[0]) return 0;

@@ -22,3 +22,4 @@ long timer_read(const char *ms, void *buf, unsigned long max);          /* /time
 long eventfd_write(const char *name, const void *data, unsigned long len); /* /event/<name>: counter += N, wake */
 long eventfd_read(const char *name, void *buf, unsigned long max);      /* /event/<name>: block until >0, return+drain */
 int  eventfd_format(char *out, int max);                               /* /proc/events: live counters */
+int  eventfd_ready(const char *name);                                  /* fswait peek: counter non-zero? (M1125) */

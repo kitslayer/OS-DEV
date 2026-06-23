@@ -33,6 +33,19 @@ long sys_singlestep(int n) { return do_syscall(SYS_singlestep, n, 0, 0); }
 long sys_seccomp(int nr) { return do_syscall(SYS_seccomp, nr, 0, 0); }
 long sys_seccomp_wait(int childpid, unsigned long *ev4) { return do_syscall(SYS_seccomp_wait, childpid, (long)ev4, 0); }
 long sys_seccomp_reply(int childpid, int run_real, long retval) { return do_syscall(SYS_seccomp_reply, childpid, run_real, retval); }
+
+/* fswait: block until one of `n` paths is readable (or timeout_ms; -1 = forever).
+ * Packs the path array into a NUL-separated buffer for the kernel. M1125. */
+long sys_fswait(const char *const *paths, int n, long timeout_ms) {
+    char buf[512]; int p = 0;
+    if (n < 1 || n > 8) return -1;
+    for (int i = 0; i < n; i++) {
+        const char *s = paths[i];
+        while (*s && p < (int)sizeof buf - 2) buf[p++] = *s++;
+        buf[p++] = 0;
+    }
+    return do_syscall(SYS_fswait, (long)buf, n, timeout_ms);
+}
 long sys_list(void *buf, unsigned long len) {
     /* leading 0 so buf/len land in the same registers (rsi/rdx) the kernel
      * reads them from — matching the write/readfile arg layout. */

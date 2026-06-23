@@ -108,6 +108,7 @@
 #define SYS_seccomp       96 /* (nr) -> child: trap syscall `nr` to a supervisor (seccomp-notify) */
 #define SYS_seccomp_wait  97 /* (childpid, ev[4]) -> supervisor: block until the child parks; ev={nr,a,b,c}; 1/0/-1 */
 #define SYS_seccomp_reply 98 /* (childpid, run_real, retval) -> supervisor: allow(run_real=1)/deny/emulate; 0/-1 */
+#define SYS_fswait        99 /* (names, n, timeout_ms) -> block until one of n NUL-separated paths is readable; index/-1 timeout */
 
 #define SYSCALL_VECTOR 0x80
 
