@@ -338,6 +338,7 @@ void syscall_dispatch(struct registers *r) {
         void       *buf  = (void *)r->rsi;
         uint64_t    max  = r->rdx;
         if (!ustr(r->rdi) || !ubuf((uint64_t)buf, max)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, name, 0)) { r->rax = (uint64_t)-1; break; }   /* hidden by unveil() */
         r->rax = (uint64_t)vfs_read(name, buf, max);
         break;
     }
@@ -394,10 +395,12 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_writefile:
         if (!ustr(r->rdi) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)vfs_write((const char *)r->rdi, (const void *)r->rsi, r->rdx);
         break;
     case SYS_delete:
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)vfs_remove((const char *)r->rdi);
         break;
     case SYS_spawn: {
@@ -484,10 +487,12 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_mkdir:
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_mkdir((const char *)r->rdi);
         break;
     case SYS_chdir:
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 0)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_chdir((const char *)r->rdi);
         break;
     case SYS_tree:
@@ -819,6 +824,13 @@ void syscall_dispatch(struct registers *r) {
         uint32_t mask;
         if (app_pledge_parse((const char *)r->rdi, &mask) < 0) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_pledge(app_current(), mask);
+        break;
+    }
+    case SYS_unveil: {                     /* rdi = path (0 to lock), rsi = perms string ("rwc") */
+        if (r->rdi == 0) { r->rax = (uint64_t)(int64_t)app_unveil(self, 0, 0); break; }  /* lock */
+        if (!ustr(r->rdi) || (r->rsi && !ustr(r->rsi))) { r->rax = (uint64_t)-1; break; }
+        uint32_t perms = app_unveil_parse((const char *)r->rsi);
+        r->rax = (uint64_t)(int64_t)app_unveil(self, (const char *)r->rdi, perms);
         break;
     }
     case SYS_exit:

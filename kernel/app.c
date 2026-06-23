@@ -91,6 +91,11 @@ struct app {
     char     launch_arg[128];            /* optional launch argument (e.g. a filename for the editor) */
     uint32_t promises;                   /* pledge() promise bitmask (valid once pledged) */
     int      pledged;                    /* 1 once pledge() has been called (then promises are enforced) */
+#define APP_NUNVEIL 8
+    struct { char path[48]; uint8_t perms; } uv[APP_NUNVEIL];  /* unveil() allowed path prefixes */
+    int      nuv;                        /* number of unveil entries */
+    int      uv_active;                  /* 1 once unveil() has been called (then file paths are checked) */
+    int      uv_locked;                  /* 1 after unveil(NULL): no more unveils accepted */
 };
 
 static struct app apps[MAX_APPS];
@@ -298,6 +303,50 @@ int app_pledge_format(uint32_t mask, char *buf, int max) {
         }
     if (p < max) buf[p] = 0;
     return p;
+}
+
+/* --- unveil(): restrict which filesystem paths a process can touch -----------
+ * Like OpenBSD's unveil: before the first call every path is visible; the first
+ * unveil() flips the process to "only the unveiled prefixes are reachable", with
+ * per-prefix r/w permission. A denied access fails (-1, as if absent) — it does
+ * NOT kill (that's pledge's job). unveil(NULL) locks the set. */
+uint32_t app_unveil_parse(const char *s) {
+    uint32_t b = 0;
+    for (; s && *s; s++) {
+        if (*s == 'r' || *s == 'R') b |= UV_R;
+        else if (*s == 'w' || *s == 'W' || *s == 'c' || *s == 'C') b |= UV_W;  /* c(reate) implies write */
+    }
+    return b;
+}
+
+int app_unveil(app_t *a, const char *path, uint32_t perms) {
+    if (!a) return -1;
+    if (!path || !path[0]) { a->uv_locked = 1; a->uv_active = 1; return 0; }  /* unveil(NULL): lock */
+    if (a->uv_locked || a->nuv >= APP_NUNVEIL) return -1;
+    int i = 0; while (path[i] && i < (int)sizeof a->uv[0].path - 1) { a->uv[a->nuv].path[i] = path[i]; i++; }
+    a->uv[a->nuv].path[i] = 0;
+    a->uv[a->nuv].perms = (uint8_t)perms;
+    a->nuv++;
+    a->uv_active = 1;
+    return 0;
+}
+
+static int uv_ci(char c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
+/* `prefix` matches `path` if it is path itself or a parent directory of it. */
+static int uv_match(const char *prefix, const char *path) {
+    int i = 0;
+    while (prefix[i] && uv_ci(prefix[i]) == uv_ci(path[i])) i++;
+    if (prefix[i] != 0) return 0;                       /* prefix not fully consumed */
+    return path[i] == 0 || path[i] == '/';              /* exact, or a sub-path boundary */
+}
+
+int app_unveil_ok(app_t *a, const char *path, int need_write) {
+    if (!a || !a->uv_active) return 1;                  /* unveil never called -> all allowed */
+    for (int i = 0; i < a->nuv; i++)
+        if (uv_match(a->uv[i].path, path) &&
+            (need_write ? (a->uv[i].perms & UV_W) : (a->uv[i].perms & UV_R)))
+            return 1;
+    return 0;
 }
 
 /* ---- text grid ---- */

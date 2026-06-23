@@ -81,6 +81,7 @@
 #define SYS_sigreturn 71/* ()              -> return from a signal handler (restore the saved context) */
 #define SYS_getrandom 72/* (buf, len)      -> fill buf with CSPRNG bytes (hardware-seeded); bytes written */
 #define SYS_pledge 73   /* (promises)      -> restrict this process to the named syscall classes; 0/-1 */
+#define SYS_unveil 74   /* (path, perms)   -> limit filesystem visibility to path (perms "rwc"); 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

@@ -95,4 +95,12 @@ int      app_is_pledged(app_t *a);      /* 1 once pledge() has been called */
 uint32_t app_promises(app_t *a);        /* current promise bitmask */
 int      app_pledge_parse(const char *s, uint32_t *out);  /* names -> mask; 0 ok, -1 unknown name */
 int      app_pledge_format(uint32_t mask, char *buf, int max);  /* mask -> "stdio rpath ..."; bytes */
+
+/* unveil() — restrict which filesystem paths the process can reach (default:
+ * all, until the first unveil). A denied access fails (-1), it does not kill. */
+#define UV_R (1u<<0)   /* read permission for an unveiled prefix */
+#define UV_W (1u<<1)   /* write/create permission */
+int      app_unveil(app_t *a, const char *path, uint32_t perms);  /* add a prefix (path NULL = lock); 0/-1 */
+uint32_t app_unveil_parse(const char *perms);   /* "rwc" -> UV_* bits */
+int      app_unveil_ok(app_t *a, const char *path, int need_write);  /* 1 if the path is reachable */
 int    app_sys_history(char *buf, int max);  /* the caller's command history */

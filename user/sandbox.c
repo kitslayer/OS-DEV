@@ -12,9 +12,23 @@
 #include "ulib.h"
 
 int main(void) {
-    sys_setcolor(4); print("  == pledge() sandbox demo ==\n\n"); sys_setcolor(0);
-    print("A program can drop the right to whole classes of syscalls.\n");
-    print("Then the KERNEL kills it the instant it tries one.\n\n");
+    sys_setcolor(4); print("  == pledge()/unveil() sandbox demo ==\n\n"); sys_setcolor(0);
+
+    /* --- unveil(): restrict the visible filesystem (a denied path fails, no kill) --- */
+    print("unveil(\"/tmp\",\"rw\") -- only /tmp is now reachable\n");
+    sys_unveil("/tmp", "rw");
+    sys_unveil(0, 0);                       /* lock: no more unveils */
+
+    if (sys_writefile("/tmp/SB.TXT", "hi from the sandbox\n", 20) >= 0)
+        print("  write /tmp/SB.TXT: ok (under an unveiled prefix)\n");
+    char buf[64];
+    long rn = sys_readfile("README.TXT", buf, sizeof buf - 1);
+    print(rn < 0 ? "  read README.TXT: DENIED by unveil (good)\n"
+                 : "  read README.TXT: leaked! unveil FAILED\n");
+    long rok = sys_readfile("/tmp/SB.TXT", buf, sizeof buf - 1);
+    print(rok >= 0 ? "  read /tmp/SB.TXT: ok (it's unveiled)\n"
+                   : "  read /tmp/SB.TXT: unexpectedly denied\n");
+    print("\n");
 
     unsigned char rb[4];
     sys_getrandom(rb, sizeof rb);

@@ -66,6 +66,7 @@ long sys_lsblk(void *buf, unsigned long len) { return do_syscall(SYS_lsblk, (lon
 long sys_mounts(void *buf, unsigned long len) { return do_syscall(SYS_mounts, (long)buf, (long)len, 0); }
 long sys_getrandom(void *buf, unsigned long len) { return do_syscall(SYS_getrandom, (long)buf, (long)len, 0); }
 int  sys_pledge(const char *promises) { return (int)do_syscall(SYS_pledge, (long)promises, 0, 0); }
+int  sys_unveil(const char *path, const char *perms) { return (int)do_syscall(SYS_unveil, (long)path, (long)perms, 0); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }
 long sys_sha512(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha512, (long)name, (long)hexbuf, (long)max); }
