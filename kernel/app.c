@@ -22,6 +22,7 @@
 #include "string.h"
 #include "vfs.h"
 #include "kheap.h"
+#include "tmpfs.h"
 #include "complete.h"
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
 #include <stdint.h>
@@ -143,7 +144,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -214,6 +215,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "sandbox", sandbox_elf_start, "Sandbox (pledge demo)" },
     { "forth", forth_elf_start, "Forth" },
     { "cc", cc_elf_start, "C Compiler" },
+    { "crash", crash_elf_start, "Crash (core-dump demo)" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1355,11 +1357,106 @@ int  app_sys_getpid(void) { return cur()->pid; }
 void app_sys_clear(void)  { grid_clear(cur()); }
 void app_setcolor(int idx) { struct app *a = cur(); if (a) a->curcol = (uint8_t)(idx & 15); }
 void app_sys_exit(void)   { cur()->exited = 1; task_exit(); }
-/* A ring-3 task hit a CPU exception (divide error, page fault, …). Mark its app
- * exited so the WM tears down the window, then terminate just this task — the
- * kernel and the rest of the desktop keep running. Does not return. */
-void app_fault_current(void) {
+/* --- ELF core dump (M1104) -------------------------------------------------
+ * When a ring-3 app dies on an unhandled fault, write an ET_CORE ELF to
+ * /tmp/core capturing its registers (a PT_NOTE/NT_PRSTATUS) and its writable
+ * memory (a PT_LOAD per region: active stack, heap, each mmap). The post-mortem
+ * complement to the kernel panic backtrace (M1078) — and a real, host-gdb-
+ * loadable artifact. Built in one kheap buffer then written to tmpfs (RAM, so
+ * the write is safe with interrupts off in the fault path); reads each page via
+ * vmm_translate + the HHDM, zero-filling any demand-paged hole, so it never
+ * faults while dumping. */
+#define CORE_MAX (2u * 1024 * 1024)
+static void cd_p16(uint8_t *b, uint16_t v) { b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8); }
+static void cd_p32(uint8_t *b, uint32_t v) { for (int i = 0; i < 4; i++) b[i] = (uint8_t)(v >> (8 * i)); }
+static void cd_p64(uint8_t *b, uint64_t v) { for (int i = 0; i < 8; i++) b[i] = (uint8_t)(v >> (8 * i)); }
+
+void app_core_dump(struct registers *r) {
+    task_t *t = task_self();
+    struct app *a = t ? (struct app *)t->proc : 0;
+    if (!a || !r) return;
+
+    struct { uint64_t va, len; } reg[2 + APP_MAXVMA]; int nreg = 0;
+    uint64_t sp = r->rsp & ~(uint64_t)(PAGE_SIZE - 1);          /* active stack: from the faulting RSP up to the top */
+    uint64_t stop = USTACK_BASE + (uint64_t)USTACK_PAGES * PAGE_SIZE;
+    if (sp >= USTACK_BASE && sp < stop) { reg[nreg].va = sp; reg[nreg].len = stop - sp; nreg++; }
+    if (a->heap_end > UHEAP_BASE) { reg[nreg].va = UHEAP_BASE; reg[nreg].len = a->heap_end - UHEAP_BASE; nreg++; }
+    for (int i = 0; i < a->nvma && nreg < (int)(sizeof reg / sizeof reg[0]); i++) {
+        reg[nreg].va = a->vma[i].start; reg[nreg].len = a->vma[i].len; nreg++;
+    }
+
+    const int NOTESZ = 12 + 8 + 336;                            /* nhdr + "CORE\0\0\0\0" + prstatus(336) */
+    int phnum = 1 + nreg;
+    uint64_t off_note = 64 + (uint64_t)phnum * 56;
+    uint64_t off_data = off_note + NOTESZ;
+    uint64_t total = off_data; for (int i = 0; i < nreg; i++) total += reg[i].len;
+    if (total > CORE_MAX) {                                     /* too big: keep just the stack */
+        nreg = (nreg >= 1) ? 1 : 0; phnum = 1 + nreg;
+        off_note = 64 + (uint64_t)phnum * 56; off_data = off_note + NOTESZ;
+        total = off_data + (nreg ? reg[0].len : 0);
+        if (total > CORE_MAX) return;
+    }
+    uint8_t *buf = kzalloc(total);     /* zeroed: demand-paged holes stay zero in the core */
+    if (!buf) return;
+
+    /* ELF64 header (ET_CORE, x86-64) */
+    buf[0] = 0x7F; buf[1] = 'E'; buf[2] = 'L'; buf[3] = 'F';
+    buf[4] = 2; buf[5] = 1; buf[6] = 1;                         /* 64-bit, little-endian, v1 */
+    cd_p16(buf + 16, 4);    cd_p16(buf + 18, 62);               /* e_type=ET_CORE, e_machine=EM_X86_64 */
+    cd_p32(buf + 20, 1);    cd_p64(buf + 32, 64);               /* e_version, e_phoff */
+    cd_p16(buf + 52, 64);   cd_p16(buf + 54, 56);               /* e_ehsize, e_phentsize */
+    cd_p16(buf + 56, (uint16_t)phnum);                          /* e_phnum */
+
+    /* PT_NOTE program header (entry 0) */
+    uint8_t *ph = buf + 64;
+    cd_p32(ph + 0, 4);                                          /* PT_NOTE */
+    cd_p64(ph + 8, off_note); cd_p64(ph + 32, NOTESZ);          /* p_offset, p_filesz */
+    /* PT_LOAD per region */
+    uint64_t doff = off_data;
+    for (int i = 0; i < nreg; i++) {
+        uint8_t *p = buf + 64 + (uint64_t)(1 + i) * 56;
+        cd_p32(p + 0, 1);  cd_p32(p + 4, 6);                    /* PT_LOAD, flags=RW */
+        cd_p64(p + 8, doff); cd_p64(p + 16, reg[i].va);         /* p_offset, p_vaddr */
+        cd_p64(p + 32, reg[i].len); cd_p64(p + 40, reg[i].len); /* p_filesz, p_memsz */
+        cd_p64(p + 48, PAGE_SIZE);                              /* p_align */
+        doff += reg[i].len;
+    }
+
+    /* PT_NOTE contents: NT_PRSTATUS with the GP registers at offset 112 */
+    uint8_t *n = buf + off_note;
+    cd_p32(n + 0, 5); cd_p32(n + 4, 336); cd_p32(n + 8, 1);     /* namesz, descsz, type=NT_PRSTATUS */
+    n[12] = 'C'; n[13] = 'O'; n[14] = 'R'; n[15] = 'E';         /* name (padded to 8) */
+    uint8_t *pr = n + 20 + 112;                                /* user_regs_struct within prstatus */
+    uint64_t gp[27] = { r->r15, r->r14, r->r13, r->r12, r->rbp, r->rbx, r->r11, r->r10,
+                        r->r9, r->r8, r->rax, r->rcx, r->rdx, r->rsi, r->rdi, r->rax /*orig_rax*/,
+                        r->rip, r->cs, r->rflags, r->rsp, r->ss, 0, 0, 0, 0, 0, 0 };
+    for (int i = 0; i < 27; i++) cd_p64(pr + i * 8, gp[i]);
+
+    /* region bytes, page by page (real bytes if mapped, else left zero) */
+    for (int i = 0; i < nreg; i++) {
+        uint64_t fo = off_data; for (int k = 0; k < i; k++) fo += reg[k].len;   /* this region's file offset */
+        uint8_t *dst = buf + fo;
+        for (uint64_t o = 0; o < reg[i].len; o += PAGE_SIZE) {
+            uint64_t phys = vmm_translate(reg[i].va + o);
+            if (!phys) continue;                               /* demand-paged hole -> stays zero */
+            uint8_t *src = (uint8_t *)hhdm(phys);
+            uint64_t n2 = reg[i].len - o; if (n2 > PAGE_SIZE) n2 = PAGE_SIZE;
+            for (uint64_t b = 0; b < n2; b++) dst[o + b] = src[b];
+        }
+    }
+
+    tmpfs_write("core", buf, total);                           /* -> /tmp/core */
+    kfree(buf);
+    kprintf("[core] wrote /tmp/core (%lu bytes) for pid %d at rip=%p\n",
+            (unsigned long)total, a->pid, (void *)r->rip);
+}
+
+/* A ring-3 task hit a CPU exception (divide error, page fault, …). Write a core
+ * dump, mark its app exited so the WM tears down the window, then terminate just
+ * this task — the kernel and the rest of the desktop keep running. No return. */
+void app_fault_current(struct registers *r) {
     struct app *a = (struct app *)task_self()->proc;
+    if (a && r) app_core_dump(r);
     if (a) a->exited = 1;
     task_exit();
 }

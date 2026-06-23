@@ -77,6 +77,7 @@ global spider_elf_start, spider_elf_end
 global sandbox_elf_start, sandbox_elf_end
 global forth_elf_start, forth_elf_end
 global cc_elf_start, cc_elf_end
+global crash_elf_start, crash_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -353,5 +354,9 @@ forth_elf_end:
 cc_elf_start:
     incbin "build/cc.elf"
 cc_elf_end:
+
+crash_elf_start:
+    incbin "build/crash.elf"
+crash_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

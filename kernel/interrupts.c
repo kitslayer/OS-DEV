@@ -88,7 +88,7 @@ void isr_dispatch(struct registers *r) {
             if (app_signal_deliver(r, 11)) return;  /* SIGSEGV: a registered handler catches the fault */
             kprintf("[fault] %s (vector %lu) err=0x%lx in a ring-3 task at rip=%p -- terminating it\n",
                     exception_names[r->int_no], r->int_no, r->err_code, (void *)r->rip);
-            app_fault_current();   /* marks the app exited + task_exit(); does not return */
+            app_fault_current(r);  /* dump a core, mark the app exited + task_exit(); does not return */
         }
 
         interrupts_disable();

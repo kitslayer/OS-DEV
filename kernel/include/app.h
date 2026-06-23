@@ -86,7 +86,8 @@ long   app_get_mouse_rel(void);        /* SYS_mouse_rel: packed dx|dy, read+clea
 void   app_sys_clear(void);             /* clear the calling app's screen */
 void   app_setcolor(int idx);           /* set the calling app's text colour (palette 0-15) */
 void   app_sys_exit(void);              /* does not return */
-void   app_fault_current(void);         /* a ring-3 task faulted: kill it, keep the kernel alive; does not return */
+void   app_fault_current(struct registers *r);  /* a ring-3 task faulted: dump a core, kill it, keep the kernel alive; no return */
+void   app_core_dump(struct registers *r);      /* write an ET_CORE ELF of the faulting app to /tmp/core (M1104) */
 
 /* pledge() sandbox (M1074): a process voluntarily drops the right to make whole
  * classes of syscalls; the dispatcher kills it if it then tries one. The class

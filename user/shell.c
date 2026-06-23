@@ -2612,7 +2612,7 @@ static int run_command(char *line, char *cwd) {
                     else if (n>=2 && b[0]==0x1F&&b[1]==0x8B) t = "gzip compressed data";
                     else if (n>=4 && b[0]=='P'&&b[1]=='K'&&b[2]==3&&b[3]==4) t = "Zip archive";
                     else if (n>262 && b[257]=='u'&&b[258]=='s'&&b[259]=='t'&&b[260]=='a'&&b[261]=='r') t = "tar archive";
-                    else if (n>=4 && b[0]==0x7F&&b[1]=='E'&&b[2]=='L'&&b[3]=='F') t = "ELF executable";
+                    else if (n>=18 && b[0]==0x7F&&b[1]=='E'&&b[2]=='L'&&b[3]=='F') t = (b[16]==4) ? "ELF core dump" : "ELF executable";  /* e_type at off 16: 4=ET_CORE */
                     else {
                         int txt = 1;             /* printable -> text, else binary data */
                         for (long i = 0; i < n; i++) { unsigned char c = b[i];
