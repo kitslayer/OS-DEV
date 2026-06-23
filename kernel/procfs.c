@@ -26,6 +26,7 @@
 #include "mbox.h"
 #include "measure.h"
 #include "cas.h"
+#include "fw.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -156,6 +157,9 @@ static long gen_measure(char *b, int max) {      /* measured-boot PCRs + event l
 static long gen_cas(char *b, int max) {          /* content-addressed store stats (M1097) */
     return cas_format(b, max);
 }
+static long gen_fw(char *b, int max) {           /* packet-filter rules + hit counts (M1100) */
+    return fw_format(b, max);
+}
 static long gen_filesystems(char *b, int max) {
     int p = sapp(b, 0, max, "nodev\tprocfs\nnodev\tdevfs\n      \tfat32\n");
     b[p] = 0; return p;
@@ -261,7 +265,7 @@ static const struct pf proc_files[] = {
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },
     { "profile", gen_profile }, { "ipc", gen_ipc }, { "binds", gen_binds },
-    { "bcache", gen_bcache }, { "measure", gen_measure }, { "cas", gen_cas },
+    { "bcache", gen_bcache }, { "measure", gen_measure }, { "cas", gen_cas }, { "fw", gen_fw },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))
@@ -380,6 +384,11 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
             char cmd[16]; int c = 0; const char *s = (const char *)buf;
             for (unsigned long i = 0; i < len && c < 15 && s[i] && s[i] != '\n' && s[i] != ' '; i++) cmd[c++] = s[i];
             cmd[c] = 0; prof_control(cmd); return (long)len;
+        }
+        if (peq(abs + 6, "fw")) {                                    /* echo "drop in icmp" > /proc/fw (M1100) */
+            char cmd[64]; int c = 0; const char *s = (const char *)buf;
+            for (unsigned long i = 0; i < len && c < 63 && s[i] && s[i] != '\n'; i++) cmd[c++] = s[i];
+            cmd[c] = 0; fw_control(cmd, c); return (long)len;
         }
         int pid; const char *file;
         if (proc_pid_path(abs, &pid, &file) && peq(file, "ctl")) {   /* echo CMD > /proc/<pid>/ctl */

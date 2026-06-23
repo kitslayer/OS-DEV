@@ -459,6 +459,7 @@ static int run_command(char *line, char *cwd) {
             print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]>\n");
+            print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        cas store<file> (content-addressed store, SHA-256 key)  cas fetch<key>  cas (stats)\n");
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
@@ -1130,6 +1131,15 @@ static int run_command(char *line, char *cwd) {
                 else { print("tftp: saved "); printl(n); print(" bytes to "); print(local); print("\n"); }
             } else { buf[n] = 0; print(buf); }
             free(buf);
+        } else if (streq(line, "fw") || startswith(line, "fw ")) {   /* packet filter: `fw` lists, `fw <verb>` adds/flushes a rule */
+            if (streq(line, "fw")) {
+                long n; char *b = slurp("/proc/fw", &n);
+                if (b) { print(b); free(b); } else print("fw: unavailable\n");
+            } else {
+                const char *v = line + 3; while (*v == ' ') v++;
+                if (sys_writefile("/proc/fw", v, ustrlen(v)) < 0) print("fw: bad rule (try: fw drop in icmp | fw allow out tcp 80 | fw flush)\n");
+                else { long n; char *b = slurp("/proc/fw", &n); if (b) { print(b); free(b); } }
+            }
         } else if (streq(line, "ping")) {
             long n = sys_ping();
             if (n < 0) print("ping: no network\n");

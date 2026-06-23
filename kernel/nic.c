@@ -16,6 +16,7 @@
  * virtio-net device, it runs over virtio-net (the paravirtual NIC).
  */
 #include "nic.h"
+#include "fw.h"
 #include "e1000.h"
 #include "rtl8139.h"
 #include "virtio_net.h"
@@ -63,9 +64,12 @@ const uint8_t *nic_mac(void) {
 }
 
 int nic_send(const void *frame, uint16_t len) {
+    if (!fw_check(FW_OUT, frame, len)) return 0;   /* firewall: silently drop (report success) */
     return drv_send ? drv_send(frame, len) : -1;
 }
 
 int nic_receive(void *out, uint16_t max) {
-    return drv_receive ? drv_receive(out, max) : 0;
+    int n = drv_receive ? drv_receive(out, max) : 0;
+    if (n > 0 && !fw_check(FW_IN, out, n)) return 0;   /* firewall: drop -> "no packet" */
+    return n;
 }
