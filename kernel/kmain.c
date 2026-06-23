@@ -274,6 +274,7 @@ void kmain(uint64_t mb_info) {
      * master, LBA 0) above and fat32.c/vfs.c are untouched. A clean no-op listing
      * if a device carries no FAT32. */
     blockdev_enumerate();
+    blockdev_selftest();           /* verify the write vtable + buffer-cache coherence (M1095) */
     kprintf("\n");
 
     /* Bring up a USB HID boot keyboard, sharing the one UHCI controller with the

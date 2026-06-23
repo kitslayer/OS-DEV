@@ -35,6 +35,7 @@
 typedef struct {
     const char *name;
     int       (*read)(void *ctx, uint64_t lba, uint32_t count, void *buf);
+    int       (*write)(void *ctx, uint64_t lba, uint32_t count, const void *buf);  /* NULL = read-only */
     uint64_t    sectors;
     void       *ctx;
 } blockdev_t;
@@ -57,6 +58,25 @@ blockdev_t *blockdev_get(int i);
  * Returns 0 on success, -1 on a bad index / unregistered device / driver error /
  * (where the capacity is known) an out-of-range request. */
 int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf);
+
+/* Write `count` 512-byte sectors at absolute LBA `lba` to device `i` from `buf`.
+ * Returns 0 on success, -1 on a bad index / read-only (no write fn) device /
+ * driver error / out-of-range request. Write-through: the buffer cache (below)
+ * is kept coherent so a subsequent blockdev_read sees the new bytes. The boot
+ * FAT32 volume is read by kernel/fat32.c directly via ATA, NOT through this
+ * layer, so this write path cannot corrupt it. */
+int blockdev_write(int i, uint64_t lba, uint32_t count, const void *buf);
+
+/* Format the buffer-cache statistics (entries, hits, misses, writes, hit rate)
+ * into `out` (capacity `max`) as text lines; returns the byte length. Backs the
+ * /proc/bcache file. */
+int blockdev_cache_format(char *out, int max);
+
+/* Boot self-test of the write path + buffer-cache coherence/durability, on the
+ * first writable NON-boot device (skips "ata*" so the boot disk is never
+ * written; restores the sector it touches). Logged to dmesg. Call after
+ * blockdev_enumerate. A clean no-op if no safe writable device is present. */
+void blockdev_selftest(void);
 
 /* The headless browsing demo: bring up the registry (blockdev_init), then for
  * EACH registered device read LBA 0 and — if it is a bare FAT32 volume OR has an

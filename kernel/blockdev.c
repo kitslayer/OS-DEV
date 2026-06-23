@@ -78,11 +78,42 @@ static int usb_bd_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
     return usb_storage_read((uint32_t)lba, count, buf);
 }
 
+/* --- per-driver WRITE adapters (each matches blockdev_t.write) — M1095. The
+ * boot FAT32 volume is read by fat32.c directly via ATA, never through this
+ * layer, so these writes cannot corrupt it. USB mass-storage's write is static
+ * in its driver, so it is registered read-only (write == NULL). --- */
+static int ata_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    int drive = (int)(intptr_t)ctx;
+    if (lba > 0xFFFFFFFFull) return -1;
+    return ata_write_drive(drive, (uint32_t)lba, count, buf);
+}
+static int ahci_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    return ahci_write((int)(intptr_t)ctx, lba, count, buf);
+}
+static int virtio_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    (void)ctx; return virtio_blk_write(lba, count, buf);
+}
+static int nvme_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    (void)ctx; return nvme_write(lba, count, buf);
+}
+
+/* IF-saving interrupt guard for the cache critical sections (same idiom as
+ * pmm.c/kheap.c): held only across fast bookkeeping, never across disk I/O. */
+static inline uint64_t irq_save(void) {
+    uint64_t fl; __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory"); return fl;
+}
+static inline void irq_restore(uint64_t fl) {
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
+static void bcache_flush(void);   /* defined with the buffer cache below */
+
 static void reg(const char *name, int (*read)(void *, uint64_t, uint32_t, void *),
+                int (*write)(void *, uint64_t, uint32_t, const void *),
                 uint64_t sectors, void *ctx) {
     if (g_ndev >= BLOCKDEV_MAX) return;
     g_dev[g_ndev].name    = name;
     g_dev[g_ndev].read    = read;
+    g_dev[g_ndev].write   = write;
     g_dev[g_ndev].sectors = sectors;
     g_dev[g_ndev].ctx     = ctx;
     g_ndev++;
@@ -90,6 +121,7 @@ static void reg(const char *name, int (*read)(void *, uint64_t, uint32_t, void *
 
 int blockdev_init(void) {
     g_ndev = 0;
+    bcache_flush();                  /* device indices may change -> drop stale cached blocks */
 
     /* ATA drives 0..3 — those that answered IDENTIFY. Static names so the
      * registered pointer stays valid for the lifetime of the kernel. */
@@ -100,7 +132,7 @@ int blockdev_init(void) {
     for (int d = 0; d < ATA_MAX_DRIVES; d++) {
         const struct ata_drive_info *info = ata_drive(d);
         if (info && info->present)
-            reg(ata_names[d], ata_bd_read, info->sectors, (void *)(intptr_t)d);
+            reg(ata_names[d], ata_bd_read, ata_bd_write, info->sectors, (void *)(intptr_t)d);
     }
 
     /* AHCI SATA disks. ahci.c exposes no capacity query, so register capacity 0
@@ -109,19 +141,19 @@ int blockdev_init(void) {
     static const char *ahci_names[4] = { "ahci0", "ahci1", "ahci2", "ahci3" };
     int nahci = ahci_disk_count();
     for (int a = 0; a < nahci && a < 4; a++)
-        reg(ahci_names[a], ahci_bd_read, 0, (void *)(intptr_t)a);
+        reg(ahci_names[a], ahci_bd_read, ahci_bd_write, 0, (void *)(intptr_t)a);
 
     /* virtio-blk (single paravirtual disk). */
     if (virtio_blk_present())
-        reg("virtio-blk", virtio_bd_read, virtio_blk_capacity(), 0);
+        reg("virtio-blk", virtio_bd_read, virtio_bd_write, virtio_blk_capacity(), 0);
 
     /* NVMe namespace 1. */
     if (nvme_present())
-        reg("nvme0n1", nvme_bd_read, nvme_capacity(), 0);
+        reg("nvme0n1", nvme_bd_read, nvme_bd_write, nvme_capacity(), 0);
 
-    /* USB mass-storage. */
+    /* USB mass-storage (driver's write is static -> registered read-only). */
     if (usb_storage_present())
-        reg("usb-storage", usb_bd_read, usb_storage_capacity(), 0);
+        reg("usb-storage", usb_bd_read, 0, usb_storage_capacity(), 0);
 
     return g_ndev;
 }
@@ -133,7 +165,8 @@ blockdev_t *blockdev_get(int i) {
     return &g_dev[i];
 }
 
-int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf) {
+/* Uncached driver dispatch + bounds — the read path before the cache. */
+static int raw_read(int i, uint64_t lba, uint32_t count, void *buf) {
     if (i < 0 || i >= g_ndev || !buf || count == 0) return -1;
     blockdev_t *d = &g_dev[i];
     if (!d->read) return -1;
@@ -144,6 +177,149 @@ int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf) {
         if (lba + count > d->sectors) return -1;
     }
     return d->read(d->ctx, lba, count, buf) < 0 ? -1 : 0;
+}
+static int raw_write(int i, uint64_t lba, uint32_t count, const void *buf) {
+    if (i < 0 || i >= g_ndev || !buf || count == 0) return -1;
+    blockdev_t *d = &g_dev[i];
+    if (!d->write) return -1;                        /* read-only device */
+    if (d->sectors) {
+        if (lba >= d->sectors) return -1;
+        if (lba + count < lba) return -1;
+        if (lba + count > d->sectors) return -1;
+    }
+    return d->write(d->ctx, lba, count, buf) < 0 ? -1 : 0;
+}
+
+/* --- LRU buffer cache (M1095) ----------------------------------------------
+ * A small pool of cached 512-byte blocks between the FS/swap and the drivers:
+ * it absorbs repeated reads (the FAT walk re-reads the same metadata sectors
+ * constantly) and gives blockdev_write a write-through coherence point. xv6's
+ * bio.c in miniature. Indexed by (device, LBA), recency-ordered by a global
+ * tick. Concurrency: the IRQ guard is held only across the fast scan/install
+ * bookkeeping — never across disk I/O — and bread copies the block into the
+ * CALLER's buffer (never hands out a pointer into a slot), so a later eviction
+ * can never dangle. A duplicate slot for the same block under a race is benign
+ * (identical bytes, write-through keeps both coherent). */
+#define BCACHE_N 64                  /* 64 * 512 B = 32 KiB of cache */
+static struct bce { int valid, dev; uint64_t lba, lru; uint8_t data[BLOCKDEV_SECSZ]; } g_bc[BCACHE_N];
+static uint64_t g_bc_clk, g_bc_hits, g_bc_miss, g_bc_wr;
+
+static void bcache_flush(void) {
+    uint64_t fl = irq_save();
+    for (int k = 0; k < BCACHE_N; k++) g_bc[k].valid = 0;
+    irq_restore(fl);
+}
+
+/* Read one sector (dev i, lba) into dst, via the cache. */
+static int bread(int i, uint64_t lba, uint8_t *dst) {
+    uint64_t fl = irq_save();
+    for (int k = 0; k < BCACHE_N; k++)
+        if (g_bc[k].valid && g_bc[k].dev == i && g_bc[k].lba == lba) {   /* hit */
+            for (int b = 0; b < BLOCKDEV_SECSZ; b++) dst[b] = g_bc[k].data[b];
+            g_bc[k].lru = ++g_bc_clk; g_bc_hits++;
+            irq_restore(fl); return 0;
+        }
+    irq_restore(fl);
+    /* miss: read into the caller's buffer with NO lock held (disk I/O blocks /
+     * needs IRQs), then install a copy into the LRU victim. */
+    if (raw_read(i, lba, 1, dst) < 0) return -1;
+    fl = irq_save();
+    int v = 0; uint64_t oldest = ~0ull;
+    for (int k = 0; k < BCACHE_N; k++) {
+        if (!g_bc[k].valid) { v = k; break; }
+        if (g_bc[k].lru < oldest) { oldest = g_bc[k].lru; v = k; }
+    }
+    g_bc[v].valid = 1; g_bc[v].dev = i; g_bc[v].lba = lba; g_bc[v].lru = ++g_bc_clk;
+    for (int b = 0; b < BLOCKDEV_SECSZ; b++) g_bc[v].data[b] = dst[b];
+    g_bc_miss++;
+    irq_restore(fl);
+    return 0;
+}
+
+int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf) {
+    if (i < 0 || i >= g_ndev || !buf || count == 0) return -1;
+    uint8_t *out = (uint8_t *)buf;
+    for (uint32_t s = 0; s < count; s++)
+        if (bread(i, lba + s, out + (uint64_t)s * BLOCKDEV_SECSZ) < 0) return -1;
+    return 0;
+}
+
+int blockdev_write(int i, uint64_t lba, uint32_t count, const void *buf) {
+    if (raw_write(i, lba, count, buf) < 0) return -1;
+    /* write-through: refresh any cached sectors that overlap [lba, lba+count). */
+    const uint8_t *in = (const uint8_t *)buf;
+    uint64_t fl = irq_save();
+    for (uint32_t s = 0; s < count; s++) {
+        uint64_t l = lba + s;
+        for (int k = 0; k < BCACHE_N; k++)
+            if (g_bc[k].valid && g_bc[k].dev == i && g_bc[k].lba == l) {
+                const uint8_t *src = in + (uint64_t)s * BLOCKDEV_SECSZ;
+                for (int b = 0; b < BLOCKDEV_SECSZ; b++) g_bc[k].data[b] = src[b];
+                break;
+            }
+    }
+    g_bc_wr += count;
+    irq_restore(fl);
+    return 0;
+}
+
+int blockdev_cache_format(char *out, int max) {
+    uint64_t hits, miss, wr; int used = 0;
+    uint64_t fl = irq_save();
+    hits = g_bc_hits; miss = g_bc_miss; wr = g_bc_wr;
+    for (int k = 0; k < BCACHE_N; k++) if (g_bc[k].valid) used++;
+    irq_restore(fl);
+    uint64_t total = hits + miss, pct = total ? hits * 100 / total : 0;
+    /* tiny local uint -> decimal */
+    int n = 0;
+    #define BC_PUT(s) do { for (const char *q = (s); *q && n + 1 < max; q++) out[n++] = *q; } while (0)
+    #define BC_NUM(v) do { char t[24]; int ti = 0; uint64_t x = (v); \
+        if (!x) t[ti++] = '0'; while (x) { t[ti++] = (char)('0' + x % 10); x /= 10; } \
+        while (ti && n + 1 < max) out[n++] = t[--ti]; } while (0)
+    BC_PUT("blockdev buffer cache (512-byte blocks)\n");
+    BC_PUT("Entries:\t"); BC_NUM((uint64_t)used); BC_PUT(" / "); BC_NUM((uint64_t)BCACHE_N); BC_PUT("\n");
+    BC_PUT("Hits:\t");    BC_NUM(hits); BC_PUT("\n");
+    BC_PUT("Misses:\t");  BC_NUM(miss); BC_PUT("\n");
+    BC_PUT("HitRate:\t"); BC_NUM(pct);  BC_PUT("%\n");
+    BC_PUT("Writes:\t");  BC_NUM(wr);   BC_PUT(" (write-through)\n");
+    #undef BC_PUT
+    #undef BC_NUM
+    if (n < max) out[n] = 0;
+    return n;
+}
+
+/* Boot self-test (M1095): prove the write vtable + cache coherence + durability
+ * on the first WRITABLE NON-boot device. We skip any "ata*" device so the boot
+ * FAT32 disk is never written. Saves the target sector, writes a known pattern,
+ * reads it back from the cache (coherence), flushes + reads from disk
+ * (durability), then restores. Logged to the kernel log (dmesg); a clean no-op
+ * if no safe writable device is present. Call after blockdev_enumerate. */
+void blockdev_selftest(void) {
+    int dev = -1;
+    for (int i = 0; i < g_ndev; i++) {
+        const char *nm = g_dev[i].name;
+        if (!g_dev[i].write) continue;
+        if (nm && nm[0] == 'a' && nm[1] == 't' && nm[2] == 'a') continue;  /* never the boot ATA disk */
+        dev = i; break;
+    }
+    if (dev < 0) { kprintf("  blockdev cache: no non-boot writable device; write self-test skipped\n"); return; }
+
+    uint64_t lba = g_dev[dev].sectors ? g_dev[dev].sectors - 1 : 2048;     /* a high, FS-unlikely sector */
+    static uint8_t saved[BLOCKDEV_SECSZ], pat[BLOCKDEV_SECSZ], back[BLOCKDEV_SECSZ];
+    if (blockdev_read(dev, lba, 1, saved) < 0) {
+        kprintf("  blockdev cache: self-test read failed on %s\n", g_dev[dev].name); return;
+    }
+    for (int b = 0; b < BLOCKDEV_SECSZ; b++) pat[b] = (uint8_t)(b * 7 + 0x5A);
+
+    int ok = blockdev_write(dev, lba, 1, pat) == 0 && blockdev_read(dev, lba, 1, back) == 0;
+    for (int b = 0; ok && b < BLOCKDEV_SECSZ; b++) if (back[b] != pat[b]) ok = 0;   /* coherence (cached read-back) */
+    bcache_flush();
+    ok = ok && blockdev_read(dev, lba, 1, back) == 0;
+    for (int b = 0; ok && b < BLOCKDEV_SECSZ; b++) if (back[b] != pat[b]) ok = 0;   /* durability (read from disk) */
+
+    blockdev_write(dev, lba, 1, saved);                                            /* restore the original sector */
+    kprintf("  blockdev cache: write+read-back+coherence+durability on %s lba %u: %s\n",
+            g_dev[dev].name, (unsigned)lba, ok ? "OK" : "FAILED");
 }
 
 /* --- FAT32 volume discovery over a generic block device -------------------- */
