@@ -14,6 +14,7 @@
 #include "mbox.h"
 #include "notify.h"
 #include "eventfd.h"
+#include "pci.h"
 #include "net.h"
 
 static struct vfs_ops *fs;
@@ -151,6 +152,15 @@ static int event_path(const char *name, const char **q) {
     return **q != 0;
 }
 
+/* Route /pci (M1120): "/pci" or "/pci/" -> list (q=""), "/pci/<rest>" -> q. */
+static int pci_path(const char *name, const char **q) {
+    if (!vstarts(name, "/pci")) return 0;
+    const char *p = name + 4;
+    if (*p == 0) { *q = p; return 1; }            /* "/pci" -> list */
+    if (*p == '/') { *q = p + 1; return 1; }      /* "/pci/..." */
+    return 0;                                     /* e.g. "/pcithing" is not ours */
+}
+
 /* Route /snap (CoW tmpfs snapshots, M1115): "/snap" or "/snap/" -> list (q=""),
  * "/snap/<rest>" -> q = the remainder ("ctl", or "<gen>/<name>"). */
 static int snap_path(const char *name, const char **q) {
@@ -242,6 +252,7 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
     if (ipc_path(name, &tb)) return mbox_read(tb, buf, max);   /* /ipc/<q>: dequeue a message (blocks if empty) */
     if (notify_path(name, &tb)) return notify_wait(tb, buf, max);   /* /notify/<n>: block until signalled, return+clear the mask */
     if (nettcp_path(name, &tb)) return netfs_read(tb, buf, max);    /* /net/tcp/<...>: sockets-as-files */
+    if (pci_path(name, &tb)) return pcifs_read(tb, (char *)buf, (int)max);  /* /pci: device tree as files (M1120) */
     if (timer_path(name, &tb)) return timer_read(tb, buf, max);     /* /timer/<ms>: block <ms> then "tick" */
     if (event_path(name, &tb)) return eventfd_read(tb, buf, max);   /* /event/<n>: block until >0, return+drain */
     if (snap_path(name, &tb)) {                                     /* /snap: CoW tmpfs snapshots (M1115) */

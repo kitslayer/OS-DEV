@@ -32,3 +32,8 @@ void     pci_enumerate(void);   /* print every device (for inspection) */
  * Returns the number present (may exceed `max`; only the first `max` are stored).
  * Pass out=NULL to just count. Used by the lspci syscall. */
 int      pci_collect(pci_device_t *out, int max);
+
+/* /pci scheme (M1120): `sub` is the path after "/pci/" — "" lists every device,
+ * "<bb:ss.f>/<field>" reads one device's vendor/device/class/irq/bars/config.
+ * Routed from vfs.c. Returns bytes written, or -1. */
+int      pcifs_read(const char *sub, char *buf, int max);
