@@ -13,6 +13,7 @@
 #include "fsevents.h"
 #include "mbox.h"
 #include "notify.h"
+#include "eventfd.h"
 #include "net.h"
 
 static struct vfs_ops *fs;
@@ -137,6 +138,19 @@ static int nettcp_path(const char *name, const char **q) {
     return **q != 0;
 }
 
+/* Route /timer/<ms> (a sleepable file) and /event/<name> (a counting eventfd) to
+ * the eventfd layer (M1113). Absolute-only. Each returns 1 + the sub-path. */
+static int timer_path(const char *name, const char **q) {
+    if (!vstarts(name, "/timer/")) return 0;
+    *q = name + 7;
+    return **q != 0;
+}
+static int event_path(const char *name, const char **q) {
+    if (!vstarts(name, "/event/")) return 0;
+    *q = name + 7;
+    return **q != 0;
+}
+
 /* Route a (possibly relative) name to the RAM /tmp filesystem. Returns 1 + the
  * basename within /tmp if it targets /tmp, else 0. */
 static int tmp_path(const char *name, const char **base) {
@@ -218,6 +232,8 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
     if (ipc_path(name, &tb)) return mbox_read(tb, buf, max);   /* /ipc/<q>: dequeue a message (blocks if empty) */
     if (notify_path(name, &tb)) return notify_wait(tb, buf, max);   /* /notify/<n>: block until signalled, return+clear the mask */
     if (nettcp_path(name, &tb)) return netfs_read(tb, buf, max);    /* /net/tcp/<...>: sockets-as-files */
+    if (timer_path(name, &tb)) return timer_read(tb, buf, max);     /* /timer/<ms>: block <ms> then "tick" */
+    if (event_path(name, &tb)) return eventfd_read(tb, buf, max);   /* /event/<n>: block until >0, return+drain */
     if (tmp_path(name, &tb)) return tmpfs_read(tb, buf, max);
     int midx; char fpath[192];
     if (mount_path(name, &midx, fpath, sizeof fpath)) return blockdev_mount_read(midx, fpath, buf, max);
@@ -231,6 +247,7 @@ long vfs_write(const char *name, const void *buf, unsigned long len) {
     if (ipc_path(name, &tb)) return mbox_write(tb, buf, len);   /* /ipc/<q>: enqueue a message */
     if (notify_path(name, &tb)) return notify_signal(tb, buf, len);   /* /notify/<n>: OR bits into the mask + wake */
     if (nettcp_path(name, &tb)) return netfs_write(tb, buf, len);     /* /net/tcp/<...>: connect / send */
+    if (event_path(name, &tb)) return eventfd_write(tb, buf, len);    /* /event/<n>: counter += N, wake a reader */
     long r;
     if (tmp_path(name, &tb)) r = tmpfs_write(tb, buf, len);
     else {
