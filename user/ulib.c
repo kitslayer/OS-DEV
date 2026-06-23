@@ -27,6 +27,7 @@ void sys_exit(int code) { do_syscall(SYS_exit, code, 0, 0); }
 int  sys_getpid(void)   { return (int)do_syscall(SYS_getpid, 0, 0, 0); }
 long sys_fork(void)     { return do_syscall(SYS_fork, 0, 0, 0); }
 long sys_waitpid(int pid, int *status) { return do_syscall(SYS_waitpid, pid, (long)status, 0); }
+long sys_exec(const char *name, const char *arg) { return do_syscall(SYS_exec, (long)name, (long)arg, 0); }
 long sys_list(void *buf, unsigned long len) {
     /* leading 0 so buf/len land in the same registers (rsi/rdx) the kernel
      * reads them from — matching the write/readfile arg layout. */

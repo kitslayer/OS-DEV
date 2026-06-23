@@ -102,6 +102,7 @@
 #define FUTEX_WAKE 1
 #define SYS_fork   91   /* () -> copy-on-write fork: child returns 0, parent returns the child's pid; -1 on failure */
 #define SYS_waitpid 92  /* (pid, int *status) -> block until child (pid, or -1=any) exits; returns its pid + *status; -1 if none */
+#define SYS_exec   93   /* (name, arg) -> replace this process's program image with the registered program `name`; -1 on failure (no return on success) */
 
 #define SYSCALL_VECTOR 0x80
 

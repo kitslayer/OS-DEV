@@ -153,7 +153,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -229,6 +229,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "nettcp", nettcp_elf_start, "TCP-over-files demo" },
     { "crashinfo", crashinfo_elf_start, "Core-dump reader" },
     { "forktest", forktest_elf_start, "COW fork demo" },
+    { "execdemo", execdemo_elf_start, "fork+exec demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1840,6 +1841,76 @@ long app_fork(struct registers *r) {
     int n = (pend_h + 1) % MAX_APPS;
     if (n != pend_t) { pending[pend_h] = a; pend_h = n; }
     return a->pid;
+}
+
+/* exec() (M1121): replace the CURRENT process's program image with the registered
+ * program `name`, in place — same pid, same task, same window. Loads the new ELF
+ * into a fresh address space, switches to it, frees the old, resets the program
+ * state, and rewrites the trap frame `r` to enter the new program. On success it
+ * does NOT return to the old program (the rewritten frame iretq's into the new
+ * one); returns -1 (frame untouched) on failure, so the caller's exec()
+ * "returns -1" like POSIX. The pid/parent/pledge sandbox are preserved. */
+long app_exec(struct registers *r, const char *name, const char *arg) {
+    struct app *a = cur();
+    if (!a || !r || !name) return -1;
+
+    const void *elf = 0; const char *title = 0;
+    for (int i = 0; i < NPROGS; i++) {
+        const char *pa = progs[i].name, *pb = name; int eq = 1;
+        while (*pa && *pb) { if (*pa++ != *pb++) { eq = 0; break; } }
+        if (eq && !*pa && !*pb) { elf = progs[i].elf; title = progs[i].title; break; }
+    }
+    if (!elf) return -1;                                /* no such program */
+
+    uint64_t new_cr3 = vmm_create_address_space();
+    if (!new_cr3) return -1;
+    vdso_map(new_cr3);
+
+    uint64_t old_cr3 = a->cr3;
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) :: "memory");
+    __asm__ volatile("mov %0, %%cr3" : : "r"(new_cr3) : "memory");   /* become the new space */
+
+    uint64_t entry = elf_load(elf, ~0ull);
+    if (!entry) goto fail;
+    for (int i = 0; i < USTACK_PAGES; i++) {
+        uint64_t frame = pmm_alloc_frame();
+        if (!frame) goto fail;
+        if (vmm_map(USTACK_BASE + (uint64_t)i * PAGE_SIZE, frame, PTE_WRITABLE | PTE_USER | PTE_NX) != 0) {
+            pmm_free_frame(frame); goto fail;
+        }
+    }
+
+    /* committed: we are now the new program. Free the OLD space (non-active now). */
+    vmm_destroy_address_space(old_cr3);
+    a->cr3 = new_cr3; a->task->cr3 = new_cr3;
+    a->entry = entry; a->ustack = USTACK_BASE + USTACK_PAGES * PAGE_SIZE;
+
+    /* reset per-program state (the new image starts clean); keep pid/parent/pledge */
+    a->heap_end = 0; a->nvma = 0; a->mmap_next = 0;
+    for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
+    a->sig_in = 0; a->pending_sig = 0; a->alarm_interval = 0; a->alarm_next = 0;
+    if (a->gfx) { kfree(a->gfx); a->gfx = 0; a->gfx_w = a->gfx_h = 0; }
+    int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
+    a->titlebuf[ti] = 0; a->title = a->titlebuf;
+    int li = 0; if (arg) while (arg[li] && li < 127) { a->launch_arg[li] = arg[li]; li++; }
+    a->launch_arg[li] = 0;
+    grid_clear(a);
+
+    /* rewrite the trap frame to enter the new program (mirrors enter_user's iret frame) */
+    r->r15 = r->r14 = r->r13 = r->r12 = r->r11 = r->r10 = r->r9 = r->r8 = 0;
+    r->rbp = r->rdi = r->rsi = r->rdx = r->rcx = r->rbx = r->rax = 0;
+    r->rip = entry; r->rsp = a->ustack; r->rflags = 0x202;   /* IF set */
+    r->cs = 0x1B; r->ss = 0x23;                              /* USER_CS / USER_DS */
+
+    __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
+    return 0;                                               /* frame rewritten; iretq enters the new program */
+
+fail:
+    __asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3) : "memory");   /* restore the old space */
+    __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
+    vmm_destroy_address_space(new_cr3);
+    return -1;
 }
 
 /* Load and run an ELF program from a FAT32 file (e.g. `run calc.elf`). The ELF

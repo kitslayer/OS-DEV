@@ -8,6 +8,7 @@ void sys_exit(int code);
 int  sys_getpid(void);
 long sys_fork(void);                 /* COW fork: child returns 0, parent returns child pid, -1 on failure (M1116) */
 long sys_waitpid(int pid, int *status);  /* block until child (pid, or -1=any) exits; returns its pid, *status=code (M1117) */
+long sys_exec(const char *name, const char *arg);  /* replace this process's image with registered program `name`; -1 fail (M1121) */
 long sys_list(void *buf, unsigned long len);
 long sys_readfile(const char *name, void *buf, unsigned long len);
 long sys_writefile(const char *name, const void *buf, unsigned long len);
