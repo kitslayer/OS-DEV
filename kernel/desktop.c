@@ -132,6 +132,7 @@ static const struct menu_item menu[] = {
     { "Matrix", KIND_APP, "matrix" }, { "Calendar", KIND_APP, "calendar" },
     { "Timer", KIND_APP, "timer" },
     { "Sandbox", KIND_APP, "sandbox" },
+    { "Forth", KIND_APP, "forth" },
     { "Monitor", KIND_SYSMON, 0 },
     { "Files", KIND_FILES, 0 }, { "Welcome", KIND_WELCOME, 0 },
     { "About", KIND_ABOUT, 0 },
