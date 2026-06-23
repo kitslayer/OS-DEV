@@ -50,6 +50,7 @@ long sys_kill(int pid) { return do_syscall(SYS_kill, pid, 0, 0); }
 long sys_ping(void) { return do_syscall(SYS_ping, 0, 0, 0); }
 long sys_ping_host(const char *host) { return do_syscall(SYS_pinghost, (long)host, 0, 0); }
 long sys_netinfo(void *buf, unsigned long len) { return do_syscall(SYS_netinfo, (long)buf, (long)len, 0); }
+long sys_dhcp(void) { return do_syscall(SYS_dhcp, 0, 0, 0); }
 long sys_apps(void *buf, unsigned long len) { return do_syscall(SYS_apps, (long)buf, (long)len, 0); }
 long sys_spawn(const char *name) { return do_syscall(SYS_spawn, (long)name, 0, 0); }
 long sys_spawn_arg(const char *name, const char *arg) { return do_syscall(SYS_spawn, (long)name, (long)arg, 0); }

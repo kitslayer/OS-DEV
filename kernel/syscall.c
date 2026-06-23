@@ -255,7 +255,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
-    case SYS_pinghost: case SYS_netinfo:
+    case SYS_pinghost: case SYS_netinfo: case SYS_dhcp:
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
@@ -295,6 +295,8 @@ static const char *syscall_name(uint64_t n) {
         [SYS_kill]="kill",[SYS_mounts]="mounts",[SYS_mmap]="mmap",[SYS_munmap]="munmap",
         [SYS_signal]="signal",[SYS_raise]="raise",[SYS_sigreturn]="sigreturn",[SYS_getrandom]="getrandom",
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
+        [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
+        [SYS_dhcp]="dhcp",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -458,6 +460,10 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         __asm__ volatile("sti");           /* DNS + ICMP both need the timer running */
         r->rax = (uint64_t)(int64_t)net_ping_host((const char *)r->rdi);
+        break;
+    case SYS_dhcp:
+        __asm__ volatile("sti");           /* the DORA handshake needs the timer for its timeouts */
+        r->rax = (uint64_t)(int64_t)net_dhcp();
         break;
     case SYS_apps:
         if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }

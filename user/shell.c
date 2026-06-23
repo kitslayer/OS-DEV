@@ -452,7 +452,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "help")) {
             print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
-            print("        ping[<host>] resolve<host> ifconfig\n");
+            print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP)\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
@@ -1102,6 +1102,14 @@ static int run_command(char *line, char *cwd) {
             char info[128];
             if (sys_netinfo(info, sizeof(info)) > 0) print(info);
             else print("ifconfig: unavailable\n");
+        } else if (streq(line, "dhcp")) {            /* lease IP/gateway/DNS from the DHCP server (DORA) */
+            print("dhcp: requesting a lease (DISCOVER -> OFFER -> REQUEST -> ACK)...\n");
+            if (sys_dhcp() < 0) { print("dhcp: no response from a DHCP server\n"); g_status = 1; }
+            else {
+                print("dhcp: lease acquired. new configuration:\n");
+                char info[128];
+                if (sys_netinfo(info, sizeof(info)) > 0) print(info);
+            }
         } else if (streq(line, "ping")) {
             long n = sys_ping();
             if (n < 0) print("ping: no network\n");

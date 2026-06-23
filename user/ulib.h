@@ -20,6 +20,7 @@ long sys_kill(int pid);    /* ask the app with this pid to close; 0 ok / -1 not 
 long sys_ping(void);
 long sys_ping_host(const char *host);
 long sys_netinfo(void *buf, unsigned long len);
+long sys_dhcp(void);
 long sys_apps(void *buf, unsigned long len);
 long sys_resolve(const char *host, void *buf, unsigned long len);
 long sys_http(const char *host, const char *path, void *buf, unsigned long max);

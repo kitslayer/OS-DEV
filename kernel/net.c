@@ -21,8 +21,9 @@
 #include "tls.h"
 #include <stdint.h>
 
-static const uint8_t  OUR_IP[4]  = {10, 0, 2, 15};
-static const uint8_t  GW_IP[4]   = {10, 0, 2, 2};
+/* The SLIRP defaults — used as-is until a DHCP lease (net_dhcp) overwrites them. */
+static uint8_t  OUR_IP[4]  = {10, 0, 2, 15};
+static uint8_t  GW_IP[4]   = {10, 0, 2, 2};
 static const uint8_t  BROADCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
 const uint8_t *net_ip(void)      { return OUR_IP; }
@@ -165,7 +166,7 @@ static int ping(const uint8_t *ip, const uint8_t *dst_mac, uint16_t seq) {
     return 0;
 }
 
-static const uint8_t DNS_IP[4] = {10, 0, 2, 3};
+static uint8_t DNS_IP[4] = {10, 0, 2, 3};       /* SLIRP default; a DHCP lease may replace it */
 const uint8_t *net_dns(void)     { return DNS_IP; }
 
 int net_ping_gateway(void) {
@@ -295,6 +296,114 @@ int dns_resolve(const char *host, uint8_t out_ip[4]) {
         }
     }
     return -1;
+}
+
+/* ===================================================================== *
+ *  DHCP client — obtain {IP, gateway, DNS} from the server (DORA).
+ *
+ *  Replaces the hardcoded SLIRP defaults with a real lease. Built on the
+ *  same byte-wrangling as dns_resolve, but broadcast from 0.0.0.0:68 to
+ *  255.255.255.255:67 (we have no IP yet, so the reply must be broadcast —
+ *  that's what the BOOTP `flags` broadcast bit requests). QEMU's SLIRP
+ *  runs a real DHCP server, so this works end-to-end under emulation.
+ * ===================================================================== */
+static const uint8_t DHCP_MAGIC[4] = { 0x63, 0x82, 0x53, 0x63 };
+
+/* Build + send one BOOTP/DHCP message. `mtype` is the DHCP message type
+ * (1=DISCOVER, 3=REQUEST). For REQUEST, reqip/srvid carry options 50/54. */
+static void dhcp_send(uint32_t xid, uint8_t mtype, const uint8_t *reqip, const uint8_t *srvid) {
+    const uint8_t *me = nic_mac();
+    uint8_t pkt[400]; memset(pkt, 0, sizeof pkt);
+    memcpy(pkt + 0, BROADCAST, 6); memcpy(pkt + 6, me, 6); put16(pkt + 12, 0x0800);
+    uint8_t *ip = pkt + 14, *udp = pkt + 34, *bp = pkt + 42;
+    /* BOOTP fixed header */
+    bp[0] = 1; bp[1] = 1; bp[2] = 6; bp[3] = 0;            /* op=BOOTREQUEST, htype=eth, hlen=6 */
+    bp[4] = xid >> 24; bp[5] = xid >> 16; bp[6] = xid >> 8; bp[7] = (uint8_t)xid;
+    put16(bp + 10, 0x8000);                                /* flags: broadcast (we have no IP to unicast to) */
+    memcpy(bp + 28, me, 6);                                /* chaddr = our MAC */
+    memcpy(bp + 236, DHCP_MAGIC, 4);
+    int o = 240;
+    bp[o++] = 53; bp[o++] = 1; bp[o++] = mtype;            /* opt 53: DHCP message type */
+    if (mtype == 3) {                                      /* REQUEST echoes the offered IP + server id */
+        if (reqip) { bp[o++] = 50; bp[o++] = 4; memcpy(bp + o, reqip, 4); o += 4; }
+        if (srvid) { bp[o++] = 54; bp[o++] = 4; memcpy(bp + o, srvid, 4); o += 4; }
+    }
+    bp[o++] = 55; bp[o++] = 3; bp[o++] = 1; bp[o++] = 3; bp[o++] = 6;  /* opt 55: want subnet(1), router(3), dns(6) */
+    bp[o++] = 0xFF;                                        /* end */
+    int blen = o;
+    put16(udp + 0, 68); put16(udp + 2, 67); put16(udp + 4, (uint16_t)(8 + blen)); put16(udp + 6, 0);  /* UDP cksum 0 = none */
+    ip[0] = 0x45; ip[1] = 0; put16(ip + 2, (uint16_t)(20 + 8 + blen)); put16(ip + 4, 0); put16(ip + 6, 0);
+    ip[8] = 64; ip[9] = 17; put16(ip + 10, 0);
+    memset(ip + 12, 0x00, 4);                              /* src 0.0.0.0 */
+    memset(ip + 16, 0xFF, 4);                              /* dst 255.255.255.255 */
+    put16(ip + 10, inet_checksum(ip, 20));
+    nic_send(pkt, 42 + blen);
+}
+
+/* Await a DHCP reply matching `xid`. Returns the DHCP message type (2=OFFER,
+ * 5=ACK, 6=NAK), filling yiaddr + any present server-id/router/dns; else 0. */
+static int dhcp_recv(uint32_t xid, uint64_t ticks, uint8_t *yiaddr,
+                     uint8_t *srvid, uint8_t *router, uint8_t *dns) {
+    uint8_t buf[1600];
+    uint64_t deadline = timer_ticks() + ticks;
+    while (timer_ticks() < deadline) {
+        int len = recv_timeout(buf, sizeof buf, 20);
+        if (len < 282) continue;                           /* eth14+ip20+udp8+bootp240 */
+        if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 17) continue;   /* IPv4 + UDP */
+        int ihl = (buf[14] & 0x0F) * 4; if (ihl < 20) continue;
+        uint8_t *udp = buf + 14 + ihl;
+        if (get16(udp + 2) != 68) continue;                /* UDP dst port 68 (DHCP client) */
+        uint8_t *bp = udp + 8;
+        int boff = (int)(bp - buf);
+        if (boff + 240 > len || bp[0] != 2) continue;      /* room for BOOTP + op=BOOTREPLY */
+        uint32_t rxid = ((uint32_t)bp[4] << 24) | ((uint32_t)bp[5] << 16) | ((uint32_t)bp[6] << 8) | bp[7];
+        if (rxid != xid || memcmp(bp + 236, DHCP_MAGIC, 4) != 0) continue;
+        memcpy(yiaddr, bp + 16, 4);                        /* yiaddr = the IP being offered/leased to us */
+        int mtype = 0, o = 240;
+        while (boff + o < len && bp[o] != 0xFF) {          /* walk TLV options, bounded by the packet */
+            if (bp[o] == 0) { o++; continue; }             /* pad */
+            int t = bp[o++]; if (boff + o >= len) break;
+            int l = bp[o++]; if (boff + o + l > len) break;
+            if      (t == 53 && l == 1) mtype = bp[o];
+            else if (t == 54 && l == 4 && srvid)  memcpy(srvid,  bp + o, 4);
+            else if (t == 3  && l >= 4 && router) memcpy(router, bp + o, 4);
+            else if (t == 6  && l >= 4 && dns)    memcpy(dns,    bp + o, 4);
+            o += l;
+        }
+        if (mtype) return mtype;
+    }
+    return 0;
+}
+
+/* The DORA handshake. On success, commits the lease into OUR_IP/GW_IP/DNS_IP
+ * and returns 0; on timeout/NAK returns -1 with the prior config left intact. */
+int net_dhcp(void) {
+    const uint8_t *me = nic_mac();
+    uint32_t xid = 0x4f534400u ^ (uint32_t)timer_ticks()
+                 ^ ((uint32_t)me[2] << 24) ^ ((uint32_t)me[3] << 16)
+                 ^ ((uint32_t)me[4] << 8)  ^ me[5];
+    uint8_t yiaddr[4] = {0}, srvid[4] = {0}, router[4] = {0}, dns[4] = {0};
+
+    int got = 0;
+    for (int t = 0; t < 4 && !got; t++) {                  /* DISCOVER -> OFFER */
+        dhcp_send(xid, 1, 0, 0);
+        if (dhcp_recv(xid, 150, yiaddr, srvid, router, dns) == 2) got = 1;
+    }
+    if (!got) return -1;
+
+    got = 0;
+    for (int t = 0; t < 4 && !got; t++) {                  /* REQUEST -> ACK */
+        dhcp_send(xid, 3, yiaddr, srvid);
+        int mt = dhcp_recv(xid, 150, yiaddr, srvid, router, dns);
+        if (mt == 5) got = 1;
+        else if (mt == 6) return -1;                       /* NAK */
+    }
+    if (!got) return -1;
+
+    memcpy(OUR_IP, yiaddr, 4);                             /* commit the lease */
+    if (router[0] | router[1] | router[2] | router[3]) memcpy(GW_IP, router, 4);
+    if (dns[0] | dns[1] | dns[2] | dns[3])             memcpy(DNS_IP, dns, 4);
+    return 0;
 }
 
 /* ===================================================================== *
