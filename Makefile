@@ -18,6 +18,7 @@ QEMU    := qemu-system-x86_64
 CFLAGS  := -std=gnu11 -ffreestanding -nostdlib \
            -fno-stack-protector -fno-pic -fno-pie \
            -mno-red-zone -mgeneral-regs-only -fwrapv \
+           -fno-omit-frame-pointer \
            -Wall -Wextra -Ikernel/include -O2 -g -MMD -MP
 
 ASFLAGS := -f elf64
@@ -275,9 +276,22 @@ $(BUILD)/calc.elf: user/calc.c user/calceval.h user/dmath.h $(BUILD)/user_ulib.o
 # the embedded blob depends on every program ELF
 $(BUILD)/kernel/asm/user_blob.o: $(USER_ELFS)
 
-$(KERNEL64): $(OBJS) linker.ld
+# kernel.elf is built in TWO link passes so the embedded symbol table (for panic
+# backtraces — kernel/ksyms.c) holds the FINAL function addresses:
+#   pass 1 links with a zero-entry stub table to learn the addresses; we then run
+#   `nm` + tools/gen_ksyms.sh to emit the real table and relink. The table lands
+#   in .rodata (after .text), so adding it never shifts a function address —
+#   making the pass-1 addresses exact for pass 2.
+KSYMSC  := $(BUILD)/ksyms_table.c
+KSYMSO  := $(BUILD)/ksyms_table.o
+$(KERNEL64): $(OBJS) linker.ld tools/gen_ksyms.sh
 	@mkdir -p $(dir $@)
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	@printf '#include "ksyms.h"\nconst struct ksym ksyms[]={{0,0}};\nconst int ksyms_count=0;\n' > $(KSYMSC)
+	$(CC) $(filter-out -MMD -MP,$(CFLAGS)) -c $(KSYMSC) -o $(KSYMSO)
+	$(LD) $(LDFLAGS) -o $(BUILD)/kernel_pass1.elf $(OBJS) $(KSYMSO)
+	@nm -n $(BUILD)/kernel_pass1.elf | sh tools/gen_ksyms.sh > $(KSYMSC)
+	$(CC) $(filter-out -MMD -MP,$(CFLAGS)) -c $(KSYMSC) -o $(KSYMSO)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(KSYMSO)
 
 $(KERNEL): $(KERNEL64)
 	$(OBJCOPY) -I elf64-x86-64 -O elf32-i386 $< $@

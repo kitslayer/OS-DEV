@@ -18,6 +18,7 @@
 #include "interrupts.h"
 #include "console.h"
 #include "random.h"
+#include "ksyms.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -177,6 +178,21 @@ static long gen_stat(char *b, int max) {
 static long gen_kmsg(char *b, int max) {        /* the kernel log ring buffer (dmesg) */
     return klog_copy(b, max);
 }
+static long gen_kallsyms(char *b, int max) {    /* the embedded kernel symbol table (addr + name per line) */
+    int p = 0;
+    for (int i = 0; i < ksyms_count && p < max - 24; i++) {
+        unsigned long a = ksyms[i].addr;
+        char h[16]; int hn = 0;
+        if (a == 0) h[hn++] = '0';
+        while (a && hn < 16) { int d = (int)(a & 0xf); h[hn++] = (char)(d < 10 ? '0' + d : 'a' + d - 10); a >>= 4; }
+        while (hn && p < max - 1) b[p++] = h[--hn];
+        if (p < max - 1) b[p++] = ' ';
+        const char *n = ksyms[i].name;
+        while (*n && p < max - 1) b[p++] = *n++;
+        if (p < max - 1) b[p++] = '\n';
+    }
+    b[p] = 0; return p;
+}
 static long gen_sched(char *b, int max) {       /* per-task CPU time + system idle% (backs `top`) */
     task_info_t ti[24];
     int cnt = task_snapshot(ti, 24);
@@ -212,6 +228,7 @@ static const struct pf proc_files[] = {
     { "processes", gen_processes }, { "partitions", gen_partitions },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
+    { "kallsyms", gen_kallsyms },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

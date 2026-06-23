@@ -17,6 +17,7 @@
 #include "console.h"
 #include "syscall.h"
 #include "app.h"
+#include "ksyms.h"
 #include <stdint.h>
 
 static const char *const exception_names[32] = {
@@ -100,6 +101,7 @@ void isr_dispatch(struct registers *r) {
             kprintf("  faulting address (CR2) = %p\n", (void *)cr2);
         }
         dump_registers(r);
+        backtrace(r->rip, r->rbp);       /* symbolized call trace (kernel/ksyms.c) */
         kprintf("  system halted.\n");
         for (;;)
             __asm__ volatile("cli; hlt");
