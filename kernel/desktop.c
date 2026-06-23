@@ -960,6 +960,7 @@ static void files_key(window_t *w, int k) {
 
     if (k == 0x11)       { if (w->fsel > 0)     w->fsel--; }   /* up   */
     else if (k == 0x12)  { if (w->fsel < n - 1) w->fsel++; }   /* down */
+    else if (k == 8)     { if (vfs_chdir("..") == 0) { n = vfs_list(e, 256); w->fsel = 0; } }  /* Backspace: up one directory */
     else if (k == 'd' || k == 0x7F) {                          /* arm the delete confirm (render shows the prompt) */
         w->fconfirm = 1;
     }
@@ -983,7 +984,12 @@ static void files_key(window_t *w, int k) {
     else if (k == '\n' || k == '\r') {
         const char *name = e[w->fsel].name;
         int len = 0; while (name[len]) len++;
-        if (len > 0 && name[len-1] != '/') {                   /* skip directories */
+        if (len > 0 && name[len-1] == '/') {                   /* a directory: navigate into it */
+            char d[64]; int p = 0;
+            for (int j = 0; j < len - 1 && p < (int)sizeof(d) - 1; j++) d[p++] = name[j];  /* strip trailing '/' */
+            d[p] = 0;
+            if (vfs_chdir(d) == 0) { n = vfs_list(e, 256); w->fsel = 0; }   /* enter folder + re-list */
+        } else if (len > 0) {                                  /* a file: open it */
             if (files_editable(name, len)) {
                 app_spawn_named_arg("editor", name);           /* edit text/source files */
             } else {
