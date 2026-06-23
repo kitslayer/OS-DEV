@@ -29,6 +29,7 @@
 #include "fw.h"
 #include "notify.h"
 #include "eventfd.h"
+#include "strace.h"
 #include "swap.h"
 #include "shm.h"
 #include <stdint.h>
@@ -404,6 +405,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (peq(file, "status"))  return gen_pid_status((char *)buf, (int)max, pid, st, proc);
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
+            if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "cmdline")) {
                 char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));

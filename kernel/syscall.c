@@ -11,6 +11,7 @@
 #include "interrupts.h"
 #include "console.h"
 #include "app.h"
+#include "strace.h"
 #include "vfs.h"
 #include "fb.h"
 #include "rtc.h"
@@ -975,9 +976,11 @@ void syscall_dispatch(struct registers *r) {
         break;
     }
 
-    if (traced)               /* strace (M1084): one line to dmesg per traced syscall */
+    if (traced) {             /* strace (M1084): one line to dmesg + the readable ring (M1118) */
         kprintf("[strace %d] %s(0x%lx, 0x%lx, 0x%lx) = 0x%lx\n",
                 app_sys_getpid(), syscall_name(tr_nr), tr_a, tr_b, tr_c, r->rax);
+        strace_record(task_current_id(), syscall_name(tr_nr), tr_a, tr_b, tr_c, r->rax);  /* tag with the task id, matching /proc/<pid> */
+    }
 
     app_deliver_pending(r);   /* an async signal (e.g. Ctrl-C->SIGINT) raised during the syscall (M1083) */
 }
