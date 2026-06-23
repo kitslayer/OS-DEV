@@ -58,6 +58,9 @@ struct app {
     char     grid[APP_ROWS][APP_COLS];
     uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
     uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
+    uint8_t  esc;                        /* ANSI escape state: 0 normal, 1 saw ESC, 2 in CSI */
+    uint8_t  csilen;                     /* bytes buffered in csi[] */
+    char     csi[24];                    /* CSI parameter bytes (between '[' and the final letter) */
     int      cx, cy;
     char     sb[SB_ROWS][APP_COLS];      /* scrollback: lines that scrolled off */
     int      sb_count;                   /* how many scrollback lines are stored */
@@ -434,9 +437,90 @@ static inline void irq_restore(uint64_t f) {
 }
 
 /* ---- syscall-facing ---- */
+/* ANSI/VT100: map an SGR colour code (30-37 normal / 90-97 bright) onto our
+ * 16-entry app_palette (which isn't in ANSI order). */
+static uint8_t ansi_color(int code, int bold) {
+    static const uint8_t base[8]   = { 8, 2, 0, 3, 6, 5, 4, 1 };   /* blk red grn yel blu mag cyn wht */
+    static const uint8_t bright[8] = { 8, 13, 9, 12, 14, 11, 10, 1 };
+    if (code >= 90 && code <= 97) return bright[code - 90];
+    if (code >= 30 && code <= 37) return (bold ? bright : base)[code - 30];
+    return 0;
+}
+
+/* Execute one buffered CSI sequence (a->csi[0..csilen)) ending in `final`. A
+ * tiny VT100 subset: SGR colours (m), cursor moves (A/B/C/D/H/f), erase (J/K). */
+static void ansi_csi(struct app *a, char final) {
+    int p[8] = {0}, np = 0, cur = 0;
+    for (int i = 0; i < a->csilen; i++) {
+        char c = a->csi[i];
+        if (c >= '0' && c <= '9') cur = cur * 10 + (c - '0');
+        else if (c == ';') { if (np < 7) p[np++] = cur; cur = 0; }
+    }
+    p[np++] = cur;                       /* the last/only param; np >= 1 */
+    int n = p[0] ? p[0] : 1;             /* default-1 count for cursor moves */
+    switch (final) {
+    case 'm': {                          /* SGR: text colour */
+        int bold = 0;
+        for (int i = 0; i < np; i++) {
+            int v = p[i];
+            if (v == 0) { a->curcol = 0; bold = 0; }
+            else if (v == 1) bold = 1;
+            else if (v == 39) a->curcol = 0;
+            else if ((v >= 30 && v <= 37) || (v >= 90 && v <= 97)) a->curcol = ansi_color(v, bold);
+        }
+        break;
+    }
+    case 'A': a->cy -= n; if (a->cy < 0) a->cy = 0; break;
+    case 'B': a->cy += n; if (a->cy >= APP_ROWS) a->cy = APP_ROWS - 1; break;
+    case 'C': a->cx += n; if (a->cx >= APP_COLS) a->cx = APP_COLS - 1; break;
+    case 'D': a->cx -= n; if (a->cx < 0) a->cx = 0; break;
+    case 'H': case 'f': {                /* cursor to row;col (1-based) */
+        int row = p[0] ? p[0] : 1, col = (np >= 2 && p[1]) ? p[1] : 1;
+        a->cy = row - 1; a->cx = col - 1;
+        if (a->cy < 0) a->cy = 0; if (a->cy >= APP_ROWS) a->cy = APP_ROWS - 1;
+        if (a->cx < 0) a->cx = 0; if (a->cx >= APP_COLS) a->cx = APP_COLS - 1;
+        break;
+    }
+    case 'J': {                          /* erase in display (2 = whole screen) */
+        int m = p[0];
+        int y0 = (m == 2) ? 0 : a->cy;
+        if (m == 2) { a->cx = a->cy = 0; }
+        for (int x = (m == 2 ? 0 : a->cx); x < APP_COLS; x++) { a->grid[y0][x] = ' '; a->gcol[y0][x] = 0; }
+        for (int y = y0 + 1; y < APP_ROWS; y++)
+            for (int x = 0; x < APP_COLS; x++) { a->grid[y][x] = ' '; a->gcol[y][x] = 0; }
+        break;
+    }
+    case 'K': {                          /* erase in line (0 to-eol, 1 from-bol, 2 whole) */
+        int m = p[0];
+        int x0 = (m == 1 || m == 2) ? 0 : a->cx;
+        int x1 = (m == 1) ? a->cx + 1 : APP_COLS;
+        for (int x = x0; x < x1 && x < APP_COLS; x++) { a->grid[a->cy][x] = ' '; a->gcol[a->cy][x] = 0; }
+        break;
+    }
+    }
+    a->gdirty = 1;
+}
+
+/* App stdout. Bytes pass straight to the grid EXCEPT ANSI escape sequences
+ * (ESC [ ... <letter>), which are parsed for colour/cursor/erase. Output with
+ * no ESC byte renders byte-identically to before, so existing apps are
+ * unaffected. */
 void app_sys_write(const char *buf, unsigned len) {
     struct app *a = cur();
-    for (unsigned i = 0; i < len; i++) grid_putc(a, buf[i]);
+    for (unsigned i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)buf[i];
+        if (a->esc == 0) {
+            if (ch == 0x1B) a->esc = 1;          /* ESC: maybe a sequence */
+            else grid_putc(a, (char)ch);
+        } else if (a->esc == 1) {                /* after ESC */
+            if (ch == '[') { a->esc = 2; a->csilen = 0; }
+            else a->esc = 0;                     /* unsupported ESC x: consume + drop */
+        } else {                                 /* in CSI: collect until the final byte */
+            if (ch >= 0x40 && ch <= 0x7E) { ansi_csi(a, (char)ch); a->esc = 0; }
+            else if (a->csilen < sizeof(a->csi)) a->csi[a->csilen++] = (char)ch;
+            else a->esc = 0;                     /* overlong: bail (no runaway) */
+        }
+    }
 }
 
 /* Replace the on-screen line with history entry `idx` (or empty); returns len. */

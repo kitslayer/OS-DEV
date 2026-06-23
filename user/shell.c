@@ -1683,7 +1683,21 @@ static int run_command(char *line, char *cwd) {
                 for (const char *f = fmt; *f; f++) {
                     if (*f == '\\' && f[1]) {
                         f++;
-                        char c = (*f == 'n') ? '\n' : (*f == 't') ? '\t' : (*f == 'r') ? '\r' : *f;   /* \\ and others -> the char itself */
+                        char c;
+                        if (*f == 'x' && f[1]) {                       /* \xHH : hex byte */
+                            int v = 0, k = 0; f++;
+                            while (k < 2 && ((*f>='0'&&*f<='9')||((*f|32)>='a'&&(*f|32)<='f'))) {
+                                v = v*16 + ((*f<='9') ? *f-'0' : (*f|32)-'a'+10); f++; k++;
+                            }
+                            f--; c = (char)v;
+                        } else if (*f >= '0' && *f <= '7') {           /* \NNN : octal byte (so \033 = ESC) */
+                            int v = 0, k = 0;
+                            while (k < 3 && *f >= '0' && *f <= '7') { v = v*8 + (*f-'0'); f++; k++; }
+                            f--; c = (char)v;
+                        } else {                                       /* named escapes; \e/\E = ESC; others -> the char */
+                            c = (*f=='n')?'\n':(*f=='t')?'\t':(*f=='r')?'\r':(*f=='e'||*f=='E')?27:
+                                (*f=='a')?7:(*f=='b')?8:(*f=='f')?12:(*f=='v')?11:*f;
+                        }
                         char s[2] = { c, 0 }; print(s);
                     } else if (*f == '%' && f[1]) {
                         f++;
