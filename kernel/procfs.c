@@ -346,6 +346,54 @@ static long gen_pid_wss(char *b, int max, int pid, void *proc) {
     b[p] = 0; return p;
 }
 
+/* /proc/<pid>/mem/<hexaddr>[/<len>]: hexdump another process's memory — the live
+ * counterpart to the post-mortem core reader (crashinfo, M1112). The name-based
+ * VFS has no fd offsets, so the address+length ride in the path. Restricted to
+ * the user footprint [0x40000000,0x80001000) so it can never expose the shared
+ * kernel higher-half or the low identity map; bytes outside a mapped page print
+ * as "..". M1114. */
+#define MEM_USER_LO 0x40000000ull
+#define MEM_USER_HI 0x80001000ull
+static int hx(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+static int shexw(char *b, int p, int max, uint64_t v, int width) {
+    for (int i = width - 1; i >= 0; i--) { int nyb = (int)((v >> (i * 4)) & 0xF); if (p < max - 1) b[p++] = (char)(nyb < 10 ? '0' + nyb : 'a' + nyb - 10); }
+    return p;
+}
+static long gen_pid_mem(char *b, int max, void *proc, const char *spec) {
+    uint64_t va = 0; const char *s = spec; int v;
+    while ((v = hx(*s)) >= 0) { va = (va << 4) | (uint64_t)v; s++; }
+    unsigned long len = 64;
+    if (*s == '/') { s++; len = 0; while (*s >= '0' && *s <= '9') { len = len * 10 + (unsigned long)(*s - '0'); s++; } }
+    if (len == 0) len = 64;
+    if (len > 256) len = 256;                              /* one screenful per read */
+    uint64_t cr3 = app_cr3((app_t *)proc);
+    int p = 0;
+    for (unsigned long i = 0; i < len; i += 16) {
+        p = sapp(b, p, max, "  "); p = shexw(b, p, max, va + i, 8); p = sapp(b, p, max, ": ");
+        char ascii[17]; int na = 0;
+        for (int j = 0; j < 16; j++) {
+            if (i + (unsigned long)j >= len) { p = sapp(b, p, max, "   "); continue; }
+            uint64_t cur = va + i + (unsigned long)j;
+            uint64_t phys = (cur >= MEM_USER_LO && cur < MEM_USER_HI) ? vmm_translate_in(cr3, cur) : 0;
+            if (phys) {
+                unsigned char by = *((volatile unsigned char *)hhdm(phys));
+                p = shexw(b, p, max, by, 2); p = sapp(b, p, max, " ");
+                ascii[na++] = (by >= 32 && by < 127) ? (char)by : '.';
+            } else {
+                p = sapp(b, p, max, ".. "); ascii[na++] = '.';
+            }
+        }
+        ascii[na] = 0;
+        p = sapp(b, p, max, " |"); p = sapp(b, p, max, ascii); p = sapp(b, p, max, "|\n");
+    }
+    b[p] = 0; return p;
+}
+
 long procfs_read(const char *abs, void *buf, unsigned long max) {
     if (max == 0) return -1;
     if (startswith(abs, "/proc/")) {
@@ -355,6 +403,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (!proc) return -1;
             if (peq(file, "status"))  return gen_pid_status((char *)buf, (int)max, pid, st, proc);
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
+            if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "cmdline")) {
                 char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));

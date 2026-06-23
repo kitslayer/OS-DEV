@@ -304,6 +304,23 @@ int vmm_protect(uint64_t virt, uint64_t flags) {
     return 0;
 }
 
+/* Translate a virtual address in an ARBITRARY address space (walk `cr3`'s tables
+ * via the HHDM, never loading CR3) — for inspecting another process's memory
+ * (/proc/<pid>/mem, M1114). Returns the physical address, or 0 if unmapped. */
+uint64_t vmm_translate_in(uint64_t cr3, uint64_t virt) {
+    uint64_t *pml4 = phys_to_table(cr3 & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return 0;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT)) return 0;
+    if (pd[PD_IDX(virt)] & PTE_HUGE)
+        return (pd[PD_IDX(virt)] & ~0x1FFFFFull) | (virt & 0x1FFFFF);
+    uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
+    if (!(pt[PT_IDX(virt)] & PTE_PRESENT)) return 0;
+    return (pt[PT_IDX(virt)] & ADDR_MASK) | (virt & 0xFFF);
+}
+
 uint64_t vmm_translate(uint64_t virt) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;
