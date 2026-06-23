@@ -250,15 +250,6 @@ struct bd_mount { char name[8]; int dev; uint64_t start; };
 static struct bd_mount g_mount[8];
 static int g_nmount, g_mount_scanned;
 
-/* "greet.txt" -> the 11-byte space-padded uppercase 8.3 form fatvol_read wants. */
-static void name83_pad(const char *in, char out[11]) {
-    for (int i = 0; i < 11; i++) out[i] = ' ';
-    int i = 0, o = 0;
-    while (in[i] && in[i] != '.' && o < 8) { char c = in[i++]; out[o++] = (c>='a'&&c<='z') ? (char)(c-32) : c; }
-    while (in[i] && in[i] != '.') i++;
-    if (in[i] == '.') { i++; int e = 8; while (in[i] && e < 11) { char c = in[i++]; out[e++] = (c>='a'&&c<='z') ? (char)(c-32) : c; } }
-}
-
 static void blockdev_mount_scan(void) {
     if (g_mount_scanned) return;
     g_mount_scanned = 1;
@@ -297,17 +288,30 @@ int blockdev_mount_index(const char *name) {     /* "disk2" -> index, else -1 */
     return -1;
 }
 
-int blockdev_mount_list(int i, fatvol_dirent *out, int max) {
+/* List the directory at `subpath` (relative to the volume root, "" = root) of
+ * mount `i`. Subdirectory-aware (M1070). */
+int blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return 0;
-    return fatvol_list(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start, out, max);
+    return fatvol_list_path(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start,
+                            subpath ? subpath : "", out, max);
 }
 
-long blockdev_mount_read(int i, const char *name, void *buf, unsigned long max) {
+/* Read the file at `path` (relative to the volume root) of mount `i`. -1 if it
+ * is a directory / not found. Subdirectory-aware (M1070). */
+long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return -1;
-    char n83[11]; name83_pad(name, n83);
-    return fatvol_read(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start, n83, buf, max);
+    return fatvol_read_path(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start,
+                            path ? path : "", buf, max);
+}
+
+/* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
+int blockdev_mount_isdir(int i, const char *path) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return 0;
+    return fatvol_isdir_path(bd_blk_read, (void *)(intptr_t)g_mount[i].dev, g_mount[i].start,
+                             path ? path : "");
 }
 
 /* --- the headless browsing demo -------------------------------------------- */

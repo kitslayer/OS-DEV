@@ -78,6 +78,10 @@ int blockdev_format(char *out, int max);
 int  blockdev_mount_count(void);                 /* number of mountable FAT32 volumes */
 const char *blockdev_mount_name(int i);          /* "disk1".."disk8", or NULL */
 int  blockdev_mount_index(const char *name);     /* "disk2" -> index, else -1 */
-int  blockdev_mount_list(int i, fatvol_dirent *out, int max);              /* list mount i's root dir */
-long blockdev_mount_read(int i, const char *name, void *buf, unsigned long max);  /* read a file from mount i */
+/* Subdirectory-aware (M1070): `subpath`/`path` is relative to the volume root
+ * ("" or NULL = root), so a mounted disk can be browsed in full, not just its
+ * root. blockdev_mount_isdir backs `cd` validation. */
+int  blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max); /* list dir at subpath */
+long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max);   /* read file at path */
+int  blockdev_mount_isdir(int i, const char *path);   /* is path a directory on mount i? */
 int  blockdev_mounts_format(char *out, int max);  /* list the mounts as text (the `mount` command) */

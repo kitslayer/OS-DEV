@@ -412,6 +412,129 @@ long fatvol_read(blk_read_fn read, void *ctx, uint64_t start_lba,
     return (long)got;
 }
 
+/* --- subdirectory traversal for mounts (M1070) ----------------------------
+ * fatvol_find/read above only look in the root; these descend a '/'-separated
+ * path into subdirectories so a mounted disk can be browsed in full. */
+
+/* Find `name83` in the directory whose chain starts at cluster `cl`; set the
+ * out params (first cluster, size, is_dir) and return 1, else 0. */
+static int fatvol_lookup(blk_read_fn read, void *ctx, const struct fatvol *v, uint32_t cl,
+                         const char name83[11], uint32_t *first, uint32_t *size, int *isdir) {
+    uint32_t steps = 0;
+    while (cl >= 2 && cl < 0x0FFFFFF8 && (!v->total_clusters || cl < v->total_clusters + 2)) {
+        uint64_t base = v->data_start + (uint64_t)(cl - 2) * v->spc;
+        for (uint32_t s = 0; s < v->spc; s++) {
+            uint8_t dir[SECSZ];
+            if (read(ctx, base + s, 1, dir) < 0) return 0;
+            for (int off = 0; off < SECSZ; off += 32) {
+                const uint8_t *e = dir + off;
+                if (e[0] == 0x00) return 0;
+                if (e[0] == 0xE5 || e[11] == 0x0F || (e[11] & 0x08)) continue;
+                int eq = 1; for (int i = 0; i < 11; i++) if (e[i] != (uint8_t)name83[i]) { eq = 0; break; }
+                if (eq) {
+                    *first = ((uint32_t)rd16(e + 20) << 16) | rd16(e + 26);
+                    *size  = rd32(e + 28);
+                    *isdir = (e[11] & 0x10) ? 1 : 0;
+                    return 1;
+                }
+            }
+        }
+        cl = fatvol_next(read, ctx, v, cl);
+        if (v->total_clusters && ++steps > v->total_clusters + 2) break;
+    }
+    return 0;
+}
+
+/* "name.ext" (a path component, `len` bytes) -> the 11-byte space-padded 8.3. */
+static void fatvol_comp83(const char *name, int len, char out[11]) {
+    for (int i = 0; i < 11; i++) out[i] = ' ';
+    int o = 0, i = 0;
+    while (i < len && name[i] != '.' && o < 8) { char c = name[i++]; out[o++] = (c>='a'&&c<='z') ? (char)(c-32) : c; }
+    while (i < len && name[i] != '.') i++;
+    if (i < len && name[i] == '.') { i++; int e = 8; while (i < len && e < 11) { char c = name[i++]; out[e++] = (c>='a'&&c<='z') ? (char)(c-32) : c; } }
+}
+
+/* Resolve a '/'-separated `path` from the volume root to its first cluster +
+ * size + is_dir. Empty path -> the root directory. Returns 1 if found. */
+static int fatvol_walk(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                       struct fatvol *v, uint32_t *first, uint32_t *size, int *isdir) {
+    if (!read || !fatvol_parse(read, ctx, start_lba, v)) return 0;
+    uint32_t cl = v->root_clus;
+    *first = cl; *size = 0; *isdir = 1;                 /* default: the root dir */
+    const char *p = path;
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        const char *comp = p; int len = 0;
+        while (p[len] && p[len] != '/') len++;
+        p += len;
+        char n83[11]; fatvol_comp83(comp, len, n83);
+        uint32_t f, sz; int isd;
+        if (!fatvol_lookup(read, ctx, v, cl, n83, &f, &sz, &isd)) return 0;
+        *first = f; *size = sz; *isdir = isd;
+        if (*p) { if (!isd) return 0; cl = f; }         /* more to come -> must descend a dir */
+    }
+    return 1;
+}
+
+/* List the directory at `path` (relative to the volume root) into out[]. */
+int fatvol_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                     fatvol_dirent *out, int max) {
+    struct fatvol v; uint32_t first, size; int isd;
+    if (!out || max <= 0 || !fatvol_walk(read, ctx, start_lba, path, &v, &first, &size, &isd) || !isd) return 0;
+    int n = 0; uint32_t cl = first, steps = 0;
+    while (cl >= 2 && cl < 0x0FFFFFF8 && (!v.total_clusters || cl < v.total_clusters + 2) && n < max) {
+        uint64_t base = v.data_start + (uint64_t)(cl - 2) * v.spc;
+        for (uint32_t s = 0; s < v.spc && n < max; s++) {
+            uint8_t dir[SECSZ];
+            if (read(ctx, base + s, 1, dir) < 0) return n;
+            for (int off = 0; off < SECSZ && n < max; off += 32) {
+                const uint8_t *e = dir + off;
+                if (e[0] == 0x00) return n;
+                if (e[0] == 0xE5 || e[11] == 0x0F || (e[11] & 0x08)) continue;
+                char name[13]; fatvol_name(e, name);
+                if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0))) continue;
+                for (int i = 0; i < 13; i++) out[n].name[i] = name[i];
+                out[n].is_dir = (e[11] & 0x10) ? 1 : 0;
+                out[n].size   = out[n].is_dir ? 0 : rd32(e + 28);
+                n++;
+            }
+        }
+        cl = fatvol_next(read, ctx, &v, cl);
+        if (v.total_clusters && ++steps > v.total_clusters + 2) break;
+    }
+    return n;
+}
+
+/* Read the FILE at `path` (relative to the volume root) into buf. -1 if it's a
+ * directory / not found. */
+long fatvol_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                      void *buf, unsigned long max) {
+    struct fatvol v; uint32_t first, size; int isd;
+    if (!buf || !fatvol_walk(read, ctx, start_lba, path, &v, &first, &size, &isd) || isd) return -1;
+    unsigned long want = size; if (want > max) want = max;
+    unsigned long got = 0; uint32_t cl = first, steps = 0;
+    while (cl >= 2 && cl < 0x0FFFFFF8 && (!v.total_clusters || cl < v.total_clusters + 2) && got < want) {
+        uint64_t base = v.data_start + (uint64_t)(cl - 2) * v.spc;
+        for (uint32_t s = 0; s < v.spc && got < want; s++) {
+            uint8_t sec[SECSZ];
+            if (read(ctx, base + s, 1, sec) < 0) return (long)got;
+            unsigned long n = want - got; if (n > SECSZ) n = SECSZ;
+            for (unsigned long i = 0; i < n; i++) ((uint8_t *)buf)[got + i] = sec[i];
+            got += n;
+        }
+        cl = fatvol_next(read, ctx, &v, cl);
+        if (v.total_clusters && ++steps > v.total_clusters + 2) break;
+    }
+    return (long)got;
+}
+
+/* Is `path` a directory on the volume? (for `cd` validation) */
+int fatvol_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path) {
+    struct fatvol v; uint32_t first, size; int isd;
+    return fatvol_walk(read, ctx, start_lba, path, &v, &first, &size, &isd) && isd;
+}
+
 /* ATA read adapter: a blk_read_fn that reads via ata_read_drive, with the drive
  * index packed into the ctx pointer (so partition_fat32_find keeps its old ATA-
  * only signature while sharing the generalized walk above). */

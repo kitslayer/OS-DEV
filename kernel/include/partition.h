@@ -106,6 +106,14 @@ int fatvol_list(blk_read_fn read, void *ctx, uint64_t start_lba,
 long fatvol_read(blk_read_fn read, void *ctx, uint64_t start_lba,
                  const char name83[11], void *buf, unsigned long max);
 
+/* Subdirectory-aware variants (M1070): `path` is a '/'-separated path relative
+ * to the volume root (empty = root), descending into subdirectories. */
+int  fatvol_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                      fatvol_dirent *out, int max);
+long fatvol_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                      void *buf, unsigned long max);
+int  fatvol_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path);
+
 /* Probe all four ATA drives and log each present drive + its partition table
  * (scheme, and per-partition drive/type/start/size). The headless self-test. */
 void partition_enumerate(void);
