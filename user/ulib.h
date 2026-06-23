@@ -23,6 +23,7 @@ long sys_netinfo(void *buf, unsigned long len);
 long sys_dhcp(void);
 long sys_cas_store(const void *buf, unsigned long len, void *hash32);
 long sys_cas_fetch(const void *hash32, void *buf, unsigned long max);
+long sys_tftp(const char *filename, void *buf, unsigned long max);
 long sys_apps(void *buf, unsigned long len);
 long sys_resolve(const char *host, void *buf, unsigned long len);
 long sys_http(const char *host, const char *path, void *buf, unsigned long max);

@@ -458,7 +458,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "help")) {
             print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
-            print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP)\n");
+            print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]>\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        cas store<file> (content-addressed store, SHA-256 key)  cas fetch<key>  cas (stats)\n");
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
@@ -1117,6 +1117,19 @@ static int run_command(char *line, char *cwd) {
                 char info[128];
                 if (sys_netinfo(info, sizeof(info)) > 0) print(info);
             }
+        } else if (startswith(line, "tftp get ")) {   /* tftp get REMOTE [LOCAL] -- fetch a file over TFTP from the gateway */
+            const char *a = line + 9; while (*a == ' ') a++;
+            char remote[96]; int j = 0; while (*a && *a != ' ' && j < 95) remote[j++] = *a++; remote[j] = 0; sh_unprot_buf(remote);
+            while (*a == ' ') a++;
+            char local[96]; int k = 0; while (*a && *a != ' ' && k < 95) local[k++] = *a++; local[k] = 0; sh_unprot_buf(local);
+            unsigned long cap = 1u << 20; char *buf = malloc(cap);   /* up to 1 MiB */
+            long n = buf ? sys_tftp(remote, buf, cap - 1) : -1;
+            if (n < 0) { print("tftp: transfer failed (no server / not found / too big)\n"); g_status = 1; }
+            else if (local[0]) {
+                if (sys_writefile(local, buf, (unsigned long)n) < 0) { print("tftp: cannot write "); print(local); print("\n"); g_status = 1; }
+                else { print("tftp: saved "); printl(n); print(" bytes to "); print(local); print("\n"); }
+            } else { buf[n] = 0; print(buf); }
+            free(buf);
         } else if (streq(line, "ping")) {
             long n = sys_ping();
             if (n < 0) print("ping: no network\n");

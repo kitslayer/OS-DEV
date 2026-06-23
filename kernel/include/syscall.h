@@ -90,6 +90,7 @@
 #define SYS_dhcp   80   /* ()              -> DHCP DORA: lease IP/gateway/DNS from the server; 0/-1 */
 #define SYS_cas_store 81 /* (buf,len,hash32) -> store a blob in the content-addressed store; writes its SHA-256 key; 0/-1 */
 #define SYS_cas_fetch 82 /* (hash32,buf,max) -> fetch a blob by its SHA-256 key; bytes/-1 */
+#define SYS_tftp   83   /* (server,file,buf,max) -> fetch a file over TFTP into buf; bytes/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

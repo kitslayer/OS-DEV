@@ -407,6 +407,103 @@ int net_dhcp(void) {
 }
 
 /* ===================================================================== *
+ *  A general UDP datagram send + a TFTP client (RFC 1350).
+ *
+ *  udp_send_to wraps a payload in Ethernet/IPv4/UDP and ships it — the
+ *  reusable datagram primitive DNS/DHCP open-coded. TFTP rides on it:
+ *  RRQ -> the server streams DATA blocks, we ACK each. QEMU's SLIRP has a
+ *  built-in TFTP server at 10.0.2.2 (`-netdev user,tftp=DIR`), so this is
+ *  verifiable with no external infrastructure.
+ * ===================================================================== */
+static int parse_ipv4(const char *s, uint8_t out[4]) {
+    int oct = 0, v = 0, any = 0;
+    for (int i = 0; i < 4; i++) out[i] = 0;
+    for (;; s++) {
+        if (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); any = 1; if (v > 255) return -1; }
+        else if (*s == '.' || *s == 0) {
+            if (!any || oct > 3) return -1;
+            out[oct++] = (uint8_t)v; v = 0; any = 0;
+            if (*s == 0) break;
+        } else return -1;
+    }
+    return oct == 4 ? 0 : -1;
+}
+
+/* Send a UDP datagram (payload plen bytes) from sport to dstip:dport via dstmac. */
+static void udp_send_to(const uint8_t *dstmac, const uint8_t *dstip,
+                        uint16_t sport, uint16_t dport, const uint8_t *payload, int plen) {
+    if (plen < 0 || plen > 1400) return;
+    const uint8_t *me = nic_mac();
+    uint8_t pkt[1500];
+    memcpy(pkt + 0, dstmac, 6); memcpy(pkt + 6, me, 6); put16(pkt + 12, 0x0800);
+    uint8_t *ip = pkt + 14, *udp = pkt + 34, *pl = pkt + 42;
+    ip[0] = 0x45; ip[1] = 0; put16(ip + 2, (uint16_t)(20 + 8 + plen)); put16(ip + 4, 0); put16(ip + 6, 0);
+    ip[8] = 64; ip[9] = 17; put16(ip + 10, 0);
+    memcpy(ip + 12, OUR_IP, 4); memcpy(ip + 16, dstip, 4);
+    put16(ip + 10, inet_checksum(ip, 20));
+    put16(udp + 0, sport); put16(udp + 2, dport); put16(udp + 4, (uint16_t)(8 + plen)); put16(udp + 6, 0);
+    for (int i = 0; i < plen; i++) pl[i] = payload[i];
+    nic_send(pkt, 42 + plen);
+}
+
+/* Fetch `filename` from the TFTP server `server_str` (dotted-quad) into `out`
+ * (capacity `max`). Returns the byte length, or -1. Lock-step RRQ/DATA/ACK;
+ * latches the server's transfer port (TID) from its first DATA. */
+long net_tftp_get(const char *server_str, const char *filename, void *out, uint32_t max) {
+    uint8_t srv[4];
+    if (parse_ipv4(server_str, srv) < 0) return -1;
+    uint8_t mac[6];
+    if (!arp_resolve(srv, mac) && !arp_resolve(GW_IP, mac)) return -1;   /* server, else via gateway */
+
+    const uint16_t myport = 0x8200;            /* our client TID */
+    uint16_t tid = 0;                          /* server's TID, learned from its first DATA */
+
+    uint8_t rrq[256]; int rl = 0;              /* Read Request: 01 | filename | 0 | "octet" | 0 */
+    rrq[rl++] = 0; rrq[rl++] = 1;
+    for (const char *p = filename; *p && rl < 220; p++) rrq[rl++] = (uint8_t)*p;
+    rrq[rl++] = 0;
+    for (const char *p = "octet"; *p; p++) rrq[rl++] = (uint8_t)*p;
+    rrq[rl++] = 0;
+    udp_send_to(mac, srv, myport, 69, rrq, rl);
+
+    long total = 0;
+    uint16_t expect = 1;                       /* next DATA block we want */
+    uint8_t buf[1600];
+    int idle = 0;
+    for (;;) {
+        int len = recv_timeout(buf, sizeof buf, 100);   /* ~1 s */
+        if (len <= 0) { if (++idle > 6) return -1; if (tid == 0) udp_send_to(mac, srv, myport, 69, rrq, rl); continue; }   /* no DATA yet: re-send RRQ; mid-transfer: await the server's retransmit */
+        if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 17) continue;   /* IPv4/UDP */
+        int ihl = (buf[14] & 0x0F) * 4; if (ihl < 20) continue;
+        uint8_t *udp = buf + 14 + ihl;
+        if (get16(udp + 2) != myport) continue;          /* to our client port */
+        int tlen = get16(udp + 4) - 8;                   /* TFTP payload length */
+        if (tlen < 4 || 14 + ihl + 8 + tlen > len) continue;
+        uint8_t *tp = udp + 8;
+        uint16_t op = get16(tp);
+        if (op == 5) return -1;                           /* ERROR packet */
+        if (op != 3) continue;                            /* only DATA */
+        uint16_t sport = get16(udp + 0);
+        if (tid == 0) tid = sport;                        /* latch the server's transfer port */
+        else if (sport != tid) continue;                  /* stray sender */
+        uint16_t blk = get16(tp + 2);
+        if (blk == expect) {
+            int dlen = tlen - 4;
+            if ((uint32_t)(total + dlen) > max) return -1;
+            for (int i = 0; i < dlen; i++) ((uint8_t *)out)[total + i] = tp[4 + i];
+            total += dlen;
+            uint8_t ack[4] = { 0, 4, tp[2], tp[3] };      /* ACK this block */
+            udp_send_to(mac, srv, myport, tid, ack, 4);
+            expect++; idle = 0;
+            if (dlen < 512) return total;                 /* a short block ends the transfer */
+        } else {
+            uint8_t ack[4] = { 0, 4, tp[2], tp[3] };      /* re-ACK a duplicate/old block */
+            udp_send_to(mac, srv, myport, tid, ack, 4);
+        }
+    }
+}
+
+/* ===================================================================== *
  *  Minimal TCP client + HTTP/1.0 GET.
  *
  *  Enough TCP to open a connection, send one request, and read the reply

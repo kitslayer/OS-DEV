@@ -37,3 +37,4 @@ const uint8_t *net_mac(void);       /* our 6-byte hardware (MAC) address */
 const uint8_t *net_dns(void);       /* the DNS resolver IPv4 address (4 bytes) */
 int net_proc(char *buf, int max);   /* /proc/net: interface + ARP/DNS caches as text; bytes written */
 int net_dhcp(void);                 /* DHCP DORA handshake: lease IP/gateway/DNS from the server; 0/-1 */
+long net_tftp_get(const char *server, const char *filename, void *out, uint32_t max);  /* TFTP read; bytes/-1 */

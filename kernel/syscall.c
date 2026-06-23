@@ -256,7 +256,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
-    case SYS_pinghost: case SYS_netinfo: case SYS_dhcp:
+    case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp:
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
@@ -298,6 +298,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
+        [SYS_tftp]="tftp",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -474,6 +475,22 @@ void syscall_dispatch(struct registers *r) {
         if (!ubuf(r->rdi, 32) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)cas_fetch((const uint8_t *)r->rdi, (void *)r->rsi, (uint32_t)r->rdx);
         break;
+    case SYS_tftp: {                       /* (filename, buf, max) -> TFTP-fetch from the gateway's server */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        const uint8_t *g = net_gateway();  /* SLIRP's TFTP server lives on the gateway */
+        char gw[16]; int n = 0;
+        for (int o = 0; o < 4; o++) {
+            if (o) gw[n++] = '.';
+            int v = g[o];
+            if (v >= 100) gw[n++] = (char)('0' + v / 100);
+            if (v >= 10)  gw[n++] = (char)('0' + (v / 10) % 10);
+            gw[n++] = (char)('0' + v % 10);
+        }
+        gw[n] = 0;
+        __asm__ volatile("sti");           /* the lock-step transfer needs the timer for its timeouts */
+        r->rax = (uint64_t)(int64_t)net_tftp_get(gw, (const char *)r->rdi, (void *)r->rsi, (uint32_t)r->rdx);
+        break;
+    }
     case SYS_apps:
         if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_list_names((char *)r->rdi, (int)r->rsi);
