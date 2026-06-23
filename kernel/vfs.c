@@ -10,6 +10,7 @@
 #include "procfs.h"
 #include "blockdev.h"
 #include "tmpfs.h"
+#include "fsevents.h"
 
 static struct vfs_ops *fs;
 
@@ -138,22 +139,34 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
 long vfs_write(const char *name, const void *buf, unsigned long len) {
     char ap[96]; const char *tb;
     if (synth_path(name, ap, sizeof ap)) { long r = procfs_write(ap, buf, len); return r == -2 ? -1 : r; }
-    if (tmp_path(name, &tb)) return tmpfs_write(tb, buf, len);
-    int midx; char fpath[192];
-    if (mount_path(name, &midx, fpath, sizeof fpath)) return -1;   /* disk mounts are read-only */
-    return (fs && fs->write) ? fs->write(name, buf, len) : -1;
+    long r;
+    if (tmp_path(name, &tb)) r = tmpfs_write(tb, buf, len);
+    else {
+        int midx; char fpath[192];
+        if (mount_path(name, &midx, fpath, sizeof fpath)) return -1;   /* disk mounts are read-only */
+        r = (fs && fs->write) ? fs->write(name, buf, len) : -1;
+    }
+    if (r >= 0) fsevents_record('w', name);    /* a real file changed (M1085) */
+    return r;
 }
 
 long vfs_remove(const char *name) {
     const char *tb;
-    if (tmp_path(name, &tb)) return tmpfs_remove(tb);
-    int midx; char fpath[192];
-    if (mount_path(name, &midx, fpath, sizeof fpath)) return -1;   /* disk mounts are read-only */
-    return (fs && fs->remove) ? fs->remove(name) : -1;
+    long r;
+    if (tmp_path(name, &tb)) r = tmpfs_remove(tb);
+    else {
+        int midx; char fpath[192];
+        if (mount_path(name, &midx, fpath, sizeof fpath)) return -1;   /* disk mounts are read-only */
+        r = (fs && fs->remove) ? fs->remove(name) : -1;
+    }
+    if (r >= 0) fsevents_record('d', name);
+    return r;
 }
 
 long vfs_mkdir(const char *path) {
-    return (fs && fs->mkdir) ? fs->mkdir(path) : -1;
+    long r = (fs && fs->mkdir) ? fs->mkdir(path) : -1;
+    if (r >= 0) fsevents_record('m', path);
+    return r;
 }
 
 /* Create a symlink `linkpath` -> `target`. Only the RAM /tmp backend supports
@@ -161,7 +174,11 @@ long vfs_mkdir(const char *path) {
  * so the link must live under /tmp. Returns 0 / -1 (M1081). */
 long vfs_symlink(const char *linkpath, const char *target) {
     const char *base;
-    if (tmp_path(linkpath, &base)) return tmpfs_symlink(base, target);
+    if (tmp_path(linkpath, &base)) {
+        long r = tmpfs_symlink(base, target);
+        if (r >= 0) fsevents_record('l', linkpath);
+        return r;
+    }
     return -1;
 }
 
@@ -219,5 +236,7 @@ long vfs_find(const char *want, char *out, int max) {
 }
 
 long vfs_rename(const char *path, const char *newname) {
-    return (fs && fs->rename) ? fs->rename(path, newname) : -1;
+    long r = (fs && fs->rename) ? fs->rename(path, newname) : -1;
+    if (r >= 0) fsevents_record('r', path);
+    return r;
 }
