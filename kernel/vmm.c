@@ -173,6 +173,65 @@ void vmm_destroy_address_space(uint64_t cr3) {
 }
 
 /*
+ * Copy-on-write clone the CURRENT (parent) address space into child_cr3, for
+ * fork() (M1116). Walks the same private PML4[0] subtree as the teardown/wss
+ * walks (a PDPT slot differing from boot's is app-private). For each present
+ * user 4 KiB leaf:
+ *   - a WRITABLE page becomes read-only + PTE_COW in BOTH parent and child, and
+ *     the shared frame gets one extra reference (pmm_addref) — a later write in
+ *     either process faults and copies (app_fault_handle).
+ *   - a read-only page is shared as-is (one extra ref), still RO.
+ * Page-TABLE pages are never shared: vmm_map_to builds fresh tables in the child
+ * (so each address space frees its own hierarchy at teardown, no double-free).
+ * Frames outside the refcount array (>1 GiB; impossible at 256 MiB) are eagerly
+ * copied instead, so they're never double-freed. The parent's TLB is flushed
+ * (CR3 reload) because we write-protected its live pages. Returns 0, or -1.
+ */
+int vmm_fork_cow(uint64_t child_cr3) {
+    uint64_t cr3 = read_cr3() & ADDR_MASK;
+    uint64_t *pml4  = phys_to_table(cr3);
+    uint64_t *bpml4 = phys_to_table(kernel_pml4);
+    uint64_t pml4e = pml4[0];
+    if (!(pml4e & PTE_PRESENT) || (pml4e & ADDR_MASK) == (bpml4[0] & ADDR_MASK)) return 0;
+    uint64_t *pdpt  = phys_to_table(pml4e & ADDR_MASK);
+    uint64_t *bpdpt = phys_to_table(bpml4[0] & ADDR_MASK);
+    int rc = 0;
+    for (int i = 0; i < 512 && rc == 0; i++) {
+        if (!(pdpt[i] & PTE_PRESENT)) continue;
+        if ((pdpt[i] & ADDR_MASK) == (bpdpt[i] & ADDR_MASK)) continue;   /* shared boot PD */
+        if (pdpt[i] & PTE_HUGE) continue;
+        uint64_t *pd = phys_to_table(pdpt[i] & ADDR_MASK);
+        for (int j = 0; j < 512 && rc == 0; j++) {
+            if (!(pd[j] & PTE_PRESENT) || (pd[j] & PTE_HUGE)) continue;
+            uint64_t *pt = phys_to_table(pd[j] & ADDR_MASK);
+            for (int k = 0; k < 512; k++) {
+                uint64_t e = pt[k];
+                if (!(e & PTE_PRESENT) || !(e & PTE_USER)) continue;
+                uint64_t phys = e & ADDR_MASK;
+                uint64_t va = ((uint64_t)i << 30) | ((uint64_t)j << 21) | ((uint64_t)k << 12);  /* PML4 idx 0 */
+                if (!pmm_refcountable(phys)) {            /* can't refcount -> eager private copy */
+                    uint64_t nf = pmm_alloc_frame();
+                    if (!nf) { rc = -1; break; }
+                    uint8_t *s = hhdm(phys), *d = hhdm(nf);
+                    for (int b = 0; b < PAGE_SIZE; b++) d[b] = s[b];
+                    if (vmm_map_to(child_cr3, va, nf, e & (PTE_WRITABLE | PTE_USER | PTE_NX)) != 0) { pmm_free_frame(nf); rc = -1; break; }
+                    continue;
+                }
+                uint64_t flags = e & (PTE_USER | PTE_NX);
+                if (e & PTE_WRITABLE) {                   /* COW: write-protect both sides, mark COW */
+                    pt[k] = (e & ~PTE_WRITABLE) | PTE_COW; /* parent now RO + COW */
+                    flags |= PTE_COW;
+                }
+                if (vmm_map_to(child_cr3, va, phys, flags) != 0) { rc = -1; break; }
+                pmm_addref(phys);                         /* one extra ref for the child's mapping */
+            }
+        }
+    }
+    __asm__ volatile("mov %0, %%cr3" : : "r"(cr3) : "memory");   /* flush parent TLB (we write-protected it) */
+    return rc;
+}
+
+/*
  * Walk every present ring-3 (PTE_USER) 4 KiB leaf in address space `cr3`. This
  * is the read-only twin of vmm_destroy_address_space and rests on the same
  * invariant: the app's private user region lives only under PML4[0], and a PDPT

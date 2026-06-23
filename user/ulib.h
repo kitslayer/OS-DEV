@@ -6,6 +6,7 @@ long sys_write(int fd, const void *buf, unsigned long len);
 long sys_read(int fd, void *buf, unsigned long len);
 void sys_exit(int code);
 int  sys_getpid(void);
+long sys_fork(void);                 /* COW fork: child returns 0, parent returns child pid, -1 on failure (M1116) */
 long sys_list(void *buf, unsigned long len);
 long sys_readfile(const char *name, void *buf, unsigned long len);
 long sys_writefile(const char *name, const void *buf, unsigned long len);

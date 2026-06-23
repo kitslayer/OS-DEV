@@ -81,6 +81,7 @@ global crash_elf_start, crash_elf_end
 global futex_elf_start, futex_elf_end
 global nettcp_elf_start, nettcp_elf_end
 global crashinfo_elf_start, crashinfo_elf_end
+global forktest_elf_start, forktest_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -373,5 +374,9 @@ nettcp_elf_end:
 crashinfo_elf_start:
     incbin "build/crashinfo.elf"
 crashinfo_elf_end:
+
+forktest_elf_start:
+    incbin "build/forktest.elf"
+forktest_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

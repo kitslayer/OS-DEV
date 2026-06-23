@@ -37,6 +37,7 @@ int      vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags);
 void     vmm_unmap(uint64_t virt);
 uint64_t vmm_translate(uint64_t virt);   /* physical address, or 0 if unmapped */
 uint64_t vmm_translate_in(uint64_t cr3, uint64_t virt);  /* ...in an arbitrary address space (another process); 0 if unmapped */
+int      vmm_fork_cow(uint64_t child_cr3);  /* COW-clone the CURRENT space into child_cr3 (fork); 0/-1 (M1116) */
 int      vmm_protect(uint64_t virt, uint64_t flags);  /* rewrite a mapped page's flags (mprotect); 0/-1 */
 int      vmm_user_ok(uint64_t ptr, uint64_t len);  /* is [ptr,ptr+len) user-accessible (PTE_USER) in the current space? for syscall arg validation */
 int      vmm_user_str_ok(uint64_t ptr, uint64_t max);  /* is the NUL-terminated string at ptr entirely in user pages (<= max bytes)? */
@@ -55,6 +56,8 @@ int      vmm_clear_accessed(uint64_t cr3);
  * not-present-but-swapped page (PTE_SWAP marker + a slot index) is distinct
  * from an unmapped one. vmm_set_raw requires the page table to already exist. */
 #define PTE_SWAP (1ull << 9)   /* software bit: this not-present page is swapped out */
+#define PTE_COW  (1ull << 10)  /* software bit: this PRESENT page is copy-on-write (shared by a fork); a write faults + copies (M1116) */
+#define PTE_ADDR_MASK 0x000FFFFFFFFFF000ull  /* the physical frame address bits of a PTE */
 uint64_t vmm_pte_raw(uint64_t virt);
 void     vmm_set_raw(uint64_t virt, uint64_t pte);
 

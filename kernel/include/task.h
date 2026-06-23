@@ -36,6 +36,7 @@ void    task_block(void);                  /* block current task until woken */
 void    task_wake(task_t *t);              /* mark a blocked task runnable again */
 void    task_sleep_ms(uint64_t ms);        /* sleep the current task off-CPU until the timer wakes it */
 void    task_wake_sleepers(void);          /* timer IRQ: wake tasks whose sleep deadline passed */
+void    task_copy_fpu(task_t *dst, task_t *src);   /* clone src's live FP/SSE state into dst (fork) */
 void    task_stop(task_t *t);              /* suspend another task (READY/RUNNING -> STOPPED); not self */
 void    task_cont(task_t *t);              /* resume a STOPPED task */
 int     task_count(void);                  /* number of live tasks */

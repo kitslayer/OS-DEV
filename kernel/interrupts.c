@@ -83,7 +83,7 @@ void isr_dispatch(struct registers *r) {
             if (r->int_no == 14) {                 /* page fault: maybe a demand-paged mmap region */
                 uint64_t cr2;
                 __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
-                if (app_fault_handle(cr2)) return;  /* mapped a reserved page -> retry the instruction */
+                if (app_fault_handle(cr2, r->err_code)) return;  /* COW copy / swap-in / mapped a reserved page -> retry */
             }
             if (app_signal_deliver(r, 11)) return;  /* SIGSEGV: a registered handler catches the fault */
             kprintf("[fault] %s (vector %lu) err=0x%lx in a ring-3 task at rip=%p -- terminating it\n",

@@ -192,5 +192,13 @@ int pmm_refcount(uint64_t phys) {
     return frame < PMM_MAXREFS ? pmm_refs[frame] : 0;
 }
 
+/* Is this frame within the refcount array's coverage? COW sharing (fork) must
+ * only share frames whose references can be counted — a frame beyond the array
+ * (>1 GiB) would be double-freed at teardown. At the 256 MiB guest size every
+ * allocatable frame qualifies; this is defensive insurance if -m ever grows. */
+int pmm_refcountable(uint64_t phys) {
+    return (phys / PAGE_SIZE) < PMM_MAXREFS;
+}
+
 uint64_t pmm_total_bytes(void) { return total_frames * PAGE_SIZE; }
 uint64_t pmm_free_bytes(void)  { return (total_frames - used_frames) * PAGE_SIZE; }

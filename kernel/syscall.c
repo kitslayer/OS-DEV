@@ -263,7 +263,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
     case SYS_clip_get: case SYS_clip_set:
         return PL_GFX;
-    case SYS_spawn: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
+    case SYS_spawn: case SYS_fork: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
         return PL_VM;
@@ -301,6 +301,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_sntp]="sntp",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
+        [SYS_fork]="fork",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -339,6 +340,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_getpid:
         r->rax = (uint64_t)app_sys_getpid();
+        break;
+    case SYS_fork:                         /* copy-on-write fork: child gets 0, parent gets the child pid (M1116) */
+        r->rax = (uint64_t)app_fork(r);
         break;
     case SYS_list: {
         /* Format the root directory into the user buffer: "name  size\n". */

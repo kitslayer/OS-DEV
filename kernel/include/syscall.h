@@ -100,6 +100,7 @@
 #define SYS_futex  90   /* (uaddr, op, val) -> FUTEX_WAIT(0): block if *uaddr==val; FUTEX_WAKE(1): wake up to val waiters */
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1
+#define SYS_fork   91   /* () -> copy-on-write fork: child returns 0, parent returns the child's pid; -1 on failure */
 
 #define SYSCALL_VECTOR 0x80
 

@@ -61,8 +61,9 @@ int      app_madvise(uint64_t addr, uint64_t len, int advice);  /* MADV_DONTNEED
 int      app_swap_out(uint64_t addr, uint64_t len);             /* page out anon pages in range to swap; pages/-1 (M1105) */
 uint64_t app_shm_open(const char *name, uint64_t size);         /* map a named shared-memory object; base VA or 0 (M1108) */
 long     app_futex(uint64_t uaddr, int op, int val);            /* FUTEX_WAIT/WAKE on a (possibly shared) user word (M1109) */
-int      app_fault_handle(uint64_t cr2);            /* #PF hook: lazily map an mmap page; 1 if handled */
+int      app_fault_handle(uint64_t cr2, uint64_t err); /* #PF hook: COW copy / swap-in / lazily map an mmap page; 1 if handled */
 struct registers;                                   /* (interrupts.h) */
+long     app_fork(struct registers *r);             /* COW fork: child returns 0, parent returns child pid; -1 fail (M1116) */
 void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */
 int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */

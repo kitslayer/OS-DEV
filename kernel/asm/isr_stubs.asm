@@ -98,7 +98,8 @@ isr_common:
     cld                     ; SysV ABI: direction flag must be clear in C
     mov rdi, rsp            ; first arg = pointer to struct registers
     call isr_dispatch
-
+    ; fall through into the shared return tail
+isr_return_tail:           ; resume ring3 from the struct registers at [rsp]
     pop r15
     pop r14
     pop r13
@@ -117,6 +118,21 @@ isr_common:
 
     add rsp, 16             ; discard int_no + err_code
     iretq                   ; restore rip/cs/rflags/rsp/ss, resume
+
+; void iret_to_user(struct registers *r /* rdi */) — resume ring 3 from a cloned
+; trap frame (used by fork's child: r->rax preset to 0). Sets user data segments
+; (iretq only restores CS/SS), points RSP at the frame, and runs the shared tail.
+; Interrupts are masked until the iretq restores RFLAGS (which has IF set).
+global iret_to_user
+iret_to_user:
+    cli
+    mov ax, 0x23            ; USER_DS into the data segments
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov rsp, rdi           ; RSP -> the saved struct registers (r15 at the lowest addr)
+    jmp isr_return_tail
 
 ; --- table the C side reads to fill the IDT ---------------------------------
 section .rodata

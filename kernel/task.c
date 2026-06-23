@@ -40,6 +40,15 @@ static void fx_alloc(task_t *t) {              /* give a task its own FP save ar
     if (t->fxbuf) memcpy(fxptr(t), fpu_template, FXSZ);
 }
 
+/* Copy the FP/SSE state of `src` (which must be the running task) into `dst` —
+ * for fork(), so a child of a process mid-float-computation inherits its state.
+ * fpu_save captures the live CPU FP state into src's area first. */
+void task_copy_fpu(task_t *dst, task_t *src) {
+    if (!dst || !src || !dst->fxbuf || !src->fxbuf) return;
+    fpu_save(fxptr(src));                      /* src is current: capture its live FP state */
+    memcpy(fxptr(dst), fxptr(src), FXSZ);
+}
+
 static uint64_t active_cr3;     /* the address space currently loaded in CR3 */
 static task_t *idle_task;       /* the scheduling floor: never blocks/exits, run ONLY when no other task is runnable (so a task that blocks itself when nothing else is ready hands off to this instead of spinning marked-BLOCKED). NULL until created -> switch_to_next falls back to its prior behavior. */
 

@@ -106,6 +106,7 @@ struct app {
     int      nuv;                        /* number of unveil entries */
     int      uv_active;                  /* 1 once unveil() has been called (then file paths are checked) */
     int      uv_locked;                  /* 1 after unveil(NULL): no more unveils accepted */
+    struct registers fork_frame;         /* a forked child's saved trap frame (rax=0); iret_to_user resumes it (M1116) */
 };
 
 static struct app apps[MAX_APPS];
@@ -148,7 +149,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -223,10 +224,12 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "futex", futex_elf_start, "Futex demo" },
     { "nettcp", nettcp_elf_start, "TCP-over-files demo" },
     { "crashinfo", crashinfo_elf_start, "Core-dump reader" },
+    { "forktest", forktest_elf_start, "COW fork demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
 extern void enter_user(uint64_t entry, uint64_t ustack);
+extern void iret_to_user(struct registers *r);   /* resume ring3 from a cloned trap frame (fork child); asm, no return */
 
 int app_cols(void) { return APP_COLS; }
 int app_rows(void) { return APP_ROWS; }
@@ -1121,11 +1124,29 @@ long app_futex(uint64_t uaddr, int op, int val) {
  * inside a reserved mmap region, map a fresh zeroed frame into the (active) app
  * space and report it resolved so the instruction retries; else 0 = a real
  * fault, and the app is terminated as before. */
-int app_fault_handle(uint64_t cr2) {
+int app_fault_handle(uint64_t cr2, uint64_t err) {
     struct app *a = cur();
     if (!a) return 0;
     uint64_t fpage = cr2 & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t pte = vmm_pte_raw(fpage);
+    /* Copy-on-write (M1116): a WRITE fault (err bit 1) to a present, COW-marked
+     * page — a frame shared by a fork. If we're the sole remaining owner just
+     * make it writable again; otherwise allocate a private copy and drop our ref
+     * on the shared frame (the other process keeps it). vmm_set_raw invlpg's. */
+    if ((pte & PTE_PRESENT) && (pte & PTE_COW) && (err & 2)) {
+        uint64_t old = pte & PTE_ADDR_MASK;
+        if (pmm_refcount(old) == 0) {
+            vmm_set_raw(fpage, (pte & ~PTE_COW) | PTE_WRITABLE);
+        } else {
+            uint64_t nf = pmm_alloc_frame();
+            if (!nf) return 0;                      /* OOM -> let it fault/die */
+            uint8_t *s = (uint8_t *)hhdm(old), *d = (uint8_t *)hhdm(nf);
+            for (int b = 0; b < PAGE_SIZE; b++) d[b] = s[b];
+            vmm_set_raw(fpage, nf | PTE_PRESENT | (pte & (PTE_USER | PTE_NX)) | PTE_WRITABLE);
+            pmm_free_frame(old);                    /* decrements the shared frame's refcount */
+        }
+        return 1;
+    }
     if (!(pte & 1) && (pte & PTE_SWAP)) {           /* a swapped-out page (M1105): fault it back in */
         int slot = (int)(pte >> 12);
         uint64_t frame = pmm_alloc_frame();
@@ -1688,6 +1709,72 @@ fail_in_space:
     vmm_destroy_address_space(a->cr3);
     a->used = 0;
     return 0;
+}
+
+/* The kernel-thread entry for a forked child: resume ring 3 from the trap frame
+ * we cloned from the parent at fork time (rax = 0). Never returns — it iretq's
+ * into userspace, and the child later exits via the normal task_exit path. */
+static void fork_child_trampoline(void) {
+    struct app *a = cur();
+    iret_to_user(&a->fork_frame);
+}
+
+/* COW fork() (M1116). Clone the calling process: a new app_t with its own blank
+ * window, a copy-on-write clone of the address space (vmm_fork_cow), and a child
+ * task that resumes at the parent's instruction after `int 0x80` with rax = 0.
+ * The parent returns the child's pid. `r` is the parent's live trap frame. */
+long app_fork(struct registers *r) {
+    struct app *p = cur();
+    if (!p || !r) return -1;
+
+    struct app *a = 0;
+    for (int i = 0; i < MAX_APPS; i++) if (!apps[i].used) { a = &apps[i]; break; }
+    if (!a) return -1;                                  /* process table full */
+
+    memset(a, 0, sizeof(*a));
+    a->used = 1;
+    a->pid = next_pid++;                                /* a FRESH pid (not the parent's) */
+    /* title: the parent's, marked as a fork */
+    int ti = 0; const char *pt = p->title ? p->title : "app";
+    while (pt[ti] && ti < 16) { a->titlebuf[ti] = pt[ti]; ti++; }
+    const char *sfx = " (fork)"; for (int s = 0; sfx[s] && ti < 23; s++) a->titlebuf[ti++] = sfx[s];
+    a->titlebuf[ti] = 0; a->title = a->titlebuf;
+    grid_clear(a);
+
+    /* Build the child's address space as a COW clone of the parent (current). */
+    a->cr3 = vmm_create_address_space();
+    if (!a->cr3) { a->used = 0; return -1; }
+    vdso_map(a->cr3);                                   /* the RO vDSO page (shared, RO — not COW) */
+    if (vmm_fork_cow(a->cr3) != 0) { vmm_destroy_address_space(a->cr3); a->used = 0; return -1; }
+
+    /* Inherit the parent's process state (NOT its window/grid/task/identity). */
+    a->entry = p->entry; a->ustack = p->ustack; a->heap_end = p->heap_end;
+    a->mmap_next = p->mmap_next; a->nvma = p->nvma;
+    for (int i = 0; i < APP_MAXVMA; i++) a->vma[i] = p->vma[i];
+    for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = p->sig_handler[i];
+    a->sig_restorer = p->sig_restorer; a->curcol = p->curcol;
+    /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
+    a->promises = p->promises; a->pledged = p->pledged;
+    a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;
+    for (int i = 0; i < APP_NUNVEIL; i++) a->uv[i] = p->uv[i];
+    int li = 0; while (p->launch_arg[li] && li < 127) { a->launch_arg[li] = p->launch_arg[li]; li++; }
+    a->launch_arg[li] = 0;
+    /* NOT inherited (POSIX): pending signals, alarms, strace, gfx-mode canvas. */
+
+    /* The child's resume context: the parent's trap frame, but returning 0. */
+    a->fork_frame = *r;
+    a->fork_frame.rax = 0;
+    a->fork_frame.rflags |= 0x200;                      /* ensure IF is set in ring 3 */
+
+    a->task = task_create_stack(fork_child_trampoline, a->cr3, a, 256 * 1024);
+    if (!a->task) { vmm_destroy_address_space(a->cr3); a->used = 0; return -1; }
+    /* copy the parent's live FP/SSE state so a child mid-float-computation is correct */
+    task_copy_fpu(a->task, p->task);
+
+    /* give the child its own window (the WM consumes the pending queue) */
+    int n = (pend_h + 1) % MAX_APPS;
+    if (n != pend_t) { pending[pend_h] = a; pend_h = n; }
+    return a->pid;
 }
 
 /* Load and run an ELF program from a FAT32 file (e.g. `run calc.elf`). The ELF
