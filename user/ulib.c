@@ -47,6 +47,7 @@ long sys_clone(void *fn, void *stack, void *arg) { return do_syscall(SYS_clone, 
 int  sys_gettid(void) { return (int)do_syscall(SYS_gettid, 0, 0, 0); }
 void sys_thread_exit(void) { do_syscall(SYS_thread_exit, 0, 0, 0); for (;;) {} }
 int  sys_join(int tid) { return (int)do_syscall(SYS_join, tid, 0, 0); }
+void sys_set_tls(void *base) { do_syscall(SYS_set_tls, (long)base, 0, 0); }   /* set %fs base for thread-local storage */
 
 /* A futex-backed mutex (M1139): the lock word is 0 = free, 1 = held. Uncontended
  * lock/unlock is a single atomic with no syscall; only a waiter sleeps. */

@@ -23,6 +23,7 @@ typedef struct task {
     uint64_t      wake_at;     /* if BLOCKED via task_sleep_ms: timer_ms() deadline (0 = not a timed sleep) */
     struct registers *uframe;  /* most recent ring-3 trap frame (for /proc/<pid>/regs); valid while stopped (M1119) */
     struct registers *start_frame;  /* a thread's initial ring-3 frame: iret'd to once at startup, then freed (M1138) */
+    uint64_t      fs_base;     /* per-thread %fs base for TLS; 0 = unused (restored on switch, M1140) */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */
@@ -36,6 +37,7 @@ void    task_exit(void);                   /* end the current thread (no return)
 void    task_free(task_t *t);              /* free a DEAD, unlinked, off-CPU task (reaper only) */
 int     task_current_id(void);
 task_t *task_self(void);                   /* the currently running task */
+void    task_set_fs_base(uint64_t b);      /* set the current thread's %fs (TLS) base (M1140) */
 void    task_block(void);                  /* block current task until woken */
 void    task_wake(task_t *t);              /* mark a blocked task runnable again */
 void    task_sleep_ms(uint64_t ms);        /* sleep the current task off-CPU until the timer wakes it */

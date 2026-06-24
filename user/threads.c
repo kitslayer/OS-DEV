@@ -1,25 +1,32 @@
-// threads.c — kernel threads + sync demo (M1138/M1139). Several threads share
-// ONE address space and hammer a shared counter, but each increment is now a
-// plain non-atomic counter++ guarded by a futex-backed MUTEX. If the mutex truly
-// serializes them, the final count is exact (NTHREADS * PER); if it didn't, lost
-// updates would make it short. The main thread then JOINs each worker (a real
-// kernel wait-for-thread that also reaps it), instead of polling.
+// threads.c — the full kernel-threads stack (M1138/M1139/M1140). Several threads
+// share ONE address space and:
+//   - hammer a shared counter, each increment guarded by a futex MUTEX
+//     (a non-atomic counter++ that only stays exact if the mutex serializes them);
+//   - are waited on with a real kernel JOIN (which also reaps them);
+//   - each gets its OWN thread-local storage via a per-thread %fs base (TLS):
+//     a thread writes its tid through %fs:0 and it lands in *its own* slot,
+//     proving %fs is restored per-thread across preemption.
 #include "ulib.h"
 
 #define NTHREADS 4
 #define PER      2000
 
-static volatile int counter = 0;     // shared by every thread
-static volatile int lock    = 0;     // the mutex word (0 = free, 1 = held)
+static volatile int  counter = 0;          // shared by every thread
+static volatile int  lock    = 0;          // the futex mutex word
+static volatile long tls_slot[NTHREADS];   // thread i points its %fs base at tls_slot[i]
+static int           spawn_tid[NTHREADS];
+
+static void fs_set0(long v) { __asm__ volatile("movq %0, %%fs:0" :: "r"(v) : "memory"); }  // *(%fs+0) = v
 
 static void worker(void *arg) {
-    (void)arg;
-    for (int i = 0; i < PER; i++) {
+    int i = (int)(long)arg;
+    sys_set_tls((void *)&tls_slot[i]);      // per-thread TLS base
+    fs_set0(sys_gettid());                  // write my tid via %fs:0 -> my own tls_slot[i]
+    for (int k = 0; k < PER; k++) {
         mutex_lock(&lock);
-        counter++;                   // a NON-atomic increment, made safe by the mutex
+        counter++;                          // non-atomic, made safe by the mutex
         mutex_unlock(&lock);
     }
-    // falls off the end -> thread_exit_stub -> sys_thread_exit
 }
 
 static void pdec(long v) {
@@ -31,22 +38,26 @@ static void pdec(long v) {
 }
 
 int main(void) {
-    print("threads: main tid="); pdec(sys_gettid()); print("\n");
-    print("spawning "); pdec(NTHREADS); print(" threads; each does "); pdec(PER);
-    print(" MUTEX-guarded increments of a shared counter.\n\n");
+    print("threads: main tid="); pdec(sys_gettid());
+    print(" -- spawning "); pdec(NTHREADS); print(" threads (shared AS + mutex + join + TLS)\n\n");
 
-    int tid[NTHREADS];
     for (int i = 0; i < NTHREADS; i++) {
-        tid[i] = thread_spawn(worker, 0);
-        print("  spawned tid="); pdec(tid[i]); print("\n");
+        spawn_tid[i] = thread_spawn(worker, (void *)(long)i);
+        print("  spawned tid="); pdec(spawn_tid[i]); print("\n");
     }
-    for (int i = 0; i < NTHREADS; i++) sys_join(tid[i]);   // wait for + reap each (no polling)
+    for (int i = 0; i < NTHREADS; i++) sys_join(spawn_tid[i]);   // wait + reap each
 
-    print("\nall threads joined. shared counter = "); pdec(counter);
+    print("\nmutex:  shared counter = "); pdec(counter);
     print("  (expected "); pdec((long)NTHREADS * PER); print(")\n");
-    print(counter == NTHREADS * PER
-          ? "PASS: the futex mutex serialized the threads; join + reap worked.\n"
-          : "FAIL: lost updates (mutex broken) or bad join.\n");
+
+    int tls_ok = 1;
+    for (int i = 0; i < NTHREADS; i++) if (tls_slot[i] != spawn_tid[i]) tls_ok = 0;
+    print("TLS:    each thread's fs:0 write landed in its own slot: ");
+    print(tls_ok ? "YES\n" : "NO\n");
+
+    print((counter == NTHREADS * PER && tls_ok)
+          ? "\nPASS: shared address space + futex mutex + join/reap + per-thread TLS all work.\n"
+          : "\nFAIL\n");
 
     sys_sleep(20000);
     return 0;

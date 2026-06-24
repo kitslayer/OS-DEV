@@ -244,7 +244,7 @@ static int pci_format(char *b, int max) {
 static uint32_t syscall_class(uint64_t nr) {
     switch (nr) {
     case SYS_exit: case SYS_sigreturn: case SYS_getpid: case SYS_pledge:
-    case SYS_gettid: case SYS_thread_exit: return 0;
+    case SYS_gettid: case SYS_thread_exit: case SYS_set_tls: return 0;
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
@@ -316,7 +316,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",
+        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -857,6 +857,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_join:                         /* (tid): wait for a thread to exit + reap it (M1139) */
         r->rax = (uint64_t)app_join((int)r->rdi);
+        break;
+    case SYS_set_tls:                      /* (base): set this thread's %fs TLS base (M1140) */
+        task_set_fs_base(r->rdi);          /* a bare base; ring-3 %fs accesses are CPU-checked */
+        r->rax = 0;
         break;
     case SYS_uffd_register:                /* (addr, len): route this region's faults to a monitor (M1134) */
         r->rax = (uint64_t)(int64_t)app_uffd_register(r->rdi, r->rsi);

@@ -61,6 +61,19 @@ static inline void load_cr3(uint64_t v) {
     __asm__ volatile("mov %0, %%cr3" : : "r"(v) : "memory");
 }
 
+/* Per-thread %fs base for TLS (M1140). The kernel never uses FS_BASE itself, so
+ * we only touch the MSR on behalf of threads that set one; `loaded_fs_base`
+ * tracks the live value so a system with no TLS pays nothing (stays 0 == 0). */
+#define MSR_FS_BASE 0xC0000100u
+static uint64_t loaded_fs_base = 0;
+static void load_fs_base(uint64_t b) {
+    if (b == loaded_fs_base) return;
+    __asm__ volatile("wrmsr" : : "c"(MSR_FS_BASE), "a"((uint32_t)b), "d"((uint32_t)(b >> 32)));
+    loaded_fs_base = b;
+}
+/* Set the CURRENT thread's TLS base (live + saved for restore). M1140. */
+void task_set_fs_base(uint64_t b) { current->fs_base = b; load_fs_base(b); }
+
 /* Save RFLAGS and disable interrupts (returns old flags); and restore them.
  * Scheduling edits the shared ready ring, so it must be uninterruptible. */
 static inline uint64_t irq_save(void) {
@@ -187,6 +200,7 @@ static void switch_to_next(void) {
         tss_set_rsp0(next->kstack_top);     /* traps from ring 3 land here */
     if (prev->fxbuf) fpu_save(fxptr(prev));     /* preserve FP/SSE across the switch */
     if (next->fxbuf) fpu_restore(fxptr(next));
+    load_fs_base(next->fs_base);                 /* restore the thread's TLS base (M1140) */
     context_switch(&prev->rsp, next->rsp);
 }
 
@@ -306,6 +320,7 @@ void task_exit(void) {
     if (next->kstack_top)
         tss_set_rsp0(next->kstack_top);
     if (next->fxbuf) fpu_restore(fxptr(next));   /* the dead task's FP state is discarded */
+    load_fs_base(next->fs_base);                 /* restore the thread's TLS base (M1140) */
     context_switch(&dead->rsp, next->rsp);   /* dead->rsp save is discarded */
     /* unreachable */
 }

@@ -100,6 +100,7 @@ int  thread_spawn(void (*fn)(void *), void *arg);  /* convenience: alloc a stack
 int  sys_join(int tid);                            /* block until thread tid exits + reap it; 0/-1 (M1139) */
 void mutex_lock(volatile int *m);                  /* futex-backed mutex (M1139); lock word: 0=free 1=held */
 void mutex_unlock(volatile int *m);
+void sys_set_tls(void *base);                      /* set this thread's %fs base for TLS (M1140) */
 void *sys_ringbuf(unsigned long len);           /* a magic mirrored ring buffer (mapped twice back-to-back); base or 0 */
 int   sys_mprotect(void *addr, unsigned long len, int prot);  /* change R/W/X (prot: 1=R 2=W 4=X); 0/-1 */
 int   sys_bind(const char *from, const char *to);  /* bind mount: graft FROM's subtree onto path TO; 0/-1 */
