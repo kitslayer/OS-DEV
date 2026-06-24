@@ -107,6 +107,38 @@ int main(int argc, char **argv) {
         exercise();
     }
     printf("fuzz: %d corrupt-metadata iterations, no OOB / no hang\n", ITERS);
+
+    /* 3) ext4 extent-mapped reads (M1186): if an extent image is given, its
+     *    extent-flag inodes must read byte-exact, and fuzzing its metadata (which
+     *    now carries the in-inode extent tree) must stay OOB/hang-safe. */
+    if (argc > 2) {
+        FILE *xf = fopen(argv[2], "rb");
+        if (!xf) { fprintf(stderr, "open extent image failed\n"); return 1; }
+        g_golden_bytes = (long)fread(g_golden, 1, sizeof g_golden, xf); fclose(xf);
+        memcpy(g_img, g_golden, (size_t)g_golden_bytes); g_img_bytes = g_golden_bytes;
+        static uint8_t big[131072];
+        long bn = ext2_read_path(bd_read, 0, 0, "/BIG.TXT", big, sizeof big);
+        int okb = (bn == 100000);
+        for (long i = 0; i < bn && okb; i++) if (big[i] != 'E') okb = 0;
+        if (!okb) { fprintf(stderr, "extent /BIG.TXT read wrong (%ld)\n", bn); return 1; }
+        long sn = ext2_read_path(bd_read, 0, 0, "/SMALL.TXT", big, sizeof big);
+        if (sn != 19 || memcmp(big, "hello extent world\n", 19) != 0) {
+            fprintf(stderr, "extent /SMALL.TXT read wrong (%ld)\n", sn); return 1;
+        }
+        printf("extent: /BIG.TXT %ld bytes + /SMALL.TXT byte-exact via the extent tree\n", bn);
+        long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;
+        for (int iter = 0; iter < 6000; iter++) {
+            memcpy(g_img, g_golden, (size_t)g_golden_bytes); g_img_bytes = g_golden_bytes;
+            int flips = 1 + (int)(seed % 12);
+            for (int k = 0; k < flips; k++) {
+                seed = seed * 1103515245u + 12345u; long off = (long)(seed % (unsigned)emeta);
+                seed = seed * 1103515245u + 12345u; g_img[off] ^= (uint8_t)(seed >> 13);
+            }
+            (void)ext2_read_path(bd_read, 0, 0, "/BIG.TXT", big, sizeof big);   /* walks the (corrupt) extent tree */
+            exercise();
+        }
+        printf("extent fuzz: 6000 corrupt-extent-tree iterations, no OOB / no hang\n");
+    }
     printf("PASS\n");
     return 0;
 }

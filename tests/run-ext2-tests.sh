@@ -26,13 +26,25 @@ head -c 300000 /dev/zero | tr '\0' 'A' > /tmp/osdev_ext2_big.txt    # 300 KB -> 
 debugfs -w -R "write /tmp/osdev_ext2_small.txt HELLO" "$G" >/dev/null 2>&1
 debugfs -w -R "write /tmp/osdev_ext2_big.txt BIG"      "$G" >/dev/null 2>&1
 
+# M1186: a second image with the ext4 `extent` feature, populated from a directory
+# (mke2fs -d allocates extent-mapped files), to verify + fuzz the extent read path.
+# Kept ext2-compatible otherwise (no 64bit/flex_bg/metadata_csum/journal) and small
+# enough to fit the harness's 2 MiB in-memory disk.
+X=/tmp/osdev_ext2_extent.img
+rm -rf /tmp/osdev_ext_src; mkdir -p /tmp/osdev_ext_src
+head -c 100000 /dev/zero | tr '\0' 'E' > /tmp/osdev_ext_src/BIG.TXT       # 100 KB -> one big extent
+printf 'hello extent world\n' > /tmp/osdev_ext_src/SMALL.TXT
+EXTOK=
+if mke2fs -F -q -b 1024 -I 256 -O extent,^resize_inode,^dir_index,^has_journal,^64bit,^metadata_csum \
+        -d /tmp/osdev_ext_src "$X" 1800 >/dev/null 2>&1; then EXTOK="$X"; fi
+
 echo "building host ext2 read path (ASan+UBSan)..."
 $CC -std=gnu11 -O1 $SAN -fno-stack-protector -Ikernel -Ikernel/include \
     tests/ext2/ext2_test.c -o /tmp/osdev_ext2_test
 
-echo "running ext2 corrupt-image fuzz..."
-if timeout 120 /tmp/osdev_ext2_test "$G"; then
-    echo "PASS: ext2.c read path (ASan/UBSan clean on corrupt-metadata fuzz)"
+echo "running ext2 corrupt-image fuzz (+ ext4 extent read/fuzz)..."
+if timeout 180 /tmp/osdev_ext2_test "$G" $EXTOK; then
+    echo "PASS: ext2.c read path (ASan/UBSan clean on corrupt-metadata fuzz + extent reads)"
 else
     echo "FAIL: ext2.c test aborted (ASan/UBSan caught a memory error, or it hung)"; exit 1
 fi

@@ -84,7 +84,50 @@ static int read_inode(ext2_t *v, uint32_t ino, uint8_t *out) {
 }
 
 /* map a file-relative block index to its disk block (0 = sparse hole) */
+/* ext4 extent tree (M1186): map logical block `fblk` -> physical, walking from a
+ * node (the 60-byte i_block, or a block-sized internal/leaf node). Bounded depth
+ * + entry count + rdblk range-checks, so a corrupt tree can't OOB or loop. 0 =
+ * hole/unmapped (the read path zero-fills). Only the low 32 bits of the physical
+ * block are used (no 64bit feature); an uninitialized extent reads as a hole. */
+#define EXT4_EXTENTS_FL 0x80000u
+#define EXT4_EXT_MAGIC  0xF30Au
+static uint32_t extent_map(ext2_t *v, const uint8_t *ib, uint32_t fblk) {
+    uint8_t buf[4096];
+    const uint8_t *node = ib;
+    uint32_t node_size = 60;                               /* i_block[] is 60 bytes */
+    for (int guard = 0; guard < 8; guard++) {              /* depth cap */
+        if (e_rd16(node) != EXT4_EXT_MAGIC) return 0;      /* eh_magic */
+        uint32_t entries = e_rd16(node + 2);               /* eh_entries */
+        uint16_t depth   = e_rd16(node + 6);               /* eh_depth */
+        uint32_t cap = (node_size - 12) / 12;              /* entries that physically fit */
+        if (entries > cap) entries = cap;
+        if (depth == 0) {                                  /* leaf: ext4_extent[] */
+            for (uint32_t i = 0; i < entries; i++) {
+                const uint8_t *e = node + 12 + i * 12;
+                uint32_t eb = e_rd32(e + 0);               /* ee_block (logical start) */
+                uint16_t raw = e_rd16(e + 4);              /* ee_len (>32768 = uninitialized) */
+                uint32_t st = e_rd32(e + 8);               /* ee_start_lo (start_hi ignored: 32-bit) */
+                uint32_t len = raw > 32768 ? (uint32_t)(raw - 32768) : raw;
+                if (len && fblk >= eb && fblk - eb < len)
+                    return raw > 32768 ? 0 : st + (fblk - eb);   /* uninit -> hole (zeros) */
+            }
+            return 0;                                      /* fblk in no extent -> hole */
+        }
+        uint32_t child = 0;                                /* internal: ext4_extent_idx[] */
+        for (uint32_t i = 0; i < entries; i++) {
+            const uint8_t *e = node + 12 + i * 12;
+            if (fblk >= e_rd32(e + 0)) child = e_rd32(e + 4);   /* last idx with ei_block <= fblk */
+            else break;
+        }
+        if (!child || rdblk(v, child, buf) < 0) return 0;
+        node = buf; node_size = v->block_size;             /* descend */
+    }
+    return 0;
+}
+
 static uint32_t map_block(ext2_t *v, const uint8_t *inode, uint32_t fblk) {
+    if (e_rd32(inode + 32) & EXT4_EXTENTS_FL)              /* i_flags: ext4 extent-mapped (M1186) */
+        return extent_map(v, inode + 40, fblk);
     const uint8_t *ib = inode + 40;                        /* i_block[15] */
     uint32_t ppb = v->block_size / 4;
     if (fblk < 12) return e_rd32(ib + fblk * 4);           /* direct */
