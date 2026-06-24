@@ -3,6 +3,7 @@
  * no match => allow (default policy). Hooked at nic_send / nic_receive.
  */
 #include "fw.h"
+#include "bpf.h"        /* a loaded eBPF-lite program decides at this hook (M1127) */
 #include <stdint.h>
 
 #define FW_MAX 16
@@ -13,7 +14,7 @@ static int g_n;
 static uint16_t be16(const uint8_t *p) { return (uint16_t)(p[0] << 8 | p[1]); }
 
 int fw_check(int dir, const void *frame, int len) {
-    if (g_n == 0) return 1;                          /* no rules -> fast allow */
+    if (!bpf_loaded() && g_n == 0) return 1;         /* nothing installed -> fast allow */
     const uint8_t *f = (const uint8_t *)frame;
     if (len < 34 || be16(f + 12) != 0x0800) return 1; /* non-IPv4 (ARP, ...) always passes */
     int ihl = (f[14] & 0x0F) * 4;
@@ -23,6 +24,11 @@ int fw_check(int dir, const void *frame, int len) {
     if ((proto == 6 || proto == 17) && len >= 14 + ihl + 4) {
         const uint8_t *l4 = f + 14 + ihl;
         sport = be16(l4); dport = be16(l4 + 2);
+    }
+    /* A loaded eBPF-lite program decides (M1127); else fall through to the rules. */
+    if (bpf_loaded()) {
+        struct bpf_ctx ctx = { (uint32_t)dir, (uint32_t)proto, sport, dport, (uint32_t)len };
+        return (int)bpf_run(&ctx);                   /* 0 = drop, nonzero = pass */
     }
     uint16_t rport = (dir == FW_OUT) ? dport : sport;   /* match on the remote port */
     for (int i = 0; i < g_n; i++) {

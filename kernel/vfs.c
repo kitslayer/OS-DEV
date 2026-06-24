@@ -15,6 +15,7 @@
 #include "notify.h"
 #include "eventfd.h"
 #include "pci.h"
+#include "bpf.h"
 #include "net.h"
 #include "app.h"          /* app_current / app_ns_id — per-process mount namespaces (M1122) */
 
@@ -199,6 +200,9 @@ int vfs_ready(const char *name) {
     return 1;
 }
 
+/* Route /bpf (M1127): write bytecode here to load an eBPF-lite packet filter. */
+static int bpf_path(const char *name) { return veq(name, "/bpf"); }
+
 /* Route /pci (M1120): "/pci" or "/pci/" -> list (q=""), "/pci/<rest>" -> q. */
 static int pci_path(const char *name, const char **q) {
     if (!vstarts(name, "/pci")) return 0;
@@ -325,6 +329,7 @@ long vfs_write(const char *name, const void *buf, unsigned long len) {
     if (nettcp_path(name, &tb)) return netfs_write(tb, buf, len);     /* /net/tcp/<...>: connect / send */
     if (event_path(name, &tb)) return eventfd_write(tb, buf, len);    /* /event/<n>: counter += N, wake a reader */
     if (snap_path(name, &tb) && vstarts(tb, "ctl")) return tmpfs_snap_control(buf, len);  /* /snap/ctl: create / drop (M1115) */
+    if (bpf_path(name)) return bpf_load(buf, len) < 0 ? -1 : (long)len;   /* /bpf: load an eBPF-lite filter (M1127) */
     long r;
     if (tmp_path(name, &tb)) r = tmpfs_write(tb, buf, len);
     else {

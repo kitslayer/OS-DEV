@@ -1,0 +1,93 @@
+/*
+ * bpf.c — the eBPF-lite bytecode VM. See bpf.h.
+ *
+ * Verify-on-load + a tiny interpreter with forward-only control flow, so a
+ * userspace-supplied program can run in the kernel's packet path safely: it
+ * provably terminates (the PC strictly increases), touches no memory (only 8
+ * registers + the read-only context), and is bounded in length.
+ */
+#include "bpf.h"
+
+static struct bpf_insn g_prog[BPF_MAXINSN];
+static int      g_n;                  /* installed instruction count (0 = none) */
+static uint64_t g_runs, g_drops;      /* stats for /proc/bpf */
+
+int bpf_loaded(void) { return g_n > 0; }
+
+/* Verify a candidate program. Returns 0 if safe to run, -1 otherwise. */
+static int bpf_verify(const struct bpf_insn *in, int n) {
+    if (n < 1 || n > BPF_MAXINSN) return -1;
+    int has_ret = 0;
+    for (int i = 0; i < n; i++) {
+        const struct bpf_insn *x = &in[i];
+        if (x->op < BPF_LDI || x->op >= BPF_OP_MAX) return -1;
+        switch (x->op) {
+            case BPF_LDI:                          if (x->a >= 8) return -1; break;
+            case BPF_LDCTX:   if (x->imm < 0 || x->imm > 4 || x->a >= 8) return -1; break;
+            case BPF_ADD: case BPF_SUB:
+            case BPF_AND: case BPF_OR:             if (x->a >= 8 || x->b >= 8) return -1; break;
+            case BPF_JEQ: case BPF_JNE:            /* skip is forward + must stay in range */
+                if (x->a >= 8 || i + 1 + x->b > n) return -1; break;
+            case BPF_RET:                          if (x->a >= 8) return -1; has_ret = 1; break;
+            default: return -1;
+        }
+    }
+    if (!has_ret) return -1;                       /* must be able to return a verdict */
+    return 0;
+}
+
+long bpf_load(const void *prog, unsigned long bytes) {
+    if (bytes == 0) { g_n = 0; g_runs = g_drops = 0; return 0; }   /* clear */
+    if (bytes % sizeof(struct bpf_insn) != 0) return -1;
+    int n = (int)(bytes / sizeof(struct bpf_insn));
+    const struct bpf_insn *in = (const struct bpf_insn *)prog;
+    if (bpf_verify(in, n) != 0) return -1;
+    for (int i = 0; i < n; i++) g_prog[i] = in[i];
+    g_n = n; g_runs = g_drops = 0;
+    return 0;
+}
+
+long bpf_run(const struct bpf_ctx *ctx) {
+    if (g_n == 0) return 1;                        /* no program -> pass */
+    int64_t reg[8] = { 0 };
+    g_runs++;
+    int pc = 0, steps = 0;
+    while (pc < g_n && steps++ < BPF_MAXINSN * 2) {  /* the step cap is belt-and-braces (skips are forward) */
+        struct bpf_insn *x = &g_prog[pc];
+        switch (x->op) {
+            case BPF_LDI:   reg[x->a] = x->imm; pc++; break;
+            case BPF_LDCTX: {
+                uint32_t v = 0;
+                switch (x->imm) { case 0: v = ctx->dir; break; case 1: v = ctx->proto; break;
+                                  case 2: v = ctx->sport; break; case 3: v = ctx->dport; break;
+                                  case 4: v = ctx->len; break; }
+                reg[x->a] = v; pc++; break;
+            }
+            case BPF_ADD: reg[x->a] += reg[x->b]; pc++; break;
+            case BPF_SUB: reg[x->a] -= reg[x->b]; pc++; break;
+            case BPF_AND: reg[x->a] &= reg[x->b]; pc++; break;
+            case BPF_OR:  reg[x->a] |= reg[x->b]; pc++; break;
+            case BPF_JEQ: pc += (reg[x->a] == x->imm) ? (x->b + 1) : 1; break;
+            case BPF_JNE: pc += (reg[x->a] != x->imm) ? (x->b + 1) : 1; break;
+            case BPF_RET: { long v = (long)reg[x->a]; if (v == 0) g_drops++; return v; }
+            default: return 1;
+        }
+    }
+    return 1;                                       /* fell off the end -> pass */
+}
+
+static int sa(char *b, int p, int max, const char *s) { while (*s && p < max - 1) b[p++] = *s++; return p; }
+static int sd(char *b, int p, int max, uint64_t v) {
+    char t[20]; int n = 0; if (!v) t[n++] = '0'; while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+    while (n && p < max - 1) b[p++] = t[--n]; return p;
+}
+int bpf_format(char *b, int max) {
+    int p = 0;
+    p = sa(b, p, max, "program: ");
+    if (g_n == 0) p = sa(b, p, max, "(none -- write bytecode to /bpf)\n");
+    else { p = sd(b, p, max, (uint64_t)g_n); p = sa(b, p, max, " instructions\n"); }
+    p = sa(b, p, max, "runs:    "); p = sd(b, p, max, g_runs);  p = sa(b, p, max, "\n");
+    p = sa(b, p, max, "drops:   "); p = sd(b, p, max, g_drops); p = sa(b, p, max, "\n");
+    if (p < max) b[p] = 0;
+    return p;
+}
