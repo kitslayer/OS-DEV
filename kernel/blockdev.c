@@ -28,6 +28,7 @@
 #include "blockdev.h"
 #include "partition.h"
 #include "ext2.h"
+#include "iso9660.h"
 #include "ata.h"
 #include "ahci.h"
 #include "virtio_blk.h"
@@ -425,6 +426,7 @@ static int collect_fat_starts(int i, uint64_t *starts, int max) {
  *     through bd_blk_read + the device-agnostic fatvol_list/fatvol_read. --- */
 #define FS_FAT  0
 #define FS_EXT2 1
+#define FS_ISO9660 2
 struct bd_mount {
     char name[8]; int dev; uint64_t start; int fstype;
     int is_loop; uint8_t *loopbuf; uint64_t looplen;   /* loop device: a file image held in RAM (M1107) */
@@ -466,6 +468,8 @@ static void blockdev_mount_scan(void) {
              * otherwise misclaim an ext2 disk as an empty FAT one. */
             if (ext2_probe(bd_blk_read, (void *)(intptr_t)i, starts[v]) == 0)
                 fstype = FS_EXT2;                                 /* an ext2 volume */
+            else if (iso9660_probe(bd_blk_read, (void *)(intptr_t)i, starts[v]) == 0)
+                fstype = FS_ISO9660;                              /* an ISO 9660 (CD/DVD) volume */
             else if (fatvol_list(bd_blk_read, (void *)(intptr_t)i, starts[v], probe, 1) >= 0)
                 fstype = FS_FAT;                                  /* a FAT32 volume */
             else continue;                                        /* neither -> skip */
@@ -506,8 +510,9 @@ int blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max)
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return 0;
     blk_read_fn r = mount_rfn(i); void *c = mount_ctx(i); uint64_t s = g_mount[i].start;
-    return g_mount[i].fstype == FS_EXT2 ? ext2_list_path(r, c, s, subpath ? subpath : "", out, max)
-                                        : fatvol_list_path(r, c, s, subpath ? subpath : "", out, max);
+    return g_mount[i].fstype == FS_EXT2    ? ext2_list_path(r, c, s, subpath ? subpath : "", out, max)
+         : g_mount[i].fstype == FS_ISO9660 ? iso9660_list_path(r, c, s, subpath ? subpath : "", out, max)
+                                           : fatvol_list_path(r, c, s, subpath ? subpath : "", out, max);
 }
 
 /* Read the file at `path` (relative to the volume root) of mount `i`. -1 if it
@@ -516,8 +521,9 @@ long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max) 
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return -1;
     blk_read_fn r = mount_rfn(i); void *c = mount_ctx(i); uint64_t s = g_mount[i].start;
-    return g_mount[i].fstype == FS_EXT2 ? ext2_read_path(r, c, s, path ? path : "", buf, max)
-                                        : fatvol_read_path(r, c, s, path ? path : "", buf, max);
+    return g_mount[i].fstype == FS_EXT2    ? ext2_read_path(r, c, s, path ? path : "", buf, max)
+         : g_mount[i].fstype == FS_ISO9660 ? iso9660_read_path(r, c, s, path ? path : "", buf, max)
+                                           : fatvol_read_path(r, c, s, path ? path : "", buf, max);
 }
 
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
@@ -525,8 +531,9 @@ int blockdev_mount_isdir(int i, const char *path) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return 0;
     blk_read_fn r = mount_rfn(i); void *c = mount_ctx(i); uint64_t s = g_mount[i].start;
-    return g_mount[i].fstype == FS_EXT2 ? ext2_isdir_path(r, c, s, path ? path : "")
-                                        : fatvol_isdir_path(r, c, s, path ? path : "");
+    return g_mount[i].fstype == FS_EXT2    ? ext2_isdir_path(r, c, s, path ? path : "")
+         : g_mount[i].fstype == FS_ISO9660 ? iso9660_isdir_path(r, c, s, path ? path : "")
+                                           : fatvol_isdir_path(r, c, s, path ? path : "");
 }
 
 /* losetup: register a loop mount backed by the file image `data` (len bytes,
@@ -541,6 +548,7 @@ int blockdev_losetup(uint8_t *data, uint64_t len) {
     int fstype;
     fatvol_dirent probe[1];
     if (ext2_probe(loop_blk_read, (void *)(intptr_t)i, 0) == 0) fstype = FS_EXT2;
+    else if (iso9660_probe(loop_blk_read, (void *)(intptr_t)i, 0) == 0) fstype = FS_ISO9660;
     else if (fatvol_list(loop_blk_read, (void *)(intptr_t)i, 0, probe, 1) >= 0) fstype = FS_FAT;
     else { g_mount[i].is_loop = 0; return -1; }              /* unrecognised -> don't mount */
     g_mount[i].fstype = fstype;

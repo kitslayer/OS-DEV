@@ -132,6 +132,7 @@ def main():
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--kernel", default="build/kernel32.elf")
     ap.add_argument("--disk",   default="build/fat.img")
+    ap.add_argument("--disk2",  default=None, help="attach a 2nd drive (virtio-blk) — auto-mounted as /disk2")
     ap.add_argument("--out",    default=".")
     ap.add_argument("--boot-timeout", type=float, default=25)
     ap.add_argument("--no-wait", action="store_true")
@@ -151,15 +152,18 @@ def main():
     tmp = tempfile.mkdtemp(prefix="osdrive.")
     mon_sock, qmp_sock, slog, ppm = (os.path.join(tmp, n) for n in
                                      ("mon.sock", "qmp.sock", "serial.log", "shot.ppm"))
-    qp = subprocess.Popen([qemu, "-no-reboot", "-no-shutdown", "-m", "256M", "-kernel", args.kernel,
+    qcmd = [qemu, "-no-reboot", "-no-shutdown", "-m", "256M", "-kernel", args.kernel,
         "-drive", "file=%s,format=raw,if=ide" % args.disk,
         "-netdev", "user,id=net0", "-device", "e1000,netdev=net0",
         "-device", "piix3-usb-uhci,id=uhci", "-device", "usb-tablet,bus=uhci.0",
         "-device", "AC97,audiodev=snd0", "-audiodev", "none,id=snd0",
         "-display", "none", "-serial", "file:" + slog,
         "-monitor", "unix:%s,server,nowait" % mon_sock,
-        "-qmp", "unix:%s,server,nowait" % qmp_sock],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        "-qmp", "unix:%s,server,nowait" % qmp_sock]
+    if args.disk2:
+        qcmd += ["-drive", "file=%s,format=raw,if=none,id=d2" % args.disk2,
+                 "-device", "virtio-blk-pci,drive=d2"]
+    qp = subprocess.Popen(qcmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     rc = 0
     try:
         # wait for both control sockets
