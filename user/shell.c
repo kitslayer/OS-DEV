@@ -1883,20 +1883,22 @@ static int run_command(char *line, char *cwd) {
                 if (!good) g_status = 1;
                 sys_munmap(m, len);
             }
-        } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
+        } else if (streq(line, "swaptest")) {  /* zram: compress pages into RAM, fault back in intact (M1156) */
             unsigned long len = 256 * 1024;       /* 64 pages */
             unsigned char *m = (unsigned char *)sys_mmap(len);
             if (!m) { print("swaptest: mmap failed\n"); g_status = 1; }
             else {
-                for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)(i * 131 + 7);   /* fault in + fill a pattern */
+                for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)((i / 64) & 0x0F);   /* compressible: long byte-runs */
                 long out = sys_swapout(m, len);
-                if (out < 0) print("swaptest: swap inactive (attach a writable non-boot disk to enable it)\n");
+                if (out < 0) { print("swaptest: swapout failed\n"); g_status = 1; }
                 else {
-                    print("paged out "); printl(out); print(" pages to disk; reading them back...\n");
-                    int ok = 1;                    /* re-touch each page -> faults back in from swap */
-                    for (unsigned long i = 0; i < len; i++) if (m[i] != (unsigned char)(i * 131 + 7)) { ok = 0; break; }
-                    print(ok ? "  every page survived the disk round-trip -> swap works\n"
-                             : "  VERIFY FAILED: data corrupted across swap\n");
+                    print("paged out "); printl(out); print(" pages to zram (compressed RAM)\n");
+                    long n; char *b = slurp("/proc/swaps", &n);   /* read stats AT PEAK (before fault-in releases slots) */
+                    if (b && n > 0) { b[n] = 0; print(b); free(b); }
+                    int ok = 1;                    /* re-touch each page -> faults back in (decompressed) */
+                    for (unsigned long i = 0; i < len; i++) if (m[i] != (unsigned char)((i / 64) & 0x0F)) { ok = 0; break; }
+                    print(ok ? "every page survived the zram round-trip OK\n"
+                             : "VERIFY FAILED: data corrupted across swap\n");
                     if (!ok) g_status = 1;
                 }
                 sys_munmap(m, len);
