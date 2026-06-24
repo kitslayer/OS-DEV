@@ -120,6 +120,8 @@ struct app {
     struct registers fork_frame;         /* a forked child's saved trap frame (rax=0); iret_to_user resumes it (M1116) */
     int      parent;                     /* pid of the process that fork()ed us (0 = none) — for waitpid (M1117) */
     uint64_t rlim_nproc;                 /* RLIMIT_NPROC: max live children (0 = unlimited), inherited on fork (M1163) */
+    uint64_t rlim_as;                    /* RLIMIT_AS: max total mmap bytes (0 = unlimited) (M1164) */
+    uint64_t rlim_data;                  /* RLIMIT_DATA: max heap bytes (0 = unlimited) (M1164) */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -703,13 +705,24 @@ long app_process_vm_read(int pid, uint64_t raddr, void *local, uint64_t len) {
  * reported back as RLIM_INFINITY. Inherited across fork. */
 int app_setrlimit(int resource, uint64_t val) {
     struct app *a = cur(); if (!a) return -1;
-    if (resource == RLIMIT_NPROC) { a->rlim_nproc = (val == RLIM_INFINITY) ? 0 : val; return 0; }
+    uint64_t v = (val == RLIM_INFINITY) ? 0 : val;      /* stored: 0 = unlimited */
+    if (resource == RLIMIT_NPROC) { a->rlim_nproc = v; return 0; }
+    if (resource == RLIMIT_AS)    { a->rlim_as    = v; return 0; }
+    if (resource == RLIMIT_DATA)  { a->rlim_data  = v; return 0; }
     return -1;                                          /* other resources not yet enforced */
 }
 uint64_t app_getrlimit(int resource) {
     struct app *a = cur(); if (!a) return RLIM_INFINITY;
-    if (resource == RLIMIT_NPROC) return a->rlim_nproc ? a->rlim_nproc : RLIM_INFINITY;
-    return RLIM_INFINITY;
+    uint64_t v = (resource == RLIMIT_NPROC) ? a->rlim_nproc :
+                 (resource == RLIMIT_AS)    ? a->rlim_as    :
+                 (resource == RLIMIT_DATA)  ? a->rlim_data  : 0;
+    return v ? v : RLIM_INFINITY;
+}
+/* Total bytes currently held by the app's mmap VMAs (for RLIMIT_AS, M1164). */
+static uint64_t app_vma_total(struct app *a) {
+    uint64_t t = 0;
+    for (int i = 0; i < a->nvma; i++) t += a->vma[i].len;
+    return t;
 }
 static int app_pid_alive(int pid) {            /* a live (un-exited) process with this pid? */
     struct app *a = app_by_pid(pid);
@@ -1156,6 +1169,7 @@ uint64_t app_sbrk(long inc) {
     uint64_t pages  = ((uint64_t)inc + PAGE_SIZE - 1) / PAGE_SIZE;
     uint64_t newend = old + pages * PAGE_SIZE;
     if (newend > UHEAP_LIMIT || newend < old) return (uint64_t)-1;   /* hit the stack / overflow */
+    if (a->rlim_data && (newend - UHEAP_BASE) > a->rlim_data) return (uint64_t)-1;   /* RLIMIT_DATA (M1164) */
     for (uint64_t v = old; v < newend; v += PAGE_SIZE) {
         uint64_t frame = pmm_alloc_frame();
         if (!frame) {                                 /* OOM: undo this call's partial mapping */
@@ -1190,6 +1204,7 @@ uint64_t app_mmap(uint64_t len) {
     if (!a || len == 0) return 0;
     len = (len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->rlim_as && app_vma_total(a) + len > a->rlim_as) return 0;   /* RLIMIT_AS (M1164) */
     if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
     uint64_t addr = a->mmap_next;
     if (addr + len > MMAP_TOP || addr + len < addr) return 0;
@@ -1214,6 +1229,7 @@ uint64_t app_mmap_huge(uint64_t len) {
     if (!a || len == 0) return 0;
     len = (len + HUGE_SIZE - 1) & ~(HUGE_SIZE - 1);          /* whole 2 MiB pages */
     if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->rlim_as && app_vma_total(a) + len > a->rlim_as) return 0;   /* RLIMIT_AS (M1164) */
     if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
     uint64_t addr = (a->mmap_next + HUGE_SIZE - 1) & ~(HUGE_SIZE - 1);   /* 2 MiB-align the base */
     if (addr + len > MMAP_TOP || addr + len < addr) return 0;
@@ -1238,6 +1254,7 @@ uint64_t app_mmap_file(const char *path, uint64_t len) {
     if (!a || len == 0 || !path) return 0;
     len = (len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->rlim_as && app_vma_total(a) + len > a->rlim_as) return 0;   /* RLIMIT_AS (M1164) */
     if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
     uint64_t addr = a->mmap_next;
     if (addr + len > MMAP_TOP || addr + len < addr) return 0;
@@ -2311,6 +2328,7 @@ long app_fork(struct registers *r) {
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = p->sig_handler[i];
     a->sig_restorer = p->sig_restorer; a->curcol = p->curcol;
     a->rlim_nproc = p->rlim_nproc;                      /* RLIMIT_NPROC is inherited across fork (M1163) */
+    a->rlim_as = p->rlim_as; a->rlim_data = p->rlim_data;   /* RLIMIT_AS/DATA inherited too (M1164) */
     /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
     a->promises = p->promises; a->pledged = p->pledged;
     a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;

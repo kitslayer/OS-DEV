@@ -151,7 +151,9 @@
 #define SYS_setrlimit       139 /* (resource, struct rlimit*) -> set a resource limit; 0/-1 (M1163) */
 
 /* getrlimit/setrlimit (M1163), shared by the kernel + ulib. */
+#define RLIMIT_DATA    2
 #define RLIMIT_NPROC   6
+#define RLIMIT_AS      9
 #define RLIM_INFINITY  (~0UL)
 struct rlimit { unsigned long rlim_cur, rlim_max; };
 

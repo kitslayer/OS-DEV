@@ -1985,6 +1985,26 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "RLIMIT_NPROC: 2nd fork capped (fork-bomb protection) OK\n" : "rlimittest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
             rl.rlim_cur = RLIM_INFINITY; rl.rlim_max = RLIM_INFINITY; sys_setrlimit(RLIMIT_NPROC, &rl);   /* restore */
+            /* RLIMIT_AS: cap mmap address space (in-process toggle — mmap can't break the shell's heap) */
+            rl.rlim_cur = 4096; rl.rlim_max = 4096; sys_setrlimit(RLIMIT_AS, &rl);
+            void *as1 = sys_mmap(64 * 1024);                 /* 64 KiB > 4 KiB limit -> denied */
+            rl.rlim_cur = RLIM_INFINITY; rl.rlim_max = RLIM_INFINITY; sys_setrlimit(RLIMIT_AS, &rl);
+            void *as2 = sys_mmap(64 * 1024);                 /* unlimited -> allowed */
+            int as_ok = (as1 == 0 && as2 != 0);
+            if (as2) sys_munmap(as2, 64 * 1024);
+            print(as_ok ? "RLIMIT_AS: mmap denied over limit, allowed unlimited OK\n" : "RLIMIT_AS: VERIFY FAILED\n");
+            if (!as_ok) g_status = 1;
+            /* RLIMIT_DATA: cap the heap — done in a CHILD so the shell's own heap is untouched */
+            long dc = sys_fork();
+            if (dc == 0) {
+                struct rlimit dl; dl.rlim_cur = 4096; dl.rlim_max = 4096; sys_setrlimit(RLIMIT_DATA, &dl);
+                void *big = malloc(1 << 20);                 /* 1 MiB needs sbrk past 4 KiB -> capped -> NULL */
+                sys_exit(big == 0 ? 0 : 1);                  /* 0 = correctly denied */
+            } else if (dc > 0) {
+                int dst = -1; sys_waitpid((int)dc, &dst);
+                print(dst == 0 ? "RLIMIT_DATA: heap growth capped (malloc failed in child) OK\n" : "RLIMIT_DATA: VERIFY FAILED\n");
+                if (dst != 0) g_status = 1;
+            }
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
             unsigned char *m = (unsigned char *)sys_mmap_huge(len);
