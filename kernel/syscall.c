@@ -392,13 +392,18 @@ void syscall_dispatch(struct registers *r) {
         if (!run_real) { r->rax = (uint64_t)ret; goto sc_done; }   /* denied/emulated: skip the real syscall */
     }
 
-    /* seccomp-BPF self-filter (M1190): a process can install a bpf.c program that
-     * vets its own syscalls. Verdict 0 => deny (-1), skipping the real syscall.
+    /* seccomp-BPF self-filter (M1190, M1192): a process installs a bpf.c program
+     * that vets its own syscalls. Verdict 0 => DENY (-1, skip the real syscall);
+     * 2 => KILL (terminate, like real seccomp's hard sandbox); else ALLOW.
      * Unfiltered apps (no program) take one cheap branch and are unaffected. */
-    if (self && app_seccomp_filter_active(self) &&
-        !app_seccomp_filter_check(self, r->rax, r->rdi, r->rsi, r->rdx)) {
-        r->rax = (uint64_t)-1;
-        goto sc_done;
+    if (self && app_seccomp_filter_active(self)) {
+        long verdict = app_seccomp_filter_check(self, r->rax, r->rdi, r->rsi, r->rdx);
+        if (verdict == 2) {                 /* SECCOMP_RET_KILL */
+            kprintf("[seccomp] pid %d (%s) hit a KILL filter (sys %lu) -- terminating\n",
+                    app_sys_getpid(), app_title(self), (unsigned long)r->rax);
+            app_sys_exit(-1);               /* does not return */
+        }
+        if (verdict == 0) { r->rax = (uint64_t)-1; goto sc_done; }   /* SECCOMP_RET_DENY */
     }
 
     switch (r->rax) {

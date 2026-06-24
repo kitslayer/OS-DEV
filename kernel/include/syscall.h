@@ -188,6 +188,10 @@
 #define SYS_mkfifo       175   /* (path) -> create a named pipe (FIFO); 0/-1 (M1188) */
 #define SYS_fifo_open    176   /* (path, write) -> open a FIFO end -> fd; -1 (M1188) */
 #define SYS_seccomp_filter 177 /* (prog, bytes) -> install a self-imposed BPF syscall filter (one-way); 0/-1 (M1190) */
+/* seccomp-BPF filter verdicts — the value a filter program RETs (M1190/M1192). */
+#define SECCOMP_RET_DENY  0    /* the syscall returns -1 */
+#define SECCOMP_RET_ALLOW 1    /* run the syscall (any non-0/2 value allows) */
+#define SECCOMP_RET_KILL  2    /* terminate the process (hard sandbox) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

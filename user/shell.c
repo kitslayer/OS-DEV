@@ -2474,27 +2474,46 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "fifo: mkfifo + open-by-name rendezvous + EOF OK\n" : "fifotest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
-        } else if (streq(line, "seccomptest")) {   /* self-imposed BPF syscall filter (M1190) */
+        } else if (streq(line, "seccomptest")) {   /* self-imposed BPF syscall filter: DENY + KILL (M1190/M1192) */
+            int ok = 1;
+            /* part 1 (M1190): a DENY filter -> the blocked syscall returns -1, the process continues */
             long pid = sys_fork();
-            if (pid == 0) {                          /* child sandboxes ITSELF, then probes */
-                /* deny SYS_writefile, allow everything else (verdict nonzero = allow) */
-                struct bpf_insn prog[] = {
-                    { BPF_LDI,   1, 0, 0, 1 },                       /* r1 = 1 (allow) */
-                    { BPF_LDCTX, 0, 0, 0, 0 },                       /* r0 = ctx[0] = syscall nr */
-                    { BPF_JEQ,   0, 1, 0, (int32_t)SYS_writefile },  /* nr==writefile? -> skip to deny */
-                    { BPF_RET,   1, 0, 0, 0 },                       /* allow (return 1) */
-                    { BPF_LDI,   1, 0, 0, 0 },                       /* r1 = 0 */
-                    { BPF_RET,   1, 0, 0, 0 },                       /* deny (return 0) */
+            if (pid == 0) {
+                struct bpf_insn prog[] = {           /* deny SYS_writefile, allow the rest */
+                    { BPF_LDI,   1, 0, 0, SECCOMP_RET_ALLOW },
+                    { BPF_LDCTX, 0, 0, 0, 0 },                       /* r0 = syscall nr */
+                    { BPF_JEQ,   0, 1, 0, (int32_t)SYS_writefile },  /* nr==writefile? -> skip to the deny RET */
+                    { BPF_RET,   1, 0, 0, 0 },                       /* allow */
+                    { BPF_LDI,   1, 0, 0, SECCOMP_RET_DENY },
+                    { BPF_RET,   1, 0, 0, 0 },                       /* deny (-1) */
                 };
-                if (sys_seccomp_filter(prog, sizeof prog) != 0) sys_exit(2);   /* install failed */
-                long denied = sys_writefile("/tmp/sec_probe", "x", 1);          /* now blocked */
-                long allowed = sys_getpid();                                    /* still works */
+                if (sys_seccomp_filter(prog, sizeof prog) != 0) sys_exit(2);
+                long denied = sys_writefile("/tmp/sec_probe", "x", 1);   /* blocked -> -1 */
+                long allowed = sys_getpid();                             /* still works */
                 sys_exit((denied < 0 && allowed > 0) ? 42 : 1);
             }
             int st = -1; sys_waitpid((int)pid, &st);
-            print(st == 42 ? "seccomp: self-filter installed; blocked syscall denied, allowed syscall ran -- OK\n"
-                           : "seccomptest: VERIFY FAILED\n");
-            if (st != 42) g_status = 1;
+            if (st != 42) ok = 0;
+            /* part 2 (M1192): a KILL filter -> the process is TERMINATED on the forbidden syscall */
+            long kpid = sys_fork();
+            if (kpid == 0) {
+                struct bpf_insn prog[] = {           /* kill on SYS_writefile, allow the rest */
+                    { BPF_LDI,   1, 0, 0, SECCOMP_RET_ALLOW },
+                    { BPF_LDCTX, 0, 0, 0, 0 },
+                    { BPF_JEQ,   0, 1, 0, (int32_t)SYS_writefile },  /* nr==writefile? -> skip to the kill RET */
+                    { BPF_RET,   1, 0, 0, 0 },                       /* allow */
+                    { BPF_LDI,   1, 0, 0, SECCOMP_RET_KILL },
+                    { BPF_RET,   1, 0, 0, 0 },                       /* kill */
+                };
+                if (sys_seccomp_filter(prog, sizeof prog) != 0) sys_exit(2);
+                sys_writefile("/tmp/sec_probe2", "x", 1);   /* -> KILLED here (never returns) */
+                sys_exit(7);                                 /* unreachable if the kill worked */
+            }
+            int kst = -99; sys_waitpid((int)kpid, &kst);
+            if (kst == 7) ok = 0;                            /* reached exit 7 => NOT killed => fail */
+            print(ok ? "seccomp: DENY blocks (-1) + allowed runs; KILL terminates the violator -- OK\n"
+                     : "seccomptest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "stdiotest")) {   /* stdio over the fd table: print()->fd1->pipe->fd0->readline() (M1191) */
             long h = sys_fork();                  /* a harness child runs the whole producer|consumer pipeline */
             if (h == 0) {                         /* (so the shell's own fd 0/1 are never redirected) */

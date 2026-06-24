@@ -2680,13 +2680,14 @@ int app_fd_is_redirected(app_t *ap, int fd) {
     return a && fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 1;
 }
 int app_seccomp_filter_active(app_t *ap) { return ap && ((struct app *)ap)->seccomp_n > 0; }
-/* Verdict for one syscall: 1 = allow, 0 = deny. The program reads ctx fields
- * 0..3 = syscall nr + the low 32 bits of args 0..2 (LDCTX), and RETs nonzero to
- * allow. */
-int app_seccomp_filter_check(app_t *ap, uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2) {
+/* Raw verdict for one syscall (M1190; M1192 adds KILL). The program reads ctx
+ * fields 0..3 = syscall nr + the low 32 bits of args 0..2 (LDCTX) and RETs:
+ *   0 = DENY (the syscall returns -1), 2 = KILL (the process is terminated),
+ *   anything else = ALLOW. The dispatch interprets the value. */
+long app_seccomp_filter_check(app_t *ap, uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2) {
     struct app *a = (struct app *)ap;
     struct bpf_ctx ctx = { (uint32_t)nr, (uint32_t)a0, (uint32_t)a1, (uint32_t)a2, 0 };
-    return bpf_run_prog(a->seccomp_prog, a->seccomp_n, &ctx) != 0;
+    return bpf_run_prog(a->seccomp_prog, a->seccomp_n, &ctx);
 }
 /* fork: the child inherits the parent's fds (each shared end gains a reference). */
 static void app_fd_fork(struct app *child, struct app *parent) {
