@@ -164,6 +164,32 @@ int main(void) {
         printf("double-free/bad-pointer free: detected + ignored, heap intact\n");
     }
 
+    /* KASAN-lite (M1201): the redzone past an allocation must catch a write past
+     * the end (heap overflow), and a clean in-bounds allocation must NOT false-
+     * alarm. The writes stay inside the single mmap'd arena (valid host memory),
+     * so ASan is quiet — it's the kheap redzone, the feature under test, that the
+     * overflow corrupts. */
+    {
+        uint64_t ov0, chk0; kheap_kasan_stats(&ov0, &chk0);
+        uint8_t *p = kmalloc(40);
+        CHECK(p != NULL, "kasan: alloc");
+        if (p) { for (int i = 0; i < 40; i++) p[i] = 0x11; kfree(p); }      /* in-bounds use, then free */
+        uint64_t ov1, chk1; kheap_kasan_stats(&ov1, &chk1);
+        CHECK(ov1 == ov0, "kasan: a clean allocation was flagged as an overflow");
+        CHECK(chk1 == chk0 + 1, "kasan: free did not redzone-check the allocation");
+
+        uint8_t *q = kmalloc(40);
+        CHECK(q != NULL, "kasan: alloc2");
+        if (q) {
+            for (int i = 0; i < 40; i++) q[i] = 0x22;
+            q[40] = 0x33;                                                   /* 1 byte past the end -> into the redzone */
+            kfree(q);
+        }
+        uint64_t ov2; kheap_kasan_stats(&ov2, NULL);
+        CHECK(ov2 == ov1 + 1, "kasan: a 1-byte heap overflow was NOT detected");
+        printf("kasan: redzone catches a 1-byte overflow; a clean allocation is silent\n");
+    }
+
     printf("torture: 400000 random alloc/free ops, pattern + tiling invariants -> %s\n",
            fails ? "FAILURES" : "all intact");
     if (fails) { printf("FAIL: %d check(s) failed\n", fails); return 1; }

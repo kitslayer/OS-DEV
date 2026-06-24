@@ -16,6 +16,7 @@
 #include "task.h"
 #include "app.h"
 #include "smp.h"
+#include "kheap.h"
 #include "blockdev.h"
 #include "interrupts.h"
 #include "console.h"
@@ -316,11 +317,21 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
     b[p] = 0; return p;
 }
 
+/* /proc/kasan (M1201): kernel-heap sanitizer counters — allocations redzone-
+ * checked at free, and heap buffer-overflows caught. */
+static long gen_kasan(char *b, int max) {
+    uint64_t ov = 0, chk = 0; kheap_kasan_stats(&ov, &chk);
+    int p = 0;
+    p = sapp(b, p, max, "redzone_checks:   "); p = sdec(b, p, max, chk); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "overflows_caught: "); p = sdec(b, p, max, ov);  p = sapp(b, p, max, "\n");
+    b[p] = 0; return p;
+}
+
 /* ---- the directory tables ------------------------------------------------- */
 struct pf { const char *name; long (*gen)(char *, int); };
 static const struct pf proc_files[] = {
     { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo },
-    { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat },
+    { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat }, { "kasan", gen_kasan },
     { "mqueue", gen_mqueue }, { "sysvipc", gen_sysvipc }, { "unix", gen_unix }, { "locks", gen_locks },
     { "processes", gen_processes }, { "partitions", gen_partitions },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },

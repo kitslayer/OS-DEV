@@ -21,6 +21,14 @@
 #include "string.h"
 #include <stdint.h>
 
+/* KASAN reports go to the kernel console; the host heap test (KHEAP_HOST_TEST)
+ * has no console, so make kprintf a no-op there (it checks the counters). */
+#ifdef KHEAP_HOST_TEST
+#define kprintf(...) ((void)0)
+#else
+#include "console.h"
+#endif
+
 #define KHEAP_BASE        0xFFFF900000000000ull
 #define KHEAP_GROW_PAGES  16                       /* grow 64 KiB at a time */
 
@@ -31,12 +39,32 @@
 static uint64_t kheap_base = KHEAP_BASE;
 
 #define BLK_MAGIC 0xA110C8EDu   /* "ALLOCED": set on an allocated block, cleared on free, so kfree detects a double-free / bad-pointer free instead of silently corrupting the list */
+
+/* KASAN-lite (M1201): catch the two heap bugs the BLK_MAGIC sentinel can't —
+ * buffer OVERFLOW (a write past the requested size) and (partially) USE-AFTER-
+ * FREE. Each allocation carries a REDZONE of poison bytes immediately after the
+ * user's `req` bytes, verified on free; freed memory is poisoned so a stale read
+ * returns obvious garbage. A violation logs to dmesg + bumps a counter
+ * (/proc/kasan) rather than panicking, so it's a non-fatal detector. */
+#define KASAN_REDZONE   16
+#define KASAN_RED_BYTE  0xBEu       /* "BE": the inviolable redzone pattern */
+#define KASAN_FREE_BYTE 0xDEu       /* "DE": freed-memory poison */
+#define KASAN_POISON_MAX 256        /* cap free-poison cost on large frees */
+
 typedef struct block {
     uint64_t      size;     /* usable payload bytes, excluding this header */
     struct block *next;
     uint32_t      free;
-    uint32_t      magic;    /* BLK_MAGIC iff currently allocated. Lives in what was struct padding (size 8 + next 8 + free 4 -> 20, padded to 24), so sizeof(block_t) is unchanged -> zero layout/alignment impact. */
+    uint32_t      magic;    /* BLK_MAGIC iff currently allocated */
+    uint64_t      req;      /* KASAN: requested user bytes; the redzone starts at payload[req] (M1201) */
 } block_t;
+
+static uint64_t kasan_overflows;    /* heap overflows caught at free (M1201) */
+static uint64_t kasan_checks;       /* allocations redzone-checked at free */
+void kheap_kasan_stats(uint64_t *overflows, uint64_t *checks) {
+    if (overflows) *overflows = kasan_overflows;
+    if (checks)    *checks    = kasan_checks;
+}
 
 static block_t  *head;
 static uint64_t  heap_end;  /* first virtual address not yet mapped */
@@ -130,9 +158,9 @@ static int grow_heap(uint64_t need_bytes) {
 }
 
 void *kmalloc(size_t size) {
-    if (size > (size_t)-1 - sizeof(block_t) - 32) return 0;   /* reject a size so large that align16()/the `need + header` math would wrap -> under-allocation -> heap overflow on use */
+    if (size > (size_t)-1 - sizeof(block_t) - KASAN_REDZONE - 32) return 0;   /* reject a size so large that align16()/the `need + header + redzone` math would wrap -> under-allocation -> heap overflow on use */
     if (size == 0) size = 1;                                  /* malloc(0): hand back a real (min) block, not a 0-usable-byte one whose first write clobbers the next header */
-    uint64_t need = align16(size);
+    uint64_t need = align16(size + KASAN_REDZONE);            /* room for the user's bytes + the KASAN redzone */
     uint64_t f = irq_save();
 
     for (block_t *b = head; b; b = b->next) {
@@ -151,7 +179,9 @@ void *kmalloc(size_t size) {
         }
         b->free = 0;
         b->magic = BLK_MAGIC;       /* mark live so a double-free / bad-pointer free is caught in kfree */
+        b->req = size;              /* KASAN: remember the user size so kfree knows where the redzone is */
         void *p = (uint8_t *)b + sizeof(block_t);
+        memset((uint8_t *)p + size, KASAN_RED_BYTE, KASAN_REDZONE);   /* KASAN redzone, just past the user's bytes */
         irq_restore(f);
         return p;
     }
@@ -176,8 +206,31 @@ void kfree(void *ptr) {
     uint64_t f = irq_save();
     block_t *b = (block_t *)((uint8_t *)ptr - sizeof(block_t));
     if (b->magic != BLK_MAGIC) { irq_restore(f); return; }   /* not a live allocation: a double-free or a bad/interior pointer -> ignore it rather than write `free=1` into the middle of a live block / link garbage into the list */
+
+    /* KASAN: verify the redzone just past the user's `req` bytes is intact — a
+     * corrupted byte means the code wrote past the end of its allocation. */
+    kasan_checks++;
+    {
+        uint8_t *pay = (uint8_t *)ptr;
+        for (uint32_t i = 0; i < KASAN_REDZONE; i++)
+            if (pay[b->req + i] != KASAN_RED_BYTE) {
+                kasan_overflows++;
+                kprintf("[kasan] heap buffer overflow: %lu-byte object at %p written >= %lu byte(s) past end\n",
+                        (unsigned long)b->req, ptr, (unsigned long)(i + 1));
+                break;
+            }
+    }
+
     b->magic = 0;            /* clear so a second free of this same pointer is detected */
     b->free = 1;
+
+    /* KASAN free-poison: stale reads of this freed block now return 0xDE garbage
+     * (use-after-free reads become obvious) instead of the last live data.
+     * Bounded by KASAN_POISON_MAX so freeing a large block stays cheap. */
+    {
+        uint64_t pn = b->size < KASAN_POISON_MAX ? b->size : KASAN_POISON_MAX;
+        memset(ptr, KASAN_FREE_BYTE, pn);
+    }
 
     /* Coalesce with following free, adjacent blocks. */
     while (b->next && b->next->free &&
