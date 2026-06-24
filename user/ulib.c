@@ -166,6 +166,8 @@ long sys_cas_fetch(const void *hash32, void *buf, unsigned long max) { return do
 long sys_tftp(const char *filename, void *buf, unsigned long max) { return do_syscall(SYS_tftp, (long)filename, (long)buf, (long)max); }
 long sys_madvise(void *addr, unsigned long len, int advice) { return do_syscall(SYS_madvise, (long)addr, (long)len, advice); }
 long sys_mincore(void *addr, unsigned long len, unsigned char *vec) { return do_syscall(SYS_mincore, (long)addr, (long)len, (long)vec); }
+long sys_mlock(void *addr, unsigned long len) { return do_syscall(SYS_mlock, (long)addr, (long)len, 0); }
+long sys_munlock(void *addr, unsigned long len) { return do_syscall(SYS_munlock, (long)addr, (long)len, 0); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }
 long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
 long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }

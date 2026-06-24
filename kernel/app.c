@@ -60,7 +60,7 @@ struct app {
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
 #define APP_MAXVMA 16
-    struct { uint64_t start, len; int sealed, uffd, file_backed; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136) */
+    struct { uint64_t start, len; int sealed, uffd, file_backed, locked; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136); locked=mlock'd, pinned against reclaim (M1149) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
     /* per-process current directory (M1144): synth_cwd state + the in-mount/overlay
@@ -1093,6 +1093,7 @@ uint64_t app_mmap(uint64_t len) {
     a->vma[a->nvma].sealed = 0;
     a->vma[a->nvma].uffd  = 0;
     a->vma[a->nvma].file_backed = 0;
+    a->vma[a->nvma].locked = 0;
     a->nvma++;
     a->mmap_next = addr + len + PAGE_SIZE;          /* leave an unmapped guard gap */
     return addr;
@@ -1115,6 +1116,7 @@ uint64_t app_mmap_file(const char *path, uint64_t len) {
     a->vma[a->nvma].sealed = 0;
     a->vma[a->nvma].uffd  = 0;
     a->vma[a->nvma].file_backed = 1;
+    a->vma[a->nvma].locked = 0;
     a->vma[a->nvma].foff = 0;
     int i = 0; for (; path[i] && i < 63; i++) a->vma[a->nvma].fpath[i] = path[i];
     a->vma[a->nvma].fpath[i] = 0;
@@ -1242,10 +1244,10 @@ int app_madvise(uint64_t addr, uint64_t len, int advice) {
     uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     int dropped = 0;
     for (uint64_t p = start; p < end; p += PAGE_SIZE) {
-        int in_vma = 0;
+        int in_vma = 0, locked = 0;
         for (int i = 0; i < a->nvma; i++)
-            if (p >= a->vma[i].start && p < a->vma[i].start + a->vma[i].len) { in_vma = 1; break; }
-        if (!in_vma) continue;                        /* only demand-paged mmap regions */
+            if (p >= a->vma[i].start && p < a->vma[i].start + a->vma[i].len) { in_vma = 1; locked = a->vma[i].locked; break; }
+        if (!in_vma || locked) continue;              /* demand-paged mmap regions; mlock'd pages are pinned (M1149) */
         uint64_t ph = vmm_translate(p);
         if (ph && pmm_refcount(ph) == 0) {            /* single-owner anon page: safe to reclaim */
             vmm_unmap(p);
@@ -1280,6 +1282,29 @@ int app_mincore(uint64_t addr, uint64_t len, uint8_t *vec) {
     }
     return 0;
 }
+
+/* mlock/munlock (M1149): pin (lock=1) or unpin (lock=0) the mmap pages that
+ * overlap [addr,addr+len) so they are exempt from reclaim — both swap-out
+ * (app_swap_out) and madvise(MADV_DONTNEED) skip a VMA whose `locked` flag is
+ * set. We set the flag on every VMA the range overlaps. NB unlike Linux this
+ * does NOT force-fault the range resident on lock (no kernel touch of a user
+ * page); a not-yet-faulted page simply faults in on first access as usual and
+ * is then pinned (its VMA is locked). Returns 0, or -1 if the range overlaps
+ * no mmap VMA. Pairs with mincore (M1147) for query+control of residency. */
+static int app_mlock_set(uint64_t addr, uint64_t len, int lock) {
+    struct app *a = cur();
+    if (!a || len == 0) return -1;
+    uint64_t start = addr & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    int any = 0;
+    for (int i = 0; i < a->nvma; i++) {
+        uint64_t vs = a->vma[i].start, ve = vs + a->vma[i].len;
+        if (start < ve && vs < end) { a->vma[i].locked = lock; any = 1; }   /* overlaps the range */
+    }
+    return any ? 0 : -1;
+}
+int app_mlock(uint64_t addr, uint64_t len)   { return app_mlock_set(addr, len, 1); }
+int app_munlock(uint64_t addr, uint64_t len) { return app_mlock_set(addr, len, 0); }
 
 /* mprotect (M1090): change the R/W/X protection of an already-mapped range in
  * the calling app (PROT_READ=1, PROT_WRITE=2, PROT_EXEC=4). Enables W^X and
@@ -1342,6 +1367,7 @@ uint64_t app_ringbuf(uint64_t len) {
     a->vma[a->nvma].sealed = 0;
     a->vma[a->nvma].uffd  = 0;
     a->vma[a->nvma].file_backed = 0;
+    a->vma[a->nvma].locked = 0;
     a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
@@ -1366,7 +1392,7 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
         pmm_addref(frames[p]);                       /* this mapping holds a ref on the shared frame */
         __asm__ volatile("invlpg (%0)" : : "r"(base + (uint64_t)p * PAGE_SIZE) : "memory");
     }
-    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0; a->vma[a->nvma].file_backed = 0; a->nvma++;
+    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0; a->vma[a->nvma].file_backed = 0; a->vma[a->nvma].locked = 0; a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
 }
@@ -1495,10 +1521,10 @@ int app_swap_out(uint64_t addr, uint64_t len) {
     uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     int n = 0;
     for (uint64_t p = start; p < end; p += PAGE_SIZE) {
-        int in_vma = 0;
+        int in_vma = 0, locked = 0;
         for (int i = 0; i < a->nvma; i++)
-            if (p >= a->vma[i].start && p < a->vma[i].start + a->vma[i].len) { in_vma = 1; break; }
-        if (!in_vma) continue;                       /* anon mmap regions only */
+            if (p >= a->vma[i].start && p < a->vma[i].start + a->vma[i].len) { in_vma = 1; locked = a->vma[i].locked; break; }
+        if (!in_vma || locked) continue;             /* anon mmap regions only; mlock'd pages are pinned (M1149) */
         uint64_t phys = vmm_translate(p);
         if (!phys || pmm_refcount(phys) != 0) continue;   /* not resident, or shared/mirrored -> skip */
         int slot = swap_out(phys);

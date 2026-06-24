@@ -69,6 +69,8 @@ long     app_uffd_read(void);                              /* monitor: block unt
 int      app_uffd_copy(uint64_t addr, const void *data, uint64_t len);  /* monitor: fill the faulting page + wake the owner; 0/-1 */
 int      app_madvise(uint64_t addr, uint64_t len, int advice);  /* MADV_DONTNEED(4): drop resident anon frames; pages dropped/-1 */
 int      app_mincore(uint64_t addr, uint64_t len, uint8_t *vec); /* per-page residency of an mmap range; vec[i]=1 resident; 0/-1 (M1147) */
+int      app_mlock(uint64_t addr, uint64_t len);                /* pin mmap pages against reclaim (swap/madvise skip them); 0/-1 (M1149) */
+int      app_munlock(uint64_t addr, uint64_t len);              /* unpin mmap pages locked by app_mlock; 0/-1 (M1149) */
 int      app_swap_out(uint64_t addr, uint64_t len);             /* page out anon pages in range to swap; pages/-1 (M1105) */
 uint64_t app_shm_open(const char *name, uint64_t size);         /* map a named shared-memory object; base VA or 0 (M1108) */
 long     app_futex(uint64_t uaddr, int op, int val);            /* FUTEX_WAIT/WAKE on a (possibly shared) user word (M1109) */

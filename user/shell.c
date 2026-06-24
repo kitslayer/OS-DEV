@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest mincoretest swaptest shmtest (mmap/ring/W^X/reclaim/residency/swap/shared-mem)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1759,6 +1759,27 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "mincore: residency exactly tracks the demand pager OK\n" : "mincore: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
                 sys_munmap(m, len);
+            }
+        } else if (streq(line, "mlocktest")) {  /* mlock pins pages against reclaim; verify via mincore (M1149) */
+            unsigned long np = 8, len = np * 4096;
+            unsigned char *lk = (unsigned char *)sys_mmap(len);   /* this region gets mlock'd */
+            unsigned char *un = (unsigned char *)sys_mmap(len);   /* this one stays unlocked */
+            unsigned char v1[8], v2[8];
+            if (!lk || !un) { print("mlocktest: mmap failed\n"); g_status = 1; }
+            else {
+                sys_mlock(lk, len);                                          /* pin the first region */
+                for (unsigned long i = 0; i < len; i++) { lk[i] = 1; un[i] = 1; }  /* fault both fully in */
+                sys_madvise(lk, len, 4 /* MADV_DONTNEED */);                 /* try to reclaim both... */
+                sys_madvise(un, len, 4);
+                sys_mincore(lk, len, v1); sys_mincore(un, len, v2);          /* ...and see what survived */
+                long rl = 0, ru = 0;
+                for (unsigned long i = 0; i < np; i++) { rl += v1[i]; ru += v2[i]; }
+                print("locked region resident after reclaim:   "); printl(rl); print("/"); printl((long)np); print("\n");
+                print("unlocked region resident after reclaim: "); printl(ru); print("/"); printl((long)np); print("\n");
+                int ok = (rl == (long)np && ru == 0);   /* locked: all pinned; unlocked: all dropped */
+                print(ok ? "mlock: locked pages pinned through reclaim OK\n" : "mlock: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+                sys_munlock(lk, len); sys_munmap(lk, len); sys_munmap(un, len);
             }
         } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
             unsigned long len = 256 * 1024;       /* 64 pages */

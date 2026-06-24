@@ -128,6 +128,8 @@
 #define SYS_set_robust_list 116 /* (robust_t*) -> register this thread's robust-futex list; 0 (M1141) */
 #define SYS_overlay         117 /* (lower, upper) -> mount a union overlay at /over (copy-up to upper); 0/-1 (M1142) */
 #define SYS_mincore         118 /* (addr, len, vec) -> per-page residency of an mmap range; 0/-1 (M1147) */
+#define SYS_mlock           119 /* (addr, len) -> pin mmap pages against reclaim; 0/-1 (M1149) */
+#define SYS_munlock         120 /* (addr, len) -> unpin mlock'd mmap pages; 0/-1 (M1149) */
 
 #define SYSCALL_VECTOR 0x80
 

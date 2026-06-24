@@ -274,7 +274,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
-    case SYS_mincore:
+    case SYS_mincore: case SYS_mlock: case SYS_munlock:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -318,7 +318,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
-        [SYS_mincore]="mincore",
+        [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -820,6 +820,12 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)app_mincore(r->rdi, r->rsi, (uint8_t *)r->rdx);
         break;
     }
+    case SYS_mlock:                        /* (addr, len) -> pin mmap pages against reclaim (M1149) */
+        r->rax = (uint64_t)(int64_t)app_mlock(r->rdi, r->rsi);
+        break;
+    case SYS_munlock:                      /* (addr, len) -> unpin mlock'd mmap pages (M1149) */
+        r->rax = (uint64_t)(int64_t)app_munlock(r->rdi, r->rsi);
+        break;
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
         r->rax = (uint64_t)(int64_t)app_swap_out(r->rdi, r->rsi);

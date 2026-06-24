@@ -49,6 +49,8 @@ long sys_cas_fetch(const void *hash32, void *buf, unsigned long max);
 long sys_tftp(const char *filename, void *buf, unsigned long max);
 long sys_madvise(void *addr, unsigned long len, int advice);
 long sys_mincore(void *addr, unsigned long len, unsigned char *vec);   /* per-page residency; vec[i]=1 if resident; 0/-1 (M1147) */
+long sys_mlock(void *addr, unsigned long len);     /* pin mmap pages against reclaim; 0/-1 (M1149) */
+long sys_munlock(void *addr, unsigned long len);   /* unpin mlock'd mmap pages; 0/-1 (M1149) */
 long sys_alarm(unsigned long ticks);
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);
