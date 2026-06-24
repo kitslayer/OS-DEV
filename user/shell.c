@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1910,6 +1910,27 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "SysV semaphores: count + NOWAIT + atomic all-or-nothing OK\n" : "semtest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
                 sys_semctl(id, 0, IPC_RMID, 0);
+            }
+        } else if (streq(line, "msgtest")) {   /* SysV message queue: mtype-selective receive (M1160) */
+            int id = (int)sys_msgget(42, IPC_CREAT);       /* fixed key -> reusable across runs (empty after) */
+            if (id < 0) { print("msgtest: msgget failed\n"); g_status = 1; }
+            else {
+                struct { long mtype; char data[8]; } m;
+                m.mtype = 3; m.data[0] = '3'; sys_msgsnd(id, &m, 1, 0);   /* send in order: type 3, 1, 2 */
+                m.mtype = 1; m.data[0] = '1'; sys_msgsnd(id, &m, 1, 0);
+                m.mtype = 2; m.data[0] = '2'; sys_msgsnd(id, &m, 1, 0);
+                long sel[3] = { 0, 2, -2 };                /* selectors: oldest, exact-2, lowest<=2 */
+                long et[3] = { 3, 2, 1 }; char ed[3] = { '3', '2', '1' };
+                int ok = 1;
+                for (int i = 0; i < 3; i++) {
+                    m.mtype = 0; m.data[0] = '?';
+                    long n = sys_msgrcv(id, &m, 8, sel[i]);
+                    char dd[2]; dd[0] = (n >= 1) ? m.data[0] : '?'; dd[1] = 0;
+                    print("  recv #"); printl(i + 1); print(": type "); printl(m.mtype); print(" data "); print(dd); print("\n");
+                    if (n < 1 || m.mtype != et[i] || m.data[0] != ed[i]) ok = 0;
+                }
+                print(ok ? "SysV msgq: selection (oldest / exact-type / lowest-type) OK\n" : "msgtest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
             }
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */

@@ -189,6 +189,9 @@ long sys_mq_receive(int idx, void *buf, unsigned long max, unsigned int *prio) {
 long sys_semget(int key, int nsems, int flags) { return do_syscall(SYS_semget, key, nsems, flags); }
 long sys_semop(int semid, struct sembuf *sops, unsigned nsops) { return do_syscall(SYS_semop, semid, (long)sops, (long)nsops); }
 long sys_semctl(int semid, int semnum, int cmd, int arg) { return do_syscall4(SYS_semctl, semid, semnum, cmd, arg); }
+long sys_msgget(int key, int flags) { return do_syscall(SYS_msgget, key, flags, 0); }
+long sys_msgsnd(int id, const void *msgp, unsigned long sz, int flags) { return do_syscall4(SYS_msgsnd, id, (long)msgp, (long)sz, flags); }
+long sys_msgrcv(int id, void *msgp, unsigned long sz, long mtyp) { return do_syscall4(SYS_msgrcv, id, (long)msgp, (long)sz, (long)mtyp); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }
 long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
 long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }

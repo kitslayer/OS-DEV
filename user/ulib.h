@@ -64,6 +64,9 @@ long sys_mq_receive(int idx, void *buf, unsigned long max, unsigned int *prio); 
 long sys_semget(int key, int nsems, int flags);                    /* SysV semaphore set; id/-1 (M1159) */
 long sys_semop(int semid, struct sembuf *sops, unsigned nsops);    /* atomic all-or-nothing semop; 0/-1 (M1159) */
 long sys_semctl(int semid, int semnum, int cmd, int arg);          /* SETVAL/GETVAL/IPC_RMID (M1159) */
+long sys_msgget(int key, int flags);                               /* SysV message queue; id/-1 (M1160) */
+long sys_msgsnd(int id, const void *msgp, unsigned long sz, int flags);   /* enqueue {long mtype; data} (M1160) */
+long sys_msgrcv(int id, void *msgp, unsigned long sz, long mtyp);  /* receive by type; bytes/-1 (M1160) */
 long sys_alarm(unsigned long ticks);
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);

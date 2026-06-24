@@ -253,6 +253,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_alarm: case SYS_getrusage:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_semget: case SYS_semop: case SYS_semctl:
+    case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
@@ -329,6 +330,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
         [SYS_mmap_huge]="mmap_huge",
         [SYS_semget]="semget",[SYS_semop]="semop",[SYS_semctl]="semctl",
+        [SYS_msgget]="msgget",[SYS_msgsnd]="msgsnd",[SYS_msgrcv]="msgrcv",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -835,6 +837,28 @@ void syscall_dispatch(struct registers *r) {
     case SYS_semctl:                       /* (semid, semnum, cmd, arg) -> SETVAL/GETVAL/IPC_RMID (M1159) */
         r->rax = (uint64_t)(int64_t)sysv_semctl((int)r->rdi, (int)r->rsi, (int)r->rdx, (int)r->r10);
         break;
+    case SYS_msgget:                       /* (key, flags) -> SysV message queue (M1160) */
+        r->rax = (uint64_t)(int64_t)sysv_msgget((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_msgsnd: {                     /* (msqid, msgbuf{long mtype; char data[sz]}, sz, flags) (M1160) */
+        int sz = (int)r->rdx;
+        if (sz < 0 || sz > 192 || !ubuf(r->rsi, 8 + (uint64_t)sz)) { r->rax = (uint64_t)-1; break; }
+        char kb[8 + 192];
+        for (int i = 0; i < 8 + sz; i++) kb[i] = ((char *)r->rsi)[i];
+        r->rax = (uint64_t)(int64_t)sysv_msgsnd((int)r->rdi, *(long *)kb, kb + 8, sz, (int)r->r10);
+        break;
+    }
+    case SYS_msgrcv: {                     /* (msqid, msgbuf*, sz, mtyp) -> receive by type (M1160) */
+        int sz = (int)r->rdx;
+        if (sz < 0 || sz > 192 || !ubuf(r->rsi, 8 + (uint64_t)sz)) { r->rax = (uint64_t)-1; break; }
+        char kb[192]; long mt = 0;
+        long n = sysv_msgrcv((int)r->rdi, (long)r->r10, kb, sz, &mt, 0);
+        if (n < 0) { r->rax = (uint64_t)-1; break; }
+        *(long *)r->rsi = mt;                          /* mtype goes at the start of the user msgbuf */
+        for (long i = 0; i < n; i++) ((char *)r->rsi)[8 + i] = kb[i];
+        r->rax = (uint64_t)n;
+        break;
+    }
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);
         break;

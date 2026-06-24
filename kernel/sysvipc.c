@@ -86,6 +86,86 @@ int sysv_semctl(int id, int semnum, int cmd, int arg) {
     return -1;
 }
 
+/* ---- System V message queues (M1160) ---------------------------------------
+ * Keyed queues of TYPED messages. msgsnd appends a message tagged with a
+ * positive mtype; msgrcv selects by `mtyp`: 0 = the oldest message, >0 = the
+ * oldest with mtype == mtyp, <0 = the oldest among messages with mtype <= |mtyp|
+ * (picking the LOWEST such mtype first). Blocks (task_block) when full/empty.
+ * Distinct from the M1154 POSIX mqueue (priority-ordered, named): this is the
+ * keyed, type-selected SysV API. */
+#define MSG_N    8
+#define MSG_MAX  32
+#define MSG_SZ   192
+struct sysv_msg { int used; long mtype; uint32_t seq; int len; char data[MSG_SZ]; };
+struct msg_q {
+    int used, key, count; uint32_t seq;
+    struct sysv_msg m[MSG_MAX];
+    task_t *swait[4], *rwait[4]; int nsw, nrw;
+};
+static struct msg_q mqs[MSG_N];
+
+static void mq_wake(task_t **w, int *n) { int k = *n; *n = 0; for (int i = 0; i < k; i++) if (w[i]) task_wake(w[i]); }
+
+int sysv_msgget(int key, int flags) {
+    if (key != IPC_PRIVATE) for (int i = 0; i < MSG_N; i++) if (mqs[i].used && mqs[i].key == key) return i;
+    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) return -1;
+    for (int i = 0; i < MSG_N; i++) if (!mqs[i].used) {
+        mqs[i].used = 1; mqs[i].key = key; mqs[i].count = 0; mqs[i].seq = 0; mqs[i].nsw = mqs[i].nrw = 0;
+        for (int j = 0; j < MSG_MAX; j++) mqs[i].m[j].used = 0;
+        return i;
+    }
+    return -1;
+}
+
+int sysv_msgsnd(int id, long mtype, const void *data, int len, int flags) {
+    if (id < 0 || id >= MSG_N || !mqs[id].used || mtype <= 0) return -1;
+    if (len < 0 || len > MSG_SZ) return -1;
+    struct msg_q *q = &mqs[id];
+    while (q->count >= MSG_MAX) {                       /* full -> block (unless IPC_NOWAIT) */
+        if (flags & IPC_NOWAIT) return -1;
+        if (q->nsw < 4) q->swait[q->nsw++] = task_self();
+        task_block();
+        if (!q->used) return -1;
+    }
+    for (int i = 0; i < MSG_MAX; i++) if (!q->m[i].used) {
+        q->m[i].used = 1; q->m[i].mtype = mtype; q->m[i].seq = q->seq++; q->m[i].len = len;
+        for (int b = 0; b < len; b++) q->m[i].data[b] = ((const char *)data)[b];
+        q->count++;
+        mq_wake(q->rwait, &q->nrw);
+        return 0;
+    }
+    return -1;
+}
+
+int sysv_msgrcv(int id, long mtyp, void *out, int max, long *mtype_out, int flags) {
+    if (id < 0 || id >= MSG_N || !mqs[id].used) return -1;
+    struct msg_q *q = &mqs[id];
+    for (;;) {
+        int best = -1;
+        for (int i = 0; i < MSG_MAX; i++) if (q->m[i].used) {
+            long t = q->m[i].mtype;
+            int match = (mtyp == 0) || (mtyp > 0 && t == mtyp) || (mtyp < 0 && t <= -mtyp);
+            if (!match) continue;
+            if (best < 0) { best = i; continue; }
+            if (mtyp < 0) {            /* lowest mtype, then oldest */
+                if (t < q->m[best].mtype || (t == q->m[best].mtype && q->m[i].seq < q->m[best].seq)) best = i;
+            } else if (q->m[i].seq < q->m[best].seq) best = i;   /* oldest match */
+        }
+        if (best >= 0) {
+            int n = q->m[best].len; if (n > max) n = max;
+            for (int b = 0; b < n; b++) ((char *)out)[b] = q->m[best].data[b];
+            if (mtype_out) *mtype_out = q->m[best].mtype;
+            q->m[best].used = 0; q->count--;
+            mq_wake(q->swait, &q->nsw);
+            return n;
+        }
+        if (flags & IPC_NOWAIT) return -1;             /* no match -> block (unless IPC_NOWAIT) */
+        if (q->nrw < 4) q->rwait[q->nrw++] = task_self();
+        task_block();
+        if (!q->used) return -1;
+    }
+}
+
 /* /proc/sysvipc: one line per live set — "id key nsems val0,val1,...". */
 int sysv_sem_format(char *out, int max) {
     int p = 0;

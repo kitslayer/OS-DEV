@@ -140,6 +140,9 @@
 #define SYS_semget          128 /* (key, nsems, flags) -> SysV semaphore-set id; -1 (M1159) */
 #define SYS_semop           129 /* (semid, struct sembuf*, nsops) -> atomic all-or-nothing semop; 0/-1 (M1159) */
 #define SYS_semctl          130 /* (semid, semnum, cmd, arg) -> SETVAL/GETVAL/IPC_RMID; value/0/-1 (M1159) */
+#define SYS_msgget          131 /* (key, flags) -> SysV message-queue id; -1 (M1160) */
+#define SYS_msgsnd          132 /* (msqid, msgbuf*, msgsz, flags) -> enqueue a typed message; 0/-1 (M1160) */
+#define SYS_msgrcv          133 /* (msqid, msgbuf*, msgsz, mtyp) -> receive by type; bytes/-1 (M1160) */
 
 /* System V semaphore ABI (M1159), shared by the kernel + ulib. */
 #define IPC_PRIVATE 0
