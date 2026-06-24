@@ -2671,6 +2671,26 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
 }
 long app_fd_write(int fd, const void *buf, unsigned long len) {
     struct app *a = cur(); if (!a) return -1;
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 2) {   /* FILE fd: positioned write (M1195) */
+        if (!a->fd[fd].write_end) return -1;                  /* opened read-only */
+        long off = a->fd[fd].off;
+        if (off < 0 || (unsigned long)off + len > FILEFD_CAP) return -1;
+        /* read-modify-write the whole file (via vfs_read/vfs_write — no per-FS work;
+         * bounded to FILEFD_CAP). Read existing, patch [off, off+len), grow if needed. */
+        struct statx st; long sz = (vfs_stat(a->fd[fd].path, &st) == 0) ? (long)st.stx_size : 0;
+        unsigned long need = (unsigned long)off + len;
+        if ((unsigned long)sz > need) need = (unsigned long)sz;   /* preserve bytes past the write */
+        char *tmp = kmalloc(need ? need : 1); if (!tmp) return -1;
+        long got = vfs_read(a->fd[fd].path, tmp, need);
+        if (got < 0) got = 0;
+        for (long i = got; i < off; i++) tmp[i] = 0;          /* zero-fill a gap (sparse extend) */
+        for (unsigned long i = 0; i < len; i++) tmp[off + i] = ((const char *)buf)[i];
+        long w = vfs_write(a->fd[fd].path, tmp, need);
+        kfree(tmp);
+        if (w < 0) return -1;
+        a->fd[fd].off = off + len;
+        return (long)len;
+    }
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
     return pipe_write(idx, buf, len);
 }
@@ -2706,16 +2726,26 @@ int app_fifo_open(const char *path, int write) {
 
 /* open(path): a read-only FILE fd (M1193). Positioned reads via app_fd_read +
  * app_lseek; close via app_fd_close. Returns the fd (>=3), or -1. */
-int app_open(const char *path) {
+int app_open(const char *path, int flags) {
     struct app *a = cur(); if (!a) return -1;
     struct statx st;
-    if (vfs_stat(path, &st) != 0) return -1;                  /* must exist */
+    int exists = (vfs_stat(path, &st) == 0);
+    if (!exists) {
+        if (!(flags & O_CREAT)) return -1;                    /* must exist unless O_CREAT */
+        if (vfs_write(path, "", 0) < 0) return -1;            /* create empty */
+        st.stx_size = 0;
+    } else if ((flags & O_TRUNC) && (flags & O_WRONLY)) {
+        if (vfs_write(path, "", 0) < 0) return -1;            /* truncate to 0 */
+        st.stx_size = 0;
+    }
     int fd = -1;
     for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
     if (fd < 0) return -1;
-    a->fd[fd] = (struct fdent){ 1, 2, 0, 0, {0}, 0 };         /* used, type=file */
+    uint8_t wr = (flags & O_WRONLY) ? 1 : 0;                  /* write_end=1 => writable file fd (M1195) */
+    a->fd[fd] = (struct fdent){ 1, 2, wr, 0, {0}, 0 };        /* used, type=file */
     int j = 0; while (path[j] && j < (int)sizeof a->fd[fd].path - 1) { a->fd[fd].path[j] = path[j]; j++; }
-    a->fd[fd].path[j] = 0; a->fd[fd].off = 0;
+    a->fd[fd].path[j] = 0;
+    a->fd[fd].off = (flags & O_APPEND) ? (long)st.stx_size : 0;   /* O_APPEND starts at EOF */
     return fd;
 }
 /* lseek(fd, off, whence): 0=SET, 1=CUR, 2=END. Returns the new offset, or -1. */

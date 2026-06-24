@@ -2576,6 +2576,25 @@ static int run_command(char *line, char *cwd) {
             int ok = (havp && ff >= 3 && sawpipe && sawfile);
             print(ok ? "/proc/self/fd: lists open pipe + file fds OK\n" : "procfdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "filewrtest")) {   /* write/append file fds (M1195) */
+            int ok = 1;
+            int fd = sys_open_mode("/tmp/fw.txt", O_WRONLY | O_CREAT | O_TRUNC);
+            if (fd < 3) ok = 0;
+            else {
+                sys_fdwrite(fd, "Hello World", 11);            /* "Hello World" */
+                sys_lseek(fd, 6, SEEK_SET);                    /* seek into the middle */
+                sys_fdwrite(fd, "There", 5);                   /* positioned overwrite -> "Hello There" */
+                sys_fdclose(fd);
+                int af = sys_open_mode("/tmp/fw.txt", O_WRONLY | O_APPEND);   /* reopen for append */
+                if (af < 3) ok = 0;
+                else { sys_fdwrite(af, "!", 1); sys_fdclose(af); }            /* -> "Hello There!" */
+                char b[32]; long n = sys_readfile("/tmp/fw.txt", b, sizeof b - 1);
+                if (n < 0) n = 0; b[n] = 0;
+                if (!(n == 12 && streq(b, "Hello There!"))) ok = 0;
+            }
+            print(ok ? "file-wr: open(WR|CREAT|TRUNC) + positioned overwrite + O_APPEND all OK\n"
+                     : "filewrtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

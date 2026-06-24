@@ -197,6 +197,12 @@
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
+/* open() flags (M1195): O_RDONLY is the default (0); the rest are bit flags. */
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_APPEND 2
+#define O_TRUNC  4
+#define O_CREAT  8
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

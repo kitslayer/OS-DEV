@@ -1086,9 +1086,9 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_fifo_open((const char *)r->rdi, (int)r->rsi);
         break;
-    case SYS_open:                         /* (path) -> a read-only file fd (M1193) */
+    case SYS_open:                         /* (path, flags) -> a file fd; O_RDONLY/WRONLY/APPEND/TRUNC/CREAT (M1193/M1195) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
-        r->rax = (uint64_t)(int64_t)app_open((const char *)r->rdi);
+        r->rax = (uint64_t)(int64_t)app_open((const char *)r->rdi, (int)r->rsi);
         break;
     case SYS_lseek:                        /* (fd, off, whence) -> reposition a file fd (M1193) */
         r->rax = (uint64_t)(int64_t)app_lseek((int)r->rdi, (long)r->rsi, (int)r->rdx);

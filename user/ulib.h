@@ -177,6 +177,7 @@ int   sys_dup2(int oldfd, int newfd);                        /* redirect newfd o
 int   sys_mkfifo(const char *path);                          /* create a named pipe (FIFO); 0/-1 (M1188) */
 int   sys_fifo_open(const char *path, int write);            /* open a FIFO end -> fd; -1 (M1188) */
 int   sys_open(const char *path);                            /* open a read-only file fd (>=3); -1 (M1193) */
+int   sys_open_mode(const char *path, int flags);            /* open a file fd with O_* flags (M1195) */
 long  sys_lseek(int fd, long off, int whence);               /* reposition a file fd (SEEK_SET/CUR/END); offset/-1 (M1193) */
 long  sys_seccomp_filter(const void *prog, unsigned long bytes);  /* install a self-imposed BPF syscall filter; 0/-1 (M1190) */
 #define PTY_SETMODE 0
