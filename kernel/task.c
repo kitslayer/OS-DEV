@@ -14,6 +14,7 @@
  * See docs/07 (threads) and docs/11 (preemption) for the history.
  */
 #include "task.h"
+#include "syscall.h"   /* SCHED_OTHER/FIFO/RR (M1172) */
 #include "kheap.h"
 #include "interrupts.h"
 #include "gdt.h"
@@ -77,6 +78,7 @@ static uint32_t nice_to_weight(int nice) {
     return sched_weight[nice + 20];
 }
 static uint64_t g_min_vruntime;   /* floor: the smallest vruntime among runnable tasks (monotonic non-decreasing) */
+#define RR_QUANTUM 5              /* SCHED_RR timeslice in timer ticks before rotating among equal-priority RR tasks (M1172) */
 static void sched_place_wake(task_t *t) {   /* a waking task can't be below the floor (no unfair head start; no starvation) */
     if (t && t->vruntime < g_min_vruntime) t->vruntime = g_min_vruntime;
 }
@@ -209,19 +211,48 @@ static void switch_to_next(void) {
     prev->run_ms += slice;
     if (prev != idle_task)
         prev->vruntime += slice * NICE0_WEIGHT / (prev->weight ? prev->weight : NICE0_WEIGHT);
+    if (prev->policy == SCHED_RR && prev->rt_ticks > 0) prev->rt_ticks--;   /* RR timeslice tick (M1172) */
 
-    /* CFS pick: the runnable, non-idle task with the smallest vruntime. */
-    task_t *best = 0, *t = prev;
-    do {
-        if (t != idle_task && (t->state == TASK_RUNNING || t->state == TASK_READY))
-            if (!best || t->vruntime < best->vruntime) best = t;
-        t = t->next;
-    } while (t != prev);
-
-    /* Advance the floor every call (even when we keep prev): it's the smallest
-     * runnable vruntime, so a task that wakes mid-way clamps to HERE and can't
-     * monopolize the CPU catching up to a long-running solo task (M1171). */
-    if (best) g_min_vruntime = best->vruntime;
+    task_t *best = 0;
+    /* --- Real-time classes first (M1172): the highest-priority runnable FIFO/RR
+       task preempts the ENTIRE normal (CFS) class. Only if none are runnable do
+       we fall through to the CFS pick — so with no RT task this is byte-for-byte
+       the M1171 behavior. --- */
+    int top_rt = -1;
+    for (task_t *u = prev->next; ; u = u->next) {
+        if (u != idle_task && (u->state == TASK_RUNNING || u->state == TASK_READY)
+            && u->policy != SCHED_OTHER && u->rt_priority > top_rt)
+            top_rt = u->rt_priority;
+        if (u == prev) break;
+    }
+    if (top_rt >= 0) {                          /* an RT task wants the CPU */
+        int prev_top = (prev != idle_task && (prev->state == TASK_RUNNING || prev->state == TASK_READY)
+                        && prev->policy != SCHED_OTHER && prev->rt_priority == top_rt);
+        if (prev_top && !(prev->policy == SCHED_RR && prev->rt_ticks <= 0)) {
+            best = prev;                        /* incumbent keeps the CPU: FIFO always; RR within its quantum */
+        } else {
+            for (task_t *u = prev->next; ; u = u->next) {   /* next runnable RT task at top_rt (ring order => RR rotation) */
+                if (u != idle_task && (u->state == TASK_RUNNING || u->state == TASK_READY)
+                    && u->policy != SCHED_OTHER && u->rt_priority == top_rt) { best = u; break; }
+                if (u == prev) break;
+            }
+            if (!best) best = prev;
+            if (prev_top) prev->rt_ticks = RR_QUANTUM;                          /* rotated out: refill */
+            if (best && best != prev && best->policy == SCHED_RR) best->rt_ticks = RR_QUANTUM;  /* fresh quantum on switch-in */
+        }
+    } else {
+        /* CFS pick: the runnable, non-idle task with the smallest vruntime. */
+        task_t *t = prev;
+        do {
+            if (t != idle_task && (t->state == TASK_RUNNING || t->state == TASK_READY))
+                if (!best || t->vruntime < best->vruntime) best = t;
+            t = t->next;
+        } while (t != prev);
+        /* Advance the floor every call (even when we keep prev): it's the smallest
+         * runnable vruntime, so a task that wakes mid-way clamps to HERE and can't
+         * monopolize the CPU catching up to a long-running solo task (M1171). */
+        if (best) g_min_vruntime = best->vruntime;
+    }
 
     task_t *next;
     if (best == prev) return;                   /* prev is the most-deserving runnable -> keep it (no switch) */
@@ -405,6 +436,26 @@ int task_set_nice(int nice) {
 }
 int task_get_nice(void) { return current ? current->nice : 0; }
 
+/* Set the current task's scheduling class (M1172). SCHED_FIFO/RR are real-time
+ * (rt_priority 1..99, clamped) and preempt the SCHED_OTHER/CFS class; switching
+ * back to OTHER re-places it at the CFS floor so its frozen vruntime can't make
+ * it dominate or starve. Returns 0, or -1 on a bad policy. */
+int task_set_sched(int policy, int rt_priority) {
+    if (!current) return -1;
+    if (policy != SCHED_OTHER && policy != SCHED_FIFO && policy != SCHED_RR) return -1;
+    if (policy == SCHED_OTHER) {
+        current->policy = SCHED_OTHER;
+        current->rt_priority = 0;
+        if (current->vruntime < g_min_vruntime) current->vruntime = g_min_vruntime;
+    } else {
+        if (rt_priority < 1) rt_priority = 1; if (rt_priority > 99) rt_priority = 99;
+        current->policy = policy;
+        current->rt_priority = rt_priority;
+        current->rt_ticks = RR_QUANTUM;
+    }
+    return 0;
+}
+
 /* Suspend a task (it leaves the run rotation until task_cont). Only a runnable,
  * non-current task — never stop ourselves (that needs a yield) or a blocked task
  * (it's already off-CPU; STOPPING it would lose the BLOCKED->READY wake path). */
@@ -506,6 +557,7 @@ int task_snapshot(task_info_t *out, int max) {
             out[n].run_ms = rm; out[n].nswitch = t->nswitch; out[n].rq_wait_ms = t->rq_wait_ms;
             out[n].wchan = (t->state == TASK_BLOCKED) ? t->wchan : 0;   /* only meaningful while blocked (M1166) */
             out[n].nice = t->nice;                                       /* CFS nice level (M1171) */
+            out[n].policy = t->policy; out[n].rt_priority = t->rt_priority;   /* scheduling class (M1172) */
             n++; t = t->next;
         } while (t != current);
     }

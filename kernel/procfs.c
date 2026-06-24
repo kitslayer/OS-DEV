@@ -277,7 +277,7 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
     p = sapp(b, p, max, "/");               p = sdec(b, p, max, memt);
     p = sapp(b, p, max, " MiB used  tasks "); p = sdec(b, p, max, (uint64_t)task_count());
     p = sapp(b, p, max, "\n");
-    p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  WAIT_MS  SWITCHES  NI  WCHAN              NAME\n");
+    p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  WAIT_MS  SWITCHES  NI  POL   WCHAN              NAME\n");
     for (int i = 0; i < cnt; i++) {
         if (ti[i].state == 3) continue;             /* skip dead */
         p = sapp(b, p, max, "  ");  p = sdec(b, p, max, (uint64_t)ti[i].id);
@@ -290,6 +290,11 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
         p = sapp(b, p, max, "  ");
         if (ti[i].nice < 0) { p = sapp(b, p, max, "-"); p = sdec(b, p, max, (uint64_t)(-ti[i].nice)); }
         else p = sdec(b, p, max, (uint64_t)ti[i].nice);
+        /* POL: scheduling class — OT (CFS) / FF<prio> (FIFO) / RR<prio> (M1172) */
+        p = sapp(b, p, max, "  ");
+        if (ti[i].policy == 1)      { p = sapp(b, p, max, "FF"); p = sdec(b, p, max, (uint64_t)ti[i].rt_priority); }
+        else if (ti[i].policy == 2) { p = sapp(b, p, max, "RR"); p = sdec(b, p, max, (uint64_t)ti[i].rt_priority); }
+        else                          p = sapp(b, p, max, "OT");
         /* WCHAN: the kernel routine a blocked task is parked in, symbolised (M1166) */
         p = sapp(b, p, max, "  ");
         if (ti[i].wchan) { unsigned long off; const char *nm = ksym_lookup(ti[i].wchan, &off);

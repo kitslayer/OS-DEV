@@ -158,6 +158,13 @@
 #define SYS_unix_close   146   /* (ep) -> 0/-1 (M1169) */
 #define SYS_unix_wait_any 147  /* (int*eps, n) -> index of first readable ep (blocks once); -1 (M1170) */
 #define SYS_nice         148   /* (nice) -> set current task's CFS nice (-20..19); returns the clamped nice (M1171) */
+#define SYS_sched_setscheduler 149 /* (policy, rt_priority) -> set current task's scheduling class; 0/-1 (M1172) */
+
+/* sched_setscheduler policies (M1172), shared by the kernel + ulib. SCHED_OTHER
+ * is the M1171 CFS/nice class; FIFO/RR are real-time classes that preempt it. */
+#define SCHED_OTHER    0
+#define SCHED_FIFO     1
+#define SCHED_RR       2
 
 /* getrlimit/setrlimit (M1163), shared by the kernel + ulib. */
 #define RLIMIT_DATA    2

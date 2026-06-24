@@ -30,6 +30,9 @@ typedef struct task {
     uint64_t      vruntime;    /* CFS virtual runtime: weighted CPU consumed; the scheduler runs the smallest (M1171) */
     uint32_t      weight;      /* CFS weight from nice (NICE0_WEIGHT=1024); vruntime += slice*1024/weight (M1171) */
     int           nice;        /* -20..+19; lower = more CPU (M1171) */
+    int           policy;      /* SCHED_OTHER (CFS) / SCHED_FIFO / SCHED_RR; RT classes preempt OTHER (M1172) */
+    int           rt_priority; /* 1..99 for FIFO/RR; higher preempts lower (0 for OTHER) (M1172) */
+    int           rt_ticks;    /* SCHED_RR: timeslice ticks left before rotating among equal-priority RR tasks (M1172) */
     uint64_t      wake_at;     /* if BLOCKED via task_sleep_ms: timer_ms() deadline (0 = not a timed sleep) */
     struct registers *uframe;  /* most recent ring-3 trap frame (for /proc/<pid>/regs); valid while stopped (M1119) */
     struct registers *start_frame;  /* a thread's initial ring-3 frame: iret'd to once at startup, then freed (M1138) */
@@ -62,7 +65,7 @@ void    task_cont(task_t *t);              /* resume a STOPPED task */
 int     task_count(void);                  /* number of live tasks */
 
 /* A snapshot of one task, for `ps` and `/proc/sched`. */
-typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitch; uint64_t rq_wait_ms; uint64_t wchan; int nice; } task_info_t;
+typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitch; uint64_t rq_wait_ms; uint64_t wchan; int nice; int policy; int rt_priority; } task_info_t;
 int     task_snapshot(task_info_t *out, int max);   /* fill out[]; returns count */
 uint64_t task_idle_ms(void);                         /* ms the idle task has run (system idle time) */
 int     task_runnable_count(void);   /* tasks wanting the CPU now (RUNNING|READY, idle excluded) (M1148) */
@@ -71,6 +74,7 @@ void    task_loadavg(uint64_t out[3]); /* fixed-point (FSHIFT=11) 1/5/15-min loa
 void    task_cpu_tick(uint64_t ms, int user);  /* timer: charge current task ms of user/kernel CPU time (M1150) */
 int     task_set_nice(int nice);     /* set the current task's nice (-20..19) -> CFS weight; returns the clamped nice (M1171) */
 int     task_get_nice(void);         /* the current task's nice (M1171) */
+int     task_set_sched(int policy, int rt_priority);   /* set the current task's scheduling class (SCHED_*); 0/-1 (M1172) */
 
 /* Called from the timer IRQ to preempt the running thread (no-op until the
  * scheduler is initialized and there's more than one task). */

@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2153,6 +2153,45 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "CFS: lower nice got proportionally more CPU (weighted fair scheduling) OK\n" : "nicetest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
                 if (sh) sys_shmdt((void *)sh);
+            }
+        } else if (streq(line, "schedtest")) {   /* SCHED_FIFO real-time priority ordering (M1172) */
+            int sid = (int)sys_semget(IPC_PRIVATE, 1, IPC_CREAT);
+            long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
+            volatile unsigned long *sh = (shmid >= 0) ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
+            if (sid < 0 || !sh) { print("schedtest: ipc setup failed\n"); g_status = 1; }
+            else {
+                sh[0] = 0; sh[1] = 0; sh[2] = 0;             /* [0]=order counter, [1]=Lo finish slot, [2]=Hi finish slot */
+                struct sembuf op; op.sem_num = 0; op.sem_flg = 0;
+                long lo = sys_fork();
+                if (lo == 0) {                               /* child Lo: real-time FIFO priority 10 */
+                    volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                    sys_sched_setscheduler(SCHED_FIFO, 10);
+                    op.sem_op = -1; sys_semop(sid, &op, 1);  /* block on the barrier until released */
+                    if (m) m[1] = ++m[0];                     /* record my finish order */
+                    sys_exit(0);
+                }
+                long hi = sys_fork();
+                if (hi == 0) {                               /* child Hi: real-time FIFO priority 50 */
+                    volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                    sys_sched_setscheduler(SCHED_FIFO, 50);
+                    op.sem_op = -1; sys_semop(sid, &op, 1);
+                    if (m) m[2] = ++m[0];
+                    sys_exit(0);
+                }
+                if (lo > 0 && hi > 0) {
+                    sys_sleep(150);                          /* let both children reach + block on the barrier */
+                    op.sem_op = 2; sys_semop(sid, &op, 1);   /* release both at once -> scheduler picks by RT priority */
+                    int st; sys_waitpid((int)lo, &st); sys_waitpid((int)hi, &st);
+                    unsigned long ordLo = sh[1], ordHi = sh[2];
+                    char nb[12];
+                    print("SCHED_FIFO finish order: prio50="); itoa_simple((int)ordHi, nb); print(nb);
+                    print(", prio10="); itoa_simple((int)ordLo, nb); print(nb); print("\n");
+                    int ok = (ordHi == 1 && ordLo == 2);     /* the higher-priority RT task ran to completion first */
+                    print(ok ? "RT sched: higher-priority FIFO ran before lower (real-time priority) OK\n" : "schedtest: VERIFY FAILED\n");
+                    if (!ok) g_status = 1;
+                } else { print("schedtest: fork failed\n"); g_status = 1; }
+                sys_shmdt((void *)sh);
+                sys_semctl(sid, 0, IPC_RMID, 0);
             }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
