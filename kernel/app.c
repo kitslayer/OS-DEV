@@ -52,6 +52,8 @@ struct app {
     int         used;
     int         pid;
     task_t     *task;
+#define APP_MAXTHREAD 16
+    task_t     *thr[APP_MAXTHREAD];      /* worker threads (M1138/M1139); 0 = free slot */
     const char *title;
     char        titlebuf[24];            /* persistent copy of the title */
     uint64_t cr3, entry, ustack;
@@ -646,6 +648,15 @@ int app_reap(app_t *a) {
         }
         if (a->task) task_free(a->task);
         a->task = 0;
+        /* Un-joined worker threads (M1139): free the dead ones; STOP any still
+         * alive so the scheduler skips them — they must never run once we free
+         * the shared address space just below. */
+        for (int i = 0; i < APP_MAXTHREAD; i++) {
+            task_t *t = a->thr[i];
+            if (!t) continue;
+            if (t->state == TASK_DEAD) task_free(t); else task_stop(t);
+            a->thr[i] = 0;
+        }
         vmm_destroy_address_space(a->cr3);   /* free page tables + user frames */
         a->cr3 = 0;
         if (a->gfx) { kfree(a->gfx); a->gfx = 0; }   /* graphics canvas (kernel heap) */
@@ -2102,6 +2113,7 @@ long app_clone(struct registers *r, uint64_t fn, uint64_t stack, uint64_t arg) {
     task_t *t = task_create_stack(thread_trampoline, a->cr3, a, 64 * 1024);   /* SHARED cr3 + app */
     if (!t) { kfree(f); return -1; }
     t->start_frame = f;
+    for (int i = 0; i < APP_MAXTHREAD; i++) if (!a->thr[i]) { a->thr[i] = t; break; }   /* track for join/reap (M1139) */
     return t->id;
 }
 
@@ -2110,6 +2122,23 @@ void app_thread_exit(void) { task_exit(); }
 
 /* The calling thread's id = its task id (each thread is a distinct task). M1138. */
 int app_gettid(void) { return task_current_id(); }
+
+/* join (M1139): block until thread `tid` (of this process) has exited, then reap
+ * its task (freeing the struct+kstack a finished thread would otherwise leak).
+ * 0 on success, -1 if `tid` isn't a thread of this process. */
+long app_join(int tid) {
+    struct app *a = cur();
+    if (!a) return -1;
+    int slot = -1;
+    for (int i = 0; i < APP_MAXTHREAD; i++) if (a->thr[i] && a->thr[i]->id == tid) { slot = i; break; }
+    if (slot < 0) return -1;
+    task_t *t = a->thr[slot];
+    __asm__ volatile("sti");                        /* the poll sleeps on the timer */
+    while (t->state != TASK_DEAD) task_sleep_ms(5); /* wait for the thread to exit (it switches off-CPU first) */
+    a->thr[slot] = 0;                               /* drop our reference before freeing */
+    task_free(t);                                   /* DEAD + unlinked + off-CPU -> safe to reap */
+    return 0;
+}
 
 /* exec() (M1121): replace the CURRENT process's program image with the registered
  * program `name`, in place — same pid, same task, same window. Loads the new ELF

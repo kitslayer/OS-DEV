@@ -59,6 +59,7 @@ struct registers;
 long     app_clone(struct registers *r, uint64_t fn, uint64_t stack, uint64_t arg);  /* spawn a thread sharing this address space; tid/-1 (M1138) */
 void     app_thread_exit(void);    /* end just the calling thread's task (M1138) */
 int      app_gettid(void);         /* the calling thread's id (its task id) (M1138) */
+long     app_join(int tid);        /* block until thread `tid` exits, then reap it; 0/-1 (M1139) */
 uint64_t app_ringbuf(uint64_t len);     /* a magic mirrored ring buffer: len frames mapped twice back-to-back */
 int      app_mprotect(uint64_t addr, uint64_t len, int prot);   /* change R/W/X of a mapped range (W^X/JIT); 0/-1 */
 int      app_munmap(uint64_t addr, uint64_t len);   /* free an mmap region; 0/-1 */

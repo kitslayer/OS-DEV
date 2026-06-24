@@ -270,7 +270,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_clip_get: case SYS_clip_set:
         return PL_GFX;
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
-    case SYS_clone:
+    case SYS_clone: case SYS_join:
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
@@ -316,7 +316,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",
+        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -854,6 +854,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_thread_exit:                  /* (): end just this thread (M1138) */
         app_thread_exit();                 /* does not return to this task */
+        break;
+    case SYS_join:                         /* (tid): wait for a thread to exit + reap it (M1139) */
+        r->rax = (uint64_t)app_join((int)r->rdi);
         break;
     case SYS_uffd_register:                /* (addr, len): route this region's faults to a monitor (M1134) */
         r->rax = (uint64_t)(int64_t)app_uffd_register(r->rdi, r->rsi);

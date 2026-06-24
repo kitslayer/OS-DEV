@@ -46,6 +46,18 @@ void *sys_mmap_file(const char *path, unsigned long len) { return (void *)do_sys
 long sys_clone(void *fn, void *stack, void *arg) { return do_syscall(SYS_clone, (long)fn, (long)stack, (long)arg); }
 int  sys_gettid(void) { return (int)do_syscall(SYS_gettid, 0, 0, 0); }
 void sys_thread_exit(void) { do_syscall(SYS_thread_exit, 0, 0, 0); for (;;) {} }
+int  sys_join(int tid) { return (int)do_syscall(SYS_join, tid, 0, 0); }
+
+/* A futex-backed mutex (M1139): the lock word is 0 = free, 1 = held. Uncontended
+ * lock/unlock is a single atomic with no syscall; only a waiter sleeps. */
+void mutex_lock(volatile int *m) {
+    while (__sync_lock_test_and_set(m, 1) != 0)      /* atomic xchg; old != 0 => was held */
+        sys_futex((void *)m, FUTEX_WAIT, 1);         /* sleep while it stays held */
+}
+void mutex_unlock(volatile int *m) {
+    __sync_lock_release(m);                          /* store 0 + barrier */
+    sys_futex((void *)m, FUTEX_WAKE, 1);             /* wake one waiter */
+}
 
 /* If a thread function returns, land here and end the thread cleanly. */
 static void thread_exit_stub(void) { sys_thread_exit(); }

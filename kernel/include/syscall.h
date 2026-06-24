@@ -123,6 +123,7 @@
 #define SYS_clone           111 /* (fn, stack, arg) -> spawn a thread sharing this address space; tid, or -1 (M1138) */
 #define SYS_gettid          112 /* () -> the calling thread's id (its task id) (M1138) */
 #define SYS_thread_exit     113 /* () -> end just the calling thread (not the process) (M1138) */
+#define SYS_join            114 /* (tid) -> block until thread tid exits, then reap it; 0/-1 (M1139) */
 
 #define SYSCALL_VECTOR 0x80
 
