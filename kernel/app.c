@@ -63,6 +63,7 @@ struct app {
     struct { uint64_t start, len; int sealed, uffd, file_backed, locked; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136); locked=mlock'd, pinned against reclaim (M1149) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
+    uint64_t minflt, majflt;             /* page-fault counters: minor (no I/O) / major (disk I/O), getrusage (M1150) */
     /* per-process current directory (M1144): synth_cwd state + the in-mount/overlay
      * subpath + the boot-FS (fat32) cwd cluster. The VFS keeps the live cwd in its
      * own globals and syncs them to/from here on each app switch. */
@@ -335,6 +336,11 @@ static struct app *cur(void) { return (struct app *)task_self()->proc; }
 app_t *app_current(void) { return cur(); }
 int  app_ns_id(app_t *a)        { return a ? a->ns_id : 0; }      /* mount-namespace id (M1122) */
 void app_set_ns_id(app_t *a, int id) { if (a) a->ns_id = id; }
+void app_self_faults(uint64_t *minflt, uint64_t *majflt) {        /* the current app's page-fault counters (getrusage, M1150) */
+    app_t *a = cur();
+    if (minflt) *minflt = a ? a->minflt : 0;
+    if (majflt) *majflt = a ? a->majflt : 0;
+}
 
 /* per-process cwd (M1144): the VFS stashes/loads an app's current directory here
  * across app switches. A fresh app is zeroed -> synth 0 + "" + fat 0 = boot root. */
@@ -1461,6 +1467,7 @@ int app_fault_handle(uint64_t cr2, uint64_t err) {
             vmm_set_raw(fpage, nf | PTE_PRESENT | (pte & (PTE_USER | PTE_NX)) | PTE_WRITABLE);
             pmm_free_frame(old);                    /* decrements the shared frame's refcount */
         }
+        a->minflt++;                                /* COW resolve: no disk I/O => minor fault (M1150) */
         return 1;
     }
     if (!(pte & 1) && (pte & PTE_SWAP)) {           /* a swapped-out page (M1105): fault it back in */
@@ -1473,6 +1480,7 @@ int app_fault_handle(uint64_t cr2, uint64_t err) {
         if (rc < 0) { pmm_free_frame(frame); return 0; }
         swap_release(slot);                         /* page is resident again; the slot is free */
         vmm_map(fpage, frame, PTE_WRITABLE | PTE_USER | PTE_NX);   /* restores PRESENT + invlpg */
+        a->majflt++;                                /* swapped in from disk => major fault (M1150) */
         return 1;
     }
     for (int i = 0; i < a->nvma; i++) {
@@ -1499,6 +1507,9 @@ int app_fault_handle(uint64_t cr2, uint64_t err) {
                 __asm__ volatile("sti");                /* the FS read may touch the disk */
                 vfs_pread(a->vma[i].fpath, z, PAGE_SIZE, fileoff);   /* bytes past EOF stay zero; MAP_PRIVATE: writable copy */
                 __asm__ volatile("cli");
+                a->majflt++;                            /* page filled from disk => major fault (M1150) */
+            } else {
+                a->minflt++;                            /* demand-zero anonymous page => minor fault (M1150) */
             }
             vmm_map(page, frame, PTE_WRITABLE | PTE_USER | PTE_NX);
             __asm__ volatile("invlpg (%0)" : : "r"(page) : "memory");

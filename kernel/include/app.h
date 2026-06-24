@@ -23,6 +23,7 @@ const char *app_title(app_t *a);
 const char *app_arg(app_t *a);          /* the app's launch argument (/proc/<pid>/cmdline) */
 void       *app_task(app_t *a);         /* the app's task_t* (cast in procfs for stop/cont) */
 uint64_t    app_cr3(app_t *a);          /* the app's CR3 (address space), for /proc/<pid>/wss */
+void        app_self_faults(uint64_t *minflt, uint64_t *majflt);   /* current app's minor/major fault counts (M1150) */
 uint64_t    app_heap_bytes(app_t *a);   /* heap size in bytes */
 int         app_vma_count(app_t *a);    /* number of mmap regions */
 int         app_format_maps(app_t *a, char *buf, int max);   /* /proc/<pid>/maps: memory regions as text */

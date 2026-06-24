@@ -20,6 +20,10 @@ typedef struct task {
     uint64_t      run_ms;      /* total ms this task has been RUNNING (CPU time)   */
     uint64_t      last_in;     /* timer_ms() when it last became `current`         */
     uint64_t      nswitch;     /* times it has been scheduled in (context switches) */
+    uint64_t      utime_ms;    /* CPU time charged in user mode (ring 3), tick-sampled (getrusage, M1150) */
+    uint64_t      stime_ms;    /* CPU time charged in kernel mode (ring 0), tick-sampled (M1150) */
+    uint64_t      nvcsw;       /* voluntary context switches: it blocked/yielded (M1150) */
+    uint64_t      nivcsw;      /* involuntary context switches: it was preempted (M1150) */
     uint64_t      rq_wait_ms;  /* total ms spent READY-but-not-running (run-queue wait, /proc/sched) (M1148) */
     uint64_t      ready_since; /* timer_ms() when it last entered the run queue; 0 = not waiting (M1148) */
     uint64_t      wake_at;     /* if BLOCKED via task_sleep_ms: timer_ms() deadline (0 = not a timed sleep) */
@@ -60,6 +64,7 @@ uint64_t task_idle_ms(void);                         /* ms the idle task has run
 int     task_runnable_count(void);   /* tasks wanting the CPU now (RUNNING|READY, idle excluded) (M1148) */
 void    loadavg_sample(void);        /* called each timer tick; updates the EWMA once per 5 s (M1148) */
 void    task_loadavg(uint64_t out[3]); /* fixed-point (FSHIFT=11) 1/5/15-min load averages (M1148) */
+void    task_cpu_tick(uint64_t ms, int user);  /* timer: charge current task ms of user/kernel CPU time (M1150) */
 
 /* Called from the timer IRQ to preempt the running thread (no-op until the
  * scheduler is initialized and there's more than one task). */

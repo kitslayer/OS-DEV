@@ -248,7 +248,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
-    case SYS_alarm:
+    case SYS_alarm: case SYS_getrusage:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
@@ -318,7 +318,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
-        [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",
+        [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -826,6 +826,26 @@ void syscall_dispatch(struct registers *r) {
     case SYS_munlock:                      /* (addr, len) -> unpin mlock'd mmap pages (M1149) */
         r->rax = (uint64_t)(int64_t)app_munlock(r->rdi, r->rsi);
         break;
+    case SYS_getrusage: {                  /* (who, struct rusage*) -> resource usage of the caller (M1150) */
+        if (!ubuf(r->rsi, sizeof(struct rusage))) { r->rax = (uint64_t)-1; break; }
+        struct rusage ru;
+        for (unsigned i = 0; i < sizeof ru; i++) ((uint8_t *)&ru)[i] = 0;
+        if ((long)r->rdi == RUSAGE_SELF) {          /* RUSAGE_CHILDREN -> all-zero (no child-time accounting) */
+            task_t *t = task_self();
+            if (t) {
+                ru.ru_utime.tv_sec = (long)(t->utime_ms / 1000); ru.ru_utime.tv_usec = (long)((t->utime_ms % 1000) * 1000);
+                ru.ru_stime.tv_sec = (long)(t->stime_ms / 1000); ru.ru_stime.tv_usec = (long)((t->stime_ms % 1000) * 1000);
+                ru.ru_nvcsw = (long)t->nvcsw; ru.ru_nivcsw = (long)t->nivcsw;
+            }
+            uint64_t mn = 0, mj = 0; app_self_faults(&mn, &mj);
+            ru.ru_minflt = (long)mn; ru.ru_majflt = (long)mj;
+            vmm_wss_t w; vmm_wss(app_cr3(app_current()), &w);
+            ru.ru_maxrss = (long)(w.resident * PAGE_SIZE / 1024);   /* resident pages -> KiB */
+        }
+        for (unsigned i = 0; i < sizeof ru; i++) ((uint8_t *)r->rsi)[i] = ((uint8_t *)&ru)[i];
+        r->rax = 0;
+        break;
+    }
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
         r->rax = (uint64_t)(int64_t)app_swap_out(r->rdi, r->rsi);

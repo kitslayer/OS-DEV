@@ -1,6 +1,7 @@
 /* ulib.h — tiny userspace C library (the start of a libc). */
 #pragma once
 #include "robust.h"   /* robust_t + FUTEX_OWNER_DIED, for robust mutexes (M1141) */
+#include "syscall.h"  /* SYS_* numbers + shared ABI structs (e.g. struct rusage, M1150) */
 
 /* raw syscalls */
 long sys_write(int fd, const void *buf, unsigned long len);
@@ -51,6 +52,7 @@ long sys_madvise(void *addr, unsigned long len, int advice);
 long sys_mincore(void *addr, unsigned long len, unsigned char *vec);   /* per-page residency; vec[i]=1 if resident; 0/-1 (M1147) */
 long sys_mlock(void *addr, unsigned long len);     /* pin mmap pages against reclaim; 0/-1 (M1149) */
 long sys_munlock(void *addr, unsigned long len);   /* unpin mlock'd mmap pages; 0/-1 (M1149) */
+long sys_getrusage(int who, struct rusage *ru);    /* fill resource usage (RUSAGE_SELF=0); 0/-1 (M1150) */
 long sys_alarm(unsigned long ticks);
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);

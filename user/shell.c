@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1781,6 +1781,27 @@ static int run_command(char *line, char *cwd) {
                 if (!ok) g_status = 1;
                 sys_munlock(lk, len); sys_munmap(lk, len); sys_munmap(un, len);
             }
+        } else if (streq(line, "usagetest")) {  /* getrusage: per-process resource accounting (M1150) */
+            struct rusage a, b;
+            sys_getrusage(RUSAGE_SELF, &a);
+            unsigned long len = 100 * 4096;              /* fault in 100 fresh pages => ~100 minor faults */
+            unsigned char *m = (unsigned char *)sys_mmap(len);
+            if (m) for (unsigned long i = 0; i < len; i += 4096) m[i] = 1;
+            volatile unsigned long sink = 0;             /* burn some user-mode CPU so utime is visibly nonzero */
+            for (unsigned long i = 0; i < 80000000UL; i++) sink += i;
+            sys_getrusage(RUSAGE_SELF, &b);
+            print("getrusage(self):\n");
+            print("  utime "); printl(b.ru_utime.tv_sec); print("s "); printl(b.ru_utime.tv_usec / 1000);
+            print("ms   stime "); printl(b.ru_stime.tv_sec); print("s "); printl(b.ru_stime.tv_usec / 1000); print("ms\n");
+            print("  maxrss "); printl(b.ru_maxrss); print(" KiB   ctxsw vol "); printl(b.ru_nvcsw);
+            print(" invol "); printl(b.ru_nivcsw); print("\n");
+            print("  minflt "); printl(a.ru_minflt); print(" -> "); printl(b.ru_minflt);
+            print("  majflt "); printl(b.ru_majflt);
+            print("   (touched 100 pages, minflt delta "); printl(b.ru_minflt - a.ru_minflt); print(")\n");
+            int ok = (b.ru_minflt - a.ru_minflt >= 100);
+            print(ok ? "getrusage: the minor-fault counter tracks demand paging OK\n" : "getrusage: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+            if (m) sys_munmap(m, len);
         } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
             unsigned long len = 256 * 1024;       /* 64 pages */
             unsigned char *m = (unsigned char *)sys_mmap(len);

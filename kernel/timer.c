@@ -25,11 +25,13 @@
 
 static volatile uint64_t ticks;
 static uint32_t          tick_hz = 100;   /* IRQ0 frequency, set by timer_init */
+static uint32_t          tick_ms = 10;    /* ms per tick (1000/hz), for CPU-time accounting (M1150) */
 
 static void timer_handler(struct registers *r) {
     ticks++;
     vdso_tick(ticks);      /* refresh the userspace vDSO time page (syscall-free clock_gettime, M1111) */
     prof_tick(r->rip, r->cs);  /* sampling profiler: record the interrupted kernel RIP (M1086) */
+    task_cpu_tick(tick_ms, (r->cs & 3) == 3);  /* charge this tick to current's user/sys time (getrusage, M1150) */
     audio_pump();          /* keep the audio DMA fed (no-op unless streaming) */
     task_wake_sleepers();  /* wake any timed-sleep task whose deadline has passed (M1079) */
     app_alarm_tick();      /* raise SIGALRM if the current app's periodic alarm is due (M1102) */
@@ -40,6 +42,7 @@ static void timer_handler(struct registers *r) {
 void timer_init(uint32_t hz) {
     uint32_t divisor = PIT_FREQUENCY / hz;
     tick_hz = hz;
+    tick_ms = hz ? 1000 / hz : 10;   /* CPU-time tick granularity (M1150) */
 
     /* command 0x36: channel 0, access lobyte+hibyte, mode 3 (square wave). */
     outb(PIT_COMMAND, 0x36);

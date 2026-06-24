@@ -185,6 +185,9 @@ static void switch_to_next(void) {
     if (prev->state == TASK_RUNNING) {
         prev->state = TASK_READY;
         prev->ready_since = now;                 /* entered the run queue: start clocking its wait (M1148) */
+        prev->nivcsw++;                           /* still runnable when switched out => preempted (M1150) */
+    } else {
+        prev->nvcsw++;                            /* it blocked/yielded/exited itself => voluntary (M1150) */
     }
     next->state = TASK_RUNNING;
     if (next->ready_since) {                      /* leaving the run queue: charge the time it waited (M1148) */
@@ -326,6 +329,16 @@ void loadavg_sample(void) {
 
 void task_loadavg(uint64_t out[3]) {
     out[0] = load_avg[0]; out[1] = load_avg[1]; out[2] = load_avg[2];
+}
+
+/* Charge the current task `ms` of CPU time to user or kernel mode, called from
+ * the timer IRQ with user = (the interrupted frame was ring 3). Tick-sampled,
+ * so coarse (one-tick granularity) — the standard getrusage utime/stime model
+ * (M1150). The precise total CPU time stays in run_ms (switch_to_next). */
+void task_cpu_tick(uint64_t ms, int user) {
+    if (!current) return;
+    if (user) current->utime_ms += ms;
+    else      current->stime_ms += ms;
 }
 
 /* Suspend a task (it leaves the run rotation until task_cont). Only a runnable,

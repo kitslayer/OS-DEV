@@ -130,8 +130,25 @@
 #define SYS_mincore         118 /* (addr, len, vec) -> per-page residency of an mmap range; 0/-1 (M1147) */
 #define SYS_mlock           119 /* (addr, len) -> pin mmap pages against reclaim; 0/-1 (M1149) */
 #define SYS_munlock         120 /* (addr, len) -> unpin mlock'd mmap pages; 0/-1 (M1149) */
+#define SYS_getrusage       121 /* (who, struct rusage*) -> fill resource usage; 0/-1 (M1150) */
 
 #define SYSCALL_VECTOR 0x80
+
+/* getrusage(2) (M1150). RUSAGE_SELF reports the calling process; RUSAGE_CHILDREN
+ * is accepted but reports zeros (no child-time accumulation). Shared by the
+ * kernel filler and the ulib wrapper, so the layout cannot drift. */
+#define RUSAGE_SELF      0
+#define RUSAGE_CHILDREN (-1)
+struct ru_timeval { long tv_sec; long tv_usec; };
+struct rusage {
+    struct ru_timeval ru_utime;   /* user-mode CPU time   */
+    struct ru_timeval ru_stime;   /* kernel-mode CPU time */
+    long ru_maxrss;               /* resident set size, KiB */
+    long ru_minflt;               /* minor page faults (no I/O: demand-zero + COW) */
+    long ru_majflt;               /* major page faults (disk I/O: swap-in + file-backed) */
+    long ru_nvcsw;                /* voluntary context switches (blocked/yielded)   */
+    long ru_nivcsw;               /* involuntary context switches (preempted)       */
+};
 
 #ifdef __KERNEL__
 struct registers;
