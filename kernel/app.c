@@ -1945,6 +1945,13 @@ void app_sigreturn(struct registers *r) {
 void app_request_signal(app_t *a, int signo) {
     struct app *ap = (struct app *)a;
     if (!ap || signo <= 0 || signo >= APP_NSIG) return;
+    /* Job-control default actions (M1178), applied with no handler required —
+     * SIGCONT resumes a stopped process, SIGSTOP/SIGTSTP suspend it (the
+     * scheduler skips a STOPPED task, so its work simply freezes). task_stop
+     * is a no-op on self, which is correct: a group ^C/^Z from the foreground
+     * reader stops the OTHER group members. */
+    if (signo == SIGCONT) { task_cont((task_t *)ap->task); return; }
+    if (signo == SIGSTOP || signo == SIGTSTP) { task_stop((task_t *)ap->task); return; }
     /* opted in via a handler, OR routed to signalfd (M1126) — else ignore, the
      * existing default for handler-less signals. */
     int sigfd = ap->sigfd_armed && (ap->sigfd_mask & (1u << signo));

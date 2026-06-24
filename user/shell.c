@@ -474,7 +474,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2270,6 +2270,40 @@ static int run_command(char *line, char *cwd) {
             int ok = (r1 == 0 && s1 == 10 && s2 == 20);
             print(ok ? "flock: exclusive lock conflicts while held, frees on unlock OK\n" : "flocktest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "stoptest")) {   /* SIGTSTP/SIGCONT job suspend/resume (M1178) */
+            long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
+            volatile unsigned long *sh = shmid >= 0 ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
+            if (!sh) { print("stoptest: shm failed\n"); g_status = 1; }
+            else {
+                sh[0] = 0; sh[1] = 0;                /* [0]=counter, [1]=exit-flag (init before fork) */
+                long c = sys_fork();
+                if (c == 0) {                        /* child: spin incrementing the shared counter */
+                    volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                    if (m) while (!m[1]) { for (int k = 0; k < 30000; k++) m[0]++; }
+                    sys_exit(0);
+                }
+                if (c > 0) {
+                    volatile unsigned long *ps = (volatile unsigned long *)sys_shmat((int)shmid);   /* post-fork attach (COW-safe writes) */
+                    sys_setpgid((int)c, (int)c);     /* child leads its own group, so killpg targets only it */
+                    sys_sleep(150);                  /* let it run */
+                    sys_killpg((int)c, SIGTSTP);     /* suspend the group */
+                    sys_sleep(60);
+                    unsigned long c1 = ps[0]; sys_sleep(150); unsigned long c2 = ps[0];   /* frozen while stopped */
+                    sys_killpg((int)c, SIGCONT);     /* resume */
+                    sys_sleep(150); unsigned long c3 = ps[0];                              /* advances after cont */
+                    ps[1] = 1;                       /* tell the now-running child to exit */
+                    int st = -1; sys_waitpid((int)c, &st);
+                    char nb[20];
+                    print("counter ran to "); itoa_simple((int)(c1 / 1000), nb); print(nb);
+                    print("k; while-stopped delta="); itoa_simple((int)(c2 - c1), nb); print(nb);
+                    print("; after-cont delta="); itoa_simple((int)((c3 - c2) / 1000), nb); print(nb); print("k\n");
+                    int ok = (c1 > 0 && c2 == c1 && c3 > c2);
+                    print(ok ? "job control: SIGTSTP froze the process, SIGCONT resumed it OK\n" : "stoptest: VERIFY FAILED\n");
+                    if (!ok) g_status = 1;
+                    if (ps) sys_shmdt((void *)ps);
+                } else { print("stoptest: fork failed\n"); g_status = 1; }
+                sys_shmdt((void *)sh);
+            }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

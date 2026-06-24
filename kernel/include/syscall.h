@@ -169,6 +169,12 @@
 #define SYS_killpg       157   /* (pgid, signo) -> signal every process in the group; count/-1 (M1176) */
 #define SYS_flock        158   /* (path, op) -> advisory whole-file lock (LOCK_SH/EX/UN|NB); 0/-1 (M1177) */
 
+/* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
+ * default-action stop a process; SIGCONT resumes it (no handler required). */
+#define SIGCONT  18
+#define SIGSTOP  19
+#define SIGTSTP  20
+
 /* flock advisory whole-file locks (M1177), shared by the kernel + ulib. */
 #define LOCK_SH  1
 #define LOCK_EX  2
