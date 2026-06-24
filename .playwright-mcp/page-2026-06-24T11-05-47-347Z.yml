@@ -1,0 +1,1368 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "jump to content" [ref=e3] [cursor=pointer]:
+      - /url: "#content"
+    - generic [ref=e5]:
+      - generic [ref=e7] [cursor=pointer]: my subreddits
+      - generic [ref=e8]:
+        - list [ref=e9]:
+          - listitem [ref=e10]:
+            - link "popular" [ref=e11] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/popular/
+          - listitem [ref=e12]:
+            - text: "-"
+            - link "all" [ref=e13] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/all/
+          - listitem [ref=e14]:
+            - text: "-"
+            - link "users" [ref=e15] [cursor=pointer]:
+              - /url: https://old.reddit.com/users/
+        - text: "|"
+        - list [ref=e16]:
+          - listitem [ref=e17]:
+            - link "AskReddit" [ref=e18] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/AskReddit/
+          - listitem [ref=e19]:
+            - text: "-"
+            - link "pics" [ref=e20] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/pics/
+          - listitem [ref=e21]:
+            - text: "-"
+            - link "funny" [ref=e22] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/funny/
+          - listitem [ref=e23]:
+            - text: "-"
+            - link "movies" [ref=e24] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/movies/
+          - listitem [ref=e25]:
+            - text: "-"
+            - link "gaming" [ref=e26] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/gaming/
+          - listitem [ref=e27]:
+            - text: "-"
+            - link "worldnews" [ref=e28] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/worldnews/
+          - listitem [ref=e29]:
+            - text: "-"
+            - link "news" [ref=e30] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/news/
+          - listitem [ref=e31]:
+            - text: "-"
+            - link "todayilearned" [ref=e32] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/todayilearned/
+          - listitem [ref=e33]:
+            - text: "-"
+            - link "nottheonion" [ref=e34] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/nottheonion/
+          - listitem [ref=e35]:
+            - text: "-"
+            - link "explainlikeimfive" [ref=e36] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/explainlikeimfive/
+          - listitem [ref=e37]:
+            - text: "-"
+            - link "mildlyinteresting" [ref=e38] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/mildlyinteresting/
+          - listitem [ref=e39]:
+            - text: "-"
+            - link "DIY" [ref=e40] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/DIY/
+          - listitem [ref=e41]:
+            - text: "-"
+            - link "videos" [ref=e42] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/videos/
+          - listitem [ref=e43]:
+            - text: "-"
+            - link "OldSchoolCool" [ref=e44] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/OldSchoolCool/
+          - listitem [ref=e45]:
+            - text: "-"
+            - link "TwoXChromosomes" [ref=e46] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/TwoXChromosomes/
+          - listitem [ref=e47]:
+            - text: "-"
+            - link "tifu" [ref=e48] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/tifu/
+          - listitem [ref=e49]:
+            - text: "-"
+            - link "Music" [ref=e50] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/Music/
+          - listitem [ref=e51]:
+            - text: "-"
+            - link "books" [ref=e52] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/books/
+          - listitem [ref=e53]:
+            - text: "-"
+            - link "LifeProTips" [ref=e54] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/LifeProTips/
+          - listitem [ref=e55]:
+            - text: "-"
+            - link "dataisbeautiful" [ref=e56] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/dataisbeautiful/
+          - listitem [ref=e57]:
+            - text: "-"
+            - link "aww" [ref=e58] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/aww/
+          - listitem [ref=e59]:
+            - text: "-"
+            - link "science" [ref=e60] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/science/
+          - listitem [ref=e61]:
+            - text: "-"
+            - link "space" [ref=e62] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/space/
+          - listitem [ref=e63]:
+            - text: "-"
+            - link "Showerthoughts" [ref=e64] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/Showerthoughts/
+          - listitem [ref=e65]:
+            - text: "-"
+            - link "askscience" [ref=e66] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/askscience/
+          - listitem [ref=e67]:
+            - text: "-"
+            - link "Jokes" [ref=e68] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/Jokes/
+          - listitem [ref=e69]:
+            - text: "-"
+            - link "Art" [ref=e70] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/Art/
+          - listitem [ref=e71]:
+            - text: "-"
+            - link "IAmA" [ref=e72] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/IAmA/
+          - listitem [ref=e73]:
+            - text: "-"
+            - link "Futurology" [ref=e74] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/Futurology/
+          - listitem [ref=e75]:
+            - text: "-"
+            - link "sports" [ref=e76] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/sports/
+          - listitem [ref=e77]:
+            - text: "-"
+            - link "UpliftingNews" [ref=e78] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/UpliftingNews/
+          - listitem [ref=e79]:
+            - text: "-"
+            - link "food" [ref=e80] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/food/
+          - listitem [ref=e81]:
+            - text: "-"
+            - link "nosleep" [ref=e82] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/nosleep/
+          - listitem [ref=e83]:
+            - text: "-"
+            - link "creepy" [ref=e84] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/creepy/
+          - listitem [ref=e85]:
+            - text: "-"
+            - link "history" [ref=e86] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/history/
+          - listitem [ref=e87]:
+            - text: "-"
+            - link "gifs" [ref=e88] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/gifs/
+          - listitem [ref=e89]:
+            - text: "-"
+            - link "InternetIsBeautiful" [ref=e90] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/InternetIsBeautiful/
+          - listitem [ref=e91]:
+            - text: "-"
+            - link "GetMotivated" [ref=e92] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/GetMotivated/
+          - listitem [ref=e93]:
+            - text: "-"
+            - link "gadgets" [ref=e94] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/gadgets/
+          - listitem [ref=e95]:
+            - text: "-"
+            - link "announcements" [ref=e96] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/announcements/
+          - listitem [ref=e97]:
+            - text: "-"
+            - link "WritingPrompts" [ref=e98] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/WritingPrompts/
+          - listitem [ref=e99]:
+            - text: "-"
+            - link "philosophy" [ref=e100] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/philosophy/
+          - listitem [ref=e101]:
+            - text: "-"
+            - link "Documentaries" [ref=e102] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/Documentaries/
+          - listitem [ref=e103]:
+            - text: "-"
+            - link "EarthPorn" [ref=e104] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/EarthPorn/
+          - listitem [ref=e105]:
+            - text: "-"
+            - link "photoshopbattles" [ref=e106] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/photoshopbattles/
+          - listitem [ref=e107]:
+            - text: "-"
+            - link "listentothis" [ref=e108] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/listentothis/
+          - listitem [ref=e109]:
+            - text: "-"
+            - link "blog" [ref=e110] [cursor=pointer]:
+              - /url: https://old.reddit.com/r/blog/
+      - link "more »" [ref=e111] [cursor=pointer]:
+        - /url: https://old.reddit.com/subreddits/
+    - generic [ref=e112]:
+      - link "reddit.com" [ref=e113] [cursor=pointer]:
+        - /url: /
+      - link "osdev" [ref=e115] [cursor=pointer]:
+        - /url: https://old.reddit.com/r/osdev/
+      - list [ref=e116]:
+        - listitem [ref=e117]:
+          - link "hot" [ref=e118] [cursor=pointer]:
+            - /url: https://old.reddit.com/r/osdev/
+        - listitem [ref=e119]:
+          - link "new" [ref=e120] [cursor=pointer]:
+            - /url: https://old.reddit.com/r/osdev/new/
+        - listitem [ref=e121]:
+          - link "rising" [ref=e122] [cursor=pointer]:
+            - /url: https://old.reddit.com/r/osdev/rising/
+        - listitem [ref=e123]:
+          - link "controversial" [ref=e124] [cursor=pointer]:
+            - /url: https://old.reddit.com/r/osdev/controversial/
+        - listitem [ref=e125]:
+          - link "top" [ref=e126] [cursor=pointer]:
+            - /url: https://old.reddit.com/r/osdev/top/
+        - listitem [ref=e127]:
+          - link "wiki" [ref=e128] [cursor=pointer]:
+            - /url: https://old.reddit.com/r/osdev/wiki/
+    - generic [ref=e129]:
+      - generic [ref=e130]:
+        - text: Want to join?
+        - link "Log in" [ref=e131] [cursor=pointer]:
+          - /url: https://www.reddit.com/login
+        - text: or
+        - link "sign up" [ref=e132] [cursor=pointer]:
+          - /url: https://www.reddit.com/login
+        - text: in seconds.
+      - list
+  - generic [ref=e133]:
+    - search [ref=e135]:
+      - textbox "search" [ref=e136]
+      - button "Submit" [ref=e137] [cursor=pointer]
+    - link "Submit a new link" [ref=e141] [cursor=pointer]:
+      - /url: https://old.reddit.com/r/osdev/submit
+    - link "Submit a new text post" [ref=e146] [cursor=pointer]:
+      - /url: https://old.reddit.com/r/osdev/submit?selftext=true
+    - generic [ref=e149]:
+      - heading "osdev" [level=1] [ref=e150]:
+        - link "osdev" [ref=e151] [cursor=pointer]:
+          - /url: https://old.reddit.com/r/osdev/
+      - link "join" [ref=e153] [cursor=pointer]:
+        - /url: "#"
+      - generic [ref=e156]:
+        - paragraph [ref=e157]: Everything about operating systems development.
+        - list [ref=e158]:
+          - listitem [ref=e159]:
+            - link "/r/osdev Projects" [ref=e160] [cursor=pointer]:
+              - /url: https://www.reddit.com/r/osdev/wiki/projects
+          - listitem [ref=e161]:
+            - link "OSDev.org" [ref=e162] [cursor=pointer]:
+              - /url: http://wiki.osdev.org/Main_Page
+          - listitem [ref=e163]:
+            - link "OSDev Links" [ref=e164] [cursor=pointer]:
+              - /url: http://fogus.me/thunks/osdev.html
+      - generic [ref=e166]:
+        - text: a community for
+        - time [ref=e167]: 15 years
+    - generic [ref=e169]:
+      - heading "MODERATORS" [level=1] [ref=e171]
+      - list [ref=e172]:
+        - listitem [ref=e173]:
+          - link "message the mods" [ref=e174] [cursor=pointer]:
+            - /url: /message/compose/?to=/r/osdev
+  - main [ref=e175]:
+    - generic [ref=e176]:
+      - link "Welcome to Reddit. Come for the cats, stay for the empathy. Become a Redditor and start exploring." [ref=e177] [cursor=pointer]:
+        - /url: /login
+        - heading "Welcome to Reddit." [level=2] [ref=e178]
+        - paragraph [ref=e179]: Come for the cats, stay for the empathy.
+        - generic [ref=e180]:
+          - generic [ref=e181]: Become a Redditor
+          - paragraph [ref=e182]: and start exploring.
+      - link "×" [ref=e183] [cursor=pointer]:
+        - /url: "#"
+    - generic [ref=e184]:
+      - generic [ref=e185]:
+        - paragraph
+        - generic [ref=e186]: "1"
+        - generic [ref=e187]:
+          - button "upvote" [ref=e188] [cursor=pointer]
+          - generic "173" [ref=e189]
+          - button "downvote" [ref=e190] [cursor=pointer]
+        - link [ref=e191] [cursor=pointer]:
+          - /url: https://www.reddit.com/r/osdev/wiki/projects
+        - generic [ref=e193]:
+          - paragraph [ref=e194]:
+            - link "A list of projects by users of /r/osdev" [ref=e195] [cursor=pointer]:
+              - /url: https://www.reddit.com/r/osdev/wiki/projects
+            - generic [ref=e196]:
+              - text: (
+              - link "reddit.com" [ref=e197] [cursor=pointer]:
+                - /url: /domain/reddit.com/
+              - text: )
+          - paragraph [ref=e198]:
+            - text: submitted
+            - time [ref=e199]: 6 years ago
+            - text: by
+            - link "timschwartz" [ref=e200] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/timschwartz
+            - generic [ref=e201]:
+              - text: "["
+              - link "M" [ref=e202] [cursor=pointer]:
+                - /url: /r/osdev/about/moderators
+              - text: "]"
+            - text: "- announcement"
+          - list [ref=e203]:
+            - listitem [ref=e204]:
+              - link "127 comments" [ref=e205] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/ekvfvw/a_list_of_projects_by_users_of_rosdev/
+            - listitem [ref=e206]:
+              - link "share" [ref=e207] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e208]:
+              - link "save" [ref=e209] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e210]:
+              - link "hide" [ref=e213] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e214]:
+              - link "report" [ref=e215] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e216]:
+        - paragraph
+        - generic [ref=e217]: "2"
+        - generic [ref=e218]:
+          - button "upvote" [ref=e219] [cursor=pointer]
+          - generic "2" [ref=e220]
+          - button "downvote" [ref=e221] [cursor=pointer]
+        - link [ref=e222] [cursor=pointer]:
+          - /url: https://www.reddit.com/gallery/1udujhl
+        - generic [ref=e224]:
+          - paragraph [ref=e225]:
+            - link "I finally got dynamically loaded ELF apps running on an ESP32 without an MMU (ProtoOS Update!)" [ref=e226] [cursor=pointer]:
+              - /url: https://www.reddit.com/gallery/1udujhl
+            - generic [ref=e227]:
+              - text: (
+              - link "reddit.com" [ref=e228] [cursor=pointer]:
+                - /url: /domain/reddit.com/
+              - text: )
+          - paragraph [ref=e231]:
+            - text: submitted
+            - time [ref=e232]: 13 hours ago
+            - text: by
+            - link "LoveSourWorms12" [ref=e233] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/LoveSourWorms12
+          - list [ref=e234]:
+            - listitem [ref=e235]:
+              - link "4 comments" [ref=e236] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1udupj8/i_finally_got_dynamically_loaded_elf_apps_running/
+            - listitem [ref=e237]:
+              - link "share" [ref=e238] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e239]:
+              - link "save" [ref=e240] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e241]:
+              - link "hide" [ref=e244] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e245]:
+              - link "report" [ref=e246] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e247]:
+        - paragraph
+        - generic [ref=e248]: "3"
+        - generic [ref=e249]:
+          - button "upvote" [ref=e250] [cursor=pointer]
+          - generic "0" [ref=e251]
+          - button "downvote" [ref=e252] [cursor=pointer]
+        - link [ref=e253] [cursor=pointer]:
+          - /url: /r/osdev/comments/1udk1st/project_cherub_a_modernized_terrys_templeos_early/
+        - generic [ref=e255]:
+          - paragraph [ref=e256]:
+            - link "Project Cherub - a modernized Terry's TempleOS. Early Build (with 120 FPS!) & Future Plans + Installation Showcase" [ref=e257] [cursor=pointer]:
+              - /url: /r/osdev/comments/1udk1st/project_cherub_a_modernized_terrys_templeos_early/
+            - generic [ref=e258]:
+              - text: (
+              - link "self.osdev" [ref=e259] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e261]:
+            - text: submitted
+            - time [ref=e262]: 19 hours ago
+            - time [ref=e263]: "*"
+            - text: by
+            - link "ComprehensiveBid3793" [ref=e264] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/ComprehensiveBid3793
+          - list [ref=e265]:
+            - listitem [ref=e266]:
+              - link "6 comments" [ref=e267] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1udk1st/project_cherub_a_modernized_terrys_templeos_early/
+            - listitem [ref=e268]:
+              - link "share" [ref=e269] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e270]:
+              - link "save" [ref=e271] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e272]:
+              - link "hide" [ref=e275] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e276]:
+              - link "report" [ref=e277] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e278]:
+        - paragraph
+        - generic [ref=e279]: "4"
+        - generic [ref=e280]:
+          - button "upvote" [ref=e281] [cursor=pointer]
+          - generic "0" [ref=e282]
+          - button "downvote" [ref=e283] [cursor=pointer]
+        - link [ref=e284] [cursor=pointer]:
+          - /url: /r/osdev/comments/1udh132/how_do_you_load_and_run_programs/
+        - generic [ref=e286]:
+          - paragraph [ref=e287]:
+            - link "How do you load AND run programs?" [ref=e288] [cursor=pointer]:
+              - /url: /r/osdev/comments/1udh132/how_do_you_load_and_run_programs/
+            - generic [ref=e289]:
+              - text: (
+              - link "self.osdev" [ref=e290] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e292]:
+            - text: submitted
+            - time [ref=e293]: 21 hours ago
+            - time [ref=e294]: "*"
+            - text: by
+            - link "letmehaveanameyoudum" [ref=e295] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/letmehaveanameyoudum
+          - list [ref=e296]:
+            - listitem [ref=e297]:
+              - link "19 comments" [ref=e298] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1udh132/how_do_you_load_and_run_programs/
+            - listitem [ref=e299]:
+              - link "share" [ref=e300] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e301]:
+              - link "save" [ref=e302] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e303]:
+              - link "hide" [ref=e306] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e307]:
+              - link "report" [ref=e308] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e309]:
+        - paragraph
+        - generic [ref=e310]: "5"
+        - generic [ref=e311]:
+          - button "upvote" [ref=e312] [cursor=pointer]
+          - generic "5" [ref=e313]
+          - button "downvote" [ref=e314] [cursor=pointer]
+        - link [ref=e315] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ucozza/a_error_which_can_really_confuse_a_newbie/
+        - generic [ref=e317]:
+          - paragraph [ref=e318]:
+            - link "A error which can really confuse a newbie" [ref=e319] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ucozza/a_error_which_can_really_confuse_a_newbie/
+            - generic [ref=e320]:
+              - text: (
+              - link "self.osdev" [ref=e321] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e323]:
+            - text: submitted
+            - time [ref=e324]: 1 day ago
+            - text: by
+            - link "Sensitive-Can9232" [ref=e325] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/Sensitive-Can9232
+          - list [ref=e326]:
+            - listitem [ref=e327]:
+              - link "12 comments" [ref=e328] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ucozza/a_error_which_can_really_confuse_a_newbie/
+            - listitem [ref=e329]:
+              - link "share" [ref=e330] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e331]:
+              - link "save" [ref=e332] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e333]:
+              - link "hide" [ref=e336] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e337]:
+              - link "report" [ref=e338] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e339]:
+        - paragraph
+        - generic [ref=e340]: "6"
+        - generic [ref=e341]:
+          - button "upvote" [ref=e342] [cursor=pointer]
+          - generic "22" [ref=e343]
+          - button "downvote" [ref=e344] [cursor=pointer]
+        - link [ref=e345] [cursor=pointer]:
+          - /url: /r/osdev/comments/1uc3t9a/which_part_of_osdev_would_you_consider_to_be_the/
+        - generic [ref=e347]:
+          - paragraph [ref=e348]:
+            - link "Which part of OSDev would you consider to be the most fun and why?" [ref=e349] [cursor=pointer]:
+              - /url: /r/osdev/comments/1uc3t9a/which_part_of_osdev_would_you_consider_to_be_the/
+            - generic [ref=e350]:
+              - text: (
+              - link "self.osdev" [ref=e351] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e353]:
+            - text: submitted
+            - time [ref=e354]: 2 days ago
+            - text: by
+            - link "JescoInc" [ref=e355] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/JescoInc
+          - list [ref=e356]:
+            - listitem [ref=e357]:
+              - link "29 comments" [ref=e358] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uc3t9a/which_part_of_osdev_would_you_consider_to_be_the/
+            - listitem [ref=e359]:
+              - link "share" [ref=e360] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e361]:
+              - link "save" [ref=e362] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e363]:
+              - link "hide" [ref=e366] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e367]:
+              - link "report" [ref=e368] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e369]:
+        - paragraph
+        - generic [ref=e370]: "7"
+        - generic [ref=e371]:
+          - button "upvote" [ref=e372] [cursor=pointer]
+          - generic "7" [ref=e373]
+          - button "downvote" [ref=e374] [cursor=pointer]
+        - link [ref=e375] [cursor=pointer]:
+          - /url: https://i.redd.it/vupvb8o1sq8h1.png
+        - generic [ref=e377]:
+          - paragraph [ref=e378]:
+            - link "No one can set up linking ffreestanding objects in windows..." [ref=e379] [cursor=pointer]:
+              - /url: https://i.redd.it/vupvb8o1sq8h1.png
+            - generic [ref=e380]:
+              - text: (
+              - link "i.redd.it" [ref=e381] [cursor=pointer]:
+                - /url: /domain/i.redd.it/
+              - text: )
+          - paragraph [ref=e383]:
+            - text: submitted
+            - time [ref=e384]: 2 days ago
+            - text: by
+            - link "letmehaveanameyoudum" [ref=e385] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/letmehaveanameyoudum
+          - list [ref=e386]:
+            - listitem [ref=e387]:
+              - link "14 comments" [ref=e388] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uc7spa/no_one_can_set_up_linking_ffreestanding_objects/
+            - listitem [ref=e389]:
+              - link "share" [ref=e390] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e391]:
+              - link "save" [ref=e392] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e393]:
+              - link "hide" [ref=e396] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e397]:
+              - link "report" [ref=e398] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e399]:
+        - paragraph
+        - generic [ref=e400]: "8"
+        - generic [ref=e401]:
+          - button "upvote" [ref=e402] [cursor=pointer]
+          - generic "11" [ref=e403]
+          - button "downvote" [ref=e404] [cursor=pointer]
+        - link [ref=e405] [cursor=pointer]:
+          - /url: /r/osdev/comments/1uc2i6s/my_new_achievement/
+        - generic [ref=e407]:
+          - paragraph [ref=e408]:
+            - link "My new achievement" [ref=e409] [cursor=pointer]:
+              - /url: /r/osdev/comments/1uc2i6s/my_new_achievement/
+            - generic [ref=e410]:
+              - text: (
+              - link "self.osdev" [ref=e411] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e413]:
+            - text: submitted
+            - time [ref=e414]: 2 days ago
+            - text: by
+            - link "BeneguiCristian" [ref=e415] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/BeneguiCristian
+          - list [ref=e416]:
+            - listitem [ref=e417]:
+              - link "6 comments" [ref=e418] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uc2i6s/my_new_achievement/
+            - listitem [ref=e419]:
+              - link "share" [ref=e420] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e421]:
+              - link "save" [ref=e422] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e423]:
+              - link "hide" [ref=e426] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e427]:
+              - link "report" [ref=e428] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e429]:
+        - paragraph
+        - generic [ref=e430]: "9"
+        - generic [ref=e431]:
+          - button "upvote" [ref=e432] [cursor=pointer]
+          - generic "0" [ref=e433]
+          - button "downvote" [ref=e434] [cursor=pointer]
+        - link [ref=e435] [cursor=pointer]:
+          - /url: https://i.redd.it/7jvpfar0ww8h1.png
+        - generic [ref=e437]:
+          - paragraph [ref=e438]:
+            - 'link "Orbios OS: The Simplistic Operating System" [ref=e439] [cursor=pointer]':
+              - /url: https://i.redd.it/7jvpfar0ww8h1.png
+            - generic [ref=e440]:
+              - text: (
+              - link "i.redd.it" [ref=e441] [cursor=pointer]:
+                - /url: /domain/i.redd.it/
+              - text: )
+          - paragraph [ref=e443]:
+            - text: submitted
+            - time [ref=e444]: 1 day ago
+            - text: by
+            - link "BetTall2589" [ref=e445] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/BetTall2589
+            - generic "Orbios 💫" [ref=e446]
+          - list [ref=e447]:
+            - listitem [ref=e448]:
+              - link "9 comments" [ref=e449] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uczhsj/orbios_os_the_simplistic_operating_system/
+            - listitem [ref=e450]:
+              - link "share" [ref=e451] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e452]:
+              - link "save" [ref=e453] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e454]:
+              - link "hide" [ref=e457] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e458]:
+              - link "report" [ref=e459] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e460]:
+        - paragraph
+        - generic [ref=e461]: "10"
+        - generic [ref=e462]:
+          - button "upvote" [ref=e463] [cursor=pointer]
+          - generic "26" [ref=e464]
+          - button "downvote" [ref=e465] [cursor=pointer]
+        - link [ref=e466] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ubq8rh/writing_a_uefi_explainer_series_looking_for/
+        - generic [ref=e468]:
+          - paragraph [ref=e469]:
+            - link "Writing a UEFI explainer series, looking for feedback from people who actually know this stuff" [ref=e470] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ubq8rh/writing_a_uefi_explainer_series_looking_for/
+            - generic [ref=e471]:
+              - text: (
+              - link "self.osdev" [ref=e472] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e474]:
+            - text: submitted
+            - time [ref=e475]: 2 days ago
+            - text: by
+            - link "PlumNo5346" [ref=e476] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/PlumNo5346
+          - list [ref=e477]:
+            - listitem [ref=e478]:
+              - link "3 comments" [ref=e479] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ubq8rh/writing_a_uefi_explainer_series_looking_for/
+            - listitem [ref=e480]:
+              - link "share" [ref=e481] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e482]:
+              - link "save" [ref=e483] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e484]:
+              - link "hide" [ref=e487] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e488]:
+              - link "report" [ref=e489] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e490]:
+        - paragraph
+        - generic [ref=e491]: "11"
+        - generic [ref=e492]:
+          - button "upvote" [ref=e493] [cursor=pointer]
+          - generic "8" [ref=e494]
+          - button "downvote" [ref=e495] [cursor=pointer]
+        - link "1:16" [ref=e496] [cursor=pointer]:
+          - /url: https://v.redd.it/8x4kdu8rxl8h1
+          - generic [ref=e497]: 1:16
+        - generic [ref=e499]:
+          - paragraph [ref=e500]:
+            - link "Visualizing a 1980s Commercial Messaging System Running on a Reconstructed RTOS" [ref=e501] [cursor=pointer]:
+              - /url: https://v.redd.it/8x4kdu8rxl8h1
+            - generic [ref=e502]:
+              - text: (
+              - link "v.redd.it" [ref=e503] [cursor=pointer]:
+                - /url: /domain/v.redd.it/
+              - text: )
+          - paragraph [ref=e505]:
+            - text: submitted
+            - time [ref=e506]: 3 days ago
+            - text: by
+            - link "noborutkhs" [ref=e507] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/noborutkhs
+          - list [ref=e508]:
+            - listitem [ref=e509]:
+              - link "comment" [ref=e510] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ubm048/visualizing_a_1980s_commercial_messaging_system/
+            - listitem [ref=e511]:
+              - link "share" [ref=e512] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e513]:
+              - link "save" [ref=e514] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e515]:
+              - link "hide" [ref=e518] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e519]:
+              - link "report" [ref=e520] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e521]:
+        - paragraph
+        - generic [ref=e522]: "12"
+        - generic [ref=e523]:
+          - button "upvote" [ref=e524] [cursor=pointer]
+          - generic "18" [ref=e525]
+          - button "downvote" [ref=e526] [cursor=pointer]
+        - link [ref=e527] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ubhewx/which_part_of_osdev_would_you_consider_to_be_the/
+        - generic [ref=e529]:
+          - paragraph [ref=e530]:
+            - link "Which part of OSDev would you consider to be the easiest and why?" [ref=e531] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ubhewx/which_part_of_osdev_would_you_consider_to_be_the/
+            - generic [ref=e532]:
+              - text: (
+              - link "self.osdev" [ref=e533] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e535]:
+            - text: submitted
+            - time [ref=e536]: 3 days ago
+            - text: by
+            - link "JescoInc" [ref=e537] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/JescoInc
+          - list [ref=e538]:
+            - listitem [ref=e539]:
+              - link "25 comments" [ref=e540] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ubhewx/which_part_of_osdev_would_you_consider_to_be_the/
+            - listitem [ref=e541]:
+              - link "share" [ref=e542] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e543]:
+              - link "save" [ref=e544] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e545]:
+              - link "hide" [ref=e548] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e549]:
+              - link "report" [ref=e550] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e551]:
+        - paragraph
+        - generic [ref=e552]: "13"
+        - generic [ref=e553]:
+          - button "upvote" [ref=e554] [cursor=pointer]
+          - generic "77" [ref=e555]
+          - button "downvote" [ref=e556] [cursor=pointer]
+        - link [ref=e557] [cursor=pointer]:
+          - /url: /r/osdev/comments/1uardef/some_key_thing_from_which_we_can_identify_a_vibe/
+        - generic [ref=e559]:
+          - paragraph [ref=e560]:
+            - link "Some key thing from which we can identify a vibe coded project" [ref=e561] [cursor=pointer]:
+              - /url: /r/osdev/comments/1uardef/some_key_thing_from_which_we_can_identify_a_vibe/
+            - generic [ref=e562]:
+              - text: (
+              - link "self.osdev" [ref=e563] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e565]:
+            - text: submitted
+            - time [ref=e566]: 4 days ago
+            - text: by
+            - link "Sensitive-Can9232" [ref=e567] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/Sensitive-Can9232
+          - list [ref=e568]:
+            - listitem [ref=e569]:
+              - link "95 comments" [ref=e570] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uardef/some_key_thing_from_which_we_can_identify_a_vibe/
+            - listitem [ref=e571]:
+              - link "share" [ref=e572] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e573]:
+              - link "save" [ref=e574] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e575]:
+              - link "hide" [ref=e578] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e579]:
+              - link "report" [ref=e580] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e581]:
+        - paragraph
+        - generic [ref=e582]: "14"
+        - generic [ref=e583]:
+          - button "upvote" [ref=e584] [cursor=pointer]
+          - generic "7" [ref=e585]
+          - button "downvote" [ref=e586] [cursor=pointer]
+        - link [ref=e587] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ub7n5i/things_i_learned_this_week/
+        - generic [ref=e589]:
+          - paragraph [ref=e590]:
+            - link "Things I learned this week" [ref=e591] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ub7n5i/things_i_learned_this_week/
+            - generic [ref=e592]:
+              - text: (
+              - link "self.osdev" [ref=e593] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e595]:
+            - text: submitted
+            - time [ref=e596]: 3 days ago
+            - text: by
+            - link "compgeek38400" [ref=e597] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/compgeek38400
+          - list [ref=e598]:
+            - listitem [ref=e599]:
+              - link "1 comment" [ref=e600] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ub7n5i/things_i_learned_this_week/
+            - listitem [ref=e601]:
+              - link "share" [ref=e602] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e603]:
+              - link "save" [ref=e604] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e605]:
+              - link "hide" [ref=e608] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e609]:
+              - link "report" [ref=e610] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e611]:
+        - paragraph
+        - generic [ref=e612]: "15"
+        - generic [ref=e613]:
+          - button "upvote" [ref=e614] [cursor=pointer]
+          - generic "0" [ref=e615]
+          - button "downvote" [ref=e616] [cursor=pointer]
+        - link [ref=e617] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ubwwnk/how_to_write_own_os/
+        - generic [ref=e619]:
+          - paragraph [ref=e620]:
+            - link "How to write own OS?" [ref=e621] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ubwwnk/how_to_write_own_os/
+            - generic [ref=e622]:
+              - text: (
+              - link "self.osdev" [ref=e623] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e625]:
+            - text: submitted
+            - time [ref=e626]: 2 days ago
+            - text: by
+            - link "hithja" [ref=e627] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/hithja
+          - list [ref=e628]:
+            - listitem [ref=e629]:
+              - link "36 comments" [ref=e630] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ubwwnk/how_to_write_own_os/
+            - listitem [ref=e631]:
+              - link "share" [ref=e632] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e633]:
+              - link "save" [ref=e634] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e635]:
+              - link "hide" [ref=e638] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e639]:
+              - link "report" [ref=e640] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e641]:
+        - paragraph
+        - generic [ref=e642]: "16"
+        - generic [ref=e643]:
+          - button "upvote" [ref=e644] [cursor=pointer]
+          - generic "48" [ref=e645]
+          - button "downvote" [ref=e646] [cursor=pointer]
+        - link "1:42" [ref=e647] [cursor=pointer]:
+          - /url: https://v.redd.it/ca6d4xmbqe8h1
+          - generic [ref=e648]: 1:42
+        - generic [ref=e650]:
+          - paragraph [ref=e651]:
+            - link "Alright full FAT32 read and write :D" [ref=e652] [cursor=pointer]:
+              - /url: https://v.redd.it/ca6d4xmbqe8h1
+            - generic [ref=e653]:
+              - text: (
+              - link "v.redd.it" [ref=e654] [cursor=pointer]:
+                - /url: /domain/v.redd.it/
+              - text: )
+          - paragraph [ref=e656]:
+            - text: submitted
+            - time [ref=e657]: 4 days ago
+            - time [ref=e658]: "*"
+            - text: by
+            - link "letmehaveanameyoudum" [ref=e659] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/letmehaveanameyoudum
+          - list [ref=e660]:
+            - listitem [ref=e661]:
+              - link "8 comments" [ref=e662] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uasavj/alright_full_fat32_read_and_write_d/
+            - listitem [ref=e663]:
+              - link "share" [ref=e664] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e665]:
+              - link "save" [ref=e666] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e667]:
+              - link "hide" [ref=e670] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e671]:
+              - link "report" [ref=e672] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e673]:
+        - paragraph
+        - generic [ref=e674]: "17"
+        - generic [ref=e675]:
+          - button "upvote" [ref=e676] [cursor=pointer]
+          - generic "0" [ref=e677]
+          - button "downvote" [ref=e678] [cursor=pointer]
+        - link [ref=e679] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ubm8s8/a_neuroadaptive_os_concept_for_energy_efficiency/
+        - generic [ref=e681]:
+          - paragraph [ref=e682]:
+            - link "A neuro-adaptive OS concept for energy efficiency and execution-path attestation" [ref=e683] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ubm8s8/a_neuroadaptive_os_concept_for_energy_efficiency/
+            - generic [ref=e684]:
+              - text: (
+              - link "self.osdev" [ref=e685] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e687]:
+            - text: submitted
+            - time [ref=e688]: 3 days ago
+            - text: by
+            - link "SirRiPP3RVanSc4LP3R" [ref=e689] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/SirRiPP3RVanSc4LP3R
+          - list [ref=e690]:
+            - listitem [ref=e691]:
+              - link "10 comments" [ref=e692] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ubm8s8/a_neuroadaptive_os_concept_for_energy_efficiency/
+            - listitem [ref=e693]:
+              - link "share" [ref=e694] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e695]:
+              - link "save" [ref=e696] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e697]:
+              - link "hide" [ref=e700] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e701]:
+              - link "report" [ref=e702] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e703]:
+        - paragraph
+        - generic [ref=e704]: "18"
+        - generic [ref=e705]:
+          - button "upvote" [ref=e706] [cursor=pointer]
+          - generic "14" [ref=e707]
+          - button "downvote" [ref=e708] [cursor=pointer]
+        - link [ref=e709] [cursor=pointer]:
+          - /url: https://i.redd.it/v2qbuumstd8h1.png
+        - generic [ref=e711]:
+          - paragraph [ref=e712]:
+            - link "Sky OS Desktop Environment Progress Update" [ref=e713] [cursor=pointer]:
+              - /url: https://i.redd.it/v2qbuumstd8h1.png
+            - generic [ref=e714]:
+              - text: (
+              - link "i.redd.it" [ref=e715] [cursor=pointer]:
+                - /url: /domain/i.redd.it/
+              - text: )
+          - paragraph [ref=e718]:
+            - text: submitted
+            - time [ref=e719]: 4 days ago
+            - text: by
+            - link "Vegetable_Exam_6865" [ref=e720] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/Vegetable_Exam_6865
+          - list [ref=e721]:
+            - listitem [ref=e722]:
+              - link "12 comments" [ref=e723] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uapcyu/sky_os_desktop_environment_progress_update/
+            - listitem [ref=e724]:
+              - link "share" [ref=e725] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e726]:
+              - link "save" [ref=e727] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e728]:
+              - link "hide" [ref=e731] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e732]:
+              - link "report" [ref=e733] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e734]:
+        - paragraph
+        - generic [ref=e735]: "19"
+        - generic [ref=e736]:
+          - button "upvote" [ref=e737] [cursor=pointer]
+          - generic "149" [ref=e738]
+          - button "downvote" [ref=e739] [cursor=pointer]
+        - link [ref=e740] [cursor=pointer]:
+          - /url: /r/osdev/comments/1u9yo44/can_we_stop_the_ai_slop/
+        - generic [ref=e742]:
+          - paragraph [ref=e743]:
+            - link "Can we stop the AI slop?" [ref=e744] [cursor=pointer]:
+              - /url: /r/osdev/comments/1u9yo44/can_we_stop_the_ai_slop/
+            - generic [ref=e745]:
+              - text: (
+              - link "self.osdev" [ref=e746] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e748]:
+            - text: submitted
+            - time [ref=e749]: 5 days ago
+            - text: by
+            - link "TheNullDeref" [ref=e750] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/TheNullDeref
+            - generic "Hehe, I just page faulted your kernel." [ref=e751]
+          - list [ref=e752]:
+            - listitem [ref=e753]:
+              - link "49 comments" [ref=e754] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1u9yo44/can_we_stop_the_ai_slop/
+            - listitem [ref=e755]:
+              - link "share" [ref=e756] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e757]:
+              - link "save" [ref=e758] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e759]:
+              - link "hide" [ref=e762] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e763]:
+              - link "report" [ref=e764] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e765]:
+        - paragraph
+        - generic [ref=e766]: "20"
+        - generic [ref=e767]:
+          - button "upvote" [ref=e768] [cursor=pointer]
+          - generic "9" [ref=e769]
+          - button "downvote" [ref=e770] [cursor=pointer]
+        - link [ref=e771] [cursor=pointer]:
+          - /url: /r/osdev/comments/1uag4am/which_part_of_osdev_would_you_consider_to_be_the/
+        - generic [ref=e773]:
+          - paragraph [ref=e774]:
+            - link "Which part of OSDev would you consider to be the most challenging?" [ref=e775] [cursor=pointer]:
+              - /url: /r/osdev/comments/1uag4am/which_part_of_osdev_would_you_consider_to_be_the/
+            - generic [ref=e776]:
+              - text: (
+              - link "self.osdev" [ref=e777] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e779]:
+            - text: submitted
+            - time [ref=e780]: 4 days ago
+            - text: by
+            - link "JescoInc" [ref=e781] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/JescoInc
+          - list [ref=e782]:
+            - listitem [ref=e783]:
+              - link "28 comments" [ref=e784] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uag4am/which_part_of_osdev_would_you_consider_to_be_the/
+            - listitem [ref=e785]:
+              - link "share" [ref=e786] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e787]:
+              - link "save" [ref=e788] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e789]:
+              - link "hide" [ref=e792] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e793]:
+              - link "report" [ref=e794] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e795]:
+        - paragraph
+        - generic [ref=e796]: "21"
+        - generic [ref=e797]:
+          - button "upvote" [ref=e798] [cursor=pointer]
+          - generic "0" [ref=e799]
+          - button "downvote" [ref=e800] [cursor=pointer]
+        - link [ref=e801] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ub8gdo/i_made_a_linux_distribution_named_bazzilt/
+        - generic [ref=e803]:
+          - paragraph [ref=e804]:
+            - link "I made a linux distribution named Bazzilt." [ref=e805] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ub8gdo/i_made_a_linux_distribution_named_bazzilt/
+            - generic [ref=e806]:
+              - text: (
+              - link "self.osdev" [ref=e807] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e809]:
+            - text: submitted
+            - time [ref=e810]: 3 days ago
+            - text: by
+            - link "DoubleForever1182" [ref=e811] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/DoubleForever1182
+          - list [ref=e812]:
+            - listitem [ref=e813]:
+              - link "7 comments" [ref=e814] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ub8gdo/i_made_a_linux_distribution_named_bazzilt/
+            - listitem [ref=e815]:
+              - link "share" [ref=e816] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e817]:
+              - link "save" [ref=e818] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e819]:
+              - link "hide" [ref=e822] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e823]:
+              - link "report" [ref=e824] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e825]:
+        - paragraph
+        - generic [ref=e826]: "22"
+        - generic [ref=e827]:
+          - button "upvote" [ref=e828] [cursor=pointer]
+          - generic "0" [ref=e829]
+          - button "downvote" [ref=e830] [cursor=pointer]
+        - link [ref=e831] [cursor=pointer]:
+          - /url: /r/Sky_os_development/comments/1uas2n7/sky_oss_information_in_the_public_will_not_be/
+        - generic [ref=e833]:
+          - paragraph [ref=e834]:
+            - link "Sky os's information in the public will not be update for a long time" [ref=e835] [cursor=pointer]:
+              - /url: /r/Sky_os_development/comments/1uas2n7/sky_oss_information_in_the_public_will_not_be/
+            - generic [ref=e836]:
+              - text: (
+              - link:
+                - /url: /domain//
+              - text: )
+          - paragraph [ref=e839]:
+            - text: submitted
+            - time [ref=e840]: 4 days ago
+            - text: by
+            - link "Vegetable_Exam_6865" [ref=e841] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/Vegetable_Exam_6865
+          - list [ref=e842]:
+            - listitem [ref=e843]:
+              - link "2 comments" [ref=e844] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uas4nf/sky_oss_information_in_the_public_will_not_be/
+            - listitem [ref=e845]:
+              - link "share" [ref=e846] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e847]:
+              - link "save" [ref=e848] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e849]:
+              - link "hide" [ref=e852] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e853]:
+              - link "report" [ref=e854] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e855]:
+        - paragraph
+        - generic [ref=e856]: "23"
+        - generic [ref=e857]:
+          - button "upvote" [ref=e858] [cursor=pointer]
+          - generic "0" [ref=e859]
+          - button "downvote" [ref=e860] [cursor=pointer]
+        - link [ref=e861] [cursor=pointer]:
+          - /url: /r/Sky_os_development/comments/1uas3p1/sky_oss_information_in_the_public_will_not_be/
+        - generic [ref=e863]:
+          - paragraph [ref=e864]:
+            - link "Sky os's information in the public will not be update for a long time" [ref=e865] [cursor=pointer]:
+              - /url: /r/Sky_os_development/comments/1uas3p1/sky_oss_information_in_the_public_will_not_be/
+            - generic [ref=e866]:
+              - text: (
+              - link:
+                - /url: /domain//
+              - text: )
+          - paragraph [ref=e869]:
+            - text: submitted
+            - time [ref=e870]: 4 days ago
+            - text: by
+            - link "Vegetable_Exam_6865" [ref=e871] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/Vegetable_Exam_6865
+          - list [ref=e872]:
+            - listitem [ref=e873]:
+              - link "3 comments" [ref=e874] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uas40o/sky_oss_information_in_the_public_will_not_be/
+            - listitem [ref=e875]:
+              - link "share" [ref=e876] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e877]:
+              - link "save" [ref=e878] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e879]:
+              - link "hide" [ref=e882] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e883]:
+              - link "report" [ref=e884] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e885]:
+        - paragraph
+        - generic [ref=e886]: "24"
+        - generic [ref=e887]:
+          - button "upvote" [ref=e888] [cursor=pointer]
+          - generic "25" [ref=e889]
+          - button "downvote" [ref=e890] [cursor=pointer]
+        - link [ref=e891] [cursor=pointer]:
+          - /url: /r/osdev/comments/1ua1h8m/how_to_start_os_development/
+        - generic [ref=e893]:
+          - paragraph [ref=e894]:
+            - link "how to start OS development" [ref=e895] [cursor=pointer]:
+              - /url: /r/osdev/comments/1ua1h8m/how_to_start_os_development/
+            - generic [ref=e896]:
+              - text: (
+              - link "self.osdev" [ref=e897] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e899]:
+            - text: submitted
+            - time [ref=e900]: 4 days ago
+            - text: by
+            - link "Sure_Ride2935" [ref=e901] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/Sure_Ride2935
+          - list [ref=e902]:
+            - listitem [ref=e903]:
+              - link "17 comments" [ref=e904] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1ua1h8m/how_to_start_os_development/
+            - listitem [ref=e905]:
+              - link "share" [ref=e906] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e907]:
+              - link "save" [ref=e908] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e909]:
+              - link "hide" [ref=e912] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e913]:
+              - link "report" [ref=e914] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e915]:
+        - paragraph
+        - generic [ref=e916]: "25"
+        - generic [ref=e917]:
+          - button "upvote" [ref=e918] [cursor=pointer]
+          - generic "0" [ref=e919]
+          - button "downvote" [ref=e920] [cursor=pointer]
+        - link [ref=e921] [cursor=pointer]:
+          - /url: /r/osdev/comments/1uaypqk/trying_to_build_my_own_operating_system_from/
+        - generic [ref=e923]:
+          - paragraph [ref=e924]:
+            - link "Trying to build my own Operating system from scratch" [ref=e925] [cursor=pointer]:
+              - /url: /r/osdev/comments/1uaypqk/trying_to_build_my_own_operating_system_from/
+            - generic [ref=e926]:
+              - text: (
+              - link "self.osdev" [ref=e927] [cursor=pointer]:
+                - /url: /r/osdev/
+              - text: )
+          - paragraph [ref=e929]:
+            - text: submitted
+            - time [ref=e930]: 3 days ago
+            - text: by
+            - link "manit-098" [ref=e931] [cursor=pointer]:
+              - /url: https://old.reddit.com/user/manit-098
+          - list [ref=e932]:
+            - listitem [ref=e933]:
+              - link "1 comment" [ref=e934] [cursor=pointer]:
+                - /url: https://old.reddit.com/r/osdev/comments/1uaypqk/trying_to_build_my_own_operating_system_from/
+            - listitem [ref=e935]:
+              - link "share" [ref=e936] [cursor=pointer]:
+                - /url: "javascript: void 0;"
+            - listitem [ref=e937]:
+              - link "save" [ref=e938] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e939]:
+              - link "hide" [ref=e942] [cursor=pointer]:
+                - /url: javascript:void(0)
+            - listitem [ref=e943]:
+              - link "report" [ref=e944] [cursor=pointer]:
+                - /url: javascript:void(0)
+      - generic [ref=e946]:
+        - text: "view more:"
+        - link "next ›" [ref=e948] [cursor=pointer]:
+          - /url: https://old.reddit.com/r/osdev/hot/?count=25&after=t3_1uaypqk
+  - generic [ref=e949]:
+    - generic [ref=e950]:
+      - list [ref=e952]:
+        - listitem [ref=e953]: about
+        - listitem [ref=e954]:
+          - link "blog" [ref=e955] [cursor=pointer]:
+            - /url: https://redditblog.com
+        - listitem [ref=e956]:
+          - link "about" [ref=e957] [cursor=pointer]:
+            - /url: https://www.redditinc.com
+        - listitem [ref=e958]:
+          - link "advertising" [ref=e959] [cursor=pointer]:
+            - /url: https://www.redditinc.com/advertising
+        - listitem [ref=e960]:
+          - link "careers" [ref=e961] [cursor=pointer]:
+            - /url: https://www.redditinc.com/careers
+      - list [ref=e963]:
+        - listitem [ref=e964]: help
+        - listitem [ref=e965]:
+          - link "site rules" [ref=e966] [cursor=pointer]:
+            - /url: https://old.reddit.com/rules/
+        - listitem [ref=e967]:
+          - link "Reddit help center" [ref=e968] [cursor=pointer]:
+            - /url: https://www.reddithelp.com
+        - listitem [ref=e969]:
+          - link "reddiquette" [ref=e970] [cursor=pointer]:
+            - /url: https://old.reddit.com/wiki/reddiquette/
+        - listitem [ref=e971]:
+          - link "mod guidelines" [ref=e972] [cursor=pointer]:
+            - /url: https://old.reddit.com/help/healthycommunities/
+        - listitem [ref=e973]:
+          - link "contact us" [ref=e974] [cursor=pointer]:
+            - /url: https://old.reddit.com/contact/
+      - list [ref=e976]:
+        - listitem [ref=e977]: apps & tools
+        - listitem [ref=e978]:
+          - link "Reddit for iPhone" [ref=e979] [cursor=pointer]:
+            - /url: https://itunes.apple.com/us/app/reddit-the-official-app/id1064216828?mt=8
+        - listitem [ref=e980]:
+          - link "Reddit for Android" [ref=e981] [cursor=pointer]:
+            - /url: https://play.google.com/store/apps/details?id=com.reddit.frontpage
+        - listitem [ref=e982]:
+          - link "mobile website" [ref=e983] [cursor=pointer]:
+            - /url: "#"
+      - list [ref=e985]:
+        - listitem [ref=e986]: <3
+        - listitem [ref=e987]:
+          - link "reddit premium" [ref=e988] [cursor=pointer]:
+            - /url: https://old.reddit.com/premium/
+    - paragraph [ref=e989]:
+      - text: Use of this site constitutes acceptance of our
+      - link "User Agreement" [ref=e990] [cursor=pointer]:
+        - /url: https://old.reddit.com/help/useragreement
+      - text: and
+      - link "Privacy Policy" [ref=e991] [cursor=pointer]:
+        - /url: https://old.reddit.com/help/privacypolicy
+      - text: . © 2026 reddit inc. All rights reserved.
+    - paragraph [ref=e992]: REDDIT and the ALIEN Logo are registered trademarks of reddit inc.
+  - img [ref=e993]
+  - paragraph [ref=e994]: π

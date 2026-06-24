@@ -24,6 +24,7 @@
 #include "vfs.h"
 #include "partition.h"
 #include "blockdev.h"
+#include "dm.h"
 #include "ata.h"
 #include "pci.h"
 #include "ahci.h"
@@ -288,6 +289,7 @@ void kmain(uint64_t mb_info) {
      * if a device carries no FAT32. */
     blockdev_enumerate();
     blockdev_selftest();           /* verify the write vtable + buffer-cache coherence (M1095) */
+    dm_selftest();                 /* RAID-1 mirror self-test, iff 2 non-boot writable disks (M1157) */
     kprintf("\n");
 
     /* Bring up a USB HID boot keyboard, sharing the one UHCI controller with the

@@ -1,0 +1,15 @@
+[     585ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://www.redditstatic.com/shreddit/assets/pix/ads/1.png:0
+[     655ms] [WARNING] Manifest: property 'start_url' ignored, should be same origin as document. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'scope' ignored. Start url should be within scope of scope URL. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' ignored, should be within scope of the manifest. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' of 'shortcut' not present. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' ignored, should be within scope of the manifest. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' of 'shortcut' not present. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' ignored, should be within scope of the manifest. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' of 'shortcut' not present. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' ignored, should be within scope of the manifest. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' of 'shortcut' not present. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' ignored, should be within scope of the manifest. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' of 'shortcut' not present. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' ignored, should be within scope of the manifest. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0
+[     655ms] [WARNING] Manifest: property 'url' of 'shortcut' not present. @ https://www.redditstatic.com/desktop2x/img/favicon/manifest.json:0

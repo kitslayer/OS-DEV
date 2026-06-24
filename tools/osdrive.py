@@ -133,6 +133,7 @@ def main():
     ap.add_argument("--kernel", default="build/kernel32.elf")
     ap.add_argument("--disk",   default="build/fat.img")
     ap.add_argument("--disk2",  default=None, help="attach a 2nd drive (virtio-blk) — auto-mounted as /disk2")
+    ap.add_argument("--disk3",  default=None, help="attach a 3rd drive (virtio-blk) — e.g. for a RAID mirror with --disk2")
     ap.add_argument("--hostfwd", default=None, help="QEMU user-net hostfwd spec, e.g. tcp::18080-:80 (inbound to the guest)")
     ap.add_argument("--out",    default=".")
     ap.add_argument("--boot-timeout", type=float, default=25)
@@ -165,6 +166,9 @@ def main():
     if args.disk2:
         qcmd += ["-drive", "file=%s,format=raw,if=none,id=d2,cache=writethrough" % args.disk2,
                  "-device", "virtio-blk-pci,drive=d2"]
+    if args.disk3:   # attach via NVMe so it's a distinct non-boot writable disk (e.g. RAID member B)
+        qcmd += ["-drive", "file=%s,format=raw,if=none,id=d3,cache=writethrough" % args.disk3,
+                 "-device", "nvme,drive=d3,serial=osdev-d3"]
     qp = subprocess.Popen(qcmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     rc = 0
     try:
