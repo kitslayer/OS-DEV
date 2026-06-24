@@ -5,7 +5,9 @@
  * real ACPI S5 power-off and an ACPI reset (with an 8042 fallback) — no AML
  * interpreter, just the well-known \_S5 byte scan. */
 #pragma once
+#include <stdint.h>
 
 void acpi_init(void);      /* scan the ACPI tables at boot (logs what it found) */
+int  acpi_madt_lapics(uint8_t *ids, int max);  /* APIC IDs of all CPUs from the MADT, for SMP (M1197) */
 void acpi_poweroff(void);  /* enter S5: power the machine off. Does not return on success. */
 void acpi_reboot(void);    /* ACPI reset register, else 8042 pulse. Does not return on success. */

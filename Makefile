@@ -28,7 +28,7 @@ LDFLAGS := -n -T linker.ld
 # PAK + a multi-MB hunk on top of the kernel (incl. the 40 MB JS arena), so it
 # silently fails to launch at 128M but runs fine at 256M (DOOM, lighter, works at
 # either). 256M comfortably fits the whole app suite, even DOOM+Quake at once.
-QEMUFLAGS := -no-reboot -no-shutdown -m 256M
+QEMUFLAGS := -no-reboot -no-shutdown -m 256M -smp 4
 
 # --- sources ----------------------------------------------------------------
 BUILD   := build
@@ -66,7 +66,10 @@ HDAAUDIOFLAGS := -device intel-hda -device hda-output,audiodev=snd0 -audiodev $(
 TESTHDAFLAGS := -device intel-hda -device hda-output,audiodev=snd0 -audiodev none,id=snd0
 
 C_SRCS  := $(shell find kernel -name '*.c')
-ASM_SRCS:= $(shell find boot kernel -name '*.asm')
+# ap_trampoline.asm is a FLAT 16-bit real-mode binary (the AP bring-up trampoline,
+# M1197) — assembled with `nasm -f bin` and incbin'd by ap_blob.asm, NOT linked
+# as an elf64 object — so exclude it from the normal asm object list.
+ASM_SRCS:= $(filter-out kernel/asm/ap_trampoline.asm,$(shell find boot kernel -name '*.asm'))
 OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
@@ -286,6 +289,14 @@ $(BUILD)/calc.elf: user/calc.c user/calceval.h user/dmath.h $(BUILD)/user_ulib.o
 
 # the embedded blob depends on every program ELF
 $(BUILD)/kernel/asm/user_blob.o: $(USER_ELFS)
+
+# AP bring-up trampoline (M1197): assemble the real-mode trampoline as a flat
+# binary, then make the embedding blob (ap_blob.asm incbin's build/ap_trampoline.bin)
+# depend on it so it's built first.
+$(BUILD)/ap_trampoline.bin: kernel/asm/ap_trampoline.asm
+	@mkdir -p $(BUILD)
+	$(AS) -f bin $< -o $@
+$(BUILD)/kernel/asm/ap_blob.o: $(BUILD)/ap_trampoline.bin
 
 # kernel.elf is built in TWO link passes so the embedded symbol table (for panic
 # backtraces — kernel/ksyms.c) holds the FINAL function addresses:

@@ -188,6 +188,62 @@ static void parse_fadt(const struct fadt *f) {
     parse_s5(dsdt);
 }
 
+/* Enumerate the usable processors from the MADT (the ACPI table signed "APIC")
+ * for SMP bring-up (kernel/smp.c). Walks the XSDT/RSDT for the MADT, then its
+ * variable-length entry list, collecting the APIC ID of every Processor Local
+ * APIC (entry type 0) that is Enabled or Online-Capable. Returns the count (the
+ * BSP is included — smp.c skips its own ID), or 0 if there's no MADT. M1197. */
+int acpi_madt_lapics(uint8_t *ids, int max) {
+    struct rsdp *r = find_rsdp();
+    if (!r) return 0;
+
+    const struct sdt_header *madt = 0;
+    if (r->revision >= 2 && r->xsdt_addr) {              /* XSDT: 64-bit entries */
+        const struct sdt_header *x = (const struct sdt_header *)hhdm(r->xsdt_addr);
+        if (sig4(x->sig, "XSDT") && x->length >= 36 && x->length < (1u << 20)) {
+            uint32_t n = (x->length - 36) / 8;
+            const uint8_t *ents = (const uint8_t *)x + 36;
+            for (uint32_t i = 0; i < n; i++) {
+                uint64_t ep; __builtin_memcpy(&ep, ents + i*8, 8);
+                const struct sdt_header *t = (const struct sdt_header *)hhdm(ep);
+                if (sig4(t->sig, "APIC")) { madt = t; break; }
+            }
+        }
+    }
+    if (!madt && r->rsdt_addr) {                         /* RSDT: 32-bit entries */
+        const struct sdt_header *rs = (const struct sdt_header *)hhdm(r->rsdt_addr);
+        if (sig4(rs->sig, "RSDT") && rs->length >= 36 && rs->length < (1u << 20)) {
+            uint32_t n = (rs->length - 36) / 4;
+            const uint8_t *ents = (const uint8_t *)rs + 36;
+            for (uint32_t i = 0; i < n; i++) {
+                uint32_t ep; __builtin_memcpy(&ep, ents + i*4, 4);
+                const struct sdt_header *t = (const struct sdt_header *)hhdm(ep);
+                if (sig4(t->sig, "APIC")) { madt = t; break; }
+            }
+        }
+    }
+    if (!madt || madt->length < 44 || madt->length >= (1u << 20)) return 0;
+
+    /* MADT entries begin after the 36-byte SDT header + 8 bytes (local APIC
+     * address + flags). Each entry is [u8 type][u8 length(incl. header)]; type 0
+     * = Processor Local APIC: { type, len=8, acpi_id, apic_id, u32 flags }. */
+    int cnt = 0;
+    const uint8_t *p   = (const uint8_t *)madt + 44;
+    const uint8_t *end = (const uint8_t *)madt + madt->length;
+    while (p + 2 <= end) {
+        uint8_t type = p[0], len = p[1];
+        if (len < 2 || p + len > end) break;             /* malformed -> stop */
+        if (type == 0 && len >= 8) {
+            uint32_t flags; __builtin_memcpy(&flags, p + 4, 4);
+            if ((flags & 1) || (flags & 2)) {            /* Enabled | Online-Capable */
+                if (cnt < max) ids[cnt++] = p[3];        /* apic_id */
+            }
+        }
+        p += len;
+    }
+    return cnt;
+}
+
 void acpi_init(void) {
     struct rsdp *r = find_rsdp();
     if (!r) { kprintf("[acpi] no RSDP found (poweroff falls back to emulator ports).\n"); return; }

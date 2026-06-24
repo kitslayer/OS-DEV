@@ -15,6 +15,7 @@
 #include "timer.h"
 #include "task.h"
 #include "app.h"
+#include "smp.h"
 #include "blockdev.h"
 #include "interrupts.h"
 #include "console.h"
@@ -94,6 +95,8 @@ static long gen_uptime(char *b, int max) {
 static long gen_cpuinfo(char *b, int max) {
     uint32_t a, x, c, d;
     int p = 0;
+    /* number of CPUs the kernel brought online at boot (BSP + APs, M1197) */
+    p = sapp(b, p, max, "processors\t: "); p = sdec(b, p, max, (uint64_t)smp_cpu_count); p = sapp(b, p, max, "\n");
     /* vendor string (leaf 0: EBX, EDX, ECX) */
     char vendor[13];
     cpuid(0, 0, &a, &x, &c, &d);

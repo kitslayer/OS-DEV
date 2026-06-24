@@ -16,6 +16,7 @@
 #include "vmm.h"
 #include "kheap.h"
 #include "acpi.h"
+#include "smp.h"
 #include "random.h"
 #include "vdso.h"
 #include "measure.h"
@@ -131,6 +132,7 @@ void kmain(uint64_t mb_info) {
     vmm_init();
     kheap_init();
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
+    smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
     random_init();                 /* seed the CSPRNG from RDSEED/RDRAND (TSC fallback) */
     vdso_init();                   /* alloc the vDSO time page + seed the wall clock from the RTC (M1111) */
 

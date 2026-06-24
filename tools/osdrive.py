@@ -155,7 +155,7 @@ def main():
     mon_sock, qmp_sock, slog, ppm = (os.path.join(tmp, n) for n in
                                      ("mon.sock", "qmp.sock", "serial.log", "shot.ppm"))
     netdev = "user,id=net0" + (",hostfwd=" + args.hostfwd if args.hostfwd else "")
-    qcmd = [qemu, "-no-reboot", "-no-shutdown", "-m", "256M", "-kernel", args.kernel,
+    qcmd = [qemu, "-no-reboot", "-no-shutdown", "-m", "256M", "-smp", "4", "-kernel", args.kernel,
         "-drive", "file=%s,format=raw,if=ide" % args.disk,
         "-netdev", netdev, "-device", "e1000,netdev=net0",
         "-device", "piix3-usb-uhci,id=uhci", "-device", "usb-tablet,bus=uhci.0",
@@ -219,6 +219,8 @@ def main():
                 print("osdrive: unknown command:", c, file=sys.stderr); rc = 1
     finally:
         qp.kill(); qp.wait()
+        try: shutil.copyfile(slog, os.path.join(args.out, "serial.log"))  # keep the boot log for debugging
+        except OSError: pass
         shutil.rmtree(tmp, ignore_errors=True)
     return rc
 
