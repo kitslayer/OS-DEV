@@ -326,7 +326,8 @@ int app_format_maps(app_t *a, char *b, int max) {
     }
     for (int i = 0; i < a->nvma; i++) {  /* demand-paged mmap regions */
         p = maps_hex(b, p, max, a->vma[i].start); p = maps_str(b, p, max, "-");
-        p = maps_hex(b, p, max, a->vma[i].start + a->vma[i].len); p = maps_str(b, p, max, " rw-  [mmap]\n");
+        p = maps_hex(b, p, max, a->vma[i].start + a->vma[i].len);
+        p = maps_str(b, p, max, a->vma[i].huge ? " rw-  [mmap-huge]\n" : " rw-  [mmap]\n");
     }
     p = maps_hex(b, p, max, USTACK_BASE);   /* the user stack region */
     p = maps_str(b, p, max, "  rw-  [stack]\n");
@@ -386,7 +387,7 @@ int app_format_smaps(app_t *a, char *b, int max) {
         p = app_smaps_region(b, p, max, a, UHEAP_BASE, a->heap_end, "[heap]");
     for (int i = 0; i < a->nvma; i++)
         p = app_smaps_region(b, p, max, a, a->vma[i].start, a->vma[i].start + a->vma[i].len,
-                             a->vma[i].file_backed ? "[mmap-file]" : (a->vma[i].locked ? "[mmap-locked]" : "[mmap]"));
+                             a->vma[i].huge ? "[mmap-huge]" : (a->vma[i].file_backed ? "[mmap-file]" : (a->vma[i].locked ? "[mmap-locked]" : "[mmap]")));
     if (p < max) b[p] = 0;
     return p;
 }
@@ -428,7 +429,7 @@ int app_format_pagemap(app_t *a, char *b, int max) {
         p = app_pagemap_region(b, p, max, a, UHEAP_BASE, a->heap_end, "[heap]");
     for (int i = 0; i < a->nvma; i++)
         p = app_pagemap_region(b, p, max, a, a->vma[i].start, a->vma[i].start + a->vma[i].len,
-                               a->vma[i].file_backed ? "[mmap-file]" : (a->vma[i].locked ? "[mmap-locked]" : "[mmap]"));
+                               a->vma[i].huge ? "[mmap-huge]" : (a->vma[i].file_backed ? "[mmap-file]" : (a->vma[i].locked ? "[mmap-locked]" : "[mmap]")));
     if (p < max) b[p] = 0;
     return p;
 }
@@ -1290,6 +1291,7 @@ uint64_t app_mmap(uint64_t len) {
     if (a->rlim_as && app_vma_total(a) + len > a->rlim_as) return 0;   /* RLIMIT_AS (M1164) */
     if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
     uint64_t addr = a->mmap_next;
+    if (len >= HUGE_SIZE) addr = (addr + HUGE_SIZE - 1) & ~(HUGE_SIZE - 1);   /* 2 MiB-align big anon regions so MADV_COLLAPSE can fold them (M1168) */
     if (addr + len > MMAP_TOP || addr + len < addr) return 0;
     a->vma[a->nvma].start = addr;
     a->vma[a->nvma].len   = len;
@@ -1466,6 +1468,65 @@ int app_uffd_copy(uint64_t addr, const void *data, uint64_t len) {
     return 0;
 }
 
+/* MADV_COLLAPSE (Linux 6.1+): synchronously fold a fully-resident, single-owner
+ * anonymous mmap VMA into 2 MiB transparent hugepages — the inverse of letting
+ * khugepaged do it lazily. ALL-OR-NOTHING: phase 1 validates every page (present,
+ * 4 KiB-mapped, refcount 0), phase 2 captures each block's page-table frame and
+ * reserves one contiguous 2 MiB frame per 2 MiB block, and only if every step
+ * succeeds does phase 3 mutate anything — so a failure leaves the region exactly
+ * as it was. Each block: copy the 512 pages' bytes into the contiguous frame
+ * (read straight out of the still-intact PT via the HHDM), install one huge PD
+ * entry (vmm_map_huge), then free the 512 scattered 4 KiB frames and the orphaned
+ * page table. Same address space as the caller + single CPU ⇒ no cross-AS TLB
+ * shootdown. The VMA is marked `huge` so munmap/teardown free it as 2 MiB runs
+ * (matching app_mmap_huge). Returns pages collapsed, or 0 if nothing qualified. (M1168) */
+static int app_collapse(uint64_t addr, uint64_t len) {
+    struct app *a = cur();
+    if (!a || (addr & (HUGE_SIZE - 1))) return 0;                /* must be 2 MiB-aligned */
+    int vi = -1;
+    for (int i = 0; i < a->nvma; i++) if (a->vma[i].start == addr) { vi = i; break; }
+    if (vi < 0) return 0;
+    if (a->vma[vi].huge || a->vma[vi].file_backed || a->vma[vi].sealed) return 0;   /* plain anon, not already huge */
+    uint64_t vlen = a->vma[vi].len;
+    if (vlen == 0 || (vlen & (HUGE_SIZE - 1)) || len < vlen) return 0;   /* collapse the WHOLE 2 MiB-multiple VMA */
+    uint64_t nblk = vlen / HUGE_SIZE;
+    if (nblk > 16) return 0;                                     /* bound the pre-capture arrays (≤ 32 MiB) */
+    uint64_t cr3 = a->cr3;
+
+    for (uint64_t b = 0; b < nblk; b++)                          /* phase 1: validate */
+        for (int i = 0; i < 512; i++) {
+            uint64_t pte = vmm_pte_in(cr3, addr + b * HUGE_SIZE + (uint64_t)i * PAGE_SIZE);
+            if (!(pte & PTE_PRESENT) || (pte & PTE_HUGE)) return 0;       /* hole / swapped / already huge */
+            if (pmm_refcount(pte & PTE_ADDR_MASK) != 0) return 0;        /* COW-shared: collapsing would unshare */
+        }
+
+    uint64_t newphys[16], ptphys[16];                           /* phase 2: capture PTs + reserve frames */
+    for (uint64_t b = 0; b < nblk; b++) {
+        ptphys[b]  = vmm_pt_phys_in(cr3, addr + b * HUGE_SIZE);
+        newphys[b] = ptphys[b] ? pmm_alloc_contiguous(512, 512) : 0;
+        if (!ptphys[b] || !newphys[b]) {                        /* roll back: free what we reserved, touch nothing else */
+            for (uint64_t u = 0; u < b; u++) pmm_free_contiguous(newphys[u], 512);
+            if (newphys[b]) pmm_free_contiguous(newphys[b], 512);
+            return 0;
+        }
+    }
+
+    for (uint64_t b = 0; b < nblk; b++) {                        /* phase 3: commit (cannot fail now) */
+        uint64_t base = addr + b * HUGE_SIZE;
+        uint64_t *pt  = (uint64_t *)hhdm(ptphys[b]);             /* the soon-to-be-orphaned page table */
+        for (int i = 0; i < 512; i++) {                         /* preserve the data */
+            uint8_t *s = (uint8_t *)hhdm(pt[i] & PTE_ADDR_MASK);
+            uint8_t *d = (uint8_t *)hhdm(newphys[b] + (uint64_t)i * PAGE_SIZE);
+            for (int by = 0; by < PAGE_SIZE; by++) d[by] = s[by];
+        }
+        vmm_map_huge(base, newphys[b], PTE_WRITABLE | PTE_USER | PTE_NX);   /* replaces the PD entry (current AS) */
+        for (int i = 0; i < 512; i++) pmm_free_frame(pt[i] & PTE_ADDR_MASK);  /* release the scattered frames */
+        pmm_free_frame(ptphys[b]);                              /* and the orphaned page table */
+    }
+    a->vma[vi].huge = 1;                                        /* now a hugepage VMA (M1155-shaped) */
+    return (int)(nblk * 512);
+}
+
 /* madvise(MADV_DONTNEED) (M1099): reclaim the resident frames of [addr,addr+len)
  * NOW, so RAM drops immediately and the next touch demand-faults a fresh zero
  * page (app_fault_handle). The mmap VMA stays reserved. We only drop pages that
@@ -1476,11 +1537,14 @@ int app_uffd_copy(uint64_t addr, const void *data, uint64_t len) {
 #define MADV_DONTNEED 4
 #define MADV_COLD     20   /* deactivate: clear accessed bits so the range is a reclaim candidate (M1158) */
 #define MADV_PAGEOUT  21   /* proactively page the range out to swap (zram) NOW (M1158) */
+#define MADV_COLLAPSE 25   /* synchronously fold the range into 2 MiB hugepage(s) (M1168) */
 int app_madvise(uint64_t addr, uint64_t len, int advice) {
     struct app *a = cur();
     if (!a || len == 0) return -1;
     if (advice == MADV_PAGEOUT)                       /* reclaim NOW by swapping the range out (M1099 swap / M1156 zram) */
         return app_swap_out(addr, len);
+    if (advice == MADV_COLLAPSE)                      /* fold into a 2 MiB hugepage NOW (M1168) */
+        return app_collapse(addr, len);
     uint64_t start = addr & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     if (advice == MADV_COLD) {                        /* clear the Accessed bit on resident pages (deactivate) */

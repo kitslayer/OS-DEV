@@ -358,6 +358,21 @@ void vmm_unmap_huge(uint64_t virt) {
     invlpg(virt);
 }
 
+/* Physical address of the 4 KiB page table (PT) that maps `virt` in space
+ * `cr3`, or 0 if there's no 4 KiB-level PT (absent, or a 2 MiB huge PD entry).
+ * MADV_COLLAPSE uses it to free the page table it orphans when it overwrites
+ * the PD entry with a hugepage (M1168). */
+uint64_t vmm_pt_phys_in(uint64_t cr3, uint64_t virt) {
+    uint64_t *pml4 = phys_to_table(cr3 & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT) || (pdpt[PDPT_IDX(virt)] & PTE_HUGE)) return 0;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    uint64_t e = pd[PD_IDX(virt)];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE)) return 0;
+    return e & ADDR_MASK;
+}
+
 /* Rewrite the access flags of an already-mapped 4 KiB page, keeping its frame
  * (for mprotect / W^X). `flags` are the new low bits (e.g. PTE_USER, plus maybe
  * PTE_WRITABLE / PTE_NX); PTE_PRESENT is always set. Returns 0/-1. M1090. */

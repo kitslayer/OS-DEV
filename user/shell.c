@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2040,6 +2040,29 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "pagemap: 8 demand-paged pages now resident with PFNs OK\n" : "pagemaptest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
                 sys_munmap(region, (unsigned long)K * 4096);
+            }
+        } else if (streq(line, "thptest")) {   /* MADV_COLLAPSE: fold 512 4KiB pages into one 2MiB hugepage (M1168) */
+            unsigned long SZ = 2UL * 1024 * 1024;          /* 2 MiB = 512 x 4 KiB */
+            void *region = sys_mmap(SZ);                    /* 2 MiB-aligned (M1168), demand-paged 4 KiB pages */
+            if (!region) { print("thptest: mmap failed\n"); g_status = 1; }
+            else {
+                volatile unsigned char *vp = (volatile unsigned char *)region;
+                for (int pg = 0; pg < 512; pg++) vp[pg * 4096] = (unsigned char)(pg * 7 + 1);   /* fault in + tag each page */
+                long n = sys_madvise(region, SZ, MADV_COLLAPSE);                                 /* collapse to a hugepage */
+                int intact = 1;
+                for (int pg = 0; pg < 512; pg++) if (vp[pg * 4096] != (unsigned char)(pg * 7 + 1)) intact = 0;
+                int huge = 0; long mn; char *mb = slurp("/proc/self/maps", &mn);   /* positive proof: now [mmap-huge] */
+                if (mb) { const char *needle = "mmap-huge";
+                          for (char *q = mb; *q; q++) { int j = 0; while (needle[j] && q[j] == needle[j]) j++;
+                                                        if (!needle[j]) { huge = 1; break; } }
+                          free(mb); }
+                char nb[12];
+                print("MADV_COLLAPSE folded "); itoa_simple((int)n, nb); print(nb); print(" pages; data ");
+                print(intact ? "intact" : "CORRUPT"); print(", region "); print(huge ? "now [mmap-huge]\n" : "NOT huge\n");
+                int ok = (n == 512 && intact && huge);
+                print(ok ? "THP: 512 4KiB pages folded into one 2MiB hugepage (contents preserved) OK\n" : "thptest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+                sys_munmap(region, SZ);
             }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
