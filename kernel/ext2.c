@@ -119,11 +119,18 @@ static uint32_t dir_lookup(ext2_t *v, const uint8_t *dino, const char *name, int
     return 0;
 }
 
-/* walk a '/'-path from root; fills inode_out (>=256B) + *is_dir, returns the inode # or 0 */
-static uint32_t walk(ext2_t *v, const char *path, uint8_t *inode_out, int *is_dir) {
-    if (read_inode(v, EXT2_ROOT_INO, inode_out) < 0) return 0;
+/* walk a '/'-path from `startino`, filling inode_out (>=256B) + *is_dir; returns
+ * the inode # or 0. Follows symlinks (M1146): a resolved component that is a
+ * symlink (mode 0xA000) is replaced by recursively resolving its target — an
+ * absolute target ("/x") from the volume root, else relative to the symlink's
+ * own directory. `depth` bounds symlink->symlink chains (loop guard). Fast
+ * symlinks only (target stored inline in i_block, i.e. i_size <= 60). */
+#define EXT2_SYMLINK_MAX 8
+static uint32_t walk_d(ext2_t *v, uint32_t startino, const char *path,
+                       uint8_t *inode_out, int *is_dir, int depth) {
+    if (read_inode(v, startino, inode_out) < 0) return 0;
     if (is_dir) *is_dir = 1;
-    uint32_t ino = EXT2_ROOT_INO;
+    uint32_t ino = startino, dirino = startino;
     const char *p = path;
     while (*p) {
         while (*p == '/') p++;
@@ -134,10 +141,22 @@ static uint32_t walk(ext2_t *v, const char *path, uint8_t *inode_out, int *is_di
         int cd = 0;
         uint32_t child = dir_lookup(v, inode_out, comp, &cd);
         if (!child || read_inode(v, child, inode_out) < 0) return 0;
-        ino = child;
+        dirino = ino; ino = child;
         if (is_dir) *is_dir = cd;
+        if ((e_rd16(inode_out + 0) & 0xF000) == 0xA000) {     /* a symlink: follow it */
+            if (depth >= EXT2_SYMLINK_MAX) return 0;          /* loop / too deep */
+            uint32_t sz = e_rd32(inode_out + 4);
+            if (sz > 60) return 0;                            /* slow symlink (target in a block): unsupported */
+            char tgt[64]; for (uint32_t i = 0; i < sz; i++) tgt[i] = (char)inode_out[40 + i]; tgt[sz] = 0;
+            uint32_t base = (tgt[0] == '/') ? EXT2_ROOT_INO : dirino;
+            ino = walk_d(v, base, tgt, inode_out, is_dir, depth + 1);   /* resolve the target */
+            if (!ino) return 0;                               /* inode_out now = the target's inode */
+        }
     }
     return ino;
+}
+static uint32_t walk(ext2_t *v, const char *path, uint8_t *inode_out, int *is_dir) {
+    return walk_d(v, EXT2_ROOT_INO, path, inode_out, is_dir, 0);
 }
 
 int ext2_probe(blk_read_fn read, void *ctx, uint64_t start_lba) {
@@ -567,6 +586,41 @@ long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     e_wr16(pin + 26, (uint16_t)(e_rd16(pin + 26) + 1));
     if (write_inode(&v, parent_ino, pin) < 0) return -1;
     grp_dirs(&v, ino, +1);
+    return 0;
+}
+
+/* Create a fast symlink `path` -> `target` (target stored inline in i_block,
+ * resolved by walk(); M1146). Target must be <= 60 bytes. 0/-1. */
+long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                       const char *path, const char *target) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+    int tlen = 0; while (target[tlen]) tlen++;
+    if (tlen == 0 || tlen > 60) return -1;                 /* fast symlinks only */
+
+    char parent[256], base[256];
+    int last = -1, n = 0;
+    for (int i = 0; path[i]; i++) { if (path[i] == '/') last = i; n = i + 1; }
+    if (last < 0) parent[0] = 0;
+    else { int j = 0; for (; j < last && j < 255; j++) parent[j] = path[j]; parent[j] = 0; }
+    { int j = 0, s = last + 1; for (; s < n && j < 255; s++, j++) base[j] = path[s]; base[j] = 0; }
+    if (base[0] == 0) return -1;
+
+    uint8_t pin[256]; int pdir = 0;
+    uint32_t parent_ino = walk(&v, parent, pin, &pdir);
+    if (!parent_ino || !pdir) return -1;
+    if (dir_lookup(&v, pin, base, 0)) return -1;           /* name already taken */
+
+    uint32_t ino = alloc_inode(&v); if (!ino) return -1;
+    uint8_t inode[256];
+    for (uint32_t i = 0; i < v.inode_size; i++) inode[i] = 0;
+    e_wr16(inode + 0, 0xA000 | 0x1FF);                     /* i_mode: symlink, rwxrwxrwx */
+    e_wr32(inode + 4, (uint32_t)tlen);                     /* i_size = target length */
+    e_wr16(inode + 26, 1);                                 /* i_links_count = 1 */
+    for (int i = 0; i < tlen; i++) inode[40 + i] = (uint8_t)target[i];   /* target inline in i_block */
+    if (write_inode(&v, ino, inode) < 0) return -1;
+    if (dir_add(&v, parent_ino, base, ino, 7) < 0) return -1;   /* ftype 7 = symlink */
     return 0;
 }
 

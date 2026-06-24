@@ -522,9 +522,16 @@ long vfs_mkdir(const char *path) {
  * links (the synthetic /proc·/dev are read-only; FAT32 has no native symlink),
  * so the link must live under /tmp. Returns 0 / -1 (M1081). */
 long vfs_symlink(const char *linkpath, const char *target) {
+    char rb[160]; linkpath = bind_resolve(linkpath, rb, sizeof rb);
     const char *base;
     if (tmp_path(linkpath, &base)) {
         long r = tmpfs_symlink(base, target);
+        if (r >= 0) fsevents_record('l', linkpath);
+        return r;
+    }
+    int midx; char fpath[192];
+    if (mount_path(linkpath, &midx, fpath, sizeof fpath)) {     /* /diskN ext2: a real on-disk symlink (M1146) */
+        long r = blockdev_mount_symlink(midx, fpath, target);
         if (r >= 0) fsevents_record('l', linkpath);
         return r;
     }

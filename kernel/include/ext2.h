@@ -26,3 +26,5 @@ long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
                       const char *path);                                      /* delete a regular file; 0/-1 (M1135) */
 long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path);                                       /* create a directory; 0/-1 (M1137) */
+long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                       const char *path, const char *target);                 /* create a fast symlink; 0/-1 (M1146) */

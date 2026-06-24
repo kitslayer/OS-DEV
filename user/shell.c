@@ -1600,7 +1600,7 @@ static int run_command(char *line, char *cwd) {
                 else { print("created "); print(name); print("/\n"); }
             }
             if (!any) print("usage: mkdir <dir>...\n");
-        } else if (startswith(line, "ln -s ") || startswith(line, "ln ")) {  /* ln -s TARGET LINK (symlink, /tmp only) */
+        } else if (startswith(line, "ln -s ") || startswith(line, "ln ")) {  /* ln -s TARGET LINK (symlink: /tmp or an ext2 /diskN mount) */
             const char *p = line + 3;
             while (*p == ' ') p++;
             if (p[0] == '-' && p[1] == 's') { p += 2; while (*p == ' ') p++; }   /* tolerate/skip -s */
@@ -1611,8 +1611,8 @@ static int run_command(char *line, char *cwd) {
             char link[96]; j = 0;
             while (*p && *p != ' ' && j < 95) link[j++] = *p++;
             link[j] = 0; sh_unprot_buf(link);
-            if (!target[0] || !link[0]) print("usage: ln -s <target> <linkpath>   (linkpath must be under /tmp)\n");
-            else if (sys_symlink(link, target) < 0) { print("ln: failed (linkpath must be under /tmp)\n"); g_status = 1; }
+            if (!target[0] || !link[0]) print("usage: ln -s <target> <linkpath>   (linkpath under /tmp or an ext2 /diskN mount)\n");
+            else if (sys_symlink(link, target) < 0) { print("ln: failed (linkpath must be under /tmp or an ext2 /diskN mount)\n"); g_status = 1; }
             else { print(link); print(" -> "); print(target); print("\n"); }
         } else if (startswith(line, "jail ")) {   /* jail <prog> <promise>... : spawn prog pre-confined (pledge) */
             const char *p = line + 5; while (*p == ' ') p++;
