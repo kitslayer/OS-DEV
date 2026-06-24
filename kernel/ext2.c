@@ -16,10 +16,13 @@ static uint16_t e_rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8))
 static uint32_t e_rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
+static void e_wr16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void e_wr32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
 
 typedef struct {
-    blk_read_fn read; void *ctx; uint64_t start;
+    blk_read_fn read; blk_write_fn write; void *ctx; uint64_t start;
     uint32_t block_size, inodes_per_group, inode_size, gdt_block;
+    uint32_t blocks_per_group, first_data_block, first_ino, blocks_count, groups;   /* for allocation (M1132) */
 } ext2_t;
 
 /* read ext2 block `blk` (block_size bytes) into buf (>= block_size) */
@@ -35,13 +38,19 @@ static int ext2_open(blk_read_fn read, void *ctx, uint64_t start, ext2_t *v) {
     if (e_rd16(sb + 56) != EXT2_MAGIC) return -1;
     uint32_t logbs = e_rd32(sb + 24);
     if (logbs > 2) return -1;                              /* only 1024/2048/4096 */
-    v->read = read; v->ctx = ctx; v->start = start;
+    v->read = read; v->write = 0; v->ctx = ctx; v->start = start;
     v->block_size = 1024u << logbs;
     v->inodes_per_group = e_rd32(sb + 40);
     uint32_t rev = e_rd32(sb + 76);
     v->inode_size = (rev >= 1) ? e_rd16(sb + 88) : 128;
     if (!v->inodes_per_group || v->inode_size < 128 || v->inode_size > 256) return -1;
     v->gdt_block = (v->block_size == 1024) ? 2 : 1;        /* GDT follows the superblock's block */
+    v->blocks_per_group = e_rd32(sb + 32);
+    v->first_data_block = e_rd32(sb + 20);
+    v->blocks_count     = e_rd32(sb + 4);
+    v->first_ino        = (rev >= 1) ? e_rd32(sb + 84) : 11;
+    if (!v->blocks_per_group || v->blocks_count <= v->first_data_block) return -1;
+    v->groups = (v->blocks_count - v->first_data_block + v->blocks_per_group - 1) / v->blocks_per_group;
     return 0;
 }
 
@@ -193,4 +202,197 @@ int ext2_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *
         }
     }
     return n;
+}
+
+/* ===================== write path (M1132) =============================== *
+ * Create a new regular file: allocate an inode + data blocks (updating the
+ * block/inode bitmaps and the free counts in the group descriptor + superblock),
+ * write the data, fill the inode, and splice a directory record into the parent.
+ * Direct + single-indirect extents. The superblock is read/written as its raw
+ * 1024 bytes at LBA+2 (block-size-independent); bitmaps/GDT/inode-table/data go
+ * through wrblk. Writes are cache-coherent (the blockdev write-through cache), so
+ * the read paths above immediately see what we commit. */
+
+static int wrblk(ext2_t *v, uint32_t blk, const uint8_t *buf) {
+    if (!v->write) return -1;
+    uint32_t spb = v->block_size / SECSZ;
+    return v->write(v->ctx, v->start + (uint64_t)blk * spb, spb, buf);
+}
+static int rd_sb(ext2_t *v, uint8_t *sb) { return v->read(v->ctx, v->start + 2, 2, sb); }      /* the 1024-byte superblock */
+static int wr_sb(ext2_t *v, const uint8_t *sb) { return v->write ? v->write(v->ctx, v->start + 2, 2, sb) : -1; }
+
+/* decrement the superblock's free-block (off=12) or free-inode (off=16) count */
+static int sb_dec(ext2_t *v, int off) {
+    uint8_t sb[1024];
+    if (rd_sb(v, sb) < 0) return -1;
+    e_wr32(sb + off, e_rd32(sb + off) - 1);
+    return wr_sb(v, sb);
+}
+
+/* Allocate a free data block; returns its 1-based-into-fs block number, or 0. */
+static uint32_t alloc_block(ext2_t *v) {
+    uint8_t gd[4096], bm[4096];
+    uint32_t gd_per_block = v->block_size / 32;
+    for (uint32_t g = 0; g < v->groups; g++) {
+        uint32_t gdblk = v->gdt_block + g / gd_per_block, goff = (g % gd_per_block) * 32;
+        if (rdblk(v, gdblk, gd) < 0) return 0;
+        if (e_rd16(gd + goff + 12) == 0) continue;             /* no free blocks in this group */
+        uint32_t bbm = e_rd32(gd + goff + 0);
+        if (rdblk(v, bbm, bm) < 0) return 0;
+        uint32_t inthis = v->blocks_per_group, prev = g * v->blocks_per_group;
+        if (v->blocks_count - v->first_data_block - prev < inthis)
+            inthis = v->blocks_count - v->first_data_block - prev;
+        for (uint32_t i = 0; i < inthis; i++) {
+            if (!(bm[i >> 3] & (1 << (i & 7)))) {
+                bm[i >> 3] |= (uint8_t)(1 << (i & 7));
+                if (wrblk(v, bbm, bm) < 0) return 0;
+                e_wr16(gd + goff + 12, e_rd16(gd + goff + 12) - 1);
+                if (wrblk(v, gdblk, gd) < 0 || sb_dec(v, 12) < 0) return 0;
+                return v->first_data_block + g * v->blocks_per_group + i;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Allocate a free inode; returns its 1-based number, or 0. */
+static uint32_t alloc_inode(ext2_t *v) {
+    uint8_t gd[4096], bm[4096];
+    uint32_t gd_per_block = v->block_size / 32;
+    for (uint32_t g = 0; g < v->groups; g++) {
+        uint32_t gdblk = v->gdt_block + g / gd_per_block, goff = (g % gd_per_block) * 32;
+        if (rdblk(v, gdblk, gd) < 0) return 0;
+        if (e_rd16(gd + goff + 14) == 0) continue;             /* no free inodes in this group */
+        uint32_t ibm = e_rd32(gd + goff + 4);
+        if (rdblk(v, ibm, bm) < 0) return 0;
+        uint32_t lo = (g == 0 && v->first_ino > 1) ? v->first_ino - 1 : 0;   /* skip reserved inodes in group 0 */
+        for (uint32_t i = lo; i < v->inodes_per_group; i++) {
+            if (!(bm[i >> 3] & (1 << (i & 7)))) {
+                bm[i >> 3] |= (uint8_t)(1 << (i & 7));
+                if (wrblk(v, ibm, bm) < 0) return 0;
+                e_wr16(gd + goff + 14, e_rd16(gd + goff + 14) - 1);
+                if (wrblk(v, gdblk, gd) < 0 || sb_dec(v, 16) < 0) return 0;
+                return g * v->inodes_per_group + i + 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Write inode `ino` back into its inode-table slot (read-modify-write). */
+static int write_inode(ext2_t *v, uint32_t ino, const uint8_t *in) {
+    if (ino == 0) return -1;
+    uint32_t group = (ino - 1) / v->inodes_per_group, index = (ino - 1) % v->inodes_per_group;
+    uint8_t gd[4096], b[4096];
+    uint32_t gd_per_block = v->block_size / 32;
+    if (rdblk(v, v->gdt_block + group / gd_per_block, gd) < 0) return -1;
+    uint32_t itable = e_rd32(gd + (group % gd_per_block) * 32 + 8);
+    uint64_t byte_off = (uint64_t)index * v->inode_size;
+    uint32_t tblk = itable + (uint32_t)(byte_off / v->block_size);
+    uint32_t off = (uint32_t)(byte_off % v->block_size);
+    if (off + v->inode_size > v->block_size) return -1;
+    if (rdblk(v, tblk, b) < 0) return -1;
+    for (uint32_t i = 0; i < v->inode_size; i++) b[off + i] = in[i];
+    return wrblk(v, tblk, b);
+}
+
+/* Add a directory record {child_ino, name, ftype} to directory inode `parent_ino`
+ * by splitting an existing record's slack. Returns 0, or -1 if no block has room
+ * (growing the directory is unsupported). */
+static int dir_add(ext2_t *v, uint32_t parent_ino, const char *name, uint32_t child_ino, uint8_t ftype) {
+    uint8_t pin[256], blk[4096];
+    if (read_inode(v, parent_ino, pin) < 0) return -1;
+    uint32_t size = e_rd32(pin + 4);
+    int nl = 0; while (name[nl]) nl++;
+    if (nl < 1 || nl > 255) return -1;
+    uint32_t need = 8 + (((uint32_t)nl + 3) & ~3u);
+    for (uint32_t off = 0; off < size; off += v->block_size) {
+        uint32_t db = map_block(v, pin, off / v->block_size);
+        if (!db || rdblk(v, db, blk) < 0) continue;
+        uint32_t bo = 0;
+        while (bo + 8 <= v->block_size) {
+            uint32_t ino = e_rd32(blk + bo);
+            uint16_t rl = e_rd16(blk + bo + 4);
+            uint8_t enl = blk[bo + 6];
+            if (rl < 8 || bo + rl > v->block_size) break;
+            uint32_t used = ino ? (8 + (((uint32_t)enl + 3) & ~3u)) : 0;
+            if (rl >= used + need) {                       /* slack here fits the new record */
+                uint32_t newoff; uint16_t newrl;
+                if (ino) { e_wr16(blk + bo + 4, (uint16_t)used); newoff = bo + used; newrl = (uint16_t)(rl - used); }
+                else     { newoff = bo; newrl = rl; }      /* reuse an empty (deleted) slot */
+                e_wr32(blk + newoff, child_ino);
+                e_wr16(blk + newoff + 4, newrl);
+                blk[newoff + 6] = (uint8_t)nl;
+                blk[newoff + 7] = ftype;
+                for (int k = 0; k < nl; k++) blk[newoff + 8 + k] = (uint8_t)name[k];
+                return wrblk(v, db, blk);
+            }
+            bo += rl;
+        }
+    }
+    return -1;
+}
+
+long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path, const void *buf, unsigned long len) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+
+    /* split `path` into parent directory + base filename */
+    char parent[256], base[256];
+    int last = -1, n = 0;
+    for (int i = 0; path[i]; i++) { if (path[i] == '/') last = i; n = i + 1; }
+    if (last < 0) { parent[0] = 0; }
+    else { int j = 0; for (; j < last && j < 255; j++) parent[j] = path[j]; parent[j] = 0; }
+    { int j = 0, s = last + 1; for (; s < n && j < 255; s++, j++) base[j] = path[s]; base[j] = 0; }
+    if (base[0] == 0) return -1;                           /* no filename */
+
+    uint8_t pin[256]; int pdir = 0;
+    uint32_t parent_ino = walk(&v, parent, pin, &pdir);
+    if (!parent_ino || !pdir) return -1;                   /* parent dir must exist */
+    if (dir_lookup(&v, pin, base, 0)) return -1;           /* create-only: refuse if it exists */
+
+    uint32_t ppb = v.block_size / 4;
+    uint32_t nblocks = (uint32_t)((len + v.block_size - 1) / v.block_size);
+    if (nblocks > 12 + ppb) return -1;                     /* beyond direct + single-indirect */
+
+    uint32_t ino = alloc_inode(&v);
+    if (!ino) return -1;
+    uint8_t inode[256];
+    for (uint32_t i = 0; i < v.inode_size; i++) inode[i] = 0;
+    e_wr16(inode + 0, 0x8000 | 0x1A4);                     /* i_mode: regular file, rw-r--r-- */
+    e_wr16(inode + 26, 1);                                 /* i_links_count = 1 */
+
+    /* allocate + write the data blocks (and a single-indirect block if needed) */
+    uint8_t blk[4096], ind[4096];
+    uint32_t indirect = 0, isectors = 0;
+    for (uint32_t fb = 0; fb < nblocks; fb++) {
+        uint32_t db = alloc_block(&v);
+        if (!db) return -1;                                /* out of space (file left partial) */
+        uint32_t boff = fb * v.block_size, chunk = (uint32_t)len - boff;
+        if (chunk > v.block_size) chunk = v.block_size;
+        for (uint32_t i = 0; i < chunk; i++) blk[i] = ((const uint8_t *)buf)[boff + i];
+        for (uint32_t i = chunk; i < v.block_size; i++) blk[i] = 0;
+        if (wrblk(&v, db, blk) < 0) return -1;
+        isectors += v.block_size / 512;
+        if (fb < 12) e_wr32(inode + 40 + fb * 4, db);
+        else {
+            if (!indirect) {
+                indirect = alloc_block(&v);
+                if (!indirect) return -1;
+                for (uint32_t i = 0; i < v.block_size; i++) ind[i] = 0;
+                isectors += v.block_size / 512;
+                e_wr32(inode + 40 + 12 * 4, indirect);
+            }
+            e_wr32(ind + (fb - 12) * 4, db);
+        }
+    }
+    if (indirect && wrblk(&v, indirect, ind) < 0) return -1;
+
+    e_wr32(inode + 4, (uint32_t)len);                      /* i_size */
+    e_wr32(inode + 28, isectors);                          /* i_blocks (in 512-byte sectors) */
+    if (write_inode(&v, ino, inode) < 0) return -1;
+    if (dir_add(&v, parent_ino, base, ino, 1) < 0) return -1;   /* ftype 1 = regular file */
+    return (long)len;
 }

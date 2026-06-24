@@ -17,3 +17,8 @@ int  ext2_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char 
 long ext2_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                     void *buf, unsigned long max);                  /* read a file; bytes, or -1 */
 int  ext2_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path);  /* 1 dir / 0 file / -1 absent */
+/* Create a NEW regular file `path` with `buf`/`len` (block + inode allocation,
+ * directory insertion). Fails (-1) if the file already exists, the parent dir is
+ * missing/full, or there's no space. Direct + single-indirect extents only. M1132. */
+long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path, const void *buf, unsigned long len);

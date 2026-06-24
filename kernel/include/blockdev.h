@@ -103,6 +103,7 @@ int  blockdev_mount_index(const char *name);     /* "disk2" -> index, else -1 */
  * root. blockdev_mount_isdir backs `cd` validation. */
 int  blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max); /* list dir at subpath */
 long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max);   /* read file at path */
+long blockdev_mount_write(int i, const char *path, const void *buf, unsigned long len);  /* create a new file (ext2 only); M1132 */
 int  blockdev_mount_isdir(int i, const char *path);   /* is path a directory on mount i? */
 int  blockdev_mounts_format(char *out, int max);  /* list the mounts as text (the `mount` command) */
 /* losetup (M1107): register a loop mount backed by the RAM image `data` (len

@@ -332,6 +332,11 @@ void blockdev_selftest(void) {
 static int bd_blk_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
     return blockdev_read((int)(intptr_t)ctx, lba, count, buf);
 }
+/* The write counterpart (M1132): goes through the write-through buffer cache, so
+ * a subsequent bd_blk_read sees the new bytes (read-back coherence). */
+static int bd_blk_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    return blockdev_write((int)(intptr_t)ctx, lba, count, buf);
+}
 
 /* Collect candidate FAT32-volume start-LBAs on device `i` into `starts` (up to
  * `max`). A device either holds a bare filesystem at LBA 0 (no table) or an
@@ -449,6 +454,18 @@ static int loop_blk_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
     return 0;
 }
 
+/* Write counterpart for a loop mount: store sectors into its in-RAM image (M1132). */
+static int loop_blk_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    int idx = (int)(intptr_t)ctx;
+    if (idx < 0 || idx >= 8 || !g_mount[idx].is_loop || !g_mount[idx].loopbuf) return -1;
+    uint64_t off = lba * SECSZ, n = (uint64_t)count * SECSZ;
+    if (off + n > g_mount[idx].looplen) return -1;
+    uint8_t *dst = g_mount[idx].loopbuf + off;
+    const uint8_t *src = (const uint8_t *)buf;
+    for (uint64_t i = 0; i < n; i++) dst[i] = src[i];
+    return 0;
+}
+
 static void blockdev_mount_scan(void) {
     if (g_mount_scanned) return;
     g_mount_scanned = 1;
@@ -503,8 +520,9 @@ int blockdev_mount_index(const char *name) {     /* "disk2" -> index, else -1 */
  * mount `i`. Subdirectory-aware (M1070). */
 /* The read fn + ctx for mount `i`: a loop device reads from RAM (ctx = the mount
  * index), a hardware mount via the blockdev layer (ctx = the device index). */
-static blk_read_fn mount_rfn(int i) { return g_mount[i].is_loop ? loop_blk_read : bd_blk_read; }
-static void       *mount_ctx(int i) { return (void *)(intptr_t)(g_mount[i].is_loop ? i : g_mount[i].dev); }
+static blk_read_fn  mount_rfn(int i) { return g_mount[i].is_loop ? loop_blk_read  : bd_blk_read;  }
+static blk_write_fn mount_wfn(int i) { return g_mount[i].is_loop ? loop_blk_write : bd_blk_write; }
+static void        *mount_ctx(int i) { return (void *)(intptr_t)(g_mount[i].is_loop ? i : g_mount[i].dev); }
 
 int blockdev_mount_list(int i, const char *subpath, fatvol_dirent *out, int max) {
     blockdev_mount_scan();
@@ -524,6 +542,17 @@ long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max) 
     return g_mount[i].fstype == FS_EXT2    ? ext2_read_path(r, c, s, path ? path : "", buf, max)
          : g_mount[i].fstype == FS_ISO9660 ? iso9660_read_path(r, c, s, path ? path : "", buf, max)
                                            : fatvol_read_path(r, c, s, path ? path : "", buf, max);
+}
+
+/* Create a new file at `path` (relative to the volume root) on mount `i`. Only
+ * ext2 mounts are writable here (FAT32 boot disk is written directly by fat32.c;
+ * ISO 9660 is a read-only medium). Bytes written, or -1. M1132. */
+long blockdev_mount_write(int i, const char *path, const void *buf, unsigned long len) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;          /* read-only filesystem */
+    return ext2_write_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start,
+                           path ? path : "", buf, len);
 }
 
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */

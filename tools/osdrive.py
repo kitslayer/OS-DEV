@@ -161,7 +161,7 @@ def main():
         "-monitor", "unix:%s,server,nowait" % mon_sock,
         "-qmp", "unix:%s,server,nowait" % qmp_sock]
     if args.disk2:
-        qcmd += ["-drive", "file=%s,format=raw,if=none,id=d2" % args.disk2,
+        qcmd += ["-drive", "file=%s,format=raw,if=none,id=d2,cache=writethrough" % args.disk2,
                  "-device", "virtio-blk-pci,drive=d2"]
     qp = subprocess.Popen(qcmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     rc = 0

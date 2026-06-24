@@ -343,8 +343,10 @@ long vfs_write(const char *name, const void *buf, unsigned long len) {
     if (tmp_path(name, &tb)) r = tmpfs_write(tb, buf, len);
     else {
         int midx; char fpath[192];
-        if (mount_path(name, &midx, fpath, sizeof fpath)) return -1;   /* disk mounts are read-only */
-        r = (fs && fs->write) ? fs->write(name, buf, len) : -1;
+        if (mount_path(name, &midx, fpath, sizeof fpath))             /* a /diskN mount: ext2 is writable (M1132) */
+            r = blockdev_mount_write(midx, fpath, buf, len);
+        else
+            r = (fs && fs->write) ? fs->write(name, buf, len) : -1;
     }
     if (r >= 0) fsevents_record('w', name);    /* a real file changed (M1085) */
     return r;

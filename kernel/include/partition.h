@@ -75,6 +75,8 @@ int partition_fat32_find(int drive, uint64_t start_lba, const char name83[11],
  * (NOT relative to the volume) into `buf`; returns 0 on success, <0 on error.
  * `ctx` is the caller's opaque handle (e.g. a block-device index). */
 typedef int (*blk_read_fn)(void *ctx, uint64_t lba, uint32_t count, void *buf);
+/* The write counterpart (M1132): persist `count` sectors at `lba` from `buf`. */
+typedef int (*blk_write_fn)(void *ctx, uint64_t lba, uint32_t count, const void *buf);
 
 /* One root-directory entry returned by fatvol_list(): an 8.3 "NAME.EXT" name, the
  * file size in bytes, and whether it is a subdirectory. */
