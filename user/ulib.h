@@ -83,6 +83,7 @@ int  sys_unix_close(int ep);                           /* 0/-1 */
 int  sys_unix_wait_any(const int *eps, int n);         /* poll: index of first readable ep (blocks once); -1 (M1170) */
 int  sys_nice(int nice);                               /* set current task's CFS nice (-20..19); returns clamped (M1171) */
 int  sys_sched_setscheduler(int policy, int rt_priority);  /* SCHED_OTHER/FIFO/RR; rt_priority 1..99 for RT; 0/-1 (M1172) */
+long sys_statx(const char *path, struct statx *st);        /* file metadata: mode/size/mtime/nlink (M1173) */
 long sys_getrlimit(int resource, struct rlimit *rl);   /* read a resource limit (M1163) */
 long sys_setrlimit(int resource, struct rlimit *rl);   /* set a resource limit (M1163) */
 long sys_alarm(unsigned long ticks);

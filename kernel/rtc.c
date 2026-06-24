@@ -46,6 +46,21 @@ void rtc_now(struct rtc_time *t) {
     t->day = d; t->month = mo; t->year = 2000 + y;
 }
 
+/* Current time as Unix epoch seconds — for filesystem timestamps (statx, ext2
+ * inode i_*time, tmpfs mtime). Uses Howard Hinnant's days_from_civil algorithm
+ * (correct across the 1900/2100 leap-century rules). (M1173) */
+uint32_t rtc_unix(void) {
+    struct rtc_time t; rtc_now(&t);
+    int y = t.year, m = t.month, d = t.day;
+    if (m <= 2) y -= 1;                                   /* shift Jan/Feb to the end of the prior year */
+    int era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);             /* year of era [0,399] */
+    unsigned doy = (unsigned)((153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1);   /* day of year [0,365] */
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; /* day of era [0,146096] */
+    long days = (long)era * 146097 + (long)doe - 719468;  /* days since 1970-01-01 */
+    return (uint32_t)(days * 86400 + t.hour * 3600 + t.min * 60 + t.sec);
+}
+
 static void cmos_write(uint8_t reg, uint8_t v) { outb(CMOS_ADDR, reg); outb(CMOS_DATA, v); }
 static uint8_t bin2bcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 

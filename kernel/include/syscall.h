@@ -159,6 +159,25 @@
 #define SYS_unix_wait_any 147  /* (int*eps, n) -> index of first readable ep (blocks once); -1 (M1170) */
 #define SYS_nice         148   /* (nice) -> set current task's CFS nice (-20..19); returns the clamped nice (M1171) */
 #define SYS_sched_setscheduler 149 /* (policy, rt_priority) -> set current task's scheduling class; 0/-1 (M1172) */
+#define SYS_statx        150   /* (path, struct statx*) -> file metadata (mode/size/times/nlink); 0/-1 (M1173) */
+
+/* statx (M1173) — unified file metadata, shared by the kernel + ulib. stx_mode's
+ * top nibble is the type (S_IFMT); times are Unix epoch seconds. */
+struct statx {                /* unsigned/unsigned long to match the other shared structs (no stdint here) */
+    unsigned       stx_mode;     /* type (S_IF*) | permission bits */
+    unsigned       stx_nlink;    /* hard-link count */
+    unsigned long  stx_size;     /* bytes */
+    unsigned long  stx_blocks;   /* 512-byte blocks allocated */
+    unsigned long  stx_mtime;    /* last modification (epoch s) */
+    unsigned long  stx_ctime;    /* last status change (epoch s) */
+    unsigned long  stx_atime;    /* last access (epoch s) */
+    unsigned       stx_ino;      /* inode number (0 if n/a) */
+    unsigned       stx_blksize;  /* preferred I/O block size */
+};
+#define S_IFMT   0xF000
+#define S_IFREG  0x8000
+#define S_IFDIR  0x4000
+#define S_IFLNK  0xA000
 
 /* sched_setscheduler policies (M1172), shared by the kernel + ulib. SCHED_OTHER
  * is the M1171 CFS/nice class; FIFO/RR are real-time classes that preempt it. */

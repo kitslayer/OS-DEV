@@ -13,6 +13,7 @@ long tmpfs_write(const char *name, const void *data, unsigned long len); /* crea
 long tmpfs_remove(const char *name);                                 /* 0, or -1 if absent */
 long tmpfs_symlink(const char *name, const char *target);            /* create a symlink; 0 or -1 */
 int  tmpfs_list(vfs_dirent *out, int max);                           /* fill out[]; returns count */
+int  tmpfs_stat(const char *name, int *islink, unsigned long *size, unsigned long *mtime);  /* metadata for statx; 0/-1 (M1173) */
 
 /* Copy-on-write snapshots (Plan 9 "dump" fs): freeze the current tmpfs into a
  * generation that shares buffers with the live files until they're overwritten.

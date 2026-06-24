@@ -10,6 +10,7 @@
 #include "procfs.h"
 #include "blockdev.h"
 #include "tmpfs.h"
+#include "syscall.h"   /* struct statx, S_IF* (M1173) */
 #include "fsevents.h"
 #include "mbox.h"
 #include "notify.h"
@@ -448,6 +449,40 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
     int midx; char fpath[192];
     if (mount_path(name, &midx, fpath, sizeof fpath)) return blockdev_mount_read(midx, fpath, buf, max);
     return fs ? fs->read(name, buf, max) : -1;
+}
+
+/* statx (M1173): fill `st` with a path's metadata. The RAM /tmp backend gives a
+ * real mtime (M1173 stamps it on write); for other paths the dirent channel
+ * carries only size, so we report size + a regular-file type (mtime 0). Returns
+ * 0, or -1 if the path isn't found. */
+int vfs_stat(const char *path, struct statx *st) {
+    for (unsigned i = 0; i < sizeof(*st); i++) ((char *)st)[i] = 0;
+    st->stx_blksize = 512; st->stx_nlink = 1;
+    const char *tb;
+    /* directory roots: the boot root + the synthetic/RAM mount points (tmp_path
+     * wants a trailing slash, so the bare "/tmp" mount dir lands here) (M1173) */
+    if (veq(path, "/") || veq(path, "/tmp") || veq(path, "/tmp/") || veq(path, "/proc") || veq(path, "/proc/") ||
+        veq(path, "/dev") || veq(path, "/dev/") || veq(path, "/snap") || veq(path, "/snap/")) {
+        st->stx_mode = S_IFDIR | 0755u; return 0;
+    }
+    if (tmp_path(path, &tb)) {                          /* RAM /tmp: full metadata */
+        int islink = 0; unsigned long sz = 0, mt = 0;
+        if (tmpfs_stat(tb, &islink, &sz, &mt) != 0) return -1;
+        st->stx_mode = (unsigned)(islink ? S_IFLNK : S_IFREG) | 0644u;
+        st->stx_size = sz; st->stx_blocks = (sz + 511) / 512;
+        st->stx_mtime = st->stx_ctime = st->stx_atime = mt;
+        return 0;
+    }
+    /* generic best-effort: match the basename in the current directory listing */
+    const char *base = path; for (const char *p = path; *p; p++) if (*p == '/') base = p + 1;
+    if (!*base) { st->stx_mode = S_IFDIR | 0755u; return 0; }   /* trailing slash -> a directory */
+    vfs_dirent ents[64]; int n = vfs_list(ents, 64);
+    for (int i = 0; i < n; i++) if (veq(ents[i].name, base)) {
+        st->stx_mode = S_IFREG | 0644u;                /* the dirent carries no type bit -> assume regular */
+        st->stx_size = ents[i].size; st->stx_blocks = (ents[i].size + 511) / 512;
+        return 0;
+    }
+    return -1;
 }
 
 long vfs_write(const char *name, const void *buf, unsigned long len) {

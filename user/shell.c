@@ -471,7 +471,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -1614,6 +1614,21 @@ static int run_command(char *line, char *cwd) {
             if (!target[0] || !link[0]) print("usage: ln -s <target> <linkpath>   (linkpath under /tmp or an ext2 /diskN mount)\n");
             else if (sys_symlink(link, target) < 0) { print("ln: failed (linkpath must be under /tmp or an ext2 /diskN mount)\n"); g_status = 1; }
             else { print(link); print(" -> "); print(target); print("\n"); }
+        } else if (startswith(line, "stat ")) {   /* stat <path>: file metadata via statx (M1173) */
+            const char *p = line + 5; while (*p == ' ') p++;
+            char fn[96]; int j = 0; while (*p && *p != ' ' && j < 95) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);
+            struct statx st;
+            if (!fn[0] || sys_statx(fn, &st) != 0) { print("stat: no such file: "); print(fn); print("\n"); g_status = 1; }
+            else {
+                unsigned t = st.stx_mode & S_IFMT;
+                print("  File: "); print(fn); print("\n");
+                print("  Type: "); print(t == S_IFDIR ? "directory" : (t == S_IFLNK ? "symlink" : "regular file")); print("\n");
+                print("  Size: "); printl((long)st.stx_size); print("   Blocks: "); printl((long)st.stx_blocks);
+                print("   Links: "); printl((long)st.stx_nlink); print("\n");
+                unsigned m = st.stx_mode & 0777;     /* print real octal digits (printl is decimal) */
+                print("  Mode: 0"); printl((m >> 6) & 7); printl((m >> 3) & 7); printl(m & 7);
+                print("   Mtime(epoch): "); printl((long)st.stx_mtime); print("\n");
+            }
         } else if (startswith(line, "fiemap ")) {   /* fiemap <path>: a file's physical on-disk extent map (ext2 mounts) (M1152) */
             const char *p = line + 7; while (*p == ' ') p++;
             char fn[96]; int j = 0; while (*p && *p != ' ' && j < 95) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);

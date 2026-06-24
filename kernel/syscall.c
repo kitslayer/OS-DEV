@@ -263,6 +263,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
         return PL_STDIO;
+    case SYS_statx:
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
@@ -343,6 +344,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_listen]="unix_listen",[SYS_unix_connect]="unix_connect",[SYS_unix_accept]="unix_accept",
         [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
+        [SYS_statx]="statx",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -920,6 +922,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sched_setscheduler:           /* (policy, rt_priority) -> set the current task's scheduling class (M1172) */
         r->rax = (uint64_t)(int64_t)task_set_sched((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_stat((const char *)r->rdi, (struct statx *)r->rsi);
         break;
     case SYS_getrlimit:                    /* (resource, struct rlimit*) -> read a resource limit (M1163) */
         if (!ubuf(r->rsi, sizeof(struct rlimit))) { r->rax = (uint64_t)-1; break; }

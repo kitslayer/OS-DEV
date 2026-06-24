@@ -50,6 +50,8 @@ long vfs_write(const char *name, const void *buf, unsigned long len);
 long vfs_remove(const char *name);
 long vfs_mkdir(const char *path);                        /* make a directory */
 long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /tmp); 0/-1 */
+struct statx;
+int  vfs_stat(const char *path, struct statx *st);      /* file metadata for statx; 0/-1 (M1173) */
 int  vfs_fiemap(const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 mounts); count/-1 (M1152) */
 long vfs_punch_hole(const char *path, uint64_t offset, uint64_t len);  /* fallocate PUNCH_HOLE (ext2 mounts); blocks/-1 (M1153) */
 int  vfs_bind(const char *from, const char *to);         /* graft FROM's subtree onto the path TO; 0/-1 */

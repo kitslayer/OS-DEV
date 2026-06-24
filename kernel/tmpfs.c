@@ -10,13 +10,15 @@
 #include "tmpfs.h"
 #include "kheap.h"
 #include "vfs.h"                     /* vfs_read, to follow a symlink to its target */
+#include "rtc.h"                     /* rtc_unix, for mtime (M1173) */
 #include <stdint.h>
 
 #define TMPFS_MAX 32                 /* up to 32 files */
 
 /* `link`: this entry is a symbolic link — `buf` holds the NUL-terminated target
- * PATH (not file data), and a read follows it (M1081). */
-static struct { char name[64]; char *buf; uint32_t len; int used; int link; } tf[TMPFS_MAX];
+ * PATH (not file data), and a read follows it (M1081). `mtime`: Unix epoch
+ * seconds of the last write/create, for statx (M1173). */
+static struct { char name[64]; char *buf; uint32_t len; int used; int link; uint32_t mtime; } tf[TMPFS_MAX];
 static int resolve_depth;            /* bounds symlink->symlink chains (loop guard) */
 
 static int teq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
@@ -52,7 +54,17 @@ long tmpfs_symlink(const char *name, const char *target) {
     if (!nb) return -1;
     for (int k = 0; k <= tl; k++) nb[k] = target[k];   /* copy incl. the NUL */
     if (tf[i].used && tf[i].buf && !buf_in_snapshot(tf[i].buf)) kfree(tf[i].buf);
-    tf[i].buf = nb; tf[i].len = (uint32_t)tl; tf[i].link = 1; tf[i].used = 1; tcpy(tf[i].name, name);
+    tf[i].buf = nb; tf[i].len = (uint32_t)tl; tf[i].link = 1; tf[i].used = 1; tf[i].mtime = rtc_unix(); tcpy(tf[i].name, name);
+    return 0;
+}
+
+/* Fill metadata for `name` (statx, M1173): islink, size, mtime. Returns 0/-1. */
+int tmpfs_stat(const char *name, int *islink, unsigned long *size, unsigned long *mtime) {
+    int i = tfind(name);
+    if (i < 0) return -1;
+    if (islink) *islink = tf[i].link;
+    if (size)   *size = tf[i].len;
+    if (mtime)  *mtime = tf[i].mtime;
     return 0;
 }
 
@@ -63,7 +75,7 @@ long tmpfs_write(const char *name, const void *data, unsigned long len) {
     if (!nb) return -1;
     for (unsigned long k = 0; k < len; k++) nb[k] = ((const char *)data)[k];
     if (tf[i].used && tf[i].buf && !buf_in_snapshot(tf[i].buf)) kfree(tf[i].buf);
-    tf[i].buf = nb; tf[i].len = (uint32_t)len; tf[i].used = 1; tf[i].link = 0; tcpy(tf[i].name, name);
+    tf[i].buf = nb; tf[i].len = (uint32_t)len; tf[i].used = 1; tf[i].link = 0; tf[i].mtime = rtc_unix(); tcpy(tf[i].name, name);
     return (long)len;
 }
 
