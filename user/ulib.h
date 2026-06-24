@@ -48,6 +48,9 @@ long sys_dhcp(void);
 long sys_cas_store(const void *buf, unsigned long len, void *hash32);
 long sys_cas_fetch(const void *hash32, void *buf, unsigned long max);
 long sys_tftp(const char *filename, void *buf, unsigned long max);
+#define MADV_DONTNEED 4    /* drop resident pages now (re-fault zero) */
+#define MADV_COLD     20   /* deactivate: clear accessed bits (M1158) */
+#define MADV_PAGEOUT  21   /* page the range out to swap/zram now (M1158) */
 long sys_madvise(void *addr, unsigned long len, int advice);
 long sys_mincore(void *addr, unsigned long len, unsigned char *vec);   /* per-page residency; vec[i]=1 if resident; 0/-1 (M1147) */
 long sys_mlock(void *addr, unsigned long len);     /* pin mmap pages against reclaim; 0/-1 (M1149) */

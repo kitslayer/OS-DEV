@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1765,6 +1765,29 @@ static int run_command(char *line, char *cwd) {
                 print(zeroed ? "  re-read after DONTNEED is ZERO -> pages reclaimed + re-faulted fresh\n"
                              : "  VERIFY FAILED: stale data survived DONTNEED\n");
                 if (!zeroed || dropped <= 0) g_status = 1;
+                sys_munmap(m, len);
+            }
+        } else if (streq(line, "pageouttest")) {  /* madvise(MADV_PAGEOUT): proactively swap a range out to zram (M1158) */
+            unsigned long np = 32, len = np * 4096;
+            unsigned char *m = (unsigned char *)sys_mmap(len);
+            unsigned char vec[32];
+            if (!m) { print("pageouttest: mmap failed\n"); g_status = 1; }
+            else {
+                for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)(i * 29 + 3);  /* fault in + fill */
+                sys_mincore(m, len, vec);
+                long r0 = 0; for (unsigned long i = 0; i < np; i++) r0 += vec[i];
+                long paged = sys_madvise(m, len, MADV_PAGEOUT);                 /* page the range out NOW */
+                sys_mincore(m, len, vec);
+                long r1 = 0; for (unsigned long i = 0; i < np; i++) r1 += vec[i];
+                int intact = 1;                                                /* re-touch -> faults back in from zram */
+                for (unsigned long i = 0; i < len; i++) if (m[i] != (unsigned char)(i * 29 + 3)) { intact = 0; break; }
+                print("resident before: "); printl(r0); print("/"); printl((long)np);
+                print("   madvise(PAGEOUT) swapped: "); printl(paged);
+                print("   resident after: "); printl(r1); print("/"); printl((long)np); print("\n");
+                int ok = (r0 == (long)np && paged == (long)np && r1 == 0 && intact);
+                print(ok ? "MADV_PAGEOUT: range paged out to zram, faulted back in intact OK\n"
+                         : "MADV_PAGEOUT: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
                 sys_munmap(m, len);
             }
         } else if (streq(line, "mincoretest")) {  /* mincore: observe which mmap pages RAM actually backs (M1147) */

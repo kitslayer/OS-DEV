@@ -1333,12 +1333,24 @@ int app_uffd_copy(uint64_t addr, const void *data, uint64_t len) {
  * from under its other mapping. Other advices are accepted as no-ops. Returns
  * the number of pages dropped, or -1 on a bad range. */
 #define MADV_DONTNEED 4
+#define MADV_COLD     20   /* deactivate: clear accessed bits so the range is a reclaim candidate (M1158) */
+#define MADV_PAGEOUT  21   /* proactively page the range out to swap (zram) NOW (M1158) */
 int app_madvise(uint64_t addr, uint64_t len, int advice) {
     struct app *a = cur();
     if (!a || len == 0) return -1;
-    if (advice != MADV_DONTNEED) return 0;            /* NORMAL/WILLNEED/etc: harmless no-op */
+    if (advice == MADV_PAGEOUT)                       /* reclaim NOW by swapping the range out (M1099 swap / M1156 zram) */
+        return app_swap_out(addr, len);
     uint64_t start = addr & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    if (advice == MADV_COLD) {                        /* clear the Accessed bit on resident pages (deactivate) */
+        int n = 0;
+        for (uint64_t p = start; p < end; p += PAGE_SIZE) {
+            uint64_t pte = vmm_pte_raw(p);
+            if (pte & PTE_PRESENT) { vmm_set_raw(p, pte & ~(uint64_t)PTE_ACCESSED); n++; }
+        }
+        return n;
+    }
+    if (advice != MADV_DONTNEED) return 0;            /* NORMAL/WILLNEED/FREE/etc: accepted no-op */
     int dropped = 0;
     for (uint64_t p = start; p < end; p += PAGE_SIZE) {
         int in_vma = 0, locked = 0;
