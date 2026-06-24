@@ -143,6 +143,9 @@
 #define SYS_msgget          131 /* (key, flags) -> SysV message-queue id; -1 (M1160) */
 #define SYS_msgsnd          132 /* (msqid, msgbuf*, msgsz, flags) -> enqueue a typed message; 0/-1 (M1160) */
 #define SYS_msgrcv          133 /* (msqid, msgbuf*, msgsz, mtyp) -> receive by type; bytes/-1 (M1160) */
+#define SYS_shmget          134 /* (key, size, flags) -> SysV shared-memory segment id; -1 (M1161) */
+#define SYS_shmat           135 /* (shmid) -> attach: base VA, or 0 (M1161) */
+#define SYS_shmdt           136 /* (addr) -> detach a SysV shm mapping; 0/-1 (M1161) */
 
 /* System V semaphore ABI (M1159), shared by the kernel + ulib. */
 #define IPC_PRIVATE 0

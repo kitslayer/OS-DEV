@@ -282,6 +282,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
     case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge:
+    case SYS_shmget: case SYS_shmat: case SYS_shmdt:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -331,6 +332,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_mmap_huge]="mmap_huge",
         [SYS_semget]="semget",[SYS_semop]="semop",[SYS_semctl]="semctl",
         [SYS_msgget]="msgget",[SYS_msgsnd]="msgsnd",[SYS_msgrcv]="msgrcv",
+        [SYS_shmget]="shmget",[SYS_shmat]="shmat",[SYS_shmdt]="shmdt",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -859,6 +861,15 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)n;
         break;
     }
+    case SYS_shmget:                       /* (key, size, flags) -> SysV shm segment id (M1161) */
+        r->rax = (uint64_t)(int64_t)sysv_shmget((int)r->rdi, r->rsi, (int)r->rdx);
+        break;
+    case SYS_shmat:                        /* (shmid) -> attach: base VA, or 0 (M1161) */
+        r->rax = sysv_shmat((int)r->rdi);
+        break;
+    case SYS_shmdt:                        /* (addr) -> detach (unmap) the shm mapping (M1161) */
+        r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, 0);
+        break;
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);
         break;

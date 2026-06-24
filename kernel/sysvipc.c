@@ -11,6 +11,7 @@
  */
 #include "sysvipc.h"
 #include "task.h"
+#include "app.h"        /* app_shm_open (SysV shm reuses the M1108 named-shm backing) */
 #include <stdint.h>
 
 #define SEM_N        16   /* max semaphore sets */
@@ -164,6 +165,38 @@ int sysv_msgrcv(int id, long mtyp, void *out, int max, long *mtype_out, int flag
         task_block();
         if (!q->used) return -1;
     }
+}
+
+/* ---- System V shared memory (M1161) ----------------------------------------
+ * Keyed shared-memory segments. shmget(key,size,flags) opens/creates a segment;
+ * shmat maps it into the caller's address space; shmdt unmaps. A segment is just
+ * a named object backed by the existing M1108 shm machinery (app_shm_open) —
+ * each segment gets a stable synthetic name, so two shmat()s of the same id (in
+ * the same or different processes) map the SAME physical frames. */
+#define SHM_N      16
+#define SHM_MAXSZ  (4u << 20)   /* 4 MiB cap per segment */
+struct shm_seg { int used, key; uint64_t size; char name[16]; };
+static struct shm_seg shms[SHM_N];
+
+int sysv_shmget(int key, uint64_t size, int flags) {
+    if (size == 0 || size > SHM_MAXSZ) return -1;
+    if (key != IPC_PRIVATE) for (int i = 0; i < SHM_N; i++) if (shms[i].used && shms[i].key == key) return i;
+    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) return -1;
+    for (int i = 0; i < SHM_N; i++) if (!shms[i].used) {
+        shms[i].used = 1; shms[i].key = key; shms[i].size = size;
+        char *n = shms[i].name; int p = 0;                 /* stable synthetic name "sysvshmNN" */
+        const char *pre = "sysvshm"; while (*pre) n[p++] = *pre++;
+        n[p++] = (char)('0' + i / 10); n[p++] = (char)('0' + i % 10); n[p] = 0;
+        return i;
+    }
+    return -1;
+}
+
+/* Attach: map the segment into the caller's address space, return the base VA
+ * (or 0). Two attaches of the same id share the backing (same synthetic name). */
+uint64_t sysv_shmat(int id) {
+    if (id < 0 || id >= SHM_N || !shms[id].used) return 0;
+    return app_shm_open(shms[id].name, shms[id].size);
 }
 
 /* /proc/sysvipc: one line per live set — "id key nsems val0,val1,...". */

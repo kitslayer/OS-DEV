@@ -192,6 +192,9 @@ long sys_semctl(int semid, int semnum, int cmd, int arg) { return do_syscall4(SY
 long sys_msgget(int key, int flags) { return do_syscall(SYS_msgget, key, flags, 0); }
 long sys_msgsnd(int id, const void *msgp, unsigned long sz, int flags) { return do_syscall4(SYS_msgsnd, id, (long)msgp, (long)sz, flags); }
 long sys_msgrcv(int id, void *msgp, unsigned long sz, long mtyp) { return do_syscall4(SYS_msgrcv, id, (long)msgp, (long)sz, (long)mtyp); }
+long sys_shmget(int key, unsigned long size, int flags) { return do_syscall(SYS_shmget, key, (long)size, flags); }
+void *sys_shmat(int shmid) { long r = do_syscall(SYS_shmat, shmid, 0, 0); return r ? (void *)r : 0; }
+long sys_shmdt(void *addr) { return do_syscall(SYS_shmdt, (long)addr, 0, 0); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }
 long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
 long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }

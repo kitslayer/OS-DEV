@@ -67,6 +67,9 @@ long sys_semctl(int semid, int semnum, int cmd, int arg);          /* SETVAL/GET
 long sys_msgget(int key, int flags);                               /* SysV message queue; id/-1 (M1160) */
 long sys_msgsnd(int id, const void *msgp, unsigned long sz, int flags);   /* enqueue {long mtype; data} (M1160) */
 long sys_msgrcv(int id, void *msgp, unsigned long sz, long mtyp);  /* receive by type; bytes/-1 (M1160) */
+long sys_shmget(int key, unsigned long size, int flags);          /* SysV shm segment; id/-1 (M1161) */
+void *sys_shmat(int shmid);                                       /* attach: base VA or 0 (M1161) */
+long sys_shmdt(void *addr);                                       /* detach a shm mapping (M1161) */
 long sys_alarm(unsigned long ticks);
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);
