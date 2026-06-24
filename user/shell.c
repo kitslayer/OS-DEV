@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  rlimittest(RLIMIT_NPROC)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1968,6 +1968,23 @@ static int run_command(char *line, char *cwd) {
                               : "process_vm_read: VERIFY FAILED\n");
                 if (st != 0) g_status = 1;
             } else { print("pvmtest: fork failed\n"); g_status = 1; }
+        } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
+            struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
+            print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");
+            rl.rlim_cur = 1; rl.rlim_max = 1; sys_setrlimit(RLIMIT_NPROC, &rl);   /* allow 1 live child */
+            long c1 = sys_fork();
+            if (c1 == 0) { sys_sleep(700); sys_exit(0); }   /* child #1: stay alive while the parent forks again */
+            long c2 = sys_fork();                            /* 1 live child >= limit 1 -> must be denied */
+            if (c2 == 0) { sys_exit(0); }
+            int st = 0;
+            if (c1 > 0) sys_waitpid((int)c1, &st);
+            if (c2 > 0) sys_waitpid((int)c2, &st);           /* clean up if it was wrongly allowed */
+            print("set NPROC=1: fork #1 "); print(c1 > 0 ? "ok" : "FAILED"); print(", fork #2 ");
+            print(c2 < 0 ? "DENIED" : "WRONGLY ALLOWED"); print("\n");
+            int ok = (c1 > 0 && c2 < 0);
+            print(ok ? "RLIMIT_NPROC: 2nd fork capped (fork-bomb protection) OK\n" : "rlimittest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+            rl.rlim_cur = RLIM_INFINITY; rl.rlim_max = RLIM_INFINITY; sys_setrlimit(RLIMIT_NPROC, &rl);   /* restore */
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
             unsigned char *m = (unsigned char *)sys_mmap_huge(len);

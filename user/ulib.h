@@ -71,6 +71,8 @@ long sys_shmget(int key, unsigned long size, int flags);          /* SysV shm se
 void *sys_shmat(int shmid);                                       /* attach: base VA or 0 (M1161) */
 long sys_shmdt(void *addr);                                       /* detach a shm mapping (M1161) */
 long sys_process_vm_read(int pid, unsigned long raddr, void *buf, unsigned long len);  /* read another process's mem; bytes/-1 (M1162) */
+long sys_getrlimit(int resource, struct rlimit *rl);   /* read a resource limit (M1163) */
+long sys_setrlimit(int resource, struct rlimit *rl);   /* set a resource limit (M1163) */
 long sys_alarm(unsigned long ticks);
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);

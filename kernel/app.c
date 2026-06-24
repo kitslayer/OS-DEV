@@ -119,6 +119,7 @@ struct app {
     int      uv_locked;                  /* 1 after unveil(NULL): no more unveils accepted */
     struct registers fork_frame;         /* a forked child's saved trap frame (rax=0); iret_to_user resumes it (M1116) */
     int      parent;                     /* pid of the process that fork()ed us (0 = none) — for waitpid (M1117) */
+    uint64_t rlim_nproc;                 /* RLIMIT_NPROC: max live children (0 = unlimited), inherited on fork (M1163) */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -695,6 +696,20 @@ long app_process_vm_read(int pid, uint64_t raddr, void *local, uint64_t len) {
         done += chunk;
     }
     return (long)done;
+}
+
+/* setrlimit/getrlimit (M1163): per-process resource limits. Only RLIMIT_NPROC
+ * (live-child cap) is enforced so far (in app_fork). Stored as 0 = unlimited;
+ * reported back as RLIM_INFINITY. Inherited across fork. */
+int app_setrlimit(int resource, uint64_t val) {
+    struct app *a = cur(); if (!a) return -1;
+    if (resource == RLIMIT_NPROC) { a->rlim_nproc = (val == RLIM_INFINITY) ? 0 : val; return 0; }
+    return -1;                                          /* other resources not yet enforced */
+}
+uint64_t app_getrlimit(int resource) {
+    struct app *a = cur(); if (!a) return RLIM_INFINITY;
+    if (resource == RLIMIT_NPROC) return a->rlim_nproc ? a->rlim_nproc : RLIM_INFINITY;
+    return RLIM_INFINITY;
 }
 static int app_pid_alive(int pid) {            /* a live (un-exited) process with this pid? */
     struct app *a = app_by_pid(pid);
@@ -2263,6 +2278,12 @@ long app_fork(struct registers *r) {
     struct app *p = cur();
     if (!p || !r) return -1;
 
+    if (p->rlim_nproc) {                                /* RLIMIT_NPROC: cap this process's live children (M1163) */
+        uint64_t nch = 0;
+        for (int i = 0; i < MAX_APPS; i++) if (apps[i].used && !apps[i].exited && apps[i].parent == p->pid) nch++;
+        if (nch >= p->rlim_nproc) return -1;            /* at the limit -> EAGAIN */
+    }
+
     struct app *a = 0;
     for (int i = 0; i < MAX_APPS; i++) if (!apps[i].used) { a = &apps[i]; break; }
     if (!a) return -1;                                  /* process table full */
@@ -2289,6 +2310,7 @@ long app_fork(struct registers *r) {
     for (int i = 0; i < APP_MAXVMA; i++) a->vma[i] = p->vma[i];
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = p->sig_handler[i];
     a->sig_restorer = p->sig_restorer; a->curcol = p->curcol;
+    a->rlim_nproc = p->rlim_nproc;                      /* RLIMIT_NPROC is inherited across fork (M1163) */
     /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
     a->promises = p->promises; a->pledged = p->pledged;
     a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;

@@ -147,6 +147,13 @@
 #define SYS_shmat           135 /* (shmid) -> attach: base VA, or 0 (M1161) */
 #define SYS_shmdt           136 /* (addr) -> detach a SysV shm mapping; 0/-1 (M1161) */
 #define SYS_process_vm_read 137 /* (pid, raddr, local, len) -> read another process's memory; bytes/-1 (M1162) */
+#define SYS_getrlimit       138 /* (resource, struct rlimit*) -> read a resource limit; 0/-1 (M1163) */
+#define SYS_setrlimit       139 /* (resource, struct rlimit*) -> set a resource limit; 0/-1 (M1163) */
+
+/* getrlimit/setrlimit (M1163), shared by the kernel + ulib. */
+#define RLIMIT_NPROC   6
+#define RLIM_INFINITY  (~0UL)
+struct rlimit { unsigned long rlim_cur, rlim_max; };
 
 /* System V semaphore ABI (M1159), shared by the kernel + ulib. */
 #define IPC_PRIVATE 0
