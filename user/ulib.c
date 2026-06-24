@@ -169,6 +169,7 @@ long sys_mincore(void *addr, unsigned long len, unsigned char *vec) { return do_
 long sys_mlock(void *addr, unsigned long len) { return do_syscall(SYS_mlock, (long)addr, (long)len, 0); }
 long sys_munlock(void *addr, unsigned long len) { return do_syscall(SYS_munlock, (long)addr, (long)len, 0); }
 long sys_getrusage(int who, struct rusage *ru) { return do_syscall(SYS_getrusage, who, (long)ru, 0); }
+long sys_fiemap(const char *path, struct fiemap_extent *out, int max) { return do_syscall(SYS_fiemap, (long)path, (long)out, max); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }
 long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
 long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }

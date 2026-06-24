@@ -582,6 +582,13 @@ long blockdev_mount_symlink(int i, const char *path, const char *target) {
                              path ? path : "", target ? target : "");
 }
 
+int blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;    /* physical extent map: ext2 only (M1152) */
+    return ext2_fiemap(mount_rfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", out, max);
+}
+
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
 int blockdev_mount_isdir(int i, const char *path) {
     blockdev_mount_scan();

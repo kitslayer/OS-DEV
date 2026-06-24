@@ -131,8 +131,20 @@
 #define SYS_mlock           119 /* (addr, len) -> pin mmap pages against reclaim; 0/-1 (M1149) */
 #define SYS_munlock         120 /* (addr, len) -> unpin mlock'd mmap pages; 0/-1 (M1149) */
 #define SYS_getrusage       121 /* (who, struct rusage*) -> fill resource usage; 0/-1 (M1150) */
+#define SYS_fiemap          122 /* (path, struct fiemap_extent*, max) -> file physical extent map; count/-1 (M1152) */
 
 #define SYSCALL_VECTOR 0x80
+
+/* FIEMAP (M1152): a file's physical on-disk extent list (ext2 mounts). Each
+ * extent is a maximal run of contiguous physical blocks. Shared kernel/user. */
+#define FIEMAP_EXTENT_LAST 0x1            /* this is the file's last extent */
+struct fiemap_extent {
+    unsigned long fe_logical;            /* byte offset within the file   */
+    unsigned long fe_physical;           /* byte offset on the device     */
+    unsigned long fe_length;             /* length of the extent in bytes */
+    unsigned int  fe_flags;              /* FIEMAP_EXTENT_* */
+    unsigned int  _pad;
+};
 
 /* getrusage(2) (M1150). RUSAGE_SELF reports the calling process; RUSAGE_CHILDREN
  * is accepted but reports zeros (no child-time accumulation). Shared by the

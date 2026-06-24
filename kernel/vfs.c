@@ -538,6 +538,17 @@ long vfs_symlink(const char *linkpath, const char *target) {
     return -1;
 }
 
+/* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
+ * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are
+ * unsupported (-1). Read-only. */
+int vfs_fiemap(const char *path, ext2_extent_t *out, int max) {
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);
+    int midx; char fpath[192];
+    if (mount_path(path, &midx, fpath, sizeof fpath))
+        return blockdev_mount_fiemap(midx, fpath, out, max);
+    return -1;
+}
+
 /* Copy a validated subpath into mount_sub (bounded). */
 static void set_mount_sub(const char *sub) {
     int i = 0; while (sub[i] && i < (int)sizeof mount_sub - 1) { mount_sub[i] = sub[i]; i++; }

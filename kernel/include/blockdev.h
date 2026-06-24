@@ -21,7 +21,7 @@
  */
 #pragma once
 #include <stdint.h>
-#include "partition.h"   /* fatvol_dirent, for the read-only mount registry below */
+#include "partition.h"   /* fatvol_dirent + ext2_extent_t, for the mount registry below */
 
 #define BLOCKDEV_SECSZ   512   /* every registered device speaks 512-byte sectors */
 #define BLOCKDEV_MAX     8     /* cap on registered devices (4 ATA + 4 others)    */
@@ -107,6 +107,7 @@ long blockdev_mount_write(int i, const char *path, const void *buf, unsigned lon
 long blockdev_mount_remove(int i, const char *path);   /* delete a file (ext2 only); 0/-1 (M1135) */
 long blockdev_mount_mkdir(int i, const char *path);    /* create a directory (ext2 only); 0/-1 (M1137) */
 long blockdev_mount_symlink(int i, const char *path, const char *target);  /* create a symlink (ext2 only); 0/-1 (M1146) */
+int  blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 only); count/-1 (M1152) */
 int  blockdev_mount_isdir(int i, const char *path);   /* is path a directory on mount i? */
 int  blockdev_mounts_format(char *out, int max);  /* list the mounts as text (the `mount` command) */
 /* losetup (M1107): register a loop mount backed by the RAM image `data` (len

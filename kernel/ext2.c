@@ -182,6 +182,35 @@ long ext2_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char 
     return (long)done;
 }
 
+/* FIEMAP (M1152): the file's physical extent map — each maximal run of
+ * contiguous on-disk blocks, in BYTES. Walks logical blocks 0..ceil(size/bs)
+ * via map_block (the same direct/indirect resolver ext2_read_path uses),
+ * coalescing runs where physical[n+1] == physical[n]+1. Sparse holes (block 0)
+ * end the current run and aren't emitted. Fills out[0..max), returns the extent
+ * count, or -1 if the path is absent / a directory. Self-contained (no external
+ * calls) so the host-test #include of ext2.c stays linkable. */
+int ext2_fiemap(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                ext2_extent_t *out, int max) {
+    ext2_t v; if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    uint8_t inode[256]; int isdir = 0;
+    if (!walk(&v, path, inode, &isdir) || isdir) return -1;
+    uint64_t size = e_rd32(inode + 4);
+    uint32_t bs = v.block_size;
+    uint32_t nblk = (uint32_t)((size + bs - 1) / bs);
+    int n = 0; uint32_t i = 0;
+    while (i < nblk && n < max) {
+        uint32_t phys = map_block(&v, inode, i);
+        if (!phys) { i++; continue; }                       /* sparse hole: not an extent */
+        uint32_t log0 = i, phys0 = phys, runlen = 1; i++;
+        while (i < nblk && map_block(&v, inode, i) == phys0 + runlen) { runlen++; i++; }
+        out[n].logical  = (uint64_t)log0  * bs;
+        out[n].physical = (uint64_t)phys0 * bs;
+        out[n].length   = (uint64_t)runlen * bs;
+        n++;
+    }
+    return n;
+}
+
 int ext2_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path) {
     ext2_t v; if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
     uint8_t inode[256]; int isdir = 0;

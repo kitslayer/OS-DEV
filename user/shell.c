@@ -471,7 +471,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  smaps  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -1614,6 +1614,22 @@ static int run_command(char *line, char *cwd) {
             if (!target[0] || !link[0]) print("usage: ln -s <target> <linkpath>   (linkpath under /tmp or an ext2 /diskN mount)\n");
             else if (sys_symlink(link, target) < 0) { print("ln: failed (linkpath must be under /tmp or an ext2 /diskN mount)\n"); g_status = 1; }
             else { print(link); print(" -> "); print(target); print("\n"); }
+        } else if (startswith(line, "fiemap ")) {   /* fiemap <path>: a file's physical on-disk extent map (ext2 mounts) (M1152) */
+            const char *p = line + 7; while (*p == ' ') p++;
+            char fn[96]; int j = 0; while (*p && *p != ' ' && j < 95) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);
+            struct fiemap_extent ext[16];
+            int n = fn[0] ? (int)sys_fiemap(fn, ext, 16) : -1;
+            if (n < 0) { print("fiemap: not an ext2-mount file (try /disk2/FILE), or absent\n"); g_status = 1; }
+            else {
+                print(fn); print(": "); printl(n); print(n == 1 ? " extent\n" : " extents\n");
+                for (int i = 0; i < n; i++) {
+                    print("  logical "); printl((long)ext[i].fe_logical);
+                    print("  physical "); printl((long)ext[i].fe_physical);
+                    print("  length "); printl((long)ext[i].fe_length);
+                    if (ext[i].fe_flags & FIEMAP_EXTENT_LAST) print("  [last]");
+                    print("\n");
+                }
+            }
         } else if (startswith(line, "jail ")) {   /* jail <prog> <promise>... : spawn prog pre-confined (pledge) */
             const char *p = line + 5; while (*p == ' ') p++;
             char prog[32]; int j = 0;

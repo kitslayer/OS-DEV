@@ -256,6 +256,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
+    case SYS_fiemap:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
@@ -319,6 +320,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
+        [SYS_fiemap]="fiemap",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -844,6 +846,23 @@ void syscall_dispatch(struct registers *r) {
         }
         for (unsigned i = 0; i < sizeof ru; i++) ((uint8_t *)r->rsi)[i] = ((uint8_t *)&ru)[i];
         r->rax = 0;
+        break;
+    }
+    case SYS_fiemap: {                     /* (path, struct fiemap_extent*, max) -> physical extent map (M1152) */
+        int umax = (int)r->rdx;
+        if (umax <= 0 || !ustr(r->rdi) || !ubuf(r->rsi, (uint64_t)umax * sizeof(struct fiemap_extent))) { r->rax = (uint64_t)-1; break; }
+        ext2_extent_t kext[64];
+        int cap = umax < 64 ? umax : 64;
+        int n = vfs_fiemap((const char *)r->rdi, kext, cap);
+        if (n < 0) { r->rax = (uint64_t)-1; break; }
+        struct fiemap_extent *u = (struct fiemap_extent *)r->rsi;
+        for (int i = 0; i < n; i++) {      /* map the kernel extents into the user ABI struct + mark the last */
+            struct fiemap_extent e;
+            e.fe_logical = kext[i].logical; e.fe_physical = kext[i].physical; e.fe_length = kext[i].length;
+            e.fe_flags = (i == n - 1) ? FIEMAP_EXTENT_LAST : 0; e._pad = 0;
+            for (unsigned b = 0; b < sizeof e; b++) ((uint8_t *)&u[i])[b] = ((uint8_t *)&e)[b];
+        }
+        r->rax = (uint64_t)n;
         break;
     }
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */

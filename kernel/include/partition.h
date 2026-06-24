@@ -86,6 +86,11 @@ typedef struct {
     int      is_dir;     /* 1 if a subdirectory, else 0 */
 } fatvol_dirent;
 
+/* One physical extent of a file: a maximal run of contiguous on-disk blocks.
+ * All three fields are BYTE offsets/lengths. Backs FIEMAP (M1152). Lives here in
+ * the base block-layer header so ext2.h + blockdev.h both see it without a cycle. */
+typedef struct { uint64_t logical, physical, length; } ext2_extent_t;
+
 /* Validate that the FAT32 volume whose boot sector is at absolute LBA `start_lba`
  * (read via `read`/`ctx`) is FAT32, then find an 8.3 file (`name83`, 11 bytes,
  * space-padded) in its root directory. Returns 1 + sets *out_size if found; 0 if

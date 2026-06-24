@@ -28,3 +28,6 @@ long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
                      const char *path);                                       /* create a directory; 0/-1 (M1137) */
 long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                        const char *path, const char *target);                 /* create a fast symlink; 0/-1 (M1146) */
+/* ext2_extent_t lives in partition.h (the base block-layer header). (M1152) */
+int  ext2_fiemap(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                 ext2_extent_t *out, int max);                                /* file's physical extent map; extent count, or -1 (M1152) */
