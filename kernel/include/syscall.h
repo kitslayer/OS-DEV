@@ -116,6 +116,9 @@
 #define SYS_io_uring_enter  104 /* (ring) -> drain a userspace submission ring; ops completed, or -1 (M1129) */
 #define SYS_mseal           105 /* (addr, len) -> irreversibly seal mmap regions in range (no later munmap/mprotect); count/-1 (M1130) */
 #define SYS_tcp_serve       106 /* (port, resp, resp_len, reqbuf, reqmax) -> serve one TCP connection; request bytes/-1 (M1133) */
+#define SYS_uffd_register   107 /* (addr, len) -> route this region's page faults to a monitor (userfaultfd); 0/-1 (M1134) */
+#define SYS_uffd_read       108 /* () -> monitor: block until the owner faults; the faulting page addr, or -1 */
+#define SYS_uffd_copy       109 /* (addr, data, len) -> monitor: fill the faulting page + wake the owner; 0/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

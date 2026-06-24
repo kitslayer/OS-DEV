@@ -57,7 +57,7 @@ struct app {
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
 #define APP_MAXVMA 16
-    struct { uint64_t start, len; int sealed; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed = mseal'd (immutable) */
+    struct { uint64_t start, len; int sealed, uffd; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed = mseal'd; uffd = userfault-managed (M1134) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
 #define APP_NSIG 32
@@ -131,6 +131,19 @@ struct app {
 
 static struct app apps[MAX_APPS];
 static int next_pid = 100;
+
+/* userfaultfd state (M1134); defined here so app_reap + app_fault_handle (both
+ * above the uffd functions) can see it. One registered region at a time. */
+static struct {
+    int        active;            /* a region is registered                     */
+    struct app *owner;            /* the registrant; only ITS faults route here */
+    uint64_t   cr3;               /* the owner's address-space root              */
+    volatile int      pending;    /* a fault awaits service                      */
+    volatile uint64_t addr;       /* the faulting page (page-aligned)            */
+    task_t    *faulter;           /* the parked faulting task                    */
+    task_t    *monitor;           /* the monitor task (blocked in uffd_read)     */
+    int        monitor_waiting;
+} g_uffd;
 static char g_pend_arg[128];             /* arg for the next app_spawn, copied into its launch_arg */
 static int  g_have_pend;
 /* A pending "jail" for the next app_spawn (M1088): pledge promises + an optional
@@ -169,7 +182,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -256,6 +269,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "iouringtest", iouringtest_elf_start, "io_uring batch demo" },
     { "msealtest", msealtest_elf_start, "mseal hardening demo" },
     { "httpd", httpd_elf_start, "in-guest HTTP server" },
+    { "uffdtest", uffdtest_elf_start, "userfaultfd demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -624,6 +638,10 @@ int app_reap(app_t *a) {
     if (!a) return 1;
     if (a->zombie) return 1;                  /* already reaped to a zombie: resources freed, slot kept for waitpid */
     if (a->used && a->exited && (!a->task || a->task->state == TASK_DEAD)) {
+        if (g_uffd.active && g_uffd.owner == a) {        /* uffd owner gone: tear down, free any blocked monitor (M1134) */
+            g_uffd.active = 0; g_uffd.pending = 0;
+            if (g_uffd.monitor_waiting && g_uffd.monitor) task_wake(g_uffd.monitor);
+        }
         if (a->task) task_free(a->task);
         a->task = 0;
         vmm_destroy_address_space(a->cr3);   /* free page tables + user frames */
@@ -1038,6 +1056,7 @@ uint64_t app_mmap(uint64_t len) {
     a->vma[a->nvma].start = addr;
     a->vma[a->nvma].len   = len;
     a->vma[a->nvma].sealed = 0;
+    a->vma[a->nvma].uffd  = 0;
     a->nvma++;
     a->mmap_next = addr + len + PAGE_SIZE;          /* leave an unmapped guard gap */
     return addr;
@@ -1081,6 +1100,69 @@ int app_mseal(uint64_t addr, uint64_t len) {
         if (addr < ve && vs < end) { a->vma[i].sealed = 1; sealed++; }   /* overlaps the range */
     }
     return sealed ? sealed : -1;
+}
+
+/* ===================== userfaultfd (M1134) =============================== *
+ * Userspace page-fault handling. An OWNER process mmap's a region and registers
+ * it (app_uffd_register); thereafter the owner faulting on an unbacked page in
+ * that region does NOT demand-zero — it PARKS, and the page address is handed to
+ * a MONITOR process. The monitor reads the fault (app_uffd_read), produces the
+ * page's contents, and fills it (app_uffd_copy) — which maps a fresh frame into
+ * the OWNER's (other) address space via vmm_map_to and wakes the owner, whose
+ * faulting instruction now re-executes successfully. It's the primitive under
+ * live migration / post-copy / on-demand paging. One region at a time; the
+ * owner≠monitor split is provided by fork(). Reuses the cross-address-space
+ * mapping (M1114) and the park/wait rendezvous (M1124). g_uffd is defined up top
+ * (above app_reap / app_fault_handle, which reference it). */
+int app_uffd_register(uint64_t addr, uint64_t len) {
+    struct app *a = cur();
+    if (!a || len == 0) return -1;
+    uint64_t end = addr + len; if (end < addr) return -1;
+    int found = 0;
+    for (int i = 0; i < a->nvma; i++) {            /* flag the overlapping mmap region(s) */
+        uint64_t vs = a->vma[i].start, ve = vs + a->vma[i].len;
+        if (addr < ve && vs < end) { a->vma[i].uffd = 1; found = 1; }
+    }
+    if (!found) return -1;                          /* must cover an mmap region */
+    g_uffd.active = 1; g_uffd.owner = a; g_uffd.cr3 = a->cr3;
+    g_uffd.pending = 0; g_uffd.monitor = 0; g_uffd.monitor_waiting = 0; g_uffd.faulter = 0;
+    return 0;
+}
+
+/* Monitor: block until the owner faults; returns the faulting page address, or -1. */
+long app_uffd_read(void) {
+    if (!g_uffd.active) return -1;
+    g_uffd.monitor = task_self();
+    while (!g_uffd.pending) {
+        g_uffd.monitor_waiting = 1;
+        task_block();
+        g_uffd.monitor_waiting = 0;
+        if (!g_uffd.active) return -1;             /* owner vanished */
+    }
+    return (long)g_uffd.addr;
+}
+
+/* Monitor: fill the faulting page with `data` (in the OWNER's address space) and
+ * wake the owner. `data` is the monitor's pointer (validated by the caller). */
+int app_uffd_copy(uint64_t addr, const void *data, uint64_t len) {
+    if (!g_uffd.active || !g_uffd.pending) return -1;
+    uint64_t page = addr & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t frame = pmm_alloc_frame();
+    if (!frame) return -1;
+    uint8_t *d = (uint8_t *)hhdm(frame);
+    const uint8_t *s = (const uint8_t *)data;
+    uint64_t n = len < PAGE_SIZE ? len : PAGE_SIZE;
+    for (uint64_t i = 0; i < n; i++) d[i] = s[i];
+    for (uint64_t i = n; i < PAGE_SIZE; i++) d[i] = 0;
+    /* map the frame into the owner's (currently inactive) space; its CR3 reload
+     * on resume makes the new PTE visible — no invlpg needed for an off-CPU space. */
+    if (vmm_map_to(g_uffd.cr3 & PTE_ADDR_MASK, page, frame, PTE_WRITABLE | PTE_USER | PTE_NX) < 0) {
+        pmm_free_frame(frame);
+        return -1;
+    }
+    g_uffd.pending = 0;
+    if (g_uffd.faulter) task_wake(g_uffd.faulter);
+    return 0;
 }
 
 /* madvise(MADV_DONTNEED) (M1099): reclaim the resident frames of [addr,addr+len)
@@ -1172,6 +1254,7 @@ uint64_t app_ringbuf(uint64_t len) {
     a->vma[a->nvma].start = base;
     a->vma[a->nvma].len   = total;
     a->vma[a->nvma].sealed = 0;
+    a->vma[a->nvma].uffd  = 0;
     a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
@@ -1196,7 +1279,7 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
         pmm_addref(frames[p]);                       /* this mapping holds a ref on the shared frame */
         __asm__ volatile("invlpg (%0)" : : "r"(base + (uint64_t)p * PAGE_SIZE) : "memory");
     }
-    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->nvma++;
+    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0; a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
 }
@@ -1283,6 +1366,17 @@ int app_fault_handle(uint64_t cr2, uint64_t err) {
         if (cr2 >= a->vma[i].start && cr2 < a->vma[i].start + a->vma[i].len) {
             uint64_t page = cr2 & ~(uint64_t)(PAGE_SIZE - 1);
             if (vmm_translate(page)) return 1;          /* already mapped (race) -> retry */
+            /* userfaultfd (M1134): the OWNER faulting in a registered region parks
+             * here; a monitor process fills the page (app_uffd_copy) and wakes us,
+             * after which the instruction re-executes against the now-present page. */
+            if (a->vma[i].uffd && g_uffd.active && a == g_uffd.owner) {
+                g_uffd.addr = page;
+                g_uffd.faulter = task_self();
+                g_uffd.pending = 1;
+                if (g_uffd.monitor_waiting) { task_wake(g_uffd.monitor); g_uffd.monitor_waiting = 0; }
+                while (g_uffd.pending) task_block();     /* IF=0 here -> wake+park is atomic (single CPU) */
+                return 1;
+            }
             uint64_t frame = pmm_alloc_frame();
             if (!frame) return 0;                       /* OOM -> let it fault/die */
             uint8_t *z = (uint8_t *)hhdm(frame);

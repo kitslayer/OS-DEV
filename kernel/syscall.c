@@ -271,7 +271,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
-    case SYS_mseal:
+    case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -313,6 +313,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
+        [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -837,6 +838,17 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_mseal:                        /* (addr, len): irreversibly seal mmap regions (M1130) */
         r->rax = (uint64_t)(int64_t)app_mseal(r->rdi, r->rsi);
+        break;
+    case SYS_uffd_register:                /* (addr, len): route this region's faults to a monitor (M1134) */
+        r->rax = (uint64_t)(int64_t)app_uffd_register(r->rdi, r->rsi);
+        break;
+    case SYS_uffd_read:                    /* (): monitor blocks until a fault; returns the faulting addr */
+        __asm__ volatile("sti");           /* may block; the scheduler needs the timer */
+        r->rax = (uint64_t)app_uffd_read();
+        break;
+    case SYS_uffd_copy:                    /* (addr, data, len): fill the faulting page + wake the owner */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_uffd_copy(r->rdi, (const void *)r->rsi, r->rdx);
         break;
     case SYS_tcp_serve: {                  /* (port, resp, resp_len, reqbuf, reqmax): serve one TCP conn (M1133) */
         const uint8_t *resp = (const uint8_t *)r->rsi; int resp_len = (int)r->rdx;

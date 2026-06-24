@@ -93,6 +93,7 @@ global fantest_elf_start, fantest_elf_end
 global iouringtest_elf_start, iouringtest_elf_end
 global msealtest_elf_start, msealtest_elf_end
 global httpd_elf_start, httpd_elf_end
+global uffdtest_elf_start, uffdtest_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -433,5 +434,9 @@ msealtest_elf_end:
 httpd_elf_start:
     incbin "build/httpd.elf"
 httpd_elf_end:
+
+uffdtest_elf_start:
+    incbin "build/uffdtest.elf"
+uffdtest_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

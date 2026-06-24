@@ -42,6 +42,9 @@ long sys_fanotify_wait(char *namebuf, int max) { return do_syscall(SYS_fanotify_
 long sys_fanotify_provide(const void *content, unsigned long len) { return do_syscall(SYS_fanotify_provide, (long)content, (long)len, 0); }
 long sys_io_uring_enter(void *ring) { return do_syscall(SYS_io_uring_enter, (long)ring, 0, 0); }
 long sys_mseal(void *addr, unsigned long len) { return do_syscall(SYS_mseal, (long)addr, (long)len, 0); }
+long sys_uffd_register(void *addr, unsigned long len) { return do_syscall(SYS_uffd_register, (long)addr, (long)len, 0); }
+long sys_uffd_read(void) { return do_syscall(SYS_uffd_read, 0, 0, 0); }
+long sys_uffd_copy(void *addr, const void *data, unsigned long len) { return do_syscall(SYS_uffd_copy, (long)addr, (long)data, (long)len); }
 long sys_tcp_serve(int port, const void *resp, unsigned long resp_len, void *reqbuf, unsigned long reqmax) {
     long ret;
     register long r10 __asm__("r10") = (long)reqbuf;     /* 4th + 5th args via r10/r8 (like sys_http) */
