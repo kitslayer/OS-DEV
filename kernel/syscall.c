@@ -243,7 +243,8 @@ static int pci_format(char *b, int max) {
  * pledged: exit, sigreturn, getpid, and pledge itself). See app.h for the bits. */
 static uint32_t syscall_class(uint64_t nr) {
     switch (nr) {
-    case SYS_exit: case SYS_sigreturn: case SYS_getpid: case SYS_pledge: return 0;
+    case SYS_exit: case SYS_sigreturn: case SYS_getpid: case SYS_pledge:
+    case SYS_gettid: case SYS_thread_exit: return 0;
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
@@ -269,6 +270,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_clip_get: case SYS_clip_set:
         return PL_GFX;
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
+    case SYS_clone:
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
@@ -314,7 +316,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",
+        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -843,6 +845,15 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mmap_file:                    /* (path, len): file-backed mmap (M1136) */
         if (!ustr(r->rdi)) { r->rax = 0; break; }
         r->rax = app_mmap_file((const char *)r->rdi, r->rsi);
+        break;
+    case SYS_clone:                        /* (fn, stack, arg): spawn a thread sharing this AS (M1138) */
+        r->rax = (uint64_t)app_clone(r, r->rdi, r->rsi, r->rdx);
+        break;
+    case SYS_gettid:                       /* (): the calling thread's id (M1138) */
+        r->rax = (uint64_t)(int64_t)app_gettid();
+        break;
+    case SYS_thread_exit:                  /* (): end just this thread (M1138) */
+        app_thread_exit();                 /* does not return to this task */
         break;
     case SYS_uffd_register:                /* (addr, len): route this region's faults to a monitor (M1134) */
         r->rax = (uint64_t)(int64_t)app_uffd_register(r->rdi, r->rsi);

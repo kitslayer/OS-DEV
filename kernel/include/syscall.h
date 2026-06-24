@@ -120,6 +120,9 @@
 #define SYS_uffd_read       108 /* () -> monitor: block until the owner faults; the faulting page addr, or -1 */
 #define SYS_uffd_copy       109 /* (addr, data, len) -> monitor: fill the faulting page + wake the owner; 0/-1 */
 #define SYS_mmap_file       110 /* (path, len) -> demand-paged file-backed mmap (MAP_PRIVATE); base VA, or 0 (M1136) */
+#define SYS_clone           111 /* (fn, stack, arg) -> spawn a thread sharing this address space; tid, or -1 (M1138) */
+#define SYS_gettid          112 /* () -> the calling thread's id (its task id) (M1138) */
+#define SYS_thread_exit     113 /* () -> end just the calling thread (not the process) (M1138) */
 
 #define SYSCALL_VECTOR 0x80
 

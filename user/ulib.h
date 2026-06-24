@@ -92,6 +92,11 @@ void sys_setcolor(int color);   /* text colour for subsequent output: palette in
 void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, or (void*)-1 */
 void *sys_mmap(unsigned long len);              /* reserve a demand-paged anon region; base or 0 */
 void *sys_mmap_file(const char *path, unsigned long len);  /* demand-paged file-backed mmap (MAP_PRIVATE); base or 0 (M1136) */
+/* threads (M1138): shared-address-space concurrency (unlike fork's separate space) */
+long sys_clone(void *fn, void *stack, void *arg);  /* low-level: start fn(arg) on `stack` in a new thread; tid/-1 */
+int  sys_gettid(void);                             /* the calling thread's id */
+void sys_thread_exit(void);                        /* end the calling thread (not the process) */
+int  thread_spawn(void (*fn)(void *), void *arg);  /* convenience: alloc a stack + clone; tid/-1 */
 void *sys_ringbuf(unsigned long len);           /* a magic mirrored ring buffer (mapped twice back-to-back); base or 0 */
 int   sys_mprotect(void *addr, unsigned long len, int prot);  /* change R/W/X (prot: 1=R 2=W 4=X); 0/-1 */
 int   sys_bind(const char *from, const char *to);  /* bind mount: graft FROM's subtree onto path TO; 0/-1 */

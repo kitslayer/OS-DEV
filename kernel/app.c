@@ -182,7 +182,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[], mmapfile_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[], mmapfile_elf_start[], threads_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -271,6 +271,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "httpd", httpd_elf_start, "in-guest HTTP server" },
     { "uffdtest", uffdtest_elf_start, "userfaultfd demo" },
     { "mmapfile", mmapfile_elf_start, "file-backed mmap demo" },
+    { "threads", threads_elf_start, "kernel threads demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -2008,6 +2009,17 @@ static void fork_child_trampoline(void) {
     iret_to_user(&a->fork_frame);
 }
 
+/* A thread's entry (M1138): iret into ring 3 at the frame app_clone built (which
+ * starts it at fn(arg) on its own stack, in the SHARED address space), then free
+ * that frame. Never returns; the thread ends via SYS_thread_exit -> task_exit. */
+static void thread_trampoline(void) {
+    task_t *t = task_self();
+    struct registers f = *t->start_frame;          /* copy out before freeing */
+    kfree(t->start_frame);
+    t->start_frame = 0;
+    iret_to_user(&f);
+}
+
 /* COW fork() (M1116). Clone the calling process: a new app_t with its own blank
  * window, a copy-on-write clone of the address space (vmm_fork_cow), and a child
  * task that resumes at the parent's instruction after `int 0x80` with rax = 0.
@@ -2067,6 +2079,37 @@ long app_fork(struct registers *r) {
     if (n != pend_t) { pending[pend_h] = a; pend_h = n; }
     return a->pid;
 }
+
+/* clone (M1138): create a THREAD — a task sharing this process's address space
+ * (same CR3, same app_t) that begins in ring 3 at fn(arg) on `stack`. Unlike
+ * fork (a separate COW address space), threads share ALL memory, so they can
+ * cooperate on shared data (the hardware `lock` prefix gives atomicity). It runs
+ * concurrently under the existing preemptive scheduler and ends via
+ * SYS_thread_exit. Returns the new thread id (its task id), or -1. `r` is the
+ * caller's live trap frame (we inherit its user segment selectors + rflags).
+ *
+ * No window, no new app_t: the thread shares the caller's window for output.
+ * Race-free because the int-0x80 gate keeps IF=0 through here, so the new task
+ * can't be scheduled until we've stored its start_frame and returned. */
+long app_clone(struct registers *r, uint64_t fn, uint64_t stack, uint64_t arg) {
+    struct app *a = cur();
+    if (!a || !r || !fn || !stack) return -1;
+    struct registers *f = kmalloc(sizeof *f);
+    if (!f) return -1;
+    *f = *r;
+    f->rip = fn; f->rsp = stack; f->rdi = arg; f->rax = 0;
+    f->rflags |= 0x200;                                 /* IF set in ring 3 */
+    task_t *t = task_create_stack(thread_trampoline, a->cr3, a, 64 * 1024);   /* SHARED cr3 + app */
+    if (!t) { kfree(f); return -1; }
+    t->start_frame = f;
+    return t->id;
+}
+
+/* End just the calling thread's task (not the whole process). M1138. */
+void app_thread_exit(void) { task_exit(); }
+
+/* The calling thread's id = its task id (each thread is a distinct task). M1138. */
+int app_gettid(void) { return task_current_id(); }
 
 /* exec() (M1121): replace the CURRENT process's program image with the registered
  * program `name`, in place — same pid, same task, same window. Loads the new ELF

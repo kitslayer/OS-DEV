@@ -22,6 +22,7 @@ typedef struct task {
     uint64_t      nswitch;     /* times it has been scheduled in (context switches) */
     uint64_t      wake_at;     /* if BLOCKED via task_sleep_ms: timer_ms() deadline (0 = not a timed sleep) */
     struct registers *uframe;  /* most recent ring-3 trap frame (for /proc/<pid>/regs); valid while stopped (M1119) */
+    struct registers *start_frame;  /* a thread's initial ring-3 frame: iret'd to once at startup, then freed (M1138) */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */

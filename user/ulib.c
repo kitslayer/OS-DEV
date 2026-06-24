@@ -43,6 +43,26 @@ long sys_fanotify_provide(const void *content, unsigned long len) { return do_sy
 long sys_io_uring_enter(void *ring) { return do_syscall(SYS_io_uring_enter, (long)ring, 0, 0); }
 long sys_mseal(void *addr, unsigned long len) { return do_syscall(SYS_mseal, (long)addr, (long)len, 0); }
 void *sys_mmap_file(const char *path, unsigned long len) { return (void *)do_syscall(SYS_mmap_file, (long)path, (long)len, 0); }
+long sys_clone(void *fn, void *stack, void *arg) { return do_syscall(SYS_clone, (long)fn, (long)stack, (long)arg); }
+int  sys_gettid(void) { return (int)do_syscall(SYS_gettid, 0, 0, 0); }
+void sys_thread_exit(void) { do_syscall(SYS_thread_exit, 0, 0, 0); for (;;) {} }
+
+/* If a thread function returns, land here and end the thread cleanly. */
+static void thread_exit_stub(void) { sys_thread_exit(); }
+
+/* thread_spawn: run fn(arg) in a NEW thread that shares this address space.
+ * Allocates a stack, lays a return-to-thread_exit_stub at the top (so a thread
+ * that simply returns ends cleanly) with the SysV alignment a fresh frame wants,
+ * and clones. Returns the new thread id, or -1. M1138. */
+int thread_spawn(void (*fn)(void *), void *arg) {
+    unsigned long sz = 64 * 1024;
+    char *stk = (char *)sys_mmap(sz);
+    if (!stk) return -1;
+    unsigned long top = ((unsigned long)stk + sz) & ~15UL;   /* 16-align the stack top */
+    top -= 8;                                                /* callee entry wants rsp%16==8 */
+    *(void **)top = (void *)thread_exit_stub;                /* fn's `ret` lands here */
+    return (int)sys_clone((void *)fn, (void *)top, arg);
+}
 long sys_uffd_register(void *addr, unsigned long len) { return do_syscall(SYS_uffd_register, (long)addr, (long)len, 0); }
 long sys_uffd_read(void) { return do_syscall(SYS_uffd_read, 0, 0, 0); }
 long sys_uffd_copy(void *addr, const void *data, unsigned long len) { return do_syscall(SYS_uffd_copy, (long)addr, (long)data, (long)len); }
