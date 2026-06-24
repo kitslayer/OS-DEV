@@ -26,6 +26,7 @@
  * It is purely READ-ONLY and never touches the boot FAT32 mount (fat32.c/vfs.c).
  */
 #include "blockdev.h"
+#include "kheap.h"     /* kmalloc/kfree for blockdev_mount_pread's prefix temp (M1196) */
 #include "partition.h"
 #include "ext2.h"
 #include "iso9660.h"
@@ -542,6 +543,24 @@ long blockdev_mount_read(int i, const char *path, void *buf, unsigned long max) 
     return g_mount[i].fstype == FS_EXT2    ? ext2_read_path(r, c, s, path ? path : "", buf, max)
          : g_mount[i].fstype == FS_ISO9660 ? iso9660_read_path(r, c, s, path ? path : "", buf, max)
                                            : fatvol_read_path(r, c, s, path ? path : "", buf, max);
+}
+/* Positioned read on mount `i` (M1196): ext2 reads natively at the offset; ISO/
+ * FAT fall back to a read-prefix-then-slice (read [0, offset+max), return the
+ * [offset..] tail) — correct, just not seek-efficient on those. */
+long blockdev_mount_pread(int i, const char *path, void *buf, unsigned long max, unsigned long offset) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype == FS_EXT2)
+        return ext2_pread(mount_rfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", buf, max, offset);
+    /* ISO/FAT: read the prefix into a temp, slice the tail */
+    unsigned long want = offset + max; if (want > (16u << 20)) want = 16u << 20;
+    char *tmp = kmalloc(want ? want : 1); if (!tmp) return -1;
+    long got = blockdev_mount_read(i, path, tmp, want);
+    long n = 0;
+    if (got > (long)offset) { n = got - (long)offset; if ((unsigned long)n > max) n = (long)max;
+                              for (long k = 0; k < n; k++) ((char *)buf)[k] = tmp[offset + k]; }
+    kfree(tmp);
+    return n;
 }
 
 /* Create a new file at `path` (relative to the volume root) on mount `i`. Only

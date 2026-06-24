@@ -44,6 +44,24 @@ long tmpfs_read(const char *name, void *buf, unsigned long max) {
     return (long)n;
 }
 
+/* Positioned read: up to `max` bytes from byte `offset` (M1196). A tmpfs file is
+ * a contiguous buffer, so this is a bounded memcpy from buf+offset. */
+long tmpfs_pread(const char *name, void *buf, unsigned long max, unsigned long offset) {
+    int i = tfind(name);
+    if (i < 0) return -1;
+    if (tf[i].link) {                         /* symlink: positioned-read the target */
+        if (resolve_depth >= 8) return -1;
+        resolve_depth++;
+        long r = vfs_pread(tf[i].buf, buf, max, offset);
+        resolve_depth--;
+        return r;
+    }
+    if (offset >= tf[i].len) return 0;        /* at/after EOF */
+    unsigned long n = tf[i].len - offset; if (n > max) n = max;
+    for (unsigned long k = 0; k < n; k++) ((char *)buf)[k] = tf[i].buf[offset + k];
+    return (long)n;
+}
+
 /* Create (or replace) a symlink `name` -> `target`. The link stores the target
  * path as its content; tmpfs_read follows it. Returns 0 / -1. */
 long tmpfs_symlink(const char *name, const char *target) {

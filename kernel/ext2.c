@@ -220,22 +220,34 @@ int ext2_probe(blk_read_fn read, void *ctx, uint64_t start_lba) {
     return ext2_open(read, ctx, start_lba, &v);
 }
 
-long ext2_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
-                    void *buf, unsigned long max) {
+/* Positioned read: up to `max` bytes starting at byte `offset` (M1196). Walks
+ * blocks from offset/bs with a partial first/last block, so file fds read at an
+ * arbitrary position without the read-the-whole-prefix workaround. */
+long ext2_pread(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                void *buf, unsigned long max, unsigned long offset) {
     ext2_t v; if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
     uint8_t inode[256]; int isdir = 0;
     if (!walk(&v, path, inode, &isdir) || isdir) return -1;
     uint32_t size = e_rd32(inode + 4);
-    if (size > max) size = (uint32_t)max;
-    uint8_t blk[4096]; uint32_t done = 0;
-    while (done < size) {
-        uint32_t db = map_block(&v, inode, done / v.block_size);
-        uint32_t chunk = v.block_size; if (chunk > size - done) chunk = size - done;
+    if (offset >= size) return 0;                          /* at/after EOF */
+    unsigned long avail = size - offset;
+    unsigned long want = max < avail ? max : avail;        /* read min(max, remaining) */
+    uint8_t blk[4096]; unsigned long done = 0;
+    while (done < want) {
+        unsigned long pos = offset + done;
+        uint32_t db = map_block(&v, inode, (uint32_t)(pos / v.block_size));
+        uint32_t bo = (uint32_t)(pos % v.block_size);      /* byte offset within the block */
+        uint32_t chunk = v.block_size - bo;                /* to the block's end */
+        if (chunk > want - done) chunk = (uint32_t)(want - done);
         if (!db) { for (uint32_t i = 0; i < chunk; i++) ((uint8_t *)buf)[done + i] = 0; }   /* hole */
-        else { if (rdblk(&v, db, blk) < 0) break; for (uint32_t i = 0; i < chunk; i++) ((uint8_t *)buf)[done + i] = blk[i]; }
+        else { if (rdblk(&v, db, blk) < 0) break; for (uint32_t i = 0; i < chunk; i++) ((uint8_t *)buf)[done + i] = blk[bo + i]; }
         done += chunk;
     }
     return (long)done;
+}
+long ext2_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                    void *buf, unsigned long max) {
+    return ext2_pread(read, ctx, start_lba, path, buf, max, 0);   /* whole-file read = pread @0 (M1196) */
 }
 
 /* FIEMAP (M1152): the file's physical extent map — each maximal run of

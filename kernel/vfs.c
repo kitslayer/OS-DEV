@@ -411,11 +411,20 @@ int vfs_list(vfs_dirent *out, int max) {
     return fs ? fs->list(out, max) : -1;
 }
 
-/* Offset read for file-backed mmap (M1136). v1 serves the boot filesystem only
- * (where programs + data live); other sources return -1 (not mmap-backable yet).
- * No bind/synth routing — mmap stores the already-resolved path. */
+/* Positioned read: up to `max` bytes of `name` starting at byte `off`. Backs
+ * file-backed mmap (M1136) and read+write file fds (M1193/M1196). tmpfs and ext2
+ * mounts now read natively at the offset (seek-efficient, uncapped, M1196); the
+ * boot filesystem uses its fs->pread; ISO/FAT mounts read-prefix-slice inside
+ * blockdev_mount_pread. A boot-FS path matches neither tmpfs nor a mount, so it
+ * still hits fs->pread exactly as before (mmap unaffected). */
 long vfs_pread(const char *name, void *buf, unsigned long max, uint64_t off) {
-    return (fs && fs->pread) ? fs->pread(name, buf, max, off) : -1;
+    char rb[160]; const char *rn = bind_resolve(name, rb, sizeof rb);
+    const char *tb;
+    if (tmp_path(rn, &tb)) return tmpfs_pread(tb, buf, max, (unsigned long)off);   /* tmpfs native (M1196) */
+    int midx; char fpath[192];
+    if (mount_path(rn, &midx, fpath, sizeof fpath))
+        return blockdev_mount_pread(midx, fpath, buf, max, (unsigned long)off);    /* ext2 native / iso-fat prefix (M1196) */
+    return (fs && fs->pread) ? fs->pread(name, buf, max, off) : -1;                /* boot FS (M1136) */
 }
 
 long vfs_read(const char *name, void *buf, unsigned long max) {

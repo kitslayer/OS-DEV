@@ -92,6 +92,28 @@ int main(int argc, char **argv) {
     if (hn <= 0) { fprintf(stderr, "golden /HELLO read failed (%ld)\n", hn); return 1; }
     printf("golden ext2: probe OK, root has %d entries (incl lost+found), /HELLO reads %ld bytes\n", n, hn);
 
+    /* ext2_pread positioned read (M1196): a slice read at an offset must match the
+     * same bytes from a full read — across block boundaries + a partial first block. */
+    {
+        static uint8_t full[400000];
+        long bn = ext2_read_path(bd_read, 0, 0, "/BIG", full, sizeof full);   /* the 300 KB golden file */
+        if (bn < 200000) { fprintf(stderr, "golden /BIG too small (%ld)\n", bn); return 1; }
+        unsigned long offs[] = { 0, 1, 1000, 1023, 1024, 4096, 4097, 100000, 250000 };
+        for (unsigned t = 0; t < sizeof offs / sizeof offs[0]; t++) {
+            unsigned long o = offs[t]; if ((long)o >= bn) continue;
+            uint8_t slice[777];
+            long sn = ext2_pread(bd_read, 0, 0, "/BIG", slice, sizeof slice, o);
+            long want = bn - (long)o; if (want > (long)sizeof slice) want = sizeof slice;
+            if (sn != want || memcmp(slice, full + o, (size_t)sn) != 0) {
+                fprintf(stderr, "ext2_pread @%lu wrong (got %ld, want %ld)\n", o, sn, want); return 1;
+            }
+        }
+        if (ext2_pread(bd_read, 0, 0, "/BIG", rb, sizeof rb, (unsigned long)bn + 10) != 0) {
+            fprintf(stderr, "ext2_pread past EOF should be 0\n"); return 1;
+        }
+        printf("ext2_pread: positioned reads byte-exact vs a full read (9 offsets + past-EOF)\n");
+    }
+
     /* 2) fuzz the metadata region (superblock + GDT + bitmaps + inode table, which
      *    carries every block pointer), re-running all read parsers each time. */
     unsigned seed = 0x9e3779b9u;

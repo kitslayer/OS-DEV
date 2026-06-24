@@ -15,6 +15,8 @@ void ext2_set_clock(uint32_t (*fn)(void));   /* wire the inode-timestamp clock (
 int  ext2_probe(blk_read_fn read, void *ctx, uint64_t start_lba);   /* 0 if a valid ext2 volume, else -1 */
 int  ext2_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                     fatvol_dirent *out, int max);                   /* list a dir; entries written, or -1 */
+long ext2_pread(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
+                void *buf, unsigned long max, unsigned long offset);   /* positioned read; bytes/-1 (M1196) */
 long ext2_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                     void *buf, unsigned long max);                  /* read a file; bytes, or -1 */
 int  ext2_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path);  /* 1 dir / 0 file / -1 absent */

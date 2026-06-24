@@ -2646,24 +2646,14 @@ int app_pipe(int *out) {
     a->fd[wfd] = (struct fdent){ 1, 1, 1, idx, {0}, 0 };          /* used, type=pipe, write end */
     out[0] = rfd; out[1] = wfd; return 0;
 }
-#define FILEFD_CAP (1u << 20)   /* a file fd reads within the first 1 MiB (the read-prefix-then-slice MVP) */
+#define FILEFD_CAP (1u << 20)   /* the write-RMW bound (M1195); reads are now uncapped via vfs_pread (M1196) */
 long app_fd_read(int fd, void *buf, unsigned long max) {
     struct app *a = cur(); if (!a) return -1;
-    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 2) {   /* FILE fd: positioned read (M1193) */
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 2) {   /* FILE fd: positioned read (M1193/M1196) */
         long off = a->fd[fd].off;
         if (off < 0) return -1;
-        unsigned long want = (unsigned long)off + max;       /* read [0, off+max) then slice [off, off+got) */
-        if (want > FILEFD_CAP) want = FILEFD_CAP;
-        if (want == 0) return 0;
-        char *tmp = kmalloc(want); if (!tmp) return -1;
-        long got = vfs_read(a->fd[fd].path, tmp, want);
-        long n = 0;
-        if (got > off) {                                      /* bytes available past the offset */
-            n = got - off; if ((unsigned long)n > max) n = (long)max;
-            for (long i = 0; i < n; i++) ((char *)buf)[i] = tmp[off + i];
-            a->fd[fd].off = off + n;
-        }
-        kfree(tmp);
+        long n = vfs_pread(a->fd[fd].path, buf, max, (uint64_t)off);   /* native positioned read (tmpfs/ext2); uncapped */
+        if (n > 0) a->fd[fd].off = off + n;
         return n;                                             /* 0 => EOF (offset at/after end) */
     }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
