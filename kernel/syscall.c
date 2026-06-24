@@ -287,7 +287,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
     case SYS_clip_get: case SYS_clip_set:
         return PL_GFX;
-    case SYS_process_vm_read: case SYS_process_vm_write:
+    case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace:
     case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_killpg:
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
     case SYS_clone: case SYS_join:
@@ -1255,6 +1255,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_singlestep:                   /* hardware single-step the next n user instructions (M1123) */
         r->rax = (uint64_t)(int64_t)app_singlestep(r, (int)r->rdi);
         break;
+    case SYS_ptrace:                       /* (request, pid, addr, data): trace a child process (M1199) */
+        r->rax = (uint64_t)app_ptrace((long)r->rdi, (int)r->rsi, r->rdx, r->r10);
+        break;
     case SYS_seccomp:                      /* child: trap syscall `nr` to the supervisor (M1124) */
         r->rax = (uint64_t)(int64_t)app_seccomp_arm((int)r->rdi);
         break;
@@ -1328,7 +1331,10 @@ void syscall_dispatch(struct registers *r) {
                                             * syscall's return (app_deliver_pending tail), or left pending
                                             * for signalfd if it has no handler (M1126). */
         r->rax = 0;
-        app_request_signal((app_t *)app_current(), (int)r->rdi);
+        /* ptrace: if this process is traced, raise() becomes a trace-stop that
+         * parks it + notifies the tracer (returns here when continued). */
+        if (!app_trace_on_signal((app_t *)app_current(), (int)r->rdi))
+            app_request_signal((app_t *)app_current(), (int)r->rdi);
         break;
     case SYS_sigreturn:                    /* return from a handler: restore the saved context */
         app_sigreturn(r);

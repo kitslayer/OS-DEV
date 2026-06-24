@@ -146,6 +146,12 @@ struct app {
     volatile long sc_retval;             /* the verdict's return value (when not run-real) */
     volatile int sc_run_real;            /* verdict: 1 = run the real syscall, 0 = use sc_retval */
     void    *sc_sup;                     /* a supervisor task_t blocked in seccomp_wait */
+    /* ptrace (M1199): a tracer (the parent) stops + inspects/modifies this task.
+     * Same rendezvous shape as seccomp-notify above. */
+    int      ptraced;                    /* 1 = being traced by our parent (ptrace) */
+    volatile int trace_stopped;          /* 1 = parked at a trace stop */
+    volatile int trace_sig;              /* the signal that caused the stop */
+    void    *trace_sup;                  /* a tracer task_t blocked in ptrace(WAIT) */
     /* per-process file-descriptor table (M1187). Additive: zero on spawn/fork,
      * only touched by pipe()/fd{read,write,close}/dup2; an app that never calls
      * them has an empty table, so fork-copy + reap-close are no-ops for it. */
@@ -3098,6 +3104,86 @@ long app_seccomp_reply(int childpid, int run_real, long retval) {
     c->sc_pending = 0;
     if (c->task) task_wake((task_t *)c->task);          /* resume the child */
     return 0;
+}
+
+/* ptrace (M1199): the canonical Unix process-tracing syscall. A tracer (the
+ * parent) stops a tracee, reads/modifies its registers + memory, and continues
+ * it — the mechanism strace/gdb are built on. Assembled from pieces already in
+ * the tree: the stop/wait/cont rendezvous mirrors seccomp-notify above
+ * (task_block/task_wake, interrupts-off so there's no lost wakeup — every ring-3
+ * task is scheduled on the BSP, so tracer and tracee never truly run at once);
+ * PEEK/POKE reuse app_process_vm_read/write (same-tree-gated, COW-aware); GETREGS
+ * reuses the tracee's saved trap frame (task_uframe). The PT_* request codes are
+ * shared with userspace in syscall.h. */
+
+/* The tracee parks here, from its own raise() syscall, until the tracer resumes
+ * it. Runs in the tracee's syscall trap context — safe to block, exactly like
+ * app_seccomp_notify. */
+static long app_trace_stop(int signo) {
+    struct app *a = cur();
+    a->trace_sig = signo;
+    a->trace_stopped = 1;
+    if (a->trace_sup) { task_wake((task_t *)a->trace_sup); a->trace_sup = 0; }  /* wake the tracer */
+    task_block();                                  /* resumed by the tracer's PT_CONT */
+    a->trace_stopped = 0;
+    return 0;
+}
+
+/* SYS_raise hook: a traced process stops + notifies its tracer instead of taking
+ * the signal's default action. Returns 1 (and blocks until continued) if traced. */
+int app_trace_on_signal(app_t *a, int signo) {
+    struct app *ap = (struct app *)a;
+    if (!ap || !ap->ptraced) return 0;
+    app_trace_stop(signo);
+    return 1;
+}
+
+long app_ptrace(long req, int pid, uint64_t addr, uint64_t data) {
+    struct app *me = cur();
+    if (!me) return -1;
+    if (req == PT_TRACEME) { me->ptraced = 1; return 0; }
+
+    struct app *t = app_by_pid(pid);
+    if (!t || t->parent != me->pid) return -1;     /* must be our own child */
+
+    /* PT_WAIT blocks until the child enters a trace-stop. It must NOT require
+     * ptraced upfront: the child may not have run PT_TRACEME yet (a fork-order
+     * race), and registering as the waiter "even if not armed yet" — like
+     * app_seccomp_wait — is what closes that race (the child's trace-stop wakes
+     * us). The check-then-block is atomic w.r.t. the child: ring-3 tasks all run
+     * on the BSP, so the child only runs once we task_block(). */
+    if (req == PT_WAIT) {
+        if (!t->trace_stopped) {
+            t->trace_sup = (void *)task_self();
+            task_block();
+            t->trace_sup = 0;
+        }
+        return t->trace_stopped ? t->trace_sig : -1;
+    }
+
+    /* Every other request inspects/continues a child that must be traced AND
+     * currently stopped (so its trap frame + memory are quiescent). */
+    if (!t->ptraced || !t->trace_stopped) return -1;
+    switch (req) {
+    case PT_PEEKDATA: {                            /* read one word from the tracee's memory */
+        uint64_t word = 0;
+        if (app_process_vm_read(pid, addr, &word, sizeof word) != (long)sizeof word) return -1;
+        return (long)word;
+    }
+    case PT_POKEDATA:                              /* write one word into the tracee's memory */
+        return app_process_vm_write(pid, addr, &data, sizeof data) == (long)sizeof data ? 0 : -1;
+    case PT_GETREGS: {                             /* copy the tracee's trap frame to the tracer's buffer */
+        struct registers *u = task_uframe((task_t *)t->task);
+        if (!u || !vmm_user_ok(addr, sizeof *u)) return -1;
+        __builtin_memcpy((void *)addr, u, sizeof *u);
+        return 0;
+    }
+    case PT_CONT:                                  /* resume the stopped tracee */
+        t->trace_stopped = 0;
+        if (t->task) task_wake((task_t *)t->task);
+        return 0;
+    }
+    return -1;
 }
 
 /* Load and run an ELF program from a FAT32 file (e.g. `run calc.elf`). The ELF

@@ -194,6 +194,17 @@
 #define SECCOMP_RET_KILL  2    /* terminate the process (hard sandbox) */
 #define SYS_open         178   /* (path) -> a read-only file fd (>=3); -1 (M1193) */
 #define SYS_lseek        179   /* (fd, off, whence) -> reposition a file fd (0=SET,1=CUR,2=END); offset/-1 (M1193) */
+#define SYS_ptrace       180   /* (request, pid, addr, data) -> trace a child process; per-request (M1199) */
+
+/* ptrace request codes (M1199) — the tracee self-marks with TRACEME; the tracer
+ * (its parent) drives the rest while the tracee is stopped. */
+#define PT_TRACEME   0   /* tracee: "trace me" (called by the child) */
+#define PT_PEEKDATA  1   /* tracer: read one word from the tracee at addr -> word */
+#define PT_POKEDATA  2   /* tracer: write `data` word into the tracee at addr */
+#define PT_GETREGS   3   /* tracer: copy the tracee's registers into *(addr) */
+#define PT_SETREGS   4   /* (reserved — follow-on) */
+#define PT_CONT      5   /* tracer: resume the stopped tracee */
+#define PT_WAIT      6   /* tracer: block until the tracee stops -> stop signal */
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2

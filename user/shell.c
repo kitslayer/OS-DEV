@@ -2474,6 +2474,25 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "fifo: mkfifo + open-by-name rendezvous + EOF OK\n" : "fifotest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "ptracetest")) {   /* ptrace: trace a child — stop, peek/poke mem, snapshot regs, continue (M1199) */
+            volatile long x = 111;
+            long pid = sys_fork();
+            if (pid == 0) {                         /* child = tracee */
+                sys_ptrace(PT_TRACEME, 0, 0, 0);
+                sys_raise(SIGSTOP);                 /* stop here; the tracer pokes x while we're stopped */
+                sys_exit(x == 222 ? 7 : 8);         /* the tracer should have changed x: 111 -> 222 */
+            }
+            long sig    = sys_ptrace(PT_WAIT, (int)pid, 0, 0);                      /* block until the child stops */
+            long before = sys_ptrace(PT_PEEKDATA, (int)pid, (unsigned long)&x, 0);  /* read the child's x (=111) */
+            sys_ptrace(PT_POKEDATA, (int)pid, (unsigned long)&x, 222);              /* overwrite it in the child */
+            long after  = sys_ptrace(PT_PEEKDATA, (int)pid, (unsigned long)&x, 0);  /* read it back (=222) */
+            unsigned long regs[40];
+            long gr     = sys_ptrace(PT_GETREGS, (int)pid, (unsigned long)regs, 0); /* snapshot the child's registers */
+            sys_ptrace(PT_CONT, (int)pid, 0, 0);                                    /* resume the child */
+            int st = -1; sys_waitpid((int)pid, &st);
+            if (sig == SIGSTOP && before == 111 && after == 222 && gr == 0 && st == 7)
+                print("ptrace: WAIT(stop) + PEEK(111) + POKE(222) + GETREGS + CONT -> child saw 222, exit 7 -- OK\n");
+            else { print("ptrace: FAILED\n"); g_status = 1; }
         } else if (streq(line, "seccomptest")) {   /* self-imposed BPF syscall filter: DENY + KILL (M1190/M1192) */
             int ok = 1;
             /* part 1 (M1190): a DENY filter -> the blocked syscall returns -1, the process continues */

@@ -72,6 +72,7 @@ long sys_shmget(int key, unsigned long size, int flags);          /* SysV shm se
 void *sys_shmat(int shmid);                                       /* attach: base VA or 0 (M1161) */
 long sys_shmdt(void *addr);                                       /* detach a shm mapping (M1161) */
 long sys_process_vm_read(int pid, unsigned long raddr, void *buf, unsigned long len);  /* read another process's mem; bytes/-1 (M1162) */
+long sys_ptrace(long req, int pid, unsigned long addr, unsigned long data);  /* trace a child process (M1199) */
 long sys_process_vm_write(int pid, unsigned long raddr, const void *buf, unsigned long len);  /* write another process's mem (COW-safe); bytes/-1 (M1165) */
 /* AF_UNIX path-keyed stream sockets (M1169): listen/connect/accept by path, send/recv over an endpoint id (survives fork) */
 int  sys_unix_listen(const char *path);                /* -> listener id; -1 */
