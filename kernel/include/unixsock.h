@@ -18,4 +18,5 @@ int  unix_accept(int lid);                                     /* -> endpoint id
 long unix_send(int ep, const void *buf, unsigned long len);    /* bytes written (may be short), -1 if peer/ep closed */
 long unix_recv(int ep, void *buf, unsigned long max);          /* bytes read, 0 = peer closed & drained, -1 bad ep */
 int  unix_close(int ep);                                       /* close one endpoint; wakes the peer; 0/-1 */
+int  unix_wait_any(const int *eps, int n);                     /* poll/epoll: index of first readable ep (blocks once); -1 (M1170) */
 int  unix_format(char *b, int max);                            /* /proc/unix table */

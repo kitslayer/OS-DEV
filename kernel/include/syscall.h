@@ -156,6 +156,7 @@
 #define SYS_unix_send    144   /* (ep, buf, len) -> bytes written; -1 closed (M1169) */
 #define SYS_unix_recv    145   /* (ep, buf, max) -> bytes read; 0 EOF; -1 bad ep (M1169) */
 #define SYS_unix_close   146   /* (ep) -> 0/-1 (M1169) */
+#define SYS_unix_wait_any 147  /* (int*eps, n) -> index of first readable ep (blocks once); -1 (M1170) */
 
 /* getrlimit/setrlimit (M1163), shared by the kernel + ulib. */
 #define RLIMIT_DATA    2

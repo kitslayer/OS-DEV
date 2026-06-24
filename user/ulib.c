@@ -203,6 +203,7 @@ int  sys_unix_accept(int lid) { return (int)do_syscall(SYS_unix_accept, lid, 0, 
 long sys_unix_send(int ep, const void *buf, unsigned long len) { return do_syscall(SYS_unix_send, ep, (long)buf, (long)len); }
 long sys_unix_recv(int ep, void *buf, unsigned long max) { return do_syscall(SYS_unix_recv, ep, (long)buf, (long)max); }
 int  sys_unix_close(int ep) { return (int)do_syscall(SYS_unix_close, ep, 0, 0); }
+int  sys_unix_wait_any(const int *eps, int n) { return (int)do_syscall(SYS_unix_wait_any, (long)eps, n, 0); }
 long sys_getrlimit(int resource, struct rlimit *rl) { return do_syscall(SYS_getrlimit, resource, (long)rl, 0); }
 long sys_setrlimit(int resource, struct rlimit *rl) { return do_syscall(SYS_setrlimit, resource, (long)rl, 0); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }

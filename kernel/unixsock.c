@@ -141,6 +141,38 @@ int unix_close(int ep) {
     return 0;
 }
 
+/* Is endpoint `ep` readable — i.e. would unix_recv NOT block? True when its RX
+ * ring has bytes OR the peer has closed (recv would return data or EOF). */
+static int ep_readable(int ep) {
+    int s; struct uconn *c = ep_conn(ep, &s); if (!c) return 0;
+    struct uring *rx = s ? &c->a2b : &c->b2a;
+    int peer_closed = s ? c->a_closed : c->b_closed;
+    return rcount(rx) > 0 || peer_closed;
+}
+
+/* wait_any: the poll/epoll-style readiness multiplexer. Given up to 16 endpoint
+ * ids, return the index of the first one that is readable, blocking once if none
+ * are. Registers the caller on every endpoint's RX waiter slot, blocks, then
+ * unregisters and re-scans; a spurious/kill wake returns -1 (the caller re-polls)
+ * rather than spinning. NB one waiter slot per endpoint, so a process shouldn't
+ * both wait_any and recv-block on the same endpoint concurrently. (M1170) */
+int unix_wait_any(const int *eps, int n) {
+    if (n <= 0 || n > 16) return -1;
+    for (int i = 0; i < n; i++) if (ep_readable(eps[i])) return i;   /* fast path: already ready */
+    for (int i = 0; i < n; i++) {                                    /* park on each endpoint's reader slot */
+        int s; struct uconn *c = ep_conn(eps[i], &s); if (!c) continue;
+        *(s ? &c->b_waiter : &c->a_waiter) = task_self();
+    }
+    task_block();                                                    /* woken by a sender/close on any of them (or a kill) */
+    for (int i = 0; i < n; i++) {                                    /* unregister ourselves everywhere */
+        int s; struct uconn *c = ep_conn(eps[i], &s); if (!c) continue;
+        task_t **mw = s ? &c->b_waiter : &c->a_waiter;
+        if (*mw == task_self()) *mw = 0;
+    }
+    for (int i = 0; i < n; i++) if (ep_readable(eps[i])) return i;   /* re-scan after the wake */
+    return -1;                                                       /* spurious/kill -> caller re-polls */
+}
+
 static int sapp(char *b, int p, int max, const char *s) { while (*s && p < max - 1) b[p++] = *s++; return p; }
 static int sdec(char *b, int p, int max, int v) {
     char t[12]; int n = 0; if (!v) t[n++] = '0';
