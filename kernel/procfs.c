@@ -128,10 +128,19 @@ static long gen_version(char *b, int max) {
     int p = sapp(b, 0, max, "OS-DEV version 1.0 (x86_64) - a from-scratch kernel, built " __DATE__ " " __TIME__ "\n");
     b[p] = 0; return p;
 }
-static long gen_loadavg(char *b, int max) {
-    int p = sapp(b, 0, max, "0.00 0.00 0.00 1/");
+static long gen_loadavg(char *b, int max) {     /* real 1/5/15-min run-queue load average (M1148) */
+    uint64_t la[3]; task_loadavg(la);           /* fixed-point, FSHIFT=11 (FIXED_1 = 2048) */
+    int p = 0;
+    for (int i = 0; i < 3; i++) {
+        p = sdec(b, p, max, la[i] >> 11);                    /* integer part */
+        if (p < max - 1) b[p++] = '.';
+        p = sdec2(b, p, max, ((la[i] & 2047) * 100) >> 11);  /* two fractional digits */
+        if (p < max - 1) b[p++] = ' ';
+    }
+    p = sdec(b, p, max, (uint64_t)task_runnable_count());    /* runnable now / total tasks */
+    if (p < max - 1) b[p++] = '/';
     p = sdec(b, p, max, (uint64_t)task_count());
-    p = sapp(b, p, max, " 0\n");
+    p = sapp(b, p, max, " 0\n");                             /* last-pid field (stub) */
     b[p] = 0; return p;
 }
 static long gen_processes(char *b, int max) {
@@ -262,13 +271,14 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
     p = sapp(b, p, max, "/");               p = sdec(b, p, max, memt);
     p = sapp(b, p, max, " MiB used  tasks "); p = sdec(b, p, max, (uint64_t)task_count());
     p = sapp(b, p, max, "\n");
-    p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  SWITCHES  NAME\n");
+    p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  WAIT_MS  SWITCHES  NAME\n");
     for (int i = 0; i < cnt; i++) {
         if (ti[i].state == 3) continue;             /* skip dead */
         p = sapp(b, p, max, "  ");  p = sdec(b, p, max, (uint64_t)ti[i].id);
         p = sapp(b, p, max, "    "); p = sapp(b, p, max, st[(unsigned)ti[i].state < 5 ? ti[i].state : 0]);
         p = sapp(b, p, max, "  ");  p = sdec(b, p, max, ti[i].run_ms);
         p = sapp(b, p, max, "    "); p = sdec(b, p, max, (ti[i].run_ms * 100) / up); p = sapp(b, p, max, "%");
+        p = sapp(b, p, max, "    "); p = sdec(b, p, max, ti[i].rq_wait_ms);
         p = sapp(b, p, max, "    "); p = sdec(b, p, max, ti[i].nswitch);
         p = sapp(b, p, max, "  ");  p = sapp(b, p, max, ti[i].proc ? app_title((app_t *)ti[i].proc) : "(kernel)");
         p = sapp(b, p, max, "\n");

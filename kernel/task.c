@@ -181,14 +181,20 @@ static void switch_to_next(void) {
         next = idle_task;                       /* prev blocked/exited and nothing else is ready -> run the idle floor (don't spin a BLOCKED prev) */
     }
 
-    if (prev->state == TASK_RUNNING)
+    uint64_t now = timer_ms();
+    if (prev->state == TASK_RUNNING) {
         prev->state = TASK_READY;
+        prev->ready_since = now;                 /* entered the run queue: start clocking its wait (M1148) */
+    }
     next->state = TASK_RUNNING;
+    if (next->ready_since) {                      /* leaving the run queue: charge the time it waited (M1148) */
+        next->rq_wait_ms += now - next->ready_since;
+        next->ready_since = 0;
+    }
     current = next;
 
     /* CPU-time accounting: credit prev with the slice it just ran, and stamp
      * next's switch-in time (for /proc/sched + a real `top`). */
-    uint64_t now = timer_ms();
     prev->run_ms += now - prev->last_in;
     next->last_in = now;
     next->nswitch++;
@@ -241,6 +247,7 @@ void task_wake(task_t *t) {
     if (t && t->state == TASK_BLOCKED) {
         t->wake_at = 0;            /* cancel any pending timed wake */
         t->state = TASK_READY;
+        t->ready_since = timer_ms();   /* re-entered the run queue (M1148) */
     }
 }
 
@@ -272,9 +279,53 @@ void task_wake_sleepers(void) {
         if (t->state == TASK_BLOCKED && t->wake_at && t->wake_at <= now) {
             t->wake_at = 0;
             t->state = TASK_READY;
+            t->ready_since = now;       /* re-entered the run queue (M1148) */
         }
         t = t->next;
     } while (t != current);
+}
+
+/* ---- load average (M1148) -------------------------------------------------
+ * An EWMA of the RUN-QUEUE DEPTH, using the classic Linux fixed-point scheme
+ * (FSHIFT=11, FIXED_1=2048), sampled every 5 s from the timer IRQ. The sample
+ * is the number of RUNNABLE tasks right now — RUNNING or READY, with the idle
+ * floor excluded — i.e. how many tasks want the CPU. This replaces the old
+ * hardcoded /proc/loadavg stub ("0.00 0.00 0.00") with a figure that genuinely
+ * climbs under contention (spawn N spinners -> the 1-min average approaches N)
+ * and decays back toward the desktop's baseline when they exit. */
+#define LOAD_FSHIFT  11
+#define LOAD_FIXED_1 (1u << LOAD_FSHIFT)
+#define LOAD_EXP_1   1884     /* 1/exp(5s/1min)  as a FIXED_1-scaled fraction */
+#define LOAD_EXP_5   2014     /* 1/exp(5s/5min)  */
+#define LOAD_EXP_15  2037     /* 1/exp(5s/15min) */
+static uint64_t load_avg[3];      /* fixed-point 1/5/15-min averages */
+static uint64_t load_next_ms;     /* next 5 s sample boundary */
+
+/* Tasks that want the CPU right now: RUNNING or READY, idle floor excluded.
+ * Walks the (tiny) ready ring; safe from the IRQ as task_wake_sleepers does. */
+int task_runnable_count(void) {
+    if (!current) return 0;
+    int n = 0; task_t *t = current;
+    do {
+        if (t != idle_task && (t->state == TASK_RUNNING || t->state == TASK_READY)) n++;
+        t = t->next;
+    } while (t != current);
+    return n;
+}
+
+/* Update the EWMAs at most once per 5 s. Called every timer tick. */
+void loadavg_sample(void) {
+    uint64_t now = timer_ms();
+    if (now < load_next_ms) return;
+    load_next_ms = now + 5000;
+    uint64_t active = (uint64_t)task_runnable_count() << LOAD_FSHIFT;
+    static const uint64_t exp_[3] = { LOAD_EXP_1, LOAD_EXP_5, LOAD_EXP_15 };
+    for (int i = 0; i < 3; i++)
+        load_avg[i] = (load_avg[i] * exp_[i] + active * (LOAD_FIXED_1 - exp_[i])) >> LOAD_FSHIFT;
+}
+
+void task_loadavg(uint64_t out[3]) {
+    out[0] = load_avg[0]; out[1] = load_avg[1]; out[2] = load_avg[2];
 }
 
 /* Suspend a task (it leaves the run rotation until task_cont). Only a runnable,
@@ -373,7 +424,7 @@ int task_snapshot(task_info_t *out, int max) {
             out[n].id = t->id; out[n].state = (int)t->state; out[n].proc = t->proc;
             uint64_t rm = t->run_ms;
             if (t->state == TASK_RUNNING) rm += now - t->last_in;   /* include the in-progress slice */
-            out[n].run_ms = rm; out[n].nswitch = t->nswitch;
+            out[n].run_ms = rm; out[n].nswitch = t->nswitch; out[n].rq_wait_ms = t->rq_wait_ms;
             n++; t = t->next;
         } while (t != current);
     }

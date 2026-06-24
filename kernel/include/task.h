@@ -20,6 +20,8 @@ typedef struct task {
     uint64_t      run_ms;      /* total ms this task has been RUNNING (CPU time)   */
     uint64_t      last_in;     /* timer_ms() when it last became `current`         */
     uint64_t      nswitch;     /* times it has been scheduled in (context switches) */
+    uint64_t      rq_wait_ms;  /* total ms spent READY-but-not-running (run-queue wait, /proc/sched) (M1148) */
+    uint64_t      ready_since; /* timer_ms() when it last entered the run queue; 0 = not waiting (M1148) */
     uint64_t      wake_at;     /* if BLOCKED via task_sleep_ms: timer_ms() deadline (0 = not a timed sleep) */
     struct registers *uframe;  /* most recent ring-3 trap frame (for /proc/<pid>/regs); valid while stopped (M1119) */
     struct registers *start_frame;  /* a thread's initial ring-3 frame: iret'd to once at startup, then freed (M1138) */
@@ -52,9 +54,12 @@ void    task_cont(task_t *t);              /* resume a STOPPED task */
 int     task_count(void);                  /* number of live tasks */
 
 /* A snapshot of one task, for `ps` and `/proc/sched`. */
-typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitch; } task_info_t;
+typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitch; uint64_t rq_wait_ms; } task_info_t;
 int     task_snapshot(task_info_t *out, int max);   /* fill out[]; returns count */
 uint64_t task_idle_ms(void);                         /* ms the idle task has run (system idle time) */
+int     task_runnable_count(void);   /* tasks wanting the CPU now (RUNNING|READY, idle excluded) (M1148) */
+void    loadavg_sample(void);        /* called each timer tick; updates the EWMA once per 5 s (M1148) */
+void    task_loadavg(uint64_t out[3]); /* fixed-point (FSHIFT=11) 1/5/15-min load averages (M1148) */
 
 /* Called from the timer IRQ to preempt the running thread (no-op until the
  * scheduler is initialized and there's more than one task). */
