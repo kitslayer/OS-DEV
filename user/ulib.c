@@ -280,6 +280,11 @@ long sys_setxattr(const char *path, const char *name, const void *val, unsigned 
 long sys_getxattr(const char *path, const char *name, void *out, unsigned long max) { return do_syscall4(SYS_getxattr, (long)path, (long)name, (long)out, (long)max); }
 long sys_listxattr(const char *path, char *out, unsigned long max) { return do_syscall(SYS_listxattr, (long)path, (long)out, (long)max); }
 long sys_removexattr(const char *path, const char *name) { return do_syscall(SYS_removexattr, (long)path, (long)name, 0); }
+int  sys_pty_open(void) { return (int)do_syscall(SYS_pty_open, 0, 0, 0); }
+long sys_pty_read(int id, void *buf, unsigned long max) { return do_syscall(SYS_pty_read, id, (long)buf, (long)max); }
+long sys_pty_write(int id, const void *buf, unsigned long len) { return do_syscall(SYS_pty_write, id, (long)buf, (long)len); }
+int  sys_pty_close(int id) { return (int)do_syscall(SYS_pty_close, id, 0, 0); }
+int  sys_pty_ctl(int id, int cmd, int arg) { return (int)do_syscall(SYS_pty_ctl, id, cmd, arg); }
 /* Restorer trampoline: a signal handler returns HERE; we ask the kernel to
  * restore the pre-signal context (which iretq's elsewhere, so this never
  * returns). The kernel is told this address via sys_signal's 3rd arg. */

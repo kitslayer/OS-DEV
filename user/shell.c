@@ -2375,6 +2375,47 @@ static int run_command(char *line, char *cwd) {
                 if (sys_removexattr(path, name) < 0) { print("xattr: remove failed (not found?)\n"); g_status = 1; }
                 else print("xattr removed\n");
             } else print("usage: xattr get|set|rm|list PATH [user.NAME [VALUE]]\n");
+        } else if (streq(line, "ptytest")) {   /* pseudoterminal line discipline (M1185) */
+            int m = sys_pty_open();
+            if (m < 0) { print("ptytest: pty_open failed\n"); g_status = 1; }
+            else {
+                int s = m | 1; char b[80]; long n; int ok = 1;
+                sys_pty_ctl(m, PTY_SETFG, 99999);   /* INTR -> a bogus pgid: exercise the path, signal nobody */
+                /* 1) cooked: a line written to the master is readable by the slave */
+                sys_pty_write(m, "hi\n", 3);
+                n = sys_pty_read(s, b, sizeof b);
+                if (!(n == 3 && b[0]=='h' && b[1]=='i' && b[2]=='\n')) ok = 0;
+                /* 2) ECHO returned the typed line to the master */
+                n = sys_pty_read(m, b, sizeof b);
+                if (!(n >= 3 && b[0]=='h' && b[1]=='i')) ok = 0;
+                /* 3) ERASE (backspace): "ab\bc\n" -> slave sees "ac\n" */
+                sys_pty_write(m, "ab\bc\n", 5);
+                n = sys_pty_read(s, b, sizeof b);
+                if (!(n == 3 && b[0]=='a' && b[1]=='c' && b[2]=='\n')) ok = 0;
+                sys_pty_read(m, b, sizeof b);        /* drain the editing echo (one read grabs it all) */
+                /* 4) INTR (^C) flushes the pending line and echoes ^C */
+                sys_pty_write(m, "xy\x03", 3);
+                n = sys_pty_read(m, b, sizeof b);
+                int sawC = 0; for (long i = 0; i + 1 < n; i++) if (b[i]=='^' && b[i+1]=='C') sawC = 1;
+                if (!sawC) ok = 0;
+                sys_pty_write(m, "z\n", 2);          /* a fresh line: "xy" must have been discarded */
+                n = sys_pty_read(s, b, sizeof b);
+                if (!(n == 2 && b[0]=='z' && b[1]=='\n')) ok = 0;
+                sys_pty_read(m, b, sizeof b);        /* drain the "z\n" echo */
+                /* 5) raw mode (no ICANON/ECHO): bytes pass through immediately */
+                sys_pty_ctl(m, PTY_SETMODE, 0);
+                sys_pty_write(m, "R", 1);
+                n = sys_pty_read(s, b, sizeof b);
+                if (!(n == 1 && b[0]=='R')) ok = 0;
+                /* 6) slave output is readable by the master */
+                sys_pty_write(s, "OUT", 3);
+                n = sys_pty_read(m, b, sizeof b);
+                if (!(n == 3 && b[0]=='O' && b[1]=='U' && b[2]=='T')) ok = 0;
+                sys_pty_close(m); sys_pty_close(s);
+                print(ok ? "pty: cooked + echo + erase + INTR-flush + raw + slave-output all OK\n"
+                         : "ptytest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

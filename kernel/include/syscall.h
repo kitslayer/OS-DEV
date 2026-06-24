@@ -175,6 +175,11 @@
 #define SYS_getxattr     162   /* (path, name, out, max) -> read a user.* xattr; full size/-1 (M1182) */
 #define SYS_listxattr    163   /* (path, out, max) -> NUL-separated user.* xattr names; total/-1 (M1182) */
 #define SYS_removexattr  164   /* (path, name) -> remove a user.* xattr; 0/-1 (M1182) */
+#define SYS_pty_open     165   /* () -> pseudoterminal master id (slave = master|1); -1 (M1185) */
+#define SYS_pty_read     166   /* (id, buf, max) -> bytes; 0 EOF; -1 (blocks if empty) (M1185) */
+#define SYS_pty_write    167   /* (id, buf, len) -> bytes; -1 (master write feeds the line discipline) (M1185) */
+#define SYS_pty_close    168   /* (id) -> close one end; 0/-1 (M1185) */
+#define SYS_pty_ctl      169   /* (id, cmd, arg) -> cmd 0=set lflag, 1=set fg pgid; 0/-1 (M1185) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

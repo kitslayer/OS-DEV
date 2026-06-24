@@ -164,6 +164,13 @@ long  sys_setxattr(const char *path, const char *name, const void *val, unsigned
 long  sys_getxattr(const char *path, const char *name, void *out, unsigned long max);  /* read a user.* xattr; full size/-1 (M1182) */
 long  sys_listxattr(const char *path, char *out, unsigned long max);  /* NUL-sep user.* xattr names; total/-1 (M1182) */
 long  sys_removexattr(const char *path, const char *name);  /* remove a user.* xattr; 0/-1 (M1182) */
+int   sys_pty_open(void);                                    /* -> pty master id (slave = master|1); -1 (M1185) */
+long  sys_pty_read(int id, void *buf, unsigned long max);    /* bytes; 0 EOF; -1 (M1185) */
+long  sys_pty_write(int id, const void *buf, unsigned long len);  /* bytes; -1 (master write feeds the ldisc) (M1185) */
+int   sys_pty_close(int id);                                 /* close one end; 0/-1 (M1185) */
+int   sys_pty_ctl(int id, int cmd, int arg);                 /* cmd 0=lflag, 1=fg pgid; 0/-1 (M1185) */
+#define PTY_SETMODE 0
+#define PTY_SETFG   1
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */

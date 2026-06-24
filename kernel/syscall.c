@@ -16,6 +16,7 @@
 #include "mqueue.h"
 #include "sysvipc.h"
 #include "unixsock.h"
+#include "pty.h"
 #include "flock.h"
 #include "fanfs.h"
 #include "iouring.h"
@@ -258,6 +259,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any:
+    case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
     case SYS_nice: case SYS_sched_setscheduler: case SYS_tcgetattr: case SYS_tcsetattr:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
@@ -349,6 +351,8 @@ static const char *syscall_name(uint64_t n) {
         [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",
         [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_killpg]="killpg",
         [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
+        [SYS_pty_open]="pty_open",[SYS_pty_read]="pty_read",[SYS_pty_write]="pty_write",
+        [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -1003,6 +1007,23 @@ void syscall_dispatch(struct registers *r) {
     case SYS_removexattr:                  /* (path, name) -> remove a user.* xattr (M1182) */
         if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_removexattr((const char *)r->rdi, (const char *)r->rsi);
+        break;
+    case SYS_pty_open:                     /* () -> pseudoterminal master id (M1185) */
+        r->rax = (uint64_t)(int64_t)pty_open();
+        break;
+    case SYS_pty_read:                     /* (id, buf, max) -> bytes; 0 EOF (M1185) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)pty_read((int)r->rdi, (void *)r->rsi, r->rdx);
+        break;
+    case SYS_pty_write:                    /* (id, buf, len) -> bytes (master write feeds the ldisc) (M1185) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)pty_write((int)r->rdi, (const void *)r->rsi, r->rdx);
+        break;
+    case SYS_pty_close:                    /* (id) -> close one end (M1185) */
+        r->rax = (uint64_t)(int64_t)pty_close((int)r->rdi);
+        break;
+    case SYS_pty_ctl:                      /* (id, cmd, arg) -> set mode / fg pgid (M1185) */
+        r->rax = (uint64_t)(int64_t)pty_ctl((int)r->rdi, (int)r->rsi, (int)r->rdx);
         break;
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);

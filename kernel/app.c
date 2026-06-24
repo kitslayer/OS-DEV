@@ -11,6 +11,7 @@
  */
 #include "app.h"
 #include "flock.h"   /* flock_release_pid on process exit (M1177) */
+#include "pty.h"     /* pty_release_pid on process exit (M1185) */
 #include "task.h"
 #include "timer.h"
 #include "interrupts.h"   /* struct registers, for ring-3 signal delivery */
@@ -875,6 +876,7 @@ int app_reap(app_t *a) {
         }
         vfs_cwd_forget(a);                               /* don't stash cwd into a freed slot (M1144) */
         flock_release_pid(a->pid);                       /* drop any advisory file locks it held (M1177) */
+        pty_release_pid(a->pid);                          /* close any pseudoterminals it owned (M1185) */
         if (a->task) task_free(a->task);
         a->task = 0;
         /* Un-joined worker threads (M1139): free the dead ones; STOP any still
