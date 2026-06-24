@@ -180,6 +180,11 @@
 #define SYS_pty_write    167   /* (id, buf, len) -> bytes; -1 (master write feeds the line discipline) (M1185) */
 #define SYS_pty_close    168   /* (id) -> close one end; 0/-1 (M1185) */
 #define SYS_pty_ctl      169   /* (id, cmd, arg) -> cmd 0=set lflag, 1=set fg pgid; 0/-1 (M1185) */
+#define SYS_pipe         170   /* (int fds[2]) -> anonymous pipe; fds[0]=read, fds[1]=write; 0/-1 (M1187) */
+#define SYS_fdread       171   /* (fd, buf, max) -> read a pipe fd; bytes/0 EOF/-1 (M1187) */
+#define SYS_fdwrite      172   /* (fd, buf, len) -> write a pipe fd; bytes/-1 EPIPE (M1187) */
+#define SYS_fdclose      173   /* (fd) -> close an fd; 0/-1 (M1187) */
+#define SYS_dup2         174   /* (oldfd, newfd) -> redirect newfd onto oldfd; newfd/-1 (M1187) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

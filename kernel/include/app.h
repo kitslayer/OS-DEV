@@ -114,6 +114,11 @@ int  app_setsid(void);                 /* become session+group leader; returns s
 int  app_tcsetpgrp(int pgid);          /* set the console's foreground process group; 0 */
 int  app_tcgetpgrp(void);              /* the console's foreground process group (0 = none) */
 int  app_killpg(int pgid, int signo);  /* deliver signo to every app in pgid (killpg); count/-1 */
+int  app_pipe(int *out);               /* pipe(): out[0]=read fd, out[1]=write fd; 0/-1 (M1187) */
+long app_fd_read(int fd, void *buf, unsigned long max);        /* read a pipe fd; bytes/0 EOF/-1 (M1187) */
+long app_fd_write(int fd, const void *buf, unsigned long len); /* write a pipe fd; bytes/-1 EPIPE (M1187) */
+int  app_fd_close(int fd);             /* close an fd; 0/-1 (M1187) */
+int  app_dup2(int oldfd, int newfd);   /* redirect newfd onto oldfd's object; newfd/-1 (M1187) */
 int  app_deliver_pending(struct registers *r);     /* deliver a pending async signal on return to ring 3; 1 if delivered */
 void app_set_alarm(uint64_t ticks);                /* SYS_alarm: arm a periodic SIGALRM every `ticks` ticks (0=disarm) */
 void app_alarm_tick(void);                         /* timer IRQ hook: raise SIGALRM if the current app's alarm is due */

@@ -169,6 +169,11 @@ long  sys_pty_read(int id, void *buf, unsigned long max);    /* bytes; 0 EOF; -1
 long  sys_pty_write(int id, const void *buf, unsigned long len);  /* bytes; -1 (master write feeds the ldisc) (M1185) */
 int   sys_pty_close(int id);                                 /* close one end; 0/-1 (M1185) */
 int   sys_pty_ctl(int id, int cmd, int arg);                 /* cmd 0=lflag, 1=fg pgid; 0/-1 (M1185) */
+int   sys_pipe(int fds[2]);                                  /* anonymous pipe; fds[0]=read, fds[1]=write; 0/-1 (M1187) */
+long  sys_fdread(int fd, void *buf, unsigned long max);      /* read a pipe fd; bytes/0 EOF/-1 (M1187) */
+long  sys_fdwrite(int fd, const void *buf, unsigned long len);  /* write a pipe fd; bytes/-1 EPIPE (M1187) */
+int   sys_fdclose(int fd);                                   /* close an fd; 0/-1 (M1187) */
+int   sys_dup2(int oldfd, int newfd);                        /* redirect newfd onto oldfd; newfd/-1 (M1187) */
 #define PTY_SETMODE 0
 #define PTY_SETFG   1
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */

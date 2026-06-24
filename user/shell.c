@@ -2416,6 +2416,39 @@ static int run_command(char *line, char *cwd) {
                          : "ptytest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "pipetest")) {   /* anonymous pipe + per-process fd table across fork (M1187) */
+            int fds[2];
+            if (sys_pipe(fds) != 0) { print("pipetest: pipe() failed\n"); g_status = 1; }
+            else {
+                long pid = sys_fork();
+                if (pid == 0) {                          /* child: the writer */
+                    sys_fdclose(fds[0]);                 /* close the read end it inherited */
+                    sys_fdwrite(fds[1], "hello pipe", 10);
+                    sys_fdclose(fds[1]);                 /* drop the write end -> EOF for the parent */
+                    sys_exit(0);
+                }
+                int ok = 1;
+                sys_fdclose(fds[1]);                     /* parent drops its write end so EOF can fire */
+                char b[32];
+                long n = sys_fdread(fds[0], b, sizeof b);    /* blocks until the child writes */
+                if (!(n == 10 && b[0] == 'h' && b[6] == 'p')) ok = 0;
+                long e = sys_fdread(fds[0], b, sizeof b);     /* child closed + exited -> EOF */
+                if (e != 0) ok = 0;
+                sys_fdclose(fds[0]);
+                int st = 0; sys_waitpid((int)pid, &st);
+                /* dup2: a 2nd pipe, write via a dup'd write fd, read the original */
+                int ok2 = 0, f2[2];
+                if (sys_pipe(f2) == 0) {
+                    if (sys_dup2(f2[1], 9) == 9) {
+                        sys_fdwrite(9, "dup", 3);
+                        char c[8]; long dn = sys_fdread(f2[0], c, sizeof c);
+                        ok2 = (dn == 3 && c[0] == 'd' && c[2] == 'p');
+                    }
+                    sys_fdclose(9); sys_fdclose(f2[0]); sys_fdclose(f2[1]);
+                }
+                print((ok && ok2) ? "pipe: fork round-trip + EOF + dup2 all OK\n" : "pipetest: VERIFY FAILED\n");
+                if (!(ok && ok2)) g_status = 1;
+            }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

@@ -260,6 +260,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any:
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
+    case SYS_pipe: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
     case SYS_nice: case SYS_sched_setscheduler: case SYS_tcgetattr: case SYS_tcsetattr:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
@@ -353,6 +354,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
         [SYS_pty_open]="pty_open",[SYS_pty_read]="pty_read",[SYS_pty_write]="pty_write",
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
+        [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -1024,6 +1026,28 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_pty_ctl:                      /* (id, cmd, arg) -> set mode / fg pgid (M1185) */
         r->rax = (uint64_t)(int64_t)pty_ctl((int)r->rdi, (int)r->rsi, (int)r->rdx);
+        break;
+    case SYS_pipe: {                       /* (int fds[2]) -> anonymous pipe (M1187) */
+        if (!ubuf(r->rdi, 2 * sizeof(int))) { r->rax = (uint64_t)-1; break; }
+        int fds[2];
+        long rc = app_pipe(fds);
+        if (rc == 0) { ((int *)r->rdi)[0] = fds[0]; ((int *)r->rdi)[1] = fds[1]; }
+        r->rax = (uint64_t)(int64_t)rc;
+        break;
+    }
+    case SYS_fdread:                       /* (fd, buf, max) -> read a pipe fd (M1187) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_fd_read((int)r->rdi, (void *)r->rsi, r->rdx);
+        break;
+    case SYS_fdwrite:                      /* (fd, buf, len) -> write a pipe fd (M1187) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_fd_write((int)r->rdi, (const void *)r->rsi, r->rdx);
+        break;
+    case SYS_fdclose:                      /* (fd) -> close an fd (M1187) */
+        r->rax = (uint64_t)(int64_t)app_fd_close((int)r->rdi);
+        break;
+    case SYS_dup2:                         /* (oldfd, newfd) -> redirect newfd (M1187) */
+        r->rax = (uint64_t)(int64_t)app_dup2((int)r->rdi, (int)r->rsi);
         break;
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);

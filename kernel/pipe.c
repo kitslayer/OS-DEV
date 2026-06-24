@@ -1,0 +1,83 @@
+/*
+ * pipe.c — anonymous pipe objects (M1187). See pipe.h.
+ *
+ * Each pipe is one ring buffer (writer -> reader) plus r_open/w_open reference
+ * counts (how many fds, across all processes, hold the read / write end). A read
+ * blocks while the ring is empty and a writer still exists, and returns 0 (EOF)
+ * once all writers have closed and the ring is drained. A write blocks while the
+ * ring is full and a reader still exists, and returns -1 (EPIPE) once all readers
+ * have closed. The slot is freed when both ends reach zero. Mirrors the
+ * lost-wakeup-free block/wake discipline of mbox.c / unixsock.c / pty.c.
+ */
+#include "pipe.h"
+#include "task.h"
+
+#define NPIPE 32
+#define PBUF  4096
+
+struct kpipe {
+    int used;
+    unsigned char b[PBUF];
+    int head, tail;                  /* ring; empty when head==tail, one slot kept free */
+    int r_open, w_open;              /* reference counts on the read / write ends */
+    task_t *rw, *ww;                 /* a blocked reader / writer */
+};
+static struct kpipe pipes[NPIPE];
+
+static int p_cnt(struct kpipe *p) { return (p->head - p->tail + PBUF) % PBUF; }
+static int p_spc(struct kpipe *p) { return PBUF - 1 - p_cnt(p); }
+static struct kpipe *pp(int idx) { return (idx < 0 || idx >= NPIPE || !pipes[idx].used) ? 0 : &pipes[idx]; }
+
+int pipe_new(void) {
+    for (int i = 0; i < NPIPE; i++) if (!pipes[i].used) {
+        struct kpipe *p = &pipes[i];
+        for (unsigned k = 0; k < sizeof *p; k++) ((unsigned char *)p)[k] = 0;
+        p->used = 1; p->r_open = 1; p->w_open = 1;
+        return i;
+    }
+    return -1;
+}
+
+long pipe_read(int idx, void *buf, unsigned long max) {
+    struct kpipe *p = pp(idx); if (!p) return -1;
+    for (;;) {
+        if (p_cnt(p) > 0) {
+            unsigned char *d = (unsigned char *)buf; long g = 0;
+            while ((unsigned long)g < max && p_cnt(p) > 0) { d[g++] = p->b[p->tail]; p->tail = (p->tail + 1) % PBUF; }
+            if (p->ww) { task_wake(p->ww); p->ww = 0; }          /* a blocked writer now has room */
+            return g;
+        }
+        if (p->w_open == 0) return 0;                            /* EOF: drained + no writers */
+        p->rw = task_self(); task_block();                       /* woken by a writer/close (or a kill) */
+        p = pp(idx); if (!p) return -1;                          /* freed under us */
+    }
+}
+
+long pipe_write(int idx, const void *buf, unsigned long len) {
+    struct kpipe *p = pp(idx); if (!p) return -1;
+    const unsigned char *d = (const unsigned char *)buf;
+    unsigned long done = 0;
+    while (done < len) {
+        if (p->r_open == 0) return done ? (long)done : -1;       /* EPIPE: no readers left */
+        if (p_spc(p) > 0) {
+            while (done < len && p_spc(p) > 0) { p->b[p->head] = d[done++]; p->head = (p->head + 1) % PBUF; }
+            if (p->rw) { task_wake(p->rw); p->rw = 0; }          /* a blocked reader now has data */
+            continue;
+        }
+        p->ww = task_self(); task_block();                       /* ring full: wait for a reader to drain */
+        p = pp(idx); if (!p) return done ? (long)done : -1;
+    }
+    return (long)done;
+}
+
+void pipe_open_end(int idx, int write_end) {
+    struct kpipe *p = pp(idx); if (!p) return;
+    if (write_end) p->w_open++; else p->r_open++;
+}
+
+void pipe_close_end(int idx, int write_end) {
+    struct kpipe *p = pp(idx); if (!p) return;
+    if (write_end) { if (p->w_open > 0) p->w_open--; if (p->w_open == 0 && p->rw) { task_wake(p->rw); p->rw = 0; } }  /* readers see EOF */
+    else           { if (p->r_open > 0) p->r_open--; if (p->r_open == 0 && p->ww) { task_wake(p->ww); p->ww = 0; } }  /* writers get EPIPE */
+    if (p->r_open == 0 && p->w_open == 0) p->used = 0;           /* both ends gone -> free */
+}

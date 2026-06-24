@@ -12,6 +12,7 @@
 #include "app.h"
 #include "flock.h"   /* flock_release_pid on process exit (M1177) */
 #include "pty.h"     /* pty_release_pid on process exit (M1185) */
+#include "pipe.h"    /* anonymous pipe objects for the fd table (M1187) */
 #include "task.h"
 #include "timer.h"
 #include "interrupts.h"   /* struct registers, for ring-3 signal delivery */
@@ -143,6 +144,11 @@ struct app {
     volatile long sc_retval;             /* the verdict's return value (when not run-real) */
     volatile int sc_run_real;            /* verdict: 1 = run the real syscall, 0 = use sc_retval */
     void    *sc_sup;                     /* a supervisor task_t blocked in seccomp_wait */
+    /* per-process file-descriptor table (M1187). Additive: zero on spawn/fork,
+     * only touched by pipe()/fd{read,write,close}/dup2; an app that never calls
+     * them has an empty table, so fork-copy + reap-close are no-ops for it. */
+#define APP_NFD 24
+    struct fdent { uint8_t used, type, write_end; int obj; } fd[APP_NFD];   /* type: 0=free, 1=pipe; obj = pipe index */
 };
 
 static struct app apps[MAX_APPS];
@@ -866,6 +872,7 @@ long app_waitpid(int pid, int *status) {
  * its task isn't off-CPU yet (retry next pass). Frees the task_t + kernel stack,
  * the app's address space (a->cr3 — page tables + user frames, via
  * vmm_destroy_address_space), and the apps[] slot. */
+static void app_fd_release(struct app *a);   /* close the process's fds/pipes (M1187; defined below) */
 int app_reap(app_t *a) {
     if (!a) return 1;
     if (a->zombie) return 1;                  /* already reaped to a zombie: resources freed, slot kept for waitpid */
@@ -877,6 +884,7 @@ int app_reap(app_t *a) {
         vfs_cwd_forget(a);                               /* don't stash cwd into a freed slot (M1144) */
         flock_release_pid(a->pid);                       /* drop any advisory file locks it held (M1177) */
         pty_release_pid(a->pid);                          /* close any pseudoterminals it owned (M1185) */
+        app_fd_release(a);                                /* close its open fds/pipes (M1187) */
         if (a->task) task_free(a->task);
         a->task = 0;
         /* Un-joined worker threads (M1139): free the dead ones; STOP any still
@@ -2579,6 +2587,67 @@ static void thread_trampoline(void) {
     iret_to_user(&f);
 }
 
+/* ---- per-process file descriptors (M1187) -------------------------------------
+ * A small fd table in struct app maps fds to pipe ends (the only fd type so far).
+ * Additive: an app that never calls these has an empty table, so the fork-copy and
+ * reap-close below are no-ops for it and existing behaviour is unchanged. */
+static int fd_pipe_idx(struct app *a, int fd, int want_write) {   /* validate + resolve to a pipe index */
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 1) return -1;
+    if (a->fd[fd].write_end != (want_write ? 1 : 0)) return -1;    /* read on a write-end (or vice versa) */
+    return a->fd[fd].obj;
+}
+/* pipe(out[2]): out[0]=read end, out[1]=write end. 0/-1. */
+int app_pipe(int *out) {
+    struct app *a = cur(); if (!a) return -1;
+    int idx = pipe_new(); if (idx < 0) return -1;
+    int rfd = -1, wfd = -1;
+    for (int i = 0; i < APP_NFD; i++) if (!a->fd[i].used) { rfd = i; break; }
+    for (int i = 0; i < APP_NFD; i++) if (!a->fd[i].used && i != rfd) { wfd = i; break; }
+    if (rfd < 0 || wfd < 0) { pipe_close_end(idx, 0); pipe_close_end(idx, 1); return -1; }   /* table full */
+    a->fd[rfd] = (struct fdent){ 1, 1, 0, idx };                  /* used, type=pipe, read end */
+    a->fd[wfd] = (struct fdent){ 1, 1, 1, idx };                  /* used, type=pipe, write end */
+    out[0] = rfd; out[1] = wfd; return 0;
+}
+long app_fd_read(int fd, void *buf, unsigned long max) {
+    struct app *a = cur(); if (!a) return -1;
+    int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
+    return pipe_read(idx, buf, max);
+}
+long app_fd_write(int fd, const void *buf, unsigned long len) {
+    struct app *a = cur(); if (!a) return -1;
+    int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
+    return pipe_write(idx, buf, len);
+}
+int app_fd_close(int fd) {
+    struct app *a = cur(); if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return -1;
+    if (a->fd[fd].type == 1) pipe_close_end(a->fd[fd].obj, a->fd[fd].write_end);
+    a->fd[fd].used = 0; a->fd[fd].type = 0;
+    return 0;
+}
+int app_dup2(int oldfd, int newfd) {
+    struct app *a = cur(); if (!a || oldfd < 0 || oldfd >= APP_NFD || !a->fd[oldfd].used) return -1;
+    if (newfd < 0 || newfd >= APP_NFD) return -1;
+    if (oldfd == newfd) return newfd;
+    if (a->fd[newfd].used && a->fd[newfd].type == 1) pipe_close_end(a->fd[newfd].obj, a->fd[newfd].write_end);
+    a->fd[newfd] = a->fd[oldfd];                                  /* newfd now references the same end */
+    if (a->fd[newfd].type == 1) pipe_open_end(a->fd[newfd].obj, a->fd[newfd].write_end);
+    return newfd;
+}
+/* fork: the child inherits the parent's fds (each shared end gains a reference). */
+static void app_fd_fork(struct app *child, struct app *parent) {
+    for (int i = 0; i < APP_NFD; i++) {
+        child->fd[i] = parent->fd[i];
+        if (parent->fd[i].used && parent->fd[i].type == 1) pipe_open_end(parent->fd[i].obj, parent->fd[i].write_end);
+    }
+}
+/* exit/reap: close every fd the process still held. */
+static void app_fd_release(struct app *a) {
+    for (int i = 0; i < APP_NFD; i++) if (a->fd[i].used) {
+        if (a->fd[i].type == 1) pipe_close_end(a->fd[i].obj, a->fd[i].write_end);
+        a->fd[i].used = 0;
+    }
+}
+
 /* COW fork() (M1116). Clone the calling process: a new app_t with its own blank
  * window, a copy-on-write clone of the address space (vmm_fork_cow), and a child
  * task that resumes at the parent's instruction after `int 0x80` with rax = 0.
@@ -2631,6 +2700,7 @@ long app_fork(struct registers *r) {
     a->pgid = p->pgid; a->sid = p->sid;                 /* fork inherits the parent's group + session (M1176) */
     a->ns_id  = p->ns_id;                               /* inherit the parent's mount namespace (shared; unshare detaches) (M1122) */
     vfs_cwd_inherit(a);                                 /* inherit the parent's current directory (M1144) */
+    app_fd_fork(a, p);                                   /* inherit the parent's open fds/pipes (M1187) */
     /* NOT inherited (POSIX): pending signals, alarms, strace, gfx-mode canvas. */
 
     /* The child's resume context: the parent's trap frame, but returning 0. */

@@ -285,6 +285,11 @@ long sys_pty_read(int id, void *buf, unsigned long max) { return do_syscall(SYS_
 long sys_pty_write(int id, const void *buf, unsigned long len) { return do_syscall(SYS_pty_write, id, (long)buf, (long)len); }
 int  sys_pty_close(int id) { return (int)do_syscall(SYS_pty_close, id, 0, 0); }
 int  sys_pty_ctl(int id, int cmd, int arg) { return (int)do_syscall(SYS_pty_ctl, id, cmd, arg); }
+int  sys_pipe(int fds[2]) { return (int)do_syscall(SYS_pipe, (long)fds, 0, 0); }
+long sys_fdread(int fd, void *buf, unsigned long max) { return do_syscall(SYS_fdread, fd, (long)buf, (long)max); }
+long sys_fdwrite(int fd, const void *buf, unsigned long len) { return do_syscall(SYS_fdwrite, fd, (long)buf, (long)len); }
+int  sys_fdclose(int fd) { return (int)do_syscall(SYS_fdclose, fd, 0, 0); }
+int  sys_dup2(int oldfd, int newfd) { return (int)do_syscall(SYS_dup2, oldfd, newfd, 0); }
 /* Restorer trampoline: a signal handler returns HERE; we ask the kernel to
  * restore the pre-signal context (which iretq's elsewhere, so this never
  * returns). The kernel is told this address via sys_signal's 3rd arg. */
