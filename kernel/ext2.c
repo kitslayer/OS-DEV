@@ -19,6 +19,17 @@ static uint32_t e_rd32(const uint8_t *p) {
 static void e_wr16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
 static void e_wr32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
 
+/* Clock hook for inode timestamps (M1175). A function pointer (NOT a direct
+ * rtc_unix call) so ext2.c stays self-contained + host-#include-linkable — the
+ * kernel wires ext2_set_clock(rtc_unix) at boot; a host test that doesn't sets
+ * nothing, so timestamps are 0 (the historical behaviour). */
+static uint32_t (*ext2_clock)(void);
+void ext2_set_clock(uint32_t (*fn)(void)) { ext2_clock = fn; }
+static void e_stamp(uint8_t *inode) {                  /* set i_atime/i_ctime/i_mtime to "now" */
+    uint32_t t = ext2_clock ? ext2_clock() : 0;
+    e_wr32(inode + 8, t); e_wr32(inode + 12, t); e_wr32(inode + 16, t);
+}
+
 typedef struct {
     blk_read_fn read; blk_write_fn write; void *ctx; uint64_t start;
     uint32_t block_size, inodes_per_group, inode_size, gdt_block;
@@ -588,9 +599,10 @@ long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
      * sees a clean deletion rather than a live-but-unattached inode: links_count
      * = 0, a nonzero deletion time, and no block references / i_blocks. */
     e_wr16(inode + 26, 0);                                /* i_links_count = 0   */
-    e_wr32(inode + 20, 1700000000u);                      /* i_dtime: a real epoch, NOT a small value (a
-                                                           * tiny dtime is misread as an orphan-list inode
-                                                           * pointer by fsck; a timestamp >> inode count is not) */
+    e_wr32(inode + 20, ext2_clock ? ext2_clock() : 1700000000u);  /* i_dtime: the real epoch (M1175), or a
+                                                           * large fallback — a tiny dtime is misread as an
+                                                           * orphan-list inode pointer by fsck; a timestamp
+                                                           * >> inode count is not */
     e_wr32(inode + 28, 0);                                /* i_blocks = 0        */
     for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);  /* clear i_block[] */
     write_inode(&v, ino, inode);
@@ -649,6 +661,7 @@ long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     e_wr16(inode + 26, 2);                                 /* i_links_count: itself + "."  */
     e_wr32(inode + 28, v.block_size / 512);                /* i_blocks                     */
     e_wr32(inode + 40, blk);                               /* i_block[0]                   */
+    e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
     if (write_inode(&v, ino, inode) < 0) return -1;
 
     if (dir_add(&v, parent_ino, base, ino, 2) < 0) return -1;   /* ftype 2 = directory */
@@ -689,6 +702,7 @@ long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t
     e_wr32(inode + 4, (uint32_t)tlen);                     /* i_size = target length */
     e_wr16(inode + 26, 1);                                 /* i_links_count = 1 */
     for (int i = 0; i < tlen; i++) inode[40 + i] = (uint8_t)target[i];   /* target inline in i_block */
+    e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
     if (write_inode(&v, ino, inode) < 0) return -1;
     if (dir_add(&v, parent_ino, base, ino, 7) < 0) return -1;   /* ftype 7 = symlink */
     return 0;
@@ -791,6 +805,7 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
 
     e_wr32(inode + 4, (uint32_t)len);                      /* i_size */
     e_wr32(inode + 28, isectors);                          /* i_blocks (in 512-byte sectors) */
+    e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
     if (write_inode(&v, ino, inode) < 0) return -1;
     if (!existing && dir_add(&v, parent_ino, base, ino, 1) < 0) return -1;   /* ftype 1 = regular file */
     return (long)len;

@@ -24,6 +24,8 @@
 #include "vfs.h"
 #include "partition.h"
 #include "blockdev.h"
+#include "ext2.h"   /* ext2_set_clock (M1175) */
+#include "rtc.h"    /* rtc_unix (M1175) */
 #include "dm.h"
 #include "ata.h"
 #include "pci.h"
@@ -287,6 +289,7 @@ void kmain(uint64_t mb_info) {
      * readable. Purely additive + read-only: the boot FAT32 mount (ATA primary
      * master, LBA 0) above and fat32.c/vfs.c are untouched. A clean no-op listing
      * if a device carries no FAT32. */
+    ext2_set_clock(rtc_unix);      /* real inode timestamps on ext2 writes (M1175) */
     blockdev_enumerate();
     blockdev_selftest();           /* verify the write vtable + buffer-cache coherence (M1095) */
     dm_selftest();                 /* RAID-1 mirror self-test, iff 2 non-boot writable disks (M1157) */
