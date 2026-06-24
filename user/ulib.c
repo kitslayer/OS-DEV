@@ -197,6 +197,12 @@ void *sys_shmat(int shmid) { long r = do_syscall(SYS_shmat, shmid, 0, 0); return
 long sys_shmdt(void *addr) { return do_syscall(SYS_shmdt, (long)addr, 0, 0); }
 long sys_process_vm_read(int pid, unsigned long raddr, void *buf, unsigned long len) { return do_syscall4(SYS_process_vm_read, pid, (long)raddr, (long)buf, (long)len); }
 long sys_process_vm_write(int pid, unsigned long raddr, const void *buf, unsigned long len) { return do_syscall4(SYS_process_vm_write, pid, (long)raddr, (long)buf, (long)len); }
+int  sys_unix_listen(const char *path) { return (int)do_syscall(SYS_unix_listen, (long)path, 0, 0); }
+int  sys_unix_connect(const char *path) { return (int)do_syscall(SYS_unix_connect, (long)path, 0, 0); }
+int  sys_unix_accept(int lid) { return (int)do_syscall(SYS_unix_accept, lid, 0, 0); }
+long sys_unix_send(int ep, const void *buf, unsigned long len) { return do_syscall(SYS_unix_send, ep, (long)buf, (long)len); }
+long sys_unix_recv(int ep, void *buf, unsigned long max) { return do_syscall(SYS_unix_recv, ep, (long)buf, (long)max); }
+int  sys_unix_close(int ep) { return (int)do_syscall(SYS_unix_close, ep, 0, 0); }
 long sys_getrlimit(int resource, struct rlimit *rl) { return do_syscall(SYS_getrlimit, resource, (long)rl, 0); }
 long sys_setrlimit(int resource, struct rlimit *rl) { return do_syscall(SYS_setrlimit, resource, (long)rl, 0); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }

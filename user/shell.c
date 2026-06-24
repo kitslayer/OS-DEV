@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2063,6 +2063,33 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "THP: 512 4KiB pages folded into one 2MiB hugepage (contents preserved) OK\n" : "thptest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
                 sys_munmap(region, SZ);
+            }
+        } else if (streq(line, "unixtest")) {   /* AF_UNIX path-keyed stream sockets: cross-fork byte round-trip (M1169) */
+            int lid = sys_unix_listen("/run/ut");           /* bind BEFORE forking so the child can connect */
+            if (lid < 0) { print("unixtest: listen failed\n"); g_status = 1; }
+            else {
+                long pid = sys_fork();
+                if (pid == 0) {                              /* child = client */
+                    int ep = sys_unix_connect("/run/ut");
+                    int ok = 0;
+                    if (ep >= 0) {
+                        sys_unix_send(ep, "ping", 4);
+                        char b[8]; long n = sys_unix_recv(ep, b, sizeof(b));   /* expect "pong" back */
+                        ok = (n == 4 && b[0]=='p' && b[1]=='o' && b[2]=='n' && b[3]=='g');
+                        sys_unix_close(ep);
+                    }
+                    sys_exit(ok ? 0 : 1);
+                } else if (pid > 0) {                        /* parent = server */
+                    int ep = sys_unix_accept(lid);           /* blocks until the child connects */
+                    char b[8]; long n = sys_unix_recv(ep, b, sizeof(b));       /* expect "ping" */
+                    int got = (n == 4 && b[0]=='p' && b[1]=='i' && b[2]=='n' && b[3]=='g');
+                    if (got) sys_unix_send(ep, "pong", 4);
+                    int st = -1; sys_waitpid((int)pid, &st);
+                    sys_unix_close(ep);
+                    int ok = (got && st == 0);
+                    print(ok ? "AF_UNIX: client<->server round-trip over /run/ut OK (ping->pong cross-fork)\n" : "unixtest: VERIFY FAILED\n");
+                    if (!ok) g_status = 1;
+                } else { print("unixtest: fork failed\n"); g_status = 1; }
             }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);

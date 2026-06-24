@@ -73,6 +73,13 @@ void *sys_shmat(int shmid);                                       /* attach: bas
 long sys_shmdt(void *addr);                                       /* detach a shm mapping (M1161) */
 long sys_process_vm_read(int pid, unsigned long raddr, void *buf, unsigned long len);  /* read another process's mem; bytes/-1 (M1162) */
 long sys_process_vm_write(int pid, unsigned long raddr, const void *buf, unsigned long len);  /* write another process's mem (COW-safe); bytes/-1 (M1165) */
+/* AF_UNIX path-keyed stream sockets (M1169): listen/connect/accept by path, send/recv over an endpoint id (survives fork) */
+int  sys_unix_listen(const char *path);                /* -> listener id; -1 */
+int  sys_unix_connect(const char *path);               /* -> client endpoint id; -1 */
+int  sys_unix_accept(int lid);                         /* -> server endpoint id (blocks); -1 */
+long sys_unix_send(int ep, const void *buf, unsigned long len);   /* bytes written; -1 closed */
+long sys_unix_recv(int ep, void *buf, unsigned long max);         /* bytes read; 0 EOF; -1 bad ep */
+int  sys_unix_close(int ep);                           /* 0/-1 */
 long sys_getrlimit(int resource, struct rlimit *rl);   /* read a resource limit (M1163) */
 long sys_setrlimit(int resource, struct rlimit *rl);   /* set a resource limit (M1163) */
 long sys_alarm(unsigned long ticks);

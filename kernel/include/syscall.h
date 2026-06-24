@@ -150,6 +150,12 @@
 #define SYS_getrlimit       138 /* (resource, struct rlimit*) -> read a resource limit; 0/-1 (M1163) */
 #define SYS_setrlimit       139 /* (resource, struct rlimit*) -> set a resource limit; 0/-1 (M1163) */
 #define SYS_process_vm_write 140 /* (pid, raddr, local, len) -> write another process's memory (COW-safe); bytes/-1 (M1165) */
+#define SYS_unix_listen  141   /* (path) -> AF_UNIX listener id; -1 (M1169) */
+#define SYS_unix_connect 142   /* (path) -> client endpoint id; -1 (M1169) */
+#define SYS_unix_accept  143   /* (lid) -> server endpoint id (blocks); -1 (M1169) */
+#define SYS_unix_send    144   /* (ep, buf, len) -> bytes written; -1 closed (M1169) */
+#define SYS_unix_recv    145   /* (ep, buf, max) -> bytes read; 0 EOF; -1 bad ep (M1169) */
+#define SYS_unix_close   146   /* (ep) -> 0/-1 (M1169) */
 
 /* getrlimit/setrlimit (M1163), shared by the kernel + ulib. */
 #define RLIMIT_DATA    2

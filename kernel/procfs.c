@@ -35,6 +35,7 @@
 #include "shm.h"
 #include "mqueue.h"
 #include "sysvipc.h"
+#include "unixsock.h"
 #include <stdint.h>
 
 extern int task_count(void);   /* kernel/task.c */
@@ -132,6 +133,7 @@ static long gen_version(char *b, int max) {
 }
 static long gen_mqueue(char *b, int max) { return mqueue_format(b, max); }   /* open priority msg queues (M1154) */
 static long gen_sysvipc(char *b, int max) { return sysv_sem_format(b, max); }   /* SysV semaphore sets (M1159) */
+static long gen_unix(char *b, int max) { return unix_format(b, max); }       /* AF_UNIX listeners + connections (M1169) */
 static long gen_loadavg(char *b, int max) {     /* real 1/5/15-min run-queue load average (M1148) */
     uint64_t la[3]; task_loadavg(la);           /* fixed-point, FSHIFT=11 (FIXED_1 = 2048) */
     int p = 0;
@@ -300,7 +302,7 @@ struct pf { const char *name; long (*gen)(char *, int); };
 static const struct pf proc_files[] = {
     { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo },
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat },
-    { "mqueue", gen_mqueue }, { "sysvipc", gen_sysvipc },
+    { "mqueue", gen_mqueue }, { "sysvipc", gen_sysvipc }, { "unix", gen_unix },
     { "processes", gen_processes }, { "partitions", gen_partitions },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },

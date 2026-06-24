@@ -15,6 +15,7 @@
 #include "vfs.h"
 #include "mqueue.h"
 #include "sysvipc.h"
+#include "unixsock.h"
 #include "fanfs.h"
 #include "iouring.h"
 #include "fb.h"
@@ -254,6 +255,8 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_semget: case SYS_semop: case SYS_semctl:
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
+    case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
+    case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
@@ -336,6 +339,8 @@ static const char *syscall_name(uint64_t n) {
         [SYS_msgget]="msgget",[SYS_msgsnd]="msgsnd",[SYS_msgrcv]="msgrcv",
         [SYS_shmget]="shmget",[SYS_shmat]="shmat",[SYS_shmdt]="shmdt",
         [SYS_process_vm_read]="process_vm_read",[SYS_process_vm_write]="process_vm_write",
+        [SYS_unix_listen]="unix_listen",[SYS_unix_connect]="unix_connect",[SYS_unix_accept]="unix_accept",
+        [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -881,6 +886,28 @@ void syscall_dispatch(struct registers *r) {
     case SYS_process_vm_write:             /* (pid, raddr, local, len) -> write another process's memory (M1165) */
         if (!ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }    /* local source buffer readable for len */
         r->rax = (uint64_t)(int64_t)app_process_vm_write((int)r->rdi, r->rsi, (const void *)r->rdx, r->r10);
+        break;
+    case SYS_unix_listen:                  /* (path) -> AF_UNIX listener id (M1169) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)unix_listen((const char *)r->rdi);
+        break;
+    case SYS_unix_connect:                 /* (path) -> client endpoint id (M1169) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)unix_connect((const char *)r->rdi);
+        break;
+    case SYS_unix_accept:                  /* (lid) -> server endpoint id, blocks (M1169) */
+        r->rax = (uint64_t)(int64_t)unix_accept((int)r->rdi);
+        break;
+    case SYS_unix_send:                    /* (ep, buf, len) -> bytes written (M1169) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)unix_send((int)r->rdi, (const void *)r->rsi, r->rdx);
+        break;
+    case SYS_unix_recv:                    /* (ep, buf, max) -> bytes read; 0 EOF (M1169) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)unix_recv((int)r->rdi, (void *)r->rsi, r->rdx);
+        break;
+    case SYS_unix_close:                   /* (ep) -> 0/-1 (M1169) */
+        r->rax = (uint64_t)(int64_t)unix_close((int)r->rdi);
         break;
     case SYS_getrlimit:                    /* (resource, struct rlimit*) -> read a resource limit (M1163) */
         if (!ubuf(r->rsi, sizeof(struct rlimit))) { r->rax = (uint64_t)-1; break; }
