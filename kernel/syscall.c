@@ -13,6 +13,7 @@
 #include "app.h"
 #include "strace.h"
 #include "vfs.h"
+#include "fanfs.h"
 #include "fb.h"
 #include "rtc.h"
 #include "speaker.h"
@@ -306,6 +307,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_singlestep]="singlestep",
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
         [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
+        [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -877,6 +879,22 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_signalfd:                     /* route masked signals to /proc/self/sigfd (M1126) */
         r->rax = (uint64_t)(int64_t)app_signalfd((uint32_t)r->rdi);
+        break;
+    case SYS_fanotify_serve:               /* become the /fan materialization daemon (M1128) */
+        r->rax = (uint64_t)(int64_t)fanfs_serve();
+        break;
+    case SYS_fanotify_wait: {              /* daemon: block until a /fan read request */
+        char *ub = (char *)r->rsi; int max = (int)r->rdx;
+        if (max <= 0 || !ubuf(r->rsi, (uint64_t)max)) { r->rax = (uint64_t)-1; break; }
+        char kb[80]; int km = max < 80 ? max : 80;
+        long n = fanfs_wait(kb, km);
+        if (n > 0) for (long i = 0; i < n; i++) ub[i] = kb[i];   /* copy out (daemon's space active) */
+        r->rax = (uint64_t)n;
+        break;
+    }
+    case SYS_fanotify_provide:             /* daemon: hand bytes back to the blocked reader */
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)fanfs_provide((const void *)r->rdi, r->rsi);
         break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);

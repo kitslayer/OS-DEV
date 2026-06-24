@@ -110,6 +110,9 @@
 #define SYS_seccomp_reply 98 /* (childpid, run_real, retval) -> supervisor: allow(run_real=1)/deny/emulate; 0/-1 */
 #define SYS_fswait        99 /* (names, n, timeout_ms) -> block until one of n NUL-separated paths is readable; index/-1 timeout */
 #define SYS_signalfd     100  /* (mask) -> route the masked signos to /proc/self/sigfd (read returns the signo) instead of a handler */
+#define SYS_fanotify_serve  101 /* () -> become the /fan userspace-materialization daemon; 0/-1 */
+#define SYS_fanotify_wait   102 /* (namebuf, max) -> block until a /fan read request; fills the name; len/-1 */
+#define SYS_fanotify_provide 103 /* (content, len) -> hand bytes to the blocked /fan reader; len/-1 */
 
 #define SYSCALL_VECTOR 0x80
 

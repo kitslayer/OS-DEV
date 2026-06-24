@@ -89,6 +89,7 @@ global scnotify_elf_start, scnotify_elf_end
 global fswaittest_elf_start, fswaittest_elf_end
 global sigfdtest_elf_start, sigfdtest_elf_end
 global bpftest_elf_start, bpftest_elf_end
+global fantest_elf_start, fantest_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -413,5 +414,9 @@ sigfdtest_elf_end:
 bpftest_elf_start:
     incbin "build/bpftest.elf"
 bpftest_elf_end:
+
+fantest_elf_start:
+    incbin "build/fantest.elf"
+fantest_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

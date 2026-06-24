@@ -16,6 +16,7 @@
 #include "eventfd.h"
 #include "pci.h"
 #include "bpf.h"
+#include "fanfs.h"
 #include "net.h"
 #include "app.h"          /* app_current / app_ns_id — per-process mount namespaces (M1122) */
 
@@ -203,6 +204,13 @@ int vfs_ready(const char *name) {
 /* Route /bpf (M1127): write bytecode here to load an eBPF-lite packet filter. */
 static int bpf_path(const char *name) { return veq(name, "/bpf"); }
 
+/* Route /fan/<name> (M1128): a userspace-materialized file. Returns 1 + the name. */
+static int fan_path(const char *name, const char **q) {
+    if (!vstarts(name, "/fan/")) return 0;
+    *q = name + 5;
+    return **q != 0;
+}
+
 /* Route /pci (M1120): "/pci" or "/pci/" -> list (q=""), "/pci/<rest>" -> q. */
 static int pci_path(const char *name, const char **q) {
     if (!vstarts(name, "/pci")) return 0;
@@ -306,6 +314,7 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
     if (pci_path(name, &tb)) return pcifs_read(tb, (char *)buf, (int)max);  /* /pci: device tree as files (M1120) */
     if (timer_path(name, &tb)) return timer_read(tb, buf, max);     /* /timer/<ms>: block <ms> then "tick" */
     if (event_path(name, &tb)) return eventfd_read(tb, buf, max);   /* /event/<n>: block until >0, return+drain */
+    if (fan_path(name, &tb)) return fanfs_read(tb, buf, max);       /* /fan/<name>: userspace-materialized file (M1128) */
     if (snap_path(name, &tb)) {                                     /* /snap: CoW tmpfs snapshots (M1115) */
         if (!tb[0]) return tmpfs_snap_list((char *)buf, (int)max);  /* "/snap" -> list generations */
         int g = 0; const char *s = tb;
