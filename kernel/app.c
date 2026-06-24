@@ -391,6 +391,48 @@ int app_format_smaps(app_t *a, char *b, int max) {
     return p;
 }
 
+/* One /proc/<pid>/pagemap region: the [start,end) header, then ONE line per
+ * non-absent page — its virtual address, physical frame number (PFN) and flags
+ * (C=COW-shared, D=dirty/written, A=accessed) for a resident page, or "swap"
+ * for a swapped-out page. Absent (never-faulted) pages are omitted so a sparse
+ * demand-paged region stays compact. Walks the app's own leaf PTEs via
+ * vmm_pte_in; read-only. The text form of Linux's /proc/<pid>/pagemap. (M1167) */
+static int app_pagemap_region(char *b, int p, int max, app_t *a, uint64_t start, uint64_t end, const char *label) {
+    p = maps_hex(b, p, max, start); p = maps_str(b, p, max, "-");
+    p = maps_hex(b, p, max, end);   p = maps_str(b, p, max, " ");
+    p = maps_str(b, p, max, label); p = maps_str(b, p, max, "\n");
+    for (uint64_t va = start; va < end && p < max - 80; va += PAGE_SIZE) {
+        uint64_t pte = vmm_pte_in(a->cr3, va);
+        if (pte & PTE_PRESENT) {
+            p = maps_str(b, p, max, "  ");  p = maps_hex(b, p, max, va);
+            p = maps_str(b, p, max, " pfn=");
+            p = maps_hex(b, p, max, (pte & PTE_ADDR_MASK) >> 12);
+            p = maps_str(b, p, max, " ");
+            if (pte & PTE_COW)      p = maps_str(b, p, max, "C");
+            if (pte & PTE_DIRTY)    p = maps_str(b, p, max, "D");
+            if (pte & PTE_ACCESSED) p = maps_str(b, p, max, "A");
+            p = maps_str(b, p, max, "\n");
+        } else if (pte & PTE_SWAP) {
+            p = maps_str(b, p, max, "  ");  p = maps_hex(b, p, max, va);
+            p = maps_str(b, p, max, " swap\n");
+        }
+    }
+    return p;
+}
+/* /proc/<pid>/pagemap: per-page residency + PFN for the heap and each mmap VMA.
+ * Read-only; reuses the demand-paging machinery's page tables. (M1167) */
+int app_format_pagemap(app_t *a, char *b, int max) {
+    if (!a || max <= 0) return 0;
+    int p = 0;
+    if (a->heap_end > UHEAP_BASE)
+        p = app_pagemap_region(b, p, max, a, UHEAP_BASE, a->heap_end, "[heap]");
+    for (int i = 0; i < a->nvma; i++)
+        p = app_pagemap_region(b, p, max, a, a->vma[i].start, a->vma[i].start + a->vma[i].len,
+                               a->vma[i].file_backed ? "[mmap-file]" : (a->vma[i].locked ? "[mmap-locked]" : "[mmap]"));
+    if (p < max) b[p] = 0;
+    return p;
+}
+
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
 
 /* --- pledge() sandbox (M1074) --------------------------------------------- */

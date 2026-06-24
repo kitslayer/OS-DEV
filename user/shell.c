@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2016,6 +2016,31 @@ static int run_command(char *line, char *cwd) {
                 if (!found) g_status = 1;
                 sys_semctl(sid, 0, IPC_RMID, 0);
             } else { print("wchantest: fork failed\n"); g_status = 1; }
+        } else if (streq(line, "pagemaptest")) {   /* /proc/<pid>/pagemap: per-page residency + PFN, proves demand paging (M1167) */
+            const int K = 8;
+            void *region = sys_mmap((unsigned long)K * 4096);
+            if (!region) { print("pagemaptest: mmap failed\n"); g_status = 1; }
+            else {
+                long n1; char *b1 = slurp("/proc/self/pagemap", &n1);   /* fresh region: its pages are all absent */
+                int c1 = 0;
+                if (b1) { for (char *q = b1; q[0] && q[1] && q[2] && q[3]; q++)
+                              if (q[0]=='p' && q[1]=='f' && q[2]=='n' && q[3]=='=') c1++;
+                          free(b1); }
+                volatile char *vp = (volatile char *)region;
+                for (int i = 0; i < K; i++) vp[i * 4096] = (char)(i + 1);   /* fault each of the 8 pages in */
+                long n2; char *b2 = slurp("/proc/self/pagemap", &n2);
+                int c2 = 0;
+                if (b2) { for (char *q = b2; q[0] && q[1] && q[2] && q[3]; q++)
+                              if (q[0]=='p' && q[1]=='f' && q[2]=='n' && q[3]=='=') c2++;
+                          free(b2); }
+                char nb[12];
+                print("pagemap resident pages: before="); itoa_simple(c1, nb); print(nb);
+                print(", after touching 8="); itoa_simple(c2, nb); print(nb); print("\n");
+                int ok = (c2 - c1 >= K);   /* heap pages never drop, mmap gains exactly K -> delta >= K */
+                print(ok ? "pagemap: 8 demand-paged pages now resident with PFNs OK\n" : "pagemaptest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+                sys_munmap(region, (unsigned long)K * 4096);
+            }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");
