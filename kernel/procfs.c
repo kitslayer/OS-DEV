@@ -277,7 +277,7 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
     p = sapp(b, p, max, "/");               p = sdec(b, p, max, memt);
     p = sapp(b, p, max, " MiB used  tasks "); p = sdec(b, p, max, (uint64_t)task_count());
     p = sapp(b, p, max, "\n");
-    p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  WAIT_MS  SWITCHES  WCHAN              NAME\n");
+    p = sapp(b, p, max, "  PID  STATE  CPU_MS   CPU%  WAIT_MS  SWITCHES  NI  WCHAN              NAME\n");
     for (int i = 0; i < cnt; i++) {
         if (ti[i].state == 3) continue;             /* skip dead */
         p = sapp(b, p, max, "  ");  p = sdec(b, p, max, (uint64_t)ti[i].id);
@@ -286,6 +286,10 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
         p = sapp(b, p, max, "    "); p = sdec(b, p, max, (ti[i].run_ms * 100) / up); p = sapp(b, p, max, "%");
         p = sapp(b, p, max, "    "); p = sdec(b, p, max, ti[i].rq_wait_ms);
         p = sapp(b, p, max, "    "); p = sdec(b, p, max, ti[i].nswitch);
+        /* NI: CFS nice level (M1171) */
+        p = sapp(b, p, max, "  ");
+        if (ti[i].nice < 0) { p = sapp(b, p, max, "-"); p = sdec(b, p, max, (uint64_t)(-ti[i].nice)); }
+        else p = sdec(b, p, max, (uint64_t)ti[i].nice);
         /* WCHAN: the kernel routine a blocked task is parked in, symbolised (M1166) */
         p = sapp(b, p, max, "  ");
         if (ti[i].wchan) { unsigned long off; const char *nm = ksym_lookup(ti[i].wchan, &off);

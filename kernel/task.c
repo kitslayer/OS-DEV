@@ -54,6 +54,33 @@ struct registers *task_uframe(task_t *t) { return t ? t->uframe : 0; }
 static uint64_t active_cr3;     /* the address space currently loaded in CR3 */
 static task_t *idle_task;       /* the scheduling floor: never blocks/exits, run ONLY when no other task is runnable (so a task that blocks itself when nothing else is ready hands off to this instead of spinning marked-BLOCKED). NULL until created -> switch_to_next falls back to its prior behavior. */
 
+/* --- CFS weighted-fair scheduling (M1171) -------------------------------------
+ * Each task carries a vruntime (weighted CPU consumed) and a weight derived from
+ * its nice level; switch_to_next runs the runnable task with the SMALLEST
+ * vruntime, and charges the running task slice*NICE0_WEIGHT/weight of vruntime,
+ * so a low-nice (high-weight) task accrues vruntime slowly and thus gets more
+ * CPU. With every task at nice 0 (weight 1024) vruntime advances by real time
+ * for all, so the pick reduces to "least-recently-run" — fair round-robin,
+ * preserving the prior behavior. The Linux nice->weight table (nice -20..+19). */
+#define NICE0_WEIGHT 1024u
+static const uint32_t sched_weight[40] = {  /* index = nice + 20 */
+    88761, 71755, 56483, 46273, 36291,      /* -20..-16 */
+    29154, 23254, 18705, 14949, 11916,      /* -15..-11 */
+     9548,  7620,  6100,  4904,  3906,      /* -10..-6  */
+     3121,  2501,  1991,  1586,  1277,      /* -5..-1   */
+     1024,   820,   655,   526,   423,      /*  0..+4   */
+      335,   272,   215,   172,   137,      /* +5..+9   */
+      110,    87,    70,    56,    45,      /* +10..+14 */
+       36,    29,    23,    18,    15 };     /* +15..+19 */
+static uint32_t nice_to_weight(int nice) {
+    if (nice < -20) nice = -20; if (nice > 19) nice = 19;
+    return sched_weight[nice + 20];
+}
+static uint64_t g_min_vruntime;   /* floor: the smallest vruntime among runnable tasks (monotonic non-decreasing) */
+static void sched_place_wake(task_t *t) {   /* a waking task can't be below the floor (no unfair head start; no starvation) */
+    if (t && t->vruntime < g_min_vruntime) t->vruntime = g_min_vruntime;
+}
+
 static inline uint64_t read_cr3(void) {
     uint64_t v; __asm__ volatile("mov %%cr3, %0" : "=r"(v)); return v;
 }
@@ -105,6 +132,7 @@ void sched_init(void) {
     t->id = next_id++;
     t->state = TASK_RUNNING;
     t->next = t;                /* a ring of one */
+    t->weight = NICE0_WEIGHT;   /* CFS: task 0 at nice 0 (M1171) — never leave weight 0 (div-by-zero in the charge) */
     t->cr3 = read_cr3();        /* task 0 runs in the kernel's address space */
     active_cr3 = t->cr3;
     fx_alloc(t);
@@ -126,6 +154,8 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
     t->id = next_id++;
     t->entry = entry;
     t->state = TASK_READY;
+    t->weight = NICE0_WEIGHT;   /* CFS: born at nice 0 (M1171) — must be non-zero before any vruntime charge */
+    t->vruntime = g_min_vruntime;  /* start at the floor: don't dominate (vruntime 0) or starve */
     t->cr3 = cr3;             /* set BEFORE the ring insert: no startup race */
     t->proc = proc;
 
@@ -168,20 +198,42 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
 /* Core switch — assumes interrupts already disabled. */
 static void switch_to_next(void) {
     task_t *prev = current;
-    task_t *next = prev->next;
-    /* Prefer a non-idle runnable task: skip DEAD/BLOCKED/STOPPED and the idle task. */
-    while (next != prev && (next->state == TASK_DEAD || next->state == TASK_BLOCKED ||
-                            next->state == TASK_STOPPED || next == idle_task))
-        next = next->next;
-    if (next == prev) {                         /* no other non-idle task is runnable */
+    uint64_t now = timer_ms();
+
+    /* Charge prev for the slice it just ran BEFORE deciding (M1171): real time to
+     * run_ms, and weighted time to vruntime, so the comparison below sees prev's
+     * up-to-date cost (otherwise a still-running task's stale vruntime would let
+     * it win forever). Done every call — including the keep-prev early return. */
+    uint64_t slice = now - prev->last_in;
+    prev->last_in = now;
+    prev->run_ms += slice;
+    if (prev != idle_task)
+        prev->vruntime += slice * NICE0_WEIGHT / (prev->weight ? prev->weight : NICE0_WEIGHT);
+
+    /* CFS pick: the runnable, non-idle task with the smallest vruntime. */
+    task_t *best = 0, *t = prev;
+    do {
+        if (t != idle_task && (t->state == TASK_RUNNING || t->state == TASK_READY))
+            if (!best || t->vruntime < best->vruntime) best = t;
+        t = t->next;
+    } while (t != prev);
+
+    /* Advance the floor every call (even when we keep prev): it's the smallest
+     * runnable vruntime, so a task that wakes mid-way clamps to HERE and can't
+     * monopolize the CPU catching up to a long-running solo task (M1171). */
+    if (best) g_min_vruntime = best->vruntime;
+
+    task_t *next;
+    if (best == prev) return;                   /* prev is the most-deserving runnable -> keep it (no switch) */
+    if (best) { next = best; }                  /* a different task has a smaller vruntime -> run it */
+    else {                                       /* nothing non-idle is runnable */
         if (prev->state == TASK_RUNNING || prev->state == TASK_READY)
-            return;                             /* prev itself is still runnable (e.g. the desktop) -> keep it; idle stays parked */
+            return;                             /* prev still runnable (e.g. the desktop) -> keep it */
         if (!idle_task || prev == idle_task)
-            return;                             /* no floor available / already on it */
-        next = idle_task;                       /* prev blocked/exited and nothing else is ready -> run the idle floor (don't spin a BLOCKED prev) */
+            return;                             /* no floor / already on it */
+        next = idle_task;                       /* prev blocked/exited, nothing ready -> the idle floor */
     }
 
-    uint64_t now = timer_ms();
     if (prev->state == TASK_RUNNING) {
         prev->state = TASK_READY;
         prev->ready_since = now;                 /* entered the run queue: start clocking its wait (M1148) */
@@ -196,10 +248,7 @@ static void switch_to_next(void) {
     }
     current = next;
 
-    /* CPU-time accounting: credit prev with the slice it just ran, and stamp
-     * next's switch-in time (for /proc/sched + a real `top`). */
-    prev->run_ms += now - prev->last_in;
-    next->last_in = now;
+    next->last_in = now;                          /* stamp switch-in (prev was already charged above) */
     next->nswitch++;
 
     /* switch address space if the next task lives in a different one. Safe to
@@ -252,6 +301,7 @@ void task_wake(task_t *t) {
         t->wake_at = 0;            /* cancel any pending timed wake */
         t->state = TASK_READY;
         t->ready_since = timer_ms();   /* re-entered the run queue (M1148) */
+        sched_place_wake(t);           /* clamp vruntime up to the floor: no head-start, no starvation (M1171) */
     }
 }
 
@@ -285,6 +335,7 @@ void task_wake_sleepers(void) {
             t->wake_at = 0;
             t->state = TASK_READY;
             t->ready_since = now;       /* re-entered the run queue (M1148) */
+            sched_place_wake(t);        /* clamp vruntime up to the floor (M1171) */
         }
         t = t->next;
     } while (t != current);
@@ -343,6 +394,17 @@ void task_cpu_tick(uint64_t ms, int user) {
     else      current->stime_ms += ms;
 }
 
+/* Set the current task's nice level (-20..+19) and its CFS weight (M1171). A
+ * higher nice => smaller weight => vruntime accrues faster => less CPU. */
+int task_set_nice(int nice) {
+    if (!current) return 0;
+    if (nice < -20) nice = -20; if (nice > 19) nice = 19;
+    current->nice = nice;
+    current->weight = nice_to_weight(nice);
+    return nice;
+}
+int task_get_nice(void) { return current ? current->nice : 0; }
+
 /* Suspend a task (it leaves the run rotation until task_cont). Only a runnable,
  * non-current task — never stop ourselves (that needs a yield) or a blocked task
  * (it's already off-CPU; STOPPING it would lose the BLOCKED->READY wake path). */
@@ -356,8 +418,10 @@ void task_stop(task_t *t) {
 /* Resume a STOPPED task. */
 void task_cont(task_t *t) {
     uint64_t f = irq_save();
-    if (t && t->state == TASK_STOPPED)
+    if (t && t->state == TASK_STOPPED) {
         t->state = TASK_READY;
+        sched_place_wake(t);            /* a long-stopped task rejoins at the floor, not dominating (M1171) */
+    }
     irq_restore(f);
 }
 
@@ -441,6 +505,7 @@ int task_snapshot(task_info_t *out, int max) {
             if (t->state == TASK_RUNNING) rm += now - t->last_in;   /* include the in-progress slice */
             out[n].run_ms = rm; out[n].nswitch = t->nswitch; out[n].rq_wait_ms = t->rq_wait_ms;
             out[n].wchan = (t->state == TASK_BLOCKED) ? t->wchan : 0;   /* only meaningful while blocked (M1166) */
+            out[n].nice = t->nice;                                       /* CFS nice level (M1171) */
             n++; t = t->next;
         } while (t != current);
     }

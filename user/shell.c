@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2120,6 +2120,39 @@ static int run_command(char *line, char *cwd) {
                     print(ok ? "AF_UNIX poll: wait_any selected the one ready socket of 2 (cross-fork) OK\n" : "unixpolltest: VERIFY FAILED\n");
                     if (!ok) g_status = 1;
                 } else { print("unixpolltest: fork failed\n"); g_status = 1; }
+            }
+        } else if (streq(line, "nicetest")) {   /* CFS weighted fair scheduling: nice 0 vs nice 10 CPU share (M1171) */
+            long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);   /* shared counters, read by the parent after the run */
+            if (shmid < 0) { print("nicetest: shmget failed\n"); g_status = 1; }
+            else {
+                long a = sys_fork();
+                if (a == 0) {                            /* child A: nice 0 (high weight -> more CPU) */
+                    volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                    if (m) { sys_nice(0); unsigned long dl = sys_uptime_ms() + 2000;
+                             while (sys_uptime_ms() < dl) for (int k = 0; k < 50000; k++) m[0]++; }
+                    sys_exit(0);
+                }
+                long b = sys_fork();
+                if (b == 0) {                            /* child B: nice 10 (low weight -> less CPU) */
+                    volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                    if (m) { sys_nice(10); unsigned long dl = sys_uptime_ms() + 2000;
+                             while (sys_uptime_ms() < dl) for (int k = 0; k < 50000; k++) m[1]++; }
+                    sys_exit(0);
+                }
+                int st;                                  /* parent: off-CPU in waitpid so the two spinners share it */
+                if (a > 0) sys_waitpid((int)a, &st);
+                if (b > 0) sys_waitpid((int)b, &st);
+                volatile unsigned long *sh = (volatile unsigned long *)sys_shmat((int)shmid);   /* attach AFTER fork -> clean read */
+                unsigned long ca = sh ? sh[0] : 0, cb = sh ? sh[1] : 0;
+                unsigned long ratio = cb ? ca / cb : 0;
+                char nb[24];
+                print("CFS nice0 vs nice10 work (Mops): "); itoa_simple((int)(ca / 1000000UL), nb); print(nb);
+                print(" vs "); itoa_simple((int)(cb / 1000000UL), nb); print(nb);
+                print(", ratio "); itoa_simple((int)ratio, nb); print(nb); print("x\n");
+                int ok = (ca > cb * 2);                  /* nice0 clearly out-ran nice10 (expect ~9x by weight) */
+                print(ok ? "CFS: lower nice got proportionally more CPU (weighted fair scheduling) OK\n" : "nicetest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+                if (sh) sys_shmdt((void *)sh);
             }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
