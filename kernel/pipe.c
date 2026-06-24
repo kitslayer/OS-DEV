@@ -20,6 +20,8 @@ struct kpipe {
     unsigned char b[PBUF];
     int head, tail;                  /* ring; empty when head==tail, one slot kept free */
     int r_open, w_open;              /* reference counts on the read / write ends */
+    int pinned;                      /* a FIFO's backing pipe: persists at 0/0 (M1188) */
+    int had_writer;                  /* a writer has connected at least once (FIFO EOF gating, M1188) */
     task_t *rw, *ww;                 /* a blocked reader / writer */
 };
 static struct kpipe pipes[NPIPE];
@@ -32,10 +34,20 @@ int pipe_new(void) {
     for (int i = 0; i < NPIPE; i++) if (!pipes[i].used) {
         struct kpipe *p = &pipes[i];
         for (unsigned k = 0; k < sizeof *p; k++) ((unsigned char *)p)[k] = 0;
-        p->used = 1; p->r_open = 1; p->w_open = 1;
+        p->used = 1; p->r_open = 1; p->w_open = 1; p->had_writer = 1;   /* anon: the creator holds both ends */
         return i;
     }
     return -1;
+}
+
+/* A FIFO's backing pipe (M1188): unopened (0/0 — opens are per-process) and
+ * `pinned` so it survives at 0/0 (the named pipe outlives any single open). A
+ * reader can't EOF until a writer has connected at least once (had_writer). */
+int pipe_new_fifo(void) {
+    int idx = pipe_new(); if (idx < 0) return -1;
+    struct kpipe *p = &pipes[idx];
+    p->r_open = 0; p->w_open = 0; p->pinned = 1; p->had_writer = 0;
+    return idx;
 }
 
 long pipe_read(int idx, void *buf, unsigned long max) {
@@ -47,7 +59,7 @@ long pipe_read(int idx, void *buf, unsigned long max) {
             if (p->ww) { task_wake(p->ww); p->ww = 0; }          /* a blocked writer now has room */
             return g;
         }
-        if (p->w_open == 0) return 0;                            /* EOF: drained + no writers */
+        if (p->w_open == 0 && p->had_writer) return 0;           /* EOF: drained + no writers (FIFO: only after one connected) */
         p->rw = task_self(); task_block();                       /* woken by a writer/close (or a kill) */
         p = pp(idx); if (!p) return -1;                          /* freed under us */
     }
@@ -72,12 +84,12 @@ long pipe_write(int idx, const void *buf, unsigned long len) {
 
 void pipe_open_end(int idx, int write_end) {
     struct kpipe *p = pp(idx); if (!p) return;
-    if (write_end) p->w_open++; else p->r_open++;
+    if (write_end) { p->w_open++; p->had_writer = 1; } else p->r_open++;
 }
 
 void pipe_close_end(int idx, int write_end) {
     struct kpipe *p = pp(idx); if (!p) return;
     if (write_end) { if (p->w_open > 0) p->w_open--; if (p->w_open == 0 && p->rw) { task_wake(p->rw); p->rw = 0; } }  /* readers see EOF */
     else           { if (p->r_open > 0) p->r_open--; if (p->r_open == 0 && p->ww) { task_wake(p->ww); p->ww = 0; } }  /* writers get EPIPE */
-    if (p->r_open == 0 && p->w_open == 0) p->used = 0;           /* both ends gone -> free */
+    if (p->r_open == 0 && p->w_open == 0 && !p->pinned) p->used = 0;   /* both ends gone -> free (a FIFO's pinned pipe persists) */
 }

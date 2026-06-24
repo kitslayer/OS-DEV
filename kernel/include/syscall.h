@@ -185,6 +185,8 @@
 #define SYS_fdwrite      172   /* (fd, buf, len) -> write a pipe fd; bytes/-1 EPIPE (M1187) */
 #define SYS_fdclose      173   /* (fd) -> close an fd; 0/-1 (M1187) */
 #define SYS_dup2         174   /* (oldfd, newfd) -> redirect newfd onto oldfd; newfd/-1 (M1187) */
+#define SYS_mkfifo       175   /* (path) -> create a named pipe (FIFO); 0/-1 (M1188) */
+#define SYS_fifo_open    176   /* (path, write) -> open a FIFO end -> fd; -1 (M1188) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

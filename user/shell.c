@@ -2449,6 +2449,30 @@ static int run_command(char *line, char *cwd) {
                 print((ok && ok2) ? "pipe: fork round-trip + EOF + dup2 all OK\n" : "pipetest: VERIFY FAILED\n");
                 if (!(ok && ok2)) g_status = 1;
             }
+        } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
+            if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
+            else {
+                long pid = sys_fork();
+                if (pid == 0) {                          /* child: open the FIFO BY NAME for writing */
+                    int w = sys_fifo_open("fifotest.pipe", 1);
+                    if (w >= 0) { sys_fdwrite(w, "fifo!", 5); sys_fdclose(w); }
+                    sys_exit(0);
+                }
+                int ok = 1;
+                int rfd = sys_fifo_open("fifotest.pipe", 0);   /* parent opens the SAME name for reading */
+                if (rfd < 0) ok = 0;
+                else {
+                    char b[32];
+                    long n = sys_fdread(rfd, b, sizeof b);      /* blocks until the child connects + writes */
+                    if (!(n == 5 && b[0] == 'f' && b[4] == '!')) ok = 0;
+                    long e = sys_fdread(rfd, b, sizeof b);      /* child closed write end + exited -> EOF */
+                    if (e != 0) ok = 0;
+                    sys_fdclose(rfd);
+                }
+                int st = 0; sys_waitpid((int)pid, &st);
+                print(ok ? "fifo: mkfifo + open-by-name rendezvous + EOF OK\n" : "fifotest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

@@ -13,6 +13,7 @@
 #include "flock.h"   /* flock_release_pid on process exit (M1177) */
 #include "pty.h"     /* pty_release_pid on process exit (M1185) */
 #include "pipe.h"    /* anonymous pipe objects for the fd table (M1187) */
+#include "fifo.h"    /* named pipes (FIFOs), path-keyed (M1188) */
 #include "task.h"
 #include "timer.h"
 #include "interrupts.h"   /* struct registers, for ring-3 signal delivery */
@@ -2632,6 +2633,20 @@ int app_dup2(int oldfd, int newfd) {
     a->fd[newfd] = a->fd[oldfd];                                  /* newfd now references the same end */
     if (a->fd[newfd].type == 1) pipe_open_end(a->fd[newfd].obj, a->fd[newfd].write_end);
     return newfd;
+}
+/* mkfifo(path): create a named pipe (M1188). 0/-1. */
+int app_mkfifo(const char *path) { return fifo_make(path); }
+/* fifo_open(path, write): open one end of a named FIFO -> a new fd. -1 if no
+ * such FIFO or the table is full. */
+int app_fifo_open(const char *path, int write) {
+    struct app *a = cur(); if (!a) return -1;
+    int idx = fifo_pipe(path); if (idx < 0) return -1;
+    int fd = -1;
+    for (int i = 0; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;
+    pipe_open_end(idx, write ? 1 : 0);
+    a->fd[fd] = (struct fdent){ 1, 1, (uint8_t)(write ? 1 : 0), idx };
+    return fd;
 }
 /* fork: the child inherits the parent's fds (each shared end gains a reference). */
 static void app_fd_fork(struct app *child, struct app *parent) {

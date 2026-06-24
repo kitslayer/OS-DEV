@@ -10,6 +10,7 @@
 #pragma once
 
 int  pipe_new(void);                                          /* -> pipe index (r_open=w_open=1), or -1 */
+int  pipe_new_fifo(void);                                     /* -> a pinned, unopened (0/0) pipe for a FIFO, or -1 (M1188) */
 long pipe_read(int idx, void *buf, unsigned long max);        /* bytes; 0 at EOF (no writers, drained); -1 bad idx */
 long pipe_write(int idx, const void *buf, unsigned long len); /* bytes; -1 if no readers (EPIPE) or bad idx */
 void pipe_open_end(int idx, int write_end);                   /* fork/dup2: add a reference to one end */

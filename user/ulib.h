@@ -174,6 +174,8 @@ long  sys_fdread(int fd, void *buf, unsigned long max);      /* read a pipe fd; 
 long  sys_fdwrite(int fd, const void *buf, unsigned long len);  /* write a pipe fd; bytes/-1 EPIPE (M1187) */
 int   sys_fdclose(int fd);                                   /* close an fd; 0/-1 (M1187) */
 int   sys_dup2(int oldfd, int newfd);                        /* redirect newfd onto oldfd; newfd/-1 (M1187) */
+int   sys_mkfifo(const char *path);                          /* create a named pipe (FIFO); 0/-1 (M1188) */
+int   sys_fifo_open(const char *path, int write);            /* open a FIFO end -> fd; -1 (M1188) */
 #define PTY_SETMODE 0
 #define PTY_SETFG   1
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */
