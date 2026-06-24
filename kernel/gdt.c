@@ -96,3 +96,14 @@ void gdt_init(void) {
 void tss_set_rsp0(uint64_t rsp0) {
     tss.rsp[0] = rsp0;
 }
+
+/* Load the shared kernel GDT on an application processor and reload its segment
+ * registers (so KERNEL_CS resolves to the 64-bit kernel code segment when the AP
+ * takes an interrupt — its trampoline GDT had a different layout). The AP does
+ * NOT `ltr`: it runs ring-0 only, so it needs no TSS (the single TSS descriptor
+ * is already owned by the BSP, and a ring-0→ring-0 interrupt consults no TSS).
+ * M1198. */
+void gdt_load_ap(void) {
+    struct gdtr gdtr = { .limit = sizeof(gdt) - 1, .base = (uint64_t)&gdt };
+    gdt_flush(&gdtr);
+}

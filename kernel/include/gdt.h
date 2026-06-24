@@ -11,6 +11,7 @@
 #define TSS_SEL    0x28
 
 void gdt_init(void);
+void gdt_load_ap(void);   /* load the shared kernel GDT on an application processor (M1198) */
 
 /* Set the kernel stack the CPU switches to on a ring 3 -> ring 0 trap. The
  * scheduler updates this per task so each user process traps onto its own

@@ -97,6 +97,11 @@ static long gen_cpuinfo(char *b, int max) {
     int p = 0;
     /* number of CPUs the kernel brought online at boot (BSP + APs, M1197) */
     p = sapp(b, p, max, "processors\t: "); p = sdec(b, p, max, (uint64_t)smp_cpu_count); p = sapp(b, p, max, "\n");
+    /* the boot parallel self-test: how many cores ran a chunk + whether it matched (M1198) */
+    if (smp_cpu_count > 1) {
+        p = sapp(b, p, max, "smp parallel\t: "); p = sdec(b, p, max, (uint64_t)smp_selftest_cores);
+        p = sapp(b, p, max, " cores, sum self-test "); p = sapp(b, p, max, smp_selftest_ok ? "OK\n" : "FAIL\n");
+    }
     /* vendor string (leaf 0: EBX, EDX, ECX) */
     char vendor[13];
     cpuid(0, 0, &a, &x, &c, &d);

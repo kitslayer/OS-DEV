@@ -7,13 +7,16 @@
  *   3. copy the trampoline blob to physical 0x8000 + fill the param block.
  *   4. for each AP: INIT IPI, then two STARTUP IPIs (vector = 0x8000>>12 = 8).
  *      Each AP climbs ap_trampoline.asm into long mode and lands in ap_main(),
- *      which bumps smp_cpu_count and parks (cli;hlt).
+ *      which adopts the kernel GDT+IDT, bumps smp_cpu_count, and idles in hlt.
  *
- * The APs do NOT run the scheduler or take interrupts (they park with IF=0), so
- * no other subsystem has to be SMP-safe for this milestone. We leave the legacy
- * 8259 PIC exactly as pic_init() left it (remapped + fully masked): the LAPIC
- * and PIC coexist, and INIT/STARTUP travel over the LAPIC's ICR, independent of
- * the PIC. Verified on QEMU with -smp N (see [smp] line in the boot log).
+ * The APs do NOT run the general scheduler. They idle halted and only wake on a
+ * fixed inter-processor interrupt (vector 0x40) to drain the parallel job pool
+ * (smp_parallel_for) — pure-compute work, the one concurrent path here — then
+ * halt again. So aside from that small pool, no other subsystem has to be
+ * SMP-safe yet. The legacy 8259 PIC is left exactly as pic_init() left it
+ * (remapped + fully masked): the LAPIC and PIC coexist, and all IPIs travel over
+ * the LAPIC's ICR, independent of the PIC. Verified on QEMU with -smp N (see the
+ * [smp] lines in the boot log).
  */
 #include "smp.h"
 #include "acpi.h"
@@ -21,6 +24,8 @@
 #include "pmm.h"
 #include "io.h"
 #include "console.h"
+#include "gdt.h"
+#include "idt.h"
 #include <stdint.h>
 
 #define LAPIC_PHYS  0xFEE00000ull       /* xAPIC MMIO register block (1 page) */
@@ -86,14 +91,115 @@ static void pit_udelay(uint32_t us) {
         __asm__ volatile("pause");
 }
 
+void lapic_eoi(void) { if (lapic) lapic_wr(0x0B0, 0); }   /* ack an interrupt */
+
+/* ---- parallel job pool (M1198) -----------------------------------------
+ * The BSP dispatches a batch of pure-compute chunks; the APs (and the BSP
+ * itself) pull from the queue and run them in parallel. A tiny spinlock guards
+ * only the claim/setup — the job function runs OUTSIDE the lock, so the cores
+ * execute concurrently. Job functions must be pure compute: no kmalloc, FS, or
+ * other unsynchronised kernel state (the rest of the kernel is still BSP-only).
+ */
+#define SMP_MAXJOB 64
+struct smp_job { smp_fn fn; int lo, hi; void *ctx; };
+static struct smp_job sj[SMP_MAXJOB];
+static volatile int sj_n, sj_next, sj_done, sj_lock;
+static volatile unsigned cpu_jobs[MAX_CPUS];   /* jobs run, indexed by APIC id */
+
+static void slock(void)   { while (__atomic_exchange_n(&sj_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause"); }
+static void sunlock(void) { __atomic_store_n(&sj_lock, 0, __ATOMIC_RELEASE); }
+
+/* Claim and run one job; returns 1 if a job ran, 0 if the queue is drained. */
+static int smp_run_one(void) {
+    slock();
+    int i = (sj_next < sj_n) ? sj_next++ : -1;
+    sunlock();
+    if (i < 0) return 0;
+    sj[i].fn(sj[i].lo, sj[i].hi, sj[i].ctx);                   /* parallel: no lock held */
+    uint32_t id = (lapic_rd(LAPIC_ID) >> 24) & 0xFF;
+    __atomic_add_fetch(&cpu_jobs[id & (MAX_CPUS - 1)], 1, __ATOMIC_SEQ_CST);
+    __atomic_add_fetch(&sj_done, 1, __ATOMIC_SEQ_CST);
+    return 1;
+}
+
+/* Wake every AP (all-but-self shorthand) with a fixed IPI at vector 0x40. */
+static void smp_wake_aps(void) {
+    if (!lapic) return;
+    lapic_wr(LAPIC_ICRLO, 0x40 | (1u << 14) | (3u << 18));     /* fixed, assert, all-but-self */
+    while (lapic_rd(LAPIC_ICRLO) & ICR_PENDING) __asm__ volatile("pause");
+}
+
+/* Run fn over [0, n) split into chunks across all online cores, in parallel.
+ * The BSP participates and returns only once every chunk has completed. */
+void smp_parallel_for(int n, smp_fn fn, void *ctx) {
+    if (n <= 0 || !fn) return;
+    int nc = __atomic_load_n(&smp_cpu_count, __ATOMIC_SEQ_CST);
+    int chunks = nc * 4;                                       /* finer than cores -> load-balances */
+    if (chunks > SMP_MAXJOB) chunks = SMP_MAXJOB;
+    if (chunks < 1) chunks = 1;
+    int per = (n + chunks - 1) / chunks;
+
+    slock();
+    sj_next = 0; sj_done = 0; sj_n = 0;
+    int k = 0;
+    for (int lo = 0; lo < n && k < SMP_MAXJOB; lo += per) {
+        int hi = lo + per; if (hi > n) hi = n;
+        sj[k].fn = fn; sj[k].lo = lo; sj[k].hi = hi; sj[k].ctx = ctx; k++;
+    }
+    sj_n = k;
+    sunlock();
+
+    smp_wake_aps();                                            /* kick the idle APs */
+    while (smp_run_one()) ;                                    /* the BSP works too */
+    while (__atomic_load_n(&sj_done, __ATOMIC_SEQ_CST) < k)    /* join */
+        __asm__ volatile("pause");
+}
+
 /* AP entry, reached from ap_trampoline.asm once the core is in 64-bit long mode
- * on its own stack with the kernel page tables loaded. Enable this core's LAPIC,
- * announce ourselves, and park. We never enable interrupts (no per-CPU IDT/TSS
- * yet), so a parked AP just idles in hlt. */
+ * on its own stack with the kernel page tables loaded. Adopt the kernel GDT+IDT
+ * (so this core can take interrupts), announce ourselves, then idle: drain any
+ * dispatched jobs, else sleep in hlt until the next wake IPI. Power-friendly —
+ * an idle core is halted, not spinning (which would peg a host CPU). */
 void ap_main(void) {
     lapic_enable_this_cpu();
+    gdt_load_ap();                       /* kernel GDT: KERNEL_CS valid on a trap */
+    idt_load();                          /* kernel IDT: the wake IPI + exceptions */
     __atomic_add_fetch(&smp_cpu_count, 1, __ATOMIC_SEQ_CST);
-    for (;;) __asm__ volatile("cli; hlt");
+    __asm__ volatile("sti");             /* accept the wake IPI */
+    for (;;) {
+        while (smp_run_one()) ;          /* run everything currently queued */
+        __asm__ volatile("cli");         /* re-check with interrupts off (no lost wakeup) */
+        if (__atomic_load_n(&sj_next, __ATOMIC_SEQ_CST) >= __atomic_load_n(&sj_n, __ATOMIC_SEQ_CST))
+            __asm__ volatile("sti; hlt");   /* sleep until an IPI; sti;hlt is atomic */
+        else
+            __asm__ volatile("sti");
+    }
+}
+
+/* Boot self-test (M1198): sum 0..N in parallel across the cores and check it
+ * against the closed form, proving the pool actually executes work on the APs.
+ * Records how many cores participated for the [smp] log + /proc/cpuinfo. */
+int smp_selftest_cores;     /* cores that ran >=1 chunk */
+int smp_selftest_ok;        /* 1 = the parallel sum matched */
+
+static volatile uint64_t st_partial[MAX_CPUS];
+static void sum_chunk(int lo, int hi, void *ctx) {
+    (void)ctx;
+    uint64_t s = 0;
+    for (int i = lo; i < hi; i++) s += (unsigned)i;
+    uint32_t id = (lapic_rd(LAPIC_ID) >> 24) & 0xFF;
+    __atomic_add_fetch(&st_partial[id & (MAX_CPUS - 1)], s, __ATOMIC_SEQ_CST);
+}
+static void smp_selftest(void) {
+    const int N = 4000000;
+    smp_parallel_for(N, sum_chunk, 0);
+    uint64_t total = 0; int cores = 0;
+    for (int i = 0; i < MAX_CPUS; i++) { total += st_partial[i]; if (st_partial[i]) cores++; }
+    uint64_t expect = (uint64_t)N * (N - 1) / 2;
+    smp_selftest_cores = cores;
+    smp_selftest_ok = (total == expect);
+    kprintf("[smp] parallel self-test: sum(0..%d) %s on %d core(s)\n",
+            N, smp_selftest_ok ? "OK" : "MISMATCH", cores);
 }
 
 /* Send one IPI to `apic_id` and wait for the LAPIC to report it delivered. */
@@ -158,4 +264,6 @@ void smp_init(void) {
 
     kprintf("[smp] %d of %d CPUs online (BSP apic=%u)\n",
             __atomic_load_n(&smp_cpu_count, __ATOMIC_SEQ_CST), n, bsp);
+
+    smp_selftest();   /* prove the cores actually run work in parallel */
 }

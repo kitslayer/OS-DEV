@@ -77,6 +77,20 @@ isr128:
     push 128
     jmp isr_common
 
+; --- SMP inter-processor interrupts (M1198) ---------------------------------
+; 0x40 (64) = AP wake IPI; 0xFF (255) = LAPIC spurious vector.
+global isr64
+isr64:
+    push 0
+    push 64
+    jmp isr_common
+
+global isr255
+isr255:
+    push 0
+    push 255
+    jmp isr_common
+
 ; --- shared tail: save state, call C, restore, return -----------------------
 isr_common:
     push rax

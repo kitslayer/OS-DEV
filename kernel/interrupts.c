@@ -19,6 +19,7 @@
 #include "app.h"
 #include "task.h"
 #include "ksyms.h"
+#include "smp.h"
 #include <stdint.h>
 
 static const char *const exception_names[32] = {
@@ -71,6 +72,12 @@ void isr_dispatch(struct registers *r) {
         syscall_dispatch(r);
         return;
     }
+
+    /* SMP inter-processor interrupts (M1198): an AP takes the wake IPI to break
+     * out of its idle hlt (the work-drain happens in its idle loop after iret);
+     * the LAPIC spurious vector needs no EOI. Both just acknowledge + return. */
+    if (r->int_no == 0x40) { lapic_eoi(); return; }
+    if (r->int_no == 0xFF) { return; }
 
     if (r->int_no < 32) {
         /* Breakpoint is recoverable — report and continue past the int3. */
