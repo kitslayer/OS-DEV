@@ -149,6 +149,7 @@
 #define SYS_process_vm_read 137 /* (pid, raddr, local, len) -> read another process's memory; bytes/-1 (M1162) */
 #define SYS_getrlimit       138 /* (resource, struct rlimit*) -> read a resource limit; 0/-1 (M1163) */
 #define SYS_setrlimit       139 /* (resource, struct rlimit*) -> set a resource limit; 0/-1 (M1163) */
+#define SYS_process_vm_write 140 /* (pid, raddr, local, len) -> write another process's memory (COW-safe); bytes/-1 (M1165) */
 
 /* getrlimit/setrlimit (M1163), shared by the kernel + ulib. */
 #define RLIMIT_DATA    2

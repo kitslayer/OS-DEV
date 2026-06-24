@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  rlimittest(RLIMIT_NPROC)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1968,6 +1968,29 @@ static int run_command(char *line, char *cwd) {
                               : "process_vm_read: VERIFY FAILED\n");
                 if (st != 0) g_status = 1;
             } else { print("pvmtest: fork failed\n"); g_status = 1; }
+        } else if (streq(line, "pvwtest")) {   /* process_vm_write: poke another process's memory cross-AS (M1165) */
+            static char wbuf[64];
+            for (int i = 0; i < 64; i++) wbuf[i] = (char)(i + 1);    /* pattern1 (parent fills before forking) */
+            int sid = (int)sys_semget(IPC_PRIVATE, 1, IPC_CREAT);
+            struct sembuf op;
+            long pid = sys_fork();
+            if (pid == 0) {                     /* child: block until poked, then verify wbuf changed */
+                op.sem_num = 0; op.sem_op = -1; op.sem_flg = 0; sys_semop(sid, &op, 1);
+                int ok = 1;
+                for (int i = 0; i < 64; i++) if (wbuf[i] != (char)(0xC0 + i)) ok = 0;   /* expect pattern2 */
+                sys_exit(ok ? 0 : 1);
+            } else if (pid > 0) {               /* parent: write pattern2 into the child's wbuf, then wake it */
+                char nd[64]; for (int i = 0; i < 64; i++) nd[i] = (char)(0xC0 + i);
+                long n = sys_process_vm_write((int)pid, (unsigned long)wbuf, nd, 64);
+                op.sem_num = 0; op.sem_op = 1; op.sem_flg = 0; sys_semop(sid, &op, 1);
+                int st = -1; sys_waitpid((int)pid, &st);
+                int ok = (n == 64 && st == 0);
+                print(ok ? "process_vm_write: parent poked the child's memory cross-AS OK\n" : "process_vm_write: VERIFY FAILED\n");
+                int iso = 1; for (int i = 0; i < 64; i++) if (wbuf[i] != (char)(i + 1)) iso = 0;   /* parent's copy intact */
+                print(iso ? "  parent's own copy untouched -> COW isolation correct\n" : "  BROKEN: parent's copy was clobbered!\n");
+                if (!ok || !iso) g_status = 1;
+                sys_semctl(sid, 0, IPC_RMID, 0);
+            } else { print("pvwtest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

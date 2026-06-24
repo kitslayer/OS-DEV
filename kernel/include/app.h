@@ -81,6 +81,7 @@ int      app_fault_handle(uint64_t cr2, uint64_t err); /* #PF hook: COW copy / s
 struct registers;                                   /* (interrupts.h) */
 long     app_fork(struct registers *r);             /* COW fork: child returns 0, parent returns child pid; -1 fail (M1116) */
 long     app_process_vm_read(int pid, uint64_t raddr, void *local, uint64_t len);  /* read another (same-tree) process's memory; bytes/-1 (M1162) */
+long     app_process_vm_write(int pid, uint64_t raddr, const void *local, uint64_t len);  /* write another (same-tree) process's memory (COW-safe); bytes/-1 (M1165) */
 int      app_setrlimit(int resource, uint64_t val);   /* set a resource limit (RLIMIT_NPROC); 0/-1 (M1163) */
 uint64_t app_getrlimit(int resource);                 /* read a resource limit (RLIM_INFINITY if unset) (M1163) */
 long     app_exec(struct registers *r, const char *name, const char *arg);  /* replace this process's image in place; -1 fail (M1121) */

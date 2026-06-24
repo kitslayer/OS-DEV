@@ -409,6 +409,24 @@ uint64_t vmm_pte_in(uint64_t cr3, uint64_t virt) {
     return pt[PT_IDX(virt)];   /* raw leaf: PRESENT/DIRTY/ACCESSED/SWAP bits all intact */
 }
 
+/* Set the 4 KiB leaf PTE for `virt` in an arbitrary address space `cr3`, ONLY if
+ * the page tables down to the leaf already exist (the page is present) — it never
+ * creates tables. Returns 0 on success, -1 if no leaf. Used by process_vm_write
+ * to break COW in the target before poking it (M1165). On single-CPU the target
+ * isn't running, and its next schedule reloads CR3 (flushing the TLB), so no
+ * cross-AS invlpg is needed. */
+int vmm_set_pte_in(uint64_t cr3, uint64_t virt, uint64_t pte) {
+    uint64_t *pml4 = phys_to_table(cr3 & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return -1;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return -1;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT) || (pd[PD_IDX(virt)] & PTE_HUGE)) return -1;
+    uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
+    pt[PT_IDX(virt)] = pte;
+    return 0;
+}
+
 uint64_t vmm_translate(uint64_t virt) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;

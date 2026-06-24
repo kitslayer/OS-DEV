@@ -700,6 +700,47 @@ long app_process_vm_read(int pid, uint64_t raddr, void *local, uint64_t len) {
     return (long)done;
 }
 
+/* process_vm_write (M1165): the symmetric poke — copy `len` bytes from the
+ * caller's buffer `local` into process `pid`'s address space at `raddr`. Same
+ * same-tree permission as the read. The correctness crux is COW: writing a
+ * target page that is COW-marked or shared (pmm_refcount > 0) would clobber the
+ * sharer, so we first PRIVATISE it — allocate a fresh frame, copy the page,
+ * remap the target's PTE writable (vmm_set_pte_in), drop the old ref — exactly
+ * app_fault_handle's COW break, applied to the target's CR3. A genuinely
+ * read-only (non-COW) page is refused (write stops there). Returns bytes
+ * written, or -1. */
+long app_process_vm_write(int pid, uint64_t raddr, const void *local, uint64_t len) {
+    struct app *me = cur(), *t = app_by_pid(pid);
+    if (!me || !t || !t->used) return -1;
+    if (t != me && t->parent != me->pid && me->parent != t->pid) return -1;   /* same-tree only */
+    const uint8_t *in = (const uint8_t *)local;
+    uint64_t done = 0;
+    while (done < len) {
+        uint64_t va = raddr + done;
+        uint64_t vpage = va & ~(uint64_t)0xFFF;
+        uint64_t pte = vmm_pte_in(t->cr3, vpage);
+        if (!(pte & PTE_PRESENT)) break;                  /* unmapped/swapped -> stop */
+        uint64_t frame = pte & PTE_ADDR_MASK;
+        if ((pte & PTE_COW) || pmm_refcount(frame) != 0) {        /* shared -> privatise before writing */
+            uint64_t nf = pmm_alloc_frame();
+            if (!nf) break;
+            uint8_t *s = (uint8_t *)hhdm(frame), *d = (uint8_t *)hhdm(nf);
+            for (int b = 0; b < PAGE_SIZE; b++) d[b] = s[b];
+            vmm_set_pte_in(t->cr3, vpage, nf | PTE_PRESENT | PTE_USER | PTE_WRITABLE | (pte & PTE_NX));
+            pmm_free_frame(frame);                        /* drop the old shared reference */
+            frame = nf;
+        } else if (!(pte & PTE_WRITABLE)) {
+            break;                                        /* genuinely read-only (e.g. code) -> refuse */
+        }
+        uint64_t off = va & 0xFFF;
+        uint64_t chunk = 0x1000 - off; if (chunk > len - done) chunk = len - done;
+        uint8_t *dst = (uint8_t *)hhdm(frame + off);
+        for (uint64_t i = 0; i < chunk; i++) dst[i] = in[done + i];
+        done += chunk;
+    }
+    return (long)done;
+}
+
 /* setrlimit/getrlimit (M1163): per-process resource limits. Only RLIMIT_NPROC
  * (live-child cap) is enforced so far (in app_fork). Stored as 0 = unlimited;
  * reported back as RLIM_INFINITY. Inherited across fork. */
