@@ -14,6 +14,7 @@
 #include "strace.h"
 #include "vfs.h"
 #include "mqueue.h"
+#include "sysvipc.h"
 #include "fanfs.h"
 #include "iouring.h"
 #include "fb.h"
@@ -251,6 +252,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
     case SYS_alarm: case SYS_getrusage:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
+    case SYS_semget: case SYS_semop: case SYS_semctl:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
@@ -326,6 +328,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
         [SYS_mmap_huge]="mmap_huge",
+        [SYS_semget]="semget",[SYS_semop]="semop",[SYS_semctl]="semctl",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -817,6 +820,20 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_mmap_huge:                    /* (len) -> 2 MiB-backed demand-paged region (M1155) */
         r->rax = app_mmap_huge(r->rdi);
+        break;
+    case SYS_semget:                       /* (key, nsems, flags) -> SysV semaphore set (M1159) */
+        r->rax = (uint64_t)(int64_t)sysv_semget((int)r->rdi, (int)r->rsi, (int)r->rdx);
+        break;
+    case SYS_semop: {                      /* (semid, struct sembuf*, nsops) -> atomic semop (M1159) */
+        unsigned nsops = (unsigned)r->rdx;
+        if (nsops == 0 || nsops > 16 || !ubuf(r->rsi, nsops * sizeof(struct sembuf))) { r->rax = (uint64_t)-1; break; }
+        struct sembuf ksops[16];           /* copy in (semop may block + re-read across task switches) */
+        for (unsigned i = 0; i < nsops; i++) ksops[i] = ((struct sembuf *)r->rsi)[i];
+        r->rax = (uint64_t)(int64_t)sysv_semop((int)r->rdi, ksops, nsops);
+        break;
+    }
+    case SYS_semctl:                       /* (semid, semnum, cmd, arg) -> SETVAL/GETVAL/IPC_RMID (M1159) */
+        r->rax = (uint64_t)(int64_t)sysv_semctl((int)r->rdi, (int)r->rsi, (int)r->rdx, (int)r->r10);
         break;
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);

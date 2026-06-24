@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1885,6 +1885,31 @@ static int run_command(char *line, char *cwd) {
                 }
                 print(ok ? "mqueue: highest-priority-first delivery OK\n" : "mqueue: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
+            }
+        } else if (streq(line, "semtest")) {   /* SysV semaphores: count + IPC_NOWAIT + atomic all-or-nothing (M1159) */
+            int id = (int)sys_semget(IPC_PRIVATE, 2, IPC_CREAT);
+            if (id < 0) { print("semtest: semget failed\n"); g_status = 1; }
+            else {
+                sys_semctl(id, 0, SETVAL, 3);                  /* sem0 = 3 */
+                sys_semctl(id, 1, SETVAL, 0);                  /* sem1 = 0 */
+                struct sembuf op; op.sem_num = 0; op.sem_op = -2; op.sem_flg = 0;
+                sys_semop(id, &op, 1);                         /* sem0: 3 -> 1 */
+                int v0 = (int)sys_semctl(id, 0, GETVAL, 0);
+                op.sem_op = -2; op.sem_flg = IPC_NOWAIT;       /* take 2 from sem0(=1): would block -> EAGAIN, no change */
+                long nw = sys_semop(id, &op, 1);
+                int v0b = (int)sys_semctl(id, 0, GETVAL, 0);
+                struct sembuf two[2];                          /* {sem0 -1 ok, sem1 -1 would block}: all-or-nothing -> refuse, sem0 untouched */
+                two[0].sem_num = 0; two[0].sem_op = -1; two[0].sem_flg = IPC_NOWAIT;
+                two[1].sem_num = 1; two[1].sem_op = -1; two[1].sem_flg = IPC_NOWAIT;
+                long an = sys_semop(id, two, 2);
+                int v0c = (int)sys_semctl(id, 0, GETVAL, 0);
+                print("sem0 after op -2: "); printl(v0); print(" (expect 1)\n");
+                print("NOWAIT over-take -> "); print(nw < 0 ? "EAGAIN" : "WRONG"); print(", sem0 still "); printl(v0b); print("\n");
+                print("all-or-nothing 2-op -> "); print(an < 0 ? "refused" : "WRONG"); print(", sem0 still "); printl(v0c); print(" (not partially applied)\n");
+                int ok = (v0 == 1 && nw < 0 && v0b == 1 && an < 0 && v0c == 1);
+                print(ok ? "SysV semaphores: count + NOWAIT + atomic all-or-nothing OK\n" : "semtest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+                sys_semctl(id, 0, IPC_RMID, 0);
             }
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */

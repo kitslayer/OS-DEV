@@ -137,6 +137,18 @@
 #define SYS_mq_send         125 /* (idx, buf, len, prio) -> enqueue (blocks if full); bytes/-1 (M1154) */
 #define SYS_mq_receive      126 /* (idx, buf, max, uint*prio) -> dequeue highest prio (blocks if empty); bytes/-1 (M1154) */
 #define SYS_mmap_huge       127 /* (len) -> reserve a 2 MiB-backed demand-paged region (MAP_HUGETLB); base VA or 0 (M1155) */
+#define SYS_semget          128 /* (key, nsems, flags) -> SysV semaphore-set id; -1 (M1159) */
+#define SYS_semop           129 /* (semid, struct sembuf*, nsops) -> atomic all-or-nothing semop; 0/-1 (M1159) */
+#define SYS_semctl          130 /* (semid, semnum, cmd, arg) -> SETVAL/GETVAL/IPC_RMID; value/0/-1 (M1159) */
+
+/* System V semaphore ABI (M1159), shared by the kernel + ulib. */
+#define IPC_PRIVATE 0
+#define IPC_CREAT   0x200
+#define IPC_NOWAIT  0x800
+#define IPC_RMID    0
+#define GETVAL      12
+#define SETVAL      16
+struct sembuf { short sem_num; short sem_op; short sem_flg; };
 
 /* fallocate(2) modes (M1153). PUNCH_HOLE deallocates whole blocks in the range,
  * leaving a sparse hole that reads as zeros; it must be OR'd with KEEP_SIZE. */
