@@ -285,7 +285,88 @@ static int mount_path(const char *name, int *midx, char *path, int max) {
 
 void vfs_register(struct vfs_ops *ops) { fs = ops; }
 
+/* --- overlay filesystem (M1142): a union mount at /over of a read-only LOWER
+ * directory and a writable UPPER directory. Reads check the upper first, then
+ * fall through to the lower; writes go to the upper (copy-up on write), leaving
+ * the lower untouched — the mechanism behind container images and live-CD
+ * overlays. Implemented as a thin router that composes the existing per-FS ops
+ * via vfs_read/vfs_write on the rebased path (so the lower can be any FS — ISO,
+ * ext2 — and the upper any writable one — tmpfs). One overlay at a time. */
+#define OVER_CWD 50                                   /* synth_cwd value while inside /over */
+static char ov_lower[96], ov_upper[96];
+static int  ov_active;
+static int  ov_lower_midx;                            /* if the lower is /diskN, its mount index (for listing); else -1 */
+void vfs_overlay_mount(const char *lower, const char *upper) {
+    int i = 0; for (; lower[i] && i < 95; i++) ov_lower[i] = lower[i]; ov_lower[i] = 0;
+    i = 0;     for (; upper[i] && i < 95; i++) ov_upper[i] = upper[i]; ov_upper[i] = 0;
+    ov_active = (ov_lower[0] && ov_upper[0]);
+    ov_lower_midx = -1;                               /* parse a "/diskN" lower for the merged listing */
+    if (ov_lower[0] == '/') {
+        char comp[12]; int c = 0; const char *p = ov_lower + 1;
+        while (*p && *p != '/' && c < 11) comp[c++] = *p++;
+        comp[c] = 0;
+        if (*p == 0) ov_lower_midx = blockdev_mount_index(comp);
+    }
+}
+/* Build the upper-layer whiteout marker path for `rel` (ov_upper + "/.wh." + rel). */
+static void ov_wh(const char *rel, char *out, int max) {
+    int o = 0;
+    for (; ov_upper[o] && o < max - 6; o++) out[o] = ov_upper[o];
+    if (o > 0 && out[o - 1] != '/') out[o++] = '/';
+    const char *w = ".wh."; for (int j = 0; w[j] && o < max - 1; j++) out[o++] = w[j];
+    for (int j = 0; rel[j] && o < max - 1; j++) out[o++] = rel[j];
+    out[o] = 0;
+}
+/* Does a whiteout exist for `rel` in the upper layer? */
+static int ov_whiteouted(const char *rel) {
+    char wh[192], one[1]; ov_wh(rel, wh, sizeof wh);
+    return vfs_read(wh, one, 1) >= 0;
+}
+static int over_path(const char *name, const char **rel) {
+    if (!ov_active) return 0;
+    if (vstarts(name, "/over/")) { *rel = name + 6; return **rel != 0; }   /* absolute */
+    if (synth_cwd == OVER_CWD && name[0] != '/') { *rel = name; return *name != 0; }  /* relative, cwd inside /over */
+    return 0;
+}
+/* join base + "/" + rel into out (e.g. "/tmp" + "X" -> "/tmp/X") */
+static void ov_join(const char *base, const char *rel, char *out, int max) {
+    int o = 0;
+    for (; base[o] && o < max - 2; o++) out[o] = base[o];
+    if (o > 0 && out[o - 1] != '/') out[o++] = '/';
+    for (int j = 0; rel[j] && o < max - 1; j++) out[o++] = rel[j];
+    out[o] = 0;
+}
+
+/* Merged listing of the overlay (M1143): upper entries (minus whiteout markers),
+ * then lower entries that the upper doesn't shadow and that aren't whiteouted.
+ * v1 lists a tmpfs upper + a /diskN lower (the usual config). */
+static int over_list(vfs_dirent *out, int max) {
+    vfs_dirent up[64]; int nup = 0;
+    if (veq(ov_upper, "/tmp")) nup = tmpfs_list(up, 64);
+    int n = 0;
+    for (int i = 0; i < nup && n < max; i++) {
+        if (vstarts(up[i].name, ".wh.")) continue;        /* hide whiteout markers */
+        out[n++] = up[i];
+    }
+    if (ov_lower_midx >= 0) {
+        fatvol_dirent lo[64];
+        int nlo = blockdev_mount_list(ov_lower_midx, "", lo, 64);
+        for (int i = 0; i < nlo && n < max; i++) {
+            int hidden = ov_whiteouted(lo[i].name);
+            for (int j = 0; !hidden && j < nup; j++) if (veq(lo[i].name, up[j].name)) hidden = 1;  /* shadowed */
+            if (hidden) continue;
+            int k = 0; while (lo[i].name[k] && k < 60) { out[n].name[k] = lo[i].name[k]; k++; }
+            if (lo[i].is_dir) out[n].name[k++] = '/';
+            out[n].name[k] = 0;
+            out[n].size = lo[i].size; out[n].date = 0; out[n].time = 0;
+            n++;
+        }
+    }
+    return n;
+}
+
 int vfs_list(vfs_dirent *out, int max) {
+    if (synth_cwd == OVER_CWD) return over_list(out, max);  /* the merged overlay (M1143) */
     if (synth_cwd == 1 || synth_cwd == 2)
         return procfs_list(synth_cwd == 1 ? "/proc" : "/dev", out, max);
     if (synth_cwd == 3) return tmpfs_list(out, max);       /* the RAM /tmp */
@@ -311,38 +392,11 @@ long vfs_pread(const char *name, void *buf, unsigned long max, uint64_t off) {
     return (fs && fs->pread) ? fs->pread(name, buf, max, off) : -1;
 }
 
-/* --- overlay filesystem (M1142): a union mount at /over of a read-only LOWER
- * directory and a writable UPPER directory. Reads check the upper first, then
- * fall through to the lower; writes go to the upper (copy-up on write), leaving
- * the lower untouched — the mechanism behind container images and live-CD
- * overlays. Implemented as a thin router that composes the existing per-FS ops
- * via vfs_read/vfs_write on the rebased path (so the lower can be any FS — ISO,
- * ext2 — and the upper any writable one — tmpfs). One overlay at a time. */
-static char ov_lower[96], ov_upper[96];
-static int  ov_active;
-void vfs_overlay_mount(const char *lower, const char *upper) {
-    int i = 0; for (; lower[i] && i < 95; i++) ov_lower[i] = lower[i]; ov_lower[i] = 0;
-    i = 0;     for (; upper[i] && i < 95; i++) ov_upper[i] = upper[i]; ov_upper[i] = 0;
-    ov_active = (ov_lower[0] && ov_upper[0]);
-}
-static int over_path(const char *name, const char **rel) {
-    if (!ov_active || !vstarts(name, "/over/")) return 0;
-    *rel = name + 6;                                  /* the path within the overlay */
-    return **rel != 0;
-}
-/* join base + "/" + rel into out (e.g. "/tmp" + "X" -> "/tmp/X") */
-static void ov_join(const char *base, const char *rel, char *out, int max) {
-    int o = 0;
-    for (; base[o] && o < max - 2; o++) out[o] = base[o];
-    if (o > 0 && out[o - 1] != '/') out[o++] = '/';
-    for (int j = 0; rel[j] && o < max - 1; j++) out[o++] = rel[j];
-    out[o] = 0;
-}
-
 long vfs_read(const char *name, void *buf, unsigned long max) {
     char ap[96]; const char *tb;
     char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
     if (over_path(name, &tb)) {                                 /* /over: upper, then lower (M1142) */
+        if (ov_whiteouted(tb)) return -1;                       /* deleted via the overlay (M1143) */
         char up[192]; ov_join(ov_upper, tb, up, sizeof up);
         long r = vfs_read(up, buf, max);                        /* recurses, but `up` is not under /over */
         if (r >= 0) return r;
@@ -377,7 +431,10 @@ long vfs_write(const char *name, const void *buf, unsigned long len) {
     if (over_path(name, &tb)) {                                 /* /over: copy-up — writes go to the upper (M1142) */
         char up[192]; ov_join(ov_upper, tb, up, sizeof up);
         long r = vfs_write(up, buf, len);
-        if (r >= 0) fsevents_record('w', name);
+        if (r >= 0) {
+            char wh[192]; ov_wh(tb, wh, sizeof wh); vfs_remove(wh);   /* writing un-deletes it (M1143) */
+            fsevents_record('w', name);
+        }
         return r;
     }
     if (synth_path(name, ap, sizeof ap)) { long r = procfs_write(ap, buf, len); return r == -2 ? -1 : r; }
@@ -403,6 +460,14 @@ long vfs_write(const char *name, const void *buf, unsigned long len) {
 long vfs_remove(const char *name) {
     const char *tb;
     char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
+    if (over_path(name, &tb)) {                                 /* delete via the overlay: whiteout (M1143) */
+        char up[192]; ov_join(ov_upper, tb, up, sizeof up);
+        vfs_remove(up);                                         /* drop the upper copy, if any */
+        char wh[192]; ov_wh(tb, wh, sizeof wh);
+        vfs_write(wh, "x", 1);                                  /* lay a whiteout to hide the lower */
+        fsevents_record('w', name);
+        return 0;
+    }
     long r;
     if (tmp_path(name, &tb)) r = tmpfs_remove(tb);
     else {
@@ -452,6 +517,7 @@ int vfs_chdir(const char *path) {
     if (veq(path, "/proc")) { synth_cwd = 1; return 0; }   /* enter synthetic dirs */
     if (veq(path, "/dev"))  { synth_cwd = 2; return 0; }
     if (veq(path, "/tmp"))  { synth_cwd = 3; return 0; }   /* the RAM filesystem */
+    if (ov_active && veq(path, "/over")) { synth_cwd = OVER_CWD; return 0; }   /* the overlay (M1143) */
     if (path[0] == '/') {                                  /* enter a mounted disk: /diskN[/sub...] */
         char comp[12]; int c = 0; const char *p = path + 1;
         while (*p && *p != '/' && c < 11) comp[c++] = *p++;
