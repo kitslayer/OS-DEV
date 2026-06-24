@@ -91,6 +91,7 @@ int  sys_getpgid(int pid);                                 /* process group id (
 int  sys_setsid(void);                                     /* become session+group leader (M1176) */
 int  sys_tcsetpgrp(int pgid);                              /* set the console foreground group (M1176) */
 int  sys_killpg(int pgid, int signo);                      /* signal every process in a group (M1176) */
+int  sys_flock(const char *path, int op);                  /* advisory whole-file lock LOCK_SH/EX/UN|NB (M1177) */
 long sys_getrlimit(int resource, struct rlimit *rl);   /* read a resource limit (M1163) */
 long sys_setrlimit(int resource, struct rlimit *rl);   /* set a resource limit (M1163) */
 long sys_alarm(unsigned long ticks);

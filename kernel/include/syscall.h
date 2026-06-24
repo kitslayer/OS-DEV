@@ -167,6 +167,13 @@
 #define SYS_setsid       155   /* () -> become session+group leader; sid (M1176) */
 #define SYS_tcsetpgrp    156   /* (pgid) -> set the console foreground group; 0/-1 (M1176) */
 #define SYS_killpg       157   /* (pgid, signo) -> signal every process in the group; count/-1 (M1176) */
+#define SYS_flock        158   /* (path, op) -> advisory whole-file lock (LOCK_SH/EX/UN|NB); 0/-1 (M1177) */
+
+/* flock advisory whole-file locks (M1177), shared by the kernel + ulib. */
+#define LOCK_SH  1
+#define LOCK_EX  2
+#define LOCK_NB  4
+#define LOCK_UN  8
 
 /* TTY line discipline (M1174), shared by the kernel + ulib. c_lflag selects
  * cooked (ICANON) vs raw input; raw delivers each keystroke immediately. Default

@@ -474,7 +474,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2253,6 +2253,23 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "job control: kill(-pgid) delivered SIGINT to the whole group OK\n" : "jobtest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             } else { print("jobtest: fork failed\n"); g_status = 1; }
+        } else if (streq(line, "flocktest")) {   /* advisory whole-file locks: conflict then free on unlock (M1177) */
+            const char *path = "/tmp/lck";
+            int r1 = sys_flock(path, LOCK_EX);                  /* parent takes an exclusive lock */
+            long c1 = sys_fork();
+            if (c1 == 0) { int r = sys_flock(path, LOCK_EX | LOCK_NB); sys_exit(r < 0 ? 10 : 11); }   /* held -> conflict -> -1 */
+            int s1 = -1; if (c1 > 0) sys_waitpid((int)c1, &s1);
+            sys_flock(path, LOCK_UN);                            /* release it */
+            long c2 = sys_fork();
+            if (c2 == 0) { int r = sys_flock(path, LOCK_EX | LOCK_NB); sys_exit(r == 0 ? 20 : 21); }   /* now free -> 0 */
+            int s2 = -1; if (c2 > 0) sys_waitpid((int)c2, &s2);  /* c2 exits holding it -> app_reap releases it */
+            char nb[12];
+            print("flock: acquire="); itoa_simple(r1, nb); print(nb);
+            print(", child-while-held="); itoa_simple(s1, nb); print(nb);
+            print(", child-after-unlock="); itoa_simple(s2, nb); print(nb); print("\n");
+            int ok = (r1 == 0 && s1 == 10 && s2 == 20);
+            print(ok ? "flock: exclusive lock conflicts while held, frees on unlock OK\n" : "flocktest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

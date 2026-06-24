@@ -10,6 +10,7 @@
  * whichever app owns the task that trapped (task_self()->proc).
  */
 #include "app.h"
+#include "flock.h"   /* flock_release_pid on process exit (M1177) */
 #include "task.h"
 #include "timer.h"
 #include "interrupts.h"   /* struct registers, for ring-3 signal delivery */
@@ -873,6 +874,7 @@ int app_reap(app_t *a) {
             if (g_uffd.monitor_waiting && g_uffd.monitor) task_wake(g_uffd.monitor);
         }
         vfs_cwd_forget(a);                               /* don't stash cwd into a freed slot (M1144) */
+        flock_release_pid(a->pid);                       /* drop any advisory file locks it held (M1177) */
         if (a->task) task_free(a->task);
         a->task = 0;
         /* Un-joined worker threads (M1139): free the dead ones; STOP any still
