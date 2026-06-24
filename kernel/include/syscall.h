@@ -113,6 +113,7 @@
 #define SYS_fanotify_serve  101 /* () -> become the /fan userspace-materialization daemon; 0/-1 */
 #define SYS_fanotify_wait   102 /* (namebuf, max) -> block until a /fan read request; fills the name; len/-1 */
 #define SYS_fanotify_provide 103 /* (content, len) -> hand bytes to the blocked /fan reader; len/-1 */
+#define SYS_io_uring_enter  104 /* (ring) -> drain a userspace submission ring; ops completed, or -1 (M1129) */
 
 #define SYSCALL_VECTOR 0x80
 

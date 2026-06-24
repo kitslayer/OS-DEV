@@ -14,6 +14,7 @@
 #include "strace.h"
 #include "vfs.h"
 #include "fanfs.h"
+#include "iouring.h"
 #include "fb.h"
 #include "rtc.h"
 #include "speaker.h"
@@ -249,6 +250,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_alarm:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
+    case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
         return PL_STDIO;
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
@@ -308,6 +310,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
         [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
+        [SYS_io_uring_enter]="io_uring_enter",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -895,6 +898,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_fanotify_provide:             /* daemon: hand bytes back to the blocked reader */
         if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)fanfs_provide((const void *)r->rdi, r->rsi);
+        break;
+    case SYS_io_uring_enter:               /* drain a userspace submission ring (M1129) */
+        r->rax = (uint64_t)io_uring_enter(r->rdi);   /* validates the ring + each SQE pointer */
         break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
