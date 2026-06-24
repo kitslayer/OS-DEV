@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  smaps  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  smaps  mqtest(prio msgq)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1841,6 +1841,28 @@ static int run_command(char *line, char *cwd) {
             long n; char *bb = slurp("/proc/self/smaps", &n);
             if (bb && n > 0) { bb[n] = 0; print(bb); free(bb); } else { print("smaps: read failed\n"); g_status = 1; }
             if (m) sys_munmap(m, len);
+        } else if (streq(line, "mqtest")) {   /* POSIX priority message queue: highest-priority-first delivery (M1154) */
+            int q = (int)sys_mq_open("/demo", 8, 64);
+            if (q < 0) { print("mqtest: mq_open failed\n"); g_status = 1; }
+            else {
+                sys_mq_send(q, "low", 3, 1);            /* enqueue out of priority order... */
+                sys_mq_send(q, "high", 4, 9);
+                sys_mq_send(q, "mid", 3, 5);
+                print("sent 3 msgs (priorities 1, 9, 5); receiving:\n");
+                const char *expect[3] = { "high", "mid", "low" };
+                unsigned int eprio[3] = { 9, 5, 1 };
+                int ok = 1;
+                for (int i = 0; i < 3; i++) {
+                    char buf[64]; unsigned int prio = 0;
+                    long n = sys_mq_receive(q, buf, sizeof buf - 1, &prio);
+                    if (n < 0) { print("  mq_receive failed\n"); ok = 0; break; }
+                    buf[n] = 0;
+                    print("  prio "); printl(prio); print(" -> "); print(buf); print("\n");
+                    if (prio != eprio[i] || !streq(buf, expect[i])) ok = 0;
+                }
+                print(ok ? "mqueue: highest-priority-first delivery OK\n" : "mqueue: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
             unsigned long len = 256 * 1024;       /* 64 pages */
             unsigned char *m = (unsigned char *)sys_mmap(len);

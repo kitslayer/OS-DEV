@@ -13,6 +13,7 @@
 #include "app.h"
 #include "strace.h"
 #include "vfs.h"
+#include "mqueue.h"
 #include "fanfs.h"
 #include "iouring.h"
 #include "fb.h"
@@ -249,6 +250,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
     case SYS_alarm: case SYS_getrusage:
+    case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
@@ -322,6 +324,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
+        [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -872,6 +875,18 @@ void syscall_dispatch(struct registers *r) {
             r->rax = (uint64_t)(int64_t)vfs_punch_hole((const char *)r->rdi, r->rdx, r->r10);
         else
             r->rax = (uint64_t)-1;         /* only PUNCH_HOLE is supported for now */
+        break;
+    case SYS_mq_open:                      /* (name, maxmsg, msgsize) -> priority msg queue index (M1154) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)mqueue_open((const char *)r->rdi, (int)r->rsi, (int)r->rdx);
+        break;
+    case SYS_mq_send:                      /* (idx, buf, len, prio) -> enqueue (M1154) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)mqueue_send((int)r->rdi, (const void *)r->rsi, r->rdx, (unsigned)r->r10);
+        break;
+    case SYS_mq_receive:                   /* (idx, buf, max, uint*prio) -> dequeue highest prio (M1154) */
+        if (!ubuf(r->rsi, r->rdx) || (r->r10 && !ubuf(r->r10, sizeof(unsigned int)))) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)mqueue_receive((int)r->rdi, (void *)r->rsi, r->rdx, (unsigned int *)r->r10);
         break;
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
