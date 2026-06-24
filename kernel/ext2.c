@@ -832,21 +832,42 @@ static const char *xa_user(const char *name) {
     return name[5] ? name + 5 : 0;
 }
 
-/* In-inode xattr limits (kept small: a 256-byte inode has ~92 spare bytes). */
+/* xattr limits. Small attrs live in the inode's ~92 spare bytes; when they
+ * overflow that (or the value is large), the whole set spills to one EA block
+ * referenced by i_file_acl (M1184). XA_VAL is bounded so the ents[] working set
+ * stays small on the kernel stack. */
 #define XA_MAX   6      /* distinct user.* attrs per inode */
 #define XA_NAME  40     /* max name length (sans "user.") */
-#define XA_VAL   80     /* max value length */
+#define XA_VAL   200    /* max value length (block-stored when it won't fit in-inode) */
 struct xa_ent { uint8_t idx, nl; uint32_t vsz; uint8_t nm[XA_NAME]; uint8_t vl[XA_VAL]; };
 
-/* Parse the in-inode EA set into ents[] (skipping the user.* entry named `skip`,
- * if non-NULL/skip_nl). Returns the count, or -1 on a bad/absent magic. */
-static int xa_parse(const uint8_t *inode, uint32_t inode_size, struct xa_ent *ents,
+/* ext2 per-entry xattr hash (Linux ext2_xattr_hash_entry). REQUIRED for block
+ * EAs (e2fsck rejects a zero entry hash there); in-inode entries use 0. Rolling
+ * hash: name bytes (shift 5), then the value as LE32 words zero-padded (shift
+ * 16). Verified byte-exact against a debugfs-created reference block. */
+static uint32_t xa_hash_entry(const uint8_t *name, uint32_t nlen, const uint8_t *val, uint32_t vsz) {
+    uint32_t h = 0;
+    for (uint32_t i = 0; i < nlen; i++) h = (h << 5) ^ (h >> 27) ^ name[i];
+    if (vsz) {
+        uint32_t nwords = (vsz + 3) >> 2;                /* ceil(vsz/4); value zero-padded */
+        for (uint32_t w = 0; w < nwords; w++) {
+            uint32_t word = 0;
+            for (int b = 0; b < 4; b++) { uint32_t k = w * 4 + b; if (k < vsz) word |= (uint32_t)val[k] << (b * 8); }
+            h = (h << 16) ^ (h >> 16) ^ word;
+        }
+    }
+    return h;
+}
+
+/* Append the in-inode EA set to ents[] (from *ne_io), skipping the user.* entry
+ * named `skip` (if non-NULL). Updates *ne_io. Returns 0, or -1 on bad/absent magic. */
+static int xa_parse(const uint8_t *inode, uint32_t inode_size, struct xa_ent *ents, int *ne_io,
                     const char *skip, uint32_t skip_nl) {
     uint32_t extra = e_rd16(inode + 128);
     if (extra < 4 || 128 + extra + 4 > inode_size) return -1;
     uint32_t magic_off = 128 + extra, ebase = magic_off + 4;
     if (e_rd32(inode + magic_off) != EXT2_XATTR_MAGIC) return -1;
-    int ne = 0;
+    int ne = *ne_io;
     for (uint32_t e = ebase; e + 16 <= inode_size; ) {
         uint8_t enl = inode[e]; if (enl == 0) break;        /* terminator */
         if (e + 16 + enl > inode_size) break;
@@ -863,18 +884,60 @@ static int xa_parse(const uint8_t *inode, uint32_t inode_size, struct xa_ent *en
         }
         e += (16 + enl + 3) & ~3u;
     }
+    *ne_io = ne;
+    return 0;
+}
+
+/* Append the EA block (i_file_acl) set to ents[] (from *ne_io), skipping `skip`.
+ * Block entries' value_offs are relative to the block start. own 4 KiB buffer. */
+static int xa_parse_block(ext2_t *v, uint32_t facl, struct xa_ent *ents, int *ne_io,
+                          const char *skip, uint32_t skip_nl) {
+    if (!facl) return 0;
+    uint8_t blk[4096];
+    if (rdblk(v, facl, blk) < 0 || e_rd32(blk + 0) != EXT2_XATTR_MAGIC) return -1;
+    uint32_t bs = v->block_size; if (bs > sizeof blk) bs = sizeof blk;
+    int ne = *ne_io;
+    for (uint32_t e = 32; e + 16 <= bs; ) {                  /* entries start after the 32-byte header */
+        uint8_t enl = blk[e]; if (enl == 0) break;
+        if (e + 16 + enl > bs) break;
+        uint8_t idx = blk[e + 1];
+        uint32_t voffs = e_rd16(blk + e + 2), vsz = e_rd32(blk + e + 8), vpos = voffs;  /* block-relative */
+        int is_skip = (skip && idx == 1 && enl == skip_nl);
+        if (is_skip) for (uint32_t i = 0; i < enl; i++) if (blk[e + 16 + i] != (uint8_t)skip[i]) { is_skip = 0; break; }
+        if (!is_skip && ne < XA_MAX && enl <= XA_NAME && vsz <= XA_VAL &&
+            voffs < bs && vpos + vsz <= bs && vpos >= 32) {
+            ents[ne].idx = idx; ents[ne].nl = enl; ents[ne].vsz = vsz;
+            for (uint32_t i = 0; i < enl; i++) ents[ne].nm[i] = blk[e + 16 + i];
+            for (uint32_t i = 0; i < vsz; i++) ents[ne].vl[i] = blk[vpos + i];
+            ne++;
+        }
+        e += (16 + enl + 3) & ~3u;
+    }
+    *ne_io = ne;
+    return 0;
+}
+
+/* Collect the WHOLE xattr set (in-inode then block) into ents[], skipping `skip`.
+ * Returns the count. */
+static int xa_collect(ext2_t *v, const uint8_t *inode, struct xa_ent *ents,
+                      const char *skip, uint32_t skip_nl) {
+    int ne = 0;
+    xa_parse(inode, v->inode_size, ents, &ne, skip, skip_nl);
+    xa_parse_block(v, e_rd32(inode + 104), ents, &ne, skip, skip_nl);
     return ne;
 }
 
-/* Rewrite the whole in-inode EA set from ents[ne]: magic, packed entries from
- * the region start, values packed from the inode end. Returns 0, or -1 (no room). */
+/* Rewrite the in-inode EA set from ents[ne]: magic, entries from the region
+ * start, values packed from the inode end. ne==0 clears it (no magic). Returns
+ * 0, or -1 if it won't fit in-inode (caller should spill to a block). */
 static int xa_write(uint8_t *inode, uint32_t inode_size, struct xa_ent *ents, int ne) {
     uint32_t extra = 32, magic_off = 128 + extra, ebase = magic_off + 4;
     uint32_t need = 4;                                       /* terminator */
     for (int i = 0; i < ne; i++) need += ((16u + ents[i].nl + 3) & ~3u) + ((ents[i].vsz + 3) & ~3u);
-    if (ebase + need > inode_size) return -1;                /* won't fit in-inode */
+    if (ne > 0 && ebase + need > inode_size) return -1;      /* won't fit in-inode */
     e_wr16(inode + 128, (uint16_t)extra);                   /* i_extra_isize */
-    for (uint32_t i = magic_off; i < inode_size; i++) inode[i] = 0;   /* clear EA region (incl. terminator) */
+    for (uint32_t i = magic_off; i < inode_size; i++) inode[i] = 0;   /* clear EA region */
+    if (ne == 0) return 0;                                   /* no attrs -> no magic, clean */
     e_wr32(inode + magic_off, EXT2_XATTR_MAGIC);
     uint32_t ep = ebase, vp = inode_size;
     for (int i = 0; i < ne; i++) {
@@ -888,17 +951,73 @@ static int xa_write(uint8_t *inode, uint32_t inode_size, struct xa_ent *ents, in
         for (uint32_t j = 0; j < ents[i].vsz; j++) inode[vp + j] = ents[i].vl[j];
         ep += (16u + ents[i].nl + 3) & ~3u;
     }
-    return 0;                                                /* terminator already zero */
+    return 0;
 }
 
-/* set user.<name> = value (vlen bytes) on `path`; replaces an existing one.
- * Preserves other in-inode xattrs (read-modify-write). returns vlen, or -1. */
+/* Write ents[ne] as an EA block into the (already-allocated) block `facl`:
+ * 32-byte header (magic, refcount=1, blocks=1, h_hash=0), entries from +32 with
+ * the REQUIRED per-entry hash, values packed from the block end (value_offs
+ * block-relative). own 4 KiB buffer. Returns 0, or -1 (won't fit / I/O). */
+static int xa_write_block(ext2_t *v, uint32_t facl, struct xa_ent *ents, int ne) {
+    uint8_t blk[4096];
+    uint32_t bs = v->block_size; if (bs > sizeof blk) return -1;
+    for (uint32_t i = 0; i < bs; i++) blk[i] = 0;
+    e_wr32(blk + 0, EXT2_XATTR_MAGIC); e_wr32(blk + 4, 1); e_wr32(blk + 8, 1); e_wr32(blk + 12, 0);
+    uint32_t need = 32 + 4;
+    for (int i = 0; i < ne; i++) need += ((16u + ents[i].nl + 3) & ~3u) + ((ents[i].vsz + 3) & ~3u);
+    if (need > bs) return -1;
+    uint32_t ep = 32, vp = bs;
+    for (int i = 0; i < ne; i++) {
+        vp -= (ents[i].vsz + 3) & ~3u;
+        blk[ep] = ents[i].nl; blk[ep + 1] = ents[i].idx;
+        e_wr16(blk + ep + 2, (uint16_t)vp);                  /* value_offs (block-relative) */
+        e_wr32(blk + ep + 4, 0);                             /* value_block */
+        e_wr32(blk + ep + 8, ents[i].vsz);                   /* value_size */
+        for (uint32_t j = 0; j < ents[i].nl; j++) blk[ep + 16 + j] = ents[i].nm[j];
+        for (uint32_t j = 0; j < ents[i].vsz; j++) blk[vp + j] = ents[i].vl[j];
+        e_wr32(blk + ep + 12, xa_hash_entry(ents[i].nm, ents[i].nl, ents[i].vl, ents[i].vsz));  /* e_hash */
+        ep += (16u + ents[i].nl + 3) & ~3u;
+    }
+    return wrblk(v, facl, blk);
+}
+
+/* Detach the EA block (free it, clear i_file_acl, decrement i_blocks). */
+static void xa_drop_block(ext2_t *v, uint8_t *inode) {
+    uint32_t facl = e_rd32(inode + 104);
+    if (!facl) return;
+    free_block(v, facl);
+    e_wr32(inode + 104, 0);
+    uint32_t ib = e_rd32(inode + 28), d = v->block_size / 512;
+    e_wr32(inode + 28, ib > d ? ib - d : 0);
+}
+
+/* Persist ents[ne] for inode `ino`: in-inode if it fits (freeing any old block),
+ * else spill the whole set to one EA block. Returns 0, or -1. */
+static int xa_save(ext2_t *v, uint32_t ino, uint8_t *inode, struct xa_ent *ents, int ne) {
+    if (xa_write(inode, v->inode_size, ents, ne) == 0) {     /* fits in-inode (or empty) */
+        xa_drop_block(v, inode);                             /* no longer need a block */
+        return write_inode(v, ino, inode);
+    }
+    uint32_t facl = e_rd32(inode + 104);
+    if (!facl) {                                             /* allocate an EA block */
+        facl = alloc_block(v); if (!facl) return -1;
+        e_wr32(inode + 104, facl);
+        e_wr32(inode + 28, e_rd32(inode + 28) + v->block_size / 512);   /* i_blocks += */
+    }
+    if (xa_write_block(v, facl, ents, ne) < 0) return -1;
+    e_wr16(inode + 128, 32);                                 /* clear the in-inode EA (all in the block now) */
+    for (uint32_t i = 160; i < v->inode_size; i++) inode[i] = 0;
+    return write_inode(v, ino, inode);
+}
+
+/* set user.<name> = value (vlen bytes) on `path`; replaces an existing one,
+ * preserves the rest (read-modify-write across in-inode + EA block). returns vlen/-1. */
 long ext2_setxattr(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                    const char *path, const char *name, const void *value, unsigned long vlen) {
     ext2_t v;
     if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
     v.write = write;
-    if (v.inode_size < 256) return -1;                 /* in-inode EA needs a 256-byte inode */
+    if (v.inode_size < 256) return -1;                 /* in-inode EA region needs a 256-byte inode */
     const char *xn = xa_user(name); if (!xn) return -1;
     uint32_t nlen = xa_strlen(xn);
     if (nlen == 0 || nlen > XA_NAME || vlen > XA_VAL) return -1;
@@ -906,15 +1025,13 @@ long ext2_setxattr(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t sta
     uint32_t ino = walk(&v, path, inode, &isdir);
     if (!ino || isdir) return -1;
     struct xa_ent ents[XA_MAX];
-    int ne = xa_parse(inode, v.inode_size, ents, xn, nlen);   /* existing set, minus our name */
-    if (ne < 0) ne = 0;                                       /* no/garbage EA -> start fresh */
+    int ne = xa_collect(&v, inode, ents, xn, nlen);           /* whole set, minus our name */
     if (ne >= XA_MAX) return -1;
     ents[ne].idx = 1; ents[ne].nl = (uint8_t)nlen; ents[ne].vsz = (uint32_t)vlen;
     for (uint32_t i = 0; i < nlen; i++) ents[ne].nm[i] = (uint8_t)xn[i];
     for (uint32_t i = 0; i < vlen; i++) ents[ne].vl[i] = ((const uint8_t *)value)[i];
     ne++;
-    if (xa_write(inode, v.inode_size, ents, ne) < 0) return -1;
-    return write_inode(&v, ino, inode) < 0 ? -1 : (long)vlen;
+    return xa_save(&v, ino, inode, ents, ne) < 0 ? -1 : (long)vlen;
 }
 
 /* remove user.<name> from `path`. returns 0 (removed), or -1 (absent/no EA). */
@@ -929,16 +1046,15 @@ long ext2_removexattr(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
     uint8_t inode[256]; int isdir = 0;
     uint32_t ino = walk(&v, path, inode, &isdir);
     if (!ino || isdir) return -1;
-    struct xa_ent before[XA_MAX], ents[XA_MAX];
-    int nb = xa_parse(inode, v.inode_size, before, 0, 0);     /* full set (skip nothing) */
-    int ne = xa_parse(inode, v.inode_size, ents, xn, nlen);   /* set minus our name */
-    if (nb < 0 || ne < 0 || ne == nb) return -1;              /* not present */
-    if (xa_write(inode, v.inode_size, ents, ne) < 0) return -1;
-    return write_inode(&v, ino, inode) < 0 ? -1 : 0;
+    struct xa_ent ents[XA_MAX];
+    int nb = xa_collect(&v, inode, ents, 0, 0);               /* full set */
+    int ne = xa_collect(&v, inode, ents, xn, nlen);           /* minus our name */
+    if (nb == ne) return -1;                                  /* not present */
+    return xa_save(&v, ino, inode, ents, ne) < 0 ? -1 : 0;
 }
 
 /* read user.<name> from `path` into out (max bytes). returns the value's full
- * size (may exceed max -> truncated), or -1 if absent/no EA. */
+ * size (may exceed max -> truncated), or -1 if absent. */
 long ext2_getxattr(blk_read_fn read, void *ctx, uint64_t start_lba,
                    const char *path, const char *name, void *out, unsigned long max) {
     ext2_t v; if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
@@ -947,53 +1063,38 @@ long ext2_getxattr(blk_read_fn read, void *ctx, uint64_t start_lba,
     uint32_t nlen = xa_strlen(xn);
     uint8_t inode[256]; int isdir = 0;
     if (!walk(&v, path, inode, &isdir)) return -1;
-    uint32_t extra = e_rd16(inode + 128);
-    if (extra < 4 || 128 + extra + 4 > v.inode_size) return -1;
-    if (e_rd32(inode + 128 + extra) != EXT2_XATTR_MAGIC) return -1;   /* no in-inode EA */
-    uint32_t ebase = 128 + extra + 4, e = ebase;
-    while (e + 16 <= v.inode_size) {
-        uint8_t enl = inode[e]; if (enl == 0) break;                  /* terminator */
-        if (e + 16 + enl > v.inode_size) break;
-        if (inode[e + 1] == 1 && enl == nlen) {
-            int match = 1;
-            for (uint32_t i = 0; i < nlen; i++) if (inode[e + 16 + i] != (uint8_t)xn[i]) { match = 0; break; }
-            if (match) {
-                uint32_t voffs = e_rd16(inode + e + 2), vsize = e_rd32(inode + e + 8);
-                uint32_t vpos = ebase + voffs;
-                if (voffs >= v.inode_size || vpos + vsize > v.inode_size || vpos < ebase) return -1;
-                uint32_t n = vsize < max ? vsize : (uint32_t)max;
-                for (uint32_t i = 0; i < n; i++) ((uint8_t *)out)[i] = inode[vpos + i];
-                return (long)vsize;
-            }
-        }
-        e += (16 + enl + 3) & ~3u;
+    struct xa_ent ents[XA_MAX];
+    int ne = xa_collect(&v, inode, ents, 0, 0);
+    for (int i = 0; i < ne; i++) {
+        if (ents[i].idx != 1 || ents[i].nl != nlen) continue;
+        int match = 1;
+        for (uint32_t j = 0; j < nlen; j++) if (ents[i].nm[j] != (uint8_t)xn[j]) { match = 0; break; }
+        if (!match) continue;
+        uint32_t n = ents[i].vsz < max ? ents[i].vsz : (uint32_t)max;
+        for (uint32_t j = 0; j < n; j++) ((uint8_t *)out)[j] = ents[i].vl[j];
+        return (long)ents[i].vsz;
     }
     return -1;
 }
 
 /* list xattr names as NUL-separated "user.NAME\0" entries into out (max bytes).
- * returns the total bytes (may exceed max -> truncated), or -1 if no EA. */
+ * returns the total bytes (may exceed max -> truncated), or -1 if not ext2. */
 long ext2_listxattr(blk_read_fn read, void *ctx, uint64_t start_lba,
                     const char *path, char *out, unsigned long max) {
     ext2_t v; if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
     if (v.inode_size < 256) return -1;
     uint8_t inode[256]; int isdir = 0;
     if (!walk(&v, path, inode, &isdir)) return -1;
-    uint32_t extra = e_rd16(inode + 128);
-    if (extra < 4 || 128 + extra + 4 > v.inode_size) return -1;
-    if (e_rd32(inode + 128 + extra) != EXT2_XATTR_MAGIC) return 0;    /* EA region but empty */
-    uint32_t ebase = 128 + extra + 4, e = ebase, total = 0;
-    while (e + 16 <= v.inode_size) {
-        uint8_t enl = inode[e]; if (enl == 0) break;
-        if (e + 16 + enl > v.inode_size) break;
-        if (inode[e + 1] == 1) {                                      /* user.* only */
-            const char *pre = "user.";
-            for (int i = 0; i < 5; i++) { if (total < max) out[total] = pre[i]; total++; }
-            for (uint32_t i = 0; i < enl; i++) { if (total < max) out[total] = (char)inode[e + 16 + i]; total++; }
-            if (total < max) out[total] = 0;
-            total++;                                                  /* NUL terminator (counted even if truncated) */
-        }
-        e += (16 + enl + 3) & ~3u;
+    struct xa_ent ents[XA_MAX];
+    int ne = xa_collect(&v, inode, ents, 0, 0);
+    uint32_t total = 0;
+    for (int i = 0; i < ne; i++) {
+        if (ents[i].idx != 1) continue;                       /* user.* only */
+        const char *pre = "user.";
+        for (int k = 0; k < 5; k++) { if (total < max) out[total] = pre[k]; total++; }
+        for (uint32_t j = 0; j < ents[i].nl; j++) { if (total < max) out[total] = (char)ents[i].nm[j]; total++; }
+        if (total < max) out[total] = 0;
+        total++;                                              /* NUL terminator (counted even if truncated) */
     }
     return (long)total;
 }

@@ -35,42 +35,55 @@ int main(int argc, char **argv) {
      * set two (one value has a space), then verify a too-big 3rd is refused. */
     check("set user.greeting=hello",  ext2_setxattr(bd_read, bd_write, 0, 0, P, "user.greeting", "hello", 5) == 5);
     check("set user.by='cc ai'",      ext2_setxattr(bd_read, bd_write, 0, 0, P, "user.by", "cc ai", 5) == 5);
-    check("overflow 3rd -> -1 (in-inode full)", ext2_setxattr(bd_read, bd_write, 0, 0, P, "user.mime", "text/plain", 10) == -1);
 
-    /* get each back */
-    char buf[128]; long n;
+    char buf[256]; long n;
+    /* --- in-inode phase: get + replace --- */
     n = ext2_getxattr(bd_read, 0, 0, P, "user.greeting", buf, sizeof buf);
     check("get user.greeting == 'hello'", n == 5 && memcmp(buf, "hello", 5) == 0);
-    n = ext2_getxattr(bd_read, 0, 0, P, "user.by", buf, sizeof buf);
-    check("get user.by == 'cc ai'", n == 5 && memcmp(buf, "cc ai", 5) == 0);
-
-    /* replace an existing value (different length) — the other must survive */
     check("replace user.greeting=hi", ext2_setxattr(bd_read, bd_write, 0, 0, P, "user.greeting", "hi", 2) == 2);
-    n = ext2_getxattr(bd_read, 0, 0, P, "user.greeting", buf, sizeof buf);
-    check("get user.greeting == 'hi'", n == 2 && memcmp(buf, "hi", 2) == 0);
     n = ext2_getxattr(bd_read, 0, 0, P, "user.by", buf, sizeof buf);
     check("user.by survived replace", n == 5 && memcmp(buf, "cc ai", 5) == 0);
 
-    /* listxattr: NUL-separated names */
-    char names[256]; long ln = ext2_listxattr(bd_read, 0, 0, P, names, sizeof names);
-    int saw_g = 0, saw_b = 0;
+    /* --- block-spill phase: a 180-byte value can't fit in-inode -> EA block;
+     * the whole set moves to the block, and the small attrs must survive --- */
+    char big[180]; memset(big, 'B', sizeof big);
+    check("set user.big (180B) -> spills to EA block", ext2_setxattr(bd_read, bd_write, 0, 0, P, "user.big", big, 180) == 180);
+    n = ext2_getxattr(bd_read, 0, 0, P, "user.big", buf, sizeof buf);
+    check("get user.big == 180x'B' (from block)", n == 180 && memcmp(buf, big, 180) == 0);
+    n = ext2_getxattr(bd_read, 0, 0, P, "user.greeting", buf, sizeof buf);
+    check("user.greeting survived spill (=hi)", n == 2 && memcmp(buf, "hi", 2) == 0);
+    n = ext2_getxattr(bd_read, 0, 0, P, "user.by", buf, sizeof buf);
+    check("user.by survived spill (=cc ai)", n == 5 && memcmp(buf, "cc ai", 5) == 0);
+
+    /* listxattr (across in-inode + block): all three names */
+    char names[512]; long ln = ext2_listxattr(bd_read, 0, 0, P, names, sizeof names);
+    int saw_g = 0, saw_b = 0, saw_x = 0;
     for (long i = 0; i < ln; ) {
         if (!strcmp(names + i, "user.greeting")) saw_g = 1;
         if (!strcmp(names + i, "user.by"))       saw_b = 1;
+        if (!strcmp(names + i, "user.big"))      saw_x = 1;
         while (i < ln && names[i]) i++; i++;
     }
-    check("list shows both names", saw_g && saw_b);
+    check("list shows all three names", saw_g && saw_b && saw_x);
+
+    /* replace the block value with a different length; the others survive */
+    char big2[150]; memset(big2, 'C', sizeof big2);
+    check("replace user.big (150B 'C')", ext2_setxattr(bd_read, bd_write, 0, 0, P, "user.big", big2, 150) == 150);
+    n = ext2_getxattr(bd_read, 0, 0, P, "user.big", buf, sizeof buf);
+    check("get user.big == 150x'C'", n == 150 && memcmp(buf, big2, 150) == 0);
 
     /* missing attr -> -1; non-user namespace -> -1 */
     check("get missing -> -1", ext2_getxattr(bd_read, 0, 0, P, "user.nope", buf, sizeof buf) == -1);
     check("set system.x -> -1 (only user.*)", ext2_setxattr(bd_read, bd_write, 0, 0, P, "system.x", "y", 1) == -1);
 
-    /* remove one; the other survives */
+    /* remove the small one; greeting + the block value survive */
     check("remove user.by", ext2_removexattr(bd_read, bd_write, 0, 0, P, "user.by") == 0);
     check("get removed user.by -> -1", ext2_getxattr(bd_read, 0, 0, P, "user.by", buf, sizeof buf) == -1);
     n = ext2_getxattr(bd_read, 0, 0, P, "user.greeting", buf, sizeof buf);
-    check("user.greeting survived removal", n == 2 && memcmp(buf, "hi", 2) == 0);
+    check("user.greeting survived removal (=hi)", n == 2 && memcmp(buf, "hi", 2) == 0);
     check("remove again -> -1 (absent)", ext2_removexattr(bd_read, bd_write, 0, 0, P, "user.by") == -1);
+    /* final on-disk state: user.greeting=hi + user.big=150x'C' in the EA block
+     * (e2fsck will validate the block + the per-entry hash; debugfs reads both). */
 
     FILE *o = fopen(argv[2], "wb"); if (!o) { perror("open out"); return 2; }
     fwrite(g_img, 1, (size_t)g_img_bytes, o); fclose(o);

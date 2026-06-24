@@ -34,11 +34,24 @@ echo "validating the on-disk image with the real ext2 tools..."
 if ! e2fsck -fn "$OUT" >/tmp/osdev_xattr_fsck.log 2>&1; then
     echo "FAIL: e2fsck found errors in our xattr image:"; cat /tmp/osdev_xattr_fsck.log; exit 1
 fi
-# debugfs (the reference tool) must read the xattr we wrote.
+# debugfs (the reference tool) must read both xattrs back. The final state has
+# user.greeting=hi AND user.big=150x'C' in an EA BLOCK (i_file_acl), so e2fsck
+# passing above already validated our block layout + per-entry hash; now confirm
+# debugfs decodes the same values.
 EA=$(debugfs -R "ea_get /F.TXT user.greeting" "$OUT" 2>/dev/null | tr -d '\n')
 case "$EA" in
-    *hi*) : ;;  # value is "hi" after the replace+remove sequence
+    *hi*) : ;;
     *) echo "FAIL: debugfs did not read back user.greeting=hi (got: '$EA')"; exit 1 ;;
 esac
+# user.big lives in the EA block; its 150 'C's prove the block path + hash.
+BIG=$(debugfs -R "ea_get /F.TXT user.big" "$OUT" 2>/dev/null | tr -dc 'C' | wc -c)
+if [ "$BIG" -lt 150 ]; then
+    echo "FAIL: debugfs did not read back the 150-byte block value (got $BIG 'C's)"; exit 1
+fi
+# the inode must actually reference an EA block (File ACL != 0).
+FACL=$(debugfs -R "stat /F.TXT" "$OUT" 2>/dev/null | grep -oiE 'File ACL: [0-9]+' | grep -oE '[0-9]+')
+if [ -z "$FACL" ] || [ "$FACL" = "0" ]; then
+    echo "FAIL: expected an EA block (File ACL != 0), got '$FACL'"; exit 1
+fi
 
-echo "PASS: ext2 xattr write path (round-trip OK; e2fsck clean; debugfs reads it: user.greeting=$EA)"
+echo "PASS: ext2 xattr (in-inode + EA block); e2fsck clean; debugfs reads user.greeting=$EA + user.big=${BIG}x'C' in block $FACL"
