@@ -30,6 +30,10 @@ int  tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port);  /* 0 / -1 */
 int  tcp_write(tcp_conn *c, const uint8_t *data, int len);          /* len / -1 */
 int  tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks);  /* bytes, 0=timeout, -1=closed */
 void tcp_close(tcp_conn *c);
+/* Passive open: LISTEN on `port`, accept one connection, read the request into
+ * reqbuf, send `resp`, close. Request bytes read (>=0), or -1. In-guest httpd. M1133. */
+int  net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
+                   uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks);
 
 const uint8_t *net_ip(void);        /* our IPv4 address (4 bytes) */
 const uint8_t *net_gateway(void);   /* the gateway IPv4 address (4 bytes) */

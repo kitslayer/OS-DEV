@@ -133,6 +133,7 @@ def main():
     ap.add_argument("--kernel", default="build/kernel32.elf")
     ap.add_argument("--disk",   default="build/fat.img")
     ap.add_argument("--disk2",  default=None, help="attach a 2nd drive (virtio-blk) — auto-mounted as /disk2")
+    ap.add_argument("--hostfwd", default=None, help="QEMU user-net hostfwd spec, e.g. tcp::18080-:80 (inbound to the guest)")
     ap.add_argument("--out",    default=".")
     ap.add_argument("--boot-timeout", type=float, default=25)
     ap.add_argument("--no-wait", action="store_true")
@@ -152,9 +153,10 @@ def main():
     tmp = tempfile.mkdtemp(prefix="osdrive.")
     mon_sock, qmp_sock, slog, ppm = (os.path.join(tmp, n) for n in
                                      ("mon.sock", "qmp.sock", "serial.log", "shot.ppm"))
+    netdev = "user,id=net0" + (",hostfwd=" + args.hostfwd if args.hostfwd else "")
     qcmd = [qemu, "-no-reboot", "-no-shutdown", "-m", "256M", "-kernel", args.kernel,
         "-drive", "file=%s,format=raw,if=ide" % args.disk,
-        "-netdev", "user,id=net0", "-device", "e1000,netdev=net0",
+        "-netdev", netdev, "-device", "e1000,netdev=net0",
         "-device", "piix3-usb-uhci,id=uhci", "-device", "usb-tablet,bus=uhci.0",
         "-device", "AC97,audiodev=snd0", "-audiodev", "none,id=snd0",
         "-display", "none", "-serial", "file:" + slog,

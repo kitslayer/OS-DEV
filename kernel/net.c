@@ -707,6 +707,94 @@ int tcp_write(tcp_conn *c, const uint8_t *data, int len) {
     return len;
 }
 
+/* ---------------- minimal one-connection TCP SERVER (M1133) ----------------
+ * The inbound counterpart of tcp_connect: LISTEN on `port`, accept one
+ * connection (passive open), read the peer's request into reqbuf, send `resp`,
+ * and close. The peer's MAC/IP/port are learned from its frames, so replies need
+ * no ARP/gateway. No retransmission — correct on the reliable QEMU/localhost path
+ * (curl via `-netdev user,hostfwd=`). Returns request bytes read (>=0), or -1 on
+ * timeout/error. Lets an in-guest httpd actually serve pages. */
+static int srv_rx(uint8_t *buf, int max, uint16_t port, uint16_t cport,
+                  const uint8_t *cip, uint64_t deadline, uint8_t **tcp_out, int *dlen_out) {
+    while (timer_ticks() < deadline) {
+        int len = nic_receive(buf, max);
+        if (len < 34) continue;
+        if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 6) continue;     /* IPv4 / TCP */
+        int ihl = (buf[14] & 0x0F) * 4;
+        if (ihl < 20 || 14 + ihl + 20 > len) continue;
+        uint8_t *tcp = buf + 14 + ihl;
+        if (get16(tcp + 2) != port) continue;                            /* our listen port */
+        if (cport && get16(tcp + 0) != cport) continue;                  /* this connection's peer port */
+        if (cip && memcmp(buf + 26, cip, 4) != 0) continue;              /* this connection's peer IP */
+        int thl = (tcp[12] >> 4) * 4;
+        if (thl < 20 || 14 + ihl + thl > len) continue;
+        int iptotal = get16(buf + 16);                                   /* clamp peer-controlled length */
+        if (iptotal > len - 14) iptotal = len - 14;
+        int dlen = iptotal - ihl - thl; if (dlen < 0) dlen = 0;
+        *tcp_out = tcp; *dlen_out = dlen;
+        return len;
+    }
+    return 0;
+}
+
+int net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
+                  uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks) {
+    uint8_t buf[1600], *tcp; int dlen;
+    uint8_t cmac[6], cip[4]; uint16_t cport;
+    uint32_t their_seq, our_seq;
+
+    /* 1. passive open: wait for a SYN (no ACK) to our port */
+    uint64_t deadline = timer_ticks() + timeout_ticks;
+    for (;;) {
+        if (!srv_rx(buf, sizeof buf, port, 0, 0, deadline, &tcp, &dlen)) return -1;   /* timeout */
+        if ((tcp[13] & TCP_SYN) && !(tcp[13] & TCP_ACK)) break;
+    }
+    memcpy(cmac, buf + 6, 6); memcpy(cip, buf + 26, 4);
+    cport = get16(tcp + 0);
+    their_seq = get32(tcp + 4) + 1;                       /* their SYN consumes one sequence number */
+
+    /* 2. SYN-ACK */
+    our_seq = ((uint32_t)(timer_ticks() * 2654435761u)) | 1;
+    tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_SYN | TCP_ACK, 0, 0);
+    our_seq += 1;                                         /* our SYN consumes one */
+
+    /* 3. read the request (the peer's first data segment; its ACK may precede it) */
+    int reqlen = 0;
+    uint64_t hdl = timer_ticks() + 200;                   /* ~2 s for handshake + request */
+    for (;;) {
+        if (!srv_rx(buf, sizeof buf, port, cport, cip, hdl, &tcp, &dlen)) return -1;
+        if (tcp[13] & TCP_RST) return -1;
+        int thl = (tcp[12] >> 4) * 4;
+        if (dlen > 0 && get32(tcp + 4) == their_seq) {    /* in-order data = the request */
+            int copy = dlen < reqmax ? dlen : reqmax;
+            for (int i = 0; i < copy; i++) reqbuf[i] = tcp[thl + i];
+            reqlen = copy;
+            their_seq += dlen;
+            tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_ACK, 0, 0);   /* ACK the request */
+            break;
+        }
+    }
+
+    /* 4. response */
+    for (int off = 0; off < resp_len; ) {
+        int chunk = resp_len - off; if (chunk > 1400) chunk = 1400;
+        tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_PSH | TCP_ACK, resp + off, chunk);
+        our_seq += chunk; off += chunk;
+    }
+
+    /* 5. close: FIN, then briefly mop up the peer's FIN/ACK */
+    tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_FIN | TCP_ACK, 0, 0);
+    our_seq += 1;
+    uint64_t fdl = timer_ticks() + 50;
+    while (srv_rx(buf, sizeof buf, port, cport, cip, fdl, &tcp, &dlen)) {
+        if (tcp[13] & TCP_FIN) {
+            tcp_send_seg(cmac, cip, port, cport, our_seq, get32(tcp + 4) + 1, TCP_ACK, 0, 0);
+            break;
+        }
+    }
+    return reqlen;
+}
+
 /* ---- out-of-order reassembly (one connection at a time, serialized) -------
  * A dropped or reordered segment leaves a gap in the byte stream. The naive
  * approach (drop everything after the gap and re-ACK) forces the whole tail to

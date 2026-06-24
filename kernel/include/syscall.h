@@ -115,6 +115,7 @@
 #define SYS_fanotify_provide 103 /* (content, len) -> hand bytes to the blocked /fan reader; len/-1 */
 #define SYS_io_uring_enter  104 /* (ring) -> drain a userspace submission ring; ops completed, or -1 (M1129) */
 #define SYS_mseal           105 /* (addr, len) -> irreversibly seal mmap regions in range (no later munmap/mprotect); count/-1 (M1130) */
+#define SYS_tcp_serve       106 /* (port, resp, resp_len, reqbuf, reqmax) -> serve one TCP connection; request bytes/-1 (M1133) */
 
 #define SYSCALL_VECTOR 0x80
 

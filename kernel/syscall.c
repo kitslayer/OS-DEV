@@ -262,6 +262,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
+    case SYS_tcp_serve:
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
@@ -311,7 +312,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
         [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
-        [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",
+        [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -837,6 +838,16 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mseal:                        /* (addr, len): irreversibly seal mmap regions (M1130) */
         r->rax = (uint64_t)(int64_t)app_mseal(r->rdi, r->rsi);
         break;
+    case SYS_tcp_serve: {                  /* (port, resp, resp_len, reqbuf, reqmax): serve one TCP conn (M1133) */
+        const uint8_t *resp = (const uint8_t *)r->rsi; int resp_len = (int)r->rdx;
+        uint8_t *reqbuf = (uint8_t *)r->r10;           int reqmax  = (int)r->r8;
+        if (resp_len < 0 || reqmax < 0 ||
+            (resp_len && !ubuf(r->rsi, (uint64_t)resp_len)) ||
+            (reqmax  && !ubuf(r->r10, (uint64_t)reqmax))) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");           /* the poll deadlines need the timer running */
+        r->rax = (uint64_t)(int64_t)net_tcp_serve((uint16_t)r->rdi, resp, resp_len, reqbuf, reqmax, 300 /*~3s*/);
+        break;
+    }
     case SYS_bind:                         /* (from, to): graft FROM's subtree onto the path TO */
         if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_bind((const char *)r->rdi, (const char *)r->rsi);

@@ -169,7 +169,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -255,6 +255,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "fantest", fantest_elf_start, "userspace-FS demo" },
     { "iouringtest", iouringtest_elf_start, "io_uring batch demo" },
     { "msealtest", msealtest_elf_start, "mseal hardening demo" },
+    { "httpd", httpd_elf_start, "in-guest HTTP server" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
