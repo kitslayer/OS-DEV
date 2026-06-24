@@ -316,7 +316,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",
+        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -864,6 +864,11 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_set_robust_list:              /* (robust_t*): register this thread's robust-futex list (M1141) */
         task_set_robust(r->rdi);           /* stored only; validated when walked on thread exit */
+        r->rax = 0;
+        break;
+    case SYS_overlay:                      /* (lower, upper): mount a union overlay at /over (M1142) */
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        vfs_overlay_mount((const char *)r->rdi, (const char *)r->rsi);
         r->rax = 0;
         break;
     case SYS_uffd_register:                /* (addr, len): route this region's faults to a monitor (M1134) */

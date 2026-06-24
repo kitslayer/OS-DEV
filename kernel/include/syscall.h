@@ -126,6 +126,7 @@
 #define SYS_join            114 /* (tid) -> block until thread tid exits, then reap it; 0/-1 (M1139) */
 #define SYS_set_tls         115 /* (base) -> set this thread's %fs (TLS) base; 0 (M1140) */
 #define SYS_set_robust_list 116 /* (robust_t*) -> register this thread's robust-futex list; 0 (M1141) */
+#define SYS_overlay         117 /* (lower, upper) -> mount a union overlay at /over (copy-up to upper); 0/-1 (M1142) */
 
 #define SYSCALL_VECTOR 0x80
 

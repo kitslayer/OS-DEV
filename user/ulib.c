@@ -49,6 +49,7 @@ void sys_thread_exit(void) { do_syscall(SYS_thread_exit, 0, 0, 0); for (;;) {} }
 int  sys_join(int tid) { return (int)do_syscall(SYS_join, tid, 0, 0); }
 void sys_set_tls(void *base) { do_syscall(SYS_set_tls, (long)base, 0, 0); }   /* set %fs base for thread-local storage */
 long sys_set_robust_list(void *r) { return do_syscall(SYS_set_robust_list, (long)r, 0, 0); }
+long sys_overlay(const char *lower, const char *upper) { return do_syscall(SYS_overlay, (long)lower, (long)upper, 0); }
 
 /* robust-mutex helpers (M1141). The lock word holds the owner's tid (0 = free),
  * with FUTEX_OWNER_DIED set if the previous owner died holding it. A thread

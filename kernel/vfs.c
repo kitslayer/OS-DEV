@@ -311,9 +311,44 @@ long vfs_pread(const char *name, void *buf, unsigned long max, uint64_t off) {
     return (fs && fs->pread) ? fs->pread(name, buf, max, off) : -1;
 }
 
+/* --- overlay filesystem (M1142): a union mount at /over of a read-only LOWER
+ * directory and a writable UPPER directory. Reads check the upper first, then
+ * fall through to the lower; writes go to the upper (copy-up on write), leaving
+ * the lower untouched — the mechanism behind container images and live-CD
+ * overlays. Implemented as a thin router that composes the existing per-FS ops
+ * via vfs_read/vfs_write on the rebased path (so the lower can be any FS — ISO,
+ * ext2 — and the upper any writable one — tmpfs). One overlay at a time. */
+static char ov_lower[96], ov_upper[96];
+static int  ov_active;
+void vfs_overlay_mount(const char *lower, const char *upper) {
+    int i = 0; for (; lower[i] && i < 95; i++) ov_lower[i] = lower[i]; ov_lower[i] = 0;
+    i = 0;     for (; upper[i] && i < 95; i++) ov_upper[i] = upper[i]; ov_upper[i] = 0;
+    ov_active = (ov_lower[0] && ov_upper[0]);
+}
+static int over_path(const char *name, const char **rel) {
+    if (!ov_active || !vstarts(name, "/over/")) return 0;
+    *rel = name + 6;                                  /* the path within the overlay */
+    return **rel != 0;
+}
+/* join base + "/" + rel into out (e.g. "/tmp" + "X" -> "/tmp/X") */
+static void ov_join(const char *base, const char *rel, char *out, int max) {
+    int o = 0;
+    for (; base[o] && o < max - 2; o++) out[o] = base[o];
+    if (o > 0 && out[o - 1] != '/') out[o++] = '/';
+    for (int j = 0; rel[j] && o < max - 1; j++) out[o++] = rel[j];
+    out[o] = 0;
+}
+
 long vfs_read(const char *name, void *buf, unsigned long max) {
     char ap[96]; const char *tb;
     char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
+    if (over_path(name, &tb)) {                                 /* /over: upper, then lower (M1142) */
+        char up[192]; ov_join(ov_upper, tb, up, sizeof up);
+        long r = vfs_read(up, buf, max);                        /* recurses, but `up` is not under /over */
+        if (r >= 0) return r;
+        char lo[192]; ov_join(ov_lower, tb, lo, sizeof lo);
+        return vfs_read(lo, buf, max);
+    }
     if (synth_path(name, ap, sizeof ap)) return procfs_read(ap, buf, max);
     if (ipc_path(name, &tb)) return mbox_read(tb, buf, max);   /* /ipc/<q>: dequeue a message (blocks if empty) */
     if (notify_path(name, &tb)) return notify_wait(tb, buf, max);   /* /notify/<n>: block until signalled, return+clear the mask */
@@ -339,6 +374,12 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
 long vfs_write(const char *name, const void *buf, unsigned long len) {
     char ap[96]; const char *tb;
     char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */
+    if (over_path(name, &tb)) {                                 /* /over: copy-up — writes go to the upper (M1142) */
+        char up[192]; ov_join(ov_upper, tb, up, sizeof up);
+        long r = vfs_write(up, buf, len);
+        if (r >= 0) fsevents_record('w', name);
+        return r;
+    }
     if (synth_path(name, ap, sizeof ap)) { long r = procfs_write(ap, buf, len); return r == -2 ? -1 : r; }
     if (ipc_path(name, &tb)) return mbox_write(tb, buf, len);   /* /ipc/<q>: enqueue a message */
     if (notify_path(name, &tb)) return notify_signal(tb, buf, len);   /* /notify/<n>: OR bits into the mask + wake */

@@ -109,6 +109,7 @@ void rmutex_unlock(volatile int *m, robust_t *r);
 void *sys_ringbuf(unsigned long len);           /* a magic mirrored ring buffer (mapped twice back-to-back); base or 0 */
 int   sys_mprotect(void *addr, unsigned long len, int prot);  /* change R/W/X (prot: 1=R 2=W 4=X); 0/-1 */
 int   sys_bind(const char *from, const char *to);  /* bind mount: graft FROM's subtree onto path TO; 0/-1 */
+long  sys_overlay(const char *lower, const char *upper);  /* mount a union overlay at /over (copy-up to upper); 0/-1 (M1142) */
 long  sys_munmap(void *addr, unsigned long len);/* free an mmap region; 0/-1 */
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */

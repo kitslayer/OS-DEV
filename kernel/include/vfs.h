@@ -31,6 +31,9 @@ struct vfs_ops {
 /* Offset read of a regular file (boot FS), for file-backed mmap's demand faults.
  * Bytes read (0 past EOF), or -1 if unsupported/absent. M1136. */
 long vfs_pread(const char *name, void *buf, unsigned long max, uint64_t off);
+/* Mount a union overlay at /over: reads fall through LOWER->...->UPPER, writes
+ * copy-up to UPPER (the lower stays read-only). One at a time. M1142. */
+void vfs_overlay_mount(const char *lower, const char *upper);
 
 void vfs_register(struct vfs_ops *ops);
 
