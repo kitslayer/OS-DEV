@@ -96,6 +96,7 @@ global httpd_elf_start, httpd_elf_end
 global uffdtest_elf_start, uffdtest_elf_end
 global mmapfile_elf_start, mmapfile_elf_end
 global threads_elf_start, threads_elf_end
+global robustfutex_elf_start, robustfutex_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -448,5 +449,9 @@ mmapfile_elf_end:
 threads_elf_start:
     incbin "build/threads.elf"
 threads_elf_end:
+
+robustfutex_elf_start:
+    incbin "build/robustfutex.elf"
+robustfutex_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

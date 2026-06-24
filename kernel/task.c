@@ -74,6 +74,10 @@ static void load_fs_base(uint64_t b) {
 /* Set the CURRENT thread's TLS base (live + saved for restore). M1140. */
 void task_set_fs_base(uint64_t b) { current->fs_base = b; load_fs_base(b); }
 
+/* Register the CURRENT thread's userspace robust-futex list (M1141). */
+void task_set_robust(uint64_t r) { current->robust = r; }
+uint64_t task_robust(void) { return current->robust; }
+
 /* Save RFLAGS and disable interrupts (returns old flags); and restore them.
  * Scheduling edits the shared ready ring, so it must be uninterruptible. */
 static inline uint64_t irq_save(void) {

@@ -1,5 +1,6 @@
 /* ulib.h — tiny userspace C library (the start of a libc). */
 #pragma once
+#include "robust.h"   /* robust_t + FUTEX_OWNER_DIED, for robust mutexes (M1141) */
 
 /* raw syscalls */
 long sys_write(int fd, const void *buf, unsigned long len);
@@ -101,6 +102,10 @@ int  sys_join(int tid);                            /* block until thread tid exi
 void mutex_lock(volatile int *m);                  /* futex-backed mutex (M1139); lock word: 0=free 1=held */
 void mutex_unlock(volatile int *m);
 void sys_set_tls(void *base);                      /* set this thread's %fs base for TLS (M1140) */
+/* robust mutexes (M1141): survive a thread dying while holding the lock */
+long sys_set_robust_list(void *r);                 /* register this thread's robust_t */
+int  rmutex_lock(volatile int *m, robust_t *r);    /* 0, or 1 (EOWNERDEAD) if the prior owner died holding it */
+void rmutex_unlock(volatile int *m, robust_t *r);
 void *sys_ringbuf(unsigned long len);           /* a magic mirrored ring buffer (mapped twice back-to-back); base or 0 */
 int   sys_mprotect(void *addr, unsigned long len, int prot);  /* change R/W/X (prot: 1=R 2=W 4=X); 0/-1 */
 int   sys_bind(const char *from, const char *to);  /* bind mount: graft FROM's subtree onto path TO; 0/-1 */

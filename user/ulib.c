@@ -48,6 +48,40 @@ int  sys_gettid(void) { return (int)do_syscall(SYS_gettid, 0, 0, 0); }
 void sys_thread_exit(void) { do_syscall(SYS_thread_exit, 0, 0, 0); for (;;) {} }
 int  sys_join(int tid) { return (int)do_syscall(SYS_join, tid, 0, 0); }
 void sys_set_tls(void *base) { do_syscall(SYS_set_tls, (long)base, 0, 0); }   /* set %fs base for thread-local storage */
+long sys_set_robust_list(void *r) { return do_syscall(SYS_set_robust_list, (long)r, 0, 0); }
+
+/* robust-mutex helpers (M1141). The lock word holds the owner's tid (0 = free),
+ * with FUTEX_OWNER_DIED set if the previous owner died holding it. A thread
+ * records its held locks in its robust_t (registered via sys_set_robust_list) so
+ * the kernel can release them on the thread's behalf if it dies. */
+static void robust_add(robust_t *r, void *m) { if (r && r->n < ROBUST_MAX) r->held[r->n++] = m; }
+static void robust_rm(robust_t *r, void *m) {
+    if (!r) return;
+    for (int i = 0; i < r->n; i++) if (r->held[i] == m) { r->held[i] = r->held[--r->n]; return; }
+}
+/* Lock a robust mutex. Returns 0, or 1 (EOWNERDEAD) if the previous owner died
+ * holding it — the caller now owns the lock and should treat the protected data
+ * as needing recovery. `r` is this thread's robust list (0 to skip robustness). */
+int rmutex_lock(volatile int *m, robust_t *r) {
+    int tid = sys_gettid();
+    for (;;) {
+        int old = *m;
+        if (old == 0) {
+            if (__sync_val_compare_and_swap(m, 0, tid) == 0) { robust_add(r, (void *)m); return 0; }
+            continue;
+        }
+        if (old & FUTEX_OWNER_DIED) {                       /* previous owner died -> recover */
+            if (__sync_val_compare_and_swap(m, old, tid) == old) { robust_add(r, (void *)m); return 1; }
+            continue;
+        }
+        sys_futex((void *)m, FUTEX_WAIT, old);              /* held by a live owner -> wait */
+    }
+}
+void rmutex_unlock(volatile int *m, robust_t *r) {
+    robust_rm(r, (void *)m);
+    __sync_lock_release(m);                                 /* word = 0 */
+    sys_futex((void *)m, FUTEX_WAKE, 1);
+}
 
 /* A futex-backed mutex (M1139): the lock word is 0 = free, 1 = held. Uncontended
  * lock/unlock is a single atomic with no syscall; only a waiter sleeps. */
