@@ -31,6 +31,31 @@ static int synth_cwd;   /* 0 = boot FS, 1 = /proc, 2 = /dev, 3 = /tmp, >=4 = mou
  * volume, relative to its root with no leading '/'. "" = the volume root (M1070). */
 static char mount_sub[128];
 
+/* --- per-process current directory (M1144) -------------------------------- *
+ * synth_cwd + mount_sub above (and the boot FS's fat32 cwd cluster) are the LIVE
+ * cwd; they belong to whichever app last ran a syscall. vfs_sync_cwd() swaps that
+ * live state to the calling app on each app switch (called once at syscall entry),
+ * so each process has its own cwd — no more one app's `cd` leaking into another. */
+uint32_t fat32_get_cwd(void);
+void     fat32_set_cwd(uint32_t c);
+static app_t *cwd_owner;        /* whose cwd is currently live in the globals */
+
+void vfs_sync_cwd(void) {
+    app_t *a = app_current();
+    if (!a || a == cwd_owner) return;                  /* same app -> globals already theirs */
+    if (cwd_owner) app_cwd_save(cwd_owner, synth_cwd, mount_sub, fat32_get_cwd());   /* stash outgoing */
+    int s; char sub[128]; uint32_t f;
+    app_cwd_load(a, &s, sub, sizeof sub, &f);          /* restore incoming */
+    synth_cwd = s;
+    int i = 0; for (; sub[i] && i < 127; i++) mount_sub[i] = sub[i]; mount_sub[i] = 0;
+    fat32_set_cwd(f);
+    cwd_owner = a;
+}
+/* An exiting app must not be saved into after its slot is freed (M1144). */
+void vfs_cwd_forget(app_t *a) { if (cwd_owner == a) cwd_owner = 0; }
+/* fork: the child inherits the parent's LIVE cwd (the globals, which are the parent's). */
+void vfs_cwd_inherit(app_t *child) { app_cwd_save(child, synth_cwd, mount_sub, fat32_get_cwd()); }
+
 static int veq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static int vstarts(const char *s, const char *pre) { while (*pre) { if (*s++ != *pre++) return 0; } return 1; }
 

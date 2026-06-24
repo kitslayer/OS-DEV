@@ -34,6 +34,12 @@ long vfs_pread(const char *name, void *buf, unsigned long max, uint64_t off);
 /* Mount a union overlay at /over: reads fall through LOWER->...->UPPER, writes
  * copy-up to UPPER (the lower stays read-only). One at a time. M1142. */
 void vfs_overlay_mount(const char *lower, const char *upper);
+/* per-process cwd (M1144): swap the live cwd to the calling app (call at syscall
+ * entry); inherit the parent's cwd into a fork child; forget an exiting app. */
+struct app;
+void vfs_sync_cwd(void);
+void vfs_cwd_inherit(struct app *child);
+void vfs_cwd_forget(struct app *a);
 
 void vfs_register(struct vfs_ops *ops);
 

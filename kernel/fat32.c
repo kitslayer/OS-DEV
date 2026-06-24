@@ -611,6 +611,11 @@ static int fat32_chdir(const char *path) {
     return 0;
 }
 
+/* Per-process cwd support (M1144): the VFS saves/restores the boot-FS cwd cluster
+ * around app switches. A 0 means "root" (a fresh app's default). */
+uint32_t fat32_get_cwd(void) { return cwd_cluster; }
+void     fat32_set_cwd(uint32_t c) { cwd_cluster = c ? c : root_cluster; }
+
 /* visit() that flags a directory as non-empty on its first real entry (not . / ..) */
 static int dir_nonempty_visit(const uint8_t *e, const char *name, void *ctx) {
     (void)e;

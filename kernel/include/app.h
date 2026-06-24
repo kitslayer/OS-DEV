@@ -131,6 +131,8 @@ void   app_core_dump(struct registers *r);      /* write an ET_CORE ELF of the f
 #define PL_POWER (1u<<7)   /* power off / reboot */
 
 app_t   *app_current(void);             /* the app owning the running task, or NULL */
+void     app_cwd_save(app_t *a, int synth, const char *sub, uint32_t fat);   /* stash an app's cwd (M1144) */
+void     app_cwd_load(app_t *a, int *synth, char *sub, int submax, uint32_t *fat);  /* load an app's cwd (M1144) */
 int      app_ns_id(app_t *a);           /* the app's mount-namespace id (0 = shared) (M1122) */
 void     app_set_ns_id(app_t *a, int id);
 int      app_pledge(app_t *a, uint32_t mask);   /* restrict promises (monotonic); 0/-1 */

@@ -323,6 +323,7 @@ static const char *syscall_name(uint64_t n) {
 
 void syscall_dispatch(struct registers *r) {
     app_t *self = app_current();
+    vfs_sync_cwd();                     /* make the live cwd this process's own (M1144) */
 
     /* strace (M1084): snapshot the call BEFORE the switch (args, in case a handler
      * reuses the register slots); emitted after, with the result, if traced. */

@@ -63,6 +63,10 @@ struct app {
     struct { uint64_t start, len; int sealed, uffd, file_backed; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
+    /* per-process current directory (M1144): synth_cwd state + the in-mount/overlay
+     * subpath + the boot-FS (fat32) cwd cluster. The VFS keeps the live cwd in its
+     * own globals and syncs them to/from here on each app switch. */
+    int      cwd_synth; char cwd_sub[128]; uint32_t cwd_fat;
 #define APP_NSIG 32
     uint64_t sig_handler[APP_NSIG];      /* ring-3 signal handlers (0 = none) */
     uint64_t sig_restorer;               /* ulib trampoline that calls sigreturn */
@@ -185,7 +189,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[], mmapfile_elf_start[], threads_elf_start[], robustfutex_elf_start[], overlay_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[], mmapfile_elf_start[], threads_elf_start[], robustfutex_elf_start[], overlay_elf_start[], pcwd_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -277,6 +281,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "threads", threads_elf_start, "kernel threads demo" },
     { "robustfutex", robustfutex_elf_start, "robust futex demo" },
     { "overlay", overlay_elf_start, "overlayfs demo" },
+    { "pcwd", pcwd_elf_start, "per-process cwd demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -330,6 +335,19 @@ static struct app *cur(void) { return (struct app *)task_self()->proc; }
 app_t *app_current(void) { return cur(); }
 int  app_ns_id(app_t *a)        { return a ? a->ns_id : 0; }      /* mount-namespace id (M1122) */
 void app_set_ns_id(app_t *a, int id) { if (a) a->ns_id = id; }
+
+/* per-process cwd (M1144): the VFS stashes/loads an app's current directory here
+ * across app switches. A fresh app is zeroed -> synth 0 + "" + fat 0 = boot root. */
+void app_cwd_save(app_t *a, int synth, const char *sub, uint32_t fat) {
+    if (!a) return;
+    a->cwd_synth = synth; a->cwd_fat = fat;
+    int i = 0; for (; sub[i] && i < 127; i++) a->cwd_sub[i] = sub[i]; a->cwd_sub[i] = 0;
+}
+void app_cwd_load(app_t *a, int *synth, char *sub, int submax, uint32_t *fat) {
+    if (!a) { *synth = 0; sub[0] = 0; *fat = 0; return; }
+    *synth = a->cwd_synth; *fat = a->cwd_fat;
+    int i = 0; for (; a->cwd_sub[i] && i < submax - 1; i++) sub[i] = a->cwd_sub[i]; sub[i] = 0;
+}
 
 /* Restrict the calling app's promises. Monotonic, like OpenBSD's pledge: the
  * first call sets the set; later calls may only DROP promises (the new mask
@@ -649,6 +667,7 @@ int app_reap(app_t *a) {
             g_uffd.active = 0; g_uffd.pending = 0;
             if (g_uffd.monitor_waiting && g_uffd.monitor) task_wake(g_uffd.monitor);
         }
+        vfs_cwd_forget(a);                               /* don't stash cwd into a freed slot (M1144) */
         if (a->task) task_free(a->task);
         a->task = 0;
         /* Un-joined worker threads (M1139): free the dead ones; STOP any still
@@ -2076,6 +2095,7 @@ long app_fork(struct registers *r) {
     a->launch_arg[li] = 0;
     a->parent = p->pid;                                 /* so the parent can waitpid() us (M1117) */
     a->ns_id  = p->ns_id;                               /* inherit the parent's mount namespace (shared; unshare detaches) (M1122) */
+    vfs_cwd_inherit(a);                                 /* inherit the parent's current directory (M1144) */
     /* NOT inherited (POSIX): pending signals, alarms, strace, gfx-mode canvas. */
 
     /* The child's resume context: the parent's trap frame, but returning 0. */
