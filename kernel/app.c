@@ -2603,13 +2603,17 @@ static int fd_pipe_idx(struct app *a, int fd, int want_write) {   /* validate + 
     if (a->fd[fd].write_end != (want_write ? 1 : 0)) return -1;    /* read on a write-end (or vice versa) */
     return a->fd[fd].obj;
 }
+/* fd 0/1/2 are reserved for stdin/stdout/stderr (M1191): unused-in-table means
+ * the window/keyboard, and dup2 can redirect them to a pipe. So pipe()/fifo_open
+ * hand out fds from 3 up, like Unix, leaving 0/1/2 for stdio. */
+#define APP_FD_FIRST 3
 /* pipe(out[2]): out[0]=read end, out[1]=write end. 0/-1. */
 int app_pipe(int *out) {
     struct app *a = cur(); if (!a) return -1;
     int idx = pipe_new(); if (idx < 0) return -1;
     int rfd = -1, wfd = -1;
-    for (int i = 0; i < APP_NFD; i++) if (!a->fd[i].used) { rfd = i; break; }
-    for (int i = 0; i < APP_NFD; i++) if (!a->fd[i].used && i != rfd) { wfd = i; break; }
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { rfd = i; break; }
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used && i != rfd) { wfd = i; break; }
     if (rfd < 0 || wfd < 0) { pipe_close_end(idx, 0); pipe_close_end(idx, 1); return -1; }   /* table full */
     a->fd[rfd] = (struct fdent){ 1, 1, 0, idx };                  /* used, type=pipe, read end */
     a->fd[wfd] = (struct fdent){ 1, 1, 1, idx };                  /* used, type=pipe, write end */
@@ -2648,7 +2652,7 @@ int app_fifo_open(const char *path, int write) {
     struct app *a = cur(); if (!a) return -1;
     int idx = fifo_pipe(path); if (idx < 0) return -1;
     int fd = -1;
-    for (int i = 0; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
     if (fd < 0) return -1;
     pipe_open_end(idx, write ? 1 : 0);
     a->fd[fd] = (struct fdent){ 1, 1, (uint8_t)(write ? 1 : 0), idx };
@@ -2666,6 +2670,14 @@ int app_seccomp_filter_install(const void *progv, int n) {
     for (int i = 0; i < n; i++) a->seccomp_prog[i] = prog[i];
     a->seccomp_n = n;
     return 0;
+}
+/* Is fd in this app's table a redirected pipe? SYS_read/SYS_write consult this to
+ * route stdio (fd 0/1/2) through the fd table when redirected, else the window
+ * grid / keyboard. An app that never redirects has an empty table -> always the
+ * default path, byte-identical (M1191). */
+int app_fd_is_redirected(app_t *ap, int fd) {
+    struct app *a = (struct app *)ap;
+    return a && fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 1;
 }
 int app_seccomp_filter_active(app_t *ap) { return ap && ((struct app *)ap)->seccomp_n > 0; }
 /* Verdict for one syscall: 1 = allow, 0 = deny. The program reads ctx fields

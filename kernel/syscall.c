@@ -403,15 +403,26 @@ void syscall_dispatch(struct registers *r) {
 
     switch (r->rax) {
     case SYS_write:
-        /* stdout goes to the calling app's window text grid */
+        /* fd 1/2 -> the app's window grid by default; but if the fd has been
+         * redirected to a pipe (dup2, M1187) route the bytes there (stdio over
+         * fds, M1191). An app that never redirects hits the grid as before. */
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
-        app_sys_write((const char *)r->rsi, (unsigned)r->rdx);
-        r->rax = r->rdx;
+        if (app_fd_is_redirected(self, (int)r->rdi)) {
+            r->rax = (uint64_t)(int64_t)app_fd_write((int)r->rdi, (const void *)r->rsi, r->rdx);
+        } else {
+            app_sys_write((const char *)r->rsi, (unsigned)r->rdx);
+            r->rax = r->rdx;
+        }
         break;
     case SYS_read:
-        /* a line of input from the app's window (blocks until Enter) */
+        /* fd 0 <- the app's window input (blocks until Enter) by default; a
+         * redirected fd 0 reads from its pipe instead (M1191). */
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
-        r->rax = (uint64_t)app_sys_read((char *)r->rsi, (unsigned)r->rdx);
+        if (app_fd_is_redirected(self, (int)r->rdi)) {
+            r->rax = (uint64_t)(int64_t)app_fd_read((int)r->rdi, (void *)r->rsi, r->rdx);
+        } else {
+            r->rax = (uint64_t)app_sys_read((char *)r->rsi, (unsigned)r->rdx);
+        }
         break;
     case SYS_getpid:
         r->rax = (uint64_t)app_sys_getpid();

@@ -2495,6 +2495,29 @@ static int run_command(char *line, char *cwd) {
             print(st == 42 ? "seccomp: self-filter installed; blocked syscall denied, allowed syscall ran -- OK\n"
                            : "seccomptest: VERIFY FAILED\n");
             if (st != 42) g_status = 1;
+        } else if (streq(line, "stdiotest")) {   /* stdio over the fd table: print()->fd1->pipe->fd0->readline() (M1191) */
+            long h = sys_fork();                  /* a harness child runs the whole producer|consumer pipeline */
+            if (h == 0) {                         /* (so the shell's own fd 0/1 are never redirected) */
+                int p[2];
+                if (sys_pipe(p) != 0) sys_exit(2);
+                long pr = sys_fork();
+                if (pr == 0) {                    /* producer: redirect stdout to the pipe, then print() */
+                    sys_dup2(p[1], 1);
+                    sys_fdclose(p[0]); sys_fdclose(p[1]);
+                    print("piped-via-stdout\n");  /* -> sys_write(1) -> the pipe */
+                    sys_exit(0);
+                }
+                sys_dup2(p[0], 0);                /* consumer: redirect stdin from the pipe, then readline() */
+                sys_fdclose(p[0]); sys_fdclose(p[1]);
+                char buf[64]; int n = readline(buf, sizeof buf);   /* -> sys_read(0) -> the pipe */
+                int ok = (n == 16 && streq(buf, "piped-via-stdout"));
+                int cst = 0; sys_waitpid((int)pr, &cst);
+                sys_exit(ok ? 42 : 1);
+            }
+            int st = -1; sys_waitpid((int)h, &st);
+            print(st == 42 ? "stdio-fd: print() -> redirected fd1 -> pipe -> fd0 -> readline() round-trip OK\n"
+                           : "stdiotest: VERIFY FAILED\n");
+            if (st != 42) g_status = 1;
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");
