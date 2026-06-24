@@ -10,3 +10,6 @@
 # Python bytecode cache (e.g. from importing tools/osdrive.py)
 __pycache__/
 *.pyc
+
+# Playwright MCP scratch logs (created by research subagents' web fetching)
+.playwright-mcp/
