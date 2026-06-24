@@ -278,7 +278,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
-    case SYS_mincore: case SYS_mlock: case SYS_munlock:
+    case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -325,6 +325,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
+        [SYS_mmap_huge]="mmap_huge",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -813,6 +814,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_mmap:
         r->rax = app_mmap(r->rdi);         /* reserve a demand-paged anon region; base VA or 0 */
+        break;
+    case SYS_mmap_huge:                    /* (len) -> 2 MiB-backed demand-paged region (M1155) */
+        r->rax = app_mmap_huge(r->rdi);
         break;
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);

@@ -235,6 +235,7 @@ long sys_untar(const char *tarname) { return do_syscall(SYS_untar, (long)tarname
 void sys_sleep(int ms) { do_syscall(SYS_sleep, ms, 0, 0); }
 void *sbrk(long inc) { return (void *)do_syscall(SYS_sbrk, inc, 0, 0); }
 void *sys_mmap(unsigned long len) { long r = do_syscall(SYS_mmap, (long)len, 0, 0); return r ? (void *)r : 0; }
+void *sys_mmap_huge(unsigned long len) { long r = do_syscall(SYS_mmap_huge, (long)len, 0, 0); return r ? (void *)r : 0; }
 void *sys_ringbuf(unsigned long len) { long r = do_syscall(SYS_ringbuf, (long)len, 0, 0); return r ? (void *)r : 0; }
 int   sys_mprotect(void *addr, unsigned long len, int prot) { return (int)do_syscall(SYS_mprotect, (long)addr, (long)len, prot); }
 int   sys_bind(const char *from, const char *to) { return (int)do_syscall(SYS_bind, (long)from, (long)to, 0); }

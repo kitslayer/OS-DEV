@@ -136,6 +136,7 @@
 #define SYS_mq_open         124 /* (name, maxmsg, msgsize) -> open/create a priority msg queue; index/-1 (M1154) */
 #define SYS_mq_send         125 /* (idx, buf, len, prio) -> enqueue (blocks if full); bytes/-1 (M1154) */
 #define SYS_mq_receive      126 /* (idx, buf, max, uint*prio) -> dequeue highest prio (blocks if empty); bytes/-1 (M1154) */
+#define SYS_mmap_huge       127 /* (len) -> reserve a 2 MiB-backed demand-paged region (MAP_HUGETLB); base VA or 0 (M1155) */
 
 /* fallocate(2) modes (M1153). PUNCH_HOLE deallocates whole blocks in the range,
  * leaving a sparse hole that reads as zeros; it must be OR'd with KEEP_SIZE. */

@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  smaps  mqtest(prio msgq)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1862,6 +1862,26 @@ static int run_command(char *line, char *cwd) {
                 }
                 print(ok ? "mqueue: highest-priority-first delivery OK\n" : "mqueue: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
+            }
+        } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
+            unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
+            unsigned char *m = (unsigned char *)sys_mmap_huge(len);
+            if (!m) { print("hugetest: mmap_huge failed (need 2 MiB contiguous RAM)\n"); g_status = 1; }
+            else {
+                struct rusage ra, rb;
+                sys_getrusage(RUSAGE_SELF, &ra);
+                for (unsigned long i = 0; i < len; i += 4096) m[i] = (unsigned char)((i >> 12) & 0xFF);  /* touch all 512 pages */
+                sys_getrusage(RUSAGE_SELF, &rb);
+                int ok = 1;
+                for (unsigned long i = 0; i < len; i += 4096) if (m[i] != (unsigned char)((i >> 12) & 0xFF)) { ok = 0; break; }
+                long faults = rb.ru_minflt - ra.ru_minflt;
+                int aligned = (((unsigned long)m & (len - 1)) == 0);   /* a hugepage base must be 2 MiB-aligned */
+                print("touched 512 pages of a 2 MiB hugepage; minor faults: "); printl(faults); print(" (expect ~1, not 512)\n");
+                print(aligned ? "  base is 2 MiB-aligned: yes\n" : "  base is 2 MiB-aligned: NO\n");
+                int good = (ok && aligned && faults <= 2);
+                print(good ? "hugepage: a single fault mapped all 512 pages (one PD entry) OK\n" : "hugepage: VERIFY FAILED\n");
+                if (!good) g_status = 1;
+                sys_munmap(m, len);
             }
         } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
             unsigned long len = 256 * 1024;       /* 64 pages */

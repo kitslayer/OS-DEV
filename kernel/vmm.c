@@ -159,7 +159,7 @@ void vmm_destroy_address_space(uint64_t cr3) {
             uint64_t *pd = phys_to_table(pdpt[i] & ADDR_MASK);
             for (int j = 0; j < 512; j++) {
                 if (!(pd[j] & PTE_PRESENT)) continue;
-                if (pd[j] & PTE_HUGE) continue;                            /* 2 MiB page (n/a for user) */
+                if (pd[j] & PTE_HUGE) { pmm_free_contiguous(pd[j] & ~0x1FFFFFull, 512); continue; }  /* user 2 MiB hugepage (M1155) */
                 uint64_t *pt = phys_to_table(pd[j] & ADDR_MASK);
                 for (int k = 0; k < 512; k++)
                     if (pt[k] & PTE_PRESENT) pmm_free_frame(pt[k] & ADDR_MASK);  /* user frame */
@@ -342,6 +342,19 @@ void vmm_unmap(uint64_t virt) {
     uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
 
     pt[PT_IDX(virt)] = 0;
+    invlpg(virt);
+}
+
+/* Tear down a 2 MiB huge mapping: clear the PD entry directly (a huge PD entry
+ * points at the 2 MiB data frame, NOT a page table — so vmm_unmap must not be
+ * used on it). The caller frees the underlying contiguous run. (M1155) */
+void vmm_unmap_huge(uint64_t virt) {
+    uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    pd[PD_IDX(virt)] = 0;
     invlpg(virt);
 }
 

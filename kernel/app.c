@@ -60,7 +60,8 @@ struct app {
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
 #define APP_MAXVMA 16
-    struct { uint64_t start, len; int sealed, uffd, file_backed, locked; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136); locked=mlock'd, pinned against reclaim (M1149) */
+#define HUGE_SIZE  0x200000ull           /* 2 MiB hugepage (M1155) */
+    struct { uint64_t start, len; int sealed, uffd, file_backed, locked, huge; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136); locked=mlock'd (M1149); huge=2 MiB-backed (M1155) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
     uint64_t minflt, majflt;             /* page-fault counters: minor (no I/O) / major (disk I/O), getrusage (M1150) */
@@ -1157,8 +1158,33 @@ uint64_t app_mmap(uint64_t len) {
     a->vma[a->nvma].uffd  = 0;
     a->vma[a->nvma].file_backed = 0;
     a->vma[a->nvma].locked = 0;
+    a->vma[a->nvma].huge = 0;
     a->nvma++;
     a->mmap_next = addr + len + PAGE_SIZE;          /* leave an unmapped guard gap */
+    return addr;
+}
+
+/* Hugepage mmap (M1155): reserve a 2 MiB-aligned, 2 MiB-granular demand-paged
+ * region whose first touch maps the whole enclosing 2 MiB with a single PD entry
+ * (PS bit) via app_fault_handle — one TLB entry for 512 pages, real x86-64 huge
+ * paging. Returns the (2 MiB-aligned) base VA, or 0. */
+uint64_t app_mmap_huge(uint64_t len) {
+    struct app *a = cur();
+    if (!a || len == 0) return 0;
+    len = (len + HUGE_SIZE - 1) & ~(HUGE_SIZE - 1);          /* whole 2 MiB pages */
+    if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
+    uint64_t addr = (a->mmap_next + HUGE_SIZE - 1) & ~(HUGE_SIZE - 1);   /* 2 MiB-align the base */
+    if (addr + len > MMAP_TOP || addr + len < addr) return 0;
+    a->vma[a->nvma].start = addr;
+    a->vma[a->nvma].len   = len;
+    a->vma[a->nvma].sealed = 0;
+    a->vma[a->nvma].uffd  = 0;
+    a->vma[a->nvma].file_backed = 0;
+    a->vma[a->nvma].locked = 0;
+    a->vma[a->nvma].huge = 1;
+    a->nvma++;
+    a->mmap_next = addr + len + HUGE_SIZE;          /* guard gap, preserving 2 MiB alignment */
     return addr;
 }
 
@@ -1180,6 +1206,7 @@ uint64_t app_mmap_file(const char *path, uint64_t len) {
     a->vma[a->nvma].uffd  = 0;
     a->vma[a->nvma].file_backed = 1;
     a->vma[a->nvma].locked = 0;
+    a->vma[a->nvma].huge = 0;
     a->vma[a->nvma].foff = 0;
     int i = 0; for (; path[i] && i < 63; i++) a->vma[a->nvma].fpath[i] = path[i];
     a->vma[a->nvma].fpath[i] = 0;
@@ -1195,9 +1222,16 @@ int app_munmap(uint64_t addr, uint64_t len) {
     for (int i = 0; i < a->nvma; i++) {
         if (a->vma[i].start == addr) {
             if (a->vma[i].sealed) return -1;          /* mseal'd: unmapping is forbidden (M1130) */
-            for (uint64_t p = a->vma[i].start; p < a->vma[i].start + a->vma[i].len; p += PAGE_SIZE) {
-                uint64_t ph = vmm_translate(p);
-                if (ph) { vmm_unmap(p); pmm_free_frame(ph); }
+            if (a->vma[i].huge) {                     /* 2 MiB hugepages: free per-2 MiB run, not per-4 KiB (M1155) */
+                for (uint64_t p = a->vma[i].start; p < a->vma[i].start + a->vma[i].len; p += HUGE_SIZE) {
+                    uint64_t ph = vmm_translate(p);   /* p is 2 MiB-aligned -> base of the run */
+                    if (ph) { vmm_unmap_huge(p); pmm_free_contiguous(ph & ~(HUGE_SIZE - 1), HUGE_SIZE / PAGE_SIZE); }
+                }
+            } else {
+                for (uint64_t p = a->vma[i].start; p < a->vma[i].start + a->vma[i].len; p += PAGE_SIZE) {
+                    uint64_t ph = vmm_translate(p);
+                    if (ph) { vmm_unmap(p); pmm_free_frame(ph); }
+                }
             }
             a->vma[i] = a->vma[a->nvma - 1];
             a->nvma--;
@@ -1431,6 +1465,7 @@ uint64_t app_ringbuf(uint64_t len) {
     a->vma[a->nvma].uffd  = 0;
     a->vma[a->nvma].file_backed = 0;
     a->vma[a->nvma].locked = 0;
+    a->vma[a->nvma].huge = 0;
     a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
@@ -1455,7 +1490,7 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
         pmm_addref(frames[p]);                       /* this mapping holds a ref on the shared frame */
         __asm__ volatile("invlpg (%0)" : : "r"(base + (uint64_t)p * PAGE_SIZE) : "memory");
     }
-    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0; a->vma[a->nvma].file_backed = 0; a->vma[a->nvma].locked = 0; a->nvma++;
+    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0; a->vma[a->nvma].file_backed = 0; a->vma[a->nvma].locked = 0; a->vma[a->nvma].huge = 0; a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
 }
@@ -1544,6 +1579,16 @@ int app_fault_handle(uint64_t cr2, uint64_t err) {
         if (cr2 >= a->vma[i].start && cr2 < a->vma[i].start + a->vma[i].len) {
             uint64_t page = cr2 & ~(uint64_t)(PAGE_SIZE - 1);
             if (vmm_translate(page)) return 1;          /* already mapped (race) -> retry */
+            if (a->vma[i].huge) {                        /* 2 MiB hugepage: map the whole enclosing 2 MiB at once (M1155) */
+                uint64_t hpage = cr2 & ~(HUGE_SIZE - 1);
+                uint64_t phys = pmm_alloc_contiguous(HUGE_SIZE / PAGE_SIZE, HUGE_SIZE / PAGE_SIZE);  /* 512 contiguous, 2 MiB-aligned */
+                if (!phys) return 0;                     /* no contiguous run -> let it fault/die */
+                uint8_t *z = (uint8_t *)hhdm(phys);
+                for (uint64_t b = 0; b < HUGE_SIZE; b++) z[b] = 0;   /* never leak stale RAM */
+                vmm_map_huge(hpage, phys, PTE_WRITABLE | PTE_USER | PTE_NX);
+                a->minflt++;                             /* one fault mapped the whole 2 MiB (M1150/M1155) */
+                return 1;
+            }
             /* userfaultfd (M1134): the OWNER faulting in a registered region parks
              * here; a monitor process fills the page (app_uffd_copy) and wakes us,
              * after which the instruction re-executes against the now-present page. */

@@ -173,6 +173,38 @@ void pmm_free_frame(uint64_t phys) {
     irq_restore(fl);
 }
 
+/* Allocate `n` CONTIGUOUS free frames whose base frame is a multiple of `align`
+ * frames (so the returned physical address is align*4096-aligned). Returns the
+ * base physical address, or 0 if no such run is free. Backs 2 MiB hugepages
+ * (n=512, align=512). Marks the whole run used in one shot. (M1155) */
+uint64_t pmm_alloc_contiguous(uint64_t n, uint64_t align) {
+    if (n == 0) return 0;
+    if (align == 0) align = 1;
+    uint64_t fl = irq_save();
+    for (uint64_t base = align; base + n <= total_frames; base += align) {  /* base, a multiple of align (skip frame 0) */
+        uint64_t k = 0;
+        while (k < n && !bm_test(base + k)) k++;
+        if (k == n) {                                  /* a fully-clear aligned run */
+            for (k = 0; k < n; k++) bm_set(base + k);
+            used_frames += n;
+            irq_restore(fl);
+            return base * PAGE_SIZE;
+        }
+    }
+    irq_restore(fl);
+    return 0;                                          /* no contiguous run available */
+}
+
+/* Free `n` contiguous frames from pmm_alloc_contiguous. These are single-owner
+ * anon frames (hugepages are never COW-shared), so release them directly. */
+void pmm_free_contiguous(uint64_t phys, uint64_t n) {
+    uint64_t base = phys / PAGE_SIZE;
+    uint64_t fl = irq_save();
+    for (uint64_t k = 0; k < n; k++) mark_free(base + k);
+    if (base < next_hint) next_hint = base;
+    irq_restore(fl);
+}
+
 /* Add an extra reference to an already-allocated frame (so it survives the next
  * pmm_free_frame). For frames mapped more than once. M1089. */
 void pmm_addref(uint64_t phys) {

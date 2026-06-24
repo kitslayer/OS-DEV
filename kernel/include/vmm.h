@@ -38,6 +38,7 @@ void     vmm_unmap(uint64_t virt);
 uint64_t vmm_translate(uint64_t virt);   /* physical address, or 0 if unmapped */
 uint64_t vmm_translate_in(uint64_t cr3, uint64_t virt);  /* ...in an arbitrary address space (another process); 0 if unmapped */
 uint64_t vmm_pte_in(uint64_t cr3, uint64_t virt);        /* raw leaf PTE in an arbitrary space (PRESENT/DIRTY/ACCESSED/SWAP intact); 0 if no leaf (M1151) */
+void     vmm_unmap_huge(uint64_t virt);                  /* tear down a 2 MiB huge mapping (clears the PD entry) (M1155) */
 int      vmm_fork_cow(uint64_t child_cr3);  /* COW-clone the CURRENT space into child_cr3 (fork); 0/-1 (M1116) */
 int      vmm_protect(uint64_t virt, uint64_t flags);  /* rewrite a mapped page's flags (mprotect); 0/-1 */
 int      vmm_user_ok(uint64_t ptr, uint64_t len);  /* is [ptr,ptr+len) user-accessible (PTE_USER) in the current space? for syscall arg validation */

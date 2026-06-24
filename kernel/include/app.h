@@ -56,6 +56,7 @@ int    app_sys_read(char *buf, unsigned max);
 int    app_sys_getpid(void);
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */
+uint64_t app_mmap_huge(uint64_t len);   /* reserve a 2 MiB-backed demand-paged region (MAP_HUGETLB); base VA or 0 (M1155) */
 uint64_t app_mmap_file(const char *path, uint64_t len);   /* demand-paged file-backed region (MAP_PRIVATE); base VA or 0 (M1136) */
 struct registers;
 long     app_clone(struct registers *r, uint64_t fn, uint64_t stack, uint64_t arg);  /* spawn a thread sharing this address space; tid/-1 (M1138) */
