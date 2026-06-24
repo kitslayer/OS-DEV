@@ -205,6 +205,7 @@
 #define PT_SETREGS   4   /* (reserved — follow-on) */
 #define PT_CONT      5   /* tracer: resume the stopped tracee */
 #define PT_WAIT      6   /* tracer: block until the tracee stops -> stop signal */
+#define PT_SINGLESTEP 7  /* tracer: resume for ONE instruction, then re-stop (SIGTRAP) (M1200) */
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
@@ -217,6 +218,7 @@
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */
+#define SIGTRAP  5    /* a ptrace single-step / breakpoint trap (M1200) */
 #define SIGCONT  18
 #define SIGSTOP  19
 #define SIGTSTP  20

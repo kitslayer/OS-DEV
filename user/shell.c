@@ -2488,10 +2488,13 @@ static int run_command(char *line, char *cwd) {
             long after  = sys_ptrace(PT_PEEKDATA, (int)pid, (unsigned long)&x, 0);  /* read it back (=222) */
             unsigned long regs[40];
             long gr     = sys_ptrace(PT_GETREGS, (int)pid, (unsigned long)regs, 0); /* snapshot the child's registers */
-            sys_ptrace(PT_CONT, (int)pid, 0, 0);                                    /* resume the child */
+            long sr     = sys_ptrace(PT_SETREGS, (int)pid, (unsigned long)regs, 0); /* write them back: a non-destructive round-trip */
+            sys_ptrace(PT_SINGLESTEP, (int)pid, 0, 0);                              /* run one instruction, then re-stop */
+            long sig2   = sys_ptrace(PT_WAIT, (int)pid, 0, 0);                      /* the single-step trap (SIGTRAP) */
+            sys_ptrace(PT_CONT, (int)pid, 0, 0);                                    /* resume the child to completion */
             int st = -1; sys_waitpid((int)pid, &st);
-            if (sig == SIGSTOP && before == 111 && after == 222 && gr == 0 && st == 7)
-                print("ptrace: WAIT(stop) + PEEK(111) + POKE(222) + GETREGS + CONT -> child saw 222, exit 7 -- OK\n");
+            if (sig == SIGSTOP && before == 111 && after == 222 && gr == 0 && sr == 0 && sig2 == SIGTRAP && st == 7)
+                print("ptrace: stop + PEEK(111)/POKE(222) + GET/SETREGS + SINGLESTEP(SIGTRAP) + CONT -> child exit 7 -- OK\n");
             else { print("ptrace: FAILED\n"); g_status = 1; }
         } else if (streq(line, "seccomptest")) {   /* self-imposed BPF syscall filter: DENY + KILL (M1190/M1192) */
             int ok = 1;

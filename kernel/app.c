@@ -152,6 +152,7 @@ struct app {
     volatile int trace_stopped;          /* 1 = parked at a trace stop */
     volatile int trace_sig;              /* the signal that caused the stop */
     void    *trace_sup;                  /* a tracer task_t blocked in ptrace(WAIT) */
+    int      trace_stepping;             /* 1 = resumed for a single ptrace step (re-stop on #DB) */
     /* per-process file-descriptor table (M1187). Additive: zero on spawn/fork,
      * only touched by pipe()/fd{read,write,close}/dup2; an app that never calls
      * them has an empty table, so fork-copy + reap-close are no-ops for it. */
@@ -3037,8 +3038,19 @@ long app_singlestep(struct registers *r, int n) {
     return n;
 }
 
+static long app_trace_stop(int signo);   /* fwd: defined with the ptrace block below (M1200) */
+
 void app_singlestep_trap(struct registers *r) {
     struct app *a = cur();
+    /* ptrace single-step (M1200): a PT_SINGLESTEP'd tracee traps here after one
+     * instruction — re-stop it as SIGTRAP and notify the tracer, instead of the
+     * /proc/sstrace recording path below. */
+    if (a && a->ptraced && a->trace_stepping) {
+        if (r) r->rflags &= ~RFLAGS_TF;
+        a->trace_stepping = 0;
+        app_trace_stop(SIGTRAP);
+        return;
+    }
     if (!a || a->sstep_remaining <= 0) {     /* not tracing (or a stray #DB): stop stepping, never kill */
         if (r) r->rflags &= ~RFLAGS_TF;
         return;
@@ -3178,10 +3190,32 @@ long app_ptrace(long req, int pid, uint64_t addr, uint64_t data) {
         __builtin_memcpy((void *)addr, u, sizeof *u);
         return 0;
     }
+    case PT_SETREGS: {                             /* write the tracee's registers from the tracer's buffer */
+        struct registers *u = task_uframe((task_t *)t->task);
+        if (!u || !vmm_user_ok(addr, sizeof *u)) return -1;
+        struct registers nw; __builtin_memcpy(&nw, (void *)addr, sizeof nw);
+        /* Preserve the privilege-critical fields so the tracee's iret stays
+         * legal — the tracer may set the GP regs + rip + rsp, but not the
+         * segment selectors; and sanitize rflags to the user-settable bits with
+         * IF forced on (no IOPL/TF/NT changes from a SETREGS). */
+        nw.cs = u->cs; nw.ss = u->ss; nw.int_no = u->int_no; nw.err_code = u->err_code;
+        nw.rflags = (nw.rflags & 0x0CD5ull) | 0x202ull;
+        *u = nw;
+        return 0;
+    }
     case PT_CONT:                                  /* resume the stopped tracee */
         t->trace_stopped = 0;
         if (t->task) task_wake((task_t *)t->task);
         return 0;
+    case PT_SINGLESTEP: {                          /* resume for ONE instruction, then re-stop (SIGTRAP) */
+        struct registers *u = task_uframe((task_t *)t->task);
+        if (!u) return -1;
+        u->rflags |= RFLAGS_TF;                    /* trap after the next instruction back in ring 3 */
+        t->trace_stepping = 1;
+        t->trace_stopped = 0;
+        if (t->task) task_wake((task_t *)t->task);
+        return 0;
+    }
     }
     return -1;
 }
