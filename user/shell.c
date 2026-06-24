@@ -2345,6 +2345,36 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "copy_file_range: in-kernel file copy OK\n" : "cfrtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
             if (a) free(a); if (b) free(b);
+        } else if (startswith(line, "xattr ")) {   /* user.* extended attributes on ext2 /diskN files (M1182) */
+            char *p = line + 6; while (*p == ' ') p++;
+            char sub[8]; int si = 0; while (*p && *p != ' ' && si < 7) sub[si++] = *p++; sub[si] = 0;
+            while (*p == ' ') p++;
+            char path[128]; int pi = 0; while (*p && *p != ' ' && pi < 127) path[pi++] = *p++; path[pi] = 0;
+            while (*p == ' ') p++;
+            if (streq(sub, "list") && path[0]) {
+                char names[512]; long n = sys_listxattr(path, names, sizeof names);
+                if (n < 0) { print("xattr: not an ext2 file (or no EA region)\n"); g_status = 1; }
+                else if (n == 0) print("(no attributes)\n");
+                else { if (n > (long)sizeof names) n = sizeof names; names[sizeof names - 1] = 0;
+                       long i = 0; while (i < n && names[i]) { print(names + i); print("\n");
+                                                               while (i < n && names[i]) i++; i++; } }
+            } else if (streq(sub, "get") && path[0]) {
+                char name[80]; int ni = 0; while (*p && *p != ' ' && ni < 79) name[ni++] = *p++; name[ni] = 0;
+                char val[256]; long n = sys_getxattr(path, name, val, sizeof val - 1);
+                if (n < 0) { print("xattr: not found\n"); g_status = 1; }
+                else { if (n > (long)sizeof val - 1) n = sizeof val - 1; val[n] = 0; print(val); print("\n"); }
+            } else if (streq(sub, "set") && path[0]) {
+                char name[80]; int ni = 0; while (*p && *p != ' ' && ni < 79) name[ni++] = *p++; name[ni] = 0;
+                while (*p == ' ') p++;
+                unsigned long vl = 0; while (p[vl]) vl++;                  /* value = rest of line (may have spaces) */
+                long n = sys_setxattr(path, name, p, vl);
+                if (n < 0) { print("xattr: set failed (needs an ext2 256-byte-inode file; name=user.* ; small value)\n"); g_status = 1; }
+                else print("xattr set\n");
+            } else if ((streq(sub, "rm") || streq(sub, "remove")) && path[0]) {
+                char name[80]; int ni = 0; while (*p && *p != ' ' && ni < 79) name[ni++] = *p++; name[ni] = 0;
+                if (sys_removexattr(path, name) < 0) { print("xattr: remove failed (not found?)\n"); g_status = 1; }
+                else print("xattr removed\n");
+            } else print("usage: xattr get|set|rm|list PATH [user.NAME [VALUE]]\n");
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

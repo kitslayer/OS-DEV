@@ -109,6 +109,10 @@ long blockdev_mount_mkdir(int i, const char *path);    /* create a directory (ex
 long blockdev_mount_symlink(int i, const char *path, const char *target);  /* create a symlink (ext2 only); 0/-1 (M1146) */
 int  blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 only); count/-1 (M1152) */
 long blockdev_mount_punch(int i, const char *path, uint64_t offset, uint64_t len);  /* fallocate PUNCH_HOLE (ext2 only); blocks/-1 (M1153) */
+long blockdev_mount_setxattr(int i, const char *path, const char *name, const void *val, unsigned long vlen);  /* set user.* xattr (ext2 only); vlen/-1 (M1182) */
+long blockdev_mount_getxattr(int i, const char *path, const char *name, void *out, unsigned long max);  /* get user.* xattr (ext2 only); size/-1 (M1182) */
+long blockdev_mount_listxattr(int i, const char *path, char *out, unsigned long max);  /* NUL-sep xattr names (ext2 only); total/-1 (M1182) */
+long blockdev_mount_removexattr(int i, const char *path, const char *name);  /* remove a user.* xattr (ext2 only); 0/-1 (M1182) */
 int  blockdev_mount_isdir(int i, const char *path);   /* is path a directory on mount i? */
 int  blockdev_mounts_format(char *out, int max);  /* list the mounts as text (the `mount` command) */
 /* losetup (M1107): register a loop mount backed by the RAM image `data` (len

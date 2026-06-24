@@ -62,6 +62,13 @@ static void exercise(void) {
     (void)ext2_read_path(bd_read, 0, 0, "/HELLO", rb, sizeof rb);
     (void)ext2_read_path(bd_read, 0, 0, "/BIG", rb, sizeof rb);   /* walks direct + (double-)indirect blocks */
     (void)ext2_read_path(bd_read, 0, 0, "/nope", rb, sizeof rb);
+    /* xattr read parsers (M1182): walk the in-inode EA on possibly-corrupt
+     * inodes — a bad i_extra_isize/magic/entry must never read past the inode. */
+    char xb[256];
+    (void)ext2_getxattr(bd_read, 0, 0, "/HELLO", "user.greeting", xb, sizeof xb);
+    (void)ext2_getxattr(bd_read, 0, 0, "/BIG", "user.x", xb, sizeof xb);
+    (void)ext2_listxattr(bd_read, 0, 0, "/HELLO", xb, sizeof xb);
+    (void)ext2_listxattr(bd_read, 0, 0, "/lost+found", xb, sizeof xb);
 }
 
 int main(int argc, char **argv) {

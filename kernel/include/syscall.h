@@ -171,6 +171,10 @@
 #define SYS_mremap       159   /* (old_addr, old_len, new_len, flags) -> resize/move an mmap region; base/-1 (M1179) */
 #define MREMAP_MAYMOVE   1
 #define SYS_copy_file_range 160 /* (src_path, dst_path, len) -> in-kernel copy (also file->/net/tcp = sendfile); bytes/-1 (M1181) */
+#define SYS_setxattr     161   /* (path, name, value, vlen) -> set a user.* xattr (ext2 in-inode); vlen/-1 (M1182) */
+#define SYS_getxattr     162   /* (path, name, out, max) -> read a user.* xattr; full size/-1 (M1182) */
+#define SYS_listxattr    163   /* (path, out, max) -> NUL-separated user.* xattr names; total/-1 (M1182) */
+#define SYS_removexattr  164   /* (path, name) -> remove a user.* xattr; 0/-1 (M1182) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

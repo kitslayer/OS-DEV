@@ -597,6 +597,32 @@ long blockdev_mount_punch(int i, const char *path, uint64_t offset, uint64_t len
                            path ? path : "", offset, len);
 }
 
+/* Extended attributes on mount `i` (ext2 only, user.* namespace). M1182. */
+long blockdev_mount_setxattr(int i, const char *path, const char *name, const void *val, unsigned long vlen) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount || g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_setxattr(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start,
+                         path ? path : "", name ? name : "", val, vlen);
+}
+long blockdev_mount_getxattr(int i, const char *path, const char *name, void *out, unsigned long max) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount || g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_getxattr(mount_rfn(i), mount_ctx(i), g_mount[i].start,
+                         path ? path : "", name ? name : "", out, max);
+}
+long blockdev_mount_listxattr(int i, const char *path, char *out, unsigned long max) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount || g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_listxattr(mount_rfn(i), mount_ctx(i), g_mount[i].start,
+                          path ? path : "", out, max);
+}
+long blockdev_mount_removexattr(int i, const char *path, const char *name) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount || g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_removexattr(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start,
+                            path ? path : "", name ? name : "");
+}
+
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
 int blockdev_mount_isdir(int i, const char *path) {
     blockdev_mount_scan();

@@ -34,3 +34,11 @@ int  ext2_fiemap(blk_read_fn read, void *ctx, uint64_t start_lba, const char *pa
                  ext2_extent_t *out, int max);                                /* file's physical extent map; extent count, or -1 (M1152) */
 long ext2_punch_hole(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, uint64_t offset, uint64_t len);        /* fallocate PUNCH_HOLE; blocks punched, or -1 (M1153) */
+long ext2_setxattr(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                   const char *path, const char *name, const void *value, unsigned long vlen);  /* set user.* xattr; vlen or -1 (M1182) */
+long ext2_getxattr(blk_read_fn read, void *ctx, uint64_t start_lba,
+                   const char *path, const char *name, void *out, unsigned long max);           /* get user.* xattr; full size or -1 (M1182) */
+long ext2_listxattr(blk_read_fn read, void *ctx, uint64_t start_lba,
+                    const char *path, char *out, unsigned long max);                            /* NUL-sep names; total or -1 (M1182) */
+long ext2_removexattr(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                      const char *path, const char *name);                                      /* remove a user.* xattr; 0 or -1 (M1182) */

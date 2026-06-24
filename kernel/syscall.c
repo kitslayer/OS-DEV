@@ -268,12 +268,12 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
-    case SYS_fiemap:
+    case SYS_fiemap: case SYS_getxattr: case SYS_listxattr:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
-    case SYS_fallocate: case SYS_copy_file_range:
+    case SYS_fallocate: case SYS_copy_file_range: case SYS_setxattr: case SYS_removexattr:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
@@ -984,6 +984,26 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)w;
         break;
     }
+    case SYS_setxattr: {                   /* (path, name, value, vlen) -> set a user.* xattr (M1182) */
+        if (!ustr(r->rdi) || !ustr(r->rsi) || !ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_setxattr((const char *)r->rdi, (const char *)r->rsi,
+                                                 (const void *)r->rdx, r->r10);
+        break;
+    }
+    case SYS_getxattr: {                   /* (path, name, out, max) -> read a user.* xattr (M1182) */
+        if (!ustr(r->rdi) || !ustr(r->rsi) || !ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_getxattr((const char *)r->rdi, (const char *)r->rsi,
+                                                 (void *)r->rdx, r->r10);
+        break;
+    }
+    case SYS_listxattr:                    /* (path, out, max) -> NUL-separated user.* names (M1182) */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_listxattr((const char *)r->rdi, (char *)r->rsi, r->rdx);
+        break;
+    case SYS_removexattr:                  /* (path, name) -> remove a user.* xattr (M1182) */
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_removexattr((const char *)r->rdi, (const char *)r->rsi);
+        break;
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);
         break;

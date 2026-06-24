@@ -598,6 +598,43 @@ long vfs_punch_hole(const char *path, uint64_t offset, uint64_t len) {
     return -1;
 }
 
+/* Extended attributes (M1182): user.* xattrs on ext2 /diskN files, stored
+ * in-inode. Other paths (FAT32 boot, /tmp, synth) are unsupported (-1). */
+long vfs_setxattr(const char *path, const char *name, const void *val, unsigned long vlen) {
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);
+    int midx; char fpath[192];
+    if (mount_path(path, &midx, fpath, sizeof fpath)) {
+        long r = blockdev_mount_setxattr(midx, fpath, name, val, vlen);
+        if (r >= 0) fsevents_record('w', path);
+        return r;
+    }
+    return -1;
+}
+long vfs_getxattr(const char *path, const char *name, void *out, unsigned long max) {
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);
+    int midx; char fpath[192];
+    if (mount_path(path, &midx, fpath, sizeof fpath))
+        return blockdev_mount_getxattr(midx, fpath, name, out, max);
+    return -1;
+}
+long vfs_listxattr(const char *path, char *out, unsigned long max) {
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);
+    int midx; char fpath[192];
+    if (mount_path(path, &midx, fpath, sizeof fpath))
+        return blockdev_mount_listxattr(midx, fpath, out, max);
+    return -1;
+}
+long vfs_removexattr(const char *path, const char *name) {
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);
+    int midx; char fpath[192];
+    if (mount_path(path, &midx, fpath, sizeof fpath)) {
+        long r = blockdev_mount_removexattr(midx, fpath, name);
+        if (r >= 0) fsevents_record('w', path);
+        return r;
+    }
+    return -1;
+}
+
 /* Copy a validated subpath into mount_sub (bounded). */
 static void set_mount_sub(const char *sub) {
     int i = 0; while (sub[i] && i < (int)sizeof mount_sub - 1) { mount_sub[i] = sub[i]; i++; }

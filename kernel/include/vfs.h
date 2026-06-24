@@ -54,6 +54,10 @@ struct statx;
 int  vfs_stat(const char *path, struct statx *st);      /* file metadata for statx; 0/-1 (M1173) */
 int  vfs_fiemap(const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 mounts); count/-1 (M1152) */
 long vfs_punch_hole(const char *path, uint64_t offset, uint64_t len);  /* fallocate PUNCH_HOLE (ext2 mounts); blocks/-1 (M1153) */
+long vfs_setxattr(const char *path, const char *name, const void *val, unsigned long vlen);  /* set user.* xattr (ext2 mounts); vlen/-1 (M1182) */
+long vfs_getxattr(const char *path, const char *name, void *out, unsigned long max);  /* get user.* xattr (ext2 mounts); size/-1 (M1182) */
+long vfs_listxattr(const char *path, char *out, unsigned long max);  /* NUL-sep xattr names (ext2 mounts); total/-1 (M1182) */
+long vfs_removexattr(const char *path, const char *name);  /* remove a user.* xattr (ext2 mounts); 0/-1 (M1182) */
 int  vfs_bind(const char *from, const char *to);         /* graft FROM's subtree onto the path TO; 0/-1 */
 int  vfs_binds_format(char *buf, int max);               /* list the active binds (backs /proc/binds) */
 int  vfs_unshare(void);                                  /* detach the caller into a private mount namespace; 0/-1 (M1122) */

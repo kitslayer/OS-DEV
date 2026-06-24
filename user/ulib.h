@@ -160,6 +160,10 @@ long  sys_overlay(const char *lower, const char *upper);  /* mount a union overl
 long  sys_munmap(void *addr, unsigned long len);/* free an mmap region; 0/-1 */
 void *sys_mremap(void *old_addr, unsigned long old_len, unsigned long new_len, int flags);  /* resize/move; new base or NULL (M1179) */
 long  sys_copy_file_range(const char *src, const char *dst, unsigned long len);  /* in-kernel file copy (dst /net/tcp = sendfile); bytes/-1 (M1181) */
+long  sys_setxattr(const char *path, const char *name, const void *val, unsigned long vlen);  /* set a user.* xattr (ext2); vlen/-1 (M1182) */
+long  sys_getxattr(const char *path, const char *name, void *out, unsigned long max);  /* read a user.* xattr; full size/-1 (M1182) */
+long  sys_listxattr(const char *path, char *out, unsigned long max);  /* NUL-sep user.* xattr names; total/-1 (M1182) */
+long  sys_removexattr(const char *path, const char *name);  /* remove a user.* xattr; 0/-1 (M1182) */
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
