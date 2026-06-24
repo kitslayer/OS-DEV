@@ -119,6 +119,7 @@
 #define SYS_uffd_register   107 /* (addr, len) -> route this region's page faults to a monitor (userfaultfd); 0/-1 (M1134) */
 #define SYS_uffd_read       108 /* () -> monitor: block until the owner faults; the faulting page addr, or -1 */
 #define SYS_uffd_copy       109 /* (addr, data, len) -> monitor: fill the faulting page + wake the owner; 0/-1 */
+#define SYS_mmap_file       110 /* (path, len) -> demand-paged file-backed mmap (MAP_PRIVATE); base VA, or 0 (M1136) */
 
 #define SYSCALL_VECTOR 0x80
 

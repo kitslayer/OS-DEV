@@ -91,6 +91,7 @@ void sys_sleep(int ms);
 void sys_setcolor(int color);   /* text colour for subsequent output: palette index 0-15 (0 = default) */
 void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, or (void*)-1 */
 void *sys_mmap(unsigned long len);              /* reserve a demand-paged anon region; base or 0 */
+void *sys_mmap_file(const char *path, unsigned long len);  /* demand-paged file-backed mmap (MAP_PRIVATE); base or 0 (M1136) */
 void *sys_ringbuf(unsigned long len);           /* a magic mirrored ring buffer (mapped twice back-to-back); base or 0 */
 int   sys_mprotect(void *addr, unsigned long len, int prot);  /* change R/W/X (prot: 1=R 2=W 4=X); 0/-1 */
 int   sys_bind(const char *from, const char *to);  /* bind mount: graft FROM's subtree onto path TO; 0/-1 */

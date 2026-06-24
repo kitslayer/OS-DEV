@@ -304,6 +304,13 @@ int vfs_list(vfs_dirent *out, int max) {
     return fs ? fs->list(out, max) : -1;
 }
 
+/* Offset read for file-backed mmap (M1136). v1 serves the boot filesystem only
+ * (where programs + data live); other sources return -1 (not mmap-backable yet).
+ * No bind/synth routing — mmap stores the already-resolved path. */
+long vfs_pread(const char *name, void *buf, unsigned long max, uint64_t off) {
+    return (fs && fs->pread) ? fs->pread(name, buf, max, off) : -1;
+}
+
 long vfs_read(const char *name, void *buf, unsigned long max) {
     char ap[96]; const char *tb;
     char rb[160]; name = bind_resolve(name, rb, sizeof rb);     /* bind mounts (M1091) */

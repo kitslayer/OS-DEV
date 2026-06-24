@@ -57,7 +57,7 @@ struct app {
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
 #define APP_MAXVMA 16
-    struct { uint64_t start, len; int sealed, uffd; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed = mseal'd; uffd = userfault-managed (M1134) */
+    struct { uint64_t start, len; int sealed, uffd, file_backed; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
 #define APP_NSIG 32
@@ -182,7 +182,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[], mmapfile_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -270,6 +270,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "msealtest", msealtest_elf_start, "mseal hardening demo" },
     { "httpd", httpd_elf_start, "in-guest HTTP server" },
     { "uffdtest", uffdtest_elf_start, "userfaultfd demo" },
+    { "mmapfile", mmapfile_elf_start, "file-backed mmap demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1057,8 +1058,34 @@ uint64_t app_mmap(uint64_t len) {
     a->vma[a->nvma].len   = len;
     a->vma[a->nvma].sealed = 0;
     a->vma[a->nvma].uffd  = 0;
+    a->vma[a->nvma].file_backed = 0;
     a->nvma++;
     a->mmap_next = addr + len + PAGE_SIZE;          /* leave an unmapped guard gap */
+    return addr;
+}
+
+/* File-backed mmap (M1136): reserve a demand-paged region whose pages are filled
+ * lazily from file `path` (offset 0) on first touch — see app_fault_handle. The
+ * mapping is MAP_PRIVATE: faults map a private writable copy, so writes stay in
+ * RAM and never reach the file. Returns the base VA, or 0. */
+uint64_t app_mmap_file(const char *path, uint64_t len) {
+    struct app *a = cur();
+    if (!a || len == 0 || !path) return 0;
+    len = (len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    if (a->nvma >= APP_MAXVMA) return 0;
+    if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
+    uint64_t addr = a->mmap_next;
+    if (addr + len > MMAP_TOP || addr + len < addr) return 0;
+    a->vma[a->nvma].start = addr;
+    a->vma[a->nvma].len   = len;
+    a->vma[a->nvma].sealed = 0;
+    a->vma[a->nvma].uffd  = 0;
+    a->vma[a->nvma].file_backed = 1;
+    a->vma[a->nvma].foff = 0;
+    int i = 0; for (; path[i] && i < 63; i++) a->vma[a->nvma].fpath[i] = path[i];
+    a->vma[a->nvma].fpath[i] = 0;
+    a->nvma++;
+    a->mmap_next = addr + len + PAGE_SIZE;
     return addr;
 }
 
@@ -1255,6 +1282,7 @@ uint64_t app_ringbuf(uint64_t len) {
     a->vma[a->nvma].len   = total;
     a->vma[a->nvma].sealed = 0;
     a->vma[a->nvma].uffd  = 0;
+    a->vma[a->nvma].file_backed = 0;
     a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
@@ -1279,7 +1307,7 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
         pmm_addref(frames[p]);                       /* this mapping holds a ref on the shared frame */
         __asm__ volatile("invlpg (%0)" : : "r"(base + (uint64_t)p * PAGE_SIZE) : "memory");
     }
-    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0; a->nvma++;
+    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0; a->vma[a->nvma].file_backed = 0; a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
 }
@@ -1381,6 +1409,12 @@ int app_fault_handle(uint64_t cr2, uint64_t err) {
             if (!frame) return 0;                       /* OOM -> let it fault/die */
             uint8_t *z = (uint8_t *)hhdm(frame);
             for (int b = 0; b < PAGE_SIZE; b++) z[b] = 0; /* never leak stale RAM to userspace */
+            if (a->vma[i].file_backed) {                /* fill the page from the backing file (M1136) */
+                uint64_t fileoff = a->vma[i].foff + (page - a->vma[i].start);
+                __asm__ volatile("sti");                /* the FS read may touch the disk */
+                vfs_pread(a->vma[i].fpath, z, PAGE_SIZE, fileoff);   /* bytes past EOF stay zero; MAP_PRIVATE: writable copy */
+                __asm__ volatile("cli");
+            }
             vmm_map(page, frame, PTE_WRITABLE | PTE_USER | PTE_NX);
             __asm__ volatile("invlpg (%0)" : : "r"(page) : "memory");
             return 1;

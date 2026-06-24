@@ -334,6 +334,47 @@ static long fat32_read(const char *name, void *buf, unsigned long max) {
     return (long)written;
 }
 
+/* Read up to `max` bytes of `name` starting at byte offset `off` (M1136, for
+ * file-backed mmap's per-page demand reads). A simple sector-by-sector chain
+ * walk — no coalescing, since callers fetch a page at a time — with a 512-byte
+ * stack buffer (so a large cluster never overflows the stack). Bytes read (0 at
+ * EOF), or -1. */
+static long fat32_pread(const char *name, void *buf, unsigned long max, uint64_t off) {
+    uint32_t dir; const char *leaf;
+    if (resolve(name, &dir, &leaf) < 0) return -1;
+    uint32_t cl0, size; int isdir;
+    if (!dir_find(dir, leaf, &cl0, &isdir, &size) || isdir) return -1;
+    if (off >= size) return 0;                               /* nothing past EOF */
+    uint64_t want = (uint64_t)size - off;
+    if (want > max) want = max;
+
+    uint32_t cbytes = sec_per_clus * SECSZ;
+    uint32_t cl = cl0;
+    for (uint32_t i = 0, skip = (uint32_t)(off / cbytes); i < skip; i++) {  /* skip to the offset's cluster */
+        if (!cluster_in_range(cl)) return 0;
+        cl = fat_next(cl);
+    }
+    uint32_t pos = (uint32_t)(off % cbytes);                 /* byte position within the current cluster */
+
+    uint8_t *dst = (uint8_t *)buf, sbuf[SECSZ];
+    uint64_t done = 0; uint32_t steps = 0;
+    while (done < want && cluster_in_range(cl)) {
+        uint32_t base = cluster_to_sector(cl);
+        uint32_t s = pos / SECSZ, bo = pos % SECSZ;
+        for (; s < sec_per_clus && done < want; s++, bo = 0) {
+            if (ata_read(base + s, 1, sbuf) < 0) return (long)done;
+            uint32_t avail = SECSZ - bo, left = (uint32_t)(want - done);
+            uint32_t chunk = left < avail ? left : avail;
+            for (uint32_t k = 0; k < chunk; k++) dst[done + k] = sbuf[bo + k];
+            done += chunk;
+        }
+        pos = 0;
+        cl = fat_next(cl);
+        if (total_clusters && ++steps > total_clusters + 2) break;   /* cycle guard */
+    }
+    return (long)done;
+}
+
 /* ---- write support ---- */
 
 /* Write a FAT entry (in all FAT copies), preserving the reserved top bits. */
@@ -698,7 +739,7 @@ static void fat32_df(uint64_t *freeb, uint64_t *totalb) {
 static struct vfs_ops fat32_ops = { fat32_list, fat32_read, fat32_write,
                                     fat32_delete, fat32_mkdir, fat32_chdir,
                                     fat32_tree, fat32_df, fat32_find,
-                                    fat32_rename };
+                                    fat32_rename, fat32_pread };
 
 int fat32_mount(void) {
     uint8_t bs[SECSZ];
