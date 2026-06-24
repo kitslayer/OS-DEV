@@ -27,8 +27,11 @@ enum {
     BPF_JEQ,       /* if reg[a] == imm: skip the next `b` instrs      */
     BPF_JNE,       /* if reg[a] != imm: skip the next `b` instrs      */
     BPF_RET,       /* return reg[a] (0 = DROP, nonzero = PASS)        */
+    BPF_MAPINC,    /* bpf_map[reg[a] & (BPF_MAP_N-1)]++ : histogram aggregation (M1202) */
     BPF_OP_MAX
 };
+
+#define BPF_MAP_N 256   /* histogram cells a tracepoint program can increment (M1202) */
 
 struct bpf_insn { uint8_t op, a, b, _pad; int32_t imm; };   /* 8 bytes */
 
@@ -41,3 +44,10 @@ long bpf_run(const struct bpf_ctx *ctx);               /* run the global firewal
 long bpf_run_prog(const struct bpf_insn *prog, int n, const struct bpf_ctx *ctx);  /* run an arbitrary program (seccomp, M1190) */
 int  bpf_verify(const struct bpf_insn *in, int n);     /* verify a program (forward skips, has RET, in-range); 0 ok / -1 (M1190) */
 int  bpf_format(char *out, int max);                   /* /proc/bpf: program + run/drop counters */
+
+/* eBPF syscall tracepoint (M1202): a global program run on every syscall enter,
+ * which counts by number into bpf_map via BPF_MAPINC (dtrace/bpftrace-style). */
+long bpf_trace_load(const void *prog, unsigned long bytes); /* verify+install the trace program (0 bytes = clear + zero the map); 0/-1 */
+int  bpf_trace_loaded(void);                               /* is a trace program installed? */
+long bpf_trace_run(const struct bpf_ctx *ctx);             /* run it on one syscall enter */
+uint64_t bpf_map_get(unsigned idx);                        /* read a histogram cell (idx & (BPF_MAP_N-1)) */

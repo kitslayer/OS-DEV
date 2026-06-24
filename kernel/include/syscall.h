@@ -195,6 +195,8 @@
 #define SYS_open         178   /* (path) -> a read-only file fd (>=3); -1 (M1193) */
 #define SYS_lseek        179   /* (fd, off, whence) -> reposition a file fd (0=SET,1=CUR,2=END); offset/-1 (M1193) */
 #define SYS_ptrace       180   /* (request, pid, addr, data) -> trace a child process; per-request (M1199) */
+#define SYS_bpf_trace    181   /* (prog, bytes) -> load a global syscall-tracepoint BPF program (0 bytes = clear); 0/-1 (M1202) */
+#define SYS_bpf_map_get  182   /* (idx) -> read BPF histogram cell idx (M1202) */
 
 /* ptrace request codes (M1199) — the tracee self-marks with TRACEME; the tracer
  * (its parent) drives the rest while the tracee is stopped. */

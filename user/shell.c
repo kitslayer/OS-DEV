@@ -2474,6 +2474,24 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "fifo: mkfifo + open-by-name rendezvous + EOF OK\n" : "fifotest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "bpftracetest")) {   /* eBPF syscall tracepoint: count syscalls by number into a BPF map (M1202) */
+            /* program: r0 = ctx field 0 (the syscall number); bpf_map[r0]++; return 1 (pass) */
+            struct bpf_insn prog[] = {
+                { BPF_LDCTX,  0, 0, 0, 0 },     /* r0 = syscall nr */
+                { BPF_MAPINC, 0, 0, 0, 0 },     /* map[nr]++ */
+                { BPF_LDI,    1, 0, 0, 1 },     /* r1 = 1 */
+                { BPF_RET,    1, 0, 0, 0 },     /* pass */
+            };
+            if (sys_bpf_trace(prog, sizeof prog) != 0) { print("bpf-trace: load failed\n"); g_status = 1; }
+            else {
+                unsigned long before = sys_bpf_map_get(SYS_getpid);
+                for (int i = 0; i < 5; i++) (void)sys_getpid();      /* 5 known syscalls -> map[getpid] += 5 */
+                unsigned long after = sys_bpf_map_get(SYS_getpid);
+                sys_bpf_trace(0, 0);                                 /* stop tracing + clear the histogram */
+                if (after >= before + 5)
+                    print("bpf-trace: histogram probe on every syscall; 5x getpid -> map[getpid] counted -- OK\n");
+                else { print("bpf-trace: FAILED (the histogram did not count the calls)\n"); g_status = 1; }
+            }
         } else if (streq(line, "ptracetest")) {   /* ptrace: trace a child — stop, peek/poke mem, snapshot regs, continue (M1199) */
             volatile long x = 111;
             long pid = sys_fork();

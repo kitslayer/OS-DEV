@@ -197,6 +197,8 @@ void *sys_shmat(int shmid) { long r = do_syscall(SYS_shmat, shmid, 0, 0); return
 long sys_shmdt(void *addr) { return do_syscall(SYS_shmdt, (long)addr, 0, 0); }
 long sys_process_vm_read(int pid, unsigned long raddr, void *buf, unsigned long len) { return do_syscall4(SYS_process_vm_read, pid, (long)raddr, (long)buf, (long)len); }
 long sys_ptrace(long req, int pid, unsigned long addr, unsigned long data) { return do_syscall4(SYS_ptrace, req, pid, (long)addr, (long)data); }
+long sys_bpf_trace(const void *prog, unsigned long bytes) { return do_syscall(SYS_bpf_trace, (long)prog, (long)bytes, 0); }
+unsigned long sys_bpf_map_get(unsigned idx) { return (unsigned long)do_syscall(SYS_bpf_map_get, (long)idx, 0, 0); }
 long sys_process_vm_write(int pid, unsigned long raddr, const void *buf, unsigned long len) { return do_syscall4(SYS_process_vm_write, pid, (long)raddr, (long)buf, (long)len); }
 int  sys_unix_listen(const char *path) { return (int)do_syscall(SYS_unix_listen, (long)path, 0, 0); }
 int  sys_unix_connect(const char *path) { return (int)do_syscall(SYS_unix_connect, (long)path, 0, 0); }

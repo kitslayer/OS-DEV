@@ -11,6 +11,7 @@
 #include "interrupts.h"
 #include "console.h"
 #include "app.h"
+#include "bpf.h"
 #include "strace.h"
 #include "vfs.h"
 #include "mqueue.h"
@@ -372,6 +373,15 @@ void syscall_dispatch(struct registers *r) {
      * reuses the register slots); emitted after, with the result, if traced. */
     int traced = app_is_traced(self);
     uint64_t tr_nr = r->rax, tr_a = r->rdi, tr_b = r->rsi, tr_c = r->rdx;
+
+    /* eBPF syscall tracepoint (M1202): if a trace program is loaded, run it on
+     * this syscall enter — it counts by number into the BPF map (read via
+     * /proc/bpf or SYS_bpf_map_get). dtrace/bpftrace-style, on the verified VM. */
+    if (bpf_trace_loaded()) {
+        struct bpf_ctx tctx = { (uint32_t)r->rax, (uint32_t)r->rdi,
+                                (uint32_t)r->rsi, (uint32_t)r->rdx, 0 };
+        bpf_trace_run(&tctx);
+    }
 
     /* pledge() enforcement: a pledged app that calls a syscall outside its kept
      * classes is killed on the spot (like OpenBSD's SIGABRT). Unpledged apps —
@@ -1267,6 +1277,15 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)app_seccomp_filter_install((const void *)r->rdi, (int)(bytes / 8));
         break;
     }
+    case SYS_bpf_trace: {                  /* load the global syscall-tracepoint BPF program (M1202) */
+        unsigned long bytes = r->rsi;
+        if (bytes && (!ubuf(r->rdi, bytes) || bytes % sizeof(struct bpf_insn) != 0)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)bpf_trace_load((const void *)r->rdi, bytes);
+        break;
+    }
+    case SYS_bpf_map_get:                  /* read a BPF histogram cell (M1202) */
+        r->rax = bpf_map_get((unsigned)r->rdi);
+        break;
     case SYS_seccomp_wait: {               /* supervisor: block until the child parks; fill ev[4] */
         uint64_t *uev = (uint64_t *)r->rsi;
         if (!ubuf(r->rsi, 4 * sizeof(uint64_t))) { r->rax = (uint64_t)-1; break; }
