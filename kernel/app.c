@@ -65,7 +65,9 @@ struct app {
     uint64_t sig_restorer;               /* ulib trampoline that calls sigreturn */
     struct registers sig_saved;          /* pre-signal context, restored by sigreturn */
     int      sig_in;                     /* 1 while a handler runs (no nesting) */
-    volatile int pending_sig;            /* a signal raised asynchronously (e.g. Ctrl-C->SIGINT), delivered on the next return to ring 3 */
+    volatile uint32_t pending_sigs;      /* bitset of pending signals (bit n = signo n); delivered on the next return to ring 3. A bitset, not one slot, so a 2nd async signal isn't dropped (M1126) */
+    int      sigfd_armed;                /* 1 if this process routes some signals to signalfd (M1126) */
+    uint32_t sigfd_mask;                 /* which signos are delivered via /proc/self/sigfd instead of a handler */
     uint64_t alarm_interval, alarm_next; /* SIGALRM (M1102): periodic timer; 0 interval = disarmed */
     int      traced;                     /* 1 = log each syscall to dmesg (strace), toggled via /proc/<pid>/ctl */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
@@ -167,7 +169,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -248,6 +250,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "steptest", steptest_elf_start, "single-step demo" },
     { "scnotify", scnotify_elf_start, "syscall-supervisor demo" },
     { "fswaittest", fswaittest_elf_start, "fswait multi-wait demo" },
+    { "sigfdtest", sigfdtest_elf_start, "signalfd demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1329,9 +1332,12 @@ void app_sigreturn(struct registers *r) {
 void app_request_signal(app_t *a, int signo) {
     struct app *ap = (struct app *)a;
     if (!ap || signo <= 0 || signo >= APP_NSIG) return;
-    if (!ap->sig_handler[signo]) return;     /* no handler installed -> not opted in */
-    ap->pending_sig = signo;
-    task_wake(ap->task);                     /* unblock it if it's parked in read() */
+    /* opted in via a handler, OR routed to signalfd (M1126) — else ignore, the
+     * existing default for handler-less signals. */
+    int sigfd = ap->sigfd_armed && (ap->sigfd_mask & (1u << signo));
+    if (!ap->sig_handler[signo] && !sigfd) return;
+    ap->pending_sigs |= (1u << signo);       /* OR into the bitset, so a 2nd async signal isn't dropped */
+    task_wake(ap->task);                     /* unblock it if it's parked in read()/sigfd */
 }
 
 #define SIGALRM 14
@@ -1381,11 +1387,49 @@ int app_deliver_pending(struct registers *r) {
                                               * sched_init (current==NULL) and on kernel tasks -> guard */
     if (!t || !t->proc) return 0;
     struct app *a = (struct app *)t->proc;
-    if (!a->pending_sig) return 0;
+    if (!a->pending_sigs) return 0;
     if ((r->cs & 3) != 3) return 0;          /* resuming kernel code (mid-syscall) -> defer */
-    int sig = a->pending_sig;
-    if (app_signal_deliver(r, sig)) { a->pending_sig = 0; return 1; }
-    return 0;                                 /* couldn't deliver yet (already in a handler) -> stay pending */
+    /* deliver the lowest pending signal that has a handler (one per return, like
+     * Linux); handler-less signals stay pending for signalfd to drain. */
+    for (int sig = 1; sig < APP_NSIG; sig++) {
+        if (!(a->pending_sigs & (1u << sig)) || !a->sig_handler[sig]) continue;
+        if (app_signal_deliver(r, sig)) { a->pending_sigs &= ~(1u << sig); return 1; }
+        return 0;                            /* couldn't deliver yet (already in a handler) -> stay pending */
+    }
+    return 0;                                /* only handler-less (signalfd) signals pending */
+}
+
+/* signalfd (M1126): route signals in `mask` to /proc/self/sigfd instead of a
+ * handler. A read there returns the lowest such pending signo (blocking if none),
+ * and it's fswait-ready when one is pending — signals as a file, composable with
+ * the M1125 event loop. */
+long app_signalfd(uint32_t mask) {
+    struct app *a = cur();
+    if (!a) return -1;
+    a->sigfd_armed = 1;
+    a->sigfd_mask |= mask;
+    return 0;
+}
+static int sigfd_pick(struct app *a) {       /* lowest pending signal routed to sigfd, or 0 */
+    for (int s = 1; s < APP_NSIG; s++)
+        if ((a->pending_sigs & (1u << s)) && (a->sigfd_mask & (1u << s)) && !a->sig_handler[s]) return s;
+    return 0;
+}
+int app_sigfd_ready(app_t *a) { return a && sigfd_pick((struct app *)a) != 0; }   /* fswait peek */
+long app_sigfd_read(app_t *a, char *buf, int max) {
+    struct app *ap = (struct app *)a;
+    if (!ap || max < 3) return -1;
+    int s;
+    while ((s = sigfd_pick(ap)) == 0) {       /* block until a sigfd signal is pending (woken by app_request_signal) */
+        task_block();
+        if (!ap->used) return -1;             /* killed while parked */
+    }
+    ap->pending_sigs &= ~(1u << s);           /* consume it */
+    int p = 0; char t[6]; int n = 0; int v = s;
+    if (!v) t[n++] = '0'; while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+    while (n) buf[p++] = t[--n];
+    buf[p++] = '\n'; buf[p] = 0;
+    return p;
 }
 
 /* ---- graphics mode: a per-app pixel canvas the WM composites --------------
@@ -1910,7 +1954,7 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     /* reset per-program state (the new image starts clean); keep pid/parent/pledge */
     a->heap_end = 0; a->nvma = 0; a->mmap_next = 0;
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
-    a->sig_in = 0; a->pending_sig = 0; a->alarm_interval = 0; a->alarm_next = 0;
+    a->sig_in = 0; a->pending_sigs = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;
     if (a->gfx) { kfree(a->gfx); a->gfx = 0; a->gfx_w = a->gfx_h = 0; }
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
     a->titlebuf[ti] = 0; a->title = a->titlebuf;

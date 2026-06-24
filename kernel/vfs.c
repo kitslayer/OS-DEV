@@ -192,6 +192,7 @@ static int event_path(const char *name, const char **q) {
  * (regular files, /proc, /dev) is treated as always-ready (its read won't park). */
 int vfs_ready(const char *name) {
     const char *q;
+    if (veq(name, "/proc/self/sigfd")) return app_sigfd_ready(app_current());  /* signalfd (M1126) */
     if (event_path(name, &q))  return eventfd_ready(q);
     if (notify_path(name, &q)) return notify_ready(q);
     if (ipc_path(name, &q))    return mbox_ready(q);

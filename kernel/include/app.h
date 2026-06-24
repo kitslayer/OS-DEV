@@ -74,6 +74,10 @@ int      app_seccomp_traps(app_t *a, uint64_t nr);         /* does `a` trap sysc
 long     app_seccomp_notify(app_t *a, uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, int *run_real);  /* park the child */
 long     app_seccomp_wait(int childpid, uint64_t *ev4);    /* supervisor: block until the child parks; ev[4]={nr,a,b,c} */
 long     app_seccomp_reply(int childpid, int run_real, long retval);  /* supervisor: deliver the verdict */
+/* signalfd: signals routed to /proc/self/sigfd instead of a handler (M1126) */
+long     app_signalfd(uint32_t mask);                      /* arm: route the masked signos to signalfd */
+long     app_sigfd_read(app_t *a, char *buf, int max);     /* read the next sigfd signo (blocks); text + '\n' */
+int      app_sigfd_ready(app_t *a);                        /* fswait peek: a sigfd signal pending? */
 void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */
 int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */

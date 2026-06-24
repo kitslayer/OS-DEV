@@ -445,6 +445,10 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */
             if (peq(file, "regs"))   return gen_pid_regs((char *)buf, (int)max, proc);   /* ring-3 register file (M1119) */
             if (peq(file, "sstrace")) return gen_pid_sstrace((char *)buf, (int)max, proc); /* single-step trace (M1123) */
+            if (peq(file, "sigfd")) {                                                     /* signalfd: next signo, blocks (M1126) */
+                if (proc != (void *)app_current()) return -1;   /* only your OWN signals */
+                return app_sigfd_read((app_t *)proc, (char *)buf, (int)max);
+            }
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "cmdline")) {
                 char *bb = (char *)buf; int p = sapp(bb, 0, (int)max, app_title((app_t *)proc));

@@ -16,6 +16,7 @@ long sys_seccomp(int nr);            /* child: trap syscall `nr` to a supervisor
 long sys_seccomp_wait(int childpid, unsigned long *ev4);  /* supervisor: block until child parks; ev={nr,a,b,c}; 1/0/-1 */
 long sys_seccomp_reply(int childpid, int run_real, long retval);  /* supervisor: allow(run_real=1)/deny/emulate */
 long sys_fswait(const char *const *paths, int n, long timeout_ms);  /* block until one of n paths is readable; index/-1 (M1125) */
+long sys_signalfd(unsigned mask);    /* route the masked signos to /proc/self/sigfd instead of a handler (M1126) */
 long sys_list(void *buf, unsigned long len);
 long sys_readfile(const char *name, void *buf, unsigned long len);
 long sys_writefile(const char *name, const void *buf, unsigned long len);

@@ -305,7 +305,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
-        [SYS_fswait]="fswait",
+        [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -875,13 +875,18 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)idx;
         break;
     }
+    case SYS_signalfd:                     /* route masked signals to /proc/self/sigfd (M1126) */
+        r->rax = (uint64_t)(int64_t)app_signalfd((uint32_t)r->rdi);
+        break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
         r->rax = 0;
         break;
-    case SYS_raise:                        /* (signo): run the handler now; resume here after it returns */
+    case SYS_raise:                        /* (signo): queue the signal; delivered to a handler at this
+                                            * syscall's return (app_deliver_pending tail), or left pending
+                                            * for signalfd if it has no handler (M1126). */
         r->rax = 0;
-        app_signal_deliver(r, (int)r->rdi);   /* if delivered, rewrites r to enter the handler */
+        app_request_signal((app_t *)app_current(), (int)r->rdi);
         break;
     case SYS_sigreturn:                    /* return from a handler: restore the saved context */
         app_sigreturn(r);

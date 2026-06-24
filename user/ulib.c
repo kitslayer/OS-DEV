@@ -36,6 +36,7 @@ long sys_seccomp_reply(int childpid, int run_real, long retval) { return do_sysc
 
 /* fswait: block until one of `n` paths is readable (or timeout_ms; -1 = forever).
  * Packs the path array into a NUL-separated buffer for the kernel. M1125. */
+long sys_signalfd(unsigned mask) { return do_syscall(SYS_signalfd, (long)mask, 0, 0); }
 long sys_fswait(const char *const *paths, int n, long timeout_ms) {
     char buf[512]; int p = 0;
     if (n < 1 || n > 8) return -1;

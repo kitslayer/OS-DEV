@@ -87,6 +87,7 @@ global nstest_elf_start, nstest_elf_end
 global steptest_elf_start, steptest_elf_end
 global scnotify_elf_start, scnotify_elf_end
 global fswaittest_elf_start, fswaittest_elf_end
+global sigfdtest_elf_start, sigfdtest_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -403,5 +404,9 @@ scnotify_elf_end:
 fswaittest_elf_start:
     incbin "build/fswaittest.elf"
 fswaittest_elf_end:
+
+sigfdtest_elf_start:
+    incbin "build/sigfdtest.elf"
+sigfdtest_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
