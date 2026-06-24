@@ -24,3 +24,5 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
                      const char *path, const void *buf, unsigned long len);   /* create OR overwrite (M1132/M1135) */
 long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                       const char *path);                                      /* delete a regular file; 0/-1 (M1135) */
+long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path);                                       /* create a directory; 0/-1 (M1137) */

@@ -564,6 +564,15 @@ long blockdev_mount_remove(int i, const char *path) {
                             path ? path : "");
 }
 
+/* Create a directory on mount `i` (ext2 only). 0 on success, -1 otherwise. M1137. */
+long blockdev_mount_mkdir(int i, const char *path) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_mkdir_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start,
+                           path ? path : "");
+}
+
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
 int blockdev_mount_isdir(int i, const char *path) {
     blockdev_mount_scan();

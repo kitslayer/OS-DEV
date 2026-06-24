@@ -473,6 +473,66 @@ long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
     return 0;
 }
 
+/* Bump (delta=+1) or drop (delta=-1) a group's bg_used_dirs_count for inode `ino`. */
+static void grp_dirs(ext2_t *v, uint32_t ino, int delta) {
+    uint32_t g = (ino - 1) / v->inodes_per_group;
+    uint8_t gd[4096]; uint32_t gd_per_block = v->block_size / 32;
+    uint32_t gdblk = v->gdt_block + g / gd_per_block, goff = (g % gd_per_block) * 32;
+    if (rdblk(v, gdblk, gd) < 0) return;
+    e_wr16(gd + goff + 16, (uint16_t)(e_rd16(gd + goff + 16) + delta));
+    wrblk(v, gdblk, gd);
+}
+
+/* Create a directory `path`: a fresh dir inode whose single block holds "." (->
+ * itself) and ".." (-> parent); link it into the parent (which gains a link from
+ * the new dir's ".."), and bump the group's directory count. M1137. */
+long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+
+    char parent[256], base[256];
+    int last = -1, n = 0;
+    for (int i = 0; path[i]; i++) { if (path[i] == '/') last = i; n = i + 1; }
+    if (last < 0) parent[0] = 0;
+    else { int j = 0; for (; j < last && j < 255; j++) parent[j] = path[j]; parent[j] = 0; }
+    { int j = 0, s = last + 1; for (; s < n && j < 255; s++, j++) base[j] = path[s]; base[j] = 0; }
+    if (base[0] == 0) return -1;
+
+    uint8_t pin[256]; int pdir = 0;
+    uint32_t parent_ino = walk(&v, parent, pin, &pdir);
+    if (!parent_ino || !pdir) return -1;
+    if (dir_lookup(&v, pin, base, 0)) return -1;           /* name already taken */
+
+    uint32_t ino = alloc_inode(&v); if (!ino) return -1;
+    uint32_t blk = alloc_block(&v); if (!blk) return -1;
+
+    /* the dir's data block: "." (rec_len 12) then ".." (rec_len = rest of block) */
+    uint8_t db[4096];
+    for (uint32_t i = 0; i < v.block_size; i++) db[i] = 0;
+    e_wr32(db + 0, ino);  e_wr16(db + 4, 12); db[6] = 1; db[7] = 2; db[8] = '.';
+    e_wr32(db + 12, parent_ino); e_wr16(db + 16, (uint16_t)(v.block_size - 12));
+    db[18] = 2; db[19] = 2; db[20] = '.'; db[21] = '.';
+    if (wrblk(&v, blk, db) < 0) return -1;
+
+    uint8_t inode[256];
+    for (uint32_t i = 0; i < v.inode_size; i++) inode[i] = 0;
+    e_wr16(inode + 0, 0x4000 | 0x1ED);                     /* i_mode: directory, rwxr-xr-x */
+    e_wr32(inode + 4, v.block_size);                       /* i_size = one block          */
+    e_wr16(inode + 26, 2);                                 /* i_links_count: itself + "."  */
+    e_wr32(inode + 28, v.block_size / 512);                /* i_blocks                     */
+    e_wr32(inode + 40, blk);                               /* i_block[0]                   */
+    if (write_inode(&v, ino, inode) < 0) return -1;
+
+    if (dir_add(&v, parent_ino, base, ino, 2) < 0) return -1;   /* ftype 2 = directory */
+    if (read_inode(&v, parent_ino, pin) < 0) return -1;         /* parent gains a link (the new dir's "..") */
+    e_wr16(pin + 26, (uint16_t)(e_rd16(pin + 26) + 1));
+    if (write_inode(&v, parent_ino, pin) < 0) return -1;
+    grp_dirs(&v, ino, +1);
+    return 0;
+}
+
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, const void *buf, unsigned long len) {
     ext2_t v;

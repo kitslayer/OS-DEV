@@ -376,8 +376,14 @@ long vfs_remove(const char *name) {
 }
 
 long vfs_mkdir(const char *path) {
-    long r = (fs && fs->mkdir) ? fs->mkdir(path) : -1;
-    if (r >= 0) fsevents_record('m', path);
+    char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);   /* bind mounts */
+    long r;
+    int midx; char fpath[192];
+    if (mount_path(p, &midx, fpath, sizeof fpath))                     /* a /diskN mount: ext2 is writable (M1137) */
+        r = blockdev_mount_mkdir(midx, fpath);
+    else
+        r = (fs && fs->mkdir) ? fs->mkdir(p) : -1;
+    if (r >= 0) fsevents_record('m', p);
     return r;
 }
 
