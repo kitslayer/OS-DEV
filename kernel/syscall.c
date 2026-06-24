@@ -274,6 +274,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
+    case SYS_mincore:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -317,6 +318,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
+        [SYS_mincore]="mincore",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -812,6 +814,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);
         break;
+    case SYS_mincore: {                    /* (addr, len, vec) -> per-page residency of an mmap range (M1147) */
+        uint64_t np = (r->rsi + PAGE_SIZE - 1) / PAGE_SIZE;     /* vec needs one byte per page */
+        if (r->rsi == 0 || !ubuf(r->rdx, np)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_mincore(r->rdi, r->rsi, (uint8_t *)r->rdx);
+        break;
+    }
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
         r->rax = (uint64_t)(int64_t)app_swap_out(r->rdi, r->rsi);

@@ -1256,6 +1256,31 @@ int app_madvise(uint64_t addr, uint64_t len, int advice) {
     return dropped;
 }
 
+/* mincore(addr,len,vec) (M1147): report per-page residency for [addr,addr+len)
+ * of the CALLING app. `addr` must be page-aligned; the WHOLE range must lie
+ * inside the app's mmap VMAs (else -1 / ENOMEM, matching POSIX). For each page
+ * it writes vec[i] = 1 if that page is RESIDENT (already demand-faulted in, so
+ * vmm_translate yields a frame) or 0 if it is reserved-but-not-yet-faulted.
+ * This is the READ side of the demand pager (app_fault_handle) + COW + madvise
+ * (MADV_DONTNEED): userspace can SEE exactly which pages RAM actually backs,
+ * proving lazy allocation. `vec` must hold ceil(len/PAGE) bytes (the syscall
+ * validates that). Returns 0 on success, -1 on a bad/unaligned/unmapped range. */
+int app_mincore(uint64_t addr, uint64_t len, uint8_t *vec) {
+    struct app *a = cur();
+    if (!a || len == 0) return -1;
+    if (addr & (uint64_t)(PAGE_SIZE - 1)) return -1;          /* POSIX: addr must be page-aligned */
+    uint64_t end = addr + ((len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1));
+    int idx = 0;
+    for (uint64_t p = addr; p < end; p += PAGE_SIZE, idx++) {
+        int in_vma = 0;
+        for (int i = 0; i < a->nvma; i++)
+            if (p >= a->vma[i].start && p < a->vma[i].start + a->vma[i].len) { in_vma = 1; break; }
+        if (!in_vma) return -1;                                /* ENOMEM: range crosses an unmapped page */
+        vec[idx] = vmm_translate(p) ? 1 : 0;                   /* bit0 = page resident */
+    }
+    return 0;
+}
+
 /* mprotect (M1090): change the R/W/X protection of an already-mapped range in
  * the calling app (PROT_READ=1, PROT_WRITE=2, PROT_EXEC=4). Enables W^X and
  * write-then-execute JIT pages. The range must be the app's own user pages. */

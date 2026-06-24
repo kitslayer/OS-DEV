@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest swaptest shmtest (mmap/ring/W^X/reclaim/swap/shared-mem)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest mincoretest swaptest shmtest (mmap/ring/W^X/reclaim/residency/swap/shared-mem)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1733,6 +1733,31 @@ static int run_command(char *line, char *cwd) {
                 print(zeroed ? "  re-read after DONTNEED is ZERO -> pages reclaimed + re-faulted fresh\n"
                              : "  VERIFY FAILED: stale data survived DONTNEED\n");
                 if (!zeroed || dropped <= 0) g_status = 1;
+                sys_munmap(m, len);
+            }
+        } else if (streq(line, "mincoretest")) {  /* mincore: observe which mmap pages RAM actually backs (M1147) */
+            unsigned long np = 16, len = np * 4096;
+            unsigned char *m = (unsigned char *)sys_mmap(len);
+            unsigned char vec[16];
+            if (!m) { print("mincoretest: mmap failed\n"); g_status = 1; }
+            else if (sys_mincore(m, len, vec) < 0) { print("mincoretest: mincore failed\n"); g_status = 1; sys_munmap(m, len); }
+            else {
+                long r0 = 0; for (unsigned long i = 0; i < np; i++) r0 += vec[i];   /* fresh mmap: nothing faulted yet */
+                print("fresh mmap of "); printl((long)np); print(" pages, resident now: "); printl(r0); print(" (lazy => 0)\n");
+                for (unsigned long i = 0; i < np; i += 2) m[i * 4096] = 1;          /* fault in only the EVEN pages */
+                sys_mincore(m, len, vec);
+                print("after touching evens:   ");
+                for (unsigned long i = 0; i < np; i++) print(vec[i] ? "R" : ".");
+                print("\n");
+                long re = 0; int patt = 1;
+                for (unsigned long i = 0; i < np; i++) { re += vec[i]; if (vec[i] != (unsigned char)((i % 2) ? 0 : 1)) patt = 0; }
+                sys_madvise(m, len, 4 /* MADV_DONTNEED */);                          /* reclaim them all */
+                sys_mincore(m, len, vec);
+                long after = 0; for (unsigned long i = 0; i < np; i++) after += vec[i];
+                print("after madvise(DONTNEED): resident "); printl(after); print(" (=> 0)\n");
+                int ok = (r0 == 0 && re == 8 && patt && after == 0);
+                print(ok ? "mincore: residency exactly tracks the demand pager OK\n" : "mincore: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
                 sys_munmap(m, len);
             }
         } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
