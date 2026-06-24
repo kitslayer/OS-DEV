@@ -1422,6 +1422,79 @@ int app_munmap(uint64_t addr, uint64_t len) {
     return -1;
 }
 
+/* mremap (M1179): resize the anonymous mmap region that starts at old_addr.
+ *   - shrink: free the tail pages, keep the start.
+ *   - grow in place: extend the VMA if [old_end,new_end) is free + in-window
+ *     (the new pages demand-fault in lazily, like the original mmap).
+ *   - grow when blocked + MREMAP_MAYMOVE: reserve a fresh region, COPY the
+ *     resident pages over (untouched ones stay demand-paged), free the old.
+ * Plain anon only (sealed/file-backed/huge/uffd/locked regions are refused).
+ * Returns the (possibly new) base, or (uint64_t)-1. */
+#define MREMAP_MAYMOVE 1
+uint64_t app_mremap(uint64_t old_addr, uint64_t old_len, uint64_t new_len, int flags) {
+    struct app *a = cur();
+    if (!a || new_len == 0) return (uint64_t)-1;
+    old_len = (old_len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    new_len = (new_len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    int vi = -1;
+    for (int i = 0; i < a->nvma; i++) if (a->vma[i].start == old_addr) { vi = i; break; }
+    if (vi < 0) return (uint64_t)-1;
+    if (a->vma[vi].sealed || a->vma[vi].file_backed || a->vma[vi].huge || a->vma[vi].uffd || a->vma[vi].locked)
+        return (uint64_t)-1;
+    if (new_len == old_len) return old_addr;
+
+    if (new_len < old_len) {                              /* SHRINK: free [old_addr+new_len, old_addr+old_len) */
+        for (uint64_t p = old_addr + new_len; p < old_addr + old_len; p += PAGE_SIZE) {
+            uint64_t ph = vmm_translate(p);
+            if (ph) { vmm_unmap(p); pmm_free_frame(ph); }
+        }
+        a->vma[vi].len = new_len;
+        return old_addr;
+    }
+
+    /* GROW: extend in place if the tail [old_end,new_end) is free + in-window */
+    uint64_t old_end = old_addr + old_len, new_end = old_addr + new_len;
+    if (new_end <= MMAP_TOP && new_end > old_addr) {
+        int overlap = 0;
+        for (int i = 0; i < a->nvma; i++) if (i != vi) {
+            uint64_t s = a->vma[i].start, e = s + a->vma[i].len;
+            if (old_end < e && new_end > s) { overlap = 1; break; }
+        }
+        if (!overlap) {
+            if (a->rlim_as && app_vma_total(a) - old_len + new_len > a->rlim_as) return (uint64_t)-1;
+            a->vma[vi].len = new_len;                     /* new pages demand-fault in lazily */
+            return old_addr;
+        }
+    }
+    if (!(flags & MREMAP_MAYMOVE)) return (uint64_t)-1;   /* blocked, and not allowed to move */
+
+    /* MOVE: reserve a fresh region (bump allocator, like app_mmap), copy, free old */
+    if (a->nvma >= APP_MAXVMA) return (uint64_t)-1;
+    if (a->mmap_next < MMAP_BASE) a->mmap_next = MMAP_BASE;
+    uint64_t nbase = a->mmap_next;
+    if (nbase + new_len > MMAP_TOP || nbase + new_len < nbase) return (uint64_t)-1;
+    if (a->rlim_as && app_vma_total(a) + new_len > a->rlim_as) return (uint64_t)-1;
+    uint64_t copy_len = old_len < new_len ? old_len : new_len;
+    for (uint64_t off = 0; off < copy_len; off += PAGE_SIZE) {
+        uint64_t ph = vmm_translate(old_addr + off);
+        if (!ph) continue;                                /* old page never faulted -> leave new demand-paged */
+        uint64_t nf = pmm_alloc_frame();
+        if (!nf) {                                         /* OOM mid-move: undo the new pages, bail (old untouched) */
+            for (uint64_t u = 0; u < off; u += PAGE_SIZE) { uint64_t q = vmm_translate(nbase + u); if (q) { vmm_unmap(nbase + u); pmm_free_frame(q); } }
+            return (uint64_t)-1;
+        }
+        uint8_t *s = (uint8_t *)hhdm(ph), *d = (uint8_t *)hhdm(nf);
+        for (int b = 0; b < PAGE_SIZE; b++) d[b] = s[b];
+        vmm_map(nbase + off, nf, PTE_WRITABLE | PTE_USER | PTE_NX);
+    }
+    a->vma[a->nvma].start = nbase; a->vma[a->nvma].len = new_len;
+    a->vma[a->nvma].sealed = a->vma[a->nvma].uffd = a->vma[a->nvma].file_backed = a->vma[a->nvma].locked = a->vma[a->nvma].huge = 0;
+    a->nvma++;
+    a->mmap_next = nbase + new_len + PAGE_SIZE;
+    app_munmap(old_addr, old_len);                        /* free the old region's frames + VMA */
+    return nbase;
+}
+
 /* mseal (M1130): irreversibly seal every mmap region overlapping [addr,addr+len)
  * so its mapping can no longer be changed — munmap and mprotect on it are denied
  * from here on (the seal even survives fork). The point is forward security: an

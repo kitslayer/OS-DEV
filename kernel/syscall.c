@@ -288,7 +288,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
     case SYS_clone: case SYS_join:
         return PL_PROC;
-    case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
+    case SYS_mmap: case SYS_munmap: case SYS_mremap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
     case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge:
     case SYS_shmget: case SYS_shmat: case SYS_shmdt:
@@ -348,7 +348,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
         [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",
         [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_killpg]="killpg",
-        [SYS_flock]="flock",
+        [SYS_flock]="flock",[SYS_mremap]="mremap",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -969,6 +969,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);
+        break;
+    case SYS_mremap:                       /* (old_addr, old_len, new_len, flags) -> resize/move (M1179) */
+        r->rax = app_mremap(r->rdi, r->rsi, r->rdx, (int)r->r10);
         break;
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);

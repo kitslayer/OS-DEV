@@ -474,7 +474,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2304,6 +2304,36 @@ static int run_command(char *line, char *cwd) {
                 } else { print("stoptest: fork failed\n"); g_status = 1; }
                 sys_shmdt((void *)sh);
             }
+        } else if (streq(line, "mremaptest")) {   /* mremap: grow-in-place + MREMAP_MAYMOVE relocation (M1179) */
+            unsigned long P = 4096;
+            int moved_ok = 0, grew_ok = 0;
+            volatile unsigned char *A = (volatile unsigned char *)sys_mmap(P);
+            volatile unsigned char *B = (volatile unsigned char *)sys_mmap(P);   /* blocks the space just above A */
+            if (A && B) {
+                A[0] = 0x11; A[100] = 0x22;
+                volatile unsigned char *A2 = (volatile unsigned char *)sys_mremap((void *)A, P, 4 * P, MREMAP_MAYMOVE);
+                if (A2) {
+                    A2[3 * P] = 0x33;   /* a freshly-grown (demand-paged) page */
+                    moved_ok = (A2 != A && A2[0] == 0x11 && A2[100] == 0x22 && A2[3 * P] == 0x33);
+                    sys_munmap((void *)A2, 4 * P);
+                }
+                sys_munmap((void *)B, P);
+            }
+            volatile unsigned char *C = (volatile unsigned char *)sys_mmap(P);
+            if (C) {
+                C[0] = 0x44; C[50] = 0x55;
+                volatile unsigned char *C2 = (volatile unsigned char *)sys_mremap((void *)C, P, 2 * P, 0);   /* no MAYMOVE */
+                if (C2) {
+                    C2[P] = 0x66;       /* the grown page */
+                    grew_ok = (C2 == C && C2[0] == 0x44 && C2[50] == 0x55 && C2[P] == 0x66);
+                    sys_munmap((void *)C2, 2 * P);
+                }
+            }
+            print("mremap: MAYMOVE relocate "); print(moved_ok ? "OK" : "FAIL");
+            print(", grow-in-place "); print(grew_ok ? "OK" : "FAIL"); print("\n");
+            int ok = moved_ok && grew_ok;
+            print(ok ? "mremap: grow-in-place + MAYMOVE move (data preserved) OK\n" : "mremaptest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

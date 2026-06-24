@@ -168,6 +168,8 @@
 #define SYS_tcsetpgrp    156   /* (pgid) -> set the console foreground group; 0/-1 (M1176) */
 #define SYS_killpg       157   /* (pgid, signo) -> signal every process in the group; count/-1 (M1176) */
 #define SYS_flock        158   /* (path, op) -> advisory whole-file lock (LOCK_SH/EX/UN|NB); 0/-1 (M1177) */
+#define SYS_mremap       159   /* (old_addr, old_len, new_len, flags) -> resize/move an mmap region; base/-1 (M1179) */
+#define MREMAP_MAYMOVE   1
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

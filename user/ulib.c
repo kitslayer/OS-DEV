@@ -271,6 +271,10 @@ void *sys_ringbuf(unsigned long len) { long r = do_syscall(SYS_ringbuf, (long)le
 int   sys_mprotect(void *addr, unsigned long len, int prot) { return (int)do_syscall(SYS_mprotect, (long)addr, (long)len, prot); }
 int   sys_bind(const char *from, const char *to) { return (int)do_syscall(SYS_bind, (long)from, (long)to, 0); }
 long  sys_munmap(void *addr, unsigned long len) { return do_syscall(SYS_munmap, (long)addr, (long)len, 0); }
+void *sys_mremap(void *old_addr, unsigned long old_len, unsigned long new_len, int flags) {
+    long r = do_syscall4(SYS_mremap, (long)old_addr, (long)old_len, (long)new_len, flags);
+    return (r == -1) ? (void *)0 : (void *)r;   /* -1 -> NULL for easy checking */
+}
 /* Restorer trampoline: a signal handler returns HERE; we ask the kernel to
  * restore the pre-signal context (which iretq's elsewhere, so this never
  * returns). The kernel is told this address via sys_signal's 3rd arg. */

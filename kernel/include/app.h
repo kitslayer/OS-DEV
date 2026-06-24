@@ -70,6 +70,7 @@ long     app_join(int tid);        /* block until thread `tid` exits, then reap 
 uint64_t app_ringbuf(uint64_t len);     /* a magic mirrored ring buffer: len frames mapped twice back-to-back */
 int      app_mprotect(uint64_t addr, uint64_t len, int prot);   /* change R/W/X of a mapped range (W^X/JIT); 0/-1 */
 int      app_munmap(uint64_t addr, uint64_t len);   /* free an mmap region; 0/-1 */
+uint64_t app_mremap(uint64_t old_addr, uint64_t old_len, uint64_t new_len, int flags);  /* resize/move an mmap region; base or -1 (M1179) */
 int      app_mseal(uint64_t addr, uint64_t len);    /* irreversibly seal mmap regions in range against munmap/mprotect; count/-1 (M1130) */
 int      app_uffd_register(uint64_t addr, uint64_t len);   /* userfaultfd: route this region's faults to a monitor; 0/-1 (M1134) */
 long     app_uffd_read(void);                              /* monitor: block until a fault; returns the faulting page addr, or -1 */
