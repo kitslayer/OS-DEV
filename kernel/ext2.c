@@ -333,6 +333,146 @@ static int dir_add(ext2_t *v, uint32_t parent_ino, const char *name, uint32_t ch
     return -1;
 }
 
+/* ----- freeing, for overwrite + unlink (M1135) ----- *
+ * The inverses of alloc_block/alloc_inode: clear the bitmap bit and bump the free
+ * count in the group descriptor + superblock. */
+static int free_block(ext2_t *v, uint32_t blk) {
+    if (blk < v->first_data_block || blk >= v->blocks_count) return -1;
+    uint32_t rel = blk - v->first_data_block;
+    uint32_t g = rel / v->blocks_per_group, idx = rel % v->blocks_per_group;
+    uint8_t gd[4096], bm[4096];
+    uint32_t gd_per_block = v->block_size / 32;
+    uint32_t gdblk = v->gdt_block + g / gd_per_block, goff = (g % gd_per_block) * 32;
+    if (rdblk(v, gdblk, gd) < 0) return -1;
+    uint32_t bbm = e_rd32(gd + goff + 0);
+    if (rdblk(v, bbm, bm) < 0) return -1;
+    bm[idx >> 3] &= (uint8_t)~(1 << (idx & 7));
+    if (wrblk(v, bbm, bm) < 0) return -1;
+    e_wr16(gd + goff + 12, e_rd16(gd + goff + 12) + 1);
+    if (wrblk(v, gdblk, gd) < 0) return -1;
+    uint8_t sb[1024];
+    if (rd_sb(v, sb) < 0) return -1;
+    e_wr32(sb + 12, e_rd32(sb + 12) + 1);
+    return wr_sb(v, sb);
+}
+
+/* Free every data block an inode references — direct (0-11), single-indirect
+ * (12) and double-indirect (13), plus the indirect metablocks themselves. */
+static void free_inode_blocks(ext2_t *v, const uint8_t *inode) {
+    const uint8_t *ib = inode + 40;
+    uint32_t ppb = v->block_size / 4;
+    uint8_t buf[4096], buf2[4096];
+    for (int i = 0; i < 12; i++) { uint32_t b = e_rd32(ib + i * 4); if (b) free_block(v, b); }
+    uint32_t ind = e_rd32(ib + 12 * 4);
+    if (ind) {
+        if (rdblk(v, ind, buf) == 0)
+            for (uint32_t i = 0; i < ppb; i++) { uint32_t b = e_rd32(buf + i * 4); if (b) free_block(v, b); }
+        free_block(v, ind);
+    }
+    uint32_t dind = e_rd32(ib + 13 * 4);
+    if (dind) {
+        if (rdblk(v, dind, buf) == 0)
+            for (uint32_t i = 0; i < ppb; i++) {
+                uint32_t ind2 = e_rd32(buf + i * 4); if (!ind2) continue;
+                if (rdblk(v, ind2, buf2) == 0)
+                    for (uint32_t j = 0; j < ppb; j++) { uint32_t b = e_rd32(buf2 + j * 4); if (b) free_block(v, b); }
+                free_block(v, ind2);
+            }
+        free_block(v, dind);
+    }
+}
+
+/* Release an inode number: clear the inode-bitmap bit + bump the free counts. */
+static int free_inode_num(ext2_t *v, uint32_t ino) {
+    if (ino == 0) return -1;
+    uint32_t g = (ino - 1) / v->inodes_per_group, idx = (ino - 1) % v->inodes_per_group;
+    uint8_t gd[4096], bm[4096];
+    uint32_t gd_per_block = v->block_size / 32;
+    uint32_t gdblk = v->gdt_block + g / gd_per_block, goff = (g % gd_per_block) * 32;
+    if (rdblk(v, gdblk, gd) < 0) return -1;
+    uint32_t ibm = e_rd32(gd + goff + 4);
+    if (rdblk(v, ibm, bm) < 0) return -1;
+    bm[idx >> 3] &= (uint8_t)~(1 << (idx & 7));
+    if (wrblk(v, ibm, bm) < 0) return -1;
+    e_wr16(gd + goff + 14, e_rd16(gd + goff + 14) + 1);
+    if (wrblk(v, gdblk, gd) < 0) return -1;
+    uint8_t sb[1024];
+    if (rd_sb(v, sb) < 0) return -1;
+    e_wr32(sb + 16, e_rd32(sb + 16) + 1);
+    return wr_sb(v, sb);
+}
+
+/* Remove `name` from directory inode `parent_ino`: coalesce its record into the
+ * preceding one (or, if it's first in its block, just zero the inode field). */
+static int dir_remove(ext2_t *v, uint32_t parent_ino, const char *name) {
+    uint8_t pin[256], blk[4096];
+    if (read_inode(v, parent_ino, pin) < 0) return -1;
+    uint32_t size = e_rd32(pin + 4);
+    int nl = 0; while (name[nl]) nl++;
+    for (uint32_t off = 0; off < size; off += v->block_size) {
+        uint32_t db = map_block(v, pin, off / v->block_size);
+        if (!db || rdblk(v, db, blk) < 0) continue;
+        uint32_t bo = 0, prev = 0; int have_prev = 0;
+        while (bo + 8 <= v->block_size) {
+            uint32_t ino = e_rd32(blk + bo);
+            uint16_t rl = e_rd16(blk + bo + 4);
+            uint8_t enl = blk[bo + 6];
+            if (rl < 8 || bo + rl > v->block_size) break;
+            if (ino && enl == nl) {
+                int match = 1;
+                for (int k = 0; k < nl; k++) if (blk[bo + 8 + k] != (uint8_t)name[k]) { match = 0; break; }
+                if (match) {
+                    if (have_prev) e_wr16(blk + prev + 4, (uint16_t)(e_rd16(blk + prev + 4) + rl));  /* absorb */
+                    else           e_wr32(blk + bo, 0);                                              /* first: empty it */
+                    return wrblk(v, db, blk);
+                }
+            }
+            prev = bo; have_prev = 1; bo += rl;
+        }
+    }
+    return -1;
+}
+
+/* Delete a regular file: free its blocks + inode and unlink its directory entry.
+ * Refuses directories (no rmdir). 0 on success, -1 otherwise. M1135. */
+long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                      const char *path) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+
+    char parent[256], base[256];
+    int last = -1, n = 0;
+    for (int i = 0; path[i]; i++) { if (path[i] == '/') last = i; n = i + 1; }
+    if (last < 0) parent[0] = 0;
+    else { int j = 0; for (; j < last && j < 255; j++) parent[j] = path[j]; parent[j] = 0; }
+    { int j = 0, s = last + 1; for (; s < n && j < 255; s++, j++) base[j] = path[s]; base[j] = 0; }
+    if (base[0] == 0) return -1;
+
+    uint8_t pin[256]; int pdir = 0;
+    uint32_t parent_ino = walk(&v, parent, pin, &pdir);
+    if (!parent_ino || !pdir) return -1;
+    int cd = 0;
+    uint32_t ino = dir_lookup(&v, pin, base, &cd);
+    if (!ino || cd) return -1;                              /* absent, or a directory */
+    uint8_t inode[256];
+    if (read_inode(&v, ino, inode) < 0) return -1;
+    free_inode_blocks(&v, inode);
+    /* Mark the inode DEAD before clearing its bitmap bit, so a consistency check
+     * sees a clean deletion rather than a live-but-unattached inode: links_count
+     * = 0, a nonzero deletion time, and no block references / i_blocks. */
+    e_wr16(inode + 26, 0);                                /* i_links_count = 0   */
+    e_wr32(inode + 20, 1700000000u);                      /* i_dtime: a real epoch, NOT a small value (a
+                                                           * tiny dtime is misread as an orphan-list inode
+                                                           * pointer by fsck; a timestamp >> inode count is not) */
+    e_wr32(inode + 28, 0);                                /* i_blocks = 0        */
+    for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);  /* clear i_block[] */
+    write_inode(&v, ino, inode);
+    free_inode_num(&v, ino);
+    dir_remove(&v, parent_ino, base);
+    return 0;
+}
+
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, const void *buf, unsigned long len) {
     ext2_t v;
@@ -351,18 +491,27 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     uint8_t pin[256]; int pdir = 0;
     uint32_t parent_ino = walk(&v, parent, pin, &pdir);
     if (!parent_ino || !pdir) return -1;                   /* parent dir must exist */
-    if (dir_lookup(&v, pin, base, 0)) return -1;           /* create-only: refuse if it exists */
+    int cd = 0;
+    uint32_t existing = dir_lookup(&v, pin, base, &cd);
+    if (existing && cd) return -1;                         /* a directory already owns that name */
 
     uint32_t ppb = v.block_size / 4;
     uint32_t nblocks = (uint32_t)((len + v.block_size - 1) / v.block_size);
     if (nblocks > 12 + ppb) return -1;                     /* beyond direct + single-indirect */
 
-    uint32_t ino = alloc_inode(&v);
-    if (!ino) return -1;
-    uint8_t inode[256];
-    for (uint32_t i = 0; i < v.inode_size; i++) inode[i] = 0;
-    e_wr16(inode + 0, 0x8000 | 0x1A4);                     /* i_mode: regular file, rw-r--r-- */
-    e_wr16(inode + 26, 1);                                 /* i_links_count = 1 */
+    uint8_t inode[256]; uint32_t ino;
+    if (existing) {                                        /* OVERWRITE: reuse the inode, free its old data (M1135) */
+        ino = existing;
+        if (read_inode(&v, ino, inode) < 0) return -1;
+        free_inode_blocks(&v, inode);
+        for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);   /* drop the stale block pointers */
+    } else {                                               /* CREATE: a fresh inode + dir entry */
+        ino = alloc_inode(&v);
+        if (!ino) return -1;
+        for (uint32_t i = 0; i < v.inode_size; i++) inode[i] = 0;
+        e_wr16(inode + 0, 0x8000 | 0x1A4);                 /* i_mode: regular file, rw-r--r-- */
+        e_wr16(inode + 26, 1);                             /* i_links_count = 1 */
+    }
 
     /* allocate + write the data blocks (and a single-indirect block if needed) */
     uint8_t blk[4096], ind[4096];
@@ -393,6 +542,6 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     e_wr32(inode + 4, (uint32_t)len);                      /* i_size */
     e_wr32(inode + 28, isectors);                          /* i_blocks (in 512-byte sectors) */
     if (write_inode(&v, ino, inode) < 0) return -1;
-    if (dir_add(&v, parent_ino, base, ino, 1) < 0) return -1;   /* ftype 1 = regular file */
+    if (!existing && dir_add(&v, parent_ino, base, ino, 1) < 0) return -1;   /* ftype 1 = regular file */
     return (long)len;
 }

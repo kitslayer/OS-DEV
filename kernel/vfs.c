@@ -359,8 +359,10 @@ long vfs_remove(const char *name) {
     if (tmp_path(name, &tb)) r = tmpfs_remove(tb);
     else {
         int midx; char fpath[192];
-        if (mount_path(name, &midx, fpath, sizeof fpath)) return -1;   /* disk mounts are read-only */
-        r = (fs && fs->remove) ? fs->remove(name) : -1;
+        if (mount_path(name, &midx, fpath, sizeof fpath))             /* a /diskN mount: ext2 is writable (M1135) */
+            r = blockdev_mount_remove(midx, fpath);
+        else
+            r = (fs && fs->remove) ? fs->remove(name) : -1;
     }
     if (r >= 0) fsevents_record('d', name);
     return r;

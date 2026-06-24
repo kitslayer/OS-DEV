@@ -21,4 +21,6 @@ int  ext2_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char
  * directory insertion). Fails (-1) if the file already exists, the parent dir is
  * missing/full, or there's no space. Direct + single-indirect extents only. M1132. */
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
-                     const char *path, const void *buf, unsigned long len);
+                     const char *path, const void *buf, unsigned long len);   /* create OR overwrite (M1132/M1135) */
+long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                      const char *path);                                      /* delete a regular file; 0/-1 (M1135) */
