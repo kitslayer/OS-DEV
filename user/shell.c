@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  smaps  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1801,6 +1801,13 @@ static int run_command(char *line, char *cwd) {
             int ok = (b.ru_minflt - a.ru_minflt >= 100);
             print(ok ? "getrusage: the minor-fault counter tracks demand paging OK\n" : "getrusage: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+            if (m) sys_munmap(m, len);
+        } else if (streq(line, "smaps")) {   /* /proc/self/smaps: per-region Rss/Pss/Dirty/Swap (M1151) */
+            unsigned long len = 64 * 4096;               /* mmap + touch 64 pages so a region shows real Rss */
+            unsigned char *m = (unsigned char *)sys_mmap(len);
+            if (m) for (unsigned long i = 0; i < len; i += 4096) m[i] = 1;
+            long n; char *bb = slurp("/proc/self/smaps", &n);
+            if (bb && n > 0) { bb[n] = 0; print(bb); free(bb); } else { print("smaps: read failed\n"); g_status = 1; }
             if (m) sys_munmap(m, len);
         } else if (streq(line, "swaptest")) {  /* demonstrate swap: page out to disk, then fault back in intact */
             unsigned long len = 256 * 1024;       /* 64 pages */

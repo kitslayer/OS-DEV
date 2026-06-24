@@ -380,6 +380,22 @@ uint64_t vmm_translate_in(uint64_t cr3, uint64_t virt) {
     return (pt[PT_IDX(virt)] & ADDR_MASK) | (virt & 0xFFF);
 }
 
+/* The raw leaf PTE for `virt` in an arbitrary address space `cr3` (0 if the walk
+ * can't reach a leaf). Unlike vmm_translate_in this returns the entry even when
+ * PRESENT=0, so a caller can see the software PTE_SWAP marker + the A/D bits —
+ * exactly what /proc/<pid>/smaps needs to classify a page (M1151). */
+uint64_t vmm_pte_in(uint64_t cr3, uint64_t virt) {
+    uint64_t *pml4 = phys_to_table(cr3 & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return 0;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT)) return 0;
+    if (pd[PD_IDX(virt)] & PTE_HUGE) return pd[PD_IDX(virt)];
+    uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
+    return pt[PT_IDX(virt)];   /* raw leaf: PRESENT/DIRTY/ACCESSED/SWAP bits all intact */
+}
+
 uint64_t vmm_translate(uint64_t virt) {
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return 0;

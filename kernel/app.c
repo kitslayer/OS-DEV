@@ -330,6 +330,63 @@ int app_format_maps(app_t *a, char *b, int max) {
     return p;
 }
 
+static int maps_dec(char *b, int p, int max, uint64_t v) {
+    char t[24]; int n = 0;
+    if (v == 0) t[n++] = '0';
+    while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+    while (n > 0 && p < max - 1) b[p++] = t[--n];
+    return p;
+}
+static int smaps_kv(char *b, int p, int max, const char *k, uint64_t kb) {   /* "Key: <n> kB" */
+    p = maps_str(b, p, max, k); p = maps_str(b, p, max, " ");
+    p = maps_dec(b, p, max, kb); p = maps_str(b, p, max, " kB\n");
+    return p;
+}
+/* One /proc/<pid>/smaps block for [start,end) of app `a`: the address header
+ * then Rss / Pss / Referenced / Dirty / Swap, computed by walking the region's
+ * leaf PTEs in the app's own address space (vmm_pte_in). Pss (proportional set
+ * size) divides each resident page by its sharer count (pmm_refcount+1), so a
+ * COW-shared frame counts fractionally — the metric that makes shared memory
+ * accountable. Bounded by `max`. (M1151) */
+static int app_smaps_region(char *b, int p, int max, app_t *a, uint64_t start, uint64_t end, const char *label) {
+    uint64_t rss = 0, pss_b = 0, dirty = 0, ref = 0, swap = 0;
+    for (uint64_t va = start; va < end; va += PAGE_SIZE) {
+        uint64_t pte = vmm_pte_in(a->cr3, va);
+        if (pte & PTE_PRESENT) {
+            rss++;
+            if (pte & PTE_DIRTY)    dirty++;
+            if (pte & PTE_ACCESSED) ref++;
+            int rc = pmm_refcount(pte & PTE_ADDR_MASK);     /* extra refs; sharers = rc+1 */
+            pss_b += (uint64_t)PAGE_SIZE / (uint64_t)(rc + 1);
+        } else if (pte & PTE_SWAP) {
+            swap++;
+        }
+    }
+    p = maps_hex(b, p, max, start); p = maps_str(b, p, max, "-");
+    p = maps_hex(b, p, max, end);   p = maps_str(b, p, max, " rw-p ");
+    p = maps_str(b, p, max, label); p = maps_str(b, p, max, "\n");
+    p = smaps_kv(b, p, max, "Rss:",        rss   * PAGE_SIZE / 1024);
+    p = smaps_kv(b, p, max, "Pss:",        pss_b / 1024);
+    p = smaps_kv(b, p, max, "Referenced:", ref   * PAGE_SIZE / 1024);
+    p = smaps_kv(b, p, max, "Dirty:",      dirty * PAGE_SIZE / 1024);
+    p = smaps_kv(b, p, max, "Swap:",       swap  * PAGE_SIZE / 1024);
+    return p;
+}
+/* /proc/<pid>/smaps: a per-region memory breakdown (heap + each mmap VMA), the
+ * Linux idiom `pmap -x` / smaps reads. Reuses the demand-paging machinery's own
+ * page tables; read-only. (M1151) */
+int app_format_smaps(app_t *a, char *b, int max) {
+    if (!a || max <= 0) return 0;
+    int p = 0;
+    if (a->heap_end > UHEAP_BASE)
+        p = app_smaps_region(b, p, max, a, UHEAP_BASE, a->heap_end, "[heap]");
+    for (int i = 0; i < a->nvma; i++)
+        p = app_smaps_region(b, p, max, a, a->vma[i].start, a->vma[i].start + a->vma[i].len,
+                             a->vma[i].file_backed ? "[mmap-file]" : (a->vma[i].locked ? "[mmap-locked]" : "[mmap]"));
+    if (p < max) b[p] = 0;
+    return p;
+}
+
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
 
 /* --- pledge() sandbox (M1074) --------------------------------------------- */
