@@ -273,7 +273,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
-    case SYS_fallocate:
+    case SYS_fallocate: case SYS_copy_file_range:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
@@ -348,7 +348,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
         [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",
         [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_killpg]="killpg",
-        [SYS_flock]="flock",[SYS_mremap]="mremap",
+        [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -973,6 +973,17 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mremap:                       /* (old_addr, old_len, new_len, flags) -> resize/move (M1179) */
         r->rax = app_mremap(r->rdi, r->rsi, r->rdx, (int)r->r10);
         break;
+    case SYS_copy_file_range: {            /* (src_path, dst_path, len) -> in-kernel copy; dst /net/tcp = sendfile (M1181) */
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        unsigned long want = r->rdx, cap = (want && want < (4UL << 20)) ? want : (4UL << 20);   /* cap one shot at 4 MiB */
+        char *kb = kmalloc(cap);
+        if (!kb) { r->rax = (uint64_t)-1; break; }
+        long n = vfs_read((const char *)r->rdi, kb, cap);      /* kernel<-src; no user buffer crosses */
+        long w = (n >= 0) ? vfs_write((const char *)r->rsi, kb, (unsigned long)n) : -1;  /* dst<-kernel (a /net/tcp dst SENDS) */
+        kfree(kb);
+        r->rax = (uint64_t)(int64_t)w;
+        break;
+    }
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);
         break;

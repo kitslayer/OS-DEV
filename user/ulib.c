@@ -275,6 +275,7 @@ void *sys_mremap(void *old_addr, unsigned long old_len, unsigned long new_len, i
     long r = do_syscall4(SYS_mremap, (long)old_addr, (long)old_len, (long)new_len, flags);
     return (r == -1) ? (void *)0 : (void *)r;   /* -1 -> NULL for easy checking */
 }
+long sys_copy_file_range(const char *src, const char *dst, unsigned long len) { return do_syscall(SYS_copy_file_range, (long)src, (long)dst, (long)len); }
 /* Restorer trampoline: a signal handler returns HERE; we ask the kernel to
  * restore the pre-signal context (which iretq's elsewhere, so this never
  * returns). The kernel is told this address via sys_signal's 3rd arg. */

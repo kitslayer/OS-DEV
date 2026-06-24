@@ -170,6 +170,7 @@
 #define SYS_flock        158   /* (path, op) -> advisory whole-file lock (LOCK_SH/EX/UN|NB); 0/-1 (M1177) */
 #define SYS_mremap       159   /* (old_addr, old_len, new_len, flags) -> resize/move an mmap region; base/-1 (M1179) */
 #define MREMAP_MAYMOVE   1
+#define SYS_copy_file_range 160 /* (src_path, dst_path, len) -> in-kernel copy (also file->/net/tcp = sendfile); bytes/-1 (M1181) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */
