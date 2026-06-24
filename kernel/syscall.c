@@ -276,6 +276,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
     case SYS_clip_get: case SYS_clip_set:
         return PL_GFX;
+    case SYS_process_vm_read:
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
     case SYS_clone: case SYS_join:
         return PL_PROC;
@@ -333,6 +334,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_semget]="semget",[SYS_semop]="semop",[SYS_semctl]="semctl",
         [SYS_msgget]="msgget",[SYS_msgsnd]="msgsnd",[SYS_msgrcv]="msgrcv",
         [SYS_shmget]="shmget",[SYS_shmat]="shmat",[SYS_shmdt]="shmdt",
+        [SYS_process_vm_read]="process_vm_read",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -869,6 +871,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_shmdt:                        /* (addr) -> detach (unmap) the shm mapping (M1161) */
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, 0);
+        break;
+    case SYS_process_vm_read:              /* (pid, raddr, local, len) -> read another process's memory (M1162) */
+        if (!ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }    /* local buffer writable for len */
+        r->rax = (uint64_t)(int64_t)app_process_vm_read((int)r->rdi, r->rsi, (void *)r->rdx, r->r10);
         break;
     case SYS_munmap:
         r->rax = (uint64_t)(int64_t)app_munmap(r->rdi, r->rsi);

@@ -670,6 +670,32 @@ static struct app *app_by_pid(int pid) {
     for (int i = 0; i < MAX_APPS; i++) if (apps[i].used && apps[i].pid == pid) return &apps[i];
     return 0;
 }
+
+/* process_vm_read (M1162): copy `len` bytes from process `pid`'s address space at
+ * `raddr` into the CALLER's buffer `local` (which lives in the active address
+ * space, so a plain write reaches it). Cross-address-space reads use the proven
+ * vmm_translate_in + the HHDM, page by page; it stops at the first unmapped page
+ * in the target. Permission: the target must be self, the caller's parent, or
+ * the caller's child (a debugger over the process tree) — like ptrace's
+ * same-tree rule. Returns bytes copied, or -1. Read-only; touches no fault path. */
+long app_process_vm_read(int pid, uint64_t raddr, void *local, uint64_t len) {
+    struct app *me = cur(), *t = app_by_pid(pid);
+    if (!me || !t || !t->used) return -1;
+    if (t != me && t->parent != me->pid && me->parent != t->pid) return -1;   /* same-tree only */
+    uint8_t *out = (uint8_t *)local;
+    uint64_t done = 0;
+    while (done < len) {
+        uint64_t va = raddr + done;
+        uint64_t phys = vmm_translate_in(t->cr3, va);     /* phys (incl. page offset) in the target's AS */
+        if (!phys) break;                                 /* unmapped page in the target -> stop */
+        uint64_t chunk = 0x1000 - (va & 0xFFF);           /* up to the page boundary */
+        if (chunk > len - done) chunk = len - done;
+        const uint8_t *src = (const uint8_t *)hhdm(phys);
+        for (uint64_t i = 0; i < chunk; i++) out[done + i] = src[i];
+        done += chunk;
+    }
+    return (long)done;
+}
 static int app_pid_alive(int pid) {            /* a live (un-exited) process with this pid? */
     struct app *a = app_by_pid(pid);
     return a && !a->exited;

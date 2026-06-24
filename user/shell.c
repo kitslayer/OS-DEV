@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1951,6 +1951,23 @@ static int run_command(char *line, char *cwd) {
                     sys_shmdt(a); sys_shmdt(b);
                 }
             }
+        } else if (streq(line, "pvmtest")) {   /* process_vm_read: read another process's memory cross-AS (M1162) */
+            static char sentinel[64];
+            for (int i = 0; i < 64; i++) sentinel[i] = (char)(i ^ 0x5A);   /* parent fills it before forking */
+            int ppid = sys_getpid();
+            long pid = sys_fork();
+            if (pid == 0) {                    /* child: read the PARENT's sentinel via its address space */
+                char buf[64];
+                long n = sys_process_vm_read(ppid, (unsigned long)sentinel, buf, 64);
+                int ok = (n == 64);
+                for (int i = 0; ok && i < 64; i++) if (buf[i] != (char)(i ^ 0x5A)) ok = 0;
+                sys_exit(ok ? 0 : 1);          /* report the cross-read verdict via exit status */
+            } else if (pid > 0) {              /* parent: collect the child's verdict */
+                int st = -1; sys_waitpid((int)pid, &st);
+                print(st == 0 ? "process_vm_read: child read the parent's memory cross-AS OK\n"
+                              : "process_vm_read: VERIFY FAILED\n");
+                if (st != 0) g_status = 1;
+            } else { print("pvmtest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
             unsigned char *m = (unsigned char *)sys_mmap_huge(len);

@@ -80,6 +80,7 @@ long     app_futex(uint64_t uaddr, int op, int val);            /* FUTEX_WAIT/WA
 int      app_fault_handle(uint64_t cr2, uint64_t err); /* #PF hook: COW copy / swap-in / lazily map an mmap page; 1 if handled */
 struct registers;                                   /* (interrupts.h) */
 long     app_fork(struct registers *r);             /* COW fork: child returns 0, parent returns child pid; -1 fail (M1116) */
+long     app_process_vm_read(int pid, uint64_t raddr, void *local, uint64_t len);  /* read another (same-tree) process's memory; bytes/-1 (M1162) */
 long     app_exec(struct registers *r, const char *name, const char *arg);  /* replace this process's image in place; -1 fail (M1121) */
 long     app_singlestep(struct registers *r, int n);  /* hardware single-step the next n user instructions (M1123) */
 void     app_singlestep_trap(struct registers *r);    /* #DB handler: record the RIP, keep/stop stepping */
