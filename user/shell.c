@@ -2560,6 +2560,22 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "file-fd: open + chunked read (offset advances) + lseek SET/END + EOF all OK\n"
                      : "filefdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "procfdtest")) {   /* /proc/self/fd lists the fd table (M1194) */
+            sys_writefile("/tmp/pf.txt", "x", 1);
+            int p[2]; int havp = (sys_pipe(p) == 0);          /* 2 pipe fds */
+            int ff = sys_open("/tmp/pf.txt");                  /* a file fd */
+            char buf[512]; long n = sys_readfile("/proc/self/fd", buf, sizeof buf - 1);
+            if (n < 0) n = 0; buf[n] = 0;
+            int sawpipe = 0, sawfile = 0;                      /* the listing must mention both */
+            for (long i = 0; i + 4 <= n; i++) {
+                if (buf[i]=='p'&&buf[i+1]=='i'&&buf[i+2]=='p'&&buf[i+3]=='e') sawpipe = 1;
+                if (buf[i]=='f'&&buf[i+1]=='i'&&buf[i+2]=='l'&&buf[i+3]=='e') sawfile = 1;
+            }
+            if (havp) { sys_fdclose(p[0]); sys_fdclose(p[1]); }
+            if (ff >= 3) sys_fdclose(ff);
+            int ok = (havp && ff >= 3 && sawpipe && sawfile);
+            print(ok ? "/proc/self/fd: lists open pipe + file fds OK\n" : "procfdtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

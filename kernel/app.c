@@ -396,6 +396,32 @@ static int app_smaps_region(char *b, int p, int max, app_t *a, uint64_t start, u
     p = smaps_kv(b, p, max, "Swap:",       swap  * PAGE_SIZE / 1024);
     return p;
 }
+/* /proc/<pid>/fd: list the process's open descriptors with type + target — pipe
+ * (read/write end + pipe id), FIFO/file (path + offset). Read-only; makes the fd
+ * table (M1187 pipes / M1188 FIFOs / M1193 files) observable. (M1194) */
+int app_format_fds(app_t *a, char *b, int max) {
+    if (!a || max <= 0) return 0;
+    int p = 0;
+    for (int i = 0; i < APP_NFD; i++) {
+        if (!a->fd[i].used) continue;
+        p = maps_dec(b, p, max, (uint64_t)i); p = maps_str(b, p, max, ": ");
+        if (a->fd[i].type == 1) {                       /* anonymous pipe / FIFO end */
+            p = maps_str(b, p, max, a->fd[i].write_end ? "pipe [write] #" : "pipe [read] #");
+            p = maps_dec(b, p, max, (uint64_t)a->fd[i].obj);
+        } else if (a->fd[i].type == 2) {                /* regular file */
+            p = maps_str(b, p, max, "file ");
+            p = maps_str(b, p, max, a->fd[i].path);
+            p = maps_str(b, p, max, " @");
+            p = maps_dec(b, p, max, (uint64_t)a->fd[i].off);
+        } else {
+            p = maps_str(b, p, max, "?");
+        }
+        p = maps_str(b, p, max, "\n");
+    }
+    if (p == 0) p = maps_str(b, p, max, "(no open fds)\n");
+    if (p < max) b[p] = 0;
+    return p;
+}
 /* /proc/<pid>/smaps: a per-region memory breakdown (heap + each mmap VMA), the
  * Linux idiom `pmap -x` / smaps reads. Reuses the demand-paging machinery's own
  * page tables; read-only. (M1151) */
