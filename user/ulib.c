@@ -41,6 +41,7 @@ long sys_fanotify_serve(void) { return do_syscall(SYS_fanotify_serve, 0, 0, 0); 
 long sys_fanotify_wait(char *namebuf, int max) { return do_syscall(SYS_fanotify_wait, 0, (long)namebuf, max); }
 long sys_fanotify_provide(const void *content, unsigned long len) { return do_syscall(SYS_fanotify_provide, (long)content, (long)len, 0); }
 long sys_io_uring_enter(void *ring) { return do_syscall(SYS_io_uring_enter, (long)ring, 0, 0); }
+long sys_mseal(void *addr, unsigned long len) { return do_syscall(SYS_mseal, (long)addr, (long)len, 0); }
 long sys_fswait(const char *const *paths, int n, long timeout_ms) {
     char buf[512]; int p = 0;
     if (n < 1 || n > 8) return -1;

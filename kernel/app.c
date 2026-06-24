@@ -57,7 +57,7 @@ struct app {
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
 #define APP_MAXVMA 16
-    struct { uint64_t start, len; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions */
+    struct { uint64_t start, len; int sealed; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed = mseal'd (immutable) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
 #define APP_NSIG 32
@@ -169,7 +169,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -254,6 +254,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "bpftest", bpftest_elf_start, "eBPF packet-filter demo" },
     { "fantest", fantest_elf_start, "userspace-FS demo" },
     { "iouringtest", iouringtest_elf_start, "io_uring batch demo" },
+    { "msealtest", msealtest_elf_start, "mseal hardening demo" },
 };
 #define NPROGS (int)(sizeof(progs)/sizeof(progs[0]))
 
@@ -1035,6 +1036,7 @@ uint64_t app_mmap(uint64_t len) {
     if (addr + len > MMAP_TOP || addr + len < addr) return 0;
     a->vma[a->nvma].start = addr;
     a->vma[a->nvma].len   = len;
+    a->vma[a->nvma].sealed = 0;
     a->nvma++;
     a->mmap_next = addr + len + PAGE_SIZE;          /* leave an unmapped guard gap */
     return addr;
@@ -1046,6 +1048,7 @@ int app_munmap(uint64_t addr, uint64_t len) {
     (void)len;
     for (int i = 0; i < a->nvma; i++) {
         if (a->vma[i].start == addr) {
+            if (a->vma[i].sealed) return -1;          /* mseal'd: unmapping is forbidden (M1130) */
             for (uint64_t p = a->vma[i].start; p < a->vma[i].start + a->vma[i].len; p += PAGE_SIZE) {
                 uint64_t ph = vmm_translate(p);
                 if (ph) { vmm_unmap(p); pmm_free_frame(ph); }
@@ -1056,6 +1059,27 @@ int app_munmap(uint64_t addr, uint64_t len) {
         }
     }
     return -1;
+}
+
+/* mseal (M1130): irreversibly seal every mmap region overlapping [addr,addr+len)
+ * so its mapping can no longer be changed — munmap and mprotect on it are denied
+ * from here on (the seal even survives fork). The point is forward security: an
+ * app that has built and mprotect'd a region the way it wants (e.g. flipped JIT'd
+ * code to R-X under W^X) seals it, so a later bug that hands an attacker an
+ * mprotect/munmap primitive still cannot make that code writable again or swap a
+ * fresh page under it. Linux's mseal(2) (2024). Returns the number of regions
+ * sealed, or -1 if the range matched no mapping. */
+int app_mseal(uint64_t addr, uint64_t len) {
+    struct app *a = cur();
+    if (!a || len == 0) return -1;
+    uint64_t end = addr + len;
+    if (end < addr) return -1;
+    int sealed = 0;
+    for (int i = 0; i < a->nvma; i++) {
+        uint64_t vs = a->vma[i].start, ve = vs + a->vma[i].len;
+        if (addr < ve && vs < end) { a->vma[i].sealed = 1; sealed++; }   /* overlaps the range */
+    }
+    return sealed ? sealed : -1;
 }
 
 /* madvise(MADV_DONTNEED) (M1099): reclaim the resident frames of [addr,addr+len)
@@ -1096,6 +1120,9 @@ int app_mprotect(uint64_t addr, uint64_t len, int prot) {
     uint64_t a0 = addr & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t end = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     if (end <= a0 || !vmm_user_ok(a0, end - a0)) return -1;   /* must be the caller's mapped user pages */
+    struct app *a = cur();                                     /* deny if the range hits a sealed region (M1130) */
+    if (a) for (int i = 0; i < a->nvma; i++)
+        if (a->vma[i].sealed && a0 < a->vma[i].start + a->vma[i].len && a->vma[i].start < end) return -1;
     uint64_t flags = PTE_USER;
     if (prot & 0x2) flags |= PTE_WRITABLE;       /* PROT_WRITE  */
     if (!(prot & 0x4)) flags |= PTE_NX;          /* not PROT_EXEC -> no-execute */
@@ -1143,6 +1170,7 @@ uint64_t app_ringbuf(uint64_t len) {
     }
     a->vma[a->nvma].start = base;
     a->vma[a->nvma].len   = total;
+    a->vma[a->nvma].sealed = 0;
     a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
@@ -1167,7 +1195,7 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
         pmm_addref(frames[p]);                       /* this mapping holds a ref on the shared frame */
         __asm__ volatile("invlpg (%0)" : : "r"(base + (uint64_t)p * PAGE_SIZE) : "memory");
     }
-    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->nvma++;
+    a->vma[a->nvma].start = base; a->vma[a->nvma].len = total; a->vma[a->nvma].sealed = 0; a->nvma++;
     a->mmap_next = base + total + PAGE_SIZE;
     return base;
 }

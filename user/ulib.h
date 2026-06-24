@@ -22,6 +22,7 @@ long sys_fanotify_serve(void);                       /* become the /fan daemon *
 long sys_fanotify_wait(char *namebuf, int max);      /* block until a /fan read; fills the name; len/-1 */
 long sys_fanotify_provide(const void *content, unsigned long len);  /* hand bytes back to the reader */
 long sys_io_uring_enter(void *ring);                 /* drain a struct io_ring of batched ops; # completed/-1 (M1129) */
+long sys_mseal(void *addr, unsigned long len);       /* irreversibly seal mmap regions in range vs munmap/mprotect; count/-1 (M1130) */
 long sys_list(void *buf, unsigned long len);
 long sys_readfile(const char *name, void *buf, unsigned long len);
 long sys_writefile(const char *name, const void *buf, unsigned long len);

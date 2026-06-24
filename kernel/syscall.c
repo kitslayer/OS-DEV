@@ -270,6 +270,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
+    case SYS_mseal:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
         return PL_POWER;
@@ -310,7 +311,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
         [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
-        [SYS_io_uring_enter]="io_uring_enter",
+        [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -832,6 +833,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_mprotect:                     /* (addr, len, prot): change R/W/X of a mapped range */
         r->rax = (uint64_t)(int64_t)app_mprotect(r->rdi, r->rsi, (int)r->rdx);
+        break;
+    case SYS_mseal:                        /* (addr, len): irreversibly seal mmap regions (M1130) */
+        r->rax = (uint64_t)(int64_t)app_mseal(r->rdi, r->rsi);
         break;
     case SYS_bind:                         /* (from, to): graft FROM's subtree onto the path TO */
         if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }

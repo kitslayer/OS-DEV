@@ -57,6 +57,7 @@ uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous regi
 uint64_t app_ringbuf(uint64_t len);     /* a magic mirrored ring buffer: len frames mapped twice back-to-back */
 int      app_mprotect(uint64_t addr, uint64_t len, int prot);   /* change R/W/X of a mapped range (W^X/JIT); 0/-1 */
 int      app_munmap(uint64_t addr, uint64_t len);   /* free an mmap region; 0/-1 */
+int      app_mseal(uint64_t addr, uint64_t len);    /* irreversibly seal mmap regions in range against munmap/mprotect; count/-1 (M1130) */
 int      app_madvise(uint64_t addr, uint64_t len, int advice);  /* MADV_DONTNEED(4): drop resident anon frames; pages dropped/-1 */
 int      app_swap_out(uint64_t addr, uint64_t len);             /* page out anon pages in range to swap; pages/-1 (M1105) */
 uint64_t app_shm_open(const char *name, uint64_t size);         /* map a named shared-memory object; base VA or 0 (M1108) */
