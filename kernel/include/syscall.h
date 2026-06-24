@@ -132,6 +132,12 @@
 #define SYS_munlock         120 /* (addr, len) -> unpin mlock'd mmap pages; 0/-1 (M1149) */
 #define SYS_getrusage       121 /* (who, struct rusage*) -> fill resource usage; 0/-1 (M1150) */
 #define SYS_fiemap          122 /* (path, struct fiemap_extent*, max) -> file physical extent map; count/-1 (M1152) */
+#define SYS_fallocate       123 /* (path, mode, offset, len) -> punch a hole / preallocate; blocks-affected/-1 (M1153) */
+
+/* fallocate(2) modes (M1153). PUNCH_HOLE deallocates whole blocks in the range,
+ * leaving a sparse hole that reads as zeros; it must be OR'd with KEEP_SIZE. */
+#define FALLOC_FL_KEEP_SIZE  0x01
+#define FALLOC_FL_PUNCH_HOLE 0x02
 
 #define SYSCALL_VECTOR 0x80
 

@@ -17,6 +17,18 @@ static long do_syscall(long n, long a1, long a2, long a3) {
     return ret;
 }
 
+/* 4-argument variant: the 4th arg goes in r10 (Linux-style), which the kernel
+ * reads as r->r10. Used by syscalls like fallocate(path, mode, offset, len). */
+static long do_syscall4(long n, long a1, long a2, long a3, long a4) {
+    long ret;
+    register long r10 __asm__("r10") = a4;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
+                     : "memory");
+    return ret;
+}
+
 long sys_write(int fd, const void *buf, unsigned long len) {
     return do_syscall(SYS_write, fd, (long)buf, (long)len);
 }
@@ -170,6 +182,7 @@ long sys_mlock(void *addr, unsigned long len) { return do_syscall(SYS_mlock, (lo
 long sys_munlock(void *addr, unsigned long len) { return do_syscall(SYS_munlock, (long)addr, (long)len, 0); }
 long sys_getrusage(int who, struct rusage *ru) { return do_syscall(SYS_getrusage, who, (long)ru, 0); }
 long sys_fiemap(const char *path, struct fiemap_extent *out, int max) { return do_syscall(SYS_fiemap, (long)path, (long)out, max); }
+long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned long len) { return do_syscall4(SYS_fallocate, (long)path, mode, (long)offset, (long)len); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }
 long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
 long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }

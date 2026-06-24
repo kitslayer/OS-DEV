@@ -549,6 +549,20 @@ int vfs_fiemap(const char *path, ext2_extent_t *out, int max) {
     return -1;
 }
 
+/* fallocate PUNCH_HOLE (M1153): deallocate whole blocks in [offset,offset+len)
+ * of an ext2-mount file, leaving a sparse hole. Only ext2 /diskN mounts support
+ * it (real block allocation); other paths are unsupported (-1). */
+long vfs_punch_hole(const char *path, uint64_t offset, uint64_t len) {
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);
+    int midx; char fpath[192];
+    if (mount_path(path, &midx, fpath, sizeof fpath)) {
+        long r = blockdev_mount_punch(midx, fpath, offset, len);
+        if (r >= 0) fsevents_record('w', path);
+        return r;
+    }
+    return -1;
+}
+
 /* Copy a validated subpath into mount_sub (bounded). */
 static void set_mount_sub(const char *sub) {
     int i = 0; while (sub[i] && i < (int)sizeof mount_sub - 1) { mount_sub[i] = sub[i]; i++; }

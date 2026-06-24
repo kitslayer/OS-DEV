@@ -430,6 +430,47 @@ static void free_inode_blocks(ext2_t *v, const uint8_t *inode) {
     }
 }
 
+/* PUNCH_HOLE helper (M1153): free the data block at file-relative index `fblk`
+ * AND zero its pointer — direct in the inode buffer (caller persists), single/
+ * double-indirect in the on-disk indirect block (written back here) — so the
+ * file gets a sparse hole there. Returns 1 if a block was freed, 0 if it was
+ * already a hole. Indirect METABLOCKS are kept (they validly map all-holes),
+ * which is e2fsck-clean. */
+static int punch_block(ext2_t *v, uint8_t *inode, uint32_t fblk) {
+    uint8_t *ib = inode + 40;
+    uint32_t ppb = v->block_size / 4;
+    if (fblk < 12) {
+        uint32_t b = e_rd32(ib + fblk * 4);
+        if (!b) return 0;
+        free_block(v, b); e_wr32(ib + fblk * 4, 0);
+        return 1;
+    }
+    fblk -= 12;
+    uint8_t buf[4096];
+    if (fblk < ppb) {                                   /* single-indirect */
+        uint32_t ind = e_rd32(ib + 12 * 4);
+        if (!ind || rdblk(v, ind, buf) < 0) return 0;
+        uint32_t b = e_rd32(buf + fblk * 4);
+        if (!b) return 0;
+        free_block(v, b); e_wr32(buf + fblk * 4, 0); wrblk(v, ind, buf);
+        return 1;
+    }
+    fblk -= ppb;
+    if (fblk < ppb * ppb) {                             /* double-indirect */
+        uint32_t dind = e_rd32(ib + 13 * 4);
+        if (!dind || rdblk(v, dind, buf) < 0) return 0;
+        uint32_t ind = e_rd32(buf + (fblk / ppb) * 4);
+        if (!ind) return 0;
+        uint8_t buf2[4096];
+        if (rdblk(v, ind, buf2) < 0) return 0;
+        uint32_t b = e_rd32(buf2 + (fblk % ppb) * 4);
+        if (!b) return 0;
+        free_block(v, b); e_wr32(buf2 + (fblk % ppb) * 4, 0); wrblk(v, ind, buf2);
+        return 1;
+    }
+    return 0;
+}
+
 /* Release an inode number: clear the inode-bitmap bit + bump the free counts. */
 static int free_inode_num(ext2_t *v, uint32_t ino) {
     if (ino == 0) return -1;
@@ -651,6 +692,35 @@ long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t
     if (write_inode(&v, ino, inode) < 0) return -1;
     if (dir_add(&v, parent_ino, base, ino, 7) < 0) return -1;   /* ftype 7 = symlink */
     return 0;
+}
+
+/* fallocate(PUNCH_HOLE) (M1153): deallocate the WHOLE data blocks fully inside
+ * [offset, offset+len) of a regular file, turning that range into a sparse hole
+ * that reads back as zeros (the file SIZE is unchanged — KEEP_SIZE semantics).
+ * Frees each block + zeros its pointer via punch_block, decrements i_blocks, and
+ * persists the inode. Partial edge blocks keep their data (whole-block grain).
+ * Returns the number of blocks punched, or -1. */
+long ext2_punch_hole(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path, uint64_t offset, uint64_t len) {
+    ext2_t v;
+    if (!write || len == 0 || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+    uint8_t inode[256]; int isdir = 0;
+    uint32_t ino = walk(&v, path, inode, &isdir);
+    if (!ino || isdir) return -1;
+    uint32_t bs = v.block_size;
+    uint64_t end = offset + len; if (end < offset) return -1;
+    uint32_t first = (uint32_t)((offset + bs - 1) / bs);   /* first block fully inside the range */
+    uint32_t last  = (uint32_t)(end / bs);                 /* one past the last fully-inside block */
+    int freed = 0;
+    for (uint32_t fb = first; fb < last; fb++) freed += punch_block(&v, inode, fb);
+    if (freed) {
+        uint32_t iblk = e_rd32(inode + 28);                /* i_blocks counts 512-byte sectors */
+        uint32_t dec = (uint32_t)freed * (bs / 512);
+        e_wr32(inode + 28, iblk > dec ? iblk - dec : 0);
+        if (write_inode(&v, ino, inode) < 0) return -1;    /* persist zeroed direct pointers + i_blocks */
+    }
+    return freed;
 }
 
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,

@@ -51,6 +51,7 @@ long vfs_remove(const char *name);
 long vfs_mkdir(const char *path);                        /* make a directory */
 long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /tmp); 0/-1 */
 int  vfs_fiemap(const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 mounts); count/-1 (M1152) */
+long vfs_punch_hole(const char *path, uint64_t offset, uint64_t len);  /* fallocate PUNCH_HOLE (ext2 mounts); blocks/-1 (M1153) */
 int  vfs_bind(const char *from, const char *to);         /* graft FROM's subtree onto the path TO; 0/-1 */
 int  vfs_binds_format(char *buf, int max);               /* list the active binds (backs /proc/binds) */
 int  vfs_unshare(void);                                  /* detach the caller into a private mount namespace; 0/-1 (M1122) */

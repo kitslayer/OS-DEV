@@ -54,6 +54,7 @@ long sys_mlock(void *addr, unsigned long len);     /* pin mmap pages against rec
 long sys_munlock(void *addr, unsigned long len);   /* unpin mlock'd mmap pages; 0/-1 (M1149) */
 long sys_getrusage(int who, struct rusage *ru);    /* fill resource usage (RUSAGE_SELF=0); 0/-1 (M1150) */
 long sys_fiemap(const char *path, struct fiemap_extent *out, int max);  /* file physical extent map; count/-1 (M1152) */
+long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned long len);  /* punch hole (FALLOC_FL_PUNCH_HOLE); blocks/-1 (M1153) */
 long sys_alarm(unsigned long ticks);
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);

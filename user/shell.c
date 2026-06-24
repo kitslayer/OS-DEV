@@ -471,7 +471,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest madvisetest mincoretest mlocktest swaptest shmtest (mmap/ring/W^X/reclaim/residency/pin/swap/shared-mem)  usagetest(getrusage)  smaps  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -1630,6 +1630,22 @@ static int run_command(char *line, char *cwd) {
                     print("\n");
                 }
             }
+        } else if (startswith(line, "fallocate ")) {   /* fallocate punch <path> <off> <len>: punch a sparse hole (ext2) (M1153) */
+            const char *p = line + 10; while (*p == ' ') p++;
+            if (startswith(p, "punch ")) {
+                p += 6; while (*p == ' ') p++;
+                char fn[96]; int j = 0; while (*p && *p != ' ' && j < 95) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);
+                while (*p == ' ') p++;
+                unsigned long off = 0; while (*p >= '0' && *p <= '9') off = off * 10 + (unsigned long)(*p++ - '0');
+                while (*p == ' ') p++;
+                unsigned long len = 0; while (*p >= '0' && *p <= '9') len = len * 10 + (unsigned long)(*p++ - '0');
+                if (!fn[0] || len == 0) print("usage: fallocate punch <path> <offset> <len>\n");
+                else {
+                    long r = sys_fallocate(fn, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, off, len);
+                    if (r < 0) { print("fallocate: failed (ext2 /diskN file only)\n"); g_status = 1; }
+                    else { print("punched "); printl(r); print(r == 1 ? " block (hole)\n" : " blocks (hole)\n"); }
+                }
+            } else print("usage: fallocate punch <path> <offset> <len>\n");
         } else if (startswith(line, "jail ")) {   /* jail <prog> <promise>... : spawn prog pre-confined (pledge) */
             const char *p = line + 5; while (*p == ' ') p++;
             char prog[32]; int j = 0;

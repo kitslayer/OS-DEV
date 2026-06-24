@@ -589,6 +589,14 @@ int blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max) 
     return ext2_fiemap(mount_rfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", out, max);
 }
 
+long blockdev_mount_punch(int i, const char *path, uint64_t offset, uint64_t len) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;    /* hole punching: ext2 only (M1153) */
+    return ext2_punch_hole(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start,
+                           path ? path : "", offset, len);
+}
+
 /* Is `path` (relative to the volume root) a directory on mount `i`? For `cd`. */
 int blockdev_mount_isdir(int i, const char *path) {
     blockdev_mount_scan();

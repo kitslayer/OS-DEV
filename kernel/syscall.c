@@ -261,6 +261,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
+    case SYS_fallocate:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
@@ -320,7 +321,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
-        [SYS_fiemap]="fiemap",
+        [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
@@ -865,6 +866,13 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)n;
         break;
     }
+    case SYS_fallocate:                    /* (path, mode, offset, len) -> punch a hole (M1153) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        if ((int)r->rsi & FALLOC_FL_PUNCH_HOLE)
+            r->rax = (uint64_t)(int64_t)vfs_punch_hole((const char *)r->rdi, r->rdx, r->r10);
+        else
+            r->rax = (uint64_t)-1;         /* only PUNCH_HOLE is supported for now */
+        break;
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
         r->rax = (uint64_t)(int64_t)app_swap_out(r->rdi, r->rsi);
