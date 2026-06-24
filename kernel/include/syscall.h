@@ -192,6 +192,11 @@
 #define SECCOMP_RET_DENY  0    /* the syscall returns -1 */
 #define SECCOMP_RET_ALLOW 1    /* run the syscall (any non-0/2 value allows) */
 #define SECCOMP_RET_KILL  2    /* terminate the process (hard sandbox) */
+#define SYS_open         178   /* (path) -> a read-only file fd (>=3); -1 (M1193) */
+#define SYS_lseek        179   /* (fd, off, whence) -> reposition a file fd (0=SET,1=CUR,2=END); offset/-1 (M1193) */
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

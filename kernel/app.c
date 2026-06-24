@@ -150,7 +150,8 @@ struct app {
      * only touched by pipe()/fd{read,write,close}/dup2; an app that never calls
      * them has an empty table, so fork-copy + reap-close are no-ops for it. */
 #define APP_NFD 24
-    struct fdent { uint8_t used, type, write_end; int obj; } fd[APP_NFD];   /* type: 0=free, 1=pipe; obj = pipe index */
+    /* type: 0=free, 1=pipe (obj=pipe index, write_end), 2=file (path+off, M1193). */
+    struct fdent { uint8_t used, type, write_end; int obj; char path[64]; long off; } fd[APP_NFD];
     /* seccomp-BPF self-filter (M1190): a process installs a bpf.c program that
      * vets its own syscalls. Zero on spawn/fork; inherited across fork; once set
      * it's permanent (privilege drop is one-way). Empty => no filtering overhead. */
@@ -2615,12 +2616,30 @@ int app_pipe(int *out) {
     for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { rfd = i; break; }
     for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used && i != rfd) { wfd = i; break; }
     if (rfd < 0 || wfd < 0) { pipe_close_end(idx, 0); pipe_close_end(idx, 1); return -1; }   /* table full */
-    a->fd[rfd] = (struct fdent){ 1, 1, 0, idx };                  /* used, type=pipe, read end */
-    a->fd[wfd] = (struct fdent){ 1, 1, 1, idx };                  /* used, type=pipe, write end */
+    a->fd[rfd] = (struct fdent){ 1, 1, 0, idx, {0}, 0 };          /* used, type=pipe, read end */
+    a->fd[wfd] = (struct fdent){ 1, 1, 1, idx, {0}, 0 };          /* used, type=pipe, write end */
     out[0] = rfd; out[1] = wfd; return 0;
 }
+#define FILEFD_CAP (1u << 20)   /* a file fd reads within the first 1 MiB (the read-prefix-then-slice MVP) */
 long app_fd_read(int fd, void *buf, unsigned long max) {
     struct app *a = cur(); if (!a) return -1;
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 2) {   /* FILE fd: positioned read (M1193) */
+        long off = a->fd[fd].off;
+        if (off < 0) return -1;
+        unsigned long want = (unsigned long)off + max;       /* read [0, off+max) then slice [off, off+got) */
+        if (want > FILEFD_CAP) want = FILEFD_CAP;
+        if (want == 0) return 0;
+        char *tmp = kmalloc(want); if (!tmp) return -1;
+        long got = vfs_read(a->fd[fd].path, tmp, want);
+        long n = 0;
+        if (got > off) {                                      /* bytes available past the offset */
+            n = got - off; if ((unsigned long)n > max) n = (long)max;
+            for (long i = 0; i < n; i++) ((char *)buf)[i] = tmp[off + i];
+            a->fd[fd].off = off + n;
+        }
+        kfree(tmp);
+        return n;                                             /* 0 => EOF (offset at/after end) */
+    }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
@@ -2655,8 +2674,35 @@ int app_fifo_open(const char *path, int write) {
     for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
     if (fd < 0) return -1;
     pipe_open_end(idx, write ? 1 : 0);
-    a->fd[fd] = (struct fdent){ 1, 1, (uint8_t)(write ? 1 : 0), idx };
+    a->fd[fd] = (struct fdent){ 1, 1, (uint8_t)(write ? 1 : 0), idx, {0}, 0 };
     return fd;
+}
+
+/* open(path): a read-only FILE fd (M1193). Positioned reads via app_fd_read +
+ * app_lseek; close via app_fd_close. Returns the fd (>=3), or -1. */
+int app_open(const char *path) {
+    struct app *a = cur(); if (!a) return -1;
+    struct statx st;
+    if (vfs_stat(path, &st) != 0) return -1;                  /* must exist */
+    int fd = -1;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;
+    a->fd[fd] = (struct fdent){ 1, 2, 0, 0, {0}, 0 };         /* used, type=file */
+    int j = 0; while (path[j] && j < (int)sizeof a->fd[fd].path - 1) { a->fd[fd].path[j] = path[j]; j++; }
+    a->fd[fd].path[j] = 0; a->fd[fd].off = 0;
+    return fd;
+}
+/* lseek(fd, off, whence): 0=SET, 1=CUR, 2=END. Returns the new offset, or -1. */
+long app_lseek(int fd, long off, int whence) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 2) return -1;
+    long base = 0;
+    if (whence == 1) base = a->fd[fd].off;
+    else if (whence == 2) { struct statx st; if (vfs_stat(a->fd[fd].path, &st) != 0) return -1; base = (long)st.stx_size; }
+    long n = base + off;
+    if (n < 0) return -1;
+    a->fd[fd].off = n;
+    return n;
 }
 
 /* ---- seccomp-BPF self-filter (M1190) ------------------------------------------
@@ -2677,7 +2723,8 @@ int app_seccomp_filter_install(const void *progv, int n) {
  * default path, byte-identical (M1191). */
 int app_fd_is_redirected(app_t *ap, int fd) {
     struct app *a = (struct app *)ap;
-    return a && fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 1;
+    return a && fd >= 0 && fd < APP_NFD && a->fd[fd].used &&
+           (a->fd[fd].type == 1 || a->fd[fd].type == 2);   /* pipe (M1187) or file (M1193) */
 }
 int app_seccomp_filter_active(app_t *ap) { return ap && ((struct app *)ap)->seccomp_n > 0; }
 /* Raw verdict for one syscall (M1190; M1192 adds KILL). The program reads ctx

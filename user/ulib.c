@@ -292,6 +292,8 @@ int  sys_fdclose(int fd) { return (int)do_syscall(SYS_fdclose, fd, 0, 0); }
 int  sys_dup2(int oldfd, int newfd) { return (int)do_syscall(SYS_dup2, oldfd, newfd, 0); }
 int  sys_mkfifo(const char *path) { return (int)do_syscall(SYS_mkfifo, (long)path, 0, 0); }
 int  sys_fifo_open(const char *path, int write) { return (int)do_syscall(SYS_fifo_open, (long)path, write, 0); }
+int  sys_open(const char *path) { return (int)do_syscall(SYS_open, (long)path, 0, 0); }
+long sys_lseek(int fd, long off, int whence) { return do_syscall(SYS_lseek, fd, off, whence); }
 long sys_seccomp_filter(const void *prog, unsigned long bytes) { return do_syscall(SYS_seccomp_filter, (long)prog, (long)bytes, 0); }
 /* Restorer trampoline: a signal handler returns HERE; we ask the kernel to
  * restore the pre-signal context (which iretq's elsewhere, so this never

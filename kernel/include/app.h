@@ -119,7 +119,9 @@ long app_fd_read(int fd, void *buf, unsigned long max);        /* read a pipe fd
 long app_fd_write(int fd, const void *buf, unsigned long len); /* write a pipe fd; bytes/-1 EPIPE (M1187) */
 int  app_fd_close(int fd);             /* close an fd; 0/-1 (M1187) */
 int  app_dup2(int oldfd, int newfd);   /* redirect newfd onto oldfd's object; newfd/-1 (M1187) */
-int  app_fd_is_redirected(app_t *a, int fd);  /* is fd a redirected pipe? (stdio routing, M1191) */
+int  app_fd_is_redirected(app_t *a, int fd);  /* is fd a redirected pipe/file? (stdio + file-fd routing, M1191/M1193) */
+int  app_open(const char *path);              /* open a read-only FILE fd; fd(>=3)/-1 (M1193) */
+long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
 int  app_mkfifo(const char *path);     /* create a named pipe (FIFO); 0/-1 (M1188) */
 int  app_fifo_open(const char *path, int write);  /* open a FIFO end -> fd; -1 (M1188) */
 int  app_seccomp_filter_install(const void *prog, int n);   /* install a self-imposed BPF syscall filter; 0/-1 (M1190) */

@@ -2537,6 +2537,29 @@ static int run_command(char *line, char *cwd) {
             print(st == 42 ? "stdio-fd: print() -> redirected fd1 -> pipe -> fd0 -> readline() round-trip OK\n"
                            : "stdiotest: VERIFY FAILED\n");
             if (st != 42) g_status = 1;
+        } else if (streq(line, "filefdtest")) {   /* read-only file descriptors: open/read/lseek (M1193) */
+            const char *content = "0123456789ABCDEFGHIJ";          /* 20 known bytes */
+            sys_writefile("/tmp/ffd.txt", content, 20);
+            int fd = sys_open("/tmp/ffd.txt");
+            int ok = (fd >= 3);
+            if (ok) {
+                char b[8];
+                long n1 = sys_read(fd, b, 5);                      /* [0,5) = "01234" */
+                if (!(n1 == 5 && b[0] == '0' && b[4] == '4')) ok = 0;
+                long n2 = sys_read(fd, b, 5);                      /* [5,10) = "56789" (offset advanced) */
+                if (!(n2 == 5 && b[0] == '5' && b[4] == '9')) ok = 0;
+                if (sys_lseek(fd, 16, SEEK_SET) != 16) ok = 0;     /* seek to 16 */
+                long n3 = sys_read(fd, b, 8);                      /* [16,20) = "GHIJ" (4, then EOF) */
+                if (!(n3 == 4 && b[0] == 'G' && b[3] == 'J')) ok = 0;
+                if (sys_read(fd, b, 8) != 0) ok = 0;               /* at end -> EOF (0) */
+                if (sys_lseek(fd, -2, SEEK_END) != 18) ok = 0;     /* size-2 = 18 */
+                long n5 = sys_read(fd, b, 8);                      /* [18,20) = "IJ" */
+                if (!(n5 == 2 && b[0] == 'I' && b[1] == 'J')) ok = 0;
+                sys_fdclose(fd);
+            }
+            print(ok ? "file-fd: open + chunked read (offset advances) + lseek SET/END + EOF all OK\n"
+                     : "filefdtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

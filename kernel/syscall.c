@@ -261,7 +261,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any:
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
     case SYS_pipe: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
-    case SYS_mkfifo: case SYS_fifo_open:
+    case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
     case SYS_nice: case SYS_sched_setscheduler: case SYS_tcgetattr: case SYS_tcsetattr:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
@@ -272,7 +272,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
-    case SYS_fiemap: case SYS_getxattr: case SYS_listxattr:
+    case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_open:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_crypt:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
@@ -358,6 +358,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
         [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",
         [SYS_mkfifo]="mkfifo",[SYS_fifo_open]="fifo_open",
+        [SYS_open]="open",[SYS_lseek]="lseek",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -1084,6 +1085,13 @@ void syscall_dispatch(struct registers *r) {
     case SYS_fifo_open:                    /* (path, write) -> open a FIFO end -> fd (M1188) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_fifo_open((const char *)r->rdi, (int)r->rsi);
+        break;
+    case SYS_open:                         /* (path) -> a read-only file fd (M1193) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_open((const char *)r->rdi);
+        break;
+    case SYS_lseek:                        /* (fd, off, whence) -> reposition a file fd (M1193) */
+        r->rax = (uint64_t)(int64_t)app_lseek((int)r->rdi, (long)r->rsi, (int)r->rdx);
         break;
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);
