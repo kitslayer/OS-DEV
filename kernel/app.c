@@ -119,6 +119,8 @@ struct app {
     int      uv_locked;                  /* 1 after unveil(NULL): no more unveils accepted */
     struct registers fork_frame;         /* a forked child's saved trap frame (rax=0); iret_to_user resumes it (M1116) */
     int      parent;                     /* pid of the process that fork()ed us (0 = none) — for waitpid (M1117) */
+    int      pgid;                        /* process group id (job control, M1176); inherited on fork, set by setpgid */
+    int      sid;                         /* session id (M1176); a setsid() leader has sid==pgid==pid */
     uint64_t rlim_nproc;                 /* RLIMIT_NPROC: max live children (0 = unlimited), inherited on fork (M1163) */
     uint64_t rlim_as;                    /* RLIMIT_AS: max total mmap bytes (0 = unlimited) (M1164) */
     uint64_t rlim_data;                  /* RLIMIT_DATA: max heap bytes (0 = unlimited) (M1164) */
@@ -143,6 +145,7 @@ struct app {
 
 static struct app apps[MAX_APPS];
 static int next_pid = 100;
+static int fg_pgid;             /* the controlling terminal's foreground process group (job control, M1176; 0 = none) */
 
 /* userfaultfd state (M1134); defined here so app_reap + app_fault_handle (both
  * above the uffd functions) can see it. One registered region at a time. */
@@ -932,6 +935,7 @@ void app_key(app_t *a, char c) {
     /* Ctrl-C (0x83): if this app installed a SIGINT handler, raise it asynchronously
      * (interrupting even a runaway compute loop) instead of queueing the key. Opt-in,
      * so the shell — which polls 0x83 to break its own loops — is unaffected. M1083. */
+    if ((unsigned char)c == 0x83 && fg_pgid) { app_killpg(fg_pgid, SIGINT); return; }   /* job control: ^C -> the foreground group (M1176) */
     if ((unsigned char)c == 0x83 && a->sig_handler[SIGINT]) { app_request_signal(a, SIGINT); return; }
     /* PgUp/PgDn scroll the scrollback for ordinary terminals; a full-screen app
      * that draws its own view (caret_off, e.g. the editor) gets them as keys to
@@ -1947,6 +1951,30 @@ void app_request_signal(app_t *a, int signo) {
     task_wake(ap->task);                     /* unblock it if it's parked in read()/sigfd */
 }
 
+/* --- Job control: process groups, sessions, foreground TTY group (M1176) --- */
+int app_setpgid(int pid, int pgid) {
+    struct app *me = cur(); if (!me) return -1;
+    struct app *t = pid ? app_by_pid(pid) : me;
+    if (!t) return -1;
+    t->pgid = pgid ? pgid : t->pid;        /* pgid 0 => the target leads its own group */
+    return 0;
+}
+int app_getpgid(int pid) { struct app *t = pid ? app_by_pid(pid) : cur(); return t ? t->pgid : -1; }
+int app_setsid(void)     { struct app *me = cur(); if (!me) return -1; me->sid = me->pgid = me->pid; return me->sid; }
+int app_tcsetpgrp(int pgid) { fg_pgid = pgid; return 0; }   /* set the foreground process group of the console */
+int app_tcgetpgrp(void)     { return fg_pgid; }
+/* Deliver `signo` to every app in process group `pgid` — POSIX killpg / kill(-pgid).
+ * Returns the count signalled. (app_request_signal is a no-op for a signal the
+ * target installed no handler for — the existing default; so a group member only
+ * acts on it if it opted in, exactly like a single-process signal.) (M1176) */
+int app_killpg(int pgid, int signo) {
+    if (pgid <= 0) return -1;
+    int n = 0;
+    for (int i = 0; i < MAX_APPS; i++)
+        if (apps[i].used && !apps[i].exited && apps[i].pgid == pgid) { app_request_signal(&apps[i], signo); n++; }
+    return n;
+}
+
 #define SIGALRM 14
 /* Arm/disarm a periodic SIGALRM for the calling app (M1102): every `ticks`
  * timer ticks, raise SIGALRM (delivered to a ring-3 handler via the same async
@@ -2368,6 +2396,7 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     memset(a, 0, sizeof(*a));
     a->used = 1;
     a->pid = next_pid++;
+    a->pgid = a->sid = a->pid;           /* a spawned app leads its own group + session (M1176) */
     /* copy the title into our own buffer (the caller's string — e.g. a filename
      * from another address space — may not outlive this call). Done here, before
      * the CR3 switch below, while the caller's pointer is still valid. */
@@ -2515,6 +2544,7 @@ long app_fork(struct registers *r) {
     int li = 0; while (p->launch_arg[li] && li < 127) { a->launch_arg[li] = p->launch_arg[li]; li++; }
     a->launch_arg[li] = 0;
     a->parent = p->pid;                                 /* so the parent can waitpid() us (M1117) */
+    a->pgid = p->pgid; a->sid = p->sid;                 /* fork inherits the parent's group + session (M1176) */
     a->ns_id  = p->ns_id;                               /* inherit the parent's mount namespace (shared; unshare detaches) (M1122) */
     vfs_cwd_inherit(a);                                 /* inherit the parent's current directory (M1144) */
     /* NOT inherited (POSIX): pending signals, alarms, strace, gfx-mode canvas. */

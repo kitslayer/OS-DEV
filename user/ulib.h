@@ -86,6 +86,11 @@ int  sys_sched_setscheduler(int policy, int rt_priority);  /* SCHED_OTHER/FIFO/R
 long sys_statx(const char *path, struct statx *st);        /* file metadata: mode/size/mtime/nlink (M1173) */
 int  sys_tcgetattr(struct termios *t);                     /* read the TTY discipline mode (M1174) */
 int  sys_tcsetattr(const struct termios *t);               /* set cooked/raw TTY mode (M1174) */
+int  sys_setpgid(int pid, int pgid);                       /* job control: set a process group (M1176) */
+int  sys_getpgid(int pid);                                 /* process group id (M1176) */
+int  sys_setsid(void);                                     /* become session+group leader (M1176) */
+int  sys_tcsetpgrp(int pgid);                              /* set the console foreground group (M1176) */
+int  sys_killpg(int pgid, int signo);                      /* signal every process in a group (M1176) */
 long sys_getrlimit(int resource, struct rlimit *rl);   /* read a resource limit (M1163) */
 long sys_setrlimit(int resource, struct rlimit *rl);   /* set a resource limit (M1163) */
 long sys_alarm(unsigned long ticks);

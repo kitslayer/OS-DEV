@@ -106,6 +106,13 @@ void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_sig
 int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */
 void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl-C->SIGINT); opt-in (needs a handler) */
+/* Job control (M1176): process groups + sessions + foreground TTY group. */
+int  app_setpgid(int pid, int pgid);   /* set a process's group (pid 0 = self, pgid 0 = own pid); 0/-1 */
+int  app_getpgid(int pid);             /* a process's group id (pid 0 = self); -1 if absent */
+int  app_setsid(void);                 /* become session+group leader; returns sid */
+int  app_tcsetpgrp(int pgid);          /* set the console's foreground process group; 0 */
+int  app_tcgetpgrp(void);              /* the console's foreground process group (0 = none) */
+int  app_killpg(int pgid, int signo);  /* deliver signo to every app in pgid (killpg); count/-1 */
 int  app_deliver_pending(struct registers *r);     /* deliver a pending async signal on return to ring 3; 1 if delivered */
 void app_set_alarm(uint64_t ticks);                /* SYS_alarm: arm a periodic SIGALRM every `ticks` ticks (0=disarm) */
 void app_alarm_tick(void);                         /* timer IRQ hook: raise SIGALRM if the current app's alarm is due */

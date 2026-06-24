@@ -162,6 +162,11 @@
 #define SYS_statx        150   /* (path, struct statx*) -> file metadata (mode/size/times/nlink); 0/-1 (M1173) */
 #define SYS_tcgetattr    151   /* (struct termios*) -> read the TTY discipline mode; 0/-1 (M1174) */
 #define SYS_tcsetattr    152   /* (struct termios*) -> set the TTY discipline mode (cooked/raw); 0/-1 (M1174) */
+#define SYS_setpgid      153   /* (pid, pgid) -> set a process group (job control); 0/-1 (M1176) */
+#define SYS_getpgid      154   /* (pid) -> process group id; -1 (M1176) */
+#define SYS_setsid       155   /* () -> become session+group leader; sid (M1176) */
+#define SYS_tcsetpgrp    156   /* (pgid) -> set the console foreground group; 0/-1 (M1176) */
+#define SYS_killpg       157   /* (pgid, signo) -> signal every process in the group; count/-1 (M1176) */
 
 /* TTY line discipline (M1174), shared by the kernel + ulib. c_lflag selects
  * cooked (ICANON) vs raw input; raw delivers each keystroke immediately. Default

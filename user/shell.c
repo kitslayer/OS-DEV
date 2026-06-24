@@ -14,6 +14,8 @@
 #include "shbrace.h"  /* expand_braces(): {a,b}/{1..N} brace expansion, host-tested by tests/shbrace */
 #include "shquote.h"  /* sh_quote_pass()/sh_unprot_buf(): "..." '...' quoting, host-tested by tests/shquote */
 
+static void jobtest_sigint(int s) { (void)s; sys_exit(42); }   /* job-control demo: a group SIGINT exits the child 42 (M1176) */
+
 static void itoa_simple(int v, char *out) {
     char tmp[12];
     int i = 0, neg = (v < 0);
@@ -472,7 +474,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2225,6 +2227,32 @@ static int run_command(char *line, char *cwd) {
                     print("TTY raw line discipline OK (cooked mode restored)\n");
                 } else { print("rawkey: read returned "); printl(r); print("\n"); g_status = 1; }
             }
+        } else if (streq(line, "jobtest")) {   /* job control: kill(-pgid) signals a whole process group (M1176) */
+            long a = sys_fork();
+            if (a == 0) {                            /* child A */
+                sys_signal(2, jobtest_sigint);       /* SIGINT(2) -> exit(42) */
+                for (int i = 0; i < 200; i++) sys_sleep(20);   /* bounded: self-exit 0 if no signal (no hang) */
+                sys_exit(0);
+            }
+            long b = sys_fork();
+            if (b == 0) {                            /* child B */
+                sys_signal(2, jobtest_sigint);
+                for (int i = 0; i < 200; i++) sys_sleep(20);
+                sys_exit(0);
+            }
+            if (a > 0 && b > 0) {
+                sys_setpgid((int)a, (int)a);         /* A leads a NEW group (isolated from the shell) */
+                sys_setpgid((int)b, (int)a);         /* B joins A's group */
+                sys_sleep(300);                      /* let both install their SIGINT handler */
+                int n = sys_killpg((int)a, 2);       /* kill(-pgid, SIGINT): the whole group */
+                int sa = -1, sb = -1; sys_waitpid((int)a, &sa); sys_waitpid((int)b, &sb);
+                char nb[12];
+                print("killpg signalled "); itoa_simple(n, nb); print(nb); print(" procs; child statuses ");
+                itoa_simple(sa, nb); print(nb); print("/"); itoa_simple(sb, nb); print(nb); print("\n");
+                int ok = (n == 2 && sa == 42 && sb == 42);
+                print(ok ? "job control: kill(-pgid) delivered SIGINT to the whole group OK\n" : "jobtest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            } else { print("jobtest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");
