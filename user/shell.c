@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -1991,6 +1991,31 @@ static int run_command(char *line, char *cwd) {
                 if (!ok || !iso) g_status = 1;
                 sys_semctl(sid, 0, IPC_RMID, 0);
             } else { print("pvwtest: fork failed\n"); g_status = 1; }
+        } else if (streq(line, "wchantest")) {   /* /proc/sched WCHAN: name the kernel routine a blocked task sleeps in (M1166) */
+            int sid = (int)sys_semget(IPC_PRIVATE, 1, IPC_CREAT);
+            struct sembuf op;
+            long pid = sys_fork();
+            if (pid == 0) {                       /* child: P a zero-valued sem -> parks inside sysv_semop */
+                op.sem_num = 0; op.sem_op = -1; op.sem_flg = 0; sys_semop(sid, &op, 1);
+                sys_exit(0);                      /* released by the parent's V below */
+            } else if (pid > 0) {                 /* parent: let the child block, then read its WCHAN from /proc/sched */
+                sys_sleep(200);                   /* give the child time to reach task_block() */
+                long n; char *buf = slurp("/proc/sched", &n);
+                int found = 0;
+                if (buf) {
+                    for (char *q = buf; *q; q++) {     /* inline substring scan (sh_substr is defined later) */
+                        const char *w = "sysv_semop"; int i = 0;
+                        while (w[i] && q[i] == w[i]) i++;
+                        if (!w[i]) { found = 1; break; }
+                    }
+                    print(buf); free(buf);            /* dump the table so the WCHAN column is visible */
+                }
+                op.sem_num = 0; op.sem_op = 1; op.sem_flg = 0; sys_semop(sid, &op, 1);   /* V: wake the child */
+                int st = -1; sys_waitpid((int)pid, &st);
+                print(found ? "WCHAN: blocked child shown parked in sysv_semop OK\n" : "wchantest: VERIFY FAILED\n");
+                if (!found) g_status = 1;
+                sys_semctl(sid, 0, IPC_RMID, 0);
+            } else { print("wchantest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

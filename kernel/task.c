@@ -240,6 +240,7 @@ void task_yield(void) {
  * can't be lost. */
 void task_block(void) {
     uint64_t f = irq_save();
+    current->wchan = (uint64_t)__builtin_return_address(0);   /* who we're blocking in, for /proc/sched WCHAN (M1166) */
     current->wake_at = 0;          /* not a timed sleep -> the timer scan must ignore it */
     current->state = TASK_BLOCKED;
     switch_to_next();
@@ -265,6 +266,7 @@ void task_sleep_ms(uint64_t ms) {
         return;
     }
     uint64_t f = irq_save();
+    current->wchan = (uint64_t)__builtin_return_address(0);   /* the sleep's caller, for WCHAN (M1166) */
     current->wake_at = timer_ms() + ms;           /* 0 ms still parks until the next tick */
     current->state = TASK_BLOCKED;
     switch_to_next();                             /* yields; woken by the timer scan */
@@ -438,6 +440,7 @@ int task_snapshot(task_info_t *out, int max) {
             uint64_t rm = t->run_ms;
             if (t->state == TASK_RUNNING) rm += now - t->last_in;   /* include the in-progress slice */
             out[n].run_ms = rm; out[n].nswitch = t->nswitch; out[n].rq_wait_ms = t->rq_wait_ms;
+            out[n].wchan = (t->state == TASK_BLOCKED) ? t->wchan : 0;   /* only meaningful while blocked (M1166) */
             n++; t = t->next;
         } while (t != current);
     }
