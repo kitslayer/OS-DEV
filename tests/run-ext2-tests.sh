@@ -42,9 +42,24 @@ echo "building host ext2 read path (ASan+UBSan)..."
 $CC -std=gnu11 -O1 $SAN -fno-stack-protector -Ikernel -Ikernel/include \
     tests/ext2/ext2_test.c -o /tmp/osdev_ext2_test
 
-echo "running ext2 corrupt-image fuzz (+ ext4 extent read/fuzz)..."
-if timeout 180 /tmp/osdev_ext2_test "$G" $EXTOK; then
+echo "running ext2 corrupt-image fuzz (+ ext4 extent read/write/fuzz)..."
+XW=/tmp/osdev_ext2_extent_written.img
+[ -n "$EXTOK" ] && WARG="$XW" || WARG=
+if timeout 180 /tmp/osdev_ext2_test "$G" $EXTOK $WARG; then
     echo "PASS: ext2.c read path (ASan/UBSan clean on corrupt-metadata fuzz + extent reads)"
 else
     echo "FAIL: ext2.c test aborted (ASan/UBSan caught a memory error, or it hung)"; exit 1
+fi
+
+# M1189: the driver-written extent image must be e2fsck-clean and debugfs must
+# see /EXTW.TXT as an EXTENT inode (not indirect) — proves the write is spec-correct.
+if [ -n "$EXTOK" ] && [ -f "$XW" ]; then
+    if ! e2fsck -fn "$XW" >/tmp/osdev_ext2_extw_fsck.log 2>&1; then
+        echo "FAIL: e2fsck found errors in the driver-written extent image:"; cat /tmp/osdev_ext2_extw_fsck.log; exit 1
+    fi
+    if debugfs -R "stat /EXTW.TXT" "$XW" 2>/dev/null | grep -qi 'EXTENTS'; then
+        echo "PASS: ext4 extent WRITE (driver-created /EXTW.TXT is an EXTENT inode; e2fsck clean)"
+    else
+        echo "FAIL: driver-written /EXTW.TXT is not extent-mapped"; exit 1
+    fi
 fi

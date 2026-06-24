@@ -126,6 +126,20 @@ int main(int argc, char **argv) {
             fprintf(stderr, "extent /SMALL.TXT read wrong (%ld)\n", sn); return 1;
         }
         printf("extent: /BIG.TXT %ld bytes + /SMALL.TXT byte-exact via the extent tree\n", bn);
+        /* ext4 extent WRITE (M1189): the driver creates a file as a single contiguous
+         * extent; read it back byte-exact, and dump the image (argv[3]) for the runner
+         * to e2fsck (which validates the extent layout + the alloc_run bitmap/counts). */
+        {
+            memcpy(g_img, g_golden, (size_t)g_golden_bytes); g_img_bytes = g_golden_bytes;
+            static uint8_t wd[50000]; for (int i = 0; i < 50000; i++) wd[i] = (uint8_t)('A' + (i % 26));
+            long w = ext2_write_path(bd_read, bd_write, 0, 0, "/EXTW.TXT", wd, 50000);
+            static uint8_t wr[50000]; long rr = (w == 50000) ? ext2_read_path(bd_read, 0, 0, "/EXTW.TXT", wr, sizeof wr) : -1;
+            if (w != 50000 || rr != 50000 || memcmp(wr, wd, 50000) != 0) {
+                fprintf(stderr, "extent WRITE/readback wrong (w=%ld r=%ld)\n", w, rr); return 1;
+            }
+            printf("extent write: created /EXTW.TXT (50000 bytes) as an extent, read back byte-exact\n");
+            if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
+        }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;
         for (int iter = 0; iter < 6000; iter++) {
             memcpy(g_img, g_golden, (size_t)g_golden_bytes); g_img_bytes = g_golden_bytes;

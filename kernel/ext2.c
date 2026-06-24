@@ -34,6 +34,7 @@ typedef struct {
     blk_read_fn read; blk_write_fn write; void *ctx; uint64_t start;
     uint32_t block_size, inodes_per_group, inode_size, gdt_block;
     uint32_t blocks_per_group, first_data_block, first_ino, blocks_count, groups;   /* for allocation (M1132) */
+    uint32_t feat_incompat;          /* s_feature_incompat; bit 0x40 = `extent` (M1189) */
 } ext2_t;
 
 /* read ext2 block `blk` (block_size bytes) into buf (>= block_size) */
@@ -60,6 +61,7 @@ static int ext2_open(blk_read_fn read, void *ctx, uint64_t start, ext2_t *v) {
     v->first_data_block = e_rd32(sb + 20);
     v->blocks_count     = e_rd32(sb + 4);
     v->first_ino        = (rev >= 1) ? e_rd32(sb + 84) : 11;
+    v->feat_incompat    = (rev >= 1) ? e_rd32(sb + 96) : 0;   /* `extent`=0x40, for extent writes (M1189) */
     if (!v->blocks_per_group || v->blocks_count <= v->first_data_block) return -1;
     v->groups = (v->blocks_count - v->first_data_block + v->blocks_per_group - 1) / v->blocks_per_group;
     return 0;
@@ -357,6 +359,47 @@ static uint32_t alloc_block(ext2_t *v) {
     return 0;
 }
 
+/* Decrement a 32-bit superblock counter by n (the run-allocation form of sb_dec). */
+static int sb_sub(ext2_t *v, int off, uint32_t n) {
+    uint8_t sb[1024];
+    if (rd_sb(v, sb) < 0) return -1;
+    e_wr32(sb + off, e_rd32(sb + off) - n);
+    return wr_sb(v, sb);
+}
+
+/* Allocate n CONTIGUOUS free blocks within one group (a single-extent write,
+ * M1189); returns the first block number, or 0 if no run of n fits. Mirrors
+ * alloc_block's bitmap + group/superblock free-count bookkeeping. */
+static uint32_t alloc_run(ext2_t *v, uint32_t n) {
+    if (n == 0) return 0;
+    uint8_t gd[4096], bm[4096];
+    uint32_t gd_per_block = v->block_size / 32;
+    for (uint32_t g = 0; g < v->groups; g++) {
+        uint32_t gdblk = v->gdt_block + g / gd_per_block, goff = (g % gd_per_block) * 32;
+        if (rdblk(v, gdblk, gd) < 0) return 0;
+        if (e_rd16(gd + goff + 12) < n) continue;              /* group lacks n free blocks */
+        uint32_t bbm = e_rd32(gd + goff + 0);
+        if (rdblk(v, bbm, bm) < 0) return 0;
+        uint32_t inthis = v->blocks_per_group, prev = g * v->blocks_per_group;
+        if (v->blocks_count - v->first_data_block - prev < inthis)
+            inthis = v->blocks_count - v->first_data_block - prev;
+        uint32_t run = 0;
+        for (uint32_t i = 0; i < inthis; i++) {
+            if (!(bm[i >> 3] & (1 << (i & 7)))) {
+                if (++run == n) {                              /* found n consecutive free bits */
+                    uint32_t startbit = i + 1 - n;
+                    for (uint32_t j = 0; j < n; j++) { uint32_t b = startbit + j; bm[b >> 3] |= (uint8_t)(1 << (b & 7)); }
+                    if (wrblk(v, bbm, bm) < 0) return 0;
+                    e_wr16(gd + goff + 12, (uint16_t)(e_rd16(gd + goff + 12) - n));
+                    if (wrblk(v, gdblk, gd) < 0 || sb_sub(v, 12, n) < 0) return 0;
+                    return v->first_data_block + g * v->blocks_per_group + startbit;
+                }
+            } else run = 0;
+        }
+    }
+    return 0;
+}
+
 /* Allocate a free inode; returns its 1-based number, or 0. */
 static uint32_t alloc_inode(ext2_t *v) {
     uint8_t gd[4096], bm[4096];
@@ -464,6 +507,19 @@ static void free_inode_blocks(ext2_t *v, const uint8_t *inode) {
     const uint8_t *ib = inode + 40;
     uint32_t ppb = v->block_size / 4;
     uint8_t buf[4096], buf2[4096];
+    if (e_rd32(inode + 32) & EXT4_EXTENTS_FL) {            /* extent-mapped (M1189) */
+        if (e_rd16(ib) == EXT4_EXT_MAGIC && e_rd16(ib + 6) == 0) {   /* depth-0 leaf: free each extent's run */
+            uint32_t ents = e_rd16(ib + 2), maxe = (60 - 12) / 12;
+            if (ents > maxe) ents = maxe;
+            for (uint32_t i = 0; i < ents; i++) {
+                const uint8_t *e = ib + 12 + i * 12;
+                uint16_t raw = e_rd16(e + 4);
+                uint32_t l = raw > 32768 ? (uint32_t)(raw - 32768) : raw, st = e_rd32(e + 8);
+                for (uint32_t j = 0; j < l; j++) free_block(v, st + j);
+            }
+        }   /* depth>0 trees (only from externally-written files) are left intact; a future pass can reclaim them */
+        return;
+    }
     for (int i = 0; i < 12; i++) { uint32_t b = e_rd32(ib + i * 4); if (b) free_block(v, b); }
     uint32_t ind = e_rd32(ib + 12 * 4);
     if (ind) {
@@ -812,6 +868,7 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
         if (read_inode(&v, ino, inode) < 0) return -1;
         free_inode_blocks(&v, inode);
         for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);   /* drop the stale block pointers */
+        e_wr32(inode + 32, e_rd32(inode + 32) & ~EXT4_EXTENTS_FL);    /* overwrite rebuilds via indirect (M1189) */
     } else {                                               /* CREATE: a fresh inode + dir entry */
         ino = alloc_inode(&v);
         if (!ino) return -1;
@@ -820,8 +877,45 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
         e_wr16(inode + 26, 1);                             /* i_links_count = 1 */
     }
 
-    /* allocate + write the data blocks (and a single-indirect block if needed) */
     uint8_t blk[4096], ind[4096];
+
+    /* M1189: on an `extent`-feature fs, place a NEW file as a single CONTIGUOUS
+     * extent (what ext4 produces; e2fsck-clean). Falls through to the direct/
+     * indirect path below if the feature is off or no contiguous run fits. */
+    if (!existing && (v.feat_incompat & 0x40) && nblocks > 0 && nblocks <= 32768) {
+        uint32_t start = alloc_run(&v, nblocks);
+        if (start) {
+            for (uint32_t fb = 0; fb < nblocks; fb++) {
+                uint32_t boff = fb * v.block_size, chunk = (uint32_t)len - boff;
+                if (chunk > v.block_size) chunk = v.block_size;
+                for (uint32_t i = 0; i < chunk; i++) blk[i] = ((const uint8_t *)buf)[boff + i];
+                for (uint32_t i = chunk; i < v.block_size; i++) blk[i] = 0;
+                if (wrblk(&v, start + fb, blk) < 0) return -1;
+            }
+            uint8_t *eh = inode + 40;                          /* extent header in i_block[] */
+            for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);
+            e_wr16(eh + 0, EXT4_EXT_MAGIC);                    /* eh_magic 0xF30A */
+            e_wr16(eh + 2, 1);                                 /* eh_entries = 1 */
+            e_wr16(eh + 4, 4);                                 /* eh_max (i_block holds 4) */
+            e_wr16(eh + 6, 0);                                 /* eh_depth = 0 (leaf) */
+            e_wr32(eh + 8, 0);                                 /* eh_generation */
+            uint8_t *ee = eh + 12;                             /* the one extent */
+            e_wr32(ee + 0, 0);                                 /* ee_block (logical start) */
+            e_wr16(ee + 4, (uint16_t)nblocks);                 /* ee_len */
+            e_wr16(ee + 6, 0);                                 /* ee_start_hi (32-bit fs) */
+            e_wr32(ee + 8, start);                             /* ee_start_lo */
+            e_wr32(inode + 32, e_rd32(inode + 32) | EXT4_EXTENTS_FL);
+            e_wr32(inode + 4, (uint32_t)len);                  /* i_size */
+            e_wr32(inode + 28, nblocks * (v.block_size / 512)); /* i_blocks */
+            e_stamp(inode);
+            if (write_inode(&v, ino, inode) < 0) return -1;
+            if (dir_add(&v, parent_ino, base, ino, 1) < 0) return -1;
+            return (long)len;
+        }
+        /* no contiguous run -> fall through to direct/indirect below */
+    }
+
+    /* allocate + write the data blocks (and a single-indirect block if needed) */
     uint32_t indirect = 0, isectors = 0;
     for (uint32_t fb = 0; fb < nblocks; fb++) {
         uint32_t db = alloc_block(&v);
