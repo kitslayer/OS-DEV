@@ -257,7 +257,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any:
-    case SYS_nice: case SYS_sched_setscheduler:
+    case SYS_nice: case SYS_sched_setscheduler: case SYS_tcgetattr: case SYS_tcsetattr:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
@@ -344,7 +344,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_listen]="unix_listen",[SYS_unix_connect]="unix_connect",[SYS_unix_accept]="unix_accept",
         [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
-        [SYS_statx]="statx",
+        [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -926,6 +926,14 @@ void syscall_dispatch(struct registers *r) {
     case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
         if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_stat((const char *)r->rdi, (struct statx *)r->rsi);
+        break;
+    case SYS_tcgetattr:                    /* (struct termios*) -> read the TTY mode (M1174) */
+        if (!ubuf(r->rdi, sizeof(struct termios))) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_tcgetattr((struct termios *)r->rdi);
+        break;
+    case SYS_tcsetattr:                    /* (struct termios*) -> set cooked/raw TTY mode (M1174) */
+        if (!ubuf(r->rdi, sizeof(struct termios))) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_tcsetattr((const struct termios *)r->rdi);
         break;
     case SYS_getrlimit:                    /* (resource, struct rlimit*) -> read a resource limit (M1163) */
         if (!ubuf(r->rsi, sizeof(struct rlimit))) { r->rax = (uint64_t)-1; break; }

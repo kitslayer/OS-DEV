@@ -160,6 +160,24 @@
 #define SYS_nice         148   /* (nice) -> set current task's CFS nice (-20..19); returns the clamped nice (M1171) */
 #define SYS_sched_setscheduler 149 /* (policy, rt_priority) -> set current task's scheduling class; 0/-1 (M1172) */
 #define SYS_statx        150   /* (path, struct statx*) -> file metadata (mode/size/times/nlink); 0/-1 (M1173) */
+#define SYS_tcgetattr    151   /* (struct termios*) -> read the TTY discipline mode; 0/-1 (M1174) */
+#define SYS_tcsetattr    152   /* (struct termios*) -> set the TTY discipline mode (cooked/raw); 0/-1 (M1174) */
+
+/* TTY line discipline (M1174), shared by the kernel + ulib. c_lflag selects
+ * cooked (ICANON) vs raw input; raw delivers each keystroke immediately. Default
+ * is ICANON|ECHO|ISIG (the existing line-editing behaviour). unsigned/unsigned
+ * char (no stdint in userspace syscall.h). */
+struct termios {
+    unsigned       c_lflag;      /* ICANON | ECHO | ISIG */
+    unsigned char  c_cc[8];      /* control chars: c_cc[VINTR]=ETX, c_cc[VEOF]=EOT, ... */
+};
+#define ISIG    0x001
+#define ICANON  0x002
+#define ECHO    0x008
+#define VINTR   0
+#define VEOF    1
+#define VERASE  2
+#define VKILL   3
 
 /* statx (M1173) — unified file metadata, shared by the kernel + ulib. stx_mode's
  * top nibble is the type (S_IFMT); times are Unix epoch seconds. */

@@ -54,6 +54,9 @@ int    app_rows(void);
 /* Called from the syscall dispatcher, acting on the currently-running app. */
 void   app_sys_write(const char *buf, unsigned len);
 int    app_sys_read(char *buf, unsigned max);
+struct termios;
+int    app_tcgetattr(struct termios *t);          /* read the TTY discipline mode (M1174) */
+int    app_tcsetattr(const struct termios *t);    /* set the TTY discipline mode cooked/raw (M1174) */
 int    app_sys_getpid(void);
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */

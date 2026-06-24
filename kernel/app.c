@@ -1067,8 +1067,40 @@ static unsigned hist_recall(struct app *a, char *buf, unsigned max, unsigned cur
     return n;
 }
 
+/* The foreground TTY line-discipline mode (M1174). Default = cooked: ICANON
+ * (line editing below) + ECHO + ISIG — byte-identical to the historical
+ * behaviour, so every app that never calls tcsetattr is unaffected. An app that
+ * clears ICANON gets raw, unbuffered, per-keystroke reads (what an editor or a
+ * game's text input wants). Global (single foreground TTY); apps should restore
+ * it, as on real Unix. */
+static struct termios g_termios = { ICANON | ECHO | ISIG, { [VINTR] = 3, [VEOF] = 4, [VERASE] = 0x7f, [VKILL] = 0x15 } };
+int app_tcgetattr(struct termios *t) { if (!t) return -1; *t = g_termios; return 0; }
+int app_tcsetattr(const struct termios *t) { if (!t) return -1; g_termios = *t; return 0; }
+
+/* Raw-mode read (M1174): no line editing — block for the first keystroke, then
+ * drain whatever else is immediately queued (VMIN=1 semantics), echoing if ECHO
+ * is set. Control keys are delivered literally: the keyboard's Ctrl+x sentinel
+ * (0x80|letter) maps back to the raw control code (1..26). */
+static int tty_raw_read(struct app *a, char *buf, unsigned max) {
+    unsigned n = 0;
+    while (n < max) {
+        uint64_t f = irq_save();
+        if (a->kill) { irq_restore(f); a->exited = 1; task_exit(); }
+        int c = iq_get(a);
+        if (c < 0) { if (n > 0) { irq_restore(f); break; }   /* got something -> return it */
+                     task_block(); irq_restore(f); continue; } /* else block for the first byte */
+        irq_restore(f);
+        if (c >= 0x81 && c <= 0x9A) c -= 0x80;       /* Ctrl+letter sentinel -> raw control code */
+        else if (c >= 0x80) continue;                /* arrows/other cooked sentinels: drop in raw */
+        buf[n++] = (char)c;
+        if (g_termios.c_lflag & ECHO) { char e = (char)c; app_sys_write(&e, 1); }
+    }
+    return (int)n;
+}
+
 int app_sys_read(char *buf, unsigned max) {
     struct app *a = cur();
+    if (!(g_termios.c_lflag & ICANON)) return tty_raw_read(a, buf, max);   /* raw mode (M1174) */
     unsigned n = 0;                                 /* line length          */
     unsigned cur_i = 0;                             /* caret index in [0,n] */
     int cx0 = a->cx, cy0 = a->cy;                   /* where the input starts */

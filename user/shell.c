@@ -472,7 +472,7 @@ static int run_command(char *line, char *cwd) {
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2207,6 +2207,23 @@ static int run_command(char *line, char *cwd) {
                 } else { print("schedtest: fork failed\n"); g_status = 1; }
                 sys_shmdt((void *)sh);
                 sys_semctl(sid, 0, IPC_RMID, 0);
+            }
+        } else if (streq(line, "rawkey")) {   /* TTY raw mode: read ONE keystroke unbuffered, no Enter (M1174) */
+            struct termios old, raw;
+            if (sys_tcgetattr(&old) != 0) { print("rawkey: tcgetattr failed\n"); g_status = 1; }
+            else {
+                raw = old; raw.c_lflag &= ~(unsigned)ICANON;   /* raw: per-keystroke delivery (ECHO kept) */
+                sys_tcsetattr(&raw);
+                print("raw mode on: press one key (NO Enter)... ");
+                char ch = 0; long r = sys_read(0, &ch, 1);
+                sys_tcsetattr(&old);                            /* restore cooked line editing */
+                print("\n");
+                if (r == 1) {
+                    const char *H = "0123456789abcdef"; char hx[3] = { H[(ch >> 4) & 15], H[ch & 15], 0 };
+                    char pr[2] = { (ch >= 32 && ch < 127) ? ch : '?', 0 };
+                    print("read 1 byte unbuffered: '"); print(pr); print("' (0x"); print(hx); print(")\n");
+                    print("TTY raw line discipline OK (cooked mode restored)\n");
+                } else { print("rawkey: read returned "); printl(r); print("\n"); g_status = 1; }
             }
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
