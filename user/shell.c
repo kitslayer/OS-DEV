@@ -7,6 +7,7 @@
  * program talking to our OS exactly the way `sh` talks to Linux.
  */
 #include "ulib.h"
+#include "bpf.h"      /* struct bpf_insn + opcodes, for the seccomptest filter program (M1190) */
 #include "shgrep.h"   /* gr_match(): the grep regex matcher (^ $ . * [..] \), host-tested by tests/shgrep */
 #include "shsed.h"    /* sed_sub(): the `sed s/RE/REPL/` substitution engine, host-tested by tests/shsed */
 #include "shmath.h"   /* sh_eval(): the $((expr)) integer evaluator, host-tested by tests/shmath */
@@ -2473,6 +2474,27 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "fifo: mkfifo + open-by-name rendezvous + EOF OK\n" : "fifotest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "seccomptest")) {   /* self-imposed BPF syscall filter (M1190) */
+            long pid = sys_fork();
+            if (pid == 0) {                          /* child sandboxes ITSELF, then probes */
+                /* deny SYS_writefile, allow everything else (verdict nonzero = allow) */
+                struct bpf_insn prog[] = {
+                    { BPF_LDI,   1, 0, 0, 1 },                       /* r1 = 1 (allow) */
+                    { BPF_LDCTX, 0, 0, 0, 0 },                       /* r0 = ctx[0] = syscall nr */
+                    { BPF_JEQ,   0, 1, 0, (int32_t)SYS_writefile },  /* nr==writefile? -> skip to deny */
+                    { BPF_RET,   1, 0, 0, 0 },                       /* allow (return 1) */
+                    { BPF_LDI,   1, 0, 0, 0 },                       /* r1 = 0 */
+                    { BPF_RET,   1, 0, 0, 0 },                       /* deny (return 0) */
+                };
+                if (sys_seccomp_filter(prog, sizeof prog) != 0) sys_exit(2);   /* install failed */
+                long denied = sys_writefile("/tmp/sec_probe", "x", 1);          /* now blocked */
+                long allowed = sys_getpid();                                    /* still works */
+                sys_exit((denied < 0 && allowed > 0) ? 42 : 1);
+            }
+            int st = -1; sys_waitpid((int)pid, &st);
+            print(st == 42 ? "seccomp: self-filter installed; blocked syscall denied, allowed syscall ran -- OK\n"
+                           : "seccomptest: VERIFY FAILED\n");
+            if (st != 42) g_status = 1;
         } else if (streq(line, "rlimittest")) {   /* RLIMIT_NPROC: cap forks — fork-bomb protection (M1163) */
             struct rlimit rl; sys_getrlimit(RLIMIT_NPROC, &rl);
             print("RLIMIT_NPROC default: "); print(rl.rlim_cur == RLIM_INFINITY ? "infinity\n" : "(limited)\n");

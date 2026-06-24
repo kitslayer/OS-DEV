@@ -37,5 +37,7 @@ struct bpf_ctx { uint32_t dir, proto, sport, dport, len; }; /* fields 0..4 */
 
 long bpf_load(const void *prog, unsigned long bytes);  /* verify + install (0 bytes = clear); 0/-1 */
 int  bpf_loaded(void);                                 /* is a program installed? */
-long bpf_run(const struct bpf_ctx *ctx);               /* run it; verdict (0 drop / nonzero pass); 1 if none */
+long bpf_run(const struct bpf_ctx *ctx);               /* run the global firewall program; verdict (0 drop / nonzero pass); 1 if none */
+long bpf_run_prog(const struct bpf_insn *prog, int n, const struct bpf_ctx *ctx);  /* run an arbitrary program (seccomp, M1190) */
+int  bpf_verify(const struct bpf_insn *in, int n);     /* verify a program (forward skips, has RET, in-range); 0 ok / -1 (M1190) */
 int  bpf_format(char *out, int max);                   /* /proc/bpf: program + run/drop counters */

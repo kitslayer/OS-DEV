@@ -187,6 +187,7 @@
 #define SYS_dup2         174   /* (oldfd, newfd) -> redirect newfd onto oldfd; newfd/-1 (M1187) */
 #define SYS_mkfifo       175   /* (path) -> create a named pipe (FIFO); 0/-1 (M1188) */
 #define SYS_fifo_open    176   /* (path, write) -> open a FIFO end -> fd; -1 (M1188) */
+#define SYS_seccomp_filter 177 /* (prog, bytes) -> install a self-imposed BPF syscall filter (one-way); 0/-1 (M1190) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

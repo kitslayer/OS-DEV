@@ -334,6 +334,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
+        [SYS_seccomp_filter]="seccomp_filter",
         [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
@@ -389,6 +390,15 @@ void syscall_dispatch(struct registers *r) {
         int run_real = 1;
         long ret = app_seccomp_notify(self, r->rax, r->rdi, r->rsi, r->rdx, &run_real);
         if (!run_real) { r->rax = (uint64_t)ret; goto sc_done; }   /* denied/emulated: skip the real syscall */
+    }
+
+    /* seccomp-BPF self-filter (M1190): a process can install a bpf.c program that
+     * vets its own syscalls. Verdict 0 => deny (-1), skipping the real syscall.
+     * Unfiltered apps (no program) take one cheap branch and are unaffected. */
+    if (self && app_seccomp_filter_active(self) &&
+        !app_seccomp_filter_check(self, r->rax, r->rdi, r->rsi, r->rdx)) {
+        r->rax = (uint64_t)-1;
+        goto sc_done;
     }
 
     switch (r->rax) {
@@ -1224,6 +1234,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_seccomp:                      /* child: trap syscall `nr` to the supervisor (M1124) */
         r->rax = (uint64_t)(int64_t)app_seccomp_arm((int)r->rdi);
         break;
+    case SYS_seccomp_filter: {             /* install a self-imposed BPF syscall filter (M1190) */
+        unsigned long bytes = r->rsi;
+        if (!ubuf(r->rdi, bytes) || bytes % 8 != 0) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_seccomp_filter_install((const void *)r->rdi, (int)(bytes / 8));
+        break;
+    }
     case SYS_seccomp_wait: {               /* supervisor: block until the child parks; fill ev[4] */
         uint64_t *uev = (uint64_t *)r->rsi;
         if (!ubuf(r->rsi, 4 * sizeof(uint64_t))) { r->rax = (uint64_t)-1; break; }

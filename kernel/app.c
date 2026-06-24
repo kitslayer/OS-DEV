@@ -14,6 +14,7 @@
 #include "pty.h"     /* pty_release_pid on process exit (M1185) */
 #include "pipe.h"    /* anonymous pipe objects for the fd table (M1187) */
 #include "fifo.h"    /* named pipes (FIFOs), path-keyed (M1188) */
+#include "bpf.h"     /* seccomp-BPF self-filter (M1190) */
 #include "task.h"
 #include "timer.h"
 #include "interrupts.h"   /* struct registers, for ring-3 signal delivery */
@@ -150,6 +151,11 @@ struct app {
      * them has an empty table, so fork-copy + reap-close are no-ops for it. */
 #define APP_NFD 24
     struct fdent { uint8_t used, type, write_end; int obj; } fd[APP_NFD];   /* type: 0=free, 1=pipe; obj = pipe index */
+    /* seccomp-BPF self-filter (M1190): a process installs a bpf.c program that
+     * vets its own syscalls. Zero on spawn/fork; inherited across fork; once set
+     * it's permanent (privilege drop is one-way). Empty => no filtering overhead. */
+    struct bpf_insn seccomp_prog[BPF_MAXINSN];
+    int      seccomp_n;                  /* program length (0 = no filter) */
 };
 
 static struct app apps[MAX_APPS];
@@ -2648,6 +2654,28 @@ int app_fifo_open(const char *path, int write) {
     a->fd[fd] = (struct fdent){ 1, 1, (uint8_t)(write ? 1 : 0), idx };
     return fd;
 }
+
+/* ---- seccomp-BPF self-filter (M1190) ------------------------------------------
+ * Install a bpf.c program that vets the calling process's own syscalls. One-way
+ * (privilege drop can't be undone); inherited across fork. `prog` is a verified
+ * user pointer (the syscall ubuf-validated it). 0/-1. */
+int app_seccomp_filter_install(const void *progv, int n) {
+    struct app *a = cur(); if (!a) return -1;
+    const struct bpf_insn *prog = (const struct bpf_insn *)progv;
+    if (n <= 0 || n > BPF_MAXINSN || bpf_verify(prog, n) != 0) return -1;
+    for (int i = 0; i < n; i++) a->seccomp_prog[i] = prog[i];
+    a->seccomp_n = n;
+    return 0;
+}
+int app_seccomp_filter_active(app_t *ap) { return ap && ((struct app *)ap)->seccomp_n > 0; }
+/* Verdict for one syscall: 1 = allow, 0 = deny. The program reads ctx fields
+ * 0..3 = syscall nr + the low 32 bits of args 0..2 (LDCTX), and RETs nonzero to
+ * allow. */
+int app_seccomp_filter_check(app_t *ap, uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2) {
+    struct app *a = (struct app *)ap;
+    struct bpf_ctx ctx = { (uint32_t)nr, (uint32_t)a0, (uint32_t)a1, (uint32_t)a2, 0 };
+    return bpf_run_prog(a->seccomp_prog, a->seccomp_n, &ctx) != 0;
+}
 /* fork: the child inherits the parent's fds (each shared end gains a reference). */
 static void app_fd_fork(struct app *child, struct app *parent) {
     for (int i = 0; i < APP_NFD; i++) {
@@ -2716,6 +2744,8 @@ long app_fork(struct registers *r) {
     a->ns_id  = p->ns_id;                               /* inherit the parent's mount namespace (shared; unshare detaches) (M1122) */
     vfs_cwd_inherit(a);                                 /* inherit the parent's current directory (M1144) */
     app_fd_fork(a, p);                                   /* inherit the parent's open fds/pipes (M1187) */
+    a->seccomp_n = p->seccomp_n;                          /* inherit the parent's seccomp filter (M1190) */
+    for (int i = 0; i < p->seccomp_n && i < BPF_MAXINSN; i++) a->seccomp_prog[i] = p->seccomp_prog[i];
     /* NOT inherited (POSIX): pending signals, alarms, strace, gfx-mode canvas. */
 
     /* The child's resume context: the parent's trap frame, but returning 0. */

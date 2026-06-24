@@ -15,7 +15,7 @@ static uint64_t g_runs, g_drops;      /* stats for /proc/bpf */
 int bpf_loaded(void) { return g_n > 0; }
 
 /* Verify a candidate program. Returns 0 if safe to run, -1 otherwise. */
-static int bpf_verify(const struct bpf_insn *in, int n) {
+int bpf_verify(const struct bpf_insn *in, int n) {
     if (n < 1 || n > BPF_MAXINSN) return -1;
     int has_ret = 0;
     for (int i = 0; i < n; i++) {
@@ -47,13 +47,15 @@ long bpf_load(const void *prog, unsigned long bytes) {
     return 0;
 }
 
-long bpf_run(const struct bpf_ctx *ctx) {
-    if (g_n == 0) return 1;                        /* no program -> pass */
+/* Run an ARBITRARY verified program against ctx; verdict (0 = drop/deny, nonzero
+ * = pass/allow). Used by the global firewall (bpf_run) and per-process seccomp
+ * filters (M1190). Pure over (prog, ctx) — no global state. */
+long bpf_run_prog(const struct bpf_insn *prog, int n, const struct bpf_ctx *ctx) {
+    if (n <= 0) return 1;                          /* no program -> pass */
     int64_t reg[8] = { 0 };
-    g_runs++;
     int pc = 0, steps = 0;
-    while (pc < g_n && steps++ < BPF_MAXINSN * 2) {  /* the step cap is belt-and-braces (skips are forward) */
-        struct bpf_insn *x = &g_prog[pc];
+    while (pc < n && steps++ < BPF_MAXINSN * 2) {    /* the step cap is belt-and-braces (skips are forward) */
+        const struct bpf_insn *x = &prog[pc];
         switch (x->op) {
             case BPF_LDI:   reg[x->a] = x->imm; pc++; break;
             case BPF_LDCTX: {
@@ -69,11 +71,20 @@ long bpf_run(const struct bpf_ctx *ctx) {
             case BPF_OR:  reg[x->a] |= reg[x->b]; pc++; break;
             case BPF_JEQ: pc += (reg[x->a] == x->imm) ? (x->b + 1) : 1; break;
             case BPF_JNE: pc += (reg[x->a] != x->imm) ? (x->b + 1) : 1; break;
-            case BPF_RET: { long v = (long)reg[x->a]; if (v == 0) g_drops++; return v; }
+            case BPF_RET: return (long)reg[x->a];
             default: return 1;
         }
     }
     return 1;                                       /* fell off the end -> pass */
+}
+
+/* The global firewall program (M1127), with its /proc/bpf run/drop stats. */
+long bpf_run(const struct bpf_ctx *ctx) {
+    if (g_n == 0) return 1;                        /* no program -> pass */
+    g_runs++;
+    long v = bpf_run_prog(g_prog, g_n, ctx);
+    if (v == 0) g_drops++;
+    return v;
 }
 
 static int sa(char *b, int p, int max, const char *s) { while (*s && p < max - 1) b[p++] = *s++; return p; }

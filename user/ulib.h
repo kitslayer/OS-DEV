@@ -176,6 +176,7 @@ int   sys_fdclose(int fd);                                   /* close an fd; 0/-
 int   sys_dup2(int oldfd, int newfd);                        /* redirect newfd onto oldfd; newfd/-1 (M1187) */
 int   sys_mkfifo(const char *path);                          /* create a named pipe (FIFO); 0/-1 (M1188) */
 int   sys_fifo_open(const char *path, int write);            /* open a FIFO end -> fd; -1 (M1188) */
+long  sys_seccomp_filter(const void *prog, unsigned long bytes);  /* install a self-imposed BPF syscall filter; 0/-1 (M1190) */
 #define PTY_SETMODE 0
 #define PTY_SETFG   1
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */

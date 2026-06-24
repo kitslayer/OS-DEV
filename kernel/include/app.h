@@ -121,6 +121,9 @@ int  app_fd_close(int fd);             /* close an fd; 0/-1 (M1187) */
 int  app_dup2(int oldfd, int newfd);   /* redirect newfd onto oldfd's object; newfd/-1 (M1187) */
 int  app_mkfifo(const char *path);     /* create a named pipe (FIFO); 0/-1 (M1188) */
 int  app_fifo_open(const char *path, int write);  /* open a FIFO end -> fd; -1 (M1188) */
+int  app_seccomp_filter_install(const void *prog, int n);   /* install a self-imposed BPF syscall filter; 0/-1 (M1190) */
+int  app_seccomp_filter_active(app_t *a);                   /* does this app have a seccomp-BPF filter? (M1190) */
+int  app_seccomp_filter_check(app_t *a, uint64_t nr, uint64_t a0, uint64_t a1, uint64_t a2);  /* 1 allow / 0 deny (M1190) */
 int  app_deliver_pending(struct registers *r);     /* deliver a pending async signal on return to ring 3; 1 if delivered */
 void app_set_alarm(uint64_t ticks);                /* SYS_alarm: arm a periodic SIGALRM every `ticks` ticks (0=disarm) */
 void app_alarm_tick(void);                         /* timer IRQ hook: raise SIGALRM if the current app's alarm is due */
