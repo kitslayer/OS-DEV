@@ -434,7 +434,29 @@ static int dir_remove(ext2_t *v, uint32_t parent_ino, const char *name) {
 }
 
 /* Delete a regular file: free its blocks + inode and unlink its directory entry.
- * Refuses directories (no rmdir). 0 on success, -1 otherwise. M1135. */
+ * Removes a regular file, or (M1145) an EMPTY directory (rmdir). 0/-1. */
+static void grp_dirs(ext2_t *v, uint32_t ino, int delta);   /* defined below (M1137) */
+/* A directory is empty if it holds nothing but "." and "..". */
+static int dir_is_empty(ext2_t *v, const uint8_t *dino) {
+    uint32_t size = e_rd32(dino + 4);
+    uint8_t blk[4096];
+    for (uint32_t off = 0; off < size; off += v->block_size) {
+        uint32_t db = map_block(v, dino, off / v->block_size);
+        if (!db || rdblk(v, db, blk) < 0) continue;
+        uint32_t bo = 0;
+        while (bo + 8 <= v->block_size) {
+            uint32_t ino = e_rd32(blk + bo); uint16_t rl = e_rd16(blk + bo + 4); uint8_t nl = blk[bo + 6];
+            if (rl < 8) break;
+            if (ino && nl) {
+                int dot = (nl == 1 && blk[bo + 8] == '.') ||
+                          (nl == 2 && blk[bo + 8] == '.' && blk[bo + 9] == '.');
+                if (!dot) return 0;                    /* a real child -> not empty */
+            }
+            bo += rl;
+        }
+    }
+    return 1;
+}
 long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                       const char *path) {
     ext2_t v;
@@ -454,9 +476,24 @@ long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
     if (!parent_ino || !pdir) return -1;
     int cd = 0;
     uint32_t ino = dir_lookup(&v, pin, base, &cd);
-    if (!ino || cd) return -1;                              /* absent, or a directory */
+    if (!ino) return -1;                                    /* absent */
     uint8_t inode[256];
     if (read_inode(&v, ino, inode) < 0) return -1;
+    if (cd) {                                               /* rmdir: only an EMPTY directory (M1145) */
+        if (!dir_is_empty(&v, inode)) return -1;
+        free_inode_blocks(&v, inode);
+        e_wr16(inode + 26, 0); e_wr32(inode + 20, 1700000000u);
+        e_wr32(inode + 28, 0); for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);
+        write_inode(&v, ino, inode);
+        free_inode_num(&v, ino);
+        dir_remove(&v, parent_ino, base);
+        if (read_inode(&v, parent_ino, pin) >= 0) {         /* the removed dir's ".." dropped a parent link */
+            e_wr16(pin + 26, (uint16_t)(e_rd16(pin + 26) - 1));
+            write_inode(&v, parent_ino, pin);
+        }
+        grp_dirs(&v, ino, -1);                              /* one fewer directory in its group */
+        return 0;
+    }
     free_inode_blocks(&v, inode);
     /* Mark the inode DEAD before clearing its bitmap bit, so a consistency check
      * sees a clean deletion rather than a live-but-unattached inode: links_count
