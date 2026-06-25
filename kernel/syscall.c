@@ -267,7 +267,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
     case SYS_nice: case SYS_sched_setscheduler: case SYS_tcgetattr: case SYS_tcsetattr:
     case SYS_getrlimit: case SYS_setrlimit:
-    case SYS_getrandom: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
+    case SYS_getrandom: case SYS_getentropy: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
         return PL_STDIO;
@@ -1637,6 +1637,22 @@ void syscall_dispatch(struct registers *r) {
         r->rax = len;
         break;
     }
+    case SYS_getentropy: {                 /* (buf, len<=256) -> CSPRNG bytes; 0/-1 (M1238) */
+        uint64_t len = r->rsi;
+        if (len > 256 || !ubuf(r->rdi, len)) { r->rax = (uint64_t)-1; break; }
+        if (len) random_bytes((void *)r->rdi, (size_t)len);
+        r->rax = 0;                        /* getentropy returns 0/-1, not a byte count */
+        break;
+    }
+    case SYS_getpriority:                  /* (which, who) -> caller's nice; self (who==0) only (M1238) */
+        if ((int)r->rdi != PRIO_PROCESS || !(r->rsi == 0 || (int)r->rsi == app_sys_getpid())) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)task_get_nice();
+        break;
+    case SYS_setpriority:                  /* (which, who, prio) -> set caller's nice; self only (M1238) */
+        if ((int)r->rdi != PRIO_PROCESS || !(r->rsi == 0 || (int)r->rsi == app_sys_getpid())) { r->rax = (uint64_t)-1; break; }
+        task_set_nice((int)r->rdx);
+        r->rax = 0;
+        break;
     case SYS_pledge: {                     /* rdi = promise string ("stdio rpath ...") */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         uint32_t mask;

@@ -277,6 +277,9 @@ int  sys_geteuid(void) { return (int)do_syscall(SYS_geteuid, 0, 0, 0); }
 int  sys_getegid(void) { return (int)do_syscall(SYS_getegid, 0, 0, 0); }
 int  sys_sethostname(const char *buf, unsigned long len) { return (int)do_syscall(SYS_sethostname, (long)buf, (long)len, 0); }
 int  sys_gethostname(char *buf, unsigned long len) { return (int)do_syscall(SYS_gethostname, (long)buf, (long)len, 0); }
+int  sys_getentropy(void *buf, unsigned long len) { return (int)do_syscall(SYS_getentropy, (long)buf, (long)len, 0); }
+int  sys_getpriority(int which, int who) { return (int)do_syscall(SYS_getpriority, which, who, 0); }
+int  sys_setpriority(int which, int who, int prio) { return (int)do_syscall(SYS_setpriority, which, who, prio); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }

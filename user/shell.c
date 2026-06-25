@@ -2952,6 +2952,21 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "hostname: sethostname('os-dev-box') -> gethostname + uname.nodename both reflect it -- OK\n"
                      : "hostnametest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "priotest")) {   /* getentropy + getpriority/setpriority (M1238) */
+            int ok = 1;
+            unsigned char eb[32]; for (int i = 0; i < 32; i++) eb[i] = 0;
+            if (sys_getentropy(eb, 32) != 0) ok = 0;                   /* fill 32 random bytes */
+            int nz = 0; for (int i = 0; i < 32; i++) if (eb[i]) nz++;
+            if (nz < 4) ok = 0;                                        /* not all-zero -> real entropy */
+            unsigned char big[8];
+            if (sys_getentropy(big, 300) != -1) ok = 0;               /* >256 rejected */
+            int old = sys_getpriority(PRIO_PROCESS, 0);
+            if (sys_setpriority(PRIO_PROCESS, 0, 7) != 0) ok = 0;      /* set nice 7 (self) */
+            if (sys_getpriority(PRIO_PROCESS, 0) != 7) ok = 0;         /* read it back */
+            sys_setpriority(PRIO_PROCESS, 0, (old < -20 || old > 19) ? 0 : old);   /* restore */
+            print(ok ? "prio: getentropy(32)=random (>256 rejected) + setpriority(7)/getpriority round-trip -- OK\n"
+                     : "priotest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -242,6 +242,10 @@
 #define SYS_getegid      223   /* () -> effective gid (0) (M1236) */
 #define SYS_sethostname  224   /* (buf, len) -> set the system hostname; 0/-1 (M1237) */
 #define SYS_gethostname  225   /* (buf, len) -> copy the system hostname; 0/-1 (M1237) */
+#define SYS_getentropy   226   /* (buf, len<=256) -> fill with CSPRNG bytes; 0/-1 (M1238) */
+#define SYS_getpriority  227   /* (which, who) -> nice value of the caller (who==0/self); -1 (M1238) */
+#define SYS_setpriority  228   /* (which, who, prio) -> set the caller's nice (who==0/self); 0/-1 (M1238) */
+#define PRIO_PROCESS 0         /* getpriority/setpriority `which`: by process (M1238) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */
 #define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */
