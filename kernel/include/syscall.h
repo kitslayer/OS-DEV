@@ -206,6 +206,7 @@
 #define SYS_memfd_create 189   /* (name, flags) -> a sealable in-RAM file fd; fd(>=3)/-1 (M1212) */
 #define SYS_memfd_seal   190   /* (fd, add_seals) -> add F_SEAL_*; new seal set/-1 (M1212) */
 #define SYS_ftruncate    191   /* (fd, len) -> resize a memfd (seal-checked); 0/-1 (M1212) */
+#define SYS_rename       192   /* (oldpath, newpath) -> rename/move within one ext2 mount; 0/-1 (M1213) */
 
 /* poll(2) readiness multiplexing over the fd table (M1210). `events`/`revents`
  * are bitmasks; the kernel sets revents to the subset that won't block now.

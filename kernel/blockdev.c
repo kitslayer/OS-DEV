@@ -608,6 +608,13 @@ long blockdev_mount_link(int i, const char *oldpath, const char *newpath) {   /*
     return ext2_link_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start,
                           oldpath ? oldpath : "", newpath ? newpath : "");
 }
+long blockdev_mount_rename(int i, const char *oldpath, const char *newpath) {   /* rename/move (ext2 only); 0/-1 (M1213) */
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_rename_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start,
+                            oldpath ? oldpath : "", newpath ? newpath : "");
+}
 
 int blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max) {
     blockdev_mount_scan();

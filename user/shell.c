@@ -3865,9 +3865,12 @@ static int run_command(char *line, char *cwd) {
             while (*p == ' ') p++;
             sh_unprot_buf(p);                         /* destination may be quoted */
             if (src[0] == 0 || *p == 0) { print("usage: "); print(move?"mv":"cp"); print(" <src> <dst>\n"); }
-            else if (sys_chdir(src) >= 0) {        /* src is a directory: cp/mv of dirs isn't supported (no -r) */
+            else if (sys_chdir(src) >= 0) {        /* src is a directory */
                 sys_chdir(cwd);
-                print(move ? "mv" : "cp"); print(": "); print(src); print(" is a directory\n"); g_status = 1;
+                char dst[128]; { int d = 0; for (const char *s = p; *s && d < 127; s++) dst[d++] = *s; dst[d] = 0; }
+                if (move && !streq(src, dst) && sys_rename(src, dst) >= 0)   /* a real rename can move a directory (ext2; M1213) */
+                    { print("moved "); print(src); print(" -> "); print(dst); print("\n"); }
+                else { print(move ? "mv" : "cp"); print(": "); print(src); print(" is a directory (cp/mv -r unsupported; rename only within an ext2 mount)\n"); g_status = 1; }
             }
             else {
                 /* file size is unknown (no stat syscall): read into a heap buffer,
@@ -3895,7 +3898,9 @@ static int run_command(char *line, char *cwd) {
                         for (const char *s = base; *s && d < 127; s++) dst[d++] = *s;
                         dst[d] = 0;
                     } else { int d = 0; for (const char *s = p; *s && d < 127; s++) dst[d++] = *s; dst[d] = 0; }
-                    if (sys_writefile(dst, buf, (unsigned long)n) < 0) print("write failed\n");
+                    if (move && !streq(src, dst) && sys_rename(src, dst) >= 0) {   /* atomic rename fast path (M1213; ext2 same-mount, else falls through to copy+delete) */
+                        print("moved "); print(src); print(" -> "); print(dst); print("\n");
+                    } else if (sys_writefile(dst, buf, (unsigned long)n) < 0) print("write failed\n");
                     else {
                         if (move && !streq(src, dst)) sys_delete(src);   /* never delete when src==dst */
                         print(move ? "moved " : "copied "); print(src);

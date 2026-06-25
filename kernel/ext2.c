@@ -866,6 +866,103 @@ long ext2_link_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t st
     return 0;
 }
 
+/* Split `path` into its parent directory + base name (the inline used by
+ * write/link/mkdir, factored out for rename's two paths). */
+static void path_split(const char *path, char *parent, char *base) {
+    int last = -1, n = 0;
+    for (int i = 0; path[i]; i++) { if (path[i] == '/') last = i; n = i + 1; }
+    if (last < 0) parent[0] = 0;
+    else { int j = 0; for (; j < last && j < 255; j++) parent[j] = path[j]; parent[j] = 0; }
+    { int j = 0, s = last + 1; for (; s < n && j < 255; s++, j++) base[j] = path[s]; base[j] = 0; }
+}
+/* Repoint a directory's ".." entry at `new_parent` (when a directory moves to a
+ * new parent dir). 0/-1. */
+static int dir_set_dotdot(ext2_t *v, uint32_t dir_ino, uint32_t new_parent) {
+    uint8_t din[256], blk[4096];
+    if (read_inode(v, dir_ino, din) < 0) return -1;
+    uint32_t db = map_block(v, din, 0);
+    if (!db || rdblk(v, db, blk) < 0) return -1;
+    uint32_t bo = 0;
+    while (bo + 8 <= v->block_size) {
+        uint16_t rl = e_rd16(blk + bo + 4); uint8_t nl = blk[bo + 6];
+        if (rl < 8) break;
+        if (nl == 2 && blk[bo + 8] == '.' && blk[bo + 9] == '.') { e_wr32(blk + bo, new_parent); return wrblk(v, db, blk); }
+        bo += rl;
+    }
+    return -1;
+}
+/* Is `anc` an ancestor of (or equal to) directory `start`? Climbs ".." to the
+ * root inode (2). Used to refuse moving a directory into its own subtree. */
+static int is_ancestor(ext2_t *v, uint32_t anc, uint32_t start) {
+    uint32_t cur = start;
+    for (int i = 0; i < 64 && cur; i++) {
+        if (cur == anc) return 1;
+        if (cur == 2) break;                               /* reached the root */
+        uint8_t din[256]; if (read_inode(v, cur, din) < 0) break;
+        int d = 0; uint32_t up = dir_lookup(v, din, "..", &d);
+        if (!up || up == cur) break;
+        cur = up;
+    }
+    return 0;
+}
+/* rename(oldpath, newpath) within one ext2 volume (M1213): relocate a directory
+ * entry to (possibly) a new parent, preserving the inode. Same inode + a net-zero
+ * link count for the moved name (add the new name, remove the old). Replaces an
+ * existing regular-file target; refuses to replace a directory or to move a
+ * directory into its own subtree. For a directory moved across parents, fixes its
+ * ".." entry and adjusts both parents' link counts (so e2fsck stays clean). 0/-1. */
+long ext2_rename_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                      const char *oldpath, const char *newpath) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+
+    uint8_t sin[256]; int sdir = 0;
+    uint32_t src_ino = walk(&v, oldpath, sin, &sdir);
+    if (!src_ino) return -1;                               /* source must exist */
+    uint8_t ftype = sdir ? 2 : (((e_rd16(sin) & 0xF000) == 0xA000) ? 7 : 1);
+
+    char op[256], ob[256], np[256], nb[256];
+    path_split(oldpath, op, ob);
+    path_split(newpath, np, nb);
+    if (ob[0] == 0 || nb[0] == 0) return -1;
+    if (nb[0] == '.' && (nb[1] == 0 || (nb[1] == '.' && nb[2] == 0))) return -1;   /* refuse "." / ".." */
+
+    uint8_t opin[256], npin[256]; int od = 0, nd = 0;
+    uint32_t oldp = walk(&v, op, opin, &od);
+    uint32_t newp = walk(&v, np, npin, &nd);
+    if (!oldp || !od || !newp || !nd) return -1;           /* both parents must be dirs */
+
+    if (sdir && is_ancestor(&v, src_ino, newp)) return -1; /* can't move a dir into itself/subtree */
+
+    int td = 0;
+    uint32_t tgt = dir_lookup(&v, npin, nb, &td);
+    if (tgt) {
+        if (tgt == src_ino) return 0;                      /* same inode (incl. rename-to-self): no-op */
+        if (td || sdir) return -1;                         /* refuse replacing a dir / moving a dir onto a file */
+        uint8_t tin[256];                                  /* replace a regular-file target: unlink it first */
+        if (read_inode(&v, tgt, tin) < 0) return -1;
+        if (dir_remove(&v, newp, nb) < 0) return -1;
+        uint16_t lc = e_rd16(tin + 26);
+        if (lc > 1) { e_wr16(tin + 26, (uint16_t)(lc - 1)); e_stamp(tin); write_inode(&v, tgt, tin); }
+        else { free_inode_blocks(&v, tin); free_inode_num(&v, tgt); }
+    }
+
+    if (dir_add(&v, newp, nb, src_ino, ftype) < 0) return -1;
+    if (dir_remove(&v, oldp, ob) < 0) { dir_remove(&v, newp, nb); return -1; }   /* roll back the add */
+
+    if (sdir && oldp != newp) {                            /* directory moved to a new parent */
+        dir_set_dotdot(&v, src_ino, newp);
+        uint8_t pb[256];
+        if (read_inode(&v, oldp, pb) == 0) { uint16_t l = e_rd16(pb + 26); if (l > 0) e_wr16(pb + 26, (uint16_t)(l - 1)); write_inode(&v, oldp, pb); }
+        if (read_inode(&v, newp, pb) == 0) { e_wr16(pb + 26, (uint16_t)(e_rd16(pb + 26) + 1)); write_inode(&v, newp, pb); }
+    }
+
+    e_stamp(sin);                                          /* ctime on the moved inode */
+    write_inode(&v, src_ino, sin);
+    return 0;
+}
+
 /* fallocate(PUNCH_HOLE) (M1153): deallocate the WHOLE data blocks fully inside
  * [offset, offset+len) of a regular file, turning that range into a sparse hole
  * that reads back as zeros (the file SIZE is unchanged — KEEP_SIZE semantics).

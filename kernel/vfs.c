@@ -598,6 +598,22 @@ long vfs_link(const char *oldpath, const char *newpath) {
     }
     return -1;
 }
+/* rename(oldpath, newpath) when both resolve to the SAME ext2 /diskN mount
+ * (atomic, metadata-preserving, works on directories) — M1213. Returns -1 for a
+ * cross-mount or non-ext2 move, so a caller can fall back to copy+delete. */
+long vfs_rename_path(const char *oldpath, const char *newpath) {
+    char ob[160], nb[160];
+    oldpath = bind_resolve(oldpath, ob, sizeof ob);
+    newpath = bind_resolve(newpath, nb, sizeof nb);
+    int omid, nmid; char ofp[192], nfp[192];
+    if (mount_path(oldpath, &omid, ofp, sizeof ofp) &&
+        mount_path(newpath, &nmid, nfp, sizeof nfp) && omid == nmid) {
+        long r = blockdev_mount_rename(omid, ofp, nfp);
+        if (r >= 0) fsevents_record('r', newpath);
+        return r;
+    }
+    return -1;
+}
 
 /* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
  * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are
@@ -681,7 +697,7 @@ int vfs_chdir(const char *path) {
         if (idx >= 0) {
             const char *rest = (*p == '/') ? p + 1 : p;
             char sub[128]; mount_sub_join("", rest, sub, sizeof sub);
-            if (sub[0] == 0 || blockdev_mount_isdir(idx, sub)) {   /* root, or a real subdir */
+            if (sub[0] == 0 || blockdev_mount_isdir(idx, sub) == 1) {   /* root, or a real subdir (==1; isdir returns -1 for absent — M1213) */
                 synth_cwd = 4 + idx; set_mount_sub(sub);
                 return 0;
             }
@@ -693,7 +709,7 @@ int vfs_chdir(const char *path) {
             return (fs && fs->chdir) ? fs->chdir(path) : -1;
         }
         char sub[128]; mount_sub_join(mount_sub, path, sub, sizeof sub);
-        if (sub[0] == 0 || blockdev_mount_isdir(synth_cwd - 4, sub)) {
+        if (sub[0] == 0 || blockdev_mount_isdir(synth_cwd - 4, sub) == 1) {   /* ==1: a real subdir (M1213) */
             set_mount_sub(sub);
             return 0;
         }

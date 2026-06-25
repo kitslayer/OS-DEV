@@ -177,6 +177,33 @@ int main(int argc, char **argv) {
                 if (ext2_read_path(bd_read, 0, 0, "/HL1.TXT", lr, sizeof lr) > 0) { fprintf(stderr, "unlinked original still readable\n"); return 1; }
                 printf("hard link: /HL1.TXT -> /HL2.TXT shares the inode; after unlinking the original the link still reads 1000 bytes\n");
             }
+            /* rename (M1213): relocate a directory entry, preserving the inode.
+             * (a) same-dir file rename, (b) cross-dir file move, (c) directory move
+             * across parents (fixes ".." + both parents' link counts), (d) a move
+             * into the directory's own subtree is refused. The final image (dumped
+             * below) must stay e2fsck-clean — the gold check of link counts + dirents. */
+            {
+                static uint8_t rd[1500]; for (int i = 0; i < 1500; i++) rd[i] = (uint8_t)(i * 3 + 5);
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/RN1.TXT", rd, 1500) != 1500) { fprintf(stderr, "rename setup write failed\n"); return 1; }
+                static uint8_t rr2[1500];
+                /* (a) same-directory rename */
+                if (ext2_rename_path(bd_read, bd_write, 0, 0, "/RN1.TXT", "/RN2.TXT") != 0) { fprintf(stderr, "rename same-dir failed\n"); return 1; }
+                if (ext2_read_path(bd_read, 0, 0, "/RN2.TXT", rr2, sizeof rr2) != 1500 || memcmp(rr2, rd, 1500) != 0) { fprintf(stderr, "rename same-dir readback wrong\n"); return 1; }
+                if (ext2_read_path(bd_read, 0, 0, "/RN1.TXT", rr2, sizeof rr2) > 0) { fprintf(stderr, "old name still readable after rename\n"); return 1; }
+                /* (b) cross-directory file move into a fresh subdir */
+                if (ext2_mkdir_path(bd_read, bd_write, 0, 0, "/RNDIR") != 0) { fprintf(stderr, "rename mkdir failed\n"); return 1; }
+                if (ext2_rename_path(bd_read, bd_write, 0, 0, "/RN2.TXT", "/RNDIR/RN3.TXT") != 0) { fprintf(stderr, "rename cross-dir failed\n"); return 1; }
+                if (ext2_read_path(bd_read, 0, 0, "/RNDIR/RN3.TXT", rr2, sizeof rr2) != 1500 || memcmp(rr2, rd, 1500) != 0) { fprintf(stderr, "rename cross-dir readback wrong\n"); return 1; }
+                /* (c) directory move across parents (".." repoint + parent link counts) */
+                if (ext2_mkdir_path(bd_read, bd_write, 0, 0, "/RNSUB") != 0) { fprintf(stderr, "rename mkdir2 failed\n"); return 1; }
+                if (ext2_mkdir_path(bd_read, bd_write, 0, 0, "/RNSUB/INNER") != 0) { fprintf(stderr, "rename mkdir3 failed\n"); return 1; }
+                if (ext2_rename_path(bd_read, bd_write, 0, 0, "/RNSUB/INNER", "/RNDIR/INNER") != 0) { fprintf(stderr, "rename dir-move failed\n"); return 1; }
+                if (ext2_isdir_path(bd_read, 0, 0, "/RNDIR/INNER") != 1) { fprintf(stderr, "moved dir absent at new path\n"); return 1; }
+                if (ext2_isdir_path(bd_read, 0, 0, "/RNSUB/INNER") == 1) { fprintf(stderr, "moved dir still at old path\n"); return 1; }
+                /* (d) refuse moving a directory into its own subtree (would orphan it) */
+                if (ext2_rename_path(bd_read, bd_write, 0, 0, "/RNDIR", "/RNDIR/INNER/LOOP") == 0) { fprintf(stderr, "rename allowed a dir into its own subtree\n"); return 1; }
+                printf("rename: same-dir + cross-dir file move + directory move across parents (\"..\" + link counts), subtree-loop refused\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;
