@@ -153,6 +153,7 @@ static void parse_s5(uint32_t dsdt_phys) {
     if (len < 36 || len > (16u << 20)) return;          /* sane bound */
     const uint8_t *aml = (const uint8_t *)h;
     aml_parse(aml, len);                                /* M1284: decode the full DSDT namespace (the real AML walk) */
+    aml_eval_selftest();                                /* M1289: prove the AML method-evaluation VM (logs a marker) */
     for (uint32_t i = 36; i + 8 < len; i++) {           /* leave room for the package bytes */
         if (aml[i]=='_'&&aml[i+1]=='S'&&aml[i+2]=='5'&&aml[i+3]=='_') {
             /* must be a Name: NameOp(0x08) [\\] "_S5_" PackageOp(0x12) */

@@ -71,6 +71,7 @@ require "full bring-up complete"             "core bring-up (PMM/VMM/IDT)"
 require "preemption works"                   "preemptive scheduler"
 require "each process has its own address"   "per-process address-space isolation"
 require "PCI devices on the bus"             "PCI enumeration"
+require "AML method evaluation OK"           "ACPI AML method-evaluation VM (recursion/If + While, M1289)"
 require "Networking works!"                  "e1000 + ARP + ICMP echo (SLIRP gateway)"
 softrequire "200 OK"                         "TCP/HTTP GET to real example.com (needs internet)"
 softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chain validated + certverify (needs internet)"
@@ -93,7 +94,7 @@ forbid "page fault"                  "page fault"
 forbid "general protection"          "#GP fault"
 
 if [ "$fail" -eq 0 ]; then
-    echo "PASS: in-guest boot (9 required bring-up markers present, no crash)"
+    echo "PASS: in-guest boot (10 required bring-up markers present, no crash)"
     exit 0
 else
     echo "FAIL: in-guest boot smoke test"

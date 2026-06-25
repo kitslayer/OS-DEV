@@ -18,6 +18,10 @@ int  aml_count(int type);                           /* # objects of `type` (0 = 
 int  aml_has(const char *seg4);                     /* is a 4-char NameSeg present? */
 int  aml_obj(int i, char *name_out);                /* i-th object: fills name_out[5], returns AML_* type or -1 (M1285) */
 long aml_eval_s5(void);                             /* evaluate the \_S5_ package -> SLP_TYPa|SLP_TYPb<<8, or -1 (M1286) */
+/* AML method EVALUATION (M1289): a bytecode VM that actually RUNS control methods. */
+void aml_eval_register(const char *name4, const uint8_t *body, uint32_t len, uint8_t argc);  /* register a method by raw body bytes (self-test) */
+long aml_eval_call(const char *name4, const uint64_t *args, int nargs);  /* run a method by name -> integer result, or -1 */
+void aml_eval_selftest(void);                       /* run + log the FACT/SUMN VM self-test (boot marker) */
 int  acpi_s5_values(void);                          /* the same value from acpi.c's byte-scan (cross-check, M1286) */
 void acpi_poweroff(void);  /* enter S5: power the machine off. Does not return on success. */
 void acpi_reboot(void);    /* ACPI reset register, else 8042 pulse. Does not return on success. */
