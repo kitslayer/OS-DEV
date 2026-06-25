@@ -1228,6 +1228,20 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(timer_ms() / 10);   /* clock_t: elapsed ticks since boot */
         break;
     }
+    case SYS_uname: {                      /* (struct utsname*) -> system identity strings (M1236) */
+        if (!ubuf(r->rdi, sizeof(struct utsname))) { r->rax = (uint64_t)-1; break; }
+        struct utsname u;
+        for (unsigned i = 0; i < sizeof u; i++) ((uint8_t *)&u)[i] = 0;
+        const char *src[5] = { "OS-DEV", "osdev", "1.0", "#1 x86_64 " __DATE__, "x86_64" };
+        char *dst[5] = { u.sysname, u.nodename, u.release, u.version, u.machine };
+        for (int f = 0; f < 5; f++) { const char *s = src[f]; char *d = dst[f]; int i = 0; while (s[i] && i < 64) { d[i] = s[i]; i++; } d[i] = 0; }
+        for (unsigned i = 0; i < sizeof u; i++) ((uint8_t *)r->rdi)[i] = ((uint8_t *)&u)[i];
+        r->rax = 0;
+        break;
+    }
+    case SYS_getppid: r->rax = (uint64_t)app_sys_getppid(); break;   /* (M1236) */
+    case SYS_getuid: case SYS_getgid:                                /* single-user: uid/gid are root (0) (M1236) */
+    case SYS_geteuid: case SYS_getegid: r->rax = 0; break;
     case SYS_fiemap: {                     /* (path, struct fiemap_extent*, max) -> physical extent map (M1152) */
         int umax = (int)r->rdx;
         if (umax <= 0 || !ustr(r->rdi) || !ubuf(r->rsi, (uint64_t)umax * sizeof(struct fiemap_extent))) { r->rax = (uint64_t)-1; break; }

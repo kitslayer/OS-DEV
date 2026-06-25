@@ -269,6 +269,12 @@ long sys_readlink(const char *path, void *buf, unsigned long size) { return do_s
 int  sys_sched_yield(void) { return (int)do_syscall(SYS_sched_yield, 0, 0, 0); }
 int  sys_nanosleep(long sec, long nsec) { return (int)do_syscall(SYS_nanosleep, sec, nsec, 0); }
 long sys_times(struct tms *t) { return do_syscall(SYS_times, (long)t, 0, 0); }
+int  sys_uname(struct utsname *u) { return (int)do_syscall(SYS_uname, (long)u, 0, 0); }
+int  sys_getppid(void) { return (int)do_syscall(SYS_getppid, 0, 0, 0); }
+int  sys_getuid(void) { return (int)do_syscall(SYS_getuid, 0, 0, 0); }
+int  sys_getgid(void) { return (int)do_syscall(SYS_getgid, 0, 0, 0); }
+int  sys_geteuid(void) { return (int)do_syscall(SYS_geteuid, 0, 0, 0); }
+int  sys_getegid(void) { return (int)do_syscall(SYS_getegid, 0, 0, 0); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }

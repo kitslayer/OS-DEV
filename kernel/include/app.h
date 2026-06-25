@@ -66,6 +66,7 @@ struct termios;
 int    app_tcgetattr(struct termios *t);          /* read the TTY discipline mode (M1174) */
 int    app_tcsetattr(const struct termios *t);    /* set the TTY discipline mode cooked/raw (M1174) */
 int    app_sys_getpid(void);
+int    app_sys_getppid(void);          /* parent pid, for getppid(2) (M1236) */
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */
 uint64_t app_mmap_huge(uint64_t len);   /* reserve a 2 MiB-backed demand-paged region (MAP_HUGETLB); base VA or 0 (M1155) */

@@ -234,6 +234,12 @@
 #define SYS_sched_yield  215   /* () -> voluntarily yield the CPU; 0 (M1234) */
 #define SYS_nanosleep    216   /* (sec, nsec) -> sleep sec+nsec (rounded to the 100Hz tick); 0 (M1234) */
 #define SYS_times        217   /* (struct tms*) -> fill CPU times (ticks); returns elapsed ticks since boot (M1235) */
+#define SYS_uname        218   /* (struct utsname*) -> system identity strings; 0/-1 (M1236) */
+#define SYS_getppid      219   /* () -> parent pid (M1236) */
+#define SYS_getuid       220   /* () -> real uid (single-user: 0) (M1236) */
+#define SYS_getgid       221   /* () -> real gid (0) (M1236) */
+#define SYS_geteuid      222   /* () -> effective uid (0) (M1236) */
+#define SYS_getegid      223   /* () -> effective gid (0) (M1236) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */
 #define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */
@@ -455,6 +461,14 @@ struct tms {                      /* times(2): CPU time in clock ticks @ 100 Hz 
     long tms_stime;               /* system CPU time of the caller        */
     long tms_cutime;              /* user CPU time of reaped children     */
     long tms_cstime;              /* system CPU time of reaped children   */
+};
+
+struct utsname {                  /* uname(2): system identity (M1236) */
+    char sysname[65];             /* "OS-DEV"        */
+    char nodename[65];            /* host name       */
+    char release[65];             /* kernel release  */
+    char version[65];             /* build version   */
+    char machine[65];             /* "x86_64"        */
 };
 
 #ifdef __KERNEL__

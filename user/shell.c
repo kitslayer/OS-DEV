@@ -2926,6 +2926,20 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("times: busy loop charged user CPU -- utime "); printl(a.tms_utime); print(" -> "); printl(b.tms_utime); print(" ticks, real-time monotonic -- OK\n"); }
             else print("timestest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "idtest")) {   /* uname + getppid/getuid/getgid (M1236) */
+            int ok = 1;
+            struct utsname u;
+            if (sys_uname(&u) != 0) ok = 0;
+            else if (!streq(u.sysname, "OS-DEV") || !streq(u.machine, "x86_64") || u.release[0] == 0) ok = 0;
+            if (sys_getuid() != 0 || sys_geteuid() != 0 || sys_getgid() != 0 || sys_getegid() != 0) ok = 0;
+            int mypid = sys_getpid();
+            long kid = sys_fork();
+            if (kid == 0) sys_exit(sys_getppid() == mypid ? 55 : 7);   /* child: getppid() == parent's pid? */
+            int st = -1; sys_waitpid((int)kid, &st);
+            if (st != 55) ok = 0;
+            if (ok) { print("id: uname='"); print(u.sysname); print(" "); print(u.machine); print(" "); print(u.release); print("', uid/gid=0, child getppid()==parent -- OK\n"); }
+            else print("idtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

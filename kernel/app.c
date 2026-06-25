@@ -2513,6 +2513,7 @@ int app_sys_getkbevent(void) {
 }
 
 int  app_sys_getpid(void) { return cur()->pid; }
+int  app_sys_getppid(void) { struct app *a = cur(); return a ? a->parent : 0; }   /* parent pid (M1236) */
 void app_sys_clear(void)  { grid_clear(cur()); }
 void app_setcolor(int idx) { struct app *a = cur(); if (a) a->curcol = (uint8_t)(idx & 15); }
 void app_sys_exit(int code) { struct app *a = cur(); a->exit_code = code; a->exited = 1; task_exit(); }
