@@ -683,13 +683,16 @@ static void render_scene(void) {
         };
         const char **rows = (ctx_kind == 1) ? desk_rows : win_rows;
         int nr = ctx_nrows(), cw = ctx_w(), ch = nr * CTX_ROW_H + 4;
-        fb_fill_rect(ctx_x, ctx_y, cw, ch, 0x1E1E2A);
+        vgrad(ctx_x, ctx_y, cw, ch, 0x262636, 0x14141D);     /* gradient panel (matches the Apps menu) */
+        fb_fill_rect(ctx_x, ctx_y, cw, 2, 0x4A90E2);         /* bright top accent */
         box(ctx_x, ctx_y, cw, ch, 0x2D6CDF);
         int sel = ctx_row_at(mouse_x(), mouse_y());          /* row under the cursor (-1 = none) */
         for (int i = 0; i < nr; i++) {
             int iy = ctx_y + 2 + i * CTX_ROW_H;
-            if (i == sel)                                        /* hover highlight */
-                fb_fill_rect(ctx_x + 2, iy, cw - 4, CTX_ROW_H, 0x2D4A8A);
+            if (i == sel) {                                      /* hover highlight: gradient bar + left accent */
+                vgrad(ctx_x + 2, iy, cw - 4, CTX_ROW_H, 0x3A78D8, 0x2C66D6);
+                fb_fill_rect(ctx_x + 2, iy, 2, CTX_ROW_H, 0x8FC0FF);
+            }
             draw_text(ctx_x + 12, iy + 3, rows[i], i == sel ? 0xFFFFFF : 0xD0D8F0);
         }
     }
@@ -730,7 +733,7 @@ static void render_scene(void) {
         int n = (int)(sizeof(H) / sizeof(H[0]));
         int pw = 380, ph = n * 18 + 40;
         int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
-        fb_fill_rect(px, py, pw, ph, 0x16161F);
+        vgrad(px, py, pw, ph, 0x1C1C28, 0x12121A);           /* subtly graded panel body */
         box(px, py, pw, ph, 0x2D6CDF);
         vgrad(px, py, pw, 26, 0x3A78D8, 0x2C66D6);            /* title bar */
         fb_fill_rect(px, py, pw, 1, lerp(0x3A78D8, 0xFFFFFF, 1, 2));
@@ -748,7 +751,7 @@ static void render_scene(void) {
         int rows = win_count > 0 ? win_count : 1;
         int pw = 320, ph = rows * MENU_ITEM_H + 40;
         int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
-        fb_fill_rect(px, py, pw, ph, 0x16161F);
+        vgrad(px, py, pw, ph, 0x1C1C28, 0x12121A);           /* subtly graded panel body */
         box(px, py, pw, ph, 0x2D6CDF);
         vgrad(px, py, pw, 26, 0x3A78D8, 0x2C66D6);            /* title bar */
         fb_fill_rect(px, py, pw, 1, lerp(0x3A78D8, 0xFFFFFF, 1, 2));
@@ -757,8 +760,10 @@ static void render_scene(void) {
             draw_text(px + 16, py + 34, "(no windows)", 0x9FB0CC);
         } else for (int i = 0; i < win_count; i++) {
             int iy = py + 30 + i * MENU_ITEM_H;
-            if (i == sw_sel)                                  /* keyboard highlight (reuse menu colour) */
-                fb_fill_rect(px + 4, iy, pw - 8, MENU_ITEM_H, 0x2D4A8A);
+            if (i == sw_sel) {                                /* keyboard highlight: gradient bar + left accent */
+                vgrad(px + 4, iy, pw - 8, MENU_ITEM_H, 0x3A78D8, 0x2C66D6);
+                fb_fill_rect(px + 4, iy, 2, MENU_ITEM_H, 0x8FC0FF);
+            }
             char t[40]; int n = 0; const char *s = windows[i].title;
             while (s && s[n] && n < 28) { t[n] = s[n]; n++; }
             if (windows[i].minimized) {                       /* mark hidden windows */
