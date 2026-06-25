@@ -147,6 +147,8 @@ long sys_insmod(void);                                         /* load+relocate+
 int  sys_rmmod(const char *name);                              /* unload a module: run mod_exit + free its slot; 0/-1 (M1262) */
 int  sys_sendfd(int ep, int fd);                               /* SCM_RIGHTS: pass an fd over an AF_UNIX endpoint; 0/-1 (M1265) */
 int  sys_recvfd(int ep);                                       /* SCM_RIGHTS: receive a passed fd; new fd/-1 (M1265) */
+int  sys_inotify_init(void);                                   /* a pollable filesystem-watch fd; fd/-1 (M1266) */
+int  sys_inotify_add_watch(int fd, const char *path, unsigned int mask);  /* register a watch; wd/-1 (M1266) */
 void *dlopen(const char *path);                                /* userspace dynamic linker: map+relocate a .so; handle/0 (M1263) */
 void *dlsym(void *handle, const char *name);                   /* resolve an exported symbol to its runtime address; 0 if absent (M1263) */
 long sys_times(struct tms *t);                                  /* fill CPU times (ticks); returns boot ticks (M1235) */

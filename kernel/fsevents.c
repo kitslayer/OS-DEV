@@ -7,6 +7,7 @@
  * A fixed ring, byte writes only, safe to call from any FS path.
  */
 #include "fsevents.h"
+#include "inotify.h"    /* feed real per-fd inotify watches from the same chokepoint (M1266) */
 #include <stdint.h>
 
 #define FSEV_N 64                       /* remember the last 64 events */
@@ -22,6 +23,7 @@ void fsevents_record(char op, const char *path) {
     while (path[j] && j < (int)sizeof ev[i].path - 1) { ev[i].path[j] = path[j]; j++; }
     ev[i].path[j] = 0;
     fsev_head++;
+    inotify_feed(op, path);                 /* also wake any matching inotify fd watches (M1266) */
 }
 
 static const char *op_word(char op) {

@@ -78,6 +78,8 @@ int    app_pipe2(int *out, int flags); /* pipe() + atomic O_CLOEXEC (M1239) */
 int    app_scm_send(int ep, int fd);   /* SCM_RIGHTS: queue fd to pass over an AF_UNIX endpoint; 0/-1 (M1265) */
 int    app_scm_recv(int ep);           /* SCM_RIGHTS: install a passed fd from the peer; new fd/-1 (M1265) */
 int    app_eventfd_create(unsigned int initval, int flags);  /* pollable u64-counter fd (M1242) */
+int    app_inotify_init(void);                       /* a pollable filesystem-watch fd (M1266) */
+int    app_inotify_add(int fd, const char *path, unsigned int mask);  /* register a watch; wd/-1 (M1266) */
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */
 uint64_t app_mmap_huge(uint64_t len);   /* reserve a 2 MiB-backed demand-paged region (MAP_HUGETLB); base VA or 0 (M1155) */

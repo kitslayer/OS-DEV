@@ -3262,6 +3262,24 @@ static int run_command(char *line, char *cwd) {
                 sys_fdclose(fds[0]); sys_fdclose(fds[1]);
             }
             if (!ok) { print("scmtest: VERIFY FAILED\n"); g_status = 1; }
+        } else if (streq(line, "inotifytest")) {   /* real pollable inotify fd (M1266) */
+            int ok = 1;
+            int fd = sys_inotify_init();
+            if (fd < 0) ok = 0;
+            int wd = (fd >= 0) ? sys_inotify_add_watch(fd, "INOTI", 2 /*IN_MODIFY*/) : -1;
+            if (wd < 0) ok = 0;
+            sys_writefile("/tmp/INOTI.TXT", "hi", 2);             /* a VFS write -> fsevents -> inotify event */
+            unsigned char eb[64]; long n = (fd >= 0) ? sys_fdread(fd, eb, sizeof eb) : -1;
+            long emask = (n >= 48) ? (eb[4] | (eb[5]<<8) | (eb[6]<<16) | ((long)eb[7]<<24)) : -1;
+            int  ewd  = (n >= 48) ? (eb[0] | (eb[1]<<8) | (eb[2]<<16) | (eb[3]<<24)) : -1;
+            int  nameok = (n >= 48 && eb[16]=='I' && eb[17]=='N' && eb[18]=='O');   /* basename "INOTI.TXT" */
+            if (!(ok && n >= 48 && emask == 2 && ewd == wd && nameok)) ok = 0;
+            if (ok) { print("inotify: watch \"INOTI\" -> writing /tmp/INOTI.TXT delivered an event on a pollable fd (wd ");
+                      printl(ewd); print(", mask IN_MODIFY, name '");
+                      for (int i = 16; i < 48 && eb[i]; i++) { char c[2] = {(char)eb[i], 0}; print(c); }
+                      print("') -- inotify OK\n"); }
+            else { print("inotifytest: VERIFY FAILED (n="); printl(n); print(" mask="); printl(emask); print(" wd="); printl(ewd); print(")\n"); g_status = 1; }
+            if (fd >= 0) sys_fdclose(fd);
         } else if (streq(line, "diskstatstest")) {   /* /proc/diskstats: per-block-device I/O counters (M1256) */
             char sb[1024]; int ok = 1;
             long n = sys_readfile("/proc/diskstats", sb, sizeof sb - 1);

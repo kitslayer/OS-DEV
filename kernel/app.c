@@ -11,6 +11,7 @@
  */
 #include "app.h"
 #include "flock.h"   /* flock_release_pid on process exit (M1177) */
+#include "inotify.h" /* inotify fd type 8 (M1266) */
 #include "pty.h"     /* pty_release_pid on process exit (M1185) */
 #include "pipe.h"    /* anonymous pipe objects for the fd table (M1187) */
 #include "fifo.h"    /* named pipes (FIFOs), path-keyed (M1188) */
@@ -2959,6 +2960,9 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
         a->fd[fd].off = a->fd[fd].write_end ? cnt - 1 : 0;                    /* SEMAPHORE: decrement, else drain */
         return 8;
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 8) {   /* inotify: drain queued events (M1266) */
+        return inotify_read(a->fd[fd].obj, buf, max);
+    }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
@@ -3019,6 +3023,7 @@ int app_fd_close(int fd) {
     if (a->fd[fd].type == 1) pipe_close_end(a->fd[fd].obj, a->fd[fd].write_end);
     else if (a->fd[fd].type == 3) memfd_unref(a->fd[fd].obj);   /* drop a memfd reference (M1212) */
     else if (a->fd[fd].type == 6) epoll_unref(a->fd[fd].obj);   /* drop an epoll reference (M1220) */
+    else if (a->fd[fd].type == 8) inotify_free(a->fd[fd].obj);  /* free the inotify instance (M1266) */
     a->fd[fd].used = 0; a->fd[fd].type = 0;
     return 0;
 }
@@ -3192,6 +3197,24 @@ int app_eventfd_create(unsigned int initval, int flags) {
                                 0, {0}, (long)initval, (flags & EFD_CLOEXEC) ? (uint8_t)1 : (uint8_t)0 };
     return fd;
 }
+
+/* inotify (M1266): a pollable filesystem-watch fd. fd type 8, obj = the kernel
+ * inotify-instance index (kernel/inotify.c). read() drains queued events;
+ * app_fd_ready reports POLLIN when events pend; close frees the instance. */
+int app_inotify_init(void) {
+    struct app *a = cur(); if (!a) return -1;
+    int idx = inotify_new(); if (idx < 0) return -1;
+    int fd = -1;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) { inotify_free(idx); return -1; }
+    a->fd[fd] = (struct fdent){ 1, 8, 0, idx, {0}, 0, 0 };   /* used, type=inotify, obj=instance */
+    return fd;
+}
+int app_inotify_add(int fd, const char *path, unsigned int mask) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 8) return -1;
+    return inotify_add(a->fd[fd].obj, path, mask);
+}
 /* fd hygiene (M1218): fcntl(F_GETFD/F_SETFD/F_DUPFD/F_DUPFD_CLOEXEC), dup3,
  * close_range — over the per-fd FD_CLOEXEC bit (honored by app_exec above; fork
  * copies the whole fdent so it survives a fork, as POSIX requires). */
@@ -3361,6 +3384,8 @@ int app_fd_ready(app_t *ap, int fd, int events) {
         if (events & POLLOUT) re |= POLLOUT;
     } else if (a->fd[fd].type == 7) {                      /* pidfd: POLLIN once the target process has exited (M1222) */
         if ((events & POLLIN) && !app_pid_alive(a->fd[fd].obj)) re |= POLLIN;
+    } else if (a->fd[fd].type == 8) {                      /* inotify: POLLIN when events are queued (M1266) */
+        if ((events & POLLIN) && inotify_ready(a->fd[fd].obj)) re |= POLLIN;
     } else {
         return POLLNVAL;
     }

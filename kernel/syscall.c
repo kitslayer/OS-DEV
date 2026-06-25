@@ -724,6 +724,13 @@ void syscall_dispatch(struct registers *r) {
     case SYS_recvfd:                       /* (ep) -> SCM_RIGHTS: install a passed fd; new fd/-1 (M1265) */
         r->rax = (uint64_t)(int64_t)app_scm_recv((int)r->rdi);
         break;
+    case SYS_inotify_init:                 /* () -> a pollable filesystem-watch fd (M1266) */
+        r->rax = (uint64_t)(int64_t)app_inotify_init();
+        break;
+    case SYS_inotify_add_watch:            /* (fd, path, mask) -> register a watch; wd/-1 (M1266) */
+        if (!ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_inotify_add((int)r->rdi, (const char *)r->rsi, (unsigned int)r->rdx);
+        break;
     case SYS_rmmod:                        /* (name) -> run mod_exit + free the module slot; 0/-1 (M1262) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)module_unload((const char *)r->rdi);
