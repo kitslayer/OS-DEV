@@ -28,6 +28,7 @@ const char *app_arg(app_t *a);          /* the app's launch argument (/proc/<pid
 void       *app_task(app_t *a);         /* the app's task_t* (cast in procfs for stop/cont) */
 uint64_t    app_cr3(app_t *a);          /* the app's CR3 (address space), for /proc/<pid>/wss */
 void        app_self_faults(uint64_t *minflt, uint64_t *majflt);   /* current app's minor/major fault counts (M1150) */
+void        app_faults(app_t *a, uint64_t *minflt, uint64_t *majflt);  /* any app's fault counts, for /proc/<pid>/stat (M1252) */
 int         app_format_smaps(app_t *a, char *b, int max);          /* /proc/<pid>/smaps: per-region Rss/Pss/Dirty/Swap (M1151) */
 int         app_format_pagemap(app_t *a, char *b, int max);        /* /proc/<pid>/pagemap: per-page residency + PFN (M1167) */
 uint64_t    app_heap_bytes(app_t *a);   /* heap size in bytes */

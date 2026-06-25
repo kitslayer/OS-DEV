@@ -412,7 +412,9 @@ static long gen_pid_stat(char *b, int max, int pid, int state, void *proc) {
     p = sdec(b, p, max, (uint64_t)app_pgid_of(a)); p = sapp(b, p, max, " ");
     p = sdec(b, p, max, (uint64_t)app_sid_of(a));  p = sapp(b, p, max, " ");
     p = sapp(b, p, max, "0 0 0 ");               /* tty_nr tpgid flags */
-    p = sapp(b, p, max, "0 0 0 0 ");             /* minflt cminflt majflt cmajflt */
+    uint64_t mnf = 0, mjf = 0; app_faults(a, &mnf, &mjf);   /* real page-fault counts (M1252) */
+    p = sdec(b, p, max, mnf); p = sapp(b, p, max, " 0 ");   /* minflt cminflt(0: no child accounting) */
+    p = sdec(b, p, max, mjf); p = sapp(b, p, max, " 0 ");   /* majflt cmajflt */
     p = sdec(b, p, max, utime);                  p = sapp(b, p, max, " ");
     p = sdec(b, p, max, stime);                  p = sapp(b, p, max, " ");
     p = sapp(b, p, max, "0 0 20 ");              /* cutime cstime priority */

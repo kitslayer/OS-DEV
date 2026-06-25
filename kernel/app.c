@@ -554,6 +554,10 @@ void app_self_faults(uint64_t *minflt, uint64_t *majflt) {        /* the current
     if (minflt) *minflt = a ? a->minflt : 0;
     if (majflt) *majflt = a ? a->majflt : 0;
 }
+void app_faults(app_t *a, uint64_t *minflt, uint64_t *majflt) {   /* page-fault counters of ANY app, for /proc/<pid>/stat (M1252) */
+    if (minflt) *minflt = a ? a->minflt : 0;
+    if (majflt) *majflt = a ? a->majflt : 0;
+}
 
 /* per-process cwd (M1144): the VFS stashes/loads an app's current directory here
  * across app switches. A fresh app is zeroed -> synth 0 + "" + fat 0 = boot root. */

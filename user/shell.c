@@ -3164,6 +3164,23 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "*at: AT_FDCWD openat/fstatat/unlinkat + dirfd-relative openat (open /tmp -> create AT2.TXT in it) -- OK\n"
                      : "attest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "faulttest")) {   /* /proc/<pid>/stat minflt field is real now (M1252) */
+            int ok = 1; char sb[256]; long m1 = -1, m2 = -1;
+            unsigned long len = 100 * 4096;
+            unsigned char *mm = (unsigned char *)sys_mmap(len);        /* a fresh demand-paged anon region (like usagetest) */
+            for (int pass = 0; pass < 2; pass++) {
+                long n = sys_readfile("/proc/self/stat", sb, sizeof sb - 1); long mf = -1;
+                if (n > 0) { sb[n] = 0; int fld = 0, i = 0;            /* field 10 = minflt */
+                    while (sb[i]) { while (sb[i] == ' ') i++; if (!sb[i]) break;
+                        fld++; int s = i; while (sb[i] && sb[i] != ' ') i++;
+                        if (fld == 10) { long v = 0; for (int k = s; k < i; k++) if (sb[k] >= '0' && sb[k] <= '9') v = v * 10 + (sb[k] - '0'); mf = v; break; } } }
+                if (pass == 0) { m1 = mf; if (mm) for (unsigned long i = 0; i < len; i += 4096) mm[i] = 1; }  /* fault 100 pages */
+                else m2 = mf;
+            }
+            if (!(mm && m1 >= 0 && m2 - m1 >= 100)) ok = 0;            /* /proc/self/stat's minflt tracked the demand paging */
+            if (ok) { print("faults: /proc/self/stat minflt "); printl(m1); print(" -> "); printl(m2); print(" after mmap+touch 100 pages (field 10 is the real counter, was hardcoded 0) -- OK\n"); }
+            else print("faulttest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
