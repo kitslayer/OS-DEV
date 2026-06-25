@@ -217,6 +217,8 @@
 #define SYS_epoll_create1 200  /* (flags) -> an epoll fd (>=3); -1 (M1220) */
 #define SYS_epoll_ctl    201   /* (epfd, op, fd, struct epoll_event*) -> register interest; 0/-1 (M1220) */
 #define SYS_epoll_wait   202   /* (epfd, struct epoll_event*, maxevents, timeout_ms) -> # ready/0/-1 (M1220) */
+#define SYS_pidfd_open   203   /* (pid, flags) -> a pollable process-exit handle (>=3); -1 (M1222) */
+#define SYS_pidfd_send_signal 204  /* (pidfd, sig) -> signal the process; 0/-1 (M1222) */
 
 /* epoll (M1220): scalable readiness multiplexing as an fd object. `events` uses
  * the POLLIN/POLLOUT bits; `data` is opaque userdata echoed back on a ready event. */

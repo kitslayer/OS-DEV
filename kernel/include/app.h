@@ -141,6 +141,8 @@ int  app_dup3(int oldfd, int newfd, int flags);            /* dup w/ O_CLOEXEC; 
 long app_close_range(unsigned lo, unsigned hi, int flags); /* close fds in [lo,hi]; 0/-1 (M1218) */
 long app_sendfile(int out_fd, int in_fd, long *off, unsigned long count); /* zero-copy fd->fd; bytes/-1 (M1219) */
 const char *app_fd_path(int fd);                           /* path behind a FILE fd (type 2), or 0 (M1221) */
+int  app_pidfd_open(int pid);                              /* a pollable process-exit handle (>=3); -1 (M1222) */
+int  app_pidfd_send_signal(int pidfd, int sig);            /* signal the pidfd's process; 0/-1 (M1222) */
 struct epoll_event;                                        /* full definition in syscall.h (M1220) */
 int  app_epoll_create(void);                               /* an epoll fd (>=3); -1 (M1220) */
 int  app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data); /* ADD/MOD/DEL; 0/-1 (M1220) */

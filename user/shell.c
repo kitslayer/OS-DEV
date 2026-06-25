@@ -2711,6 +2711,26 @@ static int run_command(char *line, char *cwd) {
                          : "locktest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "pidfdtest")) {  /* pidfd: a pollable process-exit handle (M1222) */
+            int ok = 1;
+            long pid = sys_fork();
+            if (pid == 0) {                          /* child: stay alive a moment, then exit */
+                for (volatile long i = 0; i < 30000000; i++) {}
+                sys_exit(0);
+            }
+            int pf = sys_pidfd_open((int)pid, 0);
+            if (pf < 3) ok = 0;
+            /* (A) child still running -> poll(timeout 0) returns 0 (not exited) */
+            struct pollfd a0 = { pf, POLLIN, 0 };
+            if (sys_poll(&a0, 1, 0) != 0) ok = 0;
+            /* (B) block until the child exits -> POLLIN */
+            struct pollfd b0 = { pf, POLLIN, 0 };
+            if (!(sys_poll(&b0, 1, 2000) == 1 && (b0.revents & POLLIN))) ok = 0;
+            int st = 0; sys_waitpid((int)pid, &st);
+            sys_fdclose(pf);
+            print(ok ? "pidfd: open a child handle -> poll blocks while alive, POLLIN on exit -- OK\n"
+                     : "pidfdtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

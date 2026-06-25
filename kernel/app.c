@@ -3157,10 +3157,33 @@ int app_fd_ready(app_t *ap, int fd, int events) {
         }
     } else if (a->fd[fd].type == 4) {                      /* timerfd: POLLIN at/after expiry (M1217) */
         if ((events & POLLIN) && a->fd[fd].off != 0 && (uint64_t)timer_ms() >= (uint64_t)a->fd[fd].off) re |= POLLIN;
+    } else if (a->fd[fd].type == 7) {                      /* pidfd: POLLIN once the target process has exited (M1222) */
+        if ((events & POLLIN) && !app_pid_alive(a->fd[fd].obj)) re |= POLLIN;
     } else {
         return POLLNVAL;
     }
     return re;
+}
+/* pidfd (M1222): a pid-reuse-aware-ish process handle as an fd. It stores the
+ * target pid (a plain value — no shared object, so fork/dup2 just copy it and
+ * close needs no teardown). poll/epoll report POLLIN once the process has
+ * exited (app_pid_alive goes false), so a server can wait on child exits in the
+ * same loop as its sockets/timers. */
+int app_pidfd_open(int pid) {
+    struct app *a = cur(); if (!a) return -1;
+    if (!app_pid_alive(pid)) return -1;                    /* must name a live process */
+    int fd = -1; for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;
+    a->fd[fd] = (struct fdent){ 1, 7, 0, pid, {0}, 0, 0 };  /* used, type=pidfd, obj=pid */
+    return fd;
+}
+int app_pidfd_send_signal(int pidfd, int sig) {
+    struct app *a = cur();
+    if (!a || pidfd < 0 || pidfd >= APP_NFD || !a->fd[pidfd].used || a->fd[pidfd].type != 7) return -1;
+    struct app *t = app_by_pid(a->fd[pidfd].obj);
+    if (!t || t->exited) return -1;                        /* gone: ESRCH */
+    app_request_signal(t, sig);
+    return 0;
 }
 /* splice(in_fd, out_fd, len): move bytes from a pipe read-end fd to a pipe
  * write-end fd, entirely in-kernel (no userspace bounce) (M1211). bytes/0/-1. */

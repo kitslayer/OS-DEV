@@ -274,6 +274,8 @@ long sys_sendfile(int out_fd, int in_fd, long *off, unsigned long count) { retur
 int  sys_epoll_create1(int flags) { return (int)do_syscall(SYS_epoll_create1, flags, 0, 0); }
 int  sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev) { return (int)do_syscall4(SYS_epoll_ctl, epfd, op, fd, (long)ev); }
 int  sys_epoll_wait(int epfd, struct epoll_event *evs, int maxevents, long timeout) { return (int)do_syscall4(SYS_epoll_wait, epfd, (long)evs, maxevents, timeout); }
+int  sys_pidfd_open(int pid, int flags) { return (int)do_syscall(SYS_pidfd_open, pid, flags, 0); }
+int  sys_pidfd_send_signal(int pidfd, int sig) { return (int)do_syscall(SYS_pidfd_send_signal, pidfd, sig, 0); }
 int  sys_jail(const char *prog, const char *promises, const char *path) { return (int)do_syscall(SYS_jail, (long)prog, (long)promises, (long)path); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }
