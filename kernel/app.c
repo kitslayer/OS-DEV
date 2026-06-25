@@ -2859,6 +2859,15 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
         }
         return 0;                                                             /* not expired yet */
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 5) {   /* eventfd: read the counter (M1242) */
+        if (max < 8) return -1;
+        long cnt = a->fd[fd].off;
+        if (cnt <= 0) return -1;                                              /* empty -> would block; non-blocking returns -1 */
+        uint64_t val = a->fd[fd].write_end ? 1u : (uint64_t)cnt;              /* SEMAPHORE: 1, else the whole count */
+        for (int i = 0; i < 8; i++) ((char *)buf)[i] = (char)(val >> (i * 8));
+        a->fd[fd].off = a->fd[fd].write_end ? cnt - 1 : 0;                    /* SEMAPHORE: decrement, else drain */
+        return 8;
+    }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
@@ -2898,6 +2907,16 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
         for (unsigned long i = 0; i < len; i++) m->buf[off + i] = ((const char *)buf)[i];
         a->fd[fd].off = off + (long)len;
         return (long)len;
+    }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 5) {   /* eventfd: add to the counter (M1242) */
+        if (len < 8) return -1;
+        uint64_t add = 0;
+        for (int i = 0; i < 8; i++) add |= (uint64_t)(unsigned char)((const char *)buf)[i] << (i * 8);
+        if (add == 0xFFFFFFFFFFFFFFFFull) return -1;                          /* ~0 is reserved/invalid for eventfd */
+        long nc = a->fd[fd].off + (long)add;
+        if (nc < a->fd[fd].off) return -1;                                   /* overflow -> would block; reject */
+        a->fd[fd].off = nc;
+        return 8;
     }
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
     return pipe_write(idx, buf, len);
@@ -3069,6 +3088,19 @@ long app_timerfd_settime(int fd, long delay_ms) {
     a->fd[fd].off = (delay_ms <= 0) ? 0 : (long)(timer_ms() + (uint64_t)delay_ms);   /* absolute expiry; <=0 disarms */
     return 0;
 }
+/* eventfd (M1242): a pollable u64-counter fd. The counter lives in the fd's own
+ * `off` field (like timerfd — no object table, so fork copies it + close needs no
+ * teardown); write() adds to it, read() drains it (or decrements by 1 in
+ * EFD_SEMAPHORE mode, flagged via write_end), poll() reports POLLIN when >0. */
+int app_eventfd_create(unsigned int initval, int flags) {
+    struct app *a = cur(); if (!a) return -1;
+    int fd = -1;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;
+    a->fd[fd] = (struct fdent){ 1, 5, (flags & EFD_SEMAPHORE) ? (uint8_t)1 : (uint8_t)0,
+                                0, {0}, (long)initval, (flags & EFD_CLOEXEC) ? (uint8_t)1 : (uint8_t)0 };
+    return fd;
+}
 /* fd hygiene (M1218): fcntl(F_GETFD/F_SETFD/F_DUPFD/F_DUPFD_CLOEXEC), dup3,
  * close_range — over the per-fd FD_CLOEXEC bit (honored by app_exec above; fork
  * copies the whole fdent so it survives a fork, as POSIX requires). */
@@ -3233,6 +3265,9 @@ int app_fd_ready(app_t *ap, int fd, int events) {
         }
     } else if (a->fd[fd].type == 4) {                      /* timerfd: POLLIN at/after expiry (M1217) */
         if ((events & POLLIN) && a->fd[fd].off != 0 && (uint64_t)timer_ms() >= (uint64_t)a->fd[fd].off) re |= POLLIN;
+    } else if (a->fd[fd].type == 5) {                      /* eventfd: POLLIN when counter>0, always writable (M1242) */
+        if ((events & POLLIN) && a->fd[fd].off > 0) re |= POLLIN;
+        if (events & POLLOUT) re |= POLLOUT;
     } else if (a->fd[fd].type == 7) {                      /* pidfd: POLLIN once the target process has exited (M1222) */
         if ((events & POLLIN) && !app_pid_alive(a->fd[fd].obj)) re |= POLLIN;
     } else {

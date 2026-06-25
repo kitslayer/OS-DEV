@@ -3000,6 +3000,39 @@ static int run_command(char *line, char *cwd) {
                       print(" (absent path -> -1) -- OK\n"); }
             else print("statfstest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "eventfdtest")) {   /* eventfd counter fd (M1242) */
+            int ok = 1;
+            unsigned char b[8]; unsigned long long v;
+            int efd = sys_eventfd(5, 0);
+            if (efd < 0) ok = 0;
+            else {
+                struct pollfd pf = { efd, POLLIN, 0 };
+                if (!(sys_poll(&pf, 1, 0) == 1 && (pf.revents & POLLIN))) ok = 0;   /* count 5 -> POLLIN */
+                long n = sys_fdread(efd, b, 8);
+                v = 0; for (int i = 0; i < 8; i++) v |= (unsigned long long)b[i] << (i * 8);
+                if (!(n == 8 && v == 5)) ok = 0;                                    /* read drains, returns 5 */
+                pf.revents = 0;
+                if (sys_poll(&pf, 1, 0) != 0) ok = 0;                              /* counter 0 -> not ready */
+                unsigned char w[8]; for (int i = 0; i < 8; i++) w[i] = (i == 0) ? 3 : 0;
+                if (sys_fdwrite(efd, w, 8) != 8) ok = 0;                            /* add 3 */
+                long n2 = sys_fdread(efd, b, 8);
+                v = 0; for (int i = 0; i < 8; i++) v |= (unsigned long long)b[i] << (i * 8);
+                if (!(n2 == 8 && v == 3)) ok = 0;
+                sys_fdclose(efd);
+            }
+            int sfd = sys_eventfd(2, EFD_SEMAPHORE);                                /* semaphore mode */
+            if (sfd < 0) ok = 0;
+            else {
+                long a1 = sys_fdread(sfd, b, 8); v = 0; for (int i = 0; i < 8; i++) v |= (unsigned long long)b[i] << (i * 8);
+                if (!(a1 == 8 && v == 1)) ok = 0;                                   /* returns 1, count 2->1 */
+                long a2 = sys_fdread(sfd, b, 8); v = 0; for (int i = 0; i < 8; i++) v |= (unsigned long long)b[i] << (i * 8);
+                if (!(a2 == 8 && v == 1)) ok = 0;                                   /* returns 1, count 1->0 */
+                if (sys_fdread(sfd, b, 8) != -1) ok = 0;                            /* drained -> -1 */
+                sys_fdclose(sfd);
+            }
+            print(ok ? "eventfd: count(5)->POLLIN->read 5->drained; +3->read 3; EFD_SEMAPHORE read 1,1 then empty -- OK\n"
+                     : "eventfdtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
