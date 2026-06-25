@@ -2832,6 +2832,24 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "truncate: shrink 11->5 + grow 5->8 (zero-fill) + ftruncate(fd) 8->3 -- OK\n"
                      : "truncatetest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "seektest")) {   /* lseek SEEK_DATA / SEEK_HOLE (M1229) */
+            int ok = 1;
+            sys_writefile("/tmp/SK.TXT", "0123456789", 10);
+            if (sys_truncate("/tmp/SK.TXT", 200) != 0) ok = 0;          /* grow (tmpfs zero-fills, no holes) */
+            int fd = sys_open("/tmp/SK.TXT");
+            if (fd < 0) ok = 0;
+            else {
+                if (sys_lseek(fd, 0,   SEEK_DATA) != 0)   ok = 0;       /* data starts at 0 */
+                if (sys_lseek(fd, 0,   SEEK_HOLE) != 200) ok = 0;       /* only hole is the implicit one at EOF */
+                if (sys_lseek(fd, 150, SEEK_DATA) != 150) ok = 0;       /* mid-file is data (filled) */
+                if (sys_lseek(fd, 200, SEEK_DATA) != -1)  ok = 0;       /* at EOF -> ENXIO */
+                if (sys_lseek(fd, 200, SEEK_HOLE) != -1)  ok = 0;       /* at EOF -> ENXIO */
+                sys_fdclose(fd);
+            }
+            sys_delete("/tmp/SK.TXT");
+            print(ok ? "seek: SEEK_DATA(0)=0, SEEK_HOLE(0)=EOF, SEEK_DATA(mid)=mid, ENXIO past EOF -- OK\n"
+                     : "seektest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

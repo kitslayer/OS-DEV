@@ -220,6 +220,25 @@ int main(int argc, char **argv) {
                 if (r2 != 1500 || memcmp(tr, td, 500) != 0 || !zeros_ok) { fprintf(stderr, "truncate grow readback wrong (%ld z=%d)\n", r2, zeros_ok); return 1; }
                 printf("truncate: shrink 3000->500 (frees blocks), grow 500->1500 sparse (zero-filled tail)\n");
             }
+            /* SEEK_HOLE / SEEK_DATA (M1229): build a file with a real middle hole
+             * ([data][hole][data]) and assert the boundaries. Overwrite converts
+             * the extent inode to block-mapped so punch_hole can carve the hole. */
+            {
+                static uint8_t sd[5000]; for (int i = 0; i < 5000; i++) sd[i] = (uint8_t)(i | 1);
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/SH.TXT", sd, 5000) != 5000) { fprintf(stderr, "seek setup write failed\n"); return 1; }
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/SH.TXT", sd, 5000) != 5000) { fprintf(stderr, "seek overwrite failed\n"); return 1; }
+                if (ext2_punch_hole(bd_read, bd_write, 0, 0, "/SH.TXT", 1024, 2048) < 0) { fprintf(stderr, "seek punch_hole failed\n"); return 1; }  /* returns #blocks freed */
+                /* now: [0,1024) data, [1024,3072) hole, [3072,5000) data */
+                long e = 0;
+                if (ext2_seek_data_hole(bd_read, 0, 0, "/SH.TXT", 0,    0) != 0)    e = __LINE__;   /* DATA at 0 -> 0 */
+                if (ext2_seek_data_hole(bd_read, 0, 0, "/SH.TXT", 0,    1) != 1024) e = __LINE__;   /* HOLE after 0 -> 1024 */
+                if (ext2_seek_data_hole(bd_read, 0, 0, "/SH.TXT", 1024, 0) != 3072) e = __LINE__;   /* DATA after the hole -> 3072 */
+                if (ext2_seek_data_hole(bd_read, 0, 0, "/SH.TXT", 1024, 1) != 1024) e = __LINE__;   /* HOLE at 1024 -> 1024 */
+                if (ext2_seek_data_hole(bd_read, 0, 0, "/SH.TXT", 3072, 1) != 5000) e = __LINE__;   /* HOLE after last data -> EOF */
+                if (ext2_seek_data_hole(bd_read, 0, 0, "/SH.TXT", 5000, 0) != -1)   e = __LINE__;   /* DATA at EOF -> ENXIO */
+                if (e) { fprintf(stderr, "seek_data_hole wrong (line %ld)\n", e); return 1; }
+                printf("seek: SEEK_DATA/SEEK_HOLE on a [data|hole|data] file -- boundaries at 0/1024/3072/5000 + ENXIO at EOF\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;

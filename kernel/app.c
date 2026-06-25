@@ -2957,6 +2957,18 @@ int app_open(const char *path, int flags) {
 long app_lseek(int fd, long off, int whence) {
     struct app *a = cur(); if (!a) return -1;
     if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || (a->fd[fd].type != 2 && a->fd[fd].type != 3)) return -1;
+    if (whence == SEEK_DATA || whence == SEEK_HOLE) {        /* sparse-aware seek (M1229) */
+        int find_hole = (whence == SEEK_HOLE);
+        long r;
+        if (a->fd[fd].type == 3) {                           /* memfd: contiguous, no holes */
+            long size = (long)memfds[a->fd[fd].obj].size;
+            if (off < 0 || off >= size) return -1;           /* ENXIO */
+            r = find_hole ? size : off;
+        } else r = vfs_seek_data_hole(a->fd[fd].path, off, find_hole);
+        if (r < 0) return -1;
+        a->fd[fd].off = r;                                   /* POSIX: the seek also repositions the fd */
+        return r;
+    }
     long base = 0;
     if (whence == 1) base = a->fd[fd].off;
     else if (whence == 2) {                                  /* SEEK_END: file size (memfd size for type 3, M1212) */

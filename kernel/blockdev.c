@@ -622,6 +622,16 @@ long blockdev_mount_truncate(int i, const char *path, uint64_t newlen) {   /* re
     return ext2_truncate_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", newlen);
 }
 
+/* SEEK_HOLE/SEEK_DATA on mount `i`. ext2 walks the block map for real sparse
+ * boundaries; -2 means "not an ext2 mount" so vfs falls back to a generic
+ * no-holes answer (FAT/ISO are never sparse). M1229. */
+long blockdev_mount_seek_data_hole(int i, const char *path, long off, int find_hole) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -2;
+    if (g_mount[i].fstype != FS_EXT2) return -2;
+    return ext2_seek_data_hole(mount_rfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", off, find_hole);
+}
+
 int blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return -1;

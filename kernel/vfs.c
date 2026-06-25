@@ -629,6 +629,28 @@ long vfs_truncate(const char *path, uint64_t newlen) {
     return -1;
 }
 
+/* SEEK_HOLE/SEEK_DATA (M1229): find the next hole/data boundary at/after `off`.
+ * ext2 /diskN mounts have a real block map (sparse via truncate-grow / punch-
+ * hole); everything else (/tmp, FAT32, ISO) is never sparse, so the only hole
+ * is the implicit one at EOF. Returns the offset, or -1 (ENXIO / bad off). */
+long vfs_seek_data_hole(const char *path, long off, int find_hole) {
+    if (off < 0) return -1;
+    char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);
+    const char *tb;
+    if (!tmp_path(p, &tb)) {                                  /* not RAM /tmp: try an ext2 block map */
+        int mid; char fp[192];
+        if (mount_path(p, &mid, fp, sizeof fp)) {
+            long r = blockdev_mount_seek_data_hole(mid, fp, off, find_hole);
+            if (r != -2) return r;                            /* ext2 answered (offset, or -1 ENXIO) */
+        }
+    }
+    struct statx st;                                          /* generic: data everywhere, hole only at EOF */
+    if (vfs_stat(path, &st) != 0) return -1;
+    long size = (long)st.stx_size;
+    if (off >= size) return -1;                               /* ENXIO: at/after EOF */
+    return find_hole ? size : off;
+}
+
 /* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
  * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are
  * unsupported (-1). Read-only. */

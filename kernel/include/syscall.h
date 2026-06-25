@@ -327,6 +327,8 @@ struct pollfd { int fd; short events; short revents; };
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
+#define SEEK_DATA 3   /* next data byte at/after off (M1229) */
+#define SEEK_HOLE 4   /* next hole at/after off (M1229) */
 /* open() flags (M1195): O_RDONLY is the default (0); the rest are bit flags. */
 #define O_RDONLY 0
 #define O_WRONLY 1

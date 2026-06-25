@@ -1040,6 +1040,32 @@ long ext2_truncate_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_
     return write_inode(&v, ino, inode);
 }
 
+/* SEEK_HOLE / SEEK_DATA (M1229): given a byte offset, find the next hole (an
+ * unallocated/sparse block) or the next data block at/after `off`, at block
+ * granularity. `find_hole` selects which. Returns the offset, or -1 (ENXIO):
+ * SEEK_DATA past the last data returns -1; SEEK_HOLE always finds the implicit
+ * hole at EOF. map_block resolves both the extent and direct/indirect schemes,
+ * so this works on either layout (read-only — no write fn needed). */
+long ext2_seek_data_hole(blk_read_fn read, void *ctx, uint64_t start_lba,
+                         const char *path, long off, int find_hole) {
+    ext2_t v;
+    if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    uint8_t inode[256]; int isdir = 0;
+    if (!walk(&v, path, inode, &isdir) || isdir) return -1;
+    uint32_t size = e_rd32(inode + 4);
+    if (off < 0 || (uint32_t)off >= size) return -1;       /* ENXIO: at/after EOF */
+    uint32_t bs = v.block_size;
+    uint32_t nblocks = (size + bs - 1) / bs;
+    for (uint32_t fb = (uint32_t)off / bs; fb < nblocks; fb++) {
+        int hole = (map_block(&v, inode, fb) == 0);
+        if (hole == find_hole) {                           /* the block kind we're after */
+            uint32_t bstart = fb * bs;
+            return bstart > (uint32_t)off ? (long)bstart : off;  /* clamp to off if it's inside this block */
+        }
+    }
+    return find_hole ? (long)size : -1;                    /* SEEK_HOLE: hole at EOF; SEEK_DATA: ENXIO */
+}
+
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, const void *buf, unsigned long len) {
     ext2_t v;
