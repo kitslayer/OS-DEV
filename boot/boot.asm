@@ -13,7 +13,7 @@
 ; Everything here is the classic osdev "x86_64 bare bones" trampoline.
 
 MB_MAGIC    equ 0x1BADB002          ; multiboot1 magic the loader searches for
-MB_FLAGS    equ (1 << 0) | (1 << 1) ; bit0: page-align modules, bit1: give us a memory map
+MB_FLAGS    equ (1 << 0) | (1 << 1) | (1 << 2) ; bit0: page-align, bit1: memory map, bit2: request a linear framebuffer (GRUB / bare metal)
 MB_CHECKSUM equ -(MB_MAGIC + MB_FLAGS)
 
 ; ---------------------------------------------------------------------------
@@ -25,6 +25,18 @@ align 4
     dd MB_MAGIC
     dd MB_FLAGS
     dd MB_CHECKSUM
+    ; address fields (header offsets 12..28): unused — we're an ELF, so flag
+    ; bit16 is clear and the loader ignores these; emit zeros so the video
+    ; fields below land at their fixed spec offset 32.
+    dd 0, 0, 0, 0, 0
+    ; video request (offsets 32..44, honored because flag bit2 is set): ask the
+    ; loader (GRUB on real hardware, or QEMU) for a LINEAR 32-bpp framebuffer.
+    ; It reports the LFB base + geometry back in the multiboot info, which kmain
+    ; consumes via fb_init_mb() (falling back to the Bochs std-VGA path if absent).
+    dd 0            ; mode_type: 0 = linear graphics framebuffer
+    dd 1280         ; preferred width
+    dd 960          ; preferred height
+    dd 32           ; preferred depth (bpp)
 
 ; ---------------------------------------------------------------------------
 ; 32-bit entry point

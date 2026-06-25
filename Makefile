@@ -353,6 +353,32 @@ $(KERNEL): $(KERNEL64)
 run: $(KERNEL) $(DISK)
 	$(QEMU) $(QEMUFLAGS) $(ACCEL) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
 
+# --- bare metal (see BAREMETAL.md) ------------------------------------------
+# Boot the Multiboot kernel via REAL GRUB (not QEMU's -kernel shortcut) — the
+# path a physical machine uses. The kernel requests + consumes a Multiboot
+# framebuffer (boot.asm + fb_init_mb), falling back to Bochs std-VGA under QEMU.
+
+# BIOS GRUB rescue ISO. Needs xorriso (Gentoo: emerge dev-libs/libisoburn).
+# Verify the GRUB->Multiboot handoff: qemu-system-x86_64 -cdrom build/os.iso
+# (no -kernel). Deploy to a USB stick: dd if=build/os.iso of=/dev/sdX bs=4M.
+iso: $(KERNEL)
+	@command -v xorriso >/dev/null || { echo "iso: needs xorriso — emerge dev-libs/libisoburn"; exit 1; }
+	@mkdir -p $(BUILD)/isodir/boot/grub
+	cp $(KERNEL) $(BUILD)/isodir/boot/kernel32.elf
+	printf 'set timeout=2\nset default=0\nmenuentry "OS-DEV" {\n\tmultiboot /boot/kernel32.elf\n\tboot\n}\n' > $(BUILD)/isodir/boot/grub/grub.cfg
+	grub-mkrescue -d /usr/lib/grub/i386-pc -o $(BUILD)/os.iso $(BUILD)/isodir
+	@echo "Built $(BUILD)/os.iso — verify: qemu-system-x86_64 -cdrom $(BUILD)/os.iso -serial stdio"
+
+# UEFI standalone GRUB image (no xorriso needed — VERIFIED to boot under OVMF).
+# Embeds the kernel in GRUB's memdisk. Deploy: copy build/BOOTX64.EFI to
+# <USB>/EFI/BOOT/BOOTX64.EFI on a FAT-formatted stick and boot a UEFI machine.
+efi: $(KERNEL)
+	printf 'menuentry "OS-DEV" {\n\tmultiboot /boot/kernel32.elf\n\tboot\n}\n' > $(BUILD)/grub-efi.cfg
+	grub-mkstandalone -O x86_64-efi -o $(BUILD)/BOOTX64.EFI \
+	    --modules="multiboot normal all_video efi_gop part_gpt fat" \
+	    "boot/grub/grub.cfg=$(BUILD)/grub-efi.cfg" "boot/kernel32.elf=$(KERNEL)"
+	@echo "Built $(BUILD)/BOOTX64.EFI — copy to <USB>/EFI/BOOT/BOOTX64.EFI on a FAT ESP"
+
 # Same as `run`, but with a Realtek RTL8139 NIC instead of the e1000 — boots the
 # whole stack over the second card driver (kernel/rtl8139.c) so you can watch the
 # serial log say "rtl8139 up" and ARP/ping/HTTP the SLIRP gateway over it.

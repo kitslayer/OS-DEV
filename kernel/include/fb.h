@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 int      fb_init(uint16_t width, uint16_t height);   /* set the video mode; 0 ok */
+int      fb_init_mb(uint64_t base, int w, int h, int pitch, int bpp);  /* use a Multiboot/GRUB LFB (bare metal); 0 ok / -1 (M1292) */
 /* Re-point the framebuffer at a new linear-framebuffer base of w*h 32-bpp
  * pixels (maps the region + updates dims/LFB pointer). The DISPI driver
  * (bochs_vbe.c) calls this after a mode-set; pitch is implicit (w*4), so the

@@ -45,6 +45,7 @@
 #include "svga.h"
 #include "net.h"
 #include "fbcon.h"
+#include "fb.h"            /* fb_init_mb: consume a Multiboot/GRUB framebuffer (M1292) */
 #include "mouse.h"
 #include "usb.h"
 #include "usb_storage.h"
@@ -206,6 +207,21 @@ void kmain(uint64_t mb_info) {
     }
 
     sched_init();
+
+    /* On real hardware / a GRUB ISO, the bootloader honors our Multiboot header's
+     * video request and reports a linear framebuffer here; use it. (QEMU -kernel
+     * honors the request too, so this path is exercised under QEMU as well.) If
+     * absent/unusable, fbcon_init falls back to the Bochs std-VGA mode-set. (M1292) */
+    {
+        struct multiboot_info *fbi = (struct multiboot_info *)(uintptr_t)mb_info;
+        if ((fbi->flags & MULTIBOOT_FLAG_FB) && fbi->framebuffer_type == 1 &&
+            fb_init_mb(fbi->framebuffer_addr, (int)fbi->framebuffer_width,
+                       (int)fbi->framebuffer_height, (int)fbi->framebuffer_pitch,
+                       fbi->framebuffer_bpp) == 0)
+            kprintf("[ ok ] Multiboot framebuffer %ux%u %u-bpp @ %p -- bare-metal graphics path\n",
+                    fbi->framebuffer_width, fbi->framebuffer_height, fbi->framebuffer_bpp,
+                    (void *)(uintptr_t)fbi->framebuffer_addr);
+    }
 
     /* Switch the console to the framebuffer: from here, all output renders
      * graphically with a real font. */

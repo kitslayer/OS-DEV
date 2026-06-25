@@ -26,7 +26,12 @@ int fbcon_init(void) {
      * whole desktop comes up at the new resolution with no live re-layout.
      * If DISPI is absent (a config without std-VGA), fb_init returns -1 and we
      * fall back to leaving the boot/VGA mode untouched (no black screen). */
-    if (fb_init(1280, 960) != 0)
+    /* If a framebuffer is already up (a Multiboot/GRUB-provided LFB set in kmain
+     * via fb_init_mb — real hardware, a GRUB ISO, or QEMU honoring our header's
+     * video request), use it as-is. Otherwise ask the Bochs DISPI driver for a
+     * 1280x960x32 mode (QEMU std-VGA). DISPI absent + no Multiboot FB -> -1,
+     * leaving the boot mode untouched (no black screen). */
+    if (fb_width() == 0 && fb_init(1280, 960) != 0)
         return -1;
     cols = fb_width() / font_width;
     rows = fb_height() / font_height;

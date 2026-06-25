@@ -52,6 +52,19 @@ int fb_init(uint16_t width, uint16_t height) {
     return bochs_vbe_set_mode(width, height);
 }
 
+/* Use a Multiboot/GRUB-provided linear framebuffer (real hardware / a GRUB ISO,
+ * and also QEMU -kernel, which honors our header's video request). The loader
+ * set the mode and reported the LFB base + geometry in the multiboot info. We
+ * accept ONLY a 32-bpp, tightly-packed (pitch == w*4) LFB, because every draw
+ * indexes it as y*w + x with no separate pitch; anything else -> -1 so the
+ * caller falls back to the Bochs DISPI path. Returns 0 on success. (M1292) */
+int fb_init_mb(uint64_t base, int w, int h, int pitch, int bpp) {
+    if (!base || w <= 0 || h <= 0 || bpp != 32 || pitch != w * 4)
+        return -1;
+    fb_repoint(base, w, h);   /* identity-map the LFB + point us at it */
+    return 0;
+}
+
 int fb_width(void)  { return fb_w; }
 int fb_height(void) { return fb_h; }
 
