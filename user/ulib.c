@@ -280,6 +280,7 @@ int  sys_gethostname(char *buf, unsigned long len) { return (int)do_syscall(SYS_
 int  sys_getentropy(void *buf, unsigned long len) { return (int)do_syscall(SYS_getentropy, (long)buf, (long)len, 0); }
 int  sys_getpriority(int which, int who) { return (int)do_syscall(SYS_getpriority, which, who, 0); }
 int  sys_setpriority(int which, int who, int prio) { return (int)do_syscall(SYS_setpriority, which, who, prio); }
+int  sys_pipe2(int *fds, int flags) { return (int)do_syscall(SYS_pipe2, (long)fds, flags, 0); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }

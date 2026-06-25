@@ -2967,6 +2967,24 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "prio: getentropy(32)=random (>256 rejected) + setpriority(7)/getpriority round-trip -- OK\n"
                      : "priotest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "pipe2test")) {   /* pipe2 with atomic O_CLOEXEC (M1239) */
+            int ok = 1;
+            int fds[2];
+            if (sys_pipe2(fds, O_CLOEXEC) != 0) ok = 0;
+            else {
+                if (sys_fcntl(fds[0], F_GETFD, 0) != FD_CLOEXEC) ok = 0;   /* both ends cloexec at creation */
+                if (sys_fcntl(fds[1], F_GETFD, 0) != FD_CLOEXEC) ok = 0;
+                sys_fdwrite(fds[1], "p2", 2);                             /* and data still flows */
+                char b[4]; long n = sys_fdread(fds[0], b, 2);
+                if (!(n == 2 && b[0] == 'p' && b[1] == '2')) ok = 0;
+                sys_fdclose(fds[0]); sys_fdclose(fds[1]);
+            }
+            int g[2];
+            if (sys_pipe2(g, 0) != 0) ok = 0;                            /* flags=0 -> NOT cloexec */
+            else { if (sys_fcntl(g[0], F_GETFD, 0) != 0) ok = 0; sys_fdclose(g[0]); sys_fdclose(g[1]); }
+            print(ok ? "pipe2: O_CLOEXEC sets FD_CLOEXEC on both ends + data flows; flags=0 -> not cloexec -- OK\n"
+                     : "pipe2test: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -2823,6 +2823,13 @@ int app_pipe(int *out) {
     a->fd[wfd] = (struct fdent){ 1, 1, 1, idx, {0}, 0 };          /* used, type=pipe, write end */
     out[0] = rfd; out[1] = wfd; return 0;
 }
+/* pipe2 (M1239): pipe() + atomically set FD_CLOEXEC on both ends when O_CLOEXEC
+ * is requested (the race-free way to avoid leaking the pipe across an exec). */
+int app_pipe2(int *out, int flags) {
+    if (app_pipe(out) < 0) return -1;
+    if (flags & O_CLOEXEC) { struct app *a = cur(); if (a) { a->fd[out[0]].cloexec = 1; a->fd[out[1]].cloexec = 1; } }
+    return 0;
+}
 #define FILEFD_CAP (1u << 20)   /* the write-RMW bound (M1195); reads are now uncapped via vfs_pread (M1196) */
 long app_fd_read(int fd, void *buf, unsigned long max) {
     struct app *a = cur(); if (!a) return -1;

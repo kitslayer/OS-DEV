@@ -148,6 +148,7 @@ int  sys_gethostname(char *buf, unsigned long len);             /* copy the syst
 int  sys_getentropy(void *buf, unsigned long len);              /* fill <=256 bytes with CSPRNG; 0/-1 (M1238) */
 int  sys_getpriority(int which, int who);                       /* caller's nice (self); -1 (M1238) */
 int  sys_setpriority(int which, int who, int prio);             /* set caller's nice (self); 0/-1 (M1238) */
+int  sys_pipe2(int *fds, int flags);                            /* pipe with atomic O_CLOEXEC; 0/-1 (M1239) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */

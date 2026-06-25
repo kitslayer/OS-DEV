@@ -263,7 +263,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any:
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
-    case SYS_pipe: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
+    case SYS_pipe: case SYS_pipe2: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
     case SYS_nice: case SYS_sched_setscheduler: case SYS_tcgetattr: case SYS_tcsetattr:
     case SYS_getrlimit: case SYS_setrlimit:
@@ -1151,6 +1151,14 @@ void syscall_dispatch(struct registers *r) {
         if (!ubuf(r->rdi, 2 * sizeof(int))) { r->rax = (uint64_t)-1; break; }
         int fds[2];
         long rc = app_pipe(fds);
+        if (rc == 0) { ((int *)r->rdi)[0] = fds[0]; ((int *)r->rdi)[1] = fds[1]; }
+        r->rax = (uint64_t)(int64_t)rc;
+        break;
+    }
+    case SYS_pipe2: {                      /* (int fds[2], flags) -> pipe + atomic O_CLOEXEC (M1239) */
+        if (!ubuf(r->rdi, 2 * sizeof(int))) { r->rax = (uint64_t)-1; break; }
+        int fds[2];
+        long rc = app_pipe2(fds, (int)r->rsi);
         if (rc == 0) { ((int *)r->rdi)[0] = fds[0]; ((int *)r->rdi)[1] = fds[1]; }
         r->rax = (uint64_t)(int64_t)rc;
         break;
