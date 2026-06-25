@@ -233,6 +233,7 @@
 #define SYS_readlink     214   /* (path, buf, size) -> read a symlink's target (not followed); bytes/-1 (M1233) */
 #define SYS_sched_yield  215   /* () -> voluntarily yield the CPU; 0 (M1234) */
 #define SYS_nanosleep    216   /* (sec, nsec) -> sleep sec+nsec (rounded to the 100Hz tick); 0 (M1234) */
+#define SYS_times        217   /* (struct tms*) -> fill CPU times (ticks); returns elapsed ticks since boot (M1235) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */
 #define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */
@@ -447,6 +448,13 @@ struct rusage {
     long ru_majflt;               /* major page faults (disk I/O: swap-in + file-backed) */
     long ru_nvcsw;                /* voluntary context switches (blocked/yielded)   */
     long ru_nivcsw;               /* involuntary context switches (preempted)       */
+};
+
+struct tms {                      /* times(2): CPU time in clock ticks @ 100 Hz (M1235) */
+    long tms_utime;               /* user CPU time of the caller          */
+    long tms_stime;               /* system CPU time of the caller        */
+    long tms_cutime;              /* user CPU time of reaped children     */
+    long tms_cstime;              /* system CPU time of reaped children   */
 };
 
 #ifdef __KERNEL__

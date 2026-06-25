@@ -1217,6 +1217,17 @@ void syscall_dispatch(struct registers *r) {
         r->rax = 0;
         break;
     }
+    case SYS_times: {                      /* (struct tms*) -> CPU times in 100Hz ticks; returns boot ticks (M1235) */
+        if (!ubuf(r->rdi, sizeof(struct tms))) { r->rax = (uint64_t)-1; break; }
+        struct tms tm;
+        for (unsigned i = 0; i < sizeof tm; i++) ((uint8_t *)&tm)[i] = 0;
+        task_t *t = task_self();
+        if (t) { tm.tms_utime = (long)(t->utime_ms / 10); tm.tms_stime = (long)(t->stime_ms / 10); }
+        /* tms_cutime/tms_cstime: no reaped-child CPU accounting -> 0 */
+        for (unsigned i = 0; i < sizeof tm; i++) ((uint8_t *)r->rdi)[i] = ((uint8_t *)&tm)[i];
+        r->rax = (uint64_t)(timer_ms() / 10);   /* clock_t: elapsed ticks since boot */
+        break;
+    }
     case SYS_fiemap: {                     /* (path, struct fiemap_extent*, max) -> physical extent map (M1152) */
         int umax = (int)r->rdx;
         if (umax <= 0 || !ustr(r->rdi) || !ubuf(r->rsi, (uint64_t)umax * sizeof(struct fiemap_extent))) { r->rax = (uint64_t)-1; break; }
