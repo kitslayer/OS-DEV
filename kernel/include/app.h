@@ -180,6 +180,7 @@ const char *app_fd_path(int fd);                           /* path behind a FILE
 int  app_pidfd_open(int pid);                              /* a pollable process-exit handle (>=3); -1 (M1222) */
 int  app_pidfd_send_signal(int pidfd, int sig);            /* signal the pidfd's process; 0/-1 (M1222) */
 int  app_pidfd_getfd(int pidfd, int targetfd);             /* duplicate the pidfd-process's fd into ours; new fd/-1 (M1281) */
+uint64_t app_aslr_base(int pid);                           /* the ASLR-randomized mmap base of pid (0=self), for verification (M1287) */
 long app_getdents64(void *buf, unsigned long max, int start); /* packed dirent64 of the cwd; bytes/0/-1 (M1223) */
 struct epoll_event;                                        /* full definition in syscall.h (M1220) */
 int  app_epoll_create(void);                               /* an epoll fd (>=3); -1 (M1220) */

@@ -3750,6 +3750,21 @@ static int run_command(char *line, char *cwd) {
                       { unsigned long v = (unsigned long)ev; char h[9]; int k = 0; if (!v) h[k++] = '0'; while (v) { int d = v & 0xf; h[k++] = d < 10 ? ('0' + d) : ('a' + d - 10); v >>= 4; } while (k) { char c[2] = { h[--k], 0 }; print(c); } }
                       print("; matches acpi.c's independent table byte-scan -- AML evaluation OK\n"); }
             else { print("amlevaltest: VERIFY FAILED (eval="); printl(ev); print(" scan="); printl(scan); print(")\n"); g_status = 1; }
+        } else if (streq(line, "aslrtest")) {   /* ASLR: independently-exec'd processes get different mmap bases (M1287) */
+            unsigned long self = sys_aslr(0);             /* the shell's randomized mmap base */
+            long pid2 = sys_spawn("shell");               /* a 2nd, independently app_spawn'd process -> a fresh CSPRNG base */
+            unsigned long base2 = (pid2 > 0) ? sys_aslr((int)pid2) : 0;
+            if (pid2 > 0) sys_kill((int)pid2);            /* tear down the helper window */
+            int in_range = (self >= 0x60000000ul && self < 0x64000000ul) &&
+                           (base2 >= 0x60000000ul && base2 < 0x64000000ul);   /* both inside the randomized window */
+            int ok = (self != 0 && base2 != 0 && base2 != self && in_range);
+            if (ok) {
+                print("aslr: two app_spawns landed mmap at 0x");
+                { unsigned long v=self; char h[17]; int k=0; if(!v)h[k++]='0'; while(v){int d=v&0xf; h[k++]=d<10?('0'+d):('a'+d-10); v>>=4;} while(k){char c[2]={h[--k],0}; print(c);} }
+                print(" and 0x");
+                { unsigned long v=base2; char h[17]; int k=0; if(!v)h[k++]='0'; while(v){int d=v&0xf; h[k++]=d<10?('0'+d):('a'+d-10); v>>=4;} while(k){char c[2]={h[--k],0}; print(c);} }
+                print(" -- different per exec, both CSPRNG-randomized in the window -- ASLR OK\n");
+            } else { print("aslrtest: VERIFY FAILED (self=0x"); printl((long)self); print(" base2=0x"); printl((long)base2); print(" inrange="); printl(in_range); print(" pid2="); printl(pid2); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

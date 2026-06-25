@@ -65,6 +65,7 @@ long sys_munlock(void *addr, unsigned long len);   /* unpin mlock'd mmap pages; 
 long sys_mlockall(int flags);                      /* MCL_CURRENT=1 pins all VMAs, MCL_FUTURE=2 auto-pins new anon mmaps; 0/-1 (M1283) */
 long sys_munlockall(void);                         /* unpin all pages + clear MCL_FUTURE; 0/-1 (M1283) */
 long sys_acpi(int what);                           /* ACPI AML namespace: 0=total 1=devices 2=methods 3=PCI0? 4=_SB_? (M1284) */
+unsigned long sys_aslr(int pid);                   /* the ASLR-randomized mmap base of pid (0=self) (M1287) */
 long sys_getrusage(int who, struct rusage *ru);    /* fill resource usage (RUSAGE_SELF=0); 0/-1 (M1150) */
 long sys_fiemap(const char *path, struct fiemap_extent *out, int max);  /* file physical extent map; count/-1 (M1152) */
 long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned long len);  /* punch hole (FALLOC_FL_PUNCH_HOLE); blocks/-1 (M1153) */

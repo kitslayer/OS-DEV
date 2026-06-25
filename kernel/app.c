@@ -28,6 +28,7 @@
 #include "fb.h"
 #include "font.h"
 #include "string.h"
+#include "random.h"   /* random_bytes for ASLR (M1287) */
 #include "vfs.h"
 #include "kheap.h"
 #include "tmpfs.h"
@@ -74,6 +75,7 @@ struct app {
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
     int      mlock_future;               /* mlockall(MCL_FUTURE): new mmaps are born locked (M1283) */
+    uint64_t aslr_mmap_base;             /* ASLR: per-exec randomized mmap-region start (M1287) */
     uint64_t minflt, majflt;             /* page-fault counters: minor (no I/O) / major (disk I/O), getrusage (M1150) */
     /* per-process current directory (M1144): synth_cwd state + the in-mount/overlay
      * subpath + the boot-FS (fat32) cwd cluster. The VFS keeps the live cwd in its
@@ -1581,6 +1583,21 @@ uint64_t app_sbrk(long inc) {
 #define MMAP_BASE  0x60000000ull        /* above the 0x50000000 user stack, clear of the heap */
 #define MMAP_TOP   0x70000000ull
 
+/* ASLR (M1287): pick a per-exec random start for the mmap region, drawn from
+ * the CSPRNG (kernel/random.c). 14 bits of entropy => the base lands anywhere
+ * in the first 64 MiB of the 256 MiB mmap window, so dlopen'd .so / JIT / mmap
+ * buffers no longer sit at a fixed address — the partner of W^X. */
+static uint64_t aslr_mmap_pick(void) {
+    uint16_t r = 0; random_bytes(&r, sizeof r);
+    return MMAP_BASE + ((uint64_t)(r & 0x3FFF) * PAGE_SIZE);   /* [MMAP_BASE, MMAP_BASE+64 MiB), page-aligned */
+}
+/* The randomized mmap base of process `pid` (0 = self), for the ASLR self-test
+ * to confirm two independently-exec'd processes landed at different bases. */
+uint64_t app_aslr_base(int pid) {
+    struct app *t = pid ? app_by_pid(pid) : cur();
+    return t ? t->aslr_mmap_base : 0;
+}
+
 uint64_t app_mmap(uint64_t len) {
     struct app *a = cur();
     if (!a || len == 0) return 0;
@@ -3065,6 +3082,7 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
         }
     }
     a->ustack = USTACK_BASE + USTACK_PAGES * PAGE_SIZE;
+    a->aslr_mmap_base = aslr_mmap_pick(); a->mmap_next = a->aslr_mmap_base;   /* ASLR: randomize the mmap region start (M1287) */
 
     __asm__ volatile("mov %0, %%cr3" : : "r"(old) : "memory");
     __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
@@ -3914,7 +3932,7 @@ long app_fork(struct registers *r) {
 
     /* Inherit the parent's process state (NOT its window/grid/task/identity). */
     a->entry = p->entry; a->ustack = p->ustack; a->heap_end = p->heap_end;
-    a->mmap_next = p->mmap_next; a->nvma = p->nvma;
+    a->mmap_next = p->mmap_next; a->nvma = p->nvma; a->aslr_mmap_base = p->aslr_mmap_base;   /* inherit the ASLR layout across fork (M1287) */
     for (int i = 0; i < APP_MAXVMA; i++) a->vma[i] = p->vma[i];
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = p->sig_handler[i];
     a->sig_restorer = p->sig_restorer; a->curcol = p->curcol;
@@ -4079,7 +4097,8 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     a->entry = entry; a->ustack = USTACK_BASE + USTACK_PAGES * PAGE_SIZE;
 
     /* reset per-program state (the new image starts clean); keep pid/parent/pledge */
-    a->heap_end = 0; a->nvma = 0; a->mmap_next = 0; a->mlock_future = 0;   /* mlockall(MCL_FUTURE) does not survive exec (M1283) */
+    a->heap_end = 0; a->nvma = 0; a->mlock_future = 0;   /* mlockall(MCL_FUTURE) does not survive exec (M1283) */
+    a->aslr_mmap_base = aslr_mmap_pick(); a->mmap_next = a->aslr_mmap_base;   /* ASLR: a fresh randomized mmap base per exec (M1287) */
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
     a->sig_in = 0; a->pending_sigs = 0; a->sig_blocked = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;
     a->sigq_n = 0;                                                  /* drop any queued RT-signal payloads (M1271) */
