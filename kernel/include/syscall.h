@@ -221,6 +221,9 @@
 #define SYS_pidfd_send_signal 204  /* (pidfd, sig) -> signal the process; 0/-1 (M1222) */
 #define SYS_getdents64   205   /* (buf, max, start_idx) -> packed dirent64 records of the cwd; bytes/0/-1 (M1223) */
 #define SYS_access       206   /* (path, amode) -> 0 if accessible, -1 (M1224) */
+#define SYS_prctl        207   /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME; 0/-1 (M1225) */
+#define PR_SET_NAME 15
+#define PR_GET_NAME 16
 /* access(2) mode bits (M1224). */
 #define F_OK 0
 #define X_OK 1

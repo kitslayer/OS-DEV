@@ -146,6 +146,7 @@ int  sys_pidfd_open(int pid, int flags);                       /* a pollable pro
 int  sys_pidfd_send_signal(int pidfd, int sig);                /* signal the pidfd's process; 0/-1 (M1222) */
 long sys_getdents64(void *buf, unsigned long max, int start);  /* packed dirent64 of the cwd; bytes/0/-1 (M1223) */
 int  sys_access(const char *path, int amode);                  /* 0 if accessible, -1 (M1224) */
+long sys_prctl(int option, unsigned long arg2);                /* PR_SET_NAME/PR_GET_NAME; 0/-1 (M1225) */
 int  sys_jail(const char *prog, const char *promises, const char *path);   /* spawn prog pre-confined (pledge + optional unveil) */
 long sys_find(const char *want, void *buf, unsigned long len);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);

@@ -3212,6 +3212,25 @@ long app_getdents64(void *buf, unsigned long max, int start) {
     }
     return (long)off;
 }
+/* prctl (M1225): PR_SET_NAME / PR_GET_NAME — a process renames itself at runtime
+ * (visible in ps + /proc/<pid>/comm). The name lives in the existing titlebuf
+ * (<=15 chars). The user pointers were validated by the syscall dispatch. */
+long app_prctl(int option, uint64_t arg2) {
+    struct app *a = cur(); if (!a) return -1;
+    if (option == PR_SET_NAME) {
+        const char *nm = (const char *)arg2; if (!nm) return -1;
+        int i = 0; while (nm[i] && i < 15) { a->titlebuf[i] = nm[i]; i++; }
+        a->titlebuf[i] = 0; a->title = a->titlebuf;
+        return 0;
+    }
+    if (option == PR_GET_NAME) {
+        char *out = (char *)arg2; if (!out) return -1;
+        const char *t = a->title ? a->title : "";
+        int i = 0; while (t[i] && i < 15) { out[i] = t[i]; i++; } out[i] = 0;
+        return 0;
+    }
+    return -1;
+}
 /* splice(in_fd, out_fd, len): move bytes from a pipe read-end fd to a pipe
  * write-end fd, entirely in-kernel (no userspace bounce) (M1211). bytes/0/-1. */
 long app_splice(int in_fd, int out_fd, unsigned long len) {

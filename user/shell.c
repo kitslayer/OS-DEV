@@ -2764,6 +2764,18 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "access: F_OK/R_OK on /MOTD.TXT, /NOPE.XYZ absent=-1, / is X_OK -- OK\n"
                      : "accesstest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "prctltest")) {  /* prctl(PR_SET_NAME) + /proc/self/comm (M1225) */
+            int ok = 1;
+            sys_prctl(PR_SET_NAME, (unsigned long)"vacuum");
+            char nm[20]; sys_prctl(PR_GET_NAME, (unsigned long)nm);
+            if (!streq(nm, "vacuum")) ok = 0;                       /* PR_GET_NAME round-trips */
+            char cb[64]; long n = sys_readfile("/proc/self/comm", cb, sizeof cb - 1);
+            if (n > 0) { cb[n] = 0; if (n > 0 && cb[n-1] == '\n') cb[n-1] = 0; } else ok = 0;
+            if (!streq(cb, "vacuum")) ok = 0;                       /* /proc/self/comm shows it */
+            sys_prctl(PR_SET_NAME, (unsigned long)"Shell");        /* restore the window name */
+            print(ok ? "prctl: PR_SET_NAME=vacuum, PR_GET_NAME reads it, /proc/self/comm shows it -- OK\n"
+                     : "prctltest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

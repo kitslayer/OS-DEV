@@ -509,6 +509,12 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
                 return app_sigfd_read((app_t *)proc, (char *)buf, (int)max);
             }
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
+            if (peq(file, "comm")) {                                                                   /* the process's runtime name (M1225) */
+                const char *t = app_title((app_t *)proc); int p = 0;
+                while (t && t[p] && p < (int)max - 2) { ((char *)buf)[p] = t[p]; p++; }
+                if (p < (int)max - 1) ((char *)buf)[p++] = '\n';
+                return p;
+            }
             if (peq(file, "limits"))  return app_format_limits((app_t *)proc, (char *)buf, (int)max);   /* enforced rlimits (M1214) */
             if (peq(file, "auxv"))    return app_format_auxv((app_t *)proc, (char *)buf, (int)max);     /* ELF auxiliary vector (M1215) */
             if (peq(file, "smaps"))   return app_format_smaps((app_t *)proc, (char *)buf, (int)max);

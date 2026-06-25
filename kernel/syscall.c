@@ -1010,6 +1010,11 @@ void syscall_dispatch(struct registers *r) {
         r->rax = ok ? 0 : (uint64_t)-1;
         break;
     }
+    case SYS_prctl:                        /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME (M1225) */
+        if (r->rdi == PR_SET_NAME) { if (!ustr(r->rsi)) { r->rax = (uint64_t)-1; break; } }
+        else if (r->rdi == PR_GET_NAME) { if (!ubuf(r->rsi, 16)) { r->rax = (uint64_t)-1; break; } }
+        r->rax = (uint64_t)app_prctl((int)r->rdi, r->rsi);
+        break;
     case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
         if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_stat((const char *)r->rdi, (struct statx *)r->rsi);

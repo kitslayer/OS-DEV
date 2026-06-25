@@ -20,6 +20,7 @@ app_t      *app_take_pending(void);              /* next app awaiting a window (
 void        app_browse(const char *url);         /* queue a URL for a browser window   */
 int         app_take_browse(char *out, int max); /* WM claims a queued browse URL; 0/1 */
 const char *app_title(app_t *a);
+long app_prctl(int option, uint64_t arg2);   /* PR_SET_NAME / PR_GET_NAME (M1225) */
 const char *app_arg(app_t *a);          /* the app's launch argument (/proc/<pid>/cmdline) */
 void       *app_task(app_t *a);         /* the app's task_t* (cast in procfs for stop/cont) */
 uint64_t    app_cr3(app_t *a);          /* the app's CR3 (address space), for /proc/<pid>/wss */
