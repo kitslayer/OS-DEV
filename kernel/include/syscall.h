@@ -231,6 +231,8 @@
 #define SYS_futimens     212   /* (fd, atime, mtime) -> set timestamps on an open file fd; 0/-1 (M1230) */
 #define SYS_renameat2    213   /* (oldpath, newpath, flags) -> rename with RENAME_* flags; 0/-1 (M1232) */
 #define SYS_readlink     214   /* (path, buf, size) -> read a symlink's target (not followed); bytes/-1 (M1233) */
+#define SYS_sched_yield  215   /* () -> voluntarily yield the CPU; 0 (M1234) */
+#define SYS_nanosleep    216   /* (sec, nsec) -> sleep sec+nsec (rounded to the 100Hz tick); 0 (M1234) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */
 #define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */

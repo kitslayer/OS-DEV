@@ -2902,6 +2902,16 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "readlink: RL.LNK -> target read back exact (un-terminated), non-symlink -> -1 -- OK\n"
                      : "readlinktest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "nanosleeptest")) {   /* sched_yield + nanosleep (M1234) */
+            int ok = 1;
+            if (sys_sched_yield() != 0) ok = 0;                 /* yields, returns 0 */
+            unsigned long t0 = sys_uptime_ms();
+            sys_nanosleep(0, 200000000);                        /* 200 ms */
+            unsigned long dt = sys_uptime_ms() - t0;
+            if (dt < 180) ok = 0;                               /* actually slept ~200ms (allow scheduler slack) */
+            if (ok) { print("nanosleep: sched_yield()=0 + nanosleep(200ms) elapsed ~"); printl((long)dt); print("ms -- OK\n"); }
+            else print("nanosleeptest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

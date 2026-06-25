@@ -266,6 +266,8 @@ int  sys_link(const char *oldpath, const char *newpath) { return (int)do_syscall
 int  sys_rename(const char *oldpath, const char *newpath) { return (int)do_syscall(SYS_rename, (long)oldpath, (long)newpath, 0); }
 int  sys_renameat2(const char *oldpath, const char *newpath, int flags) { return (int)do_syscall(SYS_renameat2, (long)oldpath, (long)newpath, flags); }
 long sys_readlink(const char *path, void *buf, unsigned long size) { return do_syscall(SYS_readlink, (long)path, (long)buf, (long)size); }
+int  sys_sched_yield(void) { return (int)do_syscall(SYS_sched_yield, 0, 0, 0); }
+int  sys_nanosleep(long sec, long nsec) { return (int)do_syscall(SYS_nanosleep, sec, nsec, 0); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }

@@ -603,6 +603,20 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* timer drives the wait */
         timer_wait(r->rdi / 10 + 1);
         break;
+    case SYS_sched_yield:                  /* voluntarily give up the CPU (M1234) */
+        __asm__ volatile("sti");
+        task_yield();
+        r->rax = 0;
+        break;
+    case SYS_nanosleep: {                  /* (sec, nsec) -> sleep, rounded to the 100Hz tick (M1234) */
+        app_kill_check();
+        __asm__ volatile("sti");
+        uint64_t ms = (uint64_t)r->rdi * 1000 + (uint64_t)r->rsi / 1000000;
+        if (ms || r->rdi || r->rsi) timer_wait(ms / 10 + 1);   /* >0 request -> at least one 10ms tick */
+        else task_yield();                                     /* {0,0} -> just yield */
+        r->rax = 0;
+        break;
+    }
     case SYS_ping:
         __asm__ volatile("sti");           /* needs the timer for its timeout */
         r->rax = (uint64_t)(int64_t)net_ping_gateway();
