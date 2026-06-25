@@ -3223,6 +3223,23 @@ static int run_command(char *line, char *cwd) {
                       print(" (real Linux layout w/ live ctxt+btime, was a 3-line blob) -- OK\n"); }
             else print("statcputest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "socketpairtest")) {   /* socketpair(2): a pre-connected AF_UNIX pair, no path/listen/accept (M1254) */
+            int sv[2] = { -1, -1 }; int ok = 1; char rb[16];
+            if (sys_socketpair(sv) != 0 || sv[0] < 0 || sv[1] < 0 || sv[0] == sv[1]) ok = 0;
+            else {
+                long w1 = sys_unix_send(sv[0], "ping", 4);          /* A -> B */
+                long r1 = sys_unix_recv(sv[1], rb, sizeof rb);
+                int ab = (w1 == 4 && r1 == 4 && rb[0]=='p' && rb[1]=='i' && rb[2]=='n' && rb[3]=='g');
+                long w2 = sys_unix_send(sv[1], "pong", 4);          /* B -> A (same pair, other direction) */
+                long r2 = sys_unix_recv(sv[0], rb, sizeof rb);
+                int ba = (w2 == 4 && r2 == 4 && rb[0]=='p' && rb[1]=='o' && rb[2]=='n' && rb[3]=='g');
+                if (!(ab && ba)) ok = 0;
+                sys_unix_close(sv[0]); sys_unix_close(sv[1]);
+            }
+            if (ok) { print("socketpair: sv[0]="); printl(sv[0]); print(" sv[1]="); printl(sv[1]);
+                      print(" -- A->B 'ping' + B->A 'pong' both delivered (pre-connected, bidirectional, no path/listen/accept) -- OK\n"); }
+            else print("socketpairtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -173,6 +173,23 @@ int unix_wait_any(const int *eps, int n) {
     return -1;                                                       /* spurious/kill -> caller re-polls */
 }
 
+/* socketpair(2): hand back two already-connected endpoints with no path /
+ * listen / accept dance — just claim a free connection slot (the same struct a
+ * connect/accept pair would use) and return both of its sides. The two ends
+ * then stream bidirectionally exactly like an accepted connection, and the ids
+ * survive fork() since they index this global table. (M1254) */
+int unix_socketpair(int *a, int *b) {
+    if (!a || !b) return -1;
+    int ci = -1; for (int i = 0; i < U_CONN; i++) if (!conns[i].used) { ci = i; break; }
+    if (ci < 0) return -1;                          /* connection table full */
+    struct uconn *c = &conns[ci];
+    c->used = 1; c->a2b.head = c->a2b.tail = 0; c->b2a.head = c->b2a.tail = 0;
+    c->a_closed = c->b_closed = 0; c->a_waiter = c->b_waiter = 0;
+    *a = (ci << 1) | 0;                             /* side A */
+    *b = (ci << 1) | 1;                             /* side B */
+    return 0;
+}
+
 static int sapp(char *b, int p, int max, const char *s) { while (*s && p < max - 1) b[p++] = *s++; return p; }
 static int sdec(char *b, int p, int max, int v) {
     char t[12]; int n = 0; if (!v) t[n++] = '0';

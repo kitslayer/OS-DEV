@@ -278,7 +278,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_semget: case SYS_semop: case SYS_semctl:
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
-    case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any:
+    case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any: case SYS_socketpair:
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
     case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
@@ -372,7 +372,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_shmget]="shmget",[SYS_shmat]="shmat",[SYS_shmdt]="shmdt",
         [SYS_process_vm_read]="process_vm_read",[SYS_process_vm_write]="process_vm_write",
         [SYS_unix_listen]="unix_listen",[SYS_unix_connect]="unix_connect",[SYS_unix_accept]="unix_accept",
-        [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",
+        [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",[SYS_socketpair]="socketpair",
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
         [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",
         [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_killpg]="killpg",
@@ -1054,6 +1054,14 @@ void syscall_dispatch(struct registers *r) {
         if ((int)r->rsi <= 0 || (int)r->rsi > 16 || !ubuf(r->rdi, (uint64_t)(int)r->rsi * sizeof(int))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)unix_wait_any((const int *)r->rdi, (int)r->rsi);
         break;
+    case SYS_socketpair: {                 /* (int sv[2]) -> a pre-connected AF_UNIX endpoint pair (M1254) */
+        if (!ubuf(r->rdi, 2 * sizeof(int))) { r->rax = (uint64_t)-1; break; }
+        int sv[2];
+        if (unix_socketpair(&sv[0], &sv[1]) != 0) { r->rax = (uint64_t)-1; break; }
+        ((int *)r->rdi)[0] = sv[0]; ((int *)r->rdi)[1] = sv[1];
+        r->rax = 0;
+        break;
+    }
     case SYS_nice:                         /* (nice) -> set current task's CFS nice; returns the clamped value (M1171) */
         r->rax = (uint64_t)(int64_t)task_set_nice((int)r->rdi);
         break;

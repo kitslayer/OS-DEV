@@ -261,6 +261,7 @@
 #define SYS_unlinkat     239   /* (dirfd, path, flags) -> remove relative to a dir fd; 0/-1 (M1251) */
 #define SYS_mkdirat      240   /* (dirfd, path, mode) -> mkdir relative to a dir fd; 0/-1 (M1251) */
 #define SYS_fstatat      241   /* (dirfd, path, statx*, flags) -> stat relative to a dir fd; 0/-1 (M1251) */
+#define SYS_socketpair   242   /* (int sv[2]) -> a pre-connected AF_UNIX endpoint pair; 0/-1 (M1254) */
 #define AT_FDCWD (-100)        /* *at dirfd sentinel: resolve relative to the cwd (M1251) */
 #define PRIO_PROCESS 0         /* getpriority/setpriority `which`: by process (M1238) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
