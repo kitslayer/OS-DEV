@@ -545,7 +545,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -4249,6 +4249,22 @@ static int run_command(char *line, char *cwd) {
                 free(la);
             }
             print("\n");
+        } else if (streq(line, "uname") || startswith(line, "uname ")) {   /* system identity (uname(2)) */
+            struct utsname u;
+            if (sys_uname(&u) == 0) {
+                if (streq(line, "uname")) { print(u.sysname); print("\n"); }   /* bare: kernel name */
+                else { print(u.sysname); print(" "); print(u.nodename); print(" "); print(u.release);
+                       print(" "); print(u.version); print(" "); print(u.machine); print("\n"); }   /* -a: all fields */
+            } else { print("uname: failed\n"); g_status = 1; }
+        } else if (streq(line, "whoami")) {
+            print("root\n");                                  /* single-user: uid 0 */
+        } else if (streq(line, "hostname")) {
+            char h[64]; if (sys_gethostname(h, sizeof h) == 0) { print(h); print("\n"); }
+        } else if (startswith(line, "hostname ")) {
+            const char *p = line + 9; while (*p == ' ') p++;
+            char nm[64]; int i = 0; while (*p && *p != ' ' && i < 63) nm[i++] = *p++; nm[i] = 0; sh_unprot_buf(nm);
+            if (i > 0 && sys_sethostname(nm, (unsigned long)i) == 0) { print("hostname set to "); print(nm); print("\n"); }
+            else { print("usage: hostname [NAME]\n"); g_status = 1; }
         } else if (streq(line, "clear")) {
             sys_clear();
         } else if (streq(line, "reboot")) {
