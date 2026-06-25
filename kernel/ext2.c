@@ -891,6 +891,31 @@ static int dir_set_dotdot(ext2_t *v, uint32_t dir_ino, uint32_t new_parent) {
     }
     return -1;
 }
+/* Rewrite an existing dirent's inode# + file_type in place, found by name (for
+ * RENAME_EXCHANGE, M1232). Returns 0 if rewritten, -1 if the name wasn't found. */
+static int dir_set_entry(ext2_t *v, uint32_t dir_ino, const char *name, uint32_t new_ino, uint8_t new_ftype) {
+    uint8_t dino[256], blk[4096];
+    if (read_inode(v, dir_ino, dino) < 0) return -1;
+    uint32_t size = e_rd32(dino + 4);
+    for (uint32_t off = 0; off < size; off += v->block_size) {
+        uint32_t db = map_block(v, dino, off / v->block_size);
+        if (!db || rdblk(v, db, blk) < 0) continue;
+        uint32_t bo = 0;
+        while (bo + 8 <= v->block_size) {
+            uint32_t ino = e_rd32(blk + bo);
+            uint16_t rl = e_rd16(blk + bo + 4);
+            uint8_t nl = blk[bo + 6];
+            if (rl < 8) break;
+            if (ino && nl && bo + 8 + nl <= v->block_size) {
+                int match = 1;
+                for (int k = 0; k < nl; k++) if (name[k] == 0 || (uint8_t)name[k] != blk[bo + 8 + k]) { match = 0; break; }
+                if (match && name[nl] == 0) { e_wr32(blk + bo, new_ino); blk[bo + 7] = new_ftype; return wrblk(v, db, blk); }
+            }
+            bo += rl;
+        }
+    }
+    return -1;
+}
 /* Is `anc` an ancestor of (or equal to) directory `start`? Climbs ".." to the
  * root inode (2). Used to refuse moving a directory into its own subtree. */
 static int is_ancestor(ext2_t *v, uint32_t anc, uint32_t start) {
@@ -960,6 +985,63 @@ long ext2_rename_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
 
     e_stamp(sin);                                          /* ctime on the moved inode */
     write_inode(&v, src_ino, sin);
+    return 0;
+}
+
+/* renameat2 flag values (mirror syscall.h's RENAME_*; kept local so ext2.c
+ * stays self-contained / host-#include-linkable). */
+#define EXT2_RN_NOREPLACE 1
+#define EXT2_RN_EXCHANGE  2
+
+/* renameat2 (M1232): rename with flags. flags==0 delegates to the plain M1213
+ * rename. RENAME_NOREPLACE fails (-1) if the destination already exists.
+ * RENAME_EXCHANGE atomically swaps two existing entries by rewriting each
+ * dirent's inode#+file_type (no link-count change — both names persist); it
+ * refuses a CROSS-directory exchange when either side is a directory (that would
+ * need ".."/parent-link fixups), keeping every result e2fsck-clean. */
+long ext2_rename2_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                       const char *oldpath, const char *newpath, int flags) {
+    if (flags == 0) return ext2_rename_path(read, write, ctx, start_lba, oldpath, newpath);
+    if ((flags & EXT2_RN_NOREPLACE) && (flags & EXT2_RN_EXCHANGE)) return -1;   /* mutually exclusive */
+
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+
+    uint8_t sin[256]; int sdir = 0;
+    uint32_t src_ino = walk(&v, oldpath, sin, &sdir);
+    if (!src_ino) return -1;                               /* source must exist */
+
+    char op[256], ob[256], np[256], nb[256];
+    path_split(oldpath, op, ob);
+    path_split(newpath, np, nb);
+    if (ob[0] == 0 || nb[0] == 0) return -1;
+
+    uint8_t opin[256], npin[256]; int od = 0, nd = 0;
+    uint32_t oldp = walk(&v, op, opin, &od);
+    uint32_t newp = walk(&v, np, npin, &nd);
+    if (!oldp || !od || !newp || !nd) return -1;           /* both parents must be dirs */
+
+    int td = 0;
+    uint32_t tgt = dir_lookup(&v, npin, nb, &td);
+
+    if (flags & EXT2_RN_NOREPLACE) {
+        if (tgt) return -1;                                /* destination exists -> EEXIST */
+        return ext2_rename_path(read, write, ctx, start_lba, oldpath, newpath);   /* now a plain move */
+    }
+
+    /* RENAME_EXCHANGE: both must exist; swap the two dirents' inode#+file_type. */
+    if (!tgt) return -1;
+    if (tgt == src_ino) return 0;                          /* same entry: no-op */
+    if ((sdir || td) && oldp != newp) return -1;           /* cross-dir dir exchange: refuse */
+    uint8_t ftype_s = sdir ? 2 : (((e_rd16(sin) & 0xF000) == 0xA000) ? 7 : 1);
+    uint8_t din[256];
+    if (read_inode(&v, tgt, din) < 0) return -1;
+    uint8_t ftype_d = td ? 2 : (((e_rd16(din) & 0xF000) == 0xA000) ? 7 : 1);
+    if (dir_set_entry(&v, oldp, ob, tgt, ftype_d) < 0) return -1;
+    if (dir_set_entry(&v, newp, nb, src_ino, ftype_s) < 0) { dir_set_entry(&v, oldp, ob, src_ino, ftype_s); return -1; }  /* roll back */
+    e_stamp(sin); write_inode(&v, src_ino, sin);           /* ctime on both swapped inodes */
+    e_stamp(din); write_inode(&v, tgt, din);
     return 0;
 }
 

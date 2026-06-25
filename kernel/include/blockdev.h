@@ -110,6 +110,7 @@ long blockdev_mount_mkdir(int i, const char *path);    /* create a directory (ex
 long blockdev_mount_symlink(int i, const char *path, const char *target);  /* create a symlink (ext2 only); 0/-1 (M1146) */
 long blockdev_mount_link(int i, const char *oldpath, const char *newpath); /* hard link (ext2 only); 0/-1 (M1207) */
 long blockdev_mount_rename(int i, const char *oldpath, const char *newpath); /* rename/move (ext2 only); 0/-1 (M1213) */
+long blockdev_mount_rename2(int i, const char *oldpath, const char *newpath, int flags); /* renameat2 NOREPLACE/EXCHANGE (M1232) */
 long blockdev_mount_truncate(int i, const char *path, uint64_t newlen);      /* resize (ext2 only); 0/-1 (M1228) */
 long blockdev_mount_seek_data_hole(int i, const char *path, long off, int find_hole); /* SEEK_HOLE/DATA; off/-1/-2 not-ext2 (M1229) */
 long blockdev_mount_utimes(int i, const char *path, long atime, long mtime);  /* set mtime/atime (ext2 only); 0/-1 (M1230) */

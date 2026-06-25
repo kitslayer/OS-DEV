@@ -52,6 +52,7 @@ long vfs_mkdir(const char *path);                        /* make a directory */
 long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /tmp); 0/-1 */
 long vfs_link(const char *oldpath, const char *newpath);     /* hard link (same ext2 mount); 0/-1 (M1207) */
 long vfs_rename_path(const char *oldpath, const char *newpath);  /* rename/move within one ext2 mount; 0/-1 (M1213) */
+long vfs_rename2(const char *oldpath, const char *newpath, int flags); /* renameat2 NOREPLACE/EXCHANGE (M1232) */
 long vfs_truncate(const char *path, uint64_t newlen);            /* resize a real file (tmpfs / ext2 mount); 0/-1 (M1228) */
 long vfs_seek_data_hole(const char *path, long off, int find_hole); /* SEEK_HOLE/DATA: next hole/data >= off; -1 ENXIO (M1229) */
 long vfs_utimes(const char *path, long atime, long mtime);       /* set atime/mtime (neg = leave); 0/-1 (M1230) */

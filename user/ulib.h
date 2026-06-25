@@ -132,6 +132,7 @@ int  sys_unveil(const char *path, const char *perms);   /* limit filesystem visi
 int  sys_symlink(const char *linkpath, const char *target);   /* create a symlink under /tmp; 0/-1 */
 int  sys_link(const char *oldpath, const char *newpath);       /* hard link (same ext2 mount); 0/-1 (M1207) */
 int  sys_rename(const char *oldpath, const char *newpath);     /* rename/move within one ext2 mount; 0/-1 (M1213) */
+int  sys_renameat2(const char *oldpath, const char *newpath, int flags); /* renameat2 NOREPLACE/EXCHANGE; 0/-1 (M1232) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */

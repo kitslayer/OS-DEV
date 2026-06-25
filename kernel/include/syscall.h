@@ -229,6 +229,9 @@
 #define SYS_truncate     210   /* (path, len) -> resize a real file (tmpfs / ext2 mount); 0/-1 (M1228) */
 #define SYS_utimens      211   /* (path, atime, mtime) -> set timestamps; UTIME_NOW/OMIT sentinels; 0/-1 (M1230) */
 #define SYS_futimens     212   /* (fd, atime, mtime) -> set timestamps on an open file fd; 0/-1 (M1230) */
+#define SYS_renameat2    213   /* (oldpath, newpath, flags) -> rename with RENAME_* flags; 0/-1 (M1232) */
+#define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
+#define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */
 #define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */
 #define UTIME_OMIT (-2L)       /* leave the timestamp unchanged (M1230) */
 #define SIGCHLD 17

@@ -614,6 +614,21 @@ long vfs_rename_path(const char *oldpath, const char *newpath) {
     }
     return -1;
 }
+/* renameat2 (M1232): rename with RENAME_NOREPLACE / RENAME_EXCHANGE flags.
+ * flags==0 is the plain M1213 move. Same-ext2-mount only (like vfs_rename_path). */
+long vfs_rename2(const char *oldpath, const char *newpath, int flags) {
+    char ob[160], nb[160];
+    oldpath = bind_resolve(oldpath, ob, sizeof ob);
+    newpath = bind_resolve(newpath, nb, sizeof nb);
+    int omid, nmid; char ofp[192], nfp[192];
+    if (mount_path(oldpath, &omid, ofp, sizeof ofp) &&
+        mount_path(newpath, &nmid, nfp, sizeof nfp) && omid == nmid) {
+        long r = blockdev_mount_rename2(omid, ofp, nfp, flags);
+        if (r >= 0) fsevents_record('r', newpath);
+        return r;
+    }
+    return -1;
+}
 /* truncate(path, newlen) (M1228): resize a regular file — tmpfs (/tmp) natively,
  * or a file on an ext2 /diskN mount. Returns -1 for the boot FAT fs / not found. */
 long vfs_truncate(const char *path, uint64_t newlen) {

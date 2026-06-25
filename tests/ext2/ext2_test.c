@@ -253,6 +253,26 @@ int main(int argc, char **argv) {
                 if (e_rd32(uin + 8) != 0x40000000u || e_rd32(uin + 16) != 0x60000000u) { fprintf(stderr, "utimes omit wrong (a=%u m=%u)\n", e_rd32(uin+8), e_rd32(uin+16)); return 1; }
                 printf("utimes: set atime/mtime to fixed epochs (read back exact); a negative arg leaves the field (OMIT)\n");
             }
+            /* renameat2 (M1232): RENAME_NOREPLACE refuses to clobber; RENAME_EXCHANGE
+             * atomically swaps two files. (flag values: NOREPLACE=1, EXCHANGE=2.) */
+            {
+                static uint8_t ra[40], rb[40];
+                for (int i = 0; i < 40; i++) { ra[i] = (uint8_t)('A' + (i % 5)); rb[i] = (uint8_t)('a' + (i % 7)); }
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/R2A.TXT", ra, 40) != 40) { fprintf(stderr, "renameat2 setup A failed\n"); return 1; }
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/R2B.TXT", rb, 40) != 40) { fprintf(stderr, "renameat2 setup B failed\n"); return 1; }
+                /* NOREPLACE onto an existing name must fail and leave both intact */
+                if (ext2_rename2_path(bd_read, bd_write, 0, 0, "/R2A.TXT", "/R2B.TXT", 1) == 0) { fprintf(stderr, "renameat2 NOREPLACE clobbered an existing file\n"); return 1; }
+                /* NOREPLACE onto a free name must succeed */
+                if (ext2_rename2_path(bd_read, bd_write, 0, 0, "/R2A.TXT", "/R2NEW.TXT", 1) != 0) { fprintf(stderr, "renameat2 NOREPLACE to a free name failed\n"); return 1; }
+                static uint8_t chk[64];
+                if (ext2_read_path(bd_read, 0, 0, "/R2NEW.TXT", chk, sizeof chk) != 40 || memcmp(chk, ra, 40) != 0) { fprintf(stderr, "renameat2 NOREPLACE moved wrong content\n"); return 1; }
+                if (ext2_read_path(bd_read, 0, 0, "/R2A.TXT", chk, sizeof chk) >= 0) { fprintf(stderr, "renameat2 NOREPLACE left the source\n"); return 1; }
+                /* EXCHANGE: swap /R2NEW.TXT (ra) and /R2B.TXT (rb); contents must trade places */
+                if (ext2_rename2_path(bd_read, bd_write, 0, 0, "/R2NEW.TXT", "/R2B.TXT", 2) != 0) { fprintf(stderr, "renameat2 EXCHANGE failed\n"); return 1; }
+                if (ext2_read_path(bd_read, 0, 0, "/R2NEW.TXT", chk, sizeof chk) != 40 || memcmp(chk, rb, 40) != 0) { fprintf(stderr, "renameat2 EXCHANGE: R2NEW wrong\n"); return 1; }
+                if (ext2_read_path(bd_read, 0, 0, "/R2B.TXT", chk, sizeof chk) != 40 || memcmp(chk, ra, 40) != 0) { fprintf(stderr, "renameat2 EXCHANGE: R2B wrong\n"); return 1; }
+                printf("renameat2: NOREPLACE refuses to clobber (ok onto a free name) + EXCHANGE atomically swaps two files\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;
