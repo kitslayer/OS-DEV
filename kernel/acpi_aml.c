@@ -27,14 +27,17 @@
 #include "acpi.h"   /* aml_* decls + the AML_* object-type enum */
 
 #define AML_MAX 256
-static struct { char name[5]; uint8_t type; } g_obj[AML_MAX];
+static struct { char name[5]; uint8_t type; uint32_t data_off; } g_obj[AML_MAX];
 static int g_obj_n;
+static const uint8_t *g_dsdt;       /* the DSDT base, so aml_eval_* can re-decode an object's value (M1286) */
+static uint32_t       g_dsdt_len;
 
 static void aml_add(const char *seg4, uint8_t type) {
     if (g_obj_n >= AML_MAX || !seg4[0]) return;
     for (int i = 0; i < 4; i++) g_obj[g_obj_n].name[i] = seg4[i];
     g_obj[g_obj_n].name[4] = 0;
     g_obj[g_obj_n].type = type;
+    g_obj[g_obj_n].data_off = 0;
     g_obj_n++;
 }
 
@@ -111,6 +114,7 @@ static void aml_termlist(const uint8_t *aml, uint32_t p, uint32_t end, int depth
         } else if (op == 0x08) {                            /* NameOp NameString DataRefObject */
             uint32_t q = p + 1; char nm[5]; q += aml_namestring(aml + q, nm);
             aml_add(nm, AML_NAME);
+            if (g_obj_n > 0) g_obj[g_obj_n - 1].data_off = q;   /* remember where the value lives, for aml_eval_* (M1286) */
             uint32_t ds = aml_dataobj_size(aml + q, end - q); if (!ds) return;
             p = q + ds;
         } else if (op == 0x06) {                            /* AliasOp NameString NameString */
@@ -156,7 +160,7 @@ static void aml_termlist(const uint8_t *aml, uint32_t p, uint32_t end, int depth
 /* Parse the DSDT's AML namespace. `dsdt` points at the DSDT's SDT header; the
  * AML TermList begins at offset 36 (after the 36-byte header) and runs to len. */
 void aml_parse(const uint8_t *dsdt, uint32_t len) {
-    g_obj_n = 0;
+    g_obj_n = 0; g_dsdt = dsdt; g_dsdt_len = len;
     if (!dsdt || len <= 36) return;
     aml_termlist(dsdt, 36, len, 0);
     int dev = 0, mth = 0;
@@ -184,4 +188,40 @@ int aml_obj(int i, char *name_out) {
     if (i < 0 || i >= g_obj_n) return -1;
     for (int k = 0; k < 5; k++) name_out[k] = g_obj[i].name[k];
     return g_obj[i].type;
+}
+
+/* aml_eval_s5 (M1286): the first real AML EVALUATION — find the \_S5_ Name in
+ * the parsed namespace and decode its Package's first two integer elements
+ * (SLP_TYPa, SLP_TYPb — the values written to PM1a/b_CNT to power off). This is
+ * the same data acpi.c's parse_s5 extracts by a crude byte-scan; evaluating it
+ * through the namespace and matching that scan is a two-decoders-agree proof.
+ * Returns SLP_TYPa | (SLP_TYPb << 8), or -1 if there's no decodable _S5_. */
+static long aml_eval_int_elem(const uint8_t *d, uint32_t *pp_io) {
+    uint32_t pp = *pp_io; long v;
+    switch (d[pp]) {
+        case 0x00: v = 0; pp += 1; break;                       /* ZeroOp */
+        case 0x01: v = 1; pp += 1; break;                       /* OneOp */
+        case 0x0A: v = d[pp + 1]; pp += 2; break;               /* BytePrefix */
+        case 0x0B: v = d[pp + 1] | (d[pp + 2] << 8); pp += 3; break;  /* WordPrefix */
+        case 0x0C: v = (long)d[pp+1] | ((long)d[pp+2]<<8) | ((long)d[pp+3]<<16) | ((long)d[pp+4]<<24); pp += 5; break;
+        default: return -1;                                     /* not a simple integer constant */
+    }
+    *pp_io = pp; return v;
+}
+long aml_eval_s5(void) {
+    if (!g_dsdt) return -1;
+    for (int i = 0; i < g_obj_n; i++) {
+        if (g_obj[i].type != AML_NAME) continue;
+        if (g_obj[i].name[0] != '_' || g_obj[i].name[1] != 'S' || g_obj[i].name[2] != '5' || g_obj[i].name[3] != '_') continue;
+        const uint8_t *d = g_dsdt + g_obj[i].data_off;
+        if (d[0] != 0x12) return -1;                            /* the value must be a Package */
+        uint32_t c; (void)aml_pkglen(d + 1, &c);
+        uint32_t pp = 1 + c;                                    /* skip PackageOp + PkgLength */
+        uint8_t numelem = d[pp]; pp++;                          /* NumElements (a ByteData) */
+        if (numelem < 2) return -1;
+        long a = aml_eval_int_elem(d, &pp); if (a < 0) return -1;
+        long b = aml_eval_int_elem(d, &pp); if (b < 0) return -1;
+        return (a & 0xFF) | ((b & 0xFF) << 8);
+    }
+    return -1;
 }

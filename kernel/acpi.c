@@ -173,6 +173,10 @@ static void parse_s5(uint32_t dsdt_phys) {
     }
 }
 
+/* The \_S5_ SLP_TYP values found by the byte-scan above, packed SLP_TYPa |
+ * SLP_TYPb<<8, or -1 if no _S5_. The cross-check target for aml_eval_s5 (M1286). */
+int acpi_s5_values(void) { return s5_ok ? (slp_typa | (slp_typb << 8)) : -1; }
+
 static void parse_fadt(const struct fadt *f) {
     pm1a_cnt = (uint16_t)f->pm1a_cnt_blk;
     pm1b_cnt = (uint16_t)f->pm1b_cnt_blk;

@@ -17,5 +17,7 @@ void aml_parse(const uint8_t *dsdt, uint32_t len);  /* parse the DSDT namespace 
 int  aml_count(int type);                           /* # objects of `type` (0 = all) */
 int  aml_has(const char *seg4);                     /* is a 4-char NameSeg present? */
 int  aml_obj(int i, char *name_out);                /* i-th object: fills name_out[5], returns AML_* type or -1 (M1285) */
+long aml_eval_s5(void);                             /* evaluate the \_S5_ package -> SLP_TYPa|SLP_TYPb<<8, or -1 (M1286) */
+int  acpi_s5_values(void);                          /* the same value from acpi.c's byte-scan (cross-check, M1286) */
 void acpi_poweroff(void);  /* enter S5: power the machine off. Does not return on success. */
 void acpi_reboot(void);    /* ACPI reset register, else 8042 pulse. Does not return on success. */

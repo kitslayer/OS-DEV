@@ -3743,6 +3743,13 @@ static int run_command(char *line, char *cwd) {
             int ok = (n > 0 && has_hdr && has_dev && has_pci0);
             if (ok) { print("acpifs: cat /proc/acpi -> "); printl(n); print(" bytes listing the DSDT namespace incl. a Device named PCI0 -- /proc/acpi OK\n"); }
             else { print("acpifstest: VERIFY FAILED (n="); printl(n); print(" hdr="); printl(has_hdr); print(" dev="); printl(has_dev); print(" pci0="); printl(has_pci0); print(")\n"); g_status = 1; }
+        } else if (streq(line, "amlevaltest")) {   /* AML EVALUATION: eval \\_S5_ + cross-check vs acpi.c's byte-scan (M1286) */
+            long ev = sys_acpi(5), scan = sys_acpi(6);   /* ev = AML-evaluated _S5 package; scan = independent table byte-scan */
+            int ok = (ev >= 0 && scan >= 0 && ev == scan);
+            if (ok) { print("amleval: AML-evaluated the \\_S5_ package through the namespace -> SLP_TYP 0x");
+                      { unsigned long v = (unsigned long)ev; char h[9]; int k = 0; if (!v) h[k++] = '0'; while (v) { int d = v & 0xf; h[k++] = d < 10 ? ('0' + d) : ('a' + d - 10); v >>= 4; } while (k) { char c[2] = { h[--k], 0 }; print(c); } }
+                      print("; matches acpi.c's independent table byte-scan -- AML evaluation OK\n"); }
+            else { print("amlevaltest: VERIFY FAILED (eval="); printl(ev); print(" scan="); printl(scan); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

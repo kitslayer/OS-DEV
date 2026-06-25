@@ -1794,6 +1794,8 @@ void syscall_dispatch(struct registers *r) {
             case 2:  r->rax = (uint64_t)aml_count(AML_METHOD); break;
             case 3:  r->rax = (uint64_t)aml_has("PCI0"); break;
             case 4:  r->rax = (uint64_t)aml_has("_SB_"); break;
+            case 5:  r->rax = (uint64_t)(int64_t)aml_eval_s5(); break;      /* AML-evaluate \\_S5_ (M1286) */
+            case 6:  r->rax = (uint64_t)(int64_t)acpi_s5_values(); break;   /* the byte-scan value, to cross-check (M1286) */
             default: r->rax = (uint64_t)aml_count(0); break;   /* 0 = total objects */
         }
         break;
