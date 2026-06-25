@@ -35,6 +35,7 @@
 #include "ahci.h"
 #include "virtio_blk.h"
 #include "virtio_rng.h"
+#include "virtio_console.h"
 #include "nvme.h"
 #include "floppy.h"
 #include "virtio_net.h"
@@ -267,6 +268,13 @@ void kmain(uint64_t mb_info) {
      * draws two batches and logs them to prove real entropy moved. */
     virtio_rng_init();
     virtio_rng_selftest();
+
+    /* Bring up virtio-console (a paravirtual serial port to the host): the guest
+     * writes bytes to the transmit virtqueue and they land in whatever chardev
+     * the hypervisor wired up. No-op if no virtio-console device is attached;
+     * the self-test emits one line so the host sink + serial log show it. */
+    virtio_console_init();
+    virtio_console_selftest();
 
     /* Bring up NVMe (modern PCIe storage) as YET ANOTHER additional storage
      * driver — boot still uses legacy ATA above. No-op if no NVMe controller is
