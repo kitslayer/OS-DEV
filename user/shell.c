@@ -2519,6 +2519,38 @@ static int run_command(char *line, char *cwd) {
                          : "splicetest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "memfdtest")) {  /* memfd_create + F_SEAL file seals (M1212) */
+            int ok = 1;
+            int fd = sys_memfd_create("scratch", MFD_ALLOW_SEALING);
+            if (fd < 3) { print("memfdtest: memfd_create failed\n"); g_status = 1; }
+            else {
+                /* write, rewind, read back */
+                if (sys_fdwrite(fd, "hello world", 11) != 11) ok = 0;
+                sys_lseek(fd, 0, SEEK_SET);
+                char b[32]; long n = sys_fdread(fd, b, sizeof b);
+                if (!(n == 11 && b[0] == 'h' && b[10] == 'd')) ok = 0;
+                /* SEAL_GROW: can't grow, but a shrink is still allowed */
+                if (sys_memfd_seal(fd, F_SEAL_GROW) < 0) ok = 0;
+                if (sys_ftruncate(fd, 100) != -1) ok = 0;        /* grow rejected */
+                if (sys_ftruncate(fd, 5) != 0) ok = 0;           /* shrink ok -> "hello" */
+                /* SEAL_SHRINK: now a shrink is rejected too */
+                if (sys_memfd_seal(fd, F_SEAL_SHRINK) < 0) ok = 0;
+                if (sys_ftruncate(fd, 2) != -1) ok = 0;          /* shrink rejected */
+                /* SEAL_WRITE: writes rejected, contents intact */
+                if (sys_memfd_seal(fd, F_SEAL_WRITE) < 0) ok = 0;
+                sys_lseek(fd, 0, SEEK_SET);
+                if (sys_fdwrite(fd, "X", 1) != -1) ok = 0;       /* write rejected */
+                sys_lseek(fd, 0, SEEK_SET);
+                char c[16]; long cn = sys_fdread(fd, c, sizeof c);
+                if (!(cn == 5 && c[0] == 'h' && c[4] == 'o')) ok = 0;   /* unchanged "hello" */
+                /* SEAL_SEAL: no further seals can be added */
+                if (sys_memfd_seal(fd, F_SEAL_SEAL) < 0) ok = 0;
+                if (sys_memfd_seal(fd, F_SEAL_WRITE) != -1) ok = 0;     /* sealing is sealed */
+                sys_fdclose(fd);
+                print(ok ? "memfd: rw + ftruncate + SEAL_GROW/SHRINK/WRITE/SEAL all enforced -- OK\n"
+                         : "memfdtest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

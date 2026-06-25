@@ -1375,6 +1375,18 @@ void syscall_dispatch(struct registers *r) {
     case SYS_tee:                          /* duplicate pipe->pipe without consuming the source (M1211) */
         r->rax = (uint64_t)app_tee((int)r->rdi, (int)r->rsi, (unsigned long)r->rdx);
         break;
+    case SYS_memfd_create: {               /* anonymous, sealable in-RAM file fd (M1212) */
+        const char *name = (const char *)r->rdi;
+        if (r->rdi && !ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_memfd_create(name, (int)r->rsi);
+        break;
+    }
+    case SYS_memfd_seal:                   /* add F_SEAL_* (one-way); returns the new seal set (M1212) */
+        r->rax = (uint64_t)app_memfd_seal((int)r->rdi, (unsigned)r->rsi);
+        break;
+    case SYS_ftruncate:                    /* resize a memfd, seal-checked (M1212) */
+        r->rax = (uint64_t)app_ftruncate((int)r->rdi, (long)r->rsi);
+        break;
     case SYS_signalfd:                     /* route masked signals to /proc/self/sigfd (M1126) */
         r->rax = (uint64_t)(int64_t)app_signalfd((uint32_t)r->rdi);
         break;

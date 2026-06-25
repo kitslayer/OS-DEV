@@ -21,6 +21,9 @@ long sys_fswait(const char *const *paths, int n, long timeout_ms);  /* block unt
 long sys_poll(struct pollfd *fds, int nfds, long timeout_ms);       /* fd-table readiness multiplex; #ready/0 timeout/-1 (M1210) */
 long sys_splice(int in_fd, int out_fd, unsigned long len);         /* move bytes pipe->pipe in-kernel (consumes src); bytes/0/-1 (M1211) */
 long sys_tee(int in_fd, int out_fd, unsigned long len);            /* copy bytes pipe->pipe (src preserved); bytes/0/-1 (M1211) */
+int  sys_memfd_create(const char *name, int flags);                /* anonymous sealable in-RAM file fd (>=3); -1 (M1212) */
+long sys_memfd_seal(int fd, unsigned seals);                       /* add F_SEAL_*; new seal set/-1 (M1212) */
+long sys_ftruncate(int fd, long len);                              /* resize a memfd (seal-checked); 0/-1 (M1212) */
 long sys_signalfd(unsigned mask);    /* route the masked signos to /proc/self/sigfd instead of a handler (M1126) */
 /* fanotify-style userspace file materialization (M1128) */
 long sys_fanotify_serve(void);                       /* become the /fan daemon */

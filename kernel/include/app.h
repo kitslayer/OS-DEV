@@ -128,6 +128,9 @@ int  app_fd_is_redirected(app_t *a, int fd);  /* is fd a redirected pipe/file? (
 int  app_fd_ready(app_t *a, int fd, int events); /* poll(2): revents subset of events that won't block now (M1210) */
 long app_splice(int in_fd, int out_fd, unsigned long len); /* move bytes pipe->pipe in-kernel (consumes src); bytes/0/-1 (M1211) */
 long app_tee(int in_fd, int out_fd, unsigned long len);    /* copy bytes pipe->pipe (src preserved); bytes/0/-1 (M1211) */
+int  app_memfd_create(const char *name, int flags);        /* anonymous sealable in-RAM file fd (>=3); -1 (M1212) */
+long app_memfd_seal(int fd, unsigned add);                 /* add F_SEAL_* (one-way); new seal set/-1 (M1212) */
+long app_ftruncate(int fd, long len);                      /* resize a memfd (seal-checked); 0/-1 (M1212) */
 int  app_open(const char *path, int flags);   /* open a FILE fd (O_RDONLY default; O_WRONLY/APPEND/TRUNC/CREAT); fd(>=3)/-1 (M1193/M1195) */
 long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
 int  app_mkfifo(const char *path);     /* create a named pipe (FIFO); 0/-1 (M1188) */

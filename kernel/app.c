@@ -2663,6 +2663,46 @@ static int fd_pipe_idx(struct app *a, int fd, int want_write) {   /* validate + 
     if (a->fd[fd].write_end != (want_write ? 1 : 0)) return -1;    /* read on a write-end (or vice versa) */
     return a->fd[fd].obj;
 }
+
+/* ---- memfd: anonymous, sealable memory-backed file objects (M1212) ------------
+ * A small global table of growable kheap-backed buffers, referenced by the fd
+ * table as type 3 (obj = memfd index). Distinct from mseal (M1153, which seals
+ * virtual-ADDRESS ranges): these are FILE objects carrying one-way F_SEAL_* flags
+ * (WRITE/SHRINK/GROW/SEAL). Refcounted across fork/dup2 exactly like a pipe. */
+#define NMEMFD 16
+#define MEMFD_MAX (16ul * 1024 * 1024)   /* 16 MiB per object (kheap-bounded) */
+static struct memfd { int used, refs; unsigned seals; unsigned long size, cap; char *buf; char name[32]; } memfds[NMEMFD];
+
+static int memfd_alloc(const char *name) {
+    for (int i = 0; i < NMEMFD; i++) if (!memfds[i].used) {
+        struct memfd *m = &memfds[i];
+        m->used = 1; m->refs = 1; m->seals = 0; m->size = 0; m->cap = 0; m->buf = 0;
+        int j = 0; if (name) while (name[j] && j < (int)sizeof m->name - 1) { m->name[j] = name[j]; j++; }
+        m->name[j] = 0;
+        return i;
+    }
+    return -1;
+}
+static void memfd_ref(int idx) { if (idx >= 0 && idx < NMEMFD && memfds[idx].used) memfds[idx].refs++; }
+static void memfd_unref(int idx) {
+    if (idx < 0 || idx >= NMEMFD || !memfds[idx].used) return;
+    if (--memfds[idx].refs > 0) return;
+    if (memfds[idx].buf) kfree(memfds[idx].buf);
+    memfds[idx].used = 0; memfds[idx].buf = 0; memfds[idx].size = memfds[idx].cap = 0;
+}
+/* Ensure cap >= need (doubling), preserving the first `size` bytes. 0/-1. */
+static int memfd_grow(struct memfd *m, unsigned long need) {
+    if (need <= m->cap) return 0;
+    if (need > MEMFD_MAX) return -1;
+    unsigned long nc = m->cap ? m->cap * 2 : 64;
+    while (nc < need) nc *= 2;
+    if (nc > MEMFD_MAX) nc = MEMFD_MAX;
+    char *nb = kmalloc(nc); if (!nb) return -1;
+    for (unsigned long i = 0; i < m->size; i++) nb[i] = m->buf[i];
+    if (m->buf) kfree(m->buf);
+    m->buf = nb; m->cap = nc;
+    return 0;
+}
 /* fd 0/1/2 are reserved for stdin/stdout/stderr (M1191): unused-in-table means
  * the window/keyboard, and dup2 can redirect them to a pipe. So pipe()/fifo_open
  * hand out fds from 3 up, like Unix, leaving 0/1/2 for stdio. */
@@ -2689,6 +2729,15 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
         if (n > 0) a->fd[fd].off = off + n;
         return n;                                             /* 0 => EOF (offset at/after end) */
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 3) {   /* memfd: positioned read (M1212) */
+        struct memfd *m = &memfds[a->fd[fd].obj];
+        long off = a->fd[fd].off; if (off < 0) return -1;
+        if ((unsigned long)off >= m->size) return 0;          /* at/after EOF */
+        unsigned long n = m->size - (unsigned long)off; if (n > max) n = max;
+        for (unsigned long i = 0; i < n; i++) ((char *)buf)[i] = m->buf[off + i];
+        a->fd[fd].off = off + (long)n;
+        return (long)n;
+    }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
@@ -2714,12 +2763,28 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
         a->fd[fd].off = off + len;
         return (long)len;
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 3) {   /* memfd: seal-checked positioned write (M1212) */
+        struct memfd *m = &memfds[a->fd[fd].obj];
+        if (m->seals & F_SEAL_WRITE) return -1;
+        long off = a->fd[fd].off; if (off < 0) return -1;
+        unsigned long end = (unsigned long)off + len;
+        if (end > m->size) {                                  /* the write grows the file */
+            if (m->seals & F_SEAL_GROW) return -1;
+            if (memfd_grow(m, end) != 0) return -1;
+            for (unsigned long i = m->size; i < (unsigned long)off; i++) m->buf[i] = 0;   /* zero a sparse gap */
+            m->size = end;
+        }
+        for (unsigned long i = 0; i < len; i++) m->buf[off + i] = ((const char *)buf)[i];
+        a->fd[fd].off = off + (long)len;
+        return (long)len;
+    }
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
     return pipe_write(idx, buf, len);
 }
 int app_fd_close(int fd) {
     struct app *a = cur(); if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return -1;
     if (a->fd[fd].type == 1) pipe_close_end(a->fd[fd].obj, a->fd[fd].write_end);
+    else if (a->fd[fd].type == 3) memfd_unref(a->fd[fd].obj);   /* drop a memfd reference (M1212) */
     a->fd[fd].used = 0; a->fd[fd].type = 0;
     return 0;
 }
@@ -2728,8 +2793,10 @@ int app_dup2(int oldfd, int newfd) {
     if (newfd < 0 || newfd >= APP_NFD) return -1;
     if (oldfd == newfd) return newfd;
     if (a->fd[newfd].used && a->fd[newfd].type == 1) pipe_close_end(a->fd[newfd].obj, a->fd[newfd].write_end);
+    else if (a->fd[newfd].used && a->fd[newfd].type == 3) memfd_unref(a->fd[newfd].obj);   /* (M1212) */
     a->fd[newfd] = a->fd[oldfd];                                  /* newfd now references the same end */
     if (a->fd[newfd].type == 1) pipe_open_end(a->fd[newfd].obj, a->fd[newfd].write_end);
+    else if (a->fd[newfd].type == 3) memfd_ref(a->fd[newfd].obj);   /* (M1212) */
     return newfd;
 }
 /* mkfifo(path): create a named pipe (M1188). 0/-1. */
@@ -2774,14 +2841,57 @@ int app_open(const char *path, int flags) {
 /* lseek(fd, off, whence): 0=SET, 1=CUR, 2=END. Returns the new offset, or -1. */
 long app_lseek(int fd, long off, int whence) {
     struct app *a = cur(); if (!a) return -1;
-    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 2) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || (a->fd[fd].type != 2 && a->fd[fd].type != 3)) return -1;
     long base = 0;
     if (whence == 1) base = a->fd[fd].off;
-    else if (whence == 2) { struct statx st; if (vfs_stat(a->fd[fd].path, &st) != 0) return -1; base = (long)st.stx_size; }
+    else if (whence == 2) {                                  /* SEEK_END: file size (memfd size for type 3, M1212) */
+        if (a->fd[fd].type == 3) base = (long)memfds[a->fd[fd].obj].size;
+        else { struct statx st; if (vfs_stat(a->fd[fd].path, &st) != 0) return -1; base = (long)st.stx_size; }
+    }
     long n = base + off;
     if (n < 0) return -1;
     a->fd[fd].off = n;
     return n;
+}
+/* memfd_create(name, flags): a new anonymous, sealable in-RAM file fd (M1212).
+ * Returns the fd (>=3), or -1. `flags` reserved (sealing is always permitted
+ * until F_SEAL_SEAL is added). */
+int app_memfd_create(const char *name, int flags) {
+    (void)flags;
+    struct app *a = cur(); if (!a) return -1;
+    int idx = memfd_alloc(name); if (idx < 0) return -1;
+    int fd = -1;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) { memfd_unref(idx); return -1; }
+    a->fd[fd] = (struct fdent){ 1, 3, 1, idx, {0}, 0 };      /* used, type=memfd, writable, obj=idx */
+    return fd;
+}
+/* Add memfd seals (one-way OR of F_SEAL_*). Returns the new seal set, or -1
+ * (bad fd, or already F_SEAL_SEAL'd). `add`==0 just queries the current seals. */
+long app_memfd_seal(int fd, unsigned add) {
+    struct app *a = cur();
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 3) return -1;
+    struct memfd *m = &memfds[a->fd[fd].obj];
+    if (add && (m->seals & F_SEAL_SEAL)) return -1;          /* sealing is itself sealed */
+    m->seals |= add;
+    return (long)m->seals;
+}
+/* ftruncate(fd, len): resize a memfd, honoring the WRITE/SHRINK/GROW seals. 0/-1. */
+long app_ftruncate(int fd, long len) {
+    struct app *a = cur();
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 3 || len < 0) return -1;
+    struct memfd *m = &memfds[a->fd[fd].obj];
+    unsigned long n = (unsigned long)len;
+    if (n == m->size) return 0;
+    if (n < m->size) {                                       /* shrink */
+        if (m->seals & (F_SEAL_SHRINK | F_SEAL_WRITE)) return -1;
+        m->size = n; return 0;
+    }
+    if (m->seals & (F_SEAL_GROW | F_SEAL_WRITE)) return -1;  /* grow */
+    if (memfd_grow(m, n) != 0) return -1;
+    for (unsigned long i = m->size; i < n; i++) m->buf[i] = 0;
+    m->size = n;
+    return 0;
 }
 
 /* ---- seccomp-BPF self-filter (M1190) ------------------------------------------
@@ -2803,7 +2913,7 @@ int app_seccomp_filter_install(const void *progv, int n) {
 int app_fd_is_redirected(app_t *ap, int fd) {
     struct app *a = (struct app *)ap;
     return a && fd >= 0 && fd < APP_NFD && a->fd[fd].used &&
-           (a->fd[fd].type == 1 || a->fd[fd].type == 2);   /* pipe (M1187) or file (M1193) */
+           (a->fd[fd].type == 1 || a->fd[fd].type == 2 || a->fd[fd].type == 3);   /* pipe (M1187) / file (M1193) / memfd (M1212) */
 }
 /* poll(2) readiness for one fd (M1210). Returns the subset of `events`
  * (POLLIN/POLLOUT) that won't block right now. A pipe read-end is POLLIN-ready
@@ -2858,6 +2968,7 @@ static void app_fd_fork(struct app *child, struct app *parent) {
     for (int i = 0; i < APP_NFD; i++) {
         child->fd[i] = parent->fd[i];
         if (parent->fd[i].used && parent->fd[i].type == 1) pipe_open_end(parent->fd[i].obj, parent->fd[i].write_end);
+        else if (parent->fd[i].used && parent->fd[i].type == 3) memfd_ref(parent->fd[i].obj);   /* memfd inherited (M1212) */
     }
 }
 /* exit/reap: close every fd the process still held. */

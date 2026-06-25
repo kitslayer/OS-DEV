@@ -156,6 +156,15 @@ long sys_splice(int in_fd, int out_fd, unsigned long len) {
 long sys_tee(int in_fd, int out_fd, unsigned long len) {
     return do_syscall(SYS_tee, in_fd, out_fd, (long)len);
 }
+int sys_memfd_create(const char *name, int flags) {
+    return (int)do_syscall(SYS_memfd_create, (long)name, flags, 0);
+}
+long sys_memfd_seal(int fd, unsigned seals) {
+    return do_syscall(SYS_memfd_seal, fd, (long)seals, 0);
+}
+long sys_ftruncate(int fd, long len) {
+    return do_syscall(SYS_ftruncate, fd, len, 0);
+}
 long sys_list(void *buf, unsigned long len) {
     /* leading 0 so buf/len land in the same registers (rsi/rdx) the kernel
      * reads them from — matching the write/readfile arg layout. */

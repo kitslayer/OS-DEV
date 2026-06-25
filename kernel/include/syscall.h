@@ -203,6 +203,9 @@
 #define SYS_poll         186   /* (struct pollfd*, nfds, timeout_ms) -> # ready, 0 on timeout, -1 (M1210) */
 #define SYS_splice       187   /* (in_fd, out_fd, len) -> move bytes pipe->pipe in-kernel; bytes/0/-1 (M1211) */
 #define SYS_tee          188   /* (in_fd, out_fd, len) -> copy bytes pipe->pipe w/o consuming src; bytes/0/-1 (M1211) */
+#define SYS_memfd_create 189   /* (name, flags) -> a sealable in-RAM file fd; fd(>=3)/-1 (M1212) */
+#define SYS_memfd_seal   190   /* (fd, add_seals) -> add F_SEAL_*; new seal set/-1 (M1212) */
+#define SYS_ftruncate    191   /* (fd, len) -> resize a memfd (seal-checked); 0/-1 (M1212) */
 
 /* poll(2) readiness multiplexing over the fd table (M1210). `events`/`revents`
  * are bitmasks; the kernel sets revents to the subset that won't block now.
@@ -213,6 +216,15 @@ struct pollfd { int fd; short events; short revents; };
 #define POLLERR  0x0008   /* (kernel-only revents) error condition */
 #define POLLHUP  0x0010   /* (kernel-only revents) hang-up */
 #define POLLNVAL 0x0020   /* (kernel-only revents) fd not open */
+
+/* memfd_create flags + F_SEAL_* file seals (M1212). Seals are one-way (add-only);
+ * F_SEAL_SEAL forbids adding any further seal. */
+#define MFD_CLOEXEC       0x0001
+#define MFD_ALLOW_SEALING 0x0002
+#define F_SEAL_SEAL    0x0001   /* no more seals may be added */
+#define F_SEAL_SHRINK  0x0002   /* the file may not be shrunk */
+#define F_SEAL_GROW    0x0004   /* the file may not be grown */
+#define F_SEAL_WRITE   0x0008   /* the file's contents may not be modified */
 
 /* sigprocmask `how` values (M1208) */
 #define SIG_BLOCK   0   /* add `set` to the blocked mask */
