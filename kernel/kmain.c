@@ -34,6 +34,7 @@
 #include "pci.h"
 #include "ahci.h"
 #include "virtio_blk.h"
+#include "virtio_rng.h"
 #include "nvme.h"
 #include "floppy.h"
 #include "virtio_net.h"
@@ -259,6 +260,13 @@ void kmain(uint64_t mb_info) {
      * write round-trip) and logs their bytes. */
     virtio_blk_init();
     virtio_blk_selftest();
+
+    /* Bring up virtio-rng (the paravirtual hardware entropy source) — the
+     * simplest virtio device: hand it a buffer over a virtqueue and it DMAs
+     * random bytes in. No-op if no virtio-rng device is attached; the self-test
+     * draws two batches and logs them to prove real entropy moved. */
+    virtio_rng_init();
+    virtio_rng_selftest();
 
     /* Bring up NVMe (modern PCIe storage) as YET ANOTHER additional storage
      * driver — boot still uses legacy ATA above. No-op if no NVMe controller is
