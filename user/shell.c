@@ -537,7 +537,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "help")) {
             print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             print("net:    get<url> headers<url> wget<url file> browse<url>\n");
-            print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]>\n");
+            print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
             print("        sntp / ntpdate (set the wall clock from pool.ntp.org over UDP)\n");
             print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
