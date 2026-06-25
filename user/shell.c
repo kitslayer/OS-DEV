@@ -2940,6 +2940,18 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("id: uname='"); print(u.sysname); print(" "); print(u.machine); print(" "); print(u.release); print("', uid/gid=0, child getppid()==parent -- OK\n"); }
             else print("idtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "hostnametest")) {   /* gethostname/sethostname + uname.nodename (M1237) */
+            int ok = 1;
+            char h[64];
+            if (sys_gethostname(h, sizeof h) != 0) ok = 0;              /* initial read works */
+            if (sys_sethostname("os-dev-box", 10) != 0) ok = 0;        /* set a new name */
+            if (sys_gethostname(h, sizeof h) != 0 || !streq(h, "os-dev-box")) ok = 0;   /* read it back */
+            struct utsname u;
+            if (sys_uname(&u) != 0 || !streq(u.nodename, "os-dev-box")) ok = 0;   /* uname.nodename reflects it */
+            sys_sethostname("osdev", 5);                               /* restore the default */
+            print(ok ? "hostname: sethostname('os-dev-box') -> gethostname + uname.nodename both reflect it -- OK\n"
+                     : "hostnametest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

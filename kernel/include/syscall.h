@@ -240,6 +240,8 @@
 #define SYS_getgid       221   /* () -> real gid (0) (M1236) */
 #define SYS_geteuid      222   /* () -> effective uid (0) (M1236) */
 #define SYS_getegid      223   /* () -> effective gid (0) (M1236) */
+#define SYS_sethostname  224   /* (buf, len) -> set the system hostname; 0/-1 (M1237) */
+#define SYS_gethostname  225   /* (buf, len) -> copy the system hostname; 0/-1 (M1237) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */
 #define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */

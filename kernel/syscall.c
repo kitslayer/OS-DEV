@@ -65,6 +65,8 @@ static int ubuf(uint64_t p, uint64_t n) { return vmm_user_ok(p, n); }
  * A handler that reads a string from the arg checks this before dereferencing. */
 static int ustr(uint64_t p) { return vmm_user_str_ok(p, 16u << 20); }
 
+static char g_hostname[64] = "osdev";   /* the system hostname (set/gethostname, uname.nodename) — M1237 */
+
 /* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
  * (basename, upper-cased, <=8 chars + '.' + <=3-char ext) and writes it via the
  * VFS, counting successes in ctx. */
@@ -1232,7 +1234,7 @@ void syscall_dispatch(struct registers *r) {
         if (!ubuf(r->rdi, sizeof(struct utsname))) { r->rax = (uint64_t)-1; break; }
         struct utsname u;
         for (unsigned i = 0; i < sizeof u; i++) ((uint8_t *)&u)[i] = 0;
-        const char *src[5] = { "OS-DEV", "osdev", "1.0", "#1 x86_64 " __DATE__, "x86_64" };
+        const char *src[5] = { "OS-DEV", g_hostname, "1.0", "#1 x86_64 " __DATE__, "x86_64" };
         char *dst[5] = { u.sysname, u.nodename, u.release, u.version, u.machine };
         for (int f = 0; f < 5; f++) { const char *s = src[f]; char *d = dst[f]; int i = 0; while (s[i] && i < 64) { d[i] = s[i]; i++; } d[i] = 0; }
         for (unsigned i = 0; i < sizeof u; i++) ((uint8_t *)r->rdi)[i] = ((uint8_t *)&u)[i];
@@ -1242,6 +1244,25 @@ void syscall_dispatch(struct registers *r) {
     case SYS_getppid: r->rax = (uint64_t)app_sys_getppid(); break;   /* (M1236) */
     case SYS_getuid: case SYS_getgid:                                /* single-user: uid/gid are root (0) (M1236) */
     case SYS_geteuid: case SYS_getegid: r->rax = 0; break;
+    case SYS_sethostname: {                /* (buf, len) -> set the system hostname (M1237) */
+        uint64_t len = r->rsi;
+        if (len >= sizeof g_hostname) len = sizeof g_hostname - 1;
+        if (!ubuf(r->rdi, len)) { r->rax = (uint64_t)-1; break; }
+        const char *s = (const char *)r->rdi;
+        unsigned i = 0; for (; i < len; i++) g_hostname[i] = s[i];
+        g_hostname[i] = 0;
+        r->rax = 0;
+        break;
+    }
+    case SYS_gethostname: {                /* (buf, len) -> copy the system hostname (M1237) */
+        uint64_t len = r->rsi;
+        if (!ubuf(r->rdi, len) || len == 0) { r->rax = (uint64_t)-1; break; }
+        char *d = (char *)r->rdi;
+        unsigned i = 0; for (; g_hostname[i] && i + 1 < len; i++) d[i] = g_hostname[i];
+        d[i] = 0;
+        r->rax = 0;
+        break;
+    }
     case SYS_fiemap: {                     /* (path, struct fiemap_extent*, max) -> physical extent map (M1152) */
         int umax = (int)r->rdx;
         if (umax <= 0 || !ustr(r->rdi) || !ubuf(r->rsi, (uint64_t)umax * sizeof(struct fiemap_extent))) { r->rax = (uint64_t)-1; break; }

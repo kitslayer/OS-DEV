@@ -143,6 +143,8 @@ int  sys_getuid(void);                                          /* real uid (0) 
 int  sys_getgid(void);                                          /* real gid (0) (M1236) */
 int  sys_geteuid(void);                                         /* effective uid (0) (M1236) */
 int  sys_getegid(void);                                         /* effective gid (0) (M1236) */
+int  sys_sethostname(const char *buf, unsigned long len);       /* set the system hostname; 0/-1 (M1237) */
+int  sys_gethostname(char *buf, unsigned long len);             /* copy the system hostname; 0/-1 (M1237) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */
