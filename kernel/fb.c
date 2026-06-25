@@ -24,6 +24,7 @@
 static volatile uint32_t *lfb;
 static uint32_t *target;      /* if set, draw here instead of the live screen */
 static int fb_w, fb_h;
+static int fb_stride;         /* LFB pixels per row: == fb_w for a tight LFB (QEMU/bochs); larger for a padded GOP framebuffer (some real-hw / OVMF modes) */
 
 /* Re-point the framebuffer at a linear-framebuffer base of w*h 32-bpp pixels:
  * identity-map the LFB region (PAGE_SIZE at a time) and update the dims + LFB
@@ -40,6 +41,7 @@ void fb_repoint(uint64_t base, int w, int h) {
     lfb  = (volatile uint32_t *)(uintptr_t)base;
     fb_w = w;
     fb_h = h;
+    fb_stride = w;            /* tight: this path (Bochs DISPI) programs VIRT_WIDTH = w */
 }
 
 /* Set a 32-bpp linear video mode of width*height via the Bochs DISPI driver,
@@ -59,9 +61,15 @@ int fb_init(uint16_t width, uint16_t height) {
  * indexes it as y*w + x with no separate pitch; anything else -> -1 so the
  * caller falls back to the Bochs DISPI path. Returns 0 on success. (M1292) */
 int fb_init_mb(uint64_t base, int w, int h, int pitch, int bpp) {
-    if (!base || w <= 0 || h <= 0 || bpp != 32 || pitch != w * 4)
-        return -1;
-    fb_repoint(base, w, h);   /* identity-map the LFB + point us at it */
+    if (!base || w <= 0 || h <= 0 || bpp != 32 || (pitch & 3) || pitch < w * 4)
+        return -1;            /* 32-bpp; pitch a dword multiple, at least a tight row */
+    /* Map the FULL strided LFB (pitch may exceed w*4 on real GOP modes — drawing
+     * indexes rows by the stride, so the padding bytes must be mapped too). */
+    uint64_t bytes = (uint64_t)pitch * (uint64_t)h;
+    for (uint64_t off = 0; off < bytes; off += PAGE_SIZE)
+        vmm_map(base + off, base + off, PTE_WRITABLE);
+    lfb = (volatile uint32_t *)(uintptr_t)base;
+    fb_w = w; fb_h = h; fb_stride = pitch / 4;   /* honor the bootloader's row stride */
     return 0;
 }
 
@@ -99,7 +107,12 @@ void fb_present(void) {
     if (!target) return;
     /* memcpy, not a per-element loop: lfb is volatile, so an element loop can't
      * be vectorised — and this runs on every scene change (drags, typing). */
-    memcpy((void *)lfb, target, (size_t)fb_w * fb_h * 4);
+    if (fb_stride == fb_w) {                       /* tight LFB (QEMU/bochs): one shot */
+        memcpy((void *)lfb, target, (size_t)fb_w * fb_h * 4);
+        return;
+    }
+    for (int y = 0; y < fb_h; y++)                 /* padded LFB (real GOP): row by row */
+        memcpy((void *)(lfb + (size_t)y * fb_stride), target + (size_t)y * fb_w, (size_t)fb_w * 4);
 }
 
 /* Save a screenshot of the live screen to `name` as a 24-bit BMP, downscaled to
@@ -231,10 +244,9 @@ void fb_present_rect(int x, int y, int w, int h) {
     if (x + w > fb_w) w = fb_w - x;
     if (y + h > fb_h) h = fb_h - y;
     if (w <= 0 || h <= 0) return;
-    for (int j = 0; j < h; j++) {
-        size_t row = (size_t)(y + j) * fb_w + x;
-        memcpy((void *)(lfb + row), target + row, (size_t)w * 4);
-    }
+    for (int j = 0; j < h; j++)
+        memcpy((void *)(lfb + (size_t)(y + j) * fb_stride + x),
+               target + (size_t)(y + j) * fb_w + x, (size_t)w * 4);
 }
 
 void fb_clear(uint32_t color) {

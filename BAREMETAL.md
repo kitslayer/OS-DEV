@@ -61,10 +61,14 @@ appear on the emulated display — QEMU keeps scanning out OVMF's own 1280x800
 buffer rather than the 1280x960 GOP framebuffer GRUB set (a known QEMU/OVMF
 GOP-emulation quirk). On real UEFI hardware the GOP `FrameBufferBase` persists as
 the live scanout after `ExitBootServices`, so the desktop should display — but
-that final step needs a physical machine (none here). Note: the framebuffer GRUB
-provided had a tight pitch (`5120 == 1280*4`), so no `fb.c` stride change was
-needed; a GPU whose mode has a padded pitch would require `fb.c` to honor the
-framebuffer pitch separately from the width.
+that final step needs a physical machine (none here). `fb.c` now honors the
+framebuffer **pitch** separately from the width (`fb_stride`): a real GPU whose
+GOP mode has a padded row stride (`pitch > width*4`) is mapped + presented
+row-by-row at the reported pitch, so it isn't rejected. (Tried under QEMU+OVMF:
+an explicit 1280×960 request gives a tight-pitch FB the kernel consumes but QEMU
+doesn't scan out — mode mismatch; a "no-preference" request gives GRUB's native
+mode but OVMF reports it in a form `fb_init_mb` declines — both are QEMU/OVMF
+emulation quirks, not kernel faults.)
 
 ## Real-hardware notes (from research)
 
