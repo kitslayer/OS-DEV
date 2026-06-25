@@ -582,6 +582,23 @@ long vfs_symlink(const char *linkpath, const char *target) {
     return -1;
 }
 
+/* Hard link (M1207): a second name (newpath) for oldpath's inode. POSIX hard
+ * links can't cross filesystems, so both must resolve to the SAME ext2 /diskN
+ * mount (boot FAT32 / tmpfs / synth don't support hard links -> -1). */
+long vfs_link(const char *oldpath, const char *newpath) {
+    char ob[160], nb[160];
+    oldpath = bind_resolve(oldpath, ob, sizeof ob);
+    newpath = bind_resolve(newpath, nb, sizeof nb);
+    int omid, nmid; char ofp[192], nfp[192];
+    if (mount_path(oldpath, &omid, ofp, sizeof ofp) &&
+        mount_path(newpath, &nmid, nfp, sizeof nfp) && omid == nmid) {
+        long r = blockdev_mount_link(omid, ofp, nfp);
+        if (r >= 0) fsevents_record('l', newpath);
+        return r;
+    }
+    return -1;
+}
+
 /* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
  * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are
  * unsupported (-1). Read-only. */

@@ -160,6 +160,23 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "extent WRITE/readback wrong (w=%ld r=%ld)\n", w, rr); return 1;
             }
             printf("extent write: created /EXTW.TXT (50000 bytes) as an extent, read back byte-exact\n");
+            /* hard link (M1207): a 2nd name -> the same inode; both read identically,
+             * and unlinking one leaves the other working (links_count inc/dec). Uses
+             * a dedicated file so /EXTW.TXT (separately checked extent-mapped) is
+             * untouched. The final image (dumped below) must stay e2fsck-clean. */
+            {
+                static uint8_t hd[1000]; for (int i = 0; i < 1000; i++) hd[i] = (uint8_t)(i * 7 + 1);
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/HL1.TXT", hd, 1000) != 1000) { fprintf(stderr, "hard-link setup write failed\n"); return 1; }
+                if (ext2_link_path(bd_read, bd_write, 0, 0, "/HL1.TXT", "/HL2.TXT") != 0) { fprintf(stderr, "ext2_link_path failed\n"); return 1; }
+                static uint8_t lr[1000];
+                long l1 = ext2_read_path(bd_read, 0, 0, "/HL2.TXT", lr, sizeof lr);
+                if (l1 != 1000 || memcmp(lr, hd, 1000) != 0) { fprintf(stderr, "hard-link readback wrong (%ld)\n", l1); return 1; }
+                ext2_unlink_path(bd_read, bd_write, 0, 0, "/HL1.TXT");            /* drop the original name */
+                long l2 = ext2_read_path(bd_read, 0, 0, "/HL2.TXT", lr, sizeof lr);
+                if (l2 != 1000 || memcmp(lr, hd, 1000) != 0) { fprintf(stderr, "hard link did not survive unlink (%ld)\n", l2); return 1; }
+                if (ext2_read_path(bd_read, 0, 0, "/HL1.TXT", lr, sizeof lr) > 0) { fprintf(stderr, "unlinked original still readable\n"); return 1; }
+                printf("hard link: /HL1.TXT -> /HL2.TXT shares the inode; after unlinking the original the link still reads 1000 bytes\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;

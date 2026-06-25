@@ -1606,7 +1606,8 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "ln -s ") || startswith(line, "ln ")) {  /* ln -s TARGET LINK (symlink: /tmp or an ext2 /diskN mount) */
             const char *p = line + 3;
             while (*p == ' ') p++;
-            if (p[0] == '-' && p[1] == 's') { p += 2; while (*p == ' ') p++; }   /* tolerate/skip -s */
+            int is_sym = 0;
+            if (p[0] == '-' && p[1] == 's') { is_sym = 1; p += 2; while (*p == ' ') p++; }   /* -s => symlink */
             char target[96]; int j = 0;
             while (*p && *p != ' ' && j < 95) target[j++] = *p++;
             target[j] = 0; sh_unprot_buf(target);
@@ -1614,8 +1615,9 @@ static int run_command(char *line, char *cwd) {
             char link[96]; j = 0;
             while (*p && *p != ' ' && j < 95) link[j++] = *p++;
             link[j] = 0; sh_unprot_buf(link);
-            if (!target[0] || !link[0]) print("usage: ln -s <target> <linkpath>   (linkpath under /tmp or an ext2 /diskN mount)\n");
-            else if (sys_symlink(link, target) < 0) { print("ln: failed (linkpath must be under /tmp or an ext2 /diskN mount)\n"); g_status = 1; }
+            if (!target[0] || !link[0]) print("usage: ln [-s] <a> <b>   (-s: symlink b->a under /tmp or ext2; else a hard link, same ext2 /diskN mount)\n");
+            else if (is_sym) { if (sys_symlink(link, target) < 0) { print("ln: symlink failed (linkpath under /tmp or an ext2 /diskN mount)\n"); g_status = 1; } }
+            else if (sys_link(target, link) < 0) { print("ln: hard link failed (both paths must be on the same ext2 /diskN mount)\n"); g_status = 1; }
             else { print(link); print(" -> "); print(target); print("\n"); }
         } else if (startswith(line, "stat ")) {   /* stat <path>: file metadata via statx (M1173) */
             const char *p = line + 5; while (*p == ' ') p++;

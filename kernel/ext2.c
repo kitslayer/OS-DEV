@@ -705,6 +705,17 @@ long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
         grp_dirs(&v, ino, -1);                              /* one fewer directory in its group */
         return 0;
     }
+    /* Drop THIS directory entry, then decrement the link count. With hard links
+     * (M1207) the inode may have other names — only free it + its blocks when the
+     * LAST link is removed; otherwise the remaining names keep reading the data. */
+    dir_remove(&v, parent_ino, base);
+    uint16_t lc = e_rd16(inode + 26);
+    if (lc > 1) {
+        e_wr16(inode + 26, (uint16_t)(lc - 1));           /* one fewer hard link */
+        e_stamp(inode);                                   /* ctime changed */
+        write_inode(&v, ino, inode);
+        return 0;
+    }
     free_inode_blocks(&v, inode);
     /* Mark the inode DEAD before clearing its bitmap bit, so a consistency check
      * sees a clean deletion rather than a live-but-unattached inode: links_count
@@ -718,7 +729,6 @@ long ext2_unlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
     for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);  /* clear i_block[] */
     write_inode(&v, ino, inode);
     free_inode_num(&v, ino);
-    dir_remove(&v, parent_ino, base);
     return 0;
 }
 
@@ -816,6 +826,43 @@ long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t
     e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
     if (write_inode(&v, ino, inode) < 0) return -1;
     if (dir_add(&v, parent_ino, base, ino, 7) < 0) return -1;   /* ftype 7 = symlink */
+    return 0;
+}
+
+/* Hard link (M1207): add a second directory entry (newpath) pointing at the SAME
+ * inode as oldpath, and bump that inode's link count — POSIX link(2). Directories
+ * are refused. ext2_unlink_path already decrements i_links_count and frees the
+ * inode only when it hits 0, so removing either name leaves the other working. */
+long ext2_link_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                    const char *oldpath, const char *newpath) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+
+    /* the existing target: must exist and not be a directory */
+    uint8_t tin[256]; int tdir = 0;
+    uint32_t target_ino = walk(&v, oldpath, tin, &tdir);
+    if (!target_ino || tdir) return -1;
+    uint8_t ftype = ((e_rd16(tin) & 0xF000) == 0xA000) ? 7 : 1;   /* symlink : regular */
+
+    /* split newpath into its parent directory + the new base name */
+    char parent[256], base[256];
+    int last = -1, n = 0;
+    for (int i = 0; newpath[i]; i++) { if (newpath[i] == '/') last = i; n = i + 1; }
+    if (last < 0) parent[0] = 0;
+    else { int j = 0; for (; j < last && j < 255; j++) parent[j] = newpath[j]; parent[j] = 0; }
+    { int j = 0, s = last + 1; for (; s < n && j < 255; s++, j++) base[j] = newpath[s]; base[j] = 0; }
+    if (base[0] == 0) return -1;
+
+    uint8_t pin[256]; int pdir = 0;
+    uint32_t parent_ino = walk(&v, parent, pin, &pdir);
+    if (!parent_ino || !pdir) return -1;
+    if (dir_lookup(&v, pin, base, 0)) return -1;       /* the new name is already taken */
+
+    if (dir_add(&v, parent_ino, base, target_ino, ftype) < 0) return -1;
+    e_wr16(tin + 26, (uint16_t)(e_rd16(tin + 26) + 1));   /* i_links_count++ */
+    e_stamp(tin);                                          /* ctime */
+    if (write_inode(&v, target_ino, tin) < 0) return -1;
     return 0;
 }
 

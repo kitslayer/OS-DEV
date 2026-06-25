@@ -244,6 +244,7 @@ long sys_getrandom(void *buf, unsigned long len) { return do_syscall(SYS_getrand
 int  sys_pledge(const char *promises) { return (int)do_syscall(SYS_pledge, (long)promises, 0, 0); }
 int  sys_unveil(const char *path, const char *perms) { return (int)do_syscall(SYS_unveil, (long)path, (long)perms, 0); }
 int  sys_symlink(const char *linkpath, const char *target) { return (int)do_syscall(SYS_symlink, (long)linkpath, (long)target, 0); }
+int  sys_link(const char *oldpath, const char *newpath) { return (int)do_syscall(SYS_link, (long)oldpath, (long)newpath, 0); }
 int  sys_jail(const char *prog, const char *promises, const char *path) { return (int)do_syscall(SYS_jail, (long)prog, (long)promises, (long)path); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }

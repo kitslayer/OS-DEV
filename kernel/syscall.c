@@ -1518,6 +1518,11 @@ void syscall_dispatch(struct registers *r) {
         if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_symlink((const char *)r->rdi, (const char *)r->rsi);
         break;
+    case SYS_link:                         /* rdi = oldpath, rsi = newpath (hard link; M1207) */
+        if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rsi, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_link((const char *)r->rdi, (const char *)r->rsi);
+        break;
     case SYS_jail: {                       /* rdi=prog, rsi=promises, rdx=path (0=none): spawn pre-confined */
         if (!ustr(r->rdi) || !ustr(r->rsi) || (r->rdx && !ustr(r->rdx))) { r->rax = (uint64_t)-1; break; }
         uint32_t mask;

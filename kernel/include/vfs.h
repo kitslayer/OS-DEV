@@ -50,6 +50,7 @@ long vfs_write(const char *name, const void *buf, unsigned long len);
 long vfs_remove(const char *name);
 long vfs_mkdir(const char *path);                        /* make a directory */
 long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /tmp); 0/-1 */
+long vfs_link(const char *oldpath, const char *newpath);     /* hard link (same ext2 mount); 0/-1 (M1207) */
 struct statx;
 int  vfs_stat(const char *path, struct statx *st);      /* file metadata for statx; 0/-1 (M1173) */
 int  vfs_fiemap(const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 mounts); count/-1 (M1152) */
