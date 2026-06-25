@@ -149,6 +149,10 @@ int  sys_sendfd(int ep, int fd);                               /* SCM_RIGHTS: pa
 int  sys_recvfd(int ep);                                       /* SCM_RIGHTS: receive a passed fd; new fd/-1 (M1265) */
 int  sys_inotify_init(void);                                   /* a pollable filesystem-watch fd; fd/-1 (M1266) */
 int  sys_inotify_add_watch(int fd, const char *path, unsigned int mask);  /* register a watch; wd/-1 (M1266) */
+int  sys_socket(int domain, int type);                         /* AF_INET(2) SOCK_DGRAM(2) socket fd; fd/-1 (M1267) */
+int  sys_sock_bind(int fd, int port);                          /* bind a datagram socket to a local port; 0/-1 (M1267) */
+long sys_sendto(int fd, const unsigned char *ip4, int port, const void *buf, unsigned len);  /* bytes/-1 (M1267) */
+long sys_recvfrom(int fd, void *buf, unsigned max, void *from); /* bytes/-1, 2s timeout; from={u8 ip[4];u16 port} (M1267) */
 void *dlopen(const char *path);                                /* userspace dynamic linker: map+relocate a .so; handle/0 (M1263) */
 void *dlsym(void *handle, const char *name);                   /* resolve an exported symbol to its runtime address; 0 if absent (M1263) */
 long sys_times(struct tms *t);                                  /* fill CPU times (ticks); returns boot ticks (M1235) */

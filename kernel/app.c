@@ -12,6 +12,7 @@
 #include "app.h"
 #include "flock.h"   /* flock_release_pid on process exit (M1177) */
 #include "inotify.h" /* inotify fd type 8 (M1266) */
+#include "net.h"     /* net_udp_send/recv for AF_INET datagram sockets, fd type 9 (M1267) */
 #include "pty.h"     /* pty_release_pid on process exit (M1185) */
 #include "pipe.h"    /* anonymous pipe objects for the fd table (M1187) */
 #include "fifo.h"    /* named pipes (FIFOs), path-keyed (M1188) */
@@ -3214,6 +3215,39 @@ int app_inotify_add(int fd, const char *path, unsigned int mask) {
     struct app *a = cur(); if (!a) return -1;
     if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 8) return -1;
     return inotify_add(a->fd[fd].obj, path, mask);
+}
+
+/* AF_INET datagram sockets (M1267): a BSD socket() fd API over the userspace
+ * UDP path (M1258) + loopback (M1264). fd type 9; the bound local port lives in
+ * fdent.off (0 = unbound -> an ephemeral port is assigned on first sendto). */
+static uint16_t g_ephemeral = 49152;
+int app_socket(int domain, int type) {
+    struct app *a = cur(); if (!a) return -1;
+    if (domain != 2 /*AF_INET*/ || type != 2 /*SOCK_DGRAM*/) return -1;   /* only IPv4 UDP for now */
+    int fd = -1;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;
+    a->fd[fd] = (struct fdent){ 1, 9, 0, 0, {0}, 0, 0 };   /* type=AF_INET dgram, off=0 (unbound) */
+    return fd;
+}
+int app_sock_bind(int fd, int port) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 9) return -1;
+    if (port <= 0 || port > 65535) return -1;
+    a->fd[fd].off = port;
+    return 0;
+}
+long app_sendto(int fd, const uint8_t ip[4], int port, const void *buf, int len) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 9) return -1;
+    if (a->fd[fd].off == 0) { a->fd[fd].off = g_ephemeral++; if (g_ephemeral == 0) g_ephemeral = 49152; }
+    return net_udp_send(ip, (uint16_t)port, (uint16_t)a->fd[fd].off, buf, len) == 0 ? len : -1;
+}
+long app_recvfrom(int fd, void *buf, int max, uint8_t srcip[4], uint16_t *srcport) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 9) return -1;
+    if (a->fd[fd].off == 0) return -1;                     /* unbound -> nothing to receive on */
+    return net_udp_recv((uint16_t)a->fd[fd].off, buf, max, srcip, srcport, 2000);
 }
 /* fd hygiene (M1218): fcntl(F_GETFD/F_SETFD/F_DUPFD/F_DUPFD_CLOEXEC), dup3,
  * close_range — over the per-fd FD_CLOEXEC bit (honored by app_exec above; fork

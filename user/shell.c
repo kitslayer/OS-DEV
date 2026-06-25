@@ -3400,6 +3400,25 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("lo: UDP to 127.0.0.1:7777 round-tripped through the loopback iface ("); printl(n);
                       print(" B, src 127.0.0.1) with NO NIC -- loopback OK\n"); }
             else { print("lotest: VERIFY FAILED (n="); printl(n); print(" from="); printl(from[0]); print(")\n"); g_status = 1; }
+        } else if (streq(line, "inettest")) {   /* AF_INET datagram sockets over loopback (M1267) */
+            int ok = 1;
+            int sa = sys_socket(2, 2);                       /* AF_INET, SOCK_DGRAM */
+            int sb = sys_socket(2, 2);
+            if (sa < 0 || sb < 0) ok = 0;
+            if (ok && sys_sock_bind(sa, 9999) != 0) ok = 0;  /* receiver bound to :9999 */
+            unsigned char lo[4] = {127,0,0,1};
+            long snt = (ok) ? sys_sendto(sb, lo, 9999, "INET", 4) : -1;   /* sb -> 127.0.0.1:9999 over lo */
+            unsigned char rb[16] = {0}, from[6] = {0};
+            long n = (ok) ? sys_recvfrom(sa, rb, sizeof rb, from) : -1;
+            int match = (snt == 4 && n == 4 && rb[0]=='I'&&rb[1]=='N'&&rb[2]=='E'&&rb[3]=='T');
+            int fromlo = (from[0]==127 && from[3]==1);
+            int fromport = from[4] | (from[5] << 8);
+            if (!(ok && match && fromlo && fromport > 0)) ok = 0;
+            if (ok) { print("inet: socket(AF_INET,SOCK_DGRAM) + bind(:9999); sendto 127.0.0.1:9999 over lo; recvfrom got '");
+                      for (int i=0;i<n;i++){char c[2]={(char)rb[i],0};print(c);} print("' from 127.0.0.1:"); printl(fromport);
+                      print(" -- BSD UDP sockets OK\n"); }
+            else { print("inettest: VERIFY FAILED (snt="); printl(snt); print(" n="); printl(n); print(")\n"); g_status = 1; }
+            if (sa >= 0) sys_fdclose(sa); if (sb >= 0) sys_fdclose(sb);
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

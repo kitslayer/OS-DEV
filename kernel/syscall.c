@@ -731,6 +731,31 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_inotify_add((int)r->rdi, (const char *)r->rsi, (unsigned int)r->rdx);
         break;
+    case SYS_socket:                       /* (domain, type) -> AF_INET datagram socket fd (M1267) */
+        r->rax = (uint64_t)(int64_t)app_socket((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_sock_bind:                    /* (fd, port) -> bind a datagram socket (M1267) */
+        r->rax = (uint64_t)(int64_t)app_sock_bind((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_sendto: {                     /* (fd, addr{u8 ip[4];u16 port}, buf, len) -> bytes/-1 (M1267) */
+        if (!ubuf(r->rsi, 6) || (r->r10 && !ubuf(r->rdx, r->r10))) { r->rax = (uint64_t)-1; break; }
+        const uint8_t *ad = (const uint8_t *)r->rsi;
+        uint8_t ip[4] = { ad[0], ad[1], ad[2], ad[3] };
+        uint16_t port = (uint16_t)(ad[4] | (ad[5] << 8));
+        __asm__ volatile("sti");
+        r->rax = (uint64_t)(int64_t)app_sendto((int)r->rdi, ip, port, (const void *)r->rdx, (int)r->r10);
+        break;
+    }
+    case SYS_recvfrom: {                   /* (fd, buf, max, from{u8 ip[4];u16 port}|0) -> bytes/-1 (M1267) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        if (r->r10 && !ubuf(r->r10, 6)) { r->rax = (uint64_t)-1; break; }
+        uint8_t sip[4] = {0,0,0,0}; uint16_t sp = 0;
+        __asm__ volatile("sti");
+        long n = app_recvfrom((int)r->rdi, (void *)r->rsi, (int)r->rdx, sip, &sp);
+        if (n >= 0 && r->r10) { uint8_t *f = (uint8_t *)r->r10; f[0]=sip[0];f[1]=sip[1];f[2]=sip[2];f[3]=sip[3]; f[4]=(uint8_t)(sp&0xFF); f[5]=(uint8_t)(sp>>8); }
+        r->rax = (uint64_t)(int64_t)n;
+        break;
+    }
     case SYS_rmmod:                        /* (name) -> run mod_exit + free the module slot; 0/-1 (M1262) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)module_unload((const char *)r->rdi);

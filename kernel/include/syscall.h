@@ -274,6 +274,10 @@
 #define SYS_recvfd       252   /* (ep) -> SCM_RIGHTS: receive a passed fd; new fd/-1 (M1265) */
 #define SYS_inotify_init 253   /* () -> a pollable filesystem-watch fd; fd/-1 (M1266) */
 #define SYS_inotify_add_watch 254 /* (fd, path, mask) -> register a watch; wd/-1 (M1266) */
+#define SYS_socket       255   /* (domain, type) -> AF_INET SOCK_DGRAM socket fd; fd/-1 (M1267) */
+#define SYS_sock_bind    256   /* (fd, port) -> bind a datagram socket to a local port; 0/-1 (M1267) */
+#define SYS_sendto       257   /* (fd, addr{u8 ip[4];u16 port}, buf, len) -> bytes/-1 (M1267) */
+#define SYS_recvfrom     258   /* (fd, buf, max, from{u8 ip[4];u16 port}|0) -> bytes/-1, 2s timeout (M1267) */
 
 /* clock ids + clock_nanosleep flags (M1257). */
 #define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */
