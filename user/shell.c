@@ -2755,6 +2755,15 @@ static int run_command(char *line, char *cwd) {
                          : "getdentstest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "accesstest")) {  /* access(2) (M1224) */
+            int ok = 1;
+            if (sys_access("/MOTD.TXT", F_OK) != 0) ok = 0;     /* an existing file */
+            if (sys_access("/MOTD.TXT", R_OK) != 0) ok = 0;     /* readable */
+            if (sys_access("/NOPE.XYZ", F_OK) != -1) ok = 0;    /* absent -> -1 */
+            if (sys_access("/", X_OK) != 0) ok = 0;             /* the root dir is searchable */
+            print(ok ? "access: F_OK/R_OK on /MOTD.TXT, /NOPE.XYZ absent=-1, / is X_OK -- OK\n"
+                     : "accesstest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

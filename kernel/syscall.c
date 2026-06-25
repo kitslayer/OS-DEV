@@ -269,7 +269,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
         return PL_STDIO;
-    case SYS_statx: case SYS_flock:
+    case SYS_statx: case SYS_flock: case SYS_access:
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
@@ -999,6 +999,17 @@ void syscall_dispatch(struct registers *r) {
     case SYS_sched_setscheduler:           /* (policy, rt_priority) -> set the current task's scheduling class (M1172) */
         r->rax = (uint64_t)(int64_t)task_set_sched((int)r->rdi, (int)r->rsi);
         break;
+    case SYS_access: {                     /* (path, amode) -> 0 if accessible, -1 (M1224) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        struct statx st;
+        if (vfs_stat((const char *)r->rdi, &st) != 0) { r->rax = (uint64_t)-1; break; }   /* doesn't exist */
+        int amode = (int)r->rsi, ok = 1;
+        if ((amode & R_OK) && !(st.stx_mode & 0444u)) ok = 0;
+        if ((amode & W_OK) && !(st.stx_mode & 0222u)) ok = 0;
+        if ((amode & X_OK) && !(st.stx_mode & 0111u)) ok = 0;
+        r->rax = ok ? 0 : (uint64_t)-1;
+        break;
+    }
     case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
         if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_stat((const char *)r->rdi, (struct statx *)r->rsi);
