@@ -3263,6 +3263,24 @@ static int run_command(char *line, char *cwd) {
                       print(" rd_sectors="); printl(tot_rd_sec); print(" (real per-device I/O counters tallied in blockdev_read/write) -- OK\n"); }
             else print("diskstatstest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "clocknstest")) {   /* clock_nanosleep(TIMER_ABSTIME) + clock_getres (M1257) */
+            int ok = 1;                            /* clockid 1 = CLOCK_MONOTONIC, flag 1 = TIMER_ABSTIME */
+            long res = sys_clock_getres(1);
+            if (res != 10000000) ok = 0;                            /* 10ms tick resolution */
+            unsigned long t0 = sys_uptime_ms();
+            unsigned long target = t0 + 150;                        /* absolute monotonic deadline 150 ms out */
+            sys_clock_nanosleep(1, 1, (long)(target / 1000), (long)((target % 1000) * 1000000));
+            unsigned long dt = sys_uptime_ms() - t0;
+            if (dt < 130) ok = 0;                                   /* slept until the deadline (~150ms, allow slack) */
+            unsigned long t1 = sys_uptime_ms();                     /* a deadline already in the past returns immediately */
+            unsigned long past = t1 > 1000 ? t1 - 1000 : 0;
+            sys_clock_nanosleep(1, 1, (long)(past / 1000), (long)((past % 1000) * 1000000));
+            unsigned long dt2 = sys_uptime_ms() - t1;
+            if (dt2 > 50) ok = 0;                                   /* past deadline -> immediate, no sleep */
+            if (ok) { print("clock_nanosleep: getres="); printl(res); print("ns; ABSTIME +150ms slept ~"); printl((long)dt);
+                      print("ms; past deadline returned ~"); printl((long)dt2); print("ms (immediate) -- OK\n"); }
+            else print("clocknstest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

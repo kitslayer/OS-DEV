@@ -640,6 +640,30 @@ void syscall_dispatch(struct registers *r) {
         r->rax = 0;
         break;
     }
+    case SYS_clock_nanosleep: {            /* (clockid, flags, sec, nsec) -> sleep; TIMER_ABSTIME = absolute deadline (M1257) */
+        app_kill_check();
+        __asm__ volatile("sti");
+        int clockid = (int)r->rdi, flags = (int)r->rsi;
+        uint64_t req_ms = (uint64_t)r->rdx * 1000 + (uint64_t)r->r10 / 1000000;
+        uint64_t sleep_ms;
+        if (flags & TIMER_ABSTIME) {
+            /* Deadline is on the named clock: monotonic = uptime ms, realtime =
+             * wall epoch (second-resolution from the RTC). A deadline already in
+             * the past returns immediately (sleep 0). */
+            uint64_t now_ms = (clockid == CLOCK_REALTIME) ? (uint64_t)rtc_unix() * 1000 : timer_ms();
+            sleep_ms = (req_ms > now_ms) ? req_ms - now_ms : 0;
+        } else {
+            sleep_ms = req_ms;                                 /* relative: like nanosleep */
+        }
+        if (sleep_ms) timer_wait(sleep_ms / 10 + 1);           /* >0 -> at least one 10ms tick */
+        else task_yield();
+        r->rax = 0;
+        break;
+    }
+    case SYS_clock_getres:                 /* (clockid) -> resolution in ns; every clock ticks at the 100Hz timer (M1257) */
+        (void)r->rdi;
+        r->rax = 10000000;                 /* 10,000,000 ns = 10 ms (the 100Hz tick) */
+        break;
     case SYS_ping:
         __asm__ volatile("sti");           /* needs the timer for its timeout */
         r->rax = (uint64_t)(int64_t)net_ping_gateway();

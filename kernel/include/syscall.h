@@ -262,6 +262,13 @@
 #define SYS_mkdirat      240   /* (dirfd, path, mode) -> mkdir relative to a dir fd; 0/-1 (M1251) */
 #define SYS_fstatat      241   /* (dirfd, path, statx*, flags) -> stat relative to a dir fd; 0/-1 (M1251) */
 #define SYS_socketpair   242   /* (int sv[2]) -> a pre-connected AF_UNIX endpoint pair; 0/-1 (M1254) */
+#define SYS_clock_nanosleep 243 /* (clockid, flags, sec, nsec) -> sleep; TIMER_ABSTIME = absolute deadline; 0 (M1257) */
+#define SYS_clock_getres 244   /* (clockid) -> clock resolution in nanoseconds (M1257) */
+
+/* clock ids + clock_nanosleep flags (M1257). */
+#define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */
+#define CLOCK_MONOTONIC  1     /* uptime since boot; absolute deadlines are uptime ms */
+#define TIMER_ABSTIME    1     /* clock_nanosleep flag: the time is an ABSOLUTE deadline */
 #define AT_FDCWD (-100)        /* *at dirfd sentinel: resolve relative to the cwd (M1251) */
 #define PRIO_PROCESS 0         /* getpriority/setpriority `which`: by process (M1238) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */

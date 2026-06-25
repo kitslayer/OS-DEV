@@ -269,6 +269,8 @@ int  sys_renameat2(const char *oldpath, const char *newpath, int flags) { return
 long sys_readlink(const char *path, void *buf, unsigned long size) { return do_syscall(SYS_readlink, (long)path, (long)buf, (long)size); }
 int  sys_sched_yield(void) { return (int)do_syscall(SYS_sched_yield, 0, 0, 0); }
 int  sys_nanosleep(long sec, long nsec) { return (int)do_syscall(SYS_nanosleep, sec, nsec, 0); }
+int  sys_clock_nanosleep(int clockid, int flags, long sec, long nsec) { return (int)do_syscall4(SYS_clock_nanosleep, clockid, flags, sec, nsec); }
+long sys_clock_getres(int clockid) { return do_syscall(SYS_clock_getres, clockid, 0, 0); }
 long sys_times(struct tms *t) { return do_syscall(SYS_times, (long)t, 0, 0); }
 int  sys_uname(struct utsname *u) { return (int)do_syscall(SYS_uname, (long)u, 0, 0); }
 int  sys_getppid(void) { return (int)do_syscall(SYS_getppid, 0, 0, 0); }

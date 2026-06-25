@@ -137,6 +137,8 @@ int  sys_renameat2(const char *oldpath, const char *newpath, int flags); /* rena
 long sys_readlink(const char *path, void *buf, unsigned long size);      /* read a symlink's target (not followed); bytes/-1 (M1233) */
 int  sys_sched_yield(void);                                     /* voluntarily yield the CPU; 0 (M1234) */
 int  sys_nanosleep(long sec, long nsec);                        /* sleep sec+nsec (100Hz-rounded); 0 (M1234) */
+int  sys_clock_nanosleep(int clockid, int flags, long sec, long nsec);  /* TIMER_ABSTIME=absolute deadline; 0 (M1257) */
+long sys_clock_getres(int clockid);                             /* clock resolution in nanoseconds (M1257) */
 long sys_times(struct tms *t);                                  /* fill CPU times (ticks); returns boot ticks (M1235) */
 int  sys_uname(struct utsname *u);                              /* system identity strings; 0/-1 (M1236) */
 int  sys_getppid(void);                                         /* parent pid (M1236) */
