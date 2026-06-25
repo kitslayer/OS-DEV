@@ -219,6 +219,15 @@
 #define SYS_epoll_wait   202   /* (epfd, struct epoll_event*, maxevents, timeout_ms) -> # ready/0/-1 (M1220) */
 #define SYS_pidfd_open   203   /* (pid, flags) -> a pollable process-exit handle (>=3); -1 (M1222) */
 #define SYS_pidfd_send_signal 204  /* (pidfd, sig) -> signal the process; 0/-1 (M1222) */
+#define SYS_getdents64   205   /* (buf, max, start_idx) -> packed dirent64 records of the cwd; bytes/0/-1 (M1223) */
+
+/* getdents64 (M1223): Linux-layout directory entries. d_name offset is 19
+ * (d_ino@0 + d_off@8 + d_reclen@16 + d_type@18); records are 8-byte aligned. */
+struct dirent64 { unsigned long d_ino; long d_off; unsigned short d_reclen; unsigned char d_type; char d_name[]; };
+#define DT_UNKNOWN 0
+#define DT_DIR     4
+#define DT_REG     8
+#define DT_LNK     10
 
 /* epoll (M1220): scalable readiness multiplexing as an fd object. `events` uses
  * the POLLIN/POLLOUT bits; `data` is opaque userdata echoed back on a ready event. */

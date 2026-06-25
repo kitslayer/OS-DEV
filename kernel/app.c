@@ -3185,6 +3185,33 @@ int app_pidfd_send_signal(int pidfd, int sig) {
     app_request_signal(t, sig);
     return 0;
 }
+/* getdents64 (M1223): pack the cwd's entries as Linux dirent64 records starting
+ * at index `start`. d_type comes from vfs_list's trailing-'/' dir marker (the
+ * convention the real filesystems use). Returns bytes written (0 = no more from
+ * `start`), or -1; the caller resumes from the last record's d_off. */
+long app_getdents64(void *buf, unsigned long max, int start) {
+    vfs_dirent ents[128];
+    int n = vfs_list(ents, 128);
+    if (n < 0) return -1;
+    unsigned long off = 0;
+    for (int i = (start < 0 ? 0 : start); i < n; i++) {
+        const char *nm = ents[i].name;
+        int nl = 0; while (nm[nl]) nl++;
+        int isdir = (nl > 0 && nm[nl - 1] == '/');
+        int dlen = isdir ? nl - 1 : nl;                          /* strip the dir marker from d_name */
+        unsigned short reclen = (unsigned short)((19 + (unsigned)dlen + 1 + 7) & ~7u);
+        if (off + reclen > max) break;                           /* full: caller resumes from d_off */
+        unsigned char *rec = (unsigned char *)buf + off;
+        *(unsigned long  *)(rec +  0) = (unsigned long)(i + 1);  /* d_ino (synthetic: 1-based index) */
+        *(long           *)(rec +  8) = (long)(i + 1);           /* d_off: next start index */
+        *(unsigned short *)(rec + 16) = reclen;                  /* d_reclen */
+        rec[18] = isdir ? DT_DIR : DT_REG;                       /* d_type */
+        for (int k = 0; k < dlen; k++) rec[19 + k] = (unsigned char)nm[k];
+        rec[19 + dlen] = 0;
+        off += reclen;
+    }
+    return (long)off;
+}
 /* splice(in_fd, out_fd, len): move bytes from a pipe read-end fd to a pipe
  * write-end fd, entirely in-kernel (no userspace bounce) (M1211). bytes/0/-1. */
 long app_splice(int in_fd, int out_fd, unsigned long len) {

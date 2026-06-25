@@ -2731,6 +2731,30 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "pidfd: open a child handle -> poll blocks while alive, POLLIN on exit -- OK\n"
                      : "pidfdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "getdentstest")) {  /* getdents64 + d_type (M1223) */
+            int ok = 1;
+            sys_mkdir("/GDT");                                /* a fresh, small test dir */
+            sys_mkdir("/GDT/SUB");                            /* -> DT_DIR */
+            sys_writefile("/GDT/F.TXT", "x", 1);             /* -> DT_REG */
+            if (sys_chdir("/GDT") < 0) { print("getdentstest: chdir failed\n"); g_status = 1; }
+            else {
+                char buf[2048];
+                long n = sys_getdents64(buf, sizeof buf, 0);   /* lists the cwd (/GDT) */
+                int saw_dir = 0, saw_file = 0;
+                for (long off = 0; off + 19 <= n; ) {
+                    struct dirent64 *de = (struct dirent64 *)(buf + off);
+                    if (de->d_reclen == 0) break;
+                    if (de->d_type == DT_DIR && streq(de->d_name, "SUB")) saw_dir = 1;
+                    if (de->d_type == DT_REG && streq(de->d_name, "F.TXT")) saw_file = 1;
+                    off += de->d_reclen;
+                }
+                ok = (n > 0) && saw_dir && saw_file;
+                sys_chdir("/");
+                sys_delete("/GDT/SUB"); sys_delete("/GDT/F.TXT"); sys_delete("/GDT");
+                print(ok ? "getdents64: cwd records w/ d_type -- SUB=DT_DIR + F.TXT=DT_REG -- OK\n"
+                         : "getdentstest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

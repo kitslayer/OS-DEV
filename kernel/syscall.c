@@ -1646,6 +1646,10 @@ void syscall_dispatch(struct registers *r) {
     case SYS_pidfd_send_signal:            /* (pidfd, sig) -> signal the process; 0/-1 (M1222) */
         r->rax = (uint64_t)app_pidfd_send_signal((int)r->rdi, (int)r->rsi);
         break;
+    case SYS_getdents64:                   /* (buf, max, start_idx) -> packed dirent64 of the cwd (M1223) */
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)app_getdents64((void *)r->rdi, (unsigned long)r->rsi, (int)r->rdx);
+        break;
     case SYS_sigprocmask:                  /* (how, set): block/unblock signals; returns the old mask (M1208) */
         r->rax = (uint64_t)app_sigprocmask((int)r->rdi, (uint32_t)r->rsi);
         break;

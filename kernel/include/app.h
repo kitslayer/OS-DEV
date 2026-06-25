@@ -143,6 +143,7 @@ long app_sendfile(int out_fd, int in_fd, long *off, unsigned long count); /* zer
 const char *app_fd_path(int fd);                           /* path behind a FILE fd (type 2), or 0 (M1221) */
 int  app_pidfd_open(int pid);                              /* a pollable process-exit handle (>=3); -1 (M1222) */
 int  app_pidfd_send_signal(int pidfd, int sig);            /* signal the pidfd's process; 0/-1 (M1222) */
+long app_getdents64(void *buf, unsigned long max, int start); /* packed dirent64 of the cwd; bytes/0/-1 (M1223) */
 struct epoll_event;                                        /* full definition in syscall.h (M1220) */
 int  app_epoll_create(void);                               /* an epoll fd (>=3); -1 (M1220) */
 int  app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data); /* ADD/MOD/DEL; 0/-1 (M1220) */
