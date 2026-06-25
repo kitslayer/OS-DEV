@@ -140,6 +140,10 @@ long app_fcntl(int fd, int cmd, long arg);                 /* F_GETFD/SETFD/DUPF
 int  app_dup3(int oldfd, int newfd, int flags);            /* dup w/ O_CLOEXEC; -1 if old==new (M1218) */
 long app_close_range(unsigned lo, unsigned hi, int flags); /* close fds in [lo,hi]; 0/-1 (M1218) */
 long app_sendfile(int out_fd, int in_fd, long *off, unsigned long count); /* zero-copy fd->fd; bytes/-1 (M1219) */
+struct epoll_event;                                        /* full definition in syscall.h (M1220) */
+int  app_epoll_create(void);                               /* an epoll fd (>=3); -1 (M1220) */
+int  app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data); /* ADD/MOD/DEL; 0/-1 (M1220) */
+int  app_epoll_check(int epfd, struct epoll_event *out, int maxevents);  /* one non-blocking readiness pass; count/-1 (M1220) */
 int  app_open(const char *path, int flags);   /* open a FILE fd (O_RDONLY default; O_WRONLY/APPEND/TRUNC/CREAT); fd(>=3)/-1 (M1193/M1195) */
 long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
 int  app_mkfifo(const char *path);     /* create a named pipe (FIFO); 0/-1 (M1188) */

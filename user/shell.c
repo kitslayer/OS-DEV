@@ -2656,6 +2656,28 @@ static int run_command(char *line, char *cwd) {
                          : "sendfiletest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "epolltest")) {  /* epoll: scalable readiness multiplexing (M1220) */
+            int ok = 1, fds[2];
+            int ep = sys_epoll_create1(0);
+            if (ep < 3 || sys_pipe(fds) != 0) { print("epolltest: setup failed\n"); g_status = 1; }
+            else {
+                struct epoll_event ev = { POLLIN, 0xABCD };
+                if (sys_epoll_ctl(ep, EPOLL_CTL_ADD, fds[0], &ev) != 0) ok = 0;
+                struct epoll_event got[4];
+                /* (A) nothing written -> epoll_wait timeout 0 returns 0 */
+                if (sys_epoll_wait(ep, got, 4, 0) != 0) ok = 0;
+                /* (B) write -> epoll_wait returns 1 with POLLIN + the userdata echoed back */
+                sys_fdwrite(fds[1], "x", 1);
+                int n = sys_epoll_wait(ep, got, 4, 1000);
+                if (!(n == 1 && (got[0].events & POLLIN) && got[0].data == 0xABCD)) ok = 0;
+                /* (C) DEL -> the fd is no longer watched -> timeout 0 returns 0 (despite pending data) */
+                if (sys_epoll_ctl(ep, EPOLL_CTL_DEL, fds[0], 0) != 0) ok = 0;
+                if (sys_epoll_wait(ep, got, 4, 0) != 0) ok = 0;
+                sys_fdclose(ep); sys_fdclose(fds[0]); sys_fdclose(fds[1]);
+                print(ok ? "epoll: create + ctl(ADD) + wait(timeout 0=none, then POLLIN+data) + ctl(DEL) -- OK\n"
+                         : "epolltest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

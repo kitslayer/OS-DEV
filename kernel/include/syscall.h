@@ -214,6 +214,16 @@
 #define SYS_dup3         197   /* (oldfd, newfd, flags) -> dup w/ O_CLOEXEC; -1 if old==new (M1218) */
 #define SYS_close_range  198   /* (lo, hi, flags) -> close fds in [lo,hi]; 0/-1 (M1218) */
 #define SYS_sendfile     199   /* (out_fd, in_fd, off_ptr, count) -> zero-copy fd->fd; bytes/-1 (M1219) */
+#define SYS_epoll_create1 200  /* (flags) -> an epoll fd (>=3); -1 (M1220) */
+#define SYS_epoll_ctl    201   /* (epfd, op, fd, struct epoll_event*) -> register interest; 0/-1 (M1220) */
+#define SYS_epoll_wait   202   /* (epfd, struct epoll_event*, maxevents, timeout_ms) -> # ready/0/-1 (M1220) */
+
+/* epoll (M1220): scalable readiness multiplexing as an fd object. `events` uses
+ * the POLLIN/POLLOUT bits; `data` is opaque userdata echoed back on a ready event. */
+struct epoll_event { unsigned events; unsigned long data; };
+#define EPOLL_CTL_ADD 1
+#define EPOLL_CTL_DEL 2
+#define EPOLL_CTL_MOD 3
 
 /* fd-flag ops (M1218). O_CLOEXEC (0x10) doesn't collide with O_RDONLY..O_CREAT. */
 #define O_CLOEXEC        0x10

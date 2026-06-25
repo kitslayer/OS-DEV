@@ -2857,10 +2857,13 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
     return pipe_write(idx, buf, len);
 }
+static void epoll_ref(int idx);    /* defined with the epoll table below (M1220) */
+static void epoll_unref(int idx);
 int app_fd_close(int fd) {
     struct app *a = cur(); if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return -1;
     if (a->fd[fd].type == 1) pipe_close_end(a->fd[fd].obj, a->fd[fd].write_end);
     else if (a->fd[fd].type == 3) memfd_unref(a->fd[fd].obj);   /* drop a memfd reference (M1212) */
+    else if (a->fd[fd].type == 6) epoll_unref(a->fd[fd].obj);   /* drop an epoll reference (M1220) */
     a->fd[fd].used = 0; a->fd[fd].type = 0;
     return 0;
 }
@@ -2870,9 +2873,11 @@ int app_dup2(int oldfd, int newfd) {
     if (oldfd == newfd) return newfd;
     if (a->fd[newfd].used && a->fd[newfd].type == 1) pipe_close_end(a->fd[newfd].obj, a->fd[newfd].write_end);
     else if (a->fd[newfd].used && a->fd[newfd].type == 3) memfd_unref(a->fd[newfd].obj);   /* (M1212) */
+    else if (a->fd[newfd].used && a->fd[newfd].type == 6) epoll_unref(a->fd[newfd].obj);   /* (M1220) */
     a->fd[newfd] = a->fd[oldfd];                                  /* newfd now references the same end */
     if (a->fd[newfd].type == 1) pipe_open_end(a->fd[newfd].obj, a->fd[newfd].write_end);
     else if (a->fd[newfd].type == 3) memfd_ref(a->fd[newfd].obj);   /* (M1212) */
+    else if (a->fd[newfd].type == 6) epoll_ref(a->fd[newfd].obj);   /* (M1220) */
     return newfd;
 }
 /* mkfifo(path): create a named pipe (M1188). 0/-1. */
@@ -3050,6 +3055,62 @@ long app_sendfile(int out_fd, int in_fd, long *off, unsigned long count) {
     return total;
 }
 
+/* ---- epoll: scalable readiness multiplexing as an fd object (M1220) ----------
+ * A small global table of interest sets, referenced by the fd table as type 6.
+ * epoll_wait reuses the per-type readiness ladder (app_fd_ready) the poll(2)
+ * loop already drives; refcounted across fork/dup2 like a memfd/pipe. */
+#define NEPOLL 8
+#define EP_MAX 32
+static struct epollobj { int used, refs, n; struct { int fd, events; unsigned long data; } items[EP_MAX]; } epolls[NEPOLL];
+static void epoll_ref(int idx)   { if (idx >= 0 && idx < NEPOLL && epolls[idx].used) epolls[idx].refs++; }
+static void epoll_unref(int idx) { if (idx >= 0 && idx < NEPOLL && epolls[idx].used && --epolls[idx].refs <= 0) epolls[idx].used = 0; }
+
+int app_epoll_create(void) {
+    struct app *a = cur(); if (!a) return -1;
+    int idx = -1; for (int i = 0; i < NEPOLL; i++) if (!epolls[i].used) { idx = i; break; }
+    if (idx < 0) return -1;
+    epolls[idx].used = 1; epolls[idx].refs = 1; epolls[idx].n = 0;
+    int fd = -1; for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) { epolls[idx].used = 0; return -1; }
+    a->fd[fd] = (struct fdent){ 1, 6, 0, idx, {0}, 0, 0 };   /* used, type=epoll, obj=idx */
+    return fd;
+}
+int app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data) {
+    struct app *a = cur();
+    if (!a || epfd < 0 || epfd >= APP_NFD || !a->fd[epfd].used || a->fd[epfd].type != 6) return -1;
+    if (fd < 0 || fd >= APP_NFD) return -1;
+    struct epollobj *e = &epolls[a->fd[epfd].obj];
+    if (op == EPOLL_CTL_ADD) {
+        for (int i = 0; i < e->n; i++) if (e->items[i].fd == fd) return -1;   /* already registered */
+        if (e->n >= EP_MAX) return -1;
+        e->items[e->n].fd = fd; e->items[e->n].events = (int)events; e->items[e->n].data = data; e->n++;
+        return 0;
+    }
+    if (op == EPOLL_CTL_MOD) {
+        for (int i = 0; i < e->n; i++) if (e->items[i].fd == fd) { e->items[i].events = (int)events; e->items[i].data = data; return 0; }
+        return -1;
+    }
+    if (op == EPOLL_CTL_DEL) {
+        for (int i = 0; i < e->n; i++) if (e->items[i].fd == fd) { e->items[i] = e->items[--e->n]; return 0; }
+        return -1;
+    }
+    return -1;
+}
+/* One non-blocking pass: fill `out` with the ready members. Returns the count,
+ * or -1 for a bad epfd. The SYS_epoll_wait dispatch wraps this in the poll
+ * sleep/timeout loop. */
+int app_epoll_check(int epfd, struct epoll_event *out, int maxevents) {
+    struct app *a = cur();
+    if (!a || epfd < 0 || epfd >= APP_NFD || !a->fd[epfd].used || a->fd[epfd].type != 6) return -1;
+    struct epollobj *e = &epolls[a->fd[epfd].obj];
+    int k = 0;
+    for (int i = 0; i < e->n && k < maxevents; i++) {
+        int re = app_fd_ready((app_t *)a, e->items[i].fd, e->items[i].events);
+        if (re > 0) { out[k].events = (unsigned)re; out[k].data = e->items[i].data; k++; }
+    }
+    return k;
+}
+
 /* ---- seccomp-BPF self-filter (M1190) ------------------------------------------
  * Install a bpf.c program that vets the calling process's own syscalls. One-way
  * (privilege drop can't be undone); inherited across fork. `prog` is a verified
@@ -3127,6 +3188,7 @@ static void app_fd_fork(struct app *child, struct app *parent) {
         child->fd[i] = parent->fd[i];
         if (parent->fd[i].used && parent->fd[i].type == 1) pipe_open_end(parent->fd[i].obj, parent->fd[i].write_end);
         else if (parent->fd[i].used && parent->fd[i].type == 3) memfd_ref(parent->fd[i].obj);   /* memfd inherited (M1212) */
+        else if (parent->fd[i].used && parent->fd[i].type == 6) epoll_ref(parent->fd[i].obj);   /* epoll inherited (M1220) */
     }
 }
 /* exit/reap: close every fd the process still held. */

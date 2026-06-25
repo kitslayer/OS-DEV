@@ -271,6 +271,9 @@ long sys_fcntl(int fd, int cmd, long arg) { return do_syscall(SYS_fcntl, fd, cmd
 int  sys_dup3(int oldfd, int newfd, int flags) { return (int)do_syscall(SYS_dup3, oldfd, newfd, flags); }
 long sys_close_range(unsigned lo, unsigned hi, int flags) { return do_syscall(SYS_close_range, (long)lo, (long)hi, flags); }
 long sys_sendfile(int out_fd, int in_fd, long *off, unsigned long count) { return do_syscall4(SYS_sendfile, out_fd, in_fd, (long)off, (long)count); }
+int  sys_epoll_create1(int flags) { return (int)do_syscall(SYS_epoll_create1, flags, 0, 0); }
+int  sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev) { return (int)do_syscall4(SYS_epoll_ctl, epfd, op, fd, (long)ev); }
+int  sys_epoll_wait(int epfd, struct epoll_event *evs, int maxevents, long timeout) { return (int)do_syscall4(SYS_epoll_wait, epfd, (long)evs, maxevents, timeout); }
 int  sys_jail(const char *prog, const char *promises, const char *path) { return (int)do_syscall(SYS_jail, (long)prog, (long)promises, (long)path); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }

@@ -1594,6 +1594,33 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)n;
         break;
     }
+    case SYS_epoll_create1:                /* () -> an epoll fd (M1220) */
+        r->rax = (uint64_t)(int64_t)app_epoll_create();
+        break;
+    case SYS_epoll_ctl: {                  /* (epfd, op, fd, event_ptr) (M1220) */
+        unsigned ev = 0; unsigned long data = 0;
+        if (r->r10) {
+            if (!ubuf(r->r10, sizeof(struct epoll_event))) { r->rax = (uint64_t)-1; break; }
+            struct epoll_event *e = (struct epoll_event *)r->r10; ev = e->events; data = e->data;
+        }
+        r->rax = (uint64_t)app_epoll_ctl((int)r->rdi, (int)r->rsi, (int)r->rdx, ev, data);
+        break;
+    }
+    case SYS_epoll_wait: {                 /* (epfd, events_array, maxevents, timeout_ms) (M1220) */
+        struct epoll_event *out = (struct epoll_event *)r->rsi;
+        int maxev = (int)r->rdx; long timeout = (long)r->r10;
+        if (maxev < 1 || maxev > 64 || !ubuf(r->rsi, (uint64_t)(unsigned)maxev * sizeof(struct epoll_event))) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");           /* the wait loop sleeps on the timer */
+        uint64_t start = timer_ms(); int k = 0;
+        for (;;) {
+            k = app_epoll_check((int)r->rdi, out, maxev);
+            if (k != 0) break;             /* ready (k>0) or error (k<0) */
+            if (timeout >= 0 && (long)(timer_ms() - start) >= timeout) break;
+            task_sleep_ms(10);
+        }
+        r->rax = (uint64_t)(int64_t)k;
+        break;
+    }
     case SYS_sigprocmask:                  /* (how, set): block/unblock signals; returns the old mask (M1208) */
         r->rax = (uint64_t)app_sigprocmask((int)r->rdi, (uint32_t)r->rsi);
         break;

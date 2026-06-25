@@ -139,6 +139,9 @@ long sys_fcntl(int fd, int cmd, long arg);                     /* F_GETFD/SETFD/
 int  sys_dup3(int oldfd, int newfd, int flags);                /* dup w/ O_CLOEXEC; -1 if old==new (M1218) */
 long sys_close_range(unsigned lo, unsigned hi, int flags);     /* close fds in [lo,hi]; 0/-1 (M1218) */
 long sys_sendfile(int out_fd, int in_fd, long *off, unsigned long count);  /* zero-copy fd->fd; bytes/-1 (M1219) */
+int  sys_epoll_create1(int flags);                             /* an epoll fd (>=3); -1 (M1220) */
+int  sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev);      /* ADD/MOD/DEL; 0/-1 (M1220) */
+int  sys_epoll_wait(int epfd, struct epoll_event *evs, int maxevents, long timeout);  /* # ready/0/-1 (M1220) */
 int  sys_jail(const char *prog, const char *promises, const char *path);   /* spawn prog pre-confined (pledge + optional unveil) */
 long sys_find(const char *want, void *buf, unsigned long len);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);
