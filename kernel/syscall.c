@@ -27,6 +27,7 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "timer.h"
+#include "smp.h"      /* smp_current_cpu for sched_getcpu (M1246) */
 #include "task.h"
 #include "io.h"
 #include "net.h"
@@ -610,6 +611,9 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");
         task_yield();
         r->rax = 0;
+        break;
+    case SYS_sched_getcpu:                 /* () -> APIC id of the CPU running this call (M1246) */
+        r->rax = (uint64_t)(int64_t)smp_current_cpu();
         break;
     case SYS_nanosleep: {                  /* (sec, nsec) -> sleep, rounded to the 100Hz tick (M1234) */
         app_kill_check();

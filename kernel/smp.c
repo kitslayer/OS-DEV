@@ -51,6 +51,10 @@ static volatile uint32_t *lapic;        /* set in smp_init via the HHDM */
 static inline uint32_t lapic_rd(uint32_t off) { return lapic[off / 4]; }
 static inline void     lapic_wr(uint32_t off, uint32_t v) { lapic[off / 4] = v; }
 
+/* The APIC id of the core executing right now (sched_getcpu, M1246). ring-3
+ * tasks run on the BSP, so this is the BSP's id for syscall callers. */
+int smp_current_cpu(void) { return lapic ? (int)((lapic_rd(LAPIC_ID) >> 24) & 0xFF) : 0; }
+
 static inline uint64_t rdmsr(uint32_t m) {
     uint32_t a, d; __asm__ volatile("rdmsr" : "=a"(a), "=d"(d) : "c"(m));
     return ((uint64_t)d << 32) | a;

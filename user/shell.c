@@ -3075,6 +3075,13 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "statm: /proc/self/statm -- 7 fields, size>0, resident>0, resident<=size -- OK\n"
                      : "statmtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "getcputest")) {   /* sched_getcpu (M1246) */
+            int ok = 1;
+            int c = sys_sched_getcpu();
+            if (c < 0 || c >= 256) ok = 0;          /* a valid APIC id (ring-3 runs on the BSP) */
+            if (ok) { print("sched_getcpu: ring-3 runs on CPU "); printl(c); print(" (the BSP) -- OK\n"); }
+            else print("getcputest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

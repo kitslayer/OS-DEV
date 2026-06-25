@@ -255,6 +255,7 @@
 #define EFD_NONBLOCK  4        /* eventfd: non-blocking (reads are always non-blocking here) (M1242) */
 #define SYS_chown        234   /* (path, uid, gid) -> set owner/group (ext2; -1 = leave); 0/-1 (M1243) */
 #define SYS_fchown       235   /* (fd, uid, gid) -> set owner/group on an open fd; 0/-1 (M1243) */
+#define SYS_sched_getcpu 236   /* () -> APIC id of the CPU the caller runs on (M1246) */
 #define PRIO_PROCESS 0         /* getpriority/setpriority `which`: by process (M1238) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */

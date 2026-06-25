@@ -155,6 +155,7 @@ int  sys_fchmod(int fd, unsigned mode);                         /* set permissio
 int  sys_eventfd(unsigned initval, int flags);                  /* pollable u64-counter fd; fd/-1 (M1242) */
 int  sys_chown(const char *path, int uid, int gid);            /* set owner/group (ext2; -1 = leave); 0/-1 (M1243) */
 int  sys_fchown(int fd, int uid, int gid);                     /* set owner/group on an open fd; 0/-1 (M1243) */
+int  sys_sched_getcpu(void);                                   /* APIC id of the CPU the caller runs on (M1246) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */
