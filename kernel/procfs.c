@@ -734,6 +734,19 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
             for (unsigned long i = 0; i < len && c < 63 && s[i] && s[i] != '\n'; i++) cmd[c++] = s[i];
             cmd[c] = 0; fw_control(cmd, c); return (long)len;
         }
+        if (peq(abs + 6, "sysrq-trigger")) {                         /* magic SysRq (M1278): echo a key > /proc/sysrq-trigger */
+            char k = len > 0 ? ((const char *)buf)[0] : 0;
+            switch (k) {
+                case 'f':                                            /* invoke the OOM killer to reclaim memory */
+                    kprintf("[sysrq] manual OOM kill requested\n"); app_oom_kill(); break;
+                case 'm':                                            /* dump memory info to the kernel log */
+                    kprintf("[sysrq] MemTotal: %lu kB  MemFree: %lu kB\n",
+                            pmm_total_bytes() / 1024, pmm_free_bytes() / 1024); break;
+                default:                                             /* 'h' / anything else: list the keys */
+                    kprintf("[sysrq] HELP: f=oom-kill m=show-memory h=help\n"); break;
+            }
+            return (long)len;
+        }
         int pid; const char *file;
         if (proc_pid_path(abs, &pid, &file) && peq(file, "ctl")) {   /* echo CMD > /proc/<pid>/ctl */
             void *proc = proc_find(pid, 0);

@@ -3620,6 +3620,20 @@ static int run_command(char *line, char *cwd) {
             int ok = (base > 0 && after - base >= 25000);   /* RSS-based + the +25600 adj bias landed */
             if (ok) { print("oom_score: /proc/self/oom_score="); printl(base); print(" pages (RSS-based); after oom_adj+=100 -> "); printl(after); print(" (+25600 bias) -- /proc/<pid>/oom_score OK\n"); }
             else { print("oomscoretest: VERIFY FAILED (base="); printl(base); print(" after="); printl(after); print(")\n"); g_status = 1; }
+        } else if (streq(line, "sysrqtest")) {   /* magic SysRq over /proc/sysrq-trigger (M1278) */
+            long wm = sys_writefile("/proc/sysrq-trigger", "m", 1);   /* 'm' -> dump meminfo to the kernel log */
+            char kb[8192]; long kn = sys_readfile("/proc/kmsg", kb, sizeof kb - 1);
+            int mem_ok = 0;
+            if (kn > 0) { kb[kn] = 0; for (long i = 0; i + 5 < kn; i++)
+                if (kb[i] == 's' && kb[i+1] == 'y' && kb[i+2] == 's' && kb[i+3] == 'r' && kb[i+4] == 'q') { mem_ok = 1; break; } }
+            long pid = sys_fork();                                    /* 'f' -> OOM-kill the fattest process */
+            if (pid == 0) { sys_oom(0, 1000); for (;;) { sys_pollkey(); sys_sleep(10); } sys_exit(0); }
+            sys_sleep(150);                                           /* let the child boost adj + enter its loop */
+            long wf = sys_writefile("/proc/sysrq-trigger", "f", 1);   /* invoke the OOM killer via SysRq */
+            int st = -1; long w = sys_waitpid((int)pid, &st);         /* looping child returns here only if killed */
+            int ok = (wm == 1 && wf == 1 && mem_ok && pid > 0 && w == pid);
+            if (ok) print("sysrq: echo m > /proc/sysrq-trigger -> meminfo in the kernel log; echo f -> OOM killer reaped the fattest child (pid match) -- magic SysRq OK\n");
+            else { print("sysrqtest: VERIFY FAILED (wm="); printl(wm); print(" wf="); printl(wf); print(" mem="); printl(mem_ok); print(" w="); printl(w); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
