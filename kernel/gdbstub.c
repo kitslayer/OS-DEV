@@ -186,6 +186,47 @@ static void gdb_fixup_bp_rip(struct registers *r) {
         if (gbp[i].used && gbp[i].addr == r->rip - 1) { r->rip -= 1; return; }
 }
 
+/* read `bytes` little-endian hex into a value (reverse of put_hex_le) */
+static uint64_t get_hex_le(const char *s, int bytes) {
+    uint64_t v = 0;
+    for (int i = 0; i < bytes; i++) {
+        int hi = unhex(s[i * 2]), lo = unhex(s[i * 2 + 1]);
+        if (hi < 0 || lo < 0) break;
+        v |= (uint64_t)(((unsigned)hi << 4) | (unsigned)lo) << (8 * i);
+    }
+    return v;
+}
+
+/* `G` write-all-registers (M1206): parse the g-packet hex back into the trap
+ * frame. The GP regs + rip are written; cs/ss/segments are preserved and rflags
+ * is sanitized (arith flags + IF only) so the resume iret stays legal. */
+static void gdb_set_regs(const char *h, struct registers *r) {
+    r->rax = get_hex_le(h, 8); h += 16; r->rbx = get_hex_le(h, 8); h += 16;
+    r->rcx = get_hex_le(h, 8); h += 16; r->rdx = get_hex_le(h, 8); h += 16;
+    r->rsi = get_hex_le(h, 8); h += 16; r->rdi = get_hex_le(h, 8); h += 16;
+    r->rbp = get_hex_le(h, 8); h += 16; r->rsp = get_hex_le(h, 8); h += 16;
+    r->r8  = get_hex_le(h, 8); h += 16; r->r9  = get_hex_le(h, 8); h += 16;
+    r->r10 = get_hex_le(h, 8); h += 16; r->r11 = get_hex_le(h, 8); h += 16;
+    r->r12 = get_hex_le(h, 8); h += 16; r->r13 = get_hex_le(h, 8); h += 16;
+    r->r14 = get_hex_le(h, 8); h += 16; r->r15 = get_hex_le(h, 8); h += 16;
+    r->rip = get_hex_le(h, 8); h += 16;
+    r->rflags = (get_hex_le(h, 4) & 0x0CD5ull) | 0x202ull;
+}
+
+/* `M<addr>,<len>:<hexdata>` write memory (M1206), via the bounds-checked kwriteb. */
+static int gdb_write_mem(const char *c) {
+    uint64_t a = 0, l = 0; int h;
+    while (*c && *c != ',') { if ((h = unhex(*c)) < 0) return 0; a = (a << 4) | (unsigned)h; c++; }
+    if (*c != ',') return 0; c++;
+    while (*c && *c != ':') { if ((h = unhex(*c)) < 0) return 0; l = (l << 4) | (unsigned)h; c++; }
+    if (*c != ':') return 0; c++;
+    for (uint64_t i = 0; i < l; i++) {
+        int hi = unhex(c[i * 2]), lo = unhex(c[i * 2 + 1]);
+        if (hi < 0 || lo < 0 || !kwriteb(a + i, (uint8_t)((hi << 4) | lo))) return 0;
+    }
+    return 1;
+}
+
 static void send_pkt(const char *payload) {
     com2_putc('$');
     uint8_t ck = 0;
@@ -221,6 +262,8 @@ void gdbstub_serve(struct registers *r) {
             else { gdb_bp_clear(a); send_pkt("OK"); }
             continue;
         }
+        if (pkt[0] == 'G') { gdb_set_regs(pkt + 1, r); send_pkt("OK"); continue; }   /* write all registers */
+        if (pkt[0] == 'M') { send_pkt(gdb_write_mem(pkt + 1) ? "OK" : "E01"); continue; }  /* write memory */
         if (pkt[0] == 's') { r->rflags |= (1ull << 8); gdb_running = 1; break; }  /* single-step: TF + resume */
         if (pkt[0] == 'c') { gdb_running = 1; break; }                            /* continue */
         if (pkt[0] == 'D') { send_pkt("OK"); break; }                            /* detach (no re-entry) */

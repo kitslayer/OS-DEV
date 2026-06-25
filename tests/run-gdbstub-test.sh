@@ -45,6 +45,8 @@ timeout 25 gdb -nx -batch "$ELF" \
     -ex 'continue' \
     -ex 'info registers rip' \
     -ex 'stepi' \
+    -ex 'set {unsigned long}($rsp-512) = 0xcafef00d' \
+    -ex 'x/1xg $rsp-512' \
     -ex 'detach' > "$OUT" 2>&1
 
 if ! { grep -q 'kmain' "$OUT" && grep -qE 'rip[[:space:]]+0x[0-9a-f]' "$OUT"; }; then
@@ -55,5 +57,9 @@ if ! grep -q 'vdso_init' "$OUT"; then
     echo "gdbstubtest: FAIL -- gdb breakpoint at vdso_init was not hit (Z0/continue)"
     sed -n '1,20p' "$OUT"; exit 1
 fi
-echo "gdbstubtest: PASS -- gdb attached, read+symbolized registers (->kmain), set a breakpoint, hit it (->vdso_init), stepped"
+if ! grep -qi 'cafef00d' "$OUT"; then
+    echo "gdbstubtest: FAIL -- gdb memory write/read-back (M/m) did not round-trip"
+    sed -n '1,24p' "$OUT"; exit 1
+fi
+echo "gdbstubtest: PASS -- gdb attached, read+symbolized regs (->kmain), breakpoint hit (->vdso_init), stepped, mem write/read round-trip"
 exit 0
