@@ -97,6 +97,21 @@ long tmpfs_write(const char *name, const void *data, unsigned long len) {
     return (long)len;
 }
 
+/* truncate a tmpfs file to `newlen` (M1228): a fresh buffer keeping min(old,new)
+ * bytes, zero-filled when growing. 0/-1. */
+long tmpfs_truncate(const char *name, unsigned long newlen) {
+    int i = tfind(name);
+    if (i < 0 || !tf[i].used || tf[i].link) return -1;
+    char *nb = (char *)kmalloc(newlen ? newlen : 1);
+    if (!nb) return -1;
+    unsigned long keep = tf[i].len < newlen ? tf[i].len : newlen;
+    for (unsigned long k = 0; k < keep; k++)   nb[k] = tf[i].buf[k];
+    for (unsigned long k = keep; k < newlen; k++) nb[k] = 0;        /* zero-fill grow */
+    if (tf[i].buf && !buf_in_snapshot(tf[i].buf)) kfree(tf[i].buf);
+    tf[i].buf = nb; tf[i].len = (uint32_t)newlen; tf[i].mtime = rtc_unix();
+    return 0;
+}
+
 long tmpfs_remove(const char *name) {
     int i = tfind(name);
     if (i < 0) return -1;

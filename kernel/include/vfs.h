@@ -52,6 +52,7 @@ long vfs_mkdir(const char *path);                        /* make a directory */
 long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /tmp); 0/-1 */
 long vfs_link(const char *oldpath, const char *newpath);     /* hard link (same ext2 mount); 0/-1 (M1207) */
 long vfs_rename_path(const char *oldpath, const char *newpath);  /* rename/move within one ext2 mount; 0/-1 (M1213) */
+long vfs_truncate(const char *path, uint64_t newlen);            /* resize a real file (tmpfs / ext2 mount); 0/-1 (M1228) */
 struct statx;
 int  vfs_stat(const char *path, struct statx *st);      /* file metadata for statx; 0/-1 (M1173) */
 int  vfs_fiemap(const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 mounts); count/-1 (M1152) */

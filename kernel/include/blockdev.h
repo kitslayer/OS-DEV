@@ -110,6 +110,7 @@ long blockdev_mount_mkdir(int i, const char *path);    /* create a directory (ex
 long blockdev_mount_symlink(int i, const char *path, const char *target);  /* create a symlink (ext2 only); 0/-1 (M1146) */
 long blockdev_mount_link(int i, const char *oldpath, const char *newpath); /* hard link (ext2 only); 0/-1 (M1207) */
 long blockdev_mount_rename(int i, const char *oldpath, const char *newpath); /* rename/move (ext2 only); 0/-1 (M1213) */
+long blockdev_mount_truncate(int i, const char *path, uint64_t newlen);      /* resize (ext2 only); 0/-1 (M1228) */
 int  blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 only); count/-1 (M1152) */
 long blockdev_mount_punch(int i, const char *path, uint64_t offset, uint64_t len);  /* fallocate PUNCH_HOLE (ext2 only); blocks/-1 (M1153) */
 long blockdev_mount_setxattr(int i, const char *path, const char *name, const void *val, unsigned long vlen);  /* set user.* xattr (ext2 only); vlen/-1 (M1182) */

@@ -992,6 +992,54 @@ long ext2_punch_hole(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     return freed;
 }
 
+/* truncate (M1228): resize a regular file to `newlen`. Shrink frees the blocks
+ * fully beyond newlen (via punch_block) and lowers i_size/i_blocks; grow is
+ * sparse — just raise i_size, so the new tail reads back as zeros through the
+ * hole path (ext2_pread zero-fills unmapped blocks). 0/-1. */
+long ext2_truncate_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                        const char *path, uint64_t newlen) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+    uint8_t inode[256]; int isdir = 0;
+    uint32_t ino = walk(&v, path, inode, &isdir);
+    if (!ino || isdir) return -1;                          /* regular files only */
+    uint32_t bs = v.block_size, old = e_rd32(inode + 4);   /* i_size */
+    if ((uint32_t)newlen == old) return 0;
+    if ((uint32_t)newlen < old) {                          /* shrink: free blocks fully beyond newlen */
+        uint32_t first = ((uint32_t)newlen + bs - 1) / bs; /* # of file-blocks to keep */
+        uint32_t last  = (old + bs - 1) / bs;              /* one past the last data block */
+        uint8_t *ib = inode + 40;
+        int freed = 0;
+        if ((e_rd32(inode + 32) & EXT4_EXTENTS_FL) &&      /* extent-mapped (M1189 driver writes one */
+            e_rd16(ib) == EXT4_EXT_MAGIC && e_rd16(ib + 6) == 0 && e_rd16(ib + 2) == 1) {
+            uint8_t *ee = ib + 12;                         /* contiguous depth-0 leaf extent): shrink ee_len, */
+            uint32_t elen = e_rd16(ee + 4);               /* free the trailing physical run. punch_block only */
+            if (elen > 32768) elen -= 32768;              /* knows the direct/indirect scheme, so handle this */
+            uint32_t estart = e_rd32(ee + 8);             /* layout here. (uninit extents: treat length plainly.) */
+            uint32_t keep = first < elen ? first : elen;
+            for (uint32_t b = keep; b < elen; b++) { free_block(&v, estart + b); freed++; }
+            e_wr16(ee + 4, (uint16_t)keep);
+            if (keep == 0) e_wr16(ib + 2, 0);             /* no extents left */
+        } else if (!(e_rd32(inode + 32) & EXT4_EXTENTS_FL)) {
+            for (uint32_t fb = first; fb < last; fb++) freed += punch_block(&v, inode, fb);
+        }
+        if (freed) {
+            uint32_t iblk = e_rd32(inode + 28), dec = (uint32_t)freed * (bs / 512);
+            e_wr32(inode + 28, iblk > dec ? iblk - dec : 0);
+        }
+        uint32_t poff = (uint32_t)newlen % bs;             /* zero the stale tail of the partial EOF block */
+        if (poff) {                                        /* (so a later grow reads back zeros, not old data); */
+            uint32_t db = map_block(&v, inode, (uint32_t)newlen / bs);   /* map_block resolves both schemes */
+            uint8_t blk[4096];
+            if (db && rdblk(&v, db, blk) >= 0) { for (uint32_t k = poff; k < bs; k++) blk[k] = 0; wrblk(&v, db, blk); }
+        }
+    }
+    e_wr32(inode + 4, (uint32_t)newlen);                   /* i_size (grow is sparse) */
+    e_stamp(inode);
+    return write_inode(&v, ino, inode);
+}
+
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, const void *buf, unsigned long len) {
     ext2_t v;

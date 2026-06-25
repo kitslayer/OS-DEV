@@ -204,6 +204,22 @@ int main(int argc, char **argv) {
                 if (ext2_rename_path(bd_read, bd_write, 0, 0, "/RNDIR", "/RNDIR/INNER/LOOP") == 0) { fprintf(stderr, "rename allowed a dir into its own subtree\n"); return 1; }
                 printf("rename: same-dir + cross-dir file move + directory move across parents (\"..\" + link counts), subtree-loop refused\n");
             }
+            /* truncate (M1228): shrink frees blocks beyond newlen + lowers i_size;
+             * grow is sparse (the new tail reads back as zeros). The dumped image
+             * must stay e2fsck-clean. */
+            {
+                static uint8_t td[3000]; for (int i = 0; i < 3000; i++) td[i] = (uint8_t)(i * 5 + 3);
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/TR.TXT", td, 3000) != 3000) { fprintf(stderr, "truncate setup write failed\n"); return 1; }
+                static uint8_t tr[4096];
+                if (ext2_truncate_path(bd_read, bd_write, 0, 0, "/TR.TXT", 500) != 0) { fprintf(stderr, "truncate shrink failed\n"); return 1; }
+                long r = ext2_read_path(bd_read, 0, 0, "/TR.TXT", tr, sizeof tr);
+                if (r != 500 || memcmp(tr, td, 500) != 0) { fprintf(stderr, "truncate shrink readback wrong (%ld)\n", r); return 1; }
+                if (ext2_truncate_path(bd_read, bd_write, 0, 0, "/TR.TXT", 1500) != 0) { fprintf(stderr, "truncate grow failed\n"); return 1; }
+                long r2 = ext2_read_path(bd_read, 0, 0, "/TR.TXT", tr, sizeof tr);
+                int zeros_ok = 1; for (int i = 500; i < 1500; i++) if (tr[i] != 0) { zeros_ok = 0; break; }
+                if (r2 != 1500 || memcmp(tr, td, 500) != 0 || !zeros_ok) { fprintf(stderr, "truncate grow readback wrong (%ld z=%d)\n", r2, zeros_ok); return 1; }
+                printf("truncate: shrink 3000->500 (frees blocks), grow 500->1500 sparse (zero-filled tail)\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;

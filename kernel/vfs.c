@@ -614,6 +614,20 @@ long vfs_rename_path(const char *oldpath, const char *newpath) {
     }
     return -1;
 }
+/* truncate(path, newlen) (M1228): resize a regular file — tmpfs (/tmp) natively,
+ * or a file on an ext2 /diskN mount. Returns -1 for the boot FAT fs / not found. */
+long vfs_truncate(const char *path, uint64_t newlen) {
+    char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);
+    const char *tb;
+    if (tmp_path(p, &tb)) return tmpfs_truncate(tb, newlen);          /* RAM /tmp */
+    int mid; char fp[192];
+    if (mount_path(p, &mid, fp, sizeof fp)) {
+        long r = blockdev_mount_truncate(mid, fp, newlen);
+        if (r >= 0) fsevents_record('w', path);
+        return r;
+    }
+    return -1;
+}
 
 /* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
  * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are

@@ -2994,7 +2994,9 @@ long app_memfd_seal(int fd, unsigned add) {
 /* ftruncate(fd, len): resize a memfd, honoring the WRITE/SHRINK/GROW seals. 0/-1. */
 long app_ftruncate(int fd, long len) {
     struct app *a = cur();
-    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 3 || len < 0) return -1;
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || len < 0) return -1;
+    if (a->fd[fd].type == 2) return vfs_truncate(a->fd[fd].path, (uint64_t)len);   /* a real file fd (M1228) */
+    if (a->fd[fd].type != 3) return -1;                    /* otherwise it must be a memfd */
     struct memfd *m = &memfds[a->fd[fd].obj];
     unsigned long n = (unsigned long)len;
     if (n == m->size) return 0;

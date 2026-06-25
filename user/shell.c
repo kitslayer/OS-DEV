@@ -2814,6 +2814,24 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "waitid: WNOHANG=nothing-yet (si_pid=0), then blocking reap si_status=42 CLD_EXITED -- OK\n"
                      : "waitidtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "truncatetest")) {  /* truncate/ftruncate on real files (M1228) */
+            int ok = 1;
+            sys_writefile("/tmp/T.TXT", "hello world", 11);
+            if (sys_truncate("/tmp/T.TXT", 5) != 0) ok = 0;              /* shrink */
+            char b[32]; long n = sys_readfile("/tmp/T.TXT", b, sizeof b);
+            if (!(n == 5 && b[0] == 'h' && b[4] == 'o')) ok = 0;        /* "hello" */
+            if (sys_truncate("/tmp/T.TXT", 8) != 0) ok = 0;             /* grow (sparse) */
+            long n2 = sys_readfile("/tmp/T.TXT", b, sizeof b);
+            if (!(n2 == 8 && b[4] == 'o' && b[5] == 0 && b[7] == 0)) ok = 0;   /* "hello\0\0\0" */
+            int fd = sys_open("/tmp/T.TXT");                             /* ftruncate(fd) path */
+            if (sys_ftruncate(fd, 3) != 0) ok = 0;
+            sys_fdclose(fd);
+            long n3 = sys_readfile("/tmp/T.TXT", b, sizeof b);
+            if (!(n3 == 3 && b[0] == 'h' && b[2] == 'l')) ok = 0;       /* "hel" */
+            sys_delete("/tmp/T.TXT");
+            print(ok ? "truncate: shrink 11->5 + grow 5->8 (zero-fill) + ftruncate(fd) 8->3 -- OK\n"
+                     : "truncatetest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
