@@ -549,6 +549,16 @@ static long gen_pid_wss(char *b, int max, int pid, void *proc) {
     b[p] = 0; return p;
 }
 
+/* /proc/<pid>/oom_score (M1277): the OOM killer's victim score for this process
+ * — RSS in pages plus the oom_adj bias. The number the OOM killer ranks by; a
+ * single line like Linux's. */
+static long gen_pid_oom(char *b, int max, void *proc) {
+    long s = app_oom_score_of((app_t *)proc); if (s < 0) s = 0;
+    int p = sdec(b, 0, max, (uint64_t)s);
+    p = sapp(b, p, max, "\n");
+    b[p] = 0; return p;
+}
+
 /* /proc/<pid>/mem/<hexaddr>[/<len>]: hexdump another process's memory — the live
  * counterpart to the post-mortem core reader (crashinfo, M1112). The name-based
  * VFS has no fd offsets, so the address+length ride in the path. Restricted to
@@ -650,6 +660,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (peq(file, "exe"))     return gen_pid_exe((char *)buf, (int)max, proc);             /* program image path (M1250) */
             if (peq(file, "root")) { char *bb = (char *)buf; if (max >= 3) { bb[0] = '/'; bb[1] = '\n'; bb[2] = 0; return 2; } return 0; }  /* no per-proc chroot -> "/" (M1249) */
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
+            if (peq(file, "oom_score")) return gen_pid_oom((char *)buf, (int)max, proc);            /* OOM victim score (M1277) */
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */
             if (peq(file, "regs"))   return gen_pid_regs((char *)buf, (int)max, proc);   /* ring-3 register file (M1119) */

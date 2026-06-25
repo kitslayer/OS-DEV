@@ -2954,6 +2954,8 @@ long app_oom(int cmd, int arg) {
     if (cmd == 2) { struct app *t = app_by_pid(arg); return t ? oom_score(t) : -1; }
     return -1;
 }
+/* /proc/<pid>/oom_score accessor (M1277): the OOM score of an arbitrary app. */
+long app_oom_score_of(app_t *a) { return oom_score((struct app *)a); }
 
 /* Format the caller's command history (oldest first) as "  N  command\n"
  * lines into buf. Returns bytes written (excluding the NUL terminator). The

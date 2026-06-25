@@ -3607,6 +3607,19 @@ static int run_command(char *line, char *cwd) {
             int ok = (sset == 0 && g_alt_on == 1);
             if (ok) print("altstack: SA_ONSTACK handler for SIGRTMIN ran with its stack pointer inside the sigaltstack() region (8KB) -- sigaltstack OK\n");
             else { print("altstacktest: VERIFY FAILED (sset="); printl(sset); print(" on_alt="); printl(g_alt_on); print(")\n"); g_status = 1; }
+        } else if (streq(line, "oomscoretest")) {   /* /proc/<pid>/oom_score reflects RSS + oom_adj (M1277) */
+            char sb[64];
+            long n = sys_readfile("/proc/self/oom_score", sb, sizeof sb - 1);
+            long base = -1;
+            if (n > 0) { sb[n] = 0; base = 0; for (int i = 0; sb[i] >= '0' && sb[i] <= '9'; i++) base = base * 10 + (sb[i] - '0'); }
+            sys_oom(0, 100);                              /* bump our oom_adj -> score should rise by 100*256 = 25600 */
+            long n2 = sys_readfile("/proc/self/oom_score", sb, sizeof sb - 1);
+            long after = -1;
+            if (n2 > 0) { sb[n2] = 0; after = 0; for (int i = 0; sb[i] >= '0' && sb[i] <= '9'; i++) after = after * 10 + (sb[i] - '0'); }
+            sys_oom(0, 0);                               /* restore default oom_adj */
+            int ok = (base > 0 && after - base >= 25000);   /* RSS-based + the +25600 adj bias landed */
+            if (ok) { print("oom_score: /proc/self/oom_score="); printl(base); print(" pages (RSS-based); after oom_adj+=100 -> "); printl(after); print(" (+25600 bias) -- /proc/<pid>/oom_score OK\n"); }
+            else { print("oomscoretest: VERIFY FAILED (base="); printl(base); print(" after="); printl(after); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
