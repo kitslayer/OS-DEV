@@ -3319,6 +3319,36 @@ static int run_command(char *line, char *cwd) {
                       print(") -- userspace UDP round-trip OK\n"); }
             else print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
+            int ok = 1;
+            /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
+            unsigned char frame[42];
+            for (int i=0;i<6;i++) frame[i]=0xFF;            /* dst = broadcast */
+            for (int i=6;i<42;i++) frame[i]=0;
+            frame[12]=0x08; frame[13]=0x06;                 /* ethertype = ARP */
+            frame[14]=0x00; frame[15]=0x01; frame[16]=0x08; frame[17]=0x00;  /* HTYPE eth / PTYPE IPv4 */
+            frame[18]=6; frame[19]=4; frame[20]=0x00; frame[21]=0x01;         /* HLEN PLEN OP=request */
+            if (sys_raw_send(frame, 42) != 0) ok = 0;
+            /* (2) raw RX: generate guaranteed inbound traffic (a DNS query -> a reply frame), then sniff it. */
+            unsigned char dns[4] = {10,0,2,3};
+            unsigned char q[32]; int dl=0;
+            q[dl++]=0x33;q[dl++]=0x44; q[dl++]=0x01;q[dl++]=0x00; q[dl++]=0;q[dl++]=1;
+            q[dl++]=0;q[dl++]=0; q[dl++]=0;q[dl++]=0; q[dl++]=0;q[dl++]=0;     /* an/ns/ar=0 */
+            q[dl++]=1; q[dl++]='a'; q[dl++]=3; q[dl++]='c';q[dl++]='o';q[dl++]='m'; q[dl++]=0;
+            q[dl++]=0;q[dl++]=1; q[dl++]=0;q[dl++]=1;        /* QTYPE A / QCLASS IN */
+            sys_udp_send(dns, 53, 0xC0C0, q, dl);
+            unsigned char fr[1600]; long flen=-1; int et=-1, got=0;
+            for (int tries=0; tries<4 && !got; tries++) {
+                long n = sys_raw_recv(fr, sizeof fr);
+                if (n >= 14) { et = (fr[12]<<8)|fr[13]; flen=n;
+                               if (et==0x0800 || et==0x0806) got=1; }   /* captured a real IPv4/ARP frame */
+            }
+            if (!got) ok = 0;
+            if (ok) { print("raw: TX 42B ARP frame ok; sniffed "); printl(flen);
+                      print("B frame, ethertype "); printl(et);
+                      print(et==0x0800?" (IPv4)":" (ARP)"); print(" -- raw packet socket OK\n"); }
+            else print("rawtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

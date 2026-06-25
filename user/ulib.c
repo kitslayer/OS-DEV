@@ -277,6 +277,8 @@ int  sys_udp_send(const unsigned char *ip4, unsigned short dport, unsigned short
 long sys_udp_recv(unsigned short sport, void *buf, unsigned max, void *from) {
     return do_syscall4(SYS_udp_recv, sport, (long)buf, (long)max, (long)from);
 }
+int  sys_raw_send(const void *frame, unsigned len) { return (int)do_syscall(SYS_raw_send, (long)frame, (long)len, 0); }
+long sys_raw_recv(void *buf, unsigned max) { return do_syscall(SYS_raw_recv, (long)buf, (long)max, 0); }
 long sys_times(struct tms *t) { return do_syscall(SYS_times, (long)t, 0, 0); }
 int  sys_uname(struct utsname *u) { return (int)do_syscall(SYS_uname, (long)u, 0, 0); }
 int  sys_getppid(void) { return (int)do_syscall(SYS_getppid, 0, 0, 0); }

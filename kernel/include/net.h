@@ -46,6 +46,9 @@ int  net_sntp(void);                /* SNTP: set the RTC from pool.ntp.org; 0/-1
 /* Userspace UDP sockets (M1258): connectionless datagram send/recv for ring 3. */
 int  net_udp_send(const uint8_t dstip[4], uint16_t dport, uint16_t sport, const void *payload, int plen);   /* 0/-1 */
 int  net_udp_recv(uint16_t sport, void *buf, int max, uint8_t srcip[4], uint16_t *srcport, int timeout_ms);  /* bytes/-1 */
+/* Raw packet sockets (M1259): whole-Ethernet-frame send/recv for ring 3. */
+int  net_raw_send(const void *frame, int len);              /* send a complete L2 frame; 0/-1 */
+int  net_raw_recv(void *buf, int max, int timeout_ms);      /* next L2 frame; length/-1 */
 /* /net/tcp sockets-as-files (M1110): `sub` is the path after "/net/tcp/" —
  * "clone", "<n>/ctl", or "<n>/data". Routed from vfs.c. */
 long netfs_read(const char *sub, void *buf, unsigned long max);

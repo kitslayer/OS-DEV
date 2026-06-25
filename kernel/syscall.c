@@ -703,6 +703,16 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)n;
         break;
     }
+    case SYS_raw_send:                     /* (frame, len) -> send a raw Ethernet frame; 0/-1 (M1259) */
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");
+        r->rax = (uint64_t)(int64_t)net_raw_send((const void *)r->rdi, (int)r->rsi);
+        break;
+    case SYS_raw_recv:                     /* (buf, max) -> next Ethernet frame, 2s timeout; length/-1 (M1259) */
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");           /* polling the RX ring needs the timer */
+        r->rax = (uint64_t)(int64_t)net_raw_recv((void *)r->rdi, (int)r->rsi, 2000);
+        break;
     case SYS_cas_store:                    /* (buf, len, hash32) -> store; write the SHA-256 key */
         if (!ubuf(r->rdi, r->rsi) || !ubuf(r->rdx, 32)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)cas_store((const void *)r->rdi, (uint32_t)r->rsi, (uint8_t *)r->rdx);

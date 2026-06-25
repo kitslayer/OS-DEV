@@ -498,6 +498,38 @@ int net_udp_recv(uint16_t sport, void *buf, int max,
     return -1;
 }
 
+/* ===================================================================== *
+ *  Raw packet sockets (M1259): AF_PACKET/SOCK_RAW — ring 3 gets the WHOLE
+ *  Ethernet frame (dst+src MAC + ethertype + payload). Lets userspace build
+ *  arbitrary L2 frames (a custom protocol, an ARP tool) and sniff every
+ *  frame the NIC receives (a tcpdump-lite). Single-user OS: no privilege
+ *  gate (matches the OS's existing low-level access surface).
+ * ===================================================================== */
+
+/* Transmit a complete Ethernet frame verbatim (the caller builds all 14+ bytes
+ * of header + payload). Returns 0/-1. */
+int net_raw_send(const void *frame, int len) {
+    if (!frame || len < 14 || len > 1514) return -1;
+    return nic_send(frame, (uint16_t)len) == 0 ? 0 : -1;
+}
+
+/* Receive the next complete Ethernet frame (up to max bytes) within timeout_ms.
+ * Returns the frame length (>=14) or -1 on timeout. */
+int net_raw_recv(void *buf, int max, int timeout_ms) {
+    if (!buf || max < 14) return -1;
+    if (timeout_ms < 0) timeout_ms = 0;
+    uint8_t rb[1600];
+    uint64_t deadline = timer_ticks() + (uint64_t)timeout_ms / 10 + 1;
+    while (timer_ticks() < deadline) {
+        int len = recv_timeout(rb, sizeof(rb), 20);
+        if (len < 14) continue;                               /* runt / nothing */
+        if (len > max) len = max;
+        for (int i = 0; i < len; i++) ((uint8_t *)buf)[i] = rb[i];
+        return len;
+    }
+    return -1;
+}
+
 /* Fetch `filename` from the TFTP server `server_str` (dotted-quad) into `out`
  * (capacity `max`). Returns the byte length, or -1. Lock-step RRQ/DATA/ACK;
  * latches the server's transfer port (TID) from its first DATA. */
