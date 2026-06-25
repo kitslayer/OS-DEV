@@ -26,6 +26,7 @@
 
 static task_t *current;
 static int     next_id;
+static uint64_t g_nr_switches;   /* total context switches since boot — /proc/stat "ctxt" (M1253) */
 
 extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
 extern void fpu_save(void *area16);            /* FXSAVE  (kernel/asm/fpu.asm) */
@@ -278,6 +279,7 @@ static void switch_to_next(void) {
         next->ready_since = 0;
     }
     current = next;
+    g_nr_switches++;                              /* a real switch happened (next != prev guaranteed above) — /proc/stat ctxt (M1253) */
 
     next->last_in = now;                          /* stamp switch-in (prev was already charged above) */
     next->nswitch++;
@@ -571,4 +573,34 @@ uint64_t task_idle_ms(void) {
     uint64_t rm = idle_task->run_ms;
     if (idle_task->state == TASK_RUNNING) rm += timer_ms() - idle_task->last_in;
     return rm;
+}
+
+/* --- /proc/stat aggregates (M1253) --- */
+uint64_t task_ctxt_count(void)    { return g_nr_switches; }      /* total context switches since boot */
+uint64_t task_total_spawned(void) { return (uint64_t)next_id; }  /* cumulative tasks ever created = "processes" */
+
+/* Sum per-task user/kernel CPU time (ms) across the live ring — the real
+ * user/system split behind /proc/stat's aggregate `cpu` line (data tracked
+ * per-task since M1150). The idle task is excluded (it's the idle column). */
+void task_cpu_times(uint64_t *user_ms, uint64_t *sys_ms) {
+    uint64_t u = 0, s = 0;
+    if (current) {
+        task_t *t = current;
+        do { if (t != idle_task) { u += t->utime_ms; s += t->stime_ms; }
+             t = t->next; } while (t != current);
+    }
+    if (user_ms) *user_ms = u;
+    if (sys_ms)  *sys_ms  = s;
+}
+
+/* Count of blocked tasks (excl. the idle floor) — /proc/stat procs_blocked.
+ * The runnable count is the existing task_runnable_count() (M1148). */
+int task_blocked_count(void) {
+    int b = 0;
+    if (current) {
+        task_t *t = current;
+        do { if (t != idle_task && t->state == TASK_BLOCKED) b++;
+             t = t->next; } while (t != current);
+    }
+    return b;
 }

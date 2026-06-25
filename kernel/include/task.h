@@ -70,6 +70,10 @@ typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitc
 int     task_snapshot(task_info_t *out, int max);   /* fill out[]; returns count */
 uint64_t task_idle_ms(void);                         /* ms the idle task has run (system idle time) */
 int     task_runnable_count(void);   /* tasks wanting the CPU now (RUNNING|READY, idle excluded) (M1148) */
+uint64_t task_ctxt_count(void);                      /* total context switches since boot — /proc/stat ctxt (M1253) */
+uint64_t task_total_spawned(void);                   /* cumulative tasks ever created — /proc/stat processes (M1253) */
+void     task_cpu_times(uint64_t *user_ms, uint64_t *sys_ms);  /* summed per-task user/kernel CPU ms (M1253) */
+int     task_blocked_count(void);                    /* blocked tasks (idle excluded) — /proc/stat procs_blocked (M1253) */
 void    loadavg_sample(void);        /* called each timer tick; updates the EWMA once per 5 s (M1148) */
 void    task_loadavg(uint64_t out[3]); /* fixed-point (FSHIFT=11) 1/5/15-min load averages (M1148) */
 void    task_cpu_tick(uint64_t ms, int user);  /* timer: charge current task ms of user/kernel CPU time (M1150) */

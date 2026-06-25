@@ -62,6 +62,22 @@ static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { 
 #include "normpath.h"   /* normpath(): cd's . / .. / // path resolver, host-tested by tests/normpath */
 static int nargs(const char *s) { int n = 0; while (*s) { while (*s == ' ') s++; if (!*s) break; n++; while (*s && *s != ' ') s++; } return n; }
 
+/* Find a line "key <num>" in buf (key at offset 0 or right after a '\n') and
+ * return the decimal num, or -1 if the key isn't present. Used by statcputest
+ * to parse /proc/stat's keyed lines (M1253). */
+static long sh_kvnum(const char *buf, const char *key) {
+    for (int i = 0; buf[i]; i++) {
+        if (i != 0 && buf[i - 1] != '\n') continue;
+        int k = 0; while (key[k] && buf[i + k] == key[k]) k++;
+        if (key[k] != 0 || buf[i + k] != ' ') continue;       /* full key match + a space */
+        int j = i + k; while (buf[j] == ' ') j++;
+        long v = 0; int any = 0;
+        while (buf[j] >= '0' && buf[j] <= '9') { v = v * 10 + (buf[j] - '0'); j++; any = 1; }
+        return any ? v : -1;
+    }
+    return -1;
+}
+
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
  * (a `for ...; do ...; done` loop, else a ';'-split list of && / || commands). */
@@ -3180,6 +3196,32 @@ static int run_command(char *line, char *cwd) {
             if (!(mm && m1 >= 0 && m2 - m1 >= 100)) ok = 0;            /* /proc/self/stat's minflt tracked the demand paging */
             if (ok) { print("faults: /proc/self/stat minflt "); printl(m1); print(" -> "); printl(m2); print(" after mmap+touch 100 pages (field 10 is the real counter, was hardcoded 0) -- OK\n"); }
             else print("faulttest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+        } else if (streq(line, "statcputest")) {   /* /proc/stat is the real Linux cpu/ctxt/btime layout now (M1253) */
+            char sb[512]; int ok = 1; long cpufields = 0;
+            long n = sys_readfile("/proc/stat", sb, sizeof sb - 1);
+            long ctxt1 = -1, btime = -1, prun = -1;
+            if (n > 0) { sb[n] = 0;
+                if (sb[0] == 'c' && sb[1] == 'p' && sb[2] == 'u') {   /* first line: cpu <u> <n> <s> <i> ... -- count numeric fields */
+                    int i = 3;
+                    while (sb[i] && sb[i] != '\n') {
+                        while (sb[i] == ' ') i++;
+                        if (sb[i] >= '0' && sb[i] <= '9') { cpufields++; while (sb[i] >= '0' && sb[i] <= '9') i++; }
+                        else if (sb[i] && sb[i] != '\n') i++;
+                    }
+                }
+                ctxt1 = sh_kvnum(sb, "ctxt");
+                btime = sh_kvnum(sb, "btime");
+                prun  = sh_kvnum(sb, "procs_running");
+            }
+            sys_sleep(60); sys_sched_yield();                  /* force scheduling so ctxt advances (monotonic counter) */
+            long n2 = sys_readfile("/proc/stat", sb, sizeof sb - 1); long ctxt2 = -1;
+            if (n2 > 0) { sb[n2] = 0; ctxt2 = sh_kvnum(sb, "ctxt"); }
+            if (!(cpufields >= 10 && ctxt1 > 0 && ctxt2 > ctxt1 && btime > 1500000000L && prun >= 1)) ok = 0;
+            if (ok) { print("/proc/stat: cpu line has "); printl(cpufields); print(" fields, ctxt "); printl(ctxt1);
+                      print(" -> "); printl(ctxt2); print(", btime "); printl(btime); print(", procs_running "); printl(prun);
+                      print(" (real Linux layout w/ live ctxt+btime, was a 3-line blob) -- OK\n"); }
+            else print("statcputest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
