@@ -178,6 +178,14 @@ int unix_wait_any(const int *eps, int n) {
  * connect/accept pair would use) and return both of its sides. The two ends
  * then stream bidirectionally exactly like an accepted connection, and the ids
  * survive fork() since they index this global table. (M1254) */
+/* The connection index behind an endpoint — the per-connection key SCM_RIGHTS
+ * fd-passing uses so a sendfd on one end is received on the other. -1 if the
+ * endpoint is invalid. (M1265) */
+int unix_ep_conn(int ep) {
+    int s; struct uconn *c = ep_conn(ep, &s);
+    return c ? (ep >> 1) : -1;
+}
+
 int unix_socketpair(int *a, int *b) {
     if (!a || !b) return -1;
     int ci = -1; for (int i = 0; i < U_CONN; i++) if (!conns[i].used) { ci = i; break; }

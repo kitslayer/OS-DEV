@@ -3240,6 +3240,28 @@ static int run_command(char *line, char *cwd) {
                       print(" -- A->B 'ping' + B->A 'pong' both delivered (pre-connected, bidirectional, no path/listen/accept) -- OK\n"); }
             else print("socketpairtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "scmtest")) {   /* SCM_RIGHTS: pass an open fd over an AF_UNIX socketpair (M1265) */
+            int ok = 1; int fds[2] = {-1,-1}, sv[2] = {-1,-1};
+            if (sys_pipe(fds) != 0) ok = 0;                       /* fds[0] read end, fds[1] write end */
+            else {
+                sys_fdwrite(fds[1], "SCM!", 4);                   /* park data in the pipe */
+                if (sys_socketpair(sv) != 0) ok = 0;
+                else {
+                    int snt = sys_sendfd(sv[0], fds[0]);          /* pass the pipe READ end across the socket */
+                    int nfd = sys_recvfd(sv[1]);                  /* peer receives it as a fresh fd */
+                    char rb[8] = {0};
+                    long n = (nfd >= 0) ? sys_fdread(nfd, rb, sizeof rb) : -1;
+                    int match = (snt == 0 && nfd >= 0 && nfd != fds[0] && n == 4 &&
+                                 rb[0]=='S' && rb[1]=='C' && rb[2]=='M' && rb[3]=='!');
+                    if (!match) ok = 0;
+                    if (ok) { print("scm: sendfd(pipe-rd "); printl(fds[0]); print(") over socketpair -> recvfd got NEW fd ");
+                              printl(nfd); print("; reading it returned 'SCM!' from the SAME pipe -- SCM_RIGHTS OK\n"); }
+                    if (nfd >= 0) sys_fdclose(nfd);
+                    sys_unix_close(sv[0]); sys_unix_close(sv[1]);
+                }
+                sys_fdclose(fds[0]); sys_fdclose(fds[1]);
+            }
+            if (!ok) { print("scmtest: VERIFY FAILED\n"); g_status = 1; }
         } else if (streq(line, "diskstatstest")) {   /* /proc/diskstats: per-block-device I/O counters (M1256) */
             char sb[1024]; int ok = 1;
             long n = sys_readfile("/proc/diskstats", sb, sizeof sb - 1);

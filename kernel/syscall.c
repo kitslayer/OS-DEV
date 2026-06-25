@@ -280,6 +280,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any: case SYS_socketpair:
+    case SYS_sendfd: case SYS_recvfd:
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
     case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
@@ -716,6 +717,12 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_insmod:                       /* () -> load the built-in .ko (relocate+resolve+run); retval/-err (M1261) */
         r->rax = (uint64_t)(int64_t)module_load_builtin();
+        break;
+    case SYS_sendfd:                       /* (ep, fd) -> SCM_RIGHTS: pass an fd over an AF_UNIX endpoint (M1265) */
+        r->rax = (uint64_t)(int64_t)app_scm_send((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_recvfd:                       /* (ep) -> SCM_RIGHTS: install a passed fd; new fd/-1 (M1265) */
+        r->rax = (uint64_t)(int64_t)app_scm_recv((int)r->rdi);
         break;
     case SYS_rmmod:                        /* (name) -> run mod_exit + free the module slot; 0/-1 (M1262) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }

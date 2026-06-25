@@ -281,6 +281,8 @@ int  sys_raw_send(const void *frame, unsigned len) { return (int)do_syscall(SYS_
 long sys_raw_recv(void *buf, unsigned max) { return do_syscall(SYS_raw_recv, (long)buf, (long)max, 0); }
 long sys_insmod(void) { return do_syscall(SYS_insmod, 0, 0, 0); }
 int  sys_rmmod(const char *name) { return (int)do_syscall(SYS_rmmod, (long)name, 0, 0); }
+int  sys_sendfd(int ep, int fd) { return (int)do_syscall(SYS_sendfd, ep, fd, 0); }
+int  sys_recvfd(int ep) { return (int)do_syscall(SYS_recvfd, ep, 0, 0); }
 
 /* ===================================================================== *
  *  Userspace dynamic linker (M1263): dlopen()/dlsym() over an ELF .so.

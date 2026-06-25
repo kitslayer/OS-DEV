@@ -499,6 +499,39 @@ int app_format_pagemap(app_t *a, char *b, int max) {
 
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
 
+/* SCM_RIGHTS — fd passing over AF_UNIX (M1265). A per-connection mailbox holds
+ * one in-flight descriptor (a snapshot of the sender's fdent); the peer's
+ * recvfd installs a FRESH fd in its own table referring to the SAME underlying
+ * object (pipe/file/memfd/...), exactly as Unix ancillary-data fd passing does.
+ * Keyed by the AF_UNIX connection index (unix_ep_conn), so a sendfd on one
+ * endpoint is delivered to the other. */
+extern int unix_ep_conn(int ep);   /* kernel/unixsock.c */
+#define SCM_SLOTS 16
+static struct { int valid; struct fdent fe; } g_scm[SCM_SLOTS];
+
+int app_scm_send(int ep, int fd) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return -1;
+    int ci = unix_ep_conn(ep); if (ci < 0 || ci >= SCM_SLOTS) return -1;
+    if (g_scm[ci].valid) return -1;            /* one in-flight fd per connection */
+    g_scm[ci].fe = a->fd[fd];                  /* snapshot the descriptor (shares the underlying object) */
+    g_scm[ci].fe.cloexec = 0;                  /* a freshly-received fd is not close-on-exec */
+    g_scm[ci].valid = 1;
+    return 0;
+}
+
+int app_scm_recv(int ep) {
+    struct app *a = cur(); if (!a) return -1;
+    int ci = unix_ep_conn(ep); if (ci < 0 || ci >= SCM_SLOTS) return -1;
+    if (!g_scm[ci].valid) return -1;           /* nothing pending */
+    int fd = -1;
+    for (int i = 3 /*APP_FD_FIRST: 0-2 are stdio*/; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;                     /* receiver's fd table is full */
+    a->fd[fd] = g_scm[ci].fe;                  /* install the passed descriptor */
+    g_scm[ci].valid = 0;
+    return fd;
+}
+
 /* getcwd (M1248): canonicalize an absolute-ish path (resolve "."/".."/"//") into
  * out. Component-stack: push names, pop on "..". Pure string work — the cwd_path
  * is cosmetic-for-getcwd (the real cwd is the component state above), so a bad

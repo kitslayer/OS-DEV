@@ -20,4 +20,5 @@ long unix_recv(int ep, void *buf, unsigned long max);          /* bytes read, 0 
 int  unix_close(int ep);                                       /* close one endpoint; wakes the peer; 0/-1 */
 int  unix_wait_any(const int *eps, int n);                     /* poll/epoll: index of first readable ep (blocks once); -1 (M1170) */
 int  unix_socketpair(int *a, int *b);                          /* socketpair(2): a pre-connected endpoint pair, no path; 0/-1 (M1254) */
+int  unix_ep_conn(int ep);                                     /* connection index behind an endpoint (SCM_RIGHTS key); -1 invalid (M1265) */
 int  unix_format(char *b, int max);                            /* /proc/unix table */
