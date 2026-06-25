@@ -128,6 +128,7 @@ struct app {
     int      parent;                     /* pid of the process that fork()ed us (0 = none) — for waitpid (M1117) */
     int      pgid;                        /* process group id (job control, M1176); inherited on fork, set by setpgid */
     int      sid;                         /* session id (M1176); a setsid() leader has sid==pgid==pid */
+    uint64_t rchar, wchar;               /* bytes read/written via fd ops, for /proc/<pid>/io (M1244) */
     uint64_t rlim_nproc;                 /* RLIMIT_NPROC: max live children (0 = unlimited), inherited on fork (M1163) */
     uint64_t rlim_as;                    /* RLIMIT_AS: max total mmap bytes (0 = unlimited) (M1164) */
     uint64_t rlim_data;                  /* RLIMIT_DATA: max heap bytes (0 = unlimited) (M1164) */
@@ -330,6 +331,7 @@ uint64_t    app_cr3(app_t *a) { return a ? a->cr3 : 0; }                  /* the
 uint64_t    app_heap_bytes(app_t *a) { return (a && a->heap_end) ? a->heap_end - UHEAP_BASE : 0; }
 int         app_vma_count(app_t *a) { return a ? a->nvma : 0; }
 int         app_ppid(app_t *a)    { return a ? a->parent : 0; }   /* parent pid, for /proc/<pid>/stat (M1231) */
+void        app_io_counts(app_t *a, uint64_t *rc, uint64_t *wc) { if (rc) *rc = a ? a->rchar : 0; if (wc) *wc = a ? a->wchar : 0; }  /* /proc/<pid>/io (M1244) */
 int         app_pgid_of(app_t *a) { return a ? a->pgid : 0; }     /* process-group id (M1231) */
 int         app_sid_of(app_t *a)  { return a ? a->sid : 0; }      /* session id (M1231) */
 
@@ -492,6 +494,10 @@ int app_format_pagemap(app_t *a, char *b, int max) {
 }
 
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
+void app_io_account(int is_write, long n) {   /* tally fd read/write bytes for /proc/<pid>/io (M1244) */
+    struct app *a = cur();
+    if (a && n > 0) { if (is_write) a->wchar += (uint64_t)n; else a->rchar += (uint64_t)n; }
+}
 
 /* --- pledge() sandbox (M1074) --------------------------------------------- */
 app_t *app_current(void) { return cur(); }

@@ -1199,14 +1199,20 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)rc;
         break;
     }
-    case SYS_fdread:                       /* (fd, buf, max) -> read a pipe fd (M1187) */
+    case SYS_fdread: {                     /* (fd, buf, max) -> read a pipe fd (M1187) */
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
-        r->rax = (uint64_t)(int64_t)app_fd_read((int)r->rdi, (void *)r->rsi, r->rdx);
+        long n = app_fd_read((int)r->rdi, (void *)r->rsi, r->rdx);
+        if (n > 0) app_io_account(0, n);   /* /proc/<pid>/io rchar (M1244) */
+        r->rax = (uint64_t)(int64_t)n;
         break;
-    case SYS_fdwrite:                      /* (fd, buf, len) -> write a pipe fd (M1187) */
+    }
+    case SYS_fdwrite: {                    /* (fd, buf, len) -> write a pipe fd (M1187) */
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
-        r->rax = (uint64_t)(int64_t)app_fd_write((int)r->rdi, (const void *)r->rsi, r->rdx);
+        long n = app_fd_write((int)r->rdi, (const void *)r->rsi, r->rdx);
+        if (n > 0) app_io_account(1, n);   /* /proc/<pid>/io wchar (M1244) */
+        r->rax = (uint64_t)(int64_t)n;
         break;
+    }
     case SYS_fdclose:                      /* (fd) -> close an fd (M1187) */
         r->rax = (uint64_t)(int64_t)app_fd_close((int)r->rdi);
         break;

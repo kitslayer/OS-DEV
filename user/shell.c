@@ -3033,6 +3033,28 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "eventfd: count(5)->POLLIN->read 5->drained; +3->read 3; EFD_SEMAPHORE read 1,1 then empty -- OK\n"
                      : "eventfdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "iotest")) {   /* /proc/<pid>/io byte accounting (M1244) */
+            int ok = 1;
+            char sb[256]; long w1 = -1, w2 = -1, n;
+            n = sys_readfile("/proc/self/io", sb, sizeof sb - 1);                  /* snapshot wchar */
+            if (n > 0) { sb[n] = 0; for (int k = 0; k + 6 < (int)n; k++)
+                if (sb[k]=='w'&&sb[k+1]=='c'&&sb[k+2]=='h'&&sb[k+3]=='a'&&sb[k+4]=='r'&&sb[k+5]==':') {
+                    int j = k+6; while (sb[j]==' ') j++; long v=0; while (sb[j]>='0'&&sb[j]<='9'){v=v*10+(sb[j]-'0');j++;} w1=v; break; } }
+            int pf[2];
+            if (sys_pipe(pf) != 0) ok = 0;
+            else {
+                char blob[64]; for (int i = 0; i < 64; i++) blob[i] = 'x';
+                if (sys_fdwrite(pf[1], blob, 64) != 64) ok = 0;                    /* a known 64-byte fd write */
+                n = sys_readfile("/proc/self/io", sb, sizeof sb - 1);             /* snapshot again */
+                if (n > 0) { sb[n] = 0; for (int k = 0; k + 6 < (int)n; k++)
+                    if (sb[k]=='w'&&sb[k+1]=='c'&&sb[k+2]=='h'&&sb[k+3]=='a'&&sb[k+4]=='r'&&sb[k+5]==':') {
+                        int j = k+6; while (sb[j]==' ') j++; long v=0; while (sb[j]>='0'&&sb[j]<='9'){v=v*10+(sb[j]-'0');j++;} w2=v; break; } }
+                char rb[64]; sys_fdread(pf[0], rb, 64); sys_fdclose(pf[0]); sys_fdclose(pf[1]);
+            }
+            if (!(w1 >= 0 && w2 >= w1 + 64)) ok = 0;                               /* wchar grew by the write */
+            if (ok) { print("io: /proc/self/io wchar "); printl(w1); print(" -> "); printl(w2); print(" (grew >=64 after a 64-byte fd write) -- OK\n"); }
+            else print("iotest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

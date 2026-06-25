@@ -33,6 +33,8 @@ int         app_format_pagemap(app_t *a, char *b, int max);        /* /proc/<pid
 uint64_t    app_heap_bytes(app_t *a);   /* heap size in bytes */
 int         app_vma_count(app_t *a);    /* number of mmap regions */
 int         app_ppid(app_t *a);         /* parent pid, for /proc/<pid>/stat (M1231) */
+void        app_io_account(int is_write, long n);            /* tally fd read/write bytes for /proc/<pid>/io (M1244) */
+void        app_io_counts(app_t *a, uint64_t *rc, uint64_t *wc);  /* read the rchar/wchar tallies (M1244) */
 int         app_pgid_of(app_t *a);      /* process-group id (M1231) */
 int         app_sid_of(app_t *a);       /* session id (M1231) */
 int         app_format_maps(app_t *a, char *buf, int max);   /* /proc/<pid>/maps: memory regions as text */

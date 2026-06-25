@@ -423,6 +423,18 @@ static long gen_pid_stat(char *b, int max, int pid, int state, void *proc) {
     p = sdec(b, p, max, w.resident);             p = sapp(b, p, max, "\n");  /* rss (pages) */
     b[p] = 0; return p;
 }
+/* /proc/<pid>/io (M1244): per-process I/O byte accounting — the rchar/wchar
+ * counters `iotop`/`pidstat -d` read. We tally bytes through the fd read/write
+ * path (read_bytes/write_bytes mirror them — no separate cached-vs-disk split). */
+static long gen_pid_io(char *b, int max, void *proc) {
+    uint64_t rc = 0, wc = 0; app_io_counts((app_t *)proc, &rc, &wc);
+    int p = 0;
+    p = sapp(b, p, max, "rchar: ");       p = sdec(b, p, max, rc); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "wchar: ");       p = sdec(b, p, max, wc); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "read_bytes: ");  p = sdec(b, p, max, rc); p = sapp(b, p, max, "\n");
+    p = sapp(b, p, max, "write_bytes: "); p = sdec(b, p, max, wc); p = sapp(b, p, max, "\n");
+    b[p] = 0; return p;
+}
 /* /proc/<pid>/wss: working-set size from the CPU's Accessed/Dirty PTE bits.
  * "Referenced" counts pages touched since the last `clearref` (write it to ctl
  * to reset the window) — the building block for an LRU/swap victim picker. */
@@ -532,6 +544,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (!proc) return -1;
             if (peq(file, "status"))  return gen_pid_status((char *)buf, (int)max, pid, st, proc);
             if (peq(file, "stat"))    return gen_pid_stat((char *)buf, (int)max, pid, st, proc);   /* ps/top line (M1231) */
+            if (peq(file, "io"))      return gen_pid_io((char *)buf, (int)max, proc);              /* I/O byte counters (M1244) */
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */
