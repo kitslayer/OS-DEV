@@ -80,6 +80,7 @@ struct app {
     struct registers sig_saved;          /* pre-signal context, restored by sigreturn */
     int      sig_in;                     /* 1 while a handler runs (no nesting) */
     volatile uint32_t pending_sigs;      /* bitset of pending signals (bit n = signo n); delivered on the next return to ring 3. A bitset, not one slot, so a 2nd async signal isn't dropped (M1126) */
+    volatile uint32_t sig_blocked;       /* sigprocmask: blocked-signal bitset; a blocked signal stays pending until unblocked (M1208) */
     int      sigfd_armed;                /* 1 if this process routes some signals to signalfd (M1126) */
     uint32_t sigfd_mask;                 /* which signos are delivered via /proc/self/sigfd instead of a handler */
     uint64_t alarm_interval, alarm_next; /* SIGALRM (M1102): periodic timer; 0 interval = disarmed */
@@ -2084,6 +2085,23 @@ void app_request_signal(app_t *a, int signo) {
     task_wake(ap->task);                     /* unblock it if it's parked in read()/sigfd */
 }
 
+/* sigprocmask (M1208): change the caller's blocked-signal mask and return the
+ * previous one. A blocked signal that's raised stays pending (app_deliver_pending
+ * skips it) and is delivered once unblocked. SIGKILL/SIGSTOP can't be blocked. */
+uint32_t app_sigprocmask(int how, uint32_t set) {
+    struct app *a = cur();
+    if (!a) return 0;
+    uint32_t old = a->sig_blocked;
+    switch (how) {
+        case 0: a->sig_blocked |= set;  break;       /* SIG_BLOCK */
+        case 1: a->sig_blocked &= ~set; break;       /* SIG_UNBLOCK */
+        case 2: a->sig_blocked = set;   break;       /* SIG_SETMASK */
+        default: break;
+    }
+    a->sig_blocked &= ~((1u << 9) | (1u << 19));      /* SIGKILL(9)/SIGSTOP(19) are never blockable */
+    return old;
+}
+
 /* --- Job control: process groups, sessions, foreground TTY group (M1176) --- */
 int app_setpgid(int pid, int pgid) {
     struct app *me = cur(); if (!me) return -1;
@@ -2161,6 +2179,7 @@ int app_deliver_pending(struct registers *r) {
      * Linux); handler-less signals stay pending for signalfd to drain. */
     for (int sig = 1; sig < APP_NSIG; sig++) {
         if (!(a->pending_sigs & (1u << sig)) || !a->sig_handler[sig]) continue;
+        if (a->sig_blocked & (1u << sig)) continue;   /* sigprocmask: blocked -> stays pending (M1208) */
         if (app_signal_deliver(r, sig)) { a->pending_sigs &= ~(1u << sig); return 1; }
         return 0;                            /* couldn't deliver yet (already in a handler) -> stay pending */
     }
@@ -2994,7 +3013,7 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     /* reset per-program state (the new image starts clean); keep pid/parent/pledge */
     a->heap_end = 0; a->nvma = 0; a->mmap_next = 0;
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
-    a->sig_in = 0; a->pending_sigs = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;
+    a->sig_in = 0; a->pending_sigs = 0; a->sig_blocked = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;
     if (a->gfx) { kfree(a->gfx); a->gfx = 0; a->gfx_w = a->gfx_h = 0; }
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
     a->titlebuf[ti] = 0; a->title = a->titlebuf;

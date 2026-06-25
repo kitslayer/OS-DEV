@@ -188,6 +188,7 @@ long  sys_seccomp_filter(const void *prog, unsigned long bytes);  /* install a s
 #define PTY_SETFG   1
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */
+unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
 int  sys_gfx_init(int w, int h);     /* enter graphics mode: a w*h XRGB pixel canvas; 0/-1 */
 int  sys_gfx_blit(const void *pixels); /* copy w*h pixels (0x00RRGGBB) to the window; 0/-1 */

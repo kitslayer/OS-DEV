@@ -110,6 +110,7 @@ void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_sig
 int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */
 void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl-C->SIGINT); opt-in (needs a handler) */
+uint32_t app_sigprocmask(int how, uint32_t set);   /* block/unblock signals; returns the old mask (M1208) */
 /* Job control (M1176): process groups + sessions + foreground TTY group. */
 int  app_setpgid(int pid, int pgid);   /* set a process's group (pid 0 = self, pgid 0 = own pid); 0/-1 */
 int  app_getpgid(int pid);             /* a process's group id (pid 0 = self); -1 if absent */

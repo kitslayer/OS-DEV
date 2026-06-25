@@ -306,6 +306,7 @@ long sys_seccomp_filter(const void *prog, unsigned long bytes) { return do_sysca
 void sig_trampoline(void) { do_syscall(SYS_sigreturn, 0, 0, 0); for (;;) { } }
 long sys_signal(int signo, void (*handler)(int)) { return do_syscall(SYS_signal, signo, (long)handler, (long)sig_trampoline); }
 void sys_raise(int signo) { do_syscall(SYS_raise, signo, 0, 0); }
+unsigned sys_sigprocmask(int how, unsigned set) { return (unsigned)do_syscall(SYS_sigprocmask, how, (long)set, 0); }
 unsigned long sys_uptime_ms(void) { return (unsigned long)do_syscall(SYS_uptime_ms, 0, 0, 0); }
 int  sys_gfx_init(int w, int h) { return (int)do_syscall(SYS_gfx_init, w, h, 0); }
 int  sys_gfx_blit(const void *pixels) { return (int)do_syscall(SYS_gfx_blit, (long)pixels, 0, 0); }

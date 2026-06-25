@@ -184,6 +184,8 @@ static void printl(long v) {              /* print a (possibly large) integer */
 static void sig_demo_handler(int s) {
     print("  [handler] caught signal "); printl(s); print(" in userspace, returning\n");
 }
+static volatile int g_sigmask_got;                       /* set by the sigprocmask-test handler (M1208) */
+static void sigmask_handler(int s) { (void)s; g_sigmask_got = 1; }
 static void print_base(unsigned long n, int base) {   /* print n in base 2-16 */
     const char *dgt = "0123456789abcdef";
     char t[72]; int i = 0;
@@ -2821,6 +2823,19 @@ static int run_command(char *line, char *cwd) {
             print("sigtest: raising signal 10 to self...\n");
             sys_raise(10);
             print("sigtest: main resumed after the handler returned (sigreturn OK)\n");
+        } else if (streq(line, "sigmasktest")) {   /* sigprocmask: a blocked signal stays pending, then delivers on unblock (M1208) */
+            g_sigmask_got = 0;
+            sys_signal(10, sigmask_handler);
+            sys_sigprocmask(SIG_BLOCK, 1u << 10);       /* block signal 10 */
+            sys_raise(10);                              /* raise it -> pending, but blocked (handler must NOT run) */
+            sys_sleep(60);                              /* timer ticks fire app_deliver_pending; blocked -> skipped */
+            int blocked_ok = (g_sigmask_got == 0);
+            sys_sigprocmask(SIG_UNBLOCK, 1u << 10);     /* unblock -> the pending signal now delivers */
+            for (int i = 0; i < 20 && !g_sigmask_got; i++) sys_sleep(20);   /* let a tick deliver it */
+            int delivered_ok = (g_sigmask_got == 1);
+            if (blocked_ok && delivered_ok)
+                print("sigprocmask: blocked signal stayed pending (handler NOT run), then delivered on unblock -- OK\n");
+            else { print("sigprocmask: FAILED\n"); g_status = 1; }
         } else if (streq(line, "scores")) {
             /* a personal leaderboard: the best each game saved to its *.HI file */
             static const struct { const char *name, *file; } hs[] = {

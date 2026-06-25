@@ -198,6 +198,12 @@
 #define SYS_bpf_trace    181   /* (prog, bytes) -> load a global syscall-tracepoint BPF program (0 bytes = clear); 0/-1 (M1202) */
 #define SYS_bpf_map_get  182   /* (idx) -> read BPF histogram cell idx (M1202) */
 #define SYS_link         183   /* (oldpath, newpath) -> hard link (same ext2 mount); 0/-1 (M1207) */
+#define SYS_sigprocmask  184   /* (how, set) -> block/unblock signals; returns the old mask (M1208) */
+
+/* sigprocmask `how` values (M1208) */
+#define SIG_BLOCK   0   /* add `set` to the blocked mask */
+#define SIG_UNBLOCK 1   /* remove `set` from the blocked mask */
+#define SIG_SETMASK 2   /* replace the blocked mask with `set` */
 
 /* ptrace request codes (M1199) — the tracee self-marks with TRACEME; the tracer
  * (its parent) drives the rest while the tracee is stopped. */
