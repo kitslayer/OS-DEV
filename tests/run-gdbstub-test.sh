@@ -1,0 +1,49 @@
+#!/bin/sh
+# gdbstubtest — the GDB remote-serial-protocol stub (M1204). Boots the kernel with
+# `-append gdbstub` (which int3's into the stub), exposes COM2 as a TCP serial,
+# then drives REAL host `gdb`: connect, read registers, and assert gdb symbolizes
+# rip back to kmain (proving the g-packet + the ELF symbols line up). Skips
+# cleanly if gdb or qemu is unavailable.
+set -u
+
+KERNEL=build/kernel32.elf
+ELF=build/kernel.elf
+PORT=12347
+LOG=$(mktemp)
+OUT=$(mktemp)
+QP=""
+cleanup() { [ -n "$QP" ] && kill -9 "$QP" 2>/dev/null; rm -f "$LOG" "$OUT"; }
+trap cleanup EXIT
+
+command -v gdb              >/dev/null 2>&1 || { echo "gdbstubtest: SKIP (no host gdb)";  exit 0; }
+command -v qemu-system-x86_64 >/dev/null 2>&1 || { echo "gdbstubtest: SKIP (no qemu)"; exit 0; }
+
+qemu-system-x86_64 -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
+    -append gdbstub -serial file:"$LOG" -serial tcp::$PORT,server,nowait -display none >/dev/null 2>&1 &
+QP=$!
+
+# Wait (up to ~30s) for the kernel to reach the stub — it prints this on COM1 just
+# before the int3.
+i=0
+while [ $i -lt 30 ]; do
+    grep -q 'waiting for gdb' "$LOG" 2>/dev/null && break
+    sleep 1; i=$((i + 1))
+done
+if ! grep -q 'waiting for gdb' "$LOG" 2>/dev/null; then
+    echo "gdbstubtest: FAIL -- the kernel never reached the gdb stub"
+    exit 1
+fi
+
+timeout 25 gdb -nx -batch "$ELF" \
+    -ex 'set architecture i386:x86-64' \
+    -ex "target remote :$PORT" \
+    -ex 'info registers rip' \
+    -ex 'detach' > "$OUT" 2>&1
+
+if grep -q 'kmain' "$OUT" && grep -qE 'rip[[:space:]]+0x[0-9a-f]' "$OUT"; then
+    echo "gdbstubtest: PASS -- host gdb attached over the serial stub, read registers, symbolized rip -> kmain"
+    exit 0
+fi
+echo "gdbstubtest: FAIL -- gdb did not read/symbolize registers over the stub"
+sed -n '1,20p' "$OUT"
+exit 1

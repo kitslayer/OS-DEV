@@ -20,6 +20,7 @@
 #include "task.h"
 #include "ksyms.h"
 #include "smp.h"
+#include "gdbstub.h"
 #include <stdint.h>
 
 static const char *const exception_names[32] = {
@@ -82,6 +83,7 @@ void isr_dispatch(struct registers *r) {
     if (r->int_no < 32) {
         /* Breakpoint is recoverable — report and continue past the int3. */
         if (r->int_no == 3) {
+            if (gdbstub_armed()) { gdbstub_serve(r); return; }   /* GDB stub: hand gdb the trap frame, resume on continue/detach (M1204) */
             kprintf("[int] #BP breakpoint trap at rip=%p (resuming)\n",
                     (void *)r->rip);
             return;

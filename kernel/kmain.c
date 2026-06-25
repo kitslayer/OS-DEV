@@ -17,6 +17,8 @@
 #include "kheap.h"
 #include "acpi.h"
 #include "smp.h"
+#include "multiboot.h"
+#include "gdbstub.h"
 #include "random.h"
 #include "vdso.h"
 #include "measure.h"
@@ -113,8 +115,28 @@ static void preemption_demo(void) {
             " => preemption works.\n\n", spin_count);
 }
 
+/* substring search (the kernel libc has no strstr) — for the gdbstub cmdline gate */
+static int cmdline_has(const char *hay, const char *needle) {
+    for (const char *p = hay; *p; p++) {
+        const char *a = p, *b = needle;
+        while (*a && *b && *a == *b) { a++; b++; }
+        if (!*b) return 1;
+    }
+    return 0;
+}
+
 void kmain(uint64_t mb_info) {
     console_init();
+
+    /* Detect `-append gdbstub` NOW, before pmm_init/kheap_init can allocate over
+     * the multiboot command-line string (which QEMU places in high usable RAM).
+     * Just sets a flag; the actual break into the stub happens after smp_init. */
+    {
+        struct multiboot_info *mbi = (struct multiboot_info *)(uintptr_t)mb_info;
+        if ((mbi->flags & (1u << 2)) && mbi->cmdline &&
+            cmdline_has((const char *)(uintptr_t)mbi->cmdline, "gdbstub"))
+            gdbstub_arm();
+    }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     kprintf("OS-DEV  -  x86_64 kernel\n");
@@ -133,6 +155,16 @@ void kmain(uint64_t mb_info) {
     kheap_init();
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
     smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
+
+    /* GDB remote-serial stub (M1204): if `-append gdbstub` was seen (detected at
+     * the top of kmain, before allocations could clobber the cmdline), break into
+     * the stub here so a host gdb can attach over COM2 — kmain int3's and the #BP
+     * handler runs the RSP loop. `continue`/`detach` from gdb resumes the boot. */
+    if (gdbstub_armed()) {
+        kprintf("[gdbstub] waiting for gdb on COM2 (target remote :PORT); 'continue' resumes boot\n");
+        __asm__ volatile("int3");
+    }
+
     random_init();                 /* seed the CSPRNG from RDSEED/RDRAND (TSC fallback) */
     vdso_init();                   /* alloc the vDSO time page + seed the wall clock from the RTC (M1111) */
 
