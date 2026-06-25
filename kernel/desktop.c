@@ -432,7 +432,9 @@ static void draw_content(const window_t *w, int focused) {
             "FAT32 . TCP . TLS 1.3",
             "JS engine . web browser",
             "scriptable shell . editor" };
-        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) draw_text(bx, by + i*16, L[i], 0x202028);
+        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++)
+            draw_text(bx, by + i*16, L[i], i == 0 ? 0x1F56C6 : 0x202028);   /* heading in accent blue */
+        fb_fill_rect(bx, by + 14, w->w - 24, 1, 0xC9CCD6);                  /* rule under the heading */
         break;
     }
     default:
@@ -662,7 +664,12 @@ static void render_scene(void) {
     fb_fill_rect(start_x, start_y, start_w, 1, lerp(a0, 0xFFFFFF, 1, 2));
     box(start_x, start_y, start_w, start_h, 0x18345E);
     round_chrome(start_x, start_y, start_w, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
-    draw_text(start_x + 14, start_y + 4, "Apps", 0xFFFFFF);
+    int gi_x = start_x + 9, gi_y = start_y + (start_h - 10) / 2;  /* 2x2 "apps" grid icon */
+    fb_fill_rect(gi_x,     gi_y,     4, 4, 0xFFFFFF);
+    fb_fill_rect(gi_x + 6, gi_y,     4, 4, 0xFFFFFF);
+    fb_fill_rect(gi_x,     gi_y + 6, 4, 4, 0xFFFFFF);
+    fb_fill_rect(gi_x + 6, gi_y + 6, 4, 4, 0xFFFFFF);
+    draw_text(start_x + 26, start_y + 4, "Apps", 0xFFFFFF);
 
     /* real-time clock (RTC) in a recessed pill on the right: date + time, so the
      * day is visible at a glance without opening the Calendar app. */
