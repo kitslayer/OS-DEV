@@ -13,6 +13,7 @@
 static struct bpf_insn g_prog[BPF_MAXINSN];
 static int      g_n;                  /* installed instruction count (0 = none) */
 static uint64_t g_runs, g_drops;      /* stats for /proc/bpf */
+static int      g_prog_jit_stale, g_trace_jit_stale;  /* set on (re)load; bpf_run/bpf_trace_run lazily (re)compile + validate the JIT (M1295) */
 static uint64_t g_map[BPF_MAP_N];     /* histogram cells the BPF_MAPINC opcode writes (M1202) */
 
 int bpf_loaded(void) { return g_n > 0; }
@@ -48,6 +49,7 @@ long bpf_load(const void *prog, unsigned long bytes) {
     if (bpf_verify(in, n) != 0) return -1;
     for (int i = 0; i < n; i++) g_prog[i] = in[i];
     g_n = n; g_runs = g_drops = 0;
+    g_prog_jit_stale = 1;                            /* bpf_run will JIT + validate this program */
     return 0;
 }
 
@@ -171,6 +173,28 @@ static bpf_jit_fn bpf_jit_compile(const struct bpf_insn *prog, int n, uint8_t *b
     return (bpf_jit_fn)buf;
 }
 
+/* The live firewall (g_prog) + tracepoint (g_trace) programs run JIT'd when the
+ * JIT validates; these hold the generated code + the callable pointer (0 = use
+ * the interpreter). bpf_run/bpf_trace_run (re)compile lazily on *_jit_stale. */
+static uint8_t    g_prog_jitbuf[2048], g_trace_jitbuf[2048];
+static bpf_jit_fn g_prog_jit, g_trace_jit;
+
+/* Compile (prog,n), then TRUST the JIT only if it returns EXACTLY what the
+ * interpreter does over a spread of contexts — so a codegen bug can never change
+ * a verdict; on any mismatch (or compile failure) return 0 and the caller falls
+ * back to the interpreter. The defensive partner of bpf_verify. (M1295) */
+static bpf_jit_fn bpf_jit_validate(const struct bpf_insn *prog, int n, uint8_t *buf, int buflen) {
+    bpf_jit_fn fn = bpf_jit_compile(prog, n, buf, buflen);
+    if (!fn) return 0;
+    static const struct bpf_ctx s[] = {
+        {0,0,0,0,0}, {1,1,80,80,64}, {0,6,1234,443,1500}, {1,17,53,53,512},
+        {0,1,22,22,98}, {1,6,0,65535,9000},
+    };
+    for (unsigned i = 0; i < sizeof s / sizeof s[0]; i++)
+        if (fn(&s[i]) != bpf_run_prog(prog, n, &s[i])) return 0;   /* JIT disagrees -> don't use it */
+    return fn;
+}
+
 /* Boot self-test: compile two programs covering every opcode, then assert the
  * JIT'd native code returns EXACTLY what the interpreter does (over a range of
  * contexts), and that the JIT'd MAPINC really wrote the histogram. */
@@ -204,9 +228,15 @@ void bpf_jit_selftest(void) {
         long ji = f2(&c), in = bpf_run_prog(p2, 12, &c);
         if (ji != in || ji != 0x8C) ok = 0;                   /* value matches + equals expected */
         if (g_map[0x8C] <= before) ok = 0;                    /* the JIT'd MAPINC actually wrote the map */
+        /* wiring (M1295): load P1 as the live firewall program; bpf_run must JIT
+         * + validate it and produce the right verdicts, then clear it. */
+        bpf_load(p1, sizeof p1);
+        struct bpf_ctx icmp = { 0, 1, 0, 0, 64 }, tcp = { 0, 6, 0, 0, 64 };
+        if (bpf_run(&icmp) != 0 || bpf_run(&tcp) != 1 || g_prog_jit == 0) ok = 0;
+        bpf_load(0, 0);                                       /* clear: leave the firewall empty */
     }
     if (ok)
-        kprintf("[ ok ] eBPF JIT: bytecode compiled to native x86-64; JIT == interpreter over all opcodes -- eBPF JIT OK\n");
+        kprintf("[ ok ] eBPF JIT: native x86-64; JIT == interpreter over all opcodes + wired into the firewall (validated) -- eBPF JIT OK\n");
     else
         kprintf("[bpf] eBPF JIT FAILED (f1=%p f2=%p)\n", (void *)f1, (void *)f2);
 }
@@ -236,20 +266,23 @@ long bpf_trace_load(const void *prog, unsigned long bytes) {
     for (int i = 0; i < n; i++) g_trace[i] = in[i];
     g_trace_n = n; g_trace_runs = 0;
     for (int i = 0; i < BPF_MAP_N; i++) g_map[i] = 0;   /* fresh histogram per load */
+    g_trace_jit_stale = 1;                              /* bpf_trace_run will JIT + validate this program */
     return 0;
 }
 
 long bpf_trace_run(const struct bpf_ctx *ctx) {
     if (g_trace_n == 0) return 1;
+    if (g_trace_jit_stale) { g_trace_jit = bpf_jit_validate(g_trace, g_trace_n, g_trace_jitbuf, sizeof g_trace_jitbuf); g_trace_jit_stale = 0; }
     g_trace_runs++;
-    return bpf_run_prog(g_trace, g_trace_n, ctx);
+    return g_trace_jit ? g_trace_jit(ctx) : bpf_run_prog(g_trace, g_trace_n, ctx);   /* native if the JIT validated, else interpret */
 }
 
 /* The global firewall program (M1127), with its /proc/bpf run/drop stats. */
 long bpf_run(const struct bpf_ctx *ctx) {
     if (g_n == 0) return 1;                        /* no program -> pass */
+    if (g_prog_jit_stale) { g_prog_jit = bpf_jit_validate(g_prog, g_n, g_prog_jitbuf, sizeof g_prog_jitbuf); g_prog_jit_stale = 0; }
     g_runs++;
-    long v = bpf_run_prog(g_prog, g_n, ctx);
+    long v = g_prog_jit ? g_prog_jit(ctx) : bpf_run_prog(g_prog, g_n, ctx);   /* native if the JIT validated, else interpret */
     if (v == 0) g_drops++;
     return v;
 }
