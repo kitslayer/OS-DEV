@@ -441,6 +441,53 @@ static void draw_content(const window_t *w, int focused) {
     }
 }
 
+/* A filled circle (no FPU; integer radius test) for the icon glyphs. */
+static void fcircle(int cx, int cy, int r, uint32_t c) {
+    for (int dy = -r; dy <= r; dy++)
+        for (int dx = -r; dx <= r; dx++)
+            if (dx*dx + dy*dy <= r*r) fb_pixel(cx + dx, cy + dy, c);
+}
+/* A small per-kind icon (ICON_SZ square) for the title bar + taskbar chip, so a
+ * window is identifiable at a glance. Clean colored glyphs that read on both the
+ * title-bar gradient and the dark taskbar. */
+#define ICON_SZ 14
+static void draw_icon(int kind, int x, int y) {
+    int cx = x + 7, cy = y + 7;
+    switch (kind) {
+    case KIND_FILES:
+        fb_fill_rect(x + 1, y + 3, 6, 2, 0xC99A3A);          /* folder tab */
+        fb_fill_rect(x + 1, y + 4, 12, 8, 0xF0C674);         /* folder body */
+        fb_fill_rect(x + 1, y + 4, 12, 1, 0xFFE6B0);         /* top highlight */
+        break;
+    case KIND_BROWSER:
+        fcircle(cx, cy, 6, 0x68B6E6);                        /* globe */
+        fb_fill_rect(x + 1, cy, 12, 1, 0xEAF4FF);            /* equator */
+        fb_fill_rect(cx, y + 1, 1, 12, 0xEAF4FF);            /* meridian */
+        break;
+    case KIND_CLOCK:
+        fcircle(cx, cy, 6, 0xF2F2F2);                        /* clock face */
+        fb_fill_rect(cx, cy - 4, 1, 5, 0x2A2A33);            /* minute hand */
+        fb_fill_rect(cx, cy, 4, 1, 0x2A2A33);                /* hour hand */
+        break;
+    case KIND_SYSMON:
+        fb_fill_rect(x + 2,  y + 8, 2, 4, 0x3CB371);         /* bar chart */
+        fb_fill_rect(x + 6,  y + 5, 2, 7, 0xE0A030);
+        fb_fill_rect(x + 10, y + 3, 2, 9, 0x6BB0FF);
+        break;
+    case KIND_WELCOME:
+    case KIND_ABOUT:
+        fcircle(cx, cy, 6, 0xF2F2F2);                        /* info badge */
+        fb_fill_rect(cx, y + 3, 1, 2, 0x2C66D6);             /* i dot */
+        fb_fill_rect(cx, y + 6, 1, 5, 0x2C66D6);             /* i stem */
+        break;
+    default:                                                 /* KIND_APP etc.: a window glyph */
+        fb_fill_rect(x + 1, y + 2, 12, 10, 0xE8ECF4);
+        fb_fill_rect(x + 1, y + 2, 12, 3, 0x33415A);
+        box(x + 1, y + 2, 12, 10, 0x2A3344);
+        break;
+    }
+}
+
 static void draw_window(const window_t *w, int focused) {
     int x = w->x, y = w->y, ww = w->w, hh = w->h;
 
@@ -465,7 +512,8 @@ static void draw_window(const window_t *w, int focused) {
     vgrad(x, y, ww, TITLEBAR_H, t0, t1);
     fb_fill_rect(x, y, ww, 1, lerp(t0, 0xFFFFFF, 2, 3));   /* bright top sheen */
     const char *titletext = (w->kind == KIND_BROWSER && w->app) ? browser_title((browser_t *)w->app) : w->title;   /* browser windows show the page <title> / document.title */
-    draw_text(x + 10, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, 0xFFFFFF);
+    draw_icon(w->kind, x + 8, y + (TITLEBAR_H - ICON_SZ) / 2);                /* per-kind icon */
+    draw_text(x + 28, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, 0xFFFFFF);
 
     /* close button: a rounded red chip with a top sheen; calmer when unfocused */
     int cbx = x + ww - 21, cby = y + 6;
@@ -640,9 +688,10 @@ static void render_scene(void) {
               foc ? 0x2C66D6 : 0x161D29);
         box(cx, start_y, TB_CHIPW, start_h, foc ? 0x4A90E2 : 0x33415A);
         round_chrome(cx, start_y, TB_CHIPW, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
+        draw_icon(windows[i].kind, cx + 6, start_y + (start_h - ICON_SZ) / 2);   /* per-kind icon */
         char t[18]; int n = 0; const char *s = windows[i].title;
-        while (s && s[n] && n < 15) { t[n] = s[n]; n++; } t[n] = 0;
-        draw_text(cx + 8, start_y + 4, t, foc ? 0xFFFFFF : (mini ? 0x6B7689 : 0xAEB8C8));
+        while (s && s[n] && n < 12) { t[n] = s[n]; n++; } t[n] = 0;
+        draw_text(cx + 26, start_y + 4, t, foc ? 0xFFFFFF : (mini ? 0x6B7689 : 0xAEB8C8));
     }
     fb_fill_rect(clkx, start_y, clkw, start_h, 0x10151E);
     box(clkx, start_y, clkw, start_h, 0x33415A);
