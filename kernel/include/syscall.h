@@ -213,6 +213,7 @@
 #define SYS_fcntl        196   /* (fd, cmd, arg) -> F_GETFD/SETFD/DUPFD/DUPFD_CLOEXEC (M1218) */
 #define SYS_dup3         197   /* (oldfd, newfd, flags) -> dup w/ O_CLOEXEC; -1 if old==new (M1218) */
 #define SYS_close_range  198   /* (lo, hi, flags) -> close fds in [lo,hi]; 0/-1 (M1218) */
+#define SYS_sendfile     199   /* (out_fd, in_fd, off_ptr, count) -> zero-copy fd->fd; bytes/-1 (M1219) */
 
 /* fd-flag ops (M1218). O_CLOEXEC (0x10) doesn't collide with O_RDONLY..O_CREAT. */
 #define O_CLOEXEC        0x10

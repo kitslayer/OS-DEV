@@ -2631,6 +2631,31 @@ static int run_command(char *line, char *cwd) {
                          : "fcntltest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "sendfiletest")) {  /* sendfile(2): zero-copy fd->fd (M1219) */
+            int ok = 1;
+            sys_writefile("/tmp/SF.TXT", "hello sendfile world", 20);
+            int in = sys_open("/tmp/SF.TXT"); int fds[2];
+            if (in < 3 || sys_pipe(fds) != 0) { print("sendfiletest: setup failed\n"); g_status = 1; }
+            else {
+                /* sequential (cursor) sendfile: whole file -> pipe */
+                if (sys_sendfile(fds[1], in, 0, 100) != 20) ok = 0;     /* NULL off -> cursor; 20 bytes then EOF */
+                char b[32]; long r = sys_fdread(fds[0], b, sizeof b);
+                if (!(r == 20 && b[0] == 'h' && b[6] == 's' && b[19] == 'd')) ok = 0;
+                /* positioned sendfile: offset 6, 8 bytes ("sendfile") -> a 2nd pipe; cursor untouched */
+                int f2[2]; long off = 6;
+                if (sys_pipe(f2) == 0) {
+                    long n2 = sys_sendfile(f2[1], in, &off, 8);
+                    if (!(n2 == 8 && off == 14)) ok = 0;
+                    char c[16]; long r2 = sys_fdread(f2[0], c, sizeof c);
+                    if (!(r2 == 8 && c[0] == 's' && c[7] == 'e')) ok = 0;   /* "sendfile" */
+                    sys_fdclose(f2[0]); sys_fdclose(f2[1]);
+                } else ok = 0;
+                sys_fdclose(in); sys_fdclose(fds[0]); sys_fdclose(fds[1]);
+                sys_delete("/tmp/SF.TXT");
+                print(ok ? "sendfile: file->pipe whole (cursor) + positioned slice (off advances, cursor intact) -- OK\n"
+                         : "sendfiletest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

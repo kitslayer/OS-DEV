@@ -3019,6 +3019,36 @@ long app_close_range(unsigned lo, unsigned hi, int flags) {
     for (unsigned i = lo; i <= hi && i < APP_NFD; i++) if (a->fd[i].used) app_fd_close((int)i);
     return 0;
 }
+/* sendfile (M1219): copy up to `count` bytes from in_fd to out_fd through a
+ * kernel bounce buffer — no userspace round-trip (the canonical zero-copy path,
+ * generalizing splice off pipes). If *off >= 0, read in_fd at that absolute
+ * offset (a FILE fd) and advance *off, leaving the fd cursor untouched; if
+ * *off < 0, read sequentially via the fd cursor (any fd kind). Returns bytes
+ * copied, or -1. Loops in 4 KiB chunks; stops at EOF or a short write. */
+long app_sendfile(int out_fd, int in_fd, long *off, unsigned long count) {
+    struct app *a = cur(); if (!a) return -1;
+    if (in_fd  < 0 || in_fd  >= APP_NFD || !a->fd[in_fd].used)  return -1;
+    if (out_fd < 0 || out_fd >= APP_NFD || !a->fd[out_fd].used) return -1;
+    char buf[4096]; long total = 0;
+    while ((unsigned long)total < count) {
+        unsigned long chunk = count - (unsigned long)total;
+        if (chunk > sizeof buf) chunk = sizeof buf;
+        long got;
+        if (*off >= 0) {                                    /* positioned read of a FILE fd */
+            if (a->fd[in_fd].type != 2) return total ? total : -1;
+            got = vfs_pread(a->fd[in_fd].path, buf, chunk, (uint64_t)*off);
+            if (got > 0) *off += got;
+        } else {
+            got = app_fd_read(in_fd, buf, chunk);           /* sequential (advances the cursor) */
+        }
+        if (got <= 0) break;                                /* EOF or read error */
+        long w = app_fd_write(out_fd, buf, (unsigned long)got);
+        if (w < 0) return total ? total : -1;
+        total += w;
+        if (w < got) break;                                 /* short write (e.g. pipe full) */
+    }
+    return total;
+}
 
 /* ---- seccomp-BPF self-filter (M1190) ------------------------------------------
  * Install a bpf.c program that vets the calling process's own syscalls. One-way

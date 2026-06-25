@@ -1586,6 +1586,14 @@ void syscall_dispatch(struct registers *r) {
     case SYS_close_range:                  /* (lo, hi, flags) (M1218) */
         r->rax = (uint64_t)app_close_range((unsigned)r->rdi, (unsigned)r->rsi, (int)r->rdx);
         break;
+    case SYS_sendfile: {                   /* (out_fd, in_fd, off_ptr, count) zero-copy fd->fd (M1219) */
+        long off = -1; long *offp = (long *)r->rdx;
+        if (offp) { if (!ubuf(r->rdx, sizeof(long))) { r->rax = (uint64_t)-1; break; } off = *offp; }
+        long n = app_sendfile((int)r->rdi, (int)r->rsi, &off, (unsigned long)r->r10);
+        if (offp && n >= 0) *offp = off;
+        r->rax = (uint64_t)n;
+        break;
+    }
     case SYS_sigprocmask:                  /* (how, set): block/unblock signals; returns the old mask (M1208) */
         r->rax = (uint64_t)app_sigprocmask((int)r->rdi, (uint32_t)r->rsi);
         break;
