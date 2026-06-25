@@ -269,6 +269,7 @@
 #define SYS_raw_send     247   /* (frame, len) -> send a complete Ethernet frame; 0/-1 (M1259) */
 #define SYS_raw_recv     248   /* (buf, max) -> next Ethernet frame (2s timeout); length/-1 (M1259) */
 #define SYS_insmod       249   /* () -> load the built-in .ko: relocate+resolve+run mod_init; its retval/-err (M1261) */
+#define SYS_rmmod        250   /* (name) -> unload a module: run mod_exit + free its slot; 0/-1 (M1262) */
 
 /* clock ids + clock_nanosleep flags (M1257). */
 #define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */

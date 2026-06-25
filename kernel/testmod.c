@@ -19,3 +19,9 @@ int mod_init(void) {
     unsigned long t = timer_ms();          /* the imported symbol must link to the real kernel fn */
     return (t > 0) ? (g_state + 1) : -1;   /* 42 iff timer_ms() resolved and returned a sane uptime */
 }
+
+/* Called by rmmod (module_unload) — the teardown half of the module lifecycle. */
+int mod_exit(void) {
+    g_state = 0;
+    return 0;
+}

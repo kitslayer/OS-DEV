@@ -295,6 +295,10 @@ static long gen_diskstats(char *b, int max) {
     }
     b[p] = 0; return p;
 }
+extern int module_list(char *b, int max);       /* kernel/module.c — loaded modules (M1262) */
+static long gen_modules(char *b, int max) {      /* /proc/modules: "name size" per loaded .ko (lsmod-ish) */
+    return module_list(b, max);
+}
 static long gen_kmsg(char *b, int max) {        /* the kernel log ring buffer (dmesg) */
     return klog_copy(b, max);
 }
@@ -386,7 +390,7 @@ static const struct pf proc_files[] = {
     { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo },
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat }, { "kasan", gen_kasan },
     { "mqueue", gen_mqueue }, { "sysvipc", gen_sysvipc }, { "unix", gen_unix }, { "locks", gen_locks },
-    { "processes", gen_processes }, { "partitions", gen_partitions }, { "diskstats", gen_diskstats },
+    { "processes", gen_processes }, { "partitions", gen_partitions }, { "diskstats", gen_diskstats }, { "modules", gen_modules },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },

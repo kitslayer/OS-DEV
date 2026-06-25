@@ -717,6 +717,10 @@ void syscall_dispatch(struct registers *r) {
     case SYS_insmod:                       /* () -> load the built-in .ko (relocate+resolve+run); retval/-err (M1261) */
         r->rax = (uint64_t)(int64_t)module_load_builtin();
         break;
+    case SYS_rmmod:                        /* (name) -> run mod_exit + free the module slot; 0/-1 (M1262) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)module_unload((const char *)r->rdi);
+        break;
     case SYS_cas_store:                    /* (buf, len, hash32) -> store; write the SHA-256 key */
         if (!ubuf(r->rdi, r->rsi) || !ubuf(r->rdx, 32)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)cas_store((const void *)r->rdi, (uint32_t)r->rsi, (uint8_t *)r->rdx);

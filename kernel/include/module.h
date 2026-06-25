@@ -23,3 +23,9 @@ long module_load(const void *image, unsigned long len);
 
 /* Load the kernel's built-in demo module (the incbin'd build/testmod.ko). */
 long module_load_builtin(void);
+
+/* rmmod: call the named module's mod_exit (if any) and free its slot; 0/-1 (M1262). */
+int  module_unload(const char *name);
+
+/* /proc/modules: one "name size" line per loaded module; bytes written (M1262). */
+int  module_list(char *buf, int max);

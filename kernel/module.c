@@ -72,18 +72,36 @@ typedef struct { uint64_t r_offset; uint64_t r_info; int64_t r_addend; } Elf64_R
 
 #define MOD_AREA_SZ 65536
 #define MOD_MAX_SEC 64
-/* Executable scratch for the loaded module. In the kernel image's BSS, which is
- * mapped RWX (the kernel LOAD segment is RWX), so code copied here can run. */
-static uint8_t mod_area[MOD_AREA_SZ] __attribute__((aligned(64)));
-static int     mod_loaded;
+/* Executable scratch for the loaded modules. In the kernel image's BSS, which is
+ * mapped RWX (the kernel LOAD segment is RWX), so code copied here can run. A
+ * bump allocator hands each loaded module a region; freed wholesale once all
+ * modules are unloaded (so insmod/rmmod cycles don't leak the area). */
+static uint8_t  mod_area[MOD_AREA_SZ] __attribute__((aligned(64)));
+static uint32_t mod_used;                              /* bump pointer into mod_area */
+
+/* The module registry — what /proc/modules lists and rmmod tears down. */
+#define MOD_SLOTS 8
+static struct {
+    int      used;
+    char     name[32];
+    uint32_t size;                                     /* bytes of mod_area this module occupies */
+    uint64_t exit_addr;                                /* mod_exit(), or 0 if the module has none */
+} mods[MOD_SLOTS];
 
 static int streq(const char *a, const char *b) {
     while (*a && *a == *b) { a++; b++; }
     return *a == 0 && *b == 0;
 }
 
-long module_load(const void *image, unsigned long len) {
-    if (mod_loaded) return -1;                         /* one module slot (MVP) */
+static int mod_count(void) { int n = 0; for (int i = 0; i < MOD_SLOTS; i++) if (mods[i].used) n++; return n; }
+
+/* Load an ET_REL module image (len bytes) under `name`: relocate it, resolve its
+ * kernel imports, register it, call mod_init(), and return mod_init's value (or a
+ * negative error). */
+static long mod_do_load(const void *image, unsigned long len, const char *name) {
+    int slot = -1;
+    for (int i = 0; i < MOD_SLOTS; i++) if (!mods[i].used) { slot = i; break; }
+    if (slot < 0) return -1;                           /* registry full */
     const uint8_t *base = (const uint8_t *)image;
     if (len < sizeof(Elf64_Ehdr)) return -2;
     const Elf64_Ehdr *eh = (const Elf64_Ehdr *)base;
@@ -96,10 +114,13 @@ long module_load(const void *image, unsigned long len) {
     if (eh->e_shoff + (uint64_t)nsh * sizeof(Elf64_Shdr) > len) return -7;
     const Elf64_Shdr *sh = (const Elf64_Shdr *)(base + eh->e_shoff);
 
-    /* 1) place + copy each allocatable section into mod_area (0 = not loaded). */
+    /* 1) place + copy each allocatable section into mod_area (0 = not loaded).
+     * Start at the global bump pointer so this module sits after any already
+     * loaded ones. */
     static uint64_t secbase[MOD_MAX_SEC];
     for (int i = 0; i < nsh; i++) secbase[i] = 0;
-    uint32_t used = 0;
+    uint32_t region_start = mod_used;
+    uint32_t used = mod_used;
     for (int i = 0; i < nsh; i++) {
         if (!(sh[i].sh_flags & SHF_ALLOC)) continue;
         if (sh[i].sh_type != SHT_PROGBITS && sh[i].sh_type != SHT_NOBITS) continue;
@@ -167,20 +188,63 @@ long module_load(const void *image, unsigned long len) {
         }
     }
 
-    /* 4) find mod_init and call it. */
-    uint64_t init = 0;
+    /* 4) find mod_init (required) + mod_exit (optional). */
+    uint64_t init = 0, exit = 0;
     for (int i = 0; i < nsym; i++) {
         if (syms[i].st_name == 0 || syms[i].st_shndx == SHN_UNDEF) continue;
+        if (syms[i].st_shndx >= (uint32_t)nsh || !secbase[syms[i].st_shndx]) continue;
         const char *nm = strtab + syms[i].st_name;
-        if (streq(nm, "mod_init") && syms[i].st_shndx < (uint32_t)nsh && secbase[syms[i].st_shndx]) {
-            init = secbase[syms[i].st_shndx] + syms[i].st_value;
-            break;
-        }
+        uint64_t a = secbase[syms[i].st_shndx] + syms[i].st_value;
+        if (streq(nm, "mod_init")) init = a;
+        else if (streq(nm, "mod_exit")) exit = a;
     }
     if (!init) return -18;
-    mod_loaded = 1;
+
+    /* commit: register the slot + advance the bump pointer, THEN call mod_init. */
+    mod_used = used;
+    mods[slot].used = 1;
+    mods[slot].size = used - region_start;
+    mods[slot].exit_addr = exit;
+    int k = 0; if (name) { while (name[k] && k < (int)sizeof(mods[slot].name) - 1) { mods[slot].name[k] = name[k]; k++; } }
+    mods[slot].name[k] = 0;
+
     int (*entry)(void) = (int (*)(void))(uintptr_t)init;
     return (long)entry();
+}
+
+long module_load(const void *image, unsigned long len) {
+    return mod_do_load(image, len, "module");
+}
+
+/* rmmod: call the module's mod_exit (if any) and free its registry slot. When
+ * the last module is unloaded, reset the bump allocator so the area is reusable.
+ * Returns 0, or -1 if no such module is loaded. */
+int module_unload(const char *name) {
+    for (int i = 0; i < MOD_SLOTS; i++) {
+        if (mods[i].used && streq(mods[i].name, name)) {
+            if (mods[i].exit_addr) { int (*ex)(void) = (int (*)(void))(uintptr_t)mods[i].exit_addr; ex(); }
+            mods[i].used = 0;
+            if (mod_count() == 0) mod_used = 0;        /* all gone -> reclaim the whole area */
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* /proc/modules: one "name size" line per loaded module (lsmod-ish). */
+int module_list(char *buf, int max) {
+    int p = 0;
+    for (int i = 0; i < MOD_SLOTS && p < max - 48; i++) {
+        if (!mods[i].used) continue;
+        for (const char *s = mods[i].name; *s && p < max - 1; s++) buf[p++] = *s;
+        if (p < max - 1) buf[p++] = ' ';
+        char t[12]; int n = 0; uint32_t v = mods[i].size;
+        if (!v) t[n++] = '0'; while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+        while (n && p < max - 1) buf[p++] = t[--n];
+        if (p < max - 1) buf[p++] = '\n';
+    }
+    if (p < max) buf[p] = 0;
+    return p;
 }
 
 /* The kernel's built-in demo module: build/testmod.ko, incbin'd by mod_blob.asm. */
@@ -188,5 +252,5 @@ extern const uint8_t testmod_ko_start[];
 extern const uint8_t testmod_ko_end[];
 
 long module_load_builtin(void) {
-    return module_load(testmod_ko_start, (unsigned long)(testmod_ko_end - testmod_ko_start));
+    return mod_do_load(testmod_ko_start, (unsigned long)(testmod_ko_end - testmod_ko_start), "testmod");
 }

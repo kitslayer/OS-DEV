@@ -3319,11 +3319,20 @@ static int run_command(char *line, char *cwd) {
                       print(") -- userspace UDP round-trip OK\n"); }
             else print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n");
             if (!ok) g_status = 1;
-        } else if (streq(line, "insmodtest")) {   /* loadable kernel module: relocate+resolve+run a .ko (M1261) */
-            long rv = sys_insmod();                 /* loads the built-in testmod.ko, returns mod_init()'s value */
-            int ok = (rv == 42);                    /* testmod's mod_init returns 42 iff its imported timer_ms() resolved + ran */
-            if (ok) print("insmod: loaded testmod.ko (ELF reloc + kernel-symbol resolution), mod_init() returned 42 -- loadable kernel module OK\n");
-            else { print("insmodtest: VERIFY FAILED (sys_insmod returned "); printl(rv); print(")\n"); g_status = 1; }
+        } else if (streq(line, "insmodtest")) {   /* loadable kernel module lifecycle: insmod + /proc/modules + rmmod (M1261/M1262) */
+            int ok = 1; char mb[256];
+            long rv = sys_insmod();                 /* loads testmod.ko, returns mod_init()'s value */
+            if (rv != 42) ok = 0;                   /* 42 iff its imported timer_ms() resolved + ran */
+            long n1 = sys_readfile("/proc/modules", mb, sizeof mb - 1);   /* lsmod: must now list testmod */
+            int listed = 0; if (n1 > 0) { mb[n1]=0; for (int i=0;i+7<=n1;i++) if (mb[i]=='t'&&mb[i+1]=='e'&&mb[i+2]=='s'&&mb[i+3]=='t'&&mb[i+4]=='m'&&mb[i+5]=='o'&&mb[i+6]=='d'){listed=1;break;} }
+            if (!listed) ok = 0;
+            int un = sys_rmmod("testmod");           /* rmmod: runs mod_exit + frees the slot */
+            if (un != 0) ok = 0;
+            long n2 = sys_readfile("/proc/modules", mb, sizeof mb - 1);   /* must now be gone */
+            int gone = 1; if (n2 > 0) { mb[n2]=0; for (int i=0;i+7<=n2;i++) if (mb[i]=='t'&&mb[i+1]=='e'&&mb[i+2]=='s'&&mb[i+3]=='t'&&mb[i+4]=='m'&&mb[i+5]=='o'&&mb[i+6]=='d'){gone=0;break;} }
+            if (!gone) ok = 0;
+            if (ok) print("insmod: testmod.ko loaded (ELF reloc + ksym resolution, mod_init=42), shown in /proc/modules, then rmmod ran mod_exit + removed it -- module lifecycle OK\n");
+            else { print("insmodtest: VERIFY FAILED (rv="); printl(rv); print(" listed="); printl(listed); print(" gone="); printl(gone); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
