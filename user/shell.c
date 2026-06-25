@@ -2866,6 +2866,26 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "utimes: set mtime to a fixed epoch (statx reads it), UTIME_NOW advances it, futimens(fd) sets it -- OK\n"
                      : "utimestest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "pidstattest")) {   /* /proc/<pid>/stat — the ps/top line (M1231) */
+            int ok = 1;
+            char sb[256];
+            long n = sys_readfile("/proc/self/stat", sb, sizeof sb - 1);
+            if (n <= 0) ok = 0;
+            else {
+                sb[n] = 0;
+                int i = 0, v = 0; while (sb[i] >= '0' && sb[i] <= '9') { v = v * 10 + (sb[i] - '0'); i++; }
+                if (v != sys_gettid()) ok = 0;                  /* field 1 == /proc/self's id (the task id) */
+                int op = -1, cp = -1;
+                for (int k = 0; k < (int)n; k++) { if (sb[k] == '(') op = k; else if (sb[k] == ')') cp = k; }
+                if (op < 0 || cp < op) ok = 0;                  /* field 2: (comm) */
+                char stch = (cp >= 0 && cp + 2 < (int)n) ? sb[cp + 2] : 0;
+                if (!(stch == 'R' || stch == 'S' || stch == 'Z' || stch == 'T')) ok = 0;  /* field 3 */
+                int sp = 0; for (int k = 0; k < (int)n; k++) if (sb[k] == ' ') sp++;
+                if (sp < 23) ok = 0;                            /* >= 24 fields */
+            }
+            print(ok ? "pidstat: /proc/self/stat -- field1==pid, (comm), state R/S/Z/T, >=24 fields -- OK\n"
+                     : "pidstattest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

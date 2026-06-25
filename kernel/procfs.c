@@ -391,6 +391,38 @@ static long gen_pid_status(char *b, int max, int pid, int state, void *proc) {
     p = sapp(b, p, max, "\n");
     b[p] = 0; return p;
 }
+/* /proc/<pid>/stat (M1231): the single-line, space-separated record `ps`/`top`/
+ * `htop` parse. We emit the classic fields 1-24 — pid, (comm), state, ppid,
+ * pgrp, session, then utime/stime (CPU ticks @100Hz from the task), nice,
+ * vsize (heap bytes) and rss (resident pages from the PTE walk) — with 0 for
+ * the counters we don't track (tty, faults, etc.). */
+static long gen_pid_stat(char *b, int max, int pid, int state, void *proc) {
+    app_t *a = (app_t *)proc;
+    task_t *t = (task_t *)app_task(a);
+    char stc = (state == 2) ? 'S' : (state == 3) ? 'Z' : (state == 4) ? 'T' : 'R';
+    uint64_t utime = t ? t->utime_ms / 10 : 0;             /* ms -> clock ticks @ 100 Hz */
+    uint64_t stime = t ? t->stime_ms / 10 : 0;
+    int nice = t ? t->nice : 0;
+    vmm_wss_t w; vmm_wss(app_cr3(a), &w);
+    int p = 0;
+    p = sdec(b, p, max, (uint64_t)pid);          p = sapp(b, p, max, " (");
+    p = sapp(b, p, max, app_title(a));           p = sapp(b, p, max, ") ");
+    if (p < max - 1) b[p++] = stc;               p = sapp(b, p, max, " ");
+    p = sdec(b, p, max, (uint64_t)app_ppid(a));    p = sapp(b, p, max, " ");
+    p = sdec(b, p, max, (uint64_t)app_pgid_of(a)); p = sapp(b, p, max, " ");
+    p = sdec(b, p, max, (uint64_t)app_sid_of(a));  p = sapp(b, p, max, " ");
+    p = sapp(b, p, max, "0 0 0 ");               /* tty_nr tpgid flags */
+    p = sapp(b, p, max, "0 0 0 0 ");             /* minflt cminflt majflt cmajflt */
+    p = sdec(b, p, max, utime);                  p = sapp(b, p, max, " ");
+    p = sdec(b, p, max, stime);                  p = sapp(b, p, max, " ");
+    p = sapp(b, p, max, "0 0 20 ");              /* cutime cstime priority */
+    if (nice < 0) { if (p < max - 1) b[p++] = '-'; p = sdec(b, p, max, (uint64_t)(-nice)); }
+    else p = sdec(b, p, max, (uint64_t)nice);
+    p = sapp(b, p, max, " 1 0 0 ");              /* nice<sp> num_threads itrealvalue starttime */
+    p = sdec(b, p, max, app_heap_bytes(a));      p = sapp(b, p, max, " ");   /* vsize (bytes) */
+    p = sdec(b, p, max, w.resident);             p = sapp(b, p, max, "\n");  /* rss (pages) */
+    b[p] = 0; return p;
+}
 /* /proc/<pid>/wss: working-set size from the CPU's Accessed/Dirty PTE bits.
  * "Referenced" counts pages touched since the last `clearref` (write it to ctl
  * to reset the window) — the building block for an LRU/swap victim picker. */
@@ -499,6 +531,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             int st = 0; void *proc = proc_find(pid, &st);
             if (!proc) return -1;
             if (peq(file, "status"))  return gen_pid_status((char *)buf, (int)max, pid, st, proc);
+            if (peq(file, "stat"))    return gen_pid_stat((char *)buf, (int)max, pid, st, proc);   /* ps/top line (M1231) */
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */

@@ -32,6 +32,9 @@ int         app_format_smaps(app_t *a, char *b, int max);          /* /proc/<pid
 int         app_format_pagemap(app_t *a, char *b, int max);        /* /proc/<pid>/pagemap: per-page residency + PFN (M1167) */
 uint64_t    app_heap_bytes(app_t *a);   /* heap size in bytes */
 int         app_vma_count(app_t *a);    /* number of mmap regions */
+int         app_ppid(app_t *a);         /* parent pid, for /proc/<pid>/stat (M1231) */
+int         app_pgid_of(app_t *a);      /* process-group id (M1231) */
+int         app_sid_of(app_t *a);       /* session id (M1231) */
 int         app_format_maps(app_t *a, char *buf, int max);   /* /proc/<pid>/maps: memory regions as text */
 int         app_format_fds(app_t *a, char *buf, int max);    /* /proc/<pid>/fd: open descriptors (pipe/file) (M1194) */
 int    app_alive(app_t *a);

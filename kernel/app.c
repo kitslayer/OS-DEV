@@ -329,6 +329,9 @@ void       *app_task(app_t *a) { return a ? (void *)a->task : 0; }        /* the
 uint64_t    app_cr3(app_t *a) { return a ? a->cr3 : 0; }                  /* the app's address space, for /proc/<pid>/wss */
 uint64_t    app_heap_bytes(app_t *a) { return (a && a->heap_end) ? a->heap_end - UHEAP_BASE : 0; }
 int         app_vma_count(app_t *a) { return a ? a->nvma : 0; }
+int         app_ppid(app_t *a)    { return a ? a->parent : 0; }   /* parent pid, for /proc/<pid>/stat (M1231) */
+int         app_pgid_of(app_t *a) { return a ? a->pgid : 0; }     /* process-group id (M1231) */
+int         app_sid_of(app_t *a)  { return a ? a->sid : 0; }      /* session id (M1231) */
 
 /* Format the app's user-space memory map (/proc/<pid>/maps): each region as a
  * "0xSTART-0xEND perm [label]" line, like Linux. Bounded by `max`. */
