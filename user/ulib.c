@@ -267,6 +267,9 @@ int  sys_rename(const char *oldpath, const char *newpath) { return (int)do_sysca
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }
+long sys_fcntl(int fd, int cmd, long arg) { return do_syscall(SYS_fcntl, fd, cmd, arg); }
+int  sys_dup3(int oldfd, int newfd, int flags) { return (int)do_syscall(SYS_dup3, oldfd, newfd, flags); }
+long sys_close_range(unsigned lo, unsigned hi, int flags) { return do_syscall(SYS_close_range, (long)lo, (long)hi, flags); }
 int  sys_jail(const char *prog, const char *promises, const char *path) { return (int)do_syscall(SYS_jail, (long)prog, (long)promises, (long)path); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }

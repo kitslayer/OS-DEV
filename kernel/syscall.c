@@ -1577,6 +1577,15 @@ void syscall_dispatch(struct registers *r) {
     case SYS_timerfd_settime:              /* (fd, delay_ms) -> arm/disarm; 0/-1 (M1217) */
         r->rax = (uint64_t)app_timerfd_settime((int)r->rdi, (long)r->rsi);
         break;
+    case SYS_fcntl:                        /* (fd, cmd, arg) -> fd-flag ops (M1218) */
+        r->rax = (uint64_t)app_fcntl((int)r->rdi, (int)r->rsi, (long)r->rdx);
+        break;
+    case SYS_dup3:                         /* (oldfd, newfd, flags) (M1218) */
+        r->rax = (uint64_t)(int64_t)app_dup3((int)r->rdi, (int)r->rsi, (int)r->rdx);
+        break;
+    case SYS_close_range:                  /* (lo, hi, flags) (M1218) */
+        r->rax = (uint64_t)app_close_range((unsigned)r->rdi, (unsigned)r->rsi, (int)r->rdx);
+        break;
     case SYS_sigprocmask:                  /* (how, set): block/unblock signals; returns the old mask (M1208) */
         r->rax = (uint64_t)app_sigprocmask((int)r->rdi, (uint32_t)r->rsi);
         break;

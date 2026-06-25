@@ -2612,6 +2612,25 @@ static int run_command(char *line, char *cwd) {
                          : "timerfdtest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "fcntltest")) {  /* fd hygiene: FD_CLOEXEC + dup3 + close_range + fcntl (M1218) */
+            int ok = 1, fds[2];
+            if (sys_pipe(fds) != 0) { print("fcntltest: pipe() failed\n"); g_status = 1; }
+            else {
+                if (sys_fcntl(fds[0], F_GETFD, 0) != 0) ok = 0;             /* not cloexec initially */
+                if (sys_fcntl(fds[0], F_SETFD, FD_CLOEXEC) != 0) ok = 0;
+                if (sys_fcntl(fds[0], F_GETFD, 0) != FD_CLOEXEC) ok = 0;    /* round-trips */
+                if (sys_dup3(fds[0], fds[0], 0) != -1) ok = 0;             /* dup3 EINVAL on old==new */
+                if (sys_dup3(fds[1], 9, O_CLOEXEC) != 9) ok = 0;
+                if (sys_fcntl(9, F_GETFD, 0) != FD_CLOEXEC) ok = 0;        /* dup3 O_CLOEXEC set it */
+                int d = sys_fcntl(fds[1], F_DUPFD, 5);                      /* lowest free fd >= 5 */
+                if (d < 5) ok = 0;
+                if (sys_close_range(5, 20, 0) != 0) ok = 0;                /* close 5..20 (incl. d and 9) */
+                if (sys_fcntl(d, F_GETFD, 0) != -1) ok = 0;                /* d is now closed */
+                sys_fdclose(fds[0]); sys_fdclose(fds[1]);
+                print(ok ? "fd-hygiene: FD_CLOEXEC get/set + dup3(O_CLOEXEC; EINVAL old==new) + F_DUPFD + close_range -- OK\n"
+                         : "fcntltest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -159,7 +159,7 @@ struct app {
      * them has an empty table, so fork-copy + reap-close are no-ops for it. */
 #define APP_NFD 24
     /* type: 0=free, 1=pipe (obj=pipe index, write_end), 2=file (path+off, M1193). */
-    struct fdent { uint8_t used, type, write_end; int obj; char path[64]; long off; } fd[APP_NFD];
+    struct fdent { uint8_t used, type, write_end; int obj; char path[64]; long off; uint8_t cloexec; } fd[APP_NFD];   /* cloexec at END to keep the positional initializers valid (M1218) */
     /* seccomp-BPF self-filter (M1190): a process installs a bpf.c program that
      * vets its own syscalls. Zero on spawn/fork; inherited across fork; once set
      * it's permanent (privilege drop is one-way). Empty => no filtering overhead. */
@@ -2912,6 +2912,7 @@ int app_open(const char *path, int flags) {
     int j = 0; while (path[j] && j < (int)sizeof a->fd[fd].path - 1) { a->fd[fd].path[j] = path[j]; j++; }
     a->fd[fd].path[j] = 0;
     a->fd[fd].off = (flags & O_APPEND) ? (long)st.stx_size : 0;   /* O_APPEND starts at EOF */
+    a->fd[fd].cloexec = (flags & O_CLOEXEC) ? 1 : 0;              /* close-on-exec (M1218) */
     return fd;
 }
 /* lseek(fd, off, whence): 0=SET, 1=CUR, 2=END. Returns the new offset, or -1. */
@@ -2985,6 +2986,37 @@ long app_timerfd_settime(int fd, long delay_ms) {
     struct app *a = cur();
     if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 4) return -1;
     a->fd[fd].off = (delay_ms <= 0) ? 0 : (long)(timer_ms() + (uint64_t)delay_ms);   /* absolute expiry; <=0 disarms */
+    return 0;
+}
+/* fd hygiene (M1218): fcntl(F_GETFD/F_SETFD/F_DUPFD/F_DUPFD_CLOEXEC), dup3,
+ * close_range — over the per-fd FD_CLOEXEC bit (honored by app_exec above; fork
+ * copies the whole fdent so it survives a fork, as POSIX requires). */
+long app_fcntl(int fd, int cmd, long arg) {
+    struct app *a = cur();
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return -1;
+    if (cmd == F_GETFD) return a->fd[fd].cloexec ? FD_CLOEXEC : 0;
+    if (cmd == F_SETFD) { a->fd[fd].cloexec = (arg & FD_CLOEXEC) ? 1 : 0; return 0; }
+    if (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC) {
+        int lo = (int)arg; if (lo < APP_FD_FIRST) lo = APP_FD_FIRST;
+        int nf = -1; for (int i = lo; i < APP_NFD; i++) if (!a->fd[i].used) { nf = i; break; }
+        if (nf < 0 || app_dup2(fd, nf) != nf) return -1;
+        a->fd[nf].cloexec = (cmd == F_DUPFD_CLOEXEC) ? 1 : 0;
+        return nf;
+    }
+    return -1;
+}
+int app_dup3(int oldfd, int newfd, int flags) {
+    struct app *a = cur(); if (!a) return -1;
+    if (oldfd == newfd) return -1;                          /* dup3 differs from dup2: EINVAL on equal fds */
+    if (app_dup2(oldfd, newfd) != newfd) return -1;
+    a->fd[newfd].cloexec = (flags & O_CLOEXEC) ? 1 : 0;
+    return newfd;
+}
+long app_close_range(unsigned lo, unsigned hi, int flags) {
+    struct app *a = cur(); if (!a) return -1;
+    (void)flags;
+    if (hi >= APP_NFD) hi = APP_NFD - 1;
+    for (unsigned i = lo; i <= hi && i < APP_NFD; i++) if (a->fd[i].used) app_fd_close((int)i);
     return 0;
 }
 
@@ -3271,6 +3303,7 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     a->titlebuf[ti] = 0; a->title = a->titlebuf;
     int li = 0; if (arg) while (arg[li] && li < 127) { a->launch_arg[li] = arg[li]; li++; }
     a->launch_arg[li] = 0;
+    for (int i = 0; i < APP_NFD; i++) if (a->fd[i].used && a->fd[i].cloexec) app_fd_close(i);   /* FD_CLOEXEC: drop on exec (M1218) */
     grid_clear(a);
 
     /* rewrite the trap frame to enter the new program (mirrors enter_user's iret frame) */

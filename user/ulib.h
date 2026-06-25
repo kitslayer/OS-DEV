@@ -135,6 +135,9 @@ int  sys_rename(const char *oldpath, const char *newpath);     /* rename/move wi
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */
+long sys_fcntl(int fd, int cmd, long arg);                     /* F_GETFD/SETFD/DUPFD/DUPFD_CLOEXEC (M1218) */
+int  sys_dup3(int oldfd, int newfd, int flags);                /* dup w/ O_CLOEXEC; -1 if old==new (M1218) */
+long sys_close_range(unsigned lo, unsigned hi, int flags);     /* close fds in [lo,hi]; 0/-1 (M1218) */
 int  sys_jail(const char *prog, const char *promises, const char *path);   /* spawn prog pre-confined (pledge + optional unveil) */
 long sys_find(const char *want, void *buf, unsigned long len);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);
