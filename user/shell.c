@@ -3527,6 +3527,20 @@ static int run_command(char *line, char *cwd) {
                       print("ms, stopped after timer_delete -- POSIX timer_create + SIGEV_SIGNAL OK\n"); }
             else { print("timertest: VERIFY FAILED (armed="); printl(armed); print(" n="); printl(n1); print(" after="); printl(g_tmr_n);
                    print(" code="); printl(g_tmr_code); print(" val="); printl((long)g_tmr_val); print(" rem="); printl(remaining); print(")\n"); g_status = 1; }
+        } else if (streq(line, "hpettest")) {   /* HPET high-resolution clocksource (M1273) */
+            unsigned long hz = sys_hpet(1);
+            int present = (int)sys_hpet(3);
+            unsigned long a = sys_hpet(0);          /* nanoseconds */
+            sys_sleep(50);                          /* sleep 50 ms (PIT tick) — HPET measures the real elapsed time */
+            unsigned long b = sys_hpet(0);
+            unsigned long c = sys_hpet(0), d = sys_hpet(0);   /* back-to-back pair: fine-grained monotonic */
+            long dms = (long)((b - a) / 1000000ul);
+            int ok = present && hz >= 1000000ul && hz <= 1000000000ul && d > c && dms >= 40 && dms <= 90;
+            if (ok) { print("hpet: ACPI-discovered HPET @ "); printl((long)hz); print(" Hz; ns counter advanced ");
+                      printl(dms); print("ms across a 50ms sleep, monotonic (back-to-back delta="); printl((long)(d - c));
+                      print("ns) -- HPET high-res clocksource OK\n"); }
+            else { print("hpettest: VERIFY FAILED (present="); printl(present); print(" hz="); printl((long)hz);
+                   print(" dms="); printl(dms); print(" mono="); printl(d > c); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

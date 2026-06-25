@@ -281,6 +281,7 @@ long  sys_timer_create(int clockid, int signo, unsigned long value);  /* POSIX t
 long  sys_timer_settime(int id, int flags, unsigned long value_ms, unsigned long interval_ms);  /* arm (TIMER_ABSTIME=abs); value_ms 0=disarm; 0/-1 (M1272) */
 long  sys_timer_gettime(int id);          /* ms until timer id next fires (0 disarmed), or -1 (M1272) */
 long  sys_timer_delete(int id);           /* destroy timer id; 0/-1 (M1272) */
+unsigned long sys_hpet(int what);         /* HPET high-res clock: 0=ns, 1=hz, 2=counter, 3=present (M1273) */
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */

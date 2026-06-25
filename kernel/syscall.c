@@ -49,6 +49,7 @@
 #include "random.h"
 #include "cas.h"
 #include "acpi.h"
+#include "hpet.h"   /* HPET high-res clocksource syscall (M1273) */
 #include <stdint.h>
 
 /* Validate a user-supplied syscall pointer argument: the range [p, p+n) must
@@ -274,7 +275,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_raise:
-    case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete:
+    case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet:
     case SYS_alarm: case SYS_getrusage:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_semget: case SYS_semop: case SYS_semctl:
@@ -1754,6 +1755,14 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_timer_delete:                 /* (id): destroy the timer (M1272) */
         r->rax = (uint64_t)app_timer_delete((int)r->rdi);
+        break;
+    case SYS_hpet:                         /* (what): HPET high-res clock — 0=ns 1=hz 2=counter 3=present (M1273) */
+        switch ((int)r->rdi) {
+            case 1:  r->rax = hpet_hz();      break;
+            case 2:  r->rax = hpet_counter(); break;
+            case 3:  r->rax = (uint64_t)hpet_present(); break;
+            default: r->rax = hpet_ns();      break;
+        }
         break;
     case SYS_raise:                        /* (signo): queue the signal; delivered to a handler at this
                                             * syscall's return (app_deliver_pending tail), or left pending

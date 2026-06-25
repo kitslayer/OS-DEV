@@ -9,5 +9,6 @@
 
 void acpi_init(void);      /* scan the ACPI tables at boot (logs what it found) */
 int  acpi_madt_lapics(uint8_t *ids, int max);  /* APIC IDs of all CPUs from the MADT, for SMP (M1197) */
+uint64_t acpi_hpet_base(void);  /* HPET register-block MMIO base from the HPET table, or 0 (M1273) */
 void acpi_poweroff(void);  /* enter S5: power the machine off. Does not return on success. */
 void acpi_reboot(void);    /* ACPI reset register, else 8042 pulse. Does not return on success. */

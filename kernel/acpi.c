@@ -244,6 +244,43 @@ int acpi_madt_lapics(uint8_t *ids, int max) {
     return cnt;
 }
 
+/* Locate the HPET's MMIO base address from the ACPI "HPET" table (M1273). The
+ * table is the 36-byte SDT header + a u32 event-timer-block-id, then a 12-byte
+ * Generic Address Structure whose 64-bit `address` field (table offset 44) is
+ * the register block's physical base. Returns 0 if there's no HPET table. */
+uint64_t acpi_hpet_base(void) {
+    struct rsdp *r = find_rsdp();
+    if (!r) return 0;
+    const struct sdt_header *hpet = 0;
+    if (r->revision >= 2 && r->xsdt_addr) {              /* XSDT: 64-bit entries */
+        const struct sdt_header *x = (const struct sdt_header *)hhdm(r->xsdt_addr);
+        if (sig4(x->sig, "XSDT") && x->length >= 36 && x->length < (1u << 20)) {
+            uint32_t n = (x->length - 36) / 8;
+            const uint8_t *ents = (const uint8_t *)x + 36;
+            for (uint32_t i = 0; i < n; i++) {
+                uint64_t ep; __builtin_memcpy(&ep, ents + i*8, 8);
+                const struct sdt_header *t = (const struct sdt_header *)hhdm(ep);
+                if (sig4(t->sig, "HPET")) { hpet = t; break; }
+            }
+        }
+    }
+    if (!hpet && r->rsdt_addr) {                         /* RSDT: 32-bit entries */
+        const struct sdt_header *rs = (const struct sdt_header *)hhdm(r->rsdt_addr);
+        if (sig4(rs->sig, "RSDT") && rs->length >= 36 && rs->length < (1u << 20)) {
+            uint32_t n = (rs->length - 36) / 4;
+            const uint8_t *ents = (const uint8_t *)rs + 36;
+            for (uint32_t i = 0; i < n; i++) {
+                uint32_t ep; __builtin_memcpy(&ep, ents + i*4, 4);
+                const struct sdt_header *t = (const struct sdt_header *)hhdm(ep);
+                if (sig4(t->sig, "HPET")) { hpet = t; break; }
+            }
+        }
+    }
+    if (!hpet || hpet->length < 52) return 0;            /* need at least through the GAS address */
+    uint64_t base; __builtin_memcpy(&base, (const uint8_t *)hpet + 44, 8);
+    return base;
+}
+
 void acpi_init(void) {
     struct rsdp *r = find_rsdp();
     if (!r) { kprintf("[acpi] no RSDP found (poweroff falls back to emulator ports).\n"); return; }

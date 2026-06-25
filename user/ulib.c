@@ -499,6 +499,7 @@ long sys_timer_create(int clockid, int signo, unsigned long value) { return do_s
 long sys_timer_settime(int id, int flags, unsigned long value_ms, unsigned long interval_ms) { return do_syscall4(SYS_timer_settime, id, flags, (long)value_ms, (long)interval_ms); }
 long sys_timer_gettime(int id) { return do_syscall(SYS_timer_gettime, id, 0, 0); }
 long sys_timer_delete(int id) { return do_syscall(SYS_timer_delete, id, 0, 0); }
+unsigned long sys_hpet(int what) { return (unsigned long)do_syscall(SYS_hpet, what, 0, 0); }  /* 0=ns 1=hz 2=counter 3=present (M1273) */
 unsigned sys_sigprocmask(int how, unsigned set) { return (unsigned)do_syscall(SYS_sigprocmask, how, (long)set, 0); }
 unsigned sys_sigpending(void) { return (unsigned)do_syscall(SYS_sigpending, 0, 0, 0); }
 unsigned long sys_uptime_ms(void) { return (unsigned long)do_syscall(SYS_uptime_ms, 0, 0, 0); }

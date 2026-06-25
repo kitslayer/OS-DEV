@@ -16,6 +16,7 @@
 #include "vmm.h"
 #include "kheap.h"
 #include "acpi.h"
+#include "hpet.h"   /* high-resolution HPET clocksource (M1273) */
 #include "smp.h"
 #include "multiboot.h"
 #include "gdbstub.h"
@@ -179,6 +180,7 @@ void kmain(uint64_t mb_info) {
     vmm_init();
     kheap_init();
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
+    hpet_init();                   /* high-resolution clocksource via the ACPI HPET table (M1273) */
     smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
 
     /* GDB remote-serial stub (M1204): if `-append gdbstub` was seen (detected at
