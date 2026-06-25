@@ -189,6 +189,8 @@ int  app_oom_kill(void);                       /* OOM killer: cooperatively term
 long app_oom(int cmd, int arg);                /* SYS_oom: 0=set self oom_adj 1=trigger kill 2=score of pid (M1275) */
 long app_sigaltstack(uint64_t ss_sp, uint64_t ss_size);  /* register an alternate signal stack for SA_ONSTACK handlers; 0/-1 (M1276) */
 long app_oom_score_of(app_t *a);               /* OOM score (RSS pages + oom_adj bias) of any app, for /proc/<pid>/oom_score (M1277) */
+int  app_oom_adj_get(app_t *a);                /* the oom_score_adj tuning bias of any app (M1282) */
+void app_oom_adj_set(app_t *a, int v);         /* set oom_score_adj (clamped to [-1000,1000]) (M1282) */
 long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
 long app_utimens(const char *path, long atime, long mtime);  /* set a path's atime/mtime (UTIME_NOW/OMIT); 0/-1 (M1230) */
 long app_futimens(int fd, long atime, long mtime);           /* set an open fd's atime/mtime; 0/-1 (M1230) */

@@ -558,6 +558,15 @@ static long gen_pid_oom(char *b, int max, void *proc) {
     p = sapp(b, p, max, "\n");
     b[p] = 0; return p;
 }
+/* /proc/<pid>/oom_score_adj (M1282): the tunable OOM victim bias [-1000,1000], rw. */
+static long gen_pid_oom_score_adj(char *b, int max, void *proc) {
+    int v = app_oom_adj_get((app_t *)proc);
+    int p = 0;
+    if (v < 0) { if (p < max) b[p++] = '-'; v = -v; }   /* sdec is unsigned: emit the sign ourselves */
+    p = sdec(b, p, max, (uint64_t)v);
+    p = sapp(b, p, max, "\n");
+    b[p] = 0; return p;
+}
 
 /* /proc/<pid>/mem/<hexaddr>[/<len>]: hexdump another process's memory — the live
  * counterpart to the post-mortem core reader (crashinfo, M1112). The name-based
@@ -661,6 +670,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (peq(file, "root")) { char *bb = (char *)buf; if (max >= 3) { bb[0] = '/'; bb[1] = '\n'; bb[2] = 0; return 2; } return 0; }  /* no per-proc chroot -> "/" (M1249) */
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (peq(file, "oom_score")) return gen_pid_oom((char *)buf, (int)max, proc);            /* OOM victim score (M1277) */
+            if (peq(file, "oom_score_adj")) return gen_pid_oom_score_adj((char *)buf, (int)max, proc);  /* OOM tuning bias rw (M1282) */
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */
             if (peq(file, "regs"))   return gen_pid_regs((char *)buf, (int)max, proc);   /* ring-3 register file (M1119) */
@@ -761,6 +771,14 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
             if (peq(cmd, "untrace")) { app_set_traced((app_t *)proc, 0); return (long)len; }
             if (peq(cmd, "clearref")) { vmm_clear_accessed(app_cr3((app_t *)proc)); return (long)len; }  /* reset the /proc/<pid>/wss window (M1093) */
             return -1;                                            /* unknown command */
+        }
+        if (proc_pid_path(abs, &pid, &file) && peq(file, "oom_score_adj")) {   /* echo N > /proc/<pid>/oom_score_adj (M1282) */
+            void *proc = proc_find(pid, 0); if (!proc) return -1;
+            const char *s = (const char *)buf; int i = 0, neg = 0, v = 0;
+            if (i < (int)len && s[i] == '-') { neg = 1; i++; }
+            for (; i < (int)len && s[i] >= '0' && s[i] <= '9'; i++) v = v * 10 + (s[i] - '0');
+            app_oom_adj_set((app_t *)proc, neg ? -v : v);
+            return (long)len;
         }
         return -1;                                               /* /proc otherwise read-only */
     }

@@ -2956,6 +2956,9 @@ long app_oom(int cmd, int arg) {
 }
 /* /proc/<pid>/oom_score accessor (M1277): the OOM score of an arbitrary app. */
 long app_oom_score_of(app_t *a) { return oom_score((struct app *)a); }
+/* /proc/<pid>/oom_score_adj accessors (M1282): the tunable victim bias (rw). */
+int  app_oom_adj_get(app_t *a) { struct app *p = (struct app *)a; return p ? p->oom_adj : 0; }
+void app_oom_adj_set(app_t *a, int v) { struct app *p = (struct app *)a; if (p) { if (v < -1000) v = -1000; if (v > 1000) v = 1000; p->oom_adj = v; } }
 
 /* Format the caller's command history (oldest first) as "  N  command\n"
  * lines into buf. Returns bytes written (excluding the NUL terminator). The

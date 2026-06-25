@@ -3681,6 +3681,21 @@ static int run_command(char *line, char *cwd) {
             int ok = (f >= 0 && pid > 0 && pfd >= 0 && newfd >= 0 && match);
             if (ok) print("pidfd_getfd: parent advanced its own fd to offset 15; pidfd_getfd(pidfd,fd) grabbed the CHILD's copy (offset 10) and read 'ABCDE' (not the parent's 'FGHIJ') -- cross-process fd duplication OK\n");
             else { print("pidfdgetfdtest: VERIFY FAILED (f="); printl(f); print(" pid="); printl(pid); print(" pfd="); printl(pfd); print(" newfd="); printl(newfd); print(" n="); printl(n); print(")\n"); g_status = 1; }
+        } else if (streq(line, "oomadjtest")) {   /* /proc/<pid>/oom_score_adj read+write (M1282) */
+            char b[40]; long n;
+            n = sys_readfile("/proc/self/oom_score_adj", b, sizeof b - 1);
+            long adj0 = -999; if (n > 0) { b[n] = 0; adj0 = 0; int i = 0, neg = 0; if (b[0] == '-') { neg = 1; i = 1; }
+                for (; b[i] >= '0' && b[i] <= '9'; i++) adj0 = adj0 * 10 + (b[i] - '0'); if (neg) adj0 = -adj0; }
+            long w = sys_writefile("/proc/self/oom_score_adj", "500", 3);   /* set the bias via the canonical /proc path */
+            n = sys_readfile("/proc/self/oom_score_adj", b, sizeof b - 1);
+            long adj1 = -999; if (n > 0) { b[n] = 0; adj1 = 0; for (int i = 0; b[i] >= '0' && b[i] <= '9'; i++) adj1 = adj1 * 10 + (b[i] - '0'); }
+            n = sys_readfile("/proc/self/oom_score", b, sizeof b - 1);       /* oom_score should reflect +500*256 = 128000 */
+            long score = -1; if (n > 0) { b[n] = 0; score = 0; for (int i = 0; b[i] >= '0' && b[i] <= '9'; i++) score = score * 10 + (b[i] - '0'); }
+            sys_writefile("/proc/self/oom_score_adj", "0", 1);              /* restore default */
+            int ok = (adj0 == 0 && w == 3 && adj1 == 500 && score >= 128000);
+            if (ok) { print("oom_score_adj: /proc/self/oom_score_adj 0 -> wrote 500 via /proc -> read back 500; oom_score rose to "); printl(score);
+                      print(" (+128000 bias); restored -- /proc/<pid>/oom_score_adj rw OK\n"); }
+            else { print("oomadjtest: VERIFY FAILED (adj0="); printl(adj0); print(" w="); printl(w); print(" adj1="); printl(adj1); print(" score="); printl(score); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
