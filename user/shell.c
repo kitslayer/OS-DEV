@@ -2985,6 +2985,21 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "pipe2: O_CLOEXEC sets FD_CLOEXEC on both ends + data flows; flags=0 -> not cloexec -- OK\n"
                      : "pipe2test: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "statfstest")) {   /* statfs(2) -- filesystem free/total (M1240) */
+            int ok = 1;
+            struct statvfs sv;
+            if (sys_statfs("/", &sv) != 0) ok = 0;
+            else {
+                if (sv.f_bsize == 0 || sv.f_blocks == 0) ok = 0;          /* real geometry */
+                if (sv.f_bavail > sv.f_blocks) ok = 0;                    /* free <= total */
+                if (sv.f_namemax == 0) ok = 0;
+            }
+            if (sys_statfs("/NOPE.XYZ", &sv) != -1) ok = 0;               /* absent path -> -1 */
+            if (ok) { print("statfs: / -> "); printl((long)(sv.f_bavail * sv.f_bsize / 1024)); print(" KiB free / ");
+                      printl((long)(sv.f_blocks * sv.f_bsize / 1024)); print(" KiB total, namemax="); printl((long)sv.f_namemax);
+                      print(" (absent path -> -1) -- OK\n"); }
+            else print("statfstest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

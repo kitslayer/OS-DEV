@@ -246,6 +246,7 @@
 #define SYS_getpriority  227   /* (which, who) -> nice value of the caller (who==0/self); -1 (M1238) */
 #define SYS_setpriority  228   /* (which, who, prio) -> set the caller's nice (who==0/self); 0/-1 (M1238) */
 #define SYS_pipe2        229   /* (int fds[2], flags) -> pipe with atomic O_CLOEXEC; 0/-1 (M1239) */
+#define SYS_statfs       230   /* (path, struct statvfs*) -> filesystem free/total; 0/-1 (M1240) */
 #define PRIO_PROCESS 0         /* getpriority/setpriority `which`: by process (M1238) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */
@@ -468,6 +469,17 @@ struct tms {                      /* times(2): CPU time in clock ticks @ 100 Hz 
     long tms_stime;               /* system CPU time of the caller        */
     long tms_cutime;              /* user CPU time of reaped children     */
     long tms_cstime;              /* system CPU time of reaped children   */
+};
+
+struct statvfs {                  /* statfs(2): filesystem stats (M1240) */
+    unsigned long f_bsize;        /* block size                      */
+    unsigned long f_frsize;       /* fragment size (== f_bsize here) */
+    unsigned long f_blocks;       /* total data blocks               */
+    unsigned long f_bfree;        /* free blocks                     */
+    unsigned long f_bavail;       /* free blocks for unprivileged    */
+    unsigned long f_files;        /* total inodes (0 = not tracked)  */
+    unsigned long f_ffree;        /* free inodes                     */
+    unsigned long f_namemax;      /* max filename length             */
 };
 
 struct utsname {                  /* uname(2): system identity (M1236) */

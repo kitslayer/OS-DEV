@@ -276,7 +276,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_open:
-    case SYS_readlink:
+    case SYS_readlink: case SYS_statfs:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
     case SYS_utimens: case SYS_futimens: case SYS_renameat2:
@@ -859,6 +859,21 @@ void syscall_dispatch(struct registers *r) {
         p = sappend(b, p, max, " KiB total\n");
         if (p < max) b[p] = 0;
         r->rax = (uint64_t)p;
+        break;
+    }
+    case SYS_statfs: {                     /* (path, struct statvfs*) -> filesystem free/total (M1240) */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statvfs))) { r->rax = (uint64_t)-1; break; }
+        struct statx stx;
+        if (vfs_stat((const char *)r->rdi, &stx) != 0) { r->rax = (uint64_t)-1; break; }   /* the path must exist */
+        uint64_t fb, tb; vfs_df(&fb, &tb);                 /* free / total bytes of the (single) root fs */
+        struct statvfs sv;
+        sv.f_bsize = sv.f_frsize = 512;
+        sv.f_blocks = tb / 512;
+        sv.f_bfree = sv.f_bavail = fb / 512;
+        sv.f_files = sv.f_ffree = 0;                       /* global inode counts not tracked */
+        sv.f_namemax = 255;
+        for (unsigned i = 0; i < sizeof sv; i++) ((uint8_t *)r->rsi)[i] = ((uint8_t *)&sv)[i];
+        r->rax = 0;
         break;
     }
     case SYS_ps: {
