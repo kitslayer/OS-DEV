@@ -119,6 +119,8 @@ static void reg(const char *name, int (*read)(void *, uint64_t, uint32_t, void *
     g_dev[g_ndev].write   = write;
     g_dev[g_ndev].sectors = sectors;
     g_dev[g_ndev].ctx     = ctx;
+    g_dev[g_ndev].rd_ios = g_dev[g_ndev].rd_sectors = 0;   /* fresh I/O counters (M1256) */
+    g_dev[g_ndev].wr_ios = g_dev[g_ndev].wr_sectors = 0;
     g_ndev++;
 }
 
@@ -244,6 +246,7 @@ int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf) {
     uint8_t *out = (uint8_t *)buf;
     for (uint32_t s = 0; s < count; s++)
         if (bread(i, lba + s, out + (uint64_t)s * BLOCKDEV_SECSZ) < 0) return -1;
+    g_dev[i].rd_ios++; g_dev[i].rd_sectors += count;       /* /proc/diskstats (M1256) */
     return 0;
 }
 
@@ -263,6 +266,7 @@ int blockdev_write(int i, uint64_t lba, uint32_t count, const void *buf) {
     }
     g_bc_wr += count;
     irq_restore(fl);
+    g_dev[i].wr_ios++; g_dev[i].wr_sectors += count;       /* /proc/diskstats (M1256) */
     return 0;
 }
 

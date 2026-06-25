@@ -3240,6 +3240,29 @@ static int run_command(char *line, char *cwd) {
                       print(" -- A->B 'ping' + B->A 'pong' both delivered (pre-connected, bidirectional, no path/listen/accept) -- OK\n"); }
             else print("socketpairtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "diskstatstest")) {   /* /proc/diskstats: per-block-device I/O counters (M1256) */
+            char sb[1024]; int ok = 1;
+            long n = sys_readfile("/proc/diskstats", sb, sizeof sb - 1);
+            long ndev = 0, tot_rd_ios = 0, tot_rd_sec = 0;
+            if (n > 0) { sb[n] = 0; int i = 0;
+                while (sb[i]) {                       /* one device per line: maj min name rd_ios 0 rd_sectors ... */
+                    int tok = 0, ls = i; long rdios = 0, rdsec = 0;
+                    while (sb[i] && sb[i] != '\n') {
+                        while (sb[i] == ' ') i++;
+                        if (!sb[i] || sb[i] == '\n') break;
+                        tok++; int s = i; while (sb[i] && sb[i] != ' ' && sb[i] != '\n') i++;
+                        if (tok == 4 || tok == 6) { long v = 0; for (int k = s; k < i; k++) if (sb[k] >= '0' && sb[k] <= '9') v = v * 10 + (sb[k] - '0');
+                                                    if (tok == 4) rdios = v; else rdsec = v; }
+                    }
+                    if (i > ls && tok >= 6) { ndev++; tot_rd_ios += rdios; tot_rd_sec += rdsec; }
+                    if (sb[i] == '\n') i++;
+                }
+            }
+            if (!(ndev >= 1 && tot_rd_ios > 0)) ok = 0;   /* boot enumeration read LBA0 of each device -> rd_ios>0 */
+            if (ok) { print("diskstats: "); printl(ndev); print(" block device(s), total rd_ios="); printl(tot_rd_ios);
+                      print(" rd_sectors="); printl(tot_rd_sec); print(" (real per-device I/O counters tallied in blockdev_read/write) -- OK\n"); }
+            else print("diskstatstest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -273,6 +273,28 @@ static long gen_stat(char *b, int max) {
     p = sapp(b, p, max, "\n");
     b[p] = 0; return p;
 }
+/* /proc/diskstats — per-block-device I/O counters (M1256), the file `iostat`
+ * parses. One line per registered block device in the Linux layout:
+ *   major minor name  rd_ios rd_merges rd_sectors rd_ticks  wr_ios wr_merges
+ *   wr_sectors wr_ticks  in_flight io_ticks time_in_queue
+ * We tally rd_ios/rd_sectors/wr_ios/wr_sectors in blockdev_read/write; the fields
+ * we don't track (merges, per-op ticks, in-flight, queue time) are honest zeros.
+ * There's no real major/minor here, so we emit `0 <registry-index>`. */
+static long gen_diskstats(char *b, int max) {
+    int p = 0, n = blockdev_count();
+    for (int i = 0; i < n && p < max - 128; i++) {
+        blockdev_t *d = blockdev_get(i);
+        if (!d) continue;
+        p = sapp(b, p, max, "   0 "); p = sdec(b, p, max, (uint64_t)i);   /* major minor */
+        p = sapp(b, p, max, " ");     p = sapp(b, p, max, d->name ? d->name : "blk");
+        p = sapp(b, p, max, " ");     p = sdec(b, p, max, d->rd_ios);     /* rd_ios */
+        p = sapp(b, p, max, " 0 ");   p = sdec(b, p, max, d->rd_sectors); /* rd_merges rd_sectors */
+        p = sapp(b, p, max, " 0 ");   p = sdec(b, p, max, d->wr_ios);     /* rd_ticks wr_ios */
+        p = sapp(b, p, max, " 0 ");   p = sdec(b, p, max, d->wr_sectors); /* wr_merges wr_sectors */
+        p = sapp(b, p, max, " 0 0 0 0\n");                                /* wr_ticks in_flight io_ticks time_in_queue */
+    }
+    b[p] = 0; return p;
+}
 static long gen_kmsg(char *b, int max) {        /* the kernel log ring buffer (dmesg) */
     return klog_copy(b, max);
 }
@@ -364,7 +386,7 @@ static const struct pf proc_files[] = {
     { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo },
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat }, { "kasan", gen_kasan },
     { "mqueue", gen_mqueue }, { "sysvipc", gen_sysvipc }, { "unix", gen_unix }, { "locks", gen_locks },
-    { "processes", gen_processes }, { "partitions", gen_partitions },
+    { "processes", gen_processes }, { "partitions", gen_partitions }, { "diskstats", gen_diskstats },
     { "filesystems", gen_filesystems }, { "mounts", gen_mounts },
     { "interrupts", gen_interrupts }, { "kmsg", gen_kmsg }, { "sched", gen_sched },
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },

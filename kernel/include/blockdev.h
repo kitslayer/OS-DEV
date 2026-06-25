@@ -38,6 +38,10 @@ typedef struct {
     int       (*write)(void *ctx, uint64_t lba, uint32_t count, const void *buf);  /* NULL = read-only */
     uint64_t    sectors;
     void       *ctx;
+    /* Cumulative I/O counters since boot, tallied in blockdev_read/blockdev_write,
+     * surfaced by /proc/diskstats (M1256). "ios" = read/write calls; "sectors" =
+     * 512-byte sectors transferred. */
+    uint64_t    rd_ios, rd_sectors, wr_ios, wr_sectors;
 } blockdev_t;
 
 /* Register every PRESENT storage device (ATA drives 0..3, the AHCI disk, virtio-
