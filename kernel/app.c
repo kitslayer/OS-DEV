@@ -73,6 +73,7 @@ struct app {
     struct { uint64_t start, len; int sealed, uffd, file_backed, locked, huge; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136); locked=mlock'd (M1149); huge=2 MiB-backed (M1155) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
+    int      mlock_future;               /* mlockall(MCL_FUTURE): new mmaps are born locked (M1283) */
     uint64_t minflt, majflt;             /* page-fault counters: minor (no I/O) / major (disk I/O), getrusage (M1150) */
     /* per-process current directory (M1144): synth_cwd state + the in-mount/overlay
      * subpath + the boot-FS (fat32) cwd cluster. The VFS keeps the live cwd in its
@@ -1595,7 +1596,7 @@ uint64_t app_mmap(uint64_t len) {
     a->vma[a->nvma].sealed = 0;
     a->vma[a->nvma].uffd  = 0;
     a->vma[a->nvma].file_backed = 0;
-    a->vma[a->nvma].locked = 0;
+    a->vma[a->nvma].locked = a->mlock_future;       /* MCL_FUTURE: born locked if mlockall(MCL_FUTURE) is in effect (M1283) */
     a->vma[a->nvma].huge = 0;
     a->nvma++;
     a->mmap_next = addr + len + PAGE_SIZE;          /* leave an unmapped guard gap */
@@ -1989,6 +1990,21 @@ static int app_mlock_set(uint64_t addr, uint64_t len, int lock) {
 }
 int app_mlock(uint64_t addr, uint64_t len)   { return app_mlock_set(addr, len, 1); }
 int app_munlock(uint64_t addr, uint64_t len) { return app_mlock_set(addr, len, 0); }
+/* mlockall/munlockall (M1283): MCL_CURRENT (1) pins every current VMA;
+ * MCL_FUTURE (2) makes subsequent anonymous mmaps born-locked (via mlock_future,
+ * honored in app_mmap). munlockall clears both. Returns 0/-1. */
+int app_mlockall(int flags) {
+    struct app *a = cur(); if (!a) return -1;
+    if (flags & 1) for (int i = 0; i < a->nvma; i++) a->vma[i].locked = 1;   /* MCL_CURRENT */
+    a->mlock_future = (flags & 2) ? 1 : 0;                                   /* MCL_FUTURE */
+    return 0;
+}
+int app_munlockall(void) {
+    struct app *a = cur(); if (!a) return -1;
+    for (int i = 0; i < a->nvma; i++) a->vma[i].locked = 0;
+    a->mlock_future = 0;
+    return 0;
+}
 
 /* mprotect (M1090): change the R/W/X protection of an already-mapped range in
  * the calling app (PROT_READ=1, PROT_WRITE=2, PROT_EXEC=4). Enables W^X and
@@ -4063,7 +4079,7 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     a->entry = entry; a->ustack = USTACK_BASE + USTACK_PAGES * PAGE_SIZE;
 
     /* reset per-program state (the new image starts clean); keep pid/parent/pledge */
-    a->heap_end = 0; a->nvma = 0; a->mmap_next = 0;
+    a->heap_end = 0; a->nvma = 0; a->mmap_next = 0; a->mlock_future = 0;   /* mlockall(MCL_FUTURE) does not survive exec (M1283) */
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
     a->sig_in = 0; a->pending_sigs = 0; a->sig_blocked = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;
     a->sigq_n = 0;                                                  /* drop any queued RT-signal payloads (M1271) */

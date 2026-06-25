@@ -322,7 +322,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_mremap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
-    case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge:
+    case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge: case SYS_mlockall: case SYS_munlockall:
     case SYS_shmget: case SYS_shmat: case SYS_shmdt:
         return PL_VM;
     case SYS_poweroff: case SYS_reboot:
@@ -1781,6 +1781,12 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_pidfd_getfd:                  /* (pidfd, targetfd, flags): duplicate another process's fd (M1281) */
         r->rax = (uint64_t)(int64_t)app_pidfd_getfd((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_mlockall:                     /* (flags): pin all current/future pages (M1283) */
+        r->rax = (uint64_t)(int64_t)app_mlockall((int)r->rdi);
+        break;
+    case SYS_munlockall:                   /* (): unpin all pages (M1283) */
+        r->rax = (uint64_t)(int64_t)app_munlockall();
         break;
     case SYS_raise:                        /* (signo): queue the signal; delivered to a handler at this
                                             * syscall's return (app_deliver_pending tail), or left pending

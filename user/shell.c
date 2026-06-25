@@ -3696,6 +3696,32 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("oom_score_adj: /proc/self/oom_score_adj 0 -> wrote 500 via /proc -> read back 500; oom_score rose to "); printl(score);
                       print(" (+128000 bias); restored -- /proc/<pid>/oom_score_adj rw OK\n"); }
             else { print("oomadjtest: VERIFY FAILED (adj0="); printl(adj0); print(" w="); printl(w); print(" adj1="); printl(adj1); print(" score="); printl(score); print(")\n"); g_status = 1; }
+        } else if (streq(line, "mlockalltest")) {   /* mlockall(MCL_CURRENT|MCL_FUTURE) + munlockall (M1283) */
+            unsigned long np = 8, len = np * 4096;
+            unsigned char *A = (unsigned char *)sys_mmap(len);             /* a CURRENT region */
+            unsigned char va[8], vb[8];
+            if (!A) { print("mlockalltest: mmap A failed\n"); g_status = 1; }
+            else {
+                for (unsigned long i = 0; i < len; i++) A[i] = 1;          /* fault A fully in */
+                sys_mlockall(MCL_CURRENT | MCL_FUTURE);                    /* pin A (current) + arm future */
+                unsigned char *B = (unsigned char *)sys_mmap(len);         /* a FUTURE region -> born locked */
+                if (!B) { print("mlockalltest: mmap B failed\n"); g_status = 1; }
+                else {
+                    for (unsigned long i = 0; i < len; i++) B[i] = 1;      /* fault B in */
+                    sys_madvise(A, len, 4 /*MADV_DONTNEED*/); sys_madvise(B, len, 4);   /* try to reclaim; locked VMAs are skipped */
+                    sys_mincore(A, len, va); sys_mincore(B, len, vb);
+                    long ra = 0, rb = 0; for (unsigned long i = 0; i < np; i++) { ra += va[i]; rb += vb[i]; }
+                    sys_munlockall();                                      /* release both + clear future */
+                    sys_madvise(A, len, 4); sys_madvise(B, len, 4);        /* now reclaimable */
+                    sys_mincore(A, len, va); sys_mincore(B, len, vb);
+                    long ra2 = 0, rb2 = 0; for (unsigned long i = 0; i < np; i++) { ra2 += va[i]; rb2 += vb[i]; }
+                    int ok = (ra == (long)np && rb == (long)np && ra2 == 0 && rb2 == 0);
+                    if (ok) print("mlockall: MCL_CURRENT pinned A + MCL_FUTURE pinned the later B (both survived reclaim); munlockall released both (both dropped) -- mlockall/munlockall OK\n");
+                    else { print("mlockalltest: VERIFY FAILED (lockedA="); printl(ra); print("/"); printl((long)np); print(" lockedB="); printl(rb); print(" unlockA="); printl(ra2); print(" unlockB="); printl(rb2); print(")\n"); g_status = 1; }
+                    sys_munmap(B, len);
+                }
+                sys_munmap(A, len);
+            }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

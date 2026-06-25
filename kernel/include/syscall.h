@@ -291,6 +291,10 @@
 #define SYS_sigaltstack  269   /* (ss_sp, ss_size) -> set the alternate signal stack (size 0 disables); 0/-1 (M1276) */
 #define SYS_clock_settime 270  /* (clockid, sec, nsec) -> set the wall clock (CLOCK_REALTIME only); 0/-1 (M1280) */
 #define SYS_pidfd_getfd  271   /* (pidfd, targetfd, flags) -> duplicate another process's fd into ours; new fd/-1 (M1281) */
+#define SYS_mlockall     272   /* (flags) -> pin all current (MCL_CURRENT=1) + future (MCL_FUTURE=2) pages; 0/-1 (M1283) */
+#define SYS_munlockall   273   /* () -> unpin all pages + clear MCL_FUTURE; 0/-1 (M1283) */
+#define MCL_CURRENT 1
+#define MCL_FUTURE  2
 #define SA_ONSTACK 0x08000000  /* sigaction flag: run this handler on the sigaltstack() stack (M1276) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */

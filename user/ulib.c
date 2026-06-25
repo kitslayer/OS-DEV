@@ -198,6 +198,8 @@ long sys_madvise(void *addr, unsigned long len, int advice) { return do_syscall(
 long sys_mincore(void *addr, unsigned long len, unsigned char *vec) { return do_syscall(SYS_mincore, (long)addr, (long)len, (long)vec); }
 long sys_mlock(void *addr, unsigned long len) { return do_syscall(SYS_mlock, (long)addr, (long)len, 0); }
 long sys_munlock(void *addr, unsigned long len) { return do_syscall(SYS_munlock, (long)addr, (long)len, 0); }
+long sys_mlockall(int flags) { return do_syscall(SYS_mlockall, flags, 0, 0); }       /* pin all current/future pages; 0/-1 (M1283) */
+long sys_munlockall(void) { return do_syscall(SYS_munlockall, 0, 0, 0); }            /* unpin all pages; 0/-1 (M1283) */
 long sys_getrusage(int who, struct rusage *ru) { return do_syscall(SYS_getrusage, who, (long)ru, 0); }
 long sys_fiemap(const char *path, struct fiemap_extent *out, int max) { return do_syscall(SYS_fiemap, (long)path, (long)out, max); }
 long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned long len) { return do_syscall4(SYS_fallocate, (long)path, mode, (long)offset, (long)len); }
