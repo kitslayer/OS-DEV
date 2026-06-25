@@ -90,6 +90,11 @@ struct app {
     volatile uint32_t sig_blocked;       /* sigprocmask: blocked-signal bitset; a blocked signal stays pending until unblocked (M1208) */
     int      sigfd_armed;                /* 1 if this process routes some signals to signalfd (M1126) */
     uint32_t sigfd_mask;                 /* which signos are delivered via /proc/self/sigfd instead of a handler */
+#define APP_SIGQ_MAX 32
+    struct { int signo, code; uint64_t value; } sigq[APP_SIGQ_MAX];  /* RT/sigqueue payload FIFO: real-time signals QUEUE (not coalesce) and carry a sigval (M1271) */
+    int      sigq_n;                     /* # valid queued payloads, [0..sigq_n) in arrival (FIFO) order */
+    uint64_t sig_q_value;                /* scratch: si_value for the signal currently being delivered */
+    int      sig_q_code;                 /* scratch: si_code  for the signal currently being delivered */
     uint64_t alarm_interval, alarm_next; /* SIGALRM (M1102): periodic timer; 0 interval = disarmed */
     int      traced;                     /* 1 = log each syscall to dmesg (strace), toggled via /proc/<pid>/ctl */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
@@ -2262,14 +2267,15 @@ int app_signal_deliver(struct registers *r, int signo) {
          * mcontext, which sigreturn restores. */
         uint64_t sp = (r->rsp - 128) & ~15ull;            /* skip red zone, align */
         sp -= sizeof(struct registers); sp &= ~15ull; uint64_t mctx_addr = sp;
-        sp -= 16; uint64_t si_addr = sp;                  /* {si_signo, si_code, si_addr} */
+        sp -= 32; uint64_t si_addr = sp;                  /* {si_signo, si_code, si_addr, si_value} (24B, 16-aligned) */
         uint64_t ret = (sp & ~15ull) - 8;                 /* ret-addr slot (entry rsp%16==8) */
         if (!vmm_user_ok(ret, 8) || !vmm_user_ok(mctx_addr, sizeof(struct registers))
-            || !vmm_user_ok(si_addr, 16)) return 0;
+            || !vmm_user_ok(si_addr, 32)) return 0;
         *(struct registers *)mctx_addr = *r;              /* the interrupted context = the ucontext */
-        ((int *)si_addr)[0] = signo;                      /* si_signo */
-        ((int *)si_addr)[1] = 0;                          /* si_code */
-        ((uint64_t *)si_addr)[1] = 0;                     /* si_addr (0 for a raised signal) */
+        ((int *)si_addr)[0] = signo;                      /* si_signo @0  */
+        ((int *)si_addr)[1] = a->sig_q_code;              /* si_code  @4  (SI_QUEUE=-1 from sigqueue, else SI_USER=0) */
+        ((uint64_t *)si_addr)[1] = 0;                     /* si_addr  @8  (0 for a raised/queued signal) */
+        ((uint64_t *)si_addr)[2] = a->sig_q_value;        /* si_value @16 (the sigqueue sigval payload, M1271) */
         *(volatile uint64_t *)ret = a->sig_restorer;
         a->sig_saved = *r;                                /* safe baseline: cs/ss/rflags for sigreturn */
         a->sig_uctx = mctx_addr;
@@ -2353,6 +2359,50 @@ uint32_t app_sigpending(void) {
     return a ? a->pending_sigs : 0;
 }
 
+/* --- RT signals / sigqueue(3) (M1271) -----------------------------------
+ * Real-time signals differ from standard signals in two ways: they QUEUE
+ * (multiple pending instances are kept and delivered one-by-one, in FIFO
+ * order, instead of coalescing into a single bit) and they carry a sigval
+ * PAYLOAD delivered via siginfo.si_value (with SA_SIGINFO). We model both with
+ * a per-process payload FIFO (sigq[]): sigqueue() appends {signo,value}, the
+ * pending bit just says "≥1 queued for this signo", and app_deliver_pending
+ * drains one record per delivery, clearing the bit only when the last record
+ * for that signo is gone. The standard coalescing path (app_request_signal)
+ * is unchanged — it sets the bit with no payload record (delivered SI_USER). */
+#define SI_USER   0
+#define SI_QUEUE  (-1)
+/* index of the OLDEST queued payload for `signo`, or -1 */
+static int sigq_peek(struct app *a, int signo) {
+    for (int i = 0; i < a->sigq_n; i++) if (a->sigq[i].signo == signo) return i;
+    return -1;
+}
+/* remove entry `i`, shifting the tail down (keeps FIFO order, O(n), n<=32) */
+static void sigq_drop(struct app *a, int i) {
+    for (int j = i + 1; j < a->sigq_n; j++) a->sigq[j - 1] = a->sigq[j];
+    a->sigq_n--;
+}
+/* POSIX sigqueue(pid, signo, value): queue a signal carrying a payload. pid 0
+ * = self. Returns 0, or -1 (no such target / bad signo / no handler / queue
+ * full = EAGAIN). Job-control signals keep their default action. */
+int app_sigqueue(int pid, int signo, uint64_t value) {
+    struct app *t = pid ? app_by_pid(pid) : cur();
+    if (!t || signo <= 0 || signo >= APP_NSIG) return -1;
+    if (signo == SIGCONT) { task_cont((task_t *)t->task); return 0; }
+    if (signo == SIGSTOP || signo == SIGTSTP) { task_stop((task_t *)t->task); return 0; }
+    int sigfd = t->sigfd_armed && (t->sigfd_mask & (1u << signo));
+    if (!t->sig_handler[signo] && !sigfd) return -1;     /* not opted in -> ignored, like app_request_signal */
+    if (t->sig_handler[signo]) {                          /* payload only matters for a handler */
+        if (t->sigq_n >= APP_SIGQ_MAX) return -1;         /* queue full -> EAGAIN */
+        t->sigq[t->sigq_n].signo = signo;
+        t->sigq[t->sigq_n].code  = SI_QUEUE;
+        t->sigq[t->sigq_n].value = value;
+        t->sigq_n++;
+    }
+    t->pending_sigs |= (1u << signo);                     /* mark pending; the queue holds the multiplicity */
+    task_wake(t->task);
+    return 0;
+}
+
 /* --- Job control: process groups, sessions, foreground TTY group (M1176) --- */
 int app_setpgid(int pid, int pgid) {
     struct app *me = cur(); if (!me) return -1;
@@ -2431,7 +2481,14 @@ int app_deliver_pending(struct registers *r) {
     for (int sig = 1; sig < APP_NSIG; sig++) {
         if (!(a->pending_sigs & (1u << sig)) || !a->sig_handler[sig]) continue;
         if (a->sig_blocked & (1u << sig)) continue;   /* sigprocmask: blocked -> stays pending (M1208) */
-        if (app_signal_deliver(r, sig)) { a->pending_sigs &= ~(1u << sig); return 1; }
+        int qi = sigq_peek(a, sig);                   /* RT/sigqueue payload (M1271), or -1 = coalesced/no payload */
+        a->sig_q_code  = (qi >= 0) ? a->sigq[qi].code  : SI_USER;
+        a->sig_q_value = (qi >= 0) ? a->sigq[qi].value : 0;
+        if (app_signal_deliver(r, sig)) {
+            if (qi >= 0) sigq_drop(a, qi);            /* consumed one queued instance */
+            if (sigq_peek(a, sig) < 0) a->pending_sigs &= ~(1u << sig);  /* clear the bit only when none remain -> the next queued instance delivers on the next return to ring 3 (RT queuing) */
+            return 1;
+        }
         return 0;                            /* couldn't deliver yet (already in a handler) -> stay pending */
     }
     return 0;                                /* only handler-less (signalfd) signals pending */

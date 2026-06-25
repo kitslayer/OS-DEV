@@ -90,6 +90,16 @@ static void si_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
     g_si_rip = uc ? uc->rip : 0;     /* observe the interrupted PC from the ucontext */
 }
 
+/* RT signals / sigqueue (M1271): record each delivered si_value + si_code in
+ * arrival order, so the test can prove queued payloads arrive FIFO and that
+ * multiple instances of one signal do NOT coalesce (unlike standard signals). */
+static volatile int g_rt_n, g_rt_code;
+static volatile unsigned long g_rt_vals[8];
+static void rt_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
+    (void)signo; (void)uc;
+    if (si && g_rt_n < 8) { g_rt_vals[g_rt_n] = si->si_value; g_rt_code = si->si_code; g_rt_n++; }
+}
+
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
  * (a `for ...; do ...; done` loop, else a ';'-split list of && / || commands). */
@@ -3477,6 +3487,18 @@ static int run_command(char *line, char *cwd) {
                       { unsigned long v=g_si_rip; char h[17]; int n=0; if(!v)h[n++]='0'; while(v){int d=v&0xf; h[n++]=d<10?('0'+d):('a'+d-10); v>>=4;} while(n){char c[2]={h[--n],0}; print(c);} }
                       print(" from the ucontext -- SA_SIGINFO + siginfo/ucontext OK\n"); }
             else { print("siginfotest: VERIFY FAILED (caught="); printl(g_si_caught); print(" signo="); printl(g_si_signo); print(" rip="); printl((long)g_si_rip); print(")\n"); g_status = 1; }
+        } else if (streq(line, "rtsigtest")) {   /* RT signals: sigqueue queues 3 payloads, delivered FIFO, not coalesced (M1271) */
+            g_rt_n = 0; g_rt_code = 0;
+            sys_sigaction(SIGRTMIN, rt_handler, SA_SIGINFO);   /* 3-arg handler so si_value is delivered */
+            sys_sigqueue(0, SIGRTMIN, 0xAA11);                 /* pid 0 = self; queue 3 distinct payloads */
+            sys_sigqueue(0, SIGRTMIN, 0xBB22);
+            sys_sigqueue(0, SIGRTMIN, 0xCC33);
+            for (int i = 0; i < 200 && g_rt_n < 3; i++) sys_sched_yield();   /* let all 3 drain (one per return to ring 3) */
+            int ok = (g_rt_n == 3 && g_rt_code == SI_QUEUE &&
+                      g_rt_vals[0] == 0xAA11 && g_rt_vals[1] == 0xBB22 && g_rt_vals[2] == 0xCC33);
+            if (ok) print("rtsig: sigqueue queued 3 SIGRTMIN payloads -> handler got all 3 FIFO (si_value 0xAA11,0xBB22,0xCC33, si_code SI_QUEUE), NOT coalesced -- RT signals + sigqueue OK\n");
+            else { print("rtsigtest: VERIFY FAILED (n="); printl(g_rt_n); print(" code="); printl(g_rt_code);
+                   print(" vals="); for (int i=0;i<g_rt_n && i<3;i++){ printl((long)g_rt_vals[i]); print(" "); } print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

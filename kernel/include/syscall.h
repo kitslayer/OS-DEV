@@ -280,8 +280,12 @@
 #define SYS_recvfrom     258   /* (fd, buf, max, from{u8 ip[4];u16 port}|0) -> bytes/-1, 2s timeout (M1267) */
 #define SYS_connect      259   /* (fd, addr{u8 ip[4];u16 port}) -> active-open a TCP socket; 0/-1 (M1268) */
 #define SYS_sigaction    260   /* (signo, handler, restorer, flags) -> install a handler w/ sa_flags (M1270) */
+#define SYS_sigqueue     261   /* (pid, signo, value) -> queue an RT signal carrying a sigval payload; 0/-1 (M1271) */
 #define SIGUSR1  10            /* user signal 1 */
+#define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */
 #define SA_SIGINFO 4           /* sigaction flag: 3-arg handler h(signo, siginfo*, ucontext*) (M1270) */
+#define SI_QUEUE  (-1)         /* siginfo.si_code: signal sent by sigqueue (carries si_value) (M1271) */
+#define SI_USER   0            /* siginfo.si_code: signal sent by kill/raise (no payload) (M1271) */
 
 /* clock ids + clock_nanosleep flags (M1257). */
 #define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */

@@ -267,7 +267,7 @@ long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal h
  * mirrors the kernel's saved register file; editing its rip/GP regs/rsp and
  * returning makes sigreturn resume at the edited state (JIT-trap / GC-barrier
  * mechanism). cs/ss/rflags are forced safe by the kernel. */
-struct ksiginfo { int si_signo; int si_code; unsigned long si_addr; };
+struct ksiginfo { int si_signo; int si_code; unsigned long si_addr; unsigned long si_value; };  /* si_value: the sigqueue payload (M1271) */
 struct kmcontext {
     unsigned long r15,r14,r13,r12,r11,r10,r9,r8;
     unsigned long rbp,rdi,rsi,rdx,rcx,rbx,rax;
@@ -276,6 +276,7 @@ struct kmcontext {
 };
 long  sys_sigaction(int signo, void (*h)(int, struct ksiginfo *, struct kmcontext *), int flags);  /* M1270 */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */
+long  sys_sigqueue(int pid, int signo, unsigned long value);  /* queue an RT signal carrying a sigval payload; pid 0 = self (M1271) */
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
