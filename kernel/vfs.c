@@ -582,6 +582,16 @@ long vfs_symlink(const char *linkpath, const char *target) {
     return -1;
 }
 
+/* readlink (M1233): read a symlink's TARGET path WITHOUT following it (so e.g.
+ * `ls -l` can show "a -> b"). tmpfs symlinks (the ones SYS_symlink creates);
+ * ext2 on-disk symlinks are a follow-on. Returns bytes (un-terminated) or -1. */
+long vfs_readlink(const char *path, void *buf, unsigned long max) {
+    char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);
+    const char *base;
+    if (tmp_path(p, &base)) return tmpfs_readlink(base, buf, max);
+    return -1;
+}
+
 /* Hard link (M1207): a second name (newpath) for oldpath's inode. POSIX hard
  * links can't cross filesystems, so both must resolve to the SAME ext2 /diskN
  * mount (boot FAT32 / tmpfs / synth don't support hard links -> -1). */

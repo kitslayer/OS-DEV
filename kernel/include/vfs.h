@@ -50,6 +50,7 @@ long vfs_write(const char *name, const void *buf, unsigned long len);
 long vfs_remove(const char *name);
 long vfs_mkdir(const char *path);                        /* make a directory */
 long vfs_symlink(const char *linkpath, const char *target);  /* symlink (under /tmp); 0/-1 */
+long vfs_readlink(const char *path, void *buf, unsigned long max);  /* read a symlink's target, not followed; bytes/-1 (M1233) */
 long vfs_link(const char *oldpath, const char *newpath);     /* hard link (same ext2 mount); 0/-1 (M1207) */
 long vfs_rename_path(const char *oldpath, const char *newpath);  /* rename/move within one ext2 mount; 0/-1 (M1213) */
 long vfs_rename2(const char *oldpath, const char *newpath, int flags); /* renameat2 NOREPLACE/EXCHANGE (M1232) */

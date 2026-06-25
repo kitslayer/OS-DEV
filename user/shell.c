@@ -2886,6 +2886,22 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "pidstat: /proc/self/stat -- field1==pid, (comm), state R/S/Z/T, >=24 fields -- OK\n"
                      : "pidstattest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "readlinktest")) {   /* readlink(2) -- read a symlink's target, not followed (M1233) */
+            int ok = 1;
+            const char *tgt = "/tmp/RL_TARGET.TXT";
+            sys_delete("/tmp/RL.LNK");
+            if (sys_symlink("/tmp/RL.LNK", tgt) != 0) ok = 0;       /* create RL.LNK -> tgt */
+            char b[64];
+            long n = sys_readlink("/tmp/RL.LNK", b, sizeof b);
+            int tl = 0; while (tgt[tl]) tl++;
+            if (n != tl) ok = 0;                                    /* readlink is NOT NUL-terminated -> exact byte count */
+            else for (int k = 0; k < tl; k++) if (b[k] != tgt[k]) { ok = 0; break; }
+            char rb2[16];
+            if (sys_readlink("/tmp", rb2, sizeof rb2) != -1) ok = 0;   /* a non-symlink -> -1 */
+            sys_delete("/tmp/RL.LNK");
+            print(ok ? "readlink: RL.LNK -> target read back exact (un-terminated), non-symlink -> -1 -- OK\n"
+                     : "readlinktest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

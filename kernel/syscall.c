@@ -274,6 +274,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_open:
+    case SYS_readlink:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
     case SYS_utimens: case SYS_futimens: case SYS_renameat2:
@@ -1609,6 +1610,11 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         if (!app_unveil_ok(self, (const char *)r->rdi, 1) || !app_unveil_ok(self, (const char *)r->rsi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_rename2((const char *)r->rdi, (const char *)r->rsi, (int)r->rdx);
+        break;
+    case SYS_readlink:                     /* (path, buf, size) -> a symlink's target, not followed (M1233) */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 0)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_readlink((const char *)r->rdi, (void *)r->rsi, (unsigned long)r->rdx);
         break;
     case SYS_prlimit:                      /* (pid, resource, newval, do_set) -> old/current value (M1214) */
         r->rax = (uint64_t)app_prlimit((int)r->rdi, (int)r->rsi, (uint64_t)r->rdx, (int)r->r10);

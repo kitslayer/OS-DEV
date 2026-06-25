@@ -76,6 +76,16 @@ long tmpfs_symlink(const char *name, const char *target) {
     return 0;
 }
 
+/* readlink (M1233): copy a symlink's TARGET path into buf (NOT followed, NOT
+ * NUL-terminated — POSIX). Returns the byte count, or -1 if absent / not a link. */
+long tmpfs_readlink(const char *name, void *buf, unsigned long max) {
+    int i = tfind(name);
+    if (i < 0 || !tf[i].used || !tf[i].link) return -1;
+    unsigned long n = tf[i].len; if (n > max) n = max;
+    for (unsigned long k = 0; k < n; k++) ((char *)buf)[k] = tf[i].buf[k];
+    return (long)n;
+}
+
 /* Fill metadata for `name` (statx, M1173): islink, size, mtime. Returns 0/-1. */
 int tmpfs_stat(const char *name, int *islink, unsigned long *size, unsigned long *mtime) {
     int i = tfind(name);
