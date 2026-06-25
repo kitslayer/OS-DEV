@@ -92,7 +92,12 @@ void isr_dispatch(struct registers *r) {
         /* #DB single-step trap from ring 3 (M1123): record the instruction and
          * either keep stepping or stop. Never kills (a #DB just means we stepped
          * one instruction); app_singlestep_trap clears TF if it's not tracing. */
-        if (r->int_no == 1 && (r->cs & 3) == 3) { app_singlestep_trap(r); return; }
+        if (r->int_no == 1) {
+            /* gdb single-step lands here as a RING-0 #DB (the kernel was stepped);
+             * clear TF and re-enter the stub so gdb sees the new state (M1205). */
+            if ((r->cs & 3) == 0 && gdbstub_armed()) { r->rflags &= ~(1ull << 8); gdbstub_serve(r); return; }
+            if ((r->cs & 3) == 3) { app_singlestep_trap(r); return; }
+        }
 
         /* A fault from ring 3 (CS RPL == 3) is a userspace app bug, not a kernel
          * bug: report it and terminate just that task, leaving the kernel and the

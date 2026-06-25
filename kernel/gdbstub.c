@@ -145,6 +145,46 @@ static int kreadb(uint64_t a, uint8_t *out) {
     *out = *(volatile uint8_t *)(uintptr_t)a;
     return 1;
 }
+/* same bounds for writes — the kernel image is mapped RWX, so we can plant int3 */
+static int kwriteb(uint64_t a, uint8_t v) {
+    if (a < 0x1000) return 0;
+    if (a >= 0x100000000ull && a < 0xFFFF800000000000ull) return 0;
+    *(volatile uint8_t *)(uintptr_t)a = v;
+    return 1;
+}
+
+/* Software breakpoints (M1205): Z0/z0 plant/lift an int3 (0xCC), stashing the
+ * original byte so it can be restored. The breakpoint table. */
+#define GDB_NBP 32
+static struct { uint64_t addr; uint8_t orig; int used; } gbp[GDB_NBP];
+
+/* parse the address out of "Z0,<addr>,<kind>" / "z0,<addr>,<kind>" */
+static uint64_t parse_z_addr(const char *c) {
+    const char *s = c + 2;
+    if (*s == ',') s++;
+    uint64_t a = 0; int h;
+    while (*s && *s != ',') { if ((h = unhex(*s)) < 0) break; a = (a << 4) | (unsigned)h; s++; }
+    return a;
+}
+static int gdb_bp_set(uint64_t a) {
+    int slot = -1;
+    for (int i = 0; i < GDB_NBP; i++) { if (gbp[i].used && gbp[i].addr == a) return 1; if (slot < 0 && !gbp[i].used) slot = i; }
+    uint8_t orig;
+    if (slot < 0 || !kreadb(a, &orig) || !kwriteb(a, 0xCC)) return 0;
+    gbp[slot].addr = a; gbp[slot].orig = orig; gbp[slot].used = 1;
+    return 1;
+}
+static void gdb_bp_clear(uint64_t a) {
+    for (int i = 0; i < GDB_NBP; i++)
+        if (gbp[i].used && gbp[i].addr == a) { kwriteb(a, gbp[i].orig); gbp[i].used = 0; return; }
+}
+/* On a #BP from one of OUR planted breakpoints, rip points just past the int3 —
+ * back it up so gdb sees the breakpoint's address. (The deliberate kmain int3 is
+ * not in the table, so it's left alone.) */
+static void gdb_fixup_bp_rip(struct registers *r) {
+    for (int i = 0; i < GDB_NBP; i++)
+        if (gbp[i].used && gbp[i].addr == r->rip - 1) { r->rip -= 1; return; }
+}
 
 static void send_pkt(const char *payload) {
     com2_putc('$');
@@ -154,10 +194,16 @@ static void send_pkt(const char *payload) {
     (void)com2_getc();       /* swallow the '+'/'-' ack */
 }
 
-/* Serve gdb from the trap frame `r` until it continues/detaches. */
+static int gdb_running;   /* 1 if we resumed via c/s — gdb then awaits a stop reply on re-entry */
+
+/* Serve gdb from the trap frame `r` until it continues/detaches/steps. Re-entered
+ * on every #BP/#DB (planted breakpoint or single-step). */
 void gdbstub_serve(struct registers *r) {
     static char pkt[2200], resp[2200];
-    com2_init();
+    static int inited;
+    if (!inited) { com2_init(); inited = 1; }
+    gdb_fixup_bp_rip(r);                                 /* report a planted-bp hit at its address */
+    if (gdb_running) { gdb_running = 0; send_pkt("S05"); }  /* we stopped (bp/step) -> tell the waiting gdb */
     for (;;) {
         char c;
         do { c = com2_getc(); } while (c != '$');       /* resync to a packet start */
@@ -166,9 +212,21 @@ void gdbstub_serve(struct registers *r) {
         pkt[n] = 0;
         com2_getc(); com2_getc();                        /* the 2 checksum hex chars */
         com2_putc('+');                                  /* ack the packet */
-        int resume = gdb_handle(pkt, resp, (int)sizeof resp, r, kreadb);
-        if (resp[0] || !resume) send_pkt(resp);          /* reply (empty if unsupported) */
-        if (resume) break;
+
+        /* stateful commands the kernel acts on directly; the read-only ?/g/m go
+         * through the pure gdb_handle codec. */
+        if ((pkt[0] == 'Z' || pkt[0] == 'z') && pkt[1] == '0') {      /* set/clear sw breakpoint */
+            uint64_t a = parse_z_addr(pkt);
+            if (pkt[0] == 'Z') send_pkt(gdb_bp_set(a) ? "OK" : "E01");
+            else { gdb_bp_clear(a); send_pkt("OK"); }
+            continue;
+        }
+        if (pkt[0] == 's') { r->rflags |= (1ull << 8); gdb_running = 1; break; }  /* single-step: TF + resume */
+        if (pkt[0] == 'c') { gdb_running = 1; break; }                            /* continue */
+        if (pkt[0] == 'D') { send_pkt("OK"); break; }                            /* detach (no re-entry) */
+        if (pkt[0] == 'k') { break; }                                            /* kill */
+        gdb_handle(pkt, resp, (int)sizeof resp, r, kreadb);  /* ?/g/m, or "" for unsupported */
+        send_pkt(resp);
     }
 }
 #endif

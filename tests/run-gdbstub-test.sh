@@ -34,16 +34,26 @@ if ! grep -q 'waiting for gdb' "$LOG" 2>/dev/null; then
     exit 1
 fi
 
+# Connect (stops at the kmain int3 -> read+symbolize rip = M1204), then set a
+# software breakpoint at a function reached later in boot, continue, and confirm
+# the breakpoint is hit (Z0 + #BP re-entry + single-step = M1205).
 timeout 25 gdb -nx -batch "$ELF" \
     -ex 'set architecture i386:x86-64' \
     -ex "target remote :$PORT" \
     -ex 'info registers rip' \
+    -ex 'break vdso_init' \
+    -ex 'continue' \
+    -ex 'info registers rip' \
+    -ex 'stepi' \
     -ex 'detach' > "$OUT" 2>&1
 
-if grep -q 'kmain' "$OUT" && grep -qE 'rip[[:space:]]+0x[0-9a-f]' "$OUT"; then
-    echo "gdbstubtest: PASS -- host gdb attached over the serial stub, read registers, symbolized rip -> kmain"
-    exit 0
+if ! { grep -q 'kmain' "$OUT" && grep -qE 'rip[[:space:]]+0x[0-9a-f]' "$OUT"; }; then
+    echo "gdbstubtest: FAIL -- gdb did not read/symbolize registers over the stub"
+    sed -n '1,20p' "$OUT"; exit 1
 fi
-echo "gdbstubtest: FAIL -- gdb did not read/symbolize registers over the stub"
-sed -n '1,20p' "$OUT"
-exit 1
+if ! grep -q 'vdso_init' "$OUT"; then
+    echo "gdbstubtest: FAIL -- gdb breakpoint at vdso_init was not hit (Z0/continue)"
+    sed -n '1,20p' "$OUT"; exit 1
+fi
+echo "gdbstubtest: PASS -- gdb attached, read+symbolized registers (->kmain), set a breakpoint, hit it (->vdso_init), stepped"
+exit 0
