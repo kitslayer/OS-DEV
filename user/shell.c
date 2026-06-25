@@ -100,6 +100,15 @@ static void rt_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
     if (si && g_rt_n < 8) { g_rt_vals[g_rt_n] = si->si_value; g_rt_code = si->si_code; g_rt_n++; }
 }
 
+/* POSIX timer_create (M1272): count fires + capture the delivered payload + si_code. */
+static volatile int g_tmr_n, g_tmr_code;
+static volatile unsigned long g_tmr_val;
+static void tmr_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
+    (void)signo; (void)uc;
+    g_tmr_n++;
+    if (si) { g_tmr_val = si->si_value; g_tmr_code = si->si_code; }
+}
+
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
  * (a `for ...; do ...; done` loop, else a ';'-split list of && / || commands). */
@@ -3499,6 +3508,25 @@ static int run_command(char *line, char *cwd) {
             if (ok) print("rtsig: sigqueue queued 3 SIGRTMIN payloads -> handler got all 3 FIFO (si_value 0xAA11,0xBB22,0xCC33, si_code SI_QUEUE), NOT coalesced -- RT signals + sigqueue OK\n");
             else { print("rtsigtest: VERIFY FAILED (n="); printl(g_rt_n); print(" code="); printl(g_rt_code);
                    print(" vals="); for (int i=0;i<g_rt_n && i<3;i++){ printl((long)g_rt_vals[i]); print(" "); } print(")\n"); g_status = 1; }
+        } else if (streq(line, "timertest")) {   /* POSIX timer_create + SIGEV_SIGNAL fires through the sigqueue FIFO (M1272) */
+            g_tmr_n = 0; g_tmr_code = 0; g_tmr_val = 0;
+            sys_sigaction(SIGRTMIN, tmr_handler, SA_SIGINFO);          /* 3-arg handler so si_value arrives */
+            long id = sys_timer_create(CLOCK_MONOTONIC, SIGRTMIN, 0x7E57);   /* payload 0x7E57 */
+            int armed = (id >= 0) && (sys_timer_settime((int)id, 0, 40, 40) == 0);   /* fire at 40ms, then every 40ms */
+            unsigned long t0 = sys_uptime_ms();                        /* bound the wait by WALL time (yields alone don't advance it) */
+            while (sys_uptime_ms() - t0 < 250 && g_tmr_n < 5) sys_sched_yield();
+            long remaining = sys_timer_gettime((int)id);               /* sane: within one interval */
+            sys_timer_delete((int)id);
+            for (int i = 0; i < 60; i++) sys_sched_yield();            /* drain any already-queued fires */
+            int n1 = g_tmr_n;
+            for (int i = 0; i < 120 && (sys_uptime_ms() - t0) < 500; i++) sys_sched_yield();   /* confirm NO new fires post-delete */
+            int ok = (armed && n1 >= 3 && g_tmr_n == n1 && g_tmr_code == SI_TIMER &&
+                      g_tmr_val == 0x7E57 && remaining >= 0 && remaining <= 60);
+            if (ok) { print("timer: timer_create+settime(40ms periodic) fired "); printl(n1);
+                      print("x via the sigqueue FIFO (si_value=0x7E57, si_code SI_TIMER), gettime remaining="); printl(remaining);
+                      print("ms, stopped after timer_delete -- POSIX timer_create + SIGEV_SIGNAL OK\n"); }
+            else { print("timertest: VERIFY FAILED (armed="); printl(armed); print(" n="); printl(n1); print(" after="); printl(g_tmr_n);
+                   print(" code="); printl(g_tmr_code); print(" val="); printl((long)g_tmr_val); print(" rem="); printl(remaining); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

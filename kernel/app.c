@@ -96,6 +96,8 @@ struct app {
     uint64_t sig_q_value;                /* scratch: si_value for the signal currently being delivered */
     int      sig_q_code;                 /* scratch: si_code  for the signal currently being delivered */
     uint64_t alarm_interval, alarm_next; /* SIGALRM (M1102): periodic timer; 0 interval = disarmed */
+#define APP_NPTIMER 8
+    struct { int used; int signo; uint64_t value; uint64_t next_ms, interval_ms; } ptimer[APP_NPTIMER];  /* POSIX timer_create() per-process interval timers: fire signo (carrying value) through the sigqueue FIFO when due (M1272) */
     int      traced;                     /* 1 = log each syscall to dmesg (strace), toggled via /proc/<pid>/ctl */
     uint32_t *gfx;                       /* graphics-mode pixel canvas (kernel heap), or NULL */
     int       gfx_w, gfx_h;              /* canvas dimensions (valid when gfx != NULL) */
@@ -2371,6 +2373,7 @@ uint32_t app_sigpending(void) {
  * is unchanged — it sets the bit with no payload record (delivered SI_USER). */
 #define SI_USER   0
 #define SI_QUEUE  (-1)
+#define SI_TIMER  (-2)
 /* index of the OLDEST queued payload for `signo`, or -1 */
 static int sigq_peek(struct app *a, int signo) {
     for (int i = 0; i < a->sigq_n; i++) if (a->sigq[i].signo == signo) return i;
@@ -2381,11 +2384,11 @@ static void sigq_drop(struct app *a, int i) {
     for (int j = i + 1; j < a->sigq_n; j++) a->sigq[j - 1] = a->sigq[j];
     a->sigq_n--;
 }
-/* POSIX sigqueue(pid, signo, value): queue a signal carrying a payload. pid 0
- * = self. Returns 0, or -1 (no such target / bad signo / no handler / queue
- * full = EAGAIN). Job-control signals keep their default action. */
-int app_sigqueue(int pid, int signo, uint64_t value) {
-    struct app *t = pid ? app_by_pid(pid) : cur();
+/* Enqueue a payload-carrying signal onto a SPECIFIC app — shared by sigqueue
+ * (code SI_QUEUE) and the POSIX timer tick (code SI_TIMER). Returns 0, or -1
+ * (bad target/signo / not opted in / queue full). Job-control signals keep
+ * their default action. */
+static int app_sigqueue_to(struct app *t, int signo, uint64_t value, int code) {
     if (!t || signo <= 0 || signo >= APP_NSIG) return -1;
     if (signo == SIGCONT) { task_cont((task_t *)t->task); return 0; }
     if (signo == SIGSTOP || signo == SIGTSTP) { task_stop((task_t *)t->task); return 0; }
@@ -2394,13 +2397,79 @@ int app_sigqueue(int pid, int signo, uint64_t value) {
     if (t->sig_handler[signo]) {                          /* payload only matters for a handler */
         if (t->sigq_n >= APP_SIGQ_MAX) return -1;         /* queue full -> EAGAIN */
         t->sigq[t->sigq_n].signo = signo;
-        t->sigq[t->sigq_n].code  = SI_QUEUE;
+        t->sigq[t->sigq_n].code  = code;
         t->sigq[t->sigq_n].value = value;
         t->sigq_n++;
     }
     t->pending_sigs |= (1u << signo);                     /* mark pending; the queue holds the multiplicity */
     task_wake(t->task);
     return 0;
+}
+/* POSIX sigqueue(pid, signo, value): queue a signal carrying a payload. pid 0
+ * = self. Returns 0/-1. */
+int app_sigqueue(int pid, int signo, uint64_t value) {
+    return app_sigqueue_to(pid ? app_by_pid(pid) : cur(), signo, value, SI_QUEUE);
+}
+
+/* --- POSIX per-process interval timers: timer_create(2) (M1272) ----------
+ * Real timer objects (vs the single one-shot alarm/SIGALRM, M1102): each app
+ * holds up to APP_NPTIMER timers, each firing a signal (carrying a sigval) via
+ * the sigqueue FIFO when its deadline passes. app_timer_tick() runs on every
+ * timer IRQ and scans ALL apps (not just cur(), unlike app_alarm_tick) so a
+ * timer fires even while its owner is blocked — the firing wakes it. */
+long app_timer_create(int signo, uint64_t value) {
+    struct app *a = cur();
+    if (!a || signo <= 0 || signo >= APP_NSIG) return -1;
+    for (int i = 0; i < APP_NPTIMER; i++) {
+        if (!a->ptimer[i].used) {
+            a->ptimer[i].used = 1; a->ptimer[i].signo = signo; a->ptimer[i].value = value;
+            a->ptimer[i].next_ms = 0; a->ptimer[i].interval_ms = 0;   /* created disarmed */
+            return i;                                                 /* the timer id */
+        }
+    }
+    return -1;                                                        /* out of timer slots */
+}
+/* arm/disarm timer `id`: value_ms 0 disarms; else fire after value_ms, then
+ * every interval_ms (0 = one-shot). abs=1 => value_ms is an absolute
+ * CLOCK_MONOTONIC-ms deadline (TIMER_ABSTIME). Returns 0/-1. */
+long app_timer_settime(int id, int abs, uint64_t value_ms, uint64_t interval_ms) {
+    struct app *a = cur();
+    if (!a || id < 0 || id >= APP_NPTIMER || !a->ptimer[id].used) return -1;
+    if (value_ms == 0) { a->ptimer[id].next_ms = 0; a->ptimer[id].interval_ms = 0; return 0; }
+    a->ptimer[id].next_ms     = abs ? value_ms : timer_ms() + value_ms;
+    a->ptimer[id].interval_ms = interval_ms;
+    return 0;
+}
+/* remaining ms until timer `id` next fires (0 if disarmed), or -1 if bad id */
+long app_timer_gettime(int id) {
+    struct app *a = cur();
+    if (!a || id < 0 || id >= APP_NPTIMER || !a->ptimer[id].used) return -1;
+    if (!a->ptimer[id].next_ms) return 0;
+    uint64_t now = timer_ms();
+    return a->ptimer[id].next_ms > now ? (long)(a->ptimer[id].next_ms - now) : 0;
+}
+long app_timer_delete(int id) {
+    struct app *a = cur();
+    if (!a || id < 0 || id >= APP_NPTIMER || !a->ptimer[id].used) return -1;
+    a->ptimer[id].used = 0; a->ptimer[id].next_ms = 0; a->ptimer[id].interval_ms = 0;
+    return 0;
+}
+/* timer IRQ hook: fire every armed timer whose deadline has passed, on every
+ * app (so it works regardless of who's currently scheduled). */
+void app_timer_tick(void) {
+    uint64_t now = timer_ms();
+    for (int p = 0; p < MAX_APPS; p++) {
+        struct app *a = &apps[p];
+        if (!a->used) continue;
+        for (int i = 0; i < APP_NPTIMER; i++) {
+            if (!a->ptimer[i].used || !a->ptimer[i].next_ms) continue;
+            if (now >= a->ptimer[i].next_ms) {
+                app_sigqueue_to(a, a->ptimer[i].signo, a->ptimer[i].value, SI_TIMER);
+                if (a->ptimer[i].interval_ms) a->ptimer[i].next_ms += a->ptimer[i].interval_ms;  /* periodic re-arm */
+                else                          a->ptimer[i].next_ms = 0;                          /* one-shot: disarm */
+            }
+        }
+    }
 }
 
 /* --- Job control: process groups, sessions, foreground TTY group (M1176) --- */
@@ -3865,6 +3934,8 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     a->heap_end = 0; a->nvma = 0; a->mmap_next = 0;
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
     a->sig_in = 0; a->pending_sigs = 0; a->sig_blocked = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;
+    a->sigq_n = 0;                                                  /* drop any queued RT-signal payloads (M1271) */
+    for (int i = 0; i < APP_NPTIMER; i++) a->ptimer[i].used = 0;    /* POSIX timers are not preserved across exec (M1272) */
     if (a->gfx) { kfree(a->gfx); a->gfx = 0; a->gfx_w = a->gfx_h = 0; }
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
     a->titlebuf[ti] = 0; a->title = a->titlebuf;

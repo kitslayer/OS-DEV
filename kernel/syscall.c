@@ -274,6 +274,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_raise:
+    case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete:
     case SYS_alarm: case SYS_getrusage:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_semget: case SYS_semop: case SYS_semctl:
@@ -1741,6 +1742,18 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sigqueue:                     /* (pid, signo, value): queue an RT signal w/ a sigval payload (M1271) */
         r->rax = (uint64_t)(long)app_sigqueue((int)r->rdi, (int)r->rsi, r->rdx);
+        break;
+    case SYS_timer_create:                 /* (clockid, signo, value): create a POSIX interval timer (M1272) */
+        r->rax = (uint64_t)app_timer_create((int)r->rsi, r->rdx);   /* clockid (rdi) is advisory; deadlines are uptime-ms */
+        break;
+    case SYS_timer_settime:                /* (id, flags, value_ms, interval_ms): arm/disarm (M1272) */
+        r->rax = (uint64_t)app_timer_settime((int)r->rdi, (int)r->rsi & TIMER_ABSTIME, r->rdx, r->r10);
+        break;
+    case SYS_timer_gettime:                /* (id): ms until next fire (M1272) */
+        r->rax = (uint64_t)app_timer_gettime((int)r->rdi);
+        break;
+    case SYS_timer_delete:                 /* (id): destroy the timer (M1272) */
+        r->rax = (uint64_t)app_timer_delete((int)r->rdi);
         break;
     case SYS_raise:                        /* (signo): queue the signal; delivered to a handler at this
                                             * syscall's return (app_deliver_pending tail), or left pending

@@ -281,11 +281,16 @@
 #define SYS_connect      259   /* (fd, addr{u8 ip[4];u16 port}) -> active-open a TCP socket; 0/-1 (M1268) */
 #define SYS_sigaction    260   /* (signo, handler, restorer, flags) -> install a handler w/ sa_flags (M1270) */
 #define SYS_sigqueue     261   /* (pid, signo, value) -> queue an RT signal carrying a sigval payload; 0/-1 (M1271) */
+#define SYS_timer_create 262   /* (clockid, signo, value) -> create a POSIX timer firing signo w/ payload; id/-1 (M1272) */
+#define SYS_timer_settime 263  /* (id, flags, value_ms, interval_ms) -> arm/disarm; 0/-1 (M1272) */
+#define SYS_timer_gettime 264  /* (id) -> ms until next fire (0 disarmed), or -1 (M1272) */
+#define SYS_timer_delete 265   /* (id) -> destroy the timer; 0/-1 (M1272) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */
 #define SA_SIGINFO 4           /* sigaction flag: 3-arg handler h(signo, siginfo*, ucontext*) (M1270) */
 #define SI_QUEUE  (-1)         /* siginfo.si_code: signal sent by sigqueue (carries si_value) (M1271) */
 #define SI_USER   0            /* siginfo.si_code: signal sent by kill/raise (no payload) (M1271) */
+#define SI_TIMER  (-2)         /* siginfo.si_code: signal sent by a POSIX timer_create() timer (M1272) */
 
 /* clock ids + clock_nanosleep flags (M1257). */
 #define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */

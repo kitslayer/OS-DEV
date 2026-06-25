@@ -277,6 +277,10 @@ struct kmcontext {
 long  sys_sigaction(int signo, void (*h)(int, struct ksiginfo *, struct kmcontext *), int flags);  /* M1270 */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */
 long  sys_sigqueue(int pid, int signo, unsigned long value);  /* queue an RT signal carrying a sigval payload; pid 0 = self (M1271) */
+long  sys_timer_create(int clockid, int signo, unsigned long value);  /* POSIX timer firing signo w/ payload via sigqueue; -> id/-1 (M1272) */
+long  sys_timer_settime(int id, int flags, unsigned long value_ms, unsigned long interval_ms);  /* arm (TIMER_ABSTIME=abs); value_ms 0=disarm; 0/-1 (M1272) */
+long  sys_timer_gettime(int id);          /* ms until timer id next fires (0 disarmed), or -1 (M1272) */
+long  sys_timer_delete(int id);           /* destroy timer id; 0/-1 (M1272) */
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */

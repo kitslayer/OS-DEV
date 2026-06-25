@@ -143,6 +143,12 @@ void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl
 uint32_t app_sigprocmask(int how, uint32_t set);   /* block/unblock signals; returns the old mask (M1208) */
 uint32_t app_sigpending(void);                      /* the raised-but-blocked (pending) signal set (M1209) */
 int  app_sigqueue(int pid, int signo, uint64_t value);  /* SYS_sigqueue: RT signal carrying a queued sigval payload (M1271) */
+/* POSIX per-process interval timers: timer_create(2) firing a signal via the sigqueue FIFO (M1272) */
+long app_timer_create(int signo, uint64_t value);                                   /* -> timer id, or -1 */
+long app_timer_settime(int id, int abs, uint64_t value_ms, uint64_t interval_ms);   /* arm/disarm; 0/-1 */
+long app_timer_gettime(int id);                                                     /* ms until next fire, or -1 */
+long app_timer_delete(int id);                                                      /* 0/-1 */
+void app_timer_tick(void);                                                          /* timer-IRQ hook: fire due timers on every app */
 /* Job control (M1176): process groups + sessions + foreground TTY group. */
 int  app_setpgid(int pid, int pgid);   /* set a process's group (pid 0 = self, pgid 0 = own pid); 0/-1 */
 int  app_getpgid(int pid);             /* a process's group id (pid 0 = self); -1 if absent */
