@@ -71,6 +71,7 @@ int    app_sys_getpid(void);
 int    app_sys_getppid(void);          /* parent pid, for getppid(2) (M1236) */
 void   app_chdir_track(const char *rel);   /* update cwd_path after a successful chdir, for getcwd (M1248) */
 long   app_getcwd(char *buf, unsigned long max);  /* copy the cwd string out; length/-1 (M1248) */
+const char *app_cwd_str(app_t *a);     /* the cwd path string of any app, for /proc/<pid>/cwd (M1249) */
 int    app_pipe2(int *out, int flags); /* pipe() + atomic O_CLOEXEC (M1239) */
 int    app_eventfd_create(unsigned int initval, int flags);  /* pollable u64-counter fd (M1242) */
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */

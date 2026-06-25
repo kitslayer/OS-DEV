@@ -464,6 +464,13 @@ static long gen_pid_wchan(char *b, int max, int pid) {
     p = sapp(b, p, max, "\n");
     b[p] = 0; return p;
 }
+/* /proc/<pid>/cwd (M1249): the process's current directory — what `pwdx` and
+ * `lsof` read, and `ls -l /proc/<pid>/cwd` resolves. Reuses the M1248 cwd_path
+ * string. (/proc/<pid>/root is always "/" — the OS has no per-process chroot.) */
+static long gen_pid_cwd(char *b, int max, void *proc) {
+    int p = sapp(b, 0, max, app_cwd_str((app_t *)proc));
+    p = sapp(b, p, max, "\n"); b[p] = 0; return p;
+}
 /* /proc/<pid>/wss: working-set size from the CPU's Accessed/Dirty PTE bits.
  * "Referenced" counts pages touched since the last `clearref` (write it to ctl
  * to reset the window) — the building block for an LRU/swap victim picker. */
@@ -576,6 +583,8 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (peq(file, "io"))      return gen_pid_io((char *)buf, (int)max, proc);              /* I/O byte counters (M1244) */
             if (peq(file, "statm"))   return gen_pid_statm((char *)buf, (int)max, proc);           /* short memory line (M1245) */
             if (peq(file, "wchan"))   return gen_pid_wchan((char *)buf, (int)max, pid);            /* per-pid blocked-PC symbol (M1247) */
+            if (peq(file, "cwd"))     return gen_pid_cwd((char *)buf, (int)max, proc);             /* current directory (M1249) */
+            if (peq(file, "root")) { char *bb = (char *)buf; if (max >= 3) { bb[0] = '/'; bb[1] = '\n'; bb[2] = 0; return 2; } return 0; }  /* no per-proc chroot -> "/" (M1249) */
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */

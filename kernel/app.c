@@ -326,6 +326,7 @@ extern void iret_to_user(struct registers *r);   /* resume ring3 from a cloned t
 int app_cols(void) { return APP_COLS; }
 int app_rows(void) { return APP_ROWS; }
 const char *app_title(app_t *a) { return a->title; }
+const char *app_cwd_str(app_t *a) { return (a && a->cwd_path[0]) ? a->cwd_path : "/"; }  /* cwd path of any app, for /proc/<pid>/cwd (M1249) */
 const char *app_arg(app_t *a) { return a ? a->launch_arg : ""; }          /* /proc/<pid>/cmdline */
 void       *app_task(app_t *a) { return a ? (void *)a->task : 0; }        /* the task_t*, for /proc/<pid>/ctl stop/cont */
 uint64_t    app_cr3(app_t *a) { return a ? a->cr3 : 0; }                  /* the app's address space, for /proc/<pid>/wss */

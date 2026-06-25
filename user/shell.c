@@ -3121,6 +3121,19 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "getcwd: cd /tmp->'/tmp', /proc->'/proc', /->'/'; tiny buf -> -1 -- OK\n"
                      : "getcwdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "procwdtest")) {   /* /proc/<pid>/cwd + /root (M1249) */
+            int ok = 1; char b[64]; long n;
+            sys_chdir("/tmp");
+            n = sys_readfile("/proc/self/cwd", b, sizeof b - 1);
+            if (n <= 0) ok = 0; else { b[n] = 0; if (!(b[0]=='/'&&b[1]=='t'&&b[2]=='m'&&b[3]=='p'&&(b[4]=='\n'||b[4]==0))) ok = 0; }  /* "/tmp" */
+            sys_chdir("/");
+            n = sys_readfile("/proc/self/cwd", b, sizeof b - 1);
+            if (n <= 0) ok = 0; else { b[n] = 0; if (!(b[0]=='/'&&(b[1]=='\n'||b[1]==0))) ok = 0; }                                    /* "/" */
+            n = sys_readfile("/proc/self/root", b, sizeof b - 1);
+            if (n <= 0) ok = 0; else { b[n] = 0; if (!(b[0]=='/'&&(b[1]=='\n'||b[1]==0))) ok = 0; }                                    /* "/" (no chroot) */
+            print(ok ? "procwd: /proc/self/cwd tracks cd (/tmp then /); /proc/self/root == / -- OK\n"
+                     : "procwdtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
