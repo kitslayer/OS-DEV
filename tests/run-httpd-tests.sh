@@ -66,9 +66,10 @@ for try in 1 2 3 4 5 6 7 8; do
     sleep 1
 done
 
-if echo "$out" | grep -q "Hello from OS-DEV" && echo "$out" | grep -q "README.TXT"; then
-    echo "PASS: in-guest httpd served its page + a LIVE file index over the from-scratch TCP stack (host curl received it)"
-    echo "  served: $(echo "$out" | grep -o '<h1>[^<]*</h1>' | head -1) + a <pre> file listing (incl. README.TXT)"
+if echo "$out" | grep -q "Hello from OS-DEV" && echo "$out" | grep -q "README.TXT" \
+   && echo "$out" | grep -q "Uptime:" && echo "$out" | grep -q "MemTotal:"; then
+    echo "PASS: in-guest httpd served a LIVE dashboard (uptime + memory + file index) over the from-scratch TCP stack"
+    echo "  served: $(echo "$out" | grep -o '<h1>[^<]*</h1>' | head -1) + live system status + a file listing (incl. README.TXT)"
     exit 0
 else
     echo "FAIL: host curl did not receive the served page"
