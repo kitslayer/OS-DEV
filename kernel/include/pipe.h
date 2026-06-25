@@ -13,5 +13,7 @@ int  pipe_new(void);                                          /* -> pipe index (
 int  pipe_new_fifo(void);                                     /* -> a pinned, unopened (0/0) pipe for a FIFO, or -1 (M1188) */
 long pipe_read(int idx, void *buf, unsigned long max);        /* bytes; 0 at EOF (no writers, drained); -1 bad idx */
 long pipe_write(int idx, const void *buf, unsigned long len); /* bytes; -1 if no readers (EPIPE) or bad idx */
+int  pipe_readable(int idx);                                  /* poll: 1 if a read won't block (data or EOF) (M1210) */
+int  pipe_writable(int idx);                                  /* poll: 1 if a write won't block (space or no reader) (M1210) */
 void pipe_open_end(int idx, int write_end);                   /* fork/dup2: add a reference to one end */
 void pipe_close_end(int idx, int write_end);                  /* drop a reference; wake the peer; free at 0/0 */

@@ -2805,6 +2805,28 @@ int app_fd_is_redirected(app_t *ap, int fd) {
     return a && fd >= 0 && fd < APP_NFD && a->fd[fd].used &&
            (a->fd[fd].type == 1 || a->fd[fd].type == 2);   /* pipe (M1187) or file (M1193) */
 }
+/* poll(2) readiness for one fd (M1210). Returns the subset of `events`
+ * (POLLIN/POLLOUT) that won't block right now. A pipe read-end is POLLIN-ready
+ * iff data or EOF; a pipe write-end is POLLOUT-ready iff space. A file fd never
+ * blocks (positioned r/w), so it reports both. An unopened fd -> POLLNVAL. */
+int app_fd_ready(app_t *ap, int fd, int events) {
+    struct app *a = (struct app *)ap;
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return POLLNVAL;
+    int re = 0;
+    if (a->fd[fd].type == 2) {                              /* file: never blocks */
+        if (events & POLLIN)  re |= POLLIN;
+        if (events & POLLOUT) re |= POLLOUT;
+    } else if (a->fd[fd].type == 1) {                       /* pipe end */
+        if (a->fd[fd].write_end) {
+            if ((events & POLLOUT) && pipe_writable(a->fd[fd].obj)) re |= POLLOUT;
+        } else {
+            if ((events & POLLIN) && pipe_readable(a->fd[fd].obj)) re |= POLLIN;
+        }
+    } else {
+        return POLLNVAL;
+    }
+    return re;
+}
 int app_seccomp_filter_active(app_t *ap) { return ap && ((struct app *)ap)->seccomp_n > 0; }
 /* Raw verdict for one syscall (M1190; M1192 adds KILL). The program reads ctx
  * fields 0..3 = syscall nr + the low 32 bits of args 0..2 (LDCTX) and RETs:

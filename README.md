@@ -674,11 +674,14 @@ whole thing works:
 web browser, a from-scratch JavaScript engine + interactive DOM, and live web
 search all shipped long ago — see the milestone table above (now 200+). Since
 then the work has pushed hard on the **POSIX / systems axis**: an in-guest C
-compiler (`cc`), pipes + a per-process file-descriptor table, real async signals
-+ `sigreturn`, `mmap`/demand-paging/COW-`fork`/`waitpid`, a `/proc` + `/dev`
-control-file fabric, ext2/ext4 (extents) read **and** write, swap + a buffer
-cache, seccomp-BPF + pledge/unveil sandboxing, kernel threads + futexes + TLS,
-and — most recently — **SMP: the kernel now brings every CPU core online at boot**
+compiler (`cc`), pipes + a per-process file-descriptor table + `poll(2)`
+readiness multiplexing, real async signals + `sigreturn` + masking
+(`sigprocmask`/`sigpending`), `mmap`/demand-paging/COW-`fork`/`waitpid`, a
+`/proc` + `/dev` control-file fabric, ext2/ext4 (extents) read **and** write
+(incl. hard links), swap + a buffer cache, seccomp-BPF + pledge/unveil
+sandboxing, kernel threads + futexes + TLS, a full debug/trace suite (`ptrace`,
+a **GDB remote-serial stub**, eBPF syscall tracepoints, a KASAN-lite heap
+sanitizer), and — most recently — **SMP: the kernel now brings every CPU core online at boot**
 (local APIC + ACPI MADT + a real→long-mode AP trampoline; the cores currently
 park while the scheduler runs on the boot processor — `cat /proc/cpuinfo` shows
 the count). The honest current frontier is the next SMP slice — **running real

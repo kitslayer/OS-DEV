@@ -1347,6 +1347,28 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)idx;
         break;
     }
+    case SYS_poll: {                       /* readiness-multiplex an fd set over the fd table (M1210) */
+        struct pollfd *fds = (struct pollfd *)r->rdi;
+        int nfds = (int)r->rsi; long timeout = (long)r->rdx;
+        if (nfds < 1 || nfds > 64 || !ubuf(r->rdi, (uint64_t)(unsigned)nfds * sizeof(struct pollfd))) { r->rax = (uint64_t)-1; break; }
+        app_t *self = app_current();
+        __asm__ volatile("sti");           /* the poll loop sleeps on the timer */
+        uint64_t start = timer_ms();
+        int ready = 0;
+        for (;;) {
+            ready = 0;
+            for (int i = 0; i < nfds; i++) {
+                int re = app_fd_ready(self, fds[i].fd, fds[i].events);
+                fds[i].revents = (short)re;
+                if (re) ready++;
+            }
+            if (ready) break;
+            if (timeout >= 0 && (long)(timer_ms() - start) >= timeout) break;   /* -1 = block forever */
+            task_sleep_ms(10);             /* off-CPU poll interval */
+        }
+        r->rax = (uint64_t)ready;
+        break;
+    }
     case SYS_signalfd:                     /* route masked signals to /proc/self/sigfd (M1126) */
         r->rax = (uint64_t)(int64_t)app_signalfd((uint32_t)r->rdi);
         break;

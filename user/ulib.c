@@ -147,6 +147,9 @@ long sys_fswait(const char *const *paths, int n, long timeout_ms) {
     }
     return do_syscall(SYS_fswait, (long)buf, n, timeout_ms);
 }
+long sys_poll(struct pollfd *fds, int nfds, long timeout_ms) {
+    return do_syscall(SYS_poll, (long)fds, nfds, timeout_ms);
+}
 long sys_list(void *buf, unsigned long len) {
     /* leading 0 so buf/len land in the same registers (rsi/rdx) the kernel
      * reads them from — matching the write/readfile arg layout. */

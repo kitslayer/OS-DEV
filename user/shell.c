@@ -2454,6 +2454,43 @@ static int run_command(char *line, char *cwd) {
                 print((ok && ok2) ? "pipe: fork round-trip + EOF + dup2 all OK\n" : "pipetest: VERIFY FAILED\n");
                 if (!(ok && ok2)) g_status = 1;
             }
+        } else if (streq(line, "polltest")) {   /* poll(2) readiness multiplex over the fd table (M1210) */
+            int ok = 1, fds[2];
+            if (sys_pipe(fds) != 0) { print("polltest: pipe() failed\n"); g_status = 1; }
+            else {
+                long pid = sys_fork();
+                if (pid == 0) {                      /* child: make the read end readable */
+                    sys_fdclose(fds[0]);
+                    sys_fdwrite(fds[1], "P", 1);
+                    sys_fdclose(fds[1]);
+                    sys_exit(0);
+                }
+                sys_fdclose(fds[1]);                 /* parent drops its write end */
+                /* (A) block in poll until the child writes -> 1, POLLIN set */
+                struct pollfd p = { fds[0], POLLIN, 0 };
+                long r = sys_poll(&p, 1, 1000);
+                if (!(r == 1 && (p.revents & POLLIN))) ok = 0;
+                char b[8]; long n = sys_fdread(fds[0], b, sizeof b);
+                if (!(n == 1 && b[0] == 'P')) ok = 0;
+                sys_fdclose(fds[0]);
+                int st = 0; sys_waitpid((int)pid, &st);
+                /* (B) idle read end (writer still open) + short timeout -> 0, no revents */
+                int f2[2];
+                if (sys_pipe(f2) == 0) {
+                    struct pollfd q = { f2[0], POLLIN, (short)0xFF };
+                    if (!(sys_poll(&q, 1, 30) == 0 && q.revents == 0)) ok = 0;
+                    /* (C) the empty write end is immediately POLLOUT-ready (timeout 0) */
+                    struct pollfd w = { f2[1], POLLOUT, 0 };
+                    if (!(sys_poll(&w, 1, 0) == 1 && (w.revents & POLLOUT))) ok = 0;
+                    sys_fdclose(f2[0]); sys_fdclose(f2[1]);
+                } else ok = 0;
+                /* (D) a never-opened fd -> POLLNVAL (counts toward the ready total) */
+                struct pollfd bad = { 999, POLLIN, 0 };
+                if (!(sys_poll(&bad, 1, 0) == 1 && (bad.revents & POLLNVAL))) ok = 0;
+                print(ok ? "poll: blocking POLLIN + timeout=0 + POLLOUT + POLLNVAL all OK\n"
+                         : "polltest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

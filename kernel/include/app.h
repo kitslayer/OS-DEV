@@ -125,6 +125,7 @@ long app_fd_write(int fd, const void *buf, unsigned long len); /* write a pipe f
 int  app_fd_close(int fd);             /* close an fd; 0/-1 (M1187) */
 int  app_dup2(int oldfd, int newfd);   /* redirect newfd onto oldfd's object; newfd/-1 (M1187) */
 int  app_fd_is_redirected(app_t *a, int fd);  /* is fd a redirected pipe/file? (stdio + file-fd routing, M1191/M1193) */
+int  app_fd_ready(app_t *a, int fd, int events); /* poll(2): revents subset of events that won't block now (M1210) */
 int  app_open(const char *path, int flags);   /* open a FILE fd (O_RDONLY default; O_WRONLY/APPEND/TRUNC/CREAT); fd(>=3)/-1 (M1193/M1195) */
 long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
 int  app_mkfifo(const char *path);     /* create a named pipe (FIFO); 0/-1 (M1188) */

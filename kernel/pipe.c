@@ -30,6 +30,20 @@ static int p_cnt(struct kpipe *p) { return (p->head - p->tail + PBUF) % PBUF; }
 static int p_spc(struct kpipe *p) { return PBUF - 1 - p_cnt(p); }
 static struct kpipe *pp(int idx) { return (idx < 0 || idx >= NPIPE || !pipes[idx].used) ? 0 : &pipes[idx]; }
 
+/* Non-destructive readiness (poll/select, M1210). A read won't block iff there
+ * is buffered data, OR EOF has been reached (no writers left, and -- for a FIFO
+ * -- a writer has connected at least once: matches pipe_read's EOF gating). */
+int pipe_readable(int idx) {
+    struct kpipe *p = pp(idx); if (!p) return 0;
+    return p_cnt(p) > 0 || (p->w_open == 0 && p->had_writer);
+}
+/* A write won't block iff the ring has room, or no reader remains (a write to a
+ * reader-less pipe raises EPIPE and returns at once rather than blocking). */
+int pipe_writable(int idx) {
+    struct kpipe *p = pp(idx); if (!p) return 0;
+    return p->r_open == 0 || p_spc(p) > 0;
+}
+
 int pipe_new(void) {
     for (int i = 0; i < NPIPE; i++) if (!pipes[i].used) {
         struct kpipe *p = &pipes[i];

@@ -200,6 +200,17 @@
 #define SYS_link         183   /* (oldpath, newpath) -> hard link (same ext2 mount); 0/-1 (M1207) */
 #define SYS_sigprocmask  184   /* (how, set) -> block/unblock signals; returns the old mask (M1208) */
 #define SYS_sigpending   185   /* () -> the pending (raised-but-blocked) signal set (M1209) */
+#define SYS_poll         186   /* (struct pollfd*, nfds, timeout_ms) -> # ready, 0 on timeout, -1 (M1210) */
+
+/* poll(2) readiness multiplexing over the fd table (M1210). `events`/`revents`
+ * are bitmasks; the kernel sets revents to the subset that won't block now.
+ * int+short (no stdint here) — matches the Linux struct layout (8 bytes). */
+struct pollfd { int fd; short events; short revents; };
+#define POLLIN   0x0001   /* a read won't block (data, or EOF) */
+#define POLLOUT  0x0004   /* a write won't block (space, and a reader exists) */
+#define POLLERR  0x0008   /* (kernel-only revents) error condition */
+#define POLLHUP  0x0010   /* (kernel-only revents) hang-up */
+#define POLLNVAL 0x0020   /* (kernel-only revents) fd not open */
 
 /* sigprocmask `how` values (M1208) */
 #define SIG_BLOCK   0   /* add `set` to the blocked mask */
