@@ -490,6 +490,9 @@ long sys_seccomp_filter(const void *prog, unsigned long bytes) { return do_sysca
  * returns). The kernel is told this address via sys_signal's 3rd arg. */
 void sig_trampoline(void) { do_syscall(SYS_sigreturn, 0, 0, 0); for (;;) { } }
 long sys_signal(int signo, void (*handler)(int)) { return do_syscall(SYS_signal, signo, (long)handler, (long)sig_trampoline); }
+long sys_sigaction(int signo, void (*h)(int, struct ksiginfo *, struct kmcontext *), int flags) {
+    return do_syscall4(SYS_sigaction, signo, (long)h, (long)sig_trampoline, flags);
+}
 void sys_raise(int signo) { do_syscall(SYS_raise, signo, 0, 0); }
 unsigned sys_sigprocmask(int how, unsigned set) { return (unsigned)do_syscall(SYS_sigprocmask, how, (long)set, 0); }
 unsigned sys_sigpending(void) { return (unsigned)do_syscall(SYS_sigpending, 0, 0, 0); }

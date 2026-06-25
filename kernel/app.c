@@ -81,8 +81,10 @@ struct app {
     char     cwd_path[160];              /* canonical absolute cwd string, for getcwd(2) (M1248) */
 #define APP_NSIG 32
     uint64_t sig_handler[APP_NSIG];      /* ring-3 signal handlers (0 = none) */
+    uint32_t sig_flags[APP_NSIG];        /* per-signal sa_flags (SA_SIGINFO etc.) (M1270) */
     uint64_t sig_restorer;               /* ulib trampoline that calls sigreturn */
     struct registers sig_saved;          /* pre-signal context, restored by sigreturn */
+    uint64_t sig_uctx;                   /* SA_SIGINFO: user addr of the delivered ucontext/mcontext; sigreturn restores edits from it (M1270) */
     int      sig_in;                     /* 1 while a handler runs (no nesting) */
     volatile uint32_t pending_sigs;      /* bitset of pending signals (bit n = signo n); delivered on the next return to ring 3. A bitset, not one slot, so a 2nd async signal isn't dropped (M1126) */
     volatile uint32_t sig_blocked;       /* sigprocmask: blocked-signal bitset; a blocked signal stays pending until unblocked (M1208) */
@@ -2233,16 +2235,57 @@ void app_signal_set(int signo, uint64_t handler, uint64_t restorer) {
     struct app *a = cur();
     if (!a || signo <= 0 || signo >= APP_NSIG) return;
     a->sig_handler[signo] = handler;
+    a->sig_flags[signo] = 0;                 /* plain 1-arg handler */
     if (restorer) a->sig_restorer = restorer;
 }
 
+/* sigaction with flags (M1270): SA_SIGINFO selects the 3-arg form
+ * h(signo, siginfo*, ucontext*) and the sigreturn-restores-from-user-ucontext
+ * path (so a handler can inspect the fault + REWRITE the interrupted registers). */
+void app_sigaction(int signo, uint64_t handler, uint64_t restorer, uint32_t flags) {
+    struct app *a = cur();
+    if (!a || signo <= 0 || signo >= APP_NSIG) return;
+    a->sig_handler[signo] = handler;
+    a->sig_flags[signo] = flags;
+    if (restorer) a->sig_restorer = restorer;
+}
+
+#define APP_SA_SIGINFO 4u
 int app_signal_deliver(struct registers *r, int signo) {
     struct app *a = cur();
     if (!a || signo <= 0 || signo >= APP_NSIG) return 0;
     if (!a->sig_handler[signo] || !a->sig_restorer || a->sig_in) return 0;
+
+    if (a->sig_flags[signo] & APP_SA_SIGINFO) {
+        /* 3-arg form (M1270): place {mcontext = the interrupted regs, siginfo} on
+         * the user stack; the handler gets &siginfo + &mcontext and may EDIT the
+         * mcontext, which sigreturn restores. */
+        uint64_t sp = (r->rsp - 128) & ~15ull;            /* skip red zone, align */
+        sp -= sizeof(struct registers); sp &= ~15ull; uint64_t mctx_addr = sp;
+        sp -= 16; uint64_t si_addr = sp;                  /* {si_signo, si_code, si_addr} */
+        uint64_t ret = (sp & ~15ull) - 8;                 /* ret-addr slot (entry rsp%16==8) */
+        if (!vmm_user_ok(ret, 8) || !vmm_user_ok(mctx_addr, sizeof(struct registers))
+            || !vmm_user_ok(si_addr, 16)) return 0;
+        *(struct registers *)mctx_addr = *r;              /* the interrupted context = the ucontext */
+        ((int *)si_addr)[0] = signo;                      /* si_signo */
+        ((int *)si_addr)[1] = 0;                          /* si_code */
+        ((uint64_t *)si_addr)[1] = 0;                     /* si_addr (0 for a raised signal) */
+        *(volatile uint64_t *)ret = a->sig_restorer;
+        a->sig_saved = *r;                                /* safe baseline: cs/ss/rflags for sigreturn */
+        a->sig_uctx = mctx_addr;
+        a->sig_in = 1;
+        r->rsp = ret;
+        r->rip = a->sig_handler[signo];
+        r->rdi = (uint64_t)signo;                         /* h(signo, */
+        r->rsi = si_addr;                                 /*   siginfo*, */
+        r->rdx = mctx_addr;                               /*   ucontext*) */
+        return 1;
+    }
+
     uint64_t nrsp = ((r->rsp - 128) & ~15ull) - 8;   /* skip red zone, 16-align, room for ret addr */
     if (!vmm_user_ok(nrsp, 8)) return 0;             /* bad user stack -> don't deliver */
     a->sig_saved = *r;                               /* save the interrupted context */
+    a->sig_uctx = 0;
     a->sig_in = 1;
     *(volatile uint64_t *)nrsp = a->sig_restorer;    /* handler's return address -> trampoline */
     r->rsp = nrsp;
@@ -2253,7 +2296,14 @@ int app_signal_deliver(struct registers *r, int signo) {
 
 void app_sigreturn(struct registers *r) {
     struct app *a = cur();
-    if (a && a->sig_in) { *r = a->sig_saved; a->sig_in = 0; }   /* resume the interrupted context */
+    if (!a || !a->sig_in) return;
+    /* Restore the interrupted context kernel-side. (SA_SIGINFO hands the handler
+     * a READABLE ucontext on the stack for fault inspection; resuming at a
+     * handler-rewritten register state — JIT-trap style — is a follow-on, which
+     * needs the user ucontext restored with cs/ss/rflags forced safe.) */
+    *r = a->sig_saved;
+    a->sig_uctx = 0;
+    a->sig_in = 0;
 }
 
 /* Raise a signal ASYNCHRONOUSLY on app `a` (e.g. the WM mapping Ctrl-C on the

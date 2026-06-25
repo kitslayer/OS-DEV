@@ -263,6 +263,18 @@ long  sys_seccomp_filter(const void *prog, unsigned long bytes);  /* install a s
 #define PTY_SETMODE 0
 #define PTY_SETFG   1
 long  sys_signal(int signo, void (*handler)(int));  /* install a ring-3 signal handler */
+/* SA_SIGINFO (M1270): a 3-arg handler h(signo, ksiginfo*, kmcontext*). kmcontext
+ * mirrors the kernel's saved register file; editing its rip/GP regs/rsp and
+ * returning makes sigreturn resume at the edited state (JIT-trap / GC-barrier
+ * mechanism). cs/ss/rflags are forced safe by the kernel. */
+struct ksiginfo { int si_signo; int si_code; unsigned long si_addr; };
+struct kmcontext {
+    unsigned long r15,r14,r13,r12,r11,r10,r9,r8;
+    unsigned long rbp,rdi,rsi,rdx,rcx,rbx,rax;
+    unsigned long int_no,err_code;
+    unsigned long rip,cs,rflags,rsp,ss;
+};
+long  sys_sigaction(int signo, void (*h)(int, struct ksiginfo *, struct kmcontext *), int flags);  /* M1270 */
 void  sys_raise(int signo);                     /* deliver a signal to self (runs the handler) */
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */

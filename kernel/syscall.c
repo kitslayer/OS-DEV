@@ -273,7 +273,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_gettid: case SYS_thread_exit: case SYS_set_tls: case SYS_set_robust_list: return 0;
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
-    case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_raise:
+    case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_raise:
     case SYS_alarm: case SYS_getrusage:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_semget: case SYS_semop: case SYS_semctl:
@@ -1733,6 +1733,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_signal:                       /* (signo, handler, restorer): install a handler */
         app_signal_set((int)r->rdi, r->rsi, r->rdx);
+        r->rax = 0;
+        break;
+    case SYS_sigaction:                    /* (signo, handler, restorer, flags): handler w/ sa_flags (M1270) */
+        app_sigaction((int)r->rdi, r->rsi, r->rdx, (uint32_t)r->r10);
         r->rax = 0;
         break;
     case SYS_raise:                        /* (signo): queue the signal; delivered to a handler at this

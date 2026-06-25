@@ -279,6 +279,9 @@
 #define SYS_sendto       257   /* (fd, addr{u8 ip[4];u16 port}, buf, len) -> bytes/-1 (M1267) */
 #define SYS_recvfrom     258   /* (fd, buf, max, from{u8 ip[4];u16 port}|0) -> bytes/-1, 2s timeout (M1267) */
 #define SYS_connect      259   /* (fd, addr{u8 ip[4];u16 port}) -> active-open a TCP socket; 0/-1 (M1268) */
+#define SYS_sigaction    260   /* (signo, handler, restorer, flags) -> install a handler w/ sa_flags (M1270) */
+#define SIGUSR1  10            /* user signal 1 */
+#define SA_SIGINFO 4           /* sigaction flag: 3-arg handler h(signo, siginfo*, ucontext*) (M1270) */
 
 /* clock ids + clock_nanosleep flags (M1257). */
 #define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */

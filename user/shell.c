@@ -78,6 +78,18 @@ static long sh_kvnum(const char *buf, const char *key) {
     return -1;
 }
 
+/* SA_SIGINFO demo handler (M1270): a 3-arg handler that inspects the siginfo
+ * and the interrupted register file (ucontext) — the form JIT/GC code uses to
+ * read a fault's si_addr + the saved PC. */
+static volatile int g_si_caught, g_si_signo;
+static volatile unsigned long g_si_rip;
+static void si_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
+    (void)signo;
+    g_si_caught = 1;
+    g_si_signo = si ? si->si_signo : -1;
+    g_si_rip = uc ? uc->rip : 0;     /* observe the interrupted PC from the ucontext */
+}
+
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
  * (a `for ...; do ...; done` loop, else a ';'-split list of && / || commands). */
@@ -3455,6 +3467,16 @@ static int run_command(char *line, char *cwd) {
             int ok = (st != 42);   /* child #GP'd at sgdt before exit(42) -> UMIP blocked it */
             if (ok) print("harden: a ring-3 SGDT faulted (child terminated before exit42) -- UMIP active; SMEP also on (OS boots + make check 58-green under both) -- OK\n");
             else { print("hardentest: VERIFY FAILED (child ran SGDT + exited 42 -> UMIP not blocking ring-3)\n"); g_status = 1; }
+        } else if (streq(line, "siginfotest")) {   /* SA_SIGINFO: 3-arg handler inspects siginfo + ucontext (M1270) */
+            g_si_caught = 0; g_si_signo = 0; g_si_rip = 0;
+            sys_sigaction(10 /*SIGUSR1*/, si_handler, 4 /*SA_SIGINFO*/);
+            sys_raise(10);             /* deliver SIGUSR1 -> 3-arg handler runs, reads siginfo + ucontext */
+            int ok = (g_si_caught == 1 && g_si_signo == 10 && g_si_rip != 0);   /* saw the signal + a sane interrupted PC */
+            if (ok) { print("siginfo: SA_SIGINFO 3-arg handler caught SIGUSR1, si_signo=10, read interrupted rip=0x");
+                      /* print g_si_rip in hex */
+                      { unsigned long v=g_si_rip; char h[17]; int n=0; if(!v)h[n++]='0'; while(v){int d=v&0xf; h[n++]=d<10?('0'+d):('a'+d-10); v>>=4;} while(n){char c[2]={h[--n],0}; print(c);} }
+                      print(" from the ucontext -- SA_SIGINFO + siginfo/ucontext OK\n"); }
+            else { print("siginfotest: VERIFY FAILED (caught="); printl(g_si_caught); print(" signo="); printl(g_si_signo); print(" rip="); printl((long)g_si_rip); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

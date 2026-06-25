@@ -136,6 +136,7 @@ long     app_signalfd(uint32_t mask);                      /* arm: route the mas
 long     app_sigfd_read(app_t *a, char *buf, int max);     /* read the next sigfd signo (blocks); text + '\n' */
 int      app_sigfd_ready(app_t *a);                        /* fswait peek: a sigfd signal pending? */
 void app_signal_set(int signo, uint64_t handler, uint64_t restorer);  /* SYS_signal */
+void app_sigaction(int signo, uint64_t handler, uint64_t restorer, uint32_t flags);  /* SYS_sigaction: SA_SIGINFO etc. (M1270) */
 int  app_signal_deliver(struct registers *r, int signo);  /* redirect r to the handler; 1 if delivered */
 void app_sigreturn(struct registers *r);            /* restore the pre-signal context */
 void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl-C->SIGINT); opt-in (needs a handler) */
