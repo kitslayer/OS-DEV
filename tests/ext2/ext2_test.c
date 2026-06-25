@@ -239,6 +239,20 @@ int main(int argc, char **argv) {
                 if (e) { fprintf(stderr, "seek_data_hole wrong (line %ld)\n", e); return 1; }
                 printf("seek: SEEK_DATA/SEEK_HOLE on a [data|hole|data] file -- boundaries at 0/1024/3072/5000 + ENXIO at EOF\n");
             }
+            /* utimensat (M1230): set i_atime/i_mtime to fixed epochs + read the raw
+             * inode back (white-box via walk); a negative arg must leave a field. */
+            {
+                static uint8_t ud[64]; for (int i = 0; i < 64; i++) ud[i] = (uint8_t)i;
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/UT.TXT", ud, 64) != 64) { fprintf(stderr, "utimes setup write failed\n"); return 1; }
+                if (ext2_utimes_path(bd_read, bd_write, 0, 0, "/UT.TXT", 0x40000000L, 0x50000000L) != 0) { fprintf(stderr, "utimes set failed\n"); return 1; }
+                ext2_t uv; uint8_t uin[256]; int uisd = 0;
+                if (ext2_open(bd_read, 0, 0, &uv) < 0 || !walk(&uv, "/UT.TXT", uin, &uisd)) { fprintf(stderr, "utimes walk failed\n"); return 1; }
+                if (e_rd32(uin + 8) != 0x40000000u || e_rd32(uin + 16) != 0x50000000u) { fprintf(stderr, "utimes readback wrong (a=%u m=%u)\n", e_rd32(uin+8), e_rd32(uin+16)); return 1; }
+                if (ext2_utimes_path(bd_read, bd_write, 0, 0, "/UT.TXT", -1L, 0x60000000L) != 0) { fprintf(stderr, "utimes omit set failed\n"); return 1; }
+                if (ext2_open(bd_read, 0, 0, &uv) < 0 || !walk(&uv, "/UT.TXT", uin, &uisd)) { fprintf(stderr, "utimes walk2 failed\n"); return 1; }
+                if (e_rd32(uin + 8) != 0x40000000u || e_rd32(uin + 16) != 0x60000000u) { fprintf(stderr, "utimes omit wrong (a=%u m=%u)\n", e_rd32(uin+8), e_rd32(uin+16)); return 1; }
+                printf("utimes: set atime/mtime to fixed epochs (read back exact); a negative arg leaves the field (OMIT)\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;

@@ -651,6 +651,23 @@ long vfs_seek_data_hole(const char *path, long off, int find_hole) {
     return find_hole ? size : off;
 }
 
+/* utimensat (M1230): set a file's atime/mtime. Negative = leave that field
+ * unchanged (the syscall layer resolves UTIME_NOW to a concrete epoch and maps
+ * UTIME_OMIT to negative first). tmpfs tracks only mtime; ext2 mounts set both.
+ * Other paths (FAT32 boot disk, synthetic) are unsupported (-1). */
+long vfs_utimes(const char *path, long atime, long mtime) {
+    char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);
+    const char *tb;
+    if (tmp_path(p, &tb)) return tmpfs_utimes(tb, atime, mtime);      /* RAM /tmp */
+    int mid; char fp[192];
+    if (mount_path(p, &mid, fp, sizeof fp)) {
+        long r = blockdev_mount_utimes(mid, fp, atime, mtime);
+        if (r >= 0) fsevents_record('w', path);
+        return r;
+    }
+    return -1;
+}
+
 /* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
  * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are
  * unsupported (-1). Read-only. */

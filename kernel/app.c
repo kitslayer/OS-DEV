@@ -32,6 +32,7 @@
 #include "swap.h"
 #include "shm.h"
 #include "syscall.h"   /* FUTEX_WAIT / FUTEX_WAKE op constants */
+#include "rtc.h"       /* rtc_unix, to resolve UTIME_NOW (M1230) */
 #include "robust.h"    /* robust_t + FUTEX_OWNER_DIED (M1141) */
 #include "complete.h"
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
@@ -2979,6 +2980,23 @@ long app_lseek(int fd, long off, int whence) {
     if (n < 0) return -1;
     a->fd[fd].off = n;
     return n;
+}
+
+/* utimensat (M1230): set a path's atime/mtime. UTIME_NOW -> the current epoch,
+ * UTIME_OMIT (any negative) -> leave that field unchanged; vfs_utimes handles
+ * the FS dispatch. Returns 0/-1. */
+long app_utimens(const char *path, long atime, long mtime) {
+    long now = (long)rtc_unix();
+    if (atime == UTIME_NOW) atime = now;                     /* else: epoch (>=0 set) or UTIME_OMIT (<0 leave) */
+    if (mtime == UTIME_NOW) mtime = now;
+    return vfs_utimes(path, atime, mtime);
+}
+
+/* futimens (M1230): same, on an open FILE fd (resolved to its path). */
+long app_futimens(int fd, long atime, long mtime) {
+    const char *p = app_fd_path(fd);
+    if (!p) return -1;
+    return app_utimens(p, atime, mtime);
 }
 /* memfd_create(name, flags): a new anonymous, sealable in-RAM file fd (M1212).
  * Returns the fd (>=3), or -1. `flags` reserved (sealing is always permitted

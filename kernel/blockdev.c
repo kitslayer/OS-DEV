@@ -632,6 +632,14 @@ long blockdev_mount_seek_data_hole(int i, const char *path, long off, int find_h
     return ext2_seek_data_hole(mount_rfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", off, find_hole);
 }
 
+/* utimensat backend on mount `i` (ext2 only; negative time = leave). 0/-1. M1230. */
+long blockdev_mount_utimes(int i, const char *path, long atime, long mtime) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_utimes_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", atime, mtime);
+}
+
 int blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max) {
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return -1;

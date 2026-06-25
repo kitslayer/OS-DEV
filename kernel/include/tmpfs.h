@@ -12,6 +12,7 @@ long tmpfs_read(const char *name, void *buf, unsigned long max);      /* bytes, 
 long tmpfs_pread(const char *name, void *buf, unsigned long max, unsigned long offset);  /* positioned read; bytes/-1 (M1196) */
 long tmpfs_write(const char *name, const void *data, unsigned long len); /* create/replace; len or -1 */
 long tmpfs_truncate(const char *name, unsigned long newlen);            /* resize a tmpfs file; 0/-1 (M1228) */
+long tmpfs_utimes(const char *name, long atime, long mtime);            /* set mtime (neg = leave; atime ignored); 0/-1 (M1230) */
 long tmpfs_remove(const char *name);                                 /* 0, or -1 if absent */
 long tmpfs_symlink(const char *name, const char *target);            /* create a symlink; 0 or -1 */
 int  tmpfs_list(vfs_dirent *out, int max);                           /* fill out[]; returns count */

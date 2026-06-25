@@ -276,6 +276,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_open:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
+    case SYS_utimens: case SYS_futimens:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
     case SYS_fallocate: case SYS_copy_file_range: case SYS_setxattr: case SYS_removexattr:
@@ -1026,6 +1027,14 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_truncate((const char *)r->rdi, (uint64_t)r->rsi);
+        break;
+    case SYS_utimens:                      /* (path, atime, mtime) -> set timestamps (M1230) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_utimens((const char *)r->rdi, (long)r->rsi, (long)r->rdx);
+        break;
+    case SYS_futimens:                     /* (fd, atime, mtime) -> set timestamps on an open fd (M1230) */
+        r->rax = (uint64_t)(int64_t)app_futimens((int)r->rdi, (long)r->rsi, (long)r->rdx);
         break;
     case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
         if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }

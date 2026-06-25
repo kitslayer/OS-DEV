@@ -227,6 +227,10 @@
 #define SYS_set_tid_address 208  /* (tidptr) -> register clear_child_tid (futex-on-exit); returns the tid (M1226) */
 #define SYS_waitid       209   /* (idtype, id, siginfo*, options) -> 0/-1; WNOHANG = non-blocking reap (M1227) */
 #define SYS_truncate     210   /* (path, len) -> resize a real file (tmpfs / ext2 mount); 0/-1 (M1228) */
+#define SYS_utimens      211   /* (path, atime, mtime) -> set timestamps; UTIME_NOW/OMIT sentinels; 0/-1 (M1230) */
+#define SYS_futimens     212   /* (fd, atime, mtime) -> set timestamps on an open file fd; 0/-1 (M1230) */
+#define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */
+#define UTIME_OMIT (-2L)       /* leave the timestamp unchanged (M1230) */
 #define SIGCHLD 17
 /* waitid (M1227): minimal siginfo + idtype/options/si_code constants. */
 struct siginfo { int si_signo, si_errno, si_code, si_pid, si_uid, si_status; };

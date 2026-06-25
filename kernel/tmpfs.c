@@ -112,6 +112,16 @@ long tmpfs_truncate(const char *name, unsigned long newlen) {
     return 0;
 }
 
+/* utimensat backend (M1230): set the file's mtime to a Unix epoch (negative =
+ * leave unchanged). tmpfs tracks only mtime, so atime is accepted but ignored. */
+long tmpfs_utimes(const char *name, long atime, long mtime) {
+    (void)atime;
+    int i = tfind(name);
+    if (i < 0 || !tf[i].used) return -1;
+    if (mtime >= 0) tf[i].mtime = (uint32_t)mtime;
+    return 0;
+}
+
 long tmpfs_remove(const char *name) {
     int i = tfind(name);
     if (i < 0) return -1;

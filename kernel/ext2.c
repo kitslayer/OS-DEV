@@ -1066,6 +1066,24 @@ long ext2_seek_data_hole(blk_read_fn read, void *ctx, uint64_t start_lba,
     return find_hole ? (long)size : -1;                    /* SEEK_HOLE: hole at EOF; SEEK_DATA: ENXIO */
 }
 
+/* utimensat backend (M1230): set i_atime / i_mtime to the given Unix epochs.
+ * A negative value leaves that field unchanged (the caller maps UTIME_OMIT to
+ * <0 and resolves UTIME_NOW to a concrete epoch before calling, so ext2.c stays
+ * free of syscall.h). i_ctime is bumped to "now" since metadata changed. */
+long ext2_utimes_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                      const char *path, long atime, long mtime) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+    uint8_t inode[256]; int isdir = 0;
+    uint32_t ino = walk(&v, path, inode, &isdir);          /* files and dirs both (touch -d a dir) */
+    if (!ino) return -1;
+    if (atime >= 0) e_wr32(inode + 8,  (uint32_t)atime);   /* i_atime */
+    if (mtime >= 0) e_wr32(inode + 16, (uint32_t)mtime);   /* i_mtime */
+    e_wr32(inode + 12, ext2_clock ? ext2_clock() : 0);     /* i_ctime: metadata changed now */
+    return write_inode(&v, ino, inode);
+}
+
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, const void *buf, unsigned long len) {
     ext2_t v;

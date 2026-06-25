@@ -154,6 +154,8 @@ int  app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data
 int  app_epoll_check(int epfd, struct epoll_event *out, int maxevents);  /* one non-blocking readiness pass; count/-1 (M1220) */
 int  app_open(const char *path, int flags);   /* open a FILE fd (O_RDONLY default; O_WRONLY/APPEND/TRUNC/CREAT); fd(>=3)/-1 (M1193/M1195) */
 long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
+long app_utimens(const char *path, long atime, long mtime);  /* set a path's atime/mtime (UTIME_NOW/OMIT); 0/-1 (M1230) */
+long app_futimens(int fd, long atime, long mtime);           /* set an open fd's atime/mtime; 0/-1 (M1230) */
 int  app_mkfifo(const char *path);     /* create a named pipe (FIFO); 0/-1 (M1188) */
 int  app_fifo_open(const char *path, int write);  /* open a FIFO end -> fd; -1 (M1188) */
 int  app_seccomp_filter_install(const void *prog, int n);   /* install a self-imposed BPF syscall filter; 0/-1 (M1190) */

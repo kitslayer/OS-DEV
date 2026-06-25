@@ -2850,6 +2850,22 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "seek: SEEK_DATA(0)=0, SEEK_HOLE(0)=EOF, SEEK_DATA(mid)=mid, ENXIO past EOF -- OK\n"
                      : "seektest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "utimestest")) {   /* utimensat / futimens (M1230) */
+            int ok = 1;
+            struct statx st;
+            sys_writefile("/tmp/UT.TXT", "hi", 2);
+            if (sys_utimens("/tmp/UT.TXT", UTIME_OMIT, 0x40000000) != 0) ok = 0;   /* set mtime, leave atime */
+            if (sys_statx("/tmp/UT.TXT", &st) != 0 || (long)st.stx_mtime != 0x40000000) ok = 0;
+            if (sys_utimens("/tmp/UT.TXT", UTIME_OMIT, UTIME_NOW) != 0) ok = 0;     /* mtime -> now */
+            if (sys_statx("/tmp/UT.TXT", &st) != 0 || (long)st.stx_mtime <= 0x40000000) ok = 0;  /* advanced */
+            int fd = sys_open("/tmp/UT.TXT");                                       /* futimens(fd) path */
+            if (fd < 0) ok = 0;
+            else { if (sys_futimens(fd, UTIME_OMIT, 0x50000000) != 0) ok = 0; sys_fdclose(fd); }
+            if (sys_statx("/tmp/UT.TXT", &st) != 0 || (long)st.stx_mtime != 0x50000000) ok = 0;
+            sys_delete("/tmp/UT.TXT");
+            print(ok ? "utimes: set mtime to a fixed epoch (statx reads it), UTIME_NOW advances it, futimens(fd) sets it -- OK\n"
+                     : "utimestest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

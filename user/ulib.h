@@ -150,6 +150,8 @@ long sys_prctl(int option, unsigned long arg2);                /* PR_SET_NAME/PR
 long sys_set_tid_address(void *tidptr);                        /* register clear_child_tid (futex-on-exit); tid (M1226) */
 int  sys_waitid(int idtype, int id, struct siginfo *si, int options);  /* waitid + WNOHANG; 0/-1 (M1227) */
 int  sys_truncate(const char *path, long len);                 /* resize a real file (tmpfs/ext2); 0/-1 (M1228) */
+int  sys_utimens(const char *path, long atime, long mtime);     /* set atime/mtime (UTIME_NOW/OMIT); 0/-1 (M1230) */
+int  sys_futimens(int fd, long atime, long mtime);              /* set atime/mtime on an open fd; 0/-1 (M1230) */
 int  sys_jail(const char *prog, const char *promises, const char *path);   /* spawn prog pre-confined (pledge + optional unveil) */
 long sys_find(const char *want, void *buf, unsigned long len);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);
