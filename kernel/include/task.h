@@ -38,6 +38,7 @@ typedef struct task {
     struct registers *start_frame;  /* a thread's initial ring-3 frame: iret'd to once at startup, then freed (M1138) */
     uint64_t      fs_base;     /* per-thread %fs base for TLS; 0 = unused (restored on switch, M1140) */
     uint64_t      robust;      /* userspace robust_t* (held robust locks); walked on exit (M1141) */
+    uint64_t      clear_child_tid;  /* set_tid_address: zeroed + FUTEX_WAKE'd on exit (pthread_join) (M1226) */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */

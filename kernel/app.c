@@ -3395,7 +3395,20 @@ void app_thread_exit(void) {
             }
         }
     }
+    /* CLONE_CHILD_CLEARTID (M1226): zero the registered tid address + wake any
+     * futex waiter on it — the kernel side of a real blocking pthread_join. Done
+     * here while the dying thread's CR3 is active (threads share the AS). */
+    uint64_t ct = task_self()->clear_child_tid;
+    if (ct && vmm_user_ok(ct, 4)) { *(volatile int *)ct = 0; app_futex(ct, FUTEX_WAKE, 1); }
     task_exit();
+}
+
+/* set_tid_address (M1226): register the address the kernel zeroes + FUTEX_WAKEs
+ * on this thread's exit (what glibc/musl pthread_join blocks on). Returns the tid. */
+long app_set_tid_address(uint64_t tidptr) {
+    task_t *t = task_self(); if (!t) return -1;
+    t->clear_child_tid = tidptr;
+    return task_current_id();
 }
 
 /* The calling thread's id = its task id (each thread is a distinct task). M1138. */

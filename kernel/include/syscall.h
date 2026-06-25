@@ -224,6 +224,7 @@
 #define SYS_prctl        207   /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME; 0/-1 (M1225) */
 #define PR_SET_NAME 15
 #define PR_GET_NAME 16
+#define SYS_set_tid_address 208  /* (tidptr) -> register clear_child_tid (futex-on-exit); returns the tid (M1226) */
 /* access(2) mode bits (M1224). */
 #define F_OK 0
 #define X_OK 1

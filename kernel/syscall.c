@@ -1015,6 +1015,9 @@ void syscall_dispatch(struct registers *r) {
         else if (r->rdi == PR_GET_NAME) { if (!ubuf(r->rsi, 16)) { r->rax = (uint64_t)-1; break; } }
         r->rax = (uint64_t)app_prctl((int)r->rdi, r->rsi);
         break;
+    case SYS_set_tid_address:              /* (tidptr) -> register clear_child_tid; returns the tid (M1226) */
+        r->rax = (uint64_t)app_set_tid_address(r->rdi);
+        break;
     case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
         if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_stat((const char *)r->rdi, (struct statx *)r->rsi);

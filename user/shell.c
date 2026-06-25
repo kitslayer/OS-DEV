@@ -16,6 +16,13 @@
 #include "shquote.h"  /* sh_quote_pass()/sh_unprot_buf(): "..." '...' quoting, host-tested by tests/shquote */
 
 static void jobtest_sigint(int s) { (void)s; sys_exit(42); }   /* job-control demo: a group SIGINT exits the child 42 (M1176) */
+static volatile int g_jctid;                                   /* set_tid_address join target (M1226) */
+static void join_thread_fn(void *arg) {                        /* registers clear_child_tid, lives a moment, exits */
+    (void)arg;
+    sys_set_tid_address((void *)&g_jctid);
+    for (volatile long i = 0; i < 30000000; i++) {}            /* stay alive so the joiner blocks first */
+    sys_thread_exit();
+}
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
@@ -2776,6 +2783,24 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "prctl: PR_SET_NAME=vacuum, PR_GET_NAME reads it, /proc/self/comm shows it -- OK\n"
                      : "prctltest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "jointest")) {   /* set_tid_address futex-on-exit = a real blocking pthread_join (M1226) */
+            int ok = 1;
+            char *stk = malloc(64 * 1024);
+            if (!stk) { print("jointest: oom\n"); g_status = 1; }
+            else {
+                g_jctid = 0;
+                long tid = sys_clone((void *)join_thread_fn, stk + 64 * 1024, 0);
+                if (tid <= 0) ok = 0;
+                else {
+                    g_jctid = (int)tid;                              /* the value the joiner blocks on */
+                    sys_futex((void *)&g_jctid, FUTEX_WAIT, (int)tid);  /* block until the thread exits + clears it */
+                    if (g_jctid != 0) ok = 0;                        /* the kernel zeroed it on the thread's exit */
+                }
+                free(stk);
+                print(ok ? "set_tid_address: thread registered ctid + exited -> futex woke the joiner, ctid=0 -- OK\n"
+                         : "jointest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
