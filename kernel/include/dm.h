@@ -30,4 +30,12 @@ typedef struct { int devs[DM_MAXDEV]; int n; int failed[DM_MAXDEV]; } dm_raid5_t
 int dm_raid5_read(dm_raid5_t *r, uint64_t lba, uint32_t count, void *buf);
 int dm_raid5_write(dm_raid5_t *r, uint64_t lba, uint32_t count, const void *buf);
 
-void dm_selftest(void);   /* boot-time RAID-1/0/5 self-test (no-op unless >=2 (>=3 for RAID-5) non-boot disks) */
+/* Linear logical volume (LVM-lite): concatenate `n` members into ONE address
+ * space — member 0 holds logical sectors [0, sectors[0]), member 1 the next
+ * sectors[1], and so on. Grows capacity past any single disk; no redundancy or
+ * striping. `sectors[m]` is each member's size in sectors. */
+typedef struct { int devs[DM_MAXDEV]; uint64_t sectors[DM_MAXDEV]; int n; } dm_linear_t;
+int dm_linear_read(dm_linear_t *l, uint64_t lba, uint32_t count, void *buf);
+int dm_linear_write(dm_linear_t *l, uint64_t lba, uint32_t count, const void *buf);
+
+void dm_selftest(void);   /* boot-time RAID-1/0/5 + linear-LV self-test (no-op unless >=2 (>=3 for RAID-5) non-boot disks) */

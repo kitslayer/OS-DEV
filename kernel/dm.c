@@ -112,6 +112,33 @@ int dm_raid5_write(dm_raid5_t *r, uint64_t lba, uint32_t count, const void *buf)
     return 0;
 }
 
+/* ---- linear logical volume (LVM-lite, M1296): concatenate members --------- */
+/* Map a volume-logical sector to (member blockdev index, member-local sector)
+ * by walking the per-member sizes; returns the blockdev index, or -1 past end. */
+static int dm_linear_locate(const dm_linear_t *l, uint64_t lba, uint64_t *local) {
+    for (int m = 0; m < l->n; m++) {
+        if (lba < l->sectors[m]) { *local = lba; return l->devs[m]; }
+        lba -= l->sectors[m];
+    }
+    return -1;
+}
+int dm_linear_read(dm_linear_t *l, uint64_t lba, uint32_t count, void *buf) {
+    uint8_t *p = buf;
+    for (uint32_t i = 0; i < count; i++, lba++, p += DM_SECSZ) {
+        uint64_t loc; int dev = dm_linear_locate(l, lba, &loc);
+        if (dev < 0 || blockdev_read(dev, loc, 1, p) != 0) return -1;
+    }
+    return 0;
+}
+int dm_linear_write(dm_linear_t *l, uint64_t lba, uint32_t count, const void *buf) {
+    const uint8_t *p = buf;
+    for (uint32_t i = 0; i < count; i++, lba++, p += DM_SECSZ) {
+        uint64_t loc; int dev = dm_linear_locate(l, lba, &loc);
+        if (dev < 0 || blockdev_write(dev, loc, 1, p) != 0) return -1;
+    }
+    return 0;
+}
+
 /* Boot self-test: build RAID-1 / RAID-0 / RAID-5 volumes over the non-boot
  * writable disks and prove each one's defining property — mirror redundancy,
  * stripe distribution, and RAID-5 single-disk fault tolerance via parity
@@ -205,6 +232,28 @@ void dm_selftest(void) {
         r.failed[dead] = 0;
         if (normal && parok && deg) kprintf("[ ok ] dm RAID-5 parity OK (%d members, single-disk fault reconstructed)\n", nd);
         else kprintf("[dm] RAID-5 FAILED (normal=%d parity=%d degraded=%d)\n", normal, parok, deg);
+    }
+
+    /* ---- linear LV: concatenate the members into one address space ----
+     * With per-member size 128, logical 64 -> member0 phys 64 and logical 192
+     * -> member1 phys 64 (192-128=64) — both the scratch sector saved above —
+     * so a single logical address space spans the disk boundary at logical 128. */
+    {
+        dm_linear_t lv; lv.n = nd; for (int k = 0; k < nd; k++) { lv.devs[k] = devs[k]; lv.sectors[k] = 128; }
+        static uint8_t v[DM_SECSZ];
+        int ok = 1;
+        for (int b = 0; b < DM_SECSZ; b++) pat[b]  = (uint8_t)(b * 5 + 0x11);   /* pattern -> member 0 */
+        for (int b = 0; b < DM_SECSZ; b++) back[b] = (uint8_t)(b * 5 + 0x22);   /* pattern -> member 1 */
+        if (dm_linear_write(&lv, 64,  1, pat)  != 0) ok = 0;                    /* logical 64  -> member0 phys 64 */
+        if (ok && dm_linear_write(&lv, 192, 1, back) != 0) ok = 0;             /* logical 192 -> member1 phys 64 (crossed the boundary) */
+        if (ok && blockdev_read(devs[0], 64, 1, v) == 0)                        /* member 0 directly holds pattern 1 */
+            for (int b = 0; b < DM_SECSZ; b++) if (v[b] != (uint8_t)(b*5+0x11)) { ok = 0; break; }
+        if (ok && blockdev_read(devs[1], 64, 1, v) == 0)                        /* member 1 directly holds pattern 2 */
+            for (int b = 0; b < DM_SECSZ; b++) if (v[b] != (uint8_t)(b*5+0x22)) { ok = 0; break; }
+        if (ok && dm_linear_read(&lv, 192, 1, v) == 0)                          /* and a read THROUGH the LV returns it */
+            for (int b = 0; b < DM_SECSZ; b++) if (v[b] != (uint8_t)(b*5+0x22)) { ok = 0; break; }
+        if (ok) kprintf("[ ok ] dm linear LV OK (%d members concatenated; logical space spans the disk boundary)\n", nd);
+        else kprintf("[dm] linear LV FAILED\n");
     }
 
     for (int k = 0; k < nd; k++) blockdev_write(devs[k], lba, 1, save[k]);  /* restore every scratch sector */

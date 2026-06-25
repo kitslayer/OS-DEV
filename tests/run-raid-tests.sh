@@ -63,6 +63,7 @@ require "AHCI HBA up: 3 SATA"   "AHCI brought up 3 SATA disks (the RAID members)
 require "dm RAID-1 mirror OK"   "RAID-1 mirror: fan-out write + read survives a member failure"
 require "dm RAID-0 stripe OK"   "RAID-0 stripe: round-robin distribution across 3 members"
 require "dm RAID-5 parity OK"   "RAID-5 parity: single-disk fault reconstructed from parity"
+require "dm linear LV OK"       "linear LV: members concatenated into one boundary-spanning address space"
 
 forbid() {
     if grep -qiE "$1" "$LOG"; then echo "  CRASH MARKER: $2"; grep -inE "$1" "$LOG" | head -2 | sed 's/^/      /'; fail=1; fi
