@@ -3650,6 +3650,18 @@ static int run_command(char *line, char *cwd) {
             int ok = (m >= 0 && set == 0 && rows == 40 && cols == 120 && g_winch == 1);
             if (ok) print("winsz: pty TIOCSWINSZ 40x120 -> TIOCGWINSZ read back 40x120; SIGWINCH delivered to the foreground group on resize -- pty window size OK\n");
             else { print("winsztest: VERIFY FAILED (m="); printl(m); print(" set="); printl(set); print(" rows="); printl(rows); print(" cols="); printl(cols); print(" winch="); printl(g_winch); print(")\n"); g_status = 1; }
+        } else if (streq(line, "settimetest")) {   /* clock_settime(CLOCK_REALTIME) sets the wall clock (M1280) */
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts); long orig = ts.tv_sec;
+            long target = 1700000000;                                /* a known epoch (2023-11-14 UTC) */
+            long r = sys_clock_settime(CLOCK_REALTIME, target, 0);
+            clock_gettime(CLOCK_REALTIME, &ts); long after = ts.tv_sec;
+            long mono = sys_clock_settime(CLOCK_MONOTONIC, 0, 0);     /* must be refused */
+            sys_clock_settime(CLOCK_REALTIME, orig, 0);              /* restore the real wall clock */
+            int ok = (r == 0 && after >= target && after <= target + 2 && mono != 0);
+            if (ok) { print("settime: clock_settime(CLOCK_REALTIME, 1700000000) -> clock_gettime read back "); printl(after);
+                      print("; setting CLOCK_MONOTONIC refused; original time restored -- clock_settime OK\n"); }
+            else { print("settimetest: VERIFY FAILED (r="); printl(r); print(" after="); printl(after); print(" mono="); printl(mono); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

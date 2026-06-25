@@ -270,6 +270,7 @@ long sys_readlink(const char *path, void *buf, unsigned long size) { return do_s
 int  sys_sched_yield(void) { return (int)do_syscall(SYS_sched_yield, 0, 0, 0); }
 int  sys_nanosleep(long sec, long nsec) { return (int)do_syscall(SYS_nanosleep, sec, nsec, 0); }
 int  sys_clock_nanosleep(int clockid, int flags, long sec, long nsec) { return (int)do_syscall4(SYS_clock_nanosleep, clockid, flags, sec, nsec); }
+long sys_clock_settime(int clockid, long sec, long nsec) { return do_syscall(SYS_clock_settime, clockid, sec, nsec); }  /* set the wall clock (CLOCK_REALTIME); 0/-1 (M1280) */
 long sys_clock_getres(int clockid) { return do_syscall(SYS_clock_getres, clockid, 0, 0); }
 int  sys_udp_send(const unsigned char *ip4, unsigned short dport, unsigned short sport, const void *buf, unsigned len) {
     return (int)do_syscall4(SYS_udp_send, (long)ip4, ((unsigned long)dport << 16) | sport, (long)buf, (long)len);

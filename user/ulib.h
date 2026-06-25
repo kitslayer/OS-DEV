@@ -138,6 +138,7 @@ long sys_readlink(const char *path, void *buf, unsigned long size);      /* read
 int  sys_sched_yield(void);                                     /* voluntarily yield the CPU; 0 (M1234) */
 int  sys_nanosleep(long sec, long nsec);                        /* sleep sec+nsec (100Hz-rounded); 0 (M1234) */
 int  sys_clock_nanosleep(int clockid, int flags, long sec, long nsec);  /* TIMER_ABSTIME=absolute deadline; 0 (M1257) */
+long sys_clock_settime(int clockid, long sec, long nsec);  /* set the wall clock (CLOCK_REALTIME only); 0/-1 (M1280) */
 long sys_clock_getres(int clockid);                             /* clock resolution in nanoseconds (M1257) */
 int  sys_udp_send(const unsigned char *ip4, unsigned short dport, unsigned short sport, const void *buf, unsigned len);  /* UDP datagram; 0/-1 (M1258) */
 long sys_udp_recv(unsigned short sport, void *buf, unsigned max, void *from);  /* recv to local port; bytes/-1, 2s timeout; from={u8 ip[4];u16 port} (M1258) */
