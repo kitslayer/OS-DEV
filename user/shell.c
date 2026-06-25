@@ -2663,7 +2663,7 @@ static int run_command(char *line, char *cwd) {
             int tfd = sys_timerfd_create();
             if (tfd < 3) { print("timerfdtest: create failed\n"); g_status = 1; }
             else {
-                sys_timerfd_settime(tfd, 80);                /* fire in 80 ms */
+                sys_timerfd_settime(tfd, 80, 0);             /* one-shot: fire in 80 ms */
                 /* (A) immediately, before expiry: poll timeout 0 -> not ready */
                 struct pollfd p = { tfd, POLLIN, 0 };
                 if (sys_poll(&p, 1, 0) != 0) ok = 0;
@@ -2677,7 +2677,22 @@ static int run_command(char *line, char *cwd) {
                 struct pollfd w = { tfd, POLLIN, 0 };
                 if (sys_poll(&w, 1, 0) != 0) ok = 0;
                 sys_fdclose(tfd);
-                print(ok ? "timerfd: armed 80ms -> not-ready, then POLLIN, read count=1, disarmed -- OK\n"
+                /* (E) periodic (M1302): re-arms itself; reading after several intervals
+                 * returns the missed-firing count (>1), and it stays armed afterward. */
+                int pfd = sys_timerfd_create();
+                if (pfd < 3) ok = 0;
+                else {
+                    sys_timerfd_settime(pfd, 40, 40);        /* first fire 40ms, then every 40ms */
+                    sys_sleep(170);                          /* ~4 firings elapse before we read */
+                    unsigned char pb[8]; long pn = sys_fdread(pfd, pb, sizeof pb);
+                    unsigned long pc = 0; for (int i = 0; i < 8; i++) pc |= (unsigned long)pb[i] << (i * 8);
+                    if (!(pn == 8 && pc >= 2)) ok = 0;       /* accumulated multiple missed firings */
+                    sys_sleep(60);                           /* still armed: next interval makes it ready again */
+                    struct pollfd pp = { pfd, POLLIN, 0 };
+                    if (!(sys_poll(&pp, 1, 1000) == 1 && (pp.revents & POLLIN))) ok = 0;
+                    sys_fdclose(pfd);
+                }
+                print(ok ? "timerfd: one-shot 80ms (count=1, disarmed) + periodic 40ms (re-armed, count>1) -- OK\n"
                          : "timerfdtest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }

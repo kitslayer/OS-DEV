@@ -1992,8 +1992,8 @@ void syscall_dispatch(struct registers *r) {
     case SYS_eventfd:                      /* (initval, flags) -> a pollable u64-counter fd (M1242) */
         r->rax = (uint64_t)(int64_t)app_eventfd_create((unsigned int)r->rdi, (int)r->rsi);
         break;
-    case SYS_timerfd_settime:              /* (fd, delay_ms) -> arm/disarm; 0/-1 (M1217) */
-        r->rax = (uint64_t)app_timerfd_settime((int)r->rdi, (long)r->rsi);
+    case SYS_timerfd_settime:              /* (fd, delay_ms, interval_ms) -> arm/disarm; interval>0 = periodic; 0/-1 (M1217, periodic M1302) */
+        r->rax = (uint64_t)app_timerfd_settime((int)r->rdi, (long)r->rsi, (long)r->rdx);
         break;
     case SYS_fcntl: {                      /* (fd, cmd, arg) -> fd flags (M1218) + record locks (M1221) */
         int cfd = (int)r->rdi, cmd = (int)r->rsi;

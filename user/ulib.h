@@ -188,7 +188,7 @@ int  sys_mkdirat(int dirfd, const char *path, int mode);       /* mkdir relative
 int  sys_fstatat(int dirfd, const char *path, struct statx *st, int flags); /* stat relative to a dir fd; 0/-1 (M1251) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
-long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */
+long sys_timerfd_settime(int fd, long delay_ms, long interval_ms);  /* arm a timerfd: delay + periodic interval (ms; interval 0 = one-shot); 0/-1 (M1217, periodic M1302) */
 long sys_fcntl(int fd, int cmd, long arg);                     /* F_GETFD/SETFD/DUPFD/DUPFD_CLOEXEC (M1218) */
 int  sys_dup3(int oldfd, int newfd, int flags);                /* dup w/ O_CLOEXEC; -1 if old==new (M1218) */
 long sys_close_range(unsigned lo, unsigned hi, int flags);     /* close fds in [lo,hi]; 0/-1 (M1218) */

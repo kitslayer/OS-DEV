@@ -417,7 +417,7 @@ int  sys_mkdirat(int dirfd, const char *path, int mode) { return (int)do_syscall
 int  sys_fstatat(int dirfd, const char *path, struct statx *st, int flags) { return (int)do_syscall4(SYS_fstatat, dirfd, (long)path, (long)st, flags); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
-long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }
+long sys_timerfd_settime(int fd, long delay_ms, long interval_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, interval_ms); }
 long sys_fcntl(int fd, int cmd, long arg) { return do_syscall(SYS_fcntl, fd, cmd, arg); }
 int  sys_dup3(int oldfd, int newfd, int flags) { return (int)do_syscall(SYS_dup3, oldfd, newfd, flags); }
 long sys_close_range(unsigned lo, unsigned hi, int flags) { return do_syscall(SYS_close_range, (long)lo, (long)hi, flags); }

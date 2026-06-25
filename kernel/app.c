@@ -3228,8 +3228,15 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
         if (max < 8) return -1;
         long exp = a->fd[fd].off;
         if (exp != 0 && (uint64_t)timer_ms() >= (uint64_t)exp) {
-            for (int i = 0; i < 8; i++) ((char *)buf)[i] = (i == 0) ? 1 : 0;   /* count = 1 (little-endian u64) */
-            a->fd[fd].off = 0;                                                 /* one-shot: disarm */
+            long interval = a->fd[fd].obj;                                     /* periodic interval (ms); 0 = one-shot */
+            uint64_t count = 1;
+            if (interval > 0) {                                               /* periodic: count missed firings + re-arm */
+                count += ((uint64_t)timer_ms() - (uint64_t)exp) / (uint64_t)interval;
+                a->fd[fd].off = exp + (long)(count * (uint64_t)interval);      /* next future expiry */
+            } else {
+                a->fd[fd].off = 0;                                            /* one-shot: disarm */
+            }
+            for (int i = 0; i < 8; i++) ((char *)buf)[i] = (char)(count >> (i * 8));   /* expiration count (LE u64) */
             return 8;
         }
         return 0;                                                             /* not expired yet */
@@ -3497,22 +3504,25 @@ long app_ftruncate(int fd, long len) {
     m->size = n;
     return 0;
 }
-/* timerfd (M1217): a pollable one-shot timer as an fd. The absolute expiry (ms,
- * 0 = disarmed) lives in the fd's own `off` field — no separate object, so fork
- * copies it and close needs no teardown. read() returns the 8-byte expiration
- * count (1) once expired, then disarms; poll() reports POLLIN at expiry. */
+/* timerfd (M1217; periodic M1302): a pollable timer as an fd. The absolute expiry
+ * (ms, 0 = disarmed) lives in the fd's own `off` field and the periodic interval
+ * (ms, 0 = one-shot) in `obj` — no separate object, so fork copies them and close
+ * needs no teardown. read() returns the 8-byte expiration count; a periodic timer
+ * re-arms to its next firing (count = firings missed since the last read), a
+ * one-shot disarms; poll() reports POLLIN at/after expiry. */
 int app_timerfd_create(void) {
     struct app *a = cur(); if (!a) return -1;
     int fd = -1;
     for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
     if (fd < 0) return -1;
-    a->fd[fd] = (struct fdent){ 1, 4, 0, 0, {0}, 0 };       /* used, type=timerfd, off=0 (disarmed) */
+    a->fd[fd] = (struct fdent){ 1, 4, 0, 0, {0}, 0 };       /* used, type=timerfd, off=0 disarmed, obj=0 one-shot */
     return fd;
 }
-long app_timerfd_settime(int fd, long delay_ms) {
+long app_timerfd_settime(int fd, long delay_ms, long interval_ms) {
     struct app *a = cur();
     if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 4) return -1;
     a->fd[fd].off = (delay_ms <= 0) ? 0 : (long)(timer_ms() + (uint64_t)delay_ms);   /* absolute expiry; <=0 disarms */
+    a->fd[fd].obj = (delay_ms > 0 && interval_ms > 0) ? (int)interval_ms : 0;         /* periodic interval (ms); 0 = one-shot */
     return 0;
 }
 /* eventfd (M1242): a pollable u64-counter fd. The counter lives in the fd's own

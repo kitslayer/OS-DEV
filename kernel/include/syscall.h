@@ -209,7 +209,7 @@
 #define SYS_rename       192   /* (oldpath, newpath) -> rename/move within one ext2 mount; 0/-1 (M1213) */
 #define SYS_prlimit      193   /* (pid, resource, newval, do_set) -> get/set a process's rlimit; old value (M1214) */
 #define SYS_timerfd_create  194  /* () -> a pollable one-shot timer fd (>=3); -1 (M1217) */
-#define SYS_timerfd_settime 195  /* (fd, delay_ms) -> arm/disarm a timerfd; 0/-1 (M1217) */
+#define SYS_timerfd_settime 195  /* (fd, delay_ms, interval_ms) -> arm/disarm a timerfd (interval>0 = periodic); 0/-1 (M1217, periodic M1302) */
 #define SYS_fcntl        196   /* (fd, cmd, arg) -> F_GETFD/SETFD/DUPFD/DUPFD_CLOEXEC (M1218) */
 #define SYS_dup3         197   /* (oldfd, newfd, flags) -> dup w/ O_CLOEXEC; -1 if old==new (M1218) */
 #define SYS_close_range  198   /* (lo, hi, flags) -> close fds in [lo,hi]; 0/-1 (M1218) */
