@@ -1369,6 +1369,12 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)ready;
         break;
     }
+    case SYS_splice:                       /* zero-copy pipe->pipe move, consuming the source (M1211) */
+        r->rax = (uint64_t)app_splice((int)r->rdi, (int)r->rsi, (unsigned long)r->rdx);
+        break;
+    case SYS_tee:                          /* duplicate pipe->pipe without consuming the source (M1211) */
+        r->rax = (uint64_t)app_tee((int)r->rdi, (int)r->rsi, (unsigned long)r->rdx);
+        break;
     case SYS_signalfd:                     /* route masked signals to /proc/self/sigfd (M1126) */
         r->rax = (uint64_t)(int64_t)app_signalfd((uint32_t)r->rdi);
         break;

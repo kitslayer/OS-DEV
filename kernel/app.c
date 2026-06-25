@@ -2827,6 +2827,22 @@ int app_fd_ready(app_t *ap, int fd, int events) {
     }
     return re;
 }
+/* splice(in_fd, out_fd, len): move bytes from a pipe read-end fd to a pipe
+ * write-end fd, entirely in-kernel (no userspace bounce) (M1211). bytes/0/-1. */
+long app_splice(int in_fd, int out_fd, unsigned long len) {
+    struct app *a = cur(); if (!a) return -1;
+    int i = fd_pipe_idx(a, in_fd, 0), o = fd_pipe_idx(a, out_fd, 1);
+    if (i < 0 || o < 0) return -1;
+    return pipe_splice(i, o, len);
+}
+/* tee(in_fd, out_fd, len): copy bytes between two pipe fds without consuming the
+ * source (M1211). bytes/0/-1. */
+long app_tee(int in_fd, int out_fd, unsigned long len) {
+    struct app *a = cur(); if (!a) return -1;
+    int i = fd_pipe_idx(a, in_fd, 0), o = fd_pipe_idx(a, out_fd, 1);
+    if (i < 0 || o < 0) return -1;
+    return pipe_tee(i, o, len);
+}
 int app_seccomp_filter_active(app_t *ap) { return ap && ((struct app *)ap)->seccomp_n > 0; }
 /* Raw verdict for one syscall (M1190; M1192 adds KILL). The program reads ctx
  * fields 0..3 = syscall nr + the low 32 bits of args 0..2 (LDCTX) and RETs:

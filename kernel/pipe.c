@@ -96,6 +96,41 @@ long pipe_write(int idx, const void *buf, unsigned long len) {
     return (long)done;
 }
 
+/* Move up to `max` bytes from pipe `in` to pipe `out`, ring-to-ring, with no
+ * userspace bounce (splice, M1211). Non-blocking: transfers only what's buffered
+ * in `in` and fits in `out` right now. Consumes from `in`. Returns bytes moved
+ * (0 = in empty / out full / EOF); -1 on a bad/identical index. */
+long pipe_splice(int in, int out, unsigned long max) {
+    struct kpipe *pi = pp(in), *po = pp(out); if (!pi || !po || in == out) return -1;
+    long n = 0;
+    while ((unsigned long)n < max && p_cnt(pi) > 0 && p_spc(po) > 0) {
+        po->b[po->head] = pi->b[pi->tail];
+        po->head = (po->head + 1) % PBUF;
+        pi->tail = (pi->tail + 1) % PBUF;
+        n++;
+    }
+    if (n) {
+        if (po->rw) { task_wake(po->rw); po->rw = 0; }           /* dest now has data */
+        if (pi->ww) { task_wake(pi->ww); pi->ww = 0; }           /* source now has room */
+    }
+    return n;
+}
+/* Copy up to `max` bytes from pipe `in` to pipe `out` WITHOUT consuming `in`
+ * (tee, M1211): the source stays fully readable. Non-blocking. Returns bytes
+ * copied (0 = nothing buffered / out full); -1 on a bad/identical index. */
+long pipe_tee(int in, int out, unsigned long max) {
+    struct kpipe *pi = pp(in), *po = pp(out); if (!pi || !po || in == out) return -1;
+    long n = 0; int t = pi->tail;
+    while ((unsigned long)n < max && t != pi->head && p_spc(po) > 0) {
+        po->b[po->head] = pi->b[t];
+        po->head = (po->head + 1) % PBUF;
+        t = (t + 1) % PBUF;
+        n++;
+    }
+    if (n && po->rw) { task_wake(po->rw); po->rw = 0; }          /* dest now has data */
+    return n;
+}
+
 void pipe_open_end(int idx, int write_end) {
     struct kpipe *p = pp(idx); if (!p) return;
     if (write_end) { p->w_open++; p->had_writer = 1; } else p->r_open++;

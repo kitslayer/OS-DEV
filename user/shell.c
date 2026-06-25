@@ -2491,6 +2491,34 @@ static int run_command(char *line, char *cwd) {
                          : "polltest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "splicetest")) {  /* splice/tee: zero-copy pipe->pipe movement (M1211) */
+            int ok = 1, a[2], b[2];
+            if (sys_pipe(a) != 0 || sys_pipe(b) != 0) { print("splicetest: pipe() failed\n"); g_status = 1; }
+            else {
+                /* splice: move "hello world" from a -> b, CONSUMING a */
+                sys_fdwrite(a[1], "hello world", 11);
+                if (sys_splice(a[0], b[1], 100) != 11) ok = 0;
+                char buf[32]; long n = sys_fdread(b[0], buf, sizeof buf);
+                if (!(n == 11 && buf[0] == 'h' && buf[10] == 'd')) ok = 0;
+                /* the source is now drained (splice consumed it): poll says not readable */
+                struct pollfd pf = { a[0], POLLIN, 0 };
+                if (sys_poll(&pf, 1, 0) != 0) ok = 0;
+                sys_fdclose(a[0]); sys_fdclose(a[1]); sys_fdclose(b[0]); sys_fdclose(b[1]);
+                /* tee: copy "abc" from c -> d WITHOUT consuming c */
+                int c[2], d[2];
+                if (sys_pipe(c) == 0 && sys_pipe(d) == 0) {
+                    sys_fdwrite(c[1], "abc", 3);
+                    if (sys_tee(c[0], d[1], 100) != 3) ok = 0;
+                    char e[8]; long dn = sys_fdread(d[0], e, sizeof e);   /* dest got the copy */
+                    if (!(dn == 3 && e[0] == 'a' && e[2] == 'c')) ok = 0;
+                    char f[8]; long cn = sys_fdread(c[0], f, sizeof f);   /* source STILL readable */
+                    if (!(cn == 3 && f[0] == 'a' && f[2] == 'c')) ok = 0;
+                    sys_fdclose(c[0]); sys_fdclose(c[1]); sys_fdclose(d[0]); sys_fdclose(d[1]);
+                } else ok = 0;
+                print(ok ? "splice/tee: 11B spliced (src drained) + 3B teed (src preserved) -- OK\n"
+                         : "splicetest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

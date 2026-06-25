@@ -201,6 +201,8 @@
 #define SYS_sigprocmask  184   /* (how, set) -> block/unblock signals; returns the old mask (M1208) */
 #define SYS_sigpending   185   /* () -> the pending (raised-but-blocked) signal set (M1209) */
 #define SYS_poll         186   /* (struct pollfd*, nfds, timeout_ms) -> # ready, 0 on timeout, -1 (M1210) */
+#define SYS_splice       187   /* (in_fd, out_fd, len) -> move bytes pipe->pipe in-kernel; bytes/0/-1 (M1211) */
+#define SYS_tee          188   /* (in_fd, out_fd, len) -> copy bytes pipe->pipe w/o consuming src; bytes/0/-1 (M1211) */
 
 /* poll(2) readiness multiplexing over the fd table (M1210). `events`/`revents`
  * are bitmasks; the kernel sets revents to the subset that won't block now.
