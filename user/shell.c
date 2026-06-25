@@ -2551,6 +2551,15 @@ static int run_command(char *line, char *cwd) {
                          : "memfdtest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "prlimittest")) {  /* prlimit(2) get/set + /proc/<pid>/limits (M1214) */
+            sys_prlimit(0, RLIMIT_NPROC, 7, 1);              /* set self's NPROC limit = 7 */
+            long got = sys_prlimit(0, RLIMIT_NPROC, 0, 0);   /* query it back */
+            char lb[512]; long n = sys_readfile("/proc/self/limits", lb, sizeof lb - 1);
+            int has7 = 0; for (long i = 0; i < n; i++) if (lb[i] == '7') { has7 = 1; break; }
+            int ok = (got == 7) && (n > 0) && has7;          /* round-trip + the file rendered it */
+            print(ok ? "prlimit: set self NPROC=7, query returns 7, /proc/self/limits shows it -- OK\n"
+                     : "prlimittest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

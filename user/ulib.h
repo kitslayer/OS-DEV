@@ -132,6 +132,7 @@ int  sys_unveil(const char *path, const char *perms);   /* limit filesystem visi
 int  sys_symlink(const char *linkpath, const char *target);   /* create a symlink under /tmp; 0/-1 */
 int  sys_link(const char *oldpath, const char *newpath);       /* hard link (same ext2 mount); 0/-1 (M1207) */
 int  sys_rename(const char *oldpath, const char *newpath);     /* rename/move within one ext2 mount; 0/-1 (M1213) */
+long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_jail(const char *prog, const char *promises, const char *path);   /* spawn prog pre-confined (pledge + optional unveil) */
 long sys_find(const char *want, void *buf, unsigned long len);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);

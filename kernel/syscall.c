@@ -1568,6 +1568,9 @@ void syscall_dispatch(struct registers *r) {
         if (!app_unveil_ok(self, (const char *)r->rsi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_rename_path((const char *)r->rdi, (const char *)r->rsi);
         break;
+    case SYS_prlimit:                      /* (pid, resource, newval, do_set) -> old/current value (M1214) */
+        r->rax = (uint64_t)app_prlimit((int)r->rdi, (int)r->rsi, (uint64_t)r->rdx, (int)r->r10);
+        break;
     case SYS_sigprocmask:                  /* (how, set): block/unblock signals; returns the old mask (M1208) */
         r->rax = (uint64_t)app_sigprocmask((int)r->rdi, (uint32_t)r->rsi);
         break;

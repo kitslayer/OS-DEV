@@ -855,6 +855,48 @@ uint64_t app_getrlimit(int resource) {
                  (resource == RLIMIT_DATA)  ? a->rlim_data  : 0;
     return v ? v : RLIM_INFINITY;
 }
+/* prlimit (M1214): get — and optionally set — ANOTHER process's resource limit
+ * (the cross-process complement of get/setrlimit). pid==0 means the caller.
+ * Returns the old/current value (RLIM_INFINITY if unset / bad pid / bad
+ * resource). Single-user OS: any pid is addressable. */
+long app_prlimit(int pid, int resource, uint64_t newval, int do_set) {
+    struct app *t = pid ? app_by_pid(pid) : cur();
+    if (!t) return (long)RLIM_INFINITY;
+    uint64_t *slot = (resource == RLIMIT_NPROC) ? &t->rlim_nproc :
+                     (resource == RLIMIT_AS)    ? &t->rlim_as :
+                     (resource == RLIMIT_DATA)  ? &t->rlim_data : 0;
+    if (!slot) return (long)RLIM_INFINITY;
+    uint64_t old = *slot ? *slot : RLIM_INFINITY;       /* 0 stored = unlimited */
+    if (do_set) *slot = (newval == RLIM_INFINITY) ? 0 : newval;
+    return (long)old;
+}
+/* /proc/<pid>/limits (M1214): the per-process resource limits the kernel
+ * actually enforces, as a Linux-style table (0/unset shows "unlimited"). */
+static int lim_dec(char *b, int p, int max, uint64_t v) {
+    char t[24]; int n = 0;
+    if (v == 0) t[n++] = '0';
+    while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+    while (n > 0 && p < max - 1) b[p++] = t[--n];
+    return p;
+}
+int app_format_limits(app_t *ap, char *b, int max) {
+    struct app *a = (struct app *)ap;
+    if (!a || max <= 0) return 0;
+    int p = 0;
+    p = maps_str(b, p, max, "Limit           Value\n");
+    struct { const char *name; uint64_t v; } row[3] = {
+        { "RLIMIT_AS       ", a->rlim_as },
+        { "RLIMIT_DATA     ", a->rlim_data },
+        { "RLIMIT_NPROC    ", a->rlim_nproc },
+    };
+    for (int i = 0; i < 3; i++) {
+        p = maps_str(b, p, max, row[i].name);
+        if (row[i].v == 0) p = maps_str(b, p, max, "unlimited");
+        else                p = lim_dec(b, p, max, row[i].v);
+        p = maps_str(b, p, max, "\n");
+    }
+    return p;
+}
 /* Total bytes currently held by the app's mmap VMAs (for RLIMIT_AS, M1164). */
 static uint64_t app_vma_total(struct app *a) {
     uint64_t t = 0;
