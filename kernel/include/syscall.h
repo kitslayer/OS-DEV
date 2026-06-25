@@ -225,6 +225,20 @@
 #define PR_SET_NAME 15
 #define PR_GET_NAME 16
 #define SYS_set_tid_address 208  /* (tidptr) -> register clear_child_tid (futex-on-exit); returns the tid (M1226) */
+#define SYS_waitid       209   /* (idtype, id, siginfo*, options) -> 0/-1; WNOHANG = non-blocking reap (M1227) */
+#define SIGCHLD 17
+/* waitid (M1227): minimal siginfo + idtype/options/si_code constants. */
+struct siginfo { int si_signo, si_errno, si_code, si_pid, si_uid, si_status; };
+#define P_ALL   0
+#define P_PID   1
+#define P_PGID  2
+#define P_PIDFD 3
+#define WNOHANG     1
+#define WSTOPPED    2
+#define WEXITED     4
+#define WCONTINUED  8
+#define CLD_EXITED  1
+#define CLD_KILLED  2
 /* access(2) mode bits (M1224). */
 #define F_OK 0
 #define X_OK 1

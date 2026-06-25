@@ -2801,6 +2801,19 @@ static int run_command(char *line, char *cwd) {
                          : "jointest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "waitidtest")) {  /* waitid(2) + WNOHANG (M1227) */
+            int ok = 1;
+            long pid = sys_fork();
+            if (pid == 0) { for (volatile long i = 0; i < 30000000; i++) {} sys_exit(42); }   /* child: spin then exit 42 */
+            struct siginfo si;
+            si.si_pid = -1;
+            long r1 = sys_waitid(P_PID, (int)pid, &si, WNOHANG | WEXITED);   /* (A) child still running */
+            if (!(r1 == 0 && si.si_pid == 0)) ok = 0;                        /* WNOHANG: nothing reapable yet */
+            long r2 = sys_waitid(P_PID, (int)pid, &si, WEXITED);             /* (B) block until it exits */
+            if (!(r2 == 0 && si.si_pid == (int)pid && si.si_status == 42 && si.si_code == CLD_EXITED)) ok = 0;
+            print(ok ? "waitid: WNOHANG=nothing-yet (si_pid=0), then blocking reap si_status=42 CLD_EXITED -- OK\n"
+                     : "waitidtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -290,7 +290,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_GFX;
     case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace:
     case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_killpg:
-    case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
+    case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_waitid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
     case SYS_clone: case SYS_join:
         return PL_PROC;
     case SYS_mmap: case SYS_munmap: case SYS_mremap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
@@ -1017,6 +1017,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_set_tid_address:              /* (tidptr) -> register clear_child_tid; returns the tid (M1226) */
         r->rax = (uint64_t)app_set_tid_address(r->rdi);
+        break;
+    case SYS_waitid:                       /* (idtype, id, siginfo*, options) -> 0/-1 (M1227) */
+        if (r->rdx && !ubuf(r->rdx, sizeof(struct siginfo))) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_waitid((int)r->rdi, (int)r->rsi, (struct siginfo *)r->rdx, (int)r->r10);
         break;
     case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
         if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }

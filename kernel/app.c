@@ -970,6 +970,39 @@ long app_waitpid(int pid, int *status) {
         me->waiting = 0;
     }
 }
+/* waitid (M1227): the superset of waitpid — supports WNOHANG (non-blocking reap,
+ * so an event loop can supervise children) and fills a siginfo. idtype P_PID (a
+ * specific child), P_ALL (any), or P_PIDFD (a pidfd carrying the pid). Returns 0
+ * on success (result in *si; si_pid==0 means WNOHANG found nothing ready), or -1
+ * if there are no matching children. */
+long app_waitid(int idtype, int id, struct siginfo *si, int options) {
+    struct app *me = cur(); if (!me) return -1;
+    int want = id;
+    if (idtype == P_PIDFD) {                       /* translate a pidfd -> its target pid */
+        if (id < 0 || id >= APP_NFD || !me->fd[id].used || me->fd[id].type != 7) return -1;
+        want = me->fd[id].obj; idtype = P_PID;
+    }
+    for (;;) {
+        struct app *z = 0; int have = 0;
+        for (int i = 0; i < MAX_APPS; i++) {
+            struct app *c = &apps[i];
+            if (!c->used || c->parent != me->pid) continue;
+            if (idtype == P_PID && c->pid != want) continue;
+            have = 1;
+            if (c->zombie) { z = c; break; }
+        }
+        if (z) {
+            int code = z->exit_code, cpid = z->pid;
+            z->used = 0; z->zombie = 0;             /* collect the zombie slot */
+            if (si) { si->si_signo = SIGCHLD; si->si_errno = 0; si->si_code = CLD_EXITED;
+                      si->si_pid = cpid; si->si_uid = 0; si->si_status = code; }
+            return 0;
+        }
+        if (!have) return -1;                      /* no matching children */
+        if (options & WNOHANG) { if (si) { si->si_pid = 0; si->si_signo = SIGCHLD; } return 0; }
+        me->waiting = 1; task_block(); me->waiting = 0;
+    }
+}
 
 /* Reclaim a self-exited app's resources. Called by the window manager from ITS
  * own context (not the app's), so it can free the app's task_t + 256 KB kernel

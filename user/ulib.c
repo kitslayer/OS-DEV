@@ -280,6 +280,7 @@ long sys_getdents64(void *buf, unsigned long max, int start) { return do_syscall
 int  sys_access(const char *path, int amode) { return (int)do_syscall(SYS_access, (long)path, amode, 0); }
 long sys_prctl(int option, unsigned long arg2) { return do_syscall(SYS_prctl, option, (long)arg2, 0); }
 long sys_set_tid_address(void *tidptr) { return do_syscall(SYS_set_tid_address, (long)tidptr, 0, 0); }
+int  sys_waitid(int idtype, int id, struct siginfo *si, int options) { return (int)do_syscall4(SYS_waitid, idtype, id, (long)si, options); }
 int  sys_jail(const char *prog, const char *promises, const char *path) { return (int)do_syscall(SYS_jail, (long)prog, (long)promises, (long)path); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }
