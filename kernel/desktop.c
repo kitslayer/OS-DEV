@@ -190,8 +190,9 @@ static void darken(int x, int y, int w, int h, int pct) {
             fb_pixel(x + i, y + j, r<<16 | g<<8 | b);
         }
 }
-/* Corner-pixel inset for a small rounded radius (index 0 = outermost row). */
-static const int corner[] = { 4, 2, 1, 1 };
+/* Corner-pixel inset per row from the corner (index 0 = outermost row): a
+ * quarter-circle of radius 8 for noticeably rounder, more modern window corners. */
+static const int corner[] = { 8, 5, 3, 2, 2, 1, 1, 1 };
 #define CORNER_R ((int)(sizeof(corner)/sizeof(corner[0])))
 
 #define WP_TOP 0x183A5C
@@ -415,9 +416,14 @@ static void draw_content(const window_t *w, int focused) {
 static void draw_window(const window_t *w, int focused) {
     int x = w->x, y = w->y, ww = w->w, hh = w->h;
 
-    /* soft drop shadow: two darkened, offset layers */
-    darken(x + 8, y + 9, ww, hh, 62);
-    darken(x + 4, y + 5, ww, hh, 78);
+    /* soft drop shadow: feathered, offset layers (down-right) — darker near the
+     * window edge and fading out, for real depth. The layers overlap and darken
+     * multiplicatively, so the band nearest the window is darkest and the outer
+     * fringe is faint, approximating a Gaussian-ish soft shadow. */
+    darken(x + 11, y + 13, ww, hh, 90);
+    darken(x + 8,  y + 10, ww, hh, 86);
+    darken(x + 5,  y + 7,  ww, hh, 82);
+    darken(x + 2,  y + 4,  ww, hh, 78);
 
     /* body */
     fb_fill_rect(x, y, ww, hh, w->body);
@@ -490,11 +496,33 @@ static uint32_t *decode_wallpaper(const char *name) {
     return bmp;
 }
 
-/* Load WALL.PNG into wallpaper_bmp at boot (now scaled to fit, so a non-screen-
- * size WALL.PNG works too). Failure leaves wallpaper_bmp NULL, so wallpaper_at()
- * falls back to the gradient. */
+/* Procedural desktop background (visual refresh): a deep corner-to-corner blue
+ * gradient with a soft radial vignette + a gentle glow above center. Integer-only
+ * (the kernel has no FPU). Looks clean + modern AND needs no image on disk, so the
+ * desktop looks good even on bare metal where WALL.PNG may be absent. */
+static void make_wallpaper(uint32_t *buf, int w, int h) {
+    uint32_t c0 = 0x0A1730, c1 = 0x21528F;        /* deep navy -> lit blue (diagonal) */
+    int cx = w / 2, gy = (h * 38) / 100;          /* glow center, a touch above middle */
+    long far = (long)cx * cx + (long)(h - gy) * (h - gy);
+    if (far < 1) far = 1;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            uint32_t base = lerp(c0, c1, x + y, (w + h) - 2);     /* diagonal gradient */
+            long dx = x - cx, dy = y - gy, d2 = dx * dx + dy * dy;
+            int dim = (int)(d2 * 46 / far); if (dim > 55) dim = 55;   /* radial vignette */
+            int r = (int)(((base >> 16) & 0xFF) * (100 - dim) / 100);
+            int g = (int)(((base >>  8) & 0xFF) * (100 - dim) / 100);
+            int b = (int)(( base        & 0xFF) * (100 - dim) / 100);
+            buf[(size_t)y * w + x] = (uint32_t)(r << 16 | g << 8 | b);
+        }
+}
+
+/* The boot desktop background. A clean PROCEDURAL gradient is the default (works
+ * with no image on disk, incl. bare metal); a user can still load a custom image
+ * at runtime with the `wallpaper` shell builtin (desktop_set_wallpaper). */
 static void load_wallpaper(void) {
-    wallpaper_bmp = decode_wallpaper("WALL.PNG");
+    wallpaper_bmp = kmalloc((size_t)screen_w * screen_h * 4);
+    if (wallpaper_bmp) make_wallpaper(wallpaper_bmp, screen_w, screen_h);
 }
 
 /* Change the desktop wallpaper at runtime (the `wallpaper` shell builtin, via
