@@ -545,7 +545,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -4265,6 +4265,19 @@ static int run_command(char *line, char *cwd) {
             char nm[64]; int i = 0; while (*p && *p != ' ' && i < 63) nm[i++] = *p++; nm[i] = 0; sh_unprot_buf(nm);
             if (i > 0 && sys_sethostname(nm, (unsigned long)i) == 0) { print("hostname set to "); print(nm); print("\n"); }
             else { print("usage: hostname [NAME]\n"); g_status = 1; }
+        } else if (streq(line, "free")) {       /* memory summary (kB), parsed from /proc/meminfo */
+            long n; char *m = slurp("/proc/meminfo", &n);
+            long v[3] = { 0, 0, 0 }; int vi = 0;            /* MemTotal, MemFree, MemUsed (gen_meminfo order) */
+            if (m) {
+                for (int i = 0; m[i] && vi < 3; ) {
+                    if (m[i] == ':') { i++; while (m[i] == ' ') i++; long x = 0; while (m[i] >= '0' && m[i] <= '9') x = x * 10 + (m[i++] - '0'); v[vi++] = x; }
+                    else i++;
+                }
+                free(m);
+            }
+            print("Mem:  total "); printl(v[0]); print(" kB,  used "); printl(v[2]); print(" kB,  free "); printl(v[1]); print(" kB\n");
+        } else if (streq(line, "id")) {
+            print("uid=0(root) gid=0(root)\n");             /* single-user */
         } else if (streq(line, "clear")) {
             sys_clear();
         } else if (streq(line, "reboot")) {
