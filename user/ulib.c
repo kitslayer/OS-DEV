@@ -288,6 +288,7 @@ int  sys_eventfd(unsigned initval, int flags) { return (int)do_syscall(SYS_event
 int  sys_chown(const char *path, int uid, int gid) { return (int)do_syscall(SYS_chown, (long)path, uid, gid); }
 int  sys_fchown(int fd, int uid, int gid) { return (int)do_syscall(SYS_fchown, fd, uid, gid); }
 int  sys_sched_getcpu(void) { return (int)do_syscall(SYS_sched_getcpu, 0, 0, 0); }
+long sys_getcwd(char *buf, unsigned long size) { return do_syscall(SYS_getcwd, (long)buf, (long)size, 0); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }

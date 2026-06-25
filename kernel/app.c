@@ -75,6 +75,7 @@ struct app {
      * subpath + the boot-FS (fat32) cwd cluster. The VFS keeps the live cwd in its
      * own globals and syncs them to/from here on each app switch. */
     int      cwd_synth; char cwd_sub[128]; uint32_t cwd_fat;
+    char     cwd_path[160];              /* canonical absolute cwd string, for getcwd(2) (M1248) */
 #define APP_NSIG 32
     uint64_t sig_handler[APP_NSIG];      /* ring-3 signal handlers (0 = none) */
     uint64_t sig_restorer;               /* ulib trampoline that calls sigreturn */
@@ -494,6 +495,48 @@ int app_format_pagemap(app_t *a, char *b, int max) {
 }
 
 static struct app *cur(void) { return (struct app *)task_self()->proc; }
+
+/* getcwd (M1248): canonicalize an absolute-ish path (resolve "."/".."/"//") into
+ * out. Component-stack: push names, pop on "..". Pure string work — the cwd_path
+ * is cosmetic-for-getcwd (the real cwd is the component state above), so a bad
+ * input can only make getcwd wrong, never corrupt an open. */
+static void app_norm_abs(const char *in, char *out, int max) {
+    int st[64], ln[64], nc = 0, i = 0;
+    while (in[i]) {
+        while (in[i] == '/') i++;
+        if (!in[i]) break;
+        int s = i; while (in[i] && in[i] != '/') i++;
+        int len = i - s;
+        if (len == 1 && in[s] == '.') continue;
+        if (len == 2 && in[s] == '.' && in[s + 1] == '.') { if (nc > 0) nc--; continue; }
+        if (nc < 64) { st[nc] = s; ln[nc] = len; nc++; }
+    }
+    int p = 0;
+    if (nc == 0) { if (max > 1) { out[0] = '/'; out[1] = 0; } else if (max > 0) out[0] = 0; return; }
+    for (int c = 0; c < nc; c++) { if (p < max - 1) out[p++] = '/'; for (int k = 0; k < ln[c] && p < max - 1; k++) out[p++] = in[st[c] + k]; }
+    out[p] = 0;
+}
+/* Update the calling process's cwd_path after a successful chdir(rel). */
+void app_chdir_track(const char *rel) {
+    struct app *a = cur(); if (!a || !rel) return;
+    const char *base = a->cwd_path[0] ? a->cwd_path : "/";
+    char joined[288]; int t = 0;
+    if (rel[0] == '/') { for (int i = 0; rel[i] && t < 287; i++) joined[t++] = rel[i]; }
+    else { for (int i = 0; base[i] && t < 287; i++) joined[t++] = base[i];
+           if (t < 287) joined[t++] = '/';
+           for (int i = 0; rel[i] && t < 287; i++) joined[t++] = rel[i]; }
+    joined[t] = 0;
+    app_norm_abs(joined, a->cwd_path, (int)sizeof a->cwd_path);
+}
+/* getcwd: copy the cwd string out. Returns its length, or -1 if it won't fit. */
+long app_getcwd(char *buf, unsigned long max) {
+    struct app *a = cur(); if (!a || max == 0) return -1;
+    const char *p = a->cwd_path[0] ? a->cwd_path : "/";
+    unsigned long n = 0; while (p[n]) n++;
+    if (n + 1 > max) return -1;
+    for (unsigned long i = 0; i <= n; i++) buf[i] = p[i];
+    return (long)n;
+}
 void app_io_account(int is_write, long n) {   /* tally fd read/write bytes for /proc/<pid>/io (M1244) */
     struct app *a = cur();
     if (a && n > 0) { if (is_write) a->wchar += (uint64_t)n; else a->rchar += (uint64_t)n; }

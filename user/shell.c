@@ -3109,6 +3109,18 @@ static int run_command(char *line, char *cwd) {
                           print("wchan: a pipe-blocked child (/proc/"); printl(ctid); print("/wchan) is parked in '"); print(wb); print("' -- OK\n"); }
             }
             if (!ok) { print("pidwchantest: VERIFY FAILED\n"); g_status = 1; }
+        } else if (streq(line, "getcwdtest")) {   /* getcwd(2) (M1248) */
+            int ok = 1; char cb[160];
+            sys_chdir("/tmp");
+            if (sys_getcwd(cb, sizeof cb) <= 0 || !streq(cb, "/tmp")) ok = 0;
+            sys_chdir("/proc");
+            if (sys_getcwd(cb, sizeof cb) <= 0 || !streq(cb, "/proc")) ok = 0;
+            sys_chdir("/");
+            if (sys_getcwd(cb, sizeof cb) <= 0 || !streq(cb, "/")) ok = 0;
+            if (sys_getcwd(cb, 1) != -1) ok = 0;   /* "/" + NUL needs 2 bytes -> size 1 is ERANGE */
+            print(ok ? "getcwd: cd /tmp->'/tmp', /proc->'/proc', /->'/'; tiny buf -> -1 -- OK\n"
+                     : "getcwdtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -277,7 +277,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_open:
-    case SYS_readlink: case SYS_statfs:
+    case SYS_readlink: case SYS_statfs: case SYS_getcwd:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
     case SYS_utimens: case SYS_futimens: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
@@ -729,10 +729,17 @@ void syscall_dispatch(struct registers *r) {
         if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_mkdir((const char *)r->rdi);
         break;
-    case SYS_chdir:
+    case SYS_chdir: {
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         if (!app_unveil_ok(self, (const char *)r->rdi, 0)) { r->rax = (uint64_t)-1; break; }
-        r->rax = (uint64_t)(int64_t)vfs_chdir((const char *)r->rdi);
+        long cr = vfs_chdir((const char *)r->rdi);
+        if (cr == 0) app_chdir_track((const char *)r->rdi);   /* track the cwd string for getcwd (M1248) */
+        r->rax = (uint64_t)(int64_t)cr;
+        break;
+    }
+    case SYS_getcwd:                       /* (buf, size) -> the absolute cwd; length/-1 (M1248) */
+        if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_getcwd((char *)r->rdi, (unsigned long)r->rsi);
         break;
     case SYS_tree:
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
