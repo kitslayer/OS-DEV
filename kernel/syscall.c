@@ -1526,6 +1526,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_sigprocmask:                  /* (how, set): block/unblock signals; returns the old mask (M1208) */
         r->rax = (uint64_t)app_sigprocmask((int)r->rdi, (uint32_t)r->rsi);
         break;
+    case SYS_sigpending:                   /* (): the pending (raised-but-blocked) signal set (M1209) */
+        r->rax = (uint64_t)app_sigpending();
+        break;
     case SYS_jail: {                       /* rdi=prog, rsi=promises, rdx=path (0=none): spawn pre-confined */
         if (!ustr(r->rdi) || !ustr(r->rsi) || (r->rdx && !ustr(r->rdx))) { r->rax = (uint64_t)-1; break; }
         uint32_t mask;

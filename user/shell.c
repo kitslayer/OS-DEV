@@ -2830,11 +2830,12 @@ static int run_command(char *line, char *cwd) {
             sys_raise(10);                              /* raise it -> pending, but blocked (handler must NOT run) */
             sys_sleep(60);                              /* timer ticks fire app_deliver_pending; blocked -> skipped */
             int blocked_ok = (g_sigmask_got == 0);
+            int pending_ok = (sys_sigpending() & (1u << 10)) != 0;   /* sigpending sees it queued (M1209) */
             sys_sigprocmask(SIG_UNBLOCK, 1u << 10);     /* unblock -> the pending signal now delivers */
             for (int i = 0; i < 20 && !g_sigmask_got; i++) sys_sleep(20);   /* let a tick deliver it */
             int delivered_ok = (g_sigmask_got == 1);
-            if (blocked_ok && delivered_ok)
-                print("sigprocmask: blocked signal stayed pending (handler NOT run), then delivered on unblock -- OK\n");
+            if (blocked_ok && pending_ok && delivered_ok)
+                print("sigprocmask: blocked signal stays pending (sigpending sees it, handler NOT run), then delivered on unblock -- OK\n");
             else { print("sigprocmask: FAILED\n"); g_status = 1; }
         } else if (streq(line, "scores")) {
             /* a personal leaderboard: the best each game saved to its *.HI file */

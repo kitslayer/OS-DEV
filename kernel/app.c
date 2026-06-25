@@ -2102,6 +2102,13 @@ uint32_t app_sigprocmask(int how, uint32_t set) {
     return old;
 }
 
+/* sigpending (M1209): the set of signals raised on this process but not yet
+ * delivered (because they're blocked) — POSIX sigpending(2). */
+uint32_t app_sigpending(void) {
+    struct app *a = cur();
+    return a ? a->pending_sigs : 0;
+}
+
 /* --- Job control: process groups, sessions, foreground TTY group (M1176) --- */
 int app_setpgid(int pid, int pgid) {
     struct app *me = cur(); if (!me) return -1;

@@ -199,6 +199,7 @@
 #define SYS_bpf_map_get  182   /* (idx) -> read BPF histogram cell idx (M1202) */
 #define SYS_link         183   /* (oldpath, newpath) -> hard link (same ext2 mount); 0/-1 (M1207) */
 #define SYS_sigprocmask  184   /* (how, set) -> block/unblock signals; returns the old mask (M1208) */
+#define SYS_sigpending   185   /* () -> the pending (raised-but-blocked) signal set (M1209) */
 
 /* sigprocmask `how` values (M1208) */
 #define SIG_BLOCK   0   /* add `set` to the blocked mask */
