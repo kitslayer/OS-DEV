@@ -127,6 +127,28 @@ static int cmdline_has(const char *hay, const char *needle) {
     return 0;
 }
 
+/* CPU security hardening (M1269): enable SMEP (CR4 bit 20 — the kernel #PFs if it
+ * ever tries to EXECUTE a ring-3 page) and UMIP (CR4 bit 11 — ring-3
+ * SGDT/SIDT/SLDT/STR/SMSW #GP, closing those kernel-address info leaks), each
+ * gated on CPUID.7:0 support. SMAP (CR4 bit 21) is deliberately NOT set: the
+ * kernel reads/writes user buffers directly (syscall args) without stac/clac,
+ * which SMAP would fault on. BSP only — ring-3 code runs on the BSP. */
+static void cpu_harden(void) {
+    uint32_t a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0u), "c"(0u));
+    if (a < 7) { kprintf("[cpu] CPUID leaf 7 unavailable; no SMEP/UMIP\n"); return; }
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(7u), "c"(0u));
+    int have_smep = (b >> 7) & 1;    /* CPUID.(EAX=7,ECX=0).EBX[7] */
+    int have_umip = (c >> 2) & 1;    /* CPUID.(EAX=7,ECX=0).ECX[2] */
+    uint64_t cr4; __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    if (have_smep) cr4 |= (1ull << 20);
+    if (have_umip) cr4 |= (1ull << 11);
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4) : "memory");
+    uint64_t now; __asm__ volatile("mov %%cr4, %0" : "=r"(now));
+    kprintf("[ ok ] CPU hardening: SMEP=%d UMIP=%d (CR4=%lx)\n",
+            (int)((now >> 20) & 1), (int)((now >> 11) & 1), (unsigned long)now);
+}
+
 void kmain(uint64_t mb_info) {
     console_init();
 
@@ -148,6 +170,7 @@ void kmain(uint64_t mb_info) {
     gdt_init();
     interrupts_init();
     fpu_init();                    /* enable x87 + SSE so userspace can use floating point */
+    cpu_harden();                  /* SMEP + UMIP: kernel can't run ring-3 pages; ring-3 can't SGDT/etc (M1269) */
     timer_init(100);
     keyboard_init();
     interrupts_enable();

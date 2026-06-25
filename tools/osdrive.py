@@ -135,6 +135,7 @@ def main():
     ap.add_argument("--disk2",  default=None, help="attach a 2nd drive (virtio-blk) — auto-mounted as /disk2")
     ap.add_argument("--disk3",  default=None, help="attach a 3rd drive (virtio-blk) — e.g. for a RAID mirror with --disk2")
     ap.add_argument("--hostfwd", default=None, help="QEMU user-net hostfwd spec, e.g. tcp::18080-:80 (inbound to the guest)")
+    ap.add_argument("--cpu", default=None, help="QEMU -cpu model, e.g. max (to expose SMEP/UMIP etc.)")
     ap.add_argument("--out",    default=".")
     ap.add_argument("--boot-timeout", type=float, default=25)
     ap.add_argument("--no-wait", action="store_true")
@@ -156,6 +157,7 @@ def main():
                                      ("mon.sock", "qmp.sock", "serial.log", "shot.ppm"))
     netdev = "user,id=net0" + (",hostfwd=" + args.hostfwd if args.hostfwd else "")
     qcmd = [qemu, "-no-reboot", "-no-shutdown", "-m", "256M", "-smp", "4", "-kernel", args.kernel,
+        ] + (["-cpu", args.cpu] if args.cpu else []) + [
         "-drive", "file=%s,format=raw,if=ide" % args.disk,
         "-netdev", netdev, "-device", "e1000,netdev=net0",
         "-device", "piix3-usb-uhci,id=uhci", "-device", "usb-tablet,bus=uhci.0",

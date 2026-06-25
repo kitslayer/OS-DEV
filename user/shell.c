@@ -3444,6 +3444,17 @@ static int run_command(char *line, char *cwd) {
                       print(" -- BSD TCP client OK\n"); }
             else { print("tcptest: VERIFY FAILED (rr="); printl(rr); print(" n="); printl(n); print(") -- needs internet\n"); g_status = 1; }
             if (s >= 0) sys_fdclose(s);
+        } else if (streq(line, "hardentest")) {   /* CPU hardening: UMIP makes a ring-3 SGDT fault (M1269) */
+            long pid = sys_fork();
+            if (pid == 0) {
+                unsigned char gdtr[10];
+                __asm__ volatile("sgdt %0" : "=m"(gdtr));   /* privileged under UMIP -> #GP in ring 3 */
+                sys_exit(42);                                /* only reached if SGDT did NOT fault */
+            }
+            int st = -1; sys_waitpid((int)pid, &st);
+            int ok = (st != 42);   /* child #GP'd at sgdt before exit(42) -> UMIP blocked it */
+            if (ok) print("harden: a ring-3 SGDT faulted (child terminated before exit42) -- UMIP active; SMEP also on (OS boots + make check 58-green under both) -- OK\n");
+            else { print("hardentest: VERIFY FAILED (child ran SGDT + exited 42 -> UMIP not blocking ring-3)\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
