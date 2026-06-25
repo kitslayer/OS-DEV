@@ -207,6 +207,9 @@ static long gen_shm(char *b, int max) {          /* named shared-memory objects 
 static long gen_bpf(char *b, int max) {          /* eBPF-lite program + run/drop counters (M1127) */
     return bpf_format(b, max);
 }
+static long gen_syscalls(char *b, int max) {     /* syscount: the eBPF tracepoint histogram, named (M1203) */
+    return syscall_histogram_format(b, max);
+}
 static long gen_filesystems(char *b, int max) {
     int p = sapp(b, 0, max, "nodev\tprocfs\nnodev\tdevfs\n      \tfat32\n");
     b[p] = 0; return p;
@@ -339,7 +342,7 @@ static const struct pf proc_files[] = {
     { "kallsyms", gen_kallsyms }, { "net", gen_net }, { "fsevents", gen_fsevents },
     { "profile", gen_profile }, { "ipc", gen_ipc }, { "binds", gen_binds },
     { "bcache", gen_bcache }, { "measure", gen_measure }, { "cas", gen_cas }, { "fw", gen_fw },
-    { "notify", gen_notify }, { "swaps", gen_swaps }, { "shm", gen_shm }, { "events", gen_events }, { "bpf", gen_bpf },
+    { "notify", gen_notify }, { "swaps", gen_swaps }, { "shm", gen_shm }, { "events", gen_events }, { "bpf", gen_bpf }, { "syscalls", gen_syscalls },
 };
 static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))

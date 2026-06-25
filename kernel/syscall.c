@@ -365,6 +365,33 @@ static const char *syscall_name(uint64_t n) {
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
 }
 
+/* /proc/syscalls (M1203): render the eBPF tracepoint histogram (the bpf_map a
+ * loaded count-by-number probe fills, M1202) with syscall NAMES — a syscount /
+ * bpftrace-style "which syscalls are firing" view. Empty until `syscount` loads
+ * the probe. */
+int syscall_histogram_format(char *b, int max) {
+    int p = 0;
+    for (unsigned i = 0; i < BPF_MAP_N && p < max - 40; i++) {
+        uint64_t c = bpf_map_get(i);
+        if (!c) continue;
+        const char *nm = syscall_name(i);
+        int j = 0;
+        while (nm[j] && p < max - 1) b[p++] = nm[j++];
+        while (j++ < 18 && p < max - 1) b[p++] = ' ';      /* pad to a column */
+        char t[20]; int k = 0; uint64_t v = c;
+        if (!v) t[k++] = '0';
+        while (v) { t[k++] = (char)('0' + v % 10); v /= 10; }
+        while (k && p < max - 1) b[p++] = t[--k];
+        if (p < max - 1) b[p++] = '\n';
+    }
+    if (p == 0) {
+        const char *m = "(no syscall trace loaded -- run `syscount` to start counting)\n";
+        for (int z = 0; m[z] && p < max - 1; z++) b[p++] = m[z];
+    }
+    if (p < max) b[p] = 0;
+    return p;
+}
+
 void syscall_dispatch(struct registers *r) {
     app_t *self = app_current();
     vfs_sync_cwd();                     /* make the live cwd this process's own (M1144) */

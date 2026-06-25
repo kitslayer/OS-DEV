@@ -2474,6 +2474,19 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "fifo: mkfifo + open-by-name rendezvous + EOF OK\n" : "fifotest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "syscount") || streq(line, "syscount on")) {   /* syscall profiler: load a count-by-number eBPF probe (M1203) */
+            struct bpf_insn prog[] = {
+                { BPF_LDCTX,  0, 0, 0, 0 },     /* r0 = syscall nr */
+                { BPF_MAPINC, 0, 0, 0, 0 },     /* map[nr]++ */
+                { BPF_LDI,    1, 0, 0, 1 },     /* r1 = 1 */
+                { BPF_RET,    1, 0, 0, 0 },     /* pass */
+            };
+            if (sys_bpf_trace(prog, sizeof prog) == 0)
+                print("syscount: counting syscalls system-wide -- `cat /proc/syscalls` for the histogram, `syscount off` to stop\n");
+            else { print("syscount: failed to load the probe\n"); g_status = 1; }
+        } else if (streq(line, "syscount off")) {
+            sys_bpf_trace(0, 0);
+            print("syscount: stopped (histogram cleared)\n");
         } else if (streq(line, "bpftracetest")) {   /* eBPF syscall tracepoint: count syscalls by number into a BPF map (M1202) */
             /* program: r0 = ctx field 0 (the syscall number); bpf_map[r0]++; return 1 (pass) */
             struct bpf_insn prog[] = {

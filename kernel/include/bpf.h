@@ -51,3 +51,4 @@ long bpf_trace_load(const void *prog, unsigned long bytes); /* verify+install th
 int  bpf_trace_loaded(void);                               /* is a trace program installed? */
 long bpf_trace_run(const struct bpf_ctx *ctx);             /* run it on one syscall enter */
 uint64_t bpf_map_get(unsigned idx);                        /* read a histogram cell (idx & (BPF_MAP_N-1)) */
+int  syscall_histogram_format(char *out, int max);         /* /proc/syscalls: the histogram with syscall names (M1203, defined in syscall.c) */
