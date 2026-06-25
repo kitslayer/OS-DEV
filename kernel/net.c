@@ -47,10 +47,37 @@ static uint16_t inet_checksum(const uint8_t *data, int len) {
     return (uint16_t)~sum;
 }
 
-/* Wait up to `ticks` for a frame; return its length (0 on timeout). */
+/* Loopback (lo, 127.0.0.0/8) — M1264: a virtual interface whose "transmit"
+ * re-injects the frame straight into the receive path, so two in-guest endpoints
+ * can speak IP with NO NIC (and no external host). net_udp_send detects a 127.x
+ * destination and enqueues here instead of arp+nic_send; recv_timeout drains
+ * this ring before polling the real NIC. */
+#define LO_RING 8
+static struct { uint8_t buf[1600]; int len; } lo_ring[LO_RING];
+static int lo_head, lo_tail;
+static void lo_enqueue(const uint8_t *frame, int len) {
+    if (len <= 0 || len > 1600) return;
+    int nxt = (lo_head + 1) % LO_RING;
+    if (nxt == lo_tail) return;                  /* ring full: drop (a real lo would too under flood) */
+    for (int i = 0; i < len; i++) lo_ring[lo_head].buf[i] = frame[i];
+    lo_ring[lo_head].len = len;
+    lo_head = nxt;
+}
+static int lo_dequeue(uint8_t *out, int max) {
+    if (lo_head == lo_tail) return 0;
+    int len = lo_ring[lo_tail].len; if (len > max) len = max;
+    for (int i = 0; i < len; i++) out[i] = lo_ring[lo_tail].buf[i];
+    lo_tail = (lo_tail + 1) % LO_RING;
+    return len;
+}
+
+/* Wait up to `ticks` for a frame; return its length (0 on timeout). Loopback
+ * frames (M1264) are drained first so a NIC flood can't starve them. */
 static int recv_timeout(uint8_t *buf, int max, uint64_t ticks) {
     uint64_t deadline = timer_ticks() + ticks;
-    while (timer_ticks() < deadline) {
+    while (timer_ticks() <= deadline) {
+        int l = lo_dequeue(buf, max);
+        if (l > 0) return l;
         int len = nic_receive(buf, max);
         if (len > 0)
             return len;
@@ -461,6 +488,20 @@ static void udp_send_to(const uint8_t *dstmac, const uint8_t *dstip,
 int net_udp_send(const uint8_t dstip[4], uint16_t dport, uint16_t sport,
                  const void *payload, int plen) {
     if (!dstip || plen < 0 || plen > 1400) return -1;
+    if (dstip[0] == 127) {                          /* loopback (127.0.0.0/8) -> re-inject, no NIC (M1264) */
+        const uint8_t *me = nic_mac();
+        uint8_t pkt[1500];
+        memcpy(pkt + 0, me, 6); memcpy(pkt + 6, me, 6); put16(pkt + 12, 0x0800);   /* eth: to/from self */
+        uint8_t *ip = pkt + 14, *udp = pkt + 34, *pl = pkt + 42;
+        ip[0] = 0x45; ip[1] = 0; put16(ip + 2, (uint16_t)(20 + 8 + plen)); put16(ip + 4, 0); put16(ip + 6, 0);
+        ip[8] = 64; ip[9] = 17; put16(ip + 10, 0);
+        memcpy(ip + 12, dstip, 4); memcpy(ip + 16, dstip, 4);   /* src=dst=127.x */
+        put16(ip + 10, inet_checksum(ip, 20));
+        put16(udp + 0, sport); put16(udp + 2, dport); put16(udp + 4, (uint16_t)(8 + plen)); put16(udp + 6, 0);
+        for (int i = 0; i < plen; i++) pl[i] = ((const uint8_t *)payload)[i];
+        lo_enqueue(pkt, 42 + plen);
+        return 0;
+    }
     uint8_t mac[6];
     if (!arp_resolve(dstip, mac) && !arp_resolve(GW_IP, mac)) return -1;   /* dest, else via gateway */
     udp_send_to(mac, dstip, sport, dport, (const uint8_t *)payload, plen);

@@ -3348,6 +3348,18 @@ static int run_command(char *line, char *cwd) {
             if (!(ok && ga == 42 && an == 42)) ok = 0;
             if (ok) print("dl: dlopen(DLTEST.SO) mapped+relocated the shared object, dlsym(greet)(40)=42, dlsym(answer)()=42 (incl. a JUMP_SLOT reloc) -- userspace dynamic linker OK\n");
             else { print("dltest: VERIFY FAILED (h="); printl((long)(h!=0)); print(" greet="); printl(ga); print(" answer="); printl(an); print(")\n"); g_status = 1; }
+        } else if (streq(line, "lotest")) {   /* loopback (lo, 127.0.0.0/8): a UDP round-trip with NO NIC (M1264) */
+            unsigned char lo[4] = {127,0,0,1};
+            int ok = 1;
+            if (sys_udp_send(lo, 7777, 8888, "loop!", 5) != 0) ok = 0;   /* -> 127.0.0.1:7777 from :8888 */
+            unsigned char rb[32]; unsigned char from[6] = {0};
+            long n = sys_udp_recv(7777, rb, sizeof rb, from);            /* recv on the destination port */
+            int match = (n == 5 && rb[0]=='l' && rb[1]=='o' && rb[2]=='o' && rb[3]=='p' && rb[4]=='!');
+            int fromlo = (from[0]==127 && from[3]==1);                   /* the datagram came from 127.0.0.1 */
+            if (!(match && fromlo)) ok = 0;
+            if (ok) { print("lo: UDP to 127.0.0.1:7777 round-tripped through the loopback iface ("); printl(n);
+                      print(" B, src 127.0.0.1) with NO NIC -- loopback OK\n"); }
+            else { print("lotest: VERIFY FAILED (n="); printl(n); print(" from="); printl(from[0]); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
