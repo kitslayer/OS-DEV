@@ -2589,6 +2589,29 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "kmsg: wrote a line to /dev/kmsg, read it back from /proc/kmsg (dmesg) -- OK\n"
                      : "kmsgtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "timerfdtest")) {  /* timerfd: a pollable one-shot timer fd, composed with poll (M1217) */
+            int ok = 1;
+            int tfd = sys_timerfd_create();
+            if (tfd < 3) { print("timerfdtest: create failed\n"); g_status = 1; }
+            else {
+                sys_timerfd_settime(tfd, 80);                /* fire in 80 ms */
+                /* (A) immediately, before expiry: poll timeout 0 -> not ready */
+                struct pollfd p = { tfd, POLLIN, 0 };
+                if (sys_poll(&p, 1, 0) != 0) ok = 0;
+                /* (B) poll with a 1s timeout -> becomes POLLIN-ready after ~80 ms */
+                struct pollfd q = { tfd, POLLIN, 0 };
+                if (!(sys_poll(&q, 1, 1000) == 1 && (q.revents & POLLIN))) ok = 0;
+                /* (C) read the 8-byte expiration count (== 1) */
+                unsigned char eb[8]; long nrd = sys_fdread(tfd, eb, sizeof eb);
+                if (!(nrd == 8 && eb[0] == 1)) ok = 0;
+                /* (D) one-shot: after the read it disarms -> poll timeout 0 -> not ready */
+                struct pollfd w = { tfd, POLLIN, 0 };
+                if (sys_poll(&w, 1, 0) != 0) ok = 0;
+                sys_fdclose(tfd);
+                print(ok ? "timerfd: armed 80ms -> not-ready, then POLLIN, read count=1, disarmed -- OK\n"
+                         : "timerfdtest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

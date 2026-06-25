@@ -208,6 +208,8 @@
 #define SYS_ftruncate    191   /* (fd, len) -> resize a memfd (seal-checked); 0/-1 (M1212) */
 #define SYS_rename       192   /* (oldpath, newpath) -> rename/move within one ext2 mount; 0/-1 (M1213) */
 #define SYS_prlimit      193   /* (pid, resource, newval, do_set) -> get/set a process's rlimit; old value (M1214) */
+#define SYS_timerfd_create  194  /* () -> a pollable one-shot timer fd (>=3); -1 (M1217) */
+#define SYS_timerfd_settime 195  /* (fd, delay_ms) -> arm/disarm a timerfd; 0/-1 (M1217) */
 
 /* ELF auxiliary-vector entry types, for /proc/<pid>/auxv (M1215). Standard a_type
  * values; the vector is (a_type, a_val) u64 pairs terminated by AT_NULL. */

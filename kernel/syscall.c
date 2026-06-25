@@ -1571,6 +1571,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_prlimit:                      /* (pid, resource, newval, do_set) -> old/current value (M1214) */
         r->rax = (uint64_t)app_prlimit((int)r->rdi, (int)r->rsi, (uint64_t)r->rdx, (int)r->r10);
         break;
+    case SYS_timerfd_create:               /* () -> a pollable one-shot timer fd (M1217) */
+        r->rax = (uint64_t)(int64_t)app_timerfd_create();
+        break;
+    case SYS_timerfd_settime:              /* (fd, delay_ms) -> arm/disarm; 0/-1 (M1217) */
+        r->rax = (uint64_t)app_timerfd_settime((int)r->rdi, (long)r->rsi);
+        break;
     case SYS_sigprocmask:                  /* (how, set): block/unblock signals; returns the old mask (M1208) */
         r->rax = (uint64_t)app_sigprocmask((int)r->rdi, (uint32_t)r->rsi);
         break;

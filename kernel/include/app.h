@@ -134,6 +134,8 @@ long app_tee(int in_fd, int out_fd, unsigned long len);    /* copy bytes pipe->p
 int  app_memfd_create(const char *name, int flags);        /* anonymous sealable in-RAM file fd (>=3); -1 (M1212) */
 long app_memfd_seal(int fd, unsigned add);                 /* add F_SEAL_* (one-way); new seal set/-1 (M1212) */
 long app_ftruncate(int fd, long len);                      /* resize a memfd (seal-checked); 0/-1 (M1212) */
+int  app_timerfd_create(void);                             /* a pollable one-shot timer fd (>=3); -1 (M1217) */
+long app_timerfd_settime(int fd, long delay_ms);           /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */
 int  app_open(const char *path, int flags);   /* open a FILE fd (O_RDONLY default; O_WRONLY/APPEND/TRUNC/CREAT); fd(>=3)/-1 (M1193/M1195) */
 long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
 int  app_mkfifo(const char *path);     /* create a named pipe (FIFO); 0/-1 (M1188) */

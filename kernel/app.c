@@ -2804,6 +2804,16 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
         a->fd[fd].off = off + (long)n;
         return (long)n;
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 4) {   /* timerfd: read the expiration count (M1217) */
+        if (max < 8) return -1;
+        long exp = a->fd[fd].off;
+        if (exp != 0 && (uint64_t)timer_ms() >= (uint64_t)exp) {
+            for (int i = 0; i < 8; i++) ((char *)buf)[i] = (i == 0) ? 1 : 0;   /* count = 1 (little-endian u64) */
+            a->fd[fd].off = 0;                                                 /* one-shot: disarm */
+            return 8;
+        }
+        return 0;                                                             /* not expired yet */
+    }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
@@ -2959,6 +2969,24 @@ long app_ftruncate(int fd, long len) {
     m->size = n;
     return 0;
 }
+/* timerfd (M1217): a pollable one-shot timer as an fd. The absolute expiry (ms,
+ * 0 = disarmed) lives in the fd's own `off` field — no separate object, so fork
+ * copies it and close needs no teardown. read() returns the 8-byte expiration
+ * count (1) once expired, then disarms; poll() reports POLLIN at expiry. */
+int app_timerfd_create(void) {
+    struct app *a = cur(); if (!a) return -1;
+    int fd = -1;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;
+    a->fd[fd] = (struct fdent){ 1, 4, 0, 0, {0}, 0 };       /* used, type=timerfd, off=0 (disarmed) */
+    return fd;
+}
+long app_timerfd_settime(int fd, long delay_ms) {
+    struct app *a = cur();
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 4) return -1;
+    a->fd[fd].off = (delay_ms <= 0) ? 0 : (long)(timer_ms() + (uint64_t)delay_ms);   /* absolute expiry; <=0 disarms */
+    return 0;
+}
 
 /* ---- seccomp-BPF self-filter (M1190) ------------------------------------------
  * Install a bpf.c program that vets the calling process's own syscalls. One-way
@@ -2998,6 +3026,8 @@ int app_fd_ready(app_t *ap, int fd, int events) {
         } else {
             if ((events & POLLIN) && pipe_readable(a->fd[fd].obj)) re |= POLLIN;
         }
+    } else if (a->fd[fd].type == 4) {                      /* timerfd: POLLIN at/after expiry (M1217) */
+        if ((events & POLLIN) && a->fd[fd].off != 0 && (uint64_t)timer_ms() >= (uint64_t)a->fd[fd].off) re |= POLLIN;
     } else {
         return POLLNVAL;
     }
