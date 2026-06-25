@@ -450,6 +450,20 @@ static long gen_pid_statm(char *b, int max, void *proc) {
     p = sdec(b, p, max, data); p = sapp(b, p, max, " 0\n");/* data, dt  */
     b[p] = 0; return p;
 }
+/* /proc/<pid>/wchan (M1247): the kernel symbol where a process is blocked —
+ * what `ps -o wchan` shows, and the building block for debugging hung tasks.
+ * The task's blocked-PC (task_block/sleep stamp it, M1166) is symbolized via
+ * the same ksym_lookup `/proc/sched` uses; a running task reports "0". */
+static long gen_pid_wchan(char *b, int max, int pid) {
+    task_info_t ti[24]; int cnt = task_snapshot(ti, 24);
+    uint64_t wchan = 0;
+    for (int i = 0; i < cnt; i++) if (ti[i].id == pid) { wchan = ti[i].wchan; break; }
+    int p = 0;
+    if (wchan) { unsigned long off; const char *nm = ksym_lookup(wchan, &off); p = sapp(b, p, max, nm ? nm : "?"); }
+    else p = sapp(b, p, max, "0");                         /* running / not blocked */
+    p = sapp(b, p, max, "\n");
+    b[p] = 0; return p;
+}
 /* /proc/<pid>/wss: working-set size from the CPU's Accessed/Dirty PTE bits.
  * "Referenced" counts pages touched since the last `clearref` (write it to ctl
  * to reset the window) — the building block for an LRU/swap victim picker. */
@@ -561,6 +575,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             if (peq(file, "stat"))    return gen_pid_stat((char *)buf, (int)max, pid, st, proc);   /* ps/top line (M1231) */
             if (peq(file, "io"))      return gen_pid_io((char *)buf, (int)max, proc);              /* I/O byte counters (M1244) */
             if (peq(file, "statm"))   return gen_pid_statm((char *)buf, (int)max, proc);           /* short memory line (M1245) */
+            if (peq(file, "wchan"))   return gen_pid_wchan((char *)buf, (int)max, pid);            /* per-pid blocked-PC symbol (M1247) */
             if (peq(file, "wss"))     return gen_pid_wss((char *)buf, (int)max, pid, proc);
             if (startswith(file, "mem/")) return gen_pid_mem((char *)buf, (int)max, proc, file + 4);
             if (peq(file, "strace")) return strace_format(pid, (char *)buf, (int)max);   /* traced syscalls (M1118) */

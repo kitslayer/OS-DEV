@@ -3082,6 +3082,33 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("sched_getcpu: ring-3 runs on CPU "); printl(c); print(" (the BSP) -- OK\n"); }
             else print("getcputest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "pidwchantest")) {   /* /proc/<pid>/wchan per-pid file (M1247) */
+            int ok = 1; char wb[64]; long n;
+            /* /proc keys on the TASK id (gettid), not the app pid (fork's return) -- M1231 --
+             * so the child hands us its tid before blocking, and we read /proc/<tid>/wchan. */
+            int p1[2], p2[2];
+            if (sys_pipe(p1) != 0 || sys_pipe(p2) != 0) ok = 0;
+            else {
+                long kid = sys_fork();
+                if (kid == 0) {                                          /* child: announce tid, then block */
+                    int tid = sys_gettid(); sys_fdwrite(p1[1], &tid, sizeof tid);
+                    char c; sys_fdread(p2[0], &c, 1); sys_exit(0);
+                }
+                int ctid = 0; sys_fdread(p1[0], &ctid, sizeof ctid);     /* the child's task id */
+                sys_sleep(250);                                          /* let it reach the p2 blocking read */
+                char path[40]; int pp = 0; const char *pre = "/proc/", *suf = "/wchan"; char nb[12];
+                for (int i = 0; pre[i]; i++) path[pp++] = pre[i];
+                itoa_simple(ctid, nb); for (int i = 0; nb[i]; i++) path[pp++] = nb[i];
+                for (int i = 0; suf[i]; i++) path[pp++] = suf[i]; path[pp] = 0;
+                n = sys_readfile(path, wb, sizeof wb - 1);
+                if (n <= 0) ok = 0; else { wb[n] = 0; if (wb[0] == '0' && (wb[1] == '\n' || wb[1] == 0)) ok = 0; }  /* blocked -> a real symbol */
+                sys_fdwrite(p2[1], "x", 1);                              /* unblock the child */
+                int st; sys_waitpid((int)kid, &st);
+                sys_fdclose(p1[0]); sys_fdclose(p1[1]); sys_fdclose(p2[0]); sys_fdclose(p2[1]);
+                if (ok) { int k = 0; while (wb[k] && wb[k] != '\n') k++; wb[k] = 0;
+                          print("wchan: a pipe-blocked child (/proc/"); printl(ctid); print("/wchan) is parked in '"); print(wb); print("' -- OK\n"); }
+            }
+            if (!ok) { print("pidwchantest: VERIFY FAILED\n"); g_status = 1; }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
