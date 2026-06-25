@@ -3662,6 +3662,25 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("settime: clock_settime(CLOCK_REALTIME, 1700000000) -> clock_gettime read back "); printl(after);
                       print("; setting CLOCK_MONOTONIC refused; original time restored -- clock_settime OK\n"); }
             else { print("settimetest: VERIFY FAILED (r="); printl(r); print(" after="); printl(after); print(" mono="); printl(mono); print(")\n"); g_status = 1; }
+        } else if (streq(line, "pidfdgetfdtest")) {   /* pidfd_getfd: grab an fd from another process (M1281) */
+            sys_writefile("/tmp/PG.TXT", "0123456789ABCDEFGHIJ", 20);
+            int f = sys_open("/tmp/PG.TXT");             /* parent opens the file */
+            char t[16]; sys_fdread(f, t, 10);            /* parent's fd offset -> 10 */
+            long pid = sys_fork();
+            if (pid == 0) { sys_sleep(400); sys_exit(0); }   /* child inherits f frozen at offset 10, holds it, self-exits */
+            sys_fdread(f, t, 5);                          /* DIVERGE: advance the PARENT's own copy of f -> offset 15 */
+            sys_sleep(150);                              /* let the child settle */
+            int pfd = sys_pidfd_open((int)pid, 0);
+            int newfd = (pfd >= 0) ? sys_pidfd_getfd(pfd, f, 0) : -1;   /* grab the CHILD's copy of f (still at offset 10) */
+            char buf[8]; long n = (newfd >= 0) ? sys_fdread(newfd, buf, 5) : -1;
+            int match = (n == 5 && buf[0] == 'A' && buf[4] == 'E');     /* child's offset 10 -> "ABCDE" (NOT parent's offset 15 -> "FGHIJ") */
+            if (newfd >= 0) sys_fdclose(newfd);
+            if (pfd >= 0) sys_fdclose(pfd);
+            sys_fdclose(f);
+            int st = -1; sys_waitpid((int)pid, &st);     /* child self-exits at ~400ms; reap it */
+            int ok = (f >= 0 && pid > 0 && pfd >= 0 && newfd >= 0 && match);
+            if (ok) print("pidfd_getfd: parent advanced its own fd to offset 15; pidfd_getfd(pidfd,fd) grabbed the CHILD's copy (offset 10) and read 'ABCDE' (not the parent's 'FGHIJ') -- cross-process fd duplication OK\n");
+            else { print("pidfdgetfdtest: VERIFY FAILED (f="); printl(f); print(" pid="); printl(pid); print(" pfd="); printl(pfd); print(" newfd="); printl(newfd); print(" n="); printl(n); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

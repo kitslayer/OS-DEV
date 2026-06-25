@@ -194,6 +194,7 @@ int  sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev);      /* AD
 int  sys_epoll_wait(int epfd, struct epoll_event *evs, int maxevents, long timeout);  /* # ready/0/-1 (M1220) */
 int  sys_pidfd_open(int pid, int flags);                       /* a pollable process-exit handle (>=3); -1 (M1222) */
 int  sys_pidfd_send_signal(int pidfd, int sig);                /* signal the pidfd's process; 0/-1 (M1222) */
+int  sys_pidfd_getfd(int pidfd, int targetfd, int flags);      /* duplicate the pidfd-process's fd into ours; new fd/-1 (M1281) */
 long sys_getdents64(void *buf, unsigned long max, int start);  /* packed dirent64 of the cwd; bytes/0/-1 (M1223) */
 int  sys_access(const char *path, int amode);                  /* 0 if accessible, -1 (M1224) */
 long sys_prctl(int option, unsigned long arg2);                /* PR_SET_NAME/PR_GET_NAME; 0/-1 (M1225) */

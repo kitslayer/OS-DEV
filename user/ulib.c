@@ -423,6 +423,7 @@ int  sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev) { return (i
 int  sys_epoll_wait(int epfd, struct epoll_event *evs, int maxevents, long timeout) { return (int)do_syscall4(SYS_epoll_wait, epfd, (long)evs, maxevents, timeout); }
 int  sys_pidfd_open(int pid, int flags) { return (int)do_syscall(SYS_pidfd_open, pid, flags, 0); }
 int  sys_pidfd_send_signal(int pidfd, int sig) { return (int)do_syscall(SYS_pidfd_send_signal, pidfd, sig, 0); }
+int  sys_pidfd_getfd(int pidfd, int targetfd, int flags) { return (int)do_syscall(SYS_pidfd_getfd, pidfd, targetfd, flags); }  /* dup another process's fd; new fd/-1 (M1281) */
 long sys_getdents64(void *buf, unsigned long max, int start) { return do_syscall(SYS_getdents64, (long)buf, (long)max, start); }
 int  sys_access(const char *path, int amode) { return (int)do_syscall(SYS_access, (long)path, amode, 0); }
 long sys_prctl(int option, unsigned long arg2) { return do_syscall(SYS_prctl, option, (long)arg2, 0); }

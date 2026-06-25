@@ -290,6 +290,7 @@
 #define SYS_oom          268   /* (cmd,arg) -> OOM killer: 0=set self oom_adj 1=trigger kill(->pid) 2=score of pid (M1275) */
 #define SYS_sigaltstack  269   /* (ss_sp, ss_size) -> set the alternate signal stack (size 0 disables); 0/-1 (M1276) */
 #define SYS_clock_settime 270  /* (clockid, sec, nsec) -> set the wall clock (CLOCK_REALTIME only); 0/-1 (M1280) */
+#define SYS_pidfd_getfd  271   /* (pidfd, targetfd, flags) -> duplicate another process's fd into ours; new fd/-1 (M1281) */
 #define SA_ONSTACK 0x08000000  /* sigaction flag: run this handler on the sigaltstack() stack (M1276) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */

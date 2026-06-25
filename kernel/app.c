@@ -3754,6 +3754,22 @@ int app_pidfd_send_signal(int pidfd, int sig) {
     app_request_signal(t, sig);
     return 0;
 }
+/* pidfd_getfd (M1281): duplicate descriptor `targetfd` from the process named by
+ * `pidfd` into the caller's fd table — the container/debugger primitive for
+ * reaching into another process's open files. Snapshots the target's fdent,
+ * sharing the underlying object (same model as SCM_RIGHTS, M1265). Returns the
+ * new fd, or -1 (bad pidfd / dead target / bad targetfd / table full). */
+int app_pidfd_getfd(int pidfd, int targetfd) {
+    struct app *a = cur();
+    if (!a || pidfd < 0 || pidfd >= APP_NFD || !a->fd[pidfd].used || a->fd[pidfd].type != 7) return -1;
+    struct app *t = app_by_pid(a->fd[pidfd].obj);
+    if (!t || t->exited || targetfd < 0 || targetfd >= APP_NFD || !t->fd[targetfd].used) return -1;
+    int fd = -1; for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (fd < 0) return -1;
+    a->fd[fd] = t->fd[targetfd];                           /* snapshot (shares the underlying object) */
+    a->fd[fd].cloexec = 0;                                 /* a freshly-obtained fd is not close-on-exec */
+    return fd;
+}
 /* getdents64 (M1223): pack the cwd's entries as Linux dirent64 records starting
  * at index `start`. d_type comes from vfs_list's trailing-'/' dir marker (the
  * convention the real filesystems use). Returns bytes written (0 = no more from
