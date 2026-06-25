@@ -3143,6 +3143,9 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 10) {  /* TCP socket: recv (M1268) */
         return net_tcp_sock_recv(a->fd[fd].obj, buf, max);
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 11) {  /* pty endpoint: read through the line discipline (M1274) */
+        return pty_read(a->fd[fd].obj, buf, max);
+    }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
@@ -3196,6 +3199,9 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 10) {  /* TCP socket: send (M1268) */
         return net_tcp_sock_send(a->fd[fd].obj, buf, (int)len);
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 11) {  /* pty endpoint: master write feeds the ldisc, slave write -> master output (M1274) */
+        return pty_write(a->fd[fd].obj, buf, len);
+    }
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
     return pipe_write(idx, buf, len);
 }
@@ -3208,8 +3214,16 @@ int app_fd_close(int fd) {
     else if (a->fd[fd].type == 6) epoll_unref(a->fd[fd].obj);   /* drop an epoll reference (M1220) */
     else if (a->fd[fd].type == 8) inotify_free(a->fd[fd].obj);  /* free the inotify instance (M1266) */
     else if (a->fd[fd].type == 10) net_tcp_sock_close(a->fd[fd].obj);  /* close the TCP connection (M1268) */
+    else if (a->fd[fd].type == 11) pty_close(a->fd[fd].obj);    /* close this pty end, waking the peer (M1274) */
     a->fd[fd].used = 0; a->fd[fd].type = 0;
     return 0;
+}
+/* ptsname (M1274): the pts index N for a /dev/ptmx master fd, so userspace can
+ * open the matching /dev/pts/N slave. -1 if fd isn't a pty-master fd. */
+long app_pts_number(int fd) {
+    struct app *a = cur(); if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return -1;
+    if (a->fd[fd].type != 11 || (a->fd[fd].obj & 1)) return -1;   /* must be a master end (even id) */
+    return a->fd[fd].obj >> 1;
 }
 int app_dup2(int oldfd, int newfd) {
     struct app *a = cur(); if (!a || oldfd < 0 || oldfd >= APP_NFD || !a->fd[oldfd].used) return -1;
@@ -3243,6 +3257,33 @@ int app_fifo_open(const char *path, int write) {
  * app_lseek; close via app_fd_close. Returns the fd (>=3), or -1. */
 int app_open(const char *path, int flags) {
     struct app *a = cur(); if (!a) return -1;
+    /* /dev/ptmx (M1274): open the MASTER end of a fresh pty pair (the slave then
+     * appears at /dev/pts/<n>). /dev/pts/<n> opens that slave. Both become
+     * type-11 fds over pty.c (obj = the pty endpoint id; master ids are even,
+     * slave = master|1). This is the Unix98 PTY naming over the existing M1185
+     * line-discipline engine — programs find their tty by path, not a magic id. */
+    int is_pts = 1; { const char *pfx = "/dev/pts/"; for (int k = 0; pfx[k]; k++) if (path[k] != pfx[k]) { is_pts = 0; break; } }
+    if (strcmp(path, "/dev/ptmx") == 0 || is_pts) {
+        int id;
+        if (strcmp(path, "/dev/ptmx") == 0) {
+            id = pty_open(); if (id < 0) return -1;              /* even master id */
+        } else {
+            int n = 0; const char *q = path + 9;                /* parse /dev/pts/<n> */
+            if (*q < '0' || *q > '9') return -1;
+            while (*q >= '0' && *q <= '9') n = n * 10 + (*q++ - '0');
+            if (*q) return -1;                                   /* trailing junk */
+            if (!pty_pts_valid(n)) return -1;                    /* no such live pty */
+            id = (n << 1) | 1;                                   /* slave id */
+        }
+        int fd = -1;
+        for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+        if (fd < 0) { if (!(id & 1)) pty_close(id); return -1; } /* no fd slot: undo the master open */
+        a->fd[fd] = (struct fdent){ 1, 11, 1, id, {0}, 0 };      /* used, type=11 pty, write_end=1 (bidirectional) */
+        int j = 0; while (path[j] && j < (int)sizeof a->fd[fd].path - 1) { a->fd[fd].path[j] = path[j]; j++; }
+        a->fd[fd].path[j] = 0;
+        a->fd[fd].cloexec = (flags & O_CLOEXEC) ? 1 : 0;
+        return fd;
+    }
     struct statx st;
     int exists = (vfs_stat(path, &st) == 0);
     if (!exists) {
@@ -3615,6 +3656,9 @@ int app_fd_ready(app_t *ap, int fd, int events) {
         if ((events & POLLIN) && !app_pid_alive(a->fd[fd].obj)) re |= POLLIN;
     } else if (a->fd[fd].type == 8) {                      /* inotify: POLLIN when events are queued (M1266) */
         if ((events & POLLIN) && inotify_ready(a->fd[fd].obj)) re |= POLLIN;
+    } else if (a->fd[fd].type == 11) {                     /* pty: POLLIN when readable, always writable (M1274) */
+        if ((events & POLLIN) && pty_ready(a->fd[fd].obj)) re |= POLLIN;
+        if (events & POLLOUT) re |= POLLOUT;
     } else {
         return POLLNVAL;
     }

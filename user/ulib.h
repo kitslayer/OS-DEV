@@ -282,6 +282,7 @@ long  sys_timer_settime(int id, int flags, unsigned long value_ms, unsigned long
 long  sys_timer_gettime(int id);          /* ms until timer id next fires (0 disarmed), or -1 (M1272) */
 long  sys_timer_delete(int id);           /* destroy timer id; 0/-1 (M1272) */
 unsigned long sys_hpet(int what);         /* HPET high-res clock: 0=ns, 1=hz, 2=counter, 3=present (M1273) */
+long  sys_ptsname(int fd);                /* /dev/pts/<n> index for a /dev/ptmx master fd, or -1 (M1274) */
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */

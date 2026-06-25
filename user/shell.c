@@ -3541,6 +3541,30 @@ static int run_command(char *line, char *cwd) {
                       print("ns) -- HPET high-res clocksource OK\n"); }
             else { print("hpettest: VERIFY FAILED (present="); printl(present); print(" hz="); printl((long)hz);
                    print(" dms="); printl(dms); print(" mono="); printl(d > c); print(")\n"); g_status = 1; }
+        } else if (streq(line, "ptmxtest")) {   /* Unix98 /dev/ptmx + /dev/pts/N over the M1185 pty engine (M1274) */
+            int mfd = sys_open("/dev/ptmx");               /* master end (intercept makes it read/write) */
+            long n = (mfd >= 0) ? sys_ptsname(mfd) : -1;   /* the slave's pts index */
+            char sp[24]; int L = 0; const char *pre = "/dev/pts/";
+            while (pre[L]) { sp[L] = pre[L]; L++; }
+            if (n < 0) sp[L++] = '?';
+            else if (n == 0) sp[L++] = '0';
+            else { char t[12]; int k = 0; long v = n; while (v) { t[k++] = (char)('0' + v % 10); v /= 10; } while (k) sp[L++] = t[--k]; }
+            sp[L] = 0;
+            int sfd = (n >= 0) ? sys_open(sp) : -1;
+            if (mfd >= 0 && sfd >= 0) {
+                char rb[64];
+                sys_fdwrite(mfd, "hi\n", 3);               /* master write -> line discipline commits the line */
+                long sr = sys_fdread(sfd, rb, sizeof rb);  /* slave reads the cooked line */
+                int slave_ok = (sr == 3 && rb[0] == 'h' && rb[1] == 'i' && rb[2] == '\n');
+                sys_fdwrite(sfd, "OK\n", 3);               /* slave output -> master-readable */
+                long mr = sys_fdread(mfd, rb, sizeof rb);  /* master reads (line echo + slave output) */
+                int got_ok = 0; for (long i = 0; i + 1 < mr; i++) if (rb[i] == 'O' && rb[i + 1] == 'K') got_ok = 1;
+                if (slave_ok && got_ok) { print("ptmx: open(/dev/ptmx)=master fd, ptsname -> "); print(sp);
+                    print("; master->slave line 'hi' read by slave, slave->master 'OK' read by master via the fd table -- Unix98 PTY (/dev/ptmx + /dev/pts/N) OK\n"); }
+                else { print("ptmxtest: VERIFY FAILED (sr="); printl(sr); print(" slave_ok="); printl(slave_ok); print(" mr="); printl(mr); print(" got_ok="); printl(got_ok); print(")\n"); g_status = 1; }
+            } else { print("ptmxtest: open failed (mfd="); printl(mfd); print(" pts='"); print(sp); print("' sfd="); printl(sfd); print(")\n"); g_status = 1; }
+            if (sfd >= 0) sys_fdclose(sfd);
+            if (mfd >= 0) sys_fdclose(mfd);
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

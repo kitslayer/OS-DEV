@@ -103,6 +103,9 @@ int pty_open(void) {
     return -1;
 }
 
+/* Is pair `n` a live pty whose slave (/dev/pts/n) can be opened? (master open) */
+int pty_pts_valid(int n) { return n >= 0 && n < NPTY && ptys[n].used && ptys[n].m_open; }
+
 static struct pty *resolve(int id, int *is_slave) {
     if (id < 0) return 0;
     int idx = id >> 1;

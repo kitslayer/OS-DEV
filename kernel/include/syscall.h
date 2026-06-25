@@ -286,6 +286,7 @@
 #define SYS_timer_gettime 264  /* (id) -> ms until next fire (0 disarmed), or -1 (M1272) */
 #define SYS_timer_delete 265   /* (id) -> destroy the timer; 0/-1 (M1272) */
 #define SYS_hpet         266   /* (what) -> HPET high-res clock: 0=ns 1=hz 2=counter 3=present (M1273) */
+#define SYS_ptsname      267   /* (fd) -> the /dev/pts/<n> index for a /dev/ptmx master fd, or -1 (M1274) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */
 #define SA_SIGINFO 4           /* sigaction flag: 3-arg handler h(signo, siginfo*, ucontext*) (M1270) */
