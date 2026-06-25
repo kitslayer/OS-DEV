@@ -276,7 +276,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_sigaltstack: case SYS_raise:
-    case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom: case SYS_clock_settime: case SYS_pidfd_getfd:
+    case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom: case SYS_clock_settime: case SYS_pidfd_getfd: case SYS_acpi:
     case SYS_alarm: case SYS_getrusage:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_semget: case SYS_semop: case SYS_semctl:
@@ -1787,6 +1787,15 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_munlockall:                   /* (): unpin all pages (M1283) */
         r->rax = (uint64_t)(int64_t)app_munlockall();
+        break;
+    case SYS_acpi:                         /* (what): ACPI AML namespace query (M1284) */
+        switch ((int)r->rdi) {
+            case 1:  r->rax = (uint64_t)aml_count(AML_DEVICE); break;
+            case 2:  r->rax = (uint64_t)aml_count(AML_METHOD); break;
+            case 3:  r->rax = (uint64_t)aml_has("PCI0"); break;
+            case 4:  r->rax = (uint64_t)aml_has("_SB_"); break;
+            default: r->rax = (uint64_t)aml_count(0); break;   /* 0 = total objects */
+        }
         break;
     case SYS_raise:                        /* (signo): queue the signal; delivered to a handler at this
                                             * syscall's return (app_deliver_pending tail), or left pending

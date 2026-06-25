@@ -200,6 +200,7 @@ long sys_mlock(void *addr, unsigned long len) { return do_syscall(SYS_mlock, (lo
 long sys_munlock(void *addr, unsigned long len) { return do_syscall(SYS_munlock, (long)addr, (long)len, 0); }
 long sys_mlockall(int flags) { return do_syscall(SYS_mlockall, flags, 0, 0); }       /* pin all current/future pages; 0/-1 (M1283) */
 long sys_munlockall(void) { return do_syscall(SYS_munlockall, 0, 0, 0); }            /* unpin all pages; 0/-1 (M1283) */
+long sys_acpi(int what) { return do_syscall(SYS_acpi, what, 0, 0); }                  /* ACPI AML namespace query (M1284) */
 long sys_getrusage(int who, struct rusage *ru) { return do_syscall(SYS_getrusage, who, (long)ru, 0); }
 long sys_fiemap(const char *path, struct fiemap_extent *out, int max) { return do_syscall(SYS_fiemap, (long)path, (long)out, max); }
 long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned long len) { return do_syscall4(SYS_fallocate, (long)path, mode, (long)offset, (long)len); }

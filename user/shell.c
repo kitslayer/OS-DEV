@@ -3722,6 +3722,13 @@ static int run_command(char *line, char *cwd) {
                 }
                 sys_munmap(A, len);
             }
+        } else if (streq(line, "amltest")) {   /* ACPI AML DSDT namespace parser (M1284) */
+            long total = sys_acpi(0), dev = sys_acpi(1), mth = sys_acpi(2), pci0 = sys_acpi(3), sb = sys_acpi(4);
+            int ok = (total > 0 && dev >= 1 && (pci0 == 1 || sb == 1));
+            if (ok) { print("aml: parsed QEMU's DSDT AML namespace -> "); printl(total); print(" objects, "); printl(dev);
+                      print(" devices, "); printl(mth); print(" methods; found well-known "); print(pci0 ? "PCI0" : "_SB_");
+                      print(" -- ACPI AML namespace parser OK\n"); }
+            else { print("amltest: VERIFY FAILED (total="); printl(total); print(" dev="); printl(dev); print(" mth="); printl(mth); print(" pci0="); printl(pci0); print(" sb="); printl(sb); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
