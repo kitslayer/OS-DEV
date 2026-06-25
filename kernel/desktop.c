@@ -501,18 +501,19 @@ static uint32_t *decode_wallpaper(const char *name) {
  * (the kernel has no FPU). Looks clean + modern AND needs no image on disk, so the
  * desktop looks good even on bare metal where WALL.PNG may be absent. */
 static void make_wallpaper(uint32_t *buf, int w, int h) {
-    uint32_t c0 = 0x0A1730, c1 = 0x21528F;        /* deep navy -> lit blue (diagonal) */
-    int cx = w / 2, gy = (h * 38) / 100;          /* glow center, a touch above middle */
+    uint32_t c0 = 0x12315C, c1 = 0x3A82C4;        /* deep blue -> vibrant azure (diagonal) */
+    int cx = w / 2, gy = (h * 40) / 100;          /* glow center, a touch above middle */
     long far = (long)cx * cx + (long)(h - gy) * (h - gy);
     if (far < 1) far = 1;
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
             uint32_t base = lerp(c0, c1, x + y, (w + h) - 2);     /* diagonal gradient */
             long dx = x - cx, dy = y - gy, d2 = dx * dx + dy * dy;
-            int dim = (int)(d2 * 46 / far); if (dim > 55) dim = 55;   /* radial vignette */
-            int r = (int)(((base >> 16) & 0xFF) * (100 - dim) / 100);
-            int g = (int)(((base >>  8) & 0xFF) * (100 - dim) / 100);
-            int b = (int)(( base        & 0xFF) * (100 - dim) / 100);
+            int t = (int)(d2 * 100 / far); if (t > 100) t = 100;  /* 0 = glow center .. 100 = far corner */
+            int fac = 118 - (118 - 78) * t / 100;                 /* +18% glow at center -> -22% vignette at the corners */
+            int r = ((base >> 16) & 0xFF) * fac / 100; if (r > 255) r = 255;
+            int g = ((base >>  8) & 0xFF) * fac / 100; if (g > 255) g = 255;
+            int b = ( base        & 0xFF) * fac / 100; if (b > 255) b = 255;
             buf[(size_t)y * w + x] = (uint32_t)(r << 16 | g << 8 | b);
         }
 }
