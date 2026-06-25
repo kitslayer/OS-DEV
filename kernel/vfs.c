@@ -706,6 +706,19 @@ long vfs_chmod(const char *path, uint32_t mode) {
     return -1;
 }
 
+/* chown (M1243): change a file's owner/group (negative = leave). ext2 /diskN
+ * mounts only (tmpfs / boot FAT32 have no Unix ownership -> -1). */
+long vfs_chown(const char *path, long uid, long gid) {
+    char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);
+    int mid; char fp[192];
+    if (mount_path(p, &mid, fp, sizeof fp)) {
+        long r = blockdev_mount_chown(mid, fp, uid, gid);
+        if (r >= 0) fsevents_record('w', path);
+        return r;
+    }
+    return -1;
+}
+
 /* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
  * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are
  * unsupported (-1). Read-only. */

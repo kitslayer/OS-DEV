@@ -285,6 +285,8 @@ int  sys_statfs(const char *path, struct statvfs *sv) { return (int)do_syscall(S
 int  sys_chmod(const char *path, unsigned mode) { return (int)do_syscall(SYS_chmod, (long)path, (long)mode, 0); }
 int  sys_fchmod(int fd, unsigned mode) { return (int)do_syscall(SYS_fchmod, fd, (long)mode, 0); }
 int  sys_eventfd(unsigned initval, int flags) { return (int)do_syscall(SYS_eventfd, (long)initval, flags, 0); }
+int  sys_chown(const char *path, int uid, int gid) { return (int)do_syscall(SYS_chown, (long)path, uid, gid); }
+int  sys_fchown(int fd, int uid, int gid) { return (int)do_syscall(SYS_fchown, fd, uid, gid); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, 0); }

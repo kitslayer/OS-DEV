@@ -1183,6 +1183,23 @@ long ext2_chmod_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     return write_inode(&v, ino, inode);
 }
 
+/* chown(2) backend (M1243): set i_uid (offset 2) / i_gid (offset 24). A negative
+ * id leaves that field unchanged (POSIX chown(-1) semantics; keeps ext2.c free of
+ * syscall.h). i_ctime is bumped. Files and directories both. Returns 0/-1. */
+long ext2_chown_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path, long uid, long gid) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+    uint8_t inode[256]; int isdir = 0;
+    uint32_t ino = walk(&v, path, inode, &isdir);
+    if (!ino) return -1;
+    if (uid >= 0) e_wr16(inode + 2,  (uint16_t)uid);   /* i_uid (low 16) */
+    if (gid >= 0) e_wr16(inode + 24, (uint16_t)gid);   /* i_gid (low 16) */
+    e_wr32(inode + 12, ext2_clock ? ext2_clock() : 0); /* i_ctime */
+    return write_inode(&v, ino, inode);
+}
+
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, const void *buf, unsigned long len) {
     ext2_t v;

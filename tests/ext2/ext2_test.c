@@ -287,6 +287,20 @@ int main(int argc, char **argv) {
                 if ((e_rd16(cin) & 0xFFF) != 0755 || (e_rd16(cin) & 0xF000) != 0x8000) { fprintf(stderr, "chmod 0755 wrong (mode=%o)\n", e_rd16(cin)); return 1; }
                 printf("chmod: set perm bits 0600 then 0755 (read raw i_mode back); the regular-file type bit is preserved\n");
             }
+            /* chown (M1243): set i_uid (offset 2) / i_gid (offset 24); a negative id
+             * leaves that field. Read the raw inode fields back (white-box). */
+            {
+                static uint8_t od[16]; for (int i = 0; i < 16; i++) od[i] = (uint8_t)(i + 1);
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/OWN.TXT", od, 16) != 16) { fprintf(stderr, "chown setup write failed\n"); return 1; }
+                ext2_t ov; uint8_t oin[256]; int oisd = 0;
+                if (ext2_chown_path(bd_read, bd_write, 0, 0, "/OWN.TXT", 1000, 1000) != 0) { fprintf(stderr, "chown 1000:1000 failed\n"); return 1; }
+                if (ext2_open(bd_read, 0, 0, &ov) < 0 || !walk(&ov, "/OWN.TXT", oin, &oisd)) { fprintf(stderr, "chown walk failed\n"); return 1; }
+                if (e_rd16(oin + 2) != 1000 || e_rd16(oin + 24) != 1000) { fprintf(stderr, "chown 1000 wrong (uid=%u gid=%u)\n", e_rd16(oin+2), e_rd16(oin+24)); return 1; }
+                if (ext2_chown_path(bd_read, bd_write, 0, 0, "/OWN.TXT", -1, 500) != 0) { fprintf(stderr, "chown -1:500 failed\n"); return 1; }
+                if (ext2_open(bd_read, 0, 0, &ov) < 0 || !walk(&ov, "/OWN.TXT", oin, &oisd)) { fprintf(stderr, "chown walk2 failed\n"); return 1; }
+                if (e_rd16(oin + 2) != 1000 || e_rd16(oin + 24) != 500) { fprintf(stderr, "chown -1:500 wrong (uid=%u gid=%u)\n", e_rd16(oin+2), e_rd16(oin+24)); return 1; }
+                printf("chown: set uid/gid 1000:1000 then gid->500 with uid=-1 (read raw i_uid/i_gid back); -1 leaves the field\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;

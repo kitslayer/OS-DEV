@@ -153,6 +153,8 @@ int  sys_statfs(const char *path, struct statvfs *sv);          /* filesystem fr
 int  sys_chmod(const char *path, unsigned mode);                /* set permission bits (ext2); 0/-1 (M1241) */
 int  sys_fchmod(int fd, unsigned mode);                         /* set permission bits on an open fd; 0/-1 (M1241) */
 int  sys_eventfd(unsigned initval, int flags);                  /* pollable u64-counter fd; fd/-1 (M1242) */
+int  sys_chown(const char *path, int uid, int gid);            /* set owner/group (ext2; -1 = leave); 0/-1 (M1243) */
+int  sys_fchown(int fd, int uid, int gid);                     /* set owner/group on an open fd; 0/-1 (M1243) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */

@@ -653,6 +653,13 @@ long blockdev_mount_chmod(int i, const char *path, uint32_t mode) {
     if (g_mount[i].fstype != FS_EXT2) return -1;
     return ext2_chmod_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", mode);
 }
+/* chown backend on mount `i` (ext2 only; negative id = leave). 0/-1. M1243. */
+long blockdev_mount_chown(int i, const char *path, long uid, long gid) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_chown_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", uid, gid);
+}
 
 int blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max) {
     blockdev_mount_scan();

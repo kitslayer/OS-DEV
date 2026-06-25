@@ -45,6 +45,8 @@ long ext2_utimes_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
                       const char *path, long atime, long mtime);             /* set i_atime/i_mtime (neg = leave); 0/-1 (M1230) */
 long ext2_chmod_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, uint32_t mode);                       /* set i_mode perm bits (keep type); 0/-1 (M1241) */
+long ext2_chown_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path, long uid, long gid);                  /* set i_uid/i_gid (neg = leave); 0/-1 (M1243) */
 /* ext2_extent_t lives in partition.h (the base block-layer header). (M1152) */
 int  ext2_fiemap(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                  ext2_extent_t *out, int max);                                /* file's physical extent map; extent count, or -1 (M1152) */
