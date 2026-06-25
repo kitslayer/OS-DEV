@@ -37,6 +37,7 @@ struct pty {
     unsigned lflag;                  /* ICANON | ECHO | ISIG */
     unsigned char cc[4];             /* VINTR, VEOF, VERASE, VKILL */
     int fg_pgid;                     /* INTR signal target (pty_ctl cmd 1) */
+    unsigned short ws_rows, ws_cols; /* terminal window size (TIOCGWINSZ/SWINSZ, M1279) */
     int eof;                         /* VEOF on an empty line -> slave read sees EOF */
     struct ptyring in, out;          /* in: slave-readable; out: master-readable */
     unsigned char line[PBUF]; int linelen;   /* canonical editing buffer (uncommitted) */
@@ -152,6 +153,13 @@ int pty_ctl(int id, int cmd, int arg) {
     int slave; struct pty *p = resolve(id, &slave); if (!p) return -1;
     if (cmd == 0) { p->lflag = (unsigned)arg & (ICANON | ECHO | ISIG); return 0; }   /* set line-discipline mode */
     if (cmd == 1) { p->fg_pgid = arg; return 0; }                                    /* set INTR target pgid */
+    if (cmd == 2) {                                                                  /* TIOCSWINSZ: arg = rows<<16 | cols (M1279) */
+        p->ws_rows = (unsigned short)((arg >> 16) & 0xFFFF);
+        p->ws_cols = (unsigned short)(arg & 0xFFFF);
+        if (p->fg_pgid > 0) app_killpg(p->fg_pgid, SIGWINCH);                        /* notify the foreground group of the resize */
+        return 0;
+    }
+    if (cmd == 3) return (int)(((unsigned)p->ws_rows << 16) | p->ws_cols);           /* TIOCGWINSZ: rows<<16 | cols */
     return -1;
 }
 

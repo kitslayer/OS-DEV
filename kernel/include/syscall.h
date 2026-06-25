@@ -308,6 +308,7 @@
 #define UTIME_NOW  (-1L)       /* set the timestamp to the current time (M1230) */
 #define UTIME_OMIT (-2L)       /* leave the timestamp unchanged (M1230) */
 #define SIGCHLD 17
+#define SIGWINCH 24            /* terminal window-size change (M1279); standard (coalescing), < SIGRTMIN */
 /* waitid (M1227): minimal siginfo + idtype/options/si_code constants. */
 struct siginfo { int si_signo, si_errno, si_code, si_pid, si_uid, si_status; };
 #define P_ALL   0

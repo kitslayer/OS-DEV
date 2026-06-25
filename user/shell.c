@@ -120,6 +120,10 @@ static void alt_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
     g_alt_on = (sp >= g_alt_lo && sp < g_alt_hi) ? 1 : 0;
 }
 
+/* SIGWINCH on terminal resize (M1279). */
+static volatile int g_winch;
+static void winch_handler(int s) { (void)s; g_winch = 1; }
+
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
  * (a `for ...; do ...; done` loop, else a ';'-split list of && / || commands). */
@@ -3634,6 +3638,18 @@ static int run_command(char *line, char *cwd) {
             int ok = (wm == 1 && wf == 1 && mem_ok && pid > 0 && w == pid);
             if (ok) print("sysrq: echo m > /proc/sysrq-trigger -> meminfo in the kernel log; echo f -> OOM killer reaped the fattest child (pid match) -- magic SysRq OK\n");
             else { print("sysrqtest: VERIFY FAILED (wm="); printl(wm); print(" wf="); printl(wf); print(" mem="); printl(mem_ok); print(" w="); printl(w); print(")\n"); g_status = 1; }
+        } else if (streq(line, "winsztest")) {   /* pty TIOCSWINSZ/TIOCGWINSZ + SIGWINCH on resize (M1279) */
+            g_winch = 0;
+            sys_signal(SIGWINCH, winch_handler);
+            int m = sys_pty_open();
+            if (m >= 0) sys_pty_ctl(m, 1, sys_getpid());                /* fg pgid = us, so the resize SIGWINCH targets us */
+            int set = (m >= 0) ? sys_pty_ctl(m, 2, (40 << 16) | 120) : -1;   /* TIOCSWINSZ: 40 rows x 120 cols */
+            int got = (m >= 0) ? sys_pty_ctl(m, 3, 0) : -1;                  /* TIOCGWINSZ: read it back */
+            int rows = (got >> 16) & 0xFFFF, cols = got & 0xFFFF;
+            if (m >= 0) sys_pty_close(m);
+            int ok = (m >= 0 && set == 0 && rows == 40 && cols == 120 && g_winch == 1);
+            if (ok) print("winsz: pty TIOCSWINSZ 40x120 -> TIOCGWINSZ read back 40x120; SIGWINCH delivered to the foreground group on resize -- pty window size OK\n");
+            else { print("winsztest: VERIFY FAILED (m="); printl(m); print(" set="); printl(set); print(" rows="); printl(rows); print(" cols="); printl(cols); print(" winch="); printl(g_winch); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
