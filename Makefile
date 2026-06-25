@@ -30,6 +30,14 @@ LDFLAGS := -n -T linker.ld
 # either). 256M comfortably fits the whole app suite, even DOOM+Quake at once.
 QEMUFLAGS := -no-reboot -no-shutdown -m 256M -smp 4
 
+# Hardware acceleration for the INTERACTIVE run targets: use KVM (native-speed
+# guest — typing / window drags / app launches feel instant, ~10x faster than
+# pure emulation) when /dev/kvm is present and writable (the invoking user is in
+# the kvm group), else fall back to plain TCG emulation so the build stays
+# portable. The headless make-check suites keep their own (TCG) QEMU invocations
+# for CI determinism and to run on hosts without KVM.
+ACCEL := $(shell test -w /dev/kvm && echo -enable-kvm -cpu host)
+
 # --- sources ----------------------------------------------------------------
 BUILD   := build
 # kernel.elf: real ELF64 with symbols (use this for gdb).
@@ -343,19 +351,19 @@ $(KERNEL): $(KERNEL64)
 
 # Interactive: opens a QEMU window so you can see the VGA output.
 run: $(KERNEL) $(DISK)
-	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
+	$(QEMU) $(QEMUFLAGS) $(ACCEL) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
 
 # Same as `run`, but with a Realtek RTL8139 NIC instead of the e1000 — boots the
 # whole stack over the second card driver (kernel/rtl8139.c) so you can watch the
 # serial log say "rtl8139 up" and ARP/ping/HTTP the SLIRP gateway over it.
 run-rtl8139: $(KERNEL) $(DISK)
-	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(RTLNICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
+	$(QEMU) $(QEMUFLAGS) $(ACCEL) -kernel $(KERNEL) $(DISKFLAGS) $(RTLNICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
 
 # Same as `run`, but with a LEGACY virtio-net NIC instead of the e1000 — boots the
 # whole stack over the paravirtual NIC driver (kernel/virtio_net.c) so you can
 # watch the serial log say "virtio-net up" and ARP/ping/HTTP the SLIRP gateway over it.
 run-virtio-net: $(KERNEL) $(DISK)
-	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(VIRTIONICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
+	$(QEMU) $(QEMUFLAGS) $(ACCEL) -kernel $(KERNEL) $(DISKFLAGS) $(VIRTIONICFLAGS) $(USBFLAGS) $(AUDIOFLAGS) -serial stdio
 
 # Headless in-guest assertion that the RTL8139 driver brings up the full stack:
 # boots with -device rtl8139 (no e1000) and asserts the network markers print
@@ -547,7 +555,7 @@ xhcitest: $(KERNEL) $(DISK)
 # Watch the serial log say "HDA audio: ..." and "audio output: hda"; the jukebox /
 # tone / DOOM all play through it.
 run-hda: $(KERNEL) $(DISK)
-	$(QEMU) $(QEMUFLAGS) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(HDAAUDIOFLAGS) -serial stdio
+	$(QEMU) $(QEMUFLAGS) $(ACCEL) -kernel $(KERNEL) $(DISKFLAGS) $(NICFLAGS) $(USBFLAGS) $(HDAAUDIOFLAGS) -serial stdio
 
 # Headless in-guest assertion that the HDA driver brings up an audio output path
 # AND its stream DMA actually advances: boots with -device intel-hda + hda-output
