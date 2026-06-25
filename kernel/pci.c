@@ -35,6 +35,51 @@ void pci_write32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off, uint32_t 
     outl(PCI_CONFIG_DATA, v);
 }
 
+/* Sub-word access: the hardware only transfers aligned 32-bit dwords, so a
+ * byte/word read extracts the requested lane from the containing dword and a
+ * write does a read-modify-write of it. */
+uint16_t pci_read16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off) {
+    uint32_t d = pci_read32(bus, slot, func, off & 0xFC);
+    return (uint16_t)(d >> ((off & 2) * 8));
+}
+
+uint8_t pci_read8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off) {
+    uint32_t d = pci_read32(bus, slot, func, off & 0xFC);
+    return (uint8_t)(d >> ((off & 3) * 8));
+}
+
+void pci_write16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off, uint16_t v) {
+    uint32_t d = pci_read32(bus, slot, func, off & 0xFC);
+    int sh = (off & 2) * 8;
+    d = (d & ~(0xFFFFu << sh)) | ((uint32_t)v << sh);
+    pci_write32(bus, slot, func, off & 0xFC, d);
+}
+
+void pci_write8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off, uint8_t v) {
+    uint32_t d = pci_read32(bus, slot, func, off & 0xFC);
+    int sh = (off & 3) * 8;
+    d = (d & ~(0xFFu << sh)) | ((uint32_t)v << sh);
+    pci_write32(bus, slot, func, off & 0xFC, d);
+}
+
+/* Walk the capabilities linked list. It exists only if the Status register
+ * (0x06) bit 4 is set; the head offset is at 0x34, and each capability's byte 1
+ * points to the next (0 = end). Low two bits of every pointer are reserved. */
+uint8_t pci_find_cap(const pci_device_t *d, uint8_t cap_id) {
+    uint16_t status = pci_read16(d->bus, d->slot, d->func, 0x06);
+    if (!(status & (1 << 4)))
+        return 0;                                  /* no capabilities list */
+    uint8_t off = pci_read8(d->bus, d->slot, d->func, 0x34) & 0xFC;
+    for (int guard = 0; off && guard < 48; guard++) {
+        uint8_t id   = pci_read8(d->bus, d->slot, d->func, off);
+        uint8_t next = pci_read8(d->bus, d->slot, d->func, off + 1);
+        if (id == cap_id)
+            return off;
+        off = next & 0xFC;
+    }
+    return 0;
+}
+
 pci_device_t pci_find(uint16_t vendor, uint16_t device) {
     pci_device_t d = {0};
     for (int bus = 0; bus < 256; bus++) {

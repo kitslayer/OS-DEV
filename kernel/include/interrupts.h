@@ -30,5 +30,12 @@ void interrupts_disable(void);              /* cli */
 /* Register a handler for hardware IRQ 0..15 and unmask it on the PIC. */
 void irq_install_handler(uint8_t irq, irq_handler_fn fn);
 
+/* MSI / MSI-X message-signaled interrupts (M1288). The dispatcher owns a small
+ * per-vector handler table over the reserved MSI vector block (see msi.h); the
+ * PCI-side programming in kernel/msi.c installs handlers here. `fn` may be NULL
+ * (delivery is still tallied). msi_irq_count reports deliveries on a vector. */
+void     msi_install_handler(uint8_t vector, irq_handler_fn fn);
+uint64_t msi_irq_count(uint8_t vector);
+
 /* Called from assembly (isr_common). Not for general use. */
 void isr_dispatch(struct registers *regs);

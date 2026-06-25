@@ -12,6 +12,18 @@ typedef struct {
 uint32_t pci_read32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off);
 void     pci_write32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off, uint32_t v);
 
+/* Sub-word config access (the legacy mechanism transfers aligned dwords, so
+ * these extract from / read-modify-write the containing dword). Needed to read
+ * capability structures, whose fields are byte/word-granular. */
+uint8_t  pci_read8 (uint8_t bus, uint8_t slot, uint8_t func, uint8_t off);
+uint16_t pci_read16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off);
+void     pci_write8 (uint8_t bus, uint8_t slot, uint8_t func, uint8_t off, uint8_t v);
+void     pci_write16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off, uint16_t v);
+
+/* Walk the PCI capabilities list and return the config-space offset of the
+ * capability with id `cap_id` (e.g. 0x05 MSI, 0x11 MSI-X), or 0 if absent. */
+uint8_t  pci_find_cap(const pci_device_t *d, uint8_t cap_id);
+
 /* Find the first device matching vendor:device. Result .valid == 0 if absent. */
 pci_device_t pci_find(uint16_t vendor, uint16_t device);
 

@@ -35,7 +35,7 @@ echo "booting kernel headless under QEMU with a virtio-rng device (COM1 capture)
 timeout -s KILL 30 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -object rng-random,filename=/dev/urandom,id=rng0 \
-    -device virtio-rng-pci,rng=rng0 \
+    -device virtio-rng-pci,rng=rng0,vectors=2 \
     -netdev user,id=net0 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \
     -device AC97,audiodev=snd0 -audiodev none,id=snd0 \
@@ -64,6 +64,9 @@ require() {
 require "virtio-rng up"                        "virtio-rng device probed + virtqueue brought up"
 # It DMA'd real, varying entropy in (the headline proof the read path works).
 require "entropy OK"                           "two batches drawn over the virtqueue: nonzero + differ"
+# Message-signaled interrupts (M1288): queue 0 was routed to an MSI-X vector and
+# the device actually fired it — our handler ran AND the kernel tallied it.
+require "MSI-X OK"                             "queue 0 routed to a message-signaled (MSI-X) interrupt that fired"
 # Boot reached the desktop with no fault on the virtio path.
 require "launching the desktop environment"    "reached desktop launch (no fault on the virtio-rng path)"
 

@@ -91,6 +91,18 @@ isr255:
     push 255
     jmp isr_common
 
+; --- MSI / MSI-X message-signaled interrupt vectors (M1288) ------------------
+; A contiguous block of 16 vectors (0x90..0x9F = 144..159) the chipset delivers
+; MSI/MSI-X messages into. Like the PIC IRQ stubs they push no error code;
+; isr_dispatch routes this range to the per-vector MSI handler table and acks
+; the LAPIC (not the PIC). MUST match MSI_VEC_BASE/MSI_VEC_COUNT in
+; kernel/include/msi.h (144 / 16).
+%assign v 144
+%rep 16
+    ISR_NOERR v
+%assign v v+1
+%endrep
+
 ; --- shared tail: save state, call C, restore, return -----------------------
 isr_common:
     push rax
@@ -154,6 +166,16 @@ global isr_stub_table
 isr_stub_table:
 %assign v 0
 %rep 48
+    dq isr %+ v
+%assign v v+1
+%endrep
+
+; MSI/MSI-X stub table (M1288): the 16 vectors 0x90..0x9F, read by idt.c to
+; install their IDT gates. Parallel to isr_stub_table above.
+global msi_stub_table
+msi_stub_table:
+%assign v 144
+%rep 16
     dq isr %+ v
 %assign v v+1
 %endrep

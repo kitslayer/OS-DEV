@@ -10,6 +10,7 @@
 #include "idt.h"
 #include "gdt.h"
 #include "string.h"
+#include "msi.h"          /* MSI_VEC_BASE / MSI_VEC_COUNT + msi_stub_table block */
 #include <stdint.h>
 
 #define IDT_ENTRIES 256
@@ -35,6 +36,10 @@ static struct idt_entry idt[IDT_ENTRIES];
 
 /* The assembly stub table: 48 entries, each the address of isrN. */
 extern uint64_t isr_stub_table[NUM_STUBS];
+
+/* The MSI/MSI-X stub table (kernel/asm/isr_stubs.asm): MSI_VEC_COUNT entries
+ * for the reserved message-signaled-interrupt vector block (M1288). */
+extern uint64_t msi_stub_table[MSI_VEC_COUNT];
 
 static void set_gate(int vec, uint64_t handler, uint8_t ist, uint8_t type_attr) {
     idt[vec].offset_low  = handler & 0xFFFF;
@@ -68,6 +73,12 @@ void idt_init(void) {
     extern void isr64(void), isr255(void);
     set_gate(0x40, (uint64_t)isr64,  0, 0x8E);
     set_gate(0xFF, (uint64_t)isr255, 0, 0x8E);
+
+    /* MSI / MSI-X message-signaled interrupt vectors (M1288): give the whole
+     * reserved block (0x90..0x9F) interrupt gates so a message-signaled
+     * interrupt — or a stray one — vectors into a stub instead of #GP'ing. */
+    for (int i = 0; i < MSI_VEC_COUNT; i++)
+        set_gate(MSI_VEC_BASE + i, msi_stub_table[i], 0, 0x8E);
 
     idt_load();
 }

@@ -38,6 +38,7 @@
 #include "string.h"
 #include "console.h"
 #include "io.h"
+#include "msi.h"          /* MSI-X: route queue 0 to a message-signaled interrupt (M1288) */
 
 /* ---- legacy virtio-over-PCI config registers (I/O-port BAR, byte offsets) --- */
 #define VIRTIO_PCI_HOST_FEATURES  0x00
@@ -48,6 +49,12 @@
 #define VIRTIO_PCI_QUEUE_NOTIFY   0x10
 #define VIRTIO_PCI_STATUS         0x12
 #define VIRTIO_PCI_ISR            0x13
+/* These two 16-bit registers only EXIST once MSI-X is enabled in the device's
+ * PCI capability; they pick which MSI-X table entry the config-change event and
+ * the currently-selected queue signal through (M1288). */
+#define VIRTIO_MSIX_CONFIG_VEC    0x14
+#define VIRTIO_MSIX_QUEUE_VEC     0x16
+#define VIRTIO_MSI_NO_VECTOR      0xFFFF
 
 #define VIRTIO_STATUS_ACKNOWLEDGE 0x01
 #define VIRTIO_STATUS_DRIVER      0x02
@@ -103,7 +110,14 @@ static struct {
     struct vring_used  *used;
     uint64_t           queue_phys;
     uint16_t           used_seen;
+    int                msi_vec;            /* MSI-X vector routed to queue 0, 0 if none (M1288) */
 } vr;
+
+/* MSI-X (M1288): our queue-0 interrupt handler + the count of times it has run.
+ * The self-test checks this to prove our handler actually executed in interrupt
+ * context — not merely that the kernel tallied a delivery. */
+static volatile uint32_t vr_msi_fires;
+static void vr_msi_handler(struct registers *r) { (void)r; vr_msi_fires++; }
 
 static uint8_t  vcfg_r8 (uint16_t off)            { return inb(vr.io_base + off); }
 static void     vcfg_w8 (uint16_t off, uint8_t v) { outb(vr.io_base + off, v); }
@@ -175,6 +189,27 @@ int virtio_rng_init(void) {
     vr.used_seen = 0;
 
     vcfg_w32(VIRTIO_PCI_QUEUE_PFN, (uint32_t)(base >> 12));
+
+    /* MSI-X (M1288): route queue 0's used-buffer notification to a real message-
+     * signaled interrupt rather than relying solely on the used-ring poll in
+     * virtio_rng_read. If the device exposes an MSI-X capability, claim a CPU
+     * vector, program table entry 0 to deliver it to the boot CPU, then tell the
+     * device — via the legacy virtio MSI-X vector registers, which only appear
+     * once MSI-X is enabled in the PCI capability — to use that entry for queue 0.
+     * Purely additive: the poll still works regardless of whether this succeeds. */
+    vr.msi_vec = 0;
+    int nvec = 0;
+    if (msi_x_available(&dev, &nvec) && nvec >= 1) {
+        int vec = msi_alloc_vector(vr_msi_handler);
+        if (vec >= 0 && msi_x_route(&dev, 0, (uint8_t)vec) == 0) {
+            vcfg_w16(VIRTIO_MSIX_CONFIG_VEC, VIRTIO_MSI_NO_VECTOR);  /* no config-change vector */
+            vcfg_w16(VIRTIO_PCI_QUEUE_SEL, 0);                      /* select queue 0 ... */
+            vcfg_w16(VIRTIO_MSIX_QUEUE_VEC, 0);                     /* ... -> MSI-X table entry 0 */
+            if (vcfg_r16(VIRTIO_MSIX_QUEUE_VEC) == 0)               /* device accepted the vector */
+                vr.msi_vec = vec;
+        }
+    }
+
     vr_add_status(VIRTIO_STATUS_DRIVER_OK);
 
     vr.present = 1;
@@ -267,4 +302,22 @@ void virtio_rng_selftest(void) {
         kprintf("[ ok ] virtio-rng entropy OK (nonzero + batch1 != batch2, used ring advanced).\n\n");
     else
         kprintf("[virtio-rng] ENTROPY MISMATCH (nonzero=%d differ=%d)\n\n", nonzero, differ);
+
+    /* MSI-X (M1288): the two reads above each advanced queue 0's used ring, so if
+     * we routed it to a message-signaled interrupt the device should have signaled
+     * our vector. Confirm BOTH our driver handler ran and the kernel's per-vector
+     * tally agree (they count the same deliveries, from opposite sides). */
+    if (vr.msi_vec) {
+        for (volatile int i = 0; i < 5000000 && vr_msi_fires == 0; i++)
+            __asm__ volatile("pause");
+        uint64_t kn = msi_irq_count((uint8_t)vr.msi_vec);
+        if (vr_msi_fires > 0 && kn > 0)
+            kprintf("[ ok ] virtio-rng MSI-X: queue 0 -> vector 0x%x; device signaled it %u time(s) "
+                    "(our handler ran, LAPIC-delivered) -- MSI-X OK\n\n", vr.msi_vec, (unsigned)vr_msi_fires);
+        else
+            kprintf("[virtio-rng] MSI-X NO INTERRUPT (vec=0x%x handler_fires=%u kernel_count=%lu)\n\n",
+                    vr.msi_vec, (unsigned)vr_msi_fires, kn);
+    } else {
+        kprintf("[virtio-rng] MSI-X: no MSI-X capability on this device (poll-only)\n\n");
+    }
 }

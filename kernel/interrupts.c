@@ -21,6 +21,7 @@
 #include "ksyms.h"
 #include "smp.h"
 #include "gdbstub.h"
+#include "msi.h"          /* MSI vector block + msi_install_handler/msi_irq_count */
 #include <stdint.h>
 
 static const char *const exception_names[32] = {
@@ -38,6 +39,21 @@ static const char *const exception_names[32] = {
 static irq_handler_fn irq_handlers[16];
 static uint64_t irq_counts[16];                  /* IRQ fire tally (for /proc/interrupts) */
 uint64_t irq_count(int i) { return (i >= 0 && i < 16) ? irq_counts[i] : 0; }
+
+/* MSI/MSI-X vectors (M1288): a parallel registry over the reserved MSI vector
+ * block. Populated by kernel/msi.c (msi_alloc_vector -> msi_install_handler) and
+ * fired from isr_dispatch's MSI branch below. */
+static irq_handler_fn msi_handlers[MSI_VEC_COUNT];
+static uint64_t       msi_counts[MSI_VEC_COUNT];
+
+void msi_install_handler(uint8_t vector, irq_handler_fn fn) {
+    if (vector >= MSI_VEC_BASE && vector < MSI_VEC_BASE + MSI_VEC_COUNT)
+        msi_handlers[vector - MSI_VEC_BASE] = fn;
+}
+uint64_t msi_irq_count(uint8_t vector) {
+    return (vector >= MSI_VEC_BASE && vector < MSI_VEC_BASE + MSI_VEC_COUNT)
+         ? msi_counts[vector - MSI_VEC_BASE] : 0;
+}
 
 void interrupts_init(void) {
     idt_init();
@@ -79,6 +95,17 @@ void isr_dispatch(struct registers *r) {
      * the LAPIC spurious vector needs no EOI. Both just acknowledge + return. */
     if (r->int_no == 0x40) { lapic_eoi(); return; }
     if (r->int_no == 0xFF) { return; }
+
+    /* MSI / MSI-X message-signaled interrupts (M1288): a device wrote its
+     * configured vector to the LAPIC. Run the registered handler (if any), tally
+     * the delivery, and acknowledge the LOCAL APIC — MSI bypasses the PIC. */
+    if (r->int_no >= MSI_VEC_BASE && r->int_no < MSI_VEC_BASE + MSI_VEC_COUNT) {
+        int idx = (int)r->int_no - MSI_VEC_BASE;
+        msi_counts[idx]++;
+        if (msi_handlers[idx]) msi_handlers[idx](r);
+        lapic_eoi();
+        return;
+    }
 
     if (r->int_no < 32) {
         /* Breakpoint is recoverable — report and continue past the int3. */
