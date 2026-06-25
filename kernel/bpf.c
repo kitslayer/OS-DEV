@@ -7,6 +7,8 @@
  * registers + the read-only context), and is bounded in length.
  */
 #include "bpf.h"
+#include "console.h"   /* kprintf for the JIT self-test (M1290) */
+#include <stdint.h>
 
 static struct bpf_insn g_prog[BPF_MAXINSN];
 static int      g_n;                  /* installed instruction count (0 = none) */
@@ -79,6 +81,134 @@ long bpf_run_prog(const struct bpf_insn *prog, int n, const struct bpf_ctx *ctx)
         }
     }
     return 1;                                       /* fell off the end -> pass */
+}
+
+/* ====================================================================== *
+ * eBPF JIT (M1290): compile the bytecode to NATIVE x86-64.
+ *
+ * The interpreter above dispatches each instruction in a loop; the JIT emits a
+ * straight-line native function `long fn(const struct bpf_ctx *ctx)` (SysV ABI:
+ * ctx in rdi, result in rax) that does the same work with zero per-instruction
+ * dispatch. The 8 BPF registers live in a 64-byte stack frame (reg[i] at
+ * [rbp-8*(i+1)]); ctx stays in rdi (the generated code makes no calls, so
+ * nothing clobbers it); forward JEQ/JNE skips become native je/jne rel32
+ * resolved in a second pass. Code is emitted into a static buffer in .bss --
+ * the kernel image is mapped RWX (see kernel/module.c), so .bss is executable
+ * and a generated function can be called directly, no W^X dance / icache flush
+ * (x86 snoops its own stores). Operates on VERIFIED programs (bpf_verify): valid
+ * opcodes, reg indices < 8, forward in-range skips, a RET present.
+ * ====================================================================== */
+
+typedef long (*bpf_jit_fn)(const struct bpf_ctx *ctx);
+
+/* reg[i] as an rbp-relative disp8: reg[0]@[rbp-8] .. reg[7]@[rbp-64]. */
+static int8_t jit_rdisp(int r) { return (int8_t)(-8 * (r + 1)); }
+
+/* Compile (prog,n) into buf; return a callable pointer, or 0 if it overflowed
+ * buf or hit an unexpected opcode (a verified program never should). */
+static bpf_jit_fn bpf_jit_compile(const struct bpf_insn *prog, int n, uint8_t *buf, int buflen) {
+    int len = 0;
+    int off[BPF_MAXINSN + 1];                       /* native offset of each bytecode insn (+ fall-off pad at [n]) */
+    struct { int pos, target; } fix[BPF_MAXINSN];   /* JEQ/JNE rel32 fixups, resolved after layout */
+    int nfix = 0;
+    #define EMIT(b)   do { if (len >= buflen) return 0; buf[len++] = (uint8_t)(b); } while (0)
+    #define EMIT32(v) do { uint32_t _v = (uint32_t)(v); EMIT(_v); EMIT(_v >> 8); EMIT(_v >> 16); EMIT(_v >> 24); } while (0)
+    #define EMIT64(v) do { uint64_t _v = (uint64_t)(v); for (int _i = 0; _i < 8; _i++) EMIT(_v >> (8 * _i)); } while (0)
+
+    EMIT(0x55);                                     /* push rbp                       */
+    EMIT(0x48); EMIT(0x89); EMIT(0xE5);             /* mov rbp, rsp                   */
+    EMIT(0x48); EMIT(0x83); EMIT(0xEC); EMIT(0x40); /* sub rsp, 64                    */
+    EMIT(0x31); EMIT(0xC0);                         /* xor eax, eax                   */
+    for (int r = 0; r < 8; r++) { EMIT(0x48); EMIT(0x89); EMIT(0x45); EMIT((uint8_t)jit_rdisp(r)); }  /* mov [rbp+d(r)], rax (zero reg) */
+
+    for (int i = 0; i < n; i++) {
+        off[i] = len;
+        const struct bpf_insn *x = &prog[i];
+        uint8_t da = (uint8_t)jit_rdisp(x->a), db = (uint8_t)jit_rdisp(x->b);
+        switch (x->op) {
+            case BPF_LDI:                           /* mov qword [rbp+da], imm32 (sign-extended) */
+                EMIT(0x48); EMIT(0xC7); EMIT(0x45); EMIT(da); EMIT32(x->imm); break;
+            case BPF_LDCTX:                         /* mov eax,[rdi+imm*4]; mov [rbp+da],rax (zero-extend) */
+                EMIT(0x8B); EMIT(0x47); EMIT((uint8_t)(x->imm * 4));
+                EMIT(0x48); EMIT(0x89); EMIT(0x45); EMIT(da); break;
+            case BPF_ADD: case BPF_SUB: case BPF_AND: case BPF_OR: {
+                EMIT(0x48); EMIT(0x8B); EMIT(0x45); EMIT(db);   /* mov rax, [rbp+db] */
+                uint8_t opc = x->op == BPF_ADD ? 0x01 : x->op == BPF_SUB ? 0x29 : x->op == BPF_AND ? 0x21 : 0x09;
+                EMIT(0x48); EMIT(opc); EMIT(0x45); EMIT(da);    /* <op> [rbp+da], rax */
+                break;
+            }
+            case BPF_JEQ: case BPF_JNE:
+                EMIT(0x48); EMIT(0x81); EMIT(0x7D); EMIT(da); EMIT32(x->imm);   /* cmp qword [rbp+da], imm32 */
+                EMIT(0x0F); EMIT(x->op == BPF_JEQ ? 0x84 : 0x85);              /* je/jne rel32 */
+                fix[nfix].pos = len; fix[nfix].target = i + x->b + 1; nfix++;
+                EMIT32(0);                                                     /* rel32 placeholder */
+                break;
+            case BPF_RET:                           /* mov rax,[rbp+da]; leave; ret */
+                EMIT(0x48); EMIT(0x8B); EMIT(0x45); EMIT(da); EMIT(0xC9); EMIT(0xC3); break;
+            case BPF_MAPINC:                        /* g_map[reg[a] & 255]++ */
+                EMIT(0x48); EMIT(0x8B); EMIT(0x45); EMIT(da);                  /* mov rax,[rbp+da]      */
+                EMIT(0x25); EMIT32(0xFF);                                      /* and eax, 0xFF         */
+                EMIT(0x48); EMIT(0xB9); EMIT64((uint64_t)(uintptr_t)g_map);    /* movabs rcx, &g_map    */
+                EMIT(0x48); EMIT(0xFF); EMIT(0x04); EMIT(0xC1);                /* inc qword [rcx+rax*8] */
+                break;
+            default: return 0;                      /* unexpected opcode (verifier should prevent) */
+        }
+    }
+    off[n] = len;
+    EMIT(0xB8); EMIT32(1); EMIT(0xC9); EMIT(0xC3);  /* fall-off pad: mov eax,1; leave; ret (= pass) */
+
+    for (int f = 0; f < nfix; f++) {                /* resolve forward je/jne rel32 */
+        int t = fix[f].target; if (t < 0 || t > n) t = n;
+        int32_t rel = off[t] - (fix[f].pos + 4);
+        buf[fix[f].pos]     = (uint8_t)rel;
+        buf[fix[f].pos + 1] = (uint8_t)(rel >> 8);
+        buf[fix[f].pos + 2] = (uint8_t)(rel >> 16);
+        buf[fix[f].pos + 3] = (uint8_t)(rel >> 24);
+    }
+    #undef EMIT
+    #undef EMIT32
+    #undef EMIT64
+    return (bpf_jit_fn)buf;
+}
+
+/* Boot self-test: compile two programs covering every opcode, then assert the
+ * JIT'd native code returns EXACTLY what the interpreter does (over a range of
+ * contexts), and that the JIT'd MAPINC really wrote the histogram. */
+void bpf_jit_selftest(void) {
+    static uint8_t buf1[1024], buf2[1024];
+    /* P1: drop ICMP (proto==1), else pass -- the canonical packet filter. */
+    static const struct bpf_insn p1[] = {
+        { BPF_LDCTX, 0, 0, 0, 1 }, { BPF_JNE, 0, 2, 0, 1 },
+        { BPF_LDI, 0, 0, 0, 0 },   { BPF_RET, 0, 0, 0, 0 },
+        { BPF_LDI, 0, 0, 0, 1 },   { BPF_RET, 0, 0, 0, 0 },
+    };
+    /* P2: arithmetic + bitwise + a taken JEQ + MAPINC -> returns 0x8C (140). */
+    static const struct bpf_insn p2[] = {
+        { BPF_LDI, 0, 0, 0, 0x3C }, { BPF_LDI, 1, 0, 0, 0x05 },
+        { BPF_ADD, 0, 1, 0, 0 },    { BPF_SUB, 0, 1, 0, 0 },
+        { BPF_LDI, 2, 0, 0, 0x0F }, { BPF_AND, 0, 2, 0, 0 },
+        { BPF_LDI, 3, 0, 0, 0x80 }, { BPF_OR,  0, 3, 0, 0 },
+        { BPF_JEQ, 0, 1, 0, 0x8C }, { BPF_LDI, 0, 0, 0, 0xFF },
+        { BPF_MAPINC, 0, 0, 0, 0 }, { BPF_RET, 0, 0, 0, 0 },
+    };
+    bpf_jit_fn f1 = bpf_jit_compile(p1, 6, buf1, sizeof buf1);
+    bpf_jit_fn f2 = bpf_jit_compile(p2, 12, buf2, sizeof buf2);
+    int ok = (f1 && f2);
+    if (ok) {
+        struct bpf_ctx c = { 0, 0, 0, 0, 0 };
+        for (int proto = 0; proto <= 17 && ok; proto++) {     /* JIT must match the interpreter for every proto */
+            c.proto = (uint32_t)proto;
+            if (f1(&c) != bpf_run_prog(p1, 6, &c)) ok = 0;
+        }
+        uint64_t before = g_map[0x8C];
+        long ji = f2(&c), in = bpf_run_prog(p2, 12, &c);
+        if (ji != in || ji != 0x8C) ok = 0;                   /* value matches + equals expected */
+        if (g_map[0x8C] <= before) ok = 0;                    /* the JIT'd MAPINC actually wrote the map */
+    }
+    if (ok)
+        kprintf("[ ok ] eBPF JIT: bytecode compiled to native x86-64; JIT == interpreter over all opcodes -- eBPF JIT OK\n");
+    else
+        kprintf("[bpf] eBPF JIT FAILED (f1=%p f2=%p)\n", (void *)f1, (void *)f2);
 }
 
 /* eBPF syscall tracepoint (M1202): a global program the kernel runs on every

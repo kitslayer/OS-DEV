@@ -43,6 +43,7 @@ int  bpf_loaded(void);                                 /* is a program installed
 long bpf_run(const struct bpf_ctx *ctx);               /* run the global firewall program; verdict (0 drop / nonzero pass); 1 if none */
 long bpf_run_prog(const struct bpf_insn *prog, int n, const struct bpf_ctx *ctx);  /* run an arbitrary program (seccomp, M1190) */
 int  bpf_verify(const struct bpf_insn *in, int n);     /* verify a program (forward skips, has RET, in-range); 0 ok / -1 (M1190) */
+void bpf_jit_selftest(void);                           /* JIT a program to native x86-64 + assert it == the interpreter (M1290) */
 int  bpf_format(char *out, int max);                   /* /proc/bpf: program + run/drop counters */
 
 /* eBPF syscall tracepoint (M1202): a global program run on every syscall enter,

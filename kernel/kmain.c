@@ -37,6 +37,7 @@
 #include "virtio_blk.h"
 #include "virtio_rng.h"
 #include "virtio_console.h"
+#include "bpf.h"           /* bpf_jit_selftest (M1290) */
 #include "nvme.h"
 #include "floppy.h"
 #include "virtio_net.h"
@@ -235,6 +236,8 @@ void kmain(uint64_t mb_info) {
      * here is idempotent and just surfaces the MAC before the stack demo runs. */
     virtio_net_init();
     virtio_net_selftest();
+
+    bpf_jit_selftest();            /* prove the eBPF JIT matches the interpreter (M1290) */
 
     net_demo();
 
