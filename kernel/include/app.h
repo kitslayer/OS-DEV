@@ -184,6 +184,8 @@ int  app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data
 int  app_epoll_check(int epfd, struct epoll_event *out, int maxevents);  /* one non-blocking readiness pass; count/-1 (M1220) */
 int  app_open(const char *path, int flags);   /* open a FILE fd (O_RDONLY default; O_WRONLY/APPEND/TRUNC/CREAT); fd(>=3)/-1 (M1193/M1195) */
 long app_pts_number(int fd);                   /* ptsname: the /dev/pts/<n> index for a /dev/ptmx master fd, or -1 (M1274) */
+int  app_oom_kill(void);                       /* OOM killer: cooperatively terminate the highest-scoring process; victim pid/-1 (M1275) */
+long app_oom(int cmd, int arg);                /* SYS_oom: 0=set self oom_adj 1=trigger kill 2=score of pid (M1275) */
 long app_lseek(int fd, long off, int whence); /* reposition a FILE fd (0=SET,1=CUR,2=END); new offset/-1 (M1193) */
 long app_utimens(const char *path, long atime, long mtime);  /* set a path's atime/mtime (UTIME_NOW/OMIT); 0/-1 (M1230) */
 long app_futimens(int fd, long atime, long mtime);           /* set an open fd's atime/mtime; 0/-1 (M1230) */

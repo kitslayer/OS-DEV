@@ -501,6 +501,7 @@ long sys_timer_gettime(int id) { return do_syscall(SYS_timer_gettime, id, 0, 0);
 long sys_timer_delete(int id) { return do_syscall(SYS_timer_delete, id, 0, 0); }
 unsigned long sys_hpet(int what) { return (unsigned long)do_syscall(SYS_hpet, what, 0, 0); }  /* 0=ns 1=hz 2=counter 3=present (M1273) */
 long sys_ptsname(int fd) { return do_syscall(SYS_ptsname, fd, 0, 0); }  /* /dev/pts/<n> index for a /dev/ptmx master fd, or -1 (M1274) */
+long sys_oom(int cmd, int arg) { return do_syscall(SYS_oom, cmd, arg, 0); }  /* 0=set self oom_adj 1=trigger kill(->pid) 2=score of pid (M1275) */
 unsigned sys_sigprocmask(int how, unsigned set) { return (unsigned)do_syscall(SYS_sigprocmask, how, (long)set, 0); }
 unsigned sys_sigpending(void) { return (unsigned)do_syscall(SYS_sigpending, 0, 0, 0); }
 unsigned long sys_uptime_ms(void) { return (unsigned long)do_syscall(SYS_uptime_ms, 0, 0, 0); }

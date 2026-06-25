@@ -120,6 +120,7 @@ struct app {
     volatile int ih, it;
     volatile int exited;
     volatile int kill;                   /* WM asked this app to close: it self-exits at its input wait */
+    int      oom_adj;                    /* OOM victim bias (oom_score_adj-like): higher = killed sooner, <= -1000 = never (M1275) */
     char     hist[HIST_N][96];           /* recent input lines (for up/down) */
     int      hist_n, hist_pos;
     volatile int gdirty;                 /* grid changed -> WM should repaint */
@@ -185,6 +186,7 @@ struct app {
 static struct app apps[MAX_APPS];
 static int next_pid = 100;
 static int fg_pgid;             /* the controlling terminal's foreground process group (job control, M1176; 0 = none) */
+int app_oom_kill(void);         /* OOM killer (M1275): defined below, called from the sbrk exhaustion path above it */
 
 /* userfaultfd state (M1134); defined here so app_reap + app_fault_handle (both
  * above the uffd functions) can see it. One registered region at a time. */
@@ -1560,6 +1562,7 @@ uint64_t app_sbrk(long inc) {
              * next and usually exits, so this logs about once, not in a spin. */
             kprintf("[app] '%s' out of memory: sbrk(%ld) failed, no free frames (increase QEMU -m?)\n",
                     a->title ? a->title : "?", inc);
+            app_oom_kill();          /* shed the fattest other process so the system recovers (M1275; cooperative) */
             return (uint64_t)-1;
         }
         vmm_map(v, frame, PTE_WRITABLE | PTE_USER | PTE_NX);   /* heap: data, never code (W^X) */
@@ -2886,6 +2889,47 @@ void app_fault_current(struct registers *r) {
     if (a && r) app_core_dump(r);
     if (a) a->exited = 1;
     task_exit();
+}
+
+/* --- OOM killer (M1275) ---------------------------------------------------
+ * Under memory pressure, survive by terminating the worst memory hog rather
+ * than failing/panicking. score = RSS pages + oom_adj bias (oom_adj <= -1000
+ * = OOM-protected, never chosen). The kill is COOPERATIVE — exactly the WM
+ * close-button path: we set the victim's `kill` flag and wake it, and it
+ * self-exits at its next syscall/fault boundary (app_reap then frees its
+ * frames). No risky synchronous cross-address-space teardown. */
+static long oom_score(struct app *a) {
+    if (!a || !a->used || a->exited || a->zombie) return -1;
+    if (a->oom_adj <= -1000) return -1;                   /* OOM-protected */
+    vmm_wss_t w; vmm_wss(a->cr3, &w);
+    return (long)w.resident + (long)a->oom_adj * 256;     /* RSS pages + adj bias */
+}
+/* Pick the highest-scoring app other than the caller and cooperatively kill it.
+ * Returns the victim's pid, or -1 if there's nothing eligible to reap. */
+int app_oom_kill(void) {
+    struct app *me = cur();
+    struct app *victim = 0; long best = -1;
+    for (int i = 0; i < MAX_APPS; i++) {
+        struct app *a = &apps[i];
+        if (a == me) continue;                            /* never the caller */
+        long s = oom_score(a);
+        if (s > best) { best = s; victim = a; }
+    }
+    if (!victim) return -1;
+    victim->kill = 1;                                     /* cooperative terminate */
+    if (victim->task) task_wake((task_t *)victim->task);  /* unblock it so it notices + exits */
+    kprintf("[oom] reclaiming memory: killed pid %d (score %ld pages)\n", victim->pid, best);
+    return victim->pid;
+}
+/* SYS_oom multiplexer: cmd 0 = set the caller's oom_adj to `arg`; cmd 1 = invoke
+ * the OOM killer now (sysrq-f style), returns the killed pid; cmd 2 = the
+ * oom_score of pid `arg`. */
+long app_oom(int cmd, int arg) {
+    struct app *a = cur(); if (!a) return -1;
+    if (cmd == 0) { a->oom_adj = arg; return 0; }
+    if (cmd == 1) return app_oom_kill();
+    if (cmd == 2) { struct app *t = app_by_pid(arg); return t ? oom_score(t) : -1; }
+    return -1;
 }
 
 /* Format the caller's command history (oldest first) as "  N  command\n"

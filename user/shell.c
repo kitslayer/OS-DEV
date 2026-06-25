@@ -3565,6 +3565,25 @@ static int run_command(char *line, char *cwd) {
             } else { print("ptmxtest: open failed (mfd="); printl(mfd); print(" pts='"); print(sp); print("' sfd="); printl(sfd); print(")\n"); g_status = 1; }
             if (sfd >= 0) sys_fdclose(sfd);
             if (mfd >= 0) sys_fdclose(mfd);
+        } else if (streq(line, "oomtest")) {   /* OOM killer: scoring + cooperative victim kill (M1275) */
+            long pid = sys_fork();
+            if (pid == 0) {                              /* child: become the fattest, OOM-killable, then loop */
+                sys_oom(0, 1000);                        /* boost own oom_adj -> the preferred victim */
+                char *p = (char *)sys_mmap(1024 * 1024); /* 1 MB anon region */
+                if (p) for (int i = 0; i < 1024 * 1024; i += 4096) p[i] = (char)1;   /* touch -> real RSS */
+                for (;;) { sys_pollkey(); sys_sleep(10); }   /* stay alive; pollkey honors the kill flag */
+                sys_exit(0);                             /* unreachable */
+            }
+            sys_sleep(250);                              /* let the child boost adj + balloon + enter its loop */
+            long score  = sys_oom(2, (int)pid);          /* the child's oom_score */
+            long victim = sys_oom(1, 0);                 /* invoke the OOM killer (sysrq-f style) */
+            int st = -1; long w = sys_waitpid((int)pid, &st);   /* the looping child returns here ONLY if it was killed */
+            int ok = (pid > 0 && score > 0 && victim == pid && w == pid);
+            if (ok) { print("oom: forked a 1MB-RSS child (oom_adj=1000), oom_score="); printl(score);
+                      print(" pages; OOM killer selected + cooperatively killed pid "); printl(victim);
+                      print(", looping child reaped (system survived) -- OOM killer OK\n"); }
+            else { print("oomtest: VERIFY FAILED (pid="); printl(pid); print(" score="); printl(score);
+                   print(" victim="); printl(victim); print(" w="); printl(w); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
