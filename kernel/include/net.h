@@ -43,6 +43,9 @@ int net_proc(char *buf, int max);   /* /proc/net: interface + ARP/DNS caches as 
 int net_dhcp(void);                 /* DHCP DORA handshake: lease IP/gateway/DNS from the server; 0/-1 */
 long net_tftp_get(const char *server, const char *filename, void *out, uint32_t max);  /* TFTP read; bytes/-1 */
 int  net_sntp(void);                /* SNTP: set the RTC from pool.ntp.org; 0/-1 */
+/* Userspace UDP sockets (M1258): connectionless datagram send/recv for ring 3. */
+int  net_udp_send(const uint8_t dstip[4], uint16_t dport, uint16_t sport, const void *payload, int plen);   /* 0/-1 */
+int  net_udp_recv(uint16_t sport, void *buf, int max, uint8_t srcip[4], uint16_t *srcport, int timeout_ms);  /* bytes/-1 */
 /* /net/tcp sockets-as-files (M1110): `sub` is the path after "/net/tcp/" —
  * "clone", "<n>/ctl", or "<n>/data". Routed from vfs.c. */
 long netfs_read(const char *sub, void *buf, unsigned long max);

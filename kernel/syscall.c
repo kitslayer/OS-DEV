@@ -681,6 +681,28 @@ void syscall_dispatch(struct registers *r) {
         __asm__ volatile("sti");           /* the query waits for a reply (needs the timer) */
         r->rax = (uint64_t)(int64_t)net_sntp();
         break;
+    case SYS_udp_send: {                   /* (dstip[4], (dport<<16)|sport, payload, plen) -> 0/-1 (M1258) */
+        if (!ubuf(r->rdi, 4) || (r->r10 && !ubuf(r->rdx, r->r10))) { r->rax = (uint64_t)-1; break; }
+        uint16_t dport = (uint16_t)(r->rsi >> 16), sport = (uint16_t)(r->rsi & 0xFFFF);
+        __asm__ volatile("sti");           /* ARP + TX need the timer/IRQs */
+        r->rax = (uint64_t)(int64_t)net_udp_send((const uint8_t *)r->rdi, dport, sport,
+                                                 (const void *)r->rdx, (int)r->r10);
+        break;
+    }
+    case SYS_udp_recv: {                   /* (sport, buf, max, from{u8 ip[4];u16 port}|0) -> bytes/-1 (M1258) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        if (r->r10 && !ubuf(r->r10, 6)) { r->rax = (uint64_t)-1; break; }
+        uint8_t sip[4] = {0,0,0,0}; uint16_t sp = 0;
+        __asm__ volatile("sti");           /* polling the RX ring needs the timer */
+        int n = net_udp_recv((uint16_t)r->rdi, (void *)r->rsi, (int)r->rdx, sip, &sp, 2000);
+        if (n >= 0 && r->r10) {            /* fill the caller's {ip[4], port} sender struct */
+            uint8_t *f = (uint8_t *)r->r10;
+            f[0] = sip[0]; f[1] = sip[1]; f[2] = sip[2]; f[3] = sip[3];
+            f[4] = (uint8_t)(sp & 0xFF); f[5] = (uint8_t)(sp >> 8);
+        }
+        r->rax = (uint64_t)(int64_t)n;
+        break;
+    }
     case SYS_cas_store:                    /* (buf, len, hash32) -> store; write the SHA-256 key */
         if (!ubuf(r->rdi, r->rsi) || !ubuf(r->rdx, 32)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)cas_store((const void *)r->rdi, (uint32_t)r->rsi, (uint8_t *)r->rdx);

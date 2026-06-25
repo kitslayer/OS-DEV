@@ -3281,6 +3281,44 @@ static int run_command(char *line, char *cwd) {
                       print("ms; past deadline returned ~"); printl((long)dt2); print("ms (immediate) -- OK\n"); }
             else print("clocknstest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "udptest")) {   /* userspace UDP sockets: a real DNS round-trip via sendto/recvfrom (M1258) */
+            unsigned char dns[4] = {10, 0, 2, 3};               /* QEMU slirp built-in DNS resolver */
+            unsigned char q[256]; int dl = 0;
+            q[dl++]=0x12; q[dl++]=0x34;                         /* id */
+            q[dl++]=0x01; q[dl++]=0x00;                         /* flags: recursion desired */
+            q[dl++]=0; q[dl++]=1;                               /* qdcount = 1 */
+            q[dl++]=0;q[dl++]=0; q[dl++]=0;q[dl++]=0; q[dl++]=0;q[dl++]=0;  /* an/ns/ar = 0 */
+            const char *host = "example.com"; const char *p = host;
+            while (*p) { int l=0; while (p[l] && p[l]!='.') l++; q[dl++]=(unsigned char)l;
+                         for (int i=0;i<l;i++) q[dl++]=(unsigned char)p[i]; p+=l; if(*p=='.')p++; }
+            q[dl++]=0; q[dl++]=0;q[dl++]=1; q[dl++]=0;q[dl++]=1; /* root label + QTYPE A + QCLASS IN */
+            int ok = 1; unsigned short sport = 0xB0B0;
+            if (sys_udp_send(dns, 53, sport, q, dl) != 0) ok = 0;
+            unsigned char resp[512]; unsigned char from[6] = {0};
+            long n = sys_udp_recv(sport, resp, sizeof resp, from);
+            int idok = (n >= 12 && resp[0]==0x12 && resp[1]==0x34);   /* our query's reply came back */
+            int an = (n >= 8) ? ((resp[6]<<8)|resp[7]) : 0;           /* answer count */
+            long a0=-1,a1=-1,a2=-1,a3=-1;                             /* best-effort: pull the first A record */
+            if (idok && an >= 1) {
+                int o = 12;
+                while (o < n && resp[o]) { if ((resp[o]&0xC0)==0xC0){o++;break;} o += resp[o]+1; }
+                o++; o += 4;                                          /* end-of-name + QTYPE/QCLASS */
+                for (int a=0; a<an && o+10<=n; a++) {
+                    if ((resp[o]&0xC0)==0xC0) o+=2; else { while(o<n && resp[o]) o+=resp[o]+1; o++; }
+                    if (o+10 > n) break;
+                    int type=(resp[o]<<8)|resp[o+1]; o+=2; o+=2; o+=4;   /* type, class, ttl */
+                    int rdlen=(resp[o]<<8)|resp[o+1]; o+=2;
+                    if (type==1 && rdlen==4 && o+4<=n) { a0=resp[o];a1=resp[o+1];a2=resp[o+2];a3=resp[o+3]; break; }
+                    o+=rdlen;
+                }
+            }
+            if (!(ok && idok && an >= 1)) ok = 0;                     /* PASS = matching reply with >=1 answer */
+            if (ok) { print("udp: sendto 10.0.2.3:53 DNS query, recvfrom got "); printl(n);
+                      print("B reply (id matches, "); printl(an); print(" answer");
+                      if (a0>=0){ print(", A="); printl(a0);print(".");printl(a1);print(".");printl(a2);print(".");printl(a3); }
+                      print(") -- userspace UDP round-trip OK\n"); }
+            else print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

@@ -264,6 +264,8 @@
 #define SYS_socketpair   242   /* (int sv[2]) -> a pre-connected AF_UNIX endpoint pair; 0/-1 (M1254) */
 #define SYS_clock_nanosleep 243 /* (clockid, flags, sec, nsec) -> sleep; TIMER_ABSTIME = absolute deadline; 0 (M1257) */
 #define SYS_clock_getres 244   /* (clockid) -> clock resolution in nanoseconds (M1257) */
+#define SYS_udp_send     245   /* (dstip[4], (dport<<16)|sport, payload, plen) -> 0/-1 (M1258) */
+#define SYS_udp_recv     246   /* (sport, buf, max, from{u8 ip[4];u16 port}|0) -> bytes/-1, 2s timeout (M1258) */
 
 /* clock ids + clock_nanosleep flags (M1257). */
 #define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */

@@ -447,6 +447,57 @@ static void udp_send_to(const uint8_t *dstmac, const uint8_t *dstip,
     nic_send(pkt, 42 + plen);
 }
 
+/* ===================================================================== *
+ *  Userspace UDP sockets (M1258): expose the datagram primitive to ring 3
+ *  via SYS_udp_send / SYS_udp_recv, so programs can speak their OWN UDP
+ *  protocols (a resolver, a netcat, custom netcode) instead of relying on
+ *  the kernel's built-in DNS/DHCP/TFTP/SNTP. Connectionless: the caller
+ *  picks a local port; recv filters the RX ring by that port.
+ * ===================================================================== */
+
+/* Send `plen` payload bytes to dstip:dport from local port sport. ARP-resolves
+ * dstip directly (on-subnet) or via the gateway. Returns 0 on success, -1 on
+ * bad-arg / ARP failure. */
+int net_udp_send(const uint8_t dstip[4], uint16_t dport, uint16_t sport,
+                 const void *payload, int plen) {
+    if (!dstip || plen < 0 || plen > 1400) return -1;
+    uint8_t mac[6];
+    if (!arp_resolve(dstip, mac) && !arp_resolve(GW_IP, mac)) return -1;   /* dest, else via gateway */
+    udp_send_to(mac, dstip, sport, dport, (const uint8_t *)payload, plen);
+    return 0;
+}
+
+/* Wait up to timeout_ms for a UDP datagram addressed to our local port `sport`.
+ * Copies up to `max` payload bytes into buf; fills srcip[4] / *srcport (if
+ * non-NULL) with the sender. Returns payload bytes (>=0) or -1 on timeout. */
+int net_udp_recv(uint16_t sport, void *buf, int max,
+                 uint8_t srcip[4], uint16_t *srcport, int timeout_ms) {
+    if (!buf || max <= 0) return -1;
+    if (timeout_ms < 0) timeout_ms = 0;
+    uint8_t rb[1600];
+    uint64_t deadline = timer_ticks() + (uint64_t)timeout_ms / 10 + 1;
+    while (timer_ticks() < deadline) {
+        int len = recv_timeout(rb, sizeof(rb), 20);
+        if (len < 14 + 20 + 8 || get16(rb + 12) != 0x0800 || rb[14 + 9] != 17) continue;  /* IPv4 + UDP */
+        int ihl = (rb[14] & 0x0F) * 4;
+        if (ihl < 20) continue;
+        uint8_t *udp = rb + 14 + ihl;
+        if (len < 14 + ihl + 8) continue;
+        if (get16(udp + 2) != sport) continue;                /* UDP dest port = our local port? */
+        int plen = (int)get16(udp + 4) - 8;                   /* UDP length field - 8-byte header */
+        int avail = len - (14 + ihl + 8);
+        if (plen < 0) plen = 0;
+        if (plen > avail) plen = avail;                       /* never read past what arrived */
+        if (plen > max) plen = max;
+        const uint8_t *pl = udp + 8;
+        for (int i = 0; i < plen; i++) ((uint8_t *)buf)[i] = pl[i];
+        if (srcip)   memcpy(srcip, rb + 14 + 12, 4);          /* source IPv4 */
+        if (srcport) *srcport = get16(udp + 0);               /* source port */
+        return plen;
+    }
+    return -1;
+}
+
 /* Fetch `filename` from the TFTP server `server_str` (dotted-quad) into `out`
  * (capacity `max`). Returns the byte length, or -1. Lock-step RRQ/DATA/ACK;
  * latches the server's transfer port (TID) from its first DATA. */
