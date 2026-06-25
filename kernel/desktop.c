@@ -278,7 +278,9 @@ static void draw_content(const window_t *w, int focused) {
             "- 60+ apps, games and demos", "",
             "Drag the title bar or corner to move.",
             "F9 = Apps menu     F1 = all shortcuts" };
-        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) draw_text(bx, by+i*18, L[i], 0x202028);
+        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++)
+            draw_text(bx, by+i*18, L[i], i == 0 ? 0x1F56C6 : 0x202028);   /* heading in accent blue */
+        fb_fill_rect(bx, by + 16, w->w - 24, 1, 0xC9CCD6);                /* accent rule under the heading */
         break;
     }
     case KIND_FILES: {
@@ -302,6 +304,7 @@ static void draw_content(const window_t *w, int focused) {
         } else {
             draw_text(bx, by, "FAT32 (/) up/down Enter open  d del  r rename  n new-folder  w wallpaper", 0x202028);
         }
+        fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, 0xC4CAD6);   /* rule under the header */
         int rows = (w->h - TITLEBAR_H - 30) / 18;          /* rows that fit in the body */
         if (rows < 1) rows = 1;
         int top = 0;                                       /* scroll so the selection stays visible */
@@ -310,6 +313,8 @@ static void draw_content(const window_t *w, int focused) {
             int ry = by + 22 + (i - top)*18;
             if (i == w->fsel)                              /* highlight the selected row */
                 fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0xCFE0F5);
+            else if ((i - top) & 1)                        /* zebra striping for scanability */
+                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0xDFE5F0);
             char line[48]; int p = 0; line[p++]=' '; line[p++]=' ';
             for (int j = 0; e[i].name[j] && p < 28; j++) line[p++] = e[i].name[j];
             while (p < 22) line[p++] = ' ';
