@@ -315,23 +315,29 @@ static void draw_content(const window_t *w, int focused) {
                 fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0xCFE0F5);
             else if ((i - top) & 1)                        /* zebra striping for scanability */
                 fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0xDFE5F0);
+            int nl = 0; while (e[i].name[nl]) nl++;
+            int isdir = (nl > 0 && e[i].name[nl-1] == '/');   /* vfs marks directories with a trailing '/' */
             char line[48]; int p = 0; line[p++]=' '; line[p++]=' ';
             for (int j = 0; e[i].name[j] && p < 28; j++) line[p++] = e[i].name[j];
             while (p < 22) line[p++] = ' ';
-            line[p++]='('; uint32_t s=e[i].size; char num[12]; int k=0;
-            if (!s) num[k++]='0';
-            while (s) { num[k++]='0'+s%10; s/=10; }
-            while (k) line[p++]=num[--k];
-            line[p++]='b'; line[p++]=')';
-            if (e[i].date && p < 36) {                 /* last-write date (YYYY-MM-DD) for stamped files */
-                int yr=(e[i].date>>9)+1980, mo=(e[i].date>>5)&15, dy=e[i].date&31;
-                line[p++]=' ';
-                line[p++]='0'+(yr/1000)%10; line[p++]='0'+(yr/100)%10; line[p++]='0'+(yr/10)%10; line[p++]='0'+yr%10;
-                line[p++]='-'; line[p++]='0'+(mo/10)%10; line[p++]='0'+mo%10;
-                line[p++]='-'; line[p++]='0'+(dy/10)%10; line[p++]='0'+dy%10;
+            if (isdir) {                                   /* directory: show "(dir)", no size/date */
+                const char *d = "(dir)"; for (int z = 0; d[z]; z++) line[p++] = d[z];
+            } else {
+                line[p++]='('; uint32_t s=e[i].size; char num[12]; int k=0;
+                if (!s) num[k++]='0';
+                while (s) { num[k++]='0'+s%10; s/=10; }
+                while (k) line[p++]=num[--k];
+                line[p++]='b'; line[p++]=')';
+                if (e[i].date && p < 36) {                 /* last-write date (YYYY-MM-DD) for stamped files */
+                    int yr=(e[i].date>>9)+1980, mo=(e[i].date>>5)&15, dy=e[i].date&31;
+                    line[p++]=' ';
+                    line[p++]='0'+(yr/1000)%10; line[p++]='0'+(yr/100)%10; line[p++]='0'+(yr/10)%10; line[p++]='0'+yr%10;
+                    line[p++]='-'; line[p++]='0'+(mo/10)%10; line[p++]='0'+mo%10;
+                    line[p++]='-'; line[p++]='0'+(dy/10)%10; line[p++]='0'+dy%10;
+                }
             }
             line[p]=0;
-            draw_text(bx, ry, line, 0x303840);
+            draw_text(bx, ry, line, isdir ? 0x8A5A00 : 0x303840);   /* directories in folder-gold */
         }
         break;
     }
