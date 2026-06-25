@@ -54,6 +54,14 @@ int klog_copy(char *out, int max) {
     return n;
 }
 
+/* Append userspace bytes to the kernel log ring (the /dev/kmsg writer, M1216),
+ * so init scripts / apps can log into `dmesg`. A trailing newline is ensured so
+ * each write is its own log line. */
+void klog_write(const char *buf, int n) {
+    for (int i = 0; i < n; i++) klog_putc(buf[i]);
+    if (n == 0 || buf[n - 1] != '\n') klog_putc('\n');
+}
+
 void console_init(void) {
     serial_init();
     vga_init();

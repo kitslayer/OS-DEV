@@ -19,3 +19,4 @@ void kvprintf(const char *fmt, va_list ap);
 /* Copy the most recent kernel-log bytes (oldest-first, NUL-terminated) into
  * out[max]; returns the byte count written. Backs /proc/kmsg (a `dmesg`). */
 int klog_copy(char *out, int max);
+void klog_write(const char *buf, int n);   /* append userspace bytes to the log ring (/dev/kmsg, M1216) */

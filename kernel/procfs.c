@@ -344,7 +344,7 @@ static const struct pf proc_files[] = {
     { "bcache", gen_bcache }, { "measure", gen_measure }, { "cas", gen_cas }, { "fw", gen_fw },
     { "notify", gen_notify }, { "swaps", gen_swaps }, { "shm", gen_shm }, { "events", gen_events }, { "bpf", gen_bpf }, { "syscalls", gen_syscalls },
 };
-static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard" };
+static const char *dev_files[] = { "null", "zero", "random", "urandom", "full", "clipboard", "kmsg" };
 #define NPROC (int)(sizeof(proc_files)/sizeof(proc_files[0]))
 #define NDEV  (int)(sizeof(dev_files)/sizeof(dev_files[0]))
 
@@ -542,6 +542,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
         }
         if (peq(f, "clipboard"))                                 /* the system clipboard as a file */
             return (long)clip_get((char *)buf, (int)max);
+        if (peq(f, "kmsg"))   return klog_copy((char *)buf, (int)max);   /* the kernel log ring, like /proc/kmsg (M1216) */
     }
     return -1;
 }
@@ -552,6 +553,7 @@ long procfs_write(const char *abs, const void *buf, unsigned long len) {
         if (peq(f, "null") || peq(f, "zero")) return (long)len;  /* discard, "succeed" */
         if (peq(f, "full")) return -1;                           /* always ENOSPC */
         if (peq(f, "clipboard")) { clip_set((const char *)buf, (int)len); return (long)len; }
+        if (peq(f, "kmsg")) { klog_write((const char *)buf, (int)len); return (long)len; }   /* userspace -> the kernel log ring (M1216) */
         return -1;                                               /* other /dev nodes: read-only */
     }
     if (startswith(abs, "/proc/")) {

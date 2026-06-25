@@ -2575,6 +2575,20 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "auxv: /proc/self/auxv has AT_PAGESZ=4096 + AT_ENTRY!=0, AT_NULL-terminated -- OK\n"
                      : "auxvtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "kmsgtest")) {   /* /dev/kmsg writer -> kernel log ring (M1216) */
+            const char *marker = "M1216-kmsg-userspace-probe";
+            int ml = 0; while (marker[ml]) ml++;
+            long w = sys_writefile("/dev/kmsg", marker, ml);
+            char kb[4096]; long n = sys_readfile("/proc/kmsg", kb, sizeof kb - 1);
+            int found = 0;
+            for (long i = 0; i + ml <= n && !found; i++) {
+                int m = 1; for (int j = 0; j < ml; j++) if (kb[i + j] != marker[j]) { m = 0; break; }
+                if (m) found = 1;
+            }
+            int ok = (w == ml) && found;
+            print(ok ? "kmsg: wrote a line to /dev/kmsg, read it back from /proc/kmsg (dmesg) -- OK\n"
+                     : "kmsgtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
