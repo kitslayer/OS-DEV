@@ -63,6 +63,7 @@ struct app {
     task_t     *thr[APP_MAXTHREAD];      /* worker threads (M1138/M1139); 0 = free slot */
     const char *title;
     char        titlebuf[24];            /* persistent copy of the title */
+    char        exe_path[64];            /* the spawn/exec file path, for /proc/<pid>/exe — NOT changed by prctl (M1250) */
     uint64_t cr3, entry, ustack;
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
 #define APP_MAXVMA 16
@@ -327,6 +328,7 @@ int app_cols(void) { return APP_COLS; }
 int app_rows(void) { return APP_ROWS; }
 const char *app_title(app_t *a) { return a->title; }
 const char *app_cwd_str(app_t *a) { return (a && a->cwd_path[0]) ? a->cwd_path : "/"; }  /* cwd path of any app, for /proc/<pid>/cwd (M1249) */
+const char *app_exe_str(app_t *a) { return (a && a->exe_path[0]) ? a->exe_path : "?"; }   /* spawn/exec path, for /proc/<pid>/exe (M1250) */
 const char *app_arg(app_t *a) { return a ? a->launch_arg : ""; }          /* /proc/<pid>/cmdline */
 void       *app_task(app_t *a) { return a ? (void *)a->task : 0; }        /* the task_t*, for /proc/<pid>/ctl stop/cont */
 uint64_t    app_cr3(app_t *a) { return a ? a->cr3 : 0; }                  /* the app's address space, for /proc/<pid>/wss */
@@ -2716,6 +2718,8 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
     a->titlebuf[ti] = 0;
     a->title = a->titlebuf;
+    int ei = 0; if (title) while (title[ei] && ei < 63) { a->exe_path[ei] = title[ei]; ei++; }  /* untruncated exe path (M1250) */
+    a->exe_path[ei] = 0;
     /* Measured boot (M1096): fold this app's exact ELF image into PCR1 + the
      * event log, in launch order. `elf` is kernel-accessible here (embedded
      * .rodata or a kernel read buffer), before the CR3 switch below. */
@@ -3642,6 +3646,8 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     if (a->gfx) { kfree(a->gfx); a->gfx = 0; a->gfx_w = a->gfx_h = 0; }
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
     a->titlebuf[ti] = 0; a->title = a->titlebuf;
+    int ei = 0; if (name) while (name[ei] && ei < 63) { a->exe_path[ei] = name[ei]; ei++; }   /* exec'd path, for /proc/<pid>/exe (M1250) */
+    a->exe_path[ei] = 0;
     int li = 0; if (arg) while (arg[li] && li < 127) { a->launch_arg[li] = arg[li]; li++; }
     a->launch_arg[li] = 0;
     for (int i = 0; i < APP_NFD; i++) if (a->fd[i].used && a->fd[i].cloexec) app_fd_close(i);   /* FD_CLOEXEC: drop on exec (M1218) */

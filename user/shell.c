@@ -3134,6 +3134,15 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "procwd: /proc/self/cwd tracks cd (/tmp then /); /proc/self/root == / -- OK\n"
                      : "procwdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "exetest")) {   /* /proc/<pid>/exe (M1250) */
+            int ok = 1; char b[80];
+            long n = sys_readfile("/proc/self/exe", b, sizeof b - 1);
+            if (n <= 0) ok = 0;
+            else { b[n] = 0; int k = 0; while (b[k] && b[k] != '\n') k++; b[k] = 0;   /* strip newline */
+                   if (k == 0 || (k == 1 && b[0] == '?')) ok = 0; }                   /* a real image path, not the "?" placeholder */
+            if (ok) { print("exe: /proc/self/exe = '"); print(b); print("' (the shell's image path) -- OK\n"); }
+            else print("exetest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
