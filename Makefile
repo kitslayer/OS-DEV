@@ -87,7 +87,15 @@ $(BUILD)/mkfatfs: tools/mkfatfs.c
 	@mkdir -p $(BUILD)
 	$(CC) -O2 -Wall -o $@ $<
 
-$(DISK): $(BUILD)/mkfatfs
+# A shared library placed on the FAT disk for the userspace dynamic linker
+# (M1263): built as a freestanding PIC ET_DYN, loaded at runtime by ulib's
+# dlopen()/dlsym(). mkfatfs reads build/dltest.so via its hostfiles[] table, so
+# the disk depends on it.
+$(BUILD)/dltest.so: user/dltest_lib.c Makefile
+	@mkdir -p $(BUILD)
+	$(CC) -shared -fPIC -nostdlib -ffreestanding -fno-stack-protector -mno-red-zone -fno-pie -O2 $< -o $@
+
+$(DISK): $(BUILD)/mkfatfs $(BUILD)/dltest.so
 	$(BUILD)/mkfatfs $@
 
 $(BUILD)/%.o: %.c Makefile

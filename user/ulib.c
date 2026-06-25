@@ -281,6 +281,95 @@ int  sys_raw_send(const void *frame, unsigned len) { return (int)do_syscall(SYS_
 long sys_raw_recv(void *buf, unsigned max) { return do_syscall(SYS_raw_recv, (long)buf, (long)max, 0); }
 long sys_insmod(void) { return do_syscall(SYS_insmod, 0, 0, 0); }
 int  sys_rmmod(const char *name) { return (int)do_syscall(SYS_rmmod, (long)name, 0, 0); }
+
+/* ===================================================================== *
+ *  Userspace dynamic linker (M1263): dlopen()/dlsym() over an ELF .so.
+ *  A real ring-3 ld.so — reads a shared object from the filesystem, maps its
+ *  PT_LOAD segments into a fresh mmap region at a runtime base, applies the
+ *  ELF relocations (RELATIVE / GLOB_DAT / JUMP_SLOT / 64) so the GOT points at
+ *  the loaded code, mprotects the image executable, and resolves exported
+ *  symbols from .dynsym. Eager binding (no lazy PLT resolver needed).
+ * ===================================================================== */
+typedef struct { unsigned char e_ident[16]; unsigned short e_type, e_machine; unsigned e_version;
+    unsigned long e_entry, e_phoff, e_shoff; unsigned e_flags;
+    unsigned short e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum, e_shstrndx; } dl_ehdr;
+typedef struct { unsigned p_type, p_flags; unsigned long p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align; } dl_phdr;
+typedef struct { unsigned sh_name, sh_type; unsigned long sh_flags, sh_addr, sh_offset, sh_size;
+    unsigned sh_link, sh_info; unsigned long sh_addralign, sh_entsize; } dl_shdr;
+typedef struct { unsigned st_name; unsigned char st_info, st_other; unsigned short st_shndx; unsigned long st_value, st_size; } dl_sym;
+typedef struct { unsigned long r_offset, r_info; long r_addend; } dl_rela;
+
+struct dlobj { unsigned char *base; const dl_sym *dynsym; const char *dynstr; int nsym; int ok; };
+
+void *dlopen(const char *path) {
+    static struct dlobj objs[4]; static int nobj;
+    if (nobj >= 4) return 0;
+    /* File buffer must be MALLOC'd (pre-faulted heap), not mmap'd: sys_readfile
+     * validates the user buffer's PTEs, and a fresh demand-paged mmap region has
+     * no present pages yet -> validation would reject it. */
+    unsigned char *file = (unsigned char *)malloc(256 * 1024);
+    if (!file) return 0;
+    long flen = sys_readfile(path, file, 256 * 1024);
+    if (flen < (long)sizeof(dl_ehdr)) return 0;
+    dl_ehdr *eh = (dl_ehdr *)file;
+    if (!(eh->e_ident[0] == 0x7f && eh->e_ident[1] == 'E' && eh->e_ident[2] == 'L' && eh->e_ident[3] == 'F')) return 0;
+    if (eh->e_type != 3 /*ET_DYN*/ || eh->e_machine != 62 /*x86-64*/) return 0;
+
+    /* image span = max(p_vaddr + p_memsz) over PT_LOAD */
+    dl_phdr *ph = (dl_phdr *)(file + eh->e_phoff);
+    unsigned long span = 0;
+    for (int i = 0; i < eh->e_phnum; i++)
+        if (ph[i].p_type == 1) { unsigned long e = ph[i].p_vaddr + ph[i].p_memsz; if (e > span) span = e; }
+    if (!span || span > 16 * 1024 * 1024) return 0;
+    unsigned char *base = (unsigned char *)sys_mmap(span);         /* the runtime image (RW; mprotect'd X below) */
+    if (!base) return 0;
+    for (int i = 0; i < eh->e_phnum; i++)
+        if (ph[i].p_type == 1)
+            for (unsigned long b = 0; b < ph[i].p_filesz; b++) base[ph[i].p_vaddr + b] = file[ph[i].p_offset + b];
+
+    /* find .dynsym + .dynstr via section headers (the .so isn't stripped) */
+    dl_shdr *sh = (dl_shdr *)(file + eh->e_shoff);
+    const dl_sym *dynsym = 0; const char *dynstr = 0; int nsym = 0;
+    for (int i = 0; i < eh->e_shnum; i++)
+        if (sh[i].sh_type == 11 /*SHT_DYNSYM*/) {
+            dynsym = (const dl_sym *)(file + sh[i].sh_offset);
+            nsym = (int)(sh[i].sh_size / sizeof(dl_sym));
+            dynstr = (const char *)(file + sh[sh[i].sh_link].sh_offset);
+            break;
+        }
+
+    /* apply relocations (every SHT_RELA section): point the GOT at loaded code */
+    for (int i = 0; i < eh->e_shnum; i++) {
+        if (sh[i].sh_type != 4 /*SHT_RELA*/) continue;
+        const dl_rela *rel = (const dl_rela *)(file + sh[i].sh_offset);
+        int nr = (int)(sh[i].sh_size / sizeof(dl_rela));
+        for (int r = 0; r < nr; r++) {
+            unsigned sidx = (unsigned)(rel[r].r_info >> 32);
+            unsigned typ  = (unsigned)(rel[r].r_info & 0xffffffffu);
+            unsigned long S = (dynsym && sidx < (unsigned)nsym) ? (unsigned long)base + dynsym[sidx].st_value : 0;
+            unsigned long *slot = (unsigned long *)(base + rel[r].r_offset);
+            if (typ == 8 /*RELATIVE*/)                    *slot = (unsigned long)base + (unsigned long)rel[r].r_addend;
+            else if (typ == 6 /*GLOB_DAT*/ || typ == 7 /*JUMP_SLOT*/) *slot = S;
+            else if (typ == 1 /*64*/)                     *slot = S + (unsigned long)rel[r].r_addend;
+        }
+    }
+
+    sys_mprotect(base, span, 1 | 2 | 4);                  /* R|W|X: the loaded code must be executable */
+    objs[nobj].base = base; objs[nobj].dynsym = dynsym; objs[nobj].dynstr = dynstr; objs[nobj].nsym = nsym; objs[nobj].ok = 1;
+    return &objs[nobj++];
+}
+
+void *dlsym(void *handle, const char *name) {
+    struct dlobj *o = (struct dlobj *)handle;
+    if (!o || !o->ok || !o->dynsym) return 0;
+    for (int i = 0; i < o->nsym; i++) {
+        const char *n = o->dynstr + o->dynsym[i].st_name;
+        const char *a = n, *b = name;
+        while (*a && *a == *b) { a++; b++; }
+        if (*a == 0 && *b == 0 && o->dynsym[i].st_value) return (void *)(o->base + o->dynsym[i].st_value);
+    }
+    return 0;
+}
 long sys_times(struct tms *t) { return do_syscall(SYS_times, (long)t, 0, 0); }
 int  sys_uname(struct utsname *u) { return (int)do_syscall(SYS_uname, (long)u, 0, 0); }
 int  sys_getppid(void) { return (int)do_syscall(SYS_getppid, 0, 0, 0); }

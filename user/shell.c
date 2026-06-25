@@ -3333,6 +3333,21 @@ static int run_command(char *line, char *cwd) {
             if (!gone) ok = 0;
             if (ok) print("insmod: testmod.ko loaded (ELF reloc + ksym resolution, mod_init=42), shown in /proc/modules, then rmmod ran mod_exit + removed it -- module lifecycle OK\n");
             else { print("insmodtest: VERIFY FAILED (rv="); printl(rv); print(" listed="); printl(listed); print(" gone="); printl(gone); print(")\n"); g_status = 1; }
+        } else if (streq(line, "dltest")) {   /* userspace dynamic linker: dlopen a .so from disk, dlsym + call (M1263) */
+            int ok = 1;
+            void *h = dlopen("DLTEST.SO");          /* read + map + relocate DLTEST.SO off the FAT disk */
+            if (!h) ok = 0;
+            long ga = -1, an = -1;
+            if (h) {
+                int (*greet)(int) = (int (*)(int))dlsym(h, "greet");
+                long (*answer)(void) = (long (*)(void))dlsym(h, "answer");
+                if (greet) ga = greet(40);          /* RIP-relative + global read -> 42 */
+                if (answer) an = answer();          /* indirect call through the RELOCATED GOT slot -> 42 */
+                if (!greet || !answer) ok = 0;
+            }
+            if (!(ok && ga == 42 && an == 42)) ok = 0;
+            if (ok) print("dl: dlopen(DLTEST.SO) mapped+relocated the shared object, dlsym(greet)(40)=42, dlsym(answer)()=42 (incl. a JUMP_SLOT reloc) -- userspace dynamic linker OK\n");
+            else { print("dltest: VERIFY FAILED (h="); printl((long)(h!=0)); print(" greet="); printl(ga); print(" answer="); printl(an); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

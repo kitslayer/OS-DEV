@@ -1136,6 +1136,7 @@ static const struct {
     { "NOVA    NES", "tools/nova.nes" },  /* Nova the Squirrel (GPLv3 homebrew NES game): play with: run nes */
     { "240P    NES", "tools/240p.nes" },  /* 240p test suite (GPLv3, by Tepples): a video/sound test ROM */
     { "LIBBET  GB ", "tools/libbet.gb" }, /* Libbet and the Magic Floor (Zlib, by Tepples): a Game Boy game */
+    { "DLTEST  SO ", "build/dltest.so" }, /* a shared library for the userspace dynamic linker (M1263): dltest builtin dlopen()s it */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 
