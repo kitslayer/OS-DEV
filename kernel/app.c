@@ -897,6 +897,30 @@ int app_format_limits(app_t *ap, char *b, int max) {
     }
     return p;
 }
+/* /proc/<pid>/auxv (M1215): a synthetic ELF auxiliary vector as (a_type, a_val)
+ * little-endian u64 pairs, AT_NULL-terminated — what a libc would read to learn
+ * the page size, entry point, clock tick, etc. (Our loader doesn't push an auxv
+ * onto the user stack, so this is synthesized from what the kernel knows.) */
+static int auxv_put(char *b, int p, int max, uint64_t type, uint64_t val) {
+    for (int k = 0; k < 8 && p < max; k++) b[p++] = (char)(type >> (8 * k));
+    for (int k = 0; k < 8 && p < max; k++) b[p++] = (char)(val  >> (8 * k));
+    return p;
+}
+int app_format_auxv(app_t *ap, char *b, int max) {
+    struct app *a = (struct app *)ap;
+    if (!a || max <= 0) return 0;
+    int p = 0;
+    p = auxv_put(b, p, max, AT_PAGESZ, PAGE_SIZE);
+    p = auxv_put(b, p, max, AT_ENTRY,  a->entry);
+    p = auxv_put(b, p, max, AT_CLKTCK, 100);
+    p = auxv_put(b, p, max, AT_UID,    0);
+    p = auxv_put(b, p, max, AT_EUID,   0);
+    p = auxv_put(b, p, max, AT_GID,    0);
+    p = auxv_put(b, p, max, AT_EGID,   0);
+    p = auxv_put(b, p, max, AT_SECURE, 0);
+    p = auxv_put(b, p, max, AT_NULL,   0);
+    return p;
+}
 /* Total bytes currently held by the app's mmap VMAs (for RLIMIT_AS, M1164). */
 static uint64_t app_vma_total(struct app *a) {
     uint64_t t = 0;

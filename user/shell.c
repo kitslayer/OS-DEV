@@ -2560,6 +2560,21 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "prlimit: set self NPROC=7, query returns 7, /proc/self/limits shows it -- OK\n"
                      : "prlimittest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "auxvtest")) {   /* synthetic ELF auxv via /proc/self/auxv (M1215) */
+            unsigned char ab[256]; long n = sys_readfile("/proc/self/auxv", ab, sizeof ab);
+            int pagesz_ok = 0, entry_ok = 0, sawnull = 0;
+            for (long i = 0; i + 16 <= n; i += 16) {
+                unsigned long t = 0, v = 0;
+                for (int k = 0; k < 8; k++) t |= (unsigned long)ab[i + k]     << (8 * k);
+                for (int k = 0; k < 8; k++) v |= (unsigned long)ab[i + 8 + k] << (8 * k);
+                if (t == AT_PAGESZ && v == 4096) pagesz_ok = 1;
+                if (t == AT_ENTRY  && v != 0)    entry_ok = 1;
+                if (t == AT_NULL) { sawnull = 1; break; }
+            }
+            int ok = (n > 0) && pagesz_ok && entry_ok && sawnull;
+            print(ok ? "auxv: /proc/self/auxv has AT_PAGESZ=4096 + AT_ENTRY!=0, AT_NULL-terminated -- OK\n"
+                     : "auxvtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

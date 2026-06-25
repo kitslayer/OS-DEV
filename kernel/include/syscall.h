@@ -209,6 +209,18 @@
 #define SYS_rename       192   /* (oldpath, newpath) -> rename/move within one ext2 mount; 0/-1 (M1213) */
 #define SYS_prlimit      193   /* (pid, resource, newval, do_set) -> get/set a process's rlimit; old value (M1214) */
 
+/* ELF auxiliary-vector entry types, for /proc/<pid>/auxv (M1215). Standard a_type
+ * values; the vector is (a_type, a_val) u64 pairs terminated by AT_NULL. */
+#define AT_NULL    0
+#define AT_PAGESZ  6
+#define AT_ENTRY   9
+#define AT_UID     11
+#define AT_EUID    12
+#define AT_GID     13
+#define AT_EGID    14
+#define AT_CLKTCK  17
+#define AT_SECURE  23
+
 /* poll(2) readiness multiplexing over the fd table (M1210). `events`/`revents`
  * are bitmasks; the kernel sets revents to the subset that won't block now.
  * int+short (no stdint here) — matches the Linux struct layout (8 bytes). */

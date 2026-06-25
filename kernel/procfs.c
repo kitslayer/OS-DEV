@@ -510,6 +510,7 @@ long procfs_read(const char *abs, void *buf, unsigned long max) {
             }
             if (peq(file, "maps"))    return app_format_maps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "limits"))  return app_format_limits((app_t *)proc, (char *)buf, (int)max);   /* enforced rlimits (M1214) */
+            if (peq(file, "auxv"))    return app_format_auxv((app_t *)proc, (char *)buf, (int)max);     /* ELF auxiliary vector (M1215) */
             if (peq(file, "smaps"))   return app_format_smaps((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "pagemap")) return app_format_pagemap((app_t *)proc, (char *)buf, (int)max);
             if (peq(file, "fd"))      return app_format_fds((app_t *)proc, (char *)buf, (int)max);   /* M1194 */

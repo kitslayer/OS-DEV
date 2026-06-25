@@ -92,6 +92,7 @@ int      app_setrlimit(int resource, uint64_t val);   /* set a resource limit (R
 uint64_t app_getrlimit(int resource);                 /* read a resource limit (RLIM_INFINITY if unset) (M1163) */
 long     app_prlimit(int pid, int resource, uint64_t newval, int do_set);  /* get/set another process's rlimit; old value (M1214) */
 int      app_format_limits(app_t *a, char *b, int max);   /* render /proc/<pid>/limits (M1214) */
+int      app_format_auxv(app_t *a, char *b, int max);     /* synthetic ELF auxv for /proc/<pid>/auxv (M1215) */
 long     app_exec(struct registers *r, const char *name, const char *arg);  /* replace this process's image in place; -1 fail (M1121) */
 long     app_singlestep(struct registers *r, int n);  /* hardware single-step the next n user instructions (M1123) */
 void     app_singlestep_trap(struct registers *r);    /* #DB handler: record the RIP, keep/stop stepping */
