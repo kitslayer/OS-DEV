@@ -9,12 +9,25 @@ static int slen(const char *s) { int n = 0; while (s[n]) n++; return n; }
 
 int main(void) {
     static const char *body =
-        "<!DOCTYPE html><html><head><title>OS-DEV</title></head><body>"
+        "<!DOCTYPE html><html><head><title>OS-DEV</title>"
+        "<style>body{font-family:sans-serif;max-width:40em;margin:2.5em auto;"
+        "padding:0 1.2em;color:#243;line-height:1.55}"
+        "h1{color:#1f56c6;margin-bottom:.2em}"
+        ".tag{display:inline-block;background:#1f56c6;color:#fff;padding:2px 9px;"
+        "border-radius:11px;font-size:.78em;vertical-align:middle}"
+        "code{background:#eef1fb;padding:1px 5px;border-radius:3px}"
+        "footer{margin-top:2em;color:#789;font-size:.85em}</style></head><body>"
         "<h1>Hello from OS-DEV!</h1>"
-        "<p>This page is served by an in-guest HTTP server on a from-scratch "
-        "x86-64 OS, over a from-scratch TCP/IP stack.</p>"
-        "<p>Passive open + three-way handshake + teardown all live in "
-        "kernel/net.c (M1133).</p></body></html>\n";
+        "<p><span class=tag>from scratch</span> &nbsp;This page is served by an "
+        "in-guest HTTP server on a hand-built x86-64 operating system, over its "
+        "own TCP/IP stack and <code>e1000</code> driver.</p>"
+        "<p>The passive open, three-way handshake, and connection teardown all "
+        "live in <code>kernel/net.c</code> (M1133). The same OS also has its own "
+        "windowing desktop, FAT32 / ext2 filesystems, a JavaScript engine, and a "
+        "web browser that fetches the real HTTPS web.</p>"
+        "<p>You're reaching it over a host&rarr;guest TCP port forward.</p>"
+        "<footer>OS-DEV &middot; from-scratch x86-64 OS</footer>"
+        "</body></html>\n";
     int blen = slen(body);
 
     // assemble the response: status line + headers + body
