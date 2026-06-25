@@ -278,6 +278,7 @@
 #define SYS_sock_bind    256   /* (fd, port) -> bind a datagram socket to a local port; 0/-1 (M1267) */
 #define SYS_sendto       257   /* (fd, addr{u8 ip[4];u16 port}, buf, len) -> bytes/-1 (M1267) */
 #define SYS_recvfrom     258   /* (fd, buf, max, from{u8 ip[4];u16 port}|0) -> bytes/-1, 2s timeout (M1267) */
+#define SYS_connect      259   /* (fd, addr{u8 ip[4];u16 port}) -> active-open a TCP socket; 0/-1 (M1268) */
 
 /* clock ids + clock_nanosleep flags (M1257). */
 #define CLOCK_REALTIME   0     /* wall-clock (rtc); absolute deadlines are epoch seconds */

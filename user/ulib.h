@@ -153,6 +153,7 @@ int  sys_socket(int domain, int type);                         /* AF_INET(2) SOC
 int  sys_sock_bind(int fd, int port);                          /* bind a datagram socket to a local port; 0/-1 (M1267) */
 long sys_sendto(int fd, const unsigned char *ip4, int port, const void *buf, unsigned len);  /* bytes/-1 (M1267) */
 long sys_recvfrom(int fd, void *buf, unsigned max, void *from); /* bytes/-1, 2s timeout; from={u8 ip[4];u16 port} (M1267) */
+int  sys_connect(int fd, const unsigned char *ip4, int port);  /* active-open a TCP socket fd; 0/-1 (M1268) */
 void *dlopen(const char *path);                                /* userspace dynamic linker: map+relocate a .so; handle/0 (M1263) */
 void *dlsym(void *handle, const char *name);                   /* resolve an exported symbol to its runtime address; 0 if absent (M1263) */
 long sys_times(struct tms *t);                                  /* fill CPU times (ticks); returns boot ticks (M1235) */

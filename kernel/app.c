@@ -2964,6 +2964,9 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 8) {   /* inotify: drain queued events (M1266) */
         return inotify_read(a->fd[fd].obj, buf, max);
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 10) {  /* TCP socket: recv (M1268) */
+        return net_tcp_sock_recv(a->fd[fd].obj, buf, max);
+    }
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
@@ -3014,6 +3017,9 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
         a->fd[fd].off = nc;
         return 8;
     }
+    if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 10) {  /* TCP socket: send (M1268) */
+        return net_tcp_sock_send(a->fd[fd].obj, buf, (int)len);
+    }
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
     return pipe_write(idx, buf, len);
 }
@@ -3025,6 +3031,7 @@ int app_fd_close(int fd) {
     else if (a->fd[fd].type == 3) memfd_unref(a->fd[fd].obj);   /* drop a memfd reference (M1212) */
     else if (a->fd[fd].type == 6) epoll_unref(a->fd[fd].obj);   /* drop an epoll reference (M1220) */
     else if (a->fd[fd].type == 8) inotify_free(a->fd[fd].obj);  /* free the inotify instance (M1266) */
+    else if (a->fd[fd].type == 10) net_tcp_sock_close(a->fd[fd].obj);  /* close the TCP connection (M1268) */
     a->fd[fd].used = 0; a->fd[fd].type = 0;
     return 0;
 }
@@ -3223,12 +3230,24 @@ int app_inotify_add(int fd, const char *path, unsigned int mask) {
 static uint16_t g_ephemeral = 49152;
 int app_socket(int domain, int type) {
     struct app *a = cur(); if (!a) return -1;
-    if (domain != 2 /*AF_INET*/ || type != 2 /*SOCK_DGRAM*/) return -1;   /* only IPv4 UDP for now */
+    if (domain != 2 /*AF_INET*/) return -1;
+    if (type != 2 /*SOCK_DGRAM*/ && type != 1 /*SOCK_STREAM*/) return -1;
     int fd = -1;
     for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
     if (fd < 0) return -1;
-    a->fd[fd] = (struct fdent){ 1, 9, 0, 0, {0}, 0, 0 };   /* type=AF_INET dgram, off=0 (unbound) */
+    if (type == 1) {                                       /* SOCK_STREAM: a TCP client socket (M1268) */
+        int idx = net_tcp_sock_open(); if (idx < 0) return -1;
+        a->fd[fd] = (struct fdent){ 1, 10, 0, idx, {0}, 0, 0 };  /* type=AF_INET stream, obj=TCB slot */
+    } else {
+        a->fd[fd] = (struct fdent){ 1, 9, 0, 0, {0}, 0, 0 };     /* type=AF_INET dgram, off=0 (unbound) */
+    }
     return fd;
+}
+/* connect(2) for a TCP socket fd (M1268): active-open to ip:port. */
+int app_connect(int fd, const uint8_t ip[4], int port) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 10) return -1;
+    return net_tcp_sock_connect(a->fd[fd].obj, ip, (uint16_t)port);
 }
 int app_sock_bind(int fd, int port) {
     struct app *a = cur(); if (!a) return -1;

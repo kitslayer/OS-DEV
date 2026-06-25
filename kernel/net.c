@@ -571,6 +571,38 @@ int net_raw_recv(void *buf, int max, int timeout_ms) {
     return -1;
 }
 
+/* ===================================================================== *
+ *  TCP client sockets (M1268): persistent tcp_conn TCBs backing AF_INET
+ *  SOCK_STREAM fds. The engine is single-connection, so this supports a
+ *  client connecting OUT (one active conn at a time) — connect/send/recv/
+ *  close. A multi-connection server (listen/accept over N TCBs) is the L
+ *  follow-on. read/write on the fd map to tcp_read/tcp_write.
+ * ===================================================================== */
+#define TCPSOCK_N 2
+static struct { int used; tcp_conn c; } g_tcpsock[TCPSOCK_N];
+
+int net_tcp_sock_open(void) {
+    for (int i = 0; i < TCPSOCK_N; i++) if (!g_tcpsock[i].used) { g_tcpsock[i].used = 1; g_tcpsock[i].c.up = 0; return i; }
+    return -1;
+}
+int net_tcp_sock_connect(int idx, const uint8_t ip[4], uint16_t port) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;
+    return tcp_connect(&g_tcpsock[idx].c, ip, port);
+}
+long net_tcp_sock_send(int idx, const void *buf, int len) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;
+    return tcp_write(&g_tcpsock[idx].c, (const uint8_t *)buf, len);
+}
+long net_tcp_sock_recv(int idx, void *buf, int max) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;
+    return tcp_read(&g_tcpsock[idx].c, (uint8_t *)buf, max, 300);   /* ~3s response deadline */
+}
+void net_tcp_sock_close(int idx) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return;
+    tcp_close(&g_tcpsock[idx].c);
+    g_tcpsock[idx].used = 0;
+}
+
 /* Fetch `filename` from the TFTP server `server_str` (dotted-quad) into `out`
  * (capacity `max`). Returns the byte length, or -1. Lock-step RRQ/DATA/ACK;
  * latches the server's transfer port (TID) from its first DATA. */

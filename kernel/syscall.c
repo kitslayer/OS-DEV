@@ -756,6 +756,15 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)n;
         break;
     }
+    case SYS_connect: {                    /* (fd, addr{u8 ip[4];u16 port}) -> active-open a TCP socket (M1268) */
+        if (!ubuf(r->rsi, 6)) { r->rax = (uint64_t)-1; break; }
+        const uint8_t *ad = (const uint8_t *)r->rsi;
+        uint8_t ip[4] = { ad[0], ad[1], ad[2], ad[3] };
+        int port = ad[4] | (ad[5] << 8);
+        __asm__ volatile("sti");           /* the 3-way handshake needs the timer */
+        r->rax = (uint64_t)(int64_t)app_connect((int)r->rdi, ip, port);
+        break;
+    }
     case SYS_rmmod:                        /* (name) -> run mod_exit + free the module slot; 0/-1 (M1262) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)module_unload((const char *)r->rdi);

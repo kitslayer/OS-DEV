@@ -3419,6 +3419,31 @@ static int run_command(char *line, char *cwd) {
                       print(" -- BSD UDP sockets OK\n"); }
             else { print("inettest: VERIFY FAILED (snt="); printl(snt); print(" n="); printl(n); print(")\n"); g_status = 1; }
             if (sa >= 0) sys_fdclose(sa); if (sb >= 0) sys_fdclose(sb);
+        } else if (streq(line, "tcptest")) {   /* AF_INET TCP client socket: a real HTTP fetch (M1268) */
+            int ok = 1;
+            char ips[32]; long rr = sys_resolve("example.com", ips, sizeof ips);
+            unsigned char ip[4] = {0,0,0,0};
+            if (rr == 0) { int oct=0,v=0,any=0;                  /* parse the dotted-quad */
+                for (int i=0;;i++){ char ch=ips[i];
+                    if (ch>='0'&&ch<='9'){v=v*10+(ch-'0');any=1;}
+                    else { if(any&&oct<4) ip[oct++]=(unsigned char)v; v=0;any=0; if(ch==0||oct>=4)break; } }
+            } else ok = 0;
+            int s = ok ? sys_socket(2, 1) : -1;                  /* AF_INET, SOCK_STREAM */
+            if (s < 0) ok = 0;
+            if (ok && sys_connect(s, ip, 80) != 0) ok = 0;
+            const char *req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
+            int rl = 0; while (req[rl]) rl++;
+            if (ok) sys_fdwrite(s, req, rl);                     /* send via the connected socket fd */
+            char resp[512]; long n = ok ? sys_fdread(s, resp, sizeof resp - 1) : -1;
+            int http = (n > 12 && resp[0]=='H'&&resp[1]=='T'&&resp[2]=='T'&&resp[3]=='P'&&resp[4]=='/');
+            if (!(ok && http)) ok = 0;
+            if (ok) { print("tcp: socket(SOCK_STREAM)+connect(");
+                      printl(ip[0]);print(".");printl(ip[1]);print(".");printl(ip[2]);print(".");printl(ip[3]);
+                      print(":80)+send+recv "); printl(n); print("B, status: ");
+                      for (int i=0;i<n && resp[i] && resp[i]!='\r' && resp[i]!='\n';i++){char c[2]={resp[i],0};print(c);}
+                      print(" -- BSD TCP client OK\n"); }
+            else { print("tcptest: VERIFY FAILED (rr="); printl(rr); print(" n="); printl(n); print(") -- needs internet\n"); g_status = 1; }
+            if (s >= 0) sys_fdclose(s);
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

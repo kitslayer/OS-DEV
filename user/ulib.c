@@ -292,6 +292,10 @@ long sys_sendto(int fd, const unsigned char *ip4, int port, const void *buf, uns
     return do_syscall4(SYS_sendto, fd, (long)ad, (long)buf, (long)len);
 }
 long sys_recvfrom(int fd, void *buf, unsigned max, void *from) { return do_syscall4(SYS_recvfrom, fd, (long)buf, (long)max, (long)from); }
+int  sys_connect(int fd, const unsigned char *ip4, int port) {
+    unsigned char ad[6] = { ip4[0], ip4[1], ip4[2], ip4[3], (unsigned char)(port & 0xFF), (unsigned char)((port >> 8) & 0xFF) };
+    return (int)do_syscall(SYS_connect, fd, (long)ad, 0);
+}
 
 /* ===================================================================== *
  *  Userspace dynamic linker (M1263): dlopen()/dlsym() over an ELF .so.

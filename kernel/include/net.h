@@ -49,6 +49,12 @@ int  net_udp_recv(uint16_t sport, void *buf, int max, uint8_t srcip[4], uint16_t
 /* Raw packet sockets (M1259): whole-Ethernet-frame send/recv for ring 3. */
 int  net_raw_send(const void *frame, int len);              /* send a complete L2 frame; 0/-1 */
 int  net_raw_recv(void *buf, int max, int timeout_ms);      /* next L2 frame; length/-1 */
+/* TCP client sockets (M1268): persistent TCBs behind AF_INET SOCK_STREAM fds. */
+int  net_tcp_sock_open(void);                               /* alloc a TCB slot; idx/-1 */
+int  net_tcp_sock_connect(int idx, const uint8_t ip[4], uint16_t port);  /* 0/-1 */
+long net_tcp_sock_send(int idx, const void *buf, int len);  /* bytes/-1 */
+long net_tcp_sock_recv(int idx, void *buf, int max);        /* bytes/0 timeout/-1 closed */
+void net_tcp_sock_close(int idx);
 /* /net/tcp sockets-as-files (M1110): `sub` is the path after "/net/tcp/" —
  * "clone", "<n>/ctl", or "<n>/data". Routed from vfs.c. */
 long netfs_read(const char *sub, void *buf, unsigned long max);
