@@ -46,6 +46,7 @@
 #include "net.h"
 #include "fbcon.h"
 #include "fb.h"            /* fb_init_mb: consume a Multiboot/GRUB framebuffer (M1292) */
+#include "string.h"        /* memset for the Multiboot2 shim (M1293) */
 #include "mouse.h"
 #include "usb.h"
 #include "usb_storage.h"
@@ -152,8 +153,66 @@ static void cpu_harden(void) {
             (int)((now >> 20) & 1), (int)((now >> 11) & 1), (unsigned long)now);
 }
 
-void kmain(uint64_t mb_info) {
+/* Multiboot2 -> Multiboot1 shim (M1293, bare-metal graphics). GRUB booted via
+ * `multiboot2` passes a TAG LIST, not the Multiboot1 struct the kernel reads —
+ * and, unlike Multiboot1, it reliably provides a framebuffer. Walk the tags and
+ * fill an MB1-format struct (memory map converted entry-by-entry + the
+ * framebuffer) so pmm_init / fb consumption / everything downstream work
+ * unchanged. The static buffers live in the (low, identity-mapped) kernel image,
+ * so their addresses fit MB1's u32 mmap_addr. */
+#define MULTIBOOT2_MAGIC 0x36d76289u
+static struct multiboot_info       mb1_shim;
+static struct multiboot_mmap_entry mb1_shim_mmap[96];
+static uint64_t mb2_to_mb1(uint64_t mb2) {
+    const uint8_t *p = (const uint8_t *)(uintptr_t)mb2;
+    uint32_t total = *(const uint32_t *)p;          /* total_size, then reserved, then tags */
+    memset(&mb1_shim, 0, sizeof mb1_shim);
+    int nm = 0;
+    for (uint32_t off = 8; off + 8 <= total; ) {
+        const uint8_t *tag = p + off;
+        uint32_t type = *(const uint32_t *)tag;
+        uint32_t size = *(const uint32_t *)(tag + 4);
+        if (type == 0) break;                                  /* end tag */
+        if (type == 4) {                                       /* basic meminfo */
+            mb1_shim.mem_lower = *(const uint32_t *)(tag + 8);
+            mb1_shim.mem_upper = *(const uint32_t *)(tag + 12);
+            mb1_shim.flags |= MULTIBOOT_FLAG_MEM;
+        } else if (type == 6) {                                /* memory map */
+            uint32_t esz = *(const uint32_t *)(tag + 8);
+            if (esz >= 24)
+                for (const uint8_t *e = tag + 16; e + esz <= tag + size && nm < 96; e += esz) {
+                    mb1_shim_mmap[nm].size = 20;               /* MB1 entry: size excludes itself */
+                    mb1_shim_mmap[nm].addr = *(const uint64_t *)e;
+                    mb1_shim_mmap[nm].len  = *(const uint64_t *)(e + 8);
+                    mb1_shim_mmap[nm].type = *(const uint32_t *)(e + 16);
+                    nm++;
+                }
+        } else if (type == 8) {                                /* framebuffer */
+            mb1_shim.framebuffer_addr   = *(const uint64_t *)(tag + 8);
+            mb1_shim.framebuffer_pitch  = *(const uint32_t *)(tag + 16);
+            mb1_shim.framebuffer_width  = *(const uint32_t *)(tag + 20);
+            mb1_shim.framebuffer_height = *(const uint32_t *)(tag + 24);
+            mb1_shim.framebuffer_bpp    = *(const uint8_t  *)(tag + 28);
+            mb1_shim.framebuffer_type   = *(const uint8_t  *)(tag + 29);
+            mb1_shim.flags |= MULTIBOOT_FLAG_FB;
+        }
+        off += (size + 7u) & ~7u;                              /* tags are padded to 8 bytes */
+    }
+    if (nm) {
+        mb1_shim.mmap_addr   = (uint32_t)(uintptr_t)mb1_shim_mmap;
+        mb1_shim.mmap_length = (uint32_t)(nm * (int)sizeof(struct multiboot_mmap_entry));
+        mb1_shim.flags |= MULTIBOOT_FLAG_MMAP;
+    }
+    return (uint64_t)(uintptr_t)&mb1_shim;
+}
+
+void kmain(uint64_t mb_info, uint64_t magic) {
     console_init();
+
+    /* GRUB `multiboot2` hands a tag list, not the Multiboot1 struct; convert it
+     * up front so the rest of boot (pmm, framebuffer, ...) is identical. (M1293) */
+    if (magic == MULTIBOOT2_MAGIC)
+        mb_info = mb2_to_mb1(mb_info);
 
     /* Detect `-append gdbstub` NOW, before pmm_init/kheap_init can allocate over
      * the multiboot command-line string (which QEMU places in high usable RAM).

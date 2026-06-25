@@ -365,7 +365,7 @@ iso: $(KERNEL)
 	@command -v xorriso >/dev/null || { echo "iso: needs xorriso — emerge dev-libs/libisoburn"; exit 1; }
 	@mkdir -p $(BUILD)/isodir/boot/grub
 	cp $(KERNEL) $(BUILD)/isodir/boot/kernel32.elf
-	printf 'set timeout=2\nset default=0\nmenuentry "OS-DEV" {\n\tmultiboot /boot/kernel32.elf\n\tboot\n}\n' > $(BUILD)/isodir/boot/grub/grub.cfg
+	printf 'set timeout=0\nset default=0\nmenuentry "OS-DEV" {\n\tmultiboot2 /boot/kernel32.elf\n\tboot\n}\n' > $(BUILD)/isodir/boot/grub/grub.cfg
 	grub-mkrescue -d /usr/lib/grub/i386-pc -o $(BUILD)/os.iso $(BUILD)/isodir
 	@echo "Built $(BUILD)/os.iso — verify: qemu-system-x86_64 -cdrom $(BUILD)/os.iso -serial stdio"
 
@@ -373,9 +373,9 @@ iso: $(KERNEL)
 # Embeds the kernel in GRUB's memdisk. Deploy: copy build/BOOTX64.EFI to
 # <USB>/EFI/BOOT/BOOTX64.EFI on a FAT-formatted stick and boot a UEFI machine.
 efi: $(KERNEL)
-	printf 'menuentry "OS-DEV" {\n\tmultiboot /boot/kernel32.elf\n\tboot\n}\n' > $(BUILD)/grub-efi.cfg
+	printf 'set timeout=0\nset default=0\ninsmod all_video\nmenuentry "OS-DEV" {\n\tmultiboot2 /boot/kernel32.elf\n\tboot\n}\n' > $(BUILD)/grub-efi.cfg
 	grub-mkstandalone -O x86_64-efi -o $(BUILD)/BOOTX64.EFI \
-	    --modules="multiboot normal all_video efi_gop part_gpt fat" \
+	    --modules="multiboot2 normal all_video efi_gop efi_uga part_gpt fat" \
 	    "boot/grub/grub.cfg=$(BUILD)/grub-efi.cfg" "boot/kernel32.elf=$(KERNEL)"
 	@echo "Built $(BUILD)/BOOTX64.EFI — copy to <USB>/EFI/BOOT/BOOTX64.EFI on a FAT ESP"
 

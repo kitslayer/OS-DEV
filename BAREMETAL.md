@@ -40,21 +40,31 @@ USB stick and boot a UEFI machine. Verify in QEMU:
 stick). Verify: `qemu-system-x86_64 -cdrom build/os.iso -serial stdio` (no
 `-kernel` — this exercises the real GRUB→Multiboot path).
 
-## The remaining gap: a framebuffer from GRUB (graphics on real hardware)
+## Multiboot2 framebuffer handoff (M1293) — works; on-screen display needs real HW
 
-The kernel is *ready* to use a Multiboot framebuffer, but GRUB does not yet hand
-one over for our Multiboot**1** kernel (the info `flags` framebuffer bit stays
-clear, even with video modules + `gfxpayload`). Result: under real GRUB the
-kernel boots and runs but has no linear framebuffer, so the graphical desktop
-does not paint (it reaches the desktop logic but the screen stays on the
-firmware logo). This is the well-known #1 gap for QEMU-only hobby OSes.
+GRUB does **not** hand a framebuffer to a Multiboot**1** kernel (the info `flags`
+framebuffer bit stays clear, even with video modules). So `boot/boot.asm` now
+also carries a **Multiboot2** header alongside the MB1 one, and `kmain` converts
+the MB2 tag list into the MB1-format struct (`mb2_to_mb1`) — memory map +
+framebuffer flow through the rest of boot unchanged. Booted via GRUB's
+`multiboot2` command (`make efi` / `make iso`), **GRUB hands over a real linear
+framebuffer and the kernel consumes it** — verified under QEMU + OVMF:
 
-**Next step:** switch the boot path to **Multiboot2**, whose framebuffer *tag*
-is the robust, well-supported way GRUB reports the LFB (base/pitch/width/height/
-bpp). That means a Multiboot2 header in `boot/boot.asm` + a small Multiboot2
-info parser (tag walk) feeding `fb_init_mb`. `fb.c` indexes the LFB as
-`y*width + x`, so also store/honor the framebuffer **pitch** if GRUB's mode has
-padding (`pitch != width*4`).
+    [ ok ] Multiboot framebuffer 1280x960 32-bpp @ 0x80000000 -- bare-metal graphics path
+
+The kernel maps that LFB, runs to the desktop, and paints into it with no fault.
+QEMU `-kernel` (Multiboot1) is unchanged — it gets no MB2 framebuffer and uses the
+Bochs fallback exactly as before (`make check` stays green).
+
+**One unverified step remains:** under QEMU + OVMF the painted desktop does not
+appear on the emulated display — QEMU keeps scanning out OVMF's own 1280x800
+buffer rather than the 1280x960 GOP framebuffer GRUB set (a known QEMU/OVMF
+GOP-emulation quirk). On real UEFI hardware the GOP `FrameBufferBase` persists as
+the live scanout after `ExitBootServices`, so the desktop should display — but
+that final step needs a physical machine (none here). Note: the framebuffer GRUB
+provided had a tight pitch (`5120 == 1280*4`), so no `fb.c` stride change was
+needed; a GPU whose mode has a padded pitch would require `fb.c` to honor the
+framebuffer pitch separately from the width.
 
 ## Real-hardware notes (from research)
 

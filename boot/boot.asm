@@ -38,6 +38,30 @@ align 4
     dd 960          ; preferred height
     dd 32           ; preferred depth (bpp)
 
+; --- Multiboot2 header (bare-metal graphics) -------------------------------
+; GRUB reliably hands a kernel a framebuffer via the Multiboot2 framebuffer
+; TAG (which, unlike Multiboot1's video request, it actually fills in). Boot
+; this with grub.cfg `multiboot2`; QEMU's -kernel keeps using the Multiboot1
+; header above. The 32-bit entry below handles either magic.
+align 8
+mb2_start:
+    dd 0xE85250D6                                 ; Multiboot2 magic
+    dd 0                                           ; architecture: 0 = i386
+    dd mb2_end - mb2_start                         ; header length
+    dd -(0xE85250D6 + 0 + (mb2_end - mb2_start))   ; checksum (sums to 0 with the 3 above)
+    align 8
+    dw 5                                           ; tag type 5 = framebuffer request
+    dw 0                                           ; flags
+    dd 20                                          ; tag size
+    dd 1280                                        ; preferred width
+    dd 960                                         ; preferred height
+    dd 32                                          ; preferred depth (bpp)
+    align 8
+    dw 0                                           ; end tag (type 0)
+    dw 0
+    dd 8
+mb2_end:
+
 ; ---------------------------------------------------------------------------
 ; 32-bit entry point
 ; ---------------------------------------------------------------------------
@@ -50,6 +74,7 @@ _start:
     ; eax/ebx are set by the bootloader; stash the multiboot info pointer (ebx)
     ; so a future kmain can read the memory map. (eax = magic, ebx = info ptr)
     mov [multiboot_info_ptr], ebx
+    mov [multiboot_magic], eax      ; stash the boot magic too (MB1 0x2BADB002 / MB2 0x36d76289)
 
     call check_multiboot
     call check_cpuid
@@ -68,8 +93,12 @@ _start:
 
 ; Did a multiboot-compliant loader boot us? It leaves 0x2BADB002 in eax.
 check_multiboot:
-    cmp eax, 0x2BADB002
-    jne .no_multiboot
+    cmp eax, 0x2BADB002      ; Multiboot1 loader (QEMU -kernel, GRUB `multiboot`)
+    je .ok
+    cmp eax, 0x36d76289      ; Multiboot2 loader (GRUB `multiboot2`)
+    je .ok
+    jmp .no_multiboot
+.ok:
     ret
 .no_multiboot:
     mov al, "0"
@@ -196,9 +225,11 @@ long_mode_start:
 
     mov rsp, stack_top              ; re-establish stack as a clean 64-bit rsp
 
-    ; pass the multiboot info pointer to kmain as the first argument (rdi).
-    ; it's a low physical address, so a 32-bit load zero-extended into rdi.
+    ; pass the multiboot info pointer (rdi) + the boot magic (rsi) to kmain. Both
+    ; are low values, so 32-bit loads zero-extend cleanly. kmain branches on the
+    ; magic to read either a Multiboot1 struct or a Multiboot2 tag list.
     mov edi, [multiboot_info_ptr]
+    mov esi, [multiboot_magic]
 
     extern kmain
     call kmain                      ; into C — should not return
@@ -233,6 +264,7 @@ pd_table:   resb 4096
 
 global multiboot_info_ptr
 multiboot_info_ptr: resq 1
+multiboot_magic:    resq 1
 
 alignb 16
 ; 256 KiB boot stack. kmain() -> desktop_run() (the window manager) runs on this
