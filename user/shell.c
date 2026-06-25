@@ -3729,6 +3729,20 @@ static int run_command(char *line, char *cwd) {
                       print(" devices, "); printl(mth); print(" methods; found well-known "); print(pci0 ? "PCI0" : "_SB_");
                       print(" -- ACPI AML namespace parser OK\n"); }
             else { print("amltest: VERIFY FAILED (total="); printl(total); print(" dev="); printl(dev); print(" mth="); printl(mth); print(" pci0="); printl(pci0); print(" sb="); printl(sb); print(")\n"); g_status = 1; }
+        } else if (streq(line, "acpifstest")) {   /* /proc/acpi: browsable AML namespace (M1285) */
+            static char b[4096];
+            long n = sys_readfile("/proc/acpi", b, sizeof b - 1);
+            int has_pci0 = 0, has_dev = 0, has_hdr = 0;
+            if (n > 0) { b[n] = 0;
+                for (long i = 0; i + 4 <= n; i++) {
+                    if (b[i] == 'P' && b[i+1] == 'C' && b[i+2] == 'I' && b[i+3] == '0') has_pci0 = 1;
+                    if (b[i] == 'D' && b[i+1] == 'e' && b[i+2] == 'v' && b[i+3] == 'i') has_dev = 1;
+                    if (b[i] == 'D' && b[i+1] == 'S' && b[i+2] == 'D' && b[i+3] == 'T') has_hdr = 1;
+                }
+            }
+            int ok = (n > 0 && has_hdr && has_dev && has_pci0);
+            if (ok) { print("acpifs: cat /proc/acpi -> "); printl(n); print(" bytes listing the DSDT namespace incl. a Device named PCI0 -- /proc/acpi OK\n"); }
+            else { print("acpifstest: VERIFY FAILED (n="); printl(n); print(" hdr="); printl(has_hdr); print(" dev="); printl(has_dev); print(" pci0="); printl(has_pci0); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

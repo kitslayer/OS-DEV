@@ -24,6 +24,7 @@
 #include "ksyms.h"
 #include "net.h"
 #include "fsevents.h"
+#include "acpi.h"   /* aml_count/aml_obj for /proc/acpi (M1285) */
 #include "profile.h"
 #include "mbox.h"
 #include "measure.h"
@@ -83,6 +84,24 @@ static void cpuid(uint32_t leaf, uint32_t sub, uint32_t *a, uint32_t *b, uint32_
 }
 
 /* ---- /proc generators ----------------------------------------------------- */
+/* /proc/acpi (M1285): the ACPI AML namespace decoded from the DSDT (M1284) —
+ * a browsable object list (TYPE<TAB>NAME), like acpidump's namespace view. */
+static long gen_acpi(char *b, int max) {
+    static const char *tn[] = { "?", "Scope", "Device", "Method", "Name", "OpRegion",
+                                "Field", "Processor", "PowerRes", "ThermalZone", "Mutex", "Event" };
+    int total = aml_count(0), dev = aml_count(AML_DEVICE), mth = aml_count(AML_METHOD);
+    int p = 0;
+    p = sapp(b, p, max, "DSDT AML namespace: "); p = sdec(b, p, max, (uint64_t)total);
+    p = sapp(b, p, max, " objects ("); p = sdec(b, p, max, (uint64_t)dev); p = sapp(b, p, max, " devices, ");
+    p = sdec(b, p, max, (uint64_t)mth); p = sapp(b, p, max, " methods)\n");
+    char nm[5];
+    for (int i = 0; i < total && p < max - 24; i++) {
+        int t = aml_obj(i, nm); if (t < 0) break;
+        p = sapp(b, p, max, (t >= 1 && t <= 11) ? tn[t] : "?");
+        p = sapp(b, p, max, "\t"); p = sapp(b, p, max, nm); p = sapp(b, p, max, "\n");
+    }
+    b[p] = 0; return p;
+}
 static long gen_meminfo(char *b, int max) {
     uint64_t total = pmm_total_bytes() / 1024, freeb = pmm_free_bytes() / 1024;
     int p = 0;
@@ -387,7 +406,7 @@ static long gen_kasan(char *b, int max) {
 /* ---- the directory tables ------------------------------------------------- */
 struct pf { const char *name; long (*gen)(char *, int); };
 static const struct pf proc_files[] = {
-    { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo },
+    { "meminfo", gen_meminfo }, { "uptime", gen_uptime }, { "cpuinfo", gen_cpuinfo }, { "acpi", gen_acpi },
     { "version", gen_version }, { "loadavg", gen_loadavg }, { "stat", gen_stat }, { "kasan", gen_kasan },
     { "mqueue", gen_mqueue }, { "sysvipc", gen_sysvipc }, { "unix", gen_unix }, { "locks", gen_locks },
     { "processes", gen_processes }, { "partitions", gen_partitions }, { "diskstats", gen_diskstats }, { "modules", gen_modules },

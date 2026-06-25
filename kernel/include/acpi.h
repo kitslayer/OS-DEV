@@ -16,5 +16,6 @@ enum { AML_SCOPE = 1, AML_DEVICE, AML_METHOD, AML_NAME, AML_REGION,
 void aml_parse(const uint8_t *dsdt, uint32_t len);  /* parse the DSDT namespace (dsdt = its SDT header) */
 int  aml_count(int type);                           /* # objects of `type` (0 = all) */
 int  aml_has(const char *seg4);                     /* is a 4-char NameSeg present? */
+int  aml_obj(int i, char *name_out);                /* i-th object: fills name_out[5], returns AML_* type or -1 (M1285) */
 void acpi_poweroff(void);  /* enter S5: power the machine off. Does not return on success. */
 void acpi_reboot(void);    /* ACPI reset register, else 8042 pulse. Does not return on success. */

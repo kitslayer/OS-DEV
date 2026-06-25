@@ -178,3 +178,10 @@ int aml_has(const char *seg4) {
     }
     return 0;
 }
+/* The i-th namespace object: fills name_out[5], returns its AML_* type (or -1 if
+ * out of range). For /proc/acpi listing (M1285). */
+int aml_obj(int i, char *name_out) {
+    if (i < 0 || i >= g_obj_n) return -1;
+    for (int k = 0; k < 5; k++) name_out[k] = g_obj[i].name[k];
+    return g_obj[i].type;
+}
