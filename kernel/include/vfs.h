@@ -57,6 +57,7 @@ long vfs_rename2(const char *oldpath, const char *newpath, int flags); /* rename
 long vfs_truncate(const char *path, uint64_t newlen);            /* resize a real file (tmpfs / ext2 mount); 0/-1 (M1228) */
 long vfs_seek_data_hole(const char *path, long off, int find_hole); /* SEEK_HOLE/DATA: next hole/data >= off; -1 ENXIO (M1229) */
 long vfs_utimes(const char *path, long atime, long mtime);       /* set atime/mtime (neg = leave); 0/-1 (M1230) */
+long vfs_chmod(const char *path, uint32_t mode);                 /* set perm bits (ext2 mounts); 0/-1 (M1241) */
 struct statx;
 int  vfs_stat(const char *path, struct statx *st);      /* file metadata for statx; 0/-1 (M1173) */
 int  vfs_fiemap(const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 mounts); count/-1 (M1152) */

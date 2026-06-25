@@ -273,6 +273,20 @@ int main(int argc, char **argv) {
                 if (ext2_read_path(bd_read, 0, 0, "/R2B.TXT", chk, sizeof chk) != 40 || memcmp(chk, ra, 40) != 0) { fprintf(stderr, "renameat2 EXCHANGE: R2B wrong\n"); return 1; }
                 printf("renameat2: NOREPLACE refuses to clobber (ok onto a free name) + EXCHANGE atomically swaps two files\n");
             }
+            /* chmod (M1241): change the permission bits while preserving the file-type
+             * nibble (0x8000 = regular file). Read the raw i_mode back (white-box). */
+            {
+                static uint8_t cd[16]; for (int i = 0; i < 16; i++) cd[i] = (uint8_t)i;
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/CH.TXT", cd, 16) != 16) { fprintf(stderr, "chmod setup write failed\n"); return 1; }
+                ext2_t cv; uint8_t cin[256]; int cisd = 0;
+                if (ext2_chmod_path(bd_read, bd_write, 0, 0, "/CH.TXT", 0600) != 0) { fprintf(stderr, "chmod 0600 failed\n"); return 1; }
+                if (ext2_open(bd_read, 0, 0, &cv) < 0 || !walk(&cv, "/CH.TXT", cin, &cisd)) { fprintf(stderr, "chmod walk failed\n"); return 1; }
+                if ((e_rd16(cin) & 0xFFF) != 0600 || (e_rd16(cin) & 0xF000) != 0x8000) { fprintf(stderr, "chmod 0600 wrong (mode=%o)\n", e_rd16(cin)); return 1; }
+                if (ext2_chmod_path(bd_read, bd_write, 0, 0, "/CH.TXT", 0755) != 0) { fprintf(stderr, "chmod 0755 failed\n"); return 1; }
+                if (ext2_open(bd_read, 0, 0, &cv) < 0 || !walk(&cv, "/CH.TXT", cin, &cisd)) { fprintf(stderr, "chmod walk2 failed\n"); return 1; }
+                if ((e_rd16(cin) & 0xFFF) != 0755 || (e_rd16(cin) & 0xF000) != 0x8000) { fprintf(stderr, "chmod 0755 wrong (mode=%o)\n", e_rd16(cin)); return 1; }
+                printf("chmod: set perm bits 0600 then 0755 (read raw i_mode back); the regular-file type bit is preserved\n");
+            }
             if (argc > 3) { FILE *wf = fopen(argv[3], "wb"); if (wf) { fwrite(g_img, 1, (size_t)g_img_bytes, wf); fclose(wf); } }
         }
         long emeta = g_golden_bytes < 65536 ? g_golden_bytes : 65536;

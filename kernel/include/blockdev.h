@@ -114,6 +114,7 @@ long blockdev_mount_rename2(int i, const char *oldpath, const char *newpath, int
 long blockdev_mount_truncate(int i, const char *path, uint64_t newlen);      /* resize (ext2 only); 0/-1 (M1228) */
 long blockdev_mount_seek_data_hole(int i, const char *path, long off, int find_hole); /* SEEK_HOLE/DATA; off/-1/-2 not-ext2 (M1229) */
 long blockdev_mount_utimes(int i, const char *path, long atime, long mtime);  /* set mtime/atime (ext2 only); 0/-1 (M1230) */
+long blockdev_mount_chmod(int i, const char *path, uint32_t mode);            /* set perm bits (ext2 only); 0/-1 (M1241) */
 int  blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max);  /* file physical extent map (ext2 only); count/-1 (M1152) */
 long blockdev_mount_punch(int i, const char *path, uint64_t offset, uint64_t len);  /* fallocate PUNCH_HOLE (ext2 only); blocks/-1 (M1153) */
 long blockdev_mount_setxattr(int i, const char *path, const char *name, const void *val, unsigned long vlen);  /* set user.* xattr (ext2 only); vlen/-1 (M1182) */

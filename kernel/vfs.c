@@ -693,6 +693,19 @@ long vfs_utimes(const char *path, long atime, long mtime) {
     return -1;
 }
 
+/* chmod (M1241): change a file's permission bits. Only ext2 /diskN mounts store
+ * Unix modes; tmpfs / boot FAT32 have none, so they return -1 (EPERM-ish). */
+long vfs_chmod(const char *path, uint32_t mode) {
+    char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);
+    int mid; char fp[192];
+    if (mount_path(p, &mid, fp, sizeof fp)) {
+        long r = blockdev_mount_chmod(mid, fp, mode);
+        if (r >= 0) fsevents_record('w', path);
+        return r;
+    }
+    return -1;
+}
+
 /* FIEMAP (M1152): a file's physical extent map. Only ext2 /diskN mounts carry
  * real block layout, so route there; other paths (boot FAT32, /tmp, synth) are
  * unsupported (-1). Read-only. */

@@ -646,6 +646,13 @@ long blockdev_mount_utimes(int i, const char *path, long atime, long mtime) {
     if (g_mount[i].fstype != FS_EXT2) return -1;
     return ext2_utimes_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", atime, mtime);
 }
+/* chmod backend on mount `i` (ext2 only). 0/-1. M1241. */
+long blockdev_mount_chmod(int i, const char *path, uint32_t mode) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_chmod_path(mount_rfn(i), mount_wfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", mode);
+}
 
 int blockdev_mount_fiemap(int i, const char *path, ext2_extent_t *out, int max) {
     blockdev_mount_scan();

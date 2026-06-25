@@ -1166,6 +1166,23 @@ long ext2_utimes_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t 
     return write_inode(&v, ino, inode);
 }
 
+/* chmod(2) backend (M1241): replace i_mode's permission bits (low 12) while
+ * preserving the file-type bits (high nibble: regular/dir/symlink). i_ctime is
+ * bumped since metadata changed. Files and directories both. Returns 0/-1. */
+long ext2_chmod_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
+                     const char *path, uint32_t mode) {
+    ext2_t v;
+    if (!write || ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    v.write = write;
+    uint8_t inode[256]; int isdir = 0;
+    uint32_t ino = walk(&v, path, inode, &isdir);
+    if (!ino) return -1;
+    uint16_t cur = e_rd16(inode + 0);
+    e_wr16(inode + 0, (uint16_t)((cur & 0xF000) | (mode & 0x0FFF)));   /* keep type, set perms */
+    e_wr32(inode + 12, ext2_clock ? ext2_clock() : 0);                /* i_ctime */
+    return write_inode(&v, ino, inode);
+}
+
 long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t start_lba,
                      const char *path, const void *buf, unsigned long len) {
     ext2_t v;

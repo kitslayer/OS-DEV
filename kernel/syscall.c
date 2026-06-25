@@ -279,7 +279,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_readlink: case SYS_statfs:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
-    case SYS_utimens: case SYS_futimens: case SYS_renameat2:
+    case SYS_utimens: case SYS_futimens: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
     case SYS_fallocate: case SYS_copy_file_range: case SYS_setxattr: case SYS_removexattr:
@@ -1068,6 +1068,16 @@ void syscall_dispatch(struct registers *r) {
     case SYS_futimens:                     /* (fd, atime, mtime) -> set timestamps on an open fd (M1230) */
         r->rax = (uint64_t)(int64_t)app_futimens((int)r->rdi, (long)r->rsi, (long)r->rdx);
         break;
+    case SYS_chmod:                        /* (path, mode) -> set permission bits (M1241) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, (const char *)r->rdi, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_chmod((const char *)r->rdi, (uint32_t)r->rsi);
+        break;
+    case SYS_fchmod: {                     /* (fd, mode) -> set permission bits on an open fd (M1241) */
+        const char *fp = app_fd_path((int)r->rdi);
+        r->rax = fp ? (uint64_t)(int64_t)vfs_chmod(fp, (uint32_t)r->rsi) : (uint64_t)-1;
+        break;
+    }
     case SYS_statx:                        /* (path, struct statx*) -> file metadata (M1173) */
         if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_stat((const char *)r->rdi, (struct statx *)r->rsi);
