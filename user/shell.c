@@ -545,7 +545,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -4230,6 +4230,25 @@ static int run_command(char *line, char *cwd) {
             char buf[128];
             sys_sysinfo(buf, sizeof(buf));
             print(buf);
+        } else if (streq(line, "uptime")) {     /* up Dd Hh Mm Ss + the 1/5/15-min load average */
+            long n; char *u = slurp("/proc/uptime", &n);
+            long secs = 0;
+            if (u) { for (int i = 0; u[i] && u[i] != '.' && u[i] != ' '; i++) if (u[i] >= '0' && u[i] <= '9') secs = secs * 10 + (u[i] - '0'); free(u); }
+            long d = secs / 86400, h = (secs % 86400) / 3600, m = (secs % 3600) / 60, s = secs % 60;
+            print("up ");
+            if (d) { printl(d); print("d "); }
+            printl(h); print("h "); printl(m); print("m "); printl(s); print("s");
+            char *la = slurp("/proc/loadavg", &n);
+            if (la) {
+                print(",  load average: ");
+                int fld = 0;
+                for (int i = 0; la[i] && fld < 3; i++) {
+                    if (la[i] == ' ') { fld++; if (fld < 3) print(", "); }
+                    else { char c[2] = { la[i], 0 }; print(c); }
+                }
+                free(la);
+            }
+            print("\n");
         } else if (streq(line, "clear")) {
             sys_clear();
         } else if (streq(line, "reboot")) {
