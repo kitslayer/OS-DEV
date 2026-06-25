@@ -13,3 +13,7 @@
 int  flock_op(const char *path, int pid, int op);   /* LOCK_SH/EX/UN | LOCK_NB; 0 ok / -1 (M1177) */
 void flock_release_pid(int pid);                     /* release every lock a pid holds (process exit) */
 int  flock_format(char *b, int max);                 /* /proc/locks table */
+/* POSIX fcntl byte-range record locks (M1221) — a separate lock space. */
+int  rlock_set(const char *path, int pid, int type, long start, long len);   /* F_SETLK/F_UNLCK; 0/-1 */
+int  rlock_get(const char *path, int pid, int type, long start, long len,
+               int *out_pid, int *out_type, long *out_start, long *out_len);  /* F_GETLK; 1 if a conflict, else 0 */

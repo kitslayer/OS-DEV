@@ -1577,9 +1577,28 @@ void syscall_dispatch(struct registers *r) {
     case SYS_timerfd_settime:              /* (fd, delay_ms) -> arm/disarm; 0/-1 (M1217) */
         r->rax = (uint64_t)app_timerfd_settime((int)r->rdi, (long)r->rsi);
         break;
-    case SYS_fcntl:                        /* (fd, cmd, arg) -> fd-flag ops (M1218) */
-        r->rax = (uint64_t)app_fcntl((int)r->rdi, (int)r->rsi, (long)r->rdx);
+    case SYS_fcntl: {                      /* (fd, cmd, arg) -> fd flags (M1218) + record locks (M1221) */
+        int cfd = (int)r->rdi, cmd = (int)r->rsi;
+        if (cmd == F_SETLK || cmd == F_SETLKW || cmd == F_GETLK) {
+            if (!ubuf(r->rdx, sizeof(struct flock))) { r->rax = (uint64_t)-1; break; }
+            struct flock *lf = (struct flock *)r->rdx;
+            const char *path = app_fd_path(cfd);
+            if (!path) { r->rax = (uint64_t)-1; break; }      /* record locks need a FILE fd */
+            int pid = app_sys_getpid();
+            if (cmd == F_GETLK) {
+                int hp, ht; long hs, hl;
+                if (rlock_get(path, pid, lf->l_type, lf->l_start, lf->l_len, &hp, &ht, &hs, &hl)) {
+                    lf->l_type = (short)ht; lf->l_pid = hp; lf->l_start = hs; lf->l_len = hl;
+                } else lf->l_type = F_UNLCK;                  /* no conflict: the lock could be placed */
+                r->rax = 0;
+            } else {                                          /* F_SETLK / F_SETLKW (non-blocking try for now) */
+                r->rax = (uint64_t)(int64_t)rlock_set(path, pid, lf->l_type, lf->l_start, lf->l_len);
+            }
+            break;
+        }
+        r->rax = (uint64_t)app_fcntl(cfd, cmd, (long)r->rdx);
         break;
+    }
     case SYS_dup3:                         /* (oldfd, newfd, flags) (M1218) */
         r->rax = (uint64_t)(int64_t)app_dup3((int)r->rdi, (int)r->rsi, (int)r->rdx);
         break;

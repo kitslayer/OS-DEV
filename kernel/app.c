@@ -3030,6 +3030,12 @@ long app_close_range(unsigned lo, unsigned hi, int flags) {
  * offset (a FILE fd) and advance *off, leaving the fd cursor untouched; if
  * *off < 0, read sequentially via the fd cursor (any fd kind). Returns bytes
  * copied, or -1. Loops in 4 KiB chunks; stops at EOF or a short write. */
+/* The file path behind a FILE fd (type 2), for fcntl record locks (M1221). */
+const char *app_fd_path(int fd) {
+    struct app *a = cur();
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 2) return 0;
+    return a->fd[fd].path;
+}
 long app_sendfile(int out_fd, int in_fd, long *off, unsigned long count) {
     struct app *a = cur(); if (!a) return -1;
     if (in_fd  < 0 || in_fd  >= APP_NFD || !a->fd[in_fd].used)  return -1;

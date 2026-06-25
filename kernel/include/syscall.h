@@ -233,6 +233,15 @@ struct epoll_event { unsigned events; unsigned long data; };
 #define F_SETFD          2
 #define F_DUPFD_CLOEXEC  1030
 
+/* POSIX fcntl byte-range record locks (M1221). l_len <= 0 means "to EOF". */
+struct flock { short l_type; short l_whence; long l_start; long l_len; int l_pid; };
+#define F_RDLCK  0
+#define F_WRLCK  1
+#define F_UNLCK  2
+#define F_GETLK  5
+#define F_SETLK  6
+#define F_SETLKW 7
+
 /* ELF auxiliary-vector entry types, for /proc/<pid>/auxv (M1215). Standard a_type
  * values; the vector is (a_type, a_val) u64 pairs terminated by AT_NULL. */
 #define AT_NULL    0

@@ -2678,6 +2678,39 @@ static int run_command(char *line, char *cwd) {
                          : "epolltest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "locktest")) {   /* POSIX fcntl byte-range record locks (M1221) */
+            int ok = 1, rp[2];
+            sys_writefile("/tmp/LK.TXT", "0123456789abcdefghij", 20);
+            int fd = sys_open("/tmp/LK.TXT");
+            if (fd < 3 || sys_pipe(rp) != 0) { print("locktest: setup failed\n"); g_status = 1; }
+            else {
+                struct flock l = { F_WRLCK, 0, 0, 10, 0 };           /* parent write-locks [0,10) */
+                if (sys_fcntl(fd, F_SETLK, (long)&l) != 0) ok = 0;
+                long pid = sys_fork();
+                if (pid == 0) {                                      /* child = a different owner, contends */
+                    sys_fdclose(rp[0]);
+                    int cok = 1;
+                    struct flock c1 = { F_WRLCK, 0, 5, 10, 0 };      /* [5,15) overlaps [0,10) -> conflict */
+                    if (sys_fcntl(fd, F_SETLK, (long)&c1) != -1) cok = 0;
+                    struct flock c2 = { F_WRLCK, 0, 10, 10, 0 };     /* [10,20) disjoint -> ok */
+                    if (sys_fcntl(fd, F_SETLK, (long)&c2) != 0) cok = 0;
+                    struct flock g = { F_WRLCK, 0, 0, 5, 0 };        /* F_GETLK [0,5) -> reports the parent */
+                    if (sys_fcntl(fd, F_GETLK, (long)&g) != 0) cok = 0;
+                    if (!(g.l_type == F_WRLCK && g.l_pid > 0)) cok = 0;
+                    sys_fdwrite(rp[1], cok ? "P" : "F", 1);
+                    sys_exit(0);
+                }
+                sys_fdclose(rp[1]);
+                char res = 0; sys_fdread(rp[0], &res, 1);
+                if (res != 'P') ok = 0;
+                int st = 0; sys_waitpid((int)pid, &st);
+                struct flock u = { F_UNLCK, 0, 0, 10, 0 };           /* parent releases [0,10) */
+                sys_fcntl(fd, F_SETLK, (long)&u);
+                sys_fdclose(rp[0]); sys_fdclose(fd); sys_delete("/tmp/LK.TXT");
+                print(ok ? "record-locks: WRLCK[0,10); child overlap[5,15)=conflict, disjoint[10,20)=ok, F_GETLK reports holder -- OK\n"
+                         : "locktest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+            }
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
