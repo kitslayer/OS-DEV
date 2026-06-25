@@ -3319,6 +3319,11 @@ static int run_command(char *line, char *cwd) {
                       print(") -- userspace UDP round-trip OK\n"); }
             else print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "insmodtest")) {   /* loadable kernel module: relocate+resolve+run a .ko (M1261) */
+            long rv = sys_insmod();                 /* loads the built-in testmod.ko, returns mod_init()'s value */
+            int ok = (rv == 42);                    /* testmod's mod_init returns 42 iff its imported timer_ms() resolved + ran */
+            if (ok) print("insmod: loaded testmod.ko (ELF reloc + kernel-symbol resolution), mod_init() returned 42 -- loadable kernel module OK\n");
+            else { print("insmodtest: VERIFY FAILED (sys_insmod returned "); printl(rv); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

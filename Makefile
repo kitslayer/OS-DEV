@@ -65,7 +65,11 @@ HDAAUDIOFLAGS := -device intel-hda -device hda-output,audiodev=snd0 -audiodev $(
 # Same HDA pair on the null backend, for the headless hdatest (no host sound server).
 TESTHDAFLAGS := -device intel-hda -device hda-output,audiodev=snd0 -audiodev none,id=snd0
 
-C_SRCS  := $(shell find kernel -name '*.c')
+# kernel/testmod.c is a LOADABLE MODULE (M1261): compiled to an ET_REL .ko and
+# incbin'd into the kernel image (kernel/asm/mod_blob.asm), NOT linked in — so
+# exclude it from the normal C object list (it would otherwise define mod_init in
+# the kernel itself, defeating the point).
+C_SRCS  := $(filter-out kernel/testmod.c,$(shell find kernel -name '*.c'))
 # ap_trampoline.asm is a FLAT 16-bit real-mode binary (the AP bring-up trampoline,
 # M1197) — assembled with `nasm -f bin` and incbin'd by ap_blob.asm, NOT linked
 # as an elf64 object — so exclude it from the normal asm object list.
@@ -98,6 +102,16 @@ $(BUILD)/%.o: %.c Makefile
 $(BUILD)/kernel/js.o: kernel/js.c Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -msse2 -mfpmath=sse -c $< -o $@
+
+# A loadable kernel module (M1261): kernel/testmod.c -> an ET_REL object
+# build/testmod.ko (same code model as the kernel, so its relocations match what
+# kernel/module.c applies). It is NOT linked into the kernel; instead
+# kernel/asm/mod_blob.asm incbin's it into .rodata, and insmod loads + relocates
+# + runs it. The blob object must be (re)assembled after the .ko exists.
+$(BUILD)/testmod.ko: kernel/testmod.c Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/kernel/asm/mod_blob.o: $(BUILD)/testmod.ko
 
 # -fwrapv is in CFLAGS above (global): the kernel parses untrusted input (network,
 # disk, images, TLS, HTML, JS) with signed arithmetic, so signed overflow must be

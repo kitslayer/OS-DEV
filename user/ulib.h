@@ -143,6 +143,7 @@ int  sys_udp_send(const unsigned char *ip4, unsigned short dport, unsigned short
 long sys_udp_recv(unsigned short sport, void *buf, unsigned max, void *from);  /* recv to local port; bytes/-1, 2s timeout; from={u8 ip[4];u16 port} (M1258) */
 int  sys_raw_send(const void *frame, unsigned len);            /* send a complete Ethernet frame; 0/-1 (M1259) */
 long sys_raw_recv(void *buf, unsigned max);                    /* next Ethernet frame (2s timeout); length/-1 (M1259) */
+long sys_insmod(void);                                         /* load+relocate+run the built-in .ko; mod_init retval/-err (M1261) */
 long sys_times(struct tms *t);                                  /* fill CPU times (ticks); returns boot ticks (M1235) */
 int  sys_uname(struct utsname *u);                              /* system identity strings; 0/-1 (M1236) */
 int  sys_getppid(void);                                         /* parent pid (M1236) */

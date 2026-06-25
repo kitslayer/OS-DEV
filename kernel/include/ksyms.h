@@ -18,5 +18,9 @@ extern const int ksyms_count;
  * table is empty / addr precedes the first symbol. */
 const char *ksym_lookup(unsigned long addr, unsigned long *off_out);
 
+/* Resolve a symbol NAME to its address (0 if absent) — the reverse direction,
+ * for the loadable-module loader resolving a module's kernel imports (M1261). */
+unsigned long ksym_addr(const char *name);
+
 /* Print a symbolized call trace starting at `rip`, walking the rbp frame chain. */
 void backtrace(unsigned long rip, unsigned long rbp);

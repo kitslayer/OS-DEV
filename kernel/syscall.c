@@ -12,6 +12,7 @@
 #include "console.h"
 #include "app.h"
 #include "bpf.h"
+#include "module.h"
 #include "strace.h"
 #include "vfs.h"
 #include "mqueue.h"
@@ -712,6 +713,9 @@ void syscall_dispatch(struct registers *r) {
         if (!ubuf(r->rdi, r->rsi)) { r->rax = (uint64_t)-1; break; }
         __asm__ volatile("sti");           /* polling the RX ring needs the timer */
         r->rax = (uint64_t)(int64_t)net_raw_recv((void *)r->rdi, (int)r->rsi, 2000);
+        break;
+    case SYS_insmod:                       /* () -> load the built-in .ko (relocate+resolve+run); retval/-err (M1261) */
+        r->rax = (uint64_t)(int64_t)module_load_builtin();
         break;
     case SYS_cas_store:                    /* (buf, len, hash32) -> store; write the SHA-256 key */
         if (!ubuf(r->rdi, r->rsi) || !ubuf(r->rdx, 32)) { r->rax = (uint64_t)-1; break; }

@@ -10,6 +10,19 @@
 #include "ksyms.h"
 #include "console.h"
 
+/* Reverse of ksym_lookup: resolve a symbol NAME to its address (0 if absent).
+ * The table is sorted by address, not name, so this is a linear scan — fine for
+ * the loadable-module loader (M1261), which resolves a handful of imports once. */
+unsigned long ksym_addr(const char *name) {
+    if (!name) return 0;
+    for (int i = 0; i < ksyms_count; i++) {
+        const char *a = ksyms[i].name, *b = name;
+        while (*a && *a == *b) { a++; b++; }
+        if (*a == 0 && *b == 0) return ksyms[i].addr;
+    }
+    return 0;
+}
+
 const char *ksym_lookup(unsigned long addr, unsigned long *off_out) {
     if (ksyms_count <= 0) return 0;
     /* table is sorted ascending by addr: find the largest entry <= addr */
