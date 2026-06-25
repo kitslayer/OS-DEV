@@ -157,6 +157,10 @@ int  sys_chown(const char *path, int uid, int gid);            /* set owner/grou
 int  sys_fchown(int fd, int uid, int gid);                     /* set owner/group on an open fd; 0/-1 (M1243) */
 int  sys_sched_getcpu(void);                                   /* APIC id of the CPU the caller runs on (M1246) */
 long sys_getcwd(char *buf, unsigned long size);                /* the absolute current directory; length/-1 (M1248) */
+int  sys_openat(int dirfd, const char *path, int flags);       /* open relative to a dir fd (or AT_FDCWD); fd/-1 (M1251) */
+int  sys_unlinkat(int dirfd, const char *path, int flags);     /* remove relative to a dir fd; 0/-1 (M1251) */
+int  sys_mkdirat(int dirfd, const char *path, int mode);       /* mkdir relative to a dir fd; 0/-1 (M1251) */
+int  sys_fstatat(int dirfd, const char *path, struct statx *st, int flags); /* stat relative to a dir fd; 0/-1 (M1251) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms);               /* arm a timerfd (ms; <=0 disarms); 0/-1 (M1217) */

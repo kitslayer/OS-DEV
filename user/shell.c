@@ -3143,6 +3143,27 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("exe: /proc/self/exe = '"); print(b); print("' (the shell's image path) -- OK\n"); }
             else print("exetest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "attest")) {   /* openat/unlinkat/mkdirat/fstatat (M1251) */
+            int ok = 1; struct statx st;
+            /* AT_FDCWD with an absolute path: create, stat, unlink, confirm gone */
+            int fd = sys_openat(AT_FDCWD, "/tmp/AT.TXT", O_CREAT | O_WRONLY);
+            if (fd < 0) ok = 0; else { sys_fdwrite(fd, "at", 2); sys_fdclose(fd); }
+            if (sys_fstatat(AT_FDCWD, "/tmp/AT.TXT", &st, 0) != 0) ok = 0;
+            if (sys_unlinkat(AT_FDCWD, "/tmp/AT.TXT", 0) != 0) ok = 0;
+            if (sys_fstatat(AT_FDCWD, "/tmp/AT.TXT", &st, 0) == 0) ok = 0;          /* removed */
+            /* a REAL dir fd: open /tmp, create a file relative to it via openat */
+            int dfd = sys_open("/tmp");
+            if (dfd < 0) ok = 0;
+            else {
+                int f = sys_openat(dfd, "AT2.TXT", O_CREAT | O_WRONLY);            /* -> /tmp/AT2.TXT */
+                if (f < 0) ok = 0; else { sys_fdwrite(f, "x", 1); sys_fdclose(f); }
+                sys_fdclose(dfd);
+                if (sys_fstatat(AT_FDCWD, "/tmp/AT2.TXT", &st, 0) != 0) ok = 0;     /* the dirfd-relative create landed in /tmp */
+                sys_unlinkat(AT_FDCWD, "/tmp/AT2.TXT", 0);
+            }
+            print(ok ? "*at: AT_FDCWD openat/fstatat/unlinkat + dirfd-relative openat (open /tmp -> create AT2.TXT in it) -- OK\n"
+                     : "attest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {

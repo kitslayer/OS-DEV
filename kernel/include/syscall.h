@@ -257,6 +257,11 @@
 #define SYS_fchown       235   /* (fd, uid, gid) -> set owner/group on an open fd; 0/-1 (M1243) */
 #define SYS_sched_getcpu 236   /* () -> APIC id of the CPU the caller runs on (M1246) */
 #define SYS_getcwd       237   /* (buf, size) -> the absolute current directory; length/-1 (M1248) */
+#define SYS_openat       238   /* (dirfd, path, flags) -> open relative to a dir fd (or AT_FDCWD); fd/-1 (M1251) */
+#define SYS_unlinkat     239   /* (dirfd, path, flags) -> remove relative to a dir fd; 0/-1 (M1251) */
+#define SYS_mkdirat      240   /* (dirfd, path, mode) -> mkdir relative to a dir fd; 0/-1 (M1251) */
+#define SYS_fstatat      241   /* (dirfd, path, statx*, flags) -> stat relative to a dir fd; 0/-1 (M1251) */
+#define AT_FDCWD (-100)        /* *at dirfd sentinel: resolve relative to the cwd (M1251) */
 #define PRIO_PROCESS 0         /* getpriority/setpriority `which`: by process (M1238) */
 #define RENAME_NOREPLACE 1     /* renameat2: fail if newpath exists (M1232) */
 #define RENAME_EXCHANGE  2     /* renameat2: atomically swap oldpath and newpath (M1232) */

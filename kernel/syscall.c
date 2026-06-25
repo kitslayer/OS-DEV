@@ -68,6 +68,22 @@ static int ustr(uint64_t p) { return vmm_user_str_ok(p, 16u << 20); }
 
 static char g_hostname[64] = "osdev";   /* the system hostname (set/gethostname, uname.nodename) — M1237 */
 
+/* *at resolver (M1251): build the effective path from (dirfd, path). Absolute
+ * paths + AT_FDCWD pass through (the base ops resolve cwd-relative names); a real
+ * dirfd joins the directory fd's stored path (via app_fd_path). 0/-1. */
+static int at_resolve(long dirfd, const char *path, char *out, int max) {
+    if (!path) return -1;
+    if (path[0] == '/' || dirfd == AT_FDCWD) {
+        int i = 0; for (; path[i] && i < max - 1; i++) out[i] = path[i]; out[i] = 0; return 0;
+    }
+    const char *dp = app_fd_path((int)dirfd);
+    if (!dp) return -1;
+    int p = 0; for (; dp[p] && p < max - 1; p++) out[p] = dp[p];
+    if (p && out[p - 1] != '/' && p < max - 1) out[p++] = '/';
+    for (int i = 0; path[i] && p < max - 1; i++) out[p++] = path[i];
+    out[p] = 0; return 0;
+}
+
 /* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
  * (basename, upper-cased, <=8 chars + '.' + <=3-char ext) and writes it via the
  * VFS, counting successes in ctx. */
@@ -277,11 +293,11 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_open:
-    case SYS_readlink: case SYS_statfs: case SYS_getcwd:
+    case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
     case SYS_utimens: case SYS_futimens: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
-    case SYS_chown: case SYS_fchown:
+    case SYS_chown: case SYS_fchown: case SYS_unlinkat: case SYS_mkdirat:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
     case SYS_fallocate: case SYS_copy_file_range: case SYS_setxattr: case SYS_removexattr:
@@ -1242,6 +1258,33 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_open((const char *)r->rdi, (int)r->rsi);
         break;
+    case SYS_openat: {                     /* (dirfd, path, flags) -> open relative to a dir fd (M1251) */
+        char eff[256];
+        if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_open(eff, (int)r->rdx);
+        break;
+    }
+    case SYS_unlinkat: {                   /* (dirfd, path, flags) -> remove relative to a dir fd (M1251) */
+        char eff[256];
+        if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_remove(eff);
+        break;
+    }
+    case SYS_mkdirat: {                    /* (dirfd, path, mode) -> mkdir relative to a dir fd (M1251) */
+        char eff[256];
+        if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_mkdir(eff);
+        break;
+    }
+    case SYS_fstatat: {                    /* (dirfd, path, statx*, flags) -> stat relative to a dir fd (M1251) */
+        char eff[256];
+        if (!ustr(r->rsi) || !ubuf(r->rdx, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
+        if (at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_stat(eff, (struct statx *)r->rdx);
+        break;
+    }
     case SYS_lseek:                        /* (fd, off, whence) -> reposition a file fd (M1193) */
         r->rax = (uint64_t)(int64_t)app_lseek((int)r->rdi, (long)r->rsi, (int)r->rdx);
         break;
