@@ -274,7 +274,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_gettid: case SYS_thread_exit: case SYS_set_tls: case SYS_set_robust_list: return 0;
     case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
-    case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_raise:
+    case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_sigaltstack: case SYS_raise:
     case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom:
     case SYS_alarm: case SYS_getrusage:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
@@ -1769,6 +1769,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_oom:                          /* (cmd,arg): OOM killer — set adj / trigger kill / get score (M1275) */
         r->rax = (uint64_t)app_oom((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_sigaltstack:                  /* (ss_sp, ss_size): set the alternate signal stack (M1276) */
+        r->rax = (uint64_t)app_sigaltstack(r->rdi, r->rsi);
         break;
     case SYS_raise:                        /* (signo): queue the signal; delivered to a handler at this
                                             * syscall's return (app_deliver_pending tail), or left pending

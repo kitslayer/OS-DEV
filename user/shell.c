@@ -109,6 +109,17 @@ static void tmr_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
     if (si) { g_tmr_val = si->si_value; g_tmr_code = si->si_code; }
 }
 
+/* sigaltstack (M1276): the handler checks whether its OWN stack pointer (the
+ * address of a local) lies inside the registered alternate-stack region. */
+static volatile unsigned long g_alt_lo, g_alt_hi;
+static volatile int g_alt_on;
+static void alt_handler(int signo, struct ksiginfo *si, struct kmcontext *uc) {
+    (void)signo; (void)si; (void)uc;
+    char probe;                                  /* a local -> its address is on the handler's current stack */
+    unsigned long sp = (unsigned long)&probe;
+    g_alt_on = (sp >= g_alt_lo && sp < g_alt_hi) ? 1 : 0;
+}
+
 /* Forward decls: `source` and `for` run lines/bodies back through the executor.
  * Defined far below, after run_line. run_input_line handles one logical line
  * (a `for ...; do ...; done` loop, else a ';'-split list of && / || commands). */
@@ -3584,6 +3595,18 @@ static int run_command(char *line, char *cwd) {
                       print(", looping child reaped (system survived) -- OOM killer OK\n"); }
             else { print("oomtest: VERIFY FAILED (pid="); printl(pid); print(" score="); printl(score);
                    print(" victim="); printl(victim); print(" w="); printl(w); print(")\n"); g_status = 1; }
+        } else if (streq(line, "altstacktest")) {   /* sigaltstack + SA_ONSTACK: handler runs on the alt stack (M1276) */
+            static char altstk[8192];                    /* the alternate signal stack */
+            for (unsigned i = 0; i < sizeof altstk; i += 512) altstk[i] = 0;   /* fault it in so it's mapped/present */
+            g_alt_lo = (unsigned long)altstk;
+            g_alt_hi = (unsigned long)altstk + sizeof altstk;
+            g_alt_on = -1;
+            int sset = (int)sys_sigaltstack(altstk, sizeof altstk);
+            sys_sigaction(SIGRTMIN, alt_handler, SA_SIGINFO | SA_ONSTACK);
+            sys_raise(SIGRTMIN);                         /* deliver -> handler should run ON the alt stack */
+            int ok = (sset == 0 && g_alt_on == 1);
+            if (ok) print("altstack: SA_ONSTACK handler for SIGRTMIN ran with its stack pointer inside the sigaltstack() region (8KB) -- sigaltstack OK\n");
+            else { print("altstacktest: VERIFY FAILED (sset="); printl(sset); print(" on_alt="); printl(g_alt_on); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */

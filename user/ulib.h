@@ -284,6 +284,7 @@ long  sys_timer_delete(int id);           /* destroy timer id; 0/-1 (M1272) */
 unsigned long sys_hpet(int what);         /* HPET high-res clock: 0=ns, 1=hz, 2=counter, 3=present (M1273) */
 long  sys_ptsname(int fd);                /* /dev/pts/<n> index for a /dev/ptmx master fd, or -1 (M1274) */
 long  sys_oom(int cmd, int arg);          /* OOM killer: 0=set self oom_adj, 1=trigger kill (->victim pid), 2=oom_score of pid (M1275) */
+long  sys_sigaltstack(void *ss_sp, unsigned long ss_size);  /* register an alternate signal stack for SA_ONSTACK handlers; 0/-1 (M1276) */
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */

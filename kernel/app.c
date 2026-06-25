@@ -95,6 +95,7 @@ struct app {
     int      sigq_n;                     /* # valid queued payloads, [0..sigq_n) in arrival (FIFO) order */
     uint64_t sig_q_value;                /* scratch: si_value for the signal currently being delivered */
     int      sig_q_code;                 /* scratch: si_code  for the signal currently being delivered */
+    uint64_t sig_alt_base, sig_alt_size; /* sigaltstack: alternate signal-handler stack; 0 size = none (M1276) */
     uint64_t alarm_interval, alarm_next; /* SIGALRM (M1102): periodic timer; 0 interval = disarmed */
 #define APP_NPTIMER 8
     struct { int used; int signo; uint64_t value; uint64_t next_ms, interval_ms; } ptimer[APP_NPTIMER];  /* POSIX timer_create() per-process interval timers: fire signo (carrying value) through the sigqueue FIFO when due (M1272) */
@@ -2261,16 +2262,25 @@ void app_sigaction(int signo, uint64_t handler, uint64_t restorer, uint32_t flag
 }
 
 #define APP_SA_SIGINFO 4u
+#define APP_SA_ONSTACK 0x08000000u
 int app_signal_deliver(struct registers *r, int signo) {
     struct app *a = cur();
     if (!a || signo <= 0 || signo >= APP_NSIG) return 0;
     if (!a->sig_handler[signo] || !a->sig_restorer || a->sig_in) return 0;
 
+    /* SA_ONSTACK (M1276): run the handler on the alternate signal stack set by
+     * sigaltstack(), instead of growing down from the interrupted rsp. This is
+     * what lets a SIGSEGV handler survive a stack-overflow fault (the normal
+     * stack is unusable). The frame is still built downward from the alt top. */
+    uint64_t base_sp = r->rsp;
+    if ((a->sig_flags[signo] & APP_SA_ONSTACK) && a->sig_alt_size)
+        base_sp = a->sig_alt_base + a->sig_alt_size;
+
     if (a->sig_flags[signo] & APP_SA_SIGINFO) {
         /* 3-arg form (M1270): place {mcontext = the interrupted regs, siginfo} on
          * the user stack; the handler gets &siginfo + &mcontext and may EDIT the
          * mcontext, which sigreturn restores. */
-        uint64_t sp = (r->rsp - 128) & ~15ull;            /* skip red zone, align */
+        uint64_t sp = (base_sp - 128) & ~15ull;           /* skip red zone, align (base_sp = alt stack if SA_ONSTACK) */
         sp -= sizeof(struct registers); sp &= ~15ull; uint64_t mctx_addr = sp;
         sp -= 32; uint64_t si_addr = sp;                  /* {si_signo, si_code, si_addr, si_value} (24B, 16-aligned) */
         uint64_t ret = (sp & ~15ull) - 8;                 /* ret-addr slot (entry rsp%16==8) */
@@ -2293,7 +2303,7 @@ int app_signal_deliver(struct registers *r, int signo) {
         return 1;
     }
 
-    uint64_t nrsp = ((r->rsp - 128) & ~15ull) - 8;   /* skip red zone, 16-align, room for ret addr */
+    uint64_t nrsp = ((base_sp - 128) & ~15ull) - 8;  /* skip red zone, 16-align, room for ret addr (base_sp = alt stack if SA_ONSTACK) */
     if (!vmm_user_ok(nrsp, 8)) return 0;             /* bad user stack -> don't deliver */
     a->sig_saved = *r;                               /* save the interrupted context */
     a->sig_uctx = 0;
@@ -2315,6 +2325,19 @@ void app_sigreturn(struct registers *r) {
     *r = a->sig_saved;
     a->sig_uctx = 0;
     a->sig_in = 0;
+}
+
+/* sigaltstack (M1276): register an alternate stack for handlers installed with
+ * SA_ONSTACK. ss_size 0 disables. The region must be user-accessible (mapped).
+ * Returns 0/-1. Pairs with SA_SIGINFO so a SIGSEGV handler can run even when
+ * the normal stack has overflowed. */
+long app_sigaltstack(uint64_t ss_sp, uint64_t ss_size) {
+    struct app *a = cur(); if (!a) return -1;
+    if (ss_size == 0) { a->sig_alt_base = 0; a->sig_alt_size = 0; return 0; }
+    if (ss_size < 2048 || !vmm_user_ok(ss_sp, ss_size)) return -1;   /* min usable size + must be mapped */
+    a->sig_alt_base = ss_sp;
+    a->sig_alt_size = ss_size;
+    return 0;
 }
 
 /* Raise a signal ASYNCHRONOUSLY on app `a` (e.g. the WM mapping Ctrl-C on the
@@ -4023,6 +4046,7 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
     a->sig_in = 0; a->pending_sigs = 0; a->sig_blocked = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;
     a->sigq_n = 0;                                                  /* drop any queued RT-signal payloads (M1271) */
+    a->sig_alt_base = 0; a->sig_alt_size = 0;                       /* the alternate signal stack is gone across exec (M1276) */
     for (int i = 0; i < APP_NPTIMER; i++) a->ptimer[i].used = 0;    /* POSIX timers are not preserved across exec (M1272) */
     if (a->gfx) { kfree(a->gfx); a->gfx = 0; a->gfx_w = a->gfx_h = 0; }
     int ti = 0; if (title) while (title[ti] && ti < 23) { a->titlebuf[ti] = title[ti]; ti++; }
