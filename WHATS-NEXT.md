@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1310) shell — `free` + `id` (standard memory/identity commands).** Two more standard commands the shell lacked: `free` parses `/proc/meminfo` and prints `Mem: total/used/free` in kB; `id` prints `uid=0(root) gid=0(root)` (single-user). Listed in `help`. **Verified:** in-guest — `free` → `Mem:  total 262016 kB,  used 70768 kB,  free 191248 kB` (used+free=total), `id` → `uid=0(root) gid=0(root)`.
+
 > **(M1309) shell — `uname` / `whoami` / `hostname` (expose the system-identity syscalls).** Three standard commands the shell lacked, each just surfacing an existing syscall: `uname` prints the kernel name (`OS-DEV`), `uname -a` the full `SYS_uname` line (sysname nodename release version machine); `whoami` prints `root` (single-user, uid 0); `hostname` reads `SYS_gethostname`, and `hostname NAME` sets it (`SYS_sethostname`). Listed in `help`. **Verified:** in-guest — `uname -a` → `OS-DEV osdev 1.0 #1 x86_64 Jun 25 2026 x86_64`, `whoami` → `root`, `hostname` → `osdev`.
 
 > **(M1308) shell — `uptime` (formatted uptime + 1/5/15-min load average).** The shell had `df`/`top`/`ps`/`mem`/`date` but not the standard `uptime`. New `uptime` reads `/proc/uptime` (parsing the seconds-since-boot field) and prints `up Dd Hh Mm Ss`, then appends the three run-queue load averages from `/proc/loadavg` — matching Linux's `uptime`. Listed in `help`. **Verified:** in-guest — `uptime` → `up 0h 0m 14s,  load average: 0.15, 0.03, 0.01` (real values from the kernel's `/proc`).
