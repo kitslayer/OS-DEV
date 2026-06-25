@@ -3055,6 +3055,26 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("io: /proc/self/io wchar "); printl(w1); print(" -> "); printl(w2); print(" (grew >=64 after a 64-byte fd write) -- OK\n"); }
             else print("iotest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "statmtest")) {   /* /proc/<pid>/statm short memory line (M1245) */
+            int ok = 1;
+            char sb[128];
+            long n = sys_readfile("/proc/self/statm", sb, sizeof sb - 1);
+            if (n <= 0) ok = 0;
+            else {
+                sb[n] = 0;
+                long f[7]; int nf = 0, i = 0;
+                while (nf < 7 && i < (int)n) {
+                    while (sb[i] == ' ' || sb[i] == '\n') i++;
+                    if (sb[i] < '0' || sb[i] > '9') break;
+                    long v = 0; while (sb[i] >= '0' && sb[i] <= '9') { v = v * 10 + (sb[i] - '0'); i++; }
+                    f[nf++] = v;
+                }
+                if (nf < 7) ok = 0;                                          /* seven fields */
+                else if (f[0] == 0 || f[1] == 0 || f[1] > f[0]) ok = 0;      /* size>0, resident>0, resident<=size */
+            }
+            print(ok ? "statm: /proc/self/statm -- 7 fields, size>0, resident>0, resident<=size -- OK\n"
+                     : "statmtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
