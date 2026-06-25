@@ -195,6 +195,29 @@ static void darken(int x, int y, int w, int h, int pct) {
 static const int corner[] = { 8, 5, 3, 2, 2, 1, 1, 1 };
 #define CORNER_R ((int)(sizeof(corner)/sizeof(corner[0])))
 
+/* Round the 4 corners of a small chrome element (taskbar chip/button, close box)
+ * by repainting the corner pixels with the panel behind it — sampled from that
+ * panel's vertical gradient (bg0 at panel_y .. bg1 at panel_y+panel_h-1) — so the
+ * taskbar furniture and close button echo the windows' rounded corners for one
+ * cohesive look. A 2px quarter-circle: subtle at chip scale, but it kills the
+ * boxy hard corners. */
+static const int corner2[] = { 2, 1 };
+#define CORNER2_R ((int)(sizeof(corner2)/sizeof(corner2[0])))
+static void round_chrome(int x, int y, int w, int h, uint32_t bg0, uint32_t bg1, int panel_y, int panel_h) {
+    if (panel_h <= 1) panel_h = 2;
+    for (int j = 0; j < CORNER2_R; j++) {
+        int in = corner2[j];
+        uint32_t ct = lerp(bg0, bg1, (y + j) - panel_y, panel_h - 1);
+        uint32_t cb = lerp(bg0, bg1, (y + h - 1 - j) - panel_y, panel_h - 1);
+        for (int i = 0; i < in; i++) {
+            fb_pixel(x + i, y + j, ct);
+            fb_pixel(x + w - 1 - i, y + j, ct);
+            fb_pixel(x + i, y + h - 1 - j, cb);
+            fb_pixel(x + w - 1 - i, y + h - 1 - j, cb);
+        }
+    }
+}
+
 #define WP_TOP 0x183A5C
 #define WP_BOT 0x081320
 static int wp_h;
@@ -432,16 +455,19 @@ static void draw_window(const window_t *w, int focused) {
     fb_reset_clip();
 
     /* gradient title bar (brighter when focused) with a top sheen line */
-    uint32_t t0 = focused ? 0x5B9BF0 : 0x646B79;
-    uint32_t t1 = focused ? 0x2C66D6 : 0x434A57;
+    uint32_t t0 = focused ? 0x6BA8FF : 0x6E7686;
+    uint32_t t1 = focused ? 0x1F56C6 : 0x3A4150;
     vgrad(x, y, ww, TITLEBAR_H, t0, t1);
-    fb_fill_rect(x, y, ww, 1, lerp(t0, 0xFFFFFF, 1, 3));   /* highlight */
+    fb_fill_rect(x, y, ww, 1, lerp(t0, 0xFFFFFF, 2, 3));   /* bright top sheen */
     const char *titletext = (w->kind == KIND_BROWSER && w->app) ? browser_title((browser_t *)w->app) : w->title;   /* browser windows show the page <title> / document.title */
     draw_text(x + 10, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, 0xFFFFFF);
 
-    /* close button: a rounded-ish red chip */
+    /* close button: a rounded red chip with a top sheen; calmer when unfocused */
     int cbx = x + ww - 21, cby = y + 6;
-    vgrad(cbx, cby, 14, 14, 0xFF6B6B, 0xD63B3B);
+    uint32_t cc0 = focused ? 0xFF7B7B : 0xCF6A6A, cc1 = focused ? 0xD42B2B : 0x9E3232;
+    vgrad(cbx, cby, 14, 14, cc0, cc1);
+    fb_fill_rect(cbx, cby, 14, 1, lerp(cc0, 0xFFFFFF, 1, 2));
+    round_chrome(cbx, cby, 14, 14, t0, t1, y, TITLEBAR_H);
     draw_text(cbx + 3, cby - 1, "x", 0xFFFFFF);
 
     /* resize grip hatching */
@@ -582,6 +608,7 @@ static void render_scene(void) {
     vgrad(start_x, start_y, start_w, start_h, a0, a1);
     fb_fill_rect(start_x, start_y, start_w, 1, lerp(a0, 0xFFFFFF, 1, 2));
     box(start_x, start_y, start_w, start_h, 0x18345E);
+    round_chrome(start_x, start_y, start_w, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
     draw_text(start_x + 14, start_y + 4, "Apps", 0xFFFFFF);
 
     /* real-time clock (RTC) in a recessed pill on the right: date + time, so the
@@ -607,23 +634,30 @@ static void render_scene(void) {
         vgrad(cx, start_y, TB_CHIPW, start_h, foc ? 0x3A78D8 : (mini ? 0x1B222E : 0x2A3344),
               foc ? 0x2C66D6 : 0x161D29);
         box(cx, start_y, TB_CHIPW, start_h, foc ? 0x4A90E2 : 0x33415A);
+        round_chrome(cx, start_y, TB_CHIPW, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
         char t[18]; int n = 0; const char *s = windows[i].title;
         while (s && s[n] && n < 15) { t[n] = s[n]; n++; } t[n] = 0;
         draw_text(cx + 8, start_y + 4, t, foc ? 0xFFFFFF : (mini ? 0x6B7689 : 0xAEB8C8));
     }
     fb_fill_rect(clkx, start_y, clkw, start_h, 0x10151E);
     box(clkx, start_y, clkw, start_h, 0x33415A);
+    round_chrome(clkx, start_y, clkw, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
     draw_text(clkx + 14, start_y + 4, clk, 0x9FC0F0);
 
     if (menu_open) {
         int mh = MENU_PERCOL * MENU_ITEM_H + 4, mw = MENU_COLS * MENU_W, my0 = ty - mh;
-        fb_fill_rect(start_x, my0, mw, mh, 0x1E1E2A);
+        vgrad(start_x, my0, mw, mh, 0x262636, 0x14141D);             /* gradient panel */
+        fb_fill_rect(start_x, my0, mw, 2, 0x4A90E2);                 /* bright top accent */
+        for (int c = 1; c < MENU_COLS; c++)                          /* faint column rules */
+            fb_fill_rect(start_x + c * MENU_W, my0 + 4, 1, mh - 8, 0x30303F);
         box(start_x, my0, mw, mh, 0x2D6CDF);
         for (int i = 0; i < MENU_N; i++) {
             int col = i / MENU_PERCOL, row = i % MENU_PERCOL;
             int ix = start_x + col * MENU_W, iy = my0 + 4 + row * MENU_ITEM_H;
-            if (i == menu_sel)                                   /* keyboard highlight */
-                fb_fill_rect(ix + 2, iy, MENU_W - 4, MENU_ITEM_H, 0x2D4A8A);
+            if (i == menu_sel) {                                     /* keyboard highlight: gradient bar + left accent */
+                vgrad(ix + 2, iy, MENU_W - 4, MENU_ITEM_H, 0x3A78D8, 0x2C66D6);
+                fb_fill_rect(ix + 2, iy, 2, MENU_ITEM_H, 0x8FC0FF);
+            }
             draw_text(ix + 12, iy + 2, menu[i].label, i == menu_sel ? 0xFFFFFF : 0xD0D8F0);
         }
     }
