@@ -25,7 +25,7 @@ static int app(char *dst, int p, int cap, const char *s) {   // bounded append
 // Build the full HTTP response (status line + headers + live HTML body) into
 // `resp`; returns its length. Re-reads /proc + the directory each call.
 static int build_page(char *resp, int cap) {
-    static char body[3072];
+    static char body[5120];
     int b = 0;
     b = app(body, b, sizeof body,
         "<!DOCTYPE html><html><head><title>OS-DEV</title>"
@@ -58,10 +58,32 @@ static int build_page(char *resp, int cap) {
     long mn = sys_readfile("/proc/meminfo", mem, sizeof mem - 1);
     if (mn > 0) { mem[mn] = 0; b = app(body, b, sizeof body, mem); }
     b = app(body, b, sizeof body, "</pre><h2>Files on this disk</h2><pre>");
-    // live root listing (the same text `ls` prints) -- each name is a fetchable link
+    // live root listing (the same names `ls` prints) -- each file name is a
+    // clickable link that fetches it through the per-request file server (M1328).
+    // FAT32 8.3 names contain only [A-Z0-9._], so they need no URL/HTML escaping.
     static char ls[1300];
     long ln = sys_list(ls, sizeof ls - 1);
-    if (ln > 0) { ls[ln] = 0; b = app(body, b, sizeof body, ls); }
+    if (ln > 0) {
+        ls[ln] = 0;
+        int i = 0;
+        while (ls[i]) {
+            int eol = i; while (ls[eol] && ls[eol] != '\n') eol++;
+            int ne = i; while (ne < eol && ls[ne] != ' ') ne++;        // first token = the name
+            int isdir = (ne > i && ls[ne - 1] == '/');                 // dirs aren't fetchable
+            if (!isdir && ne > i) {
+                b = app(body, b, sizeof body, "<a href=\"/");
+                for (int k = i; k < ne && b < (int)sizeof body - 1; k++) body[b++] = ls[k];
+                b = app(body, b, sizeof body, "\">");
+                for (int k = i; k < ne && b < (int)sizeof body - 1; k++) body[b++] = ls[k];
+                b = app(body, b, sizeof body, "</a>");
+            } else {
+                for (int k = i; k < ne && b < (int)sizeof body - 1; k++) body[b++] = ls[k];
+            }
+            for (int k = ne; k < eol && b < (int)sizeof body - 1; k++) body[b++] = ls[k];   // size, etc.
+            if (ls[eol] == '\n' && b < (int)sizeof body - 1) body[b++] = '\n';
+            i = (ls[eol] == '\n') ? eol + 1 : eol;
+        }
+    }
     b = app(body, b, sizeof body,
         "</pre><p>Fetch any file above by name, e.g. <code>/README.TXT</code>.</p>"
         "<footer>OS-DEV &middot; from-scratch x86-64 OS &middot; "

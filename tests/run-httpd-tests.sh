@@ -85,6 +85,7 @@ done
 
 if echo "$out" | grep -q "Hello from OS-DEV" && echo "$out" | grep -q "README.TXT" \
    && echo "$out" | grep -q "Uptime:" && echo "$out" | grep -q "MemTotal:" \
+   && echo "$out" | grep -q 'href="/README.TXT"' \
    && echo "$file" | grep -q "read by our own driver" \
    && echo "$miss" | grep -q "404"; then
     echo "PASS: in-guest httpd served a LIVE dashboard, an individual FILE by path, and a 404 over the from-scratch TCP stack"
