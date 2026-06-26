@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1410) gconv — convert FROM any unit.** The converter could only take input in each category's base unit; now `u` (or a click) cycles the *input* unit too, so you can convert from feet, °F, mph, etc. The base is treated as a unit (factor 1.0000) and every multiplicative conversion is `out = V × factor_j / factor_i`; temperature routes through Celsius (`toC`/`fromC`). **Verified:** in-guest — 10 ft → 3.048 m / 120 in / 304.8 cm and 212 °F → 100 °C / 373.15 K, both correct; `make check` green.
+
 > **(M1409) About dialog — now mentions the apps.** The built-in About box (KIND_ABOUT) listed the tech stack (kernel / FAT32 / TLS / JS / browser / shell / editor) but omitted the OS's large graphical app suite; added a `calc . image viewer . games` line and grew the box 178→196 px to fit it. A data + window-size change (the render loop already draws all `L[]` lines), so correct by construction. **Verified:** `make check` green.
 
 > **(M1408) gconv — Speed + Area categories.** Extended the converter from 3 to 5 categories: added Speed (m/s → km/h, mph, ft/s) and Area (m² → sqft, sqin, sqcm), generalising the per-category dispatch to a `TBL[cat]`/`TBLN[cat]` table. **Verified:** in-guest — 10 m/s → 36 km/h / 22.369 mph / 32.808 ft/s, correct; `make check` green.

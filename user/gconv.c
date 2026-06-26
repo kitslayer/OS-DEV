@@ -1,11 +1,12 @@
 /*
- * gconv.c — a unit converter, a userspace program (M1407).
+ * gconv.c — a unit converter, a userspace program (M1407; from-any-unit M1410).
  *
- * Type a value in the category's base unit (metres / kilograms / Celsius) and it
- * shows the equivalents in the other units of that category, live. c cycles the
- * category (Length / Weight / Temperature), digits and . type the value,
- * Backspace deletes, q/Esc quits. All maths is INTEGER fixed-point x10000 (exact,
- * no FPU); temperature uses the affine formulae.
+ * Pick a category (c) and an input unit (u), type a value, and it shows the
+ * equivalents in every other unit of that category, live. Categories: Length,
+ * Weight, Temperature, Speed, Area. All maths is INTEGER fixed-point x10000
+ * (exact, no FPU): multiplicative units convert as out = V * factor_j / factor_i
+ * with the base treated as a unit (factor = 1.0000); temperature uses the affine
+ * formulae through Celsius. q/Esc quits.
  *
  * Launch: `run gconv` from the shell, or the Apps menu ("Unit Convert").
  */
@@ -48,35 +49,41 @@ static void fmt_fixed(long v, char *b) {
     b[p] = 0;
 }
 
-/* per-category unit names + multiplicative factor from the base (fixed x10000); temperature is special-cased */
-struct U { const char *name; long factor; };
-static const struct U LEN[] = { {"ft", 32808}, {"in", 393701}, {"cm", 1000000}, {"km", 10} };  /* from metres (4-dec fixed-point; miles too small to represent) */
-static const struct U WGT[] = { {"lb", 22046}, {"g", 10000000}, {"oz", 352740} };              /* from kilograms */
-static const struct U SPD[] = { {"km/h", 36000}, {"mph", 22369}, {"ft/s", 32808} };            /* from metres/second */
-static const struct U ARE[] = { {"sqft", 107639}, {"sqin", 15500031}, {"sqcm", 100000000} };   /* from square metres */
-static const struct U *TBL[5] = { LEN, WGT, 0, SPD, ARE };                                      /* index 2 (temperature) is special-cased */
-static const int TBLN[5] = { 4, 3, 0, 3, 3 };
-static const char *CATN[5] = { "Length  (metres)", "Weight  (kilograms)", "Temperature  (Celsius)", "Speed  (metres/sec)", "Area  (square metres)" };
+struct U { const char *name; long factor; };                                       /* factor = units per base, x10000; base is the unit with factor 10000 */
+static const struct U LEN[] = { {"m", 10000}, {"ft", 32808}, {"in", 393701}, {"cm", 1000000}, {"km", 10} };
+static const struct U WGT[] = { {"kg", 10000}, {"lb", 22046}, {"g", 10000000}, {"oz", 352740} };
+static const struct U SPD[] = { {"m/s", 10000}, {"km/h", 36000}, {"mph", 22369}, {"ft/s", 32808} };
+static const struct U ARE[] = { {"sqm", 10000}, {"sqft", 107639}, {"sqin", 15500031}, {"sqcm", 100000000} };
+static const struct U *TBL[5] = { LEN, WGT, 0, SPD, ARE };                          /* index 2 (temperature) is special-cased (affine) */
+static const int TBLN[5] = { 5, 4, 0, 4, 4 };
+static const char *TEMPU[3] = { "C", "F", "K" };
+static const char *CATN[5] = { "Length", "Weight", "Temperature", "Speed", "Area" };
+
+static int ucount(int cat) { return cat == 2 ? 3 : TBLN[cat]; }
+static const char *uname(int cat, int u) { return cat == 2 ? TEMPU[u] : TBL[cat][u].name; }
+static long toC(int u, long v) { return u == 0 ? v : u == 1 ? (v - 320000) * 5 / 9 : v - 2731500; }   /* temp unit -> Celsius (x10000) */
+static long fromC(int u, long c) { return u == 0 ? c : u == 1 ? c * 9 / 5 + 320000 : c + 2731500; }   /* Celsius -> temp unit */
 
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gconv: gfx init failed\n"); return 1; }
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
     if (!FB || sys_font(FONT, sizeof FONT) < 0) { print("gconv: init failed\n"); return 1; }
 
-    int cat = 0, elen = 0, dirty = 1, prevb = 0;
+    int cat = 0, inunit = 0, elen = 0, dirty = 1, prevb = 0;
     char entry[16] = { 0 };
 
     for (;;) {
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
-        else if (k == 'c' || k == 'C') { cat = (cat + 1) % 5; dirty = 1; }
+        else if (k == 'c' || k == 'C') { cat = (cat + 1) % 5; inunit = 0; dirty = 1; }
+        else if (k == 'u' || k == 'U') { inunit = (inunit + 1) % ucount(cat); dirty = 1; }
         else if (k >= '0' && k <= '9') { if (elen < 12) { entry[elen++] = (char)k; entry[elen] = 0; } dirty = 1; }
         else if (k == '.') { int has = 0; for (int i = 0; i < elen; i++) if (entry[i] == '.') has = 1;
                              if (!has && elen < 12) { if (elen == 0) entry[elen++] = '0'; entry[elen++] = '.'; entry[elen] = 0; } dirty = 1; }
         else if (k == 8 || k == 0x7F) { if (elen > 0) entry[--elen] = 0; dirty = 1; }
 
-        int mx, my, b = sys_mouse(&mx, &my);                       /* click anywhere = next category */
-        if ((b & 1) && !(prevb & 1) && mx >= 0) { cat = (cat + 1) % 5; dirty = 1; }
+        int mx, my, b = sys_mouse(&mx, &my);                       /* click = next input unit */
+        if ((b & 1) && !(prevb & 1) && mx >= 0) { inunit = (inunit + 1) % ucount(cat); dirty = 1; }
         prevb = b;
 
         if (dirty) {
@@ -86,32 +93,22 @@ int main(void) {
             for (int x = 8; x < W - 8; x++) putpx(x, 50, 0x2A3040);
 
             long v = elen ? parse_fixed(entry) : 0;
-            char vb[24]; for (int i = 0; i <= elen; i++) vb[i] = entry[i]; if (elen == 0) { vb[0] = '0'; vb[1] = 0; }
-            textS(vb, 16, 62, 2, 0x6CF09A);                        /* the value being typed */
+            char vb[24]; int q = 0; for (int i = 0; i < elen; i++) vb[q++] = entry[i]; if (elen == 0) vb[q++] = '0';
+            vb[q++] = ' '; const char *iu = uname(cat, inunit); for (int j = 0; iu[j]; j++) vb[q++] = iu[j]; vb[q] = 0;
+            textS(vb, 16, 62, 2, 0x6CF09A);                        /* value + input unit */
 
-            int y = 110;
-            char line[40];
-            if (cat == 2) {                                        /* Temperature: affine */
-                long f = v * 18000 / SCALE + 320000, kel = v + 2731500;
-                char r[24]; int p = 0; fmt_fixed(f, r); const char *u = " F";
-                p = 0; line[p++] = '='; line[p++] = ' '; for (int j = 0; r[j]; j++) line[p++] = r[j]; for (int j = 0; u[j]; j++) line[p++] = u[j]; line[p] = 0;
-                text(line, 24, y, 0xD8E0EC); y += 24;
-                fmt_fixed(kel, r); u = " K";
-                p = 0; line[p++] = '='; line[p++] = ' '; for (int j = 0; r[j]; j++) line[p++] = r[j]; for (int j = 0; u[j]; j++) line[p++] = u[j]; line[p] = 0;
-                text(line, 24, y, 0xD8E0EC); y += 24;
-            } else {
-                const struct U *tbl = TBL[cat];
-                int n = TBLN[cat];
-                for (int i = 0; i < n; i++) {
-                    long out = v * tbl[i].factor / SCALE;
-                    char r[24]; fmt_fixed(out, r);
-                    int p = 0; line[p++] = '='; line[p++] = ' ';
-                    for (int j = 0; r[j]; j++) line[p++] = r[j];
-                    line[p++] = ' '; for (int j = 0; tbl[i].name[j]; j++) line[p++] = tbl[i].name[j]; line[p] = 0;
-                    text(line, 24, y, 0xD8E0EC); y += 24;
-                }
+            long base = cat == 2 ? toC(inunit, v) : 0;             /* for temp, value in Celsius */
+            int y = 110, n = ucount(cat);
+            for (int j = 0; j < n; j++) {
+                if (j == inunit) continue;
+                long out = cat == 2 ? fromC(j, base) : v * TBL[cat][j].factor / TBL[cat][inunit].factor;
+                char r[24]; fmt_fixed(out, r);
+                char line[40]; int p = 0; line[p++] = '='; line[p++] = ' ';
+                for (int z = 0; r[z]; z++) line[p++] = r[z];
+                line[p++] = ' '; const char *un = uname(cat, j); for (int z = 0; un[z]; z++) line[p++] = un[z]; line[p] = 0;
+                text(line, 24, y, 0xD8E0EC); y += 22;
             }
-            text("type a value   c: category   q: quit", 12, H - 16, 0x707888);
+            text("c: category   u: input unit   q: quit", 12, H - 16, 0x707888);
             sys_gfx_blit(FB);
             dirty = 0;
         }
