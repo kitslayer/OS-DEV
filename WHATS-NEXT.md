@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1421) gseq — a step sequencer.** A 16-step × 5-note grid you program by clicking cells; SPACE plays/stops a looping playhead that beeps the topmost active note in each column on the PC speaker (`sys_beep`), w/s change the tempo (shown in BPM), c clears, q quits. Pentatonic notes (A G E D C), beat markers every 4th column. Additive (own file). Launch `run gseq` or the Apps menu ("Sequencer"). **Verified:** in-guest — the grid + note labels rendered, a click lit a cell (purple C), STOPPED/100 bpm status; `make check` green.
+
 > **(M1420) gtodo — clear completed.** Added `c` to remove all done items at once (compact + save) — the one standard checklist operation still missing, so gtodo now does add/edit/toggle/delete/clear-done/persist. **Verified:** in-guest — added milk + eggs, marked milk done, `c` removed it leaving "[ ] eggs" (0/1); `make check` green.
 
 > **(M1419) gtodo — edit an item.** Added the missing operation: `e` opens the selected item's text in the same input line (pre-filled) to edit in place; Enter saves. The hint now reads "a: add  e: edit  ...". **Verified:** in-guest — added "milk", `e` + cleared + typed "bread" changed that item to "[ ] bread" in place (count 1/2); `make check` green.
