@@ -16,7 +16,7 @@ static void pnum(long v) {                 // printl is shell-local; print decim
 static volatile int shared = 111;          // lives in writable .data -> a COW page after fork
 
 int main(void) {
-    print("forktest: parent, shared="); pnum(shared); print("\n");
+    sys_setcolor(4); print("forktest:"); sys_setcolor(0); print(" parent, shared="); pnum(shared); print("\n");
 
     long pid = sys_fork();
     if (pid < 0) { print("forktest: fork failed\n"); sys_sleep(3000); return 1; }
@@ -38,7 +38,9 @@ int main(void) {
     print(", status="); pnum(status); print("\n");
     print("parent: after the child wrote 222, MY shared is still=");
     pnum(shared);                            // expect 111 — COW kept the pages independent
-    print(shared == 111 ? "  (COW isolation OK)\n" : "  (BROKEN: shared leaked!)\n");
+    if (shared == 111) { sys_setcolor(9); print("  (COW isolation OK)\n"); }
+    else { sys_setcolor(2); print("  (BROKEN: shared leaked!)\n"); }
+    sys_setcolor(0);
     sys_sleep(20000);
     return 0;
 }

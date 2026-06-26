@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1346) demo apps — begin colourising the systems-feature demos.** The `run <name>` demo apps (threads, forktest, …) were monochrome, unlike the coloured shell + menu apps; started bringing them in line: `threads` (section labels cyan, shared-counter lime, TLS/PASS lime, FAIL red) and `forktest` (label cyan, COW-isolation result lime/red). **Verified:** in-guest — `run forktest` shows `forktest:` cyan and `(COW isolation OK)` lime.
+
 > **(M1345) hexedit — column-index header.** Added a `00 01 … 07` header row (grey) aligned above the hex byte columns — like professional hex editors — so a byte's column index is easy to read off. `ROWS` 13→12 to make room. **Verified:** in-guest screenshot — the header aligns exactly over the hex columns above the grid.
 
 > **(M1344) shell — `hexedit <file>` launcher + help listing.** Added a shell builtin that launches the GUI hex editor on a file (via `sys_spawn_arg`), parallel to `edit`, and listed `hexedit<file>` in `help` — so the new tool is reachable by `hexedit FILE` directly (not only `run hexedit FILE` or the Apps menu). **Verified:** in-guest — `hexedit demo.c` opens the Hex Editor window.

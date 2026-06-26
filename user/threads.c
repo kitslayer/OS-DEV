@@ -38,7 +38,7 @@ static void pdec(long v) {
 }
 
 int main(void) {
-    print("threads: main tid="); pdec(sys_gettid());
+    sys_setcolor(4); print("threads:"); sys_setcolor(0); print(" main tid="); pdec(sys_gettid());
     print(" -- spawning "); pdec(NTHREADS); print(" threads (shared AS + mutex + join + TLS)\n\n");
 
     for (int i = 0; i < NTHREADS; i++) {
@@ -47,17 +47,19 @@ int main(void) {
     }
     for (int i = 0; i < NTHREADS; i++) sys_join(spawn_tid[i]);   // wait + reap each
 
-    print("\nmutex:  shared counter = "); pdec(counter);
+    print("\n"); sys_setcolor(4); print("mutex:"); sys_setcolor(0); print("  shared counter = ");
+    sys_setcolor(9); pdec(counter); sys_setcolor(0);
     print("  (expected "); pdec((long)NTHREADS * PER); print(")\n");
 
     int tls_ok = 1;
     for (int i = 0; i < NTHREADS; i++) if (tls_slot[i] != spawn_tid[i]) tls_ok = 0;
-    print("TLS:    each thread's fs:0 write landed in its own slot: ");
-    print(tls_ok ? "YES\n" : "NO\n");
+    sys_setcolor(4); print("TLS:"); sys_setcolor(0); print("    each thread's fs:0 write landed in its own slot: ");
+    if (tls_ok) { sys_setcolor(9); print("YES\n"); } else { sys_setcolor(2); print("NO\n"); }
+    sys_setcolor(0);
 
-    print((counter == NTHREADS * PER && tls_ok)
-          ? "\nPASS: shared address space + futex mutex + join/reap + per-thread TLS all work.\n"
-          : "\nFAIL\n");
+    if (counter == NTHREADS * PER && tls_ok) { sys_setcolor(9); print("\nPASS: shared address space + futex mutex + join/reap + per-thread TLS all work.\n"); }
+    else { sys_setcolor(2); print("\nFAIL\n"); }
+    sys_setcolor(0);
 
     sys_sleep(20000);
     return 0;
