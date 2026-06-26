@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1427) File manager — a status footer.** The Files window now shows a footer with the entry count and total size (e.g., "135 items, 51873 KB"); one list row was reserved for it. Completes the file manager's status display. **Verified:** in-guest — the boot Files window shows "135 items, 51873 KB" (135 matches the disk's file count); `make check` green.
+
 > **(M1426) File manager — sort by name / size / date.** The Files window listed entries in raw disk order; now `o` cycles the sort (name A–Z → size largest-first → date newest-first, directories always first), shown in the header (`o:sort=…`). All listing goes through one new `flist()` helper (vfs_list + insertion sort) used at every call site, so the render and key handler stay consistent. **Verified:** in-guest — the boot Files window now lists alphabetically (240P.NES, 8BALL.HTM, ALIGN, ANCHOR, ANIM.GIF, APP, …) instead of disk order; `make check` green.
 
 > **(M1425) gtodo — paste a clipboard line as a task.** `v` adds a new to-do from the system clipboard's first line (`sys_clip_get`), the reverse of the copy-integrations — so you can copy text anywhere (a calc result, an editor line, …) and drop it straight into your list. The clipboard now works as a cross-app data bus. **Verified:** in-guest end-to-end — copied "4" in gcalc, then gtodo `v` added "[ ] 4"; `make check` green.

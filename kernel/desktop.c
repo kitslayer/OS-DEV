@@ -386,7 +386,7 @@ static void draw_content(const window_t *w, int focused) {
             draw_text(bx, by, hdr, 0x202028);
         }
         fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, 0xC4CAD6);   /* rule under the header */
-        int rows = (w->h - TITLEBAR_H - 30) / 18;          /* rows that fit in the body */
+        int rows = (w->h - TITLEBAR_H - 48) / 18;          /* rows that fit in the body (last 18px reserved for the footer) */
         if (rows < 1) rows = 1;
         int top = 0;                                       /* scroll so the selection stays visible */
         if (w->fsel >= rows) top = w->fsel - rows + 1;
@@ -424,6 +424,15 @@ static void draw_content(const window_t *w, int focused) {
             draw_text(bx, ry, line, namecol);                              /* name in its type tint */
             line[name_end] = nsave;
             draw_text(bx + name_end * font_width, ry, line + name_end, 0x808890);   /* size/date in grey */
+        }
+        {   /* status footer: entry count + total size (M1427) */
+            unsigned long tot = 0; for (int i = 0; i < n; i++) tot += e[i].size;
+            char ft[48]; int p = 0; char num[16]; int k;
+            int v = n; k = 0; if (!v) num[k++] = '0'; while (v) { num[k++] = '0' + v % 10; v /= 10; } while (k) ft[p++] = num[--k];
+            const char *a = " items, "; for (int z = 0; a[z]; z++) ft[p++] = a[z];
+            unsigned long kb = tot / 1024; k = 0; if (!kb) num[k++] = '0'; while (kb) { num[k++] = '0' + (int)(kb % 10); kb /= 10; } while (k) ft[p++] = num[--k];
+            const char *b2 = " KB"; for (int z = 0; b2[z]; z++) ft[p++] = b2[z]; ft[p] = 0;
+            draw_text(bx, w->y + w->h - 18, ft, 0x707888);
         }
         break;
     }
