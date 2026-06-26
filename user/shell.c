@@ -3299,7 +3299,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("statfs: / -> "); printl((long)(sv.f_bavail * sv.f_bsize / 1024)); print(" KiB free / ");
                       printl((long)(sv.f_blocks * sv.f_bsize / 1024)); print(" KiB total, namemax="); printl((long)sv.f_namemax);
                       print(" (absent path -> -1) -- OK\n"); }
-            else print("statfstest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("statfstest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "eventfdtest")) {   /* eventfd counter fd (M1242) */
             int ok = 1;
@@ -3354,7 +3354,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (!(w1 >= 0 && w2 >= w1 + 64)) ok = 0;                               /* wchar grew by the write */
             if (ok) { print("io: /proc/self/io wchar "); printl(w1); print(" -> "); printl(w2); print(" (grew >=64 after a 64-byte fd write) -- OK\n"); }
-            else print("iotest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("iotest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "statmtest")) {   /* /proc/<pid>/statm short memory line (M1245) */
             int ok = 1;
@@ -3381,7 +3381,7 @@ static int run_command(char *line, char *cwd) {
             int c = sys_sched_getcpu();
             if (c < 0 || c >= 256) ok = 0;          /* a valid APIC id (ring-3 runs on the BSP) */
             if (ok) { print("sched_getcpu: ring-3 runs on CPU "); printl(c); print(" (the BSP) -- OK\n"); }
-            else print("getcputest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("getcputest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "pidwchantest")) {   /* /proc/<pid>/wchan per-pid file (M1247) */
             int ok = 1; char wb[64]; long n;
@@ -3442,7 +3442,7 @@ static int run_command(char *line, char *cwd) {
             else { b[n] = 0; int k = 0; while (b[k] && b[k] != '\n') k++; b[k] = 0;   /* strip newline */
                    if (k == 0 || (k == 1 && b[0] == '?')) ok = 0; }                   /* a real image path, not the "?" placeholder */
             if (ok) { print("exe: /proc/self/exe = '"); print(b); print("' (the shell's image path) -- OK\n"); }
-            else print("exetest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("exetest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "attest")) {   /* openat/unlinkat/mkdirat/fstatat (M1251) */
             int ok = 1; struct statx st;
@@ -3480,7 +3480,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (!(mm && m1 >= 0 && m2 - m1 >= 100)) ok = 0;            /* /proc/self/stat's minflt tracked the demand paging */
             if (ok) { print("faults: /proc/self/stat minflt "); printl(m1); print(" -> "); printl(m2); print(" after mmap+touch 100 pages (field 10 is the real counter, was hardcoded 0) -- OK\n"); }
-            else print("faulttest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("faulttest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "statcputest")) {   /* /proc/stat is the real Linux cpu/ctxt/btime layout now (M1253) */
             char sb[512]; int ok = 1; long cpufields = 0;
@@ -3506,7 +3506,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("/proc/stat: cpu line has "); printl(cpufields); print(" fields, ctxt "); printl(ctxt1);
                       print(" -> "); printl(ctxt2); print(", btime "); printl(btime); print(", procs_running "); printl(prun);
                       print(" (real Linux layout w/ live ctxt+btime, was a 3-line blob) -- OK\n"); }
-            else print("statcputest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("statcputest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "socketpairtest")) {   /* socketpair(2): a pre-connected AF_UNIX pair, no path/listen/accept (M1254) */
             int sv[2] = { -1, -1 }; int ok = 1; char rb[16];
@@ -3523,7 +3523,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (ok) { print("socketpair: sv[0]="); printl(sv[0]); print(" sv[1]="); printl(sv[1]);
                       print(" -- A->B 'ping' + B->A 'pong' both delivered (pre-connected, bidirectional, no path/listen/accept) -- OK\n"); }
-            else print("socketpairtest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("socketpairtest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "scmtest")) {   /* SCM_RIGHTS: pass an open fd over an AF_UNIX socketpair (M1265) */
             int ok = 1; int fds[2] = {-1,-1}, sv[2] = {-1,-1};
@@ -3586,7 +3586,7 @@ static int run_command(char *line, char *cwd) {
             if (!(ndev >= 1 && tot_rd_ios > 0)) ok = 0;   /* boot enumeration read LBA0 of each device -> rd_ios>0 */
             if (ok) { print("diskstats: "); printl(ndev); print(" block device(s), total rd_ios="); printl(tot_rd_ios);
                       print(" rd_sectors="); printl(tot_rd_sec); print(" (real per-device I/O counters tallied in blockdev_read/write) -- OK\n"); }
-            else print("diskstatstest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("diskstatstest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "clocknstest")) {   /* clock_nanosleep(TIMER_ABSTIME) + clock_getres (M1257) */
             int ok = 1;                            /* clockid 1 = CLOCK_MONOTONIC, flag 1 = TIMER_ABSTIME */
@@ -3604,7 +3604,7 @@ static int run_command(char *line, char *cwd) {
             if (dt2 > 50) ok = 0;                                   /* past deadline -> immediate, no sleep */
             if (ok) { print("clock_nanosleep: getres="); printl(res); print("ns; ABSTIME +150ms slept ~"); printl((long)dt);
                       print("ms; past deadline returned ~"); printl((long)dt2); print("ms (immediate) -- OK\n"); }
-            else print("clocknstest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("clocknstest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "udptest")) {   /* userspace UDP sockets: a real DNS round-trip via sendto/recvfrom (M1258) */
             unsigned char dns[4] = {10, 0, 2, 3};               /* QEMU slirp built-in DNS resolver */
@@ -4032,7 +4032,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("raw: TX 42B ARP frame ok; sniffed "); printl(flen);
                       print("B frame, ethertype "); printl(et);
                       print(et==0x0800?" (IPv4)":" (ARP)"); print(" -- raw packet socket OK\n"); }
-            else print("rawtest: VERIFY FAILED\n");
+            else { sys_setcolor(2); print("rawtest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
             if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
