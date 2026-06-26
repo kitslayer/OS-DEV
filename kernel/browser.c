@@ -74,7 +74,7 @@ typedef struct { uint16_t off, len; } href_t;            /* slice into hrefs[] *
 typedef struct { int16_t x, y, w, h; uint16_t link; } lrec_t;  /* a clickable rect */
 /* sel_t (one simple CSS selector: tag/.class/#id/[attr]) now lives in cssel.h (M688). */
 
-#define CSS_MAX 24                  /* simple style rules captured from <style> blocks per page */
+#define CSS_MAX 160                 /* simple style rules captured from <style> blocks per page (raised from 24 in M1432 — real sites have many rules) */
 #define SC_MAX  16                  /* max nesting depth of active style scopes (color/weight) */
 
 struct browser {
@@ -1650,10 +1650,109 @@ static int dom_find(browser_t *b, const char *id, int *is, int *ie) {
 /* sel_parse now lives in cssel.h (M688) so it can be host-fuzzed; included at the top. */
 /* Word-boundary class match within a class="..." value (space-separated tokens). */
 /* class_has (word-boundary class-token match) now lives in cssel.h (M690). */
+/* ---- CSS custom properties: var() resolution (M1432) ----
+ * Real stylesheets (e.g. milescoviello.com: 158 var() refs) define colours, spacing and
+ * sizes through `--name: value` on :root and reference them with var(--name[, fallback]).
+ * Before parsing rules we collect every custom-property declaration, flatten var() within
+ * those values, then rewrite the <style> body replacing each var(...) with its value — so
+ * the existing value parsers see concrete colours/sizes. Every buffer write is bounded. */
+#define CSS_REWRITE_MAX 49152
+#define CSS_VARS_MAX    256
+#define CSS_VNAME       40
+#define CSS_VVAL        96
+static char g_css_rw[CSS_REWRITE_MAX];
+static struct { char name[CSS_VNAME]; char val[CSS_VVAL]; } g_css_var[CSS_VARS_MAX];
+static int  g_css_nvar;
+
+static int css_var_find(const char *nm, int nl) {
+    for (int i = 0; i < g_css_nvar; i++) {
+        int k = 0; while (k < nl && g_css_var[i].name[k] && g_css_var[i].name[k] == nm[k]) k++;
+        if (k == nl && g_css_var[i].name[k] == 0) return i;
+    }
+    return -1;
+}
+/* Copy src[0..n) -> dst, replacing var(--name[, fallback]) with the variable's value (or
+ * the fallback, or nothing). Writes bounded by cap; returns out length or -1 on overflow. */
+static int css_subst_once(const char *src, int n, char *dst, int cap, int *subst) {
+    int op = 0; *subst = 0;
+    for (int i = 0; i < n; ) {
+        if (i + 4 <= n && src[i]=='v' && src[i+1]=='a' && src[i+2]=='r' && src[i+3]=='(') {
+            int depth = 1, m = i + 4, comma = -1;
+            while (m < n && depth > 0) {                       /* match the closing ')' */
+                char c = src[m];
+                if (c == '(') depth++;
+                else if (c == ')') { depth--; if (depth == 0) break; }
+                else if (c == ',' && depth == 1 && comma < 0) comma = m;
+                m++;
+            }
+            if (m >= n) { if (op >= cap-1) return -1; dst[op++] = src[i++]; continue; }   /* unterminated */
+            int close = m, ns = i + 4, ne = (comma >= 0) ? comma : close;
+            while (ns < ne && (src[ns]==' '||src[ns]=='\t')) ns++;
+            while (ne > ns && (src[ne-1]==' '||src[ne-1]=='\t')) ne--;
+            int vi = css_var_find(src + ns, ne - ns);
+            if (vi >= 0) { const char *v = g_css_var[vi].val; for (int z = 0; v[z]; z++) { if (op >= cap-1) return -1; dst[op++] = v[z]; } }
+            else if (comma >= 0) {                             /* missing var -> use fallback */
+                int fs = comma + 1, fe = close;
+                while (fs < fe && (src[fs]==' '||src[fs]=='\t')) fs++;
+                while (fe > fs && (src[fe-1]==' '||src[fe-1]=='\t')) fe--;
+                for (int z = fs; z < fe; z++) { if (op >= cap-1) return -1; dst[op++] = src[z]; }
+            }
+            *subst = 1; i = close + 1;
+        } else { if (op >= cap-1) return -1; dst[op++] = src[i++]; }
+    }
+    dst[op] = 0; return op;
+}
+static void css_collect_vars(const char *s, int n) {
+    g_css_nvar = 0;
+    for (int i = 0; i < n; ) {
+        if (s[i] == '-' && i+1 < n && s[i+1] == '-') {         /* candidate "--name" */
+            int ns = i, j = i + 2;
+            while (j < n && ((s[j]>='a'&&s[j]<='z')||(s[j]>='A'&&s[j]<='Z')||(s[j]>='0'&&s[j]<='9')||s[j]=='-'||s[j]=='_')) j++;
+            int ne = j, k = j;
+            while (k < n && (s[k]==' '||s[k]=='\t'||s[k]=='\n'||s[k]=='\r')) k++;
+            if (k < n && s[k] == ':') {                        /* "--name:" -> a definition */
+                int vs = k + 1; while (vs < n && (s[vs]==' '||s[vs]=='\t')) vs++;
+                int ve = vs, depth = 0;
+                while (ve < n) { char c = s[ve]; if (c=='(') depth++; else if (c==')') { if (depth>0) depth--; } else if ((c==';'||c=='}') && depth==0) break; ve++; }
+                int vend = ve; while (vend > vs && (s[vend-1]==' '||s[vend-1]=='\t'||s[vend-1]=='\n'||s[vend-1]=='\r')) vend--;
+                if (g_css_nvar < CSS_VARS_MAX) {
+                    int nl = ne - ns; if (nl > CSS_VNAME-1) nl = CSS_VNAME-1;
+                    for (int z = 0; z < nl; z++) g_css_var[g_css_nvar].name[z] = s[ns+z];
+                    g_css_var[g_css_nvar].name[nl] = 0;
+                    int vl = vend - vs; if (vl > CSS_VVAL-1) vl = CSS_VVAL-1;
+                    for (int z = 0; z < vl; z++) g_css_var[g_css_nvar].val[z] = s[vs+z];
+                    g_css_var[g_css_nvar].val[vl] = 0;
+                    g_css_nvar++;
+                }
+                i = ve;
+            } else i = j;
+        } else i++;
+    }
+    for (int round = 0; round < 6; round++) {                  /* flatten var() inside var values */
+        int changed = 0;
+        for (int vi = 0; vi < g_css_nvar; vi++) {
+            int len = 0; while (g_css_var[vi].val[len]) len++;
+            int sub = 0; char tmp[CSS_VVAL];
+            int r = css_subst_once(g_css_var[vi].val, len, tmp, CSS_VVAL, &sub);
+            if (r >= 0 && sub) { for (int z = 0; z <= r; z++) g_css_var[vi].val[z] = tmp[z]; changed = 1; }
+        }
+        if (!changed) break;
+    }
+}
+static const char *css_resolve_vars(const char *s, int *np) {
+    int n = *np;
+    css_collect_vars(s, n);
+    if (g_css_nvar == 0) return s;                             /* no custom properties */
+    int sub = 0, r = css_subst_once(s, n, g_css_rw, CSS_REWRITE_MAX, &sub);
+    if (r < 0 || !sub) return s;                               /* overflow / nothing changed */
+    *np = r; return g_css_rw;
+}
+
 /* Parse a <style> body into simple `selector { color / font-weight / font-style }` rules
  * (b->css_*). A selector that isn't a single simple selector (descendant, comma-grouped,
  * @-rule) fails sel_parse and is skipped. Bounded read-only over s[0..n); caps at CSS_MAX. */
 static void capture_css(browser_t *b, const char *s, int n) {
+    { int rn = n; s = css_resolve_vars(s, &rn); n = rn; }      /* resolve var() before parsing (M1432) */
     int i = 0;
     while (i < n && b->n_css < CSS_MAX) {
         while (i < n && (s[i]==' '||s[i]=='\t'||s[i]=='\n'||s[i]=='\r'||s[i]==';'||s[i]=='}')) i++;  /* ws / stray ; } */
@@ -3609,6 +3708,13 @@ static void box(int x, int y, int w, int h, uint32_t c) {
 
 void browser_render(browser_t *b, int x, int y, int w, int h) {
     uint32_t BG = 0xFFFFFF;
+    for (int r = 0; r < b->n_css; r++) {                 /* page background from body/html { background } (M1432) */
+        sel_t *s = &b->css_sel[r];
+        if (b->css_bg[r] && !s->cls[0] && !s->id[0] && !s->attr[0] &&
+            ((s->tag[0]=='b'&&s->tag[1]=='o'&&s->tag[2]=='d'&&s->tag[3]=='y'&&!s->tag[4]) ||
+             (s->tag[0]=='h'&&s->tag[1]=='t'&&s->tag[2]=='m'&&s->tag[3]=='l'&&!s->tag[4])))
+            BG = b->css_bg[r];
+    }
     fb_fill_rect(x, y, w, h, BG);
 
     /* address bar */
