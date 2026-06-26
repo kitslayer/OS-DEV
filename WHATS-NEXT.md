@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1341) shell — colourise the `edit` line editor.** The shell's quick line editor now shows its hint in grey, the `>` input prompt in cyan, and the `saved` confirmation in lime (write errors red) — the last uncoloured shell prompt surface, completing terminal-colour coverage of the shell. **Verified:** in-guest — `edit test.txt` shows a grey hint, cyan prompts, and a lime `saved test.txt`.
+
 > **(M1340) shell — `neofetch` gains CPU + Disk lines.** The system summary now also shows `CPU: x86_64 (N cores)` (core count parsed from `/proc/cpuinfo`, reflecting SMP) and `Disk: used / total MB` (from `sys_df`, used in amber), with a blank line trimmed so it still fits the 17-row terminal. **Verified:** in-guest screenshot — `CPU: x86_64 (1 core)`, `Disk: 50 / 62 MB`.
 
 > **(M1339) shell — colourise the startup banner.** The shell's opening lines now show `OS-DEV shell v0.1` in cyan, the ring-3 runtime note in grey, and the `'help'` hint in yellow (was flat green) — a tidier first impression every time a shell opens. **Verified:** in-guest screenshot.

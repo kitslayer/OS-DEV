@@ -5496,17 +5496,17 @@ static int run_command(char *line, char *cwd) {
             char fname[32]; int i = 0;
             for (char *q = line + 5; *q && i < 31; q++) fname[i++] = *q;
             fname[i] = 0; sh_unprot_buf(fname);               /* quoted filename (e.g. edit "my file") */
-            print("-- editor: type lines, '.' on its own line to save --\n");
+            sys_setcolor(8); print("-- editor: type lines, '.' on its own line to save --\n"); sys_setcolor(0);   /* hint grey (M1341) */
             char doc[1024], l[128]; int dl = 0;
             for (;;) {
-                print("> ");
+                sys_setcolor(4); print("> "); sys_setcolor(0);
                 int n = readline(l, sizeof(l));
                 if (n == 1 && l[0] == '.') break;
                 for (int k = 0; l[k] && dl < 1023; k++) doc[dl++] = l[k];
                 if (dl < 1023) doc[dl++] = '\n';
             }
-            if (sys_writefile(fname, doc, dl) < 0) print("edit: write failed\n");
-            else { print("saved "); print(fname); print("\n"); }
+            if (sys_writefile(fname, doc, dl) < 0) { sys_setcolor(2); print("edit: write failed\n"); sys_setcolor(0); }
+            else { sys_setcolor(9); print("saved "); print(fname); sys_setcolor(0); print("\n"); }
         } else if (startswith(line, "write ")) {
             char *p = line + 6, fname[32]; int i = 0;
             while (*p && *p != ' ' && i < 31) fname[i++] = *p++;
