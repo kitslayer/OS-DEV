@@ -36,7 +36,7 @@ int main(void) {
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
     if (!FB || sys_font(FONT, sizeof FONT) < 0) { print("gfont: init failed\n"); return 1; }
 
-    int idx = 'A', pidx = -1;
+    int idx = 'A', pidx = -1, prevb = 0;
     for (;;) {
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
@@ -44,6 +44,13 @@ int main(void) {
         else if ((k == 0x12 || k == 's') && idx < 112) idx += 16;     /* down  */
         else if ((k == 0x13 || k == 'a') && idx > 0)   idx -= 1;      /* left  */
         else if ((k == 0x14 || k == 'd') && idx < 127) idx += 1;      /* right */
+
+        int mx, my, b = sys_mouse(&mx, &my);                          /* click a cell to select it (M1399) */
+        if ((b & 1) && !(prevb & 1) && mx >= GX && my >= GY) {
+            int col = (mx - GX) / CW, row = (my - GY) / CH;
+            if (col >= 0 && col < 16 && row >= 0 && row < 8) idx = row * 16 + col;
+        }
+        prevb = b;
 
         if (idx != pidx) {
             pidx = idx;
