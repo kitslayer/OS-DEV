@@ -3725,13 +3725,14 @@ static void box(int x, int y, int w, int h, uint32_t c) {
 }
 
 void browser_render(browser_t *b, int x, int y, int w, int h) {
-    uint32_t BG = 0xFFFFFF;
-    for (int r = 0; r < b->n_css; r++) {                 /* page background from body/html { background } (M1432) */
+    uint32_t BG = 0xFFFFFF, page_fg = 0;
+    for (int r = 0; r < b->n_css; r++) {                 /* page bg + default text colour from body/html (M1432, M1437) */
         sel_t *s = &b->css_sel[r];
-        if (b->css_bg[r] && !s->cls[0] && !s->id[0] && !s->attr[0] &&
+        int is_root = !s->cls[0] && !s->id[0] && !s->attr[0] &&
             ((s->tag[0]=='b'&&s->tag[1]=='o'&&s->tag[2]=='d'&&s->tag[3]=='y'&&!s->tag[4]) ||
-             (s->tag[0]=='h'&&s->tag[1]=='t'&&s->tag[2]=='m'&&s->tag[3]=='l'&&!s->tag[4])))
-            BG = b->css_bg[r];
+             (s->tag[0]=='h'&&s->tag[1]=='t'&&s->tag[2]=='m'&&s->tag[3]=='l'&&!s->tag[4]));
+        if (is_root && b->css_bg[r])    BG = b->css_bg[r];
+        if (is_root && b->css_color[r]) page_fg = b->css_color[r];   /* so a dark body{background} gets its light body{color} text (M1437) */
     }
     fb_fill_rect(x, y, w, h, BG);
 
@@ -4026,6 +4027,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             int matched = (b->find_tok >= 0 && tk->type == TK_WORD && tok_matches(b, tk));
             int current = (t == b->find_tok);
             uint32_t fg = color_for(tk->style);
+            if (page_fg && tk->style == STY_NORMAL) fg = page_fg & 0xFFFFFF;   /* body{color} is the default body-text colour (M1437) */
             if (b->tokcolor[t] & 0x01000000)               /* explicit colour (CSS / <font>) overrides the default — incl. for links (M1435), so a{color} wins over the default blue */
                 fg = b->tokcolor[t] & 0xFFFFFF;
             /* content background: explicit CSS background-color wins over the <mark> default */
