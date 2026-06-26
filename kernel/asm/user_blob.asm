@@ -108,6 +108,7 @@ global gauges_elf_start, gauges_elf_end
 global gsw_elf_start, gsw_elf_end
 global bclock_elf_start, bclock_elf_end
 global gfont_elf_start, gfont_elf_end
+global gtimer_elf_start, gtimer_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -508,5 +509,9 @@ bclock_elf_end:
 gfont_elf_start:
     incbin "build/gfont.elf"
 gfont_elf_end:
+
+gtimer_elf_start:
+    incbin "build/gtimer.elf"
+gtimer_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

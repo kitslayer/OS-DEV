@@ -88,6 +88,7 @@ static const struct menu_item menu[] = {
     { "Stopwatch", KIND_APP, "gsw" },
     { "Binary Clock", KIND_APP, "bclock" },
     { "Char Map", KIND_APP, "gfont" },
+    { "Countdown", KIND_APP, "gtimer" },
     { "Snake", KIND_APP, "snake" }, { "Editor", KIND_APP, "editor" },
     { "2048", KIND_APP, "2048" }, { "Life", KIND_APP, "life" }, { "Mines", KIND_APP, "mines" },
     { "Tetris", KIND_APP, "tetris" }, { "Breakout", KIND_APP, "breakout" },
