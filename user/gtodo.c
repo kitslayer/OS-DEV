@@ -87,23 +87,28 @@ int main(void) {
             }
             if (editing) {                                  /* the new-item input line */
                 int y = 40 + nit * 22 + 6;
-                text("New:", 16, y, 0x8FD0FF);
+                text(editing == 2 ? "Edit:" : "New:", 16, y, 0x8FD0FF);
                 text(eb, 56, y, 0xF0F0A0);
                 fill(56 + elen * 8, y, 8, 16, 0x808890);    /* caret */
             }
-            text(editing ? "Enter: add   Esc: cancel" : "a: add   space: done   d: delete   q: quit", 14, H - 16, 0x707888);
+            text(editing ? "Enter: save   Esc: cancel" : "a: add   e: edit   space: done   d: del   q: quit", 14, H - 16, 0x707888);
             sys_gfx_blit(FB);
             dirty = 0;
         }
         int k = sys_pollkey();
         if (editing) {
-            if (k == '\n' || k == '\r') { if (elen > 0 && nit < MAXIT) { for (int j = 0; j <= elen; j++) items[nit].t[j] = eb[j]; items[nit].done = 0; sel = nit; nit++; save(); } editing = 0; dirty = 1; }
+            if (k == '\n' || k == '\r') {
+                if (editing == 2) { if (elen > 0) { for (int j = 0; j <= elen; j++) items[sel].t[j] = eb[j]; save(); } }   /* edit the selected item */
+                else if (elen > 0 && nit < MAXIT) { for (int j = 0; j <= elen; j++) items[nit].t[j] = eb[j]; items[nit].done = 0; sel = nit; nit++; save(); }   /* add a new item */
+                editing = 0; dirty = 1;
+            }
             else if (k == 27) { editing = 0; dirty = 1; }
             else if (k == 8 || k == 0x7F) { if (elen > 0) eb[--elen] = 0; dirty = 1; }
             else if (k >= ' ' && k < 127 && elen < TLEN - 1) { eb[elen++] = (char)k; eb[elen] = 0; dirty = 1; }
         } else {
             if (k == 'q' || k == 27) break;
             else if (k == 'a' || k == 'A') { editing = 1; elen = 0; eb[0] = 0; dirty = 1; }
+            else if ((k == 'e' || k == 'E') && nit > 0) { editing = 2; elen = 0; for (int j = 0; items[sel].t[j] && elen < TLEN - 1; j++) eb[elen++] = items[sel].t[j]; eb[elen] = 0; dirty = 1; }
             else if ((k == 0x11 || k == 'w') && sel > 0) { sel--; dirty = 1; }
             else if ((k == 0x12 || k == 's') && sel < nit - 1) { sel++; dirty = 1; }
             else if (k == ' ' && nit > 0) { items[sel].done = !items[sel].done; save(); dirty = 1; }

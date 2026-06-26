@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1419) gtodo — edit an item.** Added the missing operation: `e` opens the selected item's text in the same input line (pre-filled) to edit in place; Enter saves. The hint now reads "a: add  e: edit  ...". **Verified:** in-guest — added "milk", `e` + cleared + typed "bread" changed that item to "[ ] bread" in place (count 1/2); `make check` green.
+
 > **(M1418) gtodo — a persistent to-do list.** A checklist that survives across runs: `a` adds an item (type + Enter), Up/Down select, Space toggles done, `d` deletes, q quits; a header shows done/total. The list is saved to `TODO.TXT` (`sys_writefile`, one item per line "1/0 text") on every change and reloaded on launch (`sys_readfile`). Additive (own file). Launch `run gtodo` or the Apps menu ("To-Do"). **Verified:** in-guest end-to-end — added "milk", Space marked it done ([x], 1/1); relaunching reloaded "[x] milk" from disk (persistence); `make check` green.
 
 > **(M1417) gclip — a clipboard viewer.** Shows the system clipboard (`sys_clip_get`) live — word-wrapped with a byte count — so you can see what the editor, gpass, etc. copied; it polls a few times a second and redraws on change. c clears the clipboard (`sys_clip_set("",0)`), q quits. Additive (own file). Launch `run gclip` or the Apps menu ("Clipboard"). **Verified:** in-guest end-to-end — generated a password in gpass, copied it (c), launched gclip → it showed `+MVNRwxW9$=TDXFN` / "16 bytes" (also confirms gpass's copy); `make check` green.
