@@ -5878,7 +5878,8 @@ int main(void) {
     source_file(".SHRC", cwd, 1); g_status = 0;    /* run the startup rc file if it exists (aliases, set, banner) */
     for (;;) {
         char hn[64]; if (sys_gethostname(hn, sizeof hn) != 0 || !hn[0]) scpy(hn, "osdev");   /* prompt reflects the real hostname (M1311) */
-        print(hn); print(":"); print(cwd); print("$ ");
+        sys_setcolor(4); print(hn); sys_setcolor(8); print(":");                             /* coloured prompt (M1312): */
+        sys_setcolor(6); print(cwd); sys_setcolor(0); print("$ ");                           /* cyan host, grey :, blue cwd, green $ */
         readline(line, sizeof(line));
 
         /* `!!` (optionally followed by more, e.g. `!! | grep x`) re-runs the

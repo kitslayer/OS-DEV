@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1312) shell — a coloured prompt.** The all-green REPL prompt now uses the app text palette: the **hostname in cyan** (idx 4), the `:` in grey (8), the **cwd in light-blue** (6), and `$ ` back to the default green (0) — so the prompt reads at a glance like a modern shell. The typed command + output stay default green (color reset before `readline`). Pure cosmetics around the existing prompt print. **Verified:** in-guest screendump — the prompt renders cyan host + blue path.
+
 > **(M1311) shell — the prompt reflects the real hostname.** The REPL prompt was a hardcoded `osdev:` + cwd + `$ ` — the cwd was already live, but `osdev:` ignored the actual hostname, so M1309's `hostname` command didn't change it. The prompt now reads the hostname via `sys_gethostname` each iteration (fallback `osdev`), so `hostname NAME` immediately updates the prompt — standard shell behavior, tying M1309 together. **Verified:** in-guest — at `osdev:/$`, running `hostname nas` → the next prompt is `nas:/$`.
 
 > **(M1310) shell — `free` + `id` (standard memory/identity commands).** Two more standard commands the shell lacked: `free` parses `/proc/meminfo` and prints `Mem: total/used/free` in kB; `id` prints `uid=0(root) gid=0(root)` (single-user). Listed in `help`. **Verified:** in-guest — `free` → `Mem:  total 262016 kB,  used 70768 kB,  free 191248 kB` (used+free=total), `id` → `uid=0(root) gid=0(root)`.
