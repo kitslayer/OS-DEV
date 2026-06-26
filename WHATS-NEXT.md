@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1423) gcolor — copy the hex to the clipboard.** `c` now copies the current colour as `#RRGGBB` to the system clipboard (`sys_clip_set`), so you can paste it into the editor/code. **Verified:** in-guest end-to-end — gcolor `c` (default teal) then gclip showed `#20B2AA` (7 bytes); `make check` green.
+
 > **(M1422) imgview — set the image as wallpaper.** Pressing `w` in the image viewer sets the currently-shown image as the desktop wallpaper (`sys_setwall`, the same call the file manager's `w` uses). A natural integration — browse images, find one you like, make it the background. **Verified:** in-guest — viewing LOGO.SVG and pressing `w` filled the desktop with the OS-DEV logo; `make check` green.
 
 > **(M1421) gseq — a step sequencer.** A 16-step × 5-note grid you program by clicking cells; SPACE plays/stops a looping playhead that beeps the topmost active note in each column on the PC speaker (`sys_beep`), w/s change the tempo (shown in BPM), c clears, q quits. Pentatonic notes (A G E D C), beat markers every 4th column. Additive (own file). Launch `run gseq` or the Apps menu ("Sequencer"). **Verified:** in-guest — the grid + note labels rendered, a click lit a cell (purple C), STOPPED/100 bpm status; `make check` green.

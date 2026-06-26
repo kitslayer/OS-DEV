@@ -46,6 +46,11 @@ int main(void) {
         else if (k == 'd' || k == 0x14) rgb[active] = clamp(rgb[active] + 8);   /* right */
         else if (k == 0x11) active = (active + 2) % 3;                          /* up    */
         else if (k == 0x12) active = (active + 1) % 3;                          /* down  */
+        else if (k == 'c' || k == 'C') {                                       /* copy #RRGGBB to the clipboard */
+            char hx[8]; const char *HX = "0123456789ABCDEF"; hx[0] = '#';
+            for (int ch = 0; ch < 3; ch++) { hx[1 + ch * 2] = HX[(rgb[ch] >> 4) & 15]; hx[2 + ch * 2] = HX[rgb[ch] & 15]; }
+            hx[7] = 0; sys_clip_set(hx, 7);
+        }
 
         int mx, my, b = sys_mouse(&mx, &my);                                   /* drag/click a slider */
         if ((b & 1) && mx >= 0) for (int ch = 0; ch < 3; ch++)
@@ -92,7 +97,7 @@ int main(void) {
                 vt[vp] = 0;
                 text(vt, SX + SW + 8, y + 2, 0xC8D0DE);
             }
-            text("drag a slider, or r/g/b + a/d ; q quits", 14, H - 16, 0x707888);
+            text("drag/r/g/b/a/d   c: copy hex   q: quit", 14, H - 16, 0x707888);
             sys_gfx_blit(FB);
         }
         sys_sleep(40);
