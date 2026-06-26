@@ -1953,6 +1953,21 @@ static int run_command(char *line, char *cwd) {
                 char fr[16]; s = 0; for (int k = i; k < j && s < 15; k++) fr[s++] = b[k]; fr[s] = 0;
                 sys_setcolor(9); print(fr); sys_setcolor(0);
                 print(b + j);                                                /* " KiB free / N KiB total" */
+                /* a colour-coded disk-usage bar (M1330): parse free+total, draw 20 cells */
+                long freev = 0; for (int k = i; k < j; k++) freev = freev * 10 + (b[k] - '0');
+                long totv = 0; { int k = j; while (b[k] && !(b[k] >= '0' && b[k] <= '9')) k++;
+                                 while (b[k] >= '0' && b[k] <= '9') totv = totv * 10 + (b[k++] - '0'); }
+                if (totv > 0) {
+                    long usedv = totv > freev ? totv - freev : 0;
+                    int pct = (int)((usedv * 100) / totv);
+                    int fill = (int)((usedv * 20 + totv / 2) / totv);
+                    int bc = pct >= 90 ? 2 : (pct >= 70 ? 3 : 9);            /* red / amber / lime */
+                    print("      [");
+                    sys_setcolor(bc); for (int c = 0; c < fill; c++) print("#");
+                    sys_setcolor(8); for (int c = fill; c < 20; c++) print("-");
+                    sys_setcolor(0); print("] ");
+                    sys_setcolor(bc); printl(pct); print("%"); sys_setcolor(0); print(" used\n");
+                }
             } else print("df: no disk\n");
         } else if (streq(line, "lspci")) {
             char buf[4096];                 /* every PCI device as one text line (kernel caps at 64) */
