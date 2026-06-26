@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1420) gtodo — clear completed.** Added `c` to remove all done items at once (compact + save) — the one standard checklist operation still missing, so gtodo now does add/edit/toggle/delete/clear-done/persist. **Verified:** in-guest — added milk + eggs, marked milk done, `c` removed it leaving "[ ] eggs" (0/1); `make check` green.
+
 > **(M1419) gtodo — edit an item.** Added the missing operation: `e` opens the selected item's text in the same input line (pre-filled) to edit in place; Enter saves. The hint now reads "a: add  e: edit  ...". **Verified:** in-guest — added "milk", `e` + cleared + typed "bread" changed that item to "[ ] bread" in place (count 1/2); `make check` green.
 
 > **(M1418) gtodo — a persistent to-do list.** A checklist that survives across runs: `a` adds an item (type + Enter), Up/Down select, Space toggles done, `d` deletes, q quits; a header shows done/total. The list is saved to `TODO.TXT` (`sys_writefile`, one item per line "1/0 text") on every change and reloaded on launch (`sys_readfile`). Additive (own file). Launch `run gtodo` or the Apps menu ("To-Do"). **Verified:** in-guest end-to-end — added "milk", Space marked it done ([x], 1/1); relaunching reloaded "[x] milk" from disk (persistence); `make check` green.

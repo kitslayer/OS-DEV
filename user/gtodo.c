@@ -91,7 +91,7 @@ int main(void) {
                 text(eb, 56, y, 0xF0F0A0);
                 fill(56 + elen * 8, y, 8, 16, 0x808890);    /* caret */
             }
-            text(editing ? "Enter: save   Esc: cancel" : "a: add   e: edit   space: done   d: del   q: quit", 14, H - 16, 0x707888);
+            text(editing ? "Enter: save   Esc: cancel" : "a:add e:edit space:done d:del c:clear-done q:quit", 14, H - 16, 0x707888);
             sys_gfx_blit(FB);
             dirty = 0;
         }
@@ -113,6 +113,7 @@ int main(void) {
             else if ((k == 0x12 || k == 's') && sel < nit - 1) { sel++; dirty = 1; }
             else if (k == ' ' && nit > 0) { items[sel].done = !items[sel].done; save(); dirty = 1; }
             else if ((k == 'd' || k == 'D') && nit > 0) { for (int j = sel; j < nit - 1; j++) items[j] = items[j + 1]; nit--; if (sel >= nit) sel = nit > 0 ? nit - 1 : 0; save(); dirty = 1; }
+            else if ((k == 'c' || k == 'C') && nit > 0) { int wr = 0; for (int r = 0; r < nit; r++) if (!items[r].done) items[wr++] = items[r]; nit = wr; if (sel >= nit) sel = nit > 0 ? nit - 1 : 0; save(); dirty = 1; }   /* clear completed */
         }
         sys_sleep(40);
     }
