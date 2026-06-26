@@ -4290,17 +4290,19 @@ static int run_command(char *line, char *cwd) {
             long secs = 0;
             if (u) { for (int i = 0; u[i] && u[i] != '.' && u[i] != ' '; i++) if (u[i] >= '0' && u[i] <= '9') secs = secs * 10 + (u[i] - '0'); free(u); }
             long d = secs / 86400, h = (secs % 86400) / 3600, m = (secs % 3600) / 60, s = secs % 60;
-            print("up ");
+            print("up "); sys_setcolor(4);                       /* duration in cyan (M1316) */
             if (d) { printl(d); print("d "); }
             printl(h); print("h "); printl(m); print("m "); printl(s); print("s");
+            sys_setcolor(0);
             char *la = slurp("/proc/loadavg", &n);
             if (la) {
-                print(",  load average: ");
+                print(",  load average: "); sys_setcolor(3);     /* load values in yellow */
                 int fld = 0;
                 for (int i = 0; la[i] && fld < 3; i++) {
                     if (la[i] == ' ') { fld++; if (fld < 3) print(", "); }
                     else { char c[2] = { la[i], 0 }; print(c); }
                 }
+                sys_setcolor(0);
                 free(la);
             }
             print("\n");
@@ -4330,7 +4332,7 @@ static int run_command(char *line, char *cwd) {
                 }
                 free(m);
             }
-            print("Mem:  total "); printl(v[0]); print(" kB,  used "); printl(v[2]); print(" kB,  free "); printl(v[1]); print(" kB\n");
+            print("Mem:  total "); printl(v[0]); print(" kB,  used "); sys_setcolor(7); printl(v[2]); sys_setcolor(0); print(" kB,  free "); sys_setcolor(9); printl(v[1]); sys_setcolor(0); print(" kB\n");   /* used amber, free lime (M1316) */
         } else if (streq(line, "id")) {
             print("uid=0(root) gid=0(root)\n");             /* single-user */
         } else if (streq(line, "clear")) {

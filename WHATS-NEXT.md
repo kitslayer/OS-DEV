@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1316) shell — colour the `uptime` + `free` values too.** Continuing the colour pass into the status commands: `uptime` shows the **duration in cyan** and the **load averages in yellow**; `free` shows **used in amber** and **free in lime** (total stays default). **Verified:** in-guest — `uptime` → cyan `0h 0m 14s` + yellow load; `free` → amber used + lime free.
+
 > **(M1315) shell — colourise `find` output too (file-listing commands now all coloured).** `find` reuses `print_tree_colored`, so its result paths are coloured by type like `ls`/`tree` — completing a consistent, colourful treatment across all three file-listing commands. The colour is a terminal attribute, so `$(find …)` capture stays byte-clean. **Verified:** in-guest `find .` — images magenta, archives red, audio cyan, ROMs orange. *(Together with M1312 prompt + M1313 `ls` + M1314 `tree`, the shell's file UI is now fully colourised — the "more colours" pass.)*
 
 > **(M1314) shell — colourise `tree` output too (matches `ls`).** Extends M1313 to the `tree` command: `print_tree_colored` prints each line's branch/indent prefix in grey and colours the name by the same `ls_color` type map, so `tree` and `ls` are visually consistent. **Verified:** in-guest `tree` — images magenta, archives red, audio cyan, ROMs orange, like `ls`.
