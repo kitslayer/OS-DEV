@@ -23,6 +23,37 @@ static void ch(char c, int px, int py, unsigned col) { unsigned u = (unsigned ch
     const unsigned char *g = &FONT[u * 16]; for (int r = 0; r < 16; r++) for (int b = 0; b < 8; b++) if ((g[r] >> (7 - b)) & 1) putpx(px + b, py + r, col); }
 static void text(const char *s, int x, int y, unsigned col) { for (int i = 0; s[i]; i++) { ch(s[i], x, y, col); x += 8; } }
 
+/* ---- instrument-panel UI kit (M1444; see gconv.c M1430) ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_AMBER   0xFFB23Eu
+#define C_DIM     0x6E827Fu
+
+static void fillr(int x, int y, int w, int h, unsigned c) { for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) putpx(x + i, y + j, c); }
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fillr(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fillr(x, y, w, 1, hi); fillr(x, y, 1, h, hi); fillr(x, y + h - 1, w, 1, lo); fillr(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fillr(x, y, w, 1, lo); fillr(x, y, 1, h, lo); fillr(x, y + h - 1, w, 1, hi); fillr(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fillr(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fillr(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("bclock: gfx init failed\n"); return 1; }
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
@@ -42,25 +73,28 @@ int main(void) {
 
         if (ss != psec) {
             psec = ss;
-            for (int i = 0; i < W * H; i++) FB[i] = 0x0A0C12;
+            vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);               /* slate faceplate */
+            bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+            panel(8, 8, W - 16, 160);                            /* recessed LED panel */
             int dig[6] = { hh/10, hh%10, mm/10, mm%10, ss/10, ss%10 };
 
             for (int row = 0; row < 4; row++) {                  /* bit-value labels down the left (8/4/2/1) */
                 char bl[2] = { (char)('0' + (8 >> row)), 0 };
-                text(bl, 6, 44 + row * 32, 0x60687A);
+                text(bl, 16, 44 + row * 32, C_DIM);
             }
             for (int col = 0; col < 6; col++) {
                 int grp = col / 2;
                 int cx = 36 + col * 32 + grp * 10;
-                if (col % 2 == 0) text(hdr[grp], cx + 8, 18, 0x90A0C0);   /* group header over each pair */
+                if (col % 2 == 0) text(hdr[grp], cx + 8, 18, C_DIM);   /* group header over each pair */
                 for (int row = 0; row < 4; row++) {
                     int on = dig[col] & (8 >> row);
                     disc(cx + 8, 48 + row * 32, 11, on ? lit[grp] : dim[grp]);
                 }
             }
-            char t[12]; int i = 0;                               /* decimal HH:MM:SS for reference */
+            panel(8, 176, W - 16, 28);                           /* recessed decimal readout */
+            char t[12]; int i = 0;                               /* decimal HH:MM:SS, amber */
             t[i++]='0'+hh/10; t[i++]='0'+hh%10; t[i++]=':'; t[i++]='0'+mm/10; t[i++]='0'+mm%10; t[i++]=':'; t[i++]='0'+ss/10; t[i++]='0'+ss%10; t[i]=0;
-            text(t, (W - 8 * 8) / 2, H - 22, 0xC0C8D6);
+            text(t, (W - 8 * 8) / 2, 182, C_AMBER);
         }
 
         sys_gfx_blit(FB);
