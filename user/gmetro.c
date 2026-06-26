@@ -35,6 +35,29 @@ static void chS(char c, int px, int py, int s, unsigned col) { unsigned u = (uns
 static void textS(const char *t, int x, int y, int s, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, s, col); x += 8 * s; } }
 static void text(const char *t, int x, int y, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, 1, col); x += 8; } }
 
+/* ---- instrument-panel UI kit (M1446; see gconv.c M1430). Minimal touch: the metronome
+ * keeps its pendulum (its identity) but joins the family — slate gradient bg, a window
+ * bevel, and an amber BPM readout. ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_AMBER   0xFFB23Eu
+#define C_AMBERLO 0x7A521Au
+#define C_DIM     0x6E827Fu
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gmetro: gfx init failed\n"); return 1; }
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
@@ -51,7 +74,7 @@ int main(void) {
             if (beat != pbeat) { pbeat = beat; flash = 6; sys_beep(beat & 1 ? 1320 : 1760, 16); }   /* alternate pitch */
         }
 
-        for (int i = 0; i < W * H; i++) FB[i] = 0x0C0E16;
+        vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);               /* slate faceplate (M1446) */
         int phase = running ? (int)(((now - t0) % (2L * interval)) * 360 / (2 * interval)) : 0;
         int ang = SWING * isin(phase) / 1024;                /* pendulum angle from vertical */
         int bx = CX + L * isin(ang) / 1024, by = PY + L * icos(ang) / 1024;
@@ -66,12 +89,13 @@ int main(void) {
         while (v) { t[ti++] = '0' + v % 10; v /= 10; }
         while (ti) b[p++] = t[--ti];
         b[p] = 0;
-        textS(b, (W - (int)(p) * 24) / 2, H - 56, 3, running ? 0x70E090 : 0x808898);
-        text("BPM", (W - 24) / 2, H - 60, 0x808898);
-        text(running ? "space:stop   w/s tempo   q" : "space:start  w/s tempo   q", 18, H - 16, 0x707888);
+        textS(b, (W - (int)(p) * 24) / 2, H - 56, 3, running ? C_AMBER : C_AMBERLO);   /* BPM glows amber */
+        text("BPM", (W - 24) / 2, H - 60, C_DIM);
+        text(running ? "space stop   w/s tempo   q" : "space start  w/s tempo   q", 18, H - 16, C_DIM);
 
         int mx, my, mb = sys_mouse(&mx, &my);
         int clicked = (mb & 1) && !(prevb & 1) && mx >= 0; prevb = mb;
+        bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);              /* window frame */
         sys_gfx_blit(FB);
         if (flash > 0) flash--;
 
