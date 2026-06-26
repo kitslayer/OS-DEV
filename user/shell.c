@@ -3409,7 +3409,7 @@ static int run_command(char *line, char *cwd) {
                 if (ok) { int k = 0; while (wb[k] && wb[k] != '\n') k++; wb[k] = 0;
                           print("wchan: a pipe-blocked child (/proc/"); printl(ctid); print("/wchan) is parked in '"); print(wb); print("' -- OK\n"); }
             }
-            if (!ok) { print("pidwchantest: VERIFY FAILED\n"); g_status = 1; }
+            if (!ok) { sys_setcolor(2); print("pidwchantest: VERIFY FAILED\n"); sys_setcolor(0); g_status = 1; }
         } else if (streq(line, "getcwdtest")) {   /* getcwd(2) (M1248) */
             int ok = 1; char cb[160];
             sys_chdir("/tmp");
@@ -3546,7 +3546,7 @@ static int run_command(char *line, char *cwd) {
                 }
                 sys_fdclose(fds[0]); sys_fdclose(fds[1]);
             }
-            if (!ok) { print("scmtest: VERIFY FAILED\n"); g_status = 1; }
+            if (!ok) { sys_setcolor(2); print("scmtest: VERIFY FAILED\n"); sys_setcolor(0); g_status = 1; }
         } else if (streq(line, "inotifytest")) {   /* real pollable inotify fd (M1266) */
             int ok = 1;
             int fd = sys_inotify_init();
@@ -3563,7 +3563,7 @@ static int run_command(char *line, char *cwd) {
                       printl(ewd); print(", mask IN_MODIFY, name '");
                       for (int i = 16; i < 48 && eb[i]; i++) { char c[2] = {(char)eb[i], 0}; print(c); }
                       print("') -- inotify OK\n"); }
-            else { print("inotifytest: VERIFY FAILED (n="); printl(n); print(" mask="); printl(emask); print(" wd="); printl(ewd); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("inotifytest: VERIFY FAILED (n="); sys_setcolor(0); printl(n); print(" mask="); printl(emask); print(" wd="); printl(ewd); print(")\n"); g_status = 1; }
             if (fd >= 0) sys_fdclose(fd);
         } else if (streq(line, "diskstatstest")) {   /* /proc/diskstats: per-block-device I/O counters (M1256) */
             char sb[1024]; int ok = 1;
@@ -3642,7 +3642,7 @@ static int run_command(char *line, char *cwd) {
                       print("B reply (id matches, "); printl(an); print(" answer");
                       if (a0>=0){ print(", A="); printl(a0);print(".");printl(a1);print(".");printl(a2);print(".");printl(a3); }
                       print(") -- userspace UDP round-trip OK\n"); }
-            else print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n");
+            else sys_setcolor(2); print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n"); sys_setcolor(0);
             if (!ok) g_status = 1;
         } else if (streq(line, "insmodtest")) {   /* loadable kernel module lifecycle: insmod + /proc/modules + rmmod (M1261/M1262) */
             int ok = 1; char mb[256];
@@ -3657,7 +3657,7 @@ static int run_command(char *line, char *cwd) {
             int gone = 1; if (n2 > 0) { mb[n2]=0; for (int i=0;i+7<=n2;i++) if (mb[i]=='t'&&mb[i+1]=='e'&&mb[i+2]=='s'&&mb[i+3]=='t'&&mb[i+4]=='m'&&mb[i+5]=='o'&&mb[i+6]=='d'){gone=0;break;} }
             if (!gone) ok = 0;
             if (ok) print("insmod: testmod.ko loaded (ELF reloc + ksym resolution, mod_init=42), shown in /proc/modules, then rmmod ran mod_exit + removed it -- module lifecycle OK\n");
-            else { print("insmodtest: VERIFY FAILED (rv="); printl(rv); print(" listed="); printl(listed); print(" gone="); printl(gone); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("insmodtest: VERIFY FAILED (rv="); sys_setcolor(0); printl(rv); print(" listed="); printl(listed); print(" gone="); printl(gone); print(")\n"); g_status = 1; }
         } else if (streq(line, "dltest")) {   /* userspace dynamic linker: dlopen a .so from disk, dlsym + call (M1263) */
             int ok = 1;
             void *h = dlopen("DLTEST.SO");          /* read + map + relocate DLTEST.SO off the FAT disk */
@@ -3672,7 +3672,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (!(ok && ga == 42 && an == 42)) ok = 0;
             if (ok) print("dl: dlopen(DLTEST.SO) mapped+relocated the shared object, dlsym(greet)(40)=42, dlsym(answer)()=42 (incl. a JUMP_SLOT reloc) -- userspace dynamic linker OK\n");
-            else { print("dltest: VERIFY FAILED (h="); printl((long)(h!=0)); print(" greet="); printl(ga); print(" answer="); printl(an); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("dltest: VERIFY FAILED (h="); sys_setcolor(0); printl((long)(h!=0)); print(" greet="); printl(ga); print(" answer="); printl(an); print(")\n"); g_status = 1; }
         } else if (streq(line, "lotest")) {   /* loopback (lo, 127.0.0.0/8): a UDP round-trip with NO NIC (M1264) */
             unsigned char lo[4] = {127,0,0,1};
             int ok = 1;
@@ -3684,7 +3684,7 @@ static int run_command(char *line, char *cwd) {
             if (!(match && fromlo)) ok = 0;
             if (ok) { print("lo: UDP to 127.0.0.1:7777 round-tripped through the loopback iface ("); printl(n);
                       print(" B, src 127.0.0.1) with NO NIC -- loopback OK\n"); }
-            else { print("lotest: VERIFY FAILED (n="); printl(n); print(" from="); printl(from[0]); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("lotest: VERIFY FAILED (n="); sys_setcolor(0); printl(n); print(" from="); printl(from[0]); print(")\n"); g_status = 1; }
         } else if (streq(line, "inettest")) {   /* AF_INET datagram sockets over loopback (M1267) */
             int ok = 1;
             int sa = sys_socket(2, 2);                       /* AF_INET, SOCK_DGRAM */
@@ -3702,7 +3702,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("inet: socket(AF_INET,SOCK_DGRAM) + bind(:9999); sendto 127.0.0.1:9999 over lo; recvfrom got '");
                       for (int i=0;i<n;i++){char c[2]={(char)rb[i],0};print(c);} print("' from 127.0.0.1:"); printl(fromport);
                       print(" -- BSD UDP sockets OK\n"); }
-            else { print("inettest: VERIFY FAILED (snt="); printl(snt); print(" n="); printl(n); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("inettest: VERIFY FAILED (snt="); sys_setcolor(0); printl(snt); print(" n="); printl(n); print(")\n"); g_status = 1; }
             if (sa >= 0) sys_fdclose(sa); if (sb >= 0) sys_fdclose(sb);
         } else if (streq(line, "tcptest")) {   /* AF_INET TCP client socket: a real HTTP fetch (M1268) */
             int ok = 1;
@@ -3727,7 +3727,7 @@ static int run_command(char *line, char *cwd) {
                       print(":80)+send+recv "); printl(n); print("B, status: ");
                       for (int i=0;i<n && resp[i] && resp[i]!='\r' && resp[i]!='\n';i++){char c[2]={resp[i],0};print(c);}
                       print(" -- BSD TCP client OK\n"); }
-            else { print("tcptest: VERIFY FAILED (rr="); printl(rr); print(" n="); printl(n); print(") -- needs internet\n"); g_status = 1; }
+            else { sys_setcolor(2); print("tcptest: VERIFY FAILED (rr="); sys_setcolor(0); printl(rr); print(" n="); printl(n); print(") -- needs internet\n"); g_status = 1; }
             if (s >= 0) sys_fdclose(s);
         } else if (streq(line, "hardentest")) {   /* CPU hardening: UMIP makes a ring-3 SGDT fault (M1269) */
             long pid = sys_fork();
@@ -3739,7 +3739,7 @@ static int run_command(char *line, char *cwd) {
             int st = -1; sys_waitpid((int)pid, &st);
             int ok = (st != 42);   /* child #GP'd at sgdt before exit(42) -> UMIP blocked it */
             if (ok) print("harden: a ring-3 SGDT faulted (child terminated before exit42) -- UMIP active; SMEP also on (OS boots + make check 58-green under both) -- OK\n");
-            else { print("hardentest: VERIFY FAILED (child ran SGDT + exited 42 -> UMIP not blocking ring-3)\n"); g_status = 1; }
+            else { sys_setcolor(2); print("hardentest: VERIFY FAILED (child ran SGDT + exited 42 -> UMIP not blocking ring-3)\n"); sys_setcolor(0); g_status = 1; }
         } else if (streq(line, "siginfotest")) {   /* SA_SIGINFO: 3-arg handler inspects siginfo + ucontext (M1270) */
             g_si_caught = 0; g_si_signo = 0; g_si_rip = 0;
             sys_sigaction(10 /*SIGUSR1*/, si_handler, 4 /*SA_SIGINFO*/);
@@ -3749,7 +3749,7 @@ static int run_command(char *line, char *cwd) {
                       /* print g_si_rip in hex */
                       { unsigned long v=g_si_rip; char h[17]; int n=0; if(!v)h[n++]='0'; while(v){int d=v&0xf; h[n++]=d<10?('0'+d):('a'+d-10); v>>=4;} while(n){char c[2]={h[--n],0}; print(c);} }
                       print(" from the ucontext -- SA_SIGINFO + siginfo/ucontext OK\n"); }
-            else { print("siginfotest: VERIFY FAILED (caught="); printl(g_si_caught); print(" signo="); printl(g_si_signo); print(" rip="); printl((long)g_si_rip); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("siginfotest: VERIFY FAILED (caught="); sys_setcolor(0); printl(g_si_caught); print(" signo="); printl(g_si_signo); print(" rip="); printl((long)g_si_rip); print(")\n"); g_status = 1; }
         } else if (streq(line, "rtsigtest")) {   /* RT signals: sigqueue queues 3 payloads, delivered FIFO, not coalesced (M1271) */
             g_rt_n = 0; g_rt_code = 0;
             sys_sigaction(SIGRTMIN, rt_handler, SA_SIGINFO);   /* 3-arg handler so si_value is delivered */
@@ -3760,7 +3760,7 @@ static int run_command(char *line, char *cwd) {
             int ok = (g_rt_n == 3 && g_rt_code == SI_QUEUE &&
                       g_rt_vals[0] == 0xAA11 && g_rt_vals[1] == 0xBB22 && g_rt_vals[2] == 0xCC33);
             if (ok) print("rtsig: sigqueue queued 3 SIGRTMIN payloads -> handler got all 3 FIFO (si_value 0xAA11,0xBB22,0xCC33, si_code SI_QUEUE), NOT coalesced -- RT signals + sigqueue OK\n");
-            else { print("rtsigtest: VERIFY FAILED (n="); printl(g_rt_n); print(" code="); printl(g_rt_code);
+            else { sys_setcolor(2); print("rtsigtest: VERIFY FAILED (n="); sys_setcolor(0); printl(g_rt_n); print(" code="); printl(g_rt_code);
                    print(" vals="); for (int i=0;i<g_rt_n && i<3;i++){ printl((long)g_rt_vals[i]); print(" "); } print(")\n"); g_status = 1; }
         } else if (streq(line, "timertest")) {   /* POSIX timer_create + SIGEV_SIGNAL fires through the sigqueue FIFO (M1272) */
             g_tmr_n = 0; g_tmr_code = 0; g_tmr_val = 0;
@@ -3779,7 +3779,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("timer: timer_create+settime(40ms periodic) fired "); printl(n1);
                       print("x via the sigqueue FIFO (si_value=0x7E57, si_code SI_TIMER), gettime remaining="); printl(remaining);
                       print("ms, stopped after timer_delete -- POSIX timer_create + SIGEV_SIGNAL OK\n"); }
-            else { print("timertest: VERIFY FAILED (armed="); printl(armed); print(" n="); printl(n1); print(" after="); printl(g_tmr_n);
+            else { sys_setcolor(2); print("timertest: VERIFY FAILED (armed="); sys_setcolor(0); printl(armed); print(" n="); printl(n1); print(" after="); printl(g_tmr_n);
                    print(" code="); printl(g_tmr_code); print(" val="); printl((long)g_tmr_val); print(" rem="); printl(remaining); print(")\n"); g_status = 1; }
         } else if (streq(line, "hpettest")) {   /* HPET high-resolution clocksource (M1273) */
             unsigned long hz = sys_hpet(1);
@@ -3793,7 +3793,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("hpet: ACPI-discovered HPET @ "); printl((long)hz); print(" Hz; ns counter advanced ");
                       printl(dms); print("ms across a 50ms sleep, monotonic (back-to-back delta="); printl((long)(d - c));
                       print("ns) -- HPET high-res clocksource OK\n"); }
-            else { print("hpettest: VERIFY FAILED (present="); printl(present); print(" hz="); printl((long)hz);
+            else { sys_setcolor(2); print("hpettest: VERIFY FAILED (present="); sys_setcolor(0); printl(present); print(" hz="); printl((long)hz);
                    print(" dms="); printl(dms); print(" mono="); printl(d > c); print(")\n"); g_status = 1; }
         } else if (streq(line, "ptmxtest")) {   /* Unix98 /dev/ptmx + /dev/pts/N over the M1185 pty engine (M1274) */
             int mfd = sys_open("/dev/ptmx");               /* master end (intercept makes it read/write) */
@@ -3815,7 +3815,7 @@ static int run_command(char *line, char *cwd) {
                 int got_ok = 0; for (long i = 0; i + 1 < mr; i++) if (rb[i] == 'O' && rb[i + 1] == 'K') got_ok = 1;
                 if (slave_ok && got_ok) { print("ptmx: open(/dev/ptmx)=master fd, ptsname -> "); print(sp);
                     print("; master->slave line 'hi' read by slave, slave->master 'OK' read by master via the fd table -- Unix98 PTY (/dev/ptmx + /dev/pts/N) OK\n"); }
-                else { print("ptmxtest: VERIFY FAILED (sr="); printl(sr); print(" slave_ok="); printl(slave_ok); print(" mr="); printl(mr); print(" got_ok="); printl(got_ok); print(")\n"); g_status = 1; }
+                else { sys_setcolor(2); print("ptmxtest: VERIFY FAILED (sr="); sys_setcolor(0); printl(sr); print(" slave_ok="); printl(slave_ok); print(" mr="); printl(mr); print(" got_ok="); printl(got_ok); print(")\n"); g_status = 1; }
             } else { print("ptmxtest: open failed (mfd="); printl(mfd); print(" pts='"); print(sp); print("' sfd="); printl(sfd); print(")\n"); g_status = 1; }
             if (sfd >= 0) sys_fdclose(sfd);
             if (mfd >= 0) sys_fdclose(mfd);
@@ -3836,7 +3836,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("oom: forked a 1MB-RSS child (oom_adj=1000), oom_score="); printl(score);
                       print(" pages; OOM killer selected + cooperatively killed pid "); printl(victim);
                       print(", looping child reaped (system survived) -- OOM killer OK\n"); }
-            else { print("oomtest: VERIFY FAILED (pid="); printl(pid); print(" score="); printl(score);
+            else { sys_setcolor(2); print("oomtest: VERIFY FAILED (pid="); sys_setcolor(0); printl(pid); print(" score="); printl(score);
                    print(" victim="); printl(victim); print(" w="); printl(w); print(")\n"); g_status = 1; }
         } else if (streq(line, "altstacktest")) {   /* sigaltstack + SA_ONSTACK: handler runs on the alt stack (M1276) */
             static char altstk[8192];                    /* the alternate signal stack */
@@ -3849,7 +3849,7 @@ static int run_command(char *line, char *cwd) {
             sys_raise(SIGRTMIN);                         /* deliver -> handler should run ON the alt stack */
             int ok = (sset == 0 && g_alt_on == 1);
             if (ok) print("altstack: SA_ONSTACK handler for SIGRTMIN ran with its stack pointer inside the sigaltstack() region (8KB) -- sigaltstack OK\n");
-            else { print("altstacktest: VERIFY FAILED (sset="); printl(sset); print(" on_alt="); printl(g_alt_on); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("altstacktest: VERIFY FAILED (sset="); sys_setcolor(0); printl(sset); print(" on_alt="); printl(g_alt_on); print(")\n"); g_status = 1; }
         } else if (streq(line, "oomscoretest")) {   /* /proc/<pid>/oom_score reflects RSS + oom_adj (M1277) */
             char sb[64];
             long n = sys_readfile("/proc/self/oom_score", sb, sizeof sb - 1);
@@ -3862,7 +3862,7 @@ static int run_command(char *line, char *cwd) {
             sys_oom(0, 0);                               /* restore default oom_adj */
             int ok = (base > 0 && after - base >= 25000);   /* RSS-based + the +25600 adj bias landed */
             if (ok) { print("oom_score: /proc/self/oom_score="); printl(base); print(" pages (RSS-based); after oom_adj+=100 -> "); printl(after); print(" (+25600 bias) -- /proc/<pid>/oom_score OK\n"); }
-            else { print("oomscoretest: VERIFY FAILED (base="); printl(base); print(" after="); printl(after); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("oomscoretest: VERIFY FAILED (base="); sys_setcolor(0); printl(base); print(" after="); printl(after); print(")\n"); g_status = 1; }
         } else if (streq(line, "sysrqtest")) {   /* magic SysRq over /proc/sysrq-trigger (M1278) */
             long wm = sys_writefile("/proc/sysrq-trigger", "m", 1);   /* 'm' -> dump meminfo to the kernel log */
             char kb[8192]; long kn = sys_readfile("/proc/kmsg", kb, sizeof kb - 1);
@@ -3876,7 +3876,7 @@ static int run_command(char *line, char *cwd) {
             int st = -1; long w = sys_waitpid((int)pid, &st);         /* looping child returns here only if killed */
             int ok = (wm == 1 && wf == 1 && mem_ok && pid > 0 && w == pid);
             if (ok) print("sysrq: echo m > /proc/sysrq-trigger -> meminfo in the kernel log; echo f -> OOM killer reaped the fattest child (pid match) -- magic SysRq OK\n");
-            else { print("sysrqtest: VERIFY FAILED (wm="); printl(wm); print(" wf="); printl(wf); print(" mem="); printl(mem_ok); print(" w="); printl(w); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("sysrqtest: VERIFY FAILED (wm="); sys_setcolor(0); printl(wm); print(" wf="); printl(wf); print(" mem="); printl(mem_ok); print(" w="); printl(w); print(")\n"); g_status = 1; }
         } else if (streq(line, "winsztest")) {   /* pty TIOCSWINSZ/TIOCGWINSZ + SIGWINCH on resize (M1279) */
             g_winch = 0;
             sys_signal(SIGWINCH, winch_handler);
@@ -3888,7 +3888,7 @@ static int run_command(char *line, char *cwd) {
             if (m >= 0) sys_pty_close(m);
             int ok = (m >= 0 && set == 0 && rows == 40 && cols == 120 && g_winch == 1);
             if (ok) print("winsz: pty TIOCSWINSZ 40x120 -> TIOCGWINSZ read back 40x120; SIGWINCH delivered to the foreground group on resize -- pty window size OK\n");
-            else { print("winsztest: VERIFY FAILED (m="); printl(m); print(" set="); printl(set); print(" rows="); printl(rows); print(" cols="); printl(cols); print(" winch="); printl(g_winch); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("winsztest: VERIFY FAILED (m="); sys_setcolor(0); printl(m); print(" set="); printl(set); print(" rows="); printl(rows); print(" cols="); printl(cols); print(" winch="); printl(g_winch); print(")\n"); g_status = 1; }
         } else if (streq(line, "settimetest")) {   /* clock_settime(CLOCK_REALTIME) sets the wall clock (M1280) */
             struct timespec ts;
             clock_gettime(CLOCK_REALTIME, &ts); long orig = ts.tv_sec;
@@ -3900,7 +3900,7 @@ static int run_command(char *line, char *cwd) {
             int ok = (r == 0 && after >= target && after <= target + 2 && mono != 0);
             if (ok) { print("settime: clock_settime(CLOCK_REALTIME, 1700000000) -> clock_gettime read back "); printl(after);
                       print("; setting CLOCK_MONOTONIC refused; original time restored -- clock_settime OK\n"); }
-            else { print("settimetest: VERIFY FAILED (r="); printl(r); print(" after="); printl(after); print(" mono="); printl(mono); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("settimetest: VERIFY FAILED (r="); sys_setcolor(0); printl(r); print(" after="); printl(after); print(" mono="); printl(mono); print(")\n"); g_status = 1; }
         } else if (streq(line, "pidfdgetfdtest")) {   /* pidfd_getfd: grab an fd from another process (M1281) */
             sys_writefile("/tmp/PG.TXT", "0123456789ABCDEFGHIJ", 20);
             int f = sys_open("/tmp/PG.TXT");             /* parent opens the file */
@@ -3919,7 +3919,7 @@ static int run_command(char *line, char *cwd) {
             int st = -1; sys_waitpid((int)pid, &st);     /* child self-exits at ~400ms; reap it */
             int ok = (f >= 0 && pid > 0 && pfd >= 0 && newfd >= 0 && match);
             if (ok) print("pidfd_getfd: parent advanced its own fd to offset 15; pidfd_getfd(pidfd,fd) grabbed the CHILD's copy (offset 10) and read 'ABCDE' (not the parent's 'FGHIJ') -- cross-process fd duplication OK\n");
-            else { print("pidfdgetfdtest: VERIFY FAILED (f="); printl(f); print(" pid="); printl(pid); print(" pfd="); printl(pfd); print(" newfd="); printl(newfd); print(" n="); printl(n); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("pidfdgetfdtest: VERIFY FAILED (f="); sys_setcolor(0); printl(f); print(" pid="); printl(pid); print(" pfd="); printl(pfd); print(" newfd="); printl(newfd); print(" n="); printl(n); print(")\n"); g_status = 1; }
         } else if (streq(line, "oomadjtest")) {   /* /proc/<pid>/oom_score_adj read+write (M1282) */
             char b[40]; long n;
             n = sys_readfile("/proc/self/oom_score_adj", b, sizeof b - 1);
@@ -3934,7 +3934,7 @@ static int run_command(char *line, char *cwd) {
             int ok = (adj0 == 0 && w == 3 && adj1 == 500 && score >= 128000);
             if (ok) { print("oom_score_adj: /proc/self/oom_score_adj 0 -> wrote 500 via /proc -> read back 500; oom_score rose to "); printl(score);
                       print(" (+128000 bias); restored -- /proc/<pid>/oom_score_adj rw OK\n"); }
-            else { print("oomadjtest: VERIFY FAILED (adj0="); printl(adj0); print(" w="); printl(w); print(" adj1="); printl(adj1); print(" score="); printl(score); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("oomadjtest: VERIFY FAILED (adj0="); sys_setcolor(0); printl(adj0); print(" w="); printl(w); print(" adj1="); printl(adj1); print(" score="); printl(score); print(")\n"); g_status = 1; }
         } else if (streq(line, "mlockalltest")) {   /* mlockall(MCL_CURRENT|MCL_FUTURE) + munlockall (M1283) */
             unsigned long np = 8, len = np * 4096;
             unsigned char *A = (unsigned char *)sys_mmap(len);             /* a CURRENT region */
@@ -3956,7 +3956,7 @@ static int run_command(char *line, char *cwd) {
                     long ra2 = 0, rb2 = 0; for (unsigned long i = 0; i < np; i++) { ra2 += va[i]; rb2 += vb[i]; }
                     int ok = (ra == (long)np && rb == (long)np && ra2 == 0 && rb2 == 0);
                     if (ok) print("mlockall: MCL_CURRENT pinned A + MCL_FUTURE pinned the later B (both survived reclaim); munlockall released both (both dropped) -- mlockall/munlockall OK\n");
-                    else { print("mlockalltest: VERIFY FAILED (lockedA="); printl(ra); print("/"); printl((long)np); print(" lockedB="); printl(rb); print(" unlockA="); printl(ra2); print(" unlockB="); printl(rb2); print(")\n"); g_status = 1; }
+                    else { sys_setcolor(2); print("mlockalltest: VERIFY FAILED (lockedA="); sys_setcolor(0); printl(ra); print("/"); printl((long)np); print(" lockedB="); printl(rb); print(" unlockA="); printl(ra2); print(" unlockB="); printl(rb2); print(")\n"); g_status = 1; }
                     sys_munmap(B, len);
                 }
                 sys_munmap(A, len);
@@ -3967,7 +3967,7 @@ static int run_command(char *line, char *cwd) {
             if (ok) { print("aml: parsed QEMU's DSDT AML namespace -> "); printl(total); print(" objects, "); printl(dev);
                       print(" devices, "); printl(mth); print(" methods; found well-known "); print(pci0 ? "PCI0" : "_SB_");
                       print(" -- ACPI AML namespace parser OK\n"); }
-            else { print("amltest: VERIFY FAILED (total="); printl(total); print(" dev="); printl(dev); print(" mth="); printl(mth); print(" pci0="); printl(pci0); print(" sb="); printl(sb); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("amltest: VERIFY FAILED (total="); sys_setcolor(0); printl(total); print(" dev="); printl(dev); print(" mth="); printl(mth); print(" pci0="); printl(pci0); print(" sb="); printl(sb); print(")\n"); g_status = 1; }
         } else if (streq(line, "acpifstest")) {   /* /proc/acpi: browsable AML namespace (M1285) */
             static char b[4096];
             long n = sys_readfile("/proc/acpi", b, sizeof b - 1);
@@ -3981,14 +3981,14 @@ static int run_command(char *line, char *cwd) {
             }
             int ok = (n > 0 && has_hdr && has_dev && has_pci0);
             if (ok) { print("acpifs: cat /proc/acpi -> "); printl(n); print(" bytes listing the DSDT namespace incl. a Device named PCI0 -- /proc/acpi OK\n"); }
-            else { print("acpifstest: VERIFY FAILED (n="); printl(n); print(" hdr="); printl(has_hdr); print(" dev="); printl(has_dev); print(" pci0="); printl(has_pci0); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("acpifstest: VERIFY FAILED (n="); sys_setcolor(0); printl(n); print(" hdr="); printl(has_hdr); print(" dev="); printl(has_dev); print(" pci0="); printl(has_pci0); print(")\n"); g_status = 1; }
         } else if (streq(line, "amlevaltest")) {   /* AML EVALUATION: eval \\_S5_ + cross-check vs acpi.c's byte-scan (M1286) */
             long ev = sys_acpi(5), scan = sys_acpi(6);   /* ev = AML-evaluated _S5 package; scan = independent table byte-scan */
             int ok = (ev >= 0 && scan >= 0 && ev == scan);
             if (ok) { print("amleval: AML-evaluated the \\_S5_ package through the namespace -> SLP_TYP 0x");
                       { unsigned long v = (unsigned long)ev; char h[9]; int k = 0; if (!v) h[k++] = '0'; while (v) { int d = v & 0xf; h[k++] = d < 10 ? ('0' + d) : ('a' + d - 10); v >>= 4; } while (k) { char c[2] = { h[--k], 0 }; print(c); } }
                       print("; matches acpi.c's independent table byte-scan -- AML evaluation OK\n"); }
-            else { print("amlevaltest: VERIFY FAILED (eval="); printl(ev); print(" scan="); printl(scan); print(")\n"); g_status = 1; }
+            else { sys_setcolor(2); print("amlevaltest: VERIFY FAILED (eval="); sys_setcolor(0); printl(ev); print(" scan="); printl(scan); print(")\n"); g_status = 1; }
         } else if (streq(line, "aslrtest")) {   /* ASLR: independently-exec'd processes get different mmap bases (M1287) */
             unsigned long self = sys_aslr(0);             /* the shell's randomized mmap base */
             long pid2 = sys_spawn("shell");               /* a 2nd, independently app_spawn'd process -> a fresh CSPRNG base */
@@ -4003,7 +4003,7 @@ static int run_command(char *line, char *cwd) {
                 print(" and 0x");
                 { unsigned long v=base2; char h[17]; int k=0; if(!v)h[k++]='0'; while(v){int d=v&0xf; h[k++]=d<10?('0'+d):('a'+d-10); v>>=4;} while(k){char c[2]={h[--k],0}; print(c);} }
                 print(" -- different per exec, both CSPRNG-randomized in the window -- ASLR OK\n");
-            } else { print("aslrtest: VERIFY FAILED (self=0x"); printl((long)self); print(" base2=0x"); printl((long)base2); print(" inrange="); printl(in_range); print(" pid2="); printl(pid2); print(")\n"); g_status = 1; }
+            } else { sys_setcolor(2); print("aslrtest: VERIFY FAILED (self=0x"); sys_setcolor(0); printl((long)self); print(" base2=0x"); printl((long)base2); print(" inrange="); printl(in_range); print(" pid2="); printl(pid2); print(")\n"); g_status = 1; }
         } else if (streq(line, "rawtest")) {   /* raw packet sockets: send a raw L2 frame + sniff inbound (M1259) */
             int ok = 1;
             /* (1) raw TX: a broadcast ARP-request-shaped frame (proves ring 3 can ship a whole L2 frame). */
