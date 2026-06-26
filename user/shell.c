@@ -2059,7 +2059,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "mmaptest")) {  /* demonstrate demand-paged mmap (kernel maps pages lazily on fault) */
             unsigned long len = 64 * 1024;     /* 16 pages, none mapped up front */
             unsigned char *m = (unsigned char *)sys_mmap(len);
-            if (!m) { print("mmaptest: mmap failed\n"); g_status = 1; }
+            if (!m) { perr("mmaptest: mmap failed\n"); g_status = 1; }
             else {
                 for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)(i * 7 + 1);  /* first touch of each page demand-faults */
                 int ok = 1;
@@ -2072,7 +2072,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "madvisetest")) {  /* demonstrate madvise(MADV_DONTNEED): reclaim resident pages now */
             unsigned long len = 256 * 1024;       /* 64 pages */
             unsigned char *m = (unsigned char *)sys_mmap(len);
-            if (!m) { print("madvisetest: mmap failed\n"); g_status = 1; }
+            if (!m) { perr("madvisetest: mmap failed\n"); g_status = 1; }
             else {
                 for (unsigned long i = 0; i < len; i++) m[i] = 0xAB;   /* fault in + dirty every page */
                 print("touched "); printl((long)(len / 4096)); print(" pages (each byte = 0xAB)\n");
@@ -2089,7 +2089,7 @@ static int run_command(char *line, char *cwd) {
             unsigned long np = 32, len = np * 4096;
             unsigned char *m = (unsigned char *)sys_mmap(len);
             unsigned char vec[32];
-            if (!m) { print("pageouttest: mmap failed\n"); g_status = 1; }
+            if (!m) { perr("pageouttest: mmap failed\n"); g_status = 1; }
             else {
                 for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)(i * 29 + 3);  /* fault in + fill */
                 sys_mincore(m, len, vec);
@@ -2112,8 +2112,8 @@ static int run_command(char *line, char *cwd) {
             unsigned long np = 16, len = np * 4096;
             unsigned char *m = (unsigned char *)sys_mmap(len);
             unsigned char vec[16];
-            if (!m) { print("mincoretest: mmap failed\n"); g_status = 1; }
-            else if (sys_mincore(m, len, vec) < 0) { print("mincoretest: mincore failed\n"); g_status = 1; sys_munmap(m, len); }
+            if (!m) { perr("mincoretest: mmap failed\n"); g_status = 1; }
+            else if (sys_mincore(m, len, vec) < 0) { perr("mincoretest: mincore failed\n"); g_status = 1; sys_munmap(m, len); }
             else {
                 long r0 = 0; for (unsigned long i = 0; i < np; i++) r0 += vec[i];   /* fresh mmap: nothing faulted yet */
                 print("fresh mmap of "); printl((long)np); print(" pages, resident now: "); printl(r0); print(" (lazy => 0)\n");
@@ -2138,7 +2138,7 @@ static int run_command(char *line, char *cwd) {
             unsigned char *lk = (unsigned char *)sys_mmap(len);   /* this region gets mlock'd */
             unsigned char *un = (unsigned char *)sys_mmap(len);   /* this one stays unlocked */
             unsigned char v1[8], v2[8];
-            if (!lk || !un) { print("mlocktest: mmap failed\n"); g_status = 1; }
+            if (!lk || !un) { perr("mlocktest: mmap failed\n"); g_status = 1; }
             else {
                 sys_mlock(lk, len);                                          /* pin the first region */
                 for (unsigned long i = 0; i < len; i++) { lk[i] = 1; un[i] = 1; }  /* fault both fully in */
@@ -2184,7 +2184,7 @@ static int run_command(char *line, char *cwd) {
             if (m) sys_munmap(m, len);
         } else if (streq(line, "mqtest")) {   /* POSIX priority message queue: highest-priority-first delivery (M1154) */
             int q = (int)sys_mq_open("/demo", 8, 64);
-            if (q < 0) { print("mqtest: mq_open failed\n"); g_status = 1; }
+            if (q < 0) { perr("mqtest: mq_open failed\n"); g_status = 1; }
             else {
                 sys_mq_send(q, "low", 3, 1);            /* enqueue out of priority order... */
                 sys_mq_send(q, "high", 4, 9);
@@ -2206,7 +2206,7 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (streq(line, "semtest")) {   /* SysV semaphores: count + IPC_NOWAIT + atomic all-or-nothing (M1159) */
             int id = (int)sys_semget(IPC_PRIVATE, 2, IPC_CREAT);
-            if (id < 0) { print("semtest: semget failed\n"); g_status = 1; }
+            if (id < 0) { perr("semtest: semget failed\n"); g_status = 1; }
             else {
                 sys_semctl(id, 0, SETVAL, 3);                  /* sem0 = 3 */
                 sys_semctl(id, 1, SETVAL, 0);                  /* sem1 = 0 */
@@ -2231,7 +2231,7 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (streq(line, "msgtest")) {   /* SysV message queue: mtype-selective receive (M1160) */
             int id = (int)sys_msgget(42, IPC_CREAT);       /* fixed key -> reusable across runs (empty after) */
-            if (id < 0) { print("msgtest: msgget failed\n"); g_status = 1; }
+            if (id < 0) { perr("msgtest: msgget failed\n"); g_status = 1; }
             else {
                 struct { long mtype; char data[8]; } m;
                 m.mtype = 3; m.data[0] = '3'; sys_msgsnd(id, &m, 1, 0);   /* send in order: type 3, 1, 2 */
@@ -2252,11 +2252,11 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (streq(line, "shmsysvtest")) {   /* SysV shared memory: two attaches share one backing (M1161) */
             int id = (int)sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
-            if (id < 0) { print("shmsysvtest: shmget failed\n"); g_status = 1; }
+            if (id < 0) { perr("shmsysvtest: shmget failed\n"); g_status = 1; }
             else {
                 char *a = (char *)sys_shmat(id);
                 char *b = (char *)sys_shmat(id);           /* second attach of the SAME segment */
-                if (!a || !b) { print("shmsysvtest: shmat failed\n"); g_status = 1; }
+                if (!a || !b) { perr("shmsysvtest: shmat failed\n"); g_status = 1; }
                 else {
                     for (int i = 0; i < 64; i++) a[i] = (char)(i + 1);   /* write through attach A */
                     int shared = 1;
@@ -2285,7 +2285,7 @@ static int run_command(char *line, char *cwd) {
                 print(st == 0 ? "process_vm_read: child read the parent's memory cross-AS OK\n"
                               : "process_vm_read: VERIFY FAILED\n");
                 if (st != 0) g_status = 1;
-            } else { print("pvmtest: fork failed\n"); g_status = 1; }
+            } else { perr("pvmtest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "pvwtest")) {   /* process_vm_write: poke another process's memory cross-AS (M1165) */
             static char wbuf[64];
             for (int i = 0; i < 64; i++) wbuf[i] = (char)(i + 1);    /* pattern1 (parent fills before forking) */
@@ -2308,7 +2308,7 @@ static int run_command(char *line, char *cwd) {
                 print(iso ? "  parent's own copy untouched -> COW isolation correct\n" : "  BROKEN: parent's copy was clobbered!\n");
                 if (!ok || !iso) g_status = 1;
                 sys_semctl(sid, 0, IPC_RMID, 0);
-            } else { print("pvwtest: fork failed\n"); g_status = 1; }
+            } else { perr("pvwtest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "wchantest")) {   /* /proc/sched WCHAN: name the kernel routine a blocked task sleeps in (M1166) */
             int sid = (int)sys_semget(IPC_PRIVATE, 1, IPC_CREAT);
             struct sembuf op;
@@ -2333,11 +2333,11 @@ static int run_command(char *line, char *cwd) {
                 print(found ? "WCHAN: blocked child shown parked in sysv_semop OK\n" : "wchantest: VERIFY FAILED\n");
                 if (!found) g_status = 1;
                 sys_semctl(sid, 0, IPC_RMID, 0);
-            } else { print("wchantest: fork failed\n"); g_status = 1; }
+            } else { perr("wchantest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "pagemaptest")) {   /* /proc/<pid>/pagemap: per-page residency + PFN, proves demand paging (M1167) */
             const int K = 8;
             void *region = sys_mmap((unsigned long)K * 4096);
-            if (!region) { print("pagemaptest: mmap failed\n"); g_status = 1; }
+            if (!region) { perr("pagemaptest: mmap failed\n"); g_status = 1; }
             else {
                 long n1; char *b1 = slurp("/proc/self/pagemap", &n1);   /* fresh region: its pages are all absent */
                 int c1 = 0;
@@ -2362,7 +2362,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "thptest")) {   /* MADV_COLLAPSE: fold 512 4KiB pages into one 2MiB hugepage (M1168) */
             unsigned long SZ = 2UL * 1024 * 1024;          /* 2 MiB = 512 x 4 KiB */
             void *region = sys_mmap(SZ);                    /* 2 MiB-aligned (M1168), demand-paged 4 KiB pages */
-            if (!region) { print("thptest: mmap failed\n"); g_status = 1; }
+            if (!region) { perr("thptest: mmap failed\n"); g_status = 1; }
             else {
                 volatile unsigned char *vp = (volatile unsigned char *)region;
                 for (int pg = 0; pg < 512; pg++) vp[pg * 4096] = (unsigned char)(pg * 7 + 1);   /* fault in + tag each page */
@@ -2384,7 +2384,7 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (streq(line, "unixtest")) {   /* AF_UNIX path-keyed stream sockets: cross-fork byte round-trip (M1169) */
             int lid = sys_unix_listen("/run/ut");           /* bind BEFORE forking so the child can connect */
-            if (lid < 0) { print("unixtest: listen failed\n"); g_status = 1; }
+            if (lid < 0) { perr("unixtest: listen failed\n"); g_status = 1; }
             else {
                 long pid = sys_fork();
                 if (pid == 0) {                              /* child = client */
@@ -2407,11 +2407,11 @@ static int run_command(char *line, char *cwd) {
                     int ok = (got && st == 0);
                     print(ok ? "AF_UNIX: client<->server round-trip over /run/ut OK (ping->pong cross-fork)\n" : "unixtest: VERIFY FAILED\n");
                     if (!ok) g_status = 1;
-                } else { print("unixtest: fork failed\n"); g_status = 1; }
+                } else { perr("unixtest: fork failed\n"); g_status = 1; }
             }
         } else if (streq(line, "unixpolltest")) {   /* unix_wait_any: poll/epoll-style readiness over 2 sockets (M1170) */
             int lid = sys_unix_listen("/run/up");
-            if (lid < 0) { print("unixpolltest: listen failed\n"); g_status = 1; }
+            if (lid < 0) { perr("unixpolltest: listen failed\n"); g_status = 1; }
             else {
                 long pid = sys_fork();
                 if (pid == 0) {                          /* child: two connections, traffic on the 2nd only */
@@ -2437,11 +2437,11 @@ static int run_command(char *line, char *cwd) {
                     int ok = (idx == 1 && n == 1 && b == 'x' && st == 0);
                     print(ok ? "AF_UNIX poll: wait_any selected the one ready socket of 2 (cross-fork) OK\n" : "unixpolltest: VERIFY FAILED\n");
                     if (!ok) g_status = 1;
-                } else { print("unixpolltest: fork failed\n"); g_status = 1; }
+                } else { perr("unixpolltest: fork failed\n"); g_status = 1; }
             }
         } else if (streq(line, "nicetest")) {   /* CFS weighted fair scheduling: nice 0 vs nice 10 CPU share (M1171) */
             long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);   /* shared counters, read by the parent after the run */
-            if (shmid < 0) { print("nicetest: shmget failed\n"); g_status = 1; }
+            if (shmid < 0) { perr("nicetest: shmget failed\n"); g_status = 1; }
             else {
                 long a = sys_fork();
                 if (a == 0) {                            /* child A: nice 0 (high weight -> more CPU) */
@@ -2507,7 +2507,7 @@ static int run_command(char *line, char *cwd) {
                     int ok = (ordHi == 1 && ordLo == 2);     /* the higher-priority RT task ran to completion first */
                     print(ok ? "RT sched: higher-priority FIFO ran before lower (real-time priority) OK\n" : "schedtest: VERIFY FAILED\n");
                     if (!ok) g_status = 1;
-                } else { print("schedtest: fork failed\n"); g_status = 1; }
+                } else { perr("schedtest: fork failed\n"); g_status = 1; }
                 sys_shmdt((void *)sh);
                 sys_semctl(sid, 0, IPC_RMID, 0);
             }
@@ -2553,7 +2553,7 @@ static int run_command(char *line, char *cwd) {
                 int ok = (n == 2 && sa == 42 && sb == 42);
                 print(ok ? "job control: kill(-pgid) delivered SIGINT to the whole group OK\n" : "jobtest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
-            } else { print("jobtest: fork failed\n"); g_status = 1; }
+            } else { perr("jobtest: fork failed\n"); g_status = 1; }
         } else if (streq(line, "flocktest")) {   /* advisory whole-file locks: conflict then free on unlock (M1177) */
             const char *path = "/tmp/lck";
             int r1 = sys_flock(path, LOCK_EX);                  /* parent takes an exclusive lock */
@@ -2574,7 +2574,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "stoptest")) {   /* SIGTSTP/SIGCONT job suspend/resume (M1178) */
             long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
             volatile unsigned long *sh = shmid >= 0 ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
-            if (!sh) { print("stoptest: shm failed\n"); g_status = 1; }
+            if (!sh) { perr("stoptest: shm failed\n"); g_status = 1; }
             else {
                 sh[0] = 0; sh[1] = 0;                /* [0]=counter, [1]=exit-flag (init before fork) */
                 long c = sys_fork();
@@ -2602,7 +2602,7 @@ static int run_command(char *line, char *cwd) {
                     print(ok ? "job control: SIGTSTP froze the process, SIGCONT resumed it OK\n" : "stoptest: VERIFY FAILED\n");
                     if (!ok) g_status = 1;
                     if (ps) sys_shmdt((void *)ps);
-                } else { print("stoptest: fork failed\n"); g_status = 1; }
+                } else { perr("stoptest: fork failed\n"); g_status = 1; }
                 sys_shmdt((void *)sh);
             }
         } else if (streq(line, "mremaptest")) {   /* mremap: grow-in-place + MREMAP_MAYMOVE relocation (M1179) */
@@ -2678,7 +2678,7 @@ static int run_command(char *line, char *cwd) {
             } else print("usage: xattr get|set|rm|list PATH [user.NAME [VALUE]]\n");
         } else if (streq(line, "ptytest")) {   /* pseudoterminal line discipline (M1185) */
             int m = sys_pty_open();
-            if (m < 0) { print("ptytest: pty_open failed\n"); g_status = 1; }
+            if (m < 0) { perr("ptytest: pty_open failed\n"); g_status = 1; }
             else {
                 int s = m | 1; char b[80]; long n; int ok = 1;
                 sys_pty_ctl(m, PTY_SETFG, 99999);   /* INTR -> a bogus pgid: exercise the path, signal nobody */
@@ -2818,7 +2818,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "memfdtest")) {  /* memfd_create + F_SEAL file seals (M1212) */
             int ok = 1;
             int fd = sys_memfd_create("scratch", MFD_ALLOW_SEALING);
-            if (fd < 3) { print("memfdtest: memfd_create failed\n"); g_status = 1; }
+            if (fd < 3) { perr("memfdtest: memfd_create failed\n"); g_status = 1; }
             else {
                 /* write, rewind, read back */
                 if (sys_fdwrite(fd, "hello world", 11) != 11) ok = 0;
@@ -2888,7 +2888,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "timerfdtest")) {  /* timerfd: a pollable one-shot timer fd, composed with poll (M1217) */
             int ok = 1;
             int tfd = sys_timerfd_create();
-            if (tfd < 3) { print("timerfdtest: create failed\n"); g_status = 1; }
+            if (tfd < 3) { perr("timerfdtest: create failed\n"); g_status = 1; }
             else {
                 sys_timerfd_settime(tfd, 80, 0);             /* one-shot: fire in 80 ms */
                 /* (A) immediately, before expiry: poll timeout 0 -> not ready */
@@ -2946,7 +2946,7 @@ static int run_command(char *line, char *cwd) {
             int ok = 1;
             sys_writefile("/tmp/SF.TXT", "hello sendfile world", 20);
             int in = sys_open("/tmp/SF.TXT"); int fds[2];
-            if (in < 3 || sys_pipe(fds) != 0) { print("sendfiletest: setup failed\n"); g_status = 1; }
+            if (in < 3 || sys_pipe(fds) != 0) { perr("sendfiletest: setup failed\n"); g_status = 1; }
             else {
                 /* sequential (cursor) sendfile: whole file -> pipe */
                 if (sys_sendfile(fds[1], in, 0, 100) != 20) ok = 0;     /* NULL off -> cursor; 20 bytes then EOF */
@@ -2970,7 +2970,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "epolltest")) {  /* epoll: scalable readiness multiplexing (M1220) */
             int ok = 1, fds[2];
             int ep = sys_epoll_create1(0);
-            if (ep < 3 || sys_pipe(fds) != 0) { print("epolltest: setup failed\n"); g_status = 1; }
+            if (ep < 3 || sys_pipe(fds) != 0) { perr("epolltest: setup failed\n"); g_status = 1; }
             else {
                 struct epoll_event ev = { POLLIN, 0xABCD };
                 if (sys_epoll_ctl(ep, EPOLL_CTL_ADD, fds[0], &ev) != 0) ok = 0;
@@ -2993,7 +2993,7 @@ static int run_command(char *line, char *cwd) {
             int ok = 1, rp[2];
             sys_writefile("/tmp/LK.TXT", "0123456789abcdefghij", 20);
             int fd = sys_open("/tmp/LK.TXT");
-            if (fd < 3 || sys_pipe(rp) != 0) { print("locktest: setup failed\n"); g_status = 1; }
+            if (fd < 3 || sys_pipe(rp) != 0) { perr("locktest: setup failed\n"); g_status = 1; }
             else {
                 struct flock l = { F_WRLCK, 0, 0, 10, 0 };           /* parent write-locks [0,10) */
                 if (sys_fcntl(fd, F_SETLK, (long)&l) != 0) ok = 0;
@@ -3047,7 +3047,7 @@ static int run_command(char *line, char *cwd) {
             sys_mkdir("/GDT");                                /* a fresh, small test dir */
             sys_mkdir("/GDT/SUB");                            /* -> DT_DIR */
             sys_writefile("/GDT/F.TXT", "x", 1);             /* -> DT_REG */
-            if (sys_chdir("/GDT") < 0) { print("getdentstest: chdir failed\n"); g_status = 1; }
+            if (sys_chdir("/GDT") < 0) { perr("getdentstest: chdir failed\n"); g_status = 1; }
             else {
                 char buf[2048];
                 long n = sys_getdents64(buf, sizeof buf, 0);   /* lists the cwd (/GDT) */
@@ -3819,7 +3819,7 @@ static int run_command(char *line, char *cwd) {
                 if (slave_ok && got_ok) { print("ptmx: open(/dev/ptmx)=master fd, ptsname -> "); print(sp);
                     print("; master->slave line 'hi' read by slave, slave->master 'OK' read by master via the fd table -- Unix98 PTY (/dev/ptmx + /dev/pts/N) OK\n"); }
                 else { sys_setcolor(2); print("ptmxtest: VERIFY FAILED (sr="); sys_setcolor(0); printl(sr); print(" slave_ok="); printl(slave_ok); print(" mr="); printl(mr); print(" got_ok="); printl(got_ok); print(")\n"); g_status = 1; }
-            } else { print("ptmxtest: open failed (mfd="); printl(mfd); print(" pts='"); print(sp); print("' sfd="); printl(sfd); print(")\n"); g_status = 1; }
+            } else { perr("ptmxtest: open failed (mfd="); printl(mfd); print(" pts='"); print(sp); print("' sfd="); printl(sfd); print(")\n"); g_status = 1; }
             if (sfd >= 0) sys_fdclose(sfd);
             if (mfd >= 0) sys_fdclose(mfd);
         } else if (streq(line, "oomtest")) {   /* OOM killer: scoring + cooperative victim kill (M1275) */
@@ -4038,7 +4038,7 @@ static int run_command(char *line, char *cwd) {
             else { sys_setcolor(2); print("rawtest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "fifotest")) {   /* named pipe (mkfifo) rendezvous by pathname (M1188) */
-            if (sys_mkfifo("fifotest.pipe") != 0) { print("fifotest: mkfifo failed\n"); g_status = 1; }
+            if (sys_mkfifo("fifotest.pipe") != 0) { perr("fifotest: mkfifo failed\n"); g_status = 1; }
             else {
                 long pid = sys_fork();
                 if (pid == 0) {                          /* child: open the FIFO BY NAME for writing */
@@ -4275,7 +4275,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
             unsigned char *m = (unsigned char *)sys_mmap_huge(len);
-            if (!m) { print("hugetest: mmap_huge failed (need 2 MiB contiguous RAM)\n"); g_status = 1; }
+            if (!m) { perr("hugetest: mmap_huge failed (need 2 MiB contiguous RAM)\n"); g_status = 1; }
             else {
                 struct rusage ra, rb;
                 sys_getrusage(RUSAGE_SELF, &ra);
@@ -4295,11 +4295,11 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "swaptest")) {  /* zram: compress pages into RAM, fault back in intact (M1156) */
             unsigned long len = 256 * 1024;       /* 64 pages */
             unsigned char *m = (unsigned char *)sys_mmap(len);
-            if (!m) { print("swaptest: mmap failed\n"); g_status = 1; }
+            if (!m) { perr("swaptest: mmap failed\n"); g_status = 1; }
             else {
                 for (unsigned long i = 0; i < len; i++) m[i] = (unsigned char)((i / 64) & 0x0F);   /* compressible: long byte-runs */
                 long out = sys_swapout(m, len);
-                if (out < 0) { print("swaptest: swapout failed\n"); g_status = 1; }
+                if (out < 0) { perr("swaptest: swapout failed\n"); g_status = 1; }
                 else {
                     print("paged out "); printl(out); print(" pages to zram (compressed RAM)\n");
                     long n; char *b = slurp("/proc/swaps", &n);   /* read stats AT PEAK (before fault-in releases slots) */
@@ -4315,7 +4315,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "shmtest")) {  /* demonstrate named shared memory: two mappings, one backing */
             char *a = (char *)sys_shm_open("demo", 4096);
             char *b = (char *)sys_shm_open("demo", 4096);   /* second mapping of the same named object */
-            if (!a || !b) { print("shmtest: shm_open failed\n"); g_status = 1; }
+            if (!a || !b) { perr("shmtest: shm_open failed\n"); g_status = 1; }
             else if (a == b) { print("shmtest: expected two distinct mappings\n"); g_status = 1; }
             else {
                 a[0] = 'S'; a[1] = 'H'; a[2] = 'M'; a[3] = '!'; a[4] = 0;   /* write through mapping A */
@@ -4373,7 +4373,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "ringtest")) {  /* demonstrate a magic mirrored ring buffer (one frame, two VAs) */
             unsigned long n = 4096;
             char *r = (char *)sys_ringbuf(n);
-            if (!r) { print("ringtest: ringbuf failed\n"); g_status = 1; }
+            if (!r) { perr("ringtest: ringbuf failed\n"); g_status = 1; }
             else {
                 /* write "MAGIC" straddling the end: 'MAG' at [n-3,n), 'IC' lands at [n,n+2) -> the mirror of [0,2) */
                 r[n-3]='M'; r[n-2]='A'; r[n-1]='G'; r[n]='I'; r[n+1]='C';
@@ -4388,7 +4388,7 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (streq(line, "jittest")) {   /* W^X/JIT: write machine code into a page, mprotect r-x, run it */
             unsigned char *code = (unsigned char *)sys_mmap(4096);
-            if (!code) { print("jittest: mmap failed\n"); g_status = 1; }
+            if (!code) { perr("jittest: mmap failed\n"); g_status = 1; }
             else {
                 static const unsigned char prog[] = { 0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3 };  /* mov eax,42 ; ret */
                 for (int i = 0; i < (int)sizeof prog; i++) code[i] = prog[i];
