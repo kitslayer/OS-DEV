@@ -1134,7 +1134,7 @@ static void spawn_browser(const char *url) {
     if (win_count >= MAX_WINDOWS) return;
     spawn_n++;
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
-    windows[win_count++] = (window_t){ x, y, 620, 460, 0xFFFFFF, "Browser",
+    windows[win_count++] = (window_t){ x, y, 960, 700, 0xFFFFFF, "Browser",   /* roomy by default (M1433) */
                                        KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0, 0,{0},0, 0 };
 }
 
