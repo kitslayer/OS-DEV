@@ -85,11 +85,14 @@ int main(void) {
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
     if (!FB) { print("aclock: out of memory\n"); return 1; }
 
+    int psec = -1;
     for (;;) {
         char tb[40]; sys_time(tb, sizeof tb);                    /* "YYYY-MM-DD HH:MM:SS" */
         int hh = (tb[11] - '0') * 10 + (tb[12] - '0');
         int mm = (tb[14] - '0') * 10 + (tb[15] - '0');
         int ss = (tb[17] - '0') * 10 + (tb[18] - '0');
+        if (ss == psec) { int k = sys_pollkey(); if (k == 'q' || k == 27) break; sys_sleep(120); continue; }
+        psec = ss;                                           /* redraw only when the displayed time changes (M1367) */
 
         /* face: dark background, a filled disc, a near-white rim — one pass */
         for (int y = 0; y < H; y++) {

@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1367) aclock — redraw only when the time changes (~5× less CPU).** The clock polled and redrew the full face every 200 ms, but its display only changes once a second — so 4 of every 5 redraws (each forcing a full-screen compositor recomposite) were wasted work. Now it skips the render/blit while the second is unchanged (still polling at 120 ms so `q`/Esc stays responsive), cutting its compositor load ~5×. The WM caches the last canvas, so occlusion/reveal is unaffected. **Verified:** in-guest — `06:16:42` matches the taskbar with correct hands; still ticks every second.
+
 > **(M1366) menu clarity — rename the overview panel "Monitor" → "System Info".** The new sysgraph app is "System Monitor" (live CPU/RAM graphs), but the pre-existing kernel-drawn Memory/Tasks/Uptime/Network panel (`KIND_SYSMON`) was *also* called "Monitor" — confusing side-by-side in the Apps menu. Renamed it "System Info" (accurate for an overview snapshot), giving a clean trio: **System Info** (overview) · **System Monitor** (live graphs) · **Task Manager** (processes). Found via an end-to-end Apps-menu (F9) verification of this session's four new apps. **Verified:** `make check` green.
 
 > **(M1365) Welcome screen — surface the new graphical apps.** The boot Welcome window's "try" list now points to the session's new gfx apps — `- Clock, Monitor, Tasks, 60+ more` — for discoverability (aclock/sysgraph/taskman). **Verified:** in-guest — renders in the Welcome panel with no overflow; `make check` green.
