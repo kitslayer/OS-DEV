@@ -285,7 +285,7 @@ static void win_min(const window_t *w, int *mw, int *mh) {
     } else if (w->kind == KIND_BROWSER) { *mw = 340; *mh = 240; }
     else if (w->kind == KIND_SYSMON)  { *mw = 320; *mh = 272; }  /* a fixed-layout info panel (= its open size): can't be shrunk below its Memory/Network/Disk content, which would otherwise draw past the bottom edge */
     else if (w->kind == KIND_WELCOME) { *mw = 360; *mh = 290; }  /* likewise a fixed-layout panel pinned to its open size */
-    else if (w->kind == KIND_ABOUT)   { *mw = 300; *mh = 178; }  /* likewise */
+    else if (w->kind == KIND_ABOUT)   { *mw = 300; *mh = 196; }  /* likewise */
     else { *mw = 170; *mh = 110; }
 }
 
@@ -490,7 +490,8 @@ static void draw_content(const window_t *w, int focused) {
             "kernel . memory . tasks",
             "FAT32 . TCP . TLS 1.3",
             "JS engine . web browser",
-            "scriptable shell . editor" };
+            "scriptable shell . editor",
+            "calc . image viewer . games" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++)
             draw_text(bx, by + i*16, L[i], (i == 0 || i >= 4) ? 0x1F56C6 : 0x202028);   /* heading + tech-stack lines in accent blue (M1334) */
         fb_fill_rect(bx, by + 14, w->w - 24, 1, 0xC9CCD6);                  /* rule under the heading */
@@ -1265,7 +1266,7 @@ static void spawn_app(int kind, const char *prog) {
     switch (kind) {
     case KIND_FILES:   w.w=500; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
     case KIND_WELCOME: w.w=360; w.h=290; w.body=0xF0F0F0; w.title="Welcome"; break;
-    case KIND_ABOUT:   w.w=300; w.h=178; w.body=0xF4F0E8; w.title="About";   break;
+    case KIND_ABOUT:   w.w=300; w.h=196; w.body=0xF4F0E8; w.title="About";   break;
     case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="System Info"; break;
     default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
     }

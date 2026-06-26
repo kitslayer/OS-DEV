@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1409) About dialog — now mentions the apps.** The built-in About box (KIND_ABOUT) listed the tech stack (kernel / FAT32 / TLS / JS / browser / shell / editor) but omitted the OS's large graphical app suite; added a `calc . image viewer . games` line and grew the box 178→196 px to fit it. A data + window-size change (the render loop already draws all `L[]` lines), so correct by construction. **Verified:** `make check` green.
+
 > **(M1408) gconv — Speed + Area categories.** Extended the converter from 3 to 5 categories: added Speed (m/s → km/h, mph, ft/s) and Area (m² → sqft, sqin, sqcm), generalising the per-category dispatch to a `TBL[cat]`/`TBLN[cat]` table. **Verified:** in-guest — 10 m/s → 36 km/h / 22.369 mph / 32.808 ft/s, correct; `make check` green.
 
 > **(M1407) gconv — a unit converter.** Type a value in a category's base unit (metres / kilograms / Celsius) and it shows the equivalents live: Length → ft/in/cm/km, Weight → lb/g/oz, Temperature → °F/K. `c` (or a click) cycles the category, digits + `.` type the value. All maths is integer fixed-point ×10000 (exact, no FPU); temperature uses the affine formulae. Additive (own file). Launch `run gconv` or the Apps menu ("Unit Convert"). **Verified:** in-guest — 100 °C → 212 °F / 373.15 K and 2 m → 6.5616 ft / 78.7402 in / 200 cm / 0.002 km, all correct (caught + fixed a bad miles factor pre-build); `make check` green.
