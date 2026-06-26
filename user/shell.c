@@ -1984,7 +1984,20 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "history")) {
             char buf[640];
             long n = sys_history(buf, sizeof(buf));
-            if (n > 0) { buf[n] = 0; print(buf); } else print("  (no history yet)\n");
+            if (n > 0) {
+                buf[n] = 0;
+                for (int i = 0; buf[i]; ) {                              /* colour each line's index grey (M1356) */
+                    int eol = i; while (buf[eol] && buf[eol] != '\n') eol++;
+                    int ns = i; while (ns < eol && buf[ns] == ' ') ns++;
+                    while (ns < eol && buf[ns] >= '0' && buf[ns] <= '9') ns++;     /* the index digits */
+                    while (ns < eol && buf[ns] == ' ') ns++;                       /* spaces after the index */
+                    char seg[200]; int s = 0;
+                    for (int k = i; k < ns && s < 199; k++) seg[s++] = buf[k]; seg[s] = 0; sys_setcolor(8); print(seg); sys_setcolor(0);
+                    s = 0; for (int k = ns; k < eol && s < 199; k++) seg[s++] = buf[k]; seg[s] = 0; print(seg);
+                    if (buf[eol] == '\n') { print("\n"); eol++; }
+                    i = eol;
+                }
+            } else print("  (no history yet)\n");
         } else if (streq(line, "df")) {
             char b[96]; long n = sys_df(b, sizeof(b));
             if (n > 0) {
@@ -4381,7 +4394,9 @@ static int run_command(char *line, char *cwd) {
                 int r = u.fn();
                 print("JIT: wrote 'mov eax,42; ret' to an mmap page, mprotect r-x (rc "); printl(pr);
                 print("), called it -> "); printl(r); print("\n");
-                print(r == 42 ? "  OK: executed JIT-compiled code from a W^X page\n" : "  VERIFY FAILED\n");
+                if (r == 42) { sys_setcolor(9); print("  OK: executed JIT-compiled code from a W^X page\n"); }
+                else { sys_setcolor(2); print("  VERIFY FAILED\n"); }
+                sys_setcolor(0);
                 if (r != 42) g_status = 1;
                 sys_munmap(code, 4096);
             }
