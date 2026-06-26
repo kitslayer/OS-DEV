@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1366) menu clarity — rename the overview panel "Monitor" → "System Info".** The new sysgraph app is "System Monitor" (live CPU/RAM graphs), but the pre-existing kernel-drawn Memory/Tasks/Uptime/Network panel (`KIND_SYSMON`) was *also* called "Monitor" — confusing side-by-side in the Apps menu. Renamed it "System Info" (accurate for an overview snapshot), giving a clean trio: **System Info** (overview) · **System Monitor** (live graphs) · **Task Manager** (processes). Found via an end-to-end Apps-menu (F9) verification of this session's four new apps. **Verified:** `make check` green.
+
 > **(M1365) Welcome screen — surface the new graphical apps.** The boot Welcome window's "try" list now points to the session's new gfx apps — `- Clock, Monitor, Tasks, 60+ more` — for discoverability (aclock/sysgraph/taskman). **Verified:** in-guest — renders in the Welcome panel with no overflow; `make check` green.
 
 > **(M1364) taskman — system uptime in the footer.** The footer now reads `N tasks    up XmYYs` (uptime from `sys_uptime_ms`), a small top-style touch alongside the live process list. **Verified:** in-guest — `4 tasks    up 0m18s`.

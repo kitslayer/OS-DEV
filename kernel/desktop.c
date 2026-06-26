@@ -136,7 +136,7 @@ static const struct menu_item menu[] = {
     { "Sandbox", KIND_APP, "sandbox" },
     { "Forth", KIND_APP, "forth" },
     { "Hex Edit", KIND_APP, "hexedit" },
-    { "Monitor", KIND_SYSMON, 0 },
+    { "System Info", KIND_SYSMON, 0 },
     { "Files", KIND_FILES, 0 }, { "Welcome", KIND_WELCOME, 0 },
     { "About", KIND_ABOUT, 0 },
     { "Restart", KIND_REBOOT, 0 }, { "Shut Down", KIND_POWEROFF, 0 },
@@ -1213,7 +1213,7 @@ static void spawn_app(int kind, const char *prog) {
     case KIND_FILES:   w.w=500; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
     case KIND_WELCOME: w.w=360; w.h=290; w.body=0xF0F0F0; w.title="Welcome"; break;
     case KIND_ABOUT:   w.w=300; w.h=178; w.body=0xF4F0E8; w.title="About";   break;
-    case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="Monitor"; break;
+    case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="System Info"; break;
     default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
     }
     windows[win_count++] = w;
