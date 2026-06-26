@@ -303,6 +303,28 @@ static int gfx_scale(int gw, int gh) {
     return s;
 }
 
+/* Files-window sort key: 0 = name (A-Z), 1 = size (largest first), 2 = date
+ * (newest first); directories always sort before files. Cycled by 'o'. */
+static int g_fsort;
+static int fl_isdir(const vfs_dirent *d) { int n = 0; while (d->name[n]) n++; return n > 0 && d->name[n-1] == '/'; }
+static int fl_cmp(const vfs_dirent *a, const vfs_dirent *b) {
+    int ad = fl_isdir(a), bd = fl_isdir(b);
+    if (ad != bd) return bd - ad;
+    if (g_fsort == 1) return (a->size < b->size) - (a->size > b->size);
+    if (g_fsort == 2) { unsigned long ak = ((unsigned long)a->date << 16) | a->time, bk = ((unsigned long)b->date << 16) | b->time;
+                        return (ak < bk) - (ak > bk); }
+    for (int i = 0; ; i++) { unsigned char ca = a->name[i], cb = b->name[i]; if (ca != cb) return (int)ca - (int)cb; if (!ca) return 0; }
+}
+/* vfs_list + sort in place — the single listing path for the Files window. */
+static int flist(vfs_dirent *e, int max) {
+    int n = vfs_list(e, max);
+    for (int i = 1; i < n; i++) { vfs_dirent t = e[i]; int j = i - 1;
+        while (j >= 0 && fl_cmp(&e[j], &t) > 0) { e[j + 1] = e[j]; j--; }
+        e[j + 1] = t;
+    }
+    return n;
+}
+
 static void draw_content(const window_t *w, int focused) {
     int bx = w->x + 8, by = w->y + TITLEBAR_H + 8;
     switch (w->kind) {
@@ -337,7 +359,7 @@ static void draw_content(const window_t *w, int focused) {
         break;
     }
     case KIND_FILES: {
-        static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* static (BSS): ~18KB won't fit the 16KB guard-page-less stack; single-threaded render makes it safe. Browse ALL disk files, not just the first 32 (M421) */
+        static vfs_dirent e[256]; int n = flist(e, 256);   /* static (BSS): ~18KB won't fit the 16KB guard-page-less stack; single-threaded render makes it safe. Browse ALL disk files, not just the first 32 (M421) */
         if (w->editing) {                                      /* a text-input is open: prompt + the typed name + a cursor */
             char pr[48]; int p = 0;
             const char *a = w->editing == 1 ? "Rename to: " : "New folder: ";
@@ -355,7 +377,13 @@ static void draw_content(const window_t *w, int focused) {
             pr[p] = 0;
             draw_text(bx, by, pr, 0xC01010);                   /* bright red: this action destroys a file */
         } else {
-            draw_text(bx, by, "FAT32 (/) up/down Enter open  d del  r rename  n new-folder  w wallpaper", 0x202028);
+            const char *sm = g_fsort == 1 ? "size" : g_fsort == 2 ? "date" : "name";
+            char hdr[96]; int hp = 0;
+            const char *base = "up/dn Enter:open  d:del r:ren n:new w:wall  o:sort=";
+            for (int j = 0; base[j]; j++) hdr[hp++] = base[j];
+            for (int j = 0; sm[j]; j++) hdr[hp++] = sm[j];
+            hdr[hp] = 0;
+            draw_text(bx, by, hdr, 0x202028);
         }
         fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, 0xC4CAD6);   /* rule under the header */
         int rows = (w->h - TITLEBAR_H - 30) / 18;          /* rows that fit in the body */
@@ -1064,7 +1092,7 @@ static int ctx_desktop_action(int row) {
             return 0;                                            /* one; z-order is preserved (all visible) */
         case 2: {                                                /* Change Wallpaper: cycle to the next image on disk */
             static int wp_idx;
-            static vfs_dirent e[256]; int n = vfs_list(e, 256);  /* static (BSS), safe single-threaded (cf. files_key) */
+            static vfs_dirent e[256]; int n = flist(e, 256);  /* static (BSS), safe single-threaded (cf. files_key) */
             if (n <= 0) return 0;
             for (int step = 0; step < n; step++) {               /* try each candidate from wp_idx onward; */
                 int i = (wp_idx + step) % n;                     /* a non-image / decode failure is skipped */
@@ -1137,7 +1165,7 @@ static int files_is_image(const char *name, int len) {
  * wallpaper. The dirent list is re-read each call, so it refreshes for free
  * after a delete. */
 static void files_key(window_t *w, int k) {
-    static vfs_dirent e[256]; int n = vfs_list(e, 256);   /* match the render cap; static (BSS), safe single-threaded (M421) */
+    static vfs_dirent e[256]; int n = flist(e, 256);   /* match the render cap; static (BSS), safe single-threaded (M421) */
 
     if (w->editing) {                                         /* a rename / new-folder text-input is open */
         if (k == 27) { w->editing = 0; return; }               /* Esc cancels: leave the name untouched */
@@ -1157,7 +1185,7 @@ static void files_key(window_t *w, int k) {
                 }
             }
             w->editing = 0;
-            n = vfs_list(e, 256);                              /* re-list so the new/renamed entry shows + the clamp is correct */
+            n = flist(e, 256);                              /* re-list so the new/renamed entry shows + the clamp is correct */
             if (w->fsel >= n) w->fsel = n - 1;
             if (w->fsel < 0)  w->fsel = 0;
             return;
@@ -1186,7 +1214,7 @@ static void files_key(window_t *w, int k) {
             buf[p] = 0;
             vfs_remove(buf);                                   /* deletes a file or empty dir; refuses a non-empty dir (no crash) */
             w->fconfirm = 0;
-            n = vfs_list(e, 256);                              /* re-list so the clamp uses the post-delete count */
+            n = flist(e, 256);                              /* re-list so the clamp uses the post-delete count */
             if (w->fsel >= n) w->fsel = n - 1;
             if (w->fsel < 0)  w->fsel = 0;
         } else {                                               /* ANY other key cancels; the key is otherwise ignored */
@@ -1197,7 +1225,7 @@ static void files_key(window_t *w, int k) {
 
     if (k == 0x11)       { if (w->fsel > 0)     w->fsel--; }   /* up   */
     else if (k == 0x12)  { if (w->fsel < n - 1) w->fsel++; }   /* down */
-    else if (k == 8)     { if (vfs_chdir("..") == 0) { n = vfs_list(e, 256); w->fsel = 0; } }  /* Backspace: up one directory */
+    else if (k == 8)     { if (vfs_chdir("..") == 0) { n = flist(e, 256); w->fsel = 0; } }  /* Backspace: up one directory */
     else if (k == 'd' || k == 0x7F) {                          /* arm the delete confirm (render shows the prompt) */
         w->fconfirm = 1;
     }
@@ -1218,6 +1246,9 @@ static void files_key(window_t *w, int k) {
         w->editbuf[0] = 0; w->editlen = 0;
         w->editing = 2;
     }
+    else if (k == 'o' || k == 'O') {                           /* cycle the sort order: name -> size -> date (M1426) */
+        g_fsort = (g_fsort + 1) % 3; w->fsel = 0;
+    }
     else if (k == '\n' || k == '\r') {
         const char *name = e[w->fsel].name;
         int len = 0; while (name[len]) len++;
@@ -1225,7 +1256,7 @@ static void files_key(window_t *w, int k) {
             char d[64]; int p = 0;
             for (int j = 0; j < len - 1 && p < (int)sizeof(d) - 1; j++) d[p++] = name[j];  /* strip trailing '/' */
             d[p] = 0;
-            if (vfs_chdir(d) == 0) { n = vfs_list(e, 256); w->fsel = 0; }   /* enter folder + re-list */
+            if (vfs_chdir(d) == 0) { n = flist(e, 256); w->fsel = 0; }   /* enter folder + re-list */
         } else if (len > 0) {                                  /* a file: open it */
             if (files_editable(name, len)) {
                 app_spawn_named_arg("editor", name);           /* edit text/source files */
@@ -1246,7 +1277,7 @@ static void files_key(window_t *w, int k) {
  * it, and open it (the mouse equivalent of arrowing to it and pressing Enter).
  * `my` is the screen y of the click; the row math mirrors the KIND_FILES render. */
 static void files_click(window_t *w, int my) {
-    static vfs_dirent e[256]; int n = vfs_list(e, 256);
+    static vfs_dirent e[256]; int n = flist(e, 256);
     if (n <= 0) return;
     int by = w->y + TITLEBAR_H + 8;                    /* body content origin (matches draw) */
     int rows = (w->h - TITLEBAR_H - 30) / 18; if (rows < 1) rows = 1;
