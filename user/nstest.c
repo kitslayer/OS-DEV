@@ -13,8 +13,8 @@ int main(void) {
         sys_bind("/tmp", "/scratch");                       // /scratch -> /tmp, in MY namespace only
         sys_writefile("/scratch/ns.txt", "PRIVATE-NS", 10); // = /tmp/ns.txt via the bind
         char b[32]; long n = sys_readfile("/scratch/ns.txt", b, sizeof b - 1);
-        if (n > 0) { b[n] = 0; print("child:  /scratch/ns.txt = "); print(b); print("  (my private bind works)\n"); }
-        else        print("child:  /scratch read FAILED\n");
+        if (n > 0) { b[n] = 0; print("child:  /scratch/ns.txt = "); print(b); sys_setcolor(9); print("  (my private bind works)\n"); sys_setcolor(0); }
+        else { sys_setcolor(2); print("child:  /scratch read FAILED\n"); sys_setcolor(0); }
         sys_sleep(20000);
         sys_exit(0);
     }

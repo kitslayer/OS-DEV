@@ -28,8 +28,9 @@ int main(void) {
     print("futex(wait): blocking on the shared word; a child process will wake me...\n");
     sys_spawn_arg("futex", "wake");                     // a SEPARATE process that will FUTEX_WAKE us
     long r = sys_futex(w, FUTEX_WAIT, 1);
-    print(r == 0 ? "futex(wait): WOKEN by the other process! cross-process futex works.\n"
-                 : "futex(wait): returned without blocking\n");
+    if (r == 0) { sys_setcolor(9); print("futex(wait): WOKEN by the other process! cross-process futex works.\n"); }
+    else { sys_setcolor(3); print("futex(wait): returned without blocking\n"); }
+    sys_setcolor(0);
     sys_sleep(3000);                                    // keep the window up for the screenshot
     return 0;
 }

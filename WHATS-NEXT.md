@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1347) demo apps — colourise futex + nstest results.** Continued the colour pass for the `run <name>` demos: `futex` (cross-process WOKEN result lime, no-block amber) and `nstest` (private-bind-works lime, read-FAILED red). **Verified:** build clean; uses the same result-colour pattern proven on forktest. (Representative demos now coloured — the user-facing shell + menu apps were the priority and are fully done.)
+
 > **(M1346) demo apps — begin colourising the systems-feature demos.** The `run <name>` demo apps (threads, forktest, …) were monochrome, unlike the coloured shell + menu apps; started bringing them in line: `threads` (section labels cyan, shared-counter lime, TLS/PASS lime, FAIL red) and `forktest` (label cyan, COW-isolation result lime/red). **Verified:** in-guest — `run forktest` shows `forktest:` cyan and `(COW isolation OK)` lime.
 
 > **(M1345) hexedit — column-index header.** Added a `00 01 … 07` header row (grey) aligned above the hex byte columns — like professional hex editors — so a byte's column index is easy to read off. `ROWS` 13→12 to make room. **Verified:** in-guest screenshot — the header aligns exactly over the hex columns above the grid.
