@@ -66,14 +66,37 @@ for try in 1 2 3 4 5 6 7 8; do
     sleep 1
 done
 
+# Fetch a specific file by path (M1327): GET /README.TXT must return the FILE's
+# contents (parsed request -> sys_tcp_accept -> serve_file -> sys_tcp_respond),
+# not the dashboard. The asserted line is unique to the file.
+file=""
+for try in 1 2 3 4 5 6; do
+    file=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/README.TXT" 2>/dev/null || true)
+    echo "$file" | grep -q "read by our own driver" && break
+    sleep 1
+done
+# A missing file must 404 (proves per-request routing, not a canned page).
+miss=""
+for try in 1 2 3 4; do
+    miss=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/NOPE.XXX" 2>/dev/null || true)
+    echo "$miss" | grep -q "404" && break
+    sleep 1
+done
+
 if echo "$out" | grep -q "Hello from OS-DEV" && echo "$out" | grep -q "README.TXT" \
-   && echo "$out" | grep -q "Uptime:" && echo "$out" | grep -q "MemTotal:"; then
-    echo "PASS: in-guest httpd served a LIVE dashboard (uptime + memory + file index) over the from-scratch TCP stack"
-    echo "  served: $(echo "$out" | grep -o '<h1>[^<]*</h1>' | head -1) + live system status + a file listing (incl. README.TXT)"
+   && echo "$out" | grep -q "Uptime:" && echo "$out" | grep -q "MemTotal:" \
+   && echo "$file" | grep -q "read by our own driver" \
+   && echo "$miss" | grep -q "404"; then
+    echo "PASS: in-guest httpd served a LIVE dashboard, an individual FILE by path, and a 404 over the from-scratch TCP stack"
+    echo "  GET /            -> $(echo "$out" | grep -o '<h1>[^<]*</h1>' | head -1) + live system status + a file listing"
+    echo "  GET /README.TXT  -> $(echo "$file" | head -1)"
+    echo "  GET /NOPE.XXX    -> 404 Not Found"
     exit 0
 else
-    echo "FAIL: host curl did not receive the served page"
-    echo "----- curl output -----"; echo "$out"
+    echo "FAIL: host curl did not receive the expected responses"
+    echo "----- GET / -----"; echo "$out"
+    echo "----- GET /README.TXT -----"; echo "$file"
+    echo "----- GET /NOPE.XXX -----"; echo "$miss"
     echo "----- guest serial (tail) -----"; tail -10 "$SLOG" 2>/dev/null
     exit 1
 fi

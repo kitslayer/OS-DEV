@@ -309,7 +309,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
-    case SYS_tcp_serve:
+    case SYS_tcp_serve: case SYS_tcp_accept: case SYS_tcp_respond:
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
@@ -365,7 +365,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_seccomp_filter]="seccomp_filter",
         [SYS_fswait]="fswait",[SYS_signalfd]="signalfd",
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
-        [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",
+        [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
@@ -1605,6 +1605,20 @@ void syscall_dispatch(struct registers *r) {
             (reqmax  && !ubuf(r->r10, (uint64_t)reqmax))) { r->rax = (uint64_t)-1; break; }
         __asm__ volatile("sti");           /* the poll deadlines need the timer running */
         r->rax = (uint64_t)(int64_t)net_tcp_serve((uint16_t)r->rdi, resp, resp_len, reqbuf, reqmax, 300 /*~3s*/);
+        break;
+    }
+    case SYS_tcp_accept: {                  /* (port, reqbuf, reqmax): passive-open + read one request, hold the conn (M1327) */
+        uint8_t *reqbuf = (uint8_t *)r->rsi; int reqmax = (int)r->rdx;
+        if (reqmax < 0 || (reqmax && !ubuf(r->rsi, (uint64_t)reqmax))) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");
+        r->rax = (uint64_t)(int64_t)net_tcp_accept((uint16_t)r->rdi, reqbuf, reqmax, 300 /*~3s*/);
+        break;
+    }
+    case SYS_tcp_respond: {                 /* (resp, resp_len): reply on the accepted conn + close (M1327) */
+        const uint8_t *resp = (const uint8_t *)r->rdi; int resp_len = (int)r->rsi;
+        if (resp_len < 0 || (resp_len && !ubuf(r->rdi, (uint64_t)resp_len))) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");
+        r->rax = (uint64_t)(int64_t)net_tcp_respond(resp, resp_len);
         break;
     }
     case SYS_bind:                         /* (from, to): graft FROM's subtree onto the path TO */

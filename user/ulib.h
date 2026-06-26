@@ -32,6 +32,8 @@ long sys_fanotify_provide(const void *content, unsigned long len);  /* hand byte
 long sys_io_uring_enter(void *ring);                 /* drain a struct io_ring of batched ops; # completed/-1 (M1129) */
 long sys_mseal(void *addr, unsigned long len);       /* irreversibly seal mmap regions in range vs munmap/mprotect; count/-1 (M1130) */
 long sys_tcp_serve(int port, const void *resp, unsigned long resp_len, void *reqbuf, unsigned long reqmax);  /* serve one TCP conn; request bytes/-1 (M1133) */
+long sys_tcp_accept(int port, void *reqbuf, unsigned long reqmax);  /* passive-open + read one request, hold the conn; request bytes/-1 (M1327) */
+long sys_tcp_respond(const void *resp, unsigned long resp_len);     /* reply on the accepted conn + close; 0/-1 (M1327) */
 /* userfaultfd (M1134): register a region, then a monitor process services its faults */
 long sys_uffd_register(void *addr, unsigned long len);              /* route this region's faults to a monitor; 0/-1 */
 long sys_uffd_read(void);                                           /* monitor: block until a fault; faulting page addr/-1 */

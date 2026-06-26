@@ -34,6 +34,8 @@ void tcp_close(tcp_conn *c);
  * reqbuf, send `resp`, close. Request bytes read (>=0), or -1. In-guest httpd. M1133. */
 int  net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
                    uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks);
+int  net_tcp_accept(uint16_t port, uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks);  /* M1327: passive-open + read one request, hold the conn */
+int  net_tcp_respond(const uint8_t *resp, int resp_len);                                  /* M1327: reply on the accepted conn + close */
 
 const uint8_t *net_ip(void);        /* our IPv4 address (4 bytes) */
 const uint8_t *net_gateway(void);   /* the gateway IPv4 address (4 bytes) */

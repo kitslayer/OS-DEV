@@ -893,6 +893,74 @@ static int srv_rx(uint8_t *buf, int max, uint16_t port, uint16_t cport,
     return 0;
 }
 
+/* Split server primitive (M1327): net_tcp_accept does the passive open + reads
+ * one request, stashing the connection; net_tcp_respond sends a reply on it +
+ * closes. Lets an in-guest server choose its response PER REQUEST (e.g. serve
+ * the requested file). One connection at a time (the httpd serves sequentially);
+ * additive -- net_tcp_serve below is unchanged. */
+static struct { uint8_t cmac[6], cip[4]; uint16_t cport, lport; uint32_t our_seq, their_seq; int active; } g_srvconn;
+
+int net_tcp_accept(uint16_t port, uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks) {
+    uint8_t buf[1600], *tcp; int dlen;
+    uint8_t cmac[6], cip[4]; uint16_t cport;
+    uint32_t their_seq, our_seq;
+    g_srvconn.active = 0;
+    uint64_t deadline = timer_ticks() + timeout_ticks;
+    for (;;) {
+        if (!srv_rx(buf, sizeof buf, port, 0, 0, deadline, &tcp, &dlen)) return -1;
+        if ((tcp[13] & TCP_SYN) && !(tcp[13] & TCP_ACK)) break;
+    }
+    memcpy(cmac, buf + 6, 6); memcpy(cip, buf + 26, 4);
+    cport = get16(tcp + 0);
+    their_seq = get32(tcp + 4) + 1;
+    our_seq = ((uint32_t)(timer_ticks() * 2654435761u)) | 1;
+    tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_SYN | TCP_ACK, 0, 0);
+    our_seq += 1;
+    int reqlen = 0;
+    uint64_t hdl = timer_ticks() + 200;
+    for (;;) {
+        if (!srv_rx(buf, sizeof buf, port, cport, cip, hdl, &tcp, &dlen)) return -1;
+        if (tcp[13] & TCP_RST) return -1;
+        int thl = (tcp[12] >> 4) * 4;
+        if (dlen > 0 && get32(tcp + 4) == their_seq) {
+            int copy = dlen < reqmax ? dlen : reqmax;
+            for (int i = 0; i < copy; i++) reqbuf[i] = tcp[thl + i];
+            reqlen = copy;
+            their_seq += dlen;
+            tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_ACK, 0, 0);
+            break;
+        }
+    }
+    memcpy(g_srvconn.cmac, cmac, 6); memcpy(g_srvconn.cip, cip, 4);
+    g_srvconn.cport = cport; g_srvconn.lport = port;
+    g_srvconn.our_seq = our_seq; g_srvconn.their_seq = their_seq; g_srvconn.active = 1;
+    return reqlen;
+}
+
+int net_tcp_respond(const uint8_t *resp, int resp_len) {
+    if (!g_srvconn.active) return -1;
+    uint8_t buf[1600], *tcp; int dlen;
+    uint8_t *cmac = g_srvconn.cmac, *cip = g_srvconn.cip;
+    uint16_t cport = g_srvconn.cport, port = g_srvconn.lport;
+    uint32_t our_seq = g_srvconn.our_seq, their_seq = g_srvconn.their_seq;
+    for (int off = 0; off < resp_len; ) {
+        int chunk = resp_len - off; if (chunk > 1400) chunk = 1400;
+        tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_PSH | TCP_ACK, resp + off, chunk);
+        our_seq += chunk; off += chunk;
+    }
+    tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_FIN | TCP_ACK, 0, 0);
+    our_seq += 1;
+    uint64_t fdl = timer_ticks() + 50;
+    while (srv_rx(buf, sizeof buf, port, cport, cip, fdl, &tcp, &dlen)) {
+        if (tcp[13] & TCP_FIN) {
+            tcp_send_seg(cmac, cip, port, cport, our_seq, get32(tcp + 4) + 1, TCP_ACK, 0, 0);
+            break;
+        }
+    }
+    g_srvconn.active = 0;
+    return 0;
+}
+
 int net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
                   uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks) {
     uint8_t buf[1600], *tcp; int dlen;

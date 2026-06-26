@@ -137,6 +137,8 @@ long sys_tcp_serve(int port, const void *resp, unsigned long resp_len, void *req
                      : "memory");
     return ret;
 }
+long sys_tcp_accept(int port, void *reqbuf, unsigned long reqmax) { return do_syscall(SYS_tcp_accept, (long)port, (long)reqbuf, (long)reqmax); }
+long sys_tcp_respond(const void *resp, unsigned long resp_len) { return do_syscall(SYS_tcp_respond, (long)resp, (long)resp_len, 0); }
 long sys_fswait(const char *const *paths, int n, long timeout_ms) {
     char buf[512]; int p = 0;
     if (n < 1 || n > 8) return -1;

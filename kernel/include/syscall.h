@@ -297,6 +297,8 @@
 #define MCL_FUTURE  2
 #define SYS_acpi         274   /* (what) -> ACPI AML namespace query: 0=total 1=devices 2=methods 3=PCI0? 4=_SB_? (M1284) */
 #define SYS_aslr         275   /* (pid) -> the ASLR-randomized mmap base of pid (0=self); for verification (M1287) */
+#define SYS_tcp_accept   276   /* (port, reqbuf, reqmax) -> passive-open + read one request, hold the conn; request bytes/-1 (M1327) */
+#define SYS_tcp_respond  277   /* (resp, resp_len) -> reply on the accepted conn + close; 0/-1 (M1327) */
 #define SA_ONSTACK 0x08000000  /* sigaction flag: run this handler on the sigaltstack() stack (M1276) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */
