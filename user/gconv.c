@@ -54,10 +54,11 @@ static const struct U LEN[] = { {"m", 10000}, {"ft", 32808}, {"in", 393701}, {"c
 static const struct U WGT[] = { {"kg", 10000}, {"lb", 22046}, {"g", 10000000}, {"oz", 352740} };
 static const struct U SPD[] = { {"m/s", 10000}, {"km/h", 36000}, {"mph", 22369}, {"ft/s", 32808} };
 static const struct U ARE[] = { {"sqm", 10000}, {"sqft", 107639}, {"sqin", 15500031}, {"sqcm", 100000000} };
-static const struct U *TBL[5] = { LEN, WGT, 0, SPD, ARE };                          /* index 2 (temperature) is special-cased (affine) */
-static const int TBLN[5] = { 5, 4, 0, 4, 4 };
+static const struct U VOL[] = { {"L", 10000}, {"mL", 10000000}, {"gal", 2642}, {"cup", 42268} };   /* from litres */
+static const struct U *TBL[6] = { LEN, WGT, 0, SPD, ARE, VOL };                     /* index 2 (temperature) is special-cased (affine) */
+static const int TBLN[6] = { 5, 4, 0, 4, 4, 4 };
 static const char *TEMPU[3] = { "C", "F", "K" };
-static const char *CATN[5] = { "Length", "Weight", "Temperature", "Speed", "Area" };
+static const char *CATN[6] = { "Length", "Weight", "Temperature", "Speed", "Area", "Volume" };
 
 static int ucount(int cat) { return cat == 2 ? 3 : TBLN[cat]; }
 static const char *uname(int cat, int u) { return cat == 2 ? TEMPU[u] : TBL[cat][u].name; }
@@ -75,7 +76,7 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
-        else if (k == 'c' || k == 'C') { cat = (cat + 1) % 5; inunit = 0; dirty = 1; }
+        else if (k == 'c' || k == 'C') { cat = (cat + 1) % 6; inunit = 0; dirty = 1; }
         else if (k == 'u' || k == 'U') { inunit = (inunit + 1) % ucount(cat); dirty = 1; }
         else if (k >= '0' && k <= '9') { if (elen < 12) { entry[elen++] = (char)k; entry[elen] = 0; } dirty = 1; }
         else if (k == '.') { int has = 0; for (int i = 0; i < elen; i++) if (entry[i] == '.') has = 1;
@@ -83,7 +84,7 @@ int main(void) {
         else if (k == 8 || k == 0x7F) { if (elen > 0) entry[--elen] = 0; dirty = 1; }
 
         int mx, my, b = sys_mouse(&mx, &my);                       /* click = next input unit */
-        if ((b & 1) && !(prevb & 1) && mx >= 0) { inunit = (inunit + 1) % ucount(cat); dirty = 1; }
+        if ((b & 1) && !(prevb & 1) && mx >= 0) { inunit = (inunit + 1) % ucount(cat); dirty = 1; }   /* (category cycles with c) */
         prevb = b;
 
         if (dirty) {

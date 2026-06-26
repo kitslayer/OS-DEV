@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1415) gconv — a Volume category.** Added Volume (L → mL, gal, cup) as the 6th category, so the converter now covers the standard set (Length, Weight, Temperature, Speed, Area, Volume). Clean table addition (`cat % 6`). **Verified:** in-guest — 1 L → 1000 mL / 0.2642 gal / 4.2268 cup, correct; `make check` green.
+
 > **(M1414) gcalc — show the pending operator.** After pressing an operator the LCD showed only the running value with no hint an op was queued; now the pending operator (`+ - * /`) is drawn small in the LCD's top-left corner, so you can see what you pressed. One line in the renderer. **Verified:** in-guest — after `8 /`, a small `/` appears top-left while `8` shows; `make check` green.
 
 > **(M1413) gbase — convert FROM any base.** The base converter took decimal input only; now `i` cycles the input base (dec → hex → bin) and the keypad accepts only digits valid for it (hex takes a-f), so you can convert hex→dec etc. Shows all four bases (dec/hex/oct/bin) live. **Verified:** in-guest — hex input `FF` → DEC 255 / 0xFF / 0o377 / 0b11111111, correct; `make check` green.
