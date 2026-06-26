@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1374) taskman — right-align the MEM/CPU columns.** The numeric MEM (RSS) and CPU% values + their headers are now right-aligned (the proven CPU%-column pattern), giving a properly aligned table like `top`/`htop` instead of left-ragged numbers. **Verified:** in-guest — `1028K`/`916K` line up on the right under `MEM`, `0%` under `CPU`.
+
 > **(M1373) docs — README intro accuracy.** Bumped the headline milestone count (1300+ → 1370+) and updated the task-manager line to reflect it's now a real "top" (per-task CPU%/MEM + an aggregate system-CPU% footer). A checkpoint `make check` after the M1367–M1372 batch passed all 60 suites (kernel + userspace + boot/gfx/browser) — the whole tree is verified green.
 
 > **(M1372) taskman — aggregate system CPU% in the footer.** The footer now ends `… CPU NN%` — the whole-system CPU% (busy/total delta of `/proc/stat`, the same source sysgraph graphs). This reconciles the per-task column (≈0% for the light listed user tasks) with the real system load (the compositor's recompositing — the bulk of the CPU — isn't a listed task). **Verified:** in-guest — footer reads `CPU 50%`, matching sysgraph's ~49%.

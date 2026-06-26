@@ -102,7 +102,7 @@ int main(void) {
 
         for (int i = 0; i < W * H; i++) FB[i] = 0x0C0C16;           /* dark background */
         text("Task Manager", 12, 8, 0x8FD0FF);
-        text("MEM", W - 112, 8, 0x70A0C0); text("CPU", W - 44, 8, 0x70A0C0);
+        text("MEM", W - 76, 8, 0x70A0C0); text("CPU", W - 38, 8, 0x70A0C0);   /* right-aligned column heads */
         for (int x = 8; x < W - 8; x++) putpx(x, 30, 0x2A2A3A);     /* header rule */
 
         int y = 40, count = 0;
@@ -127,7 +127,7 @@ int main(void) {
                         }
                         if (cur_n < 40) { cur_pid[cur_n] = pid; cur_cpu[cur_n] = t; cur_n++; }
                         char ms[12]; int mi = putint(ms, 0, rss * 4); ms[mi++] = 'K'; ms[mi] = 0;   /* RSS pages -> KiB */
-                        text(ms, W - 112, y, 0x90A0B0);
+                        text(ms, W - 52 - mi * 8, y, 0x90A0B0);                     /* right-aligned column */
                     }
                     char cs[8]; int ci = putint(cs, 0, pct); cs[ci++] = '%'; cs[ci] = 0;
                     unsigned ccol = pct >= 50 ? 0xE08050 : pct >= 15 ? 0xD0D060 : 0x607080;
