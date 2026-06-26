@@ -164,6 +164,24 @@ static void draw_text(int x, int y, const char *s, uint32_t fg) {
     for (int i = 0; s[i]; i++)
         fb_glyph_fg(x + i * font_width, y, s[i], fg);
 }
+/* file-type tint for the Files list (RGB, readable on the light rows); parallels
+ * the shell's ls_color. FAT32 8.3 names are upper-case, so compare upper-case. M1332 */
+static int ext_is(const char *x, const char *s) {
+    int i = 0; for (; x[i] && s[i]; i++) if (x[i] != s[i]) return 0;
+    return x[i] == 0 && s[i] == 0;
+}
+static uint32_t file_color(const char *name) {
+    int dot = -1; for (int i = 0; name[i]; i++) if (name[i] == '.') dot = i;
+    if (dot < 0) return 0x303840;
+    const char *x = name + dot + 1;
+    if (ext_is(x,"SVG")||ext_is(x,"PNG")||ext_is(x,"BMP")||ext_is(x,"GIF")||ext_is(x,"JPG")||ext_is(x,"JPE")) return 0x8E24AA; /* images: purple */
+    if (ext_is(x,"C")||ext_is(x,"H")||ext_is(x,"JS"))                       return 0xB05A00; /* code: orange-brown */
+    if (ext_is(x,"GZ")||ext_is(x,"TAR")||ext_is(x,"TGZ")||ext_is(x,"ZIP"))  return 0xC01010; /* archives: red */
+    if (ext_is(x,"WAV"))                                                    return 0x00838A; /* audio: teal */
+    if (ext_is(x,"ELF")||ext_is(x,"SH"))                                    return 0x2E7D32; /* executables: green */
+    if (ext_is(x,"NES")||ext_is(x,"GB"))                                    return 0xC0006A; /* ROMs: pink */
+    return 0x303840;                                                                         /* text/web/default */
+}
 static void box(int x, int y, int w, int h, uint32_t c) {
     fb_fill_rect(x, y, w, 1, c); fb_fill_rect(x, y + h - 1, w, 1, c);
     fb_fill_rect(x, y, 1, h, c); fb_fill_rect(x + w - 1, y, 1, h, c);
@@ -319,6 +337,7 @@ static void draw_content(const window_t *w, int focused) {
             int isdir = (nl > 0 && e[i].name[nl-1] == '/');   /* vfs marks directories with a trailing '/' */
             char line[48]; int p = 0; line[p++]=' '; line[p++]=' ';
             for (int j = 0; e[i].name[j] && p < 28; j++) line[p++] = e[i].name[j];
+            int name_end = p;                              /* end of the "  NAME" segment (M1332) */
             while (p < 22) line[p++] = ' ';
             if (isdir) {                                   /* directory: show "(dir)", no size/date */
                 const char *d = "(dir)"; for (int z = 0; d[z]; z++) line[p++] = d[z];
@@ -337,7 +356,11 @@ static void draw_content(const window_t *w, int focused) {
                 }
             }
             line[p]=0;
-            draw_text(bx, ry, line, isdir ? 0x8A5A00 : 0x303840);   /* directories in folder-gold */
+            uint32_t namecol = isdir ? 0x8A5A00 : file_color(e[i].name);   /* dirs gold, files by type (M1332) */
+            char nsave = line[name_end]; line[name_end] = 0;
+            draw_text(bx, ry, line, namecol);                              /* name in its type tint */
+            line[name_end] = nsave;
+            draw_text(bx + name_end * font_width, ry, line + name_end, 0x808890);   /* size/date in grey */
         }
         break;
     }
