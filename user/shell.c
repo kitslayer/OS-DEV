@@ -306,7 +306,7 @@ static void print_cal_week(const char *line) {
     print("\n");
 }
 static void cmd_cal_ym(int y, int m, int today) {   /* render month m (1-12) of year y; today=0 -> no highlight */
-    if (m < 1 || m > 12) { print("cal: bad date\n"); return; }
+    if (m < 1 || m > 12) { perr("cal: bad date\n"); return; }
 
     static const int mdays[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
     int dim = mdays[m-1];
@@ -1433,7 +1433,7 @@ static int run_command(char *line, char *cwd) {
             if (host[0] == 0) { print("usage: ping <host>\n"); }
             else {
                 char ip[40];
-                if (sys_resolve(host, ip, sizeof(ip)) < 0) { print("ping: cannot resolve "); print(host); print("\n"); }
+                if (sys_resolve(host, ip, sizeof(ip)) < 0) { perr("ping: cannot resolve "); print(host); print("\n"); }
                 else {
                     for (int k = 0; ip[k]; k++) if (ip[k] == '\n') ip[k] = 0;   /* inline the IP */
                     print("PING "); print(host); print(" ("); print(ip); print(") ...\n");
@@ -1444,7 +1444,7 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (startswith(line, "resolve ")) {
             char ip[40]; sh_unprot_buf(line + 8);
-            if (sys_resolve(line + 8, ip, sizeof(ip)) < 0) print("resolve: failed\n");
+            if (sys_resolve(line + 8, ip, sizeof(ip)) < 0) perr("resolve: failed\n");
             else { print(line + 8); print(" -> "); print(ip); }
         } else if (streq(line, "pwd")) {
             print(cwd); print("\n");
@@ -1539,7 +1539,7 @@ static int run_command(char *line, char *cwd) {
             while (*p == ' ') p++;
             sh_unprot_buf(p);                                 /* the password may be quoted */
             if (fn[0] == 0 || *p == 0) print("usage: crypt <file> <pass>\n");
-            else if (sys_crypt(fn, p) < 0) print("crypt: failed\n");
+            else if (sys_crypt(fn, p) < 0) perr("crypt: failed\n");
             else { print("crypt: "); print(fn); print(" (run again to reverse)\n"); }
         } else if (startswith(line, "base64 -d ")) {       /* decode base64 -> bytes, written to a file */
             char *q = line + 10; while (*q == ' ') q++;
@@ -1561,7 +1561,7 @@ static int run_command(char *line, char *cwd) {
                     acc = (acc << 6) | (unsigned)v; nbits += 6;
                     if (nbits >= 8) { nbits -= 8; outb[op++] = (char)((acc >> nbits) & 0xff); }
                 }
-                if (sys_writefile(dst, outb, (unsigned long)op) < 0) print("base64: write failed\n");
+                if (sys_writefile(dst, outb, (unsigned long)op) < 0) perr("base64: write failed\n");
                 else { char nb[12]; itoa_simple(op, nb); print("base64: wrote "); print(dst); print(" ("); print(nb); print(" bytes)\n"); }
             }
             free(inb); free(outb);
