@@ -256,8 +256,8 @@ static int interp(const char *src, int depth) {
         else if (ieq(w, "@")) { long addr = pop(); push((addr >= 0 && addr < VARS_N) ? vars[addr] : 0); }
         else if (ieq(w, "?")) { long addr = pop(); print_long((addr >= 0 && addr < VARS_N) ? vars[addr] : 0); print(" "); }
         else if (ieq(w, "+!")) { long addr = pop(), v = pop(); if (addr >= 0 && addr < VARS_N) vars[addr] += v; }
-        else if (ieq(w, ".")) { print_long(pop()); print(" "); }
-        else if (ieq(w, ".s")) { print("<"); print_long(dp); print("> "); for (int k = 0; k < dp; k++) { print_long(ds[k]); print(" "); } }
+        else if (ieq(w, ".")) { sys_setcolor(4); print_long(pop()); sys_setcolor(0); print(" "); }   /* result cyan */
+        else if (ieq(w, ".s")) { print("<"); print_long(dp); print("> "); sys_setcolor(4); for (int k = 0; k < dp; k++) { print_long(ds[k]); print(" "); } sys_setcolor(0); }   /* stack cyan */
         else if (ieq(w, "emit")) { char c = (char)pop(); char s[2] = { c, 0 }; print(s); }
         else if (ieq(w, "cr")) { print("\n"); }
         else if (ieq(w, "space")) { print(" "); }
@@ -265,7 +265,7 @@ static int interp(const char *src, int depth) {
         else if (ieq(w, "words")) { for (int k = 0; k < nwords; k++) { print(words[k].name); print(" "); } print("\n"); }
         else if (ieq(w, "depth")) { push(dp); }
         else if (ieq(w, "clear") || ieq(w, "clearstack")) { dp = 0; }
-        else { print("forth: ?  "); print(w); print("\n"); err = 1; }
+        else { sys_setcolor(2); print("forth: ?  "); print(w); print("\n"); sys_setcolor(0); err = 1; }   /* unknown word: red */
     }
     return err ? -1 : 0;
 }
@@ -300,24 +300,24 @@ int main(void) {
     }
     if (ran_script) goto repl;
 
-    print("OS-DEV Forth -- a stack language you can program in.\n");
+    sys_setcolor(4); print("OS-DEV Forth -- a stack language you can program in.\n"); sys_setcolor(8);   /* title cyan, help grey (M1337) */
     print("  e.g.  : square dup * ;  5 square .      (prints 25)\n");
     print("  words: + - * / mod dup drop swap over rot . .s emit cr\n");
     print("         = < > if/else/then  begin/until  do/loop i  variable ! @\n");
-    print("  'words' lists definitions, 'bye' exits.\n\n");
+    print("  'words' lists definitions, 'bye' exits.\n\n"); sys_setcolor(0);
 
 repl:;
     char line[1024];
     for (;;) {
-        print("ok> ");
+        sys_setcolor(4); print("ok> "); sys_setcolor(0);   /* prompt cyan (M1337) */
         int n = readline(line, sizeof line);
         if (g_interrupted) { g_interrupted = 0; dp = 0; print("\n"); continue; }   /* Ctrl-C at the prompt */
         if (n <= 0) continue;
         if (ieq(line, "bye") || ieq(line, "quit") || ieq(line, "exit")) break;
         err = 0;
         interp(line, 0);
-        if (g_interrupted) { g_interrupted = 0; dp = 0; print("  ^C interrupted\n"); }   /* Ctrl-C aborted a runaway program */
-        else if (!err) print(" ok\n");
+        if (g_interrupted) { g_interrupted = 0; dp = 0; sys_setcolor(3); print("  ^C interrupted\n"); sys_setcolor(0); }   /* Ctrl-C aborted a runaway program */
+        else if (!err) { sys_setcolor(9); print(" ok\n"); sys_setcolor(0); }   /* success in lime */
         else { dp = 0; print("\n"); }      /* on error, clear the stack for a clean prompt */
     }
     return 0;
