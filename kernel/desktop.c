@@ -84,6 +84,7 @@ static const struct menu_item menu[] = {
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
     { "Calendar (gfx)", KIND_APP, "gcal" },
+    { "Gauges", KIND_APP, "gauges" },
     { "Snake", KIND_APP, "snake" }, { "Editor", KIND_APP, "editor" },
     { "2048", KIND_APP, "2048" }, { "Life", KIND_APP, "life" }, { "Mines", KIND_APP, "mines" },
     { "Tetris", KIND_APP, "tetris" }, { "Breakout", KIND_APP, "breakout" },
