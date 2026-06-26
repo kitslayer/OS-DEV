@@ -51,8 +51,12 @@ static void fmt_fixed(long v, char *b) {
 /* per-category unit names + multiplicative factor from the base (fixed x10000); temperature is special-cased */
 struct U { const char *name; long factor; };
 static const struct U LEN[] = { {"ft", 32808}, {"in", 393701}, {"cm", 1000000}, {"km", 10} };  /* from metres (4-dec fixed-point; miles too small to represent) */
-static const struct U WGT[] = { {"lb", 22046}, {"g", 10000000}, {"oz", 352740} };                            /* from kilograms */
-static const char *CATN[3] = { "Length  (metres)", "Weight  (kilograms)", "Temperature  (Celsius)" };
+static const struct U WGT[] = { {"lb", 22046}, {"g", 10000000}, {"oz", 352740} };              /* from kilograms */
+static const struct U SPD[] = { {"km/h", 36000}, {"mph", 22369}, {"ft/s", 32808} };            /* from metres/second */
+static const struct U ARE[] = { {"sqft", 107639}, {"sqin", 15500031}, {"sqcm", 100000000} };   /* from square metres */
+static const struct U *TBL[5] = { LEN, WGT, 0, SPD, ARE };                                      /* index 2 (temperature) is special-cased */
+static const int TBLN[5] = { 4, 3, 0, 3, 3 };
+static const char *CATN[5] = { "Length  (metres)", "Weight  (kilograms)", "Temperature  (Celsius)", "Speed  (metres/sec)", "Area  (square metres)" };
 
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gconv: gfx init failed\n"); return 1; }
@@ -65,14 +69,14 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
-        else if (k == 'c' || k == 'C') { cat = (cat + 1) % 3; dirty = 1; }
+        else if (k == 'c' || k == 'C') { cat = (cat + 1) % 5; dirty = 1; }
         else if (k >= '0' && k <= '9') { if (elen < 12) { entry[elen++] = (char)k; entry[elen] = 0; } dirty = 1; }
         else if (k == '.') { int has = 0; for (int i = 0; i < elen; i++) if (entry[i] == '.') has = 1;
                              if (!has && elen < 12) { if (elen == 0) entry[elen++] = '0'; entry[elen++] = '.'; entry[elen] = 0; } dirty = 1; }
         else if (k == 8 || k == 0x7F) { if (elen > 0) entry[--elen] = 0; dirty = 1; }
 
         int mx, my, b = sys_mouse(&mx, &my);                       /* click anywhere = next category */
-        if ((b & 1) && !(prevb & 1) && mx >= 0) { cat = (cat + 1) % 3; dirty = 1; }
+        if ((b & 1) && !(prevb & 1) && mx >= 0) { cat = (cat + 1) % 5; dirty = 1; }
         prevb = b;
 
         if (dirty) {
@@ -96,8 +100,8 @@ int main(void) {
                 p = 0; line[p++] = '='; line[p++] = ' '; for (int j = 0; r[j]; j++) line[p++] = r[j]; for (int j = 0; u[j]; j++) line[p++] = u[j]; line[p] = 0;
                 text(line, 24, y, 0xD8E0EC); y += 24;
             } else {
-                const struct U *tbl = cat == 0 ? LEN : WGT;
-                int n = cat == 0 ? 4 : 3;
+                const struct U *tbl = TBL[cat];
+                int n = TBLN[cat];
                 for (int i = 0; i < n; i++) {
                     long out = v * tbl[i].factor / SCALE;
                     char r[24]; fmt_fixed(out, r);
