@@ -118,6 +118,7 @@ global gconv_elf_start, gconv_elf_end
 global gbase_elf_start, gbase_elf_end
 global gpass_elf_start, gpass_elf_end
 global gclip_elf_start, gclip_elf_end
+global gtodo_elf_start, gtodo_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -558,5 +559,9 @@ gpass_elf_end:
 gclip_elf_start:
     incbin "build/gclip.elf"
 gclip_elf_end:
+
+gtodo_elf_start:
+    incbin "build/gtodo.elf"
+gtodo_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
