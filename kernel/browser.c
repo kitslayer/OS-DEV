@@ -4026,7 +4026,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             int matched = (b->find_tok >= 0 && tk->type == TK_WORD && tok_matches(b, tk));
             int current = (t == b->find_tok);
             uint32_t fg = color_for(tk->style);
-            if (tk->style != STY_LINK && (b->tokcolor[t] & 0x01000000))   /* <font color> override */
+            if (b->tokcolor[t] & 0x01000000)               /* explicit colour (CSS / <font>) overrides the default — incl. for links (M1435), so a{color} wins over the default blue */
                 fg = b->tokcolor[t] & 0xFFFFFF;
             /* content background: explicit CSS background-color wins over the <mark> default */
             uint32_t cbg = (b->tokbg[t] & 0x01000000) ? (b->tokbg[t] & 0xFFFFFF)
