@@ -91,7 +91,7 @@ int main(void) {
                 text(eb, 56, y, 0xF0F0A0);
                 fill(56 + elen * 8, y, 8, 16, 0x808890);    /* caret */
             }
-            text(editing ? "Enter: save   Esc: cancel" : "a:add e:edit space:done d:del c:clear-done q:quit", 14, H - 16, 0x707888);
+            text(editing ? "Enter: save   Esc: cancel" : "a:add e:edit v:paste space:done d:del c:clear q:quit", 14, H - 16, 0x707888);
             sys_gfx_blit(FB);
             dirty = 0;
         }
@@ -108,6 +108,12 @@ int main(void) {
         } else {
             if (k == 'q' || k == 27) break;
             else if (k == 'a' || k == 'A') { editing = 1; elen = 0; eb[0] = 0; dirty = 1; }
+            else if ((k == 'v' || k == 'V') && nit < MAXIT) {   /* paste the clipboard's first line as a new item */
+                char cb[TLEN]; int cn = sys_clip_get(cb, TLEN - 1);
+                int p = 0; for (int i = 0; i < cn && cb[i] && cb[i] != '\n' && p < TLEN - 1; i++) items[nit].t[p++] = cb[i];
+                items[nit].t[p] = 0;
+                if (p > 0) { items[nit].done = 0; sel = nit; nit++; save(); dirty = 1; }
+            }
             else if ((k == 'e' || k == 'E') && nit > 0) { editing = 2; elen = 0; for (int j = 0; items[sel].t[j] && elen < TLEN - 1; j++) eb[elen++] = items[sel].t[j]; eb[elen] = 0; dirty = 1; }
             else if ((k == 0x11 || k == 'w') && sel > 0) { sel--; dirty = 1; }
             else if ((k == 0x12 || k == 's') && sel < nit - 1) { sel++; dirty = 1; }

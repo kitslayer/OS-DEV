@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1425) gtodo — paste a clipboard line as a task.** `v` adds a new to-do from the system clipboard's first line (`sys_clip_get`), the reverse of the copy-integrations — so you can copy text anywhere (a calc result, an editor line, …) and drop it straight into your list. The clipboard now works as a cross-app data bus. **Verified:** in-guest end-to-end — copied "4" in gcalc, then gtodo `v` added "[ ] 4"; `make check` green.
+
 > **(M1424) gcalc — copy the result to the clipboard.** `y` copies the current display (a computed result or the typed entry) to the system clipboard (`sys_clip_set`), so you can paste a number into the editor/code; a hint line was added (window grew 320→340 px). **Verified:** in-guest end-to-end — `8/2=` then `y`, then gclip showed `4` (1 byte); `make check` green.
 
 > **(M1423) gcolor — copy the hex to the clipboard.** `c` now copies the current colour as `#RRGGBB` to the system clipboard (`sys_clip_set`), so you can paste it into the editor/code. **Verified:** in-guest end-to-end — gcolor `c` (default teal) then gclip showed `#20B2AA` (7 bytes); `make check` green.
