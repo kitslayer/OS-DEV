@@ -30,8 +30,44 @@ static void chS(char c, int px, int py, int s, unsigned col) {
     unsigned u = (unsigned char)c; if (u >= 128) u = '?'; const unsigned char *g = &FONT[u * 16];
     for (int r = 0; r < 16; r++) for (int b = 0; b < 8; b++) if ((g[r] >> (7 - b)) & 1) fill(px + b * s, py + r * s, s, s, col);
 }
-static void textS(const char *t, int x, int y, int s, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, s, col); x += 8 * s; } }
+/* (textS retired in M1441 — the time now draws via gtextS with an amber bloom) */
 static void text(const char *t, int x, int y, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, 1, col); x += 8; } }
+
+/* ---- instrument-panel UI kit (M1441; see gconv.c M1430) ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_AMBER   0xFFB23Eu
+#define C_AMBERLO 0x7A521Au
+#define C_DIM     0x6E827Fu
+#define C_LED     0x46E0A0u
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, lo); fill(x, y, 1, h, lo); fill(x, y + h - 1, w, 1, hi); fill(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fill(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fill(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+static void gtextS(const char *t, int x, int y, int s, unsigned col, unsigned glow) {
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s + 1, y + 1, s, glow);
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s,     y,     s, col);
+}
 
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gsw: gfx init failed\n"); return 1; }
@@ -52,21 +88,22 @@ int main(void) {
         if (running || dirty) {
             long ms = running ? (sys_uptime_ms() - start + accum) : accum;
             int mm = (int)(ms / 60000), ss = (int)((ms % 60000) / 1000), t = (int)((ms % 1000) / 100);
-            for (int i = 0; i < W * H; i++) FB[i] = 0x0B0D14;
+            vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);                   /* slate faceplate */
+            bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+            panel(8, 12, W - 16, 56);                                /* recessed amber readout */
 
             char b[12]; int i = 0;
             b[i++] = '0' + (mm / 10) % 10; b[i++] = '0' + mm % 10; b[i++] = ':';
             b[i++] = '0' + ss / 10; b[i++] = '0' + ss % 10; b[i++] = '.'; b[i++] = '0' + t; b[i] = 0;
-            unsigned dc = running ? 0x60E060 : 0xD0D0D8;             /* green while running, grey when stopped */
-            textS(b, (W - 7 * 24) / 2, 26, 3, dc);                   /* 7 glyphs * 8 * scale-3 = 168 px wide */
+            gtextS(b, (W - 7 * 24) / 2, 16, 3, running ? C_AMBER : C_AMBERLO, C_AMBERLO);   /* time glows amber, dim when stopped */
 
-            int cx = W / 2, cy = 132, R = 34;                        /* sub-second sweep ring */
-            for (int a = 0; a < 360; a += 3) putpx(cx + R * isin(a) / 1024, cy - R * icos(a) / 1024, 0x303848);
+            int cx = W / 2, cy = 140, R = 34;                        /* sub-second sweep ring */
+            for (int a = 0; a < 360; a += 3) putpx(cx + R * isin(a) / 1024, cy - R * icos(a) / 1024, 0x33414A);
             int ang = (int)((ms % 1000) * 360 / 1000);
-            line(cx, cy, cx + (R - 4) * isin(ang) / 1024, cy - (R - 4) * icos(ang) / 1024, running ? 0x60E060 : 0x808890);
-            fill(cx - 2, cy - 2, 5, 5, 0xFFD040);
+            line(cx, cy, cx + (R - 4) * isin(ang) / 1024, cy - (R - 4) * icos(ang) / 1024, running ? C_LED : C_DIM);
+            fill(cx - 2, cy - 2, 5, 5, C_AMBER);                     /* hub */
 
-            text(running ? "RUNNING   space:stop  r:reset" : "STOPPED   space:start  r:reset", 8, H - 16, 0x707888);
+            text(running ? "RUNNING   space stop  r reset" : "STOPPED   space start  r reset", 8, H - 16, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }
