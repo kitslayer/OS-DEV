@@ -33,6 +33,44 @@ static void ch(char c, int px, int py, unsigned col) { unsigned u = (unsigned ch
 static void text(const char *s, int x, int y, unsigned col) { for (int i = 0; s[i]; i++) { ch(s[i], x, y, col); x += 8; } }
 static void beepstep(int s) { for (int r = 0; r < ROWS; r++) if (cells[s][r]) { sys_beep(FREQ[r], 55); return; } }
 
+/* ---- instrument-panel UI kit (M1450; see gconv.c M1430). A step sequencer is a
+ * groovebox/control panel, so the faceplate fits — the note cells keep their row colours. */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_AMBER   0xFFB23Eu
+#define C_AMBERLO 0x7A521Au
+#define C_LABEL   0xC6D0CCu
+#define C_DIM     0x6E827Fu
+#define C_LED     0x46E0A0u
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, lo); fill(x, y, 1, h, lo); fill(x, y + h - 1, w, 1, hi); fill(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fill(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fill(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+static void led(int x, int y) {
+    fill(x, y, 9, 9, C_BEZLO); fill(x + 1, y + 1, 7, 7, 0x1A6E50u);
+    fill(x + 2, y + 2, 5, 5, C_LED); putpx(x + 3, y + 3, 0xCFFFE8u);
+}
+
 static const char *FNAME = "SEQ.DAT";
 static void seq_save(void) {                              /* 16 lines of 5 bits */
     char buf[STEPS * (ROWS + 1)]; int p = 0;
@@ -63,23 +101,25 @@ int main(void) {
         if (playing && now - last >= interval) { step = (step + 1) % STEPS; last = now; beepstep(step); dirty = 1; }
 
         if (dirty) {
-            for (int i = 0; i < W * H; i++) FB[i] = 0x12141C;
-            text("Step Sequencer", 12, 10, 0x8FD0FF);
-            for (int r = 0; r < ROWS; r++) text(NOTE[r], 36, Y0 + r * CW + 4, RC[r]);
+            vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);                 /* slate faceplate (M1450) */
+            bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+            text("STEP SEQUENCER", 12, 10, C_LABEL);
+            fill(12, 28, 128, 2, C_AMBERLO);                       /* amber title rule */
+            led(W - 24, 11);
+            panel(28, Y0 - 8, W - 40, ROWS * CW + 16);             /* recessed step-grid screen */
+            for (int r = 0; r < ROWS; r++) text(NOTE[r], 36, Y0 + r * CW + 4, RC[r]);   /* note labels keep row colours */
             for (int c = 0; c < STEPS; c++) for (int r = 0; r < ROWS; r++) {
                 int x = X0 + c * CW, y = Y0 + r * CW;
-                fill(x, y, CW - 1, CW - 1, (c == step && playing) ? 0x33405C : (c % 4 == 0) ? 0x20242E : 0x191C24);
+                fill(x, y, CW - 1, CW - 1, (c == step && playing) ? 0x33405C : (c % 4 == 0) ? 0x20242E : 0x141820);
                 if (cells[c][r]) fill(x + 3, y + 3, CW - 7, CW - 7, RC[r]);
             }
-            char st[40]; int p = 0; const char *s1 = playing ? "PLAYING  " : "STOPPED  ";
-            while (*s1) st[p++] = *s1++;
-            const char *s2 = "tempo "; while (*s2) st[p++] = *s2++;
-            int bpm = 60000 / (interval * 4); char t[6]; int ti = 0; if (bpm == 0) t[ti++] = '0'; while (bpm) { t[ti++] = '0' + bpm % 10; bpm /= 10; }
-            while (ti) st[p++] = t[--ti];
-            const char *s3 = " bpm"; while (*s3) st[p++] = *s3++;
-            st[p] = 0;
-            text(st, 56, Y0 + ROWS * CW + 12, playing ? 0x70E090 : 0x9098A8);
-            text("click cells   space: play   w/s: tempo   c: clear   q: quit", 12, H - 16, 0x707888);
+            int ys = Y0 + ROWS * CW + 14;
+            text(playing ? "PLAYING" : "STOPPED", 56, ys, playing ? C_LED : C_DIM);
+            text("TEMPO", 156, ys, C_DIM);
+            { int bpm = 60000 / (interval * 4); char t[6]; int ti = 0; if (bpm == 0) t[ti++] = '0'; while (bpm) { t[ti++] = '0' + bpm % 10; bpm /= 10; }
+              char bs[6]; int bi = 0; while (ti) bs[bi++] = t[--ti]; bs[bi] = 0;
+              text(bs, 212, ys, C_AMBER); text("BPM", 212 + bi * 8 + 4, ys, C_DIM); }   /* tempo glows amber */
+            text("click cells   space play   w/s tempo   c clear   q quit", 12, H - 16, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }
