@@ -29,6 +29,12 @@ static int  smode; static unsigned char spat[16]; static int splen, snib, sfail;
 
 static void hx(int v) { char s[2] = { "0123456789abcdef"[v & 15], 0 }; print(s); }
 static void hoff(long o) { hx((int)((o >> 12) & 15)); hx((int)((o >> 8) & 15)); hx((int)((o >> 4) & 15)); hx((int)(o & 15)); }
+static long find_from(long start) {   /* next occurrence of spat[0..splen) from `start`, wrapping; -1 if none (M1354) */
+    if (splen <= 0) return -1;
+    for (long i = start; i + splen <= flen; i++) { int m = 1; for (int j = 0; j < splen; j++) if (buf[i+j] != spat[j]) { m = 0; break; } if (m) return i; }
+    for (long i = 0; i < start && i + splen <= flen; i++) { int m = 1; for (int j = 0; j < splen; j++) if (buf[i+j] != spat[j]) { m = 0; break; } if (m) return i; }
+    return -1;
+}
 
 static void render(long cur, long top, int nibble, int dirty) {
     sys_clear();
@@ -63,7 +69,7 @@ static void render(long cur, long top, int nibble, int dirty) {
     sys_setcolor(8);
     if (gmode) { print("\n goto: "); hoff(gval); print("  (enter jump, esc cancel)"); }
     else if (smode) { print("\n find: "); for (int i = 0; i < splen; i++) { hx(spat[i] >> 4); hx(spat[i] & 15); print(" "); } print(" (enter, esc)"); }
-    else print("\n arrows/np/g  /find  0-9a-f edit  s save");   /* <44 cols so the cursor stays (M1343/M1349) */
+    else print("\n arrows/np/g  /N find  0-9a-f edit s save");   /* <44 cols so the cursor stays (M1343/M1354) */
     sys_setcolor(0);
 }
 
@@ -98,12 +104,7 @@ int main(void) {
             if (k == 27) smode = 0;
             else if (k == '\n' || k == '\r') {
                 smode = 0;
-                if (splen > 0) {
-                    long found = -1;
-                    for (long i = cur + 1; i + splen <= flen && found < 0; i++) { int m = 1; for (int j = 0; j < splen; j++) if (buf[i+j] != spat[j]) { m = 0; break; } if (m) found = i; }
-                    for (long i = 0;       i <= cur  && i + splen <= flen && found < 0; i++) { int m = 1; for (int j = 0; j < splen; j++) if (buf[i+j] != spat[j]) { m = 0; break; } if (m) found = i; }
-                    if (found >= 0) { cur = found; nibble = 0; sfail = 0; } else sfail = 1;
-                }
+                if (splen > 0) { long f = find_from(cur + 1); if (f >= 0) { cur = f; nibble = 0; sfail = 0; } else sfail = 1; }
             }
             else if (k == 8 || k == 127) { if (snib) snib = 0; else if (splen > 0) splen--; }
             else { int d = (k>='0'&&k<='9') ? k-'0' : (k>='a'&&k<='f') ? k-'a'+10 : (k>='A'&&k<='F') ? k-'A'+10 : -1;
@@ -118,6 +119,7 @@ int main(void) {
         sfail = 0;                                               /* any normal key clears the find indicator */
         if (k == 'q' || k == 27) break;
         else if (k == '/') { smode = 1; splen = 0; snib = 0; sfail = 0; }   /* enter find mode */
+        else if (k == 'N') { long f = find_from(cur + 1); if (f >= 0) { cur = f; nibble = 0; sfail = 0; } else sfail = 1; }   /* find-next, reuse last pattern (M1354) */
         else if (k == 'g') { gmode = 1; gval = 0; }              /* enter goto mode */
         else if (k == 's' && !ro) {                              /* save (disabled when read-only) */
             if (sys_writefile(fname, (char *)buf, flen) >= 0) {
