@@ -24,9 +24,39 @@ static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y
 static void fill(int x0, int y0, int w, int h, unsigned c) { for (int y = y0; y < y0 + h; y++) for (int x = x0; x < x0 + w; x++) putpx(x, y, c); }
 static void chS(char c, int px, int py, int s, unsigned col) { unsigned u = (unsigned char)c; if (u >= 128) u = '?';
     const unsigned char *g = &FONT[u * 16]; for (int r = 0; r < 16; r++) for (int b = 0; b < 8; b++) if ((g[r] >> (7 - b)) & 1) fill(px + b * s, py + r * s, s, s, col); }
-static void textS(const char *t, int x, int y, int s, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, s, col); x += 8 * s; } }
+/* (textS retired in M1440 — the hex readout now draws via gtextS with an amber bloom) */
 static void text(const char *t, int x, int y, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, 1, col); x += 8; } }
 static int clamp(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+
+/* ---- instrument-panel UI kit (M1440; see gconv.c M1430) ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_AMBER   0xFFB23Eu
+#define C_AMBERLO 0x7A521Au
+#define C_LABEL   0xC6D0CCu
+#define C_DIM     0x6E827Fu
+#define C_LED     0x46E0A0u
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, lo); fill(x, y, 1, h, lo); fill(x, y + h - 1, w, 1, hi); fill(x + w - 1, y, 1, h, hi);
+}
+static void gtextS(const char *t, int x, int y, int s, unsigned col, unsigned glow) {
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s + 1, y + 1, s, glow);
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s,     y,     s, col);
+}
 
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gcolor: gfx init failed\n"); return 1; }
@@ -61,14 +91,14 @@ int main(void) {
         if (rgb[0] != prgb[0] || rgb[1] != prgb[1] || rgb[2] != prgb[2] || active != pact) {
             prgb[0] = rgb[0]; prgb[1] = rgb[1]; prgb[2] = rgb[2]; pact = active;
             unsigned col = ((unsigned)rgb[0] << 16) | ((unsigned)rgb[1] << 8) | rgb[2];
-            for (int i = 0; i < W * H; i++) FB[i] = 0x15181F;
+            vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);                             /* slate faceplate */
+            bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+            fill(13, 13, W - 26, 72, col);                                     /* preview swatch */
+            bevel_dn(12, 12, W - 24, 74, C_BEZHI, C_BEZLO);                    /* recessed sample frame */
 
-            fill(12, 12, W - 24, 74, col);                                     /* preview swatch */
-            for (int i = 0; i < W - 24; i++) { putpx(12 + i, 12, 0x000000); putpx(12 + i, 85, 0x000000); }
-
-            char hx[10] = { '#', 0 }; const char *HX = "0123456789ABCDEF";     /* #RRGGBB */
+            char hx[10] = { '#', 0 }; const char *HX = "0123456789ABCDEF";     /* #RRGGBB, amber readout */
             int p = 1; for (int ch = 0; ch < 3; ch++) { hx[p++] = HX[(rgb[ch] >> 4) & 15]; hx[p++] = HX[rgb[ch] & 15]; } hx[p] = 0;
-            textS(hx, 14, 96, 2, 0xE8ECF4);
+            gtextS(hx, 14, 96, 2, C_AMBER, C_AMBERLO);
             char rs[40]; int q = 0; const char *pre = "rgb(";                  /* rgb(r, g, b) */
             while (*pre) rs[q++] = *pre++;
             for (int ch = 0; ch < 3; ch++) {
@@ -78,15 +108,16 @@ int main(void) {
                 while (ti) rs[q++] = t[--ti];
                 if (ch < 2) { rs[q++] = ','; rs[q++] = ' '; }
             }
-            rs[q++] = ')'; rs[q] = 0; text(rs, 150, 100, 0xA0A8B8);
+            rs[q++] = ')'; rs[q] = 0; text(rs, 150, 100, C_DIM);
 
             for (int ch = 0; ch < 3; ch++) {                                   /* the three sliders */
                 int y = SY[ch];
-                text((char[]){ CHN[ch], 0 }, 18, y + 2, ch == active ? 0xFFFFFF : 0x9098A8);
+                text((char[]){ CHN[ch], 0 }, 18, y + 2, ch == active ? C_LED : C_DIM);
                 for (int i = 0; i < SW; i++) {                                 /* black -> pure-channel gradient */
                     int v = i * 255 / SW; unsigned gc = ch == 0 ? (unsigned)v << 16 : ch == 1 ? (unsigned)v << 8 : (unsigned)v;
                     for (int yy = 0; yy < 14; yy++) putpx(SX + i, y + yy, gc);
                 }
+                bevel_dn(SX - 1, y - 1, SW + 2, 16, C_BEZHI, C_BEZLO);         /* recess the track */
                 int hxp = SX + rgb[ch] * SW / 255;                             /* handle */
                 fill(hxp - 2, y - 4, 5, 22, 0xFFFFFF); fill(hxp - 1, y - 3, 3, 20, 0x303840);
                 char vt[4], tb[4]; int v = rgb[ch], ti = 0;
@@ -95,9 +126,9 @@ int main(void) {
                 int vp = 0;
                 while (ti) vt[vp++] = tb[--ti];
                 vt[vp] = 0;
-                text(vt, SX + SW + 8, y + 2, 0xC8D0DE);
+                text(vt, SX + SW + 8, y + 2, C_LABEL);
             }
-            text("drag/r/g/b/a/d   c: copy hex   q: quit", 14, H - 16, 0x707888);
+            text("drag  r/g/b  a/d  c copy hex  q quit", 14, H - 16, C_DIM);
             sys_gfx_blit(FB);
         }
         sys_sleep(40);
