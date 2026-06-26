@@ -21,14 +21,15 @@ int main(void) {
     int st; sys_waitpid((int)pid, &st);        // let the child cd + exit first
     char b[1024]; long n = sys_list(b, sizeof b - 1); if (n > 0) b[n] = 0;
 
-    print("per-process cwd:\n");
+    sys_setcolor(4); print("per-process cwd:\n"); sys_setcolor(0);
     print("  parent cd'd to /proc; forked a child that cd'd to /tmp.\n");
     print("  after the child exited, the parent lists its OWN cwd:\n\n");
     print(b);
 
     int ok = contains(b, "uptime");            // /proc has 'uptime'; /tmp would not
-    print(ok ? "\nPASS: parent still sees /proc -- the child's cd to /tmp did NOT leak.\n"
-             : "\nFAIL: the child's chdir corrupted the parent's cwd (global-cwd leak).\n");
+    if (ok) { sys_setcolor(9); print("\nPASS: parent still sees /proc -- the child's cd to /tmp did NOT leak.\n"); }
+    else { sys_setcolor(2); print("\nFAIL: the child's chdir corrupted the parent's cwd (global-cwd leak).\n"); }
+    sys_setcolor(0);
 
     sys_chdir("/");
     sys_sleep(20000);

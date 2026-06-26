@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1352) demo apps — finish the colour pass (all 17 done).** Coloured the last demos: `nettcp` (label cyan, done lime), `mmapfile` (conclusion lime), `overlay`/`robustfutex`/`pcwd` (PASS lime / FAIL red), `scnotify` (supervisor cyan, DENY red / EMULATE lime), `crashinfo` (label + section headers cyan, fault line red). **Every `run`-launched systems demo is now coloured, matching the shell + menu apps — the colour pass is complete OS-wide.** **Verified:** build clean; the title/result/PASS colour pattern is verified in-guest; full `make check` green.
+
 > **(M1351) demo apps — colourise execdemo + fswaittest + bpftest.** Titles cyan + key results coloured: `execdemo` (exec-swap proof lime), `fswaittest` (woke-index lime, timeout amber), `bpftest` (filter-loaded lime). **Verified:** build clean; the title/result colour pattern is verified in-guest (forktest/threads/iouring). (10 demo apps coloured.)
 
 > **(M1350) demo apps — colourise uffdtest + mseal + iouring.** Continued the demo colour pass (titles cyan, key results/conclusions lime): `uffdtest` (materialized-page content + success lime), `mseal` (title cyan, takeaway lime), `iouring` (title cyan, "that's io_uring." conclusion lime). **Verified:** in-guest — `run iouringtest` shows `io_uring:` cyan and the conclusion lime. (7 demo apps coloured.)

@@ -86,7 +86,7 @@ int main(void) {
     }
     unsigned long phoff = rd64(core + 32);
     int phnum = (int)rd16(core + 56);
-    print("crashinfo: "); print(path); print("  ("); pdec((long)csz);
+    sys_setcolor(4); print("crashinfo:"); sys_setcolor(0); print(" "); print(path); print("  ("); pdec((long)csz);
     print(" bytes, "); pdec(phnum); print(" segments)\n");
 
     /* PT_NOTE -> NT_PRSTATUS: 27 GP regs at desc offset 112 */
@@ -111,8 +111,8 @@ int main(void) {
     /* user_regs_struct order: r15 r14 r13 r12 rbp rbx r11 r10 r9 r8 rax rcx rdx rsi rdi orig_rax rip cs rflags rsp ss */
     unsigned long rbp = regs[4], rip = regs[16], rsp = regs[19], rflags = regs[18];
 
-    print("\nfaulted at RIP="); phex(rip); print(region_of(rip)); print("\n");
-    print("registers:\n");
+    sys_setcolor(2); print("\nfaulted at RIP="); sys_setcolor(0); phex(rip); print(region_of(rip)); print("\n");
+    sys_setcolor(4); print("registers:\n"); sys_setcolor(0);
     static const struct { const char *nm; int idx; } R[16] = {
         {"rax", 10}, {"rbx", 5}, {"rcx", 11}, {"rdx", 12}, {"rsi", 13}, {"rdi", 14},
         {"rbp", 4},  {"rsp", 19},{"r8 ", 9},  {"r9 ", 8},  {"r10", 7},  {"r11", 6},
@@ -125,7 +125,7 @@ int main(void) {
     print("  rflags="); phex(rflags); print("\n");
 
     /* backtrace #1: frame-pointer (saved-rbp) walk */
-    print("\nbacktrace (frame-pointer walk):\n");
+    sys_setcolor(4); print("\nbacktrace (frame-pointer walk):\n"); sys_setcolor(0);
     print("  #0  "); phex(rip); print(region_of(rip)); print("\n");
     unsigned long fp = rbp; int depth = 1;
     for (; depth <= 32 && fp; depth++) {
@@ -140,7 +140,7 @@ int main(void) {
     if (depth == 1) print("  (frame pointers omitted by the crashed program)\n");
 
     /* backtrace #2: heuristic — text-range values lying on the live stack */
-    print("\ntext addresses on the stack (heuristic, RSP up):\n");
+    sys_setcolor(4); print("\ntext addresses on the stack (heuristic, RSP up):\n"); sys_setcolor(0);
     unsigned long top = 0x50000000UL + 0x80000UL;         /* USTACK_BASE + 128 pages */
     int shown = 0;
     for (unsigned long a = rsp & ~7UL; a + 8 <= top && shown < 12; a += 8) {

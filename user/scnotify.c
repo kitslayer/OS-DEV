@@ -29,11 +29,11 @@ int main(void) {
     // ---- parent: the supervisor ----
     unsigned long ev[4];
     if (sys_seccomp_wait(pid, ev) > 0) {
-        print("supervisor: child wants syscall #"); pnum((long)ev[0]); print(" -> DENY (return -1)\n");
+        sys_setcolor(4); print("supervisor:"); sys_setcolor(0); print(" child wants syscall #"); pnum((long)ev[0]); sys_setcolor(2); print(" -> DENY (return -1)\n"); sys_setcolor(0);
         sys_seccomp_reply(pid, 0, -1);          // run_real=0, retval=-1
     }
     if (sys_seccomp_wait(pid, ev) > 0) {
-        print("supervisor: child wants syscall #"); pnum((long)ev[0]); print(" -> EMULATE (return 4)\n");
+        sys_setcolor(4); print("supervisor:"); sys_setcolor(0); print(" child wants syscall #"); pnum((long)ev[0]); sys_setcolor(9); print(" -> EMULATE (return 4)\n"); sys_setcolor(0);
         sys_seccomp_reply(pid, 0, 4);           // run_real=0, retval=4 (fabricated, no real write)
     }
     sys_sleep(20000);

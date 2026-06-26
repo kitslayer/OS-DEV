@@ -33,7 +33,7 @@ int main(void) {
     print(priv ? "  wrote '#' to the mapping; file on disk UNCHANGED (MAP_PRIVATE): YES\n"
                : "  MAP_PRIVATE check: NO\n");
 
-    print("file-backed mmap: lazily paged from the file, private on write.\n");
+    sys_setcolor(9); print("file-backed mmap: lazily paged from the file, private on write.\n"); sys_setcolor(0);
     sys_sleep(20000);
     return 0;
 }

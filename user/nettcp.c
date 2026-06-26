@@ -7,7 +7,7 @@ int main(void) {
     char idx[8];
     long n = sys_readfile("/net/tcp/clone", idx, sizeof idx - 1);   // clone -> slot index
     if (n <= 0) { print("nettcp: clone failed\n"); sys_sleep(2000); return 1; }
-    print("nettcp: cloned a connection via /net/tcp/clone\n");
+    sys_setcolor(4); print("nettcp:"); sys_setcolor(0); print(" cloned a connection via /net/tcp/clone\n");
 
     if (sys_writefile("/net/tcp/0/ctl", "connect example.com:80", 22) < 0) {
         print("nettcp: connect (via .../ctl) failed\n"); sys_sleep(2000); return 1;
@@ -28,7 +28,7 @@ int main(void) {
         print("\n");
     }
     sys_writefile("/net/tcp/0/ctl", "close", 5);
-    print("nettcp: closed the connection (done)\n");
+    sys_setcolor(9); print("nettcp: closed the connection (done)\n"); sys_setcolor(0);
     sys_sleep(20000);
     return 0;
 }

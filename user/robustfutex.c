@@ -27,7 +27,7 @@ static void dier(void *arg) {
 }
 
 int main(void) {
-    print("robust futex: a worker locks a mutex then EXITS while holding it.\n");
+    sys_setcolor(4); print("robust futex:"); sys_setcolor(0); print(" a worker locks a mutex then EXITS while holding it.\n");
     print("the kernel must release it (owner-died) so we can recover, not hang.\n\n");
 
     int tid = thread_spawn(dier, 0);
@@ -41,8 +41,9 @@ int main(void) {
     rmutex_unlock(&m, 0);
     sys_join(tid);                            // reap the (already-dead) worker
 
-    print(rc == 1 ? "\nPASS: a thread died holding a lock; robust futex released + recovered it.\n"
-                  : "\nFAIL: owner death not detected (would have hung without robust futexes).\n");
+    if (rc == 1) { sys_setcolor(9); print("\nPASS: a thread died holding a lock; robust futex released + recovered it.\n"); }
+    else { sys_setcolor(2); print("\nFAIL: owner death not detected (would have hung without robust futexes).\n"); }
+    sys_setcolor(0);
     sys_sleep(20000);
     return 0;
 }

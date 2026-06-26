@@ -42,9 +42,9 @@ int main(void) {
     int lower_ok = (ln == on);
     for (long i = 0; i < ln && lower_ok; i++) if (c[i] != orig[i]) lower_ok = 0;
 
-    print((copied && g < 0 && lower_ok)
-          ? "\nPASS: copy-up + merged listing + whiteout all work; the lower stayed intact.\n"
-          : "\nFAIL\n");
+    if (copied && g < 0 && lower_ok) { sys_setcolor(9); print("\nPASS: copy-up + merged listing + whiteout all work; the lower stayed intact.\n"); }
+    else { sys_setcolor(2); print("\nFAIL\n"); }
+    sys_setcolor(0);
     sys_chdir("/");                                     /* restore the (process-global) cwd off /over */
     sys_sleep(20000);
     return 0;
