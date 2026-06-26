@@ -26,6 +26,42 @@ static void ch(char c, int px, int py, unsigned col) {
             if ((g[r] >> (7 - b)) & 1) putpx(px + b, py + r, col);
 }
 static void text(const char *s, int x, int y, unsigned col) { for (int i = 0; s[i]; i++) { ch(s[i], x, y, col); x += 8; } }
+
+/* ---- instrument-panel UI kit (M1449; see gconv.c M1430) ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_AMBERLO 0x7A521Au
+#define C_LABEL   0xC6D0CCu
+#define C_DIM     0x6E827Fu
+#define C_LED     0x46E0A0u
+static void fillr(int x, int y, int w, int h, unsigned c) { for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) putpx(x + i, y + j, c); }
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fillr(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fillr(x, y, w, 1, hi); fillr(x, y, 1, h, hi); fillr(x, y + h - 1, w, 1, lo); fillr(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fillr(x, y, w, 1, lo); fillr(x, y, 1, h, lo); fillr(x, y + h - 1, w, 1, hi); fillr(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fillr(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fillr(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+static void led(int x, int y) {
+    fillr(x, y, 9, 9, C_BEZLO); fillr(x + 1, y + 1, 7, 7, 0x1A6E50u);
+    fillr(x + 2, y + 2, 5, 5, C_LED); putpx(x + 3, y + 3, 0xCFFFE8u);
+}
 static int has(const char *s, const char *sub) {            /* naive substring test */
     for (int i = 0; s[i]; i++) { int j = 0; while (sub[j] && s[i + j] == sub[j]) j++; if (!sub[j]) return 1; }
     return 0;
@@ -101,18 +137,21 @@ int main(void) {
         int scpu = agg_cpu(&pbusy, &ptot);                     /* whole-system CPU% (reconciles with sysgraph) */
         int cur_pid[40]; long cur_cpu[40]; int cur_n = 0;
 
-        for (int i = 0; i < W * H; i++) FB[i] = 0x0C0C16;           /* dark background */
-        text("Task Manager", 12, 8, 0x8FD0FF);
-        text("MEM", W - 76, 8, 0x70A0C0); text("CPU", W - 38, 8, 0x70A0C0);   /* right-aligned column heads */
-        for (int x = 8; x < W - 8; x++) putpx(x, 30, 0x2A2A3A);     /* header rule */
+        vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);                      /* slate faceplate (M1449) */
+        bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+        text("TASK MANAGER", 12, 8, C_LABEL);                       /* silkscreen title */
+        fillr(12, 26, 112, 2, C_AMBERLO);                           /* amber title rule */
+        led(W - 24, 9);                                             /* power LED */
+        text("MEM", W - 76, 8, C_DIM); text("CPU", W - 38, 8, C_DIM);   /* right-aligned column heads */
+        panel(6, 32, W - 12, H - 32 - 24);                          /* recessed process-list screen */
 
-        int y = 40, count = 0;
+        int y = 42, count = 0;
         for (int i = 0; ps[i]; ) {
             int eol = i; while (ps[eol] && ps[eol] != '\n') eol++;
             char line[80]; int s = 0; for (int k = i; k < eol && s < 79; k++) line[s++] = ps[k]; line[s] = 0;
             if (s > 0) {
-                if (count == sel) for (int x = 8; x < W - 8; x++) for (int yy = -2; yy <= 15; yy++) putpx(x, y + yy, 0x2A3458);  /* selected-row bar (M1401) */
-                unsigned col = 0xC8C8D2;                            /* default */
+                if (count == sel) { for (int x = 10; x < W - 10; x++) for (int yy = -2; yy <= 15; yy++) putpx(x, y + yy, 0x182840); fillr(10, y - 2, 2, 18, 0xFFB23E); }  /* lit selected-row bar + amber edge (M1401/M1449) */
+                unsigned col = C_LABEL;                             /* default */
                 if      (has(line, "run"))   col = 0x5CE070;        /* running: green */
                 else if (has(line, "ready")) col = 0x60C8F0;        /* ready:   cyan  */
                 else if (has(line, "block")) col = 0xE0B050;        /* blocked: amber */
@@ -157,7 +196,7 @@ int main(void) {
         const char *cl = "    CPU "; for (int k = 0; cl[k]; k++) foot[fi++] = cl[k];
         fi = putint(foot, fi, scpu); foot[fi++] = '%';
         const char *kh = "   up/dn k:close"; for (int z = 0; kh[z]; z++) foot[fi++] = kh[z]; foot[fi] = 0;
-        text(foot, 12, H - 20, 0x8890A0);
+        text(foot, 12, H - 18, C_DIM);
 
         sys_gfx_blit(FB);
         int k = sys_pollkey();
