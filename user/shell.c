@@ -486,6 +486,45 @@ static int expand_vars(const char *src, char *dst, int cap){
     dst[o]=0; return 1;
 }
 
+/* --- `ls` colourisation by file type (M1313), like `ls --color`. FAT32 names
+ * are uppercase; ext_eq uppercases for the compare. The colour is a terminal
+ * attribute (sys_setcolor), not bytes in the stream, so piping `ls` stays clean. */
+static int ext_eq(const char *e, int el, const char *s) {
+    int sl = 0; while (s[sl]) sl++;
+    if (el != sl) return 0;
+    for (int k = 0; k < el; k++) { char c = e[k]; if (c >= 'a' && c <= 'z') c -= 32; if (c != s[k]) return 0; }
+    return 1;
+}
+static int ls_color(const char *name, int len) {
+    if (len > 0 && name[len-1] == '/') return 6;                 /* directory: light-blue */
+    int dot = -1; for (int k = 0; k < len; k++) if (name[k] == '.') dot = k;
+    if (dot < 0) return 0;                                       /* no extension: default green */
+    const char *e = name + dot + 1; int el = len - dot - 1;
+    if (ext_eq(e,el,"ELF")||ext_eq(e,el,"SH")) return 9;                                                                    /* executable/script: lime */
+    if (ext_eq(e,el,"PNG")||ext_eq(e,el,"JPG")||ext_eq(e,el,"GIF")||ext_eq(e,el,"BMP")||ext_eq(e,el,"SVG")) return 5;       /* image: magenta */
+    if (ext_eq(e,el,"ZIP")||ext_eq(e,el,"GZ")||ext_eq(e,el,"TGZ")||ext_eq(e,el,"TAR")||ext_eq(e,el,"PAK")||ext_eq(e,el,"WAD")) return 2; /* archive: red */
+    if (ext_eq(e,el,"WAV")) return 4;                                                                                       /* audio: cyan */
+    if (ext_eq(e,el,"C")||ext_eq(e,el,"H")||ext_eq(e,el,"JS")) return 3;                                                    /* code: yellow */
+    if (ext_eq(e,el,"NES")||ext_eq(e,el,"GB")) return 7;                                                                    /* ROM: orange */
+    return 0;                                                    /* docs / text / default: green */
+}
+/* Print an `ls` listing with each name coloured by type + the size/date in grey. */
+static void print_ls_colored(const char *buf) {
+    char seg[128];
+    int i = 0;
+    while (buf[i]) {
+        int ne = i; while (buf[ne] && buf[ne] != ' ' && buf[ne] != '\n') ne++;   /* name [i,ne) */
+        sys_setcolor(ls_color(buf + i, ne - i));
+        { int n = 0; for (int k = i; k < ne && n < 127; k++) seg[n++] = buf[k]; seg[n] = 0; print(seg); }
+        int k = ne; while (buf[k] && buf[k] != '\n') k++;                          /* metadata [ne,k) */
+        sys_setcolor(8);
+        { int n = 0; for (int j = ne; j < k && n < 127; j++) seg[n++] = buf[j]; seg[n] = 0; print(seg); }
+        sys_setcolor(0);
+        if (buf[k] == '\n') { print("\n"); k++; }
+        i = k;
+    }
+}
+
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
     do {
@@ -602,7 +641,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "ls")) {
             char buf[8192];                 /* hold a full directory (~90+ files) */
             sys_list(buf, sizeof(buf));
-            print(buf);
+            print_ls_colored(buf);          /* names coloured by file type (M1313) */
         } else if (startswith(line, "ls ")) {     /* ls <name>...: list each dir's contents, name each file (glob-friendly: `ls *.txt`) */
             const char *p = line + 3; char buf[8192];
             int nargs = 0;
@@ -615,7 +654,7 @@ static int run_command(char *line, char *cwd) {
                 name[j] = 0; sh_unprot_buf(name);
                 if (sys_chdir(name) >= 0) {                    /* a directory: list its contents (header only when several args) */
                     if (nargs > 1) { print(name); print(":\n"); }
-                    sys_list(buf, sizeof buf); print(buf);
+                    sys_list(buf, sizeof buf); print_ls_colored(buf);
                     sys_chdir(cwd);
                 } else {
                     char b;
