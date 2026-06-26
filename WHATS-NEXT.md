@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1404) docs + Welcome refresh.** Bumped the README headline to "1400+ milestones" and updated the boot Welcome screen's app highlights from "Clock, Monitor, Tasks, 60+ more" to "Clock, Calc, Images, Fireworks +", so the first window a user sees advertises the campaign's new graphical apps. **Verified:** in-guest — the Welcome window shows the new line; `make check` green.
+
 > **(M1403) gfire — click to burst.** The fireworks are now interactive: a left-click bursts a coloured firework right at the cursor (`sys_mouse` edge-detected, reusing the `burst()` used by the auto-launches), so you can set off your own alongside the show. **Verified:** in-guest via the QMP click harness — a click produced a pink radial burst centred on the cursor while the automatic green/blue fireworks continued; `make check` green.
 
 > **(M1402) gfire — a fireworks display.** A pure-integer particle simulation purely for the joy of it: rockets launch from the bottom, decelerate under gravity, and burst at their apex into a coloured ring of sparks that arc down and fade. The frame is faded toward the night sky each step (not cleared) so every particle leaves a glowing trail; burst velocities come from a Bhaskara sine (8.8 fixed-point, no FPU). Additive (own file). Launch `run gfire` or the Apps menu ("Fireworks"). **Verified:** in-guest — concurrent blue + red/pink radial bursts arcing down with dotted trails, plus a rising rocket; `make check` green.
