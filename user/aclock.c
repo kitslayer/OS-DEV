@@ -81,11 +81,18 @@ int main(void) {
             }
         }
 
-        /* twelve hour ticks (longer + white at 12/3/6/9, shorter + grey elsewhere) */
+        /* sixty fine minute ticks (the 5-minute marks become the bolder hour ticks below) */
+        for (int m = 0; m < 60; m++) {
+            if (m % 5 == 0) continue;
+            int ang = m * 6, ro = R - 4, ri = R - 7;
+            line(hx(ro, ang), hy(ro, ang), hx(ri, ang), hy(ri, ang), 0x55607A);
+        }
+        /* twelve hour ticks (longer + white + thick at 12/3/6/9, shorter + grey elsewhere) */
         for (int h = 0; h < 12; h++) {
             int ang = h * 30, maj = (h % 3 == 0);
             int ro = R - 4, ri = R - (maj ? 17 : 9);
-            line(hx(ro, ang), hy(ro, ang), hx(ri, ang), hy(ri, ang), maj ? 0xFFFFFF : 0x8890A0);
+            if (maj) thline(hx(ro, ang), hy(ro, ang), hx(ri, ang), hy(ri, ang), 0xFFFFFF);
+            else     line(hx(ro, ang), hy(ro, ang), hx(ri, ang), hy(ri, ang), 0x8890A0);
         }
 
         /* hands: hour (short, thick, white), minute (long, thick, light-blue), second (thin, red) */
