@@ -67,7 +67,8 @@ static void panel(const int *arr, int head, int count, int y0, int gh, unsigned 
         int x = W - 3 - c; if (x < 2) break;
         int v = arr[(head - 1 - c + NS) % NS]; if (v < 0) v = 0; if (v > 100) v = 100;
         int h = v * gh / 100;
-        for (int yy = 0; yy < h; yy++) putpx(x, base - yy, yy >= h - 1 ? col : dim);   /* bright crest, dim fill */
+        unsigned crest = v >= 80 ? 0xF05858 : v >= 50 ? 0xE8C040 : col;   /* load colour: red >=80%, amber >=50%, else base */
+        for (int yy = 0; yy < h; yy++) putpx(x, base - yy, yy >= h - 1 ? crest : dim);   /* coloured crest, dim fill */
     }
 }
 

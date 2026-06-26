@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1377) sysgraph — load-coloured graph crests.** Each graph's bright crest is now coloured by its value — base (green CPU / cyan RAM) below 50%, amber 50–80%, red ≥80% — so a load spike shows instantly as a red/amber band in the scrolling history (like `htop`). **Verified:** in-guest — at ~49% CPU the crest is green with the odd amber tick where samples crossed 50%.
+
 > **(M1376) docs — README taskman row reflects the "top" features.** Updated the #440 table row to note the right-aligned per-task MEM/CPU% columns + aggregate-CPU% footer added across M1371–M1375 (it predated them, describing only the bare process list). Keeps the headline feature list accurate.
 
 > **(M1375) taskman — human-readable MEM units (KiB→MiB).** The MEM column now shows `1.0M` for ≥1 MiB tasks (was `1028K`) and keeps `K` below that — integer math, no FPU — matching `top`/`htop`'s human-readable sizes. **Verified:** in-guest — Task Manager `1.0M`, Shell `916K`, right-aligned.
