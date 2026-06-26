@@ -33,6 +33,32 @@ static int slurp(const char *p, char *b, int m) { long n = sys_readfile(p, b, m 
 static long nth(const char *s, int n) { int k = 0; for (int i = 0; s[i]; ) { if (s[i] >= '0' && s[i] <= '9') { long v = 0; while (s[i] >= '0' && s[i] <= '9') v = v * 10 + (s[i++] - '0'); if (k == n) return v; k++; } else i++; } return 0; }
 static int putu(char *o, int i, long v) { char t[12]; int n = 0; if (v < 0) v = 0; do { t[n++] = '0' + (int)(v % 10); v /= 10; } while (v); while (n) o[i++] = t[--n]; return i; }
 
+/* ---- instrument-panel UI kit (M1447; see gconv.c M1430). A gauge cluster belongs on a
+ * faceplate — slate bg, silkscreen header, green LED; the gauges keep their zone colours. */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_AMBERLO 0x7A521Au
+#define C_LABEL   0xC6D0CCu
+#define C_LED     0x46E0A0u
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+static void led(int x, int y) {
+    fill(x, y, 9, 9, C_BEZLO); fill(x + 1, y + 1, 7, 7, 0x1A6E50u);
+    fill(x + 2, y + 2, 5, 5, C_LED); putpx(x + 3, y + 3, 0xCFFFE8u);
+}
+
 /* one semicircular gauge: top-half arc (0%=left, 100%=right), needle, %, label */
 static void gauge(int cx, int cy, int R, int val, const char *name) {
     if (val < 0) val = 0; if (val > 100) val = 100;
@@ -53,7 +79,7 @@ static void gauge(int cx, int cy, int R, int val, const char *name) {
     unsigned vc = val >= 80 ? 0xF07070 : val >= 50 ? 0xF0D060 : 0x70E080;
     text(s, cx - si * 8 / 2, cy - 34, vc);                 /* % readout inside the arc */
     int nl = 0; while (name[nl]) nl++;
-    text(name, cx - nl * 8 / 2, cy + 10, 0x90A0C0);        /* label below the baseline */
+    text(name, cx - nl * 8 / 2, cy + 10, C_LABEL);         /* label below the baseline */
 }
 
 int main(void) {
@@ -73,10 +99,14 @@ int main(void) {
         long mt = nth(buf, 0), mu = nth(buf, 2);
         int rp = (mt > 0) ? (int)(mu * 100 / mt) : 0; if (rp < 0) rp = 0; if (rp > 100) rp = 100;
 
-        for (int i = 0; i < W * H; i++) FB[i] = 0x0C0C16;
+        vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);               /* slate faceplate (M1447) */
+        text("SYSTEM LOAD", 12, 10, C_LABEL);
+        fill(12, 27, 88, 2, C_AMBERLO);                      /* amber title rule */
+        led(W - 24, 11);                                     /* power LED */
         gauge(85, 132, 62, cp, "CPU");
         gauge(235, 132, 62, rp, "RAM");
 
+        bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);              /* window frame */
         sys_gfx_blit(FB);
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
