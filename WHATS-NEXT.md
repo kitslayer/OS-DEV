@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1382) shell — file-operation errors in red.** Routed `mkdir` / `ln` (symlink + hard) / `fallocate` failures through `perr` (red). The common user-facing error categories — missing files, unknown commands, out-of-memory, network/crypto, and file ops — now all flag red; the remaining ~75 systems-*test* setup-failure messages stay green (dev-only, rarely seen). **Verified:** build clean.
+
 > **(M1381) shell — network/crypto/input errors in red.** Routed `cal: bad date`, `resolve: failed`, `crypt: failed`, `base64: write failed`, and `ping: cannot resolve` through `perr` (red), extending error-red coverage past the common file/command errors to these user-facing categories. **Verified:** build clean.
 
 > **(M1380) shell — out-of-memory errors in red.** Routed the `js`/`tac`/`sort` "out of memory" errors through `perr` (red). One use (`js`, early in the file) sits above `perr`'s definition, so added a forward declaration after the includes — the build caught the use-before-definition and it was fixed before commit. The ~75 systems-*test* error messages stay green (dev-only, rarely seen). **Verified:** build clean.

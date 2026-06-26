@@ -1871,7 +1871,7 @@ static int run_command(char *line, char *cwd) {
                 char name[64]; int j = 0;
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                 name[j] = 0; sh_unprot_buf(name); any = 1;
-                if (sys_mkdir(name) < 0) { print("mkdir: failed (exists?): "); print(name); print("\n"); g_status = 1; }
+                if (sys_mkdir(name) < 0) { perr("mkdir: failed (exists?): "); print(name); print("\n"); g_status = 1; }
                 else { print("created "); print(name); print("/\n"); }
             }
             if (!any) print("usage: mkdir <dir>...\n");
@@ -1888,8 +1888,8 @@ static int run_command(char *line, char *cwd) {
             while (*p && *p != ' ' && j < 95) link[j++] = *p++;
             link[j] = 0; sh_unprot_buf(link);
             if (!target[0] || !link[0]) print("usage: ln [-s] <a> <b>   (-s: symlink b->a under /tmp or ext2; else a hard link, same ext2 /diskN mount)\n");
-            else if (is_sym) { if (sys_symlink(link, target) < 0) { print("ln: symlink failed (linkpath under /tmp or an ext2 /diskN mount)\n"); g_status = 1; } }
-            else if (sys_link(target, link) < 0) { print("ln: hard link failed (both paths must be on the same ext2 /diskN mount)\n"); g_status = 1; }
+            else if (is_sym) { if (sys_symlink(link, target) < 0) { perr("ln: symlink failed (linkpath under /tmp or an ext2 /diskN mount)\n"); g_status = 1; } }
+            else if (sys_link(target, link) < 0) { perr("ln: hard link failed (both paths must be on the same ext2 /diskN mount)\n"); g_status = 1; }
             else { print(link); print(" -> "); print(target); print("\n"); }
         } else if (startswith(line, "stat ")) {   /* stat <path>: file metadata via statx (M1173) */
             const char *p = line + 5; while (*p == ' ') p++;
@@ -1934,7 +1934,7 @@ static int run_command(char *line, char *cwd) {
                 if (!fn[0] || len == 0) print("usage: fallocate punch <path> <offset> <len>\n");
                 else {
                     long r = sys_fallocate(fn, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, off, len);
-                    if (r < 0) { print("fallocate: failed (ext2 /diskN file only)\n"); g_status = 1; }
+                    if (r < 0) { perr("fallocate: failed (ext2 /diskN file only)\n"); g_status = 1; }
                     else { print("punched "); printl(r); print(r == 1 ? " block (hole)\n" : " blocks (hole)\n"); }
                 }
             } else print("usage: fallocate punch <path> <offset> <len>\n");
