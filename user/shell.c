@@ -6100,8 +6100,8 @@ static void source_file(const char *fn, char *cwd, int silent) {
 
 int main(void) {
     print("\n");
-    print("  OS-DEV shell v0.1 - running in userspace (ring 3)\n");
-    print("  type 'help' for commands\n\n");
+    sys_setcolor(4); print("  OS-DEV shell v0.1"); sys_setcolor(8); print(" - running in userspace (ring 3)\n");   /* coloured banner (M1339) */
+    sys_setcolor(8); print("  type "); sys_setcolor(3); print("'help'"); sys_setcolor(8); print(" for commands\n\n"); sys_setcolor(0);
 
     char line[1024];                               /* command line: roomy enough for long URLs + pastes */
     char cwd[128]; cwd[0] = '/'; cwd[1] = 0;       /* display path (kernel tracks the real cwd) */

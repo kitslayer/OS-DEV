@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1339) shell — colourise the startup banner.** The shell's opening lines now show `OS-DEV shell v0.1` in cyan, the ring-3 runtime note in grey, and the `'help'` hint in yellow (was flat green) — a tidier first impression every time a shell opens. **Verified:** in-guest screenshot.
+
 > **(M1338) docs — README showcase reflects the colourisation.** The headline blurb now describes the fully-colourised shell + apps (filenames by type, `ps`/`df`/`free` status with usage bars, git-style coloured `diff`s, the Calendar/Forth, a `neofetch` summary) instead of a vague "colour text", so the project's front page reflects this session's work.
 
 > **(M1337) Forth app — colourised the REPL.** The in-guest Forth interpreter now shows its banner title cyan (help text grey), the `ok>` prompt cyan, the ` ok` success in lime, unknown-word errors (`forth: ?`) red, `^C` interrupts amber, and `.`/`.s` numeric output cyan — matching the shell's terminal-colour theme. **This completes colour coverage of every user-facing text app.** **Verified:** in-guest screenshot — `5` → `ok` lime, `.s` → `<1> 5` cyan, prompt + banner cyan.
