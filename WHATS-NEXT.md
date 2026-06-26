@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1345) hexedit — column-index header.** Added a `00 01 … 07` header row (grey) aligned above the hex byte columns — like professional hex editors — so a byte's column index is easy to read off. `ROWS` 13→12 to make room. **Verified:** in-guest screenshot — the header aligns exactly over the hex columns above the grid.
+
 > **(M1344) shell — `hexedit <file>` launcher + help listing.** Added a shell builtin that launches the GUI hex editor on a file (via `sys_spawn_arg`), parallel to `edit`, and listed `hexedit<file>` in `help` — so the new tool is reachable by `hexedit FILE` directly (not only `run hexedit FILE` or the Apps menu). **Verified:** in-guest — `hexedit demo.c` opens the Hex Editor window.
 
 > **(M1343) hexedit — page navigation + a layout fit-fix.** Added `n`/`p` to page down/up (arrows-only was slow on big files, and the kernel cooks no PgUp). Also fixed the header row scrolling off the top: the cursor offset moved into the title line and the status was shortened to one sub-44-column line (with `ROWS` 14→13) so the whole grid fits the 17-row terminal with a spare row. **Verified:** in-guest — `hexedit demo.c` shows the `hexedit demo.c  @OFFSET` header, 13 hex rows, and a single status line; `n` pages down (cursor → 0x68).

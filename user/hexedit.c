@@ -17,7 +17,7 @@
 
 #define CAP  32768         /* largest file we load to edit (bigger -> read-only) */
 #define BPR  8             /* bytes per row */
-#define ROWS 13            /* visible rows (title + ROWS + blank + status <= 17, with a spare row) */
+#define ROWS 12            /* visible rows (title + header + ROWS + blank + status <= 17) */
 
 static unsigned char buf[CAP];     /* the working bytes (BSS, not the stack) */
 static unsigned char orig[CAP];    /* the loaded bytes, to flag unsaved edits */
@@ -33,6 +33,7 @@ static void render(long cur, long top, int nibble, int dirty) {
     sys_setcolor(4); print(" hexedit "); sys_setcolor(8); print(fname);
     if (dirty) print(" *"); if (ro) { sys_setcolor(2); print(" [RO]"); }
     sys_setcolor(8); print("  @"); hoff(cur); if (nibble) print(" lo"); sys_setcolor(0); print("\n");   /* offset in the title so the grid fits 17 rows (M1343) */
+    sys_setcolor(8); print("      00 01 02 03 04 05 06 07\n"); sys_setcolor(0);   /* column-index header, aligned over the hex bytes (M1345) */
     for (int r = 0; r < ROWS; r++) {
         long off = top + (long)r * BPR;
         if (off >= flen) break;
