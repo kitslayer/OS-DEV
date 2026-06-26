@@ -1784,7 +1784,9 @@ static int run_command(char *line, char *cwd) {
                         h[p++] = (c >= 32 && c < 127) ? (char)c : '.';
                     }
                     h[p++] = '\n'; h[p] = 0;
-                    print(h);
+                    { char sv = h[8];  h[8]  = 0; sys_setcolor(8); print(h);      h[8]  = sv; }   /* offset grey (M1325) */
+                    { char sv = h[35]; h[35] = 0; sys_setcolor(0); print(h + 8);  h[35] = sv; }   /* hex bytes default */
+                    sys_setcolor(4); print(h + 35); sys_setcolor(0);                              /* ASCII pane cyan */
                 }
                 free(buf);
             }
