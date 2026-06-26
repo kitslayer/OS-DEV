@@ -14,7 +14,7 @@
 #include "ulib.h"
 
 #define W   240
-#define H   280                /* 240 dial + a 40-px digital readout strip below */
+#define H   300                /* 240 dial + a 60-px readout strip (time + date) below */
 #define CX  120
 #define CY  120
 #define R   112                /* face radius */
@@ -54,10 +54,10 @@ static void thline(int x0, int y0, int x1, int y1, unsigned c) {
     line(x0, y0 + 1, x1, y1 + 1, c); line(x0, y0 - 1, x1, y1 - 1, c);
 }
 
-/* a 3x5 bitmap font (digits 0-9, then ':'), low 3 bits per row — for the digital readout */
-static const unsigned char FONT[11][5] = {
+/* a 3x5 bitmap font (digits 0-9, ':', then '-'), low 3 bits per row — for the readout */
+static const unsigned char FONT[12][5] = {
     {7,5,5,5,7}, {2,6,2,2,7}, {7,1,7,4,7}, {7,1,7,1,7}, {5,5,7,1,1},
-    {7,4,7,1,7}, {7,4,7,5,7}, {7,1,1,1,1}, {7,5,7,5,7}, {7,5,7,1,7}, {0,2,0,2,0},
+    {7,4,7,1,7}, {7,4,7,5,7}, {7,1,1,1,1}, {7,5,7,5,7}, {7,5,7,1,7}, {0,2,0,2,0}, {0,0,7,0,0},
 };
 static void drawglyph(int idx, int px, int py, int s, unsigned col) {
     for (int r = 0; r < 5; r++)
@@ -72,6 +72,15 @@ static void drawtime(const char *tb) {
     for (int i = 11; i <= 18; i++) {
         char ch = tb[i]; int idx = (ch >= '0' && ch <= '9') ? ch - '0' : (ch == ':') ? 10 : -1;
         if (idx >= 0) drawglyph(idx, x, y, s, 0x50E050);
+        x += adv;
+    }
+}
+/* "YYYY-MM-DD" (from the RTC string tb[0..9]) in a soft blue-grey, below the time */
+static void drawdate(const char *tb) {
+    int s = 3, adv = 4 * s, x = (W - (10 * adv - s)) / 2, y = 276;
+    for (int i = 0; i <= 9; i++) {
+        char ch = tb[i]; int idx = (ch >= '0' && ch <= '9') ? ch - '0' : (ch == '-') ? 11 : -1;
+        if (idx >= 0) drawglyph(idx, x, y, s, 0x90A8C8);
         x += adv;
     }
 }
@@ -134,6 +143,7 @@ int main(void) {
                 if (x * x + y * y <= 16) putpx(CX + x, CY + y, 0xFFD040);
 
         drawtime(tb);                                        /* digital HH:MM:SS readout below the dial */
+        drawdate(tb);                                        /* and the date below that */
         sys_gfx_blit(FB);
 
         int k = sys_pollkey();
