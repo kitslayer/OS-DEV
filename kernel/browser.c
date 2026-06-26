@@ -41,9 +41,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define RAW_MAX   524288        /* response/image fetch buffer (512 KB) — large real pages (e.g. Wikipedia) exceed 256 KB */
-#define TEXT_MAX  131072        /* token text pool (128 KB; tok_t.off is uint32 now, so no 64KB ceiling) */
-#define TOK_MAX   16000         /* rendered tokens; sized to fill TEXT_MAX (~8 bytes of text/token) */
+#define RAW_MAX   1048576       /* response/image fetch buffer (1 MB; M1436 — many modern pages exceed 512 KB) */
+#define TEXT_MAX  196608        /* token text pool (192 KB; tok_t.off is uint32 now, so no 64KB ceiling) */
+#define TOK_MAX   22000         /* rendered tokens; sized to fill TEXT_MAX (~8 bytes of text/token) */
 #define SCRIPT_MAX 16384        /* concatenated inline <script> text run per page */
 #define HREF_MAX  32768         /* href URL pool (< 65536: href_t.off is uint16); was 8KB — large pages' body links exceeded it */
 #define LINK_MAX  2000          /* max clickable links/page; large real pages (Wikipedia) have hundreds */
