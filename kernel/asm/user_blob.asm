@@ -103,6 +103,7 @@ global hexedit_elf_start, hexedit_elf_end
 global aclock_elf_start, aclock_elf_end
 global sysgraph_elf_start, sysgraph_elf_end
 global taskman_elf_start, taskman_elf_end
+global gcal_elf_start, gcal_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -483,5 +484,9 @@ sysgraph_elf_end:
 taskman_elf_start:
     incbin "build/taskman.elf"
 taskman_elf_end:
+
+gcal_elf_start:
+    incbin "build/gcal.elf"
+gcal_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

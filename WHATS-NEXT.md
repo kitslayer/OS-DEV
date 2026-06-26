@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1385) gcal — a graphical month calendar.** A new gfx app: a WM canvas showing the current month as a grid — a "Month YYYY" title, Su–Sa weekday headers (weekends tinted), and day numbers laid out from the 1st's weekday (Zeller's congruence + leap-aware days-in-month), with TODAY highlighted in blue. Real text via the kernel font (`sys_font`); pure integer math; redraws only on a day rollover. Launch `run gcal` or the Apps menu ("Calendar (gfx)"); `q`/Esc quits. Additive (its own file) — couldn't affect existing code. **Verified:** in-guest — June 2026 renders correctly (1st in the Monday column, the 26th highlighted in the Friday column, weekends reddish); `make check` green.
+
 > **(M1384) shell — systems-test setup errors in red (completes the error-red pass).** Routed the remaining 40 `Xtest: <op> failed` setup-error labels (mmap / fork / listen / shmget / mkfifo / … across the mmap / IPC / socket / fd / pty systems-tests) through `perr` via safe `print`→`perr` drop-ins. **Every shell error path now flags red** (83 `perr` call sites). **Verified:** build clean; grep confirms 0 uncoloured `Xtest: … failed` prints remain.
 
 > **(M1383) sysgraph — load-tint the headline CPU/RAM numbers.** The big `CPU NN%` / `RAM NN%` labels are now coloured by load (base green/cyan <50%, amber 50–80%, red ≥80%), matching the graph crests (M1377) — so the headline figure itself is an at-a-glance load indicator. **Verified:** in-guest — at 50% CPU the `CPU 50%` label + crest are amber; RAM 27% stays cyan.

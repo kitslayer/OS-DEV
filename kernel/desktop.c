@@ -83,6 +83,7 @@ static const struct menu_item menu[] = {
     { "Clock", KIND_APP, "clock" }, { "Analog Clock", KIND_APP, "aclock" }, { "Calc", KIND_APP, "calc" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
+    { "Calendar (gfx)", KIND_APP, "gcal" },
     { "Snake", KIND_APP, "snake" }, { "Editor", KIND_APP, "editor" },
     { "2048", KIND_APP, "2048" }, { "Life", KIND_APP, "life" }, { "Mines", KIND_APP, "mines" },
     { "Tetris", KIND_APP, "tetris" }, { "Breakout", KIND_APP, "breakout" },
