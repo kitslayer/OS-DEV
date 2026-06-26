@@ -14,7 +14,7 @@
 #include "ulib.h"
 
 #define W   240
-#define H   240
+#define H   280                /* 240 dial + a 40-px digital readout strip below */
 #define CX  120
 #define CY  120
 #define R   112                /* face radius */
@@ -52,6 +52,28 @@ static void thline(int x0, int y0, int x1, int y1, unsigned c) {
     line(x0, y0, x1, y1, c);
     line(x0 + 1, y0, x1 + 1, y1, c); line(x0 - 1, y0, x1 - 1, y1, c);
     line(x0, y0 + 1, x1, y1 + 1, c); line(x0, y0 - 1, x1, y1 - 1, c);
+}
+
+/* a 3x5 bitmap font (digits 0-9, then ':'), low 3 bits per row — for the digital readout */
+static const unsigned char FONT[11][5] = {
+    {7,5,5,5,7}, {2,6,2,2,7}, {7,1,7,4,7}, {7,1,7,1,7}, {5,5,7,1,1},
+    {7,4,7,1,7}, {7,4,7,5,7}, {7,1,1,1,1}, {7,5,7,5,7}, {7,5,7,1,7}, {0,2,0,2,0},
+};
+static void drawglyph(int idx, int px, int py, int s, unsigned col) {
+    for (int r = 0; r < 5; r++)
+        for (int c = 0; c < 3; c++)
+            if ((FONT[idx][r] >> (2 - c)) & 1)
+                for (int yy = 0; yy < s; yy++)
+                    for (int xx = 0; xx < s; xx++) putpx(px + c * s + xx, py + r * s + yy, col);
+}
+/* "HH:MM:SS" (from the RTC string tb[11..18]) in lime, centred in the bottom strip */
+static void drawtime(const char *tb) {
+    int s = 4, adv = 4 * s, x = (W - (8 * adv - s)) / 2, y = 248;
+    for (int i = 11; i <= 18; i++) {
+        char ch = tb[i]; int idx = (ch >= '0' && ch <= '9') ? ch - '0' : (ch == ':') ? 10 : -1;
+        if (idx >= 0) drawglyph(idx, x, y, s, 0x50E050);
+        x += adv;
+    }
 }
 
 /* a hand from the centre, length `len`, at clock angle `ang` (0 = 12 o'clock, clockwise) */
@@ -108,6 +130,7 @@ int main(void) {
             for (int x = -4; x <= 4; x++)
                 if (x * x + y * y <= 16) putpx(CX + x, CY + y, 0xFFD040);
 
+        drawtime(tb);                                        /* digital HH:MM:SS readout below the dial */
         sys_gfx_blit(FB);
 
         int k = sys_pollkey();
