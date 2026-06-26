@@ -68,6 +68,22 @@ static int proc_cpu_rss(int pid, long *cpu, long *rss) {
     *rss = nums[20];
     return 0;
 }
+/* aggregate system CPU% since the last call (busy/total delta of /proc/stat's
+   "cpu  user nice system idle ..." line); updates the pbusy/ptot accumulators. */
+static int agg_cpu(long *pbusy, long *ptot) {
+    char b[600]; long n = sys_readfile("/proc/stat", b, sizeof b - 1);
+    if (n <= 0) return 0; b[n] = 0;
+    long nums[4] = { 0, 0, 0, 0 }; int nc = 0;
+    for (int i = 0; b[i] && nc < 4; ) {
+        if (b[i] >= '0' && b[i] <= '9') { long v = 0; while (b[i] >= '0' && b[i] <= '9') v = v * 10 + (b[i++] - '0'); nums[nc++] = v; }
+        else i++;
+    }
+    long busy = nums[0] + nums[1] + nums[2], tot = busy + nums[3];
+    int pct = 0;
+    if (*ptot > 0 && tot > *ptot) { pct = (int)((busy - *pbusy) * 100 / (tot - *ptot)); if (pct < 0) pct = 0; if (pct > 100) pct = 100; }
+    *pbusy = busy; *ptot = tot;
+    return pct;
+}
 
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("taskman: gfx init failed\n"); return 1; }
@@ -76,10 +92,12 @@ int main(void) {
 
     char ps[1200];
     int prev_pid[40]; long prev_cpu[40]; int prev_n = 0; long prev_ms = 0;   /* last snapshot, for CPU% deltas */
+    long pbusy = 0, ptot = 0;                                                /* aggregate-CPU accumulators */
     for (;;) {
         long n = sys_ps(ps, sizeof ps - 1); if (n < 0) n = 0; ps[n] = 0;
         long now_ms = sys_uptime_ms();
         long ival = (prev_ms > 0 && now_ms > prev_ms) ? now_ms - prev_ms : 700;
+        int scpu = agg_cpu(&pbusy, &ptot);                     /* whole-system CPU% (reconciles with sysgraph) */
         int cur_pid[40]; long cur_cpu[40]; int cur_n = 0;
 
         for (int i = 0; i < W * H; i++) FB[i] = 0x0C0C16;           /* dark background */
@@ -129,7 +147,9 @@ int main(void) {
         const char *a = " tasks    up "; for (int k = 0; a[k]; k++) foot[fi++] = a[k];
         fi = putint(foot, fi, up / 60); foot[fi++] = 'm';
         if (up % 60 < 10) foot[fi++] = '0';
-        fi = putint(foot, fi, up % 60); foot[fi++] = 's'; foot[fi] = 0;
+        fi = putint(foot, fi, up % 60); foot[fi++] = 's';
+        const char *cl = "    CPU "; for (int k = 0; cl[k]; k++) foot[fi++] = cl[k];
+        fi = putint(foot, fi, scpu); foot[fi++] = '%'; foot[fi] = 0;
         text(foot, 12, H - 20, 0x8890A0);
 
         sys_gfx_blit(FB);
