@@ -26,6 +26,7 @@ static int rnd(void) { seed = seed * 1103515245 + 12345; return (int)((seed >> 1
 
 struct P { int x, y, vx, vy, life, max; unsigned col; char rocket; };
 static struct P ps[NP];
+static const unsigned pal[7] = { 0xFF5050, 0x50FF70, 0x60A0FF, 0xFFD040, 0xFF70D0, 0x50E0E0, 0xFFFFFF };
 
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
 static unsigned scale(unsigned c, int num, int den) {        /* c * num/den, per channel */
@@ -53,7 +54,6 @@ static void burst(int x, int y, unsigned col) {              /* spawn a ring of 
 }
 static void launch(void) {
     int s = slot(); if (s < 0) return;
-    static const unsigned pal[7] = { 0xFF5050, 0x50FF70, 0x60A0FF, 0xFFD040, 0xFF70D0, 0x50E0E0, 0xFFFFFF };
     ps[s].x = (60 + rnd() % (W - 120)) << 8;
     ps[s].y = (H - 4) << 8;
     ps[s].vx = (rnd() % 120) - 60;
@@ -69,7 +69,7 @@ int main(void) {
     for (int i = 0; i < W * H; i++) FB[i] = 0x05060E;
     seed ^= (unsigned long)sys_uptime_ms();
 
-    int frame = 0;
+    int frame = 0, prevb = 0;
     for (;;) {
         for (int i = 0; i < W * H; i++) {                    /* fade toward the night sky for glowing trails */
             unsigned c = FB[i];
@@ -89,6 +89,10 @@ int main(void) {
                 glow(px, py, c);
             }
         }
+
+        int mx, my, b = sys_mouse(&mx, &my);                 /* click to burst a firework right there (M1403) */
+        if ((b & 1) && !(prevb & 1) && mx >= 0) burst(mx << 8, my << 8, pal[rnd() % 7]);
+        prevb = b;
 
         sys_gfx_blit(FB);
         int k = sys_pollkey();
