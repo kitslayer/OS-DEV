@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1383) sysgraph — load-tint the headline CPU/RAM numbers.** The big `CPU NN%` / `RAM NN%` labels are now coloured by load (base green/cyan <50%, amber 50–80%, red ≥80%), matching the graph crests (M1377) — so the headline figure itself is an at-a-glance load indicator. **Verified:** in-guest — at 50% CPU the `CPU 50%` label + crest are amber; RAM 27% stays cyan.
+
 > **(M1382) shell — file-operation errors in red.** Routed `mkdir` / `ln` (symlink + hard) / `fallocate` failures through `perr` (red). The common user-facing error categories — missing files, unknown commands, out-of-memory, network/crypto, and file ops — now all flag red; the remaining ~75 systems-*test* setup-failure messages stay green (dev-only, rarely seen). **Verified:** build clean.
 
 > **(M1381) shell — network/crypto/input errors in red.** Routed `cal: bad date`, `resolve: failed`, `crypt: failed`, `base64: write failed`, and `ping: cannot resolve` through `perr` (red), extending error-red coverage past the common file/command errors to these user-facing categories. **Verified:** build clean.

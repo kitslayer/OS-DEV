@@ -104,10 +104,12 @@ int main(void) {
         for (int x = 0; x < W; x++) putpx(x, 122, 0x202030);    /* divider */
 
         char lab[40]; int n;
-        n = label(lab, "CPU", cp); lab[n] = 0; gtext(lab, 8, 6, 0x80FF90);
+        unsigned ccol = cp >= 80 ? 0xF08080 : cp >= 50 ? 0xF0D060 : 0x80FF90;   /* headline number tinted by load */
+        n = label(lab, "CPU", cp); lab[n] = 0; gtext(lab, 8, 6, ccol);
+        unsigned rcol = rp >= 80 ? 0xF08080 : rp >= 50 ? 0xF0D060 : 0x80E0FF;
         n = label(lab, "RAM", rp);                              /* + actual MB used/total */
         lab[n++] = ' '; n = putu(lab, n, mu / 1024); lab[n++] = '/'; n = putu(lab, n, mt / 1024); lab[n++] = 'M'; lab[n] = 0;
-        gtext(lab, 8, 124, 0x80E0FF);
+        gtext(lab, 8, 124, rcol);
 
         sys_gfx_blit(FB);
         int k = sys_pollkey();
