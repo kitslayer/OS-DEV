@@ -36,13 +36,15 @@ int main(void) {
 
     long set_ms = 5L * 60000;             /* 5:00 default */
     long rem = set_ms, deadline = 0;
-    int running = 0, done = 0, psec = -1, dirty = 1;
+    int running = 0, done = 0, psec = -1, dirty = 1, prevb = 0;
 
     for (;;) {
         long now = sys_uptime_ms();
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
-        else if (k == ' ') { if (running) { rem = deadline - now; if (rem < 0) rem = 0; running = 0; } else if (rem > 0) { deadline = now + rem; running = 1; done = 0; } dirty = 1; }
+        int mx, my, mb = sys_mouse(&mx, &my);                   /* a click = start/pause, like Space (M1398) */
+        int clicked = (mb & 1) && !(prevb & 1) && mx >= 0; prevb = mb;
+        if (k == ' ' || clicked) { if (running) { rem = deadline - now; if (rem < 0) rem = 0; running = 0; } else if (rem > 0) { deadline = now + rem; running = 1; done = 0; } dirty = 1; }
         else if ((k == 'w' || k == 0x11) && !running) { set_ms += 60000; if (set_ms > 99L * 60000) set_ms = 99L * 60000; rem = set_ms; done = 0; dirty = 1; }
         else if ((k == 's' || k == 0x12) && !running) { set_ms -= 60000; if (set_ms < 60000) set_ms = 60000; rem = set_ms; done = 0; dirty = 1; }
         else if (k == 'r' || k == 'R') { rem = set_ms; running = 0; done = 0; dirty = 1; }

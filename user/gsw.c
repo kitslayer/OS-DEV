@@ -39,12 +39,14 @@ int main(void) {
     if (!FB || sys_font(FONT, sizeof FONT) < 0) { print("gsw: init failed\n"); return 1; }
 
     int running = 0; long accum = 0, start = 0;
-    int dirty = 1;
+    int dirty = 1, prevb = 0;
     for (;;) {
         long now = sys_uptime_ms();
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
-        else if (k == ' ') { if (running) { accum += now - start; running = 0; } else { start = now; running = 1; } dirty = 1; }
+        int mx, my, mb = sys_mouse(&mx, &my);                   /* a click = start/stop, like Space (M1398) */
+        int clicked = (mb & 1) && !(prevb & 1) && mx >= 0; prevb = mb;
+        if (k == ' ' || clicked) { if (running) { accum += now - start; running = 0; } else { start = now; running = 1; } dirty = 1; }
         else if (k == 'r' || k == 'R') { accum = 0; running = 0; dirty = 1; }
 
         if (running || dirty) {
