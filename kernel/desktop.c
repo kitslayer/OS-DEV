@@ -80,7 +80,7 @@ static int start_x = 8, start_y, start_w = 110, start_h = 24;
 struct menu_item { const char *label; int kind; const char *prog; };
 static const struct menu_item menu[] = {
     { "Browser", KIND_BROWSER, 0 }, { "Shell", KIND_APP, "shell" },
-    { "Clock", KIND_APP, "clock" }, { "Calc", KIND_APP, "calc" },
+    { "Clock", KIND_APP, "clock" }, { "Analog Clock", KIND_APP, "aclock" }, { "Calc", KIND_APP, "calc" },
     { "Snake", KIND_APP, "snake" }, { "Editor", KIND_APP, "editor" },
     { "2048", KIND_APP, "2048" }, { "Life", KIND_APP, "life" }, { "Mines", KIND_APP, "mines" },
     { "Tetris", KIND_APP, "tetris" }, { "Breakout", KIND_APP, "breakout" },
