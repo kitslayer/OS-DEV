@@ -3210,8 +3210,8 @@ static int run_command(char *line, char *cwd) {
             sys_nanosleep(0, 200000000);                        /* 200 ms */
             unsigned long dt = sys_uptime_ms() - t0;
             if (dt < 180) ok = 0;                               /* actually slept ~200ms (allow scheduler slack) */
-            if (ok) { print("nanosleep: sched_yield()=0 + nanosleep(200ms) elapsed ~"); printl((long)dt); print("ms -- OK\n"); }
-            else print("nanosleeptest: VERIFY FAILED\n");
+            if (ok) { sys_setcolor(9); print("nanosleep: sched_yield()=0 + nanosleep(200ms) elapsed ~"); printl((long)dt); print("ms -- OK\n"); sys_setcolor(0); }
+            else { sys_setcolor(2); print("nanosleeptest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "timestest")) {   /* times(2) -- per-process CPU accounting (M1235) */
             int ok = 1;
@@ -3224,8 +3224,8 @@ static int run_command(char *line, char *cwd) {
             if (r2 < r1) ok = 0;                                 /* the returned real-time ticks are monotonic */
             if (b.tms_utime < a.tms_utime) ok = 0;               /* user CPU time never decreases */
             if (b.tms_utime <= a.tms_utime) ok = 0;              /* the busy loop charged measurable user ticks */
-            if (ok) { print("times: busy loop charged user CPU -- utime "); printl(a.tms_utime); print(" -> "); printl(b.tms_utime); print(" ticks, real-time monotonic -- OK\n"); }
-            else print("timestest: VERIFY FAILED\n");
+            if (ok) { sys_setcolor(9); print("times: busy loop charged user CPU -- utime "); printl(a.tms_utime); print(" -> "); printl(b.tms_utime); print(" ticks, real-time monotonic -- OK\n"); sys_setcolor(0); }
+            else { sys_setcolor(2); print("timestest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "idtest")) {   /* uname + getppid/getuid/getgid (M1236) */
             int ok = 1;
@@ -3238,8 +3238,8 @@ static int run_command(char *line, char *cwd) {
             if (kid == 0) sys_exit(sys_getppid() == mypid ? 55 : 7);   /* child: getppid() == parent's pid? */
             int st = -1; sys_waitpid((int)kid, &st);
             if (st != 55) ok = 0;
-            if (ok) { print("id: uname='"); print(u.sysname); print(" "); print(u.machine); print(" "); print(u.release); print("', uid/gid=0, child getppid()==parent -- OK\n"); }
-            else print("idtest: VERIFY FAILED\n");
+            if (ok) { sys_setcolor(9); print("id: uname='"); print(u.sysname); print(" "); print(u.machine); print(" "); print(u.release); print("', uid/gid=0, child getppid()==parent -- OK\n"); sys_setcolor(0); }
+            else { sys_setcolor(2); print("idtest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "hostnametest")) {   /* gethostname/sethostname + uname.nodename (M1237) */
             int ok = 1;

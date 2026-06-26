@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1357) shell — colourise self-test results (batch 1).** Began applying the OK-lime / VERIFY-FAILED-red convention to the systems-feature self-test commands: `nanosleeptest`, `timestest`, `idtest`. (The shell has a long tail of such self-tests; coloured in batches, matching the demo-app result convention.) **Verified:** build clean; same OK/FAIL colour pattern proven in-guest on the demo apps.
+
 > **(M1356) shell — colourise `history` indices + the `jit` result.** `history` now shows each entry's index in grey (command text default), so the list scans easily; the `jit` self-test colours its result lime (OK) / red (verify failed), matching the result convention. **Verified:** in-guest — `history` shows grey indices `1`/`2`/`3`.
 
 > **(M1355) shell — colourise `dmesg` + `stat`.** `dmesg` now tints each kernel-log line's `[subsystem]` tag light-blue (with genuine level words — `ok` lime, `warn` amber, `err`/`fail` red — when present), so the log is scannable; `stat` shows its metadata labels (File/Type/Size/Mode/…) in cyan. **Verified:** in-guest — `dmesg` shows `[ehci]`/`[main]`/`[dm]` tags in light-blue. (A first-pass bug that mis-coloured subsystem tags like `[ehci]` red as "errors" was caught via screenshot and fixed to match level *words*, not the first char.)
