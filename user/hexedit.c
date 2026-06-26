@@ -24,6 +24,7 @@ static unsigned char orig[CAP];    /* the loaded bytes, to flag unsaved edits */
 static long flen;
 static int  ro;            /* file hit CAP: it may be larger, so view-only (saving would truncate) */
 static char fname[64];
+static int  gmode; static long gval;   /* 'g' goto-offset input mode + the offset being typed (M1348) */
 
 static void hx(int v) { char s[2] = { "0123456789abcdef"[v & 15], 0 }; print(s); }
 static void hoff(long o) { hx((int)((o >> 12) & 15)); hx((int)((o >> 8) & 15)); hx((int)((o >> 4) & 15)); hx((int)(o & 15)); }
@@ -58,7 +59,8 @@ static void render(long cur, long top, int nibble, int dirty) {
         sys_setcolor(0); print("\n");
     }
     sys_setcolor(8);
-    print("\n arrows/np move 0-9a-f edit s save q quit");   /* single-spaced, <44 cols so the cursor stays on this row (M1343) */
+    if (gmode) { print("\n goto: "); hoff(gval); print("  (enter jump, esc cancel)"); }
+    else print("\n arrows/np/g move 0-9a-f edit s save q quit");   /* <44 cols so the cursor stays (M1343/M1348) */
     sys_setcolor(0);
 }
 
@@ -77,7 +79,20 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
+        if (gmode) {                                             /* goto-offset input (M1348) */
+            if (k == 27) gmode = 0;                              /* cancel */
+            else if (k == '\n' || k == '\r') { cur = (gval < flen) ? gval : flen - 1; nibble = 0; gmode = 0; }
+            else if (k == 8 || k == 127) gval /= 16;             /* backspace a nibble */
+            else { int d = (k>='0'&&k<='9') ? k-'0' : (k>='a'&&k<='f') ? k-'a'+10 : (k>='A'&&k<='F') ? k-'A'+10 : -1;
+                   if (d >= 0) gval = gval * 16 + d; }
+            if (cur < top) top = (cur / BPR) * BPR;
+            if (cur >= top + (long)ROWS * BPR) top = (cur / BPR - ROWS + 1) * BPR;
+            if (top < 0) top = 0;
+            render(cur, top, nibble, dirty);
+            continue;
+        }
         if (k == 'q' || k == 27) break;
+        else if (k == 'g') { gmode = 1; gval = 0; }              /* enter goto mode */
         else if (k == 's' && !ro) {                              /* save (disabled when read-only) */
             if (sys_writefile(fname, (char *)buf, flen) >= 0) {
                 for (long i = 0; i < flen; i++) orig[i] = buf[i]; dirty = 0;

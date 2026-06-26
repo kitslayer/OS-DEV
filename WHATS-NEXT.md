@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1348) hexedit — goto-offset (`g`).** Press `g`, type a hex offset, Enter to jump the cursor there (esc cancels); the status shows `goto: XXXX` while typing. Complements `n`/`p` paging for precise navigation in large files. The hex editor now has complete navigation: arrows + page + goto. **Verified:** in-guest — `g 40 ⏎` jumps to offset 0x40 (title shows `@0040`).
+
 > **(M1347) demo apps — colourise futex + nstest results.** Continued the colour pass for the `run <name>` demos: `futex` (cross-process WOKEN result lime, no-block amber) and `nstest` (private-bind-works lime, read-FAILED red). **Verified:** build clean; uses the same result-colour pattern proven on forktest. (Representative demos now coloured — the user-facing shell + menu apps were the priority and are fully done.)
 
 > **(M1346) demo apps — begin colourising the systems-feature demos.** The `run <name>` demo apps (threads, forktest, …) were monochrome, unlike the coloured shell + menu apps; started bringing them in line: `threads` (section labels cyan, shared-counter lime, TLS/PASS lime, FAIL red) and `forktest` (label cyan, COW-isolation result lime/red). **Verified:** in-guest — `run forktest` shows `forktest:` cyan and `(COW isolation OK)` lime.
