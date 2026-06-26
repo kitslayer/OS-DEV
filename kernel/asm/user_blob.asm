@@ -105,6 +105,7 @@ global sysgraph_elf_start, sysgraph_elf_end
 global taskman_elf_start, taskman_elf_end
 global gcal_elf_start, gcal_elf_end
 global gauges_elf_start, gauges_elf_end
+global gsw_elf_start, gsw_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -493,5 +494,9 @@ gcal_elf_end:
 gauges_elf_start:
     incbin "build/gauges.elf"
 gauges_elf_end:
+
+gsw_elf_start:
+    incbin "build/gsw.elf"
+gsw_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
