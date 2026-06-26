@@ -1,11 +1,12 @@
 /*
- * gcalc.c — a graphical calculator, a userspace program (M1394).
+ * gcalc.c — a graphical calculator, a userspace program (M1394, clickable M1396).
  *
- * A four-function calculator with an LCD-style display over a visual keypad
- * (driven by the keyboard, like the piano's key map). Immediate-execution model.
- * All maths is INTEGER fixed-point scaled by 10000 (four exact decimals, no FPU,
- * no float rounding). Keys: 0-9 . digits, + - * / (and x) operators, = or Enter
- * evaluates, c/C clears, Backspace deletes, q/Esc quits.
+ * A four-function calculator with an LCD-style display over a colour-coded
+ * keypad. Driven by EITHER the keyboard OR the mouse (click the buttons, like
+ * paint.c reads sys_mouse); the last key pressed is highlighted. Immediate-
+ * execution model. All maths is INTEGER fixed-point scaled by 10000 (four exact
+ * decimals, no FPU, no float rounding). Keys: 0-9 . digits, + - * / (and x)
+ * operators, = or Enter evaluates, c/C clears, Backspace deletes, q/Esc quits.
  *
  * Launch: `run gcalc` from the shell, or the Apps menu ("Calculator").
  */
@@ -14,6 +15,12 @@
 #define W 232
 #define H 320
 #define SCALE 10000L              /* fixed-point: value * 10000 */
+#define BX 8                      /* keypad geometry (shared by the renderer + the click hit-test) */
+#define BY 70
+#define BW 52
+#define BH 44
+#define GX 56
+#define GY 48
 
 static unsigned *FB;
 static unsigned char FONT[128 * 16];
@@ -43,7 +50,7 @@ static void fmt_fixed(long v, char *b) {
     while (ti) b[p++] = t[--ti];
     if (frac) {
         b[p++] = '.';
-        char f[4] = { '0' + (char)(frac / 1000) % 10, '0' + (char)(frac / 100) % 10, '0' + (char)(frac / 10) % 10, '0' + (char)frac % 10 };
+        char f[4] = { (char)('0' + (frac / 1000) % 10), (char)('0' + (frac / 100) % 10), (char)('0' + (frac / 10) % 10), (char)('0' + frac % 10) };
         int fl = 4; while (fl > 0 && f[fl - 1] == '0') fl--;
         for (int i = 0; i < fl; i++) b[p++] = f[i];
     }
@@ -67,56 +74,72 @@ static const char *PAD[5][4] = {
     { "C", "<", 0,   0   },
 };
 
+/* calculator state (file-scope so both the keyboard and the mouse can press()) */
+static long reg; static char pend, last; static char entry[16]; static int elen, fresh = 1, dirty = 1;
+
+/* apply one keypress (a digit, '.', an operator, '=', 'c'/'C', or 8=backspace) */
+static void press(int k) {
+    if (k >= '0' && k <= '9') { if (fresh) { elen = 0; entry[0] = 0; fresh = 0; } if (elen < 12) { entry[elen++] = (char)k; entry[elen] = 0; } last = (char)k; dirty = 1; }
+    else if (k == '.') { if (fresh) { elen = 0; entry[0] = 0; fresh = 0; } int has = 0; for (int i = 0; i < elen; i++) if (entry[i] == '.') has = 1;
+                         if (!has && elen < 12) { if (elen == 0) entry[elen++] = '0'; entry[elen++] = '.'; entry[elen] = 0; } last = '.'; dirty = 1; }
+    else if (k == '+' || k == '-' || k == '*' || k == '/' || k == 'x' || k == 'X') {
+        char op = (k == 'x' || k == 'X') ? '*' : (char)k;
+        long v = elen ? parse_fixed(entry) : reg;
+        reg = pend ? apply(reg, pend, v) : v;
+        pend = op; elen = 0; entry[0] = 0; fresh = 1; last = op; dirty = 1;
+    }
+    else if (k == '=' || k == '\n' || k == '\r') {
+        long v = elen ? parse_fixed(entry) : reg;
+        reg = pend ? apply(reg, pend, v) : v;
+        pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = '='; dirty = 1;
+    }
+    else if (k == 'c' || k == 'C') { reg = 0; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = 'C'; dirty = 1; }
+    else if (k == 8 || k == 0x7F) { if (elen > 0) { entry[--elen] = 0; fresh = 0; } last = '<'; dirty = 1; }
+}
+
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gcalc: gfx init failed\n"); return 1; }
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
     if (!FB || sys_font(FONT, sizeof FONT) < 0) { print("gcalc: init failed\n"); return 1; }
 
-    long reg = 0; char pend = 0, last = 0; char entry[16] = { 0 }; int elen = 0, fresh = 1, dirty = 1;
-
+    int prevb = 0;
     for (;;) {
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
-        else if (k >= '0' && k <= '9') { if (fresh) { elen = 0; entry[0] = 0; fresh = 0; } if (elen < 12) { entry[elen++] = (char)k; entry[elen] = 0; } last = (char)k; dirty = 1; }
-        else if (k == '.') { if (fresh) { elen = 0; entry[0] = 0; fresh = 0; } int has = 0; for (int i = 0; i < elen; i++) if (entry[i] == '.') has = 1;
-                             if (!has && elen < 12) { if (elen == 0) entry[elen++] = '0'; entry[elen++] = '.'; entry[elen] = 0; } last = '.'; dirty = 1; }
-        else if (k == '+' || k == '-' || k == '*' || k == '/' || k == 'x' || k == 'X') {
-            char op = (k == 'x' || k == 'X') ? '*' : (char)k;
-            long v = elen ? parse_fixed(entry) : reg;
-            reg = pend ? apply(reg, pend, v) : v;
-            pend = op; elen = 0; entry[0] = 0; fresh = 1; last = op; dirty = 1;
+        if (k > 0) press(k);
+
+        int mx, my, b = sys_mouse(&mx, &my);                    /* clickable keypad (M1396) */
+        if ((b & 1) && !(prevb & 1) && mx >= 0) {               /* left-click edge inside the canvas */
+            for (int r = 0; r < 5; r++) for (int c = 0; c < 4; c++) {
+                const char *lab = PAD[r][c]; if (!lab) continue;
+                int x = BX + c * GX, y = BY + r * GY;
+                if (mx >= x && mx < x + BW && my >= y && my < y + BH) press(lab[0] == '<' ? 8 : lab[0]);
+            }
         }
-        else if (k == '=' || k == '\n' || k == '\r') {
-            long v = elen ? parse_fixed(entry) : reg;
-            reg = pend ? apply(reg, pend, v) : v;
-            pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = '='; dirty = 1;
-        }
-        else if (k == 'c' || k == 'C') { reg = 0; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = 'C'; dirty = 1; }
-        else if (k == 8 || k == 0x7F) { if (elen > 0) { entry[--elen] = 0; fresh = 0; } last = '<'; dirty = 1; }
+        prevb = b;
 
         if (dirty) {
             for (int i = 0; i < W * H; i++) FB[i] = 0x15181F;
-            fill(8, 8, W - 16, 52, 0x0C1A12);                       /* LCD strip */
+            fill(8, 8, W - 16, 52, 0x0C1A12);                   /* LCD strip */
             char shown[24]; if (elen > 0 && !fresh) { for (int i = 0; i <= elen; i++) shown[i] = entry[i]; } else fmt_fixed(reg, shown);
-            int sl = slen(shown); if (sl > 9) sl = 9;               /* right-align, clip to 9 glyphs */
+            int sl = slen(shown); if (sl > 9) sl = 9;           /* right-align, clip to 9 glyphs */
             textS(shown + (slen(shown) > 9 ? slen(shown) - 9 : 0), W - 12 - sl * 24, 24, 3, 0x6CF09A);
 
-            int bx = 8, by = 70, bw = 52, bh = 44, gx = 56, gy = 48;
             for (int r = 0; r < 5; r++) for (int c = 0; c < 4; c++) {
                 const char *lab = PAD[r][c]; if (!lab) continue;
-                int x = bx + c * gx, y = by + r * gy;
-                int hot = (last && lab[0] == last);                 /* highlight the last key pressed */
+                int x = BX + c * GX, y = BY + r * GY;
+                int hot = (last && lab[0] == last);             /* highlight the last key pressed */
                 int isop = (lab[0]=='/'||lab[0]=='*'||lab[0]=='-'||lab[0]=='+'||lab[0]=='=');
                 unsigned bg = hot ? 0x3A78D8 : isop ? 0x2A3140 : (lab[0]=='C'||lab[0]=='<') ? 0x402A2A : 0x232A36;
-                fill(x, y, bw, bh, bg);
-                fill(x, y, bw, 1, 0x404A5A);
+                fill(x, y, BW, BH, bg);
+                fill(x, y, BW, 1, 0x404A5A);
                 unsigned tc = hot ? 0xFFFFFF : isop ? 0xF0C060 : 0xD8E0EC;
-                textS(lab, x + (bw - 16) / 2, y + (bh - 16) / 2, 2, tc);
+                textS(lab, x + (BW - 16) / 2, y + (BH - 16) / 2, 2, tc);
             }
             sys_gfx_blit(FB);
             dirty = 0;
         }
-        sys_sleep(60);
+        sys_sleep(40);
     }
     return 0;
 }
