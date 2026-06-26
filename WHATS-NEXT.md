@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1406) gmetro — a metronome.** A swinging pendulum keeps the beat while the PC speaker ticks (`sys_beep`, an alternating high/low pitch) once per beat and the bob flashes gold on each tick. SPACE (or a click) starts/stops, w/Up and s/Down change the tempo by 5 BPM (40–240), q/Esc quits. The pendulum angle is a Bhaskara sine of the beat phase — no FPU. Additive (own file). Launch `run gmetro` or the Apps menu ("Metronome"). **Verified:** in-guest — the pendulum swung (rod + red bob, pivot top-centre), BPM 120 in green, correct geometry; `make check` green.
+
 > **(M1405) gcalc — a percent (%) key.** Filled one of the keypad's blank slots with a `%` key (`x% = x/100`), rendered gold like the operators. Clickable or via the keyboard (`%` = Shift-5). **Verified:** in-guest — `50 %` → `0.5`, the `%` button highlighting; `make check` green.
 
 > **(M1404) docs + Welcome refresh.** Bumped the README headline to "1400+ milestones" and updated the boot Welcome screen's app highlights from "Clock, Monitor, Tasks, 60+ more" to "Clock, Calc, Images, Fireworks +", so the first window a user sees advertises the campaign's new graphical apps. **Verified:** in-guest — the Welcome window shows the new line; `make check` green.
