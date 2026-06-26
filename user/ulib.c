@@ -260,6 +260,9 @@ long sys_chdir(const char *path) { return do_syscall(SYS_chdir, (long)path, 0, 0
 long sys_tree(void *buf, unsigned long len) { return do_syscall(SYS_tree, 0, (long)buf, (long)len); }
 long sys_ps(void *buf, unsigned long len) { return do_syscall(SYS_ps, 0, (long)buf, (long)len); }
 long sys_font(void *buf, unsigned long len) { return do_syscall(SYS_font, 0, (long)buf, (long)len); }
+long sys_loadimg(const char *name, void *buf, int cw, int ch, int *outwh) {
+    return do_syscall4(SYS_loadimg, (long)name, (long)buf, ((long)cw << 16) | ((long)ch & 0xFFFF), (long)outwh);
+}
 long sys_history(void *buf, unsigned long len) { return do_syscall(SYS_history, 0, (long)buf, (long)len); }
 int  sys_pollkey(void) { return (int)do_syscall(SYS_pollkey, 0, 0, 0); }
 long sys_df(void *buf, unsigned long len) { return do_syscall(SYS_df, 0, (long)buf, (long)len); }

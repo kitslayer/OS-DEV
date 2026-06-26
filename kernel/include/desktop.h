@@ -7,3 +7,10 @@ void desktop_run(void);   /* set up windows and run the event loop (no return) *
  * decode + scale to the screen, swap in on success, keep the old on failure.
  * Returns 0 on success, -1 on any failure. */
 int desktop_set_wallpaper(const char *name);
+
+/* Decode image file `name`, fit-scale it (preserving aspect, letterboxed) into
+ * the cw*ch XRGB pixel buffer `buf`, and report the native pixel size in
+ * outwh[0]=width, outwh[1]=height (SYS_loadimg, for the image viewer). Reuses
+ * decode_image() so every format the OS reads (PNG/BMP/JPEG/GIF/SVG) works.
+ * Returns 0 on success, -1 on any failure. */
+int desktop_load_image(const char *name, unsigned *buf, int cw, int ch, int *outwh);

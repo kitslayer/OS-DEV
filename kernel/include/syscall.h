@@ -300,6 +300,7 @@
 #define SYS_tcp_accept   276   /* (port, reqbuf, reqmax) -> passive-open + read one request, hold the conn; request bytes/-1 (M1327) */
 #define SYS_tcp_respond  277   /* (resp, resp_len) -> reply on the accepted conn + close; 0/-1 (M1327) */
 #define SYS_font         278   /* (buf,len) -> copy the 8x16 console font (128*16 bytes) for gfx text; bytes/-1 (M1362) */
+#define SYS_loadimg      279   /* (name, buf, cw<<16|ch, outwh[2]) -> decode+fit-scale an image file into the cw*ch XRGB buf; native size in outwh; 0/-1 (M1392) */
 #define SA_ONSTACK 0x08000000  /* sigaction flag: run this handler on the sigaltstack() stack (M1276) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */

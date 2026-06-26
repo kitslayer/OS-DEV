@@ -89,6 +89,7 @@ static const struct menu_item menu[] = {
     { "Binary Clock", KIND_APP, "bclock" },
     { "Char Map", KIND_APP, "gfont" },
     { "Countdown", KIND_APP, "gtimer" },
+    { "Image Viewer", KIND_APP, "imgview" },
     { "Snake", KIND_APP, "snake" }, { "Editor", KIND_APP, "editor" },
     { "2048", KIND_APP, "2048" }, { "Life", KIND_APP, "life" }, { "Mines", KIND_APP, "mines" },
     { "Tetris", KIND_APP, "tetris" }, { "Breakout", KIND_APP, "breakout" },
@@ -628,6 +629,43 @@ static uint32_t *decode_wallpaper(const char *name) {
     }
     kfree(rgba);
     return bmp;
+}
+
+/* Decode an image file and fit-scale it into a caller-supplied cw*ch XRGB buffer
+ * (centred, aspect-preserved, letterboxed), reporting the native size in outwh.
+ * Backs SYS_loadimg for the image viewer (imgview). The buffer is the app's,
+ * already validated by the syscall layer; this runs with IF=0 inside a syscall.
+ * Reuses decode_image() so PNG/BMP/JPEG/GIF/SVG all work. 0 ok, -1 fail. */
+int desktop_load_image(const char *name, unsigned *buf, int cw, int ch, int *outwh) {
+    if (cw <= 0 || ch <= 0) return -1;
+    uint8_t *file = kmalloc(512 * 1024);
+    if (!file) return -1;
+    long n = vfs_read(name, file, 512 * 1024);
+    if (n <= 0) { kfree(file); return -1; }
+    int w = 0, h = 0;
+    uint8_t *rgba = decode_image(file, (int)n, &w, &h);     /* native-size RGBA (we own it) */
+    kfree(file);
+    if (!rgba || w <= 0 || h <= 0) { if (rgba) kfree(rgba); return -1; }
+
+    int dw = cw, dh = (int)((long)cw * h / w);              /* fit within cw*ch, preserve aspect */
+    if (dh > ch) { dh = ch; dw = (int)((long)ch * w / h); }
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
+    int ox = (cw - dw) / 2, oy = (ch - dh) / 2;             /* centre; letterbox the rest */
+    for (int y = 0; y < ch; y++)
+        for (int x = 0; x < cw; x++) {
+            int rx = x - ox, ry = y - oy;
+            unsigned px = 0x101418;                         /* letterbox background */
+            if (rx >= 0 && rx < dw && ry >= 0 && ry < dh) {
+                int sx = (int)((long)rx * w / dw), sy = (int)((long)ry * h / dh);
+                const uint8_t *p = &rgba[((long)sy * w + sx) * 4];   /* RGBA -> 0x00RRGGBB */
+                px = ((unsigned)p[0] << 16) | ((unsigned)p[1] << 8) | p[2];
+            }
+            buf[(long)y * cw + x] = px;
+        }
+    kfree(rgba);
+    outwh[0] = w; outwh[1] = h;
+    return 0;
 }
 
 /* Procedural desktop background (visual refresh): a deep corner-to-corner blue

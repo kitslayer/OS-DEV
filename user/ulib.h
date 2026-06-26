@@ -128,6 +128,7 @@ long sys_chdir(const char *path);
 long sys_tree(void *buf, unsigned long len);
 long sys_ps(void *buf, unsigned long len);
 long sys_font(void *buf, unsigned long len);            /* copy the 8x16 console font (128*16 bytes) for gfx text (M1362) */
+long sys_loadimg(const char *name, void *buf, int cw, int ch, int *outwh);  /* decode+fit-scale an image file into a cw*ch XRGB buf; native size -> outwh[2]; 0/-1 (M1392) */
 long sys_history(void *buf, unsigned long len);
 int  sys_pollkey(void);
 long sys_df(void *buf, unsigned long len);

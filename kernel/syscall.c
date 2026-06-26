@@ -313,7 +313,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
-    case SYS_clip_get: case SYS_clip_set: case SYS_font:
+    case SYS_clip_get: case SYS_clip_set: case SYS_font: case SYS_loadimg:
         return PL_GFX;
     case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace:
     case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_killpg:
@@ -351,7 +351,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_playwav]="playwav",[SYS_pcm_stream]="pcm_stream",[SYS_pcm_avail]="pcm_avail",[SYS_mouse]="mouse",
         [SYS_playbg]="playbg",[SYS_audiostop]="audiostop",[SYS_mouse_rel]="mouse_rel",[SYS_caret]="caret",
         [SYS_clip_get]="clip_get",[SYS_clip_set]="clip_set",[SYS_getarg]="getarg",[SYS_savebmp]="savebmp",
-        [SYS_setwall]="setwall",[SYS_lspci]="lspci",[SYS_lsblk]="lsblk",[SYS_poweroff]="poweroff",
+        [SYS_setwall]="setwall",[SYS_loadimg]="loadimg",[SYS_lspci]="lspci",[SYS_lsblk]="lsblk",[SYS_poweroff]="poweroff",
         [SYS_kill]="kill",[SYS_mounts]="mounts",[SYS_mmap]="mmap",[SYS_munmap]="munmap",
         [SYS_signal]="signal",[SYS_raise]="raise",[SYS_sigreturn]="sigreturn",[SYS_getrandom]="getrandom",
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
@@ -1026,6 +1026,13 @@ void syscall_dispatch(struct registers *r) {
         if (max < need || !ubuf(r->rsi, (uint64_t)need)) { r->rax = (uint64_t)-1; break; }
         for (int i = 0; i < need; i++) b[i] = ((const unsigned char *)font_glyphs)[i];
         r->rax = (uint64_t)need;
+        break;
+    }
+    case SYS_loadimg: {                       /* decode + fit-scale an image file into a gfx app's XRGB buffer (M1392) */
+        int cw = (int)((r->rdx >> 16) & 0xFFFF), ch = (int)(r->rdx & 0xFFFF);
+        if (cw <= 0 || ch <= 0) { r->rax = (uint64_t)-1; break; }
+        if (!ustr(r->rdi) || !ubuf(r->rsi, (uint64_t)cw * ch * 4) || !ubuf(r->r10, 8)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)desktop_load_image((const char *)r->rdi, (unsigned *)r->rsi, cw, ch, (int *)r->r10);
         break;
     }
     case SYS_ps: {
