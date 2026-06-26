@@ -727,7 +727,7 @@ static int run_command(char *line, char *cwd) {
                 p = vp;
             }
         } else if (streq(line, "set") || streq(line, "env")) {                       /* list all variables */
-            for (int i = 0; i < g_nvars; i++) { print(g_vars[i].name); print("="); print(g_vars[i].val); print("\n"); }
+            for (int i = 0; i < g_nvars; i++) { sys_setcolor(4); print(g_vars[i].name); sys_setcolor(8); print("="); sys_setcolor(0); print(g_vars[i].val); print("\n"); }   /* NAME cyan, = grey, value default (M1324) */
             if (g_nvars == 0) print("(no variables set)\n");
         } else if (startswith(line, "read ")) {                                       /* read a line of input into a variable */
             char *p = line + 5; while (*p == ' ') p++; sh_unprot_buf(p);

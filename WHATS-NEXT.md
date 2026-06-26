@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1324) shell — colour `env`/`set` variable names (cyan).** Listing shell variables shows each NAME in cyan, the `=` grey, the value default — so `env`/`set` are easy to scan. **Verified:** in-guest — `env` → `foo` cyan in `foo=bar`. *(The shell colour pass now spans 14 surfaces; only `lsblk` — a complex scrolling multi-section format that can't be cleanly verified headless — is left.)*
+
 > **(M1323) shell — colour the `mount` device path (cyan).** `print_firsttok_cyan` colours the device path (`/disk1`) of each mount line cyan, the rest default; the browse-hint stays default. **Verified:** in-guest — `mount` → cyan `/disk1`.
 
 > **(M1322) shell — colourise the `help` section labels (cyan).** A `helpline()` helper colours each `help` section header (`files:`/`net:`/`crypto:`/`math:`/`misc:`/`vm:`/`syntax:`/`edit:`) cyan, leaving continuation lines + content default — so the most-run informational command is easy to scan by section. **Verified:** in-guest — `help` shows the section labels in cyan (e.g. `edit:`).
