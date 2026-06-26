@@ -655,6 +655,33 @@ static void print_usage_bar(long used, long total) {
     sys_setcolor(bc); printl(pct); print("%"); sys_setcolor(0); print(" used\n");
 }
 
+/* Colour the kernel log's level tags: "[ ok ]" lime, "[warn..]" amber,
+ * "[err..]"/"[fail..]" red, any other "[...]" light-blue; message text default (M1355). */
+static void print_dmesg_colored(const char *buf) {
+    char seg[256]; int i = 0;
+    while (buf[i]) {
+        int eol = i; while (buf[eol] && buf[eol] != '\n') eol++;
+        int lb = -1, rb = -1;
+        for (int k = i; k < eol && k < i + 10; k++) if (buf[k] == '[') { lb = k; break; }
+        if (lb >= 0) for (int k = lb + 1; k < eol; k++) if (buf[k] == ']') { rb = k; break; }
+        if (lb >= 0 && rb > lb + 1) {
+            int t = lb + 1; while (t < rb && buf[t] == ' ') t++;          /* trim, then match level WORDS (not 1st char -- "[ehci]" is a subsystem, not an error) */
+            const char *p = buf + t; int rem = rb - t; int col = 6;       /* subsystem tag -> light-blue */
+            if      (rem >= 2 && p[0]=='o' && p[1]=='k')                     col = 9;   /* [ ok ] -> lime */
+            else if (rem >= 4 && p[0]=='w'&&p[1]=='a'&&p[2]=='r'&&p[3]=='n') col = 3;   /* warn  -> amber */
+            else if (rem >= 3 && p[0]=='e'&&p[1]=='r'&&p[2]=='r')            col = 2;   /* err   -> red */
+            else if (rem >= 4 && p[0]=='f'&&p[1]=='a'&&p[2]=='i'&&p[3]=='l') col = 2;   /* fail  -> red */
+            int n=0; for (int k=i;k<lb&&n<255;k++) seg[n++]=buf[k]; seg[n]=0; print(seg);                                  /* before tag */
+            sys_setcolor(col); n=0; for (int k=lb;k<=rb&&n<255;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); sys_setcolor(0); /* the [tag] */
+            n=0; for (int k=rb+1;k<eol&&n<255;k++) seg[n++]=buf[k]; seg[n]=0; print(seg);                                  /* after tag */
+        } else {
+            int n=0; for (int k=i;k<eol&&n<255;k++) seg[n++]=buf[k]; seg[n]=0; print(seg);
+        }
+        if (buf[eol] == '\n') { print("\n"); eol++; }
+        i = eol;
+    }
+}
+
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
     do {
@@ -1868,13 +1895,13 @@ static int run_command(char *line, char *cwd) {
             if (!fn[0] || sys_statx(fn, &st) != 0) { print("stat: no such file: "); print(fn); print("\n"); g_status = 1; }
             else {
                 unsigned t = st.stx_mode & S_IFMT;
-                print("  File: "); print(fn); print("\n");
-                print("  Type: "); print(t == S_IFDIR ? "directory" : (t == S_IFLNK ? "symlink" : "regular file")); print("\n");
-                print("  Size: "); printl((long)st.stx_size); print("   Blocks: "); printl((long)st.stx_blocks);
-                print("   Links: "); printl((long)st.stx_nlink); print("\n");
+                sys_setcolor(4); print("  File: "); sys_setcolor(0); print(fn); print("\n");
+                sys_setcolor(4); print("  Type: "); sys_setcolor(0); print(t == S_IFDIR ? "directory" : (t == S_IFLNK ? "symlink" : "regular file")); print("\n");
+                sys_setcolor(4); print("  Size: "); sys_setcolor(0); printl((long)st.stx_size); sys_setcolor(4); print("   Blocks: "); sys_setcolor(0); printl((long)st.stx_blocks);
+                sys_setcolor(4); print("   Links: "); sys_setcolor(0); printl((long)st.stx_nlink); print("\n");
                 unsigned m = st.stx_mode & 0777;     /* print real octal digits (printl is decimal) */
-                print("  Mode: 0"); printl((m >> 6) & 7); printl((m >> 3) & 7); printl(m & 7);
-                print("   Mtime(epoch): "); printl((long)st.stx_mtime); print("\n");
+                sys_setcolor(4); print("  Mode: 0"); sys_setcolor(0); printl((m >> 6) & 7); printl((m >> 3) & 7); printl(m & 7);
+                sys_setcolor(4); print("   Mtime(epoch): "); sys_setcolor(0); printl((long)st.stx_mtime); print("\n");
             }
         } else if (startswith(line, "fiemap ")) {   /* fiemap <path>: a file's physical on-disk extent map (ext2 mounts) (M1152) */
             const char *p = line + 7; while (*p == ' ') p++;
@@ -1995,7 +2022,7 @@ static int run_command(char *line, char *cwd) {
             else { print("losetup: mounted "); print(fn); print(" as /disk"); printl(idx + 1); print("  (cd /disk"); printl(idx + 1); print(" to browse)\n"); }
         } else if (streq(line, "dmesg")) {  /* the kernel log ring buffer, read back from /proc/kmsg */
             long n; char *b = slurp("/proc/kmsg", &n);
-            if (b) { print(b); if (n > 0 && b[n - 1] != '\n') print("\n"); free(b); }
+            if (b) { print_dmesg_colored(b); if (n > 0 && b[n - 1] != '\n') print("\n"); free(b); }
             else print("dmesg: kernel log unavailable\n");
         } else if (streq(line, "measure")) {  /* measured-boot PCRs + attestation event log (/proc/measure) */
             long n; char *b = slurp("/proc/measure", &n);

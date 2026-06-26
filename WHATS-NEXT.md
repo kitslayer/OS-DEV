@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1355) shell — colourise `dmesg` + `stat`.** `dmesg` now tints each kernel-log line's `[subsystem]` tag light-blue (with genuine level words — `ok` lime, `warn` amber, `err`/`fail` red — when present), so the log is scannable; `stat` shows its metadata labels (File/Type/Size/Mode/…) in cyan. **Verified:** in-guest — `dmesg` shows `[ehci]`/`[main]`/`[dm]` tags in light-blue. (A first-pass bug that mis-coloured subsystem tags like `[ehci]` red as "errors" was caught via screenshot and fixed to match level *words*, not the first char.)
+
 > **(M1354) hexedit — find-next (`N`).** Press `N` to jump to the next occurrence of the last-searched byte pattern (no re-typing) — the standard find/find-next pair. The search scan was refactored into a shared `find_from` helper used by both `/` and `N`. **Verified:** in-guest — `/20⏎` finds the first space (0x02), `N` jumps to the next (0x09). The hex editor is now feature-complete: view, navigate (arrows/page/goto), find + find-next, edit, save — all coloured.
 
 > **(M1353) docs — README showcase lists the hex editor.** Added the new interactive `hexedit` (overtype-edit + find/goto, save) to the README's tool/app list, so the front page reflects this session's new tool alongside the HTTP file server + the OS-wide colourisation.
