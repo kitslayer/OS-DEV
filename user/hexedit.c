@@ -25,6 +25,7 @@ static long flen;
 static int  ro;            /* file hit CAP: it may be larger, so view-only (saving would truncate) */
 static char fname[64];
 static int  gmode; static long gval;   /* 'g' goto-offset input mode + the offset being typed (M1348) */
+static int  smode; static unsigned char spat[16]; static int splen, snib, sfail;   /* '/' find-bytes mode (M1349) */
 
 static void hx(int v) { char s[2] = { "0123456789abcdef"[v & 15], 0 }; print(s); }
 static void hoff(long o) { hx((int)((o >> 12) & 15)); hx((int)((o >> 8) & 15)); hx((int)((o >> 4) & 15)); hx((int)(o & 15)); }
@@ -33,7 +34,8 @@ static void render(long cur, long top, int nibble, int dirty) {
     sys_clear();
     sys_setcolor(4); print(" hexedit "); sys_setcolor(8); print(fname);
     if (dirty) print(" *"); if (ro) { sys_setcolor(2); print(" [RO]"); }
-    sys_setcolor(8); print("  @"); hoff(cur); if (nibble) print(" lo"); sys_setcolor(0); print("\n");   /* offset in the title so the grid fits 17 rows (M1343) */
+    sys_setcolor(8); print("  @"); hoff(cur); if (nibble) print(" lo");
+    if (sfail) { sys_setcolor(2); print(" !notfound"); } sys_setcolor(0); print("\n");   /* offset (+ last-find result) in the title (M1343/M1349) */
     sys_setcolor(8); print("      00 01 02 03 04 05 06 07\n"); sys_setcolor(0);   /* column-index header, aligned over the hex bytes (M1345) */
     for (int r = 0; r < ROWS; r++) {
         long off = top + (long)r * BPR;
@@ -60,7 +62,8 @@ static void render(long cur, long top, int nibble, int dirty) {
     }
     sys_setcolor(8);
     if (gmode) { print("\n goto: "); hoff(gval); print("  (enter jump, esc cancel)"); }
-    else print("\n arrows/np/g move 0-9a-f edit s save q quit");   /* <44 cols so the cursor stays (M1343/M1348) */
+    else if (smode) { print("\n find: "); for (int i = 0; i < splen; i++) { hx(spat[i] >> 4); hx(spat[i] & 15); print(" "); } print(" (enter, esc)"); }
+    else print("\n arrows/np/g  /find  0-9a-f edit  s save");   /* <44 cols so the cursor stays (M1343/M1349) */
     sys_setcolor(0);
 }
 
@@ -91,7 +94,30 @@ int main(void) {
             render(cur, top, nibble, dirty);
             continue;
         }
+        if (smode) {                                             /* find-pattern input (M1349) */
+            if (k == 27) smode = 0;
+            else if (k == '\n' || k == '\r') {
+                smode = 0;
+                if (splen > 0) {
+                    long found = -1;
+                    for (long i = cur + 1; i + splen <= flen && found < 0; i++) { int m = 1; for (int j = 0; j < splen; j++) if (buf[i+j] != spat[j]) { m = 0; break; } if (m) found = i; }
+                    for (long i = 0;       i <= cur  && i + splen <= flen && found < 0; i++) { int m = 1; for (int j = 0; j < splen; j++) if (buf[i+j] != spat[j]) { m = 0; break; } if (m) found = i; }
+                    if (found >= 0) { cur = found; nibble = 0; sfail = 0; } else sfail = 1;
+                }
+            }
+            else if (k == 8 || k == 127) { if (snib) snib = 0; else if (splen > 0) splen--; }
+            else { int d = (k>='0'&&k<='9') ? k-'0' : (k>='a'&&k<='f') ? k-'a'+10 : (k>='A'&&k<='F') ? k-'A'+10 : -1;
+                   if (d >= 0) { if (snib == 0) { if (splen < 16) { spat[splen] = (unsigned char)(d << 4); snib = 1; } }
+                                 else { spat[splen] = (unsigned char)((spat[splen] & 0xF0) | d); splen++; snib = 0; } } }
+            if (cur < top) top = (cur / BPR) * BPR;
+            if (cur >= top + (long)ROWS * BPR) top = (cur / BPR - ROWS + 1) * BPR;
+            if (top < 0) top = 0;
+            render(cur, top, nibble, dirty);
+            continue;
+        }
+        sfail = 0;                                               /* any normal key clears the find indicator */
         if (k == 'q' || k == 27) break;
+        else if (k == '/') { smode = 1; splen = 0; snib = 0; sfail = 0; }   /* enter find mode */
         else if (k == 'g') { gmode = 1; gval = 0; }              /* enter goto mode */
         else if (k == 's' && !ro) {                              /* save (disabled when read-only) */
             if (sys_writefile(fname, (char *)buf, flen) >= 0) {

@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1349) hexedit — find bytes (`/`).** Press `/`, type a hex byte pattern (e.g. `4f53`), Enter to jump to its next occurrence (wrapping around the file); `!notfound` shows in the title if absent, esc cancels. **The hex editor is now fully capable: view, navigate (arrows/page/goto/find), edit, save — all coloured.** **Verified:** in-guest — `/4f53⏎` finds the bytes `OS` at offset 0x25 (title `@0025`).
+
 > **(M1348) hexedit — goto-offset (`g`).** Press `g`, type a hex offset, Enter to jump the cursor there (esc cancels); the status shows `goto: XXXX` while typing. Complements `n`/`p` paging for precise navigation in large files. The hex editor now has complete navigation: arrows + page + goto. **Verified:** in-guest — `g 40 ⏎` jumps to offset 0x40 (title shows `@0040`).
 
 > **(M1347) demo apps — colourise futex + nstest results.** Continued the colour pass for the `run <name>` demos: `futex` (cross-process WOKEN result lime, no-block amber) and `nstest` (private-bind-works lime, read-FAILED red). **Verified:** build clean; uses the same result-colour pattern proven on forktest. (Representative demos now coloured — the user-facing shell + menu apps were the priority and are fully done.)
