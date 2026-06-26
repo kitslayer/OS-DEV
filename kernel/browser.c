@@ -38,6 +38,7 @@
 #include "cssel.h"   /* sel_t + sel_parse (CSS simple-selector parser; host-fuzzed) — M688 */
 #include "color.h"
 #include "cssprop.h"
+#include "reader.h"   /* reader_main_region() — article-first content extraction (host-fuzzed) */
 #include <stdint.h>
 #include <stddef.h>
 
@@ -107,6 +108,7 @@ struct browser {
     int     host_match;                                  /* TLS hostname match: -2 n/a, 1 ok, 0 mismatch */
     char    cert_cn[48], cert_expiry[16];                /* leaf cert identity, for the 'i' cert-info display */
     int     zoom;                                        /* content zoom multiplier (1..4), persists across navigation */
+    int     reader;                                      /* reader mode: render the page's main-content region only (article-first), skipping nav/header/footer chrome. On by default; 'm' toggles. Persists across navigation */
     volatile int want;                                   /* load queued (worker busy) */
     char    cur[URL_MAX];                                /* currently shown URL */
     char    hist[16][URL_MAX]; int histn;                /* back stack          */
@@ -1214,7 +1216,24 @@ static int cell_extract(const char *s, const char *e, char *out, int cap) {
     int n = 0, sp = 0;
     const char *p = s;
     while (p < e && n < cap - 1) {
-        if (*p == '<') { while (p < e && *p != '>') p++; if (p < e) p++; continue; }
+        if (*p == '<') {
+            /* a <style>/<script> inside a cell (e.g. a MediaWiki infobox's TemplateStyles
+             * block) must be skipped WHOLE — its CSS/JS body is not cell text. */
+            const char *q = p + 1; const char *rn = 0; int rl = 0;
+            if (q + 6 <= e && lc(q[0])=='s'&&lc(q[1])=='c'&&lc(q[2])=='r'&&lc(q[3])=='i'&&lc(q[4])=='p'&&lc(q[5])=='t') { rn = "script"; rl = 6; }
+            else if (q + 5 <= e && lc(q[0])=='s'&&lc(q[1])=='t'&&lc(q[2])=='y'&&lc(q[3])=='l'&&lc(q[4])=='e') { rn = "style"; rl = 5; }
+            while (p < e && *p != '>') p++; if (p < e) p++;            /* past the open tag's '>' */
+            if (rn) {                                                  /* skip the raw-text body + its close tag */
+                while (p < e) {
+                    if (*p == '<' && p + 1 < e && p[1] == '/') {
+                        int ok = 1; for (int z = 0; z < rl; z++) if (p + 2 + z >= e || lc(p[2+z]) != rn[z]) { ok = 0; break; }
+                        if (ok) { while (p < e && *p != '>') p++; if (p < e) p++; break; }
+                    }
+                    p++;
+                }
+            }
+            continue;
+        }
         char c;
         if (*p == '&') { char d; int adv = decode_entity(p, (int)(e - p), &d); if (adv) { c = d; p += adv; } else { c = *p; p++; } }
         else if ((unsigned char)*p >= 0x80) { unsigned cp; int adv = decode_utf8(p, (int)(e - p), &cp); c = uni_to_ascii(cp); p += (adv > 0 ? adv : 1); }
@@ -1384,8 +1403,17 @@ static void parse_html(browser_t *b, const char *body, int len) {
     int det_n = 0, det_depth = 0, det_hide = 0, in_summary = 0, det_cur = 0;   /* <details>: index / nesting / suppress-depth / in-<summary> / current idx */
     int sum_link = NO_LINK, sum_style = STY_NORMAL;      /* saved link/style around a <summary> */
 
+    /* Reader mode: render only the page's main-content region so a linear renderer
+     * shows the article first, instead of stacking nav/header/sidebar chrome before
+     * it. <style>/<title>/<head> are still processed below (page CSS + window title
+     * keep working); only body content + content-emitting tags outside [rlo,rhi) are
+     * skipped. When no clear content container is found, ron==0 -> the whole page. */
+    int rlo = 0, rhi = len, ron = 0;
+    if (b->reader) { int a, z; if (reader_main_region(body, len, &a, &z)) { rlo = a; rhi = z; ron = 1; } }
+
     for (int i = 0; i < len; i++) {
         char c = body[i];
+        int rgate = ron && (i < rlo || i >= rhi);   /* reader mode: this byte/tag is chrome outside the main-content region */
         if (c == '<') {
             /* Inside <script>/<style>, content is raw: a '<' that isn't the matching
              * close tag (e.g. `i < 5`, or `<p>` inside a document.write string) must
@@ -1500,11 +1528,11 @@ static void parse_html(browser_t *b, const char *body, int len) {
             else if (tageq(tag, "title") && !insvg) intitle = !closing;  /* (svg <title> mustn't hijack) */
             else if (tageq(tag, "head")) inhead = !closing;
             else if (tageq(tag, "body")) inhead = intitle = 0;   /* visible content */
-            else if (tageq(tag, "pre")) {                        /* preformatted block */
+            else if (tageq(tag, "pre") && !rgate) {              /* preformatted block */
                 inpre = !closing;
                 emit_break(b, TK_PARA);                          /* pre starts/ends on its own line */
             }
-            else if (tageq(tag, "details")) {                    /* collapsible: hide the body when closed */
+            else if (tageq(tag, "details") && !rgate) {          /* collapsible: hide the body when closed */
                 if (!closing) {
                     int idx = det_n < 16 ? det_n : 15; if (det_n < 16) det_n++;   /* cap idx so det_open[idx] stays in bounds */
                     if (b->det_open[idx] == 0xFF) b->det_open[idx] = has_attr(body + astart, j - astart, "open") ? 1 : 0;
@@ -1513,7 +1541,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
                 } else { if (det_depth == det_hide) det_hide = 0; if (det_depth > 0) det_depth--; }
                 emit_break(b, TK_PARA);
             }
-            else if (tageq(tag, "summary")) {                    /* the always-shown, clickable toggle */
+            else if (tageq(tag, "summary") && !rgate) {          /* the always-shown, clickable toggle */
                 if (!closing && det_depth > 0) {
                     in_summary = 1; sum_link = curlink; sum_style = style;
                     int lk = add_det_link(b, det_cur);
@@ -1521,14 +1549,14 @@ static void parse_html(browser_t *b, const char *body, int len) {
                         emit_literal_link(b, b->det_open[det_cur] ? "[-] " : "[+] ", lk); }
                 } else if (closing && in_summary) { in_summary = 0; curlink = sum_link; style = sum_style; }
             }
-            else if (tageq(tag, "table") && !closing &&
+            else if (tageq(tag, "table") && !closing && !rgate &&
                      !inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary)) {
                 /* render the whole <table>..</table> region as aligned columns, then skip past it */
                 int consumed = render_table(b, body + j + 1, len - (j + 1));
                 i = j + consumed;                         /* loop ++ lands just past </table> */
                 continue;
             }
-            else if (!inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary))
+            else if (!rgate && !inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary))
                 handle_tag(b, tag, closing, body + astart, j - astart,
                            &style, &linkdepth, &curlink);
 
@@ -1553,6 +1581,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
             continue;
         }
         if (inhead) continue;                     /* skip other <head> content */
+        if (rgate) continue;                      /* reader mode: content outside the main-content region (title/head already handled above) */
         if (b->curtransform) {                    /* CSS text-transform: case-fold the RENDERED char (goes into b->text only; .textContent reads b->raw, so it stays original) */
             if (b->curtransform == 1 && c >= 'a' && c <= 'z') c -= 32;
             else if (b->curtransform == 2 && c >= 'A' && c <= 'Z') c += 32;
@@ -3781,7 +3810,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             "+ -  zoom     0  reset     g top     G bottom",
             "space / b  page     j k  scroll a line",
             "s  save page    u  view source    a  bookmark",
-            "i  certificate info     ?  this help",
+            "i  cert info    m  reader mode    ?  this help",
         };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) { fb_text(cl, ly, L[i], 0x202830, 1); ly += 20; }
         return;
@@ -4445,6 +4474,10 @@ void browser_key(browser_t *b, int c) {
     case 's':           browser_save(b);   break;   /* save page to PAGE.TXT */
     case 'u':           if (!b->img) { b->viewsource = !b->viewsource; b->scroll = 0;  /* toggle raw HTML */
                             set_status(b, b->viewsource ? "source" : ""); } break;
+    case 'm':           b->reader = !b->reader;          /* toggle reader mode (article-first vs whole page) */
+                        set_status(b, b->reader ? "reader on" : "reader off");
+                        if (b->raw && b->bodylen > 0 && !b->img) { parse_html(b, b->raw + b->bodyoff, b->bodylen); b->scroll = 0; }
+                        break;
     case 'i': {         /* cert info: identity + validity of the current HTTPS page */
         if (b->cert_status == -2) { set_status(b, "not HTTPS"); break; }
         char s[40]; int p = 0;
@@ -4497,6 +4530,7 @@ browser_t *browser_create(const char *url) {
     browser_t *b = kzalloc(sizeof(browser_t));
     if (!b) return NULL;
     b->zoom  = 1;                            /* default 1x (zoom persists across pages) */
+    b->reader = 1;                           /* reader mode on by default: show the article, not the chrome */
     b->raw   = kmalloc(RAW_MAX);
     b->text  = kmalloc(TEXT_MAX);
     b->toks  = kmalloc(sizeof(tok_t) * TOK_MAX);
