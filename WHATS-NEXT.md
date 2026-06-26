@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1331) shell — `free` gets a memory-usage bar; shared `print_usage_bar` helper.** Extracted M1330's disk-bar logic into `print_usage_bar(used, total)` (lime/amber/red by fill) and gave `free` a matching memory bar below its figures, so disk + memory read consistently (df refactored to the helper — identical output). **Verified:** in-guest — `free` shows `[#####---------------] 27% used` (lime, low usage) and `df` `[################----] 80% used` (amber).
+
 > **(M1330) shell — `df` now draws a colour-coded disk-usage bar.** Below the free/total figures, `df` shows a 20-cell `[####----]` bar + `N% used`, coloured by fill: lime <70%, amber 70–90%, red ≥90% (empty cells grey). Parses free + total from `sys_df` and computes used%. The existing free/total line is unchanged (additive). **Verified:** in-guest — `df` shows `[################----] 80% used` in amber at 80% full.
 
 > **(M1329) shell — `neofetch`/`screenfetch`: a colourful system summary.** A classic system-info banner: an ASCII monitor logo (blue frame, cyan `OS-DEV`/`x86_64`) above live stats — `root@<hostname>`, OS, kernel (from `uname`), uptime (`/proc/uptime`), shell, memory used/total (`/proc/meminfo`, used in amber), terminal size — with cyan labels, plus a 9-colour palette swatch row. Reuses existing data sources (no new syscalls); the console font is ASCII-only so the swatches use `#` blocks. Listed in `help`. **Verified:** in-guest screenshot — the logo, coloured stats, and palette bar all render.
