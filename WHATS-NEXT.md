@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1322) shell — colourise the `help` section labels (cyan).** A `helpline()` helper colours each `help` section header (`files:`/`net:`/`crypto:`/`math:`/`misc:`/`vm:`/`syntax:`/`edit:`) cyan, leaving continuation lines + content default — so the most-run informational command is easy to scan by section. **Verified:** in-guest — `help` shows the section labels in cyan (e.g. `edit:`).
+
 > **(M1321) shell — colourise `lspci` (bus cyan, vendor:device yellow).** Each PCI device line gets its bus address in cyan and its `vendor:device` id in yellow, the class + description default. **Verified:** in-guest — `lspci` → cyan bus `00:00.0` + yellow `8086:1237`. (11 colourised shell surfaces now.)
 
 > **(M1320) shell — colour the `date` output (date cyan, time yellow).** The last common-command output: `date` shows the date part cyan and the time yellow, like a colourful clock. This completes the shell colour pass — the prompt **and** every common list/status/info command (`ls`/`tree`/`find`/`uptime`/`free`/`ps`/`df`/`cal`/`date`) are now colourised (10 surfaces). **Verified:** in-guest — `date` → cyan `2026-06-26` + yellow `00:40:18`.

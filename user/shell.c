@@ -597,6 +597,16 @@ static void print_lspci_colored(const char *buf) {
         i = eol;
     }
 }
+/* Print a help line; if it starts with a "label:" section header, colour the
+ * label cyan (M1322). Continuation lines (leading space) print unchanged. */
+static void helpline(const char *s) {
+    int c = 0; while (s[c] && s[c] != ':' && s[c] != ' ') c++;
+    if (s[0] != ' ' && s[c] == ':') {
+        sys_setcolor(4);
+        char lab[16]; int n = 0; for (int k = 0; k <= c && n < 15; k++) lab[n++] = s[k]; lab[n] = 0;
+        print(lab); sys_setcolor(0); print(s + c + 1);
+    } else print(s);
+}
 
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
@@ -647,19 +657,19 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            print("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
-            print("net:    get<url> headers<url> wget<url file> browse<url>\n");
+            helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
+            helpline("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
             print("        sntp / ntpdate (set the wall clock from pool.ntp.org over UDP)\n");
-            print("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
+            helpline("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        cas store<file> (content-addressed store, SHA-256 key)  cas fetch<key>  cas (stats)\n");
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
-            print("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
-            print("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
+            helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
+            helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            print("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
-            print("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
             print("        .SHRC in / is auto-run at shell start (put aliases/set/etc. there)\n");
@@ -677,7 +687,7 @@ static int run_command(char *line, char *cwd) {
             print("        local NAME[=val]   (function-scoped variable; restored when the function returns)\n");
             print("        *.txt ? (glob)   cmd1 ; cmd2 (run both)   !! (repeat last command)\n");
             print("        NAME=val (or set NAME=val)  $NAME ${NAME} ${N:-def} ${N:+alt} ${#N} ${N#pfx} ${N%sfx}  $((expr))  unset NAME  env\n");
-            print("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
+            helpline("edit:   arrows move  Home/End  Del  up/down=history  ^W/^U/^K=kill  ^C=cancel\n");
             print("        Tab completes a filename (longest common prefix); a 2nd Tab lists the matches\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
             const char *p = line + (line[1]=='x' ? 7 : 4); while (*p == ' ') p++;   /* skip "set "/"export " */
