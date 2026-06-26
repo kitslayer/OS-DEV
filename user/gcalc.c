@@ -32,6 +32,42 @@ static void chS(char c, int px, int py, int s, unsigned col) { unsigned u = (uns
 static void textS(const char *t, int x, int y, int s, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, s, col); x += 8 * s; } }
 static int slen(const char *s) { int n = 0; while (s[n]) n++; return n; }
 
+/* ---- instrument-panel UI kit (M1439; see gconv.c M1430) ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_AMBER   0xFFB23Eu
+#define C_AMBERLO 0x7A521Au
+#define C_LABEL   0xC6D0CCu
+#define C_DIM     0x6E827Fu
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, lo); fill(x, y, 1, h, lo); fill(x, y + h - 1, w, 1, hi); fill(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fill(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fill(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+static void gtextS(const char *t, int x, int y, int s, unsigned col, unsigned glow) {
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s + 1, y + 1, s, glow);
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s,     y,     s, col);
+}
+
 /* parse a typed entry string ("31.4") into fixed-point (*10000) */
 static long parse_fixed(const char *s) {
     long ip = 0; int i = 0, neg = 0;
@@ -121,25 +157,28 @@ int main(void) {
         prevb = b;
 
         if (dirty) {
-            for (int i = 0; i < W * H; i++) FB[i] = 0x15181F;
-            fill(8, 8, W - 16, 52, 0x0C1A12);                   /* LCD strip */
-            if (pend) chS(pend, 14, 12, 1, 0xFFD060);           /* pending-operator indicator (M1414) */
+            vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);              /* slate faceplate */
+            bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+            panel(8, 8, W - 16, 52);                            /* recessed amber LCD */
+            if (pend) chS(pend, 14, 14, 1, C_AMBERLO);          /* pending-operator indicator (M1414) */
             char shown[24]; if (elen > 0 && !fresh) { for (int i = 0; i <= elen; i++) shown[i] = entry[i]; } else fmt_fixed(reg, shown);
             int sl = slen(shown); if (sl > 9) sl = 9;           /* right-align, clip to 9 glyphs */
-            textS(shown + (slen(shown) > 9 ? slen(shown) - 9 : 0), W - 12 - sl * 24, 24, 3, 0x6CF09A);
+            int rx = W - 12 - sl * 24; if (rx < 12) rx = 12;
+            gtextS(shown + (slen(shown) > 9 ? slen(shown) - 9 : 0), rx, 24, 3, C_AMBER, C_AMBERLO);   /* result glows amber */
 
             for (int r = 0; r < 5; r++) for (int c = 0; c < 4; c++) {
                 const char *lab = PAD[r][c]; if (!lab) continue;
                 int x = BX + c * GX, y = BY + r * GY;
                 int hot = (last && lab[0] == last);             /* highlight the last key pressed */
                 int isop = (lab[0]=='/'||lab[0]=='*'||lab[0]=='-'||lab[0]=='+'||lab[0]=='='||lab[0]=='%');
-                unsigned bg = hot ? 0x3A78D8 : isop ? 0x2A3140 : (lab[0]=='C'||lab[0]=='<') ? 0x402A2A : 0x232A36;
+                int isclr = (lab[0]=='C'||lab[0]=='<');
+                unsigned bg = hot ? 0x2A6E50u : isop ? 0x3A2E1Au : isclr ? 0x3A2226u : 0x2C383Eu;   /* hot=green, op=amber-dark, clear=red-dark, digit=slate */
                 fill(x, y, BW, BH, bg);
-                fill(x, y, BW, 1, 0x404A5A);
-                unsigned tc = hot ? 0xFFFFFF : isop ? 0xF0C060 : 0xD8E0EC;
+                bevel_up(x, y, BW, BH, C_BEZHI, C_BEZLO);       /* raised key */
+                unsigned tc = hot ? 0xEFFFF4u : isop ? C_AMBER : isclr ? 0xF0A6A6u : C_LABEL;
                 textS(lab, x + (BW - 16) / 2, y + (BH - 16) / 2, 2, tc);
             }
-            textS("y: copy result", 8, H - 18, 1, 0x606878);
+            textS("y copy result", 8, H - 16, 1, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }
