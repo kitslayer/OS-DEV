@@ -69,6 +69,8 @@ int     task_count(void);                  /* number of live tasks */
 typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitch; uint64_t rq_wait_ms; uint64_t wchan; int nice; int policy; int rt_priority; } task_info_t;
 int     task_snapshot(task_info_t *out, int max);   /* fill out[]; returns count */
 uint64_t task_idle_ms(void);                         /* ms the idle task has run (system idle time) */
+uint64_t task_idle_hlt_ms(void);                     /* ms the main thread spent halted = idle (M1361) */
+void     idle_hlt(void);                             /* halt until an IRQ, crediting the slept time to idle (M1361) */
 int     task_runnable_count(void);   /* tasks wanting the CPU now (RUNNING|READY, idle excluded) (M1148) */
 uint64_t task_ctxt_count(void);                      /* total context switches since boot — /proc/stat ctxt (M1253) */
 uint64_t task_total_spawned(void);                   /* cumulative tasks ever created — /proc/stat processes (M1253) */

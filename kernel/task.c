@@ -417,11 +417,17 @@ void task_loadavg(uint64_t out[3]) {
     out[0] = load_avg[0]; out[1] = load_avg[1]; out[2] = load_avg[2];
 }
 
+/* Set while the compositor's main thread is halted in idle_hlt(): the timer tick
+ * that wakes it is then credited to idle rather than pinning that task at "busy". */
+static volatile int g_in_hlt;
+static volatile uint64_t g_hlt_idle_ms;
+
 /* Charge the current task `ms` of CPU time to user or kernel mode, called from
  * the timer IRQ with user = (the interrupted frame was ring 3). Tick-sampled,
  * so coarse (one-tick granularity) — the standard getrusage utime/stime model
  * (M1150). The precise total CPU time stays in run_ms (switch_to_next). */
 void task_cpu_tick(uint64_t ms, int user) {
+    if (g_in_hlt) { g_hlt_idle_ms += ms; return; }   /* the CPU was halted: this tick is idle time */
     if (!current) return;
     if (user) current->utime_ms += ms;
     else      current->stime_ms += ms;
@@ -574,6 +580,16 @@ uint64_t task_idle_ms(void) {
     if (idle_task->state == TASK_RUNNING) rm += timer_ms() - idle_task->last_in;
     return rm;
 }
+
+/* Halt until the next interrupt, crediting the slept time to idle. The compositor's
+ * main loop calls this on each idle pass; without it the waking timer tick is charged
+ * to that (always-running) task and /proc/stat's CPU would stick at 100%. (M1361) */
+void idle_hlt(void) {
+    g_in_hlt = 1;
+    __asm__ volatile("sti; hlt");
+    g_in_hlt = 0;
+}
+uint64_t task_idle_hlt_ms(void) { return g_hlt_idle_ms; }
 
 /* --- /proc/stat aggregates (M1253) --- */
 uint64_t task_ctxt_count(void)    { return g_nr_switches; }      /* total context switches since boot */

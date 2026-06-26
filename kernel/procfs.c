@@ -272,7 +272,7 @@ static long gen_interrupts(char *b, int max) {
  * zeros. ctxt + processes are real new counters; btime is the real boot epoch. */
 static long gen_stat(char *b, int max) {
     uint64_t up = timer_ms();
-    uint64_t idle = task_idle_ms(); if (idle > up) idle = up;
+    uint64_t idle = task_idle_ms() + task_idle_hlt_ms(); if (idle > up) idle = up;
     uint64_t um = 0, sm = 0; task_cpu_times(&um, &sm);
     uint64_t now = rtc_unix();
     uint64_t btime = (now > up / 1000) ? now - up / 1000 : 0;   /* boot epoch = now - uptime */
@@ -355,7 +355,7 @@ static long gen_sched(char *b, int max) {       /* per-task CPU time + system id
     task_info_t ti[24];
     int cnt = task_snapshot(ti, 24);
     uint64_t up = timer_ms(); if (up == 0) up = 1;
-    uint64_t idle = task_idle_ms(); if (idle > up) idle = up;
+    uint64_t idle = task_idle_ms() + task_idle_hlt_ms(); if (idle > up) idle = up;
     static const char *st[5] = { "ready", "run  ", "block", "dead ", "stop " };
     uint64_t memt = pmm_total_bytes() / (1024 * 1024), memf = pmm_free_bytes() / (1024 * 1024);
     int p = sapp(b, 0, max, "uptime_ms ");  p = sdec(b, p, max, up);

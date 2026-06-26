@@ -81,6 +81,7 @@ struct menu_item { const char *label; int kind; const char *prog; };
 static const struct menu_item menu[] = {
     { "Browser", KIND_BROWSER, 0 }, { "Shell", KIND_APP, "shell" },
     { "Clock", KIND_APP, "clock" }, { "Analog Clock", KIND_APP, "aclock" }, { "Calc", KIND_APP, "calc" },
+    { "System Monitor", KIND_APP, "sysgraph" },
     { "Snake", KIND_APP, "snake" }, { "Editor", KIND_APP, "editor" },
     { "2048", KIND_APP, "2048" }, { "Life", KIND_APP, "life" }, { "Mines", KIND_APP, "mines" },
     { "Tetris", KIND_APP, "tetris" }, { "Breakout", KIND_APP, "breakout" },
@@ -1741,6 +1742,6 @@ void desktop_run(void) {
         if (dirty) { render_scene(); present_frame(); }  /* scene changed: full redraw + blit */
         else if (moved) present_cursor();                 /* cursor only: tiny rect blit */
         prev_x = mx; prev_y = my; prev_btn = btn;
-        __asm__ volatile("hlt");
+        idle_hlt();    /* halt till the next IRQ; credits the wait to idle so /proc CPU% is real (M1361) */
     }
 }
