@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1336) Calendar app — colourised (matching the shell's `cal`).** The GUI Calendar now renders the month title in cyan, the weekday header with weekend columns (Su/Sa) amber + weekdays light-blue, today's cell cyan (keeping its `[brackets]`), weekend day-cells amber, and the key hint grey — consistent with the shell's coloured `cal`. **Verified:** in-guest screenshot — June 2026 with `[26]` cyan and the Su/Sa columns amber.
+
 > **(M1335) shell — colourise `diff` output (removed red, added lime, context grey).** The existing LCS line-diff now renders `-` lines red, `+` lines lime, and unchanged context grey — like `git diff` — so changes pop. Colour is a terminal attribute, so the output bytes (and pipes/`$()`) are byte-identical. **Verified:** in-guest — `diff hello.txt motd.txt` shows the removed line red and the added lines lime.
 
 > **(M1334) desktop — colourised the About window's tech-stack lines.** The four capability lines (`kernel.memory.tasks`, `FAT32.TCP.TLS 1.3`, `JS engine.web browser`, `scriptable shell.editor`) now render in accent blue (heading blue, subtitle dark), matching the Welcome treatment. **Verified:** in-guest screenshot — the tech lines render accent-blue; full `make check` green.

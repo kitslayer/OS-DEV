@@ -46,25 +46,33 @@ static void cell(char *b, int *p, int day, int today) {
 static void render(int y, int m, int today_y, int today_m, int today_d) {
     sys_clear();
     char line[64]; int p = 0;
-    /* title: "    June 2026" */
+    /* title in cyan (M1336) */
     puts_(line, &p, "    "); puts_(line, &p, MONTHS[m - 1]); line[p++] = ' '; putn_(line, &p, y);
-    line[p] = 0; print(line); print("\n\n");
-    print("  Su  Mo  Tu  We  Th  Fr  Sa\n");
+    line[p] = 0; sys_setcolor(4); print(line); sys_setcolor(0); print("\n\n");
+    /* weekday header: weekend columns (Su/Sa) amber, weekdays light-blue */
+    sys_setcolor(7); print("  Su");
+    sys_setcolor(6); print("  Mo  Tu  We  Th  Fr");
+    sys_setcolor(7); print("  Sa");
+    sys_setcolor(0); print("\n");
 
     int first = weekday(y, m, 1);          /* column of the 1st */
     int dim = days_in_month(y, m);
     int day = 1;
     for (int row = 0; row < 6 && day <= dim; row++) {
-        p = 0; line[p++] = ' ';
+        print(" ");
         for (int col = 0; col < 7; col++) {
             int show = (row == 0 && col < first) ? 0 : (day <= dim ? day : 0);
             int today = (show && y == today_y && m == today_m && show == today_d);
-            cell(line, &p, show, today);
+            char c[8]; int q = 0; cell(c, &q, show, today); c[q] = 0;   /* one 4-char cell */
+            if (today)                     sys_setcolor(4);   /* today: cyan (with its [brackets]) */
+            else if (col == 0 || col == 6) sys_setcolor(7);   /* weekend: amber */
+            else                           sys_setcolor(0);   /* weekday: default */
+            print(c);
             if (show) day++;
         }
-        line[p] = 0; print(line); print("\n");
+        sys_setcolor(0); print("\n");
     }
-    print("\n arrows: month / year   t today   q quit\n");
+    sys_setcolor(8); print("\n arrows: month / year   t today   q quit\n"); sys_setcolor(0);
 }
 
 int main(void) {
