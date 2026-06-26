@@ -626,6 +626,9 @@ static int parse_style_flex(const char *s, int n) {
     int vs, ve;
     if (!style_prop(s, n, "display", 7, &vs, &ve)) return 0;
     if (!(attr_eq(s + vs, ve - vs, "flex") || attr_eq(s + vs, ve - vs, "inline-flex"))) return 0;
+    /* NOTE: `display:grid` deliberately NOT mapped to flex-row — tried it (M1438 experiment),
+     * but flex-row-wrap made grid heroes/2-col layouts flow awkwardly for an uncertain gain;
+     * the clean vertical-stack fallback renders more reliably. Real grid needs box layout. */
     if (style_prop(s, n, "flex-direction", 14, &vs, &ve) && attr_eq(s + vs, ve - vs, "column")) return 0;
     return 1;
 }
