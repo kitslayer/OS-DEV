@@ -579,6 +579,24 @@ static void print_ps_colored(const char *buf) {
         i = eol;
     }
 }
+/* Colour `lspci`: bus address cyan + vendor:device id yellow, rest default (M1321). */
+static void print_lspci_colored(const char *buf) {
+    char seg[200]; int i = 0;
+    while (buf[i]) {
+        int eol = i; while (buf[eol] && buf[eol] != '\n') eol++;
+        int p = i; while (p < eol && buf[p] == ' ') p++;        /* lead ws */
+        int b1 = p; while (p < eol && buf[p] != ' ') p++;       /* token0 = bus [b1,p) */
+        { int n=0; for (int k=i;k<b1&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }
+        sys_setcolor(4); { int n=0; for (int k=b1;k<p&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); } sys_setcolor(0);
+        int w2 = p; while (p < eol && buf[p] == ' ') p++;       /* ws */
+        int b2 = p; while (p < eol && buf[p] != ' ') p++;       /* token1 = vendor:device [b2,p) */
+        { int n=0; for (int k=w2;k<b2&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }
+        sys_setcolor(3); { int n=0; for (int k=b2;k<p&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); } sys_setcolor(0);
+        { int n=0; for (int k=p;k<eol&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }
+        if (buf[eol] == '\n') { print("\n"); eol++; }
+        i = eol;
+    }
+}
 
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
@@ -1895,7 +1913,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "lspci")) {
             char buf[4096];                 /* every PCI device as one text line (kernel caps at 64) */
             long n = sys_lspci(buf, sizeof(buf));
-            if (n > 0) { buf[n] = 0; print(buf); } else print("lspci: no devices\n");
+            if (n > 0) { buf[n] = 0; print_lspci_colored(buf); } else print("lspci: no devices\n");
         } else if (streq(line, "lsblk")) {
             char buf[8192];                 /* block devices + each FAT32 volume's root files */
             long n = sys_lsblk(buf, sizeof(buf));

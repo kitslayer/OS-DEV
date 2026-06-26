@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1321) shell — colourise `lspci` (bus cyan, vendor:device yellow).** Each PCI device line gets its bus address in cyan and its `vendor:device` id in yellow, the class + description default. **Verified:** in-guest — `lspci` → cyan bus `00:00.0` + yellow `8086:1237`. (11 colourised shell surfaces now.)
+
 > **(M1320) shell — colour the `date` output (date cyan, time yellow).** The last common-command output: `date` shows the date part cyan and the time yellow, like a colourful clock. This completes the shell colour pass — the prompt **and** every common list/status/info command (`ls`/`tree`/`find`/`uptime`/`free`/`ps`/`df`/`cal`/`date`) are now colourised (10 surfaces). **Verified:** in-guest — `date` → cyan `2026-06-26` + yellow `00:40:18`.
 
 > **(M1319) shell — highlight today in `cal` (cyan).** `cal` already MARKED today with a `>`; now `print_cal_week` colours today's cell **cyan** (dropping the `>`), so the current day stands out in the month grid — also applied by `cal -3` and `cal -y`. **Verified:** in-guest — `cal` shows the 26th in cyan among the green days.
