@@ -5592,9 +5592,9 @@ static int run_command(char *line, char *cwd) {
             char arg[64]; int ai = 0; while (*p && *p != ' ' && ai < 63) arg[ai++] = *p++; arg[ai] = 0; sh_unprot_buf(arg);
             long rc = arg[0] ? sys_spawn_arg(prog, arg) : sys_spawn(prog);
             if (rc < 0) {
-                print("unknown command: ");
+                sys_setcolor(2); print("unknown command: ");      /* errors in red so they stand out (M1378) */
                 print(line);
-                print("  (try 'help')\n");
+                print("  (try 'help')\n"); sys_setcolor(0);
                 g_status = 1;
             } else g_status = 0;
         }
