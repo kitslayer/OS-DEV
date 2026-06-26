@@ -15,7 +15,15 @@
 
 static unsigned *FB;
 static unsigned char FONT[128 * 16];
-static const char *CS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*-_=+";
+/* selectable character-set profiles (t cycles): some sites reject symbols, or you want a PIN */
+static const char *CSETS[4] = {
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*-_=+",   /* ALL */
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",               /* ALNUM */
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",                          /* ALPHA */
+    "0123456789",                                                                    /* DIGITS (a PIN) */
+};
+static const char *CSNAME[4] = { "ALL", "ALNUM", "ALPHA", "DIGITS" };
+static int cset = 0;
 
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
 static void fill(int x0, int y0, int w, int h, unsigned c) { for (int y = y0; y < y0 + h; y++) for (int x = x0; x < x0 + w; x++) putpx(x, y, c); }
@@ -69,8 +77,9 @@ static void gtextS(const char *t, int x, int y, int s, unsigned col, unsigned gl
 static unsigned long seed = 88172645463325252UL;
 static int rnd(void) { seed = seed * 6364136223846793005UL + 1442695040888963407UL; return (int)((seed >> 33) & 0x7FFFFFFF); }
 static void gen(char *pw, int len) {
-    int cl = 0; while (CS[cl]) cl++;
-    for (int i = 0; i < len; i++) pw[i] = CS[rnd() % cl];
+    const char *cs = CSETS[cset];
+    int cl = 0; while (cs[cl]) cl++;
+    for (int i = 0; i < len; i++) pw[i] = cs[rnd() % cl];
     pw[len] = 0;
 }
 
@@ -102,9 +111,10 @@ int main(void) {
             int v = len; char t[4]; int ti = 0; if (v == 0) t[ti++] = '0'; while (v) { t[ti++] = '0' + v % 10; v /= 10; }
             while (ti) ln[p++] = t[--ti]; ln[p] = 0;
             text(ln, 14, sy + sh + 12, C_LABEL);
+            text("MODE", 150, sy + sh + 12, C_DIM); text(CSNAME[cset], 190, sy + sh + 12, C_LED);   /* active charset profile */
             if (copied) text("COPIED", W - 78, sy + sh + 12, C_LED);
 
-            text("space new    w/s length    c copy    q quit", 14, H - 14, C_DIM);
+            text("space new   w/s len   t set   c copy   q quit", 14, H - 14, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }
@@ -114,6 +124,7 @@ int main(void) {
         else if ((k == 'w' || k == 0x11) && len < 32) { len++; gen(pw, len); copied = 0; dirty = 1; }
         else if ((k == 's' || k == 0x12) && len > 6) { len--; gen(pw, len); copied = 0; dirty = 1; }
         else if (k == 'c' || k == 'C') { sys_clip_set(pw, len); copied = 1; dirty = 1; }
+        else if (k == 't' || k == 'T') { cset = (cset + 1) % 4; gen(pw, len); copied = 0; dirty = 1; }   /* cycle charset profile */
         sys_sleep(60);
     }
     return 0;
