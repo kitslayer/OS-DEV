@@ -110,6 +110,7 @@ global bclock_elf_start, bclock_elf_end
 global gfont_elf_start, gfont_elf_end
 global gtimer_elf_start, gtimer_elf_end
 global imgview_elf_start, imgview_elf_end
+global gcalc_elf_start, gcalc_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -518,5 +519,9 @@ gtimer_elf_end:
 imgview_elf_start:
     incbin "build/imgview.elf"
 imgview_elf_end:
+
+gcalc_elf_start:
+    incbin "build/gcalc.elf"
+gcalc_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
