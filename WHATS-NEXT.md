@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1317) shell — colour the `ps` STATE column by process state.** `print_ps_colored` colours each process row's STATE — **run lime, ready cyan, blocked/sleep yellow, stopped/zombie red** — leaving PID + NAME default, so process states read at a glance. **Verified:** in-guest — `ps` shows `run` lime + `ready` cyan. *(With M1312-M1316, the shell colour pass now spans the prompt, `ls`/`tree`/`find`, `uptime`/`free`, and `ps` — 7 surfaces.)*
+
 > **(M1316) shell — colour the `uptime` + `free` values too.** Continuing the colour pass into the status commands: `uptime` shows the **duration in cyan** and the **load averages in yellow**; `free` shows **used in amber** and **free in lime** (total stays default). **Verified:** in-guest — `uptime` → cyan `0h 0m 14s` + yellow load; `free` → amber used + lime free.
 
 > **(M1315) shell — colourise `find` output too (file-listing commands now all coloured).** `find` reuses `print_tree_colored`, so its result paths are coloured by type like `ls`/`tree` — completing a consistent, colourful treatment across all three file-listing commands. The colour is a terminal attribute, so `$(find …)` capture stays byte-clean. **Verified:** in-guest `find .` — images magenta, archives red, audio cyan, ROMs orange. *(Together with M1312 prompt + M1313 `ls` + M1314 `tree`, the shell's file UI is now fully colourised — the "more colours" pass.)*

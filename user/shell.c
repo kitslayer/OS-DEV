@@ -540,6 +540,34 @@ static void print_tree_colored(const char *buf) {
         i = eol;
     }
 }
+/* Colour `ps` rows by process STATE (M1317): run lime, ready cyan, blocked
+ * yellow, stopped/zombie red; PID + NAME stay default. */
+static int pfx(const char *s, int sl, const char *m) {
+    int ml = 0; while (m[ml]) ml++; if (ml > sl) return 0;
+    for (int k = 0; k < ml; k++) if (s[k] != m[k]) return 0;
+    return 1;
+}
+static void print_ps_colored(const char *buf) {
+    char seg[160]; int i = 0;
+    while (buf[i]) {
+        int eol = i; while (buf[eol] && buf[eol] != '\n') eol++;
+        int p = i; while (p < eol && buf[p] == ' ') p++;             /* leading ws */
+        while (p < eol && buf[p] != ' ') p++;                        /* the [PID] token */
+        while (p < eol && buf[p] == ' ') p++;                        /* ws before STATE */
+        int ss = p; while (p < eol && buf[p] != ' ') p++;            /* STATE word [ss,p) */
+        { int n=0; for (int k=i;k<ss&&n<159;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }   /* PID + ws: default */
+        int sl = p - ss;
+        int col = pfx(buf+ss,sl,"run") ? 9 : pfx(buf+ss,sl,"rea") ? 4
+                : (pfx(buf+ss,sl,"blo")||pfx(buf+ss,sl,"sle")||pfx(buf+ss,sl,"wai")) ? 3
+                : (pfx(buf+ss,sl,"sto")||pfx(buf+ss,sl,"zom")||pfx(buf+ss,sl,"dea")) ? 2 : 0;
+        sys_setcolor(col);
+        { int n=0; for (int k=ss;k<p&&n<159;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }   /* STATE: coloured */
+        sys_setcolor(0);
+        { int n=0; for (int k=p;k<eol&&n<159;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }  /* NAME: default */
+        if (buf[eol] == '\n') { print("\n"); eol++; }
+        i = eol;
+    }
+}
 
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
@@ -1836,7 +1864,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "ps")) {
             char buf[512];
             long n = sys_ps(buf, sizeof(buf));
-            if (n > 0) { buf[n] = 0; print("  PID STATE  NAME\n"); print(buf); }
+            if (n > 0) { buf[n] = 0; print("  PID STATE  NAME\n"); print_ps_colored(buf); }   /* STATE coloured by state (M1317) */
             else print("ps: none\n");
         } else if (streq(line, "history")) {
             char buf[640];
