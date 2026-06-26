@@ -599,6 +599,7 @@ static void print_lspci_colored(const char *buf) {
 }
 /* Print a help line; if it starts with a "label:" section header, colour the
  * label cyan (M1322). Continuation lines (leading space) print unchanged. */
+static void perr(const char *s) { sys_setcolor(2); print(s); sys_setcolor(0); }   /* print an error label in red (M1379) */
 static void helpline(const char *s) {
     int c = 0; while (s[c] && s[c] != ':' && s[c] != ' ') c++;
     if (s[0] != ' ' && s[c] == ':') {
@@ -816,7 +817,7 @@ static int run_command(char *line, char *cwd) {
                 } else {
                     char b;
                     if (sys_readfile(name, &b, 1) >= 0) { print(name); print("\n"); }   /* an existing file: just its name */
-                    else { print("ls: no such file: "); print(name); print("\n"); g_status = 1; }
+                    else { perr("ls: no such file: "); print(name); print("\n"); g_status = 1; }
                 }
             }
         } else if (startswith(line, "cat ")) {
@@ -828,7 +829,7 @@ static int run_command(char *line, char *cwd) {
                 while (*p && *p != ' ' && i < 63) name[i++] = *p++;
                 name[i] = '\0'; sh_unprot_buf(name); any = 1;
                 long n; char *buf = slurp(name, &n);
-                if (!buf) { print("cat: no such file: "); print(name); print("\n"); }
+                if (!buf) { perr("cat: no such file: "); print(name); print("\n"); }
                 else { print(buf); free(buf); }
             }
             if (!any) print("usage: cat <file>...\n");
@@ -848,7 +849,7 @@ static int run_command(char *line, char *cwd) {
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                 name[j] = '\0'; sh_unprot_buf(name); any = 1;
                 long n; char *buf = slurp(name, &n);
-                if (!buf) { print("head: no such file: "); print(name); print("\n"); continue; }
+                if (!buf) { perr("head: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 int i;
                 if (bytes) i = (int)(n < cnt ? n : cnt);       /* -c: first cnt bytes */
@@ -860,7 +861,7 @@ static int run_command(char *line, char *cwd) {
             if (!any) print("usage: head <file>...\n");
         } else if (startswith(line, "nl ")) {
             long n; char *buf = slurp(line + 3, &n);
-            if (!buf) { print("nl: no such file: "); print(line + 3); print("\n"); }
+            if (!buf) { perr("nl: no such file: "); print(line + 3); print("\n"); }
             else {
                 int ln = 1, start = 0; char num[12];
                 for (int i = 0; i < (int)n; i++) {
@@ -894,7 +895,7 @@ static int run_command(char *line, char *cwd) {
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                 name[j] = '\0'; sh_unprot_buf(name); any = 1;
                 long n; char *buf = slurp(name, &n);
-                if (!buf) { print("tail: no such file: "); print(name); print("\n"); continue; }
+                if (!buf) { perr("tail: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 buf[n] = '\0';
                 if (bytes) {                                  /* -c: last cnt bytes */
@@ -914,7 +915,7 @@ static int run_command(char *line, char *cwd) {
             if (!any) print("usage: tail <file>...\n");
         } else if (startswith(line, "tac ")) {           /* print a file's lines in reverse order */
             long n; char *buf = slurp(line + 4, &n);
-            if (!buf) { print("tac: no such file: "); print(line + 4); print("\n"); }
+            if (!buf) { perr("tac: no such file: "); print(line + 4); print("\n"); }
             else {
                 buf[n] = 0;
                 int cap = 1; for (long i = 0; i < n; i++) if (buf[i] == '\n') cap++;   /* one slot per line (was fixed 1024) */
@@ -945,7 +946,7 @@ static int run_command(char *line, char *cwd) {
                 fp += t; while (*fp == ' ') fp++;
             }
             long n; char *buf = slurp(fp, &n);
-            if (!buf) { print("uniq: no such file: "); print(fp); print("\n"); }
+            if (!buf) { perr("uniq: no such file: "); print(fp); print("\n"); }
             else {
                 buf[n] = 0;
                 int rs = -1, rl = 0, ls = 0, count = 0;    /* current run's first line [rs,rs+rl); occurrence count */
@@ -1022,7 +1023,7 @@ static int run_command(char *line, char *cwd) {
                 fp += t; while (*fp == ' ') fp++;
             }
             long n; char *buf = slurp(fp, &n);
-            if (!buf) { print("sort: no such file: "); print(fp); print("\n"); }
+            if (!buf) { perr("sort: no such file: "); print(fp); print("\n"); }
             else {
                 buf[n] = '\0';
                 int cap = 1; for (long i = 0; i < n; i++) if (buf[i] == '\n') cap++;   /* one slot per line (was fixed at 128) */
@@ -1077,7 +1078,7 @@ static int run_command(char *line, char *cwd) {
                 for (int z = 0; z < dn; z++) del[z] = SH_UNPROT(del[z]);   /* a quoted SET char (tr -d ' ') is protected */
                 while (*p == ' ') p++;
                 long n; char *buf = slurp(p, &n);
-                if (!buf) { print("tr: no such file: "); print(p); print("\n"); }
+                if (!buf) { perr("tr: no such file: "); print(p); print("\n"); }
                 else {
                     long oi = 0;
                     for (long i = 0; i < n; i++) {
@@ -1128,7 +1129,7 @@ static int run_command(char *line, char *cwd) {
                 for (; *q; q++) { if (*q == 'g') g = 1; else if (*q == 'i' || *q == 'I') ci = 1; }
                 if (re[0] == '^') g = 0;                   /* ^ anchors to line start, so substitute once per line */
                 long n; char *buf = slurp(p, &n);
-                if (!buf) { print("sed: no such file: "); print(p); print("\n"); g_status = 2; }
+                if (!buf) { perr("sed: no such file: "); print(p); print("\n"); g_status = 2; }
                 else {
                     long i = 0;
                     while (i < n) {                        /* one line at a time, flushed (no whole-output cap) */
@@ -1156,7 +1157,7 @@ static int run_command(char *line, char *cwd) {
             if (w < 1) w = 60;
             if (w > 200) w = 200;
             long n; char *buf = slurp(p, &n);
-            if (!buf) { print("fold: no such file: "); print(p); print("\n"); }
+            if (!buf) { perr("fold: no such file: "); print(p); print("\n"); }
             else {
                 buf[n] = 0;
                 char lbuf[202]; int li = 0, col = 0;       /* one physical line at a time (w <= 200) — flushed as we go, so no whole-output cap */
@@ -1194,7 +1195,7 @@ static int run_command(char *line, char *cwd) {
             if ((mode != 'c' && mode != 'f') || nr == 0) { print("usage: cut -cLIST <file>  |  cut -fLIST [-dX] <file>   (LIST: N, N-M, or 1,3-5; fields default to tab)\n"); }
             else {
                 long n; char *buf = slurp(p, &n);
-                if (!buf) { print("cut: no such file: "); print(p); print("\n"); }
+                if (!buf) { perr("cut: no such file: "); print(p); print("\n"); }
                 else {
                     buf[n] = 0;
                     char out[256]; int oi = 0, col = 0, field = 1, dirty = 0, out_any = 0;
@@ -1244,7 +1245,7 @@ static int run_command(char *line, char *cwd) {
             } else {
                 sh_unprot_buf(line + 3);                 /* quoted JS filename (e.g. js "my prog.js") */
                 long n; filesrc = slurp(line + 3, &n);   /* whole JS file (was capped at 8KB) */
-                if (!filesrc) { print("js: no such file: "); print(line + 3); print("\n"); }
+                if (!filesrc) { perr("js: no such file: "); print(line + 3); print("\n"); }
                 else { jsrc = filesrc; have = 1; }
             }
             if (have) {
@@ -1512,7 +1513,7 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "clip ")) {    /* clip <file>: set the clipboard from a file (or a pipe) */
             char *fn = line + 5; while (*fn == ' ') fn++; sh_unprot_buf(fn);
             long n; char *buf = slurp(fn, &n);
-            if (!buf) { print("clip: no such file: "); print(fn); print("\n"); }
+            if (!buf) { perr("clip: no such file: "); print(fn); print("\n"); }
             else {
                 int len = (int)n; if (len > 2047) len = 2047;
                 sys_clip_set(buf, len); free(buf);
@@ -1613,7 +1614,7 @@ static int run_command(char *line, char *cwd) {
                 const char *f = p + 6; while (*f == ' ') f++;
                 char fn[64]; int j = 0; while (f[j] && f[j] != ' ' && j < 63) { fn[j] = f[j]; j++; } fn[j] = 0;
                 long n; char *buf = slurp(fn, &n);
-                if (!buf) { print("cas: no such file: "); print(fn); print("\n"); g_status = 1; }
+                if (!buf) { perr("cas: no such file: "); print(fn); print("\n"); g_status = 1; }
                 else {
                     unsigned char h[32];
                     if (sys_cas_store(buf, (unsigned long)n, h) < 0) { print("cas: store full\n"); g_status = 1; }
@@ -1708,7 +1709,7 @@ static int run_command(char *line, char *cwd) {
                     while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                     name[j] = 0; sh_unprot_buf(name);
                     long n; char *buf = slurp(name, &n);
-                    if (!buf) { print("grep: no such file: "); print(name); print("\n"); continue; }
+                    if (!buf) { perr("grep: no such file: "); print(name); print("\n"); continue; }
                     buf[n] = 0;
                     int ls = 0, lno = 0;
                     int after = 0, last_printed = 0;            /* -A/-C after-context counter; lno dedup */
@@ -1789,7 +1790,7 @@ static int run_command(char *line, char *cwd) {
                 while (*p && *p != ' ' && j < 63) name[j++] = *p++;
                 name[j] = 0; sh_unprot_buf(name);
                 long n; char *buf = slurp(name, &n);
-                if (!buf) { print("wc: no such file: "); print(name); print("\n"); continue; }
+                if (!buf) { perr("wc: no such file: "); print(name); print("\n"); continue; }
                 int lines = 0, words = 0, inword = 0, longest = 0, cur = 0;
                 for (long i = 0; i < n; i++) {
                     char c = buf[i];
@@ -1825,7 +1826,7 @@ static int run_command(char *line, char *cwd) {
                 char name[64]; int j = 0; while (*fp && *fp != ' ' && j < 63) name[j++] = *fp++; name[j] = 0; sh_unprot_buf(name);
                 any = 1;
                 long n; char *buf = slurp(name, &n);
-                if (!buf) { print("hexdump: no such file: "); print(name); print("\n"); continue; }
+                if (!buf) { perr("hexdump: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }
                 const char *H = "0123456789abcdef";
                 for (long off = 0; off < n; off += 8) {
@@ -1892,7 +1893,7 @@ static int run_command(char *line, char *cwd) {
             const char *p = line + 5; while (*p == ' ') p++;
             char fn[96]; int j = 0; while (*p && *p != ' ' && j < 95) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);
             struct statx st;
-            if (!fn[0] || sys_statx(fn, &st) != 0) { print("stat: no such file: "); print(fn); print("\n"); g_status = 1; }
+            if (!fn[0] || sys_statx(fn, &st) != 0) { perr("stat: no such file: "); print(fn); print("\n"); g_status = 1; }
             else {
                 unsigned t = st.stx_mode & S_IFMT;
                 sys_setcolor(4); print("  File: "); sys_setcolor(0); print(fn); print("\n");
@@ -5031,8 +5032,8 @@ static int run_command(char *line, char *cwd) {
             else {
                 long n1; char *b1 = slurp(f1, &n1);
                 long n2; char *b2 = slurp(f2, &n2);
-                if (!b1)      { print("cmp: no such file: "); print(f1); print("\n"); g_status = 2; }
-                else if (!b2) { print("cmp: no such file: "); print(f2); print("\n"); g_status = 2; }
+                if (!b1)      { perr("cmp: no such file: "); print(f1); print("\n"); g_status = 2; }
+                else if (!b2) { perr("cmp: no such file: "); print(f2); print("\n"); g_status = 2; }
                 else {
                     long i1 = 0, i2 = 0; int lineno = 1, differ = 0;
                     while (i1 < n1 || i2 < n2) {
@@ -5063,7 +5064,7 @@ static int run_command(char *line, char *cwd) {
                 char name[64]; int j = 0; while (*p && *p != ' ' && j < 63) name[j++] = *p++; name[j] = 0; sh_unprot_buf(name);
                 any = 1;
                 long n; char *buf = slurp(name, &n);
-                if (!buf) { print("strings: no such file: "); print(name); print("\n"); continue; }
+                if (!buf) { perr("strings: no such file: "); print(name); print("\n"); continue; }
                 if (fc > 1) { print("==> "); print(name); print(" <==\n"); }   /* header when listing several */
                 char run[80]; int rl = 0;
                 for (long i = 0; i < n; i++) {
@@ -5098,8 +5099,8 @@ static int run_command(char *line, char *cwd) {
             if (!f1[0] || !f2[0]) { print("usage: paste [-dX] <file1> <file2>\n"); }
             else {
                 long n1, n2; char *c1 = slurp(f1, &n1); char *c2 = slurp(f2, &n2);
-                if (!c1)      { print("paste: no such file: "); print(f1); print("\n"); }
-                else if (!c2) { print("paste: no such file: "); print(f2); print("\n"); }
+                if (!c1)      { perr("paste: no such file: "); print(f1); print("\n"); }
+                else if (!c2) { perr("paste: no such file: "); print(f2); print("\n"); }
                 else {
                     long i1 = 0, i2 = 0;
                     while (i1 < n1 || i2 < n2) {
@@ -5122,8 +5123,8 @@ static int run_command(char *line, char *cwd) {
             if (!f1[0] || !f2[0]) { print("usage: comm <file1> <file2>  (sorted; < only-1, > only-2, = both)\n"); }
             else {
                 long n1, n2; char *c1 = slurp(f1, &n1); char *c2 = slurp(f2, &n2);
-                if (!c1)      { print("comm: no such file: "); print(f1); print("\n"); }
-                else if (!c2) { print("comm: no such file: "); print(f2); print("\n"); }
+                if (!c1)      { perr("comm: no such file: "); print(f1); print("\n"); }
+                else if (!c2) { perr("comm: no such file: "); print(f2); print("\n"); }
                 else {
                     long i1 = 0, i2 = 0;
                     while (i1 < n1 || i2 < n2) {
@@ -5516,7 +5517,7 @@ static int run_command(char *line, char *cwd) {
                 name[j] = 0; sh_unprot_buf(name);
                 if (streq(name, "-f")) { force = 1; continue; }   /* -f: force (no error / no $?=1 when a file is missing) */
                 any = 1;
-                if (sys_delete(name) < 0) { if (!force) { print("rm: no such file, or dir not empty: "); print(name); print("\n"); g_status = 1; } }
+                if (sys_delete(name) < 0) { if (!force) { perr("rm: no such file, or dir not empty: "); print(name); print("\n"); g_status = 1; } }
                 else { print("removed "); print(name); print("\n"); }
             }
             if (!any && !force) print("usage: rm <file>...\n");
@@ -6147,7 +6148,7 @@ static int run_input_line(char *line, char *cwd) {
 static void source_file(const char *fn, char *cwd, int silent) {
     if (source_depth >= 8) { if (!silent) print("source: nested too deep\n"); g_status = 1; return; }
     long n; char *txt = slurp(fn, &n);
-    if (!txt) { if (!silent) { print("source: no such file: "); print(fn); print("\n"); g_status = 1; } return; }
+    if (!txt) { if (!silent) { perr("source: no such file: "); print(fn); print("\n"); g_status = 1; } return; }
     source_depth++;
     char *ln = txt;
     while (ln && *ln) {

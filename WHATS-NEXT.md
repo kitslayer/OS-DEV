@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1379) shell — file-not-found errors in red.** Added a `perr()` helper (red print) and routed all 28 `CMD: no such file` error labels through it. Crucially, `perr(s)` is a **drop-in** for `print(s)` — one statement, so even brace-less `else perr(...)` is safe (no repeat of the M1378-adjacent brace-less-`else` trap, per [[verify-behavior-bulk-edits]]). A mistyped filename now flags red instead of blending into the green output. **Verified:** in-guest — `cat nope` → red `cat: no such file:` + the name.
+
 > **(M1378) shell — the "unknown command" error in red.** The catch-all error you hit on a typo now prints red (was default green), so a mistyped command stands out instead of blending into normal output. **Verified:** in-guest — `xyzzy` → red `unknown command: xyzzy  (try 'help')`.
 
 > **(M1377) sysgraph — load-coloured graph crests.** Each graph's bright crest is now coloured by its value — base (green CPU / cyan RAM) below 50%, amber 50–80%, red ≥80% — so a load spike shows instantly as a red/amber band in the scrolling history (like `htop`). **Verified:** in-guest — at ~49% CPU the crest is green with the odd amber tick where samples crossed 50%.
