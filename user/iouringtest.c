@@ -41,7 +41,7 @@ int main(void) {
     ring.sqe[t++] = (struct io_sqe){ .op = IO_GETRANDOM, .b = (unsigned long)rnd, .c = sizeof rnd, .user_data = 0xA3 };
     ring.sq_tail = t;                  // publish the batch
 
-    print("io_uring: queued ");  pdec(t);  print(" ops; one sys_io_uring_enter()...\n\n");
+    sys_setcolor(4); print("io_uring:"); sys_setcolor(0); print(" queued ");  pdec(t);  print(" ops; one sys_io_uring_enter()...\n\n");
 
     long done = sys_io_uring_enter(&ring);
 
@@ -58,7 +58,7 @@ int main(void) {
     rdbuf[n] = 0;
     print("\nop#2 read back what op#1 wrote (in-order): \"");  print(rdbuf);  print("\"\n");
     print("op#3 getrandom: ");  phex(rnd, sizeof rnd);  print("\n");
-    print("\nfour ops, one ring0 crossing. that's io_uring.\n");
+    sys_setcolor(9); print("\nfour ops, one ring0 crossing. that's io_uring.\n"); sys_setcolor(0);
 
     sys_sleep(20000);
     return 0;

@@ -26,7 +26,7 @@ static void line(const char *what, long rc, const char *good) {
 #define PROT_X 4
 
 int main(void) {
-    print("mseal: irreversible memory sealing (W^X / JIT hardening)\n\n");
+    sys_setcolor(4); print("mseal:"); sys_setcolor(0); print(" irreversible memory sealing (W^X / JIT hardening)\n\n");
 
     // --- build a tiny JIT function in a fresh page ---
     unsigned char *code = (unsigned char *)sys_mmap(4096);
@@ -52,7 +52,7 @@ int main(void) {
     line("mprotect(scratch, R-W)", sys_mprotect(scratch, 4096, PROT_R | PROT_W), "0 = ok, unsealed");
     line("munmap(scratch)", sys_munmap(scratch, 4096),                           "0 = ok, unsealed");
 
-    print("\nseal is per-region and irreversible. that's mseal.\n");
+    sys_setcolor(9); print("\nseal is per-region and irreversible. that's mseal.\n"); sys_setcolor(0);
     sys_sleep(20000);
     return 0;
 }

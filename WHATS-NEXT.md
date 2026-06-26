@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1350) demo apps — colourise uffdtest + mseal + iouring.** Continued the demo colour pass (titles cyan, key results/conclusions lime): `uffdtest` (materialized-page content + success lime), `mseal` (title cyan, takeaway lime), `iouring` (title cyan, "that's io_uring." conclusion lime). **Verified:** in-guest — `run iouringtest` shows `io_uring:` cyan and the conclusion lime. (7 demo apps coloured.)
+
 > **(M1349) hexedit — find bytes (`/`).** Press `/`, type a hex byte pattern (e.g. `4f53`), Enter to jump to its next occurrence (wrapping around the file); `!notfound` shows in the title if absent, esc cancels. **The hex editor is now fully capable: view, navigate (arrows/page/goto/find), edit, save — all coloured.** **Verified:** in-guest — `/4f53⏎` finds the bytes `OS` at offset 0x25 (title `@0025`).
 
 > **(M1348) hexedit — goto-offset (`g`).** Press `g`, type a hex offset, Enter to jump the cursor there (esc cancels); the status shows `goto: XXXX` while typing. Complements `n`/`p` paging for precise navigation in large files. The hex editor now has complete navigation: arrows + page + goto. **Verified:** in-guest — `g 40 ⏎` jumps to offset 0x40 (title shows `@0040`).

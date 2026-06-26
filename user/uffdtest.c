@@ -35,10 +35,10 @@ int main(void) {
     sys_sleep(300);                                  // let the child reach sys_uffd_read()
     print("faulter: reading an unbacked, userfault-registered page...\n");
     print("faulter: page contents -> ");
-    print(region);                                   // first touch FAULTS -> serviced by the child
+    sys_setcolor(9); print(region); sys_setcolor(0);   // first touch FAULTS -> serviced by the child (content lime)
     print("\n");
     int st; sys_waitpid((int)pid, &st);
-    print("faulter: that page was materialized on demand, in another process, via userfaultfd.\n");
+    sys_setcolor(9); print("faulter: that page was materialized on demand, in another process, via userfaultfd.\n"); sys_setcolor(0);
     sys_sleep(20000);
     return 0;
 }
