@@ -114,6 +114,7 @@ global gcalc_elf_start, gcalc_elf_end
 global gcolor_elf_start, gcolor_elf_end
 global gfire_elf_start, gfire_elf_end
 global gmetro_elf_start, gmetro_elf_end
+global gconv_elf_start, gconv_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -538,5 +539,9 @@ gfire_elf_end:
 gmetro_elf_start:
     incbin "build/gmetro.elf"
 gmetro_elf_end:
+
+gconv_elf_start:
+    incbin "build/gconv.elf"
+gconv_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

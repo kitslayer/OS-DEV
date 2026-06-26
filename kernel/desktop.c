@@ -94,6 +94,7 @@ static const struct menu_item menu[] = {
     { "Colour Picker", KIND_APP, "gcolor" },
     { "Fireworks", KIND_APP, "gfire" },
     { "Metronome", KIND_APP, "gmetro" },
+    { "Unit Convert", KIND_APP, "gconv" },
     { "Snake", KIND_APP, "snake" }, { "Editor", KIND_APP, "editor" },
     { "2048", KIND_APP, "2048" }, { "Life", KIND_APP, "life" }, { "Mines", KIND_APP, "mines" },
     { "Tetris", KIND_APP, "tetris" }, { "Breakout", KIND_APP, "breakout" },

@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1407) gconv — a unit converter.** Type a value in a category's base unit (metres / kilograms / Celsius) and it shows the equivalents live: Length → ft/in/cm/km, Weight → lb/g/oz, Temperature → °F/K. `c` (or a click) cycles the category, digits + `.` type the value. All maths is integer fixed-point ×10000 (exact, no FPU); temperature uses the affine formulae. Additive (own file). Launch `run gconv` or the Apps menu ("Unit Convert"). **Verified:** in-guest — 100 °C → 212 °F / 373.15 K and 2 m → 6.5616 ft / 78.7402 in / 200 cm / 0.002 km, all correct (caught + fixed a bad miles factor pre-build); `make check` green.
+
 > **(M1406) gmetro — a metronome.** A swinging pendulum keeps the beat while the PC speaker ticks (`sys_beep`, an alternating high/low pitch) once per beat and the bob flashes gold on each tick. SPACE (or a click) starts/stops, w/Up and s/Down change the tempo by 5 BPM (40–240), q/Esc quits. The pendulum angle is a Bhaskara sine of the beat phase — no FPU. Additive (own file). Launch `run gmetro` or the Apps menu ("Metronome"). **Verified:** in-guest — the pendulum swung (rod + red bob, pivot top-centre), BPM 120 in green, correct geometry; `make check` green.
 
 > **(M1405) gcalc — a percent (%) key.** Filled one of the keypad's blank slots with a `%` key (`x% = x/100`), rendered gold like the operators. Clickable or via the keyboard (`%` = Shift-5). **Verified:** in-guest — `50 %` → `0.5`, the `%` button highlighting; `make check` green.
