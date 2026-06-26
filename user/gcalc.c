@@ -122,6 +122,7 @@ int main(void) {
         if (dirty) {
             for (int i = 0; i < W * H; i++) FB[i] = 0x15181F;
             fill(8, 8, W - 16, 52, 0x0C1A12);                   /* LCD strip */
+            if (pend) chS(pend, 14, 12, 1, 0xFFD060);           /* pending-operator indicator (M1414) */
             char shown[24]; if (elen > 0 && !fresh) { for (int i = 0; i <= elen; i++) shown[i] = entry[i]; } else fmt_fixed(reg, shown);
             int sl = slen(shown); if (sl > 9) sl = 9;           /* right-align, clip to 9 glyphs */
             textS(shown + (slen(shown) > 9 ? slen(shown) - 9 : 0), W - 12 - sl * 24, 24, 3, 0x6CF09A);

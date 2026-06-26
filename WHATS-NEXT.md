@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1414) gcalc — show the pending operator.** After pressing an operator the LCD showed only the running value with no hint an op was queued; now the pending operator (`+ - * /`) is drawn small in the LCD's top-left corner, so you can see what you pressed. One line in the renderer. **Verified:** in-guest — after `8 /`, a small `/` appears top-left while `8` shows; `make check` green.
+
 > **(M1413) gbase — convert FROM any base.** The base converter took decimal input only; now `i` cycles the input base (dec → hex → bin) and the keypad accepts only digits valid for it (hex takes a-f), so you can convert hex→dec etc. Shows all four bases (dec/hex/oct/bin) live. **Verified:** in-guest — hex input `FF` → DEC 255 / 0xFF / 0o377 / 0b11111111, correct; `make check` green.
 
 > **(M1412) Apps menu — 5 columns (was 4).** The campaign's ~16 new apps grew the launcher to 74 entries, which at 4 columns was 460 px tall (past the comfortable ~412 px). Bumping `MENU_COLS` to 5 drops it to ~364 px (15 rows) at 750 px wide (well within 1280). One-line change (the render is parameterised on `MENU_COLS`). **Verified:** in-guest via F9 — all 74 entries render across 5 columns, no clipping; `make check` green.
