@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1340) shell — `neofetch` gains CPU + Disk lines.** The system summary now also shows `CPU: x86_64 (N cores)` (core count parsed from `/proc/cpuinfo`, reflecting SMP) and `Disk: used / total MB` (from `sys_df`, used in amber), with a blank line trimmed so it still fits the 17-row terminal. **Verified:** in-guest screenshot — `CPU: x86_64 (1 core)`, `Disk: 50 / 62 MB`.
+
 > **(M1339) shell — colourise the startup banner.** The shell's opening lines now show `OS-DEV shell v0.1` in cyan, the ring-3 runtime note in grey, and the `'help'` hint in yellow (was flat green) — a tidier first impression every time a shell opens. **Verified:** in-guest screenshot.
 
 > **(M1338) docs — README showcase reflects the colourisation.** The headline blurb now describes the fully-colourised shell + apps (filenames by type, `ps`/`df`/`free` status with usage bars, git-style coloured `diff`s, the Calendar/Forth, a `neofetch` summary) instead of a vague "colour text", so the project's front page reflects this session's work.

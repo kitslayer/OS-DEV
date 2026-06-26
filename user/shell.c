@@ -4482,6 +4482,19 @@ static int run_command(char *line, char *cwd) {
                            else i++; }
                        free(m); }
               mt = v[0] / 1024; mu = v[2] / 1024; }
+            int cores = 0;                                   /* core count from /proc/cpuinfo "processors:" (M1340) */
+            { char *ci = slurp("/proc/cpuinfo", &n);
+              if (ci) { for (int i = 0; ci[i]; i++) if (ci[i] == ':') { int j = i + 1; while (ci[j] == ' ' || ci[j] == '\t') j++;
+                            while (ci[j] >= '0' && ci[j] <= '9') cores = cores * 10 + (ci[j++] - '0'); break; }
+                        free(ci); } }
+            long dfree = 0, dtot = 0;                         /* disk free/total (KiB) from sys_df */
+            { char db[96]; long dn = sys_df(db, sizeof db);
+              if (dn > 0) { db[dn] = 0; int i = 0;
+                  while (db[i] && !(db[i] >= '0' && db[i] <= '9')) i++;
+                  while (db[i] >= '0' && db[i] <= '9') dfree = dfree * 10 + (db[i++] - '0');
+                  while (db[i] && !(db[i] >= '0' && db[i] <= '9')) i++;
+                  while (db[i] >= '0' && db[i] <= '9') dtot = dtot * 10 + (db[i++] - '0'); } }
+            long dused = dtot > dfree ? dtot - dfree : 0;
             /* monitor logo: blue frame (6), cyan label (4) */
             sys_setcolor(6); print("    .--------------.\n");
             print("    |   "); sys_setcolor(4); print("OS-DEV"); sys_setcolor(6); print("     |\n");
@@ -4495,12 +4508,16 @@ static int run_command(char *line, char *cwd) {
             print("  "); sys_setcolor(4); print("Kernel:  "); sys_setcolor(0);
             if (have_u) { print(u.release); print(" "); print(u.version); } else print("1.0");
             print("\n");
+            print("  "); sys_setcolor(4); print("CPU:     "); sys_setcolor(0); print("x86_64");
+            if (cores > 0) { print(" ("); printl(cores); print(cores == 1 ? " core)" : " cores)"); } print("\n");
             print("  "); sys_setcolor(4); print("Uptime:  "); sys_setcolor(0);
             if (ud) { printl(ud); print("d "); } printl(uh); print("h "); printl(um); print("m\n");
             print("  "); sys_setcolor(4); print("Shell:   "); sys_setcolor(0); print("osdev-sh\n");
             print("  "); sys_setcolor(4); print("Memory:  "); sys_setcolor(0);
             sys_setcolor(7); printl(mu); sys_setcolor(0); print(" / "); printl(mt); print(" MB\n");
-            print("  "); sys_setcolor(4); print("Term:    "); sys_setcolor(0); print("44x17\n\n  ");
+            print("  "); sys_setcolor(4); print("Disk:    "); sys_setcolor(0);
+            sys_setcolor(7); printl(dused / 1024); sys_setcolor(0); print(" / "); printl(dtot / 1024); print(" MB\n");
+            print("  "); sys_setcolor(4); print("Term:    "); sys_setcolor(0); print("44x17\n  ");
             /* palette swatches (white/red/yellow/cyan/magenta/blue/orange/grey/lime);
              * the console font is ASCII-only, so use '#' blocks rather than U+2588 */
             for (int c = 1; c <= 9; c++) { sys_setcolor(c); print("###"); }
