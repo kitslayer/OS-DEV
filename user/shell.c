@@ -524,6 +524,22 @@ static void print_ls_colored(const char *buf) {
         i = k;
     }
 }
+/* Colour a `tree` listing: the branch/indent prefix in grey, each name by type. */
+static void print_tree_colored(const char *buf) {
+    char seg[160];
+    int i = 0;
+    while (buf[i]) {
+        int eol = i; while (buf[eol] && buf[eol] != '\n') eol++;          /* line [i,eol) */
+        int ns = i;                                                       /* skip the leading branch/indent prefix to the name */
+        while (ns < eol) { char c = buf[ns]; if ((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_'||c=='.'||c=='/') break; ns++; }
+        if (ns > i) { sys_setcolor(8); int n=0; for (int k=i;k<ns&&n<159;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }
+        sys_setcolor(ls_color(buf + ns, eol - ns));
+        { int n=0; for (int k=ns;k<eol&&n<159;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }
+        sys_setcolor(0);
+        if (buf[eol] == '\n') { print("\n"); eol++; }
+        i = eol;
+    }
+}
 
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
@@ -1700,7 +1716,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "tree")) {
             static char tb[2048];
             long n = sys_tree(tb, sizeof(tb));
-            if (n <= 0) print("(empty)\n"); else { tb[n] = 0; print(tb); }
+            if (n <= 0) print("(empty)\n"); else { tb[n] = 0; print_tree_colored(tb); }
         } else if (startswith(line, "mkdir ")) {
             const char *p = line + 6; int any = 0;       /* make each space-separated directory */
             while (*p) {
