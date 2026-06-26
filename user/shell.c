@@ -704,7 +704,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
+            helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump hexedit<file> strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             helpline("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
@@ -5507,6 +5507,12 @@ static int run_command(char *line, char *cwd) {
             }
             if (sys_writefile(fname, doc, dl) < 0) { sys_setcolor(2); print("edit: write failed\n"); sys_setcolor(0); }
             else { sys_setcolor(9); print("saved "); print(fname); sys_setcolor(0); print("\n"); }
+        } else if (startswith(line, "hexedit ")) {   /* launch the GUI hex editor on a file (M1344) */
+            const char *p = line + 8; while (*p == ' ') p++;
+            char fn[64]; int i = 0; while (*p && *p != ' ' && i < 63) fn[i++] = *p++; fn[i] = 0; sh_unprot_buf(fn);
+            if (!fn[0]) { print("usage: hexedit <file>\n"); g_status = 2; }
+            else if (sys_spawn_arg("hexedit", fn) < 0) { print("hexedit: launch failed\n"); g_status = 1; }
+            else { print("launched hexedit on "); print(fn); print("\n"); }
         } else if (startswith(line, "write ")) {
             char *p = line + 6, fname[32]; int i = 0;
             while (*p && *p != ' ' && i < 31) fname[i++] = *p++;
