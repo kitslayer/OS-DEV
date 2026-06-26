@@ -5877,7 +5877,8 @@ int main(void) {
     char lastcmd[1024]; lastcmd[0] = 0;            /* previous command, for `!!` */
     source_file(".SHRC", cwd, 1); g_status = 0;    /* run the startup rc file if it exists (aliases, set, banner) */
     for (;;) {
-        print("osdev:"); print(cwd); print("$ ");
+        char hn[64]; if (sys_gethostname(hn, sizeof hn) != 0 || !hn[0]) scpy(hn, "osdev");   /* prompt reflects the real hostname (M1311) */
+        print(hn); print(":"); print(cwd); print("$ ");
         readline(line, sizeof(line));
 
         /* `!!` (optionally followed by more, e.g. `!! | grep x`) re-runs the
