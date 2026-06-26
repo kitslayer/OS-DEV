@@ -13,7 +13,7 @@
 #include "ulib.h"
 
 #define W 232
-#define H 320
+#define H 340
 #define SCALE 10000L              /* fixed-point: value * 10000 */
 #define BX 8                      /* keypad geometry (shared by the renderer + the click hit-test) */
 #define BY 70
@@ -95,6 +95,7 @@ static void press(int k) {
     }
     else if (k == '%') { long v = elen ? parse_fixed(entry) : reg; reg = v / 100; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = '%'; dirty = 1; }   /* x% = x/100 */
     else if (k == 'c' || k == 'C') { reg = 0; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = 'C'; dirty = 1; }
+    else if (k == 'y' || k == 'Y') { char s[24]; if (elen > 0 && !fresh) { int i = 0; for (; entry[i]; i++) s[i] = entry[i]; s[i] = 0; } else fmt_fixed(reg, s); sys_clip_set(s, slen(s)); last = 'y'; dirty = 1; }   /* copy the display to the clipboard */
     else if (k == 8 || k == 0x7F) { if (elen > 0) { entry[--elen] = 0; fresh = 0; } last = '<'; dirty = 1; }
 }
 
@@ -138,6 +139,7 @@ int main(void) {
                 unsigned tc = hot ? 0xFFFFFF : isop ? 0xF0C060 : 0xD8E0EC;
                 textS(lab, x + (BW - 16) / 2, y + (BH - 16) / 2, 2, tc);
             }
+            textS("y: copy result", 8, H - 18, 1, 0x606878);
             sys_gfx_blit(FB);
             dirty = 0;
         }

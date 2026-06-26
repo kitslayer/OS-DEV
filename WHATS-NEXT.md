@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1424) gcalc — copy the result to the clipboard.** `y` copies the current display (a computed result or the typed entry) to the system clipboard (`sys_clip_set`), so you can paste a number into the editor/code; a hint line was added (window grew 320→340 px). **Verified:** in-guest end-to-end — `8/2=` then `y`, then gclip showed `4` (1 byte); `make check` green.
+
 > **(M1423) gcolor — copy the hex to the clipboard.** `c` now copies the current colour as `#RRGGBB` to the system clipboard (`sys_clip_set`), so you can paste it into the editor/code. **Verified:** in-guest end-to-end — gcolor `c` (default teal) then gclip showed `#20B2AA` (7 bytes); `make check` green.
 
 > **(M1422) imgview — set the image as wallpaper.** Pressing `w` in the image viewer sets the currently-shown image as the desktop wallpaper (`sys_setwall`, the same call the file manager's `w` uses). A natural integration — browse images, find one you like, make it the background. **Verified:** in-guest — viewing LOGO.SVG and pressing `w` filled the desktop with the OS-DEV logo; `make check` green.
