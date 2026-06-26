@@ -71,7 +71,7 @@ static const char *PAD[5][4] = {
     { "4", "5", "6", "*" },
     { "1", "2", "3", "-" },
     { "0", ".", "=", "+" },
-    { "C", "<", 0,   0   },
+    { "C", "<", "%", 0   },
 };
 
 /* calculator state (file-scope so both the keyboard and the mouse can press()) */
@@ -93,6 +93,7 @@ static void press(int k) {
         reg = pend ? apply(reg, pend, v) : v;
         pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = '='; dirty = 1;
     }
+    else if (k == '%') { long v = elen ? parse_fixed(entry) : reg; reg = v / 100; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = '%'; dirty = 1; }   /* x% = x/100 */
     else if (k == 'c' || k == 'C') { reg = 0; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = 'C'; dirty = 1; }
     else if (k == 8 || k == 0x7F) { if (elen > 0) { entry[--elen] = 0; fresh = 0; } last = '<'; dirty = 1; }
 }
@@ -129,7 +130,7 @@ int main(void) {
                 const char *lab = PAD[r][c]; if (!lab) continue;
                 int x = BX + c * GX, y = BY + r * GY;
                 int hot = (last && lab[0] == last);             /* highlight the last key pressed */
-                int isop = (lab[0]=='/'||lab[0]=='*'||lab[0]=='-'||lab[0]=='+'||lab[0]=='=');
+                int isop = (lab[0]=='/'||lab[0]=='*'||lab[0]=='-'||lab[0]=='+'||lab[0]=='='||lab[0]=='%');
                 unsigned bg = hot ? 0x3A78D8 : isop ? 0x2A3140 : (lab[0]=='C'||lab[0]=='<') ? 0x402A2A : 0x232A36;
                 fill(x, y, BW, BH, bg);
                 fill(x, y, BW, 1, 0x404A5A);

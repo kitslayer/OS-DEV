@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1405) gcalc — a percent (%) key.** Filled one of the keypad's blank slots with a `%` key (`x% = x/100`), rendered gold like the operators. Clickable or via the keyboard (`%` = Shift-5). **Verified:** in-guest — `50 %` → `0.5`, the `%` button highlighting; `make check` green.
+
 > **(M1404) docs + Welcome refresh.** Bumped the README headline to "1400+ milestones" and updated the boot Welcome screen's app highlights from "Clock, Monitor, Tasks, 60+ more" to "Clock, Calc, Images, Fireworks +", so the first window a user sees advertises the campaign's new graphical apps. **Verified:** in-guest — the Welcome window shows the new line; `make check` green.
 
 > **(M1403) gfire — click to burst.** The fireworks are now interactive: a left-click bursts a coloured firework right at the cursor (`sys_mouse` edge-detected, reusing the `burst()` used by the auto-launches), so you can set off your own alongside the show. **Verified:** in-guest via the QMP click harness — a click produced a pink radial burst centred on the cursor while the automatic green/blue fireworks continued; `make check` green.
