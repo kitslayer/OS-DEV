@@ -157,7 +157,7 @@ struct browser {
     struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
-    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border / list-style-type */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint16_t css_spec[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border / list-style-type / specificity */
     char    in_id[IN_MAX][32]; char in_val[IN_MAX][IN_VLEN]; int in_n;   /* <input> field values, by id (the typed/scripted text) */
     char    in_name[IN_MAX][32];                                /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
@@ -1818,9 +1818,14 @@ static void capture_css(browser_t *b, const char *s, int n) {
             int ce2 = p; if (p < se) p++;                            /* step past ',' */
             while (cs2 < ce2 && (s[cs2]==' '||s[cs2]=='\t'||s[cs2]=='\n'||s[cs2]=='\r')) cs2++;       /* trim */
             while (ce2 > cs2 && (s[ce2-1]==' '||s[ce2-1]=='\t'||s[ce2-1]=='\n'||s[ce2-1]=='\r')) ce2--;
-            int sl = ce2 - cs2; if (sl <= 0 || sl >= 40) continue;   /* empty or too long -> skip this part */
-            char selbuf[40]; for (int k = 0; k < sl; k++) selbuf[k] = s[cs2+k]; selbuf[sl] = 0;
+            int sl = ce2 - cs2; if (sl <= 0 || sl >= 96) continue;   /* empty or too long -> skip this part */
+            char selbuf[96]; for (int k = 0; k < sl; k++) selbuf[k] = s[cs2+k]; selbuf[sl] = 0;
             sel_t sel; if (!sel_parse(selbuf, &sel)) continue;       /* unsupported selector -> skip this part */
+            /* specificity = 100*(#id) + 10*(#class + #attr + ancestor presence) + 1*(#tags) */
+            int sp = (sel.id[0] ? 100 : 0)
+                   + 10 * ((sel.cls[0] ? 1 : 0) + (sel.attr[0] ? 1 : 0) + (sel.dcls[0] || sel.dtag[0] ? 1 : 0))
+                   + (sel.tag[0] ? 1 : 0) + (sel.dtag[0] ? 1 : 0);
+            b->css_spec[b->n_css] = (uint16_t)sp;
             b->css_sel[b->n_css] = sel;
             b->css_color[b->n_css] = col;
             b->css_style[b->n_css] = (int16_t)tsv;
@@ -1838,64 +1843,68 @@ static void capture_css(browser_t *b, const char *s, int n) {
         }
     }
 }
-/* Cascade the captured <style> rules onto one element: each matching rule (tag / .class /
- * #id / [attr]) sets *color / *textstyle, later rules winning per property (source order).
- * Returns 1 if any rule matched. Matching mirrors sel_match_all's per-element checks. */
+/* Test whether rule r's selector matches the current element (tag/attrs) and scope stack.
+ * Shared by css_match and css_match_list. Returns 1 on match, 0 otherwise. */
+static int css_rule_matches(browser_t *b, int r, const char *tag, const char *attrs, int attrlen) {
+    const sel_t *s = &b->css_sel[r];
+    if (s->tag[0] && !tageq(tag, s->tag)) return 0;
+    if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) return 0; }
+    if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     return 0; }
+    if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) return 0;
+    if (s->dcls[0] || s->dtag[0]) {                          /* descendant selector: some ancestor frame must match (M1434) */
+        int found = 0;
+        for (int f = 0; f < b->sc_sp; f++) {
+            if (s->dcls[0]) { int cl = 0; while (b->sc[f].cls[cl]) cl++; if (cl && class_has(b->sc[f].cls, cl, s->dcls)) { found = 1; break; } }
+            else if (tageq(b->sc[f].tag, s->dtag)) { found = 1; break; }
+        }
+        if (!found) return 0;
+    }
+    return 1;
+}
+/* Cascade the captured <style> rules onto one element: per-property specificity ordering
+ * (M1439) — for each output property, the matching rule with the HIGHEST specificity wins;
+ * ties are broken by source order (later wins, i.e. >= overwrites). Returns 1 if any rule
+ * matched. Matching mirrors sel_match_all's per-element checks. */
 static int css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
                      int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border, int *flex) {
     int hit = 0;
+    /* per-property specificity watermarks: each output property is set only when the rule's
+     * specificity >= the watermark for that property (ties go to source order = later wins). */
+    uint16_t sp_color=0, sp_style=0, sp_ul=0, sp_tr=0, sp_bg=0, sp_al=0, sp_sz=0,
+             sp_dn=0, sp_mg=0, sp_in=0, sp_bd=0;
     for (int r = 0; r < b->n_css; r++) {
-        const sel_t *s = &b->css_sel[r];
-        if (s->tag[0] && !tageq(tag, s->tag)) continue;
-        if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) continue; }
-        if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     continue; }
-        if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) continue;
-        if (s->dcls[0] || s->dtag[0]) {                          /* descendant selector: some ancestor frame must match (M1434) */
-            int found = 0;
-            for (int f = 0; f < b->sc_sp; f++) {
-                if (s->dcls[0]) { int cl = 0; while (b->sc[f].cls[cl]) cl++; if (cl && class_has(b->sc[f].cls, cl, s->dcls)) { found = 1; break; } }
-                else if (tageq(b->sc[f].tag, s->dtag)) { found = 1; break; }
-            }
-            if (!found) continue;
+        if (!css_rule_matches(b, r, tag, attrs, attrlen)) continue;
+        uint16_t sp = b->css_spec[r];
+        if (b->css_color[r]   && sp >= sp_color)   { *color     = b->css_color[r];       sp_color = sp; }
+        if (b->css_style[r] >= 0 && sp >= sp_style) { *textstyle = b->css_style[r];       sp_style = sp; }
+        if (b->css_ul[r]      && sp >= sp_ul)       { *underline = 1;                     sp_ul    = sp; }
+        if (b->css_transform[r] && sp >= sp_tr)     { *transform = b->css_transform[r];   sp_tr    = sp; }
+        if (b->css_bg[r]      && sp >= sp_bg)       { *bg        = b->css_bg[r];          sp_bg    = sp; }
+        if (b->css_align[r]   && sp >= sp_al)       { *align     = b->css_align[r];       sp_al    = sp; }
+        if (b->css_size[r]    && sp >= sp_sz)       { *size      = b->css_size[r];        sp_sz    = sp; }
+        if (b->css_disp[r]    && sp >= sp_dn) {
+            if (b->css_disp[r] == 1) *hidden = 1; else if (b->css_disp[r] == 2) *flex = 1;
+            sp_dn = sp;
         }
-        if (b->css_color[r]) *color = b->css_color[r];
-        if (b->css_style[r] >= 0) *textstyle = b->css_style[r];
-        if (b->css_ul[r]) *underline = 1;
-        if (b->css_transform[r]) *transform = b->css_transform[r];
-        if (b->css_bg[r]) *bg = b->css_bg[r];
-        if (b->css_align[r]) *align = b->css_align[r];
-        if (b->css_size[r]) *size = b->css_size[r];
-        if (b->css_disp[r] == 1) *hidden = 1; else if (b->css_disp[r] == 2) *flex = 1;   /* 1=display:none, 2=display:flex */
-        if (b->css_margin[r]) *margin = b->css_margin[r];
-        if (b->css_indent[r]) *indent = b->css_indent[r];
-        if (b->css_border[r]) *border = b->css_border[r];
+        if (b->css_margin[r]  && sp >= sp_mg)       { *margin    = b->css_margin[r];      sp_mg    = sp; }
+        if (b->css_indent[r]  && sp >= sp_in)       { *indent    = b->css_indent[r];      sp_in    = sp; }
+        if (b->css_border[r]  && sp >= sp_bd)       { *border    = b->css_border[r];      sp_bd    = sp; }
         hit = 1;
     }
     return hit;
 }
 /* list-style-type from the <style> rules for one <ul>/<ol> element (0 = none set).
  * Kept separate from css_match so the marker is resolved only at the two list-open
- * sites — it doesn't need to ride along the per-element text-style cascade. Later
- * matching rules win (source order), mirroring css_match. */
+ * sites. Per-property specificity ordering applied (M1439): highest-specificity matching
+ * rule wins; ties broken by source order. */
 static int css_match_list(browser_t *b, const char *tag, const char *attrs, int attrlen) {
     int mark = 0;
+    uint16_t sp_list = 0;
     for (int r = 0; r < b->n_css; r++) {
         if (!b->css_list[r]) continue;
-        const sel_t *s = &b->css_sel[r];
-        if (s->tag[0] && !tageq(tag, s->tag)) continue;
-        if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) continue; }
-        if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     continue; }
-        if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) continue;
-        if (s->dcls[0] || s->dtag[0]) {                          /* descendant selector: some ancestor frame must match (M1434) */
-            int found = 0;
-            for (int f = 0; f < b->sc_sp; f++) {
-                if (s->dcls[0]) { int cl = 0; while (b->sc[f].cls[cl]) cl++; if (cl && class_has(b->sc[f].cls, cl, s->dcls)) { found = 1; break; } }
-                else if (tageq(b->sc[f].tag, s->dtag)) { found = 1; break; }
-            }
-            if (!found) continue;
-        }
-        mark = b->css_list[r];
+        if (!css_rule_matches(b, r, tag, attrs, attrlen)) continue;
+        if (b->css_spec[r] >= sp_list) { mark = b->css_list[r]; sp_list = b->css_spec[r]; }
     }
     return mark;
 }

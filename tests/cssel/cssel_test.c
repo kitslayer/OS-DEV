@@ -93,9 +93,7 @@ int main(void) {
     expect("a[href=x]",  1, "a", "", "", "href");        /* =value ignored */
     expect("abcdefghijklmno", 1, "abcdefghijklmno", "", "", "");   /* 15-char tag: exact cap, still matches */
     expect("",           0, "", "", "", "");             /* empty -> no match */
-    expect(">",          0, "", "", "", "");             /* child combinator unsupported -> fail closed */
-    expect("div>p",      0, "", "", "", "");             /* `>` after tag -> fail closed */
-    expect("a:hover",    0, "", "", "", "");             /* pseudo-class unsupported -> fail closed */
+    expect(">",          0, "", "", "", "");             /* bare combinator with no target -> fail closed */
     /* descendant selectors (M1434): split on the last whitespace; target = rightmost simple
      * selector, nearest ancestor's class/tag -> dtag/dcls requirement */
     expect_desc("div p",          "p",  "",     "div", "");
@@ -103,10 +101,26 @@ int main(void) {
     expect_desc(".a .b",          "",   "b",    "",    "a");
     expect_desc("ul.menu li.item","li", "item", "ul",  "menu");   /* nearest ancestor; class preferred at match */
     expect_desc("section  p",     "p",  "",     "section", "");   /* collapsed extra whitespace */
-    expect("div > p",    0, "", "", "", "");             /* child combinator (spaced) -> ancestor `>` invalid -> fail closed */
-    expect("div p:hover",0, "", "", "", "");             /* target pseudo-class -> fail closed */
+    /* child/sibling combinators now treated like descendant (M1439) */
+    expect_desc("div>p",          "p",  "",     "div", "");       /* child combinator, no spaces */
+    expect_desc("div > p",        "p",  "",     "div", "");       /* child combinator with spaces */
+    expect_desc("div p:hover",    "p",  "",     "div", "");       /* pseudo-class stripped on target */
     expect("#x p",       0, "", "", "", "");             /* id-only ancestor unsupported -> fail closed */
     expect("abcdefghijklmnopqrstuvwxyz", 0, "", "", "", "");   /* >15-char tag: overflow remainder hits else -> fail closed */
+    /* --- pseudo-class / pseudo-element stripping (M1439) --- */
+    expect("a:hover",        1, "a",    "", "", "");    /* :hover stripped, tag "a" kept */
+    expect("li:first-child", 1, "li",   "", "", "");    /* :first-child stripped */
+    expect("p::before",      1, "p",    "", "", "");    /* ::before (pseudo-element) stripped */
+    expect("a:not(.x)",      1, "a",    "", "", "");    /* :not(.x) stripped, tag "a" kept */
+    expect(":root",          1, "html", "", "", "");    /* :root -> tag "html" */
+    /* child / sibling combinators (M1439) */
+    expect_desc(".menu > li",    "li", "",  "",    "menu");   /* child combinator with class ancestor */
+    expect_desc("h2 + p",        "p",  "",  "h2",  "");       /* adjacent sibling */
+    expect_desc("ul ~ p",        "p",  "",  "ul",  "");       /* general sibling */
+    /* attr selector with value (already supported, value ignored; long enough to test >40 cap) */
+    expect("[data-x=\"y\"]",     1, "", "", "", "data-x");   /* attr=value, value ignored */
+    /* selector longer than 40 chars: must still parse (tests the 96-char cap in browser.c) */
+    expect(".very-long-class-name-that-exceeds-forty a", 1, "a", "", "", "");
     /* class_has: a class matches only as a whole space/tab-separated token */
     expect_cls("foo", "foo", 1);
     expect_cls("a foo b", "foo", 1);
