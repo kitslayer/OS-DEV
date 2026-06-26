@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1376) docs — README taskman row reflects the "top" features.** Updated the #440 table row to note the right-aligned per-task MEM/CPU% columns + aggregate-CPU% footer added across M1371–M1375 (it predated them, describing only the bare process list). Keeps the headline feature list accurate.
+
 > **(M1375) taskman — human-readable MEM units (KiB→MiB).** The MEM column now shows `1.0M` for ≥1 MiB tasks (was `1028K`) and keeps `K` below that — integer math, no FPU — matching `top`/`htop`'s human-readable sizes. **Verified:** in-guest — Task Manager `1.0M`, Shell `916K`, right-aligned.
 
 > **(M1374) taskman — right-align the MEM/CPU columns.** The numeric MEM (RSS) and CPU% values + their headers are now right-aligned (the proven CPU%-column pattern), giving a properly aligned table like `top`/`htop` instead of left-ragged numbers. **Verified:** in-guest — `1028K`/`916K` line up on the right under `MEM`, `0%` under `CPU`.
