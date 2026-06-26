@@ -152,7 +152,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex/block-bg), a stack so nested styled elements compose */
+    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / display:none / border / list-style-type */
@@ -793,6 +793,8 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].savestyle = *style; b->sc[sp].setstyle = -1;
                 if (apply_ts) { *style = ts; b->sc[sp].setstyle = ts; }
                 int i = 0; while (tag[i] && i < 15) { b->sc[sp].tag[i] = tag[i]; i++; } b->sc[sp].tag[i] = 0;
+                b->sc[sp].cls[0] = 0;                            /* record the element's class for descendant-selector matching (M1434) */
+                { const char *cv; int cvl; if (find_attr(attrs, attrlen, "class", &cv, &cvl)) { int w = 0; for (int z = 0; z < cvl && w < 31; z++) b->sc[sp].cls[w++] = cv[z]; b->sc[sp].cls[w] = 0; } }
                 b->sc[sp].depth = 1;
                 b->sc[sp].hasborder = 0;
                 if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
@@ -1817,6 +1819,14 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) continue; }
         if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     continue; }
         if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) continue;
+        if (s->dcls[0] || s->dtag[0]) {                          /* descendant selector: some ancestor frame must match (M1434) */
+            int found = 0;
+            for (int f = 0; f < b->sc_sp; f++) {
+                if (s->dcls[0]) { int cl = 0; while (b->sc[f].cls[cl]) cl++; if (cl && class_has(b->sc[f].cls, cl, s->dcls)) { found = 1; break; } }
+                else if (tageq(b->sc[f].tag, s->dtag)) { found = 1; break; }
+            }
+            if (!found) continue;
+        }
         if (b->css_color[r]) *color = b->css_color[r];
         if (b->css_style[r] >= 0) *textstyle = b->css_style[r];
         if (b->css_ul[r]) *underline = 1;
@@ -1845,6 +1855,14 @@ static int css_match_list(browser_t *b, const char *tag, const char *attrs, int 
         if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) continue; }
         if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     continue; }
         if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) continue;
+        if (s->dcls[0] || s->dtag[0]) {                          /* descendant selector: some ancestor frame must match (M1434) */
+            int found = 0;
+            for (int f = 0; f < b->sc_sp; f++) {
+                if (s->dcls[0]) { int cl = 0; while (b->sc[f].cls[cl]) cl++; if (cl && class_has(b->sc[f].cls, cl, s->dcls)) { found = 1; break; } }
+                else if (tageq(b->sc[f].tag, s->dtag)) { found = 1; break; }
+            }
+            if (!found) continue;
+        }
         mark = b->css_list[r];
     }
     return mark;

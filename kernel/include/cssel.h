@@ -8,33 +8,59 @@
 #ifndef CSSEL_H
 #define CSSEL_H
 
-typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32]; } sel_t;  /* one simple selector: tag/.class/#id/[attr] */
+typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32];
+                 char dtag[16]; char dcls[32]; } sel_t;  /* a simple selector tag/.class/#id/[attr], + an optional descendant-ANCESTOR requirement dtag/dcls (M1434) */
 
 static int  cs_alnum(int c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9'); }
 static int  cs_lc(int c){ return (c>='A'&&c<='Z') ? c+32 : c; }
 
-/* Parse one simple selector `s` into `o`: tag lowercased; class/id keep case (allowing
- * -/_); attr lowercased with any `=value` ignored. EVERY write is bounded to the fixed
- * fields (tag[16]/cls[32]/id[32]/attr[32], NUL-terminated within), so a long or
- * adversarial selector truncates instead of overflowing. Returns 1 if any component set. */
+/* Parse ONE simple selector s[0..n) into tag/cls/id/attr (tag lowercased; class/id keep
+ * case; attr lowercased, =value ignored). Every write bounded; returns 1 if any set, 0 on
+ * an unsupported char (fail closed). */
+static int sel_one(const char *s, int n, char *tag, char *cls, char *id, char *attr) {
+    tag[0]=cls[0]=id[0]=attr[0]=0;
+    int i=0, k=0;
+    while (i<n && cs_alnum(s[i]) && k<15) { tag[k++]=(char)cs_lc(s[i]); i++; }
+    tag[k]=0;
+    while (i<n) {
+        if (s[i]=='.')      { i++; k=0; while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) cls[k++]=s[i++]; cls[k]=0; }
+        else if (s[i]=='#') { i++; k=0; while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) id[k++]=s[i++];  id[k]=0;  }
+        else if (s[i]=='[') {
+            i++; k=0;
+            while (i<n && s[i]!=']' && s[i]!='=' && k<31) attr[k++]=(char)cs_lc(s[i++]);
+            attr[k]=0;
+            while (i<n && s[i]!=']') i++;
+            if (i<n && s[i]==']') i++;
+        }
+        else return 0;   /* unsupported combinator/char -> fail closed */
+    }
+    return (tag[0]||cls[0]||id[0]||attr[0]);
+}
+
+/* Parse a selector `s` into `o`. A single simple selector parses as before. A DESCENDANT
+ * selector ("ancestor … target") splits on the last whitespace: the target (rightmost
+ * simple selector) goes in tag/cls/id/attr, and the nearest ancestor's class/tag goes in
+ * dcls/dtag as an "some ancestor must match" requirement (checked against the live scope
+ * stack at match time). Deeper chains keep only the nearest ancestor — an approximation,
+ * but it lets `.nav-links a`, `.entry-links a`, etc. apply instead of being dropped.
+ * Still bounded; combinators other than descendant (>, +, ~) still fail closed. */
 static int sel_parse(const char *s, sel_t *o) {
     o->tag[0]=o->cls[0]=o->id[0]=o->attr[0]=0;
-    int i=0, k=0;
-    while (s[i] && cs_alnum(s[i]) && k<15) { o->tag[k++]=(char)cs_lc(s[i]); i++; }   /* leading tag name (lowercased) */
-    o->tag[k]=0;
-    while (s[i]) {
-        if (s[i]=='.')      { i++; k=0; while (s[i] && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->cls[k++]=s[i++]; o->cls[k]=0; }
-        else if (s[i]=='#') { i++; k=0; while (s[i] && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) o->id[k++]=s[i++];  o->id[k]=0;  }
-        else if (s[i]=='[') {                              /* [attr] presence; any =value is ignored */
-            i++; k=0;
-            while (s[i] && s[i]!=']' && s[i]!='=' && k<31) o->attr[k++]=(char)cs_lc(s[i++]);
-            o->attr[k]=0;
-            while (s[i] && s[i]!=']') i++;
-            if (s[i]==']') i++;
-        }
-        else return 0;   /* an unsupported combinator/char -> fail closed (no match) */
+    o->dtag[0]=o->dcls[0]=0;
+    int slen=0; while (s[slen]) slen++;
+    int last_sp=-1; for (int i=0;i<slen;i++) if (s[i]==' '||s[i]=='\t') last_sp=i;
+    int ts=0;
+    if (last_sp>=0) {                                      /* descendant combinator */
+        int ae=last_sp; while (ae>0 && (s[ae-1]==' '||s[ae-1]=='\t')) ae--;   /* trim trailing ws of the ancestor part */
+        int as=ae;      while (as>0 && s[as-1]!=' ' && s[as-1]!='\t') as--;   /* nearest ancestor = the last token */
+        char et[16],ec[32],ei[32],ea[32];
+        if (!(ae>as && sel_one(s+as, ae-as, et,ec,ei,ea))) return 0;          /* ancestor not a simple selector (e.g. `div > p`) -> fail closed */
+        int z=0; while (ec[z] && z<31) { o->dcls[z]=ec[z]; z++; } o->dcls[z]=0;    /* prefer its class */
+        z=0;       while (et[z] && z<15) { o->dtag[z]=et[z]; z++; } o->dtag[z]=0;   /* else its tag */
+        if (!(o->dtag[0] || o->dcls[0])) return 0;                            /* id-only ancestor unsupported -> fail closed */
+        ts=last_sp+1; while (ts<slen && (s[ts]==' '||s[ts]=='\t')) ts++;
     }
-    return (o->tag[0]||o->cls[0]||o->id[0]||o->attr[0]);
+    return sel_one(s+ts, slen-ts, o->tag,o->cls,o->id,o->attr);
 }
 
 /* Does the class-attribute value v[0..vl) contain `cls` as a whole space/tab-separated

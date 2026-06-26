@@ -32,6 +32,19 @@ static void expect(const char *sel, int ret, const char *tag, const char *cls, c
     }
 }
 
+/* descendant selector (M1434): target in tag/cls, nearest-ancestor requirement in dtag/dcls */
+static void expect_desc(const char *sel, const char *tag, const char *cls, const char *dtag, const char *dcls) {
+    sel_t s;
+    int r = sel_parse(sel, &s);
+    char m[256];
+    snprintf(m, sizeof(m), "sel_parse('%s') -> ret=%d tag='%s' cls='%s' dtag='%s' dcls='%s'", sel, r, s.tag, s.cls, s.dtag, s.dcls);
+    CHECK(r == 1, m);
+    CHECK(strcmp(s.tag, tag) == 0, m);
+    CHECK(strcmp(s.cls, cls) == 0, m);
+    CHECK(strcmp(s.dtag, dtag) == 0, m);
+    CHECK(strcmp(s.dcls, dcls) == 0, m);
+}
+
 /* exactly-sized, NUL-terminated input so any over-read past s[len] red-zones */
 static void fuzz_one(const unsigned char *data, int len) {
     char *s = malloc((size_t)len + 1);
@@ -43,6 +56,8 @@ static void fuzz_one(const unsigned char *data, int len) {
     CHECK(strlen(o.cls)  < sizeof(o.cls),  "cls field overran");
     CHECK(strlen(o.id)   < sizeof(o.id),   "id field overran");
     CHECK(strlen(o.attr) < sizeof(o.attr), "attr field overran");
+    CHECK(strlen(o.dtag) < sizeof(o.dtag), "dtag field overran");
+    CHECK(strlen(o.dcls) < sizeof(o.dcls), "dcls field overran");
     free(s);
 }
 
@@ -79,9 +94,18 @@ int main(void) {
     expect("abcdefghijklmno", 1, "abcdefghijklmno", "", "", "");   /* 15-char tag: exact cap, still matches */
     expect("",           0, "", "", "", "");             /* empty -> no match */
     expect(">",          0, "", "", "", "");             /* child combinator unsupported -> fail closed */
-    expect("div p",      0, "", "", "", "");             /* descendant combinator (space) -> fail closed */
     expect("div>p",      0, "", "", "", "");             /* `>` after tag -> fail closed */
     expect("a:hover",    0, "", "", "", "");             /* pseudo-class unsupported -> fail closed */
+    /* descendant selectors (M1434): split on the last whitespace; target = rightmost simple
+     * selector, nearest ancestor's class/tag -> dtag/dcls requirement */
+    expect_desc("div p",          "p",  "",     "div", "");
+    expect_desc(".nav-links a",   "a",  "",     "",    "nav-links");
+    expect_desc(".a .b",          "",   "b",    "",    "a");
+    expect_desc("ul.menu li.item","li", "item", "ul",  "menu");   /* nearest ancestor; class preferred at match */
+    expect_desc("section  p",     "p",  "",     "section", "");   /* collapsed extra whitespace */
+    expect("div > p",    0, "", "", "", "");             /* child combinator (spaced) -> ancestor `>` invalid -> fail closed */
+    expect("div p:hover",0, "", "", "", "");             /* target pseudo-class -> fail closed */
+    expect("#x p",       0, "", "", "", "");             /* id-only ancestor unsupported -> fail closed */
     expect("abcdefghijklmnopqrstuvwxyz", 0, "", "", "", "");   /* >15-char tag: overflow remainder hits else -> fail closed */
     /* class_has: a class matches only as a whole space/tab-separated token */
     expect_cls("foo", "foo", 1);
