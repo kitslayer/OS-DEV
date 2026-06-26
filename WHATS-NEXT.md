@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1353) docs — README showcase lists the hex editor.** Added the new interactive `hexedit` (overtype-edit + find/goto, save) to the README's tool/app list, so the front page reflects this session's new tool alongside the HTTP file server + the OS-wide colourisation.
+
 > **(M1352) demo apps — finish the colour pass (all 17 done).** Coloured the last demos: `nettcp` (label cyan, done lime), `mmapfile` (conclusion lime), `overlay`/`robustfutex`/`pcwd` (PASS lime / FAIL red), `scnotify` (supervisor cyan, DENY red / EMULATE lime), `crashinfo` (label + section headers cyan, fault line red). **Every `run`-launched systems demo is now coloured, matching the shell + menu apps — the colour pass is complete OS-wide.** **Verified:** build clean; the title/result/PASS colour pattern is verified in-guest; full `make check` green.
 
 > **(M1351) demo apps — colourise execdemo + fswaittest + bpftest.** Titles cyan + key results coloured: `execdemo` (exec-swap proof lime), `fswaittest` (woke-index lime, timeout amber), `bpftest` (filter-loaded lime). **Verified:** build clean; the title/result colour pattern is verified in-guest (forktest/threads/iouring). (10 demo apps coloured.)
