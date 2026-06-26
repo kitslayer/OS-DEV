@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1320) shell — colour the `date` output (date cyan, time yellow).** The last common-command output: `date` shows the date part cyan and the time yellow, like a colourful clock. This completes the shell colour pass — the prompt **and** every common list/status/info command (`ls`/`tree`/`find`/`uptime`/`free`/`ps`/`df`/`cal`/`date`) are now colourised (10 surfaces). **Verified:** in-guest — `date` → cyan `2026-06-26` + yellow `00:40:18`.
+
 > **(M1319) shell — highlight today in `cal` (cyan).** `cal` already MARKED today with a `>`; now `print_cal_week` colours today's cell **cyan** (dropping the `>`), so the current day stands out in the month grid — also applied by `cal -3` and `cal -y`. **Verified:** in-guest — `cal` shows the 26th in cyan among the green days.
 
 > **(M1318) shell — colour the `df` free-space figure (green).** The last uncoloured status command: `df` shows the free-KiB number in lime. With M1312-M1317 this completes the colour pass — every shell status/list command (`ls`/`tree`/`find`/`uptime`/`free`/`ps`/`df`) **and** the prompt are now colourised (8 surfaces). **Verified:** in-guest — `df` → the free figure renders lime.

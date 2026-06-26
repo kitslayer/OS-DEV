@@ -4452,8 +4452,10 @@ static int run_command(char *line, char *cwd) {
             }
         } else if (streq(line, "date")) {
             char buf[24];
-            sys_time(buf, sizeof(buf));
-            print(buf);
+            sys_time(buf, sizeof(buf));                          /* "YYYY-MM-DD HH:MM:SS" */
+            int dl = 0; while (buf[dl] && buf[dl] != ' ') dl++;  /* date cyan, time yellow (M1320) */
+            char dpart[16]; int i = 0; for (; i < dl && i < 15; i++) dpart[i] = buf[i]; dpart[i] = 0;
+            sys_setcolor(4); print(dpart); sys_setcolor(3); print(buf + dl); sys_setcolor(0);
         } else if (streq(line, "sntp") || streq(line, "ntpdate")) {   /* set the wall clock from a network time server */
             char before[24]; sys_time(before, sizeof before);
             print("sntp: querying pool.ntp.org (UDP 123)...\n");
