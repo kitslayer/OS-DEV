@@ -1712,7 +1712,7 @@ static int run_command(char *line, char *cwd) {
             static char fb[2048];
             sh_unprot_buf(line + 5);                      /* quoted multi-word substring (e.g. find "my doc") */
             long n = sys_find(line + 5, fb, sizeof(fb));
-            if (n > 0) { fb[n] = 0; print(fb); } else if (!cap_active()) print("(no matches)\n");   /* hint, not data: keep it out of `for f in $(find ...)` */
+            if (n > 0) { fb[n] = 0; print_tree_colored(fb); } else if (!cap_active()) print("(no matches)\n");   /* colourised by type (M1315); colour is a terminal attr, so $(find) stays clean */
         } else if (streq(line, "tree")) {
             static char tb[2048];
             long n = sys_tree(tb, sizeof(tb));
