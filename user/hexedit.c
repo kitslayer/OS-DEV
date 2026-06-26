@@ -17,7 +17,7 @@
 
 #define CAP  32768         /* largest file we load to edit (bigger -> read-only) */
 #define BPR  8             /* bytes per row */
-#define ROWS 14            /* visible rows (title + ROWS + status <= 17) */
+#define ROWS 13            /* visible rows (title + ROWS + blank + status <= 17, with a spare row) */
 
 static unsigned char buf[CAP];     /* the working bytes (BSS, not the stack) */
 static unsigned char orig[CAP];    /* the loaded bytes, to flag unsaved edits */
@@ -31,7 +31,8 @@ static void hoff(long o) { hx((int)((o >> 12) & 15)); hx((int)((o >> 8) & 15)); 
 static void render(long cur, long top, int nibble, int dirty) {
     sys_clear();
     sys_setcolor(4); print(" hexedit "); sys_setcolor(8); print(fname);
-    if (dirty) print(" *"); if (ro) { sys_setcolor(2); print(" [RO]"); } sys_setcolor(0); print("\n");
+    if (dirty) print(" *"); if (ro) { sys_setcolor(2); print(" [RO]"); }
+    sys_setcolor(8); print("  @"); hoff(cur); if (nibble) print(" lo"); sys_setcolor(0); print("\n");   /* offset in the title so the grid fits 17 rows (M1343) */
     for (int r = 0; r < ROWS; r++) {
         long off = top + (long)r * BPR;
         if (off >= flen) break;
@@ -56,8 +57,7 @@ static void render(long cur, long top, int nibble, int dirty) {
         sys_setcolor(0); print("\n");
     }
     sys_setcolor(8);
-    print("\n arrows move  0-9a-f edit  s save  q quit   @"); hoff(cur);
-    if (nibble) print(" lo");
+    print("\n arrows/np move 0-9a-f edit s save q quit");   /* single-spaced, <44 cols so the cursor stays on this row (M1343) */
     sys_setcolor(0);
 }
 
@@ -86,6 +86,8 @@ int main(void) {
         else if (k == 0x14) { if (cur < flen - 1) cur++; nibble = 0; }      /* right */
         else if (k == 0x11) { if (cur >= BPR) cur -= BPR; nibble = 0; }     /* up */
         else if (k == 0x12) { if (cur + BPR < flen) cur += BPR; nibble = 0; } /* down */
+        else if (k == 'n') { cur += (long)ROWS * BPR; if (cur >= flen) cur = flen - 1; nibble = 0; }  /* page down */
+        else if (k == 'p') { cur -= (long)ROWS * BPR; if (cur < 0) cur = 0; nibble = 0; }             /* page up */
         else {
             int d = -1;
             if (k >= '0' && k <= '9') d = k - '0';
