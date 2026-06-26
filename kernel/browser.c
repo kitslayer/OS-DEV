@@ -714,6 +714,36 @@ static int  css_match(browser_t *b, const char *tag, const char *attrs, int attr
                       uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
                       int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border, int *flex);
 static int  css_match_list(browser_t *b, const char *tag, const char *attrs, int attrlen);
+
+/* Resolve the best URL for an <img> tag with "fallback only" semantics:
+ * if src= is present and non-empty it is returned unchanged (zero regression).
+ * When src is absent or empty we try srcset= (first candidate URL, stripping
+ * the optional " 320w" / " 2x" descriptor), then data-src=, data-original=,
+ * data-lazy-src= — first non-empty wins.  Returns 1 and sets *v/*vl to a
+ * slice within attrs[0..attrlen); returns 0 if no usable URL found. */
+static int img_src_attr(const char *attrs, int attrlen,
+                        const char **v, int *vl) {
+    /* 1. Canonical src= — unchanged behaviour. */
+    if (find_attr(attrs, attrlen, "src", v, vl) && *vl > 0) return 1;
+    /* 2. srcset="url descriptor, url descriptor, ..." — take first candidate URL
+     *    (everything up to the first space or comma). */
+    { const char *sv; int sl;
+      if (find_attr(attrs, attrlen, "srcset", &sv, &sl) && sl > 0) {
+          /* skip leading whitespace */
+          int s = 0; while (s < sl && (sv[s]==' '||sv[s]=='\t'||sv[s]=='\n'||sv[s]=='\r')) s++;
+          int e = s;
+          while (e < sl && sv[e]!=' ' && sv[e]!='\t' && sv[e]!=',' &&
+                 sv[e]!='\n' && sv[e]!='\r') e++;
+          if (e > s) { *v = sv + s; *vl = e - s; return 1; }
+      } }
+    /* 3. data-src= / data-original= / data-lazy-src= (lazy-load patterns). */
+    { static const char * const lazy[] = { "data-src", "data-original", "data-lazy-src", 0 };
+      for (int i = 0; lazy[i]; i++) {
+          if (find_attr(attrs, attrlen, lazy[i], v, vl) && *vl > 0) return 1;
+      } }
+    return 0;
+}
+
 static void handle_tag(browser_t *b, const char *tag, int closing,
                        const char *attrs, int attrlen,
                        int *style, int *linkdepth, int *curlink) {
@@ -993,7 +1023,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             else { const char *im = "img"; while (*im && p < 37) label[p++] = *im++; }
             label[p++] = ']'; label[p] = 0;
             const char *src; int srcl;
-            if (find_attr(attrs, attrlen, "src", &src, &srcl) && srcl > 0) {
+            if (img_src_attr(attrs, attrlen, &src, &srcl) && srcl > 0) {
                 /* a LOCAL image (file:NAME) decodes inline; everything else
                  * (http: etc.) stays a clickable link you can follow to view */
                 int shown = 0;
@@ -2700,7 +2730,7 @@ static void collect_remote_imgs(browser_t *b) {
               ae++; } }
         if (ae >= len) break;                             /* unterminated tag -> stop */
         const char *src; int srcl;
-        if (find_attr(h + as, ae - as, "src", &src, &srcl) && srcl > 0 && srcl <= 95) {
+        if (img_src_attr(h + as, ae - as, &src, &srcl) && srcl > 0 && srcl <= 95) {
             /* our decoders handle PNG/GIF/JPEG/SVG — skip a src whose extension is a
              * format we still can't decode (WebP/AVIF/ICO) so we don't waste a fetch +
              * pre-paint latency on an image that would just fall back to a link.
