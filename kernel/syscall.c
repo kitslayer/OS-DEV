@@ -313,7 +313,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
-    case SYS_clip_get: case SYS_clip_set:
+    case SYS_clip_get: case SYS_clip_set: case SYS_font:
         return PL_GFX;
     case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace:
     case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_killpg:
@@ -341,7 +341,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_sysinfo]="sysinfo",[SYS_clear]="clear",[SYS_reboot]="reboot",[SYS_writefile]="writefile",
         [SYS_ping]="ping",[SYS_resolve]="resolve",[SYS_delete]="delete",[SYS_spawn]="spawn",
         [SYS_sleep]="sleep",[SYS_http]="http",[SYS_browse]="browse",[SYS_mkdir]="mkdir",
-        [SYS_chdir]="chdir",[SYS_tree]="tree",[SYS_ps]="ps",[SYS_pollkey]="pollkey",
+        [SYS_chdir]="chdir",[SYS_tree]="tree",[SYS_ps]="ps",[SYS_font]="font",[SYS_pollkey]="pollkey",
         [SYS_df]="df",[SYS_find]="find",[SYS_sha256]="sha256",[SYS_crypt]="crypt",
         [SYS_history]="history",[SYS_https]="https",[SYS_js]="js",[SYS_setcolor]="setcolor",
         [SYS_pinghost]="pinghost",[SYS_netinfo]="netinfo",[SYS_apps]="apps",[SYS_sha512]="sha512",
@@ -1017,6 +1017,15 @@ void syscall_dispatch(struct registers *r) {
         sv.f_namemax = 255;
         for (unsigned i = 0; i < sizeof sv; i++) ((uint8_t *)r->rsi)[i] = ((uint8_t *)&sv)[i];
         r->rax = 0;
+        break;
+    }
+    case SYS_font: {                          /* copy the 8x16 console font so gfx apps can render real text (M1362) */
+        extern const unsigned char font_glyphs[128][16];
+        char *b = (char *)r->rsi; int max = (int)r->rdx;
+        int need = (int)sizeof(font_glyphs);  /* 128 * 16 = 2048 bytes */
+        if (max < need || !ubuf(r->rsi, (uint64_t)need)) { r->rax = (uint64_t)-1; break; }
+        for (int i = 0; i < need; i++) b[i] = ((const unsigned char *)font_glyphs)[i];
+        r->rax = (uint64_t)need;
         break;
     }
     case SYS_ps: {
