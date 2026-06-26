@@ -92,6 +92,7 @@ int main(void) {
 
     char ps[1200];
     int prev_pid[40]; long prev_cpu[40]; int prev_n = 0; long prev_ms = 0;   /* last snapshot, for CPU% deltas */
+    int sel = 0, row_pid[40];                                                /* keyboard selection + per-row PID (M1401) */
     long pbusy = 0, ptot = 0;                                                /* aggregate-CPU accumulators */
     for (;;) {
         long n = sys_ps(ps, sizeof ps - 1); if (n < 0) n = 0; ps[n] = 0;
@@ -110,6 +111,7 @@ int main(void) {
             int eol = i; while (ps[eol] && ps[eol] != '\n') eol++;
             char line[80]; int s = 0; for (int k = i; k < eol && s < 79; k++) line[s++] = ps[k]; line[s] = 0;
             if (s > 0) {
+                if (count == sel) for (int x = 8; x < W - 8; x++) for (int yy = -2; yy <= 15; yy++) putpx(x, y + yy, 0x2A3458);  /* selected-row bar (M1401) */
                 unsigned col = 0xC8C8D2;                            /* default */
                 if      (has(line, "run"))   col = 0x5CE070;        /* running: green */
                 else if (has(line, "ready")) col = 0x60C8F0;        /* ready:   cyan  */
@@ -117,6 +119,7 @@ int main(void) {
                 else if (has(line, "stop"))  col = 0x9090A0;        /* stopped: grey  */
                 text(line, 12, y, col);
                 int pid = extract_pid(line);                /* per-task CPU% (delta) + MEM (RSS) from /proc/<pid>/stat (M1371) */
+                if (count < 40) row_pid[count] = pid;       /* remember this row's PID for the close key (M1401) */
                 if (pid >= 0) {
                     long t = 0, rss = 0; int pct = 0;
                     if (proc_cpu_rss(pid, &t, &rss) == 0) {
@@ -146,19 +149,24 @@ int main(void) {
         prev_n = cur_n; prev_ms = now_ms;                       /* roll the snapshot forward */
 
         long up = now_ms / 1000;                                /* system uptime, seconds */
-        char foot[44]; int fi = putint(foot, 0, count);
+        char foot[72]; int fi = putint(foot, 0, count);
         const char *a = " tasks    up "; for (int k = 0; a[k]; k++) foot[fi++] = a[k];
         fi = putint(foot, fi, up / 60); foot[fi++] = 'm';
         if (up % 60 < 10) foot[fi++] = '0';
         fi = putint(foot, fi, up % 60); foot[fi++] = 's';
         const char *cl = "    CPU "; for (int k = 0; cl[k]; k++) foot[fi++] = cl[k];
-        fi = putint(foot, fi, scpu); foot[fi++] = '%'; foot[fi] = 0;
+        fi = putint(foot, fi, scpu); foot[fi++] = '%';
+        const char *kh = "   up/dn k:close"; for (int z = 0; kh[z]; z++) foot[fi++] = kh[z]; foot[fi] = 0;
         text(foot, 12, H - 20, 0x8890A0);
 
         sys_gfx_blit(FB);
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
-        sys_sleep(700);
+        else if ((k == 0x11 || k == 'w') && sel > 0) sel--;                  /* up: move selection */
+        else if ((k == 0x12 || k == 's') && sel < count - 1) sel++;          /* down */
+        else if ((k == 'k' || k == '\n' || k == '\r') && sel >= 0 && sel < count && row_pid[sel] > 1) sys_kill(row_pid[sel]);  /* close the selected task (skip pid<=1) */
+        if (count > 0) { if (sel >= count) sel = count - 1; if (sel < 0) sel = 0; }
+        sys_sleep(300);
     }
     return 0;
 }
