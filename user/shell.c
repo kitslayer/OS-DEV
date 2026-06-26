@@ -3642,7 +3642,7 @@ static int run_command(char *line, char *cwd) {
                       print("B reply (id matches, "); printl(an); print(" answer");
                       if (a0>=0){ print(", A="); printl(a0);print(".");printl(a1);print(".");printl(a2);print(".");printl(a3); }
                       print(") -- userspace UDP round-trip OK\n"); }
-            else sys_setcolor(2); print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n"); sys_setcolor(0);
+            else { sys_setcolor(2); print("udptest: VERIFY FAILED (no DNS reply -- needs slirp + host DNS)\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
         } else if (streq(line, "insmodtest")) {   /* loadable kernel module lifecycle: insmod + /proc/modules + rmmod (M1261/M1262) */
             int ok = 1; char mb[256];
