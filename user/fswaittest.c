@@ -25,10 +25,10 @@ int main(void) {
     }
 
     // parent: block on BOTH events (neither ready yet) until the child signals one
-    print("fswaittest: waiting on /event/fa + /event/fb (up to 5s)...\n");
+    sys_setcolor(4); print("fswaittest:"); sys_setcolor(0); print(" waiting on /event/fa + /event/fb (up to 5s)...\n");
     long idx = sys_fswait(set, 2, 5000);
-    if (idx < 0) print("fswaittest: TIMEOUT\n");
-    else { print("fswaittest: woke -> index "); pnum(idx); print(" ready ("); print(set[idx]); print(")\n"); }
+    if (idx < 0) { sys_setcolor(3); print("fswaittest: TIMEOUT\n"); sys_setcolor(0); }
+    else { sys_setcolor(9); print("fswaittest: woke -> index "); pnum(idx); print(" ready ("); print(set[idx]); print(")\n"); sys_setcolor(0); }
 
     // timeout case: wait on an object nobody signals
     const char *none[1] = { "/event/never" };

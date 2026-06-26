@@ -14,7 +14,7 @@ static void pnum(long v) {
 
 int main(void) {
     long before = sys_ping();                       // baseline: ICMP echo to the gateway
-    print("bpftest: ping replies BEFORE the filter: "); pnum(before); print("\n");
+    sys_setcolor(4); print("bpftest:"); sys_setcolor(0); print(" ping replies BEFORE the filter: "); pnum(before); print("\n");
 
     /* program: drop ICMP (IP proto 1), pass everything else.
      *   0: r0 = ctx.proto          (field 1)
@@ -32,7 +32,7 @@ int main(void) {
         { BPF_RET,   0, 0, 0, 0 },
     };
     if (sys_writefile("/bpf", prog, sizeof prog) < 0) { print("bpftest: load failed\n"); sys_sleep(3000); return 1; }
-    print("bpftest: uploaded a 6-instruction BPF filter (drop ICMP)\n");
+    sys_setcolor(9); print("bpftest: uploaded a 6-instruction BPF filter (drop ICMP)\n"); sys_setcolor(0);
 
     long after = sys_ping();                         // now our bytecode drops the echo requests
     print("bpftest: ping replies WITH the filter:   "); pnum(after); print("\n");

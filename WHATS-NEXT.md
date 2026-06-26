@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1351) demo apps — colourise execdemo + fswaittest + bpftest.** Titles cyan + key results coloured: `execdemo` (exec-swap proof lime), `fswaittest` (woke-index lime, timeout amber), `bpftest` (filter-loaded lime). **Verified:** build clean; the title/result colour pattern is verified in-guest (forktest/threads/iouring). (10 demo apps coloured.)
+
 > **(M1350) demo apps — colourise uffdtest + mseal + iouring.** Continued the demo colour pass (titles cyan, key results/conclusions lime): `uffdtest` (materialized-page content + success lime), `mseal` (title cyan, takeaway lime), `iouring` (title cyan, "that's io_uring." conclusion lime). **Verified:** in-guest — `run iouringtest` shows `io_uring:` cyan and the conclusion lime. (7 demo apps coloured.)
 
 > **(M1349) hexedit — find bytes (`/`).** Press `/`, type a hex byte pattern (e.g. `4f53`), Enter to jump to its next occurrence (wrapping around the file); `!notfound` shows in the title if absent, esc cancels. **The hex editor is now fully capable: view, navigate (arrows/page/goto/find), edit, save — all coloured.** **Verified:** in-guest — `/4f53⏎` finds the bytes `OS` at offset 0x25 (title `@0025`).

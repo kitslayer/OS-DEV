@@ -12,7 +12,7 @@ static void pnum(long v) {
 }
 
 int main(void) {
-    print("execdemo: fork() + exec() -- the classic Unix spawn pattern\n");
+    sys_setcolor(4); print("execdemo:"); sys_setcolor(0); print(" fork() + exec() -- the classic Unix spawn pattern\n");
     long pid = sys_fork();
     if (pid == 0) {
         // child: replace this image with the 'clock' program (same pid + window)
@@ -22,7 +22,7 @@ int main(void) {
     }
     print("execdemo: forked child pid="); pnum(pid);
     print(", exec'd it into 'clock'\n");
-    print("execdemo: that window now runs a DIFFERENT program in the SAME process.\n");
+    sys_setcolor(9); print("execdemo: that window now runs a DIFFERENT program in the SAME process.\n"); sys_setcolor(0);
     print("execdemo: I (the parent) am still execdemo.\n");
     sys_sleep(20000);
     return 0;
