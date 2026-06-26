@@ -1872,7 +1872,15 @@ static int run_command(char *line, char *cwd) {
             if (n > 0) { buf[n] = 0; print(buf); } else print("  (no history yet)\n");
         } else if (streq(line, "df")) {
             char b[96]; long n = sys_df(b, sizeof(b));
-            if (n > 0) { b[n] = 0; print(b); } else print("df: no disk\n");
+            if (n > 0) {
+                b[n] = 0;                                                    /* colour the "free" amount green (M1318) */
+                int i = 0; while (b[i] && !(b[i] >= '0' && b[i] <= '9')) i++; /* "disk: " */
+                char hd[24]; int s = 0; for (int k = 0; k < i && s < 23; k++) hd[s++] = b[k]; hd[s] = 0; print(hd);
+                int j = i; while (b[j] >= '0' && b[j] <= '9') j++;            /* the free number */
+                char fr[16]; s = 0; for (int k = i; k < j && s < 15; k++) fr[s++] = b[k]; fr[s] = 0;
+                sys_setcolor(9); print(fr); sys_setcolor(0);
+                print(b + j);                                                /* " KiB free / N KiB total" */
+            } else print("df: no disk\n");
         } else if (streq(line, "lspci")) {
             char buf[4096];                 /* every PCI device as one text line (kernel caps at 64) */
             long n = sys_lspci(buf, sizeof(buf));

@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1318) shell — colour the `df` free-space figure (green).** The last uncoloured status command: `df` shows the free-KiB number in lime. With M1312-M1317 this completes the colour pass — every shell status/list command (`ls`/`tree`/`find`/`uptime`/`free`/`ps`/`df`) **and** the prompt are now colourised (8 surfaces). **Verified:** in-guest — `df` → the free figure renders lime.
+
 > **(M1317) shell — colour the `ps` STATE column by process state.** `print_ps_colored` colours each process row's STATE — **run lime, ready cyan, blocked/sleep yellow, stopped/zombie red** — leaving PID + NAME default, so process states read at a glance. **Verified:** in-guest — `ps` shows `run` lime + `ready` cyan. *(With M1312-M1316, the shell colour pass now spans the prompt, `ls`/`tree`/`find`, `uptime`/`free`, and `ps` — 7 surfaces.)*
 
 > **(M1316) shell — colour the `uptime` + `free` values too.** Continuing the colour pass into the status commands: `uptime` shows the **duration in cyan** and the **load averages in yellow**; `free` shows **used in amber** and **free in lime** (total stays default). **Verified:** in-guest — `uptime` → cyan `0h 0m 14s` + yellow load; `free` → amber used + lime free.
