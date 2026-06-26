@@ -30,6 +30,12 @@ static int has(const char *s, const char *sub) {            /* naive substring t
     for (int i = 0; s[i]; i++) { int j = 0; while (sub[j] && s[i + j] == sub[j]) j++; if (!sub[j]) return 1; }
     return 0;
 }
+static int putint(char *o, int i, long v) {                 /* append v's decimal digits; return new index */
+    char t[12]; int n = 0; if (v < 0) v = 0;
+    do { t[n++] = '0' + (int)(v % 10); v /= 10; } while (v);
+    while (n) o[i++] = t[--n];
+    return i;
+}
 
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("taskman: gfx init failed\n"); return 1; }
@@ -62,10 +68,12 @@ int main(void) {
             if (y > H - 22) break;
         }
 
-        char foot[24]; int fi = 0; const char *lbl = "tasks: ";
-        for (int k = 0; lbl[k]; k++) foot[fi++] = lbl[k];
-        if (count >= 10) foot[fi++] = '0' + count / 10;
-        foot[fi++] = '0' + count % 10; foot[fi] = 0;
+        long up = sys_uptime_ms() / 1000;                       /* system uptime, seconds */
+        char foot[44]; int fi = putint(foot, 0, count);
+        const char *a = " tasks    up "; for (int k = 0; a[k]; k++) foot[fi++] = a[k];
+        fi = putint(foot, fi, up / 60); foot[fi++] = 'm';
+        if (up % 60 < 10) foot[fi++] = '0';
+        fi = putint(foot, fi, up % 60); foot[fi++] = 's'; foot[fi] = 0;
         text(foot, 12, H - 20, 0x8890A0);
 
         sys_gfx_blit(FB);

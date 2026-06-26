@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1364) taskman — system uptime in the footer.** The footer now reads `N tasks    up XmYYs` (uptime from `sys_uptime_ms`), a small top-style touch alongside the live process list. **Verified:** in-guest — `4 tasks    up 0m18s`.
+
 > **(M1363) sysgraph — crisp kernel-font labels + a MB readout.** Now that `sys_font` exists (M1362), the monitor's labels render in the kernel's 8×16 console font instead of the crude per-app 3×5, and the RAM label shows the actual megabytes used/total (parsed from `/proc/meminfo` kB). **Verified:** in-guest — `CPU 49%` (green) and `RAM 27% 70/255M` (cyan) in crisp text above the live scrolling graphs.
 
 > **(M1362) taskman — a graphical Task Manager + a `sys_font` syscall.** The first gfx app to render REAL text. New `sys_font(buf,len)` syscall copies the kernel's 8×16 console font (`font_glyphs[128][16]`) to userspace, so any gfx app can now draw arbitrary text into its canvas (not just the crude per-app 3×5 font). `taskman` uses it for a live, auto-refreshing process list (from `sys_ps`) — PID, state and name per row, each line tinted by run-state (run=green, ready=cyan, blocked=amber, stopped=grey), with a task-count footer. **Verified:** in-guest — list in crisp 8×16 font; `[7] run Task Manager` green, `[6] block Shell` amber (nicely confirming the shell blocks on input, per [[perceptible-improvements-and-kvm]]/the M1361 idle fix). Launch `run taskman` or the Apps menu ("Task Manager"); `q`/Esc quits.
