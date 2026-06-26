@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1326) shell — colourise `lsblk` file listings by type.** `print_indented_ls` colours each FAT32-volume file entry's name by type (like `ls`) with the size metadata grey, completing the last list command. **Verified:** in-guest — `lsblk` shows `.SVG` magenta, `.JS` yellow, etc. (16 colourised shell surfaces — every list/status/info command + the prompt).
+
 > **(M1325) shell — colourise `hexdump` (offset grey, ASCII pane cyan).** Each hex-dump line shows the offset column grey, the hex bytes default, and the ASCII pane in cyan — like a modern hex viewer, so the ASCII column reads easily. **Verified:** in-guest — `hexdump hello.txt` → grey offsets + cyan ASCII (`Hello from a real file…`). (15 colourised shell surfaces.)
 
 > **(M1324) shell — colour `env`/`set` variable names (cyan).** Listing shell variables shows each NAME in cyan, the `=` grey, the value default — so `env`/`set` are easy to scan. **Verified:** in-guest — `env` → `foo` cyan in `foo=bar`. *(The shell colour pass now spans 14 surfaces; only `lsblk` — a complex scrolling multi-section format that can't be cleanly verified headless — is left.)*

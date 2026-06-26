@@ -622,6 +622,24 @@ static void print_firsttok_cyan(const char *buf) {
     }
 }
 
+/* Colour an indented "NAME  metadata" listing (lsblk's file entries): the name
+ * token by file type, the rest (size/etc.) grey (M1326). */
+static void print_indented_ls(const char *buf) {
+    char seg[200]; int i = 0;
+    while (buf[i]) {
+        int eol = i; while (buf[eol] && buf[eol] != '\n') eol++;
+        int ns = i; while (ns < eol && buf[ns] == ' ') ns++;     /* name start (after indent) */
+        int ne = ns; while (ne < eol && buf[ne] != ' ') ne++;    /* name end */
+        sys_setcolor(ls_color(buf + ns, ne - ns));               /* name token by file type */
+        { int n=0; for (int k=i;k<ne&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }   /* indent + name */
+        sys_setcolor(8);
+        { int n=0; for (int k=ne;k<eol&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); } /* metadata grey */
+        sys_setcolor(0);
+        if (buf[eol] == '\n') { print("\n"); eol++; }
+        i = eol;
+    }
+}
+
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
     do {
@@ -1943,7 +1961,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "lsblk")) {
             char buf[8192];                 /* block devices + each FAT32 volume's root files */
             long n = sys_lsblk(buf, sizeof(buf));
-            if (n > 0) { buf[n] = 0; print(buf); } else print("lsblk: no block devices\n");
+            if (n > 0) { buf[n] = 0; print_indented_ls(buf); } else print("lsblk: no block devices\n");
         } else if (streq(line, "mount")) {  /* list the read-only secondary-disk mounts (cd /diskN to browse) */
             char buf[2048];
             long n = sys_mounts(buf, sizeof(buf));
