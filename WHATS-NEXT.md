@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1422) imgview — set the image as wallpaper.** Pressing `w` in the image viewer sets the currently-shown image as the desktop wallpaper (`sys_setwall`, the same call the file manager's `w` uses). A natural integration — browse images, find one you like, make it the background. **Verified:** in-guest — viewing LOGO.SVG and pressing `w` filled the desktop with the OS-DEV logo; `make check` green.
+
 > **(M1421) gseq — a step sequencer.** A 16-step × 5-note grid you program by clicking cells; SPACE plays/stops a looping playhead that beeps the topmost active note in each column on the PC speaker (`sys_beep`), w/s change the tempo (shown in BPM), c clears, q quits. Pentatonic notes (A G E D C), beat markers every 4th column. Additive (own file). Launch `run gseq` or the Apps menu ("Sequencer"). **Verified:** in-guest — the grid + note labels rendered, a click lit a cell (purple C), STOPPED/100 bpm status; `make check` green.
 
 > **(M1420) gtodo — clear completed.** Added `c` to remove all done items at once (compact + save) — the one standard checklist operation still missing, so gtodo now does add/edit/toggle/delete/clear-done/persist. **Verified:** in-guest — added milk + eggs, marked milk done, `c` removed it leaving "[ ] eggs" (0/1); `make check` green.

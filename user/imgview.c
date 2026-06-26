@@ -81,7 +81,7 @@ int main(void) {
                 cap[p++] = ' '; cap[p++] = '['; putint(cap, &p, idx + 1); cap[p++] = '/'; putint(cap, &p, nimg); cap[p++] = ']';
                 cap[p] = 0;
                 text(cap, 8, IMGH + 5, 0xC8D0DE);
-                text("n/p  q:quit", W - 11 * 8 - 6, IMGH + 5, 0x707888);
+                text("n/p  w:wall  q:quit", W - 19 * 8 - 6, IMGH + 5, 0x707888);
             }
             sys_gfx_blit(FB);
         }
@@ -89,6 +89,7 @@ int main(void) {
         if (k == 'q' || k == 27) break;
         else if (nimg > 0 && (k == 'n' || k == ' ' || k == 0x14)) idx = (idx + 1) % nimg;
         else if (nimg > 0 && (k == 'p' || k == 0x13)) idx = (idx + nimg - 1) % nimg;
+        else if (k == 'w' && nimg > 0) sys_setwall(names[idx]);   /* set the current image as the desktop wallpaper (M1422) */
         int mx, my, b = sys_mouse(&mx, &my);                  /* click left half = prev, right half = next (M1397) */
         if ((b & 1) && !(prevb & 1) && mx >= 0 && nimg > 0) idx = (mx < W / 2) ? (idx + nimg - 1) % nimg : (idx + 1) % nimg;
         prevb = b;
