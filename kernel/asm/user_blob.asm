@@ -99,6 +99,7 @@ global threads_elf_start, threads_elf_end
 global robustfutex_elf_start, robustfutex_elf_end
 global overlay_elf_start, overlay_elf_end
 global pcwd_elf_start, pcwd_elf_end
+global hexedit_elf_start, hexedit_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -463,5 +464,9 @@ overlay_elf_end:
 pcwd_elf_start:
     incbin "build/pcwd.elf"
 pcwd_elf_end:
+
+hexedit_elf_start:
+    incbin "build/hexedit.elf"
+hexedit_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
