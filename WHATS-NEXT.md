@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1319) shell — highlight today in `cal` (cyan).** `cal` already MARKED today with a `>`; now `print_cal_week` colours today's cell **cyan** (dropping the `>`), so the current day stands out in the month grid — also applied by `cal -3` and `cal -y`. **Verified:** in-guest — `cal` shows the 26th in cyan among the green days.
+
 > **(M1318) shell — colour the `df` free-space figure (green).** The last uncoloured status command: `df` shows the free-KiB number in lime. With M1312-M1317 this completes the colour pass — every shell status/list command (`ls`/`tree`/`find`/`uptime`/`free`/`ps`/`df`) **and** the prompt are now colourised (8 surfaces). **Verified:** in-guest — `df` → the free figure renders lime.
 
 > **(M1317) shell — colour the `ps` STATE column by process state.** `print_ps_colored` colours each process row's STATE — **run lime, ready cyan, blocked/sleep yellow, stopped/zombie red** — leaving PID + NAME default, so process states read at a glance. **Verified:** in-guest — `ps` shows `run` lime + `ready` cyan. *(With M1312-M1316, the shell colour pass now spans the prompt, `ls`/`tree`/`find`, `uptime`/`free`, and `ps` — 7 surfaces.)*

@@ -292,6 +292,17 @@ static unsigned shroll(void) {
 }
 
 /* Print a month calendar for the current date (from the RTC). */
+/* Print one calendar week-line, colouring today's cell (marked '>') cyan (M1319). */
+static void print_cal_week(const char *line) {
+    for (int i = 0; line[i]; ) {
+        if (line[i] == '>') {                              /* today's cell ">dd" -> " dd" in cyan */
+            sys_setcolor(4);
+            char cell[4] = { ' ', line[i+1], line[i+2], 0 };
+            print(cell); sys_setcolor(0); i += 3;
+        } else { char c[2] = { line[i], 0 }; print(c); i++; }
+    }
+    print("\n");
+}
 static void cmd_cal_ym(int y, int m, int today) {   /* render month m (1-12) of year y; today=0 -> no highlight */
     if (m < 1 || m > 12) { print("cal: bad date\n"); return; }
 
@@ -315,9 +326,9 @@ static void cmd_cal_ym(int y, int m, int today) {   /* render month m (1-12) of 
         line[p++] = (d == today) ? '>' : ' ';
         line[p++] = (d < 10) ? ' ' : (char)('0' + d/10);
         line[p++] = (char)('0' + d%10);
-        if ((dow + d) % 7 == 0) { line[p] = 0; print(line); print("\n"); p = 0; }
+        if ((dow + d) % 7 == 0) { line[p] = 0; print_cal_week(line); p = 0; }
     }
-    if (p) { line[p] = 0; print(line); print("\n"); }
+    if (p) { line[p] = 0; print_cal_week(line); }
 }
 static void cmd_cal(void) {                          /* current month, today highlighted */
     char t[24];
