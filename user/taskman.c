@@ -126,7 +126,10 @@ int main(void) {
                             break;
                         }
                         if (cur_n < 40) { cur_pid[cur_n] = pid; cur_cpu[cur_n] = t; cur_n++; }
-                        char ms[12]; int mi = putint(ms, 0, rss * 4); ms[mi++] = 'K'; ms[mi] = 0;   /* RSS pages -> KiB */
+                        long kib = rss * 4; char ms[12]; int mi;             /* RSS pages -> KiB, human-readable */
+                        if (kib >= 1024) { mi = putint(ms, 0, kib / 1024); ms[mi++] = '.'; mi = putint(ms, mi, (kib % 1024) * 10 / 1024); ms[mi++] = 'M'; }
+                        else { mi = putint(ms, 0, kib); ms[mi++] = 'K'; }
+                        ms[mi] = 0;
                         text(ms, W - 52 - mi * 8, y, 0x90A0B0);                     /* right-aligned column */
                     }
                     char cs[8]; int ci = putint(cs, 0, pct); cs[ci++] = '%'; cs[ci] = 0;
