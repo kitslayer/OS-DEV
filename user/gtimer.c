@@ -26,8 +26,42 @@ static void chS(char c, int px, int py, int s, unsigned col) {
     unsigned u = (unsigned char)c; if (u >= 128) u = '?'; const unsigned char *g = &FONT[u * 16];
     for (int r = 0; r < 16; r++) for (int b = 0; b < 8; b++) if ((g[r] >> (7 - b)) & 1) fill(px + b * s, py + r * s, s, s, col);
 }
-static void textS(const char *t, int x, int y, int s, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, s, col); x += 8 * s; } }
+/* (textS retired in M1442 — the time now draws via gtextS with a mode-colour bloom) */
 static void text(const char *t, int x, int y, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, 1, col); x += 8; } }
+
+/* ---- instrument-panel UI kit (M1442; see gconv.c M1430). gtimer keeps its mode
+ * colours (cyan/green/amber/red) on the recessed phosphor readout. ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_DIM     0x6E827Fu
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, lo); fill(x, y, 1, h, lo); fill(x, y + h - 1, w, 1, hi); fill(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fill(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fill(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+static void gtextS(const char *t, int x, int y, int s, unsigned col, unsigned glow) {
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s + 1, y + 1, s, glow);
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s,     y,     s, col);
+}
 
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gtimer: gfx init failed\n"); return 1; }
@@ -58,22 +92,25 @@ int main(void) {
             psec = secs;
             int paused = !running && !done && rem > 0 && rem < set_ms;
             unsigned col = done ? 0xF05858 : running ? 0x5CE05C : paused ? 0xE8C040 : 0x50C8E0;
-            for (int i = 0; i < W * H; i++) FB[i] = 0x0B0D14;
+            unsigned glow = (col >> 1) & 0x7F7F7Fu;                 /* a dim halo of the mode colour */
+            vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);                  /* slate faceplate */
+            bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+            panel(8, 12, W - 16, 56);                               /* recessed readout */
 
             char b[8]; int i = 0; int mm = secs / 60, ss = secs % 60;
             b[i++] = '0' + (mm / 10) % 10; b[i++] = '0' + mm % 10; b[i++] = ':'; b[i++] = '0' + ss / 10; b[i++] = '0' + ss % 10; b[i] = 0;
-            textS(b, (W - 5 * 24) / 2, 24, 3, col);                  /* 5 glyphs * 8 * scale-3 = 120 px */
+            gtextS(b, (W - 5 * 24) / 2, 16, 3, col, glow);          /* digits glow in the mode colour */
 
-            int cx = W / 2, cy = 132, R = 44;                        /* ring whose arc shrinks as time runs out */
-            for (int a = 0; a < 360; a += 4) putpx(cx + R * isin(a) / 1024, cy - R * icos(a) / 1024, 0x283040);
+            int cx = W / 2, cy = 140, R = 44;                       /* ring whose arc shrinks as time runs out */
+            for (int a = 0; a < 360; a += 4) putpx(cx + R * isin(a) / 1024, cy - R * icos(a) / 1024, 0x33414Au);
             int len = set_ms > 0 ? (int)((long)cur * 360 / set_ms) : 0;
             for (int a = 0; a < len; a += 4) { int x = cx + R * isin(a) / 1024, y = cy - R * icos(a) / 1024; fill(x - 2, y - 2, 4, 4, col); }
 
-            const char *st = done ? "DONE!    r:reset  q:quit"
-                           : running ? "RUNNING  space:pause  r:reset"
-                           : paused ? "PAUSED   space:resume  r:reset"
-                           : "SET      w/s:+-min  space:start";
-            text(st, 8, H - 16, 0x707888);
+            const char *st = done ? "DONE!    r reset  q quit"
+                           : running ? "RUNNING  space pause  r reset"
+                           : paused ? "PAUSED   space resume  r reset"
+                           : "SET      w/s +-min  space start";
+            text(st, 8, H - 16, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }

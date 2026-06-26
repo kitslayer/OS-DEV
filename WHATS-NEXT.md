@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1442) Visual refresh — gtimer (instrument-panel countdown).** The countdown timer now reads from a recessed phosphor screen over a slate faceplate, with the shrinking-arc ring kept — and crucially its meaningful **mode colours preserved** (cyan = set, green = running, amber = paused, red = done) as the glowing readout colour rather than forced amber. Pairs with its sibling gsw. **Verified:** in-guest — default `05:00` in cyan with the full ring; `make check` green. Nine tool/readout apps now share the instrument-panel look.
+
 > **(M1441) Visual refresh — gsw (instrument-panel stopwatch).** The stopwatch now reads its big `MM:SS.t` time from a recessed **amber-phosphor readout** (scanlines + bloom) over a slate faceplate, with the sub-second sweep hand lit green while running and dimmed when stopped. The uptime-based timing is untouched. **Verified:** in-guest — started it, showed `00:02.9` in amber with the green sweep hand; `make check` green.
 
 > **(M1440) Visual refresh — gcolor (instrument-panel colour picker).** Slate faceplate, the `#RRGGBB` value now an **amber readout** (matching the converters/calculator), the preview swatch in a recessed bevel frame, the RGB sliders recessed with the active channel's label lit green — while keeping their functional colour gradients. This completes a **cohesive instrument-panel look across the seven tool apps**: gconv, gbase, gpass, gclip, gtodo, gcalc, gcolor. **Verified:** in-guest — default teal swatch with `#20B2AA` in amber, R channel lit; `make check` green.
