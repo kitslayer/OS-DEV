@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1417) gclip — a clipboard viewer.** Shows the system clipboard (`sys_clip_get`) live — word-wrapped with a byte count — so you can see what the editor, gpass, etc. copied; it polls a few times a second and redraws on change. c clears the clipboard (`sys_clip_set("",0)`), q quits. Additive (own file). Launch `run gclip` or the Apps menu ("Clipboard"). **Verified:** in-guest end-to-end — generated a password in gpass, copied it (c), launched gclip → it showed `+MVNRwxW9$=TDXFN` / "16 bytes" (also confirms gpass's copy); `make check` green.
+
 > **(M1416) gpass — a password generator.** Generates a random password from a mixed charset (upper/lower/digits/symbols); SPACE/r makes a new one, w/s change the length (6–32), c copies it to the system clipboard (`sys_clip_set` — middle-click pastes it elsewhere), q quits. A 64-bit LCG seeded from the uptime supplies the randomness. Additive (own file). Launch `run gpass` or the Apps menu ("Password Gen"). **Verified:** in-guest — a 16-char mixed password (`+MVNRwxW9$=TDXFN`) generated; w grew it to a fresh 17-char one; `make check` green.
 
 > **(M1415) gconv — a Volume category.** Added Volume (L → mL, gal, cup) as the 6th category, so the converter now covers the standard set (Length, Weight, Temperature, Speed, Area, Volume). Clean table addition (`cat % 6`). **Verified:** in-guest — 1 L → 1000 mL / 0.2642 gal / 4.2268 cup, correct; `make check` green.
