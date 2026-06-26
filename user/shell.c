@@ -15,6 +15,8 @@
 #include "shbrace.h"  /* expand_braces(): {a,b}/{1..N} brace expansion, host-tested by tests/shbrace */
 #include "shquote.h"  /* sh_quote_pass()/sh_unprot_buf(): "..." '...' quoting, host-tested by tests/shquote */
 
+static void perr(const char *s);   /* print an error label in red (defined below); forward-declared for early use (M1379) */
+
 static void jobtest_sigint(int s) { (void)s; sys_exit(42); }   /* job-control demo: a group SIGINT exits the child 42 (M1176) */
 static volatile int g_jctid;                                   /* set_tid_address join target (M1226) */
 static void join_thread_fn(void *arg) {                        /* registers clear_child_tid, lives a moment, exits */
@@ -173,7 +175,7 @@ static char *slurp(const char *name, long *len) {
  * $(...). */
 static void run_js_inline(const char *code) {
     char *out = malloc(1u << 20);                /* 1MB output buffer */
-    if (!out) { print("js: out of memory\n"); return; }
+    if (!out) { perr("js: out of memory\n"); return; }
     sys_js(code, out, (1u << 20) - 1);
     out[(1u << 20) - 1] = 0;
     print(out);
@@ -920,7 +922,7 @@ static int run_command(char *line, char *cwd) {
                 buf[n] = 0;
                 int cap = 1; for (long i = 0; i < n; i++) if (buf[i] == '\n') cap++;   /* one slot per line (was fixed 1024) */
                 int *starts = malloc((unsigned long)cap * sizeof(int));
-                if (!starts) print("tac: out of memory\n");
+                if (!starts) perr("tac: out of memory\n");
                 else {
                     int ns = 0; starts[ns++] = 0;
                     for (long i = 0; i < n; i++) if (buf[i] == '\n' && ns < cap) starts[ns++] = (int)(i + 1);
@@ -1028,7 +1030,7 @@ static int run_command(char *line, char *cwd) {
                 buf[n] = '\0';
                 int cap = 1; for (long i = 0; i < n; i++) if (buf[i] == '\n') cap++;   /* one slot per line (was fixed at 128) */
                 char **lns = malloc((unsigned long)cap * sizeof(char *));
-                if (!lns) print("sort: out of memory\n");
+                if (!lns) perr("sort: out of memory\n");
                 else {
                     int nl = 0; char *p = buf;
                     while (*p && nl < cap) {                       /* split into lines */
@@ -1251,7 +1253,7 @@ static int run_command(char *line, char *cwd) {
             if (have) {
                 char *out = malloc(1u << 20);            /* 1MB JS output buffer (was 8KB) */
                 if (out) { sys_js(jsrc, out, (1u << 20) - 1); out[(1u << 20) - 1] = 0; print(out); free(out); }
-                else print("js: out of memory\n");
+                else perr("js: out of memory\n");
             }
             free(filesrc);                               /* free(NULL) safe */
         } else if (streq(line, "beep")) {

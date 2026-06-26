@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1380) shell — out-of-memory errors in red.** Routed the `js`/`tac`/`sort` "out of memory" errors through `perr` (red). One use (`js`, early in the file) sits above `perr`'s definition, so added a forward declaration after the includes — the build caught the use-before-definition and it was fixed before commit. The ~75 systems-*test* error messages stay green (dev-only, rarely seen). **Verified:** build clean.
+
 > **(M1379) shell — file-not-found errors in red.** Added a `perr()` helper (red print) and routed all 28 `CMD: no such file` error labels through it. Crucially, `perr(s)` is a **drop-in** for `print(s)` — one statement, so even brace-less `else perr(...)` is safe (no repeat of the M1378-adjacent brace-less-`else` trap, per [[verify-behavior-bulk-edits]]). A mistyped filename now flags red instead of blending into the green output. **Verified:** in-guest — `cat nope` → red `cat: no such file:` + the name.
 
 > **(M1378) shell — the "unknown command" error in red.** The catch-all error you hit on a typo now prints red (was default green), so a mistyped command stands out instead of blending into normal output. **Verified:** in-guest — `xyzzy` → red `unknown command: xyzzy  (try 'help')`.
