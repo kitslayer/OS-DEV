@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1448) Visual refresh — sysgraph (recessed monitor screen).** The full-window system monitor gets the recessed-screen treatment to match the family: faint CRT scanlines, a recessed bevel frame, and a green power LED, with its scrolling CPU (green) / RAM (cyan) area graphs and load-tinted labels kept. **Verified:** in-guest — CPU 3% / RAM 27% (71/255M) graphs scrolling on the dark recessed screen with the LED; `make check` green. Fifteen apps refreshed.
+
 > **(M1447) Visual refresh — gauges (instrument cluster).** A gauge cluster genuinely belongs on a faceplate, so this is a natural fit (not over-application): a slate faceplate, a **"SYSTEM LOAD" silkscreen header** + amber rule + green LED, with the two semicircular CPU/RAM gauges keeping their meaningful green/amber/red zone arcs, white needles and amber hubs. **Verified:** in-guest — CPU 49% / RAM 27% on the slate dashboard with the header + LED; `make check` green. Fourteen apps refreshed.
 
 > **(M1446) Visual refresh — gmetro (metronome, minimal touch).** The metronome's layout is dominated by its swinging pendulum, so a recessed screen doesn't fit — a minimal touch instead: a slate gradient background, a window bevel, and the **BPM readout in amber** (matching the family) while the pendulum, beat-flash bob and swing arc are untouched. **Verified:** in-guest — pendulum mid-swing with `120` BPM glowing amber; `make check` green. Thirteen small apps now share the instrument palette; the pure visualizers (gfire, gauges, sysgraph, gseq) and games keep their own identities.

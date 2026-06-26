@@ -29,6 +29,23 @@ static void gch(char c, int px, int py, unsigned col) {        /* one 8x16 glyph
 }
 static void gtext(const char *t, int x, int y, unsigned col) { for (int i = 0; t[i]; i++) { gch(t[i], x, y, col); x += 8; } }
 
+/* ---- instrument-panel UI kit (M1448; see gconv.c M1430). A full-window monitor, so it
+ * gets the recessed-screen treatment: scanlines, a recessed bevel frame, a power LED.
+ * (sysgraph already has a `panel()` graph-drawer, so no panel() here.) ---- */
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_LED     0x46E0A0u
+static void fillr(int x, int y, int w, int h, unsigned c) { for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) putpx(x + i, y + j, c); }
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fillr(x, y, w, 1, lo); fillr(x, y, 1, h, lo); fillr(x, y + h - 1, w, 1, hi); fillr(x + w - 1, y, 1, h, hi);
+}
+static void led(int x, int y) {
+    fillr(x, y, 9, 9, C_BEZLO); fillr(x + 1, y + 1, 7, 7, 0x1A6E50u);
+    fillr(x + 2, y + 2, 5, 5, C_LED); putpx(x + 3, y + 3, 0xCFFFE8u);
+}
+
 /* read a whole /proc file, NUL-terminated; returns length */
 static int slurp(const char *p, char *buf, int max) {
     long n = sys_readfile(p, buf, max - 1); if (n < 0) n = 0; buf[n] = 0; return (int)n;
@@ -98,7 +115,8 @@ int main(void) {
 
         cpu[head] = cp; ram[head] = rp; head = (head + 1) % NS; if (count < NS) count++;
 
-        for (int i = 0; i < W * H; i++) FB[i] = 0x0C0C14;       /* dark background */
+        for (int i = 0; i < W * H; i++) FB[i] = C_SCREEN;       /* recessed monitor screen (M1448) */
+        for (int sy = 3; sy < H; sy += 3) fillr(1, sy, W - 2, 1, C_SCANLN);   /* faint scanlines */
         panel(cpu, head, count, 26, 90, 0x46E05A, 0x16401E);    /* CPU: green crest, dim-green fill */
         panel(ram, head, count, 142, 90, 0x46C0E0, 0x16384A);   /* RAM: cyan crest, dim-cyan fill  */
         for (int x = 0; x < W; x++) putpx(x, 122, 0x202030);    /* divider */
@@ -111,6 +129,8 @@ int main(void) {
         lab[n++] = ' '; n = putu(lab, n, mu / 1024); lab[n++] = '/'; n = putu(lab, n, mt / 1024); lab[n++] = 'M'; lab[n] = 0;
         gtext(lab, 8, 124, rcol);
 
+        bevel_dn(0, 0, W, H, C_BEZHI, C_BEZLO);                 /* recessed monitor frame */
+        led(W - 22, 6);                                         /* power LED */
         sys_gfx_blit(FB);
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
