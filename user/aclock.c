@@ -33,6 +33,28 @@ static int icos(int d) { return isin(d + 90); }
 static unsigned *FB;
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
 
+/* ---- instrument-panel UI kit (M1445; see gconv.c M1430). Light touch: aclock keeps its
+ * round analog face but joins the clock family — slate corners, a window bevel, and its
+ * digital sub-readout on a recessed amber panel. ---- */
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_AMBER   0xFFB23Eu
+#define C_DIM     0x90A8C8u      /* the existing date blue-grey, kept */
+static void fillr(int x, int y, int w, int h, unsigned c) { for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) putpx(x + i, y + j, c); }
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fillr(x, y, w, 1, hi); fillr(x, y, 1, h, hi); fillr(x, y + h - 1, w, 1, lo); fillr(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fillr(x, y, w, 1, lo); fillr(x, y, 1, h, lo); fillr(x, y + h - 1, w, 1, hi); fillr(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fillr(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fillr(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+
 /* Bresenham line */
 static void line(int x0, int y0, int x1, int y1, unsigned c) {
     int dx = x1 - x0, dy = y1 - y0;
@@ -71,7 +93,7 @@ static void drawtime(const char *tb) {
     int s = 4, adv = 4 * s, x = (W - (8 * adv - s)) / 2, y = 248;
     for (int i = 11; i <= 18; i++) {
         char ch = tb[i]; int idx = (ch >= '0' && ch <= '9') ? ch - '0' : (ch == ':') ? 10 : -1;
-        if (idx >= 0) drawglyph(idx, x, y, s, 0x50E050);
+        if (idx >= 0) drawglyph(idx, x, y, s, C_AMBER);
         x += adv;
     }
 }
@@ -108,7 +130,7 @@ int main(void) {
             for (int x = 0; x < W; x++) {
                 int dx = x - CX, dy = y - CY, d2 = dx * dx + dy * dy;
                 unsigned c;
-                if (d2 > R * R)                         c = 0x0A0A16;     /* background */
+                if (d2 > R * R)                         c = 0x1C2329;     /* slate background (M1445) */
                 else if (d2 >= (R - 3) * (R - 3))       c = 0xE8E8F0;     /* rim */
                 else                                    c = 0x161622;     /* face */
                 FB[y * W + x] = c;
@@ -142,7 +164,9 @@ int main(void) {
             for (int x = -4; x <= 4; x++)
                 if (x * x + y * y <= 16) putpx(CX + x, CY + y, 0xFFD040);
 
-        drawtime(tb);                                        /* digital HH:MM:SS readout below the dial */
+        bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);              /* window frame (M1445) */
+        panel(8, 244, W - 16, 50);                           /* recessed sub-readout screen */
+        drawtime(tb);                                        /* digital HH:MM:SS readout (amber) below the dial */
         drawdate(tb);                                        /* and the date below that */
         sys_gfx_blit(FB);
 
