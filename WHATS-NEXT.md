@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1412) Apps menu — 5 columns (was 4).** The campaign's ~16 new apps grew the launcher to 74 entries, which at 4 columns was 460 px tall (past the comfortable ~412 px). Bumping `MENU_COLS` to 5 drops it to ~364 px (15 rows) at 750 px wide (well within 1280). One-line change (the render is parameterised on `MENU_COLS`). **Verified:** in-guest via F9 — all 74 entries render across 5 columns, no clipping; `make check` green.
+
 > **(M1411) gbase — a number-base converter.** Type a decimal integer and it shows it live in hexadecimal, octal and binary — a genuinely useful dev tool on a computer. Pure integer maths (`tobase()`). Digits type, Backspace deletes, c clears, q quits. Additive (own file). Launch `run gbase` or the Apps menu ("Base Convert"). **Verified:** in-guest — 255 → `0xFF` / `0o377` / `0b11111111`, all correct; `make check` green.
 
 > **(M1410) gconv — convert FROM any unit.** The converter could only take input in each category's base unit; now `u` (or a click) cycles the *input* unit too, so you can convert from feet, °F, mph, etc. The base is treated as a unit (factor 1.0000) and every multiplicative conversion is `out = V × factor_j / factor_i`; temperature routes through Celsius (`toC`/`fromC`). **Verified:** in-guest — 10 ft → 3.048 m / 120 in / 304.8 cm and 212 °F → 100 °C / 373.15 K, both correct; `make check` green.

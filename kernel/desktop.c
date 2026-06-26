@@ -154,14 +154,14 @@ static const struct menu_item menu[] = {
     { "About", KIND_ABOUT, 0 },
     { "Restart", KIND_REBOOT, 0 }, { "Shut Down", KIND_POWEROFF, 0 },
 };
-/* The Apps menu is laid out in 4 columns rendered upward from the taskbar, so
- * MENU_PERCOL*MENU_ITEM_H must fit the screen height (with 67 entries that is
- * ceil(67/4)*24+4 = 412px << 734); 4*150 = 600px wide << 1280. That holds
- * ~4*30 = 120 entries before the per-column height clips. */
+/* The Apps menu is laid out in 5 columns rendered upward from the taskbar, so
+ * MENU_PERCOL*MENU_ITEM_H must fit the screen height (with 74 entries that is
+ * ceil(74/5)*24+4 = 364px << 734); 5*150 = 750px wide << 1280. That holds
+ * ~5*30 = 150 entries before the per-column height clips. */
 #define MENU_N      (int)(sizeof(menu) / sizeof(menu[0]))
 #define MENU_W      150
 #define MENU_ITEM_H 24
-#define MENU_COLS   4
+#define MENU_COLS   5
 #define MENU_PERCOL ((MENU_N + MENU_COLS - 1) / MENU_COLS)
 #define TB_CHIPW    124                 /* taskbar window-chip width */
 #define TB_CHIPGAP  6
