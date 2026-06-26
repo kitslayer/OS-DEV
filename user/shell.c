@@ -607,6 +607,20 @@ static void helpline(const char *s) {
         print(lab); sys_setcolor(0); print(s + c + 1);
     } else print(s);
 }
+/* Print a listing colouring the first token of each line cyan (M1323, for mount). */
+static void print_firsttok_cyan(const char *buf) {
+    char seg[200]; int i = 0;
+    while (buf[i]) {
+        int eol = i; while (buf[eol] && buf[eol] != '\n') eol++;
+        int p = i; while (p < eol && buf[p] == ' ') p++;
+        int t = p; while (p < eol && buf[p] != ' ') p++;
+        { int n=0; for (int k=i;k<t&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }
+        sys_setcolor(4); { int n=0; for (int k=t;k<p&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); } sys_setcolor(0);
+        { int n=0; for (int k=p;k<eol&&n<199;k++) seg[n++]=buf[k]; seg[n]=0; print(seg); }
+        if (buf[eol]=='\n') { print("\n"); eol++; }
+        i = eol;
+    }
+}
 
 static int run_command(char *line, char *cwd) {
     g_status = 0;                          /* assume success; failure paths set $? = 1 */
@@ -1931,7 +1945,7 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "mount")) {  /* list the read-only secondary-disk mounts (cd /diskN to browse) */
             char buf[2048];
             long n = sys_mounts(buf, sizeof(buf));
-            if (n > 0) { buf[n] = 0; print(buf); print("  (cd into one to browse, e.g. cd /disk2)\n"); }
+            if (n > 0) { buf[n] = 0; print_firsttok_cyan(buf); print("  (cd into one to browse, e.g. cd /disk2)\n"); }
             else print("mount: no disk volumes\n");
         } else if (startswith(line, "losetup ")) {  /* mount a FAT/ext2 image FILE as a loop block device */
             const char *f = line + 8; while (*f == ' ') f++;
