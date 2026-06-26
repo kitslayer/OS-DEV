@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1338) docs — README showcase reflects the colourisation.** The headline blurb now describes the fully-colourised shell + apps (filenames by type, `ps`/`df`/`free` status with usage bars, git-style coloured `diff`s, the Calendar/Forth, a `neofetch` summary) instead of a vague "colour text", so the project's front page reflects this session's work.
+
 > **(M1337) Forth app — colourised the REPL.** The in-guest Forth interpreter now shows its banner title cyan (help text grey), the `ok>` prompt cyan, the ` ok` success in lime, unknown-word errors (`forth: ?`) red, `^C` interrupts amber, and `.`/`.s` numeric output cyan — matching the shell's terminal-colour theme. **This completes colour coverage of every user-facing text app.** **Verified:** in-guest screenshot — `5` → `ok` lime, `.s` → `<1> 5` cyan, prompt + banner cyan.
 
 > **(M1336) Calendar app — colourised (matching the shell's `cal`).** The GUI Calendar now renders the month title in cyan, the weekday header with weekend columns (Su/Sa) amber + weekdays light-blue, today's cell cyan (keeping its `[brackets]`), weekend day-cells amber, and the key hint grey — consistent with the shell's coloured `cal`. **Verified:** in-guest screenshot — June 2026 with `[26]` cyan and the Su/Sa columns amber.
