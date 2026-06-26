@@ -23,6 +23,50 @@ static void chS(char c, int px, int py, int s, unsigned col) { unsigned u = (uns
 static void textS(const char *t, int x, int y, int s, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, s, col); x += 8 * s; } }
 static void text(const char *t, int x, int y, unsigned col) { for (int i = 0; t[i]; i++) { chS(t[i], x, y, 1, col); x += 8; } }
 
+/* ---- instrument-panel UI kit (M1431; see gconv.c M1430) ---- */
+#define C_FACE_T  0x232D33u
+#define C_FACE_B  0x161D21u
+#define C_BEZHI   0x3C4A50u
+#define C_BEZLO   0x0E1316u
+#define C_SCREEN  0x0A0F0Cu
+#define C_SCANLN  0x0D140Fu
+#define C_AMBER   0xFFB23Eu
+#define C_AMBERLO 0x7A521Au
+#define C_LABEL   0xC6D0CCu
+#define C_DIM     0x6E827Fu
+#define C_LED     0x46E0A0u
+
+static void vgrad(int x, int y, int w, int h, unsigned t, unsigned b) {
+    for (int r = 0; r < h; r++) {
+        int R = ((int)(t >> 16 & 0xFF) * (h - 1 - r) + (int)(b >> 16 & 0xFF) * r) / (h - 1);
+        int G = ((int)(t >> 8  & 0xFF) * (h - 1 - r) + (int)(b >> 8  & 0xFF) * r) / (h - 1);
+        int B = ((int)(t       & 0xFF) * (h - 1 - r) + (int)(b       & 0xFF) * r) / (h - 1);
+        fill(x, y + r, w, 1, ((unsigned)R << 16) | ((unsigned)G << 8) | (unsigned)B);
+    }
+}
+static void bevel_up(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, hi); fill(x, y, 1, h, hi); fill(x, y + h - 1, w, 1, lo); fill(x + w - 1, y, 1, h, lo);
+}
+static void bevel_dn(int x, int y, int w, int h, unsigned hi, unsigned lo) {
+    fill(x, y, w, 1, lo); fill(x, y, 1, h, lo); fill(x, y + h - 1, w, 1, hi); fill(x + w - 1, y, 1, h, hi);
+}
+static void panel(int x, int y, int w, int h) {
+    fill(x, y, w, h, C_SCREEN);
+    for (int r = 3; r < h - 1; r += 3) fill(x + 1, y + r, w - 2, 1, C_SCANLN);
+    bevel_dn(x, y, w, h, C_BEZHI, C_BEZLO);
+}
+static void led(int x, int y) {
+    fill(x, y, 9, 9, C_BEZLO); fill(x + 1, y + 1, 7, 7, 0x1A6E50u);
+    fill(x + 2, y + 2, 5, 5, C_LED); putpx(x + 3, y + 3, 0xCFFFE8u);
+}
+static void pill(int x, int y, int w, const char *t, unsigned txt) {
+    fill(x, y, w, 18, 0x2C383Eu); bevel_up(x, y, w, 18, C_BEZHI, C_BEZLO); text(t, x + 8, y + 1, txt);
+}
+static void gtextS(const char *t, int x, int y, int s, unsigned col, unsigned glow) {
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s + 1, y + 1, s, glow);
+    for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s,     y,     s, col);
+}
+
 static int digval(int c) { if (c >= '0' && c <= '9') return c - '0'; if (c >= 'a' && c <= 'f') return c - 'a' + 10; if (c >= 'A' && c <= 'F') return c - 'A' + 10; return -1; }
 /* unsigned long -> string in `base` (2..16), no leading zeros */
 static void tobase(unsigned long v, int base, char *out) {
@@ -48,23 +92,28 @@ int main(void) {
         else { int dv = digval(k); if (dv >= 0 && dv < ibase && elen < 16) { entry[elen++] = (char)k; entry[elen] = 0; dirty = 1; } }
 
         if (dirty) {
-            for (int i = 0; i < W * H; i++) FB[i] = 0x121620;
-            text("Base Converter", 12, 8, 0x8FD0FF);
-            for (int x = 8; x < W - 8; x++) putpx(x, 30, 0x2A3040);
+            vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);                 /* slate faceplate */
+            bevel_up(0, 0, W, H, C_BEZHI, C_BEZLO);
+            text("BASE CONVERTER", 14, 10, C_LABEL);
+            fill(14, 27, 116, 2, C_AMBERLO);
+            led(W - 24, 11);
+            const char *ibn = ibase == 10 ? "DEC INPUT" : ibase == 16 ? "HEX INPUT" : "BIN INPUT";
+            pill(14, 38, 9 * 8 + 16, ibn, C_LED);
 
             unsigned long v = 0; for (int i = 0; i < elen; i++) v = v * (unsigned)ibase + digval(entry[i]);
-            textS(elen ? entry : "0", 16, 40, 3, 0x6CF09A);       /* the value as typed, large */
-            const char *ibn = ibase == 10 ? "dec input" : ibase == 16 ? "hex input" : "bin input";
-            text(ibn, 16 + (elen ? elen : 1) * 24 + 16, 58, 0x808A9A);
+            textS(elen ? entry : "0", 14, 60, 2, C_LABEL);         /* the value you typed, white */
 
             char dc[24], hx[68], bn[68], oc[68];
             tobase(v, 10, dc); tobase(v, 16, hx); tobase(v, 2, bn); tobase(v, 8, oc);
-            text("DEC", 16, 102, 0xF0C060);                 text(dc, 80, 102, 0xE0E8F4);
-            text("HEX", 16, 126, 0xF0C060); text("0x", 64, 126, 0x808A9A); text(hx, 80, 126, 0xE0E8F4);
-            text("OCT", 16, 150, 0xF0C060); text("0o", 64, 150, 0x808A9A); text(oc, 80, 150, 0xE0E8F4);
-            text("BIN", 16, 174, 0xF0C060); text("0b", 64, 174, 0x808A9A); text(bn, 80, 174, 0xE0E8F4);
+            int sx = 12, sy = 88, sw = W - 24, sh = H - 88 - 22;   /* recessed amber readout */
+            panel(sx, sy, sw, sh);
+            int lx = sx + 12, vx = sx + 76, y = sy + 14;
+            text("DEC", lx, y, C_AMBERLO);                                gtextS(dc, vx, y, 1, C_AMBER, C_AMBERLO); y += 24;
+            text("HEX", lx, y, C_AMBERLO); text("0x", vx - 16, y, C_AMBERLO); gtextS(hx, vx, y, 1, C_AMBER, C_AMBERLO); y += 24;
+            text("OCT", lx, y, C_AMBERLO); text("0o", vx - 16, y, C_AMBERLO); gtextS(oc, vx, y, 1, C_AMBER, C_AMBERLO); y += 24;
+            text("BIN", lx, y, C_AMBERLO); text("0b", vx - 16, y, C_AMBERLO); gtextS(bn, vx, y, 1, C_AMBER, C_AMBERLO);
 
-            text("type a number   i: input base   q: quit", 12, H - 16, 0x707888);
+            text("type a number    i input base    q quit", 14, H - 14, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }
