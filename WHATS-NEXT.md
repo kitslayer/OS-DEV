@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1365) Welcome screen — surface the new graphical apps.** The boot Welcome window's "try" list now points to the session's new gfx apps — `- Clock, Monitor, Tasks, 60+ more` — for discoverability (aclock/sysgraph/taskman). **Verified:** in-guest — renders in the Welcome panel with no overflow; `make check` green.
+
 > **(M1364) taskman — system uptime in the footer.** The footer now reads `N tasks    up XmYYs` (uptime from `sys_uptime_ms`), a small top-style touch alongside the live process list. **Verified:** in-guest — `4 tasks    up 0m18s`.
 
 > **(M1363) sysgraph — crisp kernel-font labels + a MB readout.** Now that `sys_font` exists (M1362), the monitor's labels render in the kernel's 8×16 console font instead of the crude per-app 3×5, and the RAM label shows the actual megabytes used/total (parsed from `/proc/meminfo` kB). **Verified:** in-guest — `CPU 49%` (green) and `RAM 27% 70/255M` (cyan) in crisp text above the live scrolling graphs.

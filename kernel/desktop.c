@@ -296,7 +296,7 @@ static void draw_content(const window_t *w, int focused) {
             "- Browser: the real web over HTTPS + JS",
             "- Shell: scriptable (functions, loops, $())",
             "- Editor: undo/redo, find & replace",
-            "- 60+ apps, games and demos", "",
+            "- Clock, Monitor, Tasks, 60+ more", "",
             "Drag the title bar or corner to move.",
             "F9 = Apps menu     F1 = all shortcuts" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) {           /* colourised intro (M1333) */
