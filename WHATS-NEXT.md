@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1428) Sequencer — persistent patterns.** gseq now saves its 16×5 grid to SEQ.DAT on every edit (toggle / clear) and reloads it on launch, so a beat survives across runs — like gtodo's to-do list. **Verified:** in-guest with the mouse harness — clicked a cell (E·step0, saved), then on a *fresh boot* clicked a second cell; the snap shows both the restored E cell and the new C cell, proving load + save. `make check` green.
+
 > **(M1427) File manager — a status footer.** The Files window now shows a footer with the entry count and total size (e.g., "135 items, 51873 KB"); one list row was reserved for it. Completes the file manager's status display. **Verified:** in-guest — the boot Files window shows "135 items, 51873 KB" (135 matches the disk's file count); `make check` green.
 
 > **(M1426) File manager — sort by name / size / date.** The Files window listed entries in raw disk order; now `o` cycles the sort (name A–Z → size largest-first → date newest-first, directories always first), shown in the header (`o:sort=…`). All listing goes through one new `flist()` helper (vfs_list + insertion sort) used at every call site, so the render and key handler stay consistent. **Verified:** in-guest — the boot Files window now lists alphabetically (240P.NES, 8BALL.HTM, ALIGN, ANCHOR, ANIM.GIF, APP, …) instead of disk order; `make check` green.

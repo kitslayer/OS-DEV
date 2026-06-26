@@ -4,7 +4,8 @@
  * A 16-step x 5-note grid you program by clicking cells; SPACE plays/stops a
  * looping playhead that beeps the topmost active note in each column on the PC
  * speaker (sys_beep), w/s change the tempo, c clears, q/Esc quits. Pentatonic
- * notes (A G E D C). No FPU.
+ * notes (A G E D C). No FPU. The pattern is saved to SEQ.DAT on every edit and
+ * reloaded on launch (M1428), so a beat survives across runs.
  *
  * Launch: `run gseq` from the shell, or the Apps menu ("Sequencer").
  */
@@ -32,11 +33,29 @@ static void ch(char c, int px, int py, unsigned col) { unsigned u = (unsigned ch
 static void text(const char *s, int x, int y, unsigned col) { for (int i = 0; s[i]; i++) { ch(s[i], x, y, col); x += 8; } }
 static void beepstep(int s) { for (int r = 0; r < ROWS; r++) if (cells[s][r]) { sys_beep(FREQ[r], 55); return; } }
 
+static const char *FNAME = "SEQ.DAT";
+static void seq_save(void) {                              /* 16 lines of 5 bits */
+    char buf[STEPS * (ROWS + 1)]; int p = 0;
+    for (int s = 0; s < STEPS; s++) { for (int r = 0; r < ROWS; r++) buf[p++] = '0' + cells[s][r]; buf[p++] = '\n'; }
+    sys_writefile(FNAME, buf, p);
+}
+static void seq_load(void) {
+    char buf[256]; long n = sys_readfile(FNAME, buf, sizeof buf - 1);
+    if (n <= 0) return; buf[n] = 0;
+    int i = 0;
+    for (int s = 0; s < STEPS && i < n; s++) {
+        for (int r = 0; r < ROWS && i < n && buf[i] != '\n'; r++) { cells[s][r] = (buf[i] == '1'); i++; }
+        while (i < n && buf[i] != '\n') i++;
+        if (i < n) i++;
+    }
+}
+
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gseq: gfx init failed\n"); return 1; }
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
     if (!FB || sys_font(FONT, sizeof FONT) < 0) { print("gseq: init failed\n"); return 1; }
 
+    seq_load();                                            /* restore the saved pattern */
     int playing = 0, step = 0, prevb = 0, interval = 150, dirty = 1;
     long last = 0;
     for (;;) {
@@ -68,14 +87,14 @@ int main(void) {
         int mx, my, b = sys_mouse(&mx, &my);                   /* click a cell to toggle it */
         if ((b & 1) && !(prevb & 1) && mx >= X0 && my >= Y0) {
             int c = (mx - X0) / CW, r = (my - Y0) / CW;
-            if (c >= 0 && c < STEPS && r >= 0 && r < ROWS) { cells[c][r] ^= 1; dirty = 1; }
+            if (c >= 0 && c < STEPS && r >= 0 && r < ROWS) { cells[c][r] ^= 1; seq_save(); dirty = 1; }
         }
         prevb = b;
 
         int k = sys_pollkey();
         if (k == 'q' || k == 27) break;
         else if (k == ' ') { playing = !playing; if (playing) { step = 0; last = now; beepstep(0); } dirty = 1; }
-        else if (k == 'c' || k == 'C') { for (int c = 0; c < STEPS; c++) for (int r = 0; r < ROWS; r++) cells[c][r] = 0; dirty = 1; }
+        else if (k == 'c' || k == 'C') { for (int c = 0; c < STEPS; c++) for (int r = 0; r < ROWS; r++) cells[c][r] = 0; seq_save(); dirty = 1; }
         else if ((k == 'w' || k == 0x11) && interval > 60) { interval -= 20; dirty = 1; }
         else if ((k == 's' || k == 0x12) && interval < 400) { interval += 20; dirty = 1; }
         sys_sleep(playing ? 18 : 60);
