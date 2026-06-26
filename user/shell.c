@@ -699,7 +699,7 @@ static int run_command(char *line, char *cwd) {
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
-            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
+            print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
             helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  rawkey(TTY raw mode)  jobtest(killpg process group)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
@@ -4442,6 +4442,48 @@ static int run_command(char *line, char *cwd) {
                 free(m);
             }
             print("Mem:  total "); printl(v[0]); print(" kB,  used "); sys_setcolor(7); printl(v[2]); sys_setcolor(0); print(" kB,  free "); sys_setcolor(9); printl(v[1]); sys_setcolor(0); print(" kB\n");   /* used amber, free lime (M1316) */
+        } else if (streq(line, "neofetch") || streq(line, "screenfetch")) {
+            /* a colourful system summary: ASCII monitor logo + live stats +
+             * palette swatches -- reuses uname / /proc / hostname (M1329) */
+            struct utsname u; int have_u = (sys_uname(&u) == 0);
+            char hn[64]; if (sys_gethostname(hn, sizeof hn) != 0 || !hn[0]) scpy(hn, "osdev");
+            long n, secs = 0;
+            { char *up = slurp("/proc/uptime", &n);
+              if (up) { for (int i = 0; up[i] && up[i] != '.' && up[i] != ' '; i++)
+                            if (up[i] >= '0' && up[i] <= '9') secs = secs * 10 + (up[i] - '0');
+                        free(up); } }
+            long ud = secs / 86400, uh = (secs % 86400) / 3600, um = (secs % 3600) / 60;
+            long mt = 0, mu = 0;
+            { char *m = slurp("/proc/meminfo", &n); long v[3] = { 0, 0, 0 }; int vi = 0;
+              if (m) { for (int i = 0; m[i] && vi < 3; ) {
+                           if (m[i] == ':') { i++; while (m[i] == ' ') i++; long x = 0;
+                               while (m[i] >= '0' && m[i] <= '9') x = x * 10 + (m[i++] - '0'); v[vi++] = x; }
+                           else i++; }
+                       free(m); }
+              mt = v[0] / 1024; mu = v[2] / 1024; }
+            /* monitor logo: blue frame (6), cyan label (4) */
+            sys_setcolor(6); print("    .--------------.\n");
+            print("    |   "); sys_setcolor(4); print("OS-DEV"); sys_setcolor(6); print("     |\n");
+            print("    |   "); sys_setcolor(4); print("x86_64"); sys_setcolor(6); print("     |\n");
+            print("    '--------------'\n");
+            print("       |______|\n"); sys_setcolor(0); print("\n");
+            /* stats: cyan labels, amber memory, host highlighted */
+            print("  "); sys_setcolor(3); print("root"); sys_setcolor(8); print("@");
+            sys_setcolor(4); print(hn); sys_setcolor(0); print("\n");
+            print("  "); sys_setcolor(4); print("OS:      "); sys_setcolor(0); print("OS-DEV x86_64\n");
+            print("  "); sys_setcolor(4); print("Kernel:  "); sys_setcolor(0);
+            if (have_u) { print(u.release); print(" "); print(u.version); } else print("1.0");
+            print("\n");
+            print("  "); sys_setcolor(4); print("Uptime:  "); sys_setcolor(0);
+            if (ud) { printl(ud); print("d "); } printl(uh); print("h "); printl(um); print("m\n");
+            print("  "); sys_setcolor(4); print("Shell:   "); sys_setcolor(0); print("osdev-sh\n");
+            print("  "); sys_setcolor(4); print("Memory:  "); sys_setcolor(0);
+            sys_setcolor(7); printl(mu); sys_setcolor(0); print(" / "); printl(mt); print(" MB\n");
+            print("  "); sys_setcolor(4); print("Term:    "); sys_setcolor(0); print("44x17\n\n  ");
+            /* palette swatches (white/red/yellow/cyan/magenta/blue/orange/grey/lime);
+             * the console font is ASCII-only, so use '#' blocks rather than U+2588 */
+            for (int c = 1; c <= 9; c++) { sys_setcolor(c); print("###"); }
+            sys_setcolor(0); print("\n");
         } else if (streq(line, "id")) {
             print("uid=0(root) gid=0(root)\n");             /* single-user */
         } else if (streq(line, "clear")) {
