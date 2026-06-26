@@ -34,6 +34,7 @@ static int ext_is(const char *n, const char *e) {            /* does n end with 
     return 1;
 }
 static int is_img(const char *n) { return ext_is(n,"png")||ext_is(n,"gif")||ext_is(n,"jpg")||ext_is(n,"jpeg")||ext_is(n,"bmp")||ext_is(n,"svg"); }
+static int eq_ci(const char *a, const char *b) { int i = 0; while (a[i] && b[i]) { if (ci(a[i]) != ci(b[i])) return 0; i++; } return a[i] == b[i]; }
 static void putint(char *b, int *p, int v) { if (v < 0) { b[(*p)++] = '-'; v = -v; }
     char t[10]; int i = 0; if (v == 0) t[i++] = '0'; while (v) { t[i++] = '0' + v % 10; v /= 10; } while (i) b[(*p)++] = t[--i]; }
 
@@ -57,6 +58,9 @@ int main(void) {
     }
 
     int idx = 0, prev = -1, outwh[2] = { 0, 0 };
+    char arg[24];                                            /* `run imgview NAME` (or the file manager) opens that image */
+    if (sys_getarg(arg, sizeof arg) > 0)
+        for (int i = 0; i < nimg; i++) if (eq_ci(names[i], arg)) { idx = i; break; }
     for (;;) {
         if (idx != prev) {
             prev = idx;

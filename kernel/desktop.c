@@ -1119,7 +1119,8 @@ static int files_is_image(const char *name, int len) {
 }
 
 /* Keyboard handling for the Files window. up/down move the selection; Enter
- * opens the highlighted file (text/source -> editor, else a browser window).
+ * opens the highlighted file (text/source -> editor, image -> image viewer,
+ * else a browser window).
  * 'd'/Delete arms a two-key delete confirm (a second d/y commits it; ANY other
  * key cancels it — so a stray 'd' is harmless); 'w' sets an image as the
  * wallpaper. The dirent list is re-read each call, so it refreshes for free
@@ -1217,6 +1218,8 @@ static void files_key(window_t *w, int k) {
         } else if (len > 0) {                                  /* a file: open it */
             if (files_editable(name, len)) {
                 app_spawn_named_arg("editor", name);           /* edit text/source files */
+            } else if (files_is_image(name, len)) {
+                app_spawn_named_arg("imgview", name);          /* view images in the image viewer (M1393) */
             } else {
                 char url[32]; int p = 0; const char *pre = "file:";
                 while (*pre) url[p++] = *pre++;
