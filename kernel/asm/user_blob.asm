@@ -112,6 +112,7 @@ global gtimer_elf_start, gtimer_elf_end
 global imgview_elf_start, imgview_elf_end
 global gcalc_elf_start, gcalc_elf_end
 global gcolor_elf_start, gcolor_elf_end
+global gfire_elf_start, gfire_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -528,5 +529,9 @@ gcalc_elf_end:
 gcolor_elf_start:
     incbin "build/gcolor.elf"
 gcolor_elf_end:
+
+gfire_elf_start:
+    incbin "build/gfire.elf"
+gfire_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
