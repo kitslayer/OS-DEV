@@ -61,6 +61,7 @@ int main(void) {
     char arg[24];                                            /* `run imgview NAME` (or the file manager) opens that image */
     if (sys_getarg(arg, sizeof arg) > 0)
         for (int i = 0; i < nimg; i++) if (eq_ci(names[i], arg)) { idx = i; break; }
+    int prevb = 0;
     for (;;) {
         if (idx != prev) {
             prev = idx;
@@ -88,6 +89,9 @@ int main(void) {
         if (k == 'q' || k == 27) break;
         else if (nimg > 0 && (k == 'n' || k == ' ' || k == 0x14)) idx = (idx + 1) % nimg;
         else if (nimg > 0 && (k == 'p' || k == 0x13)) idx = (idx + nimg - 1) % nimg;
+        int mx, my, b = sys_mouse(&mx, &my);                  /* click left half = prev, right half = next (M1397) */
+        if ((b & 1) && !(prevb & 1) && mx >= 0 && nimg > 0) idx = (mx < W / 2) ? (idx + nimg - 1) % nimg : (idx + 1) % nimg;
+        prevb = b;
         sys_sleep(70);
     }
     return 0;
