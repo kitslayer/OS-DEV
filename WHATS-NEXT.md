@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1335) shell — colourise `diff` output (removed red, added lime, context grey).** The existing LCS line-diff now renders `-` lines red, `+` lines lime, and unchanged context grey — like `git diff` — so changes pop. Colour is a terminal attribute, so the output bytes (and pipes/`$()`) are byte-identical. **Verified:** in-guest — `diff hello.txt motd.txt` shows the removed line red and the added lines lime.
+
 > **(M1334) desktop — colourised the About window's tech-stack lines.** The four capability lines (`kernel.memory.tasks`, `FAT32.TCP.TLS 1.3`, `JS engine.web browser`, `scriptable shell.editor`) now render in accent blue (heading blue, subtitle dark), matching the Welcome treatment. **Verified:** in-guest screenshot — the tech lines render accent-blue; full `make check` green.
 
 > **(M1333) desktop — colourised the Welcome screen (boot first-impression).** The Welcome panel now shows each app-bullet's label (`Browser:`/`Shell:`/`Editor:`) in accent blue with the description dark, and the shortcut hint in muted blue (heading stays accent blue) — drawn as coloured segments via the glyph width. **Verified:** in-guest screenshot — the bullet labels render accent-blue.

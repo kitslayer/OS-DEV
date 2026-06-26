@@ -5119,13 +5119,13 @@ static int run_command(char *line, char *cwd) {
                         }
                         if (a < na && b < nb && eq) {                              /* unchanged: context */
                             for (k = as[a]; k < ae[a] && q < 157; k++) t[q++] = d1[k]; t[q] = 0;
-                            print("  "); print(t); print("\n"); a++; b++;
+                            sys_setcolor(8); print("  "); print(t); sys_setcolor(0); print("\n"); a++; b++;   /* context: grey (M1335) */
                         } else if (b >= nb || (a < na && L[a+1][b] >= L[a][b+1])) { /* removed from F1 */
                             for (k = as[a]; k < ae[a] && q < 157; k++) t[q++] = d1[k]; t[q] = 0;
-                            print("- "); print(t); print("\n"); a++; diffs++;
+                            sys_setcolor(2); print("- "); print(t); sys_setcolor(0); print("\n"); a++; diffs++;   /* removed: red */
                         } else {                                                   /* added in F2 */
                             for (k = bs[b]; k < be[b] && q < 157; k++) t[q++] = d2[k]; t[q] = 0;
-                            print("+ "); print(t); print("\n"); b++; diffs++;
+                            sys_setcolor(9); print("+ "); print(t); sys_setcolor(0); print("\n"); b++; diffs++;   /* added: lime */
                         }
                     }
                     if (!diffs) print("(files are identical)\n");
