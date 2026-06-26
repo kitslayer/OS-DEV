@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1334) desktop — colourised the About window's tech-stack lines.** The four capability lines (`kernel.memory.tasks`, `FAT32.TCP.TLS 1.3`, `JS engine.web browser`, `scriptable shell.editor`) now render in accent blue (heading blue, subtitle dark), matching the Welcome treatment. **Verified:** in-guest screenshot — the tech lines render accent-blue; full `make check` green.
+
+> **(M1333) desktop — colourised the Welcome screen (boot first-impression).** The Welcome panel now shows each app-bullet's label (`Browser:`/`Shell:`/`Editor:`) in accent blue with the description dark, and the shortcut hint in muted blue (heading stays accent blue) — drawn as coloured segments via the glyph width. **Verified:** in-guest screenshot — the bullet labels render accent-blue.
+
 > **(M1332) Files app — type-coloured filenames (matching the shell's `ls`).** The GUI file manager now tints each filename by type — images purple, code orange, archives red, audio teal, executables green, ROMs pink, text/web dark (directories stay folder-gold) — with the size/date metadata in grey, via a kernel-side `file_color` (parallel to the shell's `ls_color`). The name + metadata are drawn as two coloured segments using the glyph width. **Verified:** in-guest screenshot — `DEMO.SH` green, `DEMO.C` orange, `.TXT`/`.HTM` dark, metadata grey; full `make check` green.
 
 > **(M1331) shell — `free` gets a memory-usage bar; shared `print_usage_bar` helper.** Extracted M1330's disk-bar logic into `print_usage_bar(used, total)` (lime/amber/red by fill) and gave `free` a matching memory bar below its figures, so disk + memory read consistently (df refactored to the helper — identical output). **Verified:** in-guest — `free` shows `[#####---------------] 27% used` (lime, low usage) and `df` `[################----] 80% used` (amber).

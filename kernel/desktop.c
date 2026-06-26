@@ -296,8 +296,22 @@ static void draw_content(const window_t *w, int focused) {
             "- 60+ apps, games and demos", "",
             "Drag the title bar or corner to move.",
             "F9 = Apps menu     F1 = all shortcuts" };
-        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++)
-            draw_text(bx, by+i*18, L[i], i == 0 ? 0x1F56C6 : 0x202028);   /* heading in accent blue */
+        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) {           /* colourised intro (M1333) */
+            const char *s = L[i];
+            if (s[0] == '-' && s[1] == ' ') {                            /* app bullet: "- Label:" accent, rest dark */
+                int colon = -1; for (int k = 0; s[k]; k++) if (s[k] == ':') { colon = k; break; }
+                if (colon > 0) {
+                    char seg[48]; int p = 0; for (int k = 0; k <= colon && p < 47; k++) seg[p++] = s[k]; seg[p] = 0;
+                    draw_text(bx, by + i*18, seg, 0x1F56C6);
+                    draw_text(bx + (colon + 1)*font_width, by + i*18, s + colon + 1, 0x202028);
+                    continue;
+                }
+            }
+            uint32_t col = (i == 0) ? 0x1F56C6                           /* heading accent blue */
+                         : (s[0] == 'F' && s[1] == '9') ? 0x4A6FA8       /* shortcut hint: muted blue */
+                         : 0x202028;                                     /* body dark */
+            draw_text(bx, by + i*18, s, col);
+        }
         fb_fill_rect(bx, by + 16, w->w - 24, 1, 0xC9CCD6);                /* accent rule under the heading */
         break;
     }
@@ -462,7 +476,7 @@ static void draw_content(const window_t *w, int focused) {
             "JS engine . web browser",
             "scriptable shell . editor" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++)
-            draw_text(bx, by + i*16, L[i], i == 0 ? 0x1F56C6 : 0x202028);   /* heading in accent blue */
+            draw_text(bx, by + i*16, L[i], (i == 0 || i >= 4) ? 0x1F56C6 : 0x202028);   /* heading + tech-stack lines in accent blue (M1334) */
         fb_fill_rect(bx, by + 14, w->w - 24, 1, 0xC9CCD6);                  /* rule under the heading */
         break;
     }
