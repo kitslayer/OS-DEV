@@ -116,6 +116,7 @@ global gfire_elf_start, gfire_elf_end
 global gmetro_elf_start, gmetro_elf_end
 global gconv_elf_start, gconv_elf_end
 global gbase_elf_start, gbase_elf_end
+global gpass_elf_start, gpass_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -548,5 +549,9 @@ gconv_elf_end:
 gbase_elf_start:
     incbin "build/gbase.elf"
 gbase_elf_end:
+
+gpass_elf_start:
+    incbin "build/gpass.elf"
+gpass_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
