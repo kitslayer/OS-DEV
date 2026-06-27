@@ -59,7 +59,7 @@
 #define LOCAL_IMG_MAX (1024*1024)   /* transient buffer for a full-page local image (a 24-bit BMP screenshot is ~576 KB > RAW_MAX) */
 #define DATA_URI_B64_MAX 262144     /* max base64 length of an inline data: image URI we'll decode */
 #define IMG_MAX_H 360               /* cap an inline image's on-screen height */
-#define REMOTE_IMG_MAX 3            /* remote <img> URLs prefetched per page (best-effort) */
+#define REMOTE_IMG_MAX 6            /* remote <img> URLs prefetched per page (best-effort; was 3 — too few to reach real content images past leading nav/icon <img>s) */
 #define IN_MAX    16                /* distinct form-field values stored per page (id-keyed: inputs/textareas/selects). was 8 -> a >8-field form silently dropped the extras from render + GET submit */
 #define IN_VLEN   256               /* bytes per stored field value -> 255 chars (was 96/95): a real textarea / long input is no longer truncated. EVERY edit buffer below must be IN_VLEN with caps IN_VLEN-1 (plain copy) / IN_VLEN-2 (before an insert) so they never overflow */
 
@@ -2799,8 +2799,9 @@ static void collect_remote_imgs(browser_t *b) {
             if (pe >= 4) { const char *e = src + pe - 4;
                 if (e[0]=='.' && lc(e[1])=='i'&&lc(e[2])=='c'&&lc(e[3])=='o') unsup = 1; }     /* .ico */
             if (!unsup && pe >= 5) { const char *e = src + pe - 5;
-                if (e[0]=='.' && lc(e[1])=='w'&&lc(e[2])=='e'&&lc(e[3])=='b'&&lc(e[4])=='p') unsup = 1;   /* .webp */
-                if (e[0]=='.' && lc(e[1])=='a'&&lc(e[2])=='v'&&lc(e[3])=='i'&&lc(e[4])=='f') unsup = 1; } /* .avif */
+                /* .webp is now FETCHED — decode_image decodes VP8L (lossless) webp (M1466).
+                 * A lossy VP8 webp still falls back to a link, but lossless ones now display. */
+                if (e[0]=='.' && lc(e[1])=='a'&&lc(e[2])=='v'&&lc(e[3])=='i'&&lc(e[4])=='f') unsup = 1; } /* .avif (still unsupported) */
             if (unsup) { i = ae; continue; }
             /* skip a src already queued (a page may repeat the same image) */
             int dup = 0;
