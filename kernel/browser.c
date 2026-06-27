@@ -1336,6 +1336,22 @@ static int cell_extract(const char *s, const char *e, char *out, int cap) {
     return n;
 }
 /* Render the table region [s, s+len). Returns chars consumed (to just past </table>). */
+/* Does the <table> region s..e contain a form field (input/button/select/textarea)?
+ * Such a table is a LAYOUT table (e.g. Google's search form) — render it through the
+ * normal flow (so the fields actually show) instead of render_table's text extraction. */
+static int table_has_field(const char *s, const char *e) {
+    int depth = 1;                                        /* called just after the opening <table> */
+    for (const char *p = s; p < e && depth > 0; p++) {
+        if (*p != '<') continue;
+        if (p+1 < e && p[1] == '/') { if (p+7 <= e && lc(p[2])=='t'&&lc(p[3])=='a'&&lc(p[4])=='b'&&lc(p[5])=='l'&&lc(p[6])=='e') depth--; continue; }
+        if (p+6 <= e && lc(p[1])=='t'&&lc(p[2])=='a'&&lc(p[3])=='b'&&lc(p[4])=='l'&&lc(p[5])=='e') { depth++; continue; }
+        if (p+6 <= e && lc(p[1])=='i'&&lc(p[2])=='n'&&lc(p[3])=='p'&&lc(p[4])=='u'&&lc(p[5])=='t') return 1;
+        if (p+7 <= e && lc(p[1])=='b'&&lc(p[2])=='u'&&lc(p[3])=='t'&&lc(p[4])=='t'&&lc(p[5])=='o'&&lc(p[6])=='n') return 1;
+        if (p+7 <= e && lc(p[1])=='s'&&lc(p[2])=='e'&&lc(p[3])=='l'&&lc(p[4])=='e'&&lc(p[5])=='c'&&lc(p[6])=='t') return 1;
+        if (p+9 <= e && lc(p[1])=='t'&&lc(p[2])=='e'&&lc(p[3])=='x'&&lc(p[4])=='t'&&lc(p[5])=='a'&&lc(p[6])=='r'&&lc(p[7])=='e'&&lc(p[8])=='a') return 1;
+    }
+    return 0;
+}
 static int render_table(browser_t *b, const char *s, int len) {
     if (len <= 0) return 0;
     const char *e = s + len, *tend = e;
@@ -1640,7 +1656,8 @@ static void parse_html(browser_t *b, const char *body, int len) {
                 } else if (closing && in_summary) { in_summary = 0; curlink = sum_link; style = sum_style; }
             }
             else if (tageq(tag, "table") && !closing && !rgate &&
-                     !inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary)) {
+                     !inscript && !instyle && !intitle && !inhead && !insvg && !(det_hide && !in_summary) &&
+                     !table_has_field(body + j + 1, body + len)) {   /* a form/layout table -> normal flow so its inputs render */
                 /* render the whole <table>..</table> region as aligned columns, then skip past it */
                 int consumed = render_table(b, body + j + 1, len - (j + 1));
                 i = j + consumed;                         /* loop ++ lands just past </table> */
