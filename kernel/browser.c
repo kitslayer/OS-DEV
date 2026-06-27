@@ -22,6 +22,7 @@
 #include "jpeg.h"
 #include "svg.h"
 #include "bmp.h"
+#include "webp.h"
 #include "image.h"   /* decode_image() — defined below; shared with desktop.c wallpaper */
 #include "tls.h"
 #include "js.h"
@@ -2982,6 +2983,24 @@ static int b64_decode(const char *in, int inlen, uint8_t *out, int cap) {
 }
 
 uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
+    /* WebP (RIFF<size>WEBP): VP8L lossless. probe -> validate caps -> decode. A
+     * lossy (VP8 ) or malformed webp makes webp_probe fail, so we return 0 and the
+     * caller falls back to a clickable link (no other decoder handles a RIFF). */
+    if (len >= 16 && data[0]=='R'&&data[1]=='I'&&data[2]=='F'&&data[3]=='F' &&
+        data[8]=='W'&&data[9]=='E'&&data[10]=='B'&&data[11]=='P') {
+        int w, h; long need;
+        if (webp_probe(data, len, &w, &h, &need) != 0) return 0;
+        if (w <= 0 || h <= 0 || w > 2048 || h > 2048 || (long)w * h > 1024*1024) return 0;
+        if (need <= 0 || need > 32*1024*1024) return 0;
+        long rgba_sz = (long)w * h * 4;
+        uint8_t *rgba = kmalloc((unsigned long)rgba_sz);
+        uint8_t *scr  = kmalloc((unsigned long)need);
+        if (!rgba || !scr) { if (rgba) kfree(rgba); if (scr) kfree(scr); return 0; }
+        int r = webp_decode(data, len, rgba, (int)rgba_sz, scr, (int)need, ow, oh);
+        kfree(scr);
+        if (r != 0) { kfree(rgba); return 0; }
+        return rgba;
+    }
     /* JPEG (FF D8 FF ...): probe for dimensions + scratch size, then decode */
     if (len >= 4 && data[0]==0xFF && data[1]==0xD8 && data[2]==0xFF) {
         int w, h; long need;
