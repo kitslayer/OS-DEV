@@ -193,15 +193,15 @@ static int ext_is(const char *x, const char *s) {
 }
 static uint32_t file_color(const char *name) {
     int dot = -1; for (int i = 0; name[i]; i++) if (name[i] == '.') dot = i;
-    if (dot < 0) return 0x303840;
+    if (dot < 0) return 0xB6C0BC;
     const char *x = name + dot + 1;
-    if (ext_is(x,"SVG")||ext_is(x,"PNG")||ext_is(x,"BMP")||ext_is(x,"GIF")||ext_is(x,"JPG")||ext_is(x,"JPE")) return 0x8E24AA; /* images: purple */
-    if (ext_is(x,"C")||ext_is(x,"H")||ext_is(x,"JS"))                       return 0xB05A00; /* code: orange-brown */
-    if (ext_is(x,"GZ")||ext_is(x,"TAR")||ext_is(x,"TGZ")||ext_is(x,"ZIP"))  return 0xC01010; /* archives: red */
-    if (ext_is(x,"WAV"))                                                    return 0x00838A; /* audio: teal */
-    if (ext_is(x,"ELF")||ext_is(x,"SH"))                                    return 0x2E7D32; /* executables: green */
-    if (ext_is(x,"NES")||ext_is(x,"GB"))                                    return 0xC0006A; /* ROMs: pink */
-    return 0x303840;                                                                         /* text/web/default */
+    if (ext_is(x,"SVG")||ext_is(x,"PNG")||ext_is(x,"BMP")||ext_is(x,"GIF")||ext_is(x,"JPG")||ext_is(x,"JPE")) return 0xC77DE0; /* images: purple */
+    if (ext_is(x,"C")||ext_is(x,"H")||ext_is(x,"JS"))                       return 0xE0954A; /* code: orange-brown */
+    if (ext_is(x,"GZ")||ext_is(x,"TAR")||ext_is(x,"TGZ")||ext_is(x,"ZIP"))  return 0xF06A6A; /* archives: red */
+    if (ext_is(x,"WAV"))                                                    return 0x4FD0D8; /* audio: teal */
+    if (ext_is(x,"ELF")||ext_is(x,"SH"))                                    return 0x7FD37A; /* executables: green */
+    if (ext_is(x,"NES")||ext_is(x,"GB"))                                    return 0xF060A8; /* ROMs: pink */
+    return 0xB6C0BC;                                                                         /* text/web/default */
 }
 static void box(int x, int y, int w, int h, uint32_t c) {
     fb_fill_rect(x, y, w, 1, c); fb_fill_rect(x, y + h - 1, w, 1, c);
@@ -373,7 +373,7 @@ static void draw_content(const window_t *w, int focused) {
             for (int j = 0; w->editbuf[j] && p < (int)sizeof(pr) - 2; j++) pr[p++] = w->editbuf[j];
             pr[p++] = '_';                                     /* a simple text cursor */
             pr[p] = 0;
-            draw_text(bx, by, pr, 0x1060C0);                   /* distinct blue: an input prompt, not the file list */
+            draw_text(bx, by, pr, 0x6BB0FF);                   /* distinct blue: an input prompt, not the file list */
         } else if (w->fconfirm && w->fsel >= 0 && w->fsel < n) {  /* a delete is armed: replace the header with a bright confirm prompt */
             char pr[64]; int p = 0; const char *a = "Delete ";
             while (*a) pr[p++] = *a++;
@@ -381,7 +381,7 @@ static void draw_content(const window_t *w, int focused) {
             const char *b = "?  d/y=confirm  any key=cancel";
             for (int j = 0; b[j] && p < (int)sizeof(pr) - 1; j++) pr[p++] = b[j];
             pr[p] = 0;
-            draw_text(bx, by, pr, 0xC01010);                   /* bright red: this action destroys a file */
+            draw_text(bx, by, pr, 0xF06060);                   /* bright red: this action destroys a file */
         } else {
             const char *sm = g_fsort == 1 ? "size" : g_fsort == 2 ? "date" : "name";
             char hdr[96]; int hp = 0;
@@ -389,9 +389,9 @@ static void draw_content(const window_t *w, int focused) {
             for (int j = 0; base[j]; j++) hdr[hp++] = base[j];
             for (int j = 0; sm[j]; j++) hdr[hp++] = sm[j];
             hdr[hp] = 0;
-            draw_text(bx, by, hdr, 0x202028);
+            draw_text(bx, by, hdr, 0xC6D0CC);
         }
-        fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, 0xC4CAD6);   /* rule under the header */
+        fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, 0x3A4A50);   /* rule under the header */
         int rows = (w->h - TITLEBAR_H - 48) / 18;          /* rows that fit in the body (last 18px reserved for the footer) */
         if (rows < 1) rows = 1;
         int top = 0;                                       /* scroll so the selection stays visible */
@@ -399,9 +399,9 @@ static void draw_content(const window_t *w, int focused) {
         for (int i = top; i < n && i < top + rows; i++) {
             int ry = by + 22 + (i - top)*18;
             if (i == w->fsel)                              /* highlight the selected row */
-                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0xCFE0F5);
+                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0x294258);
             else if ((i - top) & 1)                        /* zebra striping for scanability */
-                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0xDFE5F0);
+                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0x20282E);
             int nl = 0; while (e[i].name[nl]) nl++;
             int isdir = (nl > 0 && e[i].name[nl-1] == '/');   /* vfs marks directories with a trailing '/' */
             char line[48]; int p = 0; line[p++]=' '; line[p++]=' ';
@@ -425,7 +425,7 @@ static void draw_content(const window_t *w, int focused) {
                 }
             }
             line[p]=0;
-            uint32_t namecol = isdir ? 0x8A5A00 : file_color(e[i].name);   /* dirs gold, files by type (M1332) */
+            uint32_t namecol = isdir ? 0xD2A24A : file_color(e[i].name);   /* dirs gold, files by type (M1332) */
             char nsave = line[name_end]; line[name_end] = 0;
             draw_text(bx, ry, line, namecol);                              /* name in its type tint */
             line[name_end] = nsave;
@@ -544,8 +544,8 @@ static void draw_content(const window_t *w, int focused) {
             "scriptable shell . editor",
             "calc . image viewer . games" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++)
-            draw_text(bx, by + i*16, L[i], (i == 0 || i >= 4) ? 0x1F56C6 : 0x202028);   /* heading + tech-stack lines in accent blue (M1334) */
-        fb_fill_rect(bx, by + 14, w->w - 24, 1, 0xC9CCD6);                  /* rule under the heading */
+            draw_text(bx, by + i*16, L[i], (i == 0 || i >= 4) ? 0xFFB23E : 0xC6D0CC);   /* heading + tech-stack lines in accent blue (M1334) */
+        fb_fill_rect(bx, by + 14, w->w - 24, 1, 0x3A4A50);                  /* rule under the heading */
         break;
     }
     default:
@@ -1359,9 +1359,9 @@ static void spawn_app(int kind, const char *prog) {
     window_t w = { 0 };
     w.x = x; w.y = y; w.kind = kind;
     switch (kind) {
-    case KIND_FILES:   w.w=500; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
+    case KIND_FILES:   w.w=500; w.h=200; w.body=0x1A2228; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
     case KIND_WELCOME: w.w=360; w.h=290; w.body=0x1A2228; w.title="Welcome"; break;   /* dark slate panel (M1476) */
-    case KIND_ABOUT:   w.w=300; w.h=196; w.body=0xF4F0E8; w.title="About";   break;
+    case KIND_ABOUT:   w.w=300; w.h=196; w.body=0x1A2228; w.title="About";   break;
     case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="System Info"; break;
     default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
     }
@@ -1382,7 +1382,7 @@ void desktop_run(void) {
     start_y = screen_h - TASKBAR_H + 5;
 
     windows[win_count++] = (window_t){ 60, 70, 360, 290, 0x1A2228, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* dark slate (M1476) */
-    windows[win_count++] = (window_t){ 60, 300, 500, 200, 0xE8ECF4, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
+    windows[win_count++] = (window_t){ 60, 300, 500, 200, 0x1A2228, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
     app_spawn_named("shell");           /* a real ring-3 shell (WM gives it a
                                          * window below; spawn more via Apps) */
 
