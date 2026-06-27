@@ -620,13 +620,13 @@ static void draw_window(const window_t *w, int focused) {
     fb_reset_clip();
 
     /* gradient title bar (brighter when focused) with a top sheen line */
-    uint32_t t0 = focused ? 0x6BA8FF : 0x6E7686;
-    uint32_t t1 = focused ? 0x1F56C6 : 0x3A4150;
+    uint32_t t0 = focused ? 0x46505E : 0x343A44;
+    uint32_t t1 = focused ? 0x28323E : 0x232830;
     vgrad(x, y, ww, TITLEBAR_H, t0, t1);
     fb_fill_rect(x, y, ww, 1, lerp(t0, 0xFFFFFF, 2, 3));   /* bright top sheen */
     const char *titletext = (w->kind == KIND_BROWSER && w->app) ? browser_title((browser_t *)w->app) : w->title;   /* browser windows show the page <title> / document.title */
     draw_icon(w->kind, x + 8, y + (TITLEBAR_H - ICON_SZ) / 2);                /* per-kind icon */
-    draw_text(x + 28, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, 0xFFFFFF);
+    draw_text(x + 28, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, focused ? 0xFFFFFF : 0xAEB6C2);
 
     /* close button: a rounded red chip with a top sheen; calmer when unfocused */
     int cbx = x + ww - 21, cby = y + 6;
