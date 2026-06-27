@@ -747,7 +747,7 @@ static int inv_color_indexing(const Transform *tr, int orig_W, int H,
  *           nest transforms in sub-images, so we support them but they rarely
  *           occur.
  * ====================================================================== */
-#define MAX_HGROUPS 512
+#define MAX_HGROUPS 64
 
 static int decode_vp8l(BR *br, int W, int H, int is_sub,
                         uint32_t *out, long npix,
@@ -998,18 +998,37 @@ int webp_probe(const uint8_t *data, int len, int *w, int *h, long *scratch_need)
     if ((long)iw*ih>(1<<20)) return -1;
 
     *w = iw; *h = ih;
-    /* Scratch estimate (caller allocates this many bytes for webp_decode):
-     *   - sub-image ARGB buffers (predictor/colour/entropy/palette) + color
-     *     cache: a few × the pixel buffer,
-     *   - the Huffman groups: sizeof(HGroup) is ~230 KB (each of 5 HTrees holds
-     *     a 2^HFAST fast table + a worst-case overflow table).  The group count
-     *     equals the meta-Huffman tile count, capped at MAX_HGROUPS.
-     * We budget for a healthy number of groups; decode fails closed (returns
-     * non-zero) rather than overrunning if a pathological stream needs more. */
-    long pix = (long)iw*ih*4;
-    long groups_budget = 64L * (long)sizeof(HGroup);   /* ~15 MB: covers typical + */
-    *scratch_need = pix * 8 + groups_budget + (8L<<20);
-    if (*scratch_need < (32L<<20)) *scratch_need = 32L<<20;
+    /* Tight upper bound on scratch webp_decode needs (bump-allocator SA + pre-SA argb buf).
+     *
+     * Layout inside scratch:
+     *   [argb_buf: W*H*4 bytes]  then  [SA region — all sa_alloc calls below]
+     *
+     * SA allocations in the worst-case VP8L decode (main image + up to 4 recursive
+     * sub-image decodes for PREDICTOR, COLOR, COLOR_INDEXING and META sub-images):
+     *
+     *   a) Sub-image ARGB data buffers (3 sub-images: predictor, colour, meta).
+     *      Each sub-image is block-downsampled; the coarsest tiling (block size 4)
+     *      gives at most ceil(W/4)*ceil(H/4) pixels per sub-image.
+     *
+     *   b) SA overhead for each of the ≤4 recursive sub-image decode calls
+     *      (each is_sub=1 call allocates at most: 1 HGroup + HALPHA lens + color cache).
+     *
+     *   c) Main image: color cache (up to 2^12 entries), code-length lens scratch,
+     *      and Huffman groups.  n_groups ≤ MAX_HGROUPS (=64); the decoder rejects
+     *      streams that exceed MAX_HGROUPS (fail-closed, never overruns scratch).
+     *
+     * Replacing the old pix*8 over-estimate with the actual block-downsampled
+     * sub-image terms and capping groups at 64 keeps scratch ≤ ~20 MB for the
+     * maximum 1 Mpx (1024×1024) image, well within the 256 MB guest's budget. */
+    long nmeta = (long)(((iw+3)>>2) * ((ih+3)>>2));   /* worst-case meta/sub-image pix */
+    *scratch_need =
+        (long)iw * ih * 4L                              /* argb pixel buffer (pre-SA) */
+      + 3L * nmeta * 4L                                 /* PREDICTOR+COLOR+META data  */
+      + 4L * ((long)sizeof(HGroup) + (long)HALPHA*4L + (1L<<12)*4L) /* 4 sub-decode SA */
+      + (1L<<12)*4L                                     /* main colour cache           */
+      + (long)HALPHA * 4L                               /* main code-length lens       */
+      + (long)MAX_HGROUPS * (long)sizeof(HGroup)        /* main Huffman groups (64)    */
+      + 65536L;                                         /* alignment gaps + margin     */
     return 0;
 }
 

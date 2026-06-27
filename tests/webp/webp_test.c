@@ -62,12 +62,13 @@ static uint8_t *read_ppm(const char *path, int *out_w, int *out_h) {
     return buf;
 }
 
-/* Decode buffers (static so they don't blow the stack under ASan).  The
- * scratch buffer is sized to satisfy webp_probe()'s scratch_need for the
- * images exercised here (a 192x192 lossless image with a large colour cache
- * and meta-Huffman groups needs well over the old 16 MB). */
+/* RGBA output buffer (static so it doesn't blow the stack under ASan).
+ * Scratch is now malloc'd to exactly scratch_need per image to prove the
+ * tight estimate never under-allocates. */
 static uint8_t g_rgba[4 << 20];
-static uint8_t g_scratch[48 << 20];
+
+/* Small static scratch for malformed-input fuzz (these never get past probe) */
+static uint8_t g_fuzz_scratch[4096];
 
 /* ---- malformed-input fuzz ---- */
 static void fuzz_malformed(void) {
@@ -92,7 +93,7 @@ static void fuzz_malformed(void) {
         int r1 = webp_probe(cases[i].d, cases[i].n, &w, &h, &scr_need);
         int r2 = webp_decode(cases[i].d, cases[i].n,
                              g_rgba, (int)sizeof(g_rgba),
-                             g_scratch, (int)sizeof(g_scratch),
+                             g_fuzz_scratch, (int)sizeof(g_fuzz_scratch),
                              &w, &h);
         /* Both must return non-zero (error) */
         char msg[128];
@@ -116,7 +117,7 @@ static void fuzz_malformed(void) {
         webp_probe(noise, nlen, &w, &h, &sneed);
         webp_decode(noise, nlen,
                     g_rgba, (int)sizeof(g_rgba),
-                    g_scratch, (int)sizeof(g_scratch),
+                    g_fuzz_scratch, (int)sizeof(g_fuzz_scratch),
                     &w, &h);
     }
 
@@ -150,7 +151,8 @@ static int run_cwebp(const char *in_ppm, const char *out_webp) {
 }
 
 /* Compare round-tripped WebP against original RGB.
- * Returns number of mismatching pixels (0 = pass). */
+ * Allocates scratch to EXACTLY scratch_need bytes (via malloc) to prove the
+ * tight estimate never under-allocates.  Returns mismatching pixel count (0=pass). */
 static long roundtrip_test(const char *label,
                             const uint8_t *src_rgb, int w, int h) {
     char ppm_path[128], webp_path[128];
@@ -190,12 +192,12 @@ static long roundtrip_test(const char *label,
         fails++;
         return -1;
     }
-    /* Honour the probe contract: the scratch buffer must be at least as big as
-     * scratch_need.  If not, flag it clearly instead of getting a cryptic
-     * decode failure. */
-    if (scr_need > (long)sizeof(g_scratch)) {
-        printf("  FAIL: %s: probe wants %ld scratch but test buffer is %zu\n",
-               label, scr_need, sizeof(g_scratch));
+
+    /* Allocate scratch to EXACTLY scratch_need — proves tight estimate is a
+     * true upper bound (ASan poisons the byte immediately past this buffer). */
+    uint8_t *scr = (uint8_t *)malloc((size_t)scr_need);
+    if (!scr) {
+        printf("  FAIL: %s: malloc(%ld) for scratch failed\n", label, scr_need);
         free(webp_data);
         fails++;
         return -1;
@@ -204,8 +206,9 @@ static long roundtrip_test(const char *label,
     int ow = 0, oh = 0;
     int dr = webp_decode(webp_data, webp_len,
                          g_rgba, (int)sizeof(g_rgba),
-                         g_scratch, (int)sizeof(g_scratch),
+                         scr, (int)scr_need,
                          &ow, &oh);
+    free(scr);
     free(webp_data);
     if (dr != 0) {
         printf("  FAIL: %s: webp_decode returned %d\n", label, dr);
@@ -342,11 +345,52 @@ static void make_photo(uint8_t *rgb, int w, int h) {
         }
 }
 
+/* ---- scratch_need probe helper (prints and returns value) ---- */
+static void print_probe_scratch(int w, int h) {
+    int pw = 0, ph = 0; long scr = 0;
+    /* synthesise a minimal valid VP8L header to feed webp_probe */
+    /* RIFF<size>WEBPVP8L<size><0x2F><bits[0..3]> */
+    uint8_t hdr[32];
+    memset(hdr, 0, sizeof(hdr));
+    /* RIFF tag */
+    hdr[0]='R'; hdr[1]='I'; hdr[2]='F'; hdr[3]='F';
+    /* file size (little-endian, content after byte 8) */
+    int riff_sz = sizeof(hdr) - 8;
+    hdr[4]=(uint8_t)riff_sz; hdr[5]=0; hdr[6]=0; hdr[7]=0;
+    /* WEBP */
+    hdr[8]='W'; hdr[9]='E'; hdr[10]='B'; hdr[11]='P';
+    /* VP8L chunk */
+    hdr[12]='V'; hdr[13]='P'; hdr[14]='8'; hdr[15]='L';
+    int vp8l_sz = sizeof(hdr) - 20;
+    hdr[16]=(uint8_t)vp8l_sz; hdr[17]=0; hdr[18]=0; hdr[19]=0;
+    /* VP8L payload: signature 0x2F then 14+14+1+3 bits for W,H,alpha,ver */
+    hdr[20] = 0x2F;
+    /* Pack: W-1 in bits[0..13], H-1 in bits[14..27], alpha_used=0 in bit28, ver=0 in bits[29..31] */
+    unsigned int bw = (unsigned)(w-1), bh = (unsigned)(h-1);
+    uint32_t bits = (bw & 0x3FFF) | ((bh & 0x3FFF) << 14);
+    hdr[21] = (uint8_t)(bits & 0xFF);
+    hdr[22] = (uint8_t)((bits >> 8) & 0xFF);
+    hdr[23] = (uint8_t)((bits >> 16) & 0xFF);
+    hdr[24] = (uint8_t)((bits >> 24) & 0xFF);
+    int r = webp_probe(hdr, (int)sizeof(hdr), &pw, &ph, &scr);
+    if (r != 0 || pw != w || ph != h) {
+        printf("  probe_scratch(%dx%d): probe failed (r=%d pw=%d ph=%d)\n", w, h, r, pw, ph);
+        return;
+    }
+    printf("  scratch_need(%4dx%4d) = %7ld bytes = %.2f MB\n", w, h, scr, (double)scr / (1024.0*1024.0));
+}
+
 /* ---- main ---- */
 int main(int argc, char **argv) {
     int have_cwebp   = (argc > 1 && argv[1][0] == '1');
     int have_python3 = (argc > 2 && argv[2][0] == '1');
     (void)have_python3; /* we synthesize in C directly */
+
+    /* 0. Print scratch_need for key sizes to verify the tight estimate */
+    printf("scratch_need estimates (MAX_HGROUPS=%d):\n", MAX_HGROUPS);
+    print_probe_scratch(16, 16);
+    print_probe_scratch(256, 256);
+    print_probe_scratch(1024, 1024);
 
     /* 1. Malformed-input fuzz (always runs) */
     fuzz_malformed();
@@ -454,6 +498,35 @@ int main(int argc, char **argv) {
         make_photo(big, 191, 97);
         r = roundtrip_test("photo_odd", big, 191, 97);
         printf("round-trip photo_odd: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* 256×256 and 1024×1024 — verify scratch_need is a true upper bound at
+     * the benchmark sizes and that the new tight estimate never under-allocates.
+     * Source buffers are malloc'd to avoid blowing the stack. */
+    {
+        uint8_t *big256 = (uint8_t *)malloc(256*256*3);
+        if (big256) {
+            make_photo(big256, 256, 256);
+            long r = roundtrip_test("photo256", big256, 256, 256);
+            printf("round-trip photo256 (256x256): %s\n", r == 0 ? "ok" : "FAIL");
+            make_noise(big256, 256, 256);
+            r = roundtrip_test("noise256", big256, 256, 256);
+            printf("round-trip noise256 (256x256): %s\n", r == 0 ? "ok" : "FAIL");
+            free(big256);
+        } else {
+            printf("  SKIP: malloc failed for 256x256 src buffer\n");
+        }
+    }
+    {
+        uint8_t *big1024 = (uint8_t *)malloc(1024*1024*3);
+        if (big1024) {
+            make_photo(big1024, 1024, 1024);
+            long r = roundtrip_test("photo1024", big1024, 1024, 1024);
+            printf("round-trip photo1024 (1024x1024): %s\n", r == 0 ? "ok" : "FAIL");
+            free(big1024);
+        } else {
+            printf("  SKIP: malloc failed for 1024x1024 src buffer\n");
+        }
     }
 
     if (fails) {

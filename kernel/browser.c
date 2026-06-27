@@ -3072,7 +3072,7 @@ uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
         int w, h; long need;
         if (webp_probe(data, len, &w, &h, &need) != 0) return 0;
         if (w <= 0 || h <= 0 || w > 2048 || h > 2048 || (long)w * h > 1024*1024) return 0;
-        if (need <= 0 || need > 64*1024*1024) return 0;   /* webp scratch is conservative (~32-55MB); bound it */
+        if (need <= 0 || need > 32*1024*1024) return 0;   /* webp scratch ≤~20MB now (MAX_HGROUPS=64); bound it */
         long rgba_sz = (long)w * h * 4;
         uint8_t *rgba = kmalloc((unsigned long)rgba_sz);
         uint8_t *scr  = kmalloc((unsigned long)need);
