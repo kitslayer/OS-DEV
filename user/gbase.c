@@ -11,7 +11,7 @@
 #include "ulib.h"
 
 #define W 360
-#define H 224
+#define H 248                 /* taller: room for the CHR (ASCII) row (M1454) */
 
 static unsigned *FB;
 static unsigned char FONT[128 * 16];
@@ -111,7 +111,10 @@ int main(void) {
             text("DEC", lx, y, C_AMBERLO);                                gtextS(dc, vx, y, 1, C_AMBER, C_AMBERLO); y += 24;
             text("HEX", lx, y, C_AMBERLO); text("0x", vx - 16, y, C_AMBERLO); gtextS(hx, vx, y, 1, C_AMBER, C_AMBERLO); y += 24;
             text("OCT", lx, y, C_AMBERLO); text("0o", vx - 16, y, C_AMBERLO); gtextS(oc, vx, y, 1, C_AMBER, C_AMBERLO); y += 24;
-            text("BIN", lx, y, C_AMBERLO); text("0b", vx - 16, y, C_AMBERLO); gtextS(bn, vx, y, 1, C_AMBER, C_AMBERLO);
+            text("BIN", lx, y, C_AMBERLO); text("0b", vx - 16, y, C_AMBERLO); gtextS(bn, vx, y, 1, C_AMBER, C_AMBERLO); y += 24;
+            text("CHR", lx, y, C_AMBERLO);                         /* ASCII char for a printable byte (M1454) */
+            if (v >= 32 && v <= 126) { char cs[4] = { '\'', (char)v, '\'', 0 }; gtextS(cs, vx, y, 1, C_AMBER, C_AMBERLO); }
+            else text("-", vx, y, C_AMBERLO);
 
             text("type a number    i input base    q quit", 14, H - 14, C_DIM);
             sys_gfx_blit(FB);
