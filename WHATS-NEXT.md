@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1460) docs — README current through M1459.** Added milestone-table row **#459** summarising the M1452–M1459 instrument-app feature-gap fills (gcalc √/1÷x/±, gsw laps, gmetro time-signature, gcolor saved palette, gtimer type-min, gpass charsets, gconv Time, gbase CHR), so the README reflects the work since the M1429 "fully current" pass. (Per-feature detail remains in the entries below.)
+
 > **(M1459) gmetro — time signature + accented downbeat.** The metronome just alternated pitch every beat — no real time signature, which every metronome has. Now `1`–`9` set the beats per bar; the **downbeat is accented** (higher 1760 Hz click + brighter bob flash vs 1047 Hz off-beats), and a row of beat dots + an `N/4` readout show the position in the bar (downbeat dot always amber-tinted). **Verified:** in-guest — `3` → 3/4 with three dots, downbeat dot lit bright; built clean + snap-verified.
 
 > **(M1458) gsw — lap splits.** The stopwatch was start/stop/reset only — no laps, a real gap for a stopwatch. Now `l` records a lap; a recessed panel lists each lap's **delta** (newest highlighted amber, the rest green), and `r` clears them with the reset. The window grew and the sweep ring was re-centred above the list. **Verified:** in-guest — start, lap at ~2 s, lap at ~3 s → L1 00:02.3 / L2 00:01.2 (correct deltas), total 00:04.8; built clean + snap-verified.
