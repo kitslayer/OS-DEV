@@ -120,6 +120,7 @@ global gpass_elf_start, gpass_elf_end
 global gclip_elf_start, gclip_elf_end
 global gtodo_elf_start, gtodo_elf_end
 global gseq_elf_start, gseq_elf_end
+global pietest_elf_start, pietest_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -568,5 +569,9 @@ gtodo_elf_end:
 gseq_elf_start:
     incbin "build/gseq.elf"
 gseq_elf_end:
+
+pietest_elf_start:
+    incbin "build/pietest.elf"
+pietest_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

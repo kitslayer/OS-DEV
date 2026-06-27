@@ -50,6 +50,23 @@ typedef struct {
 #define PF_W 0x2   /* segment is writable   */
 #define PF_R 0x4   /* segment is readable    */
 
+/* Dynamic-executable (ET_DYN / PIE) support (M1465): a position-independent
+ * executable is loaded at a non-zero base, so its absolute pointers need
+ * R_X86_64_RELATIVE fix-ups from PT_DYNAMIC. A self-contained PIE (no external
+ * symbols) has ONLY RELATIVE relocs — no GLOB_DAT/JUMP_SLOT — so that's all we
+ * handle here. Kept in a separate path so the ET_EXEC loader (and the host
+ * elf_test that #includes this file) stay byte-for-byte unchanged. */
+#define ET_DYN            3
+#define PT_DYNAMIC        2
+#define DT_NULL           0
+#define DT_RELA           7
+#define DT_RELASZ         8
+#define R_X86_64_RELATIVE 8
+#define ELF_DYN_BASE      0x40000000ull   /* load base for a PIE (just above the kernel's 0..1 GiB identity map, like user.ld) */
+
+typedef struct { int64_t  d_tag; uint64_t d_val;            } Elf64_Dyn;
+typedef struct { uint64_t r_offset, r_info; int64_t r_addend; } Elf64_Rela;
+
 static inline uint64_t page_down(uint64_t x) { return x & ~(uint64_t)(PAGE_SIZE - 1); }
 static inline uint64_t page_up(uint64_t x)   { return (x + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1); }
 
@@ -123,10 +140,85 @@ uint64_t elf_image_size(const void *image, uint64_t maxsz) {
     return hi > maxsz ? maxsz : hi;
 }
 
+/* Load a position-independent executable (ET_DYN): map every PT_LOAD at
+ * ELF_DYN_BASE + p_vaddr, apply R_X86_64_RELATIVE relocations from PT_DYNAMIC,
+ * then return the based entry. Separate from elf_load so the ET_EXEC path stays
+ * unchanged. Every field is bounds-checked against the loaded span so a corrupt
+ * dynamic section can never write outside the image's mapped pages (M1465). */
+static uint64_t elf_load_dyn(const void *image, uint64_t maxsz) {
+    uint64_t phoff, entry; uint16_t phnum, phentsize;
+    if (!elf_check_header(image, maxsz, &phoff, &phnum, &phentsize, &entry)) return 0;
+    const uint64_t base = ELF_DYN_BASE;
+    uint64_t max_eff = 0;                                 /* highest mapped address (base + vaddr + memsz) */
+
+    for (uint16_t i = 0; i < phnum; i++) {                /* map + copy each PT_LOAD, writable for now */
+        const Elf64_Phdr *ph = (const Elf64_Phdr *)((const uint8_t *)image + phoff + (uint64_t)i * phentsize);
+        if (ph->p_type != PT_LOAD) continue;
+        if (ph->p_offset > maxsz || ph->p_filesz > maxsz - ph->p_offset) return 0;
+        if (ph->p_memsz < ph->p_filesz) return 0;
+        uint64_t va = base + ph->p_vaddr;                 /* effective load address */
+        if (va < PAGE_SIZE || ph->p_memsz > ELF_VADDR_MAX || va > ELF_VADDR_MAX - ph->p_memsz) return 0;
+        uint64_t start = page_down(va), end = page_up(va + ph->p_memsz);
+        for (uint64_t v = start; v < end; v += PAGE_SIZE) {
+            if (!vmm_translate(v)) {
+                uint64_t frame = pmm_alloc_frame();
+                if (!frame) return 0;
+                if (vmm_map(v, frame, PTE_WRITABLE | PTE_USER) != 0) { pmm_free_frame(frame); return 0; }
+                memset((void *)v, 0, PAGE_SIZE);
+            }
+        }
+        memcpy((void *)va, (const uint8_t *)image + ph->p_offset, ph->p_filesz);
+        if (va + ph->p_memsz > max_eff) max_eff = va + ph->p_memsz;
+    }
+    if (max_eff <= base) return 0;                        /* no loadable segments */
+    uint64_t span = max_eff - base;                       /* valid un-based offset range [0, span) */
+
+    for (uint16_t i = 0; i < phnum; i++) {                /* R_X86_64_RELATIVE fix-ups from PT_DYNAMIC */
+        const Elf64_Phdr *ph = (const Elf64_Phdr *)((const uint8_t *)image + phoff + (uint64_t)i * phentsize);
+        if (ph->p_type != PT_DYNAMIC) continue;
+        if (ph->p_vaddr >= span) break;                   /* .dynamic must lie within the loaded image */
+        const Elf64_Dyn *dyn = (const Elf64_Dyn *)(base + ph->p_vaddr);
+        uint64_t rela = 0, relasz = 0, dsz = ph->p_memsz;
+        if (dsz > span - ph->p_vaddr) dsz = span - ph->p_vaddr;
+        for (uint64_t o = 0; o + sizeof(Elf64_Dyn) <= dsz; o += sizeof(Elf64_Dyn)) {
+            const Elf64_Dyn *d = (const Elf64_Dyn *)((const uint8_t *)dyn + o);
+            if (d->d_tag == DT_NULL) break;
+            else if (d->d_tag == DT_RELA)   rela   = d->d_val;
+            else if (d->d_tag == DT_RELASZ) relasz = d->d_val;
+        }
+        if (rela && rela < span) {
+            for (uint64_t o = 0; o + sizeof(Elf64_Rela) <= relasz; o += sizeof(Elf64_Rela)) {
+                const Elf64_Rela *r = (const Elf64_Rela *)(base + rela + o);
+                if ((uint32_t)r->r_info == R_X86_64_RELATIVE &&
+                    r->r_offset <= span - sizeof(uint64_t))               /* in-image, no overflow write */
+                    *(uint64_t *)(base + r->r_offset) = base + (uint64_t)r->r_addend;
+            }
+        }
+        break;
+    }
+
+    for (uint16_t i = 0; i < phnum; i++) {                /* re-protect W^X now copy + relocs are done */
+        const Elf64_Phdr *ph = (const Elf64_Phdr *)((const uint8_t *)image + phoff + (uint64_t)i * phentsize);
+        if (ph->p_type != PT_LOAD) continue;
+        uint64_t va = base + ph->p_vaddr;
+        uint64_t start = page_down(va), end = page_up(va + ph->p_memsz);
+        uint64_t prot = PTE_USER;
+        if (ph->p_flags & PF_W)    prot |= PTE_WRITABLE;
+        if (!(ph->p_flags & PF_X)) prot |= PTE_NX;
+        for (uint64_t v = start; v < end; v += PAGE_SIZE) {
+            uint64_t phys = vmm_translate(v);
+            if (phys) vmm_map(v, phys & ~(uint64_t)(PAGE_SIZE - 1), prot);
+        }
+    }
+    return base + entry;
+}
+
 uint64_t elf_load(const void *image, uint64_t maxsz) {
     uint64_t phoff, entry; uint16_t phnum, phentsize;
     if (!elf_check_header(image, maxsz, &phoff, &phnum, &phentsize, &entry))
         return 0;
+    if (((const Elf64_Ehdr *)image)->e_type == ET_DYN)    /* a PIE: separate base-relative + relocating path (M1465) */
+        return elf_load_dyn(image, maxsz);
 
     for (uint16_t i = 0; i < phnum; i++) {
         elf_seg_t s;
