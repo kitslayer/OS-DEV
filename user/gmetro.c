@@ -3,7 +3,8 @@
  *
  * A swinging pendulum keeps the beat while the PC speaker ticks (sys_beep) once
  * per beat; the bob flashes on each tick. SPACE (or a click) starts/stops, w/Up
- * and s/Down change the tempo by 5 BPM (40..240), q/Esc quits. Pendulum angle is
+ * and s/Down change the tempo by 5 BPM (40..240), 1-9 set the time signature
+ * (beats per bar, with an accented downbeat), q/Esc quits. Pendulum angle is
  * a Bhaskara sine of the beat phase — no FPU.
  *
  * Launch: `run gmetro` from the shell, or the Apps menu ("Metronome").
@@ -63,7 +64,7 @@ int main(void) {
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
     if (!FB || sys_font(FONT, sizeof FONT) < 0) { print("gmetro: init failed\n"); return 1; }
 
-    int bpm = 120, running = 1, flash = 0, prevb = 0;
+    int bpm = 120, running = 1, flash = 0, prevb = 0, sig = 4, accent = 0;   /* sig = beats per bar (M1459) */
     long t0 = sys_uptime_ms(); int pbeat = -1;
 
     for (;;) {
@@ -71,7 +72,7 @@ int main(void) {
         int interval = 60000 / bpm;
         if (running) {
             int beat = (int)((now - t0) / interval);
-            if (beat != pbeat) { pbeat = beat; flash = 6; sys_beep(beat & 1 ? 1320 : 1760, 16); }   /* alternate pitch */
+            if (beat != pbeat) { pbeat = beat; flash = 6; accent = (beat % sig == 0); sys_beep(accent ? 1760 : 1047, accent ? 22 : 14); }   /* accented downbeat */
         }
 
         vgrad(0, 0, W, H, C_FACE_T, C_FACE_B);               /* slate faceplate (M1446) */
@@ -81,8 +82,16 @@ int main(void) {
         for (int a = -SWING; a <= SWING; a += 6)             /* faint swing arc guide */
             putpx(CX + (L + 8) * isin(a) / 1024, PY + (L + 8) * icos(a) / 1024, 0x222838);
         line(CX, PY, bx, by, 0xB0B8C8);                      /* rod */
-        disc(bx, by, 11, flash > 0 ? 0xFFE060 : 0xE05858);   /* bob, flashes gold on the beat */
+        disc(bx, by, 11, flash > 0 ? (accent ? 0xFFFFC8 : 0xFFE060) : 0xE05858);   /* bob: bright on the downbeat, gold on off-beats */
         disc(CX, PY, 4, 0x8090A8);                           /* pivot */
+
+        int curbeat = (running && pbeat >= 0) ? pbeat % sig : -1;   /* time-signature beat dots + N/4 (M1459) */
+        int dx0 = (W - sig * 18) / 2 + 5;
+        for (int i = 0; i < sig; i++) {
+            int lit = (i == curbeat);
+            disc(dx0 + i * 18, 16, lit ? 6 : 4, lit ? (i == 0 ? 0xFFFFC8 : 0xFFE060) : (i == 0 ? 0x8A6A24 : 0x3A444E));   /* downbeat dot always amber-tinted */
+        }
+        { char sg[4] = { (char)('0' + sig), '/', '4', 0 }; text(sg, 12, 12, C_AMBER); }
 
         char b[8], t[4]; int p = 0, v = bpm, ti = 0;            /* big BPM readout */
         if (v == 0) t[ti++] = '0';
@@ -91,7 +100,7 @@ int main(void) {
         b[p] = 0;
         textS(b, (W - (int)(p) * 24) / 2, H - 56, 3, running ? C_AMBER : C_AMBERLO);   /* BPM glows amber */
         text("BPM", (W - 24) / 2, H - 60, C_DIM);
-        text(running ? "space stop   w/s tempo   q" : "space start  w/s tempo   q", 18, H - 16, C_DIM);
+        text(running ? "space stop  w/s bpm  2-9 sig  q" : "space start  w/s bpm  2-9 sig  q", 18, H - 16, C_DIM);
 
         int mx, my, mb = sys_mouse(&mx, &my);
         int clicked = (mb & 1) && !(prevb & 1) && mx >= 0; prevb = mb;
@@ -104,6 +113,7 @@ int main(void) {
         else if (k == ' ' || clicked) { running = !running; t0 = now; pbeat = -1; }
         else if (k == 'w' || k == 0x11) { if (bpm < 240) bpm += 5; t0 = now; pbeat = -1; }
         else if (k == 's' || k == 0x12) { if (bpm > 40) bpm -= 5; t0 = now; pbeat = -1; }
+        else if (k >= '1' && k <= '9') { sig = k - '0'; t0 = now; pbeat = -1; }   /* set the time signature (beats per bar) */
         sys_sleep(running ? 26 : 90);
     }
     return 0;

@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1459) gmetro — time signature + accented downbeat.** The metronome just alternated pitch every beat — no real time signature, which every metronome has. Now `1`–`9` set the beats per bar; the **downbeat is accented** (higher 1760 Hz click + brighter bob flash vs 1047 Hz off-beats), and a row of beat dots + an `N/4` readout show the position in the bar (downbeat dot always amber-tinted). **Verified:** in-guest — `3` → 3/4 with three dots, downbeat dot lit bright; built clean + snap-verified.
+
 > **(M1458) gsw — lap splits.** The stopwatch was start/stop/reset only — no laps, a real gap for a stopwatch. Now `l` records a lap; a recessed panel lists each lap's **delta** (newest highlighted amber, the rest green), and `r` clears them with the reset. The window grew and the sweep ring was re-centred above the list. **Verified:** in-guest — start, lap at ~2 s, lap at ~3 s → L1 00:02.3 / L2 00:01.2 (correct deltas), total 00:04.8; built clean + snap-verified.
 
 > **(M1457) gcalc — scientific keys (√, 1/x, ±).** The calculator could already do `%` and (via `x × =`) squares, but **square-root and negate were impossible** and reciprocal was clumsy. Added three keyboard functions — `s` = square root, `i` = reciprocal (1/x), `n` = negate — all exact fixed-point (integer-Newton √), documented in a new footer. **Verified:** in-guest — √2 → 1.4142, 1/4 → 0.25, negate → -0.25; built clean + snap-verified.
