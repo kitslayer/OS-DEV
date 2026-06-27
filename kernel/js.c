@@ -3153,6 +3153,85 @@ static val nat_fetch(val *args, int nargs){
     return make_promise(1, obj_val(resp));
 }
 
+/* ---- EventSource (M-eventsource): a ONE-SHOT Server-Sent-Events snapshot ----
+ * The engine has no event loop, so a real long-lived SSE stream can't be sustained.
+ * Instead `new EventSource(url)` models the common dashboard pattern (es.onmessage =
+ * apply(JSON.parse(e.data))) by delivering exactly the FIRST event: on construction
+ * we enqueue a deferred task (like setTimeout(...,0)) that runs after the current
+ * script — so the user's es.onmessage/.onopen are set first — then does a blocking
+ * GET that the browser stops + closes after the first complete `\n\n`-terminated SSE
+ * block, gathers its `data:` lines into one payload, and fires onmessage({data,...}).
+ * Subsequent events never arrive (no loop), which is enough to populate the page once.
+ *
+ * The browser registers g_eventsource (js_set_eventsource): a blocking GET that reads
+ * the first SSE event's data payload into out, sets *status, and returns the payload
+ * length (or <0 on a network error -> onerror). NULL (host without a backing) -> the
+ * task fires onerror. */
+static int (*g_eventsource)(const char *url, char *out, int outmax, int *status);
+static int js_enqueue_task(val fn);                  /* fwd: defined with the timer queue */
+static val nat_json_parse(val *a, int n);            /* (already fwd-declared above; harmless) */
+
+/* es.close(): mark the EventSource CLOSED so a not-yet-run deferred task becomes a
+ * no-op. Carries the es object as the bound arg (args[0]). */
+static val es_close_native(val *args, int nargs){
+    if (nargs>0 && args[0].t==V_OBJ && args[0].o) obj_set(args[0].o, "readyState", NUM(2));   /* CLOSED */
+    return UND();
+}
+/* The deferred task: args[0] = the carried es object. Runs after the script. */
+static val es_deliver_native(val *args, int nargs){
+    if (nargs<1 || args[0].t!=V_OBJ || !args[0].o) return UND();
+    obj *es = args[0].o; val v;
+    if (obj_get(es, "readyState", &v) && v.t==V_NUM && v.num==2) return UND();   /* closed before firing */
+    val urlv; const char *url = (obj_get(es,"url",&urlv) && urlv.t==V_STR) ? urlv.str : 0;
+    int ok = 0, status = 0; const char *payload = "";
+    if (url && g_eventsource) {
+        int cap = 131072; char *buf = aalloc(cap);
+        if (!buf) { g_oom=1; return UND(); }
+        int n = g_eventsource(url, buf, cap-1, &status);
+        if (n >= 0) { if (n > cap-1) n = cap-1; buf[n]=0; payload = buf; ok = 1; }
+    }
+    if (ok) {
+        obj_set(es, "readyState", NUM(1));                 /* OPEN */
+        val cb;
+        if (obj_get(es, "onopen", &cb) && is_callable(cb)) {   /* fire onopen first (standard order) */
+            obj *ev=new_obj(V_OBJ); if(ev){ obj_set(ev,"type",STRV("open")); val a[1]={obj_val(ev)}; call_function_this(cb, obj_val(es), a, 1); }
+            if (g_err) return UND();
+        }
+        if (obj_get(es, "onmessage", &cb) && is_callable(cb)) {
+            obj *ev=new_obj(V_OBJ); if(!ev){ g_oom=1; return UND(); }
+            obj_set(ev, "data", STRV(payload));            /* the joined data: payload (arena-stable) */
+            obj_set(ev, "type", STRV("message"));
+            obj_set(ev, "lastEventId", STRV(""));
+            obj_set(ev, "origin", urlv);                   /* approximate origin = the URL */
+            val a[1]={obj_val(ev)};
+            call_function_this(cb, obj_val(es), a, 1);
+        }
+    } else {
+        val cb;                                            /* network error (or no backing) -> onerror */
+        if (obj_get(es, "onerror", &cb) && is_callable(cb)) {
+            obj *ev=new_obj(V_OBJ); if(ev){ obj_set(ev,"type",STRV("error")); val a[1]={obj_val(ev)}; call_function_this(cb, obj_val(es), a, 1); }
+        }
+    }
+    return UND();
+}
+/* new EventSource(url[, opts]): build the es object, then enqueue the deferred
+ * first-event delivery. */
+static val nat_eventsource(val *args, int nargs){
+    obj *es = new_obj(V_OBJ); if(!es){ g_oom=1; return UND(); }
+    const char *u = (nargs>0 && args[0].t==V_STR) ? args[0].str : "";
+    obj_set(es, "url", STRV(u));
+    obj_set(es, "readyState", NUM(0));                     /* CONNECTING */
+    obj_set(es, "withCredentials", BOOLV(0));
+    obj_set(es, "onmessage", UND());
+    obj_set(es, "onerror", UND());
+    obj_set(es, "onopen", UND());
+    obj_set(es, "close", make_resolver(es_close_native, obj_val(es)));   /* es.close() carries es */
+    /* CONNECTING/OPEN/CLOSED constants (real EventSource exposes these) */
+    obj_set(es, "CONNECTING", NUM(0)); obj_set(es, "OPEN", NUM(1)); obj_set(es, "CLOSED", NUM(2));
+    js_enqueue_task(make_resolver(es_deliver_native, obj_val(es)));   /* deferred: runs after the script */
+    return obj_val(es);
+}
+
 /* ---- Map & Set ----
  * Both are V_OBJ values whose obj->kind is V_MAP/V_SET. A Map stores entries
  * interleaved in obj->vals as [k0,v0,k1,v1,…] (so n is 2*size); a Set stores
@@ -4206,6 +4285,17 @@ static val nat_clearTimeout(val *a, int n){
         for (int i=0;i<g_ntimers;i++) if (g_timers[i].id==(int)a[0].num) g_timers[i].active=0;
     return UND();
 }
+/* Enqueue a 0-delay deferred task into the timer queue (used by EventSource to run
+ * the first-event delivery AFTER the current script). Returns the timer id, or 0 if
+ * full / not callable. */
+static int js_enqueue_task(val fn){
+    if (!js_callable(fn) || g_ntimers >= JS_NTIMERS) return 0;
+    int id = ++g_timer_id;
+    g_timers[g_ntimers].fn = fn; g_timers[g_ntimers].delay = 0;
+    g_timers[g_ntimers].id = id; g_timers[g_ntimers].active = 1; g_timers[g_ntimers].seq = g_timer_seq++;
+    g_ntimers++;
+    return id;
+}
 /* Run queued timers in (delay, seq) order; callbacks may queue more. Bounded so a
  * self-rescheduling setTimeout / setInterval can't spin forever. */
 static void js_drain_timers(void){
@@ -4298,6 +4388,7 @@ static void install_globals(env *g) {
         obj *pst=new_obj(V_OBJ); if(pst){ def_native(pst,"resolve",nat_promise_resolve); def_native(pst,"reject",nat_promise_reject); def_native(pst,"all",nat_promise_all); def_native(pst,"any",nat_promise_any); def_native(pst,"race",nat_promise_race); def_native(pst,"allSettled",nat_promise_allSettled); pc->statics=pst; }
         val v=UND(); v.t=V_NATIVE; v.o=pc; env_define(g,"Promise",v); } }
     { obj *f=new_obj(V_NATIVE); if(f){ f->native=nat_fetch; env_define(g,"fetch",obj_val_native(f)); } }   /* fetch(url) -> Promise<Response> (M684); functional once js_set_fetch wires a backing */
+    { obj *es=new_obj(V_NATIVE); if(es){ es->native=nat_eventsource; env_define(g,"EventSource",obj_val_native(es)); } }   /* new EventSource(url): one-shot SSE first-event snapshot (M-eventsource) */
     { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */
         obj *ast=new_obj(V_OBJ); if(ast){ def_native(ast,"isArray",nat_array_isArray); def_native(ast,"from",nat_array_from); def_native(ast,"of",nat_array_of); arrc->statics=ast; }
         g_array_ctor=arrc; env_define(g,"Array",obj_val_native(arrc)); } }
@@ -4437,6 +4528,12 @@ void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, 
  * returns body length or <0 on a network error. NULL (default) -> fetch() rejects. */
 void js_set_fetch(int (*fn)(const char *url, const char *method, const char *ctype, const char *body, char *out, int outmax, int *status)) {
     g_fetch = fn;
+}
+/* The browser registers a blocking SSE first-event backing for EventSource (M-eventsource):
+ * GET url, read the first complete event's data payload into out/+status, return its length
+ * or <0 on a network error. NULL (default) -> a constructed EventSource fires onerror. */
+void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status)) {
+    g_eventsource = fn;
 }
 /* The browser registers DOM read/mutate callbacks for getElementById handles. */
 void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const char *, const char *, int)) {
@@ -4656,6 +4753,15 @@ static int hfetch(const char *url, const char *method, const char *ctype, const 
     while (body[n] && n<outmax-1) { out[n]=body[n]; n++; } out[n]=0;
     return n;
 }
+/* mock EventSource backing: "/fail" -> network error (<0); else a canned first-event
+ * data payload (the joined data: lines), so the SSE snapshot path is testable host-side. */
+static int hes(const char *url, char *out, int outmax, int *status) {
+    if (strstr(url, "fail")) return -1;
+    *status = 200;
+    const char *body = "{\"msg\":\"sse-snapshot\",\"n\":7}";
+    int n=0; while (body[n] && n<outmax-1) { out[n]=body[n]; n++; } out[n]=0;
+    return n;
+}
 
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
@@ -4671,6 +4777,7 @@ int main(int argc, char **argv) {
     js_set_dom_rmattr(hdom_rmattr, hdom_rmattr_at);    /* mock removeAttribute for host tests */
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     js_set_fetch(hfetch);                                /* mock network for fetch() tests (M684) */
+    js_set_eventsource(hes);                             /* mock SSE first-event for EventSource tests (M-eventsource) */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
     if (getenv("JS_ARENA_REPORT")) fprintf(stderr, "ARENA_END=%d / %d (headroom %d)\n", g_arena_off, JS_ARENA, JS_ARENA-g_arena_off);

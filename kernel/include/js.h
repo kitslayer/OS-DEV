@@ -35,6 +35,14 @@ void js_set_title(int (*get)(char *, int), void (*set)(const char *));
  * Without it, fetch() rejects. */
 void js_set_fetch(int (*fn)(const char *url, const char *method, const char *ctype, const char *body, char *out, int outmax, int *status));
 
+/* Register a blocking backing for the JS EventSource global (M-eventsource): the
+ * callback does a GET of `url`, reads the FIRST complete SSE event, fills `out` (up
+ * to outmax) with that event's joined `data:` payload, sets *status to the HTTP
+ * status, and returns the payload length, or <0 on a network error. It must CLOSE
+ * the connection after the first event (SSE streams stay open). Without it, a
+ * constructed EventSource fires onerror. */
+void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status));
+
 /* Register DOM callbacks for document.getElementById(id) handles:
  *  get(id, out, max, html) -> 1 if found, fills out with the element's
  *    textContent (html=0) or innerHTML (html=1);
