@@ -11,7 +11,7 @@
 #include "ulib.h"
 
 #define W 300
-#define H 252
+#define H 300                 /* taller: room for the saved-colour palette row (M1455) */
 #define SX 44                     /* slider track: x in [SX, SX+SW] */
 #define SW 226
 
@@ -58,6 +58,27 @@ static void gtextS(const char *t, int x, int y, int s, unsigned col, unsigned gl
     for (int i = 0; t[i]; i++) chS(t[i], x + i * 8 * s,     y,     s, col);
 }
 
+/* saved-colour palette (M1455): up to 8 swatches, persisted to PALETTE.DAT */
+static int pal[8][3], npal;
+static const char *PFNAME = "PALETTE.DAT";
+static int hexd(int c) { if (c >= '0' && c <= '9') return c - '0'; if (c >= 'A' && c <= 'F') return c - 'A' + 10; if (c >= 'a' && c <= 'f') return c - 'a' + 10; return 0; }
+static void pal_save(void) {
+    char buf[80]; int p = 0; const char *HX = "0123456789ABCDEF";
+    for (int i = 0; i < npal; i++) { for (int c = 0; c < 3; c++) { buf[p++] = HX[(pal[i][c] >> 4) & 15]; buf[p++] = HX[pal[i][c] & 15]; } buf[p++] = '\n'; }
+    sys_writefile(PFNAME, buf, p);
+}
+static void pal_load(void) {
+    char buf[128]; long n = sys_readfile(PFNAME, buf, sizeof buf - 1);
+    if (n <= 0) return; buf[n] = 0; npal = 0;
+    for (int i = 0; i + 6 <= n && npal < 8; ) {
+        if (buf[i] == '\n' || buf[i] == ' ') { i++; continue; }
+        pal[npal][0] = hexd(buf[i]) * 16 + hexd(buf[i+1]);
+        pal[npal][1] = hexd(buf[i+2]) * 16 + hexd(buf[i+3]);
+        pal[npal][2] = hexd(buf[i+4]) * 16 + hexd(buf[i+5]);
+        npal++; i += 6; while (i < n && buf[i] != '\n') i++;
+    }
+}
+
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("gcolor: gfx init failed\n"); return 1; }
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
@@ -65,6 +86,7 @@ int main(void) {
 
     int rgb[3] = { 32, 178, 170 };           /* a pleasant default teal */
     int active = 0, prgb[3] = { -1, -1, -1 }, pact = -1;
+    pal_load();                              /* restore saved swatches */
 
     for (;;) {
         int k = sys_pollkey();
@@ -81,12 +103,21 @@ int main(void) {
             for (int ch = 0; ch < 3; ch++) { hx[1 + ch * 2] = HX[(rgb[ch] >> 4) & 15]; hx[2 + ch * 2] = HX[rgb[ch] & 15]; }
             hx[7] = 0; sys_clip_set(hx, 7);
         }
+        else if (k == 's' || k == 'S') {                                       /* save current colour to the palette (FIFO, max 8) */
+            if (npal < 8) { pal[npal][0] = rgb[0]; pal[npal][1] = rgb[1]; pal[npal][2] = rgb[2]; npal++; }
+            else { for (int i = 0; i < 7; i++) for (int c = 0; c < 3; c++) pal[i][c] = pal[i + 1][c]; pal[7][0] = rgb[0]; pal[7][1] = rgb[1]; pal[7][2] = rgb[2]; }
+            pal_save(); pact = -1;                                             /* persist + force a redraw */
+        }
 
         int mx, my, b = sys_mouse(&mx, &my);                                   /* drag/click a slider */
         if ((b & 1) && mx >= 0) for (int ch = 0; ch < 3; ch++)
             if (my >= SY[ch] - 12 && my <= SY[ch] + 18 && mx >= SX - 6 && mx <= SX + SW + 6) {
                 int v = (mx - SX) * 255 / SW; rgb[ch] = clamp(v); active = ch;
             }
+        if ((b & 1) && mx >= 14 && my >= 246 && my <= 272) {                   /* click a saved swatch -> recall it */
+            int i = (mx - 14) / 32;
+            if (i >= 0 && i < npal) { rgb[0] = pal[i][0]; rgb[1] = pal[i][1]; rgb[2] = pal[i][2]; }
+        }
 
         if (rgb[0] != prgb[0] || rgb[1] != prgb[1] || rgb[2] != prgb[2] || active != pact) {
             prgb[0] = rgb[0]; prgb[1] = rgb[1]; prgb[2] = rgb[2]; pact = active;
@@ -128,7 +159,13 @@ int main(void) {
                 vt[vp] = 0;
                 text(vt, SX + SW + 8, y + 2, C_LABEL);
             }
-            text("drag  r/g/b  a/d  c copy hex  q quit", 14, H - 16, C_DIM);
+            text("SAVED", 14, 232, C_DIM);                                     /* saved-colour palette (M1455) */
+            for (int i = 0; i < npal; i++) {
+                int x = 14 + i * 32;
+                fill(x, 246, 28, 26, ((unsigned)pal[i][0] << 16) | ((unsigned)pal[i][1] << 8) | pal[i][2]);
+                bevel_up(x, 246, 28, 26, C_BEZHI, C_BEZLO);
+            }
+            text("r/g/b a/d   s save  c copy  q quit", 14, H - 16, C_DIM);
             sys_gfx_blit(FB);
         }
         sys_sleep(40);

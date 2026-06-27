@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1455) gcolor — saved-colour palette.** The colour picker can now keep favourites: `s` saves the current colour to a row of up to 8 swatches (FIFO when full), clicking a swatch recalls it, and the palette is **persisted to PALETTE.DAT** so it survives across runs (the window grew to fit the row). **Verified:** in-guest — saved teal then `#20B25A` green → two beveled swatches in the SAVED row, Files count 135→136 (PALETTE.DAT written); built clean + snap-verified.
+
 > **(M1454) gbase — ASCII CHR row.** The base converter now shows a fifth row, **CHR**, with the value's ASCII character when it's a printable byte (32–126) — closing the dev loop "what char is 0x41?". The window grew to fit it; non-printable values show `-`. **Verified:** in-guest — hex `41` → DEC 65 / OCT 0o101 / BIN 0b1000001 / **CHR 'A'** (all correct); built clean + snap-verified.
 
 > **(M1453) gconv — Time category (day / hr / min / sec).** Added a seventh conversion category to the unit converter. It fits gconv's integer fixed-point factor model exactly by using **day** as the base (hr=24, min=1440, sec=86400 per day — all whole numbers, no rounding). `c` now cycles 7 categories. **Verified:** in-guest — `2 day` → `= 48 hr / = 2880 min / = 172800 sec` (all exact); built clean + snap-verified. (Same lighter gate as M1452 — shared tree holds the browser session's uncommitted reader-rework.)
