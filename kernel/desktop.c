@@ -720,22 +720,63 @@ int desktop_load_image(const char *name, unsigned *buf, int cw, int ch, int *out
  * gradient with a soft radial vignette + a gentle glow above center. Integer-only
  * (the kernel has no FPU). Looks clean + modern AND needs no image on disk, so the
  * desktop looks good even on bare metal where WALL.PNG may be absent. */
+static inline int wp_cl(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
+/* integer sine (Bhaskara), result ~[-1024,1024]; shapes the mountain ridges */
+static int wp_sin(int d) {
+    d %= 360; if (d < 0) d += 360;
+    int s = 1; if (d > 180) { d -= 180; s = -1; }
+    long num = 4L * d * (180 - d), den = 40500 - (long)d * (180 - d);
+    return den ? s * (int)(num * 1024 / den) : 0;
+}
+
+/* The boot desktop background: a procedurally-rendered DUSK SCENE (M1469) —
+ * a graded indigo->dusk-purple sky with a warm low sun glow and faint stars,
+ * over three layered mountain ridges shaded by atmospheric perspective (hazy
+ * light far -> dark near), each ridge given a warm sun-lit rim. It's drawn once
+ * into the cached buffer, so there's no per-frame cost. (Replaced the flat
+ * blue gradient that read as dated.) */
 static void make_wallpaper(uint32_t *buf, int w, int h) {
-    uint32_t c0 = 0x12315C, c1 = 0x3A82C4;        /* deep blue -> vibrant azure (diagonal) */
-    int cx = w / 2, gy = (h * 40) / 100;          /* glow center, a touch above middle */
-    long far = (long)cx * cx + (long)(h - gy) * (h - gy);
-    if (far < 1) far = 1;
+    const uint32_t SKY_TOP = 0x0A0E27, SKY_HOR = 0x3A2A52;   /* night indigo -> dusky purple */
+    int horizon = h * 60 / 100;
+    int gx = w * 63 / 100, gy = horizon - h / 18;            /* warm sun glow: off-centre, just above the horizon */
+    long gr = (long)(w / 3) * (w / 3); if (gr < 1) gr = 1;   /* glow radius^2 */
+
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
-            uint32_t base = lerp(c0, c1, x + y, (w + h) - 2);     /* diagonal gradient */
-            long dx = x - cx, dy = y - gy, d2 = dx * dx + dy * dy;
-            int t = (int)(d2 * 100 / far); if (t > 100) t = 100;  /* 0 = glow center .. 100 = far corner */
-            int fac = 118 - (118 - 78) * t / 100;                 /* +18% glow at center -> -22% vignette at the corners */
-            int r = ((base >> 16) & 0xFF) * fac / 100; if (r > 255) r = 255;
-            int g = ((base >>  8) & 0xFF) * fac / 100; if (g > 255) g = 255;
-            int b = ( base        & 0xFF) * fac / 100; if (b > 255) b = 255;
-            buf[(size_t)y * w + x] = (uint32_t)(r << 16 | g << 8 | b);
+            uint32_t base = (y < horizon) ? lerp(SKY_TOP, SKY_HOR, y, horizon - 1) : SKY_HOR;
+            int r = (base >> 16) & 0xFF, g = (base >> 8) & 0xFF, b = base & 0xFF;
+            long dx = x - gx, dy = y - gy, d2 = dx * dx + dy * dy;     /* warm radial sun glow */
+            int gl = (int)(230 - d2 * 230 / gr);
+            if (gl > 0) { r += gl; g += gl * 150 / 255; b += gl * 64 / 255; }
+            if (y < horizon) {                                        /* faint stars, fading toward the horizon */
+                unsigned hs = (unsigned)x * 374761393u + (unsigned)y * 668265263u;
+                hs ^= hs >> 13; hs *= 1274126177u;
+                if ((hs % 1700u) < 3u) { int br = (120 + (int)(hs % 130u)) * (horizon - y) / horizon; r += br; g += br; b += br; }
+            }
+            buf[(size_t)y * w + x] = (uint32_t)(wp_cl(r) << 16 | wp_cl(g) << 8 | wp_cl(b));
         }
+
+    /* three mountain layers, far (hazy/light) -> near (dark); each a sine ridge */
+    static const struct { int dy, amp, f1, f2, f3, ph; uint32_t col, rim; } L[3] = {
+        {  3,  6, 2,  5, 11,  40, 0x3E3360, 0x6E5A78 },    /* far: hazy purple, peeks at the horizon */
+        { 10, 10, 2,  7, 13, 170, 0x282248, 0x7A5A50 },    /* mid */
+        { 20, 15, 3,  6, 17, 300, 0x121327, 0x8A5A3E },    /* near: dark slate, warm sun-lit rim */
+    };
+    for (int li = 0; li < 3; li++) {
+        int basey = horizon + L[li].dy * h / 100, amp = L[li].amp * h / 100;
+        for (int x = 0; x < w; x++) {
+            int rg = basey
+                   - amp          * wp_sin(x * 360 * L[li].f1 / w + L[li].ph)     / 1024
+                   - amp * 6 / 10 * wp_sin(x * 360 * L[li].f2 / w + L[li].ph * 2) / 1024
+                   - amp * 3 / 10 * wp_sin(x * 360 * L[li].f3 / w + L[li].ph * 3) / 1024;
+            if (rg < 0) rg = 0;
+            for (int y = rg; y < h; y++) {
+                int rim = y - rg;
+                buf[(size_t)y * w + x] = (rim < 3) ? lerp(L[li].rim, L[li].col, rim, 3)   /* warm sun-lit ridge edge */
+                                                   : lerp(L[li].col, 0x05060E, rim, h);   /* subtle darkening toward the base */
+            }
+        }
+    }
 }
 
 /* The boot desktop background. A clean PROCEDURAL gradient is the default (works
