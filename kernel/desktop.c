@@ -345,23 +345,23 @@ static void draw_content(const window_t *w, int focused) {
             "- Clock, Calc, Images, Fireworks +", "",
             "Drag the title bar or corner to move.",
             "F9 = Apps menu     F1 = all shortcuts" };
-        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) {           /* colourised intro (M1333) */
+        for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++) {           /* dusk-themed intro (M1476): light text on a slate panel */
             const char *s = L[i];
-            if (s[0] == '-' && s[1] == ' ') {                            /* app bullet: "- Label:" accent, rest dark */
+            if (s[0] == '-' && s[1] == ' ') {                            /* app bullet: green label, soft desc */
                 int colon = -1; for (int k = 0; s[k]; k++) if (s[k] == ':') { colon = k; break; }
                 if (colon > 0) {
                     char seg[48]; int p = 0; for (int k = 0; k <= colon && p < 47; k++) seg[p++] = s[k]; seg[p] = 0;
-                    draw_text(bx, by + i*18, seg, 0x1F56C6);
-                    draw_text(bx + (colon + 1)*font_width, by + i*18, s + colon + 1, 0x202028);
+                    draw_text(bx, by + i*18, seg, 0x6FD3A6);
+                    draw_text(bx + (colon + 1)*font_width, by + i*18, s + colon + 1, 0xB6C2BE);
                     continue;
                 }
             }
-            uint32_t col = (i == 0) ? 0x1F56C6                           /* heading accent blue */
-                         : (s[0] == 'F' && s[1] == '9') ? 0x4A6FA8       /* shortcut hint: muted blue */
-                         : 0x202028;                                     /* body dark */
+            uint32_t col = (i == 0) ? 0xFFB23E                           /* heading: warm amber (echoes the wallpaper sun) */
+                         : (s[0] == 'F' && s[1] == '9') ? 0x8AA0A8       /* shortcut hint: muted */
+                         : 0xC6D0CC;                                     /* body: soft silkscreen */
             draw_text(bx, by + i*18, s, col);
         }
-        fb_fill_rect(bx, by + 16, w->w - 24, 1, 0xC9CCD6);                /* accent rule under the heading */
+        fb_fill_rect(bx, by + 16, w->w - 24, 1, 0x4A3A24);                /* dim amber rule under the heading */
         break;
     }
     case KIND_FILES: {
@@ -1360,7 +1360,7 @@ static void spawn_app(int kind, const char *prog) {
     w.x = x; w.y = y; w.kind = kind;
     switch (kind) {
     case KIND_FILES:   w.w=500; w.h=200; w.body=0xE8ECF4; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
-    case KIND_WELCOME: w.w=360; w.h=290; w.body=0xF0F0F0; w.title="Welcome"; break;
+    case KIND_WELCOME: w.w=360; w.h=290; w.body=0x1A2228; w.title="Welcome"; break;   /* dark slate panel (M1476) */
     case KIND_ABOUT:   w.w=300; w.h=196; w.body=0xF4F0E8; w.title="About";   break;
     case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="System Info"; break;
     default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
@@ -1381,7 +1381,7 @@ void desktop_run(void) {
     load_wallpaper();                    /* WALL.PNG from disk, else the gradient */
     start_y = screen_h - TASKBAR_H + 5;
 
-    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0xF0F0F0, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
+    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0x1A2228, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* dark slate (M1476) */
     windows[win_count++] = (window_t){ 60, 300, 500, 200, 0xE8ECF4, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
     app_spawn_named("shell");           /* a real ring-3 shell (WM gives it a
                                          * window below; spawn more via Apps) */
