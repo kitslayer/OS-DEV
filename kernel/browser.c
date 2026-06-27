@@ -3989,6 +3989,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         }
     } else {
     int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16]; int bstk_i[16], bsp = 0;   /* CSS border boxes: y_top+sides+left-indent pushed on OPEN, rect stroked on CLOSE */
+    int bstk_x[16];   /* cx at TK_BORDER_OPEN (x_start for single-line tight-box detection) */
     int render_rpad = 0;   /* right-edge inset while inside full border boxes, so their text wraps short of the box (M916 horizontal padding) */
     int flex_depth = 0;    /* >0 while inside a display:flex container: child block-breaks become horizontal gaps (M927) */
     int flex_gap = 18;     /* px gap between flex items (from CSS `gap`, M930; 18 default) */
@@ -3996,18 +3997,39 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     int bgsp = 0;   /* block-bg nesting depth: counted so a nested TK_BG_OPEN's forward-scan stops at ITS matching close (M993) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
-        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right */
+        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bstk_x[bsp] = cx; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right; bstk_x tracks x-start for inline tight-box */
         if (tk->type == TK_BORDER_CLOSE) {
             if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh + 3, w = bstk_w[bsp], sd = bstk_s[bsp]; uint32_t bc = bstk_c[bsp];   /* sd: 1=top 2=right 4=bottom 8=left; +3 bottom padding */
                 if (sd == 15 && render_rpad >= BORDER_PAD) render_rpad -= BORDER_PAD;   /* leaving a full box: undo its wrap-right inset */
                 int xl = cl + bstk_i[bsp];                                          /* left edge follows the block's own indent (blockquote / margin-left) */
-                int yy0 = y0 < ct ? ct : y0, yy1 = y1 > cb ? cb : y1;
-                if (yy1 > yy0) {
-                    if (sd & 8) fb_fill_rect(xl, yy0, w, yy1 - yy0, bc);            /* left edge (viewport-clipped) */
-                    if (sd & 2) fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc);        /* right edge */
+                /* Single-line (inline) element: cy hasn't advanced past the opening line — stroke
+                 * a tight box around just the content's horizontal span instead of full-width.
+                 * bstk_y[bsp] = cy_at_open - 4, so cy_at_open = bstk_y[bsp] + 4; if cy still
+                 * equals that value no line-wrap/break occurred and the element is inline. */
+                int cy_at_open = bstk_y[bsp] + 4;
+                int inline_el = (cy == cy_at_open);   /* true: no vertical advance between open+close */
+                if (inline_el) {
+                    /* tight box: [x_start-pad .. cx+pad] × [y0 .. y0+curlh+7] */
+                    int x0t = bstk_x[bsp] - BORDER_PAD;   /* left of tight box */
+                    int x1t = cx + BORDER_PAD;             /* right of tight box (cx is after last word) */
+                    if (x0t < xl) x0t = xl;                /* never exceed block's own indent */
+                    int yy0t = y0 < ct ? ct : y0, yy1t = y1 > cb ? cb : y1;
+                    if (yy1t > yy0t) {
+                        if (sd & 8) fb_fill_rect(x0t, yy0t, w, yy1t - yy0t, bc);       /* left  */
+                        if (sd & 2) fb_fill_rect(x1t - w, yy0t, w, yy1t - yy0t, bc);   /* right */
+                    }
+                    if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(x0t, y0, x1t - x0t, w, bc);             /* top */
+                    if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(x0t, y1 - w, x1t - x0t, w, bc); /* bottom */
+                } else {
+                    /* Multi-line (block) element: full-width behavior unchanged */
+                    int yy0 = y0 < ct ? ct : y0, yy1 = y1 > cb ? cb : y1;
+                    if (yy1 > yy0) {
+                        if (sd & 8) fb_fill_rect(xl, yy0, w, yy1 - yy0, bc);            /* left edge (viewport-clipped) */
+                        if (sd & 2) fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc);        /* right edge */
+                    }
+                    if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(xl, y0, cr - xl, w, bc);                /* top edge */
+                    if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(xl, y1 - w, cr - xl, w, bc);     /* bottom edge */
                 }
-                if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(xl, y0, cr - xl, w, bc);                /* top edge */
-                if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(xl, y1 - w, cr - xl, w, bc);     /* bottom edge */
             }
             continue;
         }
