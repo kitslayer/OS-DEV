@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1458) gsw — lap splits.** The stopwatch was start/stop/reset only — no laps, a real gap for a stopwatch. Now `l` records a lap; a recessed panel lists each lap's **delta** (newest highlighted amber, the rest green), and `r` clears them with the reset. The window grew and the sweep ring was re-centred above the list. **Verified:** in-guest — start, lap at ~2 s, lap at ~3 s → L1 00:02.3 / L2 00:01.2 (correct deltas), total 00:04.8; built clean + snap-verified.
+
 > **(M1457) gcalc — scientific keys (√, 1/x, ±).** The calculator could already do `%` and (via `x × =`) squares, but **square-root and negate were impossible** and reciprocal was clumsy. Added three keyboard functions — `s` = square root, `i` = reciprocal (1/x), `n` = negate — all exact fixed-point (integer-Newton √), documented in a new footer. **Verified:** in-guest — √2 → 1.4142, 1/4 → 0.25, negate → -0.25; built clean + snap-verified.
 
 > **(M1456) gtimer — type the minutes directly.** Setting a long timer used to mean tapping `w` once per minute (20+ presses for a 25-min timer). Now digit keys set the minutes live — type `25` → `25:00` — with backspace to correct, while `w`/`s` still nudge ±1. Also fixed the footer, which had been clipped past the 240px window since M1442. **Verified:** in-guest — `25` → 25:00, backspace → 02:00, footer fully visible; built clean + snap-verified.

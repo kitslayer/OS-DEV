@@ -2,7 +2,7 @@
  * gsw.c — a graphical STOPWATCH, a userspace program (M1387).
  *
  * Big MM:SS.t digits (the kernel 8x16 font scaled 3x) over a ring with a
- * sweeping sub-second hand. Keys: SPACE = start/stop, r = reset, q/Esc = quit.
+ * sweeping sub-second hand. Keys: SPACE = start/stop, l = lap, r = reset, q/Esc = quit.
  * Elapsed time from sys_uptime_ms with proper pause/resume accumulation. While
  * running it redraws ~25 fps for a smooth sweep; while stopped it idles.
  *
@@ -11,7 +11,7 @@
 #include "ulib.h"
 
 #define W 224
-#define H 212
+#define H 300                 /* taller: room for the lap-splits panel (M1458) */
 
 static unsigned *FB;
 static unsigned char FONT[128 * 16];
@@ -75,6 +75,7 @@ int main(void) {
     if (!FB || sys_font(FONT, sizeof FONT) < 0) { print("gsw: init failed\n"); return 1; }
 
     int running = 0; long accum = 0, start = 0;
+    long laps[40]; int nlap = 0;             /* recorded lap splits (M1458) */
     int dirty = 1, prevb = 0;
     for (;;) {
         long now = sys_uptime_ms();
@@ -83,7 +84,8 @@ int main(void) {
         int mx, my, mb = sys_mouse(&mx, &my);                   /* a click = start/stop, like Space (M1398) */
         int clicked = (mb & 1) && !(prevb & 1) && mx >= 0; prevb = mb;
         if (k == ' ' || clicked) { if (running) { accum += now - start; running = 0; } else { start = now; running = 1; } dirty = 1; }
-        else if (k == 'r' || k == 'R') { accum = 0; running = 0; dirty = 1; }
+        else if (k == 'r' || k == 'R') { accum = 0; running = 0; nlap = 0; dirty = 1; }
+        else if ((k == 'l' || k == 'L') && running && nlap < 40) { laps[nlap++] = now - start + accum; dirty = 1; }   /* record a lap split */
 
         if (running || dirty) {
             long ms = running ? (sys_uptime_ms() - start + accum) : accum;
@@ -97,13 +99,29 @@ int main(void) {
             b[i++] = '0' + ss / 10; b[i++] = '0' + ss % 10; b[i++] = '.'; b[i++] = '0' + t; b[i] = 0;
             gtextS(b, (W - 7 * 24) / 2, 16, 3, running ? C_AMBER : C_AMBERLO, C_AMBERLO);   /* time glows amber, dim when stopped */
 
-            int cx = W / 2, cy = 140, R = 34;                        /* sub-second sweep ring */
+            int cx = W / 2, cy = 124, R = 34;                        /* sub-second sweep ring (raised to centre it above the laps) */
             for (int a = 0; a < 360; a += 3) putpx(cx + R * isin(a) / 1024, cy - R * icos(a) / 1024, 0x33414A);
             int ang = (int)((ms % 1000) * 360 / 1000);
             line(cx, cy, cx + (R - 4) * isin(ang) / 1024, cy - (R - 4) * icos(ang) / 1024, running ? C_LED : C_DIM);
             fill(cx - 2, cy - 2, 5, 5, C_AMBER);                     /* hub */
 
-            text(running ? "RUNNING   space stop  r reset" : "STOPPED   space start  r reset", 8, H - 16, C_DIM);
+            int lpy = 170, lph = H - lpy - 24;                       /* lap-splits panel (M1458) */
+            panel(8, lpy, W - 16, lph);
+            if (nlap == 0) text("- press l for a lap -", 18, lpy + 8, C_DIM);
+            else {
+                int show = nlap < 6 ? nlap : 6, first = nlap - show;
+                for (int j = 0; j < show; j++) {
+                    int idx = first + j; long d = laps[idx] - (idx > 0 ? laps[idx - 1] : 0);
+                    int dm = (int)(d / 60000), dss = (int)((d % 60000) / 1000), dt = (int)((d % 1000) / 100);
+                    char lb[20]; int p = 0; int n = idx + 1;
+                    lb[p++] = 'L'; if (n >= 10) lb[p++] = '0' + n / 10; lb[p++] = '0' + n % 10; lb[p++] = ' '; lb[p++] = ' ';
+                    lb[p++] = '0' + (dm / 10) % 10; lb[p++] = '0' + dm % 10; lb[p++] = ':';
+                    lb[p++] = '0' + dss / 10; lb[p++] = '0' + dss % 10; lb[p++] = '.'; lb[p++] = '0' + dt; lb[p] = 0;
+                    text(lb, 18, lpy + 8 + j * 16, idx == nlap - 1 ? C_AMBER : C_LED);   /* newest lap amber, the rest green */
+                }
+            }
+
+            text(running ? "space stop  l lap  r reset" : "space start  r reset", 8, H - 16, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }
