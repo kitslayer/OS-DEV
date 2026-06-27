@@ -2561,7 +2561,15 @@ static void browser_dom_rmattr_at(int off, const char *attr) {   /* position-han
  * being rendered. */
 static int browser_fetch(const char *url, const char *method, const char *ctype, const char *reqbody, char *out, int outmax, int *status) {
     if (!url || outmax <= 0) return -1;
-    char cur[URL_MAX]; { int i=0; while (url[i] && i<URL_MAX-1) { cur[i]=url[i]; i++; } cur[i]=0; }
+    char cur[URL_MAX];
+    /* Resolve relative request URLs (e.g. fetch('/api/weather')) against the
+     * current page URL, like a real browser — without this a root-/dir-relative
+     * fetch yields an empty host and fails (M-fetch-rel). An absolute http(s)://
+     * URL is copied verbatim; resolve_img_url handles both. Fall back to a raw
+     * copy if there's no page URL or resolution can't fit. */
+    int urll = (int)strlen(url);
+    if (!(g_ls_b && g_ls_b->url[0] && resolve_img_url(g_ls_b->url, url, urll, cur, sizeof(cur))))
+        { int i=0; while (url[i] && i<URL_MAX-1) { cur[i]=url[i]; i++; } cur[i]=0; }
     int is_post = method && (method[0]=='P' || method[0]=='p');
     int reqlen = is_post && reqbody ? (int)strlen(reqbody) : 0;
     char *raw = kmalloc(RAW_MAX);
