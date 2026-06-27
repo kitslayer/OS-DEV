@@ -283,10 +283,16 @@ static int unum(uint64_t v, char *o) {           /* general unsigned -> string; 
     o[j] = 0; return j;
 }
 
+static int gfx_scale(int gw, int gh);   /* forward decl (defined just below) */
 static void win_min(const window_t *w, int *mw, int *mh) {
     if (w->kind == KIND_APP) {
-        *mw = app_cols() * font_width + 14;
-        *mh = app_rows() * font_height + TITLEBAR_H + 14;
+        uint32_t *cb; int gw, gh;
+        if (w->app && app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) {   /* gfx app: pinned to its (scaled) canvas */
+            int s = gfx_scale(gw, gh);
+            *mw = gw * s + 14; *mh = gh * s + TITLEBAR_H + 14;
+        } else {                                                       /* text terminal: small min -> live-resizable (M1473) */
+            *mw = 24 * font_width + 14; *mh = 6 * font_height + TITLEBAR_H + 14;
+        }
     } else if (w->kind == KIND_BROWSER) { *mw = 340; *mh = 240; }
     else if (w->kind == KIND_SYSMON)  { *mw = 320; *mh = 272; }  /* a fixed-layout info panel (= its open size): can't be shrunk below its Memory/Network/Disk content, which would otherwise draw past the bottom edge */
     else if (w->kind == KIND_WELCOME) { *mw = 360; *mh = 290; }  /* likewise a fixed-layout panel pinned to its open size */
@@ -450,7 +456,10 @@ static void draw_content(const window_t *w, int focused) {
                         for (int ox = 0; ox < s; ox++)
                             fb_pixel(dx + xx * s + ox, dy + yy * s + oy, px);
                 }
-        } else if (w->app) app_render((app_t *)w->app, bx - 2, by - 2, focused);
+        } else if (w->app) {                                  /* text terminal: size the live grid to the window, then render (M1473) */
+            app_set_grid((app_t *)w->app, (w->w - 14) / font_width, (w->h - TITLEBAR_H - 14) / font_height);
+            app_render((app_t *)w->app, bx - 2, by - 2, focused);
+        }
         break;
     }
     case KIND_BROWSER:
@@ -1765,7 +1774,7 @@ void desktop_run(void) {
                             uint32_t *cb; int gw, gh;    /* text app: scrollbar / word-select / drag-select */
                             if (!app_gfx_get((app_t *)t->app, &cb, &gw, &gh)) {
                                 int px = t->x + 6, py = t->y + TITLEBAR_H + 6;
-                                int sbx = px + app_cols() * font_width + 1, trackh = app_rows() * font_height;
+                                int sbx = px + app_grid_cols((app_t *)t->app) * font_width + 1, trackh = app_grid_rows((app_t *)t->app) * font_height;
                                 if (mx >= sbx - 4 && mx <= sbx + 6 && my >= py && my < py + trackh) {
                                     app_scroll_frac((app_t *)t->app, my - py, trackh);   /* click the scrollbar */
                                     sbdrag = win_count - 1;
@@ -1816,7 +1825,7 @@ void desktop_run(void) {
 
         if (sbdrag >= 0 && left) {                 /* dragging the terminal scrollbar */
             window_t *w = &windows[sbdrag];
-            int py = w->y + TITLEBAR_H + 6, trackh = app_rows() * font_height;
+            int py = w->y + TITLEBAR_H + 6, trackh = app_grid_rows((app_t *)w->app) * font_height;
             app_scroll_frac((app_t *)w->app, my - py, trackh);
             dirty = 1;
         }

@@ -41,9 +41,18 @@
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
 #include <stdint.h>
 
-#define APP_COLS 44
-#define APP_ROWS 17
-#define SB_ROWS  48          /* scrollback: ~3 screens of history */
+/* The terminal grid is now LIVE-RESIZABLE (M1473): the arrays are sized to a
+ * generous maximum, while each app tracks its CURRENT visible size (a->cols /
+ * a->rows), which the window manager derives from the window's pixel size as it
+ * is dragged. The ops below all work in terms of the current size; only the
+ * array declarations use the _MAX bounds. */
+#define APP_COLS_MAX 160     /* grid array width  (fills a 1280px screen at 8px/glyph) */
+#define APP_ROWS_MAX 56      /* grid array height (fills ~960px at 16px/glyph) */
+#define APP_DEF_COLS 80      /* default size a terminal opens at (classic 80x24) */
+#define APP_DEF_ROWS 24
+#define APP_MIN_COLS 24      /* smallest the grid may shrink to on resize */
+#define APP_MIN_ROWS 6
+#define SB_ROWS  72          /* scrollback: ~3 screens of history */
 #define IQ_SIZE  128
 #define MAX_APPS 8
 #define HIST_N   32          /* command-history depth (up/down recall) */
@@ -110,14 +119,15 @@ struct app {
     volatile int rqh, rqt;
     volatile int ms_x, ms_y, ms_btn;     /* cursor relative to the gfx canvas (-1 outside) + buttons */
     volatile int ms_dx, ms_dy;           /* accumulated relative motion (mouselook) */
-    char     grid[APP_ROWS][APP_COLS];
-    uint8_t  gcol[APP_ROWS][APP_COLS];   /* per-cell colour (palette index, 0 = default) for the live grid */
+    char     grid[APP_ROWS_MAX][APP_COLS_MAX];
+    uint8_t  gcol[APP_ROWS_MAX][APP_COLS_MAX];   /* per-cell colour (palette index, 0 = default) for the live grid */
+    int      cols, rows;                 /* CURRENT visible grid size (<= _MAX); the WM sets it from the window size on resize (M1473) */
     uint8_t  curcol;                     /* colour applied to chars printed now (set via SYS_setcolor) */
     uint8_t  esc;                        /* ANSI escape state: 0 normal, 1 saw ESC, 2 in CSI */
     uint8_t  csilen;                     /* bytes buffered in csi[] */
     char     csi[24];                    /* CSI parameter bytes (between '[' and the final letter) */
     int      cx, cy;
-    char     sb[SB_ROWS][APP_COLS];      /* scrollback: lines that scrolled off */
+    char     sb[SB_ROWS][APP_COLS_MAX];  /* scrollback: lines that scrolled off */
     int      sb_count;                   /* how many scrollback lines are stored */
     int      view;                       /* rows scrolled up from the live bottom */
     char     iq[IQ_SIZE];
@@ -363,8 +373,23 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
 extern void enter_user(uint64_t entry, uint64_t ustack);
 extern void iret_to_user(struct registers *r);   /* resume ring3 from a cloned trap frame (fork child); asm, no return */
 
-int app_cols(void) { return APP_COLS; }
-int app_rows(void) { return APP_ROWS; }
+int app_cols(void) { return APP_DEF_COLS; }   /* default open size (the WM opens a terminal window at this) */
+int app_rows(void) { return APP_DEF_ROWS; }
+int app_grid_cols(app_t *a) { return (a && a->cols) ? a->cols : APP_DEF_COLS; }   /* CURRENT visible grid size */
+int app_grid_rows(app_t *a) { return (a && a->rows) ? a->rows : APP_DEF_ROWS; }
+int app_is_gfx(app_t *a) { return a && a->gfx != 0; }                            /* gfx-canvas app vs text terminal */
+/* The WM calls this as a text-app window is dragged-resized: clamp to [MIN,_MAX],
+ * keep the cursor in-bounds, and subsequent output uses the new size (M1473). */
+void app_set_grid(app_t *a, int cols, int rows) {
+    if (!a) return;
+    if (cols < APP_MIN_COLS) cols = APP_MIN_COLS; if (cols > APP_COLS_MAX) cols = APP_COLS_MAX;
+    if (rows < APP_MIN_ROWS) rows = APP_MIN_ROWS; if (rows > APP_ROWS_MAX) rows = APP_ROWS_MAX;
+    if (cols == a->cols && rows == a->rows) return;
+    a->cols = cols; a->rows = rows;
+    if (a->cx >= cols) a->cx = cols - 1;
+    if (a->cy >= rows) a->cy = rows - 1;
+    a->gdirty = 1;
+}
 const char *app_title(app_t *a) { return a->title; }
 const char *app_cwd_str(app_t *a) { return (a && a->cwd_path[0]) ? a->cwd_path : "/"; }  /* cwd path of any app, for /proc/<pid>/cwd (M1249) */
 const char *app_exe_str(app_t *a) { return (a && a->exe_path[0]) ? a->exe_path : "?"; }   /* spawn/exec path, for /proc/<pid>/exe (M1250) */
@@ -743,8 +768,9 @@ int app_unveil_ok(app_t *a, const char *path, int need_write) {
 
 /* ---- text grid ---- */
 static void grid_clear(struct app *a) {
-    for (int r = 0; r < APP_ROWS; r++)
-        for (int c = 0; c < APP_COLS; c++) { a->grid[r][c] = ' '; a->gcol[r][c] = 0; }
+    if (a->cols <= 0) { a->cols = APP_DEF_COLS; a->rows = APP_DEF_ROWS; }   /* first use: default size */
+    for (int r = 0; r < APP_ROWS_MAX; r++)                                 /* blank the FULL array so cells exposed by a later grow are clean */
+        for (int c = 0; c < APP_COLS_MAX; c++) { a->grid[r][c] = ' '; a->gcol[r][c] = 0; }
     a->cx = a->cy = 0;
     a->sb_count = 0; a->view = 0;
     a->gdirty = 1;
@@ -752,27 +778,27 @@ static void grid_clear(struct app *a) {
 static void grid_scroll(struct app *a) {
     /* the top line is about to scroll off — keep it in the scrollback ring */
     if (a->sb_count < SB_ROWS) {
-        memcpy(a->sb[a->sb_count++], a->grid[0], APP_COLS);
+        memcpy(a->sb[a->sb_count++], a->grid[0], a->cols);
         if (a->view > 0 && a->view < a->sb_count) a->view++;   /* stay on the same lines */
     } else {
-        for (int r = 1; r < SB_ROWS; r++) memcpy(a->sb[r-1], a->sb[r], APP_COLS);
-        memcpy(a->sb[SB_ROWS-1], a->grid[0], APP_COLS);
+        for (int r = 1; r < SB_ROWS; r++) memcpy(a->sb[r-1], a->sb[r], a->cols);
+        memcpy(a->sb[SB_ROWS-1], a->grid[0], a->cols);
     }
-    for (int r = 1; r < APP_ROWS; r++) memcpy(a->grid[r-1], a->grid[r], APP_COLS);
-    for (int c = 0; c < APP_COLS; c++) a->grid[APP_ROWS-1][c] = ' ';
-    for (int r = 1; r < APP_ROWS; r++) memcpy(a->gcol[r-1], a->gcol[r], APP_COLS);   /* live colours scroll with their rows */
-    for (int c = 0; c < APP_COLS; c++) a->gcol[APP_ROWS-1][c] = 0;
-    a->cy = APP_ROWS - 1;
+    for (int r = 1; r < a->rows; r++) memcpy(a->grid[r-1], a->grid[r], a->cols);
+    for (int c = 0; c < a->cols; c++) a->grid[a->rows-1][c] = ' ';
+    for (int r = 1; r < a->rows; r++) memcpy(a->gcol[r-1], a->gcol[r], a->cols);   /* live colours scroll with their rows */
+    for (int c = 0; c < a->cols; c++) a->gcol[a->rows-1][c] = 0;
+    a->cy = a->rows - 1;
 }
-static void grid_nl(struct app *a) { a->cx = 0; if (++a->cy >= APP_ROWS) grid_scroll(a); }
+static void grid_nl(struct app *a) { a->cx = 0; if (++a->cy >= a->rows) grid_scroll(a); }
 /* Erase up to `n` echoed chars, but never past the input start (cx0,cy0) — so
  * history recall can't blank the prompt or earlier output. Handles wrapping. */
 static void grid_erase(struct app *a, int n, int cx0, int cy0) {
-    int avail = (a->cy - cy0) * APP_COLS + (a->cx - cx0);
+    int avail = (a->cy - cy0) * a->cols + (a->cx - cx0);
     if (n > avail) n = avail;
     for (int i = 0; i < n; i++) {
         if (a->cx > 0) a->cx--;
-        else if (a->cy > 0) { a->cy--; a->cx = APP_COLS - 1; }
+        else if (a->cy > 0) { a->cy--; a->cx = a->cols - 1; }
         a->grid[a->cy][a->cx] = ' ';
     }
 }
@@ -782,7 +808,7 @@ static void grid_putc(struct app *a, char ch) {
     if (ch == '\r') { a->cx = 0; return; }
     a->grid[a->cy][a->cx] = ch;
     a->gcol[a->cy][a->cx] = a->curcol;
-    if (++a->cx >= APP_COLS) grid_nl(a);
+    if (++a->cx >= a->cols) grid_nl(a);
 }
 
 /* Move the echo cursor over already-painted cells (no clearing), for in-line
@@ -790,13 +816,13 @@ static void grid_putc(struct app *a, char ch) {
 static void cursor_back(struct app *a, int k) {
     while (k-- > 0) {
         if (a->cx > 0) a->cx--;
-        else if (a->cy > 0) { a->cy--; a->cx = APP_COLS - 1; }
+        else if (a->cy > 0) { a->cy--; a->cx = a->cols - 1; }
     }
     a->gdirty = 1;
 }
 static void cursor_fwd(struct app *a, int k) {
     while (k-- > 0)
-        if (++a->cx >= APP_COLS) { a->cx = 0; if (++a->cy >= APP_ROWS) grid_scroll(a); }
+        if (++a->cx >= a->cols) { a->cx = 0; if (++a->cy >= a->rows) grid_scroll(a); }
     a->gdirty = 1;
 }
 static void emit_range(struct app *a, const char *buf, unsigned i, unsigned j) {
@@ -826,10 +852,10 @@ int clip_get(char *out, int max) {
  * the scrollback or the live grid exactly as app_render does, so selection
  * highlighting and text extraction match what's on screen. */
 static char app_cell(struct app *a, int r, int c) {
-    if (r < 0 || r >= APP_ROWS || c < 0 || c >= APP_COLS) return ' ';
+    if (r < 0 || r >= a->rows || c < 0 || c >= a->cols) return ' ';
     int L = (a->sb_count - a->view) + r;
     if (L >= 0 && L < a->sb_count) return a->sb[L][c];
-    if (L >= a->sb_count && (L - a->sb_count) < APP_ROWS) return a->grid[L - a->sb_count][c];
+    if (L >= a->sb_count && (L - a->sb_count) < a->rows) return a->grid[L - a->sb_count][c];
     return ' ';
 }
 
@@ -843,12 +869,12 @@ static void sel_ordered(struct app *a, int *r0, int *c0, int *r1, int *c1) {
 
 void app_render(app_t *a, int px, int py, int focused) {
     /* Show a 17-row window into [scrollback ... live grid], scrolled up by view. */
-    for (int r = 0; r < APP_ROWS; r++) {
+    for (int r = 0; r < a->rows; r++) {
         int L = (a->sb_count - a->view) + r;        /* logical row in the combined buffer */
-        for (int c = 0; c < APP_COLS; c++) {
+        for (int c = 0; c < a->cols; c++) {
             char ch = ' '; uint32_t fg = 0x33FF66;
             if (L >= 0 && L < a->sb_count) ch = a->sb[L][c];               /* scrollback: default green */
-            else if (L >= a->sb_count && (L - a->sb_count) < APP_ROWS) {
+            else if (L >= a->sb_count && (L - a->sb_count) < a->rows) {
                 int gr = L - a->sb_count; ch = a->grid[gr][c];
                 fg = app_palette[a->gcol[gr][c] & 15];                     /* live grid: per-cell colour */
             }
@@ -859,25 +885,25 @@ void app_render(app_t *a, int px, int py, int focused) {
      * dark track with a thumb whose size = visible/total and whose position
      * tracks `view`. Gives the wheel/PgUp scrollback visible feedback. */
     if (a->sb_count > 0) {
-        int total = a->sb_count + APP_ROWS;
-        int sbx = px + APP_COLS * font_width + 1;
-        int trackh = APP_ROWS * font_height;
+        int total = a->sb_count + a->rows;
+        int sbx = px + a->cols * font_width + 1;
+        int trackh = a->rows * font_height;
         fb_fill_rect(sbx, py, 3, trackh, 0x202428);
-        int th = trackh * APP_ROWS / total; if (th < 8) th = 8;
+        int th = trackh * a->rows / total; if (th < 8) th = 8;
         int top = a->sb_count - a->view;                       /* first visible logical row */
         int ty = py + (trackh - th) * top / (a->sb_count ? a->sb_count : 1);
         fb_fill_rect(sbx, ty, 3, th, 0x6A7480);
     } else if (a->view > 0)                          /* (fallback) scrolled-up indicator */
-        fb_glyph(px + (APP_COLS - 1) * font_width, py, '^', 0xFFD060, 0x0A0A0A);
+        fb_glyph(px + (a->cols - 1) * font_width, py, '^', 0xFFD060, 0x0A0A0A);
     /* Text selection highlight (white on blue), drawn over the cells. Linear,
      * line-spanning: the first row runs from c0, the last to c1, rows between
      * are full-width — matching app_sel_commit's extraction. */
     if (a->sel_on) {
         int r0, c0, r1, c1; sel_ordered(a, &r0, &c0, &r1, &c1);
-        for (int r = r0; r <= r1 && r < APP_ROWS; r++) {
+        for (int r = r0; r <= r1 && r < a->rows; r++) {
             if (r < 0) continue;
-            int cs = (r == r0) ? c0 : 0, ce = (r == r1) ? c1 : APP_COLS;
-            for (int c = cs; c < ce && c < APP_COLS; c++)
+            int cs = (r == r0) ? c0 : 0, ce = (r == r1) ? c1 : a->cols;
+            for (int c = cs; c < ce && c < a->cols; c++)
                 fb_glyph(px + c * font_width, py + r * font_height, app_cell(a, r, c), 0xFFFFFF, 0x2C66D6);
         }
     }
@@ -886,7 +912,7 @@ void app_render(app_t *a, int px, int py, int focused) {
      * tracks left/right/home/end edits, not just the end of the line. */
     if (focused && !a->gfx && !a->caret_off) {
         int cr = a->cy + a->view;
-        if (cr >= 0 && cr < APP_ROWS && a->cx >= 0 && a->cx < APP_COLS) {
+        if (cr >= 0 && cr < a->rows && a->cx >= 0 && a->cx < a->cols) {
             char ch = a->grid[a->cy][a->cx];
             fb_glyph(px + a->cx * font_width, py + cr * font_height,
                      (ch && ch != ' ') ? ch : ' ', 0x0A0A0A, 0x33FF66);
@@ -1292,30 +1318,30 @@ static void ansi_csi(struct app *a, char final) {
         break;
     }
     case 'A': a->cy -= n; if (a->cy < 0) a->cy = 0; break;
-    case 'B': a->cy += n; if (a->cy >= APP_ROWS) a->cy = APP_ROWS - 1; break;
-    case 'C': a->cx += n; if (a->cx >= APP_COLS) a->cx = APP_COLS - 1; break;
+    case 'B': a->cy += n; if (a->cy >= a->rows) a->cy = a->rows - 1; break;
+    case 'C': a->cx += n; if (a->cx >= a->cols) a->cx = a->cols - 1; break;
     case 'D': a->cx -= n; if (a->cx < 0) a->cx = 0; break;
     case 'H': case 'f': {                /* cursor to row;col (1-based) */
         int row = p[0] ? p[0] : 1, col = (np >= 2 && p[1]) ? p[1] : 1;
         a->cy = row - 1; a->cx = col - 1;
-        if (a->cy < 0) a->cy = 0; if (a->cy >= APP_ROWS) a->cy = APP_ROWS - 1;
-        if (a->cx < 0) a->cx = 0; if (a->cx >= APP_COLS) a->cx = APP_COLS - 1;
+        if (a->cy < 0) a->cy = 0; if (a->cy >= a->rows) a->cy = a->rows - 1;
+        if (a->cx < 0) a->cx = 0; if (a->cx >= a->cols) a->cx = a->cols - 1;
         break;
     }
     case 'J': {                          /* erase in display (2 = whole screen) */
         int m = p[0];
         int y0 = (m == 2) ? 0 : a->cy;
         if (m == 2) { a->cx = a->cy = 0; }
-        for (int x = (m == 2 ? 0 : a->cx); x < APP_COLS; x++) { a->grid[y0][x] = ' '; a->gcol[y0][x] = 0; }
-        for (int y = y0 + 1; y < APP_ROWS; y++)
-            for (int x = 0; x < APP_COLS; x++) { a->grid[y][x] = ' '; a->gcol[y][x] = 0; }
+        for (int x = (m == 2 ? 0 : a->cx); x < a->cols; x++) { a->grid[y0][x] = ' '; a->gcol[y0][x] = 0; }
+        for (int y = y0 + 1; y < a->rows; y++)
+            for (int x = 0; x < a->cols; x++) { a->grid[y][x] = ' '; a->gcol[y][x] = 0; }
         break;
     }
     case 'K': {                          /* erase in line (0 to-eol, 1 from-bol, 2 whole) */
         int m = p[0];
         int x0 = (m == 1 || m == 2) ? 0 : a->cx;
-        int x1 = (m == 1) ? a->cx + 1 : APP_COLS;
-        for (int x = x0; x < x1 && x < APP_COLS; x++) { a->grid[a->cy][x] = ' '; a->gcol[a->cy][x] = 0; }
+        int x1 = (m == 1) ? a->cx + 1 : a->cols;
+        for (int x = x0; x < x1 && x < a->cols; x++) { a->grid[a->cy][x] = ' '; a->gcol[a->cy][x] = 0; }
         break;
     }
     }
@@ -1439,13 +1465,13 @@ int app_sys_read(char *buf, unsigned max) {
         }
         if (c == 0x8c) {                  /* Ctrl-L: clear the screen, keep the current line at the top */
             int oy = cy0, span = a->cy - cy0; if (span < 0) span = 0;
-            for (int r = 0; r <= span && oy + r < APP_ROWS; r++)   /* move the prompt+input rows up */
-                for (int col = 0; col < APP_COLS; col++) {
+            for (int r = 0; r <= span && oy + r < a->rows; r++)   /* move the prompt+input rows up */
+                for (int col = 0; col < a->cols; col++) {
                     a->grid[r][col] = a->grid[oy + r][col];
                     a->gcol[r][col] = a->gcol[oy + r][col];
                 }
-            for (int r = span + 1; r < APP_ROWS; r++)              /* blank everything below */
-                for (int col = 0; col < APP_COLS; col++) { a->grid[r][col] = ' '; a->gcol[r][col] = 0; }
+            for (int r = span + 1; r < a->rows; r++)              /* blank everything below */
+                for (int col = 0; col < a->cols; col++) { a->grid[r][col] = ' '; a->gcol[r][col] = 0; }
             a->cy -= oy; cy0 = 0; a->view = 0; a->gdirty = 1;
             continue;
         }
@@ -1526,8 +1552,8 @@ int app_sys_read(char *buf, unsigned max) {
                     }
                 } else if (nm > 1) {               /* already at the common prefix: list the candidates,
                                                     * then redraw the prompt + line (bash's second Tab) */
-                    char psave[APP_COLS]; uint8_t csave[APP_COLS];
-                    int pn = cx0 < APP_COLS ? cx0 : APP_COLS;
+                    char psave[APP_COLS_MAX]; uint8_t csave[APP_COLS_MAX];
+                    int pn = cx0 < a->cols ? cx0 : a->cols;
                     for (int k = 0; k < pn; k++) { psave[k] = a->grid[cy0][k]; csave[k] = a->gcol[cy0][k]; }
                     grid_putc(a, '\n');
                     for (int i = 0; i < ne; i++) {
@@ -2738,14 +2764,14 @@ static int clampc(int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); }
 
 void app_sel_begin(app_t *a, int row, int col) {
     if (!a) return;
-    a->sel_r0 = a->sel_r1 = clampc(row, APP_ROWS - 1);
-    a->sel_c0 = a->sel_c1 = clampc(col, APP_COLS);
+    a->sel_r0 = a->sel_r1 = clampc(row, a->rows - 1);
+    a->sel_c0 = a->sel_c1 = clampc(col, a->cols);
     a->sel_on = 1; a->gdirty = 1;
 }
 void app_sel_extend(app_t *a, int row, int col) {
     if (!a || !a->sel_on) return;
-    a->sel_r1 = clampc(row, APP_ROWS - 1);
-    a->sel_c1 = clampc(col, APP_COLS);
+    a->sel_r1 = clampc(row, a->rows - 1);
+    a->sel_c1 = clampc(col, a->cols);
     a->gdirty = 1;
 }
 void app_sel_clear(app_t *a) { if (a && a->sel_on) { a->sel_on = 0; a->gdirty = 1; } }
@@ -2764,13 +2790,13 @@ void app_scroll_frac(app_t *a, int num, int den) {
 
 /* Double-click: select the whitespace-delimited word at (row,col) and copy it. */
 void app_sel_word(app_t *a, int row, int col) {
-    if (!a || row < 0 || row >= APP_ROWS) return;
+    if (!a || row < 0 || row >= a->rows) return;
     if (col < 0) col = 0;
-    if (col >= APP_COLS) col = APP_COLS - 1;
+    if (col >= a->cols) col = a->cols - 1;
     if (app_cell(a, row, col) == ' ') { app_sel_clear(a); return; }   /* clicked whitespace */
     int s = col, e = col;
     while (s > 0 && app_cell(a, row, s - 1) != ' ') s--;
-    while (e < APP_COLS - 1 && app_cell(a, row, e + 1) != ' ') e++;
+    while (e < a->cols - 1 && app_cell(a, row, e + 1) != ' ') e++;
     a->sel_r0 = a->sel_r1 = row; a->sel_c0 = s; a->sel_c1 = e + 1;
     a->sel_on = 1; a->gdirty = 1;
     app_sel_commit(a);                                  /* -> clipboard */
@@ -2785,11 +2811,11 @@ void app_sel_commit(app_t *a) {
     }
     int r0, c0, r1, c1; sel_ordered(a, &r0, &c0, &r1, &c1);
     char buf[CLIP_MAX]; int n = 0;
-    for (int r = r0; r <= r1 && r < APP_ROWS && n < CLIP_MAX - 1; r++) {
+    for (int r = r0; r <= r1 && r < a->rows && n < CLIP_MAX - 1; r++) {
         if (r < 0) continue;
-        int cs = (r == r0) ? c0 : 0, ce = (r == r1) ? c1 : APP_COLS;
+        int cs = (r == r0) ? c0 : 0, ce = (r == r1) ? c1 : a->cols;
         int lineend = n;
-        for (int c = cs; c < ce && c < APP_COLS && n < CLIP_MAX - 1; c++) {
+        for (int c = cs; c < ce && c < a->cols && n < CLIP_MAX - 1; c++) {
             char ch = app_cell(a, r, c);
             buf[n++] = ch;
             if (ch != ' ') lineend = n;          /* remember last non-blank for trimming */

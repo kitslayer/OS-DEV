@@ -59,8 +59,12 @@ void   app_scroll_frac(app_t *a, int num, int den);  /* scrollbar click/drag: th
 void   app_paste(app_t *a);                         /* inject the clipboard into the input queue */
 void   clip_set(const char *s, int n);              /* set the system clipboard */
 int    clip_get(char *out, int max);                /* read it (NUL-terminated); returns length */
-int    app_cols(void);
-int    app_rows(void);
+int    app_cols(void);                              /* default terminal open size (cols) */
+int    app_rows(void);                              /* ... rows */
+int    app_grid_cols(app_t *a);                     /* a terminal's CURRENT visible grid size (M1473) */
+int    app_grid_rows(app_t *a);
+void   app_set_grid(app_t *a, int cols, int rows);  /* WM: resize the live grid to fit the window */
+int    app_is_gfx(app_t *a);                        /* 1 = gfx-canvas app, 0 = text terminal */
 
 /* Called from the syscall dispatcher, acting on the currently-running app. */
 void   app_sys_write(const char *buf, unsigned len);
