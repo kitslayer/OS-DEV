@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1461) gcal — month navigation.** The calendar only ever showed the current month — you couldn't look ahead or back. Now `p`/`n` (or ←/→) page to the previous/next month and `t` jumps back to today; today is highlighted **only** when the displayed month is the real current month, and the footer gains a "t today" hint once you've navigated away. **Verified:** in-guest — from June 2026, `n` → July 2026 (1 on Wed, 31 days, no today-highlight, footer shows "t today"); built clean + snap-verified.
+
 > **(M1460) docs — README current through M1459.** Added milestone-table row **#459** summarising the M1452–M1459 instrument-app feature-gap fills (gcalc √/1÷x/±, gsw laps, gmetro time-signature, gcolor saved palette, gtimer type-min, gpass charsets, gconv Time, gbase CHR), so the README reflects the work since the M1429 "fully current" pass. (Per-feature detail remains in the entries below.)
 
 > **(M1459) gmetro — time signature + accented downbeat.** The metronome just alternated pitch every beat — no real time signature, which every metronome has. Now `1`–`9` set the beats per bar; the **downbeat is accented** (higher 1760 Hz click + brighter bob flash vs 1047 Hz off-beats), and a row of beat dots + an `N/4` readout show the position in the bar (downbeat dot always amber-tinted). **Verified:** in-guest — `3` → 3/4 with three dots, downbeat dot lit bright; built clean + snap-verified.
