@@ -465,6 +465,8 @@ static int parse_style_underline(const char *s, int n) {
     for (int i = vs; i + 9 <= ve; i++)                     /* "underline" is 9 chars; i+8 < ve <= n */
         if (lc(s[i])=='u'&&lc(s[i+1])=='n'&&lc(s[i+2])=='d'&&lc(s[i+3])=='e'&&lc(s[i+4])=='r'&&
             lc(s[i+5])=='l'&&lc(s[i+6])=='i'&&lc(s[i+7])=='n'&&lc(s[i+8])=='e') return 1;
+    for (int i = vs; i + 4 <= ve; i++)                     /* "none" -> 2 = suppress (e.g. a link's text-decoration:none) */
+        if (lc(s[i])=='n'&&lc(s[i+1])=='o'&&lc(s[i+2])=='n'&&lc(s[i+3])=='e') return 2;
     return 0;
 }
 /* text-transform: 1 = uppercase, 2 = lowercase, 0 = none/unsupported (capitalize is left as-is). */
@@ -837,7 +839,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
             uint32_t ic = parse_style_color(st, stl);  if (ic) c = ic;
             int its = parse_style_textstyle(st, stl);  if (its >= 0) ts = its;
-            if (parse_style_underline(st, stl)) ul = 1;
+            { int iv = parse_style_underline(st, stl); if (iv) ul = iv; }   /* 1=underline, 2=none (suppress) */
             int itr = parse_style_transform(st, stl);  if (itr) tr = itr;   /* text-transform (inline only) */
             uint32_t ibg = parse_style_bg(st, stl);    if (ibg) bg = ibg;   /* background-color */
             uint32_t ibd = parse_style_border(st, stl); if (ibd) bd = ibd;   /* inline border overrides a <style> rule */
@@ -873,7 +875,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
                 b->sc[sp].savecolor = b->curcolor; if (c) b->curcolor = c;
                 b->sc[sp].savebg = b->curbg; if (bg) b->curbg = is_block_tag(tag) ? (bg | 0x02000000u) : bg;   /* mark block bg = full-width */
-                b->sc[sp].saveul = b->curul; if (ul) b->curul = 1;
+                b->sc[sp].saveul = b->curul; if (ul) b->curul = ul;   /* 1=underline, 2=text-decoration:none */
                 b->sc[sp].savetransform = b->curtransform; if (tr) b->curtransform = tr;
                 b->sc[sp].savealign = b->curalign; if (al) b->curalign = al;
                 b->sc[sp].savescale = b->curscale; if (fs) b->curscale = fs;
@@ -1006,6 +1008,9 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             const char *idp;
             char idbuf[32]; idbuf[0] = 0;
             if (find_attr(attrs, attrlen, "id", &idp, &idl) && idl < 32) { int k=0; for(;k<idl;k++) idbuf[k]=idp[k]; idbuf[k]=0; }
+            /* no id? key the store/focus by name= so name-only inputs (e.g. Google's search
+             * box <input name="q"> — no id, no type) are still focusable, typeable & submittable. */
+            if (!idbuf[0] && find_attr(attrs, attrlen, "name", &idp, &idl) && idl > 0 && idl < 32) { int k=0; for(;k<idl;k++) idbuf[k]=idp[k]; idbuf[k]=0; }
             const char *tp; int tpl; int has_type = find_attr(attrs, attrlen, "type", &tp, &tpl);
             int is_submit = has_type && (attr_eq(tp, tpl, "submit") || attr_eq(tp, tpl, "image"));
             int is_hidden = has_type && attr_eq(tp, tpl, "hidden");
@@ -1966,7 +1971,7 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         uint16_t sp = b->css_spec[r];
         if (b->css_color[r]   && sp >= sp_color)   { *color      = b->css_color[r];       sp_color = sp; }
         if (b->css_style[r] >= 0 && sp >= sp_style) { *textstyle = b->css_style[r];       sp_style = sp; }
-        if (b->css_ul[r]      && sp >= sp_ul)       { *underline  = 1;                    sp_ul    = sp; }
+        if (b->css_ul[r]      && sp >= sp_ul)       { *underline  = b->css_ul[r];          sp_ul    = sp; }
         if (b->css_transform[r] && sp >= sp_tr)     { *transform  = b->css_transform[r];  sp_tr    = sp; }
         if (b->css_bg[r]      && sp >= sp_bg)       { *bg         = b->css_bg[r];         sp_bg    = sp; }
         if (b->css_align[r]   && sp >= sp_al)       { *align      = b->css_align[r];      sp_al    = sp; }
@@ -4205,9 +4210,9 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 fb_text(cx + 1, cy, w, fg, sc);
             }
             if (tk->style == STY_STRIKE) fb_fill_rect(cx, cy + 7, drawpx, 1, fg);   /* strike-line through the text */
-            if (b->tokul[t] && tk->style != STY_LINK) fb_fill_rect(cx, cy + 15, drawpx, 1, fg);   /* underline (text-decoration / <u>); links already underline */
+            if (b->tokul[t] == 1 && tk->style != STY_LINK) fb_fill_rect(cx, cy + 15, drawpx, 1, fg);   /* underline (text-decoration:underline / <u>); 2 = none */
             if (tk->style == STY_LINK) {
-                fb_fill_rect(cx, cy + 15, drawpx, 1, fg);
+                if (b->tokul[t] != 2) fb_fill_rect(cx, cy + 15, drawpx, 1, fg);   /* link underline, unless text-decoration:none */
                 if (selected) box(cx - 1, cy - 1, drawpx + 2, lh, 0xC08000);  /* selection outline */
                 if (tk->link != NO_LINK && b->nlrec < LREC_MAX)   /* clickable */
                     b->lrec[b->nlrec++] = (lrec_t){ (int16_t)(cx - x), (int16_t)(cy - y),
