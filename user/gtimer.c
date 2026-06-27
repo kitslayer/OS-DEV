@@ -71,6 +71,7 @@ int main(void) {
     long set_ms = 5L * 60000;             /* 5:00 default */
     long rem = set_ms, deadline = 0;
     int running = 0, done = 0, psec = -1, dirty = 1, prevb = 0;
+    int typed = -1;                       /* quick-set minutes: digit-entry accumulator (M1456); -1 = idle */
 
     for (;;) {
         long now = sys_uptime_ms();
@@ -78,10 +79,19 @@ int main(void) {
         if (k == 'q' || k == 27) break;
         int mx, my, mb = sys_mouse(&mx, &my);                   /* a click = start/pause, like Space (M1398) */
         int clicked = (mb & 1) && !(prevb & 1) && mx >= 0; prevb = mb;
-        if (k == ' ' || clicked) { if (running) { rem = deadline - now; if (rem < 0) rem = 0; running = 0; } else if (rem > 0) { deadline = now + rem; running = 1; done = 0; } dirty = 1; }
+        if (k == ' ' || clicked) { if (running) { rem = deadline - now; if (rem < 0) rem = 0; running = 0; } else if (rem > 0) { deadline = now + rem; running = 1; done = 0; } dirty = 1; typed = -1; }
         else if ((k == 'w' || k == 0x11) && !running) { set_ms += 60000; if (set_ms > 99L * 60000) set_ms = 99L * 60000; rem = set_ms; done = 0; dirty = 1; }
         else if ((k == 's' || k == 0x12) && !running) { set_ms -= 60000; if (set_ms < 60000) set_ms = 60000; rem = set_ms; done = 0; dirty = 1; }
         else if (k == 'r' || k == 'R') { rem = set_ms; running = 0; done = 0; dirty = 1; }
+        else if (k >= '0' && k <= '9' && !running) {            /* type the minutes directly (M1456): "25" -> 25:00 */
+            if (typed < 0) typed = 0;
+            typed = typed * 10 + (k - '0'); if (typed > 99) typed = 99;
+            set_ms = (long)(typed < 1 ? 1 : typed) * 60000; rem = set_ms; done = 0; dirty = 1;
+        }
+        else if (k == 8 && !running) {                          /* backspace a typed digit */
+            if (typed > 0) { typed /= 10; set_ms = (long)(typed < 1 ? 1 : typed) * 60000; rem = set_ms; dirty = 1; }
+        }
+        if (k > 0 && k != 8 && (k < '0' || k > '9')) typed = -1;   /* any other key ends the typed entry */
 
         long cur = running ? (deadline - now) : rem;
         if (running && cur <= 0) { cur = rem = 0; running = 0; done = 1; dirty = 1;
@@ -109,7 +119,7 @@ int main(void) {
             const char *st = done ? "DONE!    r reset  q quit"
                            : running ? "RUNNING  space pause  r reset"
                            : paused ? "PAUSED   space resume  r reset"
-                           : "SET      w/s +-min  space start";
+                           : "type min  w/s +-  space go";
             text(st, 8, H - 16, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
