@@ -15,6 +15,9 @@ int dns_resolve(const char *host, uint8_t out_ip[4]);
 /* HTTP/1.0 GET http://host/path -> raw response into out (max bytes).
  * Returns bytes received, or -1 on error. */
 int http_get(const char *host, const char *path, char *out, int max);
+/* HTTP/1.0 GET that stops + closes after the first Server-Sent-Events event (so a
+ * long-lived stream doesn't block). Raw response (headers + first event) into out. (M-eventsource) */
+int http_get_sse(const char *host, const char *path, char *out, int max);
 /* HTTP/1.0 POST: sends `body` (bodylen) with Content-Type `ctype`; raw response into out. -1 on error. (M702) */
 int http_post(const char *host, const char *path, const char *ctype, const char *body, int bodylen, char *out, int max);
 

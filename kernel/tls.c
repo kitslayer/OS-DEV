@@ -395,8 +395,25 @@ static int tls_verify_certverify(tls *t, const uint8_t *m, int mlen, const uint8
 }
 
 /* full client. Returns response length into `out`, or -1. */
+/* Does the HTTP response in buf[0..n) contain a complete first SSE event — i.e. the
+ * header terminator (\r\n\r\n or \n\n) followed by a blank-line-terminated body block?
+ * Used by the SSE early-stop: a server-sent-events stream stays open, so we must stop
+ * reading after the first event rather than block until the (never-coming) close. */
+static int tls_sse_first_event(const uint8_t *buf, int n) {
+    int bodyoff = -1;
+    for (int i = 0; i + 1 < n; i++) {
+        if (i + 3 < n && buf[i]=='\r' && buf[i+1]=='\n' && buf[i+2]=='\r' && buf[i+3]=='\n') { bodyoff = i + 4; break; }
+        if (buf[i]=='\n' && buf[i+1]=='\n') { bodyoff = i + 2; break; }
+    }
+    if (bodyoff < 0) return 0;                         /* headers not complete yet */
+    for (int i = bodyoff; i + 1 < n; i++) {            /* a blank line ends the first event */
+        if (buf[i]=='\n' && buf[i+1]=='\n') return 1;
+        if (i + 2 < n && buf[i]=='\r' && buf[i+1]=='\n' && buf[i+2]=='\r') return 1;
+    }
+    return 0;
+}
 static int tls_get_inner(const char *host, const char *path, uint8_t *out, int max, uint32_t seed,
-                         const char *method, const char *ctype, const char *body, int bodylen) {   /* method NULL/"GET" => GET (byte-identical to before); "POST" => send body (M702) */
+                         const char *method, const char *ctype, const char *body, int bodylen, int sse) {   /* method NULL/"GET" => GET (byte-identical to before); "POST" => send body (M702); sse=1 => stop after the first SSE event (M-eventsource) */
     rng_seed(seed);
     g_cert_status = -2; g_chain_anchored = 0; g_host_match = -2;   /* clear stale results */
     g_leaf_cn[0] = 0; g_leaf_expiry[0] = 0;
@@ -631,6 +648,7 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
             int n = got; if (total + n > max) n = max - total;
             if (n > 0) { memcpy(out + total, inner, n); total += n; }
             if (total >= max) break;
+            if (sse && tls_sse_first_event(out, total)) break;   /* SSE: stop after the first event, then close */
         }
     }
     /* polite close: send an encrypted close_notify alert before tearing down TCP
@@ -655,7 +673,18 @@ int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t 
     uint64_t f = tls_irq_save();
     if (g_tls_busy) { tls_irq_restore(f); return -1; }   /* another TLS op in flight */
     g_tls_busy = 1; tls_irq_restore(f);
-    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0);
+    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0, 0);
+    g_tls_busy = 0;
+    return r;
+}
+/* HTTPS SSE first-event GET (M-eventsource): same path as tls_get, but stops reading
+ * (and closes) after the first complete server-sent event, so a long-lived stream
+ * doesn't block. Returns the raw HTTP response (headers + first event) length, <0 on error. */
+int tls_get_sse(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) {
+    uint64_t f = tls_irq_save();
+    if (g_tls_busy) { tls_irq_restore(f); return -1; }
+    g_tls_busy = 1; tls_irq_restore(f);
+    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0, 1);
     g_tls_busy = 0;
     return r;
 }
@@ -666,7 +695,7 @@ int tls_post(const char *host, const char *path, const char *ctype,
     uint64_t f = tls_irq_save();
     if (g_tls_busy) { tls_irq_restore(f); return -1; }
     g_tls_busy = 1; tls_irq_restore(f);
-    int r = tls_get_inner(host, path, out, max, seed, "POST", ctype, body, bodylen);
+    int r = tls_get_inner(host, path, out, max, seed, "POST", ctype, body, bodylen, 0);
     g_tls_busy = 0;
     return r;
 }

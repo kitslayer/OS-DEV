@@ -6,6 +6,9 @@
  * (up to `max` bytes). `seed` seeds the ephemeral-key RNG. Returns bytes
  * received, or -1 on error. */
 int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t seed);
+/* HTTPS GET that stops + closes after the first Server-Sent-Events event (so a long-
+ * lived stream doesn't block). Raw response (headers + first event) into out. (M-eventsource) */
+int tls_get_sse(const char *host, const char *path, uint8_t *out, int max, uint32_t seed);
 /* HTTPS POST: sends `body` (bodylen) with Content-Type `ctype`; raw response into out. -1 on error. (M702) */
 int tls_post(const char *host, const char *path, const char *ctype, const char *body, int bodylen, uint8_t *out, int max, uint32_t seed);
 

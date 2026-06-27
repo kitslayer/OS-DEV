@@ -1181,6 +1181,48 @@ int http_get(const char *host, const char *path, char *out, int max) {
     return total;
 }
 
+/* Does buf[0..n) hold a complete first SSE event (header terminator then a blank
+ * line ending the first event)? (M-eventsource — mirrors tls_sse_first_event.) */
+static int http_sse_first_event(const char *buf, int n) {
+    int bodyoff = -1;
+    for (int i = 0; i + 1 < n; i++) {
+        if (i + 3 < n && buf[i]=='\r' && buf[i+1]=='\n' && buf[i+2]=='\r' && buf[i+3]=='\n') { bodyoff = i + 4; break; }
+        if (buf[i]=='\n' && buf[i+1]=='\n') { bodyoff = i + 2; break; }
+    }
+    if (bodyoff < 0) return 0;
+    for (int i = bodyoff; i + 1 < n; i++) {
+        if (buf[i]=='\n' && buf[i+1]=='\n') return 1;
+        if (i + 2 < n && buf[i]=='\r' && buf[i+1]=='\n' && buf[i+2]=='\r') return 1;
+    }
+    return 0;
+}
+/* HTTP SSE first-event GET (M-eventsource): like http_get, but stops + closes after
+ * the first complete server-sent event so a long-lived stream doesn't stall on the
+ * read budget. Returns the raw response (headers + first event) length, <0 on error. */
+int http_get_sse(const char *host, const char *path, char *out, int max) {
+    if (max <= 0) return 0;
+    uint8_t ip[4];
+    if (dns_resolve(host, ip) != 0) return -1;
+    tcp_conn c;
+    if (tcp_connect(&c, ip, 80) != 0) return -1;
+    char req[512]; int rl = 0;
+    const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
+                            "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
+    for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
+        for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = *s;
+    tcp_write(&c, (uint8_t *)req, rl);
+    int total = 0;
+    uint64_t budget = timer_ticks() + 600;
+    while (c.up && total < max && timer_ticks() < budget) {
+        int n = tcp_read(&c, (uint8_t *)out + total, max - total, 60);
+        if (n < 0) break;
+        total += n;
+        if (http_sse_first_event(out, total)) break;   /* got the first event -> stop + close */
+    }
+    tcp_close(&c);
+    return total;
+}
+
 /* ===================================================================== *
  *  /net/tcp — Plan 9 style "sockets as files" (M1110). No fd table: the
  *  VFS routes /net/tcp/<...> here. Read /net/tcp/clone -> a connection slot

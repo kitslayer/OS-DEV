@@ -2614,6 +2614,73 @@ static int browser_fetch(const char *url, const char *method, const char *ctype,
     kfree(raw);
     return -1;                                                   /* too many redirects */
 }
+
+/* EventSource backing (M-eventsource): GET `url` as Server-Sent-Events, read only the
+ * FIRST event (the stream stays open, so tls_get_sse/http_get_sse stop + close after
+ * the first `\n\n`), then extract that event's `data:` line(s) — joined with '\n' per
+ * the SSE spec — into `out`. Relative URLs resolve against the page URL. Returns the
+ * payload length, or <0 on a network error (so the JS side fires onerror). Its own
+ * kmalloc'd scratch (never b->raw). */
+static int browser_eventsource(const char *url, char *out, int outmax, int *status) {
+    if (!url || outmax <= 0) return -1;
+    char cur[URL_MAX];
+    int urll = (int)strlen(url);
+    if (!(g_ls_b && g_ls_b->url[0] && resolve_img_url(g_ls_b->url, url, urll, cur, sizeof(cur))))
+        { int i=0; while (url[i] && i<URL_MAX-1) { cur[i]=url[i]; i++; } cur[i]=0; }
+    char *raw = kmalloc(RAW_MAX);
+    if (!raw) return -1;
+    int n = 0;
+    for (int hop = 0; hop < 6; hop++) {                          /* follow redirects (e.g. http->https) like browser_fetch */
+        char host[96];
+        const char *path = url_split(cur, host, sizeof(host));
+        int https = startsw(cur, "https://");
+        n = https ? tls_get_sse(host, path, (uint8_t *)raw, RAW_MAX - 1, (uint32_t)timer_ticks())
+                  : http_get_sse(host, path, raw, RAW_MAX - 1);
+        if (n <= 0) { kfree(raw); return -1; }
+        raw[n] = 0;
+        int st = 0;
+        { const char *sp = raw; while (*sp && *sp != ' ') sp++; while (*sp == ' ') sp++;
+          for (int d = 0; d < 3 && sp[d] >= '0' && sp[d] <= '9'; d++) st = st*10 + (sp[d]-'0'); }
+        if (st >= 300 && st < 400 && hop < 5) {
+            char loc[URL_MAX], next[URL_MAX];
+            if (http_find_loc(raw, n, loc, sizeof(loc)) && resolve_img_url(cur, loc, (int)strlen(loc), next, sizeof(next))) {
+                int i=0; while (next[i] && i<URL_MAX-1) { cur[i]=next[i]; i++; } cur[i]=0;
+                continue;
+            }
+        }
+        *status = st ? st : 200;
+        break;
+    }
+    if (n <= 0) { kfree(raw); return -1; }
+    /* find the body (after the HTTP header terminator) */
+    int bodyoff = 0;
+    for (int j = 0; j + 1 < n; j++) {
+        if (j+3 < n && raw[j]=='\r' && raw[j+1]=='\n' && raw[j+2]=='\r' && raw[j+3]=='\n') { bodyoff = j+4; break; }
+        if (raw[j]=='\n' && raw[j+1]=='\n') { bodyoff = j+2; break; }
+    }
+    /* parse the first SSE event: gather `data:` field value(s) until a blank line,
+     * joining multiple data lines with '\n' (SSE framing). Bounds-safe on `out`. */
+    int p = 0; int i = bodyoff;
+    while (i < n) {
+        int ls = i;                                              /* line start */
+        while (i < n && raw[i] != '\n') i++;                     /* line end (exclusive) */
+        int le = i;                                              /* points at '\n' or n */
+        if (i < n) i++;                                          /* consume the '\n' */
+        int len = le - ls;
+        if (len > 0 && raw[le-1] == '\r') len--;                 /* trim a trailing CR */
+        if (len == 0) break;                                     /* blank line -> end of event */
+        if (len >= 5 && raw[ls]=='d'&&raw[ls+1]=='a'&&raw[ls+2]=='t'&&raw[ls+3]=='a'&&raw[ls+4]==':') {
+            int vend = ls + len;                                 /* value end (CR already trimmed from len) */
+            int vs = ls + 5; if (vs < vend && raw[vs] == ' ') vs++;   /* "data: x" — skip one optional space */
+            if (p > 0 && p < outmax) out[p++] = '\n';            /* join multiple data lines */
+            for (int k = vs; k < vend && p < outmax; k++) out[p++] = raw[k];
+        }
+        /* other fields (event:, id:, retry:, comments) are ignored for this snapshot */
+    }
+    if (p > outmax) p = outmax;
+    kfree(raw);
+    return p;
+}
 /* document.title get/set: read/write the page <title> (the window bar reads it on
  * the next paint, which the triggering click already schedules). */
 static int browser_get_title(char *out, int max) {
@@ -2626,7 +2693,7 @@ static void browser_set_title(const char *v) {
     int i = 0; while (v[i] && i < 63) { b->title_js[i] = v[i]; i++; } b->title_js[i] = 0;
     b->title_js_set = 1;                                 /* survives the parse_html re-render that follows */
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); js_set_eventsource(browser_eventsource); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
@@ -3122,8 +3189,20 @@ uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
         }
     }
     /* SVG (text XML): detect "<svg" within the first chunk, then rasterize. svg_decode
-     * caps W,H<=512, so a 1 MB worst-case buffer holds any output; shrink to exact after. */
+     * caps W,H<=512, so a 1 MB worst-case buffer holds any output; shrink to exact after.
+     * BUT skip this for an HTML document: an HTML page can carry "<svg" inside an inline
+     * SVG, a data:image/svg favicon, etc., and must NOT be mis-decoded as a standalone
+     * image (it would render the whole page as a tiny black bitmap). If the first non-
+     * whitespace bytes are "<!doctype html" or "<html", treat it as HTML, not SVG. */
     { int issvg = 0, lim = len < 512 ? len : 512;
+      int s = 0; while (s < lim && (data[s]==' '||data[s]=='\t'||data[s]=='\r'||data[s]=='\n'||data[s]=='\xEF'||data[s]=='\xBB'||data[s]=='\xBF')) s++;  /* skip leading WS + UTF-8 BOM */
+      int is_html = 0;
+      if (s+5 <= lim && data[s]=='<' && (data[s+1]|32)=='h'&&(data[s+2]|32)=='t'&&(data[s+3]|32)=='m'&&(data[s+4]|32)=='l') is_html = 1;   /* <html */
+      if (!is_html && s+2 <= lim && data[s]=='<' && data[s+1]=='!') {   /* <!doctype html ...> (or any <!... that isn't an SVG/XML decl) */
+          int k = s+2; while (k < lim && (data[k]==' '||data[k]=='\t')) k++;
+          if (k+7 <= lim && (data[k]|32)=='d'&&(data[k+1]|32)=='o'&&(data[k+2]|32)=='c'&&(data[k+3]|32)=='t'&&(data[k+4]|32)=='y'&&(data[k+5]|32)=='p'&&(data[k+6]|32)=='e') is_html = 1;
+      }
+      if (!is_html)
       for (int i = 0; i + 4 <= lim; i++)
           if (data[i]=='<' && (data[i+1]|32)=='s' && (data[i+2]|32)=='v' && (data[i+3]|32)=='g') { issvg = 1; break; }
       if (issvg) {
