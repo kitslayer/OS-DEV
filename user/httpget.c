@@ -73,6 +73,13 @@ static void rep_int(long v) { char b[24]; int i = 0; if (v < 0) { rep("-"); v = 
 int main(void) {
     static uint8_t out[200 * 1024];
     uint32_t seed = 0;
+
+    /* Defense-in-depth (pledge): the TLS client needs the network (inet — DNS +
+     * the always-allowed socket/connect/fd ops are stdio), stdio (getrandom/time/
+     * print), and writes its report (wpath). A bug in the crypto / X.509 parser
+     * handling attacker-controlled handshake bytes can't spawn, exec, or read files. */
+    sys_pledge("stdio inet wpath");
+
     sys_getrandom(&seed, sizeof seed);                 /* CSPRNG-seed the TLS ephemeral keys */
     if (!seed) seed = 0x9e3779b9u;
 

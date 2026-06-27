@@ -53,6 +53,11 @@ int main(void) {
     static char out[256 * 1024];
     static char src[200 * 1024];
 
+    /* Defense-in-depth (pledge): the JS engine only reads its source (rpath),
+     * writes its result (wpath), and uses basic stdio (sbrk/print). A bug in the
+     * 4600-line interpreter can't spawn, exec, touch the network, or the GPU. */
+    sys_pledge("stdio rpath wpath");
+
     /* Run JSIN.JS if the shell handed us a script there; otherwise the built-in
      * self-test. The shell's `js` command writes the user's source to JSIN.JS and
      * spawns us, so the JS engine runs in RING 3 for the shell path too. */
