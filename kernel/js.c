@@ -118,6 +118,46 @@ static int is_id_start(int c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='_'
 static int is_id(int c){ return is_id_start(c)||(c>='0'&&c<='9'); }
 static int is_digit(int c){ return c>='0'&&c<='9'; }
 
+/* Scan forward from s[j] (depth=1: the '{' of a '${' was already consumed) to the
+ * matching '}', skipping single/double-quoted strings and nested template literals so
+ * their literal '{'/'}' characters don't confuse the depth counter.
+ * Used by both the template LEXER and parse_template/parse_tagged.
+ * Returns the index of the matching '}', capped at len if unclosed. */
+static int tpl_scan_to_close(const char *s, int j, int len) {
+    int depth = 1;
+    while (j < len && depth > 0) {
+        unsigned char ch = (unsigned char)s[j];
+        if (ch == '\\') { j += 2; if (j > len) j = len; continue; }
+        if (ch == '\'' || ch == '"') {   /* quoted string: skip to matching close */
+            int q = ch; j++;
+            while (j < len && (unsigned char)s[j] != q) {
+                if (s[j] == '\\') { j++; if (j >= len) break; }
+                j++;
+            }
+            if (j < len) j++;  /* step past the closing quote only if it exists */
+            continue;
+        }
+        if (ch == '`') {                 /* nested template literal: skip to matching ` */
+            j++;
+            while (j < len) {
+                if (s[j] == '\\') { j += 2; if (j > len) j = len; continue; }
+                if ((unsigned char)s[j] == '`') { j++; break; }
+                if (s[j] == '$' && j+1 < len && s[j+1] == '{') {
+                    j = tpl_scan_to_close(s, j+2, len);
+                    if (j < len) j++;    /* step past the matching '}' if found */
+                    continue;
+                }
+                j++;
+            }
+            continue;
+        }
+        if (ch == '{') depth++;
+        else if (ch == '}') { depth--; if (depth == 0) break; }
+        j++;
+    }
+    return (j <= len) ? j : len;
+}
+
 static token lex_next_raw(lexer *L) {
     token t; t.type = T_EOF; t.s = 0; t.len = 0; t.num = 0.0;
     const char *s = L->src;
@@ -179,16 +219,20 @@ static token lex_next_raw(lexer *L) {
         t.type=T_STR; t.s=buf; t.len=n; return t;
     }
     /* template literal `...${expr}...` — capture the raw inner text (balancing
-     * ${ } so a `}` inside a substitution doesn't end it); the parser splits it. */
+     * ${ } so a `}` inside a substitution doesn't end it); the parser splits it.
+     * Uses tpl_scan_to_close() so strings/nested templates inside ${} are skipped. */
     if (c=='`') {
-        int start = L->pos+1, i = start, depth = 0;
+        int start = L->pos+1, i = start;
         while (i < L->len) {
             char ch = s[i];
-            if (ch=='\\') { i += 2; continue; }
-            if (depth==0 && ch=='`') break;
-            if (ch=='$' && i+1<L->len && s[i+1]=='{') { depth++; i += 2; continue; }
-            if (depth>0 && ch=='{') depth++;
-            else if (depth>0 && ch=='}') depth--;
+            if (ch=='\\') { i += 2; if (i > L->len) i = L->len; continue; }
+            if (ch=='`') break;
+            if (ch=='$' && i+1<L->len && s[i+1]=='{') {
+                /* skip the entire ${...} expression, properly handling strings/templates */
+                int close = tpl_scan_to_close(s, i+2, L->len);  /* returns <= L->len */
+                i = (close < L->len) ? close + 1 : L->len;       /* step past } if found */
+                continue;
+            }
             i++;
         }
         t.type=T_TEMPLATE; t.s=s+start; t.len=i-start; L->pos = (i<L->len)? i+1 : i;
@@ -343,7 +387,7 @@ static node *parse_template(const char *raw, int len) {
         if (raw[i]=='\\' && i+1<len) { char e=raw[i+1]; char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
         if (raw[i]=='$' && i+1<len && raw[i+1]=='{') {
             TPL_FLUSH();                                  /* literal before the ${ */
-            int j=i+2, depth=1; while(j<len && depth>0){ if(raw[j]=='{') depth++; else if(raw[j]=='}'){ depth--; if(depth==0) break; } j++; }
+            int j = tpl_scan_to_close(raw, i+2, len);   /* find the matching }, skipping strings/nested templates */
             lexer sub; memset(&sub,0,sizeof(sub)); sub.src=raw+i+2; sub.len=j-(i+2); sub.pos=0;
             node *e = parse_assign(&sub);
             chain = mkbin_plus(chain, e);                 /* chain is non-null after TPL_FLUSH */
@@ -372,7 +416,7 @@ static node *parse_tagged(node *tag, const char *raw, int len) {
         if (raw[i]=='\\' && i+1<len) { char e=raw[i+1]; char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
         if (raw[i]=='$' && i+1<len && raw[i+1]=='{') {
             TT_FLUSH();
-            int j=i+2, depth=1; while(j<len && depth>0){ if(raw[j]=='{') depth++; else if(raw[j]=='}'){ depth--; if(depth==0) break; } j++; }
+            int j = tpl_scan_to_close(raw, i+2, len);   /* find matching }, skipping strings/nested templates */
             lexer sub; memset(&sub,0,sizeof(sub)); sub.src=raw+i+2; sub.len=j-(i+2); sub.pos=0;
             node *ex = parse_assign(&sub);
             if (nv < 63) vals[nv++] = ex;

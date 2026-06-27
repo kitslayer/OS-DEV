@@ -398,4 +398,9 @@ ff NaN Infinity -1010
 7 3 undefined undefined,5 undefined
 -- M967 Number(non-numeric string) -> NaN --
 true true true 42 Infinity -3.5
+-- template-literal: } and { in quoted strings inside ${} (M1472) --
+a}b a{b a}b
+}x start-}-end
+cell:yes
+before}after{end
 -- done --

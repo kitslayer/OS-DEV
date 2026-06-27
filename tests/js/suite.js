@@ -431,4 +431,9 @@ print("-- M965/M966 var function-scope + hoisting --");
 print((function(){{var y=7;}return y;})(), (function(){for(var i=0;i<3;i++){}return i;})(), (function(){{let z=1;}return typeof z;})(), (function(){var r=typeof x;x=5;var x;return r+","+x;})(), (function(){if(false){var w=1;}return typeof w;})());  // 7 3 undefined undefined,5 undefined (var survives its block; let stays block-scoped; hoisting; bare `var x` doesn't reset)
 print("-- M967 Number(non-numeric string) -> NaN --");
 print(isNaN(Number("12abc")), isNaN(Number("x")), isNaN("abc"), Number("42"), Number("Infinity"), Number("  -3.5  "));  // true true true 42 Infinity -3.5 (a non-wholly-numeric string is NaN; Infinity recognized; valid numbers unaffected)
+print("-- template-literal: } and { in quoted strings inside ${} (M1472) --");
+print(`a${'}'}b`, `a${'{'}b`, `a${"}"}b`);  // a}b a{b a}b  (} or { inside a quoted string in ${} must not confuse brace depth)
+print(`${"}"+"x"}`, `start-${'}'}-end`);     // }x start-}-end (concatenated; single quoted
+print((function(){var n={ok:true};return `cell${n.ok?'':' off'}:${n.ok?'yes':'no'}`;})());  // cell:yes  (ternary with empty strings in ${})
+print(`before${'}'}after${'{'}end`);          // before}after{end (two consecutive substitutions with brace chars)
 print("-- done --");
