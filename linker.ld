@@ -29,12 +29,27 @@ SECTIONS
     }
 
     .rodata : ALIGN(4K) {
+        _srodata = .;               /* W^X: page-aligned start of read-only data (vmm_harden_kernel) */
         *(.rodata*)
         _kimage_end = .;            /* end of .text+.rodata: a deterministic span covering kernel code + the embedded app ELFs */
     }
 
     .data : ALIGN(4K) {
+        _sdata = .;                 /* W^X: page-aligned start of writable data */
         *(.data*)
+    }
+
+    /* Executable scratch for the eBPF JIT (kernel/bpf.c) and the loadable-module
+     * loader (kernel/module.c): both emit/relocate machine code into these buffers
+     * and then jump to it, so this region must stay executable. W^X
+     * (vmm_harden_kernel) marks the REST of .data/.bss no-execute but re-marks
+     * [_jitexec_start, _jitexec_end) RWX. Page-aligned both ends so it is a whole
+     * number of pages. NOLOAD (like .bss): the buffers are written before use. */
+    .jitexec (NOLOAD) : ALIGN(4K) {
+        _jitexec_start = .;
+        *(.jitexec*)
+        . = ALIGN(4K);
+        _jitexec_end = .;
     }
 
     /* Low-physical, page-aligned BSS placed BEFORE the big .bss arenas, so any

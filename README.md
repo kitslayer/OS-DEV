@@ -5,26 +5,73 @@ booted via Multiboot under QEMU.
 
 ## Status
 
-✅ **1400+ milestones complete — a fully keyboard-drivable graphical desktop OS — that now boots up *all* your CPU cores (SMP: it enables the local APIC, reads the core list from the ACPI MADT, and brings each application processor up through its own real→long-mode trampoline) — with its own from-scratch JavaScript interpreter (with full class-based OOP — classes, `extends`, `super` — and modern ES6 syntax — spread/rest `...`, destructuring, arrow functions, template literals, plus `Symbol` and the iterator protocol (custom iterables in `for…of`, spread, and `Array.from`) and `Proxy` get/set traps — atop a Math/JSON/String/Array standard library, runnable from the shell *and* inside web pages via `<script>`), whose web browser now browses the real HTTPS web (validated live on example.com, gnu.org, the NPR text news site, and danluu.com) — verifying the server's CertificateVerify signature, the cert chain's issuer links, anchoring the chain to one of ~13 baked-in trusted root CAs (Let's Encrypt, DigiCert, Google, Amazon, Sectigo, GlobalSign, SSL.com, Microsoft, …), and **enforcing that the leaf certificate's SAN/CN actually names the host and that it is within its validity period** (a hostname mismatch or an expired/not-yet-valid cert is rejected — the core anti-MITM checks), all with from-scratch ECDSA/RSA/X.509 crypto — following links across pages (a from-scratch TLS 1.3 client, also wired to the shell's `get`/`wget`, plus an in-guest **HTTP server** that serves a live status dashboard and any file on its disk by URL — `GET /README.TXT` — over that same from-scratch TCP stack) and renders every common image format — PNG (incl. interlaced), animated GIF, baseline-&-progressive JPEG, **SVG** (a from-scratch integer-only rasterizer with `<g>`/per-shape affine transforms, paint inheritance, opacity, linear/radial gradients, `<text>`, and `<use>`/`<symbol>` reuse), and uncompressed **BMP** (24-/32-/8-bit — so it can display its own `screenshot` output) — all inline and from scratch, now including **remote images fetched over HTTP/HTTPS** (not just local) and **inline `data:` base64 image URIs** (embedded directly in the page), plus a **fully colourised** shell and apps (filenames by type, `ps`/`df`/`free` status with usage bars, git-style coloured `diff`s, the Calendar/Forth, and a `neofetch`-style system summary), a hierarchical filesystem, fifty-plus userspace apps (around forty games — incl. **Chess** vs an alpha-beta AI, **a NES emulator** (libxnes; runs the homebrew Nova the Squirrel + the 240p suite, with an on-disk ROM picker and sound), **Freedoom Phase 1** on the bundled Doom engine via a WAD picker, an original **first-person-shooter raycaster** (depth-buffered sprite enemies + shooting), Asteroids, Space Invaders, Tron, Pong, Reversi vs an AI, Sokoban, Battleship vs an AI, Mastermind, Memory, 15-Puzzle, Lights Out, Pig, a **Half-Life/Black-Mesa tribute**, plus Connect Four vs an AI/Simon/Blackjack/tic-tac-toe vs an unbeatable minimax AI/Hangman/a text adventure/maze/Sudoku/Tetris/Breakout/Minesweeper/Wordle/2048/Snake/Life), a typing-speed test, a text editor, an interactive **hex editor** (overtype-edit + find/goto, save), an ASCII-paint canvas, a calendar, a Mandelbrot explorer, a graphical **analog clock**, a graphical **month calendar**, a graphical **stopwatch**, a graphical **binary clock**, a graphical **character map** (browse all 128 font glyphs), a graphical **countdown timer** (with an audible alarm), a graphical **image viewer** (browse every image on disk — PNG/GIF/JPEG/BMP/SVG — via the from-scratch decoders), a graphical **calculator** (keypad + LCD, exact fixed-point maths), a graphical **colour picker** (RGB sliders + hex), a **unit converter** (length/weight/temp), a **base converter** (dec↔hex↔bin↔oct), a **password generator** (copies to the clipboard), a **clipboard viewer**, a persistent **to-do list**, a piano, a metronome, a **step sequencer** (programmable melody via the PC speaker), a music jukebox, a Matrix screensaver, a **fireworks** display, …), a system monitor (text, plus a **graphical** live CPU/RAM grapher and a speedometer **gauge dashboard**) and a **graphical task manager** — a real "top": per-task CPU%/MEM + an aggregate system-CPU% footer, in the kernel font, a complete verified crypto + TLS toolkit (SHA-256/AES-GCM/ChaCha20-Poly1305/HKDF/X25519/RSA/ECDSA/X.509), a **GUI file manager** (open/delete/rename/new-folder, sort by name/size/date, a count/size status footer, and set any image as the wallpaper), a runtime-changeable desktop **wallpaper** (any image format), right-click window & desktop context menus, a real taskbar, and a `screenshot` command that saves the live screen to a BMP on disk. The browser is interactive: page `<script>` drives a live DOM (`getElementById`, `querySelector`/`querySelectorAll`/`getElementsBy*` by CSS selector — tag/`.class`/`#id`/`[attr]`, `.textContent`/`.innerHTML`/`.value`, `get`/`set`/`hasAttribute`, `.classList`), inline `onclick` plus JS-assigned `addEventListener`/`el.onclick=fn` handlers (whose state persists across clicks via a persistent per-page JS env), and editable `<input>` fields turn typing into output, and HTML forms submit — so it can **search the live web** (type a query → build `?q=…` → HTTPS-fetch + cert-validate → render DuckDuckGo's results). It even loads and runs programs from its own disk.**
+A mature hobby OS that goes from power-on to a graphical, mouse- and
+keyboard-driven **desktop** and hosts real **ring-3 programs as windows**. It is
+developed and run under QEMU; it also boots via GRUB / Multiboot2 (see the honest
+caveats below).
 
-*Since the snapshot above (M495+): the OS runs **id Software's DOOM and Quake** as windowed ring-3 apps with an AC'97 audio stack (SFX + music + a WAV jukebox), atop a userspace heap, a graphics-window API, raw keyboard/mouse, and FPU/SSE; the desktop gained F1 help, date/time + disk monitor, double-click/drag-to-edge window tiling, and Apps-menu type-to-jump; and a real **TLS 1.3 HTTPS self-test runs at every boot**. Most recently (M706+): a **NES emulator**, a **Game Boy emulator** (Peanut-GB), **Freedoom** on the Doom engine, an original first-person-shooter **raycaster**, **Chess** vs an alpha-beta AI, and ~20 more games (Asteroids, Space Invaders, Tron, Reversi, Sokoban, Battleship, Mastermind, Memory, 15-Puzzle, Lights Out, Pig, Pong, Checkers, Gomoku, Frogger, Lunar Lander, Yahtzee, Flappy, a Half-Life tribute), plus **much faster FAT file reads** (multi-sector, run-coalesced) and runnable **programs loaded from the disk** (`run NAME.ELF`). Most recently (M1280+): the desktop got a **visual refresh** (8px-rounded windows, feathered drop-shadows, and a procedural azure wallpaper that needs no image file), `make run` now **auto-detects KVM** (hardware-accelerated — no more TCG lag), the kernel boots from **real GRUB** over a **Multiboot2 framebuffer handoff** (a genuine bare-metal path, not just QEMU `-kernel`), and the systems stack gained **software RAID-0/1/5 + a linear LVM-lite volume manager** (device-mapper over real disks), an **ACPI AML method interpreter**, **MSI-X** message-signalled interrupts, and an **eBPF JIT** that compiles bytecode to native x86-64 (validated equal to the interpreter, then wired into the packet firewall). See [WHATS-NEXT.md](WHATS-NEXT.md) for the live status and [tests/README.md](tests/README.md) for the **60** ASan/UBSan + in-guest test suites (`make check`).*
-OS-DEV goes from power-on to a themed windowing **desktop environment** that
-hosts **actual ring-3 programs as windows**: 64-bit long mode, interrupts,
-physical/virtual memory + a heap, **preemptive** multitasking with **sleep/wake**
-and **per-process isolation**, ring-3 userspace + syscalls, a **read-write
-FAT32** filesystem on its own ATA driver, **PCI**, an **e1000 NIC**
-(ping + **DNS resolve**), **framebuffer graphics**, mouse + **USB absolute
-pointer**, **PC-speaker sound**, a **real-time clock**, and a **window manager**
-(drag/resize/start-menu) hosting real userspace programs — a **shell**, a live
-clock, and a **graphical web browser** that fetches and renders real web pages
-over a **from-scratch TCP/HTTP stack** (chunked-encoding aware). The browser is
-**fully keyboard-driven** — links (Tab/Enter), in-page find (`\`), bookmarks
-(`a`), history/back, save, scroll — and renders headings, **lists, tables,
-`<pre>`, `<img>` alt text, form fields, and HTML entities**, and even renders
-local **Markdown (`.md`) files** (a from-scratch markdown→HTML converter — headings, bold/italic, `~~strikethrough~~`, code/fenced blocks, lists, blockquotes, links + bare-URL autolinks, GFM tables, and `![]()` images) and **CSV (`.csv`) files as tables**. The desktop adds
-keyboard window management (F2 focus, F4 maximize, **F12 screenshot**), an interactive **Files**
-launcher, and **terminal scrollback**; and the OS can `run` an **ELF program
-loaded from the FAT32 disk**, not just the kernel-embedded ones:
+### What's genuinely here — from scratch
+
+- **Kernel:** x86_64 long mode; physical + virtual memory managers; a kernel
+  heap; **preemptive** multitasking with a CFS-style weighted scheduler,
+  sleep/wake, and **fork + copy-on-write**; per-process address-space isolation;
+  ring-3 userspace over a ~280-call syscall layer; an ELF loader (incl. PIE /
+  load-time dynamic relocation); and **SMP bring-up** (LAPIC + the ACPI MADT;
+  every core trampolines up into long mode).
+- **Storage + filesystems:** a read-write **FAT32** driver over ATA / AHCI /
+  NVMe / virtio-blk; ext2 + ISO-9660 readers; a VFS with `/proc` and `/dev`; and
+  software **RAID-0/1/5 + a linear (LVM-lite) volume manager**.
+- **Networking:** ARP / IPv4 / ICMP / UDP / **TCP**, DNS, DHCP, and a
+  **TLS 1.3 client** built on from-scratch X25519 / RSA / ECDSA / AES-GCM /
+  ChaCha20-Poly1305 / SHA-2, with **X.509 chain validation to ~13 baked-in root
+  CAs** (hostname + validity enforced — the core anti-MITM checks). A real HTTPS
+  handshake to example.com is exercised and asserted on every boot. There is also
+  a small from-scratch HTTP server.
+- **Graphics + desktop:** a framebuffer compositor; a window manager
+  (drag / resize / tile / start-menu); PS/2 and USB-tablet pointers; AC'97 / Intel
+  HD-Audio sound; a **web browser** with a **from-scratch JavaScript engine**
+  (ES6-flavoured: classes, closures, arrow functions, destructuring, Map/Set, a
+  Math/JSON/String/Array standard library) that renders real pages and runs page
+  `<script>` against a minimal live DOM; and from-scratch **PNG / GIF / JPEG /
+  SVG / BMP** decoders.
+- **Security hardening:** every syscall pointer argument is validated by a
+  PTE_USER page-table walk; the kernel image is **W^X** (`.text` read-only +
+  executable, `.rodata` / `.data` / `.bss` / heap / stacks **non-executable**);
+  the kernel stack has an unmapped **guard page**; and **SMEP + UMIP** are enabled
+  when the CPU exposes them. The untrusted-input parsers are continuously fuzzed
+  under ASan/UBSan (`make check`).
+- **Userspace:** a real scripting **shell** (pipes, redirects, globbing,
+  functions, control flow, quoting); a **text editor** with syntax highlighting; a
+  **hex editor**; a **file manager**; ~50 small graphical tools (clocks,
+  converters, a calculator, a paint canvas, a system monitor, a task manager, …);
+  and ~40 games. **Bundled third-party software** runs as ring-3 windows on the
+  syscall layer: id Software's **DOOM** and **Quake**, a **Game Boy** emulator
+  (Peanut-GB), and a **NES** emulator (libxnes).
+
+### Honest caveats — this is a learning project, not a production OS
+
+- **It runs under QEMU.** The GRUB / Multiboot2 framebuffer path is validated
+  under QEMU + OVMF but has **not yet been booted on physical hardware**.
+- **The integrated browser still runs in the kernel (ring 0)** — its HTML/CSS
+  render path is the remaining piece. That in-kernel parsing is the project's main
+  architectural weakness (a parser bug is a kernel bug), mitigated by the W^X /
+  guard-page hardening above and by extensive parser fuzzing. **Moving the stack
+  out of ring 0 is underway and the hardest parsers are already out:** the
+  **JavaScript engine** (`jsrun`), the **image decoders** (PNG/GIF/JPEG/SVG/BMP,
+  `imgdec`), and the **TLS 1.3 client + crypto + X.509 validation** (`httpget`)
+  now run as ring-3 programs — a bug in them can no longer compromise the kernel.
+  What's left is the browser shell's `fb_*` render path (see [WHATS-NEXT.md](WHATS-NEXT.md)).
+- **SMP** brings every core up, but the scheduler runs ring-3 tasks on the boot
+  core; the other cores currently serve only a parallel-compute job pool.
+- **Lines of code:** roughly **57k** of from-scratch kernel C and **~24k** of
+  from-scratch userspace C. The bundled DOOM / Quake / emulators add **~130k**
+  lines of vendored third-party code — most of the raw line count is theirs, not
+  this project's.
+
+For the running change log see **[WHATS-NEXT.md](WHATS-NEXT.md)**; for an honest
+difficulty breakdown of the long-term goals, **[GOALS.md](GOALS.md)**; for the
+test suites (host ASan/UBSan parser fuzzers + in-guest QEMU boot/driver tests),
+**[tests/README.md](tests/README.md)** (`make check`).
 
 ![OS-DEV's browser rendering info.cern.ch, the first website ever](docs/osdev-browser-cern.png)
 

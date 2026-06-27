@@ -11,6 +11,12 @@
  * Launch: `run imgview` from the shell, or the Apps menu ("Image Viewer").
  */
 #include "ulib.h"
+#include "png.h"
+#include "gif.h"
+#include "jpeg.h"
+#include "bmp.h"
+#include "svg.h"
+#include <stddef.h>
 
 #define W 480
 #define H 384
@@ -37,6 +43,49 @@ static int is_img(const char *n) { return ext_is(n,"png")||ext_is(n,"gif")||ext_
 static int eq_ci(const char *a, const char *b) { int i = 0; while (a[i] && b[i]) { if (ci(a[i]) != ci(b[i])) return 0; i++; } return a[i] == b[i]; }
 static void putint(char *b, int *p, int v) { if (v < 0) { b[(*p)++] = '-'; v = -v; }
     char t[10]; int i = 0; if (v == 0) t[i++] = '0'; while (v) { t[i++] = '0' + v % 10; v /= 10; } while (i) b[(*p)++] = t[--i]; }
+
+/* RING-3 image decode + fit-scale: the from-scratch decoders run in THIS process,
+ * not the kernel, so a malformed image opened in the viewer crashes only imgview,
+ * not the kernel. (Replaces the in-kernel sys_loadimg decode path.) The decoders
+ * need a few libc helpers ulib doesn't provide (it has memset/memcpy/memmove). */
+size_t strlen(const char *s) { const char *p = s; while (*p) p++; return (size_t)(p - s); }
+int strcmp(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return (int)(unsigned char)*a - (int)(unsigned char)*b; }
+int memcmp(const void *a, const void *b, size_t n) { const unsigned char *x = a, *y = b; for (size_t i = 0; i < n; i++) if (x[i] != y[i]) return (int)x[i] - (int)y[i]; return 0; }
+
+#define DCAP (4 * 1024 * 1024)                  /* >= 1M pixels * 4 (decode_image's cap) */
+static unsigned char g_file[512 * 1024], g_dec[DCAP], g_scr[DCAP];
+
+static int decode_native(const char *name, int *nw, int *nh) {
+    long n = sys_readfile(name, g_file, sizeof g_file);
+    if (n <= 0) return -1;
+    unsigned char *d = g_file; int len = (int)n, w = 0, h = 0, rc = -1;
+    if      (len >= 8 && d[0] == 0x89 && d[1] == 'P') rc = png_decode(d, len, g_dec, DCAP, g_scr, DCAP, &w, &h);
+    else if (len >= 4 && d[0] == 'G'  && d[1] == 'I') rc = gif_decode(d, len, g_dec, DCAP, g_scr, DCAP, &w, &h);
+    else if (len >= 3 && d[0] == 0xFF && d[1] == 0xD8) rc = jpeg_decode(d, len, g_dec, DCAP, g_scr, DCAP, &w, &h);
+    else if (len >= 2 && d[0] == 'B'  && d[1] == 'M') rc = bmp_decode(d, len, g_dec, DCAP, &w, &h);
+    else if (len >= 1 && d[0] == '<') rc = svg_decode(d, len, g_dec, DCAP, g_scr, DCAP, &w, &h);
+    if (rc != 0 || w <= 0 || h <= 0) return -1;
+    *nw = w; *nh = h; return 0;
+}
+
+/* nearest-neighbour fit-scale the decoded RGBA (nw x nh) into the W x IMGH image
+ * area, aspect-preserving + centred (letterboxed). */
+static void blit_scaled(int nw, int nh) {
+    for (int i = 0; i < IMGH * W; i++) FB[i] = 0x14181E;
+    int dw = W, dh = (int)((long)nh * W / nw);
+    if (dh > IMGH) { dh = IMGH; dw = (int)((long)nw * IMGH / nh); }
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
+    int ox = (W - dw) / 2, oy = (IMGH - dh) / 2;
+    for (int y = 0; y < dh; y++) {
+        int sy = (int)((long)y * nh / dh); if (sy >= nh) sy = nh - 1;
+        for (int x = 0; x < dw; x++) {
+            int sx = (int)((long)x * nw / dw); if (sx >= nw) sx = nw - 1;
+            unsigned char *p = &g_dec[((long)sy * nw + sx) * 4];
+            FB[(oy + y) * W + (ox + x)] = ((unsigned)p[0] << 16) | ((unsigned)p[1] << 8) | p[2];
+        }
+    }
+}
 
 static char names[64][24];
 static int nimg;
@@ -70,8 +119,9 @@ int main(void) {
                 text("No image files on disk.", 20, 32, 0xE0A0A0);
                 text("(expected TEST.PNG, PHOTO.JPG, LOGO.GIF, ...)", 20, 56, 0x808890);
             } else {
-                int rc = sys_loadimg(names[idx], FB, W, IMGH, outwh);
-                if (rc < 0) { for (int i = 0; i < IMGH * W; i++) FB[i] = 0x281418; text("decode failed", 20, 32, 0xF08080); }
+                int nw = 0, nh = 0;
+                if (decode_native(names[idx], &nw, &nh) == 0) { blit_scaled(nw, nh); outwh[0] = nw; outwh[1] = nh; }
+                else { for (int i = 0; i < IMGH * W; i++) FB[i] = 0x281418; text("decode failed", 20, 32, 0xF08080); outwh[0] = outwh[1] = 0; }
                 fill(0, IMGH, W, H - IMGH, 0x101418);
                 fill(0, IMGH, W, 1, 0x2A3340);                /* separator above the caption */
                 char cap[64]; int p = 0;

@@ -2823,12 +2823,17 @@ static void set_status(browser_t *b, const char *s) {
 
 /* Save/disable + restore interrupts: makes the WM<->worker hand-offs atomic
  * against preemption (the timer IRQ can switch tasks at any instruction). */
+#ifdef BROWSER_RING3   /* ring-3 browser app: single-threaded, can't run privileged cli/sti */
+static inline uint64_t irq_save(void) { return 0; }
+static inline void irq_restore(uint64_t f) { (void)f; }
+#else
 static inline uint64_t irq_save(void) {
     uint64_t f; __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory"); return f;
 }
 static inline void irq_restore(uint64_t f) {
     __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
 }
+#endif
 
 static volatile browser_t *g_req;        /* a browser queued for a fetch, or NULL */
 static volatile int        g_busy;       /* worker is mid-fetch                   */
@@ -3004,10 +3009,16 @@ static void worker_main(void) {
 
 void browser_init(void) {
     if (!g_worker) {
+#ifdef BROWSER_RING3
+        /* ring 3: webview shims task_create_stack onto sys_clone (a real fetch
+         * thread, so the UI stays responsive during a load). No privileged CR3 read. */
+        g_worker = task_create_stack(worker_main, 0, 0, 256 * 1024);
+#else
         uint64_t cr3; __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
         /* 256 KB stack: this worker runs TLS + (future) bignum/RSA/ECDSA cert
          * verification, which overflows the default 16 KB task stack. */
         g_worker = task_create_stack(worker_main, cr3, 0, 256 * 1024);  /* pin to kernel space */
+#endif
     }
 }
 

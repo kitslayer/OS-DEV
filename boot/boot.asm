@@ -266,12 +266,15 @@ global multiboot_info_ptr
 multiboot_info_ptr: resq 1
 multiboot_magic:    resq 1
 
-alignb 16
 ; 256 KiB boot stack. kmain() -> desktop_run() (the window manager) runs on this
-; stack, and the browser executes page <script> there via the JS interpreter,
-; whose recursion can be stack-heavy. There is no guard page, so this matches the
-; 256 KiB kernel stack the ring-3 apps get (app.c) for the same JS/TLS code.
-; (Identity-mapped: early paging maps the first 1 GiB, kernel+BSS is only ~3 MiB.)
+; stack, and the browser executes page <script> there via the JS interpreter, whose
+; recursion can be stack-heavy. A GUARD PAGE sits just below it: vmm_harden_kernel
+; unmaps stack_guard, so an overflow past stack_bottom takes a page fault here
+; instead of silently corrupting the page tables / multiboot info below it.
+; Page-aligned so stack_guard is exactly the one page below the lowest stack address.
+alignb 4096
+global stack_guard
+stack_guard:  resb 4096             ; guard page — unmapped by W^X (vmm_harden_kernel)
 stack_bottom: resb 262144           ; 256 KiB boot stack
 stack_top:
 

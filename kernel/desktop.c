@@ -79,7 +79,9 @@ static int start_x = 8, start_y, start_w = 110, start_h = 24;
 
 struct menu_item { const char *label; int kind; const char *prog; };
 static const struct menu_item menu[] = {
-    { "Browser", KIND_BROWSER, 0 }, { "Shell", KIND_APP, "shell" },
+    { "Browser", KIND_APP, "webview" },                /* the ring-3 browser is now the default */
+    { "Browser (kernel)", KIND_BROWSER, 0 },           /* the in-kernel browser kept as a fallback */
+    { "Shell", KIND_APP, "shell" },
     { "Clock", KIND_APP, "clock" }, { "Analog Clock", KIND_APP, "aclock" }, { "Calc", KIND_APP, "calc" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },

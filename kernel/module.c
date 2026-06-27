@@ -72,11 +72,11 @@ typedef struct { uint64_t r_offset; uint64_t r_info; int64_t r_addend; } Elf64_R
 
 #define MOD_AREA_SZ 65536
 #define MOD_MAX_SEC 64
-/* Executable scratch for the loaded modules. In the kernel image's BSS, which is
- * mapped RWX (the kernel LOAD segment is RWX), so code copied here can run. A
- * bump allocator hands each loaded module a region; freed wholesale once all
- * modules are unloaded (so insmod/rmmod cycles don't leak the area). */
-static uint8_t  mod_area[MOD_AREA_SZ] __attribute__((aligned(64)));
+/* Executable scratch for the loaded modules. Placed in the .jitexec section, which
+ * W^X (vmm_harden_kernel) keeps RWX while the rest of .bss is no-execute, so code
+ * copied here can run. A bump allocator hands each loaded module a region; freed
+ * wholesale once all modules are unloaded (so insmod/rmmod cycles don't leak it). */
+static uint8_t  mod_area[MOD_AREA_SZ] __attribute__((aligned(64), section(".jitexec")));
 static uint32_t mod_used;                              /* bump pointer into mod_area */
 
 /* The module registry — what /proc/modules lists and rmmod tears down. */

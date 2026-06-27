@@ -265,6 +265,12 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         measure_extend(PCR_KERNEL, _kimage_start, (uint64_t)(_kimage_end - _kimage_start), "kernel");
     }
 
+    /* W^X: split the boot huge-pages over the kernel image into 4 KiB pages and
+     * tighten them — .text read-only+executable, .rodata read-only+NX, .data/.bss/
+     * stack writable+NX (the eBPF/module .jitexec scratch stays RWX). Done here:
+     * pmm/vmm are up and we are still single-threaded in the kernel address space. */
+    vmm_harden_kernel();
+
     sched_init();
 
     /* On real hardware / a GRUB ISO, the bootloader honors our Multiboot header's

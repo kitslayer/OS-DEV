@@ -121,6 +121,10 @@ global gclip_elf_start, gclip_elf_end
 global gtodo_elf_start, gtodo_elf_end
 global gseq_elf_start, gseq_elf_end
 global pietest_elf_start, pietest_elf_end
+global jsrun_elf_start, jsrun_elf_end
+global imgdec_elf_start, imgdec_elf_end
+global httpget_elf_start, httpget_elf_end
+global webview_elf_start, webview_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -573,5 +577,21 @@ gseq_elf_end:
 pietest_elf_start:
     incbin "build/pietest.elf"
 pietest_elf_end:
+
+jsrun_elf_start:
+    incbin "build/jsrun.elf"
+jsrun_elf_end:
+
+imgdec_elf_start:
+    incbin "build/imgdec.elf"
+imgdec_elf_end:
+
+httpget_elf_start:
+    incbin "build/httpget.elf"
+httpget_elf_end:
+
+webview_elf_start:
+    incbin "build/webview.elf"
+webview_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -18,6 +18,7 @@
 #include "vmm.h"
 #include "pmm.h"
 #include "string.h"
+#include "console.h"   /* kprintf — for the W^X self-check report */
 
 #define PML4_IDX(v) (((v) >> 39) & 0x1FF)
 #define PDPT_IDX(v) (((v) >> 30) & 0x1FF)
@@ -389,6 +390,90 @@ int vmm_protect(uint64_t virt, uint64_t flags) {
     pt[PT_IDX(virt)] = (e & ADDR_MASK) | PTE_PRESENT | flags;   /* keep the frame, replace the flags */
     invlpg(virt);
     return 0;
+}
+
+/* Split the 2 MiB huge page that maps `virt` (active space) into 512 individual
+ * 4 KiB pages over the same physical 2 MiB, preserving the leaf flags. This is the
+ * prerequisite for per-page permissions (W^X) on a region the boot trampoline
+ * mapped with one huge page. Returns 0 if already 4 KiB-mapped (no-op) or after a
+ * successful split; -1 on OOM or if there is no present PD entry. */
+static int vmm_split_huge(uint64_t virt) {
+    uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return -1;
+    uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT) || (pdpt[PDPT_IDX(virt)] & PTE_HUGE)) return -1;
+    uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
+    uint64_t e = pd[PD_IDX(virt)];
+    if (!(e & PTE_PRESENT)) return -1;
+    if (!(e & PTE_HUGE))    return 0;                  /* already a 4 KiB PT — nothing to split */
+
+    uint64_t base   = e & ~0x1FFFFFull;                /* 2 MiB-aligned physical base */
+    uint64_t lflags = e & (PTE_WRITABLE | PTE_USER | PTE_NX);   /* carry leaf perms, drop HUGE */
+    uint64_t ptphys = pmm_alloc_frame();
+    if (!ptphys) return -1;
+    uint64_t *pt = phys_to_table(ptphys);
+    for (int i = 0; i < 512; i++)
+        pt[i] = (base + (uint64_t)i * PAGE_SIZE) | PTE_PRESENT | lflags;
+    pd[PD_IDX(virt)] = ptphys | PTE_PRESENT | PTE_WRITABLE;     /* PD entry now points at the PT */
+    uint64_t hbase = virt & ~0x1FFFFFull;
+    for (uint64_t off = 0; off < 0x200000; off += PAGE_SIZE) invlpg(hbase + off);
+    return 0;
+}
+
+/*
+ * Enforce W^X on the kernel image. The boot trampoline (boot.asm) identity-maps the
+ * low 1 GiB with 2 MiB huge pages, so the kernel's own code and data share huge,
+ * writable, EXECUTABLE mappings — a kernel bug can overwrite kernel code, and any
+ * writable page (stack, heap, data) is also executable. Here we split the huge pages
+ * covering the kernel image into 4 KiB pages and tighten each section:
+ *   .text            -> read-only + executable  (kernel code can no longer be patched)
+ *   .rodata          -> read-only + no-execute   (constants + embedded app ELFs immutable)
+ *   .data/.bss/stack -> writable  + no-execute   (defeats executing injected data/stack bytes)
+ * The eBPF JIT + module loader emit code into the .jitexec section, which is re-marked
+ * RWX after the blanket NX pass. EFER.NXE is enabled in boot.asm. Run once at boot,
+ * single-threaded, in the kernel address space (before sched_init / any user CR3).
+ */
+void vmm_harden_kernel(void) {
+    extern char _kimage_start[], _srodata[], _sdata[], kernel_end[];
+    extern char _jitexec_start[], _jitexec_end[];
+    uint64_t text_s = (uint64_t)_kimage_start;
+    uint64_t ro_s   = (uint64_t)_srodata;
+    uint64_t data_s = (uint64_t)_sdata;
+    uint64_t end    = ((uint64_t)kernel_end + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t jit_s  = (uint64_t)_jitexec_start;
+    uint64_t jit_e  = (uint64_t)_jitexec_end;
+
+    /* 1. Split every 2 MiB huge page overlapping the kernel image into 4 KiB pages. */
+    for (uint64_t v = text_s & ~0x1FFFFFull; v < end; v += 0x200000)
+        vmm_split_huge(v);
+
+    /* 2. Tighten per section (vmm_protect always re-sets PRESENT). */
+    for (uint64_t v = text_s; v < ro_s;   v += PAGE_SIZE) vmm_protect(v, 0);                      /* RX, read-only */
+    for (uint64_t v = ro_s;   v < data_s; v += PAGE_SIZE) vmm_protect(v, PTE_NX);                 /* R,  NX        */
+    for (uint64_t v = data_s; v < end;    v += PAGE_SIZE) vmm_protect(v, PTE_WRITABLE | PTE_NX);  /* RW, NX        */
+
+    /* 3. The JIT / module scratch must execute: re-mark it RWX (override the NX above). */
+    for (uint64_t v = jit_s;  v < jit_e;  v += PAGE_SIZE) vmm_protect(v, PTE_WRITABLE);           /* RWX           */
+
+    /* 4. Unmap the boot stack's guard page (boot.asm reserves it just below the
+     *    stack): a boot-stack overflow now faults here instead of silently
+     *    corrupting the page tables / multiboot info that sit beneath the stack. */
+    extern char stack_guard[];
+    vmm_unmap((uint64_t)stack_guard);
+
+    /* Verify the protection actually took (read representative leaf PTEs straight from
+     * the page tables) and report — turns "it booted" into a checked invariant. */
+    uint64_t te = vmm_pte_raw(text_s), re = vmm_pte_raw(ro_s), de = vmm_pte_raw(data_s);
+    kprintf("[ ok ] W^X: .text=%s .rodata=%s .data/.bss=%s (kernel image %lu KiB)\n",
+            ((te & PTE_PRESENT) && !(te & PTE_WRITABLE) && !(te & PTE_NX)) ? "RO+X"  : "BAD",
+            ((re & PTE_PRESENT) && !(re & PTE_WRITABLE) &&  (re & PTE_NX)) ? "RO+NX" : "BAD",
+            ((de & PTE_PRESENT) &&  (de & PTE_WRITABLE) &&  (de & PTE_NX)) ? "RW+NX" : "BAD",
+            (unsigned long)((end - text_s) / 1024));
+    kprintf("[ ok ] stack guard: boot-stack guard page %s\n",
+            (vmm_pte_raw((uint64_t)stack_guard) & PTE_PRESENT) ? "MAPPED (BAD)" : "unmapped");
+
+    /* Flush the whole TLB (we downgraded huge->4 KiB and changed many leaf flags). */
+    __asm__ volatile("mov %%cr3, %%rax; mov %%rax, %%cr3" ::: "rax", "memory");
 }
 
 /* Translate a virtual address in an ARBITRARY address space (walk `cr3`'s tables

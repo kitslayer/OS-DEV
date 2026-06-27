@@ -1252,7 +1252,27 @@ static int run_command(char *line, char *cwd) {
             }
             if (have) {
                 char *out = malloc(1u << 20);            /* 1MB JS output buffer (was 8KB) */
-                if (out) { sys_js(jsrc, out, (1u << 20) - 1); out[(1u << 20) - 1] = 0; print(out); free(out); }
+                if (out) {
+                    /* Run JS in RING 3 via the jsrun program (the JS engine is no longer
+                     * executed in the kernel for the shell path): hand it the source via
+                     * JSIN.JS, wait for it, read back its JSOUT.TXT. Fall back to the
+                     * in-kernel SYS_js only if the spawn fails. */
+                    long jl = 0; while (jsrc[jl]) jl++;
+                    long pid = -1;
+                    if (sys_writefile("JSIN.JS", jsrc, (unsigned long)jl) >= 0) {
+                        pid = sys_fork();                     /* fork sets us as parent so waitpid blocks */
+                        if (pid == 0) { sys_exec("jsrun", 0); sys_exit(1); }   /* child becomes jsrun (ring 3) */
+                    }
+                    if (pid > 0) {
+                        int st = 0; sys_waitpid((int)pid, &st);               /* block until jsrun exits */
+                        long n = sys_readfile("JSOUT.TXT", out, (1u << 20) - 1);
+                        if (n < 0) n = 0;
+                        out[n] = 0; print(out);
+                    } else {                                  /* fork/write failed: in-kernel fallback */
+                        sys_js(jsrc, out, (1u << 20) - 1); out[(1u << 20) - 1] = 0; print(out);
+                    }
+                    free(out);
+                }
                 else perr("js: out of memory\n");
             }
             free(filesrc);                               /* free(NULL) safe */

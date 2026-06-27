@@ -103,7 +103,11 @@ static int map_range(uint64_t from, uint64_t to) {
     for (uint64_t v = from; v < to; v += PAGE_SIZE) {
         uint64_t frame = pmm_alloc_frame();
         if (!frame) return -1;
-        if (vmm_map(v, frame, PTE_WRITABLE) != 0) { pmm_free_frame(frame); return -1; }
+        /* PTE_NX: the kernel heap holds data + task stacks, never executable code
+         * (the eBPF JIT / module loader use the .jitexec section, not the heap), so
+         * marking every heap page no-execute makes kmalloc'd task stacks NX too —
+         * injected bytes on a kernel stack/heap can't be run (W^X). */
+        if (vmm_map(v, frame, PTE_WRITABLE | PTE_NX) != 0) { pmm_free_frame(frame); return -1; }
     }
     return 0;
 }

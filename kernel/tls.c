@@ -661,12 +661,19 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
 /* tls_get_inner() uses big shared static buffers, so only one may run at a time.
  * Originally that was guaranteed by the single fetch worker; now sys_https exposes
  * it to the shell too, so serialize here (a second concurrent caller gets -1). */
+#ifdef TLS_RING3
+/* RING-3 build (user/httpget.c): no privileged cli/sti (ring 3 can't execute them);
+ * a single-threaded fetch program needs no serialization anyway. */
+static inline uint64_t tls_irq_save(void) { return 0; }
+static inline void tls_irq_restore(uint64_t f) { (void)f; }
+#else
 static inline uint64_t tls_irq_save(void) {
     uint64_t f; __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory"); return f;
 }
 static inline void tls_irq_restore(uint64_t f) {
     __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
 }
+#endif
 
 static volatile int g_tls_busy = 0;   /* one TLS op (get OR post) at a time — they share the big static buffers */
 int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) {

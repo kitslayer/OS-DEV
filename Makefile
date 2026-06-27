@@ -15,6 +15,12 @@ QEMU    := qemu-system-x86_64
 # --- flags ------------------------------------------------------------------
 # Freestanding kernel C: no host runtime, no PIC, no red zone (interrupts would
 # clobber it), and no SSE/MMX/x87 (we haven't enabled the FPU yet).
+# NOTE: -fstack-protector* is silently a no-op under this toolchain's freestanding
+# build (Gentoo GCC strips SSP when -ffreestanding/-nostdlib are set, and
+# -mstack-protector-guard=global no-ops too — verified by disassembly). So
+# stack-overflow protection is provided structurally instead: kernel stacks get an
+# unmapped GUARD PAGE below them (task.c / boot.asm), and W^X marks every stack NX
+# (vmm_harden_kernel). Keep -fno-stack-protector explicit so the intent is clear.
 CFLAGS  := -std=gnu11 -ffreestanding -nostdlib \
            -fno-stack-protector -fno-pic -fno-pie \
            -mno-red-zone -mgeneral-regs-only -fwrapv \
@@ -145,7 +151,7 @@ $(BUILD)/%.o: %.asm
 # -O2 — same rationale as the kernel CFLAGS. (Ported games keep their own CFLAGS.)
 USER_CFLAGS := -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone \
                -mgeneral-regs-only -std=gnu11 -O2 -fwrapv -Wall -Ikernel/include -MMD -MP
-USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/timer.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/scene3d.elf $(BUILD)/terrain.elf $(BUILD)/demoscene.elf $(BUILD)/doom.elf $(BUILD)/quake.elf $(BUILD)/nes.elf $(BUILD)/reversi.elf $(BUILD)/lights.elf $(BUILD)/fifteen.elf $(BUILD)/mastermind.elf $(BUILD)/pong.elf $(BUILD)/halflife.elf $(BUILD)/memory.elf $(BUILD)/sokoban.elf $(BUILD)/battleship.elf $(BUILD)/pig.elf $(BUILD)/raycast.elf $(BUILD)/tron.elf $(BUILD)/spaceinv.elf $(BUILD)/asteroids.elf $(BUILD)/flappy.elf $(BUILD)/gb.elf $(BUILD)/lander.elf $(BUILD)/yahtzee.elf $(BUILD)/checkers.elf $(BUILD)/gomoku.elf $(BUILD)/frogger.elf $(BUILD)/chess.elf $(BUILD)/vpoker.elf $(BUILD)/mancala.elf $(BUILD)/dotsbox.elf $(BUILD)/missile.elf $(BUILD)/pacman.elf $(BUILD)/solitaire.elf $(BUILD)/gems.elf $(BUILD)/columns.elf $(BUILD)/freecell.elf $(BUILD)/spider.elf $(BUILD)/sandbox.elf $(BUILD)/forth.elf $(BUILD)/cc.elf $(BUILD)/crash.elf $(BUILD)/futex.elf $(BUILD)/nettcp.elf $(BUILD)/crashinfo.elf $(BUILD)/forktest.elf $(BUILD)/execdemo.elf $(BUILD)/nstest.elf $(BUILD)/steptest.elf $(BUILD)/scnotify.elf $(BUILD)/fswaittest.elf $(BUILD)/sigfdtest.elf $(BUILD)/bpftest.elf $(BUILD)/fantest.elf $(BUILD)/iouringtest.elf $(BUILD)/msealtest.elf $(BUILD)/httpd.elf $(BUILD)/uffdtest.elf $(BUILD)/mmapfile.elf $(BUILD)/threads.elf $(BUILD)/robustfutex.elf $(BUILD)/overlay.elf $(BUILD)/pcwd.elf $(BUILD)/hexedit.elf $(BUILD)/aclock.elf $(BUILD)/sysgraph.elf $(BUILD)/taskman.elf $(BUILD)/gcal.elf $(BUILD)/gauges.elf $(BUILD)/gsw.elf $(BUILD)/bclock.elf $(BUILD)/gfont.elf $(BUILD)/gtimer.elf $(BUILD)/imgview.elf $(BUILD)/gcalc.elf $(BUILD)/gcolor.elf $(BUILD)/gfire.elf $(BUILD)/gmetro.elf $(BUILD)/gconv.elf $(BUILD)/gbase.elf $(BUILD)/gpass.elf $(BUILD)/gclip.elf $(BUILD)/gtodo.elf $(BUILD)/gseq.elf $(BUILD)/pietest.elf
+USER_ELFS := $(BUILD)/shell.elf $(BUILD)/clock.elf $(BUILD)/calc.elf $(BUILD)/snake.elf $(BUILD)/editor.elf $(BUILD)/g2048.elf $(BUILD)/life.elf $(BUILD)/tetris.elf $(BUILD)/breakout.elf $(BUILD)/mines.elf $(BUILD)/sudoku.elf $(BUILD)/calendar.elf $(BUILD)/timer.elf $(BUILD)/mandel.elf $(BUILD)/piano.elf $(BUILD)/maze.elf $(BUILD)/adv.elf $(BUILD)/matrix.elf $(BUILD)/paint.elf $(BUILD)/hangman.elf $(BUILD)/jukebox.elf $(BUILD)/ttt.elf $(BUILD)/bj.elf $(BUILD)/typing.elf $(BUILD)/simon.elf $(BUILD)/c4.elf $(BUILD)/wordle.elf $(BUILD)/gfxdemo.elf $(BUILD)/scene3d.elf $(BUILD)/terrain.elf $(BUILD)/demoscene.elf $(BUILD)/doom.elf $(BUILD)/quake.elf $(BUILD)/nes.elf $(BUILD)/reversi.elf $(BUILD)/lights.elf $(BUILD)/fifteen.elf $(BUILD)/mastermind.elf $(BUILD)/pong.elf $(BUILD)/halflife.elf $(BUILD)/memory.elf $(BUILD)/sokoban.elf $(BUILD)/battleship.elf $(BUILD)/pig.elf $(BUILD)/raycast.elf $(BUILD)/tron.elf $(BUILD)/spaceinv.elf $(BUILD)/asteroids.elf $(BUILD)/flappy.elf $(BUILD)/gb.elf $(BUILD)/lander.elf $(BUILD)/yahtzee.elf $(BUILD)/checkers.elf $(BUILD)/gomoku.elf $(BUILD)/frogger.elf $(BUILD)/chess.elf $(BUILD)/vpoker.elf $(BUILD)/mancala.elf $(BUILD)/dotsbox.elf $(BUILD)/missile.elf $(BUILD)/pacman.elf $(BUILD)/solitaire.elf $(BUILD)/gems.elf $(BUILD)/columns.elf $(BUILD)/freecell.elf $(BUILD)/spider.elf $(BUILD)/sandbox.elf $(BUILD)/forth.elf $(BUILD)/cc.elf $(BUILD)/crash.elf $(BUILD)/futex.elf $(BUILD)/nettcp.elf $(BUILD)/crashinfo.elf $(BUILD)/forktest.elf $(BUILD)/execdemo.elf $(BUILD)/nstest.elf $(BUILD)/steptest.elf $(BUILD)/scnotify.elf $(BUILD)/fswaittest.elf $(BUILD)/sigfdtest.elf $(BUILD)/bpftest.elf $(BUILD)/fantest.elf $(BUILD)/iouringtest.elf $(BUILD)/msealtest.elf $(BUILD)/httpd.elf $(BUILD)/uffdtest.elf $(BUILD)/mmapfile.elf $(BUILD)/threads.elf $(BUILD)/robustfutex.elf $(BUILD)/overlay.elf $(BUILD)/pcwd.elf $(BUILD)/hexedit.elf $(BUILD)/aclock.elf $(BUILD)/sysgraph.elf $(BUILD)/taskman.elf $(BUILD)/gcal.elf $(BUILD)/gauges.elf $(BUILD)/gsw.elf $(BUILD)/bclock.elf $(BUILD)/gfont.elf $(BUILD)/gtimer.elf $(BUILD)/imgview.elf $(BUILD)/gcalc.elf $(BUILD)/gcolor.elf $(BUILD)/gfire.elf $(BUILD)/gmetro.elf $(BUILD)/gconv.elf $(BUILD)/gbase.elf $(BUILD)/gpass.elf $(BUILD)/gclip.elf $(BUILD)/gtodo.elf $(BUILD)/gseq.elf $(BUILD)/pietest.elf $(BUILD)/jsrun.elf $(BUILD)/imgdec.elf $(BUILD)/httpget.elf $(BUILD)/webview.elf
 
 $(BUILD)/user_%.o: user/%.c Makefile
 	@mkdir -p $(BUILD)
@@ -269,6 +275,91 @@ $(BUILD)/raycast.elf: user/raycast.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.
 	      -msse2 -mfpmath=sse -Ikernel/include -c user/raycast.c -o $(BUILD)/raycast_app.o
 	$(LD) -T user/user.ld -o $@ $(BUILD)/raycast_app.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (Raycaster)"
+
+# --- jsrun (the from-scratch JavaScript engine, running in RING 3) ------------
+# First step of moving the browser/parser stack out of ring 0: kernel/js.c is pure
+# compute (arena + libc + callback I/O), so it links into a userspace program built
+# with SSE (the engine uses IEEE-754 doubles), -DJS_RING3 (drops the privileged
+# cli/sti single-flight guard, which would #GP in ring 3) and a 16 MB arena. A bug
+# in the 4600-line interpreter now crashes only this ring-3 process, not the kernel.
+$(BUILD)/jsrun.elf: user/jsrun.c kernel/js.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+	@mkdir -p $(BUILD)
+	$(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -w \
+	      -msse2 -mfpmath=sse -Ikernel/include -DJS_RING3 -DJS_ARENA=16777216 \
+	      -c kernel/js.c -o $(BUILD)/jsrun_js.o
+	$(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -Wall \
+	      -msse2 -mfpmath=sse -Ikernel/include -c user/jsrun.c -o $(BUILD)/jsrun_app.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/jsrun_app.o $(BUILD)/jsrun_js.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (ring-3 JavaScript engine)"
+
+# --- imgdec (the from-scratch image decoders, running in RING 3) --------------
+# Second step of the ring-0->ring-3 move (after jsrun): PNG/GIF/JPEG/SVG/BMP +
+# inflate are pure compute over caller-provided buffers (already host-fuzzed in
+# tests/), so they link straight into a ring-3 program. A malformed-image bug now
+# crashes only this process, not the kernel. SSE on in case a decoder uses float.
+IMGDEC_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -msse2 -mfpmath=sse -Ikernel/include
+$(BUILD)/imgdec.elf: user/imgdec.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/inflate.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+	@mkdir -p $(BUILD)
+	$(IMGDEC_CC) -w -c kernel/png.c     -o $(BUILD)/imgdec_png.o
+	$(IMGDEC_CC) -w -c kernel/gif.c     -o $(BUILD)/imgdec_gif.o
+	$(IMGDEC_CC) -w -c kernel/jpeg.c    -o $(BUILD)/imgdec_jpeg.o
+	$(IMGDEC_CC) -w -c kernel/bmp.c     -o $(BUILD)/imgdec_bmp.o
+	$(IMGDEC_CC) -w -c kernel/svg.c     -o $(BUILD)/imgdec_svg.o
+	$(IMGDEC_CC) -w -c kernel/inflate.c -o $(BUILD)/imgdec_inflate.o
+	$(IMGDEC_CC) -w -c kernel/font.c    -o $(BUILD)/imgdec_font.o
+	$(IMGDEC_CC) -Wall -c user/imgdec.c -o $(BUILD)/imgdec_app.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/imgdec_app.o $(BUILD)/imgdec_png.o $(BUILD)/imgdec_gif.o $(BUILD)/imgdec_jpeg.o $(BUILD)/imgdec_bmp.o $(BUILD)/imgdec_svg.o $(BUILD)/imgdec_inflate.o $(BUILD)/imgdec_font.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (ring-3 image decoders)"
+
+# --- imgview now DECODES IN RING 3: the graphical image viewer links the
+# from-scratch decoders directly (like imgdec) and fit-scales in-process, instead
+# of the in-kernel sys_loadimg — so a malformed image opened in the viewer crashes
+# only imgview, not the kernel. Overrides the generic %.elf rule. ---
+$(BUILD)/imgview.elf: user/imgview.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/inflate.c kernel/font.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+	@mkdir -p $(BUILD)
+	$(IMGDEC_CC) -w -c kernel/png.c     -o $(BUILD)/imgview_png.o
+	$(IMGDEC_CC) -w -c kernel/gif.c     -o $(BUILD)/imgview_gif.o
+	$(IMGDEC_CC) -w -c kernel/jpeg.c    -o $(BUILD)/imgview_jpeg.o
+	$(IMGDEC_CC) -w -c kernel/bmp.c     -o $(BUILD)/imgview_bmp.o
+	$(IMGDEC_CC) -w -c kernel/svg.c     -o $(BUILD)/imgview_svg.o
+	$(IMGDEC_CC) -w -c kernel/inflate.c -o $(BUILD)/imgview_inflate.o
+	$(IMGDEC_CC) -w -c kernel/font.c    -o $(BUILD)/imgview_font.o
+	$(IMGDEC_CC) -Wall -c user/imgview.c -o $(BUILD)/imgview_app.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/imgview_app.o $(BUILD)/imgview_png.o $(BUILD)/imgview_gif.o $(BUILD)/imgview_jpeg.o $(BUILD)/imgview_bmp.o $(BUILD)/imgview_svg.o $(BUILD)/imgview_inflate.o $(BUILD)/imgview_font.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (ring-3 image viewer)"
+
+# --- webview (the from-scratch web browser, running in RING 3) -----------------
+# Headline ring-0 -> ring-3 migration: browser.c + js.c + image decoders + HTML/
+# CSS/URL parsers built for ring 3 (-DBROWSER_RING3 / -DJS_RING3), so the untrusted
+# HTML/CSS/JS/image parsing runs OUTSIDE the kernel. Network/TLS stay in the kernel
+# (fetch via SYS_http/SYS_https syscalls, shimmed in webview.c). A parser bug now
+# crashes only this ring-3 process. SSE: js.c uses IEEE-754 doubles.
+WEBVIEW_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -msse2 -mfpmath=sse -Ikernel/include -w
+WEBVIEW_PARSERS = png gif jpeg bmp svg webp inflate font http cssprop color url htmlentity htmlattr reader
+$(BUILD)/webview.elf: user/webview.c kernel/browser.c kernel/js.c $(patsubst %,kernel/%.c,$(WEBVIEW_PARSERS)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+	@mkdir -p $(BUILD)
+	$(WEBVIEW_CC) -DBROWSER_RING3 -c kernel/browser.c -o $(BUILD)/webview_browser.o
+	$(WEBVIEW_CC) -DJS_RING3 -DJS_ARENA=16777216 -c kernel/js.c -o $(BUILD)/webview_js.o
+	@for m in $(WEBVIEW_PARSERS); do echo "  CC kernel/$$m.c (ring-3 browser)"; $(WEBVIEW_CC) -c kernel/$$m.c -o $(BUILD)/webview_$$m.o || exit 1; done
+	$(WEBVIEW_CC) -c user/webview.c -o $(BUILD)/webview_app.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/webview_app.o $(BUILD)/webview_browser.o $(BUILD)/webview_js.o $(patsubst %,$(BUILD)/webview_%.o,$(WEBVIEW_PARSERS)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (ring-3 web browser)"
+
+# --- httpget (the from-scratch TLS 1.3 client, running in RING 3) -------------
+# Third step of the ring-0->ring-3 move: tls.c + its crypto (X25519/ECDSA/RSA/
+# AES-GCM/ChaCha20-Poly1305/SHA-2/X.509) are static-buffer pure compute (host-
+# fuzzed in tests/), so they link into a ring-3 program; httpget.c shims kernel
+# tcp_*/DNS/clock onto the socket/resolve/time syscalls. -DTLS_RING3 drops tls.c's
+# privileged cli/sti. Integer-only crypto -> -mgeneral-regs-only (as the kernel).
+HTTPGET_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -std=gnu11 -O2 -Ikernel/include
+HTTPGET_CRYPTO = aes aesgcm bignum chachapoly ecdsa hkdf rsa sha256 sha512 x25519 x509 rootca
+$(BUILD)/httpget.elf: user/httpget.c kernel/tls.c $(patsubst %,kernel/%.c,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+	@mkdir -p $(BUILD)
+	$(HTTPGET_CC) -w -DTLS_RING3 -c kernel/tls.c -o $(BUILD)/httpget_tls.o
+	@for m in $(HTTPGET_CRYPTO); do echo "  CC kernel/$$m.c (ring-3 crypto)"; $(HTTPGET_CC) -w -c kernel/$$m.c -o $(BUILD)/httpget_$$m.o || exit 1; done
+	$(HTTPGET_CC) -Wall -c user/httpget.c -o $(BUILD)/httpget_app.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/httpget_app.o $(BUILD)/httpget_tls.o $(patsubst %,$(BUILD)/httpget_%.o,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (ring-3 TLS 1.3 client)"
 
 # --- scene3d (software 3D engine: z-buffer + Gouraud, float math, so SSE) -----
 $(BUILD)/scene3d.elf: user/scene3d.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile

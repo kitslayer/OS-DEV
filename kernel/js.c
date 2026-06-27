@@ -56,11 +56,13 @@ static void out_str(const char *s) {
  * 32 MB: the suite's peak reached ~26.7 MB after the M531-M542 cases; 32 MB
  * restores ~5 MB headroom. (M542)
  * OOM is graceful (aalloc -> g_oom -> NULL), so this is a capacity knob, not safety. */
+#ifndef JS_ARENA                    /* overridable: the ring-3 jsrun build sets a smaller arena via -DJS_ARENA */
 #define JS_ARENA   (45056 * 1024)   /* 44 MB. The parser builds the whole script's AST in the arena
                                      * before running it, and there's no GC (one run, then recycle), so a
                                      * big script (e.g. the growing jstest suite) needs headroom. Bumped
                                      * 20->26->32->40->44 as the suite grew (M906: real doubles format a
                                      * little heavier than the old int path); safe in the 256 MiB guest. */
+#endif
 #ifdef JS_HOSTTEST
 static char g_arena_buf[JS_ARENA];
 #else
@@ -4460,12 +4462,14 @@ static void install_globals(env *g) {
 /* Interpreter state is static (arena + globals), so only one run may be in flight.
  * The browser (WM thread) and the shell's `js` (a ring-3 syscall) are distinct
  * preemptible tasks, so guard with an irq-protected flag like tls_get does. */
-#ifndef JS_HOSTTEST
-static inline unsigned long js_irq_save(void){ unsigned long f; __asm__ volatile("pushfq; pop %0; cli":"=r"(f)::"memory"); return f; }
-static inline void js_irq_restore(unsigned long f){ __asm__ volatile("push %0; popfq"::"r"(f):"memory","cc"); }
-#else
+#if defined(JS_HOSTTEST) || defined(JS_RING3)
+/* Host test and the RING-3 build (user/jsrun.c): no privileged cli/sti — a ring-3
+ * process can't execute them, and the single-flight concern is moot (one run). */
 static inline unsigned long js_irq_save(void){ return 0; }
 static inline void js_irq_restore(unsigned long f){ (void)f; }
+#else
+static inline unsigned long js_irq_save(void){ unsigned long f; __asm__ volatile("pushfq; pop %0; cli":"=r"(f)::"memory"); return f; }
+static inline void js_irq_restore(unsigned long f){ __asm__ volatile("push %0; popfq"::"r"(f):"memory","cc"); }
 #endif
 static volatile int js_busy;
 

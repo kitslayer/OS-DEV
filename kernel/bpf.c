@@ -94,9 +94,9 @@ long bpf_run_prog(const struct bpf_insn *prog, int n, const struct bpf_ctx *ctx)
  * dispatch. The 8 BPF registers live in a 64-byte stack frame (reg[i] at
  * [rbp-8*(i+1)]); ctx stays in rdi (the generated code makes no calls, so
  * nothing clobbers it); forward JEQ/JNE skips become native je/jne rel32
- * resolved in a second pass. Code is emitted into a static buffer in .bss --
- * the kernel image is mapped RWX (see kernel/module.c), so .bss is executable
- * and a generated function can be called directly, no W^X dance / icache flush
+ * resolved in a second pass. Code is emitted into a static buffer in the .jitexec
+ * section, which W^X (vmm_harden_kernel) keeps executable while the rest of .bss is
+ * marked no-execute, so a generated function can be called directly, no icache flush
  * (x86 snoops its own stores). Operates on VERIFIED programs (bpf_verify): valid
  * opcodes, reg indices < 8, forward in-range skips, a RET present.
  * ====================================================================== */
@@ -176,7 +176,8 @@ static bpf_jit_fn bpf_jit_compile(const struct bpf_insn *prog, int n, uint8_t *b
 /* The live firewall (g_prog) + tracepoint (g_trace) programs run JIT'd when the
  * JIT validates; these hold the generated code + the callable pointer (0 = use
  * the interpreter). bpf_run/bpf_trace_run (re)compile lazily on *_jit_stale. */
-static uint8_t    g_prog_jitbuf[2048], g_trace_jitbuf[2048];
+static uint8_t    g_prog_jitbuf[2048]  __attribute__((section(".jitexec")));
+static uint8_t    g_trace_jitbuf[2048] __attribute__((section(".jitexec")));
 static bpf_jit_fn g_prog_jit, g_trace_jit;
 
 /* Compile (prog,n), then TRUST the JIT only if it returns EXACTLY what the
@@ -199,7 +200,8 @@ static bpf_jit_fn bpf_jit_validate(const struct bpf_insn *prog, int n, uint8_t *
  * JIT'd native code returns EXACTLY what the interpreter does (over a range of
  * contexts), and that the JIT'd MAPINC really wrote the histogram. */
 void bpf_jit_selftest(void) {
-    static uint8_t buf1[1024], buf2[1024];
+    static uint8_t buf1[1024] __attribute__((section(".jitexec")));   /* executable (JIT'd code runs here) */
+    static uint8_t buf2[1024] __attribute__((section(".jitexec")));
     /* P1: drop ICMP (proto==1), else pass -- the canonical packet filter. */
     static const struct bpf_insn p1[] = {
         { BPF_LDCTX, 0, 0, 0, 1 }, { BPF_JNE, 0, 2, 0, 1 },
