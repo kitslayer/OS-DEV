@@ -62,9 +62,12 @@ static uint8_t *read_ppm(const char *path, int *out_w, int *out_h) {
     return buf;
 }
 
-/* 8 MB decode buffers (static so they don't blow the stack under ASan) */
+/* Decode buffers (static so they don't blow the stack under ASan).  The
+ * scratch buffer is sized to satisfy webp_probe()'s scratch_need for the
+ * images exercised here (a 192x192 lossless image with a large colour cache
+ * and meta-Huffman groups needs well over the old 16 MB). */
 static uint8_t g_rgba[4 << 20];
-static uint8_t g_scratch[16 << 20];
+static uint8_t g_scratch[48 << 20];
 
 /* ---- malformed-input fuzz ---- */
 static void fuzz_malformed(void) {
@@ -187,6 +190,16 @@ static long roundtrip_test(const char *label,
         fails++;
         return -1;
     }
+    /* Honour the probe contract: the scratch buffer must be at least as big as
+     * scratch_need.  If not, flag it clearly instead of getting a cryptic
+     * decode failure. */
+    if (scr_need > (long)sizeof(g_scratch)) {
+        printf("  FAIL: %s: probe wants %ld scratch but test buffer is %zu\n",
+               label, scr_need, sizeof(g_scratch));
+        free(webp_data);
+        fails++;
+        return -1;
+    }
 
     int ow = 0, oh = 0;
     int dr = webp_decode(webp_data, webp_len,
@@ -261,6 +274,74 @@ static void make_few_colors(uint8_t *rgb, int w, int h) {
         }
 }
 
+/* 16-color per-pixel ramp (triggers color-indexing with bit-packing:
+ * <=16 colors → 2 indices packed per byte; caught the index-mask bug). */
+static void make_palette16(uint8_t *rgb, int w, int h) {
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int idx = (((x >> 2) + (y >> 2)) & 0xF);   /* 16 distinct colours */
+            int r = (idx & 3) * 64;
+            int g = ((idx >> 2) & 3) * 64;
+            rgb[(y*w+x)*3+0] = (uint8_t)r;
+            rgb[(y*w+x)*3+1] = (uint8_t)g;
+            rgb[(y*w+x)*3+2] = 0;
+        }
+}
+
+/* 2-colour image (triggers color-indexing with 8 indices packed per byte). */
+static void make_palette2(uint8_t *rgb, int w, int h) {
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int on = (x ^ y) & 1;
+            rgb[(y*w+x)*3+0] = on ? 17  : 240;
+            rgb[(y*w+x)*3+1] = on ? 33  : 18;
+            rgb[(y*w+x)*3+2] = on ? 200 : 9;
+        }
+}
+
+/* Photographic-ish noise (defeats palette/LZ77; exercises plain literals +
+ * predictor + colour transforms + longer length/distance codes). */
+static void make_noise(uint8_t *rgb, int w, int h) {
+    unsigned int s = 0x12345677u;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            s = s * 1103515245u + 12345u; rgb[(y*w+x)*3+0] = (uint8_t)(s >> 16);
+            s = s * 1103515245u + 12345u; rgb[(y*w+x)*3+1] = (uint8_t)(s >> 16);
+            s = s * 1103515245u + 12345u; rgb[(y*w+x)*3+2] = (uint8_t)(s >> 16);
+        }
+}
+
+/* Horizontal bands of solid colour: long single-colour runs → big LZ77
+ * length codes (>= prefix 5, where the base-table bug lived). */
+static void make_bands(uint8_t *rgb, int w, int h) {
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int band = y >> 3;
+            rgb[(y*w+x)*3+0] = (uint8_t)(band * 20 + 5);
+            rgb[(y*w+x)*3+1] = (uint8_t)(255 - band * 15);
+            rgb[(y*w+x)*3+2] = (uint8_t)((band * 37) & 0xFF);
+        }
+}
+
+/* Smooth diagonal gradient with mild noise.  cwebp encodes this with the
+ * spatial PREDICTOR (all modes incl. avg/select/clamp) AND the cross-colour
+ * transform — the combination that exposed the predictor-mode and
+ * colour-channel-order bugs. */
+static void make_photo(uint8_t *rgb, int w, int h) {
+    unsigned int s = 0x9e3779b9u;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            s = s * 1103515245u + 12345u;
+            int n = (int)((s >> 18) & 0x1F) - 16;          /* small noise */
+            int r = (x * 255 / (w>1?w-1:1)) + n;
+            int g = (y * 255 / (h>1?h-1:1)) - n;
+            int b = ((x + y) * 255 / ((w+h)>1?(w+h-2):1));
+            rgb[(y*w+x)*3+0] = (uint8_t)(r<0?0:r>255?255:r);
+            rgb[(y*w+x)*3+1] = (uint8_t)(g<0?0:g>255?255:g);
+            rgb[(y*w+x)*3+2] = (uint8_t)(b<0?0:b>255?255:b);
+        }
+}
+
 /* ---- main ---- */
 int main(int argc, char **argv) {
     int have_cwebp   = (argc > 1 && argv[1][0] == '1');
@@ -299,6 +380,80 @@ int main(int argc, char **argv) {
     {
         long r = roundtrip_test("few_colors", src, W, H);
         printf("round-trip few_colors: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* 16-colour packed-index image (2 indices/byte) */
+    make_palette16(src, W, H);
+    {
+        long r = roundtrip_test("palette16", src, W, H);
+        printf("round-trip palette16: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* 2-colour packed-index image (8 indices/byte) */
+    make_palette2(src, W, H);
+    {
+        long r = roundtrip_test("palette2", src, W, H);
+        printf("round-trip palette2: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* photographic noise (literals + predictor + colour transform) */
+    make_noise(src, W, H);
+    {
+        long r = roundtrip_test("noise", src, W, H);
+        printf("round-trip noise: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* solid horizontal bands (long LZ77 runs, large length codes) */
+    make_bands(src, W, H);
+    {
+        long r = roundtrip_test("bands", src, W, H);
+        printf("round-trip bands: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* tiny 4x4 16-colour ramp — packed indices on a non-power-of-pack width */
+    {
+        static uint8_t s4[4*4*3];
+        make_palette16(s4, 4, 4);
+        long r = roundtrip_test("tiny4x4", s4, 4, 4);
+        printf("round-trip tiny4x4: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* 1x1 single pixel */
+    {
+        static uint8_t s1[3] = { 200, 100, 50 };
+        long r = roundtrip_test("single", s1, 1, 1);
+        printf("round-trip single: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* 17x1 / 1x17 strips — exercise row/column edge handling */
+    {
+        static uint8_t sr[17*3];
+        make_noise(sr, 17, 1);
+        long r = roundtrip_test("rowstrip", sr, 17, 1);
+        printf("round-trip rowstrip: %s\n", r == 0 ? "ok" : "FAIL");
+        make_noise(sr, 1, 17);
+        r = roundtrip_test("colstrip", sr, 1, 17);
+        printf("round-trip colstrip: %s\n", r == 0 ? "ok" : "FAIL");
+    }
+
+    /* Larger images — these are big enough that cwebp picks the spatial
+     * PREDICTOR (all modes) + cross-colour transform, and produces
+     * single-symbol code-length trees.  They exposed the predictor-mode,
+     * colour-channel-order, distance-plane and single-symbol-tree bugs. */
+    {
+        static uint8_t big[192*192*3];
+        make_photo(big, 192, 192);
+        long r = roundtrip_test("photo", big, 192, 192);
+        printf("round-trip photo: %s\n", r == 0 ? "ok" : "FAIL");
+
+        make_noise(big, 160, 160);
+        r = roundtrip_test("bignoise", big, 160, 160);
+        printf("round-trip bignoise: %s\n", r == 0 ? "ok" : "FAIL");
+
+        /* odd non-square dimensions, predictor + colour transform */
+        make_photo(big, 191, 97);
+        r = roundtrip_test("photo_odd", big, 191, 97);
+        printf("round-trip photo_odd: %s\n", r == 0 ? "ok" : "FAIL");
     }
 
     if (fails) {

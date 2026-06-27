@@ -107,11 +107,18 @@ static int br_ok(const BR *br) { return !br->err; }
 /* =========================================================================
  * Compact Huffman tree
  *
- * Up to 2^13 symbols (256+24+color_cache up to 2^12 = 4376).
- * Codes up to 15 bits.  Fast table: 10-bit prefix → (sym, len) in 4 bytes.
- * Overflow: linear scan for codes > 10 bits (rare in practice).
+ * Up to 4376 symbols (256+24+color_cache up to 2^12).  Codes up to 15 bits.
+ * Fast table: HFAST-bit prefix → (sym, len) in 4 bytes.  Codes longer than
+ * HFAST bits go to the overflow arrays (linear scan).
+ *
+ * The overflow MUST be able to hold every symbol: a deeply unbalanced code
+ * over a large alphabet (e.g. the 1304-symbol green tree when a 4096-entry
+ * colour cache is in use) can put well over a thousand codes past HFAST bits.
+ * Sizing the overflow to HALPHA keeps `htree_build` from failing on such
+ * legal streams.  (HFAST=12 keeps the common, short codes on the fast path so
+ * the linear overflow scan is rarely hit.)
  * ====================================================================== */
-#define HFAST   10
+#define HFAST   12
 #define HFSZ    (1<<HFAST)
 #define HCLEN   15
 #define HALPHA  4376          /* 256+24+(1<<12) */
@@ -121,9 +128,9 @@ typedef struct { int16_t sym; uint8_t len; uint8_t pad; } HEntry;
 typedef struct {
     HEntry fast[HFSZ];
     /* overflow: codes longer than HFAST bits */
-    uint32_t ovf_code[256];  /* canonical code value */
-    int16_t  ovf_sym [256];
-    uint8_t  ovf_len [256];
+    uint32_t ovf_code[HALPHA];  /* canonical code value */
+    int16_t  ovf_sym [HALPHA];
+    uint8_t  ovf_len [HALPHA];
     int      novf;
     int      maxlen;
     int      valid;
@@ -152,14 +159,21 @@ static int htree_build(HTree *ht, const int *lens, int nsym) {
     }
 
     int cnt[HCLEN+2]; wbp_memset(cnt, 0, sizeof(cnt));
-    int actual = 0;
+    int actual = 0, only_sym = -1;
     for (int i = 0; i < nsym; i++) {
         if (lens[i] < 0 || lens[i] > HCLEN) return -1;
-        if (lens[i] > 0) cnt[lens[i]]++;
+        if (lens[i] > 0) { cnt[lens[i]]++; only_sym = i; }
         if (lens[i] > ht->maxlen) ht->maxlen = lens[i];
         actual += (lens[i] > 0);
     }
     if (actual == 0) { ht->valid = 1; return 0; }
+    /* Single non-zero symbol: VP8L (like libwebp BuildHuffmanTable) emits it
+     * with zero bits consumed, regardless of the stated length.  Without this,
+     * a 1-symbol canonical code is incomplete (only code 0 is assigned) and
+     * decoding the unused branch fails. */
+    if (actual == 1) {
+        ht->default_sym = only_sym; ht->maxlen = 0; ht->valid = 1; return 0;
+    }
 
     /* Compute starting code per length (canonical Huffman) */
     int first[HCLEN+2]; wbp_memset(first, 0, sizeof(first));
@@ -183,7 +197,7 @@ static int htree_build(HTree *ht, const int *lens, int nsym) {
                 ht->fast[j].len = (uint8_t)l;
             }
         } else {
-            if (ht->novf >= 256) return -1;
+            if (ht->novf >= HALPHA) return -1;
             int k = ht->novf++;
             ht->ovf_code[k] = (uint32_t)c;
             ht->ovf_sym [k] = (int16_t)sym;
@@ -242,17 +256,77 @@ static int htree_sym(const HTree *ht, BR *br) {
 }
 
 /* =========================================================================
- * CLC (code-length code) tree — tiny fixed decoder for 19-symbol alphabet
+ * CLC (code-length code) tree — tiny fixed decoder for the 19-symbol alphabet.
+ *
+ * Kept SEPARATE from HTree: the CLC has at most 19 symbols and code lengths in
+ * [0..7] (read as 3 bits), so a 128-entry fast table covers every code with no
+ * overflow.  This matters because read_code_lengths() is on the (recursive)
+ * decode_vp8l call path — putting a full ~47 KB HTree on the stack there would
+ * overflow the 16 KB kernel/task stacks.  CLCTree is only ~520 bytes.
  * ====================================================================== */
 static const int kCLCOrder[19] = {
     17,18,0,1,2,3,4,5,16,6,7,8,9,10,11,12,13,14,15
 };
 
-/* Build a tiny HTree from the 19 CLC lengths using a stack-local array */
-static int clc_build(HTree *out, int clc_lens[19]) {
-    int lens[19];
-    for (int i = 0; i < 19; i++) lens[i] = clc_lens[i];
-    return htree_build(out, lens, 19);
+#define CLC_FAST 7
+#define CLC_FSZ  (1<<CLC_FAST)
+
+typedef struct {
+    int8_t  sym[CLC_FSZ];   /* -1 = empty */
+    uint8_t len[CLC_FSZ];
+    int     maxlen;
+    int     default_sym;    /* single non-zero symbol: 0 bits consumed */
+    int     valid;
+} CLCTree;
+
+static int clc_build(CLCTree *ht, const int clc_lens[19]) {
+    ht->valid = 0; ht->maxlen = 0; ht->default_sym = -1;
+    for (int i = 0; i < CLC_FSZ; i++) { ht->sym[i] = -1; ht->len[i] = 0; }
+
+    int cnt[CLC_FAST+2]; wbp_memset(cnt, 0, sizeof(cnt));
+    int actual = 0, only = -1;
+    for (int i = 0; i < 19; i++) {
+        int l = clc_lens[i];
+        if (l < 0 || l > CLC_FAST) return -1;
+        if (l > 0) { cnt[l]++; only = i; actual++; if (l > ht->maxlen) ht->maxlen = l; }
+    }
+    if (actual == 0) { ht->valid = 1; return 0; }
+    if (actual == 1) { ht->default_sym = only; ht->maxlen = 0; ht->valid = 1; return 0; }
+
+    int first[CLC_FAST+2]; wbp_memset(first, 0, sizeof(first));
+    { int c = 0;
+      for (int l = 1; l <= ht->maxlen; l++) { c = (c + cnt[l-1]) << 1; first[l] = c; } }
+    int cur[CLC_FAST+2]; wbp_memcpy(cur, first, sizeof(first));
+
+    for (int s = 0; s < 19; s++) {
+        int l = clc_lens[s];
+        if (l == 0) continue;
+        int c = cur[l]++;
+        uint32_t rc = rev_bits((uint32_t)c, l);
+        int step = 1 << l;
+        for (int j = (int)rc; j < CLC_FSZ; j += step) {
+            ht->sym[j] = (int8_t)s; ht->len[j] = (uint8_t)l;
+        }
+    }
+    ht->valid = 1;
+    return 0;
+}
+
+static int clc_sym(const CLCTree *ht, BR *br) {
+    if (!ht->valid) { br->err = 1; return -1; }
+    if (ht->default_sym >= 0) return ht->default_sym;
+    if (ht->maxlen == 0) { br->err = 1; return -1; }
+    br_fill(br);
+    if (br->n < ht->maxlen && br->n < CLC_FAST) {
+        /* near end of stream: only proceed if a code actually fits */
+        if (br->n < 1) { br->err = 1; return -1; }
+    }
+    uint32_t idx = (uint32_t)(br->acc & (CLC_FSZ-1));
+    int sym = ht->sym[idx];
+    int len = ht->len[idx];
+    if (sym < 0 || len == 0 || len > br->n) { br->err = 1; return -1; }
+    br->acc >>= len; br->n -= len;
+    return sym;
 }
 
 /* =========================================================================
@@ -304,44 +378,35 @@ static int read_code_lengths(BR *br, int alpha_size, int *lens) {
         if (!br_ok(br)) return -1;
     }
 
-    HTree clc;
+    CLCTree clc;   /* ~520 bytes — safe on the recursive decode stack */
     if (clc_build(&clc, clc_lens) < 0) return -1;
 
-    /* Read optional max_symbol.  Per spec/libwebp this is a COUNTDOWN on the
-     * number of code-length CODES read (loop iterations), NOT on the symbol
-     * index.  An RLE code in one iteration can fill many symbols. */
-    int max_sym = alpha_size;
+    /* Optional max_symbol.  Per libwebp ReadHuffmanCode(): this is NOT an array
+     * bound — it caps the NUMBER OF CLC-tree READS (loop iterations).  When the
+     * flag is clear it defaults to alpha_size (i.e. effectively unlimited).
+     * The code-length array index (`i`) is bounded separately by alpha_size. */
+    int max_symbol = alpha_size;
     if (br_read(br, 1)) {
         if (!br_ok(br)) return -1;
         int nb = 2 + 2*(int)br_read(br, 3);
         if (!br_ok(br)) return -1;
-        max_sym = 2 + (int)br_read(br, nb);
+        max_symbol = 2 + (int)br_read(br, nb);
         if (!br_ok(br)) return -1;
-        if (max_sym > alpha_size) max_sym = alpha_size;
+        /* max_symbol may legitimately exceed alpha_size; the array bound clamps. */
     } else {
         if (!br_ok(br)) return -1;
     }
 
     int prev = 8, i = 0;
     while (i < alpha_size) {
-        if (max_sym-- == 0) break;   /* iteration budget exhausted */
-        int s = htree_sym(&clc, br);
+        if (max_symbol-- == 0) break;          /* exhausted the read budget */
+        int s = clc_sym(&clc, br);
         if (!br_ok(br) || s < 0) return -1;
-        if (s < 16) {
-            lens[i++] = s;
-            if (s) prev = s;
-        } else if (s <= 18) {
-            int r;
-            if (s == 16) { r = 3 + (int)br_read(br,2); }
-            else if (s == 17) { r = 3 + (int)br_read(br,3); }
-            else /* 18 */ { r = 11 + (int)br_read(br,7); }
-            if (!br_ok(br)) return -1;
-            if (i + r > alpha_size) return -1;
-            int fill = (s == 16) ? prev : 0;
-            while (r-- > 0) lens[i++] = fill;
-        } else {
-            return -1;
-        }
+        if (s < 16) { lens[i++] = s; if (s) prev = s; }
+        else if (s == 16) { int r = 3+(int)br_read(br,2); if(!br_ok(br)) return -1; while (r-- && i<alpha_size) lens[i++]=prev; }
+        else if (s == 17) { int r = 3+(int)br_read(br,3); if(!br_ok(br)) return -1; while (r-- && i<alpha_size) lens[i++]=0; }
+        else if (s == 18) { int r=11+(int)br_read(br,7); if(!br_ok(br)) return -1; while (r-- && i<alpha_size) lens[i++]=0; }
+        else return -1;
     }
     return 0;
 }
@@ -379,13 +444,13 @@ static void *sa_alloc(SA *sa, long bytes) {
  * VP8L length/distance prefix tables
  * ====================================================================== */
 static int length_from_code(int code, BR *br) {
-    /* code in [0..23].  VP8L uses the SAME prefix-coding scheme for lengths as
-     * for distances (spec §4.2.2 / §5.4): for prefix<4 value=prefix+1, else
-     * extra=(prefix-2)>>1, offset=(2+(prefix&1))<<extra, value=offset+1+bits.
-     * (NOT the DEFLATE length table.) */
+    /* VP8L length prefix (code in [0..23]), spec §4.2.4:
+     *   prefix<4 : value = prefix + 1
+     *   else     : extra = (prefix-2)>>1;  offset = (2 + (prefix&1)) << extra
+     *              value = offset + ReadBits(extra) + 1
+     * The base[] below is precomputed offset+1 (i.e. value when extra bits = 0). */
     static const int base[24] = {
-        1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,
-        1025,1537,2049,3073
+        1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073
     };
     static const int ext[24] = {
         0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10
@@ -415,29 +480,44 @@ static int dist_from_code(int code, BR *br) {
     return v;
 }
 
-/* Distance plane offsets (120 entries) */
-static const int8_t kDP[120][2] = {
-    {0,1},{1,0},{1,1},{-1,1},{0,2},{2,0},{1,2},{-1,2},{2,1},{-2,1},
-    {2,2},{-2,2},{0,3},{3,0},{1,3},{-1,3},{3,1},{-3,1},{2,3},{-2,3},
-    {3,2},{-3,2},{0,4},{4,0},{1,4},{-1,4},{4,1},{-4,1},{3,3},{-3,3},
-    {2,4},{-2,4},{4,2},{-4,2},{0,5},{3,4},{-3,4},{4,3},{-4,3},{5,0},
-    {1,5},{-1,5},{5,1},{-5,1},{2,5},{-2,5},{5,2},{-5,2},{4,4},{-4,4},
-    {3,5},{-3,5},{5,3},{-5,3},{0,6},{6,0},{1,6},{-1,6},{6,1},{-6,1},
-    {2,6},{-2,6},{6,2},{-6,2},{4,5},{-4,5},{5,4},{-5,4},{3,6},{-3,6},
-    {6,3},{-6,3},{0,7},{7,0},{1,7},{-1,7},{5,5},{-5,5},{7,1},{-7,1},
-    {4,6},{-4,6},{6,4},{-6,4},{2,7},{-2,7},{7,2},{-7,2},{3,7},{-3,7},
-    {7,3},{-7,3},{5,6},{-5,6},{6,5},{-6,5},{8,0},{4,7},{-4,7},{7,4},
-    {-7,4},{8,1},{1,8},{-1,8},{8,2},{2,8},{-2,8},{8,3},{3,8},{-3,8},
-    {5,7},{-5,7},{7,5},{-7,5},{8,4},{4,8},{-4,8},{8,5},{5,8},{-5,8}
+/* Distance-plane mapping (libwebp kCodeToPlane, src/dec/vp8l_dec.c).
+ * For plane_code in [1..120] the nearest-neighbour 2-D offset is recovered as:
+ *   yoffset = byte >> 4;   xoffset = 8 - (byte & 0xf);
+ *   distance = yoffset * xsize + xoffset   (clamped to >= 1)
+ * Storing the raw bytes (rather than a hand-expanded {x,y} table) keeps this
+ * verbatim-faithful to libwebp. */
+static const uint8_t kCodeToPlane[120] = {
+    0x18,0x07,0x17,0x19,0x28,0x06,0x27,0x29,0x16,0x1a,
+    0x26,0x2a,0x38,0x05,0x37,0x39,0x15,0x1b,0x36,0x3a,
+    0x25,0x2b,0x48,0x04,0x47,0x49,0x14,0x1c,0x35,0x3b,
+    0x46,0x4a,0x24,0x2c,0x58,0x45,0x4b,0x34,0x3c,0x03,
+    0x57,0x59,0x13,0x1d,0x56,0x5a,0x23,0x2d,0x44,0x4c,
+    0x55,0x5b,0x33,0x3d,0x68,0x02,0x67,0x69,0x12,0x1e,
+    0x66,0x6a,0x22,0x2e,0x54,0x5c,0x43,0x4d,0x65,0x6b,
+    0x32,0x3e,0x78,0x01,0x77,0x79,0x53,0x5d,0x11,0x1f,
+    0x64,0x6c,0x42,0x4e,0x76,0x7a,0x21,0x2f,0x75,0x7b,
+    0x31,0x3f,0x63,0x6d,0x52,0x5e,0x00,0x74,0x7c,0x41,
+    0x4f,0x10,0x20,0x62,0x6e,0x30,0x73,0x7d,0x51,0x5f,
+    0x40,0x72,0x7e,0x61,0x6f,0x50,0x71,0x7f,0x60,0x70
 };
+
+/* Map a 1-based plane code (<=120) to a pixel distance for image width W. */
+static long plane_code_to_dist(int plane_code, int W) {
+    uint8_t b = kCodeToPlane[plane_code - 1];
+    int yoff = b >> 4;
+    int xoff = 8 - (int)(b & 0xf);
+    long d = (long)yoff * W + xoff;
+    return (d >= 1) ? d : 1;
+}
 
 /* =========================================================================
  * Color cache hash
  * ====================================================================== */
 static uint32_t cc_hash(uint32_t argb, int bits) {
-    /* VP8L color-cache hash: the multiply is 32-bit (wraps mod 2^32), THEN the
-     * top `bits` bits are taken.  Doing the multiply in 64-bit would leave more
-     * than `bits` significant bits after the shift and index out of bounds. */
+    /* VP8L color-cache hash: 32-bit wrapping multiply, then take the top
+     * `bits` bits.  The multiply MUST be modulo 2^32 (not a 64-bit product),
+     * otherwise the shift leaves 32+bits significant bits and overruns the
+     * cache table. */
     return (uint32_t)((0x1e35a7bdU * argb) >> (32 - bits));
 }
 
@@ -478,31 +558,33 @@ static void inv_subtract_green(uint32_t *p, long n) {
     }
 }
 
+/* VP8L cross-colour delta: (transform_byte * signed_channel) >> 5.
+ * Both operands are interpreted as SIGNED 8-bit. */
+static int color_delta(int8_t t, uint8_t channel) {
+    return ((int)t * (int)(int8_t)channel) >> 5;
+}
+
 static void inv_color(const uint32_t *cimg, int cb, int W, int H, uint32_t *pix) {
     int sw = (W + (1<<cb) - 1) >> cb;
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             uint32_t ct = cimg[(y>>cb)*sw + (x>>cb)];
-            /* libwebp ColorCodeToMultipliers byte layout:
-             *   green_to_red  = bits  0..7
-             *   green_to_blue = bits  8..15
-             *   red_to_blue   = bits 16..23 */
-            int8_t g2r = (int8_t)((ct      )&0xFF);
-            int8_t g2b = (int8_t)((ct >>  8)&0xFF);
-            int8_t r2b = (int8_t)((ct >> 16)&0xFF);
+            /* VP8L colour-transform element packed in the sub-image ARGB pixel
+             * (libwebp ColorCodeToMultipliers):
+             *   green_to_red  = (code >>  0) & 0xff  → the Blue byte
+             *   green_to_blue = (code >>  8) & 0xff  → the Green byte
+             *   red_to_blue   = (code >> 16) & 0xff  → the Red byte   */
+            int8_t g2r = (int8_t)((ct    )&0xFF);
+            int8_t g2b = (int8_t)((ct>> 8)&0xFF);
+            int8_t r2b = (int8_t)((ct>>16)&0xFF);
             uint32_t px = pix[y*W+x];
             uint8_t r = (px>>16)&0xFF, g=(px>>8)&0xFF, b=px&0xFF, a=(px>>24)&0xFF;
-            /* ColorTransformDelta(pred,c) = (pred * (int8)c) >> 5.  The colour
-             * operand is interpreted as SIGNED int8, and the blue update uses
-             * the NEWLY-corrected red (libwebp ColorSpaceInverseTransform). */
-            int8_t gs = (int8_t)g;
-            int nr = (int)r + (((int)g2r * (int)gs) >> 5);
-            nr &= 0xFF;
-            int nb = (int)b + (((int)g2b * (int)gs) >> 5)
-                            + (((int)r2b * (int)(int8_t)nr) >> 5);
-            nb &= 0xFF;
+            /* red  += delta(green_to_red,  green) */
+            uint8_t nr = (uint8_t)((int)r + color_delta(g2r, g));
+            /* blue += delta(green_to_blue, green) + delta(red_to_blue, NEW red) */
+            int nb = (int)b + color_delta(g2b, g) + color_delta(r2b, nr);
             pix[y*W+x] = ((uint32_t)a<<24)|((uint32_t)nr<<16)|
-                         ((uint32_t)g<<8)|(uint32_t)nb;
+                         ((uint32_t)g<<8)|(uint32_t)(nb&0xFF);
         }
     }
 }
@@ -510,67 +592,67 @@ static void inv_color(const uint32_t *cimg, int cb, int W, int H, uint32_t *pix)
 /* Clamp integer to [0,255] */
 static uint8_t clamp8(int v) { return v<0?0:(v>255?255:(uint8_t)v); }
 
+/* Per-channel helpers (operate on one 8-bit channel value at a time). */
+static int p_avg2(int a, int b) { return (a + b) >> 1; }
+static int p_clamp_add_sub_full(int a, int b, int c) { /* Clamp(a+b-c) */
+    return clamp8(a + b - c);
+}
+static int p_clamp_add_sub_half(int a, int b) { /* Clamp(a + (a-b)/2) */
+    /* libwebp uses C truncating division (toward zero), not >>1. */
+    return clamp8(a + (a - b) / 2);
+}
+
+/* VP8L predictors, per the lossless spec §4.2.3.  TL/T/TR/L are neighbour
+ * ARGB pixels; each predictor combines them per channel and returns ARGB. */
 static uint32_t predictor(int mode, uint32_t TL, uint32_t T, uint32_t TR, uint32_t L) {
-#define CH(p,sh) (((p)>>(sh))&0xFF)
-#define AVG2(a,b) (((unsigned)(a)+(unsigned)(b))>>1)
-#define AVG3(a,b,c) ((((unsigned)(a)+(unsigned)(b))>>1)+(unsigned)(c))>>1
+#define CH(p,sh) (int)(((p)>>(sh))&0xFF)
     switch (mode & 0xF) {
-    case 0: return 0xFF000000u;
-    case 1: return L;
-    case 2: return T;
-    case 3: return TR;
-    case 4: return TL;
-    case 5: /* avg(avg(L,TR),T) */
-        return ((uint32_t)((AVG2(CH(L,24),CH(TR,24))+CH(T,24))>>1)<<24)|
-               ((uint32_t)((AVG2(CH(L,16),CH(TR,16))+CH(T,16))>>1)<<16)|
-               ((uint32_t)((AVG2(CH(L, 8),CH(TR, 8))+CH(T, 8))>>1)<< 8)|
-               (uint32_t)((AVG2(CH(L, 0),CH(TR, 0))+CH(T, 0))>>1);
-    case 6:  /* avg(L,TL) rounded */
-        return ((uint32_t)AVG2(CH(L,24),CH(TL,24))<<24)|((uint32_t)AVG2(CH(L,16),CH(TL,16))<<16)|
-               ((uint32_t)AVG2(CH(L, 8),CH(TL, 8))<< 8)|(uint32_t)AVG2(CH(L, 0),CH(TL, 0));
-    case 7:  /* avg(L,T) */
-        return ((uint32_t)AVG2(CH(L,24),CH(T,24))<<24)|((uint32_t)AVG2(CH(L,16),CH(T,16))<<16)|
-               ((uint32_t)AVG2(CH(L, 8),CH(T, 8))<< 8)|(uint32_t)AVG2(CH(L, 0),CH(T, 0));
-    case 8:  /* avg(TL,T) */
-        return ((uint32_t)AVG2(CH(TL,24),CH(T,24))<<24)|((uint32_t)AVG2(CH(TL,16),CH(T,16))<<16)|
-               ((uint32_t)AVG2(CH(TL, 8),CH(T, 8))<< 8)|(uint32_t)AVG2(CH(TL, 0),CH(T, 0));
-    case 9:  /* avg(T,TR) */
-        return ((uint32_t)AVG2(CH(T,24),CH(TR,24))<<24)|((uint32_t)AVG2(CH(T,16),CH(TR,16))<<16)|
-               ((uint32_t)AVG2(CH(T, 8),CH(TR, 8))<< 8)|(uint32_t)AVG2(CH(T, 0),CH(TR, 0));
-    case 10: /* avg(L,T) -- same as 7 in spec */
-        return ((uint32_t)AVG2(CH(L,24),CH(T,24))<<24)|((uint32_t)AVG2(CH(L,16),CH(T,16))<<16)|
-               ((uint32_t)AVG2(CH(L, 8),CH(T, 8))<< 8)|(uint32_t)AVG2(CH(L, 0),CH(T, 0));
-    case 11: { /* Select(L,T,TL) */
-        int pL = 0, pT = 0;
+    case 0:  return 0xFF000000u;
+    case 1:  return L;
+    case 2:  return T;
+    case 3:  return TR;
+    case 4:  return TL;
+    case 11: { /* Select(L, T, TL): pick L or T closest to gradient L+T-TL */
+        int pa = 0, pb = 0;       /* pa = dist to T, pb = dist to L */
         for (int sh = 0; sh <= 24; sh += 8) {
-            int d = CH(TL,sh);
-            int dl = d - (int)CH(L,sh); if(dl<0)dl=-dl;
-            int dt = d - (int)CH(T,sh); if(dt<0)dt=-dt;
-            pL += dl; pT += dt;
+            int l = CH(L,sh), t = CH(T,sh), tl = CH(TL,sh);
+            int p = l + t - tl;            /* predicted gradient */
+            int da = p - t; if (da < 0) da = -da;
+            int db = p - l; if (db < 0) db = -db;
+            pa += da; pb += db;
         }
-        return (pL <= pT) ? L : T;
+        return (pa <= pb) ? T : L;
     }
-    case 12: /* ClampAddSubtractFull */
-        return ((uint32_t)clamp8((int)CH(L,24)+(int)CH(T,24)-(int)CH(TL,24))<<24)|
-               ((uint32_t)clamp8((int)CH(L,16)+(int)CH(T,16)-(int)CH(TL,16))<<16)|
-               ((uint32_t)clamp8((int)CH(L, 8)+(int)CH(T, 8)-(int)CH(TL, 8))<< 8)|
-               (uint32_t)clamp8((int)CH(L, 0)+(int)CH(T, 0)-(int)CH(TL, 0));
-    case 13: /* ClampAddSubtractHalf */
-        return ((uint32_t)clamp8((int)CH(L,24)+((int)CH(T,24)-(int)CH(TL,24))/2)<<24)|
-               ((uint32_t)clamp8((int)CH(L,16)+((int)CH(T,16)-(int)CH(TL,16))/2)<<16)|
-               ((uint32_t)clamp8((int)CH(L, 8)+((int)CH(T, 8)-(int)CH(TL, 8))/2)<< 8)|
-               (uint32_t)clamp8((int)CH(L, 0)+((int)CH(T, 0)-(int)CH(TL, 0))/2);
-    default: return L;
+    default: break;
     }
+
+    int out[4];   /* per channel: index 0=B(sh0),1=G(sh8),2=R(sh16),3=A(sh24) */
+    for (int i = 0; i < 4; i++) {
+        int sh = i * 8;
+        int l = CH(L,sh), t = CH(T,sh), tr = CH(TR,sh), tl = CH(TL,sh);
+        int v;
+        switch (mode & 0xF) {
+        case 5:  v = p_avg2(p_avg2(l, tr), t);          break; /* avg(avg(L,TR),T) */
+        case 6:  v = p_avg2(l, tl);                     break; /* avg(L,TL) */
+        case 7:  v = p_avg2(l, t);                      break; /* avg(L,T) */
+        case 8:  v = p_avg2(tl, t);                     break; /* avg(TL,T) */
+        case 9:  v = p_avg2(t, tr);                     break; /* avg(T,TR) */
+        case 10: v = p_avg2(p_avg2(l, tl), p_avg2(t, tr)); break; /* avg(avg(L,TL),avg(T,TR)) */
+        case 12: v = p_clamp_add_sub_full(l, t, tl);    break; /* Clamp(L+T-TL) */
+        case 13: v = p_clamp_add_sub_half(p_avg2(l, t), tl); break; /* Clamp(avg(L,T)+(.-TL)/2) */
+        default: v = l;                                 break;
+        }
+        out[i] = v & 0xFF;
+    }
+    return ((uint32_t)out[3]<<24)|((uint32_t)out[2]<<16)|
+           ((uint32_t)out[1]<< 8)| (uint32_t)out[0];
 #undef CH
-#undef AVG2
-#undef AVG3
 }
 
 static uint32_t argb_add(uint32_t a, uint32_t b) {
-    return (uint32_t)(((a>>24)+(b>>24)&0xFF)<<24)|
+    return (uint32_t)(((((a>>24)&0xFF)+((b>>24)&0xFF))&0xFF)<<24)|
            (uint32_t)(((((a>>16)&0xFF)+((b>>16)&0xFF))&0xFF)<<16)|
-           (uint32_t)(((((a>>8)&0xFF)+((b>>8)&0xFF))&0xFF)<<8)|
+           (uint32_t)(((((a>>8 )&0xFF)+((b>>8 )&0xFF))&0xFF)<<8 )|
            (uint32_t)(((a&0xFF)+(b&0xFF))&0xFF);
 }
 
@@ -591,7 +673,10 @@ static void inv_predictor(const uint32_t *pimg, int cb, int W, int H, uint32_t *
                 int mode = (int)((blk>>8)&0xFF); /* green byte = predictor type */
                 uint32_t L  = px[idx-1];
                 uint32_t T  = px[idx-W];
-                uint32_t TR = (x+1<W) ? px[idx-W+1] : px[idx-W]; /* right edge: repeat T */
+                /* Top-right.  libwebp uses top[x+1]; for the last column that
+                 * index is (idx-W+1) == pixel (0,y) — the first pixel of the
+                 * CURRENT row (already decoded) — NOT a repeat of T. */
+                uint32_t TR = px[idx-W+1];
                 uint32_t TL = px[idx-W-1];
                 pred = predictor(mode, TL, T, TR, L);
             }
@@ -607,16 +692,19 @@ static int inv_color_indexing(const Transform *tr, int orig_W, int H,
     if (ps <= 0 || ps > 256) return -1;
 
     if (wb == 0) {
-        /* 1 index/pixel */
+        /* 1 index/pixel: the palette index is the raw green byte (NOT masked
+         * with ps-1 — ps need not be a power of two).  Out-of-range indices
+         * map to entry 0, matching libwebp's zero-padded palette. */
         for (long i = 0; i < total_pix; i++) {
-            int idx = (int)((pix[i]>>8)&0xFF) & (ps-1);
+            int idx = (int)((pix[i]>>8)&0xFF);
+            if (idx >= ps) idx = 0;
             pix[i] = tr->data[idx];
         }
     } else {
-        /* Packed: `pack` indices per byte (from the green byte) */
-        int pack        = 1 << wb;   /* pixels per packed byte */
-        int bits_idx    = 8 >> wb;   /* bits per index */
-        int mask        = (1 << bits_idx) - 1;  /* per-index bit mask */
+        /* Packed: 1<<wb indices per pixel (from the green byte) */
+        int pack        = 1 << wb;
+        int bits_idx    = 8 >> wb;        /* bits per index */
+        int mask        = (1 << bits_idx) - 1;  /* index field mask */
         long packed_W   = ((long)orig_W + pack - 1) / pack;
         /* Unpack right-to-left to avoid overwriting source */
         for (int y = H-1; y >= 0; y--) {
@@ -779,25 +867,24 @@ static int decode_vp8l(BR *br, int W, int H, int is_sub,
     HGroup *groups = (HGroup *)sa_alloc(sa, (long)n_groups * (long)sizeof(HGroup));
     if (!groups) return -1;
 
-    /* Temporary lens array on stack — max alpha size */
-    int lens[HALPHA]; /* stack allocation: 4376*4 = ~17KB, acceptable */
+    /* Code-length scratch — allocated from the bump allocator, NOT the stack:
+     * a 17 KB stack array here would overflow the 16 KB kernel/task stacks, and
+     * decode_vp8l recurses for sub-images.  (It is only needed transiently to
+     * build the trees, but the bump allocator does not reclaim — fine, it's a
+     * few × 17 KB at most across the recursion.) */
+    int *lens = (int *)sa_alloc(sa, (long)HALPHA * sizeof(int));
+    if (!lens) return -1;
 
     for (int g = 0; g < n_groups; g++) {
         HGroup *grp = &groups[g];
-#define DBGBIT(tag)
-        DBGBIT("pre-GREEN");
         if (read_code_lengths(br, alpha_g, lens) < 0) return -1;
         if (htree_build(&grp->t[HG_GREEN], lens, alpha_g) < 0) return -1;
-        DBGBIT("pre-RED");
         if (read_code_lengths(br, 256, lens) < 0) return -1;
         if (htree_build(&grp->t[HG_RED], lens, 256) < 0) return -1;
-        DBGBIT("pre-BLUE");
         if (read_code_lengths(br, 256, lens) < 0) return -1;
         if (htree_build(&grp->t[HG_BLUE], lens, 256) < 0) return -1;
-        DBGBIT("pre-ALPHA");
         if (read_code_lengths(br, 256, lens) < 0) return -1;
         if (htree_build(&grp->t[HG_ALPHA], lens, 256) < 0) return -1;
-        DBGBIT("pre-DIST");
         if (read_code_lengths(br, 40, lens) < 0) return -1;
         if (htree_build(&grp->t[HG_DIST], lens, 40) < 0) return -1;
     }
@@ -844,9 +931,7 @@ static int decode_vp8l(BR *br, int W, int H, int is_sub,
 
             long dist;
             if (dist_raw <= 120) {
-                int xi = kDP[dist_raw-1][0], yi = kDP[dist_raw-1][1];
-                dist = (long)xi + (long)yi * dec_W;
-                if (dist < 1) dist = 1;
+                dist = plane_code_to_dist(dist_raw, dec_W);
             } else {
                 dist = dist_raw - 120;
             }
@@ -869,7 +954,6 @@ static int decode_vp8l(BR *br, int W, int H, int is_sub,
             pos++;
         }
     }
-
 
     /* ---- 6. Inverse transforms (reverse order) ---- */
     for (int t = ntr-1; t >= 0; t--) {
@@ -914,15 +998,18 @@ int webp_probe(const uint8_t *data, int len, int *w, int *h, long *scratch_need)
     if ((long)iw*ih>(1<<20)) return -1;
 
     *w = iw; *h = ih;
-    /* Scratch estimate: we need the ARGB pixel buffer + sub-image buffers +
-     * Huffman groups.  sizeof(HGroup) with HTree internals:
-     *   HEntry[1024]*4 + 256*(4+2+1)*3 + 5 * HG_TREES overhead ≈ 12KB/group
-     * 512 groups × 5 trees × 12KB = 30MB in the worst case.
-     * In practice (typical web images): 1-4 groups, <1MB.
-     * We request a generous fixed buffer so the caller can pre-allocate. */
+    /* Scratch estimate (caller allocates this many bytes for webp_decode):
+     *   - sub-image ARGB buffers (predictor/colour/entropy/palette) + color
+     *     cache: a few × the pixel buffer,
+     *   - the Huffman groups: sizeof(HGroup) is ~230 KB (each of 5 HTrees holds
+     *     a 2^HFAST fast table + a worst-case overflow table).  The group count
+     *     equals the meta-Huffman tile count, capped at MAX_HGROUPS.
+     * We budget for a healthy number of groups; decode fails closed (returns
+     * non-zero) rather than overrunning if a pathological stream needs more. */
     long pix = (long)iw*ih*4;
-    *scratch_need = pix * 8 + (16L<<20); /* 16 MB fixed overhead */
-    if (*scratch_need < (24L<<20)) *scratch_need = 24L<<20;
+    long groups_budget = 64L * (long)sizeof(HGroup);   /* ~15 MB: covers typical + */
+    *scratch_need = pix * 8 + groups_budget + (8L<<20);
+    if (*scratch_need < (32L<<20)) *scratch_need = 32L<<20;
     return 0;
 }
 
