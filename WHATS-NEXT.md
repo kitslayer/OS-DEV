@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1457) gcalc — scientific keys (√, 1/x, ±).** The calculator could already do `%` and (via `x × =`) squares, but **square-root and negate were impossible** and reciprocal was clumsy. Added three keyboard functions — `s` = square root, `i` = reciprocal (1/x), `n` = negate — all exact fixed-point (integer-Newton √), documented in a new footer. **Verified:** in-guest — √2 → 1.4142, 1/4 → 0.25, negate → -0.25; built clean + snap-verified.
+
 > **(M1456) gtimer — type the minutes directly.** Setting a long timer used to mean tapping `w` once per minute (20+ presses for a 25-min timer). Now digit keys set the minutes live — type `25` → `25:00` — with backspace to correct, while `w`/`s` still nudge ±1. Also fixed the footer, which had been clipped past the 240px window since M1442. **Verified:** in-guest — `25` → 25:00, backspace → 02:00, footer fully visible; built clean + snap-verified.
 
 > **(M1455) gcolor — saved-colour palette.** The colour picker can now keep favourites: `s` saves the current colour to a row of up to 8 swatches (FIFO when full), clicking a swatch recalls it, and the palette is **persisted to PALETTE.DAT** so it survives across runs (the window grew to fit the row). **Verified:** in-guest — saved teal then `#20B25A` green → two beveled swatches in the SAVED row, Files count 135→136 (PALETTE.DAT written); built clean + snap-verified.

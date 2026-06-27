@@ -7,6 +7,7 @@
  * execution model. All maths is INTEGER fixed-point scaled by 10000 (four exact
  * decimals, no FPU, no float rounding). Keys: 0-9 . digits, + - * / (and x)
  * operators, = or Enter evaluates, c/C clears, Backspace deletes, q/Esc quits.
+ * Scientific keys (M1457): s = square root, i = reciprocal (1/x), n = negate (+/-).
  *
  * Launch: `run gcalc` from the shell, or the Apps menu ("Calculator").
  */
@@ -101,6 +102,8 @@ static long apply(long a, char op, long b) {
     }
     return b;
 }
+/* integer square root (Newton); used by the sqrt key on fixed-point values */
+static long isqrt_l(long n) { if (n <= 0) return 0; long x = n, y = (x + 1) / 2; while (y < x) { x = y; y = (x + n / x) / 2; } return x; }
 
 static const char *PAD[5][4] = {
     { "7", "8", "9", "/" },
@@ -130,6 +133,23 @@ static void press(int k) {
         pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = '='; dirty = 1;
     }
     else if (k == '%') { long v = elen ? parse_fixed(entry) : reg; reg = v / 100; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = '%'; dirty = 1; }   /* x% = x/100 */
+    else if (k == 's' || k == 'S') {   /* square root (sqrt(v/SCALE) in fixed-point = isqrt(v*SCALE)); neg/overflow = no-op */
+        long v = elen ? parse_fixed(entry) : reg;
+        reg = (v > 0 && v <= 900000000000000L) ? isqrt_l(v * SCALE) : v;
+        pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = 's'; dirty = 1;
+    }
+    else if (k == 'i' || k == 'I') {   /* reciprocal 1/x = SCALE^2 / v */
+        long v = elen ? parse_fixed(entry) : reg;
+        reg = v ? SCALE * SCALE / v : 0;
+        pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = 'i'; dirty = 1;
+    }
+    else if (k == 'n' || k == 'N') {   /* negate (+/-): flip the sign mid-entry, else flip the result */
+        if (elen > 0 && !fresh) {
+            if (entry[0] == '-') { for (int i = 0; i < elen; i++) entry[i] = entry[i + 1]; elen--; }
+            else { for (int i = elen; i >= 0; i--) entry[i + 1] = entry[i]; entry[0] = '-'; elen++; }
+        } else reg = -reg;
+        last = 'n'; dirty = 1;
+    }
     else if (k == 'c' || k == 'C') { reg = 0; pend = 0; elen = 0; entry[0] = 0; fresh = 1; last = 'C'; dirty = 1; }
     else if (k == 'y' || k == 'Y') { char s[24]; if (elen > 0 && !fresh) { int i = 0; for (; entry[i]; i++) s[i] = entry[i]; s[i] = 0; } else fmt_fixed(reg, s); sys_clip_set(s, slen(s)); last = 'y'; dirty = 1; }   /* copy the display to the clipboard */
     else if (k == 8 || k == 0x7F) { if (elen > 0) { entry[--elen] = 0; fresh = 0; } last = '<'; dirty = 1; }
@@ -178,7 +198,7 @@ int main(void) {
                 unsigned tc = hot ? 0xEFFFF4u : isop ? C_AMBER : isclr ? 0xF0A6A6u : C_LABEL;
                 textS(lab, x + (BW - 16) / 2, y + (BH - 16) / 2, 2, tc);
             }
-            textS("y copy result", 8, H - 16, 1, C_DIM);
+            textS("s:sqrt i:1/x n:+/- y:copy", 8, H - 16, 1, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }
