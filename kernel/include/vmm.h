@@ -44,6 +44,13 @@ uint64_t vmm_pt_phys_in(uint64_t cr3, uint64_t virt);    /* phys of the 4 KiB PT
 int      vmm_fork_cow(uint64_t child_cr3);  /* COW-clone the CURRENT space into child_cr3 (fork); 0/-1 (M1116) */
 int      vmm_protect(uint64_t virt, uint64_t flags);  /* rewrite a mapped page's flags (mprotect); 0/-1 */
 void     vmm_harden_kernel(void);                     /* W^X: split image huge-pages -> 4K, set .text RO / .rodata,.data,.bss NX */
+
+/* Guarded kernel task stacks (M1495): map a stack in a dedicated VA window with an
+ * unmapped guard page on each side, so an overflow faults at once instead of
+ * silently corrupting the heap. kstack_alloc returns the lowest usable address. */
+void    *kstack_alloc(uint64_t size);
+void     kstack_free(void *stackbase, uint64_t size);
+int      kstack_is_guard(uint64_t addr);              /* is a faulting CR2 in the guarded-stack window? (kernel stack overflow) */
 int      vmm_user_ok(uint64_t ptr, uint64_t len);  /* is [ptr,ptr+len) user-accessible (PTE_USER) in the current space? for syscall arg validation */
 int      vmm_user_str_ok(uint64_t ptr, uint64_t max);  /* is the NUL-terminated string at ptr entirely in user pages (<= max bytes)? */
 

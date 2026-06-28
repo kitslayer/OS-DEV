@@ -420,6 +420,63 @@ static int vmm_split_huge(uint64_t virt) {
     return 0;
 }
 
+/* ---- guarded kernel task stacks (M1495) ---------------------------------------
+ * Kernel task stacks were kmalloc'd from the heap, so an overflow silently
+ * corrupted the adjacent allocation (the bug class M1491/M1492 dealt with). These
+ * map each stack in a dedicated VA window with an UNMAPPED guard page on each side,
+ * so an overflow faults IMMEDIATELY (a clean #PF in the guard) — caught at the
+ * exact offending instruction, before any corruption — instead of being detected
+ * only later by the M1492 canary. The window sits in the upper half of the kheap's
+ * PML4 entry (288), which kheap_init establishes before any address space is
+ * created; vmm_create_address_space shares [256..512) by pointer, so every task's
+ * CR3 sees these mappings (a clone'd thread runs ring-0 on its kernel stack while
+ * the app's CR3 is active, so the stack VA must be globally mapped). VA is never
+ * recycled — the 256 GiB window dwarfs any realistic task churn, so leaking it on
+ * free is simpler and safe; the frames (the actual RAM) are freed. */
+#define KSTACK_WIN_BASE 0xFFFF904000000000ull   /* upper half of PML4[288]; kheap grows from 0xFFFF9000.. far below */
+#define KSTACK_WIN_END  0xFFFF908000000000ull   /* = end of PML4[288] (289 << 39) */
+static volatile uint64_t kstack_next = KSTACK_WIN_BASE;
+
+void *kstack_alloc(uint64_t size) {
+    uint64_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    if (!pages) return 0;
+    uint64_t total = (pages + 2) * PAGE_SIZE;                         /* + a low and a high guard page */
+    uint64_t guard_lo = __atomic_fetch_add(&kstack_next, total, __ATOMIC_SEQ_CST);  /* lock-free bump */
+    if (guard_lo + total > KSTACK_WIN_END) return 0;                 /* window exhausted (the bump leak is harmless) */
+    uint64_t base = guard_lo + PAGE_SIZE;                            /* lowest usable address (guard page below) */
+    uint64_t end  = base + pages * PAGE_SIZE;                        /* exclusive; a guard page sits at `end` */
+    for (uint64_t v = base; v < end; v += PAGE_SIZE) {
+        uint64_t frame = pmm_alloc_frame();
+        if (!frame || vmm_map(v, frame, PTE_WRITABLE | PTE_NX) != 0) {
+            if (frame) pmm_free_frame(frame);
+            for (uint64_t u = base; u < v; u += PAGE_SIZE) {         /* unwind the pages mapped so far */
+                uint64_t p = vmm_translate(u);
+                vmm_unmap(u);
+                if (p) pmm_free_frame(p);
+            }
+            return 0;
+        }
+    }
+    return (void *)base;
+}
+
+void kstack_free(void *stackbase, uint64_t size) {
+    if (!stackbase) return;
+    uint64_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint64_t base  = (uint64_t)stackbase;
+    for (uint64_t v = base; v < base + pages * PAGE_SIZE; v += PAGE_SIZE) {
+        uint64_t p = vmm_translate(v);
+        vmm_unmap(v);                                                /* invlpg local; only the BSP runs tasks, so no shootdown */
+        if (p) pmm_free_frame(p);
+    }
+}
+
+/* A #PF whose CR2 lands in the stack window is necessarily a guard-page (or unused
+ * slack) hit — mapped stack pages don't fault — i.e. a kernel stack overflow. */
+int kstack_is_guard(uint64_t addr) {
+    return addr >= KSTACK_WIN_BASE && addr < KSTACK_WIN_END;
+}
+
 /*
  * Enforce W^X on the kernel image. The boot trampoline (boot.asm) identity-maps the
  * low 1 GiB with 2 MiB huge pages, so the kernel's own code and data share huge,

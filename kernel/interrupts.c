@@ -18,6 +18,7 @@
 #include "syscall.h"
 #include "app.h"
 #include "task.h"
+#include "vmm.h"        /* kstack_is_guard — flag a kernel-stack-overflow #PF (M1495) */
 #include "ksyms.h"
 #include "smp.h"
 #include "gdbstub.h"
@@ -150,6 +151,8 @@ void isr_dispatch(struct registers *r) {
             uint64_t cr2;
             __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
             kprintf("  faulting address (CR2) = %p\n", (void *)cr2);
+            if (kstack_is_guard(cr2))    /* CR2 in the guarded-stack window -> a task overran its kernel stack into a guard page (M1495) */
+                kprintf("  >>> KERNEL STACK OVERFLOW: a task overran its kernel stack into a guard page <<<\n");
         }
         dump_registers(r);
         backtrace(r->rip, r->rbp);       /* symbolized call trace (kernel/ksyms.c) */

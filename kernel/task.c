@@ -21,6 +21,7 @@
 #include "string.h"
 #include "timer.h"
 #include "console.h"   /* kprintf — for the stack-overflow panic */
+#include "vmm.h"       /* kstack_alloc/free — guarded task stacks (M1495) */
 
 #define STACK_SIZE 16384
 #define FXSZ       512                 /* FXSAVE area size */
@@ -173,11 +174,11 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
 
     fx_alloc(t);
 
-    uint8_t *stack = kmalloc(stack_size);
+    uint8_t *stack = kstack_alloc(stack_size);   /* guarded VA stack: an overflow faults in a guard page, not the heap (M1495) */
     if (!stack || !t->fxbuf) {               /* OOM on the stack or FP save area: don't build a bogus stack frame
                                               * (a NULL stack -> top at a wild low address -> triple-fault on first
                                               * switch-in) or run with no FP save (XMM/x87 corruption between tasks). */
-        if (stack) kfree(stack);
+        if (stack) kstack_free(stack, stack_size);
         if (t->fxbuf) kfree(t->fxbuf);
         kfree(t);
         return 0;
@@ -548,7 +549,7 @@ void task_exit(void) {
  * so no other task can run (and observe DEAD) while this task still executes. */
 void task_free(task_t *t) {
     if (!t) return;
-    if (t->stack_base) kfree((void *)t->stack_base);
+    if (t->stack_base) kstack_free((void *)t->stack_base, t->kstack_top - t->stack_base);
     if (t->fxbuf) kfree(t->fxbuf);
     kfree(t);
 }
