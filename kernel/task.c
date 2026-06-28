@@ -20,9 +20,18 @@
 #include "gdt.h"
 #include "string.h"
 #include "timer.h"
+#include "console.h"   /* kprintf — for the stack-overflow panic */
 
 #define STACK_SIZE 16384
 #define FXSZ       512                 /* FXSAVE area size */
+/* A magic value written at the LOWEST address of every kmalloc'd kernel task stack
+ * (task_create_stack) and checked on each context switch (switch_to_next): if a
+ * deep call chain overran the stack down to its base, this is clobbered and we
+ * panic cleanly instead of silently corrupting the adjacent heap — which is how an
+ * undersized stack manifested before (the ring-3 browser fetch worker, M1491:
+ * a 64K stack overflowed during the in-kernel TLS bignum handshake and trashed the
+ * task ring, GPF'ing in task_wake_sleepers with no hint of the real cause). */
+#define STACK_CANARY 0x9e3b8a7c5d6f1024ull
 
 static task_t *current;
 static int     next_id;
@@ -174,6 +183,7 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
         return 0;
     }
     t->stack_base = (uint64_t)stack;
+    *(volatile uint64_t *)stack = STACK_CANARY;   /* overflow tripwire at the stack's lowest address */
 
     /* Build the initial stack so the first switch-in "returns" into the
      * trampoline. The layout must mirror context_switch's pops:
@@ -201,6 +211,16 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
 /* Core switch — assumes interrupts already disabled. */
 static void switch_to_next(void) {
     task_t *prev = current;
+    /* Stack-overflow tripwire: if prev overran its kernel stack to the base during
+     * its slice, the canary there is clobbered — halt cleanly rather than run on
+     * with a corrupted heap/task-ring (a silent, near-undebuggable failure). */
+    if (prev->stack_base && *(volatile uint64_t *)prev->stack_base != STACK_CANARY) {
+        interrupts_disable();
+        kprintf("\n*** KERNEL STACK OVERFLOW (task %lu): canary at %p clobbered ***\n"
+                "    a deep call chain overran the task's kernel stack; system halted.\n",
+                (unsigned long)prev->id, (void *)prev->stack_base);
+        for (;;) __asm__ volatile("cli; hlt");
+    }
     uint64_t now = timer_ms();
 
     /* Charge prev for the slice it just ran BEFORE deciding (M1171): real time to
