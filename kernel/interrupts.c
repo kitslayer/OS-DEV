@@ -154,6 +154,11 @@ void isr_dispatch(struct registers *r) {
             if (kstack_is_guard(cr2))    /* CR2 in the guarded-stack window -> a task overran its kernel stack into a guard page (M1495) */
                 kprintf("  >>> KERNEL STACK OVERFLOW: a task overran its kernel stack into a guard page <<<\n");
         }
+        /* A stack overflow usually surfaces as a #DF, not a clean #PF: once RSP is in
+         * the guard page, the CPU can't push the #PF's own exception frame, so it
+         * escalates to a double fault (taken on IST1). Diagnose that too (M1498). */
+        if (r->int_no == 8 && kstack_is_guard(r->rsp))
+            kprintf("  >>> KERNEL STACK OVERFLOW: a task overran its kernel stack (its #PF escalated to a #DF) <<<\n");
         dump_registers(r);
         backtrace(r->rip, r->rbp);       /* symbolized call trace (kernel/ksyms.c) */
         kprintf("  system halted.\n");

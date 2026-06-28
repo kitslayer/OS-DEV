@@ -206,6 +206,26 @@ static uint64_t mb2_to_mb1(uint64_t mb2) {
     return (uint64_t)(uintptr_t)&mb1_shim;
 }
 
+/* ---- deliberate kernel-stack-overflow test (M1498) ----------------------------
+ * Gated behind `-append kstackover`: spawn a kernel task that recurses until it
+ * runs off its guarded stack, exercising the WHOLE M1495/M1496 path end-to-end —
+ * the guard-page #PF, the "KERNEL STACK OVERFLOW" diagnosis, and a panic backtrace
+ * that has to walk a high-VA stack. Normal boots (no flag) never touch this. */
+static volatile int g_kstack_overflow_test;
+
+static int __attribute__((noinline)) kstack_blow(int d) {
+    volatile char buf[512];
+    for (int i = 0; i < 512; i++) buf[i] = (char)(d + i);    /* real per-frame stack use */
+    int r = 0;
+    if (g_kstack_overflow_test) r = kstack_blow(d + 1);      /* volatile guard: recurse, but the compiler can't fold it to infinite */
+    return r + buf[(unsigned)d & 511];                       /* use buf AFTER the call: not a tail call */
+}
+static void kstack_overflow_task(void) {
+    kprintf("[kstacktest] deliberately overflowing this task's kernel stack...\n");
+    volatile int sink = kstack_blow(0);
+    (void)sink;                                              /* unreachable: the recursion faults into the guard page first */
+}
+
 void kmain(uint64_t mb_info, uint64_t magic) {
     console_init();
 
@@ -219,9 +239,9 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * Just sets a flag; the actual break into the stub happens after smp_init. */
     {
         struct multiboot_info *mbi = (struct multiboot_info *)(uintptr_t)mb_info;
-        if ((mbi->flags & (1u << 2)) && mbi->cmdline &&
-            cmdline_has((const char *)(uintptr_t)mbi->cmdline, "gdbstub"))
-            gdbstub_arm();
+        const char *cl = ((mbi->flags & (1u << 2)) && mbi->cmdline) ? (const char *)(uintptr_t)mbi->cmdline : "";
+        if (cmdline_has(cl, "gdbstub"))    gdbstub_arm();
+        if (cmdline_has(cl, "kstackover")) g_kstack_overflow_test = 1;   /* deliberate guarded-stack overflow test (M1498) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -300,6 +320,9 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     kprintf("=============================================\n\n");
     kprintf("[ ok ] full bring-up complete (%lu MiB RAM).\n\n",
             pmm_total_bytes() / (1024 * 1024));
+
+    if (g_kstack_overflow_test)            /* `-append kstackover`: prove the guarded-stack fault path end-to-end (M1498) */
+        task_create(kstack_overflow_task, 0, 0);
 
     preemption_demo();
     isolation_demo();
