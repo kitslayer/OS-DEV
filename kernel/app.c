@@ -59,7 +59,7 @@
 #define CLIP_MAX 2048        /* system clipboard + per-app paste buffer size */
 
 #define USTACK_BASE  0x50000000ull
-#define USTACK_PAGES 128             /* 512 KiB user stack — DOOM's BSP renderer recurses deeply */
+#define USTACK_PAGES 129             /* 128 usable pages (512 KiB — DOOM's BSP renderer recurses deeply) + 1 unmapped guard page at USTACK_BASE: a user-stack overflow faults cleanly instead of silently corrupting the heap below it (M1499) */
 
 /* Userspace heap: grows up from 1 GiB + 64 MiB (clear of any app image, which
  * loads at 1 GiB and is at most a couple of MiB) toward the stack at 0x50000000.
@@ -3124,7 +3124,7 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     a->entry = elf_load(elf, elfsz);
     if (!a->entry) goto fail_in_space;       /* bad ELF: don't spawn a null task */
 
-    for (int i = 0; i < USTACK_PAGES; i++) {
+    for (int i = 1; i < USTACK_PAGES; i++) {   /* i=0 (USTACK_BASE) left unmapped: a guard page below the user stack (M1499) */
         uint64_t frame = pmm_alloc_frame();  /* stack: non-executable (W^X) */
         if (!frame) goto fail_in_space;      /* OOM: reclaim the partial space below */
         if (vmm_map(USTACK_BASE + (uint64_t)i * PAGE_SIZE, frame,
@@ -4145,7 +4145,7 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
 
     uint64_t entry = elf_load(elf, ~0ull);
     if (!entry) goto fail;
-    for (int i = 0; i < USTACK_PAGES; i++) {
+    for (int i = 1; i < USTACK_PAGES; i++) {   /* i=0 = unmapped guard page below the user stack (M1499) */
         uint64_t frame = pmm_alloc_frame();
         if (!frame) goto fail;
         if (vmm_map(USTACK_BASE + (uint64_t)i * PAGE_SIZE, frame, PTE_WRITABLE | PTE_USER | PTE_NX) != 0) {
