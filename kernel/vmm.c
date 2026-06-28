@@ -477,6 +477,24 @@ int kstack_is_guard(uint64_t addr) {
     return addr >= KSTACK_WIN_BASE && addr < KSTACK_WIN_END;
 }
 
+/* Boot self-test (M1495), in the kernel's self-test idiom (cf. SMEP/SMP/IDE-DMA/
+ * RAID): allocate a guarded stack and prove via the page tables that the usable
+ * region is mapped while BOTH guard pages are genuinely unmapped — so a real
+ * overflow will fault rather than corrupt. Run once at boot, single-threaded. */
+void kstack_selftest(void) {
+    uint64_t sz = 16384;
+    void *s = kstack_alloc(sz);
+    if (!s) { kprintf("[ !! ] guarded kernel stacks: self-test alloc failed\n"); return; }
+    uint64_t base = (uint64_t)s;
+    int lo_guard = (vmm_translate(base - PAGE_SIZE) == 0);                 /* page below = guard, must be unmapped */
+    int hi_guard = (vmm_translate(base + sz) == 0);                       /* page at end = guard, must be unmapped */
+    int mapped   = (vmm_translate(base) != 0) && (vmm_translate(base + sz - PAGE_SIZE) != 0);
+    kstack_free(s, sz);
+    int ok = lo_guard && hi_guard && mapped;
+    kprintf("[ %s ] guarded kernel task stacks: usable mapped=%d, guard pages unmapped lo=%d hi=%d\n",
+            ok ? "ok" : "!!", mapped, lo_guard, hi_guard);
+}
+
 /*
  * Enforce W^X on the kernel image. The boot trampoline (boot.asm) identity-maps the
  * low 1 GiB with 2 MiB huge pages, so the kernel's own code and data share huge,

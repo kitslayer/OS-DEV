@@ -51,6 +51,7 @@ void     vmm_harden_kernel(void);                     /* W^X: split image huge-p
 void    *kstack_alloc(uint64_t size);
 void     kstack_free(void *stackbase, uint64_t size);
 int      kstack_is_guard(uint64_t addr);              /* is a faulting CR2 in the guarded-stack window? (kernel stack overflow) */
+void     kstack_selftest(void);                       /* boot self-test: prove the guard pages are unmapped + the stack mapped */
 int      vmm_user_ok(uint64_t ptr, uint64_t len);  /* is [ptr,ptr+len) user-accessible (PTE_USER) in the current space? for syscall arg validation */
 int      vmm_user_str_ok(uint64_t ptr, uint64_t max);  /* is the NUL-terminated string at ptr entirely in user pages (<= max bytes)? */
 

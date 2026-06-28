@@ -270,6 +270,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * stack writable+NX (the eBPF/module .jitexec scratch stays RWX). Done here:
      * pmm/vmm are up and we are still single-threaded in the kernel address space. */
     vmm_harden_kernel();
+    kstack_selftest();             /* prove the guarded task-stack guard pages are really unmapped (M1495) */
 
     sched_init();
 
