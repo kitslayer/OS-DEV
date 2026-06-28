@@ -132,14 +132,14 @@ void isr_dispatch(struct registers *r) {
          * rest of the desktop running. (A ring-0 fault falls through and panics —
          * that IS a real kernel bug.) */
         if ((r->cs & 3) == 3) {
+            uint64_t cr2 = 0;
             if (r->int_no == 14) {                 /* page fault: maybe a demand-paged mmap region */
-                uint64_t cr2;
                 __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
                 if (app_fault_handle(cr2, r->err_code)) return;  /* COW copy / swap-in / mapped a reserved page -> retry */
             }
             if (app_signal_deliver(r, 11)) return;  /* SIGSEGV: a registered handler catches the fault */
-            kprintf("[fault] %s (vector %lu) err=0x%lx in a ring-3 task at rip=%p -- terminating it\n",
-                    exception_names[r->int_no], r->int_no, r->err_code, (void *)r->rip);
+            kprintf("[fault] %s (vector %lu) err=0x%lx in a ring-3 task at rip=%p (CR2=%p) -- terminating it\n",
+                    exception_names[r->int_no], r->int_no, r->err_code, (void *)r->rip, (void *)cr2);
             app_fault_current(r);  /* dump a core, mark the app exited + task_exit(); does not return */
         }
 

@@ -24,6 +24,7 @@
 #include "vdso.h"
 #include "measure.h"
 #include "task.h"
+#include "app.h"    /* app_spawn_named_arg — the ring-3 user-stack overflow test (M1500) */
 #include "fat32.h"
 #include "vfs.h"
 #include "partition.h"
@@ -212,6 +213,7 @@ static uint64_t mb2_to_mb1(uint64_t mb2) {
  * the guard-page #PF, the "KERNEL STACK OVERFLOW" diagnosis, and a panic backtrace
  * that has to walk a high-VA stack. Normal boots (no flag) never touch this. */
 static volatile int g_kstack_overflow_test;
+static volatile int g_ustack_overflow_test;   /* -append ustackover: spawn a ring-3 app that overflows its USER stack (M1500) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -241,7 +243,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         struct multiboot_info *mbi = (struct multiboot_info *)(uintptr_t)mb_info;
         const char *cl = ((mbi->flags & (1u << 2)) && mbi->cmdline) ? (const char *)(uintptr_t)mbi->cmdline : "";
         if (cmdline_has(cl, "gdbstub"))    gdbstub_arm();
-        if (cmdline_has(cl, "kstackover")) g_kstack_overflow_test = 1;   /* deliberate guarded-stack overflow test (M1498) */
+        if (cmdline_has(cl, "kstackover")) g_kstack_overflow_test = 1;   /* deliberate KERNEL-stack overflow test (M1498) */
+        if (cmdline_has(cl, "ustackover")) g_ustack_overflow_test = 1;   /* deliberate USER-stack overflow test (M1500) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -321,8 +324,10 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     kprintf("[ ok ] full bring-up complete (%lu MiB RAM).\n\n",
             pmm_total_bytes() / (1024 * 1024));
 
-    if (g_kstack_overflow_test)            /* `-append kstackover`: prove the guarded-stack fault path end-to-end (M1498) */
+    if (g_kstack_overflow_test)            /* -append kstackover: prove the KERNEL guarded-stack fault path end-to-end (M1498) */
         task_create(kstack_overflow_task, 0, 0);
+    if (g_ustack_overflow_test)            /* -append ustackover: prove the ring-3 USER-stack guard page (M1499/M1500) */
+        app_spawn_named_arg("crash", "stack");
 
     preemption_demo();
     isolation_demo();
