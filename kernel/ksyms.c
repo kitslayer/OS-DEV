@@ -37,12 +37,19 @@ const char *ksym_lookup(unsigned long addr, unsigned long *off_out) {
     return ksyms[best].name;
 }
 
-/* A frame pointer is only safe to dereference if it is inside the low,
- * identity-mapped kernel RAM and 8-byte aligned. Kernel stacks are kmalloc'd in
- * low physical RAM (well under 1 GiB even at -m 256M), so this bound keeps a
- * corrupt chain from faulting us a second time inside the panic handler. */
+/* A frame pointer is only safe to dereference if it is 8-byte aligned and in
+ * memory we know is mapped: either the low identity-mapped kernel RAM (task 0's
+ * boot stack + the IST/.bss stacks, well under 1 GiB even at -m 256M) or the
+ * guarded task-stack VA window (M1495 moved kernel task stacks out of the heap
+ * into 0xFFFF9040.. — without this second range, panics on a task stack printed
+ * no call trace). Bounding the chain this way keeps a corrupt frame pointer from
+ * faulting us a second time inside the panic handler (a guard-page hit here would
+ * #DF onto IST1, which is still reported). */
 static int fp_ok(unsigned long fp) {
-    return fp >= 0x1000 && fp < 0x40000000UL && (fp & 7) == 0;
+    if (fp & 7) return 0;
+    if (fp >= 0x1000 && fp < 0x40000000UL) return 1;                            /* low identity RAM */
+    if (fp >= 0xFFFF904000000000ULL && fp < 0xFFFF908000000000ULL) return 1;    /* guarded task stacks (M1495 KSTACK window) */
+    return 0;
 }
 
 void backtrace(unsigned long rip, unsigned long rbp) {
