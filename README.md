@@ -52,17 +52,24 @@ caveats below).
 
 - **It runs under QEMU.** The GRUB / Multiboot2 framebuffer path is validated
   under QEMU + OVMF but has **not yet been booted on physical hardware**.
-- **The integrated browser still runs in the kernel (ring 0)** — its HTML/CSS
-  render path is the remaining piece. That in-kernel parsing is the project's main
-  architectural weakness (a parser bug is a kernel bug), mitigated by the W^X /
-  guard-page hardening above and by extensive parser fuzzing. **Moving the stack
-  out of ring 0 is underway and the hardest parsers are already out:** the
-  **JavaScript engine** (`jsrun`), the **image decoders** (PNG/GIF/JPEG/SVG/BMP,
-  `imgdec`), and the **TLS 1.3 client + crypto + X.509 validation** (`httpget`)
-  now run as ring-3 programs — a bug in them can no longer compromise the kernel.
-  What's left is the browser shell's `fb_*` render path (see [WHATS-NEXT.md](WHATS-NEXT.md)).
-- **SMP** brings every core up, but the scheduler runs ring-3 tasks on the boot
-  core; the other cores currently serve only a parallel-compute job pool.
+- **The browser now runs mostly in ring 3.** The default **Browser** (`webview`)
+  runs its whole HTML/CSS/JS/image-decode engine as a pledge-sandboxed ring-3
+  program, so a parser bug there can no longer compromise the kernel. This was the
+  project's main architectural weakness (a parser bug was a kernel bug) and is now
+  largely resolved — also helped by the W^X / guard-page hardening above and
+  extensive parser fuzzing. Two honest caveats remain: (a) the browser still
+  fetches over the network through the kernel's TLS stack (`sys_https`), so its
+  **TLS/crypto/X.509 path still runs in ring 0** (the standalone `httpget` runs
+  that path in ring 3, but the browser doesn't use it yet); and (b) the old
+  in-kernel renderer is kept as an opt-in **"Browser (kernel)"** fallback, so that
+  ring-0 parsing code still exists in the tree. The hardest parsers are also out
+  of ring 0 as standalone programs: the **JavaScript engine** (`jsrun`), the
+  **image decoders** (PNG/GIF/JPEG/SVG/BMP, `imgdec`), and the **TLS 1.3 client +
+  crypto + X.509 validation** (`httpget`). See [WHATS-NEXT.md](WHATS-NEXT.md).
+- **SMP** brings every core up and a boot self-test runs a parallel workload on
+  all of them (verified: `sum(0..4M) OK on 4 core(s)`). But the scheduler runs
+  ring-3 tasks on the boot core only, and the parallel job pool has no
+  steady-state caller — so after boot the other cores idle in `hlt`.
 - **Lines of code:** roughly **57k** of from-scratch kernel C and **~24k** of
   from-scratch userspace C. The bundled DOOM / Quake / emulators add **~130k**
   lines of vendored third-party code — most of the raw line count is theirs, not
