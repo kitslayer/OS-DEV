@@ -4050,7 +4050,7 @@ long app_clone(struct registers *r, uint64_t fn, uint64_t stack, uint64_t arg) {
     *f = *r;
     f->rip = fn; f->rsp = stack; f->rdi = arg; f->rax = 0;
     f->rflags |= 0x200;                                 /* IF set in ring 3 */
-    task_t *t = task_create_stack(thread_trampoline, a->cr3, a, 64 * 1024);   /* SHARED cr3 + app */
+    task_t *t = task_create_stack(thread_trampoline, a->cr3, a, 256 * 1024);   /* SHARED cr3 + app. 256K (was 64K): a clone'd thread that calls sys_https runs the bignum/RSA TLS handshake on THIS kernel stack — the ring-3 browser's async fetch worker does exactly that, and 64K overflowed (corrupting the task ring -> task_wake_sleepers GPF). Matches the in-kernel browser worker's 256K. */
     if (!t) { kfree(f); return -1; }
     t->start_frame = f;
     for (int i = 0; i < APP_MAXTHREAD; i++) if (!a->thr[i]) { a->thr[i] = t; break; }   /* track for join/reap (M1139) */
