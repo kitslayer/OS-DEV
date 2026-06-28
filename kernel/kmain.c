@@ -215,6 +215,7 @@ static uint64_t mb2_to_mb1(uint64_t mb2) {
 static volatile int g_kstack_overflow_test;
 static volatile int g_ustack_overflow_test;   /* -append ustackover: spawn a ring-3 app that overflows its USER stack (M1500) */
 static volatile int g_wx_test;                /* -append wxtest: prove W^X is enforced -- executing a no-execute data page must fault (M1501) */
+static volatile int g_smep_test;              /* -append smeptest: prove SMEP -- the kernel executing a ring-3 (user) page must fault (M1502) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -241,6 +242,25 @@ static void wx_test(void) {
     kprintf("[wxtest] FAILED: executed bytes from a no-execute data page -- W^X is NOT enforced!\n");
 }
 
+/* SMEP end-to-end check (M1502): cpu_harden sets CR4.SMEP, which forbids ring 0
+ * from EXECUTING any user-accessible (PTE_USER) page — the classic ret2user
+ * defence. Map such a page, put a RET in it, and call it: SMEP must fault
+ * (instruction-fetch #PF) rather than run it. Gated behind `-append smeptest`. */
+static void smep_test(void) {
+    uint64_t va = 0xFFFF903800000000ull;        /* free scratch slot in the shared PML4[288] (between the kheap + kstack windows) */
+    uint64_t frame = pmm_alloc_frame();
+    if (!frame || vmm_map(va, frame, PTE_WRITABLE | PTE_USER) != 0) {   /* user-accessible + executable (no NX) */
+        if (frame) pmm_free_frame(frame);
+        kprintf("[smeptest] setup failed (OOM) -- skipping\n");
+        return;
+    }
+    *(volatile unsigned char *)va = 0xC3;       /* x86 RET (SMAP is off, so ring 0 may still WRITE a user page) */
+    kprintf("[smeptest] executing a ring-3 (user) page from ring 0 (SMEP must fault)...\n");
+    ((void (*)(void))(void *)va)();             /* SMEP enforced -> instruction-fetch #PF (ring-0 panic); else it returns */
+    kprintf("[smeptest] FAILED: the kernel executed a user page -- SMEP is NOT enforced!\n");
+    vmm_unmap(va); pmm_free_frame(frame);       /* only reached if SMEP is off */
+}
+
 void kmain(uint64_t mb_info, uint64_t magic) {
     console_init();
 
@@ -259,6 +279,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "kstackover")) g_kstack_overflow_test = 1;   /* deliberate KERNEL-stack overflow test (M1498) */
         if (cmdline_has(cl, "ustackover")) g_ustack_overflow_test = 1;   /* deliberate USER-stack overflow test (M1500) */
         if (cmdline_has(cl, "wxtest"))     g_wx_test = 1;                /* deliberate W^X/NX enforcement test (M1501) */
+        if (cmdline_has(cl, "smeptest"))   g_smep_test = 1;              /* deliberate SMEP enforcement test (M1502) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -344,6 +365,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         app_spawn_named_arg("crash", "stack");
     if (g_wx_test)                         /* -append wxtest: prove W^X/NX is enforced -- executing data must fault (M1501) */
         wx_test();
+    if (g_smep_test)                       /* -append smeptest: prove SMEP -- ring 0 executing a user page must fault (M1502) */
+        smep_test();
 
     preemption_demo();
     isolation_demo();
