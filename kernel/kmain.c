@@ -214,6 +214,7 @@ static uint64_t mb2_to_mb1(uint64_t mb2) {
  * that has to walk a high-VA stack. Normal boots (no flag) never touch this. */
 static volatile int g_kstack_overflow_test;
 static volatile int g_ustack_overflow_test;   /* -append ustackover: spawn a ring-3 app that overflows its USER stack (M1500) */
+static volatile int g_wx_test;                /* -append wxtest: prove W^X is enforced -- executing a no-execute data page must fault (M1501) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -226,6 +227,18 @@ static void kstack_overflow_task(void) {
     kprintf("[kstacktest] deliberately overflowing this task's kernel stack...\n");
     volatile int sink = kstack_blow(0);
     (void)sink;                                              /* unreachable: the recursion faults into the guard page first */
+}
+
+/* W^X end-to-end check (M1501): vmm_harden_kernel marks .data/.bss no-execute, so
+ * trying to EXECUTE bytes placed in a .bss buffer must fault (instruction-fetch
+ * #PF). If it instead runs, W^X/NX is NOT enforced — the headline anti-code-
+ * injection guarantee would be a lie. Gated behind `-append wxtest`. */
+static volatile unsigned char wx_nx_buf[16];   /* uninitialised -> .bss -> NX after vmm_harden_kernel */
+static void wx_test(void) {
+    wx_nx_buf[0] = 0xC3;                        /* x86 RET: a valid 1-byte function, were it executable */
+    kprintf("[wxtest] calling into a no-execute .bss buffer (W^X/NX must fault)...\n");
+    ((void (*)(void))(void *)wx_nx_buf)();      /* NX enforced -> instruction-fetch #PF (ring-0 panic); else it returns */
+    kprintf("[wxtest] FAILED: executed bytes from a no-execute data page -- W^X is NOT enforced!\n");
 }
 
 void kmain(uint64_t mb_info, uint64_t magic) {
@@ -245,6 +258,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "gdbstub"))    gdbstub_arm();
         if (cmdline_has(cl, "kstackover")) g_kstack_overflow_test = 1;   /* deliberate KERNEL-stack overflow test (M1498) */
         if (cmdline_has(cl, "ustackover")) g_ustack_overflow_test = 1;   /* deliberate USER-stack overflow test (M1500) */
+        if (cmdline_has(cl, "wxtest"))     g_wx_test = 1;                /* deliberate W^X/NX enforcement test (M1501) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -328,6 +342,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         task_create(kstack_overflow_task, 0, 0);
     if (g_ustack_overflow_test)            /* -append ustackover: prove the ring-3 USER-stack guard page (M1499/M1500) */
         app_spawn_named_arg("crash", "stack");
+    if (g_wx_test)                         /* -append wxtest: prove W^X/NX is enforced -- executing data must fault (M1501) */
+        wx_test();
 
     preemption_demo();
     isolation_demo();
