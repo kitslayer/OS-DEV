@@ -37,9 +37,13 @@ caveats below).
 - **Security hardening:** every syscall pointer argument is validated by a
   PTE_USER page-table walk; the kernel image is **W^X** (`.text` read-only +
   executable, `.rodata` / `.data` / `.bss` / heap / stacks **non-executable**);
-  the kernel stack has an unmapped **guard page**; and **SMEP + UMIP** are enabled
-  when the CPU exposes them. The untrusted-input parsers are continuously fuzzed
-  under ASan/UBSan (`make check`).
+  both the kernel **and** user stacks have unmapped **guard pages** (an overflow
+  faults cleanly rather than corrupting a neighbour), backed by a stack-overflow
+  canary; and **SMEP + UMIP** are enabled when the CPU exposes them. These aren't
+  just claimed: end-to-end tests in `make check` deliberately overflow a kernel
+  stack, overflow a user stack, execute a no-execute page, and execute a user page
+  from ring 0 — and assert each one faults. The untrusted-input parsers are
+  continuously fuzzed under ASan/UBSan.
 - **Userspace:** a real scripting **shell** (pipes, redirects, globbing,
   functions, control flow, quoting); a **text editor** with syntax highlighting; a
   **hex editor**; a **file manager**; ~50 small graphical tools (clocks,
