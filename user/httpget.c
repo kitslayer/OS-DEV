@@ -12,6 +12,11 @@
  *
  * A bug in the TLS record parser or X.509 chain validator now crashes only this
  * process, not the kernel. The in-kernel SYS_https path is untouched.
+ *
+ * `run httpget [host[/path]]` — an optional launch argument fetches that host
+ * instead of the example.com demo (always over TLS 1.3 on :443; an http(s)://
+ * prefix is accepted and stripped, not acted on — this program only speaks
+ * HTTPS). No argument reproduces the original fixed demo byte-for-byte.
  */
 #include "ulib.h"
 #include "tls.h"
@@ -23,6 +28,13 @@
 size_t strlen(const char *s) { const char *p = s; while (*p) p++; return (size_t)(p - s); }
 int strcmp(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return (int)(unsigned char)*a - (int)(unsigned char)*b; }
 int memcmp(const void *a, const void *b, size_t n) { const unsigned char *x = a, *y = b; for (size_t i = 0; i < n; i++) if (x[i] != y[i]) return (int)x[i] - (int)y[i]; return 0; }
+
+/* True if `s` starts with `pfx` (used to strip an optional http(s):// scheme
+ * from the launch argument; not a full strncmp, just what's needed here). */
+static int starts_with(const char *s, const char *pfx) {
+    while (*pfx) { if (*s++ != *pfx++) return 0; }
+    return 1;
+}
 
 /* kprintf: tls.c emits handshake/cert debug; not needed in the ring-3 program. */
 void kprintf(const char *fmt, ...) { (void)fmt; }
@@ -83,14 +95,31 @@ int main(void) {
     sys_getrandom(&seed, sizeof seed);                 /* CSPRNG-seed the TLS ephemeral keys */
     if (!seed) seed = 0x9e3779b9u;
 
-    rep("from-scratch TLS 1.3 + crypto + X.509, now running in RING 3 (not the kernel):\n\n");
-    int n = tls_get("example.com", "/", out, (int)sizeof(out) - 1, seed);
+    /* Parse an optional "host[/path]" launch argument (see the file header);
+     * defaulting to the original example.com demo keeps old behavior identical
+     * when nothing is passed. */
+    static char host[192] = "example.com";
+    static char path[192] = "/";
+    char arg[224];
+    if (sys_getarg(arg, sizeof arg) > 0) {
+        char *a = arg;
+        if (starts_with(a, "https://")) a += 8;
+        else if (starts_with(a, "http://")) a += 7;
+        int hi = 0;
+        while (*a && *a != '/' && hi < (int)sizeof(host) - 1) host[hi++] = *a++;
+        host[hi] = 0;
+        if (*a) { int pi = 0; while (*a && pi < (int)sizeof(path) - 1) path[pi++] = *a++; path[pi] = 0; }
+        else { path[0] = '/'; path[1] = 0; }
+    }
+
+    rep("from-scratch TLS 1.3 + crypto + X.509, running in RING 3 (not the kernel):\n\n");
+    int n = tls_get(host, path, out, (int)sizeof(out) - 1, seed);
 
     /* tls_get sets these during the handshake (and leaves them set on the final
      * exchange's failure too), so they report what the ring-3 crypto actually did. */
-    rep("TLS 1.3 handshake to example.com:443 (X25519 + AES-GCM/ChaCha20, from scratch):\n");
+    rep("TLS 1.3 handshake to "); rep(host); rep(":443 (X25519 + AES-GCM/ChaCha20, from scratch):\n");
     rep("  cert chain anchored to a baked-in root CA: "); rep(tls_chain_anchored() ? "YES\n" : "no\n");
-    rep("  leaf hostname matches example.com:          "); rep(tls_host_match() == 1 ? "YES\n" : "no\n");
+    rep("  leaf hostname matches "); rep(host); rep(": "); rep(tls_host_match() == 1 ? "YES\n" : "no\n");
     rep("  CertificateVerify signature:                "); rep(tls_cert_status() == 1 ? "valid\n" : "(absent)\n");
     if (n >= 0) {
         rep("  HTTPS GET -> "); rep_int(n); rep(" bytes; response starts: ");
