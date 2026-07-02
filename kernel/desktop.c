@@ -448,15 +448,8 @@ static void draw_content(const window_t *w, int focused) {
         if (w->app && app_gfx_get((app_t *)w->app, &cb, &gw, &gh)) {
             /* graphics mode: blit the app's pixel canvas into the body, scaled
              * up by an integer factor (nearest-neighbour) for small canvases. */
-            int s = gfx_scale(gw, gh), dx = bx - 2, dy = by - 2;
-            for (int yy = 0; yy < gh; yy++)
-                for (int xx = 0; xx < gw; xx++) {
-                    uint32_t px = cb[yy * gw + xx] & 0xFFFFFF;
-                    if (s == 1) { fb_pixel(dx + xx, dy + yy, px); continue; }
-                    for (int oy = 0; oy < s; oy++)
-                        for (int ox = 0; ox < s; ox++)
-                            fb_pixel(dx + xx * s + ox, dy + yy * s + oy, px);
-                }
+            int s = gfx_scale(gw, gh);
+            fb_blit_scaled(bx - 2, by - 2, cb, gw, gh, s);
         } else if (w->app) {                                  /* text terminal: size the live grid to the window, then render (M1473) */
             app_set_grid((app_t *)w->app, (w->w - 14) / font_width, (w->h - TITLEBAR_H - 14) / font_height);
             app_render((app_t *)w->app, bx - 2, by - 2, focused);

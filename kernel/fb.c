@@ -303,6 +303,52 @@ void fb_darken_rect(int x, int y, int w, int h, int pct) {
     }
 }
 
+/* Blit a caller's sw*sh 0x00RRGGBB canvas at (x,y), scaled up by an integer
+ * factor (nearest-neighbour), masking each pixel to 24-bit colour. This is
+ * the WM's per-frame path for painting a graphics app's pixel canvas into its
+ * window body (DOOM/Quake/NES/scene3d/aclock/sysgraph/...) -- same
+ * clip-and-resolve-once shape as fb_darken_rect/fb_glyph: when the whole
+ * destination rect is on-screen (the common case), each destination row is
+ * written directly once, and for scale > 1 the remaining (scale-1) copies of
+ * that row are memcpy'd from the row just written instead of re-expanding
+ * pixel by pixel -- avoiding a fb_pixel call (bounds check + clip check +
+ * target branch) for every one of up to sw*sh*scale*scale pixels, every
+ * redraw. Falls back to the original per-pixel path (still correct, just
+ * slow) when the rect doesn't fully fit on-screen, e.g. a partially
+ * off-screen or edge-dragged window. */
+void fb_blit_scaled(int x, int y, const uint32_t *src, int sw, int sh, int scale) {
+    int dw = sw * scale, dh = sh * scale;
+    if (scale >= 1 &&
+        x >= clip_x0 && y >= clip_y0 && x + dw <= clip_x1 && y + dh <= clip_y1 &&
+        x >= 0 && y >= 0 && x + dw <= fb_w && y + dh <= fb_h) {
+        uint32_t *dst = target ? target : (uint32_t *)lfb;
+        for (int sy = 0; sy < sh; sy++) {
+            uint32_t *row0 = dst + (size_t)(y + sy * scale) * fb_w + x;
+            const uint32_t *srow = src + (size_t)sy * sw;
+            if (scale == 1) {
+                for (int sx = 0; sx < sw; sx++) row0[sx] = srow[sx] & 0xFFFFFF;
+            } else {
+                for (int sx = 0; sx < sw; sx++) {
+                    uint32_t c = srow[sx] & 0xFFFFFF;
+                    uint32_t *p = row0 + (size_t)sx * scale;
+                    for (int k = 0; k < scale; k++) p[k] = c;
+                }
+                for (int oy = 1; oy < scale; oy++)
+                    memcpy(dst + (size_t)(y + sy * scale + oy) * fb_w + x, row0, (size_t)dw * 4);
+            }
+        }
+        return;
+    }
+    for (int yy = 0; yy < sh; yy++)                         /* clipped fallback: identical to the pre-fast-path code */
+        for (int xx = 0; xx < sw; xx++) {
+            uint32_t px = src[(size_t)yy * sw + xx] & 0xFFFFFF;
+            if (scale == 1) { fb_pixel(x + xx, y + yy, px); continue; }
+            for (int oy = 0; oy < scale; oy++)
+                for (int ox = 0; ox < scale; ox++)
+                    fb_pixel(x + xx * scale + ox, y + yy * scale + oy, px);
+        }
+}
+
 void fb_glyph(int x, int y, char c, uint32_t fg, uint32_t bg) {
     unsigned char uc = (unsigned char)c;
     if (uc >= 128) uc = '?';
