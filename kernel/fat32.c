@@ -16,6 +16,7 @@
 #include "vfs.h"
 #include "ata.h"
 #include "rtc.h"
+#include "string.h"
 #include <stdint.h>
 
 #define SECSZ 512
@@ -421,9 +422,9 @@ static void write_cluster(uint32_t cl, const uint8_t *data, uint32_t len) {
     uint32_t first = cluster_to_sector(cl);
     for (uint32_t s = 0; s < sec_per_clus; s++) {
         uint8_t sec[SECSZ];
-        for (int i = 0; i < SECSZ; i++) sec[i] = 0;
         uint32_t chunk = len > SECSZ ? SECSZ : len;
-        for (uint32_t i = 0; i < chunk; i++) sec[i] = data[i];
+        memcpy(sec, data, chunk);                    /* the actual file bytes for this sector */
+        if (chunk < SECSZ) memset(sec + chunk, 0, SECSZ - chunk);   /* pad the rest (only the file's last sector needs this) */
         ata_write(first + s, 1, sec);
         data += chunk; len -= chunk;
     }
