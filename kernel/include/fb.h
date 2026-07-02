@@ -21,6 +21,7 @@ uint32_t fb_get_pixel(int x, int y);
 void     fb_fill_rect(int x, int y, int w, int h, uint32_t color);
 void     fb_darken_rect(int x, int y, int w, int h, int pct);   /* scale existing pixels' RGB by pct/100 in place (soft shadows) */
 void     fb_blit_scaled(int x, int y, const uint32_t *src, int sw, int sh, int scale);  /* nearest-neighbour blit, masked to 24-bit */
+void     fb_row(int x, int y, int w, const uint32_t *colors);  /* write w explicit (caller-computed) colours into one row */
 void     fb_set_clip(int x0, int y0, int x1, int y1);   /* bound draws to [x0,x1)x[y0,y1) screen px (default: whole screen) */
 void     fb_reset_clip(void);
 

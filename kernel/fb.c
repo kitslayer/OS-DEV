@@ -349,6 +349,26 @@ void fb_blit_scaled(int x, int y, const uint32_t *src, int sw, int sh, int scale
         }
 }
 
+/* Write `w` explicit, already-computed colours into one row at (x,y) -- for a
+ * caller whose per-pixel colour is data-dependent (the browser's alpha-blended
+ * <img> compositing: arbitrary nearest-neighbour scale, not a clean integer
+ * factor like fb_blit_scaled, so there's no fixed source pixel to memcpy-repeat)
+ * and so must compute each pixel itself, but still wants to skip a fb_pixel
+ * call (bounds check + clip check + target branch) per pixel. Same
+ * clip-and-resolve-once shape: writes the whole row directly when it's fully
+ * on-screen, falls back to fb_pixel per pixel otherwise (e.g. a horizontally
+ * clipped or partially off-screen row). */
+void fb_row(int x, int y, int w, const uint32_t *colors) {
+    if (y >= clip_y0 && y < clip_y1 && x >= clip_x0 && x + w <= clip_x1 &&
+        y >= 0 && y < fb_h && x >= 0 && x + w <= fb_w) {
+        uint32_t *dst = target ? target : (uint32_t *)lfb;
+        uint32_t *row = dst + (size_t)y * fb_w + x;
+        for (int i = 0; i < w; i++) row[i] = colors[i];
+        return;
+    }
+    for (int i = 0; i < w; i++) fb_pixel(x + i, y, colors[i]);
+}
+
 void fb_glyph(int x, int y, char c, uint32_t fg, uint32_t bg) {
     unsigned char uc = (unsigned char)c;
     if (uc >= 128) uc = '?';
@@ -407,9 +427,11 @@ void fb_text(int x, int y, const char *s, uint32_t color, int scale) {
 }
 
 void fb_scroll(int px, uint32_t bg) {
-    for (int y = 0; y < fb_h - px; y++)
-        for (int x = 0; x < fb_w; x++)
-            lfb[y * fb_w + x] = lfb[(y + px) * fb_w + x];
+    /* memmove, not a per-pixel loop (same reasoning as fb_present's comment:
+     * lfb is volatile, so an element loop can't be vectorised) -- called once
+     * per text line from the early boot console (fbcon.c), so a screenful's
+     * worth of pixels shifted one row at a time adds up across a busy boot log. */
+    memmove((void *)lfb, (void *)(lfb + (size_t)px * fb_w), (size_t)(fb_h - px) * fb_w * 4);
     for (int y = fb_h - px; y < fb_h; y++)
         for (int x = 0; x < fb_w; x++)
             lfb[y * fb_w + x] = bg;

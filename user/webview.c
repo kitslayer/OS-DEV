@@ -50,6 +50,12 @@ void fb_fill_rect(int x, int y, int w, int h, uint32_t c) {
     if (x + w > W) w = W - x; if (y + h > H) h = H - y;
     for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) CANVAS[(y + j) * W + (x + i)] = c;
 }
+void fb_row(int x, int y, int w, const uint32_t *colors) {   /* browser.c's <img> compositing (M1513) */
+    if (y < 0 || y >= H) return;
+    int lo = x < 0 ? -x : 0, hi = w;
+    if (x + hi > W) hi = W - x;
+    for (int i = lo; i < hi; i++) CANVAS[y * W + x + i] = colors[i];
+}
 static void g_draw(int x, int y, char ch, uint32_t fg, int hasbg, uint32_t bg, int sc) {
     unsigned u = (unsigned char)ch; if (u >= 128) u = '?';
     const unsigned char *g = &FONT[u * 16];

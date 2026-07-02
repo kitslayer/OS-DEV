@@ -3993,6 +3993,16 @@ static void box(int x, int y, int w, int h, uint32_t c) {
     fb_fill_rect(x, y, 1, h, c); fb_fill_rect(x+w-1, y, 1, h, c);
 }
 
+/* Scratch row buffer for the <img> blits below: each pixel's colour is
+ * data-dependent (alpha-blended per source pixel), so unlike fb_blit_scaled's
+ * fixed-source-pixel memcpy trick, this file computes the row itself and
+ * hands it to fb_row() for a single clip-and-resolve-once write instead of a
+ * fb_pixel call per pixel. Sized past VBE_MAX_W (bochs_vbe.c, 1920) with
+ * margin; static (BSS), not stack -- rendering is single-threaded so this is
+ * safe, and a screen-width array doesn't belong on a guard-page-less stack. */
+#define IMG_ROWBUF_MAX 4096
+static uint32_t img_rowbuf[IMG_ROWBUF_MAX];
+
 void browser_render(browser_t *b, int x, int y, int w, int h) {
     uint32_t BG = 0xFFFFFF, page_fg = 0;
     for (int r = 0; r < b->n_css; r++) {                 /* page bg + default text colour from body/html (M1432, M1437) */
@@ -4070,20 +4080,22 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         int maxw = cr - cl, destw = b->imgw, desth = b->imgh;
         if (destw > maxw && destw > 0) { desth = (int)((long)desth * maxw / destw); destw = maxw; }
         b->content_h = desth;
+        int rw = destw > IMG_ROWBUF_MAX ? IMG_ROWBUF_MAX : destw;
         for (int dy = 0; dy < desth; dy++) {
             int py = ct + dy - b->scroll;
             if (py < ct || py >= cb) continue;      /* clip to the content area */
             int sy = (int)((long)dy * b->imgh / (desth ? desth : 1));
             const uint8_t *srow = b->img + (long)sy * b->imgw * 4;
-            for (int dx = 0; dx < destw; dx++) {
+            for (int dx = 0; dx < rw; dx++) {
                 int sx = (int)((long)dx * b->imgw / (destw ? destw : 1));
                 const uint8_t *pp = srow + (long)sx * 4;
                 int a = pp[3];                       /* alpha-blend over white */
                 int r  = (pp[0]*a + 255*(255-a)) / 255;
                 int g  = (pp[1]*a + 255*(255-a)) / 255;
                 int bl = (pp[2]*a + 255*(255-a)) / 255;
-                fb_pixel(cl + dx, py, ((uint32_t)r<<16)|((uint32_t)g<<8)|(uint32_t)bl);
+                img_rowbuf[dx] = ((uint32_t)r<<16)|((uint32_t)g<<8)|(uint32_t)bl;
             }
+            fb_row(cl, py, rw, img_rowbuf);
         }
     } else {
     int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16]; int bstk_i[16], bsp = 0;   /* CSS border boxes: y_top+sides+left-indent pushed on OPEN, rect stroked on CLOSE */
@@ -4250,20 +4262,22 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                     x0 = cl + ioff;
                 }
                 if (t < TOK_MAX) b->toky[t] = cy - (ct - b->scroll);
+                int rw = destw > IMG_ROWBUF_MAX ? IMG_ROWBUF_MAX : destw;
                 for (int dy = 0; dy < desth; dy++) {
                     int py = cy + dy;
                     if (py < ct || py >= cb) continue;   /* clip to content area */
                     int sy = (int)((long)dy * ih / (desth ? desth : 1));
                     const uint8_t *srow = b->imgs[idx] + (long)sy * iw * 4;
-                    for (int dx = 0; dx < destw; dx++) {
+                    for (int dx = 0; dx < rw; dx++) {
                         int sx = (int)((long)dx * iw / (destw ? destw : 1));
                         const uint8_t *pp = srow + (long)sx * 4;
                         int a = pp[3];                   /* alpha-blend over white */
                         int r  = (pp[0]*a + 255*(255-a)) / 255;
                         int g  = (pp[1]*a + 255*(255-a)) / 255;
                         int bl = (pp[2]*a + 255*(255-a)) / 255;
-                        fb_pixel(x0 + dx, py, ((uint32_t)r<<16)|((uint32_t)g<<8)|(uint32_t)bl);
+                        img_rowbuf[dx] = ((uint32_t)r<<16)|((uint32_t)g<<8)|(uint32_t)bl;
                     }
+                    fb_row(x0, py, rw, img_rowbuf);
                 }
                 cy += desth + 6; cx = cl; curlh = 18;
             }
