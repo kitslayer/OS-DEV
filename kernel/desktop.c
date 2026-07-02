@@ -222,14 +222,13 @@ static void vgrad(int x, int y, int w, int h, uint32_t top, uint32_t bot) {
     for (int j = 0; j < h; j++)
         fb_fill_rect(x, y + j, w, 1, lerp(top, bot, j, h - 1));
 }
-/* Darken whatever is already in the back buffer (for soft shadows). */
+/* Darken whatever is already in the back buffer (for soft shadows). Delegates
+ * to fb_darken_rect (fb.c), which clips + resolves the destination buffer
+ * ONCE and writes each row directly — a per-pixel fb_get_pixel+fb_pixel call
+ * pair here was ~38% of all kernel-mode time during a window-drag-heavy
+ * profiling run (this runs 4x, full-window-sized, on every draw_window()). */
 static void darken(int x, int y, int w, int h, int pct) {
-    for (int j = 0; j < h; j++)
-        for (int i = 0; i < w; i++) {
-            uint32_t p = fb_get_pixel(x + i, y + j);
-            uint32_t r=((p>>16)&0xFF)*pct/100, g=((p>>8)&0xFF)*pct/100, b=(p&0xFF)*pct/100;
-            fb_pixel(x + i, y + j, r<<16 | g<<8 | b);
-        }
+    fb_darken_rect(x, y, w, h, pct);
 }
 /* Corner-pixel inset per row from the corner (index 0 = outermost row): a
  * quarter-circle of radius 8 for noticeably rounder, more modern window corners. */

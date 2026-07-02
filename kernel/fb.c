@@ -275,6 +275,34 @@ void fb_fill_rect(int x, int y, int w, int h, uint32_t color) {
     }
 }
 
+/* Scale each existing pixel's RGB by pct/100 in place — the soft-shadow
+ * primitive. Same clip-and-resolve-once shape as fb_fill_rect, reading and
+ * writing `row[i]` directly instead of a fb_get_pixel+fb_pixel call pair per
+ * pixel: profiling a window-drag-heavy session found the desktop's 4-layer
+ * drop shadow (kernel/desktop.c draw_window(), 4 full-window-sized passes per
+ * redraw) alone was ~38% of all kernel-mode samples, almost entirely the two
+ * calls' per-pixel bounds/clip checks and function-call overhead. */
+void fb_darken_rect(int x, int y, int w, int h, int pct) {
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > fb_w) w = fb_w - x;
+    if (y + h > fb_h) h = fb_h - y;
+    if (x < clip_x0) { w -= (clip_x0 - x); x = clip_x0; }
+    if (y < clip_y0) { h -= (clip_y0 - y); y = clip_y0; }
+    if (x + w > clip_x1) w = clip_x1 - x;
+    if (y + h > clip_y1) h = clip_y1 - y;
+    if (w <= 0 || h <= 0) return;
+    uint32_t *dst = target ? target : (uint32_t *)lfb;
+    for (int j = 0; j < h; j++) {
+        uint32_t *row = dst + (size_t)(y + j) * fb_w + x;
+        for (int i = 0; i < w; i++) {
+            uint32_t p = row[i];
+            uint32_t r = ((p >> 16) & 0xFF) * pct / 100, g = ((p >> 8) & 0xFF) * pct / 100, b = (p & 0xFF) * pct / 100;
+            row[i] = r << 16 | g << 8 | b;
+        }
+    }
+}
+
 void fb_glyph(int x, int y, char c, uint32_t fg, uint32_t bg) {
     unsigned char uc = (unsigned char)c;
     if (uc >= 128) uc = '?';
