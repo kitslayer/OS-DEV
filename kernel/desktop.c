@@ -828,6 +828,28 @@ static int ctx_row_at(int px, int py) {
     return (r >= 0 && r < ctx_nrows()) ? r : -1;
 }
 
+/* Redraw the taskbar clock pill (date+time) at its fixed rect, into whatever
+ * fb_set_target() currently points at. Called both from render_scene() (a
+ * full-scene pass) and standalone by the main loop's once-a-second fast path
+ * below, which redraws just this small rect instead of the whole screen. */
+static void draw_clock_pill(void) {
+    struct rtc_time tm; rtc_now(&tm);
+    char clk[24]; int q = 0;                                  /* "YYYY-MM-DD  HH:MM:SS" */
+    clk[q++]='0'+(tm.year/1000)%10; clk[q++]='0'+(tm.year/100)%10;
+    clk[q++]='0'+(tm.year/10)%10;   clk[q++]='0'+tm.year%10;
+    clk[q++]='-'; u2((uint64_t)tm.month, clk+q); q+=2;
+    clk[q++]='-'; u2((uint64_t)tm.day,   clk+q); q+=2;
+    clk[q++]=' '; clk[q++]=' ';
+    u2((uint64_t)tm.hour, clk+q); q+=2; clk[q++]=':';
+    u2((uint64_t)tm.min,  clk+q); q+=2; clk[q++]=':';
+    u2((uint64_t)tm.sec,  clk+q); q+=2; clk[q]=0;
+    int clkw = clk_pill_w(), clkx = screen_w - clkw - 8, ty = screen_h - TASKBAR_H;
+    fb_fill_rect(clkx, start_y, clkw, start_h, 0x10151E);
+    box(clkx, start_y, clkw, start_h, 0x33415A);
+    round_chrome(clkx, start_y, clkw, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
+    draw_text(clkx + 14, start_y + 4, clk, 0x9FC0F0);
+}
+
 /* Render the whole scene (wallpaper, windows, taskbar — but NOT the cursor)
  * into the cached scene buffer. This is the expensive part, so we only do it
  * when the scene actually changes; plain cursor moves reuse the cache. */
@@ -861,18 +883,10 @@ static void render_scene(void) {
     fb_fill_rect(gi_x + 6, gi_y + 6, 4, 4, 0xFFFFFF);
     draw_text(start_x + 26, start_y + 4, "Apps", 0xFFFFFF);
 
-    /* real-time clock (RTC) in a recessed pill on the right: date + time, so the
-     * day is visible at a glance without opening the Calendar app. */
-    struct rtc_time tm; rtc_now(&tm);
-    char clk[24]; int q = 0;                                  /* "YYYY-MM-DD  HH:MM:SS" */
-    clk[q++]='0'+(tm.year/1000)%10; clk[q++]='0'+(tm.year/100)%10;
-    clk[q++]='0'+(tm.year/10)%10;   clk[q++]='0'+tm.year%10;
-    clk[q++]='-'; u2((uint64_t)tm.month, clk+q); q+=2;
-    clk[q++]='-'; u2((uint64_t)tm.day,   clk+q); q+=2;
-    clk[q++]=' '; clk[q++]=' ';
-    u2((uint64_t)tm.hour, clk+q); q+=2; clk[q++]=':';
-    u2((uint64_t)tm.min,  clk+q); q+=2; clk[q++]=':';
-    u2((uint64_t)tm.sec,  clk+q); q+=2; clk[q]=0;
+    /* real-time clock (RTC) pill on the right — drawn by draw_clock_pill()
+     * below (also called standalone by the once-a-second fast path in the
+     * main loop); just need its x/width here for the window-chips' "out of
+     * room" check. */
     int clkw = clk_pill_w(), clkx = screen_w - clkw - 8;
 
     /* one chip per open window (the focused one — topmost — is highlighted) */
@@ -890,10 +904,7 @@ static void render_scene(void) {
         while (s && s[n] && n < 12) { t[n] = s[n]; n++; } t[n] = 0;
         draw_text(cx + 26, start_y + 4, t, foc ? 0xFFFFFF : (mini ? 0x6B7689 : 0xAEB8C8));
     }
-    fb_fill_rect(clkx, start_y, clkw, start_h, 0x10151E);
-    box(clkx, start_y, clkw, start_h, 0x33415A);
-    round_chrome(clkx, start_y, clkw, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
-    draw_text(clkx + 14, start_y + 4, clk, 0x9FC0F0);
+    draw_clock_pill();
 
     if (menu_open) {
         int mh = MENU_PERCOL * MENU_ITEM_H + 4, mw = MENU_COLS * MENU_W, my0 = ty - mh;
@@ -1064,6 +1075,26 @@ static void present_cursor(void) {
     fb_present_rect(cur_px, cur_py, cw, ch);        /* flush repaired old rect */
     fb_present_rect(nx, ny, cw, ch);                /* flush new cursor rect */
     cur_px = nx; cur_py = ny;
+}
+
+static int rects_overlap(int ax, int ay, int aw, int ah, int bx, int by, int bw, int bh) {
+    return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
+}
+
+/* The once-a-second clock tick, and nothing else, changed: redraw just the
+ * clock pill's small rect (into the scene cache too, so it stays correct for
+ * present_cursor()'s later restore_scene_rect reads) instead of the whole
+ * scene + a full-screen memcpy+blit. Profiling found the full path here was
+ * ~40% of ALL kernel-mode samples during otherwise-idle desktop time (nothing
+ * running, just the clock ticking once a second) — this is the present_cursor
+ * (M52/M105) treatment applied to the clock. */
+static void present_clock(void) {
+    int clkw = clk_pill_w(), clkx = screen_w - clkw - 8, ty = screen_h - TASKBAR_H;
+    fb_set_target(scenebuf);
+    draw_clock_pill();
+    fb_set_target(backbuffer);
+    restore_scene_rect(clkx, ty, clkw, TASKBAR_H);
+    fb_present_rect(clkx, ty, clkw, TASKBAR_H);
 }
 
 static void raise_window(int idx) {
@@ -1799,8 +1830,13 @@ void desktop_run(void) {
                     dirty = 1; break;
                 }
             }
-        } else if (!left) {
-            /* aero-snap: release a dragged window against a screen edge to tile it
+        } else if (!left && (prev_btn & 1)) {
+            /* The mouse button was just RELEASED (edge, not level: this must not
+             * fire on every idle frame just because the button happens to be up —
+             * profiling found that bug alone forced a full-scene redraw on
+             * ~every single main-loop iteration, all the time, even at complete
+             * idle with no window open at all).
+             * aero-snap: release a dragged window against a screen edge to tile it
              * (top -> maximize, left/right -> that half). Only when it actually
              * moved (drag_ox/oy set on press) so a plain click never snaps. */
             if (dragging >= 0) {
@@ -1885,12 +1921,28 @@ void desktop_run(void) {
             }
 
         uint64_t sec = timer_ticks() / 100;
-        if (sec != last_sec) { last_sec = sec; dirty = 1; }
+        int clock_tick = (sec != last_sec);
+        if (clock_tick) last_sec = sec;
         if (wallpaper_repaint) { wallpaper_repaint = 0; dirty = 1; }   /* `wallpaper` builtin swapped the bg */
         int moved = (mx != prev_x || my != prev_y || btn != prev_btn);
         if (moved && (dragging >= 0 || resizing >= 0)) dirty = 1;  /* drag moves the scene */
 
         if (dirty) { render_scene(); present_frame(); }  /* scene changed: full redraw + blit */
+        else if (clock_tick) {
+            /* Just the clock changed — the common once-a-second case with an
+             * otherwise-idle desktop. Redraw only its pill (present_clock, the
+             * present_cursor treatment) instead of the whole scene. Falls back
+             * to a full redraw if the cursor happens to be sitting over the
+             * pill, so the cursor is never left stale. */
+            int clkw = clk_pill_w(), clkx = screen_w - clkw - 8, ty = screen_h - TASKBAR_H;
+            int cw = mouse_cursor_w(), ch = mouse_cursor_h();
+            if (cur_px >= 0 && rects_overlap(clkx, ty, clkw, TASKBAR_H, cur_px, cur_py, cw, ch)) {
+                render_scene(); present_frame();
+            } else {
+                present_clock();
+                if (moved) present_cursor();
+            }
+        }
         else if (moved) present_cursor();                 /* cursor only: tiny rect blit */
         prev_x = mx; prev_y = my; prev_btn = btn;
         idle_hlt();    /* halt till the next IRQ; credits the wait to idle so /proc CPU% is real (M1361) */
