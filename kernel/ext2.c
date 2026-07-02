@@ -6,6 +6,7 @@
  * Standard layouts (inode_size 128/256, block_size 1024-4096) only.
  */
 #include "ext2.h"
+#include "string.h"
 #include <stdint.h>
 
 #define EXT2_MAGIC    0xEF53
@@ -239,8 +240,8 @@ long ext2_pread(blk_read_fn read, void *ctx, uint64_t start_lba, const char *pat
         uint32_t bo = (uint32_t)(pos % v.block_size);      /* byte offset within the block */
         uint32_t chunk = v.block_size - bo;                /* to the block's end */
         if (chunk > want - done) chunk = (uint32_t)(want - done);
-        if (!db) { for (uint32_t i = 0; i < chunk; i++) ((uint8_t *)buf)[done + i] = 0; }   /* hole */
-        else { if (rdblk(&v, db, blk) < 0) break; for (uint32_t i = 0; i < chunk; i++) ((uint8_t *)buf)[done + i] = blk[bo + i]; }
+        if (!db) { memset((uint8_t *)buf + done, 0, chunk); }   /* hole */
+        else { if (rdblk(&v, db, blk) < 0) break; memcpy((uint8_t *)buf + done, blk + bo, chunk); }
         done += chunk;
     }
     return (long)done;
@@ -1252,8 +1253,8 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
             for (uint32_t fb = 0; fb < nblocks; fb++) {
                 uint32_t boff = fb * v.block_size, chunk = (uint32_t)len - boff;
                 if (chunk > v.block_size) chunk = v.block_size;
-                for (uint32_t i = 0; i < chunk; i++) blk[i] = ((const uint8_t *)buf)[boff + i];
-                for (uint32_t i = chunk; i < v.block_size; i++) blk[i] = 0;
+                memcpy(blk, (const uint8_t *)buf + boff, chunk);
+                if (chunk < v.block_size) memset(blk + chunk, 0, v.block_size - chunk);
                 if (wrblk(&v, start + fb, blk) < 0) return -1;
             }
             uint8_t *eh = inode + 40;                          /* extent header in i_block[] */
@@ -1286,8 +1287,8 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
         if (!db) return -1;                                /* out of space (file left partial) */
         uint32_t boff = fb * v.block_size, chunk = (uint32_t)len - boff;
         if (chunk > v.block_size) chunk = v.block_size;
-        for (uint32_t i = 0; i < chunk; i++) blk[i] = ((const uint8_t *)buf)[boff + i];
-        for (uint32_t i = chunk; i < v.block_size; i++) blk[i] = 0;
+        memcpy(blk, (const uint8_t *)buf + boff, chunk);
+        if (chunk < v.block_size) memset(blk + chunk, 0, v.block_size - chunk);
         if (wrblk(&v, db, blk) < 0) return -1;
         isectors += v.block_size / 512;
         if (fb < 12) e_wr32(inode + 40 + fb * 4, db);
@@ -1295,7 +1296,7 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
             if (!indirect) {
                 indirect = alloc_block(&v);
                 if (!indirect) return -1;
-                for (uint32_t i = 0; i < v.block_size; i++) ind[i] = 0;
+                memset(ind, 0, v.block_size);
                 isectors += v.block_size / 512;
                 e_wr32(inode + 40 + 12 * 4, indirect);
             }

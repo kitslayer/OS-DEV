@@ -220,7 +220,7 @@ static int bread(int i, uint64_t lba, uint8_t *dst) {
     uint64_t fl = irq_save();
     for (int k = 0; k < BCACHE_N; k++)
         if (g_bc[k].valid && g_bc[k].dev == i && g_bc[k].lba == lba) {   /* hit */
-            for (int b = 0; b < BLOCKDEV_SECSZ; b++) dst[b] = g_bc[k].data[b];
+            memcpy(dst, g_bc[k].data, BLOCKDEV_SECSZ);
             g_bc[k].lru = ++g_bc_clk; g_bc_hits++;
             irq_restore(fl); return 0;
         }
@@ -235,7 +235,7 @@ static int bread(int i, uint64_t lba, uint8_t *dst) {
         if (g_bc[k].lru < oldest) { oldest = g_bc[k].lru; v = k; }
     }
     g_bc[v].valid = 1; g_bc[v].dev = i; g_bc[v].lba = lba; g_bc[v].lru = ++g_bc_clk;
-    for (int b = 0; b < BLOCKDEV_SECSZ; b++) g_bc[v].data[b] = dst[b];
+    memcpy(g_bc[v].data, dst, BLOCKDEV_SECSZ);
     g_bc_miss++;
     irq_restore(fl);
     return 0;
@@ -259,8 +259,7 @@ int blockdev_write(int i, uint64_t lba, uint32_t count, const void *buf) {
         uint64_t l = lba + s;
         for (int k = 0; k < BCACHE_N; k++)
             if (g_bc[k].valid && g_bc[k].dev == i && g_bc[k].lba == l) {
-                const uint8_t *src = in + (uint64_t)s * BLOCKDEV_SECSZ;
-                for (int b = 0; b < BLOCKDEV_SECSZ; b++) g_bc[k].data[b] = src[b];
+                memcpy(g_bc[k].data, in + (uint64_t)s * BLOCKDEV_SECSZ, BLOCKDEV_SECSZ);
                 break;
             }
     }
