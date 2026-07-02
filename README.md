@@ -1,7 +1,19 @@
+<div align="center">
+
 # OS-DEV
 
-A from-scratch x86_64 operating system, written in C + a little assembly,
+**A from-scratch x86_64 operating system** — kernel, TLS 1.3, a JavaScript
+engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
+
+[![Milestones](https://img.shields.io/badge/milestones-1504-blue)](WHATS-NEXT.md)
+[![Tests](https://img.shields.io/badge/tests-65%20passing-brightgreen)](tests/README.md)
+[![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+
+![The desktop: a procedural dusk-mountain wallpaper, dark-slate windows, the Files panel, a shell, and the ring-3 Browser open](docs/osdev-desktop-current.png)
+
+</div>
 
 ## Status
 
@@ -9,8 +21,6 @@ A mature hobby OS that goes from power-on to a graphical, mouse- and
 keyboard-driven **desktop** and hosts real **ring-3 programs as windows**. It is
 developed and run under QEMU; it also boots via GRUB / Multiboot2 (see the honest
 caveats below).
-
-![The desktop: a procedural dusk-mountain wallpaper, dark-slate windows, the Files panel, a shell, and the ring-3 Browser open](docs/osdev-desktop-current.png)
 
 ### What's genuinely here — from scratch
 
