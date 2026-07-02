@@ -4,11 +4,16 @@
  * GCC is allowed to emit calls to memset/memcpy/memmove/memcmp even with
  * -ffreestanding (e.g. to zero a struct), so these must exist.
  *
- * memcpy/memset copy a machine word (8 bytes) at a time on the aligned fast
- * path, falling back to bytes for the head, the tail, and unequally-aligned
- * copies. This matters a lot: the compositor blits the whole ~3 MB framebuffer
- * through memcpy on every scene change, and the image decoders / FAT I/O lean
- * on both. `may_alias` keeps the word accesses strict-aliasing-correct.
+ * memcpy/memset/memmove copy a machine word (8 bytes) at a time on the aligned
+ * fast path, falling back to bytes for the head, the tail, and unequally-
+ * aligned copies. This matters a lot: the compositor blits the whole ~3 MB
+ * framebuffer through memcpy on every scene change, and the image decoders /
+ * FAT I/O lean on both. `may_alias` keeps the word accesses strict-aliasing-
+ * correct. memmove additionally has a direction to get right: forward
+ * (dst < src) aligns/walks up from the start, backward (dst >= src) aligns/
+ * walks down from the end -- either way the two pointers keep the same
+ * relative alignment throughout (they move in lockstep), so that check is
+ * still made once, like memcpy's.
  */
 #include "string.h"
 #include <stdint.h>
@@ -44,11 +49,19 @@ void *memmove(void *dst, const void *src, size_t n) {
     unsigned char *d = dst;
     const unsigned char *s = src;
     if (d < s) {
+        if ((((uintptr_t)d ^ (uintptr_t)s) & 7u) == 0) {
+            while (n && ((uintptr_t)d & 7u)) { *d++ = *s++; n--; }
+            while (n >= 8) { *(word_t *)d = *(const word_t *)s; d += 8; s += 8; n -= 8; }
+        }
         while (n--)
             *d++ = *s++;
     } else {
         d += n;
         s += n;
+        if ((((uintptr_t)d ^ (uintptr_t)s) & 7u) == 0) {
+            while (n && ((uintptr_t)d & 7u)) { *--d = *--s; n--; }
+            while (n >= 8) { d -= 8; s -= 8; *(word_t *)d = *(const word_t *)s; n -= 8; }
+        }
         while (n--)
             *--d = *--s;
     }
