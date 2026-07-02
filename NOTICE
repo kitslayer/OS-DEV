@@ -1,0 +1,10 @@
+This project's own original code (kernel/, most of user/) is MIT-licensed;
+see LICENSE.
+
+Bundled third-party software carries its own license, unchanged, in its own
+subdirectory:
+
+  - user/doom  -- id Software's DOOM source (GPL-2.0)      -- see user/doom/COPYING
+  - user/quake -- id Software's Quake source (GPL-2.0)     -- see user/quake/LICENSE
+  - user/nes   -- xnes NES emulator core (MIT)              -- see user/nes/LICENSE
+  - user/gb    -- Peanut-GB Game Boy emulator core (MIT)    -- see the header of user/gb/peanut_gb.h

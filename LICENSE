@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This license covers this project's own original code. Bundled third-party
-software carries its own license, unchanged, in its own subdirectory:
-
-  - user/doom   -- id Software's DOOM source (GPL-2.0)   -- see user/doom/COPYING
-  - user/quake  -- id Software's Quake source (GPL-2.0)  -- see user/quake/LICENSE
-  - user/nes    -- xnes NES emulator core (MIT)           -- see user/nes/LICENSE
-  - user/gb     -- Peanut-GB Game Boy emulator core (MIT) -- see the header of user/gb/peanut_gb.h

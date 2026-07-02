@@ -90,7 +90,8 @@ caveats below).
 - **Lines of code:** roughly **58k** of from-scratch kernel C and **~24k** of
   from-scratch userspace C. The bundled DOOM / Quake / emulators add **~130k**
   lines of vendored third-party code — most of the raw line count is theirs, not
-  this project's.
+  this project's. This project's own code is MIT-licensed (**[LICENSE](LICENSE)**);
+  the vendored code keeps its own license unchanged — see **[NOTICE](NOTICE)**.
 
 For the running change log see **[WHATS-NEXT.md](WHATS-NEXT.md)**; for an honest
 difficulty breakdown of the long-term goals, **[GOALS.md](GOALS.md)**; for
