@@ -258,8 +258,29 @@ static void round_chrome(int x, int y, int w, int h, uint32_t bg0, uint32_t bg1,
     }
 }
 
-#define WP_TOP 0x183A5C
-#define WP_BOT 0x081320
+#define WP_TOP 0x050208   /* fallback gradient (no cached wallpaper_bmp yet/OOM) — matches make_wallpaper's void sky */
+#define WP_BOT 0x03010A   /* ... and its near-black ground */
+
+/* ---- cyberpunk theme palette ----
+ * Named so the ~180 call sites that used to carry independent 0xRRGGBB
+ * literals (no theme table existed before this) can share one place to
+ * retune. Semantic, not decorative: THEME_MAGENTA is "the accent used for
+ * focus/active/primary interaction" wherever that concept shows up (it
+ * replaces what used to be an ad-hoc blue accent at ~15 different call
+ * sites), not "the color that happens to be magenta." */
+#define THEME_VOID        0x050208   /* deepest background: taskbar/sky base */
+#define THEME_PANEL       0x120A1F   /* window/panel body */
+#define THEME_PANEL_TITLE 0x1A0F2E   /* title bar / taskbar flat fill */
+#define THEME_MAGENTA     0xFF2BD6   /* primary: focus / active / primary accent */
+#define THEME_CYAN        0x2BE8FF   /* secondary: info / links / secondary accent */
+#define THEME_VIOLET      0x8B2BFF   /* tertiary: decorative accent */
+#define THEME_GREEN       0x39FF88   /* status: success / low usage */
+#define THEME_AMBER       0xFFB02B   /* status: warning / mid usage */
+#define THEME_RED         0xFF2050   /* status: danger / high usage / close */
+#define THEME_TEXT        0xD6F6FF   /* primary body text */
+#define THEME_TEXT_DIM    0x7A6A99   /* secondary/dim text */
+#define THEME_BORDER_DIM  0x3A2255   /* unfocused border/divider */
+
 static int wp_h;
 static uint32_t *wallpaper_bmp;   /* a screen-sized image loaded from disk, or NULL = gradient */
 static volatile int wallpaper_repaint;   /* set by desktop_set_wallpaper (off-task) to force a redraw */
@@ -719,66 +740,88 @@ int desktop_load_image(const char *name, unsigned *buf, int cw, int ch, int *out
     return 0;
 }
 
-/* Procedural desktop background (visual refresh): a deep corner-to-corner blue
- * gradient with a soft radial vignette + a gentle glow above center. Integer-only
- * (the kernel has no FPU). Looks clean + modern AND needs no image on disk, so the
- * desktop looks good even on bare metal where WALL.PNG may be absent. */
+/* Procedural desktop background (visual refresh): drawn once into a cached
+ * buffer at boot, so there's no per-frame cost regardless of complexity.
+ * Integer-only (the kernel has no FPU). Needs no image on disk, so the
+ * desktop looks right even on bare metal where WALL.PNG may be absent. */
 static inline int wp_cl(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
-/* integer sine (Bhaskara), result ~[-1024,1024]; shapes the mountain ridges */
-static int wp_sin(int d) {
-    d %= 360; if (d < 0) d += 360;
-    int s = 1; if (d > 180) { d -= 180; s = -1; }
-    long num = 4L * d * (180 - d), den = 40500 - (long)d * (180 - d);
-    return den ? s * (int)(num * 1024 / den) : 0;
+static void wp_px(uint32_t *buf, int w, int h, int x, int y, uint32_t c) {
+    if ((unsigned)x < (unsigned)w && (unsigned)y < (unsigned)h) buf[(size_t)y * w + x] = c;
+}
+/* Integer Bresenham (the same one this codebase's gfx apps each carry their
+ * own copy of, e.g. user/aclock.c's line() — ported here since the wallpaper
+ * writes directly into its own detached buffer, not through fb_pixel/the
+ * live framebuffer, so it can't just call an fb.c primitive). */
+static void wp_line(uint32_t *buf, int w, int h, int x0, int y0, int x1, int y1, uint32_t c) {
+    int dx = x1 - x0, dy = y1 - y0;
+    int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+    int sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
+    int err = (adx > ady ? adx : -ady) / 2, e2;
+    for (;;) {
+        wp_px(buf, w, h, x0, y0, c);
+        if (x0 == x1 && y0 == y1) break;
+        e2 = err;
+        if (e2 > -adx) { err -= ady; x0 += sx; }
+        if (e2 <  ady) { err += adx; y0 += sy; }
+    }
 }
 
-/* The boot desktop background: a procedurally-rendered DUSK SCENE (M1469) —
- * a graded indigo->dusk-purple sky with a warm low sun glow and faint stars,
- * over three layered mountain ridges shaded by atmospheric perspective (hazy
- * light far -> dark near), each ridge given a warm sun-lit rim. It's drawn once
- * into the cached buffer, so there's no per-frame cost. (Replaced the flat
- * blue gradient that read as dated.) */
+/* The boot desktop background: a synthwave grid horizon — a near-black void
+ * sky fading to deep violet at the horizon, a faint hashed star field (kept
+ * from the earlier dusk scene — still cheap, deterministic, and reads well
+ * here), a "sliced" neon sun straddling the horizon (concentric alternating
+ * bright/gap rings via squared-distance, no sqrt/FPU needed), and a receding
+ * perspective grid on the ground plane below: horizontal bands quadratically
+ * spaced (bunched near the horizon, spread out near the bottom, the way real
+ * evenly-spaced lines look in perspective) plus lines converging from the
+ * bottom edge to a single vanishing point at the horizon's centre. */
 static void make_wallpaper(uint32_t *buf, int w, int h) {
-    const uint32_t SKY_TOP = 0x0A0E27, SKY_HOR = 0x3A2A52;   /* night indigo -> dusky purple */
-    int horizon = h * 60 / 100;
-    int gx = w * 63 / 100, gy = horizon - h / 18;            /* warm sun glow: off-centre, just above the horizon */
-    long gr = (long)(w / 3) * (w / 3); if (gr < 1) gr = 1;   /* glow radius^2 */
+    const uint32_t SKY_TOP = THEME_VOID, SKY_HOR = 0x2A0A3E;   /* void -> deep violet at the horizon */
+    const uint32_t GROUND = 0x03010A;                           /* near-black ground, under the grid */
+    int horizon = h * 58 / 100;
+    int gx = w / 2;                                             /* sun + vanishing point: dead centre */
 
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
-            uint32_t base = (y < horizon) ? lerp(SKY_TOP, SKY_HOR, y, horizon - 1) : SKY_HOR;
+            uint32_t base = (y < horizon) ? lerp(SKY_TOP, SKY_HOR, y, horizon - 1) : GROUND;
             int r = (base >> 16) & 0xFF, g = (base >> 8) & 0xFF, b = base & 0xFF;
-            long dx = x - gx, dy = y - gy, d2 = dx * dx + dy * dy;     /* warm radial sun glow */
-            int gl = (int)(230 - d2 * 230 / gr);
-            if (gl > 0) { r += gl; g += gl * 150 / 255; b += gl * 64 / 255; }
-            if (y < horizon) {                                        /* faint stars, fading toward the horizon */
+            if (y < horizon) {                                  /* faint stars, fading toward the horizon */
                 unsigned hs = (unsigned)x * 374761393u + (unsigned)y * 668265263u;
                 hs ^= hs >> 13; hs *= 1274126177u;
-                if ((hs % 1700u) < 3u) { int br = (120 + (int)(hs % 130u)) * (horizon - y) / horizon; r += br; g += br; b += br; }
+                if ((hs % 1700u) < 3u) { int br = (90 + (int)(hs % 130u)) * (horizon - y) / horizon; r += br; g += br; b += br; }
             }
             buf[(size_t)y * w + x] = (uint32_t)(wp_cl(r) << 16 | wp_cl(g) << 8 | wp_cl(b));
         }
 
-    /* three mountain layers, far (hazy/light) -> near (dark); each a sine ridge */
-    static const struct { int dy, amp, f1, f2, f3, ph; uint32_t col, rim; } L[3] = {
-        {  3,  6, 2,  5, 11,  40, 0x3E3360, 0x6E5A78 },    /* far: hazy purple, peeks at the horizon */
-        { 10, 10, 2,  7, 13, 170, 0x282248, 0x7A5A50 },    /* mid */
-        { 20, 15, 3,  6, 17, 300, 0x121327, 0x8A5A3E },    /* near: dark slate, warm sun-lit rim */
-    };
-    for (int li = 0; li < 3; li++) {
-        int basey = horizon + L[li].dy * h / 100, amp = L[li].amp * h / 100;
+    /* sliced neon sun: 3 bright rings (0/2/4) separated by 2 gap rings (1/3,
+     * sky/stars show through), clipped to the sky region so it appears to
+     * sit on/behind the horizon+grid below it. */
+    int sr = h * 18 / 100, gy = horizon;
+    long sr2 = (long)sr * sr;
+    for (int y = 0; y < horizon; y++)
         for (int x = 0; x < w; x++) {
-            int rg = basey
-                   - amp          * wp_sin(x * 360 * L[li].f1 / w + L[li].ph)     / 1024
-                   - amp * 6 / 10 * wp_sin(x * 360 * L[li].f2 / w + L[li].ph * 2) / 1024
-                   - amp * 3 / 10 * wp_sin(x * 360 * L[li].f3 / w + L[li].ph * 3) / 1024;
-            if (rg < 0) rg = 0;
-            for (int y = rg; y < h; y++) {
-                int rim = y - rg;
-                buf[(size_t)y * w + x] = (rim < 3) ? lerp(L[li].rim, L[li].col, rim, 3)   /* warm sun-lit ridge edge */
-                                                   : lerp(L[li].col, 0x05060E, rim, h);   /* subtle darkening toward the base */
-            }
+            long dx = x - gx, dy = y - gy, d2 = dx * dx + dy * dy;
+            if (d2 >= sr2) continue;
+            int ring = (int)(d2 * 6 / sr2);
+            if (ring & 1) continue;                              /* odd ring = gap: leave sky/stars visible */
+            buf[(size_t)y * w + x] = (ring == 0) ? THEME_MAGENTA : (ring == 2) ? THEME_CYAN : THEME_VIOLET;
         }
+
+    /* bright horizon line, anchoring the sun above it to the grid below it */
+    wp_line(buf, w, h, 0, horizon, w - 1, horizon, THEME_MAGENTA);
+    if (horizon + 1 < h) wp_line(buf, w, h, 0, horizon + 1, w - 1, horizon + 1, THEME_MAGENTA);
+
+    /* perspective grid: lines converging to the vanishing point (chromatic
+     * alternation for visual richness), then horizontal bands on top so
+     * they stay crisp/unbroken at every crossing. */
+    for (int i = 0; i <= 20; i++) {
+        int bx = (int)((long)i * (w - 1) / 20);
+        wp_line(buf, w, h, bx, h - 1, gx, horizon, (i & 1) ? THEME_VIOLET : THEME_CYAN);
+    }
+    for (int i = 1; i <= 12; i++) {
+        long t = (long)i * 1024 / 12;
+        int gy2 = horizon + (int)((long)(h - horizon) * (t * t) / (1024L * 1024L));
+        wp_line(buf, w, h, 0, gy2, w - 1, gy2, lerp(THEME_CYAN, THEME_VIOLET, i, 12));
     }
 }
 
