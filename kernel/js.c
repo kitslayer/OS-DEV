@@ -2464,11 +2464,32 @@ static void hoist_vars(node *n, env *fe){
         default: return;                                      /* expressions / return / break / etc. hold no var statements */
     }
 }
+/* Does executing this N_BLOCK's OWN statement list (not nested blocks/loops/
+ * ifs, which scope themselves when THEY run) define a name that must live in
+ * a scope distinct from the parent's? A plain `var` doesn't count — it's
+ * defined via env_func_scope, which already walks past a block env whether or
+ * not one exists, so it works identically either way. Exactly three
+ * constructs bind directly into a block's OWN env: a let/const declaration, a
+ * function declaration (mirrors the hoisting loop just below in
+ * eval_stmt_inner's N_BLOCK case), and a named class declaration (a class
+ * expression env_define's its own name — see N_CLASS in eval_expr). A block
+ * with none of these can safely reuse the parent env with no observable
+ * difference, since nothing it runs writes anywhere but through
+ * env_func_scope (var) or into a nested construct's own env. */
+static int block_needs_own_scope(node *n){
+    for(int i=0;i<n->nlist;i++){
+        node *s=n->list[i]; if(!s) continue;
+        if(s->type==N_VAR && s->num) return 1;                                    /* let/const */
+        if(s->type==N_FUNC && s->str) return 1;                                   /* function decl */
+        if(s->type==N_EXPR && s->a && s->a->type==N_CLASS && s->a->str) return 1; /* named class decl */
+    }
+    return 0;
+}
 static comp eval_stmt_inner(node *n, env *e) {
     if (g_err || g_oom) return CN();
     switch (n->type) {
         case N_PROGRAM: case N_BLOCK: {
-            env *be = (n->type==N_BLOCK)? new_env(e) : e;
+            env *be = (n->type==N_BLOCK && block_needs_own_scope(n))? new_env(e) : e;
             if (!be) { g_oom=1; return CN(); }
             /* Hoist function declarations: define every `function name(){…}` in this
              * block before any statement runs, so a call textually BEFORE the
