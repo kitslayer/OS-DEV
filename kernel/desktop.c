@@ -421,12 +421,15 @@ static void draw_content(const window_t *w, int focused) {
             draw_text(bx, by, hdr, THEME_TEXT);
         }
         fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, THEME_BORDER_DIM);   /* rule under the header */
-        int rows = (w->h - TITLEBAR_H - 48) / 18;          /* rows that fit in the body (last 18px reserved for the footer) */
+        draw_text(bx, by + 20, "NAME", THEME_TEXT_DIM);                 /* column labels (M1525) — same columns the row loop below lays out */
+        draw_text(bx + 22 * font_width, by + 20, "SIZE / DATE", THEME_TEXT_DIM);
+        fb_fill_rect(bx - 2, by + 36, w->w - 14, 1, THEME_BORDER_DIM);   /* rule under the column labels */
+        int rows = (w->h - TITLEBAR_H - 66) / 18;          /* rows that fit in the body (18 more now reserved, for the column-header row; last 18px still for the footer) */
         if (rows < 1) rows = 1;
         int top = 0;                                       /* scroll so the selection stays visible */
         if (w->fsel >= rows) top = w->fsel - rows + 1;
         for (int i = top; i < n && i < top + rows; i++) {
-            int ry = by + 22 + (i - top)*18;
+            int ry = by + 40 + (i - top)*18;
             if (i == w->fsel)                              /* highlight the selected row */
                 fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, THEME_SELECT);
             else if ((i - top) & 1)                        /* zebra striping for scanability */
@@ -1053,7 +1056,8 @@ static void render_scene(void) {
             "F9    Apps menu",
             "F12   screenshot to disk",
             "",
-            "Mouse: drag the title bar to move a window",
+            "MOUSE:",
+            "Drag the title bar to move a window",
             "(double-click it, or drag to the top edge, to",
             "maximize; drag to a side edge to tile that half),",
             "drag the bottom-right corner to resize,",
@@ -1064,6 +1068,7 @@ static void render_scene(void) {
             "Right-click the desktop for a menu (show",
             "desktop, show all windows, change wallpaper).",
             "",
+            "TIPS:",
             "Wheel scrolls the window under the cursor.",
             "In a terminal: drag (or double-click a word)",
             "to select + copy; middle-click pastes.",
@@ -1084,8 +1089,11 @@ static void render_scene(void) {
         fb_fill_rect(px, py, pw, 26, THEME_PANEL_TITLE);      /* title bar */
         fb_fill_rect(px, py, pw, 1, THEME_CYAN);
         draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Keyboard Shortcuts", THEME_TEXT);
-        for (int i = 0; i < n; i++)
-            draw_text(px + 16, py + 34 + i * 18, H[i], THEME_TEXT);
+        for (int i = 0; i < n; i++) {                          /* a line ending ':' is a section label (M1525) */
+            int len = 0; while (H[i][len]) len++;
+            uint32_t col = (len > 0 && H[i][len - 1] == ':') ? THEME_CYAN : THEME_TEXT;
+            draw_text(px + 16, py + 34 + i * 18, H[i], col);
+        }
     }
 
     /* F7 window switcher: a centered panel listing every window (incl. minimized,
