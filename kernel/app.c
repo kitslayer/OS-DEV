@@ -3121,8 +3121,22 @@ app_t *app_spawn(const void *elf, const char *title, uint64_t elfsz) {
     __asm__ volatile("mov %%cr3, %0" : "=r"(old));
     __asm__ volatile("mov %0, %%cr3" : : "r"(a->cr3) : "memory");
 
-    a->entry = elf_load(elf, elfsz);
+    elf_lazy_range_t lazy[4]; int nlazy = 0;
+    a->entry = elf_load(elf, elfsz, lazy, 4, &nlazy);
     if (!a->entry) goto fail_in_space;       /* bad ELF: don't spawn a null task */
+    /* Register each deferred whole-BSS range as a demand-zero VMA (a->nvma is
+     * 0 here — freshly memset above) so its pages are lazily allocated+zeroed
+     * on first touch by app_fault_handle instead of all at spawn time; a large
+     * static arena (e.g. the JS engine's, several MB) is mapped once actual
+     * code reaches into it, not up front for a page count most runs never
+     * fully use. Same effective permissions either way (writable, non-exec —
+     * enforced by elf_load only ever deferring !PF_X segments). */
+    for (int li = 0; li < nlazy && a->nvma < APP_MAXVMA; li++) {
+        a->vma[a->nvma].start = lazy[li].start; a->vma[a->nvma].len = lazy[li].len;
+        a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0;
+        a->vma[a->nvma].file_backed = 0; a->vma[a->nvma].locked = 0; a->vma[a->nvma].huge = 0;
+        a->nvma++;
+    }
 
     for (int i = 1; i < USTACK_PAGES; i++) {   /* i=0 (USTACK_BASE) left unmapped: a guard page below the user stack (M1499) */
         uint64_t frame = pmm_alloc_frame();  /* stack: non-executable (W^X) */
@@ -4143,7 +4157,8 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) :: "memory");
     __asm__ volatile("mov %0, %%cr3" : : "r"(new_cr3) : "memory");   /* become the new space */
 
-    uint64_t entry = elf_load(elf, ~0ull);
+    elf_lazy_range_t lazy[4]; int nlazy = 0;
+    uint64_t entry = elf_load(elf, ~0ull, lazy, 4, &nlazy);
     if (!entry) goto fail;
     for (int i = 1; i < USTACK_PAGES; i++) {   /* i=0 = unmapped guard page below the user stack (M1499) */
         uint64_t frame = pmm_alloc_frame();
@@ -4160,6 +4175,15 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
 
     /* reset per-program state (the new image starts clean); keep pid/parent/pledge */
     a->heap_end = 0; a->nvma = 0; a->mlock_future = 0;   /* mlockall(MCL_FUTURE) does not survive exec (M1283) */
+    /* Register the NEW image's deferred whole-BSS range(s) (see app_spawn) —
+     * done here, after a->nvma was just reset above, not right after elf_load
+     * ran (which is before this reset would wipe them back out). */
+    for (int li = 0; li < nlazy && a->nvma < APP_MAXVMA; li++) {
+        a->vma[a->nvma].start = lazy[li].start; a->vma[a->nvma].len = lazy[li].len;
+        a->vma[a->nvma].sealed = 0; a->vma[a->nvma].uffd = 0;
+        a->vma[a->nvma].file_backed = 0; a->vma[a->nvma].locked = 0; a->vma[a->nvma].huge = 0;
+        a->nvma++;
+    }
     a->aslr_mmap_base = aslr_mmap_pick(); a->mmap_next = a->aslr_mmap_base;   /* ASLR: a fresh randomized mmap base per exec (M1287) */
     for (int i = 0; i < APP_NSIG; i++) a->sig_handler[i] = 0;
     a->sig_in = 0; a->pending_sigs = 0; a->sig_blocked = 0; a->sigfd_armed = 0; a->sigfd_mask = 0; a->alarm_interval = 0; a->alarm_next = 0;

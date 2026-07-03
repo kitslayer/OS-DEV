@@ -213,8 +213,10 @@ static uint64_t elf_load_dyn(const void *image, uint64_t maxsz) {
     return base + entry;
 }
 
-uint64_t elf_load(const void *image, uint64_t maxsz) {
+uint64_t elf_load(const void *image, uint64_t maxsz,
+                   elf_lazy_range_t *out_lazy, int max_lazy, int *out_nlazy) {
     uint64_t phoff, entry; uint16_t phnum, phentsize;
+    if (out_nlazy) *out_nlazy = 0;
     if (!elf_check_header(image, maxsz, &phoff, &phnum, &phentsize, &entry))
         return 0;
     if (((const Elf64_Ehdr *)image)->e_type == ET_DYN)    /* a PIE: separate base-relative + relocating path (M1465) */
@@ -227,10 +229,25 @@ uint64_t elf_load(const void *image, uint64_t maxsz) {
         if (r < 0)  return 0;      /* malformed segment: reject the image */
 
         /* Map every page this segment touches as a user page (once), writable
-         * for now so we can copy/zero into it. */
+         * for now so we can copy/zero into it. Pages entirely past the last
+         * file-backed byte are pure zero (.bss) and, for a writable/non-exec
+         * segment when the caller wants it, get deferred to out_lazy instead
+         * of being mapped here — see elf_load's own doc comment in elf.h. The
+         * boundary page containing s.vaddr+s.filesz (if not page-aligned)
+         * mixes real data and zero padding, so it always stays eager. */
         uint64_t start = page_down(s.vaddr);
         uint64_t end   = page_up(s.vaddr + s.memsz);
-        for (uint64_t v = start; v < end; v += PAGE_SIZE) {
+        uint64_t map_end = end;
+        if (out_lazy && out_nlazy && max_lazy > 0 && !(s.flags & PF_X)) {
+            uint64_t lazy_start = page_up(s.vaddr + s.filesz);
+            if (lazy_start < end && *out_nlazy < max_lazy) {
+                out_lazy[*out_nlazy].start = lazy_start;
+                out_lazy[*out_nlazy].len   = end - lazy_start;
+                (*out_nlazy)++;
+                map_end = lazy_start;
+            }
+        }
+        for (uint64_t v = start; v < map_end; v += PAGE_SIZE) {
             if (!vmm_translate(v)) {
                 uint64_t frame = pmm_alloc_frame();
                 if (!frame) return 0;              /* out of memory: fail cleanly */
@@ -248,11 +265,15 @@ uint64_t elf_load(const void *image, uint64_t maxsz) {
         /* Re-protect with the segment's real permissions now the copy is done
          * (W^X): code becomes read-only + executable, data writable + NX. The
          * linker emits .text/.rodata page-aligned away from .data/.bss, so each
-         * page belongs to exactly one segment and these flags never conflict. */
+         * page belongs to exactly one segment and these flags never conflict.
+         * Bounded to map_end, not end: a deferred page was never mapped, so
+         * vmm_translate would report it not-present anyway (the `if (phys)`
+         * below already skips it) — stopping the loop early just avoids
+         * walking the page tables of however many pages were deferred. */
         uint64_t prot = PTE_USER;
         if (s.flags & PF_W)    prot |= PTE_WRITABLE;
         if (!(s.flags & PF_X)) prot |= PTE_NX;
-        for (uint64_t v = start; v < end; v += PAGE_SIZE) {
+        for (uint64_t v = start; v < map_end; v += PAGE_SIZE) {
             uint64_t phys = vmm_translate(v);
             if (phys) vmm_map(v, phys & ~(uint64_t)(PAGE_SIZE - 1), prot);
         }

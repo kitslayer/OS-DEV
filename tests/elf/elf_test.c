@@ -125,7 +125,7 @@ static void test_regression(void) {
           seg.file_off == DATA_OFF && seg.filesz == DATA_LEN, "wrong segment fields");
 
     /* full load round-trips: entry, copied bytes, zeroed .bss */
-    uint64_t e = elf_load(buf, sz);
+    uint64_t e = elf_load(buf, sz, 0, 0, 0);
     CHECK(e == LOAD_VADDR, "elf_load returned wrong entry");
     const uint8_t *mem = (const uint8_t *)LOAD_VADDR;
     int data_ok = 1;
@@ -137,11 +137,81 @@ static void test_regression(void) {
     unmap_all();
 
     /* obvious rejects */
-    CHECK(elf_load(buf, 4) == 0, "tiny image accepted");
+    CHECK(elf_load(buf, 4, 0, 0, 0) == 0, "tiny image accepted");
     uint8_t bad[64]; memset(bad, 0, sizeof(bad));
-    CHECK(elf_load(bad, sizeof(bad)) == 0, "non-ELF magic accepted");
+    CHECK(elf_load(bad, sizeof(bad), 0, 0, 0) == 0, "non-ELF magic accepted");
 
     printf("regression: %s\n", fails ? "FAILURES" : "ok (validators + load round-trip)");
+}
+
+/* A segment with a much bigger .bss tail than build_good_elf's (5 pages, not
+ * 2): big enough to tell "one boundary page stayed eager" apart from "several
+ * whole-zero pages got deferred" unambiguously. */
+#define LAZY_SEG_MEMSZ (5 * PG)
+
+static uint64_t build_lazy_elf(uint8_t *buf, uint64_t cap) {
+    uint64_t total = DATA_OFF + DATA_LEN;
+    if (cap < total) abort();
+    memset(buf, 0, total);
+    Elf64_Ehdr *eh = (Elf64_Ehdr *)buf;
+    eh->e_ident[0] = 0x7F; eh->e_ident[1] = 'E'; eh->e_ident[2] = 'L'; eh->e_ident[3] = 'F';
+    eh->e_ident[4] = 2; eh->e_ident[5] = 1; eh->e_ident[6] = 1;
+    eh->e_type = 2; eh->e_machine = 0x3E; eh->e_version = 1;
+    eh->e_entry = LOAD_VADDR;
+    eh->e_phoff = sizeof(Elf64_Ehdr); eh->e_ehsize = sizeof(Elf64_Ehdr);
+    eh->e_phentsize = sizeof(Elf64_Phdr); eh->e_phnum = 1;
+    Elf64_Phdr *ph = (Elf64_Phdr *)(buf + eh->e_phoff);
+    ph->p_type = PT_LOAD; ph->p_flags = 6;   /* R+W, NOT X -- a data/bss segment */
+    ph->p_offset = DATA_OFF; ph->p_vaddr = LOAD_VADDR; ph->p_paddr = LOAD_VADDR;
+    ph->p_filesz = DATA_LEN; ph->p_memsz = LAZY_SEG_MEMSZ; ph->p_align = PG;
+    for (int i = 0; i < DATA_LEN; i++) buf[DATA_OFF + i] = (uint8_t)(i + 1);
+    return total;
+}
+
+/* Confirms elf_load's out_lazy path end to end: (a) with it enabled, the
+ * boundary page (real data + zero padding) is mapped as before but the whole
+ * pages beyond it are reported as one lazy range and genuinely left unmapped
+ * (not just zeroed-and-mapped); (b) the SAME image with out_lazy disabled
+ * (the 0,0,0 every other caller here uses) still gets the fully-eager
+ * behavior, so the two modes are a true before/after of the same input. */
+static void test_lazy_bss(void) {
+    uint8_t buf[DATA_OFF + DATA_LEN];
+    uint64_t sz = build_lazy_elf(buf, sizeof(buf));
+
+    elf_lazy_range_t lazy[4]; int nlazy = -1;
+    uint64_t e = elf_load(buf, sz, lazy, 4, &nlazy);
+    CHECK(e == LOAD_VADDR, "lazy: elf_load returned wrong entry");
+    CHECK(nlazy == 1, "lazy: expected exactly one deferred range");
+    uint64_t want_start = (LOAD_VADDR + DATA_LEN + PG - 1) & ~(PG - 1);   /* page_up(vaddr+filesz) */
+    uint64_t want_end   = (LOAD_VADDR + LAZY_SEG_MEMSZ + PG - 1) & ~(PG - 1);
+    if (nlazy == 1) {
+        CHECK(lazy[0].start == want_start, "lazy: wrong range start");
+        CHECK(lazy[0].len == want_end - want_start, "lazy: wrong range length");
+    }
+    CHECK(is_mapped(LOAD_VADDR), "lazy: boundary page should still be eagerly mapped");
+    const uint8_t *mem = (const uint8_t *)LOAD_VADDR;
+    int data_ok = 1;
+    for (int i = 0; i < DATA_LEN; i++) if (mem[i] != (uint8_t)(i + 1)) data_ok = 0;
+    CHECK(data_ok, "lazy: segment file bytes not copied to p_vaddr");
+    int tail_of_boundary_zeroed = 1;
+    for (uint64_t a = DATA_LEN; a < PG; a++) if (mem[a] != 0) tail_of_boundary_zeroed = 0;
+    CHECK(tail_of_boundary_zeroed, "lazy: zero padding within the boundary page missing");
+    CHECK(!is_mapped(want_start), "lazy: a deferred page was mapped anyway");
+    CHECK(!is_mapped(want_end - PG), "lazy: the last deferred page was mapped anyway");
+    unmap_all();
+
+    /* Same image, out_lazy disabled: must fall back to the old fully-eager
+     * behavior (every page mapped, real data + all-zero .bss). */
+    uint64_t e2 = elf_load(buf, sz, 0, 0, 0);
+    CHECK(e2 == LOAD_VADDR, "lazy-disabled: elf_load returned wrong entry");
+    CHECK(is_mapped(want_start), "lazy-disabled: page was left unmapped");
+    CHECK(is_mapped(want_end - PG), "lazy-disabled: last page was left unmapped");
+    int all_bss_zeroed = 1;
+    for (uint64_t off = DATA_LEN; off < LAZY_SEG_MEMSZ; off++) if (mem[off] != 0) all_bss_zeroed = 0;
+    CHECK(all_bss_zeroed, "lazy-disabled: .bss not fully zeroed when lazy path is off");
+    unmap_all();
+
+    printf("lazy-bss: %s\n", fails ? "FAILURES" : "ok (deferred range correct, unmapped until asked, eager fallback intact)");
 }
 
 /* Run both validators over an (image,len); for a fuzz body this must never
@@ -217,7 +287,7 @@ static void test_real_elf(const char *path) {
     if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) { fclose(f); free(buf); return; }
     fclose(f);
 
-    uint64_t entry = elf_load(buf, (uint64_t)sz);
+    uint64_t entry = elf_load(buf, (uint64_t)sz, 0, 0, 0);
     char msg[256];
     snprintf(msg, sizeof(msg), "%s rejected by elf_load", path);
     CHECK(entry != 0, msg);
@@ -230,6 +300,7 @@ static void test_real_elf(const char *path) {
 
 int main(int argc, char **argv) {
     test_regression();
+    test_lazy_bss();
     test_fuzz();
     int reals = 0;
     for (int i = 1; i < argc; i++) { test_real_elf(argv[i]); reals++; }

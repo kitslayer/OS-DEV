@@ -2,12 +2,34 @@
 #pragma once
 #include <stdint.h>
 
+/* A page-aligned, whole-BSS (no file-backed bytes) sub-range of a PT_LOAD
+ * segment that elf_load left unmapped instead of eagerly zeroing — see
+ * elf_load's out_lazy parameter below. */
+typedef struct { uint64_t start, len; } elf_lazy_range_t;
+
 /* Load the PT_LOAD segments of an ELF64 image (already in memory) into the
  * current address space as user pages, and return the entry point address.
  * `maxsz` bounds the readable image (file offsets/sizes are validated against
  * it; pass ~0ull for a fully trusted in-kernel image). Returns 0 on a bad or
- * out-of-bounds image. */
-uint64_t elf_load(const void *image, uint64_t maxsz);
+ * out-of-bounds image.
+ *
+ * out_lazy/max_lazy/out_nlazy (all optional — pass 0/0/0 to disable): a large
+ * static BSS (e.g. a multi-MB interpreter arena) costs real time to eagerly
+ * map+zero page by page at every spawn, almost all of which a typical run
+ * never touches. For each writable, non-executable PT_LOAD segment, elf_load
+ * eagerly maps+copies+zeroes only through the page containing the last
+ * file-backed byte (as before — a partial page there mixes real data and
+ * zero padding, so it can't be deferred); any further pages are PURE zero
+ * and are reported as a range in `out_lazy` (up to `max_lazy` of them, count
+ * in `*out_nlazy`) instead of being mapped at all. The caller is expected to
+ * register each range as a demand-zero region (this file has no notion of a
+ * process's VMA list); its own page-fault handler must map with the same
+ * effective permissions elf_load would have applied (writable, non-exec) —
+ * true of this codebase's app_fault_handle anon-mmap path. Passing NULL for
+ * out_lazy (or max_lazy 0) reverts to fully-eager loading of every page,
+ * which is what a caller with no lazy-fault machinery of its own must do. */
+uint64_t elf_load(const void *image, uint64_t maxsz,
+                   elf_lazy_range_t *out_lazy, int max_lazy, int *out_nlazy);
 
 /* The on-disk byte extent of an ELF image (max p_offset+p_filesz over PT_LOAD,
  * capped at maxsz; 0 on a bad header). Lets measured-boot hash the exact image

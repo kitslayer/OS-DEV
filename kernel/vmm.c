@@ -20,6 +20,13 @@
 #include "string.h"
 #include "console.h"   /* kprintf — for the W^X self-check report */
 
+/* app.c's demand-pager: resolves a not-present address that falls inside the
+ * CURRENT app's registered VMA list (mmap, or elf_load's deferred .bss —
+ * see vmm_user_ok below) by allocating+zeroing+mapping it, exactly as a real
+ * ring-3 #PF would. A forward declaration (not "app.h") keeps vmm.c from
+ * gaining a real dependency on app.c's types for one narrow call. */
+extern int app_fault_handle(uint64_t cr2, uint64_t err);
+
 #define PML4_IDX(v) (((v) >> 39) & 0x1FF)
 #define PDPT_IDX(v) (((v) >> 30) & 0x1FF)
 #define PD_IDX(v)   (((v) >> 21) & 0x1FF)
@@ -76,8 +83,18 @@ static int do_map(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t fla
     uint64_t *pt   = next_table(pd,   PD_IDX(virt),   flags);
     if (!pt) return -1;
 
+    /* x86 TLBs never cache a not-present translation, so populating a fresh
+     * (previously not-present) PTE can never leave a stale entry behind — only
+     * overwriting an ALREADY-present PTE (a permission change or a remap onto a
+     * live translation) can, and still gets flushed below. This matters: a new
+     * address space's whole user region starts not-present, so every page an
+     * app's spawn maps (ELF segments, the user stack, a task's kernel stack)
+     * hits the skip path. vmm_unmap already invlpg's on the transition to
+     * not-present, so a later remap of the same VA correctly sees "wasn't
+     * present" with no staleness risk. */
+    int was_present = (pt[PT_IDX(virt)] & PTE_PRESENT) != 0;
     pt[PT_IDX(virt)] = (phys & ADDR_MASK) | PTE_PRESENT | flags;
-    invlpg(virt);
+    if (was_present) invlpg(virt);
     return 0;
 }
 
@@ -617,35 +634,58 @@ uint64_t vmm_translate(uint64_t virt) {
 }
 
 /*
+ * Does a leaf, USER, PRESENT page cover `v` in the current CR3? If a level
+ * comes back not-present, that's either a genuine hole OR a demand-paged
+ * region (mmap, or elf_load's deferred whole-.bss range) nobody has touched
+ * yet — indistinguishable from the page tables alone. Try exactly once to
+ * resolve it the same way a real ring-3 #PF would (app_fault_handle, which
+ * only succeeds for an address inside the CURRENT app's own registered VMA
+ * list) and re-walk from the top, since that call may have just built the
+ * intermediate tables too. A present-but-!USER entry at any level is a real
+ * violation (kernel memory) and is never retried.
+ */
+static int user_page_present(uint64_t v) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+        uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
+        uint64_t e = pml4[PML4_IDX(v)];
+        if (!(e & PTE_PRESENT)) { if (attempt == 0 && app_fault_handle(v, 0)) continue; return 0; }
+        if (!(e & PTE_USER)) return 0;
+        uint64_t *pdpt = phys_to_table(e & ADDR_MASK);
+        e = pdpt[PDPT_IDX(v)];
+        if (!(e & PTE_PRESENT)) { if (attempt == 0 && app_fault_handle(v, 0)) continue; return 0; }
+        if (!(e & PTE_USER)) return 0;
+        if (e & PTE_HUGE) return 1;                /* 1 GiB user page covers v */
+        uint64_t *pd = phys_to_table(e & ADDR_MASK);
+        e = pd[PD_IDX(v)];
+        if (!(e & PTE_PRESENT)) { if (attempt == 0 && app_fault_handle(v, 0)) continue; return 0; }
+        if (!(e & PTE_USER)) return 0;
+        if (e & PTE_HUGE) return 1;                /* 2 MiB user page covers v */
+        uint64_t *pt = phys_to_table(e & ADDR_MASK);
+        e = pt[PT_IDX(v)];
+        if (!(e & PTE_PRESENT)) { if (attempt == 0 && app_fault_handle(v, 0)) continue; return 0; }
+        if (!(e & PTE_USER)) return 0;
+        return 1;
+    }
+    return 0;
+}
+
+/*
  * Is the whole range [ptr, ptr+len) accessible to the CURRENT (user) address
- * space — i.e. mapped and PTE_USER at every paging level? A ring-0 syscall
- * handler runs with the calling app's CR3 active, where the kernel's higher
- * half and low identity map are mapped (and writable in ring 0) but NOT marked
- * USER. So validating PTE_USER on every page an app hands to a syscall stops it
- * from steering the kernel into reading/writing kernel memory through a forged
- * pointer. Returns 1 if every page is user-accessible, 0 otherwise (unmapped,
- * supervisor-only, or a length that wraps the address space).
+ * space — i.e. mapped (or lazily resolvable — see user_page_present) and
+ * PTE_USER at every paging level? A ring-0 syscall handler runs with the
+ * calling app's CR3 active, where the kernel's higher half and low identity
+ * map are mapped (and writable in ring 0) but NOT marked USER. So validating
+ * PTE_USER on every page an app hands to a syscall stops it from steering the
+ * kernel into reading/writing kernel memory through a forged pointer. Returns
+ * 1 if every page is user-accessible, 0 otherwise (unmapped and not a known
+ * VMA, supervisor-only, or a length that wraps the address space).
  */
 int vmm_user_ok(uint64_t ptr, uint64_t len) {
     if (len == 0) return 1;                       /* empty range touches nothing */
     uint64_t end = ptr + len;
     if (end < ptr) return 0;                      /* address wrap */
-    uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
-    for (uint64_t v = ptr & ~(uint64_t)(PAGE_SIZE - 1); v < end; v += PAGE_SIZE) {
-        uint64_t e = pml4[PML4_IDX(v)];
-        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
-        uint64_t *pdpt = phys_to_table(e & ADDR_MASK);
-        e = pdpt[PDPT_IDX(v)];
-        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
-        if (e & PTE_HUGE) continue;               /* 1 GiB user page covers v */
-        uint64_t *pd = phys_to_table(e & ADDR_MASK);
-        e = pd[PD_IDX(v)];
-        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
-        if (e & PTE_HUGE) continue;               /* 2 MiB user page covers v */
-        uint64_t *pt = phys_to_table(e & ADDR_MASK);
-        e = pt[PT_IDX(v)];
-        if (!(e & PTE_PRESENT) || !(e & PTE_USER)) return 0;
-    }
+    for (uint64_t v = ptr & ~(uint64_t)(PAGE_SIZE - 1); v < end; v += PAGE_SIZE)
+        if (!user_page_present(v)) return 0;
     return 1;
 }
 
