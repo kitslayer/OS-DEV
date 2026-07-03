@@ -33,6 +33,7 @@
 #include "rootca.h"
 #include "string.h"
 #include "console.h"
+#include "smp.h"      /* smp_parallel_for — verify independent chain links across cores (M1528, kernel build only) */
 
 #define REC_HS   22
 #define REC_APP  23
@@ -245,6 +246,23 @@ static int cert_sig_ok(const x509_cert *c, const uint8_t *ikey, size_t iklen, in
     return -1;   /* unsupported signature algorithm */
 }
 
+#ifndef TLS_RING3
+/* Verify chain links [lo,hi) of an smp_parallel_for split (M1528, kernel build
+ * only — see the call site). Each link ("is certs[i] signed by certs[i+1]'s
+ * key") is fully independent of every other, so this is safe to run
+ * concurrently with the other chunks: cert_sig_ok's whole call chain
+ * (ecdsa_cert_verify/rsa_pkcs1_sha*_verify -> bignum.c) is reentrant, and
+ * ecdsa.c's only historical exception (the P/N field-prime/order globals)
+ * now keeps one slot per core specifically so this is safe. */
+struct chain_link_ctx { const x509_cert *certs; int *link_ok; };
+static void verify_link_chunk(int lo, int hi, void *ctxp) {
+    struct chain_link_ctx *cx = ctxp;
+    for (int i = lo; i < hi; i++)
+        cx->link_ok[i] = (cert_sig_ok(&cx->certs[i], cx->certs[i + 1].key,
+                                       cx->certs[i + 1].key_len, cx->certs[i + 1].key_alg) == 0);
+}
+#endif
+
 /* ---- server-certificate authentication (TLS 1.3, RFC 8446 4.4.2-4.4.3) ----
  * Parse the Certificate message, extract the LEAF cert's public key, and copy it
  * into t->leaf_key (the flight buffer moves between records, so we can't alias it).
@@ -327,12 +345,25 @@ static int tls_capture_leaf_key(tls *t, const uint8_t *m, int mlen, const char *
     /* chain-internal verification (NON-FATAL, logged): each cert is signed by the
      * next one up. This proves the presented chain is self-consistent; it does NOT
      * yet check the top against a trusted root CA (that's the remaining step before
-     * this can be enforced for MITM protection). */
-    int links = 0, ok = 0;
-    for (int i = 0; i + 1 < n; i++) {
-        links++;
+     * this can be enforced for MITM protection). Each link is independent
+     * (M1528): the kernel build verifies them all in parallel across cores
+     * instead of one at a time (a real chain is short — a couple links — but
+     * each is a full public-key signature check, ~tens of ms of bignum work,
+     * so this is a genuine wall-clock win, not a micro-optimisation). The
+     * ring-3 build (httpget.elf) has no other cores to hand work to, so it
+     * keeps the original plain loop. */
+    int links = n > 0 ? n - 1 : 0, ok = 0;
+#ifdef TLS_RING3
+    for (int i = 0; i < links; i++)
         if (cert_sig_ok(&certs[i], certs[i+1].key, certs[i+1].key_len, certs[i+1].key_alg) == 0) ok++;
+#else
+    int link_ok[8] = {0};
+    if (links > 0) {
+        struct chain_link_ctx cctx = { certs, link_ok };
+        smp_parallel_for(links, verify_link_chunk, &cctx);
+        for (int i = 0; i < links; i++) if (link_ok[i]) ok++;
     }
+#endif
     if (links) kprintf("[tls] chain: %d/%d issuer link(s) verified%s\n", ok, links,
                        ok == links ? "" : " (rest: unsupported sig alg)");
 

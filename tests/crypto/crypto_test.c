@@ -36,6 +36,12 @@
 #include "rsa.h"
 #include "sigvectors.h"
 
+/* ecdsa.c reads smp_current_cpu() to pick its per-core P/N slot (M1528) --
+ * this host harness runs single-threaded, so "core 0" always, same as every
+ * other stub here just resolving a real kernel dependency to its host-safe
+ * trivial case. */
+int smp_current_cpu(void) { return 0; }
+
 static int g_fails = 0;
 static int hxd(char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; }
 static int H(uint8_t *out, const char *hex) {            /* hex string -> bytes, returns count */

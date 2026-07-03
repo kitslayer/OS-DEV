@@ -8,6 +8,7 @@
 #include "ecdsa.h"
 #include "bignum.h"
 #include "string.h"
+#include "smp.h"      /* smp_current_cpu — per-core P/N slots so concurrent verifies (M1528) don't race */
 
 /* P-256 domain parameters (big-endian). */
 static const uint8_t P256_P[32]  = {0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x01,0,0,0,0,0,0,0,0,0,0,0,0,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
@@ -39,18 +40,33 @@ static const uint8_t P384_GY[48] = {
     0xf8,0xf4,0x1d,0xbd,0x28,0x9a,0x14,0x7c,0xe9,0xda,0x31,0x13,0xb5,0xf0,0xb8,0xc0,
     0x0a,0x60,0xb1,0xce,0x1d,0x7e,0x81,0x9d,0x7a,0x43,0x1d,0x7c,0x90,0xea,0x0e,0x5f};
 
-static bignum P, N;          /* the field prime and the group order */
+/* The field prime and group order — ONE PER CORE (M1528), not a single
+ * shared global. ecdsa_verify() sets these once at the top of a call and
+ * every helper below (fmul/fadd/fsub/fsqr, then dbl/add/mul) reads them
+ * implicitly for the rest of that SAME call; two verifies now run
+ * concurrently on different cores (kernel/x509.c parallelizes chain
+ * verification via smp_parallel_for), so a single shared P/N would let one
+ * core's curve parameters corrupt another's mid-computation. Safe as
+ * PER-CORE (rather than threading an explicit modulus parameter through
+ * every field/point-arithmetic function) because of smp_parallel_for's own
+ * contract: a dispatched job runs start-to-finish on one core with no
+ * yielding back to the pool mid-computation, so "this core's slot" and "this
+ * call's state" are the same thing for the whole duration of a verify. */
+#define ECDSA_MAX_CPUS 16
+static bignum g_P[ECDSA_MAX_CPUS], g_N[ECDSA_MAX_CPUS];
+static inline bignum *curP(void) { return &g_P[smp_current_cpu() & (ECDSA_MAX_CPUS - 1)]; }
+static inline bignum *curN(void) { return &g_N[smp_current_cpu() & (ECDSA_MAX_CPUS - 1)]; }
 
 typedef struct { bignum X, Y, Z; } pt;   /* Jacobian: affine (X/Z^2, Y/Z^3); Z=0 = infinity */
 
 static int is_inf(const pt *a) { return a->Z.n == 1 && a->Z.limb[0] == 0; }
 
-/* field helpers, mod P */
-static void fmul(bignum *o, const bignum *a, const bignum *b) { bn_modmul(o, a, b, &P); }
-static void fadd(bignum *o, const bignum *a, const bignum *b) { bn_modadd(o, a, b, &P); }
-static void fsub(bignum *o, const bignum *a, const bignum *b) { bn_modsub(o, a, b, &P); }
+/* field helpers, mod P (this core's slot) */
+static void fmul(bignum *o, const bignum *a, const bignum *b) { bn_modmul(o, a, b, curP()); }
+static void fadd(bignum *o, const bignum *a, const bignum *b) { bn_modadd(o, a, b, curP()); }
+static void fsub(bignum *o, const bignum *a, const bignum *b) { bn_modsub(o, a, b, curP()); }
 static void fmul2(bignum *o, const bignum *a) { fadd(o, a, a); }
-static void fsqr(bignum *o, const bignum *a) { bn_modmul(o, a, a, &P); }
+static void fsqr(bignum *o, const bignum *a) { bn_modmul(o, a, a, curP()); }
 
 /* R = 2*A  (Jacobian doubling for curves with a = -3). */
 static void dbl(pt *R, const pt *A) {
@@ -109,40 +125,44 @@ static void mul(pt *R, const bignum *k, const pt *A, int bits) {
 
 /* Curve-generic verify over a NIST prime curve (a = -3). cp/cn/gx/gy/cb are the
  * fl-byte big-endian field prime / order / generator / b; pub = 0x04‖X‖Y
- * (1+2*fl bytes); hash is fl bytes; r/s big-endian. Returns 0 if valid. The field
- * globals P/N are set per call (the single fetch worker means no reentrancy). */
+ * (1+2*fl bytes); hash is fl bytes; r/s big-endian. Returns 0 if valid. This
+ * core's g_P/g_N slot is set at the top and read for the rest of THIS call
+ * only (M1528 — see the slot declaration's comment for why that's safe under
+ * concurrent per-core verifies, not just the single-threaded caller this
+ * assumed when written). */
 static int ecdsa_verify(const uint8_t *cp, const uint8_t *cn, const uint8_t *gx,
                         const uint8_t *gy, const uint8_t *cb, int fl,
                         const uint8_t *pub, size_t publen, const uint8_t *hash,
                         const uint8_t *r, size_t rl, const uint8_t *s, size_t sl) {
-    bn_from_bytes(&P, cp, fl); bn_from_bytes(&N, cn, fl);
+    bignum *P = curP(), *N = curN();
+    bn_from_bytes(P, cp, fl); bn_from_bytes(N, cn, fl);
     if (publen != (size_t)(1 + 2*fl) || pub[0] != 0x04) return -1;
 
     bignum R, S, Z, w, u1, u2;
     if (bn_from_bytes(&R, r, rl) || bn_from_bytes(&S, s, sl)) return -1;
     bignum one; bn_zero(&one); one.limb[0] = 1;
-    if (bn_cmp(&R, &one) < 0 || bn_cmp(&R, &N) >= 0) return -1;   /* 1 <= r < n */
-    if (bn_cmp(&S, &one) < 0 || bn_cmp(&S, &N) >= 0) return -1;
+    if (bn_cmp(&R, &one) < 0 || bn_cmp(&R, N) >= 0) return -1;   /* 1 <= r < n */
+    if (bn_cmp(&S, &one) < 0 || bn_cmp(&S, N) >= 0) return -1;
 
     bn_from_bytes(&Z, hash, fl);
-    if (bn_cmp(&Z, &N) >= 0) bn_modsub(&Z, &Z, &N, &N);           /* z mod n (≤1 sub) */
+    if (bn_cmp(&Z, N) >= 0) bn_modsub(&Z, &Z, N, N);           /* z mod n (≤1 sub) */
 
     bignum nm2; bn_zero(&nm2); bn_from_bytes(&nm2, cn, fl);       /* w = s^(n-2) mod n */
-    { bignum two; bn_zero(&two); two.limb[0]=2; bn_modsub(&nm2, &nm2, &two, &N); }
-    bn_modexp(&w, &S, &nm2, &N);
-    bn_modmul(&u1, &Z, &w, &N);
-    bn_modmul(&u2, &R, &w, &N);
+    { bignum two; bn_zero(&two); two.limb[0]=2; bn_modsub(&nm2, &nm2, &two, N); }
+    bn_modexp(&w, &S, &nm2, N);
+    bn_modmul(&u1, &Z, &w, N);
+    bn_modmul(&u2, &R, &w, N);
 
     pt G, Q, P1, P2, sum;
     bn_from_bytes(&G.X, gx, fl); bn_from_bytes(&G.Y, gy, fl); bn_zero(&G.Z); G.Z.limb[0]=1;
     bn_from_bytes(&Q.X, pub + 1, fl); bn_from_bytes(&Q.Y, pub + 1 + fl, fl); bn_zero(&Q.Z); Q.Z.limb[0]=1;
     /* validate the public key: coordinates < p and the point is ON the curve
      * (y^2 == x^3 - 3x + b mod p) — guards against invalid-curve attacks. */
-    if (bn_cmp(&Q.X, &P) >= 0 || bn_cmp(&Q.Y, &P) >= 0) return -1;
+    if (bn_cmp(&Q.X, P) >= 0 || bn_cmp(&Q.Y, P) >= 0) return -1;
     {   bignum b, x2, x3, t3x, rhs, lhs, three;
         bn_from_bytes(&b, cb, fl);
         fsqr(&x2, &Q.X); fmul(&x3, &x2, &Q.X);
-        bn_zero(&three); three.limb[0] = 3; bn_modmul(&t3x, &three, &Q.X, &P);
+        bn_zero(&three); three.limb[0] = 3; bn_modmul(&t3x, &three, &Q.X, P);
         fsub(&rhs, &x3, &t3x); fadd(&rhs, &rhs, &b);     /* x^3 - 3x + b */
         fsqr(&lhs, &Q.Y);                                 /* y^2 */
         if (bn_cmp(&lhs, &rhs) != 0) return -1;           /* not on the curve */
@@ -155,11 +175,11 @@ static int ecdsa_verify(const uint8_t *cp, const uint8_t *cn, const uint8_t *gx,
     /* affine x = X / Z^2 mod p; then check x mod n == r */
     bignum zinv, z2inv, x, pm2;
     bn_zero(&pm2); bn_from_bytes(&pm2, cp, fl);
-    { bignum two; bn_zero(&two); two.limb[0]=2; bn_modsub(&pm2, &pm2, &two, &P); }
-    bn_modexp(&zinv, &sum.Z, &pm2, &P);          /* Z^(p-2) = Z^-1 */
+    { bignum two; bn_zero(&two); two.limb[0]=2; bn_modsub(&pm2, &pm2, &two, P); }
+    bn_modexp(&zinv, &sum.Z, &pm2, P);          /* Z^(p-2) = Z^-1 */
     fmul(&z2inv, &zinv, &zinv);
     fmul(&x, &sum.X, &z2inv);
-    if (bn_cmp(&x, &N) >= 0) bn_modsub(&x, &x, &N, &N);   /* x mod n */
+    if (bn_cmp(&x, N) >= 0) bn_modsub(&x, &x, N, N);   /* x mod n */
     return bn_cmp(&x, &R) == 0 ? 0 : -1;
 }
 

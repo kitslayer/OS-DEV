@@ -39,6 +39,13 @@ static int starts_with(const char *s, const char *pfx) {
 /* kprintf: tls.c emits handshake/cert debug; not needed in the ring-3 program. */
 void kprintf(const char *fmt, ...) { (void)fmt; }
 
+/* ecdsa.c reads smp_current_cpu() to pick its per-core P/N slot (M1528, for
+ * the kernel's parallel X.509 chain verification) -- meaningless here: ring-3
+ * tasks only ever run on the BSP (never concurrently across cores; the APs
+ * only run kernel-side smp_parallel_for jobs), so "core 0" always is correct,
+ * not just a stub-to-satisfy-the-linker. */
+int smp_current_cpu(void) { return 0; }
+
 /* --- shims: tls.c's kernel TCP/DNS/clock onto ring-3 syscalls ------------- */
 static int g_sock = -1;
 int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
