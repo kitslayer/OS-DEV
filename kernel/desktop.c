@@ -280,6 +280,17 @@ static void glow_border(int x, int y, int w, int h, uint32_t bright, uint32_t di
     stroke_rect(x - 1, y - 1, w + 2, h + 2, 1, dim);
     stroke_rect(x, y, w, h, 2, bright);
 }
+/* Four short L-shaped marks at a rect's corners — reads as instrumentation
+ * marking a boundary (a real sci-fi-HUD convention) rather than decoration,
+ * and costs 8 short solid strokes, no glow/blend of any kind. Deliberately
+ * NOT a full outline: a small accent, meant to sit alongside glow_border
+ * rather than compete with it. */
+static void hud_corners(int x, int y, int w, int h, int len, uint32_t c) {
+    fb_fill_rect(x, y, len, 1, c);                     fb_fill_rect(x, y, 1, len, c);
+    fb_fill_rect(x + w - len, y, len, 1, c);           fb_fill_rect(x + w - 1, y, 1, len, c);
+    fb_fill_rect(x, y + h - 1, len, 1, c);             fb_fill_rect(x, y + h - len, 1, len, c);
+    fb_fill_rect(x + w - len, y + h - 1, len, 1, c);   fb_fill_rect(x + w - 1, y + h - len, 1, len, c);
+}
 
 #define WP_TOP 0x050208   /* fallback gradient (no cached wallpaper_bmp yet/OOM) — matches make_wallpaper's void sky */
 #define WP_BOT 0x03010A   /* ... and its near-black ground */
@@ -711,6 +722,7 @@ static void draw_window(const window_t *w, int focused) {
     /* sharp border + a dim outer glow line — no rounding, no drop shadow */
     glow_border(x, y, ww, hh, focused ? THEME_MAGENTA : THEME_BORDER_DIM, THEME_VOID);
     fb_fill_rect(x + 1, y + TITLEBAR_H, ww - 2, 1, focused ? THEME_MAGENTA : THEME_BORDER_DIM);
+    if (focused) hud_corners(x - 2, y - 2, ww + 4, hh + 4, 8, THEME_CYAN);   /* a small accent marking the active window, distinct from the magenta glow */
 }
 
 /* Decode image file `name` into a freshly-allocated screen-sized 0x00RRGGBB
@@ -987,6 +999,7 @@ static void render_scene(void) {
         for (int c = 1; c < MENU_COLS; c++)                          /* faint column rules */
             fb_fill_rect(start_x + c * MENU_W, my0 + 4, 1, mh - 8, THEME_BORDER_DIM);
         glow_border(start_x, my0, mw, mh, THEME_CYAN, THEME_VOID);
+        hud_corners(start_x - 2, my0 - 2, mw + 4, mh + 4, 10, THEME_CYAN);
         for (int i = 0; i < MENU_N; i++) {
             int col = i / MENU_PERCOL, row = i % MENU_PERCOL;
             int ix = start_x + col * MENU_W, iy = my0 + 4 + row * MENU_ITEM_H;
@@ -1067,6 +1080,7 @@ static void render_scene(void) {
         int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
         fb_fill_rect(px, py, pw, ph, THEME_PANEL);           /* flat panel body */
         glow_border(px, py, pw, ph, THEME_CYAN, THEME_VOID);
+        hud_corners(px - 2, py - 2, pw + 4, ph + 4, 10, THEME_CYAN);
         fb_fill_rect(px, py, pw, 26, THEME_PANEL_TITLE);      /* title bar */
         fb_fill_rect(px, py, pw, 1, THEME_CYAN);
         draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Keyboard Shortcuts", THEME_TEXT);
@@ -1085,6 +1099,7 @@ static void render_scene(void) {
         int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
         fb_fill_rect(px, py, pw, ph, THEME_PANEL);           /* flat panel body */
         glow_border(px, py, pw, ph, THEME_CYAN, THEME_VOID);
+        hud_corners(px - 2, py - 2, pw + 4, ph + 4, 10, THEME_CYAN);
         fb_fill_rect(px, py, pw, 26, THEME_PANEL_TITLE);      /* title bar */
         fb_fill_rect(px, py, pw, 1, THEME_CYAN);
         draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Windows", THEME_TEXT);
