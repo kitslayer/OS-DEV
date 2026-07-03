@@ -39,6 +39,7 @@
 #include "robust.h"    /* robust_t + FUTEX_OWNER_DIED (M1141) */
 #include "complete.h"
 #include "console.h"   /* kprintf — log app-launch failures (don't fail silently) */
+#include "desktop.h"   /* desktop_wallpaper_sample — translucent terminal cell backgrounds (M1527) */
 #include <stdint.h>
 
 /* The terminal grid is now LIVE-RESIZABLE (M1473): the arrays are sized to a
@@ -871,6 +872,19 @@ static void sel_ordered(struct app *a, int *r0, int *c0, int *r1, int *c1) {
     }
 }
 
+/* A low-alpha blend of the terminal's near-black base tint with a sampled
+ * wallpaper color — the translucent-terminal effect (M1527). Blending
+ * against desktop_wallpaper_sample (the STABLE cached backdrop) rather than
+ * whatever's currently in the live framebuffer matters: a terminal that
+ * redraws often (typing, output arriving) would otherwise blend toward its
+ * OWN previous frame each time and get muddier with every redraw instead of
+ * staying a consistent tint. ~18% wallpaper keeps text solidly readable
+ * while still showing real color bleeding through. */
+static uint32_t term_bg_blend(uint32_t wp) {
+    int wr = (int)((wp >> 16) & 0xFF), wg = (int)((wp >> 8) & 0xFF), wb = (int)(wp & 0xFF);
+    int r = 10 + (wr - 10) * 18 / 100, g = 10 + (wg - 10) * 18 / 100, b = 10 + (wb - 10) * 18 / 100;
+    return (uint32_t)(r << 16 | g << 8 | b);
+}
 void app_render(app_t *a, int px, int py, int focused) {
     /* Show a 17-row window into [scrollback ... live grid], scrolled up by view. */
     for (int r = 0; r < a->rows; r++) {
@@ -882,7 +896,8 @@ void app_render(app_t *a, int px, int py, int focused) {
                 int gr = L - a->sb_count; ch = a->grid[gr][c];
                 fg = app_palette[a->gcol[gr][c] & 15];                     /* live grid: per-cell colour */
             }
-            fb_glyph(px + c * font_width, py + r * font_height, ch, fg, 0x0A0A0A);
+            int cx = px + c * font_width, cy = py + r * font_height;
+            fb_glyph(cx, cy, ch, fg, term_bg_blend(desktop_wallpaper_sample(cx, cy)));
         }
     }
     /* Scrollback scrollbar on the right edge (only when there's scrollback): a
@@ -913,18 +928,32 @@ void app_render(app_t *a, int px, int py, int focused) {
     }
     /* Block caret on the focused window at the live cursor, when it's in view
      * (hidden while scrolled up into the scrollback). Drawn over the cell so it
-     * tracks left/right/home/end edits, not just the end of the line. */
+     * tracks left/right/home/end edits, not just the end of the line. Blinks
+     * once a second (M1527, a "moving part") — the desktop's main loop forces
+     * a full redraw on the same clock_tick edge this reads (app_shows_caret),
+     * so the two always agree on when the state actually changes; drawing the
+     * plain character (translucent bg, like every other cell) on the "off"
+     * phase instead of nothing keeps the text underneath legible throughout. */
     if (focused && !a->gfx && !a->caret_off) {
         int cr = a->cy + a->view;
         if (cr >= 0 && cr < a->rows && a->cx >= 0 && a->cx < a->cols) {
             char ch = a->grid[a->cy][a->cx];
-            fb_glyph(px + a->cx * font_width, py + cr * font_height,
-                     (ch && ch != ' ') ? ch : ' ', 0x0A0A0A, 0x33FF66);
+            int cx = px + a->cx * font_width, cy = py + cr * font_height;
+            if ((timer_ticks() / 100) & 1)
+                fb_glyph(cx, cy, (ch && ch != ' ') ? ch : ' ', 0x0A0A0A, 0x33FF66);
+            else
+                fb_glyph(cx, cy, ch ? ch : ' ', 0x33FF66, term_bg_blend(desktop_wallpaper_sample(cx, cy)));
         }
     }
 }
 
 int app_alive(app_t *a) { return a && a->used && !a->exited; }
+
+/* Does this app's window currently show the blinking text caret (app_render,
+ * M1527)? Lets the desktop's main loop know it must force a full redraw on
+ * the once-a-second clock tick even when otherwise idle, so the blink is
+ * actually observed — without exposing struct app's fields to desktop.c. */
+int app_shows_caret(app_t *a) { return a && !a->gfx && !a->caret_off; }
 
 /* --- waitpid support (M1117) ---------------------------------------------- */
 static struct app *app_by_pid(int pid) {

@@ -311,6 +311,17 @@ static void dither_rect(int x, int y, int w, int h, uint32_t a, uint32_t b) {
 static int wp_h;
 static uint32_t *wallpaper_bmp;   /* a screen-sized image loaded from disk, or NULL = gradient */
 static volatile int wallpaper_repaint;   /* set by desktop_set_wallpaper (off-task) to force a redraw */
+/* The wallpaper's own color at absolute screen coords (x,y) — the STABLE
+ * backdrop bitmap, not whatever a window most recently drew there. Lets a
+ * translucent window (kernel/app.c's terminal cells) blend toward the real
+ * background each redraw instead of toward its own previous frame, which
+ * would just get muddier every repaint. THEME_VOID fallback covers the two
+ * edge cases (OOM at boot: wallpaper_bmp never allocated; a stale coordinate
+ * from a since-resized screen) without a caller needing to know about either. */
+uint32_t desktop_wallpaper_sample(int x, int y) {
+    if (!wallpaper_bmp || x < 0 || y < 0 || x >= screen_w || y >= screen_h) return THEME_VOID;
+    return wallpaper_bmp[(size_t)y * screen_w + x];
+}
 static void u2(uint64_t v, char *o) { o[0]='0'+(v/10)%10; o[1]='0'+v%10; o[2]=0; }
 static int lc_ascii(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }   /* ASCII lowercase */
 /* Width of the taskbar clock pill ("YYYY-MM-DD  HH:MM:SS" = 20 chars + padding).
@@ -2050,6 +2061,15 @@ void desktop_run(void) {
         if (wallpaper_repaint) { wallpaper_repaint = 0; dirty = 1; }   /* `wallpaper` builtin swapped the bg */
         int moved = (mx != prev_x || my != prev_y || btn != prev_btn);
         if (moved && (dragging >= 0 || resizing >= 0)) dirty = 1;  /* drag moves the scene */
+        /* The focused terminal's caret blinks on this same once-a-second tick
+         * (app_render, M1527) — force the full redraw path so it's actually
+         * seen, instead of the clock-pill-only path below (which never
+         * touches a window's content). Still just 1 Hz, not a continuous
+         * animation loop, so an idle desktop with a terminal focused costs
+         * one full redraw/sec, not one every frame. */
+        if (clock_tick && win_count > 0 && windows[win_count - 1].kind == KIND_APP &&
+            app_shows_caret((app_t *)windows[win_count - 1].app))
+            dirty = 1;
 
         if (dirty) { render_scene(); present_frame(); }  /* scene changed: full redraw + blit */
         else if (clock_tick) {

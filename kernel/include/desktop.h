@@ -1,5 +1,6 @@
 /* desktop.h — a tiny windowing desktop environment. */
 #pragma once
+#include <stdint.h>
 
 void desktop_run(void);   /* set up windows and run the event loop (no return) */
 
@@ -14,3 +15,9 @@ int desktop_set_wallpaper(const char *name);
  * decode_image() so every format the OS reads (PNG/BMP/JPEG/GIF/SVG) works.
  * Returns 0 on success, -1 on any failure. */
 int desktop_load_image(const char *name, unsigned *buf, int cw, int ch, int *outwh);
+
+/* The wallpaper's own color at absolute screen coords (x,y) (THEME_VOID if
+ * out of range or not yet generated) — for a translucent window background
+ * that wants to blend toward the real backdrop, not toward its own last
+ * frame (kernel/app.c's terminal-cell rendering, M1527). */
+uint32_t desktop_wallpaper_sample(int x, int y);

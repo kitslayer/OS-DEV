@@ -41,6 +41,7 @@ int         app_sid_of(app_t *a);       /* session id (M1231) */
 int         app_format_maps(app_t *a, char *buf, int max);   /* /proc/<pid>/maps: memory regions as text */
 int         app_format_fds(app_t *a, char *buf, int max);    /* /proc/<pid>/fd: open descriptors (pipe/file) (M1194) */
 int    app_alive(app_t *a);
+int    app_shows_caret(app_t *a);                /* does this app's window blink a text caret right now? (M1527) */
 int    app_reap(app_t *a);                       /* free a self-exited app's task+stack+slot (WM) */
 void   app_request_kill(app_t *a);               /* ask a running app to close (it self-exits) */
 void   app_kill_check(void);                     /* honor a pending kill from a polling/gfx/sleep syscall (exits) */
