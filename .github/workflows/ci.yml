@@ -1,0 +1,28 @@
+name: host tests
+
+# Runs only the host-side ASan/UBSan suites (parsers, crypto, string/bignum
+# primitives, shell utilities, ...) — the ~40 suites in `make check` that
+# compile a kernel .c file as a host binary and fuzz/regression-test it
+# directly, no emulator involved. The other ~27 suites boot the real kernel
+# under QEMU and need KVM for a reasonable runtime, which GitHub-hosted
+# runners don't expose (nested virtualization is unavailable), so those stay
+# a local/self-hosted `make check` step rather than running here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: host-side ASan/UBSan suites (parsers, crypto, string/bignum primitives, shell utils)
+        run: |
+          make jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test \
+               kattest bignumfuzztest stringtest svgtest deflatetest pngenctest ziptest \
+               tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest \
+               regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest \
+               csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest \
+               shbracetest shquotetest calctest normpathtest completetest

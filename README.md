@@ -6,12 +6,13 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1516-blue)](WHATS-NEXT.md)
+[![Milestones](https://img.shields.io/badge/milestones-1519-blue)](WHATS-NEXT.md)
 [![Tests](https://img.shields.io/badge/tests-67%20passing-brightgreen)](tests/README.md)
+[![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-![The desktop: a procedural dusk-mountain wallpaper, dark-slate windows, the Files panel, a shell, and the ring-3 Browser open](docs/osdev-desktop-current.png)
+![Demo: the desktop, the Apps menu, DOOM running as a windowed ring-3 process, and the from-scratch browser fetching a page over real HTTPS](docs/osdev-demo.gif)
 
 </div>
 
@@ -101,6 +102,19 @@ booting on real hardware, **[BAREMETAL.md](BAREMETAL.md)**; for the test suites
 
 ![The ring-3 Browser (webview) rendering its start page, including live HTTPS links, over real TLS](docs/osdev-browser-ring3.png)
 
+<table>
+<tr>
+<td width="33%"><img src="docs/osdev-doom-themed.png" alt="DOOM running as a windowed ring-3 process"></td>
+<td width="33%"><img src="docs/osdev-sysinfo-themed.png" alt="The System Info panel: live memory/task/network/disk stats"></td>
+<td width="33%"><img src="docs/osdev-terminal-themed.png" alt="The shell: neofetch + ps, from-scratch"></td>
+</tr>
+<tr>
+<td align="center"><sub>id Software's DOOM, windowed</sub></td>
+<td align="center"><sub>live system stats</sub></td>
+<td align="center"><sub>the scriptable shell</sub></td>
+</tr>
+</table>
+
 Where to go next: **[WHATS-NEXT.md](WHATS-NEXT.md)**. The honest take on the
 long-term goals (browser, music, Claude Code): **[GOALS.md](GOALS.md)**.
 
@@ -112,6 +126,10 @@ make run      # boot in a QEMU window (VGA output)
 make test     # boot headless, capture serial output, exit after 5s
 make clean
 ```
+
+Don't want to build from source? Grab the pre-built kernel + disk image from
+the [latest release](https://github.com/kitslayer/OS-DEV/releases/latest) and
+boot it straight in QEMU — see the bundled `RUN_ME.md` for the one-liner.
 
 Drive the shell over the serial line (so it works headlessly):
 
