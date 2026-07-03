@@ -27,11 +27,17 @@ if ! command -v "$QEMU" >/dev/null 2>&1; then
 fi
 
 echo "booting kernel headless under QEMU (COM1 capture)..."
-# Capture COM1 to a file and poll it: kill QEMU as soon as the boot finishes
-# (the "launching the desktop" hand-off is the last marker) rather than always
-# burning a fixed cap. The 25s timeout is a generous safety net -- the boot does
-# a real TLS 1.3 HTTPS handshake (bignum-heavy under TCG) before the desktop, so
-# a tight cap would be flaky. SIGKILL because -no-shutdown ignores SIGTERM.
+# Capture COM1 to a file and poll it in two stages, rather than always burning
+# a fixed cap. Stage 1: wait for "launching the desktop" -- net_demo() now runs
+# as a background kernel task (spawned just before it, boot-time optimization:
+# a real internet round-trip no longer blocks reaching the desktop), so this
+# now lands quickly. Stage 2: net_demo's ARP/ping/HTTP/TLS output streams in
+# concurrently and can trail the desktop hand-off by several seconds (a real
+# TLS 1.3 handshake is bignum-heavy under TCG) -- so wait a bit longer for
+# EITHER its success or failure marker before capturing the log, or the
+# softrequire checks below would always report "skip" even on an online host.
+# The 25s outer timeout is a generous safety net either way. SIGKILL because
+# -no-shutdown ignores SIGTERM.
 timeout -s KILL 25 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0 -device e1000,netdev=net0 \
@@ -43,6 +49,12 @@ i=0
 while [ $i -lt 50 ]; do
     grep -q "launching the desktop" "$LOG" 2>/dev/null && break
     kill -0 "$QPID" 2>/dev/null || break    # QEMU exited (crash, or a stubbed binary): stop waiting
+    sleep 0.5; i=$((i+1))
+done
+i=0
+while [ $i -lt 40 ]; do
+    grep -qE "certverify=ok|HTTPS GET example.com failed" "$LOG" 2>/dev/null && break
+    kill -0 "$QPID" 2>/dev/null || break
     sleep 0.5; i=$((i+1))
 done
 sleep 0.3   # let the last few lines flush

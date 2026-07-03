@@ -109,8 +109,12 @@ static void preemption_demo(void) {
     kprintf("       never-yielding loop. Under cooperative scheduling this\n");
     kprintf("       would freeze main forever. With preemption, both run:\n");
     task_create(spin_worker, 0, 0);
-    for (int i = 0; i < 4; i++) {
-        uint64_t target = timer_ticks() + 40;     /* ~0.4s of wall time */
+    /* 2 short readings (~0.1s total) are enough to show the counter moving
+     * between them -- boot-time cost, not a correctness test (this only
+     * narrates; nothing asserts specific tick/count values), so it doesn't
+     * need the dramatic ~1.6s four-reading version this used to be. */
+    for (int i = 0; i < 2; i++) {
+        uint64_t target = timer_ticks() + 5;      /* ~50ms of wall time */
         while (timer_ticks() < target) { }         /* main also gets preempted */
         kprintf("    [main] alive at %lu ticks  |  worker spin_count = %lu\n",
                 timer_ticks(), spin_count);
@@ -388,7 +392,24 @@ void kmain(uint64_t mb_info, uint64_t magic) {
 
     bpf_jit_selftest();            /* prove the eBPF JIT matches the interpreter (M1290) */
 
-    net_demo();
+    /* net_demo() does REAL network round-trips (ARP, 3x ICMP ping, an HTTP GET,
+     * and a full TLS 1.3 handshake, all to the real internet) to prove the
+     * network/TLS stack at every boot -- valuable, but there's no reason a
+     * user has to stare at a blank screen for it: internet round-trip latency
+     * made this alone ~2.5s of the boot, more than any other single thing.
+     * Spawn it as a background kernel task instead (same pattern as the
+     * ring-3 browser's fetch worker, M1487) so the rest of boot -- and the
+     * desktop itself -- proceeds immediately; the ARP/ping/HTTP/TLS results
+     * still land in the serial log a couple seconds later, just concurrently
+     * with an already-usable desktop instead of blocking it. */
+    /* 256K, not the default task_create() stack: net_demo() calls tls_get(),
+     * which runs the bignum/RSA/ECDSA TLS 1.3 handshake on THIS task's kernel
+     * stack -- the exact scenario that overflowed a 64K stack for the ring-3
+     * browser's fetch worker (M1491) and corrupted the task ring. Matches the
+     * 256K used everywhere else this same pattern occurs (kernel/app.c,
+     * kernel/browser.c). Confirmed by hitting exactly that overflow here
+     * first, with the default stack, before adding this. */
+    task_create_stack(net_demo, 0, 0, 256 * 1024);
 
     /* Mount the FAT32 disk and show it works from the kernel side. */
     if (fat32_mount() == 0) {
