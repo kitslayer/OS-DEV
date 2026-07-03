@@ -43,6 +43,27 @@
 enum { KIND_PLAIN, KIND_WELCOME, KIND_FILES, KIND_APP, KIND_CLOCK, KIND_ABOUT,
        KIND_BROWSER, KIND_SYSMON, KIND_POWEROFF, KIND_REBOOT };  /* power actions: not windows, they call ACPI */
 
+/* ---- cyberpunk theme palette ----
+ * Named so the ~180 call sites that used to carry independent 0xRRGGBB
+ * literals (no theme table existed before this) can share one place to
+ * retune. Semantic, not decorative: THEME_MAGENTA is "the accent used for
+ * focus/active/primary interaction" wherever that concept shows up (it
+ * replaces what used to be an ad-hoc blue accent at ~15 different call
+ * sites), not "the color that happens to be magenta." */
+#define THEME_VOID        0x050208   /* deepest background: taskbar/sky base */
+#define THEME_PANEL       0x120A1F   /* window/panel body */
+#define THEME_PANEL_TITLE 0x1A0F2E   /* title bar / taskbar flat fill */
+#define THEME_MAGENTA     0xFF2BD6   /* primary: focus / active / primary accent */
+#define THEME_CYAN        0x2BE8FF   /* secondary: info / links / secondary accent */
+#define THEME_VIOLET      0x8B2BFF   /* tertiary: decorative accent */
+#define THEME_GREEN       0x39FF88   /* status: success / low usage */
+#define THEME_AMBER       0xFFB02B   /* status: warning / mid usage */
+#define THEME_RED         0xFF2050   /* status: danger / high usage / close */
+#define THEME_TEXT        0xD6F6FF   /* primary body text */
+#define THEME_TEXT_DIM    0x7A6A99   /* secondary/dim text */
+#define THEME_BORDER_DIM  0x3A2255   /* unfocused border/divider */
+#define THEME_SELECT      0x3A1030   /* dim magenta selection/hover-row tint */
+
 typedef struct {
     int x, y, w, h;
     uint32_t body;
@@ -195,15 +216,15 @@ static int ext_is(const char *x, const char *s) {
 }
 static uint32_t file_color(const char *name) {
     int dot = -1; for (int i = 0; name[i]; i++) if (name[i] == '.') dot = i;
-    if (dot < 0) return 0xB6C0BC;
+    if (dot < 0) return THEME_TEXT_DIM;
     const char *x = name + dot + 1;
-    if (ext_is(x,"SVG")||ext_is(x,"PNG")||ext_is(x,"BMP")||ext_is(x,"GIF")||ext_is(x,"JPG")||ext_is(x,"JPE")) return 0xC77DE0; /* images: purple */
-    if (ext_is(x,"C")||ext_is(x,"H")||ext_is(x,"JS"))                       return 0xE0954A; /* code: orange-brown */
-    if (ext_is(x,"GZ")||ext_is(x,"TAR")||ext_is(x,"TGZ")||ext_is(x,"ZIP"))  return 0xF06A6A; /* archives: red */
-    if (ext_is(x,"WAV"))                                                    return 0x4FD0D8; /* audio: teal */
-    if (ext_is(x,"ELF")||ext_is(x,"SH"))                                    return 0x7FD37A; /* executables: green */
-    if (ext_is(x,"NES")||ext_is(x,"GB"))                                    return 0xF060A8; /* ROMs: pink */
-    return 0xB6C0BC;                                                                         /* text/web/default */
+    if (ext_is(x,"SVG")||ext_is(x,"PNG")||ext_is(x,"BMP")||ext_is(x,"GIF")||ext_is(x,"JPG")||ext_is(x,"JPE")) return THEME_VIOLET;  /* images */
+    if (ext_is(x,"C")||ext_is(x,"H")||ext_is(x,"JS"))                       return THEME_AMBER;   /* code */
+    if (ext_is(x,"GZ")||ext_is(x,"TAR")||ext_is(x,"TGZ")||ext_is(x,"ZIP"))  return THEME_RED;     /* archives */
+    if (ext_is(x,"WAV"))                                                    return THEME_CYAN;    /* audio */
+    if (ext_is(x,"ELF")||ext_is(x,"SH"))                                    return THEME_GREEN;   /* executables */
+    if (ext_is(x,"NES")||ext_is(x,"GB"))                                    return THEME_MAGENTA; /* ROMs */
+    return THEME_TEXT_DIM;                                                                        /* text/web/default */
 }
 static void box(int x, int y, int w, int h, uint32_t c) {
     fb_fill_rect(x, y, w, 1, c); fb_fill_rect(x, y + h - 1, w, 1, c);
@@ -246,26 +267,6 @@ static void glow_border(int x, int y, int w, int h, uint32_t bright, uint32_t di
 
 #define WP_TOP 0x050208   /* fallback gradient (no cached wallpaper_bmp yet/OOM) — matches make_wallpaper's void sky */
 #define WP_BOT 0x03010A   /* ... and its near-black ground */
-
-/* ---- cyberpunk theme palette ----
- * Named so the ~180 call sites that used to carry independent 0xRRGGBB
- * literals (no theme table existed before this) can share one place to
- * retune. Semantic, not decorative: THEME_MAGENTA is "the accent used for
- * focus/active/primary interaction" wherever that concept shows up (it
- * replaces what used to be an ad-hoc blue accent at ~15 different call
- * sites), not "the color that happens to be magenta." */
-#define THEME_VOID        0x050208   /* deepest background: taskbar/sky base */
-#define THEME_PANEL       0x120A1F   /* window/panel body */
-#define THEME_PANEL_TITLE 0x1A0F2E   /* title bar / taskbar flat fill */
-#define THEME_MAGENTA     0xFF2BD6   /* primary: focus / active / primary accent */
-#define THEME_CYAN        0x2BE8FF   /* secondary: info / links / secondary accent */
-#define THEME_VIOLET      0x8B2BFF   /* tertiary: decorative accent */
-#define THEME_GREEN       0x39FF88   /* status: success / low usage */
-#define THEME_AMBER       0xFFB02B   /* status: warning / mid usage */
-#define THEME_RED         0xFF2050   /* status: danger / high usage / close */
-#define THEME_TEXT        0xD6F6FF   /* primary body text */
-#define THEME_TEXT_DIM    0x7A6A99   /* secondary/dim text */
-#define THEME_BORDER_DIM  0x3A2255   /* unfocused border/divider */
 
 static int wp_h;
 static uint32_t *wallpaper_bmp;   /* a screen-sized image loaded from disk, or NULL = gradient */
@@ -352,17 +353,17 @@ static void draw_content(const window_t *w, int focused) {
                 int colon = -1; for (int k = 0; s[k]; k++) if (s[k] == ':') { colon = k; break; }
                 if (colon > 0) {
                     char seg[48]; int p = 0; for (int k = 0; k <= colon && p < 47; k++) seg[p++] = s[k]; seg[p] = 0;
-                    draw_text(bx, by + i*18, seg, 0x6FD3A6);
-                    draw_text(bx + (colon + 1)*font_width, by + i*18, s + colon + 1, 0xB6C2BE);
+                    draw_text(bx, by + i*18, seg, THEME_GREEN);
+                    draw_text(bx + (colon + 1)*font_width, by + i*18, s + colon + 1, THEME_TEXT_DIM);
                     continue;
                 }
             }
-            uint32_t col = (i == 0) ? 0xFFB23E                           /* heading: warm amber (echoes the wallpaper sun) */
-                         : (s[0] == 'F' && s[1] == '9') ? 0x8AA0A8       /* shortcut hint: muted */
-                         : 0xC6D0CC;                                     /* body: soft silkscreen */
+            uint32_t col = (i == 0) ? THEME_CYAN                         /* heading: neon cyan (echoes the wallpaper sun) */
+                         : (s[0] == 'F' && s[1] == '9') ? THEME_TEXT_DIM  /* shortcut hint: muted */
+                         : THEME_TEXT;                                    /* body */
             draw_text(bx, by + i*18, s, col);
         }
-        fb_fill_rect(bx, by + 16, w->w - 24, 1, 0x4A3A24);                /* dim amber rule under the heading */
+        fb_fill_rect(bx, by + 16, w->w - 24, 1, THEME_BORDER_DIM);        /* dim rule under the heading */
         break;
     }
     case KIND_FILES: {
@@ -374,7 +375,7 @@ static void draw_content(const window_t *w, int focused) {
             for (int j = 0; w->editbuf[j] && p < (int)sizeof(pr) - 2; j++) pr[p++] = w->editbuf[j];
             pr[p++] = '_';                                     /* a simple text cursor */
             pr[p] = 0;
-            draw_text(bx, by, pr, 0x6BB0FF);                   /* distinct blue: an input prompt, not the file list */
+            draw_text(bx, by, pr, THEME_CYAN);                 /* distinct: an input prompt, not the file list */
         } else if (w->fconfirm && w->fsel >= 0 && w->fsel < n) {  /* a delete is armed: replace the header with a bright confirm prompt */
             char pr[64]; int p = 0; const char *a = "Delete ";
             while (*a) pr[p++] = *a++;
@@ -382,7 +383,7 @@ static void draw_content(const window_t *w, int focused) {
             const char *b = "?  d/y=confirm  any key=cancel";
             for (int j = 0; b[j] && p < (int)sizeof(pr) - 1; j++) pr[p++] = b[j];
             pr[p] = 0;
-            draw_text(bx, by, pr, 0xF06060);                   /* bright red: this action destroys a file */
+            draw_text(bx, by, pr, THEME_RED);                  /* this action destroys a file */
         } else {
             const char *sm = g_fsort == 1 ? "size" : g_fsort == 2 ? "date" : "name";
             char hdr[96]; int hp = 0;
@@ -390,9 +391,9 @@ static void draw_content(const window_t *w, int focused) {
             for (int j = 0; base[j]; j++) hdr[hp++] = base[j];
             for (int j = 0; sm[j]; j++) hdr[hp++] = sm[j];
             hdr[hp] = 0;
-            draw_text(bx, by, hdr, 0xC6D0CC);
+            draw_text(bx, by, hdr, THEME_TEXT);
         }
-        fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, 0x3A4A50);   /* rule under the header */
+        fb_fill_rect(bx - 2, by + 17, w->w - 14, 1, THEME_BORDER_DIM);   /* rule under the header */
         int rows = (w->h - TITLEBAR_H - 48) / 18;          /* rows that fit in the body (last 18px reserved for the footer) */
         if (rows < 1) rows = 1;
         int top = 0;                                       /* scroll so the selection stays visible */
@@ -400,9 +401,9 @@ static void draw_content(const window_t *w, int focused) {
         for (int i = top; i < n && i < top + rows; i++) {
             int ry = by + 22 + (i - top)*18;
             if (i == w->fsel)                              /* highlight the selected row */
-                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0x294258);
+                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, THEME_SELECT);
             else if ((i - top) & 1)                        /* zebra striping for scanability */
-                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, 0x20282E);
+                fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, THEME_PANEL_TITLE);
             int nl = 0; while (e[i].name[nl]) nl++;
             int isdir = (nl > 0 && e[i].name[nl-1] == '/');   /* vfs marks directories with a trailing '/' */
             char line[48]; int p = 0; line[p++]=' '; line[p++]=' ';
@@ -426,11 +427,11 @@ static void draw_content(const window_t *w, int focused) {
                 }
             }
             line[p]=0;
-            uint32_t namecol = isdir ? 0xD2A24A : file_color(e[i].name);   /* dirs gold, files by type (M1332) */
+            uint32_t namecol = isdir ? THEME_AMBER : file_color(e[i].name);   /* dirs amber, files by type (M1332) */
             char nsave = line[name_end]; line[name_end] = 0;
             draw_text(bx, ry, line, namecol);                              /* name in its type tint */
             line[name_end] = nsave;
-            draw_text(bx + name_end * font_width, ry, line + name_end, 0x808890);   /* size/date in grey */
+            draw_text(bx + name_end * font_width, ry, line + name_end, THEME_TEXT_DIM);   /* size/date */
         }
         {   /* status footer: entry count + total size (M1427) */
             unsigned long tot = 0; for (int i = 0; i < n; i++) tot += e[i].size;
@@ -439,7 +440,7 @@ static void draw_content(const window_t *w, int focused) {
             const char *a = " items, "; for (int z = 0; a[z]; z++) ft[p++] = a[z];
             unsigned long kb = tot / 1024; k = 0; if (!kb) num[k++] = '0'; while (kb) { num[k++] = '0' + (int)(kb % 10); kb /= 10; } while (k) ft[p++] = num[--k];
             const char *b2 = " KB"; for (int z = 0; b2[z]; z++) ft[p++] = b2[z]; ft[p] = 0;
-            draw_text(bx, w->y + w->h - 18, ft, 0x707888);
+            draw_text(bx, w->y + w->h - 18, ft, THEME_TEXT_DIM);
         }
         break;
     }
@@ -463,7 +464,7 @@ static void draw_content(const window_t *w, int focused) {
     case KIND_CLOCK: {
         uint64_t sec = timer_ticks() / 100;
         char t[6]; u2(sec/60, t); t[2]=':'; u2(sec%60, t+3);
-        fb_text(w->x + 28, by + 18, t, 0x40FF90, 5);
+        fb_text(w->x + 28, by + 18, t, THEME_GREEN, 5);
         break;
     }
     case KIND_SYSMON: {
@@ -472,32 +473,32 @@ static void draw_content(const window_t *w, int focused) {
         int barw = w->w - 32, pct = tot ? (int)(used * 100 / tot) : 0;
         char line[64];
 
-        draw_text(bx, by, "Memory", 0x202028);
+        draw_text(bx, by, "Memory", THEME_CYAN);
         int yb = by + 18;
-        fb_fill_rect(bx, yb, barw, 14, 0xDADEE6);                    /* bar track */
-        uint32_t bc = pct < 70 ? 0x3CB371 : (pct < 90 ? 0xE0A030 : 0xD64545);
+        fb_fill_rect(bx, yb, barw, 14, THEME_PANEL_TITLE);            /* bar track */
+        uint32_t bc = pct < 70 ? THEME_GREEN : (pct < 90 ? THEME_AMBER : THEME_RED);
         fb_fill_rect(bx, yb, barw * pct / 100, 14, bc);              /* used */
-        box(bx, yb, barw, 14, 0x9098A4);
+        box(bx, yb, barw, 14, THEME_BORDER_DIM);
         int p = 0;
         p += unum(used/(1024*1024), line+p); line[p++]=' '; line[p++]='/'; line[p++]=' ';
         p += unum(tot/(1024*1024), line+p);
         const char *u = " MiB used"; for (int i=0;u[i];i++) line[p++]=u[i]; line[p]=0;
-        draw_text(bx, yb + 20, line, 0x303840);
+        draw_text(bx, yb + 20, line, THEME_TEXT);
 
-        draw_text(bx, yb + 46, "Tasks", 0x202028);
+        draw_text(bx, yb + 46, "Tasks", THEME_CYAN);
         int nt = task_count();
         for (int i = 0; i < nt && i < 20; i++)                        /* one block per task */
-            fb_fill_rect(bx + 60 + i*10, yb + 46, 7, 11, 0x4A90E2);
+            fb_fill_rect(bx + 60 + i*10, yb + 46, 7, 11, THEME_MAGENTA);
         p = 0; p += unum((uint64_t)nt, line+p); line[p]=0;
-        draw_text(bx + 60 + (nt<20?nt:20)*10 + 6, yb + 46, line, 0x303840);
+        draw_text(bx + 60 + (nt<20?nt:20)*10 + 6, yb + 46, line, THEME_TEXT);
 
         char up[40]; p = 0;
         const char *uh = "Uptime "; for (int i=0;uh[i];i++) up[p++]=uh[i];
         p += unum(timer_ticks()/100, up+p); up[p++]='s'; up[p]=0;
-        draw_text(bx, yb + 72, up, 0x303840);
+        draw_text(bx, yb + 72, up, THEME_TEXT);
 
         /* network: our IP + gateway (a connected, internet-capable OS) */
-        draw_text(bx, yb + 98, "Network", 0x202028);
+        draw_text(bx, yb + 98, "Network", THEME_CYAN);
         const uint8_t *ip = net_ip(), *gw = net_gateway();
         char net[64]; p = 0;
         const char *ih = "IP "; for (int i=0;ih[i];i++) net[p++]=ih[i];
@@ -505,28 +506,28 @@ static void draw_content(const window_t *w, int focused) {
         const char *gh = "  gw "; for (int i=0;gh[i];i++) net[p++]=gh[i];
         for (int k=0;k<4;k++){ p+=unum(gw[k],net+p); if(k<3)net[p++]='.'; }
         net[p]=0;
-        draw_text(bx, yb + 116, net, 0x303840);
+        draw_text(bx, yb + 116, net, THEME_TEXT);
 
         /* Disk (FAT32 volume). vfs_df() scans the whole FAT (disk I/O), so cache
          * it and refresh only every ~5s rather than on every render frame. */
         static uint64_t df_free, df_total, df_at = (uint64_t)-1;
         uint64_t nowt = timer_ticks();
         if (df_at == (uint64_t)-1 || nowt - df_at > 500) { vfs_df(&df_free, &df_total); df_at = nowt; }
-        draw_text(bx, yb + 142, "Disk", 0x202028);
+        draw_text(bx, yb + 142, "Disk", THEME_CYAN);
         if (df_total) {
             uint64_t dused = df_total > df_free ? df_total - df_free : 0;
             int dpct = (int)(dused * 100 / df_total), yd = yb + 160;
-            fb_fill_rect(bx, yd, barw, 14, 0xDADEE6);
-            uint32_t dc = dpct < 70 ? 0x3CB371 : (dpct < 90 ? 0xE0A030 : 0xD64545);
+            fb_fill_rect(bx, yd, barw, 14, THEME_PANEL_TITLE);
+            uint32_t dc = dpct < 70 ? THEME_GREEN : (dpct < 90 ? THEME_AMBER : THEME_RED);
             fb_fill_rect(bx, yd, barw * dpct / 100, 14, dc);
-            box(bx, yd, barw, 14, 0x9098A4);
+            box(bx, yd, barw, 14, THEME_BORDER_DIM);
             p = 0;
             p += unum(dused/(1024*1024), line+p); line[p++]=' '; line[p++]='/'; line[p++]=' ';
             p += unum(df_total/(1024*1024), line+p);
             const char *du = " MiB used"; for (int i=0;du[i];i++) line[p++]=du[i]; line[p]=0;
-            draw_text(bx, yd + 20, line, 0x303840);
+            draw_text(bx, yd + 20, line, THEME_TEXT);
         } else {
-            draw_text(bx, yb + 160, "no disk", 0x303840);
+            draw_text(bx, yb + 160, "no disk", THEME_TEXT_DIM);
         }
         break;
     }
@@ -538,12 +539,12 @@ static void draw_content(const window_t *w, int focused) {
             "scriptable shell . editor",
             "calc . image viewer . games" };
         for (unsigned i = 0; i < sizeof(L)/sizeof(L[0]); i++)
-            draw_text(bx, by + i*16, L[i], (i == 0 || i >= 4) ? 0xFFB23E : 0xC6D0CC);   /* heading + tech-stack lines in accent blue (M1334) */
-        fb_fill_rect(bx, by + 14, w->w - 24, 1, 0x3A4A50);                  /* rule under the heading */
+            draw_text(bx, by + i*16, L[i], (i == 0 || i >= 4) ? THEME_CYAN : THEME_TEXT);   /* heading + tech-stack lines (M1334) */
+        fb_fill_rect(bx, by + 14, w->w - 24, 1, THEME_BORDER_DIM);          /* rule under the heading */
         break;
     }
     default:
-        draw_text(bx, by, w->title, 0x303840);
+        draw_text(bx, by, w->title, THEME_TEXT);
         break;
     }
 }
@@ -562,35 +563,35 @@ static void draw_icon(int kind, int x, int y) {
     int cx = x + 7, cy = y + 7;
     switch (kind) {
     case KIND_FILES:
-        fb_fill_rect(x + 1, y + 3, 6, 2, 0xC99A3A);          /* folder tab */
-        fb_fill_rect(x + 1, y + 4, 12, 8, 0xF0C674);         /* folder body */
-        fb_fill_rect(x + 1, y + 4, 12, 1, 0xFFE6B0);         /* top highlight */
+        fb_fill_rect(x + 1, y + 3, 6, 2, 0xB8860A);          /* folder tab */
+        fb_fill_rect(x + 1, y + 4, 12, 8, THEME_AMBER);      /* folder body */
+        fb_fill_rect(x + 1, y + 4, 12, 1, THEME_TEXT);       /* top highlight */
         break;
     case KIND_BROWSER:
-        fcircle(cx, cy, 6, 0x68B6E6);                        /* globe */
-        fb_fill_rect(x + 1, cy, 12, 1, 0xEAF4FF);            /* equator */
-        fb_fill_rect(cx, y + 1, 1, 12, 0xEAF4FF);            /* meridian */
+        fcircle(cx, cy, 6, THEME_CYAN);                      /* globe */
+        fb_fill_rect(x + 1, cy, 12, 1, THEME_TEXT);          /* equator */
+        fb_fill_rect(cx, y + 1, 1, 12, THEME_TEXT);          /* meridian */
         break;
     case KIND_CLOCK:
-        fcircle(cx, cy, 6, 0xF2F2F2);                        /* clock face */
-        fb_fill_rect(cx, cy - 4, 1, 5, 0x2A2A33);            /* minute hand */
-        fb_fill_rect(cx, cy, 4, 1, 0x2A2A33);                /* hour hand */
+        fcircle(cx, cy, 6, THEME_TEXT);                      /* clock face */
+        fb_fill_rect(cx, cy - 4, 1, 5, THEME_VOID);          /* minute hand */
+        fb_fill_rect(cx, cy, 4, 1, THEME_VOID);              /* hour hand */
         break;
     case KIND_SYSMON:
-        fb_fill_rect(x + 2,  y + 8, 2, 4, 0x3CB371);         /* bar chart */
-        fb_fill_rect(x + 6,  y + 5, 2, 7, 0xE0A030);
-        fb_fill_rect(x + 10, y + 3, 2, 9, 0x6BB0FF);
+        fb_fill_rect(x + 2,  y + 8, 2, 4, THEME_GREEN);      /* bar chart */
+        fb_fill_rect(x + 6,  y + 5, 2, 7, THEME_AMBER);
+        fb_fill_rect(x + 10, y + 3, 2, 9, THEME_CYAN);
         break;
     case KIND_WELCOME:
     case KIND_ABOUT:
-        fcircle(cx, cy, 6, 0xF2F2F2);                        /* info badge */
-        fb_fill_rect(cx, y + 3, 1, 2, 0x2C66D6);             /* i dot */
-        fb_fill_rect(cx, y + 6, 1, 5, 0x2C66D6);             /* i stem */
+        fcircle(cx, cy, 6, THEME_TEXT);                      /* info badge */
+        fb_fill_rect(cx, y + 3, 1, 2, THEME_MAGENTA);        /* i dot */
+        fb_fill_rect(cx, y + 6, 1, 5, THEME_MAGENTA);        /* i stem */
         break;
     default:                                                 /* KIND_APP etc.: a window glyph */
-        fb_fill_rect(x + 1, y + 2, 12, 10, 0xE8ECF4);
-        fb_fill_rect(x + 1, y + 2, 12, 3, 0x33415A);
-        box(x + 1, y + 2, 12, 10, 0x2A3344);
+        fb_fill_rect(x + 1, y + 2, 12, 10, THEME_TEXT_DIM);
+        fb_fill_rect(x + 1, y + 2, 12, 3, THEME_MAGENTA);
+        box(x + 1, y + 2, 12, 10, THEME_BORDER_DIM);
         break;
     }
 }
@@ -689,7 +690,7 @@ int desktop_load_image(const char *name, unsigned *buf, int cw, int ch, int *out
     for (int y = 0; y < ch; y++)
         for (int x = 0; x < cw; x++) {
             int rx = x - ox, ry = y - oy;
-            unsigned px = 0x101418;                         /* letterbox background */
+            unsigned px = THEME_VOID;                        /* letterbox background */
             if (rx >= 0 && rx < dw && ry >= 0 && ry < dh) {
                 int sx = (int)((long)rx * w / dw), sy = (int)((long)ry * h / dh);
                 const uint8_t *p = &rgba[((long)sy * w + sx) * 4];   /* RGBA -> 0x00RRGGBB */
@@ -900,19 +901,19 @@ static void render_scene(void) {
 
     if (menu_open) {
         int mh = MENU_PERCOL * MENU_ITEM_H + 4, mw = MENU_COLS * MENU_W, my0 = ty - mh;
-        vgrad(start_x, my0, mw, mh, 0x262636, 0x14141D);             /* gradient panel */
-        fb_fill_rect(start_x, my0, mw, 2, 0x4A90E2);                 /* bright top accent */
+        fb_fill_rect(start_x, my0, mw, mh, THEME_PANEL);             /* flat panel */
+        fb_fill_rect(start_x, my0, mw, 2, THEME_CYAN);               /* bright top accent */
         for (int c = 1; c < MENU_COLS; c++)                          /* faint column rules */
-            fb_fill_rect(start_x + c * MENU_W, my0 + 4, 1, mh - 8, 0x30303F);
-        box(start_x, my0, mw, mh, 0x2D6CDF);
+            fb_fill_rect(start_x + c * MENU_W, my0 + 4, 1, mh - 8, THEME_BORDER_DIM);
+        glow_border(start_x, my0, mw, mh, THEME_CYAN, THEME_VOID);
         for (int i = 0; i < MENU_N; i++) {
             int col = i / MENU_PERCOL, row = i % MENU_PERCOL;
             int ix = start_x + col * MENU_W, iy = my0 + 4 + row * MENU_ITEM_H;
-            if (i == menu_sel) {                                     /* keyboard highlight: gradient bar + left accent */
-                vgrad(ix + 2, iy, MENU_W - 4, MENU_ITEM_H, 0x3A78D8, 0x2C66D6);
-                fb_fill_rect(ix + 2, iy, 2, MENU_ITEM_H, 0x8FC0FF);
+            if (i == menu_sel) {                                     /* keyboard highlight: dim magenta bar + left accent */
+                fb_fill_rect(ix + 2, iy, MENU_W - 4, MENU_ITEM_H, THEME_SELECT);
+                fb_fill_rect(ix + 2, iy, 2, MENU_ITEM_H, THEME_MAGENTA);
             }
-            draw_text(ix + 12, iy + 2, menu[i].label, i == menu_sel ? 0xFFFFFF : 0xD0D8F0);
+            draw_text(ix + 12, iy + 2, menu[i].label, i == menu_sel ? THEME_TEXT : THEME_TEXT_DIM);
         }
     }
 
@@ -932,17 +933,17 @@ static void render_scene(void) {
         };
         const char **rows = (ctx_kind == 1) ? desk_rows : win_rows;
         int nr = ctx_nrows(), cw = ctx_w(), ch = nr * CTX_ROW_H + 4;
-        vgrad(ctx_x, ctx_y, cw, ch, 0x262636, 0x14141D);     /* gradient panel (matches the Apps menu) */
-        fb_fill_rect(ctx_x, ctx_y, cw, 2, 0x4A90E2);         /* bright top accent */
-        box(ctx_x, ctx_y, cw, ch, 0x2D6CDF);
+        fb_fill_rect(ctx_x, ctx_y, cw, ch, THEME_PANEL);     /* flat panel (matches the Apps menu) */
+        fb_fill_rect(ctx_x, ctx_y, cw, 2, THEME_CYAN);       /* bright top accent */
+        glow_border(ctx_x, ctx_y, cw, ch, THEME_CYAN, THEME_VOID);
         int sel = ctx_row_at(mouse_x(), mouse_y());          /* row under the cursor (-1 = none) */
         for (int i = 0; i < nr; i++) {
             int iy = ctx_y + 2 + i * CTX_ROW_H;
-            if (i == sel) {                                      /* hover highlight: gradient bar + left accent */
-                vgrad(ctx_x + 2, iy, cw - 4, CTX_ROW_H, 0x3A78D8, 0x2C66D6);
-                fb_fill_rect(ctx_x + 2, iy, 2, CTX_ROW_H, 0x8FC0FF);
+            if (i == sel) {                                      /* hover highlight: dim magenta bar + left accent */
+                fb_fill_rect(ctx_x + 2, iy, cw - 4, CTX_ROW_H, THEME_SELECT);
+                fb_fill_rect(ctx_x + 2, iy, 2, CTX_ROW_H, THEME_MAGENTA);
             }
-            draw_text(ctx_x + 12, iy + 3, rows[i], i == sel ? 0xFFFFFF : 0xD0D8F0);
+            draw_text(ctx_x + 12, iy + 3, rows[i], i == sel ? THEME_TEXT : THEME_TEXT_DIM);
         }
     }
 
@@ -982,13 +983,13 @@ static void render_scene(void) {
         int n = (int)(sizeof(H) / sizeof(H[0]));
         int pw = 380, ph = n * 18 + 40;
         int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
-        vgrad(px, py, pw, ph, 0x1C1C28, 0x12121A);           /* subtly graded panel body */
-        box(px, py, pw, ph, 0x2D6CDF);
-        vgrad(px, py, pw, 26, 0x3A78D8, 0x2C66D6);            /* title bar */
-        fb_fill_rect(px, py, pw, 1, lerp(0x3A78D8, 0xFFFFFF, 1, 2));
-        draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Keyboard Shortcuts", 0xFFFFFF);
+        fb_fill_rect(px, py, pw, ph, THEME_PANEL);           /* flat panel body */
+        glow_border(px, py, pw, ph, THEME_CYAN, THEME_VOID);
+        fb_fill_rect(px, py, pw, 26, THEME_PANEL_TITLE);      /* title bar */
+        fb_fill_rect(px, py, pw, 1, THEME_CYAN);
+        draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Keyboard Shortcuts", THEME_TEXT);
         for (int i = 0; i < n; i++)
-            draw_text(px + 16, py + 34 + i * 18, H[i], 0xCFD8EC);
+            draw_text(px + 16, py + 34 + i * 18, H[i], THEME_TEXT);
     }
 
     /* F7 window switcher: a centered panel listing every window (incl. minimized,
@@ -1000,18 +1001,18 @@ static void render_scene(void) {
         int rows = win_count > 0 ? win_count : 1;
         int pw = 320, ph = rows * MENU_ITEM_H + 40;
         int px = (screen_w - pw) / 2, py = (screen_h - TASKBAR_H - ph) / 2;
-        vgrad(px, py, pw, ph, 0x1C1C28, 0x12121A);           /* subtly graded panel body */
-        box(px, py, pw, ph, 0x2D6CDF);
-        vgrad(px, py, pw, 26, 0x3A78D8, 0x2C66D6);            /* title bar */
-        fb_fill_rect(px, py, pw, 1, lerp(0x3A78D8, 0xFFFFFF, 1, 2));
-        draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Windows", 0xFFFFFF);
+        fb_fill_rect(px, py, pw, ph, THEME_PANEL);           /* flat panel body */
+        glow_border(px, py, pw, ph, THEME_CYAN, THEME_VOID);
+        fb_fill_rect(px, py, pw, 26, THEME_PANEL_TITLE);      /* title bar */
+        fb_fill_rect(px, py, pw, 1, THEME_CYAN);
+        draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Windows", THEME_TEXT);
         if (win_count == 0) {
-            draw_text(px + 16, py + 34, "(no windows)", 0x9FB0CC);
+            draw_text(px + 16, py + 34, "(no windows)", THEME_TEXT_DIM);
         } else for (int i = 0; i < win_count; i++) {
             int iy = py + 30 + i * MENU_ITEM_H;
-            if (i == sw_sel) {                                /* keyboard highlight: gradient bar + left accent */
-                vgrad(px + 4, iy, pw - 8, MENU_ITEM_H, 0x3A78D8, 0x2C66D6);
-                fb_fill_rect(px + 4, iy, 2, MENU_ITEM_H, 0x8FC0FF);
+            if (i == sw_sel) {                                /* keyboard highlight: dim magenta bar + left accent */
+                fb_fill_rect(px + 4, iy, pw - 8, MENU_ITEM_H, THEME_SELECT);
+                fb_fill_rect(px + 4, iy, 2, MENU_ITEM_H, THEME_MAGENTA);
             }
             char t[40]; int n = 0; const char *s = windows[i].title;
             while (s && s[n] && n < 28) { t[n] = s[n]; n++; }
@@ -1020,7 +1021,7 @@ static void render_scene(void) {
                 for (int j = 0; m[j] && n < (int)sizeof(t) - 1; j++) t[n++] = m[j];
             }
             t[n] = 0;
-            draw_text(px + 16, iy + 4, t, i == sw_sel ? 0xFFFFFF : 0xD0D8F0);
+            draw_text(px + 16, iy + 4, t, i == sw_sel ? THEME_TEXT : THEME_TEXT_DIM);
         }
     }
 }
@@ -1200,7 +1201,7 @@ static void make_app_window(app_t *a) {
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
     windows[win_count++] = (window_t){ x, y,
         app_cols()*font_width + 14, app_rows()*font_height + TITLEBAR_H + 14,
-        0x0A0A0A, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* maximized,sx,sy,sw,sh,fsel,fconfirm, editing,editbuf,editlen, minimized */
+        THEME_PANEL, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* maximized,sx,sy,sw,sh,fsel,fconfirm, editing,editbuf,editlen, minimized */
 }
 
 /* Open a browser window at `url` (NULL -> its default). */
@@ -1383,11 +1384,11 @@ static void spawn_app(int kind, const char *prog) {
     window_t w = { 0 };
     w.x = x; w.y = y; w.kind = kind;
     switch (kind) {
-    case KIND_FILES:   w.w=500; w.h=200; w.body=0x1A2228; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
-    case KIND_WELCOME: w.w=360; w.h=290; w.body=0x1A2228; w.title="Welcome"; break;   /* dark slate panel (M1476) */
-    case KIND_ABOUT:   w.w=300; w.h=196; w.body=0x1A2228; w.title="About";   break;
-    case KIND_SYSMON:  w.w=320; w.h=272; w.body=0xF0F4F8; w.title="System Info"; break;
-    default:           w.w=240; w.h=150; w.body=0xF4F0E8; w.title="Window";  break;
+    case KIND_FILES:   w.w=500; w.h=200; w.body=THEME_PANEL; w.title="Files";   break;  /* wide enough for the d-delete / w-wallpaper hint + confirm prompt */
+    case KIND_WELCOME: w.w=360; w.h=290; w.body=THEME_PANEL; w.title="Welcome"; break;   /* dark slate panel (M1476) */
+    case KIND_ABOUT:   w.w=300; w.h=196; w.body=THEME_PANEL; w.title="About";   break;
+    case KIND_SYSMON:  w.w=320; w.h=272; w.body=THEME_PANEL; w.title="System Info"; break;
+    default:           w.w=240; w.h=150; w.body=THEME_PANEL; w.title="Window";  break;
     }
     windows[win_count++] = w;
 }
@@ -1405,8 +1406,8 @@ void desktop_run(void) {
     load_wallpaper();                    /* WALL.PNG from disk, else the gradient */
     start_y = screen_h - TASKBAR_H + 5;
 
-    windows[win_count++] = (window_t){ 60, 70, 360, 290, 0x1A2228, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* dark slate (M1476) */
-    windows[win_count++] = (window_t){ 60, 300, 500, 200, 0x1A2228, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
+    windows[win_count++] = (window_t){ 60, 70, 360, 290, THEME_PANEL, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* dark slate (M1476) */
+    windows[win_count++] = (window_t){ 60, 300, 500, 200, THEME_PANEL, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
     app_spawn_named("shell");           /* a real ring-3 shell (WM gives it a
                                          * window below; spawn more via Apps) */
 
