@@ -227,35 +227,21 @@ static void vgrad(int x, int y, int w, int h, uint32_t top, uint32_t bot) {
  * ONCE and writes each row directly — a per-pixel fb_get_pixel+fb_pixel call
  * pair here was ~38% of all kernel-mode time during a window-drag-heavy
  * profiling run (this runs 4x, full-window-sized, on every draw_window()). */
-static void darken(int x, int y, int w, int h, int pct) {
-    fb_darken_rect(x, y, w, h, pct);
+/* An N-px unfilled rectangle outline (box() below is the 1px case). */
+static void stroke_rect(int x, int y, int w, int h, int thick, uint32_t c) {
+    fb_fill_rect(x, y, w, thick, c);
+    fb_fill_rect(x, y + h - thick, w, thick, c);
+    fb_fill_rect(x, y, thick, h, c);
+    fb_fill_rect(x + w - thick, y, thick, h, c);
 }
-/* Corner-pixel inset per row from the corner (index 0 = outermost row): a
- * quarter-circle of radius 8 for noticeably rounder, more modern window corners. */
-static const int corner[] = { 8, 5, 3, 2, 2, 1, 1, 1 };
-#define CORNER_R ((int)(sizeof(corner)/sizeof(corner[0])))
-
-/* Round the 4 corners of a small chrome element (taskbar chip/button, close box)
- * by repainting the corner pixels with the panel behind it — sampled from that
- * panel's vertical gradient (bg0 at panel_y .. bg1 at panel_y+panel_h-1) — so the
- * taskbar furniture and close button echo the windows' rounded corners for one
- * cohesive look. A 2px quarter-circle: subtle at chip scale, but it kills the
- * boxy hard corners. */
-static const int corner2[] = { 2, 1 };
-#define CORNER2_R ((int)(sizeof(corner2)/sizeof(corner2[0])))
-static void round_chrome(int x, int y, int w, int h, uint32_t bg0, uint32_t bg1, int panel_y, int panel_h) {
-    if (panel_h <= 1) panel_h = 2;
-    for (int j = 0; j < CORNER2_R; j++) {
-        int in = corner2[j];
-        uint32_t ct = lerp(bg0, bg1, (y + j) - panel_y, panel_h - 1);
-        uint32_t cb = lerp(bg0, bg1, (y + h - 1 - j) - panel_y, panel_h - 1);
-        for (int i = 0; i < in; i++) {
-            fb_pixel(x + i, y + j, ct);
-            fb_pixel(x + w - 1 - i, y + j, ct);
-            fb_pixel(x + i, y + h - 1 - j, cb);
-            fb_pixel(x + w - 1 - i, y + h - 1 - j, cb);
-        }
-    }
+/* Cheap glow approximation (fb.c has no alpha-blend primitive to do a real
+ * one): a dim 1px halo just outside the rect, then a bright 2px edge on the
+ * rect's own bounds — two solid strokes, not a blend, but it reads as glow
+ * at desktop scale. Replaces the old rounded-corner + soft-drop-shadow look
+ * for the sharp/HUD cyberpunk theme. */
+static void glow_border(int x, int y, int w, int h, uint32_t bright, uint32_t dim) {
+    stroke_rect(x - 1, y - 1, w + 2, h + 2, 1, dim);
+    stroke_rect(x, y, w, h, 2, bright);
 }
 
 #define WP_TOP 0x050208   /* fallback gradient (no cached wallpaper_bmp yet/OOM) — matches make_wallpaper's void sky */
@@ -284,13 +270,6 @@ static void round_chrome(int x, int y, int w, int h, uint32_t bg0, uint32_t bg1,
 static int wp_h;
 static uint32_t *wallpaper_bmp;   /* a screen-sized image loaded from disk, or NULL = gradient */
 static volatile int wallpaper_repaint;   /* set by desktop_set_wallpaper (off-task) to force a redraw */
-/* Background colour at (x,y): the loaded wallpaper if present, else the gradient. */
-static uint32_t wallpaper_at(int x, int y) {
-    if (wallpaper_bmp && x >= 0 && x < screen_w && y >= 0 && y < screen_h)
-        return wallpaper_bmp[(size_t)y * screen_w + x];
-    int yy = y < 0 ? 0 : (y >= wp_h ? wp_h - 1 : y);
-    return lerp(WP_TOP, WP_BOT, yy, wp_h - 1);
-}
 static void u2(uint64_t v, char *o) { o[0]='0'+(v/10)%10; o[1]='0'+v%10; o[2]=0; }
 static int lc_ascii(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }   /* ASCII lowercase */
 /* Width of the taskbar clock pill ("YYYY-MM-DD  HH:MM:SS" = 20 chars + padding).
@@ -619,54 +598,37 @@ static void draw_icon(int kind, int x, int y) {
 static void draw_window(const window_t *w, int focused) {
     int x = w->x, y = w->y, ww = w->w, hh = w->h;
 
-    /* soft drop shadow: feathered, offset layers (down-right) — darker near the
-     * window edge and fading out, for real depth. The layers overlap and darken
-     * multiplicatively, so the band nearest the window is darkest and the outer
-     * fringe is faint, approximating a Gaussian-ish soft shadow. */
-    darken(x + 11, y + 13, ww, hh, 90);
-    darken(x + 8,  y + 10, ww, hh, 86);
-    darken(x + 5,  y + 7,  ww, hh, 82);
-    darken(x + 2,  y + 4,  ww, hh, 78);
-
     /* body */
     fb_fill_rect(x, y, ww, hh, w->body);
     fb_set_clip(x, y, x + ww, y + hh);    /* bound this window's content to its rect — a long line / future layout can't bleed onto a neighbour or the taskbar (the per-kind min-sizes above are belt-and-braces) */
     draw_content(w, focused);
     fb_reset_clip();
 
-    /* gradient title bar (brighter when focused) with a top sheen line */
-    uint32_t t0 = focused ? 0x46505E : 0x343A44;
-    uint32_t t1 = focused ? 0x28323E : 0x232830;
-    vgrad(x, y, ww, TITLEBAR_H, t0, t1);
-    fb_fill_rect(x, y, ww, 1, lerp(t0, 0xFFFFFF, 2, 3));   /* bright top sheen */
+    /* flat title bar + a neon underline (replaces the soft gradient + sheen —
+     * the sheen line was already invisible, overpainted by the border drawn
+     * after it, so this loses nothing) */
+    fb_fill_rect(x, y, ww, TITLEBAR_H, focused ? THEME_PANEL_TITLE : THEME_PANEL);
+    fb_fill_rect(x, y + TITLEBAR_H - 1, ww, 1, focused ? THEME_MAGENTA : THEME_BORDER_DIM);
     const char *titletext = (w->kind == KIND_BROWSER && w->app) ? browser_title((browser_t *)w->app) : w->title;   /* browser windows show the page <title> / document.title */
     draw_icon(w->kind, x + 8, y + (TITLEBAR_H - ICON_SZ) / 2);                /* per-kind icon */
-    draw_text(x + 28, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, focused ? 0xFFFFFF : 0xAEB6C2);
+    draw_text(x + 28, y + (TITLEBAR_H - font_height) / 2 + 1, titletext, focused ? THEME_TEXT : THEME_TEXT_DIM);
 
-    /* close button: a rounded red chip with a top sheen; calmer when unfocused */
+    /* close button: a sharp square, thin neon border, "x" glyph — no gradient
+     * chip, no rounding. Geometry (14x14 at x+ww-21,y+6) now matches its
+     * mouse hit-test exactly (they'd drifted apart under the old rounded
+     * chip — see the hit-test near in_rect(mx,my,w->x+w->w-21,...) below). */
     int cbx = x + ww - 21, cby = y + 6;
-    uint32_t cc0 = focused ? 0xFF7B7B : 0xCF6A6A, cc1 = focused ? 0xD42B2B : 0x9E3232;
-    vgrad(cbx, cby, 14, 14, cc0, cc1);
-    fb_fill_rect(cbx, cby, 14, 1, lerp(cc0, 0xFFFFFF, 1, 2));
-    round_chrome(cbx, cby, 14, 14, t0, t1, y, TITLEBAR_H);
-    draw_text(cbx + 3, cby - 1, "x", 0xFFFFFF);
+    fb_fill_rect(cbx, cby, 14, 14, THEME_VOID);
+    stroke_rect(cbx, cby, 14, 14, 1, focused ? THEME_RED : THEME_BORDER_DIM);
+    draw_text(cbx + 3, cby - 1, "x", focused ? THEME_TEXT : THEME_TEXT_DIM);
 
     /* resize grip hatching */
     for (int i = 4; i < GRIP; i += 4)
-        fb_fill_rect(x + ww - i, y + hh - 3, i - 2, 2, 0x9098A4);
+        fb_fill_rect(x + ww - i, y + hh - 3, i - 2, 2, THEME_BORDER_DIM);
 
-    /* beveled border: light inner highlight, dark outer edge + rounded corners */
-    box(x, y, ww, hh, 0x0A0E16);
-    fb_fill_rect(x + 1, y + TITLEBAR_H, ww - 2, 1, focused ? 0x1B3F86 : 0x2A2F39);
-    for (int j = 0; j < CORNER_R; j++) {              /* round the 4 corners */
-        int in = corner[j];
-        for (int i = 0; i < in; i++) {
-            fb_pixel(x + i, y + j, wallpaper_at(x + i, y + j));
-            fb_pixel(x + ww - 1 - i, y + j, wallpaper_at(x + ww - 1 - i, y + j));
-            fb_pixel(x + i, y + hh - 1 - j, wallpaper_at(x + i, y + hh - 1 - j));
-            fb_pixel(x + ww - 1 - i, y + hh - 1 - j, wallpaper_at(x + ww - 1 - i, y + hh - 1 - j));
-        }
-    }
+    /* sharp border + a dim outer glow line — no rounding, no drop shadow */
+    glow_border(x, y, ww, hh, focused ? THEME_MAGENTA : THEME_BORDER_DIM, THEME_VOID);
+    fb_fill_rect(x + 1, y + TITLEBAR_H, ww - 2, 1, focused ? THEME_MAGENTA : THEME_BORDER_DIM);
 }
 
 /* Decode image file `name` into a freshly-allocated screen-sized 0x00RRGGBB
@@ -879,11 +841,10 @@ static void draw_clock_pill(void) {
     u2((uint64_t)tm.hour, clk+q); q+=2; clk[q++]=':';
     u2((uint64_t)tm.min,  clk+q); q+=2; clk[q++]=':';
     u2((uint64_t)tm.sec,  clk+q); q+=2; clk[q]=0;
-    int clkw = clk_pill_w(), clkx = screen_w - clkw - 8, ty = screen_h - TASKBAR_H;
-    fb_fill_rect(clkx, start_y, clkw, start_h, 0x10151E);
-    box(clkx, start_y, clkw, start_h, 0x33415A);
-    round_chrome(clkx, start_y, clkw, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
-    draw_text(clkx + 14, start_y + 4, clk, 0x9FC0F0);
+    int clkw = clk_pill_w(), clkx = screen_w - clkw - 8;
+    fb_fill_rect(clkx, start_y, clkw, start_h, THEME_PANEL_TITLE);
+    glow_border(clkx, start_y, clkw, start_h, THEME_CYAN, THEME_VOID);
+    draw_text(clkx + 14, start_y + 4, clk, THEME_TEXT);
 }
 
 /* Render the whole scene (wallpaper, windows, taskbar — but NOT the cursor)
@@ -901,23 +862,20 @@ static void render_scene(void) {
         if (!windows[i].minimized)                          /* minimized = hidden to its chip */
             draw_window(&windows[i], i == win_count - 1);
 
-    /* taskbar: gradient panel with a bright accent line on top */
+    /* taskbar: flat panel with a bright neon accent line on top */
     int ty = screen_h - TASKBAR_H;
-    vgrad(0, ty, screen_w, TASKBAR_H, 0x222C3C, 0x0D1119);
-    fb_fill_rect(0, ty, screen_w, 2, 0x4A90E2);
+    fb_fill_rect(0, ty, screen_w, TASKBAR_H, THEME_PANEL_TITLE);
+    fb_fill_rect(0, ty, screen_w, 2, THEME_CYAN);
 
-    /* Apps button: gradient + bevel */
-    uint32_t a0 = menu_open ? 0x6BA6F5 : 0x4A90E2, a1 = menu_open ? 0x3A78D8 : 0x2C66D6;
-    vgrad(start_x, start_y, start_w, start_h, a0, a1);
-    fb_fill_rect(start_x, start_y, start_w, 1, lerp(a0, 0xFFFFFF, 1, 2));
-    box(start_x, start_y, start_w, start_h, 0x18345E);
-    round_chrome(start_x, start_y, start_w, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
+    /* Apps button: flat fill + neon glow border, brighter (magenta) when the menu is open */
+    fb_fill_rect(start_x, start_y, start_w, start_h, menu_open ? THEME_PANEL : THEME_PANEL_TITLE);
+    glow_border(start_x, start_y, start_w, start_h, menu_open ? THEME_MAGENTA : THEME_CYAN, THEME_VOID);
     int gi_x = start_x + 9, gi_y = start_y + (start_h - 10) / 2;  /* 2x2 "apps" grid icon */
-    fb_fill_rect(gi_x,     gi_y,     4, 4, 0xFFFFFF);
-    fb_fill_rect(gi_x + 6, gi_y,     4, 4, 0xFFFFFF);
-    fb_fill_rect(gi_x,     gi_y + 6, 4, 4, 0xFFFFFF);
-    fb_fill_rect(gi_x + 6, gi_y + 6, 4, 4, 0xFFFFFF);
-    draw_text(start_x + 26, start_y + 4, "Apps", 0xFFFFFF);
+    fb_fill_rect(gi_x,     gi_y,     4, 4, THEME_TEXT);
+    fb_fill_rect(gi_x + 6, gi_y,     4, 4, THEME_TEXT);
+    fb_fill_rect(gi_x,     gi_y + 6, 4, 4, THEME_TEXT);
+    fb_fill_rect(gi_x + 6, gi_y + 6, 4, 4, THEME_TEXT);
+    draw_text(start_x + 26, start_y + 4, "Apps", THEME_TEXT);
 
     /* real-time clock (RTC) pill on the right — drawn by draw_clock_pill()
      * below (also called standalone by the once-a-second fast path in the
@@ -931,14 +889,12 @@ static void render_scene(void) {
         if (cx + TB_CHIPW > clkx - 8) break;                  /* out of room */
         int foc = (i == win_count - 1);
         int mini = windows[i].minimized;                      /* hidden: dim its chip */
-        vgrad(cx, start_y, TB_CHIPW, start_h, foc ? 0x3A78D8 : (mini ? 0x1B222E : 0x2A3344),
-              foc ? 0x2C66D6 : 0x161D29);
-        box(cx, start_y, TB_CHIPW, start_h, foc ? 0x4A90E2 : 0x33415A);
-        round_chrome(cx, start_y, TB_CHIPW, start_h, 0x222C3C, 0x0D1119, ty, TASKBAR_H);
+        fb_fill_rect(cx, start_y, TB_CHIPW, start_h, foc ? THEME_PANEL_TITLE : THEME_PANEL);
+        glow_border(cx, start_y, TB_CHIPW, start_h, foc ? THEME_MAGENTA : THEME_BORDER_DIM, THEME_VOID);
         draw_icon(windows[i].kind, cx + 6, start_y + (start_h - ICON_SZ) / 2);   /* per-kind icon */
         char t[18]; int n = 0; const char *s = windows[i].title;
         while (s && s[n] && n < 12) { t[n] = s[n]; n++; } t[n] = 0;
-        draw_text(cx + 26, start_y + 4, t, foc ? 0xFFFFFF : (mini ? 0x6B7689 : 0xAEB8C8));
+        draw_text(cx + 26, start_y + 4, t, mini ? THEME_TEXT_DIM : THEME_TEXT);
     }
     draw_clock_pill();
 
@@ -1789,7 +1745,7 @@ void desktop_run(void) {
                     window_t *w = &windows[i];
                     if (w->minimized) continue;                 /* hidden: not clickable */
                     if (!in_rect(mx, my, w->x, w->y, w->w, w->h)) continue;
-                    if (in_rect(mx, my, w->x + w->w - 20, w->y + 7, 12, 12)) {
+                    if (in_rect(mx, my, w->x + w->w - 21, w->y + 6, 14, 14)) {   /* matches the drawn close-button rect exactly (draw_window) */
                         if (w->kind == KIND_APP && w->app)
                             app_request_kill((app_t *)w->app);  /* app self-exits; reap loop drops the window */
                         else
