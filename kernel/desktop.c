@@ -291,6 +291,19 @@ static void hud_corners(int x, int y, int w, int h, int len, uint32_t c) {
     fb_fill_rect(x, y + h - 1, len, 1, c);             fb_fill_rect(x, y + h - len, 1, len, c);
     fb_fill_rect(x + w - len, y + h - 1, len, 1, c);   fb_fill_rect(x + w - 1, y + h - len, 1, len, c);
 }
+/* A 2x2 ordered (checkerboard) dither between two close shades — a genuine
+ * limited-palette-era depth technique (how old low-color hardware faked more
+ * shades), not a blur/gradient. At native screenshot resolution this reads as
+ * a fine two-tone texture, not a smoothly blended color — judged as that, on
+ * a small popup-scale surface only (NOT the taskbar: that redraws every
+ * frame, and this is a per-pixel fb_pixel loop — exactly the antipattern
+ * M1507/M1509/M1512 already spent real effort eliminating from anything
+ * always-visible; a popup title strip only redraws while that popup is open). */
+static void dither_rect(int x, int y, int w, int h, uint32_t a, uint32_t b) {
+    for (int dy = 0; dy < h; dy++)
+        for (int dx = 0; dx < w; dx++)
+            fb_pixel(x + dx, y + dy, ((x + dx + y + dy) & 1) ? a : b);
+}
 
 #define WP_TOP 0x050208   /* fallback gradient (no cached wallpaper_bmp yet/OOM) — matches make_wallpaper's void sky */
 #define WP_BOT 0x03010A   /* ... and its near-black ground */
@@ -882,6 +895,18 @@ static void make_wallpaper(uint32_t *buf, int w, int h) {
         int gy2 = horizon + (int)((long)(h - horizon) * (t * t) / (1024L * 1024L));
         wp_line(buf, w, h, 0, gy2, w - 1, gy2, lerp(THEME_CYAN, THEME_VIOLET, i, 12));
     }
+
+    /* Sparse scanline texture (Phase 4 texture experiment): darken every 3rd
+     * row a little — a CRT reference. Zero per-frame cost either way (this
+     * whole buffer is generated once at boot and memcpy'd every frame after),
+     * and confined to the wallpaper only, never window content/text, so
+     * nothing readable is put at risk. */
+    for (int y = 0; y < h; y += 3)
+        for (int x = 0; x < w; x++) {
+            uint32_t c = buf[(size_t)y * w + x];
+            int r = (int)((c >> 16) & 0xFF) * 80 / 100, g = (int)((c >> 8) & 0xFF) * 80 / 100, b = (int)(c & 0xFF) * 80 / 100;
+            buf[(size_t)y * w + x] = (uint32_t)(r << 16 | g << 8 | b);
+        }
 }
 
 /* The boot desktop background. A clean PROCEDURAL gradient is the default (works
@@ -1086,7 +1111,7 @@ static void render_scene(void) {
         fb_fill_rect(px, py, pw, ph, THEME_PANEL);           /* flat panel body */
         glow_border(px, py, pw, ph, THEME_CYAN, THEME_VOID);
         hud_corners(px - 2, py - 2, pw + 4, ph + 4, 10, THEME_CYAN);
-        fb_fill_rect(px, py, pw, 26, THEME_PANEL_TITLE);      /* title bar */
+        dither_rect(px, py, pw, 26, THEME_PANEL_TITLE, 0x33224E);   /* title bar, dithered (Phase 4 texture experiment) */
         fb_fill_rect(px, py, pw, 1, THEME_CYAN);
         draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Keyboard Shortcuts", THEME_TEXT);
         for (int i = 0; i < n; i++) {                          /* a line ending ':' is a section label (M1525) */
@@ -1108,7 +1133,7 @@ static void render_scene(void) {
         fb_fill_rect(px, py, pw, ph, THEME_PANEL);           /* flat panel body */
         glow_border(px, py, pw, ph, THEME_CYAN, THEME_VOID);
         hud_corners(px - 2, py - 2, pw + 4, ph + 4, 10, THEME_CYAN);
-        fb_fill_rect(px, py, pw, 26, THEME_PANEL_TITLE);      /* title bar */
+        dither_rect(px, py, pw, 26, THEME_PANEL_TITLE, 0x33224E);   /* title bar, dithered (Phase 4 texture experiment) */
         fb_fill_rect(px, py, pw, 1, THEME_CYAN);
         draw_text(px + 12, py + (26 - font_height) / 2 + 1, "Windows", THEME_TEXT);
         if (win_count == 0) {
