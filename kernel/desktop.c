@@ -214,22 +214,38 @@ static int ext_is(const char *x, const char *s) {
     int i = 0; for (; x[i] && s[i]; i++) if (x[i] != s[i]) return 0;
     return x[i] == 0 && s[i] == 0;
 }
-static uint32_t file_color(const char *name) {
+/* File-type category, shared by file_color() (text tint) and draw_file_icon()
+ * (icon shape) so the two never drift apart into disagreeing about a file's
+ * type. */
+enum { FK_TEXT, FK_IMAGE, FK_CODE, FK_ARCHIVE, FK_AUDIO, FK_EXEC, FK_ROM };
+static int file_kind(const char *name) {
     int dot = -1; for (int i = 0; name[i]; i++) if (name[i] == '.') dot = i;
-    if (dot < 0) return THEME_TEXT_DIM;
+    if (dot < 0) return FK_TEXT;
     const char *x = name + dot + 1;
-    if (ext_is(x,"SVG")||ext_is(x,"PNG")||ext_is(x,"BMP")||ext_is(x,"GIF")||ext_is(x,"JPG")||ext_is(x,"JPE")) return THEME_VIOLET;  /* images */
-    if (ext_is(x,"C")||ext_is(x,"H")||ext_is(x,"JS"))                       return THEME_AMBER;   /* code */
-    if (ext_is(x,"GZ")||ext_is(x,"TAR")||ext_is(x,"TGZ")||ext_is(x,"ZIP"))  return THEME_RED;     /* archives */
-    if (ext_is(x,"WAV"))                                                    return THEME_CYAN;    /* audio */
-    if (ext_is(x,"ELF")||ext_is(x,"SH"))                                    return THEME_GREEN;   /* executables */
-    if (ext_is(x,"NES")||ext_is(x,"GB"))                                    return THEME_MAGENTA; /* ROMs */
-    return THEME_TEXT_DIM;                                                                        /* text/web/default */
+    if (ext_is(x,"SVG")||ext_is(x,"PNG")||ext_is(x,"BMP")||ext_is(x,"GIF")||ext_is(x,"JPG")||ext_is(x,"JPE")) return FK_IMAGE;
+    if (ext_is(x,"C")||ext_is(x,"H")||ext_is(x,"JS"))                       return FK_CODE;
+    if (ext_is(x,"GZ")||ext_is(x,"TAR")||ext_is(x,"TGZ")||ext_is(x,"ZIP"))  return FK_ARCHIVE;
+    if (ext_is(x,"WAV"))                                                    return FK_AUDIO;
+    if (ext_is(x,"ELF")||ext_is(x,"SH"))                                    return FK_EXEC;
+    if (ext_is(x,"NES")||ext_is(x,"GB"))                                    return FK_ROM;
+    return FK_TEXT;                                                        /* text/web/default */
+}
+static uint32_t file_color(const char *name) {
+    switch (file_kind(name)) {
+    case FK_IMAGE:   return THEME_VIOLET;
+    case FK_CODE:    return THEME_AMBER;
+    case FK_ARCHIVE: return THEME_RED;
+    case FK_AUDIO:   return THEME_CYAN;
+    case FK_EXEC:    return THEME_GREEN;
+    case FK_ROM:     return THEME_MAGENTA;
+    default:         return THEME_TEXT_DIM;
+    }
 }
 static void box(int x, int y, int w, int h, uint32_t c) {
     fb_fill_rect(x, y, w, 1, c); fb_fill_rect(x, y + h - 1, w, 1, c);
     fb_fill_rect(x, y, 1, h, c); fb_fill_rect(x + w - 1, y, 1, h, c);
 }
+static void draw_file_icon(int x, int y, int isdir, const char *name);  /* fwd: defined near draw_icon below (needs fcircle); called from draw_content above that point */
 
 /* --- theming helpers --- */
 static uint32_t lerp(uint32_t a, uint32_t b, int n, int d) {
@@ -406,6 +422,7 @@ static void draw_content(const window_t *w, int focused) {
                 fb_fill_rect(bx - 2, ry - 2, w->w - 14, 18, THEME_PANEL_TITLE);
             int nl = 0; while (e[i].name[nl]) nl++;
             int isdir = (nl > 0 && e[i].name[nl-1] == '/');   /* vfs marks directories with a trailing '/' */
+            draw_file_icon(bx - 1, ry, isdir, e[i].name);     /* drawn into the row's existing 2-space text prefix (16px == ICON_SZ+gap) */
             char line[48]; int p = 0; line[p++]=' '; line[p++]=' ';
             for (int j = 0; e[i].name[j] && p < 28; j++) line[p++] = e[i].name[j];
             int name_end = p;                              /* end of the "  NAME" segment (M1332) */
@@ -588,11 +605,75 @@ static void draw_icon(int kind, int x, int y) {
         fb_fill_rect(cx, y + 3, 1, 2, THEME_MAGENTA);        /* i dot */
         fb_fill_rect(cx, y + 6, 1, 5, THEME_MAGENTA);        /* i stem */
         break;
-    default:                                                 /* KIND_APP etc.: a window glyph */
-        fb_fill_rect(x + 1, y + 2, 12, 10, THEME_TEXT_DIM);
-        fb_fill_rect(x + 1, y + 2, 12, 3, THEME_MAGENTA);
-        box(x + 1, y + 2, 12, 10, THEME_BORDER_DIM);
+    default:                                                 /* KIND_APP etc.: a generic-program diamond */
+        for (int dy = -6; dy <= 6; dy++) {
+            int half = 6 - (dy < 0 ? -dy : dy);              /* widest at the center row, tapering to points top/bottom */
+            if (half > 0) fb_fill_rect(cx - half, cy + dy, half * 2, 1, THEME_TEXT_DIM);
+        }
+        fb_fill_rect(cx - 1, cy - 1, 2, 2, THEME_MAGENTA);   /* center accent dot */
         break;
+    }
+}
+/* A small per-file-type icon (ICON_SZ square) for the Files list, so a row is
+ * identifiable by shape as well as by file_color()'s text tint — the two
+ * always agree since both read file_kind(). Flat-filled, no outlines, same
+ * convention as draw_icon() above (whose folder shape this reuses verbatim
+ * for isdir, so a folder looks identical everywhere it appears). Any "cut
+ * into the icon" detail (the text file's ruled lines) uses a darkened shade
+ * of the icon's OWN color rather than a hardcoded background color, since the
+ * row behind it varies (plain/zebra/selected) — matching against `c` always
+ * contrasts regardless of what's actually behind the icon. */
+static void draw_file_icon(int x, int y, int isdir, const char *name) {
+    if (isdir) {
+        fb_fill_rect(x + 1, y + 3, 6, 2, 0xB8860A);          /* folder tab */
+        fb_fill_rect(x + 1, y + 4, 12, 8, THEME_AMBER);      /* folder body */
+        fb_fill_rect(x + 1, y + 4, 12, 1, THEME_TEXT);       /* top highlight */
+        return;
+    }
+    uint32_t c = file_color(name);
+    switch (file_kind(name)) {
+    case FK_IMAGE: {                                          /* frame + mountain + sun */
+        static const int mw[4] = {1,3,5,7};                   /* symmetric triangle, apex at top, widening toward the base */
+        box(x + 1, y + 2, 12, 10, c);
+        for (int i = 0; i < 4; i++) fb_fill_rect(x + 7 - mw[i] / 2, y + 8 + i, mw[i], 1, c);
+        fcircle(x + 10, y + 5, 1, c);                         /* sun, upper-right corner of the frame */
+        break;
+    }
+    case FK_CODE: {                                           /* '<' '>' angle brackets */
+        static const int lx[5] = {4,3,2,3,4}, rx[5] = {8,9,10,9,8};
+        for (int i = 0; i < 5; i++) {
+            fb_fill_rect(x + lx[i], y + 4 + i, 2, 1, c);
+            fb_fill_rect(x + rx[i], y + 4 + i, 2, 1, c);
+        }
+        break;
+    }
+    case FK_ARCHIVE:                                          /* a sealed crate: box + tape seam */
+        box(x + 2, y + 2, 10, 10, c);
+        fb_fill_rect(x + 2, y + 6, 10, 1, c);                 /* horizontal seam */
+        fb_fill_rect(x + 6, y + 2, 1, 4, c);                  /* seam onto the lid */
+        break;
+    case FK_AUDIO:                                            /* eighth note: head + stem + flag */
+        fcircle(x + 4, y + 10, 2, c);
+        fb_fill_rect(x + 5, y + 3, 1, 7, c);
+        fb_fill_rect(x + 6, y + 3, 2, 3, c);
+        break;
+    case FK_EXEC: {                                           /* solid play triangle */
+        static const int w0[8] = {1,2,3,4,4,3,2,1};
+        for (int i = 0; i < 8; i++) fb_fill_rect(x + 4, y + 3 + i, w0[i], 1, c);
+        break;
+    }
+    case FK_ROM:                                              /* cartridge: body + top connector tab */
+        fb_fill_rect(x + 2, y + 4, 10, 8, c);
+        fb_fill_rect(x + 5, y + 2, 4, 2, c);
+        break;
+    default: {                                                /* generic text file: page + ruled lines */
+        uint32_t dim = (c >> 1) & 0x7F7F7F;
+        fb_fill_rect(x + 3, y + 1, 8, 12, c);
+        fb_fill_rect(x + 4, y + 4, 6, 1, dim);
+        fb_fill_rect(x + 4, y + 7, 6, 1, dim);
+        fb_fill_rect(x + 4, y + 10, 4, 1, dim);
+        break;
+    }
     }
 }
 
@@ -913,7 +994,8 @@ static void render_scene(void) {
                 fb_fill_rect(ix + 2, iy, MENU_W - 4, MENU_ITEM_H, THEME_SELECT);
                 fb_fill_rect(ix + 2, iy, 2, MENU_ITEM_H, THEME_MAGENTA);
             }
-            draw_text(ix + 12, iy + 2, menu[i].label, i == menu_sel ? THEME_TEXT : THEME_TEXT_DIM);
+            draw_icon(menu[i].kind, ix + 8, iy + (MENU_ITEM_H - ICON_SZ) / 2);
+            draw_text(ix + 28, iy + 2, menu[i].label, i == menu_sel ? THEME_TEXT : THEME_TEXT_DIM);
         }
     }
 
@@ -1014,6 +1096,7 @@ static void render_scene(void) {
                 fb_fill_rect(px + 4, iy, pw - 8, MENU_ITEM_H, THEME_SELECT);
                 fb_fill_rect(px + 4, iy, 2, MENU_ITEM_H, THEME_MAGENTA);
             }
+            draw_icon(windows[i].kind, px + 10, iy + (MENU_ITEM_H - ICON_SZ) / 2);
             char t[40]; int n = 0; const char *s = windows[i].title;
             while (s && s[n] && n < 28) { t[n] = s[n]; n++; }
             if (windows[i].minimized) {                       /* mark hidden windows */
@@ -1021,7 +1104,7 @@ static void render_scene(void) {
                 for (int j = 0; m[j] && n < (int)sizeof(t) - 1; j++) t[n++] = m[j];
             }
             t[n] = 0;
-            draw_text(px + 16, iy + 4, t, i == sw_sel ? THEME_TEXT : THEME_TEXT_DIM);
+            draw_text(px + 32, iy + 4, t, i == sw_sel ? THEME_TEXT : THEME_TEXT_DIM);
         }
     }
 }
