@@ -71,6 +71,68 @@ static const int A7y[7]  = {0,0,4,0,2,0,1};
 static const int A7dx[7] = {8,8,4,4,2,2,1};
 static const int A7dy[7] = {8,8,8,4,4,2,2};
 
+/* Parallel per-pixel RGBA expansion (M1533-follow-on, same pattern as jpeg.c's
+ * jpeg_color_convert): unlike recon_filters() above (Up/Average/Paeth read the
+ * PREVIOUS row's reconstructed bytes, so filter reversal must stay strictly
+ * sequential), expand_px() only reads the now-fully-reconstructed `scratch`
+ * rows plus the constant palette/trns tables, and writes a disjoint slice of
+ * `out` — the exact same "independent per pixel" shape jpeg.c's colour
+ * conversion has, once the (fast, O(n)) sequential unfilter pass is done.
+ * Scoped to the non-interlaced path only: Adam7 (7 differently-sized passes,
+ * each with its own scatter geometry) is a rarer, structurally different
+ * loop, not a same-shape extension of this one — left untouched. Guarded
+ * behind PNG_THREADED for the same host-testability reason as jpeg.c. */
+struct png_expand_job_shape {
+    int color; const uint8_t *scratch; long stride; int bpp;
+    const uint8_t *pal; int pal_n; const uint8_t *trns; int trns_n;
+    int width; uint8_t *out;
+};
+static void png_expand_range(const struct png_expand_job_shape *s, int y0, int y1) {
+    for (int y = y0; y < y1; y++) {
+        const uint8_t *cur = s->scratch + (long)y * (s->stride + 1) + 1;
+        uint8_t *o = s->out + (long)y * s->width * 4;
+        for (int x = 0; x < s->width; x++)
+            expand_px(s->color, cur + (long)x * s->bpp, s->pal, s->pal_n, s->trns, s->trns_n, o + x * 4);
+    }
+}
+
+#ifdef PNG_THREADED
+#include "ulib.h"
+
+#define PNG_MAX_THREADS     4
+#define PNG_EXPAND_MIN_PIXELS (200 * 1000)   /* see jpeg.c's JPEG_CC_MIN_PIXELS for why pixels, not rows */
+#define PNG_EXPAND_STACK    (64 * 1024)
+
+struct png_expand_job { const struct png_expand_job_shape *s; int y0, y1; volatile int done; };
+static void png_expand_thread(void *arg) {
+    struct png_expand_job *job = (struct png_expand_job *)arg;
+    png_expand_range(job->s, job->y0, job->y1);
+    job->done = 1;              /* LAST write before exiting -- the join loop waits on this */
+    sys_thread_exit();
+}
+static void png_expand_parallel(const struct png_expand_job_shape *s, int height) {
+    if ((long)s->width * height < PNG_EXPAND_MIN_PIXELS) { png_expand_range(s, 0, height); return; }
+
+    struct png_expand_job jobs[PNG_MAX_THREADS];
+    int njobs = 0;
+    int per = (height + PNG_MAX_THREADS - 1) / PNG_MAX_THREADS;
+    for (int y0 = 0; y0 < height && njobs < PNG_MAX_THREADS; y0 += per, njobs++) {
+        int y1 = y0 + per; if (y1 > height) y1 = height;
+        jobs[njobs].s = s; jobs[njobs].y0 = y0; jobs[njobs].y1 = y1; jobs[njobs].done = 0;
+    }
+    for (int i = 0; i < njobs - 1; i++) {
+        char *stk = (char *)malloc(PNG_EXPAND_STACK);
+        if (!stk || sys_clone((void *)png_expand_thread, stk + PNG_EXPAND_STACK, &jobs[i]) < 0) {
+            png_expand_range(jobs[i].s, jobs[i].y0, jobs[i].y1);   /* OOM/spawn failure: just do it inline */
+            jobs[i].done = 1;
+        }
+    }
+    png_expand_range(s, jobs[njobs - 1].y0, jobs[njobs - 1].y1);   /* this thread's own share */
+    for (int i = 0; i < njobs - 1; i++)
+        while (!jobs[i].done) { }   /* busy-wait join: each chunk is real work, not worth a syscall to block on */
+}
+#endif
+
 int png_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                uint8_t *scratch, int scratch_cap, int *w, int *h) {
     static const uint8_t sig[8] = {0x89,'P','N','G',0x0D,0x0A,0x1A,0x0A};
@@ -159,12 +221,12 @@ int png_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
     if (!interlace) {
         long stride = (long)width * bpp;
         if (recon_filters(scratch, height, stride, bpp) != 0) return -1;
-        for (int y = 0; y < height; y++) {
-            const uint8_t *cur = scratch + (long)y * (stride + 1) + 1;
-            uint8_t *o = out + (long)y * width * 4;
-            for (int x = 0; x < width; x++)
-                expand_px(color, cur + (long)x * bpp, pal, pal_n, trns, trns_n, o + x * 4);
-        }
+        struct png_expand_job_shape shp = { color, scratch, stride, bpp, pal, pal_n, trns, trns_n, width, out };
+#ifdef PNG_THREADED
+        png_expand_parallel(&shp, height);
+#else
+        png_expand_range(&shp, 0, height);
+#endif
     } else {
         /* Adam7: reconstruct each pass independently, then scatter its pixels to
          * their grid positions in the full image. */

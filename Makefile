@@ -300,7 +300,7 @@ $(BUILD)/jsrun.elf: user/jsrun.c kernel/js.c $(BUILD)/user_ulib.o $(BUILD)/user_
 IMGDEC_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -msse2 -mfpmath=sse -Ikernel/include -Iuser
 $(BUILD)/imgdec.elf: user/imgdec.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/inflate.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
-	$(IMGDEC_CC) -w -c kernel/png.c     -o $(BUILD)/imgdec_png.o
+	$(IMGDEC_CC) -w -DPNG_THREADED -c kernel/png.c     -o $(BUILD)/imgdec_png.o
 	$(IMGDEC_CC) -w -c kernel/gif.c     -o $(BUILD)/imgdec_gif.o
 	$(IMGDEC_CC) -w -DJPEG_THREADED -c kernel/jpeg.c    -o $(BUILD)/imgdec_jpeg.o
 	$(IMGDEC_CC) -w -c kernel/bmp.c     -o $(BUILD)/imgdec_bmp.o
@@ -317,7 +317,7 @@ $(BUILD)/imgdec.elf: user/imgdec.c kernel/png.c kernel/gif.c kernel/jpeg.c kerne
 # only imgview, not the kernel. Overrides the generic %.elf rule. ---
 $(BUILD)/imgview.elf: user/imgview.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/inflate.c kernel/font.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
-	$(IMGDEC_CC) -w -c kernel/png.c     -o $(BUILD)/imgview_png.o
+	$(IMGDEC_CC) -w -DPNG_THREADED -c kernel/png.c     -o $(BUILD)/imgview_png.o
 	$(IMGDEC_CC) -w -c kernel/gif.c     -o $(BUILD)/imgview_gif.o
 	$(IMGDEC_CC) -w -DJPEG_THREADED -c kernel/jpeg.c    -o $(BUILD)/imgview_jpeg.o
 	$(IMGDEC_CC) -w -c kernel/bmp.c     -o $(BUILD)/imgview_bmp.o
@@ -340,7 +340,7 @@ $(BUILD)/webview.elf: user/webview.c kernel/browser.c kernel/js.c $(patsubst %,k
 	@mkdir -p $(BUILD)
 	$(WEBVIEW_CC) -DBROWSER_RING3 -c kernel/browser.c -o $(BUILD)/webview_browser.o
 	$(WEBVIEW_CC) -DJS_RING3 -DJS_ARENA=16777216 -c kernel/js.c -o $(BUILD)/webview_js.o
-	@for m in $(WEBVIEW_PARSERS); do echo "  CC kernel/$$m.c (ring-3 browser)"; extra=""; [ "$$m" = "jpeg" ] && extra="-DJPEG_THREADED"; $(WEBVIEW_CC) $$extra -c kernel/$$m.c -o $(BUILD)/webview_$$m.o || exit 1; done
+	@for m in $(WEBVIEW_PARSERS); do echo "  CC kernel/$$m.c (ring-3 browser)"; extra=""; [ "$$m" = "jpeg" ] && extra="-DJPEG_THREADED"; [ "$$m" = "png" ] && extra="-DPNG_THREADED"; $(WEBVIEW_CC) $$extra -c kernel/$$m.c -o $(BUILD)/webview_$$m.o || exit 1; done
 	$(WEBVIEW_CC) -c user/webview.c -o $(BUILD)/webview_app.o
 	$(LD) -T user/user.ld -o $@ $(BUILD)/webview_app.o $(BUILD)/webview_browser.o $(BUILD)/webview_js.o $(patsubst %,$(BUILD)/webview_%.o,$(WEBVIEW_PARSERS)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (ring-3 web browser)"
