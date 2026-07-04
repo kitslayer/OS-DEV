@@ -27,4 +27,5 @@ void ap_main(void);                /* AP 64-bit entry, called from the trampolin
 void lapic_enable_this_cpu(void);  /* software-enable the local APIC on this core */
 void lapic_eoi(void);              /* end-of-interrupt to this core's local APIC */
 void smp_parallel_for(int n, smp_fn fn, void *ctx);   /* run fn over [0,n) across all cores */
+void smp_wake_aps(void);           /* IPI every AP awake (M1198's wake vector 0x40) */
 int  smp_current_cpu(void);        /* APIC id of the core running now, for sched_getcpu (M1246) */

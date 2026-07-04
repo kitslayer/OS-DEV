@@ -18,6 +18,7 @@
 #include "acpi.h"
 #include "hpet.h"   /* high-resolution HPET clocksource (M1273) */
 #include "smp.h"
+#include "smpthread.h"
 #include "multiboot.h"
 #include "gdbstub.h"
 #include "random.h"
@@ -220,6 +221,7 @@ static volatile int g_kstack_overflow_test;
 static volatile int g_ustack_overflow_test;   /* -append ustackover: spawn a ring-3 app that overflows its USER stack (M1500) */
 static volatile int g_wx_test;                /* -append wxtest: prove W^X is enforced -- executing a no-execute data page must fault (M1501) */
 static volatile int g_smep_test;              /* -append smeptest: prove SMEP -- the kernel executing a ring-3 (user) page must fault (M1502) */
+static volatile int g_smpthread_test;         /* -append smpthreadtest: prove real cross-core kernel threads work (M1530) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -265,6 +267,48 @@ static void smep_test(void) {
     vmm_unmap(va); pmm_free_frame(frame);       /* only reached if SMEP is off */
 }
 
+/* smp_thread end-to-end check (M1530): unlike smp_parallel_for's short-lived
+ * "split N work items, dispatch, join" batch model, an smp_thread is a real,
+ * independently-progressing kernel thread pinned to one core for its life —
+ * this proves several threads spawned across cores actually run concurrently
+ * (each records which core it landed on) and that smp_thread_yield() lets
+ * more threads than cores share fairly (round robin within a core's ring)
+ * without corrupting the shared counter they all race to increment.
+ * Gated behind `-append smpthreadtest`. */
+#define SMPTT_THREADS 4
+#define SMPTT_ITERS   200000
+struct smpthread_test_ctx { volatile long *counter; int core_seen; };
+static void smpthread_test_worker(void *argp) {
+    struct smpthread_test_ctx *c = argp;
+    c->core_seen = smp_current_cpu();
+    for (int i = 0; i < SMPTT_ITERS; i++) {
+        __atomic_add_fetch(c->counter, 1, __ATOMIC_SEQ_CST);
+        if ((i & 4095) == 0) smp_thread_yield();     /* give a same-core sibling a turn */
+    }
+}
+static void smpthread_test(void) {
+    kprintf("[smpthreadtest] spawning %d real kernel threads across cores...\n", SMPTT_THREADS);
+    volatile long counter = 0;
+    struct smpthread_test_ctx ctx[SMPTT_THREADS];
+    smp_thread_t *th[SMPTT_THREADS];
+    for (int i = 0; i < SMPTT_THREADS; i++) {
+        ctx[i].counter = &counter; ctx[i].core_seen = -1;
+        th[i] = smp_thread_spawn(smpthread_test_worker, &ctx[i]);
+    }
+    for (int i = 0; i < SMPTT_THREADS; i++) smp_thread_join(th[i]);
+
+    int seen[SMPTT_THREADS], nseen = 0;
+    for (int i = 0; i < SMPTT_THREADS; i++) {
+        int c = ctx[i].core_seen, dup = 0;
+        for (int j = 0; j < nseen; j++) if (seen[j] == c) dup = 1;
+        if (!dup) seen[nseen++] = c;
+        kprintf("[smpthreadtest]   thread %d ran on core apic=%d\n", i, c);
+    }
+    long want = (long)SMPTT_THREADS * SMPTT_ITERS;
+    kprintf("[smpthreadtest] counter=%ld (want %ld), %d distinct core(s) used: %s\n",
+            counter, want, nseen, counter == want ? "OK" : "MISMATCH");
+}
+
 void kmain(uint64_t mb_info, uint64_t magic) {
     console_init();
 
@@ -284,6 +328,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "ustackover")) g_ustack_overflow_test = 1;   /* deliberate USER-stack overflow test (M1500) */
         if (cmdline_has(cl, "wxtest"))     g_wx_test = 1;                /* deliberate W^X/NX enforcement test (M1501) */
         if (cmdline_has(cl, "smeptest"))   g_smep_test = 1;              /* deliberate SMEP enforcement test (M1502) */
+        if (cmdline_has(cl, "smpthreadtest")) g_smpthread_test = 1;      /* real cross-core kernel-thread test (M1530) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -371,6 +416,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         wx_test();
     if (g_smep_test)                       /* -append smeptest: prove SMEP -- ring 0 executing a user page must fault (M1502) */
         smep_test();
+    if (g_smpthread_test)                  /* -append smpthreadtest: prove real cross-core kernel threads (M1530) */
+        smpthread_test();
 
     preemption_demo();
     isolation_demo();

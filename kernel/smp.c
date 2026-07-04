@@ -19,6 +19,7 @@
  * [smp] lines in the boot log).
  */
 #include "smp.h"
+#include "smpthread.h"  /* smpthread_ap_tick — real kernel threads pinned per-core (M1530) */
 #include "acpi.h"
 #include "vmm.h"
 #include "io.h"
@@ -125,8 +126,10 @@ static int smp_run_one(void) {
     return 1;
 }
 
-/* Wake every AP (all-but-self shorthand) with a fixed IPI at vector 0x40. */
-static void smp_wake_aps(void) {
+/* Wake every AP (all-but-self shorthand) with a fixed IPI at vector 0x40. Also
+ * used by smpthread.c (M1530) to nudge a freshly-spawned thread's target core
+ * out of hlt promptly, the same signal smp_parallel_for already relies on. */
+void smp_wake_aps(void) {
     if (!lapic) return;
     lapic_wr(LAPIC_ICRLO, 0x40 | (1u << 14) | (3u << 18));     /* fixed, assert, all-but-self */
     while (lapic_rd(LAPIC_ICRLO) & ICR_PENDING) __asm__ volatile("pause");
@@ -171,6 +174,7 @@ void ap_main(void) {
     __asm__ volatile("sti");             /* accept the wake IPI */
     for (;;) {
         while (smp_run_one()) ;          /* run everything currently queued */
+        smpthread_ap_tick();             /* run any real kernel threads pinned to this core (M1530) */
         __asm__ volatile("cli");         /* re-check with interrupts off (no lost wakeup) */
         if (__atomic_load_n(&sj_next, __ATOMIC_SEQ_CST) >= __atomic_load_n(&sj_n, __ATOMIC_SEQ_CST))
             __asm__ volatile("sti; hlt");   /* sleep until an IPI; sti;hlt is atomic */
