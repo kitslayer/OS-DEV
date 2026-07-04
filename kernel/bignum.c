@@ -93,10 +93,19 @@ static void bn_add(bignum *a, const bignum *b) {
     bn_trim(a);
 }
 
-/* out = a * b  (schoolbook; out must not alias a or b). */
+/* out = a * b  (schoolbook; out must not alias a or b). M1537: zeroes only
+ * the out->n limbs the accumulation loop below actually touches, not
+ * bn_zero()'s full BN_LIMBS=260 -- for a P-384-sized 12x12 multiply that's
+ * ~24 limbs instead of 260, and this is now called ~1500x per ECDSA verify
+ * (once M1536's Barrett reduction fixed the OTHER bottleneck, this became
+ * the next measurable cost via microbenchmarking, not guessing). The
+ * accumulation below reads-then-writes every out->limb[i+j] (it accumulates
+ * partial products across the outer i loop), so it still genuinely needs
+ * zeros across the whole range it touches -- this narrows the range, it
+ * doesn't remove the requirement. */
 static void bn_mul(bignum *out, const bignum *a, const bignum *b) {
-    bn_zero(out);
     out->n = a->n + b->n; if (out->n > BN_LIMBS) out->n = BN_LIMBS;
+    memset(out->limb, 0, (size_t)out->n * sizeof(out->limb[0]));
     for (int i = 0; i < a->n; i++) {
         uint64_t carry = 0;
         for (int j = 0; j < b->n && i + j < BN_LIMBS; j++) {
