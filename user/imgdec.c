@@ -67,8 +67,11 @@ static void decode_one(const char *name) {
 int main(void) {
     /* Defense-in-depth (pledge): the decoders only read image files (rpath),
      * write the report (wpath), and use basic stdio. A malformed-image bug in a
-     * decoder can't spawn, exec, touch the network, or the GPU. */
-    sys_pledge("stdio rpath wpath");
+     * decoder can't spawn, exec, touch the network, or the GPU. "thread" (M1533)
+     * lets jpeg.c's color-conversion pass spawn worker threads sharing THIS
+     * address space (sys_clone) — narrower than PL_PROC, so it still can't spawn
+     * a new process or exec. */
+    sys_pledge("stdio rpath wpath thread");
     rep("from-scratch image decoders, now running in RING 3 (not the kernel):\n\n");
     /* Try every image the demo disk ships; decode whichever are present. */
     static const char *files[] = { "TEST.PNG", "ICON.PNG", "PHOTO.JPG", "ANIM.GIF",

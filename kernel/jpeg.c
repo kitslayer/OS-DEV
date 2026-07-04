@@ -556,6 +556,108 @@ static int decode_scan_prog(jctx *j) {
     return JE_OK;
 }
 
+/* Parallel YCbCr->RGB color conversion (M1533): a real ring-3 program can now
+ * genuinely run threads across cores (M1531/M1532), so the final per-pixel
+ * pass below — independent per pixel, reading only the fully-decoded (never
+ * again written) component planes — is split across sys_clone'd threads
+ * instead of running as one long serial loop. Guarded behind JPEG_THREADED
+ * (set only for the ring-3 Makefile targets that actually use it) so this
+ * file stays the portable, OS-independent, host-unit-testable decoder its own
+ * header comment promises — the host img_test.c build never defines it and
+ * gets the identical, unchanged sequential path.
+ *
+ * Thread-stack lifetime: intentionally LEAKED, never freed — the exact same
+ * tradeoff user/webview.c's own task_create_stack wrapper already makes for
+ * its fetch-worker thread. Freeing a stack the in-flight thread might still
+ * be touching (the handful of instructions between it setting `done` and its
+ * own sys_thread_exit() syscall actually trapping) is a real, if narrow, use-
+ * after-free race — this codebase's established answer is "don't reclaim it,
+ * let process exit do that," not "invent a tighter join primitive," and
+ * imgdec.elf/imgview.elf are short-lived one-shot processes (scan the disk,
+ * report, exit) so the bounded per-decode leak never accumulates across a
+ * long-running session. */
+#ifdef JPEG_THREADED
+#include "ulib.h"
+
+#define JPEG_MAX_THREADS      4
+/* Gate on total PIXEL count, not just row count: a real sys_clone (task_create +
+ * stack alloc + a scheduling round-trip) costs far more than converting a couple
+ * thousand pixels, so a narrow-but-tall (or short-but-wide) image can still lose
+ * to thread-spawn overhead if only rows are checked. 200K px (~500x400) is well
+ * past where 3 spawns pay for themselves; this disk's own tiny 120x80 test JPEGs
+ * (9.6K px) deliberately stay on the sequential path (verified in-guest, M1533). */
+#define JPEG_CC_MIN_PIXELS    (200 * 1000)
+#define JPEG_CC_STACK         (64 * 1024)
+
+struct jpeg_cc_job { jctx *j; uint8_t *out; int y0, y1; volatile int done; };
+#endif
+
+static void jpeg_cc_range(jctx *j, uint8_t *out, int y0, int y1) {
+    comp_t *Y = &j->comp[0];
+    if (j->ncomp == 1) {
+        for (int y = y0; y < y1; y++)
+            for (int x = 0; x < j->W; x++) {
+                int v = Y->plane[(long)y * Y->px + x];
+                uint8_t *o = out + ((long)y * j->W + x) * 4;
+                o[0] = o[1] = o[2] = (uint8_t)v; o[3] = 255;
+            }
+        return;
+    }
+    comp_t *Cb = &j->comp[1], *Cr = &j->comp[2];
+    for (int y = y0; y < y1; y++) {
+        for (int x = 0; x < j->W; x++) {
+            int yy = Y->plane[(long)(y * Y->vs / j->vmax) * Y->px + (x * Y->hs / j->hmax)];
+            int cbx = x * Cb->hs / j->hmax, cby = y * Cb->vs / j->vmax;
+            int crx = x * Cr->hs / j->hmax, cry = y * Cr->vs / j->vmax;
+            int cb = Cb->plane[(long)cby * Cb->px + cbx] - 128;
+            int cr = Cr->plane[(long)cry * Cr->px + crx] - 128;
+            int r = yy + ((91881 * cr) >> 16);
+            int g = yy - ((22554 * cb + 46802 * cr) >> 16);
+            int b = yy + ((116130 * cb) >> 16);
+            uint8_t *o = out + ((long)y * j->W + x) * 4;
+            o[0] = (uint8_t)clampb(r); o[1] = (uint8_t)clampb(g);
+            o[2] = (uint8_t)clampb(b); o[3] = 255;
+        }
+    }
+}
+
+#ifdef JPEG_THREADED
+static void jpeg_cc_thread(void *arg) {
+    struct jpeg_cc_job *job = (struct jpeg_cc_job *)arg;
+    jpeg_cc_range(job->j, job->out, job->y0, job->y1);
+    job->done = 1;              /* LAST write before exiting -- the join loop waits on this */
+    sys_thread_exit();
+}
+
+/* Split [0,H) across up to JPEG_MAX_THREADS-1 spawned threads + this calling
+ * thread itself (which does the last chunk directly, avoiding a stack alloc
+ * + spawn just to immediately wait on it). Falls back to the plain sequential
+ * call for small images (JPEG_CC_MIN_PIXELS) or on malloc failure -- correctness
+ * never depends on the thread count actually achieved. */
+static void jpeg_color_convert(jctx *j, uint8_t *out) {
+    int H = j->H;
+    if ((long)j->W * H < JPEG_CC_MIN_PIXELS) { jpeg_cc_range(j, out, 0, H); return; }
+
+    struct jpeg_cc_job jobs[JPEG_MAX_THREADS];
+    int njobs = 0;
+    int per = (H + JPEG_MAX_THREADS - 1) / JPEG_MAX_THREADS;
+    for (int y0 = 0; y0 < H && njobs < JPEG_MAX_THREADS; y0 += per, njobs++) {
+        int y1 = y0 + per; if (y1 > H) y1 = H;
+        jobs[njobs].j = j; jobs[njobs].out = out; jobs[njobs].y0 = y0; jobs[njobs].y1 = y1; jobs[njobs].done = 0;
+    }
+    for (int i = 0; i < njobs - 1; i++) {
+        char *stk = (char *)malloc(JPEG_CC_STACK);
+        if (!stk || sys_clone((void *)jpeg_cc_thread, stk + JPEG_CC_STACK, &jobs[i]) < 0) {
+            jpeg_cc_range(j, out, jobs[i].y0, jobs[i].y1);   /* OOM/spawn failure: just do it inline */
+            jobs[i].done = 1;
+        }
+    }
+    jpeg_cc_range(j, out, jobs[njobs - 1].y0, jobs[njobs - 1].y1);   /* this thread's own share */
+    for (int i = 0; i < njobs - 1; i++)
+        while (!jobs[i].done) { }   /* busy-wait join: each chunk is real work, not worth a syscall to block on */
+}
+#endif
+
 int jpeg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                 uint8_t *scratch, int scratch_cap, int *width, int *height) {
     jctx J; memset(&J, 0, sizeof(J));
@@ -664,31 +766,10 @@ int jpeg_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
 
     /* upsample chroma + YCbCr->RGB into the RGBA output */
     if ((long)j->W * j->H * 4 > out_cap) return JE_ERR;
-    comp_t *Y = &j->comp[0];
-    if (j->ncomp == 1) {
-        for (int y = 0; y < j->H; y++)
-            for (int x = 0; x < j->W; x++) {
-                int v = Y->plane[(long)y * Y->px + x];
-                uint8_t *o = out + ((long)y * j->W + x) * 4;
-                o[0] = o[1] = o[2] = (uint8_t)v; o[3] = 255;
-            }
-        return JE_OK;
-    }
-    comp_t *Cb = &j->comp[1], *Cr = &j->comp[2];
-    for (int y = 0; y < j->H; y++) {
-        for (int x = 0; x < j->W; x++) {
-            int yy = Y->plane[(long)(y * Y->vs / j->vmax) * Y->px + (x * Y->hs / j->hmax)];
-            int cbx = x * Cb->hs / j->hmax, cby = y * Cb->vs / j->vmax;
-            int crx = x * Cr->hs / j->hmax, cry = y * Cr->vs / j->vmax;
-            int cb = Cb->plane[(long)cby * Cb->px + cbx] - 128;
-            int cr = Cr->plane[(long)cry * Cr->px + crx] - 128;
-            int r = yy + ((91881 * cr) >> 16);
-            int g = yy - ((22554 * cb + 46802 * cr) >> 16);
-            int b = yy + ((116130 * cb) >> 16);
-            uint8_t *o = out + ((long)y * j->W + x) * 4;
-            o[0] = (uint8_t)clampb(r); o[1] = (uint8_t)clampb(g);
-            o[2] = (uint8_t)clampb(b); o[3] = 255;
-        }
-    }
+#ifdef JPEG_THREADED
+    jpeg_color_convert(j, out);
+#else
+    jpeg_cc_range(j, out, 0, j->H);
+#endif
     return JE_OK;
 }

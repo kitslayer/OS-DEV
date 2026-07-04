@@ -132,8 +132,12 @@ int main(void) {
      * (browser_create -> sys_clone), so we can now drop PL_PROC/EXEC/VM/POWER. A
      * parser bug that gains code execution inside this ring-3 browser can no longer
      * spawn, exec, fork, kill, mmap, or power off — only gfx + network + file I/O,
-     * the classes the browser legitimately needs. (pledge kills on a violation.) */
-    sys_pledge("stdio rpath wpath inet gfx");
+     * the classes the browser legitimately needs. (pledge kills on a violation.)
+     * "thread" (PL_THREAD, M1533): jpeg.c's color-conversion pass spawns worker
+     * threads on every page/image load (sys_clone), NOT just once at startup like
+     * the fetch worker above — narrower than PL_PROC, so this still can't spawn a
+     * new process/exec, only more threads sharing this same sandboxed address space. */
+    sys_pledge("stdio rpath wpath inet gfx thread");
 
     int pb = 0;
     for (;;) {

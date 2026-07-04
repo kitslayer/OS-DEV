@@ -318,8 +318,9 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace:
     case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_killpg:
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_waitid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
-    case SYS_clone: case SYS_join:
         return PL_PROC;
+    case SYS_clone: case SYS_join:          /* threads sharing THIS address space, not a new process (M1533) */
+        return PL_THREAD;
     case SYS_mmap: case SYS_munmap: case SYS_mremap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
     case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge: case SYS_mlockall: case SYS_munlockall:

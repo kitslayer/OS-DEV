@@ -691,7 +691,7 @@ uint32_t app_promises(app_t *a)   { return a ? a->promises : 0; }
  * and /proc/<pid>/status formatting. */
 static const struct { const char *name; uint32_t bit; } pledge_tab[] = {
     {"stdio",PL_STDIO},{"rpath",PL_RPATH},{"wpath",PL_WPATH},{"inet",PL_INET},
-    {"gfx",PL_GFX},{"proc",PL_PROC},{"vm",PL_VM},{"power",PL_POWER},
+    {"gfx",PL_GFX},{"proc",PL_PROC},{"vm",PL_VM},{"power",PL_POWER},{"thread",PL_THREAD},
 };
 #define PLEDGE_NTAB (int)(sizeof(pledge_tab)/sizeof(pledge_tab[0]))
 

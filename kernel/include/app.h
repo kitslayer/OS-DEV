@@ -244,6 +244,10 @@ void   app_core_dump(struct registers *r);      /* write an ET_CORE ELF of the f
 #define PL_PROC  (1u<<5)   /* spawn / kill / process listing */
 #define PL_VM    (1u<<6)   /* mmap / munmap */
 #define PL_POWER (1u<<7)   /* power off / reboot */
+#define PL_THREAD (1u<<8)  /* clone/join: threads sharing THIS address space (M1533) —
+                             * deliberately separate from PL_PROC: a sandboxed decoder
+                             * can be allowed to parallelize itself across cores without
+                             * gaining the ability to spawn/exec/kill other processes. */
 
 app_t   *app_current(void);             /* the app owning the running task, or NULL */
 void     app_cwd_save(app_t *a, int synth, const char *sub, uint32_t fat);   /* stash an app's cwd (M1144) */
