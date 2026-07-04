@@ -4,11 +4,14 @@
  * The kernel boots on the bootstrap processor (BSP); smp_init() enables the
  * local APIC, parses the ACPI MADT for the other cores, and brings each
  * application processor (AP) up through a real->long-mode trampoline
- * (kernel/asm/ap_trampoline.asm). Each AP adopts the kernel GDT+IDT and idles in
- * hlt until woken by an inter-processor interrupt (M1198). The BSP can then run
- * a pure-compute workload across all cores in parallel via smp_parallel_for().
- * The general scheduler still runs only on the BSP, so most of the kernel need
- * not be SMP-safe yet — only the small parallel pool here is concurrent.
+ * (kernel/asm/ap_trampoline.asm). Each AP adopts the kernel GDT+IDT, joins the
+ * GENERAL scheduler (task_register_ap_core, M1531 — any task, kernel or ring-3,
+ * can run on any core, preemptively), and idles in hlt when it has nothing
+ * ready, waking on: the job-pool wake IPI (0x40, smp_parallel_for), its OWN
+ * local LAPIC timer (0x42, M1532 — real per-core preemption), or (rarely) a
+ * spurious/other IPI. The BSP can also run a pure-compute workload across all
+ * cores in parallel via smp_parallel_for(), and hand off a long-lived kernel
+ * thread to one specific core via kernel/smpthread.c's smp_thread_spawn.
  */
 #pragma once
 #include <stdint.h>
@@ -28,5 +31,5 @@ void lapic_enable_this_cpu(void);  /* software-enable the local APIC on this cor
 void lapic_eoi(void);              /* end-of-interrupt to this core's local APIC */
 void smp_parallel_for(int n, smp_fn fn, void *ctx);   /* run fn over [0,n) across all cores */
 void smp_wake_aps(void);           /* IPI every AP awake (M1198's wake vector 0x40) */
-void smp_broadcast_tick(void);     /* IPI every other core to run sched_tick() locally (M1531's vector 0x41) */
+void lapic_timer_start_this_cpu(void);  /* this core's own real periodic preemption source (M1532's vector 0x42) */
 int  smp_current_cpu(void);        /* APIC id of the core running now, for sched_getcpu (M1246) */

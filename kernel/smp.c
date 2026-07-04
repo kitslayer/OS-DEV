@@ -40,10 +40,15 @@
 #define LAPIC_SVR   0x0F0               /* spurious-interrupt vector + enable bit */
 #define LAPIC_ICRLO 0x300               /* writing here fires the IPI */
 #define LAPIC_ICRHI 0x310               /* destination APIC ID in bits 24..31 */
+#define LAPIC_LVT_TIMER 0x320            /* this core's own timer: vector + mode bits */
+#define LAPIC_TIMER_ICR 0x380            /* initial count (write starts it counting down) */
+#define LAPIC_TIMER_CCR 0x390            /* current count (read-only) */
+#define LAPIC_TIMER_DCR 0x3E0            /* divide configuration */
 #define SVR_ENABLE  0x100               /* SVR bit 8: software-enable the LAPIC */
 #define ICR_INIT    0x4500              /* delivery=INIT(5), level=assert */
 #define ICR_STARTUP 0x4600              /* delivery=STARTUP(6), level=assert; | vec */
 #define ICR_PENDING (1u << 12)          /* ICR-low delivery-status: 1 while sending */
+#define LVT_TIMER_PERIODIC (1u << 17)   /* LVT Timer bit 17: periodic (vs. one-shot) */
 
 int smp_cpu_count = 1;                  /* the BSP counts as one */
 
@@ -96,6 +101,49 @@ static void pit_udelay(uint32_t us) {
         __asm__ volatile("pause");
 }
 
+/* ---- per-core LAPIC timer (M1532) ----------------------------------------
+ * M1531's cross-core preemption used a broadcast IPI (vector 0x41) from the
+ * BSP's own PIT tick, since no per-core timer existed — correct, but every
+ * AP takes an extra IPI on EVERY BSP tick regardless of whether it's doing
+ * anything, and it's fundamentally a workaround. Each core's LAPIC has its
+ * OWN built-in timer; this calibrates it once (against the same PIT already
+ * used for AP bring-up delays) and lets each AP run its OWN local, genuinely
+ * independent periodic tick — real hardware preemption, not a broadcast
+ * approximation of it. The BSP keeps its existing PIT-driven tick_handler
+ * unchanged (it already works, and running BOTH a LAPIC timer and the PIT on
+ * the BSP would just double-tick it for no benefit) — this is APs only. */
+static uint32_t g_lapic_timer_count;   /* calibrated initial-count for TICK_HZ; 0 = not calibrated (uniprocessor) */
+#define TICK_HZ 100                    /* matches kernel/timer.c's PIT tick_hz */
+
+/* Run once, on the BSP, before any AP starts: count how many LAPIC timer
+ * ticks occur in a known PIT-timed window, at divide-by-16, to compute the
+ * initial-count value for a TICK_HZ periodic tick. Same value works for
+ * every AP under QEMU (all vCPUs share one emulated bus frequency); real
+ * multi-socket hardware with per-package clocks would need per-core
+ * calibration instead, out of scope for this machine. */
+static void lapic_timer_calibrate(void) {
+    lapic_wr(LAPIC_TIMER_DCR, 0x3);            /* divide by 16 */
+    lapic_wr(LAPIC_TIMER_ICR, 0xFFFFFFFFu);    /* max count, starts counting down now */
+    pit_udelay(10000);                          /* a known 10 ms window */
+    uint32_t remaining = lapic_rd(LAPIC_TIMER_CCR);
+    lapic_wr(LAPIC_TIMER_ICR, 0);                /* stop it (one-shot from the max count) */
+    uint32_t elapsed = 0xFFFFFFFFu - remaining;  /* ticks counted in 10 ms */
+    uint32_t per_ms = elapsed / 10;
+    g_lapic_timer_count = per_ms * (1000 / TICK_HZ);
+    kprintf("[smp] LAPIC timer calibrated: %u ticks/ms, initial-count=%u for %d Hz\n",
+            per_ms, g_lapic_timer_count, TICK_HZ);
+}
+
+/* Program THIS core's own LAPIC timer to fire vector 0x42 (a local,
+ * genuinely per-core interrupt — never broadcast) at TICK_HZ, periodic.
+ * Called by each AP once it's up; never by the BSP (see the comment above). */
+void lapic_timer_start_this_cpu(void) {
+    if (!g_lapic_timer_count) return;     /* uniprocessor: never calibrated, never needed */
+    lapic_wr(LAPIC_TIMER_DCR, 0x3);        /* divide by 16, same as calibration */
+    lapic_wr(LAPIC_LVT_TIMER, 0x42 | LVT_TIMER_PERIODIC);
+    lapic_wr(LAPIC_TIMER_ICR, g_lapic_timer_count);
+}
+
 void lapic_eoi(void) { if (lapic) lapic_wr(0x0B0, 0); }   /* ack an interrupt */
 
 /* ---- parallel job pool (M1198) -----------------------------------------
@@ -133,17 +181,6 @@ static int smp_run_one(void) {
 void smp_wake_aps(void) {
     if (!lapic) return;
     lapic_wr(LAPIC_ICRLO, 0x40 | (1u << 14) | (3u << 18));     /* fixed, assert, all-but-self */
-    while (lapic_rd(LAPIC_ICRLO) & ICR_PENDING) __asm__ volatile("pause");
-}
-
-/* Broadcast the scheduler-tick IPI (0x41) to every other core (M1531): called
- * once per BSP timer tick so a task running on an AP gets preempted on the
- * same heartbeat the BSP already uses, since there's no per-core LAPIC timer
- * set up yet. A no-op cost on true uniprocessor (the caller only calls this
- * when smp_cpu_count > 1). */
-void smp_broadcast_tick(void) {
-    if (!lapic) return;
-    lapic_wr(LAPIC_ICRLO, 0x41 | (1u << 14) | (3u << 18));     /* fixed, assert, all-but-self */
     while (lapic_rd(LAPIC_ICRLO) & ICR_PENDING) __asm__ volatile("pause");
 }
 
@@ -189,9 +226,10 @@ void ap_main(void) {
     idt_load();                          /* kernel IDT: the wake/tick IPIs + exceptions */
     extern void fpu_init_ap(void);        /* CR0/CR4 are per-core: enable FXSAVE/FXRSTOR HERE too (M1531) */
     fpu_init_ap();
+    lapic_timer_start_this_cpu();        /* this core's own real preemption source (M1532) */
     __atomic_add_fetch(&smp_cpu_count, 1, __ATOMIC_SEQ_CST);
     task_register_ap_core();             /* join the shared ready ring with our own floor task (M1531) */
-    __asm__ volatile("sti");             /* accept the wake/tick IPIs */
+    __asm__ volatile("sti");             /* accept the wake/tick/local-timer IPIs */
     for (;;) {
         while (smp_run_one()) ;          /* run everything currently queued */
         smpthread_ap_tick();             /* run any real kernel threads pinned to this core (M1530) */
@@ -271,6 +309,8 @@ void smp_init(void) {
     uint32_t bsp = (lapic_rd(LAPIC_ID) >> 24) & 0xFF;
     if (n <= 1) { kprintf("[smp] uniprocessor (MADT lists %d CPU%s)\n",
                           n < 1 ? 1 : n, n == 1 ? "" : "s"); return; }
+
+    lapic_timer_calibrate();     /* once, before any AP starts (M1532) */
 
     /* Stage the trampoline at physical 0x8000 and fill its parameter block. The
      * page is in the reserved low region (pmm never hands it out) and is

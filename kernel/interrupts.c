@@ -95,17 +95,18 @@ void isr_dispatch(struct registers *r) {
      * out of its idle hlt (the work-drain happens in its idle loop after iret);
      * the LAPIC spurious vector needs no EOI. Both just acknowledge + return. */
     if (r->int_no == 0x40) { lapic_eoi(); return; }
-    /* Broadcast scheduler-tick IPI (M1531): every core preempts its own
-     * running task on the BSP's PIT heartbeat, the same way IRQ0 already does
-     * for the BSP itself — this is what makes tasks on an AP genuinely
-     * preemptible without a per-core timer source. EOI FIRST, exactly like the
-     * IRQ 32-47 branch below already does and its own comment explains: sched_
-     * tick() can context_switch away and not return here until this exact
-     * task/core is picked again, so the EOI must already be sent or the LAPIC
-     * would never deliver this vector again — hit that as a real in-guest
-     * crash (an interrupt pileup deep enough to double-fault) before swapping
-     * the order to match. */
-    if (r->int_no == 0x41) { lapic_eoi(); sched_tick(); return; }
+    /* This core's own local LAPIC timer (M1532): the real per-core preemption
+     * source, armed by lapic_timer_start_this_cpu() on every AP (never the
+     * BSP, which keeps its own working PIT-driven tick_handler). EOI FIRST,
+     * exactly like the IRQ 32-47 branch below and for the identical reason:
+     * sched_tick() can context_switch away and not return here until this
+     * exact task/core is picked again, so the EOI must already be sent or the
+     * LAPIC would never deliver this vector again — an earlier version of
+     * this same mechanism (M1531's broadcast-IPI predecessor to this) hit
+     * exactly that as a real in-guest crash (an interrupt pileup deep enough
+     * to double-fault) before the order was fixed; kept EOI-first here from
+     * the start. */
+    if (r->int_no == 0x42) { lapic_eoi(); sched_tick(); return; }
     if (r->int_no == 0xFF) { return; }
 
     /* MSI / MSI-X message-signaled interrupts (M1288): a device wrote its

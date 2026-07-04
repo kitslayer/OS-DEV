@@ -77,20 +77,22 @@ isr128:
     push 128
     jmp isr_common
 
-; --- SMP inter-processor interrupts (M1198, +0x41 M1531) --------------------
-; 0x40 (64) = AP wake IPI; 0x41 (65) = broadcast scheduler-tick IPI (lets every
-; core's running task be preempted on the BSP's PIT heartbeat, since there's no
-; per-core timer yet); 0xFF (255) = LAPIC spurious vector.
+; --- SMP inter-processor interrupts (M1198, +0x42 M1532) --------------------
+; 0x40 (64) = AP wake IPI; 0x42 (66) = this core's own LOCAL LAPIC timer (the
+; real per-core preemption source, armed by lapic_timer_start_this_cpu on
+; every AP -- M1531 first shipped this as a broadcast IPI from the BSP's own
+; tick since no per-core timer existed yet; M1532 replaced it with this once
+; the real thing worked); 0xFF (255) = LAPIC spurious vector.
 global isr64
 isr64:
     push 0
     push 64
     jmp isr_common
 
-global isr65
-isr65:
+global isr66
+isr66:
     push 0
-    push 65
+    push 66
     jmp isr_common
 
 global isr255

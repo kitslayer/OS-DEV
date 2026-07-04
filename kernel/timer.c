@@ -18,7 +18,6 @@
 #include "profile.h"
 #include "app.h"
 #include "vdso.h"
-#include "smp.h"
 
 #define PIT_CH0_DATA 0x40
 #define PIT_COMMAND  0x43
@@ -39,7 +38,13 @@ static void timer_handler(struct registers *r) {
     app_timer_tick();      /* fire any due POSIX timer_create() timers, on every app (M1272) */
     loadavg_sample();      /* update the 1/5/15-min run-queue load average every 5 s (M1148) */
     sched_tick();          /* preempt the running thread on THIS (BSP) core */
-    if (smp_cpu_count > 1) smp_broadcast_tick();   /* and every other core too (M1531) */
+    /* Every other core has its OWN local LAPIC timer now (M1532), armed by
+     * lapic_timer_start_this_cpu() in kernel/smp.c's ap_main -- no need to
+     * broadcast an IPI from here anymore (M1531's original, workaround-era
+     * mechanism, removed once the real per-core source existed and was
+     * verified: make check + repeated in-guest boots + the interactive
+     * keyboard/httpd test, since that's the specific class of bug this
+     * scheduler code has produced before). */
 }
 
 void timer_init(uint32_t hz) {
