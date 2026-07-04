@@ -90,6 +90,70 @@ static int lzw_decode(bitreader *br, int min_code_size, uint8_t *idx, int idx_ca
 
 static int rd16(const uint8_t *p) { return p[0] | (p[1] << 8); }
 
+/* Expand one already-LZW-decoded row of palette indices to RGBA. Independent
+ * per pixel (reads `irow` + the constant palette/trans, writes `o`), the same
+ * shape as jpeg.c's/png.c's colour-conversion passes — unlike lzw_decode()
+ * above, whose dictionary makes it inherently sequential and NOT a candidate
+ * for this treatment. */
+static void gif_expand_row(const uint8_t *irow, uint8_t *o, const uint8_t *ctab, int ctab_size, int trans, int iw) {
+    for (int x = 0; x < iw; x++) {
+        int ci = irow[x];
+        uint8_t r = 0, g = 0, bl = 0, al = 255;
+        if (ci < ctab_size) { r = ctab[ci*3]; g = ctab[ci*3+1]; bl = ctab[ci*3+2]; }
+        if (ci == trans) al = 0;
+        o[x*4+0] = r; o[x*4+1] = g; o[x*4+2] = bl; o[x*4+3] = al;
+    }
+}
+
+/* Parallel expansion for the common non-interlaced case (M1533-follow-on):
+ * `dy == srow` always when step==1/start==0, so this is exactly the simple
+ * contiguous-row-range shape jpeg.c/png.c already thread. Interlaced GIFs
+ * (4 differently-strided passes, rarer in practice) keep calling
+ * gif_expand_row() directly from their existing pass loop, unthreaded —
+ * same scoping decision as png.c's Adam7 exclusion. */
+struct gif_expand_shape { const uint8_t *scratch; uint8_t *out; const uint8_t *ctab; int ctab_size, trans, iw; };
+static void gif_expand_range(const struct gif_expand_shape *s, int y0, int y1) {
+    for (int y = y0; y < y1; y++)
+        gif_expand_row(s->scratch + (long)y * s->iw, s->out + (long)y * s->iw * 4, s->ctab, s->ctab_size, s->trans, s->iw);
+}
+
+#ifdef GIF_THREADED
+#include "ulib.h"
+
+#define GIF_MAX_THREADS      4
+#define GIF_EXPAND_MIN_PIXELS (200 * 1000)   /* see jpeg.c's JPEG_CC_MIN_PIXELS for why pixels, not rows */
+#define GIF_EXPAND_STACK     (64 * 1024)
+
+struct gif_expand_job { const struct gif_expand_shape *s; int y0, y1; volatile int done; };
+static void gif_expand_thread(void *arg) {
+    struct gif_expand_job *job = (struct gif_expand_job *)arg;
+    gif_expand_range(job->s, job->y0, job->y1);
+    job->done = 1;              /* LAST write before exiting -- the join loop waits on this */
+    sys_thread_exit();
+}
+static void gif_expand_parallel(const struct gif_expand_shape *s, int height) {
+    if ((long)s->iw * height < GIF_EXPAND_MIN_PIXELS) { gif_expand_range(s, 0, height); return; }
+
+    struct gif_expand_job jobs[GIF_MAX_THREADS];
+    int njobs = 0;
+    int per = (height + GIF_MAX_THREADS - 1) / GIF_MAX_THREADS;
+    for (int y0 = 0; y0 < height && njobs < GIF_MAX_THREADS; y0 += per, njobs++) {
+        int y1 = y0 + per; if (y1 > height) y1 = height;
+        jobs[njobs].s = s; jobs[njobs].y0 = y0; jobs[njobs].y1 = y1; jobs[njobs].done = 0;
+    }
+    for (int i = 0; i < njobs - 1; i++) {
+        char *stk = (char *)malloc(GIF_EXPAND_STACK);
+        if (!stk || sys_clone((void *)gif_expand_thread, stk + GIF_EXPAND_STACK, &jobs[i]) < 0) {
+            gif_expand_range(jobs[i].s, jobs[i].y0, jobs[i].y1);   /* OOM/spawn failure: just do it inline */
+            jobs[i].done = 1;
+        }
+    }
+    gif_expand_range(s, jobs[njobs - 1].y0, jobs[njobs - 1].y1);   /* this thread's own share */
+    for (int i = 0; i < njobs - 1; i++)
+        while (!jobs[i].done) { }   /* busy-wait join: each chunk is real work, not worth a syscall to block on */
+}
+#endif
+
 int gif_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
                uint8_t *scratch, int scratch_cap, int *w, int *h) {
     if (len < 13 || out_cap < 0 || scratch_cap < 0) return -1;
@@ -150,21 +214,20 @@ int gif_decode(const uint8_t *data, int len, uint8_t *out, int out_cap,
 
     /* Expand indices -> RGBA. Decoded rows are consumed in order; for an
      * interlaced image they're placed into the 4 interlace passes. */
-    static const int istart[4] = {0,4,2,1}, istep[4] = {8,8,4,2};
-    int npass = interlace ? 4 : 1, srow = 0;
-    for (int pass = 0; pass < npass; pass++) {
-        int start = interlace ? istart[pass] : 0;
-        int step  = interlace ? istep[pass]  : 1;
-        for (int dy = start; dy < ih && srow < ih; dy += step, srow++) {
-            const uint8_t *irow = scratch + (long)srow * iw;
-            uint8_t *o = out + (long)dy * iw * 4;
-            for (int x = 0; x < iw; x++) {
-                int ci = irow[x];
-                uint8_t r = 0, g = 0, bl = 0, al = 255;
-                if (ci < ctab_size) { r = ctab[ci*3]; g = ctab[ci*3+1]; bl = ctab[ci*3+2]; }
-                if (ci == trans) al = 0;
-                o[x*4+0] = r; o[x*4+1] = g; o[x*4+2] = bl; o[x*4+3] = al;
-            }
+    if (!interlace) {
+        struct gif_expand_shape shp = { scratch, out, ctab, ctab_size, trans, iw };
+#ifdef GIF_THREADED
+        gif_expand_parallel(&shp, ih);
+#else
+        gif_expand_range(&shp, 0, ih);
+#endif
+    } else {
+        static const int istart[4] = {0,4,2,1}, istep[4] = {8,8,4,2};
+        int srow = 0;
+        for (int pass = 0; pass < 4; pass++) {
+            int start = istart[pass], step = istep[pass];
+            for (int dy = start; dy < ih && srow < ih; dy += step, srow++)
+                gif_expand_row(scratch + (long)srow * iw, out + (long)dy * iw * 4, ctab, ctab_size, trans, iw);
         }
     }
     *w = iw; *h = ih;
