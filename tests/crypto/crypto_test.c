@@ -35,12 +35,29 @@
 #include "ecdsa.h"
 #include "rsa.h"
 #include "sigvectors.h"
+#include "smp.h"
 
 /* ecdsa.c reads smp_current_cpu() to pick its per-core P/N slot (M1528) --
  * this host harness runs single-threaded, so "core 0" always, same as every
  * other stub here just resolving a real kernel dependency to its host-safe
  * trivial case. */
 int smp_current_cpu(void) { return 0; }
+
+/* aes.c's aes128_ctr() dispatches large buffers through smp_parallel_for
+ * (M1529). This host harness has no APs to hand work to, but rather than a
+ * trivial single-chunk stub, actually SPLIT the range into several pieces and
+ * call `fn` once per piece (still sequential, still single-threaded) -- that's
+ * what genuinely exercises each chunk's "start my own counter at nonzero lo"
+ * arithmetic, the one part of the parallel path a single-chunk stub would
+ * never touch. */
+void smp_parallel_for(int n, smp_fn fn, void *ctx) {
+    int chunks = 4, csz = (n + chunks - 1) / chunks;
+    if (csz < 1) csz = 1;
+    for (int lo = 0; lo < n; lo += csz) {
+        int hi = lo + csz; if (hi > n) hi = n;
+        fn(lo, hi, ctx);
+    }
+}
 
 static int g_fails = 0;
 static int hxd(char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; }
@@ -99,6 +116,43 @@ int main(void) {
     { H(k, "000102030405060708090a0b0c0d0e0f"); H(buf, "00112233445566778899aabbccddeeff");
       aes128_encrypt_block(buf, k);
       check("AES-128 block (FIPS-197)", buf, "69c4e0d86a7b0430d8cdb78070b4c55a", 16); }
+
+    /* --- AES-128-CTR (NIST SP800-38A F.5.1) --- */
+    { uint8_t kk[16], nonce[16], p[64], c[64];
+      H(kk, "2b7e151628aed2a6abf7158809cf4f3c");
+      H(nonce, "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+      H(p, "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51"
+           "30c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
+      memcpy(c, p, 64);
+      aes128_ctr(c, 64, kk, nonce);
+      check("AES-128-CTR (NIST SP800-38A F.5.1)", c,
+        "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff"
+        "5ae4df3edbd5d35e5b4f09020db03eab1e031dda2fbe03d1792170a0f3009cee", 64);
+      aes128_ctr(c, 64, kk, nonce);          /* CTR is its own inverse -- decrypt back to plaintext */
+      if (memcmp(c, p, 64) != 0) { printf("  FAIL: AES-128-CTR round-trip\n"); g_fails++; }
+      else printf("  ok: AES-128-CTR round-trip\n"); }
+
+    /* --- AES-128-CTR, large buffer: forces aes128_ctr's smp_parallel_for path
+     * (M1529, threshold is 64KB) and checks it byte-for-byte against an
+     * independent, deliberately naive single-block reference -- the real risk
+     * in the parallel version isn't the cipher, it's each chunk computing the
+     * right STARTING counter value for its offset, and this is what actually
+     * exercises that (the stub above splits into multiple chunks). --- */
+    { static uint8_t kk[16], nonce[16], big[200003], ref[200003], ctr[16];
+      for (int i = 0; i < 16; i++) { kk[i] = (uint8_t)(i * 7 + 1); nonce[i] = (uint8_t)(i * 13 + 3); }
+      for (size_t i = 0; i < sizeof big; i++) big[i] = (uint8_t)(i * 31 + 5);
+      memcpy(ref, big, sizeof big);
+      memcpy(ctr, nonce, 16);
+      for (size_t off = 0; off < sizeof ref; off += 16) {           /* naive oracle */
+          uint8_t ks[16]; memcpy(ks, ctr, 16);
+          aes128_encrypt_block(ks, kk);
+          size_t n = sizeof ref - off < 16 ? sizeof ref - off : 16;
+          for (size_t i = 0; i < n; i++) ref[off + i] ^= ks[i];
+          for (int i = 15; i >= 0; i--) if (++ctr[i]) break;
+      }
+      aes128_ctr(big, sizeof big, kk, nonce);                        /* the real (parallel-path) impl */
+      if (memcmp(big, ref, sizeof big) != 0) { printf("  FAIL: AES-128-CTR large-buffer (parallel path) vs naive oracle\n"); g_fails++; }
+      else printf("  ok: AES-128-CTR large-buffer (parallel path) matches naive oracle (200003 bytes, non-multiple-of-16, multi-chunk)\n"); }
 
     /* --- AES-128-GCM (GCM spec test cases 1 & 2) --- */
     { memset(k, 0, 16); memset(iv, 0, 12);

@@ -356,7 +356,7 @@ HTTPGET_CRYPTO = aes aesgcm bignum chachapoly ecdsa hkdf rsa sha256 sha512 x2551
 $(BUILD)/httpget.elf: user/httpget.c kernel/tls.c $(patsubst %,kernel/%.c,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
 	$(HTTPGET_CC) -w -DTLS_RING3 -c kernel/tls.c -o $(BUILD)/httpget_tls.o
-	@for m in $(HTTPGET_CRYPTO); do echo "  CC kernel/$$m.c (ring-3 crypto)"; $(HTTPGET_CC) -w -c kernel/$$m.c -o $(BUILD)/httpget_$$m.o || exit 1; done
+	@for m in $(HTTPGET_CRYPTO); do echo "  CC kernel/$$m.c (ring-3 crypto)"; extra=""; [ "$$m" = "aes" ] && extra="-DAES_RING3"; $(HTTPGET_CC) -w $$extra -c kernel/$$m.c -o $(BUILD)/httpget_$$m.o || exit 1; done
 	$(HTTPGET_CC) -Wall -c user/httpget.c -o $(BUILD)/httpget_app.o
 	$(LD) -T user/user.ld -o $@ $(BUILD)/httpget_app.o $(BUILD)/httpget_tls.o $(patsubst %,$(BUILD)/httpget_%.o,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (ring-3 TLS 1.3 client)"

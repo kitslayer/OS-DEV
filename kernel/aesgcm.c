@@ -43,13 +43,17 @@ static void inc32(uint8_t *ctr) {                /* increment the low 32 bits, b
     for (int i = 15; i >= 12; i--) { if (++ctr[i]) break; }
 }
 
-/* GCTR: encrypt/decrypt `len` bytes from `in` to `out` starting at counter `cb`. */
+/* GCTR: encrypt/decrypt `len` bytes from `in` to `out` starting at counter `cb`.
+ * Expands the round-key schedule ONCE up front (M1529) instead of re-deriving
+ * it from `key` on every single 16-byte block -- a TLS record can be up to
+ * ~16KB (1000+ blocks) all under the same key. */
 static void gctr(uint8_t *out, const uint8_t *in, size_t len,
                  const uint8_t key[16], uint8_t cb[16]) {
+    uint8_t rk[176]; aes128_key_expand(key, rk);
     size_t i = 0;
     while (i < len) {
         uint8_t ks[16]; memcpy(ks, cb, 16);
-        aes128_encrypt_block(ks, key);
+        aes128_encrypt_block_rk(ks, rk);
         size_t n = len - i; if (n > 16) n = 16;
         for (size_t j = 0; j < n; j++) out[i + j] = in[i + j] ^ ks[j];
         inc32(cb);

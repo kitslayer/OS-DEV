@@ -21,7 +21,6 @@
 #include "smp.h"
 #include "acpi.h"
 #include "vmm.h"
-#include "pmm.h"
 #include "io.h"
 #include "console.h"
 #include "gdt.h"
@@ -258,11 +257,25 @@ void smp_init(void) {
     param[0] = read_cr3() & PTE_ADDR_MASK;             /* kernel PML4 -> CR3 */
     param[2] = (uint64_t)&ap_main;                     /* 64-bit C entry */
 
+    /* An AP's stack is allocated ONCE here and used for the rest of the kernel's
+     * life -- originally 16 KiB, sized only for the idle loop + the trivial boot
+     * self-test below. M1528 made smp_parallel_for's first real caller (TLS
+     * chain-link verification) dispatch full ECDSA point-arithmetic (bignum
+     * mul/modexp, a deep call chain) onto whichever core picks up a chunk,
+     * including an AP -- found via an in-guest crash (a real KERNEL STACK
+     * OVERFLOW booting against the live internet) that 16 KiB isn't remotely
+     * enough for that, matching the exact reason task.c's task_create_stack
+     * gives bignum/RSA/ECDSA-heavy kernel tasks 256 KiB instead of the 16 KiB
+     * default (M1491/M1520). Now sized the same, and via kstack_alloc (M1495)
+     * instead of a raw pmm_alloc_contiguous, so an AP that ever DOES overflow
+     * this faults cleanly on a guard page instead of corrupting whatever
+     * physical memory happened to sit past a bare HHDM allocation. */
+#define AP_STACK_SIZE (256 * 1024)
     for (int i = 0; i < n; i++) {
         if (ids[i] == bsp) continue;                   /* don't IPI ourselves */
-        uint64_t stk = pmm_alloc_contiguous(4, 1);     /* 16 KiB AP stack */
-        if (!stk) { kprintf("[smp] no stack frame for apic=%u\n", ids[i]); continue; }
-        param[1] = (uint64_t)hhdm(stk) + 4 * 4096;     /* stack top (HHDM virtual) */
+        void *stk = kstack_alloc(AP_STACK_SIZE);
+        if (!stk) { kprintf("[smp] no stack for apic=%u\n", ids[i]); continue; }
+        param[1] = (uint64_t)stk + AP_STACK_SIZE;      /* stack top */
         ap_start_one(ids[i]);
     }
 

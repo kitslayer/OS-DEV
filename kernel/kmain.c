@@ -402,14 +402,19 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * desktop itself -- proceeds immediately; the ARP/ping/HTTP/TLS results
      * still land in the serial log a couple seconds later, just concurrently
      * with an already-usable desktop instead of blocking it. */
-    /* 256K, not the default task_create() stack: net_demo() calls tls_get(),
-     * which runs the bignum/RSA/ECDSA TLS 1.3 handshake on THIS task's kernel
-     * stack -- the exact scenario that overflowed a 64K stack for the ring-3
-     * browser's fetch worker (M1491) and corrupted the task ring. Matches the
-     * 256K used everywhere else this same pattern occurs (kernel/app.c,
-     * kernel/browser.c). Confirmed by hitting exactly that overflow here
-     * first, with the default stack, before adding this. */
-    task_create_stack(net_demo, 0, 0, 256 * 1024);
+    /* 512K, not the default task_create() stack (bumped from 256K, M1530):
+     * net_demo() calls tls_get(), which runs the bignum/RSA/ECDSA TLS 1.3
+     * handshake on THIS task's kernel stack -- the exact scenario that
+     * overflowed a 64K stack for the ring-3 browser's fetch worker (M1491)
+     * and corrupted the task ring. 256K was matched to everywhere else this
+     * same pattern occurs (kernel/app.c, kernel/browser.c) and was sufficient
+     * for a single sequential chain-link verify -- but M1528's smp_parallel_for
+     * chain-verify hit a real, in-guest, live-network kernel stack overflow
+     * even at 256K (nested interrupts during a busy-wait join can stack up
+     * real depth on top of ECDSA's own call chain in a way a quiet `make
+     * check` run doesn't reliably exercise). Bumped with real headroom rather
+     * than the smallest number that happens to stop reproducing it. */
+    task_create_stack(net_demo, 0, 0, 512 * 1024);
 
     /* Mount the FAT32 disk and show it works from the kernel side. */
     if (fat32_mount() == 0) {

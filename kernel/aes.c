@@ -10,6 +10,9 @@
  * encryption and decryption are the same operation — handy for a file tool.
  */
 #include "aes.h"
+#ifndef AES_RING3
+#include "smp.h"      /* smp_parallel_for — split a big CTR buffer across cores (M1529) */
+#endif
 
 static const uint8_t sbox[256] = {
     0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
@@ -32,7 +35,7 @@ static const uint8_t sbox[256] = {
 
 static uint8_t xtime(uint8_t x) { return (uint8_t)((x << 1) ^ ((x >> 7) * 0x1b)); }
 
-static void key_expand(const uint8_t key[16], uint8_t rk[176]) {
+void aes128_key_expand(const uint8_t key[16], uint8_t rk[176]) {
     static const uint8_t rcon[10] = { 0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36 };
     for (int i = 0; i < 16; i++) rk[i] = key[i];
     int bytes = 16, rc = 0;
@@ -49,7 +52,11 @@ static void key_expand(const uint8_t key[16], uint8_t rk[176]) {
 }
 
 void aes128_encrypt_block(uint8_t s[16], const uint8_t key[16]) {
-    uint8_t rk[176]; key_expand(key, rk);
+    uint8_t rk[176]; aes128_key_expand(key, rk);
+    aes128_encrypt_block_rk(s, rk);
+}
+
+void aes128_encrypt_block_rk(uint8_t s[16], const uint8_t rk[176]) {
     for (int i = 0; i < 16; i++) s[i] ^= rk[i];                  /* AddRoundKey */
     for (int round = 1; round <= 10; round++) {
         for (int i = 0; i < 16; i++) s[i] = sbox[s[i]];          /* SubBytes */
@@ -72,13 +79,58 @@ void aes128_encrypt_block(uint8_t s[16], const uint8_t key[16]) {
     }
 }
 
-void aes128_ctr(uint8_t *data, size_t len, const uint8_t key[16], const uint8_t nonce[16]) {
-    uint8_t ctr[16]; for (int i = 0; i < 16; i++) ctr[i] = nonce[i];
-    for (size_t off = 0; off < len; off += 16) {
-        uint8_t ks[16]; for (int i = 0; i < 16; i++) ks[i] = ctr[i];
-        aes128_encrypt_block(ks, key);
-        size_t n = len - off < 16 ? len - off : 16;
-        for (size_t i = 0; i < n; i++) data[off + i] ^= ks[i];
-        for (int i = 15; i >= 0; i--) if (++ctr[i]) break;       /* counter++ */
+/* Add a (possibly large) block count onto a 128-bit big-endian counter, with
+ * carry -- lets a chunk starting at block index `blocks` compute its own
+ * starting counter value directly, instead of ticking up from zero. */
+static void ctr_add(uint8_t ctr[16], uint64_t blocks) {
+    uint64_t carry = blocks;
+    for (int i = 15; i >= 0 && carry; i--) {
+        uint64_t sum = (uint64_t)ctr[i] + (carry & 0xFF);
+        ctr[i] = (uint8_t)sum;
+        carry = (carry >> 8) + (sum >> 8);
     }
+}
+
+static void ctr_run(uint8_t *data, size_t off, size_t end, const uint8_t rk[176], uint8_t ctr[16]) {
+    for (size_t o = off; o < end; o += 16) {
+        uint8_t ks[16]; for (int i = 0; i < 16; i++) ks[i] = ctr[i];
+        aes128_encrypt_block_rk(ks, rk);
+        size_t n = end - o < 16 ? end - o : 16;
+        for (size_t i = 0; i < n; i++) data[o + i] ^= ks[i];
+        ctr_add(ctr, 1);
+    }
+}
+
+#ifndef AES_RING3
+/* Only worth the IPI-dispatch + join overhead for a real-sized buffer (M1529)
+ * -- SYS_crypt's whole-file CTR pass (up to 32MB, kernel/syscall.c) is the
+ * motivating case; a typical TLS record or small file just takes the
+ * sequential path below untouched. */
+#define AES_CTR_PARALLEL_MIN_BLOCKS 4096   /* >= 64 KiB */
+
+struct ctr_ctx { uint8_t *data; size_t len; const uint8_t *rk; uint8_t nonce[16]; };
+
+static void ctr_chunk(int lo, int hi, void *ctxp) {
+    struct ctr_ctx *c = ctxp;
+    uint8_t ctr[16]; for (int i = 0; i < 16; i++) ctr[i] = c->nonce[i];
+    ctr_add(ctr, (uint64_t)lo);
+    size_t off = (size_t)lo * 16, end = (size_t)hi * 16;
+    if (end > c->len) end = c->len;
+    ctr_run(c->data, off, end, c->rk, ctr);
+}
+#endif
+
+void aes128_ctr(uint8_t *data, size_t len, const uint8_t key[16], const uint8_t nonce[16]) {
+    uint8_t rk[176]; aes128_key_expand(key, rk);
+    size_t nblocks = (len + 15) / 16;
+#ifndef AES_RING3
+    if (nblocks > AES_CTR_PARALLEL_MIN_BLOCKS) {
+        struct ctr_ctx c = { data, len, rk, {0} };
+        for (int i = 0; i < 16; i++) c.nonce[i] = nonce[i];
+        smp_parallel_for((int)nblocks, ctr_chunk, &c);
+        return;
+    }
+#endif
+    uint8_t ctr[16]; for (int i = 0; i < 16; i++) ctr[i] = nonce[i];
+    ctr_run(data, 0, len, rk, ctr);
 }
