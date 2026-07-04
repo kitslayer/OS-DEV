@@ -3100,6 +3100,7 @@ int app_sys_history(char *buf, int max) {
 
 /* ---- spawn ---- */
 static void app_trampoline(void) {
+    task_finish_switch();   /* complete whoever we just preempted (M1531) — see task.h */
     struct app *a = cur();
     enter_user(a->entry, a->ustack);   /* -> ring 3; returns only via SYS_exit */
 }
@@ -3213,6 +3214,7 @@ fail_in_space:
  * we cloned from the parent at fork time (rax = 0). Never returns — it iretq's
  * into userspace, and the child later exits via the normal task_exit path. */
 static void fork_child_trampoline(void) {
+    task_finish_switch();   /* complete whoever we just preempted (M1531) — see task.h */
     struct app *a = cur();
     iret_to_user(&a->fork_frame);
 }
@@ -3221,6 +3223,7 @@ static void fork_child_trampoline(void) {
  * starts it at fn(arg) on its own stack, in the SHARED address space), then free
  * that frame. Never returns; the thread ends via SYS_thread_exit -> task_exit. */
 static void thread_trampoline(void) {
+    task_finish_switch();   /* complete whoever we just preempted (M1531) — see task.h */
     task_t *t = task_self();
     struct registers f = *t->start_frame;          /* copy out before freeing */
     kfree(t->start_frame);

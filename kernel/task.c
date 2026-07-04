@@ -22,6 +22,7 @@
 #include "timer.h"
 #include "console.h"   /* kprintf — for the stack-overflow panic */
 #include "vmm.h"       /* kstack_alloc/free — guarded task stacks (M1495) */
+#include "smp.h"       /* smp_current_cpu — per-core scheduler state (M1531) */
 
 #define STACK_SIZE 16384
 #define FXSZ       512                 /* FXSAVE area size */
@@ -34,9 +35,49 @@
  * task ring, GPF'ing in task_wake_sleepers with no hint of the real cause). */
 #define STACK_CANARY 0x9e3b8a7c5d6f1024ull
 
-static task_t *current;
+/* --- multi-core scheduler state (M1531) ---------------------------------
+ * Before this, `current`/`active_cr3` were single globals: only the BSP ever
+ * ran the scheduler, every other core sat in kernel/smp.c's job-pool-only
+ * idle loop. Now every core (BSP + each AP) has its OWN slot, indexed by its
+ * APIC id masked the same way kernel/smp.c's own cpu_jobs[]/ecdsa.c's per-core
+ * arrays already do — and the shared ready ring itself needs a REAL cross-
+ * core lock (a plain `cli` only ever protected against a LOCAL interrupt
+ * reentering, never against another core concurrently walking/mutating the
+ * same ring). `current`/`active_cr3` are kept as macros so the large existing
+ * body of this file (every `current->x`, `current = t`, etc.) keeps working
+ * unchanged — each reference now transparently resolves to THIS core's own
+ * slot instead of silently being a single-core assumption. */
+#define MAX_SCHED_CPUS 16
+static task_t   *cur[MAX_SCHED_CPUS];
+static uint64_t  active_cr3_arr[MAX_SCHED_CPUS];
+static inline int mycore(void) { return smp_current_cpu() & (MAX_SCHED_CPUS - 1); }
+#define current    (cur[mycore()])
+#define active_cr3 (active_cr3_arr[mycore()])
+
+/* The cross-core ready-ring lock. Local interrupt disabling (irq_save/
+ * irq_restore, unchanged below) still matters — it stops a task on THIS core
+ * from being reentered mid-update — but by itself says nothing about another
+ * core running concurrently. rq_lock_take/give bracket the actual ring reads/
+ * writes; switch_to_next/task_exit release it BEFORE their context_switch
+ * tail (a switch can leave a task off-CPU for an arbitrary time, so holding a
+ * global lock across it would freeze every other core's scheduling for that
+ * whole time) while leaving interrupts disabled around that tail exactly as
+ * the single-core version already did. */
+static volatile int rq_lock;
+static inline void rq_lock_take(void) { while (__atomic_exchange_n(&rq_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause"); }
+static inline void rq_lock_give(void) { __atomic_store_n(&rq_lock, 0, __ATOMIC_RELEASE); }
+
 static int     next_id;
 static uint64_t g_nr_switches;   /* total context switches since boot — /proc/stat "ctxt" (M1253) */
+
+/* Set once sched_init() has built task 0 (M1531). smp_init() runs BEFORE
+ * sched_init() (kmain.c relies on being genuinely single-threaded across the
+ * AP bring-up + vmm_harden_kernel span in between — see kmain.c's own
+ * comment), so an AP that reaches ap_main() early would otherwise call
+ * task_register_ap_core() while `cur[0]` (task 0) doesn't exist yet and
+ * dereference it — hit exactly that crash once, in-guest, before adding this
+ * gate. task_register_ap_core() spins on this instead. */
+static volatile int g_sched_ready;
 
 extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
 extern void fpu_save(void *area16);            /* FXSAVE  (kernel/asm/fpu.asm) */
@@ -63,8 +104,12 @@ void task_copy_fpu(task_t *dst, task_t *src) {
 
 struct registers *task_uframe(task_t *t) { return t ? t->uframe : 0; }
 
-static uint64_t active_cr3;     /* the address space currently loaded in CR3 */
-static task_t *idle_task;       /* the scheduling floor: never blocks/exits, run ONLY when no other task is runnable (so a task that blocks itself when nothing else is ready hands off to this instead of spinning marked-BLOCKED). NULL until created -> switch_to_next falls back to its prior behavior. */
+/* The scheduling floor, ONE PER CORE (M1531): never blocks/exits, run ONLY
+ * when nothing else runnable exists FOR THAT CORE. Each is pin_core-tagged so
+ * it can never be picked up by a DIFFERENT core (two cores can't share one
+ * task_t's saved rsp/stack). NULL until sched_init/task_register_ap_core runs
+ * for that slot -> switch_to_next falls back to its prior (keep prev) behavior. */
+static task_t *floor_task[MAX_SCHED_CPUS];
 
 /* --- CFS weighted-fair scheduling (M1171) -------------------------------------
  * Each task carries a vruntime (weighted CPU consumed) and a weight derived from
@@ -103,13 +148,22 @@ static inline void load_cr3(uint64_t v) {
 
 /* Per-thread %fs base for TLS (M1140). The kernel never uses FS_BASE itself, so
  * we only touch the MSR on behalf of threads that set one; `loaded_fs_base`
- * tracks the live value so a system with no TLS pays nothing (stays 0 == 0). */
+ * tracks the live value so a system with no TLS pays nothing (stays 0 == 0).
+ * M1531: FS_BASE is a PER-CORE MSR — a single shared `loaded_fs_base` let one
+ * core's write make the cache claim a value that was only ever actually
+ * loaded on THAT core, so a DIFFERENT core would then wrongly skip its own
+ * wrmsr for the same value (or, worse, for 0 vs non-zero, actually diverge).
+ * Hit this as a real in-guest crash (wrmsr faulting -- a stale/never-loaded
+ * FS_BASE on an AP). Now one slot per core, same masking convention as every
+ * other per-core array in this codebase. */
 #define MSR_FS_BASE 0xC0000100u
-static uint64_t loaded_fs_base = 0;
+#define FSBASE_MAXCPUS 16
+static uint64_t loaded_fs_base[FSBASE_MAXCPUS];
 static void load_fs_base(uint64_t b) {
-    if (b == loaded_fs_base) return;
+    int c = mycore();
+    if (b == loaded_fs_base[c]) return;
     __asm__ volatile("wrmsr" : : "c"(MSR_FS_BASE), "a"((uint32_t)b), "d"((uint32_t)(b >> 32)));
-    loaded_fs_base = b;
+    loaded_fs_base[c] = b;
 }
 /* Set the CURRENT thread's TLS base (live + saved for restore). M1140. */
 void task_set_fs_base(uint64_t b) { current->fs_base = b; load_fs_base(b); }
@@ -129,8 +183,38 @@ static inline void irq_restore(uint64_t f) {
     __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
 }
 
+/* Deferred post-switch cleanup (M1531 — the pattern real kernels call
+ * finish_task_switch): the task a core just switched AWAY from must not
+ * become pickable by ANOTHER core (state -> READY) until this core has
+ * TRULY finished touching its stack/registers — which, thanks to the CR3/
+ * TSS/FPU/FS_BASE hardware tail AFTER the scheduling decision commits, is
+ * NOT the same moment as the decision itself. Marking it READY too early
+ * left a real window where a second core could pick the same task and
+ * context_switch onto its stack while the first core was still physically
+ * running on it — hit this as a cluster of intermittent, differently-
+ * shaped crashes (stack overflows, #UD, #GP/#DF) all landing somewhere in
+ * switch_to_next's hardware tail, before adding this. `core_prev[c]` is
+ * consumed exactly once per switch, by whichever code path resumes AFTER
+ * it: thread_trampoline for a brand-new task, or switch_to_next's own line
+ * right after context_switch returns for a task resuming a previous switch. */
+static task_t *core_prev[MAX_SCHED_CPUS];
+void task_finish_switch(void) {
+    int c = mycore();
+    task_t *p = core_prev[c];
+    if (!p) return;
+    core_prev[c] = 0;
+    uint64_t f = irq_save();
+    rq_lock_take();
+    p->state = TASK_READY;
+    p->ready_since = timer_ms();
+    p->nivcsw++;
+    rq_lock_give();
+    irq_restore(f);
+}
+
 /* Where a freshly created thread begins. `current` is already this thread. */
 static void thread_trampoline(void) {
+    task_finish_switch();             /* complete whoever we just preempted (M1531) */
     interrupts_enable();        /* new threads start with interrupts on */
     current->entry();
     task_exit();                /* if the entry function returns, end cleanly */
@@ -150,8 +234,74 @@ void sched_init(void) {
     active_cr3 = t->cr3;
     fx_alloc(t);
     t->last_in = timer_ms();    /* start CPU-time accounting for task 0 */
+    /* task 0 becomes the WM/desktop main loop (kmain -> desktop_run(), never
+     * returns) — pinned to the BSP (M1531): its is_floor stays 0 so it competes
+     * normally via CFS, but pin_core keeps it from ever migrating to an AP,
+     * where the graphics/driver code it calls has never run and has not been
+     * audited for it. Hit exactly that as a real in-guest crash (intermittent
+     * page faults/GPFs right as the desktop launched) before adding this. */
+    t->pin_core = mycore();
     current = t;
-    idle_task = task_create(idle_loop, read_cr3(), 0);   /* add the always-runnable floor (heap is up: kheap_init precedes sched_init) */
+    task_t *idle = task_create(idle_loop, read_cr3(), 0);   /* the BSP's always-runnable floor (heap is up: kheap_init precedes sched_init) */
+    idle->pin_core = mycore();                              /* never let another core pick this up (M1531) */
+    idle->is_floor = 1;
+    floor_task[mycore()] = idle;
+    __atomic_store_n(&g_sched_ready, 1, __ATOMIC_RELEASE);   /* APs may now call task_register_ap_core (M1531) */
+}
+
+/* Called once by each AP (kernel/smp.c's ap_main, after gdt/idt are up) to
+ * register ITS running context as a real scheduler participant, with its own
+ * floor/idle task — the multi-core half of sched_init's BSP setup (M1531).
+ * Until this runs for a given core, that core never appears in the ready
+ * ring at all (matches the pre-M1531 world exactly: only the BSP scheduled). */
+void task_register_ap_core(void) {
+    while (!__atomic_load_n(&g_sched_ready, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    int c = mycore();
+    task_t *self = kzalloc(sizeof(task_t));
+    self->id = next_id++;
+    self->state = TASK_RUNNING;
+    self->weight = NICE0_WEIGHT;
+    self->vruntime = g_min_vruntime;
+    self->cr3 = read_cr3();          /* this AP is already running in the kernel's address space */
+    self->pin_core = c;              /* this core's OWN native context (its ap_main loop / job-pool /
+                                       * smp_thread draining) — pinned, not migratable: it's tied to THIS
+                                       * core's own hardware execution, not portable work (M1531). Competes
+                                       * normally (is_floor stays 0) against whatever else lands on this core. */
+    fx_alloc(self);
+    self->last_in = timer_ms();
+
+    task_t *idle = kzalloc(sizeof(task_t));
+    idle->id = next_id++;
+    idle->state = TASK_READY;
+    idle->entry = idle_loop;
+    idle->weight = NICE0_WEIGHT;
+    idle->vruntime = g_min_vruntime;
+    idle->cr3 = read_cr3();
+    idle->pin_core = c;               /* this core's OWN floor -- never picked by anyone else */
+    idle->is_floor = 1;
+    fx_alloc(idle);
+    uint8_t *stack = kstack_alloc(STACK_SIZE);
+    idle->stack_base = (uint64_t)stack;
+    if (stack) {
+        *(volatile uint64_t *)stack = STACK_CANARY;
+        uint64_t top = ((uint64_t)stack + STACK_SIZE) & ~15ull;
+        idle->kstack_top = top;
+        uint64_t *sp = (uint64_t *)top;
+        *--sp = (uint64_t)thread_trampoline;
+        *--sp = 0; *--sp = 0; *--sp = 0; *--sp = 0; *--sp = 0; *--sp = 0;
+        idle->rsp = (uint64_t)sp;
+    }
+
+    rq_lock_take();
+    self->next = cur[0]->next;   /* insert both into the ring right after task 0 (any live anchor works) */
+    cur[0]->next = self;
+    idle->next = self->next;
+    self->next = idle;
+    rq_lock_give();
+
+    cur[c] = self;
+    active_cr3_arr[c] = self->cr3;
+    floor_task[c] = idle;
 }
 
 task_t *task_create(void (*entry)(void), uint64_t cr3, void *proc) {
@@ -201,16 +351,35 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
     *--sp = 0;  /* r15 */
     t->rsp = (uint64_t)sp;
 
+    t->pin_core = -1;   /* an ordinary task: any core may run it (M1531) */
+
     /* Insert into the ring right after the current task. */
     uint64_t f = irq_save();
+    rq_lock_take();
     t->next = current->next;
     current->next = t;
+    rq_lock_give();
     irq_restore(f);
     return t;
 }
 
-/* Core switch — assumes interrupts already disabled. */
+/* Is `t` a valid competitive-pick candidate ON THIS CORE (M1531)? A floor/
+ * idle task never competes (it's the last resort, checked separately); a
+ * pinned task (pin_core>=0 — a core's own floor OR a genuinely core-affine
+ * task like task 0/the desktop) may only be picked by its OWN core. */
+static inline int sched_eligible(task_t *t) {
+    return !t->is_floor && (t->pin_core < 0 || t->pin_core == mycore());
+}
+
+/* Core switch — assumes interrupts already disabled (unchanged contract).
+ * M1531: takes the cross-core rq_lock itself for the decision + commit
+ * (ring walk, state changes, `current` reassignment), releasing it BEFORE the
+ * cr3/TSS/FPU/context_switch tail below — a switch can leave this call not
+ * returning for an arbitrary time, so holding a lock every OTHER core needs
+ * across that would freeze their scheduling for the same span. Interrupts
+ * stay disabled the whole time regardless (the caller's job, unchanged). */
 static void switch_to_next(void) {
+    rq_lock_take();
     task_t *prev = current;
     /* Stack-overflow tripwire: if prev overran its kernel stack to the base during
      * its slice, the canary there is clobbered — halt cleanly rather than run on
@@ -231,7 +400,7 @@ static void switch_to_next(void) {
     uint64_t slice = now - prev->last_in;
     prev->last_in = now;
     prev->run_ms += slice;
-    if (prev != idle_task)
+    if (!prev->is_floor)
         prev->vruntime += slice * NICE0_WEIGHT / (prev->weight ? prev->weight : NICE0_WEIGHT);
     if (prev->policy == SCHED_RR && prev->rt_ticks > 0) prev->rt_ticks--;   /* RR timeslice tick (M1172) */
 
@@ -239,22 +408,39 @@ static void switch_to_next(void) {
     /* --- Real-time classes first (M1172): the highest-priority runnable FIFO/RR
        task preempts the ENTIRE normal (CFS) class. Only if none are runnable do
        we fall through to the CFS pick — so with no RT task this is byte-for-byte
-       the M1171 behavior. --- */
+       the M1171 behavior. Any floor/idle task (M1531) is excluded exactly like
+       the old single `idle_task` pointer check was, and a pinned task (task 0/
+       the desktop, or a core's own floor) is only eligible on ITS OWN core —
+       see sched_eligible().
+       CRITICAL (M1531): TASK_RUNNING no longer means "the one task on the one
+       core" — now up to N tasks are RUNNING at once, one per core. `u==prev`
+       is allowed to match ONLY while it's STILL ACTUALLY RUNNING (this core's
+       own incumbent, not yet switched out); every other candidate — including
+       prev ITSELF if its caller already flipped it to BLOCKED/DEAD before
+       this exact call (task_block/task_exit-style self-transitions) — must be
+       TASK_READY. Getting this wrong two different ways, both hit as real
+       in-guest bugs: (1) matching ANY `u==prev` unconditionally let a task
+       that just blocked itself keep "winning" its own pick forever (it never
+       actually switches away, so a real wake racing against it gets lost —
+       surfaced as keystrokes silently dropped); (2) matching `u`'s state
+       alone (RUNNING) let a DIFFERENT core's ACTIVELY EXECUTING task be
+       stolen (loading a stale/zero rsp out from under it — a crash). Needs
+       BOTH conditions together. --- */
     int top_rt = -1;
     for (task_t *u = prev->next; ; u = u->next) {
-        if (u != idle_task && (u->state == TASK_RUNNING || u->state == TASK_READY)
+        if (sched_eligible(u) && ((u == prev && u->state == TASK_RUNNING) || u->state == TASK_READY)
             && u->policy != SCHED_OTHER && u->rt_priority > top_rt)
             top_rt = u->rt_priority;
         if (u == prev) break;
     }
     if (top_rt >= 0) {                          /* an RT task wants the CPU */
-        int prev_top = (prev != idle_task && (prev->state == TASK_RUNNING || prev->state == TASK_READY)
+        int prev_top = (sched_eligible(prev) && (prev->state == TASK_RUNNING || prev->state == TASK_READY)
                         && prev->policy != SCHED_OTHER && prev->rt_priority == top_rt);
         if (prev_top && !(prev->policy == SCHED_RR && prev->rt_ticks <= 0)) {
             best = prev;                        /* incumbent keeps the CPU: FIFO always; RR within its quantum */
         } else {
             for (task_t *u = prev->next; ; u = u->next) {   /* next runnable RT task at top_rt (ring order => RR rotation) */
-                if (u != idle_task && (u->state == TASK_RUNNING || u->state == TASK_READY)
+                if (sched_eligible(u) && ((u == prev && u->state == TASK_RUNNING) || u->state == TASK_READY)
                     && u->policy != SCHED_OTHER && u->rt_priority == top_rt) { best = u; break; }
                 if (u == prev) break;
             }
@@ -263,10 +449,15 @@ static void switch_to_next(void) {
             if (best && best != prev && best->policy == SCHED_RR) best->rt_ticks = RR_QUANTUM;  /* fresh quantum on switch-in */
         }
     } else {
-        /* CFS pick: the runnable, non-idle task with the smallest vruntime. */
+        /* CFS pick: the runnable, non-idle task with the smallest vruntime,
+         * from the WHOLE shared ring — any eligible READY task may be picked
+         * here regardless of which core it last ran on (M1531: this is the
+         * actual cross-core migration point) — but never a task that's
+         * RUNNING on a different core, and never prev itself unless it's
+         * STILL running (see the CRITICAL note above). */
         task_t *t = prev;
         do {
-            if (t != idle_task && (t->state == TASK_RUNNING || t->state == TASK_READY))
+            if (sched_eligible(t) && ((t == prev && t->state == TASK_RUNNING) || t->state == TASK_READY))
                 if (!best || t->vruntime < best->vruntime) best = t;
             t = t->next;
         } while (t != prev);
@@ -277,23 +468,30 @@ static void switch_to_next(void) {
     }
 
     task_t *next;
-    if (best == prev) return;                   /* prev is the most-deserving runnable -> keep it (no switch) */
-    if (best) { next = best; }                  /* a different task has a smaller vruntime -> run it */
+    if (best == prev) { rq_lock_give(); return; }   /* prev is the most-deserving runnable -> keep it (no switch) */
+    if (best) { next = best; }                  /* a different task has a smaller vruntime -> run it (maybe cross-core) */
     else {                                       /* nothing non-idle is runnable */
         if (prev->state == TASK_RUNNING || prev->state == TASK_READY)
-            return;                             /* prev still runnable (e.g. the desktop) -> keep it */
-        if (!idle_task || prev == idle_task)
-            return;                             /* no floor / already on it */
-        next = idle_task;                       /* prev blocked/exited, nothing ready -> the idle floor */
+            { rq_lock_give(); return; }         /* prev still runnable (e.g. the desktop) -> keep it */
+        task_t *floor = floor_task[mycore()];
+        if (!floor || prev == floor)
+            { rq_lock_give(); return; }         /* no floor / already on it */
+        next = floor;                           /* prev blocked/exited, nothing ready -> THIS core's floor */
     }
 
-    if (prev->state == TASK_RUNNING) {
-        prev->state = TASK_READY;
-        prev->ready_since = now;                 /* entered the run queue: start clocking its wait (M1148) */
-        prev->nivcsw++;                           /* still runnable when switched out => preempted (M1150) */
-    } else {
-        prev->nvcsw++;                            /* it blocked/yielded/exited itself => voluntary (M1150) */
-    }
+    /* CRITICAL (M1531): do NOT flip prev to TASK_READY here. That would make
+     * it pickable by ANOTHER core immediately — but this core hasn't finished
+     * with its stack/registers yet (the hardware tail below, then
+     * context_switch itself, both still run ON prev's stack). Doing this too
+     * early is exactly what let two cores end up running the same task's
+     * stack at once — a real, repeatedly-hit, intermittently-shaped crash
+     * (stack overflows/#UD/#GP landing somewhere in this tail) before this
+     * fix. finish_switch() (called from the far side of context_switch, once
+     * this core has genuinely moved on) does the READY transition instead. */
+    int prev_was_running = (prev->state == TASK_RUNNING);
+    if (!prev_was_running) prev->nvcsw++;   /* blocked/exited itself (its own caller already set state) => voluntary (M1150) */
+    core_prev[mycore()] = prev_was_running ? prev : 0;   /* what finish_switch() must complete, if anything */
+
     next->state = TASK_RUNNING;
     if (next->ready_since) {                      /* leaving the run queue: charge the time it waited (M1148) */
         next->rq_wait_ms += now - next->ready_since;
@@ -304,6 +502,8 @@ static void switch_to_next(void) {
 
     next->last_in = now;                          /* stamp switch-in (prev was already charged above) */
     next->nswitch++;
+
+    rq_lock_give();   /* decision + commit done; the hardware tail below is per-core-local (M1531) */
 
     /* switch address space if the next task lives in a different one. Safe to
      * do here: kernel code, this stack (heap), and the GDT/IDT/TSS are mapped
@@ -318,10 +518,18 @@ static void switch_to_next(void) {
     if (next->fxbuf) fpu_restore(fxptr(next));
     load_fs_base(next->fs_base);                 /* restore the thread's TLS base (M1140) */
     context_switch(&prev->rsp, next->rsp);
+    task_finish_switch();   /* runs once THIS exact call site is resumed later (M1531) */
 }
 
+/* Voluntarily give another ready task a turn (M1531: now also used by an AP's
+ * own idle loop, kernel/smp.c's ap_main, to let a real — possibly ring-3 —
+ * task run on that core). Self-contained: disables interrupts itself rather
+ * than assuming the caller already did (unlike switch_to_next's internal
+ * callers, which manage that explicitly around a state change). */
 void schedule(void) {
+    uint64_t f = irq_save();
     switch_to_next();
+    irq_restore(f);
 }
 
 /* Preemption entry point, called from the timer IRQ. We're already in
@@ -343,20 +551,26 @@ void task_yield(void) {
  * can't be lost. */
 void task_block(void) {
     uint64_t f = irq_save();
+    rq_lock_take();
     current->wchan = (uint64_t)__builtin_return_address(0);   /* who we're blocking in, for /proc/sched WCHAN (M1166) */
     current->wake_at = 0;          /* not a timed sleep -> the timer scan must ignore it */
     current->state = TASK_BLOCKED;
-    switch_to_next();
+    rq_lock_give();
+    switch_to_next();               /* takes rq_lock itself */
     irq_restore(f);
 }
 
 void task_wake(task_t *t) {
+    uint64_t f = irq_save();
+    rq_lock_take();
     if (t && t->state == TASK_BLOCKED) {
         t->wake_at = 0;            /* cancel any pending timed wake */
         t->state = TASK_READY;
         t->ready_since = timer_ms();   /* re-entered the run queue (M1148) */
         sched_place_wake(t);           /* clamp vruntime up to the floor: no head-start, no starvation (M1171) */
     }
+    rq_lock_give();
+    irq_restore(f);
 }
 
 /* Sleep the current task for `ms`, off-CPU, until the timer wakes it (M1079) —
@@ -364,7 +578,7 @@ void task_wake(task_t *t) {
  * the scheduler is up. The deadline is recorded in wake_at; task_wake_sleepers()
  * (driven by the timer IRQ) flips us back to READY when it passes. */
 void task_sleep_ms(uint64_t ms) {
-    if (!current || current == idle_task) {       /* no scheduler / the idle floor: busy-wait */
+    if (!current || current->pin_core >= 0) {       /* no scheduler / this core's own floor: busy-wait */
         uint64_t target = timer_ms() + ms;
         while (timer_ms() < target) __asm__ volatile("sti; hlt");
         return;
@@ -382,6 +596,7 @@ void task_sleep_ms(uint64_t ms) {
  * cheap; only BLOCKED tasks with a non-zero wake_at are sleepers. */
 void task_wake_sleepers(void) {
     if (!current) return;
+    rq_lock_take();
     uint64_t now = timer_ms();
     task_t *t = current;
     do {
@@ -393,6 +608,7 @@ void task_wake_sleepers(void) {
         }
         t = t->next;
     } while (t != current);
+    rq_lock_give();
 }
 
 /* ---- load average (M1148) -------------------------------------------------
@@ -415,11 +631,13 @@ static uint64_t load_next_ms;     /* next 5 s sample boundary */
  * Walks the (tiny) ready ring; safe from the IRQ as task_wake_sleepers does. */
 int task_runnable_count(void) {
     if (!current) return 0;
+    rq_lock_take();
     int n = 0; task_t *t = current;
     do {
-        if (t != idle_task && (t->state == TASK_RUNNING || t->state == TASK_READY)) n++;
+        if (!t->is_floor && (t->state == TASK_RUNNING || t->state == TASK_READY)) n++;
         t = t->next;
     } while (t != current);
+    rq_lock_give();
     return n;
 }
 
@@ -490,23 +708,28 @@ int task_set_sched(int policy, int rt_priority) {
  * (it's already off-CPU; STOPPING it would lose the BLOCKED->READY wake path). */
 void task_stop(task_t *t) {
     uint64_t f = irq_save();
+    rq_lock_take();
     if (t && t != current && (t->state == TASK_READY || t->state == TASK_RUNNING))
         t->state = TASK_STOPPED;
+    rq_lock_give();
     irq_restore(f);
 }
 
 /* Resume a STOPPED task. */
 void task_cont(task_t *t) {
     uint64_t f = irq_save();
+    rq_lock_take();
     if (t && t->state == TASK_STOPPED) {
         t->state = TASK_READY;
         sched_place_wake(t);            /* a long-stopped task rejoins at the floor, not dominating (M1171) */
     }
+    rq_lock_give();
     irq_restore(f);
 }
 
 void task_exit(void) {
     irq_save();                 /* disable; this task is ending, never restore */
+    rq_lock_take();
     task_t *dead = current;
     dead->state = TASK_DEAD;
 
@@ -516,11 +739,28 @@ void task_exit(void) {
         prev = prev->next;
     prev->next = dead->next;
 
-    task_t *next = dead->next;
+    /* Pick a replacement (M1531): NOT just "whatever's next in the ring" —
+     * that could be a DIFFERENT core's pinned floor task, which only that
+     * core may ever run. Prefer any unpinned READY task (smallest vruntime,
+     * same CFS shape as switch_to_next) — NEVER a RUNNING one: unlike
+     * switch_to_next, `dead` has no "stay put" exception (it's exiting), so
+     * TASK_RUNNING here can only mean "executing on a different core right
+     * now," which must never be picked (see switch_to_next's CRITICAL note).
+     * Fall back to THIS core's own floor if nothing else is ready. */
+    task_t *next = 0;
+    task_t *t = dead->next;
+    do {
+        if (sched_eligible(t) && t->state == TASK_READY)
+            if (!next || t->vruntime < next->vruntime) next = t;
+        t = t->next;
+    } while (t != dead->next);
+    if (!next) next = floor_task[mycore()];
+
     next->state = TASK_RUNNING;
     current = next;
     next->last_in = timer_ms();   /* stamp switch-in so its CPU time isn't over-counted from a stale last_in */
     next->nswitch++;
+    rq_lock_give();
 
     /* Load next's address space + kernel stack BEFORE switching, mirroring
      * switch_to_next. Otherwise the dead task's CR3 stays loaded under `next`,
@@ -564,9 +804,11 @@ task_t *task_self(void) {
 
 int task_count(void) {
     if (!current) return 0;                  /* ring not built yet */
+    rq_lock_take();
     int n = 0;
     task_t *t = current;
     do { if (t->state != TASK_DEAD) n++; t = t->next; } while (t != current);
+    rq_lock_give();
     return n;
 }
 
@@ -574,6 +816,7 @@ int task_count(void) {
  * record each task for `ps`. */
 int task_snapshot(task_info_t *out, int max) {
     uint64_t f = irq_save();
+    rq_lock_take();
     int n = 0;
     if (current) {
         task_t *t = current;
@@ -590,15 +833,23 @@ int task_snapshot(task_info_t *out, int max) {
             n++; t = t->next;
         } while (t != current);
     }
+    rq_lock_give();
     irq_restore(f);
     return n;
 }
 
-/* Total ms the idle task has run — the system's idle time, for `/proc/sched`. */
+/* Total ms all cores' floor/idle tasks have run, SUMMED (M1531: there's now
+ * one per core, not a single global) — the system's idle time, for
+ * `/proc/sched`/`/proc/stat`. */
 uint64_t task_idle_ms(void) {
-    if (!idle_task) return 0;
-    uint64_t rm = idle_task->run_ms;
-    if (idle_task->state == TASK_RUNNING) rm += timer_ms() - idle_task->last_in;
+    uint64_t rm = 0;
+    uint64_t now = timer_ms();
+    for (int i = 0; i < MAX_SCHED_CPUS; i++) {
+        task_t *ft = floor_task[i];
+        if (!ft) continue;
+        rm += ft->run_ms;
+        if (ft->state == TASK_RUNNING) rm += now - ft->last_in;
+    }
     return rm;
 }
 
@@ -622,22 +873,26 @@ uint64_t task_total_spawned(void) { return (uint64_t)next_id; }  /* cumulative t
 void task_cpu_times(uint64_t *user_ms, uint64_t *sys_ms) {
     uint64_t u = 0, s = 0;
     if (current) {
+        rq_lock_take();
         task_t *t = current;
-        do { if (t != idle_task) { u += t->utime_ms; s += t->stime_ms; }
+        do { if (!t->is_floor) { u += t->utime_ms; s += t->stime_ms; }
              t = t->next; } while (t != current);
+        rq_lock_give();
     }
     if (user_ms) *user_ms = u;
     if (sys_ms)  *sys_ms  = s;
 }
 
-/* Count of blocked tasks (excl. the idle floor) — /proc/stat procs_blocked.
+/* Count of blocked tasks (excl. any core's idle floor) — /proc/stat procs_blocked.
  * The runnable count is the existing task_runnable_count() (M1148). */
 int task_blocked_count(void) {
     int b = 0;
     if (current) {
+        rq_lock_take();
         task_t *t = current;
-        do { if (t != idle_task && t->state == TASK_BLOCKED) b++;
+        do { if (!t->is_floor && t->state == TASK_BLOCKED) b++;
              t = t->next; } while (t != current);
+        rq_lock_give();
     }
     return b;
 }

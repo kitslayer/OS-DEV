@@ -39,9 +39,30 @@ typedef struct task {
     uint64_t      fs_base;     /* per-thread %fs base for TLS; 0 = unused (restored on switch, M1140) */
     uint64_t      robust;      /* userspace robust_t* (held robust locks); walked on exit (M1141) */
     uint64_t      clear_child_tid;  /* set_tid_address: zeroed + FUTEX_WAKE'd on exit (pthread_join) (M1226) */
+    int           pin_core;    /* CPU AFFINITY (M1531): -1 = may run on any core; >=0 = the ONE core
+                                 * (APIC id & 15) allowed to run this task. Used for each core's own
+                                 * floor/idle task (must never migrate) AND for task 0 (the kernel's own
+                                 * boot-context task, which becomes the WM/desktop main loop via
+                                 * desktop_run() — pinned to the BSP because the graphics/driver code it
+                                 * calls has never been audited for running anywhere else). */
+    int           is_floor;    /* 1 = this is a core's fallback/idle task: excluded from normal CFS/RT
+                                 * competition, run ONLY when nothing else on its core is ready. A pinned
+                                 * (pin_core>=0) task that is NOT a floor task (e.g. task 0) still competes
+                                 * normally via CFS on its one allowed core (M1531). */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */
+void    task_register_ap_core(void);       /* each AP: join the shared scheduler with its own floor task (M1531) */
+/* Complete the deferred post-switch cleanup (M1531 — marks whoever this core
+ * just switched AWAY from as READY, now that this core is truly off its
+ * stack). MUST be the first thing ANY brand-new task's entry trampoline
+ * calls — task.c's own thread_trampoline does; kernel/app.c has three more
+ * (app_trampoline/fork_child_trampoline/thread_trampoline) that must too, or
+ * whichever task got preempted to start this one is never marked READY
+ * again — permanently stuck, not crashed. Hit exactly that as a real
+ * in-guest hang (boot never got past a fault-and-terminate) before adding
+ * the missing calls. */
+void    task_finish_switch(void);
 /* Spawn a task. cr3 = address space (0 for the kernel's); proc = opaque data.
  * Both are set before the task can be scheduled (no startup race). */
 task_t *task_create(void (*entry)(void), uint64_t cr3, void *proc);

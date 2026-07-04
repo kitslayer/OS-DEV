@@ -18,6 +18,7 @@
 #include "profile.h"
 #include "app.h"
 #include "vdso.h"
+#include "smp.h"
 
 #define PIT_CH0_DATA 0x40
 #define PIT_COMMAND  0x43
@@ -37,7 +38,8 @@ static void timer_handler(struct registers *r) {
     app_alarm_tick();      /* raise SIGALRM if the current app's periodic alarm is due (M1102) */
     app_timer_tick();      /* fire any due POSIX timer_create() timers, on every app (M1272) */
     loadavg_sample();      /* update the 1/5/15-min run-queue load average every 5 s (M1148) */
-    sched_tick();          /* preempt the running thread (no-op if <2 tasks) */
+    sched_tick();          /* preempt the running thread on THIS (BSP) core */
+    if (smp_cpu_count > 1) smp_broadcast_tick();   /* and every other core too (M1531) */
 }
 
 void timer_init(uint32_t hz) {

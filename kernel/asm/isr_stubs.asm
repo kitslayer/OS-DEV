@@ -77,12 +77,20 @@ isr128:
     push 128
     jmp isr_common
 
-; --- SMP inter-processor interrupts (M1198) ---------------------------------
-; 0x40 (64) = AP wake IPI; 0xFF (255) = LAPIC spurious vector.
+; --- SMP inter-processor interrupts (M1198, +0x41 M1531) --------------------
+; 0x40 (64) = AP wake IPI; 0x41 (65) = broadcast scheduler-tick IPI (lets every
+; core's running task be preempted on the BSP's PIT heartbeat, since there's no
+; per-core timer yet); 0xFF (255) = LAPIC spurious vector.
 global isr64
 isr64:
     push 0
     push 64
+    jmp isr_common
+
+global isr65
+isr65:
+    push 0
+    push 65
     jmp isr_common
 
 global isr255

@@ -36,6 +36,31 @@ extern int app_fault_handle(uint64_t cr2, uint64_t err);
 
 static uint64_t kernel_pml4;   /* the kernel's own PML4 — empty user region */
 
+/* M1531: every page-table mutator below used to run with NO locking at all —
+ * safe only because a single core ever executed kernel code. `next_table`'s
+ * "if not present, allocate + write" is a classic check-then-act: two
+ * concurrent callers that both see an intermediate table as not-present (e.g.
+ * two cores' kstack_alloc calls landing in the same not-yet-built PD/PT range
+ * of the shared KSTACK_WIN region) would both allocate a frame and race to
+ * write the SAME slot — the loser's frame is silently orphaned AND, worse,
+ * any leaf mapping already placed under the loser's now-discarded table
+ * becomes unreachable, a real corruption, not just a leak. A plain `cli`
+ * alone (this file never even had that) only ever stopped a LOCAL interrupt
+ * from reentering; it says nothing about a second core. One spinlock, nested
+ * inside a local cli exactly like kheap.c/pmm.c's own irq_save/restore,
+ * brackets every function that walks-and-writes the shared hierarchy. */
+static volatile int vmm_lock;
+static inline uint64_t vmm_lock_take(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&vmm_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return fl;
+}
+static inline void vmm_lock_give(uint64_t fl) {
+    __atomic_store_n(&vmm_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
+
 static uint64_t *phys_to_table(uint64_t phys) {
     return (uint64_t *)(uintptr_t)phys;     /* identity map */
 }
@@ -75,13 +100,12 @@ static uint64_t *next_table(uint64_t *table, uint64_t idx, uint64_t flags) {
 }
 
 static int do_map(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags) {
+    uint64_t f = vmm_lock_take();
     uint64_t *pml4 = phys_to_table(pml4_phys);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);
-    if (!pdpt) return -1;
-    uint64_t *pd   = next_table(pdpt, PDPT_IDX(virt), flags);
-    if (!pd) return -1;
-    uint64_t *pt   = next_table(pd,   PD_IDX(virt),   flags);
-    if (!pt) return -1;
+    uint64_t *pd   = pdpt ? next_table(pdpt, PDPT_IDX(virt), flags) : 0;
+    uint64_t *pt   = pd   ? next_table(pd,   PD_IDX(virt),   flags) : 0;
+    if (!pt) { vmm_lock_give(f); return -1; }
 
     /* x86 TLBs never cache a not-present translation, so populating a fresh
      * (previously not-present) PTE can never leave a stale entry behind — only
@@ -95,6 +119,7 @@ static int do_map(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t fla
     int was_present = (pt[PT_IDX(virt)] & PTE_PRESENT) != 0;
     pt[PT_IDX(virt)] = (phys & ADDR_MASK) | PTE_PRESENT | flags;
     if (was_present) invlpg(virt);
+    vmm_lock_give(f);
     return 0;
 }
 
@@ -339,41 +364,46 @@ void vmm_set_raw(uint64_t virt, uint64_t pte) {
 }
 
 int vmm_map_huge(uint64_t virt, uint64_t phys, uint64_t flags) {
+    uint64_t f = vmm_lock_take();
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);
-    if (!pdpt) return -1;
-    uint64_t *pd   = next_table(pdpt, PDPT_IDX(virt), flags);
-    if (!pd) return -1;
+    uint64_t *pd   = pdpt ? next_table(pdpt, PDPT_IDX(virt), flags) : 0;
+    if (!pd) { vmm_lock_give(f); return -1; }
 
     pd[PD_IDX(virt)] = (phys & ~0x1FFFFFull) | PTE_PRESENT | PTE_HUGE | flags;
     invlpg(virt);
+    vmm_lock_give(f);
     return 0;
 }
 
 void vmm_unmap(uint64_t virt) {
+    uint64_t f = vmm_lock_take();
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
-    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return;
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) { vmm_lock_give(f); return; }
     uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
-    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return;
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) { vmm_lock_give(f); return; }
     uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
-    if (!(pd[PD_IDX(virt)] & PTE_PRESENT)) return;
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT)) { vmm_lock_give(f); return; }
     uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
 
     pt[PT_IDX(virt)] = 0;
     invlpg(virt);
+    vmm_lock_give(f);
 }
 
 /* Tear down a 2 MiB huge mapping: clear the PD entry directly (a huge PD entry
  * points at the 2 MiB data frame, NOT a page table — so vmm_unmap must not be
  * used on it). The caller frees the underlying contiguous run. (M1155) */
 void vmm_unmap_huge(uint64_t virt) {
+    uint64_t f = vmm_lock_take();
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
-    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return;
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) { vmm_lock_give(f); return; }
     uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
-    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return;
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) { vmm_lock_give(f); return; }
     uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
     pd[PD_IDX(virt)] = 0;
     invlpg(virt);
+    vmm_lock_give(f);
 }
 
 /* Physical address of the 4 KiB page table (PT) that maps `virt` in space
@@ -395,17 +425,19 @@ uint64_t vmm_pt_phys_in(uint64_t cr3, uint64_t virt) {
  * (for mprotect / W^X). `flags` are the new low bits (e.g. PTE_USER, plus maybe
  * PTE_WRITABLE / PTE_NX); PTE_PRESENT is always set. Returns 0/-1. M1090. */
 int vmm_protect(uint64_t virt, uint64_t flags) {
+    uint64_t f = vmm_lock_take();
     uint64_t *pml4 = phys_to_table(read_cr3() & ADDR_MASK);
-    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) return -1;
+    if (!(pml4[PML4_IDX(virt)] & PTE_PRESENT)) { vmm_lock_give(f); return -1; }
     uint64_t *pdpt = phys_to_table(pml4[PML4_IDX(virt)] & ADDR_MASK);
-    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) return -1;
+    if (!(pdpt[PDPT_IDX(virt)] & PTE_PRESENT)) { vmm_lock_give(f); return -1; }
     uint64_t *pd = phys_to_table(pdpt[PDPT_IDX(virt)] & ADDR_MASK);
-    if (!(pd[PD_IDX(virt)] & PTE_PRESENT) || (pd[PD_IDX(virt)] & PTE_HUGE)) return -1;
+    if (!(pd[PD_IDX(virt)] & PTE_PRESENT) || (pd[PD_IDX(virt)] & PTE_HUGE)) { vmm_lock_give(f); return -1; }
     uint64_t *pt = phys_to_table(pd[PD_IDX(virt)] & ADDR_MASK);
     uint64_t e = pt[PT_IDX(virt)];
-    if (!(e & PTE_PRESENT)) return -1;
+    if (!(e & PTE_PRESENT)) { vmm_lock_give(f); return -1; }
     pt[PT_IDX(virt)] = (e & ADDR_MASK) | PTE_PRESENT | flags;   /* keep the frame, replace the flags */
     invlpg(virt);
+    vmm_lock_give(f);
     return 0;
 }
 

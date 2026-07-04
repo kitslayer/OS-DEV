@@ -79,17 +79,49 @@ static inline uint64_t align_page(uint64_t x) {
  * another task walk a half-linked list (e.g. the WM frees an app's stack with
  * interrupts on while an app's syscall allocates). These save RFLAGS + disable
  * interrupts, then restore the caller's prior state — so they nest correctly and
- * are safe whether the caller already had interrupts off (syscalls) or on. */
+ * are safe whether the caller already had interrupts off (syscalls) or on.
+ *
+ * M1531: `cli` alone only ever protected against a LOCAL interrupt reentering
+ * — it says nothing about a SECOND CORE concurrently calling kmalloc/kfree,
+ * which is now a real possibility (every core runs the general scheduler,
+ * task_create_stack/task_register_ap_core both kzalloc). Added a real
+ * cross-core spinlock nested inside the existing cli/sti (no early-release
+ * complexity needed here, unlike task.c's switch_to_next — kmalloc/kfree never
+ * context-switches away mid-call, so holding it for the whole call is fine). */
+#ifndef KHEAP_HOST_TEST
+static volatile int heap_lock;
+static volatile int heap_lock_owner = -1;
+static volatile int heap_lock_depth;
+#endif
+/* MUST be REENTRANT (owner + depth, not a bare 0/1 flag): kmalloc's OOM path
+ * below calls itself recursively while STILL holding this lock ("one retry;
+ * the new block will fit") -- a plain spinlock would have the SAME core spin
+ * forever on a lock it already holds. Hit exactly that as a real in-guest
+ * hang (the first allocation big enough to force grow_heap) before making
+ * this reentrant (M1531). */
 static inline uint64_t irq_save(void) {
     uint64_t fl;
 #ifdef KHEAP_HOST_TEST
-    __asm__ volatile("pushfq; pop %0" : "=r"(fl) :: "memory");  /* host: cli is privileged (ring 3) */
+    __asm__ volatile("pushfq; pop %0" : "=r"(fl) :: "memory");  /* host: cli is privileged (ring 3), single-threaded anyway */
 #else
     __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    extern int smp_current_cpu(void);
+    int me = smp_current_cpu() & 15;
+    if (heap_lock_owner != me) {
+        while (__atomic_exchange_n(&heap_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+        heap_lock_owner = me;
+    }
+    heap_lock_depth++;
 #endif
     return fl;
 }
 static inline void irq_restore(uint64_t fl) {
+#ifndef KHEAP_HOST_TEST
+    if (--heap_lock_depth == 0) {
+        heap_lock_owner = -1;
+        __atomic_store_n(&heap_lock, 0, __ATOMIC_RELEASE);
+    }
+#endif
     __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
 }
 

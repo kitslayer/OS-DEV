@@ -20,6 +20,7 @@
  */
 #include "smp.h"
 #include "smpthread.h"  /* smpthread_ap_tick — real kernel threads pinned per-core (M1530) */
+#include "task.h"       /* task_register_ap_core/schedule — the general scheduler on every core (M1531) */
 #include "acpi.h"
 #include "vmm.h"
 #include "io.h"
@@ -135,6 +136,17 @@ void smp_wake_aps(void) {
     while (lapic_rd(LAPIC_ICRLO) & ICR_PENDING) __asm__ volatile("pause");
 }
 
+/* Broadcast the scheduler-tick IPI (0x41) to every other core (M1531): called
+ * once per BSP timer tick so a task running on an AP gets preempted on the
+ * same heartbeat the BSP already uses, since there's no per-core LAPIC timer
+ * set up yet. A no-op cost on true uniprocessor (the caller only calls this
+ * when smp_cpu_count > 1). */
+void smp_broadcast_tick(void) {
+    if (!lapic) return;
+    lapic_wr(LAPIC_ICRLO, 0x41 | (1u << 14) | (3u << 18));     /* fixed, assert, all-but-self */
+    while (lapic_rd(LAPIC_ICRLO) & ICR_PENDING) __asm__ volatile("pause");
+}
+
 /* Run fn over [0, n) split into chunks across all online cores, in parallel.
  * The BSP participates and returns only once every chunk has completed. */
 void smp_parallel_for(int n, smp_fn fn, void *ctx) {
@@ -163,18 +175,27 @@ void smp_parallel_for(int n, smp_fn fn, void *ctx) {
 
 /* AP entry, reached from ap_trampoline.asm once the core is in 64-bit long mode
  * on its own stack with the kernel page tables loaded. Adopt the kernel GDT+IDT
- * (so this core can take interrupts), announce ourselves, then idle: drain any
- * dispatched jobs, else sleep in hlt until the next wake IPI. Power-friendly —
- * an idle core is halted, not spinning (which would peg a host CPU). */
+ * (so this core can take interrupts AND — now that gdt_load_ap ltrs its own
+ * TSS, M1531 — trap ring-3 tasks in on this core too), announce ourselves,
+ * register with the GENERAL scheduler (task_register_ap_core, M1531 — this is
+ * what lets a real, possibly ring-3, task be picked up and run HERE, not just
+ * the pure-compute job pool / smp_thread work below), then idle: drain any
+ * dispatched jobs, run any smp_thread work, give the general scheduler a turn,
+ * else sleep in hlt until the next wake IPI. Power-friendly — an idle core is
+ * halted, not spinning (which would peg a host CPU). */
 void ap_main(void) {
     lapic_enable_this_cpu();
-    gdt_load_ap();                       /* kernel GDT: KERNEL_CS valid on a trap */
-    idt_load();                          /* kernel IDT: the wake IPI + exceptions */
+    gdt_load_ap();                       /* kernel GDT + THIS core's own TSS (M1531) */
+    idt_load();                          /* kernel IDT: the wake/tick IPIs + exceptions */
+    extern void fpu_init_ap(void);        /* CR0/CR4 are per-core: enable FXSAVE/FXRSTOR HERE too (M1531) */
+    fpu_init_ap();
     __atomic_add_fetch(&smp_cpu_count, 1, __ATOMIC_SEQ_CST);
-    __asm__ volatile("sti");             /* accept the wake IPI */
+    task_register_ap_core();             /* join the shared ready ring with our own floor task (M1531) */
+    __asm__ volatile("sti");             /* accept the wake/tick IPIs */
     for (;;) {
         while (smp_run_one()) ;          /* run everything currently queued */
         smpthread_ap_tick();             /* run any real kernel threads pinned to this core (M1530) */
+        schedule();                      /* let the general scheduler run something else here too (M1531) */
         __asm__ volatile("cli");         /* re-check with interrupts off (no lost wakeup) */
         if (__atomic_load_n(&sj_next, __ATOMIC_SEQ_CST) >= __atomic_load_n(&sj_n, __ATOMIC_SEQ_CST))
             __asm__ volatile("sti; hlt");   /* sleep until an IPI; sti;hlt is atomic */

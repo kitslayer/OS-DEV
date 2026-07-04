@@ -42,13 +42,20 @@ static uint8_t  pmm_refs[PMM_MAXREFS];
  * bit twiddle below is a non-atomic read-modify-write of a whole byte, so a
  * timer preempt mid-update could lose a concurrent alloc/free in the same byte
  * and double-hand-out a frame. Guard the mutators the same way kheap.c does:
- * save IF + cli on entry, restore on exit (nests correctly, cheap, short). */
+ * save IF + cli on entry, restore on exit (nests correctly, cheap, short).
+ * M1531: cli alone only ever stopped a LOCAL interrupt from reentering —
+ * every core now allocates/frees frames (any core's task can kmalloc, which
+ * can grow the heap, which calls here), so a real cross-core spinlock is
+ * nested inside it too, same treatment as kheap.c's own irq_save/restore. */
+static volatile int pmm_lock;
 static inline uint64_t irq_save(void) {
     uint64_t fl;
     __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&pmm_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
     return fl;
 }
 static inline void irq_restore(uint64_t fl) {
+    __atomic_store_n(&pmm_lock, 0, __ATOMIC_RELEASE);
     __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
 }
 

@@ -18,6 +18,7 @@
  */
 #include "gdt.h"
 #include "string.h"
+#include "smp.h"
 #include <stdint.h>
 
 /* 64-bit TSS, packed exactly as the CPU expects (104 bytes). */
@@ -31,15 +32,25 @@ struct tss {
     uint16_t iomap_base;
 } __attribute__((packed));
 
-/* The GDT: null, kcode, kdata, ucode, udata, then a 16-byte TSS descriptor
- * that occupies the last two 8-byte slots. */
-static uint64_t gdt[7];
-static struct tss tss;
+/* One TSS PER CORE (M1531): a genuinely multi-core scheduler needs a ring-3
+ * task to be able to trap into ring 0 on WHICHEVER core it happens to be
+ * running on, and RSP0 (and the #DF IST stack) is a per-core CPU resource —
+ * two cores sharing one TSS would stomp each other's RSP0 the moment two
+ * ring-3 tasks trapped in on different cores at once. GDT_MAX_CPUS matches
+ * the MAX_CPUS convention already used by kernel/smp.c / ecdsa.c / smpthread.c
+ * (index = APIC id & (GDT_MAX_CPUS-1)). Each gets its own 16-byte TSS
+ * descriptor (2 GDT slots) built once at boot; an AP calls gdt_load_ap() to
+ * `ltr` ITS OWN selector instead of skipping ltr entirely as before. */
+#define GDT_MAX_CPUS 16
+static uint64_t gdt[5 + GDT_MAX_CPUS * 2];
+static struct tss tss[GDT_MAX_CPUS];
 
 /* Stacks the TSS points at. .bss isn't guaranteed zeroed by the loader, but
  * stacks don't care — we only ever write before we read. */
-static uint8_t kernel_stack[16384] __attribute__((aligned(16)));
-static uint8_t df_stack[8192]      __attribute__((aligned(16)));
+static uint8_t kernel_stack[GDT_MAX_CPUS][16384] __attribute__((aligned(16)));
+static uint8_t df_stack[GDT_MAX_CPUS][8192]      __attribute__((aligned(16)));
+
+static inline int this_core(void) { return smp_current_cpu() & (GDT_MAX_CPUS - 1); }
 
 struct gdtr {
     uint16_t limit;
@@ -74,36 +85,43 @@ void gdt_init(void) {
     gdt[3] = make_desc(0, 0xFFFFF, 0xFA, 0xA);    /* user code   */
     gdt[4] = make_desc(0, 0xFFFFF, 0xF2, 0xC);    /* user data   */
 
-    /* The TSS itself. */
-    memset(&tss, 0, sizeof(tss));
-    tss.rsp[0]   = (uint64_t)(kernel_stack + sizeof(kernel_stack));
-    tss.ist[0]   = (uint64_t)(df_stack + sizeof(df_stack)); /* IST1 */
-    tss.iomap_base = sizeof(tss);                 /* no I/O permission bitmap */
+    /* Build every core's TSS + descriptor up front (BSP builds all of them —
+     * simpler than growing the GDT later once APs are up, and costs nothing:
+     * an AP that never comes up just leaves its slot unused). */
+    memset(tss, 0, sizeof(tss));
+    for (int i = 0; i < GDT_MAX_CPUS; i++) {
+        tss[i].rsp[0]     = (uint64_t)(kernel_stack[i] + sizeof(kernel_stack[i]));
+        tss[i].ist[0]     = (uint64_t)(df_stack[i] + sizeof(df_stack[i]));   /* IST1 */
+        tss[i].iomap_base = sizeof(tss[i]);       /* no I/O permission bitmap */
 
-    /* The TSS descriptor is a 16-byte *system* descriptor spanning gdt[5..6].
-     * access 0x89 = present, type 0x9 (available 64-bit TSS), G=0. */
-    uint64_t base  = (uint64_t)&tss;
-    uint32_t limit = sizeof(tss) - 1;
-    gdt[5] = make_desc((uint32_t)base, limit, 0x89, 0x0);
-    gdt[6] = (base >> 32) & 0xFFFFFFFF;           /* high 32 bits of base */
+        /* Each TSS descriptor is a 16-byte *system* descriptor (2 GDT slots).
+         * access 0x89 = present, type 0x9 (available 64-bit TSS), G=0. */
+        uint64_t base  = (uint64_t)&tss[i];
+        uint32_t limit = (uint32_t)sizeof(tss[i]) - 1;
+        gdt[5 + i * 2]     = make_desc((uint32_t)base, limit, 0x89, 0x0);
+        gdt[5 + i * 2 + 1] = (base >> 32) & 0xFFFFFFFF;   /* high 32 bits of base */
+    }
 
     struct gdtr gdtr = { .limit = sizeof(gdt) - 1, .base = (uint64_t)&gdt };
     gdt_flush(&gdtr);                             /* lgdt + reload CS/DS/SS */
 
-    __asm__ volatile("ltr %0" : : "r"((uint16_t)TSS_SEL)); /* load task register */
+    __asm__ volatile("ltr %0" : : "r"((uint16_t)TSS_SEL)); /* BSP: load its own (slot 0) task register */
 }
 
 void tss_set_rsp0(uint64_t rsp0) {
-    tss.rsp[0] = rsp0;
+    tss[this_core()].rsp[0] = rsp0;   /* always targets the CORE CALLING THIS, not a fixed one (M1531) */
 }
 
-/* Load the shared kernel GDT on an application processor and reload its segment
- * registers (so KERNEL_CS resolves to the 64-bit kernel code segment when the AP
- * takes an interrupt — its trampoline GDT had a different layout). The AP does
- * NOT `ltr`: it runs ring-0 only, so it needs no TSS (the single TSS descriptor
- * is already owned by the BSP, and a ring-0→ring-0 interrupt consults no TSS).
- * M1198. */
+/* Load the shared kernel GDT on an application processor, reload its segment
+ * registers (so KERNEL_CS resolves to the 64-bit kernel code segment when the
+ * AP takes an interrupt — its trampoline GDT had a different layout), and
+ * `ltr` ITS OWN TSS selector (M1531: was skipped entirely before — fine when
+ * APs only ever ran kernel-only code with no ring3->ring0 transitions of
+ * their own, no longer fine now that a ring-3 task can be scheduled onto any
+ * core and needs a valid RSP0 to trap into on THIS specific core). M1198. */
 void gdt_load_ap(void) {
     struct gdtr gdtr = { .limit = sizeof(gdt) - 1, .base = (uint64_t)&gdt };
     gdt_flush(&gdtr);
+    uint16_t sel = (uint16_t)(TSS_SEL + this_core() * 16);   /* this core's own 16-byte TSS descriptor */
+    __asm__ volatile("ltr %0" : : "r"(sel));
 }

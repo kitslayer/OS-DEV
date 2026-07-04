@@ -35,6 +35,32 @@ fpu_init:
     fxsave [fpu_template]   ; capture the clean state as the per-task template
     ret
 
+; void fpu_init_ap(void) — CR0/CR4 are PER-CORE control registers (M1531): the
+; BSP's fpu_init() above only ever enabled FXSAVE/FXRSTOR on the BSP itself.
+; Once a task (with its own fxbuf) can be scheduled onto an AP (M1531's cross-
+; core scheduler), that AP's FIRST fpu_save/fpu_restore call would execute
+; FXSAVE/FXRSTOR with CR4.OSFXSR still 0 -- #UD (Invalid Opcode), hit exactly
+; that as a real in-guest crash. Same CR0/CR4 bits, but skips capturing
+; fpu_template again: it's a static "clean FPU state" snapshot, identical on
+; every core, already captured once by the BSP -- every task's fxbuf is
+; seeded from that same shared copy (task.c's fx_alloc), so there is nothing
+; core-specific left to (re-)do here.
+global fpu_init_ap
+fpu_init_ap:
+    mov rax, cr0
+    btr rax, 2
+    bts rax, 1
+    mov cr0, rax
+    mov rax, cr4
+    bts rax, 9
+    bts rax, 10
+    mov cr4, rax
+    fninit
+    push 0x1F80
+    ldmxcsr [rsp]
+    add rsp, 8
+    ret
+
 ; void fpu_save(void *area16)    — area must be 16-byte aligned
 global fpu_save
 fpu_save:

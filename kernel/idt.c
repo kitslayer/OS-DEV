@@ -67,11 +67,15 @@ void idt_init(void) {
     extern void isr128(void);
     set_gate(128, (uint64_t)isr128, 0, 0xEE);
 
-    /* SMP (M1198): vector 0x40 = the AP wake inter-processor interrupt, and
-     * vector 0xFF = the LAPIC spurious-interrupt vector (must have a gate or a
-     * stray spurious IRQ would #GP). Both are kernel-only interrupt gates. */
-    extern void isr64(void), isr255(void);
+    /* SMP (M1198, +0x41 M1531): vector 0x40 = the AP wake inter-processor
+     * interrupt, 0x41 = the broadcast scheduler-tick IPI (every core takes
+     * this on the BSP's PIT heartbeat and calls sched_tick() locally — the
+     * real per-core preemption source until a per-core LAPIC timer exists),
+     * and 0xFF = the LAPIC spurious-interrupt vector (must have a gate or a
+     * stray spurious IRQ would #GP). All kernel-only interrupt gates. */
+    extern void isr64(void), isr65(void), isr255(void);
     set_gate(0x40, (uint64_t)isr64,  0, 0x8E);
+    set_gate(0x41, (uint64_t)isr65,  0, 0x8E);
     set_gate(0xFF, (uint64_t)isr255, 0, 0x8E);
 
     /* MSI / MSI-X message-signaled interrupt vectors (M1288): give the whole
