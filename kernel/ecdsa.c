@@ -9,6 +9,9 @@
 #include "bignum.h"
 #include "string.h"
 #include "smp.h"      /* smp_current_cpu — per-core P/N slots so concurrent verifies (M1528) don't race */
+#ifndef ECDSA_RING3
+#include "task.h"     /* task_pin_here/task_unpin (M1536) — not linkable from ring 3, see ecdsa_verify() */
+#endif
 
 /* P-256 domain parameters (big-endian). */
 static const uint8_t P256_P[32]  = {0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x01,0,0,0,0,0,0,0,0,0,0,0,0,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
@@ -57,16 +60,27 @@ static bignum g_P[ECDSA_MAX_CPUS], g_N[ECDSA_MAX_CPUS];
 static inline bignum *curP(void) { return &g_P[smp_current_cpu() & (ECDSA_MAX_CPUS - 1)]; }
 static inline bignum *curN(void) { return &g_N[smp_current_cpu() & (ECDSA_MAX_CPUS - 1)]; }
 
+/* Barrett reciprocal for THIS core's P (M1536): same per-core-slot reasoning
+ * as g_P/g_N above (a dispatched smp_parallel_for job runs start-to-finish on
+ * one core, so "this core's slot" == "this call's state" for the whole
+ * verify). Computed ONCE per ecdsa_verify() call and reused for every fmul/
+ * fsqr in that call's ~384-iteration scalar multiply -- see
+ * osdev-bignum-reduction-perf: the dominant cost (~81% of bn_mod calls/verify)
+ * is these DIRECT field multiplies inside dbl/add, not bn_modexp's own (now
+ * separately Barrett-accelerated) loop. */
+static bn_barrett g_Pbar[ECDSA_MAX_CPUS];
+static inline bn_barrett *curPbar(void) { return &g_Pbar[smp_current_cpu() & (ECDSA_MAX_CPUS - 1)]; }
+
 typedef struct { bignum X, Y, Z; } pt;   /* Jacobian: affine (X/Z^2, Y/Z^3); Z=0 = infinity */
 
 static int is_inf(const pt *a) { return a->Z.n == 1 && a->Z.limb[0] == 0; }
 
 /* field helpers, mod P (this core's slot) */
-static void fmul(bignum *o, const bignum *a, const bignum *b) { bn_modmul(o, a, b, curP()); }
+static void fmul(bignum *o, const bignum *a, const bignum *b) { bn_modmul_barrett(o, a, b, curP(), curPbar()); }
 static void fadd(bignum *o, const bignum *a, const bignum *b) { bn_modadd(o, a, b, curP()); }
 static void fsub(bignum *o, const bignum *a, const bignum *b) { bn_modsub(o, a, b, curP()); }
 static void fmul2(bignum *o, const bignum *a) { fadd(o, a, a); }
-static void fsqr(bignum *o, const bignum *a) { bn_modmul(o, a, a, curP()); }
+static void fsqr(bignum *o, const bignum *a) { bn_modmul_barrett(o, a, a, curP(), curPbar()); }
 
 /* R = 2*A  (Jacobian doubling for curves with a = -3). */
 static void dbl(pt *R, const pt *A) {
@@ -126,16 +140,26 @@ static void mul(pt *R, const bignum *k, const pt *A, int bits) {
 /* Curve-generic verify over a NIST prime curve (a = -3). cp/cn/gx/gy/cb are the
  * fl-byte big-endian field prime / order / generator / b; pub = 0x04‖X‖Y
  * (1+2*fl bytes); hash is fl bytes; r/s big-endian. Returns 0 if valid. This
- * core's g_P/g_N slot is set at the top and read for the rest of THIS call
- * only (M1528 — see the slot declaration's comment for why that's safe under
- * concurrent per-core verifies, not just the single-threaded caller this
- * assumed when written). */
-static int ecdsa_verify(const uint8_t *cp, const uint8_t *cn, const uint8_t *gx,
+ * core's g_P/g_N/g_Pbar slots are set at the top and read for the rest of
+ * THIS call only -- safe ONLY because the thin ecdsa_verify() wrapper below
+ * pins the calling task to this core for the duration (M1536; see
+ * task_pin_here's doc comment for why that's now necessary: this function is
+ * reachable from an ordinary ring-3 syscall (sys_https), which the general
+ * preemptive scheduler (M1531/M1532) can migrate mid-call, unlike the
+ * smp_parallel_for-dispatched chain-link verifies M1528 originally wrote this
+ * per-core-slot pattern for). */
+static int ecdsa_verify_impl(const uint8_t *cp, const uint8_t *cn, const uint8_t *gx,
                         const uint8_t *gy, const uint8_t *cb, int fl,
                         const uint8_t *pub, size_t publen, const uint8_t *hash,
                         const uint8_t *r, size_t rl, const uint8_t *s, size_t sl) {
     bignum *P = curP(), *N = curN();
     bn_from_bytes(P, cp, fl); bn_from_bytes(N, cn, fl);
+    /* Once per verify, reused by every fmul/fsqr below. P-256/P-384 fields
+     * (8/12 limbs) are far under bn_barrett_init's size ceiling, so this
+     * cannot actually fail for either curve this file supports -- checked
+     * anyway (fail closed) rather than risk a stale/uninitialized context
+     * silently corrupting every field op in this verify. */
+    if (bn_barrett_init(curPbar(), P) != 0) return -1;
     if (publen != (size_t)(1 + 2*fl) || pub[0] != 0x04) return -1;
 
     bignum R, S, Z, w, u1, u2;
@@ -181,6 +205,30 @@ static int ecdsa_verify(const uint8_t *cp, const uint8_t *cn, const uint8_t *gx,
     fmul(&x, &sum.X, &z2inv);
     if (bn_cmp(&x, N) >= 0) bn_modsub(&x, &x, N, N);   /* x mod n */
     return bn_cmp(&x, &R) == 0 ? 0 : -1;
+}
+
+/* Pins the calling task to its current core for ecdsa_verify_impl's whole
+ * duration (M1536) -- see that function's doc comment for why. Thin wrapper
+ * rather than threading the pin/unpin through every one of impl's ~9 early
+ * returns. */
+static int ecdsa_verify(const uint8_t *cp, const uint8_t *cn, const uint8_t *gx,
+                        const uint8_t *gy, const uint8_t *cb, int fl,
+                        const uint8_t *pub, size_t publen, const uint8_t *hash,
+                        const uint8_t *r, size_t rl, const uint8_t *s, size_t sl) {
+#ifdef ECDSA_RING3
+    /* Ring-3 (httpget.elf): smp_current_cpu() is stubbed to always return 0
+     * here (no real APIC-id access from ring 3), and this process is
+     * single-threaded for crypto, so its own g_P/g_N/g_Pbar slot 0 is never
+     * shared with a DIFFERENT logical caller the way the kernel build's real
+     * per-core slots are -- the M1536 migration hazard doesn't apply, and
+     * task_pin_here isn't linkable from ring 3 anyway (no task.c here). */
+    return ecdsa_verify_impl(cp, cn, gx, gy, cb, fl, pub, publen, hash, r, rl, s, sl);
+#else
+    int saved_pin = task_pin_here();
+    int result = ecdsa_verify_impl(cp, cn, gx, gy, cb, fl, pub, publen, hash, r, rl, s, sl);
+    task_unpin(saved_pin);
+    return result;
+#endif
 }
 
 /* Verify: pub = 0x04‖X‖Y (65 bytes), hash[32], r/s = 32-byte big-endian. 0/-1. */

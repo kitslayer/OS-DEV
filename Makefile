@@ -356,7 +356,7 @@ HTTPGET_CRYPTO = aes aesgcm bignum chachapoly ecdsa hkdf rsa sha256 sha512 x2551
 $(BUILD)/httpget.elf: user/httpget.c kernel/tls.c $(patsubst %,kernel/%.c,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
 	$(HTTPGET_CC) -w -DTLS_RING3 -c kernel/tls.c -o $(BUILD)/httpget_tls.o
-	@for m in $(HTTPGET_CRYPTO); do echo "  CC kernel/$$m.c (ring-3 crypto)"; extra=""; [ "$$m" = "aes" ] && extra="-DAES_RING3"; $(HTTPGET_CC) -w $$extra -c kernel/$$m.c -o $(BUILD)/httpget_$$m.o || exit 1; done
+	@for m in $(HTTPGET_CRYPTO); do echo "  CC kernel/$$m.c (ring-3 crypto)"; extra=""; [ "$$m" = "aes" ] && extra="-DAES_RING3"; [ "$$m" = "ecdsa" ] && extra="-DECDSA_RING3"; $(HTTPGET_CC) -w $$extra -c kernel/$$m.c -o $(BUILD)/httpget_$$m.o || exit 1; done
 	$(HTTPGET_CC) -Wall -c user/httpget.c -o $(BUILD)/httpget_app.o
 	$(LD) -T user/user.ld -o $@ $(BUILD)/httpget_app.o $(BUILD)/httpget_tls.o $(patsubst %,$(BUILD)/httpget_%.o,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (ring-3 TLS 1.3 client)"
@@ -752,6 +752,11 @@ kattest:
 bignumfuzztest:
 	@tests/run-bignum-fuzz-tests.sh
 
+# Host-side property fuzz of Barrett reduction + bn_modexp (M1536) vs Python's
+# arbitrary-precision integers (ASan+UBSan).
+barrettfuzztest:
+	@tests/run-barrett-fuzz-tests.sh
+
 # Host-side differential fuzz of memcpy/memset/memmove vs a naive reference (every overlap shape, ASan+UBSan).
 stringtest:
 	@tests/run-string-tests.sh
@@ -933,8 +938,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test kattest bignumfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test kattest bignumfuzztest barrettfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + barrettfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

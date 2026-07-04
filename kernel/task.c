@@ -802,6 +802,34 @@ task_t *task_self(void) {
     return current;
 }
 
+/* Temporarily pin the CALLING task to the core it's running on RIGHT NOW, for
+ * code that keeps per-core global state across a call long enough to risk a
+ * preemption (M1536): task_pin_here()'s caller can be migrated to a different
+ * core mid-call by the ordinary preemptive scheduler (M1531/M1532) exactly
+ * like any other task, UNLIKE an smp_parallel_for job (which runs start-to-
+ * finish on one core by that primitive's own contract) -- ecdsa.c's per-core
+ * field-prime/Barrett-context slots (curP/curN/curPbar) assumed the latter
+ * but are reachable from an ordinary ring-3 syscall (sys_https), where only
+ * this explicit pin actually guarantees it. Returns the task's PREVIOUS
+ * pin_core (restore it with task_unpin when done); nests correctly with an
+ * already-pinned caller (e.g. task 0) since it just saves/restores the value. */
+int task_pin_here(void) {
+    uint64_t f = irq_save();
+    rq_lock_take();
+    int saved = current->pin_core;
+    current->pin_core = mycore();
+    rq_lock_give();
+    irq_restore(f);
+    return saved;
+}
+void task_unpin(int saved_pin_core) {
+    uint64_t f = irq_save();
+    rq_lock_take();
+    current->pin_core = saved_pin_core;
+    rq_lock_give();
+    irq_restore(f);
+}
+
 int task_count(void) {
     if (!current) return 0;                  /* ring not built yet */
     rq_lock_take();

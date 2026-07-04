@@ -43,6 +43,14 @@
  * trivial case. */
 int smp_current_cpu(void) { return 0; }
 
+/* ecdsa_verify() pins the calling task to its current core for the whole
+ * verify (M1536) so its per-core g_P/g_N/g_Pbar slot can't be read from a
+ * different core after a mid-verify migration -- this host harness has no
+ * real task.c scheduler linked, and is single-threaded anyway, so both are
+ * no-ops here, same pattern as the smp_current_cpu stub above. */
+int task_pin_here(void) { return 0; }
+void task_unpin(int saved_pin_core) { (void)saved_pin_core; }
+
 /* aes.c's aes128_ctr() dispatches large buffers through smp_parallel_for
  * (M1529). This host harness has no APs to hand work to, but rather than a
  * trivial single-chunk stub, actually SPLIT the range into several pieces and
@@ -203,7 +211,10 @@ int main(void) {
       else { printf("  FAIL: ECDSA P-256 accepted tampered sig\n"); g_fails++; }
       pl = H(pub, P384_PUB_HEX); sl = H(sig, P384_SIG_HEX);
       if (ecdsa_p384_verify_der(pub, pl, h48, sig, sl) == 0) printf("  ok: ECDSA P-384 verify\n");
-      else { printf("  FAIL: ECDSA P-384 verify\n"); g_fails++; } }
+      else { printf("  FAIL: ECDSA P-384 verify\n"); g_fails++; }
+      sig[sl/2] ^= 1;                                          /* tamper -> must reject */
+      if (ecdsa_p384_verify_der(pub, pl, h48, sig, sl) != 0) printf("  ok: ECDSA P-384 rejects tampered sig\n");
+      else { printf("  FAIL: ECDSA P-384 accepted tampered sig\n"); g_fails++; } }
     { uint8_t n[300], e[8], sig[300], h32[32];
       sha256((const uint8_t *)RSA_MSG, strlen(RSA_MSG), h32);
       int nl = H(n, RSA_N_HEX), el = H(e, RSA_E_HEX), sl = H(sig, RSA_SIG_HEX);

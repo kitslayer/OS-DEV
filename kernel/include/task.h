@@ -73,6 +73,13 @@ void    task_exit(void);                   /* end the current thread (no return)
 void    task_free(task_t *t);              /* free a DEAD, unlinked, off-CPU task (reaper only) */
 int     task_current_id(void);
 task_t *task_self(void);                   /* the currently running task */
+/* Pin the calling task to its CURRENT core until task_unpin (M1536): for code
+ * that keeps per-core global state across a call long enough to risk a
+ * preemption-then-migration (the ordinary scheduler, unlike smp_parallel_for,
+ * offers no "runs start-to-finish on one core" guarantee). Returns the prior
+ * pin_core to restore; nests correctly with an already-pinned caller. */
+int     task_pin_here(void);
+void    task_unpin(int saved_pin_core);
 void    task_set_fs_base(uint64_t b);      /* set the current thread's %fs (TLS) base (M1140) */
 void    task_set_robust(uint64_t r);       /* register the current thread's robust-futex list (M1141) */
 uint64_t task_robust(void);                /* the current thread's robust-list ptr (0 = none) (M1141) */
