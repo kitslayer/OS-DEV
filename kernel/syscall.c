@@ -299,7 +299,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
     case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
-    case SYS_nice: case SYS_sched_setscheduler: case SYS_tcgetattr: case SYS_tcsetattr:
+    case SYS_nice: case SYS_sched_setscheduler: case SYS_sched_setaffinity: case SYS_tcgetattr: case SYS_tcsetattr:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_getentropy: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
@@ -383,7 +383,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",
         [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_process_madvise]="process_madvise",
-        [SYS_faccessat2]="faccessat2",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
+        [SYS_faccessat2]="faccessat2",[SYS_sched_setaffinity]="sched_setaffinity",[SYS_sched_getaffinity]="sched_getaffinity",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
@@ -651,6 +651,12 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sched_getcpu:                 /* () -> APIC id of the CPU running this call (M1246) */
         r->rax = (uint64_t)(int64_t)smp_current_cpu();
+        break;
+    case SYS_sched_setaffinity:            /* (mask) -> restrict the calling task to a CPU subset; 0/-1 (M1557) */
+        r->rax = (uint64_t)(int64_t)task_set_affinity((uint32_t)r->rdi);
+        break;
+    case SYS_sched_getaffinity:            /* () -> the calling task's current affinity mask (M1557) */
+        r->rax = (uint64_t)task_get_affinity();
         break;
     case SYS_nanosleep: {                  /* (sec, nsec) -> sleep, rounded to the 100Hz tick (M1234) */
         app_kill_check();

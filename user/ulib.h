@@ -188,6 +188,8 @@ int  sys_eventfd(unsigned initval, int flags);                  /* pollable u64-
 int  sys_chown(const char *path, int uid, int gid);            /* set owner/group (ext2; -1 = leave); 0/-1 (M1243) */
 int  sys_fchown(int fd, int uid, int gid);                     /* set owner/group on an open fd; 0/-1 (M1243) */
 int  sys_sched_getcpu(void);                                   /* APIC id of the CPU the caller runs on (M1246) */
+int  sys_sched_setaffinity(unsigned int mask);                 /* restrict the caller to a CPU subset (bit i = core i); 0/-1 (M1557) */
+unsigned int sys_sched_getaffinity(void);                      /* the caller's current CPU-affinity mask (M1557) */
 long sys_getcwd(char *buf, unsigned long size);                /* the absolute current directory; length/-1 (M1248) */
 int  sys_openat(int dirfd, const char *path, int flags);       /* open relative to a dir fd (or AT_FDCWD); fd/-1 (M1251) */
 int  sys_unlinkat(int dirfd, const char *path, int flags);     /* remove relative to a dir fd; 0/-1 (M1251) */

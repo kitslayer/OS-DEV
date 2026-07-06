@@ -49,6 +49,11 @@ typedef struct task {
                                  * competition, run ONLY when nothing else on its core is ready. A pinned
                                  * (pin_core>=0) task that is NOT a floor task (e.g. task 0) still competes
                                  * normally via CFS on its one allowed core (M1531). */
+    uint32_t      affinity;    /* USER-FACING CPU affinity mask (M1557, sched_setaffinity): bit i = may
+                                 * run on core i. Independent of pin_core (that's an internal hard single-
+                                 * core pin for floor tasks/task 0; this is the general POSIX-style subset
+                                 * a task can restrict ITSELF to). Only consulted when pin_core<0 — every
+                                 * ordinary task_create_stack task starts with all bits set (any core). */
 } task_t;
 
 void    sched_init(void);                  /* adopt the current context as task 0 */
@@ -110,6 +115,8 @@ void    task_cpu_tick(uint64_t ms, int user);  /* timer: charge current task ms 
 int     task_set_nice(int nice);     /* set the current task's nice (-20..19) -> CFS weight; returns the clamped nice (M1171) */
 int     task_get_nice(void);         /* the current task's nice (M1171) */
 int     task_set_sched(int policy, int rt_priority);   /* set the current task's scheduling class (SCHED_*); 0/-1 (M1172) */
+int      task_set_affinity(uint32_t mask);   /* restrict the current task to a subset of online cores; 0/-1 (M1557) */
+uint32_t task_get_affinity(void);            /* the current task's affinity mask, clamped to online cores (M1557) */
 
 /* Called from the timer IRQ to preempt the running thread (no-op until the
  * scheduler is initialized and there's more than one task). */

@@ -308,6 +308,8 @@
 #define SYS_getsockopt   284   /* (fd, level, optname, optval*, optlen*) -> read a TCP-socket option; 0/-1 (M1554) */
 #define SYS_process_madvise 285  /* (pidfd, addr, len, advice) -> MADV_COLD on another process's memory; pages/-1 (M1555) */
 #define SYS_faccessat2   286   /* (dirfd, path, amode, flags) -> access() relative to a dir fd (or AT_FDCWD); 0/-1 (M1556) */
+#define SYS_sched_setaffinity 287  /* (mask) -> restrict the calling task to a subset of online cores; 0/-1 (M1557) */
+#define SYS_sched_getaffinity 288  /* () -> the calling task's current CPU-affinity mask (M1557) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

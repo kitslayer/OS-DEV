@@ -241,8 +241,9 @@ void sched_init(void) {
      * audited for it. Hit exactly that as a real in-guest crash (intermittent
      * page faults/GPFs right as the desktop launched) before adding this. */
     t->pin_core = mycore();
+    t->affinity = ~0u;           /* pin_core already governs task 0; affinity is just the default (M1557) */
     current = t;
-    task_t *idle = task_create(idle_loop, read_cr3(), 0);   /* the BSP's always-runnable floor (heap is up: kheap_init precedes sched_init) */
+    task_t *idle = task_create(idle_loop, read_cr3(), 0);   /* the BSP's always-runnable floor (heap is up: kheap_init precedes sched_init); task_create already defaults its affinity to ~0u */
     idle->pin_core = mycore();                              /* never let another core pick this up (M1531) */
     idle->is_floor = 1;
     floor_task[mycore()] = idle;
@@ -267,6 +268,7 @@ void task_register_ap_core(void) {
                                        * smp_thread draining) — pinned, not migratable: it's tied to THIS
                                        * core's own hardware execution, not portable work (M1531). Competes
                                        * normally (is_floor stays 0) against whatever else lands on this core. */
+    self->affinity = ~0u;             /* pin_core already governs it; affinity is just the default (M1557) */
     fx_alloc(self);
     self->last_in = timer_ms();
 
@@ -278,6 +280,7 @@ void task_register_ap_core(void) {
     idle->vruntime = g_min_vruntime;
     idle->cr3 = read_cr3();
     idle->pin_core = c;               /* this core's OWN floor -- never picked by anyone else */
+    idle->affinity = ~0u;
     idle->is_floor = 1;
     fx_alloc(idle);
     uint8_t *stack = kstack_alloc(STACK_SIZE);
@@ -352,6 +355,7 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
     t->rsp = (uint64_t)sp;
 
     t->pin_core = -1;   /* an ordinary task: any core may run it (M1531) */
+    t->affinity = ~0u;  /* and no self-imposed core restriction yet either (M1557) */
 
     /* Insert into the ring right after the current task. */
     uint64_t f = irq_save();
@@ -366,9 +370,14 @@ task_t *task_create_stack(void (*entry)(void), uint64_t cr3, void *proc, int sta
 /* Is `t` a valid competitive-pick candidate ON THIS CORE (M1531)? A floor/
  * idle task never competes (it's the last resort, checked separately); a
  * pinned task (pin_core>=0 — a core's own floor OR a genuinely core-affine
- * task like task 0/the desktop) may only be picked by its OWN core. */
+ * task like task 0/the desktop) may only be picked by its OWN core. Below
+ * that, an ordinary task (pin_core<0) is further filtered by its own
+ * user-facing affinity mask (M1557, sched_setaffinity) — defaults to
+ * "any core" so this is a no-op for every task that never calls it. */
 static inline int sched_eligible(task_t *t) {
-    return !t->is_floor && (t->pin_core < 0 || t->pin_core == mycore());
+    if (t->is_floor) return 0;
+    if (t->pin_core >= 0) return t->pin_core == mycore();
+    return (t->affinity >> mycore()) & 1;
 }
 
 /* Core switch — assumes interrupts already disabled (unchanged contract).
@@ -719,6 +728,40 @@ int task_set_sched(int policy, int rt_priority) {
         current->rt_ticks = RR_QUANTUM;
     }
     return 0;
+}
+
+/* Clamp a requested/reported affinity mask to bits that name an actually-
+ * online core — MAX_SCHED_CPUS is the scheduler's own hard ceiling (mycore()
+ * wraps modulo it), so this also protects the `1u << nc` below from a
+ * shift-by->=32 UB if smp_cpu_count were ever (incorrectly) larger (M1557). */
+static inline uint32_t online_mask(void) {
+    int nc = smp_cpu_count;
+    if (nc < 1) nc = 1;
+    if (nc > MAX_SCHED_CPUS) nc = MAX_SCHED_CPUS;
+    return (uint32_t)((1u << nc) - 1);
+}
+
+/* Restrict the current task to a subset of online cores (M1557, POSIX
+ * sched_setaffinity — self-only, matching task_set_nice/task_set_sched's own
+ * no-target-pid convention above). Rejects a mask that names no online core
+ * at all (would make the task permanently unschedulable). If the caller's
+ * OWN core just became disallowed, force it off NOW: sched_eligible() only
+ * re-filters a task against its mask when picking a candidate to switch TO,
+ * so without an explicit yield here the now-ineligible task would simply
+ * keep running on the forbidden core for as long as it keeps winning CFS
+ * picks (i.e. indefinitely) — the mask would be set but never actually take
+ * effect on this core. */
+int task_set_affinity(uint32_t mask) {
+    if (!current) return -1;
+    mask &= online_mask();
+    if (!mask) return -1;
+    current->affinity = mask;
+    if (!((mask >> mycore()) & 1)) task_yield();
+    return 0;
+}
+uint32_t task_get_affinity(void) {
+    if (!current) return 0;
+    return current->affinity & online_mask();
 }
 
 /* Suspend a task (it leaves the run rotation until task_cont). Only a runnable,

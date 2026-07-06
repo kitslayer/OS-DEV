@@ -510,6 +510,8 @@ int  sys_eventfd(unsigned initval, int flags) { return (int)do_syscall(SYS_event
 int  sys_chown(const char *path, int uid, int gid) { return (int)do_syscall(SYS_chown, (long)path, uid, gid); }
 int  sys_fchown(int fd, int uid, int gid) { return (int)do_syscall(SYS_fchown, fd, uid, gid); }
 int  sys_sched_getcpu(void) { return (int)do_syscall(SYS_sched_getcpu, 0, 0, 0); }
+int  sys_sched_setaffinity(unsigned int mask) { return (int)do_syscall(SYS_sched_setaffinity, mask, 0, 0); }
+unsigned int sys_sched_getaffinity(void) { return (unsigned int)do_syscall(SYS_sched_getaffinity, 0, 0, 0); }
 long sys_getcwd(char *buf, unsigned long size) { return do_syscall(SYS_getcwd, (long)buf, (long)size, 0); }
 int  sys_openat(int dirfd, const char *path, int flags) { return (int)do_syscall(SYS_openat, dirfd, (long)path, flags); }
 int  sys_unlinkat(int dirfd, const char *path, int flags) { return (int)do_syscall(SYS_unlinkat, dirfd, (long)path, flags); }
