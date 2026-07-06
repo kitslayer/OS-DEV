@@ -152,6 +152,11 @@ static int hexval(char c) {     /* a hex digit's value, or -1 */
  * so running it on the shell's stack mid-loop is harmless). */
 static volatile int g_alarm_fires;
 static void sh_alarm_handler(int sig) { (void)sig; g_alarm_fires++; }
+/* SIGXCPU demo (M1548): RLIMIT_CPU fires this once the process's own CPU time
+ * crosses the limit; like every signal here, delivery is opt-in (see
+ * app_cpulimit_tick) so a test process must install a handler to observe it. */
+static volatile int g_xcpu_fired;
+static void sh_xcpu_handler(int sig) { (void)sig; g_xcpu_fired = 1; }
 static char *slurp(const char *name, long *len) {
     sh_unprot_buf((char *)name);          /* a quoted filename ("my file") arrives with bit-7 sentinels — reveal them
                                            * here, the one chokepoint every file-reading builtin funnels through.
@@ -4348,6 +4353,23 @@ static int run_command(char *line, char *cwd) {
                 int fst = -1; sys_waitpid((int)fc, &fst);
                 print(fst == 0 ? "RLIMIT_NOFILE: fd allocation capped (3rd pipe denied past the limit) OK\n" : "RLIMIT_NOFILE: VERIFY FAILED\n");
                 if (fst != 0) g_status = 1;
+            }
+            /* RLIMIT_CPU (M1548): cap CPU time -- a CHILD again. Its own
+             * utime_ms/stime_ms is BSP-tick-sampled (the same basis getrusage
+             * already uses), so a generous wall-clock safety cap (not a tight
+             * one) absorbs however long it takes to actually land enough
+             * ticks on the BSP core across a real multi-core scheduler. */
+            long xc = sys_fork();
+            if (xc == 0) {
+                sys_signal(25 /* SIGXCPU */, sh_xcpu_handler);
+                struct rlimit xl; xl.rlim_cur = 1; xl.rlim_max = 1; sys_setrlimit(RLIMIT_CPU, &xl);   /* 1 CPU-second */
+                long start = sys_uptime_ms();
+                while (!g_xcpu_fired && sys_uptime_ms() - start < 8000) { }   /* burn CPU; generous wall-clock cap */
+                sys_exit(g_xcpu_fired ? 0 : 1);
+            } else if (xc > 0) {
+                int xst = -1; sys_waitpid((int)xc, &xst);
+                print(xst == 0 ? "RLIMIT_CPU: SIGXCPU delivered once CPU time exceeded the limit OK\n" : "RLIMIT_CPU: VERIFY FAILED\n");
+                if (xst != 0) g_status = 1;
             }
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */

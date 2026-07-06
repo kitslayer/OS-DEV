@@ -162,6 +162,8 @@ struct app {
     uint64_t rlim_as;                    /* RLIMIT_AS: max total mmap bytes (0 = unlimited) (M1164) */
     uint64_t rlim_data;                  /* RLIMIT_DATA: max heap bytes (0 = unlimited) (M1164) */
     uint64_t rlim_nofile;                /* RLIMIT_NOFILE: max open fds (0 = unlimited), inherited on fork (M1547) */
+    uint64_t rlim_cpu;                   /* RLIMIT_CPU: max CPU seconds (0 = unlimited) -> SIGXCPU, inherited on fork (M1548) */
+    uint64_t cpulimit_next;              /* next timer_ticks() allowed to re-raise SIGXCPU (M1548); see app_cpulimit_tick */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -1039,6 +1041,7 @@ int app_setrlimit(int resource, uint64_t val) {
     if (resource == RLIMIT_AS)     { a->rlim_as     = v; return 0; }
     if (resource == RLIMIT_DATA)   { a->rlim_data   = v; return 0; }
     if (resource == RLIMIT_NOFILE) { a->rlim_nofile = v; return 0; }
+    if (resource == RLIMIT_CPU)    { a->rlim_cpu    = v; return 0; }
     return -1;                                          /* other resources not yet enforced */
 }
 uint64_t app_getrlimit(int resource) {
@@ -1046,7 +1049,8 @@ uint64_t app_getrlimit(int resource) {
     uint64_t v = (resource == RLIMIT_NPROC)  ? a->rlim_nproc  :
                  (resource == RLIMIT_AS)     ? a->rlim_as     :
                  (resource == RLIMIT_DATA)   ? a->rlim_data   :
-                 (resource == RLIMIT_NOFILE) ? a->rlim_nofile : 0;
+                 (resource == RLIMIT_NOFILE) ? a->rlim_nofile :
+                 (resource == RLIMIT_CPU)    ? a->rlim_cpu    : 0;
     return v ? v : RLIM_INFINITY;
 }
 /* prlimit (M1214): get — and optionally set — ANOTHER process's resource limit
@@ -1059,7 +1063,8 @@ long app_prlimit(int pid, int resource, uint64_t newval, int do_set) {
     uint64_t *slot = (resource == RLIMIT_NPROC)  ? &t->rlim_nproc :
                      (resource == RLIMIT_AS)     ? &t->rlim_as :
                      (resource == RLIMIT_DATA)   ? &t->rlim_data :
-                     (resource == RLIMIT_NOFILE) ? &t->rlim_nofile : 0;
+                     (resource == RLIMIT_NOFILE) ? &t->rlim_nofile :
+                     (resource == RLIMIT_CPU)    ? &t->rlim_cpu : 0;
     if (!slot) return (long)RLIM_INFINITY;
     uint64_t old = *slot ? *slot : RLIM_INFINITY;       /* 0 stored = unlimited */
     if (do_set) *slot = (newval == RLIM_INFINITY) ? 0 : newval;
@@ -1079,13 +1084,14 @@ int app_format_limits(app_t *ap, char *b, int max) {
     if (!a || max <= 0) return 0;
     int p = 0;
     p = maps_str(b, p, max, "Limit           Value\n");
-    struct { const char *name; uint64_t v; } row[4] = {
+    struct { const char *name; uint64_t v; } row[5] = {
         { "RLIMIT_AS       ", a->rlim_as },
         { "RLIMIT_DATA     ", a->rlim_data },
         { "RLIMIT_NPROC    ", a->rlim_nproc },
         { "RLIMIT_NOFILE   ", a->rlim_nofile },
+        { "RLIMIT_CPU      ", a->rlim_cpu },
     };
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         p = maps_str(b, p, max, row[i].name);
         if (row[i].v == 0) p = maps_str(b, p, max, "unlimited");
         else                p = lim_dec(b, p, max, row[i].v);
@@ -2722,6 +2728,36 @@ void app_alarm_tick(void) {
     }
 }
 
+#define SIGXCPU 25   /* real Linux uses 24, but that number is already SIGWINCH here (M1548) */
+/* Called from the timer IRQ: if the CURRENT task's own accumulated CPU time
+ * (utime_ms+stime_ms, the same tick-sampled fields getrusage already reads)
+ * has crossed its app's RLIMIT_CPU, raise SIGXCPU. Deliberately scoped to the
+ * task that's actually running right now, like app_alarm_tick -- an app with
+ * several cloned threads (M1138) gets each thread checked against the SAME
+ * limit independently rather than a summed total, which is a simplification,
+ * not the POSIX-exact semantics (that would need a running total kept on the
+ * shared struct app instead of each task_t), but this is the honest, cheap
+ * version and matches every other per-app CPU/fd accounting in this file. */
+void app_cpulimit_tick(void) {
+    task_t *t = task_self();
+    if (!t || !t->proc) return;                  /* before sched_init / a kernel task */
+    struct app *a = (struct app *)t->proc;
+    if (!a->rlim_cpu) return;                     /* 0 = unlimited */
+    if (t->utime_ms + t->stime_ms < a->rlim_cpu * 1000) return;
+    if (timer_ticks() < a->cpulimit_next) return;
+    /* Found via a real, reproduced livelock: utime_ms/stime_ms never go back
+     * down once over the limit, so an unconditional re-request every tick (no
+     * deadline advance, unlike app_alarm_tick's alarm_next) meant the signal
+     * was still pending again by the time sigreturn's own syscall-return check
+     * ran -- app_deliver_pending kept re-entering the handler before control
+     * ever made it back to the interrupted C code that would've observed the
+     * flag the handler set and exited its loop. Re-arming only once/second
+     * (matching real POSIX SIGXCPU's own re-notify cadence once over the
+     * soft limit) gives every delivery a full round trip to actually land. */
+    a->cpulimit_next = timer_ticks() + 100;
+    app_request_signal(a, SIGXCPU);
+}
+
 /* If the app this trap returns to has an async signal pending AND we're heading
  * back to ring-3 code (never mid-syscall), deliver it now. Called from the
  * syscall return and the IRQ tail. Returns 1 if a handler was entered. M1083. */
@@ -4145,6 +4181,7 @@ long app_fork(struct registers *r) {
     a->rlim_nproc = p->rlim_nproc;                      /* RLIMIT_NPROC is inherited across fork (M1163) */
     a->rlim_as = p->rlim_as; a->rlim_data = p->rlim_data;   /* RLIMIT_AS/DATA inherited too (M1164) */
     a->rlim_nofile = p->rlim_nofile;                    /* RLIMIT_NOFILE inherited too (M1547) */
+    a->rlim_cpu = p->rlim_cpu;                          /* RLIMIT_CPU inherited too (M1548) */
     /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
     a->promises = p->promises; a->pledged = p->pledged;
     a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;

@@ -675,7 +675,16 @@ static uint64_t core_user_ms[MAX_SCHED_CPUS], core_sys_ms[MAX_SCHED_CPUS];
  * so coarse (one-tick granularity) — the standard getrusage utime/stime model
  * (M1150). The precise total CPU time stays in run_ms (switch_to_next). */
 void task_cpu_tick(uint64_t ms, int user) {
-    if (g_in_hlt) { g_hlt_idle_ms += ms; return; }   /* the CPU was halted: this tick is idle time */
+    /* g_in_hlt is specifically the BSP-pinned compositor's own idle_hlt() flag
+     * (see its own comment above) -- checking it unqualified used to be safe
+     * only because this function was itself BSP-exclusive (called solely from
+     * timer.c's PIT handler). Now that each AP's own LAPIC tick calls this too
+     * (M1548, fixing utime_ms/stime_ms staying 0 forever for a task that
+     * simply wasn't BSP-resident), an AP's tick landing while the BSP happens
+     * to be idle-halted would otherwise get swallowed into g_hlt_idle_ms
+     * instead of crediting that AP's actually-running task -- so this check
+     * must stay scoped to the one core it actually describes. */
+    if (mycore() == 0 && g_in_hlt) { g_hlt_idle_ms += ms; return; }
     if (!current) return;
     if (user) { current->utime_ms += ms; core_user_ms[mycore()] += ms; }
     else      { current->stime_ms += ms; core_sys_ms[mycore()]  += ms; }

@@ -36,6 +36,7 @@ static void timer_handler(struct registers *r) {
     task_wake_sleepers();  /* wake any timed-sleep task whose deadline has passed (M1079) */
     app_alarm_tick();      /* raise SIGALRM if the current app's periodic alarm is due (M1102) */
     app_timer_tick();      /* fire any due POSIX timer_create() timers, on every app (M1272) */
+    app_cpulimit_tick();   /* raise SIGXCPU if the current task exceeds its RLIMIT_CPU (M1548) */
     loadavg_sample();      /* update the 1/5/15-min run-queue load average every 5 s (M1148) */
     sched_tick();          /* preempt the running thread on THIS (BSP) core */
     /* Every other core has its OWN local LAPIC timer now (M1532), armed by
@@ -46,6 +47,8 @@ static void timer_handler(struct registers *r) {
      * keyboard/httpd test, since that's the specific class of bug this
      * scheduler code has produced before). */
 }
+
+uint32_t timer_tick_ms(void) { return tick_ms; }
 
 void timer_init(uint32_t hz) {
     uint32_t divisor = PIT_FREQUENCY / hz;

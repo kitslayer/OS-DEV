@@ -261,10 +261,20 @@ int vmm_fork_cow(uint64_t child_cr3) {
                     continue;
                 }
                 uint64_t flags = e & (PTE_USER | PTE_NX);
-                if (e & PTE_WRITABLE) {                   /* COW: write-protect both sides, mark COW */
-                    pt[k] = (e & ~PTE_WRITABLE) | PTE_COW; /* parent now RO + COW */
-                    flags |= PTE_COW;
-                }
+                if (e & PTE_WRITABLE) pt[k] = (e & ~PTE_WRITABLE) | PTE_COW;  /* first share: write-protect both sides, mark COW */
+                /* Either this page just became RO+COW above, OR it already was
+                 * (a second-or-later fork of a page an EARLIER child already
+                 * shares) -- both cases need the new child's own mapping to
+                 * carry PTE_COW too. Missing the latter used to silently map a
+                 * later child's copy read-only with NO COW bit: a write to it
+                 * would fail every one of app_fault_handle's checks (not the
+                 * COW branch -- no COW bit; not swap; and the VMA-lazy branch
+                 * sees the page already present and just says "retry" without
+                 * ever making it writable) -- an infinite refault loop, latent
+                 * since COW existed (M1116) and only surfaced now because
+                 * nothing before this had a 3rd-generation-or-later child
+                 * write to a page any earlier sibling had already touched. */
+                if (e & (PTE_WRITABLE | PTE_COW)) flags |= PTE_COW;
                 if (vmm_map_to(child_cr3, va, phys, flags) != 0) { rc = -1; break; }
                 pmm_addref(phys);                         /* one extra ref for the child's mapping */
             }

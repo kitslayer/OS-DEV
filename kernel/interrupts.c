@@ -18,6 +18,7 @@
 #include "syscall.h"
 #include "app.h"
 #include "task.h"
+#include "timer.h"      /* timer_tick_ms — per-core CPU-time accounting (M1548) */
 #include "vmm.h"        /* kstack_is_guard — flag a kernel-stack-overflow #PF (M1495) */
 #include "ksyms.h"
 #include "smp.h"
@@ -106,7 +107,26 @@ void isr_dispatch(struct registers *r) {
      * exactly that as a real in-guest crash (an interrupt pileup deep enough
      * to double-fault) before the order was fixed; kept EOI-first here from
      * the start. */
-    if (r->int_no == 0x42) { lapic_eoi(); sched_tick(); return; }
+    if (r->int_no == 0x42) {
+        lapic_eoi();
+        /* Charge THIS core's own current task, same as timer_handler does for
+         * the BSP -- task_cpu_tick/app_alarm_tick/app_cpulimit_tick all key off
+         * task_self()/current (whichever task is running on the core executing
+         * this code right now), so calling them here is correct, not a double-
+         * count. Found via a real, reproducible bug: utime_ms/stime_ms stayed
+         * 0 forever for a task that happened not to be BSP-resident, because
+         * task_cpu_tick was ONLY ever invoked from timer.c's PIT handler --
+         * legacy IRQ0 has exactly one target, so that path is BSP-exclusive by
+         * construction (M1548). Deliberately NOT adding app_timer_tick() or
+         * anything else from timer_handler here: those scan ALL apps globally
+         * per call, so running them once per core per tick would fire them
+         * (cores) times too often instead of once. */
+        task_cpu_tick(timer_tick_ms(), (r->cs & 3) == 3);
+        app_alarm_tick();
+        app_cpulimit_tick();
+        sched_tick();
+        return;
+    }
     if (r->int_no == 0xFF) { return; }
 
     /* MSI / MSI-X message-signaled interrupts (M1288): a device wrote its
