@@ -61,6 +61,17 @@ static long nthnum(const char *s, int n) {
     }
     return 0;
 }
+/* first occurrence of literal `tag` in `s`, or 0 if absent (a tiny local
+ * strstr -- ulib doesn't have one). Used to find each "cpuN " line's own
+ * start in /proc/stat's per-core rows (M1538), so nthnum can then read
+ * ITS numbers rather than the Nth number in the whole file. */
+static const char *findtag(const char *s, const char *tag) {
+    for (int i = 0; s[i]; i++) {
+        int j = 0; while (tag[j] && s[i + j] == tag[j]) j++;
+        if (!tag[j]) return s + i;
+    }
+    return 0;
+}
 static int putu(char *o, int i, long v) {              /* append v's decimal digits; return new index */
     char t[12]; int n = 0; if (v < 0) v = 0;
     do { t[n++] = '0' + (int)(v % 10); v /= 10; } while (v);
@@ -89,6 +100,16 @@ static void panel(const int *arr, int head, int count, int y0, int gh, unsigned 
     }
 }
 
+/* Up to MAXCORES small per-core bars (M1538): /proc/stat's own aggregate line
+ * was the ONLY CPU signal until M1538 gave the kernel real per-core time
+ * accounting -- one number could never show whether load is spread across
+ * cores or pinned to one, which is exactly what M1531-1537's whole body of
+ * multi-core work actually changed. Capped at 8 (not smp_cpu_count's up-to-16)
+ * since more wouldn't stay legible at this window's size; every QEMU config
+ * this OS actually boots under has 4. */
+#define MAXCORES 8
+static long pbusy_c[MAXCORES], ptot_c[MAXCORES];
+
 int main(void) {
     if (sys_gfx_init(W, H) < 0) { print("sysgraph: gfx init failed\n"); return 1; }
     FB = (unsigned *)malloc((unsigned long)W * H * 4);
@@ -98,6 +119,8 @@ int main(void) {
     int head = 0, count = 0, first = 1;
     long pbusy = 0, ptot = 0;
     char buf[2048];
+    int corepct[MAXCORES] = {0};
+    int ncore = 1;
 
     for (;;) {
         /* CPU%: aggregate `cpu  user nice system idle ...` busy/total delta */
@@ -106,7 +129,26 @@ int main(void) {
         long busy = u + ni + sy, tot = busy + id;
         int cp = 0;
         if (!first && tot > ptot) { cp = (int)((busy - pbusy) * 100 / (tot - ptot)); if (cp < 0) cp = 0; if (cp > 100) cp = 100; }
-        pbusy = busy; ptot = tot; first = 0;
+        pbusy = busy; ptot = tot;
+
+        /* Per-core: find each "cpuN " line's own start, then read ITS four
+         * numbers (nthnum from that point, not from the start of the file). */
+        const char *nline = findtag(buf, "\nncpu ");
+        ncore = nline ? (int)nthnum(nline, 0) : 1;
+        if (ncore < 1) ncore = 1; if (ncore > MAXCORES) ncore = MAXCORES;
+        char tag[8] = "cpu0 ";
+        for (int c = 0; c < ncore; c++) {
+            tag[3] = (char)('0' + c);
+            const char *cl = findtag(buf, tag);
+            if (!cl) { corepct[c] = 0; continue; }
+            long cu = nthnum(cl, 0), cni = nthnum(cl, 1), csy = nthnum(cl, 2), cid = nthnum(cl, 3);
+            long cbusy = cu + cni + csy, ctot = cbusy + cid;
+            int pct = 0;
+            if (!first && ctot > ptot_c[c]) { pct = (int)((cbusy - pbusy_c[c]) * 100 / (ctot - ptot_c[c])); if (pct < 0) pct = 0; if (pct > 100) pct = 100; }
+            pbusy_c[c] = cbusy; ptot_c[c] = ctot;
+            corepct[c] = pct;
+        }
+        first = 0;
 
         /* RAM%: MemTotal (0th num) and MemUsed (2nd num) from /proc/meminfo, in kB */
         slurp("/proc/meminfo", buf, sizeof buf);
@@ -124,6 +166,21 @@ int main(void) {
         char lab[40]; int n;
         unsigned ccol = cp >= 80 ? 0xF08080 : cp >= 50 ? 0xF0D060 : 0x80FF90;   /* headline number tinted by load */
         n = label(lab, "CPU", cp); lab[n] = 0; gtext(lab, 8, 6, ccol);
+
+        /* Per-core bars (M1538): one small bar per core, right of the headline
+         * number, height + colour = that core's own busy% right now. The
+         * point isn't precision (there's already a full-resolution scrolling
+         * graph for the aggregate below) -- it's answering "is load actually
+         * spread across cores, or pinned to one", which no single number can. */
+        { int bw = 12, gap = 4, bx = 96, by = 4, bh = 18;
+          for (int c = 0; c < ncore && bx + bw < W - 28; c++, bx += bw + gap) {
+              int v = corepct[c]; if (v < 0) v = 0; if (v > 100) v = 100;
+              unsigned bar = v >= 80 ? 0xF05858 : v >= 50 ? 0xE8C040 : 0x46E05A;
+              fillr(bx, by, bw, bh, 0x16211Cu);                        /* dim empty track */
+              int hh = v * bh / 100; if (hh > 0) fillr(bx, by + bh - hh, bw, hh, bar);
+              bevel_dn(bx, by, bw, bh, 0x2A362Fu, 0x0C1210u);
+          }
+        }
         unsigned rcol = rp >= 80 ? 0xF08080 : rp >= 50 ? 0xF0D060 : 0x80E0FF;
         n = label(lab, "RAM", rp);                              /* + actual MB used/total */
         lab[n++] = ' '; n = putu(lab, n, mu / 1024); lab[n++] = '/'; n = putu(lab, n, mt / 1024); lab[n++] = 'M'; lab[n] = 0;

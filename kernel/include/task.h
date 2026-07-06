@@ -102,7 +102,7 @@ void     idle_hlt(void);                             /* halt until an IRQ, credi
 int     task_runnable_count(void);   /* tasks wanting the CPU now (RUNNING|READY, idle excluded) (M1148) */
 uint64_t task_ctxt_count(void);                      /* total context switches since boot — /proc/stat ctxt (M1253) */
 uint64_t task_total_spawned(void);                   /* cumulative tasks ever created — /proc/stat processes (M1253) */
-void     task_cpu_times(uint64_t *user_ms, uint64_t *sys_ms);  /* summed per-task user/kernel CPU ms (M1253) */
+void     task_percore_times(int core, uint64_t *user_ms, uint64_t *sys_ms, uint64_t *idle_ms);  /* one core's own ms; sum across cores for /proc/stat's aggregate (M1538) */
 int     task_blocked_count(void);                    /* blocked tasks (idle excluded) — /proc/stat procs_blocked (M1253) */
 void    loadavg_sample(void);        /* called each timer tick; updates the EWMA once per 5 s (M1148) */
 void    task_loadavg(uint64_t out[3]); /* fixed-point (FSHIFT=11) 1/5/15-min load averages (M1148) */

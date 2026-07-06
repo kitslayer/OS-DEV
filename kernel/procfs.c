@@ -45,7 +45,7 @@
 extern int task_count(void);   /* kernel/task.c */
 extern uint64_t task_ctxt_count(void);                          /* /proc/stat aggregates (M1253) */
 extern uint64_t task_total_spawned(void);
-extern void task_cpu_times(uint64_t *user_ms, uint64_t *sys_ms);
+extern void task_percore_times(int core, uint64_t *user_ms, uint64_t *sys_ms, uint64_t *idle_ms);   /* M1538 */
 extern int task_runnable_count(void);
 extern int task_blocked_count(void);
 extern uint64_t rtc_unix(void);            /* current epoch seconds — for btime (M1253) */
@@ -265,23 +265,48 @@ static long gen_interrupts(char *b, int max) {
 }
 /* /proc/stat in the real Linux layout that top/vmstat/uptime parse (M1253):
  * upgraded from a 3-line custom blob. CPU time is in USER_HZ=100 ticks (ms/10,
- * matching gen_pid_stat). We emit only the aggregate `cpu` line — per-core
- * idle/user isn't tracked separately (the scheduler is a single BSP ready-ring),
- * so per-`cpuN` splits would be fabricated; tools fall back to the aggregate.
- * Columns we don't account for (nice/iowait/irq/softirq/steal/guest) are honest
- * zeros. ctxt + processes are real new counters; btime is the real boot epoch. */
+ * matching gen_pid_stat). Columns we don't account for (nice/iowait/irq/
+ * softirq/steal/guest) are honest zeros. ctxt + processes are real new
+ * counters; btime is the real boot epoch.
+ *
+ * Per-core `cpuN` lines (M1538): the aggregate-only comment this replaced
+ * was correct when written (M1253, a single-BSP scheduler) but stale once
+ * M1531/M1532 shipped a real per-core scheduler + per-core LAPIC timers —
+ * task_percore_times() now tracks genuine per-core user/system/idle ms
+ * (tagged by mycore() at each timer tick, not reconstructed after the fact),
+ * so these are real measurements, not fabricated splits of the aggregate. */
 static long gen_stat(char *b, int max) {
     uint64_t up = timer_ms();
-    uint64_t idle = task_idle_ms() + task_idle_hlt_ms(); if (idle > up) idle = up;
-    uint64_t um = 0, sm = 0; task_cpu_times(&um, &sm);
     uint64_t now = rtc_unix();
     uint64_t btime = (now > up / 1000) ? now - up / 1000 : 0;   /* boot epoch = now - uptime */
+
+    /* Compute every core's numbers FIRST and sum them for the aggregate `cpu`
+     * line, rather than deriving it separately (the old task_cpu_times() sums
+     * only CURRENTLY LIVE tasks, silently dropping exited ones -- wrong for
+     * this line's real semantic, which is monotonic-since-boot like Linux's.
+     * Summing the per-core counters instead is both more correct AND keeps
+     * `cpu` == the sum of every `cpuN`, an invariant real tools may check). */
+    uint64_t tot_u = 0, tot_s = 0, tot_i = 0;
+    uint64_t cu[16], cs[16], ci[16];
+    int ncore = smp_cpu_count; if (ncore > 16) ncore = 16; if (ncore < 1) ncore = 1;
+    for (int c = 0; c < ncore; c++) {
+        task_percore_times(c, &cu[c], &cs[c], &ci[c]);
+        if (ci[c] > up) ci[c] = up;
+        tot_u += cu[c]; tot_s += cs[c]; tot_i += ci[c];
+    }
     /* cpu  user nice system idle iowait irq softirq steal guest guest_nice */
     int p = sapp(b, 0, max, "cpu  ");
-    p = sdec(b, p, max, um / 10);  p = sapp(b, p, max, " 0 ");      /* user, nice */
-    p = sdec(b, p, max, sm / 10);  p = sapp(b, p, max, " ");        /* system */
-    p = sdec(b, p, max, idle / 10);
-    p = sapp(b, p, max, " 0 0 0 0 0 0\n");                          /* iowait irq softirq steal guest guest_nice */
+    p = sdec(b, p, max, tot_u / 10);  p = sapp(b, p, max, " 0 ");      /* user, nice */
+    p = sdec(b, p, max, tot_s / 10);  p = sapp(b, p, max, " ");        /* system */
+    p = sdec(b, p, max, tot_i / 10);
+    p = sapp(b, p, max, " 0 0 0 0 0 0\n");                             /* iowait irq softirq steal guest guest_nice */
+    for (int c = 0; c < ncore; c++) {
+        p = sapp(b, p, max, "cpu"); p = sdec(b, p, max, (uint64_t)c); p = sapp(b, p, max, " ");
+        p = sdec(b, p, max, cu[c] / 10);  p = sapp(b, p, max, " 0 ");
+        p = sdec(b, p, max, cs[c] / 10);  p = sapp(b, p, max, " ");
+        p = sdec(b, p, max, ci[c] / 10);
+        p = sapp(b, p, max, " 0 0 0 0 0 0\n");
+    }
     p = sapp(b, p, max, "ctxt ");          p = sdec(b, p, max, task_ctxt_count());
     p = sapp(b, p, max, "\nbtime ");       p = sdec(b, p, max, btime);
     p = sapp(b, p, max, "\nprocesses ");   p = sdec(b, p, max, task_total_spawned());

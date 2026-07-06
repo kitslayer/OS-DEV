@@ -661,6 +661,15 @@ void task_loadavg(uint64_t out[3]) {
 static volatile int g_in_hlt;
 static volatile uint64_t g_hlt_idle_ms;
 
+/* Per-core user/system ms (M1538): unlike task_cpu_times' per-TASK totals
+ * (which can't say which core a migrated task's time was spent on), these
+ * are tagged with mycore() at the exact instant of each timer tick -- a
+ * property of the CORE right now, not something that needs to survive a
+ * migration, so this is safe by construction (no per-core-state-outlives-
+ * this-call hazard the way ecdsa.c's g_P/g_N/g_Pbar had, M1536). Exposed via
+ * /proc/stat's per-core cpuN lines for real multi-core visibility. */
+static uint64_t core_user_ms[MAX_SCHED_CPUS], core_sys_ms[MAX_SCHED_CPUS];
+
 /* Charge the current task `ms` of CPU time to user or kernel mode, called from
  * the timer IRQ with user = (the interrupted frame was ring 3). Tick-sampled,
  * so coarse (one-tick granularity) — the standard getrusage utime/stime model
@@ -668,8 +677,8 @@ static volatile uint64_t g_hlt_idle_ms;
 void task_cpu_tick(uint64_t ms, int user) {
     if (g_in_hlt) { g_hlt_idle_ms += ms; return; }   /* the CPU was halted: this tick is idle time */
     if (!current) return;
-    if (user) current->utime_ms += ms;
-    else      current->stime_ms += ms;
+    if (user) { current->utime_ms += ms; core_user_ms[mycore()] += ms; }
+    else      { current->stime_ms += ms; core_sys_ms[mycore()]  += ms; }
 }
 
 /* Set the current task's nice level (-20..+19) and its CFS weight (M1171). A
@@ -895,20 +904,28 @@ uint64_t task_idle_hlt_ms(void) { return g_hlt_idle_ms; }
 uint64_t task_ctxt_count(void)    { return g_nr_switches; }      /* total context switches since boot */
 uint64_t task_total_spawned(void) { return (uint64_t)next_id; }  /* cumulative tasks ever created = "processes" */
 
-/* Sum per-task user/kernel CPU time (ms) across the live ring — the real
- * user/system split behind /proc/stat's aggregate `cpu` line (data tracked
- * per-task since M1150). The idle task is excluded (it's the idle column). */
-void task_cpu_times(uint64_t *user_ms, uint64_t *sys_ms) {
-    uint64_t u = 0, s = 0;
-    if (current) {
-        rq_lock_take();
-        task_t *t = current;
-        do { if (!t->is_floor) { u += t->utime_ms; s += t->stime_ms; }
-             t = t->next; } while (t != current);
-        rq_lock_give();
+/* One core's user/system/idle ms (M1538) — /proc/stat's per-core `cpuN` lines
+ * (gen_stat sums these across cores for the aggregate `cpu` line too, replacing
+ * the old task_cpu_times' "sum only currently-live tasks" approximation with a
+ * real one). `core` is a masked index (0..MAX_SCHED_CPUS-1), matching mycore()'s
+ * range. Idle mirrors task_idle_ms()'s per-core term (that core's OWN floor
+ * task's run_ms, live-updated if it's RUNNING right now) plus, for core 0
+ * only, the BSP-pinned compositor's own idle_hlt() time (g_hlt_idle_ms is
+ * BSP-specific by construction — see idle_hlt's caller, desktop.c's task 0). */
+void task_percore_times(int core, uint64_t *user_ms, uint64_t *sys_ms, uint64_t *idle_ms) {
+    if (core < 0 || core >= MAX_SCHED_CPUS) { if (user_ms) *user_ms = 0; if (sys_ms) *sys_ms = 0; if (idle_ms) *idle_ms = 0; return; }
+    if (user_ms) *user_ms = core_user_ms[core];
+    if (sys_ms)  *sys_ms  = core_sys_ms[core];
+    if (idle_ms) {
+        uint64_t rm = 0;
+        task_t *ft = floor_task[core];
+        if (ft) {
+            rm = ft->run_ms;
+            if (ft->state == TASK_RUNNING) rm += timer_ms() - ft->last_in;
+        }
+        if (core == 0) rm += g_hlt_idle_ms;
+        *idle_ms = rm;
     }
-    if (user_ms) *user_ms = u;
-    if (sys_ms)  *sys_ms  = s;
 }
 
 /* Count of blocked tasks (excl. any core's idle floor) — /proc/stat procs_blocked.
