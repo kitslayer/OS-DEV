@@ -256,6 +256,7 @@ int  sys_setpgid(int pid, int pgid) { return (int)do_syscall(SYS_setpgid, pid, p
 int  sys_getpgid(int pid) { return (int)do_syscall(SYS_getpgid, pid, 0, 0); }
 int  sys_setsid(void) { return (int)do_syscall(SYS_setsid, 0, 0, 0); }
 int  sys_tcsetpgrp(int pgid) { return (int)do_syscall(SYS_tcsetpgrp, pgid, 0, 0); }
+int  sys_tcgetpgrp(void) { return (int)do_syscall(SYS_tcgetpgrp, 0, 0, 0); }
 int  sys_killpg(int pgid, int signo) { return (int)do_syscall(SYS_killpg, pgid, signo, 0); }
 int  sys_flock(const char *path, int op) { return (int)do_syscall(SYS_flock, (long)path, op, 0); }
 long sys_getrlimit(int resource, struct rlimit *rl) { return do_syscall(SYS_getrlimit, resource, (long)rl, 0); }

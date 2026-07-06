@@ -310,6 +310,7 @@
 #define SYS_faccessat2   286   /* (dirfd, path, amode, flags) -> access() relative to a dir fd (or AT_FDCWD); 0/-1 (M1556) */
 #define SYS_sched_setaffinity 287  /* (mask) -> restrict the calling task to a subset of online cores; 0/-1 (M1557) */
 #define SYS_sched_getaffinity 288  /* () -> the calling task's current CPU-affinity mask (M1557) */
+#define SYS_tcgetpgrp    289   /* () -> the console's foreground process group (0 = none); mirrors tcsetpgrp (M1558) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

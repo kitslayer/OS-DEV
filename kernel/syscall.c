@@ -329,7 +329,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_clip_get: case SYS_clip_set: case SYS_font: case SYS_loadimg:
         return PL_GFX;
     case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace: case SYS_process_madvise:
-    case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_killpg:
+    case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_tcgetpgrp: case SYS_killpg:
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_waitid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
         return PL_PROC;
     case SYS_clone: case SYS_join:          /* threads sharing THIS address space, not a new process (M1533) */
@@ -396,7 +396,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",[SYS_socketpair]="socketpair",
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
         [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",
-        [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_killpg]="killpg",
+        [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_tcgetpgrp]="tcgetpgrp",[SYS_killpg]="killpg",
         [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
         [SYS_pty_open]="pty_open",[SYS_pty_read]="pty_read",[SYS_pty_write]="pty_write",
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
@@ -1320,6 +1320,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_tcsetpgrp:                    /* (pgid) -> set the console foreground group (M1176) */
         r->rax = (uint64_t)(int64_t)app_tcsetpgrp((int)r->rdi);
+        break;
+    case SYS_tcgetpgrp:                    /* () -> the console's foreground process group (M1558) */
+        r->rax = (uint64_t)(int64_t)app_tcgetpgrp();
         break;
     case SYS_killpg:                       /* (pgid, signo) -> signal every process in the group (M1176) */
         r->rax = (uint64_t)(int64_t)app_killpg((int)r->rdi, (int)r->rsi);
