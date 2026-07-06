@@ -3829,7 +3829,7 @@ long app_sendfile(int out_fd, int in_fd, long *off, unsigned long count) {
  * loop already drives; refcounted across fork/dup2 like a memfd/pipe. */
 #define NEPOLL 8
 #define EP_MAX 32
-static struct epollobj { int used, refs, n; struct { int fd, events; unsigned long data; } items[EP_MAX]; } epolls[NEPOLL];
+static struct epollobj { int used, refs, n; struct { int fd, events, last_ready; unsigned long data; } items[EP_MAX]; } epolls[NEPOLL];
 static void epoll_ref(int idx)   { if (idx >= 0 && idx < NEPOLL && epolls[idx].used) epolls[idx].refs++; }
 static void epoll_unref(int idx) { if (idx >= 0 && idx < NEPOLL && epolls[idx].used && --epolls[idx].refs <= 0) epolls[idx].used = 0; }
 
@@ -3851,11 +3851,17 @@ int app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data)
     if (op == EPOLL_CTL_ADD) {
         for (int i = 0; i < e->n; i++) if (e->items[i].fd == fd) return -1;   /* already registered */
         if (e->n >= EP_MAX) return -1;
-        e->items[e->n].fd = fd; e->items[e->n].events = (int)events; e->items[e->n].data = data; e->n++;
+        e->items[e->n].fd = fd; e->items[e->n].events = (int)events; e->items[e->n].data = data;
+        e->items[e->n].last_ready = 0;   /* M1545: no edge reported yet */
+        e->n++;
         return 0;
     }
     if (op == EPOLL_CTL_MOD) {
-        for (int i = 0; i < e->n; i++) if (e->items[i].fd == fd) { e->items[i].events = (int)events; e->items[i].data = data; return 0; }
+        for (int i = 0; i < e->n; i++) if (e->items[i].fd == fd) {
+            e->items[i].events = (int)events; e->items[i].data = data;
+            e->items[i].last_ready = 0;   /* M1545: a changed interest set re-arms the edge, same spirit as a fresh ADD */
+            return 0;
+        }
         return -1;
     }
     if (op == EPOLL_CTL_DEL) {
@@ -3866,15 +3872,26 @@ int app_epoll_ctl(int epfd, int op, int fd, unsigned events, unsigned long data)
 }
 /* One non-blocking pass: fill `out` with the ready members. Returns the count,
  * or -1 for a bad epfd. The SYS_epoll_wait dispatch wraps this in the poll
- * sleep/timeout loop. */
+ * sleep/timeout loop.
+ *
+ * Level- vs edge-triggered (M1545): by default (no EPOLLET in an item's
+ * registered events) this reports "ready" on EVERY call for as long as the
+ * fd stays ready -- unchanged from the original behavior, so an existing
+ * level-triggered caller sees no difference. EPOLLET instead reports it only
+ * on the RISING edge (not-ready -> ready): once reported, the SAME item
+ * won't fire again until app_fd_ready sees it go not-ready and then ready
+ * again. last_ready tracks that per-item, independent of level/edge mode, so
+ * switching an item's mode (via EPOLL_CTL_MOD) starts from a clean edge. */
 int app_epoll_check(int epfd, struct epoll_event *out, int maxevents) {
     struct app *a = cur();
     if (!a || epfd < 0 || epfd >= APP_NFD || !a->fd[epfd].used || a->fd[epfd].type != 6) return -1;
     struct epollobj *e = &epolls[a->fd[epfd].obj];
     int k = 0;
     for (int i = 0; i < e->n && k < maxevents; i++) {
-        int re = app_fd_ready((app_t *)a, e->items[i].fd, e->items[i].events);
-        if (re > 0) { out[k].events = (unsigned)re; out[k].data = e->items[i].data; k++; }
+        int re = app_fd_ready((app_t *)a, e->items[i].fd, e->items[i].events & ~(int)EPOLLET);
+        int fire = (re > 0) && (!(e->items[i].events & EPOLLET) || !e->items[i].last_ready);
+        e->items[i].last_ready = (re > 0);
+        if (fire) { out[k].events = (unsigned)re; out[k].data = e->items[i].data; k++; }
     }
     return k;
 }

@@ -349,7 +349,10 @@ struct dirent64 { unsigned long d_ino; long d_off; unsigned short d_reclen; unsi
 #define DT_LNK     10
 
 /* epoll (M1220): scalable readiness multiplexing as an fd object. `events` uses
- * the POLLIN/POLLOUT bits; `data` is opaque userdata echoed back on a ready event. */
+ * the POLLIN/POLLOUT bits; `data` is opaque userdata echoed back on a ready
+ * event. EPOLLIN/EPOLLOUT/EPOLLET are defined further down, right after
+ * POLLIN/POLLOUT themselves (EPOLLIN/EPOLLOUT alias them — real Linux's
+ * epoll.h defines them to the same values as poll.h's too). */
 struct epoll_event { unsigned events; unsigned long data; };
 #define EPOLL_CTL_ADD 1
 #define EPOLL_CTL_DEL 2
@@ -393,6 +396,13 @@ struct pollfd { int fd; short events; short revents; };
 #define POLLERR  0x0008   /* (kernel-only revents) error condition */
 #define POLLHUP  0x0010   /* (kernel-only revents) hang-up */
 #define POLLNVAL 0x0020   /* (kernel-only revents) fd not open */
+
+/* epoll's own names for the same two bits (M1545) + EPOLLET: opts a
+ * registered fd into edge-triggered reporting (bit 31, matching real
+ * epoll's own value) -- see struct epoll_event's comment above. */
+#define EPOLLIN  POLLIN
+#define EPOLLOUT POLLOUT
+#define EPOLLET  (1u << 31)
 
 /* memfd_create flags + F_SEAL_* file seals (M1212). Seals are one-way (add-only);
  * F_SEAL_SEAL forbids adding any further seal. */

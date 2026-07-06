@@ -3004,8 +3004,19 @@ static int run_command(char *line, char *cwd) {
                 /* (C) DEL -> the fd is no longer watched -> timeout 0 returns 0 (despite pending data) */
                 if (sys_epoll_ctl(ep, EPOLL_CTL_DEL, fds[0], 0) != 0) ok = 0;
                 if (sys_epoll_wait(ep, got, 4, 0) != 0) ok = 0;
+                /* (D) EPOLLET (M1545): re-add edge-triggered, write once (on top of the
+                 * still-undrained byte from B -- harmless, this only checks readiness,
+                 * not byte count), then call epoll_wait TWICE without draining. Level-
+                 * triggered would fire both times; edge must fire only the first. */
+                struct epoll_event evet = { POLLIN | EPOLLET, 0xDCBA };
+                if (sys_epoll_ctl(ep, EPOLL_CTL_ADD, fds[0], &evet) != 0) ok = 0;
+                sys_fdwrite(fds[1], "y", 1);
+                int n1 = sys_epoll_wait(ep, got, 4, 1000);
+                int n2 = sys_epoll_wait(ep, got, 4, 0);
+                if (!(n1 == 1 && (got[0].events & POLLIN) && got[0].data == 0xDCBA)) ok = 0;
+                if (n2 != 0) ok = 0;                        /* the edge already fired -- must stay silent */
                 sys_fdclose(ep); sys_fdclose(fds[0]); sys_fdclose(fds[1]);
-                print(ok ? "epoll: create + ctl(ADD) + wait(timeout 0=none, then POLLIN+data) + ctl(DEL) -- OK\n"
+                print(ok ? "epoll: create + ctl(ADD) + wait(timeout 0=none, then POLLIN+data) + ctl(DEL) + EPOLLET(fires once, not again until re-armed) -- OK\n"
                          : "epolltest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
