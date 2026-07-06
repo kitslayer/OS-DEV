@@ -2123,6 +2123,35 @@ int app_madvise(uint64_t addr, uint64_t len, int advice) {
     return dropped;
 }
 
+/* process_madvise (M1555): advise about ANOTHER process's memory, named by a
+ * pidfd (never a raw pid -- avoids the PID-reuse race a bare integer would
+ * have) rather than cur(). Same-tree permission as process_vm_read/write and
+ * ptrace (self, parent, or child). Deliberately scoped to MADV_COLD only:
+ * DONTNEED needs the target's OWN nvma/locked bookkeeping consulted (fine)
+ * but then actually FREES the frame via vmm_unmap/pmm_free_frame, which
+ * assume the CURRENTLY-loaded address space; PAGEOUT/COLLAPSE go through
+ * app_swap_out/app_collapse, which are cur()-coupled even more deeply. COLD
+ * only touches one PTE bit through the already-proven cr3-parameterized
+ * vmm_pte_in/vmm_set_pte_in pair (the same ones app_msync already uses,
+ * M1544) -- clean, safe, and honestly everything that's a small slice here;
+ * the rest is real follow-on work, not attempted in this milestone. */
+int app_process_madvise(int pidfd, uint64_t addr, uint64_t len, int advice) {
+    struct app *me = cur(); if (!me || len == 0) return -1;
+    if (pidfd < 0 || pidfd >= APP_NFD || !me->fd[pidfd].used || me->fd[pidfd].type != 7) return -1;
+    struct app *t = app_by_pid(me->fd[pidfd].obj);
+    if (!t || t->exited) return -1;                                        /* gone: ESRCH */
+    if (t != me && t->parent != me->pid && me->parent != t->pid) return -1; /* same-tree only */
+    if (advice != MADV_COLD) return -1;
+    uint64_t start = addr & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    int n = 0;
+    for (uint64_t p = start; p < end; p += PAGE_SIZE) {
+        uint64_t pte = vmm_pte_in(t->cr3, p);
+        if (pte & PTE_PRESENT) { vmm_set_pte_in(t->cr3, p, pte & ~(uint64_t)PTE_ACCESSED); n++; }
+    }
+    return n;
+}
+
 /* mincore(addr,len,vec) (M1147): report per-page residency for [addr,addr+len)
  * of the CALLING app. `addr` must be page-aligned; the WHOLE range must lie
  * inside the app's mmap VMAs (else -1 / ENOMEM, matching POSIX). For each page

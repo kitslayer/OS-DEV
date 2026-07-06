@@ -111,6 +111,7 @@ int      app_uffd_register(uint64_t addr, uint64_t len);   /* userfaultfd: route
 long     app_uffd_read(void);                              /* monitor: block until a fault; returns the faulting page addr, or -1 */
 int      app_uffd_copy(uint64_t addr, const void *data, uint64_t len);  /* monitor: fill the faulting page + wake the owner; 0/-1 */
 int      app_madvise(uint64_t addr, uint64_t len, int advice);  /* MADV_DONTNEED(4): drop resident anon frames; pages dropped/-1 */
+int      app_process_madvise(int pidfd, uint64_t addr, uint64_t len, int advice);  /* MADV_COLD only, on another process; pages touched/-1 (M1555) */
 int      app_mincore(uint64_t addr, uint64_t len, uint8_t *vec); /* per-page residency of an mmap range; vec[i]=1 resident; 0/-1 (M1147) */
 int      app_mlock(uint64_t addr, uint64_t len);                /* pin mmap pages against reclaim (swap/madvise skip them); 0/-1 (M1149) */
 int      app_munlock(uint64_t addr, uint64_t len);              /* unpin mmap pages locked by app_mlock; 0/-1 (M1149) */

@@ -2355,6 +2355,25 @@ static int run_command(char *line, char *cwd) {
                 if (!ok || !iso) g_status = 1;
                 sys_semctl(sid, 0, IPC_RMID, 0);
             } else { perr("pvwtest: fork failed\n"); g_status = 1; }
+        } else if (streq(line, "pmadvtest")) {   /* process_madvise: MADV_COLD on ANOTHER process via a pidfd (M1555) */
+            unsigned long len = 8 * 4096;
+            unsigned char *mm = (unsigned char *)sys_mmap(len);
+            int ppid = sys_getpid();
+            int ok = (mm != 0);
+            if (mm) for (unsigned long i = 0; i < len; i += 4096) mm[i] = 1;   /* touch all 8 pages -> Accessed set */
+            long pid = ok ? sys_fork() : -1;
+            if (pid == 0) {                       /* child: cold-advise the PARENT's range via a pidfd */
+                int pfd = sys_pidfd_open(ppid, 0);
+                long n = pfd >= 0 ? sys_process_madvise(pfd, mm, len, MADV_COLD) : -1;
+                int bad = (int)sys_process_madvise(2 /* stdout fd, not a pidfd */, mm, len, MADV_COLD);   /* must be denied */
+                sys_exit((n == 8 && bad == -1) ? 0 : 1);
+            } else if (pid > 0) {
+                int st = -1; sys_waitpid((int)pid, &st);
+                print(st == 0 ? "process_madvise: child cleared the PARENT's Accessed bits cross-process (8 pages) via a pidfd, bad pidfd denied -- OK\n"
+                              : "pmadvtest: VERIFY FAILED\n");
+                if (st != 0) g_status = 1;
+                sys_munmap(mm, len);
+            } else { perr("pmadvtest: fork/mmap failed\n"); g_status = 1; }
         } else if (streq(line, "wchantest")) {   /* /proc/sched WCHAN: name the kernel routine a blocked task sleeps in (M1166) */
             int sid = (int)sys_semget(IPC_PRIVATE, 1, IPC_CREAT);
             struct sembuf op;

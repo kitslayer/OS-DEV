@@ -61,6 +61,7 @@ long sys_tftp(const char *filename, void *buf, unsigned long max);
 #define MADV_PAGEOUT  21   /* page the range out to swap/zram now (M1158) */
 #define MADV_COLLAPSE 25   /* synchronously fold the range into 2 MiB hugepage(s) (M1168) */
 long sys_madvise(void *addr, unsigned long len, int advice);
+long sys_process_madvise(int pidfd, void *addr, unsigned long len, int advice);  /* MADV_COLD only, on another process; pages/-1 (M1555) */
 long sys_mincore(void *addr, unsigned long len, unsigned char *vec);   /* per-page residency; vec[i]=1 if resident; 0/-1 (M1147) */
 long sys_mlock(void *addr, unsigned long len);     /* pin mmap pages against reclaim; 0/-1 (M1149) */
 long sys_munlock(void *addr, unsigned long len);   /* unpin mlock'd mmap pages; 0/-1 (M1149) */

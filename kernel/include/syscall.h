@@ -306,6 +306,7 @@
 #define SYS_fchownat     282   /* (dirfd, path, uid, gid) -> chown relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
 #define SYS_setsockopt   283   /* (fd, level, optname, optval*, optlen) -> set a TCP-socket option; 0/-1 (M1554) */
 #define SYS_getsockopt   284   /* (fd, level, optname, optval*, optlen*) -> read a TCP-socket option; 0/-1 (M1554) */
+#define SYS_process_madvise 285  /* (pidfd, addr, len, advice) -> MADV_COLD on another process's memory; pages/-1 (M1555) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

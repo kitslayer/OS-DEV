@@ -316,7 +316,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
     case SYS_clip_get: case SYS_clip_set: case SYS_font: case SYS_loadimg:
         return PL_GFX;
-    case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace:
+    case SYS_process_vm_read: case SYS_process_vm_write: case SYS_ptrace: case SYS_process_madvise:
     case SYS_setpgid: case SYS_getpgid: case SYS_setsid: case SYS_tcsetpgrp: case SYS_killpg:
     case SYS_spawn: case SYS_fork: case SYS_waitpid: case SYS_waitid: case SYS_exec: case SYS_kill: case SYS_ps: case SYS_apps: case SYS_js:
         return PL_PROC;
@@ -370,7 +370,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",
-        [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
+        [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_process_madvise]="process_madvise",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
@@ -1465,6 +1465,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);
+        break;
+    case SYS_process_madvise:              /* (pidfd, addr, len, advice) -> MADV_COLD on another process (M1555) */
+        r->rax = (uint64_t)(int64_t)app_process_madvise((int)r->rdi, r->rsi, r->rdx, (int)r->r10);
         break;
     case SYS_mincore: {                    /* (addr, len, vec) -> per-page residency of an mmap range (M1147) */
         uint64_t np = (r->rsi + PAGE_SIZE - 1) / PAGE_SIZE;     /* vec needs one byte per page */
