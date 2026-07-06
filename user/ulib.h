@@ -310,6 +310,7 @@ long  sys_oom(int cmd, int arg);          /* OOM killer: 0=set self oom_adj, 1=t
 long  sys_sigaltstack(void *ss_sp, unsigned long ss_size);  /* register an alternate signal stack for SA_ONSTACK handlers; 0/-1 (M1276) */
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */
+int      sys_sigsuspend(unsigned mask);           /* swap blocked mask, block for a signal, restore; always -1 (M1561) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
 int  sys_gfx_init(int w, int h);     /* enter graphics mode: a w*h XRGB pixel canvas; 0/-1 */
 int  sys_gfx_blit(const void *pixels); /* copy w*h pixels (0x00RRGGBB) to the window; 0/-1 */

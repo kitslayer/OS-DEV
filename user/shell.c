@@ -161,6 +161,11 @@ static void sh_xcpu_handler(int sig) { (void)sig; g_xcpu_fired = 1; }
  * file past the limit; same opt-in delivery model as every signal here. */
 static volatile int g_xfsz_fired;
 static void sh_xfsz_handler(int sig) { (void)sig; g_xfsz_fired = 1; }
+/* sigsuspend demo (M1561): confirms the handler actually ran DURING the
+ * suspend (not merely that pending_sigs got set) -- this flag only flips
+ * from inside the SIGUSR1 handler itself. */
+static volatile int g_sigsuspend_fired;
+static void sh_sigsuspend_handler(int sig) { (void)sig; g_sigsuspend_fired = 1; }
 static char *slurp(const char *name, long *len) {
     sh_unprot_buf((char *)name);          /* a quoted filename ("my file") arrives with bit-7 sentinels — reveal them
                                            * here, the one chokepoint every file-reading builtin funnels through.
@@ -754,7 +759,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2685,6 +2690,22 @@ static int run_command(char *line, char *cwd) {
             sys_tcsetpgrp(saved_fg);
             print(pg_ok ? "tcgetpgrp: reads back exactly what tcsetpgrp set OK\n" : "jobtest: tcgetpgrp VERIFY FAILED\n");
             if (!pg_ok) g_status = 1;
+        } else if (streq(line, "sigsuspendtest")) {   /* sigsuspend: atomically unblock + wait + re-block (M1561) */
+            long c = sys_fork();
+            if (c == 0) {
+                sys_signal(10 /*SIGUSR1*/, sh_sigsuspend_handler);
+                sys_sigprocmask(0 /*SIG_BLOCK*/, 1u << 10);   /* baseline: blocked before the wait, like real usage */
+                long rc = sys_sigsuspend(0);                   /* unblock everything for the wait, re-block on return */
+                unsigned mask_after = sys_sigprocmask(0 /*SIG_BLOCK*/, 0);   /* empty set -> pure peek at the current mask */
+                sys_exit((rc == -1 && g_sigsuspend_fired && (mask_after & (1u << 10))) ? 42 : 10);
+            }
+            sys_sleep(150);                          /* let the child install the handler + reach sigsuspend first */
+            int st = -1;
+            if (c > 0) { sys_sigqueue((int)c, 10, 0); sys_waitpid((int)c, &st); }   /* sys_kill() has no signal-number arg -- it's a WM close request, not POSIX kill(2) */
+            int ok = (c > 0 && st == 42);
+            print(ok ? "sigsuspend: blocked SIGUSR1, sigsuspend(0) unblocked+waited+delivered it, mask restored after -- OK\n"
+                     : "sigsuspendtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "flocktest")) {   /* advisory whole-file locks: conflict then free on unlock (M1177) */
             const char *path = "/tmp/lck";
             int r1 = sys_flock(path, LOCK_EX);                  /* parent takes an exclusive lock */

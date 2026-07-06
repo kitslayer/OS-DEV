@@ -314,6 +314,7 @@
 #define SYS_utimensat    290   /* (dirfd, path, atime, mtime) -> set timestamps relative to a dir fd (or AT_FDCWD); 0/-1 (M1559) */
 #define SYS_getsockname  291   /* (fd, addr{u8 ip[4];u16 port}[6]) -> this socket's own address; 0/-1 (M1560) */
 #define SYS_getpeername  292   /* (fd, addr{u8 ip[4];u16 port}[6]) -> the connected peer's address; 0/-1 (M1560) */
+#define SYS_sigsuspend   293   /* (mask) -> swap the blocked-signal mask, block for a signal, restore; always -1 (M1561) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

@@ -2628,6 +2628,47 @@ uint32_t app_sigpending(void) {
     return a ? a->pending_sigs : 0;
 }
 
+/* Mirrors app_deliver_pending's own inner gate exactly (pending, has a real
+ * handler, not blocked) rather than the broader "pending_sigs & ~sig_blocked"
+ * — a signal that's only routed to signalfd (no handler) can be pending and
+ * unblocked without being "deliverable" in the sigsuspend sense; real POSIX
+ * sigsuspend only wakes for a signal whose action actually runs. */
+static int sigsuspend_ready(struct app *a) {
+    for (int sig = 1; sig < APP_NSIG; sig++)
+        if ((a->pending_sigs & (1u << sig)) && a->sig_handler[sig] && !(a->sig_blocked & (1u << sig)))
+            return 1;
+    return 0;
+}
+/* sigsuspend (M1561): atomically swap the blocked mask, block until a signal
+ * is deliverable, deliver it, THEN restore the original mask — real POSIX
+ * ordering, where the temporary mask is what's in effect while the signal's
+ * action runs, not the restored one. That ordering is why this takes `r`
+ * and calls app_deliver_pending itself instead of just setting pending_sigs
+ * and letting the syscall-return tail (kernel/syscall.c's sc_done) handle it
+ * like every other async signal: by the time that tail runs, this function
+ * has already restored the mask, which would be one syscall too late for a
+ * handler that itself calls sigprocmask to check what was blocked. Calling
+ * app_deliver_pending twice (here, then again at sc_done) is safe — the
+ * second call finds sig_in already 1 and no-ops.
+ * r->rax is set to the eventual return value (-1, always — sigsuspend never
+ * "succeeds" by definition) BEFORE app_deliver_pending runs, since it snap-
+ * shots *r verbatim into a->sig_saved for sigreturn to restore later; setting
+ * it after would leave the wrong value in that snapshot. */
+long app_sigsuspend(struct registers *r, uint32_t mask) {
+    struct app *a = cur();
+    if (!a) return -1;
+    uint32_t old = a->sig_blocked;
+    a->sig_blocked = mask & ~((1u << 9) | (1u << 19));   /* SIGKILL/SIGSTOP never blockable (matches sigprocmask) */
+    while (!sigsuspend_ready(a)) {
+        task_block();
+        if (!a->used) return -1;    /* killed while suspended */
+    }
+    r->rax = (uint64_t)-1;
+    app_deliver_pending(r);
+    a->sig_blocked = old;
+    return -1;
+}
+
 /* --- RT signals / sigqueue(3) (M1271) -----------------------------------
  * Real-time signals differ from standard signals in two ways: they QUEUE
  * (multiple pending instances are kept and delivered one-by-one, in FIFO
