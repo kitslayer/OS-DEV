@@ -210,6 +210,7 @@ int  sys_pidfd_send_signal(int pidfd, int sig);                /* signal the pid
 int  sys_pidfd_getfd(int pidfd, int targetfd, int flags);      /* duplicate the pidfd-process's fd into ours; new fd/-1 (M1281) */
 long sys_getdents64(void *buf, unsigned long max, int start);  /* packed dirent64 of the cwd; bytes/0/-1 (M1223) */
 int  sys_access(const char *path, int amode);                  /* 0 if accessible, -1 (M1224) */
+int  sys_faccessat2(int dirfd, const char *path, int amode, int flags);  /* access() relative to a dir fd (or AT_FDCWD); 0/-1 (M1556) */
 long sys_prctl(int option, unsigned long arg2);                /* PR_SET_NAME/PR_GET_NAME; 0/-1 (M1225) */
 long sys_set_tid_address(void *tidptr);                        /* register clear_child_tid (futex-on-exit); tid (M1226) */
 int  sys_waitid(int idtype, int id, struct siginfo *si, int options);  /* waitid + WNOHANG; 0/-1 (M1227) */

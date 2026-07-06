@@ -3151,6 +3151,20 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "access: F_OK/R_OK on /MOTD.TXT, /NOPE.XYZ absent=-1, / is X_OK -- OK\n"
                      : "accesstest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+            /* faccessat2 (M1556): the *at family's last remaining hole. */
+            int ok2 = 1;
+            if (sys_faccessat2(AT_FDCWD, "/MOTD.TXT", F_OK, 0) != 0) ok2 = 0;
+            if (sys_faccessat2(AT_FDCWD, "/NOPE.XYZ", F_OK, 0) != -1) ok2 = 0;
+            int dfd = sys_open("/");
+            if (dfd < 0) ok2 = 0;
+            else {
+                if (sys_faccessat2(dfd, "MOTD.TXT", R_OK, 0) != 0) ok2 = 0;   /* dirfd-relative, not AT_FDCWD */
+                if (sys_faccessat2(dfd, "NOPE.XYZ", F_OK, 0) != -1) ok2 = 0;
+                sys_fdclose(dfd);
+            }
+            print(ok2 ? "faccessat2: AT_FDCWD + a real dirfd, both present/absent cases -- OK\n"
+                      : "accesstest: faccessat2 VERIFY FAILED\n");
+            if (!ok2) g_status = 1;
         } else if (streq(line, "prctltest")) {  /* prctl(PR_SET_NAME) + /proc/self/comm (M1225) */
             int ok = 1;
             sys_prctl(PR_SET_NAME, (unsigned long)"vacuum");

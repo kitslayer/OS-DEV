@@ -87,6 +87,18 @@ static int at_resolve(long dirfd, const char *path, char *out, int max) {
     out[p] = 0; return 0;
 }
 
+/* access(2)'s core check (M1224), factored out so faccessat2 (M1556) can
+ * share it after resolving its own dirfd-relative path. */
+static int access_check(const char *path, int amode) {
+    struct statx st;
+    if (vfs_stat(path, &st) != 0) return -1;          /* doesn't exist */
+    int ok = 1;
+    if ((amode & R_OK) && !(st.stx_mode & 0444u)) ok = 0;
+    if ((amode & W_OK) && !(st.stx_mode & 0222u)) ok = 0;
+    if ((amode & X_OK) && !(st.stx_mode & 0111u)) ok = 0;
+    return ok ? 0 : -1;
+}
+
 /* SYS_unzip helper: extract callback. Mangles each archived path to an 8.3 name
  * (basename, upper-cased, <=8 chars + '.' + <=3-char ext) and writes it via the
  * VFS, counting successes in ctx. */
@@ -293,7 +305,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_mouse_rel: case SYS_beep:
     case SYS_io_uring_enter:               /* the floor to call enter; ops gate themselves per-op */
         return PL_STDIO;
-    case SYS_statx: case SYS_flock: case SYS_access:
+    case SYS_statx: case SYS_flock: case SYS_access: case SYS_faccessat2:
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
@@ -370,7 +382,8 @@ static const char *syscall_name(uint64_t n) {
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",
-        [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_process_madvise]="process_madvise",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
+        [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_process_madvise]="process_madvise",
+        [SYS_faccessat2]="faccessat2",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
@@ -1221,13 +1234,16 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_access: {                     /* (path, amode) -> 0 if accessible, -1 (M1224) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
-        struct statx st;
-        if (vfs_stat((const char *)r->rdi, &st) != 0) { r->rax = (uint64_t)-1; break; }   /* doesn't exist */
-        int amode = (int)r->rsi, ok = 1;
-        if ((amode & R_OK) && !(st.stx_mode & 0444u)) ok = 0;
-        if ((amode & W_OK) && !(st.stx_mode & 0222u)) ok = 0;
-        if ((amode & X_OK) && !(st.stx_mode & 0111u)) ok = 0;
-        r->rax = ok ? 0 : (uint64_t)-1;
+        r->rax = (uint64_t)access_check((const char *)r->rdi, (int)r->rsi);
+        break;
+    }
+    case SYS_faccessat2: {                 /* (dirfd, path, amode, flags) -> access() relative to a dir fd (M1556);
+                                             * no AT_SYMLINK_NOFOLLOW/AT_EACCESS -- same unused-flags precedent as
+                                             * unlinkat/fchmodat/fchownat, no symlink-follow-choice or seteuid-vs-
+                                             * real-uid distinction exists in this codebase to gate on either. */
+        char eff[256];
+        if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)access_check(eff, (int)r->rdx);
         break;
     }
     case SYS_prctl:                        /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME (M1225) */
