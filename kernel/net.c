@@ -595,6 +595,12 @@ static struct { int used; tcp_conn c; int opt_reuseaddr, opt_nodelay, opt_keepal
 int net_tcp_sock_open(void) {
     for (int i = 0; i < TCPSOCK_N; i++) if (!g_tcpsock[i].used) {
         g_tcpsock[i].used = 1; g_tcpsock[i].c.up = 0;
+        g_tcpsock[i].c.sport = g_tcpsock[i].c.dport = 0;    /* clear a reused slot's stale port/peer (M1560) --
+                                                              * getsockname/getpeername now make these visible,
+                                                              * where before a slot's leftover values from its
+                                                              * previous connection were write-only until the
+                                                              * next tcp_connect() overwrote them anyway */
+        for (int k = 0; k < 4; k++) g_tcpsock[i].c.ip[k] = 0;
         g_tcpsock[i].opt_reuseaddr = g_tcpsock[i].opt_nodelay = g_tcpsock[i].opt_keepalive = 0;
         return i;
     }
@@ -613,6 +619,27 @@ int net_tcp_sock_getopt(int idx, int level, int optname, int *val) {
     if (level == SOL_SOCKET && optname == SO_KEEPALIVE) { *val = g_tcpsock[idx].opt_keepalive; return 0; }
     if (level == IPPROTO_TCP && optname == TCP_NODELAY) { *val = g_tcpsock[idx].opt_nodelay;   return 0; }
     return -1;
+}
+/* getsockname/getpeername (M1560): the wire format matches connect()'s own
+ * (M1268) -- 6 raw bytes, {ip[4], port lo, port hi}, no sockaddr/family/
+ * length -- since that's the only address shape this stack has ever used.
+ * getsockname reports OUR address: this stack is single-homed (one NIC/IP,
+ * net_ip()) with no per-socket local IP to track, so only the port varies;
+ * it's 0 until a successful connect() assigns an ephemeral one. */
+int net_tcp_sock_getname(int idx, uint8_t out[6]) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;
+    const uint8_t *ip = net_ip();
+    for (int i = 0; i < 4; i++) out[i] = ip[i];
+    out[4] = (uint8_t)(g_tcpsock[idx].c.sport & 0xFF);
+    out[5] = (uint8_t)(g_tcpsock[idx].c.sport >> 8);
+    return 0;
+}
+int net_tcp_sock_getpeer(int idx, uint8_t out[6]) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used || !g_tcpsock[idx].c.up) return -1;   /* ENOTCONN-equivalent */
+    for (int i = 0; i < 4; i++) out[i] = g_tcpsock[idx].c.ip[i];
+    out[4] = (uint8_t)(g_tcpsock[idx].c.dport & 0xFF);
+    out[5] = (uint8_t)(g_tcpsock[idx].c.dport >> 8);
+    return 0;
 }
 int net_tcp_sock_connect(int idx, const uint8_t ip[4], uint16_t port) {
     if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;

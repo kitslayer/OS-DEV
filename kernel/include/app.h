@@ -92,6 +92,8 @@ long   app_recvfrom(int fd, void *buf, int max, unsigned char srcip[4], unsigned
 int    app_connect(int fd, const unsigned char ip[4], int port);  /* connect a TCP socket fd; 0/-1 (M1268) */
 int    app_setsockopt(int fd, int level, int optname, int val);    /* set a TCP-socket option; 0/-1 (M1554) */
 int    app_getsockopt(int fd, int level, int optname, int *val);   /* read a TCP-socket option; 0/-1 (M1554) */
+int    app_getsockname(int fd, unsigned char out[6]);   /* this socket's own {ip[4],port}; 0/-1 (M1560) */
+int    app_getpeername(int fd, unsigned char out[6]);   /* the connected peer's {ip[4],port}; 0/-1 (M1560) */
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */
 uint64_t app_mmap_huge(uint64_t len);   /* reserve a 2 MiB-backed demand-paged region (MAP_HUGETLB); base VA or 0 (M1155) */

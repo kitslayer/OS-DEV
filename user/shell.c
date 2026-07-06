@@ -3961,11 +3961,26 @@ static int run_command(char *line, char *cwd) {
                 if (sys_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) != 0) sockopt_ok = 0;
                 if (sys_getsockopt(s, SOL_SOCKET, SO_REUSEADDR, &rb2, &len) != 0 || rb2 != 1) sockopt_ok = 0;
                 if (sys_setsockopt(s, 999 /* bogus level */, TCP_NODELAY, &one, sizeof(one)) != -1) sockopt_ok = 0;
+                unsigned char pip0[4]; int pport0 = 0;                          /* getpeername (M1560): not connected yet -- must fail */
+                if (sys_getpeername(s, pip0, &pport0) != -1) sockopt_ok = 0;
             } else sockopt_ok = 0;
             print("setsockopt/getsockopt: TCP_NODELAY+SO_REUSEADDR set+readback, bad (level,optname) denied -- ");
             sys_setcolor(sockopt_ok ? 10 : 4); print(sockopt_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
             if (!sockopt_ok) g_status = 1;
             if (ok && sys_connect(s, ip, 80) != 0) ok = 0;
+            /* getsockname/getpeername (M1560): checked right after connect, independent
+             * of whether the HTTP fetch below succeeds -- only needs the TCP handshake. */
+            int getname_ok = 1;
+            if (ok) {
+                unsigned char lip[4] = {0,0,0,0}; int lport = 0;
+                if (sys_getsockname(s, lip, &lport) != 0 || lport == 0) getname_ok = 0;   /* connect() assigned a real ephemeral port */
+                unsigned char pip[4] = {0,0,0,0}; int pport = 0;
+                if (sys_getpeername(s, pip, &pport) != 0 || pport != 80) getname_ok = 0;
+                if (pip[0]!=ip[0] || pip[1]!=ip[1] || pip[2]!=ip[2] || pip[3]!=ip[3]) getname_ok = 0;   /* matches the resolved peer */
+            } else getname_ok = 0;
+            print("getsockname/getpeername: local port assigned post-connect, peer matches example.com:80 -- ");
+            sys_setcolor(getname_ok ? 10 : 4); print(getname_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+            if (!getname_ok) g_status = 1;
             const char *req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
             int rl = 0; while (req[rl]) rl++;
             if (ok) sys_fdwrite(s, req, rl);                     /* send via the connected socket fd */

@@ -167,6 +167,8 @@ long sys_recvfrom(int fd, void *buf, unsigned max, void *from); /* bytes/-1, 2s 
 int  sys_connect(int fd, const unsigned char *ip4, int port);  /* active-open a TCP socket fd; 0/-1 (M1268) */
 int  sys_setsockopt(int fd, int level, int optname, const void *optval, unsigned optlen);  /* 0/-1 (M1554) */
 int  sys_getsockopt(int fd, int level, int optname, void *optval, unsigned *optlen);       /* 0/-1 (M1554) */
+int  sys_getsockname(int fd, unsigned char ip4_out[4], int *port_out);   /* this socket's own address; 0/-1 (M1560) */
+int  sys_getpeername(int fd, unsigned char ip4_out[4], int *port_out);   /* the connected peer's address; 0/-1 (M1560) */
 void *dlopen(const char *path);                                /* userspace dynamic linker: map+relocate a .so; handle/0 (M1263) */
 void *dlsym(void *handle, const char *name);                   /* resolve an exported symbol to its runtime address; 0 if absent (M1263) */
 long sys_times(struct tms *t);                                  /* fill CPU times (ticks); returns boot ticks (M1235) */

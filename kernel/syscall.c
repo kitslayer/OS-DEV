@@ -382,7 +382,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",[SYS_utimensat]="utimensat",
-        [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_process_madvise]="process_madvise",
+        [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_getsockname]="getsockname",[SYS_getpeername]="getpeername",[SYS_process_madvise]="process_madvise",
         [SYS_faccessat2]="faccessat2",[SYS_sched_setaffinity]="sched_setaffinity",[SYS_sched_getaffinity]="sched_getaffinity",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
@@ -805,6 +805,17 @@ void syscall_dispatch(struct registers *r) {
             if (r->r8 && ubuf(r->r8, sizeof(int))) *(int *)r->r8 = sizeof(int);
         }
         r->rax = (uint64_t)rc;
+        break;
+    }
+    case SYS_getsockname: {                /* (fd, addr[6]) -> this socket's own address (M1560); same 6-byte
+                                             * {ip[4],port} wire format connect() (M1268) already uses */
+        if (!ubuf(r->rsi, 6)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_getsockname((int)r->rdi, (unsigned char *)r->rsi);
+        break;
+    }
+    case SYS_getpeername: {                /* (fd, addr[6]) -> the connected peer's address (M1560) */
+        if (!ubuf(r->rsi, 6)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_getpeername((int)r->rdi, (unsigned char *)r->rsi);
         break;
     }
     case SYS_rmmod:                        /* (name) -> run mod_exit + free the module slot; 0/-1 (M1262) */

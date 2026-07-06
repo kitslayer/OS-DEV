@@ -329,6 +329,27 @@ int  sys_setsockopt(int fd, int level, int optname, const void *optval, unsigned
 int  sys_getsockopt(int fd, int level, int optname, void *optval, unsigned *optlen) {
     return (int)do_syscall5(SYS_getsockopt, fd, level, optname, (long)optval, (long)optlen);
 }
+/* getsockname/getpeername (M1560): unpack the same 6-byte {ip[4],port} wire
+ * format sys_connect() packs, so callers get plain (ip4[4], *port) instead
+ * of a raw buffer -- symmetric with how sys_connect() takes them. */
+int  sys_getsockname(int fd, unsigned char ip4_out[4], int *port_out) {
+    unsigned char ad[6];
+    int rc = (int)do_syscall(SYS_getsockname, fd, (long)ad, 0);
+    if (rc == 0) {
+        if (ip4_out) for (int i = 0; i < 4; i++) ip4_out[i] = ad[i];
+        if (port_out) *port_out = ad[4] | (ad[5] << 8);
+    }
+    return rc;
+}
+int  sys_getpeername(int fd, unsigned char ip4_out[4], int *port_out) {
+    unsigned char ad[6];
+    int rc = (int)do_syscall(SYS_getpeername, fd, (long)ad, 0);
+    if (rc == 0) {
+        if (ip4_out) for (int i = 0; i < 4; i++) ip4_out[i] = ad[i];
+        if (port_out) *port_out = ad[4] | (ad[5] << 8);
+    }
+    return rc;
+}
 
 /* ===================================================================== *
  *  Userspace dynamic linker (M1263): dlopen()/dlsym() over an ELF .so.

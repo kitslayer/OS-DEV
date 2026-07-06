@@ -62,6 +62,8 @@ long net_tcp_sock_recv(int idx, void *buf, int max);        /* bytes/0 timeout/-
 void net_tcp_sock_close(int idx);
 int  net_tcp_sock_setopt(int idx, int level, int optname, int val);   /* 0/-1 (M1554) */
 int  net_tcp_sock_getopt(int idx, int level, int optname, int *val);  /* 0/-1 (M1554) */
+int  net_tcp_sock_getname(int idx, uint8_t out[6]);   /* our {ip[4],port} for this socket; 0/-1 (M1560) */
+int  net_tcp_sock_getpeer(int idx, uint8_t out[6]);   /* the connected peer's {ip[4],port}; 0/-1, ENOTCONN-equivalent if not connected (M1560) */
 /* /net/tcp sockets-as-files (M1110): `sub` is the path after "/net/tcp/" —
  * "clone", "<n>/ctl", or "<n>/data". Routed from vfs.c. */
 long netfs_read(const char *sub, void *buf, unsigned long max);

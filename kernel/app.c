@@ -3881,6 +3881,18 @@ int app_getsockopt(int fd, int level, int optname, int *val) {
     if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 10) return -1;
     return net_tcp_sock_getopt(a->fd[fd].obj, level, optname, val);
 }
+/* getsockname/getpeername (M1560): same TCP-client-socket-only scope as
+ * setsockopt/getsockopt above. */
+int app_getsockname(int fd, unsigned char out[6]) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 10) return -1;
+    return net_tcp_sock_getname(a->fd[fd].obj, out);
+}
+int app_getpeername(int fd, unsigned char out[6]) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 10) return -1;
+    return net_tcp_sock_getpeer(a->fd[fd].obj, out);
+}
 int app_sock_bind(int fd, int port) {
     struct app *a = cur(); if (!a) return -1;
     if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 9) return -1;

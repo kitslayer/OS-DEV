@@ -312,6 +312,8 @@
 #define SYS_sched_getaffinity 288  /* () -> the calling task's current CPU-affinity mask (M1557) */
 #define SYS_tcgetpgrp    289   /* () -> the console's foreground process group (0 = none); mirrors tcsetpgrp (M1558) */
 #define SYS_utimensat    290   /* (dirfd, path, atime, mtime) -> set timestamps relative to a dir fd (or AT_FDCWD); 0/-1 (M1559) */
+#define SYS_getsockname  291   /* (fd, addr{u8 ip[4];u16 port}[6]) -> this socket's own address; 0/-1 (M1560) */
+#define SYS_getpeername  292   /* (fd, addr{u8 ip[4];u16 port}[6]) -> the connected peer's address; 0/-1 (M1560) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no
