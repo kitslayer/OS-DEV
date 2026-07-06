@@ -364,15 +364,27 @@ void *dlopen(const char *path) {
     if (!file) return 0;
     long flen = sys_readfile(path, file, 256 * 1024);
     if (flen < (long)sizeof(dl_ehdr)) return 0;
+    unsigned long ulen = (unsigned long)flen;   /* everything below is bounds-checked against this, not trusted from the ELF header alone */
     dl_ehdr *eh = (dl_ehdr *)file;
     if (!(eh->e_ident[0] == 0x7f && eh->e_ident[1] == 'E' && eh->e_ident[2] == 'L' && eh->e_ident[3] == 'F')) return 0;
     if (eh->e_type != 3 /*ET_DYN*/ || eh->e_machine != 62 /*x86-64*/) return 0;
+    /* A short/truncated read (e.g. a transient disk hiccup mid-transfer) can
+     * still pass the checks above -- the ELF magic + a plausible-looking
+     * header live in the first few bytes, well within even a partial read --
+     * but every OFFSET the rest of this function dereferences (phdrs, PT_LOAD
+     * segment bytes, shdrs, .dynsym/.dynstr) must actually be covered by what
+     * was really read, or this ends up copying/relocating garbage from the
+     * tail of an uninitialized malloc buffer instead of failing cleanly. */
+    if (eh->e_phoff + (unsigned long)eh->e_phnum * sizeof(dl_phdr) > ulen) return 0;
 
     /* image span = max(p_vaddr + p_memsz) over PT_LOAD */
     dl_phdr *ph = (dl_phdr *)(file + eh->e_phoff);
     unsigned long span = 0;
     for (int i = 0; i < eh->e_phnum; i++)
-        if (ph[i].p_type == 1) { unsigned long e = ph[i].p_vaddr + ph[i].p_memsz; if (e > span) span = e; }
+        if (ph[i].p_type == 1) {
+            if (ph[i].p_offset + ph[i].p_filesz > ulen) return 0;
+            unsigned long e = ph[i].p_vaddr + ph[i].p_memsz; if (e > span) span = e;
+        }
     if (!span || span > 16 * 1024 * 1024) return 0;
     unsigned char *base = (unsigned char *)sys_mmap(span);         /* the runtime image (RW; mprotect'd X below) */
     if (!base) return 0;
@@ -381,10 +393,13 @@ void *dlopen(const char *path) {
             for (unsigned long b = 0; b < ph[i].p_filesz; b++) base[ph[i].p_vaddr + b] = file[ph[i].p_offset + b];
 
     /* find .dynsym + .dynstr via section headers (the .so isn't stripped) */
+    if (eh->e_shoff + (unsigned long)eh->e_shnum * sizeof(dl_shdr) > ulen) return 0;
     dl_shdr *sh = (dl_shdr *)(file + eh->e_shoff);
     const dl_sym *dynsym = 0; const char *dynstr = 0; int nsym = 0;
     for (int i = 0; i < eh->e_shnum; i++)
         if (sh[i].sh_type == 11 /*SHT_DYNSYM*/) {
+            if (sh[i].sh_offset + sh[i].sh_size > ulen) return 0;
+            if (sh[i].sh_link >= (unsigned)eh->e_shnum || sh[sh[i].sh_link].sh_offset + sh[sh[i].sh_link].sh_size > ulen) return 0;
             dynsym = (const dl_sym *)(file + sh[i].sh_offset);
             nsym = (int)(sh[i].sh_size / sizeof(dl_sym));
             dynstr = (const char *)(file + sh[sh[i].sh_link].sh_offset);
@@ -399,6 +414,7 @@ void *dlopen(const char *path) {
      * it used to resolve straight to this object's own base with no warning. */
     for (int i = 0; i < eh->e_shnum; i++) {
         if (sh[i].sh_type != 4 /*SHT_RELA*/) continue;
+        if (sh[i].sh_offset + sh[i].sh_size > ulen) return 0;
         const dl_rela *rel = (const dl_rela *)(file + sh[i].sh_offset);
         int nr = (int)(sh[i].sh_size / sizeof(dl_rela));
         for (int r = 0; r < nr; r++) {

@@ -30,6 +30,7 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "string.h"
+#include "timer.h"
 
 /* Per-bus command-block + control-block base ports. A drive's I/O base depends
  * only on its bus (primary/secondary); master vs slave is the DRV bit in the
@@ -75,20 +76,61 @@ static int g_probed;          /* have we run the IDENTIFY sweep yet? */
 
 static int drive_ok(int drive) { return drive >= 0 && drive < ATA_MAX_DRIVES; }
 
+/* The legacy ATA command-block registers are ONE shared hardware resource
+ * (drive-select/LBA/command/status, all at the same handful of I/O ports) --
+ * there is no way for two in-flight transactions to interleave and both come
+ * out correct, PIO or DMA, same drive or not (the DMA channels still share
+ * the drive's own task-file registers for addressing). This was never
+ * enforced: nothing here ever stopped two tasks from both being mid-transfer
+ * at once. It went unnoticed for a long time because most disk I/O used to
+ * come from one thread of control, but M1531 gave this kernel a REAL
+ * preemptive multi-core scheduler -- and the desktop redraws its Files panel
+ * (a full directory re-scan, kernel/desktop.c's KIND_FILES case) on almost
+ * every frame, so it is very often mid-ata_read at the exact moment some
+ * OTHER task (e.g. a ring-3 dlopen()) also wants the disk. That's the real
+ * root cause behind the M1539 dlxtest flakiness -- not a slow timeout, an
+ * actual unsynchronized race on shared hardware. A plain cross-core spinlock
+ * (the same atomic-exchange pattern task.c's rq_lock uses) fixes it: no IRQ
+ * handler ever touches ata.c (confirmed -- this driver is polled, not
+ * interrupt-driven), so there's no need for task.c's additional local
+ * irq_save/restore, just mutual exclusion across cores. */
+static volatile int ata_lock;
+static inline void ata_lock_take(void) { while (__atomic_exchange_n(&ata_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause"); }
+static inline void ata_lock_give(void) { __atomic_store_n(&ata_lock, 0, __ATOMIC_RELEASE); }
+
 /* --- low-level busy/DRQ polling, scoped to a given I/O base ---------------- */
 
+/* A real wall-clock bound, not a raw iteration count: under host CPU
+ * contention (several QEMU instances, a busy build) the wall-clock time
+ * behind a fixed spin count varies a lot, so a count-based "timeout" can
+ * genuinely expire before an emulated drive finishes — a real, observed
+ * source of transient read failures (see the osdev-ata-pio-busywait-flakiness
+ * memory), not a sign of a stuck device. 2 seconds is generous for any real
+ * or emulated ATA command; ATA_SPIN_HARDCAP is a zero-cost last-resort
+ * fallback in case this is ever reached before the timer/interrupts are up
+ * (it never is today — timer_init()+interrupts_enable() run at kmain.c's
+ * boot, long before any ATA call — but a wall-clock check alone would spin
+ * forever if timer_ms() ever stopped advancing). */
+#define ATA_TIMEOUT_MS    2000u
+#define ATA_SPIN_HARDCAP  100000000u
+
 static int wait_busy_clear(uint16_t io) {
-    for (int i = 0; i < 100000; i++)
+    uint64_t deadline = timer_ms() + ATA_TIMEOUT_MS;
+    for (uint32_t i = 0; i < ATA_SPIN_HARDCAP; i++) {
         if (!(inb(io + REG_STATUS) & ST_BSY))
             return 0;
+        if (timer_ms() >= deadline) return -1;
+    }
     return -1;
 }
 
 static int wait_drq(uint16_t io) {
-    for (int i = 0; i < 100000; i++) {
+    uint64_t deadline = timer_ms() + ATA_TIMEOUT_MS;
+    for (uint32_t i = 0; i < ATA_SPIN_HARDCAP; i++) {
         uint8_t s = inb(io + REG_STATUS);
         if (s & ST_ERR) return -1;
         if (!(s & ST_BSY) && (s & ST_DRQ)) return 0;
+        if (timer_ms() >= deadline) return -1;
     }
     return -1;
 }
@@ -120,7 +162,7 @@ static void select_lba(uint16_t io, uint8_t slave, uint32_t lba, uint8_t count) 
 
 /* --- drive-parameterised read/write core ---------------------------------- */
 
-int ata_read_drive(int drive, uint32_t lba, uint32_t count, void *buf) {
+static int ata_read_drive_impl(int drive, uint32_t lba, uint32_t count, void *buf) {
     if (!drive_ok(drive) || count == 0) return -1;
     uint16_t io = ATA_DRIVES[drive].io;
     uint8_t slave = ATA_DRIVES[drive].slave;
@@ -146,7 +188,18 @@ int ata_read_drive(int drive, uint32_t lba, uint32_t count, void *buf) {
     return 0;
 }
 
-int ata_write_drive(int drive, uint32_t lba, uint32_t count, const void *buf) {
+/* Public entry point: the whole multi-chunk transfer above is one hardware
+ * transaction as far as mutual exclusion is concerned (see ata_lock's
+ * comment) -- take the lock for its full duration, not per-chunk, so a large
+ * transfer can't be sliced up and interleaved with someone else's. */
+int ata_read_drive(int drive, uint32_t lba, uint32_t count, void *buf) {
+    ata_lock_take();
+    int r = ata_read_drive_impl(drive, lba, count, buf);
+    ata_lock_give();
+    return r;
+}
+
+static int ata_write_drive_impl(int drive, uint32_t lba, uint32_t count, const void *buf) {
     if (!drive_ok(drive) || count == 0) return -1;
     uint16_t io = ATA_DRIVES[drive].io;
     uint8_t slave = ATA_DRIVES[drive].slave;
@@ -170,6 +223,13 @@ int ata_write_drive(int drive, uint32_t lba, uint32_t count, const void *buf) {
         count -= chunk;
     }
     return 0;
+}
+
+int ata_write_drive(int drive, uint32_t lba, uint32_t count, const void *buf) {
+    ata_lock_take();
+    int r = ata_write_drive_impl(drive, lba, count, buf);
+    ata_lock_give();
+    return r;
 }
 
 /* --- the original primary-master API, unchanged for every existing caller --- */
@@ -322,7 +382,7 @@ static int ata_dma_setup(void) {
  * Returns 0 on success, -1 on bad-arg / absent controller / device error /
  * timeout. The PIO addressing sequence (drive-select + LBA28) is reused so the
  * only thing that differs from PIO is the command + the data transfer. */
-static int ata_dma_xfer(int drive, uint32_t lba, uint32_t count, void *buf, int write) {
+static int ata_dma_xfer_impl(int drive, uint32_t lba, uint32_t count, void *buf, int write) {
     /* Validate: drive in range + actually present, count in (0, bounce cap],
      * buffer non-NULL, controller available. */
     if (!drive_ok(drive) || count == 0 || !buf)
@@ -379,17 +439,20 @@ static int ata_dma_xfer(int drive, uint32_t lba, uint32_t count, void *buf, int 
 
     /* Poll the BMIDE status to completion with a finite timeout. The transfer is
      * done when the controller drops the active bit (and typically raises IRQ).
-     * We watch for the error bit and bail on it; we also bound the spin so an
-     * absent/stuck device can never hang the kernel. */
+     * We watch for the error bit and bail on it; we also bound the spin (by
+     * real wall-clock time, not a raw iteration count -- see wait_busy_clear's
+     * comment above) so an absent/stuck device can never hang the kernel. */
     int err = 0;
     int done = 0;
-    for (int i = 0; i < 10000000; i++) {
+    uint64_t dma_deadline = timer_ms() + ATA_TIMEOUT_MS;
+    for (uint32_t i = 0; i < ATA_SPIN_HARDCAP; i++) {
         uint8_t st = inb(ch + BMIDE_STATUS);
         if (st & BM_ST_ERR) { err = 1; break; }
         /* Active clears when the data transfer has finished. The IRQ bit being
          * set with active clear is the unambiguous "complete" signal; active
          * clear alone is also complete (some controllers don't latch IRQ here). */
         if (!(st & BM_ST_ACTIVE)) { done = 1; break; }
+        if (timer_ms() >= dma_deadline) break;               /* done/err both still 0 -> the !done check below fails it */
     }
 
     /* Stop the bus master regardless of outcome (clear the start bit). */
@@ -414,6 +477,17 @@ static int ata_dma_xfer(int drive, uint32_t lba, uint32_t count, void *buf, int 
     if (!write)
         memcpy(buf, g_bm.bounce, bytes);
     return 0;
+}
+
+/* Same shared-hardware exclusion as ata_read_drive/ata_write_drive above --
+ * DMA still addresses the drive through the same task-file registers PIO
+ * uses, so a PIO transfer and a DMA transfer to any drive on the same
+ * controller must not interleave either. */
+static int ata_dma_xfer(int drive, uint32_t lba, uint32_t count, void *buf, int write) {
+    ata_lock_take();
+    int r = ata_dma_xfer_impl(drive, lba, count, buf, write);
+    ata_lock_give();
+    return r;
 }
 
 int ata_read_dma(int drive, uint32_t lba, uint32_t count, void *buf) {

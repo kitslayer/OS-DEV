@@ -36,6 +36,27 @@ static uint32_t alloc_hint = 2; /* where the next free-cluster scan starts (set 
 static uint16_t rd16(const uint8_t *p) { return p[0] | p[1] << 8; }
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
+/* Every read in this file (a directory scan, a file's cluster-chain walk, a
+ * FAT-table lookup) is built from many single- or few-sector ata_read calls
+ * in sequence, and ata_read failing on ANY one of them used to abort the
+ * WHOLE operation -- silently truncating a file read partway through, or
+ * giving up a directory scan before it ever reached a late entry (a 137-file
+ * root needs 9 sectors; the target could be in the last one). This showed up
+ * as two distinct, real symptoms while chasing the M1539 dlxtest flakiness:
+ * dlopen() returning "not found" for a file that's really there (walk_dir
+ * gave up early), and dlopen() "succeeding" with a corrupted image (a
+ * mid-transfer truncation went undetected because dlopen never checks that
+ * the bytes it got cover the offsets it dereferences). This wrapper retries
+ * a failing sector read a few times -- see the osdev-ata-pio-busywait-flakiness
+ * memory -- before the caller gives up on the whole operation. Reads only:
+ * ata_write call sites are untouched (a partially-applied retried write has
+ * a different correctness story, and nothing here shows write-side flakiness). */
+static int ata_read_retry(uint32_t lba, uint8_t count, void *buf) {
+    int r = -1;
+    for (int attempt = 0; attempt < 3 && r < 0; attempt++) r = ata_read(lba, count, buf);
+    return r;
+}
+
 /* Current wall-clock packed into FAT16 date/time fields (date = y-1980<<9|mon<<5|day,
  * time = hour<<11|min<<5|sec/2), for stamping new directory entries. */
 static void fat_now(uint16_t *date, uint16_t *time) {
@@ -54,7 +75,7 @@ static uint32_t fat_next(uint32_t cl) {
     uint8_t sec[SECSZ];
     uint32_t fat_offset = cl * 4;
     uint32_t fat_sec = fat_start + fat_offset / SECSZ;
-    if (ata_read(fat_sec, 1, sec) < 0)
+    if (ata_read_retry(fat_sec, 1, sec) < 0)
         return EOC;
     return rd32(sec + (fat_offset % SECSZ)) & 0x0FFFFFFF;
 }
@@ -118,7 +139,12 @@ static int walk_dir(uint32_t cl, dir_visit_fn visit, void *ctx) {
     while (cluster_in_range(cl)) {
         uint32_t first = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
-            if (ata_read(first + s, 1, sec) < 0)
+            /* A directory scan reads MANY sectors in sequence to reach a late
+             * entry (a 137-file root needs 9), so a single transient ata_read
+             * hiccup here used to abort the ENTIRE remaining scan -- giving up
+             * a lookup for a file that would have been found just fine, a few
+             * sectors further in (see ata_read_retry's comment above). */
+            if (ata_read_retry(first + s, 1, sec) < 0)
                 return count;
             for (int off = 0; off < SECSZ; off += 32) {
                 uint8_t *e = sec + off;
@@ -208,7 +234,7 @@ static int add_entry(uint32_t dircl, const uint8_t name83[11], uint8_t attr,
     while (cluster_in_range(cl)) {            /* stop on a corrupt out-of-range chain value, not just EOC (mirrors the read path) */
         uint32_t firsts = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
-            if (ata_read(firsts + s, 1, sec) < 0) return -1;
+            if (ata_read_retry(firsts + s, 1, sec) < 0) return -1;
             for (int off = 0; off < SECSZ; off += 32) {
                 uint8_t *e = sec + off;
                 if (e[0] == 0x00 || e[0] == 0xE5) {
@@ -307,7 +333,7 @@ static long fat32_read(const char *name, void *buf, unsigned long max) {
         for (;;) {                                   /* coalesce a contiguous, chain-linked run */
             uint32_t off = cl * 4, fsec = fat_start + off / SECSZ;
             if (fsec != fatbuf_sec) {
-                if (ata_read(fsec, 1, fatbuf) < 0) { cl = EOC; goto have_run; }
+                if (ata_read_retry(fsec, 1, fatbuf) < 0) { cl = EOC; goto have_run; }
                 fatbuf_sec = fsec;
             }
             uint32_t next = rd32(fatbuf + (off % SECSZ)) & 0x0FFFFFFF;
@@ -322,12 +348,12 @@ static long fat32_read(const char *name, void *buf, unsigned long max) {
         while (run_sectors > 0 && remaining >= SECSZ) {           /* whole sectors, in bulk */
             uint32_t cnt = run_sectors < 255 ? run_sectors : 255; /* count is a uint8 (0 != 256 here) */
             if ((unsigned long)cnt * SECSZ > remaining) cnt = remaining / SECSZ;
-            if (ata_read(lba, (uint8_t)cnt, dst + written) < 0) return (long)written;
+            if (ata_read_retry(lba, (uint8_t)cnt, dst + written) < 0) return (long)written;
             written += (unsigned long)cnt * SECSZ; remaining -= cnt * SECSZ;
             lba += cnt; run_sectors -= cnt;
         }
         if (run_sectors > 0 && remaining > 0) {                   /* final partial sector */
-            if (ata_read(lba, 1, tail) < 0) return (long)written;
+            if (ata_read_retry(lba, 1, tail) < 0) return (long)written;
             for (uint32_t i = 0; i < remaining; i++) dst[written++] = tail[i];
             remaining = 0;
         }
@@ -363,7 +389,7 @@ static long fat32_pread(const char *name, void *buf, unsigned long max, uint64_t
         uint32_t base = cluster_to_sector(cl);
         uint32_t s = pos / SECSZ, bo = pos % SECSZ;
         for (; s < sec_per_clus && done < want; s++, bo = 0) {
-            if (ata_read(base + s, 1, sbuf) < 0) return (long)done;
+            if (ata_read_retry(base + s, 1, sbuf) < 0) return (long)done;
             uint32_t avail = SECSZ - bo, left = (uint32_t)(want - done);
             uint32_t chunk = left < avail ? left : avail;
             for (uint32_t k = 0; k < chunk; k++) dst[done + k] = sbuf[bo + k];
@@ -385,7 +411,7 @@ static void fat_set(uint32_t cl, uint32_t val) {
     uint32_t rel = fat_start + off / SECSZ, fo = off % SECSZ;
     for (uint32_t f = 0; f < num_fats; f++) {
         uint32_t s = rel + f * fat_sectors;
-        if (ata_read(s, 1, sec) < 0) return;
+        if (ata_read_retry(s, 1, sec) < 0) return;
         uint32_t nv = (rd32(sec + fo) & 0xF0000000u) | (val & 0x0FFFFFFFu);
         sec[fo] = nv; sec[fo+1] = nv>>8; sec[fo+2] = nv>>16; sec[fo+3] = nv>>24;
         ata_write(s, 1, sec);
@@ -408,7 +434,7 @@ static uint32_t alloc_cluster(void) {
     for (uint32_t n = 0; n < span; n++) {
         uint32_t cl = 2 + (((start - 2) + n) % span);
         uint32_t off = cl * 4, fsec = fat_start + off / SECSZ;
-        if (fsec != cached) { if (ata_read(fsec, 1, sec) < 0) return 0; cached = fsec; }
+        if (fsec != cached) { if (ata_read_retry(fsec, 1, sec) < 0) return 0; cached = fsec; }
         if ((rd32(sec + (off % SECSZ)) & 0x0FFFFFFF) == 0) {
             fat_set(cl, EOC);
             alloc_hint = cl + 1;
@@ -635,7 +661,7 @@ static long fat32_delete(const char *name) {
     while (cluster_in_range(cl)) {            /* corrupt-chain-safe (was cl < EOC, which a wild value steers to a bad sector) */
         uint32_t firsts = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
-            if (ata_read(firsts + s, 1, sec) < 0) return -1;
+            if (ata_read_retry(firsts + s, 1, sec) < 0) return -1;
             for (int off = 0; off < SECSZ; off += 32) {
                 uint8_t *e = sec + off;
                 if (e[0] == 0x00 || e[0] == 0xE5 || e[11] == 0x0F || (e[11] & 0x08))
@@ -708,7 +734,7 @@ static long fat32_rename(const char *path, const char *newname) {
     while (cluster_in_range(cl)) {            /* corrupt-chain-safe, exactly like fat32_delete's scan */
         uint32_t firsts = cluster_to_sector(cl);
         for (uint32_t s = 0; s < sec_per_clus; s++) {
-            if (ata_read(firsts + s, 1, sec) < 0) return -1;
+            if (ata_read_retry(firsts + s, 1, sec) < 0) return -1;
             for (int off = 0; off < SECSZ; off += 32) {
                 uint8_t *e = sec + off;
                 if (e[0] == 0x00 || e[0] == 0xE5 || e[11] == 0x0F || (e[11] & 0x08))
@@ -732,7 +758,7 @@ static void fat32_df(uint64_t *freeb, uint64_t *totalb) {
     uint32_t per = SECSZ / 4, freecl = 0;
     for (uint32_t cl = 2; cl < total_clusters + 2; cl++) {
         uint32_t s = fat_start + (cl * 4) / SECSZ;
-        if ((cl == 2) || ((cl * 4) % SECSZ == 0)) { if (ata_read(s, 1, sec) < 0) break; }
+        if ((cl == 2) || ((cl * 4) % SECSZ == 0)) { if (ata_read_retry(s, 1, sec) < 0) break; }
         uint32_t e = (cl * 4) % SECSZ;
         if ((rd32(sec + e) & 0x0FFFFFFF) == 0) freecl++;
         (void)per;
@@ -749,7 +775,7 @@ static struct vfs_ops fat32_ops = { fat32_list, fat32_read, fat32_write,
 
 int fat32_mount(void) {
     uint8_t bs[SECSZ];
-    if (ata_read(0, 1, bs) < 0)
+    if (ata_read_retry(0, 1, bs) < 0)
         return -1;
 
     if (rd16(bs + 510) != 0xAA55)          /* boot signature */
