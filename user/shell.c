@@ -3710,6 +3710,24 @@ static int run_command(char *line, char *cwd) {
             if (!(ok && mac == 45)) ok = 0;
             if (ok) print("dl: dlopen(DLBASE.SO) then dlopen(DLEXT.SO), dlsym(ext_mac)(6,7,3)=45 -- import resolved against an earlier-loaded object, not misresolved to its own base -- cross-object dynamic linking OK\n");
             else { sys_setcolor(2); print("dlxtest: VERIFY FAILED (hb="); sys_setcolor(0); printl((long)(hb!=0)); print(" he="); printl((long)(he!=0)); print(" mac="); printl(mac); print(")\n"); g_status = 1; }
+        } else if (streq(line, "mmapsharedtest")) {   /* MAP_SHARED file-backed mmap: a write through the mapping reaches the file via msync (M1544) */
+            int ok = 1;
+            const char *path = "MOTD.TXT";              /* an existing, small boot-disk file */
+            char before[64];
+            long n0 = sys_readfile(path, before, sizeof before - 1);
+            if (n0 <= 0) ok = 0;
+            char *m = ok ? (char *)sys_mmap_file(path, 4096, 1) : 0;   /* shared=1: MAP_SHARED */
+            if (!m) ok = 0;
+            char orig = ok ? m[0] : 0;                  /* first touch faults the page in from the file */
+            char written = (char)(orig == 'X' ? 'Y' : 'X');   /* a byte distinct from whatever was already there */
+            if (ok) m[0] = written;
+            char after[64];
+            long n1 = -1;
+            if (ok) { sys_msync(m, 4096); n1 = sys_readfile(path, after, sizeof after - 1); }
+            if (!(ok && n1 == n0 && after[0] == written && written != orig)) ok = 0;
+            if (m) { m[0] = orig; sys_msync(m, 4096); }  /* restore the original byte so re-runs (and other tests) see an unchanged file */
+            if (ok) print("mmap: mmap_file(MOTD.TXT, MAP_SHARED) + write + msync -- a SEPARATE sys_readfile of the same path sees the write on disk -- shared page cache OK\n");
+            else { sys_setcolor(2); print("mmapsharedtest: VERIFY FAILED (m="); sys_setcolor(0); printl((long)(m!=0)); print(" n0="); printl(n0); print(" n1="); printl(n1); print(")\n"); g_status = 1; }
         } else if (streq(line, "lotest")) {   /* loopback (lo, 127.0.0.0/8): a UDP round-trip with NO NIC (M1264) */
             unsigned char lo[4] = {127,0,0,1};
             int ok = 1;

@@ -54,7 +54,8 @@ long sys_fanotify_wait(char *namebuf, int max) { return do_syscall(SYS_fanotify_
 long sys_fanotify_provide(const void *content, unsigned long len) { return do_syscall(SYS_fanotify_provide, (long)content, (long)len, 0); }
 long sys_io_uring_enter(void *ring) { return do_syscall(SYS_io_uring_enter, (long)ring, 0, 0); }
 long sys_mseal(void *addr, unsigned long len) { return do_syscall(SYS_mseal, (long)addr, (long)len, 0); }
-void *sys_mmap_file(const char *path, unsigned long len) { return (void *)do_syscall(SYS_mmap_file, (long)path, (long)len, 0); }
+void *sys_mmap_file(const char *path, unsigned long len, int shared) { return (void *)do_syscall(SYS_mmap_file, (long)path, (long)len, shared); }
+int   sys_msync(void *addr, unsigned long len) { return (int)do_syscall(SYS_msync, (long)addr, (long)len, 0); }
 long sys_clone(void *fn, void *stack, void *arg) { return do_syscall(SYS_clone, (long)fn, (long)stack, (long)arg); }
 int  sys_gettid(void) { return (int)do_syscall(SYS_gettid, 0, 0, 0); }
 void sys_thread_exit(void) { do_syscall(SYS_thread_exit, 0, 0, 0); for (;;) {} }

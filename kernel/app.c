@@ -81,7 +81,7 @@ struct app {
     uint64_t heap_end;                   /* current program break (0 = not yet started) */
 #define APP_MAXVMA 16
 #define HUGE_SIZE  0x200000ull           /* 2 MiB hugepage (M1155) */
-    struct { uint64_t start, len; int sealed, uffd, file_backed, locked, huge; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136); locked=mlock'd (M1149); huge=2 MiB-backed (M1155) */
+    struct { uint64_t start, len; int sealed, uffd, file_backed, locked, huge, shared; uint64_t foff; char fpath[64]; } vma[APP_MAXVMA];  /* mmap'd demand-paged regions; sealed=mseal'd; uffd=userfault; file_backed=mmap'd file (M1136); locked=mlock'd (M1149); huge=2 MiB-backed (M1155); shared=MAP_SHARED, writes flow back to the file via msync/munmap/exit (M1544) */
     int      nvma;
     uint64_t mmap_next;                  /* bump allocator for mmap addresses */
     int      mlock_future;               /* mlockall(MCL_FUTURE): new mmaps are born locked (M1283) */
@@ -1727,10 +1727,12 @@ uint64_t app_mmap_huge(uint64_t len) {
 }
 
 /* File-backed mmap (M1136): reserve a demand-paged region whose pages are filled
- * lazily from file `path` (offset 0) on first touch — see app_fault_handle. The
- * mapping is MAP_PRIVATE: faults map a private writable copy, so writes stay in
- * RAM and never reach the file. Returns the base VA, or 0. */
-uint64_t app_mmap_file(const char *path, uint64_t len) {
+ * lazily from file `path` (offset 0) on first touch — see app_fault_handle.
+ * shared=0 is MAP_PRIVATE: writes stay in RAM and never reach the file. shared=1
+ * is MAP_SHARED (M1544): writes are flushed back to the file by an explicit
+ * msync(), by munmap, or (best-effort) at process exit -- see app_msync. Returns
+ * the base VA, or 0. */
+uint64_t app_mmap_file(const char *path, uint64_t len, int shared) {
     struct app *a = cur();
     if (!a || len == 0 || !path) return 0;
     len = (len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
@@ -1746,12 +1748,66 @@ uint64_t app_mmap_file(const char *path, uint64_t len) {
     a->vma[a->nvma].file_backed = 1;
     a->vma[a->nvma].locked = 0;
     a->vma[a->nvma].huge = 0;
+    a->vma[a->nvma].shared = shared ? 1 : 0;
     a->vma[a->nvma].foff = 0;
     int i = 0; for (; path[i] && i < 63; i++) a->vma[a->nvma].fpath[i] = path[i];
     a->vma[a->nvma].fpath[i] = 0;
     a->nvma++;
     a->mmap_next = addr + len + PAGE_SIZE;
     return addr;
+}
+
+/* Write back the dirty pages of a MAP_SHARED file-backed VMA overlapping
+ * [addr, addr+len) to their backing file (M1544) -- the actual "page cache"
+ * behavior: a MAP_PRIVATE region (or a non-overlapping range, or one with
+ * nothing dirty) is a no-op, matching msync(2). Uses the hardware-maintained
+ * PTE_DIRTY bit (the CPU sets it on any write) rather than separate software
+ * tracking, then clears it + invlpg's the page so the next write re-dirties
+ * it for the NEXT sync -- the same bit `vmm_wss`'s working-set scan already
+ * reads, just scoped to one VMA's range instead of the whole address space.
+ * No new per-filesystem write primitive needed: this reuses the exact
+ * read-modify-write pattern app_fd_write already uses for a positioned FILE
+ * fd write (M1195) -- read the whole file via vfs_read, patch the dirty
+ * page(s) in memory, write it back via vfs_write. One RMW per VMA (not per
+ * page), and skipped entirely when nothing in range is actually dirty. */
+int app_msync(uint64_t addr, uint64_t len) {
+    struct app *a = cur();
+    if (!a) return -1;
+    uint64_t end = addr + len;
+    for (int i = 0; i < a->nvma; i++) {
+        if (!a->vma[i].file_backed || !a->vma[i].shared) continue;
+        uint64_t vstart = a->vma[i].start, vend = vstart + a->vma[i].len;
+        uint64_t lo = addr > vstart ? addr : vstart;
+        uint64_t hi = end   < vend  ? end   : vend;
+        if (lo >= hi) continue;
+        int any_dirty = 0;
+        for (uint64_t page = lo & ~(uint64_t)(PAGE_SIZE - 1); page < hi; page += PAGE_SIZE)
+            if (vmm_pte_in(a->cr3, page) & PTE_DIRTY) { any_dirty = 1; break; }
+        if (!any_dirty) continue;
+
+        struct statx st; long sz = (vfs_stat(a->vma[i].fpath, &st) == 0) ? (long)st.stx_size : 0;
+        uint64_t need = a->vma[i].foff + a->vma[i].len;      /* the mapping's own span sets the ceiling */
+        if ((uint64_t)sz > need) need = (uint64_t)sz;        /* preserve any bytes past the mapping */
+        if (need == 0 || need > (16u << 20)) continue;       /* refuse to RMW something absurd (16 MiB cap) */
+        char *tmp = kmalloc((size_t)need);
+        if (!tmp) continue;
+        long got = vfs_read(a->vma[i].fpath, tmp, need);
+        if (got < 0) got = 0;
+        for (long b = got; b < (long)need; b++) tmp[b] = 0;  /* zero-fill any gap, mirrors app_fd_write */
+
+        for (uint64_t page = lo & ~(uint64_t)(PAGE_SIZE - 1); page < hi; page += PAGE_SIZE) {
+            uint64_t pte = vmm_pte_in(a->cr3, page);
+            if (!(pte & PTE_PRESENT) || !(pte & PTE_DIRTY)) continue;
+            uint64_t fileoff = a->vma[i].foff + (page - vstart);
+            uint64_t n = PAGE_SIZE; if (fileoff + n > need) n = need - fileoff;
+            for (uint64_t b = 0; b < n; b++) tmp[fileoff + b] = ((const char *)page)[b];
+            vmm_set_pte_in(a->cr3, page, pte & ~PTE_DIRTY);
+            __asm__ volatile("invlpg (%0)" : : "r"(page) : "memory");
+        }
+        vfs_write(a->vma[i].fpath, tmp, need);
+        kfree(tmp);
+    }
+    return 0;
 }
 
 int app_munmap(uint64_t addr, uint64_t len) {

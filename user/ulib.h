@@ -229,7 +229,8 @@ void sys_setcolor(int color);   /* text colour for subsequent output: palette in
 void *sbrk(long inc);           /* grow the heap by inc bytes; previous break, or (void*)-1 */
 void *sys_mmap(unsigned long len);              /* reserve a demand-paged anon region; base or 0 */
 void *sys_mmap_huge(unsigned long len);         /* reserve a 2 MiB-backed (hugepage) region; base or 0 (M1155) */
-void *sys_mmap_file(const char *path, unsigned long len);  /* demand-paged file-backed mmap (MAP_PRIVATE); base or 0 (M1136) */
+void *sys_mmap_file(const char *path, unsigned long len, int shared);  /* demand-paged file-backed mmap; shared=0 MAP_PRIVATE (M1136), shared=1 MAP_SHARED (M1544); base or 0 */
+int   sys_msync(void *addr, unsigned long len);         /* flush a MAP_SHARED file-backed mmap's dirty pages to disk; 0/-1 (M1544) */
 /* threads (M1138): shared-address-space concurrency (unlike fork's separate space) */
 long sys_clone(void *fn, void *stack, void *arg);  /* low-level: start fn(arg) on `stack` in a new thread; tid/-1 */
 int  sys_gettid(void);                             /* the calling thread's id */

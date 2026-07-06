@@ -322,7 +322,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_clone: case SYS_join:          /* threads sharing THIS address space, not a new process (M1533) */
         return PL_THREAD;
     case SYS_mmap: case SYS_munmap: case SYS_mremap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
-    case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file:
+    case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file: case SYS_msync:
     case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge: case SYS_mlockall: case SYS_munlockall:
     case SYS_shmget: case SYS_shmat: case SYS_shmdt:
         return PL_VM;
@@ -368,7 +368,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
+        [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
@@ -1574,9 +1574,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mseal:                        /* (addr, len): irreversibly seal mmap regions (M1130) */
         r->rax = (uint64_t)(int64_t)app_mseal(r->rdi, r->rsi);
         break;
-    case SYS_mmap_file:                    /* (path, len): file-backed mmap (M1136) */
+    case SYS_mmap_file:                    /* (path, len, shared): file-backed mmap (M1136; shared=MAP_SHARED, M1544) */
         if (!ustr(r->rdi)) { r->rax = 0; break; }
-        r->rax = app_mmap_file((const char *)r->rdi, r->rsi);
+        r->rax = app_mmap_file((const char *)r->rdi, r->rsi, (int)r->rdx);
+        break;
+    case SYS_msync:                        /* (addr, len): flush a MAP_SHARED file-backed mmap's dirty pages to disk (M1544) */
+        r->rax = (uint64_t)(int64_t)app_msync(r->rdi, r->rsi);
         break;
     case SYS_clone:                        /* (fn, stack, arg): spawn a thread sharing this AS (M1138) */
         r->rax = (uint64_t)app_clone(r, r->rdi, r->rsi, r->rdx);

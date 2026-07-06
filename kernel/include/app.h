@@ -93,7 +93,8 @@ int    app_connect(int fd, const unsigned char ip[4], int port);  /* connect a T
 uint64_t app_sbrk(long inc);            /* grow the calling app's heap; old break or -1 */
 uint64_t app_mmap(uint64_t len);        /* reserve a demand-paged anonymous region; base VA or 0 */
 uint64_t app_mmap_huge(uint64_t len);   /* reserve a 2 MiB-backed demand-paged region (MAP_HUGETLB); base VA or 0 (M1155) */
-uint64_t app_mmap_file(const char *path, uint64_t len);   /* demand-paged file-backed region (MAP_PRIVATE); base VA or 0 (M1136) */
+uint64_t app_mmap_file(const char *path, uint64_t len, int shared);   /* demand-paged file-backed region; shared=0 MAP_PRIVATE (M1136), shared=1 MAP_SHARED (M1544); base VA or 0 */
+int      app_msync(uint64_t addr, uint64_t len);   /* flush a MAP_SHARED file-backed mmap's dirty pages to disk; 0/-1 (M1544) */
 struct registers;
 long     app_clone(struct registers *r, uint64_t fn, uint64_t stack, uint64_t arg);  /* spawn a thread sharing this address space; tid/-1 (M1138) */
 void     app_thread_exit(void);    /* end just the calling thread's task (M1138) */

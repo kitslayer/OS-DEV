@@ -119,7 +119,7 @@
 #define SYS_uffd_register   107 /* (addr, len) -> route this region's page faults to a monitor (userfaultfd); 0/-1 (M1134) */
 #define SYS_uffd_read       108 /* () -> monitor: block until the owner faults; the faulting page addr, or -1 */
 #define SYS_uffd_copy       109 /* (addr, data, len) -> monitor: fill the faulting page + wake the owner; 0/-1 */
-#define SYS_mmap_file       110 /* (path, len) -> demand-paged file-backed mmap (MAP_PRIVATE); base VA, or 0 (M1136) */
+#define SYS_mmap_file       110 /* (path, len, shared) -> demand-paged file-backed mmap; shared=0 MAP_PRIVATE (M1136), shared=1 MAP_SHARED (M1544, writes flow back via msync/munmap/exit); base VA, or 0 */
 #define SYS_clone           111 /* (fn, stack, arg) -> spawn a thread sharing this address space; tid, or -1 (M1138) */
 #define SYS_gettid          112 /* () -> the calling thread's id (its task id) (M1138) */
 #define SYS_thread_exit     113 /* () -> end just the calling thread (not the process) (M1138) */
@@ -301,6 +301,7 @@
 #define SYS_tcp_respond  277   /* (resp, resp_len) -> reply on the accepted conn + close; 0/-1 (M1327) */
 #define SYS_font         278   /* (buf,len) -> copy the 8x16 console font (128*16 bytes) for gfx text; bytes/-1 (M1362) */
 #define SYS_loadimg      279   /* (name, buf, cw<<16|ch, outwh[2]) -> decode+fit-scale an image file into the cw*ch XRGB buf; native size in outwh; 0/-1 (M1392) */
+#define SYS_msync        280   /* (addr, len) -> write back dirty pages of a MAP_SHARED file-backed mmap to disk; 0/-1 (M1544) */
 #define SA_ONSTACK 0x08000000  /* sigaction flag: run this handler on the sigaltstack() stack (M1276) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */

@@ -11,7 +11,7 @@ int main(void) {
     long n = sys_readfile(path, buf, sizeof buf - 1);
     if (n <= 0) { print("cannot read MOTD.TXT\n"); sys_sleep(20000); return 1; }
 
-    char *m = (char *)sys_mmap_file(path, 4096);
+    char *m = (char *)sys_mmap_file(path, 4096, 0);   // shared=0: MAP_PRIVATE (see mmapsharedtest for MAP_SHARED, M1544)
     if (!m) { print("mmap_file failed\n"); sys_sleep(20000); return 1; }
 
     print("mmap'd MOTD.TXT; touching the mapping faults its page in from disk.\n");
