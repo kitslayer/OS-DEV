@@ -28,7 +28,7 @@ static uint32_t io_op_class(uint32_t op) {
     case IO_READFILE:  return PL_RPATH;
     case IO_WRITEFILE: return PL_WPATH;
     case IO_PING:      return PL_INET;
-    default:           return PL_STDIO;   /* NOP / SLEEP / GETRANDOM */
+    default:           return PL_STDIO;   /* NOP / SLEEP / GETRANDOM / READ / WRITE -- an fd-based op needs no MORE than the ordinary SYS_read/SYS_write's own class, since the fd was already opened through a properly-pledge-checked path */
     }
 }
 
@@ -63,6 +63,14 @@ static int64_t io_run_one(const struct io_sqe *s, app_t *self) {
         if (s->c == 0 || !vmm_user_ok(s->b, s->c)) return -1;
         random_bytes((void *)s->b, (size_t)s->c);
         return (int64_t)s->c;
+
+    case IO_READ:           /* an already-open fd (pipe/socket/pty/file) -- M1546 */
+        if (!vmm_user_ok(s->b, s->c)) return -1;
+        return app_fd_read((int)s->a, (void *)s->b, s->c);
+
+    case IO_WRITE:
+        if (!vmm_user_ok(s->b, s->c)) return -1;
+        return app_fd_write((int)s->a, (const void *)s->b, s->c);
 
     default:
         return -1;                                     /* unknown opcode */

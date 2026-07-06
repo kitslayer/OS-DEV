@@ -26,6 +26,8 @@ enum {
     IO_PING,                /* (—)                  -> gateway echo replies/-1 */
     IO_SLEEP,               /* a=milliseconds       -> 0                       */
     IO_GETRANDOM,           /* b=buf c=len          -> bytes written           */
+    IO_READ,                /* a=fd  b=buf c=len    -> bytes read,    or -1 (M1546): an already-open pipe/socket/pty/file fd, not a path -- the actual point of io_uring, batching ops against fds you hold */
+    IO_WRITE,               /* a=fd  b=buf c=len    -> bytes written, or -1 (M1546) */
     IO_OPMAX
 };
 
