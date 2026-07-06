@@ -164,6 +164,7 @@ struct app {
     uint64_t rlim_nofile;                /* RLIMIT_NOFILE: max open fds (0 = unlimited), inherited on fork (M1547) */
     uint64_t rlim_cpu;                   /* RLIMIT_CPU: max CPU seconds (0 = unlimited) -> SIGXCPU, inherited on fork (M1548) */
     uint64_t cpulimit_next;              /* next timer_ticks() allowed to re-raise SIGXCPU (M1548); see app_cpulimit_tick */
+    uint64_t rlim_fsize;                 /* RLIMIT_FSIZE: max file size in bytes (0 = unlimited) -> SIGXFSZ, inherited on fork (M1549) */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -1042,6 +1043,7 @@ int app_setrlimit(int resource, uint64_t val) {
     if (resource == RLIMIT_DATA)   { a->rlim_data   = v; return 0; }
     if (resource == RLIMIT_NOFILE) { a->rlim_nofile = v; return 0; }
     if (resource == RLIMIT_CPU)    { a->rlim_cpu    = v; return 0; }
+    if (resource == RLIMIT_FSIZE)  { a->rlim_fsize  = v; return 0; }
     return -1;                                          /* other resources not yet enforced */
 }
 uint64_t app_getrlimit(int resource) {
@@ -1050,7 +1052,8 @@ uint64_t app_getrlimit(int resource) {
                  (resource == RLIMIT_AS)     ? a->rlim_as     :
                  (resource == RLIMIT_DATA)   ? a->rlim_data   :
                  (resource == RLIMIT_NOFILE) ? a->rlim_nofile :
-                 (resource == RLIMIT_CPU)    ? a->rlim_cpu    : 0;
+                 (resource == RLIMIT_CPU)    ? a->rlim_cpu    :
+                 (resource == RLIMIT_FSIZE)  ? a->rlim_fsize  : 0;
     return v ? v : RLIM_INFINITY;
 }
 /* prlimit (M1214): get — and optionally set — ANOTHER process's resource limit
@@ -1064,7 +1067,8 @@ long app_prlimit(int pid, int resource, uint64_t newval, int do_set) {
                      (resource == RLIMIT_AS)     ? &t->rlim_as :
                      (resource == RLIMIT_DATA)   ? &t->rlim_data :
                      (resource == RLIMIT_NOFILE) ? &t->rlim_nofile :
-                     (resource == RLIMIT_CPU)    ? &t->rlim_cpu : 0;
+                     (resource == RLIMIT_CPU)    ? &t->rlim_cpu :
+                     (resource == RLIMIT_FSIZE)  ? &t->rlim_fsize : 0;
     if (!slot) return (long)RLIM_INFINITY;
     uint64_t old = *slot ? *slot : RLIM_INFINITY;       /* 0 stored = unlimited */
     if (do_set) *slot = (newval == RLIM_INFINITY) ? 0 : newval;
@@ -1084,14 +1088,15 @@ int app_format_limits(app_t *ap, char *b, int max) {
     if (!a || max <= 0) return 0;
     int p = 0;
     p = maps_str(b, p, max, "Limit           Value\n");
-    struct { const char *name; uint64_t v; } row[5] = {
+    struct { const char *name; uint64_t v; } row[6] = {
         { "RLIMIT_AS       ", a->rlim_as },
         { "RLIMIT_DATA     ", a->rlim_data },
         { "RLIMIT_NPROC    ", a->rlim_nproc },
         { "RLIMIT_NOFILE   ", a->rlim_nofile },
         { "RLIMIT_CPU      ", a->rlim_cpu },
+        { "RLIMIT_FSIZE    ", a->rlim_fsize },
     };
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         p = maps_str(b, p, max, row[i].name);
         if (row[i].v == 0) p = maps_str(b, p, max, "unlimited");
         else                p = lim_dec(b, p, max, row[i].v);
@@ -2729,6 +2734,7 @@ void app_alarm_tick(void) {
 }
 
 #define SIGXCPU 25   /* real Linux uses 24, but that number is already SIGWINCH here (M1548) */
+#define SIGXFSZ 26   /* real Linux uses 25, but that number is SIGXCPU here (M1549) */
 /* Called from the timer IRQ: if the CURRENT task's own accumulated CPU time
  * (utime_ms+stime_ms, the same tick-sampled fields getrusage already reads)
  * has crossed its app's RLIMIT_CPU, raise SIGXCPU. Deliberately scoped to the
@@ -3483,6 +3489,10 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
         if (!a->fd[fd].write_end) return -1;                  /* opened read-only */
         long off = a->fd[fd].off;
         if (off < 0 || (unsigned long)off + len > FILEFD_CAP) return -1;
+        if (a->rlim_fsize && (unsigned long)off + len > a->rlim_fsize) {   /* RLIMIT_FSIZE (M1549) */
+            app_request_signal(a, SIGXFSZ);
+            return -1;
+        }
         /* read-modify-write the whole file (via vfs_read/vfs_write — no per-FS work;
          * bounded to FILEFD_CAP). Read existing, patch [off, off+len), grow if needed. */
         struct statx st; long sz = (vfs_stat(a->fd[fd].path, &st) == 0) ? (long)st.stx_size : 0;
@@ -4182,6 +4192,7 @@ long app_fork(struct registers *r) {
     a->rlim_as = p->rlim_as; a->rlim_data = p->rlim_data;   /* RLIMIT_AS/DATA inherited too (M1164) */
     a->rlim_nofile = p->rlim_nofile;                    /* RLIMIT_NOFILE inherited too (M1547) */
     a->rlim_cpu = p->rlim_cpu;                          /* RLIMIT_CPU inherited too (M1548) */
+    a->rlim_fsize = p->rlim_fsize;                      /* RLIMIT_FSIZE inherited too (M1549) */
     /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
     a->promises = p->promises; a->pledged = p->pledged;
     a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;

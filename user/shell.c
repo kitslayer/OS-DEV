@@ -157,6 +157,10 @@ static void sh_alarm_handler(int sig) { (void)sig; g_alarm_fires++; }
  * app_cpulimit_tick) so a test process must install a handler to observe it. */
 static volatile int g_xcpu_fired;
 static void sh_xcpu_handler(int sig) { (void)sig; g_xcpu_fired = 1; }
+/* SIGXFSZ demo (M1549): RLIMIT_FSIZE fires this when a write would grow a
+ * file past the limit; same opt-in delivery model as every signal here. */
+static volatile int g_xfsz_fired;
+static void sh_xfsz_handler(int sig) { (void)sig; g_xfsz_fired = 1; }
 static char *slurp(const char *name, long *len) {
     sh_unprot_buf((char *)name);          /* a quoted filename ("my file") arrives with bit-7 sentinels — reveal them
                                            * here, the one chokepoint every file-reading builtin funnels through.
@@ -4370,6 +4374,25 @@ static int run_command(char *line, char *cwd) {
                 int xst = -1; sys_waitpid((int)xc, &xst);
                 print(xst == 0 ? "RLIMIT_CPU: SIGXCPU delivered once CPU time exceeded the limit OK\n" : "RLIMIT_CPU: VERIFY FAILED\n");
                 if (xst != 0) g_status = 1;
+            }
+            /* RLIMIT_FSIZE (M1549): cap max file size -- a CHILD again, so no
+             * shared fd/file state with the shell. A 4-byte limit: writing
+             * exactly up to it must succeed, one more byte must be denied
+             * AND raise SIGXFSZ (opt-in, like every signal here). */
+            long fz = sys_fork();
+            if (fz == 0) {
+                sys_signal(26 /* SIGXFSZ */, sh_xfsz_handler);
+                int wf = sys_open_mode("/tmp/fsizetest.txt", O_WRONLY | O_CREAT | O_TRUNC);
+                if (wf < 3) sys_exit(1);
+                struct rlimit fzl; fzl.rlim_cur = 4; fzl.rlim_max = 4; sys_setrlimit(RLIMIT_FSIZE, &fzl);
+                long w1 = sys_fdwrite(wf, "abcd", 4);   /* exactly at the limit -> allowed */
+                long w2 = sys_fdwrite(wf, "e", 1);      /* one more byte -> denied + SIGXFSZ */
+                sys_fdclose(wf);
+                sys_exit((w1 == 4 && w2 < 0 && g_xfsz_fired) ? 0 : 1);
+            } else if (fz > 0) {
+                int fzst = -1; sys_waitpid((int)fz, &fzst);
+                print(fzst == 0 ? "RLIMIT_FSIZE: write denied + SIGXFSZ delivered past the limit OK\n" : "RLIMIT_FSIZE: VERIFY FAILED\n");
+                if (fzst != 0) g_status = 1;
             }
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
