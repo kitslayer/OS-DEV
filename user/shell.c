@@ -4411,6 +4411,32 @@ static int run_command(char *line, char *cwd) {
                 print(fzst == 0 ? "RLIMIT_FSIZE: write denied + SIGXFSZ delivered past the limit OK\n" : "RLIMIT_FSIZE: VERIFY FAILED\n");
                 if (fzst != 0) g_status = 1;
             }
+            /* RLIMIT_CORE (M1551): cap core-dump size. Baseline first (no
+             * rlim_core set -> just the existing CORE_MAX ceiling), then a
+             * capped run at half that size -- proving the cap actually
+             * shrinks the written dump, without hardcoding a specific byte
+             * count that would drift if app_core_dump's fixed overhead
+             * (ELF header + PT_NOTE) ever changes. Each child deliberately
+             * NULL-derefs (same technique as user/crash.c) to trigger the
+             * kernel's fault handler, which writes /tmp/core. */
+            long crf1 = sys_fork();
+            if (crf1 == 0) { volatile int *p = (volatile int *)0; *p = 0x1234; sys_exit(1); }
+            if (crf1 > 0) { int crst1 = -1; sys_waitpid((int)crf1, &crst1); }
+            struct statx crst_a; long sz_full = (sys_statx("/tmp/core", &crst_a) == 0) ? (long)crst_a.stx_size : -1;
+            long crf2 = sys_fork();
+            if (crf2 == 0) {
+                struct rlimit crl; crl.rlim_cur = (uint64_t)(sz_full / 2); crl.rlim_max = crl.rlim_cur;
+                sys_setrlimit(RLIMIT_CORE, &crl);
+                volatile int *p = (volatile int *)0; *p = 0x1234;
+                sys_exit(1);
+            }
+            if (crf2 > 0) { int crst2 = -1; sys_waitpid((int)crf2, &crst2); }
+            struct statx crst_b; long sz_capped = (sys_statx("/tmp/core", &crst_b) == 0) ? (long)crst_b.stx_size : -1;
+            print("RLIMIT_CORE: uncapped core="); printl(sz_full); print(" bytes, capped (limit=");
+            printl(sz_full / 2); print(") core="); printl(sz_capped); print(" bytes\n");
+            int cr_ok = (sz_full > 0 && sz_capped > 0 && sz_capped <= sz_full / 2);
+            print(cr_ok ? "RLIMIT_CORE: core dump shrunk to fit the cap OK\n" : "RLIMIT_CORE: VERIFY FAILED\n");
+            if (!cr_ok) g_status = 1;
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
             unsigned char *m = (unsigned char *)sys_mmap_huge(len);

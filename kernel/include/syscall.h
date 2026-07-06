@@ -497,6 +497,7 @@ struct statx {                /* unsigned/unsigned long to match the other share
 #define RLIMIT_CPU     0    /* max CPU seconds (this thread's own; M1548) -> SIGXCPU */
 #define RLIMIT_FSIZE   1    /* max file size in bytes (M1549) -> SIGXFSZ */
 #define RLIMIT_DATA    2
+#define RLIMIT_CORE    4    /* max core-dump bytes (M1551) */
 #define RLIMIT_NOFILE  7    /* max open fds (M1547) */
 #define RLIMIT_MEMLOCK 8    /* max mlock()'d bytes (M1550) */
 #define RLIMIT_NPROC   6

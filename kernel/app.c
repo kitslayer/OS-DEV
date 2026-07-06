@@ -166,6 +166,7 @@ struct app {
     uint64_t cpulimit_next;              /* next timer_ticks() allowed to re-raise SIGXCPU (M1548); see app_cpulimit_tick */
     uint64_t rlim_fsize;                 /* RLIMIT_FSIZE: max file size in bytes (0 = unlimited) -> SIGXFSZ, inherited on fork (M1549) */
     uint64_t rlim_memlock;               /* RLIMIT_MEMLOCK: max mlock()'d bytes (0 = unlimited), inherited on fork (M1550) */
+    uint64_t rlim_core;                   /* RLIMIT_CORE: max core-dump bytes (0 = unlimited, capped by CORE_MAX either way), inherited on fork (M1551) */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -1046,6 +1047,7 @@ int app_setrlimit(int resource, uint64_t val) {
     if (resource == RLIMIT_CPU)    { a->rlim_cpu    = v; return 0; }
     if (resource == RLIMIT_FSIZE)  { a->rlim_fsize  = v; return 0; }
     if (resource == RLIMIT_MEMLOCK) { a->rlim_memlock = v; return 0; }
+    if (resource == RLIMIT_CORE)   { a->rlim_core    = v; return 0; }
     return -1;                                          /* other resources not yet enforced */
 }
 uint64_t app_getrlimit(int resource) {
@@ -1056,7 +1058,8 @@ uint64_t app_getrlimit(int resource) {
                  (resource == RLIMIT_NOFILE) ? a->rlim_nofile :
                  (resource == RLIMIT_CPU)    ? a->rlim_cpu    :
                  (resource == RLIMIT_FSIZE)  ? a->rlim_fsize  :
-                 (resource == RLIMIT_MEMLOCK) ? a->rlim_memlock : 0;
+                 (resource == RLIMIT_MEMLOCK) ? a->rlim_memlock :
+                 (resource == RLIMIT_CORE)   ? a->rlim_core   : 0;
     return v ? v : RLIM_INFINITY;
 }
 /* prlimit (M1214): get — and optionally set — ANOTHER process's resource limit
@@ -1072,7 +1075,8 @@ long app_prlimit(int pid, int resource, uint64_t newval, int do_set) {
                      (resource == RLIMIT_NOFILE) ? &t->rlim_nofile :
                      (resource == RLIMIT_CPU)    ? &t->rlim_cpu :
                      (resource == RLIMIT_FSIZE)  ? &t->rlim_fsize :
-                     (resource == RLIMIT_MEMLOCK) ? &t->rlim_memlock : 0;
+                     (resource == RLIMIT_MEMLOCK) ? &t->rlim_memlock :
+                     (resource == RLIMIT_CORE)   ? &t->rlim_core : 0;
     if (!slot) return (long)RLIM_INFINITY;
     uint64_t old = *slot ? *slot : RLIM_INFINITY;       /* 0 stored = unlimited */
     if (do_set) *slot = (newval == RLIM_INFINITY) ? 0 : newval;
@@ -1092,7 +1096,7 @@ int app_format_limits(app_t *ap, char *b, int max) {
     if (!a || max <= 0) return 0;
     int p = 0;
     p = maps_str(b, p, max, "Limit           Value\n");
-    struct { const char *name; uint64_t v; } row[7] = {
+    struct { const char *name; uint64_t v; } row[8] = {
         { "RLIMIT_AS       ", a->rlim_as },
         { "RLIMIT_DATA     ", a->rlim_data },
         { "RLIMIT_NPROC    ", a->rlim_nproc },
@@ -1100,8 +1104,9 @@ int app_format_limits(app_t *ap, char *b, int max) {
         { "RLIMIT_CPU      ", a->rlim_cpu },
         { "RLIMIT_FSIZE    ", a->rlim_fsize },
         { "RLIMIT_MEMLOCK  ", a->rlim_memlock },
+        { "RLIMIT_CORE     ", a->rlim_core },
     };
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
         p = maps_str(b, p, max, row[i].name);
         if (row[i].v == 0) p = maps_str(b, p, max, "unlimited");
         else                p = lim_dec(b, p, max, row[i].v);
@@ -3076,16 +3081,23 @@ void app_core_dump(struct registers *r) {
         reg[nreg].va = a->vma[i].start; reg[nreg].len = a->vma[i].len; nreg++;
     }
 
+    /* RLIMIT_CORE (M1551): an ADDITIONAL cap on top of the existing CORE_MAX
+     * ceiling, not a replacement for it -- same "0 = unlimited" convention
+     * every other rlimit in this file uses (real POSIX's own literal-0-means-
+     * "no dump at all" special case is NOT implemented; this governs dump
+     * SIZE truncation only, an honest, scoped simplification like several
+     * others in this codebase). A limit above CORE_MAX has no effect. */
+    uint64_t core_cap = (a->rlim_core && a->rlim_core < CORE_MAX) ? a->rlim_core : CORE_MAX;
     const int NOTESZ = 12 + 8 + 336;                            /* nhdr + "CORE\0\0\0\0" + prstatus(336) */
     int phnum = 1 + nreg;
     uint64_t off_note = 64 + (uint64_t)phnum * 56;
     uint64_t off_data = off_note + NOTESZ;
     uint64_t total = off_data; for (int i = 0; i < nreg; i++) total += reg[i].len;
-    if (total > CORE_MAX) {                                     /* too big: keep just the stack */
+    if (total > core_cap) {                                     /* too big: keep just the stack */
         nreg = (nreg >= 1) ? 1 : 0; phnum = 1 + nreg;
         off_note = 64 + (uint64_t)phnum * 56; off_data = off_note + NOTESZ;
         total = off_data + (nreg ? reg[0].len : 0);
-        if (total > CORE_MAX) return;
+        if (total > core_cap) return;
     }
     uint8_t *buf = kzalloc(total);     /* zeroed: demand-paged holes stay zero in the core */
     if (!buf) return;
@@ -4215,6 +4227,7 @@ long app_fork(struct registers *r) {
     a->rlim_cpu = p->rlim_cpu;                          /* RLIMIT_CPU inherited too (M1548) */
     a->rlim_fsize = p->rlim_fsize;                      /* RLIMIT_FSIZE inherited too (M1549) */
     a->rlim_memlock = p->rlim_memlock;                  /* RLIMIT_MEMLOCK inherited too (M1550) */
+    a->rlim_core = p->rlim_core;                        /* RLIMIT_CORE inherited too (M1551) */
     /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
     a->promises = p->promises; a->pledged = p->pledged;
     a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;
