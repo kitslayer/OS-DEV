@@ -1263,9 +1263,10 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)access_check(eff, (int)r->rdx);
         break;
     }
-    case SYS_prctl:                        /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME (M1225) */
+    case SYS_prctl:                        /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME/PR_SET_PDEATHSIG/PR_GET_PDEATHSIG (M1225, M1562) */
         if (r->rdi == PR_SET_NAME) { if (!ustr(r->rsi)) { r->rax = (uint64_t)-1; break; } }
         else if (r->rdi == PR_GET_NAME) { if (!ubuf(r->rsi, 16)) { r->rax = (uint64_t)-1; break; } }
+        else if (r->rdi == PR_GET_PDEATHSIG) { if (!ubuf(r->rsi, sizeof(int))) { r->rax = (uint64_t)-1; break; } }
         r->rax = (uint64_t)app_prctl((int)r->rdi, r->rsi);
         break;
     case SYS_set_tid_address:              /* (tidptr) -> register clear_child_tid; returns the tid (M1226) */

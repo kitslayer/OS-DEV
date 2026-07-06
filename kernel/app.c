@@ -167,6 +167,9 @@ struct app {
     uint64_t rlim_fsize;                 /* RLIMIT_FSIZE: max file size in bytes (0 = unlimited) -> SIGXFSZ, inherited on fork (M1549) */
     uint64_t rlim_memlock;               /* RLIMIT_MEMLOCK: max mlock()'d bytes (0 = unlimited), inherited on fork (M1550) */
     uint64_t rlim_core;                   /* RLIMIT_CORE: max core-dump bytes (0 = unlimited, capped by CORE_MAX either way), inherited on fork (M1551) */
+    int      pdeathsig;                   /* prctl(PR_SET_PDEATHSIG): signal to send THIS process when its parent dies;
+                                            * 0 = none. Deliberately NOT inherited on fork/exec, matching real Linux
+                                            * (a child must opt in for itself each time) (M1562) */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -1156,6 +1159,15 @@ static void app_free_zombie_children(int ppid) {  /* a dying parent orphans its 
     for (int i = 0; i < MAX_APPS; i++)
         if (apps[i].used && apps[i].zombie && apps[i].parent == ppid) apps[i].used = 0;
 }
+/* prctl(PR_SET_PDEATHSIG) (M1562): a dying parent signals any still-LIVE
+ * child that registered for it -- the counterpart to app_free_zombie_children
+ * above, which only ever touches already-zombie (dead) children. Opt-in via
+ * the usual app_request_signal gate (0/no-handler = silently no-op). */
+static void app_notify_pdeathsig(int ppid) {
+    for (int i = 0; i < MAX_APPS; i++)
+        if (apps[i].used && !apps[i].exited && apps[i].parent == ppid && apps[i].pdeathsig)
+            app_request_signal(&apps[i], apps[i].pdeathsig);
+}
 
 /* Block until a child (specific pid, or -1 = any) has exited, then collect it:
  * read its exit status, free its (now-zombie) slot, and return its pid. -1 if the
@@ -1257,6 +1269,11 @@ int app_reap(app_t *a) {
         vmm_destroy_address_space(a->cr3);   /* free page tables + user frames */
         a->cr3 = 0;
         if (a->gfx) { kfree(a->gfx); a->gfx = 0; }   /* graphics canvas (kernel heap) */
+        /* `a` is fully dead from here on (resources above already freed) --
+         * regardless of whether its OWN slot zombifies or frees immediately
+         * below, notify any LIVE child that registered via PR_SET_PDEATHSIG
+         * (M1562) now, once, unconditionally. */
+        app_notify_pdeathsig(a->pid);
         /* A forked child whose parent is still alive becomes a collectable
          * zombie (M1117): its resources are freed now, but the slot + exit_code
          * linger until the parent waitpid()s it. Spawned apps (parent==0) and
@@ -1264,6 +1281,7 @@ int app_reap(app_t *a) {
         if (a->parent && app_pid_alive(a->parent)) {
             a->zombie = 1;
             app_wake_waiter(a->parent);      /* wake the parent if it's blocked in waitpid */
+            app_request_signal(app_by_pid(a->parent), SIGCHLD);  /* + async-notify a parent that ISN'T (M1562) */
             return 1;                        /* window removable; slot persists as a zombie */
         }
         app_free_zombie_children(a->pid);    /* this app is leaving: orphan-free any zombies of its own */
@@ -4228,6 +4246,17 @@ long app_prctl(int option, uint64_t arg2) {
         char *out = (char *)arg2; if (!out) return -1;
         const char *t = a->title ? a->title : "";
         int i = 0; while (t[i] && i < 15) { out[i] = t[i]; i++; } out[i] = 0;
+        return 0;
+    }
+    /* PR_SET_PDEATHSIG/PR_GET_PDEATHSIG (M1562): ask to be sent a signal when
+     * THIS process's parent dies -- delivered from app_reap's death path via
+     * app_notify_pdeathsig, same opt-in app_request_signal every other async
+     * signal here goes through (0 disables; a signal number with no handler
+     * installed is simply dropped, matching this codebase's usual default). */
+    if (option == PR_SET_PDEATHSIG) { a->pdeathsig = (int)arg2; return 0; }
+    if (option == PR_GET_PDEATHSIG) {
+        int *out = (int *)arg2; if (!out) return -1;
+        *out = a->pdeathsig;
         return 0;
     }
     return -1;

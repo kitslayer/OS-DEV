@@ -166,6 +166,13 @@ static void sh_xfsz_handler(int sig) { (void)sig; g_xfsz_fired = 1; }
  * from inside the SIGUSR1 handler itself. */
 static volatile int g_sigsuspend_fired;
 static void sh_sigsuspend_handler(int sig) { (void)sig; g_sigsuspend_fired = 1; }
+/* SIGCHLD (M1562): fires on a live parent when a child exits, now that
+ * app_reap actually requests it (previously just a waitid siginfo label). */
+static volatile int g_sigchld_fired;
+static void sh_sigchld_handler(int sig) { (void)sig; g_sigchld_fired = 1; }
+/* PR_SET_PDEATHSIG (M1562): fires on a live child when ITS parent dies. */
+static volatile int g_pdeathsig_fired;
+static void sh_pdeathsig_handler(int sig) { (void)sig; g_pdeathsig_fired = 1; }
 static char *slurp(const char *name, long *len) {
     sh_unprot_buf((char *)name);          /* a quoted filename ("my file") arrives with bit-7 sentinels — reveal them
                                            * here, the one chokepoint every file-reading builtin funnels through.
@@ -759,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2706,6 +2713,40 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "sigsuspend: blocked SIGUSR1, sigsuspend(0) unblocked+waited+delivered it, mask restored after -- OK\n"
                      : "sigsuspendtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+        } else if (streq(line, "pdeathsigtest")) {   /* SIGCHLD-on-exit + prctl(PR_SET_PDEATHSIG) (M1562) */
+            long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
+            volatile unsigned long *sh = (shmid >= 0) ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
+            if (!sh) { perr("pdeathsigtest: shmget failed\n"); g_status = 1; }
+            else {
+                sh[0] = 0;                                       /* grandchild G's own pdeathsig result */
+                g_sigchld_fired = 0;                              /* explicit reset -- a rerun in the same session must not inherit a stale 1 */
+                sys_signal(17 /*SIGCHLD*/, sh_sigchld_handler);
+                long p = sys_fork();
+                if (p == 0) {                                     /* P: forks G, then dies immediately, abandoning it */
+                    long g = sys_fork();
+                    if (g == 0) {                                  /* G: asks to be signalled when P (its parent) dies */
+                        volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                        g_pdeathsig_fired = 0;                      /* same reset concern -- G is a fresh COW copy of a long-lived shell */
+                        sys_signal(10 /*SIGUSR1*/, sh_pdeathsig_handler);
+                        sys_prctl(PR_SET_PDEATHSIG, 10);
+                        int ok = 0;
+                        for (int i = 0; i < 100 && !ok; i++) { sys_sleep(20); if (g_pdeathsig_fired) ok = 1; }
+                        if (m) m[0] = (unsigned long)ok;
+                        sys_exit(0);
+                    }
+                    sys_exit(0);                                    /* P dies now -- G is still alive and waiting */
+                }
+                int st = -1; if (p > 0) sys_waitpid((int)p, &st);   /* reaps P -> app_reap's pdeathsig-notify path runs for G */
+                int sigchld_ok = g_sigchld_fired;
+                sys_signal(17, 0);                                  /* disable again -- don't leak a handler into later commands */
+                int pd_ok = 0;
+                for (int i = 0; i < 100 && !pd_ok; i++) { if (sh[0]) { pd_ok = 1; break; } sys_sleep(20); }
+                int ok = sigchld_ok && pd_ok;
+                print(ok ? "SIGCHLD delivered on a child's exit, PR_SET_PDEATHSIG delivered when ITS parent died -- OK\n"
+                         : "pdeathsigtest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+                sys_shmdt((void *)sh);
+            }
         } else if (streq(line, "flocktest")) {   /* advisory whole-file locks: conflict then free on unlock (M1177) */
             const char *path = "/tmp/lck";
             int r1 = sys_flock(path, LOCK_EX);                  /* parent takes an exclusive lock */

@@ -221,9 +221,11 @@
 #define SYS_pidfd_send_signal 204  /* (pidfd, sig) -> signal the process; 0/-1 (M1222) */
 #define SYS_getdents64   205   /* (buf, max, start_idx) -> packed dirent64 records of the cwd; bytes/0/-1 (M1223) */
 #define SYS_access       206   /* (path, amode) -> 0 if accessible, -1 (M1224) */
-#define SYS_prctl        207   /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME; 0/-1 (M1225) */
+#define SYS_prctl        207   /* (option, arg2) -> PR_SET_NAME/PR_GET_NAME/PR_SET_PDEATHSIG/PR_GET_PDEATHSIG; 0/-1 (M1225, M1562) */
 #define PR_SET_NAME 15
 #define PR_GET_NAME 16
+#define PR_SET_PDEATHSIG 1   /* real Linux's own value (M1562) */
+#define PR_GET_PDEATHSIG 2
 #define SYS_set_tid_address 208  /* (tidptr) -> register clear_child_tid (futex-on-exit); returns the tid (M1226) */
 #define SYS_waitid       209   /* (idtype, id, siginfo*, options) -> 0/-1; WNOHANG = non-blocking reap (M1227) */
 #define SYS_truncate     210   /* (path, len) -> resize a real file (tmpfs / ext2 mount); 0/-1 (M1228) */
