@@ -313,7 +313,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
-    case SYS_utimens: case SYS_futimens: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
+    case SYS_utimens: case SYS_futimens: case SYS_utimensat: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
     case SYS_chown: case SYS_fchown: case SYS_unlinkat: case SYS_mkdirat:
     case SYS_fchmodat: case SYS_fchownat:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
@@ -381,7 +381,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",
+        [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",[SYS_utimensat]="utimensat",
         [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_process_madvise]="process_madvise",
         [SYS_faccessat2]="faccessat2",[SYS_sched_setaffinity]="sched_setaffinity",[SYS_sched_getaffinity]="sched_getaffinity",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
@@ -1483,6 +1483,17 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
         if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_chown(eff, (long)r->rdx, (long)r->r10);
+        break;
+    }
+    case SYS_utimensat: {                  /* (dirfd, path, atime, mtime) -> set timestamps relative to a dir fd
+                                             * (M1559); same shape as fchownat -- atime/mtime are the actual
+                                             * UTIME_NOW/OMIT-sentinel-capable values directly (M1230's own
+                                             * simplification), not a timespec[2]+flags pair, so no
+                                             * AT_SYMLINK_NOFOLLOW here either, matching every other *at syscall */
+        char eff[256];
+        if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_utimens(eff, (long)r->rdx, (long)r->r10);
         break;
     }
     case SYS_lseek:                        /* (fd, off, whence) -> reposition a file fd (M1193) */

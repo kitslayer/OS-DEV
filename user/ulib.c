@@ -542,6 +542,7 @@ int  sys_waitid(int idtype, int id, struct siginfo *si, int options) { return (i
 int  sys_truncate(const char *path, long len) { return (int)do_syscall(SYS_truncate, (long)path, len, 0); }
 int  sys_utimens(const char *path, long atime, long mtime) { return (int)do_syscall(SYS_utimens, (long)path, atime, mtime); }
 int  sys_futimens(int fd, long atime, long mtime) { return (int)do_syscall(SYS_futimens, fd, atime, mtime); }
+int  sys_utimensat(int dirfd, const char *path, long atime, long mtime) { return (int)do_syscall4(SYS_utimensat, dirfd, (long)path, atime, mtime); }
 int  sys_jail(const char *prog, const char *promises, const char *path) { return (int)do_syscall(SYS_jail, (long)prog, (long)promises, (long)path); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }

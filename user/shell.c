@@ -3326,6 +3326,26 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "utimes: set mtime to a fixed epoch (statx reads it), UTIME_NOW advances it, futimens(fd) sets it -- OK\n"
                      : "utimestest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+            /* utimensat (M1559): the one *at family member still missing once
+             * fchmodat/fchownat/faccessat2 shipped. Same shape as fchownat --
+             * atime/mtime are the actual UTIME_NOW/OMIT values directly (M1230's
+             * own simplification), not a timespec[2]+flags pair -- so both an
+             * AT_FDCWD absolute path and a real dirfd are checked, same as attest. */
+            int ok2 = 1;
+            sys_writefile("/tmp/UT2.TXT", "z", 1);
+            if (sys_utimensat(AT_FDCWD, "/tmp/UT2.TXT", UTIME_OMIT, 0x60000000) != 0) ok2 = 0;
+            if (sys_statx("/tmp/UT2.TXT", &st) != 0 || (long)st.stx_mtime != 0x60000000) ok2 = 0;
+            int dfd3 = sys_open("/tmp");
+            if (dfd3 < 0) ok2 = 0;
+            else {
+                if (sys_utimensat(dfd3, "UT2.TXT", UTIME_OMIT, 0x70000000) != 0) ok2 = 0;   /* dirfd-relative */
+                sys_fdclose(dfd3);
+            }
+            if (sys_statx("/tmp/UT2.TXT", &st) != 0 || (long)st.stx_mtime != 0x70000000) ok2 = 0;   /* landed on the same file */
+            sys_delete("/tmp/UT2.TXT");
+            print(ok2 ? "utimensat: sets mtime via AT_FDCWD + a real dirfd, same file both ways -- OK\n"
+                      : "utimestest: utimensat VERIFY FAILED\n");
+            if (!ok2) g_status = 1;
         } else if (streq(line, "pidstattest")) {   /* /proc/<pid>/stat — the ps/top line (M1231) */
             int ok = 1;
             char sb[256];
