@@ -4335,6 +4335,20 @@ static int run_command(char *line, char *cwd) {
                 print(dst == 0 ? "RLIMIT_DATA: heap growth capped (malloc failed in child) OK\n" : "RLIMIT_DATA: VERIFY FAILED\n");
                 if (dst != 0) g_status = 1;
             }
+            /* RLIMIT_NOFILE (M1547): cap open fds — a CHILD again, so the shell's
+             * own fd table is untouched. limit=4 (beyond stdio) fits exactly 2
+             * pipes (each needs 2 slots); a 3rd pipe must be denied. */
+            long fc = sys_fork();
+            if (fc == 0) {
+                struct rlimit fl; fl.rlim_cur = 4; fl.rlim_max = 4; sys_setrlimit(RLIMIT_NOFILE, &fl);
+                int pfds[8][2]; int opened = 0;
+                for (int i = 0; i < 8; i++) { if (sys_pipe(pfds[i]) != 0) break; opened++; }
+                sys_exit(opened == 2 ? 0 : 1);           /* 0 = correctly capped at exactly 2 pipes (4 fds) */
+            } else if (fc > 0) {
+                int fst = -1; sys_waitpid((int)fc, &fst);
+                print(fst == 0 ? "RLIMIT_NOFILE: fd allocation capped (3rd pipe denied past the limit) OK\n" : "RLIMIT_NOFILE: VERIFY FAILED\n");
+                if (fst != 0) g_status = 1;
+            }
         } else if (streq(line, "hugetest")) {   /* 2 MiB hugepage: ONE fault maps all 512 pages (M1155) */
             unsigned long len = 2 * 1024 * 1024;            /* one 2 MiB huge page */
             unsigned char *m = (unsigned char *)sys_mmap_huge(len);

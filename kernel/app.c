@@ -161,6 +161,7 @@ struct app {
     uint64_t rlim_nproc;                 /* RLIMIT_NPROC: max live children (0 = unlimited), inherited on fork (M1163) */
     uint64_t rlim_as;                    /* RLIMIT_AS: max total mmap bytes (0 = unlimited) (M1164) */
     uint64_t rlim_data;                  /* RLIMIT_DATA: max heap bytes (0 = unlimited) (M1164) */
+    uint64_t rlim_nofile;                /* RLIMIT_NOFILE: max open fds (0 = unlimited), inherited on fork (M1547) */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -1034,16 +1035,18 @@ long app_process_vm_write(int pid, uint64_t raddr, const void *local, uint64_t l
 int app_setrlimit(int resource, uint64_t val) {
     struct app *a = cur(); if (!a) return -1;
     uint64_t v = (val == RLIM_INFINITY) ? 0 : val;      /* stored: 0 = unlimited */
-    if (resource == RLIMIT_NPROC) { a->rlim_nproc = v; return 0; }
-    if (resource == RLIMIT_AS)    { a->rlim_as    = v; return 0; }
-    if (resource == RLIMIT_DATA)  { a->rlim_data  = v; return 0; }
+    if (resource == RLIMIT_NPROC)  { a->rlim_nproc  = v; return 0; }
+    if (resource == RLIMIT_AS)     { a->rlim_as     = v; return 0; }
+    if (resource == RLIMIT_DATA)   { a->rlim_data   = v; return 0; }
+    if (resource == RLIMIT_NOFILE) { a->rlim_nofile = v; return 0; }
     return -1;                                          /* other resources not yet enforced */
 }
 uint64_t app_getrlimit(int resource) {
     struct app *a = cur(); if (!a) return RLIM_INFINITY;
-    uint64_t v = (resource == RLIMIT_NPROC) ? a->rlim_nproc :
-                 (resource == RLIMIT_AS)    ? a->rlim_as    :
-                 (resource == RLIMIT_DATA)  ? a->rlim_data  : 0;
+    uint64_t v = (resource == RLIMIT_NPROC)  ? a->rlim_nproc  :
+                 (resource == RLIMIT_AS)     ? a->rlim_as     :
+                 (resource == RLIMIT_DATA)   ? a->rlim_data   :
+                 (resource == RLIMIT_NOFILE) ? a->rlim_nofile : 0;
     return v ? v : RLIM_INFINITY;
 }
 /* prlimit (M1214): get — and optionally set — ANOTHER process's resource limit
@@ -1053,9 +1056,10 @@ uint64_t app_getrlimit(int resource) {
 long app_prlimit(int pid, int resource, uint64_t newval, int do_set) {
     struct app *t = pid ? app_by_pid(pid) : cur();
     if (!t) return (long)RLIM_INFINITY;
-    uint64_t *slot = (resource == RLIMIT_NPROC) ? &t->rlim_nproc :
-                     (resource == RLIMIT_AS)    ? &t->rlim_as :
-                     (resource == RLIMIT_DATA)  ? &t->rlim_data : 0;
+    uint64_t *slot = (resource == RLIMIT_NPROC)  ? &t->rlim_nproc :
+                     (resource == RLIMIT_AS)     ? &t->rlim_as :
+                     (resource == RLIMIT_DATA)   ? &t->rlim_data :
+                     (resource == RLIMIT_NOFILE) ? &t->rlim_nofile : 0;
     if (!slot) return (long)RLIM_INFINITY;
     uint64_t old = *slot ? *slot : RLIM_INFINITY;       /* 0 stored = unlimited */
     if (do_set) *slot = (newval == RLIM_INFINITY) ? 0 : newval;
@@ -1075,12 +1079,13 @@ int app_format_limits(app_t *ap, char *b, int max) {
     if (!a || max <= 0) return 0;
     int p = 0;
     p = maps_str(b, p, max, "Limit           Value\n");
-    struct { const char *name; uint64_t v; } row[3] = {
+    struct { const char *name; uint64_t v; } row[4] = {
         { "RLIMIT_AS       ", a->rlim_as },
         { "RLIMIT_DATA     ", a->rlim_data },
         { "RLIMIT_NPROC    ", a->rlim_nproc },
+        { "RLIMIT_NOFILE   ", a->rlim_nofile },
     };
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         p = maps_str(b, p, max, row[i].name);
         if (row[i].v == 0) p = maps_str(b, p, max, "unlimited");
         else                p = lim_dec(b, p, max, row[i].v);
@@ -3340,14 +3345,34 @@ static int memfd_grow(struct memfd *m, unsigned long need) {
  * the window/keyboard, and dup2 can redirect them to a pipe. So pipe()/fifo_open
  * hand out fds from 3 up, like Unix, leaving 0/1/2 for stdio. */
 #define APP_FD_FIRST 3
+/* RLIMIT_NOFILE (M1547): true if `a` already has rlim_nofile fds open, so any
+ * NEW fd allocation should be refused (0/unset = unlimited, always false).
+ * Call this right before the "scan for a free slot" loop at every fd-
+ * creating site below, so a limited process can't out-run its own cap
+ * regardless of which specific syscall it uses to open one more fd. */
+static int app_fd_over_limit(struct app *a) {
+    if (!a->rlim_nofile) return 0;
+    int used = 0;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (a->fd[i].used) used++;
+    return used >= (int)a->rlim_nofile;
+}
 /* pipe(out[2]): out[0]=read end, out[1]=write end. 0/-1. */
 int app_pipe(int *out) {
     struct app *a = cur(); if (!a) return -1;
     int idx = pipe_new(); if (idx < 0) return -1;
     int rfd = -1, wfd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { rfd = i; break; }
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used && i != rfd) { wfd = i; break; }
-    if (rfd < 0 || wfd < 0) { pipe_close_end(idx, 0); pipe_close_end(idx, 1); return -1; }   /* table full */
+    /* RLIMIT_NOFILE (M1547): a pipe needs TWO slots, so require room for both up
+     * front rather than the usual single-slot app_fd_over_limit check -- a
+     * process sitting at exactly limit-1 would otherwise pass a single-slot
+     * check twice in a row (neither slot is marked used between the two scans)
+     * and land one fd over its cap. */
+    int nofile_used = 0;
+    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (a->fd[i].used) nofile_used++;
+    if (!a->rlim_nofile || nofile_used + 2 <= (int)a->rlim_nofile) {
+        for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { rfd = i; break; }
+        for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used && i != rfd) { wfd = i; break; }
+    }
+    if (rfd < 0 || wfd < 0) { pipe_close_end(idx, 0); pipe_close_end(idx, 1); return -1; }   /* table full (or over RLIMIT_NOFILE) */
     a->fd[rfd] = (struct fdent){ 1, 1, 0, idx, {0}, 0 };          /* used, type=pipe, read end */
     a->fd[wfd] = (struct fdent){ 1, 1, 1, idx, {0}, 0 };          /* used, type=pipe, write end */
     out[0] = rfd; out[1] = wfd; return 0;
@@ -3513,7 +3538,7 @@ int app_fifo_open(const char *path, int write) {
     struct app *a = cur(); if (!a) return -1;
     int idx = fifo_pipe(path); if (idx < 0) return -1;
     int fd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     pipe_open_end(idx, write ? 1 : 0);
     a->fd[fd] = (struct fdent){ 1, 1, (uint8_t)(write ? 1 : 0), idx, {0}, 0 };
@@ -3543,7 +3568,7 @@ int app_open(const char *path, int flags) {
             id = (n << 1) | 1;                                   /* slave id */
         }
         int fd = -1;
-        for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+        if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
         if (fd < 0) { if (!(id & 1)) pty_close(id); return -1; } /* no fd slot: undo the master open */
         a->fd[fd] = (struct fdent){ 1, 11, 1, id, {0}, 0 };      /* used, type=11 pty, write_end=1 (bidirectional) */
         int j = 0; while (path[j] && j < (int)sizeof a->fd[fd].path - 1) { a->fd[fd].path[j] = path[j]; j++; }
@@ -3562,7 +3587,7 @@ int app_open(const char *path, int flags) {
         st.stx_size = 0;
     }
     int fd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     uint8_t wr = (flags & O_WRONLY) ? 1 : 0;                  /* write_end=1 => writable file fd (M1195) */
     a->fd[fd] = (struct fdent){ 1, 2, wr, 0, {0}, 0 };        /* used, type=file */
@@ -3624,7 +3649,7 @@ int app_memfd_create(const char *name, int flags) {
     struct app *a = cur(); if (!a) return -1;
     int idx = memfd_alloc(name); if (idx < 0) return -1;
     int fd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) { memfd_unref(idx); return -1; }
     a->fd[fd] = (struct fdent){ 1, 3, 1, idx, {0}, 0 };      /* used, type=memfd, writable, obj=idx */
     return fd;
@@ -3667,7 +3692,7 @@ long app_ftruncate(int fd, long len) {
 int app_timerfd_create(void) {
     struct app *a = cur(); if (!a) return -1;
     int fd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     a->fd[fd] = (struct fdent){ 1, 4, 0, 0, {0}, 0 };       /* used, type=timerfd, off=0 disarmed, obj=0 one-shot */
     return fd;
@@ -3686,7 +3711,7 @@ long app_timerfd_settime(int fd, long delay_ms, long interval_ms) {
 int app_eventfd_create(unsigned int initval, int flags) {
     struct app *a = cur(); if (!a) return -1;
     int fd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     a->fd[fd] = (struct fdent){ 1, 5, (flags & EFD_SEMAPHORE) ? (uint8_t)1 : (uint8_t)0,
                                 0, {0}, (long)initval, (flags & EFD_CLOEXEC) ? (uint8_t)1 : (uint8_t)0 };
@@ -3700,7 +3725,7 @@ int app_inotify_init(void) {
     struct app *a = cur(); if (!a) return -1;
     int idx = inotify_new(); if (idx < 0) return -1;
     int fd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) { inotify_free(idx); return -1; }
     a->fd[fd] = (struct fdent){ 1, 8, 0, idx, {0}, 0, 0 };   /* used, type=inotify, obj=instance */
     return fd;
@@ -3720,7 +3745,7 @@ int app_socket(int domain, int type) {
     if (domain != 2 /*AF_INET*/) return -1;
     if (type != 2 /*SOCK_DGRAM*/ && type != 1 /*SOCK_STREAM*/) return -1;
     int fd = -1;
-    for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     if (type == 1) {                                       /* SOCK_STREAM: a TCP client socket (M1268) */
         int idx = net_tcp_sock_open(); if (idx < 0) return -1;
@@ -3838,7 +3863,7 @@ int app_epoll_create(void) {
     int idx = -1; for (int i = 0; i < NEPOLL; i++) if (!epolls[i].used) { idx = i; break; }
     if (idx < 0) return -1;
     epolls[idx].used = 1; epolls[idx].refs = 1; epolls[idx].n = 0;
-    int fd = -1; for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    int fd = -1; if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) { epolls[idx].used = 0; return -1; }
     a->fd[fd] = (struct fdent){ 1, 6, 0, idx, {0}, 0, 0 };   /* used, type=epoll, obj=idx */
     return fd;
@@ -3959,7 +3984,7 @@ int app_fd_ready(app_t *ap, int fd, int events) {
 int app_pidfd_open(int pid) {
     struct app *a = cur(); if (!a) return -1;
     if (!app_pid_alive(pid)) return -1;                    /* must name a live process */
-    int fd = -1; for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    int fd = -1; if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     a->fd[fd] = (struct fdent){ 1, 7, 0, pid, {0}, 0, 0 };  /* used, type=pidfd, obj=pid */
     return fd;
@@ -3982,7 +4007,7 @@ int app_pidfd_getfd(int pidfd, int targetfd) {
     if (!a || pidfd < 0 || pidfd >= APP_NFD || !a->fd[pidfd].used || a->fd[pidfd].type != 7) return -1;
     struct app *t = app_by_pid(a->fd[pidfd].obj);
     if (!t || t->exited || targetfd < 0 || targetfd >= APP_NFD || !t->fd[targetfd].used) return -1;
-    int fd = -1; for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }
+    int fd = -1; if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     a->fd[fd] = t->fd[targetfd];                           /* snapshot (shares the underlying object) */
     a->fd[fd].cloexec = 0;                                 /* a freshly-obtained fd is not close-on-exec */
@@ -4119,6 +4144,7 @@ long app_fork(struct registers *r) {
     a->sig_restorer = p->sig_restorer; a->curcol = p->curcol;
     a->rlim_nproc = p->rlim_nproc;                      /* RLIMIT_NPROC is inherited across fork (M1163) */
     a->rlim_as = p->rlim_as; a->rlim_data = p->rlim_data;   /* RLIMIT_AS/DATA inherited too (M1164) */
+    a->rlim_nofile = p->rlim_nofile;                    /* RLIMIT_NOFILE inherited too (M1547) */
     /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
     a->promises = p->promises; a->pledged = p->pledged;
     a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;

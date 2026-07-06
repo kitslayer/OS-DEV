@@ -495,6 +495,7 @@ struct statx {                /* unsigned/unsigned long to match the other share
 
 /* getrlimit/setrlimit (M1163), shared by the kernel + ulib. */
 #define RLIMIT_DATA    2
+#define RLIMIT_NOFILE  7    /* max open fds (M1547) */
 #define RLIMIT_NPROC   6
 #define RLIMIT_AS      9
 #define RLIM_INFINITY  (~0UL)
