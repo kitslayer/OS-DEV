@@ -327,9 +327,36 @@ typedef struct { unsigned long r_offset, r_info; long r_addend; } dl_rela;
 
 struct dlobj { unsigned char *base; const dl_sym *dynsym; const char *dynstr; int nsym; int ok; };
 
+/* M1539: cross-object symbol resolution. Every object dlopen() has EVER
+ * loaded lives here (not just the one currently being loaded), so a later
+ * .so's undefined (SHN_UNDEF) imports can be resolved against an earlier
+ * .so's exports -- real multi-library linking, not just each .so's own
+ * self-contained relocations (which is all M1263's original dlopen did:
+ * every S was computed straight from the CURRENT object's own dynsym, so an
+ * import from a different object silently resolved to that object's OWN
+ * base+0 instead of ever being looked up elsewhere). Load order matters, the
+ * same as classic Unix dynamic linking: a dependency must be dlopen()'d
+ * before the library that imports from it. */
+static struct dlobj g_dlobjs[4];
+static int g_dlnobj;
+
+static unsigned long dl_resolve_import(const char *name) {
+    for (int oi = 0; oi < g_dlnobj; oi++) {
+        struct dlobj *o = &g_dlobjs[oi];
+        if (!o->ok || !o->dynsym) continue;
+        for (int i = 0; i < o->nsym; i++) {
+            if (o->dynsym[i].st_shndx == 0 || !o->dynsym[i].st_value) continue;  /* not a real export */
+            const char *n = o->dynstr + o->dynsym[i].st_name;
+            const char *a = n, *b = name;
+            while (*a && *a == *b) { a++; b++; }
+            if (*a == 0 && *b == 0) return (unsigned long)(o->base + o->dynsym[i].st_value);
+        }
+    }
+    return 0;
+}
+
 void *dlopen(const char *path) {
-    static struct dlobj objs[4]; static int nobj;
-    if (nobj >= 4) return 0;
+    if (g_dlnobj >= 4) return 0;
     /* File buffer must be MALLOC'd (pre-faulted heap), not mmap'd: sys_readfile
      * validates the user buffer's PTEs, and a fresh demand-paged mmap region has
      * no present pages yet -> validation would reject it. */
@@ -364,7 +391,12 @@ void *dlopen(const char *path) {
             break;
         }
 
-    /* apply relocations (every SHT_RELA section): point the GOT at loaded code */
+    /* apply relocations (every SHT_RELA section): point the GOT at loaded code.
+     * M1539: a symbol UNDEFINED in this object's own dynsym (st_shndx==0) is an
+     * IMPORT -- resolve it against every object dlopen()'d so far, instead of
+     * the old (silently wrong for real imports) "always use this object's own
+     * dynsym[sidx].st_value" -- which for an undefined symbol is always 0, so
+     * it used to resolve straight to this object's own base with no warning. */
     for (int i = 0; i < eh->e_shnum; i++) {
         if (sh[i].sh_type != 4 /*SHT_RELA*/) continue;
         const dl_rela *rel = (const dl_rela *)(file + sh[i].sh_offset);
@@ -372,7 +404,13 @@ void *dlopen(const char *path) {
         for (int r = 0; r < nr; r++) {
             unsigned sidx = (unsigned)(rel[r].r_info >> 32);
             unsigned typ  = (unsigned)(rel[r].r_info & 0xffffffffu);
-            unsigned long S = (dynsym && sidx < (unsigned)nsym) ? (unsigned long)base + dynsym[sidx].st_value : 0;
+            unsigned long S = 0;
+            if (dynsym && sidx < (unsigned)nsym) {
+                if (dynsym[sidx].st_shndx != 0 && dynsym[sidx].st_value)
+                    S = (unsigned long)base + dynsym[sidx].st_value;          /* defined in THIS object */
+                else
+                    S = dl_resolve_import(dynstr + dynsym[sidx].st_name);    /* import: search earlier objects */
+            }
             unsigned long *slot = (unsigned long *)(base + rel[r].r_offset);
             if (typ == 8 /*RELATIVE*/)                    *slot = (unsigned long)base + (unsigned long)rel[r].r_addend;
             else if (typ == 6 /*GLOB_DAT*/ || typ == 7 /*JUMP_SLOT*/) *slot = S;
@@ -381,8 +419,9 @@ void *dlopen(const char *path) {
     }
 
     sys_mprotect(base, span, 1 | 2 | 4);                  /* R|W|X: the loaded code must be executable */
-    objs[nobj].base = base; objs[nobj].dynsym = dynsym; objs[nobj].dynstr = dynstr; objs[nobj].nsym = nsym; objs[nobj].ok = 1;
-    return &objs[nobj++];
+    g_dlobjs[g_dlnobj].base = base; g_dlobjs[g_dlnobj].dynsym = dynsym; g_dlobjs[g_dlnobj].dynstr = dynstr;
+    g_dlobjs[g_dlnobj].nsym = nsym; g_dlobjs[g_dlnobj].ok = 1;
+    return &g_dlobjs[g_dlnobj++];
 }
 
 void *dlsym(void *handle, const char *name) {

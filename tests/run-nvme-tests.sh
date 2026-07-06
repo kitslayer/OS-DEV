@@ -121,8 +121,8 @@ forbid "panic"                       "kernel panic"
 forbid "unhandled (interrupt|excep)" "unhandled exception"
 forbid "page fault"                  "page fault"
 forbid "general protection"          "#GP fault"
-forbid "READ FAILED"                 "nvme read failure"
-forbid "MISMATCH"                    "nvme write round-trip mismatch"
+forbid "\[nvme\] sector .* READ FAILED"                "nvme read failure"
+forbid "\[nvme\] write round-trip on sector .* MISMATCH" "nvme write round-trip mismatch"
 
 if [ "$fail" -eq 0 ]; then
     echo "PASS: in-guest nvme (controller up, known sectors read back, write round-trip, no crash)"

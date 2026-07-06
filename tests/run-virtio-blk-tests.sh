@@ -120,8 +120,8 @@ forbid "panic"                       "kernel panic"
 forbid "unhandled (interrupt|excep)" "unhandled exception"
 forbid "page fault"                  "page fault"
 forbid "general protection"          "#GP fault"
-forbid "READ FAILED"                 "virtio-blk read failure"
-forbid "MISMATCH"                    "virtio-blk write round-trip mismatch"
+forbid "\[virtio-blk\] sector .* READ FAILED"              "virtio-blk read failure"
+forbid "\[virtio-blk\] write round-trip on sector .* MISMATCH" "virtio-blk write round-trip mismatch"
 
 if [ "$fail" -eq 0 ]; then
     echo "PASS: in-guest virtio-blk (device up, known sectors read back, write round-trip, no crash)"

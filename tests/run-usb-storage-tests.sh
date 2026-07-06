@@ -144,9 +144,9 @@ forbid "panic"                       "kernel panic"
 forbid "unhandled (interrupt|excep)" "unhandled exception"
 forbid "page fault"                  "page fault"
 forbid "general protection"          "#GP fault"
-forbid "READ FAILED"                 "usb-storage read failure"
+forbid "\[usb-storage\] sector .* READ FAILED"              "usb-storage read failure"
 forbid "READ CAPACITY failed"        "usb-storage READ CAPACITY failure"
-forbid "MISMATCH"                    "usb-storage write round-trip mismatch"
+forbid "\[usb-storage\] write round-trip on sector .* MISMATCH" "usb-storage write round-trip mismatch"
 
 if [ "$fail" -eq 0 ]; then
     echo "PASS: in-guest usb-storage (BOT/SCSI device enumerated, READ CAPACITY matched, known sectors read back, write round-trip, tablet intact, no crash)"

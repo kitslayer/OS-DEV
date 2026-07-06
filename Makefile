@@ -109,7 +109,20 @@ $(BUILD)/dltest.so: user/dltest_lib.c Makefile
 	@mkdir -p $(BUILD)
 	$(CC) -shared -fPIC -nostdlib -ffreestanding -fno-stack-protector -mno-red-zone -fno-pie -O2 $< -o $@
 
-$(DISK): $(BUILD)/mkfatfs $(BUILD)/dltest.so
+# Two more shared libraries proving cross-object dynamic linking (M1539):
+# dlext.so imports base_mul as an undefined symbol that only dlbase.so
+# exports, so dlopen() must resolve it against an EARLIER-loaded object
+# (dl_resolve_import() in ulib.c) rather than silently misresolving it to its
+# own base. Same freestanding PIC ET_DYN recipe as dltest.so.
+$(BUILD)/dlbase.so: user/dlbase_lib.c Makefile
+	@mkdir -p $(BUILD)
+	$(CC) -shared -fPIC -nostdlib -ffreestanding -fno-stack-protector -mno-red-zone -fno-pie -O2 $< -o $@
+
+$(BUILD)/dlext.so: user/dlext_lib.c Makefile
+	@mkdir -p $(BUILD)
+	$(CC) -shared -fPIC -nostdlib -ffreestanding -fno-stack-protector -mno-red-zone -fno-pie -O2 $< -o $@
+
+$(DISK): $(BUILD)/mkfatfs $(BUILD)/dltest.so $(BUILD)/dlbase.so $(BUILD)/dlext.so
 	$(BUILD)/mkfatfs $@
 
 $(BUILD)/%.o: %.c Makefile

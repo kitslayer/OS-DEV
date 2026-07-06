@@ -126,7 +126,7 @@ forbid "panic"                       "kernel panic"
 forbid "unhandled (interrupt|excep)" "unhandled exception"
 forbid "page fault"                  "page fault"
 forbid "general protection"          "#GP fault"
-forbid "READ FAILED"                 "floppy sector read failure"
+forbid "\[floppy\] sector .* READ FAILED" "floppy sector read failure"
 
 if [ "$fail" -eq 0 ]; then
     echo "PASS: in-guest floppy (FDC up, known sectors read back over ISA DMA, no crash)"

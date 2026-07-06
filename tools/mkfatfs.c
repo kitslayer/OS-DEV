@@ -1137,6 +1137,8 @@ static const struct {
     { "240P    NES", "tools/240p.nes" },  /* 240p test suite (GPLv3, by Tepples): a video/sound test ROM */
     { "LIBBET  GB ", "tools/libbet.gb" }, /* Libbet and the Magic Floor (Zlib, by Tepples): a Game Boy game */
     { "DLTEST  SO ", "build/dltest.so" }, /* a shared library for the userspace dynamic linker (M1263): dltest builtin dlopen()s it */
+    { "DLBASE  SO ", "build/dlbase.so" }, /* cross-object dynamic linking (M1539): exports base_mul; loaded first */
+    { "DLEXT   SO ", "build/dlext.so" },  /* imports base_mul from DLBASE.SO; dlxtest builtin dlopen()s both in order */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 

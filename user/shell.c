@@ -3696,6 +3696,20 @@ static int run_command(char *line, char *cwd) {
             if (!(ok && ga == 42 && an == 42)) ok = 0;
             if (ok) print("dl: dlopen(DLTEST.SO) mapped+relocated the shared object, dlsym(greet)(40)=42, dlsym(answer)()=42 (incl. a JUMP_SLOT reloc) -- userspace dynamic linker OK\n");
             else { sys_setcolor(2); print("dltest: VERIFY FAILED (h="); sys_setcolor(0); printl((long)(h!=0)); print(" greet="); printl(ga); print(" answer="); printl(an); print(")\n"); g_status = 1; }
+        } else if (streq(line, "dlxtest")) {   /* cross-object dynamic linking: an import resolved against an EARLIER dlopen()'d .so (M1539) */
+            int ok = 1;
+            void *hb = dlopen("DLBASE.SO");            /* the dependency: must load first, same as classic Unix load-order rules */
+            void *he = hb ? dlopen("DLEXT.SO") : 0;     /* imports base_mul as an undefined symbol -- resolved against DLBASE.SO's export */
+            if (!hb || !he) ok = 0;
+            long mac = -1;
+            if (he) {
+                int (*ext_mac)(int, int, int) = (int (*)(int, int, int))dlsym(he, "ext_mac");
+                if (ext_mac) mac = ext_mac(6, 7, 3);   /* base_mul(6,7)+3 = 45 -- a wrong pre-M1539 resolve (silently base+0) would crash or return garbage, not 45 */
+                else ok = 0;
+            }
+            if (!(ok && mac == 45)) ok = 0;
+            if (ok) print("dl: dlopen(DLBASE.SO) then dlopen(DLEXT.SO), dlsym(ext_mac)(6,7,3)=45 -- import resolved against an earlier-loaded object, not misresolved to its own base -- cross-object dynamic linking OK\n");
+            else { sys_setcolor(2); print("dlxtest: VERIFY FAILED (hb="); sys_setcolor(0); printl((long)(hb!=0)); print(" he="); printl((long)(he!=0)); print(" mac="); printl(mac); print(")\n"); g_status = 1; }
         } else if (streq(line, "lotest")) {   /* loopback (lo, 127.0.0.0/8): a UDP round-trip with NO NIC (M1264) */
             unsigned char lo[4] = {127,0,0,1};
             int ok = 1;
