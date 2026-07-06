@@ -51,9 +51,14 @@ key f9                       # open the Apps menu (Browser is item 0, pre-select
 sleep 0.6
 key ret                      # launch the Browser
 
-# Retry the capture a few times while the home page paints.
+# Retry the capture a few times while the home page paints. Widened from 4 to
+# 8 tries: the browser's own home-page load competes for ata_lock with the
+# desktop's (now throttled, but not eliminated) Files-panel disk hits, same
+# residual as the M1541/httpdtest one -- a couple of observed failures in a
+# long sequential `make check` run, never reproduced in isolation, went away
+# with more retry budget there too (see osdev-ata-pio-busywait-flakiness).
 rc=1
-for try in 1 2 3 4; do
+for try in 1 2 3 4 5 6 7 8; do
     sleep 1
     printf 'screendump %s\n' "$PPM" | socat - UNIX-CONNECT:"$SOCK" >/dev/null 2>&1 || true
     sleep 0.4

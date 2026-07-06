@@ -384,6 +384,32 @@ static int flist(vfs_dirent *e, int max) {
     return n;
 }
 
+/* Both draw_content's KIND_FILES case and files_key() used to call flist()
+ * unconditionally -- a full from-disk directory re-scan on every redraw AND
+ * every keypress, tens of times a second under any UI activity at all. That
+ * was already wasteful; combined with M1541's ata_lock (which correctly
+ * serializes ALL disk access across tasks/cores, closing a real hardware
+ * race) it meant this one hot, high-frequency caller could starve other
+ * tasks' disk I/O for unpredictable stretches -- found via an intermittent
+ * httpd-server test hang immediately after ata_lock landed. Cache the
+ * listing and only actually hit disk if it's stale (>= 1s old) or the
+ * caller demands a fresh one (force=1, used right after a mutation --
+ * delete/rename/mkdir/chdir -- so those still feel immediate). A whole
+ * second of passive staleness is unnoticeable for a background panel
+ * (any real user action already forces a fresh read), and cuts this hot
+ * caller's disk-lock contention window by roughly another 4x on top of the
+ * first throttling pass. */
+static vfs_dirent g_files_cache[256];
+static int g_files_cache_n;
+static uint64_t g_files_cache_at;
+static int files_list_cached(vfs_dirent **out, int force) {
+    uint64_t now = timer_ms();
+    if (force || !g_files_cache_at || now - g_files_cache_at >= 1000)
+        { g_files_cache_n = flist(g_files_cache, 256); g_files_cache_at = now; }
+    *out = g_files_cache;
+    return g_files_cache_n;
+}
+
 static void draw_content(const window_t *w, int focused) {
     int bx = w->x + 8, by = w->y + TITLEBAR_H + 8;
     switch (w->kind) {
@@ -418,7 +444,7 @@ static void draw_content(const window_t *w, int focused) {
         break;
     }
     case KIND_FILES: {
-        static vfs_dirent e[256]; int n = flist(e, 256);   /* static (BSS): ~18KB won't fit the 16KB guard-page-less stack; single-threaded render makes it safe. Browse ALL disk files, not just the first 32 (M421) */
+        vfs_dirent *e; int n = files_list_cached(&e, 0);   /* throttled: a render is passive, never forces a fresh disk hit (M1541) */
         if (w->editing) {                                      /* a text-input is open: prompt + the typed name + a cursor */
             char pr[48]; int p = 0;
             const char *a = w->editing == 1 ? "Rename to: " : "New folder: ";
@@ -1318,7 +1344,7 @@ static int ctx_desktop_action(int row) {
             return 0;                                            /* one; z-order is preserved (all visible) */
         case 2: {                                                /* Change Wallpaper: cycle to the next image on disk */
             static int wp_idx;
-            static vfs_dirent e[256]; int n = flist(e, 256);  /* static (BSS), safe single-threaded (cf. files_key) */
+            vfs_dirent *e; int n = files_list_cached(&e, 0);  /* just picking a wallpaper -- a throttled cache is plenty fresh */
             if (n <= 0) return 0;
             for (int step = 0; step < n; step++) {               /* try each candidate from wp_idx onward; */
                 int i = (wp_idx + step) % n;                     /* a non-image / decode failure is skipped */
@@ -1391,7 +1417,7 @@ static int files_is_image(const char *name, int len) {
  * wallpaper. The dirent list is re-read each call, so it refreshes for free
  * after a delete. */
 static void files_key(window_t *w, int k) {
-    static vfs_dirent e[256]; int n = flist(e, 256);   /* match the render cap; static (BSS), safe single-threaded (M421) */
+    vfs_dirent *e; int n = files_list_cached(&e, 0);   /* a keypress can act on the throttled cache; forced below only after an actual mutation */
 
     if (w->editing) {                                         /* a rename / new-folder text-input is open */
         if (k == 27) { w->editing = 0; return; }               /* Esc cancels: leave the name untouched */
@@ -1411,7 +1437,7 @@ static void files_key(window_t *w, int k) {
                 }
             }
             w->editing = 0;
-            n = flist(e, 256);                              /* re-list so the new/renamed entry shows + the clamp is correct */
+            n = files_list_cached(&e, 1);                   /* forced: re-list so the new/renamed entry shows + the clamp is correct */
             if (w->fsel >= n) w->fsel = n - 1;
             if (w->fsel < 0)  w->fsel = 0;
             return;
@@ -1440,7 +1466,7 @@ static void files_key(window_t *w, int k) {
             buf[p] = 0;
             vfs_remove(buf);                                   /* deletes a file or empty dir; refuses a non-empty dir (no crash) */
             w->fconfirm = 0;
-            n = flist(e, 256);                              /* re-list so the clamp uses the post-delete count */
+            n = files_list_cached(&e, 1);                   /* forced: re-list so the clamp uses the post-delete count */
             if (w->fsel >= n) w->fsel = n - 1;
             if (w->fsel < 0)  w->fsel = 0;
         } else {                                               /* ANY other key cancels; the key is otherwise ignored */
@@ -1451,7 +1477,7 @@ static void files_key(window_t *w, int k) {
 
     if (k == 0x11)       { if (w->fsel > 0)     w->fsel--; }   /* up   */
     else if (k == 0x12)  { if (w->fsel < n - 1) w->fsel++; }   /* down */
-    else if (k == 8)     { if (vfs_chdir("..") == 0) { n = flist(e, 256); w->fsel = 0; } }  /* Backspace: up one directory */
+    else if (k == 8)     { if (vfs_chdir("..") == 0) { n = files_list_cached(&e, 1); w->fsel = 0; } }  /* Backspace: up one directory (forced: new directory) */
     else if (k == 'd' || k == 0x7F) {                          /* arm the delete confirm (render shows the prompt) */
         w->fconfirm = 1;
     }
@@ -1482,7 +1508,7 @@ static void files_key(window_t *w, int k) {
             char d[64]; int p = 0;
             for (int j = 0; j < len - 1 && p < (int)sizeof(d) - 1; j++) d[p++] = name[j];  /* strip trailing '/' */
             d[p] = 0;
-            if (vfs_chdir(d) == 0) { n = flist(e, 256); w->fsel = 0; }   /* enter folder + re-list */
+            if (vfs_chdir(d) == 0) { n = files_list_cached(&e, 1); w->fsel = 0; }   /* enter folder + re-list (forced: new directory) */
         } else if (len > 0) {                                  /* a file: open it */
             if (files_editable(name, len)) {
                 app_spawn_named_arg("editor", name);           /* edit text/source files */
@@ -1503,7 +1529,7 @@ static void files_key(window_t *w, int k) {
  * it, and open it (the mouse equivalent of arrowing to it and pressing Enter).
  * `my` is the screen y of the click; the row math mirrors the KIND_FILES render. */
 static void files_click(window_t *w, int my) {
-    static vfs_dirent e[256]; int n = flist(e, 256);
+    vfs_dirent *e; int n = files_list_cached(&e, 0);   /* just hit-testing which row was clicked; files_key (below) does any real navigation */
     if (n <= 0) return;
     int by = w->y + TITLEBAR_H + 8;                    /* body content origin (matches draw) */
     int rows = (w->h - TITLEBAR_H - 30) / 18; if (rows < 1) rows = 1;

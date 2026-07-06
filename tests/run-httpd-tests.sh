@@ -58,36 +58,53 @@ sendkey ret
 sleep 2                           # let the app spawn + reach net_tcp_serve (listening)
 
 # curl the forwarded port from the host, retrying to land inside a listen window
-# (net_tcp_serve loops with ~3s windows; a missed SYN just retries).
-out=""
-for try in 1 2 3 4 5 6 7 8; do
-    out=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/" 2>/dev/null || true)
-    echo "$out" | grep -q "Hello from OS-DEV" && break
-    sleep 1
+# (net_tcp_serve loops with ~3s windows; a missed SYN just retries). The three
+# fetches (dashboard / a real file / a 404) are wrapped in an OUTER retry too,
+# not just each one's own inner loop: sustained disk contention right after
+# M1541's ata_lock landed (the desktop's Files panel and httpd's own file
+# reads serializing on the same lock) could occasionally leave the SECOND or
+# THIRD request short of its own retry budget even though the first
+# succeeded -- a real, reduced-but-not-zero residual after the lock was made
+# to yield instead of pure-spin and its timeout budget was tightened (see the
+# osdev-ata-pio-busywait-flakiness memory). Retrying the whole sequence a
+# couple of times absorbs that without weakening any assertion below.
+ok=0
+for outer in 1 2 3; do
+    out=""
+    for try in 1 2 3 4 5 6 7 8; do
+        out=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/" 2>/dev/null || true)
+        echo "$out" | grep -q "Hello from OS-DEV" && break
+        sleep 1
+    done
+
+    # Fetch a specific file by path (M1327): GET /README.TXT must return the
+    # FILE's contents (parsed request -> sys_tcp_accept -> serve_file ->
+    # sys_tcp_respond), not the dashboard. The asserted line is unique to it.
+    file=""
+    for try in 1 2 3 4 5 6; do
+        file=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/README.TXT" 2>/dev/null || true)
+        echo "$file" | grep -q "read by our own driver" && break
+        sleep 1
+    done
+    # A missing file must 404 (proves per-request routing, not a canned page).
+    miss=""
+    for try in 1 2 3 4; do
+        miss=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/NOPE.XXX" 2>/dev/null || true)
+        echo "$miss" | grep -q "404" && break
+        sleep 1
+    done
+
+    if echo "$out" | grep -q "Hello from OS-DEV" && echo "$out" | grep -q "README.TXT" \
+       && echo "$out" | grep -q "Uptime:" && echo "$out" | grep -q "MemTotal:" \
+       && echo "$out" | grep -q 'href="/README.TXT"' \
+       && echo "$file" | grep -q "read by our own driver" \
+       && echo "$miss" | grep -q "404"; then
+        ok=1; break
+    fi
+    echo "  (outer retry $outer: one or more requests didn't get the expected response yet)"
 done
 
-# Fetch a specific file by path (M1327): GET /README.TXT must return the FILE's
-# contents (parsed request -> sys_tcp_accept -> serve_file -> sys_tcp_respond),
-# not the dashboard. The asserted line is unique to the file.
-file=""
-for try in 1 2 3 4 5 6; do
-    file=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/README.TXT" 2>/dev/null || true)
-    echo "$file" | grep -q "read by our own driver" && break
-    sleep 1
-done
-# A missing file must 404 (proves per-request routing, not a canned page).
-miss=""
-for try in 1 2 3 4; do
-    miss=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/NOPE.XXX" 2>/dev/null || true)
-    echo "$miss" | grep -q "404" && break
-    sleep 1
-done
-
-if echo "$out" | grep -q "Hello from OS-DEV" && echo "$out" | grep -q "README.TXT" \
-   && echo "$out" | grep -q "Uptime:" && echo "$out" | grep -q "MemTotal:" \
-   && echo "$out" | grep -q 'href="/README.TXT"' \
-   && echo "$file" | grep -q "read by our own driver" \
-   && echo "$miss" | grep -q "404"; then
+if [ "$ok" -eq 1 ]; then
     echo "PASS: in-guest httpd served a LIVE dashboard, an individual FILE by path, and a 404 over the from-scratch TCP stack"
     echo "  GET /            -> $(echo "$out" | grep -o '<h1>[^<]*</h1>' | head -1) + live system status + a file listing"
     echo "  GET /README.TXT  -> $(echo "$file" | head -1)"

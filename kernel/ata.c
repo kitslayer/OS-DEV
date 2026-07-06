@@ -31,6 +31,7 @@
 #include "vmm.h"
 #include "string.h"
 #include "timer.h"
+#include "task.h"
 
 /* Per-bus command-block + control-block base ports. A drive's I/O base depends
  * only on its bus (primary/secondary); master vs slave is the DRV bit in the
@@ -95,7 +96,22 @@ static int drive_ok(int drive) { return drive >= 0 && drive < ATA_MAX_DRIVES; }
  * interrupt-driven), so there's no need for task.c's additional local
  * irq_save/restore, just mutual exclusion across cores. */
 static volatile int ata_lock;
-static inline void ata_lock_take(void) { while (__atomic_exchange_n(&ata_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause"); }
+/* Spin tightly for a short while (the common case: the lock is held only for
+ * a quick transfer), then start YIELDING instead of pure-spinning. Found via
+ * a real, reproduced hang: task 0 (the desktop main loop, PERMANENTLY pinned
+ * to the BSP -- see task_t's pin_core comment) held the lock through a slow
+ * multi-sector operation while another task, scheduled on that SAME core,
+ * pure-spun waiting for it -- burning the very CPU time that would have let
+ * the holder finish and release the lock sooner, extending the wait instead
+ * of just riding it out. task_yield() breaks that: it hands the CPU back to
+ * the scheduler instead of consuming a whole timeslice on a doomed poll. */
+static inline void ata_lock_take(void) {
+    uint32_t spins = 0;
+    while (__atomic_exchange_n(&ata_lock, 1, __ATOMIC_ACQUIRE)) {
+        if (++spins >= 1000) { spins = 0; task_yield(); }
+        else __asm__ volatile("pause");
+    }
+}
 static inline void ata_lock_give(void) { __atomic_store_n(&ata_lock, 0, __ATOMIC_RELEASE); }
 
 /* --- low-level busy/DRQ polling, scoped to a given I/O base ---------------- */
@@ -105,13 +121,20 @@ static inline void ata_lock_give(void) { __atomic_store_n(&ata_lock, 0, __ATOMIC
  * behind a fixed spin count varies a lot, so a count-based "timeout" can
  * genuinely expire before an emulated drive finishes — a real, observed
  * source of transient read failures (see the osdev-ata-pio-busywait-flakiness
- * memory), not a sign of a stuck device. 2 seconds is generous for any real
- * or emulated ATA command; ATA_SPIN_HARDCAP is a zero-cost last-resort
+ * memory), not a sign of a stuck device. 300ms is still generous for any real
+ * or emulated ATA command (which normally completes in low single-digit ms)
+ * -- kept modest on purpose, since kernel/fat32.c's ata_read_retry() can
+ * multiply a single stuck sector into 3 of these in a row, and one caller
+ * (a directory scan) can need one per sector: an overly generous bound here
+ * compounds into a multi-TEN-second worst case while holding ata_lock, which
+ * is what actually caused a real, reproduced httpd-server hang (a slow
+ * lock-holder + a busy-spinning waiter competing for the same core -- see
+ * ata_lock_take's own comment). ATA_SPIN_HARDCAP is a zero-cost last-resort
  * fallback in case this is ever reached before the timer/interrupts are up
  * (it never is today — timer_init()+interrupts_enable() run at kmain.c's
  * boot, long before any ATA call — but a wall-clock check alone would spin
  * forever if timer_ms() ever stopped advancing). */
-#define ATA_TIMEOUT_MS    2000u
+#define ATA_TIMEOUT_MS    300u
 #define ATA_SPIN_HARDCAP  100000000u
 
 static int wait_busy_clear(uint16_t io) {

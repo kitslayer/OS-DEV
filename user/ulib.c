@@ -434,7 +434,25 @@ void *dlopen(const char *path) {
         }
     }
 
-    sys_mprotect(base, span, 1 | 2 | 4);                  /* R|W|X: the loaded code must be executable */
+    /* W^X hardening: mprotect each PT_LOAD segment to its OWN p_flags (like
+     * elf_load_dyn does for the app's own executable in kernel/elf.c), not a
+     * single blanket R|W|X for the whole image -- a .so's read-only/code
+     * segments have no business being writable, or its data segment being
+     * executable. ELF's PF_R/PF_W/PF_X (4/2/1) don't share sys_mprotect's own
+     * prot encoding (1/2/4), so this translates rather than passing p_flags
+     * through directly. Page-align each segment's own range so adjoining
+     * segments' differing permissions on a shared page can't clobber one
+     * another (the same segment-boundary care a page-granular real ld.so
+     * takes). */
+    for (int i = 0; i < eh->e_phnum; i++) {
+        if (ph[i].p_type != 1) continue;
+        int prot = 1;                                       /* PF_R is implicit for any real segment, as elf_load_dyn also assumes */
+        if (ph[i].p_flags & 2) prot |= 2;                    /* PF_W -> W */
+        if (ph[i].p_flags & 1) prot |= 4;                    /* PF_X -> X */
+        unsigned long start = ph[i].p_vaddr & ~4095ul;
+        unsigned long end   = (ph[i].p_vaddr + ph[i].p_memsz + 4095ul) & ~4095ul;
+        sys_mprotect(base + start, end - start, prot);
+    }
     g_dlobjs[g_dlnobj].base = base; g_dlobjs[g_dlnobj].dynsym = dynsym; g_dlobjs[g_dlnobj].dynstr = dynstr;
     g_dlobjs[g_dlnobj].nsym = nsym; g_dlobjs[g_dlnobj].ok = 1;
     return &g_dlobjs[g_dlnobj++];
