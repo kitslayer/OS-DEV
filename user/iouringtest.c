@@ -50,6 +50,24 @@ int main(void) {
         ring.sqe[t++] = (struct io_sqe){ .op = IO_READ,  .a = (unsigned long)fds[0],
                                          .b = (unsigned long)pipebuf, .c = 5, .user_data = 0xA5 };
     }
+    // IOSQE_IO_LINK (M1552): a failing linked op cancels the rest of ITS
+    // chain, but ops after the chain still run normally. Chain: a write that
+    // succeeds (linked) -> a read from a bad fd that fails (linked) -> a
+    // read from a perfectly valid fd, which must still be CANCELLED because
+    // the op before it in the chain failed (linked) -> a NOP, the chain's
+    // un-linked terminator, also cancelled -> one final, independent NOP
+    // that must run normally, proving the cancellation didn't leak past the chain.
+    static char linkbuf[8];
+    if (have_pipe) {
+        ring.sqe[t++] = (struct io_sqe){ .op = IO_WRITE, .flags = IOSQE_IO_LINK, .a = (unsigned long)fds[1],
+                                         .b = (unsigned long)"link!", .c = 5, .user_data = 0xB0 };
+        ring.sqe[t++] = (struct io_sqe){ .op = IO_READ,  .flags = IOSQE_IO_LINK, .a = 999,   /* bad fd -> deliberate failure */
+                                         .b = (unsigned long)linkbuf, .c = 5, .user_data = 0xB1 };
+        ring.sqe[t++] = (struct io_sqe){ .op = IO_READ,  .flags = IOSQE_IO_LINK, .a = (unsigned long)fds[0],
+                                         .b = (unsigned long)linkbuf, .c = 5, .user_data = 0xB2 };
+        ring.sqe[t++] = (struct io_sqe){ .op = IO_NOP,   .user_data = 0xB3 };   /* chain terminator: no LINK flag, still cancelled */
+        ring.sqe[t++] = (struct io_sqe){ .op = IO_NOP,   .user_data = 0xB4 };   /* independent: must run normally */
+    }
     ring.sq_tail = t;                  // publish the batch
 
     sys_setcolor(4); print("io_uring:"); sys_setcolor(0); print(" queued ");  pdec(t);  print(" ops; one sys_io_uring_enter()...\n\n");
@@ -57,10 +75,12 @@ int main(void) {
     long done = sys_io_uring_enter(&ring);
 
     print("enter() processed ");  pdec(done);  print(" op(s); completions:\n");
+    long res_by_tag[256]; for (int i = 0; i < 256; i++) res_by_tag[i] = -12345;   /* sentinel: tag never seen */
     while (ring.cq_head != ring.cq_tail) {
         struct io_cqe *c = &ring.cqe[ring.cq_head % IO_RING_N];
         print("  cqe tag=0x"); phex((unsigned char *)&c->user_data, 1);
         print(" res="); pdec(c->res); print("\n");
+        if (c->user_data < 256) res_by_tag[c->user_data] = c->res;
         ring.cq_head++;
     }
 
@@ -73,6 +93,15 @@ int main(void) {
         int pok = (pipebuf[0]=='p' && pipebuf[1]=='i' && pipebuf[2]=='p' && pipebuf[3]=='e' && pipebuf[4]=='!');
         print("op#4/#5 IO_WRITE+IO_READ on a pipe fd, same batch: ");
         sys_setcolor(pok ? 10 : 4); print(pok ? "wrote+read back \"pipe!\" through the fd -- OK\n" : "MISMATCH\n"); sys_setcolor(0);
+
+        int link_ok = (res_by_tag[0xB0] == 5)     // the write at the head of the chain succeeded
+                   && (res_by_tag[0xB1] < 0)      // the bad-fd read genuinely failed
+                   && (res_by_tag[0xB2] < 0)      // cancelled: a VALID fd, but linked after the failure
+                   && (res_by_tag[0xB3] < 0)      // cancelled: the chain's un-linked terminator
+                   && (res_by_tag[0xB4] == 0);    // independent NOP after the chain: ran normally
+        print("IOSQE_IO_LINK: a failing linked op cancels the rest of its chain: ");
+        sys_setcolor(link_ok ? 10 : 4); print(link_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+
         sys_fdclose(fds[0]); sys_fdclose(fds[1]);
     }
     sys_setcolor(9); print("\n");  pdec((long)t);  print(" ops, one ring0 crossing. that's io_uring.\n"); sys_setcolor(0);

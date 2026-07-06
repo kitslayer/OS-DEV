@@ -31,9 +31,11 @@ enum {
     IO_OPMAX
 };
 
+#define IOSQE_IO_LINK (1u << 0)   /* if THIS op fails, cancel every SQE linked after it (M1552) */
+
 struct io_sqe {             /* submission-queue entry */
     uint32_t op;            /* one of IO_*                       */
-    uint32_t _pad;
+    uint32_t flags;         /* IOSQE_* bits (M1552; was an unused _pad) */
     uint64_t a, b, c;       /* operands (see the opcode table)   */
     uint64_t user_data;     /* opaque tag, echoed back in the CQE */
 };

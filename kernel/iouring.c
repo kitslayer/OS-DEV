@@ -91,9 +91,21 @@ long io_uring_enter(uint64_t ring_uptr) {
     /* Snapshot the tail once so a buggy/racy app can't make us loop unbounded;
      * cap the batch at the ring depth regardless. */
     uint32_t head = r->sq_head, tail = r->sq_tail;
+    int skip_chain = 0;   /* IOSQE_IO_LINK (M1552): a prior failure cancels every SQE still linked after it */
     for (uint32_t i = 0; head != tail && i < IO_RING_N; head++, i++) {
         struct io_sqe sqe = r->sqe[head % IO_RING_N];   /* copy out before running */
-        int64_t res = io_run_one(&sqe, self);
+        int64_t res;
+        if (skip_chain) {
+            /* This SQE is cancelled by an earlier failure in its link chain --
+             * don't run it at all. No distinct -ECANCELED here: this ABI only
+             * ever returns -1 for "didn't happen," an honest simplification
+             * matching how every op here already reports failure. */
+            res = -1;
+        } else {
+            res = io_run_one(&sqe, self);
+            if (res < 0 && (sqe.flags & IOSQE_IO_LINK)) skip_chain = 1;   /* cancel the rest of THIS chain */
+        }
+        if (skip_chain && !(sqe.flags & IOSQE_IO_LINK)) skip_chain = 0;   /* this was the chain's last link */
 
         /* Post the completion if the CQ has room (drop silently if it's full —
          * the app should drain it; res is lost, like a real overflowing CQ). */
