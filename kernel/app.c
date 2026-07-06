@@ -165,6 +165,7 @@ struct app {
     uint64_t rlim_cpu;                   /* RLIMIT_CPU: max CPU seconds (0 = unlimited) -> SIGXCPU, inherited on fork (M1548) */
     uint64_t cpulimit_next;              /* next timer_ticks() allowed to re-raise SIGXCPU (M1548); see app_cpulimit_tick */
     uint64_t rlim_fsize;                 /* RLIMIT_FSIZE: max file size in bytes (0 = unlimited) -> SIGXFSZ, inherited on fork (M1549) */
+    uint64_t rlim_memlock;               /* RLIMIT_MEMLOCK: max mlock()'d bytes (0 = unlimited), inherited on fork (M1550) */
     int      exit_code;                  /* exit status, captured at SYS_exit */
     int      zombie;                     /* exited + resources freed, slot retained until a parent collects it */
     volatile int waiting;                /* this process is blocked in waitpid() */
@@ -1044,6 +1045,7 @@ int app_setrlimit(int resource, uint64_t val) {
     if (resource == RLIMIT_NOFILE) { a->rlim_nofile = v; return 0; }
     if (resource == RLIMIT_CPU)    { a->rlim_cpu    = v; return 0; }
     if (resource == RLIMIT_FSIZE)  { a->rlim_fsize  = v; return 0; }
+    if (resource == RLIMIT_MEMLOCK) { a->rlim_memlock = v; return 0; }
     return -1;                                          /* other resources not yet enforced */
 }
 uint64_t app_getrlimit(int resource) {
@@ -1053,7 +1055,8 @@ uint64_t app_getrlimit(int resource) {
                  (resource == RLIMIT_DATA)   ? a->rlim_data   :
                  (resource == RLIMIT_NOFILE) ? a->rlim_nofile :
                  (resource == RLIMIT_CPU)    ? a->rlim_cpu    :
-                 (resource == RLIMIT_FSIZE)  ? a->rlim_fsize  : 0;
+                 (resource == RLIMIT_FSIZE)  ? a->rlim_fsize  :
+                 (resource == RLIMIT_MEMLOCK) ? a->rlim_memlock : 0;
     return v ? v : RLIM_INFINITY;
 }
 /* prlimit (M1214): get — and optionally set — ANOTHER process's resource limit
@@ -1068,7 +1071,8 @@ long app_prlimit(int pid, int resource, uint64_t newval, int do_set) {
                      (resource == RLIMIT_DATA)   ? &t->rlim_data :
                      (resource == RLIMIT_NOFILE) ? &t->rlim_nofile :
                      (resource == RLIMIT_CPU)    ? &t->rlim_cpu :
-                     (resource == RLIMIT_FSIZE)  ? &t->rlim_fsize : 0;
+                     (resource == RLIMIT_FSIZE)  ? &t->rlim_fsize :
+                     (resource == RLIMIT_MEMLOCK) ? &t->rlim_memlock : 0;
     if (!slot) return (long)RLIM_INFINITY;
     uint64_t old = *slot ? *slot : RLIM_INFINITY;       /* 0 stored = unlimited */
     if (do_set) *slot = (newval == RLIM_INFINITY) ? 0 : newval;
@@ -1088,15 +1092,16 @@ int app_format_limits(app_t *ap, char *b, int max) {
     if (!a || max <= 0) return 0;
     int p = 0;
     p = maps_str(b, p, max, "Limit           Value\n");
-    struct { const char *name; uint64_t v; } row[6] = {
+    struct { const char *name; uint64_t v; } row[7] = {
         { "RLIMIT_AS       ", a->rlim_as },
         { "RLIMIT_DATA     ", a->rlim_data },
         { "RLIMIT_NPROC    ", a->rlim_nproc },
         { "RLIMIT_NOFILE   ", a->rlim_nofile },
         { "RLIMIT_CPU      ", a->rlim_cpu },
         { "RLIMIT_FSIZE    ", a->rlim_fsize },
+        { "RLIMIT_MEMLOCK  ", a->rlim_memlock },
     };
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         p = maps_str(b, p, max, row[i].name);
         if (row[i].v == 0) p = maps_str(b, p, max, "unlimited");
         else                p = lim_dec(b, p, max, row[i].v);
@@ -2151,6 +2156,15 @@ static int app_mlock_set(uint64_t addr, uint64_t len, int lock) {
     if (!a || len == 0) return -1;
     uint64_t start = addr & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t end   = (addr + len + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    if (lock && a->rlim_memlock) {          /* RLIMIT_MEMLOCK (M1550): whole-VMA granularity, like the lock itself */
+        uint64_t locked_now = 0, newly = 0;
+        for (int i = 0; i < a->nvma; i++) {
+            if (a->vma[i].locked) { locked_now += a->vma[i].len; continue; }
+            uint64_t vs = a->vma[i].start, ve = vs + a->vma[i].len;
+            if (start < ve && vs < end) newly += a->vma[i].len;   /* overlaps + not already locked */
+        }
+        if (locked_now + newly > a->rlim_memlock) return -1;
+    }
     int any = 0;
     for (int i = 0; i < a->nvma; i++) {
         uint64_t vs = a->vma[i].start, ve = vs + a->vma[i].len;
@@ -2165,7 +2179,14 @@ int app_munlock(uint64_t addr, uint64_t len) { return app_mlock_set(addr, len, 0
  * honored in app_mmap). munlockall clears both. Returns 0/-1. */
 int app_mlockall(int flags) {
     struct app *a = cur(); if (!a) return -1;
-    if (flags & 1) for (int i = 0; i < a->nvma; i++) a->vma[i].locked = 1;   /* MCL_CURRENT */
+    if (flags & 1) {
+        if (a->rlim_memlock) {              /* RLIMIT_MEMLOCK (M1550): mlock()'s own per-call cap must apply here too */
+            uint64_t total = 0;
+            for (int i = 0; i < a->nvma; i++) total += a->vma[i].len;
+            if (total > a->rlim_memlock) return -1;
+        }
+        for (int i = 0; i < a->nvma; i++) a->vma[i].locked = 1;   /* MCL_CURRENT */
+    }
     a->mlock_future = (flags & 2) ? 1 : 0;                                   /* MCL_FUTURE */
     return 0;
 }
@@ -4193,6 +4214,7 @@ long app_fork(struct registers *r) {
     a->rlim_nofile = p->rlim_nofile;                    /* RLIMIT_NOFILE inherited too (M1547) */
     a->rlim_cpu = p->rlim_cpu;                          /* RLIMIT_CPU inherited too (M1548) */
     a->rlim_fsize = p->rlim_fsize;                      /* RLIMIT_FSIZE inherited too (M1549) */
+    a->rlim_memlock = p->rlim_memlock;                  /* RLIMIT_MEMLOCK inherited too (M1550) */
     /* sandbox is inherited (a child can't escape its parent's pledge/unveil) */
     a->promises = p->promises; a->pledged = p->pledged;
     a->nuv = p->nuv; a->uv_active = p->uv_active; a->uv_locked = p->uv_locked;

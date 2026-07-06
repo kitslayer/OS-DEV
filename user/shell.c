@@ -2183,6 +2183,23 @@ static int run_command(char *line, char *cwd) {
                 if (!ok) g_status = 1;
                 sys_munlock(lk, len); sys_munmap(lk, len); sys_munmap(un, len);
             }
+            /* RLIMIT_MEMLOCK (M1550): cap mlock()'d bytes -- a CHILD again, so
+             * the shell's own (just-verified-unlocked) mlock ability is
+             * untouched. A 1-page cap: locking exactly one page must succeed,
+             * a second page must be denied (would exceed it). */
+            long ml = sys_fork();
+            if (ml == 0) {
+                struct rlimit mll; mll.rlim_cur = 4096; mll.rlim_max = 4096; sys_setrlimit(RLIMIT_MEMLOCK, &mll);
+                unsigned char *m1 = (unsigned char *)sys_mmap(4096);
+                unsigned char *m2 = (unsigned char *)sys_mmap(4096);
+                long r1 = (m1 && m2) ? sys_mlock(m1, 4096) : -1;
+                long r2 = (m1 && m2) ? sys_mlock(m2, 4096) : -1;
+                sys_exit((r1 == 0 && r2 < 0) ? 0 : 1);
+            } else if (ml > 0) {
+                int mlst = -1; sys_waitpid((int)ml, &mlst);
+                print(mlst == 0 ? "RLIMIT_MEMLOCK: 2nd mlock denied past the 1-page cap OK\n" : "RLIMIT_MEMLOCK: VERIFY FAILED\n");
+                if (mlst != 0) g_status = 1;
+            }
         } else if (streq(line, "usagetest")) {  /* getrusage: per-process resource accounting (M1150) */
             struct rusage a, b;
             sys_getrusage(RUSAGE_SELF, &a);
