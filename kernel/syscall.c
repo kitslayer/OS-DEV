@@ -303,6 +303,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
     case SYS_utimens: case SYS_futimens: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
     case SYS_chown: case SYS_fchown: case SYS_unlinkat: case SYS_mkdirat:
+    case SYS_fchmodat: case SYS_fchownat:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
     case SYS_fallocate: case SYS_copy_file_range: case SYS_setxattr: case SYS_removexattr:
@@ -368,7 +369,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
+        [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
@@ -1423,6 +1424,22 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rsi) || !ubuf(r->rdx, sizeof(struct statx))) { r->rax = (uint64_t)-1; break; }
         if (at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_stat(eff, (struct statx *)r->rdx);
+        break;
+    }
+    case SYS_fchmodat: {                   /* (dirfd, path, mode) -> chmod relative to a dir fd (M1553); no
+                                             * AT_SYMLINK_NOFOLLOW flags arg -- unlinkat's own flags already
+                                             * goes unused here too, no symlink-follow-choice infra to gate on */
+        char eff[256];
+        if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_chmod(eff, (uint32_t)r->rdx);
+        break;
+    }
+    case SYS_fchownat: {                   /* (dirfd, path, uid, gid) -> chown relative to a dir fd (M1553) */
+        char eff[256];
+        if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_chown(eff, (long)r->rdx, (long)r->r10);
         break;
     }
     case SYS_lseek:                        /* (fd, off, whence) -> reposition a file fd (M1193) */

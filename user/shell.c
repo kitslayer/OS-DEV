@@ -3525,6 +3525,31 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "*at: AT_FDCWD openat/fstatat/unlinkat + dirfd-relative openat (open /tmp -> create AT2.TXT in it) -- OK\n"
                      : "attest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+            /* fchmodat/fchownat (M1553): the two *at family members M1251 didn't
+             * add. chmod/chown are ext2-only (blockdev_mount_chown denies any
+             * non-ext2 mount outright) and this interactive boot's only disk is
+             * FAT32 -- and, notably, chmod/chown THEMSELVES have no success-path
+             * test anywhere in this codebase either, on ANY path, at_ or not.
+             * What's honestly verifiable here: the *at dirfd-resolution wiring
+             * reaches vfs_chmod/vfs_chown correctly (both via AT_FDCWD and a
+             * real dirfd) and the ext2-only guard denies cleanly rather than
+             * crashing or silently succeeding on the wrong filesystem. */
+            int ok2 = 1;
+            int f2 = sys_openat(AT_FDCWD, "/tmp/AT3.TXT", O_CREAT | O_WRONLY);
+            if (f2 < 0) ok2 = 0; else sys_fdclose(f2);
+            if (sys_fchmodat(AT_FDCWD, "/tmp/AT3.TXT", 0600) != -1) ok2 = 0;   /* tmpfs -> ext2-only guard denies */
+            if (sys_fchownat(AT_FDCWD, "/tmp/AT3.TXT", 7, 8) != -1) ok2 = 0;
+            int dfd2 = sys_open("/tmp");                                       /* same denial via a REAL dirfd */
+            if (dfd2 < 0) ok2 = 0;
+            else {
+                if (sys_fchmodat(dfd2, "AT3.TXT", 0600) != -1) ok2 = 0;
+                if (sys_fchownat(dfd2, "AT3.TXT", 7, 8) != -1) ok2 = 0;
+                sys_fdclose(dfd2);
+            }
+            sys_unlinkat(AT_FDCWD, "/tmp/AT3.TXT", 0);
+            print(ok2 ? "*at: fchmodat/fchownat reach vfs_chmod/vfs_chown via AT_FDCWD + a real dirfd (ext2-only guard denies cleanly on tmpfs) -- OK\n"
+                      : "attest: fchmodat/fchownat VERIFY FAILED\n");
+            if (!ok2) g_status = 1;
         } else if (streq(line, "faulttest")) {   /* /proc/<pid>/stat minflt field is real now (M1252) */
             int ok = 1; char sb[256]; long m1 = -1, m2 = -1;
             unsigned long len = 100 * 4096;

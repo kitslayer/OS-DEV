@@ -190,6 +190,8 @@ int  sys_openat(int dirfd, const char *path, int flags);       /* open relative 
 int  sys_unlinkat(int dirfd, const char *path, int flags);     /* remove relative to a dir fd; 0/-1 (M1251) */
 int  sys_mkdirat(int dirfd, const char *path, int mode);       /* mkdir relative to a dir fd; 0/-1 (M1251) */
 int  sys_fstatat(int dirfd, const char *path, struct statx *st, int flags); /* stat relative to a dir fd; 0/-1 (M1251) */
+int  sys_fchmodat(int dirfd, const char *path, unsigned mode);    /* chmod relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
+int  sys_fchownat(int dirfd, const char *path, int uid, int gid); /* chown relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long sys_timerfd_settime(int fd, long delay_ms, long interval_ms);  /* arm a timerfd: delay + periodic interval (ms; interval 0 = one-shot); 0/-1 (M1217, periodic M1302) */
