@@ -3832,6 +3832,20 @@ static int run_command(char *line, char *cwd) {
             } else ok = 0;
             int s = ok ? sys_socket(2, 1) : -1;                  /* AF_INET, SOCK_STREAM */
             if (s < 0) ok = 0;
+            /* setsockopt/getsockopt (M1554): needs no internet, checked before
+             * connect so it's exercised even when the fetch below can't be. */
+            int sockopt_ok = 1;
+            if (s >= 0) {
+                int one = 1, rb1 = 0, rb2 = 0; unsigned len = 0;
+                if (sys_setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) != 0) sockopt_ok = 0;
+                if (sys_getsockopt(s, IPPROTO_TCP, TCP_NODELAY, &rb1, &len) != 0 || rb1 != 1) sockopt_ok = 0;
+                if (sys_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) != 0) sockopt_ok = 0;
+                if (sys_getsockopt(s, SOL_SOCKET, SO_REUSEADDR, &rb2, &len) != 0 || rb2 != 1) sockopt_ok = 0;
+                if (sys_setsockopt(s, 999 /* bogus level */, TCP_NODELAY, &one, sizeof(one)) != -1) sockopt_ok = 0;
+            } else sockopt_ok = 0;
+            print("setsockopt/getsockopt: TCP_NODELAY+SO_REUSEADDR set+readback, bad (level,optname) denied -- ");
+            sys_setcolor(sockopt_ok ? 10 : 4); print(sockopt_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+            if (!sockopt_ok) g_status = 1;
             if (ok && sys_connect(s, ip, 80) != 0) ok = 0;
             const char *req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
             int rl = 0; while (req[rl]) rl++;

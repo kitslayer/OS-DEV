@@ -163,6 +163,8 @@ int  sys_sock_bind(int fd, int port);                          /* bind a datagra
 long sys_sendto(int fd, const unsigned char *ip4, int port, const void *buf, unsigned len);  /* bytes/-1 (M1267) */
 long sys_recvfrom(int fd, void *buf, unsigned max, void *from); /* bytes/-1, 2s timeout; from={u8 ip[4];u16 port} (M1267) */
 int  sys_connect(int fd, const unsigned char *ip4, int port);  /* active-open a TCP socket fd; 0/-1 (M1268) */
+int  sys_setsockopt(int fd, int level, int optname, const void *optval, unsigned optlen);  /* 0/-1 (M1554) */
+int  sys_getsockopt(int fd, int level, int optname, void *optval, unsigned *optlen);       /* 0/-1 (M1554) */
 void *dlopen(const char *path);                                /* userspace dynamic linker: map+relocate a .so; handle/0 (M1263) */
 void *dlsym(void *handle, const char *name);                   /* resolve an exported symbol to its runtime address; 0 if absent (M1263) */
 long sys_times(struct tms *t);                                  /* fill CPU times (ticks); returns boot ticks (M1235) */

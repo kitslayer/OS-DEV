@@ -369,7 +369,8 @@ static const char *syscall_name(uint64_t n) {
         [SYS_fanotify_serve]="fanotify_serve",[SYS_fanotify_wait]="fanotify_wait",[SYS_fanotify_provide]="fanotify_provide",
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
-        [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
+        [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",
+        [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
@@ -768,6 +769,23 @@ void syscall_dispatch(struct registers *r) {
         int port = ad[4] | (ad[5] << 8);
         __asm__ volatile("sti");           /* the 3-way handshake needs the timer */
         r->rax = (uint64_t)(int64_t)app_connect((int)r->rdi, ip, port);
+        break;
+    }
+    case SYS_setsockopt: {                 /* (fd, level, optname, optval*, optlen) (M1554) */
+        if (!ubuf(r->r10, sizeof(int))) { r->rax = (uint64_t)-1; break; }   /* optlen unused beyond this: every option here is a plain int */
+        int val = *(const int *)r->r10;
+        r->rax = (uint64_t)(int64_t)app_setsockopt((int)r->rdi, (int)r->rsi, (int)r->rdx, val);
+        break;
+    }
+    case SYS_getsockopt: {                 /* (fd, level, optname, optval*, optlen*) (M1554) */
+        if (!ubuf(r->r10, sizeof(int))) { r->rax = (uint64_t)-1; break; }
+        int val = 0;
+        long rc = app_getsockopt((int)r->rdi, (int)r->rsi, (int)r->rdx, &val);
+        if (rc == 0) {
+            *(int *)r->r10 = val;
+            if (r->r8 && ubuf(r->r8, sizeof(int))) *(int *)r->r8 = sizeof(int);
+        }
+        r->rax = (uint64_t)rc;
         break;
     }
     case SYS_rmmod:                        /* (name) -> run mod_exit + free the module slot; 0/-1 (M1262) */

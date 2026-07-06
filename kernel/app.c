@@ -3840,6 +3840,18 @@ int app_connect(int fd, const uint8_t ip[4], int port) {
     if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 10) return -1;
     return net_tcp_sock_connect(a->fd[fd].obj, ip, (uint16_t)port);
 }
+/* setsockopt/getsockopt (M1554): TCP client sockets (type 10) only -- these
+ * are the fds SO_REUSEADDR/TCP_NODELAY/SO_KEEPALIVE actually apply to. */
+int app_setsockopt(int fd, int level, int optname, int val) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 10) return -1;
+    return net_tcp_sock_setopt(a->fd[fd].obj, level, optname, val);
+}
+int app_getsockopt(int fd, int level, int optname, int *val) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 10) return -1;
+    return net_tcp_sock_getopt(a->fd[fd].obj, level, optname, val);
+}
 int app_sock_bind(int fd, int port) {
     struct app *a = cur(); if (!a) return -1;
     if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 9) return -1;

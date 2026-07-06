@@ -29,6 +29,19 @@ static long do_syscall4(long n, long a1, long a2, long a3, long a4) {
     return ret;
 }
 
+/* 5-argument variant: the 5th arg goes in r8 too (Linux-style), which the
+ * kernel reads as r->r8. Used by setsockopt/getsockopt (M1554). */
+static long do_syscall5(long n, long a1, long a2, long a3, long a4, long a5) {
+    long ret;
+    register long r10 __asm__("r10") = a4;
+    register long r8  __asm__("r8")  = a5;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8)
+                     : "memory");
+    return ret;
+}
+
 long sys_write(int fd, const void *buf, unsigned long len) {
     return do_syscall(SYS_write, fd, (long)buf, (long)len);
 }
@@ -307,6 +320,12 @@ long sys_recvfrom(int fd, void *buf, unsigned max, void *from) { return do_sysca
 int  sys_connect(int fd, const unsigned char *ip4, int port) {
     unsigned char ad[6] = { ip4[0], ip4[1], ip4[2], ip4[3], (unsigned char)(port & 0xFF), (unsigned char)((port >> 8) & 0xFF) };
     return (int)do_syscall(SYS_connect, fd, (long)ad, 0);
+}
+int  sys_setsockopt(int fd, int level, int optname, const void *optval, unsigned optlen) {
+    return (int)do_syscall5(SYS_setsockopt, fd, level, optname, (long)optval, optlen);
+}
+int  sys_getsockopt(int fd, int level, int optname, void *optval, unsigned *optlen) {
+    return (int)do_syscall5(SYS_getsockopt, fd, level, optname, (long)optval, (long)optlen);
 }
 
 /* ===================================================================== *

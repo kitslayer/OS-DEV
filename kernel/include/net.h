@@ -60,6 +60,8 @@ int  net_tcp_sock_connect(int idx, const uint8_t ip[4], uint16_t port);  /* 0/-1
 long net_tcp_sock_send(int idx, const void *buf, int len);  /* bytes/-1 */
 long net_tcp_sock_recv(int idx, void *buf, int max);        /* bytes/0 timeout/-1 closed */
 void net_tcp_sock_close(int idx);
+int  net_tcp_sock_setopt(int idx, int level, int optname, int val);   /* 0/-1 (M1554) */
+int  net_tcp_sock_getopt(int idx, int level, int optname, int *val);  /* 0/-1 (M1554) */
 /* /net/tcp sockets-as-files (M1110): `sub` is the path after "/net/tcp/" —
  * "clone", "<n>/ctl", or "<n>/data". Routed from vfs.c. */
 long netfs_read(const char *sub, void *buf, unsigned long max);

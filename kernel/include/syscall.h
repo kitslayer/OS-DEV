@@ -304,6 +304,17 @@
 #define SYS_msync        280   /* (addr, len) -> write back dirty pages of a MAP_SHARED file-backed mmap to disk; 0/-1 (M1544) */
 #define SYS_fchmodat     281   /* (dirfd, path, mode) -> chmod relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
 #define SYS_fchownat     282   /* (dirfd, path, uid, gid) -> chown relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
+#define SYS_setsockopt   283   /* (fd, level, optname, optval*, optlen) -> set a TCP-socket option; 0/-1 (M1554) */
+#define SYS_getsockopt   284   /* (fd, level, optname, optval*, optlen*) -> read a TCP-socket option; 0/-1 (M1554) */
+
+/* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
+ * pick like the signals above -- these live in a separate namespace, no
+ * collision risk with anything already in this file). */
+#define SOL_SOCKET    1
+#define SO_REUSEADDR  2
+#define SO_KEEPALIVE  9
+#define IPPROTO_TCP   6
+#define TCP_NODELAY   1
 #define SA_ONSTACK 0x08000000  /* sigaction flag: run this handler on the sigaltstack() stack (M1276) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */

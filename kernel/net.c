@@ -20,6 +20,7 @@
 #include "string.h"
 #include "tls.h"
 #include "rtc.h"
+#include "syscall.h"    /* SOL_SOCKET, SO_REUSEADDR, IPPROTO_TCP, TCP_NODELAY (M1554) */
 #include <stdint.h>
 
 /* The SLIRP defaults — used as-is until a DHCP lease (net_dhcp) overwrites them. */
@@ -579,10 +580,38 @@ int net_raw_recv(void *buf, int max, int timeout_ms) {
  *  follow-on. read/write on the fd map to tcp_read/tcp_write.
  * ===================================================================== */
 #define TCPSOCK_N 2
-static struct { int used; tcp_conn c; } g_tcpsock[TCPSOCK_N];
+/* opt_reuseaddr/opt_nodelay/opt_keepalive (M1554): setsockopt/getsockopt
+ * storage. This stack has no Nagle-style write batching to disable (every
+ * net_tcp_sock_send call reaches tcp_write immediately) and the client-only
+ * connection model here has no listening-socket bind-conflict to bypass, so
+ * neither option changes observable behavior -- store+readback is genuinely
+ * all there is to implement honestly, matching real setsockopt's own
+ * contract for plenty of options on plenty of stacks. The real value is
+ * compatibility: ported code that calls setsockopt(SO_REUSEADDR/TCP_NODELAY)
+ * before use, as a huge amount of real networking code unconditionally
+ * does, no longer has to fail or be special-cased out. */
+static struct { int used; tcp_conn c; int opt_reuseaddr, opt_nodelay, opt_keepalive; } g_tcpsock[TCPSOCK_N];
 
 int net_tcp_sock_open(void) {
-    for (int i = 0; i < TCPSOCK_N; i++) if (!g_tcpsock[i].used) { g_tcpsock[i].used = 1; g_tcpsock[i].c.up = 0; return i; }
+    for (int i = 0; i < TCPSOCK_N; i++) if (!g_tcpsock[i].used) {
+        g_tcpsock[i].used = 1; g_tcpsock[i].c.up = 0;
+        g_tcpsock[i].opt_reuseaddr = g_tcpsock[i].opt_nodelay = g_tcpsock[i].opt_keepalive = 0;
+        return i;
+    }
+    return -1;
+}
+int net_tcp_sock_setopt(int idx, int level, int optname, int val) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;
+    if (level == SOL_SOCKET && optname == SO_REUSEADDR) { g_tcpsock[idx].opt_reuseaddr = val; return 0; }
+    if (level == SOL_SOCKET && optname == SO_KEEPALIVE) { g_tcpsock[idx].opt_keepalive = val; return 0; }
+    if (level == IPPROTO_TCP && optname == TCP_NODELAY) { g_tcpsock[idx].opt_nodelay   = val; return 0; }
+    return -1;                                              /* unknown (level, optname) pair */
+}
+int net_tcp_sock_getopt(int idx, int level, int optname, int *val) {
+    if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;
+    if (level == SOL_SOCKET && optname == SO_REUSEADDR) { *val = g_tcpsock[idx].opt_reuseaddr; return 0; }
+    if (level == SOL_SOCKET && optname == SO_KEEPALIVE) { *val = g_tcpsock[idx].opt_keepalive; return 0; }
+    if (level == IPPROTO_TCP && optname == TCP_NODELAY) { *val = g_tcpsock[idx].opt_nodelay;   return 0; }
     return -1;
 }
 int net_tcp_sock_connect(int idx, const uint8_t ip[4], uint16_t port) {
