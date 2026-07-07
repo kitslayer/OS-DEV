@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 CC=${CC:-gcc}
 SAN="-fsanitize=address,undefined -fno-sanitize-recover=all"
 echo "building host PNG encoder + decoder (ASan+UBSan)..."
-$CC -std=gnu11 -O1 $SAN -Ikernel/include \
+$CC -std=gnu11 -O1 $SAN -Ikernel/include -DDEFLATE_HOST \
     tests/png/png_encode_test.c kernel/png_encode.c kernel/png.c kernel/inflate.c kernel/deflate.c \
     -o /tmp/osdev_pngenc_test
 echo "running PNG encoder round-trip + bounds test..."

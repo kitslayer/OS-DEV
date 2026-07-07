@@ -2892,10 +2892,11 @@ static void collect_remote_imgs(browser_t *b) {
         if (ae >= len) break;                             /* unterminated tag -> stop */
         const char *src; int srcl;
         if (img_src_attr(h + as, ae - as, &src, &srcl) && srcl > 0 && srcl <= 95) {
-            /* our decoders handle PNG/GIF/JPEG/SVG — skip a src whose extension is a
-             * format we still can't decode (WebP/AVIF/ICO) so we don't waste a fetch +
-             * pre-paint latency on an image that would just fall back to a link.
-             * Extension-less srcs are still tried (may be a real image). */
+            /* our decoders handle PNG/GIF/JPEG/SVG + lossless WebP (M1466) — skip a src
+             * whose extension is a format we still can't decode (AVIF/ICO, and lossy
+             * VP8 WebP) so we don't waste a fetch + pre-paint latency on an image that
+             * would just fall back to a link. Extension-less srcs are still tried (may
+             * be a real image). */
             int pe = srcl; for (int x = 0; x < srcl; x++) if (src[x] == '?') { pe = x; break; }
             int unsup = 0;
             if (pe >= 4) { const char *e = src + pe - 4;

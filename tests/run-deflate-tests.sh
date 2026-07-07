@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 CC=${CC:-gcc}
 SAN="-fsanitize=address,undefined -fno-sanitize-recover=all"
 echo "building host deflate compressor + inflate decoder (ASan+UBSan)..."
-$CC -std=gnu11 -O1 $SAN -Ikernel/include \
+$CC -std=gnu11 -O1 $SAN -Ikernel/include -DDEFLATE_HOST \
     tests/deflate/deflate_test.c kernel/deflate.c kernel/inflate.c \
     -o /tmp/osdev_deflate_test
 echo "running compressor round-trip + bounds test..."
@@ -38,7 +38,7 @@ int main(void){
     return 0;
 }
 EOF
-    $CC -std=gnu11 -O2 -Ikernel/include /tmp/osdev_mkgz.c kernel/deflate.c -o /tmp/osdev_mkgz
+    $CC -std=gnu11 -O2 -Ikernel/include -DDEFLATE_HOST /tmp/osdev_mkgz.c kernel/deflate.c -o /tmp/osdev_mkgz
     /tmp/osdev_mkgz
     if gunzip -t /tmp/osdev_interop.gz; then
         echo "PASS: system gunzip -t accepts gz_deflate output (CRC32 + format OK)"

@@ -255,6 +255,32 @@ int main(int argc, char **argv) {
                 if (e) { fprintf(stderr, "seek_data_hole wrong (line %ld)\n", e); return 1; }
                 printf("seek: SEEK_DATA/SEEK_HOLE on a [data|hole|data] file -- boundaries at 0/1024/3072/5000 + ENXIO at EOF\n");
             }
+            /* punch_hole on a FRESH, still extent-mapped file (M1614): unlike the
+             * seek/hole test above, which deliberately overwrites first to
+             * de-extent (so the OLD punch_hole wouldn't corrupt it), this writes
+             * ONCE and punches a hole strictly inside the extent -- the case that
+             * needs splitting one extent record into two, the newest and riskiest
+             * part of the fix. A sibling file written right after must also come
+             * back exact (the original bug freed essentially-arbitrary "block
+             * numbers" misread from the extent header). */
+            {
+                static uint8_t ph[5000]; for (int i = 0; i < 5000; i++) ph[i] = (uint8_t)(i * 7 + 11);
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/PH.TXT", ph, 5000) != 5000) { fprintf(stderr, "punch setup write failed\n"); return 1; }
+                if (ext2_punch_hole(bd_read, bd_write, 0, 0, "/PH.TXT", 2048, 1024) < 0) { fprintf(stderr, "extent punch_hole failed\n"); return 1; }
+                static uint8_t sib[64]; for (int i = 0; i < 64; i++) sib[i] = (uint8_t)(i ^ 0x5A);
+                if (ext2_write_path(bd_read, bd_write, 0, 0, "/PHSIB.TXT", sib, 64) != 64) { fprintf(stderr, "punch sibling write failed\n"); return 1; }
+                static uint8_t pr[5000];
+                long pn = ext2_read_path(bd_read, 0, 0, "/PH.TXT", pr, sizeof pr);
+                int ok = (pn == 5000);
+                for (int i = 0; ok && i < 2048; i++) if (pr[i] != ph[i]) ok = 0;      /* before the hole: untouched */
+                for (int i = 2048; ok && i < 3072; i++) if (pr[i] != 0) ok = 0;       /* the hole: reads as zero */
+                for (int i = 3072; ok && i < 5000; i++) if (pr[i] != ph[i]) ok = 0;   /* after the hole: untouched */
+                static uint8_t sibr[64];
+                long sn = ext2_read_path(bd_read, 0, 0, "/PHSIB.TXT", sibr, sizeof sibr);
+                if (sn != 64 || memcmp(sibr, sib, 64) != 0) ok = 0;
+                if (!ok) { fprintf(stderr, "extent punch_hole readback wrong (pn=%ld sn=%ld)\n", pn, sn); return 1; }
+                printf("punch_hole: fresh extent-mapped file, hole strictly mid-extent -- splits cleanly, sibling file intact\n");
+            }
             /* utimensat (M1230): set i_atime/i_mtime to fixed epochs + read the raw
              * inode back (white-box via walk); a negative arg must leave a field. */
             {

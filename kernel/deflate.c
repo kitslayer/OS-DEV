@@ -19,6 +19,46 @@
 #include "inflate.h"
 #include <stddef.h>
 
+/* M1615: this file has three pieces of shared, file-scope mutable state with
+ * no synchronization of any kind -- crc_tab[]/crc_ready and the Huffman
+ * tables fixed_init() lazily builds (both classic unlocked double-checked
+ * inits: two cores racing the first-ever call could both see "not ready"
+ * and both populate, or one could read a partially-built table the other is
+ * still writing), and head[]/prev[] (deflate_fixed's own LZ77 hash-chain
+ * scratch, reset and mutated on every single call). raw_deflate is reachable
+ * from three independent, unrelated subsystems with no shared lock between
+ * them: swap.c's swap_out() (compressing a page), png_encode.c's
+ * fb_save_png() (a screenshot syscall/hotkey), and SYS_gzip -- any two of
+ * which can now genuinely run on different cores at once. Two callers
+ * racing head[]/prev[] doesn't just risk a corrupted compressed stream: one
+ * caller's chain entries leaking into another's src[cur+best_len] read is a
+ * heap OOB read past whichever buffer happens to be smaller. One spinlock
+ * (nested in cli, same idiom as the ten files already fixed this session)
+ * covers each of the three call sites below. */
+#ifdef DEFLATE_HOST
+/* HOST test build (tests/deflate/deflate_test.c, tests/png/png_encode_test.c):
+ * this compiles as a native ring-3 process, where cli is a privileged
+ * instruction -- executing it faults immediately (confirmed the hard way:
+ * an ASan SEGV inside raw_deflate on the very first host test run of the
+ * lock below). A single-threaded host test has no real concurrency to guard
+ * against anyway, exactly the same reasoning tls.c's own TLS_RING3 guard
+ * already uses for its ring-3 build. */
+static inline uint64_t dfl_irq_save(void) { return 0; }
+static inline void dfl_irq_restore(uint64_t f) { (void)f; }
+#else
+static volatile int deflate_lock;
+static inline uint64_t dfl_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&deflate_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void dfl_irq_restore(uint64_t f) {
+    __atomic_store_n(&deflate_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+#endif
+
 /* ------------------------------------------------------------------ CRC-32 */
 /* Standard reflected CRC-32 (polynomial 0xEDB88320, as used by gzip/zlib/PNG).
  * Built once into a 256-entry table on first use. */
@@ -36,10 +76,12 @@ static void crc_init(void) {
 }
 
 static uint32_t crc32_buf(const uint8_t *p, int len) {
+    uint64_t f = dfl_irq_save();
     if (!crc_ready) crc_init();
     uint32_t c = 0xFFFFFFFFu;
     for (int i = 0; i < len; i++)
         c = crc_tab[(c ^ p[i]) & 0xFF] ^ (c >> 8);
+    dfl_irq_restore(f);
     return c ^ 0xFFFFFFFFu;
 }
 
@@ -263,7 +305,10 @@ static int deflate_fixed(bitw *w, const uint8_t *src, int len) {
  * written, or -1 on overflow. Provided as the split-out helper. */
 int raw_deflate(const uint8_t *src, int len, uint8_t *out, int outcap) {
     bitw w = { out, outcap, 0, 0, 0, 0 };
-    if (deflate_fixed(&w, src, len) < 0) return -1;
+    uint64_t f = dfl_irq_save();
+    int r = deflate_fixed(&w, src, len);
+    dfl_irq_restore(f);
+    if (r < 0) return -1;
     return w.pos;
 }
 

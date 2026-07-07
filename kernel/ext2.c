@@ -766,7 +766,8 @@ long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     if (dir_lookup(&v, pin, base, 0)) return -1;           /* name already taken */
 
     uint32_t ino = alloc_inode(&v); if (!ino) return -1;
-    uint32_t blk = alloc_block(&v); if (!blk) return -1;
+    uint32_t blk = alloc_block(&v);
+    if (!blk) { free_inode_num(&v, ino); return -1; }   /* M1616: don't leak the inode we just claimed */
 
     /* the dir's data block: "." (rec_len 12) then ".." (rec_len = rest of block) */
     uint8_t db[4096];
@@ -774,7 +775,7 @@ long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     e_wr32(db + 0, ino);  e_wr16(db + 4, 12); db[6] = 1; db[7] = 2; db[8] = '.';
     e_wr32(db + 12, parent_ino); e_wr16(db + 16, (uint16_t)(v.block_size - 12));
     db[18] = 2; db[19] = 2; db[20] = '.'; db[21] = '.';
-    if (wrblk(&v, blk, db) < 0) return -1;
+    if (wrblk(&v, blk, db) < 0) { free_block(&v, blk); free_inode_num(&v, ino); return -1; }
 
     uint8_t inode[256];
     for (uint32_t i = 0; i < v.inode_size; i++) inode[i] = 0;
@@ -784,9 +785,14 @@ long ext2_mkdir_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     e_wr32(inode + 28, v.block_size / 512);                /* i_blocks                     */
     e_wr32(inode + 40, blk);                               /* i_block[0]                   */
     e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
-    if (write_inode(&v, ino, inode) < 0) return -1;
+    if (write_inode(&v, ino, inode) < 0) { free_block(&v, blk); free_inode_num(&v, ino); return -1; }
 
-    if (dir_add(&v, parent_ino, base, ino, 2) < 0) return -1;   /* ftype 2 = directory */
+    /* dir_add's own comment: "Returns 0, or -1 if no block has room (growing
+     * the directory is unsupported)" -- a real, reachable failure (any
+     * directory whose one allocated block fills up), not a hardware-error
+     * edge case. Without this cleanup, every failed mkdir into a full
+     * directory leaked one inode + one block permanently (M1616). */
+    if (dir_add(&v, parent_ino, base, ino, 2) < 0) { free_block(&v, blk); free_inode_num(&v, ino); return -1; }   /* ftype 2 = directory */
     if (read_inode(&v, parent_ino, pin) < 0) return -1;         /* parent gains a link (the new dir's "..") */
     e_wr16(pin + 26, (uint16_t)(e_rd16(pin + 26) + 1));
     if (write_inode(&v, parent_ino, pin) < 0) return -1;
@@ -825,8 +831,9 @@ long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t
     e_wr16(inode + 26, 1);                                 /* i_links_count = 1 */
     for (int i = 0; i < tlen; i++) inode[40 + i] = (uint8_t)target[i];   /* target inline in i_block */
     e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
-    if (write_inode(&v, ino, inode) < 0) return -1;
-    if (dir_add(&v, parent_ino, base, ino, 7) < 0) return -1;   /* ftype 7 = symlink */
+    if (write_inode(&v, ino, inode) < 0) { free_inode_num(&v, ino); return -1; }
+    if (dir_add(&v, parent_ino, base, ino, 7) < 0) { free_inode_num(&v, ino); return -1; }   /* ftype 7 = symlink;
+                                                    * don't leak the inode on a full-directory failure (M1616) */
     return 0;
 }
 
@@ -1104,7 +1111,57 @@ long ext2_punch_hole(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     uint32_t first = (uint32_t)((offset + bs - 1) / bs);   /* first block fully inside the range */
     uint32_t last  = (uint32_t)(end / bs);                 /* one past the last fully-inside block */
     int freed = 0;
-    for (uint32_t fb = first; fb < last; fb++) freed += punch_block(&v, inode, fb);
+    uint8_t *ib = inode + 40;
+    if (e_rd32(inode + 32) & EXT4_EXTENTS_FL) {
+        /* M1614: punch_block only understands the direct/indirect scheme -- for
+         * an extent-mapped inode (this driver's own writer sets EXTENTS_FL on
+         * every new file when the volume has the feature, so this is the COMMON
+         * case, not a rare one) it was misreading the extent header/records as
+         * raw block pointers, freeing arbitrary live blocks via free_block() and
+         * zeroing the extent tree in place -- silent data loss + free-space
+         * corruption from an ordinary fallocate(PUNCH_HOLE) call, no concurrency
+         * needed. Same narrow scope as ext2_truncate_path's own extent handling
+         * (a single depth-0 extent): refuse rather than corrupt for anything
+         * wider (multi-extent trees, depth>0), but unlike truncate (which only
+         * ever shrinks from the tail) a punched hole can land at the head, the
+         * tail, or strictly inside the extent -- the middle case needs splitting
+         * into two extent records, handled below if eh_max has room for one. */
+        if (!(e_rd16(ib) == EXT4_EXT_MAGIC && e_rd16(ib + 6) == 0)) return -1;   /* not a depth-0 leaf */
+        uint32_t maxe = (60 - 12) / 12;
+        uint32_t ents = e_rd16(ib + 2); if (ents > maxe) ents = maxe;
+        if (ents > 1) return -1;                            /* multi-extent tree: out of scope, refuse */
+        if (ents == 1) {
+            uint8_t *ee = ib + 12;
+            uint32_t eb = e_rd32(ee + 0);                   /* ee_block: logical start */
+            uint32_t elen = e_rd16(ee + 4); if (elen > 32768) elen -= 32768;
+            uint32_t estart = e_rd32(ee + 8);               /* ee_start_lo: physical start */
+            uint32_t ee_end = eb + elen;                    /* one past the extent's logical end */
+            uint32_t lo = first > eb ? first : eb;          /* overlap of [first,last) and [eb,ee_end) */
+            uint32_t hi = last < ee_end ? last : ee_end;
+            if (lo < hi) {
+                if (lo == eb && hi == ee_end) {              /* covers the whole extent */
+                    for (uint32_t b = 0; b < elen; b++) { free_block(&v, estart + b); freed++; }
+                    e_wr16(ib + 2, 0);
+                } else if (lo == eb) {                       /* touches the head: shift start+len forward */
+                    uint32_t n = hi - lo;
+                    for (uint32_t b = 0; b < n; b++) { free_block(&v, estart + b); freed++; }
+                    e_wr32(ee + 0, eb + n); e_wr32(ee + 8, estart + n); e_wr16(ee + 4, (uint16_t)(elen - n));
+                } else if (hi == ee_end) {                   /* touches the tail: shrink len */
+                    for (uint32_t b = lo - eb; b < elen; b++) { free_block(&v, estart + b); freed++; }
+                    e_wr16(ee + 4, (uint16_t)(lo - eb));
+                } else if (ents < maxe) {                    /* strictly inside: split into two extents */
+                    for (uint32_t b = lo - eb; b < hi - eb; b++) { free_block(&v, estart + b); freed++; }
+                    uint8_t *ee2 = ib + 12 + ents * 12;      /* new record right after the existing one */
+                    e_wr32(ee2 + 0, hi); e_wr16(ee2 + 4, (uint16_t)(ee_end - hi));
+                    e_wr16(ee2 + 6, 0);  e_wr32(ee2 + 8, estart + (hi - eb));
+                    e_wr16(ee + 4, (uint16_t)(lo - eb));     /* shrink the first record to just the head piece */
+                    e_wr16(ib + 2, (uint16_t)(ents + 1));
+                }                                            /* else: no room to split -- leave this hole unpunched */
+            }
+        }
+    } else {
+        for (uint32_t fb = first; fb < last; fb++) freed += punch_block(&v, inode, fb);
+    }
     if (freed) {
         uint32_t iblk = e_rd32(inode + 28);                /* i_blocks counts 512-byte sectors */
         uint32_t dec = (uint32_t)freed * (bs / 512);
@@ -1313,7 +1370,12 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
             e_wr32(inode + 28, nblocks * (v.block_size / 512)); /* i_blocks */
             e_stamp(inode);
             if (write_inode(&v, ino, inode) < 0) return -1;
-            if (dir_add(&v, parent_ino, base, ino, 1) < 0) return -1;
+            /* dir_add's own comment: growing the directory is unsupported, so a
+             * full directory is a real, reachable failure here -- without this,
+             * it leaked the new inode AND its whole extent run (M1616). Reuses
+             * free_inode_blocks rather than duplicating the extent-vs-direct/
+             * indirect freeing logic; `inode` already has the extent fully set. */
+            if (dir_add(&v, parent_ino, base, ino, 1) < 0) { free_inode_blocks(&v, inode); free_inode_num(&v, ino); return -1; }
             return (long)len;
         }
         /* no contiguous run -> fall through to direct/indirect below */
@@ -1348,7 +1410,8 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
     e_wr32(inode + 28, isectors);                          /* i_blocks (in 512-byte sectors) */
     e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
     if (write_inode(&v, ino, inode) < 0) return -1;
-    if (!existing && dir_add(&v, parent_ino, base, ino, 1) < 0) return -1;   /* ftype 1 = regular file */
+    /* same leaked-inode-on-full-directory gap as the extent path above (M1616) */
+    if (!existing && dir_add(&v, parent_ino, base, ino, 1) < 0) { free_inode_blocks(&v, inode); free_inode_num(&v, ino); return -1; }   /* ftype 1 = regular file */
     return (long)len;
 }
 
