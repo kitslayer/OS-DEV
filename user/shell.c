@@ -3749,6 +3749,43 @@ static int run_command(char *line, char *cwd) {
                 print(ok ? "record-locks: WRLCK[0,10); child overlap[5,15)=conflict, disjoint[10,20)=ok, F_GETLK reports holder -- OK\n"
                          : "locktest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
+                /* F_SETLKW (M1597): genuinely blocks on a conflicting range instead
+                 * of failing immediately like F_SETLK -- measure elapsed time (not
+                 * just the return value) to prove it really parked, matching this
+                 * session's own established discipline for every timed-block test. */
+                int wok = 1;
+                sys_writefile("/tmp/LKW.TXT", "0123456789abcdefghij", 20);
+                int wfd = sys_open("/tmp/LKW.TXT");
+                long wshmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
+                volatile unsigned long *wsh = (wshmid >= 0) ? (volatile unsigned long *)sys_shmat((int)wshmid) : 0;
+                if (wfd < 3 || !wsh) wok = 0;
+                else {
+                    wsh[0] = 0; wsh[1] = 0;         /* [0]=child's measured elapsed, [1]=child's F_SETLKW success */
+                    struct flock wl = { F_WRLCK, 0, 0, 10, 0 };
+                    if (sys_fcntl(wfd, F_SETLK, (long)&wl) != 0) wok = 0;   /* parent holds [0,10) */
+                    long wpid = sys_fork();
+                    if (wpid == 0) {
+                        volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)wshmid);
+                        int cfd = sys_open("/tmp/LKW.TXT");
+                        struct flock cl = { F_WRLCK, 0, 5, 10, 0 };   /* [5,15) overlaps the parent's [0,10) */
+                        unsigned long t0 = sys_uptime_ms();
+                        long r = sys_fcntl(cfd, F_SETLKW, (long)&cl);
+                        unsigned long elapsed = sys_uptime_ms() - t0;
+                        if (m) { m[0] = elapsed; m[1] = (unsigned long)(r == 0 ? 1 : 0); }
+                        sys_exit(0);
+                    }
+                    sys_sleep(200);                  /* let the child reach F_SETLKW and block */
+                    struct flock wu = { F_UNLCK, 0, 0, 10, 0 };
+                    sys_fcntl(wfd, F_SETLK, (long)&wu);   /* release -> the child's F_SETLKW should now succeed */
+                    int st2 = 0; if (wpid > 0) sys_waitpid((int)wpid, &st2);
+                    unsigned long celapsed = wsh[0]; int cok = (int)wsh[1];
+                    if (!(wpid > 0 && cok && celapsed >= 150)) wok = 0;   /* really blocked ~the parent's sleep */
+                }
+                if (wfd >= 3) sys_fdclose(wfd);
+                sys_delete("/tmp/LKW.TXT");
+                print(wok ? "F_SETLKW: blocks on a conflicting range (measured ~200ms), succeeds once the holder unlocks -- OK\n"
+                          : "locktest: F_SETLKW VERIFY FAILED\n");
+                if (!wok) g_status = 1;
             }
         } else if (streq(line, "pidfdtest")) {  /* pidfd: a pollable process-exit handle (M1222) */
             int ok = 1;

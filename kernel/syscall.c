@@ -2498,8 +2498,8 @@ void syscall_dispatch(struct registers *r) {
                     lf->l_type = (short)ht; lf->l_pid = hp; lf->l_start = hs; lf->l_len = hl;
                 } else lf->l_type = F_UNLCK;                  /* no conflict: the lock could be placed */
                 r->rax = 0;
-            } else {                                          /* F_SETLK / F_SETLKW (non-blocking try for now) */
-                r->rax = (uint64_t)(int64_t)rlock_set(path, pid, lf->l_type, lf->l_start, lf->l_len);
+            } else {                                          /* F_SETLK (fails on conflict) / F_SETLKW (blocks) (M1597) */
+                r->rax = (uint64_t)(int64_t)rlock_set(path, pid, lf->l_type, lf->l_start, lf->l_len, cmd == F_SETLKW);
             }
             break;
         }

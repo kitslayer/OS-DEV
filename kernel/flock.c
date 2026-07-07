@@ -86,11 +86,22 @@ static struct rlk *rl_conflict(const char *path, int pid, int type, long start, 
             if (type == F_WRLCK || rl[i].type == F_WRLCK) return &rl[i];
     return 0;
 }
-/* F_SETLK (try): F_UNLCK drops this pid's overlapping locks on `path`; F_RD/WRLCK
- * acquires after clearing this pid's overlaps. 0, or -1 on conflict / table full. */
-int rlock_set(const char *path, int pid, int type, long start, long len) {
+/* F_SETLK/F_SETLKW: F_UNLCK drops this pid's overlapping locks on `path`;
+ * F_RD/WRLCK acquires after clearing this pid's overlaps. can_block (M1597):
+ * F_SETLKW blocks on a conflict instead of failing immediately, reusing
+ * flock_op's own waiter array + flk_wake_all() -- already called from this
+ * function's own F_UNLCK branch below, so a parked waiter here is woken by
+ * every relevant unlock without any change to the wake side. 0, or -1 on
+ * conflict (F_SETLK only) / table full. */
+int rlock_set(const char *path, int pid, int type, long start, long len, int can_block) {
     if (!path || !path[0]) return -1;
-    if (type != F_UNLCK && rl_conflict(path, pid, type, start, len)) return -1;
+    if (type != F_UNLCK) {
+        while (rl_conflict(path, pid, type, start, len)) {
+            if (!can_block) return -1;
+            if (fl_nwait < FLK_N) fl_waiters[fl_nwait++] = task_self();
+            task_block();                             /* woken by an unlock (or a kill) */
+        }
+    }
     for (int i = 0; i < RLK_N; i++)                  /* clear this pid's overlapping locks first */
         if (rl[i].used && rl[i].owner == pid && peq(rl[i].path, path) && rl_overlap(&rl[i], start, len)) rl[i].used = 0;
     if (type == F_UNLCK) { flk_wake_all(); return 0; }
