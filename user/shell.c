@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2387,6 +2387,38 @@ static int run_command(char *line, char *cwd) {
                     sys_shmdt(a); sys_shmdt(b);
                 }
             }
+            sys_shmctl(id, IPC_RMID);   /* free the id (M1576) -- this test's IPC_PRIVATE would otherwise leak one slot every run */
+        } else if (streq(line, "sysvctltest")) {   /* msgctl/shmctl(IPC_RMID): frees an id table that could previously never shrink (M1576) */
+            int ok = 1;
+            /* Don't assume the tables start empty (an earlier command in the same
+             * boot may have its own leaked ids) -- create IPC_PRIVATE ones until
+             * creation genuinely fails, proving a real, reachable cap exists,
+             * then free ONE and confirm a fresh create succeeds again. Cleans up
+             * everything it creates either way, so later SysV tests in the same
+             * session aren't left with a permanently-shrunk table. */
+            int sids[40]; int nshm = 0;
+            while (nshm < 40) { int id2 = (int)sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT); if (id2 < 0) break; sids[nshm++] = id2; }
+            if (nshm == 0 || nshm == 40) ok = 0;                          /* never hit a real cap -- wrong assumption or a real regression */
+            if (sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT) != -1) ok = 0;   /* table is full -- one more must fail cleanly */
+            if (nshm > 0 && sys_shmctl(sids[0], IPC_RMID) != 0) ok = 0;
+            int reshm = (nshm > 0) ? (int)sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT) : -1;
+            if (reshm < 0) ok = 0;                                        /* the freed id is reusable, not lost forever */
+            if (reshm >= 0) sys_shmctl(reshm, IPC_RMID);
+            for (int i = 1; i < nshm; i++) sys_shmctl(sids[i], IPC_RMID); /* full cleanup */
+
+            int mids[40]; int nmsg = 0;
+            while (nmsg < 40) { int id2 = (int)sys_msgget(IPC_PRIVATE, IPC_CREAT); if (id2 < 0) break; mids[nmsg++] = id2; }
+            if (nmsg == 0 || nmsg == 40) ok = 0;
+            if (sys_msgget(IPC_PRIVATE, IPC_CREAT) != -1) ok = 0;
+            if (nmsg > 0 && sys_msgctl(mids[0], IPC_RMID) != 0) ok = 0;
+            int remsg = (nmsg > 0) ? (int)sys_msgget(IPC_PRIVATE, IPC_CREAT) : -1;
+            if (remsg < 0) ok = 0;
+            if (remsg >= 0) sys_msgctl(remsg, IPC_RMID);
+            for (int i = 1; i < nmsg; i++) sys_msgctl(mids[i], IPC_RMID);
+
+            print(ok ? "msgctl/shmctl(IPC_RMID): both tables genuinely cap out, a freed id is reusable, cleaned up after -- OK\n"
+                     : "sysvctltest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "pvmtest")) {   /* process_vm_read: read another process's memory cross-AS (M1162) */
             static char sentinel[64];
             for (int i = 0; i < 64; i++) sentinel[i] = (char)(i ^ 0x5A);   /* parent fills it before forking */

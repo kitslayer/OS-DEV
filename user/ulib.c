@@ -249,6 +249,8 @@ long sys_msgget(int key, int flags) { return do_syscall(SYS_msgget, key, flags, 
 long sys_msgsnd(int id, const void *msgp, unsigned long sz, int flags) { return do_syscall4(SYS_msgsnd, id, (long)msgp, (long)sz, flags); }
 long sys_msgrcv(int id, void *msgp, unsigned long sz, long mtyp) { return do_syscall4(SYS_msgrcv, id, (long)msgp, (long)sz, (long)mtyp); }
 long sys_shmget(int key, unsigned long size, int flags) { return do_syscall(SYS_shmget, key, (long)size, flags); }
+int  sys_msgctl(int id, int cmd) { return (int)do_syscall(SYS_msgctl, id, cmd, 0); }
+int  sys_shmctl(int id, int cmd) { return (int)do_syscall(SYS_shmctl, id, cmd, 0); }
 void *sys_shmat(int shmid) { long r = do_syscall(SYS_shmat, shmid, 0, 0); return r ? (void *)r : 0; }
 long sys_shmdt(void *addr) { return do_syscall(SYS_shmdt, (long)addr, 0, 0); }
 long sys_process_vm_read(int pid, unsigned long raddr, void *buf, unsigned long len) { return do_syscall4(SYS_process_vm_read, pid, (long)raddr, (long)buf, (long)len); }

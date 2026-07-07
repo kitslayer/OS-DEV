@@ -353,6 +353,8 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SYS_sem_trywait  319   /* (idx) -> non-blocking sem_wait; 0/-1 (EAGAIN) */
 #define SYS_sem_post     320   /* (idx) -> increment + wake waiters; 0/-1 */
 #define SYS_sem_getvalue 321   /* (idx, int*) -> the current value; 0/-1 */
+#define SYS_msgctl       322   /* (id, cmd) -> IPC_RMID only, frees a leaked-forever id slot; 0/-1 (M1576) */
+#define SYS_shmctl       323   /* (id, cmd) -> IPC_RMID only; 0/-1 (M1576) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

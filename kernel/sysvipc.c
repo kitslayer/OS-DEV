@@ -167,6 +167,19 @@ int sysv_msgrcv(int id, long mtyp, void *out, int max, long *mtype_out, int flag
     }
 }
 
+/* IPC_RMID (M1576): the removal path this table never had. Before this,
+ * MSG_N=8 message queues, ever created, permanently exhausted the table for
+ * the machine's uptime -- mirrors sysv_semctl's own IPC_RMID exactly, waking
+ * every blocked sender/receiver so nobody is left parked on a removed queue. */
+int sysv_msgctl(int id, int cmd) {
+    if (id < 0 || id >= MSG_N || !mqs[id].used) return -1;
+    if (cmd != IPC_RMID) return -1;
+    mqs[id].used = 0;
+    mq_wake(mqs[id].swait, &mqs[id].nsw);
+    mq_wake(mqs[id].rwait, &mqs[id].nrw);
+    return 0;
+}
+
 /* ---- System V shared memory (M1161) ----------------------------------------
  * Keyed shared-memory segments. shmget(key,size,flags) opens/creates a segment;
  * shmat maps it into the caller's address space; shmdt unmaps. A segment is just
@@ -197,6 +210,26 @@ int sysv_shmget(int key, uint64_t size, int flags) {
 uint64_t sysv_shmat(int id) {
     if (id < 0 || id >= SHM_N || !shms[id].used) return 0;
     return app_shm_open(shms[id].name, shms[id].size);
+}
+
+/* IPC_RMID (M1576): frees THIS id slot (SHM_N=16, permanently exhausted
+ * without this before now) so a future sysv_shmget can reuse the number --
+ * matching real shmctl(IPC_RMID)'s effect on the id namespace. Deliberately
+ * scoped no further: the underlying named object in shm.c (its own separate,
+ * smaller SHM_N=8 table, keyed by THIS segment's synthetic "sysvshmNN" name,
+ * derived deterministically from `id`) has no removal path of its own --
+ * shm_open()'d objects have never been freeable here, matching every
+ * existing shm_open caller's behavior today. One real, honestly-stated
+ * consequence: since the synthetic name is a pure function of `id`, if a
+ * freed id is later reused, shm_get's own find-by-name path will find and
+ * hand back the SAME (never-actually-cleared) frames rather than a fresh
+ * zeroed segment -- IPC_RMID here frees the ID for reuse, it does not (yet)
+ * guarantee a truly fresh segment on the next shmget of that same id. */
+int sysv_shmctl(int id, int cmd) {
+    if (id < 0 || id >= SHM_N || !shms[id].used) return -1;
+    if (cmd != IPC_RMID) return -1;
+    shms[id].used = 0;
+    return 0;
 }
 
 /* /proc/sysvipc: one line per live set — "id key nsems val0,val1,...". */
