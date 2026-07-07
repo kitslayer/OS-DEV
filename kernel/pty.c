@@ -21,6 +21,29 @@
 #define NPTY   8
 #define PBUF   1024
 
+/* M1607: the header comment above claims lost-wakeup-freedom from the int-0x80
+ * gate's IF=0 alone -- true only on a single CPU. Since M1531 a writer and a
+ * blocking reader can run on two DIFFERENT cores at once: reader checks the
+ * ring (empty), writer produces + checks in_waiter/out_waiter (still unset,
+ * so no wake), THEN reader sets the waiter and blocks -- forever, since the
+ * data that would have woken it already arrived. Every check-ring-or-flag +
+ * set-waiter (reader) and every produce/mutate + check-waiter (writer) below
+ * now shares one lock, so the two sequences can't interleave in that order:
+ * whichever runs second sees the other's completed effect. task_wake() is
+ * called while still holding it -- safe, since task_wake takes its own
+ * irq_save/rq_lock and nothing in task.c ever calls back into pty.c. */
+static volatile int pty_lock;
+static inline uint64_t pty_irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&pty_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return fl;
+}
+static inline void pty_irq_restore(uint64_t fl) {
+    __atomic_store_n(&pty_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
+
 struct ptyring { unsigned char b[PBUF]; int head, tail; };   /* empty when head==tail */
 static int pr_cnt(struct ptyring *r)  { return (r->head - r->tail + PBUF) % PBUF; }
 static int pr_free(struct ptyring *r) { return PBUF - 1 - pr_cnt(r); }   /* one slot kept empty */
@@ -47,14 +70,18 @@ static struct pty ptys[NPTY];
 
 /* Push a byte to the master-readable output ring + wake a blocked master reader. */
 static void emit(struct pty *p, unsigned char c) {
+    uint64_t fl = pty_irq_save();
     pr_put(&p->out, &c, 1);
     if (p->out_waiter) { task_wake(p->out_waiter); p->out_waiter = 0; }
+    pty_irq_restore(fl);
 }
 /* Commit the canonical line buffer to slave-readable input + wake a slave reader. */
 static void commit(struct pty *p) {
+    uint64_t fl = pty_irq_save();
     if (p->linelen > 0) pr_put(&p->in, p->line, p->linelen);
     p->linelen = 0;
     if (p->in_waiter) { task_wake(p->in_waiter); p->in_waiter = 0; }
+    pty_irq_restore(fl);
 }
 
 /* Process one master-written byte through the line discipline. */
@@ -66,9 +93,11 @@ static void ldisc(struct pty *p, unsigned char c) {
         return;
     }
     if (!(p->lflag & ICANON)) {                              /* raw: deliver immediately */
+        uint64_t fl = pty_irq_save();
         pr_put(&p->in, &c, 1);
-        if (p->lflag & ECHO) emit(p, c);
         if (p->in_waiter) { task_wake(p->in_waiter); p->in_waiter = 0; }
+        pty_irq_restore(fl);
+        if (p->lflag & ECHO) emit(p, c);   /* after releasing above: emit() takes the same lock itself (non-reentrant) */
         return;
     }
     if (c == p->cc[VERASE] || c == 127) {                    /* backspace: rub out a char */
@@ -80,8 +109,12 @@ static void ldisc(struct pty *p, unsigned char c) {
         return;
     }
     if (c == p->cc[VEOF]) {                                  /* ^D: commit; empty line => EOF */
-        if (p->linelen == 0) { p->eof = 1; if (p->in_waiter) { task_wake(p->in_waiter); p->in_waiter = 0; } }
-        else commit(p);
+        if (p->linelen == 0) {
+            uint64_t fl = pty_irq_save();
+            p->eof = 1;
+            if (p->in_waiter) { task_wake(p->in_waiter); p->in_waiter = 0; }
+            pty_irq_restore(fl);
+        } else commit(p);
         return;
     }
     if (p->lflag & ECHO) emit(p, c);
@@ -122,8 +155,10 @@ long pty_write(int id, const void *buf, unsigned long len) {
         for (unsigned long i = 0; i < len; i++) ldisc(p, d[i]);
         return (long)len;
     }
+    uint64_t flw = pty_irq_save();
     int n = pr_put(&p->out, d, (int)len);                    /* SLAVE write -> program output */
     if (n > 0 && p->out_waiter) { task_wake(p->out_waiter); p->out_waiter = 0; }
+    pty_irq_restore(flw);
     return n;
 }
 
@@ -131,9 +166,11 @@ long pty_read(int id, void *buf, unsigned long max) {
     int slave; struct pty *p = resolve(id, &slave); if (!p) return -1;
     struct ptyring *r = slave ? &p->in : &p->out;
     for (;;) {
-        if (pr_cnt(r) > 0) break;
-        if (slave) { if (p->eof || !p->m_open) return 0; p->in_waiter = task_self(); }
-        else       { if (!p->s_open) return 0;            p->out_waiter = task_self(); }
+        uint64_t fl = pty_irq_save();
+        if (pr_cnt(r) > 0) { pty_irq_restore(fl); break; }
+        if (slave) { if (p->eof || !p->m_open) { pty_irq_restore(fl); return 0; } p->in_waiter = task_self(); }
+        else       { if (!p->s_open)           { pty_irq_restore(fl); return 0; } p->out_waiter = task_self(); }
+        pty_irq_restore(fl);
         task_block();                                        /* woken by a writer/close (or a kill) */
         if (!p->used) return -1;
     }
@@ -142,10 +179,12 @@ long pty_read(int id, void *buf, unsigned long max) {
 
 int pty_close(int id) {
     int slave; struct pty *p = resolve(id, &slave); if (!p) return -1;
+    uint64_t fl = pty_irq_save();
     if (slave) p->s_open = 0; else p->m_open = 0;
     if (p->in_waiter)  { task_wake(p->in_waiter);  p->in_waiter = 0; }   /* let blocked reads see EOF */
     if (p->out_waiter) { task_wake(p->out_waiter); p->out_waiter = 0; }
     if (!p->m_open && !p->s_open) p->used = 0;               /* both ends gone -> free the slot */
+    pty_irq_restore(fl);
     return 0;
 }
 
@@ -172,8 +211,10 @@ int pty_ready(int id) {                                      /* fswait peek */
 void pty_release_pid(int pid) {
     for (int i = 0; i < NPTY; i++)
         if (ptys[i].used && ptys[i].owner == pid) {
+            uint64_t fl = pty_irq_save();
             if (ptys[i].in_waiter)  { task_wake(ptys[i].in_waiter);  ptys[i].in_waiter = 0; }
             if (ptys[i].out_waiter) { task_wake(ptys[i].out_waiter); ptys[i].out_waiter = 0; }
             ptys[i].used = 0;
+            pty_irq_restore(fl);
         }
 }

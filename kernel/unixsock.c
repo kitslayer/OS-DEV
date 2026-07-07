@@ -5,16 +5,35 @@
  * endpoints stream in both directions, plus a fixed table of listeners keyed by
  * pathname. An ENDPOINT id packs the connection index and which side (A=client,
  * B=server): ep = (conn<<1)|side. send writes the side's TX ring (= the peer's
- * RX ring) and wakes the peer; recv reads the side's RX ring and — mirroring
- * mbox.c — blocks once when empty (relying on the IF=0 int-0x80 syscall gate, so
- * "empty? then block" is atomic against a sender on this single CPU: a sender
- * only runs after we've recorded our waiter and called task_block), returning 0
- * at EOF (peer closed and the ring is drained). No fd table is needed: the small
- * integer ep handle is the socket reference, and because it indexes this global
- * table it stays valid across fork().
- */
+ * RX ring) and wakes the peer; recv reads the side's RX ring and blocks once
+ * when empty, returning 0 at EOF (peer closed and the ring is drained). No fd
+ * table is needed: the small integer ep handle is the socket reference, and
+ * because it indexes this global table it stays valid across fork().
+ *
+ * M1609: the old comment claimed the IF=0 int-0x80 gate alone made "empty?
+ * then block" atomic against a sender -- true only on a single CPU. Since
+ * M1531 a sender and a blocking receiver can run on two different cores at
+ * once: receiver checks its ring (empty), sender enqueues + checks the
+ * waiter field (still unset, so no wake), THEN receiver sets the waiter and
+ * blocks forever. unix_listen/unix_connect/unix_socketpair's table
+ * scan-and-claim has the same-shaped hazard one level up. One lock now
+ * covers every lookup/create/check-set-block/produce-check-wake sequence in
+ * this file, so none of them can interleave into a lost wakeup or a
+ * double-claimed slot. Same idiom as pmm.c/swap.c/tls.c/pty.c/mbox.c. */
 #include "unixsock.h"
 #include "task.h"
+
+static volatile int usock_lock;
+static inline uint64_t usock_irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&usock_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return fl;
+}
+static inline void usock_irq_restore(uint64_t fl) {
+    __atomic_store_n(&usock_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
 
 #define U_LISTEN  8               /* concurrent listeners */
 #define U_CONN    16              /* concurrent connections (each = 2 endpoints) */
@@ -56,42 +75,52 @@ static int peq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++
 
 int unix_listen(const char *path) {
     if (!path || !path[0]) return -1;
-    for (int i = 0; i < U_LISTEN; i++) if (lis[i].used && peq(lis[i].path, path)) return i;   /* already bound: idempotent re-listen (single-user OS) */
+    uint64_t fl = usock_irq_save();
+    for (int i = 0; i < U_LISTEN; i++) if (lis[i].used && peq(lis[i].path, path)) { usock_irq_restore(fl); return i; }   /* already bound: idempotent re-listen (single-user OS) */
     for (int i = 0; i < U_LISTEN; i++) if (!lis[i].used) {
         int j = 0; while (path[j] && j < U_PATH - 1) { lis[i].path[j] = path[j]; j++; } lis[i].path[j] = 0;
         lis[i].used = 1; lis[i].np = 0; lis[i].waiter = 0;
+        usock_irq_restore(fl);
         return i;
     }
+    usock_irq_restore(fl);
     return -1;                                    /* listener table full */
 }
 
 int unix_connect(const char *path) {
     if (!path) return -1;
+    uint64_t fl = usock_irq_save();
     int li = -1; for (int i = 0; i < U_LISTEN; i++) if (lis[i].used && peq(lis[i].path, path)) { li = i; break; }
-    if (li < 0) return -1;                         /* nobody listening on this path */
-    if (lis[li].np >= U_CONN) return -1;           /* accept backlog full */
+    if (li < 0) { usock_irq_restore(fl); return -1; }   /* nobody listening on this path */
+    if (lis[li].np >= U_CONN) { usock_irq_restore(fl); return -1; }   /* accept backlog full */
     int ci = -1; for (int i = 0; i < U_CONN; i++) if (!conns[i].used) { ci = i; break; }
-    if (ci < 0) return -1;                         /* connection table full */
+    if (ci < 0) { usock_irq_restore(fl); return -1; }   /* connection table full */
     struct uconn *c = &conns[ci];
     c->used = 1; c->a2b.head = c->a2b.tail = 0; c->b2a.head = c->b2a.tail = 0;
     c->a_closed = c->b_closed = 0; c->a_waiter = c->b_waiter = 0;
     lis[li].pend[lis[li].np++] = ci;               /* enqueue for the server to accept */
     if (lis[li].waiter) { task_wake(lis[li].waiter); lis[li].waiter = 0; }
+    usock_irq_restore(fl);
     return (ci << 1) | 0;                          /* client gets side A */
 }
 
 int unix_accept(int lid) {
-    if (lid < 0 || lid >= U_LISTEN || !lis[lid].used) return -1;
+    if (lid < 0 || lid >= U_LISTEN) return -1;
+    uint64_t fl = usock_irq_save();
+    if (!lis[lid].used) { usock_irq_restore(fl); return -1; }
     struct ulisten *l = &lis[lid];
     if (l->np == 0) {                              /* no pending connection -> block for one */
         l->waiter = task_self();
+        usock_irq_restore(fl);
         task_block();                              /* woken by a connector (or a kill) */
+        fl = usock_irq_save();
         l->waiter = 0;
-        if (l->np == 0) return -1;                 /* spurious wake -> nothing to accept */
+        if (l->np == 0) { usock_irq_restore(fl); return -1; }   /* spurious wake -> nothing to accept */
     }
     int ci = l->pend[0];                           /* FIFO dequeue */
     for (int i = 1; i < l->np; i++) l->pend[i - 1] = l->pend[i];
     l->np--;
+    usock_irq_restore(fl);
     return (ci << 1) | 1;                          /* server gets side B */
 }
 
@@ -105,39 +134,48 @@ static struct uconn *ep_conn(int ep, int *side) {
 }
 
 long unix_send(int ep, const void *buf, unsigned long len) {
-    int s; struct uconn *c = ep_conn(ep, &s); if (!c) return -1;
+    uint64_t fl = usock_irq_save();
+    int s; struct uconn *c = ep_conn(ep, &s); if (!c) { usock_irq_restore(fl); return -1; }
     int peer_closed = s ? c->a_closed : c->b_closed;
-    if (peer_closed) return -1;                                  /* peer is gone */
+    if (peer_closed) { usock_irq_restore(fl); return -1; }       /* peer is gone */
     struct uring *tx = s ? &c->b2a : &c->a2b;                    /* B writes b2a, A writes a2b */
     int n = rput(tx, (const unsigned char *)buf, (int)len);
     task_t **pw = s ? &c->a_waiter : &c->b_waiter;               /* wake the peer's blocked reader */
     if (n > 0 && *pw) { task_wake(*pw); *pw = 0; }
+    usock_irq_restore(fl);
     return n;
 }
 
 long unix_recv(int ep, void *buf, unsigned long max) {
-    int s; struct uconn *c = ep_conn(ep, &s); if (!c) return -1;
+    uint64_t fl = usock_irq_save();
+    int s; struct uconn *c = ep_conn(ep, &s); if (!c) { usock_irq_restore(fl); return -1; }
     struct uring *rx = s ? &c->a2b : &c->b2a;                    /* B reads a2b, A reads b2a */
     int self_closed = s ? c->b_closed : c->a_closed;
-    if (self_closed) return -1;                                  /* we closed our own end */
+    if (self_closed) { usock_irq_restore(fl); return -1; }       /* we closed our own end */
     if (rcount(rx) == 0) {
         int peer_closed = s ? c->a_closed : c->b_closed;
-        if (peer_closed) return 0;                               /* EOF: peer closed and ring drained */
+        if (peer_closed) { usock_irq_restore(fl); return 0; }    /* EOF: peer closed and ring drained */
         task_t **mw = s ? &c->b_waiter : &c->a_waiter;
         *mw = task_self();
+        usock_irq_restore(fl);
         task_block();                                            /* woken by the peer's send/close (or a kill) */
+        fl = usock_irq_save();
         *mw = 0;
-        if (rcount(rx) == 0) return 0;                           /* still empty -> EOF / spurious, don't re-block */
+        if (rcount(rx) == 0) { usock_irq_restore(fl); return 0; }   /* still empty -> EOF / spurious, don't re-block */
     }
-    return rget(rx, (unsigned char *)buf, (int)max);
+    int got = rget(rx, (unsigned char *)buf, (int)max);
+    usock_irq_restore(fl);
+    return got;
 }
 
 int unix_close(int ep) {
-    int s; struct uconn *c = ep_conn(ep, &s); if (!c) return -1;
+    uint64_t fl = usock_irq_save();
+    int s; struct uconn *c = ep_conn(ep, &s); if (!c) { usock_irq_restore(fl); return -1; }
     if (s) c->b_closed = 1; else c->a_closed = 1;
     task_t **pw = s ? &c->a_waiter : &c->b_waiter;               /* wake the peer so its recv returns EOF */
     if (*pw) { task_wake(*pw); *pw = 0; }
     if (c->a_closed && c->b_closed) c->used = 0;                 /* both ends gone -> free the slot */
+    usock_irq_restore(fl);
     return 0;
 }
 
@@ -158,18 +196,22 @@ static int ep_readable(int ep) {
  * both wait_any and recv-block on the same endpoint concurrently. (M1170) */
 int unix_wait_any(const int *eps, int n) {
     if (n <= 0 || n > 16) return -1;
-    for (int i = 0; i < n; i++) if (ep_readable(eps[i])) return i;   /* fast path: already ready */
+    uint64_t fl = usock_irq_save();
+    for (int i = 0; i < n; i++) if (ep_readable(eps[i])) { usock_irq_restore(fl); return i; }   /* fast path: already ready */
     for (int i = 0; i < n; i++) {                                    /* park on each endpoint's reader slot */
         int s; struct uconn *c = ep_conn(eps[i], &s); if (!c) continue;
         *(s ? &c->b_waiter : &c->a_waiter) = task_self();
     }
+    usock_irq_restore(fl);
     task_block();                                                    /* woken by a sender/close on any of them (or a kill) */
+    fl = usock_irq_save();
     for (int i = 0; i < n; i++) {                                    /* unregister ourselves everywhere */
         int s; struct uconn *c = ep_conn(eps[i], &s); if (!c) continue;
         task_t **mw = s ? &c->b_waiter : &c->a_waiter;
         if (*mw == task_self()) *mw = 0;
     }
-    for (int i = 0; i < n; i++) if (ep_readable(eps[i])) return i;   /* re-scan after the wake */
+    for (int i = 0; i < n; i++) if (ep_readable(eps[i])) { usock_irq_restore(fl); return i; }   /* re-scan after the wake */
+    usock_irq_restore(fl);
     return -1;                                                       /* spurious/kill -> caller re-polls */
 }
 
@@ -188,13 +230,15 @@ int unix_ep_conn(int ep) {
 
 int unix_socketpair(int *a, int *b) {
     if (!a || !b) return -1;
+    uint64_t fl = usock_irq_save();
     int ci = -1; for (int i = 0; i < U_CONN; i++) if (!conns[i].used) { ci = i; break; }
-    if (ci < 0) return -1;                          /* connection table full */
+    if (ci < 0) { usock_irq_restore(fl); return -1; }   /* connection table full */
     struct uconn *c = &conns[ci];
     c->used = 1; c->a2b.head = c->a2b.tail = 0; c->b2a.head = c->b2a.tail = 0;
     c->a_closed = c->b_closed = 0; c->a_waiter = c->b_waiter = 0;
     *a = (ci << 1) | 0;                             /* side A */
     *b = (ci << 1) | 1;                             /* side B */
+    usock_irq_restore(fl);
     return 0;
 }
 

@@ -6,11 +6,33 @@
  * blocks while the ring is empty and a writer still exists, and returns 0 (EOF)
  * once all writers have closed and the ring is drained. A write blocks while the
  * ring is full and a reader still exists, and returns -1 (EPIPE) once all readers
- * have closed. The slot is freed when both ends reach zero. Mirrors the
- * lost-wakeup-free block/wake discipline of mbox.c / unixsock.c / pty.c.
+ * have closed. The slot is freed when both ends reach zero.
+ *
+ * M1610: this used to claim lost-wakeup-freedom from the single-CPU int-0x80
+ * gate alone -- the same assumption M1531 invalidated in mbox.c/unixsock.c/
+ * pty.c (and, one level down, in pmm.c/vmm.c/kheap.c). A writer and a
+ * blocking reader can now run on two different cores at once: reader checks
+ * the ring (empty), writer fills it + checks the waiter field (still unset,
+ * so no wake), THEN reader records itself and blocks forever. pipe_new's
+ * table scan-and-claim has the same-shaped hazard one level up. One lock
+ * now covers every check-set-block / produce-check-wake sequence in this
+ * file (including splice/tee, which touch two pipes' state at once), same
+ * idiom as the other three files above.
  */
 #include "pipe.h"
 #include "task.h"
+
+static volatile int pipe_lock;
+static inline uint64_t pipe_irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&pipe_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return fl;
+}
+static inline void pipe_irq_restore(uint64_t fl) {
+    __atomic_store_n(&pipe_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
 
 #define NPIPE 32
 #define PBUF  4096
@@ -45,12 +67,15 @@ int pipe_writable(int idx) {
 }
 
 int pipe_new(void) {
+    uint64_t fl = pipe_irq_save();
     for (int i = 0; i < NPIPE; i++) if (!pipes[i].used) {
         struct kpipe *p = &pipes[i];
         for (unsigned k = 0; k < sizeof *p; k++) ((unsigned char *)p)[k] = 0;
         p->used = 1; p->r_open = 1; p->w_open = 1; p->had_writer = 1;   /* anon: the creator holds both ends */
+        pipe_irq_restore(fl);
         return i;
     }
+    pipe_irq_restore(fl);
     return -1;
 }
 
@@ -67,14 +92,18 @@ int pipe_new_fifo(void) {
 long pipe_read(int idx, void *buf, unsigned long max) {
     struct kpipe *p = pp(idx); if (!p) return -1;
     for (;;) {
+        uint64_t fl = pipe_irq_save();
         if (p_cnt(p) > 0) {
             unsigned char *d = (unsigned char *)buf; long g = 0;
             while ((unsigned long)g < max && p_cnt(p) > 0) { d[g++] = p->b[p->tail]; p->tail = (p->tail + 1) % PBUF; }
             if (p->ww) { task_wake(p->ww); p->ww = 0; }          /* a blocked writer now has room */
+            pipe_irq_restore(fl);
             return g;
         }
-        if (p->w_open == 0 && p->had_writer) return 0;           /* EOF: drained + no writers (FIFO: only after one connected) */
-        p->rw = task_self(); task_block();                       /* woken by a writer/close (or a kill) */
+        if (p->w_open == 0 && p->had_writer) { pipe_irq_restore(fl); return 0; }   /* EOF: drained + no writers (FIFO: only after one connected) */
+        p->rw = task_self();
+        pipe_irq_restore(fl);
+        task_block();                                            /* woken by a writer/close (or a kill) */
         p = pp(idx); if (!p) return -1;                          /* freed under us */
     }
 }
@@ -84,13 +113,17 @@ long pipe_write(int idx, const void *buf, unsigned long len) {
     const unsigned char *d = (const unsigned char *)buf;
     unsigned long done = 0;
     while (done < len) {
-        if (p->r_open == 0) return done ? (long)done : -1;       /* EPIPE: no readers left */
+        uint64_t fl = pipe_irq_save();
+        if (p->r_open == 0) { pipe_irq_restore(fl); return done ? (long)done : -1; }   /* EPIPE: no readers left */
         if (p_spc(p) > 0) {
             while (done < len && p_spc(p) > 0) { p->b[p->head] = d[done++]; p->head = (p->head + 1) % PBUF; }
             if (p->rw) { task_wake(p->rw); p->rw = 0; }          /* a blocked reader now has data */
+            pipe_irq_restore(fl);
             continue;
         }
-        p->ww = task_self(); task_block();                       /* ring full: wait for a reader to drain */
+        p->ww = task_self();
+        pipe_irq_restore(fl);
+        task_block();                                            /* ring full: wait for a reader to drain */
         p = pp(idx); if (!p) return done ? (long)done : -1;
     }
     return (long)done;
@@ -102,6 +135,7 @@ long pipe_write(int idx, const void *buf, unsigned long len) {
  * (0 = in empty / out full / EOF); -1 on a bad/identical index. */
 long pipe_splice(int in, int out, unsigned long max) {
     struct kpipe *pi = pp(in), *po = pp(out); if (!pi || !po || in == out) return -1;
+    uint64_t fl = pipe_irq_save();
     long n = 0;
     while ((unsigned long)n < max && p_cnt(pi) > 0 && p_spc(po) > 0) {
         po->b[po->head] = pi->b[pi->tail];
@@ -113,6 +147,7 @@ long pipe_splice(int in, int out, unsigned long max) {
         if (po->rw) { task_wake(po->rw); po->rw = 0; }           /* dest now has data */
         if (pi->ww) { task_wake(pi->ww); pi->ww = 0; }           /* source now has room */
     }
+    pipe_irq_restore(fl);
     return n;
 }
 /* Copy up to `max` bytes from pipe `in` to pipe `out` WITHOUT consuming `in`
@@ -120,6 +155,7 @@ long pipe_splice(int in, int out, unsigned long max) {
  * copied (0 = nothing buffered / out full); -1 on a bad/identical index. */
 long pipe_tee(int in, int out, unsigned long max) {
     struct kpipe *pi = pp(in), *po = pp(out); if (!pi || !po || in == out) return -1;
+    uint64_t fl = pipe_irq_save();
     long n = 0; int t = pi->tail;
     while ((unsigned long)n < max && t != pi->head && p_spc(po) > 0) {
         po->b[po->head] = pi->b[t];
@@ -128,17 +164,22 @@ long pipe_tee(int in, int out, unsigned long max) {
         n++;
     }
     if (n && po->rw) { task_wake(po->rw); po->rw = 0; }          /* dest now has data */
+    pipe_irq_restore(fl);
     return n;
 }
 
 void pipe_open_end(int idx, int write_end) {
     struct kpipe *p = pp(idx); if (!p) return;
+    uint64_t fl = pipe_irq_save();
     if (write_end) { p->w_open++; p->had_writer = 1; } else p->r_open++;
+    pipe_irq_restore(fl);
 }
 
 void pipe_close_end(int idx, int write_end) {
     struct kpipe *p = pp(idx); if (!p) return;
+    uint64_t fl = pipe_irq_save();
     if (write_end) { if (p->w_open > 0) p->w_open--; if (p->w_open == 0 && p->rw) { task_wake(p->rw); p->rw = 0; } }  /* readers see EOF */
     else           { if (p->r_open > 0) p->r_open--; if (p->r_open == 0 && p->ww) { task_wake(p->ww); p->ww = 0; } }  /* writers get EPIPE */
     if (p->r_open == 0 && p->w_open == 0 && !p->pinned) p->used = 0;   /* both ends gone -> free (a FIFO's pinned pipe persists) */
+    pipe_irq_restore(fl);
 }

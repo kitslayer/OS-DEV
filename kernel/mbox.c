@@ -4,14 +4,35 @@
  * A fixed table of named queues, each a small ring of bounded messages, created
  * on first use. The VFS routes /ipc/<name> here (kernel/vfs.c): write enqueues,
  * read dequeues FIFO and blocks the caller (task_block) when empty until a
- * writer task_wake()s it. Read-side syscalls run with interrupts off (interrupt
- * gate, no sti on the readfile path), so the "queue empty? then block" check and
- * the block are atomic against a writer on this single CPU — no lost wakeup.
+ * writer task_wake()s it.
+ *
+ * M1608: the old comment claimed the interrupt gate's IF=0 alone made "queue
+ * empty? then block" atomic against a writer -- true only on a single CPU.
+ * Since M1531 a writer and a blocking reader can run on two different cores
+ * at once: reader checks the ring (empty), writer enqueues + checks q->waiter
+ * (still unset, so no wake), THEN reader sets the waiter and blocks forever.
+ * mbox_get()'s table scan-and-create had the same-shaped hazard one level up
+ * (two cores racing to create the SAME new name could both find an empty
+ * slot). One lock now covers the lookup/create AND the check-set-block /
+ * enqueue-check-wake sequences in both mbox_write and mbox_read, so the two
+ * can't interleave into a lost wakeup. Same idiom as pmm.c/swap.c/tls.c/pty.c.
  * A read woken with the queue still empty (a stray keypress wake, or a kill)
  * returns 0 rather than re-blocking, so a `cat /ipc/<empty>` is never stuck.
  */
 #include "mbox.h"
 #include "task.h"
+
+static volatile int mbox_lock;
+static inline uint64_t mbox_irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&mbox_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return fl;
+}
+static inline void mbox_irq_restore(uint64_t fl) {
+    __atomic_store_n(&mbox_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
 
 #define MBOX_N      8           /* up to 8 named queues */
 #define MBOX_MSGS   16          /* ring depth per queue */
@@ -48,31 +69,37 @@ static struct mbox *mbox_get(const char *name) {
 }
 
 long mbox_write(const char *name, const void *data, unsigned long len) {
+    uint64_t fl = mbox_irq_save();
     struct mbox *q = mbox_get(name);
-    if (!q) return -1;
+    if (!q) { mbox_irq_restore(fl); return -1; }
     int next = (q->head + 1) % MBOX_MSGS;
-    if (next == q->tail) return -1;                 /* full */
+    if (next == q->tail) { mbox_irq_restore(fl); return -1; }   /* full */
     if (len > MBOX_MSGSZ) len = MBOX_MSGSZ;
     for (unsigned long i = 0; i < len; i++) q->msg[q->head].data[i] = ((const char *)data)[i];
     q->msg[q->head].len = (int)len;
     q->head = next;
     if (q->waiter) { task_wake(q->waiter); q->waiter = 0; }   /* wake a blocked consumer */
+    mbox_irq_restore(fl);
     return (long)len;
 }
 
 long mbox_read(const char *name, void *buf, unsigned long max) {
+    uint64_t fl = mbox_irq_save();
     struct mbox *q = mbox_get(name);
-    if (!q) return -1;
+    if (!q) { mbox_irq_restore(fl); return -1; }
     if (q->tail == q->head) {                       /* empty -> block once for a producer */
         q->waiter = task_self();
+        mbox_irq_restore(fl);
         task_block();                               /* woken by a writer, a keypress, or a kill */
+        fl = mbox_irq_save();
         q->waiter = 0;
-        if (q->tail == q->head) return 0;           /* still empty -> don't re-block */
+        if (q->tail == q->head) { mbox_irq_restore(fl); return 0; }   /* still empty -> don't re-block */
     }
     int n = q->msg[q->tail].len;
     if ((unsigned long)n > max) n = (int)max;
     for (int i = 0; i < n; i++) ((char *)buf)[i] = q->msg[q->tail].data[i];
     q->tail = (q->tail + 1) % MBOX_MSGS;
+    mbox_irq_restore(fl);
     return n;
 }
 
