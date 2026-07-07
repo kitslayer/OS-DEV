@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3252,6 +3252,37 @@ static int run_command(char *line, char *cwd) {
             sys_delete("/tmp/PW.TXT");
             print(ok ? "pread/pwrite: out-of-order offsets land correctly, neither moves the fd cursor -- OK\n"
                      : "preadwritetest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+        } else if (streq(line, "piovtest")) {   /* preadv/pwritev: scatter-gather at an explicit offset, cursor untouched (M1577) */
+            int ok = 1;
+            sys_writefile("/tmp/PIOV.TXT", "0123456789ABCDEF", 16);
+            int fd = sys_openat(AT_FDCWD, "/tmp/PIOV.TXT", O_WRONLY);
+            if (fd < 0) ok = 0;
+            else {
+                char w1[4] = "WXYZ", w2[3] = "!@#";
+                struct iovec wiov[2] = { { w1, 4 }, { w2, 3 } };   /* 7 bytes total, at offset 5 */
+                if (sys_pwritev(fd, wiov, 2, 5) != 7) ok = 0;
+                if (sys_lseek(fd, 0, SEEK_CUR) != 0) ok = 0;        /* pwritev never moved the cursor */
+                sys_fdclose(fd);
+
+                int rfd = sys_open("/tmp/PIOV.TXT");
+                char buf[16] = {0}; long n = sys_fdread(rfd, buf, sizeof buf);   /* a regular read -- advances rfd's cursor to 16 */
+                /* "0123456789ABCDEF" with [5,12) overwritten by "WXYZ!@#" -> "01234WXYZ!@#CDEF" */
+                if (n != 16 || buf[0]!='0' || buf[4]!='4' || buf[5]!='W' || buf[8]!='Z' || buf[9]!='!' || buf[11]!='#' || buf[12]!='C' || buf[15]!='F') ok = 0;
+
+                long cur_before = sys_lseek(rfd, 0, SEEK_CUR);      /* whatever the regular read left it at (16) */
+                char r1[3] = {0}, r2[4] = {0};
+                struct iovec riov[2] = { { r1, 3 }, { r2, 4 } };     /* differently-sized read segments, at offset 5 again */
+                long rn = sys_preadv(rfd, riov, 2, 5);
+                if (rn != 7) ok = 0;
+                if (!(r1[0]=='W' && r1[2]=='Y')) ok = 0;              /* r1 = "WXY" */
+                if (!(r2[0]=='Z' && r2[3]=='#')) ok = 0;              /* r2 = "Z!@#" */
+                if (sys_lseek(rfd, 0, SEEK_CUR) != cur_before) ok = 0;   /* preadv left the cursor exactly where it already was */
+                sys_fdclose(rfd);
+            }
+            sys_delete("/tmp/PIOV.TXT");
+            print(ok ? "preadv/pwritev: scatter-gather at an explicit offset lands correctly, cursor never moves -- OK\n"
+                     : "piovtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "fxattrtest")) {   /* f{set,get,list,remove}xattr: fd-based siblings of *xattr (M1569) */
             int ok = 1;

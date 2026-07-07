@@ -311,6 +311,8 @@ long  sys_pread(int fd, void *buf, unsigned long max, long off);        /* read 
 long  sys_pwrite(int fd, const void *buf, unsigned long len, long off); /* write without moving the cursor; bytes/-1 (M1572) */
 long  sys_readv(int fd, struct iovec *iov, int iovcnt);       /* read into each segment in turn; total bytes/-1 (M1574) */
 long  sys_writev(int fd, const struct iovec *iov, int iovcnt); /* write each segment in turn; total bytes/-1 (M1574) */
+long  sys_preadv(int fd, struct iovec *iov, int iovcnt, long off);        /* like readv, at an explicit offset, cursor untouched; total bytes/-1 (M1577) */
+long  sys_pwritev(int fd, const struct iovec *iov, int iovcnt, long off); /* like writev, at an explicit offset, cursor untouched; total bytes/-1 (M1577) */
 long  sys_seccomp_filter(const void *prog, unsigned long bytes);  /* install a self-imposed BPF syscall filter; 0/-1 (M1190) */
 #define PTY_SETMODE 0
 #define PTY_SETFG   1

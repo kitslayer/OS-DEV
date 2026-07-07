@@ -355,6 +355,8 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SYS_sem_getvalue 321   /* (idx, int*) -> the current value; 0/-1 */
 #define SYS_msgctl       322   /* (id, cmd) -> IPC_RMID only, frees a leaked-forever id slot; 0/-1 (M1576) */
 #define SYS_shmctl       323   /* (id, cmd) -> IPC_RMID only; 0/-1 (M1576) */
+#define SYS_preadv       324   /* (fd, iov, iovcnt, offset) -> like readv, at an explicit offset, cursor untouched; total bytes/-1 (M1577) */
+#define SYS_pwritev      325   /* (fd, iov, iovcnt, offset) -> like writev, at an explicit offset, cursor untouched; total bytes/-1 (M1577) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

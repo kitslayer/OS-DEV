@@ -651,6 +651,8 @@ long sys_pread(int fd, void *buf, unsigned long max, long off) { return do_sysca
 long sys_pwrite(int fd, const void *buf, unsigned long len, long off) { return do_syscall4(SYS_pwrite, fd, (long)buf, (long)len, off); }
 long sys_readv(int fd, struct iovec *iov, int iovcnt) { return do_syscall(SYS_readv, fd, (long)iov, iovcnt); }
 long sys_writev(int fd, const struct iovec *iov, int iovcnt) { return do_syscall(SYS_writev, fd, (long)iov, iovcnt); }
+long sys_preadv(int fd, struct iovec *iov, int iovcnt, long off) { return do_syscall4(SYS_preadv, fd, (long)iov, iovcnt, off); }
+long sys_pwritev(int fd, const struct iovec *iov, int iovcnt, long off) { return do_syscall4(SYS_pwritev, fd, (long)iov, iovcnt, off); }
 long sys_seccomp_filter(const void *prog, unsigned long bytes) { return do_syscall(SYS_seccomp_filter, (long)prog, (long)bytes, 0); }
 /* Restorer trampoline: a signal handler returns HERE; we ask the kernel to
  * restore the pre-signal context (which iretq's elsewhere, so this never
