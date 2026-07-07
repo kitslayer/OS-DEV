@@ -3886,6 +3886,27 @@ long app_ftruncate(int fd, long len) {
     m->size = n;
     return 0;
 }
+/* fsync/fdatasync/sync_file_range (M1566): honestly free, not a lying stub --
+ * blockdev.c's buffer cache is write-through (bcache_flush's own comment),
+ * and neither fat32.c nor ext2.c keep any dirty/deferred metadata of their
+ * own on top of it (grepped: zero hits for "dirty"/"_flush" in either), so
+ * by the time write()/writefile() has already returned, the data is already
+ * as durable as this stack ever makes it -- there is nothing left to flush.
+ * Scoped to a real FILE fd (type 2) only: a memfd/pipe/socket/etc. has no
+ * notion of "reached stable storage" here at all, so -1 for those is real
+ * enforcement, not an arbitrary restriction. fdatasync is identical to
+ * fsync (no separate metadata-vs-data distinction exists to relax); the
+ * range/flags arguments of sync_file_range are accepted but unused --
+ * nothing is deferred for ANY range to begin with. */
+long app_fsync(int fd) {
+    struct app *a = cur();
+    if (!a || fd < 0 || fd >= APP_NFD || !a->fd[fd].used) return -1;
+    return a->fd[fd].type == 2 ? 0 : -1;
+}
+long app_sync_file_range(int fd, uint64_t offset, uint64_t nbytes, unsigned flags) {
+    (void)offset; (void)nbytes; (void)flags;
+    return app_fsync(fd);
+}
 /* timerfd (M1217; periodic M1302): a pollable timer as an fd. The absolute expiry
  * (ms, 0 = disarmed) lives in the fd's own `off` field and the periodic interval
  * (ms, 0 = one-shot) in `obj` — no separate object, so fork copies them and close

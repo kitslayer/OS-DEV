@@ -320,6 +320,9 @@
 #define SYS_pause        294   /* () -> block until a signal is delivered, using the current mask; always -1 (M1563) */
 #define SYS_setitimer    295   /* (delay_ticks, interval_ticks) -> ITIMER_REAL, delay independent of repeat; 0 (M1565) */
 #define SYS_getitimer    296   /* (remain_ticks*, interval_ticks*) -> time left + configured interval; 0/-1 (M1565) */
+#define SYS_fsync        297   /* (fd) -> 0 for a real file fd (write-through already durable), -1 otherwise (M1566) */
+#define SYS_fdatasync    298   /* (fd) -> identical to fsync here; 0/-1 (M1566) */
+#define SYS_sync_file_range 299  /* (fd, offset, nbytes, flags) -> same as fsync; range/flags unused; 0/-1 (M1566) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

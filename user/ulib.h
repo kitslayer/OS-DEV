@@ -24,6 +24,9 @@ long sys_tee(int in_fd, int out_fd, unsigned long len);            /* copy bytes
 int  sys_memfd_create(const char *name, int flags);                /* anonymous sealable in-RAM file fd (>=3); -1 (M1212) */
 long sys_memfd_seal(int fd, unsigned seals);                       /* add F_SEAL_*; new seal set/-1 (M1212) */
 long sys_ftruncate(int fd, long len);                              /* resize a memfd (seal-checked); 0/-1 (M1212) */
+long sys_fsync(int fd);                                            /* 0 for a real file fd, -1 otherwise (M1566) */
+long sys_fdatasync(int fd);                                        /* identical to fsync here; 0/-1 (M1566) */
+long sys_sync_file_range(int fd, unsigned long offset, unsigned long nbytes, unsigned flags);  /* same as fsync; 0/-1 (M1566) */
 long sys_signalfd(unsigned mask);    /* route the masked signos to /proc/self/sigfd instead of a handler (M1126) */
 /* fanotify-style userspace file materialization (M1128) */
 long sys_fanotify_serve(void);                       /* become the /fan daemon */

@@ -183,6 +183,8 @@ long app_tee(int in_fd, int out_fd, unsigned long len);    /* copy bytes pipe->p
 int  app_memfd_create(const char *name, int flags);        /* anonymous sealable in-RAM file fd (>=3); -1 (M1212) */
 long app_memfd_seal(int fd, unsigned add);                 /* add F_SEAL_* (one-way); new seal set/-1 (M1212) */
 long app_ftruncate(int fd, long len);                      /* resize a memfd (seal-checked); 0/-1 (M1212) */
+long app_fsync(int fd);                                     /* fsync/fdatasync: 0 for a real file fd (write-through already durable), -1 otherwise (M1566) */
+long app_sync_file_range(int fd, uint64_t offset, uint64_t nbytes, unsigned flags);  /* same as app_fsync; range/flags unused (M1566) */
 int  app_timerfd_create(void);                             /* a pollable one-shot timer fd (>=3); -1 (M1217) */
 long app_timerfd_settime(int fd, long delay_ms, long interval_ms);  /* arm a timerfd: initial delay + periodic interval (ms; interval 0 = one-shot, delay <=0 disarms); 0/-1 (M1217, periodic M1302) */
 long app_fcntl(int fd, int cmd, long arg);                 /* F_GETFD/SETFD/DUPFD/DUPFD_CLOEXEC (M1218) */
