@@ -1994,6 +1994,7 @@ static val eval_member_get(val recv, const char *name) {
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM((double)(recv.o->n/2));   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
+        if (recv.o->kind==V_REGEX && strcmp(name,"lastIndex")==0) { regex *re=(regex*)recv.o->rx; return NUM(re?re->lastIndex:0); }   /* M1627: test/exec maintain this on the C-side regex*, not as an obj_set property */
         if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); if(strcmp(name,"nextElementSibling")==0) return sibling_handle(recv.o,1); if(strcmp(name,"previousElementSibling")==0) return sibling_handle(recv.o,-1); if(strcmp(name,"checked")==0){ char cb[4]; cb[0]=0; dom_prop(recv.o,name,0,cb,sizeof cb); return BOOLV(cb[0]=='1'); } static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
         if (recv.o->proto) { val pv; if (proto_lookup(recv.o->proto, name, recv, &pv)) return pv; }   /* inherited property/method (M263) */
@@ -2061,7 +2062,14 @@ static val eval_expr_inner(node *n, env *e) {
         case N_YIELD: {   /* eager generators: append the yielded value(s) to the active collection array */
             val v = n->a ? eval_expr(n->a, e) : UND();
             if (g_gen_arr) {
-                if (n->op=='*' && v.t==V_ARR && v.o) { for (int i=0; i<v.o->n && !g_oom; i++) arr_push_val(g_gen_arr, v.o->vals[i]); }  /* yield* spreads an iterable */
+                if (n->op=='*') {   /* yield* spreads an iterable -- same type coverage as [...spread] (M1626); used to
+                                     * only handle V_ARR, silently yielding a Set/Map/string/custom-iterable as ONE item */
+                    if (v.t==V_ARR && v.o) { for (int i=0; i<v.o->n && !g_oom; i++) arr_push_val(g_gen_arr, v.o->vals[i]); }
+                    else if (v.t==V_STR) { const char *s=v.str; for (int i=0; s[i] && !g_oom; i++){ char *c=aalloc(2); if(c){c[0]=s[i];c[1]=0;} arr_push_val(g_gen_arr, STRV(c?c:"")); } }
+                    else if (v.t==V_OBJ && v.o && v.o->kind==V_SET) { for (int i=0; i<v.o->n && !g_oom; i++) arr_push_val(g_gen_arr, v.o->vals[i]); }
+                    else if (v.t==V_OBJ && v.o && v.o->kind==V_MAP) { for (int i=0; i+1<v.o->n && !g_oom; i+=2){ obj *p=new_obj(V_ARR); if(!p){g_oom=1;break;} arr_push_val(p,v.o->vals[i]); arr_push_val(p,v.o->vals[i+1]); val pv=UND();pv.t=V_ARR;pv.o=p; arr_push_val(g_gen_arr,pv); } }
+                    else if (v.t==V_OBJ && v.o) iter_collect(v, g_gen_arr, UND(), 0);   /* custom iterable: drive [Symbol.iterator] */
+                }
                 else arr_push_val(g_gen_arr, v);
             }
             return UND();   /* eager mode has no .next() argument, so `x = yield e` gives undefined */
@@ -2213,6 +2221,7 @@ static val eval_expr_inner(node *n, env *e) {
                     dom_prop(recv.o, pn, val_to_str(rhs), 0, 0); return rhs;   /* el.textContent/innerHTML/value = … -> mutate the page */
                 }
                 if (recv.t==V_FUN && recv.o && strcmp(node_name(t),"prototype")==0 && rhs.t==V_OBJ && rhs.o) { recv.o->fn_proto = rhs.o; return rhs; }   /* F.prototype = obj : reassign the [[Prototype]] each `new F()` gets, so the classic `B.prototype=Object.create(A.prototype)` inheritance chain works (M698) */
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX && strcmp(node_name(t),"lastIndex")==0) { regex *re=(regex*)recv.o->rx; if(re) re->lastIndex=(int)to_num(rhs); return rhs; }   /* re.lastIndex = 0 (the standard idiom for resetting a shared global regex) must reach the C-side field test/exec actually read (M1627) */
                 if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
                 if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ const char *wk=node_name(t); val cur;
                     if(recv.t==V_ARR && strcmp(wk,"length")==0){ int nl=(int)to_num(rhs); if(nl<0)nl=0; if(nl>(1<<24)){ rt_err("array length too large"); return rhs; }
@@ -3764,6 +3773,32 @@ static void civil_from_days(int64_t z, int64_t *yr, int64_t *mo, int64_t *dy){
     int64_t m = mp < 10 ? mp+3 : mp-9;                              /* [1, 12]    */
     *yr = y + (m <= 2); *mo = m; *dy = d;
 }
+/* Normalize possibly out-of-range y/mo(1-based)/d/h/mi/s in place: fold the
+ * month into [1,12] carrying the year, then round-trip the whole instant
+ * through the civil calendar so day/hour/min/sec overflow settles too --
+ * exactly what new Date(y,mo,d,...)'s multi-arg form already does inline
+ * below. Shared with the setters (M1625): they used to store the raw field
+ * with no normalization at all, so e.g. setDate(0) (the "last day of the
+ * previous month" idiom the constructor's own comment advertises) left a
+ * bare day=0 that days_from_civil -- which itself needs a pre-normalized
+ * month, not just a tolerant day -- then fed straight into getTime/getDay. */
+static void date_normalize(int64_t *y, int64_t *mo, int64_t *d, int64_t *h, int64_t *mi, int64_t *s){
+    int64_t mo0 = *mo-1; *y += mo0/12; mo0 %= 12; if(mo0<0){ mo0+=12; (*y)--; } *mo=mo0+1;
+    int64_t secs = days_from_civil(*y,*mo,*d)*86400 + *h*3600 + *mi*60 + *s;
+    int64_t nd = secs/86400, tod = secs - nd*86400; if(tod<0){ tod+=86400; nd--; }
+    civil_from_days(nd,y,mo,d); *h=tod/3600; *mi=(tod%3600)/60; *s=tod%60;
+}
+/* Overwrite Date field `field` (0=y,1=mo,2=d,3=h,4=mi,5=s) with `newval`, then
+ * renormalize + write all six vals[] back -- the setter counterpart of the
+ * constructor's inline normalization above (M1625). */
+static void date_set_field(obj *o, int field, int64_t newval){
+    int64_t y=(int64_t)o->vals[0].num, mo=(int64_t)o->vals[1].num, d=(int64_t)o->vals[2].num,
+            h=(int64_t)o->vals[3].num, mi=(int64_t)o->vals[4].num, s=(int64_t)o->vals[5].num;
+    int64_t *f[6] = {&y,&mo,&d,&h,&mi,&s};
+    *f[field] = newval;
+    date_normalize(&y,&mo,&d,&h,&mi,&s);
+    o->vals[0]=NUM(y); o->vals[1]=NUM(mo); o->vals[2]=NUM(d); o->vals[3]=NUM(h); o->vals[4]=NUM(mi); o->vals[5]=NUM(s);
+}
 /* Parse an ISO-8601-ish date string "YYYY-MM-DD[THH:MM:SS[.sss]][Z]" into components
  * (the trailing fractional seconds + Z/timezone are accepted but ignored — this engine
  * treats everything as UTC). Returns 1 on a usable parse, 0 otherwise. (M695) */
@@ -3797,10 +3832,7 @@ static val nat_date(val *a, int n){
          * instant through the civil calendar so day/hour/min/sec overflow settles —
          * incl. day 0 = the last day of the previous month, so the common
          * `new Date(y, m+1, 0)` "last day of month" idiom and date arithmetic work. */
-        int64_t mo0=mo-1; y += mo0/12; mo0 %= 12; if(mo0<0){ mo0+=12; y--; } mo=mo0+1;
-        int64_t secs = days_from_civil(y,mo,d)*86400 + h*3600 + mi*60 + s;
-        int64_t nd = secs/86400, tod = secs - nd*86400; if(tod<0){ tod+=86400; nd--; }
-        civil_from_days(nd,&y,&mo,&d); h=tod/3600; mi=(tod%3600)/60; s=tod%60;
+        date_normalize(&y,&mo,&d,&h,&mi,&s);
     } else if(n>=1 && a[0].t==V_STR && parse_iso(a[0].str,&y,&mo,&d,&h,&mi,&s)){
         /* new Date("YYYY-MM-DD[THH:MM:SS]") — parse the ISO string (M695) */
     } else {                                /* new Date() / an unparseable string — current time */
@@ -3838,12 +3870,16 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
     if(strcmp(name,"getMilliseconds")==0) return NUM(0);   /* RTC is second-resolution */
     if(strcmp(name,"getDay")==0){ int64_t z=days_from_civil(o->vals[0].num,o->vals[1].num,o->vals[2].num); int64_t wd=(z+4)%7; if(wd<0)wd+=7; return NUM(wd); }   /* 0=Sun..6=Sat (epoch day 0 was a Thursday) */
     if(strcmp(name,"getTime")==0||strcmp(name,"valueOf")==0){ int64_t z=days_from_civil(o->vals[0].num,o->vals[1].num,o->vals[2].num); int64_t secs=z*86400 + o->vals[3].num*3600 + o->vals[4].num*60 + o->vals[5].num; return NUM(secs*1000); }   /* epoch ms */
-    if(strcmp(name,"setFullYear")==0){ if(nargs) o->vals[0]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }   /* setters store the field, return the new epoch ms */
-    if(strcmp(name,"setMonth")==0)   { if(nargs) o->vals[1]=NUM((int64_t)to_num(args[0])+1); return eval_date_method(recv,"getTime",0,0); }   /* arg is 0-based */
-    if(strcmp(name,"setDate")==0)    { if(nargs) o->vals[2]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
-    if(strcmp(name,"setHours")==0)   { if(nargs) o->vals[3]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
-    if(strcmp(name,"setMinutes")==0) { if(nargs) o->vals[4]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
-    if(strcmp(name,"setSeconds")==0) { if(nargs) o->vals[5]=NUM((int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    /* setters store the field AND renormalize (M1625; used to skip normalization
+     * entirely, so e.g. setDate(0) left a bare day=0 instead of rolling back a
+     * month like the constructor's own out-of-range handling does), then return
+     * the new epoch ms */
+    if(strcmp(name,"setFullYear")==0){ if(nargs) date_set_field(o,0,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setMonth")==0)   { if(nargs) date_set_field(o,1,(int64_t)to_num(args[0])+1); return eval_date_method(recv,"getTime",0,0); }   /* arg is 0-based */
+    if(strcmp(name,"setDate")==0)    { if(nargs) date_set_field(o,2,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setHours")==0)   { if(nargs) date_set_field(o,3,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setMinutes")==0) { if(nargs) date_set_field(o,4,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setSeconds")==0) { if(nargs) date_set_field(o,5,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
     if(strcmp(name,"toString")==0) return STRV(val_to_str(recv));
     if(strcmp(name,"toISOString")==0||strcmp(name,"toJSON")==0){   /* "YYYY-MM-DDTHH:MM:SS.000Z" (UTC; ms always 000 at second resolution) */
         char *b=aalloc(28); if(!b) return STRV("");

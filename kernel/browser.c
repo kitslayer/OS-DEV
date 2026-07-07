@@ -1359,11 +1359,18 @@ static int render_table(browser_t *b, const char *s, int len) {
     char out[TBL_CELL_MAX];
 
     /* pass 1: measure each column's max cell width */
-    { const char *p = s; int col = 0, guard = 0;
+    { const char *p = s; int col = 0, guard = 0, depth = 1;   /* M1628: nested-<table> depth, same
+                                                                 * tracking table_has_field already does
+                                                                 * on this same region -- tbl_classify
+                                                                 * returns the SAME code (0) for a nested
+                                                                 * <table> open as for any other ignored
+                                                                 * tag, so a nested table's own </table>
+                                                                 * used to end this pass early */
       while (p < e && guard++ < 200000) {
         if (*p != '<') { p++; continue; }
+        if (p+6 <= e && lc(p[1])=='t'&&lc(p[2])=='a'&&lc(p[3])=='b'&&lc(p[4])=='l'&&lc(p[5])=='e') { depth++; p += 6; continue; }
         const char *after; int k = tbl_classify(p, e, &after);
-        if (k == 4) { tend = after; break; }
+        if (k == 4) { if (--depth == 0) { tend = after; break; } p = after; continue; }
         if (k == 1) { col = 0; p = after; continue; }
         if (k == 2 || k == 6) {
             const char *cs = after, *cend = cs;
@@ -1377,11 +1384,12 @@ static int render_table(browser_t *b, const char *s, int len) {
     }
     /* pass 2: emit each cell padded to its column width (fixed-width font => aligned) */
     emit_break(b, TK_PARA);
-    { const char *p = s; int col = 0, guard = 0;
+    { const char *p = s; int col = 0, guard = 0, depth = 1;
       while (p < e && guard++ < 200000) {
         if (*p != '<') { p++; continue; }
+        if (p+6 <= e && lc(p[1])=='t'&&lc(p[2])=='a'&&lc(p[3])=='b'&&lc(p[4])=='l'&&lc(p[5])=='e') { depth++; p += 6; continue; }
         const char *after; int k = tbl_classify(p, e, &after);
-        if (k == 4) break;
+        if (k == 4) { if (--depth == 0) break; p = after; continue; }
         if (k == 1) { emit_break(b, TK_BREAK); col = 0; p = after; continue; }
         if (k == 2 || k == 6) {
             const char *cs = after, *cend = cs;

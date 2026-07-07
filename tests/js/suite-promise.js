@@ -99,4 +99,14 @@ print("\u0041\u0042\u0043");   // ABC -- the lexer used to eat just the backslas
 print(JSON.parse('"\u0041\u0042"'));   // AB -- JSON.parse used to substitute a literal '?' per escape
 print("-- String.lastIndexOf(fromIndex) (M1623) --");
 print("aXaXa".lastIndexOf("a", 1), "aXaXa".lastIndexOf("a"), "hello".lastIndexOf("l"), "hello".lastIndexOf("z"));   // 0 4 3 -1
+print("-- Date setter overflow normalization (M1625) --");
+print((function(){var d=new Date(2026,2,1);d.setDate(0);return d.getFullYear()+" "+d.getMonth()+" "+d.getDate();})());   // 2026 1 28 (setDate(0) -> last day of Feb)
+print((function(){var d=new Date(2026,0,15);d.setMonth(12);return d.getFullYear()+" "+d.getMonth()+" "+d.getDate();})());   // 2027 0 15 (month overflow carries the year)
+print("-- yield* spreads Set/string/Map, not just Array (M1626) --");
+print((function(){function* g(){yield* new Set([1,2,3]);}var out=[];for(var v of g())out.push(v);return out.join(",");})());   // 1,2,3
+print((function(){function* g(){yield* "ab";}var out=[];for(var v of g())out.push(v);return out.join(",");})());   // a,b
+print((function(){function* g(){var m=new Map();m.set("x",1);m.set("y",2);yield* m;}var out=[];for(var v of g())out.push(v[0]+":"+v[1]);return out.join(",");})());   // x:1,y:2
+print("-- RegExp.lastIndex read/write (M1627) --");
+print((function(){var re=/a/g;re.exec("banana");return re.lastIndex;})());   // 2
+print((function(){var re=/a/g;re.exec("banana");re.lastIndex=0;var m=re.exec("banana");return m[0]+" "+re.lastIndex;})());   // a 2
 print("-- done --");

@@ -88,4 +88,14 @@ ABC
 AB
 -- String.lastIndexOf(fromIndex) (M1623) --
 0 4 3 -1
+-- Date setter overflow normalization (M1625) --
+2026 1 28
+2027 0 15
+-- yield* spreads Set/string/Map, not just Array (M1626) --
+1,2,3
+a,b
+x:1,y:2
+-- RegExp.lastIndex read/write (M1627) --
+2
+a 2
 -- done --
