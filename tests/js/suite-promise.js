@@ -109,4 +109,11 @@ print((function(){function* g(){var m=new Map();m.set("x",1);m.set("y",2);yield*
 print("-- RegExp.lastIndex read/write (M1627) --");
 print((function(){var re=/a/g;re.exec("banana");return re.lastIndex;})());   // 2
 print((function(){var re=/a/g;re.exec("banana");re.lastIndex=0;var m=re.exec("banana");return m[0]+" "+re.lastIndex;})());   // a 2
+print("-- parseInt returns NaN on no leading digit, matching parseFloat (M1629) --");
+print(parseInt("hello")+" "+parseInt("")+" "+parseInt("42abc")+" "+parseInt("-7"));   // NaN NaN 42 -7
+print("-- String.indexOf/includes clamp fromIndex to length (M1630) --");
+print("abc".indexOf("",10)+" "+"abc".includes("",10)+" "+"abc".indexOf("b",10));   // 3 true -1
+print("-- Promise.race checks every member, not just index 0 (M1631) --");
+print((function(){var o="?";Promise.race([new Promise(function(){}),Promise.resolve(2)]).then(function(v){o=v;});return o;})());   // 2 (a still-pending first member no longer masks an already-settled second one)
+print((function(){var o="?";Promise.race([Promise.resolve(1),Promise.resolve(2)]).then(function(v){o=v;});return o;})());   // 1 (first non-pending, array order)
 print("-- done --");

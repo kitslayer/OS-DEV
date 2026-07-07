@@ -2802,9 +2802,9 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         if(a<0)a=0; if(b<0)b=0; if(a>len)a=len; if(b>len)b=len;
         if (name[1]=='u' && a>b) { int t=a; a=b; b=t; }   /* substring swaps its args when start>end (slice clamps to empty instead) */
         if(b<a)b=a; char*r=aalloc(b-a+1); if(!r) return STRV(""); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
-    if (strcmp(name,"indexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; for(int i=from;i+sl<=len;i++){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
+    if (strcmp(name,"indexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; if(from>len)from=len; /* M1630: clamp the upper bound too, like startsWith/endsWith already do -- "abc".indexOf("",10) is 3, not -1 */ for(int i=from;i+sl<=len;i++){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
     if (strcmp(name,"lastIndexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):len; if(from<0)from=0; if(from>len)from=len; int start=from; if(start>len-sl)start=len-sl; for(int i=start;i>=0;i--){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
-    if (strcmp(name,"includes")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; for(int i=from;i+sl<=len;i++) if(memcmp(s+i,sub,sl)==0) return BOOLV(1); return BOOLV(0); }
+    if (strcmp(name,"includes")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; if(from>len)from=len; /* M1630: same upper-bound clamp as indexOf */ for(int i=from;i+sl<=len;i++) if(memcmp(s+i,sub,sl)==0) return BOOLV(1); return BOOLV(0); }
     if (strcmp(name,"startsWith")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int pos=nargs>1?(int)to_num(args[1]):0; if(pos<0)pos=0; if(pos>len)pos=len; /* match from position (M694) */ return BOOLV(sl<=len-pos && memcmp(s+pos,sub,sl)==0); }
     if (strcmp(name,"endsWith")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int end=nargs>1?(int)to_num(args[1]):len; if(end<0)end=0; if(end>len)end=len; /* treat the string as if it ended at `end` (M694) */ return BOOLV(sl<=end && memcmp(s+end-sl,sub,sl)==0); }
     if (strcmp(name,"trim")==0){ int a=0,b=len; while(a<b&&(s[a]==' '||s[a]=='\t'||s[a]=='\n'||s[a]=='\r'))a++; while(b>a&&(s[b-1]==' '||s[b-1]=='\t'||s[b-1]=='\n'||s[b-1]=='\r'))b--; char*r=aalloc(b-a+1); if(!r) return STRV(""); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
@@ -3130,11 +3130,20 @@ static val nat_promise_all(val *args, int nargs){
     }
     val av=UND(); av.t=V_ARR; av.o=out; return make_promise(1, av);
 }
-static val nat_promise_race(val *args, int nargs){   /* first settled; sync model -> the first member */
-    if (nargs>0 && args[0].t==V_ARR && args[0].o && args[0].o->n>0){
-        val e=args[0].o->vals[0];
-        if (e.t==V_OBJ && e.o && e.o->kind==V_PROMISE) return make_promise(pstate(e.o), pvalue(e.o));
-        return make_promise(1, e);
+static val nat_promise_race(val *args, int nargs){   /* first settled member wins (M1631): unlike any/all/allSettled just
+                                                       * below, this used to look only at vals[0], so a still-pending
+                                                       * first element permanently masked an already-settled second one
+                                                       * -- e.g. Promise.race([pending, Promise.resolve(2)]) never
+                                                       * resolved. Loop like its three siblings do. */
+    if (nargs>0 && args[0].t==V_ARR && args[0].o){
+        obj *a=args[0].o;
+        for (int i=0;i<a->n;i++){
+            val e=a->vals[i];
+            if (e.t==V_OBJ && e.o && e.o->kind==V_PROMISE){
+                if (pstate(e.o)!=0) return make_promise(pstate(e.o), pvalue(e.o));   /* first non-pending member */
+            } else return make_promise(1, e);                                        /* a non-promise settles immediately */
+        }
+        if (a->n>0) { val e=a->vals[0]; return make_promise(pstate(e.o), pvalue(e.o)); }   /* all pending: mirror today's behavior */
     }
     return make_promise(0, UND());
 }
@@ -3955,7 +3964,7 @@ static val nat_parseInt(val *a, int n){                                         
     for(; *s; s++){ int d; char c=*s;
         if(c>='0'&&c<='9') d=c-'0'; else if(c>='a'&&c<='z') d=c-'a'+10; else if(c>='A'&&c<='Z') d=c-'A'+10; else break;
         if(d>=radix) break; v=v*radix+d; any=1; }
-    return NUM(any?(neg?-v:v):0);
+    return NUM(any?(neg?-v:v):JS_NAN);   /* M1629: no leading digit -> NaN per spec, matching parseFloat's own handling (the OLD ":0" here is exactly what that function's comment calls out as the odd-one-out) */
 }
 static val nat_parseFloat(val *a, int n){                                          /* parseFloat(str): leading float prefix -> double, else NaN */
     if(!n) return NUM(JS_NAN);
@@ -3966,7 +3975,7 @@ static val nat_parseFloat(val *a, int n){                                       
     int any=0; double x=0;
     while(*s>='0'&&*s<='9'){ x=x*10.0+(*s-'0'); s++; any=1; }
     if(*s=='.'){ s++; double f=0.1; while(*s>='0'&&*s<='9'){ x+=(*s-'0')*f; f*=0.1; s++; any=1; } }
-    if(!any) return NUM(JS_NAN);                                                   /* no leading digits -> NaN (unlike parseInt's 0) */
+    if(!any) return NUM(JS_NAN);                                                   /* no leading digits -> NaN (parseInt matches this too, M1629) */
     if(*s=='e'||*s=='E'){ const char *p=s+1; int eneg=0; if(*p=='+')p++; else if(*p=='-'){eneg=1;p++;}
         if(*p>='0'&&*p<='9'){ int en=0; while(*p>='0'&&*p<='9'){en=en*10+(*p-'0');p++;} x*=js_pow(10.0,eneg?-(double)en:(double)en); } }
     return NUM(neg?-x:x);

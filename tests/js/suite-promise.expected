@@ -98,4 +98,11 @@ x:1,y:2
 -- RegExp.lastIndex read/write (M1627) --
 2
 a 2
+-- parseInt returns NaN on no leading digit, matching parseFloat (M1629) --
+NaN NaN 42 -7
+-- String.indexOf/includes clamp fromIndex to length (M1630) --
+3 true -1
+-- Promise.race checks every member, not just index 0 (M1631) --
+2
+1
 -- done --
