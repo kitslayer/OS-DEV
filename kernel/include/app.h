@@ -218,6 +218,8 @@ long app_seccomp_filter_check(app_t *a, uint64_t nr, uint64_t a0, uint64_t a1, u
 int  app_deliver_pending(struct registers *r);     /* deliver a pending async signal on return to ring 3; 1 if delivered */
 void app_set_alarm(uint64_t ticks);                /* SYS_alarm: arm a periodic SIGALRM every `ticks` ticks (0=disarm) */
 void app_alarm_tick(void);                         /* timer IRQ hook: raise SIGALRM if the current app's alarm is due */
+void app_setitimer(uint64_t delay_ticks, uint64_t interval_ticks);  /* SYS_setitimer(ITIMER_REAL): delay to first fire, independent repeat interval; 0 delay = disarm (M1565) */
+void app_getitimer(uint64_t *remain_ticks, uint64_t *interval_ticks);  /* SYS_getitimer: time left + configured interval (M1565) */
 void app_cpulimit_tick(void);                      /* timer IRQ hook: raise SIGXCPU if the current task exceeds RLIMIT_CPU (M1548) */
 void app_set_traced(app_t *a, int on);             /* strace: log this app's syscalls to dmesg */
 int  app_is_traced(app_t *a);

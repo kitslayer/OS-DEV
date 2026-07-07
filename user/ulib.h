@@ -113,6 +113,8 @@ int  sys_flock(const char *path, int op);                  /* advisory whole-fil
 long sys_getrlimit(int resource, struct rlimit *rl);   /* read a resource limit (M1163) */
 long sys_setrlimit(int resource, struct rlimit *rl);   /* set a resource limit (M1163) */
 long sys_alarm(unsigned long ticks);
+long sys_setitimer(unsigned long delay_ticks, unsigned long interval_ticks);   /* ITIMER_REAL; 0 (M1565) */
+long sys_getitimer(unsigned long *remain_ticks, unsigned long *interval_ticks);  /* 0/-1 (M1565) */
 long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);
 long sys_losetup(const char *path);

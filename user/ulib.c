@@ -262,6 +262,8 @@ int  sys_flock(const char *path, int op) { return (int)do_syscall(SYS_flock, (lo
 long sys_getrlimit(int resource, struct rlimit *rl) { return do_syscall(SYS_getrlimit, resource, (long)rl, 0); }
 long sys_setrlimit(int resource, struct rlimit *rl) { return do_syscall(SYS_setrlimit, resource, (long)rl, 0); }
 long sys_alarm(unsigned long ticks) { return do_syscall(SYS_alarm, (long)ticks, 0, 0); }
+long sys_setitimer(unsigned long delay_ticks, unsigned long interval_ticks) { return do_syscall(SYS_setitimer, (long)delay_ticks, (long)interval_ticks, 0); }
+long sys_getitimer(unsigned long *remain_ticks, unsigned long *interval_ticks) { return do_syscall(SYS_getitimer, (long)remain_ticks, (long)interval_ticks, 0); }
 long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
 long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }
 long sys_losetup(const char *path) { return do_syscall(SYS_losetup, (long)path, 0, 0); }

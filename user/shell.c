@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -4785,6 +4785,41 @@ static int run_command(char *line, char *cwd) {
             sys_alarm(0);                        /* disarm */
             print("SIGALRM fired "); printl(g_alarm_fires); print(" times in ~1s (expected ~5)\n");
             if (g_alarm_fires < 3 || g_alarm_fires > 7) g_status = 1;
+        } else if (streq(line, "setitimertest")) {   /* setitimer/getitimer(ITIMER_REAL): delay independent of interval, one-shot (M1565) */
+            int ok = 1;
+            sys_signal(14 /* SIGALRM */, sh_alarm_handler);
+
+            /* one-shot (interval=0): fires exactly once, never refires -- the real risk
+             * this milestone fixed in app_alarm_tick (a naive alarm_next+=0 would have
+             * kept re-firing on every subsequent tick forever). */
+            g_alarm_fires = 0;
+            sys_setitimer(15, 0);                        /* delay 150ms, one-shot */
+            long start = sys_uptime_ms();
+            while (sys_uptime_ms() - start < 500) { }    /* spin well past the delay */
+            sys_setitimer(0, 0);
+            int oneshot_ok = (g_alarm_fires == 1);
+
+            /* independent delay+interval: alarm()'s own always-equal shape could never
+             * produce this -- first fire ~100ms, second ~400ms (100+300), not ~200ms. */
+            g_alarm_fires = 0;
+            sys_setitimer(10, 30);                       /* delay 100ms, then every 300ms */
+            unsigned long remain0 = 0, interval0 = 0;
+            sys_getitimer(&remain0, &interval0);
+            long t0 = sys_uptime_ms();
+            long fire1_ms = -1, fire2_ms = -1;
+            while (sys_uptime_ms() - t0 < 500) {
+                if (g_alarm_fires >= 1 && fire1_ms < 0) fire1_ms = sys_uptime_ms() - t0;
+                if (g_alarm_fires >= 2 && fire2_ms < 0) fire2_ms = sys_uptime_ms() - t0;
+            }
+            sys_setitimer(0, 0);
+            int getitimer_ok = (interval0 == 30 && remain0 > 0 && remain0 <= 10);
+            int timing_ok = (fire1_ms >= 50 && fire1_ms <= 200) && (fire2_ms >= 300 && fire2_ms <= 500);
+            ok = oneshot_ok && getitimer_ok && timing_ok;
+
+            print("setitimer: one-shot fires exactly once, delay+interval independent (fire1~");
+            printl((int)fire1_ms); print("ms fire2~"); printl((int)fire2_ms); print("ms, not ~200ms) -- ");
+            sys_setcolor(ok ? 10 : 4); print(ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+            if (!ok) g_status = 1;
         } else if (streq(line, "clockgt")) {  /* read the clock via the vDSO time page — NO syscall (M1111) */
             struct timespec a, b, r;
             clock_gettime(CLOCK_MONOTONIC, &a);

@@ -318,6 +318,8 @@
 #define SYS_getpeername  292   /* (fd, addr{u8 ip[4];u16 port}[6]) -> the connected peer's address; 0/-1 (M1560) */
 #define SYS_sigsuspend   293   /* (mask) -> swap the blocked-signal mask, block for a signal, restore; always -1 (M1561) */
 #define SYS_pause        294   /* () -> block until a signal is delivered, using the current mask; always -1 (M1563) */
+#define SYS_setitimer    295   /* (delay_ticks, interval_ticks) -> ITIMER_REAL, delay independent of repeat; 0 (M1565) */
+#define SYS_getitimer    296   /* (remain_ticks*, interval_ticks*) -> time left + configured interval; 0/-1 (M1565) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

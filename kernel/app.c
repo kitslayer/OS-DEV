@@ -2843,18 +2843,44 @@ void app_set_alarm(uint64_t ticks) {
     a->alarm_interval = ticks;
     a->alarm_next = ticks ? timer_ticks() + ticks : 0;
 }
-/* Called from the timer IRQ: if the CURRENT app's periodic alarm is due, raise
- * SIGALRM (a no-op if it never installed a handler). Checking cur() keeps it
- * cheap — an app times its own run while it is the one executing. */
+/* Called from the timer IRQ: if the CURRENT app's alarm is due, raise SIGALRM
+ * (a no-op if it never installed a handler). Checking cur() keeps it cheap —
+ * an app times its own run while it is the one executing.
+ * Gates on alarm_next (armed?), not alarm_interval (M1565): app_set_alarm
+ * always pairs them (both zero or both nonzero), but setitimer's whole point
+ * is a ONE-SHOT timer (nonzero delay, zero interval) -- gating on interval
+ * would silently never fire it. On fire: a periodic timer (interval!=0)
+ * advances to the next deadline; a one-shot (interval==0) disarms instead of
+ * re-triggering on every subsequent tick forever (alarm_next += 0). */
 void app_alarm_tick(void) {
     task_t *t = task_self();
     if (!t || !t->proc) return;                  /* before sched_init / a kernel task */
     struct app *a = (struct app *)t->proc;
-    if (!a->alarm_interval) return;
+    if (!a->alarm_next) return;
     if (timer_ticks() >= a->alarm_next) {
-        a->alarm_next += a->alarm_interval;
+        a->alarm_next = a->alarm_interval ? a->alarm_next + a->alarm_interval : 0;
         app_request_signal(a, SIGALRM);          /* opt-in: only fires if a SIGALRM handler is installed */
     }
+}
+/* setitimer/getitimer(ITIMER_REAL) (M1565): the generalization app_set_alarm
+ * never needed -- a delay to first fire INDEPENDENT of the repeat interval
+ * (alarm()/app_set_alarm always force them equal). No `which` argument: this
+ * codebase has no separate user/system-CPU-time itimer types to select
+ * between, matching app_set_alarm's own no-`which` precedent. Ticks, not
+ * seconds+microseconds, for the same reason -- alarm()'s own established
+ * unit in this file, not real setitimer's struct itimerval shape. */
+void app_setitimer(uint64_t delay_ticks, uint64_t interval_ticks) {
+    struct app *a = cur();
+    if (!a) return;
+    if (!delay_ticks) { a->alarm_next = 0; a->alarm_interval = 0; return; }   /* it_value==0 -> disarm regardless of interval (real setitimer) */
+    a->alarm_next = timer_ticks() + delay_ticks;
+    a->alarm_interval = interval_ticks;   /* 0 = one-shot, matching real setitimer */
+}
+void app_getitimer(uint64_t *remain_ticks, uint64_t *interval_ticks) {
+    struct app *a = cur();
+    uint64_t now = a ? timer_ticks() : 0;
+    if (remain_ticks)   *remain_ticks   = (a && a->alarm_next && a->alarm_next > now) ? a->alarm_next - now : 0;
+    if (interval_ticks) *interval_ticks = a ? a->alarm_interval : 0;
 }
 
 #define SIGXCPU 25   /* real Linux uses 24, but that number is already SIGWINCH here (M1548) */

@@ -289,7 +289,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_sigaltstack: case SYS_raise:
     case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom: case SYS_clock_settime: case SYS_pidfd_getfd: case SYS_acpi: case SYS_aslr:
-    case SYS_alarm: case SYS_getrusage:
+    case SYS_alarm: case SYS_getrusage: case SYS_setitimer: case SYS_getitimer:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
     case SYS_semget: case SYS_semop: case SYS_semctl:
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
@@ -371,7 +371,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pledge]="pledge",[SYS_unveil]="unveil",[SYS_symlink]="symlink",
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
-        [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_sntp]="sntp",
+        [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_setitimer]="setitimer",[SYS_getitimer]="getitimer",[SYS_sntp]="sntp",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
@@ -1938,6 +1938,19 @@ void syscall_dispatch(struct registers *r) {
         app_set_alarm(r->rdi);
         r->rax = 0;
         break;
+    case SYS_setitimer:                    /* (delay_ticks, interval_ticks) -> ITIMER_REAL; 0 (M1565) */
+        app_setitimer(r->rdi, r->rsi);
+        r->rax = 0;
+        break;
+    case SYS_getitimer: {                  /* (remain_ticks*, interval_ticks*) -> 0/-1 (M1565) */
+        if ((r->rdi && !ubuf(r->rdi, sizeof(uint64_t))) || (r->rsi && !ubuf(r->rsi, sizeof(uint64_t)))) { r->rax = (uint64_t)-1; break; }
+        uint64_t remain = 0, interval = 0;
+        app_getitimer(&remain, &interval);
+        if (r->rdi) *(uint64_t *)r->rdi = remain;
+        if (r->rsi) *(uint64_t *)r->rsi = interval;
+        r->rax = 0;
+        break;
+    }
     case SYS_uptime_ms:
         r->rax = timer_ms();               /* monotonic milliseconds since boot */
         break;
