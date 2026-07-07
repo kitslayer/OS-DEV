@@ -1,5 +1,7 @@
 # What's next
 
+> **(M1596) Docs — retired this file's own long-stale "biggest remaining gaps" section.** A bonus finding from the eleventh research survey while it was hunting for code bugs: this document's own bottom-of-file status page — written early enough to still say "milestone 85"/"milestone 111" in the old pre-`M`-prefix numbering — claimed `fork`/`exec` and remote `<img>` rendering as *missing*, when both have been shipped essentially since the numbering scheme this document now uses even started (`fork`=91, `exec`=93). It also claimed ext2 was 8.3-names-only, when it's supported full 255-byte names since it landed. A survey wasting even a few minutes re-verifying an already-false claim in the project's own north-star doc is a real, if small, cost — worth fixing the moment it's noticed rather than leaving it to happen again. Replaced the section with a short, explicitly-dated note pointing future readers at the actual authoritative source: this changelog's own entries, and the code itself.
+>
 > **(M1595) Kernel — `insmod_path`: this OS can load a kernel module from a real file for the first time ever.** Eleventh survey's second find: `module_load()` (M1261) is a fully general ET_REL relocator — copy sections, resolve against the kernel symbol table, apply relocations, call `mod_init` — that takes *any* buffer, but its only caller anywhere in the tree was the incbin'd built-in blob. `module.h`'s own header comment named the gap directly: *"Loading a .ko from a file is a natural follow-on once a binary can be placed on the disk"* — true since `SYS_writefile` (syscall #12, essentially the start of this whole 1595-milestone arc) and never once acted on.
 >
 > The dispatch case is the exact three-line shape `sha256`/`sha512`/`gunzip`/`gzip`/`unzip`/`untar`/`crypt` already share: `read_whole_file(path, &buf)` → do the real work → `kfree(buf)`. New `module_load_named()` mirrors `module_load()`'s own one-line wrapper around the previously-private `mod_do_load`, taking a real name instead of the generic `"module"` literal — derived from the path's own basename (stripping a trailing `.ko`) so `/proc/modules`/`rmmod` can tell multiple disk-loaded modules apart, the same way the built-in blob's own `"testmod"` name already could. Crosses no new privilege boundary: the existing no-arg `insmod` already lets ring-3 inject arbitrary ring-0 code, same as this does.
@@ -5203,61 +5205,26 @@ beep mem ps clear reboot ver pid exit`.
 
 ## The biggest remaining gaps
 
-1. **Browser interactivity — LARGELY DONE; the frontier has moved.** The browser
-   browses the real HTTPS web (from-scratch **TLS 1.3** + X.509 chain validation to
-   baked-in roots — `TLS*` on example.com/NPR/gnu.org/google.com), runs a
-   **comprehensive JS engine** (OOP + ES6 + regex + Map/Set/Date), and is now
-   **interactive**: a minimal **DOM** (`getElementById`/`querySelector` →
-   `textContent`/`innerHTML`/`.value`, `getAttribute`/`setAttribute`),
-   `window.location`, inline `onclick`, the full **form-input set**, **GET form
-   submission**, **live web search** (DuckDuckGo, from a form or the address bar),
-   and **reactive events** (`onchange`/`oninput`). What's left for *more*
-   interactivity — each a real build, best done with guidance:
-   - **Event handlers — DONE (M287–292)**: a persistent per-page JS env + a handler
-     registry; the full lifecycle works — `onclick`/`addEventListener`/`onchange`/
-     `oninput` (inline *and* JS-assigned), add / fire (with an `event` arg + `this`) /
-     remove (`removeEventListener`/`onclick=null`), state persisting across events.
-     (Minor polish left: id-less-element handlers, multiple listeners per event.)
-   - **DOM queries + traversal + element API + construction — DONE (M281–299)**:
-     querySelector(All)/getElementsBy* by CSS selector (tag/`.class`/`#id`/`[attr]`/
-     compounds); traversal `matches`/`closest`/`children`/`parentElement`; attributes
-     `get`/`has`/`set`/`removeAttribute` + `classList`; textContent/innerHTML/value
-     read+write, `remove`; and **node construction** `createElement`+`appendChild`
-     (turned out NOT to need a tree — `parent.innerHTML += built-HTML`). All via
-     byte-offset *position handles*.
-   - **CSS — a small engine DONE (M302–305)**: per-element `color` / `font-weight`
-     / `font-style` from inline `style=` *and* `<style>` rules (`tag`/`.class`/`#id`/
-     `[attr]` selectors), a real cascade (rules < inline, per property), and a scope
-     **stack** so styled elements nest to any depth. Only CSS *layout* — `font-size`,
-     `text-align`, the box model, backgrounds — still needs a layout engine the flat
-     token-stream renderer lacks. Possible next slivers without one: `rgb()`/more named
-     colours, `text-decoration` (underline/line-through).
-   - **CSS / layout**, cookies (sessions), inline remote `<img>`, `<textarea>`
-     multiline.
-   *Known limit: `lite.cnn.com` etc. refuse our minimal ClientHello (Fastly TLS
-   fingerprinting) — not a TCP/crypto bug. Hard ceiling stands: real web apps
-   (Google Docs) / Chromium are out of reach — see GOALS.md.*
-2. **`fork` / `exec` + a process table.** Programs spawn fresh from embedded or
-   on-disk ELFs (loading from disk now works — milestone 85); true `fork` +
-   `exec` would enable a Unix-like model with child processes.
-3. **Richer browser rendering.** **Inline `<img>` for remote (`http:`) images**
-   (local images render inline — milestone 111; remote ones still need an async
-   per-image fetch state machine on top of the single fetch worker/buffer),
-   hanging-indent list wrap, and true column-aligned tables. (`<pre>`, lists,
-   tables, entities, bold/italic, headings, links, form fields, text colour,
-   inline code, `<img>` sizing, **inline local PNG (incl. interlaced), GIF (incl.
-   animation), and baseline-and-progressive JPEG images**, and the full-page
-   image viewer are all done — three from-scratch image decoders, host-tested and
-   fuzzed. Every common web image format is supported.)
-4. **Long file names** (subdirectories exist, but 8.3 names only).
+**STALE — kept only for historical context, do not trust the specifics below.**
+Written extremely early in this project's history (it still says "milestone 85"/
+"milestone 111" — the pre-"M"-prefix numbering from roughly the project's first
+~150 milestones). Flagged by the eleventh research survey (2026-07-07, M1595's
+own arc) as actively misleading: item 2 (`fork`/`exec`) shipped at `SYS_fork`=91/
+`SYS_exec`=93, essentially the *start* of the numbering this document now uses in
+the thousands; item 3's "remote `<img>` still needs an async fetch machine" is
+false — `kernel/browser.c`'s `REMOTE_IMG_MAX`/`resolve_img_url` already prefetch
+and render them; item 4's "8.3 names only" is false for ext2 (255-byte names since
+it landed) and unverified either way for FAT32. Rather than patch each claim
+individually and risk leaving others (the CSS/DOM/cookies/textarea specifics above
+were never re-checked this pass), the section is retired here. **For the real,
+current state of any feature, read the changelog above (newest first) or grep the
+source directly** — this file's own entries are the authoritative, continuously
+-updated record; a standalone status snapshot like this one reliably rots the
+moment nobody's job is to maintain it in lockstep.
 
 ## Smaller polish
 
-- Window **minimize** (F3) + tiling/snap (F5/F6) are done; terminal copy/paste (scrollback is done).
-- Browser: scrollbar drag, in-page find, history forward (Back exists).
-- A graphical **file manager** with icons (the Files window is now an
-  interactive launcher); load the wallpaper from disk.
-- **APIC/HPET** + SMP (multi-core); faster syscalls (`syscall`/`sysret`).
+Same staleness caveat as above — not maintained, not verified this pass.
 
 ## Notes
 
