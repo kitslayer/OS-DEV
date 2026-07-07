@@ -2687,6 +2687,16 @@ long app_sigsuspend(struct registers *r, uint32_t mask) {
     return -1;
 }
 
+/* pause (M1563): block until a signal is delivered, using the CURRENT mask
+ * unchanged -- exactly sigsuspend with mask == a->sig_blocked, which makes
+ * its own swap-then-restore a no-op (same value both ways) and its wait
+ * condition/delivery-ordering fix (M1561) apply here for free. */
+long app_pause(struct registers *r) {
+    struct app *a = cur();
+    if (!a) return -1;
+    return app_sigsuspend(r, a->sig_blocked);
+}
+
 /* --- RT signals / sigqueue(3) (M1271) -----------------------------------
  * Real-time signals differ from standard signals in two ways: they QUEUE
  * (multiple pending instances are kept and delivered one-by-one, in FIFO

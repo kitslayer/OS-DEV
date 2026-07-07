@@ -156,6 +156,7 @@ void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl
 uint32_t app_sigprocmask(int how, uint32_t set);   /* block/unblock signals; returns the old mask (M1208) */
 uint32_t app_sigpending(void);                      /* the raised-but-blocked (pending) signal set (M1209) */
 long     app_sigsuspend(struct registers *r, uint32_t mask);  /* swap the blocked mask, block for a signal, deliver it, restore + always -1 (M1561) */
+long     app_pause(struct registers *r);                     /* block for a signal using the CURRENT mask, unchanged; always -1 (M1563) */
 int  app_sigqueue(int pid, int signo, uint64_t value);  /* SYS_sigqueue: RT signal carrying a queued sigval payload (M1271) */
 /* POSIX per-process interval timers: timer_create(2) firing a signal via the sigqueue FIFO (M1272) */
 long app_timer_create(int signo, uint64_t value);                                   /* -> timer id, or -1 */

@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2744,6 +2744,34 @@ static int run_command(char *line, char *cwd) {
                 int ok = sigchld_ok && pd_ok;
                 print(ok ? "SIGCHLD delivered on a child's exit, PR_SET_PDEATHSIG delivered when ITS parent died -- OK\n"
                          : "pdeathsigtest: VERIFY FAILED\n");
+                if (!ok) g_status = 1;
+                sys_shmdt((void *)sh);
+            }
+        } else if (streq(line, "pausetest")) {   /* pause(): block until a signal, current mask unchanged (M1563) */
+            long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
+            volatile unsigned long *sh = (shmid >= 0) ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
+            if (!sh) { perr("pausetest: shmget failed\n"); g_status = 1; }
+            else {
+                sh[0] = 0;                                    /* elapsed ms the child measured around pause() */
+                long c = sys_fork();
+                if (c == 0) {
+                    volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                    sys_signal(10 /*SIGUSR1*/, sh_sigsuspend_handler);   /* a handler must exist or app_request_signal
+                                                                          * drops it and pause() blocks forever; its
+                                                                          * flag isn't read here -- elapsed time is
+                                                                          * the actual proof pause() really blocked */
+                    unsigned long t0 = sys_uptime_ms();
+                    sys_pause();
+                    unsigned long t1 = sys_uptime_ms();
+                    if (m) m[0] = t1 - t0;
+                    sys_exit(0);
+                }
+                sys_sleep(200);                                /* let the child install the handler + reach pause() */
+                if (c > 0) { sys_sigqueue((int)c, 10, 0); int st; sys_waitpid((int)c, &st); }
+                unsigned long elapsed = sh[0];
+                int ok = (c > 0 && elapsed >= 150);             /* blocked for roughly the parent's sleep, not an instant return */
+                print("pause: blocked "); printl((int)elapsed); print("ms until signalled (parent slept ~200ms) -- ");
+                sys_setcolor(ok ? 10 : 4); print(ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
                 if (!ok) g_status = 1;
                 sys_shmdt((void *)sh);
             }

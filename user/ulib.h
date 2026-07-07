@@ -311,6 +311,7 @@ long  sys_sigaltstack(void *ss_sp, unsigned long ss_size);  /* register an alter
 unsigned sys_sigprocmask(int how, unsigned set);  /* block/unblock signals; returns the old mask (M1208) */
 unsigned sys_sigpending(void);                    /* the pending (raised-but-blocked) signal set (M1209) */
 int      sys_sigsuspend(unsigned mask);           /* swap blocked mask, block for a signal, restore; always -1 (M1561) */
+int      sys_pause(void);                         /* block until a signal is delivered, current mask unchanged; always -1 (M1563) */
 unsigned long sys_uptime_ms(void);   /* monotonic milliseconds since boot */
 int  sys_gfx_init(int w, int h);     /* enter graphics mode: a w*h XRGB pixel canvas; 0/-1 */
 int  sys_gfx_blit(const void *pixels); /* copy w*h pixels (0x00RRGGBB) to the window; 0/-1 */

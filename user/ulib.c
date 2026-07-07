@@ -640,6 +640,7 @@ long sys_sigaltstack(void *ss_sp, unsigned long ss_size) { return do_syscall(SYS
 unsigned sys_sigprocmask(int how, unsigned set) { return (unsigned)do_syscall(SYS_sigprocmask, how, (long)set, 0); }
 unsigned sys_sigpending(void) { return (unsigned)do_syscall(SYS_sigpending, 0, 0, 0); }
 int      sys_sigsuspend(unsigned mask) { return (int)do_syscall(SYS_sigsuspend, (long)mask, 0, 0); }
+int      sys_pause(void) { return (int)do_syscall(SYS_pause, 0, 0, 0); }
 unsigned long sys_uptime_ms(void) { return (unsigned long)do_syscall(SYS_uptime_ms, 0, 0, 0); }
 int  sys_gfx_init(int w, int h) { return (int)do_syscall(SYS_gfx_init, w, h, 0); }
 int  sys_gfx_blit(const void *pixels) { return (int)do_syscall(SYS_gfx_blit, (long)pixels, 0, 0); }
