@@ -28,6 +28,7 @@ long sys_memfd_seal(int fd, unsigned seals);                       /* add F_SEAL
 long sys_ftruncate(int fd, long len);                              /* resize a memfd (seal-checked); 0/-1 (M1212) */
 long sys_fsync(int fd);                                            /* 0 for a real file fd, -1 otherwise (M1566) */
 long sys_fdatasync(int fd);                                        /* identical to fsync here; 0/-1 (M1566) */
+void sys_sync(void);                                               /* whole-system flush, no fd, never fails (M1588) */
 long sys_sync_file_range(int fd, unsigned long offset, unsigned long nbytes, unsigned flags);  /* same as fsync; 0/-1 (M1566) */
 long sys_signalfd(unsigned mask);    /* route the masked signos to /proc/self/sigfd instead of a handler (M1126) */
 /* fanotify-style userspace file materialization (M1128) */

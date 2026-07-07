@@ -315,7 +315,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat: case SYS_readlinkat:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
-    case SYS_fsync: case SYS_fdatasync: case SYS_sync_file_range:
+    case SYS_fsync: case SYS_fdatasync: case SYS_sync_file_range: case SYS_sync:
     case SYS_utimens: case SYS_futimens: case SYS_utimensat: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
     case SYS_chown: case SYS_fchown: case SYS_unlinkat: case SYS_mkdirat:
     case SYS_fchmodat: case SYS_fchownat: case SYS_symlinkat: case SYS_linkat:
@@ -376,7 +376,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_setitimer]="setitimer",[SYS_getitimer]="getitimer",[SYS_sntp]="sntp",
-        [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",[SYS_epoll_pwait]="epoll_pwait",[SYS_inotify_rm_watch]="inotify_rm_watch",
+        [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",[SYS_sync]="sync",[SYS_epoll_pwait]="epoll_pwait",[SYS_inotify_rm_watch]="inotify_rm_watch",
         [SYS_fsetxattr]="fsetxattr",[SYS_fgetxattr]="fgetxattr",[SYS_flistxattr]="flistxattr",[SYS_fremovexattr]="fremovexattr",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
@@ -2135,6 +2135,10 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sync_file_range:              /* (fd, offset, nbytes, flags) -> same as fsync (M1566) */
         r->rax = (uint64_t)app_sync_file_range((int)r->rdi, (uint64_t)r->rsi, (uint64_t)r->rdx, (unsigned)r->r10);
+        break;
+    case SYS_sync:                         /* () -> whole-system flush, never fails (M1588) */
+        app_sync();
+        r->rax = 0;
         break;
     case SYS_signalfd:                     /* route masked signals to /proc/self/sigfd (M1126) */
         r->rax = (uint64_t)(int64_t)app_signalfd((uint32_t)r->rdi);

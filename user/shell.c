@@ -3336,7 +3336,12 @@ static int run_command(char *line, char *cwd) {
             int mfd = sys_memfd_create("m", 0);            /* no notion of "reached stable storage" for a memfd here -- must be denied */
             if (mfd < 0 || sys_fsync(mfd) != -1) ok = 0;
             if (mfd >= 0) sys_fdclose(mfd);
-            print(ok ? "fsync/fdatasync/sync_file_range: 0 on a real file fd (write-through already durable), -1 on a memfd -- OK\n"
+            sys_sync();                                    /* sync (M1588): no fd, no return value to check -- real
+                                                              * POSIX sync() has no failure mode either; the only
+                                                              * thing to prove is that it returns at all rather than
+                                                              * hanging, which this command finishing and printing
+                                                              * its own result right below already demonstrates */
+            print(ok ? "fsync/fdatasync/sync_file_range: 0 on a real file fd (write-through already durable), -1 on a memfd; sync() returns -- OK\n"
                      : "fsynctest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "preadwritetest")) {   /* pread/pwrite: explicit offset, cursor never moves (M1572) */

@@ -364,6 +364,7 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SYS_linkat       330   /* (olddirfd, oldpath, newdirfd, newpath) -> hard link relative to dir fds (or AT_FDCWD); 0/-1 (M1585) */
 #define SYS_fchdir       331   /* (fd) -> chdir via an already-open directory fd; 0/-1 (M1586) */
 #define SYS_dup          332   /* (fd) -> duplicate onto the lowest free fd (fcntl F_DUPFD with arg=0); fd/-1 (M1587) */
+#define SYS_sync         333   /* () -> flush all filesystem buffers; always 0 here (write-through, nothing deferred) (M1588) */
 
 /* select(2) (M1584): a small, from-scratch fd_set sized for THIS fd table
  * (APP_NFD=24), not real glibc's 1024-bit/128-byte one -- every fd this OS can

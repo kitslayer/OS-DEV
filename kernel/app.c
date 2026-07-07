@@ -3990,6 +3990,11 @@ long app_sync_file_range(int fd, uint64_t offset, uint64_t nbytes, unsigned flag
     (void)offset; (void)nbytes; (void)flags;
     return app_fsync(fd);
 }
+/* sync(2) (M1588): whole-system flush, no fd. Same reasoning as app_fsync's own
+ * comment above, minus the per-fd type check -- nothing anywhere is ever
+ * deferred, so there is nothing for a WHOLE-system flush to do either. Real
+ * sync() has no failure mode; this one genuinely never has one to report. */
+void app_sync(void) { }
 /* timerfd (M1217; periodic M1302): a pollable timer as an fd. The absolute expiry
  * (ms, 0 = disarmed) lives in the fd's own `off` field and the periodic interval
  * (ms, 0 = one-shot) in `obj` — no separate object, so fork copies them and close

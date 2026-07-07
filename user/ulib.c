@@ -189,6 +189,7 @@ long sys_ftruncate(int fd, long len) {
 }
 long sys_fsync(int fd) { return do_syscall(SYS_fsync, fd, 0, 0); }
 long sys_fdatasync(int fd) { return do_syscall(SYS_fdatasync, fd, 0, 0); }
+void sys_sync(void) { do_syscall(SYS_sync, 0, 0, 0); }
 long sys_sync_file_range(int fd, unsigned long offset, unsigned long nbytes, unsigned flags) {
     return do_syscall4(SYS_sync_file_range, fd, (long)offset, (long)nbytes, flags);
 }
