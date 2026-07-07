@@ -118,6 +118,9 @@ int     task_get_nice(void);         /* the current task's nice (M1171) */
 int     task_set_sched(int policy, int rt_priority);   /* set the current task's scheduling class (SCHED_*); 0/-1 (M1172) */
 int     task_sched_get_priority_max(int policy);       /* the valid rt_priority ceiling for a policy; -1 on a bad policy (M1589) */
 int     task_sched_get_priority_min(int policy);       /* the valid rt_priority floor for a policy; -1 on a bad policy (M1589) */
+int     task_get_sched(void);                          /* the caller's own scheduling policy; -1 if unset (M1591) */
+int     task_get_sched_priority(void);                 /* the caller's own rt_priority (0 for SCHED_OTHER); -1 if unset (M1591) */
+void    task_sched_rr_get_interval(long *sec, long *nsec);  /* the SCHED_RR timeslice as a real duration (M1591) */
 int      task_set_affinity(uint32_t mask);   /* restrict the current task to a subset of online cores; 0/-1 (M1557) */
 uint32_t task_get_affinity(void);            /* the current task's affinity mask, clamped to online cores (M1557) */
 

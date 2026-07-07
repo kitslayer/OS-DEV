@@ -274,6 +274,9 @@ int  sys_nice(int nice) { return (int)do_syscall(SYS_nice, nice, 0, 0); }
 int  sys_sched_setscheduler(int policy, int rt_priority) { return (int)do_syscall(SYS_sched_setscheduler, policy, rt_priority, 0); }
 int  sys_sched_get_priority_max(int policy) { return (int)do_syscall(SYS_sched_get_priority_max, policy, 0, 0); }
 int  sys_sched_get_priority_min(int policy) { return (int)do_syscall(SYS_sched_get_priority_min, policy, 0, 0); }
+int  sys_sched_getscheduler(void) { return (int)do_syscall(SYS_sched_getscheduler, 0, 0, 0); }
+int  sys_sched_getparam(void) { return (int)do_syscall(SYS_sched_getparam, 0, 0, 0); }
+long sys_sched_rr_get_interval(long *sec, long *nsec) { return do_syscall(SYS_sched_rr_get_interval, (long)sec, (long)nsec, 0); }
 long sys_statx(const char *path, struct statx *st) { return do_syscall(SYS_statx, (long)path, (long)st, 0); }
 int  sys_tcgetattr(struct termios *t) { return (int)do_syscall(SYS_tcgetattr, (long)t, 0, 0); }
 int  sys_tcsetattr(const struct termios *t) { return (int)do_syscall(SYS_tcsetattr, (long)t, 0, 0); }

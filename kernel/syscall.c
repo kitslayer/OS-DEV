@@ -303,6 +303,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2: case SYS_dup:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
     case SYS_nice: case SYS_sched_setscheduler: case SYS_sched_get_priority_max: case SYS_sched_get_priority_min:
+    case SYS_sched_getscheduler: case SYS_sched_getparam: case SYS_sched_rr_get_interval:
     case SYS_sched_setaffinity: case SYS_tcgetattr: case SYS_tcsetattr: case SYS_tcflush: case SYS_tcdrain:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_getentropy: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
@@ -407,6 +408,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",[SYS_socketpair]="socketpair",
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
         [SYS_sched_get_priority_max]="sched_get_priority_max",[SYS_sched_get_priority_min]="sched_get_priority_min",
+        [SYS_sched_getscheduler]="sched_getscheduler",[SYS_sched_getparam]="sched_getparam",[SYS_sched_rr_get_interval]="sched_rr_get_interval",
         [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",[SYS_tcflush]="tcflush",[SYS_tcdrain]="tcdrain",
         [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_getsid]="getsid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_tcgetpgrp]="tcgetpgrp",[SYS_killpg]="killpg",
         [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
@@ -1310,6 +1312,21 @@ void syscall_dispatch(struct registers *r) {
     case SYS_sched_get_priority_min:       /* (policy) -> the valid rt_priority floor for SCHED_* (M1589) */
         r->rax = (uint64_t)(int64_t)task_sched_get_priority_min((int)r->rdi);
         break;
+    case SYS_sched_getscheduler:           /* () -> the caller's own scheduling policy (M1591) */
+        r->rax = (uint64_t)(int64_t)task_get_sched();
+        break;
+    case SYS_sched_getparam:               /* () -> the caller's own rt_priority (M1591) */
+        r->rax = (uint64_t)(int64_t)task_get_sched_priority();
+        break;
+    case SYS_sched_rr_get_interval: {      /* (sec*, nsec*) -> the SCHED_RR timeslice as a real duration (M1591) */
+        if ((r->rdi && !ubuf(r->rdi, sizeof(long))) || (r->rsi && !ubuf(r->rsi, sizeof(long)))) { r->rax = (uint64_t)-1; break; }
+        long sec = 0, nsec = 0;
+        task_sched_rr_get_interval(&sec, &nsec);
+        if (r->rdi) *(long *)r->rdi = sec;
+        if (r->rsi) *(long *)r->rsi = nsec;
+        r->rax = 0;
+        break;
+    }
     case SYS_access: {                     /* (path, amode) -> 0 if accessible, -1 (M1224) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)access_check((const char *)r->rdi, (int)r->rsi);

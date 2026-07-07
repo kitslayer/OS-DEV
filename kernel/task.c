@@ -767,6 +767,23 @@ int task_sched_get_priority_min(int policy) {
     if (policy == SCHED_OTHER) return 0;
     return -1;
 }
+/* sched_getscheduler/sched_getparam (M1591): the read side of task_set_sched,
+ * never added when the setter shipped in M1172. Self-only, no target pid --
+ * matching task_set_nice/task_set_sched/sched_setaffinity's own established
+ * no-pid convention in this family (see sched_setaffinity's own comment
+ * above). Both flatten their POSIX pointer-out-param to a plain scalar
+ * return, the same simplification getpgid/getsid already use for a
+ * single-int payload. */
+int task_get_sched(void) { return current ? current->policy : -1; }
+int task_get_sched_priority(void) { return current ? current->rt_priority : -1; }
+/* sched_rr_get_interval (M1591): the SCHED_RR timeslice, as a real duration
+ * rather than the internal tick count -- RR_QUANTUM is a fixed constant, not
+ * per-task state, so this doesn't depend on (or need) a caller's own policy. */
+void task_sched_rr_get_interval(long *sec, long *nsec) {
+    uint64_t ms = (uint64_t)RR_QUANTUM * timer_tick_ms();
+    *sec = (long)(ms / 1000);
+    *nsec = (long)((ms % 1000) * 1000000);
+}
 
 /* Clamp a requested/reported affinity mask to bits that name an actually-
  * online core — MAX_SCHED_CPUS is the scheduler's own hard ceiling (mycore()

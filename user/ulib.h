@@ -119,6 +119,9 @@ int  sys_nice(int nice);                               /* set current task's CFS
 int  sys_sched_setscheduler(int policy, int rt_priority);  /* SCHED_OTHER/FIFO/RR; rt_priority 1..99 for RT; 0/-1 (M1172) */
 int  sys_sched_get_priority_max(int policy);               /* the valid rt_priority ceiling for a policy; -1 on a bad policy (M1589) */
 int  sys_sched_get_priority_min(int policy);               /* the valid rt_priority floor for a policy; -1 on a bad policy (M1589) */
+int  sys_sched_getscheduler(void);                          /* the caller's own scheduling policy; -1 if unset (M1591) */
+int  sys_sched_getparam(void);                              /* the caller's own rt_priority (0 for SCHED_OTHER); -1 if unset (M1591) */
+long sys_sched_rr_get_interval(long *sec, long *nsec);      /* the SCHED_RR timeslice as a real duration; 0/-1 (M1591) */
 long sys_statx(const char *path, struct statx *st);        /* file metadata: mode/size/mtime/nlink (M1173) */
 int  sys_tcgetattr(struct termios *t);                     /* read the TTY discipline mode (M1174) */
 int  sys_tcsetattr(const struct termios *t);               /* set cooked/raw TTY mode (M1174) */

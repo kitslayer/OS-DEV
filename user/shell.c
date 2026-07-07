@@ -2667,6 +2667,19 @@ static int run_command(char *line, char *cwd) {
             print(rng_ok ? "sched_get_priority_max/min: FIFO/RR 1..99, OTHER 0..0, bad policy -1 -- OK\n"
                          : "schedtest: sched_get_priority_max/min VERIFY FAILED\n");
             if (!rng_ok) g_status = 1;
+            /* sched_getscheduler/sched_getparam/sched_rr_get_interval (M1591) */
+            int getset_ok = (sys_sched_getscheduler() == SCHED_OTHER && sys_sched_getparam() == 0);  /* this
+                                                    * shell never called sched_setscheduler -> still its default */
+            if (sys_sched_setscheduler(SCHED_FIFO, 42) == 0) {
+                if (sys_sched_getscheduler() != SCHED_FIFO || sys_sched_getparam() != 42) getset_ok = 0;
+                sys_sched_setscheduler(SCHED_OTHER, 0);       /* restore -- don't leave this interactive shell RT */
+            } else getset_ok = 0;
+            long rrsec = -1, rrnsec = -1;
+            if (sys_sched_rr_get_interval(&rrsec, &rrnsec) != 0 || rrsec != 0 || rrnsec <= 0) getset_ok = 0;
+            print(getset_ok ? "sched_getscheduler/getparam: reads back what setscheduler set; "
+                               "sched_rr_get_interval: a real sub-second duration -- OK\n"
+                             : "schedtest: sched_getscheduler/getparam/rr_get_interval VERIFY FAILED\n");
+            if (!getset_ok) g_status = 1;
             int sid = (int)sys_semget(IPC_PRIVATE, 1, IPC_CREAT);
             long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
             volatile unsigned long *sh = (shmid >= 0) ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
