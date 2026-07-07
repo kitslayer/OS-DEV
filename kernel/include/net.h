@@ -27,6 +27,10 @@ typedef struct {
     uint16_t sport, dport;
     uint32_t myseq, theirseq;
     int      up;                 /* 1 while the connection is open */
+    int      errno_hint;         /* SO_ERROR (M1564): 0, or WHY tcp_connect failed
+                                   * (ECONNREFUSED/ETIMEDOUT/ENETUNREACH) -- tcp_connect
+                                   * itself still just returns 0/-1, unchanged for every
+                                   * existing caller; this is purely additive detail. */
 } tcp_conn;
 
 int  tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port);  /* 0 / -1 */

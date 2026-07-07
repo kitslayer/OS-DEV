@@ -325,8 +325,16 @@
 #define SOL_SOCKET    1
 #define SO_REUSEADDR  2
 #define SO_KEEPALIVE  9
+#define SO_ERROR      4      /* the pending per-socket error, read-once (M1564) */
 #define IPPROTO_TCP   6
 #define TCP_NODELAY   1
+/* Real Linux's own errno values (M1564) -- this codebase otherwise never
+ * distinguishes WHY a call failed (just -1), but SO_ERROR's entire point is
+ * reporting a specific reason, so using the real numbers means ported code
+ * checking `errno == ECONNREFUSED` after a getsockopt(SO_ERROR) just works. */
+#define ENETUNREACH   101
+#define ETIMEDOUT     110
+#define ECONNREFUSED  111
 #define SA_ONSTACK 0x08000000  /* sigaction flag: run this handler on the sigaltstack() stack (M1276) */
 #define SIGUSR1  10            /* user signal 1 */
 #define SIGRTMIN 28            /* first real-time signal; signos >= here are intended for queued sigqueue use (M1271) */

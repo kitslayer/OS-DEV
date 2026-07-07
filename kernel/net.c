@@ -601,6 +601,7 @@ int net_tcp_sock_open(void) {
                                                               * previous connection were write-only until the
                                                               * next tcp_connect() overwrote them anyway */
         for (int k = 0; k < 4; k++) g_tcpsock[i].c.ip[k] = 0;
+        g_tcpsock[i].c.errno_hint = 0;   /* same staleness concern, now that SO_ERROR (M1564) makes it visible too */
         g_tcpsock[i].opt_reuseaddr = g_tcpsock[i].opt_nodelay = g_tcpsock[i].opt_keepalive = 0;
         return i;
     }
@@ -618,6 +619,11 @@ int net_tcp_sock_getopt(int idx, int level, int optname, int *val) {
     if (level == SOL_SOCKET && optname == SO_REUSEADDR) { *val = g_tcpsock[idx].opt_reuseaddr; return 0; }
     if (level == SOL_SOCKET && optname == SO_KEEPALIVE) { *val = g_tcpsock[idx].opt_keepalive; return 0; }
     if (level == IPPROTO_TCP && optname == TCP_NODELAY) { *val = g_tcpsock[idx].opt_nodelay;   return 0; }
+    if (level == SOL_SOCKET && optname == SO_ERROR) {         /* read-once (M1564): real SO_ERROR clears after reading */
+        *val = g_tcpsock[idx].c.errno_hint;
+        g_tcpsock[idx].c.errno_hint = 0;
+        return 0;
+    }
     return -1;
 }
 /* getsockname/getpeername (M1560): the wire format matches connect()'s own
@@ -880,7 +886,7 @@ int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
     memset(c, 0, sizeof(*c));
     tcp_rx_reset();               /* fresh reassembly + FIN state for this conn */
     memcpy(c->ip, ip, 4);
-    if (!arp_resolve(GW_IP, c->gw)) return -1;
+    if (!arp_resolve(GW_IP, c->gw)) { c->errno_hint = ENETUNREACH; return -1; }   /* can't even reach the gateway (M1564) */
     c->dport = port;
     static uint32_t conn_ctr = 0; conn_ctr++;   /* a monotonic per-connection nonce: the 100 Hz clock alone repeats across rapid reconnects (a browser's back-to-back sub-resource fetches), reusing port+ISN and risking a stale SYN-ACK/segment from the prior connection being accepted on the reused 4-tuple */
     c->sport = (uint16_t)(40000 + ((timer_ticks() + conn_ctr * 2179u) & 0x3FFF));
@@ -893,7 +899,7 @@ int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
         while (timer_ticks() < deadline) {
             if (!tcp_recv_seg(buf, sizeof(buf), c->ip, c->sport, port, 30, &tcp, &dlen)) continue;
             uint8_t fl = tcp[13];
-            if (fl & TCP_RST) return -1;
+            if (fl & TCP_RST) { c->errno_hint = ECONNREFUSED; return -1; }   /* actively refused (M1564) */
             if ((fl & TCP_SYN) && (fl & TCP_ACK) && get32(tcp + 8) == c->myseq + 1) {
                 c->theirseq = get32(tcp + 4) + 1;
                 c->myseq += 1;
@@ -903,6 +909,7 @@ int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
             }
         }
     }
+    c->errno_hint = ETIMEDOUT;   /* nothing ever answered the SYN (M1564) */
     return -1;
 }
 

@@ -4071,6 +4071,28 @@ static int run_command(char *line, char *cwd) {
             print("getsockname/getpeername: local port assigned post-connect, peer matches example.com:80 -- ");
             sys_setcolor(getname_ok ? 10 : 4); print(getname_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
             if (!getname_ok) g_status = 1;
+            /* SO_ERROR (M1564): 0 after a successful connect (checked on `s`, already
+             * connected above), and a real, specific error after a FAILED connect on a
+             * fresh socket -- port 1 (TCPMUX) is essentially never listening on a real
+             * host. Accepts either RST (ECONNREFUSED) or a firewall silently dropping it
+             * (ETIMEDOUT) since that's the remote's behavior, not this OS's; either way
+             * proves a real, distinguishable code came back, and it must clear to 0 on a
+             * second read (read-once, matching real SO_ERROR semantics). */
+            int soerr_ok = 1;
+            if (ok) { int err = -999; if (sys_getsockopt(s, SOL_SOCKET, SO_ERROR, &err, 0) != 0 || err != 0) soerr_ok = 0; }
+            else soerr_ok = 0;
+            int s2 = sys_socket(2, 1);
+            if (s2 >= 0) {
+                sys_connect(s2, ip, 1);
+                int err1 = 0, err2 = -999;
+                sys_getsockopt(s2, SOL_SOCKET, SO_ERROR, &err1, 0);
+                sys_getsockopt(s2, SOL_SOCKET, SO_ERROR, &err2, 0);
+                if (!(err1 == ECONNREFUSED || err1 == ETIMEDOUT) || err2 != 0) soerr_ok = 0;
+                sys_fdclose(s2);
+            } else soerr_ok = 0;
+            print("SO_ERROR: 0 after a good connect, a real error after a bad one, clears on read (read-once) -- ");
+            sys_setcolor(soerr_ok ? 10 : 4); print(soerr_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+            if (!soerr_ok) g_status = 1;
             const char *req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
             int rl = 0; while (req[rl]) rl++;
             if (ok) sys_fdwrite(s, req, rl);                     /* send via the connected socket fd */
