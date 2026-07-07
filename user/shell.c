@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2308,6 +2308,45 @@ static int run_command(char *line, char *cwd) {
                 if (!ok) g_status = 1;
                 sys_semctl(id, 0, IPC_RMID, 0);
             }
+        } else if (streq(line, "semopentest")) {   /* POSIX named semaphores: sem_open/wait/trywait/post/close/unlink/getvalue (M1575) */
+            int ok = 1;
+            int s = sys_sem_open("/demo2", O_CREAT, 0);   /* starts at 0 -- a real rendezvous, not pre-signalled */
+            if (s < 0) ok = 0;
+            else {
+                if (sys_sem_trywait(s) != -1) ok = 0;         /* value=0 -> must fail immediately (EAGAIN), not block */
+                int val = -1;
+                if (sys_sem_getvalue(s, &val) != 0 || val != 0) ok = 0;
+
+                long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
+                volatile unsigned long *sh = (shmid >= 0) ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
+                if (!sh) ok = 0;
+                else {
+                    sh[0] = 0; sh[1] = 0;
+                    long c = sys_fork();
+                    if (c == 0) {                              /* child: blocks in sem_wait until the parent posts */
+                        int cs = sys_sem_open("/demo2", 0, 0);   /* the SAME named semaphore (already exists, no O_CREAT needed) */
+                        volatile unsigned long *m = (volatile unsigned long *)sys_shmat((int)shmid);
+                        unsigned long t0 = sys_uptime_ms();
+                        int r = sys_sem_wait(cs);
+                        unsigned long elapsed = sys_uptime_ms() - t0;
+                        if (m) { m[0] = elapsed; m[1] = (unsigned long)(r == 0 ? 1 : 0); }
+                        sys_sem_close(cs);
+                        sys_exit(0);
+                    }
+                    sys_sleep(200);                             /* let the child reach sem_wait first */
+                    if (sys_sem_post(s) != 0) ok = 0;
+                    int st; if (c > 0) sys_waitpid((int)c, &st);
+                    unsigned long elapsed = sh[0]; int waited_ok = (int)sh[1];
+                    if (!(elapsed >= 150 && waited_ok)) ok = 0;   /* really blocked ~the parent's sleep, then succeeded */
+                    sys_shmdt((void *)sh);
+                }
+                sys_sem_close(s);
+                sys_sem_unlink("/demo2");
+                if (sys_sem_open("/demo2", 0, 0) != -1) ok = 0;   /* unlinked -- a fresh open with no O_CREAT must fail now */
+            }
+            print(ok ? "POSIX named semaphores: sem_open/trywait(EAGAIN)/wait(blocks+wakes via post)/getvalue/unlink all correct -- OK\n"
+                     : "semopentest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "msgtest")) {   /* SysV message queue: mtype-selective receive (M1160) */
             int id = (int)sys_msgget(42, IPC_CREAT);       /* fixed key -> reusable across runs (empty after) */
             if (id < 0) { perr("msgtest: msgget failed\n"); g_status = 1; }

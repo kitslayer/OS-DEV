@@ -17,6 +17,7 @@
 #include "vfs.h"
 #include "mqueue.h"
 #include "sysvipc.h"
+#include "sem.h"
 #include "unixsock.h"
 #include "pty.h"
 #include "flock.h"
@@ -292,6 +293,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_alarm: case SYS_getrusage: case SYS_setitimer: case SYS_getitimer:
     case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive: case SYS_mq_getattr: case SYS_mq_setattr:
     case SYS_semget: case SYS_semop: case SYS_semctl:
+    case SYS_sem_open: case SYS_sem_close: case SYS_sem_unlink: case SYS_sem_wait: case SYS_sem_trywait: case SYS_sem_post: case SYS_sem_getvalue:
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any: case SYS_socketpair:
@@ -393,6 +395,8 @@ static const char *syscall_name(uint64_t n) {
         [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",[SYS_mq_getattr]="mq_getattr",[SYS_mq_setattr]="mq_setattr",
         [SYS_mmap_huge]="mmap_huge",
         [SYS_semget]="semget",[SYS_semop]="semop",[SYS_semctl]="semctl",
+        [SYS_sem_open]="sem_open",[SYS_sem_close]="sem_close",[SYS_sem_unlink]="sem_unlink",
+        [SYS_sem_wait]="sem_wait",[SYS_sem_trywait]="sem_trywait",[SYS_sem_post]="sem_post",[SYS_sem_getvalue]="sem_getvalue",
         [SYS_msgget]="msgget",[SYS_msgsnd]="msgsnd",[SYS_msgrcv]="msgrcv",
         [SYS_shmget]="shmget",[SYS_shmat]="shmat",[SYS_shmdt]="shmdt",
         [SYS_process_vm_read]="process_vm_read",[SYS_process_vm_write]="process_vm_write",
@@ -1177,6 +1181,31 @@ void syscall_dispatch(struct registers *r) {
     case SYS_semctl:                       /* (semid, semnum, cmd, arg) -> SETVAL/GETVAL/IPC_RMID (M1159) */
         r->rax = (uint64_t)(int64_t)sysv_semctl((int)r->rdi, (int)r->rsi, (int)r->rdx, (int)r->r10);
         break;
+    case SYS_sem_open:                     /* (name, oflag, value) -> POSIX named semaphore (M1575) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)sem_named_open((const char *)r->rdi, (int)r->rsi, (unsigned int)r->rdx);
+        break;
+    case SYS_sem_close:                    /* (idx) -> drop this handle (M1575) */
+        r->rax = (uint64_t)(int64_t)sem_named_close((int)r->rdi);
+        break;
+    case SYS_sem_unlink:                   /* (name) -> remove the name (M1575) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)sem_named_unlink((const char *)r->rdi);
+        break;
+    case SYS_sem_wait:                     /* (idx) -> block until value>0, then decrement (M1575) */
+        r->rax = (uint64_t)(int64_t)sem_named_wait((int)r->rdi);
+        break;
+    case SYS_sem_trywait:                  /* (idx) -> non-blocking sem_wait (M1575) */
+        r->rax = (uint64_t)(int64_t)sem_named_trywait((int)r->rdi);
+        break;
+    case SYS_sem_post:                     /* (idx) -> increment + wake waiters (M1575) */
+        r->rax = (uint64_t)(int64_t)sem_named_post((int)r->rdi);
+        break;
+    case SYS_sem_getvalue: {               /* (idx, int*) -> the current value (M1575) */
+        if (!ubuf(r->rsi, sizeof(int))) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)sem_named_getvalue((int)r->rdi, (int *)r->rsi);
+        break;
+    }
     case SYS_msgget:                       /* (key, flags) -> SysV message queue (M1160) */
         r->rax = (uint64_t)(int64_t)sysv_msgget((int)r->rdi, (int)r->rsi);
         break;

@@ -343,6 +343,16 @@
 #define SYS_writev       314   /* (fd, iov, iovcnt) -> write each segment in turn; total bytes/-1 (M1574) */
 struct iovec { void *iov_base; unsigned long iov_len; };
 struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
+/* POSIX named semaphores (M1575): distinct from the keyed SysV sets
+ * (semget/semop/semctl) already in this file -- a single named counting
+ * semaphore, opened/closed by any number of independent handles. */
+#define SYS_sem_open     315   /* (name, oflag, value) -> find-or-create; index/-1 */
+#define SYS_sem_close    316   /* (idx) -> drop this handle; 0/-1 */
+#define SYS_sem_unlink   317   /* (name) -> remove the name; 0/-1 */
+#define SYS_sem_wait     318   /* (idx) -> block until value>0, then decrement; 0/-1 */
+#define SYS_sem_trywait  319   /* (idx) -> non-blocking sem_wait; 0/-1 (EAGAIN) */
+#define SYS_sem_post     320   /* (idx) -> increment + wake waiters; 0/-1 */
+#define SYS_sem_getvalue 321   /* (idx, int*) -> the current value; 0/-1 */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no
@@ -497,6 +507,7 @@ struct pollfd { int fd; short events; short revents; };
 #define O_APPEND 2
 #define O_TRUNC  4
 #define O_CREAT  8
+#define O_EXCL   0x80  /* real Linux's own value; first used by sem_open (M1575) */
 
 /* Job-control signal numbers (M1178), shared by the kernel + ulib. SIGSTOP/TSTP
  * default-action stop a process; SIGCONT resumes it (no handler required). */

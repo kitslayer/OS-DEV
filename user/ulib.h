@@ -82,6 +82,13 @@ long sys_mq_receive(int idx, void *buf, unsigned long max, unsigned int *prio); 
 long sys_mq_getattr(int idx, struct mq_attr *out);                                    /* flags/maxmsg/msgsize/curmsgs; 0/-1 (M1571) */
 long sys_mq_setattr(int idx, const struct mq_attr *newattr, struct mq_attr *oldattr); /* set O_NONBLOCK only; 0/-1 (M1571) */
 long sys_semget(int key, int nsems, int flags);                    /* SysV semaphore set; id/-1 (M1159) */
+int  sys_sem_open(const char *name, int oflag, unsigned int value);  /* POSIX named semaphore; index/-1 (M1575) */
+int  sys_sem_close(int idx);                                          /* drop this handle; 0/-1 (M1575) */
+int  sys_sem_unlink(const char *name);                                /* remove the name; 0/-1 (M1575) */
+int  sys_sem_wait(int idx);                                            /* block until value>0, then decrement; 0/-1 (M1575) */
+int  sys_sem_trywait(int idx);                                        /* non-blocking sem_wait; 0/-1 (M1575) */
+int  sys_sem_post(int idx);                                            /* increment + wake waiters; 0/-1 (M1575) */
+int  sys_sem_getvalue(int idx, int *out);                             /* the current value; 0/-1 (M1575) */
 long sys_semop(int semid, struct sembuf *sops, unsigned nsops);    /* atomic all-or-nothing semop; 0/-1 (M1159) */
 long sys_semctl(int semid, int semnum, int cmd, int arg);          /* SETVAL/GETVAL/IPC_RMID (M1159) */
 long sys_msgget(int key, int flags);                               /* SysV message queue; id/-1 (M1160) */

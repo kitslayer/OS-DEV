@@ -236,6 +236,13 @@ long sys_mq_receive(int idx, void *buf, unsigned long max, unsigned int *prio) {
 long sys_mq_getattr(int idx, struct mq_attr *out) { return do_syscall(SYS_mq_getattr, idx, (long)out, 0); }
 long sys_mq_setattr(int idx, const struct mq_attr *newattr, struct mq_attr *oldattr) { return do_syscall(SYS_mq_setattr, idx, (long)newattr, (long)oldattr); }
 long sys_semget(int key, int nsems, int flags) { return do_syscall(SYS_semget, key, nsems, flags); }
+int  sys_sem_open(const char *name, int oflag, unsigned int value) { return (int)do_syscall(SYS_sem_open, (long)name, oflag, value); }
+int  sys_sem_close(int idx) { return (int)do_syscall(SYS_sem_close, idx, 0, 0); }
+int  sys_sem_unlink(const char *name) { return (int)do_syscall(SYS_sem_unlink, (long)name, 0, 0); }
+int  sys_sem_wait(int idx) { return (int)do_syscall(SYS_sem_wait, idx, 0, 0); }
+int  sys_sem_trywait(int idx) { return (int)do_syscall(SYS_sem_trywait, idx, 0, 0); }
+int  sys_sem_post(int idx) { return (int)do_syscall(SYS_sem_post, idx, 0, 0); }
+int  sys_sem_getvalue(int idx, int *out) { return (int)do_syscall(SYS_sem_getvalue, idx, (long)out, 0); }
 long sys_semop(int semid, struct sembuf *sops, unsigned nsops) { return do_syscall(SYS_semop, semid, (long)sops, (long)nsops); }
 long sys_semctl(int semid, int semnum, int cmd, int arg) { return do_syscall4(SYS_semctl, semid, semnum, cmd, arg); }
 long sys_msgget(int key, int flags) { return do_syscall(SYS_msgget, key, flags, 0); }
