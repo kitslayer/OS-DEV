@@ -16,10 +16,13 @@ static int contains(const char *hay, const char *needle) {
 int main(void) {
     sys_chdir("/proc");                       // parent's cwd = /proc
     long pid = sys_fork();
+    if (pid < 0) { print("pcwd: fork failed\n"); return 1; }
     if (pid == 0) { sys_chdir("/tmp"); sys_exit(0); }   // child: cd /tmp, then exit
 
     int st; sys_waitpid((int)pid, &st);        // let the child cd + exit first
-    char b[1024]; long n = sys_list(b, sizeof b - 1); if (n > 0) b[n] = 0;
+    char b[1024]; long n = sys_list(b, sizeof b - 1);
+    if (n < 0) n = 0;                          // was `if (n > 0) b[n]=0`: an empty/failed list left b
+    b[n] = 0;                                  // uninitialized, yet print(b)/contains(b,...) below read it unconditionally
 
     sys_setcolor(4); print("per-process cwd:\n"); sys_setcolor(0);
     print("  parent cd'd to /proc; forked a child that cd'd to /tmp.\n");

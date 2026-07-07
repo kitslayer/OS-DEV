@@ -39,6 +39,8 @@ int main(void) {
 
     if (sys_pledge("stdio wpath") < 0)
         print("pledge(\"stdio wpath\") REJECTED: promises only shrink. good.\n");
+    else
+        print("pledge(\"stdio wpath\") ACCEPTED: promises widened! monotonicity FAILED.\n");   /* must never appear -- mirrors the unveil checks above, which already spell out both branches */
 
     sys_getrandom(rb, sizeof rb);
     print("stdio call (getrandom) AFTER pledge: still ok\n\n");

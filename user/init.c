@@ -33,9 +33,15 @@ void _start(void) {
     uwrite("The only way I can reach the kernel is through syscalls.\n");
 
     long pid = do_syscall(SYS_getpid, 0, 0, 0);
-    char buf[16] = "my pid is _\n";
-    buf[10] = (char)('0' + (pid % 10));
-    do_syscall(SYS_write, 1, (long)buf, 12);
+    char pidbuf[24]; int pn = 0;               /* was buf[10]='0'+(pid%10): only the last digit -- harmless
+                                                 * today since init is provably always pid 1, but wrong for
+                                                 * any pid >= 10 as written */
+    if (pid == 0) pidbuf[pn++] = '0';
+    else { char t[24]; int tn = 0; long v = pid; while (v > 0) { t[tn++] = (char)('0' + v % 10); v /= 10; } while (tn > 0) pidbuf[pn++] = t[--tn]; }
+    pidbuf[pn] = 0;
+    uwrite("my pid is ");
+    uwrite(pidbuf);
+    uwrite("\n");
 
     uwrite("Calling exit(7).\n");
     do_syscall(SYS_exit, 7, 0, 0);
