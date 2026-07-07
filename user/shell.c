@@ -2261,6 +2261,27 @@ static int run_command(char *line, char *cwd) {
                 }
                 print(ok ? "mqueue: highest-priority-first delivery OK\n" : "mqueue: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
+                /* mq_getattr/mq_setattr (M1571): maxmsg/msgsize are static from
+                 * mq_open, curmsgs tracks real occupancy, and O_NONBLOCK (set via
+                 * mq_setattr) makes a full/empty queue fail send/receive
+                 * immediately instead of blocking -- the real risk here is a bug
+                 * that HANGS the whole test forever rather than just failing it. */
+                struct mq_attr attr, oldattr, newattr;
+                int aok = 1;
+                if (sys_mq_getattr(q, &attr) != 0) aok = 0;
+                if (attr.mq_maxmsg != 8 || attr.mq_msgsize != 64 || attr.mq_curmsgs != 0 || attr.mq_flags != 0) aok = 0;
+                newattr.mq_flags = 1;   /* O_NONBLOCK */
+                if (sys_mq_setattr(q, &newattr, &oldattr) != 0 || oldattr.mq_flags != 0) aok = 0;
+                for (int i = 0; i < 8; i++) sys_mq_send(q, "x", 1, 0);   /* fill to maxmsg */
+                if (sys_mq_getattr(q, &attr) != 0 || attr.mq_curmsgs != 8) aok = 0;
+                if (sys_mq_send(q, "y", 1, 0) != -1) aok = 0;            /* full + O_NONBLOCK -> fail now, not hang */
+                for (int i = 0; i < 8; i++) { char b[8]; sys_mq_receive(q, b, sizeof b, 0); }   /* drain everything */
+                char eb[8];
+                if (sys_mq_receive(q, eb, sizeof eb, 0) != -1) aok = 0;  /* empty + O_NONBLOCK -> fail now, not hang */
+                newattr.mq_flags = 0; sys_mq_setattr(q, &newattr, 0);   /* restore blocking -- /demo is find-or-create by name */
+                print(aok ? "mq_getattr/mq_setattr: maxmsg/msgsize/curmsgs correct, O_NONBLOCK fails a full/empty queue immediately -- OK\n"
+                          : "mqtest: mq_getattr/mq_setattr VERIFY FAILED\n");
+                if (!aok) g_status = 1;
             }
         } else if (streq(line, "semtest")) {   /* SysV semaphores: count + IPC_NOWAIT + atomic all-or-nothing (M1159) */
             int id = (int)sys_semget(IPC_PRIVATE, 2, IPC_CREAT);

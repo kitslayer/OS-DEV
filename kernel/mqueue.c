@@ -22,6 +22,8 @@ struct mqmsg { uint8_t used, prio; uint32_t seq; int len; char data[MQ_MSGSZ]; }
 struct mqueue {
     char   name[32];
     int    used, maxmsg, msgsize, count;
+    int    nonblock;                    /* O_NONBLOCK (M1571): mq_send/receive return -1 immediately
+                                          * instead of blocking when full/empty, respectively */
     uint32_t seq;                       /* ever-increasing, for FIFO-within-priority ties */
     struct mqmsg msg[MQ_MAXMSG];
     task_t *send_waiter, *recv_waiter;  /* one blocked sender / receiver (mbox-style) */
@@ -37,7 +39,7 @@ int mqueue_open(const char *name, int maxmsg, int msgsize) {
     for (int i = 0; i < MQ_N; i++) if (mq[i].used && meq(mq[i].name, name)) return i;
     for (int i = 0; i < MQ_N; i++) if (!mq[i].used) {
         int j = 0; while (name[j] && j < 31) { mq[i].name[j] = name[j]; j++; } mq[i].name[j] = 0;
-        mq[i].used = 1; mq[i].count = 0; mq[i].seq = 0;
+        mq[i].used = 1; mq[i].count = 0; mq[i].seq = 0; mq[i].nonblock = 0;
         mq[i].maxmsg  = (maxmsg  > 0 && maxmsg  <= MQ_MAXMSG) ? maxmsg  : MQ_MAXMSG;
         mq[i].msgsize = (msgsize > 0 && msgsize <= MQ_MSGSZ)  ? msgsize : MQ_MSGSZ;
         mq[i].send_waiter = mq[i].recv_waiter = 0;
@@ -53,7 +55,8 @@ long mqueue_send(int idx, const void *buf, unsigned long len, unsigned int prio)
     if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
     struct mqueue *q = &mq[idx];
     if ((int)len > q->msgsize) len = (unsigned long)q->msgsize;
-    while (q->count >= q->maxmsg) {                 /* full -> block for room */
+    while (q->count >= q->maxmsg) {                 /* full -> block for room (or fail fast, O_NONBLOCK) */
+        if (q->nonblock) return -1;
         q->send_waiter = task_self();
         task_block();
         q->send_waiter = 0;
@@ -77,7 +80,8 @@ long mqueue_send(int idx, const void *buf, unsigned long len, unsigned int prio)
 long mqueue_receive(int idx, void *buf, unsigned long max, unsigned int *prio_out) {
     if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
     struct mqueue *q = &mq[idx];
-    while (q->count == 0) {                          /* empty -> block for a message */
+    while (q->count == 0) {                          /* empty -> block for a message (or fail fast, O_NONBLOCK) */
+        if (q->nonblock) return -1;
         q->recv_waiter = task_self();
         task_block();
         q->recv_waiter = 0;
@@ -96,6 +100,28 @@ long mqueue_receive(int idx, void *buf, unsigned long max, unsigned int *prio_ou
     q->msg[best].used = 0; q->count--;
     if (q->send_waiter) { task_wake(q->send_waiter); q->send_waiter = 0; }
     return (long)n;
+}
+
+/* mq_getattr/mq_setattr (M1571): maxmsg/msgsize/count were already tracked
+ * (mqueue_format's own /proc/mqueue line already reports two of them) --
+ * this just exposes all four POSIX mq_attr fields together. Only mq_flags
+ * (O_NONBLOCK) is settable: real mq_setattr leaves mq_maxmsg/mq_msgsize
+ * fixed at creation time and ignores those fields in *newattr entirely. */
+int mqueue_getattr(int idx, long *flags, long *maxmsg, long *msgsize, long *curmsgs) {
+    if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
+    struct mqueue *q = &mq[idx];
+    if (flags)   *flags   = q->nonblock ? 1 : 0;
+    if (maxmsg)  *maxmsg  = q->maxmsg;
+    if (msgsize) *msgsize = q->msgsize;
+    if (curmsgs) *curmsgs = q->count;
+    return 0;
+}
+int mqueue_setattr(int idx, long new_flags, long *old_flags_out) {
+    if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
+    struct mqueue *q = &mq[idx];
+    if (old_flags_out) *old_flags_out = q->nonblock ? 1 : 0;
+    q->nonblock = new_flags ? 1 : 0;
+    return 0;
 }
 
 /* Backs /proc/mqueue: one line per open queue — "name  cur/max  msgsize". */

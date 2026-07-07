@@ -290,7 +290,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_sigaltstack: case SYS_raise:
     case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom: case SYS_clock_settime: case SYS_pidfd_getfd: case SYS_acpi: case SYS_aslr:
     case SYS_alarm: case SYS_getrusage: case SYS_setitimer: case SYS_getitimer:
-    case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive:
+    case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive: case SYS_mq_getattr: case SYS_mq_setattr:
     case SYS_semget: case SYS_semop: case SYS_semctl:
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv:
     case SYS_unix_listen: case SYS_unix_connect: case SYS_unix_accept:
@@ -390,7 +390,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_faccessat2]="faccessat2",[SYS_sched_setaffinity]="sched_setaffinity",[SYS_sched_getaffinity]="sched_getaffinity",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
-        [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",
+        [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",[SYS_mq_getattr]="mq_getattr",[SYS_mq_setattr]="mq_setattr",
         [SYS_mmap_huge]="mmap_huge",
         [SYS_semget]="semget",[SYS_semop]="semop",[SYS_semctl]="semctl",
         [SYS_msgget]="msgget",[SYS_msgsnd]="msgsnd",[SYS_msgrcv]="msgrcv",
@@ -1674,6 +1674,27 @@ void syscall_dispatch(struct registers *r) {
         if (!ubuf(r->rsi, r->rdx) || (r->r10 && !ubuf(r->r10, sizeof(unsigned int)))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)mqueue_receive((int)r->rdi, (void *)r->rsi, r->rdx, (unsigned int *)r->r10);
         break;
+    case SYS_mq_getattr: {                 /* (idx, struct mq_attr*) -> read flags/maxmsg/msgsize/curmsgs (M1571) */
+        if (!ubuf(r->rsi, sizeof(struct mq_attr))) { r->rax = (uint64_t)-1; break; }
+        struct mq_attr *out = (struct mq_attr *)r->rsi;
+        r->rax = (uint64_t)(int64_t)mqueue_getattr((int)r->rdi, &out->mq_flags, &out->mq_maxmsg, &out->mq_msgsize, &out->mq_curmsgs);
+        break;
+    }
+    case SYS_mq_setattr: {                 /* (idx, newattr*, oldattr* or 0) -> set O_NONBLOCK only (M1571);
+                                             * mq_maxmsg/mq_msgsize in *newattr are ignored, matching real
+                                             * mq_setattr -- those are fixed at mq_open time. */
+        if (!ubuf(r->rsi, sizeof(struct mq_attr)) || (r->rdx && !ubuf(r->rdx, sizeof(struct mq_attr)))) { r->rax = (uint64_t)-1; break; }
+        struct mq_attr *newattr = (struct mq_attr *)r->rsi;
+        long old_flags = 0;
+        long rc = mqueue_setattr((int)r->rdi, newattr->mq_flags, &old_flags);
+        if (rc == 0 && r->rdx) {           /* *oldattr, if requested, gets the FULL previous attr set */
+            struct mq_attr *oldattr = (struct mq_attr *)r->rdx;
+            oldattr->mq_flags = old_flags;
+            mqueue_getattr((int)r->rdi, 0, &oldattr->mq_maxmsg, &oldattr->mq_msgsize, &oldattr->mq_curmsgs);
+        }
+        r->rax = (uint64_t)rc;
+        break;
+    }
     case SYS_swapout:                      /* (addr, len) -> page out anon pages to swap */
         __asm__ volatile("sti");           /* the disk writes may wait on an IRQ (virtio) */
         r->rax = (uint64_t)(int64_t)app_swap_out(r->rdi, r->rsi);

@@ -230,6 +230,8 @@ long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned lo
 long sys_mq_open(const char *name, int maxmsg, int msgsize) { return do_syscall(SYS_mq_open, (long)name, maxmsg, msgsize); }
 long sys_mq_send(int idx, const void *buf, unsigned long len, unsigned int prio) { return do_syscall4(SYS_mq_send, idx, (long)buf, (long)len, (long)prio); }
 long sys_mq_receive(int idx, void *buf, unsigned long max, unsigned int *prio) { return do_syscall4(SYS_mq_receive, idx, (long)buf, (long)max, (long)prio); }
+long sys_mq_getattr(int idx, struct mq_attr *out) { return do_syscall(SYS_mq_getattr, idx, (long)out, 0); }
+long sys_mq_setattr(int idx, const struct mq_attr *newattr, struct mq_attr *oldattr) { return do_syscall(SYS_mq_setattr, idx, (long)newattr, (long)oldattr); }
 long sys_semget(int key, int nsems, int flags) { return do_syscall(SYS_semget, key, nsems, flags); }
 long sys_semop(int semid, struct sembuf *sops, unsigned nsops) { return do_syscall(SYS_semop, semid, (long)sops, (long)nsops); }
 long sys_semctl(int semid, int semnum, int cmd, int arg) { return do_syscall4(SYS_semctl, semid, semnum, cmd, arg); }

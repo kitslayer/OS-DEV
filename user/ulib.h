@@ -78,6 +78,8 @@ long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned lo
 long sys_mq_open(const char *name, int maxmsg, int msgsize);   /* open/create priority msg queue; index/-1 (M1154) */
 long sys_mq_send(int idx, const void *buf, unsigned long len, unsigned int prio);    /* enqueue; bytes/-1 (M1154) */
 long sys_mq_receive(int idx, void *buf, unsigned long max, unsigned int *prio);      /* dequeue highest prio; bytes/-1 (M1154) */
+long sys_mq_getattr(int idx, struct mq_attr *out);                                    /* flags/maxmsg/msgsize/curmsgs; 0/-1 (M1571) */
+long sys_mq_setattr(int idx, const struct mq_attr *newattr, struct mq_attr *oldattr); /* set O_NONBLOCK only; 0/-1 (M1571) */
 long sys_semget(int key, int nsems, int flags);                    /* SysV semaphore set; id/-1 (M1159) */
 long sys_semop(int semid, struct sembuf *sops, unsigned nsops);    /* atomic all-or-nothing semop; 0/-1 (M1159) */
 long sys_semctl(int semid, int semnum, int cmd, int arg);          /* SETVAL/GETVAL/IPC_RMID (M1159) */

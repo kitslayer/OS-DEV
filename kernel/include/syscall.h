@@ -334,6 +334,9 @@
 #define TCIFLUSH  0
 #define TCOFLUSH  1
 #define TCIOFLUSH 2
+#define SYS_mq_getattr   308   /* (idx, struct mq_attr*) -> read flags/maxmsg/msgsize/curmsgs; 0/-1 (M1571) */
+#define SYS_mq_setattr   309   /* (idx, struct mq_attr *newattr, struct mq_attr *oldattr) -> set O_NONBLOCK only; 0/-1 (M1571) */
+struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

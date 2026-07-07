@@ -9,3 +9,5 @@ int  mqueue_open(const char *name, int maxmsg, int msgsize);  /* find-or-create;
 long mqueue_send(int idx, const void *buf, unsigned long len, unsigned int prio);   /* enqueue (blocks if full); bytes/-1 */
 long mqueue_receive(int idx, void *buf, unsigned long max, unsigned int *prio_out); /* dequeue highest prio (blocks if empty); bytes/-1 */
 int  mqueue_format(char *out, int max);                       /* /proc/mqueue text */
+int  mqueue_getattr(int idx, long *flags, long *maxmsg, long *msgsize, long *curmsgs);  /* 0/-1 (M1571) */
+int  mqueue_setattr(int idx, long new_flags, long *old_flags_out);  /* set O_NONBLOCK; 0/-1 (M1571) */
