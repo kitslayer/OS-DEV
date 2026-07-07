@@ -285,7 +285,7 @@ static uint32_t syscall_class(uint64_t nr) {
     switch (nr) {
     case SYS_exit: case SYS_sigreturn: case SYS_getpid: case SYS_pledge:
     case SYS_gettid: case SYS_thread_exit: case SYS_set_tls: case SYS_set_robust_list: return 0;
-    case SYS_write: case SYS_read: case SYS_time: case SYS_sysinfo: case SYS_clear:
+    case SYS_write: case SYS_read: case SYS_pread: case SYS_pwrite: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_sigaltstack: case SYS_raise:
     case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom: case SYS_clock_settime: case SYS_pidfd_getfd: case SYS_acpi: case SYS_aslr:
@@ -406,7 +406,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
         [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",
         [SYS_mkfifo]="mkfifo",[SYS_fifo_open]="fifo_open",
-        [SYS_open]="open",[SYS_lseek]="lseek",
+        [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -1555,6 +1555,14 @@ void syscall_dispatch(struct registers *r) {
     }
     case SYS_lseek:                        /* (fd, off, whence) -> reposition a file fd (M1193) */
         r->rax = (uint64_t)(int64_t)app_lseek((int)r->rdi, (long)r->rsi, (int)r->rdx);
+        break;
+    case SYS_pread:                        /* (fd, buf, max, off) -> read without moving the cursor (M1572) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_pread((int)r->rdi, (void *)r->rsi, r->rdx, (long)r->r10);
+        break;
+    case SYS_pwrite:                       /* (fd, buf, len, off) -> write without moving the cursor (M1572) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)app_pwrite((int)r->rdi, (const void *)r->rsi, r->rdx, (long)r->r10);
         break;
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);

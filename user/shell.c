@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3106,6 +3106,30 @@ static int run_command(char *line, char *cwd) {
             if (mfd >= 0) sys_fdclose(mfd);
             print(ok ? "fsync/fdatasync/sync_file_range: 0 on a real file fd (write-through already durable), -1 on a memfd -- OK\n"
                      : "fsynctest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+        } else if (streq(line, "preadwritetest")) {   /* pread/pwrite: explicit offset, cursor never moves (M1572) */
+            int ok = 1;
+            sys_writefile("/tmp/PW.TXT", "0123456789", 10);
+            int fd = sys_openat(AT_FDCWD, "/tmp/PW.TXT", O_WRONLY);
+            if (fd < 0) ok = 0;
+            else {
+                if (sys_pwrite(fd, "BBBB", 4, 4096) != 4) ok = 0;   /* out of order: high offset first... */
+                if (sys_pwrite(fd, "AAAA", 4, 0) != 4) ok = 0;      /* ...then low offset */
+                if (sys_lseek(fd, 0, SEEK_CUR) != 0) ok = 0;        /* neither pwrite moved the cursor (started at 0) */
+                sys_fdclose(fd);
+                int rfd = sys_open("/tmp/PW.TXT");
+                char buf[10]; long n = (rfd >= 0) ? sys_fdread(rfd, buf, sizeof buf) : -1;   /* a REGULAR read -- advances the cursor to 10 */
+                /* "AAAA456789": the first 4 bytes overwritten, "456789" left untouched */
+                if (n != 10 || buf[0] != 'A' || buf[3] != 'A' || buf[4] != '4' || buf[9] != '9') ok = 0;
+                long cur_before = (rfd >= 0) ? sys_lseek(rfd, 0, SEEK_CUR) : -1;   /* whatever the regular read left it at (10) */
+                char big[8]; long n2 = (rfd >= 0) ? sys_pread(rfd, big, sizeof big, 4096) : -1;
+                if (n2 != 4 || big[0] != 'B' || big[3] != 'B') ok = 0;   /* the high-offset write landed too */
+                if (rfd >= 0 && sys_lseek(rfd, 0, SEEK_CUR) != cur_before) ok = 0;   /* pread left the cursor EXACTLY where it already was */
+                if (rfd >= 0) sys_fdclose(rfd);
+            }
+            sys_delete("/tmp/PW.TXT");
+            print(ok ? "pread/pwrite: out-of-order offsets land correctly, neither moves the fd cursor -- OK\n"
+                     : "preadwritetest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "fxattrtest")) {   /* f{set,get,list,remove}xattr: fd-based siblings of *xattr (M1569) */
             int ok = 1;

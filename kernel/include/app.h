@@ -178,6 +178,8 @@ int  app_killpg(int pgid, int signo);  /* deliver signo to every app in pgid (ki
 int  app_pipe(int *out);               /* pipe(): out[0]=read fd, out[1]=write fd; 0/-1 (M1187) */
 long app_fd_read(int fd, void *buf, unsigned long max);        /* read a pipe fd; bytes/0 EOF/-1 (M1187) */
 long app_fd_write(int fd, const void *buf, unsigned long len); /* write a pipe fd; bytes/-1 EPIPE (M1187) */
+long app_pread(int fd, void *buf, unsigned long max, long off);        /* read a FILE fd without moving its cursor; bytes/0 EOF/-1 (M1572) */
+long app_pwrite(int fd, const void *buf, unsigned long len, long off); /* write a FILE fd without moving its cursor; bytes/-1 (M1572) */
 int  app_fd_close(int fd);             /* close an fd; 0/-1 (M1187) */
 int  app_dup2(int oldfd, int newfd);   /* redirect newfd onto oldfd's object; newfd/-1 (M1187) */
 int  app_fd_is_redirected(app_t *a, int fd);  /* is fd a redirected pipe/file? (stdio + file-fd routing, M1191/M1193) */

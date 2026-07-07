@@ -3658,31 +3658,41 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
     int idx = fd_pipe_idx(a, fd, 0); if (idx < 0) return -1;
     return pipe_read(idx, buf, max);
 }
+/* Shared by app_fd_write's FILE-fd case and app_pwrite (M1572): the whole
+ * read-modify-write-the-file body, keyed on an EXPLICIT offset rather than
+ * a->fd[fd].off, so pwrite's defining property (never moves the cursor) and
+ * write()'s (always advances it) can both be one-line wrappers around the
+ * identical logic — including the identical RLIMIT_FSIZE/SIGXFSZ enforcement,
+ * matching real POSIX where pwrite() is bound by the exact same limit. */
+static long app_file_write_at(struct app *a, int fd, const void *buf, unsigned long len, long off) {
+    if (!a->fd[fd].write_end) return -1;                  /* opened read-only */
+    if (off < 0 || (unsigned long)off + len > FILEFD_CAP) return -1;
+    if (a->rlim_fsize && (unsigned long)off + len > a->rlim_fsize) {   /* RLIMIT_FSIZE (M1549) */
+        app_request_signal(a, SIGXFSZ);
+        return -1;
+    }
+    /* read-modify-write the whole file (via vfs_read/vfs_write — no per-FS work;
+     * bounded to FILEFD_CAP). Read existing, patch [off, off+len), grow if needed. */
+    struct statx st; long sz = (vfs_stat(a->fd[fd].path, &st) == 0) ? (long)st.stx_size : 0;
+    unsigned long need = (unsigned long)off + len;
+    if ((unsigned long)sz > need) need = (unsigned long)sz;   /* preserve bytes past the write */
+    char *tmp = kmalloc(need ? need : 1); if (!tmp) return -1;
+    long got = vfs_read(a->fd[fd].path, tmp, need);
+    if (got < 0) got = 0;
+    for (long i = got; i < off; i++) tmp[i] = 0;          /* zero-fill a gap (sparse extend) */
+    for (unsigned long i = 0; i < len; i++) tmp[off + i] = ((const char *)buf)[i];
+    long w = vfs_write(a->fd[fd].path, tmp, need);
+    kfree(tmp);
+    if (w < 0) return -1;
+    return (long)len;
+}
 long app_fd_write(int fd, const void *buf, unsigned long len) {
     struct app *a = cur(); if (!a) return -1;
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 2) {   /* FILE fd: positioned write (M1195) */
-        if (!a->fd[fd].write_end) return -1;                  /* opened read-only */
         long off = a->fd[fd].off;
-        if (off < 0 || (unsigned long)off + len > FILEFD_CAP) return -1;
-        if (a->rlim_fsize && (unsigned long)off + len > a->rlim_fsize) {   /* RLIMIT_FSIZE (M1549) */
-            app_request_signal(a, SIGXFSZ);
-            return -1;
-        }
-        /* read-modify-write the whole file (via vfs_read/vfs_write — no per-FS work;
-         * bounded to FILEFD_CAP). Read existing, patch [off, off+len), grow if needed. */
-        struct statx st; long sz = (vfs_stat(a->fd[fd].path, &st) == 0) ? (long)st.stx_size : 0;
-        unsigned long need = (unsigned long)off + len;
-        if ((unsigned long)sz > need) need = (unsigned long)sz;   /* preserve bytes past the write */
-        char *tmp = kmalloc(need ? need : 1); if (!tmp) return -1;
-        long got = vfs_read(a->fd[fd].path, tmp, need);
-        if (got < 0) got = 0;
-        for (long i = got; i < off; i++) tmp[i] = 0;          /* zero-fill a gap (sparse extend) */
-        for (unsigned long i = 0; i < len; i++) tmp[off + i] = ((const char *)buf)[i];
-        long w = vfs_write(a->fd[fd].path, tmp, need);
-        kfree(tmp);
-        if (w < 0) return -1;
-        a->fd[fd].off = off + len;
-        return (long)len;
+        long n = app_file_write_at(a, fd, buf, len, off);
+        if (n > 0) a->fd[fd].off = off + n;
+        return n;
     }
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 3) {   /* memfd: seal-checked positioned write (M1212) */
         struct memfd *m = &memfds[a->fd[fd].obj];
@@ -3717,6 +3727,21 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
     }
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
     return pipe_write(idx, buf, len);
+}
+/* pread/pwrite (M1572): read/write at an explicit offset WITHOUT touching
+ * a->fd[fd].off — the one thing that distinguishes them from read()/write()
+ * on the same fd. FILE fds only (type 2); real POSIX allows pread/pwrite on
+ * anything seekable, but everything else here (pipes, sockets, memfd's own
+ * separate cursor semantics) isn't worth the extra surface for this pass. */
+long app_pread(int fd, void *buf, unsigned long max, long off) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 2 || off < 0) return -1;
+    return vfs_pread(a->fd[fd].path, buf, max, (uint64_t)off);
+}
+long app_pwrite(int fd, const void *buf, unsigned long len, long off) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 2) return -1;
+    return app_file_write_at(a, fd, buf, len, off);
 }
 static void epoll_ref(int idx);    /* defined with the epoll table below (M1220) */
 static void epoll_unref(int idx);
