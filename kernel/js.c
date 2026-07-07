@@ -3701,6 +3701,8 @@ static val eval_classlist_method(val recv, const char *name, val *args, int narg
  * per-run arena reset, so page click-handlers can accumulate state (a counter). */
 static const char *(*g_ls_get)(const char *key);
 static void        (*g_ls_set)(const char *key, const char *val);
+static void        (*g_ls_remove)(const char *key);
+static void        (*g_ls_clear)(void);
 static val native_ls_getItem(val *args, int nargs) {
     if (!g_ls_get || !nargs) { val v=UND(); v.t=V_NULL; return v; }
     const char *r = g_ls_get(val_to_str(args[0]));
@@ -3709,6 +3711,15 @@ static val native_ls_getItem(val *args, int nargs) {
 }
 static val native_ls_setItem(val *args, int nargs) {
     if (g_ls_set && nargs>=2) g_ls_set(val_to_str(args[0]), val_to_str(args[1]));
+    return UND();
+}
+static val native_ls_removeItem(val *args, int nargs) {
+    if (g_ls_remove && nargs) g_ls_remove(val_to_str(args[0]));
+    return UND();
+}
+static val native_ls_clear(val *args, int nargs) {
+    (void)args; (void)nargs;
+    if (g_ls_clear) g_ls_clear();
     return UND();
 }
 
@@ -4380,6 +4391,7 @@ static void install_globals(env *g) {
     }
     /* localStorage.getItem/setItem (browser-backed; no-ops at the shell) */
     obj *ls=new_obj(V_OBJ); def_native(ls,"getItem",native_ls_getItem); def_native(ls,"setItem",native_ls_setItem);
+    def_native(ls,"removeItem",native_ls_removeItem); def_native(ls,"clear",native_ls_clear);
     env_define(g,"localStorage",obj_val(ls));
 
     /* Math */
@@ -4533,7 +4545,7 @@ static int js_run_impl(const char *src, char *out, int outmax, int mode) {
 
 int js_run(const char *src, char *out, int outmax) {
     g_doc_write = 0;                      /* shell `js`: document.write falls back to output */
-    g_ls_get = 0; g_ls_set = 0;           /* and no persistent storage */
+    g_ls_get = 0; g_ls_set = 0; g_ls_remove = 0; g_ls_clear = 0;   /* and no persistent storage */
     g_dom_get = 0; g_dom_set = 0; g_dom_getattr = 0; g_dom_setattr = 0;   /* and no DOM (no page) */
     g_get_title = 0; g_set_title = 0;     /* and no page <title> bridge */
     g_page_env = 0;                       /* shell `js`: never reuse a page env */
@@ -4546,8 +4558,9 @@ void js_set_title(int (*get)(char *, int), void (*set)(const char *)) {
     g_get_title = get; g_set_title = set;
 }
 /* The browser registers a localStorage backing store before running page JS. */
-void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *)) {
-    g_ls_get = get; g_ls_set = set;
+void js_set_storage(const char *(*get)(const char *), void (*set)(const char *, const char *),
+                     void (*remove_fn)(const char *), void (*clear_fn)(void)) {
+    g_ls_get = get; g_ls_set = set; g_ls_remove = remove_fn; g_ls_clear = clear_fn;
 }
 /* The browser registers a blocking HTTP backing for fetch() (M684): fills out/+status,
  * returns body length or <0 on a network error. NULL (default) -> fetch() rejects. */
@@ -4714,6 +4727,16 @@ static void host_set(const char *k, const char *v){
     if(i==hn){ if(hn>=16) return; int j=0; while(k[j]&&j<31){hk[hn][j]=k[j];j++;} hk[hn][j]=0; i=hn++; }
     int j=0; while(v[j]&&j<159){hv[i][j]=v[j];j++;} hv[i][j]=0;
 }
+static void host_remove(const char *k){
+    int i; for(i=0;i<hn;i++) if(!strcmp(hk[i],k)) break;
+    if(i==hn) return;
+    for(int m=i;m<hn-1;m++){
+        int j=0; while(hk[m+1][j]){hk[m][j]=hk[m+1][j];j++;} hk[m][j]=0;
+        j=0; while(hv[m+1][j]){hv[m][j]=hv[m+1][j];j++;} hv[m][j]=0;
+    }
+    hn--;
+}
+static void host_clear(void){ hn = 0; }
 /* a trivial in-memory "DOM" (id -> text) so host tests can exercise getElementById */
 static char dk[16][32], dv[16][256]; static int dnn;
 static void hdom_set(const char *id, const char *v, int html){ (void)html; int i; for(i=0;i<dnn;i++) if(!strcmp(dk[i],id)) break; if(i==dnn){ if(dnn>=16) return; int j=0; while(id[j]&&j<31){dk[dnn][j]=id[j];j++;} dk[dnn][j]=0; i=dnn++; } int j=0; while(v[j]&&j<255){dv[i][j]=v[j];j++;} dv[i][j]=0; }
@@ -4792,7 +4815,7 @@ int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
     static char outb[200000];
-    js_set_storage(host_get, host_set);                 /* mirror the browser: storage + js_run_doc */
+    js_set_storage(host_get, host_set, host_remove, host_clear);   /* mirror the browser: storage + js_run_doc */
     js_set_dom(hdom_get, hdom_set);                      /* mock DOM for host tests */
     js_set_dom_attr(hdom_getattr, hdom_setattr);
     js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);   /* mock querySelector(All) for host tests */

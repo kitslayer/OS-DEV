@@ -77,4 +77,8 @@ Infinity -Infinity NaN false true
 3.14 5.00 1234.57
 3.14 1000 NaN
 3.99 -0.5 1500 {"price":3.99,"rate":-0.5,"big":1500}
+-- localStorage getItem/setItem/removeItem/clear (M1619) --
+1 2 null
+null 2
+null null
 -- done --

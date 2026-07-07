@@ -27,7 +27,7 @@
 static char g_outbuf[16384];
 
 static void setup_stubs(void) {
-    js_set_storage(host_get, host_set);
+    js_set_storage(host_get, host_set, host_remove, host_clear);
     js_set_dom(hdom_get, hdom_set);
     js_set_dom_attr(hdom_getattr, hdom_setattr);
     js_set_dom_pos(hdom_get_at, hdom_set_at, hdom_getattr_at, hdom_setattr_at, hdom_query);

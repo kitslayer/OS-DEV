@@ -1749,6 +1749,20 @@ static void browser_ls_set(const char *key, const char *val) {
     if (i == g_ls_b->ls_n) { if (g_ls_b->ls_n >= 16) return; int j=0; while(key[j]&&j<31){g_ls_b->ls_keys[i][j]=key[j];j++;} g_ls_b->ls_keys[i][j]=0; g_ls_b->ls_n++; }
     int j=0; while(val[j]&&j<159){g_ls_b->ls_vals[i][j]=val[j];j++;} g_ls_b->ls_vals[i][j]=0;
 }
+/* removeItem/clear (M1619): getItem/setItem existed since the original
+ * localStorage support, but nothing ever backed these two ordinary Web
+ * Storage calls -- a page calling either just hit "not a function". */
+static void browser_ls_remove(const char *key) {
+    if (!g_ls_b) return;
+    int i; for (i = 0; i < g_ls_b->ls_n; i++) if (streqs(g_ls_b->ls_keys[i], key)) break;
+    if (i == g_ls_b->ls_n) return;                      /* not found: a no-op, matches real removeItem */
+    for (int k = i; k < g_ls_b->ls_n - 1; k++) {         /* shift the tail down over the removed slot */
+        int j = 0; while (g_ls_b->ls_keys[k+1][j]) { g_ls_b->ls_keys[k][j] = g_ls_b->ls_keys[k+1][j]; j++; } g_ls_b->ls_keys[k][j] = 0;
+        j = 0; while (g_ls_b->ls_vals[k+1][j]) { g_ls_b->ls_vals[k][j] = g_ls_b->ls_vals[k+1][j]; j++; } g_ls_b->ls_vals[k][j] = 0;
+    }
+    g_ls_b->ls_n--;
+}
+static void browser_ls_clear(void) { if (g_ls_b) g_ls_b->ls_n = 0; }
 /* ---- minimal DOM: find/read/mutate an element by id in the page source ----
  * Locate <tag … id="ID" …>INNER</tag> in the body region of b->raw and report
  * INNER's byte range [*is, *ie). Handles nested same-name tags by depth count. */
@@ -2693,7 +2707,7 @@ static void browser_set_title(const char *v) {
     int i = 0; while (v[i] && i < 63) { b->title_js[i] = v[i]; i++; } b->title_js[i] = 0;
     b->title_js_set = 1;                                 /* survives the parse_html re-render that follows */
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); js_set_eventsource(browser_eventsource); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set, browser_ls_remove, browser_ls_clear); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); js_set_eventsource(browser_eventsource); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */

@@ -334,3 +334,38 @@ int sysv_sem_format(char *out, int max) {
     }
     out[p] = 0; return p;
 }
+
+/* M1619: /proc/sysvipc only ever reported semaphore sets -- message queues
+ * and shm segments (both fully implemented, both with a working IPC_RMID
+ * path) had no formatter anywhere, unlike every other resource table in
+ * procfs.c. Same "id key ..." shape as sysv_sem_format above. */
+int sysv_msg_format(char *out, int max) {         /* one line per live queue: "id key count" */
+    int p = 0;
+    for (int i = 0; i < MSG_N && p < max - 48; i++) if (mqs[i].used) {
+        char t[16]; int n;
+        for (int pass = 0; pass < 3; pass++) {    /* id, key, count */
+            int v = pass == 0 ? i : (pass == 1 ? mqs[i].key : mqs[i].count); n = 0;
+            if (!v) t[n++] = '0'; while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+            while (n) out[p++] = t[--n];
+            out[p++] = (pass < 2) ? ' ' : '\n';
+        }
+    }
+    out[p] = 0; return p;
+}
+int sysv_shm_format(char *out, int max) {         /* one line per live segment: "id key size" */
+    int p = 0;
+    for (int i = 0; i < SHM_N && p < max - 48; i++) if (shms[i].used) {
+        char t[24]; int n;
+        for (int pass = 0; pass < 2; pass++) {    /* id, key */
+            int v = pass ? shms[i].key : i; n = 0;
+            if (!v) t[n++] = '0'; while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+            while (n) out[p++] = t[--n];
+            out[p++] = ' ';
+        }
+        uint64_t sz = shms[i].size; n = 0;
+        if (!sz) t[n++] = '0'; while (sz) { t[n++] = (char)('0' + sz % 10); sz /= 10; }
+        while (n) out[p++] = t[--n];
+        out[p++] = '\n';
+    }
+    out[p] = 0; return p;
+}

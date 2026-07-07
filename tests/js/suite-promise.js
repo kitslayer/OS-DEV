@@ -83,4 +83,13 @@ print(Math.atan(1) * 4, Math.sin(0), Math.cos(0), Math.PI);                  // 
 print((3.14159).toFixed(2), (5).toFixed(2), (1234.5678).toFixed(2));         // 3.14 5.00 1234.57
 print(parseFloat("3.14abc"), parseFloat("1e3"), parseFloat("abc"));          // 3.14 1000 NaN
 var _jf = JSON.parse('{"price":3.99,"rate":-0.5,"big":1.5e3}'); print(_jf.price, _jf.rate, _jf.big, JSON.stringify(_jf));   // 3.99 -0.5 1500 {"price":3.99,"rate":-0.5,"big":1500}
+print("-- localStorage getItem/setItem/removeItem/clear (M1619) --");
+localStorage.setItem("a", "1"); localStorage.setItem("b", "2");
+print(localStorage.getItem("a"), localStorage.getItem("b"), localStorage.getItem("missing"));   // 1 2 null
+localStorage.removeItem("a");
+print(localStorage.getItem("a"), localStorage.getItem("b"));   // null 2
+localStorage.removeItem("nonexistent");
+localStorage.setItem("c", "3");
+localStorage.clear();
+print(localStorage.getItem("b"), localStorage.getItem("c"));   // null null
 print("-- done --");

@@ -18,8 +18,10 @@ int sysv_msgget(int key, int flags);
 int sysv_msgsnd(int id, long mtype, const void *data, int len, int flags);
 int sysv_msgrcv(int id, long mtyp, void *out, int max, long *mtype_out, int flags);
 int sysv_msgctl(int id, int cmd);                          /* IPC_RMID only; 0/-1 (M1576) */
+int sysv_msg_format(char *out, int max);                   /* /proc/sysvipc text (M1619) */
 
 /* System V shared memory (M1161): keyed segments over the M1108 shm backing. */
 int      sysv_shmget(int key, uint64_t size, int flags);   /* open/create a segment; id or -1 */
 uint64_t sysv_shmat(int id);                               /* attach: map into the caller, base VA or 0 */
 int      sysv_shmctl(int id, int cmd);                      /* IPC_RMID only; 0/-1 (M1576) */
+int      sysv_shm_format(char *out, int max);               /* /proc/sysvipc text (M1619) */

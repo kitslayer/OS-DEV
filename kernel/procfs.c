@@ -168,7 +168,15 @@ static long gen_version(char *b, int max) {
     b[p] = 0; return p;
 }
 static long gen_mqueue(char *b, int max) { return mqueue_format(b, max); }   /* open priority msg queues (M1154) */
-static long gen_sysvipc(char *b, int max) { return sysv_sem_format(b, max); }   /* SysV semaphore sets (M1159) */
+/* SysV IPC (M1159/1160/1161): semaphore sets, message queues, shm segments --
+ * the latter two had no formatter anywhere until M1619, so 2/3 of a fully-
+ * implemented IPC family was invisible to introspection. */
+static long gen_sysvipc(char *b, int max) {
+    long p = sysv_sem_format(b, max);
+    if (p < max) p += sysv_msg_format(b + p, max - (int)p);
+    if (p < max) p += sysv_shm_format(b + p, max - (int)p);
+    return p;
+}
 static long gen_unix(char *b, int max) { return unix_format(b, max); }       /* AF_UNIX listeners + connections (M1169) */
 static long gen_locks(char *b, int max) { return flock_format(b, max); }     /* advisory file locks (M1177) */
 static long gen_loadavg(char *b, int max) {     /* real 1/5/15-min run-queue load average (M1148) */
