@@ -300,6 +300,8 @@ int   sys_open_mode(const char *path, int flags);            /* open a file fd w
 long  sys_lseek(int fd, long off, int whence);               /* reposition a file fd (SEEK_SET/CUR/END); offset/-1 (M1193) */
 long  sys_pread(int fd, void *buf, unsigned long max, long off);        /* read without moving the cursor; bytes/0 EOF/-1 (M1572) */
 long  sys_pwrite(int fd, const void *buf, unsigned long len, long off); /* write without moving the cursor; bytes/-1 (M1572) */
+long  sys_readv(int fd, struct iovec *iov, int iovcnt);       /* read into each segment in turn; total bytes/-1 (M1574) */
+long  sys_writev(int fd, const struct iovec *iov, int iovcnt); /* write each segment in turn; total bytes/-1 (M1574) */
 long  sys_seccomp_filter(const void *prog, unsigned long bytes);  /* install a self-imposed BPF syscall filter; 0/-1 (M1190) */
 #define PTY_SETMODE 0
 #define PTY_SETFG   1

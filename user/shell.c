@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3060,6 +3060,26 @@ static int run_command(char *line, char *cwd) {
                 }
                 sys_fdclose(fds[0]); sys_fdclose(fds[1]);
             }
+        } else if (streq(line, "iovtest")) {   /* readv/writev: scatter-gather over an fd (M1574) */
+            int ok = 1, fds[2];
+            if (sys_pipe(fds) != 0) { perr("iovtest: pipe failed\n"); g_status = 1; }
+            else {
+                char a[7] = "Hello, ", b[6] = "world!";       /* 7 + 6 = 13 bytes: "Hello, world!" */
+                struct iovec wiov[2] = { { a, 7 }, { b, 6 } };
+                long wn = sys_writev(fds[1], wiov, 2);
+                if (wn != 13) ok = 0;
+                char r1[5] = {0}, r2[8] = {0};                 /* differently-sized read segments: 5 + 8 = 13 */
+                struct iovec riov[2] = { { r1, 5 }, { r2, 8 } };
+                long rn = sys_readv(fds[0], riov, 2);
+                if (rn != 13) ok = 0;
+                /* "Hello, world!" split across the two DIFFERENTLY-sized buffers: "Hello" + ", world!" */
+                if (!(r1[0] == 'H' && r1[4] == 'o')) ok = 0;
+                if (!(r2[0] == ',' && r2[7] == '!')) ok = 0;
+                sys_fdclose(fds[0]); sys_fdclose(fds[1]);
+            }
+            print(ok ? "readv/writev: two-segment scatter-gather over a pipe, byte-exact join/split -- OK\n"
+                     : "iovtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "splicetest")) {  /* splice/tee: zero-copy pipe->pipe movement (M1211) */
             int ok = 1, a[2], b[2];
             if (sys_pipe(a) != 0 || sys_pipe(b) != 0) { print("splicetest: pipe() failed\n"); g_status = 1; }

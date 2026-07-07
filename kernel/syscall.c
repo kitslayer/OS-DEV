@@ -285,7 +285,7 @@ static uint32_t syscall_class(uint64_t nr) {
     switch (nr) {
     case SYS_exit: case SYS_sigreturn: case SYS_getpid: case SYS_pledge:
     case SYS_gettid: case SYS_thread_exit: case SYS_set_tls: case SYS_set_robust_list: return 0;
-    case SYS_write: case SYS_read: case SYS_pread: case SYS_pwrite: case SYS_time: case SYS_sysinfo: case SYS_clear:
+    case SYS_write: case SYS_read: case SYS_pread: case SYS_pwrite: case SYS_readv: case SYS_writev: case SYS_time: case SYS_sysinfo: case SYS_clear:
     case SYS_pollkey: case SYS_sleep: case SYS_uptime_ms: case SYS_sbrk: case SYS_getarg:
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_sigaltstack: case SYS_raise:
     case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom: case SYS_clock_settime: case SYS_pidfd_getfd: case SYS_acpi: case SYS_aslr:
@@ -406,7 +406,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
         [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",
         [SYS_mkfifo]="mkfifo",[SYS_fifo_open]="fifo_open",
-        [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",[SYS_ppoll]="ppoll",
+        [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",[SYS_ppoll]="ppoll",[SYS_readv]="readv",[SYS_writev]="writev",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -1564,6 +1564,42 @@ void syscall_dispatch(struct registers *r) {
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_pwrite((int)r->rdi, (const void *)r->rsi, r->rdx, (long)r->r10);
         break;
+    case SYS_readv: {                      /* (fd, iov, iovcnt) -> read into each segment in turn (M1574);
+                                             * real fds only (pipes/files/sockets/etc. -- whatever app_fd_read
+                                             * already handles) -- fd 0/1/2's window-grid special case that
+                                             * plain read() has is deliberately out of scope for this pass. */
+        struct iovec *iov = (struct iovec *)r->rsi;
+        int iovcnt = (int)r->rdx;
+        if (iovcnt < 1 || iovcnt > 16 || !ubuf(r->rsi, (uint64_t)(unsigned)iovcnt * sizeof(struct iovec))) { r->rax = (uint64_t)-1; break; }
+        long total = 0;
+        for (int i = 0; i < iovcnt; i++) {
+            if (iov[i].iov_len == 0) continue;
+            if (!ubuf((uint64_t)iov[i].iov_base, iov[i].iov_len)) { total = total ? total : -1; break; }
+            long n = app_fd_read((int)r->rdi, iov[i].iov_base, iov[i].iov_len);
+            if (n < 0) { total = total ? total : -1; break; }
+            total += n;
+            if ((unsigned long)n < iov[i].iov_len) break;   /* short read (EOF/would-block) -- stop, matching real readv */
+        }
+        r->rax = (uint64_t)total;
+        break;
+    }
+    case SYS_writev: {                     /* (fd, iov, iovcnt) -> write each segment in turn (M1574); same
+                                             * real-fds-only scope as readv above. */
+        struct iovec *iov = (struct iovec *)r->rsi;
+        int iovcnt = (int)r->rdx;
+        if (iovcnt < 1 || iovcnt > 16 || !ubuf(r->rsi, (uint64_t)(unsigned)iovcnt * sizeof(struct iovec))) { r->rax = (uint64_t)-1; break; }
+        long total = 0;
+        for (int i = 0; i < iovcnt; i++) {
+            if (iov[i].iov_len == 0) continue;
+            if (!ubuf((uint64_t)iov[i].iov_base, iov[i].iov_len)) { total = total ? total : -1; break; }
+            long n = app_fd_write((int)r->rdi, iov[i].iov_base, iov[i].iov_len);
+            if (n < 0) { total = total ? total : -1; break; }
+            total += n;
+            if ((unsigned long)n < iov[i].iov_len) break;   /* short write -- stop */
+        }
+        r->rax = (uint64_t)total;
+        break;
+    }
     case SYS_madvise:                      /* (addr, len, advice) -> MADV_DONTNEED reclaims resident anon pages */
         r->rax = (uint64_t)(int64_t)app_madvise(r->rdi, r->rsi, (int)r->rdx);
         break;
