@@ -3,10 +3,11 @@
  * source-level debug this kernel over a serial port: `target remote`, then
  * `info registers`, `x/`, `bt`, `continue`. (M1204)
  *
- * Read-only MVP: `?` (stop reason), `g` (read registers), `m` (read memory),
- * `c`/`D`/`k` (continue/detach). Unsupported packets get the empty response,
- * which gdb treats as "not supported" and works around. Breakpoints (`Z0`),
- * single-step (`s`), and register/memory writes (`G`/`M`) are the follow-on.
+ * `?` (stop reason), `g`/`G` (read/write registers), `m`/`M` (read/write
+ * memory), `c`/`D`/`k` (continue/detach), `Z0`/`z0` (set/clear a software
+ * breakpoint, M1205), `s` (single-step via TF, M1206). Unsupported packets
+ * get the empty response, which gdb treats as "not supported" and works
+ * around.
  *
  * Wiring: enabled by the multiboot command line (`-append gdbstub`); when on,
  * kmain executes an `int3`, and the #BP handler hands the trap frame to

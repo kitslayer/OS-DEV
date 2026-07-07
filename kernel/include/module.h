@@ -10,8 +10,8 @@
  *
  * The demo module kernel/testmod.c is compiled to build/testmod.ko and incbin'd
  * into the kernel image (kernel/asm/mod_blob.asm), so module_load_builtin()
- * exercises the whole pipeline with no filesystem. (Loading a .ko from a file is
- * a natural follow-on once a binary can be placed on the disk.)
+ * exercises the whole pipeline with no filesystem. Loading a .ko from a real
+ * file is `insmod_path`/`module_load_named` below (M1595).
  */
 #pragma once
 #include <stdint.h>
