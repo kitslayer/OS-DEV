@@ -116,7 +116,7 @@ int main(void) {
             if (v >= 32 && v <= 126) { char cs[4] = { '\'', (char)v, '\'', 0 }; gtextS(cs, vx, y, 1, C_AMBER, C_AMBERLO); }
             else text("-", vx, y, C_AMBERLO);
 
-            text("type a number    i input base    q quit", 14, H - 14, C_DIM);
+            text("type a number    i input base    q quit", 14, H - 16, C_DIM);
             sys_gfx_blit(FB);
             dirty = 0;
         }

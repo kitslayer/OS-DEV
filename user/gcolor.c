@@ -114,7 +114,7 @@ int main(void) {
             if (my >= SY[ch] - 12 && my <= SY[ch] + 18 && mx >= SX - 6 && mx <= SX + SW + 6) {
                 int v = (mx - SX) * 255 / SW; rgb[ch] = clamp(v); active = ch;
             }
-        if ((b & 1) && mx >= 14 && my >= 246 && my <= 272) {                   /* click a saved swatch -> recall it */
+        if ((b & 1) && mx >= 14 && my >= 246 && my <= 271) {                   /* click a saved swatch -> recall it (swatch is drawn 26px tall from y=246, i.e. rows 246-271) */
             int i = (mx - 14) / 32;
             if (i >= 0 && i < npal) { rgb[0] = pal[i][0]; rgb[1] = pal[i][1]; rgb[2] = pal[i][2]; }
         }

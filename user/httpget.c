@@ -114,7 +114,7 @@ int main(void) {
         else if (starts_with(a, "http://")) a += 7;
         int hi = 0;
         while (*a && *a != '/' && hi < (int)sizeof(host) - 1) host[hi++] = *a++;
-        host[hi] = 0;
+        if (hi) host[hi] = 0;   /* a path-only arg (leading '/') parses zero host chars -- leave the default alone, don't truncate it to "" */
         if (*a) { int pi = 0; while (*a && pi < (int)sizeof(path) - 1) path[pi++] = *a++; path[pi] = 0; }
         else { path[0] = '/'; path[1] = 0; }
     }

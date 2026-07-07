@@ -89,7 +89,7 @@ int main(void) {
             set_ms = (long)(typed < 1 ? 1 : typed) * 60000; rem = set_ms; done = 0; dirty = 1;
         }
         else if (k == 8 && !running) {                          /* backspace a typed digit */
-            if (typed > 0) { typed /= 10; set_ms = (long)(typed < 1 ? 1 : typed) * 60000; rem = set_ms; dirty = 1; }
+            if (typed >= 0) { typed /= 10; set_ms = (long)(typed < 1 ? 1 : typed) * 60000; rem = set_ms; dirty = 1; }   /* was > 0: typed==0 (a leading "0" was entered) made backspace a permanent no-op */
         }
         if (k > 0 && k != 8 && (k < '0' || k > '9')) typed = -1;   /* any other key ends the typed entry */
 

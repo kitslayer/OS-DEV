@@ -32,7 +32,7 @@ static int   m_alive[NM];
 static float ecx[NE], ecy[NE], er[NE]; static int e_grow[NE], e_alive[NE];
 
 static int over, wave, killed;
-static unsigned long spawn_cd, fire_cd;
+static unsigned long spawn_cd, fire_cd, wave_cd;
 static unsigned rng;
 static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
@@ -55,6 +55,9 @@ static void reset(void) {
     for (int i = 0; i < NM; i++) m_alive[i] = 0;
     for (int i = 0; i < NE; i++) e_alive[i] = 0;
     over = 0; wave = 1; killed = 0; spawn_cd = 0; fire_cd = 0;
+    wave_cd = sys_uptime_ms() + 18000;   /* first ramp 18s out, not immediately (was a static local that
+                                           * defaulted to 0 -- always <= "now", so the ramp fired on frame 1
+                                           * of every game, and reset() couldn't re-arm it on restart either) */
 }
 static int cities_left(void) { int n = 0; for (int i = 0; i < NCITY; i++) n += city_alive[i]; return n; }
 
@@ -127,9 +130,7 @@ int main(void) {
                 if (e_grow[i]) { er[i] += 1.3f; if (er[i] >= MAXR) e_grow[i] = 0; }
                 else { er[i] -= 0.4f; if (er[i] <= 0) e_alive[i] = 0; }   /* linger so missiles fly into it */
             }
-            int live = 0;
             for (int i = 0; i < NM; i++) if (m_alive[i]) {             /* move missiles */
-                live++;
                 mx_[i] += mvx[i]; my_[i] += mvy[i];
                 for (int e = 0; e < NE; e++) if (e_alive[e]) {         /* intercepted? */
                     float dx = mx_[i]-ecx[e], dy = my_[i]-ecy[e];
@@ -137,8 +138,6 @@ int main(void) {
                 }
                 if (m_alive[i] && my_[i] >= (float)GROUND) { m_alive[i] = 0; hit_nearest_city(mx_[i]); }
             }
-            if (live == 0 && now >= spawn_cd - 200) { /* a lull -> next wave ramps difficulty */ }
-            static unsigned long wave_cd = 0;
             if (now >= wave_cd) { wave++; wave_cd = now + 18000; }      /* ramp up every 18s */
         }
 

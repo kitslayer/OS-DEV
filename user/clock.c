@@ -10,6 +10,9 @@
 
 int main(void) {
     for (;;) {
+        int k = sys_pollkey();
+        if (k == 'q' || k == 'Q' || k == 27) return 0;   /* was no way to close this window at all */
+
         sys_clear();
         sys_setcolor(4); print("  == OS-DEV Clock ==\n\n");      /* title: cyan */
 

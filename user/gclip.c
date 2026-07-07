@@ -100,7 +100,7 @@ int main(void) {
                     if (++col >= COLS) { col = 0; row++; }
                 }
             }
-            text("c clear    q quit", 12, H - 14, C_DIM);
+            text("c clear    q quit", 12, H - 16, C_DIM);
             sys_gfx_blit(FB);
         }
         int k = sys_pollkey();

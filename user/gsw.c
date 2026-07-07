@@ -114,7 +114,7 @@ int main(void) {
                     int idx = first + j; long d = laps[idx] - (idx > 0 ? laps[idx - 1] : 0);
                     int dm = (int)(d / 60000), dss = (int)((d % 60000) / 1000), dt = (int)((d % 1000) / 100);
                     char lb[20]; int p = 0; int n = idx + 1;
-                    lb[p++] = 'L'; if (n >= 10) lb[p++] = '0' + n / 10; lb[p++] = '0' + n % 10; lb[p++] = ' '; lb[p++] = ' ';
+                    lb[p++] = 'L'; lb[p++] = '0' + n / 10; lb[p++] = '0' + n % 10; lb[p++] = ' '; lb[p++] = ' ';   /* always 2 digits (was 1 for n<10) so the time column doesn't shift once lap 10 appears */
                     lb[p++] = '0' + (dm / 10) % 10; lb[p++] = '0' + dm % 10; lb[p++] = ':';
                     lb[p++] = '0' + dss / 10; lb[p++] = '0' + dss % 10; lb[p++] = '.'; lb[p++] = '0' + dt; lb[p] = 0;
                     text(lb, 18, lpy + 8 + j * 16, idx == nlap - 1 ? C_AMBER : C_LED);   /* newest lap amber, the rest green */
