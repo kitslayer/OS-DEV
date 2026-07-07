@@ -406,7 +406,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
         [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",
         [SYS_mkfifo]="mkfifo",[SYS_fifo_open]="fifo_open",
-        [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",
+        [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",[SYS_ppoll]="ppoll",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -1886,6 +1886,36 @@ void syscall_dispatch(struct registers *r) {
             task_sleep_ms(10);             /* off-CPU poll interval */
         }
         r->rax = (uint64_t)ready;
+        break;
+    }
+    case SYS_ppoll: {                      /* (fds, nfds, timeout_ms, sigmask) -> like poll, but breaks early
+                                             * on a deliverable signal (M1573) -- the exact same wrapper
+                                             * epoll_pwait (M1567) already applies to epoll_wait's own loop,
+                                             * applied to poll's. */
+        struct pollfd *fds = (struct pollfd *)r->rdi;
+        int nfds = (int)r->rsi; long timeout = (long)r->rdx;
+        if (nfds < 1 || nfds > 64 || !ubuf(r->rdi, (uint64_t)(unsigned)nfds * sizeof(struct pollfd))) { r->rax = (uint64_t)-1; break; }
+        app_t *self = app_current();
+        uint32_t old_mask = app_sigprocmask(2 /* SIG_SETMASK */, (uint32_t)r->r10);
+        app_kill_check();
+        __asm__ volatile("sti");
+        uint64_t start = timer_ms();
+        int ready = 0, interrupted = 0;
+        for (;;) {
+            ready = 0;
+            for (int i = 0; i < nfds; i++) {
+                int re = app_fd_ready(self, fds[i].fd, fds[i].events);
+                fds[i].revents = (short)re;
+                if (re) ready++;
+            }
+            if (ready) break;
+            if (app_signal_deliverable()) { interrupted = 1; break; }
+            if (timeout >= 0 && (long)(timer_ms() - start) >= timeout) break;
+            task_sleep_ms(10);
+        }
+        if (interrupted) { r->rax = (uint64_t)-1; app_deliver_pending(r); }   /* r->rax baked in before the snapshot (M1561) */
+        else r->rax = (uint64_t)ready;
+        app_sigprocmask(2, old_mask);
         break;
     }
     case SYS_splice:                       /* zero-copy pipe->pipe move, consuming the source (M1211) */

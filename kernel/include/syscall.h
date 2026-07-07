@@ -338,6 +338,7 @@
 #define SYS_mq_setattr   309   /* (idx, struct mq_attr *newattr, struct mq_attr *oldattr) -> set O_NONBLOCK only; 0/-1 (M1571) */
 #define SYS_pread        310   /* (fd, buf, max, off) -> read a FILE fd without moving its cursor; bytes/0 EOF/-1 (M1572) */
 #define SYS_pwrite       311   /* (fd, buf, len, off) -> write a FILE fd without moving its cursor; bytes/-1 (M1572) */
+#define SYS_ppoll        312   /* (fds, nfds, timeout_ms, sigmask) -> like poll, signal-interruptible; #ready/-1 on signal/-1 (M1573) */
 struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
