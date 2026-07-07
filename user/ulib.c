@@ -566,6 +566,8 @@ int  sys_mkdirat(int dirfd, const char *path, int mode) { return (int)do_syscall
 int  sys_fstatat(int dirfd, const char *path, struct statx *st, int flags) { return (int)do_syscall4(SYS_fstatat, dirfd, (long)path, (long)st, flags); }
 int  sys_fchmodat(int dirfd, const char *path, unsigned mode) { return (int)do_syscall(SYS_fchmodat, dirfd, (long)path, mode); }
 int  sys_fchownat(int dirfd, const char *path, int uid, int gid) { return (int)do_syscall4(SYS_fchownat, dirfd, (long)path, uid, gid); }
+int  sys_symlinkat(const char *target, int newdirfd, const char *linkpath) { return (int)do_syscall(SYS_symlinkat, (long)target, newdirfd, (long)linkpath); }
+long sys_readlinkat(int dirfd, const char *path, void *buf, unsigned long size) { return do_syscall4(SYS_readlinkat, dirfd, (long)path, (long)buf, (long)size); }
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set) { return do_syscall4(SYS_prlimit, pid, resource, (long)newval, do_set); }
 int  sys_timerfd_create(void) { return (int)do_syscall(SYS_timerfd_create, 0, 0, 0); }
 long sys_timerfd_settime(int fd, long delay_ms, long interval_ms) { return do_syscall(SYS_timerfd_settime, fd, delay_ms, interval_ms); }

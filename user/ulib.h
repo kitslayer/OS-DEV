@@ -221,6 +221,8 @@ int  sys_mkdirat(int dirfd, const char *path, int mode);       /* mkdir relative
 int  sys_fstatat(int dirfd, const char *path, struct statx *st, int flags); /* stat relative to a dir fd; 0/-1 (M1251) */
 int  sys_fchmodat(int dirfd, const char *path, unsigned mode);    /* chmod relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
 int  sys_fchownat(int dirfd, const char *path, int uid, int gid); /* chown relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
+int  sys_symlinkat(const char *target, int newdirfd, const char *linkpath);  /* symlink relative to a dir fd (or AT_FDCWD); 0/-1 (M1582) */
+long sys_readlinkat(int dirfd, const char *path, void *buf, unsigned long size);  /* a symlink's target relative to a dir fd (or AT_FDCWD), not followed; bytes/-1 (M1582) */
 int  sys_utimensat(int dirfd, const char *path, long atime, long mtime);  /* set timestamps relative to a dir fd (or AT_FDCWD); 0/-1 (M1559) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
 int  sys_timerfd_create(void);                                 /* a pollable one-shot timer fd (>=3); -1 (M1217) */

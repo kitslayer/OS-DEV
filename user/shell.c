@@ -3838,7 +3838,24 @@ static int run_command(char *line, char *cwd) {
             char rb2[16];
             if (sys_readlink("/tmp", rb2, sizeof rb2) != -1) ok = 0;   /* a non-symlink -> -1 */
             sys_delete("/tmp/RL.LNK");
-            print(ok ? "readlink: RL.LNK -> target read back exact (un-terminated), non-symlink -> -1 -- OK\n"
+            /* symlinkat/readlinkat (M1582): same round-trip via AT_FDCWD, then again via a REAL dirfd */
+            sys_delete("/tmp/RL2.LNK"); sys_delete("/tmp/RL3.LNK");
+            int atok = (sys_symlinkat(tgt, AT_FDCWD, "/tmp/RL2.LNK") == 0);
+            char b2[64];
+            long n2 = atok ? sys_readlinkat(AT_FDCWD, "/tmp/RL2.LNK", b2, sizeof b2) : -1;
+            if (n2 != tl) atok = 0; else for (int k = 0; k < tl; k++) if (b2[k] != tgt[k]) { atok = 0; break; }
+            int dfd = sys_open("/tmp");
+            if (dfd >= 0) {
+                if (sys_symlinkat(tgt, dfd, "RL3.LNK") != 0) atok = 0;      /* dirfd-relative create */
+                char b3[64];
+                long n3 = sys_readlinkat(dfd, "RL3.LNK", b3, sizeof b3);    /* dirfd-relative read */
+                if (n3 != tl) atok = 0; else for (int k = 0; k < tl; k++) if (b3[k] != tgt[k]) { atok = 0; break; }
+                sys_fdclose(dfd);
+            } else atok = 0;
+            sys_delete("/tmp/RL2.LNK"); sys_delete("/tmp/RL3.LNK");
+            ok = ok && atok;
+            print(ok ? "readlink: RL.LNK -> target read back exact (un-terminated), non-symlink -> -1; "
+                       "symlinkat/readlinkat round-trip via AT_FDCWD + a real dirfd both OK -- OK\n"
                      : "readlinktest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "nanosleeptest")) {   /* sched_yield + nanosleep (M1234) */

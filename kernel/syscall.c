@@ -312,13 +312,13 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_fgetxattr: case SYS_flistxattr: case SYS_open:
-    case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat:
+    case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat: case SYS_readlinkat:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
     case SYS_fsync: case SYS_fdatasync: case SYS_sync_file_range:
     case SYS_utimens: case SYS_futimens: case SYS_utimensat: case SYS_renameat2: case SYS_chmod: case SYS_fchmod:
     case SYS_chown: case SYS_fchown: case SYS_unlinkat: case SYS_mkdirat:
-    case SYS_fchmodat: case SYS_fchownat:
+    case SYS_fchmodat: case SYS_fchownat: case SYS_symlinkat:
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
     case SYS_fallocate: case SYS_copy_file_range: case SYS_setxattr: case SYS_removexattr:
@@ -388,6 +388,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_io_uring_enter]="io_uring_enter",[SYS_mseal]="mseal",[SYS_tcp_serve]="tcp_serve",[SYS_tcp_accept]="tcp_accept",[SYS_tcp_respond]="tcp_respond",
         [SYS_uffd_register]="uffd_register",[SYS_uffd_read]="uffd_read",[SYS_uffd_copy]="uffd_copy",
         [SYS_mmap_file]="mmap_file",[SYS_msync]="msync",[SYS_fchmodat]="fchmodat",[SYS_fchownat]="fchownat",[SYS_utimensat]="utimensat",
+        [SYS_symlinkat]="symlinkat",[SYS_readlinkat]="readlinkat",
         [SYS_setsockopt]="setsockopt",[SYS_getsockopt]="getsockopt",[SYS_getsockname]="getsockname",[SYS_getpeername]="getpeername",[SYS_sigsuspend]="sigsuspend",[SYS_pause]="pause",[SYS_process_madvise]="process_madvise",
         [SYS_faccessat2]="faccessat2",[SYS_sched_setaffinity]="sched_setaffinity",[SYS_sched_getaffinity]="sched_getaffinity",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
@@ -1578,6 +1579,23 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rsi) || at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
         if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_chown(eff, (long)r->rdx, (long)r->r10);
+        break;
+    }
+    case SYS_symlinkat: {                  /* (target, newdirfd, linkpath) -> symlink relative to a dir fd (M1582) */
+        char eff[256];
+        if (!ustr(r->rdi) || !ustr(r->rdx)) { r->rax = (uint64_t)-1; break; }
+        if (at_resolve((long)r->rsi, (const char *)r->rdx, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, eff, 1)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_symlink(eff, (const char *)r->rdi);
+        break;
+    }
+    case SYS_readlinkat: {                 /* (dirfd, path, buf, size) -> a symlink's target relative to a dir fd,
+                                             * not followed (M1582) */
+        char eff[256];
+        if (!ustr(r->rsi) || !ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }
+        if (at_resolve((long)r->rdi, (const char *)r->rsi, eff, sizeof eff) < 0) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, eff, 0)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_readlink(eff, (void *)r->rdx, (unsigned long)r->r10);
         break;
     }
     case SYS_utimensat: {                  /* (dirfd, path, atime, mtime) -> set timestamps relative to a dir fd
