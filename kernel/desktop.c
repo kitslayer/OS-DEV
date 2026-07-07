@@ -311,6 +311,31 @@ static void dither_rect(int x, int y, int w, int h, uint32_t a, uint32_t b) {
 static int wp_h;
 static uint32_t *wallpaper_bmp;   /* a screen-sized image loaded from disk, or NULL = gradient */
 static volatile int wallpaper_repaint;   /* set by desktop_set_wallpaper (off-task) to force a redraw */
+/* M1613: wallpaper_bmp's swap-then-kfree in desktop_set_wallpaper used to rely
+ * on "this runs inside a syscall with IF=0, so it's atomic w.r.t. the desktop
+ * render task" -- the same invalidated single-CPU assumption as M1604-M1612,
+ * and a genuinely worse failure mode than a lost wakeup: task 0 (this WM) is
+ * BSP-pinned, but the app calling the `wallpaper` syscall is an ordinary
+ * pin_core=-1 task that M1531's scheduler can place on any OTHER core --
+ * meaning render_scene()'s multi-millisecond memcpy of the OLD buffer (a
+ * full screen: ~5 MB at 1280x960) could still be reading it when kfree()
+ * hands those pages back to the allocator, a real use-after-free. Widened by
+ * desktop_wallpaper_sample being called from kernel/app.c's own terminal
+ * redraw path too -- any app, any core, far more often than the rare
+ * wallpaper-change syscall. One spinlock, held only around each individual
+ * read/swap (never across the memcpy AND a later sample call in the same
+ * render pass, which would self-deadlock on this non-reentrant lock). */
+static volatile int wallpaper_lock;
+static inline uint64_t wp_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&wallpaper_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void wp_irq_restore(uint64_t f) {
+    __atomic_store_n(&wallpaper_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
 /* The wallpaper's own color at absolute screen coords (x,y) — the STABLE
  * backdrop bitmap, not whatever a window most recently drew there. Lets a
  * translucent window (kernel/app.c's terminal cells) blend toward the real
@@ -319,8 +344,12 @@ static volatile int wallpaper_repaint;   /* set by desktop_set_wallpaper (off-ta
  * edge cases (OOM at boot: wallpaper_bmp never allocated; a stale coordinate
  * from a since-resized screen) without a caller needing to know about either. */
 uint32_t desktop_wallpaper_sample(int x, int y) {
-    if (!wallpaper_bmp || x < 0 || y < 0 || x >= screen_w || y >= screen_h) return THEME_VOID;
-    return wallpaper_bmp[(size_t)y * screen_w + x];
+    if (x < 0 || y < 0 || x >= screen_w || y >= screen_h) return THEME_VOID;
+    uint64_t f = wp_irq_save();
+    uint32_t px = wallpaper_bmp ? wallpaper_bmp[(size_t)y * screen_w + x] : 0;
+    int have = wallpaper_bmp != 0;
+    wp_irq_restore(f);
+    return have ? px : THEME_VOID;
 }
 static void u2(uint64_t v, char *o) { o[0]='0'+(v/10)%10; o[1]='0'+v%10; o[2]=0; }
 static int lc_ascii(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }   /* ASCII lowercase */
@@ -956,16 +985,19 @@ static void load_wallpaper(void) {
 
 /* Change the desktop wallpaper at runtime (the `wallpaper` shell builtin, via
  * SYS_setwall). Decode-into-new-then-swap: a failed load NEVER disturbs the live
- * wallpaper. The swap is a single pointer store; this runs inside a syscall with
- * interrupts disabled (IF=0), so it is atomic w.r.t. the desktop render task —
- * the renderer can never observe a half-updated wallpaper_bmp, and freeing the
- * old buffer can't race a read of it. Returns 0 on success, -1 on any failure
- * (the current wallpaper is kept). */
+ * wallpaper. The swap itself goes through wallpaper_lock (M1613); kfree(old)
+ * happens AFTER releasing it, which is still safe -- any reader that acquires
+ * the lock from this point on sees `next`, not `old`, and every existing
+ * reader (desktop_wallpaper_sample, render_scene's memcpy) only ever touches
+ * the raw pointer while holding the lock itself, never past its own release.
+ * Returns 0 on success, -1 on any failure (the current wallpaper is kept). */
 int desktop_set_wallpaper(const char *name) {
     uint32_t *next = decode_wallpaper(name);
     if (!next) return -1;                                  /* keep the current wallpaper */
+    uint64_t f = wp_irq_save();
     uint32_t *old = wallpaper_bmp;
-    wallpaper_bmp = next;                                  /* atomic swap (IF=0) */
+    wallpaper_bmp = next;
+    wp_irq_restore(f);
     kfree(old);                                            /* free(NULL) is a no-op (boot gradient) */
     wallpaper_repaint = 1;                                 /* nudge the WM loop to redraw promptly */
     return 0;
@@ -1012,10 +1044,14 @@ static void draw_clock_pill(void) {
 static void render_scene(void) {
     fb_set_target(scenebuf);
     wp_h = screen_h;
-    if (wallpaper_bmp)                                      /* image from disk */
-        memcpy(scenebuf, wallpaper_bmp, (size_t)screen_w * screen_h * 4);
-    else
-        vgrad(0, 0, screen_w, screen_h, WP_TOP, WP_BOT);    /* fallback: gradient */
+    {
+        uint64_t f = wp_irq_save();      /* held for the whole copy (M1613) -- see wallpaper_lock's own comment */
+        if (wallpaper_bmp)                                      /* image from disk */
+            memcpy(scenebuf, wallpaper_bmp, (size_t)screen_w * screen_h * 4);
+        else
+            vgrad(0, 0, screen_w, screen_h, WP_TOP, WP_BOT);    /* fallback: gradient */
+        wp_irq_restore(f);
+    }
 
     for (int i = 0; i < win_count; i++)
         if (!windows[i].minimized)                          /* minimized = hidden to its chip */

@@ -2381,8 +2381,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_setwall:
         /* rdi=name: load that image as the desktop wallpaper. Validate the name
          * string (the app's own pages) before the kernel reads it; the decode +
-         * atomic buffer swap happen with IF=0, so the WM render task never sees
-         * a half-updated wallpaper, and a failed load keeps the current one. */
+         * buffer swap go through desktop.c's own wallpaper_lock (M1613) so the
+         * WM render task never sees a half-updated wallpaper OR reads a buffer
+         * this call has already freed, and a failed load keeps the current one. */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)desktop_set_wallpaper((const char *)r->rdi);
         break;
