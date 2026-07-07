@@ -55,16 +55,42 @@ static int swap_disk(void) {
 
 static int free_slot(void) { for (int i = 0; i < SWAP_SLOTS; i++) if (!zk[i]) return i; return -1; }
 
+/* M1605: unlike pmm.c/vmm.c/kheap.c (all retrofitted under M1531 with a real
+ * cross-core spinlock, since "cli alone only ever stopped a LOCAL interrupt"),
+ * this table had NO lock at all -- reachable from more than one core via the
+ * same page-fault swap-in path pmm.c is, plus a direct syscall (MADV_PAGEOUT,
+ * app_swap_out). Two cores racing free_slot() could both claim the same index
+ * before either marks it used, then the second swap_out() to finish clobbers
+ * the first's zbuf[s] pointer (a permanent kheap leak) while the first's PTE
+ * still encodes slot s -- a later fault-in of THAT page would read back the
+ * SECOND process's data. Same idiom as pmm.c: spinlock nested in cli. Held
+ * across the whole of each function below, including the disk tier's
+ * blockdev_read/write -- not free, but safe (those are busy-polled, never
+ * task_block, so no deadlock risk) and swap ops are rare enough that a coarse
+ * lock costs far less here than the same choice would in pmm.c/kheap.c. */
+static volatile int swap_lock;
+static inline uint64_t irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&swap_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return fl;
+}
+static inline void irq_restore(uint64_t fl) {
+    __atomic_store_n(&swap_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
+
 /* Reclaim frame `phys`: store its contents in the zram RAM tier (or disk) and
  * return the slot index, or -1 on failure (table full / OOM). */
 int swap_out(uint64_t phys) {
+    uint64_t fl = irq_save();
     int s = free_slot();
-    if (s < 0) return -1;                                      /* swap table full */
+    if (s < 0) { irq_restore(fl); return -1; }                 /* swap table full */
     const uint8_t *src = (const uint8_t *)hhdm(phys);
 
     int allzero = 1;
     for (int i = 0; i < PAGE_SIZE; i++) if (src[i]) { allzero = 0; break; }
-    if (allzero) { zk[s] = 2; g_out++; g_cur++; return s; }    /* all-zero page: store nothing */
+    if (allzero) { zk[s] = 2; g_out++; g_cur++; irq_restore(fl); return s; }    /* all-zero page: store nothing */
 
     uint8_t *tmp = kmalloc(PAGE_SIZE);
     int clen = tmp ? raw_deflate(src, PAGE_SIZE, tmp, PAGE_SIZE - 1) : -1;
@@ -75,6 +101,7 @@ int swap_out(uint64_t phys) {
             kfree(tmp);
             zbuf[s] = b; zsz[s] = (uint16_t)clen; zk[s] = 1;
             g_out++; g_cur++; g_zbytes += (uint64_t)clen;
+            irq_restore(fl);
             return s;
         }
     }
@@ -83,39 +110,45 @@ int swap_out(uint64_t phys) {
     int dev = swap_disk();                                    /* incompressible: spill to disk if we have one */
     if (dev >= 0 && blockdev_write(dev, swap_base + (uint64_t)s * SECT_PER_PAGE, SECT_PER_PAGE, hhdm(phys)) == 0) {
         zk[s] = 3; g_out++; g_cur++;
+        irq_restore(fl);
         return s;
     }
     uint8_t *b = kmalloc(PAGE_SIZE);                          /* no disk: hold it raw in RAM */
-    if (!b) return -1;
+    if (!b) { irq_restore(fl); return -1; }
     for (int i = 0; i < PAGE_SIZE; i++) b[i] = src[i];
     zbuf[s] = b; zsz[s] = (uint16_t)PAGE_SIZE; zk[s] = 1;
     g_out++; g_cur++; g_zbytes += PAGE_SIZE;
+    irq_restore(fl);
     return s;
 }
 
 /* Restore the slot's page into frame `phys`. */
 int swap_in(int slot, uint64_t phys) {
-    if (slot < 0 || slot >= SWAP_SLOTS || !zk[slot]) return -1;
+    uint64_t fl = irq_save();
+    if (slot < 0 || slot >= SWAP_SLOTS || !zk[slot]) { irq_restore(fl); return -1; }
     uint8_t *dst = (uint8_t *)hhdm(phys);
-    if (zk[slot] == 2) { for (int i = 0; i < PAGE_SIZE; i++) dst[i] = 0; g_in++; return 0; }   /* zero page */
+    if (zk[slot] == 2) { for (int i = 0; i < PAGE_SIZE; i++) dst[i] = 0; g_in++; irq_restore(fl); return 0; }   /* zero page */
     if (zk[slot] == 1) {
         if (zsz[slot] < PAGE_SIZE) {                          /* compressed */
-            if (inflate(zbuf[slot], zsz[slot], dst, PAGE_SIZE) != PAGE_SIZE) return -1;   /* corrupt */
+            if (inflate(zbuf[slot], zsz[slot], dst, PAGE_SIZE) != PAGE_SIZE) { irq_restore(fl); return -1; }   /* corrupt */
         } else {
             for (int i = 0; i < PAGE_SIZE; i++) dst[i] = zbuf[slot][i];   /* raw */
         }
-        g_in++; return 0;
+        g_in++; irq_restore(fl); return 0;
     }
     /* kind 3: disk */
-    if (swap_dev < 0 || blockdev_read(swap_dev, swap_base + (uint64_t)slot * SECT_PER_PAGE, SECT_PER_PAGE, hhdm(phys)) < 0)
-        return -1;
-    g_in++; return 0;
+    if (swap_dev < 0 || blockdev_read(swap_dev, swap_base + (uint64_t)slot * SECT_PER_PAGE, SECT_PER_PAGE, hhdm(phys)) < 0) {
+        irq_restore(fl); return -1;
+    }
+    g_in++; irq_restore(fl); return 0;
 }
 
 void swap_release(int slot) {
-    if (slot < 0 || slot >= SWAP_SLOTS || !zk[slot]) return;
+    uint64_t fl = irq_save();
+    if (slot < 0 || slot >= SWAP_SLOTS || !zk[slot]) { irq_restore(fl); return; }
     if (zk[slot] == 1 && zbuf[slot]) { if (zsz[slot]) g_zbytes -= zsz[slot]; kfree(zbuf[slot]); zbuf[slot] = 0; }
     zk[slot] = 0; zsz[slot] = 0; g_cur--;
+    irq_restore(fl);
 }
 
 static int sp_put(char *b, int p, int max, const char *s) { while (*s && p + 1 < max) b[p++] = *s++; return p; }

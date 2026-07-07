@@ -4839,6 +4839,30 @@ static int run_command(char *line, char *cwd) {
                       print(" -- BSD TCP client OK\n"); }
             else { sys_setcolor(2); print("tcptest: VERIFY FAILED (rr="); sys_setcolor(0); printl(rr); print(" n="); printl(n); print(") -- needs internet\n"); g_status = 1; }
             if (s >= 0) sys_fdclose(s);
+            /* two concurrent sockets must not share reassembly/FIN state (M1606):
+             * interleave connect+send on BOTH before reading either, so if they
+             * still aliased one global instance under the hood, one's traffic
+             * would have a real chance to corrupt the other's in-flight state.
+             * Runs only now that `s` above is closed -- TCPSOCK_N is 2, and this
+             * needs both slots free for itself. */
+            int twook = 1;
+            int ta = ok ? sys_socket(2, 1) : -1, tb = ok ? sys_socket(2, 1) : -1;
+            if (ta < 0 || tb < 0) twook = 0;
+            if (twook && sys_connect(ta, ip, 80) != 0) twook = 0;
+            if (twook && sys_connect(tb, ip, 80) != 0) twook = 0;
+            if (twook) sys_fdwrite(ta, req, rl);
+            if (twook) sys_fdwrite(tb, req, rl);
+            char rA[512], rB[512];
+            long nTA = twook ? sys_fdread(ta, rA, sizeof rA - 1) : -1;
+            long nTB = twook ? sys_fdread(tb, rB, sizeof rB - 1) : -1;
+            int httpA = (nTA > 12 && rA[0]=='H'&&rA[1]=='T'&&rA[2]=='T'&&rA[3]=='P'&&rA[4]=='/');
+            int httpB = (nTB > 12 && rB[0]=='H'&&rB[1]=='T'&&rB[2]=='T'&&rB[3]=='P'&&rB[4]=='/');
+            if (!(twook && httpA && httpB)) twook = 0;
+            if (ta >= 0) sys_fdclose(ta);
+            if (tb >= 0) sys_fdclose(tb);
+            print("tcp: 2 concurrent sockets, interleaved connect+send before either recv, both got clean independent HTTP responses -- ");
+            sys_setcolor(twook ? 10 : 4); print(twook ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+            if (!twook) g_status = 1;
         } else if (streq(line, "hardentest")) {   /* CPU hardening: UMIP makes a ring-3 SGDT fault (M1269) */
             long pid = sys_fork();
             if (pid == 0) {

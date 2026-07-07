@@ -595,6 +595,11 @@ static struct { int used, refs; tcp_conn c; int opt_reuseaddr, opt_nodelay, opt_
 int net_tcp_sock_open(void) {
     for (int i = 0; i < TCPSOCK_N; i++) if (!g_tcpsock[i].used) {
         g_tcpsock[i].used = 1; g_tcpsock[i].refs = 1; g_tcpsock[i].c.up = 0;
+        g_tcpsock[i].c.ooo_idx = -1;    /* no reassembly/FIN slot claimed until tcp_connect() actually runs (M1606) --
+                                          * net_tcp_sock_close() calls tcp_close() unconditionally, even on a socket()
+                                          * that was closed without ever connect()ing, and a fresh BSS-zeroed slot's
+                                          * ooo_idx would otherwise read as 0 -- a real (in-use-or-not) table index,
+                                          * not "none" -- and wrongly release whichever OTHER live connection owns it */
         g_tcpsock[i].c.sport = g_tcpsock[i].c.dport = 0;    /* clear a reused slot's stale port/peer (M1560) --
                                                               * getsockname/getpeername now make these visible,
                                                               * where before a slot's leftover values from its
@@ -891,13 +896,16 @@ static int tcp_recv_seg(uint8_t *buf, int max, const uint8_t *dip,
 
 /* ---------------- reusable TCP stream (for HTTP and, later, TLS) ----------- */
 
-static void tcp_rx_reset(void);   /* reset reassembly + FIN state (defined below) */
+static int ooo_claim(void);       /* claim a fresh reassembly+FIN slot (defined below, M1606) */
 
 /* Open a connection to ip:port (routed via the gateway). 0 on success, -1 on
  * failure; fills the connection state. */
 int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
     memset(c, 0, sizeof(*c));
-    tcp_rx_reset();               /* fresh reassembly + FIN state for this conn */
+    c->ooo_idx = -1;               /* claimed only on success, below (M1606) -- tcp_connect has three failure
+                                     * returns below, and net_tcp_sock_close() calls tcp_close() unconditionally
+                                     * on a socket that failed to connect, so a claim here would leak a slot on
+                                     * every failed connection attempt (bad host, refused, timed out) */
     memcpy(c->ip, ip, 4);
     if (!arp_resolve(GW_IP, c->gw)) { c->errno_hint = ENETUNREACH; return -1; }   /* can't even reach the gateway (M1564) */
     c->dport = port;
@@ -918,6 +926,7 @@ int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
                 c->myseq += 1;
                 tcp_send_seg(c->gw, c->ip, c->sport, port, c->myseq, c->theirseq, TCP_ACK, 0, 0);
                 c->up = 1;
+                c->ooo_idx = ooo_claim();     /* fresh reassembly + FIN state for this conn, now that we know we need it (M1606) */
                 return 0;
             }
         }
@@ -1095,72 +1104,125 @@ int net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
     return reqlen;
 }
 
-/* ---- out-of-order reassembly (one connection at a time, serialized) -------
+/* ---- out-of-order reassembly + peer-FIN tracking, per-connection --------
  * A dropped or reordered segment leaves a gap in the byte stream. The naive
  * approach (drop everything after the gap and re-ACK) forces the whole tail to
  * be retransmitted and can stall a fast CDN burst, where one segment is lost to
  * an RX-ring overflow and the next dozen arrive ahead of the retransmit. So we
  * buffer those post-gap bytes here and deliver them the instant the gap fills.
  *
- * `ooo_base` is the sequence number of ooo_buf[0]; `ooo_have` marks which bytes
- * have arrived; `ooo_hi` is the highest stored offset+1. The store is single-
- * instance because TCP here is single-connection (same serialization that makes
- * the static crypto buffers safe). Reset per connection in tcp_connect(). */
+ * M1606: this used to be a single global instance ("TCP here is single-
+ * connection" -- true when first written, false since M1268 gave sockets a
+ * 2-slot table, and more false still counting /net/tcp's own 4-slot nconn[].
+ * Two genuinely live connections (two browser tabs, or a shell tcptest racing
+ * a page load) shared ONE ooo_buf/fin_seen/fin_at: either one's reordered
+ * segment or FIN could splice into the other's stream, and two cores each
+ * running tcp_read() on a DIFFERENT connection raced the same globals with no
+ * lock at all. tcp_close() even grew a comment admitting fin_seen needed to be
+ * per-connection ("so a latched-but-unhonored FIN can't prematurely close the
+ * NEXT connection") without actually making it per-connection — this finishes
+ * that job: each live tcp_conn now gets its own slot in a small fixed table,
+ * claimed by tcp_connect and released by tcp_close, the same claim/release
+ * shape g_tcpsock/nconn/g_inot already use, plus the cross-core spinlock
+ * those tables already learned to need (same idiom as pmm.c/swap.c/tls.c).
+ *
+ * `base` is the sequence number of buf[0]; `have` marks which bytes have
+ * arrived; `hi` is the highest stored offset+1. */
 #define OOO_CAP (96 * 1024)
-static uint8_t  ooo_buf[OOO_CAP];
-static uint8_t  ooo_have[OOO_CAP / 8];
-static uint32_t ooo_base;
-static int      ooo_active;          /* 1 while buffered future bytes exist */
-static int      ooo_hi;              /* highest stored offset+1 (0 = empty)  */
-static int      fin_seen;            /* peer FIN observed (maybe out of order) */
-static uint32_t fin_at;              /* the FIN's sequence number (= data end) */
+#define OOO_N   8   /* TCPSOCK_N(2) + NETCONN_N(4) persistent, + spare for ephemeral local tcp_conns (http_get/tls) */
+struct ooo_state {
+    int      used;
+    uint8_t  buf[OOO_CAP];
+    uint8_t  have[OOO_CAP / 8];
+    uint32_t base;
+    int      active;          /* 1 while buffered future bytes exist */
+    int      hi;               /* highest stored offset+1 (0 = empty) */
+    int      fin_seen;         /* peer FIN observed (maybe out of order) */
+    uint32_t fin_at;           /* the FIN's sequence number (= data end) */
+};
+static struct ooo_state ooo_tab[OOO_N];
+static volatile int ooo_lock;
+static inline uint64_t ooo_irq_save(void) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+    while (__atomic_exchange_n(&ooo_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return fl;
+}
+static inline void ooo_irq_restore(uint64_t fl) {
+    __atomic_store_n(&ooo_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
 
 /* wraparound-safe 32-bit sequence comparisons */
 static inline int seq_lt(uint32_t a, uint32_t b) { return (int32_t)(a - b) < 0; }
 static inline int seq_le(uint32_t a, uint32_t b) { return (int32_t)(a - b) <= 0; }
 static inline int seq_gt(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 0; }
-static inline int ooo_bit(int i) { return ooo_have[i >> 3] & (1 << (i & 7)); }
-static inline void ooo_setbit(int i) { ooo_have[i >> 3] |= (uint8_t)(1 << (i & 7)); }
+static inline int ooo_bit(struct ooo_state *o, int i) { return o->have[i >> 3] & (1 << (i & 7)); }
+static inline void ooo_setbit(struct ooo_state *o, int i) { o->have[i >> 3] |= (uint8_t)(1 << (i & 7)); }
+
+/* Claim a fresh per-connection slot (tcp_connect). -1 if the table is full --
+ * that connection just runs without reassembly/out-of-order-FIN support (a
+ * graceful degrade, not a crash; OOO_N is sized well past realistic concurrent
+ * use, so this is not expected to ever actually trigger). */
+static int ooo_claim(void) {
+    uint64_t fl = ooo_irq_save();
+    for (int i = 0; i < OOO_N; i++) if (!ooo_tab[i].used) {
+        ooo_tab[i].used = 1; ooo_tab[i].active = 0; ooo_tab[i].hi = 0;
+        ooo_tab[i].fin_seen = 0; ooo_tab[i].fin_at = 0;
+        ooo_irq_restore(fl);
+        return i;
+    }
+    ooo_irq_restore(fl);
+    return -1;
+}
+static void ooo_release(int idx) {
+    if (idx < 0 || idx >= OOO_N) return;
+    uint64_t fl = ooo_irq_save();
+    ooo_tab[idx].used = 0;
+    ooo_irq_restore(fl);
+}
+static struct ooo_state *ooo_lookup(int idx) {
+    return (idx >= 0 && idx < OOO_N && ooo_tab[idx].used) ? &ooo_tab[idx] : 0;
+}
 
 /* Reset only the reassembly buffer. The peer FIN (fin_seen/fin_at) is NOT
  * cleared here: a FIN can be recorded while bytes are still buffered, and the
  * drain that empties the buffer calls this — clearing fin_seen there would lose
  * the FIN and the connection would never close cleanly. FIN state is per
- * connection and is reset in tcp_connect via tcp_rx_reset(). */
-static void ooo_reset(void) { ooo_active = 0; ooo_hi = 0; }
-static void tcp_rx_reset(void) { ooo_reset(); fin_seen = 0; }
+ * connection now (M1606) and is reset when the slot is claimed in tcp_connect. */
+static void ooo_reset(struct ooo_state *o) { o->active = 0; o->hi = 0; }
 
 /* Stash a future segment [seq, seq+dlen) (seq > theirseq) for later delivery. */
-static void ooo_store(uint32_t theirseq, uint32_t seq, const uint8_t *data, int dlen) {
-    if (!ooo_active) {                       /* anchor a fresh window at the gap */
-        ooo_active = 1; ooo_base = theirseq; ooo_hi = 0;
-        memset(ooo_have, 0, sizeof(ooo_have));
+static void ooo_store(struct ooo_state *o, uint32_t theirseq, uint32_t seq, const uint8_t *data, int dlen) {
+    if (!o->active) {                       /* anchor a fresh window at the gap */
+        o->active = 1; o->base = theirseq; o->hi = 0;
+        memset(o->have, 0, sizeof(o->have));
     }
-    /* off is the serial distance seq-ooo_base. seq_gt() upstream only proves it is
+    /* off is the serial distance seq-o->base. seq_gt() upstream only proves it is
      * serially positive, so it can be as large as ~2^31 for a far-future or forged
      * segment; test it WITHOUT the addition off+dlen, which would signed-overflow
      * (no -fwrapv) and wrap negative, slipping past the bound into an OOB write.
      * dlen is bounded by the 1600-byte rx frame, so OOO_CAP-dlen is a safe int. */
-    int off = (int)(seq - ooo_base);         /* base <= theirseq < seq => off>0  */
+    int off = (int)(seq - o->base);          /* base <= theirseq < seq => off>0  */
     if (off < 0 || dlen < 0 || dlen > OOO_CAP || off > OOO_CAP - dlen) return;  /* outside window: drop */
-    memcpy(ooo_buf + off, data, dlen);
-    for (int i = off; i < off + dlen; i++) ooo_setbit(i);
-    if (off + dlen > ooo_hi) ooo_hi = off + dlen;
+    memcpy(o->buf + off, data, dlen);
+    for (int i = off; i < off + dlen; i++) ooo_setbit(o, i);
+    if (off + dlen > o->hi) o->hi = off + dlen;
 }
 
 /* Deliver any buffered bytes now contiguous with theirseq into out[]. */
-static void ooo_drain(tcp_conn *c, uint8_t *out, int *total, int max) {
-    if (!ooo_active) return;
-    int rel = (int)(c->theirseq - ooo_base);
-    while (rel >= 0 && rel < ooo_hi && ooo_bit(rel) && *total < max) {
-        int run = rel; while (run < ooo_hi && ooo_bit(run)) run++;
+static void ooo_drain(struct ooo_state *o, tcp_conn *c, uint8_t *out, int *total, int max) {
+    if (!o->active) return;
+    int rel = (int)(c->theirseq - o->base);
+    while (rel >= 0 && rel < o->hi && ooo_bit(o, rel) && *total < max) {
+        int run = rel; while (run < o->hi && ooo_bit(o, run)) run++;
         int runlen = run - rel;
         int n = runlen; if (*total + n > max) n = max - *total;
-        memcpy(out + *total, ooo_buf + rel, n);
+        memcpy(out + *total, o->buf + rel, n);
         *total += n; c->theirseq += n; rel += n;
         if (n < runlen) break;               /* out filled mid-run: stop */
     }
-    if (rel >= ooo_hi) ooo_reset();          /* nothing more buffered ahead */
+    if (rel >= o->hi) ooo_reset(o);          /* nothing more buffered ahead */
 }
 
 /* Read up to `max` bytes of in-order stream data (waits up to `ticks`). Returns
@@ -1169,12 +1231,13 @@ static void ooo_drain(tcp_conn *c, uint8_t *out, int *total, int max) {
  * everything up to and including the FIN has been delivered). */
 int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
     if (!c->up) return -1;
+    struct ooo_state *o = ooo_lookup(c->ooo_idx);   /* this connection's own slot (M1606); NULL only if OOO_N ran out */
     uint8_t buf[1600];
     int total = 0;
     uint64_t deadline = timer_ticks() + ticks;
-    ooo_drain(c, out, &total, max);          /* flush data buffered last call */
-    if (fin_seen && seq_le(fin_at, c->theirseq)) {   /* honor once theirseq REACHES OR PASSES the FIN (wrap-safe; `==` hung forever on any overshoot) */ /* all data up to the FIN delivered */
-        c->theirseq = fin_at + 1;
+    if (o) ooo_drain(o, c, out, &total, max);          /* flush data buffered last call */
+    if (o && o->fin_seen && seq_le(o->fin_at, c->theirseq)) {   /* honor once theirseq REACHES OR PASSES the FIN (wrap-safe; `==` hung forever on any overshoot) */ /* all data up to the FIN delivered */
+        c->theirseq = o->fin_at + 1;
         tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
         c->up = 0; return total > 0 ? total : -1;
     }
@@ -1189,10 +1252,10 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
         if (fl & TCP_RST) { c->up = 0; return total > 0 ? total : -1; }
         int thl = (tcp[12] >> 4) * 4;
         uint8_t *data = tcp + thl;
-        if (fl & TCP_FIN) {                        /* FIN occupies sequence seq+dlen */
+        if (o && (fl & TCP_FIN)) {                  /* FIN occupies sequence seq+dlen */
             uint32_t f = seq + dlen;               /* never move fin_at BACKWARD: a stale or */
-            if (!fin_seen || seq_gt(f, fin_at)) fin_at = f;   /* overlapping retransmitted FIN */
-            fin_seen = 1;                          /* with a lower end must not strand the close */
+            if (!o->fin_seen || seq_gt(f, o->fin_at)) o->fin_at = f;   /* overlapping retransmitted FIN */
+            o->fin_seen = 1;                        /* with a lower end must not strand the close */
         }
 
         if (dlen > 0 && seq_le(seq, c->theirseq) && seq_lt(c->theirseq, seq + dlen)) {
@@ -1201,10 +1264,10 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
             int skip = (int)(c->theirseq - seq);
             int n = dlen - skip; if (total + n > max) n = max - total;
             if (n > 0) { memcpy(out + total, data + skip, n); total += n; c->theirseq += n; }
-            ooo_drain(c, out, &total, max);              /* gap may now be bridged */
+            if (o) ooo_drain(o, c, out, &total, max);    /* gap may now be bridged */
             tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_ACK, 0, 0);
         } else if (dlen > 0 && seq_gt(seq, c->theirseq)) {
-            ooo_store(c->theirseq, seq, data, dlen);      /* future segment: buffer */
+            if (o) ooo_store(o, c->theirseq, seq, data, dlen);   /* future segment: buffer */
             tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_ACK, 0, 0);
         } else {
             tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_ACK, 0, 0);
@@ -1213,8 +1276,8 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
         /* Honour the FIN only once every byte up to it has been delivered. A FIN
          * that arrived out of order (gap still open) waits; the drain above + the
          * top-of-call check consume it as soon as theirseq reaches it. */
-        if (fin_seen && seq_le(fin_at, c->theirseq)) {   /* honor once theirseq REACHES OR PASSES the FIN (wrap-safe; `==` hung forever on any overshoot) */
-            c->theirseq = fin_at + 1;
+        if (o && o->fin_seen && seq_le(o->fin_at, c->theirseq)) {   /* honor once theirseq REACHES OR PASSES the FIN (wrap-safe; `==` hung forever on any overshoot) */
+            c->theirseq = o->fin_at + 1;
             tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
             c->up = 0;
             return total > 0 ? total : -1;
@@ -1224,7 +1287,7 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
 }
 
 void tcp_close(tcp_conn *c) {
-    fin_seen = 0; fin_at = 0;     /* per-connection teardown: scrub the global peer-FIN state so a latched-but-unhonored FIN can't prematurely close the NEXT connection on a reused 4-tuple (was cleared only at the next tcp_connect) */
+    ooo_release(c->ooo_idx); c->ooo_idx = -1;   /* release this connection's own reassembly+FIN slot (M1606) */
     if (!c->up) return;
     tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
     c->up = 0;

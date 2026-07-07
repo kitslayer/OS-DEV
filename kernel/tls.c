@@ -698,10 +698,20 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
 static inline uint64_t tls_irq_save(void) { return 0; }
 static inline void tls_irq_restore(uint64_t f) { (void)f; }
 #else
+/* M1604: cli alone only ever stopped a LOCAL interrupt from reentering --
+ * since M1531 every core can run a task that calls sys_https, so two cores
+ * could both see g_tls_busy==0 before either sets it to 1 and both enter
+ * tls_get_inner() at once, tearing each other's static scratch buffers.
+ * Same cross-core spinlock-nested-in-cli treatment as pmm.c/vmm.c/kheap.c. */
+static volatile int tls_lock;
 static inline uint64_t tls_irq_save(void) {
-    uint64_t f; __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory"); return f;
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&tls_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
 }
 static inline void tls_irq_restore(uint64_t f) {
+    __atomic_store_n(&tls_lock, 0, __ATOMIC_RELEASE);
     __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
 }
 #endif

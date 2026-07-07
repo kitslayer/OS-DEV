@@ -75,13 +75,17 @@ int main(void) {
      *    reviewer's flagged-highest-risk path): crafted theirseq/seq spanning
      *    far-future, past, and 32-bit wraparound, with random payload lengths.
      *    The offset bound must reject every out-of-range write (off<0 or
-     *    off+dlen>OOO_CAP); ASan would catch any that slips through. */
+     *    off+dlen>OOO_CAP); ASan would catch any that slips through.
+     *    M1606: ooo_store now takes an explicit per-connection struct
+     *    ooo_state* (was a bare set of file-global statics) -- one fuzz
+     *    instance here is fine, this test only ever exercises one at a time. */
+    static struct ooo_state fuzz_o;
     for (int i = 0; i < ITERS; i++) {
         uint32_t theirseq = xr();
         uint32_t seq = theirseq + xr();                /* any relative offset, incl. negative/wrapping */
         int dl = (int)(xr() % 1600);                   /* fits fuzz[1600] */
         for (int j = 0; j < dl; j++) fuzz[j] = (uint8_t)xr();
-        ooo_store(theirseq, seq, fuzz, dl);
+        ooo_store(&fuzz_o, theirseq, seq, fuzz, dl);
     }
 
     printf("nettest: %d tcp_recv_seg + %d ooo_store fuzz iters — ASan/UBSan clean\n", ITERS, ITERS);

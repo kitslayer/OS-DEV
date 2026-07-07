@@ -21,7 +21,11 @@ int http_get_sse(const char *host, const char *path, char *out, int max);
 /* HTTP/1.0 POST: sends `body` (bodylen) with Content-Type `ctype`; raw response into out. -1 on error. (M702) */
 int http_post(const char *host, const char *path, const char *ctype, const char *body, int bodylen, char *out, int max);
 
-/* A minimal TCP stream connection (one at a time; used by HTTP and TLS). */
+/* A minimal TCP stream connection. Multiple may be genuinely concurrent (two
+ * sockets, /net/tcp's own slots, HTTP/TLS's own locals) since M1268 -- despite
+ * this struct's own name suggesting otherwise, nothing here assumes "one at a
+ * time" itself; that assumption lived in net.c's reassembly state until M1606
+ * gave each connection its own slot (see ooo_idx below). */
 typedef struct {
     uint8_t  ip[4], gw[6];
     uint16_t sport, dport;
@@ -31,6 +35,9 @@ typedef struct {
                                    * (ECONNREFUSED/ETIMEDOUT/ENETUNREACH) -- tcp_connect
                                    * itself still just returns 0/-1, unchanged for every
                                    * existing caller; this is purely additive detail. */
+    int      ooo_idx;            /* this connection's slot in net.c's private out-of-order
+                                   * reassembly + peer-FIN table; assigned by tcp_connect,
+                                   * released by tcp_close, -1 if none assigned (M1606) */
 } tcp_conn;
 
 int  tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port);  /* 0 / -1 */
