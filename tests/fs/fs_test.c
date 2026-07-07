@@ -30,7 +30,9 @@ static uint8_t g_disk[DISK_SECTORS * SS];
 /* ---- stubs for fat32.c's only external symbols ---- */
 #include "vfs.h"
 #include "ata.h"
+static long g_ata_read_count;   /* counts real disk reads -- the M1601 skip-loop guard test needs this */
 int ata_read(uint32_t lba, uint8_t count, void *buf) {
+    g_ata_read_count++;
     /* mimic a real drive: an out-of-range LBA errors (so the stub never reads
      * past g_disk, and a runaway chain walk terminates at the disk edge). */
     if ((uint64_t)lba + count > DISK_SECTORS) return -1;
@@ -140,6 +142,25 @@ int main(void) {
     if (fat32_rename("SUB", "SUB2") != 0)                    { printf("FAIL: rename dir SUB->SUB2\n"); return 1; }
     if (fat32_read("SUB2", rb, sizeof(rb)) != -1)            { printf("FAIL: SUB2 should still be a (read-rejected) dir after rename\n"); return 1; }
     printf("  rename OK: data-preserving, clobber + bad-name + missing refused, dir rename\n");
+
+    /* ---- pread skip-loop cycle guard (M1601): the offset-skip loop must not
+     * follow a corrupt/cyclic chain indefinitely just because the on-disk
+     * size field claims a large offset is valid -- it needs the same cycle
+     * guard the coalescing loop 20 lines below it in fat32_pread already
+     * has. A fresh valid image, then: make cluster 4 loop back to cluster 3
+     * (a 2-cluster cycle instead of EOC) and claim a multi-MB size (the real
+     * chain is 2 sectors), then pread far past that: the guard must stop the
+     * skip loop within a small, bounded number of real disk reads, not walk
+     * the cycle ~976 times chasing an untrusted offset. */
+    build_valid_image();
+    mk_fat_set(4, 3);                                        /* cluster 4 -> 3: a cycle, not EOC */
+    dir_ent(2, 0, "TEST    TXT", 0x20, 3, 10000000);          /* claim 10MB (real chain: 2 sectors) */
+    if (fat32_mount() != 0)                                  { printf("FAIL: mount for pread cycle test\n"); return 1; }
+    g_ata_read_count = 0;
+    long pn = fat32_pread("TEST.TXT", rb, sizeof(rb), 500000);   /* skip ~976 clusters into the cycle */
+    if (pn != 0)              { printf("FAIL: pread on a cyclic chain should return 0, got %ld\n", pn); return 1; }
+    if (g_ata_read_count > 300) { printf("FAIL: pread skip loop took %ld disk reads chasing a cycle (missing cycle guard)\n", g_ata_read_count); return 1; }
+    printf("  pread cycle guard: offset far past a corrupt/cyclic chain returns 0 in %ld disk reads, not ~976\n", g_ata_read_count);
 
     /* ---- fuzz: corrupt the metadata region, re-mount, re-read ---- */
     static uint8_t pristine[sizeof(g_disk)];

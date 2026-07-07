@@ -377,9 +377,14 @@ static long fat32_pread(const char *name, void *buf, unsigned long max, uint64_t
 
     uint32_t cbytes = sec_per_clus * SECSZ;
     uint32_t cl = cl0;
+    uint32_t skip_steps = 0;
     for (uint32_t i = 0, skip = (uint32_t)(off / cbytes); i < skip; i++) {  /* skip to the offset's cluster */
         if (!cluster_in_range(cl)) return 0;
         cl = fat_next(cl);
+        if (total_clusters && ++skip_steps > total_clusters + 2) return 0;   /* corrupt/cyclic chain (M1601) --
+            * `skip` comes from the on-disk size field (untrusted), with no
+            * cross-check against the chain's real length; the coalescing
+            * loop 20 lines below already guards its own walk the same way */
     }
     uint32_t pos = (uint32_t)(off % cbytes);                 /* byte position within the current cluster */
 
