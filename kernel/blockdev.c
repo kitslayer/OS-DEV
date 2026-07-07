@@ -604,6 +604,14 @@ long blockdev_mount_symlink(int i, const char *path, const char *target) {
                              path ? path : "", target ? target : "");
 }
 
+/* Read a symlink's target on mount `i` (ext2 only), not followed. bytes/-1. M1594. */
+long blockdev_mount_readlink(int i, const char *path, void *buf, unsigned long max) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    if (g_mount[i].fstype != FS_EXT2) return -1;
+    return ext2_readlink_path(mount_rfn(i), mount_ctx(i), g_mount[i].start, path ? path : "", buf, max);
+}
+
 long blockdev_mount_link(int i, const char *oldpath, const char *newpath) {   /* hard link (ext2 only); 0/-1 (M1207) */
     blockdev_mount_scan();
     if (i < 0 || i >= g_nmount) return -1;

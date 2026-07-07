@@ -177,6 +177,22 @@ int main(int argc, char **argv) {
                 if (ext2_read_path(bd_read, 0, 0, "/HL1.TXT", lr, sizeof lr) > 0) { fprintf(stderr, "unlinked original still readable\n"); return 1; }
                 printf("hard link: /HL1.TXT -> /HL2.TXT shares the inode; after unlinking the original the link still reads 1000 bytes\n");
             }
+            /* symlink + readlink (M1146 create, M1594 read): ext2_symlink_path could
+             * create a real on-disk symlink since M1146, but nothing could ever read
+             * one back until now -- genuinely the FIRST automated test of ext2
+             * symlinks at all, create or read. The dumped image (e2fsck'd below)
+             * must stay clean either way. */
+            {
+                if (ext2_symlink_path(bd_read, bd_write, 0, 0, "/SYM1.LNK", "/SYMTARGET.TXT") != 0) { fprintf(stderr, "ext2_symlink_path failed\n"); return 1; }
+                char sb[64];
+                long sl = ext2_readlink_path(bd_read, 0, 0, "/SYM1.LNK", sb, sizeof sb);
+                if (sl != 14 || memcmp(sb, "/SYMTARGET.TXT", 14) != 0) { fprintf(stderr, "readlink target wrong (n=%ld)\n", sl); return 1; }
+                if (ext2_readlink_path(bd_read, 0, 0, "/HL2.TXT", sb, sizeof sb) != -1) { fprintf(stderr, "readlink on a non-symlink should fail\n"); return 1; }
+                char tiny[4];
+                long sl2 = ext2_readlink_path(bd_read, 0, 0, "/SYM1.LNK", tiny, sizeof tiny);
+                if (sl2 != 4 || memcmp(tiny, "/SYM", 4) != 0) { fprintf(stderr, "readlink truncation wrong (n=%ld)\n", sl2); return 1; }
+                printf("readlink: real on-disk (ext2) symlink target read back exact, non-symlink refused, small buffer truncates safely\n");
+            }
             /* rename (M1213): relocate a directory entry, preserving the inode.
              * (a) same-dir file rename, (b) cross-dir file move, (c) directory move
              * across parents (fixes ".." + both parents' link counts), (d) a move

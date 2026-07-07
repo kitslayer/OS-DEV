@@ -582,13 +582,17 @@ long vfs_symlink(const char *linkpath, const char *target) {
     return -1;
 }
 
-/* readlink (M1233): read a symlink's TARGET path WITHOUT following it (so e.g.
- * `ls -l` can show "a -> b"). tmpfs symlinks (the ones SYS_symlink creates);
- * ext2 on-disk symlinks are a follow-on. Returns bytes (un-terminated) or -1. */
+/* readlink (M1233; real ext2 on-disk symlinks M1594): read a symlink's TARGET
+ * path WITHOUT following it (so e.g. `ls -l` can show "a -> b"). tmpfs
+ * symlinks (the ones SYS_symlink creates) and now real /diskN ext2 ones too
+ * -- vfs_symlink has been able to CREATE the latter since M1146, but nothing
+ * could ever read one back until now. Returns bytes (un-terminated) or -1. */
 long vfs_readlink(const char *path, void *buf, unsigned long max) {
     char rb[160]; const char *p = bind_resolve(path, rb, sizeof rb);
     const char *base;
     if (tmp_path(p, &base)) return tmpfs_readlink(base, buf, max);
+    int midx; char fpath[192];
+    if (mount_path(p, &midx, fpath, sizeof fpath)) return blockdev_mount_readlink(midx, fpath, buf, max);
     return -1;
 }
 

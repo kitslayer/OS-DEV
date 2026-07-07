@@ -830,6 +830,45 @@ long ext2_symlink_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t
     return 0;
 }
 
+/* readlink (M1594): the read counterpart ext2_symlink_path never got. Same
+ * parent+base split as symlink/link/rename below -- walk() to the PARENT
+ * (following any symlinks along the WAY there, correct: only the FINAL
+ * component itself must not be auto-followed) then dir_lookup() the base
+ * name directly, exactly like walk_d's OWN inline symlink-decode (a few
+ * hundred lines up) does right before it recurses into resolving the
+ * target -- this just returns that decoded target instead of following it.
+ * Slow symlinks (target too long to fit inline) are unsupported, matching
+ * walk_d's own existing limit for auto-following. */
+long ext2_readlink_path(blk_read_fn read, void *ctx, uint64_t start_lba,
+                        const char *path, void *buf, unsigned long max) {
+    ext2_t v;
+    if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+
+    char parent[256], base[256];
+    int last = -1, n = 0;
+    for (int i = 0; path[i]; i++) { if (path[i] == '/') last = i; n = i + 1; }
+    if (last < 0) parent[0] = 0;
+    else { int j = 0; for (; j < last && j < 255; j++) parent[j] = path[j]; parent[j] = 0; }
+    { int j = 0, s = last + 1; for (; s < n && j < 255; s++, j++) base[j] = path[s]; base[j] = 0; }
+    if (base[0] == 0) return -1;
+
+    uint8_t pin[256]; int pdir = 0;
+    uint32_t parent_ino = walk(&v, parent, pin, &pdir);
+    if (!parent_ino || !pdir) return -1;
+    int cd = 0;
+    uint32_t ino = dir_lookup(&v, pin, base, &cd);
+    if (!ino) return -1;
+
+    uint8_t inode[256];
+    if (read_inode(&v, ino, inode) < 0) return -1;
+    if ((e_rd16(inode + 0) & 0xF000) != 0xA000) return -1;   /* not a symlink */
+    uint32_t sz = e_rd32(inode + 4);
+    if (sz > 60) return -1;                                   /* slow symlink: unsupported (matches walk_d) */
+    unsigned long got = (sz < max) ? sz : max;
+    for (unsigned long i = 0; i < got; i++) ((char *)buf)[i] = (char)inode[40 + i];
+    return (long)got;
+}
+
 /* Hard link (M1207): add a second directory entry (newpath) pointing at the SAME
  * inode as oldpath, and bump that inode's link count — POSIX link(2). Directories
  * are refused. ext2_unlink_path already decrements i_links_count and frees the
