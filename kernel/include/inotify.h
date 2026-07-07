@@ -23,6 +23,7 @@
 
 int  inotify_new(void);                                  /* alloc an instance; index or -1 */
 int  inotify_add(int idx, const char *path, uint32_t mask);  /* register a watch; wd or -1 */
+int  inotify_rm(int idx, int wd);                        /* unregister a watch by wd; 0/-1 (M1568) */
 void inotify_free(int idx);                              /* release an instance */
 int  inotify_ready(int idx);                             /* are events queued? (epoll/poll) */
 long inotify_read(int idx, void *buf, unsigned long max);/* drain queued events; bytes written (0 = none) */

@@ -373,7 +373,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_setitimer]="setitimer",[SYS_getitimer]="getitimer",[SYS_sntp]="sntp",
-        [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",[SYS_epoll_pwait]="epoll_pwait",
+        [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",[SYS_epoll_pwait]="epoll_pwait",[SYS_inotify_rm_watch]="inotify_rm_watch",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
@@ -757,6 +757,9 @@ void syscall_dispatch(struct registers *r) {
     case SYS_inotify_add_watch:            /* (fd, path, mask) -> register a watch; wd/-1 (M1266) */
         if (!ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_inotify_add((int)r->rdi, (const char *)r->rsi, (unsigned int)r->rdx);
+        break;
+    case SYS_inotify_rm_watch:             /* (fd, wd) -> unregister a watch; 0/-1 (M1568) */
+        r->rax = (uint64_t)(int64_t)app_inotify_rm((int)r->rdi, (int)r->rsi);
         break;
     case SYS_socket:                       /* (domain, type) -> AF_INET datagram socket fd (M1267) */
         r->rax = (uint64_t)(int64_t)app_socket((int)r->rdi, (int)r->rsi);

@@ -319,6 +319,7 @@ int  sys_sendfd(int ep, int fd) { return (int)do_syscall(SYS_sendfd, ep, fd, 0);
 int  sys_recvfd(int ep) { return (int)do_syscall(SYS_recvfd, ep, 0, 0); }
 int  sys_inotify_init(void) { return (int)do_syscall(SYS_inotify_init, 0, 0, 0); }
 int  sys_inotify_add_watch(int fd, const char *path, unsigned int mask) { return (int)do_syscall(SYS_inotify_add_watch, fd, (long)path, (long)mask); }
+int  sys_inotify_rm_watch(int fd, int wd) { return (int)do_syscall(SYS_inotify_rm_watch, fd, wd, 0); }
 int  sys_socket(int domain, int type) { return (int)do_syscall(SYS_socket, domain, type, 0); }
 int  sys_sock_bind(int fd, int port) { return (int)do_syscall(SYS_sock_bind, fd, port, 0); }
 long sys_sendto(int fd, const unsigned char *ip4, int port, const void *buf, unsigned len) {

@@ -85,6 +85,7 @@ int    app_scm_recv(int ep);           /* SCM_RIGHTS: install a passed fd from t
 int    app_eventfd_create(unsigned int initval, int flags);  /* pollable u64-counter fd (M1242) */
 int    app_inotify_init(void);                       /* a pollable filesystem-watch fd (M1266) */
 int    app_inotify_add(int fd, const char *path, unsigned int mask);  /* register a watch; wd/-1 (M1266) */
+int    app_inotify_rm(int fd, int wd);                /* unregister a watch by wd; 0/-1 (M1568) */
 int    app_socket(int domain, int type);             /* AF_INET SOCK_DGRAM socket fd; fd/-1 (M1267) */
 int    app_sock_bind(int fd, int port);              /* bind a datagram socket to a local port; 0/-1 (M1267) */
 long   app_sendto(int fd, const unsigned char ip[4], int port, const void *buf, int len);  /* bytes/-1 (M1267) */

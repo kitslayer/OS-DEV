@@ -3910,6 +3910,20 @@ static int run_command(char *line, char *cwd) {
                       for (int i = 16; i < 48 && eb[i]; i++) { char c[2] = {(char)eb[i], 0}; print(c); }
                       print("') -- inotify OK\n"); }
             else { sys_setcolor(2); print("inotifytest: VERIFY FAILED (n="); sys_setcolor(0); printl(n); print(" mask="); printl(emask); print(" wd="); printl(ewd); print(")\n"); g_status = 1; }
+            /* inotify_rm_watch (M1568): add a second watch, remove the FIRST, write to
+             * both paths, confirm only the still-registered watch's event arrives (and
+             * that it's the ONLY event -- proving the removed watch stayed silent). */
+            int wd2 = (fd >= 0) ? sys_inotify_add_watch(fd, "INOTI2", 2 /*IN_MODIFY*/) : -1;
+            int rmok = (fd >= 0) ? (sys_inotify_rm_watch(fd, wd) == 0) : 0;
+            sys_writefile("/tmp/INOTI.TXT", "again", 5);    /* watch removed -- must NOT produce an event */
+            sys_writefile("/tmp/INOTI2.TXT", "hi2", 3);     /* still watched -- must produce an event */
+            unsigned char eb2[64]; long n2 = (fd >= 0) ? sys_fdread(fd, eb2, sizeof eb2) : -1;
+            int ewd2 = (n2 >= 48) ? (int)(eb2[0] | (eb2[1]<<8) | (eb2[2]<<16) | (eb2[3]<<24)) : -1;
+            long n3 = (fd >= 0) ? sys_fdread(fd, eb2, sizeof eb2) : -1;   /* must be empty -- only one event ever queued */
+            int rmtest_ok = wd2 >= 0 && rmok && n2 >= 48 && ewd2 == wd2 && n3 == 0;
+            print("inotify_rm_watch: removed watch stays silent, the other watch still fires -- ");
+            sys_setcolor(rmtest_ok ? 10 : 4); print(rmtest_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+            if (!rmtest_ok) g_status = 1;
             if (fd >= 0) sys_fdclose(fd);
         } else if (streq(line, "diskstatstest")) {   /* /proc/diskstats: per-block-device I/O counters (M1256) */
             char sb[1024]; int ok = 1;

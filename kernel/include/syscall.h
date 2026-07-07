@@ -324,6 +324,7 @@
 #define SYS_fdatasync    298   /* (fd) -> identical to fsync here; 0/-1 (M1566) */
 #define SYS_sync_file_range 299  /* (fd, offset, nbytes, flags) -> same as fsync; range/flags unused; 0/-1 (M1566) */
 #define SYS_epoll_pwait  300   /* (epfd, events*, maxevents, timeout_ms, sigmask) -> like epoll_wait, signal-interruptible; #ready/-1 on signal/-1 (M1567) */
+#define SYS_inotify_rm_watch 301  /* (fd, wd) -> unregister a watch; 0/-1 (M1568) */
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

@@ -64,6 +64,19 @@ int inotify_add(int idx, const char *path, uint32_t mask) {
 
 void inotify_free(int idx) { if (idx >= 0 && idx < INOT_MAX) g_inot[idx].used = 0; }
 
+/* inotify_rm_watch (M1568): a fixed INOT_WATCH-slot table could previously
+ * only be freed a whole instance at a time (inotify_free, on fd close) --
+ * any long-lived watcher process leaked watches for good once it stopped
+ * caring about a given path but kept the fd open for others. Removal is
+ * exactly the mirror of inotify_add: find the slot by wd, clear `used`. */
+int inotify_rm(int idx, int wd) {
+    if (idx < 0 || idx >= INOT_MAX || !g_inot[idx].used) return -1;
+    struct inot *n = &g_inot[idx];
+    for (int j = 0; j < INOT_WATCH; j++)
+        if (n->w[j].used && n->w[j].wd == wd) { n->w[j].used = 0; return 0; }
+    return -1;
+}
+
 int inotify_ready(int idx) {
     if (idx < 0 || idx >= INOT_MAX || !g_inot[idx].used) return 0;
     return g_inot[idx].qhead != g_inot[idx].qtail;

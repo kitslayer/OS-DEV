@@ -3964,6 +3964,11 @@ int app_inotify_add(int fd, const char *path, unsigned int mask) {
     if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 8) return -1;
     return inotify_add(a->fd[fd].obj, path, mask);
 }
+int app_inotify_rm(int fd, int wd) {
+    struct app *a = cur(); if (!a) return -1;
+    if (fd < 0 || fd >= APP_NFD || !a->fd[fd].used || a->fd[fd].type != 8) return -1;
+    return inotify_rm(a->fd[fd].obj, wd);
+}
 
 /* AF_INET datagram sockets (M1267): a BSD socket() fd API over the userspace
  * UDP path (M1258) + loopback (M1264). fd type 9; the bound local port lives in
