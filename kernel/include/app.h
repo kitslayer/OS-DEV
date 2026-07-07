@@ -124,7 +124,7 @@ int      app_mlockall(int flags);                               /* MCL_CURRENT p
 int      app_munlockall(void);                                  /* unpin all VMAs + clear MCL_FUTURE; 0/-1 (M1283) */
 int      app_swap_out(uint64_t addr, uint64_t len);             /* page out anon pages in range to swap; pages/-1 (M1105) */
 uint64_t app_shm_open(const char *name, uint64_t size);         /* map a named shared-memory object; base VA or 0 (M1108) */
-long     app_futex(uint64_t uaddr, int op, int val);            /* FUTEX_WAIT/WAKE on a (possibly shared) user word (M1109) */
+long     app_futex(uint64_t uaddr, int op, int val, long timeout_ms);  /* FUTEX_WAIT/WAKE on a (possibly shared) user word; timeout_ms<0 = wait forever (M1109, timeout M1578) */
 int      app_fault_handle(uint64_t cr2, uint64_t err); /* #PF hook: COW copy / swap-in / lazily map an mmap page; 1 if handled */
 struct registers;                                   /* (interrupts.h) */
 long     app_fork(struct registers *r);             /* COW fork: child returns 0, parent returns child pid; -1 fail (M1116) */

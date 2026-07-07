@@ -2364,7 +2364,7 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
 #define FUTEX_NWAIT 32
 static struct { uint64_t key; void *task; int used; } g_futex[FUTEX_NWAIT];
 
-long app_futex(uint64_t uaddr, int op, int val) {
+long app_futex(uint64_t uaddr, int op, int val, long timeout_ms) {
     if (!vmm_user_ok(uaddr, 4)) return -1;
     uint64_t phys = vmm_translate(uaddr & ~(uint64_t)(PAGE_SIZE - 1));
     if (!phys) return -1;
@@ -2376,7 +2376,19 @@ long app_futex(uint64_t uaddr, int op, int val) {
         for (int i = 0; i < FUTEX_NWAIT; i++) if (!g_futex[i].used) { slot = i; break; }
         if (slot < 0) return -1;                            /* too many waiters */
         g_futex[slot].key = key; g_futex[slot].task = task_self(); g_futex[slot].used = 1;
-        task_block();                                       /* woken by a WAKE, a kill, or a signal */
+        if (timeout_ms >= 0) {          /* bounded wait (M1578): matches epoll_wait/poll's own -1=forever, else ms convention */
+            task_block_timeout(timer_ms() + (uint64_t)timeout_ms);   /* woken by a WAKE, the deadline, a kill, or a signal */
+            int timed_out = g_futex[slot].used;   /* still registered -> nobody satisfied it via FUTEX_WAKE. NB: g_futex[]
+                                                    * has no lock of its own, so a FUTEX_WAKE landing in the same instant
+                                                    * the deadline expires can clear `used` even though the timer path is
+                                                    * what actually flipped the task back to READY -- a benign, narrow
+                                                    * "reports woken instead of timed-out" ambiguity (a wake WAS credited
+                                                    * to this waiter either way), not a hang or corruption. Not worth a
+                                                    * real lock for. */
+            g_futex[slot].used = 0;
+            return timed_out ? -1 : 0;
+        }
+        task_block();                                       /* woken by a WAKE, a kill, or a signal (unbounded, unchanged) */
         g_futex[slot].used = 0;                             /* reclaim our slot on resume (idempotent w/ WAKE) */
         return 0;
     }
@@ -4531,7 +4543,7 @@ void app_thread_exit(void) {
             volatile int *w = (volatile int *)fa;
             if ((*w & FUTEX_TID_MASK) == tid) {        /* a lock we still hold */
                 *w |= FUTEX_OWNER_DIED;
-                app_futex(fa, FUTEX_WAKE, 1);          /* wake one waiter to recover it */
+                app_futex(fa, FUTEX_WAKE, 1, -1);          /* wake one waiter to recover it */
             }
         }
     }
@@ -4539,7 +4551,7 @@ void app_thread_exit(void) {
      * futex waiter on it — the kernel side of a real blocking pthread_join. Done
      * here while the dying thread's CR3 is active (threads share the AS). */
     uint64_t ct = task_self()->clear_child_tid;
-    if (ct && vmm_user_ok(ct, 4)) { *(volatile int *)ct = 0; app_futex(ct, FUTEX_WAKE, 1); }
+    if (ct && vmm_user_ok(ct, 4)) { *(volatile int *)ct = 0; app_futex(ct, FUTEX_WAKE, 1, -1); }
     task_exit();
 }
 

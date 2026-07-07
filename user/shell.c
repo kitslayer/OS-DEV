@@ -25,6 +25,13 @@ static void join_thread_fn(void *arg) {                        /* registers clea
     for (volatile long i = 0; i < 30000000; i++) {}            /* stay alive so the joiner blocks first */
     sys_thread_exit();
 }
+static volatile int g_ftx_word;                                /* futextimeouttest's wake-before-deadline case (M1578) */
+static void ftx_wake_thread_fn(void *arg) {                     /* sleeps briefly, then FUTEX_WAKEs g_ftx_word */
+    (void)arg;
+    sys_sleep(150);
+    sys_futex((void *)&g_ftx_word, FUTEX_WAKE, 1, -1);
+    sys_thread_exit();
+}
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
@@ -766,7 +773,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3636,7 +3643,7 @@ static int run_command(char *line, char *cwd) {
                 if (tid <= 0) ok = 0;
                 else {
                     g_jctid = (int)tid;                              /* the value the joiner blocks on */
-                    sys_futex((void *)&g_jctid, FUTEX_WAIT, (int)tid);  /* block until the thread exits + clears it */
+                    sys_futex((void *)&g_jctid, FUTEX_WAIT, (int)tid, -1);  /* block until the thread exits + clears it */
                     if (g_jctid != 0) ok = 0;                        /* the kernel zeroed it on the thread's exit */
                 }
                 free(stk);
@@ -3644,6 +3651,26 @@ static int run_command(char *line, char *cwd) {
                          : "jointest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }
+        } else if (streq(line, "futextimeouttest")) {   /* FUTEX_WAIT bounded wait (M1578) */
+            unsigned long t0 = sys_uptime_ms();
+            long r1 = sys_futex((void *)&g_ftx_word, FUTEX_WAIT, 0, 200);  /* nobody ever wakes/changes it -> must time out */
+            unsigned long e1 = sys_uptime_ms() - t0;
+            int timeout_ok = (r1 == -1 && e1 >= 150 && e1 < 2000);   /* really blocked ~200ms, didn't hang forever */
+
+            char *stk = malloc(64 * 1024);
+            int wake_ok = 0;
+            if (stk) {
+                long tid = sys_clone((void *)ftx_wake_thread_fn, stk + 64 * 1024, 0);
+                unsigned long t1 = sys_uptime_ms();
+                long r2 = sys_futex((void *)&g_ftx_word, FUTEX_WAIT, 0, 5000);  /* generous bound; the thread wakes us ~150ms in */
+                unsigned long e2 = sys_uptime_ms() - t1;
+                wake_ok = (tid > 0 && r2 == 0 && e2 < 2000);         /* woken early by FUTEX_WAKE, not by hitting the 5s bound */
+                free(stk);
+            }
+            int ok = timeout_ok && wake_ok;
+            print(ok ? "futex(WAIT, timeout_ms): times out (~200ms) when nobody wakes it, resolves early via FUTEX_WAKE when one arrives -- OK\n"
+                     : "futextimeouttest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "waitidtest")) {  /* waitid(2) + WNOHANG (M1227) */
             int ok = 1;
             long pid = sys_fork();

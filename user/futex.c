@@ -16,7 +16,7 @@ int main(void) {
 
     if (arg[0] == 'w' && arg[1] == 'o') {               // "wake" (the child process)
         sys_sleep(600);                                 // give the waiter time to register + block
-        long n = sys_futex(w, FUTEX_WAKE, 1);
+        long n = sys_futex(w, FUTEX_WAKE, 1, -1);
         char c[2] = { (char)('0' + (n < 0 ? 0 : n > 9 ? 9 : n)), 0 };
         print("futex(wake): woke "); print(c); print(" waiter(s) in another process\n");
         sys_sleep(3000);
@@ -27,7 +27,7 @@ int main(void) {
     *w = 1;
     print("futex(wait): blocking on the shared word; a child process will wake me...\n");
     sys_spawn_arg("futex", "wake");                     // a SEPARATE process that will FUTEX_WAKE us
-    long r = sys_futex(w, FUTEX_WAIT, 1);
+    long r = sys_futex(w, FUTEX_WAIT, 1, -1);
     if (r == 0) { sys_setcolor(9); print("futex(wait): WOKEN by the other process! cross-process futex works.\n"); }
     else { sys_setcolor(3); print("futex(wait): returned without blocking\n"); }
     sys_setcolor(0);

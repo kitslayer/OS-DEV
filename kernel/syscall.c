@@ -1819,8 +1819,8 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi)) { r->rax = 0; break; }
         r->rax = app_shm_open((const char *)r->rdi, r->rsi);
         break;
-    case SYS_futex:                        /* (uaddr, op, val) -> FUTEX_WAIT/WAKE */
-        r->rax = (uint64_t)(int64_t)app_futex(r->rdi, (int)r->rsi, (int)r->rdx);
+    case SYS_futex:                        /* (uaddr, op, val, timeout_ms) -> FUTEX_WAIT/WAKE; timeout_ms<0 = wait forever (M1578) */
+        r->rax = (uint64_t)(int64_t)app_futex(r->rdi, (int)r->rsi, (int)r->rdx, (long)r->r10);
         break;
     case SYS_losetup: {                    /* (path) -> mount a FS image file as a loop device */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }

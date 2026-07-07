@@ -569,6 +569,29 @@ void task_block(void) {
     irq_restore(f);
 }
 
+/* Like task_block, but also wakeable by task_wake_sleepers() once timer_ms()
+ * reaches `deadline_ms` (M1578) -- the two wake paths compose for free: a
+ * real task_wake() call still works exactly as it does on a plain
+ * task_block()'d task (it clears wake_at and marks READY, same either way),
+ * and if the deadline passes first, task_wake_sleepers()'s own existing
+ * "BLOCKED + nonzero wake_at + past due" check does the same. Deliberately
+ * NOT implemented as task_block()'s new body (with task_block becoming a
+ * thin `task_block_timeout(0)` wrapper): that would shift WCHAN's captured
+ * return address to this function instead of task_block's own caller for
+ * every ORDINARY (non-timed) blocker, an existing, tested /proc/sched
+ * diagnostic this milestone has no reason to touch. A few duplicated lines
+ * here is the safer trade. First caller: app_futex's FUTEX_WAIT timeout. */
+void task_block_timeout(uint64_t deadline_ms) {
+    uint64_t f = irq_save();
+    rq_lock_take();
+    current->wchan = (uint64_t)__builtin_return_address(0);
+    current->wake_at = deadline_ms;
+    current->state = TASK_BLOCKED;
+    rq_lock_give();
+    switch_to_next();
+    irq_restore(f);
+}
+
 void task_wake(task_t *t) {
     uint64_t f = irq_save();
     rq_lock_take();

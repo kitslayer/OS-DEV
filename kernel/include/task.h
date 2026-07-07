@@ -89,6 +89,7 @@ void    task_set_fs_base(uint64_t b);      /* set the current thread's %fs (TLS)
 void    task_set_robust(uint64_t r);       /* register the current thread's robust-futex list (M1141) */
 uint64_t task_robust(void);                /* the current thread's robust-list ptr (0 = none) (M1141) */
 void    task_block(void);                  /* block current task until woken */
+void    task_block_timeout(uint64_t deadline_ms);  /* like task_block, but also woken by the timer at deadline_ms (M1578) */
 void    task_wake(task_t *t);              /* mark a blocked task runnable again */
 void    task_sleep_ms(uint64_t ms);        /* sleep the current task off-CPU until the timer wakes it */
 void    task_wake_sleepers(void);          /* timer IRQ: wake tasks whose sleep deadline passed */
