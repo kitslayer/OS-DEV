@@ -221,6 +221,30 @@ static int resolve(const char *path, uint32_t *dir, const char **leaf) {
     }
 }
 
+/* Full-path stat (M1622): walks the path's OWN directory components via
+ * resolve() (absolute from root, relative from cwd) instead of assuming the
+ * caller already narrowed it to the current directory -- vfs_stat's old
+ * fallback stripped to a bare basename and matched against list()'s listing
+ * of the CURRENT cwd, so an absolute path silently failed whenever cwd wasn't
+ * "/" (a real /README.TXT reported as not-found while cwd was /tmp). */
+static long fat32_stat_path(const char *path, uint32_t *size, int *isdir) {
+    uint32_t dir; const char *leaf;
+    if (resolve(path, &dir, &leaf) < 0) return -1;
+    if (!leaf[0]) {                 /* a trailing slash: resolve() already walked INTO this
+                                      * component and required it to be a directory, so an
+                                      * empty leaf here means a confirmed-existing dir, not
+                                      * "nothing to look up" (M1622 follow-up) */
+        if (size) *size = 0;
+        if (isdir) *isdir = 1;
+        return 0;
+    }
+    uint32_t fc; int isd; uint32_t sz;
+    if (!dir_find(dir, leaf, &fc, &isd, &sz)) return -1;
+    if (size) *size = sz;
+    if (isdir) *isdir = isd;
+    return 0;
+}
+
 static uint32_t alloc_cluster(void);              /* fwd: add_entry grows a full dir chain */
 static void     fat_set(uint32_t cl, uint32_t val);
 
@@ -776,7 +800,7 @@ static void fat32_df(uint64_t *freeb, uint64_t *totalb) {
 static struct vfs_ops fat32_ops = { fat32_list, fat32_read, fat32_write,
                                     fat32_delete, fat32_mkdir, fat32_chdir,
                                     fat32_tree, fat32_df, fat32_find,
-                                    fat32_rename, fat32_pread };
+                                    fat32_rename, fat32_pread, fat32_stat_path };
 
 int fat32_mount(void) {
     uint8_t bs[SECSZ];

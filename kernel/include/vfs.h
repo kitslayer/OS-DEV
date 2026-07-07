@@ -28,6 +28,7 @@ struct vfs_ops {
     long (*find)(const char *want, char *out, int max);
     long (*rename)(const char *path, const char *newname);   /* change a name in place (8.3) */
     long (*pread)(const char *name, void *buf, unsigned long max, uint64_t off);  /* offset read for file-backed mmap (M1136); may be NULL */
+    long (*stat_path)(const char *path, uint32_t *size, int *isdir);  /* resolve a full path (absolute from root, relative from cwd), unlike list()+basename-match; 0/-1 (M1622); may be NULL */
 };
 /* Offset read of a regular file (boot FS), for file-backed mmap's demand faults.
  * Bytes read (0 past EOF), or -1 if unsupported/absent. M1136. */

@@ -4308,9 +4308,21 @@ static int run_command(char *line, char *cwd) {
                                                                 * file -> vfs_chdir rejects it, not a dir */
             if (ffd >= 0) { if (sys_fchdir(ffd) != -1) fcok = 0; sys_fdclose(ffd); sys_delete("/tmp/FCD_FILE.TXT"); } else fcok = 0;
             sys_chdir("/");
-            ok = ok && fcok;
+            /* absolute-path stat/open from a non-root cwd (M1622): vfs_stat's boot-
+             * FAT32 fallback used to strip the path to a bare basename and match it
+             * against vfs_list()'s listing of the CURRENT cwd, so an absolute
+             * root-level path silently reported not-found once cwd moved anywhere
+             * else -- open() calls vfs_stat first, so this broke plain open(), not
+             * just an explicit stat call. */
+            int stok = 1;
+            sys_chdir("/tmp");
+            int sfd = sys_open("/README.TXT");
+            if (sfd < 0) stok = 0; else sys_fdclose(sfd);
+            sys_chdir("/");
+            ok = ok && fcok && stok;
             print(ok ? "getcwd: cd /tmp->'/tmp', /proc->'/proc', /->'/'; tiny buf -> -1; "
-                       "fchdir(dir fd)->'/tmp', fchdir(file fd)->-1 -- OK\n"
+                       "fchdir(dir fd)->'/tmp', fchdir(file fd)->-1; "
+                       "open(\"/README.TXT\") from cwd=/tmp -- OK\n"
                      : "getcwdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "procwdtest")) {   /* /proc/<pid>/cwd + /root (M1249) */

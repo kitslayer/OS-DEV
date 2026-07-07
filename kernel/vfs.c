@@ -467,6 +467,12 @@ long vfs_read(const char *name, void *buf, unsigned long max) {
 int vfs_stat(const char *path, struct statx *st) {
     for (unsigned i = 0; i < sizeof(*st); i++) ((char *)st)[i] = 0;
     st->stx_blksize = 512; st->stx_nlink = 1;
+    char rb[160]; path = bind_resolve(path, rb, sizeof rb);     /* bind mounts (M1622 follow-up) --
+                                                                  * every other vfs_* function does
+                                                                  * this; vfs_stat was the one
+                                                                  * exception, so stat-ing a path only
+                                                                  * reachable via a bind mount reported
+                                                                  * not-found */
     const char *tb;
     /* directory roots: the boot root + the synthetic/RAM mount points (tmp_path
      * wants a trailing slash, so the bare "/tmp" mount dir lands here) (M1173) */
@@ -482,7 +488,32 @@ int vfs_stat(const char *path, struct statx *st) {
         st->stx_mtime = st->stx_ctime = st->stx_atime = mt;
         return 0;
     }
-    /* generic best-effort: match the basename in the current directory listing */
+    /* generic best-effort: walk the path's OWN components from wherever it's
+     * rooted (M1622) -- previously stripped to a bare basename and matched
+     * against vfs_list()'s listing of the CURRENT cwd, so an absolute path
+     * silently reported not-found whenever cwd wasn't "/". Also previously
+     * had a trailing-slash shortcut here that reported ANY path ending in
+     * '/' as an existing directory unconditionally, without checking
+     * anything -- fat32_stat_path's own resolve() call now does that check
+     * for real.
+     *
+     * fs->stat_path's resolve() is FAT32-internal: for an ABSOLUTE path it
+     * always starts at the real root, correctly, regardless of synth_cwd.
+     * But for a RELATIVE path it uses FAT32's own cwd_cluster -- which
+     * vfs_chdir does NOT update when entering a /diskN mount (that only
+     * moves synth_cwd + mount_sub, see vfs_chdir above), so it goes stale.
+     * A relative stat while cwd is logically inside a mount (synth_cwd >= 4,
+     * or any other synthetic cwd) still needs the OLD vfs_list()-based
+     * match, since vfs_list() IS synth_cwd-aware. (M1622 follow-up) */
+    if (path[0] == '/' || synth_cwd == 0) {
+        uint32_t fsize; int fisdir;
+        if (fs && fs->stat_path && fs->stat_path(path, &fsize, &fisdir) == 0) {
+            st->stx_mode = (unsigned)(fisdir ? S_IFDIR : S_IFREG) | (fisdir ? 0755u : 0644u);
+            st->stx_size = fsize; st->stx_blocks = (fsize + 511) / 512;
+            return 0;
+        }
+        return -1;
+    }
     const char *base = path; for (const char *p = path; *p; p++) if (*p == '/') base = p + 1;
     if (!*base) { st->stx_mode = S_IFDIR | 0755u; return 0; }   /* trailing slash -> a directory */
     vfs_dirent ents[64]; int n = vfs_list(ents, 64);
