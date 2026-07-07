@@ -155,6 +155,7 @@ void app_sigreturn(struct registers *r);            /* restore the pre-signal co
 void app_request_signal(app_t *a, int signo);      /* async-raise a signal (Ctrl-C->SIGINT); opt-in (needs a handler) */
 uint32_t app_sigprocmask(int how, uint32_t set);   /* block/unblock signals; returns the old mask (M1208) */
 uint32_t app_sigpending(void);                      /* the raised-but-blocked (pending) signal set (M1209) */
+int      app_signal_deliverable(void);              /* 1 if the current task has a real (handled, unblocked) signal pending (M1567) */
 long     app_sigsuspend(struct registers *r, uint32_t mask);  /* swap the blocked mask, block for a signal, deliver it, restore + always -1 (M1561) */
 long     app_pause(struct registers *r);                     /* block for a signal using the CURRENT mask, unchanged; always -1 (M1563) */
 int  app_sigqueue(int pid, int signo, uint64_t value);  /* SYS_sigqueue: RT signal carrying a queued sigval payload (M1271) */

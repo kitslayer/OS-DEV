@@ -216,6 +216,7 @@ long sys_sendfile(int out_fd, int in_fd, long *off, unsigned long count);  /* ze
 int  sys_epoll_create1(int flags);                             /* an epoll fd (>=3); -1 (M1220) */
 int  sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev);      /* ADD/MOD/DEL; 0/-1 (M1220) */
 int  sys_epoll_wait(int epfd, struct epoll_event *evs, int maxevents, long timeout);  /* # ready/0/-1 (M1220) */
+int  sys_epoll_pwait(int epfd, struct epoll_event *evs, int maxevents, long timeout, unsigned sigmask);  /* like epoll_wait, signal-interruptible; #ready/-1 on signal/-1 (M1567) */
 int  sys_pidfd_open(int pid, int flags);                       /* a pollable process-exit handle (>=3); -1 (M1222) */
 int  sys_pidfd_send_signal(int pidfd, int sig);                /* signal the pidfd's process; 0/-1 (M1222) */
 int  sys_pidfd_getfd(int pidfd, int targetfd, int flags);      /* duplicate the pidfd-process's fd into ours; new fd/-1 (M1281) */

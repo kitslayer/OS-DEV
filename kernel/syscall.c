@@ -373,7 +373,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_jail]="jail",[SYS_ringbuf]="ringbuf",[SYS_mprotect]="mprotect",[SYS_bind]="bind",
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_setitimer]="setitimer",[SYS_getitimer]="getitimer",[SYS_sntp]="sntp",
-        [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",
+        [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",[SYS_epoll_pwait]="epoll_pwait",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
@@ -2197,6 +2197,30 @@ void syscall_dispatch(struct registers *r) {
             task_sleep_ms(10);
         }
         r->rax = (uint64_t)(int64_t)k;
+        break;
+    }
+    case SYS_epoll_pwait: {                /* (epfd, events, maxevents, timeout_ms, sigmask) -> like epoll_wait,
+                                             * but the wait breaks early on a deliverable signal (M1567). Reuses
+                                             * app_sigprocmask (M1208) for the swap+restore rather than touching
+                                             * sig_blocked directly -- syscall.c has no visibility into struct
+                                             * app at all, only app.c's own opaque accessors. */
+        struct epoll_event *out = (struct epoll_event *)r->rsi;
+        int maxev = (int)r->rdx; long timeout = (long)r->r10;
+        if (maxev < 1 || maxev > 64 || !ubuf(r->rsi, (uint64_t)(unsigned)maxev * sizeof(struct epoll_event))) { r->rax = (uint64_t)-1; break; }
+        uint32_t old_mask = app_sigprocmask(2 /* SIG_SETMASK */, (uint32_t)r->r8);
+        app_kill_check();
+        __asm__ volatile("sti");
+        uint64_t start = timer_ms(); int k = 0; int interrupted = 0;
+        for (;;) {
+            k = app_epoll_check((int)r->rdi, out, maxev);
+            if (k != 0) break;
+            if (app_signal_deliverable()) { interrupted = 1; break; }
+            if (timeout >= 0 && (long)(timer_ms() - start) >= timeout) break;
+            task_sleep_ms(10);
+        }
+        if (interrupted) { r->rax = (uint64_t)-1; app_deliver_pending(r); }   /* r->rax baked in BEFORE the snapshot (M1561's own lesson) */
+        else r->rax = (uint64_t)(int64_t)k;
+        app_sigprocmask(2, old_mask);
         break;
     }
     case SYS_pidfd_open:                   /* (pid, flags) -> a pollable process handle (M1222) */

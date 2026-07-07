@@ -2650,8 +2650,13 @@ uint32_t app_sigpending(void) {
  * handler, not blocked) rather than the broader "pending_sigs & ~sig_blocked"
  * — a signal that's only routed to signalfd (no handler) can be pending and
  * unblocked without being "deliverable" in the sigsuspend sense; real POSIX
- * sigsuspend only wakes for a signal whose action actually runs. */
-static int sigsuspend_ready(struct app *a) {
+ * sigsuspend only wakes for a signal whose action actually runs. Public +
+ * no-arg (matching app_sigpending's own cur()-internally style) since
+ * epoll_pwait (M1567), in syscall.c, needs it too, to break its poll loop on
+ * a deliverable signal the same way sigsuspend/pause break their own wait. */
+int app_signal_deliverable(void) {
+    struct app *a = cur();
+    if (!a) return 0;
     for (int sig = 1; sig < APP_NSIG; sig++)
         if ((a->pending_sigs & (1u << sig)) && a->sig_handler[sig] && !(a->sig_blocked & (1u << sig)))
             return 1;
@@ -2677,7 +2682,7 @@ long app_sigsuspend(struct registers *r, uint32_t mask) {
     if (!a) return -1;
     uint32_t old = a->sig_blocked;
     a->sig_blocked = mask & ~((1u << 9) | (1u << 19));   /* SIGKILL/SIGSTOP never blockable (matches sigprocmask) */
-    while (!sigsuspend_ready(a)) {
+    while (!app_signal_deliverable()) {
         task_block();
         if (!a->used) return -1;    /* killed while suspended */
     }

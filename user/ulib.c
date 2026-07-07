@@ -558,6 +558,7 @@ long sys_sendfile(int out_fd, int in_fd, long *off, unsigned long count) { retur
 int  sys_epoll_create1(int flags) { return (int)do_syscall(SYS_epoll_create1, flags, 0, 0); }
 int  sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev) { return (int)do_syscall4(SYS_epoll_ctl, epfd, op, fd, (long)ev); }
 int  sys_epoll_wait(int epfd, struct epoll_event *evs, int maxevents, long timeout) { return (int)do_syscall4(SYS_epoll_wait, epfd, (long)evs, maxevents, timeout); }
+int  sys_epoll_pwait(int epfd, struct epoll_event *evs, int maxevents, long timeout, unsigned sigmask) { return (int)do_syscall5(SYS_epoll_pwait, epfd, (long)evs, maxevents, timeout, sigmask); }
 int  sys_pidfd_open(int pid, int flags) { return (int)do_syscall(SYS_pidfd_open, pid, flags, 0); }
 int  sys_pidfd_send_signal(int pidfd, int sig) { return (int)do_syscall(SYS_pidfd_send_signal, pidfd, sig, 0); }
 int  sys_pidfd_getfd(int pidfd, int targetfd, int flags) { return (int)do_syscall(SYS_pidfd_getfd, pidfd, targetfd, flags); }  /* dup another process's fd; new fd/-1 (M1281) */
