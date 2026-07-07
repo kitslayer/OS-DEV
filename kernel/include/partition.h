@@ -120,6 +120,7 @@ int  fatvol_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const cha
 long fatvol_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                       void *buf, unsigned long max);
 int  fatvol_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path);
+int  fatvol_stat_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path, uint32_t *out_size, int *out_isdir);  /* 0/-1 (M1624) */
 
 /* Probe all four ATA drives and log each present drive + its partition table
  * (scheme, and per-partition drive/type/start/size). The headless self-test. */

@@ -535,6 +535,16 @@ int fatvol_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const cha
     return fatvol_walk(read, ctx, start_lba, path, &v, &first, &size, &isd) && isd;
 }
 
+/* Size + isdir for `path` (M1624): same fatvol_walk() as fatvol_isdir_path,
+ * just also keeping the size it already computes. 0 on success, -1 if absent. */
+int fatvol_stat_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path, uint32_t *out_size, int *out_isdir) {
+    struct fatvol v; uint32_t first, size; int isd;
+    if (!fatvol_walk(read, ctx, start_lba, path, &v, &first, &size, &isd)) return -1;
+    if (out_size) *out_size = size;
+    if (out_isdir) *out_isdir = isd;
+    return 0;
+}
+
 /* ATA read adapter: a blk_read_fn that reads via ata_read_drive, with the drive
  * index packed into the ctx pointer (so partition_fat32_find keeps its old ATA-
  * only signature while sharing the generalized walk above). */

@@ -147,6 +147,17 @@ int iso9660_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const ch
     return dir ? 1 : 0;
 }
 
+/* Size + isdir for `path` (M1624): same resolve() as iso9660_isdir_path, just
+ * also keeping the length it already computes. 0 on success, -1 if absent. */
+int iso9660_stat_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path, uint32_t *out_size, int *out_isdir) {
+    iso_t v = { read, ctx, start_lba };
+    uint32_t lba, len; int dir;
+    if (resolve(&v, path, &lba, &len, &dir) != 0) return -1;
+    if (out_size) *out_size = len;
+    if (out_isdir) *out_isdir = dir;
+    return 0;
+}
+
 int iso9660_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                       fatvol_dirent *out, int max) {
     iso_t v = { read, ctx, start_lba };

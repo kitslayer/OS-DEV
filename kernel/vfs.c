@@ -488,6 +488,20 @@ int vfs_stat(const char *path, struct statx *st) {
         st->stx_mtime = st->stx_ctime = st->stx_atime = mt;
         return 0;
     }
+    { /* a /diskN mount (M1624) -- ABSOLUTE regardless of cwd, or relative while
+       * cwd is inside it; mount_path() already handles both, exactly like every
+       * other vfs_* function's own /diskN gate (vfs_read/vfs_write/etc. above).
+       * Closes the gap the M1622 fallback below deliberately left open: its
+       * FAT32-only resolve() has no notion of a mount name as a path component. */
+        int midx; char fpath[192];
+        if (mount_path(path, &midx, fpath, sizeof fpath)) {
+            uint32_t fsize; int fisdir;
+            if (blockdev_mount_stat(midx, fpath, &fsize, &fisdir) != 0) return -1;
+            st->stx_mode = (unsigned)(fisdir ? S_IFDIR : S_IFREG) | (fisdir ? 0755u : 0644u);
+            st->stx_size = fsize; st->stx_blocks = (fsize + 511) / 512;
+            return 0;
+        }
+    }
     /* generic best-effort: walk the path's OWN components from wherever it's
      * rooted (M1622) -- previously stripped to a bare basename and matched
      * against vfs_list()'s listing of the CURRENT cwd, so an absolute path

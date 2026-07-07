@@ -20,3 +20,4 @@ int  iso9660_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const ch
 long iso9660_read_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                        void *buf, unsigned long max);                  /* read a file; bytes, or -1 */
 int  iso9660_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path);  /* 1 dir / 0 file / -1 absent */
+int  iso9660_stat_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path, uint32_t *out_size, int *out_isdir);  /* 0/-1 (M1624) */

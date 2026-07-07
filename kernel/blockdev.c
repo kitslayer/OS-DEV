@@ -723,6 +723,19 @@ int blockdev_mount_isdir(int i, const char *path) {
                                            : fatvol_isdir_path(r, c, s, path ? path : "");
 }
 
+/* Size + isdir for `path` (relative to the volume root) on mount `i` (M1624):
+ * same 3-way dispatch as blockdev_mount_isdir, feeding vfs_stat so an
+ * ABSOLUTE /diskN/... path resolves even when cwd is outside that mount
+ * (vfs_stat's own FAT32-only fallback has no notion of a mount name at all). */
+int blockdev_mount_stat(int i, const char *path, uint32_t *out_size, int *out_isdir) {
+    blockdev_mount_scan();
+    if (i < 0 || i >= g_nmount) return -1;
+    blk_read_fn r = mount_rfn(i); void *c = mount_ctx(i); uint64_t s = g_mount[i].start;
+    return g_mount[i].fstype == FS_EXT2    ? ext2_stat_path(r, c, s, path ? path : "", out_size, out_isdir)
+         : g_mount[i].fstype == FS_ISO9660 ? iso9660_stat_path(r, c, s, path ? path : "", out_size, out_isdir)
+                                           : fatvol_stat_path(r, c, s, path ? path : "", out_size, out_isdir);
+}
+
 /* losetup: register a loop mount backed by the file image `data` (len bytes,
  * ownership transferred — freed never; loops are permanent for the session).
  * Detects FAT32/ext2 in the image and mounts it as the next /diskN. Returns the

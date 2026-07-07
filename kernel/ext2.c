@@ -287,6 +287,18 @@ int ext2_isdir_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char 
     return isdir;
 }
 
+/* Size + isdir for `path` (M1624): same walk() as ext2_isdir_path, just also
+ * reading the size field the inode buffer already has. 0 on success, -1 if
+ * absent -- feeds vfs_stat's /diskN dispatch via blockdev_mount_stat. */
+int ext2_stat_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path, uint32_t *out_size, int *out_isdir) {
+    ext2_t v; if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
+    uint8_t inode[256]; int isdir = 0;
+    if (!walk(&v, path, inode, &isdir)) return -1;
+    if (out_size) *out_size = e_rd32(inode + 4);
+    if (out_isdir) *out_isdir = isdir;
+    return 0;
+}
+
 int ext2_list_path(blk_read_fn read, void *ctx, uint64_t start_lba, const char *path,
                    fatvol_dirent *out, int max) {
     ext2_t v; if (ext2_open(read, ctx, start_lba, &v) < 0) return -1;
