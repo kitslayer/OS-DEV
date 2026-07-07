@@ -103,16 +103,16 @@ int main(void) {
             bv += 2;                                /* gravity (sub-rows / frame^2) */
             by += bv;
             int brow = by / SUB;
-            if (brow < 0) { by = 0; bv = 0; }
+            if (brow < 0) { dead = 1; }             /* hit the ceiling (was just a clamp -- the header's own rule is "touch a pipe, the ceiling, or the ground and it's over") */
             if (brow >= H) { dead = 1; }            /* hit the ground */
 
             for (int i = 0; i < NPIPE; i++) if (pon[i]) {
-                int oldx = px[i]; px[i]--;
+                px[i]--;
                 if (px[i] < 0) { pon[i] = 0; continue; }
-                if (oldx > BX && px[i] <= BX) score++;   /* cleared a pipe */
                 if (px[i] == BX) {                       /* at the bird column: gap check */
                     int r = by / SUB;
                     if (r < pgap[i] || r >= pgap[i] + GAP) dead = 1;
+                    else score++;                         /* cleared a pipe -- only if it didn't also kill you */
                 }
             }
             unsigned long now = sys_uptime_ms();

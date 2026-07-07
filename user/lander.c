@@ -67,8 +67,8 @@ int main(void) {
             vy += 0.018f;                                  /* gravity */
             if (fuel > 0) {
                 if (thrust_up) { vy -= 0.045f; fuel -= 2; }
-                if (thrust_l)  { vx += 0.02f;  fuel -= 1; }
-                if (thrust_r)  { vx -= 0.02f;  fuel -= 1; }
+                if (thrust_l)  { vx -= 0.02f;  fuel -= 1; }   /* Left/A moves left (was += -- backwards from the key) */
+                if (thrust_r)  { vx += 0.02f;  fuel -= 1; }   /* Right/D moves right (was -= -- backwards from the key) */
                 if (fuel < 0) fuel = 0;
             }
             x += vx; y += vy;

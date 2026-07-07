@@ -155,6 +155,11 @@ int main(void) {
                     lives--; sys_beep(120,200);
                     if (lives <= 0) { over = 1; }
                     else { reset_ship(); }
+                    break;   /* one hit per tick -- reset_ship() just teleported the ship to
+                              * screen-center, so any asteroid checked afterward this same tick
+                              * would be tested against that new position, not the collision
+                              * that actually happened (mirrors the bullet/asteroid loop above,
+                              * which already breaks the instant a hit is resolved) */
                 }
             }
             if (live == 0) { wave++; reset_ship(); spawn_wave(3+wave); sys_beep(880,80); sys_beep(1175,80); }
