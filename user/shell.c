@@ -791,7 +791,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  sigpipetest(SIGPIPE)  selecttest(select fd_set)  linkattest(linkat)  mmapmunmaptest(munmap flushes dirty MAP_SHARED)  fdleaktest(fd table survives exit-without-close)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  sigpipetest(SIGPIPE)  selecttest(select fd_set)  linkattest(linkat)  mmapmunmaptest(munmap flushes dirty MAP_SHARED)  fdleaktest(fd table survives exit-without-close)  dupaliastest(dup'd inotify/TCP-socket fd survives original close)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -4689,6 +4689,30 @@ static int run_command(char *line, char *cwd) {
             if (s >= 0) sys_fdclose(s);
             if (ok) print("fdleak: 3x fork+socket()+exit-without-close, reaped each time -- TCP socket table NOT exhausted (leaked pre-M1602) -- OK\n");
             else { sys_setcolor(2); print("fdleaktest: VERIFY FAILED (s="); sys_setcolor(0); printl(s); print(")\n"); g_status = 1; }
+        } else if (streq(line, "dupaliastest")) {   /* a dup()'d inotify or TCP-socket fd must survive the ORIGINAL fd closing (M1603) */
+            int ok = 1;
+            int iw = sys_inotify_init();                              /* inotify half */
+            int wd = (iw >= 0) ? sys_inotify_add_watch(iw, "DUPAL", 2 /*IN_MODIFY*/) : -1;
+            int iw2 = (iw >= 0) ? sys_dup(iw) : -1;
+            if (iw < 0 || wd < 0 || iw2 < 0) ok = 0;
+            if (ok) sys_fdclose(iw);                                  /* close the ORIGINAL -- iw2 must still work */
+            if (ok) sys_writefile("/tmp/DUPAL.TXT", "hi", 2);
+            unsigned char eb[64]; long n = ok ? sys_fdread(iw2, eb, sizeof eb) : -1;
+            int inot_ok = (n >= 48);
+            if (!inot_ok) ok = 0;
+            if (iw2 >= 0) sys_fdclose(iw2);
+            int s = sys_socket(2, 1);                                 /* TCP-socket half */
+            int one = 1;
+            if (s >= 0) sys_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+            int s2 = (s >= 0) ? sys_dup(s) : -1;
+            if (s < 0 || s2 < 0) ok = 0;
+            if (ok) sys_fdclose(s);            /* close the ORIGINAL -- s2 must still reference the SAME TCB */
+            int rb = 0; unsigned len = 0;
+            int tcp_ok = ok && sys_getsockopt(s2, SOL_SOCKET, SO_REUSEADDR, &rb, &len) == 0 && rb == 1;
+            if (!tcp_ok) ok = 0;
+            if (s2 >= 0) sys_fdclose(s2);
+            if (ok) print("dupalias: dup()'d inotify + TCP-socket fds both survive the ORIGINAL fd closing -- no dangling alias (M1603) -- OK\n");
+            else { sys_setcolor(2); print("dupaliastest: VERIFY FAILED (inot_ok="); sys_setcolor(0); printl(inot_ok); print(" tcp_ok="); printl(tcp_ok); print(")\n"); g_status = 1; }
         } else if (streq(line, "lotest")) {   /* loopback (lo, 127.0.0.0/8): a UDP round-trip with NO NIC (M1264) */
             unsigned char lo[4] = {127,0,0,1};
             int ok = 1;

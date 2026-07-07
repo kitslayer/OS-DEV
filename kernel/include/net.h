@@ -63,7 +63,8 @@ int  net_tcp_sock_open(void);                               /* alloc a TCB slot;
 int  net_tcp_sock_connect(int idx, const uint8_t ip[4], uint16_t port);  /* 0/-1 */
 long net_tcp_sock_send(int idx, const void *buf, int len);  /* bytes/-1 */
 long net_tcp_sock_recv(int idx, void *buf, int max);        /* bytes/0 timeout/-1 closed */
-void net_tcp_sock_close(int idx);
+void net_tcp_sock_ref(int idx);                             /* a dup()/fork() alias of an existing fd (M1603) */
+void net_tcp_sock_close(int idx);                           /* drop a reference; closes the TCB at 0 (M1603) */
 int  net_tcp_sock_setopt(int idx, int level, int optname, int val);   /* 0/-1 (M1554) */
 int  net_tcp_sock_getopt(int idx, int level, int optname, int *val);  /* 0/-1 (M1554) */
 int  net_tcp_sock_getname(int idx, uint8_t out[6]);   /* our {ip[4],port} for this socket; 0/-1 (M1560) */

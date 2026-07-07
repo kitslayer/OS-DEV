@@ -3835,10 +3835,14 @@ int app_dup2(int oldfd, int newfd) {
     if (a->fd[newfd].used && a->fd[newfd].type == 1) pipe_close_end(a->fd[newfd].obj, a->fd[newfd].write_end);
     else if (a->fd[newfd].used && a->fd[newfd].type == 3) memfd_unref(a->fd[newfd].obj);   /* (M1212) */
     else if (a->fd[newfd].used && a->fd[newfd].type == 6) epoll_unref(a->fd[newfd].obj);   /* (M1220) */
+    else if (a->fd[newfd].used && a->fd[newfd].type == 8) inotify_free(a->fd[newfd].obj);       /* (M1603) */
+    else if (a->fd[newfd].used && a->fd[newfd].type == 10) net_tcp_sock_close(a->fd[newfd].obj); /* (M1603) */
     a->fd[newfd] = a->fd[oldfd];                                  /* newfd now references the same end */
     if (a->fd[newfd].type == 1) pipe_open_end(a->fd[newfd].obj, a->fd[newfd].write_end);
     else if (a->fd[newfd].type == 3) memfd_ref(a->fd[newfd].obj);   /* (M1212) */
     else if (a->fd[newfd].type == 6) epoll_ref(a->fd[newfd].obj);   /* (M1220) */
+    else if (a->fd[newfd].type == 8) inotify_ref(a->fd[newfd].obj);       /* (M1603) */
+    else if (a->fd[newfd].type == 10) net_tcp_sock_ref(a->fd[newfd].obj); /* (M1603) */
     return newfd;
 }
 /* mkfifo(path): create a named pipe (M1188). 0/-1. */
@@ -4472,6 +4476,8 @@ static void app_fd_fork(struct app *child, struct app *parent) {
         if (parent->fd[i].used && parent->fd[i].type == 1) pipe_open_end(parent->fd[i].obj, parent->fd[i].write_end);
         else if (parent->fd[i].used && parent->fd[i].type == 3) memfd_ref(parent->fd[i].obj);   /* memfd inherited (M1212) */
         else if (parent->fd[i].used && parent->fd[i].type == 6) epoll_ref(parent->fd[i].obj);   /* epoll inherited (M1220) */
+        else if (parent->fd[i].used && parent->fd[i].type == 8) inotify_ref(parent->fd[i].obj);        /* inotify inherited (M1603) */
+        else if (parent->fd[i].used && parent->fd[i].type == 10) net_tcp_sock_ref(parent->fd[i].obj);  /* TCP socket inherited (M1603) */
     }
 }
 /* exit/reap: close every fd the process still held. Must mirror app_fd_close's

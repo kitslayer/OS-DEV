@@ -590,11 +590,11 @@ int net_raw_recv(void *buf, int max, int timeout_ms) {
  * compatibility: ported code that calls setsockopt(SO_REUSEADDR/TCP_NODELAY)
  * before use, as a huge amount of real networking code unconditionally
  * does, no longer has to fail or be special-cased out. */
-static struct { int used; tcp_conn c; int opt_reuseaddr, opt_nodelay, opt_keepalive, opt_rcvtimeo; } g_tcpsock[TCPSOCK_N];
+static struct { int used, refs; tcp_conn c; int opt_reuseaddr, opt_nodelay, opt_keepalive, opt_rcvtimeo; } g_tcpsock[TCPSOCK_N];
 
 int net_tcp_sock_open(void) {
     for (int i = 0; i < TCPSOCK_N; i++) if (!g_tcpsock[i].used) {
-        g_tcpsock[i].used = 1; g_tcpsock[i].c.up = 0;
+        g_tcpsock[i].used = 1; g_tcpsock[i].refs = 1; g_tcpsock[i].c.up = 0;
         g_tcpsock[i].c.sport = g_tcpsock[i].c.dport = 0;    /* clear a reused slot's stale port/peer (M1560) --
                                                               * getsockname/getpeername now make these visible,
                                                               * where before a slot's leftover values from its
@@ -670,8 +670,10 @@ long net_tcp_sock_recv(int idx, void *buf, int max) {
     uint64_t ticks = ms ? (ms + 9) / 10 : ((uint64_t)-1 >> 1);
     return tcp_read(&g_tcpsock[idx].c, (uint8_t *)buf, max, ticks);
 }
+void net_tcp_sock_ref(int idx) { if (idx >= 0 && idx < TCPSOCK_N && g_tcpsock[idx].used) g_tcpsock[idx].refs++; }
 void net_tcp_sock_close(int idx) {
     if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return;
+    if (--g_tcpsock[idx].refs > 0) return;   /* another dup()/fork() alias still holds it (M1603) */
     tcp_close(&g_tcpsock[idx].c);
     g_tcpsock[idx].used = 0;
 }

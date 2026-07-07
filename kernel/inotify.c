@@ -19,6 +19,7 @@ struct watch { int used; int wd; char path[64]; uint32_t mask; };
 struct iev   { int wd; uint32_t mask; char name[INOT_NAME]; };
 struct inot {
     int used;
+    int refs;               /* dup()/fork() aliases of the same fd (M1603) */
     struct watch w[INOT_WATCH];
     int next_wd;
     struct iev q[INOT_QUEUE];
@@ -43,7 +44,7 @@ int inotify_new(void) {
     for (int i = 0; i < INOT_MAX; i++) if (!g_inot[i].used) {
         for (int j = 0; j < INOT_WATCH; j++) g_inot[i].w[j].used = 0;
         g_inot[i].next_wd = 1; g_inot[i].qhead = g_inot[i].qtail = 0;
-        g_inot[i].used = 1;
+        g_inot[i].used = 1; g_inot[i].refs = 1;
         return i;
     }
     return -1;
@@ -62,7 +63,12 @@ int inotify_add(int idx, const char *path, uint32_t mask) {
     return -1;
 }
 
-void inotify_free(int idx) { if (idx >= 0 && idx < INOT_MAX) g_inot[idx].used = 0; }
+void inotify_ref(int idx) { if (idx >= 0 && idx < INOT_MAX && g_inot[idx].used) g_inot[idx].refs++; }
+void inotify_free(int idx) {
+    if (idx < 0 || idx >= INOT_MAX || !g_inot[idx].used) return;
+    if (--g_inot[idx].refs > 0) return;   /* another dup()/fork() alias still holds it (M1603) */
+    g_inot[idx].used = 0;
+}
 
 /* inotify_rm_watch (M1568): a fixed INOT_WATCH-slot table could previously
  * only be freed a whole instance at a time (inotify_free, on fd close) --
