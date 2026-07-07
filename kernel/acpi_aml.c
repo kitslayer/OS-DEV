@@ -13,9 +13,11 @@
  * Device, Processor/PowerResource/ThermalZone, OpRegion, Field, Mutex, Event —
  * and recursing into Scope/Device bodies, collecting every named object. It
  * decodes the two tricky AML encodings (PkgLength and NameString) properly.
- * Full TermArg/method EVALUATION (running _PRT etc.) is the follow-on; this
- * proves we can correctly decode real firmware AML by enumerating the objects
- * QEMU's DSDT defines (e.g. \_SB_.PCI0).
+ * A real TermArg/method evaluation VM followed in M1286 (aml_eval_termarg
+ * below: Store/arithmetic/logical ops/If/While/Return/method calls), driving
+ * aml_eval_s5() for real ACPI poweroff — but nothing anywhere calls it against
+ * _PRT specifically, so PCI IRQ routing still isn't derived from AML; that
+ * narrower piece is the real remaining follow-on, not general evaluation.
  *
  * SAFE SCOPE: purely additive + read-only. aml_parse() runs once after
  * acpi_init() over the (already-mapped) DSDT; on any opcode it can't size it

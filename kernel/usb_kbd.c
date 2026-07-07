@@ -378,7 +378,12 @@ void usb_kbd_selftest(void) {
                 if (was_pressed(usage))
                     continue;
                 char c = translate(usage, mods);
-                input_push(c ? c : 0);            /* feed the real input path too */
+                if (c) input_push(c);              /* feed the real input path too (M1600) --
+                                                     * `c ? c : 0` was identical to plain `c`, so
+                                                     * this unconditionally pushed a NUL for any
+                                                     * unmapped key (CapsLock/F-keys/etc.); the
+                                                     * sibling usb_kbd_poll() a few lines up
+                                                     * already gated on `c` correctly */
                 if (c >= 0x20 && c < 0x7F) {
                     kprintf("[usb-kbd] decoded key: usage=%02x -> '%c'\n", usage, c);
                     decoded++;
