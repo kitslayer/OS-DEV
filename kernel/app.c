@@ -2847,6 +2847,7 @@ int app_setpgid(int pid, int pgid) {
     return 0;
 }
 int app_getpgid(int pid) { struct app *t = pid ? app_by_pid(pid) : cur(); return t ? t->pgid : -1; }
+int app_getsid(int pid)  { struct app *t = pid ? app_by_pid(pid) : cur(); return t ? t->sid : -1; }   /* (M1580) */
 int app_setsid(void)     { struct app *me = cur(); if (!me) return -1; me->sid = me->pgid = me->pid; return me->sid; }
 int app_tcsetpgrp(int pgid) { fg_pgid = pgid; return 0; }   /* set the foreground process group of the console */
 int app_tcgetpgrp(void)     { return fg_pgid; }

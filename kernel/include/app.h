@@ -171,6 +171,7 @@ void app_timer_tick(void);                                                      
 /* Job control (M1176): process groups + sessions + foreground TTY group. */
 int  app_setpgid(int pid, int pgid);   /* set a process's group (pid 0 = self, pgid 0 = own pid); 0/-1 */
 int  app_getpgid(int pid);             /* a process's group id (pid 0 = self); -1 if absent */
+int  app_getsid(int pid);              /* a process's session id (pid 0 = self); -1 if absent (M1580) */
 int  app_setsid(void);                 /* become session+group leader; returns sid */
 int  app_tcsetpgrp(int pgid);          /* set the console's foreground process group; 0 */
 int  app_tcgetpgrp(void);              /* the console's foreground process group (0 = none) */

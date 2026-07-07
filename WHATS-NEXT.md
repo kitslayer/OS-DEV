@@ -1,5 +1,13 @@
 # What's next
 
+> **(M1580) Kernel — `getsid`: a seventh research survey's top pick, and dead code since M1231.** `app_sid_of(app_t *a)` has existed since M1231 with exactly one caller anywhere in the tree — `/proc/<pid>`'s own stat formatting in `procfs.c` — while `getsid(2)` itself, the real syscall a POSIX program actually calls, was never wired up. The exact same shape as M1558's `tcgetpgrp` ("dead code since M1176, finally wired to a syscall"): the underlying data was always tracked correctly (`struct app`'s own `sid` field, set by `setsid()` since M1176), just never exposed.
+>
+> `app_getsid(int pid)` is `app_getpgid`'s own one-line template with `pgid` swapped for `sid`: `pid ? app_by_pid(pid) : cur()`, then read the field. Grouped into the same `PL_PROC` pledge class as `getpgid`/`setpgid`/`setsid` — it's the same query, just one field over.
+>
+> New coverage folded into `jobtest` (already the home for `setpgid`/`killpg`/`tcgetpgrp`, per M1558's own precedent): a forked child calls `setsid()` (becoming its own session leader, so `sid == its own pid`) and reports its self-read `getsid(0)` over shared memory; the parent independently calls `getsid(child_pid)` *while the child is still alive* (querying an already-reaped pid would be meaningless — real POSIX would fail it too) and confirms all three values agree.
+>
+> **Verified:** `make check` (69 suites) — a fully clean run, exit 0; in-guest `jobtest` (killpg + tcgetpgrp + the new getsid check) passes on the first attempt.
+>
 > **(M1579) Kernel — `eventfd()` reads actually block now.** The sixth research survey's last remaining pick: `eventfd` (M1242) shipped as "a pollable u64-counter fd," but `EFD_NONBLOCK` was a documented no-op — `app_fd_read`'s eventfd branch returned `-1` on an empty counter *unconditionally*, which happens to be real POSIX's *non-default* behavior. The primary, textbook eventfd usage pattern — a lightweight cross-task wake/notify primitive, `read()` blocking until someone posts — was the one thing this "pollable counter" couldn't actually do.
 >
 > `obj` (dead weight on this fd type since M1242 — eventfd needs no object table) now doubles as the real per-fd `EFD_NONBLOCK` flag; an empty counter otherwise registers the caller in a new small `g_evfd_wait[]` table (keyed by `(app, fd)`, `EVFD_NWAIT=16`, the same small-fixed-array-plus-linear-scan shape as `g_futex[]`/`sem.c`'s `tab[]`) and blocks for real via `task_block()`; `eventfd`'s write side wakes every matching entry after bumping the counter, mirroring real Linux's "wake every blocked reader, let each recheck" semantics.

@@ -275,6 +275,7 @@ int  sys_tcflush(int queue_selector) { return (int)do_syscall(SYS_tcflush, queue
 int  sys_tcdrain(void) { return (int)do_syscall(SYS_tcdrain, 0, 0, 0); }
 int  sys_setpgid(int pid, int pgid) { return (int)do_syscall(SYS_setpgid, pid, pgid, 0); }
 int  sys_getpgid(int pid) { return (int)do_syscall(SYS_getpgid, pid, 0, 0); }
+int  sys_getsid(int pid)  { return (int)do_syscall(SYS_getsid, pid, 0, 0); }
 int  sys_setsid(void) { return (int)do_syscall(SYS_setsid, 0, 0, 0); }
 int  sys_tcsetpgrp(int pgid) { return (int)do_syscall(SYS_tcsetpgrp, pgid, 0, 0); }
 int  sys_tcgetpgrp(void) { return (int)do_syscall(SYS_tcgetpgrp, 0, 0, 0); }

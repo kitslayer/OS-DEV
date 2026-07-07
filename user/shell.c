@@ -781,7 +781,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -2804,6 +2804,28 @@ static int run_command(char *line, char *cwd) {
             sys_tcsetpgrp(saved_fg);
             print(pg_ok ? "tcgetpgrp: reads back exactly what tcsetpgrp set OK\n" : "jobtest: tcgetpgrp VERIFY FAILED\n");
             if (!pg_ok) g_status = 1;
+            long sidshmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);            /* getsid (M1580) */
+            volatile long *sidsh = (sidshmid >= 0) ? (volatile long *)sys_shmat((int)sidshmid) : 0;
+            int sid_ok = (sidsh != 0);
+            if (sid_ok) {
+                sidsh[0] = -1; sidsh[1] = -1;
+                long gc = sys_fork();
+                if (gc == 0) {
+                    volatile long *m = (volatile long *)sys_shmat((int)sidshmid);
+                    int mysid = sys_setsid();                      /* becomes session+group leader; sid = own pid */
+                    if (m) { m[0] = mysid; m[1] = sys_getsid(0); }  /* pid==0 -> the caller's own */
+                    sys_sleep(300);                                /* stay alive long enough for the parent to query us */
+                    sys_exit(0);
+                }
+                sys_sleep(100);                                    /* let the child setsid before we query it */
+                long remote_sid = (gc > 0) ? sys_getsid((int)gc) : -1;
+                int st = -1; if (gc > 0) sys_waitpid((int)gc, &st);
+                sid_ok = (gc > 0 && sidsh[0] > 0 && sidsh[0] == sidsh[1] && sidsh[0] == gc && remote_sid == gc);
+                sys_shmdt((void *)sidsh);
+            }
+            print(sid_ok ? "getsid: a setsid()'d child's own sid==its pid; the parent's getsid(child_pid) reads the same value -- OK\n"
+                         : "jobtest: getsid VERIFY FAILED\n");
+            if (!sid_ok) g_status = 1;
         } else if (streq(line, "sigsuspendtest")) {   /* sigsuspend: atomically unblock + wait + re-block (M1561) */
             long c = sys_fork();
             if (c == 0) {

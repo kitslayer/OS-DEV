@@ -122,6 +122,7 @@ int  sys_tcflush(int queue_selector);                       /* discard unread in
 int  sys_tcdrain(void);                                     /* wait for pending output; a no-op here; 0/-1 (M1570) */
 int  sys_setpgid(int pid, int pgid);                       /* job control: set a process group (M1176) */
 int  sys_getpgid(int pid);                                 /* process group id (M1176) */
+int  sys_getsid(int pid);                                  /* session id; pid==0 = caller's own (M1580) */
 int  sys_setsid(void);                                     /* become session+group leader (M1176) */
 int  sys_tcsetpgrp(int pgid);                              /* set the console foreground group (M1176) */
 int  sys_tcgetpgrp(void);                                  /* the console's foreground process group; 0 = none (M1558) */
