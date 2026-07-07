@@ -308,6 +308,7 @@ long  sys_fdread(int fd, void *buf, unsigned long max);      /* read a pipe fd; 
 long  sys_fdwrite(int fd, const void *buf, unsigned long len);  /* write a pipe fd; bytes/-1 EPIPE (M1187) */
 int   sys_fdclose(int fd);                                   /* close an fd; 0/-1 (M1187) */
 int   sys_dup2(int oldfd, int newfd);                        /* redirect newfd onto oldfd; newfd/-1 (M1187) */
+int   sys_dup(int fd);                                       /* duplicate onto the lowest free fd; fd/-1 (M1587) */
 int   sys_mkfifo(const char *path);                          /* create a named pipe (FIFO); 0/-1 (M1188) */
 int   sys_fifo_open(const char *path, int write);            /* open a FIFO end -> fd; -1 (M1188) */
 int   sys_open(const char *path);                            /* open a read-only file fd (>=3); -1 (M1193) */

@@ -299,7 +299,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_unix_send: case SYS_unix_recv: case SYS_unix_close: case SYS_unix_wait_any: case SYS_socketpair:
     case SYS_sendfd: case SYS_recvfd:
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
-    case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
+    case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2: case SYS_dup:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
     case SYS_nice: case SYS_sched_setscheduler: case SYS_sched_setaffinity: case SYS_tcgetattr: case SYS_tcsetattr: case SYS_tcflush: case SYS_tcdrain:
     case SYS_getrlimit: case SYS_setrlimit:
@@ -409,7 +409,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
         [SYS_pty_open]="pty_open",[SYS_pty_read]="pty_read",[SYS_pty_write]="pty_write",
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
-        [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",
+        [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",[SYS_dup]="dup",
         [SYS_mkfifo]="mkfifo",[SYS_fifo_open]="fifo_open",
         [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",[SYS_ppoll]="ppoll",[SYS_select]="select",[SYS_readv]="readv",[SYS_writev]="writev",[SYS_preadv]="preadv",[SYS_pwritev]="pwritev",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
@@ -1534,6 +1534,9 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_dup2:                         /* (oldfd, newfd) -> redirect newfd (M1187) */
         r->rax = (uint64_t)(int64_t)app_dup2((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_dup:                          /* (fd) -> duplicate onto the lowest free fd (M1587) */
+        r->rax = (uint64_t)(int64_t)app_fcntl((int)r->rdi, F_DUPFD, 0);
         break;
     case SYS_mkfifo:                       /* (path) -> create a named pipe (M1188) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }

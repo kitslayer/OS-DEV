@@ -3099,8 +3099,20 @@ static int run_command(char *line, char *cwd) {
                     }
                     sys_fdclose(9); sys_fdclose(f2[0]); sys_fdclose(f2[1]);
                 }
-                print((ok && ok2) ? "pipe: fork round-trip + EOF + dup2 all OK\n" : "pipetest: VERIFY FAILED\n");
-                if (!(ok && ok2)) g_status = 1;
+                /* dup (M1587): onto the LOWEST free fd, unlike dup2's explicit target */
+                int ok3 = 0, f3[2];
+                if (sys_pipe(f3) == 0) {
+                    int d = sys_dup(f3[1]);
+                    if (d > f3[1]) {                              /* the lowest free fd is always above both pipe ends */
+                        sys_fdwrite(d, "dp2", 3);
+                        char c2[8]; long dn2 = sys_fdread(f3[0], c2, sizeof c2);
+                        ok3 = (dn2 == 3 && c2[0] == 'd' && c2[2] == '2');
+                        sys_fdclose(d);
+                    }
+                    sys_fdclose(f3[0]); sys_fdclose(f3[1]);
+                }
+                print((ok && ok2 && ok3) ? "pipe: fork round-trip + EOF + dup2 + dup all OK\n" : "pipetest: VERIFY FAILED\n");
+                if (!(ok && ok2 && ok3)) g_status = 1;
             }
         } else if (streq(line, "sigpipetest")) {   /* write() with no readers left -> -1 (EPIPE) AND SIGPIPE (M1581) */
             int ok = 1;
