@@ -148,6 +148,7 @@ long sys_spawn_arg(const char *name, const char *arg);   /* launch with an arg (
 long sys_browse(const char *url);
 long sys_mkdir(const char *path);
 long sys_chdir(const char *path);
+long sys_fchdir(int fd);                                    /* chdir via an already-open directory fd; 0/-1 (M1586) */
 long sys_tree(void *buf, unsigned long len);
 long sys_ps(void *buf, unsigned long len);
 long sys_font(void *buf, unsigned long len);            /* copy the 8x16 console font (128*16 bytes) for gfx text (M1362) */

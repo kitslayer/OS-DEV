@@ -362,6 +362,7 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SYS_readlinkat   328   /* (dirfd, path, buf, size) -> a symlink's target relative to a dir fd (or AT_FDCWD), not followed; bytes/-1 (M1582) */
 #define SYS_select       329   /* (nfds, readfds*, writefds*, exceptfds*, timeout*) -> like poll, fd_set-shaped; #ready/0 timeout/-1 (M1584) */
 #define SYS_linkat       330   /* (olddirfd, oldpath, newdirfd, newpath) -> hard link relative to dir fds (or AT_FDCWD); 0/-1 (M1585) */
+#define SYS_fchdir       331   /* (fd) -> chdir via an already-open directory fd; 0/-1 (M1586) */
 
 /* select(2) (M1584): a small, from-scratch fd_set sized for THIS fd table
  * (APP_NFD=24), not real glibc's 1024-bit/128-byte one -- every fd this OS can

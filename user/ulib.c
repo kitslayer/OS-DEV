@@ -300,6 +300,7 @@ long sys_spawn_arg(const char *name, const char *arg) { return do_syscall(SYS_sp
 long sys_browse(const char *url) { return do_syscall(SYS_browse, (long)url, 0, 0); }
 long sys_mkdir(const char *path) { return do_syscall(SYS_mkdir, (long)path, 0, 0); }
 long sys_chdir(const char *path) { return do_syscall(SYS_chdir, (long)path, 0, 0); }
+long sys_fchdir(int fd) { return do_syscall(SYS_fchdir, fd, 0, 0); }
 long sys_tree(void *buf, unsigned long len) { return do_syscall(SYS_tree, 0, (long)buf, (long)len); }
 long sys_ps(void *buf, unsigned long len) { return do_syscall(SYS_ps, 0, (long)buf, (long)len); }
 long sys_font(void *buf, unsigned long len) { return do_syscall(SYS_font, 0, (long)buf, (long)len); }

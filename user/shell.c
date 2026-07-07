@@ -4156,7 +4156,19 @@ static int run_command(char *line, char *cwd) {
             sys_chdir("/");
             if (sys_getcwd(cb, sizeof cb) <= 0 || !streq(cb, "/")) ok = 0;
             if (sys_getcwd(cb, 1) != -1) ok = 0;   /* "/" + NUL needs 2 bytes -> size 1 is ERANGE */
-            print(ok ? "getcwd: cd /tmp->'/tmp', /proc->'/proc', /->'/'; tiny buf -> -1 -- OK\n"
+            /* fchdir (M1586): chdir via an already-open directory fd, instead of a path string */
+            int fcok = 1;
+            int dfd = sys_open("/tmp");
+            if (dfd < 0 || sys_fchdir(dfd) != 0) fcok = 0;
+            else if (sys_getcwd(cb, sizeof cb) <= 0 || !streq(cb, "/tmp")) fcok = 0;
+            if (dfd >= 0) sys_fdclose(dfd);
+            int ffd = sys_open_mode("/tmp/FCD_FILE.TXT", O_WRONLY | O_CREAT | O_TRUNC);   /* a REGULAR
+                                                                * file -> vfs_chdir rejects it, not a dir */
+            if (ffd >= 0) { if (sys_fchdir(ffd) != -1) fcok = 0; sys_fdclose(ffd); sys_delete("/tmp/FCD_FILE.TXT"); } else fcok = 0;
+            sys_chdir("/");
+            ok = ok && fcok;
+            print(ok ? "getcwd: cd /tmp->'/tmp', /proc->'/proc', /->'/'; tiny buf -> -1; "
+                       "fchdir(dir fd)->'/tmp', fchdir(file fd)->-1 -- OK\n"
                      : "getcwdtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "procwdtest")) {   /* /proc/<pid>/cwd + /root (M1249) */

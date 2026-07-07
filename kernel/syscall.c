@@ -309,7 +309,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_STDIO;
     case SYS_statx: case SYS_flock: case SYS_access: case SYS_faccessat2:
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
-    case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
+    case SYS_chdir: case SYS_fchdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_fgetxattr: case SYS_flistxattr: case SYS_open:
     case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat: case SYS_readlinkat:
@@ -359,7 +359,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_sysinfo]="sysinfo",[SYS_clear]="clear",[SYS_reboot]="reboot",[SYS_writefile]="writefile",
         [SYS_ping]="ping",[SYS_resolve]="resolve",[SYS_delete]="delete",[SYS_spawn]="spawn",
         [SYS_sleep]="sleep",[SYS_http]="http",[SYS_browse]="browse",[SYS_mkdir]="mkdir",
-        [SYS_chdir]="chdir",[SYS_tree]="tree",[SYS_ps]="ps",[SYS_font]="font",[SYS_pollkey]="pollkey",
+        [SYS_chdir]="chdir",[SYS_fchdir]="fchdir",[SYS_tree]="tree",[SYS_ps]="ps",[SYS_font]="font",[SYS_pollkey]="pollkey",
         [SYS_df]="df",[SYS_find]="find",[SYS_sha256]="sha256",[SYS_crypt]="crypt",
         [SYS_history]="history",[SYS_https]="https",[SYS_js]="js",[SYS_setcolor]="setcolor",
         [SYS_pinghost]="pinghost",[SYS_netinfo]="netinfo",[SYS_apps]="apps",[SYS_sha512]="sha512",
@@ -927,6 +927,15 @@ void syscall_dispatch(struct registers *r) {
         if (!app_unveil_ok(self, (const char *)r->rdi, 0)) { r->rax = (uint64_t)-1; break; }
         long cr = vfs_chdir((const char *)r->rdi);
         if (cr == 0) app_chdir_track((const char *)r->rdi);   /* track the cwd string for getcwd (M1248) */
+        r->rax = (uint64_t)(int64_t)cr;
+        break;
+    }
+    case SYS_fchdir: {                     /* (fd) -> chdir via an already-open directory fd (M1586) */
+        const char *p = app_fd_path((int)r->rdi);
+        if (!p) { r->rax = (uint64_t)-1; break; }
+        if (!app_unveil_ok(self, p, 0)) { r->rax = (uint64_t)-1; break; }
+        long cr = vfs_chdir(p);
+        if (cr == 0) app_chdir_track(p);
         r->rax = (uint64_t)(int64_t)cr;
         break;
     }
