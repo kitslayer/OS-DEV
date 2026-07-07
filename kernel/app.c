@@ -212,6 +212,38 @@ static int next_pid = 100;
 static int fg_pgid;             /* the controlling terminal's foreground process group (job control, M1176; 0 = none) */
 int app_oom_kill(void);         /* OOM killer (M1275): defined below, called from the sbrk exhaustion path above it */
 
+/* Save/disable + restore interrupts, ATOMICALLY against a concurrent writer,
+ * for every check-then-block / produce-then-wake pairing in this file (key
+ * delivery, waitpid/waitid, futex, uffd, eventfd, seccomp-notify, ptrace).
+ *
+ * M1612: this used to be a bare cli/popfq pair at each individual site --
+ * correct for a single core, but the reader and writer in every one of these
+ * pairings are two DIFFERENT processes, routinely scheduled on two different
+ * cores since M1531 (task_create's pin_core=-1 for every ordinary task). A
+ * bare cli only stops a LOCAL interrupt from reentering -- it does nothing
+ * to a second core running the matching wake logic at the same instant, so
+ * several of these sites' own comments claimed single-CPU safety ("the
+ * mailbox discipline", "IF=0 here -> atomic (single CPU)", "every ring-3
+ * task is scheduled on the BSP") that M1531 had already invalidated -- the
+ * last claim is flatly false today: only task 0 (the desktop/WM) is
+ * BSP-pinned, no ordinary app task is. One spinlock (nested in cli, same
+ * idiom as the eight other files fixed earlier this session) now covers all
+ * of them; one coarse lock rather than one per mechanism, since none of them
+ * touch each other's state and all are rare enough that it costs nothing
+ * measurable. Defined this early so every consumer below it (starting with
+ * app_waitpid) can see it. */
+static volatile int app_wake_lock;
+static inline uint64_t irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&app_wake_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void irq_restore(uint64_t f) {
+    __atomic_store_n(&app_wake_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+
 /* userfaultfd state (M1134); defined here so app_reap + app_fault_handle (both
  * above the uffd functions) can see it. One registered region at a time. */
 static struct {
@@ -1172,13 +1204,21 @@ static void app_notify_pdeathsig(int ppid) {
 /* Block until a child (specific pid, or -1 = any) has exited, then collect it:
  * read its exit status, free its (now-zombie) slot, and return its pid. -1 if the
  * caller has no matching children. The forked child is turned into a zombie by
- * app_reap (resources already freed), which also wakes us. The scan+block runs
- * with interrupts off (the syscall is an interrupt gate), so a child that exits
- * while we're parked can't lose its wakeup — same discipline as the mailbox. */
+ * app_reap (resources already freed), which also wakes us.
+ *
+ * M1612: the scan-then-set-waiting-then-block sequence below, and app_reap's
+ * zombify-then-wake sequence, now share app_wake_lock (see its own comment) --
+ * this used to rely on the interrupt gate's local IF=0 alone ("same discipline
+ * as the mailbox"), which M1531 made insufficient the moment the parent and
+ * the WM (which runs app_reap) could be on two different cores, exactly like
+ * mbox.c's own version of this, fixed as M1608 earlier this session. Only the
+ * check+flag-set is locked; the block itself must NOT happen while holding it
+ * (would deadlock the WM's own wake attempt against this now-parked core). */
 long app_waitpid(int pid, int *status) {
     struct app *me = cur();
     if (!me) return -1;
     for (;;) {
+        uint64_t f = irq_save();
         struct app *z = 0; int have = 0;
         for (int i = 0; i < MAX_APPS; i++) {
             struct app *c = &apps[i];
@@ -1190,11 +1230,13 @@ long app_waitpid(int pid, int *status) {
         if (z) {
             int code = z->exit_code, cpid = z->pid;
             z->used = 0; z->zombie = 0;            /* collect the zombie slot */
+            irq_restore(f);
             if (status) *status = code;
             return cpid;
         }
-        if (!have) return -1;                      /* no matching children to wait for */
+        if (!have) { irq_restore(f); return -1; }  /* no matching children to wait for */
         me->waiting = 1;
+        irq_restore(f);
         task_block();                              /* woken by app_reap when a child zombifies */
         me->waiting = 0;
     }
@@ -1212,6 +1254,7 @@ long app_waitid(int idtype, int id, struct siginfo *si, int options) {
         want = me->fd[id].obj; idtype = P_PID;
     }
     for (;;) {
+        uint64_t f = irq_save();
         struct app *z = 0; int have = 0;
         for (int i = 0; i < MAX_APPS; i++) {
             struct app *c = &apps[i];
@@ -1223,13 +1266,16 @@ long app_waitid(int idtype, int id, struct siginfo *si, int options) {
         if (z) {
             int code = z->exit_code, cpid = z->pid;
             z->used = 0; z->zombie = 0;             /* collect the zombie slot */
+            irq_restore(f);
             if (si) { si->si_signo = SIGCHLD; si->si_errno = 0; si->si_code = CLD_EXITED;
                       si->si_pid = cpid; si->si_uid = 0; si->si_status = code; }
             return 0;
         }
-        if (!have) return -1;                      /* no matching children */
-        if (options & WNOHANG) { if (si) { si->si_pid = 0; si->si_signo = SIGCHLD; } return 0; }
-        me->waiting = 1; task_block(); me->waiting = 0;
+        if (!have) { irq_restore(f); return -1; }  /* no matching children */
+        if (options & WNOHANG) { irq_restore(f); if (si) { si->si_pid = 0; si->si_signo = SIGCHLD; } return 0; }
+        me->waiting = 1;
+        irq_restore(f);
+        task_block(); me->waiting = 0;
     }
 }
 
@@ -1247,9 +1293,13 @@ int app_reap(app_t *a) {
     if (!a) return 1;
     if (a->zombie) return 1;                  /* already reaped to a zombie: resources freed, slot kept for waitpid */
     if (a->used && a->exited && (!a->task || a->task->state == TASK_DEAD)) {
-        if (g_uffd.active && g_uffd.owner == a) {        /* uffd owner gone: tear down, free any blocked monitor (M1134) */
-            g_uffd.active = 0; g_uffd.pending = 0;
-            if (g_uffd.monitor_waiting && g_uffd.monitor) task_wake(g_uffd.monitor);
+        {
+            uint64_t uf = irq_save();      /* pairs with app_uffd_read/app_fault_handle's own lock (M1612) */
+            if (g_uffd.active && g_uffd.owner == a) {     /* uffd owner gone: tear down, free any blocked monitor (M1134) */
+                g_uffd.active = 0; g_uffd.pending = 0;
+                if (g_uffd.monitor_waiting && g_uffd.monitor) task_wake(g_uffd.monitor);
+            }
+            irq_restore(uf);
         }
         vfs_cwd_forget(a);                               /* don't stash cwd into a freed slot (M1144) */
         flock_release_pid(a->pid);                       /* drop any advisory file locks it held (M1177) */
@@ -1297,8 +1347,10 @@ int app_reap(app_t *a) {
          * linger until the parent waitpid()s it. Spawned apps (parent==0) and
          * orphans free their slot immediately, exactly as before. */
         if (a->parent && app_pid_alive(a->parent)) {
+            uint64_t wf = irq_save();        /* pairs with app_waitpid/app_waitid's own lock (M1612) */
             a->zombie = 1;
             app_wake_waiter(a->parent);      /* wake the parent if it's blocked in waitpid */
+            irq_restore(wf);
             app_request_signal(app_by_pid(a->parent), SIGCHLD);  /* + async-notify a parent that ISN'T (M1562) */
             return 1;                        /* window removable; slot persists as a zombie */
         }
@@ -1316,8 +1368,10 @@ int app_reap(app_t *a) {
  * are busy (not waiting for input) close once they next read input. */
 void app_request_kill(app_t *a) {
     if (a && a->used && !a->exited) {
+        uint64_t f = irq_save();
         a->kill = 1;
         task_wake(a->task);   /* unblock it if it's sleeping in app_sys_read */
+        irq_restore(f);
     }
 }
 
@@ -1355,9 +1409,11 @@ void app_key(app_t *a, char c) {
         return;
     }
     if (a->view != 0) { a->view = 0; a->gdirty = 1; }   /* typing returns to the live view */
+    uint64_t f = irq_save();
     int n = (a->ih + 1) % IQ_SIZE;
     if (n != a->it) { a->iq[a->ih] = c; a->ih = n; }
     task_wake(a->task);          /* unblock the app if it's waiting in read() */
+    irq_restore(f);
 }
 static int iq_get(struct app *a) {
     if (a->paste_pos < a->paste_len)            /* drain a pending paste first (not capped by IQ_SIZE) */
@@ -1368,15 +1424,6 @@ static int iq_get(struct app *a) {
 
 /* Non-blocking: next key for the calling app, or -1 if none (for games). */
 int app_sys_pollkey(void) { app_kill_check(); return iq_get(cur()); }
-
-/* Save/disable + restore interrupts, to make "check queue then block" atomic
- * against the window manager delivering a key (closes a lost-wakeup race). */
-static inline uint64_t irq_save(void) {
-    uint64_t f; __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory"); return f;
-}
-static inline void irq_restore(uint64_t f) {
-    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
-}
 
 /* ---- syscall-facing ---- */
 /* ANSI/VT100: map an SGR colour code (30-37 normal / 90-97 bright) onto our
@@ -1510,8 +1557,14 @@ static int tty_raw_read(struct app *a, char *buf, unsigned max) {
         uint64_t f = irq_save();
         if (a->kill) { irq_restore(f); a->exited = 1; task_exit(); }
         int c = iq_get(a);
-        if (c < 0) { if (n > 0) { irq_restore(f); break; }   /* got something -> return it */
-                     task_block(); irq_restore(f); continue; } /* else block for the first byte */
+        if (c < 0) {
+            irq_restore(f);           /* release BEFORE blocking (M1612) -- holding a real cross-core
+                                        * spinlock across task_block() would deadlock: this core never
+                                        * releases it until woken, and app_key/app_request_kill on any
+                                        * OTHER core would spin on it forever trying to deliver that wake */
+            if (n > 0) break;         /* got something -> return it */
+            task_block(); continue;   /* else block for the first byte */
+        }
         irq_restore(f);
         if (c >= 0x81 && c <= 0x9A) c -= 0x80;       /* Ctrl+letter sentinel -> raw control code */
         else if (c >= 0x80) continue;                /* arrows/other cooked sentinels: drop in raw */
@@ -1532,7 +1585,8 @@ int app_sys_read(char *buf, unsigned max) {
         uint64_t f = irq_save();                    /* check kill + queue + block ATOMICALLY: if the kill check sat outside this region, a kill+task_wake from the WM landing between the check and task_block() would be lost (the wake no-ops on a not-yet-blocked task) -> the app sleeps forever and its window is never reaped */
         if (a->kill) { irq_restore(f); a->exited = 1; task_exit(); }  /* WM asked us to close: exit cleanly (WM then reaps) */
         int c = iq_get(a);
-        if (c < 0) { task_block(); irq_restore(f); continue; }  /* sleep until woken (incl. by a kill request) */
+        if (c < 0) { irq_restore(f); task_block(); continue; }  /* sleep until woken (incl. by a kill request); release BEFORE
+                                                                  * blocking (M1612) -- see tty_raw_read's sibling comment */
         irq_restore(f);
         /* Ctrl+letter arrives as 0x81..0x9A. Map the readline navigation aliases
          * onto the existing key codes; the kill/cancel ones are handled below. */
@@ -2041,21 +2095,30 @@ int app_uffd_register(uint64_t addr, uint64_t len) {
 
 /* Monitor: block until the owner faults; returns the faulting page address, or -1. */
 long app_uffd_read(void) {
-    if (!g_uffd.active) return -1;
+    uint64_t f = irq_save();
+    if (!g_uffd.active) { irq_restore(f); return -1; }
     g_uffd.monitor = task_self();
     while (!g_uffd.pending) {
         g_uffd.monitor_waiting = 1;
+        irq_restore(f);                 /* released BEFORE blocking (M1612) */
         task_block();
+        f = irq_save();
         g_uffd.monitor_waiting = 0;
-        if (!g_uffd.active) return -1;             /* owner vanished */
+        if (!g_uffd.active) { irq_restore(f); return -1; }   /* owner vanished */
     }
-    return (long)g_uffd.addr;
+    long addr = (long)g_uffd.addr;
+    irq_restore(f);
+    return addr;
 }
 
 /* Monitor: fill the faulting page with `data` (in the OWNER's address space) and
  * wake the owner. `data` is the monitor's pointer (validated by the caller). */
 int app_uffd_copy(uint64_t addr, const void *data, uint64_t len) {
-    if (!g_uffd.active || !g_uffd.pending) return -1;
+    uint64_t f = irq_save();
+    int ok = g_uffd.active && g_uffd.pending;
+    uint64_t cr3 = g_uffd.cr3;
+    irq_restore(f);
+    if (!ok) return -1;
     uint64_t page = addr & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t frame = pmm_alloc_frame();
     if (!frame) return -1;
@@ -2066,12 +2129,14 @@ int app_uffd_copy(uint64_t addr, const void *data, uint64_t len) {
     for (uint64_t i = n; i < PAGE_SIZE; i++) d[i] = 0;
     /* map the frame into the owner's (currently inactive) space; its CR3 reload
      * on resume makes the new PTE visible — no invlpg needed for an off-CPU space. */
-    if (vmm_map_to(g_uffd.cr3 & PTE_ADDR_MASK, page, frame, PTE_WRITABLE | PTE_USER | PTE_NX) < 0) {
+    if (vmm_map_to(cr3 & PTE_ADDR_MASK, page, frame, PTE_WRITABLE | PTE_USER | PTE_NX) < 0) {
         pmm_free_frame(frame);
         return -1;
     }
+    f = irq_save();
     g_uffd.pending = 0;
     if (g_uffd.faulter) task_wake(g_uffd.faulter);
+    irq_restore(f);
     return 0;
 }
 
@@ -2384,8 +2449,14 @@ uint64_t app_shm_open(const char *name, uint64_t size) {
  * val): if *uaddr still equals val, block until woken; op 1 = WAKE(uaddr, val):
  * wake up to `val` waiters. Wait buckets are keyed by the word's PHYSICAL address,
  * so a futex in shared memory (mapped at different VAs in two processes) matches.
- * The WAIT compare+register+block is atomic against a concurrent WAKE because the
- * syscall path runs interrupts-off on this single CPU (same guarantee as mbox). */
+ *
+ * M1612: the WAIT compare+register and the WAKE scan+wake now share
+ * app_wake_lock -- this used to claim atomicity from "the syscall path runs
+ * interrupts-off on this single CPU (same guarantee as mbox)", the exact
+ * assumption M1531 invalidated and M1608 already fixed in mbox.c itself.
+ * Futexes exist specifically to synchronize across threads/cores, so a real
+ * WAIT-vs-WAKE race here (unlike most of this file's other sites) is not a
+ * rare corner case -- it's the primitive's own primary use. */
 #define FUTEX_NWAIT 32
 static struct { uint64_t key; void *task; int used; } g_futex[FUTEX_NWAIT];
 
@@ -2396,20 +2467,22 @@ long app_futex(uint64_t uaddr, int op, int val, long timeout_ms) {
     uint64_t key = phys | (uaddr & (PAGE_SIZE - 1));        /* per-physical-word key */
 
     if (op == FUTEX_WAIT) {
-        if (*(volatile int *)uaddr != val) return -1;       /* value changed -> EAGAIN, don't block */
+        uint64_t f = irq_save();
+        if (*(volatile int *)uaddr != val) { irq_restore(f); return -1; }   /* value changed -> EAGAIN, don't block */
         int slot = -1;
         for (int i = 0; i < FUTEX_NWAIT; i++) if (!g_futex[i].used) { slot = i; break; }
-        if (slot < 0) return -1;                            /* too many waiters */
+        if (slot < 0) { irq_restore(f); return -1; }        /* too many waiters */
         g_futex[slot].key = key; g_futex[slot].task = task_self(); g_futex[slot].used = 1;
+        irq_restore(f);                 /* release BEFORE blocking (M1612) -- see app_wake_lock's own comment */
         if (timeout_ms >= 0) {          /* bounded wait (M1578): matches epoll_wait/poll's own -1=forever, else ms convention */
             task_block_timeout(timer_ms() + (uint64_t)timeout_ms);   /* woken by a WAKE, the deadline, a kill, or a signal */
-            int timed_out = g_futex[slot].used;   /* still registered -> nobody satisfied it via FUTEX_WAKE. NB: g_futex[]
-                                                    * has no lock of its own, so a FUTEX_WAKE landing in the same instant
-                                                    * the deadline expires can clear `used` even though the timer path is
-                                                    * what actually flipped the task back to READY -- a benign, narrow
-                                                    * "reports woken instead of timed-out" ambiguity (a wake WAS credited
-                                                    * to this waiter either way), not a hang or corruption. Not worth a
-                                                    * real lock for. */
+            int timed_out = g_futex[slot].used;   /* still registered -> nobody satisfied it via FUTEX_WAKE. NB: this specific
+                                                    * read is deliberately outside the lock -- a FUTEX_WAKE landing in the
+                                                    * same instant the deadline expires can clear `used` even though the
+                                                    * timer path is what actually flipped the task back to READY -- a
+                                                    * benign, narrow "reports woken instead of timed-out" ambiguity (a wake
+                                                    * WAS credited to this waiter either way), not a hang or corruption.
+                                                    * Not worth locking further. */
             g_futex[slot].used = 0;
             return timed_out ? -1 : 0;
         }
@@ -2418,6 +2491,7 @@ long app_futex(uint64_t uaddr, int op, int val, long timeout_ms) {
         return 0;
     }
     if (op == FUTEX_WAKE) {
+        uint64_t f = irq_save();
         int woke = 0;
         for (int i = 0; i < FUTEX_NWAIT && woke < val; i++)
             if (g_futex[i].used && g_futex[i].key == key) {
@@ -2425,6 +2499,7 @@ long app_futex(uint64_t uaddr, int op, int val, long timeout_ms) {
                 task_wake((task_t *)g_futex[i].task);
                 woke++;
             }
+        irq_restore(f);
         return woke;
     }
     return -1;
@@ -2487,14 +2562,29 @@ int app_fault_handle(uint64_t cr2, uint64_t err) {
             }
             /* userfaultfd (M1134): the OWNER faulting in a registered region parks
              * here; a monitor process fills the page (app_uffd_copy) and wakes us,
-             * after which the instruction re-executes against the now-present page. */
-            if (a->vma[i].uffd && g_uffd.active && a == g_uffd.owner) {
-                g_uffd.addr = page;
-                g_uffd.faulter = task_self();
-                g_uffd.pending = 1;
-                if (g_uffd.monitor_waiting) { task_wake(g_uffd.monitor); g_uffd.monitor_waiting = 0; }
-                while (g_uffd.pending) task_block();     /* IF=0 here -> wake+park is atomic (single CPU) */
-                return 1;
+             * after which the instruction re-executes against the now-present page.
+             * M1612: set-pending+check-wake and the poll of `pending` below now go
+             * through app_wake_lock (was bare "IF=0 -> atomic (single CPU)", the
+             * exact assumption M1531 invalidated: the owner and the monitor are
+             * two different processes, routinely on two different cores). */
+            if (a->vma[i].uffd) {
+                uint64_t uf = irq_save();
+                if (g_uffd.active && a == g_uffd.owner) {
+                    g_uffd.addr = page;
+                    g_uffd.faulter = task_self();
+                    g_uffd.pending = 1;
+                    if (g_uffd.monitor_waiting) { task_wake(g_uffd.monitor); g_uffd.monitor_waiting = 0; }
+                    irq_restore(uf);
+                    for (;;) {
+                        uf = irq_save();
+                        int pending = g_uffd.pending;
+                        irq_restore(uf);
+                        if (!pending) break;
+                        task_block();          /* released above BEFORE blocking (M1612) */
+                    }
+                    return 1;
+                }
+                irq_restore(uf);
             }
             uint64_t frame = pmm_alloc_frame();
             if (!frame) return 0;                       /* OOM -> let it fault/die */
@@ -2668,8 +2758,17 @@ void app_request_signal(app_t *a, int signo) {
      * existing default for handler-less signals. */
     int sigfd = ap->sigfd_armed && (ap->sigfd_mask & (1u << signo));
     if (!ap->sig_handler[signo] && !sigfd) return;
+    /* M1612: paired with app_sigsuspend/app_pause/app_sigfd_read's own lock
+     * around their check-then-block loops below -- previously unsynchronized,
+     * relying purely on task_wake's own state check with no shared flag or
+     * lock of any kind (unlike this file's OTHER blocking primitives, none
+     * of which had even a bare cli here). A sender (kill/sigqueue/killpg, or
+     * the timer for SIGALRM) is routinely a different process on a different
+     * core than the one about to block. */
+    uint64_t f = irq_save();
     ap->pending_sigs |= (1u << signo);       /* OR into the bitset, so a 2nd async signal isn't dropped */
     task_wake(ap->task);                     /* unblock it if it's parked in read()/sigfd */
+    irq_restore(f);
 }
 
 /* sigprocmask (M1208): change the caller's blocked-signal mask and return the
@@ -2732,7 +2831,11 @@ long app_sigsuspend(struct registers *r, uint32_t mask) {
     if (!a) return -1;
     uint32_t old = a->sig_blocked;
     a->sig_blocked = mask & ~((1u << 9) | (1u << 19));   /* SIGKILL/SIGSTOP never blockable (matches sigprocmask) */
-    while (!app_signal_deliverable()) {
+    for (;;) {
+        uint64_t f = irq_save();               /* pairs with app_request_signal's own lock (M1612) */
+        int deliverable = app_signal_deliverable();
+        irq_restore(f);
+        if (deliverable) break;
         task_block();
         if (!a->used) return -1;    /* killed while suspended */
     }
@@ -3033,7 +3136,11 @@ long app_sigfd_read(app_t *a, char *buf, int max) {
     struct app *ap = (struct app *)a;
     if (!ap || max < 3) return -1;
     int s;
-    while ((s = sigfd_pick(ap)) == 0) {       /* block until a sigfd signal is pending (woken by app_request_signal) */
+    for (;;) {                                /* block until a sigfd signal is pending (woken by app_request_signal) */
+        uint64_t f = irq_save();              /* pairs with app_request_signal's own lock (M1612) */
+        s = sigfd_pick(ap);
+        irq_restore(f);
+        if (s != 0) break;
         task_block();
         if (!ap->used) return -1;             /* killed while parked */
     }
@@ -3689,11 +3796,16 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 5) {   /* eventfd: read the counter (M1242) */
         if (max < 8) return -1;
         while (a->fd[fd].off <= 0) {            /* empty: block for real unless EFD_NONBLOCK (M1579) */
-            if (a->fd[fd].obj) return -1;       /* obj doubles as the EFD_NONBLOCK flag for this type -> EAGAIN */
+            uint64_t f = irq_save();             /* M1612: pairs with app_fd_write's own lock below --
+                                                    * was unsynchronized, so a writer's check of g_evfd_wait[]
+                                                    * could run before this reader finishes registering */
+            if (a->fd[fd].off > 0) { irq_restore(f); break; }   /* a writer raced in since the check above */
+            if (a->fd[fd].obj) { irq_restore(f); return -1; }   /* obj doubles as the EFD_NONBLOCK flag for this type -> EAGAIN */
             int slot = -1;
             for (int i = 0; i < EVFD_NWAIT; i++) if (!g_evfd_wait[i].used) { slot = i; break; }
-            if (slot < 0) return -1;            /* too many blocked eventfd readers system-wide; fail rather than hang */
+            if (slot < 0) { irq_restore(f); return -1; }        /* too many blocked eventfd readers system-wide; fail rather than hang */
             g_evfd_wait[slot].a = a; g_evfd_wait[slot].fd = fd; g_evfd_wait[slot].task = task_self(); g_evfd_wait[slot].used = 1;
+            irq_restore(f);                      /* released BEFORE blocking (M1612) */
             task_block();                       /* woken by eventfd_write, a kill, or a signal */
             g_evfd_wait[slot].used = 0;          /* reclaim our slot on resume (idempotent w/ the WAKE below) */
         }
@@ -3774,12 +3886,14 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
         if (add == 0xFFFFFFFFFFFFFFFFull) return -1;                          /* ~0 is reserved/invalid for eventfd */
         long nc = a->fd[fd].off + (long)add;
         if (nc < a->fd[fd].off) return -1;                                   /* overflow -> would block; reject */
+        uint64_t f = irq_save();
         a->fd[fd].off = nc;
         for (int i = 0; i < EVFD_NWAIT; i++)                                  /* wake every reader blocked on THIS (app, fd) (M1579) */
             if (g_evfd_wait[i].used && g_evfd_wait[i].a == a && g_evfd_wait[i].fd == fd) {
                 g_evfd_wait[i].used = 0;
                 task_wake((task_t *)g_evfd_wait[i].task);
             }
+        irq_restore(f);
         return 8;
     }
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 10) {  /* TCP socket: send (M1268) */
@@ -4806,8 +4920,13 @@ int app_sstep_get(app_t *a, uint64_t *out, int max) {       /* copy the recorded
  * syscalls; when it calls one, syscall_dispatch parks it (app_seccomp_notify)
  * and a supervisor (typically the parent) reads the pending call
  * (app_seccomp_wait) and replies with allow / deny / emulate
- * (app_seccomp_reply). The two-way rendezvous runs interrupts-off (the syscall
- * is an interrupt gate), so there's no lost wakeup — the mailbox discipline. */
+ * (app_seccomp_reply).
+ *
+ * M1612: the two-way rendezvous now goes through app_wake_lock -- was "runs
+ * interrupts-off... so there's no lost wakeup, the mailbox discipline",
+ * exactly the assumption M1531 invalidated and M1608 already fixed in
+ * mbox.c itself. Child and supervisor are two different processes, routinely
+ * on two different cores. */
 long app_seccomp_arm(int nr) {
     struct app *a = cur();
     if (!a || nr < 0 || nr >= 128) return -1;
@@ -4821,10 +4940,12 @@ int app_seccomp_traps(app_t *a, uint64_t nr) {
 /* Park the calling (child) task with a pending notification; returns the verdict
  * value, and sets *run_real to whether the real syscall should still run. */
 long app_seccomp_notify(app_t *a, uint64_t nr, uint64_t b1, uint64_t b2, uint64_t b3, int *run_real) {
+    uint64_t f = irq_save();
     a->sc_nr = nr; a->sc_a = b1; a->sc_b = b2; a->sc_c = b3;
     a->sc_run_real = 1; a->sc_retval = 0;
     a->sc_pending = 1;
     if (a->sc_sup) { task_wake((task_t *)a->sc_sup); a->sc_sup = 0; }   /* wake a waiting supervisor */
+    irq_restore(f);                                     /* released BEFORE blocking (M1612) */
     task_block();                                       /* the child blocks until the supervisor replies */
     *run_real = a->sc_run_real;
     return a->sc_retval;
@@ -4833,44 +4954,61 @@ long app_seccomp_notify(app_t *a, uint64_t nr, uint64_t b1, uint64_t b2, uint64_
 long app_seccomp_wait(int childpid, uint64_t *ev) {
     struct app *c = app_by_pid(childpid);
     if (!c) return -1;                                  /* no such child */
+    uint64_t f = irq_save();
     if (!c->sc_pending) {                               /* block until the child parks (even if not armed yet) */
         c->sc_sup = (void *)task_self();                /* register self as the waiter; the child's park wakes us */
+        irq_restore(f);                                 /* released BEFORE blocking (M1612) */
         task_block();
+        f = irq_save();
         c->sc_sup = 0;
     }
-    if (!c->sc_pending) return 0;                       /* stray wake (e.g. the child exited without parking) */
-    ev[0] = c->sc_nr; ev[1] = c->sc_a; ev[2] = c->sc_b; ev[3] = c->sc_c;
+    int pending = c->sc_pending;
+    uint64_t nr = c->sc_nr, a1 = c->sc_a, a2 = c->sc_b, a3 = c->sc_c;
+    irq_restore(f);
+    if (!pending) return 0;                             /* stray wake (e.g. the child exited without parking) */
+    ev[0] = nr; ev[1] = a1; ev[2] = a2; ev[3] = a3;
     return 1;
 }
 /* Supervisor: deliver the verdict and resume the child. run_real!=0 lets the real
  * syscall run; otherwise the child's syscall returns `retval`. 0/-1. */
 long app_seccomp_reply(int childpid, int run_real, long retval) {
     struct app *c = app_by_pid(childpid);
-    if (!c || !c->sc_pending) return -1;
+    if (!c) return -1;
+    uint64_t f = irq_save();
+    if (!c->sc_pending) { irq_restore(f); return -1; }
     c->sc_run_real = run_real; c->sc_retval = retval;
     c->sc_pending = 0;
     if (c->task) task_wake((task_t *)c->task);          /* resume the child */
+    irq_restore(f);
     return 0;
 }
 
 /* ptrace (M1199): the canonical Unix process-tracing syscall. A tracer (the
  * parent) stops a tracee, reads/modifies its registers + memory, and continues
  * it — the mechanism strace/gdb are built on. Assembled from pieces already in
- * the tree: the stop/wait/cont rendezvous mirrors seccomp-notify above
- * (task_block/task_wake, interrupts-off so there's no lost wakeup — every ring-3
- * task is scheduled on the BSP, so tracer and tracee never truly run at once);
+ * the tree: the stop/wait/cont rendezvous mirrors seccomp-notify above;
  * PEEK/POKE reuse app_process_vm_read/write (same-tree-gated, COW-aware); GETREGS
  * reuses the tracee's saved trap frame (task_uframe). The PT_* request codes are
- * shared with userspace in syscall.h. */
+ * shared with userspace in syscall.h.
+ *
+ * M1612: the stop/wait/cont rendezvous now goes through app_wake_lock -- was
+ * "interrupts-off so there's no lost wakeup -- every ring-3 task is scheduled
+ * on the BSP, so tracer and tracee never truly run at once", which is simply
+ * false since M1531: task_create sets pin_core=-1 for every ordinary task
+ * (only task 0, the desktop/WM, is BSP-pinned), and kernel/smp.c confirms
+ * every AP joins the general scheduler -- a tracer and its tracee are two
+ * ordinary tasks the CFS picker can and does place on two different cores. */
 
 /* The tracee parks here, from its own raise() syscall, until the tracer resumes
  * it. Runs in the tracee's syscall trap context — safe to block, exactly like
  * app_seccomp_notify. */
 static long app_trace_stop(int signo) {
     struct app *a = cur();
+    uint64_t f = irq_save();
     a->trace_sig = signo;
     a->trace_stopped = 1;
     if (a->trace_sup) { task_wake((task_t *)a->trace_sup); a->trace_sup = 0; }  /* wake the tracer */
+    irq_restore(f);                                 /* released BEFORE blocking (M1612) */
     task_block();                                  /* resumed by the tracer's PT_CONT */
     a->trace_stopped = 0;
     return 0;
@@ -4897,15 +5035,20 @@ long app_ptrace(long req, int pid, uint64_t addr, uint64_t data) {
      * ptraced upfront: the child may not have run PT_TRACEME yet (a fork-order
      * race), and registering as the waiter "even if not armed yet" — like
      * app_seccomp_wait — is what closes that race (the child's trace-stop wakes
-     * us). The check-then-block is atomic w.r.t. the child: ring-3 tasks all run
-     * on the BSP, so the child only runs once we task_block(). */
+     * us). The check-then-block goes through app_wake_lock (M1612), not BSP
+     * co-scheduling — see the header comment above. */
     if (req == PT_WAIT) {
+        uint64_t f = irq_save();
         if (!t->trace_stopped) {
             t->trace_sup = (void *)task_self();
+            irq_restore(f);                 /* released BEFORE blocking (M1612) */
             task_block();
+            f = irq_save();
             t->trace_sup = 0;
         }
-        return t->trace_stopped ? t->trace_sig : -1;
+        int stopped = t->trace_stopped, sig = t->trace_sig;
+        irq_restore(f);
+        return stopped ? sig : -1;
     }
 
     /* Every other request inspects/continues a child that must be traced AND
@@ -4938,17 +5081,22 @@ long app_ptrace(long req, int pid, uint64_t addr, uint64_t data) {
         *u = nw;
         return 0;
     }
-    case PT_CONT:                                  /* resume the stopped tracee */
+    case PT_CONT: {                                 /* resume the stopped tracee */
+        uint64_t f = irq_save();
         t->trace_stopped = 0;
         if (t->task) task_wake((task_t *)t->task);
+        irq_restore(f);
         return 0;
+    }
     case PT_SINGLESTEP: {                          /* resume for ONE instruction, then re-stop (SIGTRAP) */
         struct registers *u = task_uframe((task_t *)t->task);
         if (!u) return -1;
         u->rflags |= RFLAGS_TF;                    /* trap after the next instruction back in ring 3 */
         t->trace_stepping = 1;
+        uint64_t f = irq_save();
         t->trace_stopped = 0;
         if (t->task) task_wake((task_t *)t->task);
+        irq_restore(f);
         return 0;
     }
     }
