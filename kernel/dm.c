@@ -86,7 +86,28 @@ static int dm_raid5_write1(dm_raid5_t *r, uint64_t lba, const void *buf) {
     uint64_t stripe = lba / nd;
     int pm = (int)(stripe % r->n);
     int dmem = raid5_member(r, stripe, (int)(lba % nd));
-    if (dmem < 0 || r->failed[dmem]) return -1;            /* writing a failed data member: unsupported */
+    if (dmem < 0) return -1;
+    if (r->failed[dmem]) {
+        /* degraded write to the failed member itself: can't read OR write it,
+         * so recompute parity FRESH from every OTHER live member's current
+         * sector XOR'd with the new data -- the same reconstruct-by-XOR idea
+         * dm_raid5_read1 already uses above, just substituting the new data
+         * for the one member we can't touch. The physical sector on the
+         * failed member itself is untouched (there's no rebuild/resync path
+         * in this file at all); a later degraded READ still reconstructs the
+         * correct value from this new parity, same as any other read. */
+        if (r->failed[pm]) return -1;                       /* target member AND parity both down: unrecoverable */
+        uint8_t newpar[DM_SECSZ], tmp[DM_SECSZ];
+        const uint8_t *nb = buf;
+        for (int b = 0; b < DM_SECSZ; b++) newpar[b] = nb[b];
+        for (int m = 0; m < r->n; m++) {
+            if (m == dmem || m == pm) continue;
+            if (r->failed[m]) return -1;                    /* a second failure -> unrecoverable */
+            if (blockdev_read(r->devs[m], stripe, 1, tmp) != 0) return -1;
+            for (int b = 0; b < DM_SECSZ; b++) newpar[b] ^= tmp[b];
+        }
+        return blockdev_write(r->devs[pm], stripe, 1, newpar);
+    }
     if (r->failed[pm])                                     /* parity down: write data only (rebuilt on resync) */
         return blockdev_write(r->devs[dmem], stripe, 1, buf);
     /* read-modify-write parity: new_par = old_par XOR old_data XOR new_data. */
@@ -229,9 +250,20 @@ void dm_selftest(void) {
         r.failed[dead] = 1;
         int deg = dm_raid5_read(&r, base + 0, 1, back) == 0;              /* reconstruct it from parity + survivors */
         for (int b = 0; deg && b < DM_SECSZ; b++) if (back[b] != (uint8_t)(b * 3 + 0 * 29 + 5)) deg = 0;
+        /* degraded WRITE: with the SAME member still failed, write a NEW
+         * pattern to its logical position -- must recompute parity fresh
+         * from every other live member + the new data, not just refuse the
+         * write outright. Read it back (still degraded, via reconstruction)
+         * to prove the recomputed parity is actually correct. */
+        for (int b = 0; b < DM_SECSZ; b++) pat[b] = (uint8_t)(b * 5 + 77);
+        int degw = (dm_raid5_write(&r, base + 0, 1, pat) == 0);
+        if (degw) {
+            degw = (dm_raid5_read(&r, base + 0, 1, back) == 0);
+            for (int b = 0; degw && b < DM_SECSZ; b++) if (back[b] != pat[b]) degw = 0;
+        }
         r.failed[dead] = 0;
-        if (normal && parok && deg) kprintf("[ ok ] dm RAID-5 parity OK (%d members, single-disk fault reconstructed)\n", nd);
-        else kprintf("[dm] RAID-5 FAILED (normal=%d parity=%d degraded=%d)\n", normal, parok, deg);
+        if (normal && parok && deg && degw) kprintf("[ ok ] dm RAID-5 parity OK (%d members, single-disk fault reconstructed, degraded write recomputes parity)\n", nd);
+        else kprintf("[dm] RAID-5 FAILED (normal=%d parity=%d degraded=%d degraded_write=%d)\n", normal, parok, deg, degw);
     }
 
     /* ---- linear LV: concatenate the members into one address space ----
