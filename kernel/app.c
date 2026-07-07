@@ -3718,6 +3718,7 @@ static long app_file_write_at(struct app *a, int fd, const void *buf, unsigned l
     if (w < 0) return -1;
     return (long)len;
 }
+#define SIGPIPE 13   /* real Linux's own number; free here (M1581) */
 long app_fd_write(int fd, const void *buf, unsigned long len) {
     struct app *a = cur(); if (!a) return -1;
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 2) {   /* FILE fd: positioned write (M1195) */
@@ -3763,7 +3764,9 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
         return pty_write(a->fd[fd].obj, buf, len);
     }
     int idx = fd_pipe_idx(a, fd, 1); if (idx < 0) return -1;
-    return pipe_write(idx, buf, len);
+    long pw = pipe_write(idx, buf, len);
+    if (pw == -1) app_request_signal(a, SIGPIPE);   /* no readers left (EPIPE) -> also SIGPIPE, like real POSIX (M1581) */
+    return pw;
 }
 /* pread/pwrite (M1572): read/write at an explicit offset WITHOUT touching
  * a->fd[fd].off — the one thing that distinguishes them from read()/write()

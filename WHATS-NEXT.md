@@ -1,5 +1,15 @@
 # What's next
 
+> **(M1581) Kernel — `SIGPIPE`: writing into a pipe with no readers left now raises a signal, not just an errno.** Real POSIX: `write()` on a pipe/FIFO whose read end has been fully closed returns `-1`/EPIPE *and* raises `SIGPIPE` on the writer — this codebase had the errno half (`kernel/pipe.c`'s `p->r_open == 0` check, since the pipe subsystem's earliest form) but never the signal half. `SIGPIPE=13` slots in at its real Linux number with zero collision — this project's signal registry is scattered between a shared block in `syscall.h` and several file-local `#define`s directly in `app.c` (`SIGALRM`, `SIGXCPU`, `SIGXFSZ`), so `SIGPIPE` joins the latter group, defined immediately above `app_fd_write`, its only use site.
+>
+> The fix lives entirely at `app_fd_write`'s one pipe/FIFO fallthrough (both fd types funnel through the same `pipe_write`), not inside `pipe.c` itself: `pipe_write`'s `-1` return through this specific call path can only mean "no readers left" (the *only other* `-1` path, a torn-down pipe object, can't happen between this call site's own idx lookup and the call), so raising the signal right there needed no new plumbing — just the same `app_request_signal()` every other opt-in signal in this codebase already uses. Since signals here are opt-in-only by design (no handler installed = silently ignored, per M1561), this is purely additive: any existing caller that never installs a `SIGPIPE` handler sees byte-for-byte the same behavior as before.
+>
+> **Deliberately scoped to pipes/FIFOs**, matching where the survey found the one real, already-detected EPIPE condition — real Linux also raises `SIGPIPE` for a disconnected `AF_UNIX` socket and a TCP peer that RST'd a connection, neither of which funnels through this same choke point; left for a future pass rather than folded in speculatively.
+>
+> New `sigpipetest`: a pipe with its read end closed immediately, a `SIGPIPE` handler installed beforehand, then one `write()` — checks both that the call still returns `-1` (the pre-existing, unchanged behavior) *and* that the handler actually fired.
+>
+> **Verified:** `make check` (69 suites) — a fully clean run, exit 0; in-guest `sigpipetest` passes on the first attempt.
+>
 > **(M1580) Kernel — `getsid`: a seventh research survey's top pick, and dead code since M1231.** `app_sid_of(app_t *a)` has existed since M1231 with exactly one caller anywhere in the tree — `/proc/<pid>`'s own stat formatting in `procfs.c` — while `getsid(2)` itself, the real syscall a POSIX program actually calls, was never wired up. The exact same shape as M1558's `tcgetpgrp` ("dead code since M1176, finally wired to a syscall"): the underlying data was always tracked correctly (`struct app`'s own `sid` field, set by `setsid()` since M1176), just never exposed.
 >
 > `app_getsid(int pid)` is `app_getpgid`'s own one-line template with `pgid` swapped for `sid`: `pid ? app_by_pid(pid) : cur()`, then read the field. Grouped into the same `PL_PROC` pledge class as `getpgid`/`setpgid`/`setsid` — it's the same query, just one field over.

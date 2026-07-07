@@ -181,6 +181,8 @@ static void sh_xfsz_handler(int sig) { (void)sig; g_xfsz_fired = 1; }
  * from inside the SIGUSR1 handler itself. */
 static volatile int g_sigsuspend_fired;
 static void sh_sigsuspend_handler(int sig) { (void)sig; g_sigsuspend_fired = 1; }
+static volatile int g_sigpipe_fired;                                          /* (M1581) */
+static void sh_sigpipe_handler(int sig) { (void)sig; g_sigpipe_fired = 1; }
 /* SIGCHLD (M1562): fires on a live parent when a child exits, now that
  * app_reap actually requests it (previously just a waitid siginfo label). */
 static volatile int g_sigchld_fired;
@@ -781,7 +783,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  sigpipetest(SIGPIPE)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3100,6 +3102,23 @@ static int run_command(char *line, char *cwd) {
                 print((ok && ok2) ? "pipe: fork round-trip + EOF + dup2 all OK\n" : "pipetest: VERIFY FAILED\n");
                 if (!(ok && ok2)) g_status = 1;
             }
+        } else if (streq(line, "sigpipetest")) {   /* write() with no readers left -> -1 (EPIPE) AND SIGPIPE (M1581) */
+            int ok = 1;
+            int fds[2];
+            if (sys_pipe(fds) != 0) { print("sigpipetest: pipe() failed\n"); g_status = 1; }
+            else {
+                g_sigpipe_fired = 0;
+                sys_signal(13 /*SIGPIPE*/, sh_sigpipe_handler);
+                sys_fdclose(fds[0]);                          /* drop the read end -> no readers left */
+                char c = 'x';
+                long w = sys_fdwrite(fds[1], &c, 1);
+                ok = (w == -1 && g_sigpipe_fired);
+                sys_fdclose(fds[1]);
+                sys_signal(13, 0);                             /* disable again -- don't leak a handler into later commands */
+            }
+            print(ok ? "write() to a pipe with no readers left: -1 (EPIPE) AND SIGPIPE delivered -- OK\n"
+                     : "sigpipetest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
         } else if (streq(line, "polltest")) {   /* poll(2) readiness multiplex over the fd table (M1210) */
             int ok = 1, fds[2];
             if (sys_pipe(fds) != 0) { print("polltest: pipe() failed\n"); g_status = 1; }
