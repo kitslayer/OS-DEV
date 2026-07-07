@@ -766,7 +766,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  epollpwaittest(epoll_pwait)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3085,6 +3085,31 @@ static int run_command(char *line, char *cwd) {
             if (mfd >= 0) sys_fdclose(mfd);
             print(ok ? "fsync/fdatasync/sync_file_range: 0 on a real file fd (write-through already durable), -1 on a memfd -- OK\n"
                      : "fsynctest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+        } else if (streq(line, "fxattrtest")) {   /* f{set,get,list,remove}xattr: fd-based siblings of *xattr (M1569) */
+            int ok = 1;
+            sys_writefile("/tmp/FX.TXT", "hi", 2);
+            int fd = sys_open("/tmp/FX.TXT");
+            if (fd < 0) ok = 0;
+            else {
+                /* FAT32-only boot disk (no ext2 volume) -- same honest limitation as
+                 * M1553's fchmodat/fchownat: what's verifiable here is that the fd->path
+                 * resolution reaches vfs_*xattr and denies cleanly, the SAME way the
+                 * path-based call on the SAME file already does -- not the success path. */
+                char buf[32];
+                if (sys_fsetxattr(fd, "user.x", "v", 1) != -1) ok = 0;
+                if (sys_fgetxattr(fd, "user.x", buf, sizeof buf) != -1) ok = 0;
+                if (sys_flistxattr(fd, buf, sizeof buf) != -1) ok = 0;
+                if (sys_fremovexattr(fd, "user.x") != -1) ok = 0;
+                if (sys_setxattr("/tmp/FX.TXT", "user.x", "v", 1) != -1) ok = 0;   /* path-based: same denial */
+                sys_fdclose(fd);
+            }
+            sys_delete("/tmp/FX.TXT");
+            int mfd = sys_memfd_create("mx", 0);          /* a non-FILE fd: app_fd_path returns 0, must deny too */
+            if (mfd < 0 || sys_fsetxattr(mfd, "user.x", "v", 1) != -1) ok = 0;
+            if (mfd >= 0) sys_fdclose(mfd);
+            print(ok ? "f{set,get,list,remove}xattr: fd->path resolution reaches vfs_*xattr (denies cleanly on FAT32, same as path-based; denies a non-file fd too) -- OK\n"
+                     : "fxattrtest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "prlimittest")) {  /* prlimit(2) get/set + /proc/<pid>/limits (M1214) */
             sys_prlimit(0, RLIMIT_NPROC, 7, 1);              /* set self's NPROC limit = 7 */

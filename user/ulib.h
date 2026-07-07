@@ -274,6 +274,10 @@ long  sys_setxattr(const char *path, const char *name, const void *val, unsigned
 long  sys_getxattr(const char *path, const char *name, void *out, unsigned long max);  /* read a user.* xattr; full size/-1 (M1182) */
 long  sys_listxattr(const char *path, char *out, unsigned long max);  /* NUL-sep user.* xattr names; total/-1 (M1182) */
 long  sys_removexattr(const char *path, const char *name);  /* remove a user.* xattr; 0/-1 (M1182) */
+long  sys_fsetxattr(int fd, const char *name, const void *val, unsigned long vlen);  /* set a user.* xattr on an open fd; vlen/-1 (M1569) */
+long  sys_fgetxattr(int fd, const char *name, void *out, unsigned long max);  /* read a user.* xattr on an open fd; size/-1 (M1569) */
+long  sys_flistxattr(int fd, char *out, unsigned long max);  /* NUL-sep user.* xattr names on an open fd; total/-1 (M1569) */
+long  sys_fremovexattr(int fd, const char *name);  /* remove a user.* xattr on an open fd; 0/-1 (M1569) */
 int   sys_pty_open(void);                                    /* -> pty master id (slave = master|1); -1 (M1185) */
 long  sys_pty_read(int id, void *buf, unsigned long max);    /* bytes; 0 EOF; -1 (M1185) */
 long  sys_pty_write(int id, const void *buf, unsigned long len);  /* bytes; -1 (master write feeds the ldisc) (M1185) */

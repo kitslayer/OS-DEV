@@ -309,7 +309,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
     case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
-    case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_open:
+    case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_fgetxattr: case SYS_flistxattr: case SYS_open:
     case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat:
         return PL_RPATH;
     case SYS_writefile: case SYS_delete: case SYS_mkdir: case SYS_truncate: case SYS_crypt:
@@ -320,6 +320,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_gzip: case SYS_gunzip: case SYS_unzip: case SYS_untar:
     case SYS_savebmp: case SYS_screenshot: case SYS_setwall: case SYS_cas_store:
     case SYS_fallocate: case SYS_copy_file_range: case SYS_setxattr: case SYS_removexattr:
+    case SYS_fsetxattr: case SYS_fremovexattr:
         return PL_WPATH;
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
@@ -374,6 +375,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_dhcp]="dhcp",[SYS_cas_store]="cas_store",[SYS_cas_fetch]="cas_fetch",
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_setitimer]="setitimer",[SYS_getitimer]="getitimer",[SYS_sntp]="sntp",
         [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",[SYS_epoll_pwait]="epoll_pwait",[SYS_inotify_rm_watch]="inotify_rm_watch",
+        [SYS_fsetxattr]="fsetxattr",[SYS_fgetxattr]="fgetxattr",[SYS_flistxattr]="flistxattr",[SYS_fremovexattr]="fremovexattr",
         [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
@@ -1394,6 +1396,38 @@ void syscall_dispatch(struct registers *r) {
         if (!ustr(r->rdi) || !ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)vfs_removexattr((const char *)r->rdi, (const char *)r->rsi);
         break;
+    /* f{set,get,list,remove}xattr (M1569): the fd-based siblings openat/fstatat's
+     * own family already established a pattern for -- app_fd_path (M1221)
+     * resolves an open FILE fd to its path, then straight into the SAME
+     * vfs_*xattr this syscall's own path-based version already calls. */
+    case SYS_fsetxattr: {                  /* (fd, name, value, vlen) -> set a user.* xattr (M1569) */
+        if (!ustr(r->rsi) || !ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }
+        const char *p = app_fd_path((int)r->rdi);
+        if (!p) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_setxattr(p, (const char *)r->rsi, (const void *)r->rdx, r->r10);
+        break;
+    }
+    case SYS_fgetxattr: {                  /* (fd, name, out, max) -> read a user.* xattr (M1569) */
+        if (!ustr(r->rsi) || !ubuf(r->rdx, r->r10)) { r->rax = (uint64_t)-1; break; }
+        const char *p = app_fd_path((int)r->rdi);
+        if (!p) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_getxattr(p, (const char *)r->rsi, (void *)r->rdx, r->r10);
+        break;
+    }
+    case SYS_flistxattr: {                 /* (fd, out, max) -> NUL-separated user.* names (M1569) */
+        if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
+        const char *p = app_fd_path((int)r->rdi);
+        if (!p) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_listxattr(p, (char *)r->rsi, r->rdx);
+        break;
+    }
+    case SYS_fremovexattr: {               /* (fd, name) -> remove a user.* xattr (M1569) */
+        if (!ustr(r->rsi)) { r->rax = (uint64_t)-1; break; }
+        const char *p = app_fd_path((int)r->rdi);
+        if (!p) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)vfs_removexattr(p, (const char *)r->rsi);
+        break;
+    }
     case SYS_pty_open:                     /* () -> pseudoterminal master id (M1185) */
         r->rax = (uint64_t)(int64_t)pty_open();
         break;

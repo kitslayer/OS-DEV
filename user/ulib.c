@@ -612,6 +612,10 @@ long sys_setxattr(const char *path, const char *name, const void *val, unsigned 
 long sys_getxattr(const char *path, const char *name, void *out, unsigned long max) { return do_syscall4(SYS_getxattr, (long)path, (long)name, (long)out, (long)max); }
 long sys_listxattr(const char *path, char *out, unsigned long max) { return do_syscall(SYS_listxattr, (long)path, (long)out, (long)max); }
 long sys_removexattr(const char *path, const char *name) { return do_syscall(SYS_removexattr, (long)path, (long)name, 0); }
+long sys_fsetxattr(int fd, const char *name, const void *val, unsigned long vlen) { return do_syscall4(SYS_fsetxattr, fd, (long)name, (long)val, (long)vlen); }
+long sys_fgetxattr(int fd, const char *name, void *out, unsigned long max) { return do_syscall4(SYS_fgetxattr, fd, (long)name, (long)out, (long)max); }
+long sys_flistxattr(int fd, char *out, unsigned long max) { return do_syscall(SYS_flistxattr, fd, (long)out, (long)max); }
+long sys_fremovexattr(int fd, const char *name) { return do_syscall(SYS_fremovexattr, fd, (long)name, 0); }
 int  sys_pty_open(void) { return (int)do_syscall(SYS_pty_open, 0, 0, 0); }
 long sys_pty_read(int id, void *buf, unsigned long max) { return do_syscall(SYS_pty_read, id, (long)buf, (long)max); }
 long sys_pty_write(int id, const void *buf, unsigned long len) { return do_syscall(SYS_pty_write, id, (long)buf, (long)len); }
