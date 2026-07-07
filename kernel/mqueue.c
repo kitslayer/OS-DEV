@@ -124,6 +124,26 @@ int mqueue_setattr(int idx, long new_flags, long *old_flags_out) {
     return 0;
 }
 
+/* mq_unlink (M1593): mqueue_open's create path has set `used = 1` since
+ * M1154 with no removal path anywhere in this file -- 16 distinct mq_open
+ * names in one boot permanently exhausted the table forever. No refcount/
+ * open-descriptor-count exists here (unlike sem.c's named semaphores), so
+ * this is an immediate, unconditional free, not a mirrors-sem_named_unlink
+ * defer-until-last-close; any sender/receiver already blocked on this exact
+ * queue is woken rather than left parked on removed state forever, and
+ * their own task_block loops already check `q->used` on wake and bail with
+ * -1 (the same "woken but still gone" path they already use for a kill). */
+int mqueue_unlink(const char *name) {
+    if (!name || !name[0]) return -1;
+    for (int i = 0; i < MQ_N; i++) if (mq[i].used && meq(mq[i].name, name)) {
+        mq[i].used = 0;
+        if (mq[i].send_waiter) { task_wake(mq[i].send_waiter); mq[i].send_waiter = 0; }
+        if (mq[i].recv_waiter) { task_wake(mq[i].recv_waiter); mq[i].recv_waiter = 0; }
+        return 0;
+    }
+    return -1;
+}
+
 /* Backs /proc/mqueue: one line per open queue — "name  cur/max  msgsize". */
 int mqueue_format(char *out, int max) {
     int p = 0;

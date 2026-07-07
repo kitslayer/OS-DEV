@@ -292,7 +292,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_history: case SYS_setcolor: case SYS_caret: case SYS_signal: case SYS_sigaction: case SYS_sigqueue: case SYS_sigaltstack: case SYS_raise:
     case SYS_timer_create: case SYS_timer_settime: case SYS_timer_gettime: case SYS_timer_delete: case SYS_hpet: case SYS_ptsname: case SYS_oom: case SYS_clock_settime: case SYS_pidfd_getfd: case SYS_acpi: case SYS_aslr:
     case SYS_alarm: case SYS_getrusage: case SYS_setitimer: case SYS_getitimer:
-    case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive: case SYS_mq_getattr: case SYS_mq_setattr:
+    case SYS_mq_open: case SYS_mq_send: case SYS_mq_receive: case SYS_mq_getattr: case SYS_mq_setattr: case SYS_mq_unlink:
     case SYS_semget: case SYS_semop: case SYS_semctl:
     case SYS_sem_open: case SYS_sem_close: case SYS_sem_unlink: case SYS_sem_wait: case SYS_sem_trywait: case SYS_sem_post: case SYS_sem_getvalue:
     case SYS_msgget: case SYS_msgsnd: case SYS_msgrcv: case SYS_msgctl:
@@ -396,7 +396,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_faccessat2]="faccessat2",[SYS_sched_setaffinity]="sched_setaffinity",[SYS_sched_getaffinity]="sched_getaffinity",[SYS_clone]="clone",[SYS_gettid]="gettid",[SYS_thread_exit]="thread_exit",[SYS_join]="join",[SYS_set_tls]="set_tls",[SYS_set_robust_list]="set_robust_list",[SYS_overlay]="overlay",
         [SYS_mincore]="mincore",[SYS_mlock]="mlock",[SYS_munlock]="munlock",[SYS_getrusage]="getrusage",
         [SYS_fiemap]="fiemap",[SYS_fallocate]="fallocate",
-        [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",[SYS_mq_getattr]="mq_getattr",[SYS_mq_setattr]="mq_setattr",
+        [SYS_mq_open]="mq_open",[SYS_mq_send]="mq_send",[SYS_mq_receive]="mq_receive",[SYS_mq_getattr]="mq_getattr",[SYS_mq_setattr]="mq_setattr",[SYS_mq_unlink]="mq_unlink",
         [SYS_mmap_huge]="mmap_huge",
         [SYS_semget]="semget",[SYS_semop]="semop",[SYS_semctl]="semctl",
         [SYS_sem_open]="sem_open",[SYS_sem_close]="sem_close",[SYS_sem_unlink]="sem_unlink",
@@ -1852,6 +1852,10 @@ void syscall_dispatch(struct registers *r) {
     case SYS_mq_open:                      /* (name, maxmsg, msgsize) -> priority msg queue index (M1154) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)mqueue_open((const char *)r->rdi, (int)r->rsi, (int)r->rdx);
+        break;
+    case SYS_mq_unlink:                    /* (name) -> remove a named message queue (M1593) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)mqueue_unlink((const char *)r->rdi);
         break;
     case SYS_mq_send:                      /* (idx, buf, len, prio) -> enqueue (M1154) */
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }

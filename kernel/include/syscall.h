@@ -371,6 +371,7 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SYS_sched_getscheduler  337   /* () -> the caller's own scheduling policy (SCHED_OTHER/FIFO/RR); -1 if unset (M1591) */
 #define SYS_sched_getparam      338   /* () -> the caller's own rt_priority (0 for SCHED_OTHER); -1 if unset (M1591) */
 #define SYS_sched_rr_get_interval  339   /* (sec*, nsec*) -> the SCHED_RR timeslice as a real duration; 0/-1 (M1591) */
+#define SYS_mq_unlink    340   /* (name) -> remove a named message queue, waking any blocked sender/receiver; 0/-1 (M1593) */
 
 /* select(2) (M1584): a small, from-scratch fd_set sized for THIS fd table
  * (APP_NFD=24), not real glibc's 1024-bit/128-byte one -- every fd this OS can

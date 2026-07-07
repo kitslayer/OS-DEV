@@ -79,6 +79,7 @@ long sys_getrusage(int who, struct rusage *ru);    /* fill resource usage (RUSAG
 long sys_fiemap(const char *path, struct fiemap_extent *out, int max);  /* file physical extent map; count/-1 (M1152) */
 long sys_fallocate(const char *path, int mode, unsigned long offset, unsigned long len);  /* punch hole (FALLOC_FL_PUNCH_HOLE); blocks/-1 (M1153) */
 long sys_mq_open(const char *name, int maxmsg, int msgsize);   /* open/create priority msg queue; index/-1 (M1154) */
+long sys_mq_unlink(const char *name);                           /* remove a named message queue; 0/-1 (M1593) */
 long sys_mq_send(int idx, const void *buf, unsigned long len, unsigned int prio);    /* enqueue; bytes/-1 (M1154) */
 long sys_mq_receive(int idx, void *buf, unsigned long max, unsigned int *prio);      /* dequeue highest prio; bytes/-1 (M1154) */
 long sys_mq_getattr(int idx, struct mq_attr *out);                                    /* flags/maxmsg/msgsize/curmsgs; 0/-1 (M1571) */

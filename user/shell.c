@@ -40,6 +40,14 @@ static void evfd_wake_thread_fn(void *arg) {                     /* sleeps brief
     sys_fdwrite(g_evfd_shared, w, 8);
     sys_thread_exit();
 }
+static volatile int g_mq_shared;                                /* mqtest's mq_unlink wake case, shared with its clone thread (M1593) */
+static volatile long g_mq_recv_result;
+static void mq_unlink_wait_thread_fn(void *arg) {                 /* blocks in mq_receive on an empty queue */
+    (void)arg;
+    char b[8];
+    g_mq_recv_result = sys_mq_receive(g_mq_shared, b, sizeof b, 0);
+    sys_thread_exit();
+}
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
@@ -2299,6 +2307,45 @@ static int run_command(char *line, char *cwd) {
                 print(aok ? "mq_getattr/mq_setattr: maxmsg/msgsize/curmsgs correct, O_NONBLOCK fails a full/empty queue immediately -- OK\n"
                           : "mqtest: mq_getattr/mq_setattr VERIFY FAILED\n");
                 if (!aok) g_status = 1;
+                /* mq_unlink (M1593): mqueue_open's create path had no removal path
+                 * anywhere before now -- exhaust+unlink+reopen all MQ_N=16 slots is
+                 * the real regression proof, plus confirming it wakes a receiver
+                 * already blocked on the exact queue being removed */
+                int uok = (sys_mq_unlink("/demo") == 0);
+                if (sys_mq_unlink("/no-such-mq") != -1) uok = 0;   /* unlinking an absent name -> -1 */
+                int eok = 1;
+                for (int i = 0; i < 16; i++) {
+                    char qn[3] = { 'M', (char)(i < 10 ? ('0' + i) : ('A' + i - 10)), 0 };
+                    if (sys_mq_open(qn, 4, 16) < 0) { eok = 0; break; }
+                }
+                if (sys_mq_open("MX", 4, 16) >= 0) eok = 0;         /* table genuinely full -> a 17th distinct name fails */
+                for (int i = 0; i < 16; i++) {
+                    char qn[3] = { 'M', (char)(i < 10 ? ('0' + i) : ('A' + i - 10)), 0 };
+                    if (sys_mq_unlink(qn) != 0) eok = 0;
+                }
+                int reopen = (int)sys_mq_open("MX", 4, 16);         /* slots freed -> a distinct name succeeds now */
+                if (reopen < 0) eok = 0;
+                if (reopen >= 0) sys_mq_unlink("MX");
+                int wake_ok = 1;
+                int wq = (int)sys_mq_open("/mqwake", 4, 16);
+                if (wq < 0) wake_ok = 0;
+                else {
+                    g_mq_shared = wq; g_mq_recv_result = -999;
+                    char *stk = malloc(64 * 1024);
+                    if (!stk) wake_ok = 0;
+                    else {
+                        long tid = sys_clone((void *)mq_unlink_wait_thread_fn, stk + 64 * 1024, 0);
+                        sys_sleep(150);                              /* let the thread reach mq_receive and block */
+                        if (sys_mq_unlink("/mqwake") != 0) wake_ok = 0;
+                        sys_sleep(150);                              /* let the woken thread run + record its result */
+                        if (tid <= 0 || g_mq_recv_result != -1) wake_ok = 0;   /* woken, reports gone (not a message) */
+                        free(stk);
+                    }
+                }
+                uok = uok && eok && wake_ok;
+                print(uok ? "mq_unlink: frees the name; exhaust+unlink+reopen all 16 slots; wakes a blocked receiver -- OK\n"
+                          : "mqtest: mq_unlink VERIFY FAILED\n");
+                if (!uok) g_status = 1;
             }
         } else if (streq(line, "semtest")) {   /* SysV semaphores: count + IPC_NOWAIT + atomic all-or-nothing (M1159) */
             int id = (int)sys_semget(IPC_PRIVATE, 2, IPC_CREAT);

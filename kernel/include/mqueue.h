@@ -11,3 +11,4 @@ long mqueue_receive(int idx, void *buf, unsigned long max, unsigned int *prio_ou
 int  mqueue_format(char *out, int max);                       /* /proc/mqueue text */
 int  mqueue_getattr(int idx, long *flags, long *maxmsg, long *msgsize, long *curmsgs);  /* 0/-1 (M1571) */
 int  mqueue_setattr(int idx, long new_flags, long *old_flags_out);  /* set O_NONBLOCK; 0/-1 (M1571) */
+int  mqueue_unlink(const char *name);                         /* remove a named queue, waking any blocked sender/receiver; 0/-1 (M1593) */
