@@ -118,7 +118,7 @@ static void ldisc(struct pty *p, unsigned char c) {
         return;
     }
     if (p->lflag & ECHO) emit(p, c);
-    if (p->linelen < (int)sizeof p->line) p->line[p->linelen++] = c;
+    if (p->linelen < (int)sizeof p->line - 1) p->line[p->linelen++] = c;   /* cap at the ring's real usable capacity (PBUF-1, one slot always kept empty) -- a full PBUF-byte line silently lost its last char to commit()'s pr_put otherwise */
     if (c == '\n') commit(p);                                /* newline ends the line */
 }
 
@@ -168,7 +168,8 @@ long pty_read(int id, void *buf, unsigned long max) {
     for (;;) {
         uint64_t fl = pty_irq_save();
         if (pr_cnt(r) > 0) { pty_irq_restore(fl); break; }
-        if (slave) { if (p->eof || !p->m_open) { pty_irq_restore(fl); return 0; } p->in_waiter = task_self(); }
+        if (slave) { if (p->eof) { p->eof = 0; pty_irq_restore(fl); return 0; }   /* EOF is a one-shot signal, like a real tty's ^D -- clear it once delivered so the NEXT read blocks normally instead of returning EOF forever */
+                     if (!p->m_open) { pty_irq_restore(fl); return 0; } p->in_waiter = task_self(); }
         else       { if (!p->s_open)           { pty_irq_restore(fl); return 0; } p->out_waiter = task_self(); }
         pty_irq_restore(fl);
         task_block();                                        /* woken by a writer/close (or a kill) */

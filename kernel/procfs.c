@@ -614,7 +614,7 @@ static long gen_pid_oom(char *b, int max, void *proc) {
 static long gen_pid_oom_score_adj(char *b, int max, void *proc) {
     int v = app_oom_adj_get((app_t *)proc);
     int p = 0;
-    if (v < 0) { if (p < max) b[p++] = '-'; v = -v; }   /* sdec is unsigned: emit the sign ourselves */
+    if (v < 0) { if (p < max - 1) b[p++] = '-'; v = -v; }   /* sdec is unsigned: emit the sign ourselves (was p<max, the one site not reserving the trailing NUL slot every sibling sapp/sdec call does) */
     p = sdec(b, p, max, (uint64_t)v);
     p = sapp(b, p, max, "\n");
     b[p] = 0; return p;

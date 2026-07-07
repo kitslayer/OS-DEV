@@ -241,8 +241,8 @@ long tmpfs_snap_control(const void *data, unsigned long len) {
     const char *s = (const char *)data;
     if (len >= 6 && s[0] == 'c' && s[1] == 'r') return tmpfs_snap_create() < 0 ? -1 : (long)len;
     if (len >= 4 && s[0] == 'd' && s[1] == 'r') {
-        const char *p = s + 4; while (*p == ' ' && (unsigned long)(p - s) < len) p++;
-        int g = 0; int got = 0; while (*p >= '0' && *p <= '9') { g = g * 10 + (*p - '0'); p++; got = 1; }
+        const char *p = s + 4; while ((unsigned long)(p - s) < len && *p == ' ') p++;   /* bound checked BEFORE the deref now, not after */
+        int g = 0; int got = 0; while ((unsigned long)(p - s) < len && *p >= '0' && *p <= '9') { g = g * 10 + (*p - '0'); p++; got = 1; }   /* was unbounded -- read past the write() buffer for a payload with no non-digit terminator */
         if (!got) return -1;
         return tmpfs_snap_drop(g) < 0 ? -1 : (long)len;
     }

@@ -3182,8 +3182,25 @@ static int run_command(char *line, char *cwd) {
                 sys_pty_write(s, "OUT", 3);
                 n = sys_pty_read(m, b, sizeof b);
                 if (!(n == 3 && b[0]=='O' && b[1]=='U' && b[2]=='T')) ok = 0;
+                /* 7) VEOF (^D) on an empty line: back to cooked mode, ^D -> slave read sees
+                 * EOF (n==0), and the pty is still usable afterward once the master writes a
+                 * real line (basic EOF-signaling coverage; ptytest had none before this).
+                 * NOTE: this does NOT specifically prove EOF is a one-shot flag (M1663's real
+                 * fix) -- pr_cnt(r)>0 short-circuits pty_read's eof check the moment new data
+                 * lands in the ring either way, so a stuck/uncleared eof flag from the OLD bug
+                 * would still pass this exact sequence. Isolating that needs a genuinely
+                 * blocking second read with nothing new written, which risks hanging this
+                 * single-threaded test if the fix regresses -- not attempted here. */
+                sys_pty_ctl(m, PTY_SETMODE, 0x00B);   /* ICANON|ECHO|ISIG */
+                sys_pty_write(m, "\x04", 1);
+                n = sys_pty_read(s, b, sizeof b);
+                if (n != 0) ok = 0;
+                sys_pty_write(m, "ok\n", 3);
+                n = sys_pty_read(s, b, sizeof b);
+                if (!(n == 3 && b[0]=='o' && b[1]=='k' && b[2]=='\n')) ok = 0;
+                sys_pty_read(m, b, sizeof b);        /* drain the "ok\n" echo */
                 sys_pty_close(m); sys_pty_close(s);
-                print(ok ? "pty: cooked + echo + erase + INTR-flush + raw + slave-output all OK\n"
+                print(ok ? "pty: cooked + echo + erase + INTR-flush + raw + slave-output + EOF all OK\n"
                          : "ptytest: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
             }

@@ -27,8 +27,9 @@ static uint8_t *zbuf[SWAP_SLOTS];     /* kheap blob for kind 1 (compressed if zs
 static uint16_t zsz[SWAP_SLOTS];      /* stored bytes for kind 1 */
 static int      swap_dev = -1;        /* disk-tier blockdev index, -1 = none yet */
 static uint64_t swap_base;            /* first swap sector on that device */
-static uint64_t g_out, g_in, g_cur;   /* cumulative out / in, current resident slots */
+static uint64_t g_out, g_in, g_cur;   /* cumulative out / in, current resident slots (all kinds: RAM/zero/disk) */
 static uint64_t g_zbytes;             /* bytes currently held in the RAM (zram) tier */
+static uint64_t g_ramcur;             /* current resident slots in the RAM tier ONLY (kind==1) -- g_zbytes's own page-count sibling, for the ratio stat below (g_cur counts disk/zero slots too, which g_zbytes never does) */
 
 /* zram is RAM-backed, so swap is always available — no disk needed (M1156). */
 int swap_active(void) { return 1; }
@@ -100,7 +101,7 @@ int swap_out(uint64_t phys) {
             for (int i = 0; i < clen; i++) b[i] = tmp[i];
             kfree(tmp);
             zbuf[s] = b; zsz[s] = (uint16_t)clen; zk[s] = 1;
-            g_out++; g_cur++; g_zbytes += (uint64_t)clen;
+            g_out++; g_cur++; g_ramcur++; g_zbytes += (uint64_t)clen;
             irq_restore(fl);
             return s;
         }
@@ -117,7 +118,7 @@ int swap_out(uint64_t phys) {
     if (!b) { irq_restore(fl); return -1; }
     for (int i = 0; i < PAGE_SIZE; i++) b[i] = src[i];
     zbuf[s] = b; zsz[s] = (uint16_t)PAGE_SIZE; zk[s] = 1;
-    g_out++; g_cur++; g_zbytes += PAGE_SIZE;
+    g_out++; g_cur++; g_ramcur++; g_zbytes += PAGE_SIZE;
     irq_restore(fl);
     return s;
 }
@@ -146,7 +147,7 @@ int swap_in(int slot, uint64_t phys) {
 void swap_release(int slot) {
     uint64_t fl = irq_save();
     if (slot < 0 || slot >= SWAP_SLOTS || !zk[slot]) { irq_restore(fl); return; }
-    if (zk[slot] == 1 && zbuf[slot]) { if (zsz[slot]) g_zbytes -= zsz[slot]; kfree(zbuf[slot]); zbuf[slot] = 0; }
+    if (zk[slot] == 1 && zbuf[slot]) { if (zsz[slot]) g_zbytes -= zsz[slot]; kfree(zbuf[slot]); zbuf[slot] = 0; g_ramcur--; }
     zk[slot] = 0; zsz[slot] = 0; g_cur--;
     irq_restore(fl);
 }
@@ -172,7 +173,7 @@ int swap_format(char *out, int max) {
     /* zram compression: original (resident RAM pages * 4 KiB) vs bytes actually held */
     p = sp_put(out, p, max, "RAM held:\t");  p = sp_num(out, p, max, g_zbytes);    p = sp_put(out, p, max, " bytes\n");
     p = sp_put(out, p, max, "Ratio x100:\t");
-    p = sp_num(out, p, max, g_zbytes ? (g_cur * (uint64_t)PAGE_SIZE * 100) / g_zbytes : 0);   /* orig/held * 100 */
+    p = sp_num(out, p, max, g_zbytes ? (g_ramcur * (uint64_t)PAGE_SIZE * 100) / g_zbytes : 0);   /* orig/held * 100 -- was g_cur, which also counts disk/zero-page slots g_zbytes never touches */
     p = sp_put(out, p, max, "  (orig/held; higher = better, inf for all-zero)\n");
     if (p < max) out[p] = 0;
     return p;
