@@ -18,6 +18,8 @@ static struct shm tab[SHM_N];
 
 static int sh_eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 
+uint64_t shm_max_bytes(void) { return (uint64_t)SHM_MAXPAGES * PAGE_SIZE; }  /* the real cap shm_get enforces below (M1592) */
+
 int shm_get(const char *name, uint64_t size, uint64_t **frames, int *npages) {
     if (!name || !name[0]) return -1;
     int pages = (int)((size + PAGE_SIZE - 1) / PAGE_SIZE);

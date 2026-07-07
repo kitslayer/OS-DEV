@@ -12,6 +12,7 @@
 #include "sysvipc.h"
 #include "task.h"
 #include "app.h"        /* app_shm_open (SysV shm reuses the M1108 named-shm backing) */
+#include "shm.h"        /* shm_unlink/shm_max_bytes -- the real removal path + size cap (M1592) */
 #include <stdint.h>
 
 #define SEM_N        16   /* max semaphore sets */
@@ -187,12 +188,15 @@ int sysv_msgctl(int id, int cmd) {
  * each segment gets a stable synthetic name, so two shmat()s of the same id (in
  * the same or different processes) map the SAME physical frames. */
 #define SHM_N      16
-#define SHM_MAXSZ  (4u << 20)   /* 4 MiB cap per segment */
 struct shm_seg { int used, key; uint64_t size; char name[16]; };
 static struct shm_seg shms[SHM_N];
 
 int sysv_shmget(int key, uint64_t size, int flags) {
-    if (size == 0 || size > SHM_MAXSZ) return -1;
+    /* the real cap is shm.c's own (M1592) -- a separately-maintained constant
+     * here previously let shmget accept sizes shmat would then silently fail
+     * on (shmget's own 4 MiB vs shm_get's real 256 KiB, a live gap the same
+     * research pass that found the IPC_RMID wiring bug below also caught). */
+    if (size == 0 || size > shm_max_bytes()) return -1;
     if (key != IPC_PRIVATE) for (int i = 0; i < SHM_N; i++) if (shms[i].used && shms[i].key == key) return i;
     if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) return -1;
     for (int i = 0; i < SHM_N; i++) if (!shms[i].used) {
@@ -212,22 +216,24 @@ uint64_t sysv_shmat(int id) {
     return app_shm_open(shms[id].name, shms[id].size);
 }
 
-/* IPC_RMID (M1576): frees THIS id slot (SHM_N=16, permanently exhausted
- * without this before now) so a future sysv_shmget can reuse the number --
- * matching real shmctl(IPC_RMID)'s effect on the id namespace. Deliberately
- * scoped no further: the underlying named object in shm.c (its own separate,
- * smaller SHM_N=8 table, keyed by THIS segment's synthetic "sysvshmNN" name,
- * derived deterministically from `id`) has no removal path of its own --
- * shm_open()'d objects have never been freeable here, matching every
- * existing shm_open caller's behavior today. One real, honestly-stated
- * consequence: since the synthetic name is a pure function of `id`, if a
- * freed id is later reused, shm_get's own find-by-name path will find and
- * hand back the SAME (never-actually-cleared) frames rather than a fresh
- * zeroed segment -- IPC_RMID here frees the ID for reuse, it does not (yet)
- * guarantee a truly fresh segment on the next shmget of that same id. */
+/* IPC_RMID (M1576, fully wired M1592): frees THIS id slot (SHM_N=16,
+ * permanently exhausted without this before now) so a future sysv_shmget can
+ * reuse the number -- matching real shmctl(IPC_RMID)'s effect on the id
+ * namespace. M1576 deliberately scoped itself no further, since the
+ * underlying named object in shm.c (its own separate, smaller SHM_N=8 table,
+ * keyed by THIS segment's synthetic "sysvshmNN" name, derived deterministically
+ * from `id`) had no removal path of its own at the time. shm_unlink() (M1590)
+ * is exactly that removal path, just never wired back to this caller until
+ * now -- calling it here means a freed id's frames are actually released
+ * (matching the M1089 per-frame refcount: still-live shmat mappings keep
+ * their own separate references, same as shm_unlink's own POSIX contract),
+ * and a later shmget reusing this id's synthetic name gets a genuinely fresh,
+ * zeroed segment rather than the same stale frames a pure id-slot free would
+ * have handed back. */
 int sysv_shmctl(int id, int cmd) {
     if (id < 0 || id >= SHM_N || !shms[id].used) return -1;
     if (cmd != IPC_RMID) return -1;
+    shm_unlink(shms[id].name);
     shms[id].used = 0;
     return 0;
 }

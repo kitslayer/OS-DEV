@@ -2436,6 +2436,26 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "msgctl/shmctl(IPC_RMID): both tables genuinely cap out, a freed id is reusable, cleaned up after -- OK\n"
                      : "sysvctltest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
+            /* shmctl(IPC_RMID) actually freeing shm.c's own (smaller, separate)
+             * object table too (M1592) -- the id-table loop above never calls
+             * shmat, so it can't exercise this at all; far more than shm.c's own
+             * SHM_N=8 only passes if each iteration truly frees its slot there */
+            int leak_ok = 1;
+            for (int i = 0; i < 20; i++) {
+                int id2 = (int)sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
+                if (id2 < 0) { leak_ok = 0; break; }
+                void *va = (void *)sys_shmat(id2);
+                if (!va) { leak_ok = 0; break; }
+                sys_shmdt(va);
+                if (sys_shmctl(id2, IPC_RMID) != 0) { leak_ok = 0; break; }
+            }
+            if (sys_shmget(IPC_PRIVATE, 512 * 1024, IPC_CREAT) != -1) leak_ok = 0;   /* between shmget's old
+                                    * 4 MiB cap and shm.c's real 256 KiB one -- must now be refused at shmget
+                                    * itself, not silently accepted and left to fail later at shmat */
+            print(leak_ok ? "shmctl(IPC_RMID): 20 create+attach+detach+remove cycles all succeed; "
+                             "an over-cap size is refused at shmget -- OK\n"
+                           : "sysvctltest: shm.c leak/size-cap VERIFY FAILED\n");
+            if (!leak_ok) g_status = 1;
         } else if (streq(line, "pvmtest")) {   /* process_vm_read: read another process's memory cross-AS (M1162) */
             static char sentinel[64];
             for (int i = 0; i < 64; i++) sentinel[i] = (char)(i ^ 0x5A);   /* parent fills it before forking */
