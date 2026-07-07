@@ -791,7 +791,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  sigpipetest(SIGPIPE)  selecttest(select fd_set)  linkattest(linkat)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  sigpipetest(SIGPIPE)  selecttest(select fd_set)  linkattest(linkat)  mmapmunmaptest(munmap flushes dirty MAP_SHARED)  fdleaktest(fd table survives exit-without-close)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -4653,6 +4653,42 @@ static int run_command(char *line, char *cwd) {
             if (m) { m[0] = orig; sys_msync(m, 4096); }  /* restore the original byte so re-runs (and other tests) see an unchanged file */
             if (ok) print("mmap: mmap_file(MOTD.TXT, MAP_SHARED) + write + msync -- a SEPARATE sys_readfile of the same path sees the write on disk -- shared page cache OK\n");
             else { sys_setcolor(2); print("mmapsharedtest: VERIFY FAILED (m="); sys_setcolor(0); printl((long)(m!=0)); print(" n0="); printl(n0); print(" n1="); printl(n1); print(")\n"); g_status = 1; }
+        } else if (streq(line, "mmapmunmaptest")) {   /* munmap (or exit) a dirty MAP_SHARED page with NO explicit msync() first -- must still flush (M1602) */
+            int ok = 1;
+            const char *path = "MOTD.TXT";
+            char before[64];
+            long n0 = sys_readfile(path, before, sizeof before - 1);
+            if (n0 <= 0) ok = 0;
+            char *m = ok ? (char *)sys_mmap_file(path, 4096, 1) : 0;   /* shared=1: MAP_SHARED */
+            if (!m) ok = 0;
+            char orig = ok ? m[0] : 0;
+            char written = (char)(orig == 'X' ? 'Y' : 'X');
+            if (ok) m[0] = written;
+            if (ok && sys_munmap(m, 4096) != 0) ok = 0;    /* NO sys_msync call before this -- the fix under test */
+            char after[64];
+            long n1 = -1;
+            if (ok) n1 = sys_readfile(path, after, sizeof after - 1);
+            if (!(ok && n1 == n0 && after[0] == written && written != orig)) ok = 0;
+            if (ok) {   /* restore the original byte via a fresh mapping so re-runs see an unchanged file */
+                char *m2 = (char *)sys_mmap_file(path, 4096, 1);
+                if (m2) { m2[0] = orig; sys_msync(m2, 4096); sys_munmap(m2, 4096); }
+            }
+            if (ok) print("mmap: mmap_file(MOTD.TXT, MAP_SHARED) + write + munmap with NO msync -- the dirty page still flushed to disk on unmap -- OK\n");
+            else { sys_setcolor(2); print("mmapmunmaptest: VERIFY FAILED (m="); sys_setcolor(0); printl((long)(m!=0)); print(" n0="); printl(n0); print(" n1="); printl(n1); print(")\n"); g_status = 1; }
+        } else if (streq(line, "fdleaktest")) {   /* a child that exits WITHOUT closing an owned fd must not leak its global table slot (M1602) */
+            int ok = 1;
+            int s = -1;
+            for (int i = 0; i < 3; i++) {           /* > TCPSOCK_N (2): would exhaust the global table if app_fd_release leaked */
+                long pid = sys_fork();
+                if (pid == 0) { sys_socket(2, 1); sys_exit(0); }   /* child: alloc a TCP socket fd, exit WITHOUT closing it */
+                if (pid < 0) { ok = 0; break; }
+                int status = 0;
+                sys_waitpid((int)pid, &status);     /* blocks until app_reap has already freed the child's fds */
+            }
+            if (ok) { s = sys_socket(2, 1); if (s < 0) ok = 0; }   /* table must NOT be exhausted by the 3 leaked-then-reaped children */
+            if (s >= 0) sys_fdclose(s);
+            if (ok) print("fdleak: 3x fork+socket()+exit-without-close, reaped each time -- TCP socket table NOT exhausted (leaked pre-M1602) -- OK\n");
+            else { sys_setcolor(2); print("fdleaktest: VERIFY FAILED (s="); sys_setcolor(0); printl(s); print(")\n"); g_status = 1; }
         } else if (streq(line, "lotest")) {   /* loopback (lo, 127.0.0.0/8): a UDP round-trip with NO NIC (M1264) */
             unsigned char lo[4] = {127,0,0,1};
             int ok = 1;

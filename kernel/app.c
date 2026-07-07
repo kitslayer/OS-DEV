@@ -1266,6 +1266,24 @@ int app_reap(app_t *a) {
             if (t->state == TASK_DEAD) task_free(t); else task_stop(t);
             a->thr[i] = 0;
         }
+        /* Flush any dirty MAP_SHARED pages back to their files before the
+         * teardown below frees the frames it reads (M1602). app_reap runs in
+         * the REAPER's own context (desktop.c's window-manager loop), not
+         * this dying process's -- app_msync dereferences dirty pages as
+         * plain pointers, so it needs `a`'s OWN address space active, not
+         * whatever the caller's happens to be. Same save-switch-restore
+         * shape app_spawn/app_process_vm_read already use for the same
+         * reason. */
+        {
+            uint64_t flags2;
+            __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags2) :: "memory");
+            uint64_t old_cr3_reap;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(old_cr3_reap));
+            __asm__ volatile("mov %0, %%cr3" : : "r"(a->cr3) : "memory");
+            app_msync(0, (uint64_t)-1);
+            __asm__ volatile("mov %0, %%cr3" : : "r"(old_cr3_reap) : "memory");
+            __asm__ volatile("push %0; popfq" : : "r"(flags2) : "memory", "cc");
+        }
         vmm_destroy_address_space(a->cr3);   /* free page tables + user frames */
         a->cr3 = 0;
         if (a->gfx) { kfree(a->gfx); a->gfx = 0; }   /* graphics canvas (kernel heap) */
@@ -1874,6 +1892,13 @@ int app_munmap(uint64_t addr, uint64_t len) {
     for (int i = 0; i < a->nvma; i++) {
         if (a->vma[i].start == addr) {
             if (a->vma[i].sealed) return -1;          /* mseal'd: unmapping is forbidden (M1130) */
+            if (a->vma[i].file_backed && a->vma[i].shared)
+                app_msync(a->vma[i].start, a->vma[i].len);   /* flush dirty pages to the file before their frames are freed below --
+                                                               * munmap()ing a MAP_SHARED mapping without an explicit msync() first
+                                                               * is the overwhelmingly common pattern; without this the write was
+                                                               * silently discarded (M1602). Runs in our own context (a plain
+                                                               * syscall, unlike app_reap/app_exec's cross-context callers), so
+                                                               * a->cr3 is already the live address space -- no cr3 dance needed. */
             if (a->vma[i].huge) {                     /* 2 MiB hugepages: free per-2 MiB run, not per-4 KiB (M1155) */
                 for (uint64_t p = a->vma[i].start; p < a->vma[i].start + a->vma[i].len; p += HUGE_SIZE) {
                     uint64_t ph = vmm_translate(p);   /* p is 2 MiB-aligned -> base of the run */
@@ -4449,10 +4474,21 @@ static void app_fd_fork(struct app *child, struct app *parent) {
         else if (parent->fd[i].used && parent->fd[i].type == 6) epoll_ref(parent->fd[i].obj);   /* epoll inherited (M1220) */
     }
 }
-/* exit/reap: close every fd the process still held. */
+/* exit/reap: close every fd the process still held. Must mirror app_fd_close's
+ * own dispatch (M1602) -- this only ever handled pipes, so a process that
+ * exited without itself calling close() on a memfd/epoll/inotify/TCP-socket
+ * fd leaked that global table's slot permanently (TCPSOCK_N is just 2, so
+ * two such exits exhausted socket() for the whole OS until reboot). Type 11
+ * (pty) is deliberately NOT here: it's already released by pid, not by fd,
+ * via pty_release_pid() a few lines up in app_reap -- adding it here would
+ * double-close it. */
 static void app_fd_release(struct app *a) {
     for (int i = 0; i < APP_NFD; i++) if (a->fd[i].used) {
         if (a->fd[i].type == 1) pipe_close_end(a->fd[i].obj, a->fd[i].write_end);
+        else if (a->fd[i].type == 3) memfd_unref(a->fd[i].obj);
+        else if (a->fd[i].type == 6) epoll_unref(a->fd[i].obj);
+        else if (a->fd[i].type == 8) inotify_free(a->fd[i].obj);
+        else if (a->fd[i].type == 10) net_tcp_sock_close(a->fd[i].obj);
         a->fd[i].used = 0;
     }
 }
@@ -4643,6 +4679,11 @@ long app_exec(struct registers *r, const char *name, const char *arg) {
     vdso_map(new_cr3);
 
     uint64_t old_cr3 = a->cr3;
+    app_msync(0, (uint64_t)-1);              /* flush the OLD image's dirty MAP_SHARED pages first (M1602) --
+                                               * MUST run before the cr3 switch below: app_msync dereferences
+                                               * each dirty page as a plain pointer through whatever address
+                                               * space is currently active, so it has to run while the OLD
+                                               * image (not the new, not-yet-populated one) is still live */
     uint64_t flags;
     __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) :: "memory");
     __asm__ volatile("mov %0, %%cr3" : : "r"(new_cr3) : "memory");   /* become the new space */
