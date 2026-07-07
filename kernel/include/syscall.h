@@ -368,6 +368,7 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SO_REUSEADDR  2
 #define SO_KEEPALIVE  9
 #define SO_ERROR      4      /* the pending per-socket error, read-once (M1564) */
+#define SO_RCVTIMEO   20     /* recv()/read() timeout in ms (a plain int here, not a real timeval); 0 = block indefinitely, matching real SO_RCVTIMEO (M1583) */
 #define IPPROTO_TCP   6
 #define TCP_NODELAY   1
 /* Real Linux's own errno values (M1564) -- this codebase otherwise never

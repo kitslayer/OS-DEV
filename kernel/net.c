@@ -590,7 +590,7 @@ int net_raw_recv(void *buf, int max, int timeout_ms) {
  * compatibility: ported code that calls setsockopt(SO_REUSEADDR/TCP_NODELAY)
  * before use, as a huge amount of real networking code unconditionally
  * does, no longer has to fail or be special-cased out. */
-static struct { int used; tcp_conn c; int opt_reuseaddr, opt_nodelay, opt_keepalive; } g_tcpsock[TCPSOCK_N];
+static struct { int used; tcp_conn c; int opt_reuseaddr, opt_nodelay, opt_keepalive, opt_rcvtimeo; } g_tcpsock[TCPSOCK_N];
 
 int net_tcp_sock_open(void) {
     for (int i = 0; i < TCPSOCK_N; i++) if (!g_tcpsock[i].used) {
@@ -603,6 +603,7 @@ int net_tcp_sock_open(void) {
         for (int k = 0; k < 4; k++) g_tcpsock[i].c.ip[k] = 0;
         g_tcpsock[i].c.errno_hint = 0;   /* same staleness concern, now that SO_ERROR (M1564) makes it visible too */
         g_tcpsock[i].opt_reuseaddr = g_tcpsock[i].opt_nodelay = g_tcpsock[i].opt_keepalive = 0;
+        g_tcpsock[i].opt_rcvtimeo = 3000;   /* ms; matches net_tcp_sock_recv's own prior hardcoded ~3s (M1583) */
         return i;
     }
     return -1;
@@ -612,6 +613,7 @@ int net_tcp_sock_setopt(int idx, int level, int optname, int val) {
     if (level == SOL_SOCKET && optname == SO_REUSEADDR) { g_tcpsock[idx].opt_reuseaddr = val; return 0; }
     if (level == SOL_SOCKET && optname == SO_KEEPALIVE) { g_tcpsock[idx].opt_keepalive = val; return 0; }
     if (level == IPPROTO_TCP && optname == TCP_NODELAY) { g_tcpsock[idx].opt_nodelay   = val; return 0; }
+    if (level == SOL_SOCKET && optname == SO_RCVTIMEO)  { g_tcpsock[idx].opt_rcvtimeo  = val; return 0; }   /* (M1583) */
     return -1;                                              /* unknown (level, optname) pair */
 }
 int net_tcp_sock_getopt(int idx, int level, int optname, int *val) {
@@ -619,6 +621,7 @@ int net_tcp_sock_getopt(int idx, int level, int optname, int *val) {
     if (level == SOL_SOCKET && optname == SO_REUSEADDR) { *val = g_tcpsock[idx].opt_reuseaddr; return 0; }
     if (level == SOL_SOCKET && optname == SO_KEEPALIVE) { *val = g_tcpsock[idx].opt_keepalive; return 0; }
     if (level == IPPROTO_TCP && optname == TCP_NODELAY) { *val = g_tcpsock[idx].opt_nodelay;   return 0; }
+    if (level == SOL_SOCKET && optname == SO_RCVTIMEO)  { *val = g_tcpsock[idx].opt_rcvtimeo;  return 0; }   /* (M1583) */
     if (level == SOL_SOCKET && optname == SO_ERROR) {         /* read-once (M1564): real SO_ERROR clears after reading */
         *val = g_tcpsock[idx].c.errno_hint;
         g_tcpsock[idx].c.errno_hint = 0;
@@ -657,7 +660,15 @@ long net_tcp_sock_send(int idx, const void *buf, int len) {
 }
 long net_tcp_sock_recv(int idx, void *buf, int max) {
     if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return -1;
-    return tcp_read(&g_tcpsock[idx].c, (uint8_t *)buf, max, 300);   /* ~3s response deadline */
+    /* SO_RCVTIMEO (M1583): opt_rcvtimeo is ms, tcp_read wants ticks (10ms each,
+     * timer.c's tick_ms) -- round up so any nonzero request waits at least that
+     * long rather than truncating a sub-tick value down to an instant return.
+     * 0 -> block (near-)indefinitely, matching real SO_RCVTIMEO's own meaning;
+     * tcp_read has no true infinite mode, so approximate it with a deadline far
+     * enough out that no realistic caller will ever actually reach it. */
+    uint64_t ms = (uint64_t)g_tcpsock[idx].opt_rcvtimeo;
+    uint64_t ticks = ms ? (ms + 9) / 10 : ((uint64_t)-1 >> 1);
+    return tcp_read(&g_tcpsock[idx].c, (uint8_t *)buf, max, ticks);
 }
 void net_tcp_sock_close(int idx) {
     if (idx < 0 || idx >= TCPSOCK_N || !g_tcpsock[idx].used) return;

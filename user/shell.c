@@ -4518,6 +4518,25 @@ static int run_command(char *line, char *cwd) {
             print("SO_ERROR: 0 after a good connect, a real error after a bad one, clears on read (read-once) -- ");
             sys_setcolor(soerr_ok ? 10 : 4); print(soerr_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
             if (!soerr_ok) g_status = 1;
+            /* SO_RCVTIMEO (M1583): set a short bound, then read a connected-but-idle
+             * socket (no request ever sent -> nothing will ever arrive) and confirm
+             * the read returns near that bound, not the old hardcoded ~3s default. */
+            int rcvto_ok = 1;
+            int s3 = ok ? sys_socket(2, 1) : -1;
+            if (s3 >= 0 && sys_connect(s3, ip, 80) == 0) {
+                int rb = 0; unsigned len = 0; int want = 400;
+                if (sys_setsockopt(s3, SOL_SOCKET, SO_RCVTIMEO, &want, sizeof(want)) != 0) rcvto_ok = 0;
+                if (sys_getsockopt(s3, SOL_SOCKET, SO_RCVTIMEO, &rb, &len) != 0 || rb != want) rcvto_ok = 0;
+                unsigned long t0 = sys_uptime_ms();
+                char scratch[16];
+                long rn = sys_fdread(s3, scratch, sizeof scratch);
+                unsigned long elapsed = sys_uptime_ms() - t0;
+                if (!(rn <= 0 && elapsed >= 300 && elapsed < 2500)) rcvto_ok = 0;   /* near 400ms, nowhere near the old ~3s */
+                sys_fdclose(s3);
+            } else rcvto_ok = 0;
+            print("SO_RCVTIMEO: set+readback, idle-socket read returns near the new bound, not the old ~3s default -- ");
+            sys_setcolor(rcvto_ok ? 10 : 4); print(rcvto_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);
+            if (!rcvto_ok) g_status = 1;
             const char *req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
             int rl = 0; while (req[rl]) rl++;
             if (ok) sys_fdwrite(s, req, rl);                     /* send via the connected socket fd */
