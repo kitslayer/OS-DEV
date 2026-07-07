@@ -61,6 +61,22 @@ static void itoa_simple(int v, char *out) {
     out[j] = '\0';
 }
 
+/* long-width sibling of itoa_simple: sh_eval returns a long, and (( )) results
+ * commonly exceed 2^31 (a byte count, a timestamp, an accumulated loop total) --
+ * callers that formatted via itoa_simple((int)v, ...) silently wrapped those.
+ * Same via-unsigned-long idiom expand_vars' $((...)) formatting already uses. */
+static void ltoa_simple(long v, char *out) {
+    char tmp[24];
+    int i = 0, neg = (v < 0);
+    unsigned long uv = neg ? (unsigned long)(-v) : (unsigned long)v;
+    if (uv == 0) tmp[i++] = '0';
+    while (uv) { tmp[i++] = (char)('0' + uv % 10); uv /= 10; }
+    int j = 0;
+    if (neg) out[j++] = '-';
+    while (i > 0) out[j++] = tmp[--i];
+    out[j] = '\0';
+}
+
 /* Unsigned -> base-2..16 string (for printf %x/%X/%o/%u). */
 static void utoa_base(unsigned long v, int base, int upper, char *out) {
     const char *digs = upper ? "0123456789ABCDEF" : "0123456789abcdef";
@@ -7169,21 +7185,28 @@ static long sh_do_assign(const char *e) {
     const char *vs = e; int vl = 0; while (sh_vchar(e[vl])) vl++;
     if (vl == 0) { const char *q = e; return *q ? sh_eval(&q) : 0; }   /* no lvalue -> just evaluate */
     const char *op = e + vl; while (*op == ' ') op++;
-    char num[16];
-    if (op[0]=='+' && op[1]=='+') { long o=sh_var(vs,vl); itoa_simple((int)(o+1), num); vset(vs,vl,num); return o; }   /* i++ (post: old value) */
-    if (op[0]=='-' && op[1]=='-') { long o=sh_var(vs,vl); itoa_simple((int)(o-1), num); vset(vs,vl,num); return o; }   /* i-- */
-    if (op[0]=='=' && op[1]!='=') { const char *q=op+1; long r=sh_eval(&q); itoa_simple((int)r,num); vset(vs,vl,num); return r; }   /* i=expr */
+    char num[24];
+    if (op[0]=='+' && op[1]=='+') { long o=sh_var(vs,vl); ltoa_simple(o+1, num); vset(vs,vl,num); return o; }   /* i++ (post: old value) */
+    if (op[0]=='-' && op[1]=='-') { long o=sh_var(vs,vl); ltoa_simple(o-1, num); vset(vs,vl,num); return o; }   /* i-- */
+    if (op[0]=='=' && op[1]!='=') { const char *q=op+1; long r=sh_eval(&q); ltoa_simple(r,num); vset(vs,vl,num); return r; }   /* i=expr */
     if (op[1]=='=' && (op[0]=='+'||op[0]=='-'||op[0]=='*'||op[0]=='/'||op[0]=='%')) {                       /* i+=expr etc. */
         const char *q=op+2; long r=sh_eval(&q), cur=sh_var(vs,vl), nv;
         switch(op[0]){ case '+':nv=cur+r;break; case '-':nv=cur-r;break; case '*':nv=cur*r;break; case '/':nv=r?cur/r:0;break; default:nv=r?cur%r:0; }
-        itoa_simple((int)nv,num); vset(vs,vl,num); return nv;
+        ltoa_simple(nv,num); vset(vs,vl,num); return nv;
     }
     { const char *q=e; return sh_eval(&q); }                           /* bare expression (e.g. a comparison i<5) */
 }
 /* C-style loop: for ((init; cond; incr)); do CMDS; done. `p` points at the "((".
  * cond is a read-only sh_eval (empty == true); init/incr are assignments. */
 static int run_for_carith(char *p, char *cwd) {
-    char *close = 0; for (char *q = p + 2; *q; q++) if (q[0]==')' && q[1]==')') { close = q; break; }
+    /* Depth-tracked, like cmdsub_expand's $(...) scan: the first "))" at depth 0
+     * (i.e. not the close of some inner nested "(...)" in cond/incr, e.g.
+     * i<((n))) is the one that ends this construct. */
+    char *close = 0; int depth = 0;
+    for (char *q = p + 2; *q; q++) {
+        if (*q == '(') depth++;
+        else if (*q == ')') { if (depth > 0) depth--; else if (q[1] == ')') { close = q; break; } }
+    }
     if (!close) { print("for: missing '))'\n"); g_status=1; return 0; }
     *close = 0;
     char *init = p + 2, *cond, *incr, *s1 = init, *s2;

@@ -114,6 +114,10 @@ static void render(const char *msg) {
 }
 
 int main(void) {
+    char tb[40]; long tn = sys_time(tb, sizeof(tb));   /* seed from the clock for variety (was a fixed literal -- every game dealt the same piece sequence) */
+    rng = 2463534242u;
+    for (long i = 0; i < tn; i++) rng = rng * 31 + (unsigned char)tb[i];
+    if (!rng) rng = 12345u;
     load_best();
 restart:
     for (int y = 0; y < BH; y++) for (int x = 0; x < BW; x++) board[y][x] = 0;
