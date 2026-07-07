@@ -81,4 +81,6 @@ Infinity -Infinity NaN false true
 1 2 null
 null 2
 null null
+-- Set.entries() (M1621): Map/Array already had it, Set fell through to a throw --
+1:1,2:2,3:3
 -- done --

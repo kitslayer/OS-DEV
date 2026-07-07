@@ -6,6 +6,23 @@
 #include "notify.h"
 #include "task.h"
 
+/* M1621: same fix as mbox.c(M1608)/eventfd.c this same pass -- structurally
+ * almost identical to mbox.c pre-M1608 (same waiter field, same shape),
+ * never got that fix either. One lock for the whole file (notify_get's
+ * scan-then-create race, notify_signal/wait's produce-then-wake vs
+ * check-then-block race). */
+static volatile int notify_lock;
+static inline uint64_t nt_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&notify_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void nt_irq_restore(uint64_t f) {
+    __atomic_store_n(&notify_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+
 #define NOTIFY_N 8                  /* up to 8 named notification objects */
 
 struct notify {
@@ -30,26 +47,32 @@ static struct notify *notify_get(const char *name) {
 }
 
 long notify_signal(const char *name, const void *data, unsigned long len) {
+    uint64_t f = nt_irq_save();
     struct notify *n = notify_get(name);
-    if (!n) return -1;
+    if (!n) { nt_irq_restore(f); return -1; }
     uint64_t v = 0; const char *s = (const char *)data;
     for (unsigned long i = 0; i < len && s[i] >= '0' && s[i] <= '9'; i++) v = v * 10 + (uint64_t)(s[i] - '0');
     if (v == 0) v = 1;                          /* a bare signal (no number) raises bit 0 */
     n->bits |= v;                               /* coalesce */
     if (n->waiter) { task_wake(n->waiter); n->waiter = 0; }
+    nt_irq_restore(f);
     return (long)len;
 }
 
 long notify_wait(const char *name, void *buf, unsigned long max) {
+    uint64_t f = nt_irq_save();
     struct notify *n = notify_get(name);
-    if (!n || max < 2) return -1;
+    if (!n || max < 2) { nt_irq_restore(f); return -1; }
     if (n->bits == 0) {                         /* no pending signals -> block once */
         n->waiter = task_self();
+        nt_irq_restore(f);                      /* released BEFORE blocking (M1621) */
         task_block();                           /* woken by a signaller, a keypress, or a kill */
+        f = nt_irq_save();
         n->waiter = 0;
-        if (n->bits == 0) return 0;             /* stray wake -> don't re-block */
+        if (n->bits == 0) { nt_irq_restore(f); return 0; }   /* stray wake -> don't re-block */
     }
-    uint64_t v = n->bits; n->bits = 0;          /* read-and-clear (atomic: read path is interrupts-off) */
+    uint64_t v = n->bits; n->bits = 0;          /* read-and-clear */
+    nt_irq_restore(f);
     char t[24]; int ti = 0; uint64_t x = v;
     if (!x) t[ti++] = '0'; else while (x) { t[ti++] = (char)('0' + x % 10); x /= 10; }
     int p = 0;

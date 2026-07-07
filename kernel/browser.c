@@ -3675,14 +3675,22 @@ static void browser_navigate(browser_t *b) {
 
 void browser_back(browser_t *b) {
     if (!b || b->histn <= 0) return;
-    if (b->cur[0] && b->fwdn < 16) copy_url(b->fwd[b->fwdn++], b->cur);   /* leaving page -> forward stack */
+    /* M1621: mirror browser_forward's own `pushed` guard -- this used to push
+     * onto the forward stack unconditionally and never undo it on either bail
+     * path below, so a Back pressed while a fetch was already in flight (an
+     * everyday occurrence, not an edge case) left a bogus duplicate `cur`
+     * entry on `fwd[]` with nothing pushed to justify it, corrupting the
+     * Forward button and, since the stack is capped at 16, eventually
+     * squeezing out real forward history with junk. */
+    int pushed = (b->cur[0] && b->fwdn < 16);  /* leaving page -> forward stack */
+    if (pushed) copy_url(b->fwd[b->fwdn++], b->cur);
     const char *dest = b->hist[b->histn - 1];  /* peek the destination */
 
     if (streqs(dest, "home") || !dest[0] || startsw(dest, "file:")) {
         /* local page: render directly, no worker. Stay race-safe: if a fetch is
          * in flight, bail unchanged (same as the net path losing the claim). */
         uint64_t f = irq_save();
-        if (g_busy || g_req) { irq_restore(f); return; }
+        if (g_busy || g_req) { irq_restore(f); if (pushed) b->fwdn--; return; }  /* fetch in flight: bail, undo */
         b->loading = 0;
         irq_restore(f);
         b->histn--;
@@ -3696,7 +3704,7 @@ void browser_back(browser_t *b) {
      * that picks up g_req in the gap can't fetch the stale (current) url. This
      * mirrors browser_navigate's set-then-claim ordering. */
     copy_url(b->url, dest);
-    if (!claim_fetch(b)) { copy_url(b->url, b->cur); return; }  /* lost race: restore, keep history */
+    if (!claim_fetch(b)) { copy_url(b->url, b->cur); if (pushed) b->fwdn--; return; }  /* lost race: undo */
     b->histn--;                                /* pop only after a successful claim */
     b->is_back = 0;
     js_page_reset();                           /* this branch skips browser_navigate; drop the previous page's JS env so a script-less backed-to page doesn't reuse it */

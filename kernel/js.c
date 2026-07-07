@@ -3313,6 +3313,11 @@ static val eval_set_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"clear")==0){ o->n=0; return UND(); }
     if (strcmp(name,"forEach")==0){ if(nargs<1) return UND(); for(int i=0;i<o->n && !g_err && !g_oom;i++){ val cb[3]={o->vals[i],o->vals[i],recv}; call_function(args[0],cb,3); } return UND(); }
     if (strcmp(name,"values")==0||strcmp(name,"keys")==0){ obj *a=new_obj(V_ARR); if(!a){g_oom=1;return UND();} for(int i=0;i<o->n && !g_oom;i++) arr_push_val(a,o->vals[i]); val r=UND(); r.t=V_ARR; r.o=a; return r; }
+    /* entries() (M1621): Map/Array both already have it; Set fell through to
+     * "unknown method" -- a real throw on ordinary iteration surface like
+     * `for (const [v] of s.entries())`. Per spec a Set yields [value,value]
+     * pairs (no separate key), mirroring Map's own entries case above. */
+    if (strcmp(name,"entries")==0){ obj *a=new_obj(V_ARR); if(!a){g_oom=1;return UND();} for(int i=0;i<o->n && !g_oom;i++){ obj *pair=new_obj(V_ARR); if(!pair){g_oom=1;break;} arr_push_val(pair,o->vals[i]); arr_push_val(pair,o->vals[i]); val pv=UND();pv.t=V_ARR;pv.o=pair; arr_push_val(a,pv); } val r=UND(); r.t=V_ARR; r.o=a; return r; }
     rt_err("unknown Set method"); return UND();
 }
 

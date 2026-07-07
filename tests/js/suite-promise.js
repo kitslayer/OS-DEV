@@ -92,4 +92,6 @@ localStorage.removeItem("nonexistent");
 localStorage.setItem("c", "3");
 localStorage.clear();
 print(localStorage.getItem("b"), localStorage.getItem("c"));   // null null
+print("-- Set.entries() (M1621): Map/Array already had it, Set fell through to a throw --");
+print((function(){var s=new Set([1,2,3]);var out=[];for(var e of s.entries())out.push(e[0]+":"+e[1]);return out.join(",");})());   // 1:1,2:2,3:3
 print("-- done --");

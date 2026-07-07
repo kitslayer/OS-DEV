@@ -562,9 +562,9 @@ long vfs_mkdir(const char *path) {
     return r;
 }
 
-/* Create a symlink `linkpath` -> `target`. Only the RAM /tmp backend supports
- * links (the synthetic /proc·/dev are read-only; FAT32 has no native symlink),
- * so the link must live under /tmp. Returns 0 / -1 (M1081). */
+/* Create a symlink `linkpath` -> `target`: the RAM /tmp backend (M1081), or a
+ * real on-disk /diskN ext2 symlink (M1146) -- the synthetic /proc·/dev stay
+ * read-only, and FAT32 has no native symlink support. Returns 0 / -1. */
 long vfs_symlink(const char *linkpath, const char *target) {
     char rb[160]; linkpath = bind_resolve(linkpath, rb, sizeof rb);
     const char *base;
