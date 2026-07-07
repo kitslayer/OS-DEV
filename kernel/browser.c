@@ -360,11 +360,55 @@ static int add_onclick(browser_t *b, const char *code, int codelen) {
     b->links[b->nlink] = (href_t){ (uint16_t)off, (uint16_t)(pl + codelen) };
     return b->nlink++;
 }
-/* Store a "submit:ACTION" link; following it (browser_follow) builds a GET query
- * from the field store and navigates. The action is snapshotted at render time
- * because the parse-time form_action is cleared by the </form> close tag. */
-static int add_submit_link(browser_t *b, const char *action) {
-    const char *pfx = "submit:"; int pl = 7; int al = 0; while (action[al]) al++;
+/* Byte offset of the innermost <form>'s own '<' still open at raw position `pos`
+ * (the last <form seen before pos with no </form> between it and pos), or -1 if
+ * none. A field/submit-link's enclosing form identity, computed on demand from the
+ * raw HTML rather than cached at parse time -- a field with no default value/state
+ * (so never touched until the user actually clicks it) only gets its in_id/in_name
+ * slot allocated at CLICK time, by which point any parse-time "current form" flag
+ * is long stale (parsing finished before the click happened at all). Forms don't
+ * nest in real HTML, so no depth counting is needed, unlike table_has_field's
+ * <table> nesting scan. */
+static int enclosing_form_start(browser_t *b, int pos) {
+    const char *r = b->raw; int lo = b->bodyoff, hi = b->bodyoff + b->bodylen;
+    if (pos < lo) pos = lo; if (pos > hi) pos = hi;
+    int form_at = -1;
+    for (int i = lo; i < pos; i++) {
+        if (r[i] != '<') continue;
+        if (i + 5 < hi && lc(r[i+1])=='f' && lc(r[i+2])=='o' && lc(r[i+3])=='r' && lc(r[i+4])=='m'
+            && (r[i+5]==' '||r[i+5]=='>'||r[i+5]=='\t'||r[i+5]=='\n'||r[i+5]=='\r')) form_at = i;
+        else if (i + 5 < hi && r[i+1]=='/' && lc(r[i+2])=='f' && lc(r[i+3])=='o' && lc(r[i+4])=='r' && lc(r[i+5])=='m') form_at = -1;
+    }
+    return form_at;
+}
+/* Decimal-encode a (possibly negative) small int into out, returning the length
+ * written (no NUL). Used to smuggle a form's identity through a "submit:" href's text. */
+static int fmt_int(char *out, int v) {
+    int n = 0; unsigned int u; if (v < 0) { out[n++] = '-'; u = (unsigned int)(-v); } else u = (unsigned int)v;
+    char rev[12]; int rn = 0; if (u == 0) rev[rn++] = '0'; else while (u) { rev[rn++] = (char)('0' + u % 10); u /= 10; }
+    while (rn > 0) out[n++] = rev[--rn];
+    return n;
+}
+/* Decode the FORM index add_submit_link/fmt_int encoded at the front of a
+ * "submit:FORM:ACTION" href (caller must have already confirmed the "submit:"
+ * prefix). If skip is non-NULL, *skip gets the byte offset (from href start) where
+ * the FORM: prefix ends and ACTION begins. */
+static int submit_link_form(const char *hp, int len, int *skip) {
+    int k = 7, neg = 0; if (k < len && hp[k] == '-') { neg = 1; k++; }
+    int v = 0; while (k < len && hp[k] >= '0' && hp[k] <= '9') { v = v * 10 + (hp[k] - '0'); k++; }
+    if (k < len && hp[k] == ':') k++;
+    if (skip) *skip = k;
+    return neg ? -v : v;
+}
+/* Store a "submit:FORM:ACTION" link (FORM = enclosing_form_start at raw position
+ * `pos`, i.e. the submit element's own <form>, or -1 outside any form); following
+ * it (browser_follow) builds a GET query from ONLY that form's fields and
+ * navigates. The action is snapshotted at render time because the parse-time
+ * form_action is cleared by the </form> close tag. */
+static int add_submit_link(browser_t *b, const char *action, int pos) {
+    char pfx[24]; int pl = 0; const char *p0 = "submit:"; while (p0[pl]) { pfx[pl] = p0[pl]; pl++; }
+    pl += fmt_int(pfx + pl, enclosing_form_start(b, pos)); pfx[pl++] = ':';
+    int al = 0; while (action[al]) al++;
     if (b->nlink >= LINK_MAX || b->hreflen + pl + al >= HREF_MAX) return NO_LINK;
     int off = b->hreflen;
     for (int i = 0; i < pl; i++) b->hrefs[b->hreflen++] = pfx[i];
@@ -925,7 +969,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         } else if (tageq(tag, "button")) {             /* a <button> with no handler submits the form (HTML default), unless type=button/reset */
             const char *tp; int tpl;
             int suppress = find_attr(attrs, attrlen, "type", &tp, &tpl) && (attr_eq(tp, tpl, "button") || attr_eq(tp, tpl, "reset"));
-            if (!suppress) lk = add_submit_link(b, b->form_action);
+            if (!suppress) lk = add_submit_link(b, b->form_action, (int)(attrs - b->raw));
         }
         if (lk != NO_LINK) {                           /* open a click scope (depth-counted) over the element's content */
             b->oc_link = *curlink; b->oc_style = *style;
@@ -1035,7 +1079,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (find_attr(attrs, attrlen, "value", &v, &vl) && vl > 0) { for (int i=0;i<vl&&p<60;i++) s[p++]=v[i]; }
                 else { const char *d = "Submit"; for (int i=0; d[i] && p<60; i++) s[p++]=d[i]; }
                 s[p++] = ']'; s[p] = 0;
-                int lk = add_submit_link(b, b->form_action);
+                int lk = add_submit_link(b, b->form_action, (int)(attrs - b->raw));
                 if (lk != NO_LINK) emit_literal_link(b, s, lk); else emit_literal(b, s, STY_EM);
                 return;
             }
@@ -3971,8 +4015,12 @@ static void browser_follow(browser_t *b, int id) {
                 && find_attr(b->raw + as, ae - as, "type", &tp, &tpl) && attr_eq(tp, tpl, "radio")
                 && find_attr(b->raw + as, ae - as, "name", &nm, &nml) && nml > 0) {
                 char grp[32]; int gn = nml; if (gn > 31) gn = 31; for (int i = 0; i < gn; i++) grp[i] = nm[i]; grp[gn] = 0;
-                for (int j = 0; j < b->in_n; j++)                 /* the previously-checked sibling has its name == group */
-                    if (!streqs(b->in_id[j], cid) && b->in_name[j][0] && streqs(b->in_name[j], grp)) b->in_val[j][0] = 0;
+                int myform = enclosing_form_start(b, as);         /* this radio's own <form>, computed fresh (not cached: a never-yet-clicked sibling may not even have a store slot yet) */
+                for (int j = 0; j < b->in_n; j++) {                /* the previously-checked sibling has its name == group, in the SAME <form> (a same-named radio group in a different form is independent) */
+                    if (streqs(b->in_id[j], cid) || !b->in_name[j][0] || !streqs(b->in_name[j], grp)) continue;
+                    int as2, ae2;
+                    if (dom_attr_region(b, b->in_id[j], &as2, &ae2) && enclosing_form_start(b, as2) == myform) b->in_val[j][0] = 0;
+                }
             }
         }
         if (!fire_onchange(b, cid)) parse_html(b, b->raw + b->bodyoff, b->bodylen);   /* onchange (if any) re-renders */
@@ -4004,14 +4052,17 @@ static void browser_follow(browser_t *b, int id) {
         return;
     }
     int issub = (len > 6); if (issub) for (int k = 0; k < 7; k++) if (lc(hp[k]) != "submit:"[k]) { issub = 0; break; }
-    if (issub) {                                         /* a form submit: action?name=value&… (GET) */
+    if (issub) {                                         /* a form submit: FORM:action?name=value&… (GET), scoped to the one owning <form> */
+        int k; int subform = submit_link_form(hp, len, &k);
         char q[URL_MAX]; int p = 0;
-        int al = len - 7;                                /* the snapshotted action follows "submit:" */
-        if (al > 0) { for (int i = 0; i < al && p < URL_MAX - 1; i++) q[p++] = hp[7 + i]; }
+        int al = len - k;                                /* the snapshotted action follows "submit:FORM:" */
+        if (al > 0) { for (int i = 0; i < al && p < URL_MAX - 1; i++) q[p++] = hp[k + i]; }
         else { for (int i = 0; b->url[i] && b->url[i] != '?' && p < URL_MAX - 1; i++) q[p++] = b->url[i]; }  /* no action -> this page */
         int first = 1;
-        for (int f = 0; f < b->in_n; f++) {              /* every named field becomes a query pair */
+        for (int f = 0; f < b->in_n; f++) {              /* every named field IN THIS FORM becomes a query pair */
             if (!b->in_name[f][0]) continue;
+            int asf, aef;
+            if (!dom_attr_region(b, b->in_id[f], &asf, &aef) || enclosing_form_start(b, asf) != subform) continue;
             if (p < URL_MAX - 1) q[p++] = first ? '?' : '&';
             first = 0;
             p += url_encode(q + p, URL_MAX - 1 - p, b->in_name[f]);
@@ -4728,12 +4779,13 @@ void browser_key(browser_t *b, int c) {
         }
         if (c == '\n' || c == '\r' || c == 27) {
             char fid[32]; { int k=0; while (b->focus_id[k] && k<31) { fid[k]=b->focus_id[k]; k++; } fid[k]=0; }   /* the field losing focus */
+            int myform = -1; { int asf, aef; if (dom_attr_region(b, fid, &asf, &aef)) myform = enclosing_form_start(b, asf); }
             b->focus_id[0] = 0;                          /* leave typing mode */
-            if (c != 27) {                               /* Enter (not Esc): submit the form if it has a submit button */
+            if (c != 27) {                               /* Enter (not Esc): submit THIS field's own form, if it has a submit button */
                 for (int i = 0; i < b->nlink; i++) {
                     const char *h = b->hrefs + b->links[i].off; int hl = b->links[i].len;
                     int sub = (hl > 6); if (sub) for (int k = 0; k < 7; k++) if (lc(h[k]) != "submit:"[k]) { sub = 0; break; }
-                    if (sub) { browser_follow(b, i); return; }
+                    if (sub && submit_link_form(h, hl, 0) == myform) { browser_follow(b, i); return; }
                 }
             }
             set_status(b, "");

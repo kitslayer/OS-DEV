@@ -417,6 +417,18 @@ static const struct {
         "<p><button onclick=\"document.getElementById('out').textContent='news='+(document.getElementById('c1').value||'off')+'  beta='+(document.getElementById('c2').value||'off')+'  pro='+(document.getElementById('r2').value||'off')\">[ Read states ]</button></p>"
         "<p id=\"out\">(toggle the boxes, then read their states)</p>"
         "<p>A checked box submits <code>name=on</code> with the form; an unchecked one is omitted. Selecting a radio unchecks the others sharing its <code>name</code> (try Free, then Pro).</p>" },
+    { "MFORM   HTM", "<h1>Two independent forms</h1>"
+        "<p>Form A and Form B each have their own <code>plan</code> radio group and their own <code>who</code> field, sharing the same names by design. Checking a radio in one form must NOT uncheck the other form's radio of the same name, and submitting one form must NOT leak the other form's field values into the query string.</p>"
+        "<form action=\"file:mform-a.htm\">"
+        "<p>Form A &mdash; Plan: <input id=\"a1\" type=\"radio\" name=\"plan\" checked> Free &nbsp; <input id=\"a2\" type=\"radio\" name=\"plan\"> Pro</p>"
+        "<p>Form A &mdash; Who: <input id=\"an\" name=\"who\" value=\"alice\"></p>"
+        "<p><button type=\"submit\">Submit form A</button></p>"
+        "</form>"
+        "<form action=\"file:mform-b.htm\">"
+        "<p>Form B &mdash; Plan: <input id=\"b1\" type=\"radio\" name=\"plan\" checked> Free &nbsp; <input id=\"b2\" type=\"radio\" name=\"plan\"> Pro</p>"
+        "<p>Form B &mdash; Who: <input id=\"bn\" name=\"who\" value=\"bob\"></p>"
+        "<p><button type=\"submit\">Submit form B</button></p>"
+        "</form>" },
     { "CHKJS   HTM", "<h1>checkbox <code>.checked</code> (boolean DOM property)</h1>"
         "<p><input id=\"cb\" type=\"checkbox\" checked> Enabled</p>"
         "<p><button onclick=\"document.getElementById('o').textContent='checked='+document.getElementById('cb').checked\">[ read .checked ]</button> "
