@@ -116,7 +116,7 @@ int mbox_format(char *b, int max) {
     for (int i = 0; i < MBOX_N; i++) if (mb[i].used) {
         int depth = (mb[i].head - mb[i].tail + MBOX_MSGS) % MBOX_MSGS;
         p = sapp(b, p, max, "  "); p = sapp(b, p, max, mb[i].name);
-        int pad = 20 - (int)0; const char *nm = mb[i].name; int nl = 0; while (nm[nl]) nl++;
+        int pad = 20; const char *nm = mb[i].name; int nl = 0; while (nm[nl]) nl++;
         for (int k = nl; k < pad && p < max - 1; k++) b[p++] = ' ';
         p = sdec(b, p, max, depth); p = sapp(b, p, max, "\n");
         any = 1;

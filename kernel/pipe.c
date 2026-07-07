@@ -85,7 +85,15 @@ int pipe_new(void) {
 int pipe_new_fifo(void) {
     int idx = pipe_new(); if (idx < 0) return -1;
     struct kpipe *p = &pipes[idx];
+    /* pipe_new() just set the anon-pipe defaults (1/1/1) under pipe_lock; flip
+     * them to the FIFO defaults under the SAME lock too -- every other mutator
+     * of these fields (pipe_open_end/pipe_close_end) already does, and this was
+     * the one unlocked window where another path scanning pipes[] could observe
+     * a slot that's used=1 but transiently has anon-pipe r_open/w_open/had_writer
+     * instead of the FIFO values it's about to get. */
+    uint64_t fl = pipe_irq_save();
     p->r_open = 0; p->w_open = 0; p->pinned = 1; p->had_writer = 0;
+    pipe_irq_restore(fl);
     return idx;
 }
 
