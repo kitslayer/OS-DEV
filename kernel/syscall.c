@@ -411,7 +411,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_pty_close]="pty_close",[SYS_pty_ctl]="pty_ctl",
         [SYS_pipe]="pipe",[SYS_fdread]="fdread",[SYS_fdwrite]="fdwrite",[SYS_fdclose]="fdclose",[SYS_dup2]="dup2",
         [SYS_mkfifo]="mkfifo",[SYS_fifo_open]="fifo_open",
-        [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",[SYS_ppoll]="ppoll",[SYS_readv]="readv",[SYS_writev]="writev",[SYS_preadv]="preadv",[SYS_pwritev]="pwritev",
+        [SYS_open]="open",[SYS_lseek]="lseek",[SYS_pread]="pread",[SYS_pwrite]="pwrite",[SYS_ppoll]="ppoll",[SYS_select]="select",[SYS_readv]="readv",[SYS_writev]="writev",[SYS_preadv]="preadv",[SYS_pwritev]="pwritev",
         [SYS_getrlimit]="getrlimit",[SYS_setrlimit]="setrlimit",
     };
     return (n < sizeof nm / sizeof nm[0] && nm[n]) ? nm[n] : "?";
@@ -2013,6 +2013,47 @@ void syscall_dispatch(struct registers *r) {
             if (ready) break;
             if (timeout >= 0 && (long)(timer_ms() - start) >= timeout) break;   /* -1 = block forever */
             task_sleep_ms(10);             /* off-CPU poll interval */
+        }
+        r->rax = (uint64_t)ready;
+        break;
+    }
+    case SYS_select: {                     /* (nfds, readfds*, writefds*, exceptfds*, timeout*) (M1584) */
+        int nfds = (int)r->rdi;
+        fd_set *rfds = (fd_set *)r->rsi, *wfds = (fd_set *)r->rdx, *efds = (fd_set *)r->r10;
+        struct timeval *tv = (struct timeval *)r->r8;
+        if (nfds < 0 || nfds > FD_SETSIZE) { r->rax = (uint64_t)-1; break; }   /* this fd_set's own bit width */
+        if ((rfds && !ubuf(r->rsi, sizeof(fd_set))) || (wfds && !ubuf(r->rdx, sizeof(fd_set))) ||
+            (efds && !ubuf(r->r10, sizeof(fd_set))) || (tv && !ubuf(r->r8, sizeof(struct timeval)))) {
+            r->rax = (uint64_t)-1; break;
+        }
+        app_t *self = app_current();
+        long timeout_ms = tv ? (long)(tv->tv_sec * 1000 + tv->tv_usec / 1000) : -1;   /* no timeval = block forever */
+        fd_set orig_r = rfds ? *rfds : (fd_set){0};
+        fd_set orig_w = wfds ? *wfds : (fd_set){0};
+        if (efds) *efds = (fd_set){0};      /* no OOB/urgent-data concept here -- always empty */
+        __asm__ volatile("sti");           /* the select loop sleeps on the timer */
+        uint64_t start = timer_ms();
+        int ready = 0, badfd = 0;
+        for (;;) {
+            ready = 0; badfd = 0;
+            fd_set outr = {0}, outw = {0};
+            for (int fd = 0; fd < nfds; fd++) {
+                int want = 0;
+                if (rfds && FD_ISSET(fd, &orig_r)) want |= POLLIN;
+                if (wfds && FD_ISSET(fd, &orig_w)) want |= POLLOUT;
+                if (!want) continue;
+                int re = app_fd_ready(self, fd, want);
+                if (re == POLLNVAL) { badfd = 1; break; }   /* a never-opened fd -> EBADF, like real select (M1584) */
+                if ((want & POLLIN)  && (re & POLLIN))  { FD_SET(fd, &outr); ready++; }
+                if ((want & POLLOUT) && (re & POLLOUT)) { FD_SET(fd, &outw); ready++; }
+            }
+            if (badfd) { ready = -1; break; }
+            if (ready || (timeout_ms >= 0 && (long)(timer_ms() - start) >= timeout_ms)) {
+                if (rfds) *rfds = outr;
+                if (wfds) *wfds = outw;
+                break;
+            }
+            task_sleep_ms(10);             /* off-CPU poll interval, same as poll/ppoll */
         }
         r->rax = (uint64_t)ready;
         break;

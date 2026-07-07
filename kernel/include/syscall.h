@@ -360,6 +360,23 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SYS_getsid       326   /* (pid) -> session id; pid==0 = the caller's own; -1 on a bad pid (M1580) */
 #define SYS_symlinkat    327   /* (target, newdirfd, linkpath) -> symlink relative to a dir fd (or AT_FDCWD); 0/-1 (M1582) */
 #define SYS_readlinkat   328   /* (dirfd, path, buf, size) -> a symlink's target relative to a dir fd (or AT_FDCWD), not followed; bytes/-1 (M1582) */
+#define SYS_select       329   /* (nfds, readfds*, writefds*, exceptfds*, timeout*) -> like poll, fd_set-shaped; #ready/0 timeout/-1 (M1584) */
+
+/* select(2) (M1584): a small, from-scratch fd_set sized for THIS fd table
+ * (APP_NFD=24), not real glibc's 1024-bit/128-byte one -- every fd this OS can
+ * ever hand out fits in one word, so ported code that just calls
+ * FD_ZERO/FD_SET/FD_ISSET (the overwhelming common case) works unmodified;
+ * code that assumes glibc's exact struct layout/size (memcpy, sizeof, raw
+ * byte access) would not port cleanly regardless of what's declared here.
+ * exceptfds is always reported empty -- this stack has no OOB/urgent-data
+ * concept for select to observe. */
+typedef struct { unsigned long fds_bits; } fd_set;
+#define FD_SETSIZE 32
+#define FD_ZERO(s)      ((s)->fds_bits = 0)
+#define FD_SET(fd, s)   ((s)->fds_bits |= (1UL << (fd)))
+#define FD_CLR(fd, s)   ((s)->fds_bits &= ~(1UL << (fd)))
+#define FD_ISSET(fd, s) (int)(((s)->fds_bits >> (fd)) & 1UL)
+struct timeval { long tv_sec; long tv_usec; };
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

@@ -166,6 +166,9 @@ long sys_fswait(const char *const *paths, int n, long timeout_ms) {
 long sys_poll(struct pollfd *fds, int nfds, long timeout_ms) {
     return do_syscall(SYS_poll, (long)fds, nfds, timeout_ms);
 }
+long sys_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
+    return do_syscall5(SYS_select, nfds, (long)readfds, (long)writefds, (long)exceptfds, (long)timeout);
+}
 long sys_ppoll(struct pollfd *fds, int nfds, long timeout_ms, unsigned sigmask) {
     return do_syscall4(SYS_ppoll, (long)fds, nfds, timeout_ms, sigmask);
 }
