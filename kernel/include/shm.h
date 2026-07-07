@@ -15,3 +15,4 @@
  * bytes. *frames -> the physical-frame array, *npages -> its length. 0/-1. */
 int shm_get(const char *name, uint64_t size, uint64_t **frames, int *npages);
 int shm_format(char *out, int max);   /* /proc/shm: objects + sizes */
+int shm_unlink(const char *name);     /* remove the name -> object association; 0/-1 (M1590) */

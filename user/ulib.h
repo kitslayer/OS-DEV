@@ -141,6 +141,7 @@ long sys_sntp(void);
 long sys_swapout(void *addr, unsigned long len);
 long sys_losetup(const char *path);
 void *sys_shm_open(const char *name, unsigned long size);
+long  sys_shm_unlink(const char *name);                     /* remove a named shared-memory object's name; 0/-1 (M1590) */
 long sys_futex(void *uaddr, int op, int val, long timeout_ms);   /* timeout_ms<0 = wait forever (M1578) */
 long sys_apps(void *buf, unsigned long len);
 long sys_resolve(const char *host, void *buf, unsigned long len);

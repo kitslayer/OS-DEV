@@ -18,6 +18,7 @@
 #include "mqueue.h"
 #include "sysvipc.h"
 #include "sem.h"
+#include "shm.h"
 #include "unixsock.h"
 #include "pty.h"
 #include "flock.h"
@@ -339,7 +340,7 @@ static uint32_t syscall_class(uint64_t nr) {
         return PL_PROC;
     case SYS_clone: case SYS_join:          /* threads sharing THIS address space, not a new process (M1533) */
         return PL_THREAD;
-    case SYS_mmap: case SYS_munmap: case SYS_mremap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_futex:
+    case SYS_mmap: case SYS_munmap: case SYS_mremap: case SYS_madvise: case SYS_swapout: case SYS_shm_open: case SYS_shm_unlink: case SYS_futex:
     case SYS_mseal: case SYS_uffd_register: case SYS_uffd_read: case SYS_uffd_copy: case SYS_mmap_file: case SYS_msync:
     case SYS_mincore: case SYS_mlock: case SYS_munlock: case SYS_mmap_huge: case SYS_mlockall: case SYS_munlockall:
     case SYS_shmget: case SYS_shmat: case SYS_shmdt: case SYS_shmctl:
@@ -379,7 +380,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_tftp]="tftp",[SYS_madvise]="madvise",[SYS_alarm]="alarm",[SYS_setitimer]="setitimer",[SYS_getitimer]="getitimer",[SYS_sntp]="sntp",
         [SYS_fsync]="fsync",[SYS_fdatasync]="fdatasync",[SYS_sync_file_range]="sync_file_range",[SYS_sync]="sync",[SYS_epoll_pwait]="epoll_pwait",[SYS_inotify_rm_watch]="inotify_rm_watch",
         [SYS_fsetxattr]="fsetxattr",[SYS_fgetxattr]="fgetxattr",[SYS_flistxattr]="flistxattr",[SYS_fremovexattr]="fremovexattr",
-        [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_futex]="futex",
+        [SYS_swapout]="swapout",[SYS_losetup]="losetup",[SYS_shm_open]="shm_open",[SYS_shm_unlink]="shm_unlink",[SYS_futex]="futex",
         [SYS_fork]="fork",[SYS_waitpid]="waitpid",[SYS_exec]="exec",[SYS_unshare]="unshare",
         [SYS_singlestep]="singlestep",
         [SYS_seccomp]="seccomp",[SYS_seccomp_wait]="seccomp_wait",[SYS_seccomp_reply]="seccomp_reply",
@@ -1871,6 +1872,10 @@ void syscall_dispatch(struct registers *r) {
     case SYS_shm_open:                     /* (name, size) -> map a named shared-memory object */
         if (!ustr(r->rdi)) { r->rax = 0; break; }
         r->rax = app_shm_open((const char *)r->rdi, r->rsi);
+        break;
+    case SYS_shm_unlink:                   /* (name) -> remove the name -> object association (M1590) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        r->rax = (uint64_t)(int64_t)shm_unlink((const char *)r->rdi);
         break;
     case SYS_futex:                        /* (uaddr, op, val, timeout_ms) -> FUTEX_WAIT/WAKE; timeout_ms<0 = wait forever (M1578) */
         r->rax = (uint64_t)(int64_t)app_futex(r->rdi, (int)r->rsi, (int)r->rdx, (long)r->r10);

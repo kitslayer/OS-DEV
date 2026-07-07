@@ -5312,6 +5312,31 @@ static int run_command(char *line, char *cwd) {
                 print(shared ? "wrote 'SHM!' via A, read it via B -> they share one backing\n"
                              : "VERIFY FAILED: mappings are not shared\n");
                 if (!shared) g_status = 1;
+                /* shm_unlink (M1590): frees the name without disturbing a's/b's
+                 * already-open mapping; a fresh open of the SAME name afterward is a
+                 * genuinely new, zeroed object, not the stale 'SHM!' data */
+                int ok2 = (sys_shm_unlink("demo") == 0);
+                if (a[0] != 'S') ok2 = 0;                        /* the already-open mapping is unaffected */
+                char *fresh = (char *)sys_shm_open("demo", 4096);
+                if (!fresh || fresh[0] != 0) ok2 = 0;             /* new object -> zeroed, not 'SHM!' */
+                if (sys_shm_unlink("demo") != 0) ok2 = 0;
+                if (sys_shm_unlink("no-such-shm-object") != -1) ok2 = 0;   /* unlinking an absent name -> -1 */
+                /* the real bug this closes (M1576's own documented gap): exhaust all 8
+                 * named-shm slots with distinct names, confirm a 9th genuinely fails,
+                 * unlink all 8, then confirm the table is NOT permanently exhausted */
+                char nm[4] = { 'X', '0', 0, 0 };
+                int exok = 1;
+                for (int i = 0; i < 8; i++) { nm[1] = (char)('0' + i); if (!sys_shm_open(nm, 4096)) { exok = 0; break; } }
+                if (sys_shm_open("X9", 4096) != 0) exok = 0;      /* table genuinely full -> the 9th distinct name fails */
+                for (int i = 0; i < 8; i++) { nm[1] = (char)('0' + i); if (sys_shm_unlink(nm) != 0) exok = 0; }
+                void *reopen9 = sys_shm_open("X9", 4096);         /* slots freed -> a 9th distinct name succeeds now */
+                if (!reopen9) exok = 0;
+                if (reopen9) sys_shm_unlink("X9");
+                ok2 = ok2 && exok;
+                print(ok2 ? "shm_unlink: frees the name (live mapping unaffected, reopen is a fresh zeroed object); "
+                            "exhaust+unlink+reopen all 8 slots -- OK\n"
+                          : "shmtest: shm_unlink VERIFY FAILED\n");
+                if (!ok2) g_status = 1;
             }
         } else if (streq(line, "alarmtest")) {  /* demonstrate SIGALRM: a periodic timer signal to a ring-3 handler */
             g_alarm_fires = 0;

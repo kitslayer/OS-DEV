@@ -296,6 +296,7 @@ long sys_sntp(void) { return do_syscall(SYS_sntp, 0, 0, 0); }
 long sys_swapout(void *addr, unsigned long len) { return do_syscall(SYS_swapout, (long)addr, (long)len, 0); }
 long sys_losetup(const char *path) { return do_syscall(SYS_losetup, (long)path, 0, 0); }
 void *sys_shm_open(const char *name, unsigned long size) { return (void *)do_syscall(SYS_shm_open, (long)name, (long)size, 0); }
+long  sys_shm_unlink(const char *name) { return do_syscall(SYS_shm_unlink, (long)name, 0, 0); }
 long sys_futex(void *uaddr, int op, int val, long timeout_ms) { return do_syscall4(SYS_futex, (long)uaddr, op, val, timeout_ms); }
 long sys_apps(void *buf, unsigned long len) { return do_syscall(SYS_apps, (long)buf, (long)len, 0); }
 long sys_spawn(const char *name) { return do_syscall(SYS_spawn, (long)name, 0, 0); }

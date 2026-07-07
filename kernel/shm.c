@@ -43,6 +43,26 @@ int shm_get(const char *name, uint64_t size, uint64_t **frames, int *npages) {
     return -1;                                            /* table full */
 }
 
+/* shm_unlink (M1590): drop the table SLOT's own implicit hold on each frame
+ * (the "refcount 0" baseline pmm_alloc_frame left it at, per this file's own
+ * header comment) and free the name for reuse. Any process that already
+ * app_shm_open'd this object keeps working -- its own earlier pmm_addref
+ * call is a SEPARATE reference pmm_free_frame here doesn't touch; the frame
+ * only actually returns to the pool once every one of those drops too (each
+ * mapper's own vmm_destroy_address_space teardown, same as any other shared
+ * frame). A later shm_open of the SAME name after this creates a genuinely
+ * NEW, distinct, freshly-zeroed object, matching real POSIX shm_unlink --
+ * unlink only removes the name -> object association, not live mappings. */
+int shm_unlink(const char *name) {
+    if (!name || !name[0]) return -1;
+    for (int i = 0; i < SHM_N; i++) if (tab[i].used && sh_eq(tab[i].name, name)) {
+        for (int p = 0; p < tab[i].npages; p++) pmm_free_frame(tab[i].frames[p]);
+        tab[i].used = 0;
+        return 0;
+    }
+    return -1;
+}
+
 static int s_put(char *b, int p, int max, const char *s) { while (*s && p + 1 < max) b[p++] = *s++; return p; }
 static int s_num(char *b, int p, int max, uint64_t v) {
     char t[16]; int n = 0; if (!v) t[n++] = '0';
