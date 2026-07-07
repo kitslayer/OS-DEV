@@ -316,9 +316,14 @@ static int evaluate(void) {           /* + good for White, - for Black */
 
 /* Negamax with alpha-beta. Returns score from the perspective of `white`. */
 static int negamax(int depth, int alpha, int beta, int white) {
-    if (depth == 0) return white ? evaluate() : -evaluate();
+    /* the mate/stalemate check must run even at depth==0 -- it used to return
+     * the static eval immediately there, before gen_legal ever ran, so a mate
+     * delivered exactly at the search horizon (e.g. a forced mate-in-2 whose
+     * final move lands on depth 0) was scored by material/PST instead of
+     * recognized as a terminal position. */
     Move mv[256]; int n = gen_legal(white, mv);
     if (n == 0) return in_check(white) ? -(MATE + depth) : 0;   /* mate (prefer slower) / stalemate */
+    if (depth == 0) return white ? evaluate() : -evaluate();
     char bak[65];
     int best = -INF;
     for (int i = 0; i < n; i++) {

@@ -23,7 +23,14 @@ static int over, win;
 static unsigned rng;
 static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
-static void putn(int n) { char s[2]; s[0] = (char)('0' + n); s[1] = 0; print(s); }
+static void putn(int n) {
+    /* was single-digit-only ('0'+n) -- nrows can legitimately reach ROWS (10)
+     * on a last-guess win (see fifteen.c/battleship.c for this same fix). */
+    char t[8]; int i = 0;
+    if (n == 0) { print("0"); return; }
+    while (n) { t[i++] = (char)('0' + n % 10); n /= 10; }
+    char s[8]; int j = 0; while (i) s[j++] = t[--i]; s[j] = 0; print(s);
+}
 
 static void newgame(void) {
     for (int i = 0; i < LEN; i++) secret[i] = 1 + (int)(rnd() % 6);

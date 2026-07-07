@@ -106,6 +106,11 @@ static void finish(void) {
         /* a player natural still beats the dealer's *drawn* 21 (pays 3:2);
          * only a dealer NATURAL (dn==2) pushes it. */
         chips += (BET * 3) / 2; msg = "BLACKJACK! you win 3:2.   d = deal"; sys_beep(880, 160);
+    } else if (dt == 21 && dn == 2 && !bj) {
+        /* the mirror case: a dealer natural beats the player's *drawn* (non-natural)
+         * 21 -- an ordinary loss, not a push (two naturals push each other; !bj
+         * excludes that case, which correctly falls through to the push below). */
+        chips -= BET; msg = "Dealer's BLACKJACK - you lose.   d = deal"; sys_beep(196, 220);
     } else {
         msg = "Push (tie).   d = deal";
     }

@@ -42,6 +42,18 @@ static int line_score(int r, int c, int p) {
 }
 
 static void cpu_move(void) {
+    /* an immediate win always takes priority over blocking (or the softer
+     * mine/block heuristic below) -- checked first and separately, matching
+     * c4.c's ai_move() structure, rather than folded into the weighted score
+     * below, where block's higher weight (x5) silently outscored an available
+     * win (x4: both line_score to 100000 for completing a line, win or block
+     * alike, so mine*4=400000 < block*5=500000 even when a win exists). */
+    for (int r = 0; r < N; r++) for (int c = 0; c < N; c++) {
+        if (b[r][c]) continue;
+        b[r][c] = 2;
+        if (wins_at(r, c, 2)) { over = 1; winner = 2; msg = "CPU wins.  (r replay)"; sys_beep(165, 250); return; }
+        b[r][c] = 0;
+    }
     int br = -1, bc = -1, best = -1;
     for (int r = 0; r < N; r++) for (int c = 0; c < N; c++) {
         if (b[r][c]) continue;
