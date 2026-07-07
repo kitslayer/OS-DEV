@@ -1139,6 +1139,7 @@ static const struct {
     { "DLTEST  SO ", "build/dltest.so" }, /* a shared library for the userspace dynamic linker (M1263): dltest builtin dlopen()s it */
     { "DLBASE  SO ", "build/dlbase.so" }, /* cross-object dynamic linking (M1539): exports base_mul; loaded first */
     { "DLEXT   SO ", "build/dlext.so" },  /* imports base_mul from DLBASE.SO; dlxtest builtin dlopen()s both in order */
+    { "TESTMOD KO ", "build/testmod.ko" }, /* the same ET_REL module module_load_builtin() incbins (M1261); insmodtest (M1595) loads THIS copy from a real file instead */
 };
 #define NUM_HOST (int)(sizeof(hostfiles) / sizeof(hostfiles[0]))
 

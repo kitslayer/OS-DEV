@@ -185,6 +185,7 @@ long sys_udp_recv(unsigned short sport, void *buf, unsigned max, void *from);  /
 int  sys_raw_send(const void *frame, unsigned len);            /* send a complete Ethernet frame; 0/-1 (M1259) */
 long sys_raw_recv(void *buf, unsigned max);                    /* next Ethernet frame (2s timeout); length/-1 (M1259) */
 long sys_insmod(void);                                         /* load+relocate+run the built-in .ko; mod_init retval/-err (M1261) */
+long sys_insmod_path(const char *path);                         /* load+relocate+run a .ko from a real file; mod_init retval/-err (M1595) */
 int  sys_rmmod(const char *name);                              /* unload a module: run mod_exit + free its slot; 0/-1 (M1262) */
 int  sys_sendfd(int ep, int fd);                               /* SCM_RIGHTS: pass an fd over an AF_UNIX endpoint; 0/-1 (M1265) */
 int  sys_recvfd(int ep);                                       /* SCM_RIGHTS: receive a passed fd; new fd/-1 (M1265) */

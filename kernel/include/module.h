@@ -21,6 +21,11 @@
  * negative error code (unresolved symbol, bad ELF, no room, etc.). */
 long module_load(const void *image, unsigned long len);
 
+/* Same as module_load, but registered under `name` instead of the generic
+ * "module" literal (M1595) -- lets /proc/modules and rmmod distinguish
+ * multiple disk-loaded modules from each other. */
+long module_load_named(const void *image, unsigned long len, const char *name);
+
 /* Load the kernel's built-in demo module (the incbin'd build/testmod.ko). */
 long module_load_builtin(void);
 

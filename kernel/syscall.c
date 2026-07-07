@@ -757,6 +757,20 @@ void syscall_dispatch(struct registers *r) {
     case SYS_insmod:                       /* () -> load the built-in .ko (relocate+resolve+run); retval/-err (M1261) */
         r->rax = (uint64_t)(int64_t)module_load_builtin();
         break;
+    case SYS_insmod_path: {                /* (path) -> load a .ko module from a real file (M1595) */
+        if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
+        uint8_t *buf; long n = read_whole_file((const char *)r->rdi, &buf);
+        if (n < 0) { r->rax = (uint64_t)-1; break; }
+        const char *p = (const char *)r->rdi, *base = p;
+        for (const char *q = p; *q; q++) if (*q == '/') base = q + 1;
+        char name[32]; int k = 0;
+        while (base[k] && k < 31) { name[k] = base[k]; k++; }
+        if (k >= 3 && name[k - 3] == '.' && (name[k - 2] == 'k' || name[k - 2] == 'K') && (name[k - 1] == 'o' || name[k - 1] == 'O')) k -= 3;  /* strip .ko/.KO */
+        name[k] = 0;
+        r->rax = (uint64_t)(int64_t)module_load_named(buf, (unsigned long)n, name);
+        kfree(buf);
+        break;
+    }
     case SYS_sendfd:                       /* (ep, fd) -> SCM_RIGHTS: pass an fd over an AF_UNIX endpoint (M1265) */
         r->rax = (uint64_t)(int64_t)app_scm_send((int)r->rdi, (int)r->rsi);
         break;

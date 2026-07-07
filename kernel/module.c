@@ -216,6 +216,14 @@ long module_load(const void *image, unsigned long len) {
     return mod_do_load(image, len, "module");
 }
 
+/* Same as module_load, but under a caller-given name instead of the generic
+ * "module" literal -- insmod_path (M1595) derives one from the file's own
+ * basename, so /proc/modules and rmmod can tell multiple disk-loaded modules
+ * apart, the same way module_load_builtin's own "testmod" already can. */
+long module_load_named(const void *image, unsigned long len, const char *name) {
+    return mod_do_load(image, len, name);
+}
+
 /* rmmod: call the module's mod_exit (if any) and free its registry slot. When
  * the last module is unloaded, reset the bump allocator so the area is reusable.
  * Returns 0, or -1 if no such module is loaded. */

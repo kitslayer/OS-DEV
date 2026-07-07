@@ -4551,6 +4551,24 @@ static int run_command(char *line, char *cwd) {
             if (!gone) ok = 0;
             if (ok) print("insmod: testmod.ko loaded (ELF reloc + ksym resolution, mod_init=42), shown in /proc/modules, then rmmod ran mod_exit + removed it -- module lifecycle OK\n");
             else { sys_setcolor(2); print("insmodtest: VERIFY FAILED (rv="); sys_setcolor(0); printl(rv); print(" listed="); printl(listed); print(" gone="); printl(gone); print(")\n"); g_status = 1; }
+            /* insmod_path (M1595): the SAME testmod.ko content, loaded from a real
+             * file instead of the incbin'd blob -- mkfatfs copies build/testmod.ko
+             * onto the disk image as /TESTMOD.KO specifically so this can be
+             * proven in-guest, not just via a host-side module_load() unit test.
+             * The module name is derived from the path's own basename -> "TESTMOD". */
+            int ok2 = 1;
+            long rv2 = sys_insmod_path("/TESTMOD.KO");
+            if (rv2 != 42) ok2 = 0;
+            long n3 = sys_readfile("/proc/modules", mb, sizeof mb - 1);
+            int listed2 = 0; if (n3 > 0) { mb[n3]=0; for (int i=0;i+7<=n3;i++) if (mb[i]=='T'&&mb[i+1]=='E'&&mb[i+2]=='S'&&mb[i+3]=='T'&&mb[i+4]=='M'&&mb[i+5]=='O'&&mb[i+6]=='D'){listed2=1;break;} }
+            if (!listed2) ok2 = 0;
+            int un2 = sys_rmmod("TESTMOD");
+            if (un2 != 0) ok2 = 0;
+            long n4 = sys_readfile("/proc/modules", mb, sizeof mb - 1);
+            int gone2 = 1; if (n4 > 0) { mb[n4]=0; for (int i=0;i+7<=n4;i++) if (mb[i]=='T'&&mb[i+1]=='E'&&mb[i+2]=='S'&&mb[i+3]=='T'&&mb[i+4]=='M'&&mb[i+5]=='O'&&mb[i+6]=='D'){gone2=0;break;} }
+            if (!gone2) ok2 = 0;
+            if (ok2) print("insmod_path: /TESTMOD.KO loaded from a real file (name from its basename -> 'TESTMOD'), shown in /proc/modules, rmmod removed it -- OK\n");
+            else { sys_setcolor(2); print("insmodtest: insmod_path VERIFY FAILED (rv2="); sys_setcolor(0); printl(rv2); print(" listed2="); printl(listed2); print(" gone2="); printl(gone2); print(")\n"); g_status = 1; }
         } else if (streq(line, "dltest")) {   /* userspace dynamic linker: dlopen a .so from disk, dlsym + call (M1263) */
             int ok = 1;
             void *h = dlopen("DLTEST.SO");          /* read + map + relocate DLTEST.SO off the FAT disk */

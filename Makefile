@@ -122,7 +122,7 @@ $(BUILD)/dlext.so: user/dlext_lib.c Makefile
 	@mkdir -p $(BUILD)
 	$(CC) -shared -fPIC -nostdlib -ffreestanding -fno-stack-protector -mno-red-zone -fno-pie -O2 $< -o $@
 
-$(DISK): $(BUILD)/mkfatfs $(BUILD)/dltest.so $(BUILD)/dlbase.so $(BUILD)/dlext.so
+$(DISK): $(BUILD)/mkfatfs $(BUILD)/dltest.so $(BUILD)/dlbase.so $(BUILD)/dlext.so $(BUILD)/testmod.ko
 	$(BUILD)/mkfatfs $@
 
 $(BUILD)/%.o: %.c Makefile
