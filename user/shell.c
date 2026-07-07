@@ -32,6 +32,14 @@ static void ftx_wake_thread_fn(void *arg) {                     /* sleeps briefl
     sys_futex((void *)&g_ftx_word, FUTEX_WAKE, 1, -1);
     sys_thread_exit();
 }
+static volatile int g_evfd_shared;                              /* eventfdblocktest's fd, shared with its clone thread (M1579) */
+static void evfd_wake_thread_fn(void *arg) {                     /* sleeps briefly, then posts 7 to g_evfd_shared */
+    (void)arg;
+    sys_sleep(150);
+    unsigned char w[8]; for (int i = 0; i < 8; i++) w[i] = (i == 0) ? 7 : 0;
+    sys_fdwrite(g_evfd_shared, w, 8);
+    sys_thread_exit();
+}
 
 static void itoa_simple(int v, char *out) {
     char tmp[12];
@@ -773,7 +781,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3890,10 +3898,12 @@ static int run_command(char *line, char *cwd) {
                       print(" (absent path -> -1) -- OK\n"); }
             else { sys_setcolor(2); print("statfstest: VERIFY FAILED\n"); sys_setcolor(0); }
             if (!ok) g_status = 1;
-        } else if (streq(line, "eventfdtest")) {   /* eventfd counter fd (M1242) */
+        } else if (streq(line, "eventfdtest")) {   /* eventfd counter fd (M1242); both fds below are EFD_NONBLOCK
+                                                     * so every "empty -> -1" assertion stays a synchronous check
+                                                     * even now that a plain (blocking) eventfd really blocks (M1579) */
             int ok = 1;
             unsigned char b[8]; unsigned long long v;
-            int efd = sys_eventfd(5, 0);
+            int efd = sys_eventfd(5, EFD_NONBLOCK);
             if (efd < 0) ok = 0;
             else {
                 struct pollfd pf = { efd, POLLIN, 0 };
@@ -3910,7 +3920,7 @@ static int run_command(char *line, char *cwd) {
                 if (!(n2 == 8 && v == 3)) ok = 0;
                 sys_fdclose(efd);
             }
-            int sfd = sys_eventfd(2, EFD_SEMAPHORE);                                /* semaphore mode */
+            int sfd = sys_eventfd(2, EFD_SEMAPHORE | EFD_NONBLOCK);                 /* semaphore mode */
             if (sfd < 0) ok = 0;
             else {
                 long a1 = sys_fdread(sfd, b, 8); v = 0; for (int i = 0; i < 8; i++) v |= (unsigned long long)b[i] << (i * 8);
@@ -3922,6 +3932,29 @@ static int run_command(char *line, char *cwd) {
             }
             print(ok ? "eventfd: count(5)->POLLIN->read 5->drained; +3->read 3; EFD_SEMAPHORE read 1,1 then empty -- OK\n"
                      : "eventfdtest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+        } else if (streq(line, "eventfdblocktest")) {   /* a plain (non-EFD_NONBLOCK) eventfd read really blocks (M1579) */
+            int ok = 1;
+            int bfd = sys_eventfd(0, 0);                          /* no EFD_NONBLOCK -> read() blocks on an empty counter */
+            if (bfd < 0) ok = 0;
+            else {
+                g_evfd_shared = bfd;
+                char *stk = malloc(64 * 1024);
+                if (!stk) ok = 0;
+                else {
+                    long tid = sys_clone((void *)evfd_wake_thread_fn, stk + 64 * 1024, 0);
+                    unsigned char b[8]; unsigned long long v = 0;
+                    unsigned long t0 = sys_uptime_ms();
+                    long n = sys_fdread(bfd, b, 8);                /* counter starts at 0 -> really blocks */
+                    unsigned long elapsed = sys_uptime_ms() - t0;
+                    for (int i = 0; i < 8; i++) v |= (unsigned long long)b[i] << (i * 8);
+                    ok = (tid > 0 && n == 8 && v == 7 && elapsed >= 100);   /* really parked ~150ms, not an instant return */
+                    free(stk);
+                }
+                sys_fdclose(bfd);
+            }
+            print(ok ? "eventfd (no EFD_NONBLOCK): read() blocks on an empty counter, wakes + returns 7 once another thread writes it -- OK\n"
+                     : "eventfdblocktest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "iotest")) {   /* /proc/<pid>/io byte accounting (M1244) */
             int ok = 1;

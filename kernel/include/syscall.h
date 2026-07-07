@@ -254,7 +254,7 @@
 #define SYS_eventfd      233   /* (initval, flags) -> a pollable u64-counter fd; fd/-1 (M1242) */
 #define EFD_SEMAPHORE 1        /* eventfd: read decrements by 1 (returns 1) instead of draining (M1242) */
 #define EFD_CLOEXEC   2        /* eventfd: set FD_CLOEXEC (M1242) */
-#define EFD_NONBLOCK  4        /* eventfd: non-blocking (reads are always non-blocking here) (M1242) */
+#define EFD_NONBLOCK  4        /* eventfd: read returns -1 on an empty counter instead of blocking (M1242; real blocking-if-unset M1579) */
 #define SYS_chown        234   /* (path, uid, gid) -> set owner/group (ext2; -1 = leave); 0/-1 (M1243) */
 #define SYS_fchown       235   /* (fd, uid, gid) -> set owner/group on an open fd; 0/-1 (M1243) */
 #define SYS_sched_getcpu 236   /* () -> APIC id of the CPU the caller runs on (M1246) */

@@ -3614,6 +3614,17 @@ int app_pipe2(int *out, int flags) {
     return 0;
 }
 #define FILEFD_CAP (1u << 20)   /* the write-RMW bound (M1195); reads are now uncapped via vfs_pread (M1196) */
+/* Blocked eventfd readers (M1579), keyed by (owning app, fd) rather than a
+ * field on struct fdent -- fork/dup2/dup3/pidfd_getfd/SCM_RIGHTS all move a
+ * fdent around with a raw struct copy (app_fd_fork, app_dup2, app_pidfd_getfd,
+ * g_scm[]); a "task blocked here" pointer living ON that struct would get
+ * silently duplicated by every one of those copies, and a later write on the
+ * DUPLICATE fd (which has its own independent counter -- eventfd has no
+ * shared-object table, so it doesn't alias post-fork/dup2 either) would wake a
+ * task that never touched that fd at all. Keeping this table separate means
+ * none of those copy paths need to know it exists. */
+#define EVFD_NWAIT 16
+static struct { struct app *a; int fd; void *task; int used; } g_evfd_wait[EVFD_NWAIT];
 long app_fd_read(int fd, void *buf, unsigned long max) {
     struct app *a = cur(); if (!a) return -1;
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 2) {   /* FILE fd: positioned read (M1193/M1196) */
@@ -3651,8 +3662,16 @@ long app_fd_read(int fd, void *buf, unsigned long max) {
     }
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 5) {   /* eventfd: read the counter (M1242) */
         if (max < 8) return -1;
+        while (a->fd[fd].off <= 0) {            /* empty: block for real unless EFD_NONBLOCK (M1579) */
+            if (a->fd[fd].obj) return -1;       /* obj doubles as the EFD_NONBLOCK flag for this type -> EAGAIN */
+            int slot = -1;
+            for (int i = 0; i < EVFD_NWAIT; i++) if (!g_evfd_wait[i].used) { slot = i; break; }
+            if (slot < 0) return -1;            /* too many blocked eventfd readers system-wide; fail rather than hang */
+            g_evfd_wait[slot].a = a; g_evfd_wait[slot].fd = fd; g_evfd_wait[slot].task = task_self(); g_evfd_wait[slot].used = 1;
+            task_block();                       /* woken by eventfd_write, a kill, or a signal */
+            g_evfd_wait[slot].used = 0;          /* reclaim our slot on resume (idempotent w/ the WAKE below) */
+        }
         long cnt = a->fd[fd].off;
-        if (cnt <= 0) return -1;                                              /* empty -> would block; non-blocking returns -1 */
         uint64_t val = a->fd[fd].write_end ? 1u : (uint64_t)cnt;              /* SEMAPHORE: 1, else the whole count */
         for (int i = 0; i < 8; i++) ((char *)buf)[i] = (char)(val >> (i * 8));
         a->fd[fd].off = a->fd[fd].write_end ? cnt - 1 : 0;                    /* SEMAPHORE: decrement, else drain */
@@ -3729,6 +3748,11 @@ long app_fd_write(int fd, const void *buf, unsigned long len) {
         long nc = a->fd[fd].off + (long)add;
         if (nc < a->fd[fd].off) return -1;                                   /* overflow -> would block; reject */
         a->fd[fd].off = nc;
+        for (int i = 0; i < EVFD_NWAIT; i++)                                  /* wake every reader blocked on THIS (app, fd) (M1579) */
+            if (g_evfd_wait[i].used && g_evfd_wait[i].a == a && g_evfd_wait[i].fd == fd) {
+                g_evfd_wait[i].used = 0;
+                task_wake((task_t *)g_evfd_wait[i].task);
+            }
         return 8;
     }
     if (fd >= 0 && fd < APP_NFD && a->fd[fd].used && a->fd[fd].type == 10) {  /* TCP socket: send (M1268) */
@@ -3986,14 +4010,17 @@ long app_timerfd_settime(int fd, long delay_ms, long interval_ms) {
 /* eventfd (M1242): a pollable u64-counter fd. The counter lives in the fd's own
  * `off` field (like timerfd — no object table, so fork copies it + close needs no
  * teardown); write() adds to it, read() drains it (or decrements by 1 in
- * EFD_SEMAPHORE mode, flagged via write_end), poll() reports POLLIN when >0. */
+ * EFD_SEMAPHORE mode, flagged via write_end), poll() reports POLLIN when >0.
+ * `obj` (otherwise unused here) doubles as the EFD_NONBLOCK flag (M1579): a
+ * real per-fd flag, since unlike every other blocking fd type in this table,
+ * eventfd shipped (M1242) with reads hard-coded to never block at all. */
 int app_eventfd_create(unsigned int initval, int flags) {
     struct app *a = cur(); if (!a) return -1;
     int fd = -1;
     if (!app_fd_over_limit(a)) for (int i = APP_FD_FIRST; i < APP_NFD; i++) if (!a->fd[i].used) { fd = i; break; }   /* RLIMIT_NOFILE (M1547) */
     if (fd < 0) return -1;
     a->fd[fd] = (struct fdent){ 1, 5, (flags & EFD_SEMAPHORE) ? (uint8_t)1 : (uint8_t)0,
-                                0, {0}, (long)initval, (flags & EFD_CLOEXEC) ? (uint8_t)1 : (uint8_t)0 };
+                                (flags & EFD_NONBLOCK) ? 1 : 0, {0}, (long)initval, (flags & EFD_CLOEXEC) ? (uint8_t)1 : (uint8_t)0 };
     return fd;
 }
 
