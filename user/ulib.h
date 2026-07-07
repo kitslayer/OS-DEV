@@ -117,6 +117,8 @@ int  sys_unix_wait_any(const int *eps, int n);         /* poll: index of first r
 int  sys_socketpair(int *sv);                          /* socketpair(2): sv[0]/sv[1] = pre-connected AF_UNIX pair; 0/-1 (M1254) */
 int  sys_nice(int nice);                               /* set current task's CFS nice (-20..19); returns clamped (M1171) */
 int  sys_sched_setscheduler(int policy, int rt_priority);  /* SCHED_OTHER/FIFO/RR; rt_priority 1..99 for RT; 0/-1 (M1172) */
+int  sys_sched_get_priority_max(int policy);               /* the valid rt_priority ceiling for a policy; -1 on a bad policy (M1589) */
+int  sys_sched_get_priority_min(int policy);               /* the valid rt_priority floor for a policy; -1 on a bad policy (M1589) */
 long sys_statx(const char *path, struct statx *st);        /* file metadata: mode/size/mtime/nlink (M1173) */
 int  sys_tcgetattr(struct termios *t);                     /* read the TTY discipline mode (M1174) */
 int  sys_tcsetattr(const struct termios *t);               /* set cooked/raw TTY mode (M1174) */

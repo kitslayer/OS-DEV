@@ -1,5 +1,15 @@
 # What's next
 
+> **(M1589) Kernel — `sched_get_priority_max`/`sched_get_priority_min`: the last of the eighth research survey's picks.** `sched_setscheduler` (M1172) accepts an `rt_priority` argument for `SCHED_FIFO`/`SCHED_RR`, silently clamped to 1..99 (`task_set_sched`'s own `if (rt_priority < 1) ...` line) — but nothing let a caller *ask* what that valid range actually is, the standard call real POSIX real-time code makes right before setting one. `task_sched_get_priority_max`/`_min` hand back those exact same two already-hardcoded numbers per policy, plus `0`/`0` for `SCHED_OTHER` (matching real Linux's own answer for a policy with no `rt_priority` concept at all) and `-1` for anything else.
+>
+> Placed in `task.c` next to `task_set_sched` rather than behind an `app.c` wrapper, matching that function's own existing precedent — `syscall.c` already calls `task_set_sched` directly with no indirection layer, since scheduling-policy state lives on the task itself, not the app/process structure.
+>
+> New coverage folded into `schedtest`: both calls against `SCHED_FIFO`, `SCHED_RR`, `SCHED_OTHER`, and a bogus policy value, checked before the test's own existing SCHED_FIFO priority-ordering fork race — a fast, non-forking check that doesn't need to touch the rest of the test's own IPC setup.
+>
+> **Verified:** `make check` (69 suites) — a fully clean run, exit 0; in-guest `schedtest` (the new range check + the original RT-ordering check) passes on the first attempt.
+>
+> This closes out the eighth research survey — all five candidates (`linkat`, `fchdir`, `dup`, `sync`, and this one) implemented, verified, and shipped (M1585-M1589).
+>
 > **(M1588) Kernel — `sync()`: the smallest possible fix, closing out the eighth research survey.** `fsync`/`fdatasync`/`sync_file_range` (M1566) all exist per-fd; the no-argument, whole-filesystem `sync(2)` didn't. M1566's own reasoning already proved there's nothing to implement: `blockdev.c`'s buffer cache is write-through and neither `fat32.c` nor `ext2.c` keep any dirty/deferred metadata on top of it, so by the time any write already returned, the data is already as durable as this stack ever makes it. `app_sync()` is that same conclusion with the one per-fd type check removed, since a whole-system flush has no fd to check in the first place — genuinely `void app_sync(void) { }`, matching real POSIX `sync()`'s own signature (it has no return value or failure mode to report either).
 >
 > Folded into `fsynctest`: one bare `sync()` call. There's honestly nothing else to assert — no return value, no failure mode, in this codebase or in real POSIX. The command completing and printing its own result immediately afterward is the whole proof that it returns rather than hangs.

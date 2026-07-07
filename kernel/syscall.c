@@ -301,7 +301,8 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
     case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2: case SYS_dup:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
-    case SYS_nice: case SYS_sched_setscheduler: case SYS_sched_setaffinity: case SYS_tcgetattr: case SYS_tcsetattr: case SYS_tcflush: case SYS_tcdrain:
+    case SYS_nice: case SYS_sched_setscheduler: case SYS_sched_get_priority_max: case SYS_sched_get_priority_min:
+    case SYS_sched_setaffinity: case SYS_tcgetattr: case SYS_tcsetattr: case SYS_tcflush: case SYS_tcdrain:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_getentropy: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
@@ -404,6 +405,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_listen]="unix_listen",[SYS_unix_connect]="unix_connect",[SYS_unix_accept]="unix_accept",
         [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",[SYS_socketpair]="socketpair",
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
+        [SYS_sched_get_priority_max]="sched_get_priority_max",[SYS_sched_get_priority_min]="sched_get_priority_min",
         [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",[SYS_tcflush]="tcflush",[SYS_tcdrain]="tcdrain",
         [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_getsid]="getsid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_tcgetpgrp]="tcgetpgrp",[SYS_killpg]="killpg",
         [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
@@ -1300,6 +1302,12 @@ void syscall_dispatch(struct registers *r) {
         break;
     case SYS_sched_setscheduler:           /* (policy, rt_priority) -> set the current task's scheduling class (M1172) */
         r->rax = (uint64_t)(int64_t)task_set_sched((int)r->rdi, (int)r->rsi);
+        break;
+    case SYS_sched_get_priority_max:       /* (policy) -> the valid rt_priority ceiling for SCHED_* (M1589) */
+        r->rax = (uint64_t)(int64_t)task_sched_get_priority_max((int)r->rdi);
+        break;
+    case SYS_sched_get_priority_min:       /* (policy) -> the valid rt_priority floor for SCHED_* (M1589) */
+        r->rax = (uint64_t)(int64_t)task_sched_get_priority_min((int)r->rdi);
         break;
     case SYS_access: {                     /* (path, amode) -> 0 if accessible, -1 (M1224) */
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }

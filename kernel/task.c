@@ -752,6 +752,21 @@ int task_set_sched(int policy, int rt_priority) {
     }
     return 0;
 }
+/* sched_get_priority_max/min (M1589): the valid rt_priority range per policy --
+ * the same 1..99 clamp task_set_sched already enforces above, just handed back
+ * rather than silently applied. SCHED_OTHER has no rt_priority concept (always
+ * 0 here, per task_set_sched's own SCHED_OTHER branch), matching real Linux's
+ * own answer for it. */
+int task_sched_get_priority_max(int policy) {
+    if (policy == SCHED_FIFO || policy == SCHED_RR) return 99;
+    if (policy == SCHED_OTHER) return 0;
+    return -1;
+}
+int task_sched_get_priority_min(int policy) {
+    if (policy == SCHED_FIFO || policy == SCHED_RR) return 1;
+    if (policy == SCHED_OTHER) return 0;
+    return -1;
+}
 
 /* Clamp a requested/reported affinity mask to bits that name an actually-
  * online core — MAX_SCHED_CPUS is the scheduler's own hard ceiling (mycore()

@@ -116,6 +116,8 @@ void    task_cpu_tick(uint64_t ms, int user);  /* timer: charge current task ms 
 int     task_set_nice(int nice);     /* set the current task's nice (-20..19) -> CFS weight; returns the clamped nice (M1171) */
 int     task_get_nice(void);         /* the current task's nice (M1171) */
 int     task_set_sched(int policy, int rt_priority);   /* set the current task's scheduling class (SCHED_*); 0/-1 (M1172) */
+int     task_sched_get_priority_max(int policy);       /* the valid rt_priority ceiling for a policy; -1 on a bad policy (M1589) */
+int     task_sched_get_priority_min(int policy);       /* the valid rt_priority floor for a policy; -1 on a bad policy (M1589) */
 int      task_set_affinity(uint32_t mask);   /* restrict the current task to a subset of online cores; 0/-1 (M1557) */
 uint32_t task_get_affinity(void);            /* the current task's affinity mask, clamped to online cores (M1557) */
 

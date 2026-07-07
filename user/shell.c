@@ -2659,6 +2659,14 @@ static int run_command(char *line, char *cwd) {
                 if (sh) sys_shmdt((void *)sh);
             }
         } else if (streq(line, "schedtest")) {   /* SCHED_FIFO real-time priority ordering (M1172) */
+            /* sched_get_priority_max/min (M1589): the range task_set_sched itself clamps to */
+            int rng_ok = (sys_sched_get_priority_max(SCHED_FIFO) == 99 && sys_sched_get_priority_min(SCHED_FIFO) == 1 &&
+                          sys_sched_get_priority_max(SCHED_RR) == 99 && sys_sched_get_priority_min(SCHED_RR) == 1 &&
+                          sys_sched_get_priority_max(SCHED_OTHER) == 0 && sys_sched_get_priority_min(SCHED_OTHER) == 0 &&
+                          sys_sched_get_priority_max(999) == -1 && sys_sched_get_priority_min(999) == -1);
+            print(rng_ok ? "sched_get_priority_max/min: FIFO/RR 1..99, OTHER 0..0, bad policy -1 -- OK\n"
+                         : "schedtest: sched_get_priority_max/min VERIFY FAILED\n");
+            if (!rng_ok) g_status = 1;
             int sid = (int)sys_semget(IPC_PRIVATE, 1, IPC_CREAT);
             long shmid = sys_shmget(IPC_PRIVATE, 4096, IPC_CREAT);
             volatile unsigned long *sh = (shmid >= 0) ? (volatile unsigned long *)sys_shmat((int)shmid) : 0;
