@@ -10,6 +10,26 @@
 #include "vmm.h"   /* hhdm() */
 #include <stdint.h>
 
+/* M1618: shm_get's own scan-then-create was the worst case this whole pass
+ * found -- two cores racing to create the SAME brand-new name could both
+ * find the same free slot and each write HALF of tab[i] (name/npages/used
+ * interleaved with the other's, or one's frame-allocation loop stomping the
+ * other's), corrupting the shared struct or handing out two different frame
+ * sets under one name. shm_unlink's scan-then-free races the same slot from
+ * the other direction. One lock for the whole file, same idiom as the other
+ * three files this pass. */
+static volatile int shm_lock;
+static inline uint64_t sh_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&shm_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void sh_irq_restore(uint64_t f) {
+    __atomic_store_n(&shm_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+
 #define SHM_N        8        /* up to 8 named objects */
 #define SHM_MAXPAGES 64       /* up to 256 KiB per object */
 
@@ -26,13 +46,14 @@ int shm_get(const char *name, uint64_t size, uint64_t **frames, int *npages) {
     if (pages <= 0) pages = 1;
     if (pages > SHM_MAXPAGES) return -1;
 
+    uint64_t f0 = sh_irq_save();
     for (int i = 0; i < SHM_N; i++)                       /* existing object */
-        if (tab[i].used && sh_eq(tab[i].name, name)) { *frames = tab[i].frames; *npages = tab[i].npages; return 0; }
+        if (tab[i].used && sh_eq(tab[i].name, name)) { *frames = tab[i].frames; *npages = tab[i].npages; sh_irq_restore(f0); return 0; }
 
     for (int i = 0; i < SHM_N; i++) if (!tab[i].used) {   /* create */
         for (int p = 0; p < pages; p++) {
             uint64_t f = pmm_alloc_frame();
-            if (!f) { for (int u = 0; u < p; u++) pmm_free_frame(tab[i].frames[u]); return -1; }  /* OOM: unwind */
+            if (!f) { for (int u = 0; u < p; u++) pmm_free_frame(tab[i].frames[u]); sh_irq_restore(f0); return -1; }  /* OOM: unwind */
             uint8_t *z = (uint8_t *)hhdm(f);
             for (int b = 0; b < PAGE_SIZE; b++) z[b] = 0;
             tab[i].frames[p] = f;
@@ -40,8 +61,10 @@ int shm_get(const char *name, uint64_t size, uint64_t **frames, int *npages) {
         int j = 0; while (name[j] && j < 31) { tab[i].name[j] = name[j]; j++; } tab[i].name[j] = 0;
         tab[i].npages = pages; tab[i].used = 1;
         *frames = tab[i].frames; *npages = pages;
+        sh_irq_restore(f0);
         return 0;
     }
+    sh_irq_restore(f0);
     return -1;                                            /* table full */
 }
 
@@ -57,11 +80,14 @@ int shm_get(const char *name, uint64_t size, uint64_t **frames, int *npages) {
  * unlink only removes the name -> object association, not live mappings. */
 int shm_unlink(const char *name) {
     if (!name || !name[0]) return -1;
+    uint64_t f = sh_irq_save();
     for (int i = 0; i < SHM_N; i++) if (tab[i].used && sh_eq(tab[i].name, name)) {
         for (int p = 0; p < tab[i].npages; p++) pmm_free_frame(tab[i].frames[p]);
         tab[i].used = 0;
+        sh_irq_restore(f);
         return 0;
     }
+    sh_irq_restore(f);
     return -1;
 }
 

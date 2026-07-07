@@ -15,6 +15,23 @@
 #include "task.h"
 #include <stdint.h>
 
+/* M1618: same fix as sysvipc.c/mqueue.c/shm.c this same pass -- this file had
+ * no lock of any kind, despite the header comment's own claim of being
+ * "built on the same IRQ-safe task_block/task_wake rendezvous" other,
+ * already-fixed files use. One lock for the whole file (open/close/unlink's
+ * scan-then-create-or-mutate, wait/trywait/post/getvalue's check-then-act). */
+static volatile int sem_lock;
+static inline uint64_t sm_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&sem_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void sm_irq_restore(uint64_t f) {
+    __atomic_store_n(&sem_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+
 #define SEM_N       16   /* max named semaphores */
 #define SEM_WAITERS 8    /* max tasks blocked on one semaphore */
 
@@ -35,25 +52,32 @@ static int seq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++
  * handle that must be independently closed. */
 int sem_named_open(const char *name, int oflag, unsigned int value) {
     if (!name || !name[0]) return -1;
+    uint64_t f = sm_irq_save();
     for (int i = 0; i < SEM_N; i++)
         if (tab[i].used && !tab[i].unlinked && seq(tab[i].name, name)) {
-            if ((oflag & O_CREAT) && (oflag & O_EXCL)) return -1;   /* EEXIST */
+            if ((oflag & O_CREAT) && (oflag & O_EXCL)) { sm_irq_restore(f); return -1; }   /* EEXIST */
             tab[i].refcount++;
+            sm_irq_restore(f);
             return i;
         }
-    if (!(oflag & O_CREAT)) return -1;   /* ENOENT */
+    if (!(oflag & O_CREAT)) { sm_irq_restore(f); return -1; }   /* ENOENT */
     for (int i = 0; i < SEM_N; i++) if (!tab[i].used) {
         int j = 0; while (name[j] && j < 31) { tab[i].name[j] = name[j]; j++; } tab[i].name[j] = 0;
         tab[i].used = 1; tab[i].unlinked = 0; tab[i].value = (int)value; tab[i].refcount = 1; tab[i].nwait = 0;
+        sm_irq_restore(f);
         return i;
     }
+    sm_irq_restore(f);
     return -1;   /* table full */
 }
 
 int sem_named_close(int idx) {
-    if (idx < 0 || idx >= SEM_N || !tab[idx].used) return -1;
+    if (idx < 0 || idx >= SEM_N) return -1;
+    uint64_t f = sm_irq_save();
+    if (!tab[idx].used) { sm_irq_restore(f); return -1; }
     if (tab[idx].refcount > 0) tab[idx].refcount--;
     if (tab[idx].refcount == 0 && tab[idx].unlinked) tab[idx].used = 0;
+    sm_irq_restore(f);
     return 0;
 }
 
@@ -61,11 +85,14 @@ int sem_named_close(int idx) {
  * anyone still blocked in sem_wait on this index) stay valid until closed. */
 int sem_named_unlink(const char *name) {
     if (!name || !name[0]) return -1;
+    uint64_t f = sm_irq_save();
     for (int i = 0; i < SEM_N; i++) if (tab[i].used && !tab[i].unlinked && seq(tab[i].name, name)) {
         tab[i].unlinked = 1;
         if (tab[i].refcount == 0) tab[i].used = 0;   /* nobody holds it open -- free now */
+        sm_irq_restore(f);
         return 0;
     }
+    sm_irq_restore(f);
     return -1;   /* ENOENT */
 }
 
@@ -75,35 +102,47 @@ static void wake_all(struct psem *s) {   /* a post changed the value: let every 
 }
 
 int sem_named_wait(int idx) {
-    if (idx < 0 || idx >= SEM_N || !tab[idx].used) return -1;
+    if (idx < 0 || idx >= SEM_N) return -1;
     struct psem *s = &tab[idx];
-    while (s->value == 0) {
-        if (s->nwait < SEM_WAITERS) s->waiters[s->nwait++] = task_self();
+    for (;;) {
+        uint64_t f = sm_irq_save();
+        if (!s->used) { sm_irq_restore(f); return -1; }
+        if (s->value > 0) { s->value--; sm_irq_restore(f); return 0; }
+        if (s->nwait >= SEM_WAITERS) { sm_irq_restore(f); return -1; }   /* M1618: refuse rather than block
+                                                                            * with no way to ever be woken */
+        s->waiters[s->nwait++] = task_self();
+        sm_irq_restore(f);                  /* released BEFORE blocking (M1618) */
         task_block();
-        if (!s->used) return -1;    /* removed (fully closed + unlinked) while blocked */
+        if (!s->used) return -1;            /* removed (fully closed + unlinked) while blocked */
     }
-    s->value--;
-    return 0;
 }
 
 int sem_named_trywait(int idx) {
-    if (idx < 0 || idx >= SEM_N || !tab[idx].used) return -1;
+    if (idx < 0 || idx >= SEM_N) return -1;
     struct psem *s = &tab[idx];
-    if (s->value == 0) return -1;   /* EAGAIN */
+    uint64_t f = sm_irq_save();
+    if (!s->used || s->value == 0) { sm_irq_restore(f); return -1; }   /* EAGAIN */
     s->value--;
+    sm_irq_restore(f);
     return 0;
 }
 
 int sem_named_post(int idx) {
-    if (idx < 0 || idx >= SEM_N || !tab[idx].used) return -1;
+    if (idx < 0 || idx >= SEM_N) return -1;
     struct psem *s = &tab[idx];
+    uint64_t f = sm_irq_save();
+    if (!s->used) { sm_irq_restore(f); return -1; }
     s->value++;
     wake_all(s);
+    sm_irq_restore(f);
     return 0;
 }
 
 int sem_named_getvalue(int idx, int *out) {
-    if (idx < 0 || idx >= SEM_N || !tab[idx].used || !out) return -1;
-    *out = tab[idx].value;
-    return 0;
+    if (idx < 0 || idx >= SEM_N || !out) return -1;
+    uint64_t f = sm_irq_save();
+    int ok = tab[idx].used;
+    if (ok) *out = tab[idx].value;
+    sm_irq_restore(f);
+    return ok ? 0 : -1;
 }

@@ -15,6 +15,31 @@
 #include "shm.h"        /* shm_unlink/shm_max_bytes -- the real removal path + size cap (M1592) */
 #include <stdint.h>
 
+/* M1618: this file claimed "built on the same IRQ-safe task_block/task_wake
+ * rendezvous mqueue.c/mbox.c use" -- true of the rendezvous shape, but not of
+ * the IRQ-safety itself: unlike mbox.c (fixed as M1608) and app.c's futex
+ * (M1612), this file had NO lock of any kind, not even a bare cli. Since
+ * M1531 a writer and a blocking reader/waiter can run on two different
+ * cores at once, and every table here (sem sets, message queues, shm
+ * segments) also has the scan-then-create race one level up (two cores
+ * racing semget/msgget/shmget on the same brand-new key could both find the
+ * same free slot, or worse for shmget, corrupt the shared struct while
+ * writing it). One lock for the whole file -- these sub-tables never touch
+ * each other's state and IPC setup/wait is rare, so one coarse lock costs
+ * nothing measurable. Same idiom as the eleven files already fixed this
+ * session. */
+static volatile int sysvipc_lock;
+static inline uint64_t sv_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&sysvipc_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void sv_irq_restore(uint64_t f) {
+    __atomic_store_n(&sysvipc_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+
 #define SEM_N        16   /* max semaphore sets */
 #define SEM_PER      16   /* max semaphores per set */
 #define SEM_WAITERS  8    /* max tasks blocked on one set */
@@ -32,14 +57,17 @@ static struct sem_set sets[SEM_N];
  * the set id, or -1. */
 int sysv_semget(int key, int nsems, int flags) {
     if (nsems <= 0 || nsems > SEM_PER) return -1;
+    uint64_t f = sv_irq_save();
     if (key != IPC_PRIVATE)
-        for (int i = 0; i < SEM_N; i++) if (sets[i].used && sets[i].key == key) return i;
-    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) return -1;   /* not found, not asked to create */
+        for (int i = 0; i < SEM_N; i++) if (sets[i].used && sets[i].key == key) { sv_irq_restore(f); return i; }
+    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) { sv_irq_restore(f); return -1; }   /* not found, not asked to create */
     for (int i = 0; i < SEM_N; i++) if (!sets[i].used) {
         sets[i].used = 1; sets[i].key = key; sets[i].nsems = nsems; sets[i].nwait = 0;
         for (int j = 0; j < nsems; j++) sets[i].val[j] = 0;
+        sv_irq_restore(f);
         return i;
     }
+    sv_irq_restore(f);
     return -1;   /* table full */
 }
 
@@ -57,6 +85,7 @@ int sysv_semop(int id, struct sembuf *sops, unsigned nsops) {
     for (unsigned k = 0; k < nsops; k++)        /* validate sem_num up front */
         if (sops[k].sem_num < 0 || sops[k].sem_num >= s->nsems) return -1;
     for (;;) {
+        uint64_t f = sv_irq_save();
         int would_block = 0, nowait = 0;
         for (unsigned k = 0; k < nsops; k++) {
             int v = s->val[sops[k].sem_num], op = sops[k].sem_op;
@@ -65,26 +94,34 @@ int sysv_semop(int id, struct sembuf *sops, unsigned nsops) {
                 if (sops[k].sem_flg & IPC_NOWAIT) nowait = 1;
             }
         }
-        if (!would_block) break;                /* every op can proceed */
-        if (nowait) return -1;                  /* EAGAIN: do not apply anything */
-        if (s->nwait < SEM_WAITERS) s->waiters[s->nwait++] = task_self();
+        if (!would_block) {                     /* every op can proceed: commit + wake under the same lock */
+            for (unsigned k = 0; k < nsops; k++) s->val[sops[k].sem_num] += sops[k].sem_op;
+            wake_all(s);                        /* increments may unblock other waiters */
+            sv_irq_restore(f);
+            return 0;
+        }
+        if (nowait) { sv_irq_restore(f); return -1; }   /* EAGAIN: do not apply anything */
+        if (s->nwait >= SEM_WAITERS) { sv_irq_restore(f); return -1; }   /* M1618: refuse rather than silently
+                                                                            * drop the registration and block
+                                                                            * anyway -- a permanent, deterministic
+                                                                            * hang once 8 tasks already wait here */
+        s->waiters[s->nwait++] = task_self();
+        sv_irq_restore(f);                      /* released BEFORE blocking (M1618) */
         task_block();                           /* woken by semop/semctl changing the set */
         if (!s->used) return -1;                /* removed (IPC_RMID) while we blocked */
     }
-    for (unsigned k = 0; k < nsops; k++)        /* commit all ops */
-        s->val[sops[k].sem_num] += sops[k].sem_op;
-    wake_all(s);                                /* increments may unblock other waiters */
-    return 0;
 }
 
 /* SETVAL (set a semaphore's value), GETVAL (read one), IPC_RMID (remove the set). */
 int sysv_semctl(int id, int semnum, int cmd, int arg) {
     if (id < 0 || id >= SEM_N || !sets[id].used) return -1;
     struct sem_set *s = &sets[id];
-    if (cmd == IPC_RMID) { s->used = 0; wake_all(s); return 0; }
-    if (semnum < 0 || semnum >= s->nsems) return -1;
-    if (cmd == GETVAL) return s->val[semnum];
-    if (cmd == SETVAL) { s->val[semnum] = arg; wake_all(s); return 0; }
+    uint64_t f = sv_irq_save();
+    if (cmd == IPC_RMID) { s->used = 0; wake_all(s); sv_irq_restore(f); return 0; }
+    if (semnum < 0 || semnum >= s->nsems) { sv_irq_restore(f); return -1; }
+    if (cmd == GETVAL) { int v = s->val[semnum]; sv_irq_restore(f); return v; }
+    if (cmd == SETVAL) { s->val[semnum] = arg; wake_all(s); sv_irq_restore(f); return 0; }
+    sv_irq_restore(f);
     return -1;
 }
 
@@ -109,13 +146,16 @@ static struct msg_q mqs[MSG_N];
 static void mq_wake(task_t **w, int *n) { int k = *n; *n = 0; for (int i = 0; i < k; i++) if (w[i]) task_wake(w[i]); }
 
 int sysv_msgget(int key, int flags) {
-    if (key != IPC_PRIVATE) for (int i = 0; i < MSG_N; i++) if (mqs[i].used && mqs[i].key == key) return i;
-    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) return -1;
+    uint64_t f = sv_irq_save();
+    if (key != IPC_PRIVATE) for (int i = 0; i < MSG_N; i++) if (mqs[i].used && mqs[i].key == key) { sv_irq_restore(f); return i; }
+    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) { sv_irq_restore(f); return -1; }
     for (int i = 0; i < MSG_N; i++) if (!mqs[i].used) {
         mqs[i].used = 1; mqs[i].key = key; mqs[i].count = 0; mqs[i].seq = 0; mqs[i].nsw = mqs[i].nrw = 0;
         for (int j = 0; j < MSG_MAX; j++) mqs[i].m[j].used = 0;
+        sv_irq_restore(f);
         return i;
     }
+    sv_irq_restore(f);
     return -1;
 }
 
@@ -123,26 +163,37 @@ int sysv_msgsnd(int id, long mtype, const void *data, int len, int flags) {
     if (id < 0 || id >= MSG_N || !mqs[id].used || mtype <= 0) return -1;
     if (len < 0 || len > MSG_SZ) return -1;
     struct msg_q *q = &mqs[id];
-    while (q->count >= MSG_MAX) {                       /* full -> block (unless IPC_NOWAIT) */
-        if (flags & IPC_NOWAIT) return -1;
-        if (q->nsw < 4) q->swait[q->nsw++] = task_self();
-        task_block();
-        if (!q->used) return -1;
+    for (;;) {
+        uint64_t f = sv_irq_save();
+        if (q->count >= MSG_MAX) {                       /* full -> block (unless IPC_NOWAIT) */
+            if (flags & IPC_NOWAIT) { sv_irq_restore(f); return -1; }
+            if (q->nsw >= 4) { sv_irq_restore(f); return -1; }   /* M1618: refuse rather than block with no
+                                                                    * way to ever be woken (a permanent hang) */
+            q->swait[q->nsw++] = task_self();
+            sv_irq_restore(f);                            /* released BEFORE blocking (M1618) */
+            task_block();
+            if (!q->used) return -1;
+            continue;                                     /* re-check count under the lock */
+        }
+        int placed = 0;
+        for (int i = 0; i < MSG_MAX; i++) if (!q->m[i].used) {
+            q->m[i].used = 1; q->m[i].mtype = mtype; q->m[i].seq = q->seq++; q->m[i].len = len;
+            for (int b = 0; b < len; b++) q->m[i].data[b] = ((const char *)data)[b];
+            q->count++;
+            mq_wake(q->rwait, &q->nrw);
+            placed = 1;
+            break;
+        }
+        sv_irq_restore(f);
+        return placed ? 0 : -1;      /* !placed shouldn't happen (count said there was room) */
     }
-    for (int i = 0; i < MSG_MAX; i++) if (!q->m[i].used) {
-        q->m[i].used = 1; q->m[i].mtype = mtype; q->m[i].seq = q->seq++; q->m[i].len = len;
-        for (int b = 0; b < len; b++) q->m[i].data[b] = ((const char *)data)[b];
-        q->count++;
-        mq_wake(q->rwait, &q->nrw);
-        return 0;
-    }
-    return -1;
 }
 
 int sysv_msgrcv(int id, long mtyp, void *out, int max, long *mtype_out, int flags) {
     if (id < 0 || id >= MSG_N || !mqs[id].used) return -1;
     struct msg_q *q = &mqs[id];
     for (;;) {
+        uint64_t f = sv_irq_save();
         int best = -1;
         for (int i = 0; i < MSG_MAX; i++) if (q->m[i].used) {
             long t = q->m[i].mtype;
@@ -159,10 +210,13 @@ int sysv_msgrcv(int id, long mtyp, void *out, int max, long *mtype_out, int flag
             if (mtype_out) *mtype_out = q->m[best].mtype;
             q->m[best].used = 0; q->count--;
             mq_wake(q->swait, &q->nsw);
+            sv_irq_restore(f);
             return n;
         }
-        if (flags & IPC_NOWAIT) return -1;             /* no match -> block (unless IPC_NOWAIT) */
-        if (q->nrw < 4) q->rwait[q->nrw++] = task_self();
+        if (flags & IPC_NOWAIT) { sv_irq_restore(f); return -1; }   /* no match -> block (unless IPC_NOWAIT) */
+        if (q->nrw >= 4) { sv_irq_restore(f); return -1; }   /* M1618: same overflow fix as msgsnd */
+        q->rwait[q->nrw++] = task_self();
+        sv_irq_restore(f);                                  /* released BEFORE blocking (M1618) */
         task_block();
         if (!q->used) return -1;
     }
@@ -175,9 +229,11 @@ int sysv_msgrcv(int id, long mtyp, void *out, int max, long *mtype_out, int flag
 int sysv_msgctl(int id, int cmd) {
     if (id < 0 || id >= MSG_N || !mqs[id].used) return -1;
     if (cmd != IPC_RMID) return -1;
+    uint64_t f = sv_irq_save();
     mqs[id].used = 0;
     mq_wake(mqs[id].swait, &mqs[id].nsw);
     mq_wake(mqs[id].rwait, &mqs[id].nrw);
+    sv_irq_restore(f);
     return 0;
 }
 
@@ -197,23 +253,37 @@ int sysv_shmget(int key, uint64_t size, int flags) {
      * on (shmget's own 4 MiB vs shm_get's real 256 KiB, a live gap the same
      * research pass that found the IPC_RMID wiring bug below also caught). */
     if (size == 0 || size > shm_max_bytes()) return -1;
-    if (key != IPC_PRIVATE) for (int i = 0; i < SHM_N; i++) if (shms[i].used && shms[i].key == key) return i;
-    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) return -1;
+    uint64_t f = sv_irq_save();
+    /* M1618: two cores racing shmget on the same brand-new key was the worst
+     * case this file's own scan-then-create race could hit -- both could
+     * find the same free slot and each write HALF of shms[i] (used/key/size
+     * fields interleaved with the other's), or hand out the same id with
+     * two different sizes. Now serialized like every other table here. */
+    if (key != IPC_PRIVATE) for (int i = 0; i < SHM_N; i++) if (shms[i].used && shms[i].key == key) { sv_irq_restore(f); return i; }
+    if (key != IPC_PRIVATE && !(flags & IPC_CREAT)) { sv_irq_restore(f); return -1; }
     for (int i = 0; i < SHM_N; i++) if (!shms[i].used) {
         shms[i].used = 1; shms[i].key = key; shms[i].size = size;
         char *n = shms[i].name; int p = 0;                 /* stable synthetic name "sysvshmNN" */
         const char *pre = "sysvshm"; while (*pre) n[p++] = *pre++;
         n[p++] = (char)('0' + i / 10); n[p++] = (char)('0' + i % 10); n[p] = 0;
+        sv_irq_restore(f);
         return i;
     }
+    sv_irq_restore(f);
     return -1;
 }
 
 /* Attach: map the segment into the caller's address space, return the base VA
  * (or 0). Two attaches of the same id share the backing (same synthetic name). */
 uint64_t sysv_shmat(int id) {
-    if (id < 0 || id >= SHM_N || !shms[id].used) return 0;
-    return app_shm_open(shms[id].name, shms[id].size);
+    if (id < 0 || id >= SHM_N) return 0;
+    uint64_t f = sv_irq_save();
+    int ok = shms[id].used;
+    char name[16] = {0}; uint64_t size = 0;
+    if (ok) { for (int i = 0; i < 16; i++) name[i] = shms[id].name[i]; size = shms[id].size; }
+    sv_irq_restore(f);
+    if (!ok) return 0;
+    return app_shm_open(name, size);   /* outside the lock: a separate subsystem call, avoid nesting locks */
 }
 
 /* IPC_RMID (M1576, fully wired M1592): frees THIS id slot (SHM_N=16,
@@ -231,10 +301,15 @@ uint64_t sysv_shmat(int id) {
  * zeroed segment rather than the same stale frames a pure id-slot free would
  * have handed back. */
 int sysv_shmctl(int id, int cmd) {
-    if (id < 0 || id >= SHM_N || !shms[id].used) return -1;
+    if (id < 0 || id >= SHM_N) return -1;
     if (cmd != IPC_RMID) return -1;
-    shm_unlink(shms[id].name);
-    shms[id].used = 0;
+    uint64_t f = sv_irq_save();
+    int ok = shms[id].used;
+    char name[16] = {0};
+    if (ok) { for (int i = 0; i < 16; i++) name[i] = shms[id].name[i]; shms[id].used = 0; }
+    sv_irq_restore(f);
+    if (!ok) return -1;
+    shm_unlink(name);   /* outside the lock: a separate subsystem call */
     return 0;
 }
 

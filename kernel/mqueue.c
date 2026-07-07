@@ -14,6 +14,22 @@
 #include "task.h"
 #include <stdint.h>
 
+/* M1618: same fix as sysvipc.c/sem.c/shm.c this same pass -- this file
+ * claimed the same "IRQ-safe task_block/task_wake rendezvous mbox.c uses"
+ * but, unlike mbox.c (fixed as M1608), never got the cross-core lock that
+ * claim actually needs since M1531. One lock for the whole file. */
+static volatile int mq_lock;
+static inline uint64_t mq_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    while (__atomic_exchange_n(&mq_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+static inline void mq_irq_restore(uint64_t f) {
+    __atomic_store_n(&mq_lock, 0, __ATOMIC_RELEASE);
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+
 #define MQ_N       16     /* max simultaneous named queues */
 #define MQ_MAXMSG  16     /* max messages held per queue    */
 #define MQ_MSGSZ   128    /* max message payload (bytes)     */
@@ -36,7 +52,8 @@ static int meq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++
  * is full / the name is empty. maxmsg/msgsize are clamped to the static caps. */
 int mqueue_open(const char *name, int maxmsg, int msgsize) {
     if (!name || !name[0]) return -1;
-    for (int i = 0; i < MQ_N; i++) if (mq[i].used && meq(mq[i].name, name)) return i;
+    uint64_t f = mq_irq_save();
+    for (int i = 0; i < MQ_N; i++) if (mq[i].used && meq(mq[i].name, name)) { mq_irq_restore(f); return i; }
     for (int i = 0; i < MQ_N; i++) if (!mq[i].used) {
         int j = 0; while (name[j] && j < 31) { mq[i].name[j] = name[j]; j++; } mq[i].name[j] = 0;
         mq[i].used = 1; mq[i].count = 0; mq[i].seq = 0; mq[i].nonblock = 0;
@@ -44,8 +61,10 @@ int mqueue_open(const char *name, int maxmsg, int msgsize) {
         mq[i].msgsize = (msgsize > 0 && msgsize <= MQ_MSGSZ)  ? msgsize : MQ_MSGSZ;
         mq[i].send_waiter = mq[i].recv_waiter = 0;
         for (int k = 0; k < MQ_MAXMSG; k++) mq[i].msg[k].used = 0;
+        mq_irq_restore(f);
         return i;
     }
+    mq_irq_restore(f);
     return -1;
 }
 
@@ -55,22 +74,30 @@ long mqueue_send(int idx, const void *buf, unsigned long len, unsigned int prio)
     if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
     struct mqueue *q = &mq[idx];
     if ((int)len > q->msgsize) len = (unsigned long)q->msgsize;
-    while (q->count >= q->maxmsg) {                 /* full -> block for room (or fail fast, O_NONBLOCK) */
-        if (q->nonblock) return -1;
+    for (;;) {
+        uint64_t f = mq_irq_save();
+        if (q->count < q->maxmsg) {
+            int placed = 0;
+            for (int i = 0; i < MQ_MAXMSG; i++) if (!q->msg[i].used) {
+                q->msg[i].used = 1; q->msg[i].prio = (uint8_t)prio; q->msg[i].seq = q->seq++;
+                q->msg[i].len = (int)len;
+                for (unsigned long k = 0; k < len; k++) q->msg[i].data[k] = ((const char *)buf)[k];
+                q->count++;
+                if (q->recv_waiter) { task_wake(q->recv_waiter); q->recv_waiter = 0; }
+                placed = 1;
+                break;
+            }
+            mq_irq_restore(f);
+            return placed ? (long)len : -1;   /* !placed shouldn't happen (count said there was room) */
+        }
+        /* full -> block for room (or fail fast, O_NONBLOCK) */
+        if (q->nonblock) { mq_irq_restore(f); return -1; }
         q->send_waiter = task_self();
+        mq_irq_restore(f);              /* released BEFORE blocking (M1618) */
         task_block();
         q->send_waiter = 0;
         if (!q->used) return -1;
     }
-    for (int i = 0; i < MQ_MAXMSG; i++) if (!q->msg[i].used) {
-        q->msg[i].used = 1; q->msg[i].prio = (uint8_t)prio; q->msg[i].seq = q->seq++;
-        q->msg[i].len = (int)len;
-        for (unsigned long k = 0; k < len; k++) q->msg[i].data[k] = ((const char *)buf)[k];
-        q->count++;
-        if (q->recv_waiter) { task_wake(q->recv_waiter); q->recv_waiter = 0; }
-        return (long)len;
-    }
-    return -1;
 }
 
 /* Dequeue the HIGHEST-priority message (oldest seq among equal priorities);
@@ -80,26 +107,32 @@ long mqueue_send(int idx, const void *buf, unsigned long len, unsigned int prio)
 long mqueue_receive(int idx, void *buf, unsigned long max, unsigned int *prio_out) {
     if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
     struct mqueue *q = &mq[idx];
-    while (q->count == 0) {                          /* empty -> block for a message (or fail fast, O_NONBLOCK) */
-        if (q->nonblock) return -1;
-        q->recv_waiter = task_self();
-        task_block();
-        q->recv_waiter = 0;
-        if (!q->used || q->count == 0) return -1;    /* woken but still empty (e.g. killed) */
+    for (;;) {
+        uint64_t f = mq_irq_save();
+        if (q->count == 0) {                          /* empty -> block for a message (or fail fast, O_NONBLOCK) */
+            if (q->nonblock) { mq_irq_restore(f); return -1; }
+            q->recv_waiter = task_self();
+            mq_irq_restore(f);          /* released BEFORE blocking (M1618) */
+            task_block();
+            q->recv_waiter = 0;
+            if (!q->used || q->count == 0) return -1;    /* woken but still empty (e.g. killed) */
+            continue;
+        }
+        int best = -1;
+        for (int i = 0; i < MQ_MAXMSG; i++) if (q->msg[i].used) {
+            if (best < 0 || q->msg[i].prio > q->msg[best].prio ||
+                (q->msg[i].prio == q->msg[best].prio && q->msg[i].seq < q->msg[best].seq))
+                best = i;
+        }
+        if (best < 0) { mq_irq_restore(f); return -1; }
+        int n = q->msg[best].len; if ((unsigned long)n > max) n = (int)max;
+        for (int k = 0; k < n; k++) ((char *)buf)[k] = q->msg[best].data[k];
+        if (prio_out) *prio_out = q->msg[best].prio;
+        q->msg[best].used = 0; q->count--;
+        if (q->send_waiter) { task_wake(q->send_waiter); q->send_waiter = 0; }
+        mq_irq_restore(f);
+        return (long)n;
     }
-    int best = -1;
-    for (int i = 0; i < MQ_MAXMSG; i++) if (q->msg[i].used) {
-        if (best < 0 || q->msg[i].prio > q->msg[best].prio ||
-            (q->msg[i].prio == q->msg[best].prio && q->msg[i].seq < q->msg[best].seq))
-            best = i;
-    }
-    if (best < 0) return -1;
-    int n = q->msg[best].len; if ((unsigned long)n > max) n = (int)max;
-    for (int k = 0; k < n; k++) ((char *)buf)[k] = q->msg[best].data[k];
-    if (prio_out) *prio_out = q->msg[best].prio;
-    q->msg[best].used = 0; q->count--;
-    if (q->send_waiter) { task_wake(q->send_waiter); q->send_waiter = 0; }
-    return (long)n;
 }
 
 /* mq_getattr/mq_setattr (M1571): maxmsg/msgsize/count were already tracked
@@ -108,20 +141,30 @@ long mqueue_receive(int idx, void *buf, unsigned long max, unsigned int *prio_ou
  * (O_NONBLOCK) is settable: real mq_setattr leaves mq_maxmsg/mq_msgsize
  * fixed at creation time and ignores those fields in *newattr entirely. */
 int mqueue_getattr(int idx, long *flags, long *maxmsg, long *msgsize, long *curmsgs) {
-    if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
+    if (idx < 0 || idx >= MQ_N) return -1;
     struct mqueue *q = &mq[idx];
-    if (flags)   *flags   = q->nonblock ? 1 : 0;
-    if (maxmsg)  *maxmsg  = q->maxmsg;
-    if (msgsize) *msgsize = q->msgsize;
-    if (curmsgs) *curmsgs = q->count;
-    return 0;
+    uint64_t f = mq_irq_save();
+    int ok = q->used;
+    if (ok) {
+        if (flags)   *flags   = q->nonblock ? 1 : 0;
+        if (maxmsg)  *maxmsg  = q->maxmsg;
+        if (msgsize) *msgsize = q->msgsize;
+        if (curmsgs) *curmsgs = q->count;
+    }
+    mq_irq_restore(f);
+    return ok ? 0 : -1;
 }
 int mqueue_setattr(int idx, long new_flags, long *old_flags_out) {
-    if (idx < 0 || idx >= MQ_N || !mq[idx].used) return -1;
+    if (idx < 0 || idx >= MQ_N) return -1;
     struct mqueue *q = &mq[idx];
-    if (old_flags_out) *old_flags_out = q->nonblock ? 1 : 0;
-    q->nonblock = new_flags ? 1 : 0;
-    return 0;
+    uint64_t f = mq_irq_save();
+    int ok = q->used;
+    if (ok) {
+        if (old_flags_out) *old_flags_out = q->nonblock ? 1 : 0;
+        q->nonblock = new_flags ? 1 : 0;
+    }
+    mq_irq_restore(f);
+    return ok ? 0 : -1;
 }
 
 /* mq_unlink (M1593): mqueue_open's create path has set `used = 1` since
@@ -135,12 +178,15 @@ int mqueue_setattr(int idx, long new_flags, long *old_flags_out) {
  * -1 (the same "woken but still gone" path they already use for a kill). */
 int mqueue_unlink(const char *name) {
     if (!name || !name[0]) return -1;
+    uint64_t f = mq_irq_save();
     for (int i = 0; i < MQ_N; i++) if (mq[i].used && meq(mq[i].name, name)) {
         mq[i].used = 0;
         if (mq[i].send_waiter) { task_wake(mq[i].send_waiter); mq[i].send_waiter = 0; }
         if (mq[i].recv_waiter) { task_wake(mq[i].recv_waiter); mq[i].recv_waiter = 0; }
+        mq_irq_restore(f);
         return 0;
     }
+    mq_irq_restore(f);
     return -1;
 }
 
