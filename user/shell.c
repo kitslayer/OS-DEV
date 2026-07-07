@@ -2286,6 +2286,20 @@ static int run_command(char *line, char *cwd) {
                 }
                 print(ok ? "mqueue: highest-priority-first delivery OK\n" : "mqueue: VERIFY FAILED\n");
                 if (!ok) g_status = 1;
+                /* priority > 255 (M1623): mqmsg used to store prio in a uint8_t while
+                 * mq_send's own param is a full unsigned int, so 300 and 200 wrapped to
+                 * 44 and 200 -- the WRONG one (200) would have come out first. */
+                int pok = 1;
+                sys_mq_send(q, "lo300", 5, 300);
+                sys_mq_send(q, "hi200", 5, 200);
+                { char b2[64]; unsigned int p2 = 0;
+                  long n2 = sys_mq_receive(q, b2, sizeof b2 - 1, &p2);
+                  if (n2 < 0) pok = 0; else { b2[n2] = 0; if (p2 != 300 || !streq(b2, "lo300")) pok = 0; } }
+                { char b2[64]; unsigned int p2 = 0;
+                  long n2 = sys_mq_receive(q, b2, sizeof b2 - 1, &p2);
+                  if (n2 < 0) pok = 0; else { b2[n2] = 0; if (p2 != 200 || !streq(b2, "hi200")) pok = 0; } }
+                print(pok ? "mqueue: priority 300 (>255) still beats 200 -- OK\n" : "mqueue: priority>255 VERIFY FAILED\n");
+                if (!pok) g_status = 1;
                 /* mq_getattr/mq_setattr (M1571): maxmsg/msgsize are static from
                  * mq_open, curmsgs tracks real occupancy, and O_NONBLOCK (set via
                  * mq_setattr) makes a full/empty queue fail send/receive

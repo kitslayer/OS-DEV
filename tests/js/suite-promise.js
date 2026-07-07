@@ -94,4 +94,9 @@ localStorage.clear();
 print(localStorage.getItem("b"), localStorage.getItem("c"));   // null null
 print("-- Set.entries() (M1621): Map/Array already had it, Set fell through to a throw --");
 print((function(){var s=new Set([1,2,3]);var out=[];for(var e of s.entries())out.push(e[0]+":"+e[1]);return out.join(",");})());   // 1:1,2:2,3:3
+print("-- unicode escapes in string literals + JSON.parse (M1623) --");
+print("\u0041\u0042\u0043");   // ABC -- the lexer used to eat just the backslash+u, leaving "u0041u0042u0043"
+print(JSON.parse('"\u0041\u0042"'));   // AB -- JSON.parse used to substitute a literal '?' per escape
+print("-- String.lastIndexOf(fromIndex) (M1623) --");
+print("aXaXa".lastIndexOf("a", 1), "aXaXa".lastIndexOf("a"), "hello".lastIndexOf("l"), "hello".lastIndexOf("z"));   // 0 4 3 -1
 print("-- done --");

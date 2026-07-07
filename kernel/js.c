@@ -212,7 +212,18 @@ static token lex_next_raw(lexer *L) {
             int ch = s[L->pos++];
             if (ch=='\\' && L->pos<L->len) {
                 int e = s[L->pos++];
-                ch = e=='n'?'\n': e=='t'?'\t': e=='r'?'\r': e=='\\'?'\\': e=='\''?'\'': e=='"'?'"': e=='0'?0: e;
+                if (e=='u') {          /* \uXXXX (M1623): decode 4 hex digits, keep the low byte (ASCII-only engine, matches fromCharCode's own &0xFF) */
+                    int v=0, k=0;
+                    for (; k<4 && L->pos<L->len; k++) {
+                        int h = s[L->pos];
+                        int d = (h>='0'&&h<='9') ? h-'0' : (h>='a'&&h<='f') ? h-'a'+10 : (h>='A'&&h<='F') ? h-'A'+10 : -1;
+                        if (d<0) break;
+                        v = v*16 + d; L->pos++;
+                    }
+                    ch = (k==4) ? (v & 0xFF) : 'u';   /* malformed: fall back to a literal 'u' */
+                } else {
+                    ch = e=='n'?'\n': e=='t'?'\t': e=='r'?'\r': e=='\\'?'\\': e=='\''?'\'': e=='"'?'"': e=='0'?0: e;
+                }
             }
             if (buf) buf[n++] = (char)ch;
         }
@@ -2783,7 +2794,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         if (name[1]=='u' && a>b) { int t=a; a=b; b=t; }   /* substring swaps its args when start>end (slice clamps to empty instead) */
         if(b<a)b=a; char*r=aalloc(b-a+1); if(!r) return STRV(""); memcpy(r,s+a,b-a); r[b-a]=0; return STRV(r); }
     if (strcmp(name,"indexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; for(int i=from;i+sl<=len;i++){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
-    if (strcmp(name,"lastIndexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); for(int i=len-sl;i>=0;i--){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
+    if (strcmp(name,"lastIndexOf")==0){ if(!nargs) return NUM(-1); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):len; if(from<0)from=0; if(from>len)from=len; int start=from; if(start>len-sl)start=len-sl; for(int i=start;i>=0;i--){ if(memcmp(s+i,sub,sl)==0) return NUM(i);} return NUM(-1); }
     if (strcmp(name,"includes")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int from=nargs>1?(int)to_num(args[1]):0; if(from<0)from=0; for(int i=from;i+sl<=len;i++) if(memcmp(s+i,sub,sl)==0) return BOOLV(1); return BOOLV(0); }
     if (strcmp(name,"startsWith")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int pos=nargs>1?(int)to_num(args[1]):0; if(pos<0)pos=0; if(pos>len)pos=len; /* match from position (M694) */ return BOOLV(sl<=len-pos && memcmp(s+pos,sub,sl)==0); }
     if (strcmp(name,"endsWith")==0){ if(!nargs) return BOOLV(0); const char*sub=val_to_str(args[0]); int sl=(int)strlen(sub); int end=nargs>1?(int)to_num(args[1]):len; if(end<0)end=0; if(end>len)end=len; /* treat the string as if it ended at `end` (M694) */ return BOOLV(sl<=end && memcmp(s+end-sl,sub,sl)==0); }
@@ -4014,7 +4025,7 @@ static const char *jp_string(void){          /* assumes *jp == '"'; sizes from t
     jp++; const char *raw=jp, *e=jp;
     while(e<jp_end && *e!='"'){ if(*e=='\\' && e+1<jp_end) e++; e++; }
     int cap=(int)(e-raw)+1; char *buf=aalloc(cap); int nn=0;
-    while(jp<e){ char c=*jp++; if(c=='\\' && jp<jp_end){ char x=*jp++; c = x=='n'?'\n':x=='t'?'\t':x=='r'?'\r':x=='"'?'"':x=='\\'?'\\':x=='/'?'/':x; if(x=='u'){ for(int k=0;k<4 && jp<jp_end;k++) jp++; c='?'; } } if(buf && nn<cap-1) buf[nn++]=c; }
+    while(jp<e){ char c=*jp++; if(c=='\\' && jp<jp_end){ char x=*jp++; if(x=='u'){ int v=0,k=0; for(;k<4 && jp<jp_end;k++){ char h=*jp; int d=(h>='0'&&h<='9')?h-'0':(h>='a'&&h<='f')?h-'a'+10:(h>='A'&&h<='F')?h-'A'+10:-1; if(d<0) break; v=v*16+d; jp++; } c = (k==4) ? (char)(v & 0xFF) : '?'; } else c = x=='n'?'\n':x=='t'?'\t':x=='r'?'\r':x=='"'?'"':x=='\\'?'\\':x=='/'?'/':x; } if(buf && nn<cap-1) buf[nn++]=c; }
     if(jp<jp_end && *jp=='"') jp++;
     if(buf) buf[nn]=0; return buf?buf:"";
 }

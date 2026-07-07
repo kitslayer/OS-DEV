@@ -34,7 +34,7 @@ static inline void mq_irq_restore(uint64_t f) {
 #define MQ_MAXMSG  16     /* max messages held per queue    */
 #define MQ_MSGSZ   128    /* max message payload (bytes)     */
 
-struct mqmsg { uint8_t used, prio; uint32_t seq; int len; char data[MQ_MSGSZ]; };
+struct mqmsg { uint8_t used; uint32_t prio; uint32_t seq; int len; char data[MQ_MSGSZ]; };  /* prio widened from uint8_t (M1623): mqueue_send's own param is a full unsigned int, and nothing documents an 8-bit cap */
 struct mqueue {
     char   name[32];
     int    used, maxmsg, msgsize, count;
@@ -79,7 +79,7 @@ long mqueue_send(int idx, const void *buf, unsigned long len, unsigned int prio)
         if (q->count < q->maxmsg) {
             int placed = 0;
             for (int i = 0; i < MQ_MAXMSG; i++) if (!q->msg[i].used) {
-                q->msg[i].used = 1; q->msg[i].prio = (uint8_t)prio; q->msg[i].seq = q->seq++;
+                q->msg[i].used = 1; q->msg[i].prio = prio; q->msg[i].seq = q->seq++;
                 q->msg[i].len = (int)len;
                 for (unsigned long k = 0; k < len; k++) q->msg[i].data[k] = ((const char *)buf)[k];
                 q->count++;

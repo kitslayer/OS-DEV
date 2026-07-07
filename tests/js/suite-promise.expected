@@ -83,4 +83,9 @@ null 2
 null null
 -- Set.entries() (M1621): Map/Array already had it, Set fell through to a throw --
 1:1,2:2,3:3
+-- unicode escapes in string literals + JSON.parse (M1623) --
+ABC
+AB
+-- String.lastIndexOf(fromIndex) (M1623) --
+0 4 3 -1
 -- done --
