@@ -783,7 +783,7 @@ static int run_command(char *line, char *cwd) {
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
             helpline("misc:   echo cal[ M Y] weekday<YYYYMMDD> dur<sec> date beep tone[ hz ms] play<f.wav> stop morse<text> unmorse<code> rev<text> rot13<text> ascii cowsay<text> fortune\n");
             print("        todo[ add T|done N|clear] clip[ file] wallpaper<file> mem ps top df uptime uname whoami hostname[ NAME] free id neofetch stat<path> fiemap<path> fallocate punch<path off len> dmesg measure lspci lsblk mount losetup<img> scores history clear reboot poweroff kill<pid> exit\n");
-            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  sigpipetest(SIGPIPE)  selecttest(select fd_set)  clockgt  wss[ pid]\n");
+            helpline("vm:     mmaptest ringtest jittest madvisetest pageouttest(MADV_PAGEOUT) mincoretest mlocktest swaptest shmtest hugetest(2MiB) thptest(MADV_COLLAPSE) (mmap/ring/W^X/reclaim/residency/pin/swap/shm/hugepage/THP)  usagetest(getrusage)  smaps  mqtest(prio msgq)  semtest(SysV sem)  semopentest(POSIX named sem)  msgtest(SysV msgq)  shmsysvtest(SysV shm)  sysvctltest(msgctl/shmctl)  unixtest(AF_UNIX sockets)  unixpolltest(wait_any poll)  nicetest(CFS fair sched)  schedtest(SCHED_FIFO RT)  affinitytest(sched_setaffinity)  rawkey(TTY raw mode)  jobtest(killpg process group + tcgetpgrp + getsid)  sigsuspendtest(sigsuspend)  pdeathsigtest(SIGCHLD + PR_SET_PDEATHSIG)  pausetest(pause)  flocktest(advisory file locks)  stoptest(SIGTSTP/SIGCONT)  mremaptest(mmap resize/move)  cfrtest(copy_file_range)  pvmtest(process_vm_read)  pvwtest(process_vm_write)  wchantest(/proc/sched WCHAN)  pagemaptest(/proc/pagemap PFNs)  rlimittest(rlimits)  alarmtest  setitimertest(setitimer/getitimer)  fsynctest(fsync/fdatasync/sync_file_range)  fxattrtest(f*xattr)  epollpwaittest(epoll_pwait)  tcflushtest(tcflush/tcdrain)  preadwritetest(pread/pwrite)  ppolltest(ppoll)  iovtest(readv/writev)  piovtest(preadv/pwritev)  futextimeouttest(FUTEX_WAIT timeout)  eventfdblocktest(blocking eventfd read)  sigpipetest(SIGPIPE)  selecttest(select fd_set)  linkattest(linkat)  clockgt  wss[ pid]\n");
             helpline("syntax: cmd1 | cmd2 (pipe)   cmd > file (write)   cmd >> file (append)   cmd < file (read)   $(cmd) (substitute)\n");
             print("        a && b (b if a ok)   a || b (b if a fails)   $? (last status)  true false\n");
             print("        source file (or '. file'): run shell commands from a file (# = comment)\n");
@@ -3899,6 +3899,21 @@ static int run_command(char *line, char *cwd) {
             print(ok ? "readlink: RL.LNK -> target read back exact (un-terminated), non-symlink -> -1; "
                        "symlinkat/readlinkat round-trip via AT_FDCWD + a real dirfd both OK -- OK\n"
                      : "readlinktest: VERIFY FAILED\n");
+            if (!ok) g_status = 1;
+        } else if (streq(line, "linkattest")) {   /* linkat: hard link relative to dir fds (M1585); ext2-only
+                                                    * (like fchmodat/fchownat) and this interactive boot's only
+                                                    * disk is FAT32 -- proves the *at wiring reaches vfs_link via
+                                                    * BOTH AT_FDCWD and a real dirfd, denying cleanly rather than
+                                                    * crashing or silently succeeding on the wrong filesystem */
+            int ok = 1;
+            if (sys_linkat(AT_FDCWD, "/tmp/LA_OLD.TXT", AT_FDCWD, "/tmp/LA1.TXT") != -1) ok = 0;
+            int dfd = sys_open("/tmp");
+            if (dfd >= 0) {
+                if (sys_linkat(dfd, "LA_OLD.TXT", dfd, "LA2.TXT") != -1) ok = 0;   /* dirfd-relative, same denial */
+                sys_fdclose(dfd);
+            } else ok = 0;
+            print(ok ? "linkat: AT_FDCWD + dirfd-relative both reach vfs_link, FAT32 (non-ext2) denies cleanly -- OK\n"
+                     : "linkattest: VERIFY FAILED\n");
             if (!ok) g_status = 1;
         } else if (streq(line, "nanosleeptest")) {   /* sched_yield + nanosleep (M1234) */
             int ok = 1;

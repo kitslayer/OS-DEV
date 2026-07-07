@@ -223,6 +223,7 @@ int  sys_fstatat(int dirfd, const char *path, struct statx *st, int flags); /* s
 int  sys_fchmodat(int dirfd, const char *path, unsigned mode);    /* chmod relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
 int  sys_fchownat(int dirfd, const char *path, int uid, int gid); /* chown relative to a dir fd (or AT_FDCWD); 0/-1 (M1553) */
 int  sys_symlinkat(const char *target, int newdirfd, const char *linkpath);  /* symlink relative to a dir fd (or AT_FDCWD); 0/-1 (M1582) */
+int  sys_linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath);  /* hard link relative to dir fds (or AT_FDCWD); 0/-1 (M1585) */
 long sys_readlinkat(int dirfd, const char *path, void *buf, unsigned long size);  /* a symlink's target relative to a dir fd (or AT_FDCWD), not followed; bytes/-1 (M1582) */
 int  sys_utimensat(int dirfd, const char *path, long atime, long mtime);  /* set timestamps relative to a dir fd (or AT_FDCWD); 0/-1 (M1559) */
 long sys_prlimit(int pid, int resource, unsigned long newval, int do_set);  /* get/set a process's rlimit; old value (M1214) */
