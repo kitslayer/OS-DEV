@@ -121,10 +121,16 @@ static void render(void) {
     }
     print("\n");
 
-    /* Tableau: one card per row, columns side by side. Find the tallest column. */
+    /* Tableau: one card per row, columns side by side. Find the tallest column,
+     * but cap the rendered depth so the header/footer never scroll off the
+     * visible text grid (data is never lost — only very deep stacks are
+     * clipped), the same way freecell.c's own near-identical cascade loop
+     * already does (M1640: this loop had no cap at all). */
     int maxn = 1;
     for (int c = 0; c < 7; c++) if (tn[c] > maxn) maxn = tn[c];
-    for (int r = 0; r < maxn; r++) {
+    int rows = maxn, clipped = 0;
+    if (rows > 9) { rows = 9; clipped = 1; }
+    for (int r = 0; r < rows; r++) {
         print("  ");
         for (int c = 0; c < 7; c++) {
             if (r < tn[c]) {
@@ -138,6 +144,7 @@ static void render(void) {
         }
         print("\n");
     }
+    if (clipped) { sys_setcolor(8); print(" (deep columns clipped)\n"); sys_setcolor(0); }
 
     /* Footer: status line + the key help. */
     print("\n "); sys_setcolor(7); print(msg); sys_setcolor(0);

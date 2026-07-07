@@ -111,4 +111,10 @@ ABC
 5
 2
 1
+-- JSON.stringify's function replacer now runs on array elements too (M1637) --
+{"a":[2,4,6],"b":10}
+-- obj?.method() throws on a genuinely missing method, obj.method?.() doesn't (M1638) --
+true
+undefined
+undefined
 -- done --

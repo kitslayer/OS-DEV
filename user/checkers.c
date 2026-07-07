@@ -99,19 +99,30 @@ static void check_end(void) {
 /* CPU: greedy — must capture if able (and continue multi-jumps); else a random legal slide. */
 static void cpu_turn(void) {
     int fr0=-1, fc0=-1, tr1=-1, tc1=-1;          /* first-from + last-to, for the highlight */
+    int cr=-1, cc=-1;                            /* M1639: pin to the SAME piece across a multi-jump chain,
+                                                   * the same way the human path pins sr,sc (line ~194) --
+                                                   * re-scanning the WHOLE board every loop (the old code)
+                                                   * could grab a DIFFERENT cpu piece's independent jump
+                                                   * instead of continuing this one's chain, breaking the
+                                                   * mandatory-continue-same-piece rule. */
     for (;;) {
         if (side_has_jump(-1)) {
-            /* find any cpu piece that can jump, prefer continuing a chain */
             int fr=-1,fc=-1,tr=-1,tc=-1;
-            for (int r=0;r<8&&fr<0;r++) for (int c=0;c<8&&fr<0;c++) if (own(b[r][c],-1) && piece_can_jump(r,c)) {
-                int dr[4],dc[4],n=dirs(r,c,dr,dc);
-                for (int i=0;i<n;i++){ int mr=r+dr[i],mc=c+dc[i],lr=r+2*dr[i],lc=c+2*dc[i];
-                    if (in(lr,lc)&&enemy(b[mr][mc],-1)&&b[lr][lc]==0){ fr=r;fc=c;tr=lr;tc=lc;break; } }
+            if (cr>=0) {                                 /* continuing a chain: only this piece's own jumps */
+                int dr[4],dc[4],n=dirs(cr,cc,dr,dc);
+                for (int i=0;i<n;i++){ int mr=cr+dr[i],mc=cc+dc[i],lr=cr+2*dr[i],lc=cc+2*dc[i];
+                    if (in(lr,lc)&&enemy(b[mr][mc],-1)&&b[lr][lc]==0){ fr=cr;fc=cc;tr=lr;tc=lc;break; } }
+            } else {                                      /* fresh turn: find any cpu piece that can jump */
+                for (int r=0;r<8&&fr<0;r++) for (int c=0;c<8&&fr<0;c++) if (own(b[r][c],-1) && piece_can_jump(r,c)) {
+                    int dr[4],dc[4],n=dirs(r,c,dr,dc);
+                    for (int i=0;i<n;i++){ int mr=r+dr[i],mc=c+dc[i],lr=r+2*dr[i],lc=c+2*dc[i];
+                        if (in(lr,lc)&&enemy(b[mr][mc],-1)&&b[lr][lc]==0){ fr=r;fc=c;tr=lr;tc=lc;break; } }
+                }
             }
             if (fr<0) break;
             if (fr0<0){ fr0=fr; fc0=fc; } do_move(fr,fc,tr,tc); tr1=tr; tc1=tc;
             if (piece_can_jump(tr,tc)) {                 /* multi-jump continuation */
-                /* re-select the same piece next loop by leaving it; simplest: loop again, it'll be found */
+                cr=tr; cc=tc;                            /* pin to this exact piece for the next iteration */
                 continue;
             }
             break;

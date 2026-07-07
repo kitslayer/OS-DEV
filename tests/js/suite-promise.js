@@ -122,4 +122,10 @@ print("-- fn.prop / Class.staticField work without a pre-declared static member 
 print((function(){function f(){}f.bar=5;return f.bar;})());   // 5
 print((function(){class C{}C.count=0;C.count++;C.count++;return C.count;})());   // 2
 print((function(){class D{}D.x++;return D.x;})());   // 1
+print("-- JSON.stringify's function replacer now runs on array elements too (M1637) --");
+print(JSON.stringify({a:[1,2,3],b:5}, function(k,v){ return typeof v=="number" ? v*2 : v; }));   // {"a":[2,4,6],"b":10}
+print("-- obj?.method() throws on a genuinely missing method, obj.method?.() doesn't (M1638) --");
+print((function(){var obj={};var t=false;try{obj?.method();}catch(e){t=true;}return t;})());   // true (throws, like plain obj.method())
+print((function(){var obj={};var r="?";try{r=obj.method?.();}catch(e){r="threw";}return r;})());   // undefined (the CALL itself is optional)
+print((function(){var a=null;var r="?";try{r=a?.b.c();}catch(e){r="threw";}return r;})());   // undefined (short-circuits on the null receiver, unaffected)
 print("-- done --");

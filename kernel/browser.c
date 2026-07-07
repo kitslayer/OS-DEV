@@ -4681,8 +4681,15 @@ void browser_scroll_track(browser_t *b, int ry, int h) {
     int ct = ADDR_H + 6, cb = h - 8, track = cb - ct;
     if (track <= 0) return;
     int maxscroll = b->content_h - b->view_h; if (maxscroll < 0) maxscroll = 0;
-    int pos = ry - ct; if (pos < 0) pos = 0; if (pos > track) pos = track;
-    b->scroll = maxscroll * pos / track;               /* render clamps */
+    /* M1641: mirror render()'s own thumb-height formula so dragging is the exact
+     * inverse of where the thumb is actually drawn -- this used to map ry against
+     * the FULL track, while render() only ever moves the thumb within
+     * (track - th), leaving the thumb a few percent off the cursor after a drag
+     * (worst on short pages where th is large relative to track). */
+    int th = (b->content_h > 0) ? track * b->view_h / b->content_h : track; if (th < 16) th = 16;
+    int range = track - th; if (range < 1) range = 1;
+    int pos = ry - ct; if (pos < 0) pos = 0; if (pos > range) pos = range;
+    b->scroll = maxscroll * pos / range;               /* render clamps */
 }
 /* Release: copy the selected token range to `out` (words joined by spaces, a
  * newline at each block break). Returns the length, or 0 for a non-drag click. */

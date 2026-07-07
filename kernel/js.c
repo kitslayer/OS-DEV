@@ -665,7 +665,7 @@ static node *parse_postfix(lexer *L) {
             else { token p=advance(L); node *m=mknode(N_MEMBER); m->a=e; m->str=intern(p.s,p.len); m->slen=p.len; m->prefix=1; e=m; }
         }
         else if (peek_punc(L,"[")) { advance(L); node *idx=parse_expr(L); expect_punc(L,"]"); node *m=mknode(N_INDEX); m->a=e; m->b=idx; m->prefix=opt; e=m; }
-        else if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->prefix=opt; call->list=parse_list(L,")",&call->nlist); e=call; }
+        else if (peek_punc(L,"(")) { advance(L); node *call=mknode(N_CALL); call->a=e; call->prefix=0; call->list=parse_list(L,")",&call->nlist); e=call; }   /* M1638: a PLAIN call, not itself written ?.( -- must NOT inherit `opt`. Unlike member/index access (where a missing property never throws either way, so propagating the nullish-receiver guard changes nothing), a call's OWN prefix also gates "swallow a missing-method/not-a-function error" (js.c ~2361/2364/2365/2369) -- inheriting it here let a LATER, non-optional call in the same chain (obj?.method(), only ?. on the MEMBER) silently swallow a real "no such method" error instead of throwing. The receiver-nullish short-circuit itself is unaffected: it's driven by callee->prefix (the member/index node's own flag), which still propagates correctly. */
         else if (peek_punc(L,"++")||peek_punc(L,"--")) { token o=advance(L); node *u=mknode(N_UPDATE); u->op=o.s[0]; u->a=e; u->prefix=0; e=u; }
         else if (peek(L).type==T_TEMPLATE) { token tt=advance(L); e = parse_tagged(e, tt.s, tt.len); }   /* tagged template: tag`…${x}…` -> tag([strings], x) */
         else break;
@@ -4060,7 +4060,7 @@ static void json_val(val v, int depth){
         case V_NUM:  if(!js_isfinite(v.num)) js_app("null"); else js_app(num_to_str(v.num)); break;   /* NaN/Infinity serialize as null, per JSON (M691) */
         case V_STR:  js_appq(v.str); break;
         case V_ARR:  if(v.o->n==0){ js_app("[]"); break; } js_app("[");
-            for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); json_val(v.o->vals[i], depth+1); } js_nl(depth); js_app("]"); break;
+            for(int i=0;i<v.o->n;i++){ if(i) js_app(","); js_nl(depth+1); json_val(json_repl(num_to_str((double)i), v.o->vals[i]), depth+1); } js_nl(depth); js_app("]"); break;   /* M1637: the function replacer used to run on every object property but skip array elements entirely -- per spec it sees each array index too (as a string key, like an object property) */
         case V_OBJ:
             if(is_proxy(v)){ val tv=deproxy(v); if(tv.t!=V_OBJ){ json_val(tv,depth); break; } v=tv; }   /* JSON.stringify(proxy) serializes the TARGET; never the proxy's vals[] (M-proxy) */
             if(v.o && v.o->kind==V_DATE){ js_appq(val_to_str(v)); break; }   /* a Date serializes as its string */
