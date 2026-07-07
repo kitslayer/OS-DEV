@@ -3842,6 +3842,38 @@ int browser_poll(browser_t *b) {
 /* Resolve `href` (absolute / root-relative / relative) against the current URL
  * and navigate there. If suppress_push, replace the current history entry
  * rather than pushing (used for redirects, so Back doesn't loop). */
+/* Collapse "." and ".." path segments in place, e.g. "/a/b/../c" -> "/a/c" and
+ * "/a/./b" -> "/a/b" (M1636). `path` must start with '/'. goto_href's relative-
+ * link resolution below used to build a path by straight concatenation with no
+ * dot-segment removal at all, so a page using ../-relative links (an ordinary,
+ * common pattern) navigated to the literal, uncollapsed URL instead of the
+ * right one. A leading ".." past the root is dropped rather than erroring,
+ * matching how real browsers clamp it. */
+static void collapse_dot_segments(char *path) {
+    char out[URL_MAX]; int op = 0;
+    int segstart[64]; int nseg = 0;   /* out[] offset of each kept segment's own '/' */
+    int trail = path[0] && path[strlen(path)-1] == '/';   /* preserve a trailing slash (dir vs. file) */
+    const char *p = path;
+    while (*p) {
+        while (*p == '/') p++;
+        const char *s = p; while (*p && *p != '/') p++;
+        int len = (int)(p - s);
+        if (len == 0) continue;
+        if (len == 1 && s[0] == '.') continue;                         /* "." -> drop */
+        if (len == 2 && s[0] == '.' && s[1] == '.') {                  /* ".." -> pop the previous segment */
+            if (nseg > 0) { nseg--; op = segstart[nseg]; }
+            continue;
+        }
+        if (op + len + 1 >= URL_MAX) break;
+        if (nseg < 64) segstart[nseg++] = op;
+        out[op++] = '/';
+        for (int i = 0; i < len; i++) out[op++] = s[i];
+    }
+    if (op == 0) out[op++] = '/';                                      /* never produce an empty path */
+    else if (trail && op < URL_MAX-1) out[op++] = '/';
+    out[op] = 0;
+    int i = 0; while (out[i] && i < URL_MAX-1) { path[i] = out[i]; i++; } path[i] = 0;
+}
 static void goto_href(browser_t *b, const char *href, int suppress_push) {
     { const char *jp="javascript:"; int isjs=1; for (int k=0;k<11;k++) if (lc(href[k])!=jp[k]) { isjs=0; break; }
       if (isjs) { run_js_handler(b, href + 11); return; } }   /* javascript: (any case) runs, doesn't navigate */
@@ -3881,6 +3913,7 @@ static void goto_href(browser_t *b, const char *href, int suppress_push) {
             return;
         }
         for (int i = 0; host[i] && p < URL_MAX-1; i++) newurl[p++] = host[i];
+        int path_start = p;   /* M1636: everything from here on is the path -- collapse ./ and ../ once it's built */
         if (href[0] == '/') {                            /* absolute path */
             for (int i = 0; href[i] && p < URL_MAX-1; i++) newurl[p++] = href[i];
         } else {                                         /* relative to current dir */
@@ -3893,6 +3926,7 @@ static void goto_href(browser_t *b, const char *href, int suppress_push) {
             for (int i = 0; href[i] && p < URL_MAX-1; i++) newurl[p++] = href[i];
         }
         newurl[p] = 0;
+        collapse_dot_segments(newurl + path_start);   /* M1636 */
     }
     copy_url(b->url, newurl);
     if (suppress_push) b->is_back = 1;          /* replace, don't push history */

@@ -116,4 +116,10 @@ print("abc".indexOf("",10)+" "+"abc".includes("",10)+" "+"abc".indexOf("b",10));
 print("-- Promise.race checks every member, not just index 0 (M1631) --");
 print((function(){var o="?";Promise.race([new Promise(function(){}),Promise.resolve(2)]).then(function(v){o=v;});return o;})());   // 2 (a still-pending first member no longer masks an already-settled second one)
 print((function(){var o="?";Promise.race([Promise.resolve(1),Promise.resolve(2)]).then(function(v){o=v;});return o;})());   // 1 (first non-pending, array order)
+print("-- template literals decode \\u escapes too, not just string literals (M1632) --");
+print(`\u0041\u0042\u0043`);   // ABC
+print("-- fn.prop / Class.staticField work without a pre-declared static member (M1635) --");
+print((function(){function f(){}f.bar=5;return f.bar;})());   // 5
+print((function(){class C{}C.count=0;C.count++;C.count++;return C.count;})());   // 2
+print((function(){class D{}D.x++;return D.x;})());   // 1
 print("-- done --");

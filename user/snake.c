@@ -83,7 +83,12 @@ restart:
         }
         int nx = sx[0] + dx, ny = sy[0] + dy;
         int dead = (nx < 0 || nx >= W || ny < 0 || ny >= H);
-        for (int i = 0; i < len && !dead; i++) if (sx[i] == nx && sy[i] == ny) dead = 1;
+        int eating = (nx == fx && ny == fy);
+        /* the tail (index len-1) vacates this same tick (see the shift below) UNLESS
+         * eating grows the snake, in which case a new segment refills that exact
+         * cell -- so moving there is only safe when NOT eating (M1633). */
+        int check_len = eating ? len : len - 1;
+        for (int i = 0; i < check_len && !dead; i++) if (sx[i] == nx && sy[i] == ny) dead = 1;
         if (dead) break;
 
         int tx = sx[len-1], ty = sy[len-1];

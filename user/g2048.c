@@ -133,6 +133,7 @@ static void render(const char *msg) {
 }
 
 int main(void) {
+restart:
     for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) g[y][x] = 0;
     score = 0; won = 0;
     load_best();
@@ -142,13 +143,16 @@ int main(void) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
         if (k == 'q') return 0;
+        /* M1634: once stuck, any other key restarts -- matches snake.c/mines.c/
+         * tetris.c's own retry convention; this game had none. */
+        if (!won && !can_move()) goto restart;
         int dir = -1;
         if (k == 0x13) dir = 0; else if (k == 0x14) dir = 1;
         else if (k == 0x11) dir = 2; else if (k == 0x12) dir = 3;
         if (dir < 0) continue;
         if (move(dir)) { add_tile(); if (score > best) { best = score; save_best(); } }
         if (won)            render("you reached 2048!");
-        else if (!can_move()) render("game over - q to quit");
+        else if (!can_move()) render("game over - any key to retry, q to quit");
         else                render(0);
     }
 }

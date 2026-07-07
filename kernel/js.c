@@ -391,13 +391,32 @@ static node *mkbin_plus(node *a, node *b){ node *n=mknode(N_BINARY); n->op='+'; 
 /* Parse a template literal's raw inner text into a `+`-concatenation of string
  * literals and `${expr}` substitutions. Always begins with a (possibly empty)
  * string literal, so the whole chain coerces to a string. */
+/* \uXXXX inline decode for template literals (M1632): mirrors the main string
+ * lexer's own fix (M1623), which never propagated to parse_template/parse_tagged's
+ * SEPARATE escape loop below -- so `A` in a template literal still yielded
+ * the 4 raw characters "u0041" instead of "A". Called with *pi pointing at the
+ * first hex digit (right after "\u"); advances *pi past the 4 digits on success.
+ * On a malformed escape (fewer than 4 valid hex digits), returns 'u' and leaves
+ * *pi unchanged, matching the lexer's own fallback. */
+static char tpl_decode_u(const char *raw, int len, int *pi) {
+    int v=0, k=0, i=*pi;
+    for (; k<4 && i<len; k++) {
+        int h=raw[i]; int d=(h>='0'&&h<='9')?h-'0':(h>='a'&&h<='f')?h-'a'+10:(h>='A'&&h<='F')?h-'A'+10:-1;
+        if (d<0) break;
+        v=v*16+d; i++;
+    }
+    if (k==4) { *pi=i; return (char)(v & 0xFF); }
+    return 'u';
+}
 static node *parse_template(const char *raw, int len) {
     node *chain = 0;
     char *lit = aalloc(len + 1); int ln = 0;
     #define TPL_FLUSH() do { if(lit) lit[ln]=0; node *sn=mknode(N_STR); sn->str=intern(lit?lit:"",ln); sn->slen=ln; chain = chain ? mkbin_plus(chain,sn) : sn; ln=0; } while(0)
     int i = 0;
     while (i < len) {
-        if (raw[i]=='\\' && i+1<len) { char e=raw[i+1]; char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
+        if (raw[i]=='\\' && i+1<len) { char e=raw[i+1];
+            if (e=='u') { int pi=i+2; char c=tpl_decode_u(raw,len,&pi); if(lit&&ln<len) lit[ln++]=c; i=pi; continue; }
+            char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
         if (raw[i]=='$' && i+1<len && raw[i+1]=='{') {
             TPL_FLUSH();                                  /* literal before the ${ */
             int j = tpl_scan_to_close(raw, i+2, len);   /* find the matching }, skipping strings/nested templates */
@@ -426,7 +445,9 @@ static node *parse_tagged(node *tag, const char *raw, int len) {
     #define TT_FLUSH() do { if(lit) lit[ln]=0; node *sn=mknode(N_STR); sn->str=intern(lit?lit:"",ln); sn->slen=ln; if(strs->list && strs->nlist<33) strs->list[strs->nlist++]=sn; ln=0; } while(0)
     int i = 0;
     while (i < len) {
-        if (raw[i]=='\\' && i+1<len) { char e=raw[i+1]; char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
+        if (raw[i]=='\\' && i+1<len) { char e=raw[i+1];
+            if (e=='u') { int pi=i+2; char c=tpl_decode_u(raw,len,&pi); if(lit&&ln<len) lit[ln++]=c; i=pi; continue; }
+            char c = e=='n'?'\n':e=='t'?'\t':e=='r'?'\r':e=='`'?'`':e=='$'?'$':e=='\\'?'\\':e; if(lit && ln<len) lit[ln++]=c; i+=2; continue; }
         if (raw[i]=='$' && i+1<len && raw[i+1]=='{') {
             TT_FLUSH();
             int j = tpl_scan_to_close(raw, i+2, len);   /* find matching }, skipping strings/nested templates */
@@ -2123,9 +2144,13 @@ static val eval_expr_inner(node *n, env *e) {
                     for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; }
                     if (!slot) { obj_set(recv.o,key,NUM(0)); for (int i=0;i<recv.o->n;i++) if(strcmp(recv.o->keys[i],key)==0){ slot=&recv.o->vals[i]; break; } }
                 }
-                else if (recv.t==V_FUN && recv.o && recv.o->statics) { const char *key=node_name(t); obj *st=recv.o->statics;   /* Class.staticField++ : the slot is in the side statics object (mirrors N_ASSIGN) */
-                    for (int i=0;i<st->n;i++) if(strcmp(st->keys[i],key)==0){ slot=&st->vals[i]; break; }
-                    if (!slot) { obj_set(st,key,NUM(0)); for (int i=0;i<st->n;i++) if(strcmp(st->keys[i],key)==0){ slot=&st->vals[i]; break; } }
+                else if (recv.t==V_FUN && recv.o) { const char *key=node_name(t);   /* Class.staticField++ : the slot is in the side statics object (mirrors N_ASSIGN) */
+                    if (!recv.o->statics) { recv.o->statics=new_obj(V_OBJ); if(!recv.o->statics) g_oom=1; }   /* M1635: lazily create on first write, like plain assignment now does -- a class/function with no PRE-declared static member used to throw "invalid ++/-- target" here instead */
+                    obj *st=recv.o->statics;
+                    if (st) {
+                        for (int i=0;i<st->n;i++) if(strcmp(st->keys[i],key)==0){ slot=&st->vals[i]; break; }
+                        if (!slot) { obj_set(st,key,NUM(0)); for (int i=0;i<st->n;i++) if(strcmp(st->keys[i],key)==0){ slot=&st->vals[i]; break; } }
+                    }
                 }
             }
             else if (t->type==N_INDEX) {             /* arr[i]++ / o[k]++ */
@@ -2222,7 +2247,10 @@ static val eval_expr_inner(node *n, env *e) {
                 }
                 if (recv.t==V_FUN && recv.o && strcmp(node_name(t),"prototype")==0 && rhs.t==V_OBJ && rhs.o) { recv.o->fn_proto = rhs.o; return rhs; }   /* F.prototype = obj : reassign the [[Prototype]] each `new F()` gets, so the classic `B.prototype=Object.create(A.prototype)` inheritance chain works (M698) */
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_REGEX && strcmp(node_name(t),"lastIndex")==0) { regex *re=(regex*)recv.o->rx; if(re) re->lastIndex=(int)to_num(rhs); return rhs; }   /* re.lastIndex = 0 (the standard idiom for resetting a shared global regex) must reach the C-side field test/exec actually read (M1627) */
-                if (recv.t==V_FUN && recv.o && recv.o->statics) { obj_set(recv.o->statics, node_name(t), rhs); return rhs; }   /* Class.staticField = … (write to the side statics object) */
+                if (recv.t==V_FUN && recv.o) {   /* Class.staticField = … / fn.prop = … (write to the side statics object) */
+                    if (!recv.o->statics) { recv.o->statics=new_obj(V_OBJ); if(!recv.o->statics){ g_oom=1; return rhs; } }   /* M1635: lazily create on first write -- this used to silently do nothing for a class/function with no PRE-declared static member */
+                    obj_set(recv.o->statics, node_name(t), rhs); return rhs;
+                }
                 if((recv.t==V_OBJ||recv.t==V_ARR)&&recv.o){ const char *wk=node_name(t); val cur;
                     if(recv.t==V_ARR && strcmp(wk,"length")==0){ int nl=(int)to_num(rhs); if(nl<0)nl=0; if(nl>(1<<24)){ rt_err("array length too large"); return rhs; }
                         if(nl<=recv.o->n) recv.o->n=nl; else while(recv.o->n<nl && !g_oom) arr_push_val(recv.o,UND()); return rhs; }   /* a.length = n: truncate or grow-with-undefined (M267) */

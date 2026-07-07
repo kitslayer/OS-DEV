@@ -105,4 +105,10 @@ NaN NaN 42 -7
 -- Promise.race checks every member, not just index 0 (M1631) --
 2
 1
+-- template literals decode \u escapes too, not just string literals (M1632) --
+ABC
+-- fn.prop / Class.staticField work without a pre-declared static member (M1635) --
+5
+2
+1
 -- done --
