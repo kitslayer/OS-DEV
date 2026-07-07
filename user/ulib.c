@@ -257,6 +257,8 @@ int  sys_sched_setscheduler(int policy, int rt_priority) { return (int)do_syscal
 long sys_statx(const char *path, struct statx *st) { return do_syscall(SYS_statx, (long)path, (long)st, 0); }
 int  sys_tcgetattr(struct termios *t) { return (int)do_syscall(SYS_tcgetattr, (long)t, 0, 0); }
 int  sys_tcsetattr(const struct termios *t) { return (int)do_syscall(SYS_tcsetattr, (long)t, 0, 0); }
+int  sys_tcflush(int queue_selector) { return (int)do_syscall(SYS_tcflush, queue_selector, 0, 0); }
+int  sys_tcdrain(void) { return (int)do_syscall(SYS_tcdrain, 0, 0, 0); }
 int  sys_setpgid(int pid, int pgid) { return (int)do_syscall(SYS_setpgid, pid, pgid, 0); }
 int  sys_getpgid(int pid) { return (int)do_syscall(SYS_getpgid, pid, 0, 0); }
 int  sys_setsid(void) { return (int)do_syscall(SYS_setsid, 0, 0, 0); }

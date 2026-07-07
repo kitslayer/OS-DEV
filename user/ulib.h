@@ -106,6 +106,8 @@ int  sys_sched_setscheduler(int policy, int rt_priority);  /* SCHED_OTHER/FIFO/R
 long sys_statx(const char *path, struct statx *st);        /* file metadata: mode/size/mtime/nlink (M1173) */
 int  sys_tcgetattr(struct termios *t);                     /* read the TTY discipline mode (M1174) */
 int  sys_tcsetattr(const struct termios *t);               /* set cooked/raw TTY mode (M1174) */
+int  sys_tcflush(int queue_selector);                       /* discard unread input (TCIFLUSH/TCIOFLUSH); 0/-1 (M1570) */
+int  sys_tcdrain(void);                                     /* wait for pending output; a no-op here; 0/-1 (M1570) */
 int  sys_setpgid(int pid, int pgid);                       /* job control: set a process group (M1176) */
 int  sys_getpgid(int pid);                                 /* process group id (M1176) */
 int  sys_setsid(void);                                     /* become session+group leader (M1176) */

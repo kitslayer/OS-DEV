@@ -299,7 +299,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_pty_open: case SYS_pty_read: case SYS_pty_write: case SYS_pty_close: case SYS_pty_ctl:
     case SYS_pipe: case SYS_pipe2: case SYS_eventfd: case SYS_fdread: case SYS_fdwrite: case SYS_fdclose: case SYS_dup2:
     case SYS_mkfifo: case SYS_fifo_open: case SYS_lseek:
-    case SYS_nice: case SYS_sched_setscheduler: case SYS_sched_setaffinity: case SYS_tcgetattr: case SYS_tcsetattr:
+    case SYS_nice: case SYS_sched_setscheduler: case SYS_sched_setaffinity: case SYS_tcgetattr: case SYS_tcsetattr: case SYS_tcflush: case SYS_tcdrain:
     case SYS_getrlimit: case SYS_setrlimit:
     case SYS_getrandom: case SYS_getentropy: case SYS_setkbmode: case SYS_getkbevent: case SYS_mouse:
     case SYS_mouse_rel: case SYS_beep:
@@ -399,7 +399,7 @@ static const char *syscall_name(uint64_t n) {
         [SYS_unix_listen]="unix_listen",[SYS_unix_connect]="unix_connect",[SYS_unix_accept]="unix_accept",
         [SYS_unix_send]="unix_send",[SYS_unix_recv]="unix_recv",[SYS_unix_close]="unix_close",[SYS_socketpair]="socketpair",
         [SYS_unix_wait_any]="unix_wait_any",[SYS_nice]="nice",[SYS_sched_setscheduler]="sched_setscheduler",
-        [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",
+        [SYS_statx]="statx",[SYS_tcgetattr]="tcgetattr",[SYS_tcsetattr]="tcsetattr",[SYS_tcflush]="tcflush",[SYS_tcdrain]="tcdrain",
         [SYS_setpgid]="setpgid",[SYS_getpgid]="getpgid",[SYS_setsid]="setsid",[SYS_tcsetpgrp]="tcsetpgrp",[SYS_tcgetpgrp]="tcgetpgrp",[SYS_killpg]="killpg",
         [SYS_flock]="flock",[SYS_mremap]="mremap",[SYS_copy_file_range]="copy_file_range",
         [SYS_pty_open]="pty_open",[SYS_pty_read]="pty_read",[SYS_pty_write]="pty_write",
@@ -1327,6 +1327,12 @@ void syscall_dispatch(struct registers *r) {
     case SYS_tcsetattr:                    /* (struct termios*) -> set cooked/raw TTY mode (M1174) */
         if (!ubuf(r->rdi, sizeof(struct termios))) { r->rax = (uint64_t)-1; break; }
         r->rax = (uint64_t)(int64_t)app_tcsetattr((const struct termios *)r->rdi);
+        break;
+    case SYS_tcflush:                      /* (queue_selector) -> discard unread input; 0/-1 (M1570) */
+        r->rax = (uint64_t)(int64_t)app_tcflush((int)r->rdi);
+        break;
+    case SYS_tcdrain:                      /* () -> wait for pending output; a no-op here; 0/-1 (M1570) */
+        r->rax = (uint64_t)(int64_t)app_tcdrain();
         break;
     case SYS_setpgid:                      /* (pid, pgid) -> set process group (M1176) */
         r->rax = (uint64_t)(int64_t)app_setpgid((int)r->rdi, (int)r->rsi);

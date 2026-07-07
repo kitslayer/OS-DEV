@@ -73,6 +73,8 @@ int    app_sys_read(char *buf, unsigned max);
 struct termios;
 int    app_tcgetattr(struct termios *t);          /* read the TTY discipline mode (M1174) */
 int    app_tcsetattr(const struct termios *t);    /* set the TTY discipline mode cooked/raw (M1174) */
+int    app_tcflush(int queue_selector);           /* discard unread input (TCIFLUSH/TCIOFLUSH); TCOFLUSH is a no-op; 0/-1 (M1570) */
+int    app_tcdrain(void);                          /* wait for pending output; a no-op here (synchronous output); 0/-1 (M1570) */
 int    app_sys_getpid(void);
 int    app_sys_getppid(void);          /* parent pid, for getppid(2) (M1236) */
 void   app_chdir_track(const char *rel);   /* update cwd_path after a successful chdir, for getcwd (M1248) */

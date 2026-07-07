@@ -329,6 +329,11 @@
 #define SYS_fgetxattr    303   /* (fd, name, out, max) -> read a user.* xattr on an open FILE fd; size/-1 (M1569) */
 #define SYS_flistxattr   304   /* (fd, out, max) -> NUL-separated user.* names on an open FILE fd; total/-1 (M1569) */
 #define SYS_fremovexattr 305   /* (fd, name) -> remove a user.* xattr on an open FILE fd; 0/-1 (M1569) */
+#define SYS_tcflush      306   /* (queue_selector) -> discard unread input (TCIFLUSH/TCIOFLUSH); TCOFLUSH is a no-op (synchronous output); 0/-1 (M1570) */
+#define SYS_tcdrain      307   /* () -> wait for pending output to transmit; a no-op here (synchronous console output); 0/-1 (M1570) */
+#define TCIFLUSH  0
+#define TCOFLUSH  1
+#define TCIOFLUSH 2
 
 /* setsockopt/getsockopt (M1554): real Linux's own numbering (not a free-slot
  * pick like the signals above -- these live in a separate namespace, no

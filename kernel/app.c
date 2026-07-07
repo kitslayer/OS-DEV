@@ -1468,6 +1468,19 @@ static unsigned hist_recall(struct app *a, char *buf, unsigned max, unsigned cur
 static struct termios g_termios = { ICANON | ECHO | ISIG, { [VINTR] = 3, [VEOF] = 4, [VERASE] = 0x7f, [VKILL] = 0x15 } };
 int app_tcgetattr(struct termios *t) { if (!t) return -1; *t = g_termios; return 0; }
 int app_tcsetattr(const struct termios *t) { if (!t) return -1; g_termios = *t; return 0; }
+/* tcflush/tcdrain (M1570): the same iq[]/it/ih ring iq_get/iq_put already
+ * manipulate. TCIFLUSH/TCIOFLUSH discard unread input by fast-forwarding the
+ * tail to the head; TCOFLUSH and tcdrain are honest no-ops -- console output
+ * goes straight through app_sys_write synchronously, no output buffer exists
+ * to discard or wait on here at all (same reasoning as M1566's fsync). */
+int app_tcflush(int queue_selector) {
+    struct app *a = cur();
+    if (!a) return -1;
+    if (queue_selector != TCIFLUSH && queue_selector != TCOFLUSH && queue_selector != TCIOFLUSH) return -1;
+    if (queue_selector == TCIFLUSH || queue_selector == TCIOFLUSH) a->it = a->ih;
+    return 0;
+}
+int app_tcdrain(void) { return cur() ? 0 : -1; }
 
 /* Raw-mode read (M1174): no line editing — block for the first keystroke, then
  * drain whatever else is immediately queued (VMIN=1 semantics), echoing if ECHO
