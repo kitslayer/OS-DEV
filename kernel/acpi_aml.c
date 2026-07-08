@@ -122,7 +122,8 @@ static void aml_termlist(const uint8_t *aml, uint32_t p, uint32_t end, int depth
             if (g_obj_n > 0) {                              /* record the body so aml_eval_call can run it on demand (M1289) */
                 g_obj[g_obj_n - 1].argc = (uint8_t)(flags & 7);
                 g_obj[g_obj_n - 1].data_off = q;            /* body start (after MethodFlags) */
-                g_obj[g_obj_n - 1].body_end = p + 1 + l;    /* body end */
+                uint32_t mbody_end = p + 1 + l; if (mbody_end > end) mbody_end = end;   /* clamp to the enclosing TermList, like ScopeOp/DeviceOp already do -- a miscalculated PkgLength (a real, known firmware quirk) would otherwise let aml_eval_call read/execute past the actual DSDT buffer */
+                g_obj[g_obj_n - 1].body_end = mbody_end;    /* body end */
             }
             p = p + 1 + l;                                  /* body recorded; evaluation is on demand */
         } else if (op == 0x08) {                            /* NameOp NameString DataRefObject */
@@ -131,9 +132,9 @@ static void aml_termlist(const uint8_t *aml, uint32_t p, uint32_t end, int depth
             if (g_obj_n > 0) g_obj[g_obj_n - 1].data_off = q;   /* remember where the value lives, for aml_eval_* (M1286) */
             uint32_t ds = aml_dataobj_size(aml + q, end - q); if (!ds) return;
             p = q + ds;
-        } else if (op == 0x06) {                            /* AliasOp NameString NameString */
+        } else if (op == 0x06) {                            /* AliasOp NameString NameString: SOURCE object, then the NEW alias name being defined */
             uint32_t q = p + 1; char a[5], b[5]; q += aml_namestring(aml + q, a); q += aml_namestring(aml + q, b);
-            aml_add(a, AML_NAME); p = q;
+            aml_add(b, AML_NAME); p = q;                    /* was aml_add(a,...): catalogued the pre-existing source name instead of the new alias actually being defined, dropping the real name from the namespace */
         } else if (op == 0x5B) {                            /* ExtOpPrefix */
             uint8_t ext = aml[p + 1];
             if (ext == 0x82) {                              /* DeviceOp PkgLength NameString TermList */

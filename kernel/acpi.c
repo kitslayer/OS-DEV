@@ -190,7 +190,7 @@ static void parse_fadt(const struct fadt *f) {
     }
     /* prefer the 64-bit DSDT pointer when present + sane */
     uint32_t dsdt = f->dsdt;
-    if (f->h.length > 140 && f->x_dsdt && f->x_dsdt < (1ull << 32)) dsdt = (uint32_t)f->x_dsdt;
+    if (f->h.length > 147 && f->x_dsdt && f->x_dsdt < (1ull << 32)) dsdt = (uint32_t)f->x_dsdt;   /* x_dsdt is 8 bytes at offset 140 (bytes 140-147) -- was >140, which only guarantees the FIRST of those 8 bytes is within the table */
     parse_s5(dsdt);
 }
 
