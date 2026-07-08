@@ -10,11 +10,11 @@
 #define FUTEX_WAKE 1
 
 int main(void) {
-    char arg[16]; sys_getarg(arg, sizeof arg);
+    char arg[16]; arg[0] = 0; if (sys_getarg(arg, sizeof arg) <= 0) arg[0] = 0;   /* no arg -> "wait" default; was reading arg[0]/[1] uninitialized on this path */
     int *w = (int *)sys_shm_open("ftx", 4096);          // the shared futex word
     if (!w) { print("futex: shm_open failed\n"); sys_sleep(2000); return 1; }
 
-    if (arg[0] == 'w' && arg[1] == 'o') {               // "wake" (the child process)
+    if (arg[0] == 'w' && arg[1] == 'a') {               // "wake" (the child process) -- was arg[1]=='o', which "wake" never has, so the child always fell through to the "wait" default and spawned ANOTHER "wake" child recursively instead of ever waking the real waiter
         sys_sleep(600);                                 // give the waiter time to register + block
         long n = sys_futex(w, FUTEX_WAKE, 1, -1);
         char c[2] = { (char)('0' + (n < 0 ? 0 : n > 9 ? 9 : n)), 0 };

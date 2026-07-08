@@ -15,10 +15,11 @@ int main(void) {
 
     char b[16];
     long n = sys_readfile("/proc/self/sigfd", b, sizeof b - 1);
-    if (n > 0) { b[n] = 0; print("sigfd read #1: signo "); print(b); }
-    n = sys_readfile("/proc/self/sigfd", b, sizeof b - 1);
-    if (n > 0) { b[n] = 0; print("sigfd read #2: signo "); print(b); }
-    print("both signals arrived -> the bitset kept them (old one-deep slot would drop one)\n");
+    int ok1 = n > 0; if (ok1) { b[n] = 0; print("sigfd read #1: signo "); print(b); }
+    long n2 = sys_readfile("/proc/self/sigfd", b, sizeof b - 1);
+    int ok2 = n2 > 0; if (ok2) { b[n2] = 0; print("sigfd read #2: signo "); print(b); }
+    if (ok1 && ok2) print("both signals arrived -> the bitset kept them (old one-deep slot would drop one)\n");
+    else print("sigfdtest: FAILED -- a signal was dropped\n");   /* was unconditional -- the exact regression this test exists to catch would have still printed success */
 
     sys_sleep(20000);
     return 0;
