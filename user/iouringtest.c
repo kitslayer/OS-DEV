@@ -8,6 +8,8 @@
 #include "ulib.h"
 #include "iouring.h"
 
+#define TAG_UNSEEN -12345              /* out-of-band: a real completion res is never this */
+
 static void pdec(long v) {            // print a signed decimal
     char b[24]; int i = 0, neg = v < 0;
     unsigned long u = neg ? -(unsigned long)v : (unsigned long)v;
@@ -75,7 +77,7 @@ int main(void) {
     long done = sys_io_uring_enter(&ring);
 
     print("enter() processed ");  pdec(done);  print(" op(s); completions:\n");
-    long res_by_tag[256]; for (int i = 0; i < 256; i++) res_by_tag[i] = -12345;   /* sentinel: tag never seen */
+    long res_by_tag[256]; for (int i = 0; i < 256; i++) res_by_tag[i] = TAG_UNSEEN;   /* sentinel: tag never seen */
     while (ring.cq_head != ring.cq_tail) {
         struct io_cqe *c = &ring.cqe[ring.cq_head % IO_RING_N];
         print("  cqe tag=0x"); phex((unsigned char *)&c->user_data, 1);
@@ -94,10 +96,13 @@ int main(void) {
         print("op#4/#5 IO_WRITE+IO_READ on a pipe fd, same batch: ");
         sys_setcolor(pok ? 10 : 4); print(pok ? "wrote+read back \"pipe!\" through the fd -- OK\n" : "MISMATCH\n"); sys_setcolor(0);
 
+        /* TAG_UNSEEN is itself negative, so a "< 0" check alone can't tell a genuinely-failed/
+         * cancelled op apart from one whose completion never got posted at all -- exactly the
+         * failure mode these assertions exist to catch. Exclude the sentinel explicitly. */
         int link_ok = (res_by_tag[0xB0] == 5)     // the write at the head of the chain succeeded
-                   && (res_by_tag[0xB1] < 0)      // the bad-fd read genuinely failed
-                   && (res_by_tag[0xB2] < 0)      // cancelled: a VALID fd, but linked after the failure
-                   && (res_by_tag[0xB3] < 0)      // cancelled: the chain's un-linked terminator
+                   && (res_by_tag[0xB1] < 0 && res_by_tag[0xB1] != TAG_UNSEEN)   // the bad-fd read genuinely failed
+                   && (res_by_tag[0xB2] < 0 && res_by_tag[0xB2] != TAG_UNSEEN)   // cancelled: a VALID fd, but linked after the failure
+                   && (res_by_tag[0xB3] < 0 && res_by_tag[0xB3] != TAG_UNSEEN)   // cancelled: the chain's un-linked terminator
                    && (res_by_tag[0xB4] == 0);    // independent NOP after the chain: ran normally
         print("IOSQE_IO_LINK: a failing linked op cancels the rest of its chain: ");
         sys_setcolor(link_ok ? 10 : 4); print(link_ok ? "OK\n" : "VERIFY FAILED\n"); sys_setcolor(0);

@@ -33,7 +33,7 @@ int main(void) {
 
     sys_delete("/over/HELLO.TXT");                       /* whiteout */
     long g = sys_readfile("/over/HELLO.TXT", c, sizeof c - 1);
-    print("after rm, read /over/HELLO.TXT -> "); print(g < 0 ? "GONE (whiteout hides the lower)\n" : "STILL PRESENT?!\n");
+    print("after rm, read /over/HELLO.TXT -> "); print(g <= 0 ? "GONE (whiteout hides the lower)\n" : "STILL PRESENT?!\n");
     sys_list(ls, sizeof ls - 1);
     print("ls /over after rm:\n"); print(ls);
 
@@ -42,7 +42,7 @@ int main(void) {
     int lower_ok = (ln == on);
     for (long i = 0; i < ln && lower_ok; i++) if (c[i] != orig[i]) lower_ok = 0;
 
-    if (copied && g < 0 && lower_ok) { sys_setcolor(9); print("\nPASS: copy-up + merged listing + whiteout all work; the lower stayed intact.\n"); }
+    if (copied && g <= 0 && lower_ok) { sys_setcolor(9); print("\nPASS: copy-up + merged listing + whiteout all work; the lower stayed intact.\n"); }   /* was g<0: every OTHER read-succeeded check in this file (na/nb/ln above) treats 0 as "no data" too, via >0 */
     else { sys_setcolor(2); print("\nFAIL\n"); }
     sys_setcolor(0);
     sys_chdir("/");                                     /* restore the (process-global) cwd off /over */

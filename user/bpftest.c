@@ -6,10 +6,14 @@
 #include "bpf.h"
 
 static void pnum(long v) {
-    if (v < 0) { print("-"); v = -v; }
+    int neg = v < 0;                                  /* was `v = -v` directly on a signed long: -LONG_MIN
+                                                         * overflows back to LONG_MIN (still negative), same
+                                                         * bug class already fixed via this exact unsigned-cast
+                                                         * idiom in iouringtest.c/msealtest.c's own pdec() */
+    unsigned long u = neg ? -(unsigned long)v : (unsigned long)v;
     char t[20]; int n = 0;
-    do { t[n++] = '0' + (int)(v % 10); v /= 10; } while (v);
-    char b[21]; int i = 0; while (n) b[i++] = t[--n]; b[i] = 0; print(b);
+    if (!u) t[n++] = '0'; else do { t[n++] = '0' + (int)(u % 10); u /= 10; } while (u);
+    char b[21]; int i = 0; if (neg) b[i++] = '-'; while (n) b[i++] = t[--n]; b[i] = 0; print(b);
 }
 
 int main(void) {
