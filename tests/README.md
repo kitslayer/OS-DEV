@@ -10,7 +10,7 @@ cases + deterministic fuzzing.
 ## Running
 
 ```sh
-make check       # run all 69 suites (~5 min total)
+make check       # run all 71 suites (~5 min total)
 make jstest      # JS engine      — tests/js/suite.js vs the golden output
 make imgtest     # image decoders — tests/img/img_test.c   (jpeg/png/gif/bmp/inflate)
 make x509test    # X.509 parser   — tests/x509/x509_test.c
@@ -24,6 +24,8 @@ make ziptest     # ZIP extractor  — extraction + corrupt-input fuzz
 make tartest     # tar extractor  — extraction + corrupt-input fuzz
 make heaptest    # userspace malloc — umalloc.c alloc/free regression
 make wavtest     # WAV header     — wav_parse over corrupt RIFF chunks
+make acpiamltest # AML parser     — tests/acpiaml (Alias/Field namespace correctness + truncated/random DSDT fuzz)
+make webptest    # WebP VP8L      — tests/webp (real cwebp round-trips + malformed-input fuzz)
 make elftest     # ELF64 loader   — tests/elf/elf_test.c   (validators + load round-trip + every shipped app binary)
 make httptest    # HTTP parsers   — tests/http/http_test.c (chunked-transfer decode + header scans)
 make kheaptest   # kernel heap    — tests/kheap/kheap_test.c (kmalloc/kfree split/coalesce/grow torture)
@@ -75,6 +77,8 @@ disk), or the baked-in demos `js`, `js showcase.js`, `js sample.js`.
 | `tartest` | `kernel/tar.c` | Exact extraction of a ustar archive vs the originals, plus truncation + single-byte-corruption + 20k random-buffer fuzz; corrupt input must never OOB. |
 | `heaptest` | `user/umalloc.c` | Regression of the userspace first-fit allocator (malloc/free/calloc/realloc over an sbrk-backed arena): split/coalesce/reuse correctness, ASan/UBSan-clean. |
 | `wavtest` | `kernel/wav.c` | The RIFF/WAVE header parser `wav_parse` (walks untrusted chunk data): valid mono/stereo headers parse correctly, plus a fuzz pass over truncated/corrupt RIFF chunks that must never OOB. |
+| `acpiamltest` | `kernel/acpi_aml.c` | The AML bytecode namespace parser: hand-built `Alias`/`Field` DSDT fragments checked against the real `aml_has`/`aml_count` API, plus a fuzz pass over truncated/corrupted/random DSDT bytes that must never OOB. |
+| `webptest` | `kernel/webp.c` | The VP8L (WebP Lossless) decoder: pixel-exact round-trips against real `cwebp`-encoded files (gradient/palette/noise/photo shapes, several sizes), plus a malformed-input fuzz pass. Pre-existing coverage that had never been wired into `make check` until M1689. |
 | `elftest` | `kernel/elf.c` | The ELF64 loader (the ring-3 trust boundary). A known-good minimal ELF round-trips through `elf_load` (correct entry, file bytes copied to `p_vaddr`, `.bss` tail zeroed, via an mmap-backed guest-memory stub); the pure validators (`elf_check_header`/`elf_check_phdr`) are fuzzed over every truncated prefix, every single-byte header corruption, and 200k random buffers so a malformed ELF can never OOB-read or be accepted with a segment escaping the image or the user range; and **every shipped app binary** (all 29 — shell, the games, DOOM, Quake) is loaded through `elf_load` to guard against a linker/toolchain regression. |
 | `httptest` | `kernel/http.c` | The HTTP/1.x response parsers that read untrusted server/CDN bytes. Regression: chunked bodies, hex/large chunk sizes, chunk extensions, truncation, case-insensitive header scans, and `Location:` extraction with buffer-truncation all produce the expected results. Fuzz: every truncated prefix, every single-byte corruption, and 400k random buffers — in-place de-chunking (which memmoves with attacker-controlled hex sizes) never OOBs or returns a length outside the input, and `find_loc` never overruns its output. |
 | `kheaptest` | `kernel/kheap.c` | The kernel heap `kmalloc`/`kfree`/`kzalloc` (underlies every kernel allocation), run against a real mmap'd arena. 400k random alloc/free ops with a per-block byte pattern re-verified each pass (catches any overlap/corruption), `kzalloc` zeroing, repeated `grow_heap()`, and a free-list walk asserting the blocks tile `[base, heap_end)` exactly with no gaps or cycles; ASan/UBSan-clean. |

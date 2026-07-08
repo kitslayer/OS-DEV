@@ -108,7 +108,12 @@ void term_input(char c) {
         inlen = 0;
         prompt();
     } else if (c == '\b') {
-        if (inlen > 0) { inlen--; if (cx > 0) { cx--; grid[cy][cx] = ' '; } }
+        if (inlen > 0) {
+            inlen--;
+            if (cx > 0) cx--;
+            else { cx = TCOLS - 1; if (cy > 0) cy--; }   /* backspacing back across a put()-inserted wrap */
+            grid[cy][cx] = ' ';
+        }
     } else if (inlen < TCOLS - 1) {
         inbuf[inlen++] = c;
         put(c);

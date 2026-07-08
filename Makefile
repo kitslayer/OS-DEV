@@ -802,6 +802,16 @@ heaptest:
 wavtest:
 	@tests/run-wav-tests.sh
 
+# Host-side regression + fuzz test of the AML namespace parser (ASan+UBSan):
+# AliasOp/FieldOp namespace correctness + truncated/random DSDT bytes.
+acpiamltest:
+	@tests/run-acpiaml-tests.sh
+
+# Host-side regression + fuzz test of the VP8L (WebP Lossless) decoder (ASan+UBSan):
+# real cwebp round-trips (gradient/palette/noise/photo shapes) + malformed-input fuzz.
+webptest:
+	@tests/run-webp-tests.sh
+
 # Host-side regression + fuzz test of the ELF64 loader (ASan+UBSan): the ring-3
 # trust boundary — a malformed program must never OOB-read or escape its range.
 elftest:
@@ -951,8 +961,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test kattest bignumfuzztest barrettfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + barrettfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test kattest bignumfuzztest barrettfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest acpiamltest webptest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shquotetest calctest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + barrettfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + acpiamltest + webptest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)

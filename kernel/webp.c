@@ -811,13 +811,24 @@ static int decode_vp8l(BR *br, int W, int H, int is_sub,
 
     /* Actual decode width after bundling */
     int dec_W = W;
+    int bundled = 0;
     for (int t = 0; t < ntr; t++) {
         if (trs[t].type==TR_COLOR_INDEXING && trs[t].width_bits>0) {
             int pk = 1<<trs[t].width_bits;
             dec_W = (W + pk - 1) / pk;
+            bundled = 1;
             break;
         }
     }
+    /* PREDICTOR/COLOR's inverse transforms below always run at dec_W (their own
+     * sub-image tiles are sized off it at parse time above), but COLOR_INDEXING's
+     * bundling only shrinks dec_W when it packs >1 pixel per byte (width_bits>0) --
+     * combine that with PREDICTOR/COLOR and the two disagree about which width is
+     * live at which point, corrupting pixels without ever going out of bounds. Real
+     * encoders never emit this combination (a small palette is used instead of, not
+     * alongside, predictor/color); fail closed on it like every other unsupported
+     * shape this parser already rejects. */
+    if (bundled && (used_tr & ((1<<TR_PREDICTOR)|(1<<TR_COLOR)))) return -1;
     long dec_npix = (long)dec_W * H;
 
     /* ---- 2. Color cache ---- */

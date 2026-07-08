@@ -39,8 +39,10 @@ void rtc_now(struct rtc_time *t) {
     } else {
         h &= 0x7F;
     }
-    if (!(regB & 0x02) && pm)           /* 12-hour PM -> 24-hour */
-        h = (h % 12) + 12;
+    if (!(regB & 0x02)) {                /* 12-hour -> 24-hour */
+        if (pm) h = (h % 12) + 12;       /* 12/1..11 PM -> 12/13..23 */
+        else    h = h % 12;              /* 12/1..11 AM -> 0/1..11 (was left at 12 for midnight) */
+    }
 
     t->sec = s; t->min = mi; t->hour = h;
     t->day = d; t->month = mo; t->year = 2000 + y;

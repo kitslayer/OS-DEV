@@ -20,6 +20,7 @@
 void speaker_tone(uint32_t hz) {
     if (hz == 0) { speaker_off(); return; }
     uint32_t div = PIT_HZ / hz;
+    if (div > 0xFFFF) div = 0xFFFF;            /* channel 2's reload register is 16 bits -- an unclamped div for hz below ~19 would truncate on the port writes below and alias to an unrelated pitch instead of the lowest one */
     outb(PIT_CMD, 0xB6);                       /* channel 2, lo/hi, mode 3 */
     outb(PIT_CH2, (uint8_t)(div & 0xFF));
     outb(PIT_CH2, (uint8_t)((div >> 8) & 0xFF));

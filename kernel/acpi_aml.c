@@ -63,6 +63,18 @@ static uint32_t aml_pkglen(const uint8_t *p, uint32_t *consumed) {
     return len;
 }
 
+/* Does a PkgLength encoding starting at aml[at] fit before lim, WITHOUT reading
+ * anything yet? aml_pkglen itself reads 1-4 bytes (its lead byte's top 2 bits
+ * pick how many trail it) with no bounds check of its own -- every call site
+ * elsewhere in this file gets away with that because a real DSDT's outer
+ * TermLists are trusted well-formed, but a FieldList is walked byte-by-byte
+ * here for the first time (M1688) and a truncated one must stop, not overrun. */
+static int aml_pkglen_fits(const uint8_t *aml, uint32_t at, uint32_t lim) {
+    if (at >= lim) return 0;
+    uint32_t need = 1 + (uint32_t)(aml[at] >> 6);
+    return at + need <= lim;
+}
+
 /* NameString: optional '\'/'^' prefixes, then NullName (0x00) | DualNamePrefix
  * (0x2E)+2 segs | MultiNamePrefix (0x2F)+count+segs | a single 4-byte NameSeg.
  * Captures the LAST NameSeg into out[5] (enough to identify the object).
@@ -151,8 +163,23 @@ static void aml_termlist(const uint8_t *aml, uint32_t p, uint32_t end, int depth
                 p = p + 2 + l;                              /* skip body: extra fixed fields make recursion unsafe */
             } else if (ext == 0x81) {                       /* FieldOp PkgLength NameString FieldFlags FieldList */
                 uint32_t c; uint32_t l = aml_pkglen(aml + p + 2, &c);
-                char nm[5]; aml_namestring(aml + p + 2 + c, nm);
-                aml_add(nm, AML_FIELD);
+                uint32_t body_end = p + 2 + l; if (body_end > end) body_end = end;
+                uint32_t q = p + 2 + c; char rgn[5]; q += aml_namestring(aml + q, rgn);  /* the OpRegion this field list applies to -- a reference, not a new object, so not catalogued */
+                q += 1;                                      /* FieldFlags: AccessType/LockRule/UpdateRule -- not needed to catalogue names */
+                while (q < body_end) {                       /* FieldList: NamedField | ReservedField | AccessField | ConnectField | ExtendedAccessField (was skipped entirely -- see M1685-1687's deferred note) */
+                    uint8_t b = aml[q];
+                    if (b == 0x00) {                          /* ReservedField: 0x00 PkgLength(bit width) -- padding, no name */
+                        if (!aml_pkglen_fits(aml, q + 1, body_end)) break;
+                        uint32_t rc; aml_pkglen(aml + q + 1, &rc); q = q + 1 + rc;
+                    } else if (b == 0x01) {                   /* AccessField: 0x01 AccessType AccessAttrib -- changes access width, no name */
+                        q = q + 3;
+                    } else if ((b == '_' || (b >= 'A' && b <= 'Z')) && q + 4 <= body_end && aml_pkglen_fits(aml, q + 4, body_end)) {  /* NamedField: NameSeg PkgLength(bit width) -- the actual field being defined */
+                        char fnm[5]; for (int i = 0; i < 4; i++) fnm[i] = (char)aml[q + i]; fnm[4] = 0;
+                        uint32_t rc; aml_pkglen(aml + q + 4, &rc);
+                        aml_add(fnm, AML_FIELD);
+                        q = q + 4 + rc;
+                    } else break;                              /* ConnectField/ExtendedAccessField/malformed/truncated -> stop this FieldList safely, like unknown ops elsewhere in this function */
+                }
                 p = p + 2 + l;
             } else if (ext == 0x80) {                       /* OpRegionOp NameString RegionSpace RegionOffset RegionLen (no PkgLength) */
                 uint32_t q = p + 2; char nm[5]; q += aml_namestring(aml + q, nm);

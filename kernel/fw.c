@@ -30,7 +30,7 @@ int fw_check(int dir, const void *frame, int len) {
         struct bpf_ctx ctx = { (uint32_t)dir, (uint32_t)proto, sport, dport, (uint32_t)len };
         return (int)bpf_run(&ctx);                   /* 0 = drop, nonzero = pass */
     }
-    uint16_t rport = (dir == FW_OUT) ? dport : sport;   /* match on the remote port */
+    uint16_t rport = dport;   /* match on the port being targeted: for OUT that's the remote service being called, for IN that's the local service being connected to -- sport is just the caller's ephemeral port either way, never useful to filter on */
     for (int i = 0; i < g_n; i++) {
         struct rule *r = &g_rules[i];
         if (!r->used) continue;
@@ -76,8 +76,9 @@ void fw_control(const char *cmd, int len) {
     next_tok(&p, c, sizeof c);          /* protocol */
     int proto = tok_eq(c, "icmp") ? 1 : tok_eq(c, "tcp") ? 6 : tok_eq(c, "udp") ? 17 : 0;
 
-    uint16_t port = 0;
-    if (next_tok(&p, d, sizeof d)) { for (int i = 0; d[i] >= '0' && d[i] <= '9'; i++) port = (uint16_t)(port * 10 + (d[i] - '0')); }
+    uint32_t portv = 0;
+    if (next_tok(&p, d, sizeof d)) { for (int i = 0; d[i] >= '0' && d[i] <= '9' && portv <= 65535; i++) portv = portv * 10 + (uint32_t)(d[i] - '0'); }
+    uint16_t port = (uint16_t)(portv > 65535 ? 65535 : portv);
 
     if (g_n >= FW_MAX) return;
     struct rule *r = &g_rules[g_n++];

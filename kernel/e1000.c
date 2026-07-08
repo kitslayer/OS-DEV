@@ -165,6 +165,7 @@ int e1000_init(void) {
 }
 
 int e1000_send(const void *frame, uint16_t len) {
+    if (len > BUF_SIZE) return -1;      /* every tx_buf[] slot is one BUF_SIZE-capacity buffer -- no caller needs more today, but nothing stopped a future one overrunning it */
     uint32_t i = tx_cur;
     memcpy((void *)(uintptr_t)tx_buf[i], frame, len);
     tx_ring[i].addr = tx_buf[i];

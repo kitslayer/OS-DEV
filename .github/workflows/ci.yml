@@ -22,7 +22,7 @@ jobs:
         run: |
           make jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test \
                kattest bignumfuzztest stringtest svgtest deflatetest pngenctest ziptest \
-               tartest heaptest wavtest elftest httptest kheaptest jsonfuzztest \
+               tartest heaptest wavtest acpiamltest webptest elftest httptest kheaptest jsonfuzztest \
                regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest \
                csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest \
                shbracetest shquotetest calctest normpathtest completetest
