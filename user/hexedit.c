@@ -137,10 +137,10 @@ int main(void) {
             if (k >= '0' && k <= '9') d = k - '0';
             else if (k >= 'a' && k <= 'f') d = k - 'a' + 10;
             else if (k >= 'A' && k <= 'F') d = k - 'A' + 10;
-            if (d < 0 || cur >= flen) continue;                  /* ignore other keys */
+            if (ro || d < 0 || cur >= flen) continue;            /* ignore other keys, and all edits when read-only (was save-only: RO still let you "edit" in memory) */
             if (nibble == 0) { buf[cur] = (unsigned char)((d << 4) | (buf[cur] & 0x0F)); nibble = 1; }
             else { buf[cur] = (unsigned char)((buf[cur] & 0xF0) | d); nibble = 0; if (cur < flen - 1) cur++; }
-            dirty = 1;
+            dirty = 0; for (long i = 0; i < flen; i++) if (buf[i] != orig[i]) { dirty = 1; break; }   /* was an unconditional dirty=1 -- typing back the SAME value (or undoing an edit) left the title's "*" on even though nothing actually differs from the saved file */
         }
         if (cur < top) top = (cur / BPR) * BPR;                  /* scroll to follow the cursor */
         if (cur >= top + (long)ROWS * BPR) top = (cur / BPR - ROWS + 1) * BPR;
