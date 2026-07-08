@@ -125,6 +125,7 @@ static long mod_do_load(const void *image, unsigned long len, const char *name) 
         if (!(sh[i].sh_flags & SHF_ALLOC)) continue;
         if (sh[i].sh_type != SHT_PROGBITS && sh[i].sh_type != SHT_NOBITS) continue;
         uint64_t align = sh[i].sh_addralign ? sh[i].sh_addralign : 1;
+        if ((align & (align - 1)) != 0 || align > 4096) return -21;   /* must be a sane power of two: a huge or non-power-of-2 value from an untrusted image can round `used` up then truncate it back down to a SMALL value in the 32-bit cast below, silently passing the MOD_AREA_SZ check with the bump pointer pointing at the wrong (already-used) place */
         used = (uint32_t)((used + align - 1) & ~(align - 1));
         if ((uint64_t)used + sh[i].sh_size > MOD_AREA_SZ) return -8;
         uint8_t *dst = mod_area + used;
@@ -147,6 +148,7 @@ static long mod_do_load(const void *image, unsigned long len, const char *name) 
     int nsym = (int)(sh[symi].sh_size / sizeof(Elf64_Sym));
     uint32_t stri = sh[symi].sh_link;
     if (stri >= (uint32_t)nsh) return -12;
+    if (sh[stri].sh_offset + sh[stri].sh_size > len) return -20;   /* was never checked against the image length, unlike the symtab fetch just above -- every strtab+st_name dereference below could read past the image on a bogus sh_offset */
     const char *strtab = (const char *)(base + sh[stri].sh_offset);
 
     /* 2+3) apply relocations. */
@@ -175,6 +177,12 @@ static long mod_do_load(const void *image, unsigned long len, const char *name) 
             } else {
                 S = s->st_value;                       /* SHN_ABS / non-alloc */
             }
+            /* the patch's full write (up to 8 bytes, for R_X86_64_64) must land entirely inside
+             * the target section -- every OTHER field pulled from this untrusted image is
+             * bounds-checked before use, this one wasn't. +8 covers every write size the switch
+             * below can perform (only R_X86_64_64 writes 8; the rest write 4), so this can't
+             * under-check even if a future reloc type changes that without this line changing too. */
+            if (rel[r].r_offset + 8 > sh[tgt].sh_size) return -19;
             uint64_t P = secbase[tgt] + rel[r].r_offset;
             int64_t  A = rel[r].r_addend;
             switch (typ) {
