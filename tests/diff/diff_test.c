@@ -21,6 +21,14 @@ static void chk(const char *a, const char *b, const char *ops, int add, int del)
     if (strcmp(got, ops) != 0) { printf("  FAIL ops(%s|%s): got \"%s\" want \"%s\"\n", a, b, got, ops); fails++; }
     else if (dc_add != add || dc_del != del) { printf("  FAIL counts(%s|%s): +%d -%d want +%d -%d\n", a, b, dc_add, dc_del, add, del); fails++; }
 }
+/* diff a vs b, format as a unified-diff patch, and check the exact text */
+static void chk_patch(const char *a, const char *b, const char *want) {
+    checks++;
+    diff_run(a, b);
+    char out[8192];
+    diff_to_patch("a", "b", out, sizeof out);
+    if (strcmp(out, want) != 0) { printf("  FAIL patch(%s|%s):\n--got--\n%s--want--\n%s\n", a, b, out, want); fails++; }
+}
 /* check that entry idx (from the most recent diff_run) has this op + text */
 static void chk_line(int idx, char op, const char *text) {
     checks++;
@@ -55,6 +63,21 @@ int main(void) {
     /* a blank line in the middle is a real line */
     chk("a\n\nb", "a\n\nb", "   ", 0, 0);
     chk("a\nb", "a\n\nb", " + ", 1, 0);             /* a blank line inserted */
+
+    /* --- unified-diff patch output (M1730) --------------------------------*/
+    chk_patch("a\nb\nc", "a\nb\nc", "");                          /* identical -> empty patch */
+    chk_patch("a\nb\nc", "a\nB\nc",
+              "--- a\n+++ b\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n");   /* middle change, full context */
+    chk_patch("a\nb", "a\nb\nc",
+              "--- a\n+++ b\n@@ -1,2 +1,3 @@\n a\n b\n+c\n");       /* append */
+    chk_patch("a\nb\nc", "a\nc",
+              "--- a\n+++ b\n@@ -1,3 +1,2 @@\n a\n-b\n c\n");       /* delete a middle line */
+    {   /* two far-apart changes must split into TWO @@ hunks (context doesn't span the gap) */
+        diff_run("A\n1\n2\n3\n4\n5\n6\n7\n8\n9\nB", "X\n1\n2\n3\n4\n5\n6\n7\n8\n9\nY");
+        char out[8192]; diff_to_patch("a", "b", out, sizeof out);
+        int hunks = 0; for (const char *p = out; (p = strstr(p, "@@ -")) != 0; p += 4) hunks++;
+        checks++; if (hunks != 2) { printf("  FAIL multi-hunk: got %d hunks, want 2\n%s\n", hunks, out); fails++; }
+    }
 
     if (!fails) printf("PASS: %d checks, diff engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", fails, checks);

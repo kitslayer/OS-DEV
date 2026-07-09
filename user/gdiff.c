@@ -8,7 +8,8 @@
  * sheet/plot/gjson's cores. This file is just the terminal UI and file load.
  *
  * Launch: `gdiff A B` (diff two files) or `gdiff` (a built-in before/after demo).
- * Keys: up/down scroll a line, left/right page, Esc/q quit.
+ * Keys: up/down scroll a line, left/right page, s save a real unified-diff patch
+ * (---/+++ header + @@ hunks with context) to DIFF.PATCH, Esc/q quit.
  */
 #include "ulib.h"
 #include "diffcore.h"        /* diff_run() + dc_out[] — the pure LCS diff (host-tested by tests/diff) */
@@ -19,6 +20,8 @@
 static char abuf[IOMAX], bbuf[IOMAX];
 static char fa[64], fb[64];
 static int  top;
+static char patchbuf[2 * IOMAX];          /* unified-diff patch text for :save */
+static const char *msg;                    /* transient status note (after save) */
 
 static const char *DEMO_A =
     "OS-DEV apps\n- kernel\n- TLS 1.3\n- JS engine\n- spreadsheet\n- paint (ASCII art)\n- calc\nthe end\n";
@@ -56,7 +59,8 @@ static void render(void) {
         sys_setcolor(0); print("\n");
     }
     sys_setcolor(8);
-    print(" up/dn scroll  left/right page  Esc quit   ("); putn(dc_n); print(" diff lines)");
+    if (msg) { sys_setcolor(10); print(" "); print(msg); sys_setcolor(8); print("  "); }
+    print(" up/dn scroll  s:save patch  Esc quit   ("); putn(dc_n); print(" diff lines)");
     sys_setcolor(0);
 }
 
@@ -73,10 +77,15 @@ int main(void) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(15); continue; }
         if (k == 27 || k == 'q') break;
-        else if (k == 0x11) { if (top > 0) top--; }
-        else if (k == 0x12) { if (top < dc_n - 1) top++; }
-        else if (k == 0x13) { top -= VIEWROWS; if (top < 0) top = 0; }
-        else if (k == 0x14) { top += VIEWROWS; if (top > dc_n - 1) top = dc_n - 1; if (top < 0) top = 0; }
+        else if (k == 0x11) { if (top > 0) top--; msg = 0; }
+        else if (k == 0x12) { if (top < dc_n - 1) top++; msg = 0; }
+        else if (k == 0x13) { top -= VIEWROWS; if (top < 0) top = 0; msg = 0; }
+        else if (k == 0x14) { top += VIEWROWS; if (top > dc_n - 1) top = dc_n - 1; if (top < 0) top = 0; msg = 0; }
+        else if (k == 's') {                             /* save a unified-diff patch to DIFF.PATCH */
+            int n = diff_to_patch(fa[0] ? fa : "a", fb[0] ? fb : "b", patchbuf, sizeof patchbuf);
+            msg = n == 0 ? "no differences to save"
+                : (sys_writefile("DIFF.PATCH", patchbuf, n) >= 0 ? "saved DIFF.PATCH" : "save failed");
+        }
         else continue;
         render();
     }

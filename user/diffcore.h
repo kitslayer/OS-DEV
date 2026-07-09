@@ -75,4 +75,64 @@ static int diff_run(const char *a, const char *b) {
     return dc_n;
 }
 
+/* Format the last diff_run() result as a real unified-diff patch into `out`
+ * (<= max-1 bytes + NUL): a ---/+++ header pair (labelled `fa`/`fb`) then one or
+ * more `@@ -as,ac +bs,bc @@` hunks, each covering a run of changes plus up to
+ * DC_CONTEXT surrounding context lines (nearby changes merge into one hunk).
+ * Returns the byte length (0 + "" if the files are identical). Pure; host-tested.
+ * Must be called after diff_run(). */
+#define DC_CONTEXT 3
+static int diff_to_patch(const char *fa, const char *fb, char *out, int max) {
+    if (max <= 0) return 0;
+    if (dc_add == 0 && dc_del == 0) { out[0] = 0; return 0; }   /* identical -> empty patch */
+
+    static int  aln[DC_MAXOUT], bln[DC_MAXOUT];   /* 1-based line-in-A / line-in-B at each entry */
+    static char inh[DC_MAXOUT];                   /* is entry k within a hunk (near a change)? */
+    int ai = 1, bi = 1;
+    for (int k = 0; k < dc_n; k++) {
+        aln[k] = ai; bln[k] = bi; inh[k] = 0;
+        if (dc_out[k].op == ' ') { ai++; bi++; }
+        else if (dc_out[k].op == '-') ai++;
+        else bi++;
+    }
+    for (int k = 0; k < dc_n; k++)
+        if (dc_out[k].op != ' ') {                /* mark +-DC_CONTEXT entries around each change */
+            int lo = k - DC_CONTEXT, hi = k + DC_CONTEXT;
+            if (lo < 0) lo = 0;
+            if (hi >= dc_n) hi = dc_n - 1;
+            for (int m = lo; m <= hi; m++) inh[m] = 1;
+        }
+
+    int po = 0;
+    #define DPUTS(s) do { const char *_s = (s); while (*_s && po < max - 1) out[po++] = *_s++; } while (0)
+    #define DPUTC(ch) do { if (po < max - 1) out[po++] = (char)(ch); } while (0)
+    #define DPUTN(v) do { char _b[12]; int _n = 0; unsigned _u = (unsigned)(v); \
+        if (!_u) _b[_n++] = '0'; while (_u) { _b[_n++] = (char)('0' + _u % 10); _u /= 10; } \
+        while (_n) DPUTC(_b[--_n]); } while (0)
+
+    DPUTS("--- "); DPUTS(fa); DPUTC('\n');
+    DPUTS("+++ "); DPUTS(fb); DPUTC('\n');
+
+    int k = 0;
+    while (k < dc_n) {
+        if (!inh[k]) { k++; continue; }
+        int lo = k; while (k < dc_n && inh[k]) k++;   /* one hunk = entries [lo, k) */
+        int ac = 0, bc = 0;
+        for (int m = lo; m < k; m++) { if (dc_out[m].op != '+') ac++; if (dc_out[m].op != '-') bc++; }
+        int as = ac ? aln[lo] : aln[lo] - 1;          /* empty A count -> the preceding A line (GNU convention) */
+        int bs = bc ? bln[lo] : bln[lo] - 1;
+        DPUTS("@@ -"); DPUTN(as); DPUTC(','); DPUTN(ac); DPUTS(" +"); DPUTN(bs); DPUTC(','); DPUTN(bc); DPUTS(" @@\n");
+        for (int m = lo; m < k; m++) {
+            DPUTC(dc_out[m].op);
+            for (int i = 0; i < dc_out[m].len && po < max - 1; i++) out[po++] = dc_out[m].text[i];
+            DPUTC('\n');
+        }
+    }
+    #undef DPUTS
+    #undef DPUTC
+    #undef DPUTN
+    out[po] = 0;
+    return po;
+}
+
 #endif /* DIFFCORE_H */

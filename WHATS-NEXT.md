@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1730) Userspace — gdiff exports a real unified-diff patch (`s` → DIFF.PATCH).** The visual diff viewer could only display; `s` now writes a proper unified diff — a `---`/`+++` header pair and one or more `@@ -as,ac +bs,bc @@` hunks, each a run of changes plus up to 3 lines of surrounding context (nearby changes merge into one hunk; far-apart ones split), i.e. a patch you can apply elsewhere. The formatter `diff_to_patch()` lives in the pure `user/diffcore.h` (host-tested); it reuses the existing LCS entry list, computing per-entry A/B line numbers and correct hunk ranges (empty-side counts use the GNU `start-1` convention). Completes the app-suite export theme (sheet CSV · gpaint BMP/PNG · plot BMP · imgview BMP · gjson JSON.OUT · gdiff patch).
+>
+> **Verified:** `difftest` grew to 21 host checks (ASan/UBSan clean) — exact patch text for a middle-change / append / delete, an identical pair → empty patch, and two far-apart changes → two `@@` hunks. In-guest: gdiff `s` on the demo reported "saved DIFF.PATCH". `make check` green.
+>
 > **(M1729) Userspace — two-argument functions in the graphing calculator (`min`/`max`/`hypot`).** The plotter's expression engine was single-argument only; it now parses an optional second argument and adds `min(a,b)`, `max(a,b)` and `hypot(a,b)` (matching the scalar calc's set from M1720). This unlocks genuinely useful graphs: `max(x,0)` is a ReLU, `min(5, x*x)` is a clamped parabola, `max(min(x,3),-3)` clamps to [-3,3]. In the pure `user/ploteval.h`, host-tested.
 >
 > **Verified:** `plottest` grew to 78 host checks (ASan/UBSan clean) — `min`/`max`/`hypot`, args-as-expressions, nested clamps, and wrong-arg-count errors. In-guest: `max(x,0)` drew a clean ReLU (flat 0 for x<0, rising for x>0). `make check` green.
