@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1717) Userspace — undo in the paint program (gpaint).** You could draw but never take back a mistaken stroke; now `u` undoes the last edit, up to **8 levels** deep. gpaint snapshots the canvas into a ring buffer at the start of every edit — each freehand stroke, shape (line/rect/box/ellipse), flood-fill and the `c` clear is one undo step — and `u` pops the most recent snapshot back. The ring lives in BSS (~8 MB, lazily backed by the kernel, so only the snapshots actually taken cost any RAM) and reuses the existing `canvas_copy` helper.
+>
+> **Verified in-guest:** in gpaint, drew a gray filled box then a red one; pressing `u` removed the red box (restoring the one-box canvas), and `u` again removed the gray box (restoring the blank canvas) — multi-level LIFO undo across two edits. `make check` green.
+>
 > **(M1716) Userspace — root-finding in the graphing calculator (`:root`), completing its calculus toolkit.** A new `:root` command finds and marks the zeros of the first curve over the visible x-range: it scans the range for sign changes (and exact sample hits), refines each by bisection, marks them with orange ticks on the x-axis and lists the x-values. With M1714's integral and derivative, the plotter now does the three staple graphing-calculator operations (∫ · d/dx · zeros). `plot_find_roots()` is a pure helper in `user/ploteval.h`, host-tested like the rest of the engine, and it reuses M1714's `:` command line.
 >
 > **Verified:** `plottest` grew to 67 host checks (ASan/UBSan clean) — 7 new root cases: `x²-4`→{-2,2}, `x²-2`→{±√2}, `x-3`→{3}, `x`→{0}, `x²+1`→none, the cubic `(x-1)(x-2)(x-3)`→{1,2,3}, and `sin`→{-π,0,π}. In-guest: plotted `x*x-4`, `:root` listed `roots: -2, 2` and drew orange ticks at both x-axis crossings. `make check` green.

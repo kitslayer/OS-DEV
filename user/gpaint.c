@@ -12,7 +12,8 @@
  * toolbar to change colour. Tools (keys): f freehand pen · l line · r rectangle
  * · b filled box · o ellipse · g flood-fill — line/rect/box/ellipse preview live
  * as you drag out from the press point. Other keys: 1-9/0 pick a palette colour
- * · [ / ] shrink / grow the brush · e erase (paint white) · c clear · s save to
+ * · [ / ] shrink / grow the brush · e erase (paint white) · c clear · u undo (an
+ * 8-level history — each stroke, shape, fill and clear is one step) · s save to
  * PAINT.BMP · p save to PAINT.PNG · Esc quit.  Launch: `gpaint` or the Apps menu.
  */
 #include "ulib.h"
@@ -128,6 +129,25 @@ static void flood(int sx, int sy, unsigned newc) {
 }
 static void canvas_copy(unsigned *dst, const unsigned *src) { long n = (long)W * (H - TB); for (long i = 0; i < n; i++) dst[i] = src[i]; }
 
+/* Multi-level undo: a ring of canvas snapshots (BSS — the kernel lazily backs it,
+ * so only as many pages as snapshots taken are ever allocated). undo_push() saves
+ * the current canvas before an edit; undo_pop() restores the most recent. */
+#define UNDO_N 8
+static unsigned undo_ring[UNDO_N][W * ART_H];
+static int undo_count, undo_head;
+static void undo_push(void) {
+    canvas_copy(undo_ring[undo_head], &FB[TB * W]);
+    undo_head = (undo_head + 1) % UNDO_N;
+    if (undo_count < UNDO_N) undo_count++;
+}
+static int undo_pop(void) {                          /* returns 1 if a snapshot was restored */
+    if (undo_count == 0) return 0;
+    undo_head = (undo_head - 1 + UNDO_N) % UNDO_N;
+    undo_count--;
+    canvas_copy(&FB[TB * W], undo_ring[undo_head]);
+    return 1;
+}
+
 /* Encode the canvas (below the toolbar) to PNG and write PAINT.PNG. */
 static void save_png(void) {
     for (int y = 0; y < ART_H; y++) {
@@ -159,7 +179,7 @@ static void draw_toolbar(void) {
     const char *pre = "  br "; for (int i = 0; pre[i]; i++) s[p++] = pre[i];
     if (brush >= 10) s[p++] = (char)('0' + brush / 10);
     s[p++] = (char)('0' + brush % 10);
-    const char *post = "  [ ]size  f l r b o g  s bmp p png  Esc";   /* 'e' erase / 'c' clear in the header doc */
+    const char *post = "  [ ]size  f l r b o g  u undo  s bmp p png  Esc";   /* 'e' erase / 'c' clear in the header doc */
     for (int i = 0; post[i]; i++) s[p++] = post[i];
     s[p] = 0;
     text(s, tx, 3, 0xC8D0F0);
@@ -180,7 +200,8 @@ int main(void) {
         int k = sys_pollkey();
         if (k >= 0 && k != 's' && msg[0]) { msg[0] = 0; draw_toolbar(); dirty = 1; }   /* clear stale save msg */
         if (k == 27) break;
-        else if (k == 'c') { rect(0, TB, W, H - TB, 0xFFFFFF); draw_toolbar(); dirty = 1; }
+        else if (k == 'c') { undo_push(); rect(0, TB, W, H - TB, 0xFFFFFF); draw_toolbar(); dirty = 1; }
+        else if (k == 'u') { if (undo_pop()) { draw_toolbar(); dirty = 1; } }   /* undo the last edit */
         else if (k == 'e') { cur = 1; draw_toolbar(); dirty = 1; }
         else if (k == '[') { if (brush > 1) brush--; draw_toolbar(); dirty = 1; }
         else if (k == ']') { if (brush < 24) brush++; draw_toolbar(); dirty = 1; }
@@ -206,6 +227,7 @@ int main(void) {
             int i = (mx - 3) / SW; if (i >= 0 && i < NC && i != cur) { cur = i; draw_toolbar(); dirty = 1; }
         } else if (down) {
             unsigned c = PAL[cur];
+            if (!wasdown) undo_push();               /* snapshot the canvas before this stroke/shape/fill */
             if (!wasdown && tool != T_FREE && tool != T_FILL) { sx = mx; sy = my; canvas_copy(&BK[TB * W], &FB[TB * W]); }
             if (tool == T_FREE) {
                 if (wasdown) seg(lx, ly, mx, my, brush, c); else disc(mx, my, brush, c);
