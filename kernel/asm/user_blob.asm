@@ -130,6 +130,7 @@ global plot_elf_start, plot_elf_end
 global gpaint_elf_start, gpaint_elf_end
 global gjson_elf_start, gjson_elf_end
 global gregex_elf_start, gregex_elf_end
+global gdiff_elf_start, gdiff_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -618,5 +619,9 @@ gjson_elf_end:
 gregex_elf_start:
     incbin "build/gregex.elf"
 gregex_elf_end:
+
+gdiff_elf_start:
+    incbin "build/gdiff.elf"
+gdiff_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

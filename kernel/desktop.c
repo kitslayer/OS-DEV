@@ -109,6 +109,7 @@ static const struct menu_item menu[] = {
     { "Paint (gfx)", KIND_APP, "gpaint" },
     { "JSON Viewer", KIND_APP, "gjson" },
     { "Regex Tester", KIND_APP, "gregex" },
+    { "Diff Viewer", KIND_APP, "gdiff" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
     { "Calendar (gfx)", KIND_APP, "gcal" },
