@@ -410,9 +410,9 @@ int usb_storage_read(uint32_t lba, uint32_t count, void *buf) {
     return 0;
 }
 
-/* WRITE(10) — stretch path, used only by the self-test's optional round-trip.
- * Same bounds + chunking as the read path. */
-static int usb_storage_write(uint32_t lba, uint32_t count, const void *buf) {
+/* WRITE(10) — BOT/SCSI write path (M1728: now wired into the block layer, not
+ * just the self-test). Same bounds + chunking as the read path. */
+int usb_storage_write(uint32_t lba, uint32_t count, const void *buf) {
     if (!us.present || !buf || count == 0)
         return -1;
     if (us.block_size != USB_STORAGE_SECTOR_SIZE)

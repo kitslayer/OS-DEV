@@ -80,6 +80,11 @@ static int usb_bd_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
     if (lba > 0xFFFFFFFFull) return -1;
     return usb_storage_read((uint32_t)lba, count, buf);
 }
+static int usb_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    (void)ctx;
+    if (lba > 0xFFFFFFFFull) return -1;
+    return usb_storage_write((uint32_t)lba, count, buf);
+}
 
 /* --- per-driver WRITE adapters (each matches blockdev_t.write) — M1095. The
  * boot FAT32 volume is read by fat32.c directly via ATA, never through this
@@ -156,9 +161,9 @@ int blockdev_init(void) {
     if (nvme_present())
         reg("nvme0n1", nvme_bd_read, nvme_bd_write, nvme_capacity(), 0);
 
-    /* USB mass-storage (driver's write is static -> registered read-only). */
+    /* USB mass-storage — now read+write (M1728: usb_storage_write wired in). */
     if (usb_storage_present())
-        reg("usb-storage", usb_bd_read, 0, usb_storage_capacity(), 0);
+        reg("usb-storage", usb_bd_read, usb_bd_write, usb_storage_capacity(), 0);
 
     return g_ndev;
 }

@@ -127,6 +127,9 @@ require "USB-STORAGE SECT"                     "on-disk marker string read back 
 # The write path works: write a sector, read it back, compare, restore.
 require "write round-trip on sector"          "WRITE(10) path (round-trip on the last sector)"
 require "OK (wrote+read back+restored)"       "write round-trip verified OK"
+# M1728: usb_storage_write is now wired into the block layer (was read-only), so
+# the non-destructive block-cache durability self-test runs on usb-storage.
+require "coherence+durability on usb-storage" "block layer write path on usb-storage (M1728: write wired in)"
 # Boot stayed on legacy ATA, kept the USB tablet up (shared controller), and
 # reached the desktop with no fault.
 require "mounted FAT32 volume"                "FAT32 still mounted on legacy ATA (boot path intact)"

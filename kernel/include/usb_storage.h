@@ -38,6 +38,11 @@ uint64_t usb_storage_capacity(void);
  * the request to the device capacity and chunks large reads internally. */
 int usb_storage_read(uint32_t lba, uint32_t count, void *buf);
 
+/* Write `count` 512-byte sectors from `buf` to the USB disk at `lba` (SCSI
+ * WRITE(10) over Bulk-Only Transport). Same bounds/chunking as the read. Returns
+ * 0 on success, -1 otherwise. (M1728: wired into the block layer.) */
+int usb_storage_write(uint32_t lba, uint32_t count, const void *buf);
+
 /* Boot-time self-test: if a USB mass-storage device is present, log its
  * INQUIRY string + capacity, read a few sectors and log their bytes + an
  * additive checksum so the read can be matched against known on-disk content.

@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1728) Kernel / drivers — USB mass-storage is now read+write, not read-only.** The BOT/SCSI driver's `WRITE(10)` path (`usb_storage_write`) existed but was `static`, exercised only by the driver's own self-test; `blockdev.c` therefore registered the USB disk read-only. It's now exported and wired in, so a USB flash disk is a full read/write block device like the ATA/AHCI/NVMe/virtio ones. Safe: the block layer's write self-test is non-destructive (it saves the sector, writes a pattern, verifies coherence + durability, then restores).
+>
+> **Verified in-guest** (`usbstoragetest`, extended): with a `usb-storage` disk on the UHCI bus, the driver-level `WRITE(10)` round-trip still passes, and — new — the block-cache `write+read-back+coherence+durability` self-test now runs **on usb-storage** (it only picks *writable* non-boot devices, so this line appearing proves the write is wired into the block layer). Boot stays on ATA, no fault. `make check` green.
+>
 > **(M1727) Userspace — find in the spreadsheet (`:find`).** `:find TEXT` jumps the cursor to the next cell whose **raw text or computed value** contains TEXT (case-insensitive), wrapping around the grid; a bare `:find` repeats the last search, so pressing it walks through every match. Searching the computed value means `:find 210` locates a formula cell that *evaluates* to 210, not just a literal. Pure `sheet_find()` in `user/sheeteval.h`, host-tested.
 >
 > **Verified:** `sheettest` grew to 231 host checks (ASan/UBSan clean) — case-insensitive match, raw-text vs computed-value match, wrap-around, find-next cycling, and empty/no-match. In-guest: `:find West` on the demo moved the cursor to A5 with status "found A5: West". `make check` green.
