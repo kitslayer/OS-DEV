@@ -20,6 +20,7 @@
  *                  | ('-'|'+') factor | cellref | name '(' args ')' | PI | E
  * Comparisons are the lowest precedence and evaluate to 1.0 (true) / 0.0 (false).
  * Functions: SUM AVERAGE/AVG MIN MAX COUNT COUNTA PRODUCT STDEV/STDEVP VAR/VARP
+ *              MEDIAN MODE (variadic, over ranges)
  *              (variadic, take ranges);  SUMIF/COUNTIF/AVERAGEIF(range, [op]value)
  *              where op is = <> < <= > >= (bare value means "=");  IF(c,a[,b])
  *              AND/OR(...) NOT(x)  (logical);
@@ -184,8 +185,63 @@ static int parse_scalar_args(double *out, int max) {
     return n;
 }
 
+/* Collect the numeric values of range [r1,c1]-[r2,c2] into buf (up to cap). */
+static void collect_range_vals(int r1, int c1, int r2, int c2, double *buf, int cap, int *n) {
+    if (r1 > r2) { int t = r1; r1 = r2; r2 = t; }
+    if (c1 > c2) { int t = c1; c1 = c2; c2 = t; }
+    for (int r = r1; r <= r2; r++) for (int c = c1; c <= c2; c++) {
+        eval_cell(r, c);
+        cell_t *cell = CELL(r, c);
+        if (cell->err) perr = cell->err;
+        else if (cell->is_num && *n < cap) buf[(*n)++] = cell->val;
+    }
+}
+/* Parse a function arg list (ranges + scalar expressions) collecting every
+ * numeric value into buf (<= cap). Mirrors parse_agg_args but keeps the actual
+ * values — for MEDIAN/MODE, which need the distribution, not just running sums.
+ * buf is the caller's (usually stack), so nested MEDIAN/MODE calls don't clash. */
+static void collect_agg_values(double *buf, int cap, int *n) {
+    *n = 0;
+    skipws();
+    if (*pcur == ')') { pcur++; return; }
+    for (;;) {
+        skipws();
+        const char *save = pcur;
+        int r1, c1, r2, c2;
+        if (parse_ref_cursor(&r1, &c1)) {
+            skipws();
+            if (*pcur == ':') {
+                pcur++; skipws();
+                if (parse_ref_cursor(&r2, &c2)) collect_range_vals(r1, c1, r2, c2, buf, cap, n);
+                else perr = ERR_SYNTAX;
+            } else { pcur = save; double v = eval_compare(); if (*n < cap) buf[(*n)++] = v; }
+        } else { pcur = save; double v = eval_compare(); if (*n < cap) buf[(*n)++] = v; }
+        skipws();
+        if (*pcur == ',') { pcur++; continue; }
+        if (*pcur == ')') { pcur++; break; }
+        perr = ERR_SYNTAX; break;
+    }
+}
+static void dsort(double *v, int n) {                  /* insertion sort (n is small: <= a column or two) */
+    for (int i = 1; i < n; i++) { double k = v[i]; int j = i - 1; while (j >= 0 && v[j] > k) { v[j + 1] = v[j]; j--; } v[j + 1] = k; }
+}
+
 /* Dispatch a function by name; '(' has already been consumed. */
 static double call_function(const char *name) {
+    if (nameeq(name, "MEDIAN") || nameeq(name, "MODE")) {       /* need the sorted value distribution */
+        double vals[512]; int nv;
+        collect_agg_values(vals, 512, &nv);
+        if (nv <= 0) return 0;
+        dsort(vals, nv);
+        if (nameeq(name, "MEDIAN"))
+            return (nv & 1) ? vals[nv / 2] : (vals[nv / 2 - 1] + vals[nv / 2]) / 2.0;
+        double best = vals[0]; int bestc = 1, curc = 1;         /* MODE: value of the longest equal run */
+        for (int i = 1; i < nv; i++) {
+            if (vals[i] == vals[i - 1]) curc++; else curc = 1;
+            if (curc > bestc) { bestc = curc; best = vals[i]; }
+        }
+        return best;
+    }
     /* range/variadic aggregates (take ranges or scalar lists) */
     if (nameeq(name, "SUM") || nameeq(name, "AVERAGE") || nameeq(name, "AVG") ||
         nameeq(name, "MIN") || nameeq(name, "MAX") || nameeq(name, "COUNT") ||

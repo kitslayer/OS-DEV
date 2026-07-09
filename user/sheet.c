@@ -19,6 +19,7 @@
  *              comparisons  = <> < <= > >=  (lowest precedence, yield 1/0).
  *   Cell refs: A1 .. Z100 (case-insensitive).  Ranges: A1:B10 (inside a fn).
  *   Functions: SUM AVERAGE(=AVG) MIN MAX COUNT COUNTA PRODUCT STDEV STDEVP VAR VARP
+ *              MEDIAN MODE
  *              SUMIF/COUNTIF/AVERAGEIF(range, [op]value)  (op = = <> < <= > >=)
  *              IF(cond,then[,else]) AND(...) OR(...) NOT(x)  (logical, 1=true/0=false)
  *              SQRT ABS INT FLOOR CEIL(=CEILING) ROUND(x[,dp]) TRUNC(x[,dp]) MOD POW(=POWER)

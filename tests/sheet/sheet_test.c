@@ -472,6 +472,21 @@ int main(void) {
         checks++; if (!sheet_find("o", 1, 0, &r, &c) || r != 2 || c != 0) FAILN("find-next cycles matches");
     }
 
+    /* --- MEDIAN / MODE (M1732) --------------------------------------------*/
+    chk_expr("=MEDIAN(1,2,3)", 2);                 /* odd count -> middle */
+    chk_expr("=MEDIAN(3,1,2)", 2);                 /* unsorted input */
+    chk_expr("=MEDIAN(1,2,3,4)", 2.5);             /* even count -> mean of the two middle */
+    chk_expr("=MEDIAN(7)", 7);
+    chk_expr("=MEDIAN(10,2,8,4,6)", 6);
+    chk_expr("=MODE(1,2,2,3,3,3)", 3);             /* most frequent */
+    chk_expr("=MODE(4,4,5,5,5,1)", 5);
+    clear_all();                                    /* over a range with a text cell (skipped) */
+    set_raw(0, 0, "5"); set_raw(1, 0, "1"); set_raw(2, 0, "9"); set_raw(3, 0, "hi"); set_raw(4, 0, "3");
+    /* numeric cells of A1:A5 = {5,1,9,3} (text skipped) -> sorted 1,3,5,9 -> even -> (3+5)/2 = 4 */
+    set_raw(0, 2, "=MEDIAN(A1:A5)"); recompute(); chk_num(0, 2, 4, "MEDIAN over a range, text skipped");
+    set_raw(0, 2, "=MODE(A1:A5)"); recompute(); chk_num(0, 2, 1, "MODE over a range (all unique -> smallest)");
+    set_raw(0, 2, "=MEDIAN(A1:A5)+MODE(A1:A5)"); recompute(); chk_num(0, 2, 5, "MEDIAN+MODE compose (4+1)");
+
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);
     return failures ? 1 : 0;
