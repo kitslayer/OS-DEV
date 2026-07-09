@@ -44,7 +44,9 @@
  *   ref-adjusted — e.g. :sort D2:D5) · fmt CODE (set the current COLUMN's number
  *   display format: $ currency, % percent, 0..6 fixed decimals, G general) ·
  *   find TEXT (jump to the next cell whose text or value contains TEXT, case-
- *   insensitive, wrapping; a bare :find repeats the last search) · a cell ref
+ *   insensitive, wrapping; a bare :find repeats the last search) · u / undo
+ *   (single-level whole-sheet undo of the last change — typed cell, delete,
+ *   paste, fill, sort or format; a second :u redoes it) · a cell ref
  *   like C10 (jump there) · Esc.
  *
  * Launch: `sheet [file]` from the shell, or the Apps menu (loads a demo sheet).
@@ -309,7 +311,7 @@ static void render(void) {
     } else if (status[0]) {
         sys_setcolor(8); print(" "); print(status);
     } else {
-        sys_setcolor(8); print(" arrows  :y/:p copy  :fd/:fr fill  :sort :fmt :find  :w  :q");
+        sys_setcolor(8); print(" arrows  :y/:p copy  :fd/:fr fill  :sort :fmt :find  :u undo  :w  :q");
     }
     sys_setcolor(0);
 }
@@ -320,7 +322,39 @@ static void begin_edit(int seed) {
     if (seed == 0) { scopy(edit_buf, CELL(cur_r, cur_c)->raw, RAWMAX); edit_len = slen(edit_buf); }
     else if (edit_len < RAWMAX - 1) { edit_buf[edit_len++] = (char)seed; edit_buf[edit_len] = 0; }
 }
+/* ---- single-level whole-grid undo (M1736) ---------------------------------*
+ * Snapshot every cell's raw text + the per-column formats before each mutating
+ * operation; :u swaps the live grid with the snapshot, so a second :u redoes.
+ * One buffer (same footprint as the sort scratch) covers every edit uniformly
+ * -- typed cells, delete, paste, fill, sort, format. raw text is the source of
+ * truth; recompute() rebuilds each cell's kind/value from it after a swap. */
+static char undo_buf[NROWS][NCOLS][RAWMAX];
+static char undo_fmt[NCOLS];
+static int  undo_have = 0;               /* a snapshot exists */
+static int  undo_done = 0;               /* the last :u left us in the undone state */
+static void save_undo(void) {
+    for (int r = 0; r < NROWS; r++)
+        for (int c = 0; c < NCOLS; c++) scopy(undo_buf[r][c], CELL(r, c)->raw, RAWMAX);
+    for (int c = 0; c < NCOLS; c++) undo_fmt[c] = col_fmt[c];
+    undo_have = 1; undo_done = 0;
+}
+static void do_undo(void) {
+    if (!undo_have) { scopy(status, "nothing to undo", sizeof status); return; }
+    for (int r = 0; r < NROWS; r++)
+        for (int c = 0; c < NCOLS; c++) {
+            char tmp[RAWMAX];
+            scopy(tmp, CELL(r, c)->raw, RAWMAX);
+            scopy(CELL(r, c)->raw, undo_buf[r][c], RAWMAX);
+            scopy(undo_buf[r][c], tmp, RAWMAX);
+        }
+    for (int c = 0; c < NCOLS; c++) { char t = col_fmt[c]; col_fmt[c] = undo_fmt[c]; undo_fmt[c] = t; }
+    modified = 1; recompute();
+    undo_done = !undo_done;
+    scopy(status, undo_done ? "undone -- :u again to redo" : "redone -- :u again to undo", sizeof status);
+}
+
 static void commit_edit(void) {
+    save_undo();                         /* snapshot the pre-edit grid for :u */
     scopy(CELL(cur_r, cur_c)->raw, edit_buf, RAWMAX);
     modified = 1; mode = MODE_NAV; status[0] = 0;
     recompute();
@@ -351,6 +385,7 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         } else scopy(status, "chart: usage  :chart B2:B5  (or :chart for this column)", sizeof status);
         return 0;
     }
+    if (streq(c, "u") || streq(c, "undo")) { do_undo(); return 0; }   /* single-level undo/redo (toggles) */
     if (streq(c, "y")) {                             /* yank the current cell (copy) */
         scopy(yank_buf, CELL(cur_r, cur_c)->raw, RAWMAX);
         yank_r = cur_r; yank_c = cur_c; have_yank = 1;
@@ -361,6 +396,7 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
     }
     if (streq(c, "p")) {                             /* paste into the current cell, ref-adjusted */
         if (!have_yank) { scopy(status, "nothing yanked -- :y a cell first", sizeof status); return 0; }
+        save_undo();
         char out[RAWMAX];
         adjust_refs(yank_buf, cur_r - yank_r, cur_c - yank_c, out, RAWMAX);
         scopy(CELL(cur_r, cur_c)->raw, out, RAWMAX);
@@ -375,6 +411,7 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         while (*a == ' ') a++;
         if (n < 1 || *a) { scopy(status, down ? "usage: :fd N  (fill cell down N rows)"
                                               : "usage: :fr N  (fill cell right N cols)", sizeof status); return 0; }
+        save_undo();
         char src[RAWMAX]; scopy(src, CELL(cur_r, cur_c)->raw, RAWMAX);   /* snapshot before overwriting */
         int filled = 0;
         for (int i = 1; i <= n; i++) {
@@ -408,6 +445,7 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
     }
     if (startswith(c, "fmt")) {                      /* :fmt CODE — set the current column's number format */
         const char *a = c + 3; while (*a == ' ') a++;
+        save_undo();
         char code = *a;
         if (code == 0 || code == 'G' || code == 'g' || code == '-') { col_fmt[cur_c] = 0; scopy(status, "format: general", sizeof status); }
         else if ((code >= '0' && code <= '6') || code == '%' || code == '$') {
@@ -422,6 +460,7 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         const char *rng = c + (desc ? 5 : 4); while (*rng == ' ') rng++;
         int r1, c1, r2, c2;
         if (parse_range(rng, &r1, &c1, &r2, &c2)) {
+            save_undo();
             sort_rows(r1, r2, c1, desc);             /* rows r1..r2 keyed by the range's column c1 */
             modified = 1; recompute();
             cur_r = r1; cur_c = c1;                  /* park on the top of the sorted block */
@@ -470,7 +509,7 @@ int main(void) {
             else if (k == 0x12) move_sel(1, 0);
             else if (k == 0x13) move_sel(0, -1);
             else if (k == 0x14) move_sel(0, 1);
-            else if (k == 8 || k == 127) { CELL(cur_r, cur_c)->raw[0] = 0; modified = 1; recompute(); }
+            else if (k == 8 || k == 127) { if (CELL(cur_r, cur_c)->raw[0]) { save_undo(); CELL(cur_r, cur_c)->raw[0] = 0; modified = 1; recompute(); } }
             else if (k == '\n' || k == '\r') begin_edit(0);
             else if (k == ':') { mode = MODE_CMD; cmd_len = 0; cmd_buf[0] = 0; }
             else if (k >= 32 && k < 127) begin_edit(k);
