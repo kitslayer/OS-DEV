@@ -79,6 +79,7 @@
 #define FIS_TYPE_REG_H2D 0x27
 #define ATA_CMD_READ_DMA_EXT  0x25
 #define ATA_CMD_WRITE_DMA_EXT 0x35
+#define ATA_CMD_IDENTIFY      0xEC   /* IDENTIFY DEVICE — reports the disk's capacity */
 
 /* A command header (one of 32 in the command list). Bitfields pack the DW0
  * flags: CFL = command-FIS length in DWORDs, W = write, PRDTL = #PRDT entries. */
@@ -144,7 +145,10 @@ struct ahci_disk {
     struct hba_cmd_header *cmd_list;   /* 32 command headers (1 KiB used)      */
     void                  *fis;        /* received-FIS area (256 B used)       */
     struct hba_cmd_table  *cmd_table;  /* one command table (we reuse slot 0)  */
+    uint64_t               sectors;    /* capacity from IDENTIFY (0 = unknown) */
 };
+
+static uint64_t ahci_identify(int disk);   /* fwd: IDENTIFY DEVICE -> sector count */
 
 static volatile uint8_t   *abar;       /* HBA register block (mapped BAR5)     */
 static struct ahci_disk    disks[AHCI_MAX_PORTS];
@@ -228,11 +232,14 @@ static int port_init(int pi_index) {
 
     port_start(p);
 
-    disks[ndisks].port      = p;
-    disks[ndisks].cmd_list  = (struct hba_cmd_header *)(uintptr_t)clb;
-    disks[ndisks].fis       = (void *)(uintptr_t)fb;
-    disks[ndisks].cmd_table = (struct hba_cmd_table *)(uintptr_t)ct;
+    int idx = ndisks;
+    disks[idx].port      = p;
+    disks[idx].cmd_list  = (struct hba_cmd_header *)(uintptr_t)clb;
+    disks[idx].fis       = (void *)(uintptr_t)fb;
+    disks[idx].cmd_table = (struct hba_cmd_table *)(uintptr_t)ct;
+    disks[idx].sectors   = 0;
     ndisks++;
+    disks[idx].sectors = ahci_identify(idx);   /* now the port runs: ask it its capacity */
     return 0;
 }
 
@@ -271,6 +278,10 @@ int ahci_init(void) {
 }
 
 int ahci_disk_count(void) { return ndisks; }
+
+uint64_t ahci_disk_sectors(int disk) {
+    return (disk >= 0 && disk < ndisks) ? disks[disk].sectors : 0;
+}
 
 /* Find a free command slot: a slot is busy if its bit is set in either PxCI
  * (command issue) or PxSACT (NCQ active). We only ever use slot 0, but checking
@@ -367,6 +378,75 @@ int ahci_write(int disk, uint64_t lba, uint32_t count, const void *buf) {
     return ahci_xfer(disk, lba, count, (void *)buf, 1);
 }
 
+/* IDENTIFY DEVICE target: a page-aligned 512-byte DMA buffer in identity-mapped
+ * low RAM (its physical address is its own). Init is sequential (one port at a
+ * time), so a single shared buffer is fine. */
+static uint16_t ahci_id_buf[256] __attribute__((aligned(PAGE_SIZE)));
+
+/* Issue IDENTIFY DEVICE (ATA 0xEC) to `disk` and return its total 512-byte
+ * sector count — the LBA48 64-bit field (IDENTIFY words 100..103) when 48-bit
+ * addressing is supported (word 83 bit 10), else the LBA28 32-bit field (words
+ * 60..61); 0 if IDENTIFY errors. Same command mechanism as ahci_xfer, but a
+ * data-in command with no LBA/sector-count (it returns one 512-byte block). */
+static uint64_t ahci_identify(int disk) {
+    if (disk < 0 || disk >= ndisks)
+        return 0;
+    volatile uint8_t *p = disks[disk].port;
+
+    for (int i = 0; i < 1000000; i++)
+        if (!(port_read(p, PxTFD) & (PxTFD_BSY | PxTFD_DRQ)))
+            break;
+
+    int slot = find_cmd_slot(p);
+    if (slot < 0)
+        return 0;
+
+    struct hba_cmd_header *hdr = &disks[disk].cmd_list[slot];
+    struct hba_cmd_table  *tbl = disks[disk].cmd_table;
+    uint64_t tbl_phys = phys_of(tbl);
+
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->cfl   = sizeof(struct fis_reg_h2d) / sizeof(uint32_t);
+    hdr->w     = 0;                          /* data-in (device -> host) */
+    hdr->prdtl = 1;
+    hdr->ctba  = (uint32_t)tbl_phys;
+    hdr->ctbau = (uint32_t)(tbl_phys >> 32);
+
+    memset(tbl, 0, sizeof(*tbl));
+    memset(ahci_id_buf, 0, sizeof(ahci_id_buf));
+    uint64_t buf_phys = phys_of(ahci_id_buf);
+    tbl->prdt[0].dba   = (uint32_t)buf_phys;
+    tbl->prdt[0].dbau  = (uint32_t)(buf_phys >> 32);
+    tbl->prdt[0].dbc_i = (512 - 1) | (1u << 31);   /* one 512-byte block, IOC */
+
+    struct fis_reg_h2d *fis = (struct fis_reg_h2d *)tbl->cfis;
+    fis->fis_type = FIS_TYPE_REG_H2D;
+    fis->c        = 1;
+    fis->command  = ATA_CMD_IDENTIFY;        /* device / LBA / count all 0 for IDENTIFY */
+
+    port_write(p, PxIS, 0xFFFFFFFF);
+    port_write(p, PxCI, 1u << slot);
+    for (int i = 0; i < 5000000; i++) {
+        if (!(port_read(p, PxCI) & (1u << slot)))
+            break;
+        if (port_read(p, PxIS) & PxIS_TFES)
+            return 0;
+        if (i == 4999999)
+            return 0;
+    }
+    if (port_read(p, PxTFD) & PxTFD_ERR)
+        return 0;
+
+    const uint16_t *id = ahci_id_buf;
+    uint64_t sectors = 0;
+    if (id[83] & (1u << 10))
+        sectors = (uint64_t)id[100] | ((uint64_t)id[101] << 16) |
+                  ((uint64_t)id[102] << 32) | ((uint64_t)id[103] << 48);
+    if (sectors == 0)
+        sectors = (uint32_t)id[60] | ((uint32_t)id[61] << 16);   /* LBA28 fallback */
+    return sectors;
+}
+
 /* ---- boot-time verification --------------------------------------------- */
 
 /* A static, page-frame-sized DMA buffer for the self-test, in the kernel's BSS
@@ -384,6 +464,9 @@ void ahci_selftest(void) {
 
     kprintf("[ ok ] AHCI HBA up: %d SATA disk(s) via DMA (boot stays on legacy ATA).\n",
             ndisks);
+    for (int d = 0; d < ndisks; d++)
+        kprintf("[ ok ] ahci%d: %lu sectors (%lu MiB) via IDENTIFY DEVICE.\n",
+                d, disks[d].sectors, disks[d].sectors / 2048);
 
     for (uint64_t lba = 0; lba < 3; lba++) {
         if (ahci_read(0, lba, 1, selftest_buf) != 0) {

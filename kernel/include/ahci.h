@@ -23,6 +23,11 @@ int ahci_init(void);
 /* How many SATA disks ahci_init() brought up (0 if none / not initialized). */
 int ahci_disk_count(void);
 
+/* Total 512-byte-sector capacity of `disk`, from IDENTIFY DEVICE at bring-up
+ * (0 if unknown / IDENTIFY failed). Lets the block layer size and bounds-check
+ * the SATA disk instead of treating it as unbounded. */
+uint64_t ahci_disk_sectors(int disk);
+
 /* Read `count` 512-byte sectors starting at 48-bit LBA `lba` from the SATA disk
  * `disk` (0..ahci_disk_count()-1) into `buf` (must hold count*512 bytes; the
  * HBA DMAs into its physical frame, so it must be in identity-mapped low RAM).

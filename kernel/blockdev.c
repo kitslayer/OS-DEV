@@ -140,13 +140,13 @@ int blockdev_init(void) {
             reg(ata_names[d], ata_bd_read, ata_bd_write, info->sectors, (void *)(intptr_t)d);
     }
 
-    /* AHCI SATA disks. ahci.c exposes no capacity query, so register capacity 0
-     * (unknown): blockdev_read then trusts the driver's own bounds-checking, and
-     * the FAT walk stays bounded by the cluster count regardless. */
+    /* AHCI SATA disks — sized by IDENTIFY DEVICE (M1715), so the block layer
+     * bounds-checks them like the ATA disks (capacity 0 only if IDENTIFY failed,
+     * in which case reads stay unbounded, as before). */
     static const char *ahci_names[4] = { "ahci0", "ahci1", "ahci2", "ahci3" };
     int nahci = ahci_disk_count();
     for (int a = 0; a < nahci && a < 4; a++)
-        reg(ahci_names[a], ahci_bd_read, ahci_bd_write, 0, (void *)(intptr_t)a);
+        reg(ahci_names[a], ahci_bd_read, ahci_bd_write, ahci_disk_sectors(a), (void *)(intptr_t)a);
 
     /* virtio-blk (single paravirtual disk). */
     if (virtio_blk_present())
