@@ -60,7 +60,10 @@
 
 #define CMD_READ_SECTORS  0x20
 #define CMD_WRITE_SECTORS 0x30
+#define CMD_READ_SECTORS_EXT  0x24   /* LBA48 PIO read  */
+#define CMD_WRITE_SECTORS_EXT 0x34   /* LBA48 PIO write */
 #define CMD_FLUSH         0xE7
+#define CMD_FLUSH_EXT     0xEA        /* LBA48 cache flush */
 #define CMD_IDENTIFY      0xEC
 
 /* The four legacy drives, in index order. */
@@ -183,10 +186,76 @@ static void select_lba(uint16_t io, uint8_t slave, uint32_t lba, uint8_t count) 
     outb(io + REG_LBA2, (uint8_t)((lba >> 16) & 0xFF));
 }
 
+/* Program a 48-bit LBA access: LBA mode with no address bits in the drive
+ * register, then each of the seccount/LBA0..2 registers written TWICE — the high
+ * byte first (latched as the "previous" content) then the low byte. This lets the
+ * primary ATA path reach past the LBA28 128 GiB ceiling (up to the 2 TB the
+ * 32-bit `lba` argument allows). */
+static void select_lba48(uint16_t io, uint8_t slave, uint64_t lba, uint16_t count) {
+    outb(io + REG_DRIVE, 0x40 | (slave ? 0x10 : 0));
+    outb(io + REG_SECCOUNT, (uint8_t)(count >> 8));
+    outb(io + REG_LBA0, (uint8_t)(lba >> 24));
+    outb(io + REG_LBA1, (uint8_t)(lba >> 32));
+    outb(io + REG_LBA2, (uint8_t)(lba >> 40));
+    outb(io + REG_SECCOUNT, (uint8_t)(count & 0xFF));
+    outb(io + REG_LBA0, (uint8_t)(lba & 0xFF));
+    outb(io + REG_LBA1, (uint8_t)((lba >> 8) & 0xFF));
+    outb(io + REG_LBA2, (uint8_t)((lba >> 16) & 0xFF));
+}
+
+/* LBA48 PIO read/write — the mirror of the LBA28 impls below, used only for
+ * accesses that reach sector >= 2^28 (see the dispatch in those impls). Chunks
+ * are still bounded at 256 sectors (count <= 256 fits the 16-bit EXT count). */
+static int ata_read_drive_impl_lba48(int drive, uint32_t lba, uint32_t count, void *buf) {
+    uint16_t io = ATA_DRIVES[drive].io;
+    uint8_t slave = ATA_DRIVES[drive].slave;
+    uint8_t *p = buf;
+    while (count > 0) {
+        uint32_t chunk = count > 256 ? 256 : count;
+        if (wait_busy_clear(io) < 0) return -1;
+        select_lba48(io, slave, lba, (uint16_t)chunk);
+        outb(io + REG_COMMAND, CMD_READ_SECTORS_EXT);
+        for (uint32_t s = 0; s < chunk; s++) {
+            if (wait_drq(io) < 0) return -1;
+            read_data(io, p, SECTOR_SIZE / 2);
+            p += SECTOR_SIZE;
+        }
+        lba += chunk;
+        count -= chunk;
+    }
+    return 0;
+}
+
+static int ata_write_drive_impl_lba48(int drive, uint32_t lba, uint32_t count, const void *buf) {
+    uint16_t io = ATA_DRIVES[drive].io;
+    uint8_t slave = ATA_DRIVES[drive].slave;
+    const uint8_t *p = buf;
+    while (count > 0) {
+        uint32_t chunk = count > 256 ? 256 : count;
+        if (wait_busy_clear(io) < 0) return -1;
+        select_lba48(io, slave, lba, (uint16_t)chunk);
+        outb(io + REG_COMMAND, CMD_WRITE_SECTORS_EXT);
+        for (uint32_t s = 0; s < chunk; s++) {
+            if (wait_drq(io) < 0) return -1;
+            write_data(io, p, SECTOR_SIZE / 2);
+            p += SECTOR_SIZE;
+        }
+        outb(io + REG_COMMAND, CMD_FLUSH_EXT);
+        wait_busy_clear(io);
+        lba += chunk;
+        count -= chunk;
+    }
+    return 0;
+}
+
 /* --- drive-parameterised read/write core ---------------------------------- */
 
 static int ata_read_drive_impl(int drive, uint32_t lba, uint32_t count, void *buf) {
     if (!drive_ok(drive) || count == 0) return -1;
+    /* Any access reaching sector 2^28 or beyond needs LBA48; low accesses (all of
+     * the boot / FAT path) keep the proven LBA28 code below, byte-for-byte. */
+    if ((uint64_t)lba + count > (1u << 28))
+        return ata_read_drive_impl_lba48(drive, lba, count, buf);
     uint16_t io = ATA_DRIVES[drive].io;
     uint8_t slave = ATA_DRIVES[drive].slave;
 
@@ -224,6 +293,8 @@ int ata_read_drive(int drive, uint32_t lba, uint32_t count, void *buf) {
 
 static int ata_write_drive_impl(int drive, uint32_t lba, uint32_t count, const void *buf) {
     if (!drive_ok(drive) || count == 0) return -1;
+    if ((uint64_t)lba + count > (1u << 28))
+        return ata_write_drive_impl_lba48(drive, lba, count, buf);
     uint16_t io = ATA_DRIVES[drive].io;
     uint8_t slave = ATA_DRIVES[drive].slave;
 
@@ -753,4 +824,40 @@ void ata_dma_selftest(void) {
     else
         kprintf("[ata-dma] IDE DMA self-test: %d/%d sectors matched "
                 "(see above).\n\n", matched, compared);
+}
+
+/* LBA48 self-test (M1721): if a NON-boot ATA disk larger than the LBA28 ceiling
+ * (2^28 sectors = 128 GiB) is attached, write a known pattern to a sector PAST
+ * that boundary, read it back, and confirm the round-trip — proving the primary
+ * ATA path can now address beyond 128 GiB. A clean no-op if no such disk is
+ * present (the default config), so the LBA28 boot path stays untouched. Never
+ * touches drive 0 (the boot disk). */
+void ata_lba48_selftest(void) {
+    if (!g_probed) ata_identify_all();
+
+    int big = -1;
+    for (int d = 1; d < ATA_MAX_DRIVES; d++) {
+        const struct ata_drive_info *info = ata_drive(d);
+        if (info && info->present && info->sectors > (1ull << 28)) { big = d; break; }
+    }
+    if (big < 0) {
+        kprintf("[ata-lba48] no >128 GiB ATA disk attached "
+                "(LBA48 path idle; LBA28 boot path intact).\n\n");
+        return;
+    }
+
+    const struct ata_drive_info *info = ata_drive(big);
+    kprintf("[ ok ] ATA LBA48: drive %d is %lu sectors (> the 2^28 LBA28 limit); "
+            "testing a high-LBA round-trip.\n", big, info->sectors);
+
+    uint64_t hi = (1ull << 28) + 100000;             /* ~49 MiB past the 128 GiB boundary -> needs LBA48 */
+    if (hi >= info->sectors) hi = info->sectors - 1;
+    for (int i = 0; i < SECTOR_SIZE; i++) dma_scratch[i] = (uint8_t)(i * 3 + 0x2D);
+    memset(dma_readback, 0, sizeof(dma_readback));
+    int ok = (ata_write_drive(big, (uint32_t)hi, 1, dma_scratch) == 0);
+    ok = ok && (ata_read_drive(big, (uint32_t)hi, 1, dma_readback) == 0);
+    ok = ok && (memcmp(dma_readback, dma_scratch, SECTOR_SIZE) == 0);
+    kprintf("[ %s ] ATA LBA48 high-LBA round-trip at sector %lu (past the 128 GiB "
+            "boundary): %s\n\n", ok ? "ok" : "!!", hi,
+            ok ? "wrote + read back, data matches (LBA48 OK)" : "MISMATCH/FAIL");
 }

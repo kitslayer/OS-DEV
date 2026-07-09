@@ -88,3 +88,8 @@ uint32_t ata_dma_max_sectors(void);
  * path); then a DMA write round-trip on a scratch sector. No-op (logs "DMA
  * unavailable") if no BMIDE controller is attached. */
 void ata_dma_selftest(void);
+
+/* LBA48 self-test (M1721): if a non-boot ATA disk larger than the LBA28 128 GiB
+ * ceiling is present, write+read-back a sector past the 2^28 boundary to prove
+ * the LBA48 path. A clean no-op with no such disk (the default). */
+void ata_lba48_selftest(void);

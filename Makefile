@@ -92,7 +92,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest atalba48test idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -664,6 +664,12 @@ raidtest: $(KERNEL) $(DISK)
 ahcitest: $(KERNEL) $(DISK)
 	@tests/run-ahci-tests.sh
 
+# In-guest assertion for the ATA driver's LBA48 path (M1721): attaches a 160 GiB
+# sparse ATA disk (primary slave) and asserts a write+read-back at a sector past
+# the 128 GiB LBA28 boundary round-trips. Boot stays on the LBA28 disk 0.
+atalba48test: $(KERNEL) $(DISK)
+	@tests/run-ata-lba48-tests.sh
+
 # In-guest HTTP SERVER test (M1304): boots with a host->guest TCP port forward,
 # runs the `httpd` shell command (net_tcp_serve), then curls the forwarded port
 # from the HOST and asserts the served page comes back -- the inbound-connection
@@ -1044,8 +1050,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test kattest bignumfuzztest barrettfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest acpiamltest webptest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shquotetest calctest sheettest plottest jsoncoretest difftest arctest hashtest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + barrettfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + acpiamltest + webptest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + sheettest + plottest + jsoncoretest + difftest + arctest + hashtest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + ahcitest + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
+check: jstest imgtest x509test nettest fstest ext2test xattrtest iso9660test kattest bignumfuzztest barrettfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest wavtest acpiamltest webptest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shquotetest calctest sheettest plottest jsoncoretest difftest arctest hashtest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest atalba48test idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + nettest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + barrettfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + wavtest + acpiamltest + webptest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shquotetest + calctest + sheettest + plottest + jsoncoretest + difftest + arctest + hashtest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + ahcitest + atalba48test + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)
