@@ -34,6 +34,8 @@ static const struct {
     { "README  TXT", "OS-DEV: a from-scratch x86_64 OS.\nThis file lives on a FAT32 disk read by our own driver.\n" },
     { "HELLO   TXT", "Hello from a real file on a virtual disk!\n" },
     { "MOTD    TXT", "Milestone 10 reached: VFS + FAT32 + ATA driver.\nTry: ls   and   cat hello.txt\n" },
+    { "PATCHME TXT", "line one\nline two\nline three\n" },   /* target for the `patch` command demo (M1731) */
+    { "PATCHME PAT", "--- PATCHME.TXT\n+++ PATCHED\n@@ -1,3 +1,3 @@\n line one\n-line two\n+LINE TWO CHANGED\n line three\n" },
     { "DEMO    SH ", "# OS-DEV shell scripting demo -- run it with:  source DEMO.SH\n"
                      "echo == OS-DEV shell scripting ==\n"
                      "OS=OS-DEV\n"

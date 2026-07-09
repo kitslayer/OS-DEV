@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "diffcore.h"       /* -Iuser on the compile line */
+#include "patchcore.h"      /* patch_apply() — the inverse, for the diff->patch->apply round-trip */
 
 static int fails, checks;
 
@@ -28,6 +29,16 @@ static void chk_patch(const char *a, const char *b, const char *want) {
     char out[8192];
     diff_to_patch("a", "b", out, sizeof out);
     if (strcmp(out, want) != 0) { printf("  FAIL patch(%s|%s):\n--got--\n%s--want--\n%s\n", a, b, out, want); fails++; }
+}
+/* round-trip: patch_apply(a, diff_to_patch(diff_run(a,b))) must reproduce b */
+static void chk_roundtrip(const char *a, const char *b) {
+    checks++;
+    char patch[8192], result[8192];
+    diff_run(a, b);
+    diff_to_patch("a", "b", patch, sizeof patch);
+    int n = patch_apply(a, patch, result, sizeof result);
+    if (n < 0) { printf("  FAIL roundtrip(%s|%s): patch_apply reported no match\n", a, b); fails++; }
+    else if (strcmp(result, b) != 0) { printf("  FAIL roundtrip(%s|%s):\n--got--\n%s--want--\n%s\n", a, b, result, b); fails++; }
 }
 /* check that entry idx (from the most recent diff_run) has this op + text */
 static void chk_line(int idx, char op, const char *text) {
@@ -77,6 +88,21 @@ int main(void) {
         char out[8192]; diff_to_patch("a", "b", out, sizeof out);
         int hunks = 0; for (const char *p = out; (p = strstr(p, "@@ -")) != 0; p += 4) hunks++;
         checks++; if (hunks != 2) { printf("  FAIL multi-hunk: got %d hunks, want 2\n%s\n", hunks, out); fails++; }
+    }
+
+    /* --- patch apply (M1731): diff -> patch -> apply must reproduce the target */
+    chk_roundtrip("a\nb\nc\n", "a\nb\nc\n");                  /* identical (empty patch) */
+    chk_roundtrip("a\nb\nc\n", "a\nB\nc\n");                  /* middle change */
+    chk_roundtrip("a\nb\n", "a\nb\nc\n");                     /* append */
+    chk_roundtrip("a\nb\nc\n", "a\nc\n");                     /* delete */
+    chk_roundtrip("a\nb\nc\n", "x\ny\nz\n");                  /* full replace */
+    chk_roundtrip("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n",
+                  "X\n2\n3\n4\n5\n6\n7\n8\n9\nY\n");          /* two far-apart hunks */
+    /* a patch whose context/removed lines don't match src must be rejected */
+    {
+        char r[256];
+        int n = patch_apply("y\n", "--- a\n+++ b\n@@ -1,1 +1,2 @@\n x\n+z\n", r, sizeof r);
+        checks++; if (n >= 0) { printf("  FAIL patch mismatch should be rejected, got %d\n", n); fails++; }
     }
 
     if (!fails) printf("PASS: %d checks, diff engine correct\n", checks);

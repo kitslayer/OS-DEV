@@ -14,6 +14,7 @@
 #include "shsplit.h"  /* sh_next_sep(): the ';' statement splitter (construct-aware), host-tested by tests/shsplit */
 #include "shbrace.h"  /* expand_braces(): {a,b}/{1..N} brace expansion, host-tested by tests/shbrace */
 #include "shquote.h"  /* sh_quote_pass()/sh_unprot_buf(): "..." '...' quoting, host-tested by tests/shquote */
+#include "patchcore.h" /* patch_apply(): apply a unified-diff patch (the `patch` builtin), host-tested by tests/diff */
 
 static void perr(const char *s);   /* print an error label in red (defined below); forward-declared for early use (M1379) */
 
@@ -923,6 +924,35 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
             if (!any) print("usage: head <file>...\n");
+        } else if (startswith(line, "patch ")) {          /* patch TARGET PATCHFILE: apply a unified diff in place */
+            const char *a = line + 6; while (*a == ' ') a++;
+            char tgt[64]; int tl = 0; while (*a && *a != ' ' && tl < 63) tgt[tl++] = *a++; tgt[tl] = 0;
+            while (*a == ' ') a++;
+            char pf[64]; int pl = 0; while (*a && *a != ' ' && pl < 63) pf[pl++] = *a++; pf[pl] = 0;
+            sh_unprot_buf(tgt); sh_unprot_buf(pf);
+            if (!tgt[0] || !pf[0]) { print("usage: patch TARGET PATCHFILE  (apply a unified diff in place)\n"); g_status = 2; }
+            else {
+                long tn, pn; char *tb = slurp(tgt, &tn);
+                if (!tb) { perr("patch: no such file: "); print(tgt); print("\n"); g_status = 1; }
+                else {
+                    char *pb = slurp(pf, &pn);
+                    if (!pb) { perr("patch: no such file: "); print(pf); print("\n"); free(tb); g_status = 1; }
+                    else {
+                        tb[tn] = 0; pb[pn] = 0;
+                        char *outp = (char *)malloc((unsigned long)(tn + pn + 16));
+                        if (!outp) { print("patch: out of memory\n"); g_status = 1; }
+                        else {
+                            int r = patch_apply(tb, pb, outp, (int)(tn + pn + 16));
+                            if (r < 0) { print("patch: a hunk does not match "); print(tgt); print(" -- not applied\n"); g_status = 1; }
+                            else if (sys_writefile(tgt, outp, r) < 0) { perr("patch: write failed: "); print(tgt); print("\n"); g_status = 1; }
+                            else { print("patched "); print(tgt); print("\n"); }
+                            free(outp);
+                        }
+                        free(pb);
+                    }
+                    free(tb);
+                }
+            }
         } else if (startswith(line, "nl ")) {
             long n; char *buf = slurp(line + 3, &n);
             if (!buf) { perr("nl: no such file: "); print(line + 3); print("\n"); }
