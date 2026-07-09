@@ -19,6 +19,14 @@ static void ok(const char *in, const char *want) {
     if (e >= 0) { printf("  FAIL ok(%s): unexpected error at %d\n", in, e); fails++; }
     else if (strcmp(out, want) != 0) { printf("  FAIL ok(%s):\n   got  \"%s\"\n   want \"%s\"\n", in, out, want); fails++; }
 }
+/* valid JSON `in` must MINIFY to exactly `want` (compact, no whitespace) */
+static void mini(const char *in, const char *want) {
+    checks++;
+    char out[4096];
+    int e = json_minify(in, out, sizeof out);
+    if (e >= 0) { printf("  FAIL mini(%s): unexpected error at %d\n", in, e); fails++; }
+    else if (strcmp(out, want) != 0) { printf("  FAIL mini(%s):\n   got  \"%s\"\n   want \"%s\"\n", in, out, want); fails++; }
+}
 /* invalid JSON `in` must report an error at byte offset `wantpos` */
 static void bad(const char *in, int wantpos) {
     checks++;
@@ -87,6 +95,28 @@ int main(void) {
         char out[4096];
         int e = json_format(deep, out, sizeof out);
         if (e < 0) { printf("  FAIL deep nesting should be rejected\n"); fails++; }
+    }
+
+    /* --- minify (M1725): same validation, compact output ------------------*/
+    mini("42", "42");
+    mini("  true ", "true");
+    mini("\"a b\"", "\"a b\"");                          /* spaces INSIDE strings preserved */
+    mini("[1,2,3]", "[1,2,3]");
+    mini("[ 1 , 2 ]", "[1,2]");
+    mini("{}", "{}");
+    mini("[]", "[]");
+    mini("{\"a\":1}", "{\"a\":1}");
+    mini("{ \"a\" : 1 , \"b\" : 2 }", "{\"a\":1,\"b\":2}");
+    mini("{\n  \"x\": [1, 2],\n  \"y\": {\"z\": 3}\n}", "{\"x\":[1,2],\"y\":{\"z\":3}}");   /* strips all layout whitespace */
+    mini("{\"k\":\"v v\",\"n\":[true, null, -3.5e2]}", "{\"k\":\"v v\",\"n\":[true,null,-3.5e2]}");
+    /* minify is idempotent, and re-pretty-printing a minified doc round-trips */
+    {
+        char m[4096], p[4096], m2[4096];
+        const char *doc = "{ \"a\":[1,2,{\"b\":3}], \"c\":\"hi\" }";
+        json_minify(doc, m, sizeof m);
+        json_format(m, p, sizeof p);        /* minified -> pretty (valid) */
+        json_minify(p, m2, sizeof m2);      /* pretty  -> minified again */
+        checks++; if (strcmp(m, m2) != 0) { printf("  FAIL minify round-trip: \"%s\" vs \"%s\"\n", m, m2); fails++; }
     }
 
     if (!fails) printf("PASS: %d checks, JSON engine correct\n", checks);

@@ -24,7 +24,9 @@ static int         jc_depth;
 static int  jc_hex(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 static void jc_emit(char c) { if (jc_len < jc_cap - 1) jc_out[jc_len++] = c; }
 static void jc_emits(const char *s) { while (*s) jc_emit(*s++); }
-static void jc_indent(int n) { for (int i = 0; i < n; i++) { jc_emit(' '); jc_emit(' '); } }
+static int  jc_compact;                /* 1 = minify (no indentation / newlines / ': ' space) */
+static void jc_indent(int n) { if (jc_compact) return; for (int i = 0; i < n; i++) { jc_emit(' '); jc_emit(' '); } }
+static void jc_nl(void)      { if (!jc_compact) jc_emit('\n'); }
 static void jc_ws(void) { while (*jc_p == ' ' || *jc_p == '\t' || *jc_p == '\n' || *jc_p == '\r') jc_p++; }
 static void jc_fail(void) { if (jc_err < 0) jc_err = (int)(jc_p - jc_base); }
 
@@ -69,7 +71,7 @@ static void jc_value(int ind) {
     else if (c == '{') {
         jc_p++; jc_ws();
         if (*jc_p == '}') { jc_emits("{}"); jc_p++; jc_depth--; return; }
-        jc_emits("{\n");
+        jc_emit('{'); jc_nl();
         for (;;) {
             jc_ws();
             jc_indent(ind + 1);
@@ -77,26 +79,26 @@ static void jc_value(int ind) {
             jc_string();
             jc_ws();
             if (*jc_p != ':') { jc_fail(); break; }
-            jc_p++; jc_emits(": ");
+            jc_p++; jc_emit(':'); if (!jc_compact) jc_emit(' ');
             jc_value(ind + 1);
             if (jc_err >= 0) break;
             jc_ws();
-            if (*jc_p == ',') { jc_p++; jc_emit(','); jc_emit('\n'); continue; }
-            if (*jc_p == '}') { jc_emit('\n'); jc_indent(ind); jc_emit('}'); jc_p++; break; }
+            if (*jc_p == ',') { jc_p++; jc_emit(','); jc_nl(); continue; }
+            if (*jc_p == '}') { jc_nl(); jc_indent(ind); jc_emit('}'); jc_p++; break; }
             jc_fail(); break;
         }
     }
     else if (c == '[') {
         jc_p++; jc_ws();
         if (*jc_p == ']') { jc_emits("[]"); jc_p++; jc_depth--; return; }
-        jc_emits("[\n");
+        jc_emit('['); jc_nl();
         for (;;) {
             jc_indent(ind + 1);
             jc_value(ind + 1);
             if (jc_err >= 0) break;
             jc_ws();
-            if (*jc_p == ',') { jc_p++; jc_emit(','); jc_emit('\n'); continue; }
-            if (*jc_p == ']') { jc_emit('\n'); jc_indent(ind); jc_emit(']'); jc_p++; break; }
+            if (*jc_p == ',') { jc_p++; jc_emit(','); jc_nl(); continue; }
+            if (*jc_p == ']') { jc_nl(); jc_indent(ind); jc_emit(']'); jc_p++; break; }
             jc_fail(); break;
         }
     }
@@ -111,12 +113,15 @@ static void jc_value(int ind) {
 /* Validate + pretty-print `in` into `out` (<= outmax-1 bytes + NUL). Returns -1
  * on success (out holds the re-indented JSON), else the byte offset of the first
  * syntax error. */
-static int json_format(const char *in, char *out, int outmax) {
-    jc_base = jc_p = in; jc_out = out; jc_cap = outmax; jc_len = 0; jc_err = -1; jc_depth = 0;
+static int jc_run(const char *in, char *out, int outmax, int compact) {
+    jc_base = jc_p = in; jc_out = out; jc_cap = outmax; jc_len = 0; jc_err = -1; jc_depth = 0; jc_compact = compact;
     jc_value(0);
     if (jc_err < 0) { jc_ws(); if (*jc_p) jc_fail(); }   /* trailing junk after the top-level value */
     out[jc_len] = 0;
     return jc_err;
 }
+static int json_format(const char *in, char *out, int outmax) { return jc_run(in, out, outmax, 0); }
+/* Same validation, but emit COMPACT JSON (no indentation, newlines or ': ' space). */
+static int json_minify(const char *in, char *out, int outmax) { return jc_run(in, out, outmax, 1); }
 
 #endif /* JSONCORE_H */

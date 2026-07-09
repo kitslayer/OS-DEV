@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1725) Userspace — gjson gains minify + save, becoming a JSON formatter, not just a viewer.** `m` toggles pretty-print ⟷ **minify** (compact — no indentation, newlines, or `": "` space, but whitespace *inside* strings preserved), and `s` writes the current output to `JSON.OUT`. The compact mode is a `jc_compact` flag in the pure `user/jsoncore.h` gating the pretty-printer's whitespace, exposed as `json_minify()`; the same one-pass validator runs either way. (The line-viewer's render also now stops at the content end rather than padding, so a one-line minified doc keeps its header on screen.)
+>
+> **Verified:** `jsoncoretest` grew to 47 host checks (ASan/UBSan clean) — minify of scalars/arrays/objects/nesting, in-string spaces preserved, and a pretty↔minify round-trip that's stable. In-guest: `m` on the demo showed `[minified]` + the compact one-line JSON; `s` reported `saved JSON.OUT`. `make check` green.
+>
 > **(M1724) Userspace — the image viewer becomes a format converter (`s` → VIEW.BMP).** imgview already decodes PNG / GIF / baseline-JPEG / BMP / SVG / lossless-WebP with the OS's own from-scratch decoders; pressing `s` now saves the currently-displayed image, at its native resolution, to `VIEW.BMP`. The decoders leave RGBA in `g_dec`, so it repacks to the XRGB words `sys_savebmp` writes (through the 24 MB decode-scratch buffer, free once decoding is done). So you can open a JPEG or WebP and get a BMP out — a genuine one-key format conversion.
 >
 > **Verified in-guest:** opened the viewer (which decoded and displayed a test image — a blue field with a yellow sun and red pyramid), pressed `s`, and the caption reported "saved VIEW.BMP (native size)" — the decoded image was repacked and written via the proven BMP-export path. `make check` green.

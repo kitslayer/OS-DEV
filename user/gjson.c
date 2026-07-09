@@ -10,7 +10,9 @@
  * This file is just the terminal UI, the file load, and the scroll loop.
  *
  * Launch: `gjson [file]` from the shell, or the Apps menu (a built-in demo).
- * Keys: up/down scroll a line, left/right page, Esc/q quit.
+ * Keys: up/down scroll a line, left/right page, m toggle pretty-print / minify
+ * (compact), s save the current output to JSON.OUT, Esc/q quit. So it doubles as
+ * a JSON formatter + minifier that writes a file, not just a viewer.
  */
 #include "ulib.h"
 #include "jsoncore.h"        /* the pure validator + pretty-printer (host-tested by tests/json) */
@@ -26,6 +28,9 @@ static char fname[64];
 static int  err;                          /* json_format result: -1 ok, >=0 error offset, -2 no file */
 static int  nlines, top;
 static int  linestart[MAXLINES];
+static const char *g_src;                 /* the source JSON (iobuf or DEMO), re-formatted on toggle */
+static int  compact;                      /* 0 = pretty-print, 1 = minify */
+static const char *msg;                   /* transient status note (e.g. after save) */
 
 static const char *DEMO =
     "{\"name\":\"OS-DEV\",\"kind\":\"from-scratch x86_64 OS\",\"milestone\":1703,"
@@ -50,15 +55,18 @@ static void index_lines(void) {
         if (fmtbuf[i] == '\n') linestart[nlines++] = i + 1;
 }
 
+/* (Re)format g_src into fmtbuf with the current pretty/minify mode + index it. */
+static void reformat(void) {
+    err = compact ? json_minify(g_src, fmtbuf, FMTMAX) : json_format(g_src, fmtbuf, FMTMAX);
+    index_lines();
+}
 static void load(void) {
-    const char *src;
     if (fname[0]) {
         long n = sys_readfile(fname, iobuf, IOMAX - 1);
         if (n < 0) { err = -2; return; }
-        iobuf[n] = 0; src = iobuf;
-    } else src = DEMO;
-    err = json_format(src, fmtbuf, FMTMAX);
-    index_lines();
+        iobuf[n] = 0; g_src = iobuf;
+    } else g_src = DEMO;
+    reformat();
 }
 
 /* print one formatted line with JSON syntax colouring */
@@ -91,18 +99,23 @@ static void render(void) {
     print(fname[0] ? fname : "(demo)");
     if (err == -2)      { sys_setcolor(2); print("  file not found"); }
     else if (err >= 0)  { sys_setcolor(2); print("  INVALID  syntax error @ offset "); print_int(err); }
-    else                { sys_setcolor(10); print("  valid"); sys_setcolor(8); print("  ("); print_int(nlines); print(" lines)"); }
+    else                { sys_setcolor(10); print("  valid"); sys_setcolor(8); print("  ("); print_int(nlines); print(" lines)");
+                          sys_setcolor(3); print(compact ? "  [minified]" : "  [pretty]"); }
+    if (msg) { sys_setcolor(10); print("  "); print(msg); }
     sys_setcolor(0); print("\n");
 
     if (err == -2) { print("\n  could not read "); print(fname); print("\n"); sys_setcolor(0); return; }
     for (int r = 0; r < VIEWROWS; r++) {
         int li = top + r;
-        if (li >= nlines) { print("\n"); continue; }
+        if (li >= nlines) break;                 /* stop at the content end (a minified doc is one long
+                                                   * wrapping line — padding blanks would overflow + scroll
+                                                   * the header off) */
         print_line(li); print("\n");
     }
+    print("\n");
     sys_setcolor(8);
     if (err >= 0) print(" (showing the valid prefix)  ");
-    print(" up/dn scroll  left/right page  Esc quit");
+    print(" up/dn scroll  m:pretty/minify  s:save JSON.OUT  Esc quit");
     sys_setcolor(0);
 }
 
@@ -115,10 +128,15 @@ int main(void) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(15); continue; }
         if (k == 27 || k == 'q') break;
-        else if (k == 0x11) { if (top > 0) top--; }                                  /* up */
-        else if (k == 0x12) { if (top < nlines - 1) top++; }                         /* down */
-        else if (k == 0x13) { top -= VIEWROWS; if (top < 0) top = 0; }               /* left: page up */
-        else if (k == 0x14) { top += VIEWROWS; if (top > nlines - 1) top = nlines - 1; if (top < 0) top = 0; }  /* right: page down */
+        else if (k == 0x11) { if (top > 0) top--; msg = 0; }                         /* up */
+        else if (k == 0x12) { if (top < nlines - 1) top++; msg = 0; }                /* down */
+        else if (k == 0x13) { top -= VIEWROWS; if (top < 0) top = 0; msg = 0; }      /* left: page up */
+        else if (k == 0x14) { top += VIEWROWS; if (top > nlines - 1) top = nlines - 1; if (top < 0) top = 0; msg = 0; }  /* right: page down */
+        else if (k == 'm') { if (err != -2) { compact = !compact; top = 0; msg = 0; reformat(); } }   /* toggle pretty/minify */
+        else if (k == 's') {                                                         /* save the formatted output */
+            if (err == -2) msg = 0;
+            else msg = (sys_writefile("JSON.OUT", fmtbuf, slen(fmtbuf)) >= 0) ? "saved JSON.OUT" : "save failed";
+        }
         else continue;
         render();
     }
