@@ -32,8 +32,9 @@
  *   colon       command line (see below)
  * Edit mode:  type to append; Backspace deletes; Enter commits + moves down;
  *   an arrow commits + moves that way (Excel-style); Esc cancels.
- * Command line (after ':'):  w [file] (save) · q · q! · wq [file] · a cell ref
- *   like C10 (jump there) · Esc cancels.
+ * Command line (after ':'):  w [file] (save) · q · q! · wq [file] · chart
+ *   [range] (a horizontal bar chart of a range, or the current column) · a cell
+ *   ref like C10 (jump there) · Esc cancels.
  *
  * Launch: `sheet [file]` from the shell, or the Apps menu (loads a demo sheet).
  * The native file format is one `CELLREF rawtext` line per non-empty cell; a
@@ -51,7 +52,7 @@
 #define VIEWCOLS 8              /* visible columns: RHW + 8*(FIELDW+1) = 76 <= 80 */
 #define IOMAX    65536          /* load/save scratch buffer */
 
-enum { MODE_NAV, MODE_EDIT, MODE_CMD };
+enum { MODE_NAV, MODE_EDIT, MODE_CMD, MODE_CHART };
 
 static char iobuf[IOMAX];
 static int  cur_r, cur_c;            /* selected cell */
@@ -62,6 +63,7 @@ static char fname[64];
 static char status[72];              /* transient status/help message */
 static char edit_buf[RAWMAX];  static int edit_len;
 static char cmd_buf[72];        static int cmd_len;
+static int  ch_r1, ch_c1, ch_r2, ch_c2;   /* :chart target rect (inclusive, 0-based) */
 
 /* ---- file load / save -----------------------------------------------------*/
 static int is_csv(const char *name) {                    /* case-insensitive ".csv" suffix */
@@ -162,7 +164,59 @@ static void ensure_visible(void) {
     if (left_col < 0) left_col = 0;
 }
 
+/* A full-screen horizontal bar chart of the ch_* rect: one labeled bar per
+ * numeric cell, scaled to the largest magnitude, teal for +ve / red for -ve. */
+#define CHART_MAXBARS 16
+static void render_chart(void) {
+    sys_clear();
+    sys_setcolor(4); print(" chart "); sys_setcolor(1);
+    putch((char)('A' + ch_c1)); putn_pad(ch_r1 + 1, 0);
+    if (ch_r1 != ch_r2 || ch_c1 != ch_c2) { print(":"); putch((char)('A' + ch_c2)); putn_pad(ch_r2 + 1, 0); }
+    sys_setcolor(8); print("    (press any key to return)\n\n");
+
+    double vals[CHART_MAXBARS]; char labs[CHART_MAXBARS][16]; int nb = 0; double peak = 0;
+    int single_col = (ch_c1 == ch_c2), single_row = (ch_r1 == ch_r2);
+    for (int r = ch_r1; r <= ch_r2 && nb < CHART_MAXBARS; r++)
+        for (int c = ch_c1; c <= ch_c2 && nb < CHART_MAXBARS; c++) {
+            cell_t *cell = CELL(r, c);
+            if (!cell->is_num) continue;                 /* chart only numeric cells */
+            vals[nb] = cell->val;
+            if (single_col && ch_c1 > 0 && CELL(r, ch_c1 - 1)->raw[0])
+                scopy(labs[nb], CELL(r, ch_c1 - 1)->raw, 16);        /* label from the column to the left */
+            else if (single_row && ch_r1 > 0 && CELL(ch_r1 - 1, c)->raw[0])
+                scopy(labs[nb], CELL(ch_r1 - 1, c)->raw, 16);        /* or the row above */
+            else {                                                    /* else the cell's own ref */
+                int n = 0; labs[nb][n++] = (char)('A' + c);
+                int rr = r + 1; char d[6]; int dn = 0;
+                while (rr) { d[dn++] = (char)('0' + rr % 10); rr /= 10; }
+                while (dn) labs[nb][n++] = d[--dn];
+                labs[nb][n] = 0;
+            }
+            double a = vals[nb] < 0 ? -vals[nb] : vals[nb];
+            if (a > peak) peak = a;
+            nb++;
+        }
+    if (!nb) { sys_setcolor(2); print(" no numeric values in that range\n"); sys_setcolor(0); return; }
+
+    int labw = 8, valw = 10, barmax = 76 - labw - valw - 1; if (barmax < 4) barmax = 4;
+    for (int i = 0; i < nb; i++) {
+        sys_setcolor(6); putstr_pad_right(labs[i], labw); print(" ");
+        double a = vals[i] < 0 ? -vals[i] : vals[i];
+        int blen = peak > 0 ? (int)(a / peak * barmax + 0.5) : 0;
+        if (blen < 1 && a > 0) blen = 1;                 /* a sliver for tiny non-zero values */
+        sys_setcolor(vals[i] < 0 ? 2 : 10);
+        for (int k = 0; k < blen; k++) putch('#');
+        for (int k = blen; k < barmax; k++) print(" ");
+        sys_setcolor(3); print(" "); print(fmt_value(vals[i], valw));
+        sys_setcolor(0); print("\n");
+    }
+    sys_setcolor(8); print("\n longest bar = "); print(fmt_value(peak, 12));
+    if (nb >= CHART_MAXBARS) { print("   (first "); putn_pad(CHART_MAXBARS, 0); print(" values)"); }
+    sys_setcolor(0);
+}
+
 static void render(void) {
+    if (mode == MODE_CHART) { render_chart(); return; }
     sys_clear();
     /* title bar: name/modified + current ref + its raw content (+ value) */
     sys_setcolor(4); print(" sheet "); sys_setcolor(1);
@@ -219,7 +273,7 @@ static void render(void) {
     } else if (status[0]) {
         sys_setcolor(8); print(" "); print(status);
     } else {
-        sys_setcolor(8); print(" arrows move  type/Enter edit  Bksp clear  :w save  :q quit");
+        sys_setcolor(8); print(" arrows move  type edit  Bksp clear  :chart  :w save  :q quit");
     }
     sys_setcolor(0);
 }
@@ -249,6 +303,18 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
     if (streq(c, "wq") || streq(c, "x")) { save_file(); return !streq(status, "save FAILED"); }
     if (startswith(c, "w "))  { char *n = c + 2; while (*n == ' ') n++; scopy(fname, n, sizeof fname); save_file(); return 0; }
     if (startswith(c, "wq ")) { char *n = c + 3; while (*n == ' ') n++; scopy(fname, n, sizeof fname); save_file(); return !streq(status, "save FAILED"); }
+    if (streq(c, "chart") || startswith(c, "chart ")) {
+        const char *rng = c + 5; while (*rng == ' ') rng++;
+        if (!*rng) {                                       /* no range: chart this column's used cells */
+            int top = -1, bot = -1;
+            for (int r = 0; r < NROWS; r++) if (CELL(r, cur_c)->raw[0]) { if (top < 0) top = r; bot = r; }
+            if (top < 0) { scopy(status, "chart: this column is empty", sizeof status); return 0; }
+            ch_r1 = top; ch_r2 = bot; ch_c1 = ch_c2 = cur_c; mode = MODE_CHART; status[0] = 0;
+        } else if (parse_range(rng, &ch_r1, &ch_c1, &ch_r2, &ch_c2)) {
+            mode = MODE_CHART; status[0] = 0;
+        } else scopy(status, "chart: usage  :chart B2:B5  (or :chart for this column)", sizeof status);
+        return 0;
+    }
     int r, cc;
     if (parse_whole_ref(c, &r, &cc)) { cur_r = r; cur_c = cc; return 0; }
     scopy(status, "unknown command", sizeof status);
@@ -268,7 +334,9 @@ int main(void) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(15); continue; }
 
-        if (mode == MODE_EDIT) {
+        if (mode == MODE_CHART) {
+            mode = MODE_NAV; status[0] = 0;               /* any key dismisses the chart */
+        } else if (mode == MODE_EDIT) {
             if (k == 27) { mode = MODE_NAV; status[0] = 0; }
             else if (k == '\n' || k == '\r') { commit_edit(); move_sel(1, 0); }
             else if (k == 8 || k == 127) { if (edit_len > 0) edit_buf[--edit_len] = 0; }

@@ -412,6 +412,35 @@ static int parse_whole_ref(const char *s, int *rr, int *cc) {
     *rr = row; *cc = col; return 1;
 }
 
+/* Parse "A1:B10" (or a single "A1") into an inclusive, normalised rect
+ * (r1<=r2, c1<=c2), all 0-based. Returns 1 on success, 0 on malformed input or
+ * an out-of-range endpoint. Used by the :chart command. */
+static int parse_range(const char *s, int *r1o, int *c1o, int *r2o, int *c2o) {
+    while (*s == ' ') s++;
+    if (!is_alpha(*s)) return 0;
+    int c1 = up(*s) - 'A'; s++;
+    if (!is_digit(*s)) return 0;
+    int r1 = 0; while (is_digit(*s)) { r1 = r1 * 10 + (*s - '0'); s++; }
+    r1--;
+    int r2 = r1, c2 = c1;
+    while (*s == ' ') s++;
+    if (*s == ':') {
+        s++; while (*s == ' ') s++;
+        if (!is_alpha(*s)) return 0;
+        c2 = up(*s) - 'A'; s++;
+        if (!is_digit(*s)) return 0;
+        r2 = 0; while (is_digit(*s)) { r2 = r2 * 10 + (*s - '0'); s++; }
+        r2--;
+        while (*s == ' ') s++;
+    }
+    if (*s) return 0;                                   /* trailing junk */
+    if (c1 < 0 || c1 >= NCOLS || r1 < 0 || r1 >= NROWS ||
+        c2 < 0 || c2 >= NCOLS || r2 < 0 || r2 >= NROWS) return 0;
+    if (r1 > r2) { int t = r1; r1 = r2; r2 = t; }
+    if (c1 > c2) { int t = c1; c1 = c2; c2 = t; }
+    *r1o = r1; *c1o = c1; *r2o = r2; *c2o = c2; return 1;
+}
+
 /* ---- number formatting (pure; shared by the UI and the host test) ---------*/
 /* Format v with exactly `dec` fractional digits into out; returns length. */
 static int fmt_fixed(double v, int dec, char *out) {

@@ -266,6 +266,19 @@ int main(void) {
     set_raw(0, 2, "=STDEVP(A1:A8)"); recompute(); chk_num(0, 2, 2, "STDEVP range");
     set_raw(0, 2, "=AVERAGE(A1:A8)"); recompute(); chk_num(0, 2, 5, "mean of the sample");
 
+    /* --- range parsing for :chart (M1699) ---------------------------------*/
+    {
+        int r1, c1, r2, c2;
+        checks++; if (!parse_range("B2:B5", &r1, &c1, &r2, &c2) || r1 != 1 || c1 != 1 || r2 != 4 || c2 != 1) FAILN("parse_range B2:B5");
+        checks++; if (!parse_range("A1:C3", &r1, &c1, &r2, &c2) || r1 != 0 || c1 != 0 || r2 != 2 || c2 != 2) FAILN("parse_range A1:C3");
+        checks++; if (!parse_range("D5", &r1, &c1, &r2, &c2) || r1 != 4 || c1 != 3 || r2 != 4 || c2 != 3) FAILN("parse_range single D5");
+        checks++; if (!parse_range("b5:b2", &r1, &c1, &r2, &c2) || r1 != 1 || r2 != 4) FAILN("parse_range normalises reversed ends");
+        checks++; if (parse_range("B2:", &r1, &c1, &r2, &c2)) FAILN("parse_range must reject \"B2:\"");
+        checks++; if (parse_range("2B", &r1, &c1, &r2, &c2)) FAILN("parse_range must reject \"2B\"");
+        checks++; if (parse_range("B2 C3", &r1, &c1, &r2, &c2)) FAILN("parse_range must reject junk after ref");
+        checks++; if (parse_range("A200:A201", &r1, &c1, &r2, &c2)) FAILN("parse_range must reject out-of-range row");
+    }
+
     /* --- CSV export / import (M1698) --------------------------------------*/
     {
         char csv[512];
