@@ -76,6 +76,25 @@ int main(void) {
         g = plot_derivative("cos(x)", 3.14159265358979/2.0, 1e-5, &e); checks++; if (e || !napprox(g, -1.0)) { printf("  FAIL d/dx cos @pi/2 = %.10g, want -1\n", g); fails++; }
     }
 
+    /* --- root finding (M1716): sign-change scan + bisection ----------------*/
+    {
+        double r[16]; int nr;
+        nr = plot_find_roots("x*x-4", -10, 10, 1000, r, 16);
+        checks++; if (nr != 2 || !napprox(r[0], -2) || !napprox(r[1], 2)) { printf("  FAIL roots x*x-4: n=%d\n", nr); fails++; }
+        nr = plot_find_roots("x-3", -10, 10, 1000, r, 16);
+        checks++; if (nr != 1 || !napprox(r[0], 3)) { printf("  FAIL roots x-3: n=%d\n", nr); fails++; }
+        nr = plot_find_roots("x", -5, 5, 1000, r, 16);
+        checks++; if (nr != 1 || !napprox(r[0], 0)) { printf("  FAIL roots x: n=%d\n", nr); fails++; }
+        nr = plot_find_roots("x*x+1", -10, 10, 1000, r, 16);
+        checks++; if (nr != 0) { printf("  FAIL roots x*x+1 (none expected): n=%d\n", nr); fails++; }
+        nr = plot_find_roots("x*x-2", -10, 10, 1000, r, 16);
+        checks++; if (nr != 2 || !napprox(r[0], -1.4142135623730951) || !napprox(r[1], 1.4142135623730951)) { printf("  FAIL roots x*x-2: n=%d\n", nr); fails++; }
+        nr = plot_find_roots("(x-1)*(x-2)*(x-3)", 0, 4, 1000, r, 16);
+        checks++; if (nr != 3 || !napprox(r[0], 1) || !napprox(r[1], 2) || !napprox(r[2], 3)) { printf("  FAIL roots cubic: n=%d\n", nr); fails++; }
+        nr = plot_find_roots("sin(x)", -3.5, 3.5, 1000, r, 16);
+        checks++; if (nr != 3 || !napprox(r[0], -3.14159265358979) || !napprox(r[1], 0) || !napprox(r[2], 3.14159265358979)) { printf("  FAIL roots sin: n=%d\n", nr); fails++; }
+    }
+
     if (!fails) printf("PASS: %d checks, plot evaluator correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", fails, checks);
     return fails ? 1 : 0;

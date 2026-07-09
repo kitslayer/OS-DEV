@@ -157,4 +157,42 @@ static double plot_derivative(const char *expr, double x, double h, int *err) {
     return (f1 - f2) / (2.0 * h);
 }
 
+/* Find the real roots (zeros) of `expr` in [a,b]: sample `samples` sub-intervals
+ * and, wherever f changes sign across a step (or hits exactly 0 at a sample),
+ * bisect to refine one root. Roots are written ascending into out[0..ret-1], up
+ * to `maxroots`. A step whose either end is non-finite (a pole/discontinuity) is
+ * skipped — a sign flip across a pole is not a root. Returns the count found.
+ * Pure; drives the plotter's :root and is host-tested by tests/plot. */
+static int plot_find_roots(const char *expr, double a, double b, int samples,
+                           double *out, int maxroots) {
+    int n = 0;
+    if (samples < 2) samples = 2;
+    if (maxroots <= 0) return 0;
+    double h = (b - a) / (double)samples;
+    double span = b - a; if (span < 0) span = -span;
+    double tol = span * 1e-6;               /* de-dup adjacent hits within this */
+    int prev_ok = 0; double prev_x = a, prev_y = 0;
+    for (int i = 0; i <= samples && n < maxroots; i++) {
+        double x = a + (double)i * h;
+        int e; double y = plot_eval(expr, x, &e);
+        int ok = !(e || js_isnan(y) || !js_isfinite(y));
+        if (ok && y == 0.0) {                                   /* exact zero at a sample */
+            if (n == 0 || (x - out[n - 1]) > tol) out[n++] = x;
+        } else if (ok && prev_ok && ((prev_y < 0 && y > 0) || (prev_y > 0 && y < 0))) {
+            double lo = prev_x, hi = x, ylo = prev_y;           /* bisect the sign-change bracket */
+            for (int it = 0; it < 60; it++) {
+                double mid = (lo + hi) * 0.5;
+                int e2; double ym = plot_eval(expr, mid, &e2);
+                if (e2 || js_isnan(ym) || !js_isfinite(ym)) break;
+                if ((ylo < 0 && ym < 0) || (ylo > 0 && ym > 0)) { lo = mid; ylo = ym; }
+                else hi = mid;
+            }
+            double r = (lo + hi) * 0.5;
+            if (n == 0 || (r - out[n - 1]) > tol) out[n++] = r;
+        }
+        prev_ok = ok; prev_x = x; prev_y = y;
+    }
+    return n;
+}
+
 #endif /* PLOTEVAL_H */

@@ -22,8 +22,10 @@
  *   commands  int  (toggle the definite integral of the first curve over the
  *   visible x-range — shades the area to the x-axis and prints the value) ·  der
  *   (toggle the numeric derivative f'(x) of the first curve, drawn as a lavender
- *   overlay) ·  fit ·  reset.  Both integral (Simpson) and derivative (central
- *   difference) are the pure, host-tested ploteval.h helpers.
+ *   overlay) ·  root  (toggle the zeros of the first curve in view — orange ticks
+ *   on the x-axis + the x-values listed) ·  fit ·  reset.  Integral (Simpson),
+ *   derivative (central difference) and roots (sign-change scan + bisection) are
+ *   all pure, host-tested ploteval.h helpers.
  *
  * Launch: `plot [formula]` from the shell, or the Apps menu (shows a demo wave).
  */
@@ -49,6 +51,7 @@
 #define C_HILITE 0xFF4FA3u
 #define C_FILL  0x123A44u          /* dim teal — :int area shading */
 #define C_DER   0xB0A6E6u          /* lavender — :der derivative overlay */
+#define C_ROOT  0xFF8828u          /* orange — :root zero markers */
 
 static unsigned      *FB;
 static unsigned char  FONT[128 * 16];
@@ -62,7 +65,7 @@ static char   funcs[NF][64]; static int nf;      /* `func` split on ';' */
 
 static int    cmdmode;                           /* ':' command line active */
 static char   cmd[48]; static int cmd_len;
-static int    show_int, show_der;                /* :int / :der toggles (first curve) */
+static int    show_int, show_der, show_root;     /* :int / :der / :root toggles (first curve) */
 
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
 static void fill(int x0, int y0, int w, int h, unsigned c) { for (int y = y0; y < y0 + h; y++) for (int x = x0; x < x0 + w; x++) putpx(x, y, c); }
@@ -139,6 +142,7 @@ static void exec_plot_cmd(void) {
     const char *c = cmd; while (*c == ' ') c++;
     if      (streq(c, "int"))   show_int = !show_int;
     else if (streq(c, "der"))   show_der = !show_der;
+    else if (streq(c, "root"))  show_root = !show_root;
     else if (streq(c, "fit"))   auto_fit_y();
     else if (streq(c, "reset")) { xmin = -10; xmax = 10; ymin = -6; ymax = 6; }
 }
@@ -203,7 +207,7 @@ static void draw(void) {
         }
     }
 
-    /* :int / :der value readouts, top-left of the plot area */
+    /* :int / :der / :root readouts, top-left of the plot area */
     { int ly = PY0 + 3;
       if (show_int && nf > 0) {
           int err; double area = plot_integral(funcs[0], xmin, xmax, 2000, &err);
@@ -211,7 +215,20 @@ static void draw(void) {
           if (err) p = sappend(lb, p, sizeof lb, "n/a"); else { fmtnum(area, nb); p = sappend(lb, p, sizeof lb, nb); }
           text(lb, 4, ly, FCOLORS[0]); ly += 14;
       }
-      if (show_der && nf > 0) text("f'(x)", 4, ly, C_DER);
+      if (show_der && nf > 0) { text("f'(x)", 4, ly, C_DER); ly += 14; }
+      if (show_root && nf > 0) {
+          double rts[16]; int nrt = plot_find_roots(funcs[0], xmin, xmax, W * 2, rts, 16);
+          char lb[80], nb[24]; int p = sappend(lb, 0, sizeof lb, "roots: ");
+          if (nrt == 0) p = sappend(lb, p, sizeof lb, "none in view");
+          for (int i = 0; i < nrt && i < 6; i++) { if (i) p = sappend(lb, p, sizeof lb, ", "); fmtnum(rts[i], nb); p = sappend(lb, p, sizeof lb, nb); }
+          if (nrt > 6) p = sappend(lb, p, sizeof lb, ", ...");
+          text(lb, 4, ly, C_ROOT);
+          int ay = sy_of(0);                              /* an orange tick on the x-axis at each root */
+          for (int i = 0; i < nrt; i++) {
+              int mx = sx_of(rts[i]);
+              for (int yy = ay - 6; yy <= ay + 6; yy++) if (yy >= PY0 && yy <= PY1) putpx(mx, yy, C_ROOT);
+          }
+      }
     }
 
     /* top bar: the (editable) formula, each function coloured like its curve */
@@ -243,7 +260,7 @@ static void draw(void) {
         p = sappend(b, p, sizeof b, ", ");  fmtnum(ymax, nb); p = sappend(b, p, sizeof b, nb);
         p = sappend(b, p, sizeof b, "]");
         text(b, 2, H - BOTH, C_DIM);
-        const char *hint = "arrows:pan  Enter:fit  :int :der  Esc:quit";
+        const char *hint = "arrows:pan  :int :der :root  Enter:fit  Esc:quit";
         int hl = 0; while (hint[hl]) hl++;
         text(hint, W - hl * 8 - 2, H - BOTH, C_DIM);
     }
