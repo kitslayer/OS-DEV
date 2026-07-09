@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1729) Userspace — two-argument functions in the graphing calculator (`min`/`max`/`hypot`).** The plotter's expression engine was single-argument only; it now parses an optional second argument and adds `min(a,b)`, `max(a,b)` and `hypot(a,b)` (matching the scalar calc's set from M1720). This unlocks genuinely useful graphs: `max(x,0)` is a ReLU, `min(5, x*x)` is a clamped parabola, `max(min(x,3),-3)` clamps to [-3,3]. In the pure `user/ploteval.h`, host-tested.
+>
+> **Verified:** `plottest` grew to 78 host checks (ASan/UBSan clean) — `min`/`max`/`hypot`, args-as-expressions, nested clamps, and wrong-arg-count errors. In-guest: `max(x,0)` drew a clean ReLU (flat 0 for x<0, rising for x>0). `make check` green.
+>
 > **(M1728) Kernel / drivers — USB mass-storage is now read+write, not read-only.** The BOT/SCSI driver's `WRITE(10)` path (`usb_storage_write`) existed but was `static`, exercised only by the driver's own self-test; `blockdev.c` therefore registered the USB disk read-only. It's now exported and wired in, so a USB flash disk is a full read/write block device like the ATA/AHCI/NVMe/virtio ones. Safe: the block layer's write self-test is non-destructive (it saves the sector, writes a pattern, verifies coherence + durability, then restores).
 >
 > **Verified in-guest** (`usbstoragetest`, extended): with a `usb-storage` disk on the UHCI bus, the driver-level `WRITE(10)` round-trip still passes, and — new — the block-cache `write+read-back+coherence+durability` self-test now runs **on usb-storage** (it only picks *writable* non-boot devices, so this line appearing proves the write is wired into the block layer). Boot stays on ATA, no fault. `make check` green.

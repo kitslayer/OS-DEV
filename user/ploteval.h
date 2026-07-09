@@ -13,6 +13,7 @@
  *           factor := number | '(' expr ')' | ('-'|'+') factor | name '(' expr ')'
  *                   | name        (the variable x, or the constants pi / e)
  * Functions: sin cos tan asin acos atan sqrt abs ln log log2 exp floor ceil round sign
+ *            + the two-argument min(a,b) max(a,b) hypot(a,b)
  */
 #ifndef PLOTEVAL_H
 #define PLOTEVAL_H
@@ -63,7 +64,16 @@ static double pe_factor(void) {
         while (pe_isalpha(*pe_cur) || pe_isdigit(*pe_cur)) { pe_cur++; n++; }
         pe_ws();
         if (*pe_cur == '(') {                        /* function call */
-            pe_cur++; double a = pe_expr(); pe_ws(); if (*pe_cur == ')') pe_cur++; else pe_err = 1;
+            pe_cur++; double a = pe_expr(); pe_ws();
+            double b = 0; int two = 0;
+            if (*pe_cur == ',') { pe_cur++; b = pe_expr(); pe_ws(); two = 1; }   /* optional 2nd arg */
+            if (*pe_cur == ')') pe_cur++; else pe_err = 1;
+            if (two) {                               /* two-argument functions (M1729) */
+                if (pe_kw(s, n, "min"))   return a < b ? a : b;
+                if (pe_kw(s, n, "max"))   return a > b ? a : b;
+                if (pe_kw(s, n, "hypot")) return js_sqrt(a * a + b * b);
+                pe_err = 1; return 0;
+            }
             if (pe_kw(s, n, "sin"))   return js_sin(a);
             if (pe_kw(s, n, "cos"))   return js_cos(a);
             if (pe_kw(s, n, "tan"))   return js_tan(a);

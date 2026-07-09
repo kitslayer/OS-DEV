@@ -12,7 +12,7 @@
  *
  * Type to edit the formula (live-replotted); functions/operators are those of
  * ploteval.h (sin cos tan asin acos atan sqrt abs ln log log2 exp floor ceil
- * round sign, + - * / % ^, parens, pi, e, and the variable x). Separate several
+ * round sign, 2-arg min/max/hypot, + - * / % ^, parens, pi, e, variable x). Sep.
  * formulas with ';' to plot up to four curves at once, each in its own colour.
  * Keys:  printable -> edit the formula · Backspace -> delete · arrows -> pan the
  *   view · Enter -> auto-fit the y-range to the curve · Tab -> reset the view ·

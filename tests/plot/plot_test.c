@@ -50,6 +50,14 @@ int main(void) {
     /* constants */
     CK("pi", 0, 3.14159265358979);  CK("2*pi", 0, 6.28318530717958);  CK("e", 0, 2.71828182845905);
 
+    /* two-argument functions (M1729) */
+    CK("min(x, 3)", 5, 3);   CK("min(x, 3)", 1, 1);        /* min */
+    CK("max(x, 0)", -2, 0);  CK("max(x, 0)", 4, 4);        /* max / ReLU */
+    CK("min(5, x*x)", 3, 5); CK("min(5, x*x)", 1, 1);      /* clamp a parabola; args are expressions */
+    CK("hypot(3, 4)", 0, 5); CK("hypot(x, 4)", 3, 5);      /* hypot */
+    CK("max(min(x, 3), -3)", 5, 3);                        /* nested clamp to [-3,3] */
+    CKERR("min(x)");   CKERR("sin(x, 2)");                 /* wrong arg count is an error */
+
     /* a realistic plotted formula sampled at a few points */
     CK("5*sin(x)", 0, 0);  CK("5*sin(x)", 3.14159265358979 / 2, 5);
 
