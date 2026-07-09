@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1718) Userspace — precise view control in the graphing calculator (`:xr` / `:yr` / `:zoom`).** The plotter could only *pan* — every printable key feeds the formula, so there was no way to zoom (the source even said so). M1714's `:` command line unblocks it: `:xr A B` and `:yr A B` set the x / y range, and `:zoom F` scales both axes about the view centre (F>1 zooms in, F<1 out). The range arguments are run through `plot_eval`, so they can be expressions — `:xr -pi pi` frames exactly one period. Small UI over the already-tested evaluator.
+>
+> **Verified in-guest:** from the default `x[-10,10] y[-6,6]`, `:zoom 2` halved the view to `x[-5,5] y[-3,3]` (zoom in 2×), then `:xr -pi pi` set `x[-3.14, 3.14]` — framing one period of the demo's `5*sin(x)` — confirming both the range-set and the expression evaluation of `pi`. `make check` green.
+>
 > **(M1717) Userspace — undo in the paint program (gpaint).** You could draw but never take back a mistaken stroke; now `u` undoes the last edit, up to **8 levels** deep. gpaint snapshots the canvas into a ring buffer at the start of every edit — each freehand stroke, shape (line/rect/box/ellipse), flood-fill and the `c` clear is one undo step — and `u` pops the most recent snapshot back. The ring lives in BSS (~8 MB, lazily backed by the kernel, so only the snapshots actually taken cost any RAM) and reuses the existing `canvas_copy` helper.
 >
 > **Verified in-guest:** in gpaint, drew a gray filled box then a red one; pressing `u` removed the red box (restoring the one-box canvas), and `u` again removed the gray box (restoring the blank canvas) — multi-level LIFO undo across two edits. `make check` green.

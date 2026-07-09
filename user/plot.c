@@ -17,13 +17,15 @@
  * Keys:  printable -> edit the formula · Backspace -> delete · arrows -> pan the
  *   view · Enter -> auto-fit the y-range to the curve · Tab -> reset the view ·
  *   Esc/`~` -> quit.  (Letter/digit/operator keys type into the formula, so only
- *   the non-typeable keys drive the view — that's why there's no +/- zoom.)
+ *   the non-typeable keys drive the view — so precise zoom / range are ':' commands, below.)
  * ':' opens a command line (':' is never part of a formula), with the calculus
  *   commands  int  (toggle the definite integral of the first curve over the
  *   visible x-range — shades the area to the x-axis and prints the value) ·  der
  *   (toggle the numeric derivative f'(x) of the first curve, drawn as a lavender
  *   overlay) ·  root  (toggle the zeros of the first curve in view — orange ticks
- *   on the x-axis + the x-values listed) ·  fit ·  reset.  Integral (Simpson),
+ *   on the x-axis + the x-values listed) ·  fit ·  reset ·  xr A B / yr A B (set the x/y range) ·  zoom F (scale about
+ *   the centre; F>1 zooms in) — range args are evaluated, so `xr -pi pi` works.
+ *   Integral (Simpson),
  *   derivative (central difference) and roots (sign-change scan + bisection) are
  *   all pure, host-tested ploteval.h helpers.
  *
@@ -137,6 +139,24 @@ static void auto_fit_y(void) {
     ymin = lo - m; ymax = hi + m;
 }
 
+/* Evaluate up to `max` space-separated expressions (via plot_eval with x=0) from
+ * `s` into out[]; returns how many parsed (stops at the first empty/error token).
+ * Lets the view-range commands take expressions, e.g. ":xr -pi pi". */
+static int parse_nums(const char *s, double *out, int max) {
+    int n = 0;
+    while (*s && n < max) {
+        while (*s == ' ') s++;
+        if (!*s) break;
+        char tok[32]; int t = 0;
+        while (*s && *s != ' ' && t < 31) tok[t++] = *s++;
+        tok[t] = 0;
+        int err; double v = plot_eval(tok, 0, &err);
+        if (err) break;
+        out[n++] = v;
+    }
+    return n;
+}
+
 /* Run the ':'-command in cmd[]. Unknown commands are ignored silently. */
 static void exec_plot_cmd(void) {
     const char *c = cmd; while (*c == ' ') c++;
@@ -145,6 +165,16 @@ static void exec_plot_cmd(void) {
     else if (streq(c, "root"))  show_root = !show_root;
     else if (streq(c, "fit"))   auto_fit_y();
     else if (streq(c, "reset")) { xmin = -10; xmax = 10; ymin = -6; ymax = 6; }
+    else if (startswith(c, "xr")) { double a[2]; if (parse_nums(c + 2, a, 2) == 2 && a[1] > a[0]) { xmin = a[0]; xmax = a[1]; } }
+    else if (startswith(c, "yr")) { double a[2]; if (parse_nums(c + 2, a, 2) == 2 && a[1] > a[0]) { ymin = a[0]; ymax = a[1]; } }
+    else if (startswith(c, "zoom")) {           /* scale both spans by 1/F about the view centre (F>1 zooms in) */
+        double a[1];
+        if (parse_nums(c + 4, a, 1) == 1 && a[0] > 0) {
+            double cx = (xmin + xmax) * 0.5, cy = (ymin + ymax) * 0.5;
+            double hx = (xmax - xmin) * 0.5 / a[0], hy = (ymax - ymin) * 0.5 / a[0];
+            xmin = cx - hx; xmax = cx + hx; ymin = cy - hy; ymax = cy + hy;
+        }
+    }
 }
 
 static void draw(void) {
@@ -249,7 +279,7 @@ static void draw(void) {
         cl[p] = 0;
         text(cl, 2, H - BOTH, C_TEXT);
         fill(2 + (cmd_len + 1) * 8, H - BOTH + 1, 6, 12, C_HILITE);   /* caret */
-        const char *ch = "int  der  fit  reset";
+        const char *ch = "int der root  fit reset  xr A B  yr A B  zoom F";
         int chl = 0; while (ch[chl]) chl++;
         text(ch, W - chl * 8 - 2, H - BOTH, C_DIM);
     } else {
@@ -260,7 +290,7 @@ static void draw(void) {
         p = sappend(b, p, sizeof b, ", ");  fmtnum(ymax, nb); p = sappend(b, p, sizeof b, nb);
         p = sappend(b, p, sizeof b, "]");
         text(b, 2, H - BOTH, C_DIM);
-        const char *hint = "arrows:pan  :int :der :root  Enter:fit  Esc:quit";
+        const char *hint = "arrows:pan  :zoom :xr :int :der :root  Enter:fit  Esc";
         int hl = 0; while (hint[hl]) hl++;
         text(hint, W - hl * 8 - 2, H - BOTH, C_DIM);
     }
