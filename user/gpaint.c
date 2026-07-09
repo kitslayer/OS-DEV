@@ -12,9 +12,9 @@
  * toolbar to change colour. Tools (keys): f freehand pen · l line · r rectangle
  * · b filled box · o ellipse · g flood-fill — line/rect/box/ellipse preview live
  * as you drag out from the press point. Other keys: 1-9/0 pick a palette colour
- * · [ / ] shrink / grow the brush · e erase (paint white) · c clear · u undo (an
- * 8-level history — each stroke, shape, fill and clear is one step) · s save to
- * PAINT.BMP · p save to PAINT.PNG · Esc quit.  Launch: `gpaint` or the Apps menu.
+ * · [ / ] shrink / grow the brush · e erase (paint white) · c clear · u undo /
+ * y redo (an 8-level history — each stroke, shape, fill and clear is one step) ·
+ * s save to PAINT.BMP · p save to PAINT.PNG · Esc quit.  Launch: `gpaint` or Apps.
  */
 #include "ulib.h"
 #include "png.h"        /* png_encode — the from-scratch PNG encoder, linked ring-3 (deflate.c) */
@@ -129,22 +129,40 @@ static void flood(int sx, int sy, unsigned newc) {
 }
 static void canvas_copy(unsigned *dst, const unsigned *src) { long n = (long)W * (H - TB); for (long i = 0; i < n; i++) dst[i] = src[i]; }
 
-/* Multi-level undo: a ring of canvas snapshots (BSS — the kernel lazily backs it,
- * so only as many pages as snapshots taken are ever allocated). undo_push() saves
- * the current canvas before an edit; undo_pop() restores the most recent. */
+/* Multi-level undo + redo: two rings of canvas snapshots (BSS — the kernel lazily
+ * backs it, so only pages for snapshots actually taken cost RAM). undo_push()
+ * saves the current canvas before an edit and clears the redo history (a new edit
+ * branches). undo_pop() saves the current onto the redo ring, then restores the
+ * most recent pre-edit snapshot; redo_pop() is the mirror. */
 #define UNDO_N 8
 static unsigned undo_ring[UNDO_N][W * ART_H];
-static int undo_count, undo_head;
-static void undo_push(void) {
+static unsigned redo_ring[UNDO_N][W * ART_H];
+static int undo_count, undo_head, redo_count, redo_head;
+
+static void undo_push(void) {                        /* at the start of each edit */
     canvas_copy(undo_ring[undo_head], &FB[TB * W]);
     undo_head = (undo_head + 1) % UNDO_N;
     if (undo_count < UNDO_N) undo_count++;
+    redo_count = 0; redo_head = 0;                    /* a fresh edit invalidates redo */
 }
 static int undo_pop(void) {                          /* returns 1 if a snapshot was restored */
     if (undo_count == 0) return 0;
+    canvas_copy(redo_ring[redo_head], &FB[TB * W]);   /* current -> redo, so it can be redone */
+    redo_head = (redo_head + 1) % UNDO_N;
+    if (redo_count < UNDO_N) redo_count++;
     undo_head = (undo_head - 1 + UNDO_N) % UNDO_N;
     undo_count--;
     canvas_copy(&FB[TB * W], undo_ring[undo_head]);
+    return 1;
+}
+static int redo_pop(void) {                          /* re-apply the most recently undone edit */
+    if (redo_count == 0) return 0;
+    canvas_copy(undo_ring[undo_head], &FB[TB * W]);   /* current -> undo, so it can be undone again */
+    undo_head = (undo_head + 1) % UNDO_N;
+    if (undo_count < UNDO_N) undo_count++;
+    redo_head = (redo_head - 1 + UNDO_N) % UNDO_N;
+    redo_count--;
+    canvas_copy(&FB[TB * W], redo_ring[redo_head]);
     return 1;
 }
 
@@ -179,7 +197,7 @@ static void draw_toolbar(void) {
     const char *pre = "  br "; for (int i = 0; pre[i]; i++) s[p++] = pre[i];
     if (brush >= 10) s[p++] = (char)('0' + brush / 10);
     s[p++] = (char)('0' + brush % 10);
-    const char *post = "  [ ]size  f l r b o g  u undo  s bmp p png  Esc";   /* 'e' erase / 'c' clear in the header doc */
+    const char *post = "  [ ]size  f l r b o g  u undo y redo  s bmp p png  Esc";   /* 'e' erase / 'c' clear in the header doc */
     for (int i = 0; post[i]; i++) s[p++] = post[i];
     s[p] = 0;
     text(s, tx, 3, 0xC8D0F0);
@@ -202,6 +220,7 @@ int main(void) {
         if (k == 27) break;
         else if (k == 'c') { undo_push(); rect(0, TB, W, H - TB, 0xFFFFFF); draw_toolbar(); dirty = 1; }
         else if (k == 'u') { if (undo_pop()) { draw_toolbar(); dirty = 1; } }   /* undo the last edit */
+        else if (k == 'y') { if (redo_pop()) { draw_toolbar(); dirty = 1; } }   /* redo (re-apply) it */
         else if (k == 'e') { cur = 1; draw_toolbar(); dirty = 1; }
         else if (k == '[') { if (brush > 1) brush--; draw_toolbar(); dirty = 1; }
         else if (k == ']') { if (brush < 24) brush++; draw_toolbar(); dirty = 1; }

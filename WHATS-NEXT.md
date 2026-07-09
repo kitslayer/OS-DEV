@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1722) Userspace — redo in the paint program, completing gpaint's undo/redo.** M1717 added undo (`u`); `y` now redoes. A second snapshot ring holds the redo history: `undo` saves the current canvas onto the redo ring before restoring the previous state, `redo` mirrors it, and starting a fresh edit clears the redo history (a new branch). Both rings are 8-deep, lazily-backed BSS.
+>
+> **Verified in-guest:** in gpaint, drew a gray box then a red box, pressed `u` twice (canvas blank), then `y` twice — both boxes reappeared in order, i.e. two-level redo re-applied both undone edits. `make check` green.
+>
 > **(M1721) Kernel / drivers — the ATA driver breaks the 128 GiB barrier with LBA48.** The primary IDE read/write path was LBA28-only (a 28-bit address = 2^28 sectors = 128 GiB ceiling). It now dispatches any access that reaches sector 2^28 or beyond to a new **LBA48** branch (`select_lba48` + the `READ/WRITE SECTORS EXT` commands, each address register written high-byte-then-low). Crucially this is *additive*: the LBA28 code is byte-for-byte unchanged and still serves every low / boot-path access, so a subtle LBA48 bug can never touch the disk the OS boots from. With the 32-bit LBA argument this reaches 2 TB.
 >
 > **Verified in-guest** by a new `atalba48test` wired into `make check` (now **79 suites**): booting with a 160 GiB sparse ATA disk on the primary-slave channel, `ata_lba48_selftest()` finds the >128 GiB disk, writes a known pattern to a sector ~49 MiB **past** the 128 GiB boundary (`LBA 268535456` > `2^28`), reads it back and confirms the round-trip — impossible under LBA28. The boot FAT32 volume (all low LBAs) still mounts and the desktop launches with no fault, and `boottest`/`fstest` (which exercise only the untouched LBA28 path) stay green. `make check` green.
