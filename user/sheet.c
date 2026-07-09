@@ -40,7 +40,9 @@
  *   current cell down / right N cells with the same ref adjustment — "fill a
  *   formula down a column") · sort RANGE / sortd RANGE (sort those rows by the
  *   range's column, ascending / descending, whole rows moving with formulas
- *   ref-adjusted — e.g. :sort D2:D5) · a cell ref like C10 (jump there) · Esc.
+ *   ref-adjusted — e.g. :sort D2:D5) · fmt CODE (set the current COLUMN's number
+ *   display format: $ currency, % percent, 0..6 fixed decimals, G general) · a
+ *   cell ref like C10 (jump there) · Esc.
  *
  * Launch: `sheet [file]` from the shell, or the Apps menu (loads a demo sheet).
  * The native file format is one `CELLREF rawtext` line per non-empty cell; a
@@ -72,6 +74,7 @@ static char cmd_buf[72];        static int cmd_len;
 static int  ch_r1, ch_c1, ch_r2, ch_c2;   /* :chart target rect (inclusive, 0-based) */
 static char yank_buf[RAWMAX];             /* copy/paste buffer: raw text of the yanked cell */
 static int  yank_r, yank_c, have_yank;    /* its origin cell (for relative-ref adjustment on paste) */
+static char col_fmt[NCOLS];               /* per-column number display format (0/'G'=general, 0-6/%/$) */
 
 /* Format a cell ref ("D12") into buf (for status messages). */
 static void ref_str(int r, int c, char *buf) {
@@ -101,6 +104,12 @@ static void load_file(void) {
         char *line = iobuf + ls; line[le - ls] = 0;      /* NUL-terminate this line in place */
         char *p = line; while (*p == ' ') p++;
         if (!*p || *p == '#') continue;
+        if (startswith(p, "%fmt ")) {                    /* per-column formats (M1726) */
+            char *f = p + 5;
+            for (int c = 0; c < NCOLS && *f && *f != '\n'; c++, f++) col_fmt[c] = (*f == 'G') ? 0 : *f;
+            continue;
+        }
+        if (*p == '%') continue;                          /* any other directive line: ignore */
         char ref[8]; int rn = 0;
         while ((is_alpha(*p) || is_digit(*p)) && rn < 7) ref[rn++] = *p++;
         ref[rn] = 0;
@@ -118,6 +127,12 @@ static void save_file(void) {
         p = sheet_to_csv(iobuf, IOMAX);                  /* interchange: computed values, RFC-4180 */
     } else {
         p = 0;                                           /* native: one "CELLREF rawtext" line per cell */
+        int anyfmt = 0; for (int c = 0; c < NCOLS; c++) if (col_fmt[c]) anyfmt = 1;
+        if (anyfmt) {                                    /* per-column formats: "%fmt <26 codes>" (M1726) */
+            for (const char *pre = "%fmt "; *pre; pre++) iobuf[p++] = *pre;
+            for (int c = 0; c < NCOLS; c++) iobuf[p++] = col_fmt[c] ? col_fmt[c] : 'G';
+            iobuf[p++] = '\n';
+        }
         for (int r = 0; r < NROWS && p < IOMAX - RAWMAX - 8; r++)
             for (int c = 0; c < NCOLS && p < IOMAX - RAWMAX - 8; c++) {
                 const char *raw = CELL(r, c)->raw;
@@ -244,7 +259,7 @@ static void render(void) {
     cell_t *sel = CELL(cur_r, cur_c);
     sys_setcolor(sel->raw[0] == '=' ? 10 : sel->kind == K_TEXT ? 6 : 1);
     if (sel->raw[0]) print(sel->raw); else { sys_setcolor(8); print("(empty)"); }
-    if (sel->raw[0] == '=' && !sel->err) { sys_setcolor(8); print("  = "); sys_setcolor(3); print(fmt_value(sel->val, 20)); }
+    if (sel->raw[0] == '=' && !sel->err) { sys_setcolor(8); print("  = "); sys_setcolor(3); print(fmt_value_col(sel->val, 20, col_fmt[cur_c])); }
     if (sel->err) { sys_setcolor(2); print(sel->err == ERR_CIRC ? "  #CIRC" : "  #ERR"); }
     sys_setcolor(0); print("\n");
 
@@ -273,7 +288,7 @@ static void render(void) {
             else if (cell->kind == K_FORMULA) sys_setcolor(10); /* formula result: teal */
             else sys_setcolor(1);                        /* plain number: white */
             if (cell->err) putstr_pad_left(cell->err == ERR_CIRC ? "#CIRC" : "#ERR", FIELDW);
-            else if (cell->is_num) putstr_pad_left(fmt_value(cell->val, FIELDW), FIELDW);
+            else if (cell->is_num) putstr_pad_left(fmt_value_col(cell->val, FIELDW, col_fmt[c]), FIELDW);
             else if (cell->kind == K_TEXT) putstr_pad_right(cell->raw, FIELDW);
             else { for (int i = 0; i < FIELDW; i++) print(" "); }
             sys_setcolor(0); print(" ");
@@ -290,7 +305,7 @@ static void render(void) {
     } else if (status[0]) {
         sys_setcolor(8); print(" "); print(status);
     } else {
-        sys_setcolor(8); print(" arrows  :y/:p copy  :fd/:fr fill  :sort  :chart  :w  :q");
+        sys_setcolor(8); print(" arrows  :y/:p copy  :fd/:fr fill  :sort  :fmt  :chart  :w  :q");
     }
     sys_setcolor(0);
 }
@@ -367,6 +382,17 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         }
         modified = 1; recompute();
         scopy(status, filled ? (down ? "filled down" : "filled right") : "nothing to fill", sizeof status);
+        return 0;
+    }
+    if (startswith(c, "fmt")) {                      /* :fmt CODE — set the current column's number format */
+        const char *a = c + 3; while (*a == ' ') a++;
+        char code = *a;
+        if (code == 0 || code == 'G' || code == 'g' || code == '-') { col_fmt[cur_c] = 0; scopy(status, "format: general", sizeof status); }
+        else if ((code >= '0' && code <= '6') || code == '%' || code == '$') {
+            col_fmt[cur_c] = code; modified = 1;
+            scopy(status, code == '$' ? "format: currency ($)" : code == '%' ? "format: percent (%)" : "format: fixed decimals", sizeof status);
+        } else scopy(status, "usage: :fmt $ | % | 0..6 | G   (sets column A..Z display)", sizeof status);
+        if (col_fmt[cur_c] == 0) modified = 1;
         return 0;
     }
     if (startswith(c, "sort")) {                     /* :sort D2:D5 (asc) / :sortd D2:D5 (desc) */

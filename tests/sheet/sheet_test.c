@@ -48,6 +48,12 @@ static void chk_fmt(double v, int w, const char *want) {
     const char *got = fmt_value(v, w);
     if (strcmp(got, want) != 0) FAILN("fmt_value(%.10g,%d) = \"%s\", want \"%s\"", v, w, got, want);
 }
+/* check fmt_value_col(v, w, fmt) renders exactly `want` */
+static void chk_fmtc(double v, int w, char fmt, const char *want) {
+    checks++;
+    const char *got = fmt_value_col(v, w, fmt);
+    if (strcmp(got, want) != 0) FAILN("fmt_value_col(%.10g,%d,'%c') = \"%s\", want \"%s\"", v, w, fmt ? fmt : ' ', got, want);
+}
 /* check adjust_refs shifts a formula's relative refs by (dr,dc) into `want` */
 static void chk_adj(const char *src, int dr, int dc, const char *want) {
     checks++;
@@ -429,6 +435,24 @@ int main(void) {
     sort_rows(0, 2, 0, 0);
     checks++; if (strcmp(CELL(0, 1)->raw, "first") != 0 || strcmp(CELL(1, 1)->raw, "second") != 0 ||
                    strcmp(CELL(2, 1)->raw, "third") != 0) FAILN("sort not stable for equal keys");
+
+    /* --- per-column number formats (M1726): fmt_value_col + fmt_fixed dec=0 round */
+    chk_fmtc(117.5, 8, 'G', "117.5");           /* general = fmt_value */
+    chk_fmtc(470, 8, 0, "470");                  /* 0 code = general */
+    chk_fmtc(3.14159, 8, '2', "3.14");           /* fixed 2 dp */
+    chk_fmtc(2, 8, '3', "2.000");
+    chk_fmtc(3.7, 8, '0', "4");                  /* 0 dp ROUNDS (the fmt_fixed dec=0 fix) */
+    chk_fmtc(3.4, 8, '0', "3");
+    chk_fmtc(0.5, 8, '%', "50.0%");              /* percent = value*100 + 1dp + '%' */
+    chk_fmtc(0.125, 8, '%', "12.5%");
+    chk_fmtc(1.0, 8, '%', "100.0%");
+    chk_fmtc(-0.25, 8, '%', "-25.0%");
+    chk_fmtc(270, 10, '$', "$270.00");           /* currency = '$' + 2dp */
+    chk_fmtc(1005, 10, '$', "$1005.00");
+    chk_fmtc(0, 8, '$', "$0.00");
+    chk_fmtc(-12.5, 10, '$', "-$12.50");         /* sign ahead of the '$' */
+    chk_fmtc(123456, 4, '2', "####");            /* formatted value too wide -> '#' fill */
+    chk_fmtc(1234, 4, '%', "####");
 
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);

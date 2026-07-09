@@ -599,7 +599,7 @@ static int fmt_fixed(double v, int dec, char *out) {
     double frac = v - (double)ip;
     double scale = 1; for (int i = 0; i < dec; i++) scale *= 10.0;
     unsigned long long fr = (unsigned long long)(frac * scale + 0.5);
-    if (dec > 0 && fr >= (unsigned long long)scale) { ip++; fr = 0; }   /* rounding carry */
+    if (fr >= (unsigned long long)scale) { ip++; fr = 0; }   /* rounding carry (incl. dec==0: 3.7 -> 4) */
     char tmp[24]; int tn = 0;
     if (ip == 0) tmp[tn++] = '0'; else while (ip) { tmp[tn++] = (char)('0' + ip % 10); ip /= 10; }
     while (tn) out[p++] = tmp[--tn];
@@ -626,6 +626,34 @@ static const char *fmt_value(double v, int w) {
         if (n <= w) return buf;
     }
     for (i = 0; i < w; i++) buf[i] = '#';                /* still too wide: Excel-style overflow */
+    buf[w] = 0; return buf;
+}
+
+/* Format v for a column with an explicit display format `fmt`:
+ *   'G' or 0 -> general (fmt_value's auto width-fit);  '0'..'6' -> fixed N
+ *   decimals;  '%' -> percent (value*100, 1 dp, trailing '%');  '$' -> currency
+ *   ('$' + 2 dp, sign ahead of the '$'). Clamped to `w` columns ('#'-filled if it
+ *   won't fit), like fmt_value. Pure; host-tested. */
+static const char *fmt_value_col(double v, int w, char fmt) {
+    static char buf[48];
+    if (fmt == 'G' || fmt == 0) return fmt_value(v, w);
+    if (js_isnan(v) || !js_isfinite(v)) return fmt_value(v, w);
+    int n = -1;
+    if (fmt >= '0' && fmt <= '6') {
+        n = fmt_fixed(v, fmt - '0', buf);
+    } else if (fmt == '%') {
+        n = fmt_fixed(v * 100.0, 1, buf);
+        if (n >= 0 && n < 46) { buf[n++] = '%'; buf[n] = 0; }
+    } else if (fmt == '$') {
+        int p = 0; double a = v;
+        if (v < 0) { buf[p++] = '-'; a = -v; }
+        buf[p++] = '$';
+        n = p + fmt_fixed(a, 2, buf + p);
+    } else {
+        return fmt_value(v, w);                          /* unknown code -> general */
+    }
+    if (n >= 0 && n <= w) return buf;
+    for (int i = 0; i < w; i++) buf[i] = '#';            /* formatted value won't fit the column */
     buf[w] = 0; return buf;
 }
 
