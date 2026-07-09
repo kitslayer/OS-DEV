@@ -106,6 +106,7 @@ static const struct menu_item menu[] = {
     { "Clock", KIND_APP, "clock" }, { "Analog Clock", KIND_APP, "aclock" }, { "Calc", KIND_APP, "calc" },
     { "Spreadsheet", KIND_APP, "sheet" },
     { "Graphing Calc", KIND_APP, "plot" },
+    { "Paint (gfx)", KIND_APP, "gpaint" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
     { "Calendar (gfx)", KIND_APP, "gcal" },

@@ -127,6 +127,7 @@ global httpget_elf_start, httpget_elf_end
 global webview_elf_start, webview_elf_end
 global sheet_elf_start, sheet_elf_end
 global plot_elf_start, plot_elf_end
+global gpaint_elf_start, gpaint_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -603,5 +604,9 @@ sheet_elf_end:
 plot_elf_start:
     incbin "build/plot.elf"
 plot_elf_end:
+
+gpaint_elf_start:
+    incbin "build/gpaint.elf"
+gpaint_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
