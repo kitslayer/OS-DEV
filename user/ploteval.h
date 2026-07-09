@@ -125,4 +125,36 @@ static double plot_eval(const char *expr, double xval, int *err) {
     return v;
 }
 
+/* Definite integral of `expr` over [a,b] by composite Simpson's rule with n
+ * subintervals (forced even). *err is set nonzero if any sample is a parse
+ * error or non-finite (e.g. a singularity in range) — the integral is then
+ * undefined. Pure; drives the plotter's :int and is host-tested by tests/plot. */
+static double plot_integral(const char *expr, double a, double b, int n, int *err) {
+    if (n < 2) n = 2;
+    if (n & 1) n++;                                    /* Simpson needs an even count */
+    double h = (b - a) / (double)n, sum = 0;
+    for (int i = 0; i <= n; i++) {
+        int e; double y = plot_eval(expr, a + (double)i * h, &e);
+        if (e || js_isnan(y) || !js_isfinite(y)) { if (err) *err = 1; return 0; }
+        double w = (i == 0 || i == n) ? 1.0 : (i & 1) ? 4.0 : 2.0;
+        sum += w * y;
+    }
+    if (err) *err = 0;
+    return sum * h / 3.0;
+}
+
+/* Numeric derivative f'(x) by the symmetric central difference
+ * (f(x+h) - f(x-h)) / 2h. *err is set nonzero if either sample is a parse error
+ * or non-finite. Pure; drives the plotter's :der overlay, host-tested. */
+static double plot_derivative(const char *expr, double x, double h, int *err) {
+    int e1, e2;
+    double f1 = plot_eval(expr, x + h, &e1);
+    double f2 = plot_eval(expr, x - h, &e2);
+    if (e1 || e2 || js_isnan(f1) || js_isnan(f2) || !js_isfinite(f1) || !js_isfinite(f2)) {
+        if (err) *err = 1; return 0;
+    }
+    if (err) *err = 0;
+    return (f1 - f2) / (2.0 * h);
+}
+
 #endif /* PLOTEVAL_H */

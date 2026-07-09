@@ -18,6 +18,12 @@
  *   view · Enter -> auto-fit the y-range to the curve · Tab -> reset the view ·
  *   Esc/`~` -> quit.  (Letter/digit/operator keys type into the formula, so only
  *   the non-typeable keys drive the view — that's why there's no +/- zoom.)
+ * ':' opens a command line (':' is never part of a formula), with the calculus
+ *   commands  int  (toggle the definite integral of the first curve over the
+ *   visible x-range — shades the area to the x-axis and prints the value) ·  der
+ *   (toggle the numeric derivative f'(x) of the first curve, drawn as a lavender
+ *   overlay) ·  fit ·  reset.  Both integral (Simpson) and derivative (central
+ *   difference) are the pure, host-tested ploteval.h helpers.
  *
  * Launch: `plot [formula]` from the shell, or the Apps menu (shows a demo wave).
  */
@@ -41,6 +47,8 @@
 #define C_TEXT  0xC8D0F0u
 #define C_DIM   0x7A86B0u
 #define C_HILITE 0xFF4FA3u
+#define C_FILL  0x123A44u          /* dim teal — :int area shading */
+#define C_DER   0xB0A6E6u          /* lavender — :der derivative overlay */
 
 static unsigned      *FB;
 static unsigned char  FONT[128 * 16];
@@ -51,6 +59,10 @@ static int    func_len;
 #define NF 4
 static const unsigned FCOLORS[NF] = { 0x35E0D0u, 0xFF4FA3u, 0xF0D000u, 0x46E05Au };   /* teal, pink, yellow, green */
 static char   funcs[NF][64]; static int nf;      /* `func` split on ';' */
+
+static int    cmdmode;                           /* ':' command line active */
+static char   cmd[48]; static int cmd_len;
+static int    show_int, show_der;                /* :int / :der toggles (first curve) */
 
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
 static void fill(int x0, int y0, int w, int h, unsigned c) { for (int y = y0; y < y0 + h; y++) for (int x = x0; x < x0 + w; x++) putpx(x, y, c); }
@@ -122,6 +134,15 @@ static void auto_fit_y(void) {
     ymin = lo - m; ymax = hi + m;
 }
 
+/* Run the ':'-command in cmd[]. Unknown commands are ignored silently. */
+static void exec_plot_cmd(void) {
+    const char *c = cmd; while (*c == ' ') c++;
+    if      (streq(c, "int"))   show_int = !show_int;
+    else if (streq(c, "der"))   show_der = !show_der;
+    else if (streq(c, "fit"))   auto_fit_y();
+    else if (streq(c, "reset")) { xmin = -10; xmax = 10; ymin = -6; ymax = 6; }
+}
+
 static void draw(void) {
     fill(0, 0, W, H, C_BG);
 
@@ -137,8 +158,22 @@ static void draw(void) {
         int py = sy_of(gy); if (py >= PY0 && py <= PY1) fill(0, py, W, 1, gy == 0 ? C_AXIS : C_GRID);
     }
 
-    /* the curves: each ';'-separated function in its own colour, one sample/column */
     split_funcs();
+
+    /* :int — shade the signed area between the first curve and the x-axis over
+     * the whole visible x-range (drawn under the curves so they stay on top) */
+    if (show_int && nf > 0) {
+        int ay = sy_of(0);                                 /* the y=0 axis row */
+        for (int px = 0; px < W; px++) {
+            double x = xmin + (xmax - xmin) * px / (W - 1);
+            int err; double y = plot_eval(funcs[0], x, &err);
+            if (err || js_isnan(y) || !js_isfinite(y)) continue;
+            int cy = sy_of(y), y0 = cy < ay ? cy : ay, y1 = cy < ay ? ay : cy;
+            for (int yy = y0; yy <= y1; yy++) if (yy >= PY0 && yy <= PY1) putpx(px, yy, C_FILL);
+        }
+    }
+
+    /* the curves: each ';'-separated function in its own colour, one sample/column */
     for (int fi = 0; fi < nf; fi++) {
         unsigned col = FCOLORS[fi & 3];
         int prevpy = 0, have = 0;
@@ -153,6 +188,32 @@ static void draw(void) {
         }
     }
 
+    /* :der — the first curve's numeric derivative f'(x), a lavender overlay */
+    if (show_der && nf > 0) {
+        double h = (xmax - xmin) / (W * 4.0);
+        int prevpy = 0, have = 0;
+        for (int px = 0; px < W; px++) {
+            double x = xmin + (xmax - xmin) * px / (W - 1);
+            int err; double dy = plot_derivative(funcs[0], x, h, &err);
+            if (err || js_isnan(dy) || !js_isfinite(dy)) { have = 0; continue; }
+            int py = sy_of(dy);
+            if (py < PY0 - PH || py > PY1 + PH) { have = 0; continue; }
+            if (have) line(px - 1, prevpy, px, py, C_DER); else putpx(px, py, C_DER);
+            prevpy = py; have = 1;
+        }
+    }
+
+    /* :int / :der value readouts, top-left of the plot area */
+    { int ly = PY0 + 3;
+      if (show_int && nf > 0) {
+          int err; double area = plot_integral(funcs[0], xmin, xmax, 2000, &err);
+          char lb[64], nb[24]; int p = sappend(lb, 0, sizeof lb, "area = ");
+          if (err) p = sappend(lb, p, sizeof lb, "n/a"); else { fmtnum(area, nb); p = sappend(lb, p, sizeof lb, nb); }
+          text(lb, 4, ly, FCOLORS[0]); ly += 14;
+      }
+      if (show_der && nf > 0) text("f'(x)", 4, ly, C_DER);
+    }
+
     /* top bar: the (editable) formula, each function coloured like its curve */
     fill(0, 0, W, TOPH, C_BAR);
     text("y=", 2, 0, C_DIM);
@@ -163,18 +224,29 @@ static void draw(void) {
       } }
     fill(18 + func_len * 8, 1, 6, 12, C_HILITE);           /* block caret */
 
-    /* bottom bar: the view range + a key hint */
+    /* bottom bar: a ':' command line while active, else the view range + hint */
     fill(0, H - BOTH, W, BOTH, C_BAR);
-    char b[96], nb[24]; int p = 0;
-    p = sappend(b, p, sizeof b, "x[");  fmtnum(xmin, nb); p = sappend(b, p, sizeof b, nb);
-    p = sappend(b, p, sizeof b, ", ");  fmtnum(xmax, nb); p = sappend(b, p, sizeof b, nb);
-    p = sappend(b, p, sizeof b, "]  y["); fmtnum(ymin, nb); p = sappend(b, p, sizeof b, nb);
-    p = sappend(b, p, sizeof b, ", ");  fmtnum(ymax, nb); p = sappend(b, p, sizeof b, nb);
-    p = sappend(b, p, sizeof b, "]");
-    text(b, 2, H - BOTH, C_DIM);
-    const char *hint = "arrows:pan  Enter:fit  Tab:reset  Esc:quit";
-    int hl = 0; while (hint[hl]) hl++;
-    text(hint, W - hl * 8 - 2, H - BOTH, C_DIM);
+    if (cmdmode) {
+        char cl[56]; int p = 0; cl[p++] = ':';
+        for (int i = 0; cmd[i] && p < (int)sizeof cl - 1; i++) cl[p++] = cmd[i];
+        cl[p] = 0;
+        text(cl, 2, H - BOTH, C_TEXT);
+        fill(2 + (cmd_len + 1) * 8, H - BOTH + 1, 6, 12, C_HILITE);   /* caret */
+        const char *ch = "int  der  fit  reset";
+        int chl = 0; while (ch[chl]) chl++;
+        text(ch, W - chl * 8 - 2, H - BOTH, C_DIM);
+    } else {
+        char b[96], nb[24]; int p = 0;
+        p = sappend(b, p, sizeof b, "x[");  fmtnum(xmin, nb); p = sappend(b, p, sizeof b, nb);
+        p = sappend(b, p, sizeof b, ", ");  fmtnum(xmax, nb); p = sappend(b, p, sizeof b, nb);
+        p = sappend(b, p, sizeof b, "]  y["); fmtnum(ymin, nb); p = sappend(b, p, sizeof b, nb);
+        p = sappend(b, p, sizeof b, ", ");  fmtnum(ymax, nb); p = sappend(b, p, sizeof b, nb);
+        p = sappend(b, p, sizeof b, "]");
+        text(b, 2, H - BOTH, C_DIM);
+        const char *hint = "arrows:pan  Enter:fit  :int :der  Esc:quit";
+        int hl = 0; while (hint[hl]) hl++;
+        text(hint, W - hl * 8 - 2, H - BOTH, C_DIM);
+    }
 
     sys_gfx_blit(FB);
 }
@@ -194,8 +266,19 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(15); continue; }
+
+        if (cmdmode) {                                              /* ':' command line */
+            if (k == 27) cmdmode = 0;                               /* cancel */
+            else if (k == '\n' || k == '\r') { exec_plot_cmd(); cmdmode = 0; }
+            else if (k == 8 || k == 127) { if (cmd_len > 0) cmd[--cmd_len] = 0; }
+            else if (k >= 32 && k < 127) { if (cmd_len < (int)sizeof cmd - 1) { cmd[cmd_len++] = (char)k; cmd[cmd_len] = 0; } }
+            if (!cmdmode) { cmd_len = 0; cmd[0] = 0; }
+            draw(); continue;
+        }
+
         double xspan = xmax - xmin, yspan = ymax - ymin;
         if (k == 27 || k == '`' || k == '~') break;                 /* quit */
+        else if (k == ':') { cmdmode = 1; cmd_len = 0; cmd[0] = 0; } /* open the command line */
         else if (k == 8 || k == 127) { if (func_len > 0) func[--func_len] = 0; }   /* backspace */
         else if (k == '\n' || k == '\r') { auto_fit_y(); }          /* fit y to the curve */
         else if (k == '\t') { xmin = -10; xmax = 10; ymin = -6; ymax = 6; }        /* reset view */
