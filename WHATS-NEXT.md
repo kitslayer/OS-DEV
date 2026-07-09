@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1710) Userspace — the graphing calculator plots multiple functions at once.** Separate formulas with `;` (e.g. `5*sin(x); x*x/9-6`) and it draws up to four curves, each in its own colour (teal / pink / yellow / green), with the formula bar colour-coding each function to match its curve; auto-fit-y (Enter) scales to fit all of them. The formula is split on `;` in the UI — the pure evaluator (`ploteval.h`) is unchanged (still host-tested by `plottest`).
+>
+> **Verified in-guest:** `run plot` (default `5*sin(x); x*x/9-6`) drew a teal sine wave and a pink parabola simultaneously over x[-10,10] y[-6,6], with the two functions colour-matched in the formula bar. No fault. `make check` green.
+>
 > **(M1709) Userspace — gpaint can now export PNG, not just BMP.** Pressing `p` writes `PAINT.PNG` (`s` still writes BMP); the from-scratch PNG encoder (`kernel/png_encode.c` + its DEFLATE) is linked into gpaint in ring 3 — the same "run a kernel codec safely in ring 3" trick `imgview`/`imgdec` use. One catch, found by a ring-3 GPF: DEFLATE's compressor guards its lazy tables with a spinlock that disables interrupts (`cli`, privileged in ring 3), so `deflate.c` is compiled with `-DDEFLATE_HOST` — the flag it already provides for exactly the "compiled as a ring-3 process" case, making the lock a no-op.
 >
 > **Verified in-guest by a full round-trip:** drew a red line + a blue box in gpaint, pressed `p` to write `PAINT.PNG` (640×398), then opened it in `imgview` — which decoded it with the OS's own `png_decode` and displayed the exact drawing, proving the encoded PNG is valid. No fault. `make check` green.

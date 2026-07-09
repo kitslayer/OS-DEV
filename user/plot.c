@@ -12,7 +12,8 @@
  *
  * Type to edit the formula (live-replotted); functions/operators are those of
  * ploteval.h (sin cos tan asin acos atan sqrt abs ln log log2 exp floor ceil
- * round sign, + - * / % ^, parens, pi, e, and the variable x).
+ * round sign, + - * / % ^, parens, pi, e, and the variable x). Separate several
+ * formulas with ';' to plot up to four curves at once, each in its own colour.
  * Keys:  printable -> edit the formula · Backspace -> delete · arrows -> pan the
  *   view · Enter -> auto-fit the y-range to the curve · Tab -> reset the view ·
  *   Esc/`~` -> quit.  (Letter/digit/operator keys type into the formula, so only
@@ -44,8 +45,12 @@
 static unsigned      *FB;
 static unsigned char  FONT[128 * 16];
 static double xmin = -10, xmax = 10, ymin = -6, ymax = 6;
-static char   func[64] = "5*sin(x)";
+static char   func[128] = "5*sin(x); x*x/9-6";   /* one or more ';'-separated formulas */
 static int    func_len;
+
+#define NF 4
+static const unsigned FCOLORS[NF] = { 0x35E0D0u, 0xFF4FA3u, 0xF0D000u, 0x46E05Au };   /* teal, pink, yellow, green */
+static char   funcs[NF][64]; static int nf;      /* `func` split on ';' */
 
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
 static void fill(int x0, int y0, int w, int h, unsigned c) { for (int y = y0; y < y0 + h; y++) for (int x = x0; x < x0 + w; x++) putpx(x, y, c); }
@@ -68,6 +73,21 @@ static void line(int x0, int y0, int x1, int y1, unsigned c) {
 static int sx_of(double x) { return (int)((x - xmin) / (xmax - xmin) * (W - 1) + 0.5); }
 static int sy_of(double y) { return PY0 + (int)((ymax - y) / (ymax - ymin) * (PH - 1) + 0.5); }
 
+/* Split `func` on ';' into up to NF trimmed, non-empty sub-expressions. */
+static void split_funcs(void) {
+    nf = 0; const char *p = func;
+    while (*p && nf < NF) {
+        while (*p == ' ') p++;
+        int n = 0;
+        while (*p && *p != ';' && n < 63) funcs[nf][n++] = *p++;
+        while (n > 0 && funcs[nf][n - 1] == ' ') n--;
+        funcs[nf][n] = 0;
+        if (n > 0) nf++;
+        while (*p && *p != ';') p++;                 /* skip any overflow in this segment */
+        if (*p == ';') p++;
+    }
+}
+
 static int sappend(char *d, int p, int max, const char *s) { while (*s && p < max - 1) d[p++] = *s++; d[p] = 0; return p; }
 
 /* Compact axis-label formatter: round to 2 decimals, trim trailing zeros (so
@@ -87,13 +107,15 @@ static void fmtnum(double v, char *out) {
 
 /* Auto-scale the y window to the finite values of f(x) over the current x range. */
 static void auto_fit_y(void) {
+    split_funcs();
     double lo = 0, hi = 0; int any = 0;
-    for (int px = 0; px < W; px += 2) {
-        double x = xmin + (xmax - xmin) * px / (W - 1);
-        int err; double y = plot_eval(func, x, &err);
-        if (err || js_isnan(y) || !js_isfinite(y)) continue;
-        if (!any) { lo = hi = y; any = 1; } else { if (y < lo) lo = y; if (y > hi) hi = y; }
-    }
+    for (int fi = 0; fi < nf; fi++)
+        for (int px = 0; px < W; px += 2) {
+            double x = xmin + (xmax - xmin) * px / (W - 1);
+            int err; double y = plot_eval(funcs[fi], x, &err);
+            if (err || js_isnan(y) || !js_isfinite(y)) continue;
+            if (!any) { lo = hi = y; any = 1; } else { if (y < lo) lo = y; if (y > hi) hi = y; }
+        }
     if (!any) return;
     if (hi - lo < 1e-9) { lo -= 1; hi += 1; }             /* flat line: give it room */
     double m = (hi - lo) * 0.10;                           /* 10% margin */
@@ -115,22 +137,30 @@ static void draw(void) {
         int py = sy_of(gy); if (py >= PY0 && py <= PY1) fill(0, py, W, 1, gy == 0 ? C_AXIS : C_GRID);
     }
 
-    /* the curve: one sample per column, connected unless a sample is invalid */
-    int prevpy = 0, have = 0;
-    for (int px = 0; px < W; px++) {
-        double x = xmin + (xmax - xmin) * px / (W - 1);
-        int err; double y = plot_eval(func, x, &err);
-        if (err || js_isnan(y) || !js_isfinite(y)) { have = 0; continue; }
-        int py = sy_of(y);
-        if (py < PY0 - PH || py > PY1 + PH) { have = 0; continue; }   /* far off-screen: break */
-        if (have) line(px - 1, prevpy, px, py, C_CURVE); else putpx(px, py, C_CURVE);
-        prevpy = py; have = 1;
+    /* the curves: each ';'-separated function in its own colour, one sample/column */
+    split_funcs();
+    for (int fi = 0; fi < nf; fi++) {
+        unsigned col = FCOLORS[fi & 3];
+        int prevpy = 0, have = 0;
+        for (int px = 0; px < W; px++) {
+            double x = xmin + (xmax - xmin) * px / (W - 1);
+            int err; double y = plot_eval(funcs[fi], x, &err);
+            if (err || js_isnan(y) || !js_isfinite(y)) { have = 0; continue; }
+            int py = sy_of(y);
+            if (py < PY0 - PH || py > PY1 + PH) { have = 0; continue; }   /* far off-screen: break */
+            if (have) line(px - 1, prevpy, px, py, col); else putpx(px, py, col);
+            prevpy = py; have = 1;
+        }
     }
 
-    /* top bar: the (editable) formula with a caret */
+    /* top bar: the (editable) formula, each function coloured like its curve */
     fill(0, 0, W, TOPH, C_BAR);
     text("y=", 2, 0, C_DIM);
-    text(func, 18, 0, C_TEXT);
+    { int seg = 0, x = 18;
+      for (int i = 0; func[i]; i++) {
+          if (func[i] == ';') { chS(';', x, 0, C_DIM); x += 8; seg++; continue; }
+          chS(func[i], x, 0, FCOLORS[seg & 3]); x += 8;
+      } }
     fill(18 + func_len * 8, 1, 6, 12, C_HILITE);           /* block caret */
 
     /* bottom bar: the view range + a key hint */
