@@ -18,6 +18,7 @@
 #include "jpeg.h"
 #include "bmp.h"
 #include "svg.h"
+#include "webp.h"
 #include <stddef.h>
 
 /* libc helpers the decoders/inflate use that user/ulib.c doesn't provide. */
@@ -26,7 +27,7 @@ int strcmp(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } 
 int memcmp(const void *a, const void *b, size_t n) { const unsigned char *x = a, *y = b; for (size_t i = 0; i < n; i++) if (x[i] != y[i]) return (int)x[i] - (int)y[i]; return 0; }
 
 #define OUTCAP  (4 * 1024 * 1024)   /* >= 1M pixels * 4 (decode_image's pixel cap) */
-#define SCRCAP  (4 * 1024 * 1024)
+#define SCRCAP  (24 * 1024 * 1024)  /* WebP's VP8L decoder needs up to ~20 MB scratch (webp.c); BSS is lazily faulted */
 static uint8_t g_file[512 * 1024];
 static uint8_t g_out[OUTCAP];
 static uint8_t g_scratch[SCRCAP];
@@ -51,6 +52,8 @@ static void decode_one(const char *name) {
         fmt = "BMP";  rc = bmp_decode(d, len, g_out, OUTCAP, &w, &h);
     } else if (len >= 1 && d[0] == '<') {
         fmt = "SVG";  rc = svg_decode(d, len, g_out, OUTCAP, g_scratch, SCRCAP, &w, &h);
+    } else if (len >= 12 && d[0]=='R'&&d[1]=='I'&&d[2]=='F'&&d[3]=='F'&&d[8]=='W'&&d[9]=='E'&&d[10]=='B'&&d[11]=='P') {
+        fmt = "WEBP"; rc = webp_decode(d, len, g_out, OUTCAP, g_scratch, SCRCAP, &w, &h);
     }
     rep(name); rep(": ");
     if (rc == 0 && w > 0 && h > 0) {

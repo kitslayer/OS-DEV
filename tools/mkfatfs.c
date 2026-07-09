@@ -1129,6 +1129,7 @@ static const struct {
     { "CALC    ELF", "build/calc.elf" },   /* run it in-OS with: run calc.elf */
     { "SUITE   JS ", "tests/js/suite.js" },/* the JS regression suite — run in-OS with: js suite.js */
     { "TEST    PNG", "tools/test.png" },   /* view in-OS with: browse file:test.png */
+    { "TEST    WEB", "tools/test.webp" },  /* lossless (VP8L) WebP: run imgview TEST.WEB (FAT 8.3 clips .webp) */
     { "BIG     PNG", "tools/big.png" },    /* 113 KB image — needs the 128 KB fetch buffer */
     { "ICON    PNG", "tools/icon.png" },  /* palette + tRNS transparency */
     { "LOGO    GIF", "tools/logo.gif" },  /* GIF: LZW + transparency + interlace */

@@ -324,34 +324,36 @@ $(BUILD)/gregex.elf: user/gregex.c kernel/js.c $(BUILD)/user_ulib.o $(BUILD)/use
 # tests/), so they link straight into a ring-3 program. A malformed-image bug now
 # crashes only this process, not the kernel. SSE on in case a decoder uses float.
 IMGDEC_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -msse2 -mfpmath=sse -Ikernel/include -Iuser
-$(BUILD)/imgdec.elf: user/imgdec.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/inflate.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+$(BUILD)/imgdec.elf: user/imgdec.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/webp.c kernel/inflate.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
 	$(IMGDEC_CC) -w -DPNG_THREADED -c kernel/png.c     -o $(BUILD)/imgdec_png.o
 	$(IMGDEC_CC) -w -DGIF_THREADED -c kernel/gif.c     -o $(BUILD)/imgdec_gif.o
 	$(IMGDEC_CC) -w -DJPEG_THREADED -c kernel/jpeg.c    -o $(BUILD)/imgdec_jpeg.o
 	$(IMGDEC_CC) -w -c kernel/bmp.c     -o $(BUILD)/imgdec_bmp.o
 	$(IMGDEC_CC) -w -c kernel/svg.c     -o $(BUILD)/imgdec_svg.o
+	$(IMGDEC_CC) -w -c kernel/webp.c    -o $(BUILD)/imgdec_webp.o
 	$(IMGDEC_CC) -w -c kernel/inflate.c -o $(BUILD)/imgdec_inflate.o
 	$(IMGDEC_CC) -w -c kernel/font.c    -o $(BUILD)/imgdec_font.o
 	$(IMGDEC_CC) -Wall -c user/imgdec.c -o $(BUILD)/imgdec_app.o
-	$(LD) -T user/user.ld -o $@ $(BUILD)/imgdec_app.o $(BUILD)/imgdec_png.o $(BUILD)/imgdec_gif.o $(BUILD)/imgdec_jpeg.o $(BUILD)/imgdec_bmp.o $(BUILD)/imgdec_svg.o $(BUILD)/imgdec_inflate.o $(BUILD)/imgdec_font.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/imgdec_app.o $(BUILD)/imgdec_png.o $(BUILD)/imgdec_gif.o $(BUILD)/imgdec_jpeg.o $(BUILD)/imgdec_bmp.o $(BUILD)/imgdec_svg.o $(BUILD)/imgdec_webp.o $(BUILD)/imgdec_inflate.o $(BUILD)/imgdec_font.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (ring-3 image decoders)"
 
 # --- imgview now DECODES IN RING 3: the graphical image viewer links the
 # from-scratch decoders directly (like imgdec) and fit-scales in-process, instead
 # of the in-kernel sys_loadimg — so a malformed image opened in the viewer crashes
 # only imgview, not the kernel. Overrides the generic %.elf rule. ---
-$(BUILD)/imgview.elf: user/imgview.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/inflate.c kernel/font.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+$(BUILD)/imgview.elf: user/imgview.c kernel/png.c kernel/gif.c kernel/jpeg.c kernel/bmp.c kernel/svg.c kernel/webp.c kernel/inflate.c kernel/font.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
 	$(IMGDEC_CC) -w -DPNG_THREADED -c kernel/png.c     -o $(BUILD)/imgview_png.o
 	$(IMGDEC_CC) -w -DGIF_THREADED -c kernel/gif.c     -o $(BUILD)/imgview_gif.o
 	$(IMGDEC_CC) -w -DJPEG_THREADED -c kernel/jpeg.c    -o $(BUILD)/imgview_jpeg.o
 	$(IMGDEC_CC) -w -c kernel/bmp.c     -o $(BUILD)/imgview_bmp.o
 	$(IMGDEC_CC) -w -c kernel/svg.c     -o $(BUILD)/imgview_svg.o
+	$(IMGDEC_CC) -w -c kernel/webp.c    -o $(BUILD)/imgview_webp.o
 	$(IMGDEC_CC) -w -c kernel/inflate.c -o $(BUILD)/imgview_inflate.o
 	$(IMGDEC_CC) -w -c kernel/font.c    -o $(BUILD)/imgview_font.o
 	$(IMGDEC_CC) -Wall -c user/imgview.c -o $(BUILD)/imgview_app.o
-	$(LD) -T user/user.ld -o $@ $(BUILD)/imgview_app.o $(BUILD)/imgview_png.o $(BUILD)/imgview_gif.o $(BUILD)/imgview_jpeg.o $(BUILD)/imgview_bmp.o $(BUILD)/imgview_svg.o $(BUILD)/imgview_inflate.o $(BUILD)/imgview_font.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/imgview_app.o $(BUILD)/imgview_png.o $(BUILD)/imgview_gif.o $(BUILD)/imgview_jpeg.o $(BUILD)/imgview_bmp.o $(BUILD)/imgview_svg.o $(BUILD)/imgview_webp.o $(BUILD)/imgview_inflate.o $(BUILD)/imgview_font.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (ring-3 image viewer)"
 
 # --- webview (the from-scratch web browser, running in RING 3) -----------------

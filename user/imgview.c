@@ -16,6 +16,7 @@
 #include "jpeg.h"
 #include "bmp.h"
 #include "svg.h"
+#include "webp.h"
 #include <stddef.h>
 
 #define W 480
@@ -39,7 +40,7 @@ static int ext_is(const char *n, const char *e) {            /* does n end with 
     for (int i = 0; i < le; i++) if (ci(n[ln - le + i]) != ci(e[i])) return 0;
     return 1;
 }
-static int is_img(const char *n) { return ext_is(n,"png")||ext_is(n,"gif")||ext_is(n,"jpg")||ext_is(n,"jpeg")||ext_is(n,"bmp")||ext_is(n,"svg"); }
+static int is_img(const char *n) { return ext_is(n,"png")||ext_is(n,"gif")||ext_is(n,"jpg")||ext_is(n,"jpeg")||ext_is(n,"bmp")||ext_is(n,"svg")||ext_is(n,"webp")||ext_is(n,"web"); }
 static int eq_ci(const char *a, const char *b) { int i = 0; while (a[i] && b[i]) { if (ci(a[i]) != ci(b[i])) return 0; i++; } return a[i] == b[i]; }
 static void putint(char *b, int *p, int v) { if (v < 0) { b[(*p)++] = '-'; v = -v; }
     char t[10]; int i = 0; if (v == 0) t[i++] = '0'; while (v) { t[i++] = '0' + v % 10; v /= 10; } while (i) b[(*p)++] = t[--i]; }
@@ -53,7 +54,8 @@ int strcmp(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } 
 int memcmp(const void *a, const void *b, size_t n) { const unsigned char *x = a, *y = b; for (size_t i = 0; i < n; i++) if (x[i] != y[i]) return (int)x[i] - (int)y[i]; return 0; }
 
 #define DCAP (4 * 1024 * 1024)                  /* >= 1M pixels * 4 (decode_image's cap) */
-static unsigned char g_file[512 * 1024], g_dec[DCAP], g_scr[DCAP];
+#define SCRCAP (24 * 1024 * 1024)                /* WebP's VP8L decoder needs up to ~20 MB scratch (webp.c); BSS is lazily faulted */
+static unsigned char g_file[512 * 1024], g_dec[DCAP], g_scr[SCRCAP];
 
 static int decode_native(const char *name, int *nw, int *nh) {
     long n = sys_readfile(name, g_file, sizeof g_file);
@@ -64,6 +66,8 @@ static int decode_native(const char *name, int *nw, int *nh) {
     else if (len >= 3 && d[0] == 0xFF && d[1] == 0xD8) rc = jpeg_decode(d, len, g_dec, DCAP, g_scr, DCAP, &w, &h);
     else if (len >= 2 && d[0] == 'B'  && d[1] == 'M') rc = bmp_decode(d, len, g_dec, DCAP, &w, &h);
     else if (len >= 1 && d[0] == '<') rc = svg_decode(d, len, g_dec, DCAP, g_scr, DCAP, &w, &h);
+    else if (len >= 12 && d[0]=='R'&&d[1]=='I'&&d[2]=='F'&&d[3]=='F'&&d[8]=='W'&&d[9]=='E'&&d[10]=='B'&&d[11]=='P')
+        rc = webp_decode(d, len, g_dec, DCAP, g_scr, SCRCAP, &w, &h);   /* lossless (VP8L) WebP — needs the big scratch */
     if (rc != 0 || w <= 0 || h <= 0) return -1;
     *nw = w; *nh = h; return 0;
 }
