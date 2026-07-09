@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1733) Docs — the in-OS help page now covers the productivity + developer-tools apps.** `file:help.htm` (the built-in manual the browser home page links to) predated this whole app arc — its app list still described only the old ASCII `paint`. It now has a **productivity** entry (sheet, plot, gpaint, imgview) and a **developer tools** entry (gjson, gregex, gdiff, garc, ghash) with each app's key features/keys, and `patch` is added to the shell-commands list. Pure content (a disk file baked by `tools/mkfatfs.c`), rendered by the from-scratch CSS engine.
+>
+> **Verified:** valid HTML in the same `<dl>`/`<span class="key">` style the rest of the page already uses; the disk rebuilds and boots, and `file:help.htm` renders the new sections in the browser. `make check` green.
+>
 > **(M1732) Userspace — `MEDIAN` and `MODE` in the spreadsheet.** The sheet had SUM/AVERAGE/MIN/MAX/STDEV/VAR but not the order-statistic functions; both are now variadic aggregates over ranges + scalars. Unlike the running-sum aggregates, these need the value *distribution*, so a nesting-safe `collect_agg_values()` gathers each range's numeric cells into a caller-local buffer, which `MEDIAN` sorts (middle value, or the mean of the two middle for an even count) and `MODE` scans for the longest equal run. In the pure `user/sheeteval.h`, host-tested.
 >
 > **Verified:** `sheettest` grew to 241 host checks (ASan/UBSan clean) — MEDIAN of odd/even counts and unsorted input, MEDIAN over a range with a text cell skipped ({1,3,5,9}→4), MODE frequency, and MEDIAN+MODE composition. In-guest: `=MEDIAN(B2:B5)` on the demo (120,90,60,200) computed 105. `make check` green.
