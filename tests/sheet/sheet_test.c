@@ -374,6 +374,62 @@ int main(void) {
     chk_adj("hello world", 1, 1, "hello world");  /* plain text: nothing to adjust */
     chk_adj("=A10+A2", 1, 0, "=A11+A3");          /* multi-digit row shifts correctly */
 
+    /* --- row sort (M1713): whole rows reorder by a key column, and moved
+     * formulas ref-adjust so they still reference their own (new) row --------*/
+    clear_all();                        /* col A label, B value, C = a formula =B{row}*2 */
+    set_raw(0, 0, "d"); set_raw(0, 1, "30"); set_raw(0, 2, "=B1*2");   /* 30 -> 60 */
+    set_raw(1, 0, "b"); set_raw(1, 1, "10"); set_raw(1, 2, "=B2*2");   /* 10 -> 20 */
+    set_raw(2, 0, "c"); set_raw(2, 1, "20"); set_raw(2, 2, "=B3*2");   /* 20 -> 40 */
+    set_raw(3, 0, "a"); set_raw(3, 1, "40"); set_raw(3, 2, "=B4*2");   /* 40 -> 80 */
+    recompute();
+    sort_rows(0, 3, 1, 0);              /* sort rows 0..3 by column B, ascending */
+    recompute();
+    chk_num(0, 1, 10, "sort asc B row0"); chk_num(1, 1, 20, "sort asc B row1");
+    chk_num(2, 1, 30, "sort asc B row2"); chk_num(3, 1, 40, "sort asc B row3");
+    chk_num(0, 2, 20, "sort asc C follows row0");   /* the =B*2 formula moved WITH its row */
+    chk_num(1, 2, 40, "sort asc C follows row1");
+    chk_num(2, 2, 60, "sort asc C follows row2");
+    chk_num(3, 2, 80, "sort asc C follows row3");
+    checks++; if (strcmp(CELL(0, 0)->raw, "b") != 0) FAILN("sort asc: label row0 = \"%s\", want b", CELL(0, 0)->raw);
+    checks++; if (strcmp(CELL(3, 0)->raw, "a") != 0) FAILN("sort asc: label row3 = \"%s\", want a", CELL(3, 0)->raw);
+    checks++; if (strcmp(CELL(0, 2)->raw, "=B1*2") != 0) FAILN("sort asc: C row0 raw = \"%s\", want =B1*2", CELL(0, 2)->raw);
+    checks++; if (strcmp(CELL(3, 2)->raw, "=B4*2") != 0) FAILN("sort asc: C row3 raw = \"%s\", want =B4*2", CELL(3, 2)->raw);
+
+    clear_all();                        /* descending */
+    set_raw(0, 1, "30"); set_raw(1, 1, "10"); set_raw(2, 1, "20"); set_raw(3, 1, "40");
+    recompute();
+    sort_rows(0, 3, 1, 1);
+    recompute();
+    chk_num(0, 1, 40, "sort desc row0"); chk_num(1, 1, 30, "sort desc row1");
+    chk_num(2, 1, 20, "sort desc row2"); chk_num(3, 1, 10, "sort desc row3");
+
+    clear_all();                        /* text keys ascending; an empty key cell sorts last */
+    set_raw(0, 0, "banana"); set_raw(1, 0, "apple"); set_raw(2, 0, ""); set_raw(3, 0, "cherry");
+    recompute();
+    sort_rows(0, 3, 0, 0);
+    checks++; if (strcmp(CELL(0, 0)->raw, "apple")  != 0) FAILN("sort text row0 = \"%s\"", CELL(0, 0)->raw);
+    checks++; if (strcmp(CELL(1, 0)->raw, "banana") != 0) FAILN("sort text row1 = \"%s\"", CELL(1, 0)->raw);
+    checks++; if (strcmp(CELL(2, 0)->raw, "cherry") != 0) FAILN("sort text row2 = \"%s\"", CELL(2, 0)->raw);
+    checks++; if (CELL(3, 0)->raw[0] != 0) FAILN("sort: empty key should sort last, got \"%s\"", CELL(3, 0)->raw);
+
+    clear_all();                        /* a number key sorts before a text key */
+    set_raw(0, 0, "xyz"); set_raw(1, 0, "5"); set_raw(2, 0, "abc"); set_raw(3, 0, "2");
+    recompute();
+    sort_rows(0, 3, 0, 0);
+    checks++; if (strcmp(CELL(0, 0)->raw, "2")   != 0) FAILN("num<text row0 = \"%s\", want 2", CELL(0, 0)->raw);
+    checks++; if (strcmp(CELL(1, 0)->raw, "5")   != 0) FAILN("num<text row1 = \"%s\", want 5", CELL(1, 0)->raw);
+    checks++; if (strcmp(CELL(2, 0)->raw, "abc") != 0) FAILN("num<text row2 = \"%s\", want abc", CELL(2, 0)->raw);
+    checks++; if (strcmp(CELL(3, 0)->raw, "xyz") != 0) FAILN("num<text row3 = \"%s\", want xyz", CELL(3, 0)->raw);
+
+    clear_all();                        /* stability: equal keys keep their original order */
+    set_raw(0, 0, "5"); set_raw(0, 1, "first");
+    set_raw(1, 0, "5"); set_raw(1, 1, "second");
+    set_raw(2, 0, "5"); set_raw(2, 1, "third");
+    recompute();
+    sort_rows(0, 2, 0, 0);
+    checks++; if (strcmp(CELL(0, 1)->raw, "first") != 0 || strcmp(CELL(1, 1)->raw, "second") != 0 ||
+                   strcmp(CELL(2, 1)->raw, "third") != 0) FAILN("sort not stable for equal keys");
+
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);
     return failures ? 1 : 0;

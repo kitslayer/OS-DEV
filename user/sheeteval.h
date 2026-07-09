@@ -533,6 +533,62 @@ static void adjust_refs(const char *src, int dr, int dc, char *out, int max) {
     out[o] = 0;
 }
 
+/* ---- row sort (pure; host-tested) — the :sort command ---------------------
+ * Reorder the rows in [r0..r1] by the key column `keyc`, ascending (desc=0) or
+ * descending (desc=1). The WHOLE row (every column) moves as a unit and each
+ * moved formula's relative refs are shifted by its row delta via adjust_refs, so
+ * a self-contained table's intra-row formulas stay correct after the sort — e.g.
+ * a Total column of =B2+C2, =B3+C3, … keeps computing each row's own B+C once
+ * the rows are rearranged. (This engine has no absolute refs, so a formula that
+ * points OUTSIDE the sorted rows is not tracked.) Empty key cells sort last in
+ * both directions; numeric keys order before text; the sort is stable.
+ * recompute() must have run (keys read computed values); the caller recomputes
+ * again afterwards. */
+static char sort_snap[NROWS][NCOLS][RAWMAX];    /* scratch: raw-text snapshot of the block being sorted (BSS) */
+static int  sort_perm[NROWS];                   /* the sorted order of absolute row indices */
+
+static int sort_scmp(const char *a, const char *b) {            /* lexicographic byte compare */
+    int i = 0;
+    while (a[i] && b[i] && a[i] == b[i]) i++;
+    return (int)(unsigned char)a[i] - (int)(unsigned char)b[i];
+}
+/* Ascending order of two NON-empty key cells: a number sorts before text;
+ * numbers by value; text lexicographically. (Empties handled by sort_order.) */
+static int sort_key_cmp(int ra, int rb, int keyc) {
+    cell_t *a = CELL(ra, keyc), *b = CELL(rb, keyc);
+    if (a->is_num && b->is_num) return a->val < b->val ? -1 : a->val > b->val ? 1 : 0;
+    if (a->is_num != b->is_num) return a->is_num ? -1 : 1;
+    return sort_scmp(a->raw, b->raw);
+}
+/* Full ordering: an empty key cell always sorts last (stable when both empty);
+ * two non-empty cells compare ascending, negated for descending. */
+static int sort_order(int ra, int rb, int keyc, int desc) {
+    int ea = (CELL(ra, keyc)->raw[0] == 0), eb = (CELL(rb, keyc)->raw[0] == 0);
+    if (ea || eb) return (ea ? 1 : 0) - (eb ? 1 : 0);
+    int c = sort_key_cmp(ra, rb, keyc);
+    return desc ? -c : c;
+}
+static void sort_rows(int r0, int r1, int keyc, int desc) {
+    if (r0 < 0) r0 = 0;
+    if (r1 >= NROWS) r1 = NROWS - 1;
+    if (r0 >= r1 || keyc < 0 || keyc >= NCOLS) return;          /* nothing to do */
+    int n = r1 - r0 + 1;
+    for (int i = 0; i < n; i++) sort_perm[i] = r0 + i;
+    for (int i = 1; i < n; i++) {                               /* stable insertion sort */
+        int key = sort_perm[i], j = i - 1;
+        while (j >= 0 && sort_order(sort_perm[j], key, keyc, desc) > 0) { sort_perm[j + 1] = sort_perm[j]; j--; }
+        sort_perm[j + 1] = key;
+    }
+    for (int r = r0; r <= r1; r++)                              /* snapshot raw text before overwriting */
+        for (int c = 0; c < NCOLS; c++) scopy(sort_snap[r][c], CELL(r, c)->raw, RAWMAX);
+    for (int i = 0; i < n; i++) {
+        int src = sort_perm[i], dst = r0 + i, dr = dst - src;
+        for (int c = 0; c < NCOLS; c++)
+            if (dr == 0) scopy(CELL(dst, c)->raw, sort_snap[src][c], RAWMAX);
+            else         adjust_refs(sort_snap[src][c], dr, 0, CELL(dst, c)->raw, RAWMAX);
+    }
+}
+
 /* ---- number formatting (pure; shared by the UI and the host test) ---------*/
 /* Format v with exactly `dec` fractional digits into out; returns length. */
 static int fmt_fixed(double v, int dec, char *out) {

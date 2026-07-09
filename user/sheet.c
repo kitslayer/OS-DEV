@@ -38,7 +38,9 @@
  *   the current cell) · p (paste it here, shifting relative refs by the move —
  *   =A1+B1 yanked from D1 pasted at D2 becomes =A2+B2) · fd N / fr N (fill the
  *   current cell down / right N cells with the same ref adjustment — "fill a
- *   formula down a column") · a cell ref like C10 (jump there) · Esc cancels.
+ *   formula down a column") · sort RANGE / sortd RANGE (sort those rows by the
+ *   range's column, ascending / descending, whole rows moving with formulas
+ *   ref-adjusted — e.g. :sort D2:D5) · a cell ref like C10 (jump there) · Esc.
  *
  * Launch: `sheet [file]` from the shell, or the Apps menu (loads a demo sheet).
  * The native file format is one `CELLREF rawtext` line per non-empty cell; a
@@ -288,7 +290,7 @@ static void render(void) {
     } else if (status[0]) {
         sys_setcolor(8); print(" "); print(status);
     } else {
-        sys_setcolor(8); print(" arrows move  edit  :y/:p copy  :fd/:fr fill  :chart  :w  :q");
+        sys_setcolor(8); print(" arrows  :y/:p copy  :fd/:fr fill  :sort  :chart  :w  :q");
     }
     sys_setcolor(0);
 }
@@ -365,6 +367,18 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         }
         modified = 1; recompute();
         scopy(status, filled ? (down ? "filled down" : "filled right") : "nothing to fill", sizeof status);
+        return 0;
+    }
+    if (startswith(c, "sort")) {                     /* :sort D2:D5 (asc) / :sortd D2:D5 (desc) */
+        int desc = (c[4] == 'd');
+        const char *rng = c + (desc ? 5 : 4); while (*rng == ' ') rng++;
+        int r1, c1, r2, c2;
+        if (parse_range(rng, &r1, &c1, &r2, &c2)) {
+            sort_rows(r1, r2, c1, desc);             /* rows r1..r2 keyed by the range's column c1 */
+            modified = 1; recompute();
+            cur_r = r1; cur_c = c1;                  /* park on the top of the sorted block */
+            scopy(status, desc ? "sorted (descending)" : "sorted (ascending)", sizeof status);
+        } else scopy(status, "usage: :sort D2:D5  (sort rows by column D; :sortd = descending)", sizeof status);
         return 0;
     }
     int r, cc;
