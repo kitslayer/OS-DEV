@@ -108,6 +108,7 @@ static const struct menu_item menu[] = {
     { "Graphing Calc", KIND_APP, "plot" },
     { "Paint (gfx)", KIND_APP, "gpaint" },
     { "JSON Viewer", KIND_APP, "gjson" },
+    { "Regex Tester", KIND_APP, "gregex" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
     { "Calendar (gfx)", KIND_APP, "gcal" },
