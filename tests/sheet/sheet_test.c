@@ -328,6 +328,20 @@ int main(void) {
         checks++; if (strcmp(csv1, csv2) != 0) FAILN("CSV round-trip unstable: \"%s\" vs \"%s\"", csv1, csv2);
     }
 
+    /* --- conditional aggregates (M1711): A1:A6 = 1,5,3,8,5,2 --------------*/
+    clear_all();
+    set_raw(0, 0, "1"); set_raw(1, 0, "5"); set_raw(2, 0, "3"); set_raw(3, 0, "8"); set_raw(4, 0, "5"); set_raw(5, 0, "2");
+    set_raw(0, 2, "=SUMIF(A1:A6,>3)");    recompute(); chk_num(0, 2, 18, "SUMIF >3");        /* 5+8+5 */
+    set_raw(0, 2, "=SUMIF(A1:A6,5)");     recompute(); chk_num(0, 2, 10, "SUMIF =5 (bare)"); /* 5+5 */
+    set_raw(0, 2, "=SUMIF(A1:A6,<=3)");   recompute(); chk_num(0, 2, 6,  "SUMIF <=3");        /* 1+3+2 */
+    set_raw(0, 2, "=SUMIF(A1:A6,<>5)");   recompute(); chk_num(0, 2, 14, "SUMIF <>5");        /* 1+3+8+2 */
+    set_raw(0, 2, "=SUMIF(A1:A6,>100)");  recompute(); chk_num(0, 2, 0,  "SUMIF none matches");
+    set_raw(0, 2, "=COUNTIF(A1:A6,>3)");  recompute(); chk_num(0, 2, 3,  "COUNTIF >3");
+    set_raw(0, 2, "=COUNTIF(A1:A6,5)");   recompute(); chk_num(0, 2, 2,  "COUNTIF =5");
+    set_raw(0, 2, "=COUNTIF(A1:A6,<>5)"); recompute(); chk_num(0, 2, 4,  "COUNTIF <>5");
+    set_raw(0, 2, "=AVERAGEIF(A1:A6,>3)"); recompute(); chk_num(0, 2, 6, "AVERAGEIF >3");     /* 18/3 */
+    set_raw(0, 2, "=SUMIF(A1:A6,>3)+COUNTIF(A1:A6,>3)"); recompute(); chk_num(0, 2, 21, "conditional aggs compose"); /* 18+3 */
+
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);
     return failures ? 1 : 0;

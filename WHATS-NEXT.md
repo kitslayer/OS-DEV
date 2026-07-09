@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1711) Userspace — conditional aggregates in the spreadsheet: `SUMIF`, `COUNTIF`, `AVERAGEIF`.** `=SUMIF(A1:A9, >3)` sums the cells in a range that satisfy a criterion — an optional comparison operator (`= <> < <= > >=`) then a value (a bare value means `=`), e.g. `SUMIF(B2:B5, >=120)`, `COUNTIF(A1:A6, <>5)`. Built on M1697's comparison operators; the criterion is parsed directly (an operator + a numeric expression, no quotes) rather than as an Excel-style string, which fits this engine's numeric cell model. All in the pure `user/sheeteval.h`.
+>
+> **Verified:** `sheettest` grew to 163 host checks (ASan/UBSan clean) — SUMIF/COUNTIF/AVERAGEIF across `>`, `=`, `<=`, `<>`, a no-match case, and composition with other functions over a known dataset. In-guest: `=SUMIF(B2:B5,>=120)` on the demo (B2:B5 = 120,90,60,200) computed 320. `make check` green.
+>
 > **(M1710) Userspace — the graphing calculator plots multiple functions at once.** Separate formulas with `;` (e.g. `5*sin(x); x*x/9-6`) and it draws up to four curves, each in its own colour (teal / pink / yellow / green), with the formula bar colour-coding each function to match its curve; auto-fit-y (Enter) scales to fit all of them. The formula is split on `;` in the UI — the pure evaluator (`ploteval.h`) is unchanged (still host-tested by `plottest`).
 >
 > **Verified in-guest:** `run plot` (default `5*sin(x); x*x/9-6`) drew a teal sine wave and a pink parabola simultaneously over x[-10,10] y[-6,6], with the two functions colour-matched in the formula bar. No fault. `make check` green.

@@ -20,7 +20,9 @@
  *                  | ('-'|'+') factor | cellref | name '(' args ')' | PI | E
  * Comparisons are the lowest precedence and evaluate to 1.0 (true) / 0.0 (false).
  * Functions: SUM AVERAGE/AVG MIN MAX COUNT COUNTA PRODUCT STDEV/STDEVP VAR/VARP
- *              (variadic, take ranges);  IF(c,a[,b]) AND/OR(...) NOT(x)  (logical);
+ *              (variadic, take ranges);  SUMIF/COUNTIF/AVERAGEIF(range, [op]value)
+ *              where op is = <> < <= > >= (bare value means "=");  IF(c,a[,b])
+ *              AND/OR(...) NOT(x)  (logical);
  *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) TRUNC(x[,dp]) MOD POW/POWER
  *            SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
  */
@@ -239,6 +241,45 @@ static double call_function(const char *name) {
             perr = ERR_SYNTAX; break;
         }
         return (double)result;
+    }
+
+    /* conditional aggregates: SUMIF/COUNTIF/AVERAGEIF(range, criterion), where the
+     * criterion is an optional comparison operator (= <> < <= > >=) then a value
+     * (a bare value means "= value"), e.g. SUMIF(A1:A9, ">3"). */
+    if (nameeq(name, "SUMIF") || nameeq(name, "COUNTIF") || nameeq(name, "AVERAGEIF")) {
+        skipws();
+        int r1, c1, r2, c2;
+        if (!parse_ref_cursor(&r1, &c1)) { perr = ERR_SYNTAX; return 0; }
+        skipws();
+        if (*pcur == ':') { pcur++; skipws(); if (!parse_ref_cursor(&r2, &c2)) { perr = ERR_SYNTAX; return 0; } }
+        else { r2 = r1; c2 = c1; }
+        skipws();
+        if (*pcur != ',') { perr = ERR_SYNTAX; return 0; }
+        pcur++; skipws();
+        int op = 0;                                          /* 0 '=' 1 '<' 2 '<=' 3 '>' 4 '>=' 5 '<>' */
+        if (*pcur == '<') { pcur++; if (*pcur == '=') { pcur++; op = 2; } else if (*pcur == '>') { pcur++; op = 5; } else op = 1; }
+        else if (*pcur == '>') { pcur++; if (*pcur == '=') { pcur++; op = 4; } else op = 3; }
+        else if (*pcur == '=') { pcur++; op = 0; }
+        double thr = eval_expr();                            /* the threshold value */
+        skipws();
+        if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        if (r1 > r2) { int t = r1; r1 = r2; r2 = t; }
+        if (c1 > c2) { int t = c1; c1 = c2; c2 = t; }
+        double sum = 0; int cnt = 0;
+        for (int r = r1; r <= r2; r++) for (int c = c1; c <= c2; c++) {
+            eval_cell(r, c); cell_t *cell = CELL(r, c);
+            if (cell->err) perr = cell->err;
+            if (!cell->is_num) continue;
+            double v = cell->val; int m = 0;
+            switch (op) {
+                case 0: m = (v == thr); break; case 1: m = (v < thr); break; case 2: m = (v <= thr); break;
+                case 3: m = (v > thr); break; case 4: m = (v >= thr); break; case 5: m = (v != thr); break;
+            }
+            if (m) { sum += v; cnt++; }
+        }
+        if (nameeq(name, "COUNTIF"))   return (double)cnt;
+        if (nameeq(name, "AVERAGEIF")) return cnt ? sum / (double)cnt : 0;
+        return sum;                                          /* SUMIF */
     }
 
     /* fixed-arity scalar functions */
