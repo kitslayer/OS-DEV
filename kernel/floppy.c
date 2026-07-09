@@ -64,9 +64,11 @@
 #define CMD_RECALIBRATE  0x07
 #define CMD_SEEK         0x0F
 #define CMD_READ_DATA    0x06
+#define CMD_WRITE_DATA   0x05
 /* READ DATA modifiers: MT (multi-track), MFM (the standard double-density
  * encoding), SK (skip deleted) — 0xE6 = MT|MFM|SK | READ DATA. */
 #define READ_FLAGS       (0x80 | 0x40 | 0x20)   /* MT | MFM | SK */
+#define WRITE_FLAGS      (0x80 | 0x40)          /* MT | MFM (no SK on write) -> 0xC5 */
 
 /* ST0 (first result byte) interrupt-code field (bits 7..6): 00 = normal end. */
 #define ST0_IC_MASK      0xC0
@@ -507,6 +509,92 @@ int floppy_read(uint32_t lba, uint32_t count, void *buf) {
     return 0;
 }
 
+/* Write one FDC command's worth of sectors (<= one track) from `src`. Mirrors
+ * floppy_read_chunk, but stages the data into the bounce buffer first and arms
+ * the 8237 for a read-FROM-memory transfer (the FDC pulls bytes out and writes
+ * them to the diskette), and issues WRITE DATA. Returns 0 on success. */
+static int floppy_write_chunk(uint32_t lba, uint32_t n, const uint8_t *src) {
+    uint8_t cyl, head, sect;
+    lba_to_chs(lba, &cyl, &head, &sect);
+
+    floppy_motor_on();
+    if (floppy_seek(cyl, head) < 0)
+        return -1;
+
+    uint32_t bytes = n * FLOPPY_SECTOR_SIZE;
+    memcpy(g_bounce, src, bytes);            /* stage the data for the 8237 to read out */
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (dma_prepare(bytes, 1) < 0)       /* arm 8237 channel 2 for a disk write */
+            return -1;
+
+        int ok = 1;
+        ok = ok && fdc_write(CMD_WRITE_DATA | WRITE_FLAGS) == 0;
+        ok = ok && fdc_write((uint8_t)((head << 2) | DOR_DSEL0)) == 0;
+        ok = ok && fdc_write(cyl) == 0;
+        ok = ok && fdc_write(head) == 0;
+        ok = ok && fdc_write(sect) == 0;
+        ok = ok && fdc_write(0x02) == 0;                       /* 512 B/sector */
+        ok = ok && fdc_write((uint8_t)(sect + n - 1)) == 0;    /* last sector on this track */
+        ok = ok && fdc_write(0x1B) == 0;                       /* GAP3 for 1.44 MB */
+        ok = ok && fdc_write(0xFF) == 0;                       /* DTL (unused when N!=0) */
+        if (!ok)
+            return -1;
+
+        uint8_t st[7];
+        int got = 0, timed_out = 0;
+        for (int i = 0; i < 7; i++) {
+            if (fdc_read(&st[i]) < 0) { timed_out = 1; break; }
+            got++;
+        }
+        if (timed_out || got != 7) {
+            for (int i = 0; i < 7; i++) {
+                uint8_t junk;
+                if (fdc_wait_rqm(MSR_DIO) < 0) break;
+                junk = inb(FDC_FIFO); (void)junk;
+            }
+            continue;                        /* retry */
+        }
+
+        /* ST1 bit 1 (NW) is set for a write-protected diskette; ST0 IC + ST1/ST2
+         * clear means the write completed. */
+        uint8_t st0 = st[0], st1 = st[1], st2 = st[2];
+        if ((st0 & ST0_IC_MASK) == ST0_IC_NORMAL && st1 == 0 && st2 == 0)
+            return 0;                        /* written */
+        if (floppy_seek(cyl, head) < 0)
+            return -1;
+    }
+    return -1;                               /* all attempts failed */
+}
+
+int floppy_write(uint32_t lba, uint32_t count, const void *buf) {
+    if (!buf || count == 0)
+        return -1;
+    if (!g_probed)
+        floppy_init();
+    if (!g_present)
+        return -1;
+    if ((uint64_t)lba + count > FLOPPY_TOTAL_SECTORS)
+        return -1;
+
+    const uint8_t *p = (const uint8_t *)buf;
+    while (count > 0) {
+        uint32_t sect_in_track = lba % FLOPPY_SECTORS_TRACK;
+        uint32_t track_left = FLOPPY_SECTORS_TRACK - sect_in_track;
+        uint32_t chunk = count;
+        if (chunk > FLOPPY_DMA_MAX_SECTORS) chunk = FLOPPY_DMA_MAX_SECTORS;
+        if (chunk > track_left)             chunk = track_left;
+
+        if (floppy_write_chunk(lba, chunk, p) < 0)
+            return -1;
+
+        lba   += chunk;
+        count -= chunk;
+        p     += chunk * FLOPPY_SECTOR_SIZE;
+    }
+    return 0;
+}
+
 /* ---- boot-time verification ---------------------------------------------- */
 
 static uint8_t selftest_buf[FLOPPY_SECTOR_SIZE * 4];
@@ -554,6 +642,26 @@ void floppy_selftest(void) {
         for (uint32_t i = 0; i < FLOPPY_SECTOR_SIZE * 4; i++)
             sum += selftest_buf[i];
         kprintf("[floppy] sectors 5..8 (4-sector read) sum=%08x\n", sum);
+    }
+
+    /* Write path (M1719): stage a known pattern, WRITE it to a scratch sector
+     * (the last one, well clear of the low sectors the read test verifies), read
+     * it back, and confirm the round-trip — proving WRITE DATA + the read-from-
+     * memory ISA-DMA direction (the mirror of the read path). */
+    {
+        uint8_t *wbuf = selftest_buf, *rbuf = selftest_buf + FLOPPY_SECTOR_SIZE;
+        for (uint32_t i = 0; i < FLOPPY_SECTOR_SIZE; i++) wbuf[i] = (uint8_t)(i * 7 + 0x5A);
+        uint32_t scratch = FLOPPY_TOTAL_SECTORS - 1;
+        if (floppy_write(scratch, 1, wbuf) != 0)
+            kprintf("[floppy] scratch sector %u: WRITE FAILED\n", scratch);
+        else if (floppy_read(scratch, 1, rbuf) != 0)
+            kprintf("[floppy] scratch sector %u: read-back FAILED\n", scratch);
+        else {
+            int match = (memcmp(wbuf, rbuf, FLOPPY_SECTOR_SIZE) == 0);
+            kprintf("[ %s ] floppy write self-test: wrote + read back sector %u -- %s\n",
+                    match ? "ok" : "!!", scratch,
+                    match ? "data matches (write path OK)" : "MISMATCH (write path broken)");
+        }
     }
 
     floppy_motor_off();   /* done — stop the motor */

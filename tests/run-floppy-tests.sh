@@ -111,6 +111,8 @@ done < "$EXP"
 # The marker string we wrote into the image surfaced in the dumped first-16 bytes.
 require "FLOPPY SECTOR 0!"                     "on-disk marker string read back verbatim"
 require "ISA-DMA read self-test complete"      "ISA-DMA read self-test completed"
+# Write path (M1719): a pattern written to the scratch sector read back identical.
+require "data matches (write path OK)"         "WRITE DATA path: pattern written + read back over ISA DMA"
 # Boot stayed on legacy ATA and reached the desktop with no fault.
 require "mounted FAT32 volume"                "FAT32 still mounted on legacy ATA (boot path intact)"
 require "launching the desktop environment"   "reached desktop launch (no fault on the floppy path)"
@@ -129,7 +131,7 @@ forbid "general protection"          "#GP fault"
 forbid "\[floppy\] sector .* READ FAILED" "floppy sector read failure"
 
 if [ "$fail" -eq 0 ]; then
-    echo "PASS: in-guest floppy (FDC up, known sectors read back over ISA DMA, no crash)"
+    echo "PASS: in-guest floppy (FDC up, sectors read back + write round-trips over ISA DMA, no crash)"
     exit 0
 else
     echo "FAIL: in-guest floppy test"

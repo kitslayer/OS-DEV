@@ -50,6 +50,13 @@ int floppy_present(void);
  * controller / seek or read error / timeout. */
 int floppy_read(uint32_t lba, uint32_t count, void *buf);
 
+/* Write `count` 512-byte sectors from `buf` to the diskette starting at `lba`
+ * (WRITE DATA over ISA DMA — the mirror of floppy_read: `buf` is staged into the
+ * bounce buffer, which the 8237 reads out to the FDC). Same track-cap looping and
+ * geometry bound as floppy_read. Returns 0 on success, -1 on bad-arg / absent
+ * controller / write-protected diskette / seek or write error / timeout. */
+int floppy_write(uint32_t lba, uint32_t count, const void *buf);
+
 /* Boot-time self-test: if a floppy + diskette is present, read sector 0 and a
  * couple more, log the first 16 bytes + an additive checksum per sector (so the
  * read can be matched byte-exact against known on-disk content), and confirm the

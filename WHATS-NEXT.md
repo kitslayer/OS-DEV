@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1719) Kernel / drivers — the floppy driver can now WRITE, not just read.** `kernel/floppy.c` was read-only; it gains `floppy_write()`, the mirror of the read path — it stages the caller's bytes into the ISA-DMA bounce buffer, arms the 8237 (channel 2) for a **read-from-memory** transfer, and issues the FDC **WRITE DATA** command, with the same track-cap looping and 2880-sector geometry bound as the read. Isolated and boot-safe (the OS boots from ATA; a config with no diskette is a clean no-op).
+>
+> **Verified in-guest** (existing `floppytest`, extended): the boot self-test now stages a known pattern, writes it to the diskette's last (scratch) sector, reads it back, and confirms the round-trip — `floppy write self-test: … data matches (write path OK)` — while every existing read-back assertion still passes (no regression) and the boot stays on legacy ATA. `make check` green.
+>
 > **(M1718) Userspace — precise view control in the graphing calculator (`:xr` / `:yr` / `:zoom`).** The plotter could only *pan* — every printable key feeds the formula, so there was no way to zoom (the source even said so). M1714's `:` command line unblocks it: `:xr A B` and `:yr A B` set the x / y range, and `:zoom F` scales both axes about the view centre (F>1 zooms in, F<1 out). The range arguments are run through `plot_eval`, so they can be expressions — `:xr -pi pi` frames exactly one period. Small UI over the already-tested evaluator.
 >
 > **Verified in-guest:** from the default `x[-10,10] y[-6,6]`, `:zoom 2` halved the view to `x[-5,5] y[-3,3]` (zoom in 2×), then `:xr -pi pi` set `x[-3.14, 3.14]` — framing one period of the demo's `5*sin(x)` — confirming both the range-set and the expression evaluation of `pi`. `make check` green.
