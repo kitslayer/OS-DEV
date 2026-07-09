@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1727) Userspace — find in the spreadsheet (`:find`).** `:find TEXT` jumps the cursor to the next cell whose **raw text or computed value** contains TEXT (case-insensitive), wrapping around the grid; a bare `:find` repeats the last search, so pressing it walks through every match. Searching the computed value means `:find 210` locates a formula cell that *evaluates* to 210, not just a literal. Pure `sheet_find()` in `user/sheeteval.h`, host-tested.
+>
+> **Verified:** `sheettest` grew to 231 host checks (ASan/UBSan clean) — case-insensitive match, raw-text vs computed-value match, wrap-around, find-next cycling, and empty/no-match. In-guest: `:find West` on the demo moved the cursor to A5 with status "found A5: West". `make check` green.
+>
 > **(M1726) Userspace — per-column number formatting in the spreadsheet (`:fmt`).** A core spreadsheet capability the sheet lacked: `:fmt` sets the current **column's** display format — `$` currency (`$1005.00`, sign ahead of the `$`), `%` percent (value×100, 1 dp), `0`–`6` fixed decimal places, or `G` general (the default auto-fit). It's a pure `fmt_value_col()` in `user/sheeteval.h` (host-tested), a `col_fmt[26]` array in the UI, and the format persists in the native file via a `%fmt` header line. Fixing this also uncovered and fixed a latent `fmt_fixed` rounding bug (0-decimal formatting truncated instead of rounding, so `3.7` → `3`; now → `4`).
 >
 > **Verified:** `sheettest` grew to 224 host checks (ASan/UBSan clean) — currency (incl. negative sign placement + `$0.00`), percent (incl. negative), fixed 0–3 dp with correct rounding, general fall-through, and `#`-overflow when a formatted value won't fit. In-guest: `:fmt $` on the demo's Total column rendered `$270.00 … $1005.00` while the other columns stayed general, status "format: currency ($)". `make check` green.

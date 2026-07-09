@@ -657,6 +657,38 @@ static const char *fmt_value_col(double v, int w, char fmt) {
     buf[w] = 0; return buf;
 }
 
+/* ---- cell search (pure; host-tested) — the :find command ------------------*/
+/* Case-insensitive substring test: does `hay` contain `needle`? ("" -> yes). */
+static int ci_substr(const char *hay, const char *needle) {
+    if (!needle[0]) return 1;
+    for (int i = 0; hay[i]; i++) {
+        int j = 0;
+        while (needle[j] && hay[i + j] && up(hay[i + j]) == up(needle[j])) j++;
+        if (!needle[j]) return 1;
+    }
+    return 0;
+}
+/* A cell matches query `q` if `q` (case-insensitive) is a substring of its raw
+ * text OR, for a numeric cell, of its displayed value (so `:find 270` locates a
+ * formula cell that computes 270, not just a literal). */
+static int cell_search_match(int r, int c, const char *q) {
+    cell_t *cell = CELL(r, c);
+    if (cell->raw[0] && ci_substr(cell->raw, q)) return 1;
+    if (cell->is_num && ci_substr(fmt_value(cell->val, 40), q)) return 1;
+    return 0;
+}
+/* Find the next cell (row-major, wrapping) strictly after (fr,fc) matching `q`.
+ * Fills *ro,*co and returns 1 if found, else 0 (also 0 for an empty query). */
+static int sheet_find(const char *q, int fr, int fc, int *ro, int *co) {
+    if (!q[0]) return 0;
+    int total = NROWS * NCOLS, start = fr * NCOLS + fc;
+    for (int k = 1; k <= total; k++) {
+        int idx = (start + k) % total, r = idx / NCOLS, c = idx % NCOLS;
+        if (cell_search_match(r, c, q)) { *ro = r; *co = c; return 1; }
+    }
+    return 0;
+}
+
 /* ---- CSV import/export (pure; host-tested) --------------------------------
  * Interchange with real tools (RFC 4180). Export writes the computed VALUES
  * (numbers in dnum_to_str's shortest round-trip form; text verbatim), a field

@@ -454,6 +454,24 @@ int main(void) {
     chk_fmtc(123456, 4, '2', "####");            /* formatted value too wide -> '#' fill */
     chk_fmtc(1234, 4, '%', "####");
 
+    /* --- cell find (M1727): case-insensitive, raw text + computed value, wraps */
+    clear_all();
+    set_raw(0, 0, "North"); set_raw(0, 1, "120");
+    set_raw(1, 0, "South"); set_raw(1, 1, "90");
+    set_raw(2, 0, "total"); set_raw(2, 1, "=B1+B2");   /* value 210 */
+    recompute();
+    {
+        int r, c;
+        checks++; if (!sheet_find("South", 0, 0, &r, &c) || r != 1 || c != 0) FAILN("find South");
+        checks++; if (!sheet_find("north", 2, 1, &r, &c) || r != 0 || c != 0) FAILN("find 'north' (case-insensitive, wraps)");
+        checks++; if (!sheet_find("210", 0, 0, &r, &c) || r != 2 || c != 1) FAILN("find computed value 210");
+        checks++; if (!sheet_find("North", 1, 0, &r, &c) || r != 0 || c != 0) FAILN("find wraps past the end");
+        checks++; if (sheet_find("zzz", 0, 0, &r, &c)) FAILN("find non-existent must fail");
+        checks++; if (sheet_find("", 0, 0, &r, &c)) FAILN("find empty query must fail");
+        /* 'o' is in North(0,0)/South(1,0)/total(2,0); from (1,0) the NEXT is (2,0) */
+        checks++; if (!sheet_find("o", 1, 0, &r, &c) || r != 2 || c != 0) FAILN("find-next cycles matches");
+    }
+
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);
     return failures ? 1 : 0;

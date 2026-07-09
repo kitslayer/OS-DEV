@@ -41,8 +41,10 @@
  *   formula down a column") · sort RANGE / sortd RANGE (sort those rows by the
  *   range's column, ascending / descending, whole rows moving with formulas
  *   ref-adjusted — e.g. :sort D2:D5) · fmt CODE (set the current COLUMN's number
- *   display format: $ currency, % percent, 0..6 fixed decimals, G general) · a
- *   cell ref like C10 (jump there) · Esc.
+ *   display format: $ currency, % percent, 0..6 fixed decimals, G general) ·
+ *   find TEXT (jump to the next cell whose text or value contains TEXT, case-
+ *   insensitive, wrapping; a bare :find repeats the last search) · a cell ref
+ *   like C10 (jump there) · Esc.
  *
  * Launch: `sheet [file]` from the shell, or the Apps menu (loads a demo sheet).
  * The native file format is one `CELLREF rawtext` line per non-empty cell; a
@@ -75,6 +77,7 @@ static int  ch_r1, ch_c1, ch_r2, ch_c2;   /* :chart target rect (inclusive, 0-ba
 static char yank_buf[RAWMAX];             /* copy/paste buffer: raw text of the yanked cell */
 static int  yank_r, yank_c, have_yank;    /* its origin cell (for relative-ref adjustment on paste) */
 static char col_fmt[NCOLS];               /* per-column number display format (0/'G'=general, 0-6/%/$) */
+static char find_q[RAWMAX];               /* last :find query (bare :find repeats it) */
 
 /* Format a cell ref ("D12") into buf (for status messages). */
 static void ref_str(int r, int c, char *buf) {
@@ -305,7 +308,7 @@ static void render(void) {
     } else if (status[0]) {
         sys_setcolor(8); print(" "); print(status);
     } else {
-        sys_setcolor(8); print(" arrows  :y/:p copy  :fd/:fr fill  :sort  :fmt  :chart  :w  :q");
+        sys_setcolor(8); print(" arrows  :y/:p copy  :fd/:fr fill  :sort :fmt :find  :w  :q");
     }
     sys_setcolor(0);
 }
@@ -382,6 +385,24 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         }
         modified = 1; recompute();
         scopy(status, filled ? (down ? "filled down" : "filled right") : "nothing to fill", sizeof status);
+        return 0;
+    }
+    if (startswith(c, "find")) {                     /* :find TEXT — jump to the next matching cell (bare :find repeats) */
+        const char *a = c + 4; while (*a == ' ') a++;
+        if (*a) scopy(find_q, a, sizeof find_q);
+        if (!find_q[0]) { scopy(status, "usage: :find TEXT  (then :find repeats)", sizeof status); return 0; }
+        int r, cc;
+        if (sheet_find(find_q, cur_r, cur_c, &r, &cc)) {
+            cur_r = r; cur_c = cc;
+            char ref[8]; ref_str(r, cc, ref);
+            scopy(status, "found ", sizeof status); int l = slen(status);
+            scopy(status + l, ref, (int)sizeof status - l); l = slen(status);
+            scopy(status + l, ": ", (int)sizeof status - l); l = slen(status);
+            scopy(status + l, find_q, (int)sizeof status - l);
+        } else {
+            scopy(status, "not found: ", sizeof status);
+            int l = slen(status); scopy(status + l, find_q, (int)sizeof status - l);
+        }
         return 0;
     }
     if (startswith(c, "fmt")) {                      /* :fmt CODE — set the current column's number format */
