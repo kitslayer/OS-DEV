@@ -110,6 +110,7 @@ static const struct menu_item menu[] = {
     { "JSON Viewer", KIND_APP, "gjson" },
     { "Regex Tester", KIND_APP, "gregex" },
     { "Diff Viewer", KIND_APP, "gdiff" },
+    { "Archive Browser", KIND_APP, "garc" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
     { "Calendar (gfx)", KIND_APP, "gcal" },
