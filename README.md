@@ -59,11 +59,16 @@ caveats below).
   continuously fuzzed under ASan/UBSan.
 - **Userspace:** a real scripting **shell** (pipes, redirects, globbing,
   functions, control flow, quoting); a **text editor** with syntax highlighting; a
-  **hex editor**; a **file manager**; ~50 small graphical tools (clocks,
-  converters, a calculator, a paint canvas, a system monitor, a task manager, …);
-  and ~40 games. **Bundled third-party software** runs as ring-3 windows on the
-  syscall layer: id Software's **DOOM** and **Quake**, a **Game Boy** emulator
-  (Peanut-GB), and a **NES** emulator (libxnes).
+  **hex editor**; a **file manager**; a **spreadsheet** (live formulas — arithmetic,
+  logic, stats — CSV import/export, and in-cell bar charts) and a **graphing
+  calculator** (plots y=f(x)); developer tools — a **JSON** validator/pretty-printer,
+  an interactive **regex** tester (over the JS engine's own regex), a visual **diff**
+  viewer, a zip/tar **archive** browser, and a SHA-256/512/CRC-32 **checksum** tool; a
+  mouse-driven **paint** program (shapes, flood-fill, PNG/BMP export); ~50 more small
+  graphical tools (clocks, converters, a scientific calculator, a system monitor, a
+  task manager, …); and ~40 games. **Bundled third-party software** runs as ring-3
+  windows on the syscall layer: id Software's **DOOM** and **Quake**, a **Game Boy**
+  emulator (Peanut-GB), and a **NES** emulator (libxnes).
 
 ### Honest caveats — this is a learning project, not a production OS
 
@@ -112,6 +117,31 @@ booting on real hardware, **[BAREMETAL.md](BAREMETAL.md)**; for the test suites
 <td align="center"><sub>id Software's DOOM, windowed</sub></td>
 <td align="center"><sub>live system stats</sub></td>
 <td align="center"><sub>the scriptable shell</sub></td>
+</tr>
+</table>
+
+**Productivity & developer tools** — all from scratch, running in ring 3:
+
+<table>
+<tr>
+<td width="33%"><img src="docs/osdev-app-sheet.png" alt="The spreadsheet: live formulas, an IF-driven Pass? column, and STDEV"></td>
+<td width="33%"><img src="docs/osdev-app-plot.png" alt="The graphing calculator plotting y = 5*sin(x)"></td>
+<td width="33%"><img src="docs/osdev-app-paint.png" alt="The paint program: line, rectangle, filled box, ellipse and flood-fill"></td>
+</tr>
+<tr>
+<td align="center"><sub>spreadsheet — formulas + charts</sub></td>
+<td align="center"><sub>graphing calculator</sub></td>
+<td align="center"><sub>paint — shapes + fill</sub></td>
+</tr>
+<tr>
+<td width="33%"><img src="docs/osdev-app-gjson.png" alt="The JSON viewer: validate + pretty-print with syntax colouring"></td>
+<td width="33%"><img src="docs/osdev-app-gregex.png" alt="The regex tester: matches highlighted, over the JS engine's own regex"></td>
+<td width="33%"><img src="docs/osdev-app-garc.png" alt="The archive browser: list a zip/tar's contents without extracting"></td>
+</tr>
+<tr>
+<td align="center"><sub>JSON pretty-printer</sub></td>
+<td align="center"><sub>regex tester</sub></td>
+<td align="center"><sub>archive browser</sub></td>
 </tr>
 </table>
 
