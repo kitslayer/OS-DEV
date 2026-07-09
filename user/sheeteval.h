@@ -452,4 +452,103 @@ static const char *fmt_value(double v, int w) {
     buf[w] = 0; return buf;
 }
 
+/* ---- CSV import/export (pure; host-tested) --------------------------------
+ * Interchange with real tools (RFC 4180). Export writes the computed VALUES
+ * (numbers in dnum_to_str's shortest round-trip form; text verbatim), a field
+ * quoted only when it contains a comma, quote or newline. Import fills cells
+ * from A1 — the cell model then classifies each field (a bare number -> NUMBER,
+ * an '='-prefixed field -> FORMULA, else TEXT). Formulas are NOT exported (CSV
+ * has no formulas — the native format preserves those); a formula cell exports
+ * its result, matching every real spreadsheet's CSV export. */
+
+/* Used extent: rows/cols is one past the last row/column holding any raw text. */
+static void sheet_extent(int *rows, int *cols) {
+    int mr = 0, mc = 0;
+    for (int r = 0; r < NROWS; r++)
+        for (int c = 0; c < NCOLS; c++)
+            if (CELL(r, c)->raw[0]) { if (r + 1 > mr) mr = r + 1; if (c + 1 > mc) mc = c + 1; }
+    *rows = mr; *cols = mc;
+}
+
+/* Append one CSV field (RFC-4180 quoting) to out[p]; return the new length. */
+static int csv_put_field(char *out, int p, int max, const char *s) {
+    int needq = 0;
+    for (const char *q = s; *q; q++) if (*q == ',' || *q == '"' || *q == '\n' || *q == '\r') { needq = 1; break; }
+    if (!needq) { for (int i = 0; s[i] && p < max; i++) out[p++] = s[i]; return p; }
+    if (p < max) out[p++] = '"';
+    for (int i = 0; s[i] && p < max - 1; i++) {
+        if (s[i] == '"') out[p++] = '"';                 /* escape a quote by doubling it */
+        if (p < max) out[p++] = s[i];
+    }
+    if (p < max) out[p++] = '"';
+    return p;
+}
+
+/* Serialize the sheet's used extent to CSV in out (<= max-1 bytes + NUL);
+ * returns the byte length. recompute() must have run so values are current. */
+static int sheet_to_csv(char *out, int max) {
+    int rows, cols; sheet_extent(&rows, &cols);
+    int p = 0;
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            if (c && p < max) out[p++] = ',';
+            cell_t *cell = CELL(r, c);
+            if (!cell->raw[0]) continue;                 /* empty -> empty field */
+            if (cell->err) p = csv_put_field(out, p, max, cell->err == ERR_CIRC ? "#CIRC" : "#ERR");
+            else if (cell->is_num) {
+                const char *s = js_isnan(cell->val) ? "NaN"
+                              : !js_isfinite(cell->val) ? (cell->val < 0 ? "-inf" : "inf")
+                              : dnum_to_str(cell->val);
+                p = csv_put_field(out, p, max, s);
+            } else p = csv_put_field(out, p, max, cell->raw);   /* text */
+        }
+        if (p < max) out[p++] = '\n';
+    }
+    if (p > max - 1) p = max - 1;
+    out[p] = 0; return p;
+}
+
+/* Read one CSV field at *pp into buf (<= bufmax-1 + NUL); advance past the field
+ * and its delimiter. Returns 1 if a comma followed (more fields this record),
+ * else 0 (a newline or end of input ended the record). */
+static int csv_get_field(const char **pp, char *buf, int bufmax) {
+    const char *p = *pp; int n = 0;
+    if (*p == '"') {                                     /* quoted field */
+        p++;
+        for (;;) {
+            if (*p == 0) break;
+            if (*p == '"') {
+                if (p[1] == '"') { if (n < bufmax - 1) buf[n++] = '"'; p += 2; continue; }
+                p++; break;                              /* closing quote */
+            }
+            if (n < bufmax - 1) buf[n++] = *p;
+            p++;
+        }
+        while (*p && *p != ',' && *p != '\n' && *p != '\r') p++;   /* skip to delimiter */
+    } else {                                             /* unquoted field */
+        while (*p && *p != ',' && *p != '\n' && *p != '\r') { if (n < bufmax - 1) buf[n++] = *p; p++; }
+    }
+    buf[n] = 0;
+    int more = (*p == ',');
+    if (*p == ',') p++;
+    else { if (*p == '\r') p++; if (*p == '\n') p++; }   /* consume LF or CRLF */
+    *pp = p; return more;
+}
+
+/* Replace the whole grid with the contents of a CSV string, placed from A1. */
+static void sheet_from_csv(const char *in) {
+    for (int r = 0; r < NROWS; r++) for (int c = 0; c < NCOLS; c++) CELL(r, c)->raw[0] = 0;
+    const char *p = in; int r = 0;
+    while (*p && r < NROWS) {
+        int c = 0, more;
+        do {
+            char buf[RAWMAX];
+            more = csv_get_field(&p, buf, RAWMAX);
+            if (c < NCOLS) set_raw(r, c, buf);           /* extra columns past Z are parsed but dropped */
+            c++;
+        } while (more);
+        r++;
+    }
+}
+
 #endif /* SHEETEVAL_H */

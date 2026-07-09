@@ -266,6 +266,55 @@ int main(void) {
     set_raw(0, 2, "=STDEVP(A1:A8)"); recompute(); chk_num(0, 2, 2, "STDEVP range");
     set_raw(0, 2, "=AVERAGE(A1:A8)"); recompute(); chk_num(0, 2, 5, "mean of the sample");
 
+    /* --- CSV export / import (M1698) --------------------------------------*/
+    {
+        char csv[512];
+        clear_all();
+        set_raw(0, 0, "Name");   set_raw(0, 1, "Qty"); set_raw(0, 2, "Total");
+        set_raw(1, 0, "Apples"); set_raw(1, 1, "3");   set_raw(1, 2, "=B2*10");
+        set_raw(2, 0, "Pears");  set_raw(2, 1, "5");   set_raw(2, 2, "=B3*10");
+        recompute();
+        sheet_to_csv(csv, sizeof csv);   /* formulas export as their computed VALUES */
+        checks++;
+        if (strcmp(csv, "Name,Qty,Total\nApples,3,30\nPears,5,50\n") != 0)
+            FAILN("CSV export: got \"%s\"", csv);
+
+        clear_all();                     /* RFC-4180 quoting of comma / quote fields */
+        set_raw(0, 0, "a,b"); set_raw(0, 1, "he said \"hi\""); set_raw(0, 2, "plain");
+        recompute();
+        sheet_to_csv(csv, sizeof csv);
+        checks++;
+        if (strcmp(csv, "\"a,b\",\"he said \"\"hi\"\"\",plain\n") != 0)
+            FAILN("CSV quoting: got \"%s\"", csv);
+
+        sheet_from_csv("x,y,z\n1,2,3\n10,20,30\n");   /* import: numbers vs text */
+        recompute();
+        chk_num(1, 0, 1, "CSV import A2"); chk_num(1, 2, 3, "CSV import C2");
+        chk_num(2, 1, 20, "CSV import B3");
+        checks++; if (CELL(0, 0)->kind != K_TEXT) FAILN("CSV import: \"x\" should be text");
+        checks++; if (CELL(1, 0)->kind != K_NUM)  FAILN("CSV import: \"1\" should be number");
+
+        /* import quoted fields: embedded comma + escaped ("") quote */
+        sheet_from_csv("\"a,b\",\"say \"\"hi\"\"\"\nplain,42\n");
+        recompute();
+        checks++; if (strcmp(CELL(0, 0)->raw, "a,b") != 0) FAILN("CSV in quoted comma: \"%s\"", CELL(0, 0)->raw);
+        checks++; if (strcmp(CELL(0, 1)->raw, "say \"hi\"") != 0) FAILN("CSV in escaped quote: \"%s\"", CELL(0, 1)->raw);
+        chk_num(1, 1, 42, "CSV import row2 B");
+
+        sheet_from_csv("5,=A1*3\n");     /* an '='-prefixed field imports as a live formula */
+        recompute();
+        chk_num(0, 1, 15, "CSV import formula field");
+
+        clear_all();                     /* export -> import -> export is stable */
+        set_raw(0, 0, "10"); set_raw(0, 1, "=A1+5"); set_raw(1, 0, "hello");
+        recompute();
+        char csv1[512], csv2[512];
+        sheet_to_csv(csv1, sizeof csv1);
+        sheet_from_csv(csv1); recompute();
+        sheet_to_csv(csv2, sizeof csv2);
+        checks++; if (strcmp(csv1, csv2) != 0) FAILN("CSV round-trip unstable: \"%s\" vs \"%s\"", csv1, csv2);
+    }
+
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);
     return failures ? 1 : 0;

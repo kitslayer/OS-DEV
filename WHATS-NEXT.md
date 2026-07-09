@@ -1,5 +1,11 @@
 # What's next
 
+> **(M1698) Userspace — CSV import/export for the spreadsheet, so it can exchange data with the real world.** `sheet` already had a native format (one `CELLREF rawtext` line per cell); this adds RFC-4180 CSV, chosen by filename extension — `:w report.csv` (or launching `sheet report.csv`) round-trips through comma-separated values, anything else stays native. The serialize/parse pair lives in the pure `sheeteval.h` core (so it's host-tested), the extension dispatch in `sheet.c`'s load/save.
+>
+> Export writes the *computed values* (numbers in shortest round-trip form, text verbatim), quoting a field only when it contains a comma, quote or newline (an embedded quote is doubled, per the spec) — so a formula cell exports its result, exactly like every real spreadsheet's CSV export (the native format is what preserves formulas). Import fills cells from A1 and lets the existing cell model classify each field: a bare number becomes a NUMBER, an `=`-prefixed field a live FORMULA, everything else TEXT; quoted fields with embedded commas/newlines/escaped quotes parse correctly, and rows wider than column Z are read but dropped.
+>
+> **Verified:** `sheettest` grew to 145 host checks (ASan/UBSan clean): exact-string export incl. quoting of comma/quote fields, import of numbers-vs-text, quoted fields with an embedded comma + `""`-escaped quote, an `=`-prefixed field importing as a live formula, and an export→import→export round-trip proven byte-stable. In-guest: exported the demo with `:w SHEET.CSV` (the Files panel item count ticked 140→141, confirming the disk write), then re-launched `sheet SHEET.CSV` — every value, including the formula results (270/470/1005) and `STDEV=60.20797`, came back correctly as imported numbers. `make check` green.
+>
 > **(M1697) Userspace — powered up the spreadsheet's formula engine with comparison operators, conditional/logical functions, a scientific-function library, and statistics.** The M1696 engine did arithmetic + aggregates; this makes `sheet` genuinely useful for modelling. All additions live in the pure, host-tested core (`user/sheeteval.h`):
 >
 > - **Comparison operators `= <> < <= > >=`** as a new lowest-precedence, left-associative grammar level yielding `1.0`/`0.0` (Excel-style booleans), so `A1>=250` and `(x<y)*3` work and feed straight into conditionals.

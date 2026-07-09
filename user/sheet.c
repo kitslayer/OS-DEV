@@ -36,7 +36,9 @@
  *   like C10 (jump there) · Esc cancels.
  *
  * Launch: `sheet [file]` from the shell, or the Apps menu (loads a demo sheet).
- * The native file format is one `CELLREF rawtext` line per non-empty cell.
+ * The native file format is one `CELLREF rawtext` line per non-empty cell; a
+ * name ending in .csv is loaded/saved as CSV instead (RFC 4180 — export writes
+ * computed values, so formulas resolve to numbers, like any real spreadsheet).
  * Kernel cooks no PgUp/Ctrl/function keys to apps, so navigation is arrows-only
  * and the grid auto-scrolls to follow the selection.
  */
@@ -62,10 +64,17 @@ static char edit_buf[RAWMAX];  static int edit_len;
 static char cmd_buf[72];        static int cmd_len;
 
 /* ---- file load / save -----------------------------------------------------*/
+static int is_csv(const char *name) {                    /* case-insensitive ".csv" suffix */
+    int n = slen(name);
+    return n >= 4 && name[n - 4] == '.' &&
+           up(name[n - 3]) == 'C' && up(name[n - 2]) == 'S' && up(name[n - 1]) == 'V';
+}
+
 static void load_file(void) {
     long n = sys_readfile(fname, iobuf, IOMAX - 1);
     if (n < 0) { scopy(status, "new file", sizeof status); return; }   /* absent -> fresh sheet */
     iobuf[n] = 0;
+    if (is_csv(fname)) { sheet_from_csv(iobuf); scopy(status, "loaded CSV", sizeof status); return; }
     long i = 0;
     while (i < n) {
         long ls = i; while (i < n && iobuf[i] != '\n') i++;
@@ -85,19 +94,24 @@ static void load_file(void) {
 
 static void save_file(void) {
     if (!fname[0]) { scopy(status, "no filename: use :w NAME", sizeof status); return; }
-    int p = 0;
-    for (int r = 0; r < NROWS && p < IOMAX - RAWMAX - 8; r++)
-        for (int c = 0; c < NCOLS && p < IOMAX - RAWMAX - 8; c++) {
-            const char *raw = CELL(r, c)->raw;
-            if (!raw[0]) continue;
-            iobuf[p++] = (char)('A' + c);
-            int row = r + 1; char d[4]; int dn = 0;
-            while (row) { d[dn++] = (char)('0' + row % 10); row /= 10; }
-            while (dn) iobuf[p++] = d[--dn];
-            iobuf[p++] = ' ';
-            for (int k = 0; raw[k]; k++) iobuf[p++] = raw[k];
-            iobuf[p++] = '\n';
-        }
+    int p;
+    if (is_csv(fname)) {
+        p = sheet_to_csv(iobuf, IOMAX);                  /* interchange: computed values, RFC-4180 */
+    } else {
+        p = 0;                                           /* native: one "CELLREF rawtext" line per cell */
+        for (int r = 0; r < NROWS && p < IOMAX - RAWMAX - 8; r++)
+            for (int c = 0; c < NCOLS && p < IOMAX - RAWMAX - 8; c++) {
+                const char *raw = CELL(r, c)->raw;
+                if (!raw[0]) continue;
+                iobuf[p++] = (char)('A' + c);
+                int row = r + 1; char d[4]; int dn = 0;
+                while (row) { d[dn++] = (char)('0' + row % 10); row /= 10; }
+                while (dn) iobuf[p++] = d[--dn];
+                iobuf[p++] = ' ';
+                for (int k = 0; raw[k]; k++) iobuf[p++] = raw[k];
+                iobuf[p++] = '\n';
+            }
+    }
     if (sys_writefile(fname, iobuf, p) < 0) { scopy(status, "save FAILED", sizeof status); return; }
     modified = 0;
     scopy(status, "saved ", sizeof status);
