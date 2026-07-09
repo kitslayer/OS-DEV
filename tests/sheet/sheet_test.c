@@ -48,6 +48,13 @@ static void chk_fmt(double v, int w, const char *want) {
     const char *got = fmt_value(v, w);
     if (strcmp(got, want) != 0) FAILN("fmt_value(%.10g,%d) = \"%s\", want \"%s\"", v, w, got, want);
 }
+/* check adjust_refs shifts a formula's relative refs by (dr,dc) into `want` */
+static void chk_adj(const char *src, int dr, int dc, const char *want) {
+    checks++;
+    char out[RAWMAX];
+    adjust_refs(src, dr, dc, out, RAWMAX);
+    if (strcmp(out, want) != 0) FAILN("adjust_refs(\"%s\", %d, %d) = \"%s\", want \"%s\"", src, dr, dc, out, want);
+}
 
 int main(void) {
     printf("spreadsheet formula-engine tests\n");
@@ -341,6 +348,31 @@ int main(void) {
     set_raw(0, 2, "=COUNTIF(A1:A6,<>5)"); recompute(); chk_num(0, 2, 4,  "COUNTIF <>5");
     set_raw(0, 2, "=AVERAGEIF(A1:A6,>3)"); recompute(); chk_num(0, 2, 6, "AVERAGEIF >3");     /* 18/3 */
     set_raw(0, 2, "=SUMIF(A1:A6,>3)+COUNTIF(A1:A6,>3)"); recompute(); chk_num(0, 2, 21, "conditional aggs compose"); /* 18+3 */
+
+    /* --- relative-reference adjustment for copy/paste + fill (M1712) -------
+     * The pure engine behind :y/:p and :fd/:fr — shift every genuine cell ref
+     * by (dr,dc), clamped to the grid, while leaving function names, constants,
+     * text and number literals (incl. exponents) untouched. */
+    chk_adj("=A1+B1", 1, 0, "=A2+B2");            /* fill one row down */
+    chk_adj("=A1+B1", 2, 0, "=A3+B3");            /* two rows down */
+    chk_adj("=A1+B1", 0, 1, "=B1+C1");            /* one column right */
+    chk_adj("=A1", 2, 3, "=D3");                  /* both axes: A1 -> D3 */
+    chk_adj("=A1*2", 1, 0, "=A2*2");              /* a literal 2 is not a ref */
+    chk_adj("=SUM(A1:A5)", 1, 0, "=SUM(A2:A6)");  /* range endpoints both shift; SUM stays */
+    chk_adj("=A1+SUM(B1:B2)", 2, 0, "=A3+SUM(B3:B4)");
+    chk_adj("=IF(A1>0,B1,C1)", 1, 0, "=IF(A2>0,B2,C2)");   /* IF name kept, all three refs shift */
+    chk_adj("=SUMIF(A1:A6,>3)", 1, 0, "=SUMIF(A2:A7,>3)"); /* criterion's 3 is a literal, not a ref */
+    chk_adj("=A1*PI", 0, 1, "=B1*PI");            /* PI is a constant, not a ref */
+    chk_adj("=A1+E", 1, 0, "=A2+E");              /* bare E (constant) is left alone */
+    chk_adj("=E5", 1, 0, "=E6");                  /* ...but E5 is a genuine ref (col E, row 5) */
+    chk_adj("=A1*1e5", 1, 0, "=A2*1e5");          /* an exponent's e5 must NOT be read as a ref */
+    chk_adj("=1.5e-2+A1", 2, 0, "=1.5e-2+A3");    /* signed exponent preserved */
+    chk_adj("=a1+b1", 1, 0, "=A2+B2");            /* lowercase refs normalise to uppercase */
+    chk_adj("=A1", -5, 0, "=A1");                 /* clamp at the top edge (row can't go < 1) */
+    chk_adj("=A1", 0, -3, "=A1");                 /* clamp at the left edge (col can't go < A) */
+    chk_adj("=Z100", 5, 5, "=Z100");              /* clamp at the bottom-right corner */
+    chk_adj("hello world", 1, 1, "hello world");  /* plain text: nothing to adjust */
+    chk_adj("=A10+A2", 1, 0, "=A11+A3");          /* multi-digit row shifts correctly */
 
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);

@@ -34,8 +34,11 @@
  * Edit mode:  type to append; Backspace deletes; Enter commits + moves down;
  *   an arrow commits + moves that way (Excel-style); Esc cancels.
  * Command line (after ':'):  w [file] (save) · q · q! · wq [file] · chart
- *   [range] (a horizontal bar chart of a range, or the current column) · a cell
- *   ref like C10 (jump there) · Esc cancels.
+ *   [range] (a horizontal bar chart of a range, or the current column) · y (yank
+ *   the current cell) · p (paste it here, shifting relative refs by the move —
+ *   =A1+B1 yanked from D1 pasted at D2 becomes =A2+B2) · fd N / fr N (fill the
+ *   current cell down / right N cells with the same ref adjustment — "fill a
+ *   formula down a column") · a cell ref like C10 (jump there) · Esc cancels.
  *
  * Launch: `sheet [file]` from the shell, or the Apps menu (loads a demo sheet).
  * The native file format is one `CELLREF rawtext` line per non-empty cell; a
@@ -65,6 +68,17 @@ static char status[72];              /* transient status/help message */
 static char edit_buf[RAWMAX];  static int edit_len;
 static char cmd_buf[72];        static int cmd_len;
 static int  ch_r1, ch_c1, ch_r2, ch_c2;   /* :chart target rect (inclusive, 0-based) */
+static char yank_buf[RAWMAX];             /* copy/paste buffer: raw text of the yanked cell */
+static int  yank_r, yank_c, have_yank;    /* its origin cell (for relative-ref adjustment on paste) */
+
+/* Format a cell ref ("D12") into buf (for status messages). */
+static void ref_str(int r, int c, char *buf) {
+    int n = 0; buf[n++] = (char)('A' + c);
+    int rr = r + 1; char d[6]; int dn = 0;
+    while (rr) { d[dn++] = (char)('0' + rr % 10); rr /= 10; }
+    while (dn) buf[n++] = d[--dn];
+    buf[n] = 0;
+}
 
 /* ---- file load / save -----------------------------------------------------*/
 static int is_csv(const char *name) {                    /* case-insensitive ".csv" suffix */
@@ -274,7 +288,7 @@ static void render(void) {
     } else if (status[0]) {
         sys_setcolor(8); print(" "); print(status);
     } else {
-        sys_setcolor(8); print(" arrows move  type edit  Bksp clear  :chart  :w save  :q quit");
+        sys_setcolor(8); print(" arrows move  edit  :y/:p copy  :fd/:fr fill  :chart  :w  :q");
     }
     sys_setcolor(0);
 }
@@ -314,6 +328,43 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         } else if (parse_range(rng, &ch_r1, &ch_c1, &ch_r2, &ch_c2)) {
             mode = MODE_CHART; status[0] = 0;
         } else scopy(status, "chart: usage  :chart B2:B5  (or :chart for this column)", sizeof status);
+        return 0;
+    }
+    if (streq(c, "y")) {                             /* yank the current cell (copy) */
+        scopy(yank_buf, CELL(cur_r, cur_c)->raw, RAWMAX);
+        yank_r = cur_r; yank_c = cur_c; have_yank = 1;
+        char ref[8]; ref_str(cur_r, cur_c, ref);
+        scopy(status, "yanked ", sizeof status);
+        int l = slen(status); scopy(status + l, ref, (int)sizeof status - l);
+        return 0;
+    }
+    if (streq(c, "p")) {                             /* paste into the current cell, ref-adjusted */
+        if (!have_yank) { scopy(status, "nothing yanked -- :y a cell first", sizeof status); return 0; }
+        char out[RAWMAX];
+        adjust_refs(yank_buf, cur_r - yank_r, cur_c - yank_c, out, RAWMAX);
+        scopy(CELL(cur_r, cur_c)->raw, out, RAWMAX);
+        modified = 1; recompute();
+        scopy(status, "pasted (refs adjusted)", sizeof status);
+        return 0;
+    }
+    if (startswith(c, "fd") || startswith(c, "fr")) {   /* fill the current cell down / right N cells */
+        int down = (c[1] == 'd');
+        const char *a = c + 2; while (*a == ' ') a++;
+        int n = 0; while (is_digit(*a)) { n = n * 10 + (*a - '0'); a++; }
+        while (*a == ' ') a++;
+        if (n < 1 || *a) { scopy(status, down ? "usage: :fd N  (fill cell down N rows)"
+                                              : "usage: :fr N  (fill cell right N cols)", sizeof status); return 0; }
+        char src[RAWMAX]; scopy(src, CELL(cur_r, cur_c)->raw, RAWMAX);   /* snapshot before overwriting */
+        int filled = 0;
+        for (int i = 1; i <= n; i++) {
+            int rr = cur_r + (down ? i : 0), cc2 = cur_c + (down ? 0 : i);
+            if (rr >= NROWS || cc2 >= NCOLS) break;
+            char out[RAWMAX];
+            adjust_refs(src, down ? i : 0, down ? 0 : i, out, RAWMAX);
+            scopy(CELL(rr, cc2)->raw, out, RAWMAX); filled++;
+        }
+        modified = 1; recompute();
+        scopy(status, filled ? (down ? "filled down" : "filled right") : "nothing to fill", sizeof status);
         return 0;
     }
     int r, cc;

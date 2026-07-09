@@ -482,6 +482,57 @@ static int parse_range(const char *s, int *r1o, int *c1o, int *r2o, int *c2o) {
     *r1o = r1; *c1o = c1; *r2o = r2; *c2o = c2; return 1;
 }
 
+/* Rewrite a formula/text `src` into `out`, shifting every relative cell
+ * reference by (dr, dc) rows/cols, clamped to the grid — the ref-adjustment
+ * behind copy/paste ("fill a formula down": yanking =A1+B1 from D1 and pasting
+ * into D2 gives =A2+B2). This mirrors the evaluator's lexer exactly so it only
+ * touches genuine references: a number literal (incl. an exponent like 1e5) is
+ * copied verbatim so its 'e5' is never mistaken for a ref, an identifier
+ * immediately followed by '(' is a function name (SUM, IF), a multi-letter or
+ * lone-letter identifier is a name/constant (PI, E) — only a single column
+ * letter followed by digits (A1, Z100), and not a function call, is a ref. Pure. */
+static void adjust_refs(const char *src, int dr, int dc, char *out, int max) {
+    int o = 0; const char *p = src;
+    while (*p && o < max - 1) {
+        if (is_digit(*p) || (*p == '.' && is_digit(p[1]))) {     /* number literal — verbatim */
+            while ((is_digit(*p) || *p == '.') && o < max - 1) out[o++] = *p++;
+            if ((*p == 'e' || *p == 'E') &&
+                (is_digit(p[1]) || ((p[1] == '+' || p[1] == '-') && is_digit(p[2])))) {
+                if (o < max - 1) out[o++] = *p++;                /* e/E */
+                if ((*p == '+' || *p == '-') && o < max - 1) out[o++] = *p++;
+                while (is_digit(*p) && o < max - 1) out[o++] = *p++;
+            }
+            continue;
+        }
+        if (is_alpha(*p)) {                                      /* identifier: name, constant or ref */
+            const char *s = p; char id[24]; int n = 0;
+            while (is_alpha(*p) || is_digit(*p)) { if (n < 23) id[n++] = *p; p++; }
+            id[n] = 0;
+            int isref = (*p != '(' && is_alpha(id[0]) && !is_alpha(id[1]) && is_digit(id[1]));
+            int col = 0, row = 0;
+            if (isref) {
+                col = up(id[0]) - 'A';
+                for (int i = 1; id[i]; i++) { if (!is_digit(id[i])) { isref = 0; break; } row = row * 10 + (id[i] - '0'); }
+                row--;
+            }
+            if (isref) {
+                int nc = col + dc, nr = row + dr;
+                if (nc < 0) nc = 0; if (nc >= NCOLS) nc = NCOLS - 1;
+                if (nr < 0) nr = 0; if (nr >= NROWS) nr = NROWS - 1;
+                if (o < max - 1) out[o++] = (char)('A' + nc);
+                char d[8]; int dn = 0, rr = nr + 1;
+                while (rr) { d[dn++] = (char)('0' + rr % 10); rr /= 10; }
+                while (dn && o < max - 1) out[o++] = d[--dn];
+            } else {
+                for (const char *q = s; q < p && o < max - 1; q++) out[o++] = *q;   /* verbatim span */
+            }
+            continue;
+        }
+        out[o++] = *p++;
+    }
+    out[o] = 0;
+}
+
 /* ---- number formatting (pure; shared by the UI and the host test) ---------*/
 /* Format v with exactly `dec` fractional digits into out; returns length. */
 static int fmt_fixed(double v, int dec, char *out) {
