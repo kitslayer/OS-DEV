@@ -24,7 +24,8 @@
  *   (toggle the numeric derivative f'(x) of the first curve, drawn as a lavender
  *   overlay) ·  root  (toggle the zeros of the first curve in view — orange ticks
  *   on the x-axis + the x-values listed) ·  fit ·  reset ·  xr A B / yr A B (set the x/y range) ·  zoom F (scale about
- *   the centre; F>1 zooms in) — range args are evaluated, so `xr -pi pi` works.
+ *   the centre; F>1 zooms in) — range args are evaluated, so `xr -pi pi` works ·
+ *   save (write the current graph to PLOT.BMP).
  *   Integral (Simpson),
  *   derivative (central difference) and roots (sign-change scan + bisection) are
  *   all pure, host-tested ploteval.h helpers.
@@ -68,6 +69,7 @@ static char   funcs[NF][64]; static int nf;      /* `func` split on ';' */
 static int    cmdmode;                           /* ':' command line active */
 static char   cmd[48]; static int cmd_len;
 static int    show_int, show_der, show_root;     /* :int / :der / :root toggles (first curve) */
+static const char *plot_msg;                     /* transient bottom-bar note (e.g. after :save) */
 
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
 static void fill(int x0, int y0, int w, int h, unsigned c) { for (int y = y0; y < y0 + h; y++) for (int x = x0; x < x0 + w; x++) putpx(x, y, c); }
@@ -165,6 +167,7 @@ static void exec_plot_cmd(void) {
     else if (streq(c, "root"))  show_root = !show_root;
     else if (streq(c, "fit"))   auto_fit_y();
     else if (streq(c, "reset")) { xmin = -10; xmax = 10; ymin = -6; ymax = 6; }
+    else if (streq(c, "save"))  plot_msg = (sys_savebmp("PLOT.BMP", FB, W, H) >= 0) ? "saved PLOT.BMP" : "save FAILED";
     else if (startswith(c, "xr")) { double a[2]; if (parse_nums(c + 2, a, 2) == 2 && a[1] > a[0]) { xmin = a[0]; xmax = a[1]; } }
     else if (startswith(c, "yr")) { double a[2]; if (parse_nums(c + 2, a, 2) == 2 && a[1] > a[0]) { ymin = a[0]; ymax = a[1]; } }
     else if (startswith(c, "zoom")) {           /* scale both spans by 1/F about the view centre (F>1 zooms in) */
@@ -279,7 +282,7 @@ static void draw(void) {
         cl[p] = 0;
         text(cl, 2, H - BOTH, C_TEXT);
         fill(2 + (cmd_len + 1) * 8, H - BOTH + 1, 6, 12, C_HILITE);   /* caret */
-        const char *ch = "int der root  fit reset  xr A B  yr A B  zoom F";
+        const char *ch = "int der root  fit reset  xr A B  yr A B  zoom F  save";
         int chl = 0; while (ch[chl]) chl++;
         text(ch, W - chl * 8 - 2, H - BOTH, C_DIM);
     } else {
@@ -290,9 +293,10 @@ static void draw(void) {
         p = sappend(b, p, sizeof b, ", ");  fmtnum(ymax, nb); p = sappend(b, p, sizeof b, nb);
         p = sappend(b, p, sizeof b, "]");
         text(b, 2, H - BOTH, C_DIM);
-        const char *hint = "arrows:pan  :zoom :xr :int :der :root  Enter:fit  Esc";
+        const char *hint = plot_msg ? plot_msg : "arrows:pan  :zoom :int :der :root :save  Esc";
+        unsigned hcol = plot_msg ? C_ROOT : C_DIM;
         int hl = 0; while (hint[hl]) hl++;
-        text(hint, W - hl * 8 - 2, H - BOTH, C_DIM);
+        text(hint, W - hl * 8 - 2, H - BOTH, hcol);
     }
 
     sys_gfx_blit(FB);
@@ -323,6 +327,7 @@ int main(void) {
             draw(); continue;
         }
 
+        plot_msg = 0;                                               /* any key dismisses a transient note */
         double xspan = xmax - xmin, yspan = ymax - ymin;
         if (k == 27 || k == '`' || k == '~') break;                 /* quit */
         else if (k == ':') { cmdmode = 1; cmd_len = 0; cmd[0] = 0; } /* open the command line */

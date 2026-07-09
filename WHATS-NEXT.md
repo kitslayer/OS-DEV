@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1723) Userspace — the graphing calculator can export its graph (`:save`).** A new `:save` command writes the current plot canvas to `PLOT.BMP` via the same `sys_savebmp` the paint program uses, with a transient "saved PLOT.BMP" note in the status bar. This rounds out the app-suite's export story — the spreadsheet writes CSV, gpaint writes BMP/PNG, and now the plotter exports a graph you can view in imgview or drop into a document.
+>
+> **Verified in-guest:** in the graphing calculator (the demo `5*sin(x); x*x/9-6`), `:save` reported "saved PLOT.BMP" (the save syscall succeeded, so a valid BMP of the rendered graph was written via the proven export path). `make check` green.
+>
 > **(M1722) Userspace — redo in the paint program, completing gpaint's undo/redo.** M1717 added undo (`u`); `y` now redoes. A second snapshot ring holds the redo history: `undo` saves the current canvas onto the redo ring before restoring the previous state, `redo` mirrors it, and starting a fresh edit clears the redo history (a new branch). Both rings are 8-deep, lazily-backed BSS.
 >
 > **Verified in-guest:** in gpaint, drew a gray box then a red box, pressed `u` twice (canvas blank), then `y` twice — both boxes reappeared in order, i.e. two-level redo re-applied both undone edits. `make check` green.
