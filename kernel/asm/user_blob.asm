@@ -132,6 +132,7 @@ global gjson_elf_start, gjson_elf_end
 global gregex_elf_start, gregex_elf_end
 global gdiff_elf_start, gdiff_elf_end
 global garc_elf_start, garc_elf_end
+global ghash_elf_start, ghash_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -628,5 +629,9 @@ gdiff_elf_end:
 garc_elf_start:
     incbin "build/garc.elf"
 garc_elf_end:
+
+ghash_elf_start:
+    incbin "build/ghash.elf"
+ghash_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

@@ -111,6 +111,7 @@ static const struct menu_item menu[] = {
     { "Regex Tester", KIND_APP, "gregex" },
     { "Diff Viewer", KIND_APP, "gdiff" },
     { "Archive Browser", KIND_APP, "garc" },
+    { "Hash / Checksum", KIND_APP, "ghash" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
     { "Calendar (gfx)", KIND_APP, "gcal" },
