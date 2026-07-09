@@ -294,7 +294,7 @@ extern char shell_elf_start[], clock_elf_start[], calc_elf_start[], snake_elf_st
             chess_elf_start[], vpoker_elf_start[], mancala_elf_start[],
             dotsbox_elf_start[], missile_elf_start[], pacman_elf_start[],
             solitaire_elf_start[], gems_elf_start[], columns_elf_start[], freecell_elf_start[],
-            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[], mmapfile_elf_start[], threads_elf_start[], robustfutex_elf_start[], overlay_elf_start[], pcwd_elf_start[], hexedit_elf_start[], aclock_elf_start[], sysgraph_elf_start[], taskman_elf_start[], gcal_elf_start[], gauges_elf_start[], gsw_elf_start[], bclock_elf_start[], gfont_elf_start[], gtimer_elf_start[], imgview_elf_start[], gcalc_elf_start[], gcolor_elf_start[], gfire_elf_start[], gmetro_elf_start[], gconv_elf_start[], gbase_elf_start[], gpass_elf_start[], gclip_elf_start[], gtodo_elf_start[], gseq_elf_start[], jsrun_elf_start[], imgdec_elf_start[], httpget_elf_start[], webview_elf_start[];
+            spider_elf_start[], sandbox_elf_start[], forth_elf_start[], cc_elf_start[], crash_elf_start[], futex_elf_start[], nettcp_elf_start[], crashinfo_elf_start[], forktest_elf_start[], execdemo_elf_start[], nstest_elf_start[], steptest_elf_start[], scnotify_elf_start[], fswaittest_elf_start[], sigfdtest_elf_start[], bpftest_elf_start[], fantest_elf_start[], iouringtest_elf_start[], msealtest_elf_start[], httpd_elf_start[], uffdtest_elf_start[], mmapfile_elf_start[], threads_elf_start[], robustfutex_elf_start[], overlay_elf_start[], pcwd_elf_start[], hexedit_elf_start[], aclock_elf_start[], sysgraph_elf_start[], taskman_elf_start[], gcal_elf_start[], gauges_elf_start[], gsw_elf_start[], bclock_elf_start[], gfont_elf_start[], gtimer_elf_start[], imgview_elf_start[], gcalc_elf_start[], gcolor_elf_start[], gfire_elf_start[], gmetro_elf_start[], gconv_elf_start[], gbase_elf_start[], gpass_elf_start[], gclip_elf_start[], gtodo_elf_start[], gseq_elf_start[], jsrun_elf_start[], imgdec_elf_start[], httpget_elf_start[], webview_elf_start[], sheet_elf_start[];
 static const struct { const char *name; char *elf; const char *title; } progs[] = {
     { "shell",  shell_elf_start,  "Shell"  },
     { "clock",  clock_elf_start,  "Clock"  },
@@ -366,6 +366,7 @@ static const struct { const char *name; char *elf; const char *title; } progs[] 
     { "sandbox", sandbox_elf_start, "Sandbox (pledge demo)" },
     { "forth", forth_elf_start, "Forth" },
     { "hexedit", hexedit_elf_start, "Hex Editor" },
+    { "sheet", sheet_elf_start, "Spreadsheet" },
     { "aclock", aclock_elf_start, "Analog Clock" },
     { "sysgraph", sysgraph_elf_start, "System Monitor" },
     { "taskman", taskman_elf_start, "Task Manager" },

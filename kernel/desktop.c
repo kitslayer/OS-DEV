@@ -104,6 +104,7 @@ static const struct menu_item menu[] = {
     { "Browser (kernel)", KIND_BROWSER, 0 },           /* the in-kernel browser kept as a fallback */
     { "Shell", KIND_APP, "shell" },
     { "Clock", KIND_APP, "clock" }, { "Analog Clock", KIND_APP, "aclock" }, { "Calc", KIND_APP, "calc" },
+    { "Spreadsheet", KIND_APP, "sheet" },
     { "System Monitor", KIND_APP, "sysgraph" },
     { "Task Manager", KIND_APP, "taskman" },
     { "Calendar (gfx)", KIND_APP, "gcal" },

@@ -125,6 +125,7 @@ global jsrun_elf_start, jsrun_elf_end
 global imgdec_elf_start, imgdec_elf_end
 global httpget_elf_start, httpget_elf_end
 global webview_elf_start, webview_elf_end
+global sheet_elf_start, sheet_elf_end
 
 shell_elf_start:
     incbin "build/shell.elf"
@@ -593,5 +594,9 @@ httpget_elf_end:
 webview_elf_start:
     incbin "build/webview.elf"
 webview_elf_end:
+
+sheet_elf_start:
+    incbin "build/sheet.elf"
+sheet_elf_end:
 
 section .note.GNU-stack noalloc noexec nowrite progbits
