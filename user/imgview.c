@@ -6,7 +6,8 @@
  * BMP, SVG) via the new sys_loadimg syscall — the kernel reuses the same
  * decode_image() that backs the browser and the wallpaper. A caption shows the
  * filename, native pixel size and index. Keys: n/Right/Space = next, p/Left =
- * prev, q/Esc = quit. No FPU (all scaling is in the kernel).
+ * prev, s = save the decoded image as VIEW.BMP (a format converter — any decoded
+ * format out to BMP, at native resolution), w = set as wallpaper, q/Esc = quit.
  *
  * Launch: `run imgview` from the shell, or the Apps menu ("Image Viewer").
  */
@@ -91,6 +92,23 @@ static void blit_scaled(int nw, int nh) {
     }
 }
 
+/* Save the currently-displayed image, at its native resolution, to VIEW.BMP —
+ * turning the viewer into a format converter (any decoded PNG/GIF/JPEG/BMP/SVG/
+ * WebP -> BMP). The decoders leave RGBA bytes in g_dec; sys_savebmp wants XRGB
+ * words, so repack through g_scr (free once decoding is done; 24 MB >> the 4 MB
+ * decode cap). Returns >=0 on success. */
+static int save_view(int nw, int nh) {
+    if (nw <= 0 || nh <= 0) return -1;
+    long np = (long)nw * nh;
+    if (np * 4 > (long)sizeof g_scr) return -1;
+    unsigned *out = (unsigned *)g_scr;
+    for (long i = 0; i < np; i++) {
+        unsigned char *p = &g_dec[i * 4];
+        out[i] = ((unsigned)p[0] << 16) | ((unsigned)p[1] << 8) | p[2];
+    }
+    return sys_savebmp("VIEW.BMP", out, nw, nh);
+}
+
 static char names[64][24];
 static int nimg;
 
@@ -135,7 +153,7 @@ int main(void) {
                 cap[p++] = ' '; cap[p++] = '['; putint(cap, &p, idx + 1); cap[p++] = '/'; putint(cap, &p, nimg); cap[p++] = ']';
                 cap[p] = 0;
                 text(cap, 8, IMGH + 5, 0xC8D0DE);
-                text("n/p  w:wall  q:quit", W - 19 * 8 - 6, IMGH + 5, 0x707888);
+                text("n/p  s:save  w:wall  q:quit", W - 26 * 8 - 6, IMGH + 5, 0x707888);
             }
             sys_gfx_blit(FB);
         }
@@ -144,6 +162,12 @@ int main(void) {
         else if (nimg > 0 && (k == 'n' || k == ' ' || k == 0x14)) idx = (idx + 1) % nimg;
         else if (nimg > 0 && (k == 'p' || k == 0x13)) idx = (idx + nimg - 1) % nimg;
         else if (k == 'w' && nimg > 0) sys_setwall(names[idx]);   /* set the current image as the desktop wallpaper (M1422) */
+        else if (k == 's' && nimg > 0 && outwh[0] > 0) {          /* save the decoded image as VIEW.BMP (format convert) */
+            int rc = save_view(outwh[0], outwh[1]);
+            fill(0, IMGH, W, H - IMGH, 0x101418); fill(0, IMGH, W, 1, 0x2A3340);
+            text(rc >= 0 ? "saved VIEW.BMP (native size)" : "save failed", 8, IMGH + 5, rc >= 0 ? 0x50E0A0 : 0xF08080);
+            sys_gfx_blit(FB);
+        }
         int mx, my, b = sys_mouse(&mx, &my);                  /* click left half = prev, right half = next (M1397) */
         if ((b & 1) && !(prevb & 1) && mx >= 0 && nimg > 0) idx = (mx < W / 2) ? (idx + nimg - 1) % nimg : (idx + 1) % nimg;
         prevb = b;

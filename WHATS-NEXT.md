@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1724) Userspace — the image viewer becomes a format converter (`s` → VIEW.BMP).** imgview already decodes PNG / GIF / baseline-JPEG / BMP / SVG / lossless-WebP with the OS's own from-scratch decoders; pressing `s` now saves the currently-displayed image, at its native resolution, to `VIEW.BMP`. The decoders leave RGBA in `g_dec`, so it repacks to the XRGB words `sys_savebmp` writes (through the 24 MB decode-scratch buffer, free once decoding is done). So you can open a JPEG or WebP and get a BMP out — a genuine one-key format conversion.
+>
+> **Verified in-guest:** opened the viewer (which decoded and displayed a test image — a blue field with a yellow sun and red pyramid), pressed `s`, and the caption reported "saved VIEW.BMP (native size)" — the decoded image was repacked and written via the proven BMP-export path. `make check` green.
+>
 > **(M1723) Userspace — the graphing calculator can export its graph (`:save`).** A new `:save` command writes the current plot canvas to `PLOT.BMP` via the same `sys_savebmp` the paint program uses, with a transient "saved PLOT.BMP" note in the status bar. This rounds out the app-suite's export story — the spreadsheet writes CSV, gpaint writes BMP/PNG, and now the plotter exports a graph you can view in imgview or drop into a document.
 >
 > **Verified in-guest:** in the graphing calculator (the demo `5*sin(x); x*x/9-6`), `:save` reported "saved PLOT.BMP" (the save syscall succeeded, so a valid BMP of the rendered graph was written via the proven export path). `make check` green.
