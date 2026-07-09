@@ -115,6 +115,12 @@ int main(void) {
     CHECK_F("min(2^3, 3^2)", 8);                /* args are full expressions */
     CHECK_ERR("min(3)");                        /* a 2-arg function needs two args */
     CHECK_ERR("hypot(3,)");                     /* malformed second arg */
+    CHECK_F("atan2(1, 1)", 0.7853981633974483); /* atan2: pi/4, quadrant I */
+    CHECK_F("atan2(1, 0)", 1.5707963267948966); /* pi/2 on the +y axis */
+    CHECK_F("atan2(0, -1)", 3.141592653589793); /* pi on the -x axis */
+    CHECK_F("atan2(-1, 0)", -1.5707963267948966); /* -pi/2 on the -y axis */
+    CHECK_F("atan2(-1, -1)", -2.356194490192345); /* -3pi/4, quadrant III */
+    CHECK_ERR("atan2(1)");                      /* atan2 needs two args */
 
     /* --- constants --- */
     CHECK_F("pi", 3.14159265358979);

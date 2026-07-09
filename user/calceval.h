@@ -4,7 +4,7 @@
  * parentheses, decimal (3.14, .5, 1e3, 1.5e-2) and 0x-hex literals, the
  * constants pi/e, and the functions sqrt sin cos tan asin acos atan ln log
  * log2 log10 exp abs sign floor ceil round trunc, plus the two-argument
- * min(a,b) max(a,b) hypot(a,b). Results are IEEE-754 doubles (calc.o is built
+ * min(a,b) max(a,b) hypot(a,b) atan2(y,x). Results are IEEE-754 doubles (calc.o is built
  * with SSE). Note: calc uses ^ for POWER (not XOR) and has no relational/
  * logical operators, unlike the shell's $(()) evaluator (shmath.h).
  *
@@ -85,7 +85,7 @@ static double call_arg(void) {
 }
 
 /* Parse a parenthesised two-argument list: '(' bor ',' bor ')'. Fills *a and *b;
- * sets err on a missing paren/comma. Used by the 2-arg functions (min/max/hypot). */
+ * sets err on a missing paren/comma. Used by the 2-arg functions (min/max/hypot/atan2). */
 static void call_arg2(double *a, double *b) {
     *a = *b = 0;
     skipws();
@@ -97,6 +97,17 @@ static void call_arg2(double *a, double *b) {
     *b = bor();
     skipws();
     if (*cur == ')') cur++; else err = 1;
+}
+
+/* atan2(y,x): the polar angle of (x,y) in (-pi,pi], built from js_atan (dmath has
+ * no atan2) with the standard quadrant fix-up. */
+static double calc_atan2(double y, double x) {
+    const double PI = 3.14159265358979;
+    if (x > 0) return js_atan(y / x);
+    if (x < 0) return y >= 0 ? js_atan(y / x) + PI : js_atan(y / x) - PI;
+    if (y > 0) return PI / 2;
+    if (y < 0) return -PI / 2;
+    return 0;
 }
 
 static double factor(void) {
@@ -137,6 +148,7 @@ static double factor(void) {
         if (match_kw("min"))   { double a, b; call_arg2(&a, &b); return a < b ? a : b; }
         if (match_kw("max"))   { double a, b; call_arg2(&a, &b); return a > b ? a : b; }
         if (match_kw("hypot")) { double a, b; call_arg2(&a, &b); return js_sqrt(a * a + b * b); }
+        if (match_kw("atan2")) { double a, b; call_arg2(&a, &b); return calc_atan2(a, b); }
         err = 1;                          /* unknown identifier/function */
         return JS_NAN;
     }

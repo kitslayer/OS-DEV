@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1734) Userspace — `atan2(y, x)` in the calculator and the graphing calculator.** Both evaluators had the two-argument `min`/`max`/`hypot` but not `atan2`, the standard scientific-calculator function that recovers the polar angle of a point `(x, y)` across all four quadrants (where `atan(y/x)` alone collapses two of them). `dmath.h` — the from-scratch IEEE-754 math shared by these apps — has no `atan2`, so it is built from `js_atan` with the textbook quadrant fix-up (`±pi` for `x<0`, `±pi/2` on the y-axis, `0` at the origin). Added to the two-arg dispatch in both pure cores (`user/calceval.h`, `user/ploteval.h`); the grapher can now plot e.g. `atan2(x, 1)`.
+>
+> **Verified:** host unit tests in both suites — new quadrant cases (`atan2(1,1)=pi/4`, `atan2(0,-1)=pi`, `atan2(-1,-1)=-3pi/4`, etc.) plus a wrong-arg-count error case; `tests/calc` (400k-iteration fuzz still clean) and `tests/plot` (now 85 checks) both PASS under ASan/UBSan; kernel builds clean; `make check` green.
+>
 > **(M1733) Docs — the in-OS help page now covers the productivity + developer-tools apps.** `file:help.htm` (the built-in manual the browser home page links to) predated this whole app arc — its app list still described only the old ASCII `paint`. It now has a **productivity** entry (sheet, plot, gpaint, imgview) and a **developer tools** entry (gjson, gregex, gdiff, garc, ghash) with each app's key features/keys, and `patch` is added to the shell-commands list. Pure content (a disk file baked by `tools/mkfatfs.c`), rendered by the from-scratch CSS engine.
 >
 > **Verified:** valid HTML in the same `<dl>`/`<span class="key">` style the rest of the page already uses; the disk rebuilds and boots, and `file:help.htm` renders the new sections in the browser. `make check` green.

@@ -13,7 +13,7 @@
  *           factor := number | '(' expr ')' | ('-'|'+') factor | name '(' expr ')'
  *                   | name        (the variable x, or the constants pi / e)
  * Functions: sin cos tan asin acos atan sqrt abs ln log log2 exp floor ceil round sign
- *            + the two-argument min(a,b) max(a,b) hypot(a,b)
+ *            + the two-argument min(a,b) max(a,b) hypot(a,b) atan2(y,x)
  */
 #ifndef PLOTEVAL_H
 #define PLOTEVAL_H
@@ -53,6 +53,15 @@ static double pe_num(void) {
     return v;
 }
 
+/* atan2(y,x) from js_atan (dmath has no atan2) with the quadrant fix-up. */
+static double pe_atan2(double y, double x) {
+    const double PI = 3.14159265358979;
+    if (x > 0) return js_atan(y / x);
+    if (x < 0) return y >= 0 ? js_atan(y / x) + PI : js_atan(y / x) - PI;
+    if (y > 0) return PI / 2;
+    if (y < 0) return -PI / 2;
+    return 0;
+}
 static double pe_factor(void) {
     pe_ws();
     if (*pe_cur == '(') { pe_cur++; double v = pe_expr(); pe_ws(); if (*pe_cur == ')') pe_cur++; else pe_err = 1; return v; }
@@ -72,6 +81,7 @@ static double pe_factor(void) {
                 if (pe_kw(s, n, "min"))   return a < b ? a : b;
                 if (pe_kw(s, n, "max"))   return a > b ? a : b;
                 if (pe_kw(s, n, "hypot")) return js_sqrt(a * a + b * b);
+                if (pe_kw(s, n, "atan2")) return pe_atan2(a, b);
                 pe_err = 1; return 0;
             }
             if (pe_kw(s, n, "sin"))   return js_sin(a);

@@ -56,6 +56,13 @@ int main(void) {
     CK("min(5, x*x)", 3, 5); CK("min(5, x*x)", 1, 1);      /* clamp a parabola; args are expressions */
     CK("hypot(3, 4)", 0, 5); CK("hypot(x, 4)", 3, 5);      /* hypot */
     CK("max(min(x, 3), -3)", 5, 3);                        /* nested clamp to [-3,3] */
+    CK("atan2(1, 1)", 0, 0.7853981633974483);              /* atan2: pi/4 in quadrant I */
+    CK("atan2(1, 0)", 0, 1.5707963267948966);              /* +pi/2 up the +y axis */
+    CK("atan2(0, -1)", 0, 3.141592653589793);              /* +pi along the -x axis (y>=0) */
+    CK("atan2(-1, 0)", 0, -1.5707963267948966);            /* -pi/2 down the -y axis */
+    CK("atan2(-1, -1)", 0, -2.356194490192345);            /* -3pi/4 in quadrant III */
+    CK("atan2(x, 1)", 1, 0.7853981633974483);              /* the y-arg can be the variable */
+    CKERR("atan2(1)");                                     /* atan2 needs two args */
     CKERR("min(x)");   CKERR("sin(x, 2)");                 /* wrong arg count is an error */
 
     /* a realistic plotted formula sampled at a few points */
