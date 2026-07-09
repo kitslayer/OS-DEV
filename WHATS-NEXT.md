@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1709) Userspace — gpaint can now export PNG, not just BMP.** Pressing `p` writes `PAINT.PNG` (`s` still writes BMP); the from-scratch PNG encoder (`kernel/png_encode.c` + its DEFLATE) is linked into gpaint in ring 3 — the same "run a kernel codec safely in ring 3" trick `imgview`/`imgdec` use. One catch, found by a ring-3 GPF: DEFLATE's compressor guards its lazy tables with a spinlock that disables interrupts (`cli`, privileged in ring 3), so `deflate.c` is compiled with `-DDEFLATE_HOST` — the flag it already provides for exactly the "compiled as a ring-3 process" case, making the lock a no-op.
+>
+> **Verified in-guest by a full round-trip:** drew a red line + a blue box in gpaint, pressed `p` to write `PAINT.PNG` (640×398), then opened it in `imgview` — which decoded it with the OS's own `png_decode` and displayed the exact drawing, proving the encoded PNG is valid. No fault. `make check` green.
+>
 > **(M1708) Userspace — a file hash / checksum tool (`ghash`).** Point it at a file (`ghash FILE`, or `ghash` for the README.TXT demo) and it shows the from-scratch SHA-256 and SHA-512 (computed in the kernel via `sys_sha256`/`sys_sha512`), the CRC-32, the size, and the Base64 of the contents — for verifying a download's integrity. CRC-32 (IEEE, gzip-compatible) and Base64 (RFC 4648) aren't syscalls, so they live in the pure `user/hashcore.h`, host-unit-tested by `tests/hash` (14 checks: the canonical CRC-32 check value `0xCBF43926` + known cases, the RFC-4648 Base64 padding vectors, hex formatting), wired into `make check` as `hashtest` (now 77 suites).
 >
 > **Verified:** `hashtest` passes (14 host checks, ASan/UBSan clean). In-guest, `ghash README.TXT` displayed SHA-256 `d6b0fb3d…f682e702` — byte-for-byte identical to the host `sha256sum` of the same 90-byte content, cross-verifying the kernel's from-scratch SHA-256 end-to-end — plus SHA-512, CRC-32 and the Base64 encoding. No fault. `make check` green.

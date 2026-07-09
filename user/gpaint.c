@@ -13,9 +13,10 @@
  * · b filled box · o ellipse · g flood-fill — line/rect/box/ellipse preview live
  * as you drag out from the press point. Other keys: 1-9/0 pick a palette colour
  * · [ / ] shrink / grow the brush · e erase (paint white) · c clear · s save to
- * PAINT.BMP · Esc quit.  Launch: `gpaint` from the shell, or the Apps menu.
+ * PAINT.BMP · p save to PAINT.PNG · Esc quit.  Launch: `gpaint` or the Apps menu.
  */
 #include "ulib.h"
+#include "png.h"        /* png_encode — the from-scratch PNG encoder, linked ring-3 (deflate.c) */
 
 #define W  640
 #define H  420
@@ -32,6 +33,12 @@ enum { T_FREE, T_LINE, T_RECT, T_BOX, T_OVAL, T_FILL, T_N };
 static int  tool = T_FREE;
 static const char *TOOLNAME[T_N] = { "pen", "line", "rect", "box", "oval", "fill" };
 static unsigned *BK;                    /* canvas backup, for live shape preview */
+
+/* PNG-export scratch (static; sized from png_encode's requirements for the art region) */
+#define ART_H   (H - TB)
+#define PNG_SCR ((1 + W * 3) * ART_H)
+#define PNG_OUT (PNG_SCR + PNG_SCR / 2 + 1024)
+static unsigned char png_rgb[W * ART_H * 3], png_scr[PNG_SCR], png_out[PNG_OUT];
 
 static const unsigned PAL[NC] = {
     0x000000, 0xFFFFFF, 0x808080, 0xE03030, 0xF08000, 0xF0D000,
@@ -121,6 +128,20 @@ static void flood(int sx, int sy, unsigned newc) {
 }
 static void canvas_copy(unsigned *dst, const unsigned *src) { long n = (long)W * (H - TB); for (long i = 0; i < n; i++) dst[i] = src[i]; }
 
+/* Encode the canvas (below the toolbar) to PNG and write PAINT.PNG. */
+static void save_png(void) {
+    for (int y = 0; y < ART_H; y++) {
+        unsigned char *r = png_rgb + (long)y * W * 3;
+        for (int x = 0; x < W; x++) {
+            unsigned c = FB[(TB + y) * W + x];           /* 0x00RRGGBB */
+            r[x * 3 + 0] = (c >> 16) & 0xff; r[x * 3 + 1] = (c >> 8) & 0xff; r[x * 3 + 2] = c & 0xff;
+        }
+    }
+    int n = png_encode(png_rgb, W, ART_H, png_out, PNG_OUT, png_scr, PNG_SCR);
+    if (n > 0 && sys_writefile("PAINT.PNG", png_out, (unsigned long)n) >= 0) scpy(msg, "saved PAINT.PNG");
+    else scpy(msg, "PNG save failed");
+}
+
 static void draw_toolbar(void) {
     rect(0, 0, W, TB, 0x1A1A24);
     for (int i = 0; i < NC; i++) {
@@ -138,7 +159,7 @@ static void draw_toolbar(void) {
     const char *pre = "  br "; for (int i = 0; pre[i]; i++) s[p++] = pre[i];
     if (brush >= 10) s[p++] = (char)('0' + brush / 10);
     s[p++] = (char)('0' + brush % 10);
-    const char *post = "  [ ]size  f l r b o g  s save  Esc";   /* 'e' erase / 'c' clear in the header doc */
+    const char *post = "  [ ]size  f l r b o g  s bmp p png  Esc";   /* 'e' erase / 'c' clear in the header doc */
     for (int i = 0; post[i]; i++) s[p++] = post[i];
     s[p] = 0;
     text(s, tx, 3, 0xC8D0F0);
@@ -176,6 +197,7 @@ int main(void) {
             else scpy(msg, "save failed");
             draw_toolbar(); dirty = 1;
         }
+        else if (k == 'p') { save_png(); draw_toolbar(); dirty = 1; }   /* export the canvas as a PNG */
 
         int mx, my, b = sys_mouse(&mx, &my);
         int down  = (b & 1) && mx >= 0 && my >= TB;      /* left button in the canvas */

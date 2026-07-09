@@ -338,6 +338,17 @@ $(BUILD)/imgdec.elf: user/imgdec.c kernel/png.c kernel/gif.c kernel/jpeg.c kerne
 	$(LD) -T user/user.ld -o $@ $(BUILD)/imgdec_app.o $(BUILD)/imgdec_png.o $(BUILD)/imgdec_gif.o $(BUILD)/imgdec_jpeg.o $(BUILD)/imgdec_bmp.o $(BUILD)/imgdec_svg.o $(BUILD)/imgdec_webp.o $(BUILD)/imgdec_inflate.o $(BUILD)/imgdec_font.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (ring-3 image decoders)"
 
+# gpaint links the from-scratch PNG encoder (kernel/png_encode.c + its DEFLATE)
+# so it can export the canvas as a PNG in ring 3 — same IMGDEC_CC pattern as
+# imgview/imgdec. gpaint itself is integer-only; the SSE in IMGDEC_CC is harmless.
+$(BUILD)/gpaint.elf: user/gpaint.c kernel/png_encode.c kernel/deflate.c $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+	@mkdir -p $(BUILD)
+	$(IMGDEC_CC) -w -c kernel/png_encode.c -o $(BUILD)/gpaint_pngenc.o
+	$(IMGDEC_CC) -w -DDEFLATE_HOST -c kernel/deflate.c -o $(BUILD)/gpaint_deflate.o   # DEFLATE_HOST = ring-3 build: no privileged cli in the lock
+	$(IMGDEC_CC) -Wall -c user/gpaint.c    -o $(BUILD)/gpaint_app.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/gpaint_app.o $(BUILD)/gpaint_pngenc.o $(BUILD)/gpaint_deflate.o $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (paint, with PNG export)"
+
 # --- imgview now DECODES IN RING 3: the graphical image viewer links the
 # from-scratch decoders directly (like imgdec) and fit-scales in-process, instead
 # of the in-kernel sys_loadimg — so a malformed image opened in the viewer crashes
