@@ -188,6 +188,84 @@ int main(void) {
     chk_num(0, 0, 90, "deep reverse chain A1");
     chk_num(89, 0, 1, "deep reverse chain A90 base");
 
+    /* --- comparison operators (M1697): lowest precedence, yield 1.0/0.0 ----*/
+    chk_expr("=1<2", 1);
+    chk_expr("=2<1", 0);
+    chk_expr("=3=3", 1);
+    chk_expr("=3<>3", 0);
+    chk_expr("=3<>4", 1);
+    chk_expr("=5>=5", 1);
+    chk_expr("=5>=6", 0);
+    chk_expr("=4<=3", 0);
+    chk_expr("=4<=4", 1);
+    chk_expr("=7>2", 1);
+    chk_expr("=2>7", 0);
+    chk_expr("=2+3=5", 1);             /* arithmetic binds tighter than comparison */
+    chk_expr("=2+3<10", 1);            /* 5 < 10 */
+    chk_expr("=1<2=1", 1);             /* left-assoc: (1<2)=1 -> 1=1 -> 1 */
+    chk_expr("=(2>1)*10", 10);         /* boolean usable as a number */
+
+    /* --- IF / AND / OR / NOT (M1697) --------------------------------------*/
+    chk_expr("=IF(1,10,20)", 10);
+    chk_expr("=IF(0,10,20)", 20);
+    chk_expr("=IF(2>1,100,200)", 100);
+    chk_expr("=IF(2<1,100,200)", 200);
+    chk_expr("=IF(1,7)", 7);           /* omitted else, condition true -> then */
+    chk_expr("=IF(0,7)", 0);           /* omitted else, condition false -> 0 */
+    chk_expr("=IF(1>0,IF(2>1,5,6),9)", 5);   /* nested IF */
+    chk_expr("=AND(1,1,1)", 1);
+    chk_expr("=AND(1,0,1)", 0);
+    chk_expr("=OR(0,0,1)", 1);
+    chk_expr("=OR(0,0,0)", 0);
+    chk_expr("=NOT(0)", 1);
+    chk_expr("=NOT(5)", 0);
+    chk_expr("=AND(2>1, 3>2)", 1);
+    chk_expr("=OR(1>2, 2>3)", 0);
+    chk_expr("=IF(AND(1,1), 42, 0)", 42);
+
+    clear_all();                        /* IF's untaken branch must not fail the formula */
+    set_raw(0, 0, "=SUM(");             /* A1 is a syntax error */
+    set_raw(0, 1, "=IF(1>0, 5, A1)");   /* takes the then-branch; A1's error must not leak */
+    recompute();
+    chk_num(0, 1, 5, "IF untaken-branch error rollback");
+    clear_all();
+    set_raw(0, 0, "10"); set_raw(0, 1, "5");        /* A1=10 B1=5 */
+    set_raw(0, 2, "=IF(A1>B1, A1-B1, B1-A1)");      /* refs in condition + branches */
+    recompute();
+    chk_num(0, 2, 5, "IF over cell refs");
+
+    /* --- math functions (M1697); values matched to calc's proven-accurate set */
+    chk_expr("=LN(1)", 0);
+    chk_expr("=EXP(0)", 1);
+    chk_expr("=EXP(LN(5))", 5);        /* inverse pair */
+    chk_expr("=LOG(100)", 2);          /* default base 10 (like calc) */
+    chk_expr("=LOG(1000)", 3);
+    chk_expr("=LOG(8,2)", 3);          /* explicit base */
+    chk_expr("=LOG10(1000)", 3);
+    chk_expr("=LOG2(8)", 3);
+    chk_expr("=SIN(0)", 0);
+    chk_expr("=COS(0)", 1);
+    chk_expr("=TAN(0)", 0);
+    chk_expr("=ATAN(1)", 0.7853981633974483);   /* pi/4 */
+    chk_expr("=SIGN(-3.5)", -1);
+    chk_expr("=SIGN(0)", 0);
+    chk_expr("=SIGN(9)", 1);
+    chk_expr("=TRUNC(3.7)", 3);
+    chk_expr("=TRUNC(-3.7)", -3);      /* toward zero, unlike FLOOR */
+    chk_expr("=TRUNC(3.14159, 2)", 3.14);
+
+    /* --- statistics (M1697): classic {2,4,4,4,5,5,7,9}, mean 5, ss=32 ------*/
+    chk_expr("=VARP(2,4,4,4,5,5,7,9)", 4);        /* population variance = 32/8 */
+    chk_expr("=STDEVP(2,4,4,4,5,5,7,9)", 2);      /* population stdev = sqrt(4) */
+    chk_expr("=VAR(2,4,4,4,5,5,7,9)", 32.0 / 7.0);          /* sample variance = 32/(n-1) */
+    chk_expr("=STDEV(2,4,4,4,5,5,7,9)", js_sqrt(32.0 / 7.0));
+    clear_all();                        /* same, over a range */
+    set_raw(0, 0, "2"); set_raw(1, 0, "4"); set_raw(2, 0, "4"); set_raw(3, 0, "4");
+    set_raw(4, 0, "5"); set_raw(5, 0, "5"); set_raw(6, 0, "7"); set_raw(7, 0, "9");
+    set_raw(0, 2, "=VARP(A1:A8)");   recompute(); chk_num(0, 2, 4, "VARP range");
+    set_raw(0, 2, "=STDEVP(A1:A8)"); recompute(); chk_num(0, 2, 2, "STDEVP range");
+    set_raw(0, 2, "=AVERAGE(A1:A8)"); recompute(); chk_num(0, 2, 5, "mean of the sample");
+
     if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);
     return failures ? 1 : 0;

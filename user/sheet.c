@@ -15,10 +15,13 @@
  * TEXT label. The sheet recalculates after every edit (circular refs -> #CIRC).
  *
  *   Formulas: = expr        e.g.  =B2+C2   =(A1+A2)/2   =SUM(B2:B5)*1.1
- *   Operators: + - * / % ^ (power, right-assoc), unary -, parentheses.
+ *   Operators: + - * / % ^ (power, right-assoc), unary -, parentheses, and
+ *              comparisons  = <> < <= > >=  (lowest precedence, yield 1/0).
  *   Cell refs: A1 .. Z100 (case-insensitive).  Ranges: A1:B10 (inside a fn).
- *   Functions: SUM AVERAGE(=AVG) MIN MAX COUNT COUNTA PRODUCT
- *              SQRT ABS INT FLOOR CEIL(=CEILING) ROUND(x[,dp]) MOD POW(=POWER)
+ *   Functions: SUM AVERAGE(=AVG) MIN MAX COUNT COUNTA PRODUCT STDEV STDEVP VAR VARP
+ *              IF(cond,then[,else]) AND(...) OR(...) NOT(x)  (logical, 1=true/0=false)
+ *              SQRT ABS INT FLOOR CEIL(=CEILING) ROUND(x[,dp]) TRUNC(x[,dp]) MOD POW(=POWER)
+ *              SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
  *   Constants: PI E.  A referenced empty/text cell counts as 0 in arithmetic.
  *
  * Keys — Normal mode (default):
@@ -103,15 +106,16 @@ static void save_file(void) {
 
 /* A small starter sheet so the Apps-menu launch shows the feature immediately. */
 static void load_demo(void) {
-    set_raw(0, 0, "Region"); set_raw(0, 1, "Q1"); set_raw(0, 2, "Q2"); set_raw(0, 3, "Total");
-    set_raw(1, 0, "North");  set_raw(1, 1, "120"); set_raw(1, 2, "150"); set_raw(1, 3, "=B2+C2");
-    set_raw(2, 0, "South");  set_raw(2, 1, "90");  set_raw(2, 2, "110"); set_raw(2, 3, "=B3+C3");
-    set_raw(3, 0, "East");   set_raw(3, 1, "60");  set_raw(3, 2, "95");  set_raw(3, 3, "=B4+C4");
-    set_raw(4, 0, "West");   set_raw(4, 1, "200"); set_raw(4, 2, "180"); set_raw(4, 3, "=B5+C5");
-    set_raw(5, 0, "Total");  set_raw(5, 1, "=SUM(B2:B5)"); set_raw(5, 2, "=SUM(C2:C5)"); set_raw(5, 3, "=SUM(D2:D5)");
+    set_raw(0, 0, "Region"); set_raw(0, 1, "Q1"); set_raw(0, 2, "Q2"); set_raw(0, 3, "Total"); set_raw(0, 4, "Pass?");
+    set_raw(1, 0, "North");  set_raw(1, 1, "120"); set_raw(1, 2, "150"); set_raw(1, 3, "=B2+C2"); set_raw(1, 4, "=IF(D2>=250,1,0)");
+    set_raw(2, 0, "South");  set_raw(2, 1, "90");  set_raw(2, 2, "110"); set_raw(2, 3, "=B3+C3"); set_raw(2, 4, "=IF(D3>=250,1,0)");
+    set_raw(3, 0, "East");   set_raw(3, 1, "60");  set_raw(3, 2, "95");  set_raw(3, 3, "=B4+C4"); set_raw(3, 4, "=IF(D4>=250,1,0)");
+    set_raw(4, 0, "West");   set_raw(4, 1, "200"); set_raw(4, 2, "180"); set_raw(4, 3, "=B5+C5"); set_raw(4, 4, "=IF(D5>=250,1,0)");
+    set_raw(5, 0, "Total");  set_raw(5, 1, "=SUM(B2:B5)"); set_raw(5, 2, "=SUM(C2:C5)"); set_raw(5, 3, "=SUM(D2:D5)"); set_raw(5, 4, "=SUM(E2:E5)");
     set_raw(7, 0, "Avg/qtr"); set_raw(7, 1, "=AVERAGE(B2:B5)"); set_raw(7, 2, "=AVERAGE(C2:C5)");
     set_raw(7, 3, "=AVERAGE(D2:D5)");
     set_raw(9, 0, "Best");   set_raw(9, 1, "=MAX(D2:D5)");
+    set_raw(10, 0, "StdDev"); set_raw(10, 1, "=STDEV(B2:B5)");
     scopy(status, "demo sheet -- edit freely, :w NAME to save", sizeof status);
 }
 

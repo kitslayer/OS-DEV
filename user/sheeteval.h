@@ -14,11 +14,15 @@
  * the whole grid. A referenced empty/text cell reads as 0 in arithmetic; a range
  * (A1:B10) is only meaningful inside a function's argument list.
  *
- * Grammar:  expr := term (('+'|'-') term)* ; term := power (('*'|'/'|'%') power)* ;
- *           power := factor ('^' power)? ;  factor := number | '(' expr ')'
+ * Grammar:  compare := expr (('='|'<>'|'<'|'<='|'>'|'>=') expr)*   (yields 1/0)
+ *           expr := term (('+'|'-') term)* ; term := power (('*'|'/'|'%') power)* ;
+ *           power := factor ('^' power)? ;  factor := number | '(' compare ')'
  *                  | ('-'|'+') factor | cellref | name '(' args ')' | PI | E
- * Functions: SUM AVERAGE/AVG MIN MAX COUNT COUNTA PRODUCT (variadic, take ranges)
- *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) MOD(x,y) POW/POWER(x,y)
+ * Comparisons are the lowest precedence and evaluate to 1.0 (true) / 0.0 (false).
+ * Functions: SUM AVERAGE/AVG MIN MAX COUNT COUNTA PRODUCT STDEV/STDEVP VAR/VARP
+ *              (variadic, take ranges);  IF(c,a[,b]) AND/OR(...) NOT(x)  (logical);
+ *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) TRUNC(x[,dp]) MOD POW/POWER
+ *            SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
  */
 #ifndef SHEETEVAL_H
 #define SHEETEVAL_H
@@ -52,6 +56,7 @@ static int         eval_depth; /* recursion guard */
 
 static void   eval_cell(int r, int c);
 static double eval_expr(void);
+static double eval_compare(void);
 
 static cell_t *CELL(int r, int c) { return &cells[r][c]; }
 
@@ -112,11 +117,12 @@ static double get_cell_value(int r, int c) {
     return cell->is_num ? cell->val : 0.0;
 }
 
-/* aggregate accumulator for SUM/AVG/MIN/MAX/COUNT/COUNTA/PRODUCT */
-typedef struct { double sum, prod, mn, mx; int countnum, nonempty; } agg_t;
-static void agg_init(agg_t *a) { a->sum = 0; a->prod = 1; a->mn = 0; a->mx = 0; a->countnum = 0; a->nonempty = 0; }
+/* aggregate accumulator for SUM/AVG/MIN/MAX/COUNT/COUNTA/PRODUCT/STDEV/VAR
+ * (sumsq lets STDEV/VAR compute in a single pass, no value buffer). */
+typedef struct { double sum, sumsq, prod, mn, mx; int countnum, nonempty; } agg_t;
+static void agg_init(agg_t *a) { a->sum = 0; a->sumsq = 0; a->prod = 1; a->mn = 0; a->mx = 0; a->countnum = 0; a->nonempty = 0; }
 static void agg_add(agg_t *a, double v) {
-    a->sum += v; a->prod *= v;
+    a->sum += v; a->sumsq += v * v; a->prod *= v;
     if (a->countnum == 0) { a->mn = a->mx = v; }
     else { if (v < a->mn) a->mn = v; if (v > a->mx) a->mx = v; }
     a->countnum++;
@@ -149,9 +155,9 @@ static void parse_agg_args(agg_t *a) {
                 if (parse_ref_cursor(&r2, &c2)) agg_range(a, r1, c1, r2, c2);
                 else perr = ERR_SYNTAX;
             } else {                                    /* a lone ref used as a scalar */
-                pcur = save; double v = eval_expr(); agg_add(a, v); a->nonempty++;
+                pcur = save; double v = eval_compare(); agg_add(a, v); a->nonempty++;
             }
-        } else { pcur = save; double v = eval_expr(); agg_add(a, v); a->nonempty++; }
+        } else { pcur = save; double v = eval_compare(); agg_add(a, v); a->nonempty++; }
         skipws();
         if (*pcur == ',') { pcur++; continue; }
         if (*pcur == ')') { pcur++; break; }
@@ -165,7 +171,7 @@ static int parse_scalar_args(double *out, int max) {
     if (*pcur == ')') { pcur++; return 0; }
     int n = 0;
     for (;;) {
-        double v = eval_expr();
+        double v = eval_compare();
         if (n < max) out[n] = v;
         n++;
         skipws();
@@ -178,9 +184,12 @@ static int parse_scalar_args(double *out, int max) {
 
 /* Dispatch a function by name; '(' has already been consumed. */
 static double call_function(const char *name) {
+    /* range/variadic aggregates (take ranges or scalar lists) */
     if (nameeq(name, "SUM") || nameeq(name, "AVERAGE") || nameeq(name, "AVG") ||
         nameeq(name, "MIN") || nameeq(name, "MAX") || nameeq(name, "COUNT") ||
-        nameeq(name, "COUNTA") || nameeq(name, "PRODUCT")) {
+        nameeq(name, "COUNTA") || nameeq(name, "PRODUCT") ||
+        nameeq(name, "STDEV") || nameeq(name, "STDEVP") ||
+        nameeq(name, "VAR") || nameeq(name, "VARP")) {
         agg_t a; agg_init(&a); parse_agg_args(&a);
         if (nameeq(name, "SUM"))     return a.sum;
         if (nameeq(name, "PRODUCT")) return a.countnum ? a.prod : 0;
@@ -188,8 +197,51 @@ static double call_function(const char *name) {
         if (nameeq(name, "MAX"))     return a.countnum ? a.mx : 0;
         if (nameeq(name, "COUNT"))   return (double)a.countnum;
         if (nameeq(name, "COUNTA"))  return (double)a.nonempty;
+        if (nameeq(name, "VAR") || nameeq(name, "VARP") ||
+            nameeq(name, "STDEV") || nameeq(name, "STDEVP")) {   /* one-pass sum-of-squared-deviations */
+            int pop = nameeq(name, "VARP") || nameeq(name, "STDEVP");
+            int denom = pop ? a.countnum : a.countnum - 1;       /* sample uses n-1 */
+            if (a.countnum < 1 || denom < 1) return 0;
+            double ss = a.sumsq - a.sum * a.sum / (double)a.countnum;
+            if (ss < 0) ss = 0;                                  /* guard tiny fp negatives */
+            double var = ss / (double)denom;
+            return (nameeq(name, "VAR") || nameeq(name, "VARP")) ? var : js_sqrt(var);
+        }
         return a.countnum ? a.sum / (double)a.countnum : 0;   /* AVERAGE / AVG */
     }
+
+    /* control-flow / variadic-logical functions evaluate their own arguments
+     * (IF short-circuits which branch's errors count; AND/OR are variadic) */
+    if (nameeq(name, "IF")) {                     /* IF(cond, then [, else]) */
+        double cond = eval_compare();
+        skipws();
+        if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        int take = (cond != 0.0);
+        int saved = perr; double thenv = eval_compare();
+        if (!take) perr = saved;                  /* discard an error from the untaken then-branch */
+        skipws();
+        double elsev = 0;
+        if (*pcur == ',') { pcur++; saved = perr; elsev = eval_compare(); if (take) perr = saved; }
+        skipws();
+        if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        return take ? thenv : elsev;
+    }
+    if (nameeq(name, "AND") || nameeq(name, "OR")) {   /* variadic; each arg a scalar/comparison */
+        int is_and = nameeq(name, "AND"), result = is_and ? 1 : 0;
+        skipws();
+        if (*pcur == ')') { pcur++; return 0; }
+        for (;;) {
+            double v = eval_compare();
+            if (is_and) { if (v == 0.0) result = 0; } else { if (v != 0.0) result = 1; }
+            skipws();
+            if (*pcur == ',') { pcur++; continue; }
+            if (*pcur == ')') { pcur++; break; }
+            perr = ERR_SYNTAX; break;
+        }
+        return (double)result;
+    }
+
+    /* fixed-arity scalar functions */
     double a[3]; int n = parse_scalar_args(a, 3);
     if (n < 1) { perr = ERR_SYNTAX; return 0; }
     if (nameeq(name, "SQRT"))  return js_sqrt(a[0]);
@@ -200,15 +252,32 @@ static double call_function(const char *name) {
         if (n >= 2) { double m = js_pow(10.0, a[1]); return js_round(a[0] * m) / m; }
         return js_round(a[0]);
     }
+    if (nameeq(name, "TRUNC")) {
+        if (n >= 2) { double m = js_pow(10.0, a[1]); return js_trunc(a[0] * m) / m; }
+        return js_trunc(a[0]);
+    }
     if (nameeq(name, "MOD"))   { if (n < 2) { perr = ERR_SYNTAX; return 0; } return js_fmod(a[0], a[1]); }
     if (nameeq(name, "POW") || nameeq(name, "POWER")) { if (n < 2) { perr = ERR_SYNTAX; return 0; } return js_pow(a[0], a[1]); }
+    if (nameeq(name, "NOT"))   return a[0] == 0.0 ? 1.0 : 0.0;
+    if (nameeq(name, "SIGN"))  return a[0] > 0 ? 1.0 : a[0] < 0 ? -1.0 : 0.0;
+    if (nameeq(name, "LN"))    return js_ln(a[0]);
+    if (nameeq(name, "LOG"))   return n >= 2 ? js_ln(a[0]) / js_ln(a[1]) : js_ln(a[0]) / js_ln(10.0);
+    if (nameeq(name, "LOG10")) return js_ln(a[0]) / js_ln(10.0);
+    if (nameeq(name, "LOG2"))  return js_ln(a[0]) / js_ln(2.0);
+    if (nameeq(name, "EXP"))   return js_exp(a[0]);
+    if (nameeq(name, "SIN"))   return js_sin(a[0]);
+    if (nameeq(name, "COS"))   return js_cos(a[0]);
+    if (nameeq(name, "TAN"))   return js_tan(a[0]);
+    if (nameeq(name, "ASIN"))  return js_asin(a[0]);
+    if (nameeq(name, "ACOS"))  return js_acos(a[0]);
+    if (nameeq(name, "ATAN"))  return js_atan(a[0]);
     perr = ERR_SYNTAX; return 0;
 }
 
 /* factor := number | '(' expr ')' | -factor | +factor | cellref | fn(args) | PI | E */
 static double factor(void) {
     skipws();
-    if (*pcur == '(') { pcur++; double v = eval_expr(); skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX; return v; }
+    if (*pcur == '(') { pcur++; double v = eval_compare(); skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX; return v; }
     if (*pcur == '-') { pcur++; return -factor(); }
     if (*pcur == '+') { pcur++; return factor(); }
     if (is_digit(*pcur) || *pcur == '.') { double v; if (!scan_number(&pcur, &v)) perr = ERR_SYNTAX; return v; }
@@ -260,6 +329,31 @@ static double eval_expr(void) {
     return v;
 }
 
+/* Comparison level — the lowest precedence, left-associative, yielding 1.0/0.0
+ * like a boolean (Excel-style). Operators: = (equal), <> (not equal), < <= > >=.
+ * This is the top of the grammar: a formula body, a parenthesised group and a
+ * function argument all parse at this level, so `IF(A1>0, ...)` and `(x<y)*3`
+ * work. Chains left-associatively: `1<2<3` -> `(1<2)<3` -> `1<3` -> 1. */
+static double eval_compare(void) {
+    double v = eval_expr();
+    for (;;) {
+        skipws();
+        char c = *pcur;
+        if (c == '=') { pcur++; double r = eval_expr(); v = (v == r); }
+        else if (c == '<') {
+            pcur++;
+            if (*pcur == '=')      { pcur++; double r = eval_expr(); v = (v <= r); }
+            else if (*pcur == '>') { pcur++; double r = eval_expr(); v = (v != r); }
+            else                   {         double r = eval_expr(); v = (v <  r); }
+        } else if (c == '>') {
+            pcur++;
+            if (*pcur == '=') { pcur++; double r = eval_expr(); v = (v >= r); }
+            else              {         double r = eval_expr(); v = (v >  r); }
+        } else break;
+    }
+    return v;
+}
+
 /* Is `raw` (ignoring surrounding spaces) a pure number? If so *out gets it. */
 static int cell_is_number(const char *raw, double *out) {
     const char *p = raw; while (*p == ' ') p++;
@@ -283,7 +377,7 @@ static void eval_cell(int r, int c) {
         if (++eval_depth > EVAL_MAX_DEPTH) { cell->err = ERR_CIRC; cell->is_num = 0; cell->val = 0; eval_depth--; cell->state = ST_DONE; return; }
         const char *save_cur = pcur; int save_err = perr;   /* protect the caller's parse state */
         pcur = cell->raw + 1; perr = ERR_OK;
-        double v = eval_expr(); skipws();
+        double v = eval_compare(); skipws();
         if (*pcur) perr = ERR_SYNTAX;                        /* trailing junk */
         if (perr) { cell->err = (unsigned char)perr; cell->is_num = 0; cell->val = 0; }
         else { cell->is_num = 1; cell->val = v; }            /* NaN/Inf from real math still shows */
