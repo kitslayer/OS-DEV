@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1720) Userspace — the scalar calculator gains a full scientific function set.** `calc` was oddly the least capable of the calc/sheet/plot family; it now matches them with `log2`, `log10`, `sign` and `trunc`, and goes further with the two-argument `min(a,b)`, `max(a,b)` and `hypot(a,b)` (via a small `call_arg2` two-argument parser). `pow` and `mod` were already covered by the `^` and `%` operators. All in the pure `user/calceval.h`. The evaluator's own header comment and the app's on-screen function banner are updated.
+>
+> **Verified:** `calctest` still passes all checks plus its 400k-iteration fuzz sweep (ASan/UBSan clean) with 20 new cases — `log2(1024)=10`, `log10(1000)=3`, `trunc(-3.7)=-3` vs `floor(-3.7)=-4`, `sign`, `min`/`max` nesting, `hypot(3,4)=5`, and errors for a missing/ malformed 2nd argument. In-guest: `hypot(3,4)`→5, `log2(1024)`→10, `sign(-9)+trunc(3.9)`→2, `min(10,max(2,7))`→7. `make check` green.
+>
 > **(M1719) Kernel / drivers — the floppy driver can now WRITE, not just read.** `kernel/floppy.c` was read-only; it gains `floppy_write()`, the mirror of the read path — it stages the caller's bytes into the ISA-DMA bounce buffer, arms the 8237 (channel 2) for a **read-from-memory** transfer, and issues the FDC **WRITE DATA** command, with the same track-cap looping and 2880-sector geometry bound as the read. Isolated and boot-safe (the OS boots from ATA; a config with no diskette is a clean no-op).
 >
 > **Verified in-guest** (existing `floppytest`, extended): the boot self-test now stages a known pattern, writes it to the diskette's last (scratch) sector, reads it back, and confirms the round-trip — `floppy write self-test: … data matches (write path OK)` — while every existing read-back assertion still passes (no regression) and the boot stays on legacy ATA. `make check` green.

@@ -3,7 +3,8 @@
  * right-assoc, binds tightest), * / %, + -, << >>, & , | (lowest) — plus
  * parentheses, decimal (3.14, .5, 1e3, 1.5e-2) and 0x-hex literals, the
  * constants pi/e, and the functions sqrt sin cos tan asin acos atan ln log
- * exp abs floor ceil round. Results are IEEE-754 doubles (calc.o is built
+ * log2 log10 exp abs sign floor ceil round trunc, plus the two-argument
+ * min(a,b) max(a,b) hypot(a,b). Results are IEEE-754 doubles (calc.o is built
  * with SSE). Note: calc uses ^ for POWER (not XOR) and has no relational/
  * logical operators, unlike the shell's $(()) evaluator (shmath.h).
  *
@@ -83,6 +84,21 @@ static double call_arg(void) {
     return v;
 }
 
+/* Parse a parenthesised two-argument list: '(' bor ',' bor ')'. Fills *a and *b;
+ * sets err on a missing paren/comma. Used by the 2-arg functions (min/max/hypot). */
+static void call_arg2(double *a, double *b) {
+    *a = *b = 0;
+    skipws();
+    if (*cur != '(') { err = 1; return; }
+    cur++;
+    *a = bor();
+    skipws();
+    if (*cur == ',') cur++; else { err = 1; return; }
+    *b = bor();
+    skipws();
+    if (*cur == ')') cur++; else err = 1;
+}
+
 static double factor(void) {
     skipws();
     if (*cur == '(') {
@@ -114,6 +130,13 @@ static double factor(void) {
         if (match_kw("floor")) return js_floor(call_arg());
         if (match_kw("ceil"))  return js_ceil(call_arg());
         if (match_kw("round")) return js_round(call_arg());
+        if (match_kw("log2"))  return js_ln(call_arg()) / js_ln(2.0);
+        if (match_kw("log10")) return js_ln(call_arg()) / js_ln(10.0);
+        if (match_kw("trunc")) return js_trunc(call_arg());               /* toward zero, unlike floor */
+        if (match_kw("sign"))  { double a = call_arg(); return a > 0 ? 1.0 : a < 0 ? -1.0 : 0.0; }
+        if (match_kw("min"))   { double a, b; call_arg2(&a, &b); return a < b ? a : b; }
+        if (match_kw("max"))   { double a, b; call_arg2(&a, &b); return a > b ? a : b; }
+        if (match_kw("hypot")) { double a, b; call_arg2(&a, &b); return js_sqrt(a * a + b * b); }
         err = 1;                          /* unknown identifier/function */
         return JS_NAN;
     }

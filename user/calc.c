@@ -25,7 +25,8 @@ static void to_hex(unsigned long long v, char *buf) {
 
 int main(void) {
     sys_setcolor(4); print("\n  OS-DEV calc: + - * / % ^(pow) & | << >> ~ ( ) 0x\n");   /* title: cyan */
-    sys_setcolor(8); print("  fns: sqrt sin cos tan asin acos atan ln log exp abs floor ceil round\n");
+    sys_setcolor(8); print("  fns: sqrt sin cos tan asin acos atan ln log log2 log10 exp abs sign\n");
+    sys_setcolor(8); print("       floor ceil round trunc  min(a,b) max(a,b) hypot(a,b)\n");
     print("  consts: pi e ans ; e.g. sqrt(2)  sin(pi/2)  2^10 ; 'q' to quit\n\n"); sys_setcolor(0);
     char line[128];
     for (;;) {

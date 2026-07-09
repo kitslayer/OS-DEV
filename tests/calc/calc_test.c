@@ -94,6 +94,28 @@ int main(void) {
     CHECK_F("sqrt(2)^2", 2);                    /* round-trip */
     CHECK_F("ln(exp(3))", 3);
 
+    /* --- M1720 scientific functions (parity with sheet/plot + 2-arg extras) --- */
+    CHECK_F("log2(8)", 3);
+    CHECK_F("log2(1024)", 10);
+    CHECK_F("log10(1000)", 3);
+    CHECK_F("log10(1)", 0);
+    CHECK_F("trunc(3.7)", 3);
+    CHECK_F("trunc(-3.7)", -3);                 /* toward zero, unlike floor(-3.7) = -4 */
+    CHECK_F("floor(-3.7)", -4);                 /* contrast */
+    CHECK_F("sign(-9.5)", -1);
+    CHECK_F("sign(9.5)", 1);
+    CHECK_F("sign(0)", 0);
+    CHECK_F("min(3, 8)", 3);
+    CHECK_F("min(8, 3)", 3);
+    CHECK_F("max(3, 8)", 8);
+    CHECK_F("min(-2, -5)", -5);
+    CHECK_F("hypot(3, 4)", 5);                  /* 3-4-5 triangle */
+    CHECK_F("hypot(5, 12)", 13);
+    CHECK_F("max(min(5, 10), 2)", 5);           /* nesting / composition */
+    CHECK_F("min(2^3, 3^2)", 8);                /* args are full expressions */
+    CHECK_ERR("min(3)");                        /* a 2-arg function needs two args */
+    CHECK_ERR("hypot(3,)");                     /* malformed second arg */
+
     /* --- constants --- */
     CHECK_F("pi", 3.14159265358979);
     CHECK_F("e", 2.71828182845905);
