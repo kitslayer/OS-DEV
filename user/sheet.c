@@ -129,8 +129,8 @@ static void load_file(void) {
     scopy(status, "loaded", sizeof status);
 }
 
-static void save_file(void) {
-    if (!fname[0]) { scopy(status, "no filename: use :w NAME", sizeof status); return; }
+static int save_file(void) {   /* returns 1 if the sheet was actually written, 0 on any failure (M1759) */
+    if (!fname[0]) { scopy(status, "no filename: use :w NAME", sizeof status); return 0; }
     int p;
     if (is_csv(fname)) {
         p = sheet_to_csv(iobuf, IOMAX);                  /* interchange: computed values, RFC-4180 */
@@ -155,10 +155,11 @@ static void save_file(void) {
                 iobuf[p++] = '\n';
             }
     }
-    if (sys_writefile(fname, iobuf, p) < 0) { scopy(status, "save FAILED", sizeof status); return; }
+    if (sys_writefile(fname, iobuf, p) < 0) { scopy(status, "save FAILED", sizeof status); return 0; }
     modified = 0;
     scopy(status, "saved ", sizeof status);
     int l = slen(status); scopy(status + l, fname, (int)sizeof status - l);
+    return 1;
 }
 
 /* A small starter sheet so the Apps-menu launch shows the feature immediately. */
@@ -373,9 +374,9 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
     if (streq(c, "q"))  { if (modified) { scopy(status, "unsaved -- :w to save or :q! to discard", sizeof status); return 0; } return 1; }
     if (streq(c, "q!")) return 1;
     if (streq(c, "w"))  { save_file(); return 0; }
-    if (streq(c, "wq") || streq(c, "x")) { save_file(); return !streq(status, "save FAILED"); }
+    if (streq(c, "wq") || streq(c, "x")) { return save_file(); }   /* M1759: quit ONLY if the save succeeded -- a bare :wq with no filename now stays open with "no filename", instead of quitting and discarding the sheet */
     if (startswith(c, "w "))  { char *n = c + 2; while (*n == ' ') n++; scopy(fname, n, sizeof fname); save_file(); return 0; }
-    if (startswith(c, "wq ")) { char *n = c + 3; while (*n == ' ') n++; scopy(fname, n, sizeof fname); save_file(); return !streq(status, "save FAILED"); }
+    if (startswith(c, "wq ")) { char *n = c + 3; while (*n == ' ') n++; scopy(fname, n, sizeof fname); return save_file(); }   /* M1759: quit only on a successful save */
     if (streq(c, "chart") || startswith(c, "chart ")) {
         const char *rng = c + 5; while (*rng == ' ') rng++;
         if (!*rng) {                                       /* no range: chart this column's used cells */
