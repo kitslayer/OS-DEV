@@ -105,6 +105,53 @@ int main(void) {
         checks++; if (n >= 0) { printf("  FAIL patch mismatch should be rejected, got %d\n", n); fails++; }
     }
 
+    /* --- fuzz: correctness + OOB-safety on adversarial input (M1741) ---------
+     * (1) round-trip invariant: for ANY two well-formed (newline-terminated)
+     *     texts, patch_apply(a, diff_to_patch(diff(a,b))) must reproduce b.
+     * (2) OOB-safety: patch_apply must never read past its inputs on a MALFORMED
+     *     patch -- it parses attacker-controlled @@ headers + context lines.
+     * ASan/UBSan abort on any OOB; a (1) mismatch is a real diff/patch bug.
+     * Texts stay well under DC_MAXLINES(400) so nothing is truncated. */
+    {
+        static unsigned rs = 0x1234567u;
+        #define DXR() (rs ^= rs << 13, rs ^= rs >> 17, rs ^= rs << 5, rs)
+        char a[256], b[256], patch[8192], result[8192];
+        int rtfail = 0, badret = 0;
+        for (int it = 0; it < 60000; it++) {
+            int la = DXR() % 200, lb = DXR() % 200;               /* two random line-y texts */
+            for (int i = 0; i < la; i++) { unsigned r = DXR(); a[i] = (r % 5 == 0) ? '\n' : (char)('a' + r % 4); }
+            if (la == 0 || a[la - 1] != '\n') a[la++] = '\n';      /* well-formed: newline-terminated */
+            a[la] = 0;
+            for (int i = 0; i < lb; i++) { unsigned r = DXR(); b[i] = (r % 5 == 0) ? '\n' : (char)('a' + r % 4); }
+            if (lb == 0 || b[lb - 1] != '\n') b[lb++] = '\n';
+            b[lb] = 0;
+
+            diff_run(a, b);                                        /* (1) round-trip invariant */
+            diff_to_patch("a", "b", patch, sizeof patch);
+            int n = patch_apply(a, patch, result, sizeof result);
+            if (n < 0 || strcmp(result, b) != 0) rtfail++;
+
+            int plen = (int)strlen(patch);                        /* (2) mutate into a malformed patch */
+            if (plen > 0) {
+                int muts = 1 + (DXR() % 8);
+                for (int m = 0; m < muts; m++) patch[DXR() % plen] = (char)(DXR() & 0xFF);
+                if (DXR() % 3 == 0) patch[DXR() % plen] = 0;       /* random truncation */
+                int r2 = patch_apply(a, patch, result, sizeof result);
+                if (r2 > (int)sizeof result) badret++;
+            }
+        }
+        for (int it = 0; it < 40000; it++) {                      /* pure-random patch bytes, no valid prefix */
+            int la = DXR() % 40; for (int i = 0; i < la; i++) a[i] = (char)('a' + DXR() % 3); a[la] = 0;
+            int pl = DXR() % 240; for (int i = 0; i < pl; i++) patch[i] = (char)(DXR() & 0xFF); patch[pl] = 0;
+            int r3 = patch_apply(a, patch, result, sizeof result);
+            if (r3 > (int)sizeof result) badret++;
+        }
+        checks += 2;
+        if (rtfail) { printf("  FAIL fuzz round-trip: %d/60000 mismatches\n", rtfail); fails++; }
+        if (badret) { printf("  FAIL fuzz: patch_apply returned an out-of-range length %d times\n", badret); fails++; }
+        #undef DXR
+    }
+
     if (!fails) printf("PASS: %d checks, diff engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", fails, checks);
     return fails ? 1 : 0;
