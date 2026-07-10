@@ -2078,8 +2078,9 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         if (b->css_align[r]   && PRI(5) >= sp_al)       { *align      = b->css_align[r];      sp_al    = PRI(5); }
         if (b->css_size[r]    && PRI(6) >= sp_sz)       { *size       = b->css_size[r];       sp_sz    = PRI(6); }
         if (b->css_disp[r]    && PRI(7) >= sp_dn) {
-            if (b->css_disp[r] == 1) *hidden = 1; else if (b->css_disp[r] == 2) *flex = 1;
-            sp_dn = PRI(7);
+            *hidden = (b->css_disp[r] == 1);          /* M1789: the display slot is exclusive — a winning */
+            *flex   = (b->css_disp[r] == 2);          /* display value clears the loser (else a lower-priority */
+            sp_dn = PRI(7);                           /* display:none left *hidden=1 even when display:flex later won) */
         }
         if (b->css_margin[r]  && PRI(8) >= sp_mg)       { *margin     = b->css_margin[r];     sp_mg    = PRI(8); }
         if (b->css_indent[r]  && PRI(9) >= sp_in)       { *indent     = b->css_indent[r];     sp_in    = PRI(9); }
