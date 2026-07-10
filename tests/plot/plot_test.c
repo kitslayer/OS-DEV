@@ -110,6 +110,19 @@ int main(void) {
         checks++; if (nr != 3 || !napprox(r[0], -3.14159265358979) || !napprox(r[1], 0) || !napprox(r[2], 3.14159265358979)) { printf("  FAIL roots sin: n=%d\n", nr); fails++; }
     }
 
+    /* --- degrees angle mode (M1744): trig args are degrees, inverse trig returns them --- */
+    pe_angle_deg = 1;
+    CK("sin(90)", 0, 1);                                   /* sin 90deg = 1 */
+    CK("sin(30)", 0, 0.5);
+    CK("cos(180)", 0, -1);
+    CK("tan(45)", 0, 1);
+    CK("asin(1)", 0, 90);                                  /* inverse trig returns degrees */
+    CK("atan(1)", 0, 45);
+    CK("atan2(1, 1)", 0, 45);
+    CK("sin(x)", 90, 1);                                   /* the variable x is in degrees too */
+    pe_angle_deg = 0;                                      /* restore radians for the fuzz below */
+    CK("sin(pi/2)", 0, 1);
+
     /* --- fuzz: random short formulas must never crash/trap/hang (ASan/UBSan). --
      * plot_eval consumes a bounded string and always terminates, so a violation
      * is a real bug. The alphabet exercises x, pi/e, the function-name letters,

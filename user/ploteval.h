@@ -23,6 +23,7 @@
 static double      pe_x;      /* the variable `x` (set per evaluation) */
 static const char *pe_cur;    /* parse cursor */
 static int         pe_err;    /* set nonzero on a syntax/parse error */
+static int         pe_angle_deg = 0;   /* 0 = radians (default), 1 = degrees; set by plot.c's :deg/:rad (M1744). Affects only trig. */
 
 static double pe_expr(void);
 
@@ -62,6 +63,11 @@ static double pe_atan2(double y, double x) {
     if (y < 0) return -PI / 2;
     return 0;
 }
+/* degree<->radian conversion honouring pe_angle_deg (no-ops in radian mode):
+ * pe_a2r converts a trig ARGUMENT to radians, pe_r2a a trig RESULT back to the
+ * current angle unit. Mirrors calc's calc_a2r/calc_r2a (M1738/M1744). */
+static double pe_a2r(double a) { return pe_angle_deg ? a * 3.14159265358979 / 180.0 : a; }
+static double pe_r2a(double r) { return pe_angle_deg ? r * 180.0 / 3.14159265358979 : r; }
 static double pe_factor(void) {
     pe_ws();
     if (*pe_cur == '(') { pe_cur++; double v = pe_expr(); pe_ws(); if (*pe_cur == ')') pe_cur++; else pe_err = 1; return v; }
@@ -81,15 +87,15 @@ static double pe_factor(void) {
                 if (pe_kw(s, n, "min"))   return a < b ? a : b;
                 if (pe_kw(s, n, "max"))   return a > b ? a : b;
                 if (pe_kw(s, n, "hypot")) return js_sqrt(a * a + b * b);
-                if (pe_kw(s, n, "atan2")) return pe_atan2(a, b);
+                if (pe_kw(s, n, "atan2")) return pe_r2a(pe_atan2(a, b));
                 pe_err = 1; return 0;
             }
-            if (pe_kw(s, n, "sin"))   return js_sin(a);
-            if (pe_kw(s, n, "cos"))   return js_cos(a);
-            if (pe_kw(s, n, "tan"))   return js_tan(a);
-            if (pe_kw(s, n, "asin"))  return js_asin(a);
-            if (pe_kw(s, n, "acos"))  return js_acos(a);
-            if (pe_kw(s, n, "atan"))  return js_atan(a);
+            if (pe_kw(s, n, "sin"))   return js_sin(pe_a2r(a));
+            if (pe_kw(s, n, "cos"))   return js_cos(pe_a2r(a));
+            if (pe_kw(s, n, "tan"))   return js_tan(pe_a2r(a));
+            if (pe_kw(s, n, "asin"))  return pe_r2a(js_asin(a));
+            if (pe_kw(s, n, "acos"))  return pe_r2a(js_acos(a));
+            if (pe_kw(s, n, "atan"))  return pe_r2a(js_atan(a));
             if (pe_kw(s, n, "sqrt"))  return js_sqrt(a);
             if (pe_kw(s, n, "abs"))   return js_fabs(a);
             if (pe_kw(s, n, "ln"))    return js_ln(a);

@@ -25,7 +25,8 @@
  *   overlay) ·  root  (toggle the zeros of the first curve in view — orange ticks
  *   on the x-axis + the x-values listed) ·  table (toggle a right-side panel of
  *   sampled (x, f(x)) values for the first curve, for reading exact values off
- *   the graph) ·  fit ·  reset ·  xr A B / yr A B (set the x/y range) ·  zoom F (scale about
+ *   the graph) ·  deg / rad (interpret trig arguments as degrees / radians;
+ *   a "DEG" tag shows in the status bar) ·  fit ·  reset ·  xr A B / yr A B (set the x/y range) ·  zoom F (scale about
  *   the centre; F>1 zooms in) — range args are evaluated, so `xr -pi pi` works ·
  *   save (write the current graph to PLOT.BMP).
  *   Integral (Simpson),
@@ -169,6 +170,8 @@ static void exec_plot_cmd(void) {
     else if (streq(c, "der"))   show_der = !show_der;
     else if (streq(c, "root"))  show_root = !show_root;
     else if (streq(c, "table") || streq(c, "tbl")) show_table = !show_table;
+    else if (streq(c, "deg")) pe_angle_deg = 1;      /* trig in degrees (M1744) */
+    else if (streq(c, "rad")) pe_angle_deg = 0;      /* trig in radians (default) */
     else if (streq(c, "fit"))   auto_fit_y();
     else if (streq(c, "reset")) { xmin = -10; xmax = 10; ymin = -6; ymax = 6; }
     else if (streq(c, "save"))  plot_msg = (sys_savebmp("PLOT.BMP", FB, W, H) >= 0) ? "saved PLOT.BMP" : "save FAILED";
@@ -308,7 +311,7 @@ static void draw(void) {
         cl[p] = 0;
         text(cl, 2, H - BOTH, C_TEXT);
         fill(2 + (cmd_len + 1) * 8, H - BOTH + 1, 6, 12, C_HILITE);   /* caret */
-        const char *ch = "int der root table  fit reset  xr A B  yr A B  zoom F  save";
+        const char *ch = "int der root table  deg rad  fit reset  xr A B  yr A B  zoom F  save";
         int chl = 0; while (ch[chl]) chl++;
         text(ch, W - chl * 8 - 2, H - BOTH, C_DIM);
     } else {
@@ -318,8 +321,9 @@ static void draw(void) {
         p = sappend(b, p, sizeof b, "]  y["); fmtnum(ymin, nb); p = sappend(b, p, sizeof b, nb);
         p = sappend(b, p, sizeof b, ", ");  fmtnum(ymax, nb); p = sappend(b, p, sizeof b, nb);
         p = sappend(b, p, sizeof b, "]");
+        if (pe_angle_deg) p = sappend(b, p, sizeof b, "  DEG");   /* trig-in-degrees indicator (M1744) */
         text(b, 2, H - BOTH, C_DIM);
-        const char *hint = plot_msg ? plot_msg : "arrows:pan  :zoom :int :der :root :save  Esc";
+        const char *hint = plot_msg ? plot_msg : ":zoom :int :der :root :save  Esc";
         unsigned hcol = plot_msg ? C_ROOT : C_DIM;
         int hl = 0; while (hint[hl]) hl++;
         text(hint, W - hl * 8 - 2, H - BOTH, hcol);
