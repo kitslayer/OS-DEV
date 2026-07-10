@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../../kernel/cssprop.c"
+#include "../../kernel/color.c"                  /* parse_color — the border parser reads a colour token (M1777) */
+#include "../../kernel/include/cssborder.h"      /* parse_style_border — conformance for border:none/0 */
 
 static int fails;
 #define CHECK(c, msg) do { if (!(c)) { printf("  FAIL: %s\n", msg); fails++; } } while (0)
@@ -22,6 +24,18 @@ static void expect(const char *style, const char *prop, const char *want) {
     char m[160]; snprintf(m, sizeof(m), "style_prop('%s','%s') -> %.*s", style, prop, got?ve-vs:0, got?style+vs:"");
     if (!want) { CHECK(!got, m); return; }
     CHECK(got && ve-vs == (int)strlen(want) && memcmp(style+vs, want, ve-vs)==0, m);
+}
+/* parse_style_border returns (width<<28)|(sides<<24)|(color&0xFFFFFF); 0 = no border. (M1777) */
+static void expect_border(const char *style, uint32_t want) {
+    uint32_t got = parse_style_border(style, (int)strlen(style));
+    char m[160]; snprintf(m, sizeof(m), "parse_style_border('%s') = 0x%08X (want 0x%08X)", style, got, want);
+    CHECK(got == want, m);
+}
+static void fuzz_border(const unsigned char *data, int len) {
+    char *b = malloc(len ? len : 1);
+    if (len) memcpy(b, data, len);
+    (void)parse_style_border(b, len);   /* must not OOB over the exactly-sized slice */
+    free(b);
 }
 
 /* exactly-sized (no NUL) so any over-read past s[0..n) red-zones */
@@ -53,7 +67,18 @@ int main(void) {
     expect("color:red;color:blue", "color", "blue");           /* CSS cascade: a later duplicate wins */
     expect("color:red !important", "color", "red");            /* !important priority marker stripped from the value */
     expect("font-weight:bold!important;", "font-weight", "bold");
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (style_prop boundary + value span)");
+    /* border shorthand parser (M1777): none/hidden/0 -> NO border (F2); real borders keep width|sides|colour */
+    expect_border("border: none", 0);                     /* F2: border-style none -> nothing */
+    expect_border("border:none", 0);                      /* no space after ':' */
+    expect_border("border: hidden", 0);                   /* border-style hidden -> nothing */
+    expect_border("border: 0", 0);                        /* zero width -> nothing */
+    expect_border("border: 0px", 0);                      /* zero width with unit -> nothing (was clamped up to 1px) */
+    expect_border("border: 1px solid black", 0x1F000000); /* w=1, all sides, black */
+    expect_border("border: 2px solid red", 0x2FCC0000);   /* w=2, all sides, red (0xCC0000) */
+    expect_border("border: 5px", 0x5F666666);             /* w=5, all sides, default grey */
+    expect_border("border-top: 3px", 0x31666666);         /* top side only, default grey */
+    expect_border("color:red", 0);                        /* no border property present */
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (style_prop boundary + value span + border none/0/real)");
 
     /* ---- fuzz: truncations + single-byte corruptions of a battery ---- */
     const char *bank[] = {
@@ -79,6 +104,7 @@ int main(void) {
         unsigned char tmp[56];
         for (int i = 0; i < len; i++) tmp[i] = (trial & 1) ? (unsigned char)alpha[rand() % alen] : (unsigned char)rand();
         fuzz_one(tmp, len, fp[rand() % 4]);
+        fuzz_border(tmp, len);   /* border parser over the same random slice (bounds, ASan) */
     }
 
     printf("fuzz: truncations/corruptions + 400000 random style buffers -> %s\n", fails ? "FAILURES" : "all clean");

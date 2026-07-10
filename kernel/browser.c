@@ -39,6 +39,7 @@
 #include "cssel.h"   /* sel_t + sel_parse (CSS simple-selector parser; host-fuzzed) — M688 */
 #include "color.h"
 #include "cssprop.h"
+#include "cssborder.h"   /* parse_style_border — CSS `border` shorthand value parser, host-tested via tests/css (M1777) */
 #include "reader.h"   /* reader_main_region() — article-first content extraction (host-fuzzed) */
 #include <stdint.h>
 #include <stddef.h>
@@ -533,34 +534,8 @@ static uint32_t parse_style_bg(const char *s, int n) {
         return parse_color(s + vs, ve - vs);
     return 0;
 }
-/* CSS border. Returns (width<<28)|(sides<<24)|color, 0 if none. `sides` is a bitmask
- * (1=top 2=right 4=bottom 8=left, 15=all from the `border` shorthand). Pulls a px width
- * and a #hex colour from the value; defaults 1px / grey. style_prop matches each property
- * name up to ':' exactly, so "border" never matches "border-top". One width/colour per box. */
-static uint32_t parse_style_border(const char *s, int n) {
-    int vs, ve, sides = 0, vstart = -1, vend = -1;
-    if (style_prop(s, n, "border", 6, &vs, &ve))         { sides  = 15; vstart = vs; vend = ve; }
-    if (style_prop(s, n, "border-top", 10, &vs, &ve))    { sides |= 1;  if (vstart < 0) { vstart = vs; vend = ve; } }
-    if (style_prop(s, n, "border-right", 12, &vs, &ve))  { sides |= 2;  if (vstart < 0) { vstart = vs; vend = ve; } }
-    if (style_prop(s, n, "border-bottom", 13, &vs, &ve)) { sides |= 4;  if (vstart < 0) { vstart = vs; vend = ve; } }
-    if (style_prop(s, n, "border-left", 11, &vs, &ve))   { sides |= 8;  if (vstart < 0) { vstart = vs; vend = ve; } }
-    if (!sides || vstart < 0) return 0;
-    const char *v = s + vstart; int vl = vend - vstart;
-    int width = 1;
-    for (int i = 0; i + 1 < vl; i++)
-        if (v[i] >= '0' && v[i] <= '9') { int w = 0, j = i; while (j < vl && v[j] >= '0' && v[j] <= '9') { w = w*10 + (v[j]-'0'); j++; } if (j < vl && v[j] == 'p') { width = w; break; } }
-    width = width < 1 ? 1 : (width > 15 ? 15 : width);          /* 4-bit width */
-    uint32_t color = 0x666666; int found = 0;                   /* default medium grey */
-    for (int i = 0; i < vl && !found; ) {                        /* scan each token for a colour (#hex, rgb(), or a name like "red") */
-        while (i < vl && (v[i]==' '||v[i]=='\t')) i++;
-        int ts = i; while (i < vl && v[i]!=' ' && v[i]!='\t') i++;
-        if (i <= ts) continue;
-        uint32_t pc = parse_color(v + ts, i - ts);              /* parse_color reads the leading token of what we pass */
-        if (pc != 0) { color = pc; found = 1; }                 /* any non-black colour token wins (width/style words parse to 0) */
-        else if (v[ts]=='#' || (i-ts==5 && memcmp(v+ts,"black",5)==0)) { color = 0; found = 1; }   /* explicit black / #000 */
-    }
-    return ((uint32_t)(width & 0xF) << 28) | ((uint32_t)(sides & 0xF) << 24) | (color & 0xFFFFFFu);
-}
+/* parse_style_border now lives in cssborder.h so the untrusted CSS `border` value can
+ * be host-tested for conformance (border:none/0) + bounds in tests/css (M1777). */
 /* text-align: 1 = center, 2 = right, 0 = left/justify/other (the default flow). */
 static int parse_style_align(const char *s, int n) {
     int vs, ve;
