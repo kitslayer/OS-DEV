@@ -78,10 +78,15 @@ typedef int (*blk_read_fn)(void *ctx, uint64_t lba, uint32_t count, void *buf);
 /* The write counterpart (M1132): persist `count` sectors at `lba` from `buf`. */
 typedef int (*blk_write_fn)(void *ctx, uint64_t lba, uint32_t count, const void *buf);
 
-/* One root-directory entry returned by fatvol_list(): an 8.3 "NAME.EXT" name, the
- * file size in bytes, and whether it is a subdirectory. */
+/* One directory entry returned by fatvol_list() / ext2_list_path(). FAT fills
+ * only an 8.3 "NAME.EXT" (<=12), but ext2 supports long names, so `name` is 32
+ * (31 usable + NUL) -- widened from 13 (M1746) to stop ext2 listings truncating
+ * to 12. Bounded well below ext2's 255 limit on purpose: this struct is used in
+ * fatvol_dirent[64] arrays on the 16 KB kernel task stack (see vfs.c over_list /
+ * vfs_list), and ext2_list_path already carries a 4 KB block buffer down the
+ * same call chain, so a full-255 name here would risk a stack overflow. */
 typedef struct {
-    char     name[13];   /* "NAME.EXT" + NUL (max 8 + '.' + 3 = 12, +NUL = 13) */
+    char     name[32];   /* file name + NUL (ext2: up to 31; FAT 8.3: <=12) */
     uint32_t size;       /* file size in bytes (0 for directories) */
     int      is_dir;     /* 1 if a subdirectory, else 0 */
 } fatvol_dirent;

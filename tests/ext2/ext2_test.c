@@ -402,6 +402,21 @@ int main(int argc, char **argv) {
         printf("nearfull (M1745): out-of-space write leaks no blocks + failed overwrite leaves no dangling refs\n");
     }
 
+    /* --- M1746: an ext2 listing must not truncate a long (>12-char) name --- */
+    memcpy(g_img, g_golden, (size_t)g_golden_bytes); g_img_bytes = g_golden_bytes;
+    {
+        const char *lname = "documentation-notes.md";        /* 22 chars > the old 12-char cap */
+        uint8_t d[8]; for (int k = 0; k < 8; k++) d[k] = (uint8_t)k;
+        char p[40]; snprintf(p, sizeof p, "/%s", lname);
+        if (ext2_write_path(bd_read, bd_write, 0, 0, p, d, 8) != 8) { fprintf(stderr, "FAIL longname: create of %s failed\n", lname); return 1; }
+        fatvol_dirent le[64];
+        int ln = ext2_list_path(bd_read, 0, 0, "/", le, 64);
+        int found = 0;
+        for (int i = 0; i < ln; i++) if (!strcmp(le[i].name, lname)) found = 1;
+        if (!found) { fprintf(stderr, "FAIL longname: '%s' not listed untruncated (n=%d)\n", lname, ln); return 1; }
+        printf("longname (M1746): ext2 listing returns '%s' (22 chars) untruncated\n", lname);
+    }
+
     printf("PASS\n");
     return 0;
 }
