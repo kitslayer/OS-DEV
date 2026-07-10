@@ -46,9 +46,10 @@ void js_set_fetch(int (*fn)(const char *url, const char *method, const char *cty
  * constructed EventSource fires onerror. */
 void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status));
 
-/* M1796: register the canvas 2D fillRect(id,x,y,w,h,color) callback — the browser
- * resolves the canvas id to its writable image slot and fills the rect. */
-void js_set_canvas(void (*fillrect)(const char *id, int x, int y, int w, int h, const char *color));
+/* M1796/M1797: register the canvas 2D drawing op callback — the browser resolves the
+ * canvas id to its writable image slot and draws. op: 0=fillRect 1=strokeRect
+ * 2=clearRect 3=line; (a,b,c,d) are the op's coords; color is fill/strokeStyle. */
+void js_set_canvas(void (*op)(const char *id, int op, int a, int b, int c, int d, const char *color));
 
 /* Register DOM callbacks for document.getElementById(id) handles:
  *  get(id, out, max, html) -> 1 if found, fills out with the element's

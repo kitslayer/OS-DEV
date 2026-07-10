@@ -262,7 +262,7 @@ static void in_name_set(browser_t *b, const char *id, const char *name);    /* f
 static int dom_attr_region_at(browser_t *b, int off, int *as, int *ae);     /* fwd: position-handle id resolution */
 static int browser_dom_get(const char *id, char *out, int max, int html);   /* fwd */
 static int canvas_new_slot(browser_t *b, int cw, int ch);   /* M1796: fwd — allocate a blank writable image slot for a <canvas> */
-static void browser_canvas_fillrect(const char *id, int x, int y, int w, int h, const char *color);   /* M1796: fwd (registered via js_set_canvas) */
+static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color);   /* M1796/M1797: fwd (registered via js_set_canvas) */
 static void browser_dom_set(const char *id, const char *value, int html);   /* fwd */
 
 
@@ -2843,7 +2843,7 @@ static void browser_set_title(const char *v) {
     int i = 0; while (v[i] && i < 63) { b->title_js[i] = v[i]; i++; } b->title_js[i] = 0;
     b->title_js_set = 1;                                 /* survives the parse_html re-render that follows */
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set, browser_ls_remove, browser_ls_clear); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); js_set_eventsource(browser_eventsource); js_set_canvas(browser_canvas_fillrect); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set, browser_ls_remove, browser_ls_clear); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); js_set_eventsource(browser_eventsource); js_set_canvas(browser_canvas_op); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
@@ -3475,10 +3475,11 @@ static int canvas_new_slot(browser_t *b, int cw, int ch) {
     b->imgs[s] = px; b->imgsw[s] = cw; b->imgsh[s] = ch;
     return s;
 }
-/* M1796: JS canvas 2D context fillRect(x,y,w,h) with the current fillStyle colour
- * string. Resolves the canvas's slot by id, parses the colour (parse_color handles
- * #hex / named / hsl), and fills the clamped rectangle in the slot's RGBA buffer. */
-static void browser_canvas_fillrect(const char *id, int x, int y, int w, int h, const char *color) {
+/* M1796/M1797: JS canvas 2D context drawing op. Resolves the canvas's slot by id,
+ * parses the colour string (parse_color: #hex / named / hsl), and writes the slot's
+ * RGBA buffer. op: 0=fillRect(a,b=x,y c,d=w,h), 1=strokeRect(1px outline), 2=clearRect
+ * (fills opaque white), 3=line(a,b -> c,d, Bresenham). All writes bounds-clamped. */
+static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color) {
     browser_t *b = g_ls_b; if (!b || !id) return;
     int slot = -1;
     for (int i = 0; i < b->n_canv; i++) {
@@ -3488,14 +3489,23 @@ static void browser_canvas_fillrect(const char *id, int x, int y, int w, int h, 
     }
     if (slot < 0 || slot >= b->nimg || !b->imgs[slot]) return;
     int cw = b->imgsw[slot], chh = b->imgsh[slot];
-    uint32_t col = color ? parse_color(color, (int)strlen(color)) : 0;   /* 0xRRGGBB (0 = black on invalid) */
+    uint8_t *px = b->imgs[slot];
+    uint32_t col = (op == 2) ? 0xFFFFFFu : (color ? parse_color(color, (int)strlen(color)) : 0);   /* clearRect -> white */
     uint8_t R = (uint8_t)((col >> 16) & 0xFF), G = (uint8_t)((col >> 8) & 0xFF), B = (uint8_t)(col & 0xFF);
-    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y, x1 = x + w, y1 = y + h;
-    if (x1 > cw) x1 = cw; if (y1 > chh) y1 = chh;
-    for (int yy = y0; yy < y1; yy++) {
-        uint8_t *row = b->imgs[slot] + (long)yy * cw * 4;
-        for (int xx = x0; xx < x1; xx++) { uint8_t *p = row + (long)xx * 4; p[0] = R; p[1] = G; p[2] = B; p[3] = 0xFF; }
+    #define CVPX(X,Y) do { int _x=(X),_y=(Y); if(_x>=0&&_x<cw&&_y>=0&&_y<chh){ uint8_t*_p=px+((long)_y*cw+_x)*4; _p[0]=R;_p[1]=G;_p[2]=B;_p[3]=0xFF; } } while(0)
+    if (op == 0 || op == 2) {                                /* fillRect / clearRect */
+        int x0=a<0?0:a, y0=by<0?0:by, x1=a+c, y1=by+d; if(x1>cw)x1=cw; if(y1>chh)y1=chh;
+        for (int yy=y0; yy<y1; yy++) for (int xx=x0; xx<x1; xx++) CVPX(xx,yy);
+    } else if (op == 1) {                                    /* strokeRect: 1px outline */
+        int x1=a+c-1, y1=by+d-1;
+        for (int xx=a; xx<=x1; xx++) { CVPX(xx,by); CVPX(xx,y1); }
+        for (int yy=by; yy<=y1; yy++) { CVPX(a,yy); CVPX(x1,yy); }
+    } else if (op == 3) {                                    /* line a,by -> c,d (Bresenham) */
+        int x0=a,y0=by,x1=c,y1=d, dx=x1-x0, dy=y1-y0;
+        int adx=dx<0?-dx:dx, ady=dy<0?-dy:dy, sx=dx<0?-1:1, sy=dy<0?-1:1, err=(adx>ady?adx:-ady)/2;
+        for (;;) { CVPX(x0,y0); if(x0==x1&&y0==y1) break; int e2=err; if(e2>-adx){err-=ady;x0+=sx;} if(e2<ady){err+=adx;y0+=sy;} }
     }
+    #undef CVPX
 }
 
 /* Read a local file and decode it into the next inline-image slot. Returns the
