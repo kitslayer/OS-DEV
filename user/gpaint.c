@@ -81,7 +81,11 @@ static void oval(int x0, int y0, int x1, int y1, int r, unsigned c) {
     if (x0 > x1) { int t = x0; x0 = x1; x1 = t; }
     if (y0 > y1) { int t = y0; y0 = y1; y1 = t; }
     long a = (x1 - x0) / 2, b = (y1 - y0) / 2, cx = x0 + a, cy = y0 + b;
-    if (a <= 0 || b <= 0) { seg(x0, cy, x1, cy, r, c); return; }
+    if (a <= 0 || b <= 0) {                     /* M1764: degenerate box -> a straight line on the non-zero axis */
+        if (a <= 0) seg(cx, y0, cx, y1, r, c);  /* zero width: a VERTICAL line (was wrongly a horizontal dot) */
+        else        seg(x0, cy, x1, cy, r, c);  /* zero height: a horizontal line */
+        return;
+    }
     long a2 = a * a, b2 = b * b, x = 0, y = b, dx = 0, dy = 2 * a2 * y;
     long d = b2 - a2 * b + a2 / 4;
     while (dx < dy) {                                                   /* region 1 */
@@ -242,7 +246,7 @@ int main(void) {
         int mx, my, b = sys_mouse(&mx, &my);
         int down  = (b & 1) && mx >= 0 && my >= TB;      /* left button in the canvas */
         int inbar = (b & 1) && mx >= 0 && my < TB;       /* left button in the toolbar */
-        if (inbar) {
+        if (inbar && !wasdown) {                     /* M1764: pick a swatch only on a FRESH press -- not when a canvas drag strays up into the toolbar (that used to silently change the paint colour mid-stroke) */
             int i = (mx - 3) / SW; if (i >= 0 && i < NC && i != cur) { cur = i; draw_toolbar(); dirty = 1; }
         } else if (down) {
             unsigned c = PAL[cur];
