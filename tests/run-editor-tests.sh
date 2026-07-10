@@ -4,7 +4,8 @@
 # edits must undo as one Ctrl-Z; this drives the real undo machinery and asserts
 # that multi-line Tab indent/dedent (block_indent) and Replace-All (replace_all)
 # each revert in a single undo(), which the M1756 undo_merge_last() calls fixed.
-# Built with ASan+UBSan+-fwrapv. Exit 0 = pass.
+# Also checks the M1757 preferred column (Up/Down keep the target column through a
+# shorter intervening line). Built with ASan+UBSan+-fwrapv. Exit 0 = pass.
 set -e
 cd "$(dirname "$0")/.."
 CC=${CC:-gcc}

@@ -26,6 +26,7 @@ static int  sel_anchor = -1;
 static char findq[40];
 static char replq[40];
 static int  dirty;
+static int  goal_col = -1;   /* M1757 preferred column */
 
 #define UNDO_MAX 16384
 struct uop { int pos, grp; unsigned char ch, kind; };
@@ -158,6 +159,23 @@ static int replace_all(void) {
     if (count) { undo_merge_last(un - n0); undo_break(); }   /* M1756 */
     return count;
 }
+static void move_vert(int down) {
+    int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;
+    int col = (goal_col >= 0) ? goal_col : cur - ls;   /* M1757 */
+    goal_col = col;
+    if (!down) {
+        if (ls == 0) return;
+        int ps = ls - 1; while (ps > 0 && doc[ps-1] != '\n') ps--;
+        int plen = 0; while (ps + plen < ls - 1 && doc[ps+plen] != '\n') plen++;
+        cur = ps + (col < plen ? col : plen);
+    } else {
+        int le = cur; while (le < dlen && doc[le] != '\n') le++;
+        if (le >= dlen) return;
+        int ns = le + 1, nlen = 0;
+        while (ns + nlen < dlen && doc[ns+nlen] != '\n') nlen++;
+        cur = ns + (col < nlen ? col : nlen);
+    }
+}
 /* ---- end verbatim ------------------------------------------------------- */
 
 static int fails = 0;
@@ -166,6 +184,7 @@ static int fails = 0;
 static void reset(const char *s) {
     dlen = (int)strlen(s); memcpy(doc, s, dlen); cur = 0; sel_anchor = -1;
     un = umax = ugrp = 0; uexpect = -1; ulast_kind = -1; readonly = 0; dirty = 0;
+    goal_col = -1;
 }
 static int doc_is(const char *s) {
     int n = (int)strlen(s);
@@ -231,7 +250,26 @@ int main(void) {
     undo();
     CK(doc_is("a,b,c,"), "delete-all undoes in one step");
 
+    /* ---- Finding 3 (M1757): preferred column persists through a short line ----
+     * doc lines: "aaaaaaaaaa"(0-9) \n(10) "bb"(11-12) \n(13) "cccccccccc"(14-23). */
+    reset("aaaaaaaaaa\nbb\ncccccccccc");
+    cur = 10;                        /* end of line 0, column 10 */
+    move_vert(1);                    /* Down: onto the short line, clamped to its end (col 2) */
+    CK(cur == 13, "down onto the short line clamps to col 2");
+    move_vert(1);                    /* Down again: preferred col 10 restored on the long line */
+    CK(cur == 24, "down again restores preferred column 10 (not stuck at 2)");
+    move_vert(0);                    /* Up: back to the short line (clamped) */
+    move_vert(0);                    /* Up: back to line 0 at the preferred column */
+    CK(cur == 10, "up back through the short line returns to column 10 on line 0");
+    /* a non-vertical key (simulated by clearing goal_col, as the key loop does) resets it */
+    reset("aaaaaaaaaa\nbb\ncccccccccc");
+    cur = 10;
+    move_vert(1);                    /* col 2 on line 1, goal_col becomes 10 */
+    goal_col = -1;                   /* <- e.g. a Left/Home/typing keystroke */
+    move_vert(1);                    /* now uses the current column (2), not the stale 10 */
+    CK(cur == 16, "after a non-vertical key resets the goal, Down uses the current column (2)");
+
     if (fails) { fprintf(stderr, "FAIL: %d editor-undo check(s) failed\n", fails); return 1; }
-    printf("PASS: editor undo grouping (multi-line indent/dedent + replace-all atomic, ASan/UBSan clean)\n");
+    printf("PASS: editor undo grouping + preferred column (indent/dedent/replace-all atomic, Up/Down sticky column, ASan/UBSan clean)\n");
     return 0;
 }

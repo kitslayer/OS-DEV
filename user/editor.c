@@ -17,6 +17,7 @@
 static char doc[MAXDOC];
 static int  dlen, cur, readonly;  /* readonly: file exceeded the buffer — view only, never save (would truncate it) */
 static int  sel_anchor = -1;      /* selection mark (Ctrl-B); -1 = none. Selection spans [min, max](anchor,cur) */
+static int  goal_col = -1;        /* preferred column for Up/Down (M1757): -1 = derive from the caret; set on the first vertical move and kept across a run, so passing through a shorter line doesn't permanently shrink the target column. Reset by any non-vertical key. */
 static char fname[40];
 static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
 static char replq[40]; static int replacing;          /* Ctrl-R replace: replacement text + mode (1=typing search, 2=typing replacement) */
@@ -312,7 +313,8 @@ static void do_cut(void) {
 /* up/down move to the same column in the adjacent line (split on '\n'). */
 static void move_vert(int down) {
     int ls = cur; while (ls > 0 && doc[ls-1] != '\n') ls--;
-    int col = cur - ls;
+    int col = (goal_col >= 0) ? goal_col : cur - ls;   /* M1757: sticky preferred column */
+    goal_col = col;                                    /* keep it for the next Up/Down in this run */
     if (!down) {
         if (ls == 0) return;
         int ps = ls - 1; while (ps > 0 && doc[ps-1] != '\n') ps--;
@@ -671,6 +673,7 @@ int main(void) {
     for (;;) {
         int k = sys_pollkey();
         if (k < 0) { sys_sleep(20); continue; }
+        if (k != 0x11 && k != 0x12 && k != 0x15 && k != 0x16) goal_col = -1;   /* M1757: only Up/Down/PgUp/PgDn keep the preferred column; any other key resets it */
         if (helping) { helping = 0; render(0); continue; }   /* any key dismisses the help overlay */
         if (finding) {                              /* Ctrl-F find mode: edit the query, Enter searches */
             int fl = 0; while (findq[fl]) fl++;
