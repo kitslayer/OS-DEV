@@ -506,7 +506,26 @@ int main(void) {
     set_raw(0, 2, "=MODE(A1:A5)"); recompute(); chk_num(0, 2, 1, "MODE over a range (all unique -> smallest)");
     set_raw(0, 2, "=MEDIAN(A1:A5)+MODE(A1:A5)"); recompute(); chk_num(0, 2, 5, "MEDIAN+MODE compose (4+1)");
 
-    if (failures == 0) printf("PASS: %d checks, spreadsheet engine correct\n", checks);
+    /* --- fuzz: random short cell formulas must never crash/trap/hang (ASan/UBSan).
+     * Driven through the real set_raw + recompute path (empty cells keep recompute
+     * cheap). The alphabet exercises '=' formulas, $-anchored refs, ranges (:),
+     * function args (,), operators and function-name letters; length <=40 bounds
+     * the recursion depth. (M1743 -- mirrors calc's fuzz.) */
+    {
+        const char *cs = "=0123456789.ABCZ$:,+-*/%()^<>&| SUMIFAVGMNXPOWDEVLR";
+        unsigned cn = 0; while (cs[cn]) cn++;
+        unsigned seed = 0x5EED11u;
+        for (int it = 0; it < 40000; it++) {
+            char buf[41];
+            seed = seed * 1103515245u + 12345u; int n = (int)((seed >> 24) % 40);
+            for (int i = 0; i < n; i++) { seed = seed * 1103515245u + 12345u; buf[i] = cs[(seed >> 12) % cn]; }
+            buf[n] = 0;
+            clear_all(); set_raw(0, 0, buf); recompute();
+        }
+        checks++;
+    }
+
+    if (failures == 0) printf("PASS: %d checks + 40k fuzz, spreadsheet engine correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", failures, checks);
     return failures ? 1 : 0;
 }

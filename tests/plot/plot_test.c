@@ -110,7 +110,26 @@ int main(void) {
         checks++; if (nr != 3 || !napprox(r[0], -3.14159265358979) || !napprox(r[1], 0) || !napprox(r[2], 3.14159265358979)) { printf("  FAIL roots sin: n=%d\n", nr); fails++; }
     }
 
-    if (!fails) printf("PASS: %d checks, plot evaluator correct\n", checks);
+    /* --- fuzz: random short formulas must never crash/trap/hang (ASan/UBSan). --
+     * plot_eval consumes a bounded string and always terminates, so a violation
+     * is a real bug. The alphabet exercises x, pi/e, the function-name letters,
+     * operators and parens; length <=40 bounds the recursion depth (no overflow).
+     * (M1743 -- mirrors calc's 400k-iteration fuzz.) */
+    {
+        const char *cs = "0123456789.xepisncotardquglbfh+-*/%()^, ";
+        unsigned cn = 0; while (cs[cn]) cn++;
+        unsigned seed = 0xB0A710u;
+        for (int it = 0; it < 300000; it++) {
+            char buf[41];
+            seed = seed * 1103515245u + 12345u; int n = (int)((seed >> 24) % 40);
+            for (int i = 0; i < n; i++) { seed = seed * 1103515245u + 12345u; buf[i] = cs[(seed >> 12) % cn]; }
+            buf[n] = 0;
+            int e; volatile double r = plot_eval(buf, (double)((int)(seed % 40) - 20), &e); (void)r; (void)e;
+        }
+        checks++;
+    }
+
+    if (!fails) printf("PASS: %d checks + 300k fuzz, plot evaluator correct\n", checks);
     else printf("FAIL: %d/%d checks failed\n", fails, checks);
     return fails ? 1 : 0;
 }
