@@ -2072,8 +2072,8 @@ static int loose_eq(val a, val b) {
     if (a.t==V_SYMBOL||b.t==V_SYMBOL) return 0;   /* a symbol == only the SAME symbol (handled by a.t==b.t above); never loosely-equal to any other type — don't fall through to the numeric coercion below (M-symbol) */
     int aobj=(a.t==V_OBJ||a.t==V_ARR||a.t==V_FUN||a.t==V_NATIVE), bobj=(b.t==V_OBJ||b.t==V_ARR||b.t==V_FUN||b.t==V_NATIVE);
     if (aobj && bobj) return a.o==b.o;                    /* two objects of any val-types: reference identity ({}==[] -> false) (M271 review fix) */
-    if (aobj) return loose_eq(STRV(val_to_str(a)), b);    /* object/function vs primitive: coerce to a string, re-compare (one bounded step) */
-    if (bobj) return loose_eq(a, STRV(val_to_str(b)));
+    if (aobj) return loose_eq(to_primitive(a), b);        /* M1791: object vs primitive -> ToPrimitive(default hint = valueOf-first), re-compare (one bounded step; to_primitive never returns an object, so no further coercion) */
+    if (bobj) return loose_eq(a, to_primitive(b));
     return to_num(a)==to_num(b);   /* number/string/boolean cross-type */
 }
 

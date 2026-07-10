@@ -23,4 +23,12 @@ V 8
 W 6 1
 X 5 1
 Y 6 1
+Z1 true
+Z2 true
+Z3 false
+Z4 true
+Z5 true
+Z6 false
+Z7 false false false true true
+Z8 true false
 -- done --

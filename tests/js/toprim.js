@@ -34,4 +34,13 @@ var m=2; m*={valueOf(){return 4}}; console.log("V", m);                // 8
 var c=0; var ob={valueOf(){c++; return 5}}; var y=1; y+=ob; console.log("W", y, c);   // 6 1
 var c2=0; var o2={valueOf(){c2++; return 5}}; var z=10; z-=o2; console.log("X", z, c2); // 5 1
 var c3=0; var o3={valueOf(){c3++; return 5}}; console.log("Y", (o3+1), c3);            // 6 1
+// --- M1791: loose == uses ToPrimitive(default hint) for object-vs-primitive ---
+console.log("Z1", ({valueOf(){return 5}}) == 5);        // true (was false)
+console.log("Z2", 5 == ({valueOf(){return 5}}));        // true
+console.log("Z3", ({valueOf(){return 5}}) != 5);        // false
+console.log("Z4", ({valueOf(){return "5"}}) == 5);      // true
+console.log("Z5", ({valueOf(){return 0}}) == false);    // true
+console.log("Z6", ({valueOf(){return 5}}) === 5);       // false (=== is identity, unaffected)
+console.log("Z7", {}=={}, {}==[], []==[], [1]==1, [1,2]=="1,2");  // false false false true true
+console.log("Z8", ({})=="[object Object]", new Date(0)==0);       // true false
 console.log("-- done --");
