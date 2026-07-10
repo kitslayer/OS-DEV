@@ -4046,10 +4046,12 @@ static val nat_obj_keys(val *a, int n){
 /* ---- JSON.stringify (bounded 16 KB output; depth-guarded against cycles) ---- */
 static char *g_json; static int g_json_pos, g_json_cap;
 static void js_app(const char *s){ while(*s && g_json_pos<g_json_cap-1) g_json[g_json_pos++]=*s++; }
-static void js_appq(const char *s){ js_app("\""); for(; *s && g_json_pos<g_json_cap-2; s++){ char c=*s;
-        if(c=='"'||c=='\\'){ g_json[g_json_pos++]='\\'; g_json[g_json_pos++]=c; }
+static void js_appq(const char *s){ js_app("\""); for(; *s && g_json_pos<g_json_cap-8; s++){ unsigned char c=(unsigned char)*s;
+        if(c=='"'||c=='\\'){ g_json[g_json_pos++]='\\'; g_json[g_json_pos++]=(char)c; }
         else if(c=='\n'){ js_app("\\n"); } else if(c=='\t'){ js_app("\\t"); } else if(c=='\r'){ js_app("\\r"); }
-        else g_json[g_json_pos++]=c; } js_app("\""); }
+        else if(c=='\b'){ js_app("\\b"); } else if(c=='\f'){ js_app("\\f"); }         /* M1768: the two remaining standard JSON short escapes */
+        else if(c<0x20){ const char*hx="0123456789abcdef"; char u[7]={'\\','u','0','0',hx[(c>>4)&0xF],hx[c&0xF],0}; js_app(u); }   /* M1768: any other control char -> \u00XX; was emitted RAW, producing JSON no conformant parser accepts. (unsigned char keeps bytes >=0x80 raw, not mis-escaped.) */
+        else g_json[g_json_pos++]=(char)c; } js_app("\""); }
 static int g_json_pretty; static char g_json_unit[16];   /* indentation: "" (compact) or N spaces / a string */
 static obj *g_json_allow;   /* array replacer: a property-name allowlist (NULL = include every key) */
 static int json_allowed(const char *k){
@@ -4105,8 +4107,12 @@ static const char *jp_string(void){          /* assumes *jp == '"'; sizes from t
     jp++; const char *raw=jp, *e=jp;
     while(e<jp_end && *e!='"'){ if(*e=='\\' && e+1<jp_end) e++; e++; }
     int cap=(int)(e-raw)+1; char *buf=aalloc(cap); int nn=0;
-    while(jp<e){ char c=*jp++; if(c=='\\' && jp<jp_end){ char x=*jp++; if(x=='u'){ int v=0,k=0; for(;k<4 && jp<jp_end;k++){ char h=*jp; int d=(h>='0'&&h<='9')?h-'0':(h>='a'&&h<='f')?h-'a'+10:(h>='A'&&h<='F')?h-'A'+10:-1; if(d<0) break; v=v*16+d; jp++; } c = (k==4) ? (char)(v & 0xFF) : '?'; } else c = x=='n'?'\n':x=='t'?'\t':x=='r'?'\r':x=='"'?'"':x=='\\'?'\\':x=='/'?'/':x; } if(buf && nn<cap-1) buf[nn++]=c; }
-    if(jp<jp_end && *jp=='"') jp++;
+    while(jp<e){ char c=*jp++; if(c=='\\' && jp<jp_end){ char x=*jp++;
+            if(x=='u'){ int v=0,k=0; for(;k<4 && jp<jp_end;k++){ char h=*jp; int d=(h>='0'&&h<='9')?h-'0':(h>='a'&&h<='f')?h-'a'+10:(h>='A'&&h<='F')?h-'A'+10:-1; if(d<0) break; v=v*16+d; jp++; } if(k<4){ jp_err=1; c='?'; } else c=(char)(v & 0xFF); }   /* M1768: bad/short \u is now an error (still low byte only -- single-byte engine) */
+            else if(x=='n')c='\n'; else if(x=='t')c='\t'; else if(x=='r')c='\r'; else if(x=='b')c='\b'; else if(x=='f')c='\f'; else if(x=='"')c='"'; else if(x=='\\')c='\\'; else if(x=='/')c='/';   /* M1768: added the standard \b \f */
+            else { jp_err=1; c=x; } }   /* M1768: an unrecognized escape (\a, \x..) is invalid JSON, not a literal */
+        if(buf && nn<cap-1) buf[nn++]=c; }
+    if(jp<jp_end && *jp=='"') jp++; else jp_err=1;   /* M1768: an unterminated string (no closing ") is now an error */
     if(buf) buf[nn]=0; return buf?buf:"";
 }
 static val json_parse_val(void){
