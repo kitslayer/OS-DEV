@@ -21,6 +21,13 @@ const char *url_split(const char *url, char *host, int hostsz);
  * by the resolver, so only a single trailing port is parsed. */
 int url_host_port(const char *hostport, char *host, int hostsz, int defport);
 
+/* Copy the HTTP request-target out of `path`, dropping any "#fragment": the
+ * fragment is a client-side concern and must never appear in the request line
+ * (RFC 7230 origin-form is absolute-path [ "?" query ] — no fragment). The
+ * query is kept. The caller's stored URL keeps its fragment (for scroll-to);
+ * only what goes on the wire is stripped. Writes NUL-terminated into out. */
+void url_request_path(const char *path, char *out, int outsz);
+
 /* Resolve a raw <img src> slice src[0..srcl) (NOT NUL-terminated) against the
  * page URL `base` into out[0..outsz), NUL-terminated. Absolute http(s) is kept;
  * protocol-relative //host, root-relative /path, and dir-relative are resolved

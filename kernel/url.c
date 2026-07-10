@@ -45,6 +45,14 @@ int url_host_port(const char *hostport, char *host, int hostsz, int defport) {
     return port ? port : defport;                    /* ":0" -> default */
 }
 
+/* Copy the request-target out of `path`, dropping any "#fragment" (see url.h).
+ * The fragment must never hit the wire; the query ("?...") is preserved. */
+void url_request_path(const char *path, char *out, int outsz) {
+    int i = 0;
+    for (; path[i] && path[i] != '#' && i < outsz - 1; i++) out[i] = path[i];
+    out[i] = 0;
+}
+
 /* Resolve a raw <img src> (as it appears in the HTML) into a full absolute URL,
  * the SAME way goto_href resolves a link: an absolute http(s):// src is kept;
  * a protocol-relative //host/path, root-relative /path, or dir-relative src is

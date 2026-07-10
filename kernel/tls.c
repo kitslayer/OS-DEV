@@ -652,18 +652,19 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
 
     /* --- send the HTTP request, read the response --- */
     char req[640]; int rl = 0;
+    char rpath[1024]; url_request_path(path, rpath, sizeof(rpath));   /* drop any #fragment from the wire request-target (M1774) */
     int is_post = method && (method[0]=='P' || method[0]=='p');
     if (is_post) {
         if (bodylen < 0) bodylen = 0;
         char clen[12]; { unsigned b=(unsigned)bodylen; int t=0; char tmp[12]; do{ tmp[t++]=(char)('0'+b%10); b/=10; }while(b && t<11); int ci=0; while(t) clen[ci++]=tmp[--t]; clen[ci]=0; }
-        const char *parts[] = { "POST ", path, " HTTP/1.0\r\nHost: ", host,
+        const char *parts[] = { "POST ", rpath, " HTTP/1.0\r\nHost: ", host,
                                 "\r\nContent-Type: ", ctype ? ctype : "text/plain",
                                 "\r\nContent-Length: ", clen,
                                 "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
         for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
             for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = (char)*s;
     } else {                       /* GET: byte-identical to the original request (no regression) */
-        const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
+        const char *parts[] = { "GET ", rpath, " HTTP/1.0\r\nHost: ", host,
                                 "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
         for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
             for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = (char)*s;

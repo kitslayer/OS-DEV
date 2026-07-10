@@ -1304,8 +1304,9 @@ int http_get(const char *host, const char *path, char *out, int max) {
     tcp_conn c;
     if (tcp_connect(&c, ip, port) != 0) return -1;
 
+    char rpath[1024]; url_request_path(path, rpath, sizeof(rpath));   /* drop any #fragment from the wire request-target (M1774) */
     char req[512]; int rl = 0;
-    const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
+    const char *parts[] = { "GET ", rpath, " HTTP/1.0\r\nHost: ", host,
                             "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
     for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
         for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = *s;
@@ -1347,8 +1348,9 @@ int http_get_sse(const char *host, const char *path, char *out, int max) {
     if (dns_resolve(bare, ip) != 0) return -1;
     tcp_conn c;
     if (tcp_connect(&c, ip, port) != 0) return -1;
+    char rpath[1024]; url_request_path(path, rpath, sizeof(rpath));   /* drop any #fragment from the wire request-target (M1774) */
     char req[512]; int rl = 0;
-    const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
+    const char *parts[] = { "GET ", rpath, " HTTP/1.0\r\nHost: ", host,
                             "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };
     for (unsigned k = 0; k < sizeof(parts)/sizeof(parts[0]); k++)
         for (const char *s = parts[k]; *s && rl < (int)sizeof(req); s++) req[rl++] = *s;

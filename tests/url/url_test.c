@@ -54,6 +54,21 @@ static void fuzz_hp(const char *hostport, int hostsz) {
     if (hostsz) CHECK(strlen(h) < (size_t)hostsz, "url_host_port host not NUL-terminated within buffer");
     free(h);
 }
+static void expect_rp(const char *path, const char *want) {
+    char out[256]; url_request_path(path, out, sizeof(out));
+    char m[300]; snprintf(m, sizeof(m), "url_request_path('%s') -> '%s' (want '%s')", path, out, want);
+    CHECK(strcmp(out, want)==0, m);
+}
+static void fuzz_rp(const char *path, int outsz) {
+    char *out = malloc(outsz ? outsz : 1);
+    url_request_path(path, out, outsz);
+    if (outsz) {
+        CHECK(strlen(out) < (size_t)outsz, "url_request_path out not NUL-terminated within buffer");
+        int has_hash = 0; for (int i = 0; out[i]; i++) if (out[i] == '#') has_hash = 1;
+        CHECK(!has_hash, "url_request_path left a '#' in the request target");
+    }
+    free(out);
+}
 
 int main(void) {
     /* ---- regression ---- */
@@ -90,7 +105,14 @@ int main(void) {
     expect_hp("h:99999",            80, "h",           80);      /* out of range -> default */
     expect_hp("h:80x",              80, "h",           80);      /* trailing junk -> default */
     expect_hp("h:8x0",              80, "h",           80);      /* mid junk -> default */
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (url_split + resolve_img_url + url_host_port)");
+    /* request-target fragment stripping (M1774): '#fragment' must not hit the wire; keep the ?query */
+    expect_rp("/page.html#section", "/page.html");               /* cross-doc anchor: drop the fragment */
+    expect_rp("/search?q=x#top",    "/search?q=x");              /* keep the query, drop the fragment */
+    expect_rp("/plain",             "/plain");                   /* no fragment -> unchanged */
+    expect_rp("/a?b=c",             "/a?b=c");                   /* query, no fragment -> unchanged */
+    expect_rp("/#frag",             "/");                        /* fragment right after the path */
+    expect_rp("/p#a#b",             "/p");                       /* stop at the first '#' */
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (url_split + resolve_img_url + url_host_port + url_request_path)");
 
     /* ---- fuzz: url_split with truncations + tiny host buffers ---- */
     const char *urls[] = {
@@ -113,6 +135,7 @@ int main(void) {
         char base[33]; int bl=rand()%32; for(int i=0;i<bl;i++) base[i]=alpha[rand()%alen]; base[bl]=0;
         fuzz_img(base, tmp, len, 1 + rand()%40);            /* src is the exactly-len (non-NUL) slice */
         fuzz_hp(z, 1 + rand()%16);                          /* host:port split into a tiny host buffer */
+        fuzz_rp(z, 1 + rand()%24);                          /* fragment strip into a tiny out buffer */
     }
 
     printf("fuzz: truncations + 400000 random URLs (tiny host/out buffers) -> %s\n", fails ? "FAILURES" : "all clean");
