@@ -666,10 +666,13 @@ static int sort_order(int ra, int rb, int keyc, int desc) {
     int c = sort_key_cmp(ra, rb, keyc);
     return desc ? -c : c;
 }
-static void sort_rows(int r0, int r1, int keyc, int desc) {
+/* Returns 1 if it actually reordered rows, 0 if the block was already sorted or
+ * the range was degenerate (M1767: lets the caller avoid a spurious dirty flag /
+ * "sorted" status / wasted undo on a no-op :sort). */
+static int sort_rows(int r0, int r1, int keyc, int desc) {
     if (r0 < 0) r0 = 0;
     if (r1 >= NROWS) r1 = NROWS - 1;
-    if (r0 >= r1 || keyc < 0 || keyc >= NCOLS) return;          /* nothing to do */
+    if (r0 >= r1 || keyc < 0 || keyc >= NCOLS) return 0;        /* nothing to do */
     int n = r1 - r0 + 1;
     for (int i = 0; i < n; i++) sort_perm[i] = r0 + i;
     for (int i = 1; i < n; i++) {                               /* stable insertion sort */
@@ -677,6 +680,8 @@ static void sort_rows(int r0, int r1, int keyc, int desc) {
         while (j >= 0 && sort_order(sort_perm[j], key, keyc, desc) > 0) { sort_perm[j + 1] = sort_perm[j]; j--; }
         sort_perm[j + 1] = key;
     }
+    int changed = 0; for (int i = 0; i < n; i++) if (sort_perm[i] != r0 + i) { changed = 1; break; }
+    if (!changed) return 0;                                     /* already in order -> a true no-op (no cell rewrite) */
     for (int r = r0; r <= r1; r++)                              /* snapshot raw text before overwriting */
         for (int c = 0; c < NCOLS; c++) scopy(sort_snap[r][c], CELL(r, c)->raw, RAWMAX);
     for (int i = 0; i < n; i++) {
@@ -685,6 +690,7 @@ static void sort_rows(int r0, int r1, int keyc, int desc) {
             if (dr == 0) scopy(CELL(dst, c)->raw, sort_snap[src][c], RAWMAX);
             else         adjust_refs(sort_snap[src][c], dr, 0, CELL(dst, c)->raw, RAWMAX);
     }
+    return 1;
 }
 
 /* ---- number formatting (pure; shared by the UI and the host test) ---------*/

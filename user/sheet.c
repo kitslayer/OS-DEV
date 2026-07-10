@@ -449,14 +449,12 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
     }
     if (startswith(c, "fmt")) {                      /* :fmt CODE — set the current column's number format */
         const char *a = c + 3; while (*a == ' ') a++;
-        save_undo();
-        char code = *a;
-        if (code == 0 || code == 'G' || code == 'g' || code == '-') { col_fmt[cur_c] = 0; scopy(status, "format: general", sizeof status); }
-        else if ((code >= '0' && code <= '6') || code == '%' || code == '$') {
-            col_fmt[cur_c] = code; modified = 1;
-            scopy(status, code == '$' ? "format: currency ($)" : code == '%' ? "format: percent (%)" : "format: fixed decimals", sizeof status);
-        } else scopy(status, "usage: :fmt $ | % | 0..6 | G   (sets column A..Z display)", sizeof status);
-        if (col_fmt[cur_c] == 0) modified = 1;
+        char code = *a, newfmt;
+        if (code == 0 || code == 'G' || code == 'g' || code == '-') newfmt = 0;   /* general */
+        else if ((code >= '0' && code <= '6') || code == '%' || code == '$') newfmt = code;
+        else { scopy(status, "usage: :fmt $ | % | 0..6 | G   (sets column A..Z display)", sizeof status); return 0; }   /* M1767: a rejected code no longer snapshots undo or marks the sheet modified */
+        if (newfmt != col_fmt[cur_c]) { save_undo(); col_fmt[cur_c] = newfmt; modified = 1; }   /* M1767: only an actual format change dirties the sheet + consumes an undo slot */
+        scopy(status, newfmt == 0 ? "format: general" : newfmt == '$' ? "format: currency ($)" : newfmt == '%' ? "format: percent (%)" : "format: fixed decimals", sizeof status);
         return 0;
     }
     if (startswith(c, "sort")) {                     /* :sort D2:D5 (asc) / :sortd D2:D5 (desc) */
@@ -465,10 +463,10 @@ static int exec_cmd(void) {                      /* returns 1 to quit */
         int r1, c1, r2, c2;
         if (parse_range(rng, &r1, &c1, &r2, &c2)) {
             save_undo();
-            sort_rows(r1, r2, c1, desc);             /* rows r1..r2 keyed by the range's column c1 */
-            modified = 1; recompute();
+            int ch = sort_rows(r1, r2, c1, desc);    /* rows r1..r2 keyed by the range's column c1 */
+            if (ch) { modified = 1; recompute(); }   /* M1767: only a real reorder dirties the sheet */
             cur_r = r1; cur_c = c1;                  /* park on the top of the sorted block */
-            scopy(status, desc ? "sorted (descending)" : "sorted (ascending)", sizeof status);
+            scopy(status, ch ? (desc ? "sorted (descending)" : "sorted (ascending)") : "already sorted", sizeof status);   /* M1767: honest status on a no-op */
         } else scopy(status, "usage: :sort D2:D5  (sort rows by column D; :sortd = descending)", sizeof status);
         return 0;
     }
