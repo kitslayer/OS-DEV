@@ -3668,13 +3668,19 @@ int browser_poll(browser_t *b) {
  * right one. A leading ".." past the root is dropped rather than erroring,
  * matching how real browsers clamp it. */
 static void collapse_dot_segments(char *path) {
+    /* M1771: normalize ONLY the path; a `/` or `.`/`..` inside a ?query or
+     * #fragment is data, not a path segment, so split those off and re-append
+     * them verbatim (was: the whole string was run through the segment splitter,
+     * mangling e.g. "/r?url=http://x/y" -> "/r?url=http:/x/y"). */
+    int plen = 0; while (path[plen] && path[plen] != '?' && path[plen] != '#') plen++;
+    char qf[URL_MAX]; int qn = 0; for (int i = plen; path[i] && qn < URL_MAX-1; i++) qf[qn++] = path[i]; qf[qn] = 0;
     char out[URL_MAX]; int op = 0;
     int segstart[64]; int nseg = 0;   /* out[] offset of each kept segment's own '/' */
-    int trail = path[0] && path[strlen(path)-1] == '/';   /* preserve a trailing slash (dir vs. file) */
-    const char *p = path;
-    while (*p) {
-        while (*p == '/') p++;
-        const char *s = p; while (*p && *p != '/') p++;
+    int trail = plen > 0 && path[plen-1] == '/';   /* preserve a trailing slash (dir vs. file) of the PATH */
+    const char *p = path, *pe = path + plen;
+    while (p < pe) {
+        while (p < pe && *p == '/') p++;
+        const char *s = p; while (p < pe && *p != '/') p++;
         int len = (int)(p - s);
         if (len == 0) continue;
         if (len == 1 && s[0] == '.') continue;                         /* "." -> drop */
@@ -3689,6 +3695,7 @@ static void collapse_dot_segments(char *path) {
     }
     if (op == 0) out[op++] = '/';                                      /* never produce an empty path */
     else if (trail && op < URL_MAX-1) out[op++] = '/';
+    for (int i = 0; qf[i] && op < URL_MAX-1; i++) out[op++] = qf[i];   /* M1771: re-append ?query/#fragment untouched */
     out[op] = 0;
     int i = 0; while (out[i] && i < URL_MAX-1) { path[i] = out[i]; i++; } path[i] = 0;
 }
@@ -3734,10 +3741,15 @@ static void goto_href(browser_t *b, const char *href, int suppress_push) {
         int path_start = p;   /* M1636: everything from here on is the path -- collapse ./ and ../ once it's built */
         if (href[0] == '/') {                            /* absolute path */
             for (int i = 0; href[i] && p < URL_MAX-1; i++) newurl[p++] = href[i];
+        } else if (href[0] == '?') {                     /* M1771: query-only ref -> keep the base PATH, replace only the query (RFC 3986 5.3). `?page=2` on /a/b resolves to /a/b?page=2, not /a/?page=2 */
+            const char *cp = cu + hi;                    /* base path incl leading '/' */
+            if (!cp[0] && p < URL_MAX-1) newurl[p++] = '/';   /* empty base path -> "/" */
+            for (int i = 0; cp[i] && cp[i] != '?' && cp[i] != '#' && p < URL_MAX-1; i++) newurl[p++] = cp[i];   /* base path, sans its own query/fragment */
+            for (int i = 0; href[i] && p < URL_MAX-1; i++) newurl[p++] = href[i];   /* the new ?query (and any #fragment) */
         } else {                                         /* relative to current dir */
             const char *cp = cu + hi;                    /* current path incl leading '/' */
             int lastslash = 0;
-            for (int i = 0; cp[i]; i++) if (cp[i] == '/') lastslash = i + 1;
+            for (int i = 0; cp[i] && cp[i] != '?' && cp[i] != '#'; i++) if (cp[i] == '/') lastslash = i + 1;   /* M1771: the base directory is in the PATH only -- a '/' inside the base's ?query is not a separator */
             if (p < URL_MAX-1) newurl[p++] = '/';
             for (int i = 0; i < lastslash && cp[i] && p < URL_MAX-1; i++)
                 if (!(i == 0 && cp[0] == '/')) newurl[p++] = cp[i];
