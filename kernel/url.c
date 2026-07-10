@@ -87,10 +87,15 @@ int resolve_img_url(const char *base, const char *src, int srcl, char *out, int 
     for (int i = 0; host[i] && p < outsz - 1; i++) out[p++] = host[i];
     if (srcl >= 1 && src[0] == '/') {                     /* absolute path */
         for (int i = 0; i < srcl && p < outsz - 1; i++) out[p++] = src[i];
+    } else if (srcl >= 1 && src[0] == '?') {              /* M1772: query-only ref -> keep the base PATH, replace only the query (mirrors goto_href, M1771; e.g. fetch("?page=2")) */
+        const char *cp = cu + hi;                         /* base path incl leading '/' */
+        if (!cp[0] && p < outsz - 1) out[p++] = '/';
+        for (int i = 0; cp[i] && cp[i] != '?' && cp[i] != '#' && p < outsz - 1; i++) out[p++] = cp[i];   /* base path, sans its own query/fragment */
+        for (int i = 0; i < srcl && p < outsz - 1; i++) out[p++] = src[i];   /* the new ?query */
     } else {                                              /* relative to current dir */
         const char *cp = cu + hi;                         /* current path incl leading '/' */
         int lastslash = 0;
-        for (int i = 0; cp[i]; i++) if (cp[i] == '/') lastslash = i + 1;
+        for (int i = 0; cp[i] && cp[i] != '?' && cp[i] != '#'; i++) if (cp[i] == '/') lastslash = i + 1;   /* M1772: the base directory is in the PATH only -- a '/' in the base's ?query is not a separator */
         if (p < outsz - 1) out[p++] = '/';
         for (int i = 0; i < lastslash && cp[i] && p < outsz - 1; i++)
             if (!(i == 0 && cp[0] == '/')) out[p++] = cp[i];

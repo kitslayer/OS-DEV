@@ -53,6 +53,9 @@ int main(void) {
     expect_img("https://e.com/a/b", "/root.png", 1, "https://e.com/root.png");          /* root-relative */
     expect_img("http://e.com/x", "http://other.com/a.png", 1, "http://other.com/a.png");/* absolute kept */
     expect_img("https://e.com/x", "//cdn.com/a.png", 1, "https://cdn.com/a.png");        /* protocol-relative */
+    expect_img("http://e.com/products/list", "?page=2", 1, "http://e.com/products/list?page=2");    /* M1772: query-only ref keeps the whole base path */
+    expect_img("http://e.com/a/b?old=1", "?new=2", 1, "http://e.com/a/b?new=2");                     /* M1772: replaces the base query, keeps the path */
+    expect_img("http://e.com/login?next=/acct/settings", "go.png", 1, "http://e.com/go.png");        /* M1772: a '/' in the base query is not a path separator */
     expect_img("http://e.com/x", "data:image/png;base64,AAAA", 0, 0);                    /* data: rejected */
     expect_img("http://e.com/x", "file:///etc/passwd", 0, 0);                            /* file: rejected */
     /* RFC 3986 ./ and ../ path normalization (M660): the resolved URL is canonical */
