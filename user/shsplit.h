@@ -32,9 +32,11 @@ static int sh_next_sep(const char *seg) {
             if (word_at(semi, "if") || word_at(semi, "for") || word_at(semi, "while") || word_at(semi, "case")) cd++;
             else if ((word_at(semi, "fi") || word_at(semi, "done") || word_at(semi, "esac")) && cd > 0) cd--;
         }
-        int nextcmd = word_at(semi, "then") || word_at(semi, "do") || word_at(semi, "else");
-        while (*semi && *semi != ' ' && *semi != ';') {         /* skip this whole token, incl any "..."/'...' spans */
+        int nextcmd = atcmd && (word_at(semi, "then") || word_at(semi, "do") || word_at(semi, "else"));   /* M1786: then/do/else re-arm a command position ONLY as keywords (at a command position), not as bare arguments */
+        while (*semi && *semi != ' ' && *semi != ';') {         /* skip this whole token, incl any "..."/'...' spans and $(...) substitutions */
             if (*semi == '"' || *semi == '\'') { char qq = *semi++; while (*semi && *semi != qq) semi++; if (*semi) semi++; }
+            else if (semi[0] == '$' && semi[1] == '(') {        /* M1786: a mid-token $(...) / $((...)) — skip the balanced parens incl its internal ';' (e.g. x=$(a;b)) */
+                int d = 1; semi += 2; while (*semi && d > 0) { if (*semi == '(') d++; else if (*semi == ')') d--; semi++; } }
             else semi++;
         }
         atcmd = nextcmd;

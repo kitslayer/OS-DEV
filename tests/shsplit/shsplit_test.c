@@ -41,6 +41,10 @@ int main(void) {
     CHECK("echo $(a; b); c", "echo $(a; b)| c");
     CHECK("x $((1>0)) ; y", "x $((1>0)) | y");
     CHECK("echo $(echo $(a; b); c)", "echo $(echo $(a; b); c)");   /* nested $() */
+    CHECK("x=$(a;b); ls", "x=$(a;b)| ls");                         /* M1786: mid-token $( — internal ';' must not split (var=$(cmd1;cmd2)) */
+    CHECK("v=$(echo hi; date)", "v=$(echo hi; date)");             /* M1786: assignment command-substitution stays one statement */
+    CHECK("echo do while; ls", "echo do while| ls");               /* M1786: then/do/else as bare args must NOT re-arm a command position */
+    CHECK("echo then if; ls", "echo then if| ls");
 
     /* --- control constructs stay intact across their internal ';' --- */
     CHECK("if x; then y; fi", "if x; then y; fi");
