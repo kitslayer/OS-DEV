@@ -2863,8 +2863,9 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         int caps[2*(RE_MAXGROUP+1)]; sbuild b; memset(&b,0,sizeof(b)); int pos=0;
         for(;;){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom||g_err) break;
             sb_put(&b, s+pos, caps[0]-pos);
-            if(has_fn){ val fa[RE_MAXGROUP+1]; int na=0;                    /* pass (match, g1, …, gN) */
+            if(has_fn){ val fa[RE_MAXGROUP+3]; int na=0;                    /* M1770: pass (match, g1, …, gN, offset, wholeString) per spec */
                 for(int gi=0; gi<=re->ngroup && na<RE_MAXGROUP+1; gi++){ int a=caps[2*gi],e=caps[2*gi+1]; if(a>=0&&e>=a){ char*m=aalloc(e-a+1); if(m){memcpy(m,s+a,e-a);m[e-a]=0;} fa[na++]=STRV(m?m:""); } else fa[na++]=UND(); }
+                fa[na++]=NUM(caps[0]); fa[na++]=STRV(s);                    /* M1770: the match offset, then the whole subject string */
                 val rv=call_function(args[1], fa, na); const char *rs=val_to_str(rv); sb_put(&b, rs, (int)strlen(rs)); }
             else sb_expand(&b, repl, s, caps, re->ngroup, re->gnames);
             pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(caps[1]==caps[0] && caps[0]<len) sb_put(&b, s+caps[0], 1);   /* zero-width: emit a char, advance */
@@ -2884,11 +2885,12 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         else { for(int i=0;i<len;i++) r[p++]=s[i]; for(int i=0;i<padn;i++) r[p++]=pad[i%pl]; }              /* padEnd */
         r[p]=0; return STRV(r); }
     if (strcmp(name,"split")==0 && nargs>=1 && rx_of(args[0])){ regex *re=rx_of(args[0]); obj*arr=new_obj(V_ARR); if(!arr) return UND(); int caps[2*(RE_MAXGROUP+1)]; int start=0,pos=0;
-        while(pos<=len){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom) break; if(caps[1]==caps[0]){ pos++; continue; }   /* skip zero-width to make progress */
+        while(pos<=len){ int st=re_search(re,s,len,pos,caps); if(st<0||g_oom) break;
+            if(caps[0]==caps[1] && (caps[0]<=start || caps[0]>=len)){ pos=caps[0]+1; continue; }   /* M1770: a zero-width match at the current segment start or at end-of-string is not a split boundary -- just advance (was: skip ALL zero-width, so `split(/(?=X)/)` never split) */
             char*p=aalloc(caps[0]-start+1); if(p){memcpy(p,s+start,caps[0]-start);p[caps[0]-start]=0;} arr_push_val(arr,STRV(p?p:""));
             for(int g=1; g<=re->ngroup; g++){ int gs=caps[2*g],ge=caps[2*g+1];   /* per spec: captured groups are spliced into the result */
                 if(gs>=0&&ge>=gs){ char*gp=aalloc(ge-gs+1); if(gp){memcpy(gp,s+gs,ge-gs);gp[ge-gs]=0;} arr_push_val(arr,STRV(gp?gp:"")); } else arr_push_val(arr,UND()); }
-            start=caps[1]; pos=caps[1]; }
+            start=caps[1]; pos = caps[1]>caps[0] ? caps[1] : caps[1]+1; }   /* M1770: advance past a zero-width boundary to make progress */
         char*p=aalloc(len-start+1); if(p){memcpy(p,s+start,len-start);p[len-start]=0;} arr_push_val(arr,STRV(p?p:""));
         if (nargs>1) { int lim=(int)to_num(args[1]); if(lim>=0 && arr->n>lim) arr->n=lim; }   /* split(re, limit) */
         val v=UND();v.t=V_ARR;v.o=arr;return v; }
