@@ -54,11 +54,20 @@ int main(void) {
     expect_attr("a hrefx=\"no\"",           "href", NULL);           /* not a token boundary */
     expect_attr("a data-href=\"no\"",       "href", NULL);           /* prefix, not boundary */
     expect_attr("td",                       "href", NULL);           /* absent */
+    /* multi-line tags (M1778): \n / \r are HTML whitespace between attributes */
+    expect_attr("a\nhref=\"x\"",             "href", "x");           /* newline before the attr name */
+    expect_attr("a\r\nhref=\"y\"",           "href", "y");           /* CRLF before the attr name */
+    expect_attr("input\ntype=text\nname=q",  "type", "text");        /* flush-left newline + unquoted value ended by \n */
+    expect_attr("input\n  type=text\n  name=q", "type", "text");     /* indented: unquoted value must NOT keep the trailing \n */
+    expect_attr("img\n  src=pic.png\n  alt=hi", "src", "pic.png");   /* unquoted value stops at the newline */
+    expect_attr("input\ntype=text\nname=q",  "name", "q");           /* the 2nd newline-separated attr is reachable */
     { const char *v; int vl;
       CHECK(find_href("a href=\"/p\"", 13, &v, &vl) && vl == 2 && memcmp(v, "/p", 2) == 0, "find_href"); }
     CHECK(has_attr("input checked", 13, "checked"), "has_attr bare token present");
     CHECK(!has_attr("input checkedx", 14, "checked"), "has_attr rejects non-boundary suffix");
     CHECK(has_attr("input type=cb checked disabled", 30, "disabled"), "has_attr mid-list");
+    CHECK(has_attr("input\nchecked", 13, "checked"), "has_attr after a newline");                 /* M1778: newline boundary */
+    CHECK(has_attr("input checked\ndisabled", 22, "checked"), "has_attr token ended by newline"); /* M1778: newline ends the token */
     CHECK(attr_int("img width=48 height=20", 22, "width") == 48, "attr_int width=48");
     CHECK(attr_int("img width=999999", 16, "width") == 8192, "attr_int clamps huge");
     CHECK(attr_int("img width=ab", 12, "width") == 0, "attr_int non-numeric -> 0");
