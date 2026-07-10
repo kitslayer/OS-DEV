@@ -449,6 +449,21 @@ static void fcwd_ascend(window_t *w) {                             /* up one lev
     if (len <= 1) w->fcwd[0] = 0;                                  /* "/X" -> root ("") */
     else w->fcwd[len-1] = 0;                                       /* "/A/B" -> "/A" */
 }
+/* Copy/cut clipboard for the Files window (M1763): a remembered SOURCE abspath
+ * and whether the pending paste should move (delete the source). */
+static char files_clip[160];
+static int  files_clip_move;
+/* In-kernel file copy by path (read src -> write dst), same shape as the
+ * copy_file_range syscall; one shot capped at 4 MiB. 0 on success, -1 on error. */
+static int files_copy(const char *src, const char *dst) {
+    unsigned long cap = 4UL << 20;
+    char *kb = kmalloc(cap);
+    if (!kb) return -1;
+    long n = vfs_read(src, kb, cap);
+    long w = (n >= 0) ? vfs_write(dst, kb, (unsigned long)n) : -1;
+    kfree(kb);
+    return (w >= 0) ? 0 : -1;
+}
 
 /* Both draw_content's KIND_FILES case and files_key() used to call flist()
  * unconditionally -- a full from-disk directory re-scan on every redraw AND
@@ -538,7 +553,7 @@ static void draw_content(const window_t *w, int focused) {
             char hdr[160]; int hp = 0;
             const char *cwd = FCWD(w);                              /* the window's browse dir (M1762) */
             for (int j = 0; cwd[j] && hp < 40; j++) hdr[hp++] = cwd[j];
-            const char *base = "   up/dn Enter:open  d:del r:ren n:new w:wall  bksp:up  o:sort=";
+            const char *base = "   Enter:open bksp:up  d:del r:ren n:new  c/x/v:copy/cut/paste  w:wall o:sort=";
             for (int j = 0; base[j] && hp < (int)sizeof(hdr) - 8; j++) hdr[hp++] = base[j];
             for (int j = 0; sm[j] && hp < (int)sizeof(hdr) - 1; j++) hdr[hp++] = sm[j];
             hdr[hp] = 0;
@@ -1542,6 +1557,16 @@ static void files_key(window_t *w, int k) {
      * the n<=0 guard below (which only gates the per-selection actions). */
     if (k == 8) { fcwd_ascend(w); files_list_cached(FCWD(w), &e, 1); w->fsel = 0; w->fconfirm = 0; return; }   /* Backspace: up one directory */
     if (k == 'n') { w->editbuf[0] = 0; w->editlen = 0; w->editing = 2; w->fconfirm = 0; return; }             /* new folder */
+    if (k == 'v' && files_clip[0]) {                           /* paste the copied/cut file into THIS dir (M1763) -- works in an empty dir too */
+        const char *base = files_clip; for (const char *t = files_clip; *t; t++) if (*t == '/') base = t + 1;
+        char dst[160]; files_abspath(w, base, dst, sizeof dst);
+        if (!path_eq(dst, files_clip)) {                       /* pasting onto itself would delete the file on a cut -> skip */
+            if (files_copy(files_clip, dst) == 0 && files_clip_move) vfs_remove(files_clip);
+        }
+        files_clip[0] = 0;                                     /* clipboard consumed (a cut is one-shot) */
+        files_list_cached(FCWD(w), &e, 1); w->fsel = 0; w->fconfirm = 0;
+        return;
+    }
 
     if (n <= 0) { w->fconfirm = 0; return; }
     if (w->fsel >= n) w->fsel = n - 1;
@@ -1576,6 +1601,14 @@ static void files_key(window_t *w, int k) {
         if (len > 0 && files_is_image(name, len)) {
             char wa[160]; files_abspath(w, name, wa, sizeof wa);
             desktop_set_wallpaper(wa);                         /* visible bg change is the feedback; a decode failure is a no-op */
+        }
+    }
+    else if (k == 'c' || k == 'x') {                           /* copy / cut the selected FILE onto the clipboard; 'v' pastes into any dir (M1763) */
+        const char *name = e[w->fsel].name;
+        int len = 0; while (name[len]) len++;
+        if (len > 0 && name[len-1] != '/') {                   /* files only -- no recursive directory copy */
+            files_abspath(w, name, files_clip, sizeof files_clip);
+            files_clip_move = (k == 'x');
         }
     }
     else if (k == 'r') {                                       /* rename: open a text-input pre-filled with the selected name */
