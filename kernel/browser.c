@@ -262,7 +262,7 @@ static void in_name_set(browser_t *b, const char *id, const char *name);    /* f
 static int dom_attr_region_at(browser_t *b, int off, int *as, int *ae);     /* fwd: position-handle id resolution */
 static int browser_dom_get(const char *id, char *out, int max, int html);   /* fwd */
 static int canvas_new_slot(browser_t *b, int cw, int ch);   /* M1796: fwd — allocate a blank writable image slot for a <canvas> */
-static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color);   /* M1796/M1797: fwd (registered via js_set_canvas) */
+static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color, const char *text);   /* M1796-M1798: fwd (registered via js_set_canvas) */
 static void browser_dom_set(const char *id, const char *value, int html);   /* fwd */
 
 
@@ -3479,7 +3479,7 @@ static int canvas_new_slot(browser_t *b, int cw, int ch) {
  * parses the colour string (parse_color: #hex / named / hsl), and writes the slot's
  * RGBA buffer. op: 0=fillRect(a,b=x,y c,d=w,h), 1=strokeRect(1px outline), 2=clearRect
  * (fills opaque white), 3=line(a,b -> c,d, Bresenham). All writes bounds-clamped. */
-static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color) {
+static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color, const char *text) {
     browser_t *b = g_ls_b; if (!b || !id) return;
     int slot = -1;
     for (int i = 0; i < b->n_canv; i++) {
@@ -3504,6 +3504,16 @@ static void browser_canvas_op(const char *id, int op, int a, int by, int c, int 
         int x0=a,y0=by,x1=c,y1=d, dx=x1-x0, dy=y1-y0;
         int adx=dx<0?-dx:dx, ady=dy<0?-dy:dy, sx=dx<0?-1:1, sy=dy<0?-1:1, err=(adx>ady?adx:-ady)/2;
         for (;;) { CVPX(x0,y0); if(x0==x1&&y0==y1) break; int e2=err; if(e2>-adx){err-=ady;x0+=sx;} if(e2<ady){err+=adx;y0+=sy;} }
+    } else if (op == 4 && text) {                            /* M1798: fillText(text, a=x, by=baseline y) in fillStyle, 8x16 bitmap font */
+        extern const unsigned char font_glyphs[128][16];
+        int pen = a;
+        for (const char *t = text; *t; t++) {
+            unsigned char uc = (unsigned char)*t; if (uc >= 128) uc = '?';
+            const unsigned char *g = font_glyphs[uc];
+            for (int row = 0; row < 16; row++) { unsigned char bits = g[row]; int yy = by - 13 + row;   /* by is the text baseline */
+                for (int col = 0; col < 8; col++) if (bits & (0x80 >> col)) CVPX(pen + col, yy); }
+            pen += 8;
+        }
     }
     #undef CVPX
 }

@@ -3311,7 +3311,7 @@ static val nat_fetch(val *args, int nargs){
  * length (or <0 on a network error -> onerror). NULL (host without a backing) -> the
  * task fires onerror. */
 static int (*g_eventsource)(const char *url, char *out, int outmax, int *status);
-static void (*g_canvas_op)(const char *id, int op, int a, int b, int c, int d, const char *color);   /* M1796/M1797: canvas 2D op (0=fill 1=stroke 2=clear 3=line) */
+static void (*g_canvas_op)(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text);   /* M1796-M1798: canvas 2D op (0=fill 1=stroke 2=clear 3=line 4=fillText) */
 static int js_enqueue_task(val fn);                  /* fwd: defined with the timer queue */
 static val nat_json_parse(val *a, int n);            /* (already fwd-declared above; harmless) */
 
@@ -3674,12 +3674,18 @@ static val eval_canvas_method(val recv, const char *name, val *args, int nargs) 
         int cx = (obj_get(c,"__cx",&cxv) && cxv.t==V_NUM) ? (int)cxv.num : 0;
         int cy = (obj_get(c,"__cy",&cyv) && cyv.t==V_NUM) ? (int)cyv.num : 0;
         const char *ss = (obj_get(c,"strokeStyle",&ssv) && ssv.t==V_STR) ? ssv.str : "#000000";
-        g_canvas_op(cid, 3, cx, cy, a, b, ss);
+        g_canvas_op(cid, 3, cx, cy, a, b, ss, 0);
         obj_set(c, "__cx", NUM(a)); obj_set(c, "__cy", NUM(b)); return UND();
     }
-    if (strcmp(name, "fillRect") == 0)   { val fsv; const char *fs=(obj_get(c,"fillStyle",  &fsv)&&fsv.t==V_STR)?fsv.str:"#000000"; g_canvas_op(cid, 0, a, b, cc, d, fs); return UND(); }
-    if (strcmp(name, "strokeRect") == 0) { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 1, a, b, cc, d, ss); return UND(); }
-    if (strcmp(name, "clearRect") == 0)  { g_canvas_op(cid, 2, a, b, cc, d, ""); return UND(); }
+    if (strcmp(name, "fillText") == 0) { /* M1798: fillText(text, x, y) — x=args[1], y=baseline args[2], colour = fillStyle */
+        const char *txt = nargs > 0 ? val_to_str(args[0]) : "";
+        int tx = nargs > 1 ? (int)to_num(args[1]) : 0, ty = nargs > 2 ? (int)to_num(args[2]) : 0;
+        val fsv; const char *fs=(obj_get(c,"fillStyle",&fsv)&&fsv.t==V_STR)?fsv.str:"#000000";
+        g_canvas_op(cid, 4, tx, ty, 0, 0, fs, txt); return UND();
+    }
+    if (strcmp(name, "fillRect") == 0)   { val fsv; const char *fs=(obj_get(c,"fillStyle",  &fsv)&&fsv.t==V_STR)?fsv.str:"#000000"; g_canvas_op(cid, 0, a, b, cc, d, fs, 0); return UND(); }
+    if (strcmp(name, "strokeRect") == 0) { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 1, a, b, cc, d, ss, 0); return UND(); }
+    if (strcmp(name, "clearRect") == 0)  { g_canvas_op(cid, 2, a, b, cc, d, "", 0); return UND(); }
     /* beginPath / closePath / stroke / fill / save / restore: accepted no-ops (lineTo draws immediately) */
     return UND();
 }
@@ -4769,7 +4775,7 @@ void js_set_fetch(int (*fn)(const char *url, const char *method, const char *cty
 void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status)) {
     g_eventsource = fn;
 }
-void js_set_canvas(void (*op)(const char *id, int op, int a, int b, int c, int d, const char *color)) {   /* M1796/M1797 */
+void js_set_canvas(void (*op)(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text)) {   /* M1796-M1798 */
     g_canvas_op = op;
 }
 /* The browser registers DOM read/mutate callbacks for getElementById handles. */
