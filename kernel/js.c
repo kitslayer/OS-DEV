@@ -2979,7 +2979,9 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
         for(; i>=0 && !g_err && !g_oom; i--){ val ca[3]={acc,o->vals[i],NUM(i)}; acc=call_function(args[0],ca,3); } return acc; }
     if (strcmp(name,"sort")==0){   /* in-place insertion sort: comparator if given, else string order (JS default) */
         int havecmp = (nargs && (args[0].t==V_FUN || args[0].t==V_NATIVE));
-        for (int i=1; i<o->n && !g_err && !g_oom; i++){ val key=o->vals[i]; int j=i-1;
+        int m=0; for(int i=0;i<o->n;i++) if(o->vals[i].t!=V_UNDEF) o->vals[m++]=o->vals[i];   /* M1781: undefined sorts to the END, and is NOT passed to the comparator (spec) */
+        for(int i=m;i<o->n;i++) o->vals[i]=UND();
+        for (int i=1; i<m && !g_err && !g_oom; i++){ val key=o->vals[i]; int j=i-1;
             while (j>=0){ int cmp;
                 if (havecmp){ val ca[2]={o->vals[j],key}; double cd=to_num(call_function(args[0],ca,2)); cmp=cd>0?1:(cd<0?-1:0); }   /* compare the SIGN of the comparator's result, not its int truncation: (a-b)/10 etc. must still sort */
                 else cmp=strcmp(val_to_str(o->vals[j]), val_to_str(key));
@@ -2998,7 +3000,9 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"toSorted")==0){ obj*r=new_obj(V_ARR); if(!r) return UND();
         for(int i=0;i<o->n;i++) arr_push_val(r,o->vals[i]);   /* copy, then sort the copy in place (mirrors `sort`) */
         int havecmp = (nargs && (args[0].t==V_FUN || args[0].t==V_NATIVE));
-        for (int i=1; i<r->n && !g_err && !g_oom; i++){ val key=r->vals[i]; int j=i-1;
+        int m=0; for(int i=0;i<r->n;i++) if(r->vals[i].t!=V_UNDEF) r->vals[m++]=r->vals[i];   /* M1781: undefined to the end (mirrors sort) */
+        for(int i=m;i<r->n;i++) r->vals[i]=UND();
+        for (int i=1; i<m && !g_err && !g_oom; i++){ val key=r->vals[i]; int j=i-1;
             while (j>=0){ int cmp;
                 if (havecmp){ val ca[2]={r->vals[j],key}; double cd=to_num(call_function(args[0],ca,2)); cmp=cd>0?1:(cd<0?-1:0); }   /* compare the SIGN of the comparator's result, not its int truncation: (a-b)/10 etc. must still sort */
                 else cmp=strcmp(val_to_str(r->vals[j]), val_to_str(key));
