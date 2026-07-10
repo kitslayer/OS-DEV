@@ -1576,10 +1576,10 @@ static void files_click(window_t *w, int my) {
     vfs_dirent *e; int n = files_list_cached(&e, 0);   /* just hit-testing which row was clicked; files_key (below) does any real navigation */
     if (n <= 0) return;
     int by = w->y + TITLEBAR_H + 8;                    /* body content origin (matches draw) */
-    int rows = (w->h - TITLEBAR_H - 30) / 18; if (rows < 1) rows = 1;
+    int rows = (w->h - TITLEBAR_H - 66) / 18; if (rows < 1) rows = 1;   /* M1753: match the render. The M1525 column-label header pushed the first file row to by+40 (highlight band by+38) and the row count to -66; this hit-test kept the stale -30 / by+22, so every click landed ~1 row low (opened the file below the one clicked). */
     int top = (w->fsel >= rows) ? w->fsel - rows + 1 : 0;   /* same scroll as the render */
-    if (my < by + 22) return;                          /* clicked the header line, not a file */
-    int row = top + (my - (by + 22)) / 18;
+    if (my < by + 38) return;                          /* above the first row's highlight band -> header, not a file */
+    int row = top + (my - (by + 38)) / 18;
     if (row < 0 || row >= n) return;                   /* clicked below the last file */
     w->fsel = row;
     files_key(w, '\n');                                /* select + open via the shared Enter path */
