@@ -161,7 +161,7 @@ struct browser {
     struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
-    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint16_t css_spec[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint16_t css_spec[CSS_MAX]; uint16_t css_imp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
     char    in_id[IN_MAX][32]; char in_val[IN_MAX][IN_VLEN]; int in_n;   /* <input> field values, by id (the typed/scripted text) */
     char    in_name[IN_MAX][32];                                /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
@@ -1933,6 +1933,32 @@ static const char *css_resolve_vars(const char *s, int *np) {
 /* Parse a <style> body into simple `selector { color / font-weight / font-style }` rules
  * (b->css_*). A selector that isn't a single simple selector (descendant, comma-grouped,
  * @-rule) fails sel_parse and is skipped. Bounded read-only over s[0..n); caps at CSS_MAX. */
+/* Does the declaration for property `name` (at a property boundary in s[0..n))
+ * carry a `!important` priority marker in its value? Mirrors parse_style_color's
+ * boundary test; scans the first matching declaration's value to ';'/'}' for
+ * `!` [ws]* `important` (case-insensitive). Used to give !important declarations
+ * cascade priority over higher-specificity normal ones (M1788, CSS survey F5). */
+static int prop_imp(const char *s, int n, const char *name) {
+    int nl = 0; while (name[nl]) nl++;
+    for (int i = 0; i + nl < n; i++) {
+        char before = i ? s[i-1] : ' ';
+        if (!(before==' '||before==';'||before=='\t'||before=='\n'||before=='\r'||before=='{'||before=='"'||before=='\'')) continue;
+        int m = 1; for (int k = 0; k < nl; k++) if (lc(s[i+k]) != lc(name[k])) { m = 0; break; }
+        if (!m) continue;
+        int k = i + nl; while (k < n && (s[k]==' '||s[k]=='\t')) k++;
+        if (k >= n || s[k] != ':') continue;                 /* must be exactly "name:" */
+        k++;
+        for (; k < n && s[k] != ';' && s[k] != '}'; k++) {    /* scan this property's value */
+            if (s[k] == '!') {
+                int j = k + 1; while (j < n && (s[j]==' '||s[j]=='\t')) j++;
+                if (j + 9 <= n && lc(s[j])=='i'&&lc(s[j+1])=='m'&&lc(s[j+2])=='p'&&lc(s[j+3])=='o'&&
+                    lc(s[j+4])=='r'&&lc(s[j+5])=='t'&&lc(s[j+6])=='a'&&lc(s[j+7])=='n'&&lc(s[j+8])=='t') return 1;
+            }
+        }
+        return 0;                                             /* found the property, no !important */
+    }
+    return 0;
+}
 static void capture_css(browser_t *b, const char *s, int n) {
     { int rn = n; s = css_resolve_vars(s, &rn); n = rn; }      /* resolve var() before parsing (M1432) */
     int i = 0;
@@ -1960,6 +1986,21 @@ static void capture_css(browser_t *b, const char *s, int n) {
         int lsv = parse_style_listtype(s + ds, de - ds);             /* list-style-type from a stylesheet rule (applies to a <ul>/<ol>) */
         int lhv = parse_style_lineheight(s + ds, de - ds);           /* line-height from a stylesheet rule */
         if (!(col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv || mgv || hsv || bdv || lsv || lhv)) continue;   /* nothing we render */
+        const char *D = s + ds; int dn = de - ds;                    /* M1788: per-property !important bitmask, so an !important decl outranks a higher-specificity normal one */
+        uint16_t imp = 0;
+        if (prop_imp(D,dn,"color"))                                  imp |= 1u<<0;
+        if (prop_imp(D,dn,"font-weight")||prop_imp(D,dn,"font-style")||prop_imp(D,dn,"font")||prop_imp(D,dn,"text-decoration")||prop_imp(D,dn,"text-decoration-line")) imp |= 1u<<1;
+        if (prop_imp(D,dn,"text-decoration")||prop_imp(D,dn,"text-decoration-line")) imp |= 1u<<2;
+        if (prop_imp(D,dn,"text-transform"))                        imp |= 1u<<3;
+        if (prop_imp(D,dn,"background")||prop_imp(D,dn,"background-color")) imp |= 1u<<4;
+        if (prop_imp(D,dn,"text-align"))                            imp |= 1u<<5;
+        if (prop_imp(D,dn,"font-size")||prop_imp(D,dn,"font"))       imp |= 1u<<6;
+        if (prop_imp(D,dn,"display")||prop_imp(D,dn,"visibility"))   imp |= 1u<<7;
+        if (prop_imp(D,dn,"margin")||prop_imp(D,dn,"margin-top")||prop_imp(D,dn,"padding")||prop_imp(D,dn,"padding-top")) imp |= 1u<<8;
+        if (prop_imp(D,dn,"margin-left")||prop_imp(D,dn,"padding-left")) imp |= 1u<<9;
+        if (prop_imp(D,dn,"border")||prop_imp(D,dn,"border-top")||prop_imp(D,dn,"border-right")||prop_imp(D,dn,"border-bottom")||prop_imp(D,dn,"border-left")) imp |= 1u<<10;
+        if (prop_imp(D,dn,"list-style-type")||prop_imp(D,dn,"list-style")) imp |= 1u<<11;
+        if (prop_imp(D,dn,"line-height"))                           imp |= 1u<<12;
         /* a selector list "a, b, c" -> one rule per simple sub-selector that parses */
         int p = ss;
         while (p < se && b->n_css < CSS_MAX) {
@@ -1975,6 +2016,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
                    + 10 * (sel_class_count(sel.cls) + (sel.attr[0] ? 1 : 0) + sel_class_count(sel.dcls))   /* M1775: each compound class counts (F1); a TAG ancestor scores at tag-weight below, not class-weight (F4) */
                    + (sel.tag[0] ? 1 : 0) + (sel.dtag[0] ? 1 : 0);
             b->css_spec[b->n_css] = (uint16_t)sp;
+            b->css_imp[b->n_css] = imp;                             /* M1788 */
             b->css_sel[b->n_css] = sel;
             b->css_color[b->n_css] = col;
             b->css_style[b->n_css] = (int16_t)tsv;
@@ -2022,26 +2064,28 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
     int hit = 0;
     /* per-property specificity watermarks: each output property is set only when the rule's
      * specificity >= the watermark for that property (ties go to source order = later wins). */
-    uint16_t sp_color=0, sp_style=0, sp_ul=0, sp_tr=0, sp_bg=0, sp_al=0, sp_sz=0,
+    uint32_t sp_color=0, sp_style=0, sp_ul=0, sp_tr=0, sp_bg=0, sp_al=0, sp_sz=0,
              sp_dn=0, sp_mg=0, sp_in=0, sp_bd=0, sp_lh=0;
     for (int r = 0; r < b->n_css; r++) {
         if (!css_rule_matches(b, r, tag, attrs, attrlen)) continue;
-        uint16_t sp = b->css_spec[r];
-        if (b->css_color[r]   && sp >= sp_color)   { *color      = b->css_color[r];       sp_color = sp; }
-        if (b->css_style[r] >= 0 && sp >= sp_style) { *textstyle = b->css_style[r];       sp_style = sp; }
-        if (b->css_ul[r]      && sp >= sp_ul)       { *underline  = b->css_ul[r];          sp_ul    = sp; }
-        if (b->css_transform[r] && sp >= sp_tr)     { *transform  = b->css_transform[r];  sp_tr    = sp; }
-        if (b->css_bg[r]      && sp >= sp_bg)       { *bg         = b->css_bg[r];         sp_bg    = sp; }
-        if (b->css_align[r]   && sp >= sp_al)       { *align      = b->css_align[r];      sp_al    = sp; }
-        if (b->css_size[r]    && sp >= sp_sz)       { *size       = b->css_size[r];       sp_sz    = sp; }
-        if (b->css_disp[r]    && sp >= sp_dn) {
+        uint32_t sp = b->css_spec[r]; uint16_t imp = b->css_imp[r];   /* M1788: priority = (this property is !important)<<16 | specificity, so any !important decl beats any normal one */
+        #define PRI(bit) ((((uint32_t)(imp>>(bit))&1u) << 16) | sp)
+        if (b->css_color[r]   && PRI(0) >= sp_color)   { *color      = b->css_color[r];       sp_color = PRI(0); }
+        if (b->css_style[r] >= 0 && PRI(1) >= sp_style) { *textstyle = b->css_style[r];       sp_style = PRI(1); }
+        if (b->css_ul[r]      && PRI(2) >= sp_ul)       { *underline  = b->css_ul[r];          sp_ul    = PRI(2); }
+        if (b->css_transform[r] && PRI(3) >= sp_tr)     { *transform  = b->css_transform[r];  sp_tr    = PRI(3); }
+        if (b->css_bg[r]      && PRI(4) >= sp_bg)       { *bg         = b->css_bg[r];         sp_bg    = PRI(4); }
+        if (b->css_align[r]   && PRI(5) >= sp_al)       { *align      = b->css_align[r];      sp_al    = PRI(5); }
+        if (b->css_size[r]    && PRI(6) >= sp_sz)       { *size       = b->css_size[r];       sp_sz    = PRI(6); }
+        if (b->css_disp[r]    && PRI(7) >= sp_dn) {
             if (b->css_disp[r] == 1) *hidden = 1; else if (b->css_disp[r] == 2) *flex = 1;
-            sp_dn = sp;
+            sp_dn = PRI(7);
         }
-        if (b->css_margin[r]  && sp >= sp_mg)       { *margin     = b->css_margin[r];     sp_mg    = sp; }
-        if (b->css_indent[r]  && sp >= sp_in)       { *indent     = b->css_indent[r];     sp_in    = sp; }
-        if (b->css_border[r]  && sp >= sp_bd)       { *border     = b->css_border[r];     sp_bd    = sp; }
-        if (b->css_lineheight[r] && sp >= sp_lh)    { *lineheight = b->css_lineheight[r]; sp_lh    = sp; }
+        if (b->css_margin[r]  && PRI(8) >= sp_mg)       { *margin     = b->css_margin[r];     sp_mg    = PRI(8); }
+        if (b->css_indent[r]  && PRI(9) >= sp_in)       { *indent     = b->css_indent[r];     sp_in    = PRI(9); }
+        if (b->css_border[r]  && PRI(10) >= sp_bd)      { *border     = b->css_border[r];     sp_bd    = PRI(10); }
+        if (b->css_lineheight[r] && PRI(12) >= sp_lh)   { *lineheight = b->css_lineheight[r]; sp_lh    = PRI(12); }
+        #undef PRI
         hit = 1;
     }
     return hit;
@@ -2052,11 +2096,12 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
  * rule wins; ties broken by source order. */
 static int css_match_list(browser_t *b, const char *tag, const char *attrs, int attrlen) {
     int mark = 0;
-    uint16_t sp_list = 0;
+    uint32_t sp_list = 0;
     for (int r = 0; r < b->n_css; r++) {
         if (!b->css_list[r]) continue;
         if (!css_rule_matches(b, r, tag, attrs, attrlen)) continue;
-        if (b->css_spec[r] >= sp_list) { mark = b->css_list[r]; sp_list = b->css_spec[r]; }
+        uint32_t pri = ((((uint32_t)b->css_imp[r]>>11)&1u) << 16) | b->css_spec[r];   /* M1788: !important list-style */
+        if (pri >= sp_list) { mark = b->css_list[r]; sp_list = pri; }
     }
     return mark;
 }
