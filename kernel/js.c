@@ -2783,8 +2783,15 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
         if(u==0) tmp[i++]='0';
         while(u){ int d=(int)(u%(unsigned)radix); tmp[i++]=d<10?('0'+d):('a'+d-10); u/=(unsigned)radix; }
         if(neg) tmp[i++]='-';
-        char*r=aalloc(i+1); if(!r) return STRV("");
-        for(int j=0;j<i;j++){ r[j]=tmp[i-1-j]; } r[i]=0; return STRV(r);
+        /* M1794: fractional part in the chosen radix — (3.5).toString(16) === "3.8", not "3".
+         * Up to 32 fractional digits (bounds the buffer + non-terminating fractions like 0.1 base-2). */
+        double dvv=to_num(recv), frac=(dvv<0?-dvv:dvv)-(double)(neg?-v:v);
+        char fbuf[40]; int fn=0;
+        while(frac>0 && fn<32){ frac*=radix; int fd=(int)frac; if(fd<0)fd=0; if(fd>=radix)fd=radix-1; fbuf[fn++]=fd<10?('0'+fd):('a'+fd-10); frac-=fd; }
+        char*r=aalloc(i+(fn?fn+1:0)+1); if(!r) return STRV("");
+        int p=0; for(int j=0;j<i;j++){ r[p++]=tmp[i-1-j]; }
+        if(fn){ r[p++]='.'; for(int j=0;j<fn;j++) r[p++]=fbuf[j]; }
+        r[p]=0; return STRV(r);
     }
     if (strcmp(name,"toFixed")==0) {                 /* round to k decimals: (3.14159).toFixed(2) -> "3.14" */
         int k = nargs ? (int)to_num(args[0]) : 0;
