@@ -43,6 +43,8 @@ int main(void) {
     /* ---- anchors (note: the shell forces g=0 when RE starts with ^) ---- */
     S("foobar", "^foo", "X", 0, 0, "Xbar", "^ at start");
     S("barfoo", "^foo", "X", 0, 0, "barfoo", "^ only at start");
+    S("ab", "^", "X", 1, 0, "Xab", "M1785: ^ with g touches only the start (not XaXbX)");
+    S("aab", "^a", "X", 1, 0, "Xab", "M1785: ^-anchored pattern + g matches once at the start");
     S("foobar", "r$", "X", 0, 0, "foobaX", "$ at end");
     S("foo", "$", "!", 0, 0, "foo!", "$ empty match appends");
     /* ---- empty-match stepping must make progress + match GNU's adjacency rule ---- */

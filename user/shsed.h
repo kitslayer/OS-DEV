@@ -21,6 +21,7 @@ static void sed_sub(const char *line, const char *re, const char *repl,
      * `p` and spin forever on a truncated line. Always step pointers separately. */
 #define SED_PUT(ch) do { if (o < cap - 1) out[o++] = (char)(ch); } while (0)
     for (;;) {
+        if (re[0] == '^' && p != line) break;                 /* M1785: ^ anchors to the LINE start only — once a match advances p past the start, a ^-pattern must not re-anchor (GNU: `s/^/X/g` touches only the start -> "Xab", not "XaXbX") */
         const char *ms, *me;
         if (!gr_match_span(re, p, ci, &ms, &me)) break;       /* no more matches */
         if (ms == me && ms == prev_end) {                     /* empty match right after the last match: skip it (GNU rule) */
