@@ -225,6 +225,7 @@ static void block_indent(int dedent) {
      * still to come — so no fixed per-line array is needed (was capped at 1024
      * lines, silently skipping the rest of a larger selection). */
     int q = s1 - 1; if (q < lo) q = lo;                          /* last line start that is < s1 (or just `lo` when there's no selection) */
+    int n0 = un;                                                 /* M1756: remember the undo depth so every line's edits fuse into ONE group (below) */
     for (;;) {
         int ls = q; while (ls > 0 && doc[ls-1] != '\n') ls--;   /* start of the line containing q (an original offset: all edits so far were above it) */
         if (!dedent) {
@@ -245,6 +246,7 @@ static void block_indent(int dedent) {
     if (sel_anchor >= 0) sel_anchor = na < 0 ? 0 : na;
     cur = nc < 0 ? 0 : (nc > dlen ? dlen : nc);
     dirty = 1;
+    undo_merge_last(un - n0);   /* M1756: one Ctrl-Z reverts the whole multi-line indent/dedent -- indent used 4 fixed-position ins_at() per line (each its own group, so undo removed one space at a time; 4*N presses), unlike dedent_brace which already merges its mixed run */
     undo_break();
 }
 
@@ -598,7 +600,7 @@ static int replace_all(void) {
     int flen = 0; while (findq[flen]) flen++;
     int rlen = 0; while (replq[rlen]) rlen++;
     if (flen == 0 || readonly) return 0;
-    int count = 0, pos = 0;
+    int count = 0, pos = 0, n0 = un;   /* M1756: undo depth before any edit, to fuse the whole Replace-All into one step */
     while (pos <= dlen - flen) {
         int m = 1; for (int i = 0; i < flen; i++) if (doc[pos+i] != findq[i]) { m = 0; break; }
         if (!m) { pos++; continue; }
@@ -606,10 +608,15 @@ static int replace_all(void) {
         cur = pos;
         for (int i = 0; i < flen; i++) del_fwd();
         for (int i = 0; i < rlen; i++) insert(replq[i]);
-        undo_break();
         pos += rlen;                 /* skip the inserted text so replq containing findq can't loop */
         count++;
     }
+    /* M1756: one Ctrl-Z undoes the entire Replace-All. Each match was flen del_fwd()
+     * (kind 2) then rlen insert() (kind 0); the two kinds never coalesce, so a match
+     * was two undo groups -- one Ctrl-Z removed only the inserted text, leaving that
+     * spot blank (neither the old nor the new word: looked like data loss) and a full
+     * undo needed 2*N presses. Merge every op into one group. */
+    if (count) { undo_merge_last(un - n0); undo_break(); }
     return count;
 }
 
