@@ -135,6 +135,7 @@ struct browser {
     int      framedelay[64];                             /* per-frame delay (centiseconds) */
     uint64_t frametick;                                  /* tick at which curframe was shown */
     uint8_t *imgs[IMG_SLOTS]; int imgsw[IMG_SLOTS], imgsh[IMG_SLOTS]; int nimg;  /* inline images */
+    char canv_id[IMG_SLOTS][32]; int canv_slot[IMG_SLOTS]; int n_canv;           /* M1796: <canvas> id -> image-slot registry (a canvas is a writable image slot) */
     char     rimg_src[REMOTE_IMG_MAX][96];   /* the RAW src string as it appears in the <img> (for matching) */
     uint8_t *rimg_data[REMOTE_IMG_MAX];      /* the fetched COMPRESSED image bytes (kmalloc'd), or NULL */
     int      rimg_len[REMOTE_IMG_MAX];       /* byte length of rimg_data[i] */
@@ -260,6 +261,8 @@ static void in_set(browser_t *b, const char *id, const char *val);          /* f
 static void in_name_set(browser_t *b, const char *id, const char *name);    /* fwd */
 static int dom_attr_region_at(browser_t *b, int off, int *as, int *ae);     /* fwd: position-handle id resolution */
 static int browser_dom_get(const char *id, char *out, int max, int html);   /* fwd */
+static int canvas_new_slot(browser_t *b, int cw, int ch);   /* M1796: fwd — allocate a blank writable image slot for a <canvas> */
+static void browser_canvas_fillrect(const char *id, int x, int y, int w, int h, const char *color);   /* M1796: fwd (registered via js_set_canvas) */
 static void browser_dom_set(const char *id, const char *value, int html);   /* fwd */
 
 
@@ -1021,6 +1024,26 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         return;
     }
     if (tageq(tag, "hr")) { if (b->ntok < TOK_MAX && b->n_hidden == 0) b->toks[b->ntok++] = (tok_t){0,0,NO_LINK,STY_NORMAL,TK_HR}; return; }
+    if (tageq(tag, "canvas")) {                          /* M1796: <canvas> — a writable image slot the JS 2D context draws into, then blitted like an image */
+        if (!closing && b->n_hidden == 0 && b->ntok + 2 < TOK_MAX) {
+            int cw = attr_int(attrs, attrlen, "width"), ch = attr_int(attrs, attrlen, "height");
+            if (cw <= 0) cw = 300; if (ch <= 0) ch = 150;          /* HTML canvas defaults */
+            if (cw > 800) cw = 800; if (ch > 600) ch = 600;        /* cap the backing buffer */
+            int slot = canvas_new_slot(b, cw, ch);
+            if (slot >= 0) {
+                const char *idv; int idl;                          /* register id -> slot so getContext/fillRect can find it */
+                if (b->n_canv < IMG_SLOTS && find_attr(attrs, attrlen, "id", &idv, &idl) && idl > 0) {
+                    int m = idl > 31 ? 31 : idl; for (int i = 0; i < m; i++) b->canv_id[b->n_canv][i] = idv[i];
+                    b->canv_id[b->n_canv][m] = 0; b->canv_slot[b->n_canv] = slot; b->n_canv++;
+                }
+                emit_break(b, TK_BREAK);
+                b->tokalign[b->ntok] = (uint8_t)b->curalign;
+                b->toks[b->ntok++] = (tok_t){ (uint16_t)cw, (uint16_t)ch, (uint16_t)slot, STY_NORMAL, TK_IMG };
+                emit_break(b, TK_BREAK);
+            }
+        }
+        return;
+    }
     if (tageq(tag, "input")) {                           /* a form field: shows its value; focusable for typing */
         if (!closing) {
             const char *v; int vl, idl;
@@ -2820,7 +2843,7 @@ static void browser_set_title(const char *v) {
     int i = 0; while (v[i] && i < 63) { b->title_js[i] = v[i]; i++; } b->title_js[i] = 0;
     b->title_js_set = 1;                                 /* survives the parse_html re-render that follows */
 }
-static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set, browser_ls_remove, browser_ls_clear); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); js_set_eventsource(browser_eventsource); }
+static void js_bind_storage(browser_t *b){ g_ls_b=b; js_set_storage(browser_ls_get, browser_ls_set, browser_ls_remove, browser_ls_clear); js_set_title(browser_get_title, browser_set_title); js_set_dom(browser_dom_get, browser_dom_set); js_set_dom_attr(browser_dom_getattr, browser_dom_setattr); js_set_dom_pos(browser_dom_get_at, browser_dom_set_at, browser_dom_getattr_at, browser_dom_setattr_at, browser_dom_query); js_set_dom_match(browser_dom_matches, browser_dom_matches_at, browser_dom_closest, browser_dom_closest_at); js_set_dom_rmattr(browser_dom_rmattr, browser_dom_rmattr_at); js_set_dom_children(browser_dom_children, browser_dom_children_at, browser_dom_parent, browser_dom_parent_at, browser_dom_sibling, browser_dom_sibling_at); js_set_dom_tag(browser_dom_tag, browser_dom_tag_at); js_set_location(b->url); js_set_fetch(browser_fetch); js_set_eventsource(browser_eventsource); js_set_canvas(browser_canvas_fillrect); }
 static void run_page_scripts(browser_t *b, int bodyoff, int bodylen) {
     static char jsout[2048];
     int appendpos = bodyoff + bodylen;                   /* splice point in b->raw */
@@ -3225,6 +3248,7 @@ static void drop_image(browser_t *b) {
 static void drop_image_slots(browser_t *b) {
     for (int i = 0; i < b->nimg; i++) { if (b->imgs[i]) kfree(b->imgs[i]); b->imgs[i] = 0; }
     b->nimg = 0;
+    b->n_canv = 0;   /* M1796: canvas slots live in imgs[] (freed above); clear the id->slot registry */
 }
 
 /* Free the prefetched COMPRESSED remote-image bytes and clear the match table.
@@ -3437,6 +3461,41 @@ static int decode_bytes_to_slot(browser_t *b, const uint8_t *data, int len) {
     int s = b->nimg++;
     b->imgs[s] = rgba; b->imgsw[s] = ow; b->imgsh[s] = oh;
     return s;
+}
+
+/* M1796: allocate a blank (opaque-white) writable RGBA image slot for a <canvas>.
+ * The JS 2D context draws into imgs[slot]; it blits like a decoded image at render
+ * (RGBA, R at byte 0, matching decode_image). Returns the slot index, or -1. */
+static int canvas_new_slot(browser_t *b, int cw, int ch) {
+    if (b->nimg >= IMG_SLOTS || cw <= 0 || ch <= 0) return -1;
+    uint8_t *px = kmalloc((long)cw * ch * 4);
+    if (!px) return -1;
+    for (long i = 0; i < (long)cw * ch * 4; i++) px[i] = 0xFF;   /* opaque white */
+    int s = b->nimg++;
+    b->imgs[s] = px; b->imgsw[s] = cw; b->imgsh[s] = ch;
+    return s;
+}
+/* M1796: JS canvas 2D context fillRect(x,y,w,h) with the current fillStyle colour
+ * string. Resolves the canvas's slot by id, parses the colour (parse_color handles
+ * #hex / named / hsl), and fills the clamped rectangle in the slot's RGBA buffer. */
+static void browser_canvas_fillrect(const char *id, int x, int y, int w, int h, const char *color) {
+    browser_t *b = g_ls_b; if (!b || !id) return;
+    int slot = -1;
+    for (int i = 0; i < b->n_canv; i++) {
+        const char *ci = b->canv_id[i]; int j = 0;
+        while (ci[j] && id[j] && ci[j] == id[j]) j++;
+        if (!ci[j] && !id[j]) { slot = b->canv_slot[i]; break; }
+    }
+    if (slot < 0 || slot >= b->nimg || !b->imgs[slot]) return;
+    int cw = b->imgsw[slot], chh = b->imgsh[slot];
+    uint32_t col = color ? parse_color(color, (int)strlen(color)) : 0;   /* 0xRRGGBB (0 = black on invalid) */
+    uint8_t R = (uint8_t)((col >> 16) & 0xFF), G = (uint8_t)((col >> 8) & 0xFF), B = (uint8_t)(col & 0xFF);
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y, x1 = x + w, y1 = y + h;
+    if (x1 > cw) x1 = cw; if (y1 > chh) y1 = chh;
+    for (int yy = y0; yy < y1; yy++) {
+        uint8_t *row = b->imgs[slot] + (long)yy * cw * 4;
+        for (int xx = x0; xx < x1; xx++) { uint8_t *p = row + (long)xx * 4; p[0] = R; p[1] = G; p[2] = B; p[3] = 0xFF; }
+    }
 }
 
 /* Read a local file and decode it into the next inline-image slot. Returns the

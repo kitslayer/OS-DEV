@@ -942,7 +942,7 @@ static node *parse_program(lexer *L) {
 
 /* =========================== values =========================== */
 enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
-       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR, V_CLASSLIST,
+       V_MAP, V_SET, V_REGEX, V_DATE, V_ELEMENT, V_BOUND, V_ACCESSOR, V_CLASSLIST, V_CANVASCTX,
        /* V_PROXY (ES6 Proxy, get/set traps): like V_ACCESSOR/V_BOUND its val.t stays
         * V_OBJ — only obj->kind is V_PROXY. The target lives in vals[0], the handler in
         * vals[1] (n==2). is_proxy/proxy_target/proxy_handler below; NOT obj_keyed, so its
@@ -1015,7 +1015,7 @@ static obj *g_array_ctor, *g_object_ctor, *g_promise_ctor;
  * V_REGEX, which use obj_set). V_ARR/V_MAP/V_SET/V_DATE store data in vals[] via
  * arr_push_val, which does NOT maintain keys[] — keys[] there is garbage and
  * shorter than n, so it must NEVER be iterated as property keys. */
-static int obj_keyed(obj *o){ return o && (o->kind==V_OBJ || o->kind==V_REGEX); }
+static int obj_keyed(obj *o){ return o && (o->kind==V_OBJ || o->kind==V_REGEX || o->kind==V_CANVASCTX); }   /* M1796: a canvas 2D context stores __cid + fillStyle as keyed properties */
 static void obj_set(obj *o, const char *key, val v) {
     if (!o || !o->keys || !o->vals) { g_oom=1; return; }   /* a NULL/half-built obj (OOM) — don't deref */
     if (!obj_keyed(o)) return;   /* not a keyed object (array/map/set/date) — ignore stray property writes */
@@ -1937,6 +1937,7 @@ static val eval_promise_method(val recv, const char *name, val *args, int nargs)
 static int is_callable(val v){ return v.t==V_FUN || v.t==V_NATIVE || (v.t==V_OBJ && v.o && v.o->kind==V_BOUND); }
 static val eval_date_method(val recv, const char *name, val *args, int nargs);
 static val eval_element_method(val recv, const char *name, val *args, int nargs);
+static val eval_canvas_method(val recv, const char *name, val *args, int nargs);   /* M1796: canvas 2D context methods */
 static val eval_classlist_method(val recv, const char *name, val *args, int nargs);
 static val classlist_handle(obj *el);
 static val children_array(obj *el);   /* fwd: el.children -> array of position handles */
@@ -2383,6 +2384,7 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_DATE) return eval_date_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_ELEMENT) return eval_element_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_CLASSLIST) return eval_classlist_method(recv,m,args,na);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_CANVASCTX) return eval_canvas_method(recv,m,args,na);   /* M1796: canvas 2D context */
                 if (recv.t==V_FUN || recv.t==V_NATIVE || (recv.t==V_OBJ && recv.o && recv.o->kind==V_BOUND)) {   /* Function call/apply/bind */
                     if (strcmp(m,"call")==0)  return call_function_this(recv, na>0?args[0]:UND(), na>1?args+1:args, na>1?na-1:0);
                     if (strcmp(m,"apply")==0) { val th=na>0?args[0]:UND();
@@ -3309,6 +3311,7 @@ static val nat_fetch(val *args, int nargs){
  * length (or <0 on a network error -> onerror). NULL (host without a backing) -> the
  * task fires onerror. */
 static int (*g_eventsource)(const char *url, char *out, int outmax, int *status);
+static void (*g_canvas_fillrect)(const char *id, int x, int y, int w, int h, const char *color);   /* M1796: canvas 2D fillRect */
 static int js_enqueue_task(val fn);                  /* fwd: defined with the timer queue */
 static val nat_json_parse(val *a, int n);            /* (already fwd-declared above; harmless) */
 
@@ -3655,6 +3658,23 @@ static void build_child_html(obj *child, char *out, int max) {
     out[p]=0;
 }
 /* methods on a DOM element handle (recv.o->kind==V_ELEMENT): getAttribute(name). */
+/* M1796: canvas 2D context methods. Context state lives as normal properties on the
+ * object — __cid (the canvas element's id) + fillStyle (a CSS colour string, settable
+ * via `ctx.fillStyle=...` like any property). fillRect(x,y,w,h) routes to the browser's
+ * g_canvas_fillrect (id -> writable image slot -> fill), drawn during the page's load
+ * script and blitted at render. Unknown methods no-op (forward-compatible). */
+static val eval_canvas_method(val recv, const char *name, val *args, int nargs) {
+    obj *c = recv.o; if (!c) return UND();
+    if (strcmp(name, "fillRect") == 0) {
+        val cidv, fsv;
+        const char *cid = (obj_get(c, "__cid", &cidv) && cidv.t == V_STR) ? cidv.str : "";
+        const char *fs  = (obj_get(c, "fillStyle", &fsv) && fsv.t == V_STR) ? fsv.str : "#000000";
+        int x = nargs > 0 ? (int)to_num(args[0]) : 0, y = nargs > 1 ? (int)to_num(args[1]) : 0;
+        int w = nargs > 2 ? (int)to_num(args[2]) : 0, h = nargs > 3 ? (int)to_num(args[3]) : 0;
+        if (g_canvas_fillrect) g_canvas_fillrect(cid, x, y, w, h, fs);
+    }
+    return UND();
+}
 static val eval_element_method(val recv, const char *name, val *args, int nargs) {
     obj *el = recv.o;
     const char *id = (el->n > 0 && el->vals[0].t == V_STR) ? el->vals[0].str : "";
@@ -3679,6 +3699,13 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
                           : (g_dom_getattr    && g_dom_getattr(id, aname, ab, (int)sizeof(ab)));
         if (got) return STRV(intern(ab, (int)strlen(ab)));
         val nv = UND(); nv.t = V_NULL; return nv;   /* missing attribute -> null, per the DOM */
+    }
+    if (strcmp(name, "getContext") == 0) {   /* M1796: canvas.getContext('2d') -> a 2D context bound to this canvas's id */
+        obj *c = new_obj(V_CANVASCTX);
+        if (!c) { g_oom = 1; return UND(); }
+        obj_set(c, "__cid", STRV(intern(id, (int)strlen(id))));   /* the canvas element's id (drawing routes id -> slot) */
+        obj_set(c, "fillStyle", STRV("#000000"));                 /* CSS default; ctx.fillStyle='...' overrides as a normal property */
+        val v = UND(); v.t = V_OBJ; v.o = c; return v;
     }
     if (strcmp(name, "setAttribute") == 0) {
         char an[128];   /* copy the name BEFORE the 2nd val_to_str (it may share a static buffer) */
@@ -4732,6 +4759,9 @@ void js_set_fetch(int (*fn)(const char *url, const char *method, const char *cty
  * or <0 on a network error. NULL (default) -> a constructed EventSource fires onerror. */
 void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status)) {
     g_eventsource = fn;
+}
+void js_set_canvas(void (*fillrect)(const char *id, int x, int y, int w, int h, const char *color)) {   /* M1796 */
+    g_canvas_fillrect = fillrect;
 }
 /* The browser registers DOM read/mutate callbacks for getElementById handles. */
 void js_set_dom(int (*get)(const char *, char *, int, int), void (*set)(const char *, const char *, int)) {
