@@ -7474,12 +7474,23 @@ static int run_input_line(char *line, char *cwd) {
           const char *b = q + 2; while (*b == ' ') b++;
           if (*b == '{') {
               const char *body = b + 1; while (*body == ' ') body++;
-              const char *last = 0; for (const char *e = body; *e; e++) if (*e == '}') last = e;
-              if (last) {
-                  char bb[256]; int bi = 0; for (const char *c = body; c < last && bi < 255; c++) bb[bi++] = *c;
+              /* Find the '}' that MATCHES this '{' by brace depth -- NOT the last
+               * '}' in the line. The old last-'}' scan mis-captured a second def
+               * ("a(){..}; b(){..}" swallowed b into a's body) and dropped any
+               * command after a def ("greet(){..}; greet" never ran greet). M1749. */
+              int depth = 1; const char *close = 0;
+              for (const char *e = body; *e; e++) {
+                  if (*e == '{') depth++;
+                  else if (*e == '}' && --depth == 0) { close = e; break; }
+              }
+              if (close) {
+                  char bb[256]; int bi = 0; for (const char *c = body; c < close && bi < 255; c++) bb[bi++] = *c;
                   while (bi > 0 && (bb[bi-1] == ' ' || bb[bi-1] == ';')) bi--;   /* trim trailing ; / space */
                   bb[bi] = 0;
                   func_set(t, (int)(q - t), bb); g_status = 0;
+                  const char *rest = close + 1;                  /* run whatever follows the '}' (another def, or a call) */
+                  while (*rest == ' ' || *rest == ';') rest++;
+                  if (*rest) return run_input_line((char *)rest, cwd);
                   return 0;
               }
           }
