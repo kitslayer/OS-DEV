@@ -1063,6 +1063,7 @@ static char *i64_to_str(int64_t v) {
 static int js_isnan(double x){ return x != x; }
 static int js_isfinite(double x){ return (x - x) == 0.0; }   /* finite -> 0; inf/nan -> nan != 0 */
 static int js_isinf(double x){ return js_isfinite(x) ? 0 : !js_isnan(x); }
+static int js_toint(double d){ return js_isnan(d) ? 0 : (int)d; }   /* ES ToIntegerOrInfinity: NaN (e.g. from an undefined index arg) -> 0, not a huge negative (int)NaN (M1782) */
 static double js_trunc(double x){            /* toward zero */
     if (!js_isfinite(x)) return x;
     if (x >= 4503599627370496.0 || x <= -4503599627370496.0) return x;   /* >= 2^52: already integral */
@@ -2825,9 +2826,9 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
 
 static val eval_string_method(val recv, const char *name, val *args, int nargs) {
     const char *s=recv.str; int len=(int)strlen(s);
-    if (strcmp(name,"charAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return STRV(""); char*r=aalloc(2); r[0]=s[i]; r[1]=0; return STRV(r); }
-    if (strcmp(name,"charCodeAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return NUM(JS_NAN); return NUM((unsigned char)s[i]); }   /* M1766: out-of-range -> NaN (real JS); codePointAt below correctly stays undefined */
-    if (strcmp(name,"codePointAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }   /* = charCodeAt for ASCII (M278) */
+    if (strcmp(name,"charAt")==0){ int i=nargs?js_toint(to_num(args[0])):0; if(i<0||i>=len) return STRV(""); char*r=aalloc(2); r[0]=s[i]; r[1]=0; return STRV(r); }   /* M1782: NaN/undefined index -> 0 */
+    if (strcmp(name,"charCodeAt")==0){ int i=nargs?js_toint(to_num(args[0])):0; if(i<0||i>=len) return NUM(JS_NAN); return NUM((unsigned char)s[i]); }   /* M1766: out-of-range -> NaN; M1782: NaN index -> 0 */
+    if (strcmp(name,"codePointAt")==0){ int i=nargs?js_toint(to_num(args[0])):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }   /* = charCodeAt for ASCII (M278); M1782: NaN index -> 0 */
     if (strcmp(name,"localeCompare")==0){ const char*o=nargs?val_to_str(args[0]):""; int c=strcmp(s,o); return NUM(c<0?-1:c>0?1:0); }   /* ASCII collation (M278) */
     if (strcmp(name,"toUpperCase")==0||strcmp(name,"toLocaleUpperCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='a'&&s[i]<='z')?s[i]-32:s[i]; r[len]=0; return STRV(r); }
     if (strcmp(name,"toLowerCase")==0||strcmp(name,"toLocaleLowerCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='A'&&s[i]<='Z')?s[i]+32:s[i]; r[len]=0; return STRV(r); }
@@ -2891,7 +2892,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
                 i+=fl; if(g_oom||g_err) break; }
             else { sb_put(&b, s+i, 1); i++; } }
         if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
-    if (strcmp(name,"at")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0) i+=len; if(i<0||i>=len) return UND(); char*r=aalloc(2); if(r){r[0]=s[i];r[1]=0;} return STRV(r?r:""); }
+    if (strcmp(name,"at")==0){ int i=nargs?js_toint(to_num(args[0])):0; if(i<0) i+=len; if(i<0||i>=len) return UND(); char*r=aalloc(2); if(r){r[0]=s[i];r[1]=0;} return STRV(r?r:""); }   /* M1782: NaN index -> 0 */
     if (strcmp(name,"padStart")==0||strcmp(name,"padEnd")==0){ int tgt=nargs?(int)to_num(args[0]):0; const char*pad=nargs>1?val_to_str(args[1]):" "; int pl=(int)strlen(pad); if(tgt<=len||pl==0||tgt>JS_ARENA){ char*r=aalloc(len+1); if(r){memcpy(r,s,len);r[len]=0;} return STRV(r?r:""); }
         char*r=aalloc(tgt+1); if(!r) return STRV(""); int start_at=name[3]=='S'?0:0; (void)start_at; int padn=tgt-len; int p=0;
         if(name[3]=='S'){ for(int i=0;i<padn;i++) r[p++]=pad[i%pl]; for(int i=0;i<len;i++) r[p++]=s[i]; }   /* padStart */
@@ -2928,7 +2929,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"push")==0){ for(int i=0;i<nargs;i++){ if(o->n>=o->cap){int nc=o->cap*2+4;val*nv=aalloc(sizeof(val)*nc);if(!nv){g_oom=1;break;}memcpy(nv,o->vals,sizeof(val)*o->n);o->vals=nv;o->cap=nc;} o->vals[o->n++]=args[i]; } return NUM(o->n); }
     if (strcmp(name,"pop")==0){ if(o->n==0) return UND(); return o->vals[--o->n]; }
     if (strcmp(name,"join")==0){
-        const char*sep=nargs?val_to_str(args[0]):","; long sl=(long)strlen(sep);
+        const char*sep=(nargs && args[0].t!=V_UNDEF)?val_to_str(args[0]):","; long sl=(long)strlen(sep);   /* M1782: join(undefined) uses the default "," separator (spec) */
         const char **parts=aalloc((long)sizeof(char*)*(o->n>0?o->n:1)); if(!parts) return STRV("");
         long total=0; for(int i=0;i<o->n;i++){ val ev=o->vals[i]; parts[i]=(ev.t==V_UNDEF||ev.t==V_NULL)?"":val_to_str(ev);   /* per spec: undefined/null elements join as "" */
             total+=(long)strlen(parts[i]); if(i) total+=sl; }
@@ -2968,7 +2969,7 @@ static val eval_array_method(val recv, const char *name, val *args, int nargs) {
     if (strcmp(name,"find")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) return o->vals[i]; } return UND(); }
     if (strcmp(name,"findLast")==0){ if(nargs) for(int i=o->n-1;i>=0 && !g_err && !g_oom;i--){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) return o->vals[i]; } return UND(); }
     if (strcmp(name,"findLastIndex")==0){ if(nargs) for(int i=o->n-1;i>=0 && !g_err && !g_oom;i--){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) return NUM(i); } return NUM(-1); }
-    if (strcmp(name,"at")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0) i+=o->n; if(i>=0&&i<o->n) return o->vals[i]; return UND(); }
+    if (strcmp(name,"at")==0){ int i=nargs?js_toint(to_num(args[0])):0; if(i<0) i+=o->n; if(i>=0&&i<o->n) return o->vals[i]; return UND(); }   /* M1782: NaN index -> 0 */
     if (strcmp(name,"flatMap")==0){ obj*r=new_obj(V_ARR); if(!r) return UND(); if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; val m=call_function(args[0],ca,2); if(m.t==V_ARR&&m.o){ for(int j=0;j<m.o->n && !g_oom;j++) arr_push_val(r,m.o->vals[j]); } else arr_push_val(r,m); } val v=UND(); v.t=V_ARR; v.o=r; return v; }
     if (strcmp(name,"findIndex")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) return NUM(i); } return NUM(-1); }
     if (strcmp(name,"some")==0){ if(nargs) for(int i=0;i<o->n && !g_err && !g_oom;i++){ val ca[2]={o->vals[i],NUM(i)}; if(truthy(call_function(args[0],ca,2))) return BOOLV(1); } return BOOLV(0); }
@@ -4010,7 +4011,7 @@ static val nat_random(val *a, int n){
 static val nat_parseInt(val *a, int n){                                            /* parseInt(str, radix), with 0x detection */
     if(!n) return NUM(0);
     const char *s=val_to_str(a[0]); int radix=(n>1)?(int)to_num(a[1]):0;
-    while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r') s++;
+    while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++;   /* M1782: skip all JS whitespace (was missing \f/\v; to_num + parseFloat already do) */
     int neg=0; if(*s=='+') s++; else if(*s=='-'){ neg=1; s++; }
     if((radix==0||radix==16) && s[0]=='0' && (s[1]=='x'||s[1]=='X')){ radix=16; s+=2; }
     if(radix<2||radix>36) radix=10;
