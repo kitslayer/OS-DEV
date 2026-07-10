@@ -42,11 +42,12 @@ static int skip_pseudo(const char *s, int i, int n) {
  * closed). */
 static int sel_one(const char *s, int n, char *tag, char *cls, char *id, char *attr) {
     tag[0]=cls[0]=id[0]=attr[0]=0;
-    int i=0, k=0;
+    int i=0, k=0, ck=0;                                   /* ck: persistent cls write pos so a compound ".a.b" keeps BOTH classes (M1775) */
     while (i<n && cs_alnum(s[i]) && k<15) { tag[k++]=(char)cs_lc(s[i]); i++; }
     tag[k]=0;
     while (i<n) {
-        if (s[i]=='.')      { i++; k=0; while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) cls[k++]=s[i++]; cls[k]=0;
+        if (s[i]=='.')      { i++; if (ck>0 && ck<31) cls[ck++]=' ';        /* space-separate multiple classes (M1775) */
+                              while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_') && ck<31) cls[ck++]=s[i++]; cls[ck]=0;
                               while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_')) i++; }  /* consume any overflow chars */
         else if (s[i]=='#') { i++; k=0; while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_') && k<31) id[k++]=s[i++];  id[k]=0;
                               while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_')) i++;  }  /* consume any overflow chars */
@@ -147,5 +148,28 @@ static int class_has(const char *v, int vl, const char *cls) {
         if (m==cl && (i+cl==vl || v[i+cl]==' ' || v[i+cl]=='\t')) return 1;   /* …and end at one */
     }
     return 0;
+}
+
+/* Every space-separated class in `cls_list` (as produced by sel_one for a compound
+ * selector like ".btn.primary" -> "btn primary") must be present as a whole token in
+ * v[0..vl). So ".btn.primary" matches class="primary btn extra" but NOT class="btn". (M1775) */
+static int class_has_all(const char *v, int vl, const char *cls_list) {
+    int i = 0;
+    while (cls_list[i]) {
+        while (cls_list[i] == ' ') i++;
+        int cs = i; while (cls_list[i] && cls_list[i] != ' ') i++;
+        if (i > cs) {
+            char one[32]; int k = 0; for (int j = cs; j < i && k < 31; j++) one[k++] = cls_list[j]; one[k] = 0;
+            if (!class_has(v, vl, one)) return 0;
+        }
+    }
+    return 1;
+}
+/* Count the space-separated classes in a selector's cls field, for specificity
+ * (each class contributes one 0-1-0). "" -> 0, "btn" -> 1, "btn primary" -> 2. (M1775) */
+static int sel_class_count(const char *cls_list) {
+    int n = 0, i = 0;
+    while (cls_list[i]) { while (cls_list[i] == ' ') i++; if (cls_list[i]) { n++; while (cls_list[i] && cls_list[i] != ' ') i++; } }
+    return n;
 }
 #endif

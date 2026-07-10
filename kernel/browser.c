@@ -1997,7 +1997,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
             sel_t sel; if (!sel_parse(selbuf, &sel)) continue;       /* unsupported selector -> skip this part */
             /* specificity = 100*(#id) + 10*(#class + #attr + ancestor presence) + 1*(#tags) */
             int sp = (sel.id[0] ? 100 : 0)
-                   + 10 * ((sel.cls[0] ? 1 : 0) + (sel.attr[0] ? 1 : 0) + (sel.dcls[0] || sel.dtag[0] ? 1 : 0))
+                   + 10 * (sel_class_count(sel.cls) + (sel.attr[0] ? 1 : 0) + sel_class_count(sel.dcls))   /* M1775: each compound class counts (F1); a TAG ancestor scores at tag-weight below, not class-weight (F4) */
                    + (sel.tag[0] ? 1 : 0) + (sel.dtag[0] ? 1 : 0);
             b->css_spec[b->n_css] = (uint16_t)sp;
             b->css_sel[b->n_css] = sel;
@@ -2023,13 +2023,13 @@ static void capture_css(browser_t *b, const char *s, int n) {
 static int css_rule_matches(browser_t *b, int r, const char *tag, const char *attrs, int attrlen) {
     const sel_t *s = &b->css_sel[r];
     if (s->tag[0] && !tageq(tag, s->tag)) return 0;
-    if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has(v, vl, s->cls)) return 0; }
+    if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has_all(v, vl, s->cls)) return 0; }   /* M1775: ALL compound classes must be present */
     if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     return 0; }
     if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) return 0;
     if (s->dcls[0] || s->dtag[0]) {                          /* descendant selector: some ancestor frame must match (M1434) */
         int found = 0;
         for (int f = 0; f < b->sc_sp; f++) {
-            if (s->dcls[0]) { int cl = 0; while (b->sc[f].cls[cl]) cl++; if (cl && class_has(b->sc[f].cls, cl, s->dcls)) { found = 1; break; } }
+            if (s->dcls[0]) { int cl = 0; while (b->sc[f].cls[cl]) cl++; if (cl && class_has_all(b->sc[f].cls, cl, s->dcls)) { found = 1; break; } }   /* M1775: compound-class ancestor */
             else if (tageq(b->sc[f].tag, s->dtag)) { found = 1; break; }
         }
         if (!found) return 0;
@@ -2110,7 +2110,7 @@ static int sel_match_all(browser_t *b, const sel_t *sel, int *offs, int max) {
             continue;
         }
         if (sel->tag[0] && !tageq(tag, sel->tag)) { i=j; continue; }
-        if (sel->cls[0]) { const char *v; int vl; if(!find_attr(body+astart,alen,"class",&v,&vl) || !class_has(v,vl,sel->cls)) { i=j; continue; } }
+        if (sel->cls[0]) { const char *v; int vl; if(!find_attr(body+astart,alen,"class",&v,&vl) || !class_has_all(v,vl,sel->cls)) { i=j; continue; } }   /* M1775: compound classes */
         if (sel->id[0])  { const char *v; int vl; if(!find_attr(body+astart,alen,"id",&v,&vl)    || !attr_eq(v,vl,sel->id))     { i=j; continue; } }
         if (sel->attr[0] && !has_attr(body+astart,alen,sel->attr)) { i=j; continue; }   /* [attr] presence (has_attr matches valued + boolean attrs) */
         offs[n++] = i;          /* matched: record the '<' offset */

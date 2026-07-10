@@ -66,6 +66,11 @@ static void expect_cls(const char *v, const char *cls, int want) {
     char m[160]; snprintf(m, sizeof(m), "class_has('%s','%s')=%d want=%d", v, cls, r, want);
     CHECK(r == want, m);
 }
+static void expect_cls_all(const char *v, const char *list, int want) {
+    int r = class_has_all(v, (int)strlen(v), list);
+    char m[160]; snprintf(m, sizeof(m), "class_has_all('%s','%s')=%d want=%d", v, list, r, want);
+    CHECK(r == want, m);
+}
 
 /* class_has reads v[0..vl) (vl-bounded, never v[vl]) + the NUL-terminated cls; an
  * exactly-sized v (NO NUL) red-zones any over-read past the class-attribute slice. */
@@ -88,6 +93,11 @@ int main(void) {
     expect("a.b#c[d]",   1, "a", "b", "c", "d");         /* all four components */
     expect("p.my-class", 1, "p", "my-class", "", "");    /* hyphen kept in class */
     expect("x.a_b",      1, "x", "a_b", "", "");         /* underscore kept */
+    /* compound classes (M1775): every ".class" is retained, space-separated, not overwritten */
+    expect(".btn.primary",   1, "",    "btn primary", "", "");   /* two classes both kept */
+    expect("div.a.b",        1, "div", "a b",         "", "");   /* tag + two classes */
+    expect(".x.y.z",         1, "",    "x y z",       "", "");   /* three classes */
+    expect("li.item.active#f",1,"li",  "item active", "f", "");  /* classes accumulate, id still last */
     expect("input[type]",1, "input", "", "", "type");
     expect("[CHECKED]",  1, "", "", "", "checked");      /* attr lowercased */
     expect("a[href=x]",  1, "a", "", "", "href");        /* =value ignored */
@@ -133,7 +143,15 @@ int main(void) {
     expect_cls("", "foo", 0);              /* empty class list */
     expect_cls("foo", "", 0);              /* empty target class */
     expect_cls("nav-link active", "active", 1);
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (tag/class/id/attr + lowercase + =value-ignored + fail-closed + truncation + class_has word-boundary)");
+    /* class_has_all: EVERY class in the compound list must be present as a whole token (M1775) */
+    expect_cls_all("btn primary",        "btn primary", 1);   /* both present */
+    expect_cls_all("btn",                "btn primary", 0);   /* missing "primary" */
+    expect_cls_all("primary",            "btn primary", 0);   /* missing "btn" */
+    expect_cls_all("a btn b primary c",  "btn primary", 1);   /* both present among others */
+    expect_cls_all("btn primaryx",       "btn primary", 0);   /* "primaryx" is not the token "primary" */
+    expect_cls_all("btn primary",        "btn",         1);   /* single-class list still works */
+    expect_cls_all("anything",           "",            1);   /* empty list -> vacuously true */
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (tag/class/id/attr + compound classes + lowercase + =value-ignored + fail-closed + truncation + class_has word-boundary)");
 
     /* --- fuzz: random + structured selectors over exactly-sized inputs (ASan-checked) --- */
     unsigned int seed = 0x5e1ec701u;
