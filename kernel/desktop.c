@@ -1862,6 +1862,7 @@ void desktop_run(void) {
                     char cbuf[512]; int n = clip_get(cbuf, sizeof cbuf);
                     browser_t *bp = (browser_t *)w->app;
                     raise_window(i);                     /* focus it so Enter submits after the paste */
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;   /* array reordered -> drop any in-flight gesture, like every other raise_window site (M1754) */
                     if (n > 0) browser_paste(bp, cbuf, n);
                     dirty = 1;
                 }
