@@ -506,8 +506,8 @@ static int expand_vars(const char *src, char *dst, int cap){
             while (uv){ tmp[ti++]=(char)('0'+uv%10); uv/=10; }
             while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
             i += 2;
-        } else if (src[i]=='$' && (src[i+1]=='#' || src[i+1]=='@')){ /* $# arg count, $@ all args (set on a function call) */
-            const char *v = vget(src+i+1, 1);
+        } else if (src[i]=='$' && (src[i+1]=='#' || src[i+1]=='@' || src[i+1]=='*')){ /* $# arg count, $@/$* all args (set on a function call) */
+            const char *v = vget((src[i+1]=='*') ? "@" : src+i+1, 1);   /* $* == $@ in this shell's single-string args model; before M1750 $* fell through to $NAME leaving a bare * -> a cwd glob */
             if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
             i += 2;
         } else if (src[i]=='$'){                                    /* $NAME / ${NAME} / ${NAME:-w} / ${NAME:+w} / ${#NAME} / ${NAME#pat} / ${NAME%pat} */
