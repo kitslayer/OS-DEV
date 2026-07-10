@@ -36,4 +36,5 @@ run_suite() {
 run_suite tests/js/suite.js         tests/js/suite.expected
 run_suite tests/js/suite-promise.js tests/js/suite-promise.expected
 run_suite tests/js/timers.js        tests/js/timers.expected
+run_suite tests/js/toprim.js        tests/js/toprim.expected
 echo "PASS: JS engine regression suite (ASan/UBSan clean, ran to completion, output matches golden)"

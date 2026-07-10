@@ -1291,6 +1291,29 @@ static double to_num(val v) {
         default: return 0;
     }
 }
+/* ToPrimitive(v) with the default/number hint (M1790): a user object's valueOf()
+ * wins if it returns a primitive, else the object's string form (toString, via
+ * val_to_str). Primitives pass through unchanged. Used by `+`/`+=` so an object
+ * with a numeric valueOf does numeric addition — ({valueOf(){return 5}})+1 is 6,
+ * not "[object Object]1" — while plain objects/arrays still stringify as before
+ * (their inherited valueOf returns the object itself, not a primitive). Date keeps
+ * its string form (its default hint is string; its epoch valueOf must NOT hijack
+ * `date+""`). Each operand's valueOf/toString runs at most once (spec: once). */
+static val to_primitive(val v) {
+    if (v.t != V_OBJ && v.t != V_ARR && v.t != V_FUN && v.t != V_NATIVE) return v;  /* already primitive */
+    if (v.t == V_OBJ && v.o && v.o->kind == V_DATE) return STRV(val_to_str(v));     /* Date: default hint = string */
+    if (v.o) {
+        val fn;
+        if (obj_get(v.o, "valueOf", &fn) ||
+            (v.o->proto && proto_lookup(v.o->proto, "valueOf", v, &fn))) {
+            if (fn.t==V_FUN || fn.t==V_NATIVE || (fn.t==V_OBJ && fn.o && fn.o->kind==V_BOUND)) {
+                val r = call_function_this(fn, v, 0, 0);
+                if (r.t!=V_OBJ && r.t!=V_ARR && r.t!=V_FUN && r.t!=V_NATIVE) return r;  /* primitive wins */
+            }
+        }
+    }
+    return STRV(val_to_str(v));   /* toString / default string form */
+}
 /* `===`-style equality, used for Map keys and Set members: primitives by value,
  * objects/functions by identity (same obj pointer). */
 static int val_equal(val a, val b) {
@@ -2182,7 +2205,9 @@ static val eval_expr_inner(node *n, env *e) {
         }
         case N_BINARY: {
             val a=eval_expr(n->a,e), b=eval_expr(n->b,e);
-            if (n->op=='+') { if (a.t>=V_STR||b.t>=V_STR) { const char*sa=val_to_str(a),*sb=val_to_str(b);   /* concat if either is a string OR an object (V_STR..V_NATIVE are all >= V_STR): ToPrimitive stringifies objects (M420) */ int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(!s) return UND(); memcpy(s,sa,la); memcpy(s+la,sb,lb); s[la+lb]=0; return STRV(s); } return NUM(to_num(a)+to_num(b)); }
+            if (n->op=='+') { val pa=to_primitive(a),pb=to_primitive(b);   /* M1790: ToPrimitive(default) both, THEN concat iff a primitive is a string/symbol (V_STR..: an object whose valueOf yields a number now adds numerically — ({valueOf(){return 5}})+1 is 6 — while plain objects/arrays/Date still stringify) */
+                if (pa.t>=V_STR||pb.t>=V_STR) { const char*sa=val_to_str(pa),*sb=val_to_str(pb); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(!s) return UND(); memcpy(s,sa,la); memcpy(s+la,sb,lb); s[la+lb]=0; return STRV(s); }
+                return NUM(to_num(pa)+to_num(pb)); }
             double x=to_num(a), y=to_num(b);
             switch (n->op) {
                 case '-': return NUM(x-y);
@@ -2232,12 +2257,14 @@ static val eval_expr_inner(node *n, env *e) {
                 rhs = eval_expr(n->b,e);
             } else {
                 rhs = eval_expr(n->b,e);
-                if (n->op!='=') { val cur=eval_expr(t,e); double x=to_num(cur),y=to_num(rhs);
-                    if (n->op=='+'&&(cur.t>=V_STR||rhs.t>=V_STR)) { const char*sa=val_to_str(cur),*sb=val_to_str(rhs);   /* += concat matches binary + (M420) */ int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
-                    else rhs = NUM(n->op=='+'?x+y: n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?x/y: n->op=='%'?js_fmod(x,y):
+                if (n->op!='=') { val cur=eval_expr(t,e);
+                    if (n->op=='+') { val pa=to_primitive(cur),pb=to_primitive(rhs);   /* M1790: += matches binary + — ToPrimitive both, concat iff a string/symbol else numeric (to_primitive fires each valueOf/toString once; non-+ ops below fire it once via to_num) */
+                        if (pa.t>=V_STR||pb.t>=V_STR) { const char*sa=val_to_str(pa),*sb=val_to_str(pb); int la=(int)strlen(sa),lb=(int)strlen(sb); char*s=aalloc(la+lb+1); if(s){memcpy(s,sa,la);memcpy(s+la,sb,lb);s[la+lb]=0;} rhs=STRV(s?s:""); }
+                        else rhs=NUM(to_num(pa)+to_num(pb)); }
+                    else { double x=to_num(cur),y=to_num(rhs); rhs = NUM(n->op=='-'?x-y: n->op=='*'?x*y: n->op=='/'?x/y: n->op=='%'?js_fmod(x,y):
                                    n->op=='&'?(double)(to_i32(x)&to_i32(y)): n->op=='|'?(double)(to_i32(x)|to_i32(y)): n->op=='^'?(double)(to_i32(x)^to_i32(y)):
                                    n->op=='L'?(double)(int32_t)((uint32_t)to_i32(x)<<(to_i32(y)&31)): n->op=='R'?(double)(to_i32(x)>>(to_i32(y)&31)): n->op=='U'?(double)((uint32_t)to_i32(x)>>(to_i32(y)&31)):
-                                   n->op=='P'?js_pow(x,y): 0.0); }
+                                   n->op=='P'?js_pow(x,y): 0.0); } }
             }
             if ((t->type==N_ARRAY || t->type==N_OBJECT) && n->op=='=') { bind_pattern_assign(t, rhs, e); return rhs; }   /* [a,b]=… / ({x}=…) */
             if (t->type==N_IDENT) { const char*nm=node_name(t); val *slot=env_find(e,nm); if(slot) *slot=rhs; else env_define(e,nm,rhs); return rhs; }
