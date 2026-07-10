@@ -18,6 +18,9 @@
  *   Operators: + - * / % ^ (power, right-assoc), unary -, parentheses, and
  *              comparisons  = <> < <= > >=  (lowest precedence, yield 1/0).
  *   Cell refs: A1 .. Z100 (case-insensitive).  Ranges: A1:B10 (inside a fn).
+ *   Absolute refs: a $ pins a column and/or row so copy/paste/fill does NOT
+ *   shift it -- $A$1 (both), $A1 (column), A$1 (row).  E.g. =A1*$B$1 filled down
+ *   a column keeps $B$1 fixed while A1 -> A2 -> A3.
  *   Functions: SUM AVERAGE(=AVG) MIN MAX COUNT COUNTA PRODUCT STDEV STDEVP VAR VARP
  *              MEDIAN MODE
  *              SUMIF/COUNTIF/AVERAGEIF(range, [op]value)  (op = = <> < <= > >=)

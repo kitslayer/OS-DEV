@@ -377,6 +377,25 @@ int main(void) {
     chk_adj("=A1", -5, 0, "=A1");                 /* clamp at the top edge (row can't go < 1) */
     chk_adj("=A1", 0, -3, "=A1");                 /* clamp at the left edge (col can't go < A) */
     chk_adj("=Z100", 5, 5, "=Z100");              /* clamp at the bottom-right corner */
+
+    /* --- absolute references: a $-anchored column/row does NOT shift (M1737) --- */
+    chk_adj("=A1+$B$1", 1, 0, "=A2+$B$1");        /* $B$1 pinned; A1 shifts down */
+    chk_adj("=A1+$B$1", 0, 1, "=B1+$B$1");        /* $B$1 pinned on a rightward move */
+    chk_adj("=$A1", 1, 1, "=$A2");                /* $col: column pinned, row shifts */
+    chk_adj("=A$1", 1, 1, "=B$1");                /* $row: row pinned, column shifts */
+    chk_adj("=$A$1", 3, 4, "=$A$1");              /* both anchored: never moves */
+    chk_adj("=SUM($A$1:$B$2)", 2, 2, "=SUM($A$1:$B$2)");  /* pinned range endpoints stay */
+    chk_adj("=$A1*B$2", 1, 1, "=$A2*C$2");        /* mixed anchors in one formula */
+
+    /* absolute-ref markers are ignored for the VALUE ($A$1 == A1) (M1737) */
+    clear_all();
+    set_raw(0, 0, "7");                            /* A1 = 7 */
+    set_raw(1, 1, "3");                            /* B2 = 3 */
+    set_raw(4, 0, "=$A$1");        recompute(); chk_num(4, 0, 7,  "$A$1 reads A1");
+    set_raw(4, 0, "=$A1");         recompute(); chk_num(4, 0, 7,  "$A1 reads A1");
+    set_raw(4, 0, "=A$1");         recompute(); chk_num(4, 0, 7,  "A$1 reads A1");
+    set_raw(4, 0, "=$A$1+$B$2");   recompute(); chk_num(4, 0, 10, "$A$1 + $B$2");
+    set_raw(4, 0, "=SUM($A$1,$B$2)"); recompute(); chk_num(4, 0, 10, "$ refs as fn args");
     chk_adj("hello world", 1, 1, "hello world");  /* plain text: nothing to adjust */
     chk_adj("=A10+A2", 1, 0, "=A11+A3");          /* multi-digit row shifts correctly */
 

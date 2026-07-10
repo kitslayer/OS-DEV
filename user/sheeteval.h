@@ -96,12 +96,16 @@ static int scan_number(const char **pp, double *out) {
     *pp = p; *out = v; return 1;
 }
 
-/* Parse a cell reference (letter + digits, e.g. B12) at pcur. On success advance
+/* Parse a cell reference (letter + digits, e.g. B12) at pcur, with optional '$'
+ * absolute markers ($A$1 / $A1 / A$1 -- pinning has no effect on the VALUE, only
+ * on how copy/paste/fill shift the ref, see adjust_refs). On success advance
  * pcur, fill rr and cc (0-based) and return 1; else leave pcur untouched, return 0. */
 static int parse_ref_cursor(int *rr, int *cc) {
     const char *p = pcur;
+    if (*p == '$') p++;                                 /* optional $ absolute column */
     if (!is_alpha(*p)) return 0;
     int col = up(*p) - 'A'; p++;
+    if (*p == '$') p++;                                 /* optional $ absolute row */
     if (!is_digit(*p)) return 0;
     int row = 0; while (is_digit(*p)) { row = row * 10 + (*p - '0'); p++; }
     row--;
@@ -378,22 +382,23 @@ static double factor(void) {
     if (*pcur == '-') { pcur++; return -factor(); }
     if (*pcur == '+') { pcur++; return factor(); }
     if (is_digit(*pcur) || *pcur == '.') { double v; if (!scan_number(&pcur, &v)) perr = ERR_SYNTAX; return v; }
+    /* cell reference, optionally $-anchored ($A$1 / $A1 / A$1 / A1) -- tried
+     * before the name lexer. parse_ref_cursor rejects function/constant names
+     * (a letter not followed by a digit), so SUM( and PI/E still fall through. */
+    if (*pcur == '$' || is_alpha(*pcur)) {
+        const char *save = pcur;
+        int rr, cc;
+        if (parse_ref_cursor(&rr, &cc)) {
+            skipws();
+            if (*pcur != '(') return get_cell_value(rr, cc);
+        }
+        pcur = save;                                    /* a function/constant name, not a bare ref */
+    }
     if (is_alpha(*pcur)) {
         char name[16]; int nl = 0;
         while ((is_alpha(*pcur) || is_digit(*pcur)) && nl < 15) name[nl++] = *pcur++;
         name[nl] = 0;
         if (*pcur == '(') { pcur++; return call_function(name); }
-        /* cellref: one column letter then a row number */
-        int li = 0; while (name[li] && is_alpha(name[li])) li++;
-        if (li == 1 && name[li]) {
-            int ok = 1; for (int j = li; name[j]; j++) if (!is_digit(name[j])) { ok = 0; break; }
-            if (ok) {
-                int col = up(name[0]) - 'A';
-                int row = 0; for (int j = li; name[j]; j++) row = row * 10 + (name[j] - '0');
-                row--;
-                if (col >= 0 && col < NCOLS && row >= 0 && row < NROWS) return get_cell_value(row, col);
-            }
-        }
         if (nameeq(name, "PI")) return 3.14159265358979;
         if (nameeq(name, "E"))  return 2.71828182845905;
         perr = ERR_SYNTAX; return 0;
@@ -546,10 +551,41 @@ static int parse_range(const char *s, int *r1o, int *c1o, int *r2o, int *c2o) {
  * copied verbatim so its 'e5' is never mistaken for a ref, an identifier
  * immediately followed by '(' is a function name (SUM, IF), a multi-letter or
  * lone-letter identifier is a name/constant (PI, E) — only a single column
- * letter followed by digits (A1, Z100), and not a function call, is a ref. Pure. */
+ * letter followed by digits (A1, Z100), and not a function call, is a ref. A '$'
+ * before the column and/or row ($A$1, $A1, A$1) anchors that part so it does NOT
+ * shift (adjust_one_ref handles these first, preserving the '$'). Pure. */
+/* Parse a $-anchored-or-plain cell reference ($?[A-Z]$?[0-9]+, not a function
+ * call) at *pp. On a match, emit it into out shifted by (dr,dc) -- but a
+ * $-anchored column or row is NOT shifted (that is the whole point of $) and its
+ * '$' is preserved -- advance *pp and *po, return 1; else touch nothing, 0. */
+static int adjust_one_ref(const char **pp, int dr, int dc, char *out, int *po, int max) {
+    const char *p = *pp;
+    int abscol = 0, absrow = 0;
+    if (*p == '$') { abscol = 1; p++; }
+    if (!is_alpha(*p)) return 0;
+    int col = up(*p) - 'A'; p++;
+    if (*p == '$') { absrow = 1; p++; }
+    if (!is_digit(*p)) return 0;
+    int row = 0; while (is_digit(*p)) { row = row * 10 + (*p - '0'); p++; }
+    row--;
+    if (is_alpha(*p) || *p == '(') return 0;            /* "A1B" / a function call is not a ref */
+    if (col < 0 || col >= NCOLS || row < 0 || row >= NROWS) return 0;
+    int nc = abscol ? col : col + dc, nr = absrow ? row : row + dr;
+    if (nc < 0) nc = 0; if (nc >= NCOLS) nc = NCOLS - 1;
+    if (nr < 0) nr = 0; if (nr >= NROWS) nr = NROWS - 1;
+    int o = *po;
+    if (abscol && o < max - 1) out[o++] = '$';
+    if (o < max - 1) out[o++] = (char)('A' + nc);
+    if (absrow && o < max - 1) out[o++] = '$';
+    char d[8]; int dn = 0, rr = nr + 1;
+    while (rr) { d[dn++] = (char)('0' + rr % 10); rr /= 10; }
+    while (dn && o < max - 1) out[o++] = d[--dn];
+    *po = o; *pp = p; return 1;
+}
 static void adjust_refs(const char *src, int dr, int dc, char *out, int max) {
     int o = 0; const char *p = src;
     while (*p && o < max - 1) {
+        if (adjust_one_ref(&p, dr, dc, out, &o, max)) continue;   /* $-aware cell ref (shifts only non-$ parts) */
         if (is_digit(*p) || (*p == '.' && is_digit(p[1]))) {     /* number literal — verbatim */
             while ((is_digit(*p) || *p == '.') && o < max - 1) out[o++] = *p++;
             if ((*p == 'e' || *p == 'E') &&
