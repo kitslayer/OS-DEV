@@ -440,4 +440,8 @@ print("-- M1751 unquoted numeric object-literal keys --");
 var st={200:"OK",404:"NF"}; print(st[200], st[404], Object.keys(st).join(","));   // OK NF 200,404 (was: undefined undefined "" -- all numeric keys collided to one empty key)
 var lk={1:"a",2:"b",3:"c"}; print(lk[1], lk[2], lk[3]);                            // a b c
 print(({1.5:"half"})[1.5], ({"200":"q"})[200], ({[404]:"c"})[404]);               // half q c (float key; quoted "200" and computed [404] already worked and must still match)
+print("-- M1752 JS semantic fixes (NaN falsy, ++/-- float, array null->empty) --");
+print(!NaN, (NaN?"t":"f"), Boolean(NaN));               // true f false (NaN is falsy)
+var w1=9.99; w1++; print(w1); var x1=1.5; print(x1++, x1);   // 10.99 ; 1.5 2.5 (++/-- keep the fraction)
+print(String([1,null,3]), ""+[1,undefined,3]);          // 1,,3 1,,3 (null/undefined array elements render empty)
 print("-- done --");

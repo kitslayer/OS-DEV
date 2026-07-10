@@ -1228,7 +1228,7 @@ static const char *val_to_str(val v); /* fwd */
 static int truthy(val v) {
     switch (v.t) {
         case V_UNDEF: case V_NULL: return 0;
-        case V_BOOL: case V_NUM: return v.num!=0;
+        case V_BOOL: case V_NUM: return v.num!=0 && !js_isnan(v.num);   /* NaN is falsy in JS; NaN!=0 is true in C (M1752). A bool's num is 0/1, never NaN, so V_BOOL is unchanged. */
         case V_STR: return v.str && v.str[0];
         default: return 1;
     }
@@ -1660,7 +1660,7 @@ static const char *val_to_str_inner(val v) {
             const char **parts = aalloc((long)sizeof(char*) * (o->n>0?o->n:1));
             if (!parts) return "[array]";
             long total = 0;
-            for (int i=0;i<o->n;i++){ parts[i]=val_to_str(o->vals[i]); total += (long)strlen(parts[i]) + 1; }
+            for (int i=0;i<o->n;i++){ val ev=o->vals[i]; parts[i]=(ev.t==V_UNDEF||ev.t==V_NULL)?"":val_to_str(ev); total += (long)strlen(parts[i]) + 1; }   /* null/undefined array elements render as "" in join/toString (M1752), matching the engine's own join */
             char *buf=aalloc(total+1); if(!buf) return "[array]"; int p=0;
             for (int i=0;i<o->n;i++){ if(i) buf[p++]=','; const char*s=parts[i]; while(*s) buf[p++]=*s++; }
             buf[p]=0; return buf;
@@ -2170,11 +2170,11 @@ static val eval_expr_inner(node *n, env *e) {
             if (!slot) { rt_err("invalid ++/-- target"); return UND(); }
             if (is_accessor(*slot)) {   /* o.accessor++ : read via getter, write via setter -- NEVER overwrite the accessor slot (M261 review Finding 1) */
                 if (recv.t!=V_OBJ) { rt_err("invalid ++/-- on accessor"); return UND(); }   /* detached (e.g. destructured) accessor: no receiver */
-                val acc=*slot; int64_t old=to_num(fire_getter(acc,recv)); int64_t nw = n->op=='+'?old+1:old-1;   /* capture acc by value before firing (getter may realloc vals[], dangling slot) */
+                val acc=*slot; double old=to_num(fire_getter(acc,recv)); double nw = n->op=='+'?old+1:old-1;   /* capture acc by value before firing (getter may realloc vals[], dangling slot); double, not int64 -- ++/-- must keep the fraction (M1752) */
                 val s=acc.o->vals[1]; if(s.t!=V_UNDEF){ val av=NUM(nw); call_function_this(s,recv,&av,1); }       /* getter-only: write ignored (non-strict) */
                 return NUM(n->prefix?nw:old);
             }
-            int64_t old=to_num(*slot); int64_t nw = n->op=='+'?old+1:old-1; *slot=NUM(nw);
+            double old=to_num(*slot); double nw = n->op=='+'?old+1:old-1; *slot=NUM(nw);   /* double, not int64: 9.99++ is 10.99, NaN++/Inf++ propagate (M1752) */
             return NUM(n->prefix?nw:old);
         }
         case N_BINARY: {

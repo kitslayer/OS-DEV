@@ -407,4 +407,9 @@ before}after{end
 OK NF 200,404
 a b c
 half q c
+-- M1752 JS semantic fixes (NaN falsy, ++/-- float, array null->empty) --
+true f false
+10.99
+1.5 2.5
+1,,3 1,,3
 -- done --
