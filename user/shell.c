@@ -7309,10 +7309,11 @@ static int run_for(char *line, char *cwd) {
     if (blen>0 && body[blen-1]==';') blen--;
     while (blen>0 && body[blen-1]==' ') blen--;
     body[blen] = 0;
-    char elist[1024], glist[1024], bodybuf[1024], sublist[1024];
+    char elist[1024], glist[1024], bodybuf[1024], sublist[1024], blist[1024];
     char *lst = list;
     if (cmdsub_expand(lst, sublist, sizeof sublist, cwd)) lst = sublist;   /* for f in $(cmd) */
     if (expand_vars(lst, elist, sizeof elist)) lst = elist;
+    if (expand_braces(lst, blist, sizeof blist)) lst = blist;   /* {a,b} / {1..N}: run_for is dispatched from run_input_line, bypassing run_line's brace pass (M1748) */
     for (int i=0; lst[i]; i++) if (lst[i]=='*' || lst[i]=='?') { glob_expand(lst, glist, sizeof glist); lst = glist; break; }
     int doexit = 0;
     char *w = lst;
