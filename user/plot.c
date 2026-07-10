@@ -23,7 +23,9 @@
  *   visible x-range — shades the area to the x-axis and prints the value) ·  der
  *   (toggle the numeric derivative f'(x) of the first curve, drawn as a lavender
  *   overlay) ·  root  (toggle the zeros of the first curve in view — orange ticks
- *   on the x-axis + the x-values listed) ·  fit ·  reset ·  xr A B / yr A B (set the x/y range) ·  zoom F (scale about
+ *   on the x-axis + the x-values listed) ·  table (toggle a right-side panel of
+ *   sampled (x, f(x)) values for the first curve, for reading exact values off
+ *   the graph) ·  fit ·  reset ·  xr A B / yr A B (set the x/y range) ·  zoom F (scale about
  *   the centre; F>1 zooms in) — range args are evaluated, so `xr -pi pi` works ·
  *   save (write the current graph to PLOT.BMP).
  *   Integral (Simpson),
@@ -69,6 +71,7 @@ static char   funcs[NF][64]; static int nf;      /* `func` split on ';' */
 static int    cmdmode;                           /* ':' command line active */
 static char   cmd[48]; static int cmd_len;
 static int    show_int, show_der, show_root;     /* :int / :der / :root toggles (first curve) */
+static int    show_table;                        /* :table — a panel of sampled (x, f(x)) values */
 static const char *plot_msg;                     /* transient bottom-bar note (e.g. after :save) */
 
 static void putpx(int x, int y, unsigned c) { if (x >= 0 && x < W && y >= 0 && y < H) FB[y * W + x] = c; }
@@ -165,6 +168,7 @@ static void exec_plot_cmd(void) {
     if      (streq(c, "int"))   show_int = !show_int;
     else if (streq(c, "der"))   show_der = !show_der;
     else if (streq(c, "root"))  show_root = !show_root;
+    else if (streq(c, "table") || streq(c, "tbl")) show_table = !show_table;
     else if (streq(c, "fit"))   auto_fit_y();
     else if (streq(c, "reset")) { xmin = -10; xmax = 10; ymin = -6; ymax = 6; }
     else if (streq(c, "save"))  plot_msg = (sys_savebmp("PLOT.BMP", FB, W, H) >= 0) ? "saved PLOT.BMP" : "save FAILED";
@@ -264,6 +268,28 @@ static void draw(void) {
       }
     }
 
+    /* :table — a right-side panel of sampled (x, f(x)) values for the first
+     * curve, sampled evenly across the current x-range (the classic graphing-
+     * calculator TABLE, for reading exact values off the graph). */
+    if (show_table && nf > 0) {
+        const int rows = 14, pw = 150, ph = (rows + 1) * 16 + 8;
+        int x0 = W - pw - 4, y0 = PY0 + 4;
+        fill(x0, y0, pw, ph, C_BAR);
+        text("x", x0 + 8, y0 + 4, C_TEXT);
+        text("f(x)", x0 + 78, y0 + 4, C_TEXT);
+        for (int i = 0; i < rows; i++) {
+            double x = xmin + (xmax - xmin) * i / (rows - 1);
+            int err; double y = plot_eval(funcs[0], x, &err);
+            char xb[24], yb[24];
+            fmtnum(x, xb);
+            if (err || js_isnan(y) || !js_isfinite(y)) { yb[0] = 'n'; yb[1] = '/'; yb[2] = 'a'; yb[3] = 0; }
+            else fmtnum(y, yb);
+            int ry = y0 + 22 + i * 16;
+            text(xb, x0 + 8,  ry, C_DIM);
+            text(yb, x0 + 78, ry, FCOLORS[0]);
+        }
+    }
+
     /* top bar: the (editable) formula, each function coloured like its curve */
     fill(0, 0, W, TOPH, C_BAR);
     text("y=", 2, 0, C_DIM);
@@ -282,7 +308,7 @@ static void draw(void) {
         cl[p] = 0;
         text(cl, 2, H - BOTH, C_TEXT);
         fill(2 + (cmd_len + 1) * 8, H - BOTH + 1, 6, 12, C_HILITE);   /* caret */
-        const char *ch = "int der root  fit reset  xr A B  yr A B  zoom F  save";
+        const char *ch = "int der root table  fit reset  xr A B  yr A B  zoom F  save";
         int chl = 0; while (ch[chl]) chl++;
         text(ch, W - chl * 8 - 2, H - BOTH, C_DIM);
     } else {
