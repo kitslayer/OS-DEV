@@ -77,8 +77,12 @@ typedef struct {
     int editing;          /* KIND_FILES: 0=none, 1=rename, 2=new-folder (a text-input modal) */
     char editbuf[16];     /* the typed name (8.3 = max 12 chars + NUL) */
     int editlen;          /* chars in editbuf */
-    int minimized;        /* F3: hidden to its taskbar chip (last field; the
-                             positional struct literals below init every field) */
+    int minimized;        /* F3: hidden to its taskbar chip */
+    char fcwd[128];       /* KIND_FILES: this window's OWN browse directory (M1762),
+                             independent of the shared per-process cwd. "" == "/".
+                             Last field: the positional literal in make_app_window
+                             omits it, so C zero-inits it (empty = root), and the
+                             `{0}` literal in spawn_app zeroes it too. */
 } window_t;
 
 static window_t windows[MAX_WINDOWS];
@@ -411,14 +415,39 @@ static int fl_cmp(const vfs_dirent *a, const vfs_dirent *b) {
                         return (ak < bk) - (ak > bk); }
     for (int i = 0; ; i++) { unsigned char ca = a->name[i], cb = b->name[i]; if (ca != cb) return (int)ca - (int)cb; if (!ca) return 0; }
 }
-/* vfs_list + sort in place — the single listing path for the Files window. */
-static int flist(vfs_dirent *e, int max) {
-    int n = vfs_list(e, max);
+/* vfs_list_path + sort in place. Lists `path` -- the Files window's OWN browse
+ * directory (M1762) -- via the cwd-independent primitive, so a shell/app `cd`
+ * no longer changes what Files shows, and Files navigation no longer moves any
+ * app's cwd. */
+static int flist(const char *path, vfs_dirent *e, int max) {
+    int n = vfs_list_path(path, e, max);
+    if (n < 0) n = 0;
     for (int i = 1; i < n; i++) { vfs_dirent t = e[i]; int j = i - 1;
         while (j >= 0 && fl_cmp(&e[j], &t) > 0) { e[j + 1] = e[j]; j--; }
         e[j + 1] = t;
     }
     return n;
+}
+static int path_eq(const char *a, const char *b) { int i = 0; for (; a[i] && b[i]; i++) if (a[i] != b[i]) return 0; return a[i] == b[i]; }
+/* Absolute path of `name` within a window's browse dir (M1762). */
+static void files_abspath(const window_t *w, const char *name, char *out, int max) {
+    int p = 0; const char *d = w->fcwd[0] ? w->fcwd : "/";
+    for (int i = 0; d[i] && p < max - 1; i++) out[p++] = d[i];
+    if (p > 0 && out[p-1] != '/' && p < max - 1) out[p++] = '/';   /* separator (root "/" already ends in '/') */
+    for (int i = 0; name[i] && p < max - 1; i++) out[p++] = name[i];
+    out[p] = 0;
+}
+static void fcwd_descend(window_t *w, const char *dir) {           /* into subdirectory `dir` (no trailing slash) */
+    char nw[128]; files_abspath(w, dir, nw, sizeof nw);
+    int i = 0; for (; nw[i] && i < 127; i++) w->fcwd[i] = nw[i]; w->fcwd[i] = 0;
+}
+static void fcwd_ascend(window_t *w) {                             /* up one level (no-op at root) */
+    if (!w->fcwd[0]) return;
+    int len = 0; while (w->fcwd[len]) len++;
+    if (len > 0 && w->fcwd[len-1] == '/') len--;                   /* ignore a trailing slash */
+    while (len > 0 && w->fcwd[len-1] != '/') len--;                /* back to and including the last '/' */
+    if (len <= 1) w->fcwd[0] = 0;                                  /* "/X" -> root ("") */
+    else w->fcwd[len-1] = 0;                                       /* "/A/B" -> "/A" */
 }
 
 /* Both draw_content's KIND_FILES case and files_key() used to call flist()
@@ -439,13 +468,19 @@ static int flist(vfs_dirent *e, int max) {
 static vfs_dirent g_files_cache[256];
 static int g_files_cache_n;
 static uint64_t g_files_cache_at;
-static int files_list_cached(vfs_dirent **out, int force) {
+static char g_files_cache_path[128];
+static int files_list_cached(const char *path, vfs_dirent **out, int force) {
     uint64_t now = timer_ms();
-    if (force || !g_files_cache_at || now - g_files_cache_at >= 1000)
-        { g_files_cache_n = flist(g_files_cache, 256); g_files_cache_at = now; }
+    if (force || !path_eq(g_files_cache_path, path) || !g_files_cache_at || now - g_files_cache_at >= 1000) {
+        g_files_cache_n = flist(path, g_files_cache, 256);
+        g_files_cache_at = now;
+        int i = 0; for (; path[i] && i < 127; i++) g_files_cache_path[i] = path[i]; g_files_cache_path[i] = 0;
+    }
     *out = g_files_cache;
     return g_files_cache_n;
 }
+/* The browse dir to list for window `w` ("" -> root). */
+#define FCWD(w) ((w)->fcwd[0] ? (w)->fcwd : "/")
 
 static void draw_content(const window_t *w, int focused) {
     int bx = w->x + 8, by = w->y + TITLEBAR_H + 8;
@@ -481,7 +516,7 @@ static void draw_content(const window_t *w, int focused) {
         break;
     }
     case KIND_FILES: {
-        vfs_dirent *e; int n = files_list_cached(&e, 0);   /* throttled: a render is passive, never forces a fresh disk hit (M1541) */
+        vfs_dirent *e; int n = files_list_cached(FCWD(w), &e, 0);   /* throttled render; lists THIS window's browse dir, not the shared cwd (M1762) */
         if (w->editing) {                                      /* a text-input is open: prompt + the typed name + a cursor */
             char pr[48]; int p = 0;
             const char *a = w->editing == 1 ? "Rename to: " : "New folder: ";
@@ -500,10 +535,12 @@ static void draw_content(const window_t *w, int focused) {
             draw_text(bx, by, pr, THEME_RED);                  /* this action destroys a file */
         } else {
             const char *sm = g_fsort == 1 ? "size" : g_fsort == 2 ? "date" : "name";
-            char hdr[96]; int hp = 0;
-            const char *base = "up/dn Enter:open  d:del r:ren n:new w:wall  o:sort=";
-            for (int j = 0; base[j]; j++) hdr[hp++] = base[j];
-            for (int j = 0; sm[j]; j++) hdr[hp++] = sm[j];
+            char hdr[160]; int hp = 0;
+            const char *cwd = FCWD(w);                              /* the window's browse dir (M1762) */
+            for (int j = 0; cwd[j] && hp < 40; j++) hdr[hp++] = cwd[j];
+            const char *base = "   up/dn Enter:open  d:del r:ren n:new w:wall  bksp:up  o:sort=";
+            for (int j = 0; base[j] && hp < (int)sizeof(hdr) - 8; j++) hdr[hp++] = base[j];
+            for (int j = 0; sm[j] && hp < (int)sizeof(hdr) - 1; j++) hdr[hp++] = sm[j];
             hdr[hp] = 0;
             draw_text(bx, by, hdr, THEME_TEXT);
         }
@@ -1388,7 +1425,7 @@ static int ctx_desktop_action(int row) {
             return 0;                                            /* one; z-order is preserved (all visible) */
         case 2: {                                                /* Change Wallpaper: cycle to the next image on disk */
             static int wp_idx;
-            vfs_dirent *e; int n = files_list_cached(&e, 0);  /* just picking a wallpaper -- a throttled cache is plenty fresh */
+            vfs_dirent *e; int n = files_list_cached("/", &e, 0);  /* wallpaper images live at the boot-FS root (M1762) */
             if (n <= 0) return 0;
             for (int step = 0; step < n; step++) {               /* try each candidate from wp_idx onward; */
                 int i = (wp_idx + step) % n;                     /* a non-image / decode failure is skipped */
@@ -1413,7 +1450,7 @@ static void make_app_window(app_t *a) {
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
     windows[win_count++] = (window_t){ x, y,
         app_cols()*font_width + 14, app_rows()*font_height + TITLEBAR_H + 14,
-        THEME_PANEL, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* maximized,sx,sy,sw,sh,fsel,fconfirm, editing,editbuf,editlen, minimized */
+        THEME_PANEL, app_title(a), KIND_APP, a, 0,0,0,0,0,0,0, 0,{0},0, 0, {0} };  /* maximized,sx,sy,sw,sh,fsel,fconfirm, editing,editbuf,editlen, minimized */
 }
 
 /* Open a browser window at `url` (NULL -> its default). */
@@ -1422,7 +1459,7 @@ static void spawn_browser(const char *url) {
     spawn_n++;
     int x = 150 + (spawn_n % 6) * 26, y = 60 + (spawn_n % 6) * 26;
     windows[win_count++] = (window_t){ x, y, 960, 700, 0xFFFFFF, "Browser",   /* roomy by default (M1433) */
-                                       KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0, 0,{0},0, 0 };
+                                       KIND_BROWSER, browser_create(url), 0,0,0,0,0,0,0, 0,{0},0, 0, {0} };
 }
 
 /* Is `name` a plain-text / source file we'd rather edit than view? (case-
@@ -1461,7 +1498,7 @@ static int files_is_image(const char *name, int len) {
  * wallpaper. The dirent list is re-read each call, so it refreshes for free
  * after a delete. */
 static void files_key(window_t *w, int k) {
-    vfs_dirent *e; int n = files_list_cached(&e, 0);   /* a keypress can act on the throttled cache; forced below only after an actual mutation */
+    vfs_dirent *e; int n = files_list_cached(FCWD(w), &e, 0);   /* a keypress can act on the throttled cache; forced below only after an actual mutation */
 
     if (w->editing) {                                         /* a rename / new-folder text-input is open */
         if (k == 27) { w->editing = 0; return; }               /* Esc cancels: leave the name untouched */
@@ -1474,14 +1511,16 @@ static void files_key(window_t *w, int k) {
                         for (int j = 0; e[w->fsel].name[j] && p < (int)sizeof(old) - 1; j++) old[p++] = e[w->fsel].name[j];
                         if (p > 0 && old[p-1] == '/') p--;     /* the listing marks dirs with a trailing '/' */
                         old[p] = 0;
-                        vfs_rename(old, w->editbuf);           /* -1 (bad name / clobber / missing) leaves the disk unchanged */
+                        char oa[160]; files_abspath(w, old, oa, sizeof oa);   /* resolve against THIS window's browse dir (M1762) */
+                        vfs_rename(oa, w->editbuf);            /* -1 (bad name / clobber / missing) leaves the disk unchanged */
                     }
                 } else {                                       /* editing == 2: make a new folder */
-                    vfs_mkdir(w->editbuf);                     /* -1 on a bad name / existing entry: no-op */
+                    char na[160]; files_abspath(w, w->editbuf, na, sizeof na);
+                    vfs_mkdir(na);                             /* -1 on a bad name / existing entry: no-op */
                 }
             }
             w->editing = 0;
-            n = files_list_cached(&e, 1);                   /* forced: re-list so the new/renamed entry shows + the clamp is correct */
+            n = files_list_cached(FCWD(w), &e, 1);          /* forced: re-list so the new/renamed entry shows + the clamp is correct */
             if (w->fsel >= n) w->fsel = n - 1;
             if (w->fsel < 0)  w->fsel = 0;
             return;
@@ -1498,6 +1537,12 @@ static void files_key(window_t *w, int k) {
         return;                                                /* swallow every key while editing — don't fall through to nav */
     }
 
+    /* These must work even when the current directory is EMPTY (n==0) -- otherwise
+     * descending into an empty folder would trap you (M1762). Handle them before
+     * the n<=0 guard below (which only gates the per-selection actions). */
+    if (k == 8) { fcwd_ascend(w); files_list_cached(FCWD(w), &e, 1); w->fsel = 0; w->fconfirm = 0; return; }   /* Backspace: up one directory */
+    if (k == 'n') { w->editbuf[0] = 0; w->editlen = 0; w->editing = 2; w->fconfirm = 0; return; }             /* new folder */
+
     if (n <= 0) { w->fconfirm = 0; return; }
     if (w->fsel >= n) w->fsel = n - 1;
     if (w->fsel < 0)  w->fsel = 0;
@@ -1508,9 +1553,10 @@ static void files_key(window_t *w, int k) {
             for (int j = 0; e[w->fsel].name[j] && p < (int)sizeof(buf) - 1; j++) buf[p++] = e[w->fsel].name[j];
             if (p > 0 && buf[p-1] == '/') p--;                 /* strip the listing's trailing '/' on dirs */
             buf[p] = 0;
-            vfs_remove(buf);                                   /* deletes a file or empty dir; refuses a non-empty dir (no crash) */
+            char ba[160]; files_abspath(w, buf, ba, sizeof ba);   /* delete the file in THIS window's browse dir, not the shared cwd (M1762) */
+            vfs_remove(ba);                                    /* deletes a file or empty dir; refuses a non-empty dir (no crash) */
             w->fconfirm = 0;
-            n = files_list_cached(&e, 1);                   /* forced: re-list so the clamp uses the post-delete count */
+            n = files_list_cached(FCWD(w), &e, 1);          /* forced: re-list so the clamp uses the post-delete count */
             if (w->fsel >= n) w->fsel = n - 1;
             if (w->fsel < 0)  w->fsel = 0;
         } else {                                               /* ANY other key cancels; the key is otherwise ignored */
@@ -1521,15 +1567,16 @@ static void files_key(window_t *w, int k) {
 
     if (k == 0x11)       { if (w->fsel > 0)     w->fsel--; }   /* up   */
     else if (k == 0x12)  { if (w->fsel < n - 1) w->fsel++; }   /* down */
-    else if (k == 8)     { if (vfs_chdir("..") == 0) { n = files_list_cached(&e, 1); w->fsel = 0; } }  /* Backspace: up one directory (forced: new directory) */
     else if (k == 'd' || k == 0x7F) {                          /* arm the delete confirm (render shows the prompt) */
         w->fconfirm = 1;
     }
     else if (k == 'w') {                                       /* set an image file as the desktop wallpaper */
         const char *name = e[w->fsel].name;
         int len = 0; while (name[len]) len++;
-        if (len > 0 && files_is_image(name, len))
-            desktop_set_wallpaper(name);                       /* visible bg change is the feedback; a decode failure is a no-op */
+        if (len > 0 && files_is_image(name, len)) {
+            char wa[160]; files_abspath(w, name, wa, sizeof wa);
+            desktop_set_wallpaper(wa);                         /* visible bg change is the feedback; a decode failure is a no-op */
+        }
     }
     else if (k == 'r') {                                       /* rename: open a text-input pre-filled with the selected name */
         int p = 0;
@@ -1538,30 +1585,27 @@ static void files_key(window_t *w, int k) {
         w->editbuf[p] = 0; w->editlen = p;
         w->editing = 1;
     }
-    else if (k == 'n') {                                       /* new folder: open an empty text-input */
-        w->editbuf[0] = 0; w->editlen = 0;
-        w->editing = 2;
-    }
     else if (k == 'o' || k == 'O') {                           /* cycle the sort order: name -> size -> date (M1426) */
         g_fsort = (g_fsort + 1) % 3; w->fsel = 0;
     }
     else if (k == '\n' || k == '\r') {
         const char *name = e[w->fsel].name;
         int len = 0; while (name[len]) len++;
-        if (len > 0 && name[len-1] == '/') {                   /* a directory: navigate into it */
+        if (len > 0 && name[len-1] == '/') {                   /* a directory: descend into THIS window's browse dir (M1762) */
             char d[64]; int p = 0;
             for (int j = 0; j < len - 1 && p < (int)sizeof(d) - 1; j++) d[p++] = name[j];  /* strip trailing '/' */
             d[p] = 0;
-            if (vfs_chdir(d) == 0) { n = files_list_cached(&e, 1); w->fsel = 0; }   /* enter folder + re-list (forced: new directory) */
-        } else if (len > 0) {                                  /* a file: open it */
+            fcwd_descend(w, d); n = files_list_cached(FCWD(w), &e, 1); w->fsel = 0;   /* enter folder + re-list (no cwd change) */
+        } else if (len > 0) {                                  /* a file: open it by absolute path (so it opens the right file regardless of any app's cwd) */
+            char ap[160]; files_abspath(w, name, ap, sizeof ap);
             if (files_editable(name, len)) {
-                app_spawn_named_arg("editor", name);           /* edit text/source files */
+                app_spawn_named_arg("editor", ap);             /* edit text/source files */
             } else if (files_is_image(name, len)) {
-                app_spawn_named_arg("imgview", name);          /* view images in the image viewer (M1393) */
+                app_spawn_named_arg("imgview", ap);            /* view images in the image viewer (M1393) */
             } else {
-                char url[32]; int p = 0; const char *pre = "file:";
+                char url[168]; int p = 0; const char *pre = "file:";
                 while (*pre) url[p++] = *pre++;
-                for (int j = 0; name[j] && p < (int)sizeof(url) - 1; j++) url[p++] = name[j];
+                for (int j = 0; ap[j] && p < (int)sizeof(url) - 1; j++) url[p++] = ap[j];
                 url[p] = 0;
                 spawn_browser(url);                            /* view everything else */
             }
@@ -1573,7 +1617,7 @@ static void files_key(window_t *w, int k) {
  * it, and open it (the mouse equivalent of arrowing to it and pressing Enter).
  * `my` is the screen y of the click; the row math mirrors the KIND_FILES render. */
 static void files_click(window_t *w, int my) {
-    vfs_dirent *e; int n = files_list_cached(&e, 0);   /* just hit-testing which row was clicked; files_key (below) does any real navigation */
+    vfs_dirent *e; int n = files_list_cached(FCWD(w), &e, 0);   /* just hit-testing which row was clicked; files_key (below) does any real navigation */
     if (n <= 0) return;
     int by = w->y + TITLEBAR_H + 8;                    /* body content origin (matches draw) */
     int rows = (w->h - TITLEBAR_H - 66) / 18; if (rows < 1) rows = 1;   /* M1753: match the render. The M1525 column-label header pushed the first file row to by+40 (highlight band by+38) and the row count to -66; this hit-test kept the stale -30 / by+22, so every click landed ~1 row low (opened the file below the one clicked). */
@@ -1618,8 +1662,8 @@ void desktop_run(void) {
     load_wallpaper();                    /* WALL.PNG from disk, else the gradient */
     start_y = screen_h - TASKBAR_H + 5;
 
-    windows[win_count++] = (window_t){ 60, 70, 360, 290, THEME_PANEL, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };  /* dark slate (M1476) */
-    windows[win_count++] = (window_t){ 60, 300, 500, 200, THEME_PANEL, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0 };
+    windows[win_count++] = (window_t){ 60, 70, 360, 290, THEME_PANEL, "Welcome", KIND_WELCOME, 0, 0,0,0,0,0,0,0, 0,{0},0, 0, {0} };  /* dark slate (M1476) */
+    windows[win_count++] = (window_t){ 60, 300, 500, 200, THEME_PANEL, "Files", KIND_FILES, 0, 0,0,0,0,0,0,0, 0,{0},0, 0, {0} };
     app_spawn_named("shell");           /* a real ring-3 shell (WM gives it a
                                          * window below; spawn more via Apps) */
 
