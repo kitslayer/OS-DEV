@@ -1371,6 +1371,17 @@ static int table_has_field(const char *s, const char *e) {
     }
     return 0;
 }
+/* M1795: read colspan="N" from a <td>/<th> tag [tag..tagend) (default 1, clamped to
+ * [1, TBL_COLS]). tag points at '<'; attributes start after the 3-char "<td"/"<th". */
+static int cell_colspan(const char *tag, const char *tagend) {
+    const char *attrs = tag + 3; int attrlen = (int)(tagend - attrs);
+    if (attrlen <= 0) return 1;
+    const char *v; int vl;
+    if (!find_attr(attrs, attrlen, "colspan", &v, &vl)) return 1;
+    int n = 0; for (int i = 0; i < vl && v[i] >= '0' && v[i] <= '9'; i++) n = n*10 + (v[i]-'0');
+    if (n < 1) n = 1; if (n > TBL_COLS) n = TBL_COLS;
+    return n;
+}
 static int render_table(browser_t *b, const char *s, int len) {
     if (len <= 0) return 0;
     const char *e = s + len, *tend = e;
@@ -1395,8 +1406,9 @@ static int render_table(browser_t *b, const char *s, int len) {
             const char *cs = after, *cend = cs;
             while (cend < e) { if (*cend == '<') { const char *aa; if (tbl_classify(cend, e, &aa)) break; } cend++; }
             int n = cell_extract(cs, cend, out, TBL_CELL_MAX);
-            if (col < TBL_COLS && n > col_w[col]) col_w[col] = n;
-            col++; p = cend; continue;
+            int span = cell_colspan(p, after - 1);                               /* M1795: colspan */
+            if (span == 1) { if (col < TBL_COLS && n > col_w[col]) col_w[col] = n; }  /* a single cell measures its own column */
+            col += span; p = cend; continue;                                     /* a spanning cell advances the cursor by span (width summed in pass 2) */
         }
         p = after;
       }
@@ -1414,13 +1426,15 @@ static int render_table(browser_t *b, const char *s, int len) {
             const char *cs = after, *cend = cs;
             while (cend < e) { if (*cend == '<') { const char *aa; if (tbl_classify(cend, e, &aa)) break; } cend++; }
             int n = cell_extract(cs, cend, out, TBL_CELL_MAX);
-            int w = (col < TBL_COLS) ? col_w[col] : n;
+            int span = cell_colspan(p, after - 1);                               /* M1795: colspan */
+            int w = 0; for (int c = col; c < col + span && c < TBL_COLS; c++) w += col_w[c];   /* pad to the SUM of the spanned columns */
+            if (w == 0) w = n;
             char padded[TBL_CELL_MAX + 2]; int m = 0;
             for (int i = 0; i < n && m < TBL_CELL_MAX; i++) padded[m++] = out[i];
             while (m < w && m < TBL_CELL_MAX) padded[m++] = ' ';
             padded[m] = 0;
             emit_literal(b, padded, (k == 6) ? STY_BOLD : STY_NORMAL);
-            col++; p = cend; continue;
+            col += span; p = cend; continue;
         }
         p = after;
       }
