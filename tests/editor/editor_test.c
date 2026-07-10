@@ -68,7 +68,7 @@ static void undo(void) {
         } else if (dlen < MAXDOC - 1) {
             for (int i = dlen; i > o->pos; i--) doc[i] = doc[i-1];
             doc[o->pos] = (char)o->ch; dlen++;
-            cur = o->pos + 1;
+            cur = (o->kind == 1) ? o->pos + 1 : o->pos;   /* M1758 */
         }
     }
     if (cur > dlen) cur = dlen;
@@ -81,6 +81,13 @@ static void insert(char c) {
     undo_record(cur, c, 0);
     for (int i = dlen; i > cur; i--) doc[i] = doc[i-1];
     doc[cur++] = c; dlen++;
+}
+static void backspace(void) {
+    if (readonly || cur == 0) return;
+    sel_anchor = -1; dirty = 1;
+    undo_record(cur - 1, doc[cur - 1], 1);
+    for (int i = cur - 1; i < dlen - 1; i++) doc[i] = doc[i+1];
+    dlen--; cur--;
 }
 static void del_fwd(void) {
     if (readonly || cur >= dlen) return;
@@ -269,7 +276,24 @@ int main(void) {
     move_vert(1);                    /* now uses the current column (2), not the stale 10 */
     CK(cur == 16, "after a non-vertical key resets the goal, Down uses the current column (2)");
 
+    /* ---- Finding 6 (M1758): undoing a forward-Delete restores the caret to the
+     * left of the re-inserted char (where it was when Delete was pressed), while
+     * undoing a Backspace restores it to the right (unchanged). ---- */
+    reset("abc");
+    cur = 1;                         /* between 'a' and 'b' */
+    del_fwd();                       /* Delete removes 'b'; caret stays at 1 ("ac") */
+    CK(doc_is("ac") && cur == 1, "forward-delete removes the char at the caret");
+    undo();
+    CK(doc_is("abc"), "undo restores the forward-deleted char");
+    CK(cur == 1, "undo of forward-Delete leaves the caret BEFORE the restored char (col 1)");
+    reset("abc");
+    cur = 1;                         /* between 'a' and 'b' */
+    backspace();                     /* Backspace removes 'a'; caret -> 0 ("bc") */
+    CK(doc_is("bc") && cur == 0, "backspace removes the char left of the caret");
+    undo();
+    CK(doc_is("abc") && cur == 1, "undo of Backspace leaves the caret AFTER the restored char (col 1, unchanged)");
+
     if (fails) { fprintf(stderr, "FAIL: %d editor-undo check(s) failed\n", fails); return 1; }
-    printf("PASS: editor undo grouping + preferred column (indent/dedent/replace-all atomic, Up/Down sticky column, ASan/UBSan clean)\n");
+    printf("PASS: editor undo grouping + preferred column + delete-undo caret (ASan/UBSan clean)\n");
     return 0;
 }

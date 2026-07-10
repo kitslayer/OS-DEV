@@ -20,6 +20,7 @@ static int  sel_anchor = -1;      /* selection mark (Ctrl-B); -1 = none. Selecti
 static int  goal_col = -1;        /* preferred column for Up/Down (M1757): -1 = derive from the caret; set on the first vertical move and kept across a run, so passing through a shorter line doesn't permanently shrink the target column. Reset by any non-vertical key. */
 static char fname[40];
 static char findq[40]; static int finding, goting;   /* Ctrl-F find / Ctrl-G go-to-line: shared query buffer + mode flags */
+static char lastfind[40];                             /* M1758: the last committed find query. findq is shared with goto/save-as/open (which each clear + reuse it), so Ctrl-F re-offers THIS instead of a leftover line number / filename. */
 static char replq[40]; static int replacing;          /* Ctrl-R replace: replacement text + mode (1=typing search, 2=typing replacement) */
 static int helping;                                   /* Ctrl-H: key-list overlay shown */
 static int saving_as;                                 /* Ctrl-W: typing a new filename to save under */
@@ -85,7 +86,7 @@ static void undo(void) {
         } else if (dlen < MAXDOC - 1) {         /* was a deletion: re-insert the char at pos */
             for (int i = dlen; i > o->pos; i--) doc[i] = doc[i-1];
             doc[o->pos] = (char)o->ch; dlen++;
-            cur = o->pos + 1;
+            cur = (o->kind == 1) ? o->pos + 1 : o->pos;   /* M1758: backspace (kind 1) had the caret AFTER the removed char, forward-Delete (kind 2) had it BEFORE -- restore the right side, not always pos+1 */
         }
     }
     if (cur > dlen) cur = dlen;
@@ -679,6 +680,7 @@ int main(void) {
             int fl = 0; while (findq[fl]) fl++;
             if (k == '\n' || k == '\r') {
                 finding = 0;
+                for (int i = 0; i < 40; i++) lastfind[i] = findq[i];   /* M1758: remember this search for the next Ctrl-F */
                 int pos = find_from(cur + 1);       /* next match after the caret... */
                 if (pos < 0) pos = find_from(0);    /* ...else wrap to the top */
                 if (pos >= 0) { cur = pos; render(0); }
@@ -778,7 +780,7 @@ int main(void) {
         else if (k == 0x91) {                       /* Ctrl-Q: quit WITHOUT saving */
             render("\n[quit - changes not saved]"); sys_sleep(350); return 0;
         }
-        else if (k == 0x86) { finding = 1; render_prompt("find: ", findq); }    /* Ctrl-F: find (keeps the last query) */
+        else if (k == 0x86) { finding = 1; for (int i = 0; i < 40; i++) findq[i] = lastfind[i]; render_prompt("find: ", findq); }    /* Ctrl-F: find, re-offering the last committed search (M1758: not whatever goto/save-as/open left in the shared buffer) */
         else if (k == 0x87) { goting = 1; findq[0] = 0; render_prompt("goto line: ", findq); }  /* Ctrl-G: go to line */
         else if (k == 0x88) { helping = 1; render_help(); continue; }   /* Ctrl-H: key-list overlay (skip the trailing render) */
         else if (k == 0x92) { replacing = 1; findq[0] = 0; render_prompt("replace: ", findq); } /* Ctrl-R: find & replace */
