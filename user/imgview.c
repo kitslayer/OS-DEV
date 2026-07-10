@@ -6,8 +6,10 @@
  * BMP, SVG) via the new sys_loadimg syscall — the kernel reuses the same
  * decode_image() that backs the browser and the wallpaper. A caption shows the
  * filename, native pixel size and index. Keys: n/Right/Space = next, p/Left =
- * prev, s = save the decoded image as VIEW.BMP (a format converter — any decoded
- * format out to BMP, at native resolution), w = set as wallpaper, q/Esc = quit.
+ * prev, + / - = zoom in/out (1x..8x; when zoomed in, the arrows pan the view
+ * instead of paging), s = save the decoded image as VIEW.BMP (a format converter
+ * — any decoded format out to BMP, at native resolution), w = set as wallpaper,
+ * q/Esc = quit.
  *
  * Launch: `run imgview` from the shell, or the Apps menu ("Image Viewer").
  */
@@ -73,8 +75,13 @@ static int decode_native(const char *name, int *nw, int *nh) {
     *nw = w; *nh = h; return 0;
 }
 
+/* zoom state (M1740): magnification (1,2,4,8) + top-left of the visible source
+ * window in source pixels. zoom==1 is the plain fit view; >1 shows a sub-region. */
+static int zoom = 1, panx = 0, pany = 0;
+
 /* nearest-neighbour fit-scale the decoded RGBA (nw x nh) into the W x IMGH image
- * area, aspect-preserving + centred (letterboxed). */
+ * area, aspect-preserving + centred (letterboxed). At zoom>1 only a
+ * (nw/zoom x nh/zoom) source window at (panx,pany) is shown, magnified. */
 static void blit_scaled(int nw, int nh) {
     for (int i = 0; i < IMGH * W; i++) FB[i] = 0x14181E;
     int dw = W, dh = (int)((long)nh * W / nw);
@@ -82,10 +89,17 @@ static void blit_scaled(int nw, int nh) {
     if (dw < 1) dw = 1;
     if (dh < 1) dh = 1;
     int ox = (W - dw) / 2, oy = (IMGH - dh) / 2;
+    int vw = nw / zoom, vh = nh / zoom;                  /* visible source window */
+    if (vw < 1) vw = 1;
+    if (vh < 1) vh = 1;
+    if (panx > nw - vw) panx = nw - vw;                  /* keep the window in bounds */
+    if (pany > nh - vh) pany = nh - vh;
+    if (panx < 0) panx = 0;
+    if (pany < 0) pany = 0;
     for (int y = 0; y < dh; y++) {
-        int sy = (int)((long)y * nh / dh); if (sy >= nh) sy = nh - 1;
+        int sy = pany + (int)((long)y * vh / dh); if (sy >= nh) sy = nh - 1;
         for (int x = 0; x < dw; x++) {
-            int sx = (int)((long)x * nw / dw); if (sx >= nw) sx = nw - 1;
+            int sx = panx + (int)((long)x * vw / dw); if (sx >= nw) sx = nw - 1;
             unsigned char *p = &g_dec[((long)sy * nw + sx) * 4];
             FB[(oy + y) * W + (ox + x)] = ((unsigned)p[0] << 16) | ((unsigned)p[1] << 8) | p[2];
         }
@@ -128,39 +142,61 @@ int main(void) {
         if (p > 0 && is_img(nm)) { for (int k = 0; k <= p && k < 24; k++) names[nimg][k] = nm[k]; nimg++; }
     }
 
-    int idx = 0, prev = -1, outwh[2] = { 0, 0 };
+    int idx = 0, prev = -1, outwh[2] = { 0, 0 }, decoded = 0, dirty = 1;
     char arg[24];                                            /* `run imgview NAME` (or the file manager) opens that image */
     if (sys_getarg(arg, sizeof arg) > 0)
         for (int i = 0; i < nimg; i++) if (eq_ci(names[i], arg)) { idx = i; break; }
     int prevb = 0;
     for (;;) {
-        if (idx != prev) {
-            prev = idx;
+        if (idx != prev) {                                   /* new image: decode ONCE + reset the zoom */
+            prev = idx; zoom = 1; panx = pany = 0;
+            if (nimg == 0) decoded = 0;
+            else {
+                int nw = 0, nh = 0;
+                if (decode_native(names[idx], &nw, &nh) == 0) { outwh[0] = nw; outwh[1] = nh; decoded = 1; }
+                else { outwh[0] = outwh[1] = 0; decoded = -1; }
+            }
+            dirty = 1;
+        }
+        if (dirty) {                                         /* (re)draw from the decoded buffer -- zoom/pan need no re-decode */
             if (nimg == 0) {
                 for (int i = 0; i < W * H; i++) FB[i] = 0x14181E;
                 text("No image files on disk.", 20, 32, 0xE0A0A0);
                 text("(expected TEST.PNG, PHOTO.JPG, LOGO.GIF, ...)", 20, 56, 0x808890);
             } else {
-                int nw = 0, nh = 0;
-                if (decode_native(names[idx], &nw, &nh) == 0) { blit_scaled(nw, nh); outwh[0] = nw; outwh[1] = nh; }
-                else { for (int i = 0; i < IMGH * W; i++) FB[i] = 0x281418; text("decode failed", 20, 32, 0xF08080); outwh[0] = outwh[1] = 0; }
+                if (decoded == 1) blit_scaled(outwh[0], outwh[1]);
+                else { for (int i = 0; i < IMGH * W; i++) FB[i] = 0x281418; text("decode failed", 20, 32, 0xF08080); }
                 fill(0, IMGH, W, H - IMGH, 0x101418);
                 fill(0, IMGH, W, 1, 0x2A3340);                /* separator above the caption */
-                char cap[64]; int p = 0;
+                char cap[80]; int p = 0;
                 for (int k = 0; names[idx][k] && p < 20; k++) cap[p++] = names[idx][k];
                 cap[p++] = ' '; cap[p++] = ' ';
                 putint(cap, &p, outwh[0]); cap[p++] = 'x'; putint(cap, &p, outwh[1]);
                 cap[p++] = ' '; cap[p++] = '['; putint(cap, &p, idx + 1); cap[p++] = '/'; putint(cap, &p, nimg); cap[p++] = ']';
+                if (zoom > 1) { cap[p++] = ' '; putint(cap, &p, zoom); cap[p++] = 'x'; }   /* zoom indicator */
                 cap[p] = 0;
                 text(cap, 8, IMGH + 5, 0xC8D0DE);
-                text("n/p  s:save  w:wall  q:quit", W - 26 * 8 - 6, IMGH + 5, 0x707888);
+                text("n/p +/-:zoom s:save q", W - 21 * 8 - 6, IMGH + 5, 0x707888);
             }
             sys_gfx_blit(FB);
+            dirty = 0;
         }
         int k = sys_pollkey();
+        int psx = outwh[0] / (zoom * 6); if (psx < 1) psx = 1;   /* pan step ~1/6 of the visible window */
+        int psy = outwh[1] / (zoom * 6); if (psy < 1) psy = 1;
         if (k == 'q' || k == 27) break;
-        else if (nimg > 0 && (k == 'n' || k == ' ' || k == 0x14)) idx = (idx + 1) % nimg;
+        else if (nimg > 0 && zoom > 1 && k == 0x11) { pany -= psy; dirty = 1; }   /* zoomed in: arrows PAN */
+        else if (nimg > 0 && zoom > 1 && k == 0x12) { pany += psy; dirty = 1; }
+        else if (nimg > 0 && zoom > 1 && k == 0x13) { panx -= psx; dirty = 1; }
+        else if (nimg > 0 && zoom > 1 && k == 0x14) { panx += psx; dirty = 1; }
+        else if (nimg > 0 && (k == 'n' || k == ' ' || k == 0x14)) idx = (idx + 1) % nimg;   /* fit view: arrows NAVIGATE */
         else if (nimg > 0 && (k == 'p' || k == 0x13)) idx = (idx + nimg - 1) % nimg;
+        else if (nimg > 0 && decoded == 1 && (k == '+' || k == '=') && zoom < 8) {   /* zoom in about the view centre */
+            panx += (outwh[0] / zoom - outwh[0] / (zoom * 2)) / 2;
+            pany += (outwh[1] / zoom - outwh[1] / (zoom * 2)) / 2;
+            zoom *= 2; dirty = 1;
+        }
+        else if (nimg > 0 && (k == '-' || k == '_') && zoom > 1) { zoom /= 2; if (zoom == 1) { panx = pany = 0; } dirty = 1; }
         else if (k == 'w' && nimg > 0) sys_setwall(names[idx]);   /* set the current image as the desktop wallpaper (M1422) */
         else if (k == 's' && nimg > 0 && outwh[0] > 0) {          /* save the decoded image as VIEW.BMP (format convert) */
             int rc = save_view(outwh[0], outwh[1]);
@@ -168,8 +204,8 @@ int main(void) {
             text(rc >= 0 ? "saved VIEW.BMP (native size)" : "save failed", 8, IMGH + 5, rc >= 0 ? 0x50E0A0 : 0xF08080);
             sys_gfx_blit(FB);
         }
-        int mx, my, b = sys_mouse(&mx, &my);                  /* click left half = prev, right half = next (M1397) */
-        if ((b & 1) && !(prevb & 1) && mx >= 0 && nimg > 0) idx = (mx < W / 2) ? (idx + nimg - 1) % nimg : (idx + 1) % nimg;
+        int mx, my, b = sys_mouse(&mx, &my);                  /* fit view: click left half = prev, right half = next (M1397) */
+        if ((b & 1) && !(prevb & 1) && mx >= 0 && nimg > 0 && zoom == 1) idx = (mx < W / 2) ? (idx + nimg - 1) % nimg : (idx + 1) % nimg;
         prevb = b;
         sys_sleep(70);
     }
