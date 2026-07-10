@@ -253,7 +253,7 @@ true false
 -- arithmetic / real division / div-by-zero (IEEE-754) --
 3.5 Infinity NaN -1 2147483648
 -- coercion edges (ToPrimitive / ToNumber) --
-[] [object Object] 0 1 1 2
+[] [object Object] 0 1 NaN 2
 10 3 53 0.5
 255 42
 -- regex bounded quantifiers {n,m} (M438) --

@@ -1242,6 +1242,7 @@ static val call_function_this(val fn, val thisv, val *args, int nargs);
 static int tn_tail_ws(const char *s){ while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++; return *s==0; }
 static double to_num(val v) {
     switch (v.t) {
+        case V_UNDEF: return JS_NAN;   /* M1766: undefined -> NaN (null stays 0 via default), so 1+undefined, Number(undefined), +undefined, isNaN(undefined), undefined<5 all match real JS instead of silently yielding 0 */
         case V_NUM: case V_BOOL: return v.num;
         case V_STR: { const char*s=v.str;
             while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r'||*s=='\f'||*s=='\v') s++;   /* JS ToNumber skips leading whitespace */
@@ -2824,7 +2825,7 @@ static val eval_number_method(val recv, const char *name, val *args, int nargs) 
 static val eval_string_method(val recv, const char *name, val *args, int nargs) {
     const char *s=recv.str; int len=(int)strlen(s);
     if (strcmp(name,"charAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return STRV(""); char*r=aalloc(2); r[0]=s[i]; r[1]=0; return STRV(r); }
-    if (strcmp(name,"charCodeAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }
+    if (strcmp(name,"charCodeAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return NUM(JS_NAN); return NUM((unsigned char)s[i]); }   /* M1766: out-of-range -> NaN (real JS); codePointAt below correctly stays undefined */
     if (strcmp(name,"codePointAt")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0||i>=len) return UND(); return NUM((unsigned char)s[i]); }   /* = charCodeAt for ASCII (M278) */
     if (strcmp(name,"localeCompare")==0){ const char*o=nargs?val_to_str(args[0]):""; int c=strcmp(s,o); return NUM(c<0?-1:c>0?1:0); }   /* ASCII collation (M278) */
     if (strcmp(name,"toUpperCase")==0||strcmp(name,"toLocaleUpperCase")==0){ char*r=aalloc(len+1); for(int i=0;i<len;i++) r[i]=(s[i]>='a'&&s[i]<='z')?s[i]-32:s[i]; r[len]=0; return STRV(r); }

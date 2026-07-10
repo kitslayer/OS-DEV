@@ -277,7 +277,7 @@ print(2+3, [1,2,3].reduce(function(a,b){return a+b;},0), "n="+5);  // 5 6 n=5 (n
 print("-- arithmetic / real division / div-by-zero (IEEE-754) --");
 print(7/2, 10/0, 0/0, 0-7%3, 2147483647+1);  // 3.5 Infinity NaN -1 2147483648 (real division; 1/0->Infinity, 0/0->NaN; modulo; no 32-bit overflow)
 print("-- coercion edges (ToPrimitive / ToNumber) --");
-print("["+([]+[])+"]", []+{}, +[], null+1, undefined+1, true+true);  // [] [object Object] 0 1 1 2 (empty array->""; array/object->string; +[]->0; null/undefined->0 [no NaN]; bool->num)
+print("["+([]+[])+"]", []+{}, +[], null+1, undefined+1, true+true);  // [] [object Object] 0 1 NaN 2 (empty array->""; array/object->string; +[]->0; null+1->1; undefined+1->NaN (M1766); bool->num)
 print('5'*2, '5'-2, [5]+3, 0.5);  // 10 3 53 0.5 (string<->num arithmetic; [5]->"5" then +3 concats; 0.5 is a real fractional literal)
 print(parseInt("0xff"), parseInt("  42abc"));  // 255 42 (hex prefix; leading ws + trailing junk)
 print("-- regex bounded quantifiers {n,m} (M438) --");
