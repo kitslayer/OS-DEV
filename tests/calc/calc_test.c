@@ -67,6 +67,10 @@ int main(void) {
     CHECK_F("3*2^3", 24);             /* ^ binds tighter than * : 3*(2^3) */
     CHECK_F("2^-1", 0.5);             /* float: x^(negative) is the reciprocal now */
     CHECK_F("9^0.5", 3);              /* fractional exponent -> sqrt */
+    CHECK_F("-2^2", -4);              /* M1784: ^ binds tighter than unary minus -> -(2^2), matching Python/TI/Google */
+    CHECK_F("-3^2", -9);
+    CHECK_F("2^-2", 0.25);            /* but the ^ exponent may still be signed (unary allowed there) */
+    CHECK_F("10-2^2", 6);             /* 10 - (2^2) unchanged */
 
     /* --- functions (dmath) --- */
     CHECK_F("sqrt(2)", 1.4142135623730951);

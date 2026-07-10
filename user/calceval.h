@@ -53,6 +53,7 @@ static int calc_angle_deg = 0;    /* 0 = radians (default), 1 = degrees; set by 
 static double calc_a2r(double a) { return calc_angle_deg ? a * 3.14159265358979 / 180.0 : a; }
 static double calc_r2a(double r) { return calc_angle_deg ? r * 180.0 / 3.14159265358979 : r; }
 static double bor(void);          /* the lowest-precedence level (bitwise OR) — the eval entry */
+static double power(void);        /* forward decl: unary() (looser than ^) calls power() (M1784) */
 
 static void skipws(void) { while (*cur == ' ' || *cur == '\t') cur++; }
 
@@ -127,8 +128,7 @@ static double factor(void) {
         if (*cur == ')') cur++; else err = 1;
         return v;
     }
-    if (*cur == '-') { cur++; return -factor(); }
-    if (*cur == '~') { cur++; return (double)(~to_long(factor())); }   /* bitwise NOT (integer) */
+    /* unary -/~ moved to unary() (M1784) so ^ binds tighter: -2^2 == -(2^2) == -4 */
 
     /* identifiers: constants (pi, e) and functions (name '(' arg ')') */
     if ((*cur >= 'a' && *cur <= 'z') || (*cur >= 'A' && *cur <= 'Z') || *cur == '_') {
@@ -200,24 +200,30 @@ static double factor(void) {
     }
 }
 
-static double power(void) {               /* right-associative ^, binds tighter than * / % */
+static double unary(void) {               /* unary -/~ : looser than ^ (so -2^2 == -(2^2) == -4), but the ^ exponent is itself unary (2^-2 stays 0.25) — M1784 */
+    skipws();
+    if (*cur == '-') { cur++; return -unary(); }
+    if (*cur == '~') { cur++; return (double)(~to_long(unary())); }   /* bitwise NOT (integer) */
+    return power();
+}
+static double power(void) {               /* right-associative ^, binds tighter than unary and * / % */
     double b = factor();
     skipws();
     if (*cur == '^') {
         cur++;
-        double e = power();
+        double e = unary();               /* M1784: exponent is a unary-expr, so 2^-2 == 0.25 */
         return js_pow(b, e);
     }
     return b;
 }
 
 static double term(void) {
-    double v = power();
+    double v = unary();
     for (;;) {
         skipws();
-        if (*cur == '*') { cur++; v *= power(); }
-        else if (*cur == '/') { cur++; v /= power(); }            /* real division: /0 -> +-Inf, 0/0 -> NaN (no trap) */
-        else if (*cur == '%') { cur++; v = js_fmod(v, power()); } /* JS-style fmod: sign of dividend, x%0 -> NaN */
+        if (*cur == '*') { cur++; v *= unary(); }
+        else if (*cur == '/') { cur++; v /= unary(); }            /* real division: /0 -> +-Inf, 0/0 -> NaN (no trap) */
+        else if (*cur == '%') { cur++; v = js_fmod(v, unary()); } /* JS-style fmod: sign of dividend, x%0 -> NaN */
         else break;
     }
     return v;

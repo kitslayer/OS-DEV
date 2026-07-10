@@ -26,6 +26,7 @@ static int         pe_err;    /* set nonzero on a syntax/parse error */
 static int         pe_angle_deg = 0;   /* 0 = radians (default), 1 = degrees; set by plot.c's :deg/:rad (M1744). Affects only trig. */
 
 static double pe_expr(void);
+static double pe_power(void);   /* forward decl: pe_unary() (looser than ^) calls pe_power() (M1784) */
 
 static int  pe_isdigit(char c) { return c >= '0' && c <= '9'; }
 static int  pe_isalpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
@@ -71,8 +72,7 @@ static double pe_r2a(double r) { return pe_angle_deg ? r * 180.0 / 3.14159265358
 static double pe_factor(void) {
     pe_ws();
     if (*pe_cur == '(') { pe_cur++; double v = pe_expr(); pe_ws(); if (*pe_cur == ')') pe_cur++; else pe_err = 1; return v; }
-    if (*pe_cur == '-') { pe_cur++; return -pe_factor(); }
-    if (*pe_cur == '+') { pe_cur++; return pe_factor(); }
+    /* unary -/+ moved to pe_unary() (M1784) so ^ binds tighter: -2^2 == -(2^2) */
     if (pe_isdigit(*pe_cur) || *pe_cur == '.') return pe_num();
     if (pe_isalpha(*pe_cur)) {
         const char *s = pe_cur; int n = 0;
@@ -116,17 +116,23 @@ static double pe_factor(void) {
     pe_err = 1; return 0;
 }
 
-static double pe_power(void) {                        /* right-associative ^ */
+static double pe_unary(void) {                        /* unary -/+ : looser than ^ (so -2^2 == -(2^2)), exponent stays unary (2^-2) — M1784 */
+    pe_ws();
+    if (*pe_cur == '-') { pe_cur++; return -pe_unary(); }
+    if (*pe_cur == '+') { pe_cur++; return pe_unary(); }
+    return pe_power();
+}
+static double pe_power(void) {                        /* right-associative ^, binds tighter than unary and * / % */
     double b = pe_factor(); pe_ws();
-    if (*pe_cur == '^') { pe_cur++; double e = pe_power(); return js_pow(b, e); }
+    if (*pe_cur == '^') { pe_cur++; double e = pe_unary(); return js_pow(b, e); }   /* M1784: exponent is a unary-expr, so 2^-2 works */
     return b;
 }
 static double pe_term(void) {
-    double v = pe_power();
+    double v = pe_unary();
     for (;;) { pe_ws();
-        if (*pe_cur == '*') { pe_cur++; v *= pe_power(); }
-        else if (*pe_cur == '/') { pe_cur++; v /= pe_power(); }
-        else if (*pe_cur == '%') { pe_cur++; v = js_fmod(v, pe_power()); }
+        if (*pe_cur == '*') { pe_cur++; v *= pe_unary(); }
+        else if (*pe_cur == '/') { pe_cur++; v /= pe_unary(); }
+        else if (*pe_cur == '%') { pe_cur++; v = js_fmod(v, pe_unary()); }
         else break;
     }
     return v;

@@ -36,6 +36,7 @@ int main(void) {
 
     /* arithmetic / precedence / associativity (constant in x) */
     CK("1+2*3", 0, 7);  CK("(1+2)*3", 0, 9);  CK("2^3^2", 0, 512);  CK("10-4-3", 0, 3);
+    CK("-2^2", 0, -4);  CK("-3^2", 0, -9);  CK("2^-2", 0, 0.25);  CK("-x^2", 3, -9);   /* M1784: ^ binds tighter than unary minus -> -(x^2) */
     CK("7/2", 0, 3.5);  CK("10%3", 0, 1);  CK("2*-3", 0, -6);
 
     /* functions (values matched to calc's proven-accurate dmath assertions) */
