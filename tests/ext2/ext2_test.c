@@ -71,6 +71,14 @@ static void exercise(void) {
     (void)ext2_listxattr(bd_read, 0, 0, "/lost+found", xb, sizeof xb);
 }
 
+/* s_free_blocks_count from the ext2 superblock (byte 1024, field offset 12).
+ * bd_write is write-through to g_img, so this reflects the live free count --
+ * used by the M1745 leak check. */
+static uint32_t free_blocks_count(void) {
+    const uint8_t *sb = g_img + 1024;
+    return (uint32_t)sb[12] | ((uint32_t)sb[13] << 8) | ((uint32_t)sb[14] << 16) | ((uint32_t)sb[15] << 24);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: ext2_test <golden.ext2>\n"); return 2; }
     FILE *f = fopen(argv[1], "rb");
@@ -358,6 +366,42 @@ int main(int argc, char **argv) {
         }
         printf("extent fuzz: 6000 corrupt-extent-tree iterations, no OOB / no hang\n");
     }
+    /* --- M1745: an out-of-space write must not LEAK the inode/blocks, and a
+     * doomed OVERWRITE must not leave the inode pointing at blocks it already
+     * freed (silent corruption). Reproduces the failure paths the M1616 fix
+     * missed (only dir_add failures were cleaned up before). --- */
+    memcpy(g_img, g_golden, (size_t)g_golden_bytes); g_img_bytes = g_golden_bytes;   /* fresh, uncorrupted */
+    {
+        static uint8_t big[262144];                          /* ~256 KB, near the single-indirect max */
+        for (size_t i = 0; i < sizeof big; i++) big[i] = (uint8_t)(i * 7 + 1);
+        char nm[24]; int i;
+        for (i = 0; i < 64; i++) {                           /* fill the volume until a write fails */
+            snprintf(nm, sizeof nm, "/FILL%d.BIN", i);
+            if (ext2_write_path(bd_read, bd_write, 0, 0, nm, big, sizeof big) < 0) break;
+        }
+        if (i >= 64) { fprintf(stderr, "FAIL nearfull: 64x256KB never filled the volume\n"); return 1; }
+
+        /* (a) leak: a doomed out-of-space write leaves the free-block count unchanged */
+        uint32_t free_before = free_blocks_count();
+        long w = ext2_write_path(bd_read, bd_write, 0, 0, "/NOFIT.BIN", big, sizeof big);
+        uint32_t free_after = free_blocks_count();
+        if (w >= 0) { fprintf(stderr, "FAIL nearfull: /NOFIT.BIN unexpectedly fit (%ld)\n", w); return 1; }
+        if (free_after != free_before) { fprintf(stderr, "FAIL nearfull LEAK: doomed write changed free blocks %u -> %u\n", free_before, free_after); return 1; }
+
+        /* (b) corruption: a doomed OVERWRITE leaves a CONSISTENT (empty) file --
+         * never dangling refs to the old blocks it already freed at the top. */
+        memcpy(g_img, g_golden, (size_t)g_golden_bytes);     /* fresh */
+        uint8_t small[300]; for (int k = 0; k < 300; k++) small[k] = (uint8_t)k;
+        if (ext2_write_path(bd_read, bd_write, 0, 0, "/OV.BIN", small, 300) != 300) { fprintf(stderr, "FAIL nearfull: /OV.BIN setup failed\n"); return 1; }
+        for (i = 0; i < 64; i++) { snprintf(nm, sizeof nm, "/G%d.BIN", i); if (ext2_write_path(bd_read, bd_write, 0, 0, nm, big, sizeof big) < 0) break; }   /* fill the rest */
+        long ow = ext2_write_path(bd_read, bd_write, 0, 0, "/OV.BIN", big, sizeof big);   /* doomed overwrite */
+        if (ow >= 0) { fprintf(stderr, "FAIL nearfull: doomed /OV.BIN overwrite fit (%ld)\n", ow); return 1; }
+        uint8_t ovb[512];
+        long r = ext2_read_path(bd_read, 0, 0, "/OV.BIN", ovb, sizeof ovb);
+        if (r != 0) { fprintf(stderr, "FAIL nearfull CORRUPTION: /OV.BIN reads %ld bytes after a failed overwrite (should be 0)\n", r); return 1; }
+        printf("nearfull (M1745): out-of-space write leaks no blocks + failed overwrite leaves no dangling refs\n");
+    }
+
     printf("PASS\n");
     return 0;
 }

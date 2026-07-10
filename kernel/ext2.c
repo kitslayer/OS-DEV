@@ -1363,7 +1363,11 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
                 if (chunk > v.block_size) chunk = v.block_size;
                 memcpy(blk, (const uint8_t *)buf + boff, chunk);
                 if (chunk < v.block_size) memset(blk + chunk, 0, v.block_size - chunk);
-                if (wrblk(&v, start + fb, blk) < 0) return -1;
+                if (wrblk(&v, start + fb, blk) < 0) {          /* disk error mid-run: free the whole run + inode (M1745) */
+                    for (uint32_t k = 0; k < nblocks; k++) free_block(&v, start + k);
+                    free_inode_num(&v, ino);
+                    return -1;
+                }
             }
             uint8_t *eh = inode + 40;                          /* extent header in i_block[] */
             for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);
@@ -1393,38 +1397,60 @@ long ext2_write_path(blk_read_fn read, blk_write_fn write, void *ctx, uint64_t s
         /* no contiguous run -> fall through to direct/indirect below */
     }
 
-    /* allocate + write the data blocks (and a single-indirect block if needed) */
-    uint32_t indirect = 0, isectors = 0;
-    for (uint32_t fb = 0; fb < nblocks; fb++) {
+    /* Allocate + write the data blocks (+ a single-indirect block if needed). On
+     * ANY failure we must undo everything allocated THIS call, else we leak the
+     * inode + blocks (CREATE) or -- worse -- leave the on-disk inode pointing at
+     * the OLD blocks we already freed at the top (OVERWRITE) => cross-linked
+     * blocks + silent corruption. Each data block is RECORDED in inode[]/ind[]
+     * BEFORE its wrblk, so `fail_free` frees exactly what was allocated. (M1745;
+     * the M1616 fix only covered the two dir_add failures, not these earlier ones,
+     * which FAT32 already handles via free_chain -- fat32.c:533.) */
+    uint32_t indirect = 0, isectors = 0, fb = 0;
+    for (fb = 0; fb < nblocks; fb++) {
         uint32_t db = alloc_block(&v);
-        if (!db) return -1;                                /* out of space (file left partial) */
-        uint32_t boff = fb * v.block_size, chunk = (uint32_t)len - boff;
-        if (chunk > v.block_size) chunk = v.block_size;
-        memcpy(blk, (const uint8_t *)buf + boff, chunk);
-        if (chunk < v.block_size) memset(blk + chunk, 0, v.block_size - chunk);
-        if (wrblk(&v, db, blk) < 0) return -1;
+        if (!db) goto fail_free;                           /* out of space */
         isectors += v.block_size / 512;
-        if (fb < 12) e_wr32(inode + 40 + fb * 4, db);
+        if (fb < 12) e_wr32(inode + 40 + fb * 4, db);      /* record before writing */
         else {
             if (!indirect) {
                 indirect = alloc_block(&v);
-                if (!indirect) return -1;
+                if (!indirect) { free_block(&v, db); goto fail_free; }   /* db not yet in ind[] */
                 memset(ind, 0, v.block_size);
                 isectors += v.block_size / 512;
                 e_wr32(inode + 40 + 12 * 4, indirect);
             }
             e_wr32(ind + (fb - 12) * 4, db);
         }
+        uint32_t boff = fb * v.block_size, chunk = (uint32_t)len - boff;
+        if (chunk > v.block_size) chunk = v.block_size;
+        memcpy(blk, (const uint8_t *)buf + boff, chunk);
+        if (chunk < v.block_size) memset(blk + chunk, 0, v.block_size - chunk);
+        if (wrblk(&v, db, blk) < 0) goto fail_free;        /* db already recorded => fail_free frees it */
     }
-    if (indirect && wrblk(&v, indirect, ind) < 0) return -1;
+    if (indirect && wrblk(&v, indirect, ind) < 0) goto fail_free;
 
     e_wr32(inode + 4, (uint32_t)len);                      /* i_size */
     e_wr32(inode + 28, isectors);                          /* i_blocks (in 512-byte sectors) */
     e_stamp(inode);                                        /* i_atime/ctime/mtime = now (M1175) */
-    if (write_inode(&v, ino, inode) < 0) return -1;
-    /* same leaked-inode-on-full-directory gap as the extent path above (M1616) */
-    if (!existing && dir_add(&v, parent_ino, base, ino, 1) < 0) { free_inode_blocks(&v, inode); free_inode_num(&v, ino); return -1; }   /* ftype 1 = regular file */
+    if (write_inode(&v, ino, inode) < 0) goto fail_free;
+    if (!existing && dir_add(&v, parent_ino, base, ino, 1) < 0) goto fail_free;   /* ftype 1 = regular file */
     return (long)len;
+
+fail_free:   /* undo THIS call's allocations, leaving the fs consistent (M1745) */
+    for (int i = 0; i < 12; i++) { uint32_t b = e_rd32(inode + 40 + i * 4); if (b) free_block(&v, b); }
+    if (indirect) {
+        uint32_t ppb2 = v.block_size / 4;
+        for (uint32_t i = 0; i < ppb2; i++) { uint32_t b = e_rd32(ind + i * 4); if (b) free_block(&v, b); }
+        free_block(&v, indirect);
+    }
+    if (existing) {   /* OVERWRITE: old blocks already freed -> leave a CONSISTENT empty inode, never dangling refs */
+        for (int i = 0; i < 15; i++) e_wr32(inode + 40 + i * 4, 0);
+        e_wr32(inode + 4, 0); e_wr32(inode + 28, 0); e_stamp(inode);
+        write_inode(&v, ino, inode);
+    } else {          /* CREATE: release the inode number we reserved */
+        free_inode_num(&v, ino);
+    }
+    return -1;
 }
 
 /* ---- extended attributes (in-inode EA, user.* namespace) --------------------
