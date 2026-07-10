@@ -161,7 +161,13 @@ static void parse_agg_args(agg_t *a) {
                 pcur++; skipws();
                 if (parse_ref_cursor(&r2, &c2)) agg_range(a, r1, c1, r2, c2);
                 else perr = ERR_SYNTAX;
-            } else {                                    /* a lone ref used as a scalar */
+            } else if (*pcur == ',' || *pcur == ')') {  /* M1760: a lone BARE ref -> treat exactly like a 1-cell range, so an empty/text cell is SKIPPED (COUNT/SUM/AVG/MIN/MAX/PRODUCT), not folded in as a phantom 0 the way the range form A1:A1 already skips it */
+                eval_cell(r1, c1);
+                cell_t *cell = CELL(r1, c1);
+                if (cell->raw[0]) a->nonempty++;
+                if (cell->err) perr = cell->err;
+                else if (cell->is_num) agg_add(a, cell->val);
+            } else {                                    /* the ref begins a larger scalar expression (e.g. A1+1): evaluate the whole thing */
                 pcur = save; double v = eval_compare(); agg_add(a, v); a->nonempty++;
             }
         } else { pcur = save; double v = eval_compare(); agg_add(a, v); a->nonempty++; }

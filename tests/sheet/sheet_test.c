@@ -104,6 +104,50 @@ int main(void) {
     chk_expr("=COUNT(1, 2, 3)", 3);
     chk_expr("=sum(1,2)+sqrt(4)", 5);  /* case-insensitive names */
 
+    /* --- M1760: comma-separated aggregate args that are bare refs to EMPTY/TEXT
+     * cells must be skipped (like the range form A1:A3 already does), not folded
+     * in as a phantom 0. --------------------------------------------------------*/
+    clear_all();
+    set_raw(1, 0, "120"); set_raw(2, 0, "150");   /* A2, A3; A1 and A4 stay empty */
+    set_raw(3, 0, "txt");                          /* A4 is TEXT, not a number */
+    set_raw(10, 0, "=AVERAGE(A2,A3,A4)");          /* A11 */
+    set_raw(11, 0, "=AVERAGE(A2:A4)");             /* A12: range form must agree */
+    set_raw(12, 0, "=COUNT(A2,A3,A4)");            /* A13 */
+    set_raw(13, 0, "=COUNTA(A2,A3,A4)");           /* A14 */
+    set_raw(14, 0, "=SUM(A2,A3,A4)");              /* A15 */
+    recompute();
+    chk_num(10, 0, 135.0, "AVERAGE(A2,A3,A4): text A4 skipped, 270/2");
+    chk_num(11, 0, 135.0, "AVERAGE(A2:A4) range form agrees");
+    chk_num(12, 0, 2.0,   "COUNT(A2,A3,A4): only the 2 numeric cells");
+    chk_num(13, 0, 3.0,   "COUNTA(A2,A3,A4): 3 non-empty (incl. the text cell)");
+    chk_num(14, 0, 270.0, "SUM(A2,A3,A4): text contributes nothing");
+
+    clear_all();                                   /* MIN/MAX/PRODUCT must not fold a blank ref in as 0 */
+    set_raw(0, 0, "-5"); set_raw(1, 0, "-3");      /* A1,A2 ; A3 empty */
+    set_raw(5, 0, "=MAX(A1,A2,A3)");
+    set_raw(6, 0, "=MIN(A1,A2,A3)");
+    set_raw(7, 0, "=MAX(A1:A3)");
+    recompute();
+    chk_num(5, 0, -3.0, "MAX(A1,A2,A3): -3, not a phantom 0 from blank A3");
+    chk_num(6, 0, -5.0, "MIN(A1,A2,A3): -5");
+    chk_num(7, 0, -3.0, "MAX(A1:A3) range form agrees");
+
+    clear_all();
+    set_raw(1, 0, "120");                          /* A2 ; A4 empty */
+    set_raw(5, 0, "=PRODUCT(A2,A4)");
+    recompute();
+    chk_num(5, 0, 120.0, "PRODUCT(A2,A4): blank A4 skipped, not *0");
+
+    clear_all();                                   /* bare numeric ref + literals still count */
+    set_raw(0, 0, "7");                            /* A1 */
+    set_raw(5, 0, "=COUNT(A1)");
+    set_raw(6, 0, "=SUM(A1,3)");                   /* ref + literal */
+    set_raw(7, 0, "=COUNT(0,0)");                  /* literal zeros DO count */
+    recompute();
+    chk_num(5, 0, 1.0,  "COUNT(A1) of a numeric cell = 1");
+    chk_num(6, 0, 10.0, "SUM(A1,3) = 7+3 (bare ref + literal)");
+    chk_num(7, 0, 2.0,  "COUNT(0,0): literal zeros still count");
+
     /* --- cell references ---------------------------------------------------*/
     clear_all();
     set_raw(0, 0, "10"); set_raw(0, 1, "=A1*2"); recompute();
