@@ -30,6 +30,12 @@ int main(void) {
     CHECK("pre{1..2}post", "pre1post pre2post");
     CHECK("{-2..2}", "-2 -1 0 1 2");        /* negative bounds */
     CHECK("{5..5}", "5");                   /* single-element range */
+    /* --- M1787: zero-padded numeric ranges (a leading-zero bound -> pad to the widest literal, bash-style) --- */
+    CHECK("{01..03}", "01 02 03");          /* leading zero -> pad to width 2 */
+    CHECK("{08..11}", "08 09 10 11");       /* padding preserved as the number widens */
+    CHECK("{001..3}", "001 002 003");       /* pad to the WIDEST bound literal ("001" -> 3) */
+    CHECK("img{01..10}.png", "img01.png img02.png img03.png img04.png img05.png img06.png img07.png img08.png img09.png img10.png");
+    CHECK("{1..3}", "1 2 3");               /* no leading zero -> unchanged (no pad) */
 
     /* --- cartesian product of adjacent groups + nesting --- */
     CHECK("{1,2}{3,4}", "13 14 23 24");

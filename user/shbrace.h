@@ -26,22 +26,30 @@ static int br_int(const char *s, int n, int *pi, long *pv) {   /* parse a signed
     *pi = i; *pv = sign * v; return 1;
 }
 /* {N..M[..S]} numeric or {a..z} single-char range; fills lo/hi/step/ischar. */
-static int br_range(const char *c, int clen, long *lo, long *hi, long *step, int *ischar) {
+static int br_range(const char *c, int clen, long *lo, long *hi, long *step, int *ischar, int *pad) {
+    *pad = 0;
     if (clen == 4 && c[1] == '.' && c[2] == '.' &&
         (((c[0]|32) >= 'a' && (c[0]|32) <= 'z')) && (((c[3]|32) >= 'a' && (c[3]|32) <= 'z'))) {
         *lo = c[0]; *hi = c[3]; *step = 1; *ischar = 1; return 1;
     }
     int i = 0; long a, b, s = 1;
-    if (!br_int(c, clen, &i, &a)) return 0;
+    int as_ = i; if (!br_int(c, clen, &i, &a)) return 0; int aw = i - as_;   /* width of the low-bound literal */
     if (i + 1 >= clen || c[i] != '.' || c[i + 1] != '.') return 0;
     i += 2;
-    if (!br_int(c, clen, &i, &b)) return 0;
+    int bs_ = i; if (!br_int(c, clen, &i, &b)) return 0; int bw = i - bs_;   /* width of the high-bound literal */
     if (i < clen) {                                  /* optional ..step */
         if (i + 1 < clen && c[i] == '.' && c[i + 1] == '.') { i += 2; if (!br_int(c, clen, &i, &s)) return 0; }
         if (i != clen) return 0;                     /* trailing junk -> not a clean range */
     }
     if (s < 0) s = -s;
     if (s == 0) s = 1;
+    /* M1787: a leading-zero bound -> zero-pad the output to the widest bound literal, matching
+     * bash ({01..10} -> "01".."10", {001..100} -> "001".."100"). Non-negative bounds only
+     * (negative-bound padding is a rare, sign-fiddly edge — left unpadded). */
+    if (a >= 0 && b >= 0) {
+        int az = (aw > 1 && c[as_] == '0'), bz = (bw > 1 && c[bs_] == '0');
+        if (az || bz) *pad = (aw > bw ? aw : bw);
+    }
     *lo = a; *hi = b; *step = s; *ischar = 0; return 1;
 }
 static int brace_eligible(const char *s, int lb, int *prb) {
@@ -56,8 +64,8 @@ static int brace_eligible(const char *s, int lb, int *prb) {
                 *prb = i;
                 if (i <= lb + 1) return 0;            /* empty {} */
                 if (hascomma) return 1;
-                long lo, hi, st; int ic;
-                return br_range(s + lb + 1, i - lb - 1, &lo, &hi, &st, &ic);
+                long lo, hi, st; int ic, pd;
+                return br_range(s + lb + 1, i - lb - 1, &lo, &hi, &st, &ic, &pd);
             }
         } else if (depth == 1 && c == ',') hascomma = 1;
     }
@@ -92,11 +100,13 @@ static int brace_expand_one(const char *s, int lb, int rb, char *out, int cap) {
             else { char c = content[i]; if (c == '{') depth++; else if (c == '}') depth--; else if (depth == 0 && c == ',') { EMIT_ITEM(content + istart, i - istart); istart = i + 1; } }
         }
     } else {                                          /* range (guaranteed valid by eligibility) */
-        long lo, hi, st; int ic; br_range(content, clen, &lo, &hi, &st, &ic);
+        long lo, hi, st; int ic, pad; br_range(content, clen, &lo, &hi, &st, &ic, &pad);
         int dir = (lo <= hi) ? 1 : -1;
         for (long v = lo; (dir > 0) ? (v <= hi) : (v >= hi); v += dir * st) {
             if (ic) { char ch = (char)v; EMIT_ITEM(&ch, 1); }
-            else { char num[24]; int nl = br_itoa(v, num); EMIT_ITEM(num, nl); }
+            else { char num[24]; int nl = br_itoa(v, num);
+                   if (nl < pad && pad < 24) { int sh = pad - nl; for (int z = nl; z >= 0; z--) num[z+sh] = num[z]; for (int z = 0; z < sh; z++) num[z] = '0'; nl = pad; }   /* M1787: zero-pad to the bound-literal width */
+                   EMIT_ITEM(num, nl); }
         }
     }
     for (int i = we; s[i]; i++) EMIT(s[i]);            /* text after the word */
