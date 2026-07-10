@@ -436,4 +436,8 @@ print(`a${'}'}b`, `a${'{'}b`, `a${"}"}b`);  // a}b a{b a}b  (} or { inside a quo
 print(`${"}"+"x"}`, `start-${'}'}-end`);     // }x start-}-end (concatenated; single quoted
 print((function(){var n={ok:true};return `cell${n.ok?'':' off'}:${n.ok?'yes':'no'}`;})());  // cell:yes  (ternary with empty strings in ${})
 print(`before${'}'}after${'{'}end`);          // before}after{end (two consecutive substitutions with brace chars)
+print("-- M1751 unquoted numeric object-literal keys --");
+var st={200:"OK",404:"NF"}; print(st[200], st[404], Object.keys(st).join(","));   // OK NF 200,404 (was: undefined undefined "" -- all numeric keys collided to one empty key)
+var lk={1:"a",2:"b",3:"c"}; print(lk[1], lk[2], lk[3]);                            // a b c
+print(({1.5:"half"})[1.5], ({"200":"q"})[200], ({[404]:"c"})[404]);               // half q c (float key; quoted "200" and computed [404] already worked and must still match)
 print("-- done --");

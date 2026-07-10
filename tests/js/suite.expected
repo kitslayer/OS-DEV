@@ -403,4 +403,8 @@ a}b a{b a}b
 }x start-}-end
 cell:yes
 before}after{end
+-- M1751 unquoted numeric object-literal keys --
+OK NF 200,404
+a b c
+half q c
 -- done --

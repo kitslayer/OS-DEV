@@ -345,6 +345,7 @@ static node *parse_stmt(lexer *L);
 static node *parse_unary(lexer *L);
 static node *parse_postfix(lexer *L);
 static node *parse_primary(lexer *L);
+static char *num_to_str(double d);   /* fwd: numeric object-literal keys intern their canonical string (M1751) */
 
 static void expect_punc(lexer *L, const char *p){ token t=advance(L); if(!(t.type==T_PUNC && tok_is(t,p))) rt_err("syntax: expected punctuation"); }
 
@@ -637,7 +638,12 @@ static node *parse_primary(lexer *L) {
                     lex_restore(L,sv);                                /* not an accessor — `get`/`set` is an ordinary key */
                 }
                 token k=advance(L); node *pr=mknode(N_PROP);
-                pr->str=intern(k.s,k.len); pr->slen=k.len;
+                if (k.type==T_NUM) {   /* numeric key {200:...}: a T_NUM token has no .s/.len, so intern(k.s,k.len) was intern("") -- ALL numeric keys collided to one empty slot (M1751). Use the same num_to_str keystr() uses for m[200]/{[200]:} so the literal key matches lookups. */
+                    char *ks = num_to_str(k.num); int kl = 0; while (ks[kl]) kl++;
+                    pr->str = intern(ks, kl); pr->slen = kl;
+                } else {
+                    pr->str=intern(k.s,k.len); pr->slen=k.len;
+                }
                 if (peek_punc(L,":")) { advance(L); pr->a=parse_assign(L); }
                 else if (peek_punc(L,"(")) { node *fn=mknode(N_FUNC); fn->is_gen=genm; fn->is_async=asyncm; parse_fn_params(L,fn); { int sg=g_in_gen, sa=g_in_async; g_in_gen=genm; g_in_async=asyncm; fn->a=parse_stmt(L); g_in_gen=sg; g_in_async=sa; } pr->a=fn; }   /* method shorthand: name(args){…} */
                 else if (peek_punc(L,"=")) { advance(L); node *id=mknode(N_IDENT); id->str=pr->str; id->slen=pr->slen; node *as=mknode(N_ASSIGN); as->op='='; as->a=id; as->b=parse_assign(L); pr->a=as; }   /* {x = default} (destructuring) */
