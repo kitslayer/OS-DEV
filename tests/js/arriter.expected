@@ -1,0 +1,16 @@
+map3 3,3,3
+mapI 10,21,32
+filt 7
+find 7
+findIdx 2
+some true
+every true
+fe 1:2 2:2 
+flatMap 1,2,2,2
+red4 9
+redR4 9
+redI 10
+sort 1,2,3
+sortD 200,30,4
+from 9,9
+-- done --
