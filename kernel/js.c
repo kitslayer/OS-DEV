@@ -2872,13 +2872,25 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
             pos = caps[1]>caps[0]?caps[1]:caps[1]+1; if(caps[1]==caps[0] && caps[0]<len) sb_put(&b, s+caps[0], 1);   /* zero-width: emit a char, advance */
             if(!re->global && !all){ break; } }
         sb_put(&b, s+pos, len-pos); if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
-    if (strcmp(name,"replace")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]),*to=val_to_str(args[1]); int fl=(int)strlen(from),tl=(int)strlen(to); if(fl==0) return STRV(s); for(int i=0;i+fl<=len;i++){ if(memcmp(s+i,from,fl)==0){ char*r=aalloc((long)len-fl+tl+1); if(!r) return STRV(""); memcpy(r,s,i); memcpy(r+i,to,tl); memcpy(r+i+tl,s+i+fl,len-i-fl); r[len-fl+tl]=0; return STRV(r); } } return STRV(s); }
-    if (strcmp(name,"replaceAll")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]),*to=val_to_str(args[1]); int fl=(int)strlen(from),tl=(int)strlen(to); if(fl==0) return STRV(s);
-        int cnt=0; for(int i=0;i+fl<=len;){ if(memcmp(s+i,from,fl)==0){cnt++;i+=fl;} else i++; }
-        long outlen=(long)len + (long)cnt*((long)tl-fl); if(outlen<0||outlen>JS_ARENA) return STRV(s);
-        char*r=aalloc(outlen+1); if(!r) return STRV(""); int p=0;
-        for(int i=0;i<len;){ if(i+fl<=len && memcmp(s+i,from,fl)==0){ memcpy(r+p,to,tl); p+=tl; i+=fl; } else r[p++]=s[i++]; }
-        r[p]=0; return STRV(r); }
+    if (strcmp(name,"replace")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]); int fl=(int)strlen(from); if(fl==0) return STRV(s);
+        int has_fn = args[1].t==V_FUN||args[1].t==V_NATIVE;                 /* M1780: str.replace("lit", fn) must CALL fn(match, offset, whole), not stringify it */
+        const char *repl = has_fn ? "" : val_to_str(args[1]);
+        for(int i=0;i+fl<=len;i++){ if(memcmp(s+i,from,fl)==0){
+            sbuild b; memset(&b,0,sizeof(b)); sb_put(&b, s, i);             /* text before the match */
+            if(has_fn){ val fa[3]; fa[0]=STRV(from); fa[1]=NUM(i); fa[2]=STRV(s); val rv=call_function(args[1],fa,3); const char*rs=val_to_str(rv); sb_put(&b,rs,(int)strlen(rs)); }
+            else { int caps[2]={i,i+fl}; sb_expand(&b, repl, s, caps, 0, 0); }   /* M1780: expand $& $$ $` $' in the replacement */
+            sb_put(&b, s+i+fl, len-i-fl); if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); } }
+        return STRV(s); }
+    if (strcmp(name,"replaceAll")==0){ if(nargs<2) return STRV(s); const char*from=val_to_str(args[0]); int fl=(int)strlen(from); if(fl==0) return STRV(s);
+        int has_fn = args[1].t==V_FUN||args[1].t==V_NATIVE;                 /* M1780: fn replacer + $-expansion, per match */
+        const char *repl = has_fn ? "" : val_to_str(args[1]);
+        sbuild b; memset(&b,0,sizeof(b));
+        for(int i=0;i<len;){ if(i+fl<=len && memcmp(s+i,from,fl)==0){
+                if(has_fn){ val fa[3]; fa[0]=STRV(from); fa[1]=NUM(i); fa[2]=STRV(s); val rv=call_function(args[1],fa,3); const char*rs=val_to_str(rv); sb_put(&b,rs,(int)strlen(rs)); }
+                else { int caps[2]={i,i+fl}; sb_expand(&b, repl, s, caps, 0, 0); }
+                i+=fl; if(g_oom||g_err) break; }
+            else { sb_put(&b, s+i, 1); i++; } }
+        if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
     if (strcmp(name,"at")==0){ int i=nargs?(int)to_num(args[0]):0; if(i<0) i+=len; if(i<0||i>=len) return UND(); char*r=aalloc(2); if(r){r[0]=s[i];r[1]=0;} return STRV(r?r:""); }
     if (strcmp(name,"padStart")==0||strcmp(name,"padEnd")==0){ int tgt=nargs?(int)to_num(args[0]):0; const char*pad=nargs>1?val_to_str(args[1]):" "; int pl=(int)strlen(pad); if(tgt<=len||pl==0||tgt>JS_ARENA){ char*r=aalloc(len+1); if(r){memcpy(r,s,len);r[len]=0;} return STRV(r?r:""); }
         char*r=aalloc(tgt+1); if(!r) return STRV(""); int start_at=name[3]=='S'?0:0; (void)start_at; int padn=tgt-len; int p=0;
