@@ -4096,7 +4096,9 @@ static val nat_json_stringify(val *a, int n){ if(!n) return UND(); char *buf=aal
         if(sp.t==V_NUM){ int k=(int)sp.num; if(k<0)k=0; if(k>10)k=10; for(int i=0;i<k;i++) g_json_unit[i]=' '; g_json_unit[k]=0; if(k>0) g_json_pretty=1; }
         else if(sp.t==V_STR){ int i=0; for(; sp.str[i] && i<15; i++) g_json_unit[i]=sp.str[i]; g_json_unit[i]=0; if(i>0) g_json_pretty=1; }
     }
-    json_val(json_repl("", a[0]), 0);   /* the replacer also sees the top-level value with key "" */
+    val top = json_repl("", a[0]);      /* the replacer also sees the top-level value with key "" */
+    if(top.t==V_UNDEF || top.t==V_FUN || top.t==V_NATIVE || top.t==V_SYMBOL) return UND();   /* M1769: top-level undefined/function/symbol -> the value `undefined`, not the string "null" */
+    json_val(top, 0);
     buf[g_json_pos]=0; return STRV(buf); }
 
 /* ---- JSON.parse (recursive descent; bounded + depth-guarded) ---- */
@@ -4135,10 +4137,12 @@ static val json_parse_val(void){
     else if(*jp=='t'){ if(jp+4<=jp_end && jp[1]=='r'&&jp[2]=='u'&&jp[3]=='e'){ r=BOOLV(1); jp+=4; } else jp_err=1; }   /* exact spelling: "truX"/"tru" are invalid JSON, not `true` */
     else if(*jp=='f'){ if(jp+5<=jp_end && jp[1]=='a'&&jp[2]=='l'&&jp[3]=='s'&&jp[4]=='e'){ r=BOOLV(0); jp+=5; } else jp_err=1; }
     else if(*jp=='n'){ if(jp+4<=jp_end && jp[1]=='u'&&jp[2]=='l'&&jp[3]=='l'){ r.t=V_NULL; jp+=4; } else jp_err=1; }
-    else if(*jp=='-' || (*jp>='0'&&*jp<='9')){ int neg=0; if(*jp=='-'){ neg=1; jp++; } double v=0;   /* JSON number -> double (M908: real fraction + exponent) */
-        while(jp<jp_end && *jp>='0'&&*jp<='9'){ v=v*10.0+(*jp-'0'); jp++; }
-        if(jp<jp_end && *jp=='.'){ jp++; double f=0.1; while(jp<jp_end && *jp>='0'&&*jp<='9'){ v+=(*jp-'0')*f; f*=0.1; jp++; } }
-        if(jp<jp_end && (*jp=='e'||*jp=='E')){ jp++; int eneg=0; if(jp<jp_end&&(*jp=='+'||*jp=='-')){ eneg=(*jp=='-'); jp++; } int ex=0; while(jp<jp_end && *jp>='0'&&*jp<='9'){ ex=ex*10+(*jp-'0'); jp++; } v*=js_pow(10.0, eneg?-(double)ex:(double)ex); }
+    else if(*jp=='-' || (*jp>='0'&&*jp<='9')){ int neg=0; if(*jp=='-'){ neg=1; jp++; } double v=0; int idig=0;   /* JSON number: -?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)? -- strict (M1769: was lenient, accepting 01/5./bare-/1e) */
+        if(jp<jp_end && *jp=='0'){ jp++; idig=1; }                          /* a leading 0 stands alone (no 01/007: the next digit is left as trailing garbage -> caller errors) */
+        else while(jp<jp_end && *jp>='0'&&*jp<='9'){ v=v*10.0+(*jp-'0'); jp++; idig=1; }
+        if(!idig) jp_err=1;                                                 /* a bare '-' or leading '.' has no integer digit */
+        if(jp<jp_end && *jp=='.'){ jp++; double f=0.1; int fd=0; while(jp<jp_end && *jp>='0'&&*jp<='9'){ v+=(*jp-'0')*f; f*=0.1; jp++; fd=1; } if(!fd) jp_err=1; }   /* '.' requires >=1 fraction digit (no 5.) */
+        if(jp<jp_end && (*jp=='e'||*jp=='E')){ jp++; int eneg=0; if(jp<jp_end&&(*jp=='+'||*jp=='-')){ eneg=(*jp=='-'); jp++; } int ex=0,ed=0; while(jp<jp_end && *jp>='0'&&*jp<='9'){ ex=ex*10+(*jp-'0'); jp++; ed=1; } if(!ed) jp_err=1; else v*=js_pow(10.0, eneg?-(double)ex:(double)ex); }   /* exponent requires >=1 digit (no 1e/1e+) */
         r=NUM(neg?-v:v); }
     else jp_err=1;
     g_depth--; return r;
