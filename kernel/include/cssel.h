@@ -10,8 +10,8 @@
 #ifndef CSSEL_H
 #define CSSEL_H
 
-typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32];
-                 char dtag[16]; char dcls[32]; } sel_t;  /* a simple selector tag/.class/#id/[attr], + an optional descendant-ANCESTOR requirement dtag/dcls (M1434) */
+typedef struct { char tag[16]; char cls[32]; char id[32]; char attr[32]; char aval[32]; char aop;
+                 char dtag[16]; char dcls[32]; } sel_t;  /* a simple selector tag/.class/#id/[attr] (+ [attr=val] value in aval, op in aop: '=' '~' '^' '$' '*', 0=presence-only, M1793), + an optional descendant-ANCESTOR requirement dtag/dcls (M1434) */
 
 static int  cs_alnum(int c){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9'); }
 static int  cs_lc(int c){ return (c>='A'&&c<='Z') ? c+32 : c; }
@@ -40,8 +40,8 @@ static int skip_pseudo(const char *s, int i, int n) {
  * :not(.x)) are stripped — a fair approximation for a static renderer. :root is mapped to
  * tag "html". Every write bounded; returns 1 if any set, 0 on an unsupported char (fail
  * closed). */
-static int sel_one(const char *s, int n, char *tag, char *cls, char *id, char *attr) {
-    tag[0]=cls[0]=id[0]=attr[0]=0;
+static int sel_one(const char *s, int n, char *tag, char *cls, char *id, char *attr, char *aval, char *aop) {
+    tag[0]=cls[0]=id[0]=attr[0]=aval[0]=0; *aop=0;
     int i=0, k=0, ck=0;                                   /* ck: persistent cls write pos so a compound ".a.b" keeps BOTH classes (M1775) */
     while (i<n && cs_alnum(s[i]) && k<15) { tag[k++]=(char)cs_lc(s[i]); i++; }
     tag[k]=0;
@@ -53,9 +53,17 @@ static int sel_one(const char *s, int n, char *tag, char *cls, char *id, char *a
                               while (i<n && (cs_alnum(s[i])||s[i]=='-'||s[i]=='_')) i++;  }  /* consume any overflow chars */
         else if (s[i]=='[') {
             i++; k=0;
-            while (i<n && s[i]!=']' && s[i]!='=' && k<31) attr[k++]=(char)cs_lc(s[i++]);
+            while (i<n && s[i]!=']' && s[i]!='=' && s[i]!='~' && s[i]!='^' && s[i]!='$' && s[i]!='*' && k<31) attr[k++]=(char)cs_lc(s[i++]);
             attr[k]=0;
-            while (i<n && s[i]!=']') i++;
+            char op=0;
+            if (i<n && (s[i]=='~'||s[i]=='^'||s[i]=='$'||s[i]=='*')) op=(char)s[i++];   /* [a~=]/[a^=]/[a$=]/[a*=] prefix op (M1793) */
+            if (i<n && s[i]=='=') { i++; if (!op) op='=';                               /* [a=value] exact */
+                char q=0; if (i<n && (s[i]=='"'||s[i]=='\'')) q=(char)s[i++];            /* optional quotes around the value */
+                int vk=0; while (i<n && s[i]!=']' && (q ? s[i]!=q : 1) && vk<31) aval[vk++]=s[i++]; aval[vk]=0;   /* value: case-PRESERVED (CSS attr values are case-sensitive) */
+                if (q && i<n && s[i]==q) i++;
+                *aop=op;
+            }
+            while (i<n && s[i]!=']') i++;                 /* skip any trailing (e.g. an `i`/`s` flag) up to ] */
             if (i<n && s[i]==']') i++;
         }
         else if (s[i]==':') {                         /* pseudo-class or pseudo-element: strip it */
@@ -84,9 +92,11 @@ static int find_last_combinator(const char *s, int slen) {
      * We return the position of the last such split (the position just after the target
      * simple selector starts, equivalently the index where the ancestor part ends +
      * combinator characters begin). Strategy: scan from the right for ws or >+~. */
-    int last = -1;
+    int last = -1, bracket = 0;
     for (int i = 0; i < slen; i++) {
-        if (s[i]==' ' || s[i]=='\t' || s[i]=='>' || s[i]=='+' || s[i]=='~') {
+        if (s[i]=='[') bracket++;                     /* M1793: a '~' inside [a~=b] is an attr operator, */
+        else if (s[i]==']') { if (bracket>0) bracket--; }   /* not the general-sibling combinator — skip bracket contents */
+        else if (!bracket && (s[i]==' ' || s[i]=='\t' || s[i]=='>' || s[i]=='+' || s[i]=='~')) {
             last = i;
         }
     }
@@ -102,7 +112,7 @@ static int find_last_combinator(const char *s, int slen) {
  * Deeper chains keep only the nearest ancestor — an approximation. Bounded; still fails
  * closed on genuinely unparseable input. (M1434, M1439) */
 static int sel_parse(const char *s, sel_t *o) {
-    o->tag[0]=o->cls[0]=o->id[0]=o->attr[0]=0;
+    o->tag[0]=o->cls[0]=o->id[0]=o->attr[0]=o->aval[0]=0; o->aop=0;
     o->dtag[0]=o->dcls[0]=0;
     int slen=0; while (s[slen]) slen++;
 
@@ -124,16 +134,22 @@ static int sel_parse(const char *s, sel_t *o) {
 
         /* The nearest ancestor is the last simple-selector token in [0..ae).
          * Walk back from ae to find its start. */
-        int as = ae;
-        while (as > 0 && s[as-1] != ' ' && s[as-1] != '\t' && s[as-1] != '>' && s[as-1] != '+' && s[as-1] != '~') as--;
+        int as = ae, abd = 0;                        /* M1793: bracket-aware walk-back so a '~' inside a bracketed ancestor ([a~=b] > x) isn't taken as a combinator */
+        while (as > 0) {
+            char ac = s[as-1];
+            if (ac == ']') { abd++; as--; continue; }
+            if (ac == '[') { if (abd>0) abd--; as--; continue; }
+            if (!abd && (ac==' '||ac=='\t'||ac=='>'||ac=='+'||ac=='~')) break;
+            as--;
+        }
 
-        char et[16],ec[32],ei[32],ea[32];
-        if (!(ae > as && sel_one(s+as, ae-as, et,ec,ei,ea))) return 0;  /* ancestor not a simple selector -> fail closed */
+        char et[16],ec[32],ei[32],ea[32],eav[32],eop;
+        if (!(ae > as && sel_one(s+as, ae-as, et,ec,ei,ea,eav,&eop))) return 0;  /* ancestor not a simple selector -> fail closed (its attr value/op are unused) */
         int z=0; while (ec[z] && z<31) { o->dcls[z]=ec[z]; z++; } o->dcls[z]=0;    /* prefer its class */
         z=0;       while (et[z] && z<15) { o->dtag[z]=et[z]; z++; } o->dtag[z]=0;   /* else its tag */
         if (!(o->dtag[0] || o->dcls[0])) return 0;   /* id-only ancestor unsupported -> fail closed */
     }
-    return sel_one(s+ts, slen-ts, o->tag,o->cls,o->id,o->attr);
+    return sel_one(s+ts, slen-ts, o->tag,o->cls,o->id,o->attr,o->aval,&o->aop);
 }
 
 /* Does the class-attribute value v[0..vl) contain `cls` as a whole space/tab-separated

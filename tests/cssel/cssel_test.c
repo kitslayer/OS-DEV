@@ -32,6 +32,18 @@ static void expect(const char *sel, int ret, const char *tag, const char *cls, c
     }
 }
 
+/* M1793: [attr OP value] — verify the captured value (aval) and operator (aop). */
+static void expect_av(const char *sel, const char *attr, const char *aval, char aop) {
+    sel_t s;
+    int r = sel_parse(sel, &s);
+    char m[256];
+    snprintf(m, sizeof(m), "sel_parse('%s') -> ret=%d attr='%s' aval='%s' aop='%c'", sel, r, s.attr, s.aval, s.aop ? s.aop : '0');
+    CHECK(r == 1, m);
+    CHECK(strcmp(s.attr, attr) == 0, m);
+    CHECK(strcmp(s.aval, aval) == 0, m);
+    CHECK(s.aop == aop, m);
+}
+
 /* descendant selector (M1434): target in tag/cls, nearest-ancestor requirement in dtag/dcls */
 static void expect_desc(const char *sel, const char *tag, const char *cls, const char *dtag, const char *dcls) {
     sel_t s;
@@ -100,7 +112,7 @@ int main(void) {
     expect("li.item.active#f",1,"li",  "item active", "f", "");  /* classes accumulate, id still last */
     expect("input[type]",1, "input", "", "", "type");
     expect("[CHECKED]",  1, "", "", "", "checked");      /* attr lowercased */
-    expect("a[href=x]",  1, "a", "", "", "href");        /* =value ignored */
+    expect("a[href=x]",  1, "a", "", "", "href");        /* name "href" (value captured in aval — see expect_av below) */
     expect("abcdefghijklmno", 1, "abcdefghijklmno", "", "", "");   /* 15-char tag: exact cap, still matches */
     expect("",           0, "", "", "", "");             /* empty -> no match */
     expect(">",          0, "", "", "", "");             /* bare combinator with no target -> fail closed */
@@ -127,8 +139,19 @@ int main(void) {
     expect_desc(".menu > li",    "li", "",  "",    "menu");   /* child combinator with class ancestor */
     expect_desc("h2 + p",        "p",  "",  "h2",  "");       /* adjacent sibling */
     expect_desc("ul ~ p",        "p",  "",  "ul",  "");       /* general sibling */
-    /* attr selector with value (already supported, value ignored; long enough to test >40 cap) */
-    expect("[data-x=\"y\"]",     1, "", "", "", "data-x");   /* attr=value, value ignored */
+    /* M1793: attribute-VALUE selectors — the value + operator are now CAPTURED (aval/aop),
+     * no longer ignored. The attr NAME still parses as before (verified by expect() above). */
+    expect("[data-x=\"y\"]",     1, "", "", "", "data-x");   /* name still "data-x"; value now in aval */
+    expect_av("a[href=x]",        "href",   "x",     '=');
+    expect_av("input[type=text]", "type",   "text",  '=');   /* the common form-control case */
+    expect_av("[data-x=\"y\"]",   "data-x", "y",     '=');   /* double-quoted value */
+    expect_av("[data-x='y']",     "data-x", "y",     '=');   /* single-quoted value */
+    expect_av("[class~=box]",     "class",  "box",   '~');   /* whitespace-separated token */
+    expect_av("[href^=https]",    "href",   "https", '^');   /* prefix */
+    expect_av("[href$=pdf]",      "href",   "pdf",   '$');   /* suffix */
+    expect_av("[title*=ell]",     "title",  "ell",   '*');   /* substring */
+    expect_av("[data-v=Case]",    "data-v", "Case",  '=');   /* value is case-PRESERVED */
+    expect_av("[type]",           "type",   "",      0);     /* presence-only: no op, empty aval */
     /* selector longer than 40 chars: must still parse (tests the 96-char cap in browser.c) */
     expect(".very-long-class-name-that-exceeds-forty a", 1, "a", "", "", "");
     /* class_has: a class matches only as a whole space/tab-separated token */
@@ -151,7 +174,7 @@ int main(void) {
     expect_cls_all("btn primaryx",       "btn primary", 0);   /* "primaryx" is not the token "primary" */
     expect_cls_all("btn primary",        "btn",         1);   /* single-class list still works */
     expect_cls_all("anything",           "",            1);   /* empty list -> vacuously true */
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (tag/class/id/attr + compound classes + lowercase + =value-ignored + fail-closed + truncation + class_has word-boundary)");
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (tag/class/id/attr + [attr=val] value/op (M1793) + compound classes + lowercase + fail-closed + truncation + class_has word-boundary)");
 
     /* --- fuzz: random + structured selectors over exactly-sized inputs (ASan-checked) --- */
     unsigned int seed = 0x5e1ec701u;

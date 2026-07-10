@@ -2037,12 +2037,35 @@ static void capture_css(browser_t *b, const char *s, int n) {
 }
 /* Test whether rule r's selector matches the current element (tag/attrs) and scope stack.
  * Shared by css_match and css_match_list. Returns 1 on match, 0 otherwise. */
+/* M1793: match an element's attribute VALUE (v[0..vl), not NUL-terminated) against a
+ * selector's [attr OP value] (aval NUL-terminated; op '='/'~'/'^'/'$'/'*'). Case-sensitive,
+ * as CSS attribute-value matching is by default. '~='=one whitespace-separated token equals
+ * aval; '^='=prefix; '$='=suffix; '*='=substring; '='=exact. An empty aval matches only an
+ * empty value for '=', and never for the substring/prefix/suffix/token ops (per spec). */
+static int attr_val_match(const char *v, int vl, const char *aval, char op) {
+    int al = 0; while (aval[al]) al++;
+    switch (op) {
+        case '=': return al == vl && (vl == 0 || memcmp(v, aval, (size_t)vl) == 0);
+        case '^': return al > 0 && al <= vl && memcmp(v, aval, (size_t)al) == 0;
+        case '$': return al > 0 && al <= vl && memcmp(v + vl - al, aval, (size_t)al) == 0;
+        case '*': if (al == 0) return 0; for (int i = 0; i + al <= vl; i++) if (memcmp(v + i, aval, (size_t)al) == 0) return 1; return 0;
+        case '~': { if (al == 0) return 0; int i = 0; while (i < vl) {
+                        while (i < vl && (v[i]==' '||v[i]=='\t'||v[i]=='\n'||v[i]=='\r'||v[i]=='\f')) i++;
+                        int st = i; while (i < vl && !(v[i]==' '||v[i]=='\t'||v[i]=='\n'||v[i]=='\r'||v[i]=='\f')) i++;
+                        if (i - st == al && memcmp(v + st, aval, (size_t)al) == 0) return 1;
+                    } return 0; }
+        default:  return 1;   /* op 0 is presence-only, handled by the caller */
+    }
+}
 static int css_rule_matches(browser_t *b, int r, const char *tag, const char *attrs, int attrlen) {
     const sel_t *s = &b->css_sel[r];
     if (s->tag[0] && !tageq(tag, s->tag)) return 0;
     if (s->cls[0]) { const char *v; int vl; if (!find_attr(attrs, attrlen, "class", &v, &vl) || !class_has_all(v, vl, s->cls)) return 0; }   /* M1775: ALL compound classes must be present */
     if (s->id[0])  { const char *v; int vl; if (!find_attr(attrs, attrlen, "id", &v, &vl)    || !attr_eq(v, vl, s->id))     return 0; }
-    if (s->attr[0] && !has_attr(attrs, attrlen, s->attr)) return 0;
+    if (s->attr[0]) {                                       /* [attr] presence, or [attr OP value] value match (M1793) */
+        if (!has_attr(attrs, attrlen, s->attr)) return 0;
+        if (s->aop) { const char *v; int vl; if (!find_attr(attrs, attrlen, s->attr, &v, &vl) || !attr_val_match(v, vl, s->aval, s->aop)) return 0; }
+    }
     if (s->dcls[0] || s->dtag[0]) {                          /* descendant selector: some ancestor frame must match (M1434) */
         int found = 0;
         for (int f = 0; f < b->sc_sp; f++) {
@@ -2133,7 +2156,10 @@ static int sel_match_all(browser_t *b, const sel_t *sel, int *offs, int max) {
         if (sel->tag[0] && !tageq(tag, sel->tag)) { i=j; continue; }
         if (sel->cls[0]) { const char *v; int vl; if(!find_attr(body+astart,alen,"class",&v,&vl) || !class_has_all(v,vl,sel->cls)) { i=j; continue; } }   /* M1775: compound classes */
         if (sel->id[0])  { const char *v; int vl; if(!find_attr(body+astart,alen,"id",&v,&vl)    || !attr_eq(v,vl,sel->id))     { i=j; continue; } }
-        if (sel->attr[0] && !has_attr(body+astart,alen,sel->attr)) { i=j; continue; }   /* [attr] presence (has_attr matches valued + boolean attrs) */
+        if (sel->attr[0]) {   /* [attr] presence, or [attr OP value] value match (M1793) */
+            if (!has_attr(body+astart,alen,sel->attr)) { i=j; continue; }
+            if (sel->aop) { const char *av2; int al2; if (!find_attr(body+astart,alen,sel->attr,&av2,&al2) || !attr_val_match(av2,al2,sel->aval,sel->aop)) { i=j; continue; } }
+        }
         offs[n++] = i;          /* matched: record the '<' offset */
         i = j;                  /* advance past this opening tag (children are still scanned) */
     }
