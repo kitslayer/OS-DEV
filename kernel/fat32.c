@@ -328,6 +328,23 @@ static int fat32_list(vfs_dirent *out, int max) {
     walk_dir(cwd_cluster, list_visit, &ctx);          /* list the current dir */
     return ctx.n;
 }
+/* List an ARBITRARY directory by path (absolute from root, or cwd-relative),
+ * without touching cwd_cluster -- so the GUI Files window keeps its own browse
+ * directory independent of the shell/app cwd (M1761). */
+static int fat32_list_path(const char *path, vfs_dirent *out, int max) {
+    uint32_t dir; const char *leaf;
+    if (resolve(path, &dir, &leaf) < 0) return -1;
+    uint32_t target;
+    if (!leaf[0]) target = dir;                       /* "/" or a trailing slash: resolve() already walked into the dir */
+    else {                                            /* leaf names the directory to list */
+        uint32_t fc; int isdir;
+        if (!dir_find(dir, leaf, &fc, &isdir, 0) || !isdir) return -1;  /* not found, or not a directory */
+        target = fc ? fc : root_cluster;              /* a ".." that lands on root reports cluster 0 */
+    }
+    struct list_ctx ctx = { out, max, 0 };
+    walk_dir(target, list_visit, &ctx);
+    return ctx.n;
+}
 
 /* ---- VFS: read ---- */
 
@@ -800,7 +817,8 @@ static void fat32_df(uint64_t *freeb, uint64_t *totalb) {
 static struct vfs_ops fat32_ops = { fat32_list, fat32_read, fat32_write,
                                     fat32_delete, fat32_mkdir, fat32_chdir,
                                     fat32_tree, fat32_df, fat32_find,
-                                    fat32_rename, fat32_pread, fat32_stat_path };
+                                    fat32_rename, fat32_pread, fat32_stat_path,
+                                    fat32_list_path };
 
 int fat32_mount(void) {
     uint8_t bs[SECSZ];

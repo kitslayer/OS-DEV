@@ -29,6 +29,7 @@ struct vfs_ops {
     long (*rename)(const char *path, const char *newname);   /* change a name in place (8.3) */
     long (*pread)(const char *name, void *buf, unsigned long max, uint64_t off);  /* offset read for file-backed mmap (M1136); may be NULL */
     long (*stat_path)(const char *path, uint32_t *size, int *isdir);  /* resolve a full path (absolute from root, relative from cwd), unlike list()+basename-match; 0/-1 (M1622); may be NULL */
+    int  (*list_path)(const char *path, vfs_dirent *out, int max);    /* list an arbitrary directory by path, independent of the live cwd, so the GUI Files window can browse without disturbing any shell/app cwd; count or -1 (M1761); may be NULL */
 };
 /* Offset read of a regular file (boot FS), for file-backed mmap's demand faults.
  * Bytes read (0 past EOF), or -1 if unsupported/absent. M1136. */
@@ -46,6 +47,7 @@ void vfs_cwd_forget(struct app *a);
 void vfs_register(struct vfs_ops *ops);
 
 int  vfs_list(vfs_dirent *out, int max);                 /* -1 if nothing mounted */
+int  vfs_list_path(const char *path, vfs_dirent *out, int max);  /* list a directory by path on the boot FS, independent of the live cwd (M1761); -1 if unsupported */
 long vfs_read(const char *name, void *buf, unsigned long max);
 long vfs_write(const char *name, const void *buf, unsigned long len);
 long vfs_remove(const char *name);

@@ -411,6 +411,16 @@ int vfs_list(vfs_dirent *out, int max) {
     return fs ? fs->list(out, max) : -1;
 }
 
+/* List a directory by PATH on the boot filesystem, independent of the live
+ * per-process cwd -- so the GUI Files window can browse the disk without
+ * disturbing any shell/app's current directory (M1761). Boot FS only; the
+ * synthetic (/proc /dev /tmp) and secondary-mount (/diskN) directories keep
+ * using the cwd-based vfs_list(). Returns the entry count, or -1. */
+int vfs_list_path(const char *path, vfs_dirent *out, int max) {
+    if (!fs || !fs->list_path) return -1;
+    return fs->list_path(path && path[0] ? path : "/", out, max);
+}
+
 /* Positioned read: up to `max` bytes of `name` starting at byte `off`. Backs
  * file-backed mmap (M1136) and read+write file fds (M1193/M1196). tmpfs and ext2
  * mounts now read natively at the offset (seek-efficient, uncapped, M1196); the
