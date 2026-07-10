@@ -85,6 +85,15 @@ static void regression(void) {
     out = conv_md("5 \\* 3 = 15", buf, sizeof buf - 1);
     HAS("5 * 3 = 15", "backslash escapes the star (no italic)");
     HASNT("<i>", "escaped star did not open italic");
+    /* M1783: '_' emphasis only at word boundaries (GFM) — intra-word underscores stay literal */
+    out = conv_md("use my_file here", buf, sizeof buf - 1);
+    HAS("my_file", "intra-word underscore stays literal");
+    HASNT("<i>", "my_file did not open italic");
+    out = conv_md("a snake_case_name b", buf, sizeof buf - 1);
+    HAS("snake_case_name", "multi-underscore identifier stays literal");
+    HASNT("<i>", "snake_case did not open italic");
+    out = conv_md("_italic_ text", buf, sizeof buf - 1);
+    HAS("<i>italic</i>", "boundary underscore still italicizes");
 
     /* --- links / images / autolinks --- */
     out = conv_md("[go](http://x/)", buf, sizeof buf - 1);

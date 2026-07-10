@@ -32,6 +32,7 @@ static void md_esc(char *o, int *p, int cap, char c) {            /* escape HTML
                                                          &quot; decodes back to " in text content, so escaping it everywhere is safe. */
     else md_putc(o, p, cap, c);
 }
+static int md_wordch(char c) { return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9'); }   /* a "word" char, for '_' intra-word emphasis suppression (M1783) */
 static void md_inline(char *o, int *p, int cap, const char *s, int len) {  /* spans within one line */
     int bold = 0, ital = 0, strike = 0;
     for (int i = 0; i < len; ) {
@@ -76,7 +77,11 @@ static void md_inline(char *o, int *p, int cap, const char *s, int len) {  /* sp
         }
         if (c == '*' && i + 1 < len && s[i + 1] == '*') { md_put(o, p, cap, bold ? "</b>" : "<b>"); bold = !bold; i += 2; continue; }
         if (c == '~' && i + 1 < len && s[i + 1] == '~') { md_put(o, p, cap, strike ? "</s>" : "<s>"); strike = !strike; i += 2; continue; }
-        if (c == '*' || c == '_') { md_put(o, p, cap, ital ? "</i>" : "<i>"); ital = !ital; i++; continue; }
+        if (c == '*') { md_put(o, p, cap, ital ? "</i>" : "<i>"); ital = !ital; i++; continue; }
+        if (c == '_') {                                          /* M1783: '_' emphasis only at a word boundary (GFM) — intra-word my_var / snake_case stays literal */
+            if (i > 0 && md_wordch(s[i-1]) && i+1 < len && md_wordch(s[i+1])) { md_esc(o, p, cap, c); i++; continue; }
+            md_put(o, p, cap, ital ? "</i>" : "<i>"); ital = !ital; i++; continue;
+        }
         if (c == 'h') {                                          /* autolink: a bare http(s):// URL */
             int sch = 0;
             if (i + 7 <= len && s[i+1]=='t'&&s[i+2]=='t'&&s[i+3]=='p'&&s[i+4]==':'&&s[i+5]=='/'&&s[i+6]=='/') sch = 7;
