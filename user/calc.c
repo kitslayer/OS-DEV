@@ -27,13 +27,15 @@ int main(void) {
     sys_setcolor(4); print("\n  OS-DEV calc: + - * / % ^(pow) & | << >> ~ ( ) 0x\n");   /* title: cyan */
     sys_setcolor(8); print("  fns: sqrt sin cos tan asin acos atan ln log log2 log10 exp abs sign\n");
     sys_setcolor(8); print("       floor ceil round trunc  min(a,b) max(a,b) hypot(a,b)\n");
-    print("  consts: pi e ans ; e.g. sqrt(2)  sin(pi/2)  2^10 ; 'q' to quit\n\n"); sys_setcolor(0);
+    print("  consts: pi e ans ; e.g. sqrt(2)  sin(pi/2)  2^10 ; 'deg'/'rad' angle mode ; 'q' quit\n\n"); sys_setcolor(0);
     char line[128];
     for (;;) {
-        print("calc> ");
+        print(calc_angle_deg ? "calc[deg]> " : "calc> ");
         readline(line, sizeof(line));
         if (line[0] == '\0') continue;
         if (streq(line, "q") || streq(line, "quit") || streq(line, "exit")) break;
+        if (streq(line, "deg")) { calc_angle_deg = 1; sys_setcolor(3); print("  angle mode: DEGREES (sin/cos/tan take degrees; asin/acos/atan return them)\n"); sys_setcolor(0); continue; }
+        if (streq(line, "rad")) { calc_angle_deg = 0; sys_setcolor(3); print("  angle mode: RADIANS\n"); sys_setcolor(0); continue; }
         int e; double r = calc_eval(line, &e);
         if (e) { sys_setcolor(2); print("  ? syntax error\n"); sys_setcolor(0); }   /* error: red (leaves `ans` unchanged) */
         else {                                          /* result: yellow, with a hex echo for integers */

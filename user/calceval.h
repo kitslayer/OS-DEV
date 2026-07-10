@@ -44,6 +44,14 @@ static double calc_ans = 0;       /* last result; the identifier `ans` reads it.
                                    * evaluator stays pure — the caller sets this (see
                                    * user/calc.c: `calc_ans = r` after a successful eval)
                                    * so the next expression can chain off the prior one. */
+static int calc_angle_deg = 0;    /* 0 = radians (default), 1 = degrees; set by user/calc.c's
+                                   * DEG/RAD toggle. Affects only the trig functions: a degree
+                                   * argument is converted to radians before sin/cos/tan, and an
+                                   * asin/acos/atan/atan2 result is converted back to degrees. */
+/* angle-arg -> radians (for sin/cos/tan) and radians-result -> angle (for the
+ * inverse trig), honouring calc_angle_deg. No-ops in radian mode. */
+static double calc_a2r(double a) { return calc_angle_deg ? a * 3.14159265358979 / 180.0 : a; }
+static double calc_r2a(double r) { return calc_angle_deg ? r * 180.0 / 3.14159265358979 : r; }
 static double bor(void);          /* the lowest-precedence level (bitwise OR) — the eval entry */
 
 static void skipws(void) { while (*cur == ' ' || *cur == '\t') cur++; }
@@ -128,12 +136,12 @@ static double factor(void) {
         if (match_kw("e"))  return 2.71828182845905;
         if (match_kw("ans")) return calc_ans;             /* last result (settable by the caller) */
         if (match_kw("sqrt"))  return js_sqrt(call_arg());
-        if (match_kw("sin"))   return js_sin(call_arg());
-        if (match_kw("cos"))   return js_cos(call_arg());
-        if (match_kw("tan"))   return js_tan(call_arg());
-        if (match_kw("asin"))  return js_asin(call_arg());
-        if (match_kw("acos"))  return js_acos(call_arg());
-        if (match_kw("atan"))  return js_atan(call_arg());
+        if (match_kw("sin"))   return js_sin(calc_a2r(call_arg()));
+        if (match_kw("cos"))   return js_cos(calc_a2r(call_arg()));
+        if (match_kw("tan"))   return js_tan(calc_a2r(call_arg()));
+        if (match_kw("asin"))  return calc_r2a(js_asin(call_arg()));
+        if (match_kw("acos"))  return calc_r2a(js_acos(call_arg()));
+        if (match_kw("atan"))  return calc_r2a(js_atan(call_arg()));
         if (match_kw("ln"))    return js_ln(call_arg());
         if (match_kw("log"))   return js_ln(call_arg()) / js_ln(10.0);   /* base-10 */
         if (match_kw("exp"))   return js_exp(call_arg());
@@ -148,7 +156,7 @@ static double factor(void) {
         if (match_kw("min"))   { double a, b; call_arg2(&a, &b); return a < b ? a : b; }
         if (match_kw("max"))   { double a, b; call_arg2(&a, &b); return a > b ? a : b; }
         if (match_kw("hypot")) { double a, b; call_arg2(&a, &b); return js_sqrt(a * a + b * b); }
-        if (match_kw("atan2")) { double a, b; call_arg2(&a, &b); return calc_atan2(a, b); }
+        if (match_kw("atan2")) { double a, b; call_arg2(&a, &b); return calc_r2a(calc_atan2(a, b)); }
         err = 1;                          /* unknown identifier/function */
         return JS_NAN;
     }

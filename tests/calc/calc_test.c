@@ -122,6 +122,21 @@ int main(void) {
     CHECK_F("atan2(-1, -1)", -2.356194490192345); /* -3pi/4, quadrant III */
     CHECK_ERR("atan2(1)");                      /* atan2 needs two args */
 
+    /* --- degrees angle mode (M1738): trig args are degrees, inverse trig returns degrees --- */
+    calc_angle_deg = 1;
+    CHECK_F("sin(90)", 1);                      /* sin 90deg = 1 */
+    CHECK_F("sin(30)", 0.5);                    /* the classic 30deg -> 0.5 */
+    CHECK_F("cos(0)", 1);
+    CHECK_F("cos(180)", -1);
+    CHECK_F("tan(45)", 1);
+    CHECK_F("asin(1)", 90);                     /* inverse trig now returns degrees */
+    CHECK_F("acos(0)", 90);
+    CHECK_F("atan(1)", 45);
+    CHECK_F("atan2(1, 1)", 45);                 /* atan2 result also in degrees */
+    calc_angle_deg = 0;                         /* restore radians for the remaining tests */
+    CHECK_F("sin(pi/2)", 1);                    /* radian mode still correct */
+    CHECK_F("atan(1)", 0.7853981633974483);     /* pi/4 in radians */
+
     /* --- constants --- */
     CHECK_F("pi", 3.14159265358979);
     CHECK_F("e", 2.71828182845905);
