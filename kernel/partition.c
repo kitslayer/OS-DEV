@@ -468,8 +468,18 @@ static int fatvol_walk(blk_read_fn read, void *ctx, uint64_t start_lba, const ch
         const char *comp = p; int len = 0;
         while (p[len] && p[len] != '/') len++;
         p += len;
-        char n83[11]; fatvol_comp83(comp, len, n83);
-        uint32_t f, sz; int isd;
+        if (len == 1 && comp[0] == '.') continue;       /* "." -> stay in this directory (M1747) */
+        char n83[11]; uint32_t f, sz; int isd;
+        if (len == 2 && comp[0] == '.' && comp[1] == '.') {   /* ".." -> parent, via the on-disk ".." entry */
+            for (int i = 0; i < 11; i++) n83[i] = ' ';
+            n83[0] = n83[1] = '.';                       /* the 8.3 name of a ".." dir entry is ". . <spaces>" -> ['.','.',' '...] */
+            if (fatvol_lookup(read, ctx, v, cl, n83, &f, &sz, &isd)) {
+                cl = f ? f : v->root_clus;               /* a ".." entry stores 0 to mean the root dir */
+                *first = cl; *size = 0; *isdir = 1;
+            }                                            /* no ".." entry => already at root => stay put */
+            continue;
+        }
+        fatvol_comp83(comp, len, n83);
         if (!fatvol_lookup(read, ctx, v, cl, n83, &f, &sz, &isd)) return 0;
         *first = f; *size = sz; *isdir = isd;
         if (*p) { if (!isd) return 0; cl = f; }         /* more to come -> must descend a dir */
