@@ -392,12 +392,13 @@ $(BUILD)/webview.elf: user/webview.c kernel/browser.c kernel/js.c $(patsubst %,k
 # privileged cli/sti. Integer-only crypto -> -mgeneral-regs-only (as the kernel).
 HTTPGET_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -std=gnu11 -O2 -Ikernel/include
 HTTPGET_CRYPTO = aes aesgcm bignum chachapoly ecdsa hkdf rsa sha256 sha512 x25519 x509 rootca
-$(BUILD)/httpget.elf: user/httpget.c kernel/tls.c $(patsubst %,kernel/%.c,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+$(BUILD)/httpget.elf: user/httpget.c kernel/tls.c kernel/url.c $(patsubst %,kernel/%.c,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
 	$(HTTPGET_CC) -w -DTLS_RING3 -c kernel/tls.c -o $(BUILD)/httpget_tls.o
+	$(HTTPGET_CC) -w -c kernel/url.c -o $(BUILD)/httpget_url.o    # url_host_port() for tls_get_inner (M1773)
 	@for m in $(HTTPGET_CRYPTO); do echo "  CC kernel/$$m.c (ring-3 crypto)"; extra=""; [ "$$m" = "aes" ] && extra="-DAES_RING3"; [ "$$m" = "ecdsa" ] && extra="-DECDSA_RING3"; $(HTTPGET_CC) -w $$extra -c kernel/$$m.c -o $(BUILD)/httpget_$$m.o || exit 1; done
 	$(HTTPGET_CC) -Wall -c user/httpget.c -o $(BUILD)/httpget_app.o
-	$(LD) -T user/user.ld -o $@ $(BUILD)/httpget_app.o $(BUILD)/httpget_tls.o $(patsubst %,$(BUILD)/httpget_%.o,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	$(LD) -T user/user.ld -o $@ $(BUILD)/httpget_app.o $(BUILD)/httpget_tls.o $(BUILD)/httpget_url.o $(patsubst %,$(BUILD)/httpget_%.o,$(HTTPGET_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
 	@echo "Built $@ (ring-3 TLS 1.3 client)"
 
 # --- scene3d (software 3D engine: z-buffer + Gouraud, float math, so SSE) -----

@@ -9,7 +9,7 @@ CC=${CC:-gcc}
 SAN="-fsanitize=address,undefined -fno-sanitize-recover=all"
 echo "building host TCP/IP parser (ASan+UBSan)..."
 $CC -std=gnu11 -O1 $SAN -fno-stack-protector -Ikernel -Ikernel/include \
-    tests/net/net_test.c -o /tmp/osdev_net_test
+    tests/net/net_test.c kernel/url.c -o /tmp/osdev_net_test
 echo "running TCP/IP parser + reassembly fuzz..."
 if /tmp/osdev_net_test; then
     echo "PASS: net.c parser + reassembly (ASan/UBSan clean on packet + ooo_store fuzz)"

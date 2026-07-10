@@ -24,6 +24,27 @@ const char *url_split(const char *url, char *host, int hostsz) {
     return (*u == '/') ? u : "/";
 }
 
+/* Split "host[:port]" into a bare hostname + return the TCP port (see url.h).
+ * The connection identity (DNS lookup, TLS SNI, cert hostname match) must use
+ * the bare host; only the HTTP Host: header keeps the ":port". A malformed or
+ * out-of-range port falls back to `defport` (so a hostile authority can't pick
+ * an absurd port or wedge the parse). */
+int url_host_port(const char *hostport, char *host, int hostsz, int defport) {
+    int i = 0;
+    while (hostport[i] && hostport[i] != ':' && i < hostsz - 1) { host[i] = hostport[i]; i++; }
+    host[i] = 0;
+    if (hostport[i] != ':') return defport;          /* no port (or host filled the buffer before any ':') */
+    const char *pp = hostport + i + 1;
+    if (!*pp) return defport;                        /* bare "host:" */
+    int port = 0;
+    for (const char *d = pp; *d; d++) {
+        if (*d < '0' || *d > '9') return defport;    /* non-numeric junk -> default */
+        port = port * 10 + (*d - '0');
+        if (port > 65535) return defport;            /* out of range -> default */
+    }
+    return port ? port : defport;                    /* ":0" -> default */
+}
+
 /* Resolve a raw <img src> (as it appears in the HTML) into a full absolute URL,
  * the SAME way goto_href resolves a link: an absolute http(s):// src is kept;
  * a protocol-relative //host/path, root-relative /path, or dir-relative src is

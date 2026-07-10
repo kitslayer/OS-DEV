@@ -20,6 +20,7 @@
  */
 #include "tls.h"
 #include "net.h"
+#include "url.h"      /* url_host_port() — honor an explicit :port on an https authority (M1773) */
 #include "x25519.h"
 #include "sha256.h"
 #include "hkdf.h"
@@ -448,10 +449,11 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
     rng_seed(seed);
     g_cert_status = -2; g_chain_anchored = 0; g_host_match = -2;   /* clear stale results */
     g_leaf_cn[0] = 0; g_leaf_expiry[0] = 0;
+    char bare[256]; uint16_t cport = (uint16_t)url_host_port(host, bare, sizeof(bare), 443);   /* honor host:port (M1773); DNS/SNI/cert-match use the bare host, Host: keeps the :port */
     uint8_t ip[4];
-    if (dns_resolve(host, ip) != 0) return -1;
+    if (dns_resolve(bare, ip) != 0) return -1;
     tcp_conn tcp;
-    if (tcp_connect(&tcp, ip, 443) != 0) return -1;
+    if (tcp_connect(&tcp, ip, cport) != 0) return -1;
 
     /* These large buffers live in BSS, not on the small (16 KB) task stack. They're
      * shared, so tls_get() serializes all callers (the browser worker AND the shell's
@@ -487,14 +489,14 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
     /* key_share: x25519 */
     ch[p++]=0x00; ch[p++]=0x33; ch[p++]=0x00; ch[p++]=0x26; ch[p++]=0x00; ch[p++]=0x24;
     ch[p++]=0x00; ch[p++]=0x1d; ch[p++]=0x00; ch[p++]=0x20; memcpy(ch+p, cpub, 32); p += 32;
-    /* server_name (SNI) */
-    int hl = (int)strlen(host);
+    /* server_name (SNI) — the bare hostname only (a ":port" is not part of the name) */
+    int hl = (int)strlen(bare);
     ch[p++]=0x00; ch[p++]=0x00;
     ch[p++]=(uint8_t)((hl+5)>>8); ch[p++]=(uint8_t)(hl+5);
     ch[p++]=(uint8_t)((hl+3)>>8); ch[p++]=(uint8_t)(hl+3);
     ch[p++]=0x00;
     ch[p++]=(uint8_t)(hl>>8); ch[p++]=(uint8_t)hl;
-    for (int i = 0; i < hl; i++) ch[p++] = (uint8_t)host[i];
+    for (int i = 0; i < hl; i++) ch[p++] = (uint8_t)bare[i];
     int extlen = p - extlen_pos - 2;
     ch[extlen_pos] = (uint8_t)(extlen >> 8); ch[extlen_pos+1] = (uint8_t)extlen;
 
@@ -585,7 +587,7 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
             if (mt == HS_FINISHED) {
                 trans_hash(&T, s_fin_hash); have_finhash = 1;   /* transcript up to (not incl) server Finished */
             }
-            if (mt == HS_CERT)             tls_capture_leaf_key(&T, hsbuf + o + 4, ml, host);
+            if (mt == HS_CERT)             tls_capture_leaf_key(&T, hsbuf + o + 4, ml, bare);   /* match the cert against the bare host, not host:port (M1773) */
             else if (mt == HS_CERT_VERIFY) trans_hash(&T, cv_th);  /* snapshot BEFORE adding CertVerify */
             trans_add(&T, hsbuf + o, 4 + ml);
             if (mt == HS_CERT_VERIFY)                /* server proves it holds the leaf key (non-fatal) */

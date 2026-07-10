@@ -14,6 +14,7 @@
  * Under QEMU's user-mode networking, the virtual gateway 10.0.2.2 answers both.
  */
 #include "net.h"
+#include "url.h"        /* url_host_port() — honor an explicit :port in the fetch host (M1773) */
 #include "nic.h"
 #include "timer.h"
 #include "console.h"
@@ -1297,10 +1298,11 @@ void tcp_close(tcp_conn *c) {
  * out (up to max bytes). Returns bytes received, or -1 on error. */
 int http_get(const char *host, const char *path, char *out, int max) {
     if (max <= 0) return 0;
+    char bare[256]; uint16_t port = (uint16_t)url_host_port(host, bare, sizeof(bare), 80);   /* honor host:port (M1773); DNS gets the bare host, Host: keeps the port */
     uint8_t ip[4];
-    if (dns_resolve(host, ip) != 0) return -1;
+    if (dns_resolve(bare, ip) != 0) return -1;
     tcp_conn c;
-    if (tcp_connect(&c, ip, 80) != 0) return -1;
+    if (tcp_connect(&c, ip, port) != 0) return -1;
 
     char req[512]; int rl = 0;
     const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
@@ -1340,10 +1342,11 @@ static int http_sse_first_event(const char *buf, int n) {
  * read budget. Returns the raw response (headers + first event) length, <0 on error. */
 int http_get_sse(const char *host, const char *path, char *out, int max) {
     if (max <= 0) return 0;
+    char bare[256]; uint16_t port = (uint16_t)url_host_port(host, bare, sizeof(bare), 80);   /* honor host:port (M1773) */
     uint8_t ip[4];
-    if (dns_resolve(host, ip) != 0) return -1;
+    if (dns_resolve(bare, ip) != 0) return -1;
     tcp_conn c;
-    if (tcp_connect(&c, ip, 80) != 0) return -1;
+    if (tcp_connect(&c, ip, port) != 0) return -1;
     char req[512]; int rl = 0;
     const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
                             "\r\nConnection: close\r\nUser-Agent: OS-DEV/0.1\r\n\r\n" };

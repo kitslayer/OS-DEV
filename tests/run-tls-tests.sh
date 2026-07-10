@@ -16,6 +16,7 @@ $CC -std=gnu11 -O1 $SAN -Ikernel/include \
     kernel/x509.c kernel/bignum.c kernel/ecdsa.c kernel/rsa.c kernel/rootca.c \
     kernel/sha256.c kernel/sha512.c kernel/hkdf.c \
     kernel/aesgcm.c kernel/aes.c kernel/chachapoly.c kernel/x25519.c \
+    kernel/url.c \
     -o /tmp/osdev_tls_test
 echo "running TLS record + cert-chain framing fuzz..."
 if /tmp/osdev_tls_test; then

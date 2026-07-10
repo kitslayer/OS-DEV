@@ -41,6 +41,19 @@ static void fuzz_img(const char *base, const unsigned char *src, int srcl, int o
     if (rc) CHECK(strlen(out) < (size_t)outsz, "resolve_img_url out not NUL-terminated within buffer");
     free(out);
 }
+static void expect_hp(const char *hostport, int defport, const char *want_host, int want_port) {
+    char h[128]; int port = url_host_port(hostport, h, sizeof(h), defport);
+    char m[200]; snprintf(m, sizeof(m), "url_host_port('%s', def=%d) -> host '%s' port %d (want '%s' %d)",
+                          hostport, defport, h, port, want_host, want_port);
+    CHECK(strcmp(h, want_host)==0 && port==want_port, m);
+}
+static void fuzz_hp(const char *hostport, int hostsz) {
+    char *h = malloc(hostsz ? hostsz : 1);
+    int port = url_host_port(hostport, h, hostsz, 80);
+    CHECK(port >= 1 && port <= 65535, "url_host_port returned an out-of-range port");
+    if (hostsz) CHECK(strlen(h) < (size_t)hostsz, "url_host_port host not NUL-terminated within buffer");
+    free(h);
+}
 
 int main(void) {
     /* ---- regression ---- */
@@ -64,7 +77,20 @@ int main(void) {
     expect_img("http://e.com/d/p.html", "./here.png", 1, "http://e.com/d/here.png");       /* ./ removed */
     expect_img("http://e.com/a/b/p.html", "../../../x.png", 1, "http://e.com/x.png");       /* .. clamped at root */
     expect_img("http://e.com/x", "http://o.com/a/../b.png", 1, "http://o.com/b.png");       /* absolute also canonicalized */
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (url_split + resolve_img_url)");
+    /* host:port splitting (M1773): DNS/SNI/cert-match get the bare host, tcp_connect the port */
+    expect_hp("example.com",        80, "example.com", 80);      /* no port -> http default */
+    expect_hp("example.com",       443, "example.com", 443);     /* no port -> https default */
+    expect_hp("example.com:8080",   80, "example.com", 8080);    /* explicit port */
+    expect_hp("localhost:3000",     80, "localhost",   3000);
+    expect_hp("h:443",              80, "h",           443);
+    expect_hp("h:65535",            80, "h",           65535);   /* max valid */
+    expect_hp("h:",                 80, "h",           80);      /* bare colon -> default */
+    expect_hp("h:0",                80, "h",           80);      /* :0 -> default */
+    expect_hp("h:65536",            80, "h",           80);      /* out of range -> default */
+    expect_hp("h:99999",            80, "h",           80);      /* out of range -> default */
+    expect_hp("h:80x",              80, "h",           80);      /* trailing junk -> default */
+    expect_hp("h:8x0",              80, "h",           80);      /* mid junk -> default */
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (url_split + resolve_img_url + url_host_port)");
 
     /* ---- fuzz: url_split with truncations + tiny host buffers ---- */
     const char *urls[] = {
@@ -86,6 +112,7 @@ int main(void) {
         fuzz_split(z, 1 + rand()%32);
         char base[33]; int bl=rand()%32; for(int i=0;i<bl;i++) base[i]=alpha[rand()%alen]; base[bl]=0;
         fuzz_img(base, tmp, len, 1 + rand()%40);            /* src is the exactly-len (non-NUL) slice */
+        fuzz_hp(z, 1 + rand()%16);                          /* host:port split into a tiny host buffer */
     }
 
     printf("fuzz: truncations + 400000 random URLs (tiny host/out buffers) -> %s\n", fails ? "FAILURES" : "all clean");
