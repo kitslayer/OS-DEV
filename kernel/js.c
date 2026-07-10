@@ -1092,6 +1092,7 @@ static double js_cbrt(double x){
 }
 static double js_ln(double x){               /* natural log; x>0 */
     if (x<=0.0) return x==0.0 ? -JS_INF : JS_NAN;
+    if (!js_isfinite(x)) return x;           /* ln(+inf)=+inf, ln(NaN)=NaN — M1779: the m*2^k range reduction below never leaves +inf (inf*0.5==inf), so this guards a script-triggerable infinite loop (Math.log(1/0), Math.pow(1/0,0.5)) */
     int k=0; while (x>=2.0){ x*=0.5; k++; } while (x<1.0){ x*=2.0; k--; }   /* x = m*2^k, m in [1,2) */
     double t=(x-1.0)/(x+1.0), t2=t*t, term=t, sum=0.0;                      /* ln(m)=2*(t+t^3/3+t^5/5+..) */
     for (int i=1;i<=25;i+=2){ sum += term/i; term *= t2; }
