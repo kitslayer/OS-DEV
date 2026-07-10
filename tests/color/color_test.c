@@ -56,7 +56,16 @@ int main(void) {
     expect("#xyz", 0);                             /* non-hex */
     { uint32_t k = parse_color("hsl(0,100%,50%)", 15); CHECK((k & 0xFF000000u)==0x01000000u, "hsl red parses"); }
     { uint32_t k = parse_color("hsl(120,100%,50%)", 17); CHECK((k & 0xFF000000u)==0x01000000u, "hsl green parses"); }
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (#hex/rgb/rgba/hsl/named)");
+    /* M1776: a named colour followed by more tokens (a "!important", or a `background`
+     * shorthand's image/keyword) must still resolve on its leading name token */
+    expect("red !important", 0x01CC0000);       /* color: red !important */
+    expect("white url(bg.png)", 0x01FFFFFF);    /* background: white url(...) */
+    expect("navy no-repeat", 0x01000080);       /* background: navy no-repeat */
+    expect("steelblue  ", 0x013672A0);          /* trailing whitespace */
+    expect("red;", 0x01CC0000);                 /* trailing ';' */
+    expect("reddish", 0);                        /* NOT "red": a longer letter run is not a prefix match */
+    expect("re", 0);                             /* NOT "red": a shorter run isn't either */
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (#hex/rgb/rgba/hsl/named + leading-token names)");
 
     /* ---- fuzz: truncations + single-byte corruptions of a battery ---- */
     const char *bank[] = {

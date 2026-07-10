@@ -120,7 +120,7 @@ uint32_t parse_color(const char *v, int vl) {
         {"ghostwhite",0xF8F8FF},{"cornsilk",0xF8F4DC},{"seashell",0xF8F0EC},{"mintcream",0xF0FAF4},
     };
     char buf[16]; int p = 0;
-    for (int i = 0; i < vl && p < 15; i++) buf[p++] = (char)lc(v[i]);
+    for (int i = 0; i < vl && p < 15; i++) { int c = lc(v[i]); if (c < 'a' || c > 'z') break; buf[p++] = (char)c; }  /* M1776: match only the leading name token, so "red !important" / "white url(..)" still resolve to the colour */
     buf[p] = 0;
     for (unsigned i = 0; i < sizeof(named)/sizeof(named[0]); i++)
         if (streqs(buf, named[i].n)) return 0x01000000u | named[i].rgb;
