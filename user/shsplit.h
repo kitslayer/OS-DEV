@@ -29,7 +29,7 @@ static int sh_next_sep(const char *seg) {
         if (*semi == ';') { if (cd == 0) break; semi++; atcmd = 1; continue; }
         if (*semi == ' ') { semi++; continue; }
         if (atcmd) {
-            if (word_at(semi, "if") || word_at(semi, "for") || word_at(semi, "while") || word_at(semi, "case")) cd++;
+            if (word_at(semi, "if") || word_at(semi, "for") || word_at(semi, "while") || word_at(semi, "until") || word_at(semi, "case")) cd++;
             else if ((word_at(semi, "fi") || word_at(semi, "done") || word_at(semi, "esac")) && cd > 0) cd--;
         }
         int nextcmd = atcmd && (word_at(semi, "then") || word_at(semi, "do") || word_at(semi, "else"));   /* M1786: then/do/else re-arm a command position ONLY as keywords (at a command position), not as bare arguments */

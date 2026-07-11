@@ -65,6 +65,12 @@ static const struct {
                      "i=1\n"
                      "while test $i -le 3; do echo while-loop i is $i; i=$((i + 1)); done\n"
                      "for ((k=1; k<=3; k++)); do echo c-style-for k is $k; done\n"
+                     "j=1\n"
+                     "until test $j -gt 3; do echo until-loop j is $j; j=$((j + 1)); done\n"
+                     "echo tilde: bare ~ expands to root and ~/docs to a path\n"
+                     "set -x\n"
+                     "echo this line is traced\n"
+                     "set +x\n"
                      "((sq = 6 * 7)); echo arithmetic command: 6 times 7 is $sq\n"
                      "echo == demo complete -- type help for more ==\n" },
     { "DEMO    C  ", "// DEMO.C -- compiled AND run inside OS-DEV by our own C compiler.\n"

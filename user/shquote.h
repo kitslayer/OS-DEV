@@ -30,9 +30,10 @@ static void sh_unprot_buf(char *s) {
     for (; *s; s++) if (SH_ISPROT(*s)) *s = SH_UNPROT(*s);
 }
 
-/* Bytes a later pipeline stage would act on if left literal (both quote kinds). */
+/* Bytes a later pipeline stage would act on if left literal (both quote kinds).
+ * '~' is here so a quoted "~" stays literal rather than being tilde-expanded (M1806). */
 static int shq_special_both(char c) {
-    return c==' '||c=='\t'||c==';'||c=='|'||c=='&'||c=='<'||c=='>'||c=='*'||c=='?';
+    return c==' '||c=='\t'||c==';'||c=='|'||c=='&'||c=='<'||c=='>'||c=='*'||c=='?'||c=='~';
 }
 /* Additionally protected inside single quotes (single quotes suppress ALL of it). */
 static int shq_special_single(char c) {

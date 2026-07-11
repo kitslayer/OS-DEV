@@ -97,6 +97,7 @@ static int g_status;
 static int g_returning;     /* set by `return` (in a function/sourced script); honored by the body executors, cleared at the boundary */
 static int g_loopbrk;       /* 0=none, 1=break, 2=continue: set by break/continue, consumed by the innermost for/while */
 static int g_loopdepth;     /* for/while loops currently running; break/continue only fire when >0 (else they're no-ops) */
+static int g_xtrace;        /* `set -x`: print each command as `+ cmd` before running it (M1808) */
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
 static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
@@ -175,6 +176,7 @@ static int run_for(char *line, char *cwd);
 static int run_case(char *line, char *cwd);
 static long sh_do_assign(const char *e);   /* (( expr )) / C-style-for assignment; defined below */
 static int run_while(char *line, char *cwd);
+static int run_until(char *line, char *cwd);
 static void source_file(const char *fn, char *cwd, int silent);   /* run shell commands from a file */
 
 /* Read an entire file into a malloc'd, NUL-terminated buffer (caller free()s).
@@ -487,6 +489,33 @@ static void func_set(const char *n, int nl, const char *body){
 static int sh_laststatus(void){ return g_status < 0 ? 0 : g_status; }   /* $? value, clamped >= 0 */
 #include "shexpand.h"
 
+/* Expand a word-initial ~ to HOME (which is "/" on this OS): ~ -> /, ~/x -> /x,
+ * and ~ before a space/tab/':'/end -> /. A '~' mid-word (foo~bar) is left literal,
+ * as is a quoted "~" (sh_quote_pass protected it as a high-bit byte, M1806). Run
+ * after variable/alias expansion; returns 1 if a '~' was present (dst holds the
+ * result). Word boundary = start of line or just after a space/tab. */
+static int expand_tilde(const char *src, char *dst, int cap){
+    int has=0; for (int i=0;src[i];i++) if (src[i]=='~'){ has=1; break; }
+    if (!has) return 0;
+    int o=0, atword=1;
+    for (int i=0; src[i] && o<cap-1; ){
+        char c=src[i];
+        if (c=='~' && atword){
+            char n=src[i+1];
+            if (n=='/' || n==0 || n==' ' || n=='\t' || n==':'){
+                dst[o++]='/';                 /* HOME */
+                i++;                          /* consume '~' */
+                if (n=='/') i++;              /* fold "~/" -> "/" (HOME is root, avoid "//") */
+                atword=0;
+                continue;
+            }
+        }
+        atword = (c==' '||c=='\t');            /* next char starts a word iff we just copied a separator */
+        dst[o++]=c; i++;
+    }
+    dst[o]=0; return 1;
+}
+
 /* --- `ls` colourisation by file type (M1313), like `ls --color`. FAT32 names
  * are uppercase; ext_eq uppercases for the compare. The colour is a terminal
  * attribute (sys_setcolor), not bytes in the stream, so piping `ls` stays clean. */
@@ -756,9 +785,18 @@ static int run_command(char *line, char *cwd) {
             print("        Tab completes a filename (longest common prefix); a 2nd Tab lists the matches\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
             const char *p = line + (line[1]=='x' ? 7 : 4); while (*p == ' ') p++;   /* skip "set "/"export " */
-            int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
-            if (p[nl] == '=' && nl > 0) { sh_unprot_buf((char *)p + nl + 1); vset(p, nl, p + nl + 1); }   /* value = rest of line (may contain spaces) */
-            else print("usage: set NAME=value\n");
+            if (line[0]=='s' && (p[0]=='-' || p[0]=='+')) {   /* `set -x`/`set +x` shell options (M1808); `set -o` unsupported */
+                int on = (p[0]=='-'); int ok = 1;
+                for (const char *f = p + 1; *f && *f != ' '; f++) {
+                    if (*f == 'x') g_xtrace = on;
+                    else { ok = 0; }
+                }
+                if (!ok) print("set: only -x/+x supported\n");
+            } else {
+                int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
+                if (p[nl] == '=' && nl > 0) { sh_unprot_buf((char *)p + nl + 1); vset(p, nl, p + nl + 1); }   /* value = rest of line (may contain spaces) */
+                else print("usage: set NAME=value  (or set -x/+x)\n");
+            }
         } else if (startswith(line, "local ")) {       /* local NAME[=val] ... : function-scoped vars (restored on return) */
             const char *p = line + 6;
             while (*p) {
@@ -7052,7 +7090,7 @@ static int cmdsub_expand(const char *src, char *dst, int dstsz, char *cwd) {
  * then peel off output redirection and pipelines, then dispatch. Returns 1 only
  * when the shell should exit (the "exit" command). */
 static int run_line(char *line, char *cwd) {
-    static char gline[1024], vline[1024], aline[1024], bline[1024];
+    static char gline[1024], vline[1024], aline[1024], bline[1024], tline[1024];
     /* cmdsub_expand recurses back through run_line (a nested $(...)), so its dst
      * can't be one shared static buffer — the inner call would clobber the outer
      * one mid-build. Index by the cmdsub depth (in_cmdsub) instead. gline/vline/
@@ -7071,6 +7109,7 @@ static int run_line(char *line, char *cwd) {
           for (int i = 0; av[i] && o < 1023; i++) aline[o++] = av[i];
           for (int i = wl; cmd[i] && o < 1023; i++) aline[o++] = cmd[i];
           aline[o] = 0; cmd = aline; } }
+    if (expand_tilde(cmd, tline, sizeof tline)) cmd = tline;    /* ~ / ~/x -> HOME (after vars/alias, before glob) */
     if (expand_braces(cmd, bline, sizeof bline)) cmd = bline;   /* {a,b} / {1..N} brace expansion (after vars, before glob) */
     if (cmd[0] == '(' && cmd[1] == '(')        /* (( expr )) arithmetic command: bypass glob/redirect/pipe — its */
         return run_command(cmd, cwd);          /* < > | * << >> are operators, not shell metacharacters */
@@ -7102,6 +7141,11 @@ static int run_line(char *line, char *cwd) {
         break;
     }
 
+    if (g_xtrace && *cmd) {                          /* `set -x` trace: show the fully-expanded command */
+        char tr[256]; int ti = 0; for (int k = 0; cmd[k] && ti < 255; k++) tr[ti++] = cmd[k]; tr[ti] = 0;
+        sh_unprot_buf(tr);                           /* reveal any quoted (high-bit) bytes so the trace is readable */
+        print("+ "); print(tr); print("\n");
+    }
     int piped = 0;
     for (int i = 0; cmd[i]; i++) if (cmd[i] == '|') { piped = 1; break; }
 
@@ -7349,21 +7393,23 @@ static int run_case(char *line, char *cwd) {
     return 0;
 }
 
-/* while COND; do BODY; done  (one line). Re-runs COND each pass and loops while
- * it succeeds ($? == 0). Bounded at 100000 iterations and interruptible with
- * Ctrl-C / Esc so a runaway loop can't hang the shell. */
-static int run_while(char *line, char *cwd) {
-    char *p = line + 5; while (*p == ' ') p++;             /* skip "while" */
+/* while/until COND; do BODY; done  (one line). Re-runs COND each pass; `while`
+ * loops while it succeeds ($? == 0), `until` loops while it fails (invert=1, M1807).
+ * Bounded at 100000 iterations and interruptible with Ctrl-C / Esc so a runaway
+ * loop can't hang the shell. "while" and "until" are both 5 chars. */
+static int run_while_until(char *line, char *cwd, int invert) {
+    const char *kw = invert ? "until" : "while";
+    char *p = line + 5; while (*p == ' ') p++;             /* skip "while"/"until" */
     char *cond = p, *semi = p; while (*semi && *semi != ';') semi++;
-    if (*semi != ';') { print("while: missing ';' before do\n"); g_status = 1; return 0; }
+    if (*semi != ';') { print(kw); print(": missing ';' before do\n"); g_status = 1; return 0; }
     *semi = 0;
     char *q = semi + 1; while (*q == ' ') q++;
-    if (!(q[0]=='d' && q[1]=='o' && (q[2]==' '||q[2]==0))) { print("while: missing 'do'\n"); g_status = 1; return 0; }
+    if (!(q[0]=='d' && q[1]=='o' && (q[2]==' '||q[2]==0))) { print(kw); print(": missing 'do'\n"); g_status = 1; return 0; }
     q += 2; while (*q == ' ') q++;
     char *body = q;
     int blen = (int)ustrlen(body);
     while (blen > 0 && body[blen-1]==' ') body[--blen]=0;
-    if (!(blen >= 4 && streq(body+blen-4, "done"))) { print("while: missing 'done'\n"); g_status = 1; return 0; }
+    if (!(blen >= 4 && streq(body+blen-4, "done"))) { print(kw); print(": missing 'done'\n"); g_status = 1; return 0; }
     blen -= 4; while (blen>0 && body[blen-1]==' ') blen--;
     if (blen>0 && body[blen-1]==';') blen--;
     while (blen>0 && body[blen-1]==' ') blen--;
@@ -7372,11 +7418,11 @@ static int run_while(char *line, char *cwd) {
     char condbuf[1024], bodybuf[1024];
     g_loopdepth++;
     while (!doexit) {
-        if (iters >= 100000) { print("\nwhile: stopped at 100000 iterations\n"); break; }
+        if (iters >= 100000) { print("\n"); print(kw); print(": stopped at 100000 iterations\n"); break; }
         int k = sys_pollkey(); if (k == 0x83 || k == 27) { print("\n^C\n"); break; }   /* Ctrl-C / Esc */
         int ci = 0; for (const char *c = cond; *c && ci < 1023; c++) condbuf[ci++] = *c; condbuf[ci] = 0;
         run_input_line(condbuf, cwd);
-        if (g_status != 0) break;                          /* COND false -> stop */
+        if (invert ? (g_status == 0) : (g_status != 0)) break;   /* while: stop when COND false; until: stop when COND true */
         int bi = 0; for (const char *c = body; *c && bi < 1023; c++) bodybuf[bi++] = *c; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;
         if (g_returning) break;                            /* `return` inside the loop body */
@@ -7386,6 +7432,8 @@ static int run_while(char *line, char *cwd) {
     g_loopdepth--;
     return doexit;
 }
+static int run_while(char *line, char *cwd) { return run_while_until(line, cwd, 0); }
+static int run_until(char *line, char *cwd) { return run_while_until(line, cwd, 1); }
 
 /* Run one logical input line: a ';'-separated list, where each item may be a
  * `for`/`while`/`if` construct or a && / || pipeline. The splitter tracks
@@ -7433,6 +7481,7 @@ static int run_input_line(char *line, char *cwd) {
             int rc;
             if (startswith(seg, "for "))        rc = run_for(seg, cwd);
             else if (startswith(seg, "while ")) rc = run_while(seg, cwd);
+            else if (startswith(seg, "until ")) rc = run_until(seg, cwd);
             else if (startswith(seg, "if "))    rc = run_if(seg, cwd);
             else if (startswith(seg, "case "))  rc = run_case(seg, cwd);
             else                                rc = run_andor(seg, cwd);

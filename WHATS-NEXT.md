@@ -1,5 +1,17 @@
 # What's next
 
+> **(M1808) Shell `set -x` — command tracing (xtrace).** `set -x` now prints each fully-expanded command as `+ cmd` (to the terminal) before running it; `set +x` turns it off. Implemented via a `g_xtrace` flag in the `set` builtin (which previously only did `NAME=value`) and one trace point in `run_line` after all expansion/glob/redirect parsing, so the trace shows the command as it will actually run (quoted high-bit bytes revealed for readability). Invaluable for debugging shell scripts. (`set -e` errexit is the next milestone.)
+> 
+> **Verified:** `make shquotetest`/`shsplittest`/`shexpandtest` green; kernel builds clean; DEMO.SH gains a `set -x … set +x` block; full `make check` green.
+> 
+> **(M1807) Shell `until` loop.** `until COND; do BODY; done` — the companion to `while`, looping while the condition *fails* and stopping when it succeeds. `run_while` was refactored into a shared `run_while_until(…, invert)` (the two keywords are both 5 chars; `until` just inverts the stop test), plus a `run_until` wrapper, the `run_input_line` dispatch, and `until` added to `shsplit.h`'s construct-open keywords (it already closes on `done`) so its internal `;`s aren't split.
+> 
+> **Verified:** `shsplittest` green (splitter tracks `until…done` nesting); kernel builds clean; DEMO.SH gains an `until` loop counting 1→3; full `make check` green.
+> 
+> **(M1806) Shell tilde `~` expansion.** A word-initial `~` now expands to HOME (`/` on this OS): `~` → `/`, `~/docs` → `/docs` (the redundant slash is folded), and `~` before a space/`:`/end → `/`. A `~` mid-word (`foo~bar`) or a quoted `"~"` is left literal — the latter because `sh_quote_pass` now protects `~` inside quotes (added to `shq_special_both`). A new `expand_tilde` pass runs in `run_line` after variable/alias expansion and before glob. Previously only `cd ~` was special-cased; now `ls ~`, `cp x ~/`, etc. work.
+> 
+> **Verified:** `shquotetest` green with the new `~` protection; kernel builds clean; DEMO.SH shows `~`/`~/docs` expanding; full `make check` green.
+> 
 > **(M1805) Shell `${VAR:=default}` — assign-default expansion.** `${VAR:=word}` now, when `VAR` is unset or null, *assigns* the (literal) default word to `VAR` via the existing `vset` and expands to it; when `VAR` is set it expands to the value with no assignment (bash's `:=`). This is the parameter form that lets a script default-and-remember a value in one step (`: ${TMPDIR:=/tmp}`). Added to the extracted `user/shexpand.h` alongside the `:-`/`:+` forms, disjoint on the char after `:` (`=`), so the existing default/alternate/substring branches are untouched.
 > 
 > **Verified:** `tests/shexpand` gains `:=` cases proving both paths — `${NEW:=hello}` → `hello` *and* a follow-up `$NEW` → `hello` (the assignment persisted through the test's mutable `vset` overlay); `${FOO:=x}` (set) → `bar` with no assignment; empty counts as unset. Regression + 200k-input fuzz, ASan/UBSan clean; kernel builds clean; full `make check` green.
