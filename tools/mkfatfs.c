@@ -73,6 +73,11 @@ static const struct {
                      "set +x\n"
                      "((sq = 6 * 7)); echo arithmetic command: 6 times 7 is $sq\n"
                      "echo == demo complete -- type help for more ==\n" },
+    { "SEDI    SH ", "# sed -i (in-place edit) demo -- run it with:  source SEDI.SH\n"
+                     "echo one two three > /tmp/SEDT.TXT\n"
+                     "echo sedi before:; cat /tmp/SEDT.TXT\n"
+                     "sed -i 's/two/TWO/' /tmp/SEDT.TXT\n"
+                     "echo sedi after:; cat /tmp/SEDT.TXT\n" },
     { "SETE    SH ", "# set -e (errexit) demo -- run it with:  source SETE.SH\n"
                      "echo sete: start\n"
                      "set -e\n"

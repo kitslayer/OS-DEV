@@ -1164,13 +1164,18 @@ static int run_command(char *line, char *cwd) {
                     print(buf); free(buf);
                 }
             }
-        } else if (startswith(line, "sed ")) {            /* sed 's/RE/REPL/[gi]' [file] : regex stream substitution (RE like grep: ^ $ . * [..] \) */
+        } else if (startswith(line, "sed ")) {            /* sed [-i] 's/RE/REPL/[gi]' [file] : regex stream substitution (RE like grep: ^ $ . * [..] \) */
             const char *p = line + 4; while (*p == ' ') p++;
+            int inplace = 0;                              /* sed -i FILE : rewrite the file in place instead of printing (M1810) */
+            if (p[0] == '-' && p[1] == 'i' && (p[2] == ' ' || p[2] == 0)) { inplace = 1; p += 2; while (*p == ' ') p++; }
             char scr[256]; int sn = 0;                    /* the script (first arg; a quoted script's spaces arrive sentinel-protected) */
             while (*p && *p != ' ' && sn < (int)sizeof(scr) - 1) scr[sn++] = SH_UNPROT(*p++);
             scr[sn] = 0;
             while (*p == ' ') p++;                         /* the rest is the file (a pipe appends PIPE.TMP) */
-            if (scr[0] != 's' || sn < 4) { print("usage: sed 's/RE/REPL/[gi]' [file]   (RE: ^ $ . * [..] \\)\n"); g_status = 2; }
+            char fname[160]; int fni = 0; { const char *fp = p; while (*fp && fni < 159) fname[fni++] = SH_UNPROT(*fp++); } fname[fni] = 0;   /* unprotected file path for -i write-back */
+            while (fni > 0 && fname[fni-1] == ' ') fname[--fni] = 0;
+            if (scr[0] != 's' || sn < 4) { print("usage: sed [-i] 's/RE/REPL/[gi]' [file]   (-i edits in place; RE: ^ $ . * [..] \\)\n"); g_status = 2; }
+            else if (inplace && !fname[0]) { print("sed: -i needs a file\n"); g_status = 2; }
             else {
                 char delim = scr[1];
                 char re[160], repl[160]; int rn = 0, pn = 0;
@@ -1192,6 +1197,7 @@ static int run_command(char *line, char *cwd) {
                 long n; char *buf = slurp(p, &n);
                 if (!buf) { perr("sed: no such file: "); print(p); print("\n"); g_status = 2; }
                 else {
+                    char *out = 0; long outlen = 0, outcap = 0;   /* -i: accumulate the whole result, then write it back */
                     long i = 0;
                     while (i < n) {                        /* one line at a time, flushed (no whole-output cap) */
                         long ls = i; while (i < n && buf[i] != '\n') i++;
@@ -1200,11 +1206,22 @@ static int run_command(char *line, char *cwd) {
                         long osz = (i - ls + 1) * (pn + 2) + 64;   /* generous; sed_sub is bounds-safe regardless */
                         if (osz > (1L << 20)) osz = 1L << 20;
                         char *ob = malloc(osz);
-                        if (ob) { sed_sub(buf + ls, re, repl, g, ci, ob, osz); print(ob); free(ob); }
-                        if (had_nl) print("\n");
+                        if (ob) {
+                            sed_sub(buf + ls, re, repl, g, ci, ob, osz);
+                            if (inplace) {                 /* grow `out` and append this line + its newline */
+                                long oblen = (long)ustrlen(ob), need = outlen + oblen + 2;
+                                if (need > outcap) { outcap = need + (need >> 1) + 256; char *no = realloc(out, (unsigned long)outcap); if (no) out = no; }
+                                if (out && outcap >= need) { for (long k = 0; k < oblen; k++) out[outlen++] = ob[k]; if (had_nl) out[outlen++] = '\n'; }
+                            } else { print(ob); if (had_nl) print("\n"); }
+                            free(ob);
+                        } else if (!inplace && had_nl) print("\n");   /* OOM: preserve the blank line for the stream form */
                         buf[i] = saved;
                         if (!had_nl) break;
                         i++;
+                    }
+                    if (inplace) {                         /* write the transformed file back over itself */
+                        if (sys_writefile(fname, out ? out : "", (unsigned long)outlen) < 0) { perr("sed: cannot write: "); print(fname); print("\n"); g_status = 2; }
+                        free(out);
                     }
                     free(buf);
                 }
