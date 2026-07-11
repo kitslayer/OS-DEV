@@ -5017,6 +5017,15 @@ static int hes(const char *url, char *out, int outmax, int *status) {
     return n;
 }
 
+/* M1800: mock canvas 2D op — records each dispatched op into the output stream (via
+ * out_str, same as console.log) so canvas.js can assert the JS->op dispatch: op code,
+ * coords, fill/strokeStyle colour, and fillText text. Locks eval_canvas_method. */
+static void hcanvas(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text) {
+    char buf[192];
+    snprintf(buf, sizeof buf, "CVOP id=%s op=%d %d,%d,%d,%d col=%s txt=%s\n",
+             id?id:"", op, a, b, c, d, color?color:"", text?text:"");
+    out_str(buf);
+}
 int main(int argc, char **argv) {
     static char src[200000]; int n=0; FILE *f = argc>1?fopen(argv[1],"rb"):stdin;
     n = (int)fread(src,1,sizeof(src)-1,f); src[n]=0;
@@ -5032,6 +5041,8 @@ int main(int argc, char **argv) {
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     js_set_fetch(hfetch);                                /* mock network for fetch() tests (M684) */
     js_set_eventsource(hes);                             /* mock SSE first-event for EventSource tests (M-eventsource) */
+    js_set_canvas(hcanvas);                              /* M1800: mock canvas 2D op recorder for canvas.js */
+    hdom_set("c", "", 0);                                /* seed a <canvas id="c"> so getElementById('c').getContext works */
     int r = js_run_doc(src, outb, sizeof(outb), 0);
     fputs(outb, stdout);
     if (getenv("JS_ARENA_REPORT")) fprintf(stderr, "ARENA_END=%d / %d (headroom %d)\n", g_arena_off, JS_ARENA, JS_ARENA-g_arena_off);

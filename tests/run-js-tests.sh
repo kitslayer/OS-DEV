@@ -39,4 +39,5 @@ run_suite tests/js/timers.js        tests/js/timers.expected
 run_suite tests/js/toprim.js        tests/js/toprim.expected
 run_suite tests/js/arriter.js       tests/js/arriter.expected
 run_suite tests/js/numfmt.js        tests/js/numfmt.expected
+run_suite tests/js/canvas.js        tests/js/canvas.expected
 echo "PASS: JS engine regression suite (ASan/UBSan clean, ran to completion, output matches golden)"

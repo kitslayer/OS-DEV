@@ -1,0 +1,11 @@
+ctx object
+fs0 #000000
+fs1 #ff0000
+CVOP id=c op=0 1,2,3,4 col=#ff0000 txt=
+CVOP id=c op=1 5,6,7,8 col=#00ff00 txt=
+CVOP id=c op=2 9,10,11,12 col= txt=
+CVOP id=c op=3 20,21,30,31 col=#00ff00 txt=
+CVOP id=c op=3 30,31,40,41 col=#00ff00 txt=
+CVOP id=c op=4 50,51,0,0 col=#0000ff txt=Hi
+CVOP id=c op=5 60,61,15,0 col=#00ff00 txt=
+-- done --
