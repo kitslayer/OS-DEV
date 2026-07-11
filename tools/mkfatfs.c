@@ -73,6 +73,14 @@ static const struct {
                      "set +x\n"
                      "((sq = 6 * 7)); echo arithmetic command: 6 times 7 is $sq\n"
                      "echo == demo complete -- type help for more ==\n" },
+    { "SETE    SH ", "# set -e (errexit) demo -- run it with:  source SETE.SH\n"
+                     "echo sete: start\n"
+                     "set -e\n"
+                     "if false; then echo unreached; fi\n"
+                     "echo sete: a failing if-condition is exempt (still here)\n"
+                     "false || echo sete: a guarded failure is exempt too\n"
+                     "false\n"
+                     "echo sete: THIS MUST NOT PRINT\n" },
     { "DEMO    C  ", "// DEMO.C -- compiled AND run inside OS-DEV by our own C compiler.\n"
                      "//   try it with:   cc DEMO.C\n"
                      "// c4 grammar: int/char, pointers, if/else, while, return, recursion, printf.\n"

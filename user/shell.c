@@ -98,6 +98,9 @@ static int g_returning;     /* set by `return` (in a function/sourced script); h
 static int g_loopbrk;       /* 0=none, 1=break, 2=continue: set by break/continue, consumed by the innermost for/while */
 static int g_loopdepth;     /* for/while loops currently running; break/continue only fire when >0 (else they're no-ops) */
 static int g_xtrace;        /* `set -x`: print each command as `+ cmd` before running it (M1808) */
+static int g_errexit;       /* `set -e`: abort the running script when a command fails (M1809) */
+static int g_errexit_tripped; /* latch: a command failed under -e; unwinds the script like g_returning, cleared at the source/prompt boundary */
+static int g_cond_depth;    /* >0 while evaluating an if/while/until condition or a &&/|| left side, where -e must NOT fire */
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
 static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
@@ -785,13 +788,14 @@ static int run_command(char *line, char *cwd) {
             print("        Tab completes a filename (longest common prefix); a 2nd Tab lists the matches\n");
         } else if (startswith(line, "set ") || startswith(line, "export ")) {
             const char *p = line + (line[1]=='x' ? 7 : 4); while (*p == ' ') p++;   /* skip "set "/"export " */
-            if (line[0]=='s' && (p[0]=='-' || p[0]=='+')) {   /* `set -x`/`set +x` shell options (M1808); `set -o` unsupported */
+            if (line[0]=='s' && (p[0]=='-' || p[0]=='+')) {   /* `set -e`/`-x` (and +) shell options (M1808/M1809); `set -o` unsupported */
                 int on = (p[0]=='-'); int ok = 1;
                 for (const char *f = p + 1; *f && *f != ' '; f++) {
                     if (*f == 'x') g_xtrace = on;
+                    else if (*f == 'e') g_errexit = on;
                     else { ok = 0; }
                 }
-                if (!ok) print("set: only -x/+x supported\n");
+                if (!ok) print("set: only -e/-x (and +e/+x) supported\n");
             } else {
                 int nl = 0; while (p[nl] && p[nl] != '=' && p[nl] != ' ') nl++;
                 if (p[nl] == '=' && nl > 0) { sh_unprot_buf((char *)p + nl + 1); vset(p, nl, p + nl + 1); }   /* value = rest of line (may contain spaces) */
@@ -7167,7 +7171,7 @@ static int run_line(char *line, char *cwd) {
  * untouched. Returns 1 if a command was the "exit" builtin. */
 static int run_andor(char *seg, char *cwd) {
     char *p = seg;
-    int run_this = 1, exitflag = 0;
+    int run_this = 1, exitflag = 0, skipped = 0;   /* skipped: a segment was short-circuited past (its failure was "used" by &&/||) */
     while (p) {
         char *op = p; int oplen = 0, pd = 0, q = 0;
         while (*op) {
@@ -7183,11 +7187,16 @@ static int run_andor(char *seg, char *cwd) {
         while (*p == ' ') p++;                         /* trim leading spaces */
         char *e = p; while (*e) e++;                   /* ...and trailing ones, so */
         while (e > p && e[-1] == ' ') *--e = 0;        /* "true && .." matches streq("true") */
-        if (run_this && *p && run_line(p, cwd)) exitflag = 1;
+        if (run_this && *p) { if (run_line(p, cwd)) exitflag = 1; }
+        else if (*p) skipped = 1;                          /* short-circuited: this segment didn't run */
         if      (opc == '&') run_this = (g_status == 0);   /* &&: next runs only on success */
         else if (opc == '|') run_this = (g_status != 0);   /* ||: next runs only on failure */
         p = oplen ? op + oplen : 0;
     }
+    /* `set -e`: abort the script if this complete list failed AND its failure was
+     * not "used" by a &&/|| short-circuit (`false && x` doesn't fire; `x; false`
+     * and `true && false` do) and we're not inside an if/while/until condition. */
+    if (g_errexit && !g_cond_depth && !in_cmdsub && !skipped && g_status != 0) g_errexit_tripped = 1;
     return exitflag;
 }
 
@@ -7248,7 +7257,7 @@ static int run_for_carith(char *p, char *cwd) {
         { const char *q = cond; while (*q == ' ') q++; long cv = *q ? sh_eval(&q) : 1; if (!cv) break; }   /* empty cond = forever */
         int bi = 0; for (const char *c = body; *c && bi < 1023; c++) bodybuf[bi++] = *c; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;
-        if (g_returning) break;
+        if (g_returning || g_errexit_tripped) break;
         if (g_loopbrk) { int brk = (g_loopbrk == 1); g_loopbrk = 0; if (brk) break; }
         sh_do_assign(incr);
     }
@@ -7297,7 +7306,7 @@ static int run_for(char *line, char *cwd) {
         *we = wsave;
         int bi = 0; for (const char *b = body; *b && bi < 1023; b++) bodybuf[bi++] = *b; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;       /* fresh copy: run_input_line edits it in place */
-        if (g_returning) break;                             /* `return` inside the loop body */
+        if (g_returning || g_errexit_tripped) break;        /* `return`, or a `set -e` trip, inside the loop body */
         if (g_loopbrk) { int brk = (g_loopbrk == 1); g_loopbrk = 0; if (brk) break; }   /* break stops; continue advances */
         w = we;
     }
@@ -7343,7 +7352,7 @@ static int run_if(char *line, char *cwd) {
         char *els = sh_substr(body, "; else");
         if (els) { *els = 0; elseb = els + 6; while (*elseb == ' ') elseb++; }
     }
-    run_input_line(p, cwd);                                /* run COND -> sets g_status */
+    g_cond_depth++; run_input_line(p, cwd); g_cond_depth--; /* run COND -> sets g_status (COND is exempt from set -e) */
     if (g_status == 0) return run_input_line(thenb, cwd);
     if (elseb)         return run_input_line(elseb, cwd);
     return 0;
@@ -7421,11 +7430,11 @@ static int run_while_until(char *line, char *cwd, int invert) {
         if (iters >= 100000) { print("\n"); print(kw); print(": stopped at 100000 iterations\n"); break; }
         int k = sys_pollkey(); if (k == 0x83 || k == 27) { print("\n^C\n"); break; }   /* Ctrl-C / Esc */
         int ci = 0; for (const char *c = cond; *c && ci < 1023; c++) condbuf[ci++] = *c; condbuf[ci] = 0;
-        run_input_line(condbuf, cwd);
+        g_cond_depth++; run_input_line(condbuf, cwd); g_cond_depth--;   /* COND is exempt from set -e */
         if (invert ? (g_status == 0) : (g_status != 0)) break;   /* while: stop when COND false; until: stop when COND true */
         int bi = 0; for (const char *c = body; *c && bi < 1023; c++) bodybuf[bi++] = *c; bodybuf[bi] = 0;
         if (run_input_line(bodybuf, cwd)) doexit = 1;
-        if (g_returning) break;                            /* `return` inside the loop body */
+        if (g_returning || g_errexit_tripped) break;       /* `return`, or a `set -e` trip, inside the loop body */
         if (g_loopbrk) { int brk = (g_loopbrk == 1); g_loopbrk = 0; if (brk) break; }   /* break stops; continue re-tests COND */
         iters++;
     }
@@ -7487,7 +7496,7 @@ static int run_input_line(char *line, char *cwd) {
             else                                rc = run_andor(seg, cwd);
             if (rc) doexit = 1;
         }
-        if (g_returning || g_loopbrk) break;   /* `return`, or `break`/`continue`, stops the rest of this line */
+        if (g_returning || g_loopbrk || g_errexit_tripped) break;   /* `return`, `break`/`continue`, or a `set -e` trip stops the rest of this line */
         seg = more ? semi + 1 : 0;
     }
     return doexit;
@@ -7507,10 +7516,10 @@ static void source_file(const char *fn, char *cwd, int silent) {
         int more = (*nl == '\n'); if (more) *nl = 0;
         char *t = ln; while (*t == ' ' || *t == '\t') t++;
         if (*t && *t != '#') run_input_line(t, cwd);   /* skip blanks + # comments */
-        if (g_returning) break;                        /* `return` ends the sourced script */
+        if (g_returning || g_errexit_tripped) break;   /* `return`, or a `set -e` failure, ends the sourced script */
         ln = more ? nl + 1 : 0;
     }
-    g_returning = 0; g_loopbrk = 0;   /* consume: return/break unwind only to the end of this source */
+    g_returning = 0; g_loopbrk = 0; g_errexit_tripped = 0;   /* consume: return/break/errexit unwind only to the end of this source */
     source_depth--;
     free(txt);
 }
@@ -7547,7 +7556,7 @@ int main(void) {
 
         /* run the line: a `for` loop, or a ';'-separated list of && / || pipelines */
         if (run_input_line(line, cwd)) break;
-        g_returning = 0; g_loopbrk = 0;   /* a stray `return`/`break` at the prompt must not wedge the next line */
+        g_returning = 0; g_loopbrk = 0; g_errexit_tripped = 0;   /* a stray `return`/`break`, or a `set -e` trip, must not wedge the next prompt line (the interactive shell survives) */
     }
     return 0;
 }
