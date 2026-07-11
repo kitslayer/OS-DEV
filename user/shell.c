@@ -481,86 +481,11 @@ static void func_set(const char *n, int nl, const char *body){
     int k=0; for(;body[k] && k<255;k++) g_func[slot].body[k]=body[k]; g_func[slot].body[k]=0;
 }
 /* The $((expr)) evaluator (sh_eval, sh_vchar, sh_askip, …) now lives in
- * shmath.h, host-tested by tests/shmath; the sh_var hook above resolves names. */
-
-/* Expand $NAME / ${NAME} and $((expr)) in src into dst; returns 1 if a '$'
- * appeared (dst is then the result). */
-static int expand_vars(const char *src, char *dst, int cap){
-    int has=0; for (int i=0;src[i];i++) if (src[i]=='$'){ has=1; break; }
-    if (!has) return 0;
-    int o=0;
-    for (int i=0; src[i] && o<cap-1; ){
-        if (src[i]=='$' && src[i+1]=='(' && src[i+2]=='('){        /* $((expr)) arithmetic */
-            const char *q = src + i + 3;
-            long val = sh_eval(&q);
-            sh_askip(&q); if (*q==')') q++; if (*q==')') q++;       /* consume the closing )) */
-            char tmp[24]; int ti=0; int neg = val<0;
-            unsigned long uv = neg ? (unsigned long)(-val) : (unsigned long)val;
-            if (uv==0) tmp[ti++]='0'; while(uv){ tmp[ti++]=(char)('0'+uv%10); uv/=10; }
-            if (neg) tmp[ti++]='-';
-            while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
-            i = (int)(q - src);
-        } else if (src[i]=='$' && src[i+1]=='?'){                   /* $? -> last exit status */
-            char tmp[12]; int ti=0; unsigned uv=(unsigned)(g_status<0?0:g_status);
-            if (uv==0) tmp[ti++]='0';
-            while (uv){ tmp[ti++]=(char)('0'+uv%10); uv/=10; }
-            while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
-            i += 2;
-        } else if (src[i]=='$' && (src[i+1]=='#' || src[i+1]=='@' || src[i+1]=='*')){ /* $# arg count, $@/$* all args (set on a function call) */
-            const char *v = vget((src[i+1]=='*') ? "@" : src+i+1, 1);   /* $* == $@ in this shell's single-string args model; before M1750 $* fell through to $NAME leaving a bare * -> a cwd glob */
-            if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
-            i += 2;
-        } else if (src[i]=='$'){                                    /* $NAME / ${NAME} / ${NAME:-w} / ${NAME:+w} / ${#NAME} / ${NAME#pat} / ${NAME%pat} */
-            int br=(src[i+1]=='{');
-            if (br && src[i+2]=='#') {                              /* ${#NAME} = length of NAME; ${#} = arg count */
-                int ns=i+3, ne=ns; while (src[ne] && sh_vchar(src[ne])) ne++;
-                if (ne > ns) {
-                    const char *v=vget(src+ns, ne-ns);
-                    int len=0; if (v) while (v[len]) len++;
-                    char tmp[12]; int ti=0; if (!len) tmp[ti++]='0'; while (len) { tmp[ti++]=(char)('0'+len%10); len/=10; }
-                    while (ti>0 && o<cap-1) dst[o++]=tmp[--ti];
-                } else {
-                    const char *v=vget("#",1);
-                    if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
-                }
-                i = (src[ne]=='}') ? ne+1 : ne;
-            } else {
-                int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
-                const char *v=(e>s)?vget(src+s,e-s):0;
-                if (br && src[e]==':' && (src[e+1]=='-' || src[e+1]=='+')) {   /* ${VAR:-word} default / ${VAR:+word} alt (literal word) */
-                    int plus=(src[e+1]=='+'), set=(v && v[0]);
-                    int ws=e+2, we=ws; while (src[we] && src[we]!='}') we++;
-                    const char *w=src+ws; int wl=we-ws;
-                    if (plus) { if (set) { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; } }
-                    else if (set) { for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k]; }
-                    else { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; }
-                    i = (src[we]=='}') ? we+1 : we;
-                } else if (br && (src[e]=='#' || src[e]=='%') && e>s) {   /* ${NAME#pat}/##/%/%% : strip a glob prefix/suffix */
-                    char op=src[e]; int lng=(src[e+1]==op); int ps=e+1+lng, pe=ps;
-                    while (src[pe] && src[pe]!='}') pe++;
-                    char pat[80]; int pl=0; for (int k=ps; k<pe && pl<79; k++) pat[pl++]=src[k]; pat[pl]=0;
-                    char vb[260]; int vl=0; if (v) for (int k=0; v[k] && vl<259; k++) vb[vl++]=v[k]; vb[vl]=0;
-                    int keepStart=0, keepLen=vl;
-                    if (op=='%') {                                  /* strip the shortest (%) or longest (%%) matching suffix */
-                        int best=-1;
-                        for (int sl=0; sl<=vl; sl++) if (glob_match(pat, vb+vl-sl)) { best=sl; if (!lng) break; }
-                        if (best>=0) keepLen=vl-best;
-                    } else {                                        /* strip the shortest (#) or longest (##) matching prefix */
-                        int best=-1;
-                        for (int q=0; q<=vl; q++) { char sv=vb[q]; vb[q]=0; int m=glob_match(pat, vb); vb[q]=sv; if (m) { best=q; if (!lng) break; } }
-                        if (best>=0) { keepStart=best; keepLen=vl-best; }
-                    }
-                    for (int k=0; k<keepLen && o<cap-1; k++) dst[o++]=vb[keepStart+k];
-                    i = (src[pe]=='}') ? pe+1 : pe;
-                } else {
-                    if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
-                    i = e + ((br && src[e]=='}')?1:0);
-                }
-            }
-        } else dst[o++]=src[i++];
-    }
-    dst[o]=0; return 1;
-}
+ * shmath.h, host-tested by tests/shmath; the sh_var hook above resolves names.
+ * The $NAME/${…} parameter expander (expand_vars) now lives in shexpand.h,
+ * host-tested by tests/shexpand; it uses vget + sh_laststatus (below). */
+static int sh_laststatus(void){ return g_status < 0 ? 0 : g_status; }   /* $? value, clamped >= 0 */
+#include "shexpand.h"
 
 /* --- `ls` colourisation by file type (M1313), like `ls --color`. FAT32 names
  * are uppercase; ext_eq uppercases for the compare. The colour is a terminal

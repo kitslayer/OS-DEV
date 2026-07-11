@@ -1,5 +1,21 @@
 # What's next
 
+> **(M1805) Shell `${VAR:=default}` — assign-default expansion.** `${VAR:=word}` now, when `VAR` is unset or null, *assigns* the (literal) default word to `VAR` via the existing `vset` and expands to it; when `VAR` is set it expands to the value with no assignment (bash's `:=`). This is the parameter form that lets a script default-and-remember a value in one step (`: ${TMPDIR:=/tmp}`). Added to the extracted `user/shexpand.h` alongside the `:-`/`:+` forms, disjoint on the char after `:` (`=`), so the existing default/alternate/substring branches are untouched.
+> 
+> **Verified:** `tests/shexpand` gains `:=` cases proving both paths — `${NEW:=hello}` → `hello` *and* a follow-up `$NEW` → `hello` (the assignment persisted through the test's mutable `vset` overlay); `${FOO:=x}` (set) → `bar` with no assignment; empty counts as unset. Regression + 200k-input fuzz, ASan/UBSan clean; kernel builds clean; full `make check` green.
+> 
+> **(M1804) Shell `${VAR:offset:len}` — substring slicing.** The bash substring form: `${VAR:6}` (offset to end), `${VAR:0:5}` (offset+length), negative offset with a disambiguating space (`${VAR: -5}` → last 5 chars) and negative length (`${VAR:0:-6}` → all but the last 6), with bash's clamping. Triggers only when the char after `:` is a digit or space, so `${VAR:-word}` (default) and `${VAR:=word}` (assign) are unaffected — a regression guard (`${HELLO:-3}` → the value, `${UNSET:-3}` → `3`) locks that split.
+> 
+> **Verified:** `tests/shexpand` gains 12 substring cases (interior slices, both-negative, past-end→empty, zero-len→empty) + the `:-`-vs-`:offset` guards. Regression + 200k fuzz, ASan/UBSan clean; full `make check` green.
+> 
+> **(M1803) Shell `${VAR/pat/repl}` and `${VAR//pat/repl}` — pattern substitution.** The single most-used bash string edit: replace the first (`/`) or every (`//`) glob match of `pat` in `VAR` with `repl`. `pat` is a glob (`*`/`?`, greedy, matched by a new `shx_glob_prefix_n` reusing the anchored `glob_match`); `\/` escapes a literal slash in the pattern (so `${PATH//\//_}` swaps every `/`); an empty replacement deletes. Added to `user/shexpand.h`.
+> 
+> **Verified:** `tests/shexpand` gains substitution cases — first/all literal, all-`.`→`_`, delete-via-empty-repl, greedy `*` (`${x//a*/Z}`), escaped-slash replace, no-match unchanged, empty-pattern no-op. Regression + 200k fuzz, ASan/UBSan clean; full `make check` green.
+> 
+> **(M1802) Shell — extracted the `${…}`/`$` parameter expander to a host-tested header.** `expand_vars` (the `$NAME`/`${NAME}`/`$?`/`$#`/`$@`/`$*`/`${#NAME}`/`${VAR:-}`/`${VAR:+}`/`${NAME#pat}`/`${NAME%pat}`/`$((…))` expander) moved verbatim from `user/shell.c` into `user/shexpand.h`, using three includer-provided hooks (`vget`, a new one-line `sh_laststatus`, and shmath/shgrep's `sh_eval`/`sh_askip`/`sh_vchar`/`glob_match`) — the same extraction pattern as `shmath`/`shbrace`/`shgrep`/`shsplit`. This gives the expander its **first automated test** (`tests/shexpand`, wired into `make check` as `shexpandtest`) and a clean base for the M1803–M1805 additions.
+> 
+> **Verified:** behaviour-preserving — `tests/shexpand` locks every existing form (incl. the subtle single-pass detail that a `:-` default word is emitted literally, not re-expanded) with a 200k-input ASan/UBSan fuzz; kernel builds clean; full `make check` green.
+> 
 > **(M1801) Browser canvas — `lineWidth` (thick strokes).** `ctx.lineWidth = N` now widens the stroke ops: `browser_canvas_op` gains an `lw` param, and `strokeRect`/`lineTo`/`arc` plot an `lw×lw` pen at each point (clamped 1–40) instead of a single pixel. `lineWidth` rides as a context property (via the M1796 `obj_keyed`), default 1; fill ops (`fillRect`/`clearRect`/`fillText`) ignore it. Thicker lines/outlines are essential for readable charts and diagrams.
 >
 > **Verified:** `tests/js/canvas.js` gains `lineWidth` cases — the property round-trips (default 1 → 3) and stroke ops (strokeRect/line) carry `lw=3` while fill ops carry `lw=1` (the host mock records the width on each op). In-guest (osdrive → framebuffer screenshot) the `CANVAS.HTM` outer magenta circle renders visibly **3px thick** vs the thin (1px) inner circle. `make jstest` green; kernel builds clean; full `make check` green.
