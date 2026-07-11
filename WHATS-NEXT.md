@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1799) Browser canvas — `arc` (circles).** Adds op 5 to `browser_canvas_op`: `ctx.arc(x, y, r, …)` strokes a full-circle outline (midpoint-circle algorithm, integer-only, no trig) in `strokeStyle` — rounding out the canvas primitives (rects, clear, lines, text, circles), enough for scatter / bubble / pie-outline charts. **Approximation:** the start/end angles are ignored (always a full circle), so the common `arc(x,y,r,0,2π)` circle idiom is exact but a partial arc draws the whole circle; true partial arcs (needing trig) are a follow-up.
+>
+> **Verified:** the extended `CANVAS.HTM` renders in-guest (osdrive → framebuffer screenshot) two concentric magenta circles (`arc(222,104,20,…)` + `arc(222,104,10,…)`) alongside all the prior ops (rects, notch, zig-zag, line, frame, text). Kernel builds clean; `jstest` green (js.c changes additive); full `make check` green.
+>
 > **(M1798) Browser canvas — `fillText` (bitmap-font text drawn into the canvas).** Adds op 4 to `browser_canvas_op` (now threaded with a `text` param): `ctx.fillText(text, x, y)` renders each character from the kernel's 8×16 `font_glyphs` bitmap into the canvas RGBA slot in `fillStyle`, advancing 8 px per glyph, with `y` as the text baseline (glyph top ≈ y − 13). With this the canvas covers filled / outlined / cleared rectangles, `moveTo`/`lineTo` lines, and text — most of what real chart / diagram / label drawing needs.
 >
 > **Verified:** the extended `CANVAS.HTM` renders in-guest (osdrive → framebuffer screenshot) all the ops together — a red box with a cleared white notch, a blue outlined box + frame, a green zig-zag, a brown line, and the text **“Canvas 2D!”** in the bitmap font, all drawn by the page's JavaScript. Kernel builds clean; `jstest` green (js.c changes additive); full `make check` green (browsertest confirms no browser regression). Multi-segment path fill and arcs/circles remain follow-ups.

@@ -3514,6 +3514,13 @@ static void browser_canvas_op(const char *id, int op, int a, int by, int c, int 
                 for (int col = 0; col < 8; col++) if (bits & (0x80 >> col)) CVPX(pen + col, yy); }
             pen += 8;
         }
+    } else if (op == 5) {                                    /* M1799: arc — full-circle outline, centre (a,by) radius c, in strokeStyle (midpoint circle, no trig; partial arcs draw the full circle) */
+        int ccx=a, ccy=by, r=c<0?-c:c, xx=r, yy=0, e2=1-r;
+        while (xx >= yy) {
+            CVPX(ccx+xx,ccy+yy); CVPX(ccx-xx,ccy+yy); CVPX(ccx+xx,ccy-yy); CVPX(ccx-xx,ccy-yy);
+            CVPX(ccx+yy,ccy+xx); CVPX(ccx-yy,ccy+xx); CVPX(ccx+yy,ccy-xx); CVPX(ccx-yy,ccy-xx);
+            yy++; if (e2 < 0) e2 += 2*yy+1; else { xx--; e2 += 2*(yy-xx)+1; }
+        }
     }
     #undef CVPX
 }

@@ -3686,6 +3686,7 @@ static val eval_canvas_method(val recv, const char *name, val *args, int nargs) 
     if (strcmp(name, "fillRect") == 0)   { val fsv; const char *fs=(obj_get(c,"fillStyle",  &fsv)&&fsv.t==V_STR)?fsv.str:"#000000"; g_canvas_op(cid, 0, a, b, cc, d, fs, 0); return UND(); }
     if (strcmp(name, "strokeRect") == 0) { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 1, a, b, cc, d, ss, 0); return UND(); }
     if (strcmp(name, "clearRect") == 0)  { g_canvas_op(cid, 2, a, b, cc, d, "", 0); return UND(); }
+    if (strcmp(name, "arc") == 0)        { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 5, a, b, cc, 0, ss, 0); return UND(); }   /* M1799: arc(x,y,r,...) -> full-circle outline */
     /* beginPath / closePath / stroke / fill / save / restore: accepted no-ops (lineTo draws immediately) */
     return UND();
 }
