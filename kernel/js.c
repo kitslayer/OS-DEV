@@ -3311,7 +3311,7 @@ static val nat_fetch(val *args, int nargs){
  * length (or <0 on a network error -> onerror). NULL (host without a backing) -> the
  * task fires onerror. */
 static int (*g_eventsource)(const char *url, char *out, int outmax, int *status);
-static void (*g_canvas_op)(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text);   /* M1796-M1798: canvas 2D op (0=fill 1=stroke 2=clear 3=line 4=fillText) */
+static void (*g_canvas_op)(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text, int lw);   /* M1796-M1801: canvas 2D op (0=fill 1=stroke 2=clear 3=line 4=fillText 5=arc; lw=lineWidth) */
 static int js_enqueue_task(val fn);                  /* fwd: defined with the timer queue */
 static val nat_json_parse(val *a, int n);            /* (already fwd-declared above; harmless) */
 
@@ -3668,25 +3668,26 @@ static val eval_canvas_method(val recv, const char *name, val *args, int nargs) 
     val cidv; const char *cid = (obj_get(c, "__cid", &cidv) && cidv.t == V_STR) ? cidv.str : "";
     int a = nargs > 0 ? (int)to_num(args[0]) : 0, b = nargs > 1 ? (int)to_num(args[1]) : 0;
     int cc = nargs > 2 ? (int)to_num(args[2]) : 0, d = nargs > 3 ? (int)to_num(args[3]) : 0;
+    int lw = 1; { val lwv; if (obj_get(c,"lineWidth",&lwv) && lwv.t==V_NUM && lwv.num>=1) lw=(int)lwv.num; }   /* M1801: stroke width for line/strokeRect/arc */
     if (strcmp(name, "moveTo") == 0) { obj_set(c, "__cx", NUM(a)); obj_set(c, "__cy", NUM(b)); return UND(); }
     if (strcmp(name, "lineTo") == 0) {   /* draw current-point -> (a,b) in strokeStyle, then move the current point */
         val cxv, cyv, ssv;
         int cx = (obj_get(c,"__cx",&cxv) && cxv.t==V_NUM) ? (int)cxv.num : 0;
         int cy = (obj_get(c,"__cy",&cyv) && cyv.t==V_NUM) ? (int)cyv.num : 0;
         const char *ss = (obj_get(c,"strokeStyle",&ssv) && ssv.t==V_STR) ? ssv.str : "#000000";
-        g_canvas_op(cid, 3, cx, cy, a, b, ss, 0);
+        g_canvas_op(cid, 3, cx, cy, a, b, ss, 0, lw);
         obj_set(c, "__cx", NUM(a)); obj_set(c, "__cy", NUM(b)); return UND();
     }
     if (strcmp(name, "fillText") == 0) { /* M1798: fillText(text, x, y) — x=args[1], y=baseline args[2], colour = fillStyle */
         const char *txt = nargs > 0 ? val_to_str(args[0]) : "";
         int tx = nargs > 1 ? (int)to_num(args[1]) : 0, ty = nargs > 2 ? (int)to_num(args[2]) : 0;
         val fsv; const char *fs=(obj_get(c,"fillStyle",&fsv)&&fsv.t==V_STR)?fsv.str:"#000000";
-        g_canvas_op(cid, 4, tx, ty, 0, 0, fs, txt); return UND();
+        g_canvas_op(cid, 4, tx, ty, 0, 0, fs, txt, 1); return UND();
     }
-    if (strcmp(name, "fillRect") == 0)   { val fsv; const char *fs=(obj_get(c,"fillStyle",  &fsv)&&fsv.t==V_STR)?fsv.str:"#000000"; g_canvas_op(cid, 0, a, b, cc, d, fs, 0); return UND(); }
-    if (strcmp(name, "strokeRect") == 0) { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 1, a, b, cc, d, ss, 0); return UND(); }
-    if (strcmp(name, "clearRect") == 0)  { g_canvas_op(cid, 2, a, b, cc, d, "", 0); return UND(); }
-    if (strcmp(name, "arc") == 0)        { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 5, a, b, cc, 0, ss, 0); return UND(); }   /* M1799: arc(x,y,r,...) -> full-circle outline */
+    if (strcmp(name, "fillRect") == 0)   { val fsv; const char *fs=(obj_get(c,"fillStyle",  &fsv)&&fsv.t==V_STR)?fsv.str:"#000000"; g_canvas_op(cid, 0, a, b, cc, d, fs, 0, 1); return UND(); }
+    if (strcmp(name, "strokeRect") == 0) { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 1, a, b, cc, d, ss, 0, lw); return UND(); }
+    if (strcmp(name, "clearRect") == 0)  { g_canvas_op(cid, 2, a, b, cc, d, "", 0, 1); return UND(); }
+    if (strcmp(name, "arc") == 0)        { val ssv; const char *ss=(obj_get(c,"strokeStyle",&ssv)&&ssv.t==V_STR)?ssv.str:"#000000"; g_canvas_op(cid, 5, a, b, cc, 0, ss, 0, lw); return UND(); }   /* M1799: arc(x,y,r,...) -> full-circle outline */
     /* beginPath / closePath / stroke / fill / save / restore: accepted no-ops (lineTo draws immediately) */
     return UND();
 }
@@ -3721,6 +3722,7 @@ static val eval_element_method(val recv, const char *name, val *args, int nargs)
         obj_set(c, "__cid", STRV(intern(id, (int)strlen(id))));   /* the canvas element's id (drawing routes id -> slot) */
         obj_set(c, "fillStyle", STRV("#000000"));                 /* CSS default; ctx.fillStyle='...' overrides as a normal property */
         obj_set(c, "strokeStyle", STRV("#000000"));               /* M1797: strokeRect/lineTo colour */
+        obj_set(c, "lineWidth", NUM(1));                          /* M1801: stroke width */
         val v = UND(); v.t = V_OBJ; v.o = c; return v;
     }
     if (strcmp(name, "setAttribute") == 0) {
@@ -4776,7 +4778,7 @@ void js_set_fetch(int (*fn)(const char *url, const char *method, const char *cty
 void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status)) {
     g_eventsource = fn;
 }
-void js_set_canvas(void (*op)(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text)) {   /* M1796-M1798 */
+void js_set_canvas(void (*op)(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text, int lw)) {   /* M1796-M1801 */
     g_canvas_op = op;
 }
 /* The browser registers DOM read/mutate callbacks for getElementById handles. */
@@ -5020,10 +5022,10 @@ static int hes(const char *url, char *out, int outmax, int *status) {
 /* M1800: mock canvas 2D op — records each dispatched op into the output stream (via
  * out_str, same as console.log) so canvas.js can assert the JS->op dispatch: op code,
  * coords, fill/strokeStyle colour, and fillText text. Locks eval_canvas_method. */
-static void hcanvas(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text) {
+static void hcanvas(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text, int lw) {
     char buf[192];
-    snprintf(buf, sizeof buf, "CVOP id=%s op=%d %d,%d,%d,%d col=%s txt=%s\n",
-             id?id:"", op, a, b, c, d, color?color:"", text?text:"");
+    snprintf(buf, sizeof buf, "CVOP id=%s op=%d %d,%d,%d,%d col=%s txt=%s lw=%d\n",
+             id?id:"", op, a, b, c, d, color?color:"", text?text:"", lw);
     out_str(buf);
 }
 int main(int argc, char **argv) {

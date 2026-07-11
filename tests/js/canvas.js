@@ -16,5 +16,11 @@ x.clearRect(9, 10, 11, 12);                // op 2, colour ignored
 x.moveTo(20, 21); x.lineTo(30, 31);        // op 3: (20,21)->(30,31), strokeStyle
 x.lineTo(40, 41);                          // op 3: current point advanced -> (30,31)->(40,41)
 x.fillStyle = '#0000ff'; x.fillText('Hi', 50, 51);  // op 4, fillStyle, text
-x.arc(60, 61, 15);                         // op 5 (radius 15), strokeStyle
+x.arc(60, 61, 15);                         // op 5 (radius 15), strokeStyle, lw 1
+console.log('lw0', x.lineWidth);           // lw0 1  (getContext default)
+x.lineWidth = 3;
+console.log('lw1', x.lineWidth);           // lw1 3  (property round-trip)
+x.strokeRect(70, 71, 8, 9);                // op 1, lw 3
+x.moveTo(80, 81); x.lineTo(90, 91);        // op 3, lw 3
+x.fillRect(2, 3, 4, 5);                    // op 0 — fill ignores lineWidth (lw 1)
 console.log('-- done --');

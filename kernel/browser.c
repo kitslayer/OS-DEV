@@ -262,7 +262,7 @@ static void in_name_set(browser_t *b, const char *id, const char *name);    /* f
 static int dom_attr_region_at(browser_t *b, int off, int *as, int *ae);     /* fwd: position-handle id resolution */
 static int browser_dom_get(const char *id, char *out, int max, int html);   /* fwd */
 static int canvas_new_slot(browser_t *b, int cw, int ch);   /* M1796: fwd — allocate a blank writable image slot for a <canvas> */
-static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color, const char *text);   /* M1796-M1798: fwd (registered via js_set_canvas) */
+static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color, const char *text, int lw);   /* M1796-M1801: fwd (registered via js_set_canvas) */
 static void browser_dom_set(const char *id, const char *value, int html);   /* fwd */
 
 
@@ -3479,8 +3479,9 @@ static int canvas_new_slot(browser_t *b, int cw, int ch) {
  * parses the colour string (parse_color: #hex / named / hsl), and writes the slot's
  * RGBA buffer. op: 0=fillRect(a,b=x,y c,d=w,h), 1=strokeRect(1px outline), 2=clearRect
  * (fills opaque white), 3=line(a,b -> c,d, Bresenham). All writes bounds-clamped. */
-static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color, const char *text) {
+static void browser_canvas_op(const char *id, int op, int a, int by, int c, int d, const char *color, const char *text, int lw) {
     browser_t *b = g_ls_b; if (!b || !id) return;
+    if (lw < 1) lw = 1; if (lw > 40) lw = 40;               /* M1801: lineWidth (stroke ops), clamped */
     int slot = -1;
     for (int i = 0; i < b->n_canv; i++) {
         const char *ci = b->canv_id[i]; int j = 0;
@@ -3493,17 +3494,18 @@ static void browser_canvas_op(const char *id, int op, int a, int by, int c, int 
     uint32_t col = (op == 2) ? 0xFFFFFFu : (color ? parse_color(color, (int)strlen(color)) : 0);   /* clearRect -> white */
     uint8_t R = (uint8_t)((col >> 16) & 0xFF), G = (uint8_t)((col >> 8) & 0xFF), B = (uint8_t)(col & 0xFF);
     #define CVPX(X,Y) do { int _x=(X),_y=(Y); if(_x>=0&&_x<cw&&_y>=0&&_y<chh){ uint8_t*_p=px+((long)_y*cw+_x)*4; _p[0]=R;_p[1]=G;_p[2]=B;_p[3]=0xFF; } } while(0)
+    #define PEN(X,Y)  do { if (lw <= 1) CVPX((X),(Y)); else { int _h=lw/2; for(int _py=-_h;_py<=lw-1-_h;_py++) for(int _px=-_h;_px<=lw-1-_h;_px++) CVPX((X)+_px,(Y)+_py); } } while(0)   /* M1801: lw×lw pen for stroke ops */
     if (op == 0 || op == 2) {                                /* fillRect / clearRect */
         int x0=a<0?0:a, y0=by<0?0:by, x1=a+c, y1=by+d; if(x1>cw)x1=cw; if(y1>chh)y1=chh;
         for (int yy=y0; yy<y1; yy++) for (int xx=x0; xx<x1; xx++) CVPX(xx,yy);
-    } else if (op == 1) {                                    /* strokeRect: 1px outline */
+    } else if (op == 1) {                                    /* strokeRect: lw-px outline */
         int x1=a+c-1, y1=by+d-1;
-        for (int xx=a; xx<=x1; xx++) { CVPX(xx,by); CVPX(xx,y1); }
-        for (int yy=by; yy<=y1; yy++) { CVPX(a,yy); CVPX(x1,yy); }
-    } else if (op == 3) {                                    /* line a,by -> c,d (Bresenham) */
+        for (int xx=a; xx<=x1; xx++) { PEN(xx,by); PEN(xx,y1); }
+        for (int yy=by; yy<=y1; yy++) { PEN(a,yy); PEN(x1,yy); }
+    } else if (op == 3) {                                    /* line a,by -> c,d (Bresenham, lw-px) */
         int x0=a,y0=by,x1=c,y1=d, dx=x1-x0, dy=y1-y0;
         int adx=dx<0?-dx:dx, ady=dy<0?-dy:dy, sx=dx<0?-1:1, sy=dy<0?-1:1, err=(adx>ady?adx:-ady)/2;
-        for (;;) { CVPX(x0,y0); if(x0==x1&&y0==y1) break; int e2=err; if(e2>-adx){err-=ady;x0+=sx;} if(e2<ady){err+=adx;y0+=sy;} }
+        for (;;) { PEN(x0,y0); if(x0==x1&&y0==y1) break; int e2=err; if(e2>-adx){err-=ady;x0+=sx;} if(e2<ady){err+=adx;y0+=sy;} }
     } else if (op == 4 && text) {                            /* M1798: fillText(text, a=x, by=baseline y) in fillStyle, 8x16 bitmap font */
         extern const unsigned char font_glyphs[128][16];
         int pen = a;
@@ -3517,11 +3519,12 @@ static void browser_canvas_op(const char *id, int op, int a, int by, int c, int 
     } else if (op == 5) {                                    /* M1799: arc — full-circle outline, centre (a,by) radius c, in strokeStyle (midpoint circle, no trig; partial arcs draw the full circle) */
         int ccx=a, ccy=by, r=c<0?-c:c, xx=r, yy=0, e2=1-r;
         while (xx >= yy) {
-            CVPX(ccx+xx,ccy+yy); CVPX(ccx-xx,ccy+yy); CVPX(ccx+xx,ccy-yy); CVPX(ccx-xx,ccy-yy);
-            CVPX(ccx+yy,ccy+xx); CVPX(ccx-yy,ccy+xx); CVPX(ccx+yy,ccy-xx); CVPX(ccx-yy,ccy-xx);
+            PEN(ccx+xx,ccy+yy); PEN(ccx-xx,ccy+yy); PEN(ccx+xx,ccy-yy); PEN(ccx-xx,ccy-yy);
+            PEN(ccx+yy,ccy+xx); PEN(ccx-yy,ccy+xx); PEN(ccx+yy,ccy-xx); PEN(ccx-yy,ccy-xx);
             yy++; if (e2 < 0) e2 += 2*yy+1; else { xx--; e2 += 2*(yy-xx)+1; }
         }
     }
+    #undef PEN
     #undef CVPX
 }
 
