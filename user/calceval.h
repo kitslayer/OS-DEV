@@ -119,6 +119,57 @@ static double calc_atan2(double y, double x) {
     return 0;
 }
 
+/* --- scientific helpers (M1812) --- */
+/* factorial n! for a non-negative integer n; NaN for negative or non-integer.
+ * n > 170 overflows a double, so the running product naturally becomes +Inf. */
+static double calc_fact(double x) {
+    if (!js_isfinite(x) || x < 0) return JS_NAN;
+    double n = js_round(x);
+    if (js_fabs(n - x) > 1e-9) return JS_NAN;    /* only defined on integers here */
+    double r = 1;
+    for (double i = 2; i <= n; i += 1) r *= i;
+    return r;
+}
+/* nPr = n!/(n-r)! as the falling product n*(n-1)*...*(n-r+1). */
+static double calc_perm(double nd, double rd) {
+    if (!js_isfinite(nd) || !js_isfinite(rd)) return JS_NAN;
+    double n = js_round(nd), r = js_round(rd);
+    if (js_fabs(n - nd) > 1e-9 || js_fabs(r - rd) > 1e-9) return JS_NAN;
+    if (n < 0 || r < 0 || r > n) return JS_NAN;
+    double res = 1;
+    for (double i = 0; i < r; i += 1) res *= (n - i);
+    return res;
+}
+/* nCr via the multiplicative form res*(n-r+i)/i, which keeps the running value
+ * small so ncr(100,50) doesn't overflow the way computing n! alone would. */
+static double calc_comb(double nd, double rd) {
+    if (!js_isfinite(nd) || !js_isfinite(rd)) return JS_NAN;
+    double n = js_round(nd), r = js_round(rd);
+    if (js_fabs(n - nd) > 1e-9 || js_fabs(r - rd) > 1e-9) return JS_NAN;
+    if (n < 0 || r < 0 || r > n) return JS_NAN;
+    if (r > n - r) r = n - r;                    /* symmetry: fewer terms, less overflow */
+    double res = 1;
+    for (double i = 1; i <= r; i += 1) res = res * (n - r + i) / i;
+    return js_round(res);                        /* an exact integer; round off fp drift */
+}
+/* gcd/lcm on the integer (truncated toward zero, like the bitwise ops) magnitudes. */
+static double calc_gcd(double ad, double bd) {
+    long a = to_long(ad), b = to_long(bd);
+    if (a < 0) a = -a;
+    if (b < 0) b = -b;
+    while (b) { long t = a % b; a = b; b = t; }
+    return (double)a;
+}
+static double calc_lcm(double ad, double bd) {
+    long a = to_long(ad), b = to_long(bd);
+    if (a < 0) a = -a;
+    if (b < 0) b = -b;
+    if (a == 0 || b == 0) return 0;
+    long g = a, t = b; while (t) { long r = g % t; g = t; t = r; }   /* gcd(a,b) */
+    long l = (a / g) * b;   /* g divides a exactly, so a/g is exact integer arithmetic */
+    return (double)l;
+}
+
 static double factor(void) {
     skipws();
     if (*cur == '(') {
@@ -157,6 +208,17 @@ static double factor(void) {
         if (match_kw("max"))   { double a, b; call_arg2(&a, &b); return a > b ? a : b; }
         if (match_kw("hypot")) { double a, b; call_arg2(&a, &b); return js_sqrt(a * a + b * b); }
         if (match_kw("atan2")) { double a, b; call_arg2(&a, &b); return calc_r2a(calc_atan2(a, b)); }
+        /* hyperbolic + cube root + combinatorics + gcd/lcm (M1812). Hyperbolics take
+         * a plain real argument, NOT an angle, so they are never DEG-converted. */
+        if (match_kw("sinh"))  { double x = call_arg(); return (js_exp(x) - js_exp(-x)) * 0.5; }
+        if (match_kw("cosh"))  { double x = call_arg(); return (js_exp(x) + js_exp(-x)) * 0.5; }
+        if (match_kw("tanh"))  { double x = call_arg(); double a = x < 0 ? -x : x; double e = js_exp(-2.0 * a); double t = (1.0 - e) / (1.0 + e); return x < 0 ? -t : t; }
+        if (match_kw("cbrt"))  { double x = call_arg(); double r = js_pow(x < 0 ? -x : x, 1.0 / 3.0); return x < 0 ? -r : r; }
+        if (match_kw("fact"))  return calc_fact(call_arg());
+        if (match_kw("gcd"))   { double a, b; call_arg2(&a, &b); return calc_gcd(a, b); }
+        if (match_kw("lcm"))   { double a, b; call_arg2(&a, &b); return calc_lcm(a, b); }
+        if (match_kw("npr"))   { double a, b; call_arg2(&a, &b); return calc_perm(a, b); }
+        if (match_kw("ncr"))   { double a, b; call_arg2(&a, &b); return calc_comb(a, b); }
         err = 1;                          /* unknown identifier/function */
         return JS_NAN;
     }
@@ -173,6 +235,13 @@ static double factor(void) {
             else break;
             v = v * 16 + d; cur++; any = 1;
         }
+        if (!any) err = 1;
+        return (double)v;
+    }
+    if (cur[0] == '0' && (cur[1] == 'b' || cur[1] == 'B')) {          /* binary literal: 0b1010 (M1812) */
+        cur += 2;
+        unsigned long v = 0; int any = 0;
+        while (*cur == '0' || *cur == '1') { v = v * 2 + (unsigned)(*cur - '0'); cur++; any = 1; }
         if (!any) err = 1;
         return (double)v;
     }
@@ -209,6 +278,7 @@ static double unary(void) {               /* unary -/~ : looser than ^ (so -2^2 
 static double power(void) {               /* right-associative ^, binds tighter than unary and * / % */
     double b = factor();
     skipws();
+    while (*cur == '!') { cur++; b = calc_fact(b); skipws(); }   /* postfix factorial: 5! = 120, `3!^2` = (3!)^2 (M1812) */
     if (*cur == '^') {
         cur++;
         double e = unary();               /* M1784: exponent is a unary-expr, so 2^-2 == 0.25 */

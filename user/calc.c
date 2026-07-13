@@ -24,10 +24,10 @@ static void to_hex(unsigned long long v, char *buf) {
 }
 
 int main(void) {
-    sys_setcolor(4); print("\n  OS-DEV calc: + - * / % ^(pow) & | << >> ~ ( ) 0x\n");   /* title: cyan */
-    sys_setcolor(8); print("  fns: sqrt sin cos tan asin acos atan ln log log2 log10 exp abs sign\n");
-    sys_setcolor(8); print("       floor ceil round trunc  min(a,b) max(a,b) hypot(a,b)\n");
-    print("  consts: pi e ans ; e.g. sqrt(2)  sin(pi/2)  2^10 ; 'deg'/'rad' angle mode ; 'q' quit\n\n"); sys_setcolor(0);
+    sys_setcolor(4); print("\n  OS-DEV calc: + - * / % ^(pow) ! & | << >> ~ ( ) 0x 0b\n");   /* title: cyan */
+    sys_setcolor(8); print("  fns: sqrt cbrt sin cos tan asin acos atan sinh cosh tanh ln log log2 log10 exp abs sign\n");
+    sys_setcolor(8); print("       floor ceil round trunc fact(n) n!  min max hypot atan2 gcd lcm ncr npr (a,b)\n");
+    print("  consts: pi e ans ; e.g. sqrt(2)  sin(pi/2)  5!  ncr(52,5)  2^10 ; 'deg'/'rad' mode ; 'q' quit\n\n"); sys_setcolor(0);
     char line[128];
     for (;;) {
         print(calc_angle_deg ? "calc[deg]> " : "calc> ");

@@ -126,6 +126,51 @@ int main(void) {
     CHECK_F("atan2(-1, -1)", -2.356194490192345); /* -3pi/4, quadrant III */
     CHECK_ERR("atan2(1)");                      /* atan2 needs two args */
 
+    /* --- hyperbolic + cbrt + factorial + combinatorics + gcd/lcm (M1812) --- */
+    CHECK_F("sinh(0)", 0);
+    CHECK_F("cosh(0)", 1);
+    CHECK_F("tanh(0)", 0);
+    CHECK_F("sinh(1)", 1.1752011936438014);
+    CHECK_F("cosh(1)", 1.5430806348152437);
+    CHECK_F("tanh(1)", 0.7615941559557649);
+    CHECK_F("tanh(20)", 1);                      /* saturates to ~1 without overflow */
+    CHECK_F("cosh(2)^2 - sinh(2)^2", 1);         /* the hyperbolic identity */
+    CHECK_F("cbrt(27)", 3);
+    CHECK_F("cbrt(-8)", -2);                     /* real cube root of a negative */
+    CHECK_F("cbrt(0)", 0);
+    CHECK_F("fact(0)", 1);
+    CHECK_F("fact(5)", 120);
+    CHECK_F("fact(10)", 3628800);
+    CHECK_F("5!", 120);                          /* postfix factorial */
+    CHECK_F("0!", 1);
+    CHECK_F("3!^2", 36);                         /* postfix `!` binds tighter than ^: (3!)^2 */
+    CHECK_F("3! + 4", 10);
+    CHECK_NAN("fact(-1)");                       /* undefined for negatives */
+    CHECK_NAN("fact(2.5)");                      /* only defined on integers here */
+    CHECK_F("ncr(5, 2)", 10);
+    CHECK_F("ncr(10, 3)", 120);
+    CHECK_F("ncr(52, 5)", 2598960);              /* poker hands */
+    CHECK_F("ncr(20, 10)", 184756);             /* larger: the multiplicative form doesn't overflow */
+    CHECK_F("npr(5, 2)", 20);
+    CHECK_F("npr(10, 3)", 720);
+    CHECK_NAN("ncr(3, 5)");                       /* r > n */
+    CHECK_ERR("ncr(5)");                          /* needs two args */
+    CHECK_ERR("gcd(4)");
+    CHECK_F("gcd(12, 18)", 6);
+    CHECK_F("gcd(17, 5)", 1);                     /* coprime */
+    CHECK_F("gcd(0, 9)", 9);
+    CHECK_F("lcm(4, 6)", 12);
+    CHECK_F("lcm(21, 6)", 42);
+    CHECK_F("lcm(7, 0)", 0);
+
+    /* --- binary literals: 0b... (M1812) --- */
+    CHECK_F("0b1010", 10);
+    CHECK_F("0b11111111", 255);
+    CHECK_F("0b0", 0);
+    CHECK_F("0b101 & 0b110", 4);                  /* binary literals compose with bitwise ops: 5 & 6 = 4 */
+    CHECK_F("0b1 << 4", 16);
+    CHECK_ERR("0b");                              /* 0b with no binary digits */
+
     /* --- degrees angle mode (M1738): trig args are degrees, inverse trig returns degrees --- */
     calc_angle_deg = 1;
     CHECK_F("sin(90)", 1);                      /* sin 90deg = 1 */
