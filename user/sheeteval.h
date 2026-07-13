@@ -26,6 +26,7 @@
  *              AND/OR(...) NOT(x)  (logical);
  *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) TRUNC(x[,dp]) MOD POW/POWER
  *            SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
+ *            MATCH(key,range,[type]) INDEX(range,row,[col]) VLOOKUP(key,range,col,[exact])
  */
 #ifndef SHEETEVAL_H
 #define SHEETEVAL_H
@@ -236,6 +237,20 @@ static void dsort(double *v, int n) {                  /* insertion sort (n is s
     for (int i = 1; i < n; i++) { double k = v[i]; int j = i - 1; while (j >= 0 && v[j] > k) { v[j + 1] = v[j]; j--; } v[j + 1] = k; }
 }
 
+/* Parse a "ref" or "ref:ref" range argument at pcur into [r1,c1]-[r2,c2],
+ * normalized so r1<=r2 and c1<=c2. Returns 1 on success, 0 (perr set) on failure.
+ * Used by the lookup functions (MATCH/INDEX/VLOOKUP, M1813). */
+static int parse_range_arg(int *r1, int *c1, int *r2, int *c2) {
+    skipws();
+    if (!parse_ref_cursor(r1, c1)) { perr = ERR_SYNTAX; return 0; }
+    skipws();
+    if (*pcur == ':') { pcur++; skipws(); if (!parse_ref_cursor(r2, c2)) { perr = ERR_SYNTAX; return 0; } }
+    else { *r2 = *r1; *c2 = *c1; }
+    if (*r1 > *r2) { int t = *r1; *r1 = *r2; *r2 = t; }
+    if (*c1 > *c2) { int t = *c1; *c1 = *c2; *c2 = t; }
+    return 1;
+}
+
 /* Dispatch a function by name; '(' has already been consumed. */
 static double call_function(const char *name) {
     if (nameeq(name, "MEDIAN") || nameeq(name, "MODE")) {       /* need the sorted value distribution */
@@ -346,6 +361,68 @@ static double call_function(const char *name) {
         if (nameeq(name, "COUNTIF"))   return (double)cnt;
         if (nameeq(name, "AVERAGEIF")) return cnt ? sum / (double)cnt : 0;
         return sum;                                          /* SUMIF */
+    }
+
+    /* lookup functions (M1813). This engine has only #ERR/#CIRC, so a "not found"
+     * surfaces as #ERR (via ERR_SYNTAX) rather than Excel's #N/A. */
+    if (nameeq(name, "MATCH")) {                             /* MATCH(key, range, [type]) -> 1-based position */
+        double key = eval_compare();
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        int r1, c1, r2, c2;
+        if (!parse_range_arg(&r1, &c1, &r2, &c2)) return 0;
+        int type = 1;                                        /* 1 = largest value <= key (ascending, default), 0 = exact, -1 = smallest >= key */
+        skipws();
+        if (*pcur == ',') { pcur++; type = (int)eval_compare(); }
+        skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        int pos = 0, idx = 0, have = 0; double best = 0;
+        for (int r = r1; r <= r2; r++) for (int c = c1; c <= c2; c++) {   /* row-major over the 1-D vector; idx counts every cell */
+            idx++;
+            eval_cell(r, c); cell_t *cell = CELL(r, c);
+            if (!cell->is_num) continue;
+            double v = cell->val;
+            if (type == 0) { if (v == key && !pos) pos = idx; }                             /* first exact match */
+            else if (type == 1) { if (v <= key && (!have || v >= best)) { best = v; pos = idx; have = 1; } }
+            else { if (v >= key && (!have || v <= best)) { best = v; pos = idx; have = 1; } }
+        }
+        if (pos == 0) { perr = ERR_SYNTAX; return 0; }
+        return (double)pos;
+    }
+    if (nameeq(name, "INDEX")) {                             /* INDEX(range, row_num, [col_num]) -> the cell value */
+        int r1, c1, r2, c2;
+        if (!parse_range_arg(&r1, &c1, &r2, &c2)) return 0;
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        int row_num = (int)eval_compare(), col_num = 0;
+        skipws();
+        if (*pcur == ',') { pcur++; col_num = (int)eval_compare(); }
+        skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        int nr = r2 - r1 + 1, rr, cc;
+        if (col_num >= 1) { rr = r1 + row_num - 1; cc = c1 + col_num - 1; }   /* 2-D (both 1-based) */
+        else if (nr == 1) { rr = r1; cc = c1 + row_num - 1; }                 /* single row: index picks the column */
+        else { rr = r1 + row_num - 1; cc = c1; }                             /* single column: index picks the row */
+        if (rr < r1 || rr > r2 || cc < c1 || cc > c2) { perr = ERR_SYNTAX; return 0; }
+        return get_cell_value(rr, cc);
+    }
+    if (nameeq(name, "VLOOKUP")) {                           /* VLOOKUP(key, range, col_index, [exact?]) */
+        double key = eval_compare();
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        int r1, c1, r2, c2;
+        if (!parse_range_arg(&r1, &c1, &r2, &c2)) return 0;
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        int col_index = (int)eval_compare(), approx = 1;     /* default TRUE = approximate (largest <= key, sorted 1st column) */
+        skipws();
+        if (*pcur == ',') { pcur++; approx = (eval_compare() != 0.0); }
+        skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        if (col_index < 1 || c1 + col_index - 1 > c2) { perr = ERR_SYNTAX; return 0; }
+        int found_r = -1, have = 0; double best = 0;
+        for (int r = r1; r <= r2; r++) {
+            eval_cell(r, c1); cell_t *cell = CELL(r, c1);    /* search the first column */
+            if (!cell->is_num) continue;
+            double v = cell->val;
+            if (approx) { if (v <= key && (!have || v >= best)) { best = v; found_r = r; have = 1; } }
+            else if (v == key) { found_r = r; break; }
+        }
+        if (found_r < 0) { perr = ERR_SYNTAX; return 0; }
+        return get_cell_value(found_r, c1 + col_index - 1);
     }
 
     /* fixed-arity scalar functions */

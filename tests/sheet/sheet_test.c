@@ -191,6 +191,30 @@ int main(void) {
     set_raw(0, 0, "1"); set_raw(0, 1, "2"); set_raw(1, 0, "3"); set_raw(1, 1, "4");
     set_raw(3, 3, "=SUM(A1:B2)"); recompute(); chk_num(3, 3, 10, "2-D range sum");
 
+    /* --- lookup functions: MATCH / INDEX / VLOOKUP (M1813) -----------------*/
+    clear_all();
+    set_raw(0, 0, "10"); set_raw(1, 0, "20"); set_raw(2, 0, "30"); set_raw(3, 0, "40");    /* A1:A4 keys */
+    set_raw(0, 1, "100"); set_raw(1, 1, "200"); set_raw(2, 1, "300"); set_raw(3, 1, "400"); /* B1:B4 values */
+    set_raw(0, 3, "=MATCH(30,A1:A4,0)");  recompute(); chk_num(0, 3, 3, "MATCH exact");
+    set_raw(0, 3, "=MATCH(20,A1:A4,0)");  recompute(); chk_num(0, 3, 2, "MATCH exact 2");
+    set_raw(0, 3, "=MATCH(25,A1:A4,1)");  recompute(); chk_num(0, 3, 2, "MATCH approx (largest<=25)");
+    set_raw(0, 3, "=MATCH(50,A1:A4,1)");  recompute(); chk_num(0, 3, 4, "MATCH approx past end");
+    set_raw(0, 3, "=MATCH(30,A1:A4)");    recompute(); chk_num(0, 3, 3, "MATCH default type hits exact");
+    set_raw(0, 3, "=INDEX(A1:A4,3)");     recompute(); chk_num(0, 3, 30, "INDEX single column");
+    set_raw(0, 3, "=INDEX(B1:B4,2)");     recompute(); chk_num(0, 3, 200, "INDEX single column 2");
+    set_raw(0, 3, "=INDEX(A1:B4,2,2)");   recompute(); chk_num(0, 3, 200, "INDEX 2-D (row,col)");
+    set_raw(0, 3, "=INDEX(A1:B4,4,1)");   recompute(); chk_num(0, 3, 40, "INDEX 2-D col 1");
+    set_raw(0, 3, "=INDEX(B1:B4,MATCH(30,A1:A4,0))"); recompute(); chk_num(0, 3, 300, "INDEX+MATCH composition");
+    set_raw(0, 3, "=VLOOKUP(30,A1:B4,2,0)"); recompute(); chk_num(0, 3, 300, "VLOOKUP exact");
+    set_raw(0, 3, "=VLOOKUP(20,A1:B4,2,0)"); recompute(); chk_num(0, 3, 200, "VLOOKUP exact 2");
+    set_raw(0, 3, "=VLOOKUP(25,A1:B4,2,1)"); recompute(); chk_num(0, 3, 200, "VLOOKUP approx");
+    set_raw(0, 3, "=VLOOKUP(40,A1:B4,2,1)"); recompute(); chk_num(0, 3, 400, "VLOOKUP approx exact-hit");
+    set_raw(0, 3, "=VLOOKUP(10,A1:B4,1,0)"); recompute(); chk_num(0, 3, 10, "VLOOKUP col 1 = key column");
+    /* not-found / bad-column surface as #ERR (this engine has no #N/A) */
+    set_raw(0, 3, "=MATCH(99,A1:A4,0)");    recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("MATCH not-found should be #ERR (got %d)", CELL(0, 3)->err);
+    set_raw(0, 3, "=VLOOKUP(99,A1:B4,2,0)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("VLOOKUP not-found should be #ERR (got %d)", CELL(0, 3)->err);
+    set_raw(0, 3, "=VLOOKUP(30,A1:B4,5,0)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("VLOOKUP bad col_index should be #ERR (got %d)", CELL(0, 3)->err);
+
     /* --- circular references ----------------------------------------------*/
     clear_all(); set_raw(0, 0, "=A1"); recompute();
     checks++; if (CELL(0, 0)->err != ERR_CIRC) FAILN("self-ref A1=A1 should be #CIRC (got %d)", CELL(0, 0)->err);
