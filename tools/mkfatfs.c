@@ -73,6 +73,16 @@ static const struct {
                      "set +x\n"
                      "((sq = 6 * 7)); echo arithmetic command: 6 times 7 is $sq\n"
                      "echo == demo complete -- type help for more ==\n" },
+    { "WHRD    SH ", "# while read demo -- run it with:  source WHRD.SH\n"
+                     "echo alpha > /tmp/LINES.TXT\n"
+                     "echo beta >> /tmp/LINES.TXT\n"
+                     "echo gamma >> /tmp/LINES.TXT\n"
+                     "echo single var:\n"
+                     "while read x; do echo got: $x; done < /tmp/LINES.TXT\n"
+                     "echo one two three > /tmp/COLS.TXT\n"
+                     "echo four five six >> /tmp/COLS.TXT\n"
+                     "echo multi var:\n"
+                     "while read a b; do echo a=$a b=$b; done < /tmp/COLS.TXT\n" },
     { "SEDI    SH ", "# sed -i (in-place edit) demo -- run it with:  source SEDI.SH\n"
                      "echo one two three > /tmp/SEDT.TXT\n"
                      "echo sedi before:; cat /tmp/SEDT.TXT\n"

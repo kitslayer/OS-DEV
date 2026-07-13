@@ -101,6 +101,23 @@ static int g_xtrace;        /* `set -x`: print each command as `+ cmd` before ru
 static int g_errexit;       /* `set -e`: abort the running script when a command fails (M1809) */
 static int g_errexit_tripped; /* latch: a command failed under -e; unwinds the script like g_returning, cleared at the source/prompt boundary */
 static int g_cond_depth;    /* >0 while evaluating an if/while/until condition or a &&/|| left side, where -e must NOT fire */
+/* `while read LINE; do …; done < FILE` (M1811): the loop slurps FILE into this
+ * source and the `read` builtin drains it a line at a time, returning EOF ($?=1)
+ * so the loop terminates. g_reading nests (a loop inside a loop restores it). */
+static char *g_read_src; static long g_read_pos, g_read_len; static int g_reading;
+/* Copy the next line (without its '\n') from the read source into out[0..cap);
+ * returns 1 if a line was available, 0 at EOF. */
+static int sh_read_next(char *out, int cap) {
+    if (!g_reading || g_read_pos >= g_read_len) return 0;
+    int o = 0;
+    while (g_read_pos < g_read_len && g_read_src[g_read_pos] != '\n') {
+        if (o < cap - 1) out[o++] = g_read_src[g_read_pos];
+        g_read_pos++;
+    }
+    if (g_read_pos < g_read_len && g_read_src[g_read_pos] == '\n') g_read_pos++;   /* consume the newline */
+    out[o] = 0;
+    return 1;
+}
 static int source_depth;   /* recursion guard for `source` (scripts sourcing scripts) */
 static char prevcwd[128];  /* the directory before the last cd, for `cd -` */
 static void scpy(char *d, const char *s) { int i = 0; while (s[i] && i < 127) { d[i] = s[i]; i++; } d[i] = 0; }
@@ -822,10 +839,34 @@ static int run_command(char *line, char *cwd) {
         } else if (streq(line, "set") || streq(line, "env")) {                       /* list all variables */
             for (int i = 0; i < g_nvars; i++) { sys_setcolor(4); print(g_vars[i].name); sys_setcolor(8); print("="); sys_setcolor(0); print(g_vars[i].val); print("\n"); }   /* NAME cyan, = grey, value default (M1324) */
             if (g_nvars == 0) print("(no variables set)\n");
-        } else if (startswith(line, "read ")) {                                       /* read a line of input into a variable */
+        } else if (startswith(line, "read ")) {                                       /* read a line of input into variable(s) */
             char *p = line + 5; while (*p == ' ') p++; sh_unprot_buf(p);
-            int nl = 0; while (p[nl] && p[nl] != ' ') nl++;
-            if (nl > 0) { char rb[256]; readline(rb, sizeof rb); vset(p, nl, rb); }
+            char rb[256]; int got;
+            if (g_reading) got = sh_read_next(rb, sizeof rb);   /* `while read; done < FILE`: next line, or EOF */
+            else { readline(rb, sizeof rb); got = 1; }          /* interactive: a keyed line always "succeeds" */
+            if (!got) g_status = 1;                             /* EOF -> $?=1 so `while read` stops */
+            else {
+                g_status = 0;
+                /* split rb across the named vars: each earlier var gets one whitespace word,
+                 * the LAST var gets the whole remainder (bash `read a b c`). One var = whole line. */
+                const char *r = rb;
+                while (*p) {
+                    while (*p == ' ') p++;
+                    if (!*p) break;
+                    int nl = 0; while (p[nl] && p[nl] != ' ') nl++;   /* this target var name */
+                    const char *next = p + nl; while (*next == ' ') next++;
+                    while (*r == ' ' || *r == '\t') r++;              /* skip leading blanks of this field */
+                    char val[256]; int vi = 0;
+                    if (*next) {                                     /* more vars follow: take ONE word */
+                        while (*r && *r != ' ' && *r != '\t' && vi < 255) val[vi++] = *r++;
+                    } else {                                         /* last var: take the remainder, trim trailing blanks */
+                        while (*r && vi < 255) val[vi++] = *r++;
+                        while (vi > 0 && (val[vi-1] == ' ' || val[vi-1] == '\t')) vi--;
+                    }
+                    val[vi] = 0; vset(p, nl, val);
+                    p += nl;
+                }
+            }
         } else if (startswith(line, "unset ")) {
             char *p = line + 6; while (*p == ' ') p++; sh_unprot_buf(p); vunset(p);
         } else if (streq(line, "ls")) {
@@ -7435,6 +7476,19 @@ static int run_while_until(char *line, char *cwd, int invert) {
     char *body = q;
     int blen = (int)ustrlen(body);
     while (blen > 0 && body[blen-1]==' ') body[--blen]=0;
+    /* M1811: optional `done < FILE` — feeds the `read` builtin inside the loop (while read line; do …; done < f).
+     * Only probed when the body doesn't already end in "done", so an inner `cmd < f` in the body is untouched. */
+    char readfile[160]; int has_readfile = 0; readfile[0] = 0;
+    if (!(blen >= 4 && streq(body+blen-4, "done"))) {
+        char *lt = 0; for (int k = 0; k < blen; k++) if (body[k] == '<') lt = body + k;   /* the last '<' */
+        if (lt) {
+            const char *fp = lt + 1; while (*fp == ' ') fp++;
+            int fi = 0; while (*fp && fi < 159) readfile[fi++] = SH_UNPROT(*fp++);
+            while (fi > 0 && readfile[fi-1] == ' ') fi--; readfile[fi] = 0;
+            char *be = lt; while (be > body && be[-1] == ' ') be--; *be = 0; blen = (int)(be - body);   /* body := up to '<' */
+            if (blen >= 4 && streq(body+blen-4, "done") && readfile[0]) has_readfile = 1;
+        }
+    }
     if (!(blen >= 4 && streq(body+blen-4, "done"))) { print(kw); print(": missing 'done'\n"); g_status = 1; return 0; }
     blen -= 4; while (blen>0 && body[blen-1]==' ') blen--;
     if (blen>0 && body[blen-1]==';') blen--;
@@ -7442,6 +7496,14 @@ static int run_while_until(char *line, char *cwd, int invert) {
     body[blen] = 0;
     int doexit = 0, iters = 0;
     char condbuf[1024], bodybuf[1024];
+    /* M1811: install the `read` source from `done < FILE`, saving any enclosing loop's source (nesting-safe) */
+    char *rd_save_src = g_read_src; long rd_save_pos = g_read_pos, rd_save_len = g_read_len; int rd_save_reading = g_reading;
+    char *rdbuf = 0;
+    if (has_readfile) {
+        long rn; rdbuf = slurp(readfile, &rn);
+        if (rdbuf) { g_read_src = rdbuf; g_read_pos = 0; g_read_len = rn; g_reading = 1; }
+        else { print(kw); print(": no such file: "); print(readfile); print("\n"); g_read_src = 0; g_read_pos = 0; g_read_len = 0; g_reading = 1; }  /* empty -> 0 iterations */
+    }
     g_loopdepth++;
     while (!doexit) {
         if (iters >= 100000) { print("\n"); print(kw); print(": stopped at 100000 iterations\n"); break; }
@@ -7456,6 +7518,7 @@ static int run_while_until(char *line, char *cwd, int invert) {
         iters++;
     }
     g_loopdepth--;
+    if (has_readfile) { free(rdbuf); g_read_src = rd_save_src; g_read_pos = rd_save_pos; g_read_len = rd_save_len; g_reading = rd_save_reading; }
     return doexit;
 }
 static int run_while(char *line, char *cwd) { return run_while_until(line, cwd, 0); }

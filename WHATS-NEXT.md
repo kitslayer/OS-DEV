@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1811) Shell `while read LINE; do … done < FILE` — line-by-line file processing.** The canonical shell idiom now works. A new read source (`g_read_src`/`g_read_pos`/`g_read_len`, saved & restored so loops nest) is filled when `run_while_until` sees a `done < FILE` redirect (slurped once); the `read` builtin drains it a line at a time and returns `$?=1` at EOF so the `while` terminates. `read` also gained bash's multi-variable split — `read a b` binds `a` to the first word and `b` to the whole remainder (one var = the whole line); interactive `read` (no redirect) still uses the line editor. `until … done < FILE` works too (shared executor).
+> 
+> **Verified:** in-guest osdrive `source WHRD.SH`: `while read x; do echo got: $x; done < /tmp/LINES.TXT` prints `got: alpha`/`beta`/`gamma` then stops at EOF, and `while read a b … < /tmp/COLS.TXT` prints `a=one b=two three` / `a=four b=five six`. Kernel builds clean; full `make check` green.
+> 
 > **(M1810) Shell `sed -i` — in-place file edit.** `sed -i 's/RE/REPL/[gi]' FILE` now rewrites the file in place instead of streaming to stdout — the dominant real-world sed use (`sed … > tmp && mv` was the only prior option). The `-i` flag is detected before the script; the per-line loop accumulates the transformed output into a grown buffer and, at the end, writes it over the file via `sys_writefile` (final-newline state preserved from the input); `-i` with no file is an error. The stream form (no `-i`) is byte-for-byte unchanged.
 > 
 > **Verified:** in-guest osdrive `source SEDI.SH` writes `one two three` to `/tmp/SEDT.TXT`, runs `sed -i 's/two/TWO/'`, and `cat` then shows `one TWO three` — the on-disk file was edited in place. Kernel builds clean; full `make check` green.
