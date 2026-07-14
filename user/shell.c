@@ -814,7 +814,7 @@ static int run_command(char *line, char *cwd) {
             continue;
         } else if (streq(line, "help")) {
             helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir[-p] touch ln<-s tgt link> cd pwd basename<p [suf]> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump hexedit<file> strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
-            helpline("net:    get<url> headers<url> wget<url file> browse<url> wsget<ws://url [msg]> (WebSocket send+echo)\n");
+            helpline("net:    get<url> headers<url> wget<url file> browse<url> wsget<ws://url [msg]> wsserve[ port] (WebSocket client/server)\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
             print("        sntp / ntpdate (set the wall clock from pool.ntp.org over UDP)\n");
@@ -6719,6 +6719,25 @@ static int run_command(char *line, char *cwd) {
                         for (int k = 0; k < nrecv; k++) { print("  <- "); print(q); print("\n"); int L = 0; while (q[L]) L++; q += L + 1; }
                     }
                 }
+            }
+        } else if (streq(line, "wsserve") || startswith(line, "wsserve ")) {
+            /* wsserve [port] — accept ONE WebSocket client on `port` (default 8080)
+             * and echo its frames back, then report. The server side of the M1849
+             * from-scratch WebSocket (RFC 6455 handshake w/ SHA-1 accept key). */
+            const char *p = streq(line, "wsserve") ? "" : line + 7;
+            while (*p == ' ') p++;
+            int port = 0; while (*p >= '0' && *p <= '9') port = port * 10 + (*p++ - '0');
+            if (port <= 0) port = 8080;
+            char num[12]; itoa_simple(port, num);
+            print("wsserve: listening for one WebSocket client on port "); print(num); print(" (~60s)...\n");
+            char last[256]; int nf = 0;
+            long r = sys_ws_serve(port, last, sizeof last, &nf);
+            if (r < 0) { print("wsserve: no client connected / not a WebSocket handshake\n"); g_status = 1; }
+            else {
+                itoa_simple(nf, num);
+                print("wsserve: served 1 client, echoed "); print(num); print(" frame(s)");
+                if (nf > 0) { print("; last message: \""); print(last); print("\""); }
+                print("\n");
             }
         } else if (startswith(line, "headers ")) {
             /* curl -I style: show just the HTTP response headers — status line,

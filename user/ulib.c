@@ -154,6 +154,7 @@ long sys_tcp_serve(int port, const void *resp, unsigned long resp_len, void *req
 long sys_tcp_accept(int port, void *reqbuf, unsigned long reqmax) { return do_syscall(SYS_tcp_accept, (long)port, (long)reqbuf, (long)reqmax); }
 long sys_tcp_respond(const void *resp, unsigned long resp_len) { return do_syscall(SYS_tcp_respond, (long)resp, (long)resp_len, 0); }
 long sys_ws_open(const char *url, int *status) { return do_syscall(SYS_ws_open, (long)url, (long)status, 0); }
+long sys_ws_serve(int port, char *lastmsg, int lastmax, int *nframes) { return do_syscall4(SYS_ws_serve, port, (long)lastmsg, lastmax, (long)nframes); }
 long sys_ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv) {
     long ret;                                            /* 6 args: id,sendbuf,sendtot in rdi/rsi/rdx; out,outmax,nrecv via r10/r8/r9 */
     register long r10 __asm__("r10") = (long)out;

@@ -26,6 +26,10 @@ int http_get_sse(const char *host, const char *path, char *out, int max);
  * then reads the reply frames NUL-separated into `out` (*nrecv = count). */
 int ws_open(const char *url, int *status);
 int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv);
+/* WebSocket SERVER (M1849): accept one client on `port`, handshake, echo its
+ * frames back until it closes; *nframes = frames echoed, lastmsg = last payload.
+ * Returns frames echoed / -1. Blocking. */
+int ws_serve(uint16_t port, char *lastmsg, int lastmax, int *nframes);
 /* HTTP/1.0 POST: sends `body` (bodylen) with Content-Type `ctype`; raw response into out. -1 on error. (M702) */
 int http_post(const char *host, const char *path, const char *ctype, const char *body, int bodylen, char *out, int max);
 

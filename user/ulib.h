@@ -153,6 +153,7 @@ long sys_http(const char *host, const char *path, void *buf, unsigned long max);
 long sys_https(const char *host, const char *path, void *buf, unsigned long max);
 long sys_ws_open(const char *url, int *status);   /* WebSocket connect + handshake; conn id / -1 (M1846) */
 long sys_ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv);  /* send + recv frames (M1846) */
+long sys_ws_serve(int port, char *lastmsg, int lastmax, int *nframes);   /* accept 1 WS client + echo; frames/-1 (M1849) */
 long sys_spawn(const char *name);
 long sys_spawn_arg(const char *name, const char *arg);   /* launch with an arg (e.g. `run editor FILE`) */
 long sys_browse(const char *url);

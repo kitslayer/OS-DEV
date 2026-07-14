@@ -136,6 +136,23 @@ int main(void) {
         }
     }
 
+    /* --- server frames are UNMASKED and parse back correctly --- */
+    {
+        uint8_t f[300], out[300]; uint64_t pl; size_t used; int fin, op;
+        long fl = ws_build_server_frame(WS_OP_TEXT, (const uint8_t *)"hi there", 8, f, sizeof f);
+        OK(fl == 10);                                   /* 2 header + 8 payload, no mask key */
+        OK((f[1] & 0x80) == 0);                          /* MASK bit clear */
+        OK(ws_parse_frame(f, (size_t)fl, &fin, &op, out, sizeof out, &pl, &used) == 1);
+        OK(op == WS_OP_TEXT && pl == 8 && memcmp(out, "hi there", 8) == 0);
+        /* 16-bit length path, unmasked */
+        static uint8_t big[400], sf[500]; memset(big, 'Z', sizeof big);
+        fl = ws_build_server_frame(WS_OP_BIN, big, 400, sf, sizeof sf);
+        OK(fl == 2 + 2 + 400 && (sf[1] & 0x7f) == 126 && (sf[1] & 0x80) == 0);
+        static uint8_t ob[400];
+        OK(ws_parse_frame(sf, (size_t)fl, &fin, &op, ob, sizeof ob, &pl, &used) == 1);
+        OK(op == WS_OP_BIN && pl == 400 && memcmp(ob, big, 400) == 0);
+    }
+
     /* --- fuzz: random length + payload + key, build then parse, exact match --- */
     {
         srand(20260714u);

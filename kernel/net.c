@@ -25,6 +25,7 @@
 #include "kheap.h"      /* kmalloc/kfree — WebSocket transport working buffers (M1846) */
 #include "wsframe.h"    /* RFC 6455 frame codec (M1843) */
 #include "wsclient.h"   /* RFC 6455 client handshake helpers (M1845) */
+#include "sha1.h"       /* SHA-1 — WebSocket server accept-key digest (M1849) */
 #include <stdint.h>
 
 /* The SLIRP defaults — used as-is until a DHCP lease (net_dhcp) overwrites them. */
@@ -1048,6 +1049,99 @@ int net_tcp_respond(const uint8_t *resp, int resp_len) {
     }
     g_srvconn.active = 0;
     return 0;
+}
+
+/* WebSocket SERVER (M1849): listen on `port`, accept ONE client, do the RFC 6455
+ * server handshake (SHA-1 accept key), then echo each TEXT/BIN frame back
+ * (unmasked) until the client sends CLOSE/FIN or ~60s elapses. `lastmsg`/`lastmax`
+ * receive the last echoed payload (for a caller summary); *nframes = frames
+ * echoed. Returns frames echoed (>=0), or -1 on accept/handshake failure.
+ * Built on the g_srvconn segment primitive (same seq/ACK handling as
+ * net_tcp_accept/respond), extended to a persistent framed exchange. Blocking. */
+static int ci_find_hdr(const char *buf, const char *name, char *val, int valmax) {
+    for (const char *p = buf; *p; p++) {                 /* case-insensitive header scan */
+        const char *a = p, *b = name; int m = 1;
+        while (*b) { char ca = *a, cb = *b; if (ca>='A'&&ca<='Z') ca+=32; if (cb>='A'&&cb<='Z') cb+=32; if (ca!=cb){m=0;break;} a++; b++; }
+        if (!m) continue;
+        while (*a == ' ' || *a == ':') a++;              /* skip ": " */
+        int i = 0; while (*a && *a != '\r' && *a != '\n' && i < valmax-1) val[i++] = *a++;
+        val[i] = 0; return i;
+    }
+    return 0;
+}
+int ws_serve(uint16_t port, char *lastmsg, int lastmax, int *nframes) {
+    if (nframes) *nframes = 0;
+    static uint8_t req[2048];
+    int reqlen = net_tcp_accept(port, req, sizeof req - 1, 6000);   /* wait up to ~60s for a client */
+    if (reqlen < 0) return -1;
+    req[reqlen] = 0;
+
+    char key[96];
+    if (!ci_find_hdr((const char *)req, "sec-websocket-key:", key, sizeof key)) {
+        const char *no = "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nnot a WebSocket upgrade\n";
+        net_tcp_respond((const uint8_t *)no, (int)strlen(no));       /* sends + FIN + clears g_srvconn */
+        return -1;
+    }
+    char cat[160]; int cl = 0;                                       /* key + RFC 6455 magic GUID */
+    for (const char *s = key; *s && cl < 120; s++) cat[cl++] = *s;
+    for (const char *s = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"; *s && cl < 158; s++) cat[cl++] = *s;
+    uint8_t dg[20]; sha1_hash((const uint8_t *)cat, (size_t)cl, dg);
+    char accept[32]; ws_base64(dg, 20, accept);
+
+    char resp[256]; int rl = 0;
+    const char *parts[] = { "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                            "Connection: Upgrade\r\nSec-WebSocket-Accept: ", accept, "\r\n\r\n" };
+    for (unsigned k = 0; k < 3; k++) for (const char *s = parts[k]; *s && rl < (int)sizeof resp; s++) resp[rl++] = *s;
+    tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                 g_srvconn.our_seq, g_srvconn.their_seq, TCP_PSH | TCP_ACK, (uint8_t *)resp, rl);
+    g_srvconn.our_seq += rl;
+
+    static uint8_t rbuf[8192], of[8300], payload[8192];
+    int rn = 0, frames = 0, closing = 0;
+    uint8_t buf[1600], *tcp; int dlen;
+    uint64_t budget = timer_ticks() + 6000;
+    while (!closing && timer_ticks() < budget) {
+        if (!srv_rx(buf, sizeof buf, g_srvconn.lport, g_srvconn.cport, g_srvconn.cip,
+                    timer_ticks() + 100, &tcp, &dlen)) continue;      /* idle: keep waiting within budget */
+        if (tcp[13] & TCP_RST) break;
+        int thl = (tcp[12] >> 4) * 4;
+        if (tcp[13] & TCP_FIN) { g_srvconn.their_seq += dlen + 1;      /* client half-close */
+            tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                         g_srvconn.our_seq, g_srvconn.their_seq, TCP_ACK, 0, 0);
+            closing = 1; break;
+        }
+        if (dlen <= 0 || get32(tcp + 4) != g_srvconn.their_seq) continue;   /* pure ACK / retransmit */
+        if (rn + dlen <= (int)sizeof rbuf) { memcpy(rbuf + rn, tcp + thl, dlen); rn += dlen; }
+        g_srvconn.their_seq += dlen;
+        tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                     g_srvconn.our_seq, g_srvconn.their_seq, TCP_ACK, 0, 0);
+        int fin, op; uint64_t pl; size_t used; int r;
+        while ((r = ws_parse_frame(rbuf, (size_t)rn, &fin, &op, payload, sizeof payload - 1, &pl, &used)) == 1) {
+            if (op == WS_OP_CLOSE) { closing = 1; }
+            else if (op == WS_OP_TEXT || op == WS_OP_BIN) {
+                long ol = ws_build_server_frame((uint8_t)op, payload, pl, of, sizeof of);
+                if (ol > 0) {
+                    tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                                 g_srvconn.our_seq, g_srvconn.their_seq, TCP_PSH | TCP_ACK, of, (int)ol);
+                    g_srvconn.our_seq += ol;
+                }
+                frames++;
+                if (lastmsg && lastmax > 0) { int c = pl < (uint64_t)(lastmax - 1) ? (int)pl : lastmax - 1; memcpy(lastmsg, payload, c); lastmsg[c] = 0; }
+            }
+            memmove(rbuf, rbuf + used, (size_t)rn - used); rn -= (int)used;
+            if (closing) break;
+        }
+        if (r == -1) break;
+    }
+    uint8_t cf[4]; long cfl = ws_build_server_frame(WS_OP_CLOSE, (const uint8_t *)"", 0, cf, sizeof cf);
+    if (cfl > 0) { tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                                g_srvconn.our_seq, g_srvconn.their_seq, TCP_PSH | TCP_ACK, cf, (int)cfl); g_srvconn.our_seq += cfl; }
+    tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                 g_srvconn.our_seq, g_srvconn.their_seq, TCP_FIN | TCP_ACK, 0, 0);
+    g_srvconn.our_seq += 1;
+    g_srvconn.active = 0;
+    if (nframes) *nframes = frames;
+    return frames;
 }
 
 int net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,

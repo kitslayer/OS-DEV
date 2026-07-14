@@ -54,6 +54,31 @@ static inline long ws_build_client_frame(uint8_t opcode, const uint8_t *payload,
     return (long)p;
 }
 
+/* Build one UNMASKED server frame (FIN=1) for `opcode` carrying `payload`
+ * (`len` bytes) into `out` (capacity `outcap`). RFC 6455 forbids a server from
+ * masking; this is the counterpart to ws_build_client_frame for the WS server
+ * (M1849). Returns the total frame length, or -1 if it wouldn't fit. */
+static inline long ws_build_server_frame(uint8_t opcode, const uint8_t *payload,
+                                         uint64_t len, uint8_t *out, size_t outcap) {
+    size_t hdr = 2;
+    if (len > 65535) hdr += 8; else if (len >= 126) hdr += 2;   /* no mask key */
+    if (outcap < hdr || (uint64_t)(outcap - hdr) < len) return -1;
+    size_t p = 0;
+    out[p++] = (uint8_t)(0x80 | (opcode & 0x0f));      /* FIN=1 + opcode, MASK=0 */
+    if (len > 65535) {
+        out[p++] = 127;
+        for (int i = 7; i >= 0; i--) out[p++] = (uint8_t)(len >> (i * 8));
+    } else if (len >= 126) {
+        out[p++] = 126;
+        out[p++] = (uint8_t)(len >> 8);
+        out[p++] = (uint8_t)(len & 0xff);
+    } else {
+        out[p++] = (uint8_t)len;
+    }
+    for (uint64_t i = 0; i < len; i++) out[p++] = payload[i];
+    return (long)p;
+}
+
 /* Parse a single frame from the front of `in` (inlen bytes buffered).
  * Returns:
  *   1  a complete frame was parsed: *consumed = its total byte length, with
