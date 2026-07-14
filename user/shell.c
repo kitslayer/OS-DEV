@@ -7219,6 +7219,25 @@ static int run_line(char *line, char *cwd) {
         break;
     }
 
+    /* Here-string `cmd <<< STRING` (M1820): write STRING (+ a trailing newline) to
+     * a temp file and rewrite to `cmd /tmp/HERESTR`, i.e. append it as the input
+     * arg — the same file-arg convention the `<` redirect below uses. $VARs in
+     * STRING are already expanded (expand_vars ran above). Handled before the
+     * single-`<` scan so the `<<<` isn't mis-read as a plain input redirect. */
+    for (int i = 0; cmd[i]; i++) if (cmd[i] == '<' && cmd[i+1] == '<' && cmd[i+2] == '<') {
+        char *str = &cmd[i+3]; while (*str == ' ') str++;
+        char sb[1024]; int sl = 0; while (str[sl] && sl < 1022) { sb[sl] = str[sl]; sl++; } sb[sl] = 0;
+        sh_unprot_buf(sb);                                                   /* reveal quoted "..."/'...' bytes */
+        int e2 = 0; while (sb[e2]) e2++; while (e2 > 0 && sb[e2-1] == ' ') sb[--e2] = 0;   /* trim trailing spaces */
+        sb[e2++] = '\n';                                                     /* here-strings add one trailing newline */
+        sys_writefile("/tmp/HERESTR", sb, (unsigned long)e2);
+        cmd[i] = 0;
+        while (i > 0 && cmd[i-1] == ' ') cmd[--i] = 0;                       /* trim spaces before <<< */
+        int e = i; if (e < 1008) cmd[e++] = ' ';
+        const char *tf = "/tmp/HERESTR"; for (int k = 0; tf[k] && e < 1022; k++) cmd[e++] = tf[k]; cmd[e] = 0;
+        break;
+    }
+
     /* Input redirect `cmd < file`: our commands read a file argument, so rewrite
      * it to `cmd file` (append the input file as a trailing arg). The result is
      * never longer than the original, so it rewrites cmd[] in place safely. */
@@ -7613,6 +7632,70 @@ static int run_input_line(char *line, char *cwd) {
 /* Run shell commands from a file: each non-blank, non-'#' line goes through the
  * same executor as interactive input. `silent` suppresses the not-found message
  * (used for the optional startup .shrc). */
+/* Index of a here-doc `<<` operator in a script line, or -1. Skips a `<<` that is
+ * quoted, inside `((`/`$((` arithmetic, or actually `<<<` (a here-string, which
+ * run_line handles on its own). (M1820) */
+static int sh_heredoc_op(const char *s) {
+    char q = 0; int paren = 0;
+    for (int i = 0; s[i]; i++) {
+        char c = s[i];
+        if (q) { if (c == q) q = 0; continue; }
+        if (c == '"' || c == '\'') { q = c; continue; }
+        if (c == '(') { paren++; continue; }
+        if (c == ')') { if (paren > 0) paren--; continue; }
+        if (paren > 0) continue;                       /* inside (...) / $((...)): << is arithmetic */
+        if (c == '<' && s[i+1] == '<') {
+            if (s[i+2] == '<') { i += 2; continue; }    /* <<< here-string (handled in run_line) */
+            return i;
+        }
+    }
+    return -1;
+}
+/* Run a here-doc `cmd << [-]DELIM` whose `<<` is at t[hd]. Collects body lines from
+ * `body` (the buffer just after this command line) up to a line == DELIM, writes them
+ * to /tmp/HEREDOC, rewrites the command to read that file (reusing the file-arg
+ * convention), runs it, and returns the buffer position just past the DELIM line (0 at
+ * EOF). $VARs in the body expand unless DELIM was quoted; `<<-` strips leading tabs. */
+static char *sh_run_heredoc(char *t, int hd, char *body, char *cwd) {
+    int dash = (t[hd + 2] == '-');
+    const char *d = t + hd + 2 + dash; while (*d == ' ' || *d == '\t') d++;
+    int expand = 1; char q = 0;
+    if (*d == '"' || *d == '\'') { q = *d; expand = 0; d++; }        /* quoted delimiter -> literal body */
+    char delim[64]; int dl = 0;
+    while (*d && dl < 63 && (q ? *d != q : (*d != ' ' && *d != '\t'))) delim[dl++] = *d++;
+    delim[dl] = 0;
+    if (q && *d == q) d++;
+    while (*d == ' ' || *d == '\t') d++;
+    const char *suffix = d;                                         /* e.g. "> out" after the delimiter */
+    unsigned long cap = 1024, blen = 0; char *bbuf = malloc(cap);
+    if (!bbuf) return body;
+    char *ln = body;
+    while (ln && *ln) {
+        char *nl = ln; while (*nl && *nl != '\n') nl++;
+        int more = (*nl == '\n'); if (more) *nl = 0;
+        char *cmp = ln; if (dash) while (*cmp == '\t') cmp++;       /* <<- : the terminator may be tab-indented */
+        if (streq(cmp, delim)) { ln = more ? nl + 1 : 0; break; }   /* delimiter line ends the body */
+        char *bl = ln; if (dash) while (*bl == '\t') bl++;          /* <<- : strip leading tabs from body too */
+        char exp[1024]; const char *out = bl;
+        if (expand && expand_vars(bl, exp, sizeof exp)) out = exp;
+        unsigned long olen = 0; while (out[olen]) olen++;
+        if (blen + olen + 2 >= cap) { cap = (blen + olen + 2) * 2; char *nb = realloc(bbuf, cap); if (!nb) break; bbuf = nb; }
+        for (unsigned long k = 0; k < olen; k++) bbuf[blen++] = out[k];
+        bbuf[blen++] = '\n';
+        ln = more ? nl + 1 : 0;
+    }
+    bbuf[blen] = 0;
+    sys_writefile("/tmp/HEREDOC", bbuf, blen);
+    free(bbuf);
+    char rw[1024]; int p = 0;
+    for (int k = 0; k < hd && p < 1000; k++) rw[p++] = t[k];
+    while (p > 0 && rw[p - 1] == ' ') p--;                          /* trim spaces before << */
+    const char *ins = " /tmp/HEREDOC "; for (int k = 0; ins[k] && p < 1010; k++) rw[p++] = ins[k];
+    for (int k = 0; suffix[k] && p < 1022; k++) rw[p++] = suffix[k];
+    rw[p] = 0;
+    run_input_line(rw, cwd);
+    return ln;
+}
 static void source_file(const char *fn, char *cwd, int silent) {
     if (source_depth >= 8) { if (!silent) print("source: nested too deep\n"); g_status = 1; return; }
     long n; char *txt = slurp(fn, &n);
@@ -7623,9 +7706,14 @@ static void source_file(const char *fn, char *cwd, int silent) {
         char *nl = ln; while (*nl && *nl != '\n') nl++;
         int more = (*nl == '\n'); if (more) *nl = 0;
         char *t = ln; while (*t == ' ' || *t == '\t') t++;
-        if (*t && *t != '#') run_input_line(t, cwd);   /* skip blanks + # comments */
+        int hd = (*t && *t != '#') ? sh_heredoc_op(t) : -1;   /* `cmd << DELIM` here-doc? (M1820) */
+        if (hd >= 0) {
+            ln = sh_run_heredoc(t, hd, more ? nl + 1 : 0, cwd);   /* collects the body, runs, jumps past the delimiter */
+        } else {
+            if (*t && *t != '#') run_input_line(t, cwd);   /* skip blanks + # comments */
+            ln = more ? nl + 1 : 0;
+        }
         if (g_returning || g_errexit_tripped) break;   /* `return`, or a `set -e` failure, ends the sourced script */
-        ln = more ? nl + 1 : 0;
     }
     g_returning = 0; g_loopbrk = 0; g_errexit_tripped = 0;   /* consume: return/break/errexit unwind only to the end of this source */
     source_depth--;
