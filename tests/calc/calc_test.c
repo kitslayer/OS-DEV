@@ -171,6 +171,23 @@ int main(void) {
     CHECK_F("0b1 << 4", 16);
     CHECK_ERR("0b");                              /* 0b with no binary digits */
 
+    /* --- variadic list statistics (M1827) --- */
+    CHECK_F("sum(1, 2, 3, 4)", 10);
+    CHECK_F("sum(10)", 10);                       /* single value */
+    CHECK_F("sum()", 0);                          /* empty -> 0 */
+    CHECK_F("mean(2, 4, 6)", 4);
+    CHECK_F("avg(1, 2, 3, 4)", 2.5);              /* avg is an alias of mean */
+    CHECK_F("stdev(2, 4, 6)", 2);                 /* sample stdev: sqrt(8/2) */
+    CHECK_F("variance(2, 4, 6)", 4);
+    CHECK_F("median(3, 1, 2)", 2);                /* odd count: middle after sort */
+    CHECK_F("median(4, 1, 3, 2)", 2.5);           /* even count: mean of the two middles */
+    CHECK_F("count(5, 6, 7, 8)", 4);
+    CHECK_F("mean(10, 20, 30) * 2", 40);          /* composes with arithmetic */
+    CHECK_F("sum(2^2, 3^2, 4^2)", 29);            /* args are full expressions: 4+9+16 */
+    CHECK_NAN("mean()");                          /* mean of nothing -> NaN */
+    CHECK_NAN("stdev(5)");                         /* < 2 samples -> NaN */
+    CHECK_ERR("sum(1, 2");                         /* missing ')' */
+
     /* --- degrees angle mode (M1738): trig args are degrees, inverse trig returns degrees --- */
     calc_angle_deg = 1;
     CHECK_F("sin(90)", 1);                      /* sin 90deg = 1 */

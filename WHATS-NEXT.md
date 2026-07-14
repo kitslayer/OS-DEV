@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1827) Calculator — variadic list statistics (`sum`/`mean`/`stdev`/`variance`/`median`/`count`).** The scientific calculator had per-value functions and 2-arg `min`/`max`, but no way to reduce a list. Added a variadic `call_argn()` arg parser and six list functions: `sum`, `mean` (alias `avg`), `stdev`/`stddev` (sample, n−1), `variance`/`var`, `median` (sorts, averages the two middles for an even count), and `count` — e.g. `mean(2,4,6)`=4, `stdev(2,4,6)`=2, `median(4,1,3,2)`=2.5. Args are full expressions (`sum(2^2,3^2,4^2)`=29). The in-app function list gained a `stats:` line.
+> 
+> **Verified:** `make calctest` green — 15 new cases (sum/mean/avg/stdev/variance/median/count, empty→0/NaN, `<2`-sample NaN, arithmetic composition, a missing-`)` error) + the existing 400k-iteration fuzz sweep, ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1826) Shell `${!NAME}` — indirect variable expansion.** A new branch in the `${…}` dispatch (`user/shexpand.h`) next to `${#NAME}`: `${!NAME}` takes NAME's value as *another variable's name* and expands to that variable's value (bash indirection) — so with `ref=FOO; FOO=bar`, `${!ref}` yields `bar`. If NAME is unset, or names a variable that doesn't exist, it expands to empty.
 > 
 > **Verified:** `make shexpandtest` green — 4 new cases (`${!REF}`→`bar`, embedded `[${!REF}]`, the unset-target and unset-name empties) + the existing 200k-input fuzz sweep, ASan/UBSan clean. Full OS image builds clean. (Pure-expander change — the host suite is the authoritative oracle, no boot needed.)

@@ -108,6 +108,28 @@ static void call_arg2(double *a, double *b) {
     if (*cur == ')') cur++; else err = 1;
 }
 
+/* Parse a variadic argument list '(' bor (',' bor)* ')' into out[0..max); returns
+ * the count (which may exceed max — extras are counted but not stored). Sets err on
+ * a missing paren. Used by the list statistics functions (sum/mean/stdev/…, M1827). */
+static int call_argn(double *out, int max) {
+    skipws();
+    if (*cur != '(') { err = 1; return 0; }
+    cur++;
+    skipws();
+    if (*cur == ')') { cur++; return 0; }            /* empty () */
+    int n = 0;
+    for (;;) {
+        double v = bor();
+        if (n < max) out[n] = v;
+        n++;
+        skipws();
+        if (*cur == ',') { cur++; continue; }
+        if (*cur == ')') { cur++; break; }
+        err = 1; break;
+    }
+    return n;
+}
+
 /* atan2(y,x): the polar angle of (x,y) in (-pi,pi], built from js_atan (dmath has
  * no atan2) with the standard quadrant fix-up. */
 static double calc_atan2(double y, double x) {
@@ -219,6 +241,13 @@ static double factor(void) {
         if (match_kw("lcm"))   { double a, b; call_arg2(&a, &b); return calc_lcm(a, b); }
         if (match_kw("npr"))   { double a, b; call_arg2(&a, &b); return calc_perm(a, b); }
         if (match_kw("ncr"))   { double a, b; call_arg2(&a, &b); return calc_comb(a, b); }
+        /* variadic list statistics (M1827): sum/mean(avg)/stdev(sample)/variance/median/count */
+        if (match_kw("sum"))   { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; double s = 0; for (int k = 0; k < n; k++) s += a[k]; return s; }
+        if (match_kw("mean") || match_kw("avg")) { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (!n) return JS_NAN; double s = 0; for (int k = 0; k < n; k++) s += a[k]; return s / n; }
+        if (match_kw("stdev") || match_kw("stddev")) { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (n < 2) return JS_NAN; double s = 0; for (int k = 0; k < n; k++) s += a[k]; double m = s / n, ss = 0; for (int k = 0; k < n; k++) { double d = a[k] - m; ss += d * d; } return js_sqrt(ss / (n - 1)); }
+        if (match_kw("variance") || match_kw("var")) { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (n < 2) return JS_NAN; double s = 0; for (int k = 0; k < n; k++) s += a[k]; double m = s / n, ss = 0; for (int k = 0; k < n; k++) { double d = a[k] - m; ss += d * d; } return ss / (n - 1); }
+        if (match_kw("median")) { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (!n) return JS_NAN; for (int i = 1; i < n; i++) { double k = a[i]; int j = i - 1; while (j >= 0 && a[j] > k) { a[j+1] = a[j]; j--; } a[j+1] = k; } return (n & 1) ? a[n/2] : (a[n/2 - 1] + a[n/2]) / 2.0; }
+        if (match_kw("count"))  { double a[64]; return (double)call_argn(a, 64); }
         err = 1;                          /* unknown identifier/function */
         return JS_NAN;
     }

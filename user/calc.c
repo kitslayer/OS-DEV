@@ -27,6 +27,7 @@ int main(void) {
     sys_setcolor(4); print("\n  OS-DEV calc: + - * / % ^(pow) ! & | << >> ~ ( ) 0x 0b\n");   /* title: cyan */
     sys_setcolor(8); print("  fns: sqrt cbrt sin cos tan asin acos atan sinh cosh tanh ln log log2 log10 exp abs sign\n");
     sys_setcolor(8); print("       floor ceil round trunc fact(n) n!  min max hypot atan2 gcd lcm ncr npr (a,b)\n");
+    sys_setcolor(8); print("       stats: sum mean avg stdev variance median count (a,b,c,...)\n");
     print("  consts: pi e ans ; e.g. sqrt(2)  sin(pi/2)  5!  ncr(52,5)  2^10 ; 'deg'/'rad' mode ; 'q' quit\n\n"); sys_setcolor(0);
     char line[128];
     for (;;) {
