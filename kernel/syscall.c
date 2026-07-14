@@ -330,6 +330,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_ping: case SYS_resolve: case SYS_http: case SYS_https: case SYS_browse:
     case SYS_pinghost: case SYS_netinfo: case SYS_dhcp: case SYS_tftp: case SYS_sntp:
     case SYS_tcp_serve: case SYS_tcp_accept: case SYS_tcp_respond:
+    case SYS_ws_open: case SYS_ws_exchange:
         return PL_INET;
     case SYS_gfx_init: case SYS_gfx_blit: case SYS_pcm: case SYS_playwav:
     case SYS_pcm_stream: case SYS_pcm_avail: case SYS_playbg: case SYS_audiostop:
@@ -925,6 +926,20 @@ void syscall_dispatch(struct registers *r) {
                                             (uint8_t *)r->rdx, (int)r->r10,
                                             (uint32_t)timer_ticks());
         break;
+    case SYS_ws_open:                      /* (url, status*) -> WebSocket connect + handshake (M1846) */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, sizeof(int))) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");           /* TCP needs the timer running */
+        r->rax = (uint64_t)(int64_t)ws_open((const char *)r->rdi, (int *)r->rsi);
+        break;
+    case SYS_ws_exchange: {                /* (id, sendbuf, sendtot, out, outmax, nrecv*) (M1846) */
+        int st = (int)r->rdx, om = (int)r->r8;
+        if (st < 0 || om <= 0 || (st > 0 && !ubuf(r->rsi, (uint64_t)st)) ||
+            !ubuf(r->r10, (uint64_t)om) || !ubuf(r->r9, sizeof(int))) { r->rax = (uint64_t)-1; break; }
+        __asm__ volatile("sti");
+        r->rax = (uint64_t)(int64_t)ws_exchange((int)r->rdi, (const char *)r->rsi, st,
+                                                (char *)r->r10, om, (int *)r->r9);
+        break;
+    }
     case SYS_browse:
         if (!ustr(r->rdi)) { r->rax = (uint64_t)-1; break; }
         app_browse((const char *)r->rdi);  /* WM opens the browser window */

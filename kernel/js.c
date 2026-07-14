@@ -3422,7 +3422,7 @@ static val nat_eventsource(val *args, int nargs){
  * NUL-separated buffer, close). Splitting open from exchange is what lets
  * onopen run — and queue more sends — between connect and the first send. */
 static int (*g_ws_open)(const char *url, int *status);
-static int (*g_ws_exchange)(int id, const char *sendbuf, int nsend,
+static int (*g_ws_exchange)(int id, const char *sendbuf, int sendtot,
                             char *out, int outmax, int *nrecv);
 
 /* ws.send(data): stringify + append to the ws's private send queue. A no-op once
@@ -3473,17 +3473,16 @@ static val ws_pump_native(val *args, int nargs){
 
     /* Marshal the (possibly onopen-extended) send queue into a NUL-separated buffer. */
     int cap = 131072; char *sbuf = aalloc(cap); if(!sbuf){ g_oom=1; return UND(); }
-    int soff = 0, nsend = 0; val q;
+    int soff = 0; val q;
     if (obj_get(ws,"__sendq",&q) && q.t==V_ARR && q.o) {
         for (int i=0;i<q.o->n;i++){
             const char *m = val_to_str(q.o->vals[i]); int L=0; while(m[L]) L++;
             if (soff + L + 1 > cap) break;                     /* queue overflow -> drop the rest */
             for (int j=0;j<=L;j++) sbuf[soff++] = m[j];        /* copy incl. the NUL separator */
-            nsend++;
         }
     }
     int rcap = 131072, nrecv = 0; char *rbuf = aalloc(rcap); if(!rbuf){ g_oom=1; return UND(); }
-    int rn = g_ws_exchange ? g_ws_exchange(id, sbuf, nsend, rbuf, rcap-1, &nrecv) : -1;
+    int rn = g_ws_exchange ? g_ws_exchange(id, sbuf, soff, rbuf, rcap-1, &nrecv) : -1;
     if (rn < 0) {                                              /* exchange error mid-stream */
         obj_set(ws, "readyState", NUM(3));
         if (!ws_fire(ws, "onerror", "error", 0)) return UND();
@@ -4940,7 +4939,7 @@ void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *s
  * RFC 6455 handshake (returns a conn id, or -1), `exchange` sends the queued
  * messages on that id and reads the replies, then closes. */
 void js_set_websocket(int (*open)(const char *url, int *status),
-                      int (*exchange)(int id, const char *sendbuf, int nsend,
+                      int (*exchange)(int id, const char *sendbuf, int sendtot,
                                       char *out, int outmax, int *nrecv)) {
     g_ws_open = open;
     g_ws_exchange = exchange;
@@ -5193,16 +5192,16 @@ static int hws_open(const char *url, int *status) {
     if (strstr(url, "fail")) { *status = 0; return -1; }
     *status = 101; return 1;                     /* a fake connection id */
 }
-static int hws_exchange(int id, const char *sendbuf, int nsend,
+static int hws_exchange(int id, const char *sendbuf, int sendtot,
                         char *out, int outmax, int *nrecv) {
     (void)id;
-    int off = 0, rc = 0; const char *p = sendbuf;
-    for (int i = 0; i < nsend; i++) {
+    int off = 0, rc = 0; const char *p = sendbuf, *pend = sendbuf + sendtot;
+    while (p < pend) {
         int w = snprintf(out + off, (size_t)(outmax - off), "echo:%s", p);
         if (w < 0 || off + w + 1 > outmax) break;
         off += w + 1;                            /* keep the NUL as the record separator */
         rc++;
-        int L = 0; while (p[L]) L++; p += L + 1;  /* advance past this sent message */
+        int L = 0; while (p + L < pend && p[L]) L++; p += L + 1;  /* advance past this sent message */
     }
     *nrecv = rc; return off;
 }

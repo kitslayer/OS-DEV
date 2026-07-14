@@ -814,7 +814,7 @@ static int run_command(char *line, char *cwd) {
             continue;
         } else if (streq(line, "help")) {
             helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir[-p] touch ln<-s tgt link> cd pwd basename<p [suf]> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump hexedit<file> strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
-            helpline("net:    get<url> headers<url> wget<url file> browse<url>\n");
+            helpline("net:    get<url> headers<url> wget<url file> browse<url> wsget<ws://url [msg]> (WebSocket send+echo)\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
             print("        sntp / ntpdate (set the wall clock from pool.ntp.org over UDP)\n");
@@ -6675,6 +6675,38 @@ static int run_command(char *line, char *cwd) {
                     char num[12]; itoa_simple((int)n, num);
                     print("--- "); print(num); print(" bytes ---\n");
                     print(resp); print("\n");
+                }
+            }
+        } else if (startswith(line, "wsget ")) {
+            /* wsget ws://host[:port][/path] [message] — open a WebSocket, send
+             * `message` (default "hi"), print each reply frame. A diagnostic for
+             * the from-scratch WebSocket client (M1846), like `get` is for HTTP. */
+            char url[256]; int i = 0; char *p = line + 6;
+            while (*p == ' ') p++;
+            while (*p && *p != ' ' && i < 255) url[i++] = *p++;
+            url[i] = 0; sh_unprot_buf(url);
+            while (*p == ' ') p++;
+            char msg[256]; int j = 0; while (*p && j < 255) msg[j++] = *p++; msg[j] = 0; sh_unprot_buf(msg);
+            if (msg[0] == 0) { msg[0] = 'h'; msg[1] = 'i'; msg[2] = 0; }
+            if (url[0] == 0) { print("usage: wsget ws://<host>[:port][/path] [message]\n"); }
+            else {
+                int status = 0; char num[12];
+                long id = sys_ws_open(url, &status);
+                if (id < 0) {
+                    print("wsget: connect/handshake failed (status "); itoa_simple(status, num); print(num); print(")\n");
+                } else {
+                    char sbuf[300]; int sl = 0;
+                    for (const char *m = msg; *m && sl < 298; m++) sbuf[sl++] = *m;
+                    sbuf[sl++] = 0;                              /* one NUL-terminated message */
+                    static char out[8192]; int nrecv = 0;
+                    long rb = sys_ws_exchange((int)id, sbuf, sl, out, sizeof out, &nrecv);
+                    if (rb < 0) { print("wsget: exchange failed\n"); }
+                    else {
+                        print("wsget: connected (status "); itoa_simple(status, num); print(num);
+                        print("), replies="); itoa_simple(nrecv, num); print(num); print(":\n");
+                        const char *q = out;
+                        for (int k = 0; k < nrecv; k++) { print("  <- "); print(q); print("\n"); int L = 0; while (q[L]) L++; q += L + 1; }
+                    }
                 }
             }
         } else if (startswith(line, "headers ")) {

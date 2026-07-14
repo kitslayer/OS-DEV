@@ -46,6 +46,14 @@ void js_set_fetch(int (*fn)(const char *url, const char *method, const char *cty
  * constructed EventSource fires onerror. */
 void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status));
 
+/* M1846: register the browser's WebSocket backings. `open` connects + does the
+ * RFC 6455 Upgrade handshake (conn id / -1); `exchange` sends the queued
+ * messages on that connection and reads the replies. Without them, a
+ * constructed WebSocket fires onerror+onclose. */
+void js_set_websocket(int (*open)(const char *url, int *status),
+                      int (*exchange)(int id, const char *sendbuf, int sendtot,
+                                      char *out, int outmax, int *nrecv));
+
 /* M1796/M1797: register the canvas 2D drawing op callback — the browser resolves the
  * canvas id to its writable image slot and draws. op: 0=fillRect 1=strokeRect
  * 2=clearRect 3=line; (a,b,c,d) are the op's coords; color is fill/strokeStyle. */

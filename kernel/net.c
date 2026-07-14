@@ -22,6 +22,9 @@
 #include "tls.h"
 #include "rtc.h"
 #include "syscall.h"    /* SOL_SOCKET, SO_REUSEADDR, IPPROTO_TCP, TCP_NODELAY (M1554) */
+#include "kheap.h"      /* kmalloc/kfree — WebSocket transport working buffers (M1846) */
+#include "wsframe.h"    /* RFC 6455 frame codec (M1843) */
+#include "wsclient.h"   /* RFC 6455 client handshake helpers (M1845) */
 #include <stdint.h>
 
 /* The SLIRP defaults — used as-is until a DHCP lease (net_dhcp) overwrites them. */
@@ -1365,6 +1368,141 @@ int http_get_sse(const char *host, const char *path, char *out, int max) {
     }
     tcp_close(&c);
     return total;
+}
+
+/* ===================================================================== *
+ *  WebSocket client transport (M1846). Glues the tcp_* socket to the
+ *  RFC 6455 frame codec (wsframe.h) + handshake helpers (wsclient.h). The
+ *  browser-JS WebSocket object (js.c) drives it through two backings:
+ *    ws_open     — connect + Upgrade handshake, hold the socket open.
+ *    ws_exchange — mask+send the queued messages, read the reply frames.
+ *  A single connection at a time (the JS pump is single-threaded); only
+ *  plaintext ws:// (wss:// would need a persistent TLS session — deferred).
+ * ===================================================================== */
+static tcp_conn g_wsc;                 /* the one in-flight WebSocket connection */
+static int      g_wsc_up;              /* is g_wsc connected? */
+static uint8_t  g_ws_carry[512];       /* bytes read past the handshake terminator */
+static int      g_ws_carry_n;
+
+/* Non-crypto masking key (RFC 6455 requires client frames be masked, but the key
+ * only needs to vary — it is an anti-cache-poisoning measure, not a secret). */
+static void ws_mask_key(uint8_t k[4]) {
+    static uint32_t s;
+    if (!s) s = (uint32_t)timer_ticks() ^ 0x9e3779b9u;
+    for (int i = 0; i < 4; i++) { s ^= s << 13; s ^= s >> 17; s ^= s << 5; k[i] = (uint8_t)(s >> (i * 8)); }
+}
+
+/* Open a ws:// connection and perform the RFC 6455 opening handshake. Returns a
+ * (trivial) connection id >=0 on a 101 upgrade, or -1; *status gets the HTTP
+ * status (or 0 if the connection itself failed). */
+int ws_open(const char *url, int *status) {
+    *status = 0;
+    if (g_wsc_up) { tcp_close(&g_wsc); g_wsc_up = 0; }   /* drop any stale connection */
+    g_ws_carry_n = 0;
+
+    const char *u = url;                                 /* strip the scheme; only ws:// (plaintext) */
+    if (u[0]=='w'&&u[1]=='s'&&u[2]=='s'&&u[3]==':'&&u[4]=='/'&&u[5]=='/') return -1;   /* wss:// unsupported here */
+    if (u[0]=='w'&&u[1]=='s'&&u[2]==':'&&u[3]=='/'&&u[4]=='/') u += 5;
+
+    char authority[256]; int ai = 0;                     /* host[:port] up to the path */
+    while (*u && *u != '/' && ai < (int)sizeof(authority)-1) authority[ai++] = *u++;
+    authority[ai] = 0;
+    const char *path = (*u == '/') ? u : "/";
+
+    char bare[256]; uint16_t port = (uint16_t)url_host_port(authority, bare, sizeof(bare), 80);
+    uint8_t ip[4];
+    if (parse_ipv4(bare, ip) != 0 && dns_resolve(bare, ip) != 0) return -1;   /* IP literal, else DNS */
+    if (tcp_connect(&g_wsc, ip, port) != 0) return -1;
+
+    uint8_t nonce[16]; for (int i = 0; i < 16; i++) nonce[i] = (uint8_t)((timer_ticks() >> (i & 7)) ^ (i * 37 + 1));
+    char key[25]; ws_base64(nonce, 16, key);
+    char req[640];
+    long rl = ws_build_handshake(authority, path, key, req, sizeof(req));
+    if (rl <= 0) { tcp_close(&g_wsc); return -1; }
+    tcp_write(&g_wsc, (uint8_t *)req, (int)rl);
+
+    char resp[1024]; int total = 0, hdr_end = -1;        /* read until the blank-line header terminator */
+    uint64_t budget = timer_ticks() + 300;
+    while (g_wsc.up && total < (int)sizeof(resp)-1 && timer_ticks() < budget) {
+        int n = tcp_read(&g_wsc, (uint8_t *)resp + total, sizeof(resp)-1 - total, 60);
+        if (n < 0) break;
+        if (n == 0) continue;
+        total += n;
+        for (int i = 3; i < total; i++)                  /* find "\r\n\r\n" */
+            if (resp[i-3]=='\r'&&resp[i-2]=='\n'&&resp[i-1]=='\r'&&resp[i]=='\n') { hdr_end = i + 1; break; }
+        if (hdr_end >= 0) break;
+    }
+    int code = ws_handshake_status(resp, (size_t)total);
+    *status = code;
+    if (code != 101 || hdr_end < 0) { tcp_close(&g_wsc); return -1; }
+
+    int leftover = total - hdr_end;                      /* stash any early frame bytes for ws_exchange */
+    if (leftover > 0 && leftover <= (int)sizeof(g_ws_carry)) {
+        memcpy(g_ws_carry, resp + hdr_end, leftover);
+        g_ws_carry_n = leftover;
+    }
+    g_wsc_up = 1;
+    return 1;
+}
+
+/* On the open connection: send each NUL-separated message in `sendbuf`
+ * (`sendtot` bytes total, i.e. the messages back-to-back each with its NUL) as a
+ * masked TEXT frame, then read reply frames, writing each text/binary payload
+ * NUL-separated into `out` (*nrecv = count). Closes the connection. Returns the
+ * number of bytes written to `out` (>=0), or -1 on error. */
+int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv) {
+    (void)id; *nrecv = 0;
+    if (!g_wsc_up) return -1;
+    int RC = 131072;
+    uint8_t *raw = kmalloc(RC), *tx = kmalloc(RC + 16);
+    if (!raw || !tx) { if(raw)kfree(raw); if(tx)kfree(tx); tcp_close(&g_wsc); g_wsc_up=0; return -1; }
+
+    const char *p = sendbuf, *pend = sendbuf + sendtot;  /* send the queued messages */
+    while (p < pend) {
+        int L = 0; while (p + L < pend && p[L]) L++;      /* this message runs to its NUL (or the end) */
+        if (L <= RC) {
+            uint8_t mk[4]; ws_mask_key(mk);
+            long fl = ws_build_client_frame(WS_OP_TEXT, (const uint8_t *)p, (uint64_t)L, mk, tx, RC + 16);
+            if (fl > 0) tcp_write(&g_wsc, tx, (int)fl);
+        }
+        p += L + 1;                                       /* skip the NUL separator */
+    }
+
+    int rn = 0, ooff = 0;                                /* reply read + parse loop */
+    if (g_ws_carry_n > 0 && g_ws_carry_n <= RC) { memcpy(raw, g_ws_carry, g_ws_carry_n); rn = g_ws_carry_n; g_ws_carry_n = 0; }
+    uint64_t budget = timer_ticks() + 400;
+    int closing = 0;
+    while (!closing && g_wsc.up && timer_ticks() < budget) {
+        int fin, op; uint64_t pl; size_t used;
+        int r;
+        /* drain every complete frame currently buffered in raw[0..rn) */
+        while ((r = ws_parse_frame(raw, (size_t)rn, &fin, &op,
+                                   (uint8_t *)out + ooff, (size_t)(outmax - ooff - 1), &pl, &used)) == 1) {
+            if (op == WS_OP_CLOSE) { closing = 1; }
+            else if (op == WS_OP_TEXT || op == WS_OP_BIN) {
+                ooff += (int)pl; out[ooff++] = 0;        /* NUL-separate the payloads */
+                (*nrecv)++;
+            }
+            /* PING/PONG/continuation: skip (payload already unmasked, just drop) */
+            memmove(raw, raw + used, (size_t)rn - used); /* consume the frame */
+            rn -= (int)used;
+            if (closing || ooff + 16 >= outmax) { closing = 1; break; }
+        }
+        if (r == -1) { closing = 1; break; }             /* malformed / oversized -> bail */
+        if (closing) break;
+        if (rn >= RC) { closing = 1; break; }            /* a frame bigger than our buffer */
+        int n = tcp_read(&g_wsc, raw + rn, RC - rn, 60);
+        if (n < 0) break;                                /* peer closed */
+        if (n == 0) { if (*nrecv > 0) break; else continue; }  /* idle: stop once we have replies */
+        rn += n;
+    }
+
+    uint8_t mk[4]; ws_mask_key(mk);                      /* polite CLOSE, then tear down */
+    long cf = ws_build_client_frame(WS_OP_CLOSE, (const uint8_t *)"", 0, mk, tx, RC + 16);
+    if (cf > 0 && g_wsc.up) tcp_write(&g_wsc, tx, (int)cf);
+    tcp_close(&g_wsc); g_wsc_up = 0;
+    kfree(raw); kfree(tx);
+    return ooff;
 }
 
 /* ===================================================================== *

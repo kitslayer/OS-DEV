@@ -77,6 +77,10 @@ int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t 
 /* browser.c's EventSource/streaming path calls the *_sse fetch variants; in ring 3
  * the kernel syscall does the (non-streaming) fetch, so route them the same way. */
 int http_get_sse(const char *host, const char *path, char *out, int max) { return (int)sys_http(host, path, out, (unsigned long)max); }
+/* WebSocket (M1846): the kernel holds the connection between the two calls (one
+ * socket at a time), so these route straight through to the kernel transport. */
+int ws_open(const char *url, int *status) { return (int)sys_ws_open(url, status); }
+int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv) { return (int)sys_ws_exchange(id, sendbuf, sendtot, out, outmax, nrecv); }
 int tls_get_sse(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) { (void)seed; return (int)sys_https(host, path, out, (unsigned long)max); }
 int http_post(const char *h, const char *p, const char *ct, const char *b, int bl, char *o, int max) { (void)h; (void)p; (void)ct; (void)b; (void)bl; (void)o; (void)max; return -1; }
 int tls_post(const char *h, const char *p, const char *ct, const char *b, int bl, uint8_t *o, int max, uint32_t s) { (void)h; (void)p; (void)ct; (void)b; (void)bl; (void)o; (void)max; (void)s; return -1; }

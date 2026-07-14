@@ -153,6 +153,19 @@ long sys_tcp_serve(int port, const void *resp, unsigned long resp_len, void *req
 }
 long sys_tcp_accept(int port, void *reqbuf, unsigned long reqmax) { return do_syscall(SYS_tcp_accept, (long)port, (long)reqbuf, (long)reqmax); }
 long sys_tcp_respond(const void *resp, unsigned long resp_len) { return do_syscall(SYS_tcp_respond, (long)resp, (long)resp_len, 0); }
+long sys_ws_open(const char *url, int *status) { return do_syscall(SYS_ws_open, (long)url, (long)status, 0); }
+long sys_ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv) {
+    long ret;                                            /* 6 args: id,sendbuf,sendtot in rdi/rsi/rdx; out,outmax,nrecv via r10/r8/r9 */
+    register long r10 __asm__("r10") = (long)out;
+    register long r8  __asm__("r8")  = (long)outmax;
+    register long r9  __asm__("r9")  = (long)nrecv;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"((long)SYS_ws_exchange), "D"((long)id), "S"((long)sendbuf),
+                       "d"((long)sendtot), "r"(r10), "r"(r8), "r"(r9)
+                     : "memory");
+    return ret;
+}
 long sys_fswait(const char *const *paths, int n, long timeout_ms) {
     char buf[512]; int p = 0;
     if (n < 1 || n > 8) return -1;
