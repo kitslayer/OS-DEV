@@ -52,6 +52,7 @@
 #include "mouse.h"
 #include "usb.h"
 #include "usb_storage.h"
+#include "atapi.h"           /* atapi_selftest — ATAPI CD-ROM read driver (M1852) */
 #include "usb_kbd.h"
 #include "ehci.h"
 #include "xhci.h"
@@ -505,6 +506,11 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * self-test reads real sectors off the AHCI disk and logs their bytes. */
     ahci_init();
     ahci_selftest();
+
+    /* Bring up ATAPI CD-ROM (SCSI PACKET over ATA) as an ADDITIONAL read-only
+     * storage driver — boot stays on legacy ATA. No-op unless a CD image is
+     * attached; the self-test reads + verifies an ISO 9660 PVD off the CD (M1852). */
+    atapi_selftest();
 
     /* Bring up virtio-blk (the paravirtual "fast VM disk") as ANOTHER additional
      * storage driver — boot still uses legacy ATA above. No-op if no virtio block

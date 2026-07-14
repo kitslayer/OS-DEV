@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1852) ATAPI CD-ROM driver — the OS can read real CDs now.** New `kernel/atapi.c`: a SCSI-PACKET-over-ATA CD-ROM reader (PIO/polled) — `READ CAPACITY(10)` + `READ(10)` of 2048-byte logical sectors. It's fully **additive**: `ata.c` is the plain-ATA disk driver and explicitly *skips* ATAPI-signature devices, so `atapi.c` claims those instead and the boot ATA path is byte-for-byte untouched (the self-test is a no-op unless a CD is attached, so `make check`'s default config is unaffected). This makes the OS's existing (previously host-test-only) `iso9660.c` usable against actual CD media — the highest-value item left on the driver [[driver-campaign]] gap list.
+> 
+> **Verified — in-guest, new `make atapitest`:** boots the real kernel headless with a minimal ISO 9660 image on `-cdrom` (built by the test with python3); the driver detects the ATAPI CD-ROM, reads its capacity, and does a PACKET `READ(10)` of logical sector 16 (the Primary Volume Descriptor), finding the `CD001` magic — proving detection + the PACKET transport + a non-zero-LBA read. Boot path stays intact (reached the desktop, no panic). Full OS image builds clean; `kernel/atapi.c` is auto-globbed into the build.
+> 
 > **(M1851) JS `TextEncoder` / `TextDecoder` — string ↔ bytes.** Gives M1850's typed arrays a real, common consumer: `new TextEncoder().encode(str)` → a `Uint8Array` of the string's bytes, `new TextDecoder().decode(u8)` → the string back. Since the engine already stores strings as their raw (UTF-8) bytes, both are a straight byte copy — no codepoint math. Standard web-platform API real apps use for byte↔text conversion.
 > 
 > **Verified:** `make jstest` green — `tests/js/typedarray.js` extended with a round-trip: `encode("Hi!")` → `72,105,33` (len 3, `encoding` "utf-8"), `decode` → `"Hi!"`, and a full round-trip of `"round-trip 123"`. ASan/UBSan clean, all JS goldens match. Full OS image builds clean.
