@@ -115,6 +115,10 @@ int main(void) {
     CHECK_F("min(-2, -5)", -5);
     CHECK_F("hypot(3, 4)", 5);                  /* 3-4-5 triangle */
     CHECK_F("hypot(5, 12)", 13);
+    CHECK_F("hypot(3, 4, 12)", 13);             /* variadic (M1841): 3-D Euclidean norm */
+    CHECK_F("hypot(1, 2, 2)", 3);
+    CHECK_F("hypot(5)", 5);                      /* single arg */
+    CHECK_F("hypot()", 0);                       /* empty -> 0 */
     CHECK_F("max(min(5, 10), 2)", 5);           /* nesting / composition */
     CHECK_F("min(2^3, 3^2)", 8);                /* args are full expressions */
     CHECK_F("min(3)", 3);                        /* variadic (M1836): a single arg is itself */

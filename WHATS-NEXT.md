@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1841) Calculator — variadic `hypot` (Euclidean norm).** `hypot` was 2-argument; it now takes any number of arguments and returns √(Σxᵢ²) — the n-dimensional vector magnitude (`hypot(3,4,12)`=13), consistent with the variadic `min`/`max`/stats. Reuses `call_argn`; `hypot()`=0, a single arg = |x|, and two-arg calls are unchanged.
+> 
+> **Verified:** `make calctest` green — new 3-D `hypot(3,4,12)`=13, `hypot(1,2,2)`=3, single-arg and empty cases; all pass + the 400k fuzz sweep, ASan/UBSan clean (the existing `hypot(3,)` trailing-comma error still errors). Full OS image builds clean.
+> 
 > **(M1840) Hardening — extract the `tr`/`cut` text helpers to a host test.** Same as M1839, for the next pair of pure-but-untested shell helpers: `tr_expand` (a `tr` SET token → chars + `a-z` ranges) and `cut_sel` (is a position in any `cut` range). Moved both verbatim into `user/shtxt.h` (`#include`d by shell.c), with `tests/shtxt` wired into `make check` as `shtxttest`. The `tr`/`cut` builtins are byte-for-byte unchanged.
 > 
 > **Verified:** `make shtxttest` green — **29 checks**: `tr` SET expansion (ranges `a-c`/`0-9`/`A-E`, range+literal, stop-at-space, a trailing `-` and a reverse range `z-a` treated as literals, cursor advance) and `cut` range membership (multi-range, gaps, open-ended `[3,∞)`) — ASan/UBSan clean. Full OS image builds clean.
