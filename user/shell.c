@@ -17,6 +17,7 @@
 #include "shtest.h"   /* sh_test_eval(): the test / [ ] conditional evaluator, host-tested by tests/shtest */
 #include "lsfmt.h"    /* ls_mode_str()/ls_fmt_time(): `ls -l` formatting, host-tested by tests/lsfmt */
 #include "shsort.h"   /* sort_numval()/sort_field()/sort_foldeq(): `sort` key helpers, host-tested by tests/shsort */
+#include "shtxt.h"    /* tr_expand()/cut_sel(): `tr`/`cut` text helpers, host-tested by tests/shtxt */
 #include "patchcore.h" /* patch_apply(): apply a unified-diff patch (the `patch` builtin), host-tested by tests/diff */
 
 static void perr(const char *s);   /* print an error label in red (defined below); forward-declared for early use (M1379) */
@@ -271,23 +272,8 @@ static void run_js_inline(const char *code) {
 }
 /* sort key helpers (sort_numval / sort_foldeq / sort_field) live in shsort.h,
  * host-tested by tests/shsort. */
-/* Expand a `tr` SET token (literal chars + a-z ranges) into out[]; advance *pp past it. */
-static int tr_expand(const char **pp, char *out, int max) {
-    const char *s = *pp; int o = 0;
-    while (*s && *s != ' ' && o < max) {
-        if (s[1] == '-' && s[2] && s[2] != ' ' && (unsigned char)s[2] >= (unsigned char)s[0]) {
-            for (int c = (unsigned char)s[0]; c <= (unsigned char)s[2] && o < max; c++) out[o++] = (char)c;
-            s += 3;
-        } else out[o++] = *s++;
-    }
-    *pp = s;
-    return o;
-}
-/* `cut` field/char selection: is position n in any of the nr ranges? (oe[i] = open-ended) */
-static int cut_sel(int n, const int *rf, const int *rt, const int *oe, int nr) {
-    for (int i = 0; i < nr; i++) if (n >= rf[i] && (oe[i] || n <= rt[i])) return 1;
-    return 0;
-}
+/* tr_expand() (tr SET expansion) and cut_sel() (cut range membership) live in
+ * shtxt.h, host-tested by tests/shtxt. */
 /* Print one grep result line with its prefix. `sep` is ':' for a match, '-' for
  * a context line (grep -A/-B/-C). Mirrors the inline prefix logic exactly. */
 static void grep_emit(const char *name, int fcount, int nn, int lno, const char *linetext, char sep) {

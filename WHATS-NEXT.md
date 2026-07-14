@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1840) Hardening — extract the `tr`/`cut` text helpers to a host test.** Same as M1839, for the next pair of pure-but-untested shell helpers: `tr_expand` (a `tr` SET token → chars + `a-z` ranges) and `cut_sel` (is a position in any `cut` range). Moved both verbatim into `user/shtxt.h` (`#include`d by shell.c), with `tests/shtxt` wired into `make check` as `shtxttest`. The `tr`/`cut` builtins are byte-for-byte unchanged.
+> 
+> **Verified:** `make shtxttest` green — **29 checks**: `tr` SET expansion (ranges `a-c`/`0-9`/`A-E`, range+literal, stop-at-space, a trailing `-` and a reverse range `z-a` treated as literals, cursor advance) and `cut` range membership (multi-range, gaps, open-ended `[3,∞)`) — ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1839) Hardening — extract the `sort` key helpers to a host test.** The `sort` builtin's key logic (numeric-key parsing, `-uf` fold equality, `-kN`/`-td` field extraction) was pure but inlined in `shell.c` with **no host test**. Moved `sort_numval`/`sort_foldeq`/`sort_field` verbatim into a new `user/shsort.h` (the same extract-to-a-header pattern as `shmath.h`/`shtest.h`/`lsfmt.h`) that `shell.c` now `#include`s, and added `tests/shsort` (wired into `make check` as `shsorttest`). Locks the M1838 decimal behavior and the field/fold logic with regression coverage; the `sort` builtin itself is byte-for-byte unchanged (the helpers just moved).
 > 
 > **Verified:** `make shsorttest` green — **26 checks** (fixed-point numeric keys incl. `3.14`<`3.2`<`10`, the 6-decimal clamp, signs; fold-equality; whitespace + custom-delimiter field extraction incl. past-the-last-field) + ASan/UBSan clean. Full OS image builds clean (shell.c compiles against the header, sort builtin unchanged).
