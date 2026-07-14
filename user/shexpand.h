@@ -75,6 +75,17 @@ static int expand_vars(const char *src, char *dst, int cap){
                     if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
                 }
                 i = (src[ne]=='}') ? ne+1 : ne;
+            } else if (br && src[i+2]=='!') {                       /* ${!NAME} indirect: value of the variable whose name is NAME's value (M1826) */
+                int ns=i+3, ne=ns; while (src[ne] && sh_vchar(src[ne])) ne++;
+                if (ne > ns) {
+                    const char *iname=vget(src+ns, ne-ns);          /* NAME's value = the target variable's name */
+                    if (iname && iname[0]) {
+                        int il=0; while (iname[il]) il++;
+                        const char *v=vget(iname, il);
+                        if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
+                    }
+                }
+                i = (src[ne]=='}') ? ne+1 : ne;
             } else {
                 int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
                 const char *v=(e>s)?vget(src+s,e-s):0;

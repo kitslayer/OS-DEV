@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1826) Shell `${!NAME}` — indirect variable expansion.** A new branch in the `${…}` dispatch (`user/shexpand.h`) next to `${#NAME}`: `${!NAME}` takes NAME's value as *another variable's name* and expands to that variable's value (bash indirection) — so with `ref=FOO; FOO=bar`, `${!ref}` yields `bar`. If NAME is unset, or names a variable that doesn't exist, it expands to empty.
+> 
+> **Verified:** `make shexpandtest` green — 4 new cases (`${!REF}`→`bar`, embedded `[${!REF}]`, the unset-target and unset-name empties) + the existing 200k-input fuzz sweep, ASan/UBSan clean. Full OS image builds clean. (Pure-expander change — the host suite is the authoritative oracle, no boot needed.)
+> 
 > **(M1825) Shell `tr -s` — squeeze repeated characters.** `tr` had `-d SET` (delete) and `SET1 SET2` (translate) but not the third common mode: `-s SET FILE` collapses each run of a repeated character listed in SET to a single occurrence (`tr -s ' '` to squash runs of spaces, `tr -s abc` etc.). A new branch mirroring the `-d` one — reuses `tr_expand` (chars + `a-z` ranges) and the quoted-SET `SH_UNPROT` handling; a char is dropped only when it's in SET and equals the previously-emitted char.
 > 
 > **Verified in-guest** (osdrive): `echo aaabbbccc > /tmp/T.TXT` then `tr -s abc /tmp/T.TXT` prints `abc` (each run squeezed to one). The `-d` and translate paths are untouched (the `-s` branch is inserted before them). Full OS image builds clean.

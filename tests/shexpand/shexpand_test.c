@@ -19,6 +19,7 @@ static const struct { const char *n, *v; } g_vars[] = {
     {"HELLO", "Hello World"},           /* length 11, for substring slices */
     {"FILE",  "archive.tar.gz"},
     {"BANANA","banana"},
+    {"REF",   "FOO"},                   /* for ${!REF} indirect: REF's value "FOO" names the FOO var */
     {"@",     "one two three"},         /* $@ / $* / ${#} share the "@"/"#" pseudo-vars */
     {"#",     "3"},
     {0, 0}
@@ -158,6 +159,12 @@ int main(void){
     CHECK("${NUM^^}", "42");                       /* digits unaffected */
     CHECK("${UNSET^^}", "");                       /* unset -> empty */
     CHECK("x${FOO^^}y", "xBARy");                  /* embedded in a word */
+
+    /* --- ${!NAME} indirect expansion (M1826): REF="FOO", FOO="bar" --- */
+    CHECK("${!REF}", "bar");                       /* REF -> "FOO" -> FOO's value "bar" */
+    CHECK("[${!REF}]", "[bar]");                    /* embedded */
+    CHECK("${!FOO}", "");                           /* FOO -> "bar", but there's no var named "bar" -> empty */
+    CHECK("${!UNSET}", "");                         /* NAME unset -> empty */
 
     /* --- $((expr)) arithmetic (delegates to shmath) --- */
     CHECK("$((2+3))", "5");
