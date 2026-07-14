@@ -744,13 +744,14 @@ static int sh_test_file(char op, const char *path, const char *cwd) {
 /* One `ls -l` line for `name` (statx'd relative to the cwd): mode string, link
  * count, right-aligned size, "YYYY-MM-DD HH:MM" mtime, then the type-coloured
  * name. On a stat failure just prints the bare name. (M1817) */
-static void ls_long_entry(const char *name) {
+static void ls_long_entry(const char *name, int human) {
     int nl = 0; while (name[nl]) nl++;
     struct statx st;
     if (sys_statx(name, &st) != 0) { print(name); print("\n"); return; }
     char modes[12], tbuf[20]; ls_mode_str(st.stx_mode, modes); ls_fmt_time(st.stx_mtime, tbuf);
-    char sizb[24]; int sl = 0;                             /* size -> decimal string (for right-alignment) */
-    { unsigned long v = st.stx_size; char tmp[24]; int ti = 0; if (!v) tmp[ti++] = '0'; while (v) { tmp[ti++] = '0' + (int)(v % 10); v /= 10; } while (ti) sizb[sl++] = tmp[--ti]; sizb[sl] = 0; }
+    char sizb[24]; int sl = 0;                             /* size -> string (for right-alignment) */
+    if (human) { ls_human_size(st.stx_size, sizb); while (sizb[sl]) sl++; }   /* -h: 1.5K / 27M */
+    else { unsigned long v = st.stx_size; char tmp[24]; int ti = 0; if (!v) tmp[ti++] = '0'; while (v) { tmp[ti++] = '0' + (int)(v % 10); v /= 10; } while (ti) sizb[sl++] = tmp[--ti]; sizb[sl] = 0; }
     print(modes); print(" "); printl((long)st.stx_nlink); print(" ");
     for (int s = sl; s < 8; s++) print(" ");               /* right-align size to width 8 */
     sys_setcolor(8); print(sizb); print(" "); print(tbuf); print("  ");
@@ -759,7 +760,7 @@ static void ls_long_entry(const char *name) {
 
 /* List directory `dir` (relative to cwd; NULL/"" = the cwd itself). longfmt ->
  * one `ls -l` line per entry; else the existing coloured name grid. (M1817) */
-static void ls_print_dir(const char *dir, int longfmt, char *cwd) {
+static void ls_print_dir(const char *dir, int longfmt, int human, char *cwd) {
     if (dir && dir[0] && sys_chdir(dir) < 0) { perr("ls: no such directory: "); print(dir); print("\n"); g_status = 1; return; }
     char buf[8192]; sys_list(buf, sizeof buf);
     if (!longfmt) { print_ls_colored(buf); }
@@ -769,7 +770,7 @@ static void ls_print_dir(const char *dir, int longfmt, char *cwd) {
             int ne = i; while (buf[ne] && buf[ne] != ' ' && buf[ne] != '\n') ne++;   /* name [i,ne) */
             char name[128]; int n = 0; for (int k = i; k < ne && n < 127; k++) name[n++] = buf[k]; name[n] = 0;
             int k = ne; while (buf[k] && buf[k] != '\n') k++;                          /* skip sys_list's own trailing metadata */
-            if (name[0]) ls_long_entry(name);
+            if (name[0]) ls_long_entry(name, human);
             i = (buf[k] == '\n') ? k + 1 : k;
         }
     }
@@ -924,27 +925,27 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "unset ")) {
             char *p = line + 6; while (*p == ' ') p++; sh_unprot_buf(p); vunset(p);
         } else if (streq(line, "ls")) {
-            ls_print_dir(0, 0, cwd);                   /* the cwd, coloured name grid (M1313) */
-        } else if (startswith(line, "ls ")) {     /* ls [-l] [-a] <name>...: -l = long format; glob-friendly (`ls *.txt`) */
+            ls_print_dir(0, 0, 0, cwd);                /* the cwd, coloured name grid (M1313) */
+        } else if (startswith(line, "ls ")) {     /* ls [-l] [-a] [-h] <name>...: -l long, -h human sizes; glob-friendly (`ls *.txt`) */
             const char *p = line + 3;
-            int longfmt = 0;                           /* -l; -a is accepted but a no-op here (this FS has no dotfiles) */
+            int longfmt = 0, human = 0;                /* -l; -h human-readable sizes; -a accepted but a no-op here (no dotfiles) */
             char paths[16][64]; int npath = 0;
             while (*p) {
                 while (*p == ' ') p++;
                 if (!*p) break;
                 char tok[64]; int j = 0; while (*p && *p != ' ' && j < 63) tok[j++] = *p++; tok[j] = 0;
-                if (tok[0] == '-' && tok[1]) { for (int k = 1; tok[k]; k++) if (tok[k] == 'l') longfmt = 1; }   /* -l / -a / -la */
+                if (tok[0] == '-' && tok[1]) { for (int k = 1; tok[k]; k++) { if (tok[k] == 'l') longfmt = 1; else if (tok[k] == 'h') human = 1; } }   /* -l / -a / -h / -lh */
                 else { sh_unprot_buf(tok); if (npath < 16) { int m = 0; while (tok[m] && m < 63) { paths[npath][m] = tok[m]; m++; } paths[npath][m] = 0; npath++; } }
             }
-            if (npath == 0) ls_print_dir(0, longfmt, cwd);
+            if (npath == 0) ls_print_dir(0, longfmt, human, cwd);
             else for (int i = 0; i < npath; i++) {
                 if (sys_chdir(paths[i]) >= 0) {                    /* a directory: list its contents */
                     sys_chdir(cwd);
                     if (npath > 1) { print(paths[i]); print(":\n"); }
-                    ls_print_dir(paths[i], longfmt, cwd);
+                    ls_print_dir(paths[i], longfmt, human, cwd);
                 } else {                                           /* a file (or a glob expansion): name it, long if -l */
                     char b;
-                    if (sys_readfile(paths[i], &b, 1) >= 0) { if (longfmt) ls_long_entry(paths[i]); else { print(paths[i]); print("\n"); } }
+                    if (sys_readfile(paths[i], &b, 1) >= 0) { if (longfmt) ls_long_entry(paths[i], human); else { print(paths[i]); print("\n"); } }
                     else { perr("ls: no such file: "); print(paths[i]); print("\n"); g_status = 1; }
                 }
             }

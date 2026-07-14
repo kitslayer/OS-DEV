@@ -21,6 +21,28 @@ static void ls_mode_str(unsigned mode, char *out) {
     out[10] = 0;
 }
 
+/* human-readable size (`ls -lh`): bytes bare below 1024, else 1024-scaled with a
+ * K/M/G/T/P suffix and one decimal when the whole part is < 10 (e.g. 1.5K, 27M). */
+static void ls_human_size(unsigned long b, char *out) {
+    int o = 0;
+    if (b < 1024) {                                   /* bytes: bare number */
+        char tmp[24]; int ti = 0; unsigned long v = b;
+        if (!v) tmp[ti++] = '0';
+        while (v) { tmp[ti++] = (char)('0' + (int)(v % 10)); v /= 10; }
+        while (ti) out[o++] = tmp[--ti];
+        out[o] = 0; return;
+    }
+    const char U[] = "KMGTP"; int ui = 0;
+    unsigned long unit = 1024;
+    while (b / unit >= 1024 && ui < 4) { unit *= 1024; ui++; }
+    unsigned long whole = b / unit, rem = b % unit;
+    char tmp[24]; int ti = 0; unsigned long v = whole;
+    if (!v) tmp[ti++] = '0';
+    while (v) { tmp[ti++] = (char)('0' + (int)(v % 10)); v /= 10; }
+    while (ti) out[o++] = tmp[--ti];
+    if (whole < 10) { out[o++] = '.'; out[o++] = (char)('0' + (int)((rem * 10) / unit)); }
+    out[o++] = U[ui]; out[o] = 0;
+}
 /* epoch day count (days since 1970-01-01) -> Y / M(1-12) / D, via Howard
  * Hinnant's days_from_civil inverse (the same algorithm the kernel Date uses). */
 static void ls_civil(long z, int *y, int *m, int *d) {

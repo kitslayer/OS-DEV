@@ -29,6 +29,18 @@ int main(void) {
     ls_fmt_time(1582934400UL, b); EQ(b, "2020-02-29 00:00");   /* the leap day */
     ls_fmt_time(1609459199UL, b); EQ(b, "2020-12-31 23:59");   /* last minute of 2020 */
 
+    /* --- human-readable sizes (`ls -lh`) --- */
+    ls_human_size(0UL, b);          EQ(b, "0");
+    ls_human_size(278UL, b);        EQ(b, "278");
+    ls_human_size(1023UL, b);       EQ(b, "1023");
+    ls_human_size(1024UL, b);       EQ(b, "1.0K");
+    ls_human_size(1536UL, b);       EQ(b, "1.5K");     /* 1.5 * 1024 */
+    ls_human_size(10240UL, b);      EQ(b, "10K");      /* whole >= 10 -> no decimal */
+    ls_human_size(1048576UL, b);    EQ(b, "1.0M");
+    ls_human_size(4196020UL, b);    EQ(b, "4.0M");     /* DOOM1.WAD */
+    ls_human_size(28795076UL, b);   EQ(b, "27M");      /* FREEDOM1.WAD (truncating) */
+    ls_human_size(1073741824UL, b); EQ(b, "1.0G");
+
     if (fails) { printf("lsfmt: %d of %d checks FAILED\n", fails, checks); return 1; }
     printf("lsfmt: all %d ls -l formatting checks passed\n", checks);
     return 0;

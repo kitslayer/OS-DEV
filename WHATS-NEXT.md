@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1822) Shell `ls -lh` — human-readable sizes.** Extends M1817's long listing with the `-h` flag (one of the most common `ls` invocations): sizes render as bytes below 1024, else 1024-scaled with a K/M/G/T/P suffix and one decimal when the whole part is < 10 (`1.5K`, `10K`, `27M`, `1.0G`). A pure `ls_human_size()` in `user/lsfmt.h`, threaded through `ls_long_entry`/`ls_print_dir`; `-lh`/`-hl` combine.
+> 
+> **Verified:** `make lsfmttest` green — 24 checks (10 new human-size cases: byte passthrough, the `<1024` boundary, `1.0K`/`1.5K`, the `10K` no-decimal cutover, `4.0M` (DOOM1.WAD), `27M` (FREEDOM1.WAD), `1.0G`), ASan/UBSan clean. Full OS image builds clean; the `ls -l` render path itself was verified in-guest at M1817 and is unchanged apart from the size column.
+> 
 > **(M1821) Shell parameter expansion — case conversion `${VAR^^}` / `${VAR^}` / `${VAR,,}` / `${VAR,}`.** The expander (`user/shexpand.h`) already had a broad set (`${#VAR}`, `${VAR:-/:+/:=}`, `${VAR:off:len}`, `${VAR#/##/%/%%}`, `${VAR/pat/repl}`) but no case conversion — a common bash-4 text idiom. Added `^^` (uppercase all) / `^` (uppercase first char) / `,,` (lowercase all) / `,` (lowercase first char), as a new branch in the `${…}` dispatch (any trailing char-class pattern is tolerated/ignored). Pure string transform, so it slotted straight into the pure expander.
 > 
 > **Verified:** `make shexpandtest` green — the host regression suite gained 10 case-conversion cases (`${FOO^^}`→`BAR`, `${FOO^}`→`Bar`, `${HELLO,,}`→`hello world`, `${HELLO,}`→`hello World`, digits/unset/embedded) and all pass plus the existing 200k-input fuzz sweep (ASan/UBSan clean). Full OS image builds clean.
