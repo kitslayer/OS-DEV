@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1825) Shell `tr -s` — squeeze repeated characters.** `tr` had `-d SET` (delete) and `SET1 SET2` (translate) but not the third common mode: `-s SET FILE` collapses each run of a repeated character listed in SET to a single occurrence (`tr -s ' '` to squash runs of spaces, `tr -s abc` etc.). A new branch mirroring the `-d` one — reuses `tr_expand` (chars + `a-z` ranges) and the quoted-SET `SH_UNPROT` handling; a char is dropped only when it's in SET and equals the previously-emitted char.
+> 
+> **Verified in-guest** (osdrive): `echo aaabbbccc > /tmp/T.TXT` then `tr -s abc /tmp/T.TXT` prints `abc` (each run squeezed to one). The `-d` and translate paths are untouched (the `-s` branch is inserted before them). Full OS image builds clean.
+> 
 > **(M1824) Shell `ls -S` / `-t` / `-r` — sort by size / mtime / reverse.** Completes the common `ls` sorting flags on top of M1817's long listing: `-S` sorts by size and `-t` by mtime (both descending, like GNU), `-r` reverses the final order; they combine (`ls -lSr`, `ls -lth`, …). Implemented without disturbing the fast default: plain `ls`/`ls -l` keep their existing streaming coloured-grid / long path, and only a sort/reverse request collects the entries (cap 256, `statx` for the key) into an insertion-sorted array before printing.
 > 
 > **Verified in-guest** (osdrive, `ls -lSh`): the listing is size-descending — the visible tail runs 346, 344, 330, … 42, 29 bytes in order — with sub-1024 sizes shown bare by `-h` (the multi-MB files, human-formatted, lead the scrolled-off top). The default `ls -l` path is unchanged (same entries via `ls_long_entry` in `sys_list` order). Full OS image builds clean.

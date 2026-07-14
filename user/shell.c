@@ -1248,7 +1248,7 @@ static int run_command(char *line, char *cwd) {
                 }
                 free(buf);
             }
-        } else if (startswith(line, "tr ")) {              /* tr -d SET FILE (delete) | tr SET1 SET2 FILE (translate); SETs take a-z ranges */
+        } else if (startswith(line, "tr ")) {              /* tr -d SET FILE (delete) | tr -s SET FILE (squeeze) | tr SET1 SET2 FILE (translate); SETs take a-z ranges */
             const char *p = line + 3; while (*p == ' ') p++;
             if (p[0] == '-' && p[1] == 'd' && p[2] == ' ') {
                 p += 3; while (*p == ' ') p++;
@@ -1266,6 +1266,23 @@ static int run_command(char *line, char *cwd) {
                     }
                     buf[oi] = 0; print(buf); free(buf);
                 }
+            } else if (p[0] == '-' && p[1] == 's' && p[2] == ' ') {   /* tr -s SET FILE: squeeze runs of a repeated SET char to one (M1825) */
+                p += 3; while (*p == ' ') p++;
+                char sq[128]; int sn = tr_expand(&p, sq, 128);
+                for (int z = 0; z < sn; z++) sq[z] = SH_UNPROT(sq[z]);
+                while (*p == ' ') p++;
+                long n; char *buf = slurp(p, &n);
+                if (!buf) { perr("tr: no such file: "); print(p); print("\n"); }
+                else {
+                    long oi = 0; int prev_in = 0; char prev = 0;
+                    for (long i = 0; i < n; i++) {
+                        int in_set = 0;
+                        for (int j = 0; j < sn; j++) if (buf[i] == sq[j]) { in_set = 1; break; }
+                        if (in_set && prev_in && buf[i] == prev) continue;   /* collapse a repeat of the same SET char */
+                        buf[oi++] = buf[i]; prev_in = in_set; prev = buf[i];
+                    }
+                    buf[oi] = 0; print(buf); free(buf);
+                }
             } else {
                 char s1[128], s2[128];
                 int n1 = tr_expand(&p, s1, 128); while (*p == ' ') p++;   /* SET1 */
@@ -1273,7 +1290,7 @@ static int run_command(char *line, char *cwd) {
                 for (int z = 0; z < n1; z++) s1[z] = SH_UNPROT(s1[z]);    /* reveal quoted SET chars (tr ' ' _) */
                 for (int z = 0; z < n2; z++) s2[z] = SH_UNPROT(s2[z]);
                 long n; char *buf = slurp(p, &n);
-                if (!buf || n1 == 0 || n2 == 0) { print("usage: tr SET1 SET2 FILE  |  tr -d SET FILE   (SETs: chars or a-z ranges)\n"); if (buf) free(buf); }
+                if (!buf || n1 == 0 || n2 == 0) { print("usage: tr SET1 SET2 FILE  |  tr -d SET FILE  |  tr -s SET FILE   (SETs: chars or a-z ranges)\n"); if (buf) free(buf); }
                 else {
                     buf[n] = 0;
                     for (long i = 0; i < n; i++)
