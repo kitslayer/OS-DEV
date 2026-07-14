@@ -27,6 +27,7 @@
  *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) TRUNC(x[,dp]) MOD POW/POWER
  *            SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
  *            MATCH(key,range,[type]) INDEX(range,row,[col]) VLOOKUP(key,range,col,[exact])
+ *            LARGE(range,k) SMALL(range,k)
  */
 #ifndef SHEETEVAL_H
 #define SHEETEVAL_H
@@ -423,6 +424,18 @@ static double call_function(const char *name) {
         }
         if (found_r < 0) { perr = ERR_SYNTAX; return 0; }
         return get_cell_value(found_r, c1 + col_index - 1);
+    }
+    if (nameeq(name, "LARGE") || nameeq(name, "SMALL")) {   /* LARGE(range,k)/SMALL(range,k): kth largest/smallest (M1828) */
+        int r1, c1, r2, c2;
+        if (!parse_range_arg(&r1, &c1, &r2, &c2)) return 0;
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        int k = (int)eval_compare();
+        skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        double vals[512]; int nv = 0;
+        collect_range_vals(r1, c1, r2, c2, vals, 512, &nv);
+        if (nv <= 0 || k < 1 || k > nv) { perr = ERR_SYNTAX; return 0; }
+        dsort(vals, nv);                                     /* ascending */
+        return nameeq(name, "SMALL") ? vals[k - 1] : vals[nv - k];
     }
 
     /* fixed-arity scalar functions */

@@ -215,6 +215,16 @@ int main(void) {
     set_raw(0, 3, "=VLOOKUP(99,A1:B4,2,0)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("VLOOKUP not-found should be #ERR (got %d)", CELL(0, 3)->err);
     set_raw(0, 3, "=VLOOKUP(30,A1:B4,5,0)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("VLOOKUP bad col_index should be #ERR (got %d)", CELL(0, 3)->err);
 
+    /* --- LARGE / SMALL kth-largest/smallest of a range (M1828), A1:A4 = 10,20,30,40 --- */
+    set_raw(0, 3, "=LARGE(A1:A4,1)"); recompute(); chk_num(0, 3, 40, "LARGE k=1 (max)");
+    set_raw(0, 3, "=LARGE(A1:A4,2)"); recompute(); chk_num(0, 3, 30, "LARGE k=2");
+    set_raw(0, 3, "=LARGE(A1:A4,4)"); recompute(); chk_num(0, 3, 10, "LARGE k=4 (min)");
+    set_raw(0, 3, "=SMALL(A1:A4,1)"); recompute(); chk_num(0, 3, 10, "SMALL k=1 (min)");
+    set_raw(0, 3, "=SMALL(A1:A4,2)"); recompute(); chk_num(0, 3, 20, "SMALL k=2");
+    set_raw(0, 3, "=LARGE(A1:A4,1)-SMALL(A1:A4,1)"); recompute(); chk_num(0, 3, 30, "LARGE-SMALL = range span");
+    set_raw(0, 3, "=LARGE(A1:A4,5)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("LARGE k>n should be #ERR (got %d)", CELL(0, 3)->err);
+    set_raw(0, 3, "=SMALL(A1:A4,0)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("SMALL k<1 should be #ERR (got %d)", CELL(0, 3)->err);
+
     /* --- circular references ----------------------------------------------*/
     clear_all(); set_raw(0, 0, "=A1"); recompute();
     checks++; if (CELL(0, 0)->err != ERR_CIRC) FAILN("self-ref A1=A1 should be #CIRC (got %d)", CELL(0, 0)->err);

@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1828) Spreadsheet — `LARGE(range,k)` / `SMALL(range,k)`.** The kth-largest / kth-smallest of a range — the standard complement to `MIN`/`MAX` for top-N / bottom-N analysis. Reuses the M1813 `parse_range_arg` plus the engine's existing `collect_range_vals` + `dsort`: collect the range's numeric values, sort ascending, return `vals[k-1]` (SMALL) or `vals[n-k]` (LARGE); `k` out of `[1,n]` surfaces as `#ERR`.
+> 
+> **Verified:** `make sheettest` green — 292 checks (8 new: `LARGE(A1:A4,1)`=40, `LARGE(…,2)`=30, `SMALL(…,1)`=10, `LARGE-SMALL` span, and the `k>n`/`k<1` `#ERR` cases) + 40k-iteration fuzz, ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1827) Calculator — variadic list statistics (`sum`/`mean`/`stdev`/`variance`/`median`/`count`).** The scientific calculator had per-value functions and 2-arg `min`/`max`, but no way to reduce a list. Added a variadic `call_argn()` arg parser and six list functions: `sum`, `mean` (alias `avg`), `stdev`/`stddev` (sample, n−1), `variance`/`var`, `median` (sorts, averages the two middles for an even count), and `count` — e.g. `mean(2,4,6)`=4, `stdev(2,4,6)`=2, `median(4,1,3,2)`=2.5. Args are full expressions (`sum(2^2,3^2,4^2)`=29). The in-app function list gained a `stats:` line.
 > 
 > **Verified:** `make calctest` green — 15 new cases (sum/mean/avg/stdev/variance/median/count, empty→0/NaN, `<2`-sample NaN, arithmetic composition, a missing-`)` error) + the existing 400k-iteration fuzz sweep, ASan/UBSan clean. Full OS image builds clean.
