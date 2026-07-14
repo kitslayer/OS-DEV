@@ -14,6 +14,7 @@
 #include "shsplit.h"  /* sh_next_sep(): the ';' statement splitter (construct-aware), host-tested by tests/shsplit */
 #include "shbrace.h"  /* expand_braces(): {a,b}/{1..N} brace expansion, host-tested by tests/shbrace */
 #include "shquote.h"  /* sh_quote_pass()/sh_unprot_buf(): "..." '...' quoting, host-tested by tests/shquote */
+#include "shtest.h"   /* sh_test_eval(): the test / [ ] conditional evaluator, host-tested by tests/shtest */
 #include "patchcore.h" /* patch_apply(): apply a unified-diff patch (the `patch` builtin), host-tested by tests/diff */
 
 static void perr(const char *s);   /* print an error label in red (defined below); forward-declared for early use (M1379) */
@@ -720,6 +721,23 @@ static void print_dmesg_colored(const char *buf) {
         if (buf[eol] == '\n') { print("\n"); eol++; }
         i = eol;
     }
+}
+
+/* The sh_test_file hook from shtest.h: file-existence/type probe for `test`/`[ ]`.
+ * -e/-f/-d/-s reuse the read-one-byte + chdir probe the builtin has always used;
+ * this OS has a minimal single-user permission model, so -r/-w/-x are approximated
+ * as "exists". (M1816) */
+static int sh_test_file(char op, const char *path, const char *cwd) {
+    char b; long rf = sys_readfile(path, &b, 1);
+    int isdir = 0; if (sys_chdir(path) >= 0) { isdir = 1; sys_chdir((char *)cwd); }
+    switch (op) {
+        case 'd': return isdir;
+        case 'e': return (rf >= 0) || isdir;
+        case 'f': return (rf >= 0) && !isdir;
+        case 's': return (rf >= 1) && !isdir;
+        case 'r': case 'w': case 'x': return (rf >= 0) || isdir;   /* minimal perms: r/w/x ~ exists */
+    }
+    return 0;
 }
 
 static int run_command(char *line, char *cwd) {
@@ -1591,12 +1609,13 @@ static int run_command(char *line, char *cwd) {
             g_status = 1;                          /* exit status 1 — useful with && / || */
         } else if (startswith(line, "test ") || (line[0] == '[' && line[1] == ' ')) {
             /* test EXPR / [ EXPR ] -> set $? (0 = true). Args are already
-             * variable-expanded by run_line. Supports: STR (non-empty),
-             * -z/-n STR, -e/-f/-d/-s FILE, A -eq/-ne/-lt/-gt/-le/-ge B,
-             * A =/!= B, and a leading ! to negate. */
+             * variable-expanded by run_line. The evaluator (sh_test_eval in
+             * shtest.h, host-tested by tests/shtest) handles STR (non-empty),
+             * -z/-n STR, -e/-f/-d/-s/-r/-w/-x FILE, A OP B (= == != -eq..-ge),
+             * a leading ! (negate), and -a (AND) / -o (OR) combiners. */
             const char *p = line + (line[0] == '[' ? 1 : 4);
-            char *av[12]; static char tok[256]; int ac = 0, ti = 0;
-            while (*p && ac < 12) {
+            char *av[16]; static char tok[256]; int ac = 0, ti = 0;
+            while (*p && ac < 16) {
                 while (*p == ' ') p++;
                 if (!*p) break;
                 if (ti >= 255) break;        /* no room for another token + its NUL: stop (else tok[ti++]=0 writes past tok[256] + stores a dangling av[]) */
@@ -1606,35 +1625,7 @@ static int run_command(char *line, char *cwd) {
             }
             for (int i = 0; i < ac; i++) sh_unprot_buf(av[i]);            /* restore quoted bytes in each arg */
             if (line[0] == '[' && ac > 0 && streq(av[ac-1], "]")) ac--;   /* drop closing ] */
-            int neg = 0, i0 = 0;
-            if (ac > 0 && streq(av[0], "!")) { neg = 1; i0 = 1; }
-            int rem = ac - i0, res = 0;
-            if (rem == 1) res = (av[i0][0] != 0);
-            else if (rem == 2) {
-                const char *op = av[i0], *a = av[i0+1];
-                if (streq(op, "-z")) res = (a[0] == 0);
-                else if (streq(op, "-n")) res = (a[0] != 0);
-                else {                                       /* file tests: read 1 byte (rf>=0 = readable, rf = bytes so 0 if empty);
-                                                             * chdir-able = directory (restore cwd after) */
-                    char b; long rf = sys_readfile(a, &b, 1);
-                    int isdir = 0; if (sys_chdir(a) >= 0) { isdir = 1; sys_chdir(cwd); }
-                    if (streq(op, "-d")) res = isdir;                          /* directory */
-                    else if (streq(op, "-e")) res = (rf >= 0) || isdir;       /* exists: file or dir */
-                    else if (streq(op, "-f")) res = (rf >= 0) && !isdir;      /* regular file (readable, not a dir) */
-                    else if (streq(op, "-s")) res = (rf >= 1) && !isdir;      /* non-empty regular file */
-                }
-            }
-            else if (rem == 3) {
-                const char *a = av[i0], *op = av[i0+1], *b = av[i0+2];
-                if (streq(op, "=")) res = streq(a, b);
-                else if (streq(op, "!=")) res = !streq(a, b);
-                else { long x = sh_str2long(a), y = sh_str2long(b);
-                    if (streq(op, "-eq")) res = (x == y); else if (streq(op, "-ne")) res = (x != y);
-                    else if (streq(op, "-lt")) res = (x < y); else if (streq(op, "-gt")) res = (x > y);
-                    else if (streq(op, "-le")) res = (x <= y); else if (streq(op, "-ge")) res = (x >= y); }
-            }
-            if (neg) res = !res;
-            g_status = res ? 0 : 1;
+            g_status = sh_test_eval(av, ac, cwd) ? 0 : 1;
         } else if (streq(line, "alias")) {         /* list aliases */
             for (int i = 0; i < g_nalias; i++) { print(g_alias[i].name); print("='"); print(g_alias[i].val); print("'\n"); }
             if (!g_nalias) print("(no aliases)\n");
