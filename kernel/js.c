@@ -4051,6 +4051,17 @@ static val eval_date_method(val recv, const char *name, val *args, int nargs){
     if(strcmp(name,"setHours")==0)   { if(nargs) date_set_field(o,3,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
     if(strcmp(name,"setMinutes")==0) { if(nargs) date_set_field(o,4,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
     if(strcmp(name,"setSeconds")==0) { if(nargs) date_set_field(o,5,(int64_t)to_num(args[0]));   return eval_date_method(recv,"getTime",0,0); }
+    if(strcmp(name,"setTime")==0){   /* set the whole instant from epoch ms, mirroring the new Date(ms) decomposition (M1815) */
+        int64_t ms = nargs ? (int64_t)to_num(args[0]) : 0;
+        int64_t secs=ms/1000; if(ms<0 && ms%1000) secs--;                          /* floor toward -inf */
+        int64_t days=secs/86400, tod=secs-days*86400; if(tod<0){ tod+=86400; days--; }
+        int64_t Y,Mo,D; civil_from_days(days,&Y,&Mo,&D);
+        int64_t H=tod/3600, Mi=(tod%3600)/60, S=tod%60;
+        o->vals[0]=NUM(Y); o->vals[1]=NUM(Mo); o->vals[2]=NUM(D);
+        o->vals[3]=NUM(H); o->vals[4]=NUM(Mi); o->vals[5]=NUM(S);
+        return eval_date_method(recv,"getTime",0,0);
+    }
+    if(strcmp(name,"getTimezoneOffset")==0) return NUM(0);   /* this engine has no timezone — always UTC (M1815) */
     if(strcmp(name,"toString")==0) return STRV(val_to_str(recv));
     if(strcmp(name,"toISOString")==0||strcmp(name,"toJSON")==0){   /* "YYYY-MM-DDTHH:MM:SS.000Z" (UTC; ms always 000 at second resolution) */
         char *b=aalloc(28); if(!b) return STRV("");
