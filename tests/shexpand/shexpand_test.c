@@ -147,6 +147,18 @@ int main(void){
     CHECK("${EMPTY:=def}", "def");                /* empty counts as unset -> assign */
     CHECK("$EMPTY", "def");                        /* assignment persisted */
 
+    /* --- ${VAR^^}/${VAR^} upper, ${VAR,,}/${VAR,} lower case conversion (M1821) --- */
+    CHECK("${FOO^^}", "BAR");                      /* all upper */
+    CHECK("${FOO^}", "Bar");                       /* first char only */
+    CHECK("${HELLO,,}", "hello world");           /* all lower */
+    CHECK("${HELLO,}", "hello World");            /* first char only */
+    CHECK("${BANANA^^}", "BANANA");
+    CHECK("${HELLO^^}", "HELLO WORLD");
+    CHECK("${FOO,,}", "bar");                      /* already lower -> unchanged */
+    CHECK("${NUM^^}", "42");                       /* digits unaffected */
+    CHECK("${UNSET^^}", "");                       /* unset -> empty */
+    CHECK("x${FOO^^}y", "xBARy");                  /* embedded in a word */
+
     /* --- $((expr)) arithmetic (delegates to shmath) --- */
     CHECK("$((2+3))", "5");
     CHECK("$((NUM*2))", "84");               /* NUM=42 via sh_var */

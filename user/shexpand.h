@@ -1,6 +1,8 @@
 /* shexpand.h — the shell's parameter/variable expander for a command word:
  * $NAME, ${NAME}, $?, $#, $@, $*, ${#NAME}, ${VAR:-word}/${VAR:+word} default/alt,
- * ${NAME#pat}/##/%/%% glob prefix/suffix strip, and $((expr)) arithmetic. A
+ * ${VAR:=default}, ${VAR:off:len} slice, ${NAME#pat}/##/%/%% glob prefix/suffix
+ * strip, ${VAR/pat/repl}//, ${VAR^^}/${VAR^}/${VAR,,}/${VAR,} case conversion,
+ * and $((expr)) arithmetic. A
  * pass run after alias expansion and before glob/pipe/redirect. Pure apart from
  * three hooks the includer provides — vget() (variable lookup), sh_laststatus()
  * ($? value), and the shmath/shgrep helpers already in scope (sh_eval/sh_askip/
@@ -163,6 +165,21 @@ static int expand_vars(const char *src, char *dst, int cap){
                         }
                     }
                     i = (src[ps]=='}') ? ps+1 : ps;
+                } else if (br && (src[e]=='^' || src[e]==',') && e>s) {   /* ${VAR^^}/${VAR^} upper, ${VAR,,}/${VAR,} lower (M1821) */
+                    char op=src[e]; int all=(src[e+1]==op);
+                    int pe=e+1+all; while (src[pe] && src[pe]!='}') pe++;   /* ignore any trailing pattern up to '}' */
+                    if (v) {
+                        int first=1;
+                        for (int k=0; v[k] && o<cap-1; k++) {
+                            char c=v[k];
+                            if (all || first) {
+                                if (op=='^' && c>='a' && c<='z') c-=32;
+                                else if (op==',' && c>='A' && c<='Z') c+=32;
+                            }
+                            dst[o++]=c; first=0;
+                        }
+                    }
+                    i = (src[pe]=='}') ? pe+1 : pe;
                 } else {
                     if (v) for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k];
                     i = e + ((br && src[e]=='}')?1:0);
