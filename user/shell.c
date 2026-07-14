@@ -1834,7 +1834,7 @@ static int run_command(char *line, char *cwd) {
             }
             if (!any) print("usage: crc32 <file>...\n");
         } else if (startswith(line, "grep ")) {
-            char *p = line + 5; char pats[8][40]; int npat = 0, ci = 0, nn = 0, cc = 0, vv = 0, ll = 0, actx = 0, bctx = 0, oo = 0;  /* -A/-B/-C N context; -o = only the matched part */
+            char *p = line + 5; char pats[8][40]; int npat = 0, ci = 0, nn = 0, cc = 0, vv = 0, ll = 0, actx = 0, bctx = 0, oo = 0, wm = 0, qq = 0;  /* -A/-B/-C N context; -o only the matched part; -w word match; -q quiet (exit status only) */
             while (*p == ' ') p++;
             while (p[0] == '-' && p[1] && p[1] != ' ') {   /* flags -i (case-insens), -n (line#s), -c (count), -v (invert); combinable as -in. -e <pat> adds a pattern: a line matches ANY (the alternation the tiny regex lacks, and avoids the shell `|` = pipe clash) */
                 if (p[1] == '-' && (p[2] == ' ' || p[2] == 0)) { p += 2; while (*p == ' ') p++; break; }  /* "--": end of flags (pattern may then start with '-') */
@@ -1855,9 +1855,9 @@ static int run_command(char *line, char *cwd) {
                     continue;
                 }
                 int t, valid = 1;
-                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n' && p[t] != 'c' && p[t] != 'v' && p[t] != 'l' && p[t] != 'o') valid = 0;
+                for (t = 1; p[t] && p[t] != ' '; t++) if (p[t] != 'i' && p[t] != 'n' && p[t] != 'c' && p[t] != 'v' && p[t] != 'l' && p[t] != 'o' && p[t] != 'w' && p[t] != 'q') valid = 0;
                 if (!valid) break;                          /* not a flag token (e.g. a pattern starting with '-') */
-                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else if (p[t] == 'n') nn = 1; else if (p[t] == 'c') cc = 1; else if (p[t] == 'v') vv = 1; else if (p[t] == 'l') ll = 1; else oo = 1; }   /* -l filenames only; -o matched part only */
+                for (t = 1; p[t] && p[t] != ' '; t++) { if (p[t] == 'i') ci = 1; else if (p[t] == 'n') nn = 1; else if (p[t] == 'c') cc = 1; else if (p[t] == 'v') vv = 1; else if (p[t] == 'l') ll = 1; else if (p[t] == 'w') wm = 1; else if (p[t] == 'q') qq = 1; else oo = 1; }   /* -l filenames only; -w word match; -q quiet; -o matched part only */
                 p += t; while (*p == ' ') p++;
             }
             if (npat == 0) {                                /* no -e given: the first non-flag word is the pattern */
@@ -1887,8 +1887,9 @@ static int run_command(char *line, char *cwd) {
                             lno++;
                             char save = buf[k]; buf[k] = 0;   /* NUL-terminate this line for matching + printing */
                             int found = 0;                 /* ^ $ . * + literal/escape (tiny regex); match ANY -e pattern */
-                            for (int pi = 0; pi < npat; pi++) if (gr_match(pats[pi], buf + ls, ci)) { found = 1; break; }
+                            for (int pi = 0; pi < npat; pi++) if ((wm ? gr_match_word : gr_match)(pats[pi], buf + ls, ci)) { found = 1; break; }   /* -w: whole-word match */
                             int hit = vv ? !found : found;   /* -v inverts: act on non-matching lines */
+                            if (qq) { buf[k] = save; if (hit) { hits = 1; break; } ls = (int)k + 1; continue; }   /* -q: no output, stop at the first match */
                             if (oo) {                       /* -o: print just the matched part(s), each on its own line */
                                 if (found) {
                                     hits++;
@@ -1932,8 +1933,10 @@ static int run_command(char *line, char *cwd) {
                         }
                     }
                     free(buf);
+                    if (qq && hits) break;            /* -q: first match anywhere is enough */
                 }
-                if (ll) { /* -l already printed the matching filenames; no summary line */ }
+                if (qq) { /* -q: no output at all, just the exit status below */ }
+                else if (ll) { /* -l already printed the matching filenames; no summary line */ }
                 else if (cc) { char cb[12]; itoa_simple(hits, cb); print("  "); print(cb); print("\n"); }
                 else if (!hits && !cap_active()) print("  (no matches)\n");   /* screen-only note; would otherwise pollute a pipe/$() */
                 g_status = hits ? 0 : 1;          /* exit status like real grep: 0 if any line matched, else 1 */

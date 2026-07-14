@@ -70,6 +70,24 @@ static int gr_match(const char *re, const char *t, int ci) {     /* match anywhe
     do { if (gr_matchhere(re, t, ci, &e)) return 1; } while (*t++);
     return 0;
 }
+static int gr_isword(int c) { return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'; }
+/* grep -w: match only where the matched span is bounded by a non-word char (or an
+ * end of the text) on both sides, so `grep -w cat` hits "a cat" but not "category". */
+static int gr_match_word(const char *re, const char *t, int ci) {
+    const char *base = t, *e;
+    if (re[0] == '^') {                                          /* ^ anchors the start; the line start is a boundary */
+        if (gr_matchhere(re + 1, t, ci, &e) && !gr_isword((unsigned char)*e)) return 1;
+        return 0;
+    }
+    for (const char *p = t; ; p++) {
+        if (gr_matchhere(re, p, ci, &e)) {
+            int lb = (p == base) || !gr_isword((unsigned char)p[-1]);
+            if (lb && !gr_isword((unsigned char)*e)) return 1;
+        }
+        if (!*p) break;
+    }
+    return 0;
+}
 /* grep -o: leftmost match's span [*ms, *me). With the greedy matcher this is the
  * leftmost-longest match at that start. Returns 1 if a match was found. */
 static int gr_match_span(const char *re, const char *t, int ci, const char **ms, const char **me) {

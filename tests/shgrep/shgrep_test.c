@@ -21,6 +21,9 @@ static void M(const char *re, const char *t, int ci, int exp, const char *m) {
 static void G(const char *pat, const char *s, int exp, const char *m) {
     CHECK(glob_match(pat, s) == exp, m);
 }
+static void W(const char *re, const char *t, int ci, int exp, const char *m) {   /* grep -w whole-word match */
+    CHECK(gr_match_word(re, t, ci) == exp, m);
+}
 
 int main(void) {
     /* ---- literal (no metacharacters) behaves like substring search ---- */
@@ -65,7 +68,22 @@ int main(void) {
     M("FOO", "xfoo", 1, 1, "case-insensitive literal");
     M("FOO", "xfoo", 0, 0, "case-sensitive literal");
     M("[a-c]", "B", 1, 1, "case-insensitive class");
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (literal/anchors/./*/classes/escape/-i)");
+
+    /* ---- grep -w whole-word matching ---- */
+    W("cat", "a cat here", 0, 1, "word: bounded by spaces");
+    W("cat", "category", 0, 0, "word: prefix of a longer word is not a whole word");
+    W("cat", "bobcat", 0, 0, "word: suffix of a longer word is not a whole word");
+    W("cat", "cat", 0, 1, "word: whole string");
+    W("cat", "the cat.", 0, 1, "word: '.' is a boundary");
+    W("cat", "concatenate", 0, 0, "word: embedded is not a whole word");
+    W("cat", "cat_dog", 0, 0, "word: '_' is a word char, so cat_dog is one word");
+    W("cat", "my-cat-toy", 0, 1, "word: '-' is a boundary");
+    W("CAT", "a cat here", 1, 1, "word: case-insensitive");
+    W("^cat", "cat food", 0, 1, "word: ^ anchor + right boundary");
+    W("^cat", "category", 0, 0, "word: ^ anchor but no right boundary");
+    W("c.t", "a cot here", 0, 1, "word: regex '.' within a bounded word");
+    W("c.t", "scatter", 0, 0, "word: regex match embedded in a longer word");
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (literal/anchors/./*/classes/escape/-i/-w)");
 
     /* ---- fuzz: random metachar-biased patterns x random texts; must never OOB ---- */
     srand(20260618);

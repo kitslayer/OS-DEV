@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1823) Shell `grep -w` (whole-word) and `-q` (quiet).** The grep builtin was already rich (`-i`/`-n`/`-c`/`-v`/`-l`/`-o`, `-e`, `-A`/`-B`/`-C`) but lacked two staples. `-w` matches only where the span is bounded by a non-word char (or a text edge) on both sides — a new additive `gr_match_word()` in `user/shgrep.h` that scans positions with the existing `gr_matchhere`+`endp` and checks the boundaries (so `grep -w cat` hits "a cat" but not "category"/"bobcat"/"concatenate"; `_` counts as a word char, `-`/`.` as boundaries). `-q` suppresses all output and stops at the first match, reporting only via `$?` — the ubiquitous `if grep -q pat file; then` script idiom.
+> 
+> **Verified:** `make shgreptest` green — 13 new whole-word cases (prefix/suffix/embedded rejects, `_` vs `-`/`.` boundaries, case-insensitive, `^`-anchored, regex `.`) + the existing 300k-pair fuzz, ASan/UBSan clean. **In-guest** (osdrive, `source GREPW.SH`): `grep -w cat` prints only `cat` and `one cat two` (not `category`/`bobcat`); `grep -q cat`→no output, `status=0`; `grep -q dog`→no output, `status=1`. Full OS image builds clean.
+> 
 > **(M1822) Shell `ls -lh` — human-readable sizes.** Extends M1817's long listing with the `-h` flag (one of the most common `ls` invocations): sizes render as bytes below 1024, else 1024-scaled with a K/M/G/T/P suffix and one decimal when the whole part is < 10 (`1.5K`, `10K`, `27M`, `1.0G`). A pure `ls_human_size()` in `user/lsfmt.h`, threaded through `ls_long_entry`/`ls_print_dir`; `-lh`/`-hl` combine.
 > 
 > **Verified:** `make lsfmttest` green — 24 checks (10 new human-size cases: byte passthrough, the `<1024` boundary, `1.0K`/`1.5K`, the `10K` no-decimal cutover, `4.0M` (DOOM1.WAD), `27M` (FREEDOM1.WAD), `1.0G`), ASan/UBSan clean. Full OS image builds clean; the `ls -l` render path itself was verified in-guest at M1817 and is unchanged apart from the size column.
