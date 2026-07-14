@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1837) Graphing calculator — `sinh`/`cosh`/`tanh`/`cbrt` (+ `log10`/`trunc`).** The plot evaluator (`user/ploteval.h`) had trig/`sqrt`/`abs`/`ln`/`log`/`exp` but not the hyperbolics or cube root the scientific calculator gained in M1812 — so `plot sinh(x)` failed. Added them with the same numerically-stable `tanh` and sign-aware `cbrt` formulas, so the plotter and calculator now share a consistent function set.
+> 
+> **Verified:** `make plottest` green — 112 checks (11 new: `sinh`/`cosh`/`tanh` incl. saturation + the `cosh²−sinh²=1` identity, sign-aware `cbrt`, `log10`, `trunc` on negatives) + the 300k-iteration fuzz sweep, ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1836) Calculator — variadic `min` / `max`.** They were fixed 2-argument (`min(a,b)`); now they take any number of arguments (`max(3,9,2)`=9), consistent with the M1827 list statistics (`sum`/`mean`/…) and reusing the same `call_argn` parser. A single argument returns itself; empty is `NaN`. Two-arg calls are unchanged.
 > 
 > **Verified:** `make calctest` green — updated `min(3)` from an expected-error to `3` (now valid) and added `max(3,9,2)`/`min(3,9,2)`/repeated/negative cases; all pass + the 400k-iteration fuzz sweep, ASan/UBSan clean. Full OS image builds clean.

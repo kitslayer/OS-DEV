@@ -48,6 +48,13 @@ int main(void) {
     CK("abs(x)", -7, 7);  CK("floor(x)", 3.9, 3);  CK("ceil(x)", 3.1, 4);
     CK("round(x)", 2.5, 3);  CK("sign(x)", -2, -1);  CK("sign(x)", 0, 0);
 
+    /* hyperbolics + cbrt + log10 + trunc (M1836, matching the calculator) */
+    CK("sinh(x)", 0, 0);  CK("cosh(x)", 0, 1);  CK("tanh(x)", 0, 0);
+    CK("sinh(x)", 1, 1.1752011936438014);  CK("cosh(x)", 1, 1.5430806348152437);
+    CK("tanh(x)", 20, 1);  CK("cosh(x)^2-sinh(x)^2", 2, 1);   /* saturates; hyperbolic identity */
+    CK("cbrt(x)", 27, 3);  CK("cbrt(x)", -8, -2);  CK("cbrt(x)", 0, 0);
+    CK("log10(x)", 1000, 3);  CK("trunc(x)", 3.7, 3);  CK("trunc(x)", -3.7, -3);
+
     /* constants */
     CK("pi", 0, 3.14159265358979);  CK("2*pi", 0, 6.28318530717958);  CK("e", 0, 2.71828182845905);
 

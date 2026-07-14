@@ -12,7 +12,8 @@
  *           power := factor ('^' power)? ;
  *           factor := number | '(' expr ')' | ('-'|'+') factor | name '(' expr ')'
  *                   | name        (the variable x, or the constants pi / e)
- * Functions: sin cos tan asin acos atan sqrt abs ln log log2 exp floor ceil round sign
+ * Functions: sin cos tan asin acos atan sqrt abs ln log log2 log10 exp floor ceil round trunc sign
+ *            sinh cosh tanh cbrt  (hyperbolics/cube-root, matching the calculator)
  *            + the two-argument min(a,b) max(a,b) hypot(a,b) atan2(y,x)
  */
 #ifndef PLOTEVAL_H
@@ -106,6 +107,12 @@ static double pe_factor(void) {
             if (pe_kw(s, n, "ceil"))  return js_ceil(a);
             if (pe_kw(s, n, "round")) return js_round(a);
             if (pe_kw(s, n, "sign"))  return a > 0 ? 1.0 : a < 0 ? -1.0 : 0.0;
+            if (pe_kw(s, n, "sinh"))  return (js_exp(a) - js_exp(-a)) * 0.5;                        /* hyperbolics: real arg, not DEG-converted (M1836) */
+            if (pe_kw(s, n, "cosh"))  return (js_exp(a) + js_exp(-a)) * 0.5;
+            if (pe_kw(s, n, "tanh"))  { double x = a < 0 ? -a : a, e = js_exp(-2.0 * x), t = (1.0 - e) / (1.0 + e); return a < 0 ? -t : t; }
+            if (pe_kw(s, n, "cbrt"))  { double r = js_pow(a < 0 ? -a : a, 1.0 / 3.0); return a < 0 ? -r : r; }   /* sign-aware real cube root */
+            if (pe_kw(s, n, "log10")) return js_ln(a) / js_ln(10.0);
+            if (pe_kw(s, n, "trunc")) return js_trunc(a);
             pe_err = 1; return 0;
         }
         if (pe_kw(s, n, "x"))  return pe_x;           /* the variable */
