@@ -163,13 +163,17 @@ int main(void) {
     CHECK_F("npr(10, 3)", 720);
     CHECK_NAN("ncr(3, 5)");                       /* r > n */
     CHECK_ERR("ncr(5)");                          /* needs two args */
-    CHECK_ERR("gcd(4)");
+    CHECK_F("gcd(4)", 4);                         /* variadic (M1842): single arg = itself */
     CHECK_F("gcd(12, 18)", 6);
     CHECK_F("gcd(17, 5)", 1);                     /* coprime */
     CHECK_F("gcd(0, 9)", 9);
+    CHECK_F("gcd(12, 18, 24)", 6);                /* variadic fold: gcd(gcd(12,18),24) */
+    CHECK_F("gcd(100, 40, 60)", 20);
     CHECK_F("lcm(4, 6)", 12);
     CHECK_F("lcm(21, 6)", 42);
     CHECK_F("lcm(7, 0)", 0);
+    CHECK_F("lcm(4, 6, 10)", 60);                 /* variadic: lcm(lcm(4,6),10) */
+    CHECK_F("lcm(2, 3, 5)", 30);
 
     /* --- binary literals: 0b... (M1812) --- */
     CHECK_F("0b1010", 10);

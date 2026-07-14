@@ -237,8 +237,8 @@ static double factor(void) {
         if (match_kw("tanh"))  { double x = call_arg(); double a = x < 0 ? -x : x; double e = js_exp(-2.0 * a); double t = (1.0 - e) / (1.0 + e); return x < 0 ? -t : t; }
         if (match_kw("cbrt"))  { double x = call_arg(); double r = js_pow(x < 0 ? -x : x, 1.0 / 3.0); return x < 0 ? -r : r; }
         if (match_kw("fact"))  return calc_fact(call_arg());
-        if (match_kw("gcd"))   { double a, b; call_arg2(&a, &b); return calc_gcd(a, b); }
-        if (match_kw("lcm"))   { double a, b; call_arg2(&a, &b); return calc_lcm(a, b); }
+        if (match_kw("gcd"))   { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (!n) return 0; double g = a[0]; for (int k = 1; k < n; k++) g = calc_gcd(g, a[k]); return g; }   /* variadic fold (M1842) */
+        if (match_kw("lcm"))   { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (!n) return 0; double l = a[0]; for (int k = 1; k < n; k++) l = calc_lcm(l, a[k]); return l; }
         if (match_kw("npr"))   { double a, b; call_arg2(&a, &b); return calc_perm(a, b); }
         if (match_kw("ncr"))   { double a, b; call_arg2(&a, &b); return calc_comb(a, b); }
         /* variadic list statistics (M1827): sum/mean(avg)/stdev(sample)/variance/median/count */

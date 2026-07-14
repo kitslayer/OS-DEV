@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1842) Calculator — variadic `gcd` / `lcm`.** They were 2-argument; now they fold over any number of arguments (`gcd(12,18,24)`=6, `lcm(4,6,10)`=60) via `call_argn` + the existing pairwise `calc_gcd`/`calc_lcm`. This completes the variadic-function set alongside `min`/`max`/`hypot`/`sum`/`mean`/`stdev`. A single arg returns itself; empty → 0; two-arg calls unchanged.
+> 
+> **Verified:** `make calctest` green — `gcd(4)` updated from expected-error to `4` (now valid), plus `gcd(12,18,24)`=6, `gcd(100,40,60)`=20, `lcm(4,6,10)`=60, `lcm(2,3,5)`=30; all pass + the 400k fuzz sweep, ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1841) Calculator — variadic `hypot` (Euclidean norm).** `hypot` was 2-argument; it now takes any number of arguments and returns √(Σxᵢ²) — the n-dimensional vector magnitude (`hypot(3,4,12)`=13), consistent with the variadic `min`/`max`/stats. Reuses `call_argn`; `hypot()`=0, a single arg = |x|, and two-arg calls are unchanged.
 > 
 > **Verified:** `make calctest` green — new 3-D `hypot(3,4,12)`=13, `hypot(1,2,2)`=3, single-arg and empty cases; all pass + the 400k fuzz sweep, ASan/UBSan clean (the existing `hypot(3,)` trailing-comma error still errors). Full OS image builds clean.
