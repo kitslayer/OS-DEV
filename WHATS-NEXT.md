@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1829) Spreadsheet — `ROUNDUP` / `ROUNDDOWN`.** The directional rounding pair that complements `ROUND`: `ROUNDUP(x[,dp])` rounds *away* from zero (`ceil` of a positive scaled value, `floor` of a negative), `ROUNDDOWN(x[,dp])` *toward* zero (= `TRUNC`), both to an optional digit count. Two small handlers next to `ROUND`/`TRUNC` reusing `js_pow`/`js_ceil`/`js_floor`/`js_trunc`.
+> 
+> **Verified:** `make sheettest` green — 299 checks (7 new: `ROUNDUP(3.14159,2)`=3.15, `ROUNDUP(-3.1,0)`=−4, default-0-digits, `ROUNDDOWN` toward-zero incl. negatives) + 40k fuzz, ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1828) Spreadsheet — `LARGE(range,k)` / `SMALL(range,k)`.** The kth-largest / kth-smallest of a range — the standard complement to `MIN`/`MAX` for top-N / bottom-N analysis. Reuses the M1813 `parse_range_arg` plus the engine's existing `collect_range_vals` + `dsort`: collect the range's numeric values, sort ascending, return `vals[k-1]` (SMALL) or `vals[n-k]` (LARGE); `k` out of `[1,n]` surfaces as `#ERR`.
 > 
 > **Verified:** `make sheettest` green — 292 checks (8 new: `LARGE(A1:A4,1)`=40, `LARGE(…,2)`=30, `SMALL(…,1)`=10, `LARGE-SMALL` span, and the `k>n`/`k<1` `#ERR` cases) + 40k-iteration fuzz, ASan/UBSan clean. Full OS image builds clean.

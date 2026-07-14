@@ -344,6 +344,14 @@ int main(void) {
     chk_expr("=TRUNC(3.7)", 3);
     chk_expr("=TRUNC(-3.7)", -3);      /* toward zero, unlike FLOOR */
     chk_expr("=TRUNC(3.14159, 2)", 3.14);
+    /* ROUNDUP away from zero, ROUNDDOWN toward zero (M1829) */
+    chk_expr("=ROUNDUP(3.14159, 2)", 3.15);
+    chk_expr("=ROUNDUP(3.1, 0)", 4);
+    chk_expr("=ROUNDUP(-3.1, 0)", -4);       /* away from zero */
+    chk_expr("=ROUNDUP(3.2)", 4);            /* default 0 digits */
+    chk_expr("=ROUNDDOWN(3.99, 0)", 3);
+    chk_expr("=ROUNDDOWN(-3.99, 0)", -3);    /* toward zero */
+    chk_expr("=ROUNDDOWN(3.146, 2)", 3.14);
 
     /* --- statistics (M1697): classic {2,4,4,4,5,5,7,9}, mean 5, ss=32 ------*/
     chk_expr("=VARP(2,4,4,4,5,5,7,9)", 4);        /* population variance = 32/8 */

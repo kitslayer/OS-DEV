@@ -24,7 +24,7 @@
  *              (variadic, take ranges);  SUMIF/COUNTIF/AVERAGEIF(range, [op]value)
  *              where op is = <> < <= > >= (bare value means "=");  IF(c,a[,b])
  *              AND/OR(...) NOT(x)  (logical);
- *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) TRUNC(x[,dp]) MOD POW/POWER
+ *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) ROUNDUP/ROUNDDOWN(x[,dp]) TRUNC(x[,dp]) MOD POW/POWER
  *            SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
  *            MATCH(key,range,[type]) INDEX(range,row,[col]) VLOOKUP(key,range,col,[exact])
  *            LARGE(range,k) SMALL(range,k)
@@ -452,6 +452,14 @@ static double call_function(const char *name) {
     if (nameeq(name, "TRUNC")) {
         if (n >= 2) { double m = js_pow(10.0, a[1]); return js_trunc(a[0] * m) / m; }
         return js_trunc(a[0]);
+    }
+    if (nameeq(name, "ROUNDUP")) {                          /* round AWAY from zero to a[1] digits (M1829) */
+        double m = (n >= 2) ? js_pow(10.0, a[1]) : 1.0, v = a[0] * m;
+        return ((v >= 0) ? js_ceil(v) : js_floor(v)) / m;
+    }
+    if (nameeq(name, "ROUNDDOWN")) {                        /* round TOWARD zero to a[1] digits (= TRUNC) */
+        double m = (n >= 2) ? js_pow(10.0, a[1]) : 1.0;
+        return js_trunc(a[0] * m) / m;
     }
     if (nameeq(name, "MOD"))   { if (n < 2) { perr = ERR_SYNTAX; return 0; } return js_fmod(a[0], a[1]); }
     if (nameeq(name, "POW") || nameeq(name, "POWER")) { if (n < 2) { perr = ERR_SYNTAX; return 0; } return js_pow(a[0], a[1]); }
