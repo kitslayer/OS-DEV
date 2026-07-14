@@ -1341,13 +1341,13 @@ static int same_value_zero(val a, val b) {
  * overflowing the kernel stack (verified on `(a+)+$`). Supports literals, . ,
  * [classes] (ranges, negation, \d\w\s\D\W\S), * + ? (greedy), | , (capture
  * groups), ^ $, escapes; flags i (ignore case) and g (global). */
-enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_WORDB, I_NWORDB, I_BACKREF, I_AHEAD, I_AHEADEND, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
+enum { I_CHAR, I_ANY, I_CLASS, I_BOL, I_EOL, I_WORDB, I_NWORDB, I_BACKREF, I_AHEAD, I_AHEADEND, I_BEHIND, I_BEHINDEND, I_SAVE, I_SPLIT, I_JMP, I_MATCH };
 typedef struct { int op; int c; int x, y; unsigned char *cls; } reinst;
 #define RE_MAXPROG 512
 #define RE_MAXGROUP 9
 typedef struct { reinst *prog; int n; int ngroup; int icase; int global; int multiline; int dotall; int lastIndex; const char *source; int ok; const char *gnames[RE_MAXGROUP+1]; } regex;
 
-enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_BACKREF, RN_AHEAD, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
+enum { RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_BACKREF, RN_AHEAD, RN_BEHIND, RN_CAT, RN_ALT, RN_STAR, RN_PLUS, RN_OPT, RN_GROUP, RN_EMPTY };
 typedef struct rnode rnode;
 struct rnode { int type; int c; unsigned char *cls; rnode *a, *b; int group; int lazy; };
 typedef struct { const char *p; int len, pos; int ngroup; int err; int depth; const char *gnames[RE_MAXGROUP+1]; } rparse;
@@ -1378,6 +1378,21 @@ static rnode *rx_class(rparse *P){
     if(P->pos<P->len && P->p[P->pos]==']') P->pos++; else P->err=1;
     n->c=neg; return n;
 }
+/* Fixed match length of a regex subtree, or -1 if it can vary (quantifiers,
+ * backrefs, or unequal-length alternation). Used to validate + size a lookbehind
+ * (only fixed-length lookbehind is supported — the tractable subset). (M1814) */
+static int rx_fixedlen(rnode *n){
+    if(!n) return 0;
+    switch(n->type){
+        case RN_CHAR: case RN_ANY: case RN_CLASS: return 1;
+        case RN_BOL: case RN_EOL: case RN_WORDB: case RN_NWORDB:
+        case RN_EMPTY: case RN_AHEAD: case RN_BEHIND: return 0;          /* zero-width */
+        case RN_CAT: { int a=rx_fixedlen(n->a); if(a<0) return -1; int b=rx_fixedlen(n->b); if(b<0) return -1; return a+b; }
+        case RN_ALT: { int a=rx_fixedlen(n->a), b=rx_fixedlen(n->b); return (a<0||b<0||a!=b) ? -1 : a; }
+        case RN_GROUP: return rx_fixedlen(n->a);
+        default: return -1;                                             /* RN_STAR/PLUS/OPT/BACKREF: variable */
+    }
+}
 static rnode *rx_atom(rparse *P){
     if(P->pos>=P->len) return rx_node(RN_EMPTY);
     int c=(unsigned char)P->p[P->pos];
@@ -1386,6 +1401,11 @@ static rnode *rx_atom(rparse *P){
             int neg=(P->p[P->pos+1]=='!'); P->pos+=2;
             rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1;
             rnode *la=rx_node(RN_AHEAD); if(!la){P->err=1;return 0;} la->a=body; la->c=neg; return la; }
+        if(P->pos+2<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]=='<' && (P->p[P->pos+2]=='='||P->p[P->pos+2]=='!')){   /* (?<= lookbehind, (?<! negative lookbehind (zero-width, FIXED-LENGTH body only) */
+            int neg=(P->p[P->pos+2]=='!'); P->pos+=3;
+            rnode *body=rx_alt(P); if(P->pos<P->len&&P->p[P->pos]==')')P->pos++; else P->err=1;
+            int L=rx_fixedlen(body); if(L<0){ P->err=1; return rx_node(RN_EMPTY); }   /* variable-length lookbehind unsupported */
+            rnode *lb=rx_node(RN_BEHIND); if(!lb){P->err=1;return 0;} lb->a=body; lb->c=neg; lb->group=L; return lb; }   /* ->group repurposed: the fixed body length */
         const char *gnm=0; int gnl=0; int noncap=0;   /* (?<name>… capture name span, if present */
         if(P->pos+1<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]==':') { P->pos+=2; noncap=1; }   /* (?: non-capturing: skip ?: AND don't allocate a group */
         else if(P->pos+2<P->len && P->p[P->pos]=='?' && P->p[P->pos+1]=='<' && P->p[P->pos+2]!='=' && P->p[P->pos+2]!='!'){   /* (?<name>… named capture: capture the name, treat as a numbered group */
@@ -1508,6 +1528,8 @@ static void rx_compile(remit *E, rnode *n){
         /* (?= )/(?! ): emit I_AHEAD, the body, then I_AHEADEND; patch I_AHEAD.x to the
          * instruction after the body so a successful (zero-width) assertion resumes there. */
         case RN_AHEAD: { int a=rx_emit(E,I_AHEAD,n->c,0,0,0); rx_compile(E,n->a); rx_emit(E,I_AHEADEND,0,0,0,0); E->prog[a].x=E->pc; break; }
+        /* (?<=)/(?<!): I_BEHIND.c=negate, .y=fixed body length, .x patched past I_BEHINDEND (M1814) */
+        case RN_BEHIND: { int a=rx_emit(E,I_BEHIND,n->c,0,n->group,0); rx_compile(E,n->a); rx_emit(E,I_BEHINDEND,0,0,0,0); E->prog[a].x=E->pc; break; }
         case RN_EMPTY: break;
         case RN_CAT: rx_compile(E,n->a); rx_compile(E,n->b); break;
         case RN_GROUP: if(n->group){ rx_emit(E,I_SAVE,2*n->group,0,0,0); rx_compile(E,n->a); rx_emit(E,I_SAVE,2*n->group+1,0,0,0); } else rx_compile(E,n->a); break;
@@ -1564,6 +1586,12 @@ static int re_run(regex *re,int pc,const char*s,int slen,int sp,int*caps,long*bu
                 int r=re_run(re,pc+1,s,slen,sp,caps,budget,depth+1); if(r==-2) return -2;
                 if((r>0) != (in->c!=0)){ pc=in->x; continue; } return 0; }   /* in->c = negate flag */
             case I_AHEADEND: return 1;   /* terminal success for a lookahead sub-match */
+            case I_BEHIND: {   /* (?<=…)/(?<!…): does the fixed-length (in->y) body match ENDING at sp? zero-width */
+                int L=in->y, start=sp-L, matched;
+                if(start<0) matched=0;   /* not enough preceding text */
+                else { int r=re_run(re,pc+1,s,slen,start,caps,budget,depth+1); if(r==-2) return -2; matched=(r>0); }
+                if(matched != (in->c!=0)){ pc=in->x; continue; } return 0; }   /* in->c = negate flag */
+            case I_BEHINDEND: return 1;   /* terminal success for a lookbehind sub-match (fixed length => ends exactly at sp) */
             case I_JMP: pc=in->x; continue;
             case I_SPLIT: { int r=re_run(re,in->x,s,slen,sp,caps,budget,depth+1); if(r!=0) return r; pc=in->y; continue; }
             case I_SAVE: { int idx=in->c; int old=(idx<2*(RE_MAXGROUP+1))?caps[idx]:-1; if(idx<2*(RE_MAXGROUP+1)) caps[idx]=sp;
