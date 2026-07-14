@@ -117,7 +117,11 @@ int main(void) {
     CHECK_F("hypot(5, 12)", 13);
     CHECK_F("max(min(5, 10), 2)", 5);           /* nesting / composition */
     CHECK_F("min(2^3, 3^2)", 8);                /* args are full expressions */
-    CHECK_ERR("min(3)");                        /* a 2-arg function needs two args */
+    CHECK_F("min(3)", 3);                        /* variadic (M1836): a single arg is itself */
+    CHECK_F("max(3, 9, 2)", 9);                 /* variadic: more than two args */
+    CHECK_F("min(3, 9, 2)", 2);
+    CHECK_F("max(5, 5, 5)", 5);
+    CHECK_F("max(-1, -9, -3)", -1);
     CHECK_ERR("hypot(3,)");                     /* malformed second arg */
     CHECK_F("atan2(1, 1)", 0.7853981633974483); /* atan2: pi/4, quadrant I */
     CHECK_F("atan2(1, 0)", 1.5707963267948966); /* pi/2 on the +y axis */

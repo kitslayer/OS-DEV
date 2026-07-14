@@ -226,8 +226,8 @@ static double factor(void) {
         if (match_kw("log10")) return js_ln(call_arg()) / js_ln(10.0);
         if (match_kw("trunc")) return js_trunc(call_arg());               /* toward zero, unlike floor */
         if (match_kw("sign"))  { double a = call_arg(); return a > 0 ? 1.0 : a < 0 ? -1.0 : 0.0; }
-        if (match_kw("min"))   { double a, b; call_arg2(&a, &b); return a < b ? a : b; }
-        if (match_kw("max"))   { double a, b; call_arg2(&a, &b); return a > b ? a : b; }
+        if (match_kw("min"))   { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (!n) return JS_NAN; double m = a[0]; for (int k = 1; k < n; k++) if (a[k] < m) m = a[k]; return m; }   /* variadic (M1836) */
+        if (match_kw("max"))   { double a[64]; int n = call_argn(a, 64); if (n > 64) n = 64; if (!n) return JS_NAN; double m = a[0]; for (int k = 1; k < n; k++) if (a[k] > m) m = a[k]; return m; }
         if (match_kw("hypot")) { double a, b; call_arg2(&a, &b); return js_sqrt(a * a + b * b); }
         if (match_kw("atan2")) { double a, b; call_arg2(&a, &b); return calc_r2a(calc_atan2(a, b)); }
         /* hyperbolic + cube root + combinatorics + gcd/lcm (M1812). Hyperbolics take

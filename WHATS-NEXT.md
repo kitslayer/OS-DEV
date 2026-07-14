@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1836) Calculator — variadic `min` / `max`.** They were fixed 2-argument (`min(a,b)`); now they take any number of arguments (`max(3,9,2)`=9), consistent with the M1827 list statistics (`sum`/`mean`/…) and reusing the same `call_argn` parser. A single argument returns itself; empty is `NaN`. Two-arg calls are unchanged.
+> 
+> **Verified:** `make calctest` green — updated `min(3)` from an expected-error to `3` (now valid) and added `max(3,9,2)`/`min(3,9,2)`/repeated/negative cases; all pass + the 400k-iteration fuzz sweep, ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1835) Spreadsheet — `MAXIFS` / `MINIFS`.** Conditional max/min: `MAXIFS(value_range, criteria_range, [op]value)` returns the largest value whose position-paired criteria cell satisfies the test (`op` ∈ `= < <= > >= <>`, bare = equality — the same criterion grammar as `SUMIF`); `MINIFS` the smallest. Reuses `parse_range_arg` + the SUMIF op-parse; ranges must match shape (else `#ERR`); no match → 0.
 > 
 > **Verified:** `make sheettest` green — 314 checks (8 new: category-filtered max/min, an `>`-operator criterion, no-match→0, shape-mismatch `#ERR`) + 40k fuzz, ASan/UBSan clean. Full OS image builds clean. (Host-tested — instant oracle, no boot.)
