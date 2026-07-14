@@ -1,0 +1,16 @@
+ab.byteLength=8
+u.length=4 byteLength=4
+u=10,20,44,255
+u[2]=44 oob=undefined
+v=1,2,3,255,0 len=5
+w.length=8 sharesBuffer=true
+w=65,0,0,0,0,0,0,0
+s=9,8,7,1,1
+f=7,7,7,7
+f2=7,0,0,7
+sub=2,3,255 len=3
+idxOf255=3 idxOf99=-1
+sum=261
+join=1-2-3-255-0
+typeof=object bpe=1
+-- done --

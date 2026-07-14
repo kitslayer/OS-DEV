@@ -957,7 +957,12 @@ enum { V_UNDEF, V_NULL, V_BOOL, V_NUM, V_STR, V_OBJ, V_ARR, V_FUN, V_NATIVE,
         * V_OBJ branch). To add ZERO bytes to every obj, state+value live in the promise's
         * own vals[]: vals[0]=NUM(state) (0=pending,1=fulfilled,2=rejected), vals[1]=value/
         * reason (see pstate/pvalue/pset). Not obj_keyed, so vals[] is never walked as props. */
-       V_PROMISE };
+       V_PROMISE,
+       /* V_ARRAYBUF (ArrayBuffer) + V_U8ARRAY (Uint8Array): binary byte stores (M1850).
+        * val.t stays V_OBJ (typeof "object"). Bytes live in obj->bytes[0..nbytes); a
+        * Uint8Array keeps its backing ArrayBuffer in vals[0] (for .buffer + liveness).
+        * Not obj_keyed — indexing is byte access via dedicated N_INDEX branches. */
+       V_ARRAYBUF, V_U8ARRAY };
 typedef struct val val;
 typedef struct obj obj;
 typedef struct env env;
@@ -984,6 +989,7 @@ struct obj {
     obj *match_props;  /* a regex match-result V_ARR's named props (.index, .groups) as a keyed V_OBJ; NULL otherwise (M577) */
     obj *proto;        /* [[Prototype]] chain parent; NULL = none (every pre-M263 object, Object.create(null)) */
     obj *fn_proto;     /* a plain function's `.prototype` object (becomes each `new F()` instance's proto). Stored in a field, NOT a keyed prop, because functions aren't obj_keyed */
+    uint8_t *bytes; int nbytes;   /* byte store for V_ARRAYBUF (ArrayBuffer) / V_U8ARRAY (Uint8Array view). NULL otherwise (M1850) */
 };
 
 struct env { const char **keys; val *vals; int n, cap; env *parent; int func_scope; };   /* func_scope=1 marks a function (or the global) boundary: `var` hoists to here, not into inner blocks */
@@ -1689,6 +1695,13 @@ static val nat_regexp(val *args, int nargs){
 }
 static const char *val_to_str_inner(val v) {
     if (v.t == V_OBJ && v.o && v.o->kind == V_BOUND) return "function";   /* a bound function */
+    if (v.t == V_OBJ && v.o && v.o->kind == V_U8ARRAY) {   /* Uint8Array -> "1,2,3" like an array (M1850) */
+        obj *o = v.o; char *buf = aalloc((long)o->nbytes * 4 + 1); if (!buf) return "[Uint8Array]";
+        int p = 0;
+        for (int i = 0; i < o->nbytes; i++) { if (i) buf[p++] = ','; int b = o->bytes[i]; char t[4]; int tl=0; do { t[tl++]=(char)('0'+b%10); b/=10; } while(b); while(tl) buf[p++]=t[--tl]; }
+        buf[p] = 0; return buf;
+    }
+    if (v.t == V_OBJ && v.o && v.o->kind == V_ARRAYBUF) return "[object ArrayBuffer]";
     switch (v.t) {
         case V_UNDEF: return "undefined";
         case V_NULL: return "null";
@@ -1960,6 +1973,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs);
 static val eval_array_method(val recv, const char *name, val *args, int nargs);
 static val eval_number_method(val recv, const char *name, val *args, int nargs);
 static val eval_map_method(val recv, const char *name, val *args, int nargs);
+static val eval_u8_method(val recv, const char *name, val *args, int nargs);   /* Uint8Array methods (M1850) */
 static val eval_set_method(val recv, const char *name, val *args, int nargs);
 static val eval_promise_method(val recv, const char *name, val *args, int nargs);   /* Promise.prototype then/catch/finally (M679) */
 static int is_callable(val v){ return v.t==V_FUN || v.t==V_NATIVE || (v.t==V_OBJ && v.o && v.o->kind==V_BOUND); }
@@ -2076,6 +2090,12 @@ static val eval_member_get(val recv, const char *name) {
         if (strcmp(name,"__proto__")==0) { if (recv.o->proto) return obj_val(recv.o->proto); val nu=UND(); nu.t=V_NULL; return nu; }   /* magic [[Prototype]] accessor (M263) */
         if (recv.o->kind==V_MAP && strcmp(name,"size")==0) return NUM((double)(recv.o->n/2));   /* entries are [k,v] pairs */
         if (recv.o->kind==V_SET && strcmp(name,"size")==0) return NUM(recv.o->n);
+        if (recv.o->kind==V_U8ARRAY) {   /* Uint8Array props (M1850) */
+            if (strcmp(name,"length")==0 || strcmp(name,"byteLength")==0) return NUM(recv.o->nbytes);
+            if (strcmp(name,"buffer")==0) return recv.o->n > 0 ? recv.o->vals[0] : UND();
+            if (strcmp(name,"BYTES_PER_ELEMENT")==0) return NUM(1);
+        }
+        if (recv.o->kind==V_ARRAYBUF && strcmp(name,"byteLength")==0) return NUM(recv.o->nbytes);
         if (recv.o->kind==V_REGEX && strcmp(name,"lastIndex")==0) { regex *re=(regex*)recv.o->rx; return NUM(re?re->lastIndex:0); }   /* M1627: test/exec maintain this on the C-side regex*, not as an obj_set property */
         if (recv.o->kind==V_ELEMENT) { if(strcmp(name,"classList")==0) return classlist_handle(recv.o); if(strcmp(name,"children")==0) return children_array(recv.o); if(strcmp(name,"parentElement")==0||strcmp(name,"parentNode")==0) return parent_handle(recv.o); if(strcmp(name,"nextElementSibling")==0) return sibling_handle(recv.o,1); if(strcmp(name,"previousElementSibling")==0) return sibling_handle(recv.o,-1); if(strcmp(name,"checked")==0){ char cb[4]; cb[0]=0; dom_prop(recv.o,name,0,cb,sizeof cb); return BOOLV(cb[0]=='1'); } static char domb[4096]; if(dom_prop(recv.o,name,0,domb,sizeof(domb))) return STRV(intern(domb,(int)strlen(domb))); return UND(); }
         val out; if (obj_get(recv.o,name,&out)) { if (is_accessor(out)) return fire_getter(out, recv); return out; }
@@ -2326,6 +2346,11 @@ static val eval_expr_inner(node *n, env *e) {
                 } return rhs; }
             if (t->type==N_INDEX) { val recv=eval_expr(t->a,e); val idx=eval_expr(t->b,e);
                 if (is_proxy(recv)) { proxy_set(recv, keystr(idx), rhs); return rhs; }   /* proxy[key] = v -> SET trap (M-proxy) */
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_U8ARRAY) {   /* Uint8Array byte write, clamped to 0-255 (M1850) */
+                    int i = (int)to_num(idx);
+                    if (i >= 0 && i < recv.o->nbytes) recv.o->bytes[i] = (uint8_t)((long)to_num(rhs) & 0xff);
+                    return rhs;
+                }
                 if (recv.t==V_ARR && recv.o) {
                     long i = to_num(idx);
                     if (i < 0 || i > (1<<24)) { rt_err("array index out of range"); return rhs; }
@@ -2358,6 +2383,7 @@ static val eval_expr_inner(node *n, env *e) {
             if (n->prefix && (recv.t==V_UNDEF||recv.t==V_NULL)) return UND();   /* obj?.[i] short-circuit */
             val idx=eval_expr(n->b,e);
             if (recv.t==V_ARR && recv.o){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->n) return recv.o->vals[i]; return UND(); }
+            if (recv.t==V_OBJ && recv.o && recv.o->kind==V_U8ARRAY){ int i=(int)to_num(idx); if(i>=0&&i<recv.o->nbytes) return NUM(recv.o->bytes[i]); return UND(); }   /* Uint8Array byte read (M1850) */
             if (recv.t==V_STR){ int i=(int)to_num(idx); int l=(int)strlen(recv.str); if(i>=0&&i<l){ char*s=aalloc(2); if(s){s[0]=recv.str[i]; s[1]=0;} return STRV(s?s:"");} return UND(); }
             if (is_proxy(recv)) return eval_member_get(recv, keystr(idx));   /* proxy[key]: route through eval_member_get's GET trap (M-proxy) */
             if (recv.t==V_OBJ && recv.o){ const char *ik=keystr(idx); val out; if(obj_get(recv.o,ik,&out)){ if(is_accessor(out)) return fire_getter(out,recv); return out; } if(recv.o->proto){ val pv; if(proto_lookup(recv.o->proto,ik,recv,&pv)) return pv; } }   /* inherited (M263); symbol key -> "@@sym:<id>" (M-symbol) */
@@ -2405,6 +2431,7 @@ static val eval_expr_inner(node *n, env *e) {
                 if (recv.t==V_STR) return eval_string_method(recv,m,args,na);
                 if (recv.t==V_ARR) return eval_array_method(recv,m,args,na);
                 if (recv.t==V_NUM || recv.t==V_BOOL) return eval_number_method(recv,m,args,na);
+                if (recv.t==V_OBJ && recv.o && recv.o->kind==V_U8ARRAY) return eval_u8_method(recv,m,args,na);   /* Uint8Array methods (M1850) */
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_MAP) return eval_map_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_SET) return eval_set_method(recv,m,args,na);
                 if (recv.t==V_OBJ && recv.o && recv.o->kind==V_PROMISE) return eval_promise_method(recv,m,args,na);
@@ -2676,6 +2703,9 @@ static comp eval_stmt_inner(node *n, env *e) {
             if (it.t==V_ARR && it.o) {
                 for (int i=0;i<it.o->n && !g_err && !g_oom;i++){
                     comp c=foreach_step(n,e,fe,vn,per_iter,it.o->vals[i]); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
+            } else if (it.t==V_OBJ && it.o && it.o->kind==V_U8ARRAY) {   /* for..of over a Uint8Array's bytes (M1850) */
+                for (int i=0;i<it.o->nbytes && !g_err && !g_oom;i++){
+                    comp c=foreach_step(n,e,fe,vn,per_iter,NUM(it.o->bytes[i])); if(c.kind==C_BREAK){ if(label_here(c,n->label)) break; else return c; } if(c.kind==C_CONTINUE && !label_here(c,n->label)) return c; if(c.kind==C_RETURN) return c; }
             } else if (it.t==V_STR) {
                 int l=(int)strlen(it.str);
                 for (int i=0;i<l && !g_err && !g_oom;i++){ char*ch=aalloc(2); if(ch){ch[0]=it.str[i];ch[1]=0;} val cv=STRV(ch?ch:"");
@@ -3555,6 +3585,90 @@ static val nat_proxy(val *args, int nargs){
     if(g_oom){ return UND(); }                       /* the fallback new_obj()s may have OOM'd */
     p->vals[0]=target; p->vals[1]=handler; p->n=2;   /* cap is 4 from new_obj, so n=2 fits without realloc */
     return obj_val(p);
+}
+
+/* ---- ArrayBuffer + Uint8Array (M1850): binary byte stores ----
+ * A minimal but real typed-array core: ArrayBuffer owns a zeroed byte block; a
+ * Uint8Array is a view over one (kept in vals[0] for .buffer + liveness). Byte
+ * indexing is via dedicated N_INDEX branches; methods via eval_u8_method. */
+#define TA_MAX (1 << 24)                                 /* 16 MiB cap on a buffer */
+static val nat_arraybuffer(val *args, int nargs){
+    int n = (nargs > 0 && args[0].t == V_NUM) ? (int)args[0].num : 0;
+    if (n < 0) n = 0; if (n > TA_MAX) n = TA_MAX;
+    obj *o = new_obj(V_ARRAYBUF); if(!o){ g_oom=1; return UND(); }
+    o->bytes = aalloc(n > 0 ? n : 1); if(!o->bytes){ g_oom=1; return UND(); }
+    for (int i = 0; i < n; i++) o->bytes[i] = 0;
+    o->nbytes = n;
+    return obj_val(o);
+}
+/* new Uint8Array(n) | (array) | (uint8array) | (arraybuffer view) */
+static val nat_uint8array(val *args, int nargs){
+    obj *o = new_obj(V_U8ARRAY); if(!o){ g_oom=1; return UND(); }
+    if (nargs > 0 && args[0].t == V_OBJ && args[0].o && args[0].o->kind == V_ARRAYBUF) {
+        obj *ab = args[0].o;                             /* view over an existing buffer (shares bytes) */
+        o->bytes = ab->bytes; o->nbytes = ab->nbytes;
+        arr_push_val(o, args[0]);                        /* vals[0] = the buffer */
+        return obj_val(o);
+    }
+    obj *src = 0; int n = 0;
+    if (nargs > 0 && args[0].t == V_NUM) n = (int)args[0].num;
+    else if (nargs > 0 && args[0].t == V_ARR && args[0].o) { src = args[0].o; n = src->n; }
+    else if (nargs > 0 && args[0].t == V_OBJ && args[0].o && args[0].o->kind == V_U8ARRAY) { src = args[0].o; n = src->nbytes; }
+    if (n < 0) n = 0; if (n > TA_MAX) n = TA_MAX;
+    val abv = nat_arraybuffer((val[]){ NUM(n) }, 1); if (g_oom) return UND();
+    o->bytes = abv.o->bytes; o->nbytes = n;
+    arr_push_val(o, abv);                                /* vals[0] = backing ArrayBuffer */
+    if (src) {
+        if (src->kind == V_ARR) for (int i = 0; i < n; i++) o->bytes[i] = (uint8_t)((long)to_num(src->vals[i]) & 0xff);
+        else                    for (int i = 0; i < n; i++) o->bytes[i] = src->bytes[i];
+    }
+    return obj_val(o);
+}
+/* Uint8Array.prototype methods (M1850): set/subarray/slice/fill/indexOf/join. */
+static val eval_u8_method(val recv, const char *name, val *args, int nargs){
+    obj *o = recv.o; if (!o) return UND();
+    if (strcmp(name, "set") == 0) {                      /* u8.set(src[, offset]) */
+        int off = (nargs > 1) ? (int)to_num(args[1]) : 0;
+        if (nargs > 0 && args[0].t == V_ARR && args[0].o)
+            for (int i = 0; i < args[0].o->n && off + i < o->nbytes; i++) o->bytes[off + i] = (uint8_t)((long)to_num(args[0].o->vals[i]) & 0xff);
+        else if (nargs > 0 && args[0].t == V_OBJ && args[0].o && args[0].o->kind == V_U8ARRAY)
+            for (int i = 0; i < args[0].o->nbytes && off + i < o->nbytes; i++) o->bytes[off + i] = args[0].o->bytes[i];
+        return UND();
+    }
+    if (strcmp(name, "fill") == 0) {                     /* u8.fill(v[, start[, end]]) */
+        uint8_t v = (uint8_t)((nargs > 0 ? (long)to_num(args[0]) : 0) & 0xff);
+        int s = nargs > 1 ? (int)to_num(args[1]) : 0, e = nargs > 2 ? (int)to_num(args[2]) : o->nbytes;
+        if (s < 0) s = 0; if (e > o->nbytes) e = o->nbytes;
+        for (int i = s; i < e; i++) o->bytes[i] = v;
+        return recv;
+    }
+    if (strcmp(name, "subarray") == 0 || strcmp(name, "slice") == 0) {   /* copy [begin,end) into a new Uint8Array */
+        int b = nargs > 0 ? (int)to_num(args[0]) : 0, e = nargs > 1 ? (int)to_num(args[1]) : o->nbytes;
+        if (b < 0) b += o->nbytes; if (e < 0) e += o->nbytes;
+        if (b < 0) b = 0; if (e > o->nbytes) e = o->nbytes; if (e < b) e = b;
+        int m = e - b;
+        val nv = nat_uint8array((val[]){ NUM(m) }, 1); if (g_oom) return UND();
+        for (int i = 0; i < m; i++) nv.o->bytes[i] = o->bytes[b + i];
+        return nv;
+    }
+    if (strcmp(name, "indexOf") == 0) {
+        uint8_t v = (uint8_t)((nargs > 0 ? (long)to_num(args[0]) : 0) & 0xff);
+        for (int i = 0; i < o->nbytes; i++) if (o->bytes[i] == v) return NUM(i);
+        return NUM(-1);
+    }
+    if (strcmp(name, "join") == 0) {
+        const char *sep = (nargs > 0 && args[0].t == V_STR) ? args[0].str : ",";
+        int sl = 0; while (sep[sl]) sl++;
+        char *b = aalloc(o->nbytes * 4 + o->nbytes * sl + 1); if(!b){ g_oom=1; return UND(); }
+        int p = 0;
+        for (int i = 0; i < o->nbytes; i++) {
+            if (i) { for (int k = 0; k < sl; k++) b[p++] = sep[k]; }
+            int v = o->bytes[i]; char t[4]; int tl = 0; do { t[tl++] = (char)('0' + v % 10); v /= 10; } while (v);
+            while (tl) b[p++] = t[--tl];
+        }
+        b[p] = 0; return STRV(b);
+    }
+    return UND();
 }
 
 static val eval_map_method(val recv, const char *name, val *args, int nargs) {
@@ -4780,6 +4894,8 @@ static void install_globals(env *g) {
     { obj *ws=new_obj(V_NATIVE); if(ws){ ws->native=nat_set; val v=UND(); v.t=V_NATIVE; v.o=ws; env_define(g,"WeakSet",v); } }   /* WeakSet: backed by Set (M273) */
     { obj *rx=new_obj(V_NATIVE); if(rx){ rx->native=nat_regexp; val v=UND(); v.t=V_NATIVE; v.o=rx; env_define(g,"RegExp",v); } }   /* RegExp(pat,flags) / new RegExp(...) */
     { obj *px=new_obj(V_NATIVE); if(px){ px->native=nat_proxy; val v=UND(); v.t=V_NATIVE; v.o=px; env_define(g,"Proxy",v); } }   /* new Proxy(target,handler) — get/set traps (M-proxy) */
+    { obj *ab=new_obj(V_NATIVE); if(ab){ ab->native=nat_arraybuffer; env_define(g,"ArrayBuffer",obj_val_native(ab)); } }   /* new ArrayBuffer(n) (M1850) */
+    { obj *u8=new_obj(V_NATIVE); if(u8){ u8->native=nat_uint8array;  env_define(g,"Uint8Array",obj_val_native(u8)); } }    /* new Uint8Array(n|arr|buf) (M1850) */
     { obj *pc=new_obj(V_NATIVE); if(pc){ pc->native=nat_promise; g_promise_ctor=pc;   /* Promise (synchronous-resolution model, M679) */
         obj *pst=new_obj(V_OBJ); if(pst){ def_native(pst,"resolve",nat_promise_resolve); def_native(pst,"reject",nat_promise_reject); def_native(pst,"all",nat_promise_all); def_native(pst,"any",nat_promise_any); def_native(pst,"race",nat_promise_race); def_native(pst,"allSettled",nat_promise_allSettled); pc->statics=pst; }
         val v=UND(); v.t=V_NATIVE; v.o=pc; env_define(g,"Promise",v); } }
