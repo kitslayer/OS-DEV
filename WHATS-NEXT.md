@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1839) Hardening — extract the `sort` key helpers to a host test.** The `sort` builtin's key logic (numeric-key parsing, `-uf` fold equality, `-kN`/`-td` field extraction) was pure but inlined in `shell.c` with **no host test**. Moved `sort_numval`/`sort_foldeq`/`sort_field` verbatim into a new `user/shsort.h` (the same extract-to-a-header pattern as `shmath.h`/`shtest.h`/`lsfmt.h`) that `shell.c` now `#include`s, and added `tests/shsort` (wired into `make check` as `shsorttest`). Locks the M1838 decimal behavior and the field/fold logic with regression coverage; the `sort` builtin itself is byte-for-byte unchanged (the helpers just moved).
+> 
+> **Verified:** `make shsorttest` green — **26 checks** (fixed-point numeric keys incl. `3.14`<`3.2`<`10`, the 6-decimal clamp, signs; fold-equality; whitespace + custom-delimiter field extraction incl. past-the-last-field) + ASan/UBSan clean. Full OS image builds clean (shell.c compiles against the header, sort builtin unchanged).
+> 
 > **(M1838) Shell `sort -n` — decimal + signed numeric sort.** `sort -n`'s key parser was integer-only, so `3.14`, `3.2`, `10` all collapsed to their integer part (`3.14`→3) and mis-ordered. Now it parses a leading `+`/`-` sign and up to 6 decimal places as a **fixed-point long scaled by 1e6** — the shell is built without the FPU/SSE (only the calc/sheet/plot evaluators use software-float via dmath.h), so a `double` return actually fails to compile there; fixed-point keeps it integer-only while ordering decimals correctly.
 > 
 > **Verified in-guest** (osdrive): sorting `3.3, 3.1, 3.2, 10.5, 2.75, 1.1` with `sort -n` yields `1.1, 2.75, 3.1, 3.2, 3.3, 10.5` — the `3.1/3.2/3.3` ordering proves decimal comparison (integer-only would tie them at 3 and keep input order). Full OS image builds clean.

@@ -16,6 +16,7 @@
 #include "shquote.h"  /* sh_quote_pass()/sh_unprot_buf(): "..." '...' quoting, host-tested by tests/shquote */
 #include "shtest.h"   /* sh_test_eval(): the test / [ ] conditional evaluator, host-tested by tests/shtest */
 #include "lsfmt.h"    /* ls_mode_str()/ls_fmt_time(): `ls -l` formatting, host-tested by tests/lsfmt */
+#include "shsort.h"   /* sort_numval()/sort_field()/sort_foldeq(): `sort` key helpers, host-tested by tests/shsort */
 #include "patchcore.h" /* patch_apply(): apply a unified-diff patch (the `patch` builtin), host-tested by tests/diff */
 
 static void perr(const char *s);   /* print an error label in red (defined below); forward-declared for early use (M1379) */
@@ -268,33 +269,8 @@ static void run_js_inline(const char *code) {
     print(out);
     free(out);
 }
-/* parse a leading (optionally signed) number from a line, for `sort -n`, as a
- * fixed-point long scaled by 1e6 (the shell is built without the FPU/SSE, so no
- * doubles here). Handles a +/- sign and up to 6 decimal places (M1838), so
- * `sort -n` orders 3.14 vs 3.2 vs 10 correctly — was integer-only (3.14 -> 3). */
-static long sort_numval(const char *s) {
-    while (*s == ' ' || *s == '\t') s++;
-    int neg = 0; if (*s == '-') { neg = 1; s++; } else if (*s == '+') s++;
-    long v = 0; while (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); s++; }
-    v *= 1000000;                                        /* scale so a fraction is comparable in integer space */
-    if (*s == '.') { s++; long f = 100000; while (*s >= '0' && *s <= '9' && f > 0) { v += (*s - '0') * f; f /= 10; s++; } }
-    return neg ? -v : v;
-}
-static int sort_foldeq(const char *a, const char *b) {   /* case-insensitive string equality (for sort -uf) */
-    while (*a && gr_lc(*a) == gr_lc(*b)) { a++; b++; }
-    return gr_lc(*a) == gr_lc(*b);
-}
-/* sort -kN: pointer to the start of field k (1-based) — the key compares from
- * there to end of line, like `sort -kN`. Fields are whitespace-delimited, or
- * split on `d` when `sort -td` was given. Past the last field returns NUL. */
-static const char *sort_field(const char *s, int k, char d) {
-    for (int f = 1; f < k && *s; f++) {
-        if (d) { while (*s && *s != d) s++; if (*s == d) s++; }            /* custom delimiter */
-        else { while (*s == ' ' || *s == '\t') s++; while (*s && *s != ' ' && *s != '\t') s++; }
-    }
-    if (!d) while (*s == ' ' || *s == '\t') s++;   /* whitespace mode skips leading blanks of field k */
-    return s;
-}
+/* sort key helpers (sort_numval / sort_foldeq / sort_field) live in shsort.h,
+ * host-tested by tests/shsort. */
 /* Expand a `tr` SET token (literal chars + a-z ranges) into out[]; advance *pp past it. */
 static int tr_expand(const char **pp, char *out, int max) {
     const char *s = *pp; int o = 0;
