@@ -375,6 +375,7 @@ struct mq_attr { long mq_flags, mq_maxmsg, mq_msgsize, mq_curmsgs; };
 #define SYS_insmod_path  341   /* (path) -> load a .ko module from a real file (relocate+resolve+run); retval/-err (M1595) */
 #define SYS_ws_open      342   /* (url, status*) -> WebSocket connect + RFC 6455 handshake; conn id / -1 (M1846) */
 #define SYS_ws_exchange  343   /* (id, sendbuf, sendtot, out, outmax, nrecv*) -> send queue + read reply frames; bytes / -1 (M1846) */
+#define SYS_sha1         344   /* (name, hexbuf) -> SHA-1 of a file as 40 hex chars; 0/-1 (M1848) */
 
 /* select(2) (M1584): a small, from-scratch fd_set sized for THIS fd table
  * (APP_NFD=24), not real glibc's 1024-bit/128-byte one -- every fd this OS can

@@ -621,6 +621,7 @@ int  sys_futimens(int fd, long atime, long mtime) { return (int)do_syscall(SYS_f
 int  sys_utimensat(int dirfd, const char *path, long atime, long mtime) { return (int)do_syscall4(SYS_utimensat, dirfd, (long)path, atime, mtime); }
 int  sys_jail(const char *prog, const char *promises, const char *path) { return (int)do_syscall(SYS_jail, (long)prog, (long)promises, (long)path); }
 long sys_find(const char *want, void *buf, unsigned long len) { return do_syscall(SYS_find, (long)want, (long)buf, (long)len); }
+long sys_sha1(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha1, (long)name, (long)hexbuf, (long)max); }
 long sys_sha256(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha256, (long)name, (long)hexbuf, (long)max); }
 long sys_sha512(const char *name, void *hexbuf, unsigned long max) { return do_syscall(SYS_sha512, (long)name, (long)hexbuf, (long)max); }
 long sys_crypt(const char *name, const char *pass) { return do_syscall(SYS_crypt, (long)name, (long)pass, 0); }

@@ -36,6 +36,7 @@
 #include "net.h"
 #include "tls.h"
 #include "js.h"
+#include "sha1.h"
 #include "sha256.h"
 #include "sha512.h"
 #include "aes.h"
@@ -313,7 +314,7 @@ static uint32_t syscall_class(uint64_t nr) {
     case SYS_statx: case SYS_flock: case SYS_access: case SYS_faccessat2:
     case SYS_readfile: case SYS_list: case SYS_tree: case SYS_df: case SYS_find:
     case SYS_chdir: case SYS_fchdir: case SYS_lsblk: case SYS_lspci: case SYS_mounts:
-    case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
+    case SYS_sha1: case SYS_sha256: case SYS_sha512: case SYS_cas_fetch: case SYS_losetup:
     case SYS_fiemap: case SYS_getxattr: case SYS_listxattr: case SYS_fgetxattr: case SYS_flistxattr: case SYS_open:
     case SYS_readlink: case SYS_statfs: case SYS_getcwd: case SYS_openat: case SYS_fstatat: case SYS_readlinkat:
         return PL_RPATH;
@@ -989,6 +990,17 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)vfs_find((const char *)r->rdi,
                                              (char *)r->rsi, (int)r->rdx);
         break;
+    case SYS_sha1: {
+        if ((int)r->rdx < 41) { r->rax = (uint64_t)-1; break; }   /* need room for 40 hex + NUL */
+        if (!ustr(r->rdi) || !ubuf(r->rsi, 41)) { r->rax = (uint64_t)-1; break; }  /* filename + hex output */
+        uint8_t *fbuf; long fn = read_whole_file((const char *)r->rdi, &fbuf);
+        if (fn < 0) { r->rax = (uint64_t)-1; break; }
+        uint8_t dg[20]; sha1_hash(fbuf, (size_t)fn, dg); kfree(fbuf);
+        char *hx = (char *)r->rsi; const char *H = "0123456789abcdef";
+        for (int i = 0; i < 20; i++) { hx[i*2] = H[dg[i]>>4]; hx[i*2+1] = H[dg[i]&0xF]; }
+        hx[40] = 0; r->rax = 0;
+        break;
+    }
     case SYS_sha256: {
         if ((int)r->rdx < 65) { r->rax = (uint64_t)-1; break; }   /* need room for 64 hex + NUL */
         if (!ustr(r->rdi) || !ubuf(r->rsi, 65)) { r->rax = (uint64_t)-1; break; }  /* filename + hex output */

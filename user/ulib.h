@@ -263,6 +263,7 @@ int  sys_utimens(const char *path, long atime, long mtime);     /* set atime/mti
 int  sys_futimens(int fd, long atime, long mtime);              /* set atime/mtime on an open fd; 0/-1 (M1230) */
 int  sys_jail(const char *prog, const char *promises, const char *path);   /* spawn prog pre-confined (pledge + optional unveil) */
 long sys_find(const char *want, void *buf, unsigned long len);
+long sys_sha1(const char *name, void *hexbuf, unsigned long max);
 long sys_sha256(const char *name, void *hexbuf, unsigned long max);
 long sys_sha512(const char *name, void *hexbuf, unsigned long max);
 long sys_crypt(const char *name, const char *pass);

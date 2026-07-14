@@ -818,7 +818,7 @@ static int run_command(char *line, char *cwd) {
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
             print("        sntp / ntpdate (set the wall clock from pool.ntp.org over UDP)\n");
-            helpline("crypto: sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
+            helpline("crypto: sha1<file> sha256<file> sha512<file> crc32<file> genpass[ N] uuidgen crypt base64 unbase64<b64>\n");
             print("        cas store<file> (content-addressed store, SHA-256 key)  cas fetch<key>  cas (stats)\n");
             print("        run: apps run<prog> js<file>  jail<prog promise..> (sandbox a spawned app)\n");
             helpline("math:   factor<n> roll<NdM> seq<n> base<N> dec<0x..> roman<N> gcd<a b> primes<N> fib<N> fizzbuzz<N> stats<n..> size<bytes>\n");
@@ -1757,6 +1757,17 @@ static int run_command(char *line, char *cwd) {
                 if (col) { ln[col] = '\n'; ln[col+1] = 0; print(ln); }
                 free(buf);
             }
+        } else if (startswith(line, "sha1 ")) {
+            const char *p = line + 5; int any = 0;       /* hash each space-separated file (M1848) */
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                char fn[64]; int j = 0; while (*p && *p != ' ' && j < 63) fn[j++] = *p++; fn[j] = 0; sh_unprot_buf(fn);
+                any = 1; char hex[44];
+                if (sys_sha1(fn, hex, sizeof hex) < 0) { print("sha1: no such file: "); print(fn); print("\n"); g_status = 1; }
+                else { print("  "); print(hex); print("  "); print(fn); print("\n"); }
+            }
+            if (!any) print("usage: sha1 <file>...\n");
         } else if (startswith(line, "sha256 ")) {
             const char *p = line + 7; int any = 0;       /* hash each space-separated file */
             while (*p) {
