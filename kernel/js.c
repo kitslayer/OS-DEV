@@ -3671,6 +3671,36 @@ static val eval_u8_method(val recv, const char *name, val *args, int nargs){
     return UND();
 }
 
+/* ---- TextEncoder / TextDecoder (M1851): string <-> Uint8Array ----
+ * The engine already stores strings as their raw (UTF-8) bytes, so encode/decode
+ * are a straight byte copy — no codepoint math. A real, common consumer of the
+ * M1850 typed arrays. */
+static val nat_text_encode(val *a, int n){                    /* enc.encode(str) -> Uint8Array */
+    const char *s = (n > 0) ? val_to_str(a[0]) : "";
+    int len = 0; while (s[len]) len++;
+    val uv = nat_uint8array((val[]){ NUM(len) }, 1); if (g_oom) return UND();
+    for (int i = 0; i < len; i++) uv.o->bytes[i] = (uint8_t)s[i];
+    return uv;
+}
+static val nat_text_decode(val *a, int n){                    /* dec.decode(u8) -> string */
+    if (n < 1 || a[0].t != V_OBJ || !a[0].o || a[0].o->kind != V_U8ARRAY) return STRV("");
+    obj *o = a[0].o;
+    char *buf = aalloc(o->nbytes + 1); if (!buf) { g_oom = 1; return UND(); }
+    for (int i = 0; i < o->nbytes; i++) buf[i] = (char)o->bytes[i];
+    buf[o->nbytes] = 0;
+    return STRV(buf);
+}
+static val nat_textencoder(val *a, int n){ (void)a; (void)n;
+    obj *o = new_obj(V_OBJ); if (!o) { g_oom = 1; return UND(); }
+    obj *e = new_obj(V_NATIVE); if (e) { e->native = nat_text_encode; obj_set(o, "encode", obj_val_native(e)); }
+    obj_set(o, "encoding", STRV("utf-8")); return obj_val(o);
+}
+static val nat_textdecoder(val *a, int n){ (void)a; (void)n;
+    obj *o = new_obj(V_OBJ); if (!o) { g_oom = 1; return UND(); }
+    obj *d = new_obj(V_NATIVE); if (d) { d->native = nat_text_decode; obj_set(o, "decode", obj_val_native(d)); }
+    obj_set(o, "encoding", STRV("utf-8")); return obj_val(o);
+}
+
 static val eval_map_method(val recv, const char *name, val *args, int nargs) {
     obj *o=recv.o; val k = nargs>0?args[0]:UND();
     if (strcmp(name,"set")==0){ val v=nargs>1?args[1]:UND();
@@ -4896,6 +4926,8 @@ static void install_globals(env *g) {
     { obj *px=new_obj(V_NATIVE); if(px){ px->native=nat_proxy; val v=UND(); v.t=V_NATIVE; v.o=px; env_define(g,"Proxy",v); } }   /* new Proxy(target,handler) — get/set traps (M-proxy) */
     { obj *ab=new_obj(V_NATIVE); if(ab){ ab->native=nat_arraybuffer; env_define(g,"ArrayBuffer",obj_val_native(ab)); } }   /* new ArrayBuffer(n) (M1850) */
     { obj *u8=new_obj(V_NATIVE); if(u8){ u8->native=nat_uint8array;  env_define(g,"Uint8Array",obj_val_native(u8)); } }    /* new Uint8Array(n|arr|buf) (M1850) */
+    { obj *te=new_obj(V_NATIVE); if(te){ te->native=nat_textencoder; env_define(g,"TextEncoder",obj_val_native(te)); } }   /* new TextEncoder().encode(str) (M1851) */
+    { obj *td=new_obj(V_NATIVE); if(td){ td->native=nat_textdecoder; env_define(g,"TextDecoder",obj_val_native(td)); } }   /* new TextDecoder().decode(u8) (M1851) */
     { obj *pc=new_obj(V_NATIVE); if(pc){ pc->native=nat_promise; g_promise_ctor=pc;   /* Promise (synchronous-resolution model, M679) */
         obj *pst=new_obj(V_OBJ); if(pst){ def_native(pst,"resolve",nat_promise_resolve); def_native(pst,"reject",nat_promise_reject); def_native(pst,"all",nat_promise_all); def_native(pst,"any",nat_promise_any); def_native(pst,"race",nat_promise_race); def_native(pst,"allSettled",nat_promise_allSettled); pc->statics=pst; }
         val v=UND(); v.t=V_NATIVE; v.o=pc; env_define(g,"Promise",v); } }

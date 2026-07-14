@@ -26,4 +26,11 @@ var sum = 0; for (var b of v) sum += b;
 print("sum=" + sum);
 print("join=" + v.join("-"));
 print("typeof=" + typeof u + " bpe=" + u.BYTES_PER_ELEMENT);
+// TextEncoder / TextDecoder round-trip (M1851)
+var enc = new TextEncoder();
+var by = enc.encode("Hi!");
+print("enc=" + by + " len=" + by.length + " encoding=" + enc.encoding);
+var dec = new TextDecoder();
+print("dec=" + dec.decode(by));
+print("roundtrip=" + dec.decode(new TextEncoder().encode("round-trip 123")));
 print("-- done --");

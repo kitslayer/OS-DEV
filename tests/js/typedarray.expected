@@ -13,4 +13,7 @@ idxOf255=3 idxOf99=-1
 sum=261
 join=1-2-3-255-0
 typeof=object bpe=1
+enc=72,105,33 len=3 encoding=utf-8
+dec=Hi!
+roundtrip=round-trip 123
 -- done --
