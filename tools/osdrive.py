@@ -134,6 +134,7 @@ def main():
     ap.add_argument("--disk",   default="build/fat.img")
     ap.add_argument("--disk2",  default=None, help="attach a 2nd drive (virtio-blk) — auto-mounted as /disk2")
     ap.add_argument("--disk3",  default=None, help="attach a 3rd drive (virtio-blk) — e.g. for a RAID mirror with --disk2")
+    ap.add_argument("--cdrom", default=None, help="attach an ISO image as an ATAPI CD-ROM (-cdrom)")
     ap.add_argument("--hostfwd", default=None, help="QEMU user-net hostfwd spec, e.g. tcp::18080-:80 (inbound to the guest)")
     ap.add_argument("--cpu", default=None, help="QEMU -cpu model, e.g. max (to expose SMEP/UMIP etc.)")
     ap.add_argument("--out",    default=".")
@@ -165,6 +166,8 @@ def main():
         "-display", "none", "-serial", "file:" + slog,
         "-monitor", "unix:%s,server,nowait" % mon_sock,
         "-qmp", "unix:%s,server,nowait" % qmp_sock]
+    if args.cdrom:
+        qcmd += ["-cdrom", args.cdrom]
     if args.disk2:
         qcmd += ["-drive", "file=%s,format=raw,if=none,id=d2,cache=writethrough" % args.disk2,
                  "-device", "virtio-blk-pci,drive=d2"]

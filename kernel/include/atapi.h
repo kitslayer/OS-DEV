@@ -10,6 +10,7 @@
 void atapi_init(void);        /* probe the ATA channels for ATAPI CD-ROM devices */
 void atapi_selftest(void);    /* boot self-test: read + verify a CD's ISO 9660 PVD (no-op without a CD) */
 int  atapi_present(int slot);
+uint32_t atapi_capacity512(int slot);   /* capacity in 512-byte sectors (0 if absent) */
 int  atapi_read_capacity(int slot, uint32_t *last_lba, uint32_t *block_size);   /* 0/-1 */
 int  atapi_read10(int slot, uint32_t lba, uint16_t count, uint8_t *buf, int buflen);   /* bytes/-1 */
 

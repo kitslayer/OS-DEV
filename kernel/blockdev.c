@@ -30,6 +30,7 @@
 #include "partition.h"
 #include "ext2.h"
 #include "iso9660.h"
+#include "atapi.h"     /* ATAPI CD-ROM registered as a read-only blockdev (M1853) */
 #include "ata.h"
 #include "ahci.h"
 #include "virtio_blk.h"
@@ -79,6 +80,24 @@ static int usb_bd_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
     (void)ctx;
     if (lba > 0xFFFFFFFFull) return -1;
     return usb_storage_read((uint32_t)lba, count, buf);
+}
+/* ATAPI CD-ROM: 2048-byte media exposed as 512-byte sectors (M1853). Read-only
+ * (registered with write==NULL). Reads each distinct 2048-byte logical sector at
+ * most once per call (iso9660 fetches 4 contiguous 512-sectors per 2 KiB sector). */
+static int atapi_bd_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
+    int slot = (int)(intptr_t)ctx;
+    uint8_t *out = buf; static uint8_t sec[2048]; uint32_t cached = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < count; i++) {
+        uint64_t l = lba + i;
+        uint32_t asec = (uint32_t)(l >> 2);          /* 512-LBA / 4 -> 2 KiB sector */
+        int off = (int)(l & 3) << 9;                 /* (LBA % 4) * 512 */
+        if (asec != cached) {
+            if (atapi_read10(slot, asec, 1, sec, (int)sizeof sec) < 2048) return -1;
+            cached = asec;
+        }
+        memcpy(out + (uint64_t)i * SECSZ, sec + off, SECSZ);
+    }
+    return 0;
 }
 static int usb_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
     (void)ctx;
@@ -164,6 +183,13 @@ int blockdev_init(void) {
     /* USB mass-storage — now read+write (M1728: usb_storage_write wired in). */
     if (usb_storage_present())
         reg("usb-storage", usb_bd_read, usb_bd_write, usb_storage_capacity(), 0);
+
+    /* ATAPI CD-ROM(s) — read-only (write==NULL); enumerate then auto-mounts the
+     * ISO 9660 volume like any other device (M1853). */
+    atapi_init();
+    for (int s = 0; s < ATAPI_MAX; s++)
+        if (atapi_present(s))
+            reg("cdrom", atapi_bd_read, 0, atapi_capacity512(s), (void *)(intptr_t)s);
 
     return g_ndev;
 }

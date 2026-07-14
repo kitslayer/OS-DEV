@@ -139,6 +139,13 @@ int atapi_read10(int slot, uint32_t lba, uint16_t count, uint8_t *buf, int bufle
 
 int atapi_present(int slot) { return slot >= 0 && slot < ATAPI_MAX && g_cd[slot].present; }
 
+/* Capacity in 512-byte units (2048-byte media exposed as 4x 512-byte sectors), for
+ * the block layer. 0 if absent. */
+uint32_t atapi_capacity512(int slot) {
+    if (slot < 0 || slot >= ATAPI_MAX || !g_cd[slot].present) return 0;
+    return (g_cd[slot].last_lba + 1) * 4;
+}
+
 void atapi_init(void) {
     if (g_probed) return;
     g_probed = 1;
