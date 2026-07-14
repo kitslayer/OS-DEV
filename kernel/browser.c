@@ -163,7 +163,7 @@ struct browser {
     struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
-    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint16_t css_spec[CSS_MAX]; uint16_t css_imp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
+    sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint8_t css_ws[CSS_MAX]; uint16_t css_spec[CSS_MAX]; uint16_t css_imp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
     char    in_id[IN_MAX][32]; char in_val[IN_MAX][IN_VLEN]; int in_n;   /* <input> field values, by id (the typed/scripted text) */
     char    in_name[IN_MAX][32];                                /* each field's name= attr (parallel to in_id), for GET submit */
     char    ta_ids[8][32]; int ta_n;                            /* ids that are <textarea>s (so Enter inserts a newline, not submit) */
@@ -799,7 +799,7 @@ static void capture_css(browser_t *b, const char *s, int n);
 static int  css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
                       uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
                       int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border, int *flex,
-                      int *lineheight);
+                      int *lineheight, int *ws);
 static int  css_match_list(browser_t *b, const char *tag, const char *attrs, int attrlen);
 
 /* Resolve the best URL for an <img> tag with "fallback only" semantics:
@@ -868,7 +868,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
         }
     } else if (!is_void_tag(tag)) {
         uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0;
-        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css);   /* <style> rules first (lower priority) */
+        if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css, &prews);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
         if (find_attr(attrs, attrlen, "style", &st, &stl)) {           /* inline style overrides per-property (cascade) */
@@ -888,7 +888,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int imv = parse_style_vspace(st, stl); if (imv) b->pending_vmargin = (uint16_t)imv;  /* CSS vertical margin+padding -> block spacing */
             int iml = parse_style_hspace(st, stl); if (iml) ml = iml;                            /* CSS left margin/padding -> indent */
             int ilh = parse_style_lineheight(st, stl); if (ilh) lh_css = ilh;                    /* line-height (inline overrides rule) */
-            prews = parse_style_whitespace(st, stl);                                             /* white-space: pre/pre-wrap/pre-line (M1818) */
+            { int iws = parse_style_whitespace(st, stl); if (iws) prews = iws; }                 /* white-space: inline overrides a <style> rule (M1818/M1819) */
         }
         if (has_attr(attrs, attrlen, "hidden")) hide = 1;   /* the HTML5 `hidden` attribute */
         if (tageq(tag, "big")) { if (!fs) fs = 2; }         /* <big> -> 2x */
@@ -2039,7 +2039,8 @@ static void capture_css(browser_t *b, const char *s, int n) {
         uint32_t bdv = parse_style_border(s + ds, de - ds);          /* border: shorthand from a stylesheet rule */
         int lsv = parse_style_listtype(s + ds, de - ds);             /* list-style-type from a stylesheet rule (applies to a <ul>/<ol>) */
         int lhv = parse_style_lineheight(s + ds, de - ds);           /* line-height from a stylesheet rule */
-        if (!(col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv || mgv || hsv || bdv || lsv || lhv)) continue;   /* nothing we render */
+        int wsv = parse_style_whitespace(s + ds, de - ds);           /* white-space from a stylesheet rule (M1819) */
+        if (!(col || tsv >= 0 || ulv || trv || bgv || alv || szv || dnv || mgv || hsv || bdv || lsv || lhv || wsv)) continue;   /* nothing we render */
         const char *D = s + ds; int dn = de - ds;                    /* M1788: per-property !important bitmask, so an !important decl outranks a higher-specificity normal one */
         uint16_t imp = 0;
         if (prop_imp(D,dn,"color"))                                  imp |= 1u<<0;
@@ -2055,6 +2056,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
         if (prop_imp(D,dn,"border")||prop_imp(D,dn,"border-top")||prop_imp(D,dn,"border-right")||prop_imp(D,dn,"border-bottom")||prop_imp(D,dn,"border-left")) imp |= 1u<<10;
         if (prop_imp(D,dn,"list-style-type")||prop_imp(D,dn,"list-style")) imp |= 1u<<11;
         if (prop_imp(D,dn,"line-height"))                           imp |= 1u<<12;
+        if (prop_imp(D,dn,"white-space"))                           imp |= 1u<<13;
         /* a selector list "a, b, c" -> one rule per simple sub-selector that parses */
         int p = ss;
         while (p < se && b->n_css < CSS_MAX) {
@@ -2085,6 +2087,7 @@ static void capture_css(browser_t *b, const char *s, int n) {
             b->css_border[b->n_css] = bdv;
             b->css_list[b->n_css] = (uint8_t)lsv;
             b->css_lineheight[b->n_css] = (uint8_t)(lhv > 255 ? 255 : lhv);
+            b->css_ws[b->n_css] = (uint8_t)wsv;
             b->n_css++;
         }
     }
@@ -2137,12 +2140,12 @@ static int css_rule_matches(browser_t *b, int r, const char *tag, const char *at
 static int css_match(browser_t *b, const char *tag, const char *attrs, int attrlen,
                      uint32_t *color, int *textstyle, int *underline, int *transform, uint32_t *bg,
                      int *align, int *size, int *hidden, int *margin, int *indent, uint32_t *border, int *flex,
-                     int *lineheight) {
+                     int *lineheight, int *ws) {
     int hit = 0;
     /* per-property specificity watermarks: each output property is set only when the rule's
      * specificity >= the watermark for that property (ties go to source order = later wins). */
     uint32_t sp_color=0, sp_style=0, sp_ul=0, sp_tr=0, sp_bg=0, sp_al=0, sp_sz=0,
-             sp_dn=0, sp_mg=0, sp_in=0, sp_bd=0, sp_lh=0;
+             sp_dn=0, sp_mg=0, sp_in=0, sp_bd=0, sp_lh=0, sp_ws=0;
     for (int r = 0; r < b->n_css; r++) {
         if (!css_rule_matches(b, r, tag, attrs, attrlen)) continue;
         uint32_t sp = b->css_spec[r]; uint16_t imp = b->css_imp[r];   /* M1788: priority = (this property is !important)<<16 | specificity, so any !important decl beats any normal one */
@@ -2163,6 +2166,7 @@ static int css_match(browser_t *b, const char *tag, const char *attrs, int attrl
         if (b->css_indent[r]  && PRI(9) >= sp_in)       { *indent     = b->css_indent[r];     sp_in    = PRI(9); }
         if (b->css_border[r]  && PRI(10) >= sp_bd)      { *border     = b->css_border[r];     sp_bd    = PRI(10); }
         if (b->css_lineheight[r] && PRI(12) >= sp_lh)   { *lineheight = b->css_lineheight[r]; sp_lh    = PRI(12); }
+        if (b->css_ws[r]      && PRI(13) >= sp_ws)      { *ws         = b->css_ws[r];         sp_ws    = PRI(13); }
         #undef PRI
         hit = 1;
     }
