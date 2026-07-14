@@ -49,6 +49,7 @@ int  tcp_write(tcp_conn *c, const uint8_t *data, int len) { (void)c; (void)data;
 int  tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) { (void)c; (void)ip; (void)port; return 0; }
 void tcp_close(tcp_conn *c) { (void)c; }
 int  dns_resolve(const char *host, uint8_t out_ip[4]) { (void)host; (void)out_ip; return -1; }
+int  parse_ipv4(const char *s, uint8_t out[4]) { (void)s; (void)out; return -1; }   /* tls.c calls it before dns (M1847); no IP-literal fuzz input, so a stub suffices */
 /* ecdsa.c's per-core Barrett-context migration guard (never exercised here) */
 int  smp_current_cpu(void) { return 0; }
 int  task_pin_here(void) { return 0; }

@@ -448,7 +448,7 @@ int net_dhcp(void) {
  *  built-in TFTP server at 10.0.2.2 (`-netdev user,tftp=DIR`), so this is
  *  verifiable with no external infrastructure.
  * ===================================================================== */
-static int parse_ipv4(const char *s, uint8_t out[4]) {
+int parse_ipv4(const char *s, uint8_t out[4]) {
     int oct = 0, v = 0, any = 0;
     for (int i = 0; i < 4; i++) out[i] = 0;
     for (;; s++) {
@@ -1371,16 +1371,18 @@ int http_get_sse(const char *host, const char *path, char *out, int max) {
 }
 
 /* ===================================================================== *
- *  WebSocket client transport (M1846). Glues the tcp_* socket to the
- *  RFC 6455 frame codec (wsframe.h) + handshake helpers (wsclient.h). The
- *  browser-JS WebSocket object (js.c) drives it through two backings:
+ *  WebSocket client transport (M1846, +wss:// M1847). Glues the socket to
+ *  the RFC 6455 frame codec (wsframe.h) + handshake helpers (wsclient.h).
+ *  The browser-JS WebSocket object (js.c) drives it through two backings:
  *    ws_open     — connect + Upgrade handshake, hold the socket open.
  *    ws_exchange — mask+send the queued messages, read the reply frames.
- *  A single connection at a time (the JS pump is single-threaded); only
- *  plaintext ws:// (wss:// would need a persistent TLS session — deferred).
+ *  One session at a time (the JS pump is single-threaded). ws:// runs over
+ *  a raw tcp_conn; wss:// runs the same frames as TLS application data over
+ *  a persistent tls session (tls_ws_*), dispatched by g_ws_secure.
  * ===================================================================== */
-static tcp_conn g_wsc;                 /* the one in-flight WebSocket connection */
-static int      g_wsc_up;              /* is g_wsc connected? */
+static tcp_conn g_wsc;                 /* the in-flight PLAINTEXT ws:// connection */
+static int      g_ws_up;               /* a WS session (ws:// or wss://) is open */
+static int      g_ws_secure;           /* the open session is wss:// (TLS) */
 static uint8_t  g_ws_carry[512];       /* bytes read past the handshake terminator */
 static int      g_ws_carry_n;
 
@@ -1392,41 +1394,52 @@ static void ws_mask_key(uint8_t k[4]) {
     for (int i = 0; i < 4; i++) { s ^= s << 13; s ^= s >> 17; s ^= s << 5; k[i] = (uint8_t)(s >> (i * 8)); }
 }
 
-/* Open a ws:// connection and perform the RFC 6455 opening handshake. Returns a
- * (trivial) connection id >=0 on a 101 upgrade, or -1; *status gets the HTTP
- * status (or 0 if the connection itself failed). */
+/* Transport dispatch: plaintext tcp vs TLS application data (tls_ws_*).
+ * wsio_read returns bytes, 0 = plaintext idle-timeout (retryable), <0 = closed
+ * (or, for TLS, idle-timeout/close/alert — read_enc doesn't distinguish). */
+static int  wsio_write(const uint8_t *b, int n) { return g_ws_secure ? tls_ws_write(b, n) : tcp_write(&g_wsc, b, n); }
+static int  wsio_read(uint8_t *b, int n)        { return g_ws_secure ? tls_ws_read(b, n)  : tcp_read(&g_wsc, b, n, 60); }
+static void wsio_teardown(void)                 { if (g_ws_secure) tls_ws_close(); else tcp_close(&g_wsc); }
+
+/* Open a ws:// or wss:// connection and perform the RFC 6455 opening handshake.
+ * Returns a (trivial) connection id >=0 on a 101 upgrade, or -1; *status gets the
+ * HTTP status (or 0 if the connection/TLS setup itself failed). */
 int ws_open(const char *url, int *status) {
     *status = 0;
-    if (g_wsc_up) { tcp_close(&g_wsc); g_wsc_up = 0; }   /* drop any stale connection */
+    if (g_ws_up) { wsio_teardown(); g_ws_up = 0; }       /* drop any stale session */
     g_ws_carry_n = 0;
 
-    const char *u = url;                                 /* strip the scheme; only ws:// (plaintext) */
-    if (u[0]=='w'&&u[1]=='s'&&u[2]=='s'&&u[3]==':'&&u[4]=='/'&&u[5]=='/') return -1;   /* wss:// unsupported here */
-    if (u[0]=='w'&&u[1]=='s'&&u[2]==':'&&u[3]=='/'&&u[4]=='/') u += 5;
+    const char *u = url; g_ws_secure = 0;                /* strip + classify the scheme */
+    if (u[0]=='w'&&u[1]=='s'&&u[2]=='s'&&u[3]==':'&&u[4]=='/'&&u[5]=='/') { u += 6; g_ws_secure = 1; }
+    else if (u[0]=='w'&&u[1]=='s'&&u[2]==':'&&u[3]=='/'&&u[4]=='/') u += 5;
+    else return -1;
 
     char authority[256]; int ai = 0;                     /* host[:port] up to the path */
     while (*u && *u != '/' && ai < (int)sizeof(authority)-1) authority[ai++] = *u++;
     authority[ai] = 0;
     const char *path = (*u == '/') ? u : "/";
 
-    char bare[256]; uint16_t port = (uint16_t)url_host_port(authority, bare, sizeof(bare), 80);
-    uint8_t ip[4];
-    if (parse_ipv4(bare, ip) != 0 && dns_resolve(bare, ip) != 0) return -1;   /* IP literal, else DNS */
-    if (tcp_connect(&g_wsc, ip, port) != 0) return -1;
+    if (g_ws_secure) {                                   /* wss://: TLS handshake (DNS/connect/:443 inside) */
+        if (tls_ws_open(authority, (uint32_t)timer_ticks()) != 0) return -1;
+    } else {                                             /* ws://: raw TCP */
+        char bare[256]; uint16_t port = (uint16_t)url_host_port(authority, bare, sizeof(bare), 80);
+        uint8_t ip[4];
+        if (parse_ipv4(bare, ip) != 0 && dns_resolve(bare, ip) != 0) return -1;   /* IP literal, else DNS */
+        if (tcp_connect(&g_wsc, ip, port) != 0) return -1;
+    }
 
     uint8_t nonce[16]; for (int i = 0; i < 16; i++) nonce[i] = (uint8_t)((timer_ticks() >> (i & 7)) ^ (i * 37 + 1));
     char key[25]; ws_base64(nonce, 16, key);
     char req[640];
     long rl = ws_build_handshake(authority, path, key, req, sizeof(req));
-    if (rl <= 0) { tcp_close(&g_wsc); return -1; }
-    tcp_write(&g_wsc, (uint8_t *)req, (int)rl);
+    if (rl <= 0 || wsio_write((uint8_t *)req, (int)rl) < 0) { wsio_teardown(); return -1; }
 
-    char resp[1024]; int total = 0, hdr_end = -1;        /* read until the blank-line header terminator */
+    char resp[2048]; int total = 0, hdr_end = -1;        /* read until the blank-line header terminator */
     uint64_t budget = timer_ticks() + 300;
-    while (g_wsc.up && total < (int)sizeof(resp)-1 && timer_ticks() < budget) {
-        int n = tcp_read(&g_wsc, (uint8_t *)resp + total, sizeof(resp)-1 - total, 60);
-        if (n < 0) break;
-        if (n == 0) continue;
+    while (total < (int)sizeof(resp)-1 && timer_ticks() < budget) {
+        int n = wsio_read((uint8_t *)resp + total, sizeof(resp)-1 - total);
+        if (n < 0) break;                                /* closed / (TLS) idle-timeout */
+        if (n == 0) continue;                            /* plaintext idle: keep waiting within budget */
         total += n;
         for (int i = 3; i < total; i++)                  /* find "\r\n\r\n" */
             if (resp[i-3]=='\r'&&resp[i-2]=='\n'&&resp[i-1]=='\r'&&resp[i]=='\n') { hdr_end = i + 1; break; }
@@ -1434,14 +1447,14 @@ int ws_open(const char *url, int *status) {
     }
     int code = ws_handshake_status(resp, (size_t)total);
     *status = code;
-    if (code != 101 || hdr_end < 0) { tcp_close(&g_wsc); return -1; }
+    if (code != 101 || hdr_end < 0) { wsio_teardown(); return -1; }
 
     int leftover = total - hdr_end;                      /* stash any early frame bytes for ws_exchange */
     if (leftover > 0 && leftover <= (int)sizeof(g_ws_carry)) {
         memcpy(g_ws_carry, resp + hdr_end, leftover);
         g_ws_carry_n = leftover;
     }
-    g_wsc_up = 1;
+    g_ws_up = 1;
     return 1;
 }
 
@@ -1452,10 +1465,10 @@ int ws_open(const char *url, int *status) {
  * number of bytes written to `out` (>=0), or -1 on error. */
 int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv) {
     (void)id; *nrecv = 0;
-    if (!g_wsc_up) return -1;
+    if (!g_ws_up) return -1;
     int RC = 131072;
     uint8_t *raw = kmalloc(RC), *tx = kmalloc(RC + 16);
-    if (!raw || !tx) { if(raw)kfree(raw); if(tx)kfree(tx); tcp_close(&g_wsc); g_wsc_up=0; return -1; }
+    if (!raw || !tx) { if(raw)kfree(raw); if(tx)kfree(tx); wsio_teardown(); g_ws_up=0; return -1; }
 
     const char *p = sendbuf, *pend = sendbuf + sendtot;  /* send the queued messages */
     while (p < pend) {
@@ -1463,7 +1476,7 @@ int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax,
         if (L <= RC) {
             uint8_t mk[4]; ws_mask_key(mk);
             long fl = ws_build_client_frame(WS_OP_TEXT, (const uint8_t *)p, (uint64_t)L, mk, tx, RC + 16);
-            if (fl > 0) tcp_write(&g_wsc, tx, (int)fl);
+            if (fl > 0) wsio_write(tx, (int)fl);
         }
         p += L + 1;                                       /* skip the NUL separator */
     }
@@ -1472,7 +1485,7 @@ int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax,
     if (g_ws_carry_n > 0 && g_ws_carry_n <= RC) { memcpy(raw, g_ws_carry, g_ws_carry_n); rn = g_ws_carry_n; g_ws_carry_n = 0; }
     uint64_t budget = timer_ticks() + 400;
     int closing = 0;
-    while (!closing && g_wsc.up && timer_ticks() < budget) {
+    while (!closing && timer_ticks() < budget) {
         int fin, op; uint64_t pl; size_t used;
         int r;
         /* drain every complete frame currently buffered in raw[0..rn) */
@@ -1491,16 +1504,18 @@ int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax,
         if (r == -1) { closing = 1; break; }             /* malformed / oversized -> bail */
         if (closing) break;
         if (rn >= RC) { closing = 1; break; }            /* a frame bigger than our buffer */
-        int n = tcp_read(&g_wsc, raw + rn, RC - rn, 60);
-        if (n < 0) break;                                /* peer closed */
-        if (n == 0) { if (*nrecv > 0) break; else continue; }  /* idle: stop once we have replies */
+        int n = wsio_read(raw + rn, RC - rn);
+        if (n < 0) break;                                /* peer closed / (TLS) idle-timeout */
+        if (n == 0) { if (*nrecv > 0) break; else continue; }  /* plaintext idle: stop once we have replies */
         rn += n;
     }
 
-    uint8_t mk[4]; ws_mask_key(mk);                      /* polite CLOSE, then tear down */
-    long cf = ws_build_client_frame(WS_OP_CLOSE, (const uint8_t *)"", 0, mk, tx, RC + 16);
-    if (cf > 0 && g_wsc.up) tcp_write(&g_wsc, tx, (int)cf);
-    tcp_close(&g_wsc); g_wsc_up = 0;
+    if (!g_ws_secure && g_wsc.up) {                      /* plaintext: send a polite CLOSE frame first */
+        uint8_t mk[4]; ws_mask_key(mk);
+        long cf = ws_build_client_frame(WS_OP_CLOSE, (const uint8_t *)"", 0, mk, tx, RC + 16);
+        if (cf > 0) tcp_write(&g_wsc, tx, (int)cf);
+    }
+    wsio_teardown(); g_ws_up = 0;                        /* wss:// teardown sends TLS close_notify */
     kfree(raw); kfree(tx);
     return ooff;
 }

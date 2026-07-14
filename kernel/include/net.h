@@ -12,6 +12,7 @@ int net_ping_gateway(void);
 int net_ping_host(const char *host);
 /* Resolve a hostname to an IPv4 address via DNS. 0 on success, -1 otherwise. */
 int dns_resolve(const char *host, uint8_t out_ip[4]);
+int parse_ipv4(const char *s, uint8_t out[4]);   /* dotted-quad literal -> 4 bytes; 0/-1 (exposed M1847) */
 /* HTTP/1.0 GET http://host/path -> raw response into out (max bytes).
  * Returns bytes received, or -1 on error. */
 int http_get(const char *host, const char *path, char *out, int max);

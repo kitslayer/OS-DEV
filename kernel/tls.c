@@ -444,14 +444,22 @@ static int tls_sse_first_event(const uint8_t *buf, int n) {
     }
     return 0;
 }
+/* WebSocket-over-TLS (wss://, M1847): a persistent session left open after the
+ * handshake so the net.c WebSocket transport can send/read frames as TLS app
+ * data. Copied out of tls_get_inner's function-static `T` + stack `tcp` so a
+ * later HTTPS fetch (which reuses those) doesn't clobber the live WS session. */
+static tls       g_wss_T;
+static tcp_conn  g_wss_tcp;
+static int       g_wss_open;
+
 static int tls_get_inner(const char *host, const char *path, uint8_t *out, int max, uint32_t seed,
-                         const char *method, const char *ctype, const char *body, int bodylen, int sse) {   /* method NULL/"GET" => GET (byte-identical to before); "POST" => send body (M702); sse=1 => stop after the first SSE event (M-eventsource) */
+                         const char *method, const char *ctype, const char *body, int bodylen, int sse, int ws_mode) {   /* method NULL/"GET" => GET (byte-identical to before); "POST" => send body (M702); sse=1 => stop after the first SSE event (M-eventsource); ws_mode=1 => stop after the handshake, leave the session open for tls_ws_* (M1847) */
     rng_seed(seed);
     g_cert_status = -2; g_chain_anchored = 0; g_host_match = -2;   /* clear stale results */
     g_leaf_cn[0] = 0; g_leaf_expiry[0] = 0;
     char bare[256]; uint16_t cport = (uint16_t)url_host_port(host, bare, sizeof(bare), 443);   /* honor host:port (M1773); DNS/SNI/cert-match use the bare host, Host: keeps the :port */
     uint8_t ip[4];
-    if (dns_resolve(bare, ip) != 0) return -1;
+    if (parse_ipv4(bare, ip) != 0 && dns_resolve(bare, ip) != 0) return -1;   /* IP literal (M1847), else DNS */
     tcp_conn tcp;
     if (tcp_connect(&tcp, ip, cport) != 0) return -1;
 
@@ -650,6 +658,15 @@ static int tls_get_inner(const char *host, const char *path, uint8_t *out, int m
         return -1;
     }
 
+    /* wss:// (M1847): the handshake is done and app keys are live — hand the open
+     * session to tls_ws_* rather than sending an HTTP request. Copy T (function-
+     * static) + tcp (a stack local) into the WS-dedicated statics and return; the
+     * caller (net.c ws_open) now owns the connection until tls_ws_close(). */
+    if (ws_mode) {
+        g_wss_T = T; g_wss_tcp = tcp; g_wss_T.tcp = &g_wss_tcp; g_wss_open = 1;
+        return 0;
+    }
+
     /* --- send the HTTP request, read the response --- */
     char req[640]; int rl = 0;
     char rpath[1024]; url_request_path(path, rpath, sizeof(rpath));   /* drop any #fragment from the wire request-target (M1774) */
@@ -724,7 +741,7 @@ int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t 
     uint64_t f = tls_irq_save();
     if (g_tls_busy) { tls_irq_restore(f); return -1; }   /* another TLS op in flight */
     g_tls_busy = 1; tls_irq_restore(f);
-    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0, 0);
+    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0, 0, 0);
     g_tls_busy = 0;
     return r;
 }
@@ -735,7 +752,7 @@ int tls_get_sse(const char *host, const char *path, uint8_t *out, int max, uint3
     uint64_t f = tls_irq_save();
     if (g_tls_busy) { tls_irq_restore(f); return -1; }
     g_tls_busy = 1; tls_irq_restore(f);
-    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0, 1);
+    int r = tls_get_inner(host, path, out, max, seed, "GET", 0, 0, 0, 1, 0);
     g_tls_busy = 0;
     return r;
 }
@@ -746,7 +763,67 @@ int tls_post(const char *host, const char *path, const char *ctype,
     uint64_t f = tls_irq_save();
     if (g_tls_busy) { tls_irq_restore(f); return -1; }
     g_tls_busy = 1; tls_irq_restore(f);
-    int r = tls_get_inner(host, path, out, max, seed, "POST", ctype, body, bodylen, 0);
+    int r = tls_get_inner(host, path, out, max, seed, "POST", ctype, body, bodylen, 0, 0);
     g_tls_busy = 0;
     return r;
+}
+
+/* ---- wss:// persistent session (M1847) ----
+ * Drives WebSocket-over-TLS for net.c's transport. tls_ws_open does the full
+ * handshake (via tls_get_inner ws_mode) and leaves the session open in g_wss_T;
+ * write/read carry the WebSocket frame bytes as TLS application data; close
+ * sends close_notify + tears down TCP. Each op serializes with the shared record
+ * scratch (read_enc's static buffer) via g_tls_busy so a concurrent HTTPS fetch
+ * on another core can't reenter it. One session at a time (the JS pump is
+ * single-threaded); a caller MUST pair a successful open with a close. */
+int tls_ws_open(const char *host, uint32_t seed) {
+    uint64_t f = tls_irq_save();
+    if (g_tls_busy) { tls_irq_restore(f); return -1; }
+    g_tls_busy = 1; tls_irq_restore(f);
+    if (g_wss_open) { tcp_close(&g_wss_tcp); g_wss_open = 0; }   /* drop any stale session */
+    int r = tls_get_inner(host, "/", 0, 0, seed, "GET", 0, 0, 0, 0, 1 /*ws_mode*/);
+    g_tls_busy = 0;
+    return r;                                    /* 0 => session live in g_wss_T */
+}
+int tls_ws_write(const uint8_t *data, int len) {
+    if (!g_wss_open) return -1;
+    uint64_t f = tls_irq_save();
+    if (g_tls_busy) { tls_irq_restore(f); return -1; }
+    g_tls_busy = 1; tls_irq_restore(f);
+    int off = 0, rc = 0;
+    while (off < len) {                          /* chunk into <=2000-B records (write_enc's pt[2048]) */
+        int c = len - off; if (c > 2000) c = 2000;
+        if (write_enc(&g_wss_T, REC_APP, data + off, c) != 0) { rc = -1; break; }
+        off += c;
+    }
+    g_tls_busy = 0;
+    return rc < 0 ? -1 : len;
+}
+int tls_ws_read(uint8_t *out, int max) {
+    if (!g_wss_open) return -1;
+    uint64_t f = tls_irq_save();
+    if (g_tls_busy) { tls_irq_restore(f); return -1; }
+    g_tls_busy = 1; tls_irq_restore(f);
+    int n;
+    for (;;) {                                   /* skip post-handshake NewSessionTicket (REC_HS) records */
+        int inner;
+        n = read_enc(&g_wss_T, &inner, out, max); /* one record's inner content, or -1 */
+        if (n < 0) { n = -1; break; }            /* closed / alert / idle-timeout */
+        if (inner == REC_HS) continue;           /* session tickets etc: not app data, keep reading */
+        if (inner != REC_APP) { n = -1; break; }
+        break;                                   /* got a WebSocket-carrying application-data record */
+    }
+    g_tls_busy = 0;
+    return n;
+}
+void tls_ws_close(void) {
+    if (!g_wss_open) return;
+    uint64_t f = tls_irq_save();
+    if (!g_tls_busy) {                           /* best-effort close_notify (skip if a TLS op is mid-flight) */
+        g_tls_busy = 1; tls_irq_restore(f);
+        if (g_wss_tcp.up) { uint8_t cn[2] = { 1, 0 }; write_enc(&g_wss_T, REC_ALERT, cn, 2); }
+        g_tls_busy = 0;
+    } else { tls_irq_restore(f); }
+    tcp_close(&g_wss_tcp);
+    g_wss_open = 0;
 }

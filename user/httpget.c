@@ -56,6 +56,21 @@ int tcp_write(tcp_conn *c, const uint8_t *data, int len) { (void)c; return (int)
 int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) { (void)c; (void)ticks; return (int)sys_fdread(g_sock, out, (unsigned long)max); }
 void tcp_close(tcp_conn *c) { (void)c; if (g_sock >= 0) { sys_fdclose(g_sock); g_sock = -1; } }
 
+/* dotted-quad literal -> 4 bytes (tls.c calls this before dns_resolve since M1847);
+ * pure, so implemented locally rather than shimmed onto a syscall. 0/-1. */
+int parse_ipv4(const char *s, uint8_t out[4]) {
+    int oct = 0, v = 0, any = 0;
+    for (int i = 0; i < 4; i++) out[i] = 0;
+    for (const char *p = s; ; p++) {
+        if (*p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); any = 1; if (v > 255) return -1; }
+        else if (*p == '.' || *p == 0) {
+            if (!any || oct > 3) return -1;
+            out[oct++] = (uint8_t)v; v = 0; any = 0;
+            if (*p == 0) break;
+        } else return -1;
+    }
+    return oct == 4 ? 0 : -1;
+}
 int dns_resolve(const char *host, uint8_t out_ip[4]) {
     char b[80];
     long r = sys_resolve(host, b, sizeof b);     /* returns 0 on success, -1 on failure */

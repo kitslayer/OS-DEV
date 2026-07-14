@@ -12,6 +12,14 @@ int tls_get_sse(const char *host, const char *path, uint8_t *out, int max, uint3
 /* HTTPS POST: sends `body` (bodylen) with Content-Type `ctype`; raw response into out. -1 on error. (M702) */
 int tls_post(const char *host, const char *path, const char *ctype, const char *body, int bodylen, uint8_t *out, int max, uint32_t seed);
 
+/* wss:// persistent TLS session for the WebSocket transport (M1847): open does the
+ * full handshake + leaves the connection live; write/read carry frame bytes as TLS
+ * application data; close sends close_notify + tears down. One session at a time. */
+int  tls_ws_open(const char *host, uint32_t seed);   /* 0 = session open, -1 = fail */
+int  tls_ws_write(const uint8_t *data, int len);     /* len / -1 */
+int  tls_ws_read(uint8_t *out, int max);             /* app-data bytes / -1 (idle-timeout, close, or alert) */
+void tls_ws_close(void);
+
 /* CertificateVerify result of the most recent tls_get: -2 = none/absent,
  * 0 = signature verified (server proved leaf-key possession), -1 = failed.
  * (Chain-to-root path validation is done separately -- see tls_chain_anchored.) */
