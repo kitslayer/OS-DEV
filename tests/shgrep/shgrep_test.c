@@ -24,6 +24,9 @@ static void G(const char *pat, const char *s, int exp, const char *m) {
 static void W(const char *re, const char *t, int ci, int exp, const char *m) {   /* grep -w whole-word match */
     CHECK(gr_match_word(re, t, ci) == exp, m);
 }
+static void X(const char *re, const char *t, int ci, int exp, const char *m) {   /* grep -x whole-line match */
+    CHECK(gr_match_line(re, t, ci) == exp, m);
+}
 
 int main(void) {
     /* ---- literal (no metacharacters) behaves like substring search ---- */
@@ -83,7 +86,18 @@ int main(void) {
     W("^cat", "category", 0, 0, "word: ^ anchor but no right boundary");
     W("c.t", "a cot here", 0, 1, "word: regex '.' within a bounded word");
     W("c.t", "scatter", 0, 0, "word: regex match embedded in a longer word");
-    printf("regression: %s\n", fails ? "FAILURES" : "ok (literal/anchors/./*/classes/escape/-i/-w)");
+
+    /* ---- grep -x whole-line matching ---- */
+    X("cat", "cat", 0, 1, "line: exact whole line");
+    X("cat", "cat food", 0, 0, "line: prefix only is not the whole line");
+    X("cat", "a cat", 0, 0, "line: suffix only is not the whole line");
+    X("c.t", "cot", 0, 1, "line: regex '.' spans the whole line");
+    X("c.t", "cots", 0, 0, "line: regex leaves a trailing char -> no whole-line match");
+    X("a.*", "axbyz", 0, 1, "line: greedy .* consumes to end");
+    X("^cat", "cat", 0, 1, "line: leading ^ is redundant but fine");
+    X("CAT", "cat", 1, 1, "line: case-insensitive whole line");
+    X("", "", 0, 1, "line: empty pattern matches an empty line");
+    printf("regression: %s\n", fails ? "FAILURES" : "ok (literal/anchors/./*/classes/escape/-i/-w/-x)");
 
     /* ---- fuzz: random metachar-biased patterns x random texts; must never OOB ---- */
     srand(20260618);

@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1831) Shell `grep -x` — whole-line match.** The exact-line complement to M1823's `-w` (whole-word): a line matches only if the pattern spans it entirely — `grep -x cat` hits the line `cat` but not `cat food`. A new additive `gr_match_line()` in `user/shgrep.h` matches from the line start via the existing `gr_matchhere` and requires it to consume to the end (`*e == 0`; a leading `^` is redundant). The grep builtin's match test now selects `gr_match_line` (`-x`) / `gr_match_word` (`-w`) / `gr_match` (substring).
+> 
+> **Verified:** `make shgreptest` green — 9 new whole-line cases (exact vs prefix/suffix, regex `.`/greedy `.*` to end, redundant `^`, case-insensitive, empty pattern/line) + the existing 300k-pair fuzz, ASan/UBSan clean. Full OS image builds clean (the `-x` wiring is a trivial matcher-selection mirroring `-w`, verified in-guest at M1823).
+> 
 > **(M1830) Spreadsheet — `CHOOSE` and `SUMPRODUCT`.** `CHOOSE(index, v1, v2, …)` returns the index-th value (1-based; out-of-range → `#ERR`); the index can itself be a formula (`CHOOSE(A1/10, …)`). `SUMPRODUCT(range1, range2)` sums the pairwise products of two equally-shaped ranges, paired by position (blank/text cells read as 0), with a `#ERR` on a shape mismatch — it reuses `parse_range_arg` + `get_cell_value`.
 > 
 > **Verified:** `make sheettest` green — 306 checks (7 new: `CHOOSE` by literal/cell index + out-of-range `#ERR`, `SUMPRODUCT` 2-cell/full-column + shape-mismatch `#ERR`) + 40k fuzz, ASan/UBSan clean. Full OS image builds clean.

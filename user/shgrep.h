@@ -88,6 +88,14 @@ static int gr_match_word(const char *re, const char *t, int ci) {
     }
     return 0;
 }
+/* grep -x: the pattern must match the WHOLE line (from the start, consuming to the
+ * end) — `grep -x cat` hits the line "cat" but not "cat food". A leading ^ is
+ * redundant (already anchored) so it's skipped. (M1831) */
+static int gr_match_line(const char *re, const char *t, int ci) {
+    const char *e;
+    const char *r = (re[0] == '^') ? re + 1 : re;
+    return gr_matchhere(r, t, ci, &e) && *e == 0;
+}
 /* grep -o: leftmost match's span [*ms, *me). With the greedy matcher this is the
  * leftmost-longest match at that start. Returns 1 if a match was found. */
 static int gr_match_span(const char *re, const char *t, int ci, const char **ms, const char **me) {
