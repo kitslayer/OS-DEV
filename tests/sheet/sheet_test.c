@@ -234,6 +234,19 @@ int main(void) {
     set_raw(0, 3, "=SUMPRODUCT(A1:A4, B1:B4)"); recompute(); chk_num(0, 3, 30000, "SUMPRODUCT full column");
     set_raw(0, 3, "=SUMPRODUCT(A1:A2, B1:B3)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("SUMPRODUCT shape mismatch should be #ERR (got %d)", CELL(0, 3)->err);
 
+    /* --- MAXIFS / MINIFS (M1835): values A1:A4 = 10,20,30,40, category B1:B4 = 1,2,1,2 --- */
+    clear_all();
+    set_raw(0, 0, "10"); set_raw(1, 0, "20"); set_raw(2, 0, "30"); set_raw(3, 0, "40");
+    set_raw(0, 1, "1"); set_raw(1, 1, "2"); set_raw(2, 1, "1"); set_raw(3, 1, "2");
+    set_raw(0, 3, "=MAXIFS(A1:A4,B1:B4,1)"); recompute(); chk_num(0, 3, 30, "MAXIFS cat=1 -> max(10,30)");
+    set_raw(0, 3, "=MAXIFS(A1:A4,B1:B4,2)"); recompute(); chk_num(0, 3, 40, "MAXIFS cat=2 -> max(20,40)");
+    set_raw(0, 3, "=MINIFS(A1:A4,B1:B4,1)"); recompute(); chk_num(0, 3, 10, "MINIFS cat=1 -> min(10,30)");
+    set_raw(0, 3, "=MINIFS(A1:A4,B1:B4,2)"); recompute(); chk_num(0, 3, 20, "MINIFS cat=2 -> min(20,40)");
+    set_raw(0, 3, "=MAXIFS(A1:A4,B1:B4,>0)"); recompute(); chk_num(0, 3, 40, "MAXIFS >0 matches all -> 40");
+    set_raw(0, 3, "=MINIFS(A1:A4,B1:B4,>1)"); recompute(); chk_num(0, 3, 20, "MINIFS cat>1 -> min(20,40)");
+    set_raw(0, 3, "=MAXIFS(A1:A4,B1:B4,5)"); recompute(); chk_num(0, 3, 0, "MAXIFS no match -> 0");
+    set_raw(0, 3, "=MAXIFS(A1:A4,B1:B3,1)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("MAXIFS shape mismatch should be #ERR (got %d)", CELL(0, 3)->err);
+
     /* --- circular references ----------------------------------------------*/
     clear_all(); set_raw(0, 0, "=A1"); recompute();
     checks++; if (CELL(0, 0)->err != ERR_CIRC) FAILN("self-ref A1=A1 should be #CIRC (got %d)", CELL(0, 0)->err);

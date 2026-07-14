@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1835) Spreadsheet — `MAXIFS` / `MINIFS`.** Conditional max/min: `MAXIFS(value_range, criteria_range, [op]value)` returns the largest value whose position-paired criteria cell satisfies the test (`op` ∈ `= < <= > >= <>`, bare = equality — the same criterion grammar as `SUMIF`); `MINIFS` the smallest. Reuses `parse_range_arg` + the SUMIF op-parse; ranges must match shape (else `#ERR`); no match → 0.
+> 
+> **Verified:** `make sheettest` green — 314 checks (8 new: category-filtered max/min, an `>`-operator criterion, no-match→0, shape-mismatch `#ERR`) + 40k fuzz, ASan/UBSan clean. Full OS image builds clean. (Host-tested — instant oracle, no boot.)
+> 
 > **(M1834) Shell `mkdir -p` — make parent directories.** One of the most-used `mkdir` forms was missing: `mkdir -p a/b/c` now creates each missing path component in turn and, unlike plain `mkdir`, is silent+successful when a component already exists (idempotent). Implemented by walking the path prefix-by-prefix and `sys_mkdir`-ing each, ignoring "already exists"; plain `mkdir` (per-dir, errors on a clash) is unchanged.
 > 
 > **Verified in-guest** (osdrive): `mkdir -p /tmp/aa/bb/cc` then `cd /tmp/aa/bb/cc` + `pwd`→`/tmp/aa/bb/cc` (all three levels created); re-running `mkdir -p …` produces no error and the next command runs (`rerun-ok`), confirming idempotence. Full OS image builds clean.

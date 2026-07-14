@@ -28,6 +28,7 @@
  *            SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
  *            MATCH(key,range,[type]) INDEX(range,row,[col]) VLOOKUP(key,range,col,[exact])
  *            LARGE(range,k) SMALL(range,k) CHOOSE(i,v1,v2,...) SUMPRODUCT(r1,r2)
+ *            MAXIFS/MINIFS(value_range, criteria_range, [op]value)
  */
 #ifndef SHEETEVAL_H
 #define SHEETEVAL_H
@@ -464,6 +465,35 @@ static double call_function(const char *name) {
         for (int rr = 0; rr < nr; rr++) for (int cc = 0; cc < nc; cc++)   /* position-paired; blank/text reads as 0 */
             sum += get_cell_value(r1 + rr, c1 + cc) * get_cell_value(s1 + rr, d1 + cc);
         return sum;
+    }
+    if (nameeq(name, "MAXIFS") || nameeq(name, "MINIFS")) {  /* MAXIFS(value_range, criteria_range, criterion) (M1835) */
+        int r1, c1, r2, c2, s1, d1, s2, d2;
+        if (!parse_range_arg(&r1, &c1, &r2, &c2)) return 0;   /* value range */
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        if (!parse_range_arg(&s1, &d1, &s2, &d2)) return 0;   /* criteria range */
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        int op = 0;                                          /* same op grammar as SUMIF: = < <= > >= <> */
+        if (*pcur == '<') { pcur++; if (*pcur == '=') { pcur++; op = 2; } else if (*pcur == '>') { pcur++; op = 5; } else op = 1; }
+        else if (*pcur == '>') { pcur++; if (*pcur == '=') { pcur++; op = 4; } else op = 3; }
+        else if (*pcur == '=') { pcur++; op = 0; }
+        double thr = eval_expr();
+        skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        int nr = r2 - r1 + 1, nc = c2 - c1 + 1;
+        if (nr != s2 - s1 + 1 || nc != d2 - d1 + 1) { perr = ERR_SYNTAX; return 0; }   /* ranges must match */
+        int ismax = nameeq(name, "MAXIFS"), have = 0; double best = 0;
+        for (int rr = 0; rr < nr; rr++) for (int cc = 0; cc < nc; cc++) {
+            eval_cell(s1 + rr, d1 + cc); cell_t *crit = CELL(s1 + rr, d1 + cc);
+            if (!crit->is_num) continue;                      /* non-numeric criteria cell: skip */
+            double cv = crit->val; int m = 0;
+            switch (op) { case 0: m=(cv==thr); break; case 1: m=(cv<thr); break; case 2: m=(cv<=thr); break;
+                          case 3: m=(cv>thr); break; case 4: m=(cv>=thr); break; case 5: m=(cv!=thr); break; }
+            if (!m) continue;
+            eval_cell(r1 + rr, c1 + cc); cell_t *vc = CELL(r1 + rr, c1 + cc);
+            if (!vc->is_num) continue;
+            double v = vc->val;
+            if (!have || (ismax ? v > best : v < best)) { best = v; have = 1; }
+        }
+        return have ? best : 0;                               /* no match -> 0 (like SUMIF/AVERAGEIF's empty case) */
     }
 
     /* fixed-arity scalar functions */
