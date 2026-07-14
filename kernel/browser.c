@@ -154,12 +154,13 @@ struct browser {
     int      curlh_css;                                  /* CSS line-height override in effect (0=none/use style default, else px value) */
     uint8_t  toklh[TOK_MAX];                              /* per-token CSS line-height in px (0=none/use style default) */
     int      curindent;                                  /* left-indent in px (from <blockquote> nesting), applied at every line start */
+    int      curprews;                                   /* CSS white-space: preserve spaces+newlines like <pre> when >0 (M1818) */
     uint8_t  tokindent[TOK_MAX];                          /* per-token left-indent in px, capped at 255 (a line takes its first token's value) */
     char    *scripts; int scriptlen;                     /* inline <script> text captured this parse */
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
+    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint16_t css_spec[CSS_MAX]; uint16_t css_imp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
@@ -548,6 +549,17 @@ static int parse_style_align(const char *s, int n) {
     if (attr_eq(v, vl, "right"))  return 2;
     return 0;
 }
+/* white-space (M1818): 1 = preserve (pre / pre-wrap / pre-line), 2 = normal
+ * (collapse — an explicit reset inside a preformatted ancestor), 0 = unspecified.
+ * `nowrap` collapses like normal here (this word-wrapping renderer has no true no-wrap). */
+static int parse_style_whitespace(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "white-space", 11, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs;
+    if (attr_eq(v, vl, "pre") || attr_eq(v, vl, "pre-wrap") || attr_eq(v, vl, "pre-line")) return 1;
+    if (attr_eq(v, vl, "normal") || attr_eq(v, vl, "nowrap")) return 2;
+    return 0;
+}
 /* font-size -> a glyph-scale bucket: 3 (≈ ≥28px / ≥175% / ≥1.8em), 2 (≈ ≥19px / ≥119% /
  * ≥1.2em), else 0 (no override). The bitmap font has no sub-1x, so this only enlarges;
  * small sizes just fall through to the default 1x. Reads the leading integer of the value. */
@@ -845,6 +857,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->curscale = b->sc[sp].savescale;
                 b->curlh_css = b->sc[sp].savelh;
                 b->curindent = b->sc[sp].saveindent;
+                b->curprews = b->sc[sp].saveprews;
                 if (b->sc[sp].hidden && b->n_hidden > 0) b->n_hidden--;   /* leaving a display:none element */
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
                 if (b->sc[sp].hasborder && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };   /* close the border box opened by this frame */
@@ -854,7 +867,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0;
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -875,6 +888,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             int imv = parse_style_vspace(st, stl); if (imv) b->pending_vmargin = (uint16_t)imv;  /* CSS vertical margin+padding -> block spacing */
             int iml = parse_style_hspace(st, stl); if (iml) ml = iml;                            /* CSS left margin/padding -> indent */
             int ilh = parse_style_lineheight(st, stl); if (ilh) lh_css = ilh;                    /* line-height (inline overrides rule) */
+            prews = parse_style_whitespace(st, stl);                                             /* white-space: pre/pre-wrap/pre-line (M1818) */
         }
         if (has_attr(attrs, attrlen, "hidden")) hide = 1;   /* the HTML5 `hidden` attribute */
         if (tageq(tag, "big")) { if (!fs) fs = 2; }         /* <big> -> 2x */
@@ -891,7 +905,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
               if (attr_eq(av, avl, "center")) al = 1; else if (attr_eq(av, avl, "right")) al = 2; } }
         if (tageq(tag, "u") || tageq(tag, "ins")) ul = 1;   /* the <u>/<ins> tags also underline */
         int apply_ts = (ts >= 0 && *style == STY_NORMAL);   /* like <b>/<i>: only over normal-flow text */
-        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml || bd || flex || mw || lh_css) {  /* styled/hidden/indented/bordered/flex/max-width/line-height element -> push a frame */
+        if (c || apply_ts || ul || tr || bg || al || fs || hide || ml || bd || flex || mw || lh_css || prews) {  /* styled/hidden/indented/bordered/flex/max-width/line-height/white-space element -> push a frame */
             if (b->sc_sp < SC_MAX) {
                 int sp = b->sc_sp;
                 b->sc[sp].hidden = hide; if (hide) b->n_hidden++;   /* enter a display:none subtree */
@@ -903,6 +917,8 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].savescale = b->curscale; if (fs) b->curscale = fs;
                 b->sc[sp].savelh = b->curlh_css; if (lh_css) b->curlh_css = lh_css;   /* CSS line-height */
                 b->sc[sp].saveindent = b->curindent; if (ml) b->curindent += ml;   /* CSS left indent (margin/padding-left) */
+                b->sc[sp].saveprews = b->curprews;                                 /* white-space: pre-like -> preserve, normal/nowrap -> collapse (M1818) */
+                if (prews == 1) b->curprews = 1; else if (prews == 2) b->curprews = 0;
                 b->sc[sp].savestyle = *style; b->sc[sp].setstyle = -1;
                 if (apply_ts) { *style = ts; b->sc[sp].setstyle = ts; }
                 int i = 0; while (tag[i] && i < 15) { b->sc[sp].tag[i] = tag[i]; i++; } b->sc[sp].tag[i] = 0;
@@ -1553,6 +1569,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
     b->curscale = 0;                                     /* no font-size override in effect */
     b->curlh_css = 0;                                    /* no CSS line-height override in effect */
     b->curindent = 0;                                    /* no blockquote indent in effect */
+    b->curprews = 0;                                     /* no CSS white-space:pre in effect (M1818) */
     b->curul = 0;                                        /* no underline in effect */
     b->curtransform = 0;                                 /* no text-transform in effect */
     b->viewsource = 0;                                   /* show the rendered page, not source */
@@ -1757,7 +1774,7 @@ static void parse_html(browser_t *b, const char *body, int len) {
             if (b->curtransform == 1 && c >= 'a' && c <= 'z') c -= 32;
             else if (b->curtransform == 2 && c >= 'A' && c <= 'Z') c += 32;
         }
-        if (inpre) {                              /* preformatted: keep spaces + line breaks */
+        if (inpre || b->curprews) {               /* preformatted (<pre> or CSS white-space:pre): keep spaces + line breaks */
             if (c == '\r') continue;
             if (c == '\n') {
                 if (wstart >= 0) { emit_word(b, wstart, style, curlink); wstart = -1; }
