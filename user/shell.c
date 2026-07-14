@@ -846,7 +846,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump hexedit<file> strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
+            helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p [suf]> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump hexedit<file> strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             helpline("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
@@ -6551,12 +6551,16 @@ static int run_command(char *line, char *cwd) {
                 free(buf);
             }
             if (!any) print("usage: strings <file>...\n");
-        } else if (startswith(line, "basename ")) {       /* basename PATH -> the last component */
+        } else if (startswith(line, "basename ")) {       /* basename PATH [SUFFIX] -> last component, minus a trailing SUFFIX */
             const char *p = line + 9; while (*p == ' ') p++;
             char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0; sh_unprot_buf(path);
+            const char *sp = p + pl; while (*sp == ' ') sp++;         /* optional SUFFIX to strip (basename foo.txt .txt -> foo) */
+            char suf[64]; int sl = 0; while (*sp && *sp != ' ' && sl < 63) suf[sl++] = *sp++; suf[sl] = 0; sh_unprot_buf(suf);
             while (pl > 1 && path[pl-1] == '/') path[--pl] = 0;        /* strip trailing slashes (keep a lone "/") */
             int last = -1; for (int i = 0; i < pl; i++) if (path[i] == '/') last = i;
-            print("  "); print(last >= 0 ? path + last + 1 : path); print("\n");
+            char *base = last >= 0 ? path + last + 1 : path;
+            if (sl > 0) { int bl = 0; while (base[bl]) bl++; if (bl > sl && streq(base + bl - sl, suf)) base[bl - sl] = 0; }   /* trim SUFFIX, but never the whole name (POSIX) */
+            print("  "); print(base); print("\n");
         } else if (startswith(line, "dirname ")) {        /* dirname PATH -> the directory part */
             const char *p = line + 8; while (*p == ' ') p++;
             char path[160]; int pl = 0; while (p[pl] && p[pl] != ' ' && pl < 159) { path[pl] = p[pl]; pl++; } path[pl] = 0; sh_unprot_buf(path);

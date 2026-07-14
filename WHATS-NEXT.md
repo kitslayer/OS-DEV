@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1833) Shell `basename PATH [SUFFIX]` — strip a trailing suffix.** `basename` gave only the last path component; it now also accepts an optional `SUFFIX` argument and trims it from the end (`basename /usr/foo.txt .txt` → `foo`, `basename report.md .md` → `report`) — the ubiquitous extension-stripping idiom. Follows POSIX: a suffix that isn't a strict trailing substring is ignored, and a name equal to the suffix (`basename .txt .txt`) is left intact.
+> 
+> **Verified in-guest** (osdrive): `/usr/foo.txt .txt`→`foo`, `report.md .md`→`report`, `data .csv`→`data` (no match, unchanged), `.txt .txt`→`.txt` (whole name preserved). Full OS image builds clean.
+> 
 > **(M1832) Shell `date +FORMAT` — strftime-style output.** `date` printed a single fixed `YYYY-MM-DD HH:MM:SS`; a `+FORMAT` argument now formats the current time with the common specifiers `%Y %y %m %d %H %M %S`, the shorthands `%F` (=`%Y-%m-%d`) and `%T` (=`%H:%M:%S`), `%%` for a literal percent, and any other text passed through verbatim — the idiom scripts use for timestamped filenames (`f=$(date +%Y%m%d)`). Reads the fixed-offset fields out of `sys_time()`'s string, so no new date math.
 > 
 > **Verified in-guest** (osdrive): `date +%Y-%m-%d`→`2026-07-14`, `date +time=%H:%M:%S`→`time=03:51:20`, `date +%F is %T`→`2026-07-14 is 03:51:22` (specifiers substituted, literal text preserved). Plain `date` is unchanged. Full OS image builds clean.
