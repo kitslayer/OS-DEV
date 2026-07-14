@@ -760,19 +760,39 @@ static void ls_long_entry(const char *name, int human) {
 
 /* List directory `dir` (relative to cwd; NULL/"" = the cwd itself). longfmt ->
  * one `ls -l` line per entry; else the existing coloured name grid. (M1817) */
-static void ls_print_dir(const char *dir, int longfmt, int human, char *cwd) {
+/* sortkey: 0 none (sys_list order), 1 by size, 2 by mtime (both descending, like
+ * GNU ls -S/-t); reverse flips the final order (-r). Plain `ls` (no -l/-S/-t/-r)
+ * keeps the fast streaming coloured grid untouched; anything else collects the
+ * entries (cap 256) so they can be sorted/reversed. (M1817/M1822/M1824) */
+static void ls_print_dir(const char *dir, int longfmt, int human, int sortkey, int reverse, char *cwd) {
     if (dir && dir[0] && sys_chdir(dir) < 0) { perr("ls: no such directory: "); print(dir); print("\n"); g_status = 1; return; }
     char buf[8192]; sys_list(buf, sizeof buf);
-    if (!longfmt) { print_ls_colored(buf); }
-    else {
-        int i = 0;
-        while (buf[i]) {
-            int ne = i; while (buf[ne] && buf[ne] != ' ' && buf[ne] != '\n') ne++;   /* name [i,ne) */
-            char name[128]; int n = 0; for (int k = i; k < ne && n < 127; k++) name[n++] = buf[k]; name[n] = 0;
-            int k = ne; while (buf[k] && buf[k] != '\n') k++;                          /* skip sys_list's own trailing metadata */
-            if (name[0]) ls_long_entry(name, human);
-            i = (buf[k] == '\n') ? k + 1 : k;
+    if (!longfmt && !sortkey && !reverse) { print_ls_colored(buf); if (dir && dir[0]) sys_chdir(cwd); return; }
+    static char sn[256][64]; static unsigned long sk[256]; int cnt = 0;
+    int i = 0;
+    while (buf[i] && cnt < 256) {
+        int ne = i; while (buf[ne] && buf[ne] != ' ' && buf[ne] != '\n') ne++;         /* name [i,ne) */
+        if (ne > i) {
+            int n = 0; for (int k = i; k < ne && n < 63; k++) sn[cnt][n++] = buf[k]; sn[cnt][n] = 0;
+            sk[cnt] = 0;
+            if (sortkey) { struct statx st; if (sys_statx(sn[cnt], &st) == 0) sk[cnt] = (sortkey == 1) ? st.stx_size : st.stx_mtime; }
+            cnt++;
         }
+        int k = ne; while (buf[k] && buf[k] != '\n') k++;                              /* skip sys_list's own trailing metadata */
+        i = (buf[k] == '\n') ? k + 1 : k;
+    }
+    if (sortkey) {                                                                     /* insertion sort, descending by key */
+        for (int a = 1; a < cnt; a++) {
+            unsigned long kk = sk[a]; char nm[64]; int z = 0; while (sn[a][z]) { nm[z] = sn[a][z]; z++; } nm[z] = 0;
+            int b = a - 1;
+            while (b >= 0 && sk[b] < kk) { sk[b+1] = sk[b]; int y = 0; while (sn[b][y]) { sn[b+1][y] = sn[b][y]; y++; } sn[b+1][y] = 0; b--; }
+            sk[b+1] = kk; int y = 0; while (nm[y]) { sn[b+1][y] = nm[y]; y++; } sn[b+1][y] = 0;
+        }
+    }
+    for (int idx = 0; idx < cnt; idx++) {
+        int e = reverse ? (cnt - 1 - idx) : idx;
+        if (longfmt) ls_long_entry(sn[e], human);
+        else { int nl = 0; while (sn[e][nl]) nl++; sys_setcolor(ls_color(sn[e], nl)); print(sn[e]); sys_setcolor(0); print("\n"); }
     }
     if (dir && dir[0]) sys_chdir(cwd);
 }
@@ -925,24 +945,24 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "unset ")) {
             char *p = line + 6; while (*p == ' ') p++; sh_unprot_buf(p); vunset(p);
         } else if (streq(line, "ls")) {
-            ls_print_dir(0, 0, 0, cwd);                /* the cwd, coloured name grid (M1313) */
-        } else if (startswith(line, "ls ")) {     /* ls [-l] [-a] [-h] <name>...: -l long, -h human sizes; glob-friendly (`ls *.txt`) */
+            ls_print_dir(0, 0, 0, 0, 0, cwd);          /* the cwd, coloured name grid (M1313) */
+        } else if (startswith(line, "ls ")) {     /* ls [-l][-a][-h][-S|-t][-r] <name>...: -l long, -h human, -S size sort, -t time sort, -r reverse */
             const char *p = line + 3;
-            int longfmt = 0, human = 0;                /* -l; -h human-readable sizes; -a accepted but a no-op here (no dotfiles) */
+            int longfmt = 0, human = 0, sortkey = 0, reverse = 0;   /* -a accepted but a no-op here (no dotfiles); -S=size -t=mtime sort (desc); -r reverse */
             char paths[16][64]; int npath = 0;
             while (*p) {
                 while (*p == ' ') p++;
                 if (!*p) break;
                 char tok[64]; int j = 0; while (*p && *p != ' ' && j < 63) tok[j++] = *p++; tok[j] = 0;
-                if (tok[0] == '-' && tok[1]) { for (int k = 1; tok[k]; k++) { if (tok[k] == 'l') longfmt = 1; else if (tok[k] == 'h') human = 1; } }   /* -l / -a / -h / -lh */
+                if (tok[0] == '-' && tok[1]) { for (int k = 1; tok[k]; k++) { if (tok[k] == 'l') longfmt = 1; else if (tok[k] == 'h') human = 1; else if (tok[k] == 'S') sortkey = 1; else if (tok[k] == 't') sortkey = 2; else if (tok[k] == 'r') reverse = 1; } }
                 else { sh_unprot_buf(tok); if (npath < 16) { int m = 0; while (tok[m] && m < 63) { paths[npath][m] = tok[m]; m++; } paths[npath][m] = 0; npath++; } }
             }
-            if (npath == 0) ls_print_dir(0, longfmt, human, cwd);
+            if (npath == 0) ls_print_dir(0, longfmt, human, sortkey, reverse, cwd);
             else for (int i = 0; i < npath; i++) {
                 if (sys_chdir(paths[i]) >= 0) {                    /* a directory: list its contents */
                     sys_chdir(cwd);
                     if (npath > 1) { print(paths[i]); print(":\n"); }
-                    ls_print_dir(paths[i], longfmt, human, cwd);
+                    ls_print_dir(paths[i], longfmt, human, sortkey, reverse, cwd);
                 } else {                                           /* a file (or a glob expansion): name it, long if -l */
                     char b;
                     if (sys_readfile(paths[i], &b, 1) >= 0) { if (longfmt) ls_long_entry(paths[i], human); else { print(paths[i]); print("\n"); } }
