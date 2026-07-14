@@ -6093,6 +6093,29 @@ static int run_command(char *line, char *cwd) {
             int dl = 0; while (buf[dl] && buf[dl] != ' ') dl++;  /* date cyan, time yellow (M1320) */
             char dpart[16]; int i = 0; for (; i < dl && i < 15; i++) dpart[i] = buf[i]; dpart[i] = 0;
             sys_setcolor(4); print(dpart); sys_setcolor(3); print(buf + dl); sys_setcolor(0);
+        } else if (startswith(line, "date +")) {            /* date +FORMAT: strftime-style output (M1832) */
+            const char *fmt = line + 6;
+            char buf[24]; sys_time(buf, sizeof buf);         /* "YYYY-MM-DD HH:MM:SS" at fixed offsets */
+            char out[128]; int o = 0;
+            for (const char *f = fmt; *f && o < 110; f++) {
+                if (*f == '%' && f[1]) {
+                    f++;
+                    switch (*f) {
+                        case 'Y': out[o++]=buf[0]; out[o++]=buf[1]; out[o++]=buf[2]; out[o++]=buf[3]; break;
+                        case 'y': out[o++]=buf[2]; out[o++]=buf[3]; break;
+                        case 'm': out[o++]=buf[5]; out[o++]=buf[6]; break;
+                        case 'd': out[o++]=buf[8]; out[o++]=buf[9]; break;
+                        case 'H': out[o++]=buf[11]; out[o++]=buf[12]; break;
+                        case 'M': out[o++]=buf[14]; out[o++]=buf[15]; break;
+                        case 'S': out[o++]=buf[17]; out[o++]=buf[18]; break;
+                        case 'F': for (int k = 0; k < 10; k++) out[o++]=buf[k]; break;   /* %F = %Y-%m-%d */
+                        case 'T': for (int k = 11; k < 19; k++) out[o++]=buf[k]; break;  /* %T = %H:%M:%S */
+                        case '%': out[o++]='%'; break;
+                        default: out[o++]='%'; out[o++]=*f; break;                       /* unknown -> literal */
+                    }
+                } else out[o++]=*f;
+            }
+            out[o]=0; print(out); print("\n");
         } else if (streq(line, "sntp") || streq(line, "ntpdate")) {   /* set the wall clock from a network time server */
             char before[24]; sys_time(before, sizeof before);
             print("sntp: querying pool.ntp.org (UDP 123)...\n");

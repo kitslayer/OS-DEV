@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1832) Shell `date +FORMAT` — strftime-style output.** `date` printed a single fixed `YYYY-MM-DD HH:MM:SS`; a `+FORMAT` argument now formats the current time with the common specifiers `%Y %y %m %d %H %M %S`, the shorthands `%F` (=`%Y-%m-%d`) and `%T` (=`%H:%M:%S`), `%%` for a literal percent, and any other text passed through verbatim — the idiom scripts use for timestamped filenames (`f=$(date +%Y%m%d)`). Reads the fixed-offset fields out of `sys_time()`'s string, so no new date math.
+> 
+> **Verified in-guest** (osdrive): `date +%Y-%m-%d`→`2026-07-14`, `date +time=%H:%M:%S`→`time=03:51:20`, `date +%F is %T`→`2026-07-14 is 03:51:22` (specifiers substituted, literal text preserved). Plain `date` is unchanged. Full OS image builds clean.
+> 
 > **(M1831) Shell `grep -x` — whole-line match.** The exact-line complement to M1823's `-w` (whole-word): a line matches only if the pattern spans it entirely — `grep -x cat` hits the line `cat` but not `cat food`. A new additive `gr_match_line()` in `user/shgrep.h` matches from the line start via the existing `gr_matchhere` and requires it to consume to the end (`*e == 0`; a leading `^` is redundant). The grep builtin's match test now selects `gr_match_line` (`-x`) / `gr_match_word` (`-w`) / `gr_match` (substring).
 > 
 > **Verified:** `make shgreptest` green — 9 new whole-line cases (exact vs prefix/suffix, regex `.`/greedy `.*` to end, redundant `^`, case-insensitive, empty pattern/line) + the existing 300k-pair fuzz, ASan/UBSan clean. Full OS image builds clean (the `-x` wiring is a trivial matcher-selection mirroring `-w`, verified in-guest at M1823).
