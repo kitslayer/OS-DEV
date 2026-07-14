@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1834) Shell `mkdir -p` — make parent directories.** One of the most-used `mkdir` forms was missing: `mkdir -p a/b/c` now creates each missing path component in turn and, unlike plain `mkdir`, is silent+successful when a component already exists (idempotent). Implemented by walking the path prefix-by-prefix and `sys_mkdir`-ing each, ignoring "already exists"; plain `mkdir` (per-dir, errors on a clash) is unchanged.
+> 
+> **Verified in-guest** (osdrive): `mkdir -p /tmp/aa/bb/cc` then `cd /tmp/aa/bb/cc` + `pwd`→`/tmp/aa/bb/cc` (all three levels created); re-running `mkdir -p …` produces no error and the next command runs (`rerun-ok`), confirming idempotence. Full OS image builds clean.
+> 
 > **(M1833) Shell `basename PATH [SUFFIX]` — strip a trailing suffix.** `basename` gave only the last path component; it now also accepts an optional `SUFFIX` argument and trims it from the end (`basename /usr/foo.txt .txt` → `foo`, `basename report.md .md` → `report`) — the ubiquitous extension-stripping idiom. Follows POSIX: a suffix that isn't a strict trailing substring is ignored, and a name equal to the suffix (`basename .txt .txt`) is left intact.
 > 
 > **Verified in-guest** (osdrive): `/usr/foo.txt .txt`→`foo`, `report.md .md`→`report`, `data .csv`→`data` (no match, unchanged), `.txt .txt`→`.txt` (whole name preserved). Full OS image builds clean.

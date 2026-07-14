@@ -846,7 +846,7 @@ static int run_command(char *line, char *cwd) {
         if (line[0] == '\0') {
             continue;
         } else if (streq(line, "help")) {
-            helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir touch ln<-s tgt link> cd pwd basename<p [suf]> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump hexedit<file> strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
+            helpline("files:  ls cat head tail sort[-nrufkt] nl tac uniq[-cdu] cut[-c/-f] cmp<f1 f2> paste[-d]<f1 f2> comm<f1 f2> diff<f1 f2> edit write rm cp mv mkdir[-p] touch ln<-s tgt link> cd pwd basename<p [suf]> dirname<p> tree find grep[-incvelo,-A/B/C,regex] sed<'s/RE/REPL/gi'> file<n> hexdump hexedit<file> strings<file> unhex<hex> gzip<f> gunzip<f.gz> unzip<f.zip> tar<f.tgz> wc[-lwcL] tr fold seq[a b c] printf<fmt args> sleep<n> tee<f> xargs<cmd>\n");
             helpline("net:    get<url> headers<url> wget<url file> browse<url>\n");
             print("        ping[<host>] resolve<host> ifconfig dhcp (lease IP via DHCP) tftp get<remote [local]> httpd (serve HTTP on :80, then curl a host-forwarded port)\n");
             print("        fw (packet filter: 'fw drop in icmp', 'fw allow out tcp 80', 'fw flush'; bare 'fw' lists rules+hits)\n");
@@ -2070,17 +2070,27 @@ static int run_command(char *line, char *cwd) {
             long n = sys_tree(tb, sizeof(tb));
             if (n <= 0) print("(empty)\n"); else { tb[n] = 0; print_tree_colored(tb); }
         } else if (startswith(line, "mkdir ")) {
-            const char *p = line + 6; int any = 0;       /* make each space-separated directory */
+            const char *p = line + 6; int any = 0, parents = 0;   /* -p: make parents as needed, no error if any exist */
+            while (*p == ' ') p++;
+            if (p[0] == '-' && p[1] == 'p' && (p[2] == ' ' || p[2] == 0)) { parents = 1; p += 2; while (*p == ' ') p++; }
             while (*p) {
                 while (*p == ' ') p++;
                 if (!*p) break;
-                char name[64]; int j = 0;
-                while (*p && *p != ' ' && j < 63) name[j++] = *p++;
+                char name[128]; int j = 0;
+                while (*p && *p != ' ' && j < 127) name[j++] = *p++;
                 name[j] = 0; sh_unprot_buf(name); any = 1;
-                if (sys_mkdir(name) < 0) { perr("mkdir: failed (exists?): "); print(name); print("\n"); g_status = 1; }
+                if (parents) {                            /* create each path prefix in turn, ignoring "already exists" */
+                    char partial[128]; int pi = 0;
+                    for (int k = 0; k <= j; k++) {
+                        if (name[k] == '/' || name[k] == 0) {
+                            if (pi > 0) { partial[pi] = 0; sys_mkdir(partial); }   /* best-effort; a pre-existing dir is fine */
+                            if (name[k] == '/' && pi < 127) partial[pi++] = '/';   /* keep the slash for the next prefix */
+                        } else if (pi < 127) partial[pi++] = name[k];
+                    }
+                } else if (sys_mkdir(name) < 0) { perr("mkdir: failed (exists?): "); print(name); print("\n"); g_status = 1; }
                 else { print("created "); print(name); print("/\n"); }
             }
-            if (!any) print("usage: mkdir <dir>...\n");
+            if (!any) print("usage: mkdir [-p] <dir>...\n");
         } else if (startswith(line, "ln -s ") || startswith(line, "ln ")) {  /* ln -s TARGET LINK (symlink: /tmp or an ext2 /diskN mount) */
             const char *p = line + 3;
             while (*p == ' ') p++;
