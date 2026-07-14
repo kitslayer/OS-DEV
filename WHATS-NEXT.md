@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1830) Spreadsheet — `CHOOSE` and `SUMPRODUCT`.** `CHOOSE(index, v1, v2, …)` returns the index-th value (1-based; out-of-range → `#ERR`); the index can itself be a formula (`CHOOSE(A1/10, …)`). `SUMPRODUCT(range1, range2)` sums the pairwise products of two equally-shaped ranges, paired by position (blank/text cells read as 0), with a `#ERR` on a shape mismatch — it reuses `parse_range_arg` + `get_cell_value`.
+> 
+> **Verified:** `make sheettest` green — 306 checks (7 new: `CHOOSE` by literal/cell index + out-of-range `#ERR`, `SUMPRODUCT` 2-cell/full-column + shape-mismatch `#ERR`) + 40k fuzz, ASan/UBSan clean. Full OS image builds clean.
+> 
 > **(M1829) Spreadsheet — `ROUNDUP` / `ROUNDDOWN`.** The directional rounding pair that complements `ROUND`: `ROUNDUP(x[,dp])` rounds *away* from zero (`ceil` of a positive scaled value, `floor` of a negative), `ROUNDDOWN(x[,dp])` *toward* zero (= `TRUNC`), both to an optional digit count. Two small handlers next to `ROUND`/`TRUNC` reusing `js_pow`/`js_ceil`/`js_floor`/`js_trunc`.
 > 
 > **Verified:** `make sheettest` green — 299 checks (7 new: `ROUNDUP(3.14159,2)`=3.15, `ROUNDUP(-3.1,0)`=−4, default-0-digits, `ROUNDDOWN` toward-zero incl. negatives) + 40k fuzz, ASan/UBSan clean. Full OS image builds clean.

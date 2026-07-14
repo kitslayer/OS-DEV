@@ -225,6 +225,15 @@ int main(void) {
     set_raw(0, 3, "=LARGE(A1:A4,5)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("LARGE k>n should be #ERR (got %d)", CELL(0, 3)->err);
     set_raw(0, 3, "=SMALL(A1:A4,0)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("SMALL k<1 should be #ERR (got %d)", CELL(0, 3)->err);
 
+    /* --- CHOOSE / SUMPRODUCT (M1830), A1:A4 = 10,20,30,40, B1:B4 = 100,200,300,400 --- */
+    set_raw(0, 3, "=CHOOSE(2, 100, 200, 300)"); recompute(); chk_num(0, 3, 200, "CHOOSE index 2");
+    set_raw(0, 3, "=CHOOSE(1, 5, 6, 7)"); recompute(); chk_num(0, 3, 5, "CHOOSE index 1");
+    set_raw(0, 3, "=CHOOSE(A1/10, 5, 6, 7, 8)"); recompute(); chk_num(0, 3, 5, "CHOOSE index from a cell expr (A1/10=1)");
+    set_raw(0, 3, "=CHOOSE(9, 1, 2)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("CHOOSE index out of range should be #ERR (got %d)", CELL(0, 3)->err);
+    set_raw(0, 3, "=SUMPRODUCT(A1:A2, B1:B2)"); recompute(); chk_num(0, 3, 5000, "SUMPRODUCT 10*100+20*200");
+    set_raw(0, 3, "=SUMPRODUCT(A1:A4, B1:B4)"); recompute(); chk_num(0, 3, 30000, "SUMPRODUCT full column");
+    set_raw(0, 3, "=SUMPRODUCT(A1:A2, B1:B3)"); recompute(); checks++; if (CELL(0, 3)->err != ERR_SYNTAX) FAILN("SUMPRODUCT shape mismatch should be #ERR (got %d)", CELL(0, 3)->err);
+
     /* --- circular references ----------------------------------------------*/
     clear_all(); set_raw(0, 0, "=A1"); recompute();
     checks++; if (CELL(0, 0)->err != ERR_CIRC) FAILN("self-ref A1=A1 should be #CIRC (got %d)", CELL(0, 0)->err);

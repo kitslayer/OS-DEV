@@ -27,7 +27,7 @@
  *            SQRT ABS INT FLOOR CEIL/CEILING ROUND(x[,dp]) ROUNDUP/ROUNDDOWN(x[,dp]) TRUNC(x[,dp]) MOD POW/POWER
  *            SIGN LN LOG(x[,base]) LOG10 LOG2 EXP SIN COS TAN ASIN ACOS ATAN
  *            MATCH(key,range,[type]) INDEX(range,row,[col]) VLOOKUP(key,range,col,[exact])
- *            LARGE(range,k) SMALL(range,k)
+ *            LARGE(range,k) SMALL(range,k) CHOOSE(i,v1,v2,...) SUMPRODUCT(r1,r2)
  */
 #ifndef SHEETEVAL_H
 #define SHEETEVAL_H
@@ -436,6 +436,34 @@ static double call_function(const char *name) {
         if (nv <= 0 || k < 1 || k > nv) { perr = ERR_SYNTAX; return 0; }
         dsort(vals, nv);                                     /* ascending */
         return nameeq(name, "SMALL") ? vals[k - 1] : vals[nv - k];
+    }
+    if (nameeq(name, "CHOOSE")) {                            /* CHOOSE(index, v1, v2, ...) -> the index-th value, 1-based (M1830) */
+        int idx = (int)eval_compare(), i = 1, found = 0; double result = 0;
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        for (;;) {
+            double v = eval_compare();
+            if (i == idx) { result = v; found = 1; }
+            i++;
+            skipws();
+            if (*pcur == ',') { pcur++; continue; }
+            if (*pcur == ')') { pcur++; break; }
+            perr = ERR_SYNTAX; break;
+        }
+        if (!found) { perr = ERR_SYNTAX; return 0; }         /* index out of range */
+        return result;
+    }
+    if (nameeq(name, "SUMPRODUCT")) {                        /* SUMPRODUCT(r1, r2): sum of pairwise products, same shape (M1830) */
+        int r1, c1, r2, c2, s1, d1, s2, d2;
+        if (!parse_range_arg(&r1, &c1, &r2, &c2)) return 0;
+        skipws(); if (*pcur == ',') pcur++; else { perr = ERR_SYNTAX; return 0; }
+        if (!parse_range_arg(&s1, &d1, &s2, &d2)) return 0;
+        skipws(); if (*pcur == ')') pcur++; else perr = ERR_SYNTAX;
+        int nr = r2 - r1 + 1, nc = c2 - c1 + 1;
+        if (nr != s2 - s1 + 1 || nc != d2 - d1 + 1) { perr = ERR_SYNTAX; return 0; }   /* dimensions must match */
+        double sum = 0;
+        for (int rr = 0; rr < nr; rr++) for (int cc = 0; cc < nc; cc++)   /* position-paired; blank/text reads as 0 */
+            sum += get_cell_value(r1 + rr, c1 + cc) * get_cell_value(s1 + rr, d1 + cc);
+        return sum;
     }
 
     /* fixed-arity scalar functions */
