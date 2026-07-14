@@ -268,11 +268,16 @@ static void run_js_inline(const char *code) {
     print(out);
     free(out);
 }
-/* parse a leading (optionally signed) integer from a line, for `sort -n`. */
+/* parse a leading (optionally signed) number from a line, for `sort -n`, as a
+ * fixed-point long scaled by 1e6 (the shell is built without the FPU/SSE, so no
+ * doubles here). Handles a +/- sign and up to 6 decimal places (M1838), so
+ * `sort -n` orders 3.14 vs 3.2 vs 10 correctly — was integer-only (3.14 -> 3). */
 static long sort_numval(const char *s) {
     while (*s == ' ' || *s == '\t') s++;
-    int neg = 0; if (*s == '-') { neg = 1; s++; }
+    int neg = 0; if (*s == '-') { neg = 1; s++; } else if (*s == '+') s++;
     long v = 0; while (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); s++; }
+    v *= 1000000;                                        /* scale so a fraction is comparable in integer space */
+    if (*s == '.') { s++; long f = 100000; while (*s >= '0' && *s <= '9' && f > 0) { v += (*s - '0') * f; f /= 10; s++; } }
     return neg ? -v : v;
 }
 static int sort_foldeq(const char *a, const char *b) {   /* case-insensitive string equality (for sort -uf) */

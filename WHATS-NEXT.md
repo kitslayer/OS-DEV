@@ -1,5 +1,9 @@
 # What's next
 
+> **(M1838) Shell `sort -n` — decimal + signed numeric sort.** `sort -n`'s key parser was integer-only, so `3.14`, `3.2`, `10` all collapsed to their integer part (`3.14`→3) and mis-ordered. Now it parses a leading `+`/`-` sign and up to 6 decimal places as a **fixed-point long scaled by 1e6** — the shell is built without the FPU/SSE (only the calc/sheet/plot evaluators use software-float via dmath.h), so a `double` return actually fails to compile there; fixed-point keeps it integer-only while ordering decimals correctly.
+> 
+> **Verified in-guest** (osdrive): sorting `3.3, 3.1, 3.2, 10.5, 2.75, 1.1` with `sort -n` yields `1.1, 2.75, 3.1, 3.2, 3.3, 10.5` — the `3.1/3.2/3.3` ordering proves decimal comparison (integer-only would tie them at 3 and keep input order). Full OS image builds clean.
+> 
 > **(M1837) Graphing calculator — `sinh`/`cosh`/`tanh`/`cbrt` (+ `log10`/`trunc`).** The plot evaluator (`user/ploteval.h`) had trig/`sqrt`/`abs`/`ln`/`log`/`exp` but not the hyperbolics or cube root the scientific calculator gained in M1812 — so `plot sinh(x)` failed. Added them with the same numerically-stable `tanh` and sign-aware `cbrt` formulas, so the plotter and calculator now share a consistent function set.
 > 
 > **Verified:** `make plottest` green — 112 checks (11 new: `sinh`/`cosh`/`tanh` incl. saturation + the `cosh²−sinh²=1` identity, sign-aware `cbrt`, `log10`, `trunc` on negatives) + the 300k-iteration fuzz sweep, ASan/UBSan clean. Full OS image builds clean.
