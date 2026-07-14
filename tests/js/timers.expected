@@ -3,12 +3,20 @@ setInterval is function, clearInterval is function
 rAF=function qm=function caf=function
 EventSource is function
 es.readyState(connecting)=0 typeof es.close=function
+WebSocket is function
+ws.readyState(connecting)=0 typeof ws.send=function
 end-of-main
 raf-fired
 microtask-fired
 es-onopen open
 es-onmessage data={"msg":"sse-snapshot","n":7} state=1
 esFail-onerror
+ws-onopen open state=1
+ws-onmessage echo:hi
+ws-onmessage echo:yo
+ws-onclose state=3
+wsFail-onerror
+wsFail-onclose
 A-delay-10
 B-delay-20
 D-chained

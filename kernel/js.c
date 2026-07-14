@@ -3404,6 +3404,124 @@ static val nat_eventsource(val *args, int nargs){
     return obj_val(es);
 }
 
+/* ---- WebSocket (M1844): a one-shot request/reply model over a real WS connection ----
+ *
+ * Like EventSource, this is honest about the engine's single-threaded, run-to-
+ * completion task model: it does NOT hold a socket open for arbitrary server
+ * push over time. Instead `new WebSocket(url)` enqueues a deferred "pump" task
+ * that (after the script sets its handlers) opens the connection + does the
+ * RFC 6455 handshake, fires onopen, drains everything queued by ws.send()
+ * (INCLUDING sends issued from inside onopen — the ubiquitous
+ * `ws.onopen = () => ws.send(req)` idiom), reads the server's reply frames,
+ * fires onmessage per reply, then closes and fires onclose. Perfect for
+ * echo/RPC-style servers; a persistent server-push stream is out of scope.
+ *
+ * The browser registers two backings (js_set_websocket), mocked in the host
+ * test: g_ws_open (connect + Upgrade handshake -> conn id, or -1) and
+ * g_ws_exchange (on that id: send the NUL-separated queue, read replies into a
+ * NUL-separated buffer, close). Splitting open from exchange is what lets
+ * onopen run — and queue more sends — between connect and the first send. */
+static int (*g_ws_open)(const char *url, int *status);
+static int (*g_ws_exchange)(int id, const char *sendbuf, int nsend,
+                            char *out, int outmax, int *nrecv);
+
+/* ws.send(data): stringify + append to the ws's private send queue. A no-op once
+ * the socket is CLOSING/CLOSED. args[0] = the carried ws (make_resolver), args[1]
+ * = the JS-supplied data. */
+static val ws_send_native(val *args, int nargs){
+    if (nargs<1 || args[0].t!=V_OBJ || !args[0].o) return UND();
+    obj *ws = args[0].o; val v;
+    if (obj_get(ws,"readyState",&v) && v.t==V_NUM && (v.num==2 || v.num==3)) return UND();
+    const char *s = val_to_str(nargs>1 ? args[1] : STRV(""));
+    val q;
+    if (obj_get(ws,"__sendq",&q) && q.t==V_ARR && q.o) arr_push_val(q.o, STRV(s));
+    return UND();
+}
+/* ws.close(): mark it closed so a not-yet-run pump becomes a no-op (mirrors
+ * es.close()). If already OPEN the pump owns the teardown; just flag it. */
+static val ws_close_native(val *args, int nargs){
+    if (nargs>0 && args[0].t==V_OBJ && args[0].o) obj_set(args[0].o, "__closed", BOOLV(1));
+    return UND();
+}
+/* Fire ws.<name>(event{...}) if it is callable. `extra`, when non-NULL, adds one
+ * "data" string field (for onmessage). Returns 0 and stops if a handler threw. */
+static int ws_fire(obj *ws, const char *name, const char *type, const char *data){
+    val cb;
+    if (!obj_get(ws, name, &cb) || !is_callable(cb)) return 1;
+    obj *ev = new_obj(V_OBJ); if(!ev){ g_oom=1; return 0; }
+    obj_set(ev, "type", STRV(type));
+    if (data) obj_set(ev, "data", STRV(data));
+    val a[1] = { obj_val(ev) };
+    call_function_this(cb, obj_val(ws), a, 1);
+    return !g_err;
+}
+/* The deferred pump: args[0] = the carried ws. Runs after the script drains. */
+static val ws_pump_native(val *args, int nargs){
+    if (nargs<1 || args[0].t!=V_OBJ || !args[0].o) return UND();
+    obj *ws = args[0].o; val v;
+    if (obj_get(ws,"__closed",&v) && truthy(v)) return UND();   /* closed before firing */
+    val urlv; const char *url = (obj_get(ws,"url",&urlv) && urlv.t==V_STR) ? urlv.str : 0;
+    int status = 0, id = (url && g_ws_open) ? g_ws_open(url, &status) : -1;
+    if (id < 0) {                                               /* connect/handshake failed */
+        obj_set(ws, "readyState", NUM(3));                     /* CLOSED */
+        if (!ws_fire(ws, "onerror", "error", 0)) return UND();
+        ws_fire(ws, "onclose", "close", 0);
+        return UND();
+    }
+    obj_set(ws, "readyState", NUM(1));                         /* OPEN */
+    if (!ws_fire(ws, "onopen", "open", 0)) return UND();       /* may ws.send() -> queues below */
+
+    /* Marshal the (possibly onopen-extended) send queue into a NUL-separated buffer. */
+    int cap = 131072; char *sbuf = aalloc(cap); if(!sbuf){ g_oom=1; return UND(); }
+    int soff = 0, nsend = 0; val q;
+    if (obj_get(ws,"__sendq",&q) && q.t==V_ARR && q.o) {
+        for (int i=0;i<q.o->n;i++){
+            const char *m = val_to_str(q.o->vals[i]); int L=0; while(m[L]) L++;
+            if (soff + L + 1 > cap) break;                     /* queue overflow -> drop the rest */
+            for (int j=0;j<=L;j++) sbuf[soff++] = m[j];        /* copy incl. the NUL separator */
+            nsend++;
+        }
+    }
+    int rcap = 131072, nrecv = 0; char *rbuf = aalloc(rcap); if(!rbuf){ g_oom=1; return UND(); }
+    int rn = g_ws_exchange ? g_ws_exchange(id, sbuf, nsend, rbuf, rcap-1, &nrecv) : -1;
+    if (rn < 0) {                                              /* exchange error mid-stream */
+        obj_set(ws, "readyState", NUM(3));
+        if (!ws_fire(ws, "onerror", "error", 0)) return UND();
+        ws_fire(ws, "onclose", "close", 0);
+        return UND();
+    }
+    if (rn > rcap-1) rn = rcap-1; rbuf[rn] = 0;
+    const char *p = rbuf;                                      /* fire onmessage per NUL-separated reply */
+    for (int i=0; i<nrecv; i++){
+        if (!ws_fire(ws, "onmessage", "message", p)) return UND();
+        int L=0; while(p[L]) L++; p += L+1;
+    }
+    obj_set(ws, "readyState", NUM(3));                         /* CLOSED */
+    ws_fire(ws, "onclose", "close", 0);
+    return UND();
+}
+/* new WebSocket(url[, protocols]): build the ws object + its send queue, then
+ * enqueue the deferred pump. */
+static val nat_websocket(val *args, int nargs){
+    obj *ws = new_obj(V_OBJ); if(!ws){ g_oom=1; return UND(); }
+    const char *u = (nargs>0 && args[0].t==V_STR) ? args[0].str : "";
+    obj_set(ws, "url", STRV(u));
+    obj_set(ws, "readyState", NUM(0));                         /* CONNECTING */
+    obj_set(ws, "bufferedAmount", NUM(0));
+    obj_set(ws, "protocol", STRV(""));
+    obj_set(ws, "onopen", UND()); obj_set(ws, "onmessage", UND());
+    obj_set(ws, "onclose", UND()); obj_set(ws, "onerror", UND());
+    obj *qa = new_obj(V_ARR); if(!qa){ g_oom=1; return UND(); }
+    val qv = UND(); qv.t=V_ARR; qv.o=qa; obj_set(ws, "__sendq", qv);
+    obj_set(ws, "send",  make_resolver(ws_send_native,  obj_val(ws)));
+    obj_set(ws, "close", make_resolver(ws_close_native, obj_val(ws)));
+    /* readyState constants (real WebSocket exposes these) */
+    obj_set(ws, "CONNECTING", NUM(0)); obj_set(ws, "OPEN", NUM(1));
+    obj_set(ws, "CLOSING", NUM(2)); obj_set(ws, "CLOSED", NUM(3));
+    js_enqueue_task(make_resolver(ws_pump_native, obj_val(ws)));   /* deferred: runs after the script */
+    return obj_val(ws);
+}
+
 /* ---- Map & Set ----
  * Both are V_OBJ values whose obj->kind is V_MAP/V_SET. A Map stores entries
  * interleaved in obj->vals as [k0,v0,k1,v1,…] (so n is 2*size); a Set stores
@@ -4668,6 +4786,7 @@ static void install_globals(env *g) {
         val v=UND(); v.t=V_NATIVE; v.o=pc; env_define(g,"Promise",v); } }
     { obj *f=new_obj(V_NATIVE); if(f){ f->native=nat_fetch; env_define(g,"fetch",obj_val_native(f)); } }   /* fetch(url) -> Promise<Response> (M684); functional once js_set_fetch wires a backing */
     { obj *es=new_obj(V_NATIVE); if(es){ es->native=nat_eventsource; env_define(g,"EventSource",obj_val_native(es)); } }   /* new EventSource(url): one-shot SSE first-event snapshot (M-eventsource) */
+    { obj *wsc=new_obj(V_NATIVE); if(wsc){ wsc->native=nat_websocket; env_define(g,"WebSocket",obj_val_native(wsc)); } }   /* new WebSocket(url): one-shot request/reply over a real WS connection (M1844) */
     { obj *arrc=new_obj(V_NATIVE); if(arrc){ arrc->native=nat_array_ctor;   /* Array() constructor; statics on the side so isArray/from/of still resolve (M268) */
         obj *ast=new_obj(V_OBJ); if(ast){ def_native(ast,"isArray",nat_array_isArray); def_native(ast,"from",nat_array_from); def_native(ast,"of",nat_array_of); arrc->statics=ast; }
         g_array_ctor=arrc; env_define(g,"Array",obj_val_native(arrc)); } }
@@ -4816,6 +4935,15 @@ void js_set_fetch(int (*fn)(const char *url, const char *method, const char *cty
  * or <0 on a network error. NULL (default) -> a constructed EventSource fires onerror. */
 void js_set_eventsource(int (*fn)(const char *url, char *out, int outmax, int *status)) {
     g_eventsource = fn;
+}
+/* Register the browser's WebSocket backings (M1844): `open` does connect +
+ * RFC 6455 handshake (returns a conn id, or -1), `exchange` sends the queued
+ * messages on that id and reads the replies, then closes. */
+void js_set_websocket(int (*open)(const char *url, int *status),
+                      int (*exchange)(int id, const char *sendbuf, int nsend,
+                                      char *out, int outmax, int *nrecv)) {
+    g_ws_open = open;
+    g_ws_exchange = exchange;
 }
 void js_set_canvas(void (*op)(const char *id, int op, int a, int b, int c, int d, const char *color, const char *text, int lw)) {   /* M1796-M1801 */
     g_canvas_op = op;
@@ -5057,6 +5185,27 @@ static int hes(const char *url, char *out, int outmax, int *status) {
     int n=0; while (body[n] && n<outmax-1) { out[n]=body[n]; n++; } out[n]=0;
     return n;
 }
+/* Mock WebSocket backing for the JS host test (M1844): a "fail" URL refuses the
+ * connection; otherwise the handshake succeeds (101) and the exchange echoes
+ * each sent message back as "echo:<msg>" (NUL-separated), modelling a WS echo
+ * server so timers.js can assert onopen -> send -> onmessage -> onclose. */
+static int hws_open(const char *url, int *status) {
+    if (strstr(url, "fail")) { *status = 0; return -1; }
+    *status = 101; return 1;                     /* a fake connection id */
+}
+static int hws_exchange(int id, const char *sendbuf, int nsend,
+                        char *out, int outmax, int *nrecv) {
+    (void)id;
+    int off = 0, rc = 0; const char *p = sendbuf;
+    for (int i = 0; i < nsend; i++) {
+        int w = snprintf(out + off, (size_t)(outmax - off), "echo:%s", p);
+        if (w < 0 || off + w + 1 > outmax) break;
+        off += w + 1;                            /* keep the NUL as the record separator */
+        rc++;
+        int L = 0; while (p[L]) L++; p += L + 1;  /* advance past this sent message */
+    }
+    *nrecv = rc; return off;
+}
 
 /* M1800: mock canvas 2D op — records each dispatched op into the output stream (via
  * out_str, same as console.log) so canvas.js can assert the JS->op dispatch: op code,
@@ -5082,6 +5231,7 @@ int main(int argc, char **argv) {
     js_set_location("https://host.example/dir/page?q=hi&n=2");   /* mock URL for window.location tests */
     js_set_fetch(hfetch);                                /* mock network for fetch() tests (M684) */
     js_set_eventsource(hes);                             /* mock SSE first-event for EventSource tests (M-eventsource) */
+    js_set_websocket(hws_open, hws_exchange);            /* mock WS echo server for WebSocket tests (M1844) */
     js_set_canvas(hcanvas);                              /* M1800: mock canvas 2D op recorder for canvas.js */
     hdom_set("c", "", 0);                                /* seed a <canvas id="c"> so getElementById('c').getContext works */
     int r = js_run_doc(src, outb, sizeof(outb), 0);

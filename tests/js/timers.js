@@ -26,5 +26,23 @@ esFail.onerror = function(){ print("esFail-onerror"); };
 var esClosed = new EventSource("http://x/stream");
 esClosed.onmessage = function(){ print("esClosed-MUST-NOT-FIRE"); };
 esClosed.close();
+// WebSocket (M1844): one-shot request/reply over a real WS connection. Its deferred
+// pump (also a delay-0 task, enqueued after the EventSource tasks above) opens the
+// connection, fires onopen, drains ws.send() — INCLUDING sends issued from inside
+// onopen — reads the echo replies (host mock echoes "echo:<msg>"), fires onmessage
+// per reply, then onclose. A "/fail" URL fires onerror+onclose; a socket closed
+// before its pump runs delivers nothing.
+print("WebSocket is " + typeof WebSocket);
+var ws = new WebSocket("ws://x/echo");
+print("ws.readyState(connecting)=" + ws.readyState + " typeof ws.send=" + typeof ws.send);
+ws.onopen = function(e){ print("ws-onopen " + e.type + " state=" + ws.readyState); ws.send("hi"); ws.send("yo"); };
+ws.onmessage = function(e){ print("ws-onmessage " + e.data); };
+ws.onclose = function(){ print("ws-onclose state=" + ws.readyState); };
+var wsFail = new WebSocket("ws://x/fail");
+wsFail.onerror = function(){ print("wsFail-onerror"); };
+wsFail.onclose = function(){ print("wsFail-onclose"); };
+var wsClosed = new WebSocket("ws://x/echo");
+wsClosed.onmessage = function(){ print("wsClosed-MUST-NOT-FIRE"); };
+wsClosed.close();
 print("end-of-main");
 setTimeout(function(){ print("-- done --"); }, 9999999);
