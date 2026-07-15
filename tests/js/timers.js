@@ -44,5 +44,20 @@ wsFail.onclose = function(){ print("wsFail-onclose"); };
 var wsClosed = new WebSocket("ws://x/echo");
 wsClosed.onmessage = function(){ print("wsClosed-MUST-NOT-FIRE"); };
 wsClosed.close();
+// Binary WebSocket (M1859): ws.send(Uint8Array) sends a BINARY frame; the echo
+// mock returns the same bytes. Default binaryType is "blob" — with no Blob type
+// we deliver a Uint8Array; set "arraybuffer" to receive an ArrayBuffer instead.
+// A text send in the same session still round-trips as "echo:<msg>".
+var wsBin = new WebSocket("ws://x/echo");
+wsBin.onopen = function(){ wsBin.send("mix"); wsBin.send(new Uint8Array([1,2,3,255])); };
+wsBin.onmessage = function(e){
+  if (typeof e.data === "string") print("wsBin-text " + e.data);
+  else print("wsBin-u8 len=" + e.data.length + " [" + e.data.join(",") + "]");
+};
+wsBin.onclose = function(){ print("wsBin-close binaryType=" + wsBin.binaryType); };
+var wsAB = new WebSocket("ws://x/echo");
+wsAB.binaryType = "arraybuffer";
+wsAB.onopen = function(){ wsAB.send(new Uint8Array([9,8,7])); };
+wsAB.onmessage = function(e){ print("wsAB-ab byteLength=" + e.data.byteLength + " [" + new Uint8Array(e.data).join(",") + "]"); };
 print("end-of-main");
 setTimeout(function(){ print("-- done --"); }, 9999999);

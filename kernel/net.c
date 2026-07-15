@@ -1560,11 +1560,16 @@ int ws_open(const char *url, int *status) {
     return 1;
 }
 
-/* On the open connection: send each NUL-separated message in `sendbuf`
- * (`sendtot` bytes total, i.e. the messages back-to-back each with its NUL) as a
- * masked TEXT frame, then read reply frames, writing each text/binary payload
- * NUL-separated into `out` (*nrecv = count). Closes the connection. Returns the
- * number of bytes written to `out` (>=0), or -1 on error. */
+/* On the open connection: send each message in `sendbuf` as a masked frame, then
+ * read reply frames back into `out` (*nrecv = count). Closes the connection.
+ *
+ * Both directions use a length-prefixed record framing — each record is
+ *   [opcode:1][len:4 little-endian][payload:len]
+ * where opcode is WS_OP_TEXT (0x1) or WS_OP_BIN (0x2). This replaces the old
+ * NUL-separation, which couldn't carry binary payloads (they contain NULs) and
+ * discarded the received TEXT/BIN type; the record header carries the type each
+ * way so binary WebSocket frames round-trip (M1859). `sendtot` is a raw byte
+ * count. Returns the number of bytes written to `out` (>=0), or -1 on error. */
 int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv) {
     (void)id; *nrecv = 0;
     if (!g_ws_up) return -1;
@@ -1572,15 +1577,19 @@ int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax,
     uint8_t *raw = kmalloc(RC), *tx = kmalloc(RC + 16);
     if (!raw || !tx) { if(raw)kfree(raw); if(tx)kfree(tx); wsio_teardown(); g_ws_up=0; return -1; }
 
-    const char *p = sendbuf, *pend = sendbuf + sendtot;  /* send the queued messages */
-    while (p < pend) {
-        int L = 0; while (p + L < pend && p[L]) L++;      /* this message runs to its NUL (or the end) */
-        if (L <= RC) {
+    const uint8_t *p = (const uint8_t *)sendbuf, *pend = p + sendtot;   /* send the queued records */
+    while (p + 5 <= pend) {                               /* each record: [op:1][len:4 LE][payload] */
+        uint8_t recop = p[0];
+        uint32_t L = (uint32_t)p[1] | ((uint32_t)p[2] << 8) | ((uint32_t)p[3] << 16) | ((uint32_t)p[4] << 24);
+        p += 5;
+        if ((uint64_t)(pend - p) < L) break;              /* truncated record */
+        if (L <= (uint32_t)RC) {
             uint8_t mk[4]; ws_mask_key(mk);
-            long fl = ws_build_client_frame(WS_OP_TEXT, (const uint8_t *)p, (uint64_t)L, mk, tx, RC + 16);
+            uint8_t wsop = (recop == WS_OP_BIN) ? WS_OP_BIN : WS_OP_TEXT;
+            long fl = ws_build_client_frame(wsop, p, (uint64_t)L, mk, tx, RC + 16);
             if (fl > 0) wsio_write(tx, (int)fl);
         }
-        p += L + 1;                                       /* skip the NUL separator */
+        p += L;
     }
 
     int rn = 0, ooff = 0;                                /* reply read + parse loop */
@@ -1589,19 +1598,27 @@ int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax,
     int closing = 0;
     while (!closing && timer_ticks() < budget) {
         int fin, op; uint64_t pl; size_t used;
-        int r;
-        /* drain every complete frame currently buffered in raw[0..rn) */
-        while ((r = ws_parse_frame(raw, (size_t)rn, &fin, &op,
-                                   (uint8_t *)out + ooff, (size_t)(outmax - ooff - 1), &pl, &used)) == 1) {
+        int r = 0;
+        /* drain every complete frame currently buffered in raw[0..rn), writing each
+         * TEXT/BIN frame as a [op][len:4 LE][payload] record. Parse the payload 5
+         * bytes past ooff, then backfill the header (need >=5 bytes of headroom). */
+        while (ooff + 5 < outmax &&
+               (r = ws_parse_frame(raw, (size_t)rn, &fin, &op,
+                                   (uint8_t *)out + ooff + 5, (size_t)(outmax - ooff - 5), &pl, &used)) == 1) {
             if (op == WS_OP_CLOSE) { closing = 1; }
             else if (op == WS_OP_TEXT || op == WS_OP_BIN) {
-                ooff += (int)pl; out[ooff++] = 0;        /* NUL-separate the payloads */
+                out[ooff]     = (char)op;                 /* record header: opcode ... */
+                out[ooff + 1] = (char)((uint32_t)pl & 0xff);
+                out[ooff + 2] = (char)(((uint32_t)pl >> 8) & 0xff);
+                out[ooff + 3] = (char)(((uint32_t)pl >> 16) & 0xff);
+                out[ooff + 4] = (char)(((uint32_t)pl >> 24) & 0xff);   /* ... + LE32 length */
+                ooff += 5 + (int)pl;
                 (*nrecv)++;
             }
             /* PING/PONG/continuation: skip (payload already unmasked, just drop) */
             memmove(raw, raw + used, (size_t)rn - used); /* consume the frame */
             rn -= (int)used;
-            if (closing || ooff + 16 >= outmax) { closing = 1; break; }
+            if (closing || ooff + 5 >= outmax) { closing = 1; break; }
         }
         if (r == -1) { closing = 1; break; }             /* malformed / oversized -> bail */
         if (closing) break;

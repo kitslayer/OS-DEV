@@ -6691,7 +6691,9 @@ static int run_command(char *line, char *cwd) {
         } else if (startswith(line, "wsget ")) {
             /* wsget ws://host[:port][/path] [message] — open a WebSocket, send
              * `message` (default "hi"), print each reply frame. A diagnostic for
-             * the from-scratch WebSocket client (M1846), like `get` is for HTTP. */
+             * the from-scratch WebSocket client (M1846), like `get` is for HTTP.
+             * A `0x`-prefixed message is sent as a BINARY frame of those hex bytes
+             * (e.g. `0x01ff80`); binary replies are hex-dumped (M1859). */
             char url[256]; int i = 0; char *p = line + 6;
             while (*p == ' ') p++;
             while (*p && *p != ' ' && i < 255) url[i++] = *p++;
@@ -6706,17 +6708,47 @@ static int run_command(char *line, char *cwd) {
                 if (id < 0) {
                     print("wsget: connect/handshake failed (status "); itoa_simple(status, num); print(num); print(")\n");
                 } else {
-                    char sbuf[300]; int sl = 0;
-                    for (const char *m = msg; *m && sl < 298; m++) sbuf[sl++] = *m;
-                    sbuf[sl++] = 0;                              /* one NUL-terminated message */
+                    char sbuf[300]; int sl = 0;                 /* one record: [op:1][len:4 LE][payload] */
+                    unsigned char pay[256]; int pl2 = 0, op = 1;   /* op 1=WSREC_TEXT, 2=WSREC_BIN */
+                    if ((msg[0]=='0') && (msg[1]=='x' || msg[1]=='X')) {
+                        op = 2;                                 /* 0x-prefixed -> BINARY frame of hex bytes */
+                        for (const char *h = msg + 2; h[0] && h[1] && pl2 < 256; h += 2) {
+                            int hi = (h[0]<='9')?h[0]-'0':(h[0]|32)-'a'+10, lo = (h[1]<='9')?h[1]-'0':(h[1]|32)-'a'+10;
+                            pay[pl2++] = (unsigned char)((hi << 4) | lo);
+                        }
+                    } else {
+                        while (msg[pl2] && pl2 < 256) { pay[pl2] = (unsigned char)msg[pl2]; pl2++; }
+                    }
+                    sbuf[sl++] = (char)op;
+                    sbuf[sl++] = (char)(pl2 & 0xff);        sbuf[sl++] = (char)((pl2 >> 8) & 0xff);
+                    sbuf[sl++] = (char)((pl2 >> 16) & 0xff); sbuf[sl++] = (char)((pl2 >> 24) & 0xff);
+                    for (int m2 = 0; m2 < pl2 && sl < 299; m2++) sbuf[sl++] = (char)pay[m2];
                     static char out[8192]; int nrecv = 0;
                     long rb = sys_ws_exchange((int)id, sbuf, sl, out, sizeof out, &nrecv);
                     if (rb < 0) { print("wsget: exchange failed\n"); }
                     else {
                         print("wsget: connected (status "); itoa_simple(status, num); print(num);
                         print("), replies="); itoa_simple(nrecv, num); print(num); print(":\n");
-                        const char *q = out;
-                        for (int k = 0; k < nrecv; k++) { print("  <- "); print(q); print("\n"); int L = 0; while (q[L]) L++; q += L + 1; }
+                        const unsigned char *q = (const unsigned char *)out; int off = 0;
+                        for (int k = 0; k < nrecv && off + 5 <= rb; k++) {   /* parse reply records */
+                            int op = q[off];
+                            int L = (int)((unsigned)q[off+1] | ((unsigned)q[off+2] << 8) |
+                                          ((unsigned)q[off+3] << 16) | ((unsigned)q[off+4] << 24));
+                            off += 5; if (L < 0 || off + L > rb) break;
+                            if (op == 2) {                      /* WSREC_BIN: hex-dump the payload */
+                                print("  <- (binary "); itoa_simple(L, num); print(num); print(" bytes) ");
+                                for (int b = 0; b < L; b++) {
+                                    const char *H = "0123456789abcdef"; char hx[3];
+                                    hx[0] = H[(q[off+b] >> 4) & 0xf]; hx[1] = H[q[off+b] & 0xf]; hx[2] = 0; print(hx);
+                                }
+                                print("\n");
+                            } else {                            /* WSREC_TEXT */
+                                char t[512]; int tl = L < 511 ? L : 511;
+                                for (int b = 0; b < tl; b++) t[b] = (char)q[off+b]; t[tl] = 0;
+                                print("  <- "); print(t); print("\n");
+                            }
+                            off += L;
+                        }
                     }
                 }
             }

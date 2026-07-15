@@ -3448,12 +3448,22 @@ static val nat_eventsource(val *args, int nargs){
  *
  * The browser registers two backings (js_set_websocket), mocked in the host
  * test: g_ws_open (connect + Upgrade handshake -> conn id, or -1) and
- * g_ws_exchange (on that id: send the NUL-separated queue, read replies into a
- * NUL-separated buffer, close). Splitting open from exchange is what lets
- * onopen run — and queue more sends — between connect and the first send. */
+ * g_ws_exchange (on that id: send the queued messages, read the replies, close).
+ * Splitting open from exchange is what lets onopen run — and queue more sends —
+ * between connect and the first send.
+ *
+ * Both send and receive buffers use a length-prefixed record framing so binary
+ * data (which contains NUL bytes) round-trips and each frame's TEXT/BIN type is
+ * carried: each record is [opcode:1][len:4 little-endian][payload:len], opcode
+ * WSREC_TEXT(1) or WSREC_BIN(2) — matching kernel/wsframe.h WS_OP_TEXT/BIN and
+ * net.c ws_exchange (M1859). */
+#define WSREC_TEXT 1
+#define WSREC_BIN  2
 static int (*g_ws_open)(const char *url, int *status);
 static int (*g_ws_exchange)(int id, const char *sendbuf, int sendtot,
                             char *out, int outmax, int *nrecv);
+static val nat_uint8array(val *args, int nargs);   /* fwd: binary onmessage builds a Uint8Array */
+static val nat_arraybuffer(val *args, int nargs);   /* fwd: binaryType "arraybuffer" delivery */
 
 /* ws.send(data): stringify + append to the ws's private send queue. A no-op once
  * the socket is CLOSING/CLOSED. args[0] = the carried ws (make_resolver), args[1]
@@ -3462,9 +3472,19 @@ static val ws_send_native(val *args, int nargs){
     if (nargs<1 || args[0].t!=V_OBJ || !args[0].o) return UND();
     obj *ws = args[0].o; val v;
     if (obj_get(ws,"readyState",&v) && v.t==V_NUM && (v.num==2 || v.num==3)) return UND();
-    const char *s = val_to_str(nargs>1 ? args[1] : STRV(""));
-    val q;
-    if (obj_get(ws,"__sendq",&q) && q.t==V_ARR && q.o) arr_push_val(q.o, STRV(s));
+    val q; if (!(obj_get(ws,"__sendq",&q) && q.t==V_ARR && q.o)) return UND();
+    val d = nargs>1 ? args[1] : STRV("");
+    if (d.t==V_OBJ && d.o && (d.o->kind==V_U8ARRAY || d.o->kind==V_ARRAYBUF)) {
+        /* binary: snapshot the bytes NOW (real send() is synchronous; our flush is
+         * deferred to the pump), so a later mutation of the array can't change what
+         * was "sent". A fresh Uint8Array copy carries WSREC_BIN at marshal time. */
+        int nb = d.o->nbytes;
+        val cp = nat_uint8array((val[]){ NUM(nb) }, 1); if (g_oom) return UND();
+        for (int j=0;j<nb;j++) cp.o->bytes[j] = d.o->bytes[j];
+        arr_push_val(q.o, cp);
+    } else {
+        arr_push_val(q.o, STRV(val_to_str(d)));         /* text: stringify like real send() */
+    }
     return UND();
 }
 /* ws.close(): mark it closed so a not-yet-run pump becomes a no-op (mirrors
@@ -3473,17 +3493,22 @@ static val ws_close_native(val *args, int nargs){
     if (nargs>0 && args[0].t==V_OBJ && args[0].o) obj_set(args[0].o, "__closed", BOOLV(1));
     return UND();
 }
-/* Fire ws.<name>(event{...}) if it is callable. `extra`, when non-NULL, adds one
- * "data" string field (for onmessage). Returns 0 and stops if a handler threw. */
-static int ws_fire(obj *ws, const char *name, const char *type, const char *data){
+/* Fire ws.<name>(event{...}) if it is callable, with event.data = `data` when
+ * `has_data`. Returns 0 and stops if a handler threw. */
+static int ws_fire_data(obj *ws, const char *name, const char *type, val data, int has_data){
     val cb;
     if (!obj_get(ws, name, &cb) || !is_callable(cb)) return 1;
     obj *ev = new_obj(V_OBJ); if(!ev){ g_oom=1; return 0; }
     obj_set(ev, "type", STRV(type));
-    if (data) obj_set(ev, "data", STRV(data));
+    if (has_data) obj_set(ev, "data", data);
     val a[1] = { obj_val(ev) };
     call_function_this(cb, obj_val(ws), a, 1);
     return !g_err;
+}
+/* Fire with a C-string data field (onmessage TEXT) or no data (onopen/onclose/
+ * onerror pass NULL). Thin wrapper over ws_fire_data. */
+static int ws_fire(obj *ws, const char *name, const char *type, const char *data){
+    return ws_fire_data(ws, name, type, data ? STRV(data) : UND(), data ? 1 : 0);
 }
 /* The deferred pump: args[0] = the carried ws. Runs after the script drains. */
 static val ws_pump_native(val *args, int nargs){
@@ -3501,29 +3526,59 @@ static val ws_pump_native(val *args, int nargs){
     obj_set(ws, "readyState", NUM(1));                         /* OPEN */
     if (!ws_fire(ws, "onopen", "open", 0)) return UND();       /* may ws.send() -> queues below */
 
-    /* Marshal the (possibly onopen-extended) send queue into a NUL-separated buffer. */
+    /* Marshal the (possibly onopen-extended) send queue into length-prefixed
+     * records ([op][len:4 LE][payload]): binary items (Uint8Array/ArrayBuffer)
+     * as WSREC_BIN with their raw bytes, everything else stringified as WSREC_TEXT. */
     int cap = 131072; char *sbuf = aalloc(cap); if(!sbuf){ g_oom=1; return UND(); }
     int soff = 0; val q;
     if (obj_get(ws,"__sendq",&q) && q.t==V_ARR && q.o) {
         for (int i=0;i<q.o->n;i++){
-            const char *m = val_to_str(q.o->vals[i]); int L=0; while(m[L]) L++;
-            if (soff + L + 1 > cap) break;                     /* queue overflow -> drop the rest */
-            for (int j=0;j<=L;j++) sbuf[soff++] = m[j];        /* copy incl. the NUL separator */
+            val it = q.o->vals[i];
+            const unsigned char *data; int L, op;
+            if (it.t==V_OBJ && it.o && (it.o->kind==V_U8ARRAY || it.o->kind==V_ARRAYBUF)) {
+                data = it.o->bytes; L = it.o->nbytes; op = WSREC_BIN;
+            } else {
+                const char *m = val_to_str(it); L=0; while(m[L]) L++;
+                data = (const unsigned char *)m; op = WSREC_TEXT;
+            }
+            if (soff + 5 + L > cap) break;                     /* queue overflow -> drop the rest */
+            sbuf[soff++] = (char)op;
+            sbuf[soff++] = (char)(L & 0xff);          sbuf[soff++] = (char)((L >> 8) & 0xff);
+            sbuf[soff++] = (char)((L >> 16) & 0xff);  sbuf[soff++] = (char)((L >> 24) & 0xff);
+            for (int j=0;j<L;j++) sbuf[soff++] = (char)data[j];
         }
     }
     int rcap = 131072, nrecv = 0; char *rbuf = aalloc(rcap); if(!rbuf){ g_oom=1; return UND(); }
-    int rn = g_ws_exchange ? g_ws_exchange(id, sbuf, soff, rbuf, rcap-1, &nrecv) : -1;
+    int rn = g_ws_exchange ? g_ws_exchange(id, sbuf, soff, rbuf, rcap, &nrecv) : -1;
     if (rn < 0) {                                              /* exchange error mid-stream */
         obj_set(ws, "readyState", NUM(3));
         if (!ws_fire(ws, "onerror", "error", 0)) return UND();
         ws_fire(ws, "onclose", "close", 0);
         return UND();
     }
-    if (rn > rcap-1) rn = rcap-1; rbuf[rn] = 0;
-    const char *p = rbuf;                                      /* fire onmessage per NUL-separated reply */
-    for (int i=0; i<nrecv; i++){
-        if (!ws_fire(ws, "onmessage", "message", p)) return UND();
-        int L=0; while(p[L]) L++; p += L+1;
+    if (rn > rcap) rn = rcap;
+    /* fire onmessage per reply record; TEXT -> a string, BIN -> a Uint8Array
+     * (or ArrayBuffer if ws.binaryType is "arraybuffer"). */
+    val bt; int as_ab = (obj_get(ws,"binaryType",&bt) && bt.t==V_STR && strcmp(bt.str,"arraybuffer")==0);
+    const unsigned char *p = (const unsigned char *)rbuf; int off = 0;
+    for (int i=0; i<nrecv && off + 5 <= rn; i++){
+        int op = p[off];
+        int L = (int)((unsigned)p[off+1] | ((unsigned)p[off+2] << 8) |
+                      ((unsigned)p[off+3] << 16) | ((unsigned)p[off+4] << 24));
+        off += 5;
+        if (L < 0 || off + L > rn) break;                      /* truncated record */
+        if (op == WSREC_BIN) {
+            val dv = as_ab ? nat_arraybuffer((val[]){ NUM(L) }, 1)
+                           : nat_uint8array((val[]){ NUM(L) }, 1);
+            if (g_oom) return UND();
+            for (int j=0;j<L;j++) dv.o->bytes[j] = p[off+j];
+            if (!ws_fire_data(ws, "onmessage", "message", dv, 1)) return UND();
+        } else {
+            char *s = aalloc(L+1); if(!s){ g_oom=1; return UND(); }  /* records aren't NUL-terminated */
+            for (int j=0;j<L;j++) s[j] = (char)p[off+j]; s[L] = 0;
+            if (!ws_fire_data(ws, "onmessage", "message", STRV(s), 1)) return UND();
+        }
+        off += L;
     }
     obj_set(ws, "readyState", NUM(3));                         /* CLOSED */
     ws_fire(ws, "onclose", "close", 0);
@@ -3538,6 +3593,7 @@ static val nat_websocket(val *args, int nargs){
     obj_set(ws, "readyState", NUM(0));                         /* CONNECTING */
     obj_set(ws, "bufferedAmount", NUM(0));
     obj_set(ws, "protocol", STRV(""));
+    obj_set(ws, "binaryType", STRV("blob"));                   /* set to "arraybuffer" for ArrayBuffer onmessage data (M1859) */
     obj_set(ws, "onopen", UND()); obj_set(ws, "onmessage", UND());
     obj_set(ws, "onclose", UND()); obj_set(ws, "onerror", UND());
     obj *qa = new_obj(V_ARR); if(!qa){ g_oom=1; return UND(); }
@@ -5334,22 +5390,40 @@ static int hes(const char *url, char *out, int outmax, int *status) {
 }
 /* Mock WebSocket backing for the JS host test (M1844): a "fail" URL refuses the
  * connection; otherwise the handshake succeeds (101) and the exchange echoes
- * each sent message back as "echo:<msg>" (NUL-separated), modelling a WS echo
- * server so timers.js can assert onopen -> send -> onmessage -> onclose. */
+ * each sent record back, modelling a WS echo server so timers.js can assert
+ * onopen -> send -> onmessage -> onclose. Speaks the M1859 record framing
+ * ([op][len:4 LE][payload]): a TEXT record echoes as "echo:<msg>", a BIN record
+ * echoes the same bytes back (so a binary round-trip can be asserted). */
 static int hws_open(const char *url, int *status) {
     if (strstr(url, "fail")) { *status = 0; return -1; }
     *status = 101; return 1;                     /* a fake connection id */
 }
+static int hws_put_rec(char *out, int *off, int outmax, int op, const unsigned char *data, int L) {
+    if (*off + 5 + L > outmax) return 0;
+    out[(*off)++] = (char)op;
+    out[(*off)++] = (char)(L & 0xff);        out[(*off)++] = (char)((L >> 8) & 0xff);
+    out[(*off)++] = (char)((L >> 16) & 0xff); out[(*off)++] = (char)((L >> 24) & 0xff);
+    for (int j=0;j<L;j++) out[(*off)++] = (char)data[j];
+    return 1;
+}
 static int hws_exchange(int id, const char *sendbuf, int sendtot,
                         char *out, int outmax, int *nrecv) {
     (void)id;
-    int off = 0, rc = 0; const char *p = sendbuf, *pend = sendbuf + sendtot;
-    while (p < pend) {
-        int w = snprintf(out + off, (size_t)(outmax - off), "echo:%s", p);
-        if (w < 0 || off + w + 1 > outmax) break;
-        off += w + 1;                            /* keep the NUL as the record separator */
-        rc++;
-        int L = 0; while (p + L < pend && p[L]) L++; p += L + 1;  /* advance past this sent message */
+    int off = 0, rc = 0;
+    const unsigned char *p = (const unsigned char *)sendbuf, *pend = p + sendtot;
+    while (p + 5 <= pend) {                       /* each record: [op][len:4 LE][payload] */
+        int op = p[0];
+        int L = (int)((unsigned)p[1] | ((unsigned)p[2]<<8) | ((unsigned)p[3]<<16) | ((unsigned)p[4]<<24));
+        p += 5; if (L < 0 || p + L > pend) break;
+        if (op == WSREC_BIN) {
+            if (!hws_put_rec(out, &off, outmax, WSREC_BIN, p, L)) break;
+        } else {
+            unsigned char tmp[512]; int tl = 0;   /* "echo:" + payload (test messages are short) */
+            const char *pre = "echo:"; for (int j=0;j<5 && tl<(int)sizeof(tmp);j++) tmp[tl++] = (unsigned char)pre[j];
+            for (int j=0;j<L && tl<(int)sizeof(tmp);j++) tmp[tl++] = p[j];
+            if (!hws_put_rec(out, &off, outmax, WSREC_TEXT, tmp, tl)) break;
+        }
+        rc++; p += L;
     }
     *nrecv = rc; return off;
 }

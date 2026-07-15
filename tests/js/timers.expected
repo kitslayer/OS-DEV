@@ -17,6 +17,10 @@ ws-onmessage echo:yo
 ws-onclose state=3
 wsFail-onerror
 wsFail-onclose
+wsBin-text echo:mix
+wsBin-u8 len=4 [1,2,3,255]
+wsBin-close binaryType=blob
+wsAB-ab byteLength=3 [9,8,7]
 A-delay-10
 B-delay-20
 D-chained
