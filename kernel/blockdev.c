@@ -836,7 +836,27 @@ void blockdev_enumerate(void) {
         }
     }
 
-    kprintf("[ ok ] blockdev browse: %d FAT32 volume(s) listed across %d device(s).\n",
+    /* Also list any mounted NON-FAT volumes (ISO 9660 CDs, ext2 disks): the
+     * per-device scan above only covers FAT32, so a mounted CD/ext2 disk was
+     * invisible in the boot browse until now (M1854). */
+    int nmounts = blockdev_mount_count();
+    for (int mi = 0; mi < nmounts; mi++) {
+        if (g_mount[mi].fstype == FS_FAT) continue;                 /* already shown above */
+        const char *fs = g_mount[mi].fstype == FS_ISO9660 ? "ISO 9660" : "ext2";
+        const char *ro = g_mount[mi].fstype == FS_ISO9660 ? "read-only" : "read-write";
+        fatvol_dirent ents[32];
+        int n = blockdev_mount_list(mi, "", ents, 32);
+        if (n < 0) n = 0;
+        total_volumes++;
+        kprintf("    %s volume mounted (%s) as /%s: %d root entr%s\n",
+                fs, ro, g_mount[mi].name, n, n == 1 ? "y" : "ies");
+        for (int e = 0; e < n; e++) {
+            if (ents[e].is_dir) kprintf("        %s/  (dir)\n", ents[e].name);
+            else kprintf("        %s  (%lu bytes)\n", ents[e].name, (unsigned long)ents[e].size);
+        }
+    }
+
+    kprintf("[ ok ] blockdev browse: %d volume(s) listed across %d device(s).\n",
             total_volumes, ndev);
 }
 

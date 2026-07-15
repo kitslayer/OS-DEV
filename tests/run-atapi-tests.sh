@@ -29,17 +29,33 @@ trap cleanup EXIT
 if ! command -v "$QEMU" >/dev/null 2>&1; then echo "SKIP: ATAPI test ($QEMU not found)"; exit 0; fi
 if ! command -v python3 >/dev/null 2>&1; then echo "SKIP: ATAPI test (python3 not found to build the ISO)"; exit 0; fi
 
-# Minimal ISO 9660: 18 logical sectors; sector 16 = Primary Volume Descriptor
-# (type 1, "CD001", version 1), sector 17 = terminator (type 255). Enough for the
-# driver to read + the "CD001" magic check to pass.
+# A minimal but BROWSABLE ISO 9660: PVD @ sector 16 -> root directory @ sector 18
+# (".", "..", "F.TXT;1") -> file data @ sector 20. Lets the driver read the PVD AND
+# the block layer auto-mount + list it (M1853/M1854).
 python3 - "$ISO" <<'PY'
 import sys
-d = bytearray(2048 * 18)
-pvd = 16 * 2048
-d[pvd] = 1; d[pvd+1:pvd+6] = b"CD001"; d[pvd+6] = 1
-term = 17 * 2048
-d[term] = 255; d[term+1:term+6] = b"CD001"; d[term+6] = 1
-open(sys.argv[1], "wb").write(d)
+LOG = 2048
+img = bytearray(LOG * 24)
+def dir_rec(off, extent, length, is_dir, name):
+    nl = len(name); lendr = 33 + nl
+    if lendr & 1: lendr += 1
+    img[off] = lendr
+    img[off+2:off+6] = extent.to_bytes(4, 'little')
+    img[off+10:off+14] = length.to_bytes(4, 'little')
+    img[off+25] = 2 if is_dir else 0
+    img[off+32] = nl
+    img[off+33:off+33+nl] = name
+    return lendr
+pvd = 16 * LOG
+img[pvd] = 1; img[pvd+1:pvd+6] = b"CD001"; img[pvd+6] = 1
+dir_rec(pvd + 156, 18, LOG, True, b"\x00")           # root directory record -> extent 18
+t = 17 * LOG; img[t] = 255; img[t+1:t+6] = b"CD001"; img[t+6] = 1
+off = 18 * LOG
+off += dir_rec(off, 18, LOG, True, b"\x00")          # "."
+off += dir_rec(off, 18, LOG, True, b"\x01")          # ".."
+off += dir_rec(off, 20, 27, False, b"F.TXT;1")       # a real file
+f = 20 * LOG; img[f:f+27] = b"hello iso9660 fuzz harness\n"
+open(sys.argv[1], "wb").write(img)
 PY
 
 echo "booting kernel headless with an ATAPI CD-ROM attached (COM1 capture)..."
@@ -65,6 +81,8 @@ require() {
 }
 require "ATAPI CD-ROM"                        "detected the ATAPI CD-ROM + read its capacity"
 require "read PVD ok, CD001 found"            "PACKET READ(10) of sector 16 returned the ISO 9660 PVD"
+require "ISO 9660 volume mounted"             "the block layer auto-mounted the CD as an ISO 9660 volume (M1853)"
+require "F.TXT"                               "the mounted CD's root directory listed its file (M1854 browse)"
 require "launching the desktop environment"   "reached desktop launch (boot path intact)"
 
 forbid() {
