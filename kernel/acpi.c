@@ -250,6 +250,78 @@ int acpi_madt_lapics(uint8_t *ids, int max) {
     return cnt;
 }
 
+/* Find the MADT ("APIC") table via the XSDT/RSDT (M1856). NULL if absent/bad.
+ * A local copy of acpi_madt_lapics's table-find so the working SMP path above
+ * stays untouched. */
+static const struct sdt_header *find_madt(void) {
+    struct rsdp *r = find_rsdp();
+    if (!r) return 0;
+    const struct sdt_header *madt = 0;
+    if (r->revision >= 2 && r->xsdt_addr) {
+        const struct sdt_header *x = (const struct sdt_header *)hhdm(r->xsdt_addr);
+        if (sig4(x->sig, "XSDT") && x->length >= 36 && x->length < (1u << 20)) {
+            uint32_t n = (x->length - 36) / 8;
+            const uint8_t *ents = (const uint8_t *)x + 36;
+            for (uint32_t i = 0; i < n; i++) {
+                uint64_t ep; __builtin_memcpy(&ep, ents + i*8, 8);
+                const struct sdt_header *t = (const struct sdt_header *)hhdm(ep);
+                if (sig4(t->sig, "APIC")) { madt = t; break; }
+            }
+        }
+    }
+    if (!madt && r->rsdt_addr) {
+        const struct sdt_header *rs = (const struct sdt_header *)hhdm(r->rsdt_addr);
+        if (sig4(rs->sig, "RSDT") && rs->length >= 36 && rs->length < (1u << 20)) {
+            uint32_t n = (rs->length - 36) / 4;
+            const uint8_t *ents = (const uint8_t *)rs + 36;
+            for (uint32_t i = 0; i < n; i++) {
+                uint32_t ep; __builtin_memcpy(&ep, ents + i*4, 4);
+                const struct sdt_header *t = (const struct sdt_header *)hhdm(ep);
+                if (sig4(t->sig, "APIC")) { madt = t; break; }
+            }
+        }
+    }
+    if (!madt || madt->length < 44 || madt->length >= (1u << 20)) return 0;
+    return madt;
+}
+
+/* First I/O APIC from the MADT (type 1: {type,len=12, id, resv, u32 addr, u32
+ * gsi_base}). 1 + fills the addr + gsi_base out-params, else 0. (M1856) */
+int acpi_madt_ioapic(uint32_t *addr, uint32_t *gsi_base) {
+    const struct sdt_header *madt = find_madt();
+    if (!madt) return 0;
+    const uint8_t *p = (const uint8_t *)madt + 44, *end = (const uint8_t *)madt + madt->length;
+    while (p + 2 <= end) {
+        uint8_t type = p[0], len = p[1];
+        if (len < 2 || p + len > end) break;
+        if (type == 1 && len >= 12) {
+            uint32_t a, g; __builtin_memcpy(&a, p + 4, 4); __builtin_memcpy(&g, p + 8, 4);
+            if (addr) *addr = a; if (gsi_base) *gsi_base = g;
+            return 1;
+        }
+        p += len;
+    }
+    return 0;
+}
+
+/* Map an ISA IRQ to its Global System Interrupt via a MADT Interrupt Source
+ * Override (type 2: {type,len=10, bus, source(irq), u32 gsi, u16 flags}); returns
+ * `irq` itself (identity) if no override names it. (M1856) */
+uint32_t acpi_madt_gsi_for_irq(uint8_t irq) {
+    const struct sdt_header *madt = find_madt();
+    if (!madt) return irq;
+    const uint8_t *p = (const uint8_t *)madt + 44, *end = (const uint8_t *)madt + madt->length;
+    while (p + 2 <= end) {
+        uint8_t type = p[0], len = p[1];
+        if (len < 2 || p + len > end) break;
+        if (type == 2 && len >= 10 && p[3] == irq) {
+            uint32_t g; __builtin_memcpy(&g, p + 4, 4); return g;
+        }
+        p += len;
+    }
+    return irq;
+}
+
 /* Locate the HPET's MMIO base address from the ACPI "HPET" table (M1273). The
  * table is the 36-byte SDT header + a u32 event-timer-block-id, then a 12-byte
  * Generic Address Structure whose 64-bit `address` field (table offset 44) is

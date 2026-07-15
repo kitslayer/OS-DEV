@@ -9,6 +9,8 @@
 
 void acpi_init(void);      /* scan the ACPI tables at boot (logs what it found) */
 int  acpi_madt_lapics(uint8_t *ids, int max);  /* APIC IDs of all CPUs from the MADT, for SMP (M1197) */
+int  acpi_madt_ioapic(uint32_t *addr, uint32_t *gsi_base);  /* first I/O APIC's MMIO base + GSI base; 1/0 (M1856) */
+uint32_t acpi_madt_gsi_for_irq(uint8_t irq);   /* ISA IRQ -> GSI (MADT override), identity if none (M1856) */
 uint64_t acpi_hpet_base(void);  /* HPET register-block MMIO base from the HPET table, or 0 (M1273) */
 /* AML namespace parser (M1284): decode the DSDT's AML into a list of named objects. */
 enum { AML_SCOPE = 1, AML_DEVICE, AML_METHOD, AML_NAME, AML_REGION,

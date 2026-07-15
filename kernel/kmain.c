@@ -18,6 +18,7 @@
 #include "acpi.h"
 #include "hpet.h"   /* high-resolution HPET clocksource (M1273) */
 #include "smp.h"
+#include "ioapic.h"      /* ioapic_init — I/O APIC routing foundation (M1856) */
 #include "smpthread.h"
 #include "multiboot.h"
 #include "gdbstub.h"
@@ -351,6 +352,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
     hpet_init();                   /* high-resolution clocksource via the ACPI HPET table (M1273) */
     smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
+    ioapic_init();                 /* M1856: locate + map the I/O APIC (foundation for interrupt-driven I/O; entries masked, PIC still live) */
 
     /* GDB remote-serial stub (M1204): if `-append gdbstub` was seen (detected at
      * the top of kmain, before allocations could clobber the cmdline), break into
