@@ -25,4 +25,5 @@ jobs:
                tartest heaptest wavtest acpiamltest webptest elftest httptest kheaptest jsonfuzztest \
                regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest \
                csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest \
-               shbracetest shquotetest calctest normpathtest completetest
+               shbracetest shquotetest calctest normpathtest completetest \
+               wsframetest wsclienttest sha1test

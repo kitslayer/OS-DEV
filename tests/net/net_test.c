@@ -46,6 +46,17 @@ struct rtc_time;
 void rtc_set(const struct rtc_time *t) { (void)t; }
 const char *tls_leaf_cn(void)     { return ""; }
 const char *tls_leaf_expiry(void) { return ""; }
+/* net.c's ws_open/ws_exchange (M1846/M1847) call the persistent WS-over-TLS
+ * session in tls.c + the kernel heap; this suite fuzzes packet parsing, not
+ * WebSocket, so stub the seam (same pattern as the tls_get stub above). */
+int  tls_ws_open(const char *host, uint32_t seed) { (void)host; (void)seed; return -1; }
+int  tls_ws_write(const uint8_t *data, int len)   { (void)data; (void)len; return -1; }
+int  tls_ws_read(uint8_t *out, int max)           { (void)out; (void)max; return -1; }
+void tls_ws_close(void) {}
+#include <stddef.h>                              /* size_t (avoid <stdlib.h>: its struct timeval clashes with net.c's) */
+extern void *malloc(size_t); extern void free(void *);
+void *kmalloc(size_t n) { return malloc(n); }
+void  kfree(void *p)    { free(p); }
 
 #include "net.c"   /* the static tcp_recv_seg / ooo_store + the reassembly globals */
 
