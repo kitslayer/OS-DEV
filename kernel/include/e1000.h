@@ -5,6 +5,7 @@
 /* Initialize the card: map its registers, read the MAC, set up the RX/TX
  * descriptor rings. Returns 0 on success, -1 if no e1000 is present. */
 int  e1000_init(void);
+uint64_t e1000_irq_count(void);   /* RX interrupts taken (0 before M1858); storm sanity-check */
 
 const uint8_t *e1000_mac(void);              /* our 6-byte hardware address */
 

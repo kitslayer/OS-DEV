@@ -87,6 +87,14 @@ static int recv_timeout(uint8_t *buf, int max, uint64_t ticks) {
         int len = nic_receive(buf, max);
         if (len > 0)
             return len;
+        /* Nothing yet: instead of tight-spinning the CPU, SLEEP until the next
+         * interrupt. Interrupt-driven RX (M1858) makes the NIC raise its IRQ the
+         * moment a packet lands, waking us promptly; the ~10ms timer tick is the
+         * fallback (and drives loopback). Only `hlt` with interrupts enabled —
+         * else the CPU would wedge; then it degrades to the old busy-poll. */
+        uint64_t fl; __asm__ volatile("pushfq; pop %0" : "=r"(fl));
+        if (fl & (1u << 9)) __asm__ volatile("hlt");   /* IF set: wake on NIC IRQ or timer */
+        else                __asm__ volatile("pause");
     }
     return 0;
 }

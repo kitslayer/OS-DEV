@@ -18,12 +18,17 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "string.h"
+#include "interrupts.h"   /* irq_install_handler — interrupt-driven RX (M1858) */
+#include "console.h"
 
 /* register offsets */
 #define REG_CTRL   0x0000
 #define REG_EERD   0x0014
 #define REG_ICR    0x00C0
+#define REG_IMS    0x00D0    /* Interrupt Mask Set (enable causes) */
 #define REG_IMC    0x00D8
+#define ICR_RXT0   (1u << 7) /* receiver timer (a packet arrived) */
+#define ICR_RXDMT0 (1u << 4) /* RX descriptor min threshold */
 #define REG_RCTL   0x0100
 #define REG_TCTL   0x0400
 #define REG_TIPG   0x0410
@@ -103,6 +108,21 @@ static uint16_t eeprom_read(uint8_t addr) {
 
 const uint8_t *e1000_mac(void) { return mac; }
 
+/* Interrupt-driven RX (M1858): the card raises its PCI IRQ when a packet arrives,
+ * which wakes net.c's receive wait from hlt (instead of tight-spinning). The
+ * handler's real job is to READ ICR — that clears the cause, which is what stops
+ * the level-triggered PCI line re-firing into a storm. The RX ring itself is
+ * still drained by the existing e1000_receive() poll, so this is purely a
+ * "wake the sleeper" signal + a safe fallback (a missed IRQ just means the net
+ * loop falls back to its timer-tick wakeups). */
+static volatile uint64_t g_e1000_irqs;
+uint64_t e1000_irq_count(void) { return g_e1000_irqs; }
+static void e1000_isr(struct registers *r) {
+    (void)r;
+    uint32_t cause = reg_read(REG_ICR);              /* read = ack/clear the causes (no storm) */
+    if (cause) g_e1000_irqs++;                        /* 0 => not our (shared) IRQ */
+}
+
 int e1000_init(void) {
     pci_device_t dev = pci_find(0x8086, 0x100E);
     if (!dev.valid)
@@ -161,6 +181,16 @@ int e1000_init(void) {
     reg_write(REG_TCTL, TCTL_EN | TCTL_PSP | (0x0F << 4) | (0x40 << 12));
     tx_cur = 0;
 
+    /* Interrupt-driven RX (M1858): install the ISR on the card's PCI IRQ line
+     * (via the 8259 PIC — no ACPI _PRT needed) and enable ONLY the RX causes.
+     * reg_read(REG_ICR) once clears any stale cause before we unmask. */
+    uint8_t irq = pci_irq_line(&dev);
+    if (irq < 16) {
+        (void)reg_read(REG_ICR);
+        irq_install_handler(irq, e1000_isr);         /* also pic_unmask(irq) */
+        reg_write(REG_IMS, ICR_RXT0 | ICR_RXDMT0);   /* raise IRQ when a packet is received */
+        kprintf("[ ok ] e1000: interrupt-driven RX enabled (IRQ %u) — net waits now sleep, not spin (M1858).\n", irq);
+    }
     return 0;
 }
 
