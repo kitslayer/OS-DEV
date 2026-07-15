@@ -41,6 +41,9 @@ hello from fetch
 1,2-3
 hello from fetch
 caught
+-- fetch binary body: Response.arrayBuffer() / .bytes() (M1860) --
+5:0-1-128-255-65
+5:128,65
 -- fetch POST + options (M703; mock echoes POST <ctype>:<body>) --
 POST text/plain:hi POST application/json:{"a":1}
 -- Promise.any + thenable assimilation (M687) --

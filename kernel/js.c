@@ -3320,7 +3320,27 @@ static val nat_promise_allSettled(val *args, int nargs){
  * status (404…) still RESOLVES (ok=false); only a network failure rejects. */
 static int (*g_fetch)(const char *url, const char *method, const char *ctype, const char *body, char *out, int outmax, int *status);   /* method/ctype/body NULL for a GET (M703) */
 static val nat_json_parse(val *a, int n);   /* fwd: Response.json() parses the body */
+static val nat_uint8array(val *args, int nargs);   /* fwd: r.bytes()/binary onmessage build a Uint8Array */
+static val nat_arraybuffer(val *args, int nargs);   /* fwd: r.arrayBuffer()/binaryType "arraybuffer" */
 static val fetch_text_native(val *args, int nargs){ return make_promise(1, nargs>0?args[0]:STRV("")); }   /* args[0]=bound body */
+/* Response.arrayBuffer()/bytes() (M1860): resolve a Promise with a fresh copy of
+ * the body bytes as an ArrayBuffer / Uint8Array. args[0] = the bound body
+ * Uint8Array (built length-tracked in nat_fetch, so binary bodies with embedded
+ * NULs survive — unlike the string body used by .text()/.json()). */
+static val fetch_arraybuffer_native(val *args, int nargs){
+    obj *src = (nargs>0 && args[0].t==V_OBJ) ? args[0].o : 0;
+    int n = src ? src->nbytes : 0;
+    val ab = nat_arraybuffer((val[]){ NUM(n) }, 1); if (g_oom) return UND();
+    if (src && src->bytes) for (int i=0;i<n;i++) ab.o->bytes[i] = src->bytes[i];
+    return make_promise(1, ab);
+}
+static val fetch_bytes_native(val *args, int nargs){
+    obj *src = (nargs>0 && args[0].t==V_OBJ) ? args[0].o : 0;
+    int n = src ? src->nbytes : 0;
+    val u = nat_uint8array((val[]){ NUM(n) }, 1); if (g_oom) return UND();
+    if (src && src->bytes) for (int i=0;i<n;i++) u.o->bytes[i] = src->bytes[i];
+    return make_promise(1, u);
+}
 static val fetch_json_native(val *args, int nargs){
     val body = nargs>0 ? args[0] : STRV("");
     val parsed = nat_json_parse(&body, 1);
@@ -3346,11 +3366,15 @@ static val nat_fetch(val *args, int nargs){
     if (n > cap-1) n = cap-1;
     buf[n] = 0;
     val body = STRV(buf);                                /* buf is arena-allocated -> persists for the run */
+    val bytesv = nat_uint8array((val[]){ NUM(n) }, 1); if (g_oom) return UND();   /* length-tracked body copy */
+    for (int i=0;i<n;i++) bytesv.o->bytes[i] = (unsigned char)buf[i];
     obj *resp = new_obj(V_OBJ); if (!resp) { g_oom=1; return UND(); }
     obj_set(resp, "status", NUM(status));
     obj_set(resp, "ok", BOOLV(status>=200 && status<300));
     obj_set(resp, "text", make_resolver(fetch_text_native, body));   /* r.text() -> Promise<body> */
     obj_set(resp, "json", make_resolver(fetch_json_native, body));   /* r.json() -> Promise<parsed> */
+    obj_set(resp, "arrayBuffer", make_resolver(fetch_arraybuffer_native, bytesv));   /* r.arrayBuffer() -> Promise<ArrayBuffer> (M1860) */
+    obj_set(resp, "bytes",       make_resolver(fetch_bytes_native, bytesv));         /* r.bytes() -> Promise<Uint8Array> (M1860) */
     return make_promise(1, obj_val(resp));
 }
 
@@ -3462,8 +3486,6 @@ static val nat_eventsource(val *args, int nargs){
 static int (*g_ws_open)(const char *url, int *status);
 static int (*g_ws_exchange)(int id, const char *sendbuf, int sendtot,
                             char *out, int outmax, int *nrecv);
-static val nat_uint8array(val *args, int nargs);   /* fwd: binary onmessage builds a Uint8Array */
-static val nat_arraybuffer(val *args, int nargs);   /* fwd: binaryType "arraybuffer" delivery */
 
 /* ws.send(data): stringify + append to the ws's private send queue. A no-op once
  * the socket is CLOSING/CLOSED. args[0] = the carried ws (make_resolver), args[1]
@@ -5374,6 +5396,11 @@ static int hfetch(const char *url, const char *method, const char *ctype, const 
         if (n<outmax-1) out[n++]=':';
         for (const char *b=reqbody?reqbody:""; *b && n<outmax-1; b++) out[n++]=*b;
         out[n]=0; return n;
+    }
+    if (strstr(url, "bin")) {                                 /* binary body incl. a leading NUL + a >127 byte */
+        static const unsigned char blob[] = { 0x00, 0x01, 0x80, 0xff, 0x41 };   /* 5 bytes; index-0 NUL would truncate a C string to len 0 */
+        for (int i=0; i<(int)sizeof(blob) && n<outmax; i++) out[n++]=(char)blob[i];
+        return n;                                             /* returns the true length 5, not strlen (0) */
     }
     const char *body = strstr(url, "json") ? "{\"a\":1,\"b\":[2,3]}" : "hello from fetch";
     while (body[n] && n<outmax-1) { out[n]=body[n]; n++; } out[n]=0;

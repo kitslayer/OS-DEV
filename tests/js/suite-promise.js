@@ -47,6 +47,9 @@ print((function(){var o="?";fetch("http://x/404").then(function(r){o=r.status+",
 print((function(){var o="?";fetch("http://x/json").then(function(r){return r.json();}).then(function(j){o=j.a+","+j.b.join("-");});return o;})());  // 1,2-3 (Response.json())
 print((function(){async function f(){var r=await fetch("http://x/");return await r.text();}var o="?";f().then(function(t){o=t;});return o;})());  // hello from fetch (await fetch + await r.text())
 print((function(){var o="?";fetch("http://x/fail").then(function(){o="F";}).catch(function(){o="caught";});return o;})());  // caught (a network failure rejects)
+print("-- fetch binary body: Response.arrayBuffer() / .bytes() (M1860) --");
+print((function(){var o="?";fetch("http://x/bin").then(function(r){return r.arrayBuffer();}).then(function(ab){o=ab.byteLength+":"+new Uint8Array(ab).join("-");});return o;})());  // 5:0-1-128-255-65 (length-tracked past the leading NUL a string body would truncate at)
+print((function(){var o="?";fetch("http://x/bin").then(function(r){return r.bytes();}).then(function(u){o=u.length+":"+u[2]+","+u[4];});return o;})());  // 5:128,65 (r.bytes() -> Uint8Array)
 print("-- fetch POST + options (M703; mock echoes POST <ctype>:<body>) --");
 print((function(){var o="?";fetch("http://x/api",{method:"POST",body:"hi"}).then(function(r){return r.text();}).then(function(t){o=t;});return o;})(), (function(){var o="?";fetch("http://x/api",{method:"POST",body:'{"a":1}',headers:{"Content-Type":"application/json"}}).then(function(r){return r.text();}).then(function(t){o=t;});return o;})());  // POST text/plain:hi POST application/json:{"a":1} (method + body + Content-Type reach the backing; default ctype is text/plain)
 print("-- Promise.any + thenable assimilation (M687) --");
