@@ -353,6 +353,10 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     hpet_init();                   /* high-resolution clocksource via the ACPI HPET table (M1273) */
     smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
     ioapic_init();                 /* M1856: locate + map the I/O APIC (foundation for interrupt-driven I/O; entries masked, PIC still live) */
+    if (ioapic_present()) {        /* M1857: move the keyboard's IRQ off the 8259 PIC onto the I/O APIC — proves live delivery (LAPIC-EOI path) end to end */
+        irq_route_ioapic(1);
+        kprintf("[ ok ] keyboard IRQ routed via the I/O APIC (off the 8259 PIC).\n\n");
+    }
 
     /* GDB remote-serial stub (M1204): if `-append gdbstub` was seen (detected at
      * the top of kmain, before allocations could clobber the cmdline), break into

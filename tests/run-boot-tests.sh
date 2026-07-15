@@ -91,6 +91,7 @@ softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chai
 require "mounted FAT32 volume"               "FAT32 mount"
     require "ATA read cache: fill+hit+write-invalidate coherent"  "ATA single-sector read cache (fill/hit/write-invalidate coherence, M1855)"
     require "I/O APIC at 0x"  "I/O APIC detected + mapped + routing primitives verified (M1856)"
+    require "keyboard IRQ routed via the I/O APIC"  "keyboard IRQ moved onto the I/O APIC + LAPIC-EOI (live delivery, M1857)"
 require "AC'97 audio: NAM="                  "AC'97 audio bring-up"
 require "USB tablet active"                  "USB UHCI + tablet"
 require "launching the desktop environment"  "reached desktop launch"
@@ -109,7 +110,7 @@ forbid "page fault"                  "page fault"
 forbid "general protection"          "#GP fault"
 
 if [ "$fail" -eq 0 ]; then
-    echo "PASS: in-guest boot (13 required bring-up markers present, no crash)"
+    echo "PASS: in-guest boot (14 required bring-up markers present, no crash)"
     exit 0
 else
     echo "FAIL: in-guest boot smoke test"

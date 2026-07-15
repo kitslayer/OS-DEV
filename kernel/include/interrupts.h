@@ -29,6 +29,7 @@ void interrupts_disable(void);              /* cli */
 
 /* Register a handler for hardware IRQ 0..15 and unmask it on the PIC. */
 void irq_install_handler(uint8_t irq, irq_handler_fn fn);
+void irq_route_ioapic(uint8_t irq);   /* move a live IRQ's delivery from the 8259 PIC to the I/O APIC (M1857) */
 
 /* MSI / MSI-X message-signaled interrupts (M1288). The dispatcher owns a small
  * per-vector handler table over the reserved MSI vector block (see msi.h); the

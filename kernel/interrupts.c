@@ -21,6 +21,9 @@
 #include "timer.h"      /* timer_tick_ms — per-core CPU-time accounting (M1548) */
 #include "vmm.h"        /* kstack_is_guard — flag a kernel-stack-overflow #PF (M1495) */
 #include "ksyms.h"
+#include "ioapic.h"     /* I/O APIC routing — move a live IRQ off the PIC (M1857) */
+#include "acpi.h"       /* acpi_madt_gsi_for_irq — ISA IRQ -> GSI (M1857) */
+#include "smp.h"        /* lapic_eoi — ack an I/O APIC-delivered IRQ (M1857) */
 #include "smp.h"
 #include "gdbstub.h"
 #include "msi.h"          /* MSI vector block + msi_install_handler/msi_irq_count */
@@ -70,6 +73,22 @@ void irq_install_handler(uint8_t irq, irq_handler_fn fn) {
         irq_handlers[irq] = fn;
         pic_unmask(irq);
     }
+}
+
+/* IRQs whose delivery has been moved from the 8259 PIC to the I/O APIC (M1857):
+ * the same handler runs (same vector 32+irq), but the dispatch must acknowledge
+ * via the LOCAL APIC, not the PIC. */
+static uint32_t g_ioapic_routed;
+
+/* Route ISA `irq`'s delivery through the I/O APIC (to vector 32+irq on the BSP's
+ * local APIC), masking it on the PIC. No-op if no I/O APIC. The handler is
+ * unchanged; only the delivery path + EOI target change. */
+void irq_route_ioapic(uint8_t irq) {
+    if (irq >= 16 || !ioapic_present()) return;
+    uint32_t gsi = acpi_madt_gsi_for_irq(irq);
+    ioapic_route((uint8_t)gsi, (uint8_t)(32 + irq), 0 /* BSP APIC id (0 on QEMU) */, 0 /* unmasked */);
+    pic_mask(irq);                                   /* the PIC no longer delivers this line */
+    g_ioapic_routed |= (1u << irq);
 }
 
 static void dump_registers(struct registers *r) {
@@ -206,7 +225,8 @@ void isr_dispatch(struct registers *r) {
          * this task runs again, so the EOI must already be sent or the PIC
          * would never deliver another tick. Safe because interrupt gates keep
          * IF clear during the handler (no re-entry). */
-        pic_send_eoi(irq);
+        if (g_ioapic_routed & (1u << irq)) lapic_eoi();   /* I/O APIC-delivered: ack the LOCAL APIC (M1857) */
+        else                               pic_send_eoi(irq);
         if (irq_handlers[irq])
             irq_handlers[irq](r);
         /* On the way back to ring 3 (after the timer may have rescheduled us),
