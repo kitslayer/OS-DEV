@@ -35,6 +35,10 @@ int ata_write(uint32_t lba, uint8_t count, const void *buf);
  * caller may request more than 256 sectors. Returns 0 on success, -1 on error. */
 int ata_read_drive(int drive, uint32_t lba, uint32_t count, void *buf);
 int ata_write_drive(int drive, uint32_t lba, uint32_t count, const void *buf);
+/* Single-sector read cache (M1855): faster repeated FS reads, coherent w/ writes. */
+void ata_cache_flush(void);
+void ata_cache_stats(uint32_t *hits, uint32_t *miss);
+void ata_cache_selftest(void);   /* boot self-test: fill+hit+write-invalidate coherence (save/restore) */
 
 /* Probe all four legacy drives with IDENTIFY (finite timeouts; an absent drive
  * is detected via the status register, never hangs). Records which are present

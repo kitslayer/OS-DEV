@@ -284,9 +284,50 @@ static int ata_read_drive_impl(int drive, uint32_t lba, uint32_t count, void *bu
  * transaction as far as mutual exclusion is concerned (see ata_lock's
  * comment) -- take the lock for its full duration, not per-chunk, so a large
  * transfer can't be sliced up and interleaved with someone else's. */
+/* --- single-sector read cache (M1855) ---------------------------------------
+ * fat32 walks the FAT + directory sectors over and over, re-reading the same
+ * LBAs; each miss is a full PIO sector transfer off the disk. A small LRU cache
+ * of single-sector reads turns those repeats into a memcpy. COHERENT: every
+ * write path (ata_write_drive) invalidates the sectors it touches, and all
+ * access is inside ata_lock (so it is SMP-safe, same as the transfers). Only
+ * count==1 reads are cached (the fat32 hot path); multi-sector reads bypass. */
+#define ACACHE_N 64                                  /* 64 * 512 B = 32 KiB */
+static struct { int valid, drive; uint32_t lba, lru; uint8_t data[SECTOR_SIZE]; } acache[ACACHE_N];
+static uint32_t acache_clk, acache_hits, acache_miss;
+
+static int acache_lookup(int drive, uint32_t lba, void *buf) {
+    for (int k = 0; k < ACACHE_N; k++)
+        if (acache[k].valid && acache[k].drive == drive && acache[k].lba == lba) {
+            memcpy(buf, acache[k].data, SECTOR_SIZE);
+            acache[k].lru = ++acache_clk; acache_hits++;
+            return 1;
+        }
+    return 0;
+}
+static void acache_fill(int drive, uint32_t lba, const void *buf) {
+    int victim = 0; uint32_t best = 0xFFFFFFFFu;
+    for (int k = 0; k < ACACHE_N; k++) {
+        if (!acache[k].valid) { victim = k; break; }
+        if (acache[k].lru < best) { best = acache[k].lru; victim = k; }
+    }
+    acache[victim].valid = 1; acache[victim].drive = drive; acache[victim].lba = lba;
+    acache[victim].lru = ++acache_clk; memcpy(acache[victim].data, buf, SECTOR_SIZE);
+}
+static void acache_invalidate(int drive, uint32_t lba, uint32_t count) {
+    for (int k = 0; k < ACACHE_N; k++)
+        if (acache[k].valid && acache[k].drive == drive &&
+            acache[k].lba >= lba && acache[k].lba < lba + count)
+            acache[k].valid = 0;
+}
+/* Drop everything (e.g. before a DMA write path that bypasses ata_write_drive). */
+void ata_cache_flush(void) { ata_lock_take(); for (int k = 0; k < ACACHE_N; k++) acache[k].valid = 0; ata_lock_give(); }
+void ata_cache_stats(uint32_t *hits, uint32_t *miss) { if (hits) *hits = acache_hits; if (miss) *miss = acache_miss; }
+
 int ata_read_drive(int drive, uint32_t lba, uint32_t count, void *buf) {
     ata_lock_take();
+    if (count == 1 && acache_lookup(drive, lba, buf)) { ata_lock_give(); return 0; }
     int r = ata_read_drive_impl(drive, lba, count, buf);
+    if (r >= 0 && count == 1) { acache_miss++; acache_fill(drive, lba, buf); }
     ata_lock_give();
     return r;
 }
@@ -321,9 +362,43 @@ static int ata_write_drive_impl(int drive, uint32_t lba, uint32_t count, const v
 
 int ata_write_drive(int drive, uint32_t lba, uint32_t count, const void *buf) {
     ata_lock_take();
+    acache_invalidate(drive, lba, count);            /* keep the read cache coherent (M1855) */
     int r = ata_write_drive_impl(drive, lba, count, buf);
     ata_lock_give();
     return r;
+}
+
+/* Boot self-test for the read cache (M1855): on drive 0's LAST sector
+ * (save+restore, non-destructive — MBR/FAT metadata lives at the start), prove
+ * fill→hit and, critically, that a write INVALIDATES the cached copy so a
+ * subsequent read sees the new bytes, never a stale hit. No-op if drive 0 is
+ * absent. */
+void ata_cache_selftest(void) {
+    const struct ata_drive_info *info = ata_drive(0);
+    if (!info || !info->present || info->sectors == 0) {
+        kprintf("[ata-cache] drive 0 absent; read cache present, self-test skipped.\n\n");
+        return;
+    }
+    static uint8_t save[SECTOR_SIZE], pa[SECTOR_SIZE], pb[SECTOR_SIZE], rd[SECTOR_SIZE];
+    uint32_t lba = (uint32_t)(info->sectors - 1);
+    if (ata_read_drive(0, lba, 1, save) < 0) { kprintf("[ata-cache] save read failed; skipping\n\n"); return; }
+    for (int i = 0; i < SECTOR_SIZE; i++) { pa[i] = (uint8_t)(i * 7 + 1); pb[i] = (uint8_t)(i * 13 + 2); }
+
+    uint32_t h0, m0; ata_cache_stats(&h0, &m0);
+    ata_write_drive(0, lba, 1, pa);                  /* write A (invalidates) */
+    ata_read_drive(0, lba, 1, rd); int okA   = (memcmp(rd, pa, SECTOR_SIZE) == 0);   /* miss -> fresh A */
+    ata_read_drive(0, lba, 1, rd); int okHit = (memcmp(rd, pa, SECTOR_SIZE) == 0);   /* hit  -> A */
+    uint32_t h1, m1; ata_cache_stats(&h1, &m1);
+    ata_write_drive(0, lba, 1, pb);                  /* write B: must invalidate the cached A */
+    ata_read_drive(0, lba, 1, rd); int okInv = (memcmp(rd, pb, SECTOR_SIZE) == 0);   /* NOT stale A */
+    ata_write_drive(0, lba, 1, save);                /* restore the original bytes */
+
+    if (okA && okHit && okInv && h1 > h0)
+        kprintf("[ ok ] ATA read cache: fill+hit+write-invalidate coherent (%u hits, %u misses).\n\n",
+                (unsigned)h1, (unsigned)m1);
+    else
+        kprintf("[ata-cache] FAIL: freshA=%d hit=%d invalidate=%d hits+%u\n\n",
+                okA, okHit, okInv, (unsigned)(h1 - h0));
 }
 
 /* --- the original primary-master API, unchanged for every existing caller --- */
@@ -579,6 +654,7 @@ static int ata_dma_xfer_impl(int drive, uint32_t lba, uint32_t count, void *buf,
  * controller must not interleave either. */
 static int ata_dma_xfer(int drive, uint32_t lba, uint32_t count, void *buf, int write) {
     ata_lock_take();
+    if (write) acache_invalidate(drive, lba, count);   /* DMA write bypasses ata_write_drive — invalidate too (M1855) */
     int r = ata_dma_xfer_impl(drive, lba, count, buf, write);
     ata_lock_give();
     return r;

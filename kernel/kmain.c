@@ -500,6 +500,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * no-op (logs "DMA unavailable") if no PIIX3 BMIDE controller is present. */
     ata_dma_selftest();
     ata_lba48_selftest();   /* M1721: high-LBA round-trip if a >128 GiB ATA disk is attached (else no-op) */
+    ata_cache_selftest();   /* M1855: single-sector read cache fill+hit+write-invalidate coherence */
 
     /* Bring up AHCI/SATA as an ADDITIONAL storage driver (the boot disk above
      * stays on legacy ATA). No-op if no AHCI HBA + disk is attached. The
