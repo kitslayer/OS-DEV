@@ -89,17 +89,19 @@ static int expand_vars(const char *src, char *dst, int cap){
             } else {
                 int s=i+1+br, e=s; while (src[e] && sh_vchar(src[e])) e++;
                 const char *v=(e>s)?vget(src+s,e-s):0;
-                if (br && src[e]==':' && (src[e+1]=='-' || src[e+1]=='+')) {   /* ${VAR:-word} default / ${VAR:+word} alt (literal word) */
-                    int plus=(src[e+1]=='+'), set=(v && v[0]);
-                    int ws=e+2, we=ws; while (src[we] && src[we]!='}') we++;
+                if (br && ((src[e]==':' && (src[e+1]=='-' || src[e+1]=='+')) || src[e]=='-' || src[e]=='+')) {   /* ${VAR:-word}/${VAR-word} default, ${VAR:+word}/${VAR+word} alt (literal word) */
+                    int colon=(src[e]==':'), plus=(src[e+colon]=='+');
+                    int set = colon ? (v && v[0]) : (v != 0);   /* colon form: set-AND-nonempty; no-colon form: merely set (empty counts) */
+                    int ws=e+colon+1, we=ws; while (src[we] && src[we]!='}') we++;
                     const char *w=src+ws; int wl=we-ws;
                     if (plus) { if (set) { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; } }
                     else if (set) { for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k]; }
                     else { for (int k=0; k<wl && o<cap-1; k++) dst[o++]=w[k]; }
                     i = (src[we]=='}') ? we+1 : we;
-                } else if (br && src[e]==':' && src[e+1]=='=' && e>s) {   /* ${VAR:=default}: if unset/empty, assign default AND expand to it */
-                    int ws=e+2, we=ws; while (src[we] && src[we]!='}') we++;
-                    int set=(v && v[0]);
+                } else if (br && ((src[e]==':' && src[e+1]=='=') || src[e]=='=') && e>s) {   /* ${VAR:=default}/${VAR=default}: if unset(/empty), assign default AND expand to it */
+                    int colon=(src[e]==':');
+                    int ws=e+colon+1, we=ws; while (src[we] && src[we]!='}') we++;
+                    int set = colon ? (v && v[0]) : (v != 0);
                     if (set) { for (int k=0; v[k] && o<cap-1; k++) dst[o++]=v[k]; }
                     else {
                         char wtmp[128]; int wl=0; for (int k=ws; k<we && wl<127; k++) wtmp[wl++]=src[k]; wtmp[wl]=0;
@@ -119,7 +121,7 @@ static int expand_vars(const char *src, char *dst, int cap){
                     while (src[p] && src[p]!='}') p++;                    /* tolerate trailing junk up to '}' */
                     char vb[260]; int vl=0; if (v) for (int k=0; v[k] && vl<259; k++) vb[vl++]=v[k]; vb[vl]=0;
                     long n=vl, start=off, end;
-                    if (start<0){ start=n+start; if (start<0) start=0; } else if (start>n) start=n;
+                    if (start<0){ start=n+start; if (start<0) start=n; } else if (start>n) start=n;   /* offset before the start -> empty (bash), not clamp-to-whole-string */
                     if (!hasLen) end=n;
                     else if (len>=0){ end=start+len; if (end>n) end=n; }
                     else end=n+len;                                      /* negative length: end measured from the string's end */
@@ -178,12 +180,15 @@ static int expand_vars(const char *src, char *dst, int cap){
                     i = (src[ps]=='}') ? ps+1 : ps;
                 } else if (br && (src[e]=='^' || src[e]==',') && e>s) {   /* ${VAR^^}/${VAR^} upper, ${VAR,,}/${VAR,} lower (M1821) */
                     char op=src[e]; int all=(src[e+1]==op);
-                    int pe=e+1+all; while (src[pe] && src[pe]!='}') pe++;   /* ignore any trailing pattern up to '}' */
+                    int ps=e+1+all, pe=ps; while (src[pe] && src[pe]!='}') pe++;   /* optional glob pattern ps..pe: only matching chars convert (bash) */
+                    char pat[80]; int pl=0; for (int k=ps; k<pe && pl<79; k++) pat[pl++]=src[k]; pat[pl]=0;
                     if (v) {
                         int first=1;
                         for (int k=0; v[k] && o<cap-1; k++) {
                             char c=v[k];
-                            if (all || first) {
+                            int apply = all || first;                     /* ^^/,, : every char;  ^/, : first char only */
+                            if (apply && pl>0) { char one[2]={c,0}; apply = glob_match(pat, one); }   /* gate on the pattern (no pattern -> match all) */
+                            if (apply) {
                                 if (op=='^' && c>='a' && c<='z') c-=32;
                                 else if (op==',' && c>='A' && c<='Z') c+=32;
                             }

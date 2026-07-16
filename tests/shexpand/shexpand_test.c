@@ -98,6 +98,16 @@ int main(void){
     CHECK("${UNSET:+alt}", "");              /* unset -> empty */
     CHECK("${EMPTY:+alt}", "");              /* empty -> empty */
 
+    /* --- ${VAR-word}/${VAR+word} NON-colon forms (M1861): test only UNSET, not empty --- */
+    CHECK("${FOO-def}", "bar");              /* set -> value */
+    CHECK("${UNSET-def}", "def");            /* unset -> default */
+    CHECK("${EMPTY-def}", "");               /* empty is SET (no colon) -> its value (empty), NOT the default */
+    CHECK("${FOO+alt}", "alt");              /* set -> alternate */
+    CHECK("${UNSET+alt}", "");               /* unset -> empty */
+    CHECK("${EMPTY+alt}", "alt");            /* empty is SET -> alternate */
+    CHECK("[${UNSET-x}]", "[x]");            /* regression: the whole `${...}` is consumed, no leaked `-x}` */
+    CHECK("a${FOO-y}b", "abarb");            /* embedded in a word */
+
     /* --- ${NAME#pat} / ##  prefix strip (glob) --- */
     CHECK("${FILE#*.}", "tar.gz");           /* shortest matching prefix "archive." */
     CHECK("${FILE##*.}", "gz");              /* longest matching prefix "archive.tar." */
@@ -136,6 +146,10 @@ int main(void){
     CHECK("${HELLO:2:-2}", "llo Wor");            /* both interior */
     CHECK("${HELLO:100}", "");                    /* offset past end -> empty */
     CHECK("${HELLO:5:0}", "");                    /* zero length -> empty */
+    CHECK("${HELLO: -11}", "Hello World");        /* offset == -length -> whole string */
+    CHECK("${HELLO: -12}", "");                   /* |offset| > length -> empty (M1861; was the whole string) */
+    CHECK("${HELLO: -100}", "");
+    CHECK("${HELLO: -100:2}", "");                /* out-of-range negative offset stays empty even with a length */
     CHECK("${HELLO:-3}", "Hello World");          /* ${VAR:-word}: HELLO is set -> its value (NOT a slice) */
     CHECK("${UNSET:-3}", "3");                     /* ${VAR:-word}: default "3" (regression guard for the :- vs :off split) */
 
@@ -147,6 +161,10 @@ int main(void){
     CHECK("${NEW:=other}", "hello");              /* now set -> keeps first assignment */
     CHECK("${EMPTY:=def}", "def");                /* empty counts as unset -> assign */
     CHECK("$EMPTY", "def");                        /* assignment persisted */
+    /* non-colon ${VAR=word} (M1861): assigns only when UNSET */
+    CHECK("${NEW2=hi}", "hi");                    /* unset -> assign + expand */
+    CHECK("$NEW2", "hi");                          /* assignment persisted */
+    CHECK("${FOO=nope}", "bar");                  /* set -> value, no assignment */
 
     /* --- ${VAR^^}/${VAR^} upper, ${VAR,,}/${VAR,} lower case conversion (M1821) --- */
     CHECK("${FOO^^}", "BAR");                      /* all upper */
@@ -159,6 +177,13 @@ int main(void){
     CHECK("${NUM^^}", "42");                       /* digits unaffected */
     CHECK("${UNSET^^}", "");                       /* unset -> empty */
     CHECK("x${FOO^^}y", "xBARy");                  /* embedded in a word */
+    /* pattern-scoped case conversion (M1861): only chars matching the glob convert */
+    CHECK("${HELLO^^l}", "HeLLo WorLd");          /* upper only the 'l' chars */
+    CHECK("${HELLO^^o}", "HellO WOrld");          /* upper only the 'o' chars */
+    CHECK("${HELLO,,O}", "Hello World");          /* pattern 'O' (uppercase) matches nothing -> unchanged */
+    CHECK("${BANANA^^a}", "bAnAnA");              /* upper the 'a' chars */
+    CHECK("${HELLO^l}", "Hello World");           /* ^pat: first char 'H' doesn't match 'l' -> unchanged */
+    CHECK("${BANANA^a}", "banana");               /* first char 'b' doesn't match 'a' -> unchanged */
 
     /* --- ${!NAME} indirect expansion (M1826): REF="FOO", FOO="bar" --- */
     CHECK("${!REF}", "bar");                       /* REF -> "FOO" -> FOO's value "bar" */
