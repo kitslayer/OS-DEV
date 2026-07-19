@@ -224,6 +224,7 @@ static volatile int g_ustack_overflow_test;   /* -append ustackover: spawn a rin
 static volatile int g_wx_test;                /* -append wxtest: prove W^X is enforced -- executing a no-execute data page must fault (M1501) */
 static volatile int g_smep_test;              /* -append smeptest: prove SMEP -- the kernel executing a ring-3 (user) page must fault (M1502) */
 static volatile int g_smpthread_test;         /* -append smpthreadtest: prove real cross-core kernel threads work (M1530) */
+static volatile int g_smpsched_test;          /* -append smpschedtest: prove the GENERAL (M1531) scheduler runs ordinary pin_core=-1 tasks across cores */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -311,6 +312,50 @@ static void smpthread_test(void) {
             counter, want, nseen, counter == want ? "OK" : "MISMATCH");
 }
 
+/* General-scheduler cross-core check (M1862): smpthread_test above proves the
+ * SEPARATE M1530 smp_thread mechanism (per-core-pinned kernel threads drained by
+ * each AP's own ap_tick). This proves the DIFFERENT, and until now untested,
+ * claim that the general M1531 CFS scheduler genuinely runs *ordinary* tasks --
+ * the pin_core=-1 kind that task_create makes for every kernel thread AND every
+ * ring-3 process -- concurrently across multiple cores. Each worker is spawned
+ * with task_create (so it enters the shared ready ring and is migratable by any
+ * core's switch_to_next, exactly like a user app), races to atomically bump a
+ * shared counter, and ORs the core it observes into a shared mask. Pass = the
+ * counter is EXACT (no lost/duplicated updates under real cross-core concurrency)
+ * AND, when >1 CPU is online, more than one distinct core actually ran a worker.
+ * Gated behind `-append smpschedtest`. */
+#define SMPSCHED_TASKS 8
+#define SMPSCHED_ITERS 1500000
+static volatile long     smpsched_counter;
+static volatile unsigned smpsched_coremask;
+static volatile int      smpsched_done;
+static void smpsched_worker(void) {
+    for (long i = 0; i < SMPSCHED_ITERS; i++) {
+        __atomic_add_fetch(&smpsched_counter, 1, __ATOMIC_SEQ_CST);
+        if ((i & 8191) == 0) {                       /* sample the core we're on periodically */
+            int c = smp_current_cpu() & 31;
+            __atomic_or_fetch(&smpsched_coremask, 1u << c, __ATOMIC_SEQ_CST);
+        }
+    }
+    __atomic_add_fetch(&smpsched_done, 1, __ATOMIC_SEQ_CST);
+}
+static void smpsched_test(void) {
+    kprintf("[smpschedtest] spawning %d ordinary (pin_core=-1) tasks via the GENERAL scheduler...\n", SMPSCHED_TASKS);
+    smpsched_counter = 0; smpsched_coremask = 0; smpsched_done = 0;
+    for (int i = 0; i < SMPSCHED_TASKS; i++)
+        task_create(smpsched_worker, 0, 0);          /* cr3=0 => kernel address space (like the kstack test) */
+    uint64_t deadline = timer_ms() + 30000;          /* generous cap so a stall reports instead of hanging boot */
+    while (__atomic_load_n(&smpsched_done, __ATOMIC_SEQ_CST) < SMPSCHED_TASKS && timer_ms() < deadline)
+        task_yield();                                 /* task 0 is BSP-pinned; yielding lets a worker run here too */
+    long want = (long)SMPSCHED_TASKS * SMPSCHED_ITERS;
+    int distinct = 0;
+    for (unsigned m = smpsched_coremask; m; m &= m - 1) distinct++;   /* popcount (no libgcc in the freestanding kernel) */
+    int multi_ok = (smp_cpu_count <= 1) || (distinct > 1);   /* on a real uniprocessor, 1 core is correct */
+    kprintf("[smpschedtest] counter=%ld (want %ld), %d distinct core(s) used (mask=0x%x, %d online): %s\n",
+            smpsched_counter, want, distinct, smpsched_coremask, smp_cpu_count,
+            (smpsched_counter == want && smpsched_done == SMPSCHED_TASKS && multi_ok) ? "OK" : "FAIL");
+}
+
 void kmain(uint64_t mb_info, uint64_t magic) {
     console_init();
 
@@ -331,6 +376,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "wxtest"))     g_wx_test = 1;                /* deliberate W^X/NX enforcement test (M1501) */
         if (cmdline_has(cl, "smeptest"))   g_smep_test = 1;              /* deliberate SMEP enforcement test (M1502) */
         if (cmdline_has(cl, "smpthreadtest")) g_smpthread_test = 1;      /* real cross-core kernel-thread test (M1530) */
+        if (cmdline_has(cl, "smpschedtest"))  g_smpsched_test = 1;       /* general-scheduler cross-core migration test (M1862) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -425,6 +471,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         smep_test();
     if (g_smpthread_test)                  /* -append smpthreadtest: prove real cross-core kernel threads (M1530) */
         smpthread_test();
+    if (g_smpsched_test)                   /* -append smpschedtest: prove the general scheduler migrates ordinary tasks across cores (M1862) */
+        smpsched_test();
 
     preemption_demo();
     isolation_demo();

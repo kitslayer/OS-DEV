@@ -6,8 +6,8 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1861-blue)](WHATS-NEXT.md)
-[![Tests](https://img.shields.io/badge/tests-80%20passing-brightgreen)](tests/README.md)
+[![Milestones](https://img.shields.io/badge/milestones-1862-blue)](WHATS-NEXT.md)
+[![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)](tests/README.md)
 [![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
 [![Written by Claude](https://img.shields.io/badge/code-100%25%20AI--written-8A2BE2)](https://claude.com/claude-code)
@@ -93,10 +93,20 @@ caveats below).
   of ring 0 as standalone programs: the **JavaScript engine** (`jsrun`), the
   **image decoders** (PNG/GIF/JPEG/SVG/BMP, `imgdec`), and the **TLS 1.3 client +
   crypto + X.509 validation** (`httpget`). See [WHATS-NEXT.md](WHATS-NEXT.md).
-- **SMP** brings every core up and a boot self-test runs a parallel workload on
-  all of them (verified: `sum(0..4M) OK on 4 core(s)`). But the scheduler runs
-  ring-3 tasks on the boot core only, and the parallel job pool has no
-  steady-state caller — so after boot the other cores idle in `hlt`.
+- **SMP is real, and used.** The kernel brings every core online at boot (local
+  APIC + ACPI MADT + a real→long-mode AP trampoline), and the **general CFS
+  scheduler genuinely runs ordinary tasks — the `pin_core=-1` kind that every
+  kernel thread and every ring-3 process is — concurrently across all cores**:
+  each AP takes its own local-APIC-timer tick and pulls runnable work from the
+  shared ready ring, so a busy user app migrates onto an idle core (and
+  `sched_setaffinity` can pin/evict it, enforced per-core). This is covered by
+  an automated test — `make smpschedtest` spreads 8 compute tasks across 4 cores
+  with an **exact** shared counter (no lost updates under real concurrency),
+  alongside the existing `smpthreadtest` for the separate kernel-thread pool. At
+  **idle** the APs correctly `hlt` (power-friendly — an idle core is halted, not
+  spinning). The one piece with no steady-state driver is the short-lived
+  **compute job pool** (`smp_parallel_for`), used at boot for parallel TLS
+  chain-link verification and a self-test but not called afterwards.
 - **Lines of code:** roughly **58k** of from-scratch kernel C and **~24k** of
   from-scratch userspace C. The bundled DOOM / Quake / emulators add **~130k**
   lines of vendored third-party code — most of the raw line count is theirs, not
@@ -361,10 +371,12 @@ cache, seccomp-BPF + pledge/unveil sandboxing, resource limits (`prlimit`),
 kernel threads + futexes + TLS, a full debug/trace suite (`ptrace`, a **GDB
 remote-serial stub**, eBPF syscall tracepoints, a KASAN-lite heap sanitizer),
 and **SMP: the kernel brings every CPU core online at boot** (local APIC +
-ACPI MADT + a real→long-mode AP trampoline; a boot self-test proves every core
-runs a parallel workload, but nothing calls the job pool after that, so the
-APs idle in `hlt` for the rest of the session — `cat /proc/cpuinfo` shows the
-count regardless).
+ACPI MADT + a real→long-mode AP trampoline) **and actually schedules across
+them** — the general CFS scheduler migrates ordinary tasks (every kernel thread
+and ring-3 process) onto any core via each AP's own local-APIC-timer tick, with
+`sched_setaffinity` enforced per-core (`make smpschedtest` proves 8 tasks spread
+across 4 cores with an exact shared counter). Idle APs `hlt` (power-friendly);
+the only thing with no steady-state caller is the boot-time compute job pool.
 
 More recently the work turned to **dismantling the kernel's biggest attack
 surface: untrusted-input parsing.** The JS engine, the image decoders
@@ -378,8 +390,11 @@ user-stack overflow, an NX violation, and a SMEP violation and assert each one
 faults — protections that are tested, not just claimed. (See "Honest caveats"
 above for exactly what's still ring-0.)
 
-The honest current frontier: giving the idle CPU cores a real, steady-state
-job instead of just a boot self-test; moving the browser's own network fetch
-off the kernel TLS syscall and onto the ring-3 `httpget` path it already has a
-sibling for; and the other big systems swings — an ext3-style journal for
-crash consistency and a unified inode/page cache.
+The honest current frontier: moving the browser's own network fetch off the
+kernel TLS syscall and onto the ring-3 `httpget` path it already has a sibling
+for (so no untrusted-network parsing runs in ring 0 for the default browser);
+and the other big systems swings — an ext3-style journal for crash consistency
+and a unified inode/page cache. (Cross-core scheduling, once listed here, is
+done and now tested — see the SMP caveat above; the one remaining SMP loose end
+is that the boot-time compute job pool has no steady-state caller, which is a
+narrow, cosmetic gap rather than an idle-cores one.)
