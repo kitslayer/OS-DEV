@@ -156,6 +156,7 @@ int journal_commit(journal_t *j) {
     if (j->write(j->ctx, j_commit_lba(j), blk) < 0) return -1;
     /* 4. flush — COMMIT POINT: the transaction is now atomic across a crash */
     j_flush(j);
+    if (j->dbg_crash) { j->in_txn = 0; j->npend = 0; return 2; }  /* TEST: simulate a crash here */
     /* 5. checkpoint — copy each staged block to its real target LBA */
     for (int i = 0; i < n; i++)
         if (j->write(j->ctx, j->pend_lba[i], j->pend_buf[i]) < 0) return -1;

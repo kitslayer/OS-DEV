@@ -48,6 +48,10 @@ typedef struct {
     int      npend;       /* staged blocks in the open transaction */
     uint64_t pend_lba[JRNL_MAXTXN];
     uint8_t  pend_buf[JRNL_MAXTXN][JRNL_BLK];
+    int      dbg_crash;   /* TEST ONLY: if set, commit stops right AFTER the commit
+                             point (before checkpoint), returning 2 — simulates a
+                             power loss with a committed-but-uncheckpointed txn that
+                             journal_recover() must then replay. Zero in normal use. */
 } journal_t;
 
 /* Initialise an EMPTY journal (writes a clean/invalid descriptor). Call once

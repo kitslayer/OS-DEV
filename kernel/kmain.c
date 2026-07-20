@@ -35,6 +35,7 @@
 #include "rtc.h"    /* rtc_unix (M1175) */
 #include "dm.h"
 #include "ata.h"
+#include "journal.h"   /* write-ahead journal + its in-guest crash-recovery self-test (M1865) */
 #include "pci.h"
 #include "ahci.h"
 #include "virtio_blk.h"
@@ -225,6 +226,7 @@ static volatile int g_wx_test;                /* -append wxtest: prove W^X is en
 static volatile int g_smep_test;              /* -append smeptest: prove SMEP -- the kernel executing a ring-3 (user) page must fault (M1502) */
 static volatile int g_smpthread_test;         /* -append smpthreadtest: prove real cross-core kernel threads work (M1530) */
 static volatile int g_smpsched_test;          /* -append smpschedtest: prove the GENERAL (M1531) scheduler runs ordinary pin_core=-1 tasks across cores */
+static volatile int g_journal_test;           /* -append journalguest: prove the write-ahead journal + crash recovery on REAL ata hardware (M1865) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -356,6 +358,61 @@ static void smpsched_test(void) {
             (smpsched_counter == want && smpsched_done == SMPSCHED_TASKS && multi_ok) ? "OK" : "FAIL");
 }
 
+/* Write-ahead journal crash-recovery check on REAL ata hardware (M1865): the
+ * host journaltest proves the LOGIC under fault injection; this proves the same
+ * code drives an actual disk and survives a simulated power loss. mkfatfs
+ * reserves the disk tail [FS_SECTORS, TOTAL_SECTORS) = [130944, 131072) OUTSIDE
+ * the filesystem, so this touches only sectors the FS never uses. Journal region
+ * = [130944, 130944+JRNL_MINLEN); test targets sit past it, still in the tail.
+ * Gated behind `-append journalguest`. */
+static int jt_read(void *ctx, uint64_t lba, void *buf)        { (void)ctx; return ata_read((uint32_t)lba, 1, buf) < 0 ? -1 : 0; }
+static int jt_write(void *ctx, uint64_t lba, const void *buf) { (void)ctx; return ata_write((uint32_t)lba, 1, (void *)buf) < 0 ? -1 : 0; }
+static void jt_flush(void *ctx)                               { (void)ctx; ata_cache_flush(); }
+#define JT_JSTART 130944u                      /* = FS_SECTORS in tools/mkfatfs.c */
+#define JT_TGT0   131010u                      /* target sectors: past [jstart, jstart+64), still inside the reserved tail */
+static void journal_guest_test(void) {
+    journal_t j; memset(&j, 0, sizeof j);
+    j.read = jt_read; j.write = jt_write; j.flush = jt_flush;
+    j.jstart = JT_JSTART; j.jlen = JRNL_MINLEN;
+    uint8_t buf[512], got[512];
+    int ok = 1;
+
+    /* (1) format + a normal committed transaction: targets go OLD(0xA1) -> NEW(0xB2) */
+    if (journal_format(&j) != 0) ok = 0;
+    memset(buf, 0xA1, 512); ata_write(JT_TGT0, 1, buf); ata_write(JT_TGT0 + 1, 1, buf);
+    journal_begin(&j);
+    memset(buf, 0xB2, 512);
+    journal_write(&j, JT_TGT0, buf); journal_write(&j, JT_TGT0 + 1, buf);
+    int rc = journal_commit(&j);
+    ata_cache_flush();
+    ata_read(JT_TGT0,     1, got); int c0 = (got[0] == 0xB2 && got[511] == 0xB2);
+    ata_read(JT_TGT0 + 1, 1, got); int c1 = (got[0] == 0xB2 && got[511] == 0xB2);
+    int clean = (journal_recover(&j) == 0);     /* clean journal after a completed commit */
+
+    /* (2) CRASH case: commit stops right after the commit point (dbg_crash), so
+     * the targets stay OLD(0xC3) on disk but the journal holds a committed txn.
+     * journal_recover() must REPLAY it, making the targets NEW(0xD4). */
+    memset(buf, 0xC3, 512); ata_write(JT_TGT0, 1, buf); ata_write(JT_TGT0 + 1, 1, buf);
+    ata_cache_flush();
+    j.dbg_crash = 1;
+    journal_begin(&j);
+    memset(buf, 0xD4, 512);
+    journal_write(&j, JT_TGT0, buf); journal_write(&j, JT_TGT0 + 1, buf);
+    int crc = journal_commit(&j);               /* returns 2: committed, NOT checkpointed */
+    j.dbg_crash = 0;
+    ata_cache_flush();
+    ata_read(JT_TGT0, 1, got); int pre_old = (got[0] == 0xC3);   /* checkpoint really didn't run */
+    int rep = journal_recover(&j);              /* replay the committed txn */
+    ata_cache_flush();
+    ata_read(JT_TGT0,     1, got); int r0 = (got[0] == 0xD4 && got[511] == 0xD4);
+    ata_read(JT_TGT0 + 1, 1, got); int r1 = (got[0] == 0xD4 && got[511] == 0xD4);
+    int idem = (journal_recover(&j) == 0);      /* idempotent: nothing left to replay */
+
+    if (!(rc == 0 && c0 && c1 && clean && crc == 2 && pre_old && rep == 1 && r0 && r1 && idem)) ok = 0;
+    kprintf("[journalguest] commit rc=%d chk=%d,%d clean=%d | crash crc=%d preOLD=%d replay=%d new=%d,%d idem=%d: %s\n",
+            rc, c0, c1, clean, crc, pre_old, rep, r0, r1, idem, ok ? "OK" : "FAIL");
+}
+
 void kmain(uint64_t mb_info, uint64_t magic) {
     console_init();
 
@@ -377,6 +434,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "smeptest"))   g_smep_test = 1;              /* deliberate SMEP enforcement test (M1502) */
         if (cmdline_has(cl, "smpthreadtest")) g_smpthread_test = 1;      /* real cross-core kernel-thread test (M1530) */
         if (cmdline_has(cl, "smpschedtest"))  g_smpsched_test = 1;       /* general-scheduler cross-core migration test (M1862) */
+        if (cmdline_has(cl, "journalguest"))  g_journal_test = 1;        /* on-ata write-ahead-journal crash-recovery test (M1865) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -473,6 +531,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         smpthread_test();
     if (g_smpsched_test)                   /* -append smpschedtest: prove the general scheduler migrates ordinary tasks across cores (M1862) */
         smpsched_test();
+    if (g_journal_test)                    /* -append journalguest: prove the write-ahead journal + crash recovery on real ata (M1865) */
+        journal_guest_test();
 
     preemption_demo();
     isolation_demo();

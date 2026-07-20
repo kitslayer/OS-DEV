@@ -17,6 +17,15 @@
 
 #define SECTOR        512
 #define TOTAL_SECTORS 131072        /* 64 MiB image (DOOM IWAD ~4 MB + Quake pak ~18 MB + demos) */
+/* Reserve a tail region OUTSIDE the FAT32 volume for the write-ahead journal +
+ * its crash-recovery self-test (M1865). The image stays TOTAL_SECTORS, but the
+ * FAT32 filesystem is told it only owns FS_SECTORS, so the last JOURNAL_SECTORS
+ * sectors are physically present (ata can read/write them) yet the FS never
+ * touches them — a safe home for the journal. 128 sectors (64 KiB) >> the
+ * journal's minimum (JRNL_MINLEN=64) plus room for the self-test's target
+ * blocks. The kernel finds this region as [boot-sector-total_sec, disk_sectors). */
+#define JOURNAL_SECTORS 128
+#define FS_SECTORS      (TOTAL_SECTORS - JOURNAL_SECTORS)
 #define RESERVED      32
 #define NUM_FATS      2
 #define SPC           1             /* sectors per cluster */
@@ -1245,7 +1254,7 @@ int main(int argc, char **argv) {
     /* Solve for the FAT size (sectors) that covers the cluster count. */
     uint32_t fatsz = 1, clusters;
     for (;;) {
-        uint32_t data = TOTAL_SECTORS - RESERVED - NUM_FATS * fatsz;
+        uint32_t data = FS_SECTORS - RESERVED - NUM_FATS * fatsz;   /* FS owns FS_SECTORS; journal tail excluded */
         clusters = data / SPC;
         uint32_t need = ((clusters + 2) * 4 + SECTOR - 1) / SECTOR;
         if (need <= fatsz) break;
@@ -1273,7 +1282,7 @@ int main(int argc, char **argv) {
     put16(b + 24, 32);                            /* sectors per track */
     put16(b + 26, 2);                             /* heads */
     put32(b + 28, 0);                             /* hidden sectors */
-    put32(b + 32, TOTAL_SECTORS);                 /* total sectors 32 */
+    put32(b + 32, FS_SECTORS);                    /* total sectors 32 (FS volume; journal tail is beyond this) */
     put32(b + 36, fatsz);                         /* FAT size 32 */
     put16(b + 40, 0);                             /* ext flags */
     put16(b + 42, 0);                             /* fs version */
