@@ -99,6 +99,25 @@ static void fat_wr(uint32_t lba, const void *buf) {
     ata_write(lba, 1, buf);
 }
 
+/* Open a journaled transaction for one FS op. Returns 1 if journaling is active
+ * (caller MUST call fat_txn_end() with commit=1 on success / 0 on error), or 0
+ * if the op should just run direct (journal off, or another op owns it — the
+ * atomic claim serializes journaled ops without a yielding lock). Never nests:
+ * if a transaction is already open, returns 0 so the inner op writes through it. */
+static int fat_txn_begin_op(void) {
+    if (!g_fj_ready || g_fj_txn) return 0;
+    if (__atomic_exchange_n(&g_fj_busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
+    if (journal_begin(&g_fj) != 0) { __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE); return 0; }
+    g_fj_txn = 1;
+    return 1;
+}
+static void fat_txn_end(int commit) {
+    if (!g_fj_txn) return;
+    g_fj_txn = 0;
+    if (commit) journal_commit(&g_fj); else journal_abort(&g_fj);
+    __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE);
+}
+
 /* Current wall-clock packed into FAT16 date/time fields (date = y-1980<<9|mon<<5|day,
  * time = hour<<11|min<<5|sec/2), for stamping new directory entries. */
 static void fat_now(uint16_t *date, uint16_t *time) {
@@ -595,12 +614,7 @@ static long fat32_write(const char *name, const void *data, unsigned long len) {
      * that doesn't qualify (overwrite, huge file, journal busy/off) takes the
      * original direct path unchanged. */
     uint32_t meta_est = (nclus / 128 + 2) * (num_fats ? num_fats : 1) + 4;
-    int journaled = 0;
-    if (g_fj_ready && !exists && meta_est <= (uint32_t)(JRNL_MAXTXN - 4) &&
-        __atomic_exchange_n(&g_fj_busy, 1, __ATOMIC_ACQUIRE) == 0) {
-        if (journal_begin(&g_fj) == 0) { g_fj_txn = 1; journaled = 1; }
-        else __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE);
-    }
+    if (!exists && meta_est <= (uint32_t)(JRNL_MAXTXN - 4)) fat_txn_begin_op();  /* journal a new small file's create */
 
     fat32_delete(name);            /* no-op for a new file; drops an old copy otherwise (direct path only) */
 
@@ -627,14 +641,10 @@ static long fat32_write(const char *name, const void *data, unsigned long len) {
 
     if (failed) {
         free_chain(first);                             /* don't leak the data (staged frees discarded on abort) */
-        if (journaled) { g_fj_txn = 0; journal_abort(&g_fj); __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE); }
+        fat_txn_end(0);                                /* abort: nothing checkpointed -> FS untouched */
         return -1;
     }
-    if (journaled) {                                   /* atomically commit + checkpoint the metadata */
-        g_fj_txn = 0;
-        journal_commit(&g_fj);
-        __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE);
-    }
+    fat_txn_end(1);                                    /* atomically commit + checkpoint the metadata */
     return (long)len;
 }
 
@@ -644,8 +654,9 @@ static long fat32_mkdir(const char *path) {
     if (resolve(path, &dir, &leaf) < 0 || !leaf[0]) return -1;
     if (dir_find(dir, leaf, 0, 0, 0)) return -1;          /* already exists */
 
+    fat_txn_begin_op();                                   /* journal the directory create atomically (metadata; M1866) */
     uint32_t newcl = alloc_cluster();
-    if (!newcl) return -1;
+    if (!newcl) { fat_txn_end(0); return -1; }
 
     /* the new directory's first cluster holds just "." and ".." (rest zero) */
     uint8_t buf[64];
@@ -660,7 +671,8 @@ static long fat32_mkdir(const char *path) {
 
     uint8_t name83[11];
     to_83(leaf, name83);
-    if (add_entry(dir, name83, 0x10, newcl, 0) < 0) { fat_set(newcl, 0); return -1; }
+    if (add_entry(dir, name83, 0x10, newcl, 0) < 0) { fat_set(newcl, 0); fat_txn_end(0); return -1; }
+    fat_txn_end(1);
     return 0;
 }
 
