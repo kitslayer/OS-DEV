@@ -6,8 +6,8 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1863-blue)](WHATS-NEXT.md)
-[![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)](tests/README.md)
+[![Milestones](https://img.shields.io/badge/milestones-1864-blue)](WHATS-NEXT.md)
+[![Tests](https://img.shields.io/badge/tests-82%20passing-brightgreen)](tests/README.md)
 [![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
 [![Written by Claude](https://img.shields.io/badge/code-100%25%20AI--written-8A2BE2)](https://claude.com/claude-code)

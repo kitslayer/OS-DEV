@@ -10,7 +10,7 @@ cases + deterministic fuzzing.
 ## Running
 
 ```sh
-make check       # run all 72 suites (~5 min total)
+make check       # run all 73 suites (~5 min total)
 make jstest      # JS engine      — tests/js/suite.js vs the golden output
 make imgtest     # image decoders — tests/img/img_test.c   (jpeg/png/gif/bmp/inflate)
 make x509test    # X.509 parser   — tests/x509/x509_test.c
@@ -23,6 +23,7 @@ make pngenctest  # PNG encoder    — encoder vs the decoder, round-trip
 make ziptest     # ZIP extractor  — extraction + corrupt-input fuzz
 make tartest     # tar extractor  — extraction + corrupt-input fuzz
 make heaptest    # userspace malloc — umalloc.c alloc/free regression
+make journaltest # write-ahead journal — kernel/journal.c crash-consistency (power-loss injected at every write; never torn)
 make wavtest     # WAV header     — wav_parse over corrupt RIFF chunks
 make acpiamltest # AML parser     — tests/acpiaml (Alias/Field namespace correctness + truncated/random DSDT fuzz)
 make webptest    # WebP VP8L      — tests/webp (real cwebp round-trips + malformed-input fuzz)
