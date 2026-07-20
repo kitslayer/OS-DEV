@@ -26,6 +26,7 @@
  * It is purely READ-ONLY and never touches the boot FAT32 mount (fat32.c/vfs.c).
  */
 #include "blockdev.h"
+#include "bcache.h"    /* unified kernel-wide block cache (M1869) */
 #include "kheap.h"     /* kmalloc/kfree for blockdev_mount_pread's prefix temp (M1196) */
 #include "partition.h"
 #include "ext2.h"
@@ -132,7 +133,6 @@ static inline uint64_t irq_save(void) {
 static inline void irq_restore(uint64_t fl) {
     __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
 }
-static void bcache_flush(void);   /* defined with the buffer cache below */
 
 static void reg(const char *name, int (*read)(void *, uint64_t, uint32_t, void *),
                 int (*write)(void *, uint64_t, uint32_t, const void *),
@@ -226,49 +226,17 @@ static int raw_write(int i, uint64_t lba, uint32_t count, const void *buf) {
     return d->write(d->ctx, lba, count, buf) < 0 ? -1 : 0;
 }
 
-/* --- LRU buffer cache (M1095) ----------------------------------------------
- * A small pool of cached 512-byte blocks between the FS/swap and the drivers:
- * it absorbs repeated reads (the FAT walk re-reads the same metadata sectors
- * constantly) and gives blockdev_write a write-through coherence point. xv6's
- * bio.c in miniature. Indexed by (device, LBA), recency-ordered by a global
- * tick. Concurrency: the IRQ guard is held only across the fast scan/install
- * bookkeeping — never across disk I/O — and bread copies the block into the
- * CALLER's buffer (never hands out a pointer into a slot), so a later eviction
- * can never dangle. A duplicate slot for the same block under a race is benign
- * (identical bytes, write-through keeps both coherent). */
-#define BCACHE_N 64                  /* 64 * 512 B = 32 KiB of cache */
-static struct bce { int valid, dev; uint64_t lba, lru; uint8_t data[BLOCKDEV_SECSZ]; } g_bc[BCACHE_N];
-static uint64_t g_bc_clk, g_bc_hits, g_bc_miss, g_bc_wr;
-
-static void bcache_flush(void) {
-    uint64_t fl = irq_save();
-    for (int k = 0; k < BCACHE_N; k++) g_bc[k].valid = 0;
-    irq_restore(fl);
-}
+/* Block caching is the unified kernel-wide cache now (kernel/bcache.c, M1869):
+ * blockdev reads/writes go through it under the BLK owner namespace, sharing one
+ * 64 KiB LRU pool + one /proc/bcache stat with the ATA driver instead of keeping
+ * a private copy. Every lookup copies into the caller's buffer (no dangling on
+ * eviction) and writes are write-through, exactly as before. */
 
 /* Read one sector (dev i, lba) into dst, via the cache. */
 static int bread(int i, uint64_t lba, uint8_t *dst) {
-    uint64_t fl = irq_save();
-    for (int k = 0; k < BCACHE_N; k++)
-        if (g_bc[k].valid && g_bc[k].dev == i && g_bc[k].lba == lba) {   /* hit */
-            memcpy(dst, g_bc[k].data, BLOCKDEV_SECSZ);
-            g_bc[k].lru = ++g_bc_clk; g_bc_hits++;
-            irq_restore(fl); return 0;
-        }
-    irq_restore(fl);
-    /* miss: read into the caller's buffer with NO lock held (disk I/O blocks /
-     * needs IRQs), then install a copy into the LRU victim. */
-    if (raw_read(i, lba, 1, dst) < 0) return -1;
-    fl = irq_save();
-    int v = 0; uint64_t oldest = ~0ull;
-    for (int k = 0; k < BCACHE_N; k++) {
-        if (!g_bc[k].valid) { v = k; break; }
-        if (g_bc[k].lru < oldest) { oldest = g_bc[k].lru; v = k; }
-    }
-    g_bc[v].valid = 1; g_bc[v].dev = i; g_bc[v].lba = lba; g_bc[v].lru = ++g_bc_clk;
-    memcpy(g_bc[v].data, dst, BLOCKDEV_SECSZ);
-    g_bc_miss++;
-    irq_restore(fl);
+    if (bcache_lookup(BCACHE_OWNER_BLK(i), lba, dst)) return 0;      /* hit */
+    if (raw_read(i, lba, 1, dst) < 0) return -1;                    /* miss: read (no lock held) */
+    bcache_install(BCACHE_OWNER_BLK(i), lba, dst);
     return 0;
 }
 
@@ -282,47 +250,18 @@ int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf) {
 }
 
 int blockdev_write(int i, uint64_t lba, uint32_t count, const void *buf) {
+    /* Invalidate any cached copies of the written range BEFORE the write so a
+     * concurrent reader can't re-cache stale bytes, then write (M1869). Coherent
+     * + pollution-free (a big swap write won't evict the read cache). */
+    bcache_inval_range(BCACHE_OWNER_BLK(i), lba, count);
     if (raw_write(i, lba, count, buf) < 0) return -1;
-    /* write-through: refresh any cached sectors that overlap [lba, lba+count). */
-    const uint8_t *in = (const uint8_t *)buf;
-    uint64_t fl = irq_save();
-    for (uint32_t s = 0; s < count; s++) {
-        uint64_t l = lba + s;
-        for (int k = 0; k < BCACHE_N; k++)
-            if (g_bc[k].valid && g_bc[k].dev == i && g_bc[k].lba == l) {
-                memcpy(g_bc[k].data, in + (uint64_t)s * BLOCKDEV_SECSZ, BLOCKDEV_SECSZ);
-                break;
-            }
-    }
-    g_bc_wr += count;
-    irq_restore(fl);
     g_dev[i].wr_ios++; g_dev[i].wr_sectors += count;       /* /proc/diskstats (M1256) */
     return 0;
 }
 
 int blockdev_cache_format(char *out, int max) {
-    uint64_t hits, miss, wr; int used = 0;
-    uint64_t fl = irq_save();
-    hits = g_bc_hits; miss = g_bc_miss; wr = g_bc_wr;
-    for (int k = 0; k < BCACHE_N; k++) if (g_bc[k].valid) used++;
-    irq_restore(fl);
-    uint64_t total = hits + miss, pct = total ? hits * 100 / total : 0;
-    /* tiny local uint -> decimal */
-    int n = 0;
-    #define BC_PUT(s) do { for (const char *q = (s); *q && n + 1 < max; q++) out[n++] = *q; } while (0)
-    #define BC_NUM(v) do { char t[24]; int ti = 0; uint64_t x = (v); \
-        if (!x) t[ti++] = '0'; while (x) { t[ti++] = (char)('0' + x % 10); x /= 10; } \
-        while (ti && n + 1 < max) out[n++] = t[--ti]; } while (0)
-    BC_PUT("blockdev buffer cache (512-byte blocks)\n");
-    BC_PUT("Entries:\t"); BC_NUM((uint64_t)used); BC_PUT(" / "); BC_NUM((uint64_t)BCACHE_N); BC_PUT("\n");
-    BC_PUT("Hits:\t");    BC_NUM(hits); BC_PUT("\n");
-    BC_PUT("Misses:\t");  BC_NUM(miss); BC_PUT("\n");
-    BC_PUT("HitRate:\t"); BC_NUM(pct);  BC_PUT("%\n");
-    BC_PUT("Writes:\t");  BC_NUM(wr);   BC_PUT(" (write-through)\n");
-    #undef BC_PUT
-    #undef BC_NUM
-    if (n < max) out[n] = 0;
-    return n;
+    /* the unified kernel-wide block cache now backs every device (M1869) */
+    return bcache_stats(out, max);
 }
 
 /* Boot self-test (M1095): prove the write vtable + cache coherence + durability

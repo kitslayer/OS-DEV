@@ -6,7 +6,7 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1868-blue)](WHATS-NEXT.md)
+[![Milestones](https://img.shields.io/badge/milestones-1869-blue)](WHATS-NEXT.md)
 [![Tests](https://img.shields.io/badge/tests-84%20passing-brightgreen)](tests/README.md)
 [![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
@@ -39,8 +39,9 @@ caveats below).
   NVMe / virtio-blk, now with a from-scratch **write-ahead journal** so a file /
   directory create is **crash-atomic** (ext3-style ordered-mode metadata
   journaling with replay-on-mount — survives a power cut); ext2 + ISO-9660
-  readers; a VFS with `/proc` and `/dev`; and software **RAID-0/1/5 + a linear
-  (LVM-lite) volume manager**.
+  readers; a VFS with `/proc` and `/dev`; a **unified block cache** shared by
+  every device (one LRU pool, write-through); and software **RAID-0/1/5 + a
+  linear (LVM-lite) volume manager**.
 - **Networking:** ARP / IPv4 / ICMP / UDP / **TCP**, DNS, DHCP, and a
   **TLS 1.3 client** built on from-scratch X25519 / RSA / ECDSA / AES-GCM /
   ChaCha20-Poly1305 / SHA-2, with **X.509 chain validation to ~13 baked-in root

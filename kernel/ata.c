@@ -24,6 +24,7 @@
  * partition layer can enumerate every disk attached to the machine.
  */
 #include "ata.h"
+#include "bcache.h"   /* unified kernel-wide block cache (M1869) */
 #include "io.h"
 #include "console.h"
 #include "pci.h"
@@ -291,43 +292,20 @@ static int ata_read_drive_impl(int drive, uint32_t lba, uint32_t count, void *bu
  * write path (ata_write_drive) invalidates the sectors it touches, and all
  * access is inside ata_lock (so it is SMP-safe, same as the transfers). Only
  * count==1 reads are cached (the fat32 hot path); multi-sector reads bypass. */
-#define ACACHE_N 64                                  /* 64 * 512 B = 32 KiB */
-static struct { int valid, drive; uint32_t lba, lru; uint8_t data[SECTOR_SIZE]; } acache[ACACHE_N];
-static uint32_t acache_clk, acache_hits, acache_miss;
-
-static int acache_lookup(int drive, uint32_t lba, void *buf) {
-    for (int k = 0; k < ACACHE_N; k++)
-        if (acache[k].valid && acache[k].drive == drive && acache[k].lba == lba) {
-            memcpy(buf, acache[k].data, SECTOR_SIZE);
-            acache[k].lru = ++acache_clk; acache_hits++;
-            return 1;
-        }
-    return 0;
-}
-static void acache_fill(int drive, uint32_t lba, const void *buf) {
-    int victim = 0; uint32_t best = 0xFFFFFFFFu;
-    for (int k = 0; k < ACACHE_N; k++) {
-        if (!acache[k].valid) { victim = k; break; }
-        if (acache[k].lru < best) { best = acache[k].lru; victim = k; }
-    }
-    acache[victim].valid = 1; acache[victim].drive = drive; acache[victim].lba = lba;
-    acache[victim].lru = ++acache_clk; memcpy(acache[victim].data, buf, SECTOR_SIZE);
-}
-static void acache_invalidate(int drive, uint32_t lba, uint32_t count) {
-    for (int k = 0; k < ACACHE_N; k++)
-        if (acache[k].valid && acache[k].drive == drive &&
-            acache[k].lba >= lba && acache[k].lba < lba + count)
-            acache[k].valid = 0;
-}
-/* Drop everything (e.g. before a DMA write path that bypasses ata_write_drive). */
-void ata_cache_flush(void) { ata_lock_take(); for (int k = 0; k < ACACHE_N; k++) acache[k].valid = 0; ata_lock_give(); }
-void ata_cache_stats(uint32_t *hits, uint32_t *miss) { if (hits) *hits = acache_hits; if (miss) *miss = acache_miss; }
+/* Block caching moved to the unified kernel-wide cache (kernel/bcache.c, M1869):
+ * ata reads/writes go through it under the ATA owner namespace, so the boot disk
+ * shares one 64 KiB LRU pool + one /proc/bcache stat with every other block
+ * device instead of ata keeping a private 32 KiB copy. Behaviour is unchanged —
+ * single-sector read cache + write-through invalidation. */
+/* Drop everything (e.g. before a DMA write path that bypasses ata_write_drive,
+ * and the journal's flush hook). */
+void ata_cache_flush(void) { bcache_flush(); }
 
 int ata_read_drive(int drive, uint32_t lba, uint32_t count, void *buf) {
     ata_lock_take();
-    if (count == 1 && acache_lookup(drive, lba, buf)) { ata_lock_give(); return 0; }
+    if (count == 1 && bcache_lookup(BCACHE_OWNER_ATA(drive), lba, buf)) { ata_lock_give(); return 0; }
     int r = ata_read_drive_impl(drive, lba, count, buf);
-    if (r >= 0 && count == 1) { acache_miss++; acache_fill(drive, lba, buf); }
+    if (r >= 0 && count == 1) bcache_install(BCACHE_OWNER_ATA(drive), lba, buf);
     ata_lock_give();
     return r;
 }
@@ -362,7 +340,7 @@ static int ata_write_drive_impl(int drive, uint32_t lba, uint32_t count, const v
 
 int ata_write_drive(int drive, uint32_t lba, uint32_t count, const void *buf) {
     ata_lock_take();
-    acache_invalidate(drive, lba, count);            /* keep the read cache coherent (M1855) */
+    bcache_inval_range(BCACHE_OWNER_ATA(drive), lba, count);   /* keep the read cache coherent (M1855/M1869) */
     int r = ata_write_drive_impl(drive, lba, count, buf);
     ata_lock_give();
     return r;
@@ -384,11 +362,11 @@ void ata_cache_selftest(void) {
     if (ata_read_drive(0, lba, 1, save) < 0) { kprintf("[ata-cache] save read failed; skipping\n\n"); return; }
     for (int i = 0; i < SECTOR_SIZE; i++) { pa[i] = (uint8_t)(i * 7 + 1); pb[i] = (uint8_t)(i * 13 + 2); }
 
-    uint32_t h0, m0; ata_cache_stats(&h0, &m0);
+    uint64_t h0, m0; bcache_counts(&h0, &m0);         /* unified block cache (M1869) */
     ata_write_drive(0, lba, 1, pa);                  /* write A (invalidates) */
     ata_read_drive(0, lba, 1, rd); int okA   = (memcmp(rd, pa, SECTOR_SIZE) == 0);   /* miss -> fresh A */
     ata_read_drive(0, lba, 1, rd); int okHit = (memcmp(rd, pa, SECTOR_SIZE) == 0);   /* hit  -> A */
-    uint32_t h1, m1; ata_cache_stats(&h1, &m1);
+    uint64_t h1, m1; bcache_counts(&h1, &m1);
     ata_write_drive(0, lba, 1, pb);                  /* write B: must invalidate the cached A */
     ata_read_drive(0, lba, 1, rd); int okInv = (memcmp(rd, pb, SECTOR_SIZE) == 0);   /* NOT stale A */
     ata_write_drive(0, lba, 1, save);                /* restore the original bytes */
@@ -654,7 +632,7 @@ static int ata_dma_xfer_impl(int drive, uint32_t lba, uint32_t count, void *buf,
  * controller must not interleave either. */
 static int ata_dma_xfer(int drive, uint32_t lba, uint32_t count, void *buf, int write) {
     ata_lock_take();
-    if (write) acache_invalidate(drive, lba, count);   /* DMA write bypasses ata_write_drive — invalidate too (M1855) */
+    if (write) bcache_inval_range(BCACHE_OWNER_ATA(drive), lba, count);   /* DMA write bypasses ata_write_drive — invalidate too (M1855/M1869) */
     int r = ata_dma_xfer_impl(drive, lba, count, buf, write);
     ata_lock_give();
     return r;
