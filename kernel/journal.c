@@ -131,6 +131,15 @@ int journal_write(journal_t *j, uint64_t lba, const void *buf) {
 
 void journal_abort(journal_t *j) { if (j) { j->in_txn = 0; j->npend = 0; } }
 
+int journal_peek(journal_t *j, uint64_t lba, void *buf) {
+    if (!j || !j->in_txn) return 0;
+    for (int i = 0; i < j->npend; i++)
+        if (j->pend_lba[i] == lba) { memcpy(buf, j->pend_buf[i], JRNL_BLK); return 1; }
+    return 0;
+}
+
+int journal_room(journal_t *j) { return (j && j->in_txn) ? (JRNL_MAXTXN - j->npend) : 0; }
+
 int journal_commit(journal_t *j) {
     if (!j || !j->in_txn) return -1;
     int n = j->npend;

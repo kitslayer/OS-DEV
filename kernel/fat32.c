@@ -17,6 +17,7 @@
 #include "ata.h"
 #include "rtc.h"
 #include "string.h"
+#include "journal.h"    /* write-ahead journal: crash-consistent metadata writes (M1866) */
 #include <stdint.h>
 
 #define SECSZ 512
@@ -32,6 +33,29 @@ static uint32_t num_fats;
 static uint32_t fat_sectors;   /* sectors per FAT */
 static uint32_t total_clusters; /* count of data clusters on the volume */
 static uint32_t alloc_hint = 2; /* where the next free-cluster scan starts (set on free) */
+
+/* --- write-ahead journal for crash-consistent metadata writes (M1866) ---------
+ * A filesystem-mutating op (create a file = allocate FAT clusters + write the
+ * data + add a directory entry) is many sector writes; a power loss between them
+ * tears the volume. So a journaled op opens a transaction (g_fj_txn=1): every
+ * single-sector write funnels through fat_wr() -> journal_write() (STAGED, not on
+ * disk yet), and every single-sector read (all go through ata_read_retry) first
+ * peeks the staged blocks so a read-modify-write inside the op sees its own
+ * earlier writes (fat_set touches two entries in one FAT sector; a chain link
+ * re-reads it). journal_commit() then atomically logs + checkpoints them. The
+ * journal lives in the disk tail mkfatfs reserves OUTSIDE the FS ([tot_sec,
+ * tot_sec+JRNL_MINLEN); see M1865). Journal-region I/O + checkpoint go straight to
+ * disk via the jf_* backend below. On mount, journal_recover() replays a
+ * committed-but-uncheckpointed transaction (a crash mid-checkpoint) or discards an
+ * uncommitted one (a crash before commit — the FS was never touched). */
+static journal_t g_fj;
+static int g_fj_ready;          /* journal formatted/recovered and usable */
+static int g_fj_txn;            /* a filesystem-op transaction is open */
+/* Claimed atomically so only ONE journaled op runs at a time: on SMP a second
+ * concurrent writer just falls back to the direct (non-journaled) path rather
+ * than corrupting the shared transaction buffer — no yielding lock (which would
+ * deadlock against ata_lock's own yield). */
+static volatile int g_fj_busy;
 
 static uint16_t rd16(const uint8_t *p) { return p[0] | p[1] << 8; }
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
@@ -52,9 +76,27 @@ static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | 
  * ata_write call sites are untouched (a partially-applied retried write has
  * a different correctness story, and nothing here shows write-side flakiness). */
 static int ata_read_retry(uint32_t lba, uint8_t count, void *buf) {
+    /* Inside a journaled op, a single-sector read must see any block this op has
+     * already STAGED (not the stale on-disk copy) — else e.g. a chain-link
+     * fat_set would re-read a FAT sector and undo the just-allocated entry. */
+    if (g_fj_txn && count == 1 && journal_peek(&g_fj, lba, buf)) return 0;
     int r = -1;
     for (int attempt = 0; attempt < 3 && r < 0; attempt++) r = ata_read(lba, count, buf);
     return r;
+}
+
+/* journal backend: the journal's OWN region I/O + its checkpoint writes go
+ * straight to disk (they must not re-enter the transaction). */
+static int  jf_bread(void *c, uint64_t lba, void *buf)        { (void)c; return ata_read((uint32_t)lba, 1, buf) < 0 ? -1 : 0; }
+static int  jf_bwrite(void *c, uint64_t lba, const void *buf) { (void)c; return ata_write((uint32_t)lba, 1, (void *)buf) < 0 ? -1 : 0; }
+static void jf_bflush(void *c)                                { (void)c; ata_cache_flush(); }
+
+/* fat32's single-sector write funnel: STAGE into the open transaction (so the op
+ * is atomic), else write straight through. If staging ever fails (txn full — the
+ * caller's size guard prevents this), fall back to a direct write. */
+static void fat_wr(uint32_t lba, const void *buf) {
+    if (g_fj_txn && journal_write(&g_fj, lba, buf) == 0) return;
+    ata_write(lba, 1, buf);
 }
 
 /* Current wall-clock packed into FAT16 date/time fields (date = y-1980<<9|mon<<5|day,
@@ -272,7 +314,7 @@ static int add_entry(uint32_t dircl, const uint8_t name83[11], uint8_t attr,
                       e[14] = ft; e[15] = ft >> 8; e[16] = fd; e[17] = fd >> 8;   /* create */
                       e[18] = fd; e[19] = fd >> 8;                                /* access */
                       e[22] = ft; e[23] = ft >> 8; e[24] = fd; e[25] = fd >> 8; } /* write  */
-                    ata_write(firsts + s, 1, sec);
+                    fat_wr(firsts + s, sec);      /* dir entry: journaled metadata (M1866) */
                     return 0;
                 }
             }
@@ -460,7 +502,7 @@ static void fat_set(uint32_t cl, uint32_t val) {
         if (ata_read_retry(s, 1, sec) < 0) return;
         uint32_t nv = (rd32(sec + fo) & 0xF0000000u) | (val & 0x0FFFFFFFu);
         sec[fo] = nv; sec[fo+1] = nv>>8; sec[fo+2] = nv>>16; sec[fo+3] = nv>>24;
-        ata_write(s, 1, sec);
+        fat_wr(s, sec);                       /* FAT entry: journaled metadata (M1866) */
     }
 }
 
@@ -531,34 +573,67 @@ static long fat32_delete(const char *name);          /* forward decl */
 static long fat32_write(const char *name, const void *data, unsigned long len) {
     uint32_t dir; const char *leaf;
     if (resolve(name, &dir, &leaf) < 0 || !leaf[0]) return -1;
+    int exists = 0;
     { uint32_t fc; int isdir = 0; uint32_t sz;            /* refuse to overwrite a DIRECTORY with a file: else the */
-      if (dir_find(dir, leaf, &fc, &isdir, &sz) && isdir) /* fat32_delete below either fails on a non-empty dir (leaving a */
-          return -1;                                      /* duplicate same-name entry) or silently rmdir's an empty one. */
+      if (dir_find(dir, leaf, &fc, &isdir, &sz)) {        /* fat32_delete below either fails on a non-empty dir (leaving a */
+          if (isdir) return -1;                           /* duplicate same-name entry) or silently rmdir's an empty one. */
+          exists = 1;
+      }
     }
-    fat32_delete(name);            /* replace, don't duplicate: drop any old copy (a regular file) */
 
     uint32_t csize = sec_per_clus * SECSZ;
     uint32_t nclus = (uint32_t)((len + csize - 1) / csize);
     if (nclus == 0) nclus = 1;
 
+    /* Journal the create ATOMICALLY (M1866) iff: the journal is up; the file is
+     * NEW (no old chain to free -> the transaction holds only this create's
+     * METADATA, ordered-mode: data clusters are written direct BEFORE the commit,
+     * only the FAT entries + directory entry are journaled); that metadata fits
+     * one transaction; and no other journaled op is in flight (atomic claim). A
+     * crash before commit leaves the FS untouched (data written to still-free
+     * clusters is harmless); a crash after leaves the file fully present. Any op
+     * that doesn't qualify (overwrite, huge file, journal busy/off) takes the
+     * original direct path unchanged. */
+    uint32_t meta_est = (nclus / 128 + 2) * (num_fats ? num_fats : 1) + 4;
+    int journaled = 0;
+    if (g_fj_ready && !exists && meta_est <= (uint32_t)(JRNL_MAXTXN - 4) &&
+        __atomic_exchange_n(&g_fj_busy, 1, __ATOMIC_ACQUIRE) == 0) {
+        if (journal_begin(&g_fj) == 0) { g_fj_txn = 1; journaled = 1; }
+        else __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE);
+    }
+
+    fat32_delete(name);            /* no-op for a new file; drops an old copy otherwise (direct path only) */
+
     /* allocate a cluster chain and write the data into it */
     uint32_t first = 0, prev = 0;
     const uint8_t *p = data;
     unsigned long rem = len;
+    int failed = 0;
     for (uint32_t i = 0; i < nclus; i++) {
         uint32_t cl = alloc_cluster();
-        if (!cl) { free_chain(first); return -1; }    /* disk full: free partial chain */
+        if (!cl) { failed = 1; break; }               /* disk full */
         if (i == 0) first = cl; else fat_set(prev, cl);
         uint32_t chunk = rem > csize ? csize : (uint32_t)rem;
-        write_cluster(cl, p, chunk);
+        write_cluster(cl, p, chunk);                   /* DATA: direct, ordered-mode */
         p += chunk; rem -= chunk;
         prev = cl;
     }
 
-    uint8_t name83[11];
-    to_83(leaf, name83);
-    if (add_entry(dir, name83, 0x20, first, (uint32_t)len) < 0) {
-        free_chain(first); return -1;                 /* dir full: don't leak the data */
+    if (!failed) {
+        uint8_t name83[11];
+        to_83(leaf, name83);
+        if (add_entry(dir, name83, 0x20, first, (uint32_t)len) < 0) failed = 1;   /* dir full */
+    }
+
+    if (failed) {
+        free_chain(first);                             /* don't leak the data (staged frees discarded on abort) */
+        if (journaled) { g_fj_txn = 0; journal_abort(&g_fj); __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE); }
+        return -1;
+    }
+    if (journaled) {                                   /* atomically commit + checkpoint the metadata */
+        g_fj_txn = 0;
+        journal_commit(&g_fj);
+        __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE);
     }
     return (long)len;
 }
@@ -722,7 +797,7 @@ static long fat32_delete(const char *name) {
                 }
                 free_chain(fc);              /* free the cluster chain (guarded) */
                 e[0] = 0xE5;                 /* mark the dir entry deleted */
-                ata_write(firsts + s, 1, sec);
+                fat_wr(firsts + s, sec);     /* dir entry: journaled metadata (M1866) */
                 return 0;
             }
         }
@@ -789,7 +864,7 @@ static long fat32_rename(const char *path, const char *newname) {
                 for (int i = 0; i < 11; i++) if (e[i] != want[i]) { eq = 0; break; }
                 if (!eq) continue;
                 for (int i = 0; i < 11; i++) e[i] = new83[i];   /* the ONLY mutation: bytes [0..10] (name) */
-                ata_write(firsts + s, 1, sec);                  /* write back ONLY this sector */
+                fat_wr(firsts + s, sec);                        /* dir entry write-back: journaled metadata (M1866) */
                 return 0;
             }
         }
@@ -852,6 +927,60 @@ int fat32_mount(void) {
     if (root_cluster < 2) return -1;                            /* corrupt BPB: a root cluster of 0/1 would underflow cluster_to_sector */
     alloc_hint = 2;
 
+    /* Set up the write-ahead journal in the disk tail mkfatfs reserves OUTSIDE
+     * the FS: [tot_sec, tot_sec+JRNL_MINLEN) (M1865). journal_recover() replays a
+     * transaction a prior crash left committed-but-uncheckpointed, or discards an
+     * uncommitted one. If the region isn't there (recover's read fails on a disk
+     * with no reserved tail) journaling just stays off and writes go direct. A
+     * fresh mkfatfs image has the region zeroed, which reads as "clean". */
+    g_fj.read = jf_bread; g_fj.write = jf_bwrite; g_fj.flush = jf_bflush; g_fj.ctx = 0;
+    g_fj.jstart = tot_sec; g_fj.jlen = JRNL_MINLEN;
+    g_fj_txn = 0; g_fj_ready = 0;
+    if (tot_sec >= 2 && journal_recover(&g_fj) >= 0) g_fj_ready = 1;
+
     vfs_register(&fat32_ops);
     return 0;
+}
+
+/* In-guest proof that a REAL file create on the live FS is crash-atomic (M1866,
+ * `-append fatjournaltest`). Creates a file with a simulated power loss right
+ * after the journal commit point (dbg_crash) — so the metadata is committed to
+ * the journal but NOT yet checkpointed, and the file is invisible on disk — then
+ * runs journal_recover() and asserts the file appears with the exact content
+ * (the transaction was replayed), and that recovery is idempotent. */
+extern void kprintf(const char *fmt, ...);
+int fat32_journal_selftest(void) {
+    if (!g_fj_ready) { kprintf("[fatjournal] journal not ready (no reserved tail?): SKIP\n"); return -2; }
+    const char *nm = "JRNLTEST.TXT";
+    char content[48]; int cl = 0;
+    for (const char *s = "journaled-atomic-create-ok-M1866"; *s; s++) content[cl++] = *s;
+
+    fat32_delete(nm);                        /* clean slate */
+    /* (0) a NORMAL journaled create: commit + checkpoint -> immediately visible + correct */
+    char rb0[64];
+    fat32_write(nm, content, (unsigned long)cl);
+    long n0 = fat32_read(nm, rb0, sizeof rb0);
+    int normal_ok = (n0 == cl);
+    for (int i = 0; i < cl && normal_ok; i++) if (rb0[i] != content[i]) normal_ok = 0;
+    fat32_delete(nm);
+
+    /* (1) crash right after the commit point: committed to the journal, NOT checkpointed */
+    g_fj.dbg_crash = 1;
+    fat32_write(nm, content, (unsigned long)cl);
+    g_fj.dbg_crash = 0;
+
+    char rb[64];
+    long pre = fat32_read(nm, rb, sizeof rb);          /* must be invisible (dir entry never hit disk) */
+    int not_visible = (pre <= 0);
+    int rep = journal_recover(&g_fj);                  /* replay -> checkpoint the metadata */
+    long n = fat32_read(nm, rb, sizeof rb);            /* now the file must be there, exact content */
+    int content_ok = (n == cl);
+    for (int i = 0; i < cl && content_ok; i++) if (rb[i] != content[i]) content_ok = 0;
+    int idem = (journal_recover(&g_fj) == 0);          /* nothing left to replay */
+    fat32_delete(nm);                                  /* clean up */
+
+    int ok = (normal_ok && not_visible && rep == 1 && content_ok && idem);
+    kprintf("[fatjournal] normal_create=%d | crash-create pre_invisible=%d replayed=%d content_ok=%d(n=%ld) idem=%d: %s\n",
+            normal_ok, not_visible, rep, content_ok, n, idem, ok ? "OK" : "FAIL");
+    return ok ? 0 : -1;
 }

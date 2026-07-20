@@ -72,4 +72,13 @@ int  journal_write(journal_t *j, uint64_t lba, const void *buf);
 int  journal_commit(journal_t *j);
 void journal_abort(journal_t *j);
 
+/* Read-back of a block STAGED in the current (open) transaction. A filesystem
+ * doing read-modify-write inside a transaction (e.g. two FAT entries in one
+ * sector) must see its own earlier staged write, not the stale on-disk version.
+ * Returns 1 and fills buf if lba is staged; 0 otherwise. */
+int  journal_peek(journal_t *j, uint64_t lba, void *buf);
+
+/* Blocks the open transaction can still take before it is full (0 => no txn). */
+int  journal_room(journal_t *j);
+
 #endif

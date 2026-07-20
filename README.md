@@ -6,8 +6,8 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1865-blue)](WHATS-NEXT.md)
-[![Tests](https://img.shields.io/badge/tests-83%20passing-brightgreen)](tests/README.md)
+[![Milestones](https://img.shields.io/badge/milestones-1866-blue)](WHATS-NEXT.md)
+[![Tests](https://img.shields.io/badge/tests-84%20passing-brightgreen)](tests/README.md)
 [![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
 [![Written by Claude](https://img.shields.io/badge/code-100%25%20AI--written-8A2BE2)](https://claude.com/claude-code)
@@ -392,10 +392,14 @@ user-stack overflow, an NX violation, and a SMEP violation and assert each one
 faults — protections that are tested, not just claimed. (See "Honest caveats"
 above for exactly what's still ring-0.)
 
-The honest current frontier: the big filesystem systems-swings — an ext3-style
-journal for crash consistency and a unified inode/page cache. (Two items once
-listed here are done: **cross-core scheduling** works and is now tested — M1862,
-see the SMP caveat above; and the **browser's HTTPS fetch now runs in ring 3** —
-M1863, so no TLS/crypto/X.509 runs in the kernel for the default browser. The one
-remaining SMP loose end is that the boot-time compute job pool has no steady-state
-caller, a narrow cosmetic gap rather than an idle-cores one.)
+The honest current frontier: a **unified inode/page cache** (the block buffer
+cache is the seed), and extending the new crash-consistency journal to the rest
+of the filesystem write path. (Several items once listed here are done:
+**cross-core scheduling** works and is now tested — M1862; the **browser's HTTPS
+fetch now runs in ring 3** — M1863, so no TLS/crypto/X.509 runs in the kernel for
+the default browser; and a from-scratch **write-ahead journal** now makes a real
+FAT32 file create **crash-atomic** — M1864-M1866, ext3-style ordered-mode metadata
+journaling with replay-on-mount, proven under host fault-injection *and* in-guest
+on real hardware. Extending the journal to `rm`/`mkdir`/`rename`/overwrite is
+mechanical follow-on. The one remaining SMP loose end is that the boot-time
+compute job pool has no steady-state caller — a narrow cosmetic gap.)

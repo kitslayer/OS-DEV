@@ -227,6 +227,7 @@ static volatile int g_smep_test;              /* -append smeptest: prove SMEP --
 static volatile int g_smpthread_test;         /* -append smpthreadtest: prove real cross-core kernel threads work (M1530) */
 static volatile int g_smpsched_test;          /* -append smpschedtest: prove the GENERAL (M1531) scheduler runs ordinary pin_core=-1 tasks across cores */
 static volatile int g_journal_test;           /* -append journalguest: prove the write-ahead journal + crash recovery on REAL ata hardware (M1865) */
+static volatile int g_fatjournal_test;        /* -append fatjournaltest: prove a live FAT32 file create is crash-atomic (M1866) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -435,6 +436,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "smpthreadtest")) g_smpthread_test = 1;      /* real cross-core kernel-thread test (M1530) */
         if (cmdline_has(cl, "smpschedtest"))  g_smpsched_test = 1;       /* general-scheduler cross-core migration test (M1862) */
         if (cmdline_has(cl, "journalguest"))  g_journal_test = 1;        /* on-ata write-ahead-journal crash-recovery test (M1865) */
+        if (cmdline_has(cl, "fatjournaltest")) g_fatjournal_test = 1;    /* live FAT32 create crash-atomicity test (M1866) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -533,6 +535,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         smpsched_test();
     if (g_journal_test)                    /* -append journalguest: prove the write-ahead journal + crash recovery on real ata (M1865) */
         journal_guest_test();
+    /* g_fatjournal_test runs AFTER fat32_mount() below (it needs the FS mounted) */
 
     preemption_demo();
     isolation_demo();
@@ -581,6 +584,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     /* Mount the FAT32 disk and show it works from the kernel side. */
     if (fat32_mount() == 0) {
         kprintf("[ ok ] mounted FAT32 volume (ATA primary master).\n\n");
+        if (g_fatjournal_test)             /* -append fatjournaltest: live FAT32 create crash-atomicity (M1866) */
+            fat32_journal_selftest();
         vfs_dirent ents[32];
         int n = vfs_list(ents, 32);
         kprintf("  / contains %d file(s):\n", n);

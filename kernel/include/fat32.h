@@ -4,3 +4,4 @@
 /* Read the boot sector from the ATA disk, validate FAT32, and register with
  * the VFS. Returns 0 on success, -1 if no valid FAT32 volume was found. */
 int fat32_mount(void);
+int fat32_journal_selftest(void);   /* -append fatjournaltest: prove a live file create is crash-atomic (M1866) */
