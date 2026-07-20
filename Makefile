@@ -370,19 +370,29 @@ $(BUILD)/imgview.elf: user/imgview.c kernel/png.c kernel/gif.c kernel/jpeg.c ker
 # --- webview (the from-scratch web browser, running in RING 3) -----------------
 # Headline ring-0 -> ring-3 migration: browser.c + js.c + image decoders + HTML/
 # CSS/URL parsers built for ring 3 (-DBROWSER_RING3 / -DJS_RING3), so the untrusted
-# HTML/CSS/JS/image parsing runs OUTSIDE the kernel. Network/TLS stay in the kernel
-# (fetch via SYS_http/SYS_https syscalls, shimmed in webview.c). A parser bug now
-# crashes only this ring-3 process. SSE: js.c uses IEEE-754 doubles.
+# HTML/CSS/JS/image parsing runs OUTSIDE the kernel. A parser bug now crashes only
+# this ring-3 process. As of M1863 the HTTPS fetch path is ALSO ring 3: tls.c + the
+# crypto/X.509 stack (the same proven objects httpget links) are compiled in, so the
+# browser no longer calls the kernel's SYS_https (its TLS/crypto/cert-validation runs
+# here, in ring 3). Plain http:// still uses SYS_http (no crypto/X.509 there). SSE:
+# js.c uses IEEE-754 doubles; the integer-only crypto is built -mgeneral-regs-only.
 WEBVIEW_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -std=gnu11 -O2 -msse2 -mfpmath=sse -Ikernel/include -Iuser -w
 WEBVIEW_PARSERS = png gif jpeg bmp svg webp inflate font http cssprop color url htmlentity htmlattr reader
-$(BUILD)/webview.elf: user/webview.c kernel/browser.c kernel/js.c $(patsubst %,kernel/%.c,$(WEBVIEW_PARSERS)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
+# Ring-3 TLS 1.3 + crypto + X.509 for the browser's HTTPS fetch (M1863). Same set +
+# flags httpget uses (integer-only -> -mgeneral-regs-only). url.c is already linked
+# via WEBVIEW_PARSERS, so tls.c's url_host_port() resolves without adding it here.
+WEBVIEW_TLS_CC = $(CC) -ffreestanding -nostdlib -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -std=gnu11 -O2 -Ikernel/include -w
+WEBVIEW_CRYPTO = aes aesgcm bignum chachapoly ecdsa hkdf rsa sha256 sha512 x25519 x509 rootca
+$(BUILD)/webview.elf: user/webview.c kernel/browser.c kernel/js.c $(patsubst %,kernel/%.c,$(WEBVIEW_PARSERS)) kernel/tls.c $(patsubst %,kernel/%.c,$(WEBVIEW_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o user/user.ld Makefile
 	@mkdir -p $(BUILD)
 	$(WEBVIEW_CC) -DBROWSER_RING3 -c kernel/browser.c -o $(BUILD)/webview_browser.o
 	$(WEBVIEW_CC) -DJS_RING3 -DJS_ARENA=16777216 -c kernel/js.c -o $(BUILD)/webview_js.o
 	@for m in $(WEBVIEW_PARSERS); do echo "  CC kernel/$$m.c (ring-3 browser)"; extra=""; [ "$$m" = "jpeg" ] && extra="-DJPEG_THREADED"; [ "$$m" = "png" ] && extra="-DPNG_THREADED"; [ "$$m" = "gif" ] && extra="-DGIF_THREADED"; $(WEBVIEW_CC) $$extra -c kernel/$$m.c -o $(BUILD)/webview_$$m.o || exit 1; done
+	$(WEBVIEW_TLS_CC) -DTLS_RING3 -c kernel/tls.c -o $(BUILD)/webview_tls.o
+	@for m in $(WEBVIEW_CRYPTO); do echo "  CC kernel/$$m.c (ring-3 browser TLS/crypto)"; extra=""; [ "$$m" = "aes" ] && extra="-DAES_RING3"; [ "$$m" = "ecdsa" ] && extra="-DECDSA_RING3"; $(WEBVIEW_TLS_CC) $$extra -c kernel/$$m.c -o $(BUILD)/webview_$$m.o || exit 1; done
 	$(WEBVIEW_CC) -c user/webview.c -o $(BUILD)/webview_app.o
-	$(LD) -T user/user.ld -o $@ $(BUILD)/webview_app.o $(BUILD)/webview_browser.o $(BUILD)/webview_js.o $(patsubst %,$(BUILD)/webview_%.o,$(WEBVIEW_PARSERS)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
-	@echo "Built $@ (ring-3 web browser)"
+	$(LD) -T user/user.ld -o $@ $(BUILD)/webview_app.o $(BUILD)/webview_browser.o $(BUILD)/webview_js.o $(patsubst %,$(BUILD)/webview_%.o,$(WEBVIEW_PARSERS)) $(BUILD)/webview_tls.o $(patsubst %,$(BUILD)/webview_%.o,$(WEBVIEW_CRYPTO)) $(BUILD)/user_ulib.o $(BUILD)/user_umalloc.o
+	@echo "Built $@ (ring-3 web browser + ring-3 TLS)"
 
 # --- httpget (the from-scratch TLS 1.3 client, running in RING 3) -------------
 # Third step of the ring-0->ring-3 move: tls.c + its crypto (X25519/ECDSA/RSA/

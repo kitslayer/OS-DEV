@@ -19,6 +19,7 @@
  */
 #include "ulib.h"
 #include "browser.h"
+#include "net.h"     /* tcp_conn + the tcp_* prototypes tls.c's TCP shims implement (M1863) */
 #include "rtc.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -71,25 +72,74 @@ void fb_glyph(int x, int y, char c, uint32_t fg, uint32_t bg) { g_draw(x, y, c, 
 void fb_glyph_fg(int x, int y, char c, uint32_t fg) { g_draw(x, y, c, fg, 0, 0, 1); }
 void fb_text(int x, int y, const char *s, uint32_t c, int sc) { if (sc < 1) sc = 1; for (int i = 0; s[i]; i++) { g_draw(x, y, s[i], c, 0, 0, sc); x += 8 * sc; } }
 
-/* --- network: route to the WORKING kernel TLS/HTTP syscalls (no crypto in ring 3) --- */
+/* --- network -------------------------------------------------------------
+ * HTTPS fetch now runs ENTIRELY in ring 3 (M1863). tls.c + the crypto/X.509
+ * stack are linked into this program (see the Makefile webview rule), so
+ * browser.c's tls_get/tls_get_sse/tls_post and the tls_* cert-info accessors
+ * are the REAL functions from tls.c — the kernel's SYS_https (and with it the
+ * whole TLS/crypto/cert-validation path in ring 0) is no longer on the
+ * browser's fetch path. tls.c reaches the wire through the tcp/DNS shims
+ * below onto ring-3 syscalls, exactly like the standalone httpget program.
+ * A single fetch worker (browser.c's g_worker, claimed atomically) does every
+ * fetch sequentially, so tls.c's shared static handshake buffers never see two
+ * callers at once (its TLS_RING3 build assumes exactly this single-caller model).
+ *
+ * Plain http:// still uses SYS_http: it carries no crypto/X.509, so it isn't
+ * the ring-0 attack surface this migration closes — only the TLS path moved. */
 int http_get(const char *host, const char *path, char *out, int max) { return (int)sys_http(host, path, out, (unsigned long)max); }
-int tls_get(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) { (void)seed; return (int)sys_https(host, path, out, (unsigned long)max); }
-/* browser.c's EventSource/streaming path calls the *_sse fetch variants; in ring 3
- * the kernel syscall does the (non-streaming) fetch, so route them the same way. */
 int http_get_sse(const char *host, const char *path, char *out, int max) { return (int)sys_http(host, path, out, (unsigned long)max); }
+int http_post(const char *h, const char *p, const char *ct, const char *b, int bl, char *o, int max) { (void)h; (void)p; (void)ct; (void)b; (void)bl; (void)o; (void)max; return -1; }
 /* WebSocket (M1846): the kernel holds the connection between the two calls (one
- * socket at a time), so these route straight through to the kernel transport. */
+ * socket at a time), so these route straight through to the kernel transport.
+ * (wss:// still uses the kernel TLS via sys_ws_open — a separate path from the
+ * page-fetch tls_get above; moving it is out of scope for this migration.) */
 int ws_open(const char *url, int *status) { return (int)sys_ws_open(url, status); }
 int ws_exchange(int id, const char *sendbuf, int sendtot, char *out, int outmax, int *nrecv) { return (int)sys_ws_exchange(id, sendbuf, sendtot, out, outmax, nrecv); }
-int tls_get_sse(const char *host, const char *path, uint8_t *out, int max, uint32_t seed) { (void)seed; return (int)sys_https(host, path, out, (unsigned long)max); }
-int http_post(const char *h, const char *p, const char *ct, const char *b, int bl, char *o, int max) { (void)h; (void)p; (void)ct; (void)b; (void)bl; (void)o; (void)max; return -1; }
-int tls_post(const char *h, const char *p, const char *ct, const char *b, int bl, uint8_t *o, int max, uint32_t s) { (void)h; (void)p; (void)ct; (void)b; (void)bl; (void)o; (void)max; (void)s; return -1; }
-/* cert info: the kernel already validated the chain in sys_https; report secure. */
-int tls_cert_status(void) { return 1; }
-int tls_chain_anchored(void) { return 1; }
-int tls_host_match(void) { return 1; }
-const char *tls_leaf_cn(void) { return ""; }
-const char *tls_leaf_expiry(void) { return ""; }
+
+/* tls.c's kernel TCP/DNS/clock hooks, shimmed onto ring-3 syscalls — identical
+ * to user/httpget.c (the standalone ring-3 TLS client this shares its stack with). */
+static int g_sock = -1;
+int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
+    (void)c; g_sock = sys_socket(2, 1); if (g_sock < 0) return -1;   /* AF_INET, SOCK_STREAM */
+    return sys_connect(g_sock, ip, (int)port);                       /* 0 / -1 */
+}
+int tcp_write(tcp_conn *c, const uint8_t *data, int len) { (void)c; return (int)sys_fdwrite(g_sock, data, (unsigned long)len); }
+int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) { (void)c; (void)ticks; return (int)sys_fdread(g_sock, out, (unsigned long)max); }
+void tcp_close(tcp_conn *c) { (void)c; if (g_sock >= 0) { sys_fdclose(g_sock); g_sock = -1; } }
+/* dotted-quad literal -> 4 bytes (tls.c calls this before dns_resolve, M1847). */
+int parse_ipv4(const char *s, uint8_t out[4]) {
+    int oct = 0, v = 0, any = 0;
+    for (int i = 0; i < 4; i++) out[i] = 0;
+    for (const char *p = s; ; p++) {
+        if (*p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); any = 1; if (v > 255) return -1; }
+        else if (*p == '.' || *p == 0) {
+            if (!any || oct > 3) return -1;
+            out[oct++] = (uint8_t)v; v = 0; any = 0;
+            if (*p == 0) break;
+        } else return -1;
+    }
+    return oct == 4 ? 0 : -1;
+}
+int dns_resolve(const char *host, uint8_t out_ip[4]) {
+    char b[80];
+    long r = sys_resolve(host, b, sizeof b);      /* 0 on success, -1 on failure; IP as "a.b.c.d\n\0" */
+    if (r < 0) return -1;
+    b[sizeof b - 1] = 0;
+    int oi = 0, v = 0, have = 0;
+    for (int i = 0; i < (int)sizeof b && b[i] && oi < 4; i++) {
+        char ch = b[i];
+        if (ch >= '0' && ch <= '9') { v = v * 10 + (ch - '0'); have = 1; }
+        else if (have) { out_ip[oi++] = (uint8_t)v; v = 0; have = 0; }
+    }
+    if (have && oi < 4) out_ip[oi++] = (uint8_t)v;
+    return oi == 4 ? 0 : -1;
+}
+/* ecdsa.c (X.509 verify) reads smp_current_cpu() to index its per-core scratch
+ * slot. A constant 0 pins every ECDSA op to slot 0 — correct AND migration-safe
+ * here: the single fetch worker never runs two verifies at once, and a constant
+ * (vs a value that could change mid-call under M1531 core migration) is exactly
+ * what avoids the per-core-slot hazard. */
+int smp_current_cpu(void) { return 0; }
 
 /* --- vfs (bookmarks/history/SITES) -> file syscalls --- */
 long vfs_read(const char *name, void *buf, unsigned long max) { return sys_readfile(name, buf, max); }

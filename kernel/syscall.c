@@ -1589,7 +1589,23 @@ void syscall_dispatch(struct registers *r) {
         r->rax = (uint64_t)(int64_t)rc;
         break;
     }
-    case SYS_fdread: {                     /* (fd, buf, max) -> read a pipe fd (M1187) */
+    case SYS_fdread: {                     /* (fd, buf, max) -> read a pipe/socket fd (M1187) */
+        /* Enable interrupts for the read (M1863): a syscall enters through the
+         * 0xEE INTERRUPT gate with IF=0. A blocking read on a TCP SOCKET fd
+         * (app_fd_read -> net_tcp_sock_recv -> tcp_read) uses timer_ticks()
+         * DEADLINES to bound its waits -- but with IF=0 on a uniprocessor the PIT
+         * never fires, so timer_ticks() is frozen and every one of those timeouts
+         * becomes infinite: the read blocks until the next packet physically
+         * arrives. The ring-3 TLS client (webview, M1863) hit this hard -- after
+         * receiving the server's whole ServerHello+cert flight it must think +
+         * send its Finished, but the intervening read never returned, so the peer
+         * timed the handshake out (~15 s) and RST/FIN'd. The kernel's own
+         * sys_https path never saw it because it runs in a KERNEL TASK (IF=1), not
+         * this syscall. sti here (same idiom as beep/sleep above) lets the timer
+         * advance so the read's own timeouts work; the iret restores the caller's
+         * flags. Harmless for pipe/eventfd reads (they task_block(), which already
+         * yields with IF=1). */
+        __asm__ volatile("sti");
         if (!ubuf(r->rsi, r->rdx)) { r->rax = (uint64_t)-1; break; }
         long n = app_fd_read((int)r->rdi, (void *)r->rsi, r->rdx);
         if (n > 0) app_io_account(0, n);   /* /proc/<pid>/io rchar (M1244) */

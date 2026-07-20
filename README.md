@@ -6,7 +6,7 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1862-blue)](WHATS-NEXT.md)
+[![Milestones](https://img.shields.io/badge/milestones-1863-blue)](WHATS-NEXT.md)
 [![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)](tests/README.md)
 [![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
@@ -84,12 +84,14 @@ caveats below).
   program, so a parser bug there can no longer compromise the kernel. This was the
   project's main architectural weakness (a parser bug was a kernel bug) and is now
   largely resolved — also helped by the W^X / guard-page hardening above and
-  extensive parser fuzzing. Two honest caveats remain: (a) the browser still
-  fetches over the network through the kernel's TLS stack (`sys_https`), so its
-  **TLS/crypto/X.509 path still runs in ring 0** (the standalone `httpget` runs
-  that path in ring 3, but the browser doesn't use it yet); and (b) the old
-  in-kernel renderer is kept as an opt-in **"Browser (kernel)"** fallback, so that
-  ring-0 parsing code still exists in the tree. The hardest parsers are also out
+  extensive parser fuzzing. As of **M1863 the browser's HTTPS fetch also runs in
+  ring 3**: `webview` links the same from-scratch TLS 1.3 + crypto + X.509 stack
+  the standalone `httpget` uses, so its **entire TLS/crypto/certificate-validation
+  path is out of the kernel** (plain `http://` still uses the kernel `sys_http`,
+  which carries no crypto/X.509 — verified end-to-end: the ring-3 browser fetches
+  `https://example.com` over a full in-process TLS 1.3 handshake). One honest caveat
+  remains: the old in-kernel renderer is kept as an opt-in **"Browser (kernel)"**
+  fallback, so that ring-0 parsing code still exists in the tree. The hardest parsers are also out
   of ring 0 as standalone programs: the **JavaScript engine** (`jsrun`), the
   **image decoders** (PNG/GIF/JPEG/SVG/BMP, `imgdec`), and the **TLS 1.3 client +
   crypto + X.509 validation** (`httpget`). See [WHATS-NEXT.md](WHATS-NEXT.md).
@@ -390,11 +392,10 @@ user-stack overflow, an NX violation, and a SMEP violation and assert each one
 faults — protections that are tested, not just claimed. (See "Honest caveats"
 above for exactly what's still ring-0.)
 
-The honest current frontier: moving the browser's own network fetch off the
-kernel TLS syscall and onto the ring-3 `httpget` path it already has a sibling
-for (so no untrusted-network parsing runs in ring 0 for the default browser);
-and the other big systems swings — an ext3-style journal for crash consistency
-and a unified inode/page cache. (Cross-core scheduling, once listed here, is
-done and now tested — see the SMP caveat above; the one remaining SMP loose end
-is that the boot-time compute job pool has no steady-state caller, which is a
-narrow, cosmetic gap rather than an idle-cores one.)
+The honest current frontier: the big filesystem systems-swings — an ext3-style
+journal for crash consistency and a unified inode/page cache. (Two items once
+listed here are done: **cross-core scheduling** works and is now tested — M1862,
+see the SMP caveat above; and the **browser's HTTPS fetch now runs in ring 3** —
+M1863, so no TLS/crypto/X.509 runs in the kernel for the default browser. The one
+remaining SMP loose end is that the boot-time compute job pool has no steady-state
+caller, a narrow cosmetic gap rather than an idle-cores one.)
