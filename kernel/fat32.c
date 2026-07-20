@@ -592,11 +592,11 @@ static long fat32_delete(const char *name);          /* forward decl */
 static long fat32_write(const char *name, const void *data, unsigned long len) {
     uint32_t dir; const char *leaf;
     if (resolve(name, &dir, &leaf) < 0 || !leaf[0]) return -1;
-    int exists = 0;
+    int exists = 0; uint32_t oldsz = 0;
     { uint32_t fc; int isdir = 0; uint32_t sz;            /* refuse to overwrite a DIRECTORY with a file: else the */
       if (dir_find(dir, leaf, &fc, &isdir, &sz)) {        /* fat32_delete below either fails on a non-empty dir (leaving a */
           if (isdir) return -1;                           /* duplicate same-name entry) or silently rmdir's an empty one. */
-          exists = 1;
+          exists = 1; oldsz = sz;
       }
     }
 
@@ -604,19 +604,21 @@ static long fat32_write(const char *name, const void *data, unsigned long len) {
     uint32_t nclus = (uint32_t)((len + csize - 1) / csize);
     if (nclus == 0) nclus = 1;
 
-    /* Journal the create ATOMICALLY (M1866) iff: the journal is up; the file is
-     * NEW (no old chain to free -> the transaction holds only this create's
-     * METADATA, ordered-mode: data clusters are written direct BEFORE the commit,
-     * only the FAT entries + directory entry are journaled); that metadata fits
-     * one transaction; and no other journaled op is in flight (atomic claim). A
-     * crash before commit leaves the FS untouched (data written to still-free
-     * clusters is harmless); a crash after leaves the file fully present. Any op
-     * that doesn't qualify (overwrite, huge file, journal busy/off) takes the
-     * original direct path unchanged. */
-    uint32_t meta_est = (nclus / 128 + 2) * (num_fats ? num_fats : 1) + 4;
-    if (!exists && meta_est <= (uint32_t)(JRNL_MAXTXN - 4)) fat_txn_begin_op();  /* journal a new small file's create */
+    /* Journal a NEW small file's create atomically (M1866): the transaction holds
+     * only this create's metadata (ordered mode — data clusters written direct
+     * FIRST, then the FAT entries + directory entry journaled), so a crash leaves
+     * the file fully present or fully absent. Deliberately NOT for an OVERWRITE:
+     * doing the old-chain free + the new-chain alloc in one transaction would let
+     * alloc_cluster reuse a cluster that this same uncommitted txn just staged as
+     * free and overwrite the OLD file's data before commit — corrupting it on a
+     * crash. Instead an overwrite takes the direct path where the nested
+     * fat32_delete SELF-journals the rm (frees committed first), then the create
+     * runs direct — no reuse-of-uncommitted-free hazard. nclus<=24 caps the txn so
+     * even a fragmented chain's FAT sectors + the dir entry fit. */
+    (void)oldsz;
+    int owns = (!exists && nclus <= 24) ? fat_txn_begin_op() : 0;
 
-    fat32_delete(name);            /* no-op for a new file; drops an old copy otherwise (direct path only) */
+    fat32_delete(name);            /* no-op for a new file; for an overwrite it self-journals the rm (direct path) */
 
     /* allocate a cluster chain and write the data into it */
     uint32_t first = 0, prev = 0;
@@ -641,10 +643,10 @@ static long fat32_write(const char *name, const void *data, unsigned long len) {
 
     if (failed) {
         free_chain(first);                             /* don't leak the data (staged frees discarded on abort) */
-        fat_txn_end(0);                                /* abort: nothing checkpointed -> FS untouched */
+        if (owns) fat_txn_end(0);                      /* abort: nothing checkpointed -> FS untouched */
         return -1;
     }
-    fat_txn_end(1);                                    /* atomically commit + checkpoint the metadata */
+    if (owns) fat_txn_end(1);                          /* atomically commit + checkpoint the metadata */
     return (long)len;
 }
 
@@ -654,9 +656,9 @@ static long fat32_mkdir(const char *path) {
     if (resolve(path, &dir, &leaf) < 0 || !leaf[0]) return -1;
     if (dir_find(dir, leaf, 0, 0, 0)) return -1;          /* already exists */
 
-    fat_txn_begin_op();                                   /* journal the directory create atomically (metadata; M1866) */
+    int owns = fat_txn_begin_op();                        /* journal the directory create atomically (metadata; M1866) */
     uint32_t newcl = alloc_cluster();
-    if (!newcl) { fat_txn_end(0); return -1; }
+    if (!newcl) { if (owns) fat_txn_end(0); return -1; }
 
     /* the new directory's first cluster holds just "." and ".." (rest zero) */
     uint8_t buf[64];
@@ -671,8 +673,8 @@ static long fat32_mkdir(const char *path) {
 
     uint8_t name83[11];
     to_83(leaf, name83);
-    if (add_entry(dir, name83, 0x10, newcl, 0) < 0) { fat_set(newcl, 0); fat_txn_end(0); return -1; }
-    fat_txn_end(1);
+    if (add_entry(dir, name83, 0x10, newcl, 0) < 0) { fat_set(newcl, 0); if (owns) fat_txn_end(0); return -1; }
+    if (owns) fat_txn_end(1);
     return 0;
 }
 
@@ -807,9 +809,19 @@ static long fat32_delete(const char *name) {
                     int nonempty = 0; walk_dir(fc, dir_nonempty_visit, &nonempty);
                     if (nonempty) return -1;
                 }
-                free_chain(fc);              /* free the cluster chain (guarded) */
+                /* Journal rm atomically (M1868): free the chain + clear the dir
+                 * entry in ONE transaction, so a crash never leaves the entry
+                 * pointing at freed clusters. Only when standalone (a nested
+                 * overwrite's txn is already open -> owns=0, stage into it) and the
+                 * chain is short enough to fit one transaction; else direct. */
+                int owns = 0;
+                { uint32_t c = fc, st = 0, cnt = 0;
+                  while (cluster_in_range(c) && cnt <= 25) { cnt++; c = fat_step(c, &st); }
+                  if (cnt <= 24) owns = fat_txn_begin_op(); }
+                free_chain(fc);              /* free the cluster chain (guarded); stages if in a txn */
                 e[0] = 0xE5;                 /* mark the dir entry deleted */
-                fat_wr(firsts + s, sec);     /* dir entry: journaled metadata (M1866) */
+                fat_wr(firsts + s, sec);     /* dir entry: journaled metadata */
+                if (owns) fat_txn_end(1);
                 return 0;
             }
         }
@@ -991,8 +1003,22 @@ int fat32_journal_selftest(void) {
     int idem = (journal_recover(&g_fj) == 0);          /* nothing left to replay */
     fat32_delete(nm);                                  /* clean up */
 
-    int ok = (normal_ok && not_visible && rep == 1 && content_ok && idem);
-    kprintf("[fatjournal] normal_create=%d | crash-create pre_invisible=%d replayed=%d content_ok=%d(n=%ld) idem=%d: %s\n",
-            normal_ok, not_visible, rep, content_ok, n, idem, ok ? "OK" : "FAIL");
+    /* (2) crash-RM: create a file, delete it with a simulated crash right after
+     * the commit point (rm committed to the journal but NOT checkpointed -> the
+     * file is still visible), then recover -> replay -> the file is gone. */
+    fat32_write(nm, content, (unsigned long)cl);
+    g_fj.dbg_crash = 1;
+    fat32_delete(nm);
+    g_fj.dbg_crash = 0;
+    long still = fat32_read(nm, rb, sizeof rb);
+    int rm_visible_pre = (still == cl);                /* rm not yet applied */
+    int rm_rep = journal_recover(&g_fj);
+    long gone = fat32_read(nm, rb, sizeof rb);
+    int rm_gone = (gone <= 0);                         /* now really deleted */
+
+    int ok = (normal_ok && not_visible && rep == 1 && content_ok && idem &&
+              rm_visible_pre && rm_rep == 1 && rm_gone);
+    kprintf("[fatjournal] normal_create=%d | crash-create pre_invisible=%d replayed=%d content_ok=%d(n=%ld) idem=%d | crash-rm visible_pre=%d replayed=%d gone=%d: %s\n",
+            normal_ok, not_visible, rep, content_ok, n, idem, rm_visible_pre, rm_rep, rm_gone, ok ? "OK" : "FAIL");
     return ok ? 0 : -1;
 }
