@@ -46,6 +46,8 @@
 #define REG_RAH0   0x5404
 #define REG_MTA    0x5200
 
+#define CTRL_SLU   (1 << 6)    /* Set Link Up — the e1000e/I217/I218 need it */
+
 #define RCTL_EN    (1 << 1)
 #define RCTL_BAM   (1 << 15)   /* accept broadcast */
 #define RCTL_SECRC (1 << 26)   /* strip ethernet CRC */
@@ -101,8 +103,12 @@ static void     reg_write(uint32_t off, uint32_t v){ *(volatile uint32_t *)(mmio
 
 static uint16_t eeprom_read(uint8_t addr) {
     reg_write(REG_EERD, ((uint32_t)addr << 8) | 1);
-    uint32_t v;
-    do { v = reg_read(REG_EERD); } while (!(v & (1 << 4)));   /* wait for DONE */
+    uint32_t v = 0;
+    /* BOUNDED wait (M1876): the e1000e/I217/I218 EERD interface differs from the
+     * classic 82540's, so the DONE bit may never set — an unbounded loop would
+     * hang boot. We only reach here as a fallback anyway (MAC normally comes from
+     * the firmware-loaded RAL0/RAH0 below). */
+    for (int i = 0; i < 1000000; i++) { v = reg_read(REG_EERD); if (v & (1 << 4)) break; }
     return (v >> 16) & 0xFFFF;
 }
 
@@ -123,8 +129,27 @@ static void e1000_isr(struct registers *r) {
     if (cause) g_e1000_irqs++;                        /* 0 => not our (shared) IRQ */
 }
 
+/* Intel Gigabit controllers this driver supports. 0x100E is the classic 82540EM
+ * (QEMU's default e1000). The rest are e1000e-family: 0x10D3 = 82574L (QEMU's
+ * `e1000e`), then the I217/I218 PCH LOMs on Haswell/Broadwell laptops (0x153A/
+ * 0x153B = I217-LM/V, 0x1559/0x155A = I218-V/LM — e.g. the Dell Latitude 3340)
+ * and common I219 variants. Their RX/TX register interface matches the classic
+ * e1000; the differences handled below are the MAC source (firmware-loaded
+ * RAL0/RAH0, not the 82540 EEPROM) and setting the link up. (M1876) */
+static const uint16_t SUPPORTED_IDS[] = {
+    0x100E,                                     /* 82540EM (QEMU e1000)  */
+    0x10D3,                                     /* 82574L  (QEMU e1000e) */
+    0x153A, 0x153B,                             /* I217-LM / I217-V      */
+    0x1559, 0x155A,                             /* I218-V  / I218-LM     */
+    0x15B7, 0x15B8, 0x15D7, 0x15D8, 0x15E3,     /* I219 variants         */
+};
+
 int e1000_init(void) {
-    pci_device_t dev = pci_find(0x8086, 0x100E);
+    pci_device_t dev = { 0 };
+    for (unsigned k = 0; k < sizeof SUPPORTED_IDS / sizeof SUPPORTED_IDS[0]; k++) {
+        dev = pci_find(0x8086, SUPPORTED_IDS[k]);
+        if (dev.valid) break;
+    }
     if (!dev.valid)
         return -1;
     pci_enable_bus_master(&dev);
@@ -137,11 +162,23 @@ int e1000_init(void) {
 
     reg_write(REG_IMC, 0xFFFFFFFF);    /* mask all NIC interrupts; we poll */
 
-    /* MAC address from the EEPROM. */
-    uint16_t w0 = eeprom_read(0), w1 = eeprom_read(1), w2 = eeprom_read(2);
-    mac[0] = w0; mac[1] = w0 >> 8;
-    mac[2] = w1; mac[3] = w1 >> 8;
-    mac[4] = w2; mac[5] = w2 >> 8;
+    /* Set the link up (SLU) — the e1000e/I217/I218 need it; harmless on the 82540. */
+    reg_write(REG_CTRL, reg_read(REG_CTRL) | CTRL_SLU);
+
+    /* MAC address: prefer the receive-address filter RAL0/RAH0, which the firmware
+     * pre-loads on every card here (and is the only reliable source on the I217/
+     * I218 — their EEPROM interface differs from the 82540's). Fall back to the
+     * classic EEPROM only if RAH0's Address-Valid bit isn't set. (M1876) */
+    uint32_t ral = reg_read(REG_RAL0), rah = reg_read(REG_RAH0);
+    if ((rah & (1u << 31)) && (ral || (rah & 0xFFFF))) {
+        mac[0] = ral; mac[1] = ral >> 8; mac[2] = ral >> 16; mac[3] = ral >> 24;
+        mac[4] = rah; mac[5] = rah >> 8;
+    } else {
+        uint16_t w0 = eeprom_read(0), w1 = eeprom_read(1), w2 = eeprom_read(2);
+        mac[0] = w0; mac[1] = w0 >> 8;
+        mac[2] = w1; mac[3] = w1 >> 8;
+        mac[4] = w2; mac[5] = w2 >> 8;
+    }
 
     /* Program the receive-address filter so unicast to us is accepted. */
     reg_write(REG_RAL0, (uint32_t)(mac[0] | mac[1] << 8 | mac[2] << 16 | (uint32_t)mac[3] << 24));
