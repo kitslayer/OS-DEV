@@ -292,6 +292,7 @@ static void dns_cache_put(const char *host, const uint8_t ip[4]) {
 
 /* Minimal DNS A-record lookup over UDP, to the SLIRP resolver at 10.0.2.3. */
 int dns_resolve(const char *host, uint8_t out_ip[4]) {
+    if (parse_ipv4(host, out_ip) == 0) return 0;   /* a dotted-quad literal (e.g. `ping 1.1.1.1`) is already an address — don't DNS-"resolve" it (M1879) */
     for (int i = 0; i < DNS_CACHE_N; i++)          /* serve a fresh cached answer */
         if (dns_cache[i].used && timer_ticks() < dns_cache[i].exp
             && dns_streq(dns_cache[i].host, host)) {
