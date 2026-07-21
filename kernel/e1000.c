@@ -47,6 +47,9 @@
 #define REG_MTA    0x5200
 
 #define CTRL_SLU   (1 << 6)    /* Set Link Up — the e1000e/I217/I218 need it */
+#define CTRL_RST   (1u << 26)  /* device software reset (recover from firmware/PXE-left state) */
+#define REG_STATUS 0x0008
+#define STATUS_LU  (1 << 1)    /* link up */
 
 #define RCTL_EN    (1 << 1)
 #define RCTL_BAM   (1 << 15)   /* accept broadcast */
@@ -162,6 +165,16 @@ int e1000_init(void) {
 
     reg_write(REG_IMC, 0xFFFFFFFF);    /* mask all NIC interrupts; we poll */
 
+    /* Software-reset the controller FIRST, so we init from a known state no matter
+     * what the firmware / UEFI PXE stack left it in. Without this a NIC that was
+     * just used for PXE boot (like the I218 when net-booting) won't DHCP — it
+     * inherits PXE's leftover config. CTRL.RST self-clears when the reset finishes;
+     * the MAC reloads into RAL0/RAH0 from the NVM afterward. (M1880) */
+    reg_write(REG_CTRL, reg_read(REG_CTRL) | CTRL_RST);
+    for (volatile int d = 0; d < 4000000; d++) if (!(reg_read(REG_CTRL) & CTRL_RST)) break;
+    for (volatile int d = 0; d < 2000000; d++) { }   /* settle: MAC reload + PHY */
+    reg_write(REG_IMC, 0xFFFFFFFF);                   /* the reset re-enabled interrupt causes — re-mask */
+
     /* Set the link up (SLU) — the e1000e/I217/I218 need it; harmless on the 82540. */
     reg_write(REG_CTRL, reg_read(REG_CTRL) | CTRL_SLU);
 
@@ -217,6 +230,10 @@ int e1000_init(void) {
     reg_write(REG_TIPG, 0x0060200A);
     reg_write(REG_TCTL, TCTL_EN | TCTL_PSP | (0x0F << 4) | (0x40 << 12));
     tx_cur = 0;
+
+    /* Give the link a moment to come up (auto-neg after the reset) so the first
+     * DHCP isn't sent before there's carrier. Best-effort — proceed on timeout. */
+    for (volatile int d = 0; d < 80000000 && !(reg_read(REG_STATUS) & STATUS_LU); d++) { }
 
     /* Interrupt-driven RX (M1858): install the ISR on the card's PCI IRQ line
      * (via the 8259 PIC — no ACPI _PRT needed) and enable ONLY the RX causes.

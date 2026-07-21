@@ -69,7 +69,7 @@ static void put(const char *s) {
 /* ---- command implementations ------------------------------------------------ */
 
 static const char *BANNER =
-    "\r\nOS-DEV network debug console (netcon) — type 'help'\r\n";
+    "\r\nOS-DEV network debug console (netcon, build " __DATE__ " " __TIME__ ") — type 'help'\r\n";
 static const char *PROMPT = "netcon> ";
 
 static const char *HELP =
