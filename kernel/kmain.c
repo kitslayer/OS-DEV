@@ -238,6 +238,7 @@ static volatile int g_smpsched_test;          /* -append smpschedtest: prove the
 static volatile int g_journal_test;           /* -append journalguest: prove the write-ahead journal + crash recovery on REAL ata hardware (M1865) */
 static volatile int g_fatjournal_test;        /* -append fatjournaltest: prove a live FAT32 file create is crash-atomic (M1866) */
 static volatile int g_netcon;                 /* -append netcon: start the network debug console on TCP 2323 (M1870, real-HW bring-up) */
+static volatile int g_nodisk;                 /* -append nodisk: skip ALL disk-WRITE self-tests + FS mount (M1872) — safe to boot on a machine with real disks; the bring-up image sets this */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -448,6 +449,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "journalguest"))  g_journal_test = 1;        /* on-ata write-ahead-journal crash-recovery test (M1865) */
         if (cmdline_has(cl, "fatjournaltest")) g_fatjournal_test = 1;    /* live FAT32 create crash-atomicity test (M1866) */
         if (cmdline_has(cl, "netcon"))     g_netcon = 1;                 /* network debug console for real-HW bring-up (M1870) */
+        if (cmdline_has(cl, "nodisk"))     g_nodisk = 1;                 /* skip disk-write self-tests + FS mount — safe on a machine with real disks (M1872) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -613,8 +615,11 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     if (g_netcon)
         task_create(netcon_task, 0, 0);
 
-    /* Mount the FAT32 disk and show it works from the kernel side. */
-    if (fat32_mount() == 0) {
+    /* Mount the FAT32 disk and show it works from the kernel side. Skipped under
+     * `nodisk` (real-HW bring-up): fat32_mount reads a real disk to validate it,
+     * and a match would arm the write-ahead journal on it — neither is wanted when
+     * the attached disks hold someone else's data. */
+    if (!g_nodisk && fat32_mount() == 0) {
         kprintf("[ ok ] mounted FAT32 volume (ATA primary master).\n\n");
         if (g_fatjournal_test)             /* -append fatjournaltest: live FAT32 create crash-atomicity (M1866) */
             fat32_journal_selftest();
@@ -649,9 +654,13 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * This is purely additive: fat32/vfs/boot still use the PIO ata_read/write
      * above; the DMA path is a separate, proven-identical capability. A clean
      * no-op (logs "DMA unavailable") if no PIIX3 BMIDE controller is present. */
+    if (g_nodisk) {
+        kprintf("[boot] nodisk: skipping ALL disk-write self-tests (ata/ahci/nvme/virtio-blk/blockdev/raid) — real disks left untouched\n");
+    } else {
     ata_dma_selftest();
     ata_lba48_selftest();   /* M1721: high-LBA round-trip if a >128 GiB ATA disk is attached (else no-op) */
     ata_cache_selftest();   /* M1855: single-sector read cache fill+hit+write-invalidate coherence */
+    }
 
     /* Bring up AHCI/SATA as an ADDITIONAL storage driver (the boot disk above
      * stays on legacy ATA). No-op if no AHCI HBA + disk is attached. The
@@ -669,7 +678,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * device is attached. The self-test reads real sectors off it (and does a
      * write round-trip) and logs their bytes. */
     virtio_blk_init();
-    virtio_blk_selftest();
+    if (!g_nodisk) virtio_blk_selftest();       /* writes a scratch sector — skip under nodisk */
 
     /* Bring up virtio-rng (the paravirtual hardware entropy source) — the
      * simplest virtio device: hand it a buffer over a virtqueue and it DMAs
@@ -690,7 +699,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * attached. The self-test identifies namespace 1, reads real sectors off it
      * (and does a write round-trip) and logs their bytes/checksum. */
     nvme_init();
-    nvme_selftest();
+    if (!g_nodisk) nvme_selftest();             /* writes a scratch LBA — skip under nodisk (real NVMe likely holds the host OS) */
 
     /* Bring up the legacy floppy controller (82077AA) as ANOTHER additional
      * block device — boot still uses legacy ATA above. Unlike every other DMA
@@ -750,8 +759,10 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * if a device carries no FAT32. */
     ext2_set_clock(rtc_unix);      /* real inode timestamps on ext2 writes (M1175) */
     blockdev_enumerate();
-    blockdev_selftest();           /* verify the write vtable + buffer-cache coherence (M1095) */
-    dm_selftest();                 /* RAID-1 mirror self-test, iff 2 non-boot writable disks (M1157) */
+    if (!g_nodisk) {
+        blockdev_selftest();       /* verify the write vtable + buffer-cache coherence (M1095) — writes a scratch sector */
+        dm_selftest();             /* RAID-1 mirror self-test, iff 2 non-boot writable disks (M1157) — writes LBA 64 */
+    }
     kprintf("\n");
 
     /* Bring up a USB HID boot keyboard, sharing the one UHCI controller with the

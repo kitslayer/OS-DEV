@@ -568,12 +568,12 @@ iso-bringup: $(KERNEL)
 	@command -v xorriso >/dev/null || { echo "iso-bringup: needs xorriso — emerge dev-libs/libisoburn"; exit 1; }
 	@mkdir -p $(BUILD)/isodir-bringup/boot/grub
 	cp $(KERNEL) $(BUILD)/isodir-bringup/boot/kernel32.elf
-	printf 'set timeout=0\nset default=0\nmenuentry "OS-DEV (netcon bring-up)" {\n\tmultiboot2 /boot/kernel32.elf netcon\n\tboot\n}\n' > $(BUILD)/isodir-bringup/boot/grub/grub.cfg
+	printf 'set timeout=0\nset default=0\nmenuentry "OS-DEV (netcon bring-up)" {\n\tmultiboot2 /boot/kernel32.elf netcon nodisk\n\tboot\n}\n' > $(BUILD)/isodir-bringup/boot/grub/grub.cfg
 	grub-mkrescue -d /usr/lib/grub/i386-pc -o $(BUILD)/os-bringup.iso $(BUILD)/isodir-bringup
 	@echo "Built $(BUILD)/os-bringup.iso (cmdline: netcon) — dd to USB: dd if=$(BUILD)/os-bringup.iso of=/dev/sdX bs=4M"
 
 efi-bringup: $(KERNEL)
-	printf 'set timeout=0\nset default=0\ninsmod all_video\nmenuentry "OS-DEV (netcon bring-up)" {\n\tmultiboot2 /boot/kernel32.elf netcon\n\tboot\n}\n' > $(BUILD)/grub-efi-bringup.cfg
+	printf 'set timeout=0\nset default=0\ninsmod all_video\nmenuentry "OS-DEV (netcon bring-up)" {\n\tmultiboot2 /boot/kernel32.elf netcon nodisk\n\tboot\n}\n' > $(BUILD)/grub-efi-bringup.cfg
 	grub-mkstandalone -O x86_64-efi -o $(BUILD)/BOOTX64-bringup.EFI \
 	    --modules="multiboot2 normal all_video efi_gop efi_uga part_gpt fat" \
 	    "boot/grub/grub.cfg=$(BUILD)/grub-efi-bringup.cfg" "boot/kernel32.elf=$(KERNEL)"

@@ -103,7 +103,28 @@ that boots `multiboot2 /boot/kernel32.elf netcon`.
 3. `nc <ip> 2323`, then type `help`. (`echo hi` is a quick link check; `dmesg`
    shows the whole boot log; `pci` shows exactly what hardware the machine has.)
 
+### Safe on a machine with real disks (`nodisk`)
+
+The bring-up images set `nodisk` on the kernel cmdline alongside `netcon`. This is
+important: OS-DEV's boot normally runs disk-**write** self-tests (ata-dma, ata-
+cache, nvme, virtio-blk, the blockdev buffer-cache test, and the dm-RAID test at
+LBA 64) against whatever writable disks it finds — and on real hardware "whatever
+it finds" is the machine's actual internal disk. Even though each test saves and
+restores the sector, a power loss mid-test would leave permanent corruption, and
+the LBAs chosen (last sector = backup GPT header; LBA 64 = filesystem metadata)
+are not actually safe. `nodisk` skips every disk-write self-test AND the boot
+FAT32 mount, so OS-DEV touches **no disk at all** — verified by booting with a
+scratch NVMe attached and confirming its contents are byte-identical afterward.
+Boot without `nodisk` only on a machine whose disks you are willing to lose.
+
 ### Notes / limits
+
+- **Networking needs a supported NIC.** netcon (and all OS-DEV networking) has
+  drivers for the Intel **e1000**, the old Realtek **RTL8139**, and **virtio-net**
+  only. A newer Realtek gigabit part (RTL8111/8168) or a recent Intel (i2xx) will
+  NOT bind — netcon logs "no supported NIC found" and there's no network path.
+  On a laptop with a working display this is fine (the screen is the channel);
+  netcon is the fallback for a headless/dark-framebuffer box with a supported NIC.
 
 - **Opt-in, and it replaces the boot net self-test.** The net stack has no
   cross-connection RX demux (every receiver polls `nic_receive` directly) and the
