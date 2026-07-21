@@ -49,6 +49,7 @@
 #include "svga.h"
 #include "net.h"
 #include "netcon.h"
+#include "watchdog.h"
 #include "fbcon.h"
 #include "fb.h"            /* fb_init_mb: consume a Multiboot/GRUB framebuffer (M1292) */
 #include "string.h"        /* memset for the Multiboot2 shim (M1293) */
@@ -239,6 +240,8 @@ static volatile int g_journal_test;           /* -append journalguest: prove the
 static volatile int g_fatjournal_test;        /* -append fatjournaltest: prove a live FAT32 file create is crash-atomic (M1866) */
 static volatile int g_netcon;                 /* -append netcon: start the network debug console on TCP 2323 (M1870, real-HW bring-up) */
 static volatile int g_nodisk;                 /* -append nodisk: skip ALL disk-WRITE self-tests + FS mount (M1872) — safe to boot on a machine with real disks; the bring-up image sets this */
+static volatile int g_watchdog;               /* -append watchdog: arm the HW watchdog + panic-auto-reboot so a hang/crash self-heals via PXE (M1881) */
+static volatile int g_wdhang;                 /* -append wdhang: deliberately wedge the CPU to prove the HW watchdog resets a true hang (M1881) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -450,6 +453,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "fatjournaltest")) g_fatjournal_test = 1;    /* live FAT32 create crash-atomicity test (M1866) */
         if (cmdline_has(cl, "netcon"))     g_netcon = 1;                 /* network debug console for real-HW bring-up (M1870) */
         if (cmdline_has(cl, "nodisk"))     g_nodisk = 1;                 /* skip disk-write self-tests + FS mount — safe on a machine with real disks (M1872) */
+        if (cmdline_has(cl, "watchdog"))   g_watchdog = 1;              /* HW watchdog + panic-auto-reboot for the autonomous PXE loop (M1881) */
+        if (cmdline_has(cl, "wdhang"))     g_wdhang = 1;               /* deliberate CPU wedge to prove the watchdog resets a hang (M1881) */
     }
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     kprintf("OS-DEV  -  x86_64 kernel\n");
@@ -475,6 +480,16 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         irq_route_ioapic(1);
         kprintf("[ ok ] keyboard IRQ routed via the I/O APIC (off the 8259 PIC).\n\n");
     }
+
+    /* Arm the hardware watchdog + panic-auto-reboot now (interrupts/timer are up,
+     * so the PIT IRQ can pet it) — covers the desktop, the device battery, and
+     * steady state. On the PXE bring-up box a hang/crash self-heals into a fresh
+     * kernel; a normal boot (no `watchdog` flag) is unaffected. (M1881) */
+    if (g_watchdog)
+        watchdog_enable(20);
+    /* -append wdhang: deliberately wedge the CPU (no more timer IRQs -> no pets) to
+     * prove the hardware watchdog resets a true hang. Never set in normal use. */
+    if (g_wdhang) { kprintf("[wdhang] wedging the CPU to test the watchdog...\n"); for (;;) __asm__ volatile("cli; hlt"); }
 
     /* GDB remote-serial stub (M1204): if `-append gdbstub` was seen (detected at
      * the top of kmain, before allocations could clobber the cmdline), break into

@@ -11,6 +11,7 @@
  * interrupt is what yanks the CPU away from a running task.
  */
 #include "timer.h"
+#include "watchdog.h"
 #include "interrupts.h"
 #include "io.h"
 #include "task.h"
@@ -29,6 +30,7 @@ static uint32_t          tick_ms = 10;    /* ms per tick (1000/hz), for CPU-time
 
 static void timer_handler(struct registers *r) {
     ticks++;
+    watchdog_pet();        /* pet the HW watchdog (no-op unless armed) — a wedge that stops this IRQ lets it reset (M1881) */
     vdso_tick(ticks);      /* refresh the userspace vDSO time page (syscall-free clock_gettime, M1111) */
     prof_tick(r->rip, r->cs);  /* sampling profiler: record the interrupted kernel RIP (M1086) */
     task_cpu_tick(tick_ms, (r->cs & 3) == 3);  /* charge this tick to current's user/sys time (getrusage, M1150) */

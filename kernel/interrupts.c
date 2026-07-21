@@ -25,6 +25,7 @@
 #include "acpi.h"       /* acpi_madt_gsi_for_irq — ISA IRQ -> GSI (M1857) */
 #include "smp.h"        /* lapic_eoi — ack an I/O APIC-delivered IRQ (M1857) */
 #include "smp.h"
+#include "watchdog.h"
 #include "gdbstub.h"
 #include "msi.h"          /* MSI vector block + msi_install_handler/msi_irq_count */
 #include <stdint.h>
@@ -212,6 +213,16 @@ void isr_dispatch(struct registers *r) {
             kprintf("  >>> KERNEL STACK OVERFLOW: a task overran its kernel stack (its #PF escalated to a #DF) <<<\n");
         dump_registers(r);
         backtrace(r->rip, r->rbp);       /* symbolized call trace (kernel/ksyms.c) */
+        /* Autonomous bring-up (M1881): with the watchdog enabled, a panic REBOOTS
+         * instead of halting forever, so a bad change self-heals — the machine
+         * PXE-boots the latest kernel. The brief spin leaves the panic on the
+         * framebuffer/serial first. (Off by default: `make check`'s deliberate
+         * faults still halt for inspection.) */
+        if (watchdog_enabled()) {
+            kprintf("  watchdog: rebooting in ~10s...\n");
+            for (volatile uint64_t d = 0; d < 8000000000ULL; d++) { }
+            acpi_reboot();
+        }
         kprintf("  system halted.\n");
         for (;;)
             __asm__ volatile("cli; hlt");
