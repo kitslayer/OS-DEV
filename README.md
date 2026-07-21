@@ -6,8 +6,8 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1869-blue)](WHATS-NEXT.md)
-[![Tests](https://img.shields.io/badge/tests-84%20passing-brightgreen)](tests/README.md)
+[![Milestones](https://img.shields.io/badge/milestones-1870-blue)](WHATS-NEXT.md)
+[![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](tests/README.md)
 [![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
 [![Written by Claude](https://img.shields.io/badge/code-100%25%20AI--written-8A2BE2)](https://claude.com/claude-code)
@@ -47,7 +47,10 @@ caveats below).
   ChaCha20-Poly1305 / SHA-2, with **X.509 chain validation to ~13 baked-in root
   CAs** (hostname + validity enforced — the core anti-MITM checks). A real HTTPS
   handshake to example.com is exercised and asserted on every boot. There is also
-  a small from-scratch HTTP server.
+  a small from-scratch HTTP server, a WebSocket client + server, and a **network
+  debug console** (`-append netcon`) that serves a remote inspection shell
+  (`dmesg`/`ps`/`mem`/`pci`/`ls`/`cat`/`reboot`) over TCP — the bring-up lifeline
+  for a physical machine whose framebuffer may not light up.
 - **Graphics + desktop:** a framebuffer compositor; a window manager
   (drag / resize / tile / start-menu); PS/2 and USB-tablet pointers; AC'97 / Intel
   HD-Audio sound; a **web browser** with a **from-scratch JavaScript engine**

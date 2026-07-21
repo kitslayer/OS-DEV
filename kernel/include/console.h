@@ -20,3 +20,7 @@ void kvprintf(const char *fmt, va_list ap);
  * out[max]; returns the byte count written. Backs /proc/kmsg (a `dmesg`). */
 int klog_copy(char *out, int max);
 void klog_write(const char *buf, int n);   /* append userspace bytes to the log ring (/dev/kmsg, M1216) */
+/* Console capture (M1870): redirect a kprintf-based dumper's output into buf[max]
+ * (for the network debug console). Single-consumer, best-effort; returns bytes. */
+void console_capture_begin(char *buf, int max);
+int  console_capture_end(void);

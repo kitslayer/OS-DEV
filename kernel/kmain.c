@@ -48,6 +48,7 @@
 #include "virtio_gpu.h"
 #include "svga.h"
 #include "net.h"
+#include "netcon.h"
 #include "fbcon.h"
 #include "fb.h"            /* fb_init_mb: consume a Multiboot/GRUB framebuffer (M1292) */
 #include "string.h"        /* memset for the Multiboot2 shim (M1293) */
@@ -228,6 +229,7 @@ static volatile int g_smpthread_test;         /* -append smpthreadtest: prove re
 static volatile int g_smpsched_test;          /* -append smpschedtest: prove the GENERAL (M1531) scheduler runs ordinary pin_core=-1 tasks across cores */
 static volatile int g_journal_test;           /* -append journalguest: prove the write-ahead journal + crash recovery on REAL ata hardware (M1865) */
 static volatile int g_fatjournal_test;        /* -append fatjournaltest: prove a live FAT32 file create is crash-atomic (M1866) */
+static volatile int g_netcon;                 /* -append netcon: start the network debug console on TCP 2323 (M1870, real-HW bring-up) */
 
 static int __attribute__((noinline)) kstack_blow(int d) {
     volatile char buf[512];
@@ -437,6 +439,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "smpschedtest"))  g_smpsched_test = 1;       /* general-scheduler cross-core migration test (M1862) */
         if (cmdline_has(cl, "journalguest"))  g_journal_test = 1;        /* on-ata write-ahead-journal crash-recovery test (M1865) */
         if (cmdline_has(cl, "fatjournaltest")) g_fatjournal_test = 1;    /* live FAT32 create crash-atomicity test (M1866) */
+        if (cmdline_has(cl, "netcon"))     g_netcon = 1;                 /* network debug console for real-HW bring-up (M1870) */
     }
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
@@ -580,6 +583,23 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * check` run doesn't reliably exercise). Bumped with real headroom rather
      * than the smallest number that happens to stop reproducing it. */
     task_create_stack(net_demo, 0, 0, 512 * 1024);
+
+    /* Network debug console (M1870): a kernel task listening on TCP 2323 that
+     * serves a remote inspection shell (dmesg/ps/mem/pci/ls/cat/reboot/...). Built
+     * for real-hardware bring-up — if the framebuffer handoff doesn't light up the
+     * screen on a physical box, this is the window into the machine over ethernet.
+     * It blocks in accept (sleeping the core) until a client connects, so it costs
+     * nothing at idle; it shares net.c's single server-conn slot, so don't run it
+     * alongside wsserve/on-demand httpd.
+     *
+     * OPT-IN (`-append netcon`), not default: the net stack has no cross-connection
+     * RX demux (every receiver polls nic_receive directly), so an always-listening
+     * console would steal packets from a concurrent browser fetch / the boot
+     * net_demo self-test. The real-hardware bring-up boot image bakes `netcon` into
+     * its kernel cmdline, so the remote console is up even if the framebuffer is
+     * dark; a normal desktop boot leaves it off and networking is unaffected. */
+    if (g_netcon)
+        task_create(netcon_task, 0, 0);
 
     /* Mount the FAT32 disk and show it works from the kernel side. */
     if (fat32_mount() == 0) {

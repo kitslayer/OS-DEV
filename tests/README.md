@@ -116,6 +116,14 @@ it also runs the **shell-helper** fuzz suites split out of `shell.c`/`calc.c`
 `calctest`, `normpathtest`, `completetest`) and the `ext2test`/`xattrtest`/`iso9660test`
 filesystem suites.
 
+Two in-guest tests exercise the **inbound** side of the from-scratch TCP stack by
+forwarding a host port into the guest and connecting from the host: `httpdtest`
+(the one-shot HTTP server — dashboard, a file by path, a 404) and `netcontest`
+(the **network debug console**, `-append netcon` — a *persistent* multi-command
+session: `echo`/`mem`/`cpu`/`uptime`/`ip`/`ps`/`dmesg`/`pci`/`ls`/`cat` each
+round-trips over one held connection, proving the real-hardware remote-console
+lifeline works end to end).
+
 ## Validated to catch regressions
 
 Each fuzz harness is **verified to fail** when its guard is removed:

@@ -972,7 +972,17 @@ static int srv_rx(uint8_t *buf, int max, uint16_t port, uint16_t cport,
                   const uint8_t *cip, uint64_t deadline, uint8_t **tcp_out, int *dlen_out) {
     while (timer_ticks() < deadline) {
         int len = nic_receive(buf, max);
-        if (len < 34) continue;
+        if (len < 34) {
+            /* Idle (no packet / a runt): SLEEP to the next interrupt instead of
+             * tight-spinning. Interrupt-driven RX (M1858) wakes us the moment a
+             * packet lands; the ~10ms timer tick is the fallback. This matters
+             * now because netcon.c (M1870) keeps a srv_rx-based accept loop
+             * running FOREVER — a busy-poll there would peg a core. Same guarded
+             * hlt as recv_timeout: only with IF set, else degrade to pause. */
+            uint64_t fl; __asm__ volatile("pushfq; pop %0" : "=r"(fl));
+            if (fl & (1u << 9)) __asm__ volatile("hlt"); else __asm__ volatile("pause");
+            continue;
+        }
         if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 6) continue;     /* IPv4 / TCP */
         int ihl = (buf[14] & 0x0F) * 4;
         if (ihl < 20 || 14 + ihl + 20 > len) continue;
@@ -1057,6 +1067,101 @@ int net_tcp_respond(const uint8_t *resp, int resp_len) {
     }
     g_srvconn.active = 0;
     return 0;
+}
+
+/* M1870: passive open that establishes the connection (SYN-ACK) but reads NO
+ * request — for INTERACTIVE sessions (netcon) where the client may connect and
+ * sit silent before typing, which net_tcp_accept's built-in 2s request-wait would
+ * drop. Returns 0 on an established conn (held in g_srvconn), -1 on listen
+ * timeout. Then drive it with net_tcp_accept_recv/send/close. Deliberately a
+ * separate function (not a refactor of net_tcp_accept) to leave the tested
+ * httpd/ws_serve accept path byte-for-byte unchanged. */
+int net_tcp_accept_open(uint16_t port, uint64_t timeout_ticks) {
+    uint8_t buf[1600], *tcp; int dlen;
+    uint8_t cmac[6], cip[4]; uint16_t cport;
+    uint32_t their_seq, our_seq;
+    g_srvconn.active = 0;
+    uint64_t deadline = timer_ticks() + timeout_ticks;
+    for (;;) {
+        if (!srv_rx(buf, sizeof buf, port, 0, 0, deadline, &tcp, &dlen)) return -1;
+        if ((tcp[13] & TCP_SYN) && !(tcp[13] & TCP_ACK)) break;
+    }
+    memcpy(cmac, buf + 6, 6); memcpy(cip, buf + 26, 4);
+    cport = get16(tcp + 0);
+    their_seq = get32(tcp + 4) + 1;                      /* their SYN consumes one seq */
+    our_seq = ((uint32_t)(timer_ticks() * 2654435761u)) | 1;
+    tcp_send_seg(cmac, cip, port, cport, our_seq, their_seq, TCP_SYN | TCP_ACK, 0, 0);
+    our_seq += 1;                                        /* our SYN consumes one */
+    memcpy(g_srvconn.cmac, cmac, 6); memcpy(g_srvconn.cip, cip, 4);
+    g_srvconn.cport = cport; g_srvconn.lport = port;
+    g_srvconn.our_seq = our_seq; g_srvconn.their_seq = their_seq; g_srvconn.active = 1;
+    return 0;
+}
+
+/* M1870: full-duplex SESSION on the connection net_tcp_accept is holding (in
+ * g_srvconn) — turns the one-shot accept/respond pair into a persistent stream,
+ * the way ws_serve does, but as reusable primitives. Same seq/ACK bookkeeping.
+ * Used by the network debug console (netcon.c). One connection at a time, like
+ * the rest of g_srvconn — don't run netcon and wsserve/on-demand-httpd at once.
+ *
+ * net_tcp_accept_recv: read the next inbound data on the held conn, ACKing it.
+ *   Returns bytes (>0); 0 on timeout (conn still open); -1 on RST or peer-FIN
+ *   (conn then closed — g_srvconn.active cleared). A FIN that carries data still
+ *   delivers that data (returns >0) and closes, so `echo cmd | nc host port`
+ *   (send-then-FIN) is handled as well as an interactive session. */
+long net_tcp_accept_recv(uint8_t *out, int max, uint64_t timeout_ticks) {
+    if (!g_srvconn.active) return -1;
+    uint8_t buf[1600], *tcp; int dlen;
+    uint64_t deadline = timer_ticks() + timeout_ticks;
+    for (;;) {
+        if (!srv_rx(buf, sizeof buf, g_srvconn.lport, g_srvconn.cport, g_srvconn.cip,
+                    deadline, &tcp, &dlen))
+            return 0;                                            /* timeout, still open */
+        if (tcp[13] & TCP_RST) { g_srvconn.active = 0; return -1; }
+        int thl = (tcp[12] >> 4) * 4;
+        if (tcp[13] & TCP_FIN) {                                 /* peer half-close */
+            int copy = 0;
+            if (dlen > 0 && get32(tcp + 4) == g_srvconn.their_seq) {
+                copy = dlen < max ? dlen : max;
+                memcpy(out, tcp + thl, copy);
+            }
+            g_srvconn.their_seq += dlen + 1;                     /* FIN consumes one seq */
+            tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                         g_srvconn.our_seq, g_srvconn.their_seq, TCP_ACK, 0, 0);
+            g_srvconn.active = 0;
+            return copy > 0 ? copy : -1;                         /* deliver trailing data, else closed */
+        }
+        if (dlen <= 0 || get32(tcp + 4) != g_srvconn.their_seq) continue;  /* pure ACK / retransmit */
+        int copy = dlen < max ? dlen : max;
+        memcpy(out, tcp + thl, copy);
+        g_srvconn.their_seq += dlen;
+        tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                     g_srvconn.our_seq, g_srvconn.their_seq, TCP_ACK, 0, 0);
+        return copy;
+    }
+}
+
+/* Send data on the held conn (PSH|ACK, chunked to the MSS) WITHOUT closing. */
+int net_tcp_accept_send(const uint8_t *data, int len) {
+    if (!g_srvconn.active) return -1;
+    for (int off = 0; off < len; ) {
+        int chunk = len - off; if (chunk > 1400) chunk = 1400;
+        tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                     g_srvconn.our_seq, g_srvconn.their_seq, TCP_PSH | TCP_ACK,
+                     data + off, chunk);
+        g_srvconn.our_seq += chunk; off += chunk;
+    }
+    return len;
+}
+
+/* Close the held conn (bare FIN|ACK) — the session-mode counterpart to letting
+ * net_tcp_respond send-and-close. Safe to call when no conn is active. */
+void net_tcp_accept_close(void) {
+    if (!g_srvconn.active) return;
+    tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
+                 g_srvconn.our_seq, g_srvconn.their_seq, TCP_FIN | TCP_ACK, 0, 0);
+    g_srvconn.our_seq += 1;
+    g_srvconn.active = 0;
 }
 
 /* WebSocket SERVER (M1849): listen on `port`, accept ONE client, do the RFC 6455

@@ -62,6 +62,13 @@ int  net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
                    uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks);
 int  net_tcp_accept(uint16_t port, uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks);  /* M1327: passive-open + read one request, hold the conn */
 int  net_tcp_respond(const uint8_t *resp, int resp_len);                                  /* M1327: reply on the accepted conn + close */
+/* M1870: persistent full-duplex session on the accepted conn (for netcon.c).
+ * accept_open: SYN-ACK only, no request read (interactive); 0/-1.
+ * recv: bytes/0-timeout/-1-closed (delivers FIN-carried data); send: no close. */
+int  net_tcp_accept_open(uint16_t port, uint64_t timeout_ticks);
+long net_tcp_accept_recv(uint8_t *out, int max, uint64_t timeout_ticks);
+int  net_tcp_accept_send(const uint8_t *data, int len);
+void net_tcp_accept_close(void);
 
 const uint8_t *net_ip(void);        /* our IPv4 address (4 bytes) */
 const uint8_t *net_gateway(void);   /* the gateway IPv4 address (4 bytes) */

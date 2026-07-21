@@ -62,6 +62,16 @@ void klog_write(const char *buf, int n) {
     if (n == 0 || buf[n - 1] != '\n') klog_putc('\n');
 }
 
+/* ---- console capture (M1870) ------------------------------------------------
+ * A single-consumer sink so the network debug console (netcon.c) can capture the
+ * output of a kprintf-based dumper (e.g. pci_enumerate) into a buffer and ship it
+ * over the socket, instead of only to the screen/serial. Best-effort: another
+ * core's kprintf during a capture window interleaves into the buffer, which is
+ * fine for diagnostics. Bracket the buffer's lifetime with begin()/end(). */
+static char *g_cap; static int g_cap_max, g_cap_n;
+void console_capture_begin(char *buf, int max) { g_cap_n = 0; g_cap_max = max; g_cap = buf; }
+int  console_capture_end(void)   { int n = g_cap_n; g_cap = 0; return n; }
+
 void console_init(void) {
     serial_init();
     vga_init();
@@ -77,6 +87,7 @@ void console_putc(char c) {
     else
         vga_putc(c);         /* legacy VGA text mode */
     klog_putc(c);            /* capture into the kernel log ring (M1071) */
+    if (g_cap && g_cap_n < g_cap_max - 1) g_cap[g_cap_n++] = c;   /* netcon capture (M1870) */
     if (c == '\n')
         serial_putc('\r');   /* terminals want CRLF; the screen doesn't care */
     serial_putc(c);
