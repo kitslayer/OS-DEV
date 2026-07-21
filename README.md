@@ -6,7 +6,7 @@
 engine, and a sandboxed web browser — written in C and a little assembly,
 booted via Multiboot under QEMU.
 
-[![Milestones](https://img.shields.io/badge/milestones-1870-blue)](WHATS-NEXT.md)
+[![Milestones](https://img.shields.io/badge/milestones-1871-blue)](WHATS-NEXT.md)
 [![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](tests/README.md)
 [![host tests](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml/badge.svg)](https://github.com/kitslayer/OS-DEV/actions/workflows/ci.yml)
 [![From scratch](https://img.shields.io/badge/from--scratch-~82k%20lines-orange)](#status)
@@ -83,9 +83,14 @@ caveats below).
 
 ### Honest caveats — this is a learning project, not a production OS
 
-- **It runs under QEMU.** The GRUB / Multiboot2 framebuffer path is validated
-  under QEMU + OVMF but has **not yet been booted on physical hardware** (see
-  [BAREMETAL.md](BAREMETAL.md) for exactly what that would take).
+- **It runs under QEMU.** The GRUB / Multiboot2 boot path is validated under
+  QEMU + OVMF but has **not yet been booted on physical hardware** (see
+  [BAREMETAL.md](BAREMETAL.md) for exactly what that would take). Bring-up is
+  network-ready: `make efi-bringup` / `make iso-bringup` build an image that
+  comes up with a **network debug console** (`netcon`) on TCP 2323, so a physical
+  machine can be driven over ethernet even if its framebuffer never lights up —
+  verified end-to-end through the real GRUB→Multiboot2 handoff under OVMF
+  (`make efitest`).
 - **The browser now runs mostly in ring 3.** The default **Browser** (`webview`)
   runs its whole HTML/CSS/JS/image-decode engine as a pledge-sandboxed ring-3
   program, so a parser bug there can no longer compromise the kernel. This was the

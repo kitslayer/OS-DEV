@@ -70,6 +70,54 @@ doesn't scan out — mode mismatch; a "no-preference" request gives GRUB's nativ
 mode but OVMF reports it in a form `fb_init_mb` declines — both are QEMU/OVMF
 emulation quirks, not kernel faults.)
 
+## Getting in over the network — the netcon debug console (M1870)
+
+The framebuffer-display step above is the one thing that can't be fully verified
+without a physical machine. So the bring-up plan doesn't depend on the screen at
+all: the kernel can serve a **debug console over ethernet**. It's the safety net —
+if the display stays dark, you still get a shell.
+
+`kernel/netcon.c` is an in-kernel task that (when the kernel cmdline carries
+`netcon`) brings the NIC up, takes a DHCP lease, and LISTENS on **TCP 2323**,
+serving a line-oriented inspection shell. Because it runs in the kernel — not as a
+ring-3 app, whose `print()` only reaches the framebuffer — it can dump the boot
+log and kernel state and reboot the box, all remotely:
+
+    help    dmesg   mem   ps    cpu   uptime
+    net     ip      pci   bcache   ls [path]   cat <path>   echo <text>   reboot
+
+### Build a bring-up image (cmdline already set to `netcon`)
+
+    make efi-bringup   # UEFI: build/BOOTX64-bringup.EFI
+    make iso-bringup   # BIOS: build/os-bringup.iso   (needs xorriso)
+
+Deploy exactly like the normal images (`BOOTX64-bringup.EFI` → `/EFI/BOOT/
+BOOTX64.EFI` on a FAT USB; or `dd` the ISO). These default to a GRUB menuentry
+that boots `multiboot2 /boot/kernel32.elf netcon`.
+
+### Connect
+
+1. Boot the machine on a LAN with a DHCP server, NIC connected.
+2. Find its address: look up the OS-DEV NIC's MAC in your router's DHCP-lease
+   table (netcon logs the MAC + leased IP to serial/screen too, if either works).
+3. `nc <ip> 2323`, then type `help`. (`echo hi` is a quick link check; `dmesg`
+   shows the whole boot log; `pci` shows exactly what hardware the machine has.)
+
+### Notes / limits
+
+- **Opt-in, and it replaces the boot net self-test.** The net stack has no
+  cross-connection RX demux (every receiver polls `nic_receive` directly) and the
+  NIC RX rings aren't safe for two concurrent pollers, so a netcon boot skips
+  `net_demo`'s internet self-test and netcon owns the network. Don't run
+  `wsserve`/on-demand `httpd` during a netcon session (they share one server
+  connection slot). A normal (non-`netcon`) boot is completely unaffected.
+- **Verified end-to-end under QEMU + OVMF** (the real GRUB→Multiboot2 path, not
+  `-kernel`): the `netcon` cmdline reaches the kernel, netcon takes a DHCP lease,
+  and a host TCP client drives a full multi-command session — booting once, no
+  fault. Fixing this exposed a real latent bug: `mb2_to_mb1` wasn't copying the
+  Multiboot2 command-line tag, so **no** cmdline flag (gdbstub, netcon, …) had
+  ever reached a GRUB-booted kernel; now it does.
+
 ## Real-hardware notes (from research)
 
 - **Input:** primary input is PS/2 (IRQ1) + a USB tablet/keyboard over UHCI.

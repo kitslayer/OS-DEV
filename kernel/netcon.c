@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include "netcon.h"
 #include "net.h"
+#include "nic.h"
 #include "console.h"
 #include "pmm.h"
 #include "task.h"
@@ -271,6 +272,26 @@ static void session(void) {
 }
 
 void netcon_task(void) {
+    /* On a netcon bring-up boot we OWN the network: net_demo's internet self-test
+     * is skipped (kmain), so we are the sole nic_receive consumer — the drivers'
+     * RX rings aren't built for two concurrent pollers (that races to a fault).
+     * Bring the NIC up ourselves (single caller, no double-init hazard). */
+    if (nic_init() != 0) {
+        kprintf("[netcon] no supported NIC found — debug console unavailable\n");
+        return;
+    }
+    /* Real hardware needs a routable address — the static SLIRP default
+     * (10.0.2.15) won't work on a real LAN, and net_dhcp() is otherwise only
+     * reached by the `dhcp` shell command. Best-effort DORA (we're the sole RX
+     * consumer, so no contention); on failure we keep the static IP. Under QEMU
+     * SLIRP this just re-derives the same address, harmless in the test too. */
+    int leased = (net_dhcp() == 0);
+    const uint8_t *ip = net_ip(), *m = net_mac();
+    kprintf("[netcon] debug console on tcp %d.%d.%d.%d:%u  (%s, mac %02x:%02x:%02x:%02x:%02x:%02x)\n",
+            ip[0], ip[1], ip[2], ip[3], (unsigned)NETCON_PORT,
+            leased ? "DHCP lease" : "static/no-lease",
+            m[0], m[1], m[2], m[3], m[4], m[5]);
+
     for (;;) {
         /* Wait (sleeping, via srv_rx's hlt) up to ~1 h for a client, then re-arm. */
         if (net_tcp_accept_open(NETCON_PORT, 360000) == 0)

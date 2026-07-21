@@ -173,6 +173,7 @@ static void cpu_harden(void) {
 #define MULTIBOOT2_MAGIC 0x36d76289u
 static struct multiboot_info       mb1_shim;
 static struct multiboot_mmap_entry mb1_shim_mmap[96];
+static char                        mb1_shim_cmdline[256];
 static uint64_t mb2_to_mb1(uint64_t mb2) {
     const uint8_t *p = (const uint8_t *)(uintptr_t)mb2;
     uint32_t total = *(const uint32_t *)p;          /* total_size, then reserved, then tags */
@@ -183,7 +184,14 @@ static uint64_t mb2_to_mb1(uint64_t mb2) {
         uint32_t type = *(const uint32_t *)tag;
         uint32_t size = *(const uint32_t *)(tag + 4);
         if (type == 0) break;                                  /* end tag */
-        if (type == 4) {                                       /* basic meminfo */
+        if (type == 1) {                                       /* boot command line */
+            const char *s = (const char *)(tag + 8);
+            uint32_t i = 0;
+            while (i < sizeof mb1_shim_cmdline - 1 && s[i]) { mb1_shim_cmdline[i] = s[i]; i++; }
+            mb1_shim_cmdline[i] = 0;
+            mb1_shim.cmdline = (uint32_t)(uintptr_t)mb1_shim_cmdline;
+            mb1_shim.flags  |= (1u << 2);                       /* MB1 flag bit 2 = cmdline present */
+        } else if (type == 4) {                                /* basic meminfo */
             mb1_shim.mem_lower = *(const uint32_t *)(tag + 8);
             mb1_shim.mem_upper = *(const uint32_t *)(tag + 12);
             mb1_shim.flags |= MULTIBOOT_FLAG_MEM;
@@ -582,7 +590,8 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * real depth on top of ECDSA's own call chain in a way a quiet `make
      * check` run doesn't reliably exercise). Bumped with real headroom rather
      * than the smallest number that happens to stop reproducing it. */
-    task_create_stack(net_demo, 0, 0, 512 * 1024);
+    if (!g_netcon)
+        task_create_stack(net_demo, 0, 0, 512 * 1024);
 
     /* Network debug console (M1870): a kernel task listening on TCP 2323 that
      * serves a remote inspection shell (dmesg/ps/mem/pci/ls/cat/reboot/...). Built
@@ -592,12 +601,15 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * nothing at idle; it shares net.c's single server-conn slot, so don't run it
      * alongside wsserve/on-demand httpd.
      *
-     * OPT-IN (`-append netcon`), not default: the net stack has no cross-connection
-     * RX demux (every receiver polls nic_receive directly), so an always-listening
-     * console would steal packets from a concurrent browser fetch / the boot
-     * net_demo self-test. The real-hardware bring-up boot image bakes `netcon` into
-     * its kernel cmdline, so the remote console is up even if the framebuffer is
-     * dark; a normal desktop boot leaves it off and networking is unaffected. */
+     * OPT-IN (`-append netcon`), not default — and it REPLACES net_demo (above)
+     * rather than running beside it. The net stack has no cross-connection RX demux
+     * (every receiver polls nic_receive directly), and the NIC drivers' RX rings
+     * aren't safe for two concurrent pollers — an always-listening console racing
+     * net_demo's boot self-test faulted the box on real hardware. So on a netcon
+     * boot, netcon_task owns bring-up (its own nic_init + DHCP + listen) and the
+     * internet self-test is skipped; a normal desktop boot runs net_demo and leaves
+     * netcon off. The bring-up image bakes `netcon` into its kernel cmdline, so the
+     * console is up even if the framebuffer stays dark. */
     if (g_netcon)
         task_create(netcon_task, 0, 0);
 

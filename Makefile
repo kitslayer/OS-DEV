@@ -557,6 +557,28 @@ efi: $(KERNEL)
 	    "boot/grub/grub.cfg=$(BUILD)/grub-efi.cfg" "boot/kernel32.elf=$(KERNEL)"
 	@echo "Built $(BUILD)/BOOTX64.EFI — copy to <USB>/EFI/BOOT/BOOTX64.EFI on a FAT ESP"
 
+# --- Real-hardware BRING-UP images (M1870) ------------------------------------
+# Same as `iso`/`efi` but the kernel cmdline carries `netcon`, so the machine
+# comes up with the network debug console listening on TCP 2323 even if the
+# framebuffer never lights up (a known MB2/GOP risk on bare metal). Find the box
+# on the LAN by its NIC's MAC in the router's DHCP table, then connect:
+#   nc <ip> 2323          (type `help`)
+# See docs/BAREMETAL-BRINGUP.md for the full checklist.
+iso-bringup: $(KERNEL)
+	@command -v xorriso >/dev/null || { echo "iso-bringup: needs xorriso — emerge dev-libs/libisoburn"; exit 1; }
+	@mkdir -p $(BUILD)/isodir-bringup/boot/grub
+	cp $(KERNEL) $(BUILD)/isodir-bringup/boot/kernel32.elf
+	printf 'set timeout=0\nset default=0\nmenuentry "OS-DEV (netcon bring-up)" {\n\tmultiboot2 /boot/kernel32.elf netcon\n\tboot\n}\n' > $(BUILD)/isodir-bringup/boot/grub/grub.cfg
+	grub-mkrescue -d /usr/lib/grub/i386-pc -o $(BUILD)/os-bringup.iso $(BUILD)/isodir-bringup
+	@echo "Built $(BUILD)/os-bringup.iso (cmdline: netcon) — dd to USB: dd if=$(BUILD)/os-bringup.iso of=/dev/sdX bs=4M"
+
+efi-bringup: $(KERNEL)
+	printf 'set timeout=0\nset default=0\ninsmod all_video\nmenuentry "OS-DEV (netcon bring-up)" {\n\tmultiboot2 /boot/kernel32.elf netcon\n\tboot\n}\n' > $(BUILD)/grub-efi-bringup.cfg
+	grub-mkstandalone -O x86_64-efi -o $(BUILD)/BOOTX64-bringup.EFI \
+	    --modules="multiboot2 normal all_video efi_gop efi_uga part_gpt fat" \
+	    "boot/grub/grub.cfg=$(BUILD)/grub-efi-bringup.cfg" "boot/kernel32.elf=$(KERNEL)"
+	@echo "Built $(BUILD)/BOOTX64-bringup.EFI (cmdline: netcon) — copy to <USB>/EFI/BOOT/BOOTX64.EFI on a FAT ESP"
+
 # Same as `run`, but with a Realtek RTL8139 NIC instead of the e1000 — boots the
 # whole stack over the second card driver (kernel/rtl8139.c) so you can watch the
 # serial log say "rtl8139 up" and ARP/ping/HTTP the SLIRP gateway over it.
@@ -1124,6 +1146,14 @@ fatjournaltest: $(KERNEL) $(DISK)
 # responses -- proving the real-hardware remote-console lifeline works end to end.
 netcontest: $(KERNEL) $(DISK)
 	@tests/run-netcon-test.sh
+
+# efitest (M1871): the REAL bare-metal boot path — build the netcon bring-up EFI
+# image and boot it through GRUB's multiboot2 handoff under QEMU + OVMF (UEFI),
+# then drive netcon over a forwarded port. Regression guard for the mb2_to_mb1
+# cmdline-tag fix (a GRUB-booted kernel now actually receives its cmdline). NOT in
+# `make check` (needs OVMF firmware + is slow); skips cleanly if OVMF is absent.
+efitest: $(KERNEL) $(DISK)
+	@tests/run-efi-netcon-test.sh
 
 # gdbstubtest (M1204): boot `-append gdbstub`, attach real host gdb over COM2,
 # assert it reads + symbolizes registers. Skips if gdb/qemu are unavailable.
