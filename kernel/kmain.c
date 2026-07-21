@@ -425,31 +425,8 @@ static void journal_guest_test(void) {
             rc, c0, c1, clean, crc, pre_old, rep, r0, r1, idem, ok ? "OK" : "FAIL");
 }
 
-/* magic == MB2 => booted by GRUB (the real-HW bring-up path). Gate the audible
- * boot-progress beeps on this so the QEMU `-kernel` (Multiboot1) boottest path is
- * never slowed by the busy-wait beeps below. */
-static volatile int g_grub_boot;
-
-/* Audible boot-progress checkpoint (M1874): `n` quick PC-speaker beeps, busy-
- * waited (no timer/interrupt/framebuffer dependency, so it works at ANY boot
- * stage). Only fires on a GRUB/MB2 boot. On a headless box whose screen never
- * lights up, the LAST group of beeps heard before silence tells us the last stage
- * the kernel reached — the only way to bisect an early hang with no other output. */
-static void bootbeep(int n) {
-    if (!g_grub_boot) return;
-    for (int i = 0; i < n; i++) {
-        speaker_tone(1000);
-        for (volatile uint64_t d = 0; d < 40000000ULL; d++) { }   /* beep on  */
-        speaker_off();
-        for (volatile uint64_t d = 0; d < 25000000ULL; d++) { }   /* gap      */
-    }
-    for (volatile uint64_t d = 0; d < 90000000ULL; d++) { }        /* longer gap after the group */
-}
-
 void kmain(uint64_t mb_info, uint64_t magic) {
     console_init();
-    g_grub_boot = (magic == MULTIBOOT2_MAGIC);
-    bootbeep(2);                       /* [2] reached kmain; console_init done (mb2_to_mb1 next) */
 
     /* GRUB `multiboot2` hands a tag list, not the Multiboot1 struct; convert it
      * up front so the rest of boot (pmm, framebuffer, ...) is identical. (M1293) */
@@ -474,8 +451,6 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         if (cmdline_has(cl, "netcon"))     g_netcon = 1;                 /* network debug console for real-HW bring-up (M1870) */
         if (cmdline_has(cl, "nodisk"))     g_nodisk = 1;                 /* skip disk-write self-tests + FS mount — safe on a machine with real disks (M1872) */
     }
-    bootbeep(3);                       /* [3] mb2_to_mb1 + cmdline parse OK (multiboot info deref worked) */
-
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     kprintf("OS-DEV  -  x86_64 kernel\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
@@ -492,21 +467,14 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     pmm_init(mb_info);
     vmm_init();
     kheap_init();
-    bootbeep(4);                   /* [4] interrupts + timer + pmm + vmm + kheap OK */
-    /* SUB-BISECT (M1874): the Latitude reaches [4] but not the old [5] — the hang
-     * is in one of these four. Per-call beeps pinpoint which. */
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
-    bootbeep(5);                   /* [5] acpi_init done */
     hpet_init();                   /* high-resolution clocksource via the ACPI HPET table (M1273) */
-    bootbeep(6);                   /* [6] hpet_init done */
     smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
-    bootbeep(7);                   /* [7] smp_init done (LAPIC up, APs online) */
     ioapic_init();                 /* M1856: locate + map the I/O APIC (foundation for interrupt-driven I/O; entries masked, PIC still live) */
     if (ioapic_present()) {        /* M1857: move the keyboard's IRQ off the 8259 PIC onto the I/O APIC — proves live delivery (LAPIC-EOI path) end to end */
         irq_route_ioapic(1);
         kprintf("[ ok ] keyboard IRQ routed via the I/O APIC (off the 8259 PIC).\n\n");
     }
-    bootbeep(8);                   /* [8] ioapic + route done */
 
     /* GDB remote-serial stub (M1204): if `-append gdbstub` was seen (detected at
      * the top of kmain, before allocations could clobber the cmdline), break into
@@ -564,7 +532,6 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     kprintf("=============================================\n\n");
     kprintf("[ ok ] full bring-up complete (%lu MiB RAM).\n\n",
             pmm_total_bytes() / (1024 * 1024));
-    bootbeep(9);                   /* [9] framebuffer + gfx console + sched + W^X harden OK */
 
     if (g_kstack_overflow_test)            /* -append kstackover: prove the KERNEL guarded-stack fault path end-to-end (M1498) */
         task_create(kstack_overflow_task, 0, 0);
@@ -588,7 +555,6 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     kprintf("[ ok ] PCI devices on the bus:\n");
     pci_enumerate();
     kprintf("\n");
-    bootbeep(10);                  /* [10] PCI enumeration OK; entering the device init/self-test battery */
 
     audio_init();     /* bring up audio: HDA if present, else AC'97 (no-op if neither) */
     kprintf("[ ok ] audio output: %s\n", audio_name());
