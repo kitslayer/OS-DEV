@@ -77,6 +77,32 @@ static int lo_dequeue(uint8_t *out, int max) {
     return len;
 }
 
+/* Reply to an inbound ARP request for our IP so other hosts on a real LAN can
+ * find us — required for INBOUND connections (netcon/httpd) on bare metal, where
+ * (unlike QEMU's SLIRP) nothing proxies ARP on our behalf. net.c otherwise only
+ * ever SENT ARP requests + consumed replies. Returns 1 if `buf` was an ARP
+ * request for OUR_IP that we just answered. (M1878) */
+static int arp_maybe_reply(const uint8_t *buf, int len) {
+    if (len < 42 || get16(buf + 12) != 0x0806) return 0;   /* not ARP */
+    if (get16(buf + 20) != 1) return 0;                    /* not a request */
+    if (memcmp(buf + 38, OUR_IP, 4) != 0) return 0;        /* target protocol addr isn't us */
+    const uint8_t *m = nic_mac();
+    uint8_t pkt[42];
+    memcpy(pkt + 0, buf + 22, 6);          /* eth dst   = requester's MAC */
+    memcpy(pkt + 6, m, 6);                 /* eth src   = us */
+    put16(pkt + 12, 0x0806);               /* ethertype = ARP */
+    put16(pkt + 14, 1);                    /* htype     = ethernet */
+    put16(pkt + 16, 0x0800);               /* ptype     = IPv4 */
+    pkt[18] = 6; pkt[19] = 4;              /* hlen / plen */
+    put16(pkt + 20, 2);                    /* oper      = reply */
+    memcpy(pkt + 22, m, 6);                /* sender MAC = us */
+    memcpy(pkt + 28, OUR_IP, 4);           /* sender IP  = us */
+    memcpy(pkt + 32, buf + 22, 6);         /* target MAC = requester */
+    memcpy(pkt + 38, buf + 28, 4);         /* target IP  = requester */
+    nic_send(pkt, 42);
+    return 1;
+}
+
 /* Wait up to `ticks` for a frame; return its length (0 on timeout). Loopback
  * frames (M1264) are drained first so a NIC flood can't starve them. */
 static int recv_timeout(uint8_t *buf, int max, uint64_t ticks) {
@@ -85,8 +111,10 @@ static int recv_timeout(uint8_t *buf, int max, uint64_t ticks) {
         int l = lo_dequeue(buf, max);
         if (l > 0) return l;
         int len = nic_receive(buf, max);
-        if (len > 0)
+        if (len > 0) {
+            if (arp_maybe_reply(buf, len)) continue;   /* answered an ARP query — keep waiting */
             return len;
+        }
         /* Nothing yet: instead of tight-spinning the CPU, SLEEP until the next
          * interrupt. Interrupt-driven RX (M1858) makes the NIC raise its IRQ the
          * moment a packet lands, waking us promptly; the ~10ms timer tick is the
@@ -983,6 +1011,7 @@ static int srv_rx(uint8_t *buf, int max, uint16_t port, uint16_t cport,
             if (fl & (1u << 9)) __asm__ volatile("hlt"); else __asm__ volatile("pause");
             continue;
         }
+        if (arp_maybe_reply(buf, len)) continue;                          /* answer "who has us?" so a LAN client can connect in (M1878) */
         if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 6) continue;     /* IPv4 / TCP */
         int ihl = (buf[14] & 0x0F) * 4;
         if (ihl < 20 || 14 + ihl + 20 > len) continue;
