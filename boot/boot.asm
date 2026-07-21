@@ -76,6 +76,12 @@ _start:
     mov [multiboot_info_ptr], ebx
     mov [multiboot_magic], eax      ; stash the boot magic too (MB1 0x2BADB002 / MB2 0x36d76289)
 
+    ; Real-hardware bring-up heartbeat (M1873): a single PC-speaker beep the instant
+    ; we reach the kernel entry, BEFORE any check that could halt. On a headless/dark
+    ; box this is the "GRUB handed off and the kernel is executing" signal. Pure port
+    ; I/O, no memory/paging needed, so it works at the earliest possible moment.
+    call beep32
+
     call check_multiboot
     call check_cpuid
     call check_long_mode
@@ -144,6 +150,12 @@ check_long_mode:
 ;   PML4[0] -> PDPT[0] -> PD[0..511] each a 2 MiB page.
 ; We always write the high dword of each entry too, so we never depend on the
 ; loader having zeroed our .bss.
+; NOTE (M1873): a 4 GiB map was tried to reach a high GRUB-placed multiboot info,
+; but mapping the low 4 GiB as cached WB huge pages also covers the LAPIC/IOAPIC
+; MMIO (0xFEE00000/0xFEC00000) as cached -> EOIs never reach the APIC -> interrupt
+; storm -> stack overflow (seen under TCG; KVM virtualizes the APIC so it hid it).
+; A larger identity map must skip/UC the MMIO hole; kept at the proven 1 GiB until
+; a real-hardware signal says the info pointer actually lands above it.
 setup_page_tables:
     ; PML4[0] = PDPT | present | writable
     mov eax, pdpt_table
@@ -209,6 +221,33 @@ error:
 .hang:
     hlt
     jmp .hang
+
+; --- beep32: one ~440 Hz PC-speaker beep (bring-up heartbeat, M1873) ---------
+; PIT channel 2 square wave gated to the speaker (port 0x61 bits 0+1). Pure port
+; I/O — no memory, paging, or IDT needed, so it runs at the earliest instant.
+; Clobbers eax/ecx (both free at the _start call site).
+beep32:
+    push eax                        ; PRESERVE eax — check_multiboot (right after the
+    push ecx                        ; call site) still needs the boot magic GRUB left in it
+    mov al, 0xB6                    ; PIT: ch2, access lo/hi byte, mode 3 (square)
+    out 0x43, al
+    mov ax, 2711                    ; divisor 1193182/2711 ~= 440 Hz
+    out 0x42, al                    ; low byte
+    mov al, ah
+    out 0x42, al                    ; high byte
+    in al, 0x61
+    or al, 0b11                     ; speaker enable (bit0) + PIT gate (bit1)
+    out 0x61, al
+    mov ecx, 0x08000000             ; crude busy-wait "on" time (~fraction of a second)
+.on:
+    dec ecx
+    jnz .on
+    in al, 0x61
+    and al, 0b11111100             ; speaker + gate off
+    out 0x61, al
+    pop ecx
+    pop eax                         ; restore the boot magic for check_multiboot
+    ret
 
 ; ---------------------------------------------------------------------------
 ; 64-bit entry point
