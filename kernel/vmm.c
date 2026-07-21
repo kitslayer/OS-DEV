@@ -61,8 +61,16 @@ static inline void vmm_lock_give(uint64_t fl) {
     __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
 }
 
+/* Reach a page-table frame by physical address. The boot trampoline only
+ * identity-maps the low 1 GiB, so on real hardware with >1 GiB RAM a page-table
+ * frame (or a walk into a high region) can sit above that and fault. The HHDM
+ * direct-maps ALL physical RAM, so once it's built we reach any frame through it.
+ * During the HHDM's OWN construction (early vmm_init) the HHDM isn't up yet, so we
+ * fall back to the low identity map — pmm hands out low frames first, so the
+ * handful of tables the build itself allocates stay under 1 GiB. (M1875) */
+static int g_hhdm_ready;
 static uint64_t *phys_to_table(uint64_t phys) {
-    return (uint64_t *)(uintptr_t)phys;     /* identity map */
+    return (uint64_t *)(uintptr_t)(g_hhdm_ready ? HHDM_BASE + phys : phys);
 }
 
 static uint64_t read_cr3(void) {
@@ -104,6 +112,24 @@ static int do_map(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t fla
     uint64_t *pml4 = phys_to_table(pml4_phys);
     uint64_t *pdpt = next_table(pml4, PML4_IDX(virt), flags);
     uint64_t *pd   = pdpt ? next_table(pdpt, PDPT_IDX(virt), flags) : 0;
+    /* If a 2 MiB huge page already covers this VA, split it into 512 x 4 KiB
+     * first, so we can set one fine-grained PTE (e.g. a UC MMIO page for HPET /
+     * LAPIC) without clobbering the rest of the region. This is why MMIO mapping
+     * faulted on >1 GiB machines: the HHDM huge-maps [0,total) including the MMIO
+     * hole, and do_map used to walk INTO that huge page as if it were a PT. (M1875) */
+    if (pd && (pd[PD_IDX(virt)] & (PTE_PRESENT | PTE_HUGE)) == (PTE_PRESENT | PTE_HUGE)) {
+        uint64_t e    = pd[PD_IDX(virt)];
+        uint64_t base = e & ~0x1FFFFFull;
+        uint64_t lf   = e & (PTE_WRITABLE | PTE_USER | PTE_NX);   /* carry leaf perms, drop HUGE */
+        uint64_t ptphys = pmm_alloc_frame();
+        if (!ptphys) { vmm_lock_give(f); return -1; }
+        uint64_t *npt = phys_to_table(ptphys);
+        for (int i = 0; i < 512; i++)
+            npt[i] = (base + (uint64_t)i * PAGE_SIZE) | PTE_PRESENT | lf;
+        pd[PD_IDX(virt)] = ptphys | PTE_PRESENT | PTE_WRITABLE | (e & PTE_USER);
+        uint64_t hbase = virt & ~0x1FFFFFull;
+        for (uint64_t off = 0; off < 0x200000; off += PAGE_SIZE) invlpg(hbase + off);
+    }
     uint64_t *pt   = pd   ? next_table(pd,   PD_IDX(virt),   flags) : 0;
     if (!pt) { vmm_lock_give(f); return -1; }
 
@@ -758,4 +784,5 @@ void vmm_init(void) {
     uint64_t total = pmm_total_bytes();
     for (uint64_t phys = 0; phys < total; phys += 0x200000)
         vmm_map_huge(HHDM_BASE + phys, phys, PTE_WRITABLE);
+    g_hhdm_ready = 1;   /* HHDM now covers all RAM: reach page tables through it, not the 1 GiB boot identity map (M1875) */
 }

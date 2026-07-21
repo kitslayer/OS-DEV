@@ -493,15 +493,20 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     vmm_init();
     kheap_init();
     bootbeep(4);                   /* [4] interrupts + timer + pmm + vmm + kheap OK */
+    /* SUB-BISECT (M1874): the Latitude reaches [4] but not the old [5] — the hang
+     * is in one of these four. Per-call beeps pinpoint which. */
     acpi_init();                   /* find the ACPI tables for clean poweroff/reboot (uses hhdm) */
+    bootbeep(5);                   /* [5] acpi_init done */
     hpet_init();                   /* high-resolution clocksource via the ACPI HPET table (M1273) */
+    bootbeep(6);                   /* [6] hpet_init done */
     smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
+    bootbeep(7);                   /* [7] smp_init done (LAPIC up, APs online) */
     ioapic_init();                 /* M1856: locate + map the I/O APIC (foundation for interrupt-driven I/O; entries masked, PIC still live) */
     if (ioapic_present()) {        /* M1857: move the keyboard's IRQ off the 8259 PIC onto the I/O APIC — proves live delivery (LAPIC-EOI path) end to end */
         irq_route_ioapic(1);
         kprintf("[ ok ] keyboard IRQ routed via the I/O APIC (off the 8259 PIC).\n\n");
     }
-    bootbeep(5);                   /* [5] acpi + hpet + smp (APs online) + ioapic OK */
+    bootbeep(8);                   /* [8] ioapic + route done */
 
     /* GDB remote-serial stub (M1204): if `-append gdbstub` was seen (detected at
      * the top of kmain, before allocations could clobber the cmdline), break into
@@ -559,7 +564,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     kprintf("=============================================\n\n");
     kprintf("[ ok ] full bring-up complete (%lu MiB RAM).\n\n",
             pmm_total_bytes() / (1024 * 1024));
-    bootbeep(6);                   /* [6] framebuffer + gfx console + sched + W^X harden OK */
+    bootbeep(9);                   /* [9] framebuffer + gfx console + sched + W^X harden OK */
 
     if (g_kstack_overflow_test)            /* -append kstackover: prove the KERNEL guarded-stack fault path end-to-end (M1498) */
         task_create(kstack_overflow_task, 0, 0);
@@ -583,7 +588,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     kprintf("[ ok ] PCI devices on the bus:\n");
     pci_enumerate();
     kprintf("\n");
-    bootbeep(7);                   /* [7] PCI enumeration OK; entering the device init/self-test battery */
+    bootbeep(10);                  /* [10] PCI enumeration OK; entering the device init/self-test battery */
 
     audio_init();     /* bring up audio: HDA if present, else AC'97 (no-op if neither) */
     kprintf("[ ok ] audio output: %s\n", audio_name());
