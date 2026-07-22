@@ -1036,7 +1036,7 @@ static int srv_rx(uint8_t *buf, int max, uint16_t port, uint16_t cport,
  * closes. Lets an in-guest server choose its response PER REQUEST (e.g. serve
  * the requested file). One connection at a time (the httpd serves sequentially);
  * additive -- net_tcp_serve below is unchanged. */
-static struct { uint8_t cmac[6], cip[4]; uint16_t cport, lport; uint32_t our_seq, their_seq; int active; } g_srvconn;
+static struct { uint8_t cmac[6], cip[4]; uint16_t cport, lport; uint32_t our_seq, their_seq; int active; int peer_fin; } g_srvconn;
 
 int net_tcp_accept(uint16_t port, uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks) {
     uint8_t buf[1600], *tcp; int dlen;
@@ -1071,7 +1071,7 @@ int net_tcp_accept(uint16_t port, uint8_t *reqbuf, int reqmax, uint64_t timeout_
     }
     memcpy(g_srvconn.cmac, cmac, 6); memcpy(g_srvconn.cip, cip, 4);
     g_srvconn.cport = cport; g_srvconn.lport = port;
-    g_srvconn.our_seq = our_seq; g_srvconn.their_seq = their_seq; g_srvconn.active = 1;
+    g_srvconn.our_seq = our_seq; g_srvconn.their_seq = their_seq; g_srvconn.active = 1; g_srvconn.peer_fin = 0;
     return reqlen;
 }
 
@@ -1124,7 +1124,7 @@ int net_tcp_accept_open(uint16_t port, uint64_t timeout_ticks) {
     our_seq += 1;                                        /* our SYN consumes one */
     memcpy(g_srvconn.cmac, cmac, 6); memcpy(g_srvconn.cip, cip, 4);
     g_srvconn.cport = cport; g_srvconn.lport = port;
-    g_srvconn.our_seq = our_seq; g_srvconn.their_seq = their_seq; g_srvconn.active = 1;
+    g_srvconn.our_seq = our_seq; g_srvconn.their_seq = their_seq; g_srvconn.active = 1; g_srvconn.peer_fin = 0;
     return 0;
 }
 
@@ -1141,6 +1141,7 @@ int net_tcp_accept_open(uint16_t port, uint64_t timeout_ticks) {
  *   (send-then-FIN) is handled as well as an interactive session. */
 long net_tcp_accept_recv(uint8_t *out, int max, uint64_t timeout_ticks) {
     if (!g_srvconn.active) return -1;
+    if (g_srvconn.peer_fin) return -1;   /* peer already half-closed + any trailing data delivered -> EOF */
     uint8_t buf[1600], *tcp; int dlen;
     uint64_t deadline = timer_ticks() + timeout_ticks;
     for (;;) {
@@ -1158,8 +1159,12 @@ long net_tcp_accept_recv(uint8_t *out, int max, uint64_t timeout_ticks) {
             g_srvconn.their_seq += dlen + 1;                     /* FIN consumes one seq */
             tcp_send_seg(g_srvconn.cmac, g_srvconn.cip, g_srvconn.lport, g_srvconn.cport,
                          g_srvconn.our_seq, g_srvconn.their_seq, TCP_ACK, 0, 0);
-            g_srvconn.active = 0;
-            return copy > 0 ? copy : -1;                         /* deliver trailing data, else closed */
+            /* Half-close: the peer won't send more, but OUR side is still open, so
+             * KEEP active=1 — the caller must still be able to send its reply (the
+             * `echo cmd | nc` case, where data+FIN coalesce) and net_tcp_accept_close
+             * must still emit our FIN. peer_fin makes the NEXT recv return EOF. (M1884) */
+            g_srvconn.peer_fin = 1;
+            return copy > 0 ? copy : -1;                         /* deliver trailing data, else EOF */
         }
         if (dlen <= 0 || get32(tcp + 4) != g_srvconn.their_seq) continue;  /* pure ACK / retransmit */
         int copy = dlen < max ? dlen : max;

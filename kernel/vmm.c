@@ -120,7 +120,7 @@ static int do_map(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t fla
     if (pd && (pd[PD_IDX(virt)] & (PTE_PRESENT | PTE_HUGE)) == (PTE_PRESENT | PTE_HUGE)) {
         uint64_t e    = pd[PD_IDX(virt)];
         uint64_t base = e & ~0x1FFFFFull;
-        uint64_t lf   = e & (PTE_WRITABLE | PTE_USER | PTE_NX);   /* carry leaf perms, drop HUGE */
+        uint64_t lf   = e & (PTE_WRITABLE | PTE_USER | PTE_NX | PTE_PCD | PTE_PWT);   /* carry leaf perms + cache attrs, drop HUGE (M1884) */
         uint64_t ptphys = pmm_alloc_frame();
         if (!ptphys) { vmm_lock_give(f); return -1; }
         uint64_t *npt = phys_to_table(ptphys);
@@ -493,7 +493,7 @@ static int vmm_split_huge(uint64_t virt) {
     if (!(e & PTE_HUGE))    return 0;                  /* already a 4 KiB PT — nothing to split */
 
     uint64_t base   = e & ~0x1FFFFFull;                /* 2 MiB-aligned physical base */
-    uint64_t lflags = e & (PTE_WRITABLE | PTE_USER | PTE_NX);   /* carry leaf perms, drop HUGE */
+    uint64_t lflags = e & (PTE_WRITABLE | PTE_USER | PTE_NX | PTE_PCD | PTE_PWT);   /* carry leaf perms + cache attrs, drop HUGE (M1884) */
     uint64_t ptphys = pmm_alloc_frame();
     if (!ptphys) return -1;
     uint64_t *pt = phys_to_table(ptphys);
