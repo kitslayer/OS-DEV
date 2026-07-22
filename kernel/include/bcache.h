@@ -3,11 +3,18 @@
  *
  * Before this, two separate 512-byte block caches existed: ata.c's ACACHE (the
  * boot disk's read cache, keyed by ATA drive) and blockdev.c's LRU buffer cache
- * (keyed by blockdev device index). They duplicated the same logic and
- * double-cached any ATA disk reached through the blockdev layer. This is the
+ * (keyed by blockdev device index). They duplicated the same logic. This is the
  * single shared pool both now use — one LRU, one set of hit/miss stats
  * (/proc/bcache), one implementation — with each caller passing an `owner` id so
  * the ATA and blockdev key namespaces don't collide.
+ *
+ * The two owner namespaces still key the SAME physical sector separately when an
+ * ATA disk is reached both directly (fat32.c) and via the blockdev layer, and
+ * their invalidations are independent — so to avoid double-caching an ATA sector
+ * AND leaving one copy stale on a write, blockdev.c does NOT cache ATA-backed
+ * devices under the BLK owner at all; it routes them through ata_read_drive/
+ * ata_write_drive, which cache + invalidate coherently under the ATA owner
+ * (M1885). Non-ATA devices (nvme, virtio-blk, ahci, usb) use the BLK owner.
  *
  * Write-through (a write updates the cached copy AND the disk), so the cache
  * never holds data the disk doesn't — a crash can't lose a cached write. It is a

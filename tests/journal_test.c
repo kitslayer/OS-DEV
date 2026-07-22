@@ -178,6 +178,45 @@ int main(void) {
         CHECK(!torn, "fuzz (4000 random txns x random crash points): never torn");
     }
 
+    /* 6. CROSS-MOUNT stale-commit replay (regression for the seq-reset bug).
+     * The bug: journal_recover() reset seq=1 on every clean mount, but the commit
+     * block is never cleared (checkpoint invalidates only the descriptor). So a
+     * NEW txn (also seq=1) that crashes AFTER its descriptor sector is durable but
+     * BEFORE its staged data blocks are, would be validated by the PREVIOUS mount's
+     * stale commit block (same seq+nblocks) against the stale journal data region
+     * (still the old txn's bytes, csum matches) and wrongly REPLAYED onto the new
+     * txn's targets. Model it across two mounts on ONE persistent platter. */
+    {
+        memset(platter, 0, sizeof platter); wn = 0; g_ops = 0; g_crash_at = 1 << 30; g_crashed = 0;
+
+        /* Boot 1: format + one clean commit (seq=1) writing 'O' to target 50.
+         * Leaves commit block {seq=1,nblocks=1,csum('O')} + journal data = 'O'. */
+        journal_t j1 = J(); journal_format(&j1);
+        pat(platter[50], 'A');
+        journal_begin(&j1);
+        uint8_t ob[JRNL_BLK]; pat(ob, 'O'); journal_write(&j1, 50, ob);
+        CHECK(journal_commit(&j1) == 0, "xmount: boot1 commit");
+        pat(platter[60], 'U');                        /* target 60 untouched, holds 'U' */
+
+        /* Reboot: lose cache, recover (clean). */
+        reboot_cache(); journal_t j2 = J(); journal_recover(&j2);
+
+        /* Boot 2: a NEW one-block txn to target 60 ('N'), but power is cut right
+         * after the descriptor sector reaches the platter — the staged data block
+         * never does, so the journal data region still holds boot-1's 'O'. */
+        g_ops = 0; g_crash_at = 1; g_crashed = 0;     /* only the 1st platter write (descriptor) survives */
+        journal_begin(&j2);
+        uint8_t nb[JRNL_BLK]; pat(nb, 'N'); journal_write(&j2, 60, nb);
+        journal_commit(&j2);                          /* cut short by the crash */
+
+        /* Reboot + recover: target 60 must be UNTOUCHED ('U'). The uncommitted
+         * boot-2 txn must NOT be replayed from boot-1's stale commit block. */
+        reboot_cache(); g_crashed = 0; g_crash_at = 1 << 30;
+        journal_t j3 = J(); journal_recover(&j3);
+        uint8_t b[JRNL_BLK]; reboot_cache(); h_read(0, 60, b);
+        CHECK(is_pat(b, 'U'), "xmount: uncommitted new txn NOT replayed from stale commit block");
+    }
+
     if (fails == 0) { printf("PASS: journal is crash-consistent (all-or-nothing across every injected crash)\n"); return 0; }
     printf("FAIL: %d journal check(s) failed\n", fails);
     return 1;

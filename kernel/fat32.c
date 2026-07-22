@@ -56,6 +56,7 @@ static int g_fj_txn;            /* a filesystem-op transaction is open */
  * than corrupting the shared transaction buffer — no yielding lock (which would
  * deadlock against ata_lock's own yield). */
 static volatile int g_fj_busy;
+static int g_fj_overflow;        /* a staged write didn't fit the open txn -> force abort, never tear (M1885) */
 
 static uint16_t rd16(const uint8_t *p) { return p[0] | p[1] << 8; }
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
@@ -95,8 +96,29 @@ static void jf_bflush(void *c)                                { (void)c; ata_cac
  * is atomic), else write straight through. If staging ever fails (txn full — the
  * caller's size guard prevents this), fall back to a direct write. */
 static void fat_wr(uint32_t lba, const void *buf) {
-    if (g_fj_txn && journal_write(&g_fj, lba, buf) == 0) return;
+    if (g_fj_txn) {
+        /* In a journaled op: stage it. If it somehow doesn't fit the transaction
+         * (the cluster-cap guard below should make this impossible), do NOT fall
+         * back to a direct write — that tears the op (some blocks staged, this one
+         * live on disk). Mark overflow so fat_txn_end aborts the whole txn instead,
+         * keeping the op all-or-nothing (M1885, was a torn-write hazard). */
+        if (journal_write(&g_fj, lba, buf) == 0) return;
+        g_fj_overflow = 1;
+        return;
+    }
     ata_write(lba, 1, buf);
+}
+
+/* Max clusters a single op may stage in one journal transaction. Each cluster
+ * touches a FAT sector in EVERY FAT copy (num_fats), plus a handful of directory
+ * sectors, and the lot must fit one JRNL_MAXTXN-block transaction — otherwise a
+ * staged write would overflow and (pre-M1885) tear via fat_wr's direct fallback.
+ * Capped at 24 (the long-standing safe value for the usual 2 FAT copies) and
+ * tightened for num_fats>2 so the txn can never overflow (Finding 5). */
+static uint32_t jrnl_cluster_cap(void) {
+    if (num_fats == 0) return 0;
+    uint32_t c = (JRNL_MAXTXN - 6) / num_fats;
+    return c < 24 ? c : 24;
 }
 
 /* Open a journaled transaction for one FS op. Returns 1 if journaling is active
@@ -109,12 +131,15 @@ static int fat_txn_begin_op(void) {
     if (__atomic_exchange_n(&g_fj_busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
     if (journal_begin(&g_fj) != 0) { __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE); return 0; }
     g_fj_txn = 1;
+    g_fj_overflow = 0;
     return 1;
 }
 static void fat_txn_end(int commit) {
     if (!g_fj_txn) return;
     g_fj_txn = 0;
+    if (g_fj_overflow) commit = 0;      /* a staged write overflowed the txn -> abort, don't tear (M1885) */
     if (commit) journal_commit(&g_fj); else journal_abort(&g_fj);
+    g_fj_overflow = 0;
     __atomic_store_n(&g_fj_busy, 0, __ATOMIC_RELEASE);
 }
 
@@ -613,10 +638,11 @@ static long fat32_write(const char *name, const void *data, unsigned long len) {
      * free and overwrite the OLD file's data before commit — corrupting it on a
      * crash. Instead an overwrite takes the direct path where the nested
      * fat32_delete SELF-journals the rm (frees committed first), then the create
-     * runs direct — no reuse-of-uncommitted-free hazard. nclus<=24 caps the txn so
-     * even a fragmented chain's FAT sectors + the dir entry fit. */
+     * runs direct — no reuse-of-uncommitted-free hazard. jrnl_cluster_cap() caps
+     * the txn (num_fats-aware) so even a fragmented chain's FAT sectors + the dir
+     * entry fit one transaction. */
     (void)oldsz;
-    int owns = (!exists && nclus <= 24) ? fat_txn_begin_op() : 0;
+    int owns = (!exists && nclus <= jrnl_cluster_cap()) ? fat_txn_begin_op() : 0;
 
     fat32_delete(name);            /* no-op for a new file; for an overwrite it self-journals the rm (direct path) */
 
@@ -815,9 +841,9 @@ static long fat32_delete(const char *name) {
                  * overwrite's txn is already open -> owns=0, stage into it) and the
                  * chain is short enough to fit one transaction; else direct. */
                 int owns = 0;
-                { uint32_t c = fc, st = 0, cnt = 0;
-                  while (cluster_in_range(c) && cnt <= 25) { cnt++; c = fat_step(c, &st); }
-                  if (cnt <= 24) owns = fat_txn_begin_op(); }
+                { uint32_t c = fc, st = 0, cnt = 0; uint32_t cap = jrnl_cluster_cap();
+                  while (cluster_in_range(c) && cnt <= cap) { cnt++; c = fat_step(c, &st); }
+                  if (cnt <= cap) owns = fat_txn_begin_op(); }
                 free_chain(fc);              /* free the cluster chain (guarded); stages if in a txn */
                 e[0] = 0xE5;                 /* mark the dir entry deleted */
                 fat_wr(firsts + s, sec);     /* dir entry: journaled metadata */

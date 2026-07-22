@@ -39,6 +39,7 @@
 #include "usb_storage.h"
 #include "console.h"
 #include "string.h"
+#include "task.h"      /* task_yield() for the per-device cache lock's backoff */
 
 #define SECSZ 512
 
@@ -125,14 +126,23 @@ static int nvme_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *bu
     (void)ctx; return nvme_write(lba, count, buf);
 }
 
-/* IF-saving interrupt guard for the cache critical sections (same idiom as
- * pmm.c/kheap.c): held only across fast bookkeeping, never across disk I/O. */
-static inline uint64_t irq_save(void) {
-    uint64_t fl; __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory"); return fl;
+/* Per-device cache serialization (M1885). Like the ATA driver's ata_lock, this
+ * is held across the WHOLE read-miss (lookup -> raw_read -> bcache_install) and
+ * the whole write (bcache_inval_range -> raw_write), so a concurrent same-LBA
+ * write on another core can't slip its invalidation between a read's raw_read
+ * and its install and leave a stale cached sector. Per-device (indexed by the
+ * registry slot) so different devices still run in parallel; the underlying
+ * driver's own lock (e.g. ata_lock) nests inside, always in this order. Yields
+ * after a short spin, exactly as ata_lock_take does (same rationale). */
+static volatile int blk_lock[BLOCKDEV_MAX];
+static inline void blk_lock_take(int i) {
+    uint32_t spins = 0;
+    while (__atomic_exchange_n(&blk_lock[i], 1, __ATOMIC_ACQUIRE)) {
+        if (++spins >= 1000) { spins = 0; task_yield(); }
+        else __asm__ volatile("pause");
+    }
 }
-static inline void irq_restore(uint64_t fl) {
-    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
-}
+static inline void blk_lock_give(int i) { __atomic_store_n(&blk_lock[i], 0, __ATOMIC_RELEASE); }
 
 static void reg(const char *name, int (*read)(void *, uint64_t, uint32_t, void *),
                 int (*write)(void *, uint64_t, uint32_t, const void *),
@@ -232,12 +242,26 @@ static int raw_write(int i, uint64_t lba, uint32_t count, const void *buf) {
  * a private copy. Every lookup copies into the caller's buffer (no dangling on
  * eviction) and writes are write-through, exactly as before. */
 
-/* Read one sector (dev i, lba) into dst, via the cache. */
+/* An ATA-backed device is already cached AND kept coherent under the ATA owner by
+ * ata_read_drive / ata_write_drive (which invalidates on every write). Adding a
+ * second BLK-owner copy here would double-cache the same physical sector and,
+ * worse, miss ata_write_drive's invalidation (a direct FAT32 write would leave
+ * the BLK copy stale). So for ATA devices we skip this layer entirely and let the
+ * driver's own cache serve — one coherent copy per sector (M1885, closes the
+ * double-cache coherence gap the bcache.h note wrongly claimed was already gone). */
+static int is_ata_backed(int i) { return g_dev[i].read == ata_bd_read; }
+
+/* Read one sector (dev i, lba) into dst, via the cache. The per-device lock spans
+ * lookup->read->install so a concurrent write's invalidation can't race between
+ * the raw_read and the install and strand a stale sector in the cache (M1885). */
 static int bread(int i, uint64_t lba, uint8_t *dst) {
-    if (bcache_lookup(BCACHE_OWNER_BLK(i), lba, dst)) return 0;      /* hit */
-    if (raw_read(i, lba, 1, dst) < 0) return -1;                    /* miss: read (no lock held) */
-    bcache_install(BCACHE_OWNER_BLK(i), lba, dst);
-    return 0;
+    if (is_ata_backed(i)) return raw_read(i, lba, 1, dst) < 0 ? -1 : 0;   /* ATA: driver caches coherently */
+    blk_lock_take(i);
+    if (bcache_lookup(BCACHE_OWNER_BLK(i), lba, dst)) { blk_lock_give(i); return 0; }  /* hit */
+    int r = raw_read(i, lba, 1, dst);                               /* miss */
+    if (r >= 0) bcache_install(BCACHE_OWNER_BLK(i), lba, dst);
+    blk_lock_give(i);
+    return r < 0 ? -1 : 0;
 }
 
 int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf) {
@@ -250,11 +274,25 @@ int blockdev_read(int i, uint64_t lba, uint32_t count, void *buf) {
 }
 
 int blockdev_write(int i, uint64_t lba, uint32_t count, const void *buf) {
-    /* Invalidate any cached copies of the written range BEFORE the write so a
-     * concurrent reader can't re-cache stale bytes, then write (M1869). Coherent
-     * + pollution-free (a big swap write won't evict the read cache). */
-    bcache_inval_range(BCACHE_OWNER_BLK(i), lba, count);
-    if (raw_write(i, lba, count, buf) < 0) return -1;
+    if (i < 0 || i >= g_ndev) return -1;                   /* bound i before it indexes blk_lock/bcache */
+    int r;
+    if (is_ata_backed(i)) {
+        /* ATA path: ata_write_drive already invalidates the ATA-owner cache under
+         * ata_lock (and we keep no BLK-owner copy for ATA — see bread), so no
+         * blockdev-level cache work is needed and it stays coherent (M1885). */
+        r = raw_write(i, lba, count, buf);
+    } else {
+        /* Invalidate any cached copies of the written range BEFORE the write so a
+         * concurrent reader can't re-cache stale bytes, then write (M1869). The
+         * per-device lock spans inval+write so it is atomic against a concurrent
+         * read-miss install on another core (M1885). Coherent + pollution-free (a
+         * big swap write won't evict the read cache). */
+        blk_lock_take(i);
+        bcache_inval_range(BCACHE_OWNER_BLK(i), lba, count);
+        r = raw_write(i, lba, count, buf);
+        blk_lock_give(i);
+    }
+    if (r < 0) return -1;
     g_dev[i].wr_ios++; g_dev[i].wr_sectors += count;       /* /proc/diskstats (M1256) */
     return 0;
 }

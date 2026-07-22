@@ -71,6 +71,7 @@ int journal_format(journal_t *j) {
     uint8_t blk[JRNL_BLK];
     memset(blk, 0, sizeof blk);                     /* magic 0 => no transaction present */
     if (j->write(j->ctx, j_desc_lba(j), blk) < 0) return -1;
+    if (j->write(j->ctx, j_commit_lba(j), blk) < 0) return -1;   /* also clear any stale commit block */
     j_flush(j);
     j->seq = 1; j->in_txn = 0; j->npend = 0;
     return 0;
@@ -83,7 +84,22 @@ int journal_recover(journal_t *j) {
     jrnl_desc_t d;
     if (j->read(j->ctx, j_desc_lba(j), blk) < 0) return -1;
     memcpy(&d, blk, sizeof d);
-    if (d.magic != JRNL_DMAGIC) { j->seq = 1; return 0; }   /* clean */
+    if (d.magic != JRNL_DMAGIC) {                           /* clean: no interrupted txn */
+        /* Continue seq monotonically from the last committed txn. The commit
+         * block is NOT cleared at checkpoint (only the descriptor is), so it
+         * still holds the last seq. Resetting seq to 1 here was a corruption
+         * bug: a new seq=1 txn that crashed after its descriptor but before its
+         * staged data blocks would be validated against THIS stale commit block
+         * (same seq+nblocks) + the stale journal data region and wrongly
+         * replayed onto the new txn's targets. Advancing past it makes the
+         * (seq) linkage unique across mounts, so a stale commit can never match
+         * a later descriptor. */
+        jrnl_commit_t cc;
+        if (j->read(j->ctx, j_commit_lba(j), blk) < 0) return -1;
+        memcpy(&cc, blk, sizeof cc);
+        j->seq = (cc.magic == JRNL_CMAGIC) ? cc.seq + 1 : 1;
+        return 0;
+    }
     j->seq = d.seq + 1;                                     /* continue monotonically */
     if (d.nblocks == 0 || d.nblocks > JRNL_MAXTXN) {        /* corrupt descriptor -> discard */
         memset(blk, 0, sizeof blk); j->write(j->ctx, j_desc_lba(j), blk); j_flush(j); return 0;
@@ -151,10 +167,10 @@ int journal_commit(journal_t *j) {
     d.magic = JRNL_DMAGIC; d.seq = j->seq; d.nblocks = (uint32_t)n;
     for (int i = 0; i < n; i++) d.targets[i] = j->pend_lba[i];
     memset(blk, 0, sizeof blk); memcpy(blk, &d, sizeof d);
-    if (j->write(j->ctx, j_desc_lba(j), blk) < 0) return -1;
+    if (j->write(j->ctx, j_desc_lba(j), blk) < 0) { journal_abort(j); return -1; }
     /* 1b. staged data blocks */
     for (int i = 0; i < n; i++)
-        if (j->write(j->ctx, j_data_lba(j, i), j->pend_buf[i]) < 0) return -1;
+        if (j->write(j->ctx, j_data_lba(j, i), j->pend_buf[i]) < 0) { journal_abort(j); return -1; }
     /* 2. flush — descriptor + data durable in the journal before the commit */
     j_flush(j);
     /* 3. commit block */
@@ -162,19 +178,25 @@ int journal_commit(journal_t *j) {
     c.magic = JRNL_CMAGIC; c.seq = j->seq; c.nblocks = (uint32_t)n;
     c.csum = jsum_blocks((const uint8_t(*)[JRNL_BLK])j->pend_buf, n);
     memset(blk, 0, sizeof blk); memcpy(blk, &c, sizeof c);
-    if (j->write(j->ctx, j_commit_lba(j), blk) < 0) return -1;
+    if (j->write(j->ctx, j_commit_lba(j), blk) < 0) { journal_abort(j); return -1; }
     /* 4. flush — COMMIT POINT: the transaction is now atomic across a crash */
     j_flush(j);
+    /* Spend this seq the moment the commit block is durable. If checkpoint below
+     * then fails, we must NOT hand the same seq to the next txn: a stale commit
+     * block with seq=S + the stale journal data region would validate a later
+     * seq=S descriptor and be wrongly replayed (the cross-mount hazard, but
+     * in-session). Advancing here keeps seq unique per committed txn. */
+    j->seq++;
     if (j->dbg_crash) { j->in_txn = 0; j->npend = 0; return 2; }  /* TEST: simulate a crash here */
     /* 5. checkpoint — copy each staged block to its real target LBA */
     for (int i = 0; i < n; i++)
-        if (j->write(j->ctx, j->pend_lba[i], j->pend_buf[i]) < 0) return -1;
+        if (j->write(j->ctx, j->pend_lba[i], j->pend_buf[i]) < 0) { journal_abort(j); return -1; }
     j_flush(j);
     /* 6. invalidate the descriptor so recovery won't replay a done txn */
     memset(blk, 0, sizeof blk);
-    if (j->write(j->ctx, j_desc_lba(j), blk) < 0) return -1;
+    if (j->write(j->ctx, j_desc_lba(j), blk) < 0) { journal_abort(j); return -1; }
     j_flush(j);
 
-    j->seq++; j->in_txn = 0; j->npend = 0;
+    j->in_txn = 0; j->npend = 0;
     return 0;
 }
