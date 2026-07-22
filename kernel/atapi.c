@@ -152,7 +152,19 @@ void atapi_init(void) {
     for (int s = 0; s < ATAPI_MAX; s++) {
         if (atapi_detect(s)) {
             g_cd[s].present = 1;
-            atapi_read_capacity(s, &g_cd[s].last_lba, &g_cd[s].block_size);
+            /* Detection only proves an ATAPI-signature DEVICE answered; it does
+             * NOT prove a readable disc. A CD-ROM drive with no media — and
+             * QEMU's PIIX3 secondary channel, which presents a phantom ATAPI stub
+             * even with no -cdrom — answers IDENTIFY with the signature but has no
+             * volume: READ CAPACITY fails or reports a zero block size / zero
+             * size. Presenting such a drive only spams read failures (and used to
+             * fail idedmatest via a stray "PVD read FAILED") and pollutes the
+             * block layer with an unreadable device, so require a valid capacity
+             * before treating it as a usable CD. (M1888) */
+            if (atapi_read_capacity(s, &g_cd[s].last_lba, &g_cd[s].block_size) != 0
+                || g_cd[s].block_size == 0 || g_cd[s].last_lba == 0) {
+                g_cd[s].present = 0; g_cd[s].last_lba = 0; g_cd[s].block_size = 0;
+            }
         }
     }
 }
