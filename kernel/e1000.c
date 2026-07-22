@@ -165,15 +165,12 @@ int e1000_init(void) {
 
     reg_write(REG_IMC, 0xFFFFFFFF);    /* mask all NIC interrupts; we poll */
 
-    /* Software-reset the controller FIRST, so we init from a known state no matter
-     * what the firmware / UEFI PXE stack left it in. Without this a NIC that was
-     * just used for PXE boot (like the I218 when net-booting) won't DHCP — it
-     * inherits PXE's leftover config. CTRL.RST self-clears when the reset finishes;
-     * the MAC reloads into RAL0/RAH0 from the NVM afterward. (M1880) */
-    reg_write(REG_CTRL, reg_read(REG_CTRL) | CTRL_RST);
-    for (volatile int d = 0; d < 4000000; d++) if (!(reg_read(REG_CTRL) & CTRL_RST)) break;
-    for (volatile int d = 0; d < 2000000; d++) { }   /* settle: MAC reload + PHY */
-    reg_write(REG_IMC, 0xFFFFFFFF);                   /* the reset re-enabled interrupt causes — re-mask */
+    /* NOTE (M1883): a CTRL.RST software reset here (to recover the I218 after the
+     * UEFI PXE stack drove it) HUNG the real Latitude — a bare MAC reset wedges the
+     * I218's PCH PHY. Reverted. Proper e1000e PHY re-init after PXE is a bigger,
+     * hardware-only effort; without it a PXE boot leaves the I218 on the static IP
+     * (netcon unreachable), but a USB boot — where firmware only POST-inits the NIC
+     * — works fully. So this driver stays reset-free (works on QEMU + USB boot). */
 
     /* Set the link up (SLU) — the e1000e/I217/I218 need it; harmless on the 82540. */
     reg_write(REG_CTRL, reg_read(REG_CTRL) | CTRL_SLU);
@@ -230,10 +227,6 @@ int e1000_init(void) {
     reg_write(REG_TIPG, 0x0060200A);
     reg_write(REG_TCTL, TCTL_EN | TCTL_PSP | (0x0F << 4) | (0x40 << 12));
     tx_cur = 0;
-
-    /* Give the link a moment to come up (auto-neg after the reset) so the first
-     * DHCP isn't sent before there's carrier. Best-effort — proceed on timeout. */
-    for (volatile int d = 0; d < 80000000 && !(reg_read(REG_STATUS) & STATUS_LU); d++) { }
 
     /* Interrupt-driven RX (M1858): install the ISR on the card's PCI IRQ line
      * (via the 8259 PIC — no ACPI _PRT needed) and enable ONLY the RX causes.
