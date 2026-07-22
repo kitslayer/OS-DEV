@@ -939,6 +939,7 @@ static int tcp_recv_seg(uint8_t *buf, int max, const uint8_t *dip,
 /* ---------------- reusable TCP stream (for HTTP and, later, TLS) ----------- */
 
 static int ooo_claim(void);       /* claim a fresh reassembly+FIN slot (defined below, M1606) */
+static void tcp_snd_open(int idx, uint32_t isn, uint32_t peer_wnd);  /* arm the reliable-send state on connect (M1886) */
 
 /* Open a connection to ip:port (routed via the gateway). 0 on success, -1 on
  * failure; fills the connection state. */
@@ -969,6 +970,7 @@ int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
                 tcp_send_seg(c->gw, c->ip, c->sport, port, c->myseq, c->theirseq, TCP_ACK, 0, 0);
                 c->up = 1;
                 c->ooo_idx = ooo_claim();     /* fresh reassembly + FIN state for this conn, now that we know we need it (M1606) */
+                tcp_snd_open(c->ooo_idx, c->myseq, get16(tcp + 14));  /* arm reliable send: ISN + peer's advertised window (M1886) */
                 return 0;
             }
         }
@@ -977,18 +979,7 @@ int tcp_connect(tcp_conn *c, const uint8_t ip[4], uint16_t port) {
     return -1;
 }
 
-/* Send `len` bytes on the connection. Returns len, or -1. */
-int tcp_write(tcp_conn *c, const uint8_t *data, int len) {
-    if (!c->up) return -1;
-    int off = 0;
-    while (off < len) {                                  /* segment to <=1400-byte chunks */
-        int chunk = len - off; if (chunk > 1400) chunk = 1400;
-        tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq,
-                     TCP_PSH | TCP_ACK, data + off, chunk);
-        c->myseq += chunk; off += chunk;
-    }
-    return len;
-}
+/* tcp_write moved below the reliable-send helpers (needs struct ooo_state), M1886. */
 
 /* ---------------- minimal one-connection TCP SERVER (M1133) ----------------
  * The inbound counterpart of tcp_connect: LISTEN on `port`, accept one
@@ -1376,6 +1367,14 @@ int net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
  * arrived; `hi` is the highest stored offset+1. */
 #define OOO_CAP (96 * 1024)
 #define OOO_N   8   /* TCPSOCK_N(2) + NETCONN_N(4) persistent, + spare for ephemeral local tcp_conns (http_get/tls) */
+
+/* --- send-side reliability tunables (M1886) --- */
+#define TCP_MSS   1400            /* our segment payload cap (matches tcp_write's historical chunking) */
+#define SND_CAP   (32 * 1024)     /* per-connection unacked/unsent send buffer; also bounds in-flight */
+#define RTO_MIN   30              /* retransmit timeout floor, in 100 Hz ticks (300 ms) */
+#define RTO_MAX   500             /* ...and ceiling (5 s) */
+#define RTO_INIT  100             /* initial RTO before any RTT sample (1 s, per RFC 6298) */
+
 struct ooo_state {
     int      used;
     uint8_t  buf[OOO_CAP];
@@ -1385,6 +1384,24 @@ struct ooo_state {
     int      hi;               /* highest stored offset+1 (0 = empty) */
     int      fin_seen;         /* peer FIN observed (maybe out of order) */
     uint32_t fin_at;           /* the FIN's sequence number (= data end) */
+    /* --- send-side reliability (M1886): reliable, windowed, retransmitting TX.
+     * sndbuf holds every byte from snd_una (oldest unacked) up to the buffered
+     * end; snd_nxt (= tcp_conn.myseq) is the highest seq actually put on the wire,
+     * so [snd_una,snd_nxt) is in flight and [snd_nxt,snd_una+sndbuf_len) is queued
+     * but window-blocked. ACKs advance snd_una (drop from the head); the RTO timer
+     * retransmits the in-flight bytes; 3 dup-ACKs fast-retransmit. */
+    uint32_t snd_una;         /* oldest unacked seq; sndbuf[0] is this byte */
+    uint32_t snd_nxt;         /* highest seq sent (mirrors tcp_conn.myseq) */
+    int      sndbuf_len;      /* bytes buffered (sent + queued) = (snd_una+len) - snd_una */
+    uint8_t  sndbuf[SND_CAP];
+    uint64_t rto_at;          /* absolute tick to retransmit at (0 = timer disarmed) */
+    uint32_t rto;             /* current retransmit timeout (ticks) */
+    int32_t  srtt, rttvar;    /* smoothed RTT + variance (ticks); srtt < 0 => no sample yet */
+    uint64_t rtt_start;       /* tick a timed segment left (Karn) */
+    uint32_t rtt_seq;         /* snd_nxt when timing started; sample lands when snd_una passes it */
+    int      rtt_timing;      /* 1 while an RTT sample is outstanding */
+    uint32_t peer_wnd;        /* peer's most recently advertised receive window (bytes) */
+    int      dupacks;         /* consecutive duplicate-ACK count (fast retransmit at 3) */
 };
 static struct ooo_state ooo_tab[OOO_N];
 static volatile int ooo_lock;
@@ -1413,8 +1430,15 @@ static inline void ooo_setbit(struct ooo_state *o, int i) { o->have[i >> 3] |= (
 static int ooo_claim(void) {
     uint64_t fl = ooo_irq_save();
     for (int i = 0; i < OOO_N; i++) if (!ooo_tab[i].used) {
-        ooo_tab[i].used = 1; ooo_tab[i].active = 0; ooo_tab[i].hi = 0;
-        ooo_tab[i].fin_seen = 0; ooo_tab[i].fin_at = 0;
+        struct ooo_state *o = &ooo_tab[i];
+        o->used = 1; o->active = 0; o->hi = 0;
+        o->fin_seen = 0; o->fin_at = 0;
+        /* send-side reliability state (M1886) — snd_una/snd_nxt are set to the ISN
+         * by tcp_connect once the handshake fixes myseq; the rest start clean. */
+        o->snd_una = o->snd_nxt = 0; o->sndbuf_len = 0;
+        o->rto_at = 0; o->rto = RTO_INIT; o->srtt = -1; o->rttvar = 0;
+        o->rtt_start = 0; o->rtt_seq = 0; o->rtt_timing = 0;
+        o->peer_wnd = SND_CAP; o->dupacks = 0;
         ooo_irq_restore(fl);
         return i;
     }
@@ -1471,6 +1495,165 @@ static void ooo_drain(struct ooo_state *o, tcp_conn *c, uint8_t *out, int *total
     if (rel >= o->hi) ooo_reset(o);          /* nothing more buffered ahead */
 }
 
+/* ========================= reliable send (M1886) ===========================
+ * TCP output was fire-and-forget: tcp_write blasted the data once and never
+ * retransmitted, so a single dropped segment silently lost bytes — fine on the
+ * loopback/QEMU path the tests use, wrong on a real lossy network (the whole
+ * point of the bare-metal bring-up). This makes the sender reliable + windowed:
+ * unacked bytes are buffered per-connection (in the ooo slot, so the stack-
+ * allocated tcp_conn stays small), incoming ACKs free them and feed an RFC 6298
+ * RTT/RTO estimator, an expired RTO or 3 duplicate ACKs retransmit the in-flight
+ * window (go-back-N), and the send window honours the peer's advertised receive
+ * window. It is a strict SUPERSET of the old behaviour: with no loss and a
+ * typical (<=window) send, the exact same segments go out immediately, so the
+ * happy-path suites (httpd/browser/ws/netcon) see identical wire traffic.
+ * Deliberate follow-ons (documented, not gaps): congestion control (cwnd/slow-
+ * start) and true zero-window probing — reliability + flow control is the
+ * correctness core; those two are fairness/efficiency refinements. */
+
+/* Max bytes that may be outstanding (in flight): the peer's window, floored at
+ * one MSS (a 0-window still lets one probe segment ride the RTO timer so the
+ * connection can't wedge) and capped at our own buffer. */
+static uint32_t tcp_snd_wnd(struct ooo_state *o) {
+    uint32_t w = o->peer_wnd; if (w == 0) w = TCP_MSS;
+    return w < SND_CAP ? w : SND_CAP;
+}
+
+/* Arm the reliable-send state once the handshake fixes our ISN (tcp_connect). */
+static void tcp_snd_open(int idx, uint32_t isn, uint32_t peer_wnd) {
+    struct ooo_state *o = ooo_lookup(idx);
+    if (!o) return;
+    o->snd_una = o->snd_nxt = isn;
+    o->sndbuf_len = 0;
+    o->rto_at = 0; o->rto = RTO_INIT;
+    o->srtt = -1; o->rttvar = 0; o->rtt_timing = 0; o->dupacks = 0;
+    o->peer_wnd = peer_wnd;
+}
+
+/* Fold one RTT sample (ticks) into srtt/rttvar and recompute rto (RFC 6298). */
+static void tcp_rtt_update(struct ooo_state *o, int32_t r) {
+    if (r < 0) r = 0;
+    if (o->srtt < 0) { o->srtt = r; o->rttvar = r / 2; }        /* first sample */
+    else {
+        int32_t d = r - o->srtt; if (d < 0) d = -d;
+        o->rttvar = (3 * o->rttvar + d) / 4;                    /* 1/4 gain */
+        o->srtt   = (7 * o->srtt + r) / 8;                      /* 1/8 gain */
+    }
+    int32_t rto = o->srtt + 4 * o->rttvar;
+    if (rto < RTO_MIN) rto = RTO_MIN;
+    if (rto > RTO_MAX) rto = RTO_MAX;
+    o->rto = (uint32_t)rto;
+}
+
+/* Transmit buffered-but-unsent bytes that fit the window, as MSS segments.
+ * [snd_una,snd_nxt) is in flight; [snd_nxt, snd_una+sndbuf_len) is queued. */
+static void tcp_output(tcp_conn *c, struct ooo_state *o) {
+    uint32_t wnd = tcp_snd_wnd(o);
+    for (;;) {
+        uint32_t inflight = o->snd_nxt - o->snd_una;
+        uint32_t queued   = (uint32_t)o->sndbuf_len - inflight;   /* unsent bytes */
+        if (queued == 0 || inflight >= wnd) break;                /* nothing queued / window closed */
+        uint32_t room = wnd - inflight;
+        uint32_t n = queued; if (n > room) n = room; if (n > TCP_MSS) n = TCP_MSS;
+        tcp_send_seg(c->gw, c->ip, c->sport, c->dport, o->snd_nxt, c->theirseq,
+                     TCP_PSH | TCP_ACK, o->sndbuf + inflight, (int)n);
+        if (!o->rtt_timing) {                                     /* start an RTT sample (Karn: fresh data only) */
+            o->rtt_timing = 1; o->rtt_start = timer_ticks(); o->rtt_seq = o->snd_nxt + n;
+        }
+        o->snd_nxt += n; c->myseq = o->snd_nxt;
+        if (!o->rto_at) o->rto_at = timer_ticks() + o->rto;       /* arm the retransmit timer */
+    }
+}
+
+/* Retransmit the whole in-flight window from snd_una (go-back-N). */
+static void tcp_retransmit(tcp_conn *c, struct ooo_state *o) {
+    uint32_t inflight = o->snd_nxt - o->snd_una, off = 0;
+    while (off < inflight) {
+        uint32_t n = inflight - off; if (n > TCP_MSS) n = TCP_MSS;
+        tcp_send_seg(c->gw, c->ip, c->sport, c->dport, o->snd_una + off, c->theirseq,
+                     TCP_PSH | TCP_ACK, o->sndbuf + off, (int)n);
+        off += n;
+    }
+    o->rtt_timing = 0;                          /* Karn: never sample a retransmitted segment */
+    o->rto_at = timer_ticks() + o->rto;         /* restart the timer */
+}
+
+/* Process one inbound segment's ACK field + advertised window: free acked bytes,
+ * update RTT/RTO, count duplicate ACKs (fast-retransmit at 3), then send whatever
+ * the freshly-opened window now allows. Call for EVERY inbound segment. */
+static void tcp_ack_input(tcp_conn *c, struct ooo_state *o, const uint8_t *tcp, uint8_t fl, int dlen) {
+    if (!(fl & TCP_ACK)) return;
+    uint32_t ackno = get32(tcp + 8);
+    o->peer_wnd = get16(tcp + 14);                                /* honour the latest window (0 handled by tcp_snd_wnd) */
+    uint32_t inflight = o->snd_nxt - o->snd_una;
+
+    if (seq_gt(ackno, o->snd_una) && seq_le(ackno, o->snd_nxt)) {   /* NEW data acked */
+        uint32_t acked = ackno - o->snd_una;
+        memmove(o->sndbuf, o->sndbuf + acked, (uint32_t)o->sndbuf_len - acked);   /* drop from the head */
+        o->sndbuf_len -= (int)acked;
+        o->snd_una = ackno;
+        o->dupacks = 0;
+        if (o->rtt_timing && seq_le(o->rtt_seq, ackno)) {          /* RTT sample landed (Karn) */
+            tcp_rtt_update(o, (int32_t)(timer_ticks() - o->rtt_start));
+            o->rtt_timing = 0;
+        }
+        o->rto_at = (o->snd_una == o->snd_nxt) ? 0 : timer_ticks() + o->rto;  /* disarm if all acked, else restart */
+    } else if (inflight > 0 && ackno == o->snd_una && dlen == 0 && !(fl & (TCP_SYN | TCP_FIN))) {
+        if (++o->dupacks == 3) tcp_retransmit(c, o);              /* 3 dup ACKs => fast retransmit */
+    }
+    tcp_output(c, o);                                             /* the window may have opened */
+}
+
+/* Retransmit if the RTO timer expired with data still in flight (+ back off). */
+static void tcp_rto_check(tcp_conn *c, struct ooo_state *o) {
+    if (o->rto_at && o->snd_nxt != o->snd_una && timer_ticks() >= o->rto_at) {
+        o->rto *= 2; if (o->rto > RTO_MAX) o->rto = RTO_MAX;      /* exponential backoff */
+        tcp_retransmit(c, o);
+    }
+}
+
+/* Send `len` bytes reliably: buffer them (retransmitted until acked), transmit
+ * what the window allows now, and pump ACKs to drain the buffer if `len` exceeds
+ * it. Returns len once every byte is buffered/queued, or -1 on a dead peer. The
+ * no-slot path (OOO table exhausted) keeps the old fire-and-forget fallback. */
+int tcp_write(tcp_conn *c, const uint8_t *data, int len) {
+    if (!c->up) return -1;
+    if (len <= 0) return len;
+    struct ooo_state *o = ooo_lookup(c->ooo_idx);
+    if (!o) {                                    /* degraded: fire-and-forget (unchanged) */
+        int off = 0;
+        while (off < len) {
+            int chunk = len - off; if (chunk > TCP_MSS) chunk = TCP_MSS;
+            tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq,
+                         TCP_PSH | TCP_ACK, data + off, chunk);
+            c->myseq += chunk; off += chunk;
+        }
+        return len;
+    }
+    int off = 0;
+    uint64_t giveup = timer_ticks() + 2000;      /* ~20 s hard cap so a dead peer can't wedge the sender */
+    while (off < len) {
+        int room = SND_CAP - o->sndbuf_len;
+        if (room > 0) {                          /* buffer as much as fits, then transmit within the window */
+            int n = len - off; if (n > room) n = room;
+            memcpy(o->sndbuf + o->sndbuf_len, data + off, n);
+            o->sndbuf_len += n; off += n;
+            tcp_output(c, o);
+            if (off >= len) break;
+        }
+        /* buffer full with more to write: pump ACKs (+ retransmit) to drain it */
+        tcp_rto_check(c, o);
+        uint8_t buf[1600]; uint8_t *tcp; int dlen;
+        if (tcp_recv_seg(buf, sizeof buf, c->ip, c->sport, c->dport, 20, &tcp, &dlen)) {
+            uint8_t fl = tcp[13];
+            if (fl & TCP_RST) { c->up = 0; return -1; }
+            tcp_ack_input(c, o, tcp, fl, dlen);  /* frees buffer; carried data is dropped -> peer resends, tcp_read gets it */
+        }
+        if (timer_ticks() >= giveup) return -1;
+    }
+    return len;
+}
+
 /* Read up to `max` bytes of in-order stream data (waits up to `ticks`). Returns
  * bytes read (0 on timeout), or -1 if the connection has closed/reset. ACKs,
  * buffers out-of-order segments, and tracks the peer FIN (returns -1 once
@@ -1489,6 +1672,7 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
     }
     while (timer_ticks() < deadline && total < max) {
         uint8_t *tcp; int dlen;
+        if (o) { tcp_rto_check(c, o); tcp_output(c, o); }   /* keep retransmits + window-blocked sends moving while we poll (M1886) */
         if (!tcp_recv_seg(buf, sizeof(buf), c->ip, c->sport, c->dport, 20, &tcp, &dlen)) {
             if (total > 0) break;                        /* return what we have */
             continue;
@@ -1498,6 +1682,7 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
         if (fl & TCP_RST) { c->up = 0; return total > 0 ? total : -1; }
         int thl = (tcp[12] >> 4) * 4;
         uint8_t *data = tcp + thl;
+        if (o) tcp_ack_input(c, o, tcp, fl, dlen);  /* free acked send bytes + RTT/RTO + fast-retransmit (M1886) */
         if (o && (fl & TCP_FIN)) {                  /* FIN occupies sequence seq+dlen */
             uint32_t f = seq + dlen;               /* never move fin_at BACKWARD: a stale or */
             if (!o->fin_seen || seq_gt(f, o->fin_at)) o->fin_at = f;   /* overlapping retransmitted FIN */
@@ -1533,10 +1718,28 @@ int tcp_read(tcp_conn *c, uint8_t *out, int max, uint64_t ticks) {
 }
 
 void tcp_close(tcp_conn *c) {
-    ooo_release(c->ooo_idx); c->ooo_idx = -1;   /* release this connection's own reassembly+FIN slot (M1606) */
-    if (!c->up) return;
-    tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
-    c->up = 0;
+    if (c->up) {
+        struct ooo_state *o = ooo_lookup(c->ooo_idx);
+        if (o) {
+            /* Flush unacked data before closing so a graceful close doesn't drop
+             * buffered/in-flight bytes: pump ACKs + retransmit briefly. Normally a
+             * no-op (a preceding tcp_read already reaped the ACKs). (M1886) */
+            uint64_t giveup = timer_ticks() + 200;   /* ~2 s cap */
+            while (o->snd_una != o->snd_nxt && timer_ticks() < giveup) {
+                tcp_rto_check(c, o); tcp_output(c, o);
+                uint8_t buf[1600]; uint8_t *tcp; int dlen;
+                if (tcp_recv_seg(buf, sizeof buf, c->ip, c->sport, c->dport, 20, &tcp, &dlen)) {
+                    uint8_t fl = tcp[13];
+                    if (fl & TCP_RST) { c->up = 0; break; }
+                    tcp_ack_input(c, o, tcp, fl, dlen);
+                }
+            }
+        }
+        if (c->up)
+            tcp_send_seg(c->gw, c->ip, c->sport, c->dport, c->myseq, c->theirseq, TCP_FIN | TCP_ACK, 0, 0);
+        c->up = 0;
+    }
+    ooo_release(c->ooo_idx); c->ooo_idx = -1;   /* release the reassembly+FIN+send slot (M1606/M1886) */
 }
 
 /* HTTP/1.0 GET http://host/path -> writes the raw response (headers+body) into
