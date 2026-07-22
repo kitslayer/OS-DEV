@@ -200,6 +200,8 @@ int main(void) {
         pump(&c);
         CHECK(all_acked(&c), "rto: dropped segment recovered + acknowledged");
         CHECK(stream_ok(n, 7), "rto: peer got the exact 1000-byte stream after an RTO retransmit");
+        { struct ooo_state *o = ooo_lookup(c.ooo_idx);
+          CHECK(o && o->ssthresh < CWND_INIT, "rto: congestion control cut ssthresh below the initial window"); }
     }
 
     /* 3. Fast retransmit: drop one middle segment of a big send; the later
@@ -212,6 +214,8 @@ int main(void) {
         pump(&c);
         CHECK(all_acked(&c), "fast-rtx: gap filled + fully acknowledged");
         CHECK(stream_ok(n, 3), "fast-rtx: peer reassembled the exact 20000-byte stream");
+        { struct ooo_state *o = ooo_lookup(c.ooo_idx);
+          CHECK(o && o->ssthresh < CWND_INIT, "fast-rtx: congestion control halved ssthresh on the loss"); }
     }
 
     /* 4. Multiple drops across a large transfer: still fully reliable. */
@@ -241,7 +245,19 @@ int main(void) {
         peer_wnd_adv = 65535;
     }
 
-    if (fails == 0) { printf("PASS: reliable TCP sender (retransmit/RTO/fast-rtx/flow control) verified\n"); return 0; }
+    /* 6. Congestion control: a large clean transfer must OPEN the congestion
+     *    window (slow start / congestion avoidance) well past its initial value,
+     *    up to our send-buffer cap, and still deliver every byte. */
+    {
+        tcp_conn c = mkconn(); int n = 70000; fill(n, 0x11);
+        CHECK(tcp_write(&c, payload, n) == n, "cwnd: tcp_write returns full length");
+        pump(&c);
+        struct ooo_state *o = ooo_lookup(c.ooo_idx);
+        CHECK(o && o->cwnd > CWND_INIT, "cwnd: congestion window grew past the initial window on a clean transfer");
+        CHECK(all_acked(&c) && (int)(peer_rcv_nxt - data_isn) == n, "cwnd: peer got the exact 70000-byte stream");
+    }
+
+    if (fails == 0) { printf("PASS: reliable TCP sender (retransmit/RTO/fast-rtx/flow control/congestion) verified\n"); return 0; }
     printf("FAIL: %d reliable-TCP check(s) failed\n", fails);
     return 1;
 }

@@ -1374,6 +1374,7 @@ int net_tcp_serve(uint16_t port, const uint8_t *resp, int resp_len,
 #define RTO_MIN   30              /* retransmit timeout floor, in 100 Hz ticks (300 ms) */
 #define RTO_MAX   500             /* ...and ceiling (5 s) */
 #define RTO_INIT  100             /* initial RTO before any RTT sample (1 s, per RFC 6298) */
+#define CWND_INIT (10 * TCP_MSS)  /* initial congestion window (IW10, RFC 6928): typical small sends still burst out at once */
 
 struct ooo_state {
     int      used;
@@ -1402,6 +1403,8 @@ struct ooo_state {
     int      rtt_timing;      /* 1 while an RTT sample is outstanding */
     uint32_t peer_wnd;        /* peer's most recently advertised receive window (bytes) */
     int      dupacks;         /* consecutive duplicate-ACK count (fast retransmit at 3) */
+    uint32_t cwnd, ssthresh;  /* congestion window / slow-start threshold (bytes), TCP Reno (M1886) */
+    int      in_fastrec;      /* 1 while in fast recovery (inflated cwnd until a new ACK) */
 };
 static struct ooo_state ooo_tab[OOO_N];
 static volatile int ooo_lock;
@@ -1511,11 +1514,13 @@ static void ooo_drain(struct ooo_state *o, tcp_conn *c, uint8_t *out, int *total
  * start) and true zero-window probing — reliability + flow control is the
  * correctness core; those two are fairness/efficiency refinements. */
 
-/* Max bytes that may be outstanding (in flight): the peer's window, floored at
- * one MSS (a 0-window still lets one probe segment ride the RTO timer so the
- * connection can't wedge) and capped at our own buffer. */
+/* Max bytes that may be outstanding (in flight): the smaller of the congestion
+ * window and the peer's advertised window, floored at one MSS (a 0-window still
+ * lets one probe segment ride the RTO timer so the connection can't wedge) and
+ * capped at our own send buffer. */
 static uint32_t tcp_snd_wnd(struct ooo_state *o) {
-    uint32_t w = o->peer_wnd; if (w == 0) w = TCP_MSS;
+    uint32_t w = o->cwnd < o->peer_wnd ? o->cwnd : o->peer_wnd;   /* min(cwnd, rwnd) */
+    if (w < TCP_MSS) w = TCP_MSS;
     return w < SND_CAP ? w : SND_CAP;
 }
 
@@ -1528,6 +1533,7 @@ static void tcp_snd_open(int idx, uint32_t isn, uint32_t peer_wnd) {
     o->rto_at = 0; o->rto = RTO_INIT;
     o->srtt = -1; o->rttvar = 0; o->rtt_timing = 0; o->dupacks = 0;
     o->peer_wnd = peer_wnd;
+    o->cwnd = CWND_INIT; o->ssthresh = SND_CAP; o->in_fastrec = 0;   /* start in slow start (M1886) */
 }
 
 /* Fold one RTT sample (ticks) into srtt/rttvar and recompute rto (RFC 6298). */
@@ -1593,20 +1599,40 @@ static void tcp_ack_input(tcp_conn *c, struct ooo_state *o, const uint8_t *tcp, 
         o->sndbuf_len -= (int)acked;
         o->snd_una = ackno;
         o->dupacks = 0;
+        /* congestion window (TCP Reno): deflate out of fast recovery, else grow by
+         * a segment per RTT in slow start (cwnd < ssthresh) or per cwnd in
+         * congestion avoidance. */
+        if (o->in_fastrec) { o->cwnd = o->ssthresh; o->in_fastrec = 0; }
+        else if (o->cwnd < o->ssthresh) o->cwnd += (acked < TCP_MSS ? acked : TCP_MSS);
+        else { uint32_t inc = TCP_MSS * TCP_MSS / o->cwnd; o->cwnd += inc ? inc : 1; }
+        if (o->cwnd > SND_CAP) o->cwnd = SND_CAP;
         if (o->rtt_timing && seq_le(o->rtt_seq, ackno)) {          /* RTT sample landed (Karn) */
             tcp_rtt_update(o, (int32_t)(timer_ticks() - o->rtt_start));
             o->rtt_timing = 0;
         }
         o->rto_at = (o->snd_una == o->snd_nxt) ? 0 : timer_ticks() + o->rto;  /* disarm if all acked, else restart */
     } else if (inflight > 0 && ackno == o->snd_una && dlen == 0 && !(fl & (TCP_SYN | TCP_FIN))) {
-        if (++o->dupacks == 3) tcp_retransmit(c, o);              /* 3 dup ACKs => fast retransmit */
+        if (++o->dupacks == 3) {                                  /* 3 dup ACKs => fast retransmit + fast recovery */
+            o->ssthresh = inflight / 2; if (o->ssthresh < 2 * TCP_MSS) o->ssthresh = 2 * TCP_MSS;
+            o->cwnd = o->ssthresh + 3 * TCP_MSS;                  /* inflate for the 3 segments that left the network */
+            o->in_fastrec = 1;
+            tcp_retransmit(c, o);
+        } else if (o->in_fastrec) {
+            o->cwnd += TCP_MSS;                                   /* each further dup-ACK inflates the window */
+            if (o->cwnd > SND_CAP) o->cwnd = SND_CAP;
+        }
     }
     tcp_output(c, o);                                             /* the window may have opened */
 }
 
-/* Retransmit if the RTO timer expired with data still in flight (+ back off). */
+/* Retransmit if the RTO timer expired with data still in flight (+ back off). A
+ * timeout is the strongest congestion signal: halve ssthresh and collapse the
+ * window to one segment, restarting slow start (TCP Reno). */
 static void tcp_rto_check(tcp_conn *c, struct ooo_state *o) {
     if (o->rto_at && o->snd_nxt != o->snd_una && timer_ticks() >= o->rto_at) {
+        uint32_t inflight = o->snd_nxt - o->snd_una;
+        o->ssthresh = inflight / 2; if (o->ssthresh < 2 * TCP_MSS) o->ssthresh = 2 * TCP_MSS;
+        o->cwnd = TCP_MSS; o->in_fastrec = 0;                    /* back to one segment, slow start */
         o->rto *= 2; if (o->rto > RTO_MAX) o->rto = RTO_MAX;      /* exponential backoff */
         tcp_retransmit(c, o);
     }
