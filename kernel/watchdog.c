@@ -26,9 +26,7 @@
  * cases); clearing that bit needs RCBA access, a follow-up if it proves necessary.
  */
 #include "watchdog.h"
-#include "pci.h"
 #include "io.h"
-#include "vmm.h"
 #include "console.h"
 
 #define TCO_RLD    0x00   /* write to reload (pet) the timer            */
@@ -41,52 +39,17 @@ static uint16_t tco_base;      /* TCO I/O base, 0 = no HW watchdog */
 static int      wd_enabled;    /* panic-auto-reboot armed */
 
 void watchdog_enable(unsigned secs) {
-    wd_enabled = 1;            /* panic-auto-reboot on, even if no TCO is found */
-
-    pci_device_t lpc = pci_find_class(0x06, 0x01, 0x00);   /* ISA bridge (prog_if 0) = the PCH LPC */
-    if (!lpc.valid || lpc.vendor_id != 0x8086) {
-        kprintf("[watchdog] no Intel PCH LPC — HW watchdog off; panic-auto-reboot on.\n");
-        return;
-    }
-    /* PIIX3/PIIX4 (QEMU's default i440fx south bridge) have no TCO watchdog — the
-     * TCO block is ICH6+/PCH. Skip so we don't poke unrelated PM registers there;
-     * q35 (ICH9) and real PCHs do have it. */
-    if (lpc.device_id == 0x7000 || lpc.device_id == 0x7110) {
-        kprintf("[watchdog] LPC is PIIX (no TCO) — HW watchdog off; panic-auto-reboot on.\n");
-        return;
-    }
-    uint16_t pmbase = pci_read16(lpc.bus, lpc.slot, lpc.func, 0x40) & 0xFF80;
-    if (!pmbase) { kprintf("[watchdog] no ACPI PMBASE — HW watchdog off; panic-auto-reboot on.\n"); return; }
-    tco_base = pmbase + 0x60;
-
-    /* Clear the "No-Reboot" bit so the TCO's second timeout actually RESETS the
-     * machine (the firmware often leaves it set). It lives in RCBA + 0x3410 (GCS)
-     * bit 5; RCBA base is LPC config 0xF0 (bits 31:14, bit 0 = enable). We map
-     * that MMIO page and read-modify-write only bit 5. (M1881) */
-    uint32_t rcba = pci_read32(lpc.bus, lpc.slot, lpc.func, 0xF0);
-    if (rcba & 1) {
-        uint64_t gcs_pa = (rcba & 0xFFFFC000u) + 0x3410;
-        uint64_t pg = gcs_pa & ~0xFFFull;
-        volatile uint32_t *gcs = (volatile uint32_t *)((uint8_t *)hhdm(pg) + (gcs_pa & 0xFFF));
-        vmm_map((uint64_t)(uintptr_t)hhdm(pg), pg, PTE_WRITABLE | PTE_PCD);
-        *gcs = *gcs & ~(1u << 5);          /* No-Reboot = 0 -> TCO reset enabled */
-    }
-
-    uint16_t ticks = (uint16_t)((secs * 10u) / 6u);        /* ~0.6 s per tick */
-    if (ticks < 4)     ticks = 4;
-    if (ticks > 0x3FF) ticks = 0x3FF;
-
-    outw(1u << 3, tco_base + TCO1_STS);                    /* clear a stale TIMEOUT status  */
-    outw(1u << 1, tco_base + TCO2_STS);                    /* clear a stale SECOND_TO status */
-    uint16_t tmr = (inw(tco_base + TCO_TMR) & ~0x3FFu) | ticks;
-    outw(tmr, tco_base + TCO_TMR);
-    outw(1, tco_base + TCO_RLD);                           /* load the new timeout */
-    uint16_t cnt = inw(tco_base + TCO1_CNT) & ~(1u << 11); /* clear TCO_TMR_HLT -> run */
-    outw(cnt, tco_base + TCO1_CNT);
-    outw(1, tco_base + TCO_RLD);                           /* first pet */
-
-    kprintf("[ ok ] TCO hardware watchdog armed (~%us, TCOBASE 0x%x) — a hang self-resets into PXE.\n",
-            secs, tco_base);
+    (void)secs;
+    /* Panic-auto-reboot only (verified, safe): a CPU-exception panic reboots
+     * instead of halting, so a crash self-heals via PXE. The Intel TCO HARDWARE
+     * watchdog was removed (M1882): it needs an RCBA (PCH root-complex) MMIO write
+     * to clear the No-Reboot bit, and doing that blind on the real PCH glitched +
+     * hung the machine at framebuffer init — a bad trade for an unverifiable
+     * (QEMU wouldn't confirm the reset) feature. Crashes/faults are covered here;
+     * a triple-fault self-resets in hardware; a true no-fault hang is the residual
+     * gap (a networked smart plug is the clean fix for that). */
+    wd_enabled = 1;
+    kprintf("[ ok ] panic-auto-reboot armed — a crash self-heals via PXE (no HW watchdog).\n");
 }
 
 void watchdog_pet(void) {
