@@ -37,6 +37,8 @@
 #include "virtio_blk.h"
 #include "nvme.h"
 #include "usb_storage.h"
+#include "ehci.h"      /* USB 2.0 mass storage registered as a blockdev (M1889) */
+#include "xhci.h"      /* USB 3.0 mass storage registered as a blockdev (M1889) */
 #include "console.h"
 #include "string.h"
 #include "task.h"      /* task_yield() for the per-device cache lock's backoff */
@@ -105,6 +107,30 @@ static int usb_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf
     (void)ctx;
     if (lba > 0xFFFFFFFFull) return -1;
     return usb_storage_write((uint32_t)lba, count, buf);
+}
+/* USB mass-storage behind EHCI (USB 2.0) and xHCI (USB 3.0) — M1889. Each host
+ * controller carries at most one BOT/SCSI disk today, so ctx is unused; both
+ * take a u32 LBA like the UHCI path. These are what make a USB disk usable on
+ * real hardware, which has no UHCI controller at all. */
+static int ehci_bd_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
+    (void)ctx;
+    if (lba > 0xFFFFFFFFull) return -1;
+    return ehci_storage_read((uint32_t)lba, count, buf);
+}
+static int ehci_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    (void)ctx;
+    if (lba > 0xFFFFFFFFull) return -1;
+    return ehci_storage_write((uint32_t)lba, count, buf);
+}
+static int xhci_bd_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
+    (void)ctx;
+    if (lba > 0xFFFFFFFFull) return -1;
+    return xhci_storage_read((uint32_t)lba, count, buf);
+}
+static int xhci_bd_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    (void)ctx;
+    if (lba > 0xFFFFFFFFull) return -1;
+    return xhci_storage_write((uint32_t)lba, count, buf);
 }
 
 /* --- per-driver WRITE adapters (each matches blockdev_t.write) — M1095. The
@@ -190,9 +216,19 @@ int blockdev_init(void) {
     if (nvme_present())
         reg("nvme0n1", nvme_bd_read, nvme_bd_write, nvme_capacity(), 0);
 
-    /* USB mass-storage — now read+write (M1728: usb_storage_write wired in). */
+    /* USB mass-storage over UHCI — read+write (M1728: usb_storage_write wired in). */
     if (usb_storage_present())
         reg("usb-storage", usb_bd_read, usb_bd_write, usb_storage_capacity(), 0);
+
+    /* USB mass-storage over EHCI (USB 2.0) and xHCI (USB 3.0) — M1889. Until now
+     * a disk on either was enumerated and read once at LBA 0 by the driver's own
+     * self-test, then dropped on the floor; it is now a first-class blockdev, so
+     * blockdev_enumerate() below mounts its FAT32/ext2 volumes like any other
+     * disk. This is the path that matters off QEMU: real machines have no UHCI. */
+    if (ehci_storage_present())
+        reg("usb-ehci", ehci_bd_read, ehci_bd_write, ehci_storage_capacity(), 0);
+    if (xhci_storage_present())
+        reg("usb-xhci", xhci_bd_read, xhci_bd_write, xhci_storage_capacity(), 0);
 
     /* ATAPI CD-ROM(s) — read-only (write==NULL); enumerate then auto-mounts the
      * ISO 9660 volume like any other device (M1853). */

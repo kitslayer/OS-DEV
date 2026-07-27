@@ -292,18 +292,24 @@ int usb_kbd_init(void) {
         return -1;                                /* no controller: clean no-op */
 
     /* Probe each root port for a HID boot keyboard, one port at a time and
-     * SKIPPING the port the tablet already claimed (so we never disturb the live
-     * tablet endpoint). One-port-at-a-time is required because two unaddressed
-     * devices would both answer address 0. */
-    int tablet_port = usb_uhci_tablet_port();
+     * SKIPPING every port another driver has already claimed. One-port-at-a-time
+     * is required because two unaddressed devices would both answer address 0.
+     *
+     * The skip is not just politeness: usb_uhci_enable_port() RESETS the port,
+     * knocking the device behind it back to address 0. Skipping only the tablet
+     * (as this loop used to) meant that on a machine with a USB flash disk, this
+     * probe reset the already-enumerated mass-storage device — which stayed
+     * registered in the block layer while every subsequent read failed (M1889). */
     int ok = -1;
     for (int p = 0; p < usb_uhci_port_count() && ok != 0; p++) {
-        if (p == tablet_port)
+        if (usb_uhci_port_claimed(p))
             continue;
         if (!usb_uhci_enable_port(p))
             continue;                             /* nothing connected/enabled */
-        if (enumerate_one() == 0)
+        if (enumerate_one() == 0) {
+            usb_uhci_claim_port(p);
             ok = 0;
+        }
     }
     if (ok != 0)
         return -1;                                /* no boot keyboard: clean no-op */

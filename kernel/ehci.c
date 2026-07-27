@@ -51,6 +51,7 @@
  *    devices are completely unaffected (this is a separate file; usb.c untouched).
  */
 #include "ehci.h"
+#include "usbbot.h"   /* the shared BOT/SCSI protocol layer (M1889) */
 #include "pci.h"
 #include "pmm.h"
 #include "vmm.h"
@@ -193,6 +194,9 @@ static struct {
     uint8_t *bulk_buf;             /* page-aligned bulk DMA bounce buffer          */
     int      storage_sector_ok;    /* 1 once a sector was read over EHCI bulk      */
     uint32_t storage_sector_sum;   /* additive checksum of that sector            */
+    uint8_t  storage_first16[16];  /* its first 16 bytes, kept for the self-test   */
+    usb_bot_t bot;                 /* shared BOT/SCSI engine + device geometry     */
+    int      storage_ready;        /* 1 once READ CAPACITY succeeded (mountable)   */
 } eh;
 
 /* ---- small MMIO helpers -------------------------------------------------- */
@@ -423,90 +427,76 @@ static int bulk_xfer(uint8_t ep, uint16_t maxp, int *toggle, int len, int in) {
     return act;                                          /* >=0 bytes moved */
 }
 
-/* --- Bulk-Only Transport (mirrors usb_storage.c's bot_command) ------------ */
-#define EHCI_CBW_SIG 0x43425355u   /* 'USBC' little-endian */
-#define EHCI_CSW_SIG 0x53425355u   /* 'USBS' little-endian */
-#define EHCI_CBW_IN  0x80          /* CBW flags: data device->host */
+/* --- the EHCI transport for the shared BOT layer (kernel/usbbot.h) ---------
+ * The BOT/SCSI protocol itself lives once, in usbbot.h, host-tested against a
+ * mock device. EHCI's contribution is this adapter: bulk_xfer above always moves
+ * data through the page-aligned DMA bounce frame eh.bulk_buf (the HC needs a
+ * physical address), so an OUT copies the caller's bytes in first and an IN
+ * copies the received bytes back out. That copy is what used to force the old
+ * private bot_read to snapshot the data phase into a second static page before
+ * reading the CSW; routing through the caller's own buffer removes both the
+ * duplicated protocol and that 4 KiB static scratch buffer. */
+static int ehci_bot_xfer(void *ctx, int in, void *buf, int len) {
+    (void)ctx;
+    if (len < 0 || len > (int)PAGE_SIZE) return -1;
+    if (!in && len)
+        memcpy(eh.bulk_buf, buf, (size_t)len);
+    int act = bulk_xfer(in ? eh.bulk_in : eh.bulk_out,
+                        in ? eh.bulk_in_maxp : eh.bulk_out_maxp,
+                        in ? &eh.tog_in : &eh.tog_out, len, in);
+    if (act < 0) return -1;
+    if (act > len) act = len;
+    if (in && act > 0)
+        memcpy(buf, eh.bulk_buf, (size_t)act);
+    return act;
+}
+static void ehci_bot_delay(int ms) { timer_wait(ms); }
 
-/* Run one BOT command: ship a 31-byte CBW (BULK OUT), do the data phase (BULK IN
- * here — we only READ), then read + validate the 13-byte CSW (BULK IN). `cb`/
- * `cb_len` is the SCSI command; `data_len` is the IN data phase length (read into
- * eh.bulk_buf). Returns the bytes read on success (>=0), -1 on any transport /
- * signature / tag / status fault. */
-static int bot_read(const uint8_t *cb, int cb_len, uint32_t data_len) {
-    if (cb_len < 1 || cb_len > 16 || data_len > PAGE_SIZE)
+/* Bring the mass-storage device behind EHCI up as a usable disk: bind the shared
+ * BOT engine to the EHCI transport, poke TEST UNIT READY, then READ CAPACITY so
+ * the block layer knows its geometry. Also reads sector 0 to fill the self-test's
+ * checksum. Returns 0 if the device is ready for I/O. */
+static int storage_bring_up(void) {
+    eh.bot.xfer     = ehci_bot_xfer;
+    eh.bot.delay_ms = ehci_bot_delay;
+    eh.bot.ctx      = 0;
+    eh.bot.max_data = PAGE_SIZE;            /* one bulk data phase = the bounce frame */
+    eh.bot.lun      = 0;
+
+    (void)usb_bot_test_unit_ready(&eh.bot);         /* some devices need the poke */
+    if (usb_bot_read_capacity(&eh.bot) != 0)
         return -1;
-    static uint32_t bot_tag = 0;
-    uint32_t tag = ++bot_tag;
+    eh.storage_ready = 1;
 
-    /* Phase 1: 31-byte CBW on BULK OUT (built in the bulk bounce buffer). */
-    uint8_t *p = eh.bulk_buf;
-    memset(p, 0, 31);
-    p[0]=(uint8_t)EHCI_CBW_SIG; p[1]=(uint8_t)(EHCI_CBW_SIG>>8);
-    p[2]=(uint8_t)(EHCI_CBW_SIG>>16); p[3]=(uint8_t)(EHCI_CBW_SIG>>24);
-    p[4]=(uint8_t)tag; p[5]=(uint8_t)(tag>>8); p[6]=(uint8_t)(tag>>16); p[7]=(uint8_t)(tag>>24);
-    p[8]=(uint8_t)data_len; p[9]=(uint8_t)(data_len>>8);
-    p[10]=(uint8_t)(data_len>>16); p[11]=(uint8_t)(data_len>>24);
-    p[12]= EHCI_CBW_IN;                 /* data is IN (device->host) */
-    p[13]=0;                            /* LUN 0 */
-    p[14]=(uint8_t)cb_len;
-    memcpy(&p[15], cb, (size_t)cb_len);
-    if (bulk_xfer(eh.bulk_out, eh.bulk_out_maxp, &eh.tog_out, 31, 0) != 31)
-        return -1;
-
-    /* Phase 2: the IN data phase. */
-    int got = 0;
-    if (data_len) {
-        got = bulk_xfer(eh.bulk_in, eh.bulk_in_maxp, &eh.tog_in, (int)data_len, 1);
-        if (got < 0)
-            return -1;
+    /* Prove the read path end-to-end and record sector 0's checksum for the
+     * self-test log (the same value the old LBA-0-only path reported). */
+    static uint8_t sec0[USB_BOT_SECTOR];
+    if (usb_bot_read10(&eh.bot, 0, 1, sec0) == 0) {
+        uint32_t sum = 0;
+        for (int i = 0; i < USB_BOT_SECTOR; i++)
+            sum += sec0[i];
+        eh.storage_sector_sum = sum;
+        memcpy(eh.storage_first16, sec0, 16);
+        eh.storage_sector_ok  = 1;
     }
-    /* The data we just read sits in eh.bulk_buf; the CSW read below will overwrite
-     * it, so snapshot before reading the CSW if the caller wants the bytes. We
-     * read the CSW into a separate stack buffer to avoid clobbering the data. */
-    static uint8_t databak[PAGE_SIZE];
-    if (data_len)
-        memcpy(databak, eh.bulk_buf, data_len);
-
-    /* Phase 3: 13-byte CSW on BULK IN. */
-    int cswn = bulk_xfer(eh.bulk_in, eh.bulk_in_maxp, &eh.tog_in, 13, 1);
-    if (cswn != 13)
-        return -1;
-    uint8_t *c = eh.bulk_buf;
-    uint32_t sig = (uint32_t)c[0] | ((uint32_t)c[1]<<8) | ((uint32_t)c[2]<<16) | ((uint32_t)c[3]<<24);
-    uint32_t rtag = (uint32_t)c[4] | ((uint32_t)c[5]<<8) | ((uint32_t)c[6]<<16) | ((uint32_t)c[7]<<24);
-    uint8_t status = c[12];
-    if (sig != EHCI_CSW_SIG || rtag != tag || status != 0)
-        return -1;
-
-    /* Restore the data bytes into the bounce buffer for the caller. */
-    if (data_len)
-        memcpy(eh.bulk_buf, databak, data_len);
-    return got;
+    return 0;
 }
 
-/* Read sector 0 over EHCI bulk (BOT + SCSI READ(10)) to prove the bulk path, and
- * fill eh.storage_sector_* for the self-test. Best-effort: a TEST UNIT READY +
- * READ CAPACITY poke precede the read (some devices need it). Returns 0 if a
- * sector was read, -1 otherwise. */
-static int storage_read_sector0(void) {
-    /* TEST UNIT READY (no data); ignore result. */
-    { uint8_t cb[6] = { 0x00,0,0,0,0,0 }; (void)bot_read(cb, sizeof(cb), 0); }
-    /* READ CAPACITY(10): 8 bytes; best-effort (confirms the LUN answers). */
-    { uint8_t cb[10] = { 0x25,0,0,0,0,0,0,0,0,0 }; (void)bot_read(cb, sizeof(cb), 8); }
+/* --- public storage API: a real block device over USB 2.0 (M1889) ---------- */
+int ehci_storage_present(void) { return eh.present && eh.storage_ready; }
 
-    /* READ(10) one 512-byte sector at LBA 0. */
-    uint8_t cb[10] = { 0x28, 0, 0,0,0,0, 0, 0, 1, 0 };   /* opcode, LBA=0, len=1 block */
-    int got = bot_read(cb, sizeof(cb), 512);
-    if (got < 512)
-        return -1;
+uint64_t ehci_storage_capacity(void) {
+    return ehci_storage_present() ? eh.bot.blocks : 0;
+}
 
-    uint32_t sum = 0;
-    for (int i = 0; i < 512; i++)
-        sum += eh.bulk_buf[i];
-    eh.storage_sector_sum = sum;
-    eh.storage_sector_ok = 1;
-    return 0;
+int ehci_storage_read(uint32_t lba, uint32_t count, void *buf) {
+    if (!ehci_storage_present()) return -1;
+    return usb_bot_read10(&eh.bot, lba, count, buf);
+}
+
+int ehci_storage_write(uint32_t lba, uint32_t count, const void *buf) {
+    if (!ehci_storage_present()) return -1;
+    return usb_bot_write10(&eh.bot, lba, count, buf);
 }
 
 /* ---- root-port reset ----------------------------------------------------- */
@@ -804,11 +794,12 @@ int ehci_init(void) {
     if (enumerate_device() != 0)
         return -1;
 
-    /* STRETCH: if the enumerated device is a BOT/SCSI mass-storage device, read a
-     * sector over EHCI bulk to prove the bulk path. Best-effort — a failure here
-     * does not fail ehci_init (the control-path milestone already succeeded). */
+    /* If the enumerated device is a BOT/SCSI mass-storage device, bring it up as
+     * a real disk (READ CAPACITY -> geometry) so blockdev_init can register it.
+     * Best-effort — a failure here does not fail ehci_init (the control-path
+     * milestone already succeeded and the controller stays usable). */
     if (eh.is_storage)
-        (void)storage_read_sector0();
+        (void)storage_bring_up();
 
     return 0;
 }
@@ -858,13 +849,26 @@ void ehci_selftest(void) {
                     "sum=%08x first16=%02x%02x%02x%02x%02x%02x%02x%02x"
                     "%02x%02x%02x%02x%02x%02x%02x%02x\n",
                     eh.storage_sector_sum,
-                    eh.bulk_buf[0], eh.bulk_buf[1], eh.bulk_buf[2], eh.bulk_buf[3],
-                    eh.bulk_buf[4], eh.bulk_buf[5], eh.bulk_buf[6], eh.bulk_buf[7],
-                    eh.bulk_buf[8], eh.bulk_buf[9], eh.bulk_buf[10], eh.bulk_buf[11],
-                    eh.bulk_buf[12], eh.bulk_buf[13], eh.bulk_buf[14], eh.bulk_buf[15]);
+                    eh.storage_first16[0],  eh.storage_first16[1],
+                    eh.storage_first16[2],  eh.storage_first16[3],
+                    eh.storage_first16[4],  eh.storage_first16[5],
+                    eh.storage_first16[6],  eh.storage_first16[7],
+                    eh.storage_first16[8],  eh.storage_first16[9],
+                    eh.storage_first16[10], eh.storage_first16[11],
+                    eh.storage_first16[12], eh.storage_first16[13],
+                    eh.storage_first16[14], eh.storage_first16[15]);
         else
             kprintf("[ehci] bulk sector read over EHCI did not complete "
                     "(control path proven; bulk best-effort).\n");
+
+        /* The headline change (M1889): it is now a real, mountable block device,
+         * not a one-sector self-test curiosity. */
+        if (eh.storage_ready) {
+            uint64_t mib = (eh.bot.blocks * (uint64_t)eh.bot.block_size) / (1024 * 1024);
+            kprintf("[ ok ] EHCI usb-storage READ CAPACITY = %lu blocks x %u bytes "
+                    "(%lu MiB) — registered as a block device (usb-ehci).\n",
+                    eh.bot.blocks, eh.bot.block_size, mib);
+        }
     }
 
     kprintf("\n");

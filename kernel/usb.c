@@ -440,6 +440,30 @@ int usb_uhci_port_count(void) { return 2; }
  * skip it (leaving the live tablet endpoint undisturbed). */
 int usb_uhci_tablet_port(void) { return tablet_port; }
 
+/* --- claimed root ports (M1889) --------------------------------------------
+ * usb_uhci_enable_port() RESETS the port, which knocks the device behind it
+ * back to address 0 and invalidates the address its driver assigned it. So a
+ * driver probing for its own device type must never re-enable a port another
+ * driver has already enumerated. The tablet had a bespoke tablet_port for this,
+ * but that only ever protected the tablet: usb_kbd_init() probing for a HID
+ * keyboard would happily re-enable — and thereby break — an already-working
+ * mass-storage device. (It did exactly that; the disk stayed registered in the
+ * block layer but every later read failed.) This is the general version: each
+ * driver claims the port it enumerated, and every probe skips claimed ports. */
+static uint8_t port_claimed;        /* bit p set => root port p is spoken for */
+
+void usb_uhci_claim_port(int port) {
+    if (port >= 0 && port < usb_uhci_port_count())
+        port_claimed |= (uint8_t)(1u << port);
+}
+int usb_uhci_port_claimed(int port) {
+    if (port < 0 || port >= usb_uhci_port_count())
+        return 1;                   /* out of range: treat as unavailable */
+    if (port == tablet_port)
+        return 1;                   /* the tablet claims its port implicitly */
+    return (port_claimed >> port) & 1;
+}
+
 /* Allocate the next free USB device address (1, 2, ...). Shared by the tablet
  * and usb_storage so two devices on one controller never collide. */
 uint8_t usb_alloc_address(void) {

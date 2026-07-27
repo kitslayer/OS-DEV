@@ -26,6 +26,6 @@ jobs:
                webptest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest \
                htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest \
                shgreptest shsedtest shmathtest shsplittest shbracetest shexpandtest shquotetest \
-               shtesttest lsfmttest shsorttest shtxttest wsframetest wsclienttest sha1test \
+               shtesttest lsfmttest shsorttest shtxttest wsframetest wsclienttest usbbottest sha1test \
                calctest sheettest plottest jsoncoretest difftest mdtest editortest arctest \
                hashtest normpathtest completetest

@@ -762,22 +762,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     usb_storage_init();
     usb_storage_selftest();
 
-    /* Generic block-device browsing across EVERY storage driver brought up above.
-     * Each driver (ATA/AHCI/virtio-blk/NVMe/USB-storage) only SELF-TESTED its raw
-     * sectors; this registers every present device behind one uniform read
-     * interface (kernel/blockdev.c) and then, for each, MOUNTS any FAT32 volume it
-     * carries (bare at LBA 0, or inside an MBR/GPT partition) READ-ONLY and LISTS
-     * its root directory — proving the disks are genuinely browsable, not just
-     * readable. Purely additive + read-only: the boot FAT32 mount (ATA primary
-     * master, LBA 0) above and fat32.c/vfs.c are untouched. A clean no-op listing
-     * if a device carries no FAT32. */
     ext2_set_clock(rtc_unix);      /* real inode timestamps on ext2 writes (M1175) */
-    blockdev_enumerate();
-    if (!g_nodisk) {
-        blockdev_selftest();       /* verify the write vtable + buffer-cache coherence (M1095) — writes a scratch sector */
-        dm_selftest();             /* RAID-1 mirror self-test, iff 2 non-boot writable disks (M1157) — writes LBA 64 */
-    }
-    kprintf("\n");
 
     /* Bring up a USB HID boot keyboard, sharing the one UHCI controller with the
      * tablet + mass-storage above (skipping the tablet's port, using the shared
@@ -812,6 +797,29 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * EHCI/storage self-tests. Completes the USB host-controller trilogy. */
     xhci_init();
     xhci_selftest();
+
+    /* Generic block-device browsing across EVERY storage driver brought up above.
+     * Each driver (ATA/AHCI/virtio-blk/NVMe/USB-storage over UHCI/EHCI/xHCI) only
+     * SELF-TESTED its raw sectors; this registers every present device behind one
+     * uniform read interface (kernel/blockdev.c) and then, for each, MOUNTS any
+     * FAT32 volume it carries (bare at LBA 0, or inside an MBR/GPT partition)
+     * READ-ONLY and LISTS its root directory — proving the disks are genuinely
+     * browsable, not just readable. Purely additive + read-only: the boot FAT32
+     * mount (ATA primary master, LBA 0) above and fat32.c/vfs.c are untouched. A
+     * clean no-op listing if a device carries no FAT32.
+     *
+     * ORDERING (M1889): this now runs AFTER the EHCI + xHCI bring-up, because a
+     * USB disk behind either is registered as a blockdev and blockdev_init() can
+     * only see the drivers that are already up. The USB host controllers keep
+     * their original relative order — every UHCI device (tablet, mass-storage,
+     * keyboard) is enumerated BEFORE ehci_init() routes shared root ports over to
+     * EHCI, which is what keeps the UHCI devices alive on real hardware. */
+    blockdev_enumerate();
+    if (!g_nodisk) {
+        blockdev_selftest();       /* verify the write vtable + buffer-cache coherence (M1095) — writes a scratch sector */
+        dm_selftest();             /* RAID-1 mirror self-test, iff 2 non-boot writable disks (M1157) — writes LBA 64 */
+    }
+    kprintf("\n");
 
     kprintf("[main] launching the desktop environment...\n");
     speaker_chime();              /* a little startup arpeggio */

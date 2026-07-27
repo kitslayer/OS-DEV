@@ -43,3 +43,24 @@ int xhci_is_up(void);
  * bulk IN (BOT/SCSI READ(10)) to a usb-storage device behind xHCI. A clean no-op
  * (logs "none found") if no xHCI controller is attached. */
 void xhci_selftest(void);
+
+/* --- USB 3.0 mass storage as a real block device (M1889) --------------------
+ * A BOT/SCSI disk behind xHCI used to be read once, at LBA 0, inside the
+ * self-test and then forgotten. These expose it to kernel/blockdev.c exactly
+ * like any ATA/AHCI/NVMe disk, so its partitions mount and it is browsable —
+ * which matters on real hardware, where xHCI is typically the ONLY USB host
+ * present. All I/O goes through the shared, host-tested BOT/SCSI layer in
+ * kernel/usbbot.h. */
+
+/* 1 if a USB mass-storage device behind xHCI is enumerated AND answered READ
+ * CAPACITY, i.e. it is ready for block I/O. */
+int xhci_storage_present(void);
+
+/* Its capacity in 512-byte blocks (0 if none). */
+uint64_t xhci_storage_capacity(void);
+
+/* Read/write `count` 512-byte sectors at `lba`. Bounds-checked against the
+ * device capacity and chunked to the controller's max data phase by usbbot.h.
+ * Return 0 on success, -1 on any fault. */
+int xhci_storage_read(uint32_t lba, uint32_t count, void *buf);
+int xhci_storage_write(uint32_t lba, uint32_t count, const void *buf);

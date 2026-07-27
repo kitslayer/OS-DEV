@@ -40,6 +40,15 @@ int usb_uhci_port_count(void);
  * skip it and leave the live tablet endpoint undisturbed. */
 int usb_uhci_tablet_port(void);
 
+/* --- claimed root ports (M1889) --------------------------------------------
+ * usb_uhci_enable_port() resets the port, knocking the device behind it back to
+ * address 0 — so re-probing a port whose device another driver already
+ * enumerated BREAKS that device. Every driver that successfully enumerates a
+ * device must claim its port, and every probe loop must skip claimed ports.
+ * (The tablet's port is reported as claimed implicitly.) */
+void usb_uhci_claim_port(int port);
+int  usb_uhci_port_claimed(int port);
+
 /* Allocate the next free USB device address (1..127), or 0 if exhausted. Shared
  * so the tablet and a flash disk on the same controller never collide. */
 uint8_t usb_alloc_address(void);

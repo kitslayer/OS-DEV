@@ -122,12 +122,20 @@ while read -r line; do
 done < "$EXP"
 # The existing UHCI controller + its tablet stay up (EHCI is a separate host),
 # boot stayed on legacy ATA, and the desktop launched with no fault.
+# M1889: the disk is not just readable once at LBA 0 — it is a REAL BLOCK DEVICE.
+# READ CAPACITY gave it a geometry, blockdev_init registered it as "usb-ehci", and
+# the block layer's own write+read-back+coherence+durability check ran against it,
+# which exercises the BOT/SCSI WRITE(10) path over EHCI as well as READ(10).
+require "registered as a block device (usb-ehci)"  "USB 2.0 disk registered as a block device (READ CAPACITY geometry)"
+require ": usb-ehci,"                          "usb-ehci listed in the block-device registry"
+require "coherence+durability on usb-ehci"     "block-layer write+read-back+coherence+durability over EHCI bulk"
+
 require "USB tablet active"                    "UHCI USB tablet still active (EHCI is a separate, additional controller)"
 require "mounted FAT32 volume"                 "FAT32 still mounted on legacy ATA (boot path intact)"
 require "launching the desktop environment"    "reached desktop launch (no fault on the EHCI path)"
 
 # Surface the actual EHCI bring-up lines the driver logged.
-grep -iE "EHCI HC up|enumerated device over control|bulk IN: read sector 0" "$LOG" | sed 's/^/      /' || true
+grep -iE "EHCI HC up|enumerated device over control|bulk IN: read sector 0|registered as a block device" "$LOG" | sed 's/^/      /' || true
 
 forbid() {
     if grep -qiE "$1" "$LOG"; then

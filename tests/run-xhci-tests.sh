@@ -132,6 +132,14 @@ require "xHCI bulk IN: read sector 0 over xHCI"  "sector 0 read over xHCI bulk (
 while read -r line; do
     require "$line"                            "xHCI bulk read matches known sector-0 content ($line)"
 done < "$EXP"
+# M1889: the disk is not just readable once at LBA 0 — it is a REAL BLOCK DEVICE.
+# READ CAPACITY gave it a geometry, blockdev_init registered it as "usb-xhci", and
+# the block layer's own write+read-back+coherence+durability check ran against it,
+# which exercises the BOT/SCSI WRITE(10) path over xHCI as well as READ(10).
+require "registered as a block device (usb-xhci)"  "USB 3.0 disk registered as a block device (READ CAPACITY geometry)"
+require ": usb-xhci,"                          "usb-xhci listed in the block-device registry"
+require "coherence+durability on usb-xhci"     "block-layer write+read-back+coherence+durability over xHCI bulk"
+
 # The existing UHCI controller + its tablet stay up (xHCI is a separate host),
 # boot stayed on legacy ATA, and the desktop launched with no fault.
 require "USB tablet active"                    "UHCI USB tablet still active (xHCI is a separate, additional controller)"
@@ -139,7 +147,7 @@ require "mounted FAT32 volume"                 "FAT32 still mounted on legacy AT
 require "launching the desktop environment"    "reached desktop launch (no fault on the xHCI path)"
 
 # Surface the actual xHCI bring-up lines the driver logged.
-grep -iE "xHCI HC up|ENABLE SLOT|enumerated device over control|bulk IN: read sector 0" "$LOG" | sed 's/^/      /' || true
+grep -iE "xHCI HC up|ENABLE SLOT|enumerated device over control|bulk IN: read sector 0|registered as a block device" "$LOG" | sed 's/^/      /' || true
 
 forbid() {
     if grep -qiE "$1" "$LOG"; then

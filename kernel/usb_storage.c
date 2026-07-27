@@ -1,35 +1,25 @@
 /*
- * usb_storage.c — USB mass-storage (Bulk-Only Transport + minimal SCSI) over the
- * UHCI host controller (kernel/usb.c). Drives a USB flash disk: enumerate it,
- * then read sectors with SCSI READ(10) carried inside USB BOT.
+ * usb_storage.c — USB mass-storage over the UHCI host controller (kernel/usb.c).
+ * Drives a USB flash disk: enumerate it, then read/write sectors with SCSI
+ * READ(10)/WRITE(10) carried inside USB Bulk-Only Transport.
  *
- * --- The protocol, briefly --------------------------------------------------
- * A Mass-Storage / SCSI-transparent / Bulk-Only-Transport device (class 0x08,
- * subclass 0x06, protocol 0x50) speaks SCSI over two bulk endpoints. Each
- * command is three phases on those endpoints:
+ * Since M1889 the BOT/SCSI protocol itself is NOT here — it lives once, shared
+ * by every host controller (UHCI here, EHCI, xHCI), in kernel/usbbot.h, which is
+ * pure and host-tested (tests/usbbot, ASan/UBSan) against a mock device. What
+ * remains in this file is the two halves a transport must supply:
  *
- *   1. COMMAND  — a 31-byte Command Block Wrapper (CBW) on BULK OUT:
- *        signature 'USBC' (0x43425355, little-endian), a tag we echo-check, the
- *        data-transfer length, a flags byte (0x80 = data is IN), the LUN, the
- *        SCSI command length, then the SCSI command bytes (padded to 16).
- *   2. DATA     — the data phase of the stated length: BULK IN for a READ.
- *   3. STATUS   — a 13-byte Command Status Wrapper (CSW) on BULK IN:
- *        signature 'USBS' (0x53425355), the echoed tag, the residue (bytes NOT
- *        transferred), and a status byte (0 = passed, 1 = failed, 2 = phase err).
+ *   - ENUMERATION (above): walk the UHCI root ports, address the device, find a
+ *     Mass-Storage / SCSI-transparent / BOT interface (class 0x08, subclass
+ *     0x06, protocol 0x50) and its BULK IN + OUT endpoints.
+ *   - THE TRANSPORT (uhci_bot_xfer): move bytes on those two endpoints, keeping
+ *     the per-endpoint data toggles BOT requires.
  *
- * The SCSI commands we issue: INQUIRY (0x12, for a log line), READ CAPACITY(10)
- * (0x25 -> last-LBA + block size), and READ(10) (0x28 -> data phase). WRITE(10)
- * (0x2A) is provided as a stretch path, used by the self-test's optional
- * round-trip only.
- *
- * --- Safety (reviewed line-by-line) -----------------------------------------
- *  - usb_storage_read validates buf!=NULL, count>0, and lba+count within
- *    capacity; it caps each bulk data phase to USB_BULK_MAX and chunks the rest,
- *    and never copies more than min(declared CBW length, caller buffer) out.
+ * --- Safety -----------------------------------------------------------------
+ *  - Capacity bounds (lba+count inside the device, 32-bit wrap guarded), the
+ *    512-byte block-size requirement, data-phase chunking, and the CBW/CSW
+ *    signature + tag + status + residue checks are all enforced by usbbot.h.
  *  - Every USB transfer (control + bulk) has a finite, bounded timeout in
  *    kernel/usb.c; a stalled/absent endpoint returns -1 cleanly.
- *  - The CBW/CSW signatures + the echoed tag are verified; a bad CSW fails clean
- *    (one retry, then report).
  *  - DMA buffers come from pmm frames (identity-mapped: phys == virt); the bulk
  *    bounce buffer in usb.c carries the data phase, so the device DMAs into a
  *    physically-addressed frame, then usb.c memcpys into the caller buffer
@@ -39,41 +29,16 @@
  */
 #include "usb_storage.h"
 #include "usb.h"
+#include "usbbot.h"    /* the shared BOT/SCSI protocol layer (M1889) */
 #include "console.h"
 #include "string.h"
 #include "timer.h"
 #include <stdint.h>
 
-/* --- Bulk-Only Transport wrappers ----------------------------------------- */
-#define CBW_SIGNATURE 0x43425355u    /* 'USBC' little-endian */
-#define CSW_SIGNATURE 0x53425355u    /* 'USBS' little-endian */
-#define CBW_FLAG_IN   0x80           /* data-transfer direction: device->host */
-
-struct cbw {
-    uint32_t signature;   /* CBW_SIGNATURE                                    */
-    uint32_t tag;         /* echoed back in the CSW                           */
-    uint32_t data_len;    /* bytes the host expects to transfer in the data phase */
-    uint8_t  flags;       /* bit 7: 1 = IN (device->host), 0 = OUT            */
-    uint8_t  lun;         /* logical unit (bits 0..3)                         */
-    uint8_t  cb_len;      /* length of the SCSI command (1..16)               */
-    uint8_t  cb[16];      /* the SCSI command block                           */
-} __attribute__((packed));
-
-struct csw {
-    uint32_t signature;   /* CSW_SIGNATURE                                    */
-    uint32_t tag;         /* must equal the CBW's tag                         */
-    uint32_t residue;     /* data_len minus the bytes actually transferred    */
-    uint8_t  status;      /* 0 = passed, 1 = failed, 2 = phase error          */
-} __attribute__((packed));
-
-/* --- SCSI opcodes ---------------------------------------------------------- */
-#define SCSI_INQUIRY       0x12
-#define SCSI_READ_CAPACITY 0x25
-#define SCSI_READ_10       0x28
-#define SCSI_WRITE_10      0x2A
-#define SCSI_TEST_UNIT_RDY 0x00
-
-/* Driver state for the one USB mass-storage device we support. */
+/* Driver state for the one USB mass-storage device we support. Everything above
+ * the two bulk endpoints — the CBW/CSW state machine, the SCSI commands, the
+ * capacity bounds and the chunking — lives in the shared usbbot.h layer; this
+ * driver supplies only the UHCI transport below and the enumeration above. */
 static struct {
     int      present;
     uint8_t  addr;        /* USB device address                               */
@@ -83,104 +48,25 @@ static struct {
     uint16_t maxp_out;    /* BULK OUT max packet                              */
     int      tog_in;      /* BULK IN data toggle (persists across transfers)  */
     int      tog_out;     /* BULK OUT data toggle                             */
-    uint8_t  lun;         /* logical unit (0)                                 */
-    uint32_t block_size;  /* bytes per block (expected 512)                   */
-    uint64_t blocks;      /* total blocks (last-LBA + 1)                      */
-    uint32_t tag;         /* monotonically increasing CBW tag                 */
+    usb_bot_t bot;        /* the shared BOT/SCSI engine + device geometry     */
 } us;
 
-/* Store a 32-bit value big-endian (SCSI CDB fields are big-endian). */
-static void be32(uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
-    p[2] = (uint8_t)(v >> 8);  p[3] = (uint8_t)v;
-}
-static uint32_t rd_be32(const uint8_t *p) {
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-           ((uint32_t)p[2] << 8)  |  (uint32_t)p[3];
-}
-
-/* Run one full Bulk-Only-Transport command: send the CBW (BULK OUT), do the
- * data phase (BULK IN for a read, OUT for a write; `data_in` selects), then read
- * + validate the CSW. `cb`/`cb_len` is the SCSI command. `data`/`data_len` is
- * the data buffer + the host-declared transfer length (0 for none). On a
- * read, *got receives the bytes actually transferred. Returns 0 if the CSW
- * reported success, -1 on any transport error / signature / tag / status fault.
- *
- * The data phase length is bounded by usb.c's USB_BULK_MAX (the caller chunks),
- * and usb.c never copies more than the bytes the device actually sent into our
- * buffer — so a device returning an over-long IN cannot overrun `data`. */
-static int bot_command(const uint8_t *cb, int cb_len,
-                       void *data, uint32_t data_len, int data_in, uint32_t *got) {
-    if (got) *got = 0;
-    if (!us.present && us.addr == 0)            /* not yet enumerated */
-        return -1;
-    if (cb_len < 1 || cb_len > 16)
-        return -1;
-    if (data_len > USB_BULK_MAX)                /* caller must chunk */
-        return -1;
-
-    struct cbw cbw;
-    memset(&cbw, 0, sizeof(cbw));
-    cbw.signature = CBW_SIGNATURE;
-    cbw.tag       = ++us.tag;
-    cbw.data_len  = data_len;
-    cbw.flags     = data_in ? CBW_FLAG_IN : 0;
-    cbw.lun       = us.lun;
-    cbw.cb_len    = (uint8_t)cb_len;
-    memcpy(cbw.cb, cb, (size_t)cb_len);
-
-    /* Phase 1: ship the 31-byte CBW on BULK OUT. */
+/* --- the UHCI transport for the shared BOT layer ---------------------------
+ * usb_bulk_xfer already copies to/from the caller's buffer through its own
+ * bounce frame and reports the byte count actually moved (so a short IN stays
+ * visible), which is exactly the contract usbbot.h asks for. The per-endpoint
+ * data toggles persist in `us` across transfers, as BOT requires. */
+static int uhci_bot_xfer(void *ctx, int in, void *buf, int len) {
+    (void)ctx;
     int act = 0;
-    if (usb_bulk_xfer(us.addr, us.ep_out, us.maxp_out, &us.tog_out,
-                      &cbw, (int)sizeof(cbw), 0, &act) != 0 || act != (int)sizeof(cbw))
+    if (usb_bulk_xfer(us.addr, in ? us.ep_in : us.ep_out,
+                      in ? us.maxp_in : us.maxp_out,
+                      in ? &us.tog_in : &us.tog_out,
+                      buf, len, in, &act) != 0)
         return -1;
-
-    /* Phase 2: the data phase, of the host-declared length. */
-    uint32_t moved = 0;
-    if (data_len) {
-        int a = 0;
-        int rc = usb_bulk_xfer(us.addr, data_in ? us.ep_in : us.ep_out,
-                               data_in ? us.maxp_in : us.maxp_out,
-                               data_in ? &us.tog_in : &us.tog_out,
-                               data, (int)data_len, data_in, &a);
-        if (rc != 0)
-            return -1;                          /* data-phase transport fault */
-        moved = (a > 0) ? (uint32_t)a : 0;
-        if (moved > data_len) moved = data_len; /* defensive: never exceed declared */
-    }
-
-    /* Phase 3: read + validate the 13-byte CSW on BULK IN. */
-    struct csw csw;
-    memset(&csw, 0, sizeof(csw));
-    int csw_act = 0;
-    if (usb_bulk_xfer(us.addr, us.ep_in, us.maxp_in, &us.tog_in,
-                      &csw, (int)sizeof(csw), 1, &csw_act) != 0)
-        return -1;
-    if (csw_act != (int)sizeof(csw))            /* short CSW => fail clean */
-        return -1;
-    if (csw.signature != CSW_SIGNATURE || csw.tag != cbw.tag)
-        return -1;                              /* bad signature / tag mismatch */
-    if (csw.status != 0)
-        return -1;                              /* command failed / phase error */
-
-    /* Residue is the bytes NOT transferred; trust the smaller of (declared -
-     * residue) and what the transfer reported. */
-    if (got) {
-        uint32_t by_residue = (csw.residue <= data_len) ? (data_len - csw.residue) : 0;
-        *got = (moved < by_residue) ? moved : by_residue;
-    }
-    return 0;
+    return act;
 }
-
-/* As bot_command, but retry once on failure (handles a transient stall/CSW
- * fault as the task allows). */
-static int bot_command_retry(const uint8_t *cb, int cb_len,
-                             void *data, uint32_t data_len, int data_in, uint32_t *got) {
-    if (bot_command(cb, cb_len, data, data_len, data_in, got) == 0)
-        return 0;
-    timer_wait(1);
-    return bot_command(cb, cb_len, data, data_len, data_in, got);
-}
+static void uhci_bot_delay(int ms) { timer_wait(ms); }
 
 /* --- enumeration ----------------------------------------------------------- */
 
@@ -277,7 +163,13 @@ static int enumerate_one(void) {
     us.maxp_out = maxp_out;
     us.tog_in   = 0;
     us.tog_out  = 0;
-    us.lun      = 0;
+
+    /* Bind the shared BOT engine to this device over the UHCI transport. */
+    us.bot.xfer     = uhci_bot_xfer;
+    us.bot.delay_ms = uhci_bot_delay;
+    us.bot.ctx      = 0;
+    us.bot.max_data = USB_BULK_MAX;      /* one bulk data phase on UHCI */
+    us.bot.lun      = 0;
 
     kprintf("[usb-storage] enumerated mass-storage: class=%02x subclass=%02x "
             "proto=%02x  bulk-in=ep%d(maxp=%d) bulk-out=ep%d(maxp=%d)\n",
@@ -291,11 +183,9 @@ static int enumerate_one(void) {
 /* INQUIRY: read the standard inquiry data (36 bytes) for a log line. Best-effort
  * (failure is non-fatal — some emulated devices are terse). */
 static void scsi_inquiry(void) {
-    uint8_t cb[6] = { SCSI_INQUIRY, 0, 0, 0, 36, 0 };
     uint8_t inq[36];
-    memset(inq, 0, sizeof(inq));
-    uint32_t got = 0;
-    if (bot_command_retry(cb, sizeof(cb), inq, sizeof(inq), 1, &got) == 0 && got >= 32) {
+    int got = usb_bot_inquiry(&us.bot, inq);
+    if (got >= 32) {
         /* bytes 8..15 vendor + 16..31 product = 24 ASCII chars (space-padded). */
         char vp[25];
         for (int i = 0; i < 24; i++) {
@@ -305,23 +195,6 @@ static void scsi_inquiry(void) {
         vp[24] = '\0';
         kprintf("[usb-storage] INQUIRY: '%s'\n", vp);
     }
-}
-
-/* READ CAPACITY(10): fills us.blocks + us.block_size. Returns 0 on success. */
-static int scsi_read_capacity(void) {
-    uint8_t cb[10] = { SCSI_READ_CAPACITY, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-    uint8_t cap[8];
-    memset(cap, 0, sizeof(cap));
-    uint32_t got = 0;
-    if (bot_command_retry(cb, sizeof(cb), cap, sizeof(cap), 1, &got) != 0 || got < 8)
-        return -1;
-    uint32_t last_lba = rd_be32(&cap[0]);
-    uint32_t blk      = rd_be32(&cap[4]);
-    if (blk == 0)
-        return -1;
-    us.block_size = blk;
-    us.blocks     = (uint64_t)last_lba + 1;
-    return 0;
 }
 
 /* --- public API ------------------------------------------------------------ */
@@ -338,15 +211,16 @@ int usb_storage_init(void) {
      * tablet endpoint). Enabling a port resets the device behind it back to
      * address 0; we then enumerate + address it. One-port-at-a-time is required
      * because two unaddressed devices would both answer address 0. */
-    int tablet_port = usb_uhci_tablet_port();
     int ok = -1;
     for (int p = 0; p < usb_uhci_port_count() && ok != 0; p++) {
-        if (p == tablet_port)
-            continue;
+        if (usb_uhci_port_claimed(p))
+            continue;                             /* the tablet (or another driver) owns it */
         if (!usb_uhci_enable_port(p))
             continue;                             /* nothing connected/enabled */
-        if (enumerate_one() == 0)
+        if (enumerate_one() == 0) {
+            usb_uhci_claim_port(p);               /* ours now — later probes must not reset it */
             ok = 0;
+        }
     }
     if (ok != 0) {
         /* No mass-storage interface on the bus — clean no-op (tablet unaffected). */
@@ -355,12 +229,9 @@ int usb_storage_init(void) {
 
     /* Some devices need a TEST UNIT READY poke before they answer commands;
      * issue it (ignore failure) so READ CAPACITY is more likely to succeed. */
-    {
-        uint8_t cb[6] = { SCSI_TEST_UNIT_RDY, 0, 0, 0, 0, 0 };
-        (void)bot_command_retry(cb, sizeof(cb), 0, 0, 0, 0);
-    }
+    (void)usb_bot_test_unit_ready(&us.bot);
 
-    if (scsi_read_capacity() != 0) {
+    if (usb_bot_read_capacity(&us.bot) != 0) {
         kprintf("[usb-storage] READ CAPACITY failed\n");
         return -1;
     }
@@ -370,79 +241,18 @@ int usb_storage_init(void) {
 }
 
 int      usb_storage_present(void)  { return us.present; }
-uint64_t usb_storage_capacity(void) { return us.present ? us.blocks : 0; }
+uint64_t usb_storage_capacity(void) { return us.present ? us.bot.blocks : 0; }
 
 int usb_storage_read(uint32_t lba, uint32_t count, void *buf) {
-    if (!us.present || !buf || count == 0)
-        return -1;
-    if (us.block_size != USB_STORAGE_SECTOR_SIZE)
-        return -1;                                /* we only support 512-byte blocks */
-    /* Bound to capacity: lba+count must not exceed the device, and guard the
-     * 32-bit add against wrap. */
-    if (lba >= us.blocks || count > us.blocks - lba)
-        return -1;
-
-    /* Chunk so each bulk data phase fits USB_BULK_MAX (8 sectors). */
-    const uint32_t per = USB_BULK_MAX / USB_STORAGE_SECTOR_SIZE;   /* sectors/chunk */
-    uint8_t *out = (uint8_t *)buf;
-
-    while (count > 0) {
-        uint32_t n = (count < per) ? count : per;
-        uint32_t bytes = n * USB_STORAGE_SECTOR_SIZE;
-
-        uint8_t cb[10];
-        memset(cb, 0, sizeof(cb));
-        cb[0] = SCSI_READ_10;
-        be32(&cb[2], lba);                        /* logical block address (BE)     */
-        cb[7] = (uint8_t)(n >> 8);                /* transfer length (blocks, BE16)  */
-        cb[8] = (uint8_t)n;
-
-        uint32_t got = 0;
-        if (bot_command_retry(cb, sizeof(cb), out, bytes, 1, &got) != 0)
-            return -1;
-        if (got != bytes)                          /* short read => fail clean */
-            return -1;
-
-        lba   += n;
-        count -= n;
-        out   += bytes;
-    }
-    return 0;
+    if (!us.present) return -1;
+    return usb_bot_read10(&us.bot, lba, count, buf);
 }
 
-/* WRITE(10) — BOT/SCSI write path (M1728: now wired into the block layer, not
- * just the self-test). Same bounds + chunking as the read path. */
+/* WRITE(10) — BOT/SCSI write path (M1728: wired into the block layer, not just
+ * the self-test). Bounds + chunking live in the shared layer. */
 int usb_storage_write(uint32_t lba, uint32_t count, const void *buf) {
-    if (!us.present || !buf || count == 0)
-        return -1;
-    if (us.block_size != USB_STORAGE_SECTOR_SIZE)
-        return -1;
-    if (lba >= us.blocks || count > us.blocks - lba)
-        return -1;
-
-    const uint32_t per = USB_BULK_MAX / USB_STORAGE_SECTOR_SIZE;
-    const uint8_t *in = (const uint8_t *)buf;
-
-    while (count > 0) {
-        uint32_t n = (count < per) ? count : per;
-        uint32_t bytes = n * USB_STORAGE_SECTOR_SIZE;
-
-        uint8_t cb[10];
-        memset(cb, 0, sizeof(cb));
-        cb[0] = SCSI_WRITE_10;
-        be32(&cb[2], lba);
-        cb[7] = (uint8_t)(n >> 8);
-        cb[8] = (uint8_t)n;
-
-        uint32_t got = 0;
-        if (bot_command_retry(cb, sizeof(cb), (void *)in, bytes, 0, &got) != 0)
-            return -1;
-
-        lba   += n;
-        count -= n;
-        in    += bytes;
-    }
-    return 0;
+    if (!us.present) return -1;
+    return usb_bot_write10(&us.bot, lba, count, buf);
 }
 
 /* --- boot-time verification ------------------------------------------------ */
@@ -459,12 +269,12 @@ void usb_storage_selftest(void) {
 
     scsi_inquiry();   /* best-effort vendor/product log line */
 
-    uint64_t bytes_total = us.blocks * (uint64_t)us.block_size;
+    uint64_t bytes_total = us.bot.blocks * (uint64_t)us.bot.block_size;
     kprintf("[ ok ] usb-storage up: READ CAPACITY = %lu blocks x %u bytes "
             "(%lu MiB) via BOT/SCSI over UHCI (boot stays on legacy ATA).\n",
-            us.blocks, us.block_size, bytes_total / (1024 * 1024));
+            us.bot.blocks, us.bot.block_size, bytes_total / (1024 * 1024));
 
-    for (uint64_t lba = 0; lba < 3 && lba < us.blocks; lba++) {
+    for (uint64_t lba = 0; lba < 3 && lba < us.bot.blocks; lba++) {
         if (usb_storage_read((uint32_t)lba, 1, selftest_buf) != 0) {
             kprintf("[usb-storage] sector %lu: READ FAILED\n", lba);
             continue;
@@ -486,8 +296,8 @@ void usb_storage_selftest(void) {
     /* Optional write round-trip on the last sector: save, write a marker, read
      * back, verify, restore. Only if the device has room (>=8 sectors). A
      * failure is reported but not fatal. */
-    if (us.blocks >= 8) {
-        uint32_t test_lba = (uint32_t)(us.blocks - 1);
+    if (us.bot.blocks >= 8) {
+        uint32_t test_lba = (uint32_t)(us.bot.blocks - 1);
         static uint8_t saved[USB_STORAGE_SECTOR_SIZE];
         static uint8_t scratch[USB_STORAGE_SECTOR_SIZE];
         static uint8_t readback[USB_STORAGE_SECTOR_SIZE];

@@ -59,6 +59,7 @@
  *    and their devices are completely unaffected (separate file/controller).
  */
 #include "xhci.h"
+#include "usbbot.h"   /* the shared BOT/SCSI protocol layer (M1889) */
 #include "pci.h"
 #include "pmm.h"
 #include "vmm.h"
@@ -234,6 +235,9 @@ static struct {
     uint8_t *bulk_buf;                 /* page-aligned bulk DMA bounce buffer      */
     int      storage_sector_ok;
     uint32_t storage_sector_sum;
+    uint8_t  storage_first16[16];      /* sector 0's first bytes, for the self-test */
+    usb_bot_t bot;                     /* shared BOT/SCSI engine + device geometry  */
+    int      storage_ready;            /* 1 once READ CAPACITY succeeded (mountable)*/
 } xh;
 
 /* ---- small MMIO helpers -------------------------------------------------- */
@@ -779,73 +783,70 @@ static int bulk_xfer(uint8_t epnum, int in, int len) {
     return moved;
 }
 
-/* --- Bulk-Only Transport (mirrors usb_storage.c / ehci.c) ----------------- */
-#define XHCI_CBW_SIG 0x43425355u
-#define XHCI_CSW_SIG 0x53425355u
-#define XHCI_CBW_IN  0x80
+/* --- the xHCI transport for the shared BOT layer (kernel/usbbot.h) ---------
+ * The BOT/SCSI protocol lives once, in usbbot.h, host-tested against a mock
+ * device; xHCI's contribution is this adapter. bulk_xfer above always moves data
+ * through the page-aligned DMA bounce frame xh.bulk_buf (the Normal TRB carries
+ * its physical address), so an OUT copies the caller's bytes in first and an IN
+ * copies the received bytes back out — which also removes the second static 4 KiB
+ * scratch page the old private bot_read needed to survive the CSW read. */
+static int xhci_bot_xfer(void *ctx, int in, void *buf, int len) {
+    (void)ctx;
+    if (len < 0 || len > (int)PAGE_SIZE) return -1;
+    if (!in && len)
+        memcpy(xh.bulk_buf, buf, (size_t)len);
+    int act = bulk_xfer(in ? xh.bulk_in : xh.bulk_out, in, len);
+    if (act < 0) return -1;
+    if (act > len) act = len;
+    if (in && act > 0)
+        memcpy(buf, xh.bulk_buf, (size_t)act);
+    return act;
+}
+static void xhci_bot_delay(int ms) { timer_wait(ms); }
 
-static int bot_read(const uint8_t *cb, int cb_len, uint32_t data_len) {
-    if (cb_len < 1 || cb_len > 16 || data_len > PAGE_SIZE)
+/* Bring the mass-storage device behind xHCI up as a usable disk: bind the shared
+ * BOT engine to the xHCI transport, poke TEST UNIT READY, then READ CAPACITY so
+ * the block layer knows its geometry. Also reads sector 0 for the self-test's
+ * checksum. Returns 0 if the device is ready for block I/O. */
+static int storage_bring_up(void) {
+    xh.bot.xfer     = xhci_bot_xfer;
+    xh.bot.delay_ms = xhci_bot_delay;
+    xh.bot.ctx      = 0;
+    xh.bot.max_data = PAGE_SIZE;            /* one bulk data phase = the bounce frame */
+    xh.bot.lun      = 0;
+
+    (void)usb_bot_test_unit_ready(&xh.bot);         /* some devices need the poke */
+    if (usb_bot_read_capacity(&xh.bot) != 0)
         return -1;
-    static uint32_t bot_tag = 0;
-    uint32_t tag = ++bot_tag;
+    xh.storage_ready = 1;
 
-    /* Phase 1: 31-byte CBW on BULK OUT. */
-    uint8_t *p = xh.bulk_buf;
-    memset(p, 0, 31);
-    p[0]=(uint8_t)XHCI_CBW_SIG; p[1]=(uint8_t)(XHCI_CBW_SIG>>8);
-    p[2]=(uint8_t)(XHCI_CBW_SIG>>16); p[3]=(uint8_t)(XHCI_CBW_SIG>>24);
-    p[4]=(uint8_t)tag; p[5]=(uint8_t)(tag>>8); p[6]=(uint8_t)(tag>>16); p[7]=(uint8_t)(tag>>24);
-    p[8]=(uint8_t)data_len; p[9]=(uint8_t)(data_len>>8);
-    p[10]=(uint8_t)(data_len>>16); p[11]=(uint8_t)(data_len>>24);
-    p[12]= XHCI_CBW_IN;
-    p[13]=0;
-    p[14]=(uint8_t)cb_len;
-    memcpy(&p[15], cb, (size_t)cb_len);
-    if (bulk_xfer(xh.bulk_out, 0, 31) != 31)
-        return -1;
-
-    /* Phase 2: IN data phase. */
-    int got = 0;
-    if (data_len) {
-        got = bulk_xfer(xh.bulk_in, 1, (int)data_len);
-        if (got < 0)
-            return -1;
+    static uint8_t sec0[USB_BOT_SECTOR];
+    if (usb_bot_read10(&xh.bot, 0, 1, sec0) == 0) {
+        uint32_t sum = 0;
+        for (int i = 0; i < USB_BOT_SECTOR; i++)
+            sum += sec0[i];
+        xh.storage_sector_sum = sum;
+        memcpy(xh.storage_first16, sec0, 16);
+        xh.storage_sector_ok  = 1;
     }
-    static uint8_t databak[PAGE_SIZE];
-    if (data_len)
-        memcpy(databak, xh.bulk_buf, data_len);
-
-    /* Phase 3: 13-byte CSW on BULK IN. */
-    if (bulk_xfer(xh.bulk_in, 1, 13) != 13)
-        return -1;
-    uint8_t *c = xh.bulk_buf;
-    uint32_t sig  = (uint32_t)c[0] | ((uint32_t)c[1]<<8) | ((uint32_t)c[2]<<16) | ((uint32_t)c[3]<<24);
-    uint32_t rtag = (uint32_t)c[4] | ((uint32_t)c[5]<<8) | ((uint32_t)c[6]<<16) | ((uint32_t)c[7]<<24);
-    uint8_t status = c[12];
-    if (sig != XHCI_CSW_SIG || rtag != tag || status != 0)
-        return -1;
-
-    if (data_len)
-        memcpy(xh.bulk_buf, databak, data_len);
-    return got;
+    return 0;
 }
 
-/* Read sector 0 over xHCI bulk (BOT + SCSI READ(10)) to prove the bulk path. */
-static int storage_read_sector0(void) {
-    { uint8_t cb[6] = { 0x00,0,0,0,0,0 }; (void)bot_read(cb, sizeof(cb), 0); }       /* TEST UNIT READY */
-    { uint8_t cb[10] = { 0x25,0,0,0,0,0,0,0,0,0 }; (void)bot_read(cb, sizeof(cb), 8); } /* READ CAPACITY */
+/* --- public storage API: a real block device over USB 3.0 (M1889) ---------- */
+int xhci_storage_present(void) { return xh.present && xh.storage_ready; }
 
-    uint8_t cb[10] = { 0x28, 0, 0,0,0,0, 0, 0, 1, 0 };   /* READ(10) LBA 0, 1 block */
-    int got = bot_read(cb, sizeof(cb), 512);
-    if (got < 512)
-        return -1;
-    uint32_t sum = 0;
-    for (int i = 0; i < 512; i++)
-        sum += xh.bulk_buf[i];
-    xh.storage_sector_sum = sum;
-    xh.storage_sector_ok = 1;
-    return 0;
+uint64_t xhci_storage_capacity(void) {
+    return xhci_storage_present() ? xh.bot.blocks : 0;
+}
+
+int xhci_storage_read(uint32_t lba, uint32_t count, void *buf) {
+    if (!xhci_storage_present()) return -1;
+    return usb_bot_read10(&xh.bot, lba, count, buf);
+}
+
+int xhci_storage_write(uint32_t lba, uint32_t count, const void *buf) {
+    if (!xhci_storage_present()) return -1;
+    return usb_bot_write10(&xh.bot, lba, count, buf);
 }
 
 /* ---- bring-up ------------------------------------------------------------ */
@@ -1034,7 +1035,7 @@ int xhci_init(void) {
      * not fail xhci_init (the enumeration milestone already succeeded). */
     if (xh.is_storage) {
         if (configure_bulk_endpoints() == 0)
-            (void)storage_read_sector0();
+            (void)storage_bring_up();
     }
 
     return 0;
@@ -1091,13 +1092,25 @@ void xhci_selftest(void) {
                     "sum=%08x first16=%02x%02x%02x%02x%02x%02x%02x%02x"
                     "%02x%02x%02x%02x%02x%02x%02x%02x\n",
                     xh.storage_sector_sum,
-                    xh.bulk_buf[0], xh.bulk_buf[1], xh.bulk_buf[2], xh.bulk_buf[3],
-                    xh.bulk_buf[4], xh.bulk_buf[5], xh.bulk_buf[6], xh.bulk_buf[7],
-                    xh.bulk_buf[8], xh.bulk_buf[9], xh.bulk_buf[10], xh.bulk_buf[11],
-                    xh.bulk_buf[12], xh.bulk_buf[13], xh.bulk_buf[14], xh.bulk_buf[15]);
+                    xh.storage_first16[0],  xh.storage_first16[1],
+                    xh.storage_first16[2],  xh.storage_first16[3],
+                    xh.storage_first16[4],  xh.storage_first16[5],
+                    xh.storage_first16[6],  xh.storage_first16[7],
+                    xh.storage_first16[8],  xh.storage_first16[9],
+                    xh.storage_first16[10], xh.storage_first16[11],
+                    xh.storage_first16[12], xh.storage_first16[13],
+                    xh.storage_first16[14], xh.storage_first16[15]);
         else
             kprintf("[xhci] bulk sector read over xHCI did not complete "
                     "(control path proven; bulk best-effort).\n");
+
+        /* The headline change (M1889): a real, mountable block device. */
+        if (xh.storage_ready) {
+            uint64_t mib = (xh.bot.blocks * (uint64_t)xh.bot.block_size) / (1024 * 1024);
+            kprintf("[ ok ] xHCI usb-storage READ CAPACITY = %lu blocks x %u bytes "
+                    "(%lu MiB) — registered as a block device (usb-xhci).\n",
+                    xh.bot.blocks, xh.bot.block_size, mib);
+        }
     }
 
     kprintf("\n");

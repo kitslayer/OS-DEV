@@ -36,3 +36,24 @@ int ehci_is_up(void);
  * bDeviceClass). A clean no-op (logs "none found") if no EHCI controller is
  * attached. */
 void ehci_selftest(void);
+
+/* --- USB 2.0 mass storage as a real block device (M1889) --------------------
+ * A BOT/SCSI disk behind EHCI used to be read once, at LBA 0, inside the
+ * self-test and then forgotten. These expose it to kernel/blockdev.c exactly
+ * like any ATA/AHCI/NVMe disk, so its partitions mount and it is browsable —
+ * which matters on real hardware, where there is no UHCI controller at all and
+ * this (or xHCI) is the only way a USB disk is reachable. All I/O goes through
+ * the shared, host-tested BOT/SCSI layer in kernel/usbbot.h. */
+
+/* 1 if a USB mass-storage device behind EHCI is enumerated AND answered READ
+ * CAPACITY, i.e. it is ready for block I/O. */
+int ehci_storage_present(void);
+
+/* Its capacity in 512-byte blocks (0 if none). */
+uint64_t ehci_storage_capacity(void);
+
+/* Read/write `count` 512-byte sectors at `lba`. Bounds-checked against the
+ * device capacity and chunked to the controller's max data phase by usbbot.h.
+ * Return 0 on success, -1 on any fault. */
+int ehci_storage_read(uint32_t lba, uint32_t count, void *buf);
+int ehci_storage_write(uint32_t lba, uint32_t count, const void *buf);
