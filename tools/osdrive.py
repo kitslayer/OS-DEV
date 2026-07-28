@@ -25,6 +25,9 @@ Commands (one per line, or ';'-separated with -c):
     click X Y            left-click at screen pixel (X,Y)
     dblclick X Y         double-click at (X,Y)
     drag X0 Y0 X1 Y1     press at (X0,Y0), move to (X1,Y1), release
+    press X Y            press the left button at (X,Y) and HOLD it
+    release [X Y]        release the left button (optionally moving there first)
+                         press/move/shot/release captures drag-time UI (snap preview)
     move X Y             move the pointer to (X,Y) without clicking
     wheel X Y N          scroll the wheel at (X,Y): N>0 up, N<0 down
     mclick X Y           middle-click at (X,Y) (clipboard paste)
@@ -97,6 +100,18 @@ class Qmp:
         for k in range(1, 11):
             self._ev(self._abs(x0 + (x1 - x0) * k // 10, y0 + (y1 - y0) * k // 10)); time.sleep(0.04)
         self._ev([{"type": "btn", "data": {"down": False, "button": "left"}}])
+    # Press/release as SEPARATE commands, so a script can screenshot mid-gesture
+    # (drag() presses, moves and releases atomically, which cannot capture
+    # drag-time UI such as the window-snap preview). press -> move... -> shot ->
+    # release is the sequence that verifies anything drawn only while held.
+    def press(self, x, y):
+        self.move(x, y); time.sleep(0.08)
+        self._ev([{"type": "btn", "data": {"down": True, "button": "left"}}]); time.sleep(0.08)
+    def release(self, x=None, y=None):
+        if x is not None and y is not None:
+            self.move(x, y); time.sleep(0.08)
+        self._ev([{"type": "btn", "data": {"down": False, "button": "left"}}]); time.sleep(0.08)
+
     def mclick(self, x, y):
         # middle-click at (x,y) — used for clipboard paste
         self._ev(self._abs(x, y)); time.sleep(0.06)
@@ -210,6 +225,10 @@ def main():
             elif op == "dblclick": qmp.click(int(t[1]), int(t[2]), 2)
             elif op == "move":     qmp.move(int(t[1]), int(t[2]))
             elif op == "drag":     qmp.drag(int(t[1]), int(t[2]), int(t[3]), int(t[4]))
+            elif op == "press":    qmp.press(int(t[1]), int(t[2]))               # hold the button down
+            elif op == "release":                                                 # release (optionally after a move)
+                if len(t) >= 3: qmp.release(int(t[1]), int(t[2]))
+                else:           qmp.release()
             elif op == "wheel":    qmp.wheel(int(t[1]), int(t[2]), int(t[3]))   # x y n (n>0 up, <0 down)
             elif op == "mclick":   qmp.mclick(int(t[1]), int(t[2]))             # middle-click (paste)
             elif op == "rclick":   qmp.rclick(int(t[1]), int(t[2]))             # right-click (copy link)

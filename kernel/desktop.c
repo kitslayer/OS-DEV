@@ -1101,6 +1101,72 @@ static void draw_clock_pill(void) {
 /* Render the whole scene (wallpaper, windows, taskbar — but NOT the cursor)
  * into the cached scene buffer. This is the expensive part, so we only do it
  * when the scene actually changes; plain cursor moves reuse the cache. */
+/* --- snap zones (M1892) -----------------------------------------------------
+ * Dragging a window against a screen edge tiles it. The geometry each zone
+ * produces lives in ONE function, snap_zone_rect, which both the action and the
+ * on-screen preview call — a preview computed separately would be free to drift
+ * from what the release actually does, which is exactly the kind of "looks
+ * right, behaves differently" bug that makes a DE feel untrustworthy. */
+enum { SNAP_NONE = 0, SNAP_LEFT, SNAP_RIGHT, SNAP_MAX };
+
+/* The trigger band, in pixels, around a screen edge. This was 2px, which is
+ * technically reachable (the tablet delivers absolute coordinates, so the
+ * pointer can land exactly on 0) but miserable to hit on purpose — you aimed for
+ * an edge and usually just dropped the window there instead. A band this size is
+ * what makes the gesture feel like it's helping rather than resisting. */
+#define SNAP_EDGE 12
+
+/* Which snap zone (if any) the pointer at (mx,my) is in. Top edge wins over the
+ * sides so the top corners maximize rather than half-tiling, matching the order
+ * the release path has always used. */
+static int snap_zone_at(int mx, int my) {
+    if (my <= SNAP_EDGE)              return SNAP_MAX;
+    if (mx <= SNAP_EDGE)              return SNAP_LEFT;
+    if (mx >= screen_w - 1 - SNAP_EDGE) return SNAP_RIGHT;
+    return SNAP_NONE;
+}
+
+/* The exact rectangle a snap zone yields. Single source of truth. */
+static void snap_zone_rect(int zone, int *x, int *y, int *w, int *h) {
+    int half = screen_w / 2;
+    *y = 0; *h = screen_h - TASKBAR_H;
+    switch (zone) {
+        case SNAP_LEFT:  *x = 0;    *w = half;     break;
+        case SNAP_RIGHT: *x = half; *w = half;     break;
+        default:         *x = 0;    *w = screen_w; break;   /* SNAP_MAX */
+    }
+}
+
+/* The zone the in-progress drag would snap into, or SNAP_NONE. Set by the main
+ * loop while a title-bar drag is live; read by render_scene to draw the preview.
+ * File-scope because `dragging` itself is a main-loop local. */
+static int snap_hint = SNAP_NONE;
+
+/* Blend every pixel under the rect `num/den` of the way toward `c` — a real
+ * translucent tint, so the snap preview reads as a TARGET REGION you can see
+ * through rather than an opaque slab dropped over the desktop (the first cut of
+ * this used dither_rect, which fills solid and hid the wallpaper and every window
+ * behind it — it looked like a bug, not a preview).
+ *
+ * Writes scenebuf rows directly instead of calling fb_get_pixel/fb_pixel per
+ * pixel: a half-screen preview is ~590k pixels and this runs on every frame of a
+ * drag inside a snap zone, which is exactly the "bounds-checked call per pixel in
+ * a hot loop" pattern fb.c's own comments call out. render_scene has already
+ * pointed the draw target at scenebuf when this is called. */
+static void tint_rect(int x, int y, int w, int h, uint32_t c, int num, int den) {
+    if (!scenebuf) return;
+    if (x < 0) { w += x; x = 0; }                     /* clip to the screen */
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > screen_w) w = screen_w - x;
+    if (y + h > screen_h) h = screen_h - y;
+    if (w <= 0 || h <= 0) return;
+    for (int dy = 0; dy < h; dy++) {
+        uint32_t *row = scenebuf + (size_t)(y + dy) * screen_w + x;
+        for (int dx = 0; dx < w; dx++)
+            row[dx] = lerp(row[dx], c, num, den);
+    }
+}
+
 static void render_scene(void) {
     fb_set_target(scenebuf);
     wp_h = screen_h;
@@ -1116,6 +1182,20 @@ static void render_scene(void) {
     for (int i = 0; i < win_count; i++)
         if (!windows[i].minimized)                          /* minimized = hidden to its chip */
             draw_window(&windows[i], i == win_count - 1);
+
+    /* Snap preview (M1892): while a title-bar drag sits in an edge zone, show
+     * exactly where releasing would put the window. Drawn OVER the windows (so it
+     * reads as a target, not as another window) but UNDER the overlays and cursor.
+     * Deliberately just a dithered wash + a bright outline + the HUD corner
+     * brackets already used elsewhere in this theme — no gradient, no glow. The
+     * rectangle comes from snap_zone_rect, the same function the release uses. */
+    if (snap_hint != SNAP_NONE) {
+        int px, py, pw, ph;
+        snap_zone_rect(snap_hint, &px, &py, &pw, &ph);
+        tint_rect(px, py, pw, ph, THEME_MAGENTA, 22, 100);   /* ~22% wash: see-through */
+        stroke_rect(px, py, pw, ph, 2, THEME_MAGENTA);
+        hud_corners(px, py, pw, ph, 22, THEME_CYAN);
+    }
 
     /* taskbar: flat panel with a bright neon accent line on top */
     int ty = screen_h - TASKBAR_H;
@@ -1367,6 +1447,7 @@ static void sink_window(int idx) {
     for (int i = idx; i > 0; i--) windows[i] = windows[i - 1];
     windows[0] = tmp;
 }
+
 /* F4: fill the screen (above the taskbar), or restore the saved geometry. */
 static void toggle_maximize(int idx) {
     window_t *w = &windows[idx];
@@ -1375,7 +1456,7 @@ static void toggle_maximize(int idx) {
         w->maximized = 0;
     } else {
         w->sx = w->x; w->sy = w->y; w->sw = w->w; w->sh = w->h;
-        w->x = 0; w->y = 0; w->w = screen_w; w->h = screen_h - TASKBAR_H;
+        snap_zone_rect(SNAP_MAX, &w->x, &w->y, &w->w, &w->h);
         w->maximized = 1;
     }
 }
@@ -1384,9 +1465,7 @@ static void toggle_maximize(int idx) {
 static void snap_window(int idx, int rightside) {
     window_t *w = &windows[idx];
     if (!w->maximized) { w->sx = w->x; w->sy = w->y; w->sw = w->w; w->sh = w->h; }
-    int half = screen_w / 2;
-    w->x = rightside ? half : 0;
-    w->y = 0; w->w = half; w->h = screen_h - TASKBAR_H;
+    snap_zone_rect(rightside ? SNAP_RIGHT : SNAP_LEFT, &w->x, &w->y, &w->w, &w->h);
     w->maximized = 1;
 }
 static void remove_window(int idx) {
@@ -2126,11 +2205,17 @@ void desktop_run(void) {
                 int moved = (mx - drag_ox > 3 || drag_ox - mx > 3 ||
                              my - drag_oy > 3 || drag_oy - my > 3);
                 if (moved) {
-                    if (my <= 2)                    { if (!windows[dragging].maximized) toggle_maximize(dragging); }
-                    else if (mx <= 2)               snap_window(dragging, 0);
-                    else if (mx >= screen_w - 2)    snap_window(dragging, 1);
+                    /* Same zone test the live preview used, so what you saw is
+                     * what you get (M1892). */
+                    switch (snap_zone_at(mx, my)) {
+                        case SNAP_MAX:   if (!windows[dragging].maximized) toggle_maximize(dragging); break;
+                        case SNAP_LEFT:  snap_window(dragging, 0); break;
+                        case SNAP_RIGHT: snap_window(dragging, 1); break;
+                        default: break;
+                    }
                 }
             }
+            if (snap_hint != SNAP_NONE) { snap_hint = SNAP_NONE; dirty = 1; }   /* drop the preview */
             if (selecting >= 0) {                  /* finished a terminal text drag-selection: copy it */
                 app_sel_commit((app_t *)windows[selecting].app); selecting = -1; dirty = 1;
             }
@@ -2181,8 +2266,22 @@ void desktop_run(void) {
                 w->x = mx - gdx; w->y = my - gdy;
                 if (w->y < 0) w->y = 0;                                                       /* keep the title bar on-screen at the top */
                 else if (w->y > screen_h - TASKBAR_H - TITLEBAR_H) w->y = screen_h - TASKBAR_H - TITLEBAR_H;   /* and above the taskbar (else it hides behind it -> mouse-unreachable) */
+
+                /* Live snap preview (M1892): show where a release right now would
+                 * land the window. Only redraw when the zone actually CHANGES —
+                 * the drag already marks the scene dirty every frame it moves, and
+                 * an unconditional dirty=1 here would be the same level-vs-edge
+                 * mistake that once forced a full redraw at idle. */
+                int z = snap_zone_at(mx, my);
+                if (z != snap_hint) { snap_hint = z; dirty = 1; }
             }
         }
+        /* Safety net: if a drag ended by any route other than the button-release
+         * path above (the window was closed, the array reordered under us), make
+         * sure the preview does not linger. Fires at most once per drag because it
+         * clears the flag it tests, so it is not the level-check redraw trap. */
+        if (dragging < 0 && snap_hint != SNAP_NONE) { snap_hint = SNAP_NONE; dirty = 1; }
+
         if (resizing >= 0 && left) {
             window_t *w = &windows[resizing];
             int mw, mh; win_min(w, &mw, &mh);
