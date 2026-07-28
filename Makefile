@@ -92,7 +92,7 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
 
 # --- rules ------------------------------------------------------------------
-.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest atapitest atalba48test idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest usbbottest hdatest httpdtest jstest clean
+.PHONY: all run run-rtl8139 run-virtio-net run-hda test rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest atapitest atalba48test idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest usbbottest layouttest hdatest httpdtest jstest clean
 
 all: $(KERNEL) $(DISK)
 
@@ -1040,6 +1040,15 @@ wsframetest:
 usbbottest:
 	@tests/run-usbbot-tests.sh
 
+# Host-side known-answer tests for the CSS box-layout engine (kernel/layout.h,
+# ASan+UBSan): the CSS 2.1 §10.3.3 width constraint incl. auto margins/centring,
+# border/padding, nested block stacking, §8.3.1 margin collapsing (siblings,
+# parent<->first-child, parent<->last-child), auto vs explicit height,
+# display:none, greedy inline wrapping, and hostile input. Pure, so the layout
+# rules are unit-testable off-target before any of it is wired into browser.c.
+layouttest:
+	@tests/run-layout-tests.sh
+
 # Host-side regression of the WebSocket client handshake helpers (kernel/wsclient.h, ASan+UBSan).
 wsclienttest:
 	@tests/run-wsclient-tests.sh
@@ -1186,8 +1195,8 @@ browsertest: $(KERNEL) $(DISK)
 
 # Run every host-side regression/fuzz/KAT suite, then the in-guest boot assertions.
 # ('test' above is the human-readable headless boot; 'boottest'/'gfxtest' are asserted.)
-check: jstest imgtest x509test tlsfuzztest nettest tcpreliabletest fstest ext2test xattrtest iso9660test kattest bignumfuzztest barrettfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest journaltest wavtest acpiamltest webptest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shexpandtest shquotetest shtesttest lsfmttest shsorttest shtxttest wsframetest wsclienttest usbbottest sha1test calctest sheettest plottest jsoncoretest difftest mdtest editortest arctest hashtest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest smpschedtest journalguesttest fatjournaltest netcontest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest atapitest atalba48test idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
-	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + tlsfuzztest + nettest + tcpreliabletest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + barrettfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + journaltest + wavtest + acpiamltest + webptest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shexpandtest + shquotetest + shtesttest + lsfmttest + shsorttest + shtxttest + wsframetest + wsclienttest + usbbottest + sha1test + calctest + sheettest + plottest + jsoncoretest + difftest + mdtest + editortest + arctest + hashtest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + smpschedtest + journalguesttest + fatjournaltest + netcontest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + ahcitest + atapitest + atalba48test + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
+check: jstest imgtest x509test tlsfuzztest nettest tcpreliabletest fstest ext2test xattrtest iso9660test kattest bignumfuzztest barrettfuzztest stringtest svgtest deflatetest pngenctest ziptest tartest heaptest journaltest wavtest acpiamltest webptest elftest httptest kheaptest jsonfuzztest regexfuzztest jssrcfuzztest htmlentfuzztest htmlattrtest urltest colortest csstest csseltest readertest shgreptest shsedtest shmathtest shsplittest shbracetest shexpandtest shquotetest shtesttest lsfmttest shsorttest shtxttest wsframetest wsclienttest usbbottest layouttest sha1test calctest sheettest plottest jsoncoretest difftest mdtest editortest arctest hashtest normpathtest completetest boottest kstacktest ustacktest wxtest smeptest smpthreadtest smpschedtest journalguesttest fatjournaltest netcontest gdbstubtest rtl8139test virtionettest virtioblktest virtiorngtest virtioconsoletest nvmetest floppytest parttest blockdevtest raidtest ahcitest atapitest atalba48test idedmatest virtiogputest svgatest usbstoragetest usbkbdtest ehcitest xhcitest hdatest httpdtest gfxtest browsertest
+	@echo "ALL TESTS PASSED (jstest + imgtest + x509test + tlsfuzztest + nettest + tcpreliabletest + fstest + ext2test + xattrtest + iso9660test + kattest + bignumfuzztest + barrettfuzztest + stringtest + svgtest + deflatetest + pngenctest + ziptest + tartest + heaptest + journaltest + wavtest + acpiamltest + webptest + elftest + httptest + kheaptest + jsonfuzztest + regexfuzztest + jssrcfuzztest + htmlentfuzztest + htmlattrtest + urltest + colortest + csstest + csseltest + readertest + shgreptest + shsedtest + shmathtest + shsplittest + shbracetest + shexpandtest + shquotetest + shtesttest + lsfmttest + shsorttest + shtxttest + wsframetest + wsclienttest + usbbottest + layouttest + sha1test + calctest + sheettest + plottest + jsoncoretest + difftest + mdtest + editortest + arctest + hashtest + normpathtest + completetest + boottest + kstacktest + ustacktest + wxtest + smeptest + smpthreadtest + smpschedtest + journalguesttest + fatjournaltest + netcontest + gdbstubtest + rtl8139test + virtionettest + virtioblktest + virtiorngtest + virtioconsoletest + nvmetest + floppytest + parttest + blockdevtest + raidtest + ahcitest + atapitest + atalba48test + idedmatest + virtiogputest + svgatest + usbstoragetest + usbkbdtest + ehcitest + xhcitest + hdatest + httpdtest + gfxtest + browsertest)"
 
 clean:
 	rm -rf $(BUILD)
