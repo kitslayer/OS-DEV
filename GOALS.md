@@ -28,9 +28,21 @@ below are what comes *after* it, and each adds large subsystems.
   and reactive `onchange`/`oninput`. Fully keyboard-driven. The honest ceiling
   (real web apps / Chromium) still stands — see below — but "a browser somehow"
   is comprehensively met.
-- **🎵 Music from the NAS — shelved.** Miles deprioritized this ("idc about music
-  i want a good DE"). The networking foundation it needed exists; an audio driver
-  + decoder were never built.
+- **🎵 Music — audio SHIPPED; the "from the NAS" part is what's still missing.**
+  Miles deprioritized this goal ("idc about music i want a good DE"), and the
+  note here used to say "an audio driver + decoder were never built" — that is
+  **false and was corrected 2026-07-28**. What actually exists: **two audio
+  drivers** (`kernel/ac97.c` AC'97 and `kernel/hda.c` Intel HD Audio, selected at
+  boot, `audio_name()` reports which), a **from-scratch WAV decoder**
+  (`kernel/wav.c`), a mixing/streaming layer (`kernel/audio.c`:
+  `audio_play_wav`, `audio_play_wav_bg`, `audio_stream_write` + a timer-IRQ
+  pump), and a **`jukebox` player app** (`user/jukebox.c`) that scans the disk
+  for WAVs and plays them. DOOM and Quake play their sound through it.
+  What is genuinely NOT built: **compressed-format decoders** (no MP3/FLAC/Vorbis)
+  and **any NAS filesystem protocol** (no SMB/CIFS, no NFS, no DLNA). HTTP is the
+  only transport, so the closest thing to the original goal today is
+  `wget <url> <file>` followed by `jukebox` — i.e. fetch-then-play a WAV over
+  HTTP, not stream from an SMB share.
 - **🤖 Run Claude Code — still a multi-year stretch.** Unchanged: needs a Linux
   syscall ABI + a JS runtime. Not attempted.
 
@@ -81,6 +93,12 @@ What it needs:
 **Realistic milestone:** stream a WAV (or MP3 via a ported decoder) over HTTP
 from the NAS and play it through the AC'97/HDA codec. This is genuinely
 attainable and a fantastic mid-term target.
+
+> **Status (2026-07-28): mostly reached.** The NIC driver, TCP/IP stack, HTTP
+> client, AC'97 *and* HDA drivers, and a WAV decoder + player app all shipped —
+> see the corrected bullet in the update section above. The two pieces of this
+> paragraph still outstanding are the **MP3/FLAC decoder** and an **SMB/NFS
+> client**; over HTTP it is `wget` + `jukebox` today.
 
 ---
 

@@ -3379,7 +3379,23 @@ uint8_t *decode_image(const uint8_t *data, int len, int *ow, int *oh) {
      * image (it would render the whole page as a tiny black bitmap). If the first non-
      * whitespace bytes are "<!doctype html" or "<html", treat it as HTML, not SVG. */
     { int issvg = 0, lim = len < 512 ? len : 512;
-      int s = 0; while (s < lim && (data[s]==' '||data[s]=='\t'||data[s]=='\r'||data[s]=='\n'||data[s]=='\xEF'||data[s]=='\xBB'||data[s]=='\xBF')) s++;  /* skip leading WS + UTF-8 BOM */
+      /* Skip leading whitespace + a UTF-8 BOM to find the first real byte. The BOM
+       * bytes MUST be written as UNSIGNED literals: `data` is a const uint8_t*, so
+       * data[s] promotes to 0..255, while '\xEF' is a plain-char constant = -17 on
+       * x86 (signed char). Comparing the two is always false, so this BOM skip was
+       * DEAD CODE (caught by -Wtype-limits, fixed M1893).
+       *
+       * `s` feeds only the is_html tests below — the "<svg" scan is a free search
+       * over the whole first chunk — so the consequence was NOT that a BOM'd SVG
+       * failed to render (it still did). It was the reverse, and worse: an HTML
+       * document beginning with a BOM left data[s] pointing at 0xEF rather than
+       * '<', so neither the "<html" nor the "<!doctype" test could fire, is_html
+       * stayed 0, and any such page carrying "<svg" in its first 512 bytes (an
+       * inline SVG, an SVG data: favicon) was mis-detected as a standalone SVG
+       * image — i.e. exactly the "render the whole page as a tiny black bitmap"
+       * failure the comment above says this guard exists to prevent. */
+      int s = 0; while (s < lim && (data[s]==' '||data[s]=='\t'||data[s]=='\r'||data[s]=='\n'||
+                                    data[s]==0xEF||data[s]==0xBB||data[s]==0xBF)) s++;
       int is_html = 0;
       if (s+5 <= lim && data[s]=='<' && (data[s+1]|32)=='h'&&(data[s+2]|32)=='t'&&(data[s+3]|32)=='m'&&(data[s+4]|32)=='l') is_html = 1;   /* <html */
       if (!is_html && s+2 <= lim && data[s]=='<' && data[s+1]=='!') {   /* <!doctype html ...> (or any <!... that isn't an SVG/XML decl) */
@@ -3649,6 +3665,23 @@ static void browser_navigate(browser_t *b) {
             if (n0 < 0) { b->ntok = 0; set_status(b, "file not found"); return; }
             b->raw[n0] = 0; b->rawlen = (int)n0;
             if (try_image(b, (const uint8_t *)b->raw, (int)n0)) { set_status(b, "image"); return; }
+        }
+        /* Strip a leading UTF-8 BOM (EF BB BF) before deciding HTML-vs-text, and
+         * strip it from the content itself so nothing downstream renders it
+         * (M1893). Second instance of the same bug class as the decode_image sniff
+         * above: the whitespace skip below never accounted for a BOM, so a BOM'd
+         * HTML file left *q pointing at 0xEF rather than '<' and the whole document
+         * was handed to parse_text — the browser showed its raw markup as literal
+         * text. Editors and web servers emit UTF-8 BOMs routinely, so this was not
+         * an exotic input. Removing the bytes (rather than just stepping the sniff
+         * pointer past them) also keeps them out of parse_text/parse_html output,
+         * where they had been rendering as stray "???" glyphs. Images are untouched:
+         * try_image already ran above, and no image format starts with a BOM. */
+        if (b->rawlen >= 3 && (unsigned char)b->raw[0] == 0xEF
+                           && (unsigned char)b->raw[1] == 0xBB
+                           && (unsigned char)b->raw[2] == 0xBF) {
+            memmove(b->raw, b->raw + 3, (size_t)(b->rawlen - 3) + 1);   /* +1 keeps the NUL */
+            b->rawlen -= 3;
         }
         long n = b->rawlen;
         const char *q = b->raw; while (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t') q++;

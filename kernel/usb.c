@@ -514,9 +514,13 @@ int usb_tablet_init(void) {
         int blen = cfg[i], btype = cfg[i + 1];
         if (blen == 0) break;
         if (btype == 0x05) {                         /* ENDPOINT descriptor */
-            uint8_t addr = cfg[i + 2], attr = cfg[i + 3];
-            if ((addr & 0x80) && (attr & 0x03) == 0x03) {   /* IN + interrupt */
-                ep_in = addr & 0x0F;
+            /* `eaddr`, not `addr`: in this file `addr` means the USB DEVICE
+             * address, and shadowing it with an ENDPOINT address inside the
+             * descriptor walk is a trap for later edits. Matches the name
+             * usb_storage.c / ehci.c already use for the same field. */
+            uint8_t eaddr = cfg[i + 2], attr = cfg[i + 3];
+            if ((eaddr & 0x80) && (attr & 0x03) == 0x03) {   /* IN + interrupt */
+                ep_in = eaddr & 0x0F;
                 ep_maxp = cfg[i + 4] | (cfg[i + 5] << 8);
             }
         }

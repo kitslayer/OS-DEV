@@ -2988,7 +2988,7 @@ static val eval_string_method(val recv, const char *name, val *args, int nargs) 
         if(b.buf) b.buf[b.len]=0; return STRV(b.buf?b.buf:""); }
     if (strcmp(name,"at")==0){ int i=nargs?js_toint(to_num(args[0])):0; if(i<0) i+=len; if(i<0||i>=len) return UND(); char*r=aalloc(2); if(r){r[0]=s[i];r[1]=0;} return STRV(r?r:""); }   /* M1782: NaN index -> 0 */
     if (strcmp(name,"padStart")==0||strcmp(name,"padEnd")==0){ int tgt=nargs?(int)to_num(args[0]):0; const char*pad=nargs>1?val_to_str(args[1]):" "; int pl=(int)strlen(pad); if(tgt<=len||pl==0||tgt>JS_ARENA){ char*r=aalloc(len+1); if(r){memcpy(r,s,len);r[len]=0;} return STRV(r?r:""); }
-        char*r=aalloc(tgt+1); if(!r) return STRV(""); int start_at=name[3]=='S'?0:0; (void)start_at; int padn=tgt-len; int p=0;
+        char*r=aalloc(tgt+1); if(!r) return STRV(""); int padn=tgt-len; int p=0;
         if(name[3]=='S'){ for(int i=0;i<padn;i++) r[p++]=pad[i%pl]; for(int i=0;i<len;i++) r[p++]=s[i]; }   /* padStart */
         else { for(int i=0;i<len;i++) r[p++]=s[i]; for(int i=0;i<padn;i++) r[p++]=pad[i%pl]; }              /* padEnd */
         r[p]=0; return STRV(r); }

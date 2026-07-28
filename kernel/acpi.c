@@ -296,7 +296,8 @@ int acpi_madt_ioapic(uint32_t *addr, uint32_t *gsi_base) {
         if (len < 2 || p + len > end) break;
         if (type == 1 && len >= 12) {
             uint32_t a, g; __builtin_memcpy(&a, p + 4, 4); __builtin_memcpy(&g, p + 8, 4);
-            if (addr) *addr = a; if (gsi_base) *gsi_base = g;
+            if (addr)     *addr     = a;      /* two independent guards — kept on */
+            if (gsi_base) *gsi_base = g;      /* separate lines (-Wmisleading-indentation) */
             return 1;
         }
         p += len;
