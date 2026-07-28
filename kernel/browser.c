@@ -20,6 +20,7 @@
 #include "png.h"
 #include "gif.h"
 #include "jpeg.h"
+#include "layout.h"   /* shared CSS box-layout engine: the §10.3.3 width solver (M1896) */
 #include "svg.h"
 #include "bmp.h"
 #include "webp.h"
@@ -748,6 +749,92 @@ static int parse_style_maxwidth(const char *s, int n) {
     if (i + 1 < vl && (v[i]|32) == 'e' && (v[i+1]|32) == 'm') num *= 16;   /* em -> ~16px */
     return num > 4000 ? 4000 : num;                                       /* sane upper cap */
 }
+
+/* `width: <px>` on a block, in the same spirit as parse_style_maxwidth (its own
+ * digit scan, because parse_px_val caps at 120 — far too small for a column).
+ * Returns 0 for absent/auto/percentage. (M1896) */
+static int parse_style_width_px(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "width", 5, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs, i = 0, num = 0, digits = 0;
+    while (i < vl && v[i] == ' ') i++;
+    while (i < vl && v[i] >= '0' && v[i] <= '9') { num = num*10 + (v[i]-'0'); i++; digits++; }
+    if (!digits) return 0;                                   /* auto / inherit / calc(...) */
+    if (i < vl && v[i] == '%') return 0;                     /* percentages not handled here */
+    if (i + 1 < vl && (v[i]|32) == 'e' && (v[i+1]|32) == 'm') num *= 16;
+    return num > 4000 ? 4000 : num;
+}
+
+/* Which horizontal margins are `auto` — bit0 = margin-left, bit1 = margin-right.
+ * `margin: 0 auto` (the centring idiom) sets both via the shorthand's H part. */
+static int parse_style_auto_margins(const char *s, int n) {
+    int vs, ve, bits = 0;
+    if (style_prop(s, n, "margin-left", 11, &vs, &ve)) {
+        if (ve - vs >= 4 && (s[vs]|32)=='a') bits |= 1;
+    }
+    if (style_prop(s, n, "margin-right", 12, &vs, &ve)) {
+        if (ve - vs >= 4 && (s[vs]|32)=='a') bits |= 2;
+    }
+    if (!bits && style_prop(s, n, "margin", 6, &vs, &ve)) {
+        /* Scan the shorthand's words; an `auto` in the horizontal position sets
+         * both sides, which is what `margin: 0 auto` means. */
+        const char *v = s + vs; int vl = ve - vs, i = 0;
+        while (i < vl) {
+            while (i < vl && v[i] == ' ') i++;
+            int st2 = i;
+            while (i < vl && v[i] != ' ') i++;
+            if (i - st2 == 4 && (v[st2]|32)=='a' && (v[st2+1]|32)=='u'
+                             && (v[st2+2]|32)=='t' && (v[st2+3]|32)=='o') { bits |= 3; break; }
+        }
+    }
+    return bits;
+}
+
+/* Narrow the render column [*cl,*cr) to a block box's CONTENT box, using the
+ * shared layout engine's CSS 2.1 §10.3.3 width solver (kernel/layout.h) instead
+ * of the old always-centre approximation (M1896).
+ *
+ * Token payload: off = max-width px (0 = none), len = specified width px
+ * (0 = auto), style bit0/bit1 = margin-left/right is `auto`.
+ *
+ * DELIBERATE DEVIATION, preserved from M933: `max-width` with no explicit
+ * horizontal margins still CENTRES the column. Per spec max-width only clamps
+ * the used width and the box stays left-aligned, but M933 introduced this as a
+ * readability feature ("readable column") and existing pages are built around
+ * it, so that case is expressed as "both margins auto" and routed through the
+ * same solver rather than being special-cased in the renderer. Explicit `width`
+ * and explicit `margin:auto` now follow the real rule. */
+static void box_solve_column(const tok_t *tk, int *cl, int *cr) {
+    int avail = *cr - *cl;
+    if (avail <= 0) return;
+
+    int spec_w = (int)tk->len;          /* 0 = auto */
+    int maxw   = (int)tk->off;          /* 0 = none */
+    int autob  = (int)tk->style & 3;
+
+    lay_box lb;
+    for (unsigned i = 0; i < sizeof lb; i++) ((unsigned char *)&lb)[i] = 0;
+    lb.display = LAY_BLOCK;
+    lb.height = LAY_AUTO;
+    lb.first_child = lb.next_sibling = -1;
+
+    lb.width = spec_w > 0 ? spec_w : LAY_AUTO;
+    if (maxw > 0) {                      /* §10.4: max-width clamps the used width */
+        int base = (lb.width == LAY_AUTO) ? avail : lb.width;
+        if (base > maxw) lb.width = maxw;
+    }
+    /* The M933 centring case: a clamped column with no margins stated. */
+    if (!autob && maxw > 0 && spec_w == 0) autob = 3;
+
+    lb.margin.left  = (autob & 1) ? LAY_AUTO : 0;
+    lb.margin.right = (autob & 2) ? LAY_AUTO : 0;
+
+    int ml, mr, w;
+    lay_solve_width(&lb, avail, &ml, &mr, &w);
+    (void)mr;
+    *cl += ml;
+    *cr  = *cl + w;
+}
 /* list-style-type (or the `list-style` shorthand) on a <ul>/<ol>. Returns a marker code
  * for the list's items, applied per-<li>:
  *   0   = not specified (caller keeps the depth-varied default bullet / <ol> numbering)
@@ -867,7 +954,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0;
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0;   /* width px / margin-auto bits (M1896) */
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css, &prews);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -882,6 +969,8 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             fgap = parse_style_gap(st, stl);                                  /* flex gap (px) */
             fjust = parse_style_justify(st, stl);                             /* justify-content: 1 center, 2 end */
             mw = parse_style_maxwidth(st, stl);                               /* max-width (px) -> centred column */
+            bwpx = parse_style_width_px(st, stl);                             /* width (px) — real §10.3.3 column (M1896) */
+            bmauto = parse_style_auto_margins(st, stl);                        /* margin-left/right:auto bits (M1896) */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -937,8 +1026,15 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                     b->sc[sp].hasflex = 1;
                 }
                 b->sc[sp].hasmaxw = 0;
-                if (mw > 0 && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* max-width: narrow + centre this block */
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)mw, 0, NO_LINK, 0, TK_MAXW_OPEN };
+                /* A block box that constrains its content column: max-width, an
+                 * explicit width, or auto horizontal margins. The renderer solves
+                 * the actual geometry per CSS 2.1 §10.3.3 via box_solve_column
+                 * (M1896); here we only carry the SPECIFIED values, because the
+                 * containing-block width is a render-time quantity. */
+                if ((mw > 0 || bwpx > 0 || bmauto) && is_block_tag(tag)
+                        && b->ntok < TOK_MAX && b->n_hidden == 0) {
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)mw, (uint16_t)bwpx, NO_LINK,
+                                                  (uint8_t)bmauto, TK_MAXW_OPEN };
                     b->sc[sp].hasmaxw = 1;
                 }
                 b->sc[sp].hasbg = 0;
@@ -4209,7 +4305,11 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     int render_rpad = 0;   /* right-edge inset while inside full border boxes, so their text wraps short of the box (M916 horizontal padding) */
     int flex_depth = 0;    /* >0 while inside a display:flex container: child block-breaks become horizontal gaps (M927) */
     int flex_gap = 18;     /* px gap between flex items (from CSS `gap`, M930; 18 default) */
-    int mxoff[16], mxsp = 0;   /* max-width: cl/cr inset per active container, restored on close (M933) */
+    /* Saved content column per active constrained block, restored on close. Stores
+     * the ORIGINAL cl/cr rather than a single symmetric inset, because §10.3.3 can
+     * produce ASYMMETRIC margins (e.g. `margin-left:auto` right-aligns) which a
+     * single offset cannot express (M1896). */
+    int mxcl[16], mxcr[16], mxsp = 0;
     int bgsp = 0;   /* block-bg nesting depth: counted so a nested TK_BG_OPEN's forward-scan stops at ITS matching close (M993) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
@@ -4274,11 +4374,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         if (tk->type == TK_FLEX_CLOSE) { if (flex_depth > 0) flex_depth--; cy += curlh; cx = cl; curlh = 18; continue; }   /* end the row */
         if (tk->type == TK_MAXW_OPEN)  {   /* narrow + centre the content column for this block */
             if (cx > cl) { cy += curlh; curlh = 18; }
-            int mwv = (int)tk->off, off = (cr - cl > mwv) ? (cr - cl - mwv) / 2 : 0;
-            if (mxsp < 16) { mxoff[mxsp++] = off; cl += off; cr -= off; }
+            if (mxsp < 16) { mxcl[mxsp] = cl; mxcr[mxsp] = cr; mxsp++; box_solve_column(tk, &cl, &cr); }
             cx = cl; continue;
         }
-        if (tk->type == TK_MAXW_CLOSE) { if (mxsp > 0) { int off = mxoff[--mxsp]; cl -= off; cr += off; } cy += curlh; cx = cl; curlh = 18; continue; }   /* restore full width */
+        if (tk->type == TK_MAXW_CLOSE) { if (mxsp > 0) { --mxsp; cl = mxcl[mxsp]; cr = mxcr[mxsp]; } cy += curlh; cx = cl; curlh = 18; continue; }   /* restore full width */
         if (tk->type == TK_BG_OPEN) {
             /* Forward-scan to the matching TK_BG_CLOSE, faithfully mirroring the main loop's
              * vertical advance, to find this block's y_bottom. Then fill ONE contiguous rect
@@ -4289,7 +4388,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             uint32_t col = tk->off & 0xFFFFFFu;
             int scy = cy, scx = cx, slh = curlh, scl = cl, scr = cr;
             int srp = render_rpad, sfd = flex_depth, sfg = flex_gap, depth = 1;
-            int smxoff[16], smxsp = 0;
+            int smxcl[16], smxcr[16], smxsp = 0;
             int sbfull[16], sbsp = 0;   /* per nested border: was it a full box (so undo its wrap-right inset on close), mirroring the real loop's render_rpad bookkeeping */
             for (int u = t + 1; u < b->ntok && u < TOK_MAX && depth > 0; u++) {
                 tok_t *tu = &b->toks[u];
@@ -4299,8 +4398,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 if (tu->type == TK_BORDER_CLOSE) { if (sbsp > 0 && sbfull[--sbsp] && srp >= BORDER_PAD) srp -= BORDER_PAD; continue; }   /* edges stroked after content (no vertical advance); undo the full-box wrap-right inset, like the real loop */
                 if (tu->type == TK_FLEX_OPEN)  { if (scx > scl) { scy += slh; scx = scl; slh = 18; } sfd++; sfg = tu->off ? (int)tu->off : 18; continue; }
                 if (tu->type == TK_FLEX_CLOSE) { if (sfd > 0) sfd--; scy += slh; scx = scl; slh = 18; continue; }
-                if (tu->type == TK_MAXW_OPEN)  { if (scx > scl) { scy += slh; slh = 18; } int mwv = (int)tu->off, off = (scr - scl > mwv) ? (scr - scl - mwv) / 2 : 0; if (smxsp < 16) { smxoff[smxsp++] = off; scl += off; scr -= off; } scx = scl; continue; }
-                if (tu->type == TK_MAXW_CLOSE) { if (smxsp > 0) { int off = smxoff[--smxsp]; scl -= off; scr += off; } scy += slh; scx = scl; slh = 18; continue; }
+                /* Must use the SAME solver as the main loop above, or a block's
+                 * background rect drifts away from its text (M1896). */
+                if (tu->type == TK_MAXW_OPEN)  { if (scx > scl) { scy += slh; slh = 18; } if (smxsp < 16) { smxcl[smxsp] = scl; smxcr[smxsp] = scr; smxsp++; box_solve_column(tu, &scl, &scr); } scx = scl; continue; }
+                if (tu->type == TK_MAXW_CLOSE) { if (smxsp > 0) { --smxsp; scl = smxcl[smxsp]; scr = smxcr[smxsp]; } scy += slh; scx = scl; slh = 18; continue; }
                 if (tu->type == TK_BREAK) { if (sfd > 0) { if (scx > scl) scx += sfg; continue; } scy += slh + tu->off; scx = scl; slh = 18; continue; }
                 if (tu->type == TK_PARA)  { if (sfd > 0) { if (scx > scl) scx += sfg; continue; } scy += slh + 8 + tu->off; scx = scl; slh = 18; continue; }
                 if (tu->type == TK_HR)    { scy += slh; scy += 12; scx = scl; slh = 18; continue; }
