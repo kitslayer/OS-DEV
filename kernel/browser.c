@@ -695,9 +695,23 @@ static int parse_style_hspace(const char *s, int n) {
     int m = 0, vs, ve;
     if (style_prop(s, n, "margin-left", 11, &vs, &ve))  m += parse_px_val(s + vs, ve - vs);
     else if (style_prop(s, n, "margin", 6, &vs, &ve))   m += shorthand_left(s + vs, ve - vs);   /* `margin: V H` etc. */
-    if (style_prop(s, n, "padding-left", 12, &vs, &ve)) m += parse_px_val(s + vs, ve - vs);
-    else if (style_prop(s, n, "padding", 7, &vs, &ve))  m += shorthand_left(s + vs, ve - vs);
+    /* Horizontal PADDING used to be folded in here, so a padded block was indented
+     * on the left while its text ran to the container's right edge — padding-right
+     * was dropped entirely. Since M1897 padding is real box geometry: it rides in
+     * the block token and box_solve_column insets BOTH edges via the §10.3.3
+     * solver, while the BACKGROUND still paints the padding box (see below). */
     return m > 200 ? 200 : m;
+}
+
+/* Horizontal padding in px, capped at 255 so each side fits one byte of the block
+ * token's 16-bit payload. (M1897) */
+static void parse_style_padding_lr(const char *s, int n, int *outl, int *outr) {
+    int vs, ve, l = 0, r = 0;
+    if (style_prop(s, n, "padding-left", 12, &vs, &ve))  l = parse_px_val(s + vs, ve - vs);
+    else if (style_prop(s, n, "padding", 7, &vs, &ve))   l = shorthand_left(s + vs, ve - vs);
+    if (style_prop(s, n, "padding-right", 13, &vs, &ve)) r = parse_px_val(s + vs, ve - vs);
+    else if (style_prop(s, n, "padding", 7, &vs, &ve))   r = shorthand_left(s + vs, ve - vs);
+    *outl = l > 255 ? 255 : l; *outr = r > 255 ? 255 : r;
 }
 /* returns 1 if the element should be hidden: display:none OR visibility:hidden.
  * (In this box-model-less renderer visibility:hidden can't preserve the element's
@@ -804,13 +818,25 @@ static int parse_style_auto_margins(const char *s, int n) {
  * it, so that case is expressed as "both margins auto" and routed through the
  * same solver rather than being special-cased in the renderer. Explicit `width`
  * and explicit `margin:auto` now follow the real rule. */
-static void box_solve_column(const tok_t *tk, int *cl, int *cr) {
+/* Solves the block's column and reports TWO geometries, because CSS needs both
+ * and they differ whenever there is padding (M1897):
+ *   *cl/*cr  -> the CONTENT box: where text lays out and wraps.
+ *   *pbl/*pbr -> the PADDING box: what a background paints over (CSS 2.1 §14.2,
+ *                background covers the padding box, not the content box).
+ * Passing the content box as a background rect makes a padded block's background
+ * hug its text instead of extending around it. `pbl`/`pbr` may be NULL for
+ * callers that only need to wrap text (the background forward-scan). */
+static void box_solve_column(const tok_t *tk, int *cl, int *cr, int *pbl, int *pbr) {
     int avail = *cr - *cl;
+    if (pbl) *pbl = *cl;
+    if (pbr) *pbr = *cr;
     if (avail <= 0) return;
 
     int spec_w = (int)tk->len;          /* 0 = auto */
     int maxw   = (int)tk->off;          /* 0 = none */
     int autob  = (int)tk->style & 3;
+    int padl   = (int)(tk->link & 0xFF);            /* horizontal padding, packed 8+8 */
+    int padr   = (int)((tk->link >> 8) & 0xFF);
 
     lay_box lb;
     for (unsigned i = 0; i < sizeof lb; i++) ((unsigned char *)&lb)[i] = 0;
@@ -829,11 +855,17 @@ static void box_solve_column(const tok_t *tk, int *cl, int *cr) {
     lb.margin.left  = (autob & 1) ? LAY_AUTO : 0;
     lb.margin.right = (autob & 2) ? LAY_AUTO : 0;
 
+    lb.padding.left  = padl;
+    lb.padding.right = padr;
+
     int ml, mr, w;
     lay_solve_width(&lb, avail, &ml, &mr, &w);
     (void)mr;
-    *cl += ml;
-    *cr  = *cl + w;
+    int left = *cl + ml;                 /* the box's left border edge */
+    if (pbl) *pbl = left;                /* padding box spans the padding + content */
+    if (pbr) *pbr = left + padl + w + padr;
+    *cl = left + padl;                   /* content box sits inside the padding */
+    *cr = *cl + w;
 }
 /* list-style-type (or the `list-style` shorthand) on a <ul>/<ol>. Returns a marker code
  * for the list's items, applied per-<li>:
@@ -954,7 +986,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0;   /* width px / margin-auto bits (M1896) */
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0, bpadl = 0, bpadr = 0;   /* width (M1896) / h-padding (M1897) */
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css, &prews);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -971,6 +1003,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             mw = parse_style_maxwidth(st, stl);                               /* max-width (px) -> centred column */
             bwpx = parse_style_width_px(st, stl);                             /* width (px) — real §10.3.3 column (M1896) */
             bmauto = parse_style_auto_margins(st, stl);                        /* margin-left/right:auto bits (M1896) */
+            parse_style_padding_lr(st, stl, &bpadl, &bpadr);                  /* h-padding -> real box inset (M1897) */
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -1031,15 +1064,24 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                  * the actual geometry per CSS 2.1 §10.3.3 via box_solve_column
                  * (M1896); here we only carry the SPECIFIED values, because the
                  * containing-block width is a render-time quantity. */
-                if ((mw > 0 || bwpx > 0 || bmauto) && is_block_tag(tag)
-                        && b->ntok < TOK_MAX && b->n_hidden == 0) {
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)mw, (uint16_t)bwpx, NO_LINK,
+                if ((mw > 0 || bwpx > 0 || bmauto || bpadl > 0 || bpadr > 0)
+                        && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {
+                    uint16_t pk = (uint16_t)((bpadl & 0xFF) | ((bpadr & 0xFF) << 8));
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)mw, (uint16_t)bwpx, pk,
                                                   (uint8_t)bmauto, TK_MAXW_OPEN };
                     b->sc[sp].hasmaxw = 1;
                 }
                 b->sc[sp].hasbg = 0;
                 if (bg && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* block background: bracket the block so render fills ONE contiguous rect behind it */
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bg & 0xFFFFFFu), 0, NO_LINK, 0, TK_BG_OPEN };
+                    /* Bit 24 of `off` (above the 24-bit colour) records that THIS
+                     * element also emitted a block box, so the renderer knows to
+                     * paint its padding box rather than the current column. Without
+                     * the flag a background on a plain child inside a padded parent
+                     * would wrongly inherit the PARENT's padding box and paint too
+                     * wide. (M1897) */
+                    uint32_t bgoff = (uint32_t)(bg & 0xFFFFFFu)
+                                   | (b->sc[sp].hasmaxw ? (1u << 24) : 0u);
+                    b->toks[b->ntok++] = (tok_t){ bgoff, 0, NO_LINK, 0, TK_BG_OPEN };
                     b->sc[sp].hasbg = 1;
                 }
                 b->sc_sp++;
@@ -4309,7 +4351,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
      * the ORIGINAL cl/cr rather than a single symmetric inset, because §10.3.3 can
      * produce ASYMMETRIC margins (e.g. `margin-left:auto` right-aligns) which a
      * single offset cannot express (M1896). */
-    int mxcl[16], mxcr[16], mxsp = 0;
+    int mxcl[16], mxcr[16], mxpl[16], mxpr[16], mxsp = 0;
+    /* The padding box of the innermost constrained block, for background fills.
+     * With no constrained block active it is just the full column. (M1897) */
+    int pbl = 0, pbr = 0;
     int bgsp = 0;   /* block-bg nesting depth: counted so a nested TK_BG_OPEN's forward-scan stops at ITS matching close (M993) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
@@ -4374,10 +4419,11 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
         if (tk->type == TK_FLEX_CLOSE) { if (flex_depth > 0) flex_depth--; cy += curlh; cx = cl; curlh = 18; continue; }   /* end the row */
         if (tk->type == TK_MAXW_OPEN)  {   /* narrow + centre the content column for this block */
             if (cx > cl) { cy += curlh; curlh = 18; }
-            if (mxsp < 16) { mxcl[mxsp] = cl; mxcr[mxsp] = cr; mxsp++; box_solve_column(tk, &cl, &cr); }
+            if (mxsp < 16) { mxcl[mxsp] = cl; mxcr[mxsp] = cr; mxpl[mxsp] = pbl; mxpr[mxsp] = pbr; mxsp++;
+                             box_solve_column(tk, &cl, &cr, &pbl, &pbr); }
             cx = cl; continue;
         }
-        if (tk->type == TK_MAXW_CLOSE) { if (mxsp > 0) { --mxsp; cl = mxcl[mxsp]; cr = mxcr[mxsp]; } cy += curlh; cx = cl; curlh = 18; continue; }   /* restore full width */
+        if (tk->type == TK_MAXW_CLOSE) { if (mxsp > 0) { --mxsp; cl = mxcl[mxsp]; cr = mxcr[mxsp]; pbl = mxpl[mxsp]; pbr = mxpr[mxsp]; } cy += curlh; cx = cl; curlh = 18; continue; }   /* restore full width */
         if (tk->type == TK_BG_OPEN) {
             /* Forward-scan to the matching TK_BG_CLOSE, faithfully mirroring the main loop's
              * vertical advance, to find this block's y_bottom. Then fill ONE contiguous rect
@@ -4400,7 +4446,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 if (tu->type == TK_FLEX_CLOSE) { if (sfd > 0) sfd--; scy += slh; scx = scl; slh = 18; continue; }
                 /* Must use the SAME solver as the main loop above, or a block's
                  * background rect drifts away from its text (M1896). */
-                if (tu->type == TK_MAXW_OPEN)  { if (scx > scl) { scy += slh; slh = 18; } if (smxsp < 16) { smxcl[smxsp] = scl; smxcr[smxsp] = scr; smxsp++; box_solve_column(tu, &scl, &scr); } scx = scl; continue; }
+                if (tu->type == TK_MAXW_OPEN)  { if (scx > scl) { scy += slh; slh = 18; } if (smxsp < 16) { smxcl[smxsp] = scl; smxcr[smxsp] = scr; smxsp++; box_solve_column(tu, &scl, &scr, 0, 0); } scx = scl; continue; }
                 if (tu->type == TK_MAXW_CLOSE) { if (smxsp > 0) { --smxsp; scl = smxcl[smxsp]; scr = smxcr[smxsp]; } scy += slh; scx = scl; slh = 18; continue; }
                 if (tu->type == TK_BREAK) { if (sfd > 0) { if (scx > scl) scx += sfg; continue; } scy += slh + tu->off; scx = scl; slh = 18; continue; }
                 if (tu->type == TK_PARA)  { if (sfd > 0) { if (scx > scl) scx += sfg; continue; } scy += slh + 8 + tu->off; scx = scl; slh = 18; continue; }
@@ -4432,7 +4478,11 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             }
             int y_bottom = scy + slh;   /* bottom of the last line of the block */
             int yy0 = cy < ct ? ct : cy, yy1 = y_bottom > cb ? cb : y_bottom;
-            if (yy1 > yy0) fb_fill_rect(cl, yy0, cr - cl, yy1 - yy0, col);
+            /* Paint the PADDING box, not the content box: a padded block's
+             * background must extend around its text (CSS 2.1 §14.2). (M1897) */
+            { int own_box = ((tk->off >> 24) & 1) && mxsp > 0;   /* see the emit site */
+              int bx = own_box ? pbl : cl, bw = (own_box ? pbr : cr) - bx;
+              if (yy1 > yy0 && bw > 0) fb_fill_rect(bx, yy0, bw, yy1 - yy0, col); }
             if (bgsp < 16) bgsp++;
             continue;
         }
