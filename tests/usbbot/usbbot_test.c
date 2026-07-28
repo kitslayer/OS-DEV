@@ -345,6 +345,45 @@ int main(void) {
         OK(memcmp(inq + 8, "OSDEV   ", 8) == 0);
     }
 
+    /* --- packet accounting for a per-endpoint data toggle (M1891) ------------
+     * A controller with a data toggle (UHCI/EHCI) must advance it once per
+     * packet, counted from the bytes ACTUALLY moved. The bug this guards against
+     * counted the bytes REQUESTED, which only shows up when the two counts differ
+     * in parity — so the cases below pair "harmless shortfall" against "toggle
+     * flips the wrong way". */
+    {
+        /* exact multiples and partials of maxp */
+        OK(usb_bot_packets(0,    512) == 1);   /* zero-length transfer is one ZLP */
+        OK(usb_bot_packets(1,    512) == 1);
+        OK(usb_bot_packets(511,  512) == 1);
+        OK(usb_bot_packets(512,  512) == 1);
+        OK(usb_bot_packets(513,  512) == 2);
+        OK(usb_bot_packets(1024, 512) == 2);
+        OK(usb_bot_packets(1536, 512) == 3);
+        OK(usb_bot_packets(31,    64) == 1);   /* a 31-byte CBW at full-speed maxp */
+        OK(usb_bot_packets(13,    64) == 1);   /* a 13-byte CSW */
+
+        /* The shortfall that is HARMLESS: 412 of a requested 512 is still one
+         * packet, so the toggle lands in the same place either way. */
+        OK(usb_bot_packets(412, 512) == usb_bot_packets(512, 512));
+
+        /* The shortfall that BITES: 1024 delivered of a requested 1536 is 2
+         * packets vs 3 — opposite parity, so a toggle advanced by the requested
+         * count desynchronises from the device. */
+        OK(usb_bot_packets(1024, 512) != usb_bot_packets(1536, 512));
+        OK((usb_bot_packets(1024, 512) & 1) != (usb_bot_packets(1536, 512) & 1));
+
+        /* A short transfer never counts MORE packets than the full one. */
+        for (int maxp = 8; maxp <= 512; maxp *= 2)
+            for (int req = 0; req <= 4096; req += 37)
+                for (int got = 0; got <= req; got += 53)
+                    OK(usb_bot_packets(got, maxp) <= usb_bot_packets(req, maxp));
+
+        /* Defensive: a bad maxp is reported as 0 rather than dividing by zero. */
+        OK(usb_bot_packets(512, 0)  == 0);
+        OK(usb_bot_packets(512, -1) == 0);
+    }
+
     /* --- blocks-per-transfer is capped by the CDB's 16-bit count field ------- */
     {
         mock_reset(&m); bot_bind(&b, &m, 0xFFFFFFFFu);

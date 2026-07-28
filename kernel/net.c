@@ -1595,6 +1595,16 @@ static void tcp_ack_input(tcp_conn *c, struct ooo_state *o, const uint8_t *tcp, 
 
     if (seq_gt(ackno, o->snd_una) && seq_le(ackno, o->snd_nxt)) {   /* NEW data acked */
         uint32_t acked = ackno - o->snd_una;
+        /* INVARIANT (load-bearing, audited M1891): acked <= inflight <= sndbuf_len,
+         * so the length below cannot underflow into a huge memmove. This is the
+         * one place a remote peer's ACK field feeds a memmove length, so the chain
+         * is worth stating: the guard above bounds acked by inflight; tcp_output
+         * only advances snd_nxt by n <= queued (= sndbuf_len - inflight), keeping
+         * inflight <= sndbuf_len; this branch decrements sndbuf_len and advances
+         * snd_una by the SAME acked, preserving it; tcp_write only grows sndbuf_len;
+         * and a fresh ooo slot zeroes snd_una/snd_nxt/sndbuf_len together, so the
+         * guard (ackno in (0,0]) can never pass on stale state from a prior
+         * connection. Keep all four of those true, or add an explicit clamp. */
         memmove(o->sndbuf, o->sndbuf + acked, (uint32_t)o->sndbuf_len - acked);   /* drop from the head */
         o->sndbuf_len -= (int)acked;
         o->snd_una = ackno;

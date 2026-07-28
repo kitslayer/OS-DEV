@@ -415,14 +415,17 @@ static int bulk_xfer(uint8_t ep, uint16_t maxp, int *toggle, int len, int in) {
     int rc = run_qtds_ex(1, len, &act);
     if (rc != 0)
         return -1;
-    /* Advance the toggle by the number of maxp packets the transfer consumed:
-     * a high-speed bulk transfer of `len` bytes is ceil(len/maxp) packets (a
-     * zero-length transfer is one packet), each flipping the toggle. */
-    if (toggle) {
-        int packets = (len == 0) ? 1 : ((len + maxp - 1) / maxp);
-        *toggle = (tg + packets) & 1;
-    }
     if (act > len) act = len;
+    /* Advance the toggle by the number of maxp packets the transfer ACTUALLY
+     * consumed — derived from `act`, not `len` (M1891). EHCI issues ONE qTD for
+     * the whole transfer and the HC splits it into maxp packets internally, so a
+     * short IN ends the qTD early having moved fewer packets than we asked for;
+     * advancing by the requested count then leaves our toggle out of step with
+     * the device's and every later transfer on this endpoint NAKs or
+     * mis-sequences. (Only a parity difference is observable, which is why this
+     * stayed latent — see usb_bot_packets in usbbot.h.) */
+    if (toggle)
+        *toggle = (tg + usb_bot_packets(act, (int)maxp)) & 1;
     /* On an IN, the data now sits in eh.bulk_buf for the caller to read. */
     return act;                                          /* >=0 bytes moved */
 }

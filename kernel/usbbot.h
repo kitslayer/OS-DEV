@@ -228,6 +228,30 @@ static inline int usb_bot_read_capacity(usb_bot_t *b) {
     return 0;
 }
 
+/* How many max-packet-sized packets a bulk transfer of `moved` bytes consumed
+ * (M1891). A controller that manages a per-endpoint DATA TOGGLE has to advance
+ * it once per packet, and the count must come from the bytes ACTUALLY moved, not
+ * the bytes requested: USB terminates a transfer early on a short packet, so a
+ * short IN consumes fewer packets than were asked for. A zero-length transfer is
+ * still one packet (the ZLP).
+ *
+ * Getting this wrong desynchronises the endpoint's toggle from the device's, and
+ * every later transfer on that endpoint is then NAKed or mis-sequenced. Because
+ * the toggle is a single bit, only a PARITY difference between the requested and
+ * actual packet counts is visible — which is why the bug this replaced survived:
+ * the common shortfall (fewer bytes inside the same packet count, e.g. 412 of a
+ * requested 512 with maxp 512) is harmless, and QEMU's usb-storage always
+ * delivers exactly what was asked. A real device that short-terminates across a
+ * packet boundary (e.g. 1024 delivered of a requested 1536 at maxp 512: 2
+ * packets vs 3) flips the toggle the wrong way.
+ *
+ * Returns 0 for a negative maxp (a caller error) so the caller can reject it. */
+static inline int usb_bot_packets(int moved, int maxp) {
+    if (maxp <= 0) return 0;
+    if (moved <= 0) return 1;                       /* zero-length transfer = one ZLP */
+    return (moved + maxp - 1) / maxp;
+}
+
 /* Blocks we can move in one data phase: max_data/512, capped at the CDB's
  * 16-bit transfer-length field. At least 1 whenever max_data >= 512. */
 static inline uint32_t usb_bot_blocks_per_xfer(const usb_bot_t *b) {
