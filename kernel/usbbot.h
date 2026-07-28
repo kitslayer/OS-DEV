@@ -80,6 +80,15 @@ typedef int (*usb_bot_xfer_fn)(void *ctx, int in, void *buf, int len);
 typedef struct {
     usb_bot_xfer_fn xfer;        /* transport (required)                        */
     void  (*delay_ms)(int ms);   /* optional inter-retry delay (may be NULL)    */
+    /* Optional BOT reset recovery (may be NULL), invoked by the retry path after
+     * a failed command (M1898). A stalled bulk endpoint leaves the device and the
+     * host disagreeing about BOTH the phase of the transport and the endpoint data
+     * toggle, so a bare retry usually fails the same way and can stay desynced for
+     * the rest of the session. The USB Mass Storage Bulk-Only Transport spec §5.3.4
+     * prescribes: Bulk-Only Mass Storage Reset, then Clear Feature ENDPOINT_HALT on
+     * both bulk endpoints (which is what resets the device's toggles), then reset
+     * the host's own toggles. Returns 0 if recovery succeeded. */
+    int   (*reset_recovery)(void *ctx);
     void    *ctx;                /* opaque, passed to xfer                      */
     uint32_t max_data;           /* max bytes in ONE data phase (>= 512)        */
     uint8_t  lun;                /* logical unit (0..15)                        */
@@ -189,6 +198,11 @@ static inline int usb_bot_command_retry(usb_bot_t *b, const uint8_t *cb, int cb_
     if (usb_bot_command(b, cb, cb_len, data, data_len, data_in, got) == 0)
         return 0;
     if (b && b->delay_ms) b->delay_ms(1);
+    /* Recover the endpoint before retrying (M1898). Without this a stall leaves the
+     * transport mid-phase and the toggles disagreeing, so the retry fails the same
+     * way — and every later command on that endpoint does too. Best-effort: a
+     * transport with no recovery hook simply retries as before. */
+    if (b && b->reset_recovery) (void)b->reset_recovery(b->ctx);
     return usb_bot_command(b, cb, cb_len, data, data_len, data_in, got);
 }
 

@@ -48,6 +48,8 @@ static struct {
     uint16_t maxp_out;    /* BULK OUT max packet                              */
     int      tog_in;      /* BULK IN data toggle (persists across transfers)  */
     int      tog_out;     /* BULK OUT data toggle                             */
+    uint16_t ep0_maxp;    /* endpoint-0 max packet (for control requests)      */
+    uint8_t  iface;       /* bInterfaceNumber of the BOT interface             */
     usb_bot_t bot;        /* the shared BOT/SCSI engine + device geometry     */
 } us;
 
@@ -67,6 +69,40 @@ static int uhci_bot_xfer(void *ctx, int in, void *buf, int len) {
     return act;
 }
 static void uhci_bot_delay(int ms) { timer_wait(ms); }
+
+/* BOT reset recovery (USB Mass Storage Bulk-Only Transport §5.3.4), M1898.
+ *
+ * A stalled bulk endpoint leaves the device and the host disagreeing about both
+ * the transport phase and the endpoint DATA TOGGLE, so retrying a command
+ * unchanged fails the same way — and so does every command after it. The spec's
+ * sequence is:
+ *   1. Bulk-Only Mass Storage Reset: class request, bmRequestType 0x21
+ *      (host->device, class, interface), bRequest 0xFF, wIndex = interface. This
+ *      readies the device for the next CBW without disturbing its configuration.
+ *   2. Clear Feature ENDPOINT_HALT (bmRequestType 0x02, bRequest 0x01,
+ *      wValue 0 = ENDPOINT_HALT) on the bulk IN and then the bulk OUT endpoint.
+ *      This is the step that resets the DEVICE's data toggles to 0.
+ *   3. Reset our own toggles to match.
+ *
+ * Best-effort: each request's failure is tolerated, because a device that will
+ * not answer control transfers either way is already gone, and the caller treats
+ * a still-failing command as a failure. Returns 0 if every step succeeded. */
+static int uhci_bot_reset_recovery(void *ctx) {
+    (void)ctx;
+    int ok = 0;
+    uint8_t reset[8]  = { 0x21, 0xFF, 0, 0, us.iface, 0, 0, 0 };
+    if (usb_control_xfer(us.addr, us.ep0_maxp, reset, 0, 0, 0) != 0) ok = -1;
+
+    uint8_t chi[8] = { 0x02, 0x01, 0x00, 0x00, (uint8_t)(us.ep_in | 0x80), 0, 0, 0 };
+    if (usb_control_xfer(us.addr, us.ep0_maxp, chi, 0, 0, 0) != 0) ok = -1;
+
+    uint8_t cho[8] = { 0x02, 0x01, 0x00, 0x00, (uint8_t)(us.ep_out & 0x7F), 0, 0, 0 };
+    if (usb_control_xfer(us.addr, us.ep0_maxp, cho, 0, 0, 0) != 0) ok = -1;
+
+    /* Whatever the device did, our toggles must match a freshly-unhalted endpoint. */
+    us.tog_in = us.tog_out = 0;
+    return ok;
+}
 
 /* --- enumeration ----------------------------------------------------------- */
 
@@ -133,6 +169,7 @@ static int enumerate_one(void) {
             in_target = (icls == 0x08 && isub == 0x06 && iproto == 0x50);
             if (in_target && !found_iface) {
                 iface_class = icls; iface_sub = isub; iface_proto = iproto;
+                us.iface = cfg[i + 2];       /* bInterfaceNumber, for BOT reset (M1898) */
             }
         } else if (btype == 0x05 && blen >= 7 && in_target) {  /* ENDPOINT in target iface */
             uint8_t eaddr = cfg[i + 2], eattr = cfg[i + 3];
@@ -163,10 +200,12 @@ static int enumerate_one(void) {
     us.maxp_out = maxp_out;
     us.tog_in   = 0;
     us.tog_out  = 0;
+    us.ep0_maxp = ep0;                       /* kept for BOT reset recovery (M1898) */
 
     /* Bind the shared BOT engine to this device over the UHCI transport. */
-    us.bot.xfer     = uhci_bot_xfer;
-    us.bot.delay_ms = uhci_bot_delay;
+    us.bot.xfer           = uhci_bot_xfer;
+    us.bot.delay_ms       = uhci_bot_delay;
+    us.bot.reset_recovery = uhci_bot_reset_recovery;
     us.bot.ctx      = 0;
     us.bot.max_data = USB_BULK_MAX;      /* one bulk data phase on UHCI */
     us.bot.lun      = 0;

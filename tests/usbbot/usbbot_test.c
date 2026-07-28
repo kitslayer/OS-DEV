@@ -23,6 +23,8 @@
 
 static int fails = 0, checks = 0;
 #define OK(cond) do { checks++; if (!(cond)) { printf("FAIL line %d: %s\n", __LINE__, #cond); fails++; } } while (0)
+#define EQ(got, want) do { checks++; if ((got) != (want)) { \
+    printf("FAIL line %d: %s == %d, wanted %d\n", __LINE__, #got, (int)(got), (int)(want)); fails++; } } while (0)
 
 #define MOCK_BLOCKS 64
 
@@ -49,7 +51,10 @@ typedef struct {
     int      f_fail_call;             /* return -1 on this xfer call (1-based)*/
     int      f_fail_once;             /* clear f_fail_call after it fires     */
 
+    int      f_stall_until_reset;     /* fail every xfer until recovery runs  */
+
     /* --- observability ----------------------------------------------------*/
+    int      resets;                  /* reset_recovery invocations           */
     int      calls;                   /* xfer call count                      */
     uint8_t  last_cbw[31];            /* the last CBW we received, verbatim   */
     int      commands;                /* completed commands                   */
@@ -74,6 +79,9 @@ static int mock_xfer(void *ctx, int in, void *buf, int len) {
         if (m->f_fail_once) m->f_fail_call = 0;
         return -1;
     }
+    /* A stalled endpoint: every transfer fails, and the phase state is left
+     * wherever it was, until the host performs BOT reset recovery. */
+    if (m->f_stall_until_reset) return -1;
 
     if (m->phase == 0) {                       /* --- expect the CBW on OUT --- */
         if (in || len != 31) return -1;
@@ -137,10 +145,22 @@ static int mock_xfer(void *ctx, int in, void *buf, int len) {
     return m->f_short_csw ? 12 : 13;
 }
 
+/* Stands in for Bulk-Only Mass Storage Reset + Clear Feature ENDPOINT_HALT:
+ * clears the stall and resynchronises the transport back to expecting a CBW,
+ * exactly as a real device does after the spec's recovery sequence. */
+static int mock_reset_recovery(void *ctx) {
+    mockdev *m = (mockdev *)ctx;
+    m->resets++;
+    m->f_stall_until_reset = 0;
+    m->phase = 0;                     /* device is back to expecting a CBW */
+    return 0;
+}
+
 static void bot_bind(usb_bot_t *b, mockdev *m, uint32_t max_data) {
     memset(b, 0, sizeof *b);
-    b->xfer     = mock_xfer;
-    b->ctx      = m;
+    b->xfer           = mock_xfer;
+    b->reset_recovery = mock_reset_recovery;
+    b->ctx            = m;
     b->max_data = max_data;
     b->lun      = 0;
 }
@@ -334,6 +354,48 @@ int main(void) {
         int before = m.commands;
         OK(usb_bot_read_capacity(&b) != 0);
         OK(m.commands - before == 2);          /* tried exactly twice */
+    }
+
+    /* --- BOT reset recovery after a stall (M1898) ---------------------------
+     * A stalled bulk endpoint leaves the device and host disagreeing about the
+     * transport phase AND the data toggle, so a bare retry fails the same way.
+     * The spec's recovery sequence is what resynchronises them. */
+    {
+        /* A stall that persists until recovery runs: the retry path must invoke
+         * recovery and then succeed. Without the hook this command is unfixable. */
+        mock_reset(&m); bot_bind(&b, &m, 4096);
+        m.f_stall_until_reset = 1;
+        OK(usb_bot_read_capacity(&b) == 0);      /* succeeds *because* of recovery */
+        EQ(m.resets, 1);
+
+        /* A stall left mid-transfer desynchronises the phase; recovery resets it
+         * so the following CBW is understood. */
+        mock_reset(&m); bot_bind(&b, &m, 4096);
+        OK(usb_bot_read_capacity(&b) == 0);       /* get geometry first */
+        m.f_stall_until_reset = 1;
+        uint8_t sec[512];
+        OK(usb_bot_read10(&b, 0, 1, sec) == 0);
+        OK(m.resets >= 1);
+
+        /* Recovery is only attempted when something actually failed. */
+        mock_reset(&m); bot_bind(&b, &m, 4096);
+        OK(usb_bot_read_capacity(&b) == 0);
+        EQ(m.resets, 0);
+
+        /* A transport with NO recovery hook still behaves exactly as before: one
+         * retry, no crash, and a persistent failure still reports failure. */
+        mock_reset(&m); bot_bind(&b, &m, 4096);
+        b.reset_recovery = 0;
+        m.f_stall_until_reset = 1;
+        OK(usb_bot_read_capacity(&b) != 0);
+        EQ(m.resets, 0);
+
+        /* Recovery that itself fails must not wedge or loop: the command simply
+         * reports failure after its single retry. */
+        mock_reset(&m); bot_bind(&b, &m, 4096);
+        m.f_stall_until_reset = 1;
+        m.f_status = 1;                            /* stays broken after recovery */
+        OK(usb_bot_read_capacity(&b) != 0);
     }
 
     /* --- INQUIRY + TEST UNIT READY ------------------------------------------ */
