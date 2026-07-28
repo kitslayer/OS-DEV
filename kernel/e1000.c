@@ -229,14 +229,22 @@ int e1000_init(void) {
     tx_cur = 0;
 
     /* Interrupt-driven RX (M1858): install the ISR on the card's PCI IRQ line
-     * (via the 8259 PIC — no ACPI _PRT needed) and enable ONLY the RX causes.
-     * reg_read(REG_ICR) once clears any stale cause before we unmask. */
+     * and enable ONLY the RX causes. reg_read(REG_ICR) once clears any stale
+     * cause before we unmask.
+     *
+     * M1890: deliver it through the I/O APIC when one is present. This uses the
+     * PCI routing variant, not the ISA one — PCI INTx is LEVEL-triggered and
+     * ACTIVE-LOW, and a redirection entry left at the ISA default (edge,
+     * active-high) on a level/low line either never fires or latches on. Falls
+     * back to the 8259 PIC when there is no I/O APIC. */
     uint8_t irq = pci_irq_line(&dev);
     if (irq < 16) {
         (void)reg_read(REG_ICR);
         irq_install_handler(irq, e1000_isr);         /* also pic_unmask(irq) */
+        irq_route_ioapic_pci(irq);                   /* no-op without an I/O APIC */
         reg_write(REG_IMS, ICR_RXT0 | ICR_RXDMT0);   /* raise IRQ when a packet is received */
-        kprintf("[ ok ] e1000: interrupt-driven RX enabled (IRQ %u) — net waits now sleep, not spin (M1858).\n", irq);
+        kprintf("[ ok ] e1000: interrupt-driven RX enabled (IRQ %u, %s) — net waits now sleep, not spin (M1858).\n",
+                irq, irq_is_ioapic_routed(irq) ? "I/O APIC, level/active-low" : "8259 PIC");
     }
     return 0;
 }

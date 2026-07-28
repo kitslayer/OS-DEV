@@ -91,7 +91,15 @@ softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chai
 require "mounted FAT32 volume"               "FAT32 mount"
     require "ATA read cache: fill+hit+write-invalidate coherent"  "ATA single-sector read cache (fill/hit/write-invalidate coherence, M1855)"
     require "I/O APIC at 0x"  "I/O APIC detected + mapped + routing primitives verified (M1856)"
-    require "keyboard IRQ routed via the I/O APIC"  "keyboard IRQ moved onto the I/O APIC + LAPIC-EOI (live delivery, M1857)"
+    # M1890: every live ISA line (PIT tick, keyboard, serial) is delivered via the
+    # I/O APIC with GSI + polarity/trigger taken from the ACPI MADT, and the NIC's
+    # PCI IRQ is routed with the PCI electrical configuration (level/active-low),
+    # which the old edge/active-high-only routing could not express. That the boot
+    # gets this far at all is the proof the PIT tick still arrives (the scheduler
+    # heartbeat) via the LAPIC-EOI path.
+    require "routed via the I/O APIC"          "ISA IRQs (PIT/keyboard/serial) moved onto the I/O APIC + LAPIC-EOI (live delivery, M1857/M1890)"
+    require "polarity/trigger from the ACPI MADT"  "redirection entries honour the MADT override flags, not assumed edge/active-high (M1890)"
+    require "I/O APIC, level/active-low"       "e1000 PCI IRQ routed via the I/O APIC as level-triggered/active-low (M1890)"
 require "AC'97 audio: NAM="                  "AC'97 audio bring-up"
 require "USB tablet active"                  "USB UHCI + tablet"
 require "launching the desktop environment"  "reached desktop launch"

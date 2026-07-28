@@ -83,13 +83,59 @@ static uint32_t g_ioapic_routed;
 
 /* Route ISA `irq`'s delivery through the I/O APIC (to vector 32+irq on the BSP's
  * local APIC), masking it on the PIC. No-op if no I/O APIC. The handler is
- * unchanged; only the delivery path + EOI target change. */
+ * unchanged; only the delivery path + EOI target change.
+ *
+ * The electrical configuration comes from the MADT Interrupt Source Override if
+ * the firmware supplied one, else the ISA bus default (edge-triggered,
+ * active-high). Before M1890 the override's flags word was parsed past and
+ * discarded, so every routed line was programmed edge/active-high regardless of
+ * what the firmware asked for. */
 void irq_route_ioapic(uint8_t irq) {
     if (irq >= 16 || !ioapic_present()) return;
-    uint32_t gsi = acpi_madt_gsi_for_irq(irq);
-    ioapic_route((uint8_t)gsi, (uint8_t)(32 + irq), 0 /* BSP APIC id (0 on QEMU) */, 0 /* unmasked */);
+    uint32_t gsi   = irq;                     /* identity unless overridden */
+    uint16_t flags = 0;                       /* 0 = "conforms to bus default" */
+    (void)acpi_madt_irq_override(irq, &gsi, &flags);
+
+    /* ISA bus defaults: active high, edge triggered. A polarity/trigger field of
+     * 0 means exactly "the bus default", so only an explicit 3 (low / level)
+     * changes anything; 1 restates the default. */
+    int active_low = (ACPI_MADT_POLARITY(flags) == 3);
+    int level      = (ACPI_MADT_TRIGGER(flags)  == 3);
+
+    ioapic_route_ex((uint8_t)gsi, (uint8_t)(32 + irq), 0 /* BSP APIC id (0 on QEMU) */,
+                    0 /* unmasked */, active_low, level);
     pic_mask(irq);                                   /* the PIC no longer delivers this line */
     g_ioapic_routed |= (1u << irq);
+}
+
+/* Route a PCI device's interrupt line through the I/O APIC (M1890).
+ *
+ * PCI INTx is LEVEL-triggered and ACTIVE-LOW by definition, and shared: several
+ * functions can drive the same line, and the line stays asserted until every
+ * sharer's handler has quiesced its device. That is why this cannot reuse the
+ * ISA path — an edge/active-high redirection entry on a level/low line either
+ * never fires or latches on. A MADT override still wins if the firmware
+ * supplied one (some chipsets remap the legacy line). */
+void irq_route_ioapic_pci(uint8_t irq) {
+    if (irq >= 16 || !ioapic_present()) return;
+    uint32_t gsi   = irq;
+    uint16_t flags = 0;
+    (void)acpi_madt_irq_override(irq, &gsi, &flags);
+
+    /* PCI bus defaults: active LOW, LEVEL triggered. Here a field of 0 ("bus
+     * default") means low/level, and only an explicit 1 forces high/edge. */
+    int active_low = (ACPI_MADT_POLARITY(flags) != 1);
+    int level      = (ACPI_MADT_TRIGGER(flags)  != 1);
+
+    ioapic_route_ex((uint8_t)gsi, (uint8_t)(32 + irq), 0, 0 /* unmasked */,
+                    active_low, level);
+    pic_mask(irq);
+    g_ioapic_routed |= (1u << irq);
+}
+
+/* 1 if `irq`'s delivery has been moved onto the I/O APIC. */
+int irq_is_ioapic_routed(uint8_t irq) {
+    return (irq < 16) && ((g_ioapic_routed >> irq) & 1);
 }
 
 static void dump_registers(struct registers *r) {

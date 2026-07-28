@@ -29,7 +29,15 @@ void interrupts_disable(void);              /* cli */
 
 /* Register a handler for hardware IRQ 0..15 and unmask it on the PIC. */
 void irq_install_handler(uint8_t irq, irq_handler_fn fn);
-void irq_route_ioapic(uint8_t irq);   /* move a live IRQ's delivery from the 8259 PIC to the I/O APIC (M1857) */
+void irq_route_ioapic(uint8_t irq);   /* move a live ISA IRQ's delivery from the 8259 PIC to the I/O APIC (M1857) */
+
+/* Same, for a PCI device's interrupt line (M1890). PCI INTx is level-triggered
+ * and active-low (and shared), so it needs a different redirection-entry
+ * configuration than an ISA line — see irq_route_ioapic_pci in interrupts.c. */
+void irq_route_ioapic_pci(uint8_t irq);
+
+/* 1 if `irq` is delivered via the I/O APIC rather than the 8259 PIC. */
+int  irq_is_ioapic_routed(uint8_t irq);
 
 /* MSI / MSI-X message-signaled interrupts (M1288). The dispatcher owns a small
  * per-vector handler table over the reserved MSI vector block (see msi.h); the

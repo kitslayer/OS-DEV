@@ -182,6 +182,10 @@ void mouse_init(void) {
 
     pic_unmask(2);                            /* cascade line for the slave PIC */
     irq_install_handler(12, mouse_handler);   /* unmasks IRQ12 */
+    /* Deliver via the I/O APIC if one is up (M1890). mouse_init runs long after
+     * ioapic_init, so unlike the IRQs kmain routes in a batch this one routes
+     * itself here, right after its handler exists. No-op without an I/O APIC. */
+    irq_route_ioapic(12);
 }
 
 /* --- arrow cursor (X = black outline, O = white fill, space = transparent) --- */

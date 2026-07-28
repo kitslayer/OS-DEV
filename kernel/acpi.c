@@ -304,22 +304,40 @@ int acpi_madt_ioapic(uint32_t *addr, uint32_t *gsi_base) {
     return 0;
 }
 
-/* Map an ISA IRQ to its Global System Interrupt via a MADT Interrupt Source
- * Override (type 2: {type,len=10, bus, source(irq), u32 gsi, u16 flags}); returns
- * `irq` itself (identity) if no override names it. (M1856) */
-uint32_t acpi_madt_gsi_for_irq(uint8_t irq) {
+/* Look up an ISA IRQ's MADT Interrupt Source Override (type 2:
+ * {type, len=10, bus, source(irq), u32 gsi, u16 flags}). Returns 1 and fills
+ * *gsi / *flags if an override names `irq`, else 0 (identity mapping, bus
+ * defaults). Either out-pointer may be NULL. (M1890)
+ *
+ * The `flags` word is the part that used to be dropped on the floor, and it is
+ * the part the I/O APIC actually needs: bits 1:0 are the polarity (00 = bus
+ * default, 01 = active high, 11 = active low) and bits 3:2 the trigger mode
+ * (00 = bus default, 01 = edge, 11 = level). Programming a redirection entry
+ * without them means every routed line is edge/active-high whatever the
+ * firmware said — fine for a plain ISA line, wrong for anything the firmware
+ * remapped to level/low. */
+int acpi_madt_irq_override(uint8_t irq, uint32_t *gsi, uint16_t *flags) {
     const struct sdt_header *madt = find_madt();
-    if (!madt) return irq;
+    if (!madt) return 0;
     const uint8_t *p = (const uint8_t *)madt + 44, *end = (const uint8_t *)madt + madt->length;
     while (p + 2 <= end) {
         uint8_t type = p[0], len = p[1];
         if (len < 2 || p + len > end) break;
         if (type == 2 && len >= 10 && p[3] == irq) {
-            uint32_t g; __builtin_memcpy(&g, p + 4, 4); return g;
+            if (gsi)   { uint32_t g; __builtin_memcpy(&g, p + 4, 4); *gsi = g; }
+            if (flags) { uint16_t f; __builtin_memcpy(&f, p + 8, 2); *flags = f; }
+            return 1;
         }
         p += len;
     }
-    return irq;
+    return 0;
+}
+
+/* Map an ISA IRQ to its Global System Interrupt; returns `irq` itself (identity)
+ * if no override names it. (M1856) */
+uint32_t acpi_madt_gsi_for_irq(uint8_t irq) {
+    uint32_t gsi;
+    return acpi_madt_irq_override(irq, &gsi, 0) ? gsi : irq;
 }
 
 /* Locate the HPET's MMIO base address from the ACPI "HPET" table (M1273). The

@@ -9,12 +9,15 @@
  * interrupt-driven device I/O (so a NIC/disk can raise an IRQ on completion
  * instead of the CPU spin-polling).
  *
- * This first step is deliberately ADDITIVE and inert: it locates + maps the
- * I/O APIC and exposes the routing primitives (all redirection entries left
- * MASKED), so the live IRQ path stays 100% on the 8259 PIC. A self-check
- * programs one masked entry and reads it back to prove the MMIO works. Actually
- * moving a live IRQ onto the I/O APIC (with the LAPIC-EOI change that needs) is
- * a later, separately-gated step.
+ * History: M1856 landed this file inert — it located + mapped the I/O APIC and
+ * exposed the routing primitives with every redirection entry MASKED, so the
+ * live IRQ path stayed 100% on the 8259 PIC. M1857 moved one line (the
+ * keyboard) across to prove the LAPIC-EOI delivery path end to end. M1890
+ * finished the job: the PIT tick, keyboard, serial, PS/2 mouse and the NIC's
+ * PCI line are all delivered here now, and ioapic_route_ex() takes the
+ * electrical configuration (polarity + trigger mode) rather than assuming the
+ * ISA default of edge-triggered/active-high — which is what made routing a PCI
+ * INTx line (level-triggered, active-LOW) possible at all.
  *
  * MMIO: two registers at the base — IOREGSEL (offset 0x00) selects a register
  * index, IOWIN (offset 0x10) reads/writes it. Redirection entry n is the 64-bit
@@ -38,16 +41,40 @@ int ioapic_present(void) { return g_io != 0; }
 uint32_t ioapic_gsi_base(void) { return g_gsi_base; }
 uint32_t ioapic_num_redir(void) { return g_nredir; }
 
-/* Program redirection entry for `gsi`: deliver `vector` (fixed, physical dest,
- * active-high, edge-triggered) to local APIC `apic_id`, (un)masked. */
-void ioapic_route(uint8_t gsi, uint8_t vector, uint8_t apic_id, int masked) {
+/* Program redirection entry for `gsi`: deliver `vector` (fixed delivery,
+ * physical destination) to local APIC `apic_id`, (un)masked, with an explicit
+ * electrical configuration.
+ *
+ * The low dword's layout (Intel ICH/IOAPIC §): [7:0] vector, [10:8] delivery
+ * mode (000 = fixed), [11] destination mode (0 = physical), [12] delivery
+ * status (RO), [13] polarity (0 = active high, 1 = active LOW), [14] remote IRR
+ * (RO, level only), [15] trigger mode (0 = edge, 1 = LEVEL), [16] mask.
+ *
+ * `active_low` and `level` were previously hardcoded to 0 — correct for a plain
+ * ISA line, and wrong for anything else. PCI interrupt lines are level-triggered
+ * and active-low by definition, so routing one with the old edge/active-high
+ * entry either never fires or fires continuously; and an ISA line the firmware
+ * remapped (per the MADT override flags) may be either. (M1890) */
+void ioapic_route_ex(uint8_t gsi, uint8_t vector, uint8_t apic_id, int masked,
+                     int active_low, int level) {
     if (!g_io || gsi < g_gsi_base) return;
     uint32_t idx = gsi - g_gsi_base;
     if (idx >= g_nredir) return;
-    uint32_t lo = (uint32_t)vector | (masked ? (1u << 16) : 0);   /* [7:0]=vec, [16]=mask */
+    uint32_t lo = (uint32_t)vector
+                | (active_low ? (1u << 13) : 0)
+                | (level      ? (1u << 15) : 0)
+                | (masked     ? (1u << 16) : 0);
     uint32_t hi = (uint32_t)apic_id << 24;                        /* [63:56]=dest APIC id */
+    /* Mask the entry before rewriting it, so a line that is already live can't
+     * deliver against a half-updated (vector-changed, destination-stale) entry. */
+    io_write(0x10 + 2 * idx, io_read(0x10 + 2 * idx) | (1u << 16));
     io_write(0x10 + 2 * idx + 1, hi);                             /* high first, then low arms it */
     io_write(0x10 + 2 * idx, lo);
+}
+
+/* Back-compatible edge-triggered / active-high routing (the ISA default). */
+void ioapic_route(uint8_t gsi, uint8_t vector, uint8_t apic_id, int masked) {
+    ioapic_route_ex(gsi, vector, apic_id, masked, 0, 0);
 }
 void ioapic_mask(uint8_t gsi) {
     if (!g_io || gsi < g_gsi_base) return;
@@ -87,5 +114,5 @@ void ioapic_init(void) {
 
     kprintf("[ %s ] I/O APIC at 0x%x: GSI base %u, %u redirection entries (ver 0x%x)%s\n\n",
             ok ? "ok" : "!!", (unsigned)base, (unsigned)gsi, (unsigned)g_nredir,
-            (unsigned)(ver & 0xFF), ok ? " — routing primitives ready (entries masked, PIC still live)" : " READBACK FAILED");
+            (unsigned)(ver & 0xFF), ok ? " — routing ready (entries masked until each IRQ is routed over)" : " READBACK FAILED");
 }

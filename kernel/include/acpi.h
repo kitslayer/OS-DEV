@@ -11,6 +11,18 @@ void acpi_init(void);      /* scan the ACPI tables at boot (logs what it found) 
 int  acpi_madt_lapics(uint8_t *ids, int max);  /* APIC IDs of all CPUs from the MADT, for SMP (M1197) */
 int  acpi_madt_ioapic(uint32_t *addr, uint32_t *gsi_base);  /* first I/O APIC's MMIO base + GSI base; 1/0 (M1856) */
 uint32_t acpi_madt_gsi_for_irq(uint8_t irq);   /* ISA IRQ -> GSI (MADT override), identity if none (M1856) */
+
+/* Full MADT Interrupt Source Override lookup for an ISA IRQ (M1890): fills *gsi
+ * and the *flags word (bits 1:0 polarity — 00 bus default / 01 high / 11 low;
+ * bits 3:2 trigger — 00 bus default / 01 edge / 11 level) and returns 1, or
+ * returns 0 if no override names `irq`. Either out-pointer may be NULL. The
+ * flags matter: an I/O APIC redirection entry programmed without them is always
+ * edge/active-high, which is wrong for any line the firmware remapped. */
+int acpi_madt_irq_override(uint8_t irq, uint32_t *gsi, uint16_t *flags);
+
+/* MADT ISO flag fields. */
+#define ACPI_MADT_POLARITY(f)  ((f) & 0x3)         /* 0 = bus default, 1 = high, 3 = low  */
+#define ACPI_MADT_TRIGGER(f)   (((f) >> 2) & 0x3)  /* 0 = bus default, 1 = edge, 3 = level */
 uint64_t acpi_hpet_base(void);  /* HPET register-block MMIO base from the HPET table, or 0 (M1273) */
 /* AML namespace parser (M1284): decode the DSDT's AML into a list of named objects. */
 enum { AML_SCOPE = 1, AML_DEVICE, AML_METHOD, AML_NAME, AML_REGION,

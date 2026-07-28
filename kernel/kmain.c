@@ -476,9 +476,21 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     hpet_init();                   /* high-resolution clocksource via the ACPI HPET table (M1273) */
     smp_init();                    /* enable the LAPIC + bring the other cores online (M1197) */
     ioapic_init();                 /* M1856: locate + map the I/O APIC (foundation for interrupt-driven I/O; entries masked, PIC still live) */
-    if (ioapic_present()) {        /* M1857: move the keyboard's IRQ off the 8259 PIC onto the I/O APIC — proves live delivery (LAPIC-EOI path) end to end */
-        irq_route_ioapic(1);
-        kprintf("[ ok ] keyboard IRQ routed via the I/O APIC (off the 8259 PIC).\n\n");
+    /* Move the live ISA IRQs off the 8259 PIC onto the I/O APIC. M1857 did this
+     * for the keyboard alone, to prove the LAPIC-EOI delivery path end to end;
+     * M1890 finishes the job for every ISA line whose handler is already
+     * installed by this point — the PIT tick (IRQ0, the scheduler's heartbeat)
+     * and the serial RX line (IRQ4) — now that the redirection entries honour
+     * the MADT override's polarity/trigger flags instead of assuming
+     * edge/active-high. The mouse (IRQ12) and the NIC's PCI line route
+     * themselves at their own init, which runs later. Handlers are unchanged;
+     * only the delivery path and the EOI target move. */
+    if (ioapic_present()) {
+        irq_route_ioapic(0);       /* PIT tick — usually MADT-overridden to GSI 2 */
+        irq_route_ioapic(1);       /* keyboard (M1857) */
+        irq_route_ioapic(4);       /* serial RX */
+        kprintf("[ ok ] ISA IRQs 0 (PIT), 1 (keyboard), 4 (serial) routed via the I/O APIC "
+                "(off the 8259 PIC; GSI + polarity/trigger from the ACPI MADT).\n\n");
     }
 
     /* Arm the hardware watchdog + panic-auto-reboot now (interrupts/timer are up,
