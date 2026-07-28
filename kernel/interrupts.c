@@ -81,6 +81,35 @@ void irq_install_handler(uint8_t irq, irq_handler_fn fn) {
  * via the LOCAL APIC, not the PIC. */
 static uint32_t g_ioapic_routed;
 
+/* Perform the PIC -> I/O APIC handover for one IRQ ATOMICALLY (M1895).
+ *
+ * This ordering is load-bearing, and getting it wrong is a permanent hang rather
+ * than a glitch. kmain enables interrupts long before it routes anything, so the
+ * handover runs with IRQs live. The original code unmasked the I/O APIC entry
+ * FIRST and set g_ioapic_routed two statements later — so an interrupt delivered
+ * by the I/O APIC inside that window found the bit still clear, took the
+ * `else pic_send_eoi(irq)` path in isr_dispatch, and never sent the LAPIC EOI.
+ * The LAPIC's in-service bit for that vector then stays set forever and the
+ * vector is NEVER delivered again. On the keyboard (M1857) that would lose a
+ * key; on the PIT (M1890) it kills the scheduler's heartbeat outright — the boot
+ * wedges at the preemption demo. It was hit for real, intermittently, by
+ * `make check`, and reproduces deterministically if the window is widened.
+ *
+ * So: mask interrupts for the whole handover, and publish g_ioapic_routed BEFORE
+ * the I/O APIC entry is unmasked, so the very first interrupt from the new source
+ * is already acknowledged to the right controller. */
+static void irq_handover_to_ioapic(uint8_t irq, uint32_t gsi, int active_low, int level) {
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) :: "memory");
+
+    g_ioapic_routed |= (1u << irq);      /* dispatch now EOIs this vector to the LAPIC */
+    pic_mask(irq);                        /* the 8259 stops delivering the line       */
+    ioapic_route_ex((uint8_t)gsi, (uint8_t)(32 + irq), 0 /* BSP APIC id */,
+                    0 /* unmasked */, active_low, level);
+
+    __asm__ volatile("push %0; popfq" : : "r"(fl) : "memory", "cc");
+}
+
 /* Route ISA `irq`'s delivery through the I/O APIC (to vector 32+irq on the BSP's
  * local APIC), masking it on the PIC. No-op if no I/O APIC. The handler is
  * unchanged; only the delivery path + EOI target change.
@@ -102,10 +131,7 @@ void irq_route_ioapic(uint8_t irq) {
     int active_low = (ACPI_MADT_POLARITY(flags) == 3);
     int level      = (ACPI_MADT_TRIGGER(flags)  == 3);
 
-    ioapic_route_ex((uint8_t)gsi, (uint8_t)(32 + irq), 0 /* BSP APIC id (0 on QEMU) */,
-                    0 /* unmasked */, active_low, level);
-    pic_mask(irq);                                   /* the PIC no longer delivers this line */
-    g_ioapic_routed |= (1u << irq);
+    irq_handover_to_ioapic(irq, gsi, active_low, level);
 }
 
 /* Route a PCI device's interrupt line through the I/O APIC (M1890).
@@ -127,10 +153,7 @@ void irq_route_ioapic_pci(uint8_t irq) {
     int active_low = (ACPI_MADT_POLARITY(flags) != 1);
     int level      = (ACPI_MADT_TRIGGER(flags)  != 1);
 
-    ioapic_route_ex((uint8_t)gsi, (uint8_t)(32 + irq), 0, 0 /* unmasked */,
-                    active_low, level);
-    pic_mask(irq);
-    g_ioapic_routed |= (1u << irq);
+    irq_handover_to_ioapic(irq, gsi, active_low, level);
 }
 
 /* 1 if `irq`'s delivery has been moved onto the I/O APIC. */
