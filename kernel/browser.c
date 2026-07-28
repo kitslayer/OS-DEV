@@ -997,7 +997,10 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->curprews = b->sc[sp].saveprews;
                 if (b->sc[sp].hidden && b->n_hidden > 0) b->n_hidden--;   /* leaving a display:none element */
                 if (b->sc[sp].setstyle >= 0 && *style == b->sc[sp].setstyle) *style = b->sc[sp].savestyle;
-                if (b->sc[sp].hasborder && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };   /* close the border box opened by this frame */
+                /* CLOSE carries padding-bottom: BORDER_CLOSE is emitted BEFORE
+                 * MAXW_CLOSE, so `cy` has not yet had the bottom band added and the
+                 * stroke would otherwise stop short of its own box (M1901). */
+                if (b->sc[sp].hasborder && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ (uint32_t)(b->sc[sp].padb & 0xFF), 0, NO_LINK, STY_NORMAL, TK_BORDER_CLOSE };
                 if (b->sc[sp].hasflex && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_FLEX_CLOSE };   /* end the flex row */
                 /* CLOSE carries padding-bottom in `off` so the renderer can add the
                  * bottom band; BG_CLOSE is emitted after it, so the background's
@@ -1026,6 +1029,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             bmauto = parse_style_auto_margins(st, stl);                        /* margin-left/right:auto bits (M1896) */
             parse_style_padding_lr(st, stl, &bpadl, &bpadr);                  /* h-padding -> real box inset (M1897) */
             parse_style_padding_tb(st, stl, &bpadt, &bpadb);                  /* v-padding -> inside the background (M1900) */
+
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
             if (parse_style_display(st, stl)) hide = 1;                      /* display:none */
@@ -1069,9 +1073,20 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].cls[0] = 0;                            /* record the element's class for descendant-selector matching (M1434) */
                 { const char *cv; int cvl; if (find_attr(attrs, attrlen, "class", &cv, &cvl)) { int w = 0; for (int z = 0; z < cvl && w < 31; z++) b->sc[sp].cls[w++] = cv[z]; b->sc[sp].cls[w] = 0; } }
                 b->sc[sp].depth = 1;
+                /* Does this element get a block box (a solved column)? Computed once
+                 * so the border, the box itself and the background all agree. */
+                int box_owner = (mw > 0 || bwpx > 0 || bmauto || bpadl > 0 || bpadr > 0
+                                 || bpadt > 0 || bpadb > 0);
                 b->sc[sp].hasborder = 0;
                 if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
-                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu), (uint16_t)((bd >> 24) & 0xF), (uint16_t)b->curindent, (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color, len=sides, link=left-indent(pre-padding), style=width */
+                    /* Bit 24 of `off` (above the 24-bit colour) marks that this element
+                     * also owns a block box, so the renderer strokes the BORDER box
+                     * around the padding box instead of the content box. Without it a
+                     * bordered+padded block drew its stroke INSIDE its own background
+                     * (M1901). Same spare-high-byte trick as the background token. */
+                    b->toks[b->ntok++] = (tok_t){ (uint32_t)(bd & 0xFFFFFFu) | (box_owner ? (1u << 24) : 0u),
+                                                  (uint16_t)((bd >> 24) & 0xF), (uint16_t)b->curindent,
+                                                  (uint8_t)((bd >> 28) & 0xF), TK_BORDER_OPEN };   /* off=color(+bit24), len=sides, link=left-indent, style=width */
                     b->sc[sp].hasborder = 1;
                     if (((bd >> 24) & 0xF) == 15) b->curindent += BORDER_PAD;   /* full box: inset its text (left); the marker already captured the box's left edge */
                 }
@@ -1086,9 +1101,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                  * the actual geometry per CSS 2.1 §10.3.3 via box_solve_column
                  * (M1896); here we only carry the SPECIFIED values, because the
                  * containing-block width is a render-time quantity. */
-                if ((mw > 0 || bwpx > 0 || bmauto || bpadl > 0 || bpadr > 0
-                        || bpadt > 0 || bpadb > 0)
-                        && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {
+                if (box_owner && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {
                     uint16_t pk = (uint16_t)((bpadl & 0xFF) | ((bpadr & 0xFF) << 8));
                     uint32_t ow = ((uint32_t)mw & 0xFFFFu)
                                 | ((uint32_t)(bpadt & 0xFF) << 16)
@@ -4371,6 +4384,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     } else {
     int bstk_y[16]; uint32_t bstk_c[16]; int bstk_w[16]; int bstk_s[16]; int bstk_i[16], bsp = 0;   /* CSS border boxes: y_top+sides+left-indent pushed on OPEN, rect stroked on CLOSE */
     int bstk_x[16];   /* cx at TK_BORDER_OPEN (x_start for single-line tight-box detection) */
+    int bstk_ob[16];  /* this border's element owns a block box -> stroke the border box (M1901) */
     int render_rpad = 0;   /* right-edge inset while inside full border boxes, so their text wraps short of the box (M916 horizontal padding) */
     int flex_depth = 0;    /* >0 while inside a display:flex container: child block-breaks become horizontal gaps (M927) */
     int flex_gap = 18;     /* px gap between flex items (from CSS `gap`, M930; 18 default) */
@@ -4388,11 +4402,20 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     int bgsp = 0;   /* block-bg nesting depth: counted so a nested TK_BG_OPEN's forward-scan stops at ITS matching close (M993) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
-        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bstk_x[bsp] = cx; bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right; bstk_x tracks x-start for inline tight-box */
+        if (tk->type == TK_BORDER_OPEN) { if (bsp < 16) { int sd = tk->len ? tk->len : 15; bstk_y[bsp] = cy - 4; bstk_c[bsp] = tk->off & 0xFFFFFFu; bstk_w[bsp] = tk->style ? tk->style : 1; bstk_s[bsp] = sd; bstk_i[bsp] = tk->link; bstk_x[bsp] = cx; bstk_ob[bsp] = (int)((tk->off >> 24) & 1); bsp++; if (sd == 15) render_rpad += BORDER_PAD; } continue; }   /* y_top includes 4px top padding; full box insets the wrap-right; bstk_x tracks x-start for inline tight-box */
         if (tk->type == TK_BORDER_CLOSE) {
             if (bsp > 0) { bsp--; int y0 = bstk_y[bsp], y1 = cy + curlh + 3, w = bstk_w[bsp], sd = bstk_s[bsp]; uint32_t bc = bstk_c[bsp];   /* sd: 1=top 2=right 4=bottom 8=left; +3 bottom padding */
                 if (sd == 15 && render_rpad >= BORDER_PAD) render_rpad -= BORDER_PAD;   /* leaving a full box: undo its wrap-right inset */
                 int xl = cl + bstk_i[bsp];                                          /* left edge follows the block's own indent (blockquote / margin-left) */
+                int xr = cr;                                                        /* right edge (content column by default) */
+                /* If this element owns a block box, its border is the OUTERMOST edge:
+                 * stroke the padding box, not the content box, and extend to the
+                 * bottom padding band (which MAXW_CLOSE has not applied yet). Before
+                 * M1901 a bordered+padded block stroked inside its own background. */
+                if (bstk_ob[bsp] && mxsp > 0) {
+                    xl = pbl; xr = pbr;
+                    y1 += (int)(tk->off & 0xFF);
+                }
                 /* Single-line (inline) element: cy hasn't advanced past the opening line — stroke
                  * a tight box around just the content's horizontal span instead of full-width.
                  * bstk_y[bsp] = cy_at_open - 4, so cy_at_open = bstk_y[bsp] + 4; if cy still
@@ -4416,10 +4439,10 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                     int yy0 = y0 < ct ? ct : y0, yy1 = y1 > cb ? cb : y1;
                     if (yy1 > yy0) {
                         if (sd & 8) fb_fill_rect(xl, yy0, w, yy1 - yy0, bc);            /* left edge (viewport-clipped) */
-                        if (sd & 2) fb_fill_rect(cr - w, yy0, w, yy1 - yy0, bc);        /* right edge */
+                        if (sd & 2) fb_fill_rect(xr - w, yy0, w, yy1 - yy0, bc);        /* right edge */
                     }
-                    if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(xl, y0, cr - xl, w, bc);                /* top edge */
-                    if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(xl, y1 - w, cr - xl, w, bc);     /* bottom edge */
+                    if ((sd & 1) && y0 >= ct && y0 <= cb) fb_fill_rect(xl, y0, xr - xl, w, bc);                /* top edge */
+                    if ((sd & 4) && y1 - w >= ct && y1 - w <= cb) fb_fill_rect(xl, y1 - w, xr - xl, w, bc);     /* bottom edge */
                 }
             }
             continue;
