@@ -195,6 +195,7 @@ static struct {
     int      storage_sector_ok;    /* 1 once a sector was read over EHCI bulk      */
     uint32_t storage_sector_sum;   /* additive checksum of that sector            */
     uint8_t  storage_first16[16];  /* its first 16 bytes, kept for the self-test   */
+    uint8_t  iface;                /* bInterfaceNumber of the BOT interface        */
     usb_bot_t bot;                 /* shared BOT/SCSI engine + device geometry     */
     int      storage_ready;        /* 1 once READ CAPACITY succeeded (mountable)   */
 } eh;
@@ -455,13 +456,40 @@ static int ehci_bot_xfer(void *ctx, int in, void *buf, int len) {
 }
 static void ehci_bot_delay(int ms) { timer_wait(ms); }
 
+/* BOT reset recovery over EHCI (M1899) — the same USB Mass Storage §5.3.4
+ * sequence usb_storage.c performs for UHCI: Bulk-Only Mass Storage Reset, then
+ * Clear Feature ENDPOINT_HALT on both bulk endpoints (which is what resets the
+ * DEVICE's data toggles), then resynchronise ours.
+ *
+ * This matters more on EHCI than anywhere else: EHCI is the transport that keeps
+ * per-endpoint data toggles in software AND issues one qTD per transfer, so it is
+ * the one where a desync silently mis-sequences every later transfer — exactly
+ * the class of bug M1891 fixed in the non-error path. Best-effort; the caller
+ * treats a still-failing command as failed. */
+static int ehci_bot_reset_recovery(void *ctx) {
+    (void)ctx;
+    int ok = 0;
+    uint8_t reset[8] = { 0x21, 0xFF, 0, 0, eh.iface, 0, 0, 0 };
+    if (control_xfer(eh.dev_addr, eh.ep0_maxp, reset, 0, 0, 0) != 0) ok = -1;
+
+    uint8_t chi[8] = { 0x02, 0x01, 0x00, 0x00, (uint8_t)(eh.bulk_in | 0x80), 0, 0, 0 };
+    if (control_xfer(eh.dev_addr, eh.ep0_maxp, chi, 0, 0, 0) != 0) ok = -1;
+
+    uint8_t cho[8] = { 0x02, 0x01, 0x00, 0x00, (uint8_t)(eh.bulk_out & 0x7F), 0, 0, 0 };
+    if (control_xfer(eh.dev_addr, eh.ep0_maxp, cho, 0, 0, 0) != 0) ok = -1;
+
+    eh.tog_in = eh.tog_out = 0;      /* match a freshly-unhalted endpoint */
+    return ok;
+}
+
 /* Bring the mass-storage device behind EHCI up as a usable disk: bind the shared
  * BOT engine to the EHCI transport, poke TEST UNIT READY, then READ CAPACITY so
  * the block layer knows its geometry. Also reads sector 0 to fill the self-test's
  * checksum. Returns 0 if the device is ready for I/O. */
 static int storage_bring_up(void) {
-    eh.bot.xfer     = ehci_bot_xfer;
-    eh.bot.delay_ms = ehci_bot_delay;
+    eh.bot.xfer           = ehci_bot_xfer;
+    eh.bot.delay_ms       = ehci_bot_delay;
+    eh.bot.reset_recovery = ehci_bot_reset_recovery;
     eh.bot.ctx      = 0;
     eh.bot.max_data = PAGE_SIZE;            /* one bulk data phase = the bounce frame */
     eh.bot.lun      = 0;
@@ -618,6 +646,7 @@ static int enumerate_device(void) {
         if (i + blen > total) break;
         if (btype == 0x04 && blen >= 9) {              /* INTERFACE */
             in_target = (cfg[i + 5] == 0x08 && cfg[i + 6] == 0x06 && cfg[i + 7] == 0x50);
+            if (in_target) eh.iface = cfg[i + 2];      /* bInterfaceNumber, for BOT reset (M1899) */
         } else if (btype == 0x05 && blen >= 7 && in_target) {  /* ENDPOINT in target */
             uint8_t eaddr = cfg[i + 2], eattr = cfg[i + 3];
             uint16_t emax = (uint16_t)(cfg[i + 4] | (cfg[i + 5] << 8));
