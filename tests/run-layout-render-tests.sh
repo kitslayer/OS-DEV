@@ -24,17 +24,20 @@ OUT=$(mktemp -d /tmp/osdev_layrender.XXXXXX)
 cleanup() { rc=$?; rm -rf "$OUT"; exit "$rc"; }
 trap cleanup EXIT
 
-# Capture, then check. Retried once: under host load the desktop can still be
-# settling when the keys are injected, so the address bar never receives the URL
-# and the dump shows no fixture at all. That is a harness-timing miss, not a
-# geometry regression -- and it is distinguishable, because a miss loses EVERY
-# colour while a real regression keeps the boxes and moves them. Only a
-# no-colours-found result is retried.
-capture() {
-    rm -f "$OUT/laychk.ppm"
-    echo "booting the desktop headlessly and opening LAYCHK.HTM (attempt $1)..."
-    # Apps menu (F9) -> Enter opens the Browser -> '/' focuses the address bar.
-    python3 tools/osdrive.py --out "$OUT" --boot-timeout 60 -c '
+# Take THREE dumps in one boot, spaced a few seconds apart, and check the first
+# one that actually contains the fixture.
+#
+# Why: under host load the desktop can still be settling when the keys are
+# injected, so the address bar never receives the URL and the dump shows nothing
+# at all. That is a harness-timing miss, not a geometry regression, and it is
+# cleanly distinguishable — a miss loses EVERY colour, whereas a real regression
+# keeps the boxes and moves them. An earlier version rebooted the whole VM to
+# retry, which cost ~40s and printed an alarming FAIL into the log on the way;
+# extra dumps inside the same boot fix the same problem for a few seconds,
+# because time-to-settle is exactly what was missing.
+echo "booting the desktop headlessly and opening LAYCHK.HTM..."
+# Apps menu (F9) -> Enter opens the Browser -> '/' focuses the address bar.
+python3 tools/osdrive.py --out "$OUT" --boot-timeout 60 -c '
 sleep 4;
 key f9;
 sleep 1.5;
@@ -45,35 +48,36 @@ sleep 1.5;
 type file:LAYCHK.HTM;
 sleep 1.5;
 key ret;
-sleep 6;
-shot laychk.ppm' >/dev/null 2>&1 || true
-    [ -f "$OUT/laychk.ppm" ]
-}
+sleep 5;
+shot laychk1.ppm;
+sleep 4;
+shot laychk2.ppm;
+sleep 4;
+shot laychk3.ppm' >/dev/null 2>&1 || true
 
-attempt=1
-while : ; do
-    if capture "$attempt"; then
-        echo "checking solved box-model geometry..."
-        out=$(python3 tests/layoutrender/check_geometry.py "$OUT/laychk.ppm" 2>&1) && rc=0 || rc=$?
-        printf '%s\n' "$out"
-        # A total miss (no colours at all) is a capture problem; retry once.
-        if [ "$rc" != 0 ] && [ "$attempt" -lt 2 ] && printf '%s' "$out" | grep -q "did not render at all"; then
-            echo "  (nothing rendered — retrying the capture once)"
-            attempt=$((attempt+1)); continue
-        fi
-    else
-        rc=1
-        if [ "$attempt" -lt 2 ]; then
-            echo "  (no dump produced — retrying the capture once)"
-            attempt=$((attempt+1)); continue
-        fi
-        echo "FAIL: no framebuffer dump produced (boot or navigation failed)"
+rc=1
+found=""
+for f in laychk1 laychk2 laychk3; do
+    [ -f "$OUT/$f.ppm" ] || continue
+    out=$(python3 tests/layoutrender/check_geometry.py "$OUT/$f.ppm" 2>&1) && st=0 || st=$?
+    # Nothing rendered => this dump was taken too early; try a later one.
+    if [ "$st" != 0 ] && printf '%s' "$out" | grep -q "did not render at all"; then
+        continue
     fi
+    found=$f; rc=$st
+    echo "checking solved box-model geometry ($f)..."
+    printf '%s\n' "$out"
     break
 done
 
+if [ -z "$found" ]; then
+    echo "FAIL: the fixture never rendered in any of the three dumps"
+    echo "      (boot or navigation failed — not a geometry regression)"
+    exit 1
+fi
+
 if [ "$rc" = 0 ]; then
-    echo "PASS: browser box-model geometry (§10.3.3 used widths incl. padding, auto-margin centring + left/right alignment, nested background inset, border encloses the padding box)"
+    echo "PASS: browser box-model geometry (§10.3.3 used widths incl. padding, auto-margin centring + left/right alignment, box-sizing, margin-bottom, nested background inset, border encloses the padding box)"
 else
     echo "FAIL: browser box-model geometry regressed"; exit 1
 fi

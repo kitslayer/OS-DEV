@@ -161,7 +161,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; uint8_t padb; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
+    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; uint8_t padb; uint8_t margb; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint8_t css_ws[CSS_MAX]; uint16_t css_spec[CSS_MAX]; uint16_t css_imp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
@@ -677,6 +677,38 @@ static int parse_style_vspace(const char *s, int n) {
     return m > 200 ? 200 : m;
 }
 
+/* margin-bottom in px (M1903). Until now only margin-top was ever read, so a
+ * block's bottom margin was silently dropped — asymmetric with everything else in
+ * the box model once padding-bottom started working (M1900). Applied as trailing
+ * block spacing OUTSIDE the background (margins are outside the box; padding is
+ * inside it), by handing it to emit_break's pending-margin slot on the close tag,
+ * where it then COLLAPSES with the next block's margin-top through the existing
+ * max() rule. */
+static int parse_style_margin_bottom(const char *s, int n) {
+    int vs, ve, m = 0;
+    if (style_prop(s, n, "margin-bottom", 13, &vs, &ve)) m = parse_px_val(s + vs, ve - vs);
+    else if (style_prop(s, n, "margin", 6, &vs, &ve))    m = parse_px_val(s + vs, ve - vs);  /* shorthand: 1st value applies to top+bottom */
+    return m > 200 ? 200 : m;
+}
+
+/* box-sizing: border-box? (M1903)
+ *
+ * Near-universal in real CSS, and it matters now that padding participates in the
+ * width constraint (M1897): with border-box the specified `width` INCLUDES the
+ * padding, so the content width is width - padding-left - padding-right.
+ *
+ * Note on borders: in this renderer a block's border is stroked ON the padding
+ * box's edge (M1901) rather than occupying its own ring of layout space, so
+ * border width is not subtracted here. That keeps border-box self-consistent with
+ * how the border is actually painted. */
+static int parse_style_border_box(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "box-sizing", 10, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs, i = 0;
+    while (i < vl && v[i] == ' ') i++;
+    return (vl - i >= 6 && (v[i]|32) == 'b' && (v[i+1]|32) == 'o' && (v[i+2]|32) == 'r');
+}
+
 /* Vertical padding in px, capped at 255 so each side fits one byte of the block
  * token's payload. (M1900) */
 static void parse_style_padding_tb(const char *s, int n, int *outt, int *outb) {
@@ -862,6 +894,12 @@ static void box_solve_column(const tok_t *tk, int *cl, int *cr, int *pbl, int *p
     lb.height = LAY_AUTO;
     lb.first_child = lb.next_sibling = -1;
 
+    /* box-sizing:border-box (style bit 2): the specified width INCLUDES the
+     * padding, so peel the padding off to get the content width (M1903). */
+    if (spec_w > 0 && (tk->style & 4)) {
+        spec_w -= padl + padr;
+        if (spec_w < 0) spec_w = 0;
+    }
     lb.width = spec_w > 0 ? spec_w : LAY_AUTO;
     if (maxw > 0) {                      /* §10.4: max-width clamps the used width */
         int base = (lb.width == LAY_AUTO) ? avail : lb.width;
@@ -1007,10 +1045,16 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                  * forward scan naturally includes that band. (M1900) */
                 if (b->sc[sp].hasmaxw && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ (uint32_t)(b->sc[sp].padb & 0xFF), 0, NO_LINK, STY_NORMAL, TK_MAXW_CLOSE };
                 if (b->sc[sp].hasbg && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BG_CLOSE };   /* end the block-bg fill region */
+                /* margin-bottom is OUTSIDE every box decoration, so it is applied
+                 * after all the CLOSE markers, as pending spacing for the next
+                 * break — where emit_break's max() rule collapses it against the
+                 * following block's margin-top, which is what §8.3.1 asks for. */
+                if (b->sc[sp].margb > b->pending_vmargin)
+                    b->pending_vmargin = b->sc[sp].margb;
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0, bpadl = 0, bpadr = 0, bpadt = 0, bpadb = 0;   /* width (M1896) / padding (M1897, M1900) */
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0, bpadl = 0, bpadr = 0, bpadt = 0, bpadb = 0, bmargb = 0, bbordbox = 0;   /* width (M1896) / padding (M1897, M1900) / margin-bottom + box-sizing (M1903) */
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css, &prews);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -1029,6 +1073,8 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             bmauto = parse_style_auto_margins(st, stl);                        /* margin-left/right:auto bits (M1896) */
             parse_style_padding_lr(st, stl, &bpadl, &bpadr);                  /* h-padding -> real box inset (M1897) */
             parse_style_padding_tb(st, stl, &bpadt, &bpadb);                  /* v-padding -> inside the background (M1900) */
+            bmargb   = parse_style_margin_bottom(st, stl);                    /* trailing margin, outside the bg (M1903) */
+            bbordbox = parse_style_border_box(st, stl);                       /* box-sizing:border-box (M1903) */
 
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
@@ -1076,7 +1122,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 /* Does this element get a block box (a solved column)? Computed once
                  * so the border, the box itself and the background all agree. */
                 int box_owner = (mw > 0 || bwpx > 0 || bmauto || bpadl > 0 || bpadr > 0
-                                 || bpadt > 0 || bpadb > 0);
+                                 || bpadt > 0 || bpadb > 0 || bbordbox);
                 b->sc[sp].hasborder = 0;
                 if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
                     /* Bit 24 of `off` (above the 24-bit colour) marks that this element
@@ -1096,6 +1142,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                     b->sc[sp].hasflex = 1;
                 }
                 b->sc[sp].hasmaxw = 0; b->sc[sp].padb = 0;
+                b->sc[sp].margb = (uint8_t)(bmargb > 255 ? 255 : bmargb);   /* M1903 */
                 /* A block box that constrains its content column: max-width, an
                  * explicit width, or auto horizontal margins. The renderer solves
                  * the actual geometry per CSS 2.1 §10.3.3 via box_solve_column
@@ -1107,7 +1154,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                                 | ((uint32_t)(bpadt & 0xFF) << 16)
                                 | ((uint32_t)(bpadb & 0xFF) << 24);
                     b->toks[b->ntok++] = (tok_t){ ow, (uint16_t)bwpx, pk,
-                                                  (uint8_t)bmauto, TK_MAXW_OPEN };
+                                                  (uint8_t)(bmauto | (bbordbox ? 4 : 0)), TK_MAXW_OPEN };
                     b->sc[sp].hasmaxw = 1;
                     b->sc[sp].padb    = (uint8_t)(bpadb & 0xFF);
                 }

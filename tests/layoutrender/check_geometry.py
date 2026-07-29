@@ -32,6 +32,9 @@ COL = {
     "padbox":    (0xfe, 0x04, 0x04),   # width:400px; padding:20px; margin:0 auto
     "bordered":  (0xfe, 0x05, 0x05),   # border:3px + padding:30px
     "border":    (0x01, 0xfe, 0x01),   # that block's border stroke
+    "bordbox":   (0xfe, 0x08, 0x08),   # width:400px; padding:20px; box-sizing:border-box
+    "mb":        (0xfe, 0x09, 0x09),   # width:200px; margin-bottom:60px
+    "after_mb":  (0xfe, 0x0a, 0x0a),   # the block that follows it
 }
 
 
@@ -133,6 +136,26 @@ def main():
         gr = col_r - boxes[name][2]
         ck(abs(gl - gr) <= TOL,
            "%s: margin:0 auto centres it (gaps %d vs %d)" % (name, gl, gr))
+
+    # --- box-sizing:border-box (M1903) --------------------------------------
+    # With border-box the specified width INCLUDES the padding, so the box is
+    # exactly 400px wide -- not 440px as the same declaration gives under the
+    # default content-box (asserted above as `padbox`).
+    ck(abs(width("bordbox") - 400) <= TOL,
+       "border-box: width:400px + padding:20px stays a 400px box (got %d)" % width("bordbox"))
+    ck(width("padbox") - width("bordbox") >= 2 * 20 - TOL,
+       "border-box differs from content-box by the padding (%d vs %d)"
+       % (width("padbox"), width("bordbox")))
+
+    # --- margin-bottom (M1903) ----------------------------------------------
+    # It was previously dropped entirely. It must push the FOLLOWING block down,
+    # and it lives outside the background, so it must NOT enlarge its own box.
+    gap = boxes["after_mb"][1] - boxes["mb"][3] - 1
+    ck(gap >= 60 - 8,
+       "margin-bottom:60px separates it from the next block (gap %d)" % gap)
+    ck((boxes["mb"][3] - boxes["mb"][1] + 1) < 60,
+       "margin-bottom stays OUTSIDE its own background (box height %d)"
+       % (boxes["mb"][3] - boxes["mb"][1] + 1))
 
     # --- a nested background stays inside its padded parent ------------------
     il, it, ir, ib = boxes["wide_in"]
