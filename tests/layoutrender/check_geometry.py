@@ -43,6 +43,12 @@ COL = {
     "after_mb":  (0xfe, 0x0a, 0x0a),   # the block that follows it
     "h80":       (0xfe, 0x0b, 0x0b),   # width:200px; height:80px
     "h80bb":     (0xfe, 0x0c, 0x0c),   # same + padding:15px; box-sizing:border-box
+    "minh":      (0xfe, 0x0d, 0x0d),   # width:200px; min-height:70px
+    "minh_lose": (0xfe, 0x0e, 0x0e),   # min-height:20px; height:90px -> height wins
+    # A trailing sentinel so the LAST interesting block still has a successor to
+    # overlap. Without it a main-loop under-advance on the final block is invisible
+    # (a mutation exploited exactly that and survived).
+    "sentinel":  (0xfe, 0x0f, 0x0f),
 }
 
 
@@ -181,6 +187,29 @@ def main():
     # border-box: the declared 80px INCLUDES the 2x15px padding, so still 80 total.
     ck(abs(height("h80bb") - 80) <= 4,
        "height:80px + padding:15px + border-box stays 80px tall (got %d)" % height("h80bb"))
+
+    # --- min-height (M1905) --------------------------------------------------
+    # One line is ~18px, so a 70px box proves min-height raised the used height.
+    ck(abs(height("minh") - 70) <= 4,
+       "min-height:70px raises a short block to 70px (got %d)" % height("minh"))
+    # §10.7 precedence: min-height only ever RAISES. With height:90px already above
+    # the 20px minimum, height wins and the box stays 90px.
+    ck(abs(height("minh_lose") - 90) <= 4,
+       "min-height:20px does not shrink height:90px (got %d)" % height("minh_lose"))
+
+    # --- blocks must not overlap vertically (M1905) --------------------------
+    # This closes a real coverage gap. Every height assertion above measures a
+    # BACKGROUND, whose extent comes from the renderer's forward scan — so a bug in
+    # the MAIN loop's cursor advance is invisible to them (found by a mutation that
+    # broke only the main loop and still passed everything). The main loop is what
+    # positions FOLLOWING content, so consecutive blocks overlapping is exactly its
+    # failure signature. Page 2's blocks are in source order, so their boxes must be
+    # strictly stacked.
+    seq = ["bordbox", "mb", "after_mb", "h80", "h80bb", "minh", "minh_lose", "sentinel"]
+    for prev, nxt in zip(seq, seq[1:]):
+        ck(boxes[nxt][1] >= boxes[prev][3],
+           "%s starts at or below %s's bottom, no overlap (%d vs %d)"
+           % (nxt, prev, boxes[nxt][1], boxes[prev][3]))
 
     # --- a nested background stays inside its padded parent ------------------
     il, it, ir, ib = boxes["wide_in"]
