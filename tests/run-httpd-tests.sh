@@ -30,7 +30,7 @@ for t in "$QEMU" socat curl; do
 done
 
 echo "booting kernel headless with a host->guest :$HPORT -> :80 forward..."
-timeout -s KILL 70 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
+timeout -s KILL 360 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0,hostfwd=tcp::$HPORT-:80 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \
@@ -68,8 +68,24 @@ sleep 2                           # let the app spawn + reach net_tcp_serve (lis
 # to yield instead of pure-spin and its timeout budget was tightened (see the
 # osdev-ata-pio-busywait-flakiness memory). Retrying the whole sequence a
 # couple of times absorbs that without weakening any assertion below.
+# Bail out with an ACCURATE message if the VM is gone. The retry budget below is
+# (8+6+4) attempts x ~5s x 3 outer passes = up to ~270s, and the QEMU hard-kill
+# used to be 70s — so on a slow run the VM was killed with most of the retries
+# still queued, every remaining curl failed against nothing, and the test blamed
+# "host curl did not receive the expected responses". That points at the HTTP
+# server when the real cause was the harness shooting its own VM. The cap is now
+# larger than the worst-case budget (it costs nothing normally: boot is ~1.5s and
+# the first attempt almost always succeeds), and this guard makes the remaining
+# case self-diagnosing instead of misleading.
+vm_dead() { ! kill -0 "$QPID" 2>/dev/null; }
+
 ok=0
 for outer in 1 2 3; do
+    if vm_dead; then
+        echo "FAIL: QEMU exited before the requests completed (harness/boot problem, not the httpd path)"
+        tail -12 "$SLOG" 2>/dev/null | sed 's/^/      /'
+        exit 1
+    fi
     out=""
     for try in 1 2 3 4 5 6 7 8; do
         out=$(curl -s --max-time 4 "http://127.0.0.1:$HPORT/" 2>/dev/null || true)

@@ -34,7 +34,7 @@ for t in "$QEMU" python3; do
 done
 
 echo "booting kernel headless with -append netcon and a host->guest :$HPORT -> :2323 forward..."
-timeout -s KILL 90 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
+timeout -s KILL 240 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
     -append netcon \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0,hostfwd=tcp::$HPORT-:2323 -device e1000,netdev=net0 \
@@ -90,8 +90,21 @@ sys.stdout.buffer.write(out)
 PY
 }
 
+# Same fix as run-httpd-tests.sh: one run_client pass can take ~30s (12 commands
+# x 0.5s pacing + a 2s recv timeout each), so four passes budget ~120s — but the
+# QEMU hard-kill was 90s. On a slow run the VM died mid-retry and the failure was
+# reported as "netcon did not return the expected responses", blaming the TCP
+# stack rather than the harness. Cap now exceeds the worst-case budget, and the
+# guard below reports a dead VM as exactly that.
+vm_dead() { ! kill -0 "$QPID" 2>/dev/null; }
+
 ok=0
 for outer in 1 2 3 4; do
+    if vm_dead; then
+        echo "FAIL: QEMU exited before the netcon session completed (harness/boot problem, not the TCP stack)"
+        tail -12 "$SLOG" 2>/dev/null | sed 's/^/      /'
+        exit 1
+    fi
     out=$(run_client 2>/dev/null || true)
     if printf '%s' "$out" | grep -q "network debug console" \
        && printf '%s' "$out" | grep -q "NETCON_LINK_OK" \
