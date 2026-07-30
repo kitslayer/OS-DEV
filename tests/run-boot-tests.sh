@@ -36,9 +36,17 @@ echo "booting kernel headless under QEMU (COM1 capture)..."
 # TLS 1.3 handshake is bignum-heavy under TCG) -- so wait a bit longer for
 # EITHER its success or failure marker before capturing the log, or the
 # softrequire checks below would always report "skip" even on an online host.
-# The 25s outer timeout is a generous safety net either way. SIGKILL because
+# The outer timeout is a generous safety net either way. SIGKILL because
 # -no-shutdown ignores SIGTERM.
-timeout -s KILL 25 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
+#
+# M1909: the stage-2 bound and this cap were both raised (20s->45s wait, 25s->60s
+# cap) because the require_either checks below turned "neither outcome printed"
+# from tolerated into FATAL. Measured on this host: terminal lines at 2.0s online
+# and 6.6s fully blackholed (-netdev user,restrict=on), so 45s has wide margin --
+# but a firewall that DROPs rather than refuses is slower than SLIRP, and a
+# false-positive hang report would be worse than the flake it replaces. Costs
+# nothing normally: the poll loop breaks as soon as the marker lands.
+timeout -s KILL 60 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \
@@ -52,8 +60,8 @@ while [ $i -lt 50 ]; do
     sleep 0.5; i=$((i+1))
 done
 i=0
-while [ $i -lt 40 ]; do
-    grep -qE "certverify=ok|HTTPS GET example.com failed" "$LOG" 2>/dev/null && break
+while [ $i -lt 90 ]; do
+    grep -qE "certverify=|HTTPS GET example.com failed" "$LOG" 2>/dev/null && break
     kill -0 "$QPID" 2>/dev/null || break
     sleep 0.5; i=$((i+1))
 done
@@ -79,6 +87,21 @@ softrequire() {
     if grep -qiF "$1" "$LOG"; then echo "  ok: $2"
     else echo "  (skip: $2 -- no marker '$1'; offline host? not fatal)"; fi
 }
+# The soft markers above are tolerated because an offline host legitimately can't
+# reach example.com -- but "offline" and "the fetch never returned at all" were
+# INDISTINGUISHABLE, which is how a suspected mid-handshake stall stayed unprovable
+# for a whole investigation (M1909). The kernel prints a DISTINCT line for the
+# offline case, so the two are separable: net_demo() always reaches one of the two
+# terminal lines per fetch. NEITHER appearing means the call did not return, which
+# is a real hang and must fail. This is the permanent detector for that class.
+require_either() {
+    if grep -qE "$1" "$LOG" 2>/dev/null; then echo "  ok: $3"
+    else
+        echo "  MISSING: $3 -- neither outcome was printed, so the call never returned (a HANG, not an offline host)"
+        echo "           (expected one of: $2)"
+        fail=1
+    fi
+}
 require "full bring-up complete"             "core bring-up (PMM/VMM/IDT)"
 require "preemption works"                   "preemptive scheduler"
 require "each process has its own address"   "per-process address-space isolation"
@@ -88,6 +111,12 @@ require "eBPF JIT OK"                         "eBPF JIT: bytecode compiled to na
 require "Networking works!"                  "e1000 + ARP + ICMP echo (SLIRP gateway)"
 softrequire "200 OK"                         "TCP/HTTP GET to real example.com (needs internet)"
 softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chain validated + certverify (needs internet)"
+require_either "HTTP GET example.com -> |HTTP GET example.com failed" \
+               "'HTTP GET example.com -> N bytes' or 'HTTP GET example.com failed'" \
+               "the plaintext HTTP fetch RETURNED (success or clean failure, not a hang)"
+require_either "certverify=|HTTPS GET example.com failed" \
+               "'certverify=...' or 'HTTPS GET example.com failed'" \
+               "the TLS 1.3 fetch RETURNED (success or clean failure, not a mid-handshake hang)"
 require "mounted FAT32 volume"               "FAT32 mount"
     require "ATA read cache: fill+hit+write-invalidate coherent"  "ATA single-sector read cache (fill/hit/write-invalidate coherence, M1855)"
     require "I/O APIC at 0x"  "I/O APIC detected + mapped + routing primitives verified (M1856)"

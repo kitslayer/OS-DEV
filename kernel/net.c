@@ -1117,10 +1117,30 @@ static int srv_rx(uint8_t *buf, int max, uint16_t port, uint16_t cport,
  * additive -- net_tcp_serve below is unchanged. */
 static struct { uint8_t cmac[6], cip[4]; uint16_t cport, lport; uint32_t our_seq, their_seq; int active; int peer_fin; } g_srvconn;
 
+/* Announce a passive open on the SERIAL console, once per port (M1909).
+ *
+ * A headless test otherwise cannot distinguish "the server app never launched"
+ * from "it launched but could not answer": a server is a ring-3 app and its own
+ * print() goes to its window text grid, which is NOT mirrored to COM1. That
+ * distinction was the unresolved crux of httpdtest's intermittent failure.
+ *
+ * This belongs on the ACCEPT path, not net_tcp_serve: user/httpd.c calls
+ * sys_tcp_accept in a loop, so a marker in net_tcp_serve never fired for it — my
+ * first attempt put it there and made the test fail 6/6 unconditionally, which
+ * looked exactly like evidence that httpd wasn't launching. Once per port, because
+ * accept is called in a loop. */
+static void srv_announce(uint16_t port) {
+    static uint16_t announced[8]; static int nann;
+    for (int i = 0; i < nann; i++) if (announced[i] == port) return;
+    if (nann < 8) announced[nann++] = port;
+    kprintf("[net] tcp listening on port %u (server app is up)\n", (unsigned)port);
+}
+
 int net_tcp_accept(uint16_t port, uint8_t *reqbuf, int reqmax, uint64_t timeout_ticks) {
     uint8_t buf[1600], *tcp; int dlen;
     uint8_t cmac[6], cip[4]; uint16_t cport;
     uint32_t their_seq, our_seq;
+    srv_announce(port);
     g_srvconn.active = 0;
     uint64_t deadline = timer_ticks() + timeout_ticks;
     for (;;) {
@@ -1187,6 +1207,7 @@ int net_tcp_respond(const uint8_t *resp, int resp_len) {
  * httpd/ws_serve accept path byte-for-byte unchanged. */
 int net_tcp_accept_open(uint16_t port, uint64_t timeout_ticks) {
     uint8_t buf[1600], *tcp; int dlen;
+    srv_announce(port);
     uint8_t cmac[6], cip[4]; uint16_t cport;
     uint32_t their_seq, our_seq;
     g_srvconn.active = 0;

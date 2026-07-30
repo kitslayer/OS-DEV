@@ -30,6 +30,10 @@ for t in "$QEMU" socat curl; do
 done
 
 echo "booting kernel headless with a host->guest :$HPORT -> :80 forward..."
+# Deliberately booted in the DEFAULT configuration (boot network self-test on):
+# a suite that tests httpd should test it on the machine users get. An earlier
+# hypothesis blamed the flakiness on that self-test starving ring-3 and this suite
+# booted with `-append nonetdemo`; measurement rejected it (6/6 with the demo on).
 timeout -s KILL 360 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0,hostfwd=tcp::$HPORT-:80 -device e1000,netdev=net0 \
@@ -53,9 +57,40 @@ sleep 1.5
 # Type `httpd<Enter>` into the focused Shell window (topmost at boot); the shell
 # spawns the httpd app, which starts listening on TCP 80.
 sendkey() { printf 'sendkey %s\n' "$1" | socat - UNIX-CONNECT:"$SOCK" >/dev/null 2>&1 || true; sleep 0.25; }
-for c in h t t p d; do sendkey "$c"; done
-sendkey ret
-sleep 2                           # let the app spawn + reach net_tcp_serve (listening)
+listening() { grep -q "tcp listening on port 80" "$SLOG" 2>/dev/null; }
+
+# The launch is a RACE the harness cannot observe from outside: keystrokes are
+# injected at a fixed delay after the desktop marker, and a key delivered before
+# the Shell window is ready to consume it is simply lost -- so httpd never starts
+# and every later curl fails against nothing, which the old code reported as "host
+# curl did not receive the expected responses" (blaming the HTTP path for a lost
+# keypress). Two changes, both M1909:
+#   1. Wait for a real kernel-side listen marker ([net] tcp listening on port 80,
+#      printed from the accept path) instead of a fixed `sleep 2` guess.
+#   2. If it does not appear, RETYPE the command rather than failing. `ret` first,
+#      so any partial line left by a half-delivered attempt is executed (and
+#      errors) instead of being prefixed onto the retry.
+# Only when several launch attempts all fail to reach accept() do we call it a
+# failure -- and then say specifically that the app never launched.
+launched=0
+for attempt in 1 2 3; do
+    [ "$attempt" -gt 1 ] && { echo "  (httpd did not come up; retyping the command, attempt $attempt)"; sendkey ret; }
+    for c in h t t p d; do sendkey "$c"; done
+    sendkey ret
+    i=0
+    while [ $i -lt 30 ]; do          # ~15s per attempt
+        listening && { launched=1; break; }
+        kill -0 "$QPID" 2>/dev/null || break
+        sleep 0.5; i=$((i+1))
+    done
+    [ "$launched" -eq 1 ] && break
+    kill -0 "$QPID" 2>/dev/null || break
+done
+if [ "$launched" -ne 1 ]; then
+    echo "FAIL: httpd never started listening after 3 launch attempts (the app did not launch — NOT a request-path or TCP problem)"
+    echo "----- guest serial (tail) -----"; tail -12 "$SLOG" 2>/dev/null | sed 's/^/      /'
+    exit 1
+fi
 
 # curl the forwarded port from the host, retrying to land inside a listen window
 # (net_tcp_serve loops with ~3s windows; a missed SYN just retries). The three

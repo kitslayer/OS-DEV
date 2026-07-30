@@ -47,6 +47,7 @@
 #include "virtio_net.h"
 #include "virtio_gpu.h"
 #include "svga.h"
+#include "nic.h"      /* nic_init — needed when the boot demo is skipped (M1909) */
 #include "net.h"
 #include "netcon.h"
 #include "watchdog.h"
@@ -241,6 +242,15 @@ static volatile int g_journal_test;           /* -append journalguest: prove the
 static volatile int g_fatjournal_test;        /* -append fatjournaltest: prove a live FAT32 file create is crash-atomic (M1866) */
 static volatile int g_netcon;                 /* -append netcon: start the network debug console on TCP 2323 (M1870, real-HW bring-up) */
 static volatile int g_nodisk;                 /* -append nodisk: skip ALL disk-WRITE self-tests + FS mount (M1872) — safe to boot on a machine with real disks; the bring-up image sets this */
+/* -append nonetdemo: skip the boot network self-test (M1909). net_demo() runs as a
+ * BACKGROUND task whose TLS handshake ends in a CPU-bound bignum CertificateVerify
+ * that is far slower than it should be, so it competes with ring-3 work for a
+ * while after the desktop appears. This flag exists as a DIAGNOSTIC LEVER for
+ * separating "kernel network task load" from "app networking" — it is not required
+ * by any suite. It was written for a hypothesis about httpdtest's flakiness that
+ * measurement then REJECTED (httpdtest passes 6/6 with the demo on, once the test
+ * waits for the real listen marker), so don't read a known bug into its existence. */
+static volatile int g_nonetdemo;
 static volatile int g_watchdog;               /* -append watchdog: arm the HW watchdog + panic-auto-reboot so a hang/crash self-heals via PXE (M1881) */
 static volatile int g_wdhang;                 /* -append wdhang: deliberately wedge the CPU to prove the HW watchdog resets a true hang (M1881) */
 
@@ -443,6 +453,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     {
         struct multiboot_info *mbi = (struct multiboot_info *)(uintptr_t)mb_info;
         const char *cl = ((mbi->flags & (1u << 2)) && mbi->cmdline) ? (const char *)(uintptr_t)mbi->cmdline : "";
+        if (cmdline_has(cl, "nonetdemo"))  g_nonetdemo = 1;      /* M1909 */
         if (cmdline_has(cl, "gdbstub"))    gdbstub_arm();
         if (cmdline_has(cl, "kstackover")) g_kstack_overflow_test = 1;   /* deliberate KERNEL-stack overflow test (M1498) */
         if (cmdline_has(cl, "ustackover")) g_ustack_overflow_test = 1;   /* deliberate USER-stack overflow test (M1500) */
@@ -619,8 +630,17 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * real depth on top of ECDSA's own call chain in a way a quiet `make
      * check` run doesn't reliably exercise). Bumped with real headroom rather
      * than the smallest number that happens to stop reproducing it. */
-    if (!g_netcon)
+    if (!g_netcon && !g_nonetdemo)
         task_create_stack(net_demo, 0, 0, 512 * 1024);
+    else if (g_nonetdemo) {
+        /* nic_init() lives INSIDE net_demo() (and inside netcon), so skipping the
+         * demo without this leaves the NIC uninitialised and every later network
+         * user dead — the first attempt at this flag turned httpdtest from flaky
+         * into failing 100%. */
+        int nr = nic_init();
+        kprintf("[net] boot network self-test skipped (-append nonetdemo); NIC %s\n\n",
+                nr == 0 ? "initialised" : "absent");
+    }
 
     /* Network debug console (M1870): a kernel task listening on TCP 2323 that
      * serves a remote inspection shell (dmesg/ps/mem/pci/ls/cat/reboot/...). Built
