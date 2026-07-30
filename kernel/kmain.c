@@ -63,6 +63,7 @@
 #include "speaker.h"
 #include "audio.h"
 #include "hda.h"
+#include "ipcselftest.h"   /* boot-time POSIX IPC self-test (M1906) */
 #include "desktop.h"
 #include <stdint.h>
 
@@ -832,6 +833,12 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         dm_selftest();             /* RAID-1 mirror self-test, iff 2 non-boot writable disks (M1157) — writes LBA 64 */
     }
     kprintf("\n");
+
+    /* Exercise the POSIX IPC surface (message queues, named semaphores, shared
+     * memory, ptys, advisory locks, inotify, eventfd) — ~2,700 lines that had no
+     * automated assertions at all until M1906. Non-blocking operations only; see
+     * ipcselftest.c for why. Leaves no objects behind. */
+    ipc_selftest();
 
     kprintf("[main] launching the desktop environment...\n");
     speaker_chime();              /* a little startup arpeggio */
