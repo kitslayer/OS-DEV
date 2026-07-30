@@ -16,7 +16,13 @@ compared against each other) rather than absolute screen coordinates, so they
 survive window placement and desktop chrome changes. The full-width padded block
 establishes the content column that the alignment cases are measured against.
 
-Usage: check_geometry.py <dump.ppm>   ->  exit 0 = pass
+Takes one or more dumps and MERGES them: each colour is taken from the first dump
+that contains it. That serves two purposes — the fixture spans two pages (all the
+cases together overflow the viewport, and a block scrolled off screen is simply
+absent), and a dump grabbed before the desktop settled contributes nothing rather
+than failing the run.
+
+Usage: check_geometry.py <dump.ppm> [more.ppm ...]   ->  exit 0 = pass
 """
 import sys
 
@@ -35,6 +41,8 @@ COL = {
     "bordbox":   (0xfe, 0x08, 0x08),   # width:400px; padding:20px; box-sizing:border-box
     "mb":        (0xfe, 0x09, 0x09),   # width:200px; margin-bottom:60px
     "after_mb":  (0xfe, 0x0a, 0x0a),   # the block that follows it
+    "h80":       (0xfe, 0x0b, 0x0b),   # width:200px; height:80px
+    "h80bb":     (0xfe, 0x0c, 0x0c),   # same + padding:15px; box-sizing:border-box
 }
 
 
@@ -84,16 +92,19 @@ def bbox(px, w, h, rgb):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: check_geometry.py <dump.ppm>")
-    w, h, px = read_ppm(sys.argv[1])
+    if len(sys.argv) < 2:
+        raise SystemExit("usage: check_geometry.py <dump.ppm> [more.ppm ...]")
 
-    boxes, missing = {}, []
-    for name, rgb in COL.items():
-        bb = bbox(px, w, h, rgb)
-        if bb is None:
-            missing.append(name)
-        boxes[name] = bb
+    boxes = {name: None for name in COL}
+    for path in sys.argv[1:]:
+        try:
+            w, h, px = read_ppm(path)
+        except SystemExit:
+            continue                      # unreadable/partial dump: skip it
+        for name, rgb in COL.items():
+            if boxes[name] is None:
+                boxes[name] = bbox(px, w, h, rgb)
+    missing = [n for n, v in boxes.items() if v is None]
     if missing:
         print("FAIL: these cases did not render at all: %s" % ", ".join(sorted(missing)))
         print("      (the page may not have loaded, or a colour changed in LAYCHK.HTM)")
@@ -156,6 +167,20 @@ def main():
     ck((boxes["mb"][3] - boxes["mb"][1] + 1) < 60,
        "margin-bottom stays OUTSIDE its own background (box height %d)"
        % (boxes["mb"][3] - boxes["mb"][1] + 1))
+
+    # --- CSS height on a block (M1904) --------------------------------------
+    def height(n):
+        _, t, _, bt = boxes[n]
+        return bt - t + 1
+    # One line of text is ~18px, so an 80px box proves the height was honoured AND
+    # that the BACKGROUND was stretched to cover it — the background's extent comes
+    # from the forward scan, which is where the first attempt at this silently
+    # skipped the stretch.
+    ck(abs(height("h80") - 80) <= 4,
+       "height:80px sets the block's height (got %d)" % height("h80"))
+    # border-box: the declared 80px INCLUDES the 2x15px padding, so still 80 total.
+    ck(abs(height("h80bb") - 80) <= 4,
+       "height:80px + padding:15px + border-box stays 80px tall (got %d)" % height("h80bb"))
 
     # --- a nested background stays inside its padded parent ------------------
     il, it, ir, ib = boxes["wide_in"]

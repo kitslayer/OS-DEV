@@ -49,32 +49,31 @@ type file:LAYCHK.HTM;
 sleep 1.5;
 key ret;
 sleep 5;
-shot laychk1.ppm;
+shot p1a.ppm;
 sleep 4;
-shot laychk2.ppm;
+shot p1b.ppm;
+key slash;
+sleep 1.5;
+type file:LAYCHK2.HTM;
+sleep 1.5;
+key ret;
+sleep 5;
+shot p2a.ppm;
 sleep 4;
-shot laychk3.ppm' >/dev/null 2>&1 || true
+shot p2b.ppm' >/dev/null 2>&1 || true
 
-rc=1
-found=""
-for f in laychk1 laychk2 laychk3; do
-    [ -f "$OUT/$f.ppm" ] || continue
-    out=$(python3 tests/layoutrender/check_geometry.py "$OUT/$f.ppm" 2>&1) && st=0 || st=$?
-    # Nothing rendered => this dump was taken too early; try a later one.
-    if [ "$st" != 0 ] && printf '%s' "$out" | grep -q "did not render at all"; then
-        continue
-    fi
-    found=$f; rc=$st
-    echo "checking solved box-model geometry ($f)..."
-    printf '%s\n' "$out"
-    break
+dumps=""
+for f in p1a p1b p2a p2b; do
+    [ -f "$OUT/$f.ppm" ] && dumps="$dumps $OUT/$f.ppm"
 done
-
-if [ -z "$found" ]; then
-    echo "FAIL: the fixture never rendered in any of the three dumps"
-    echo "      (boot or navigation failed — not a geometry regression)"
-    exit 1
+if [ -z "$dumps" ]; then
+    echo "FAIL: no framebuffer dump produced (boot or navigation failed)"; exit 1
 fi
+
+echo "checking solved box-model geometry (merged across the captures)..."
+# The checker merges the dumps, taking each colour from the first that has it: the
+# fixture spans two pages, and a too-early dump simply contributes nothing.
+python3 tests/layoutrender/check_geometry.py $dumps && rc=0 || rc=$?
 
 if [ "$rc" = 0 ]; then
     echo "PASS: browser box-model geometry (§10.3.3 used widths incl. padding, auto-margin centring + left/right alignment, box-sizing, margin-bottom, nested background inset, border encloses the padding box)"
