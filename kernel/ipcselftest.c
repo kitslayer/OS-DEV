@@ -36,7 +36,12 @@
 #include "flock.h"
 #include "inotify.h"
 #include "eventfd.h"
-#include "syscall.h"   /* O_CREAT / O_EXCL — sem_open's oflag semantics */
+#include "syscall.h"   /* O_CREAT/O_EXCL, struct sembuf, IPC_* / GET-SETVAL */
+#include "tmpfs.h"
+#include "unixsock.h"
+#include "sysvipc.h"
+#include "procfs.h"
+#include "vfs.h"       /* vfs_dirent, for the tmpfs/procfs listings */
 #include "console.h"
 #include "string.h"
 #include <stdint.h>
@@ -222,9 +227,135 @@ static void test_eventfd(void) {
     ck(eventfd_ready("ipcself") == 0, "eventfd drained to 0 by the read");
 }
 
+/* --- tmpfs (in-memory files) ----------------------------------------------- */
+static void test_tmpfs(void) {
+    const char *f = "/tmp/ipcself.txt";
+    ck(tmpfs_write(f, "HelloTmpfs", 10) == 10, "tmpfs_write wrote 10 bytes");
+
+    char buf[32]; memset(buf, 0, sizeof buf);
+    ck(tmpfs_read(f, buf, sizeof buf) == 10 && buf[0] == 'H' && buf[9] == 's',
+       "tmpfs_read round-tripped the content");
+
+    /* Positioned read: the offset must actually skip bytes, not restart. */
+    memset(buf, 0, sizeof buf);
+    ck(tmpfs_pread(f, buf, sizeof buf, 5) == 5 && buf[0] == 'T' && buf[4] == 's',
+       "tmpfs_pread honoured the offset");
+
+    ck(tmpfs_truncate(f, 5) == 0, "tmpfs_truncate shrank the file");
+    memset(buf, 0, sizeof buf);
+    ck(tmpfs_read(f, buf, sizeof buf) == 5 && buf[0] == 'H' && buf[4] == 'o',
+       "tmpfs_read sees the truncated length");
+
+    /* A symlink must NOT be followed by readlink — it returns the target text. */
+    ck(tmpfs_symlink("/tmp/ipcself.lnk", f) == 0, "tmpfs_symlink created a link");
+    memset(buf, 0, sizeof buf);
+    long rl = tmpfs_readlink("/tmp/ipcself.lnk", buf, sizeof buf);
+    ck(rl > 0 && buf[0] == '/', "tmpfs_readlink returned the target, unfollowed");
+
+    ck(tmpfs_remove(f) == 0, "tmpfs_remove deleted the file");
+    ck(tmpfs_read(f, buf, sizeof buf) < 0, "tmpfs_read fails after remove");
+    tmpfs_remove("/tmp/ipcself.lnk");
+}
+
+/* --- unix-domain sockets --------------------------------------------------- */
+static void test_unixsock(void) {
+    /* socketpair, not listen/accept: unix_accept BLOCKS, and blocking from the
+     * boot path with no other runnable task would wedge the boot. A pre-connected
+     * pair exercises the same send/recv machinery without that risk. */
+    int a = -1, b = -1;
+    ck(unix_socketpair(&a, &b) == 0 && a >= 0 && b >= 0,
+       "unix socketpair created a connected endpoint pair");
+    if (a < 0 || b < 0) return;
+
+    char buf[32];
+    ck(unix_send(a, "ping", 4) == 4, "unix_send wrote 4 bytes on endpoint A");
+    memset(buf, 0, sizeof buf);
+    ck(unix_recv(b, buf, sizeof buf) == 4 && buf[0] == 'p' && buf[3] == 'g',
+       "unix_recv read them on endpoint B");
+
+    /* And the other direction, so this isn't a one-way fluke. */
+    ck(unix_send(b, "pong", 4) == 4, "unix_send wrote back on endpoint B");
+    memset(buf, 0, sizeof buf);
+    ck(unix_recv(a, buf, sizeof buf) == 4 && buf[0] == 'p' && buf[3] == 'g',
+       "unix_recv read it on endpoint A");
+
+    /* After the peer closes and the buffer is drained, recv must report EOF (0),
+     * not block and not error — the property a bug here would break. */
+    ck(unix_close(b) == 0, "unix_close closed endpoint B");
+    ck(unix_recv(a, buf, sizeof buf) == 0, "unix_recv reports EOF once the peer closed");
+    unix_close(a);
+}
+
+/* --- System V IPC (semaphores + message queues) ---------------------------- */
+static void test_sysvipc(void) {
+    int sid = sysv_semget(0x1C5E1F, 1, IPC_CREAT | 0666);
+    ck(sid >= 0, "sysv semget created a 1-semaphore set");
+    if (sid >= 0) {
+        ck(sysv_semctl(sid, 0, SETVAL, 3) == 0, "sysv semctl SETVAL set it to 3");
+        ck(sysv_semctl(sid, 0, GETVAL, 0) == 3, "sysv semctl GETVAL reads back 3");
+
+        /* semop is all-or-nothing: -1 succeeds against a value of 3. */
+        struct sembuf op = { 0, -1, 0 };
+        ck(sysv_semop(sid, &op, 1) == 0, "sysv semop -1 succeeded");
+        ck(sysv_semctl(sid, 0, GETVAL, 0) == 2, "sysv semop decremented it to 2");
+
+        /* A decrement that would block must fail immediately under IPC_NOWAIT
+         * rather than wait -- and must NOT partially apply. */
+        struct sembuf too = { 0, -9, IPC_NOWAIT };
+        ck(sysv_semop(sid, &too, 1) != 0, "sysv semop -9 with IPC_NOWAIT fails, not blocks");
+        ck(sysv_semctl(sid, 0, GETVAL, 0) == 2, "the failed semop left the value UNCHANGED");
+
+        ck(sysv_semctl(sid, 0, IPC_RMID, 0) == 0, "sysv semctl IPC_RMID removed the set");
+    }
+
+    int qid = sysv_msgget(0x1C5E1F, IPC_CREAT | 0666);
+    ck(qid >= 0, "sysv msgget created a message queue");
+    if (qid >= 0) {
+        ck(sysv_msgsnd(qid, 7, "seven", 5, 0) == 0, "sysv msgsnd enqueued mtype 7");
+        ck(sysv_msgsnd(qid, 9, "nine", 4, 0) == 0, "sysv msgsnd enqueued mtype 9");
+
+        /* Receiving by TYPE must skip the earlier message of a different type --
+         * that selectivity is the whole point of SysV mtype. */
+        char m[32]; long got = 0; memset(m, 0, sizeof m);
+        int n = sysv_msgrcv(qid, 9, m, sizeof m, &got, 0);
+        ck(n == 4 && got == 9 && m[0] == 'n', "sysv msgrcv selected mtype 9, skipping 7");
+
+        memset(m, 0, sizeof m); got = 0;
+        n = sysv_msgrcv(qid, 7, m, sizeof m, &got, 0);
+        ck(n == 5 && got == 7 && m[0] == 's', "sysv msgrcv then got mtype 7");
+
+        ck(sysv_msgctl(qid, IPC_RMID) == 0, "sysv msgctl IPC_RMID removed the queue");
+    }
+}
+
+/* --- procfs ---------------------------------------------------------------- */
+static void test_procfs(void) {
+    ck(procfs_owns("/proc/meminfo") == 1, "procfs claims /proc/meminfo");
+    ck(procfs_owns("/README.TXT") == 0, "procfs does NOT claim a real disk path");
+    ck(procfs_is_dir("/proc") == 1, "procfs reports /proc as a directory");
+
+    char buf[512]; memset(buf, 0, sizeof buf);
+    long n = procfs_read("/proc/meminfo", buf, sizeof buf - 1);
+    ck(n > 0, "procfs_read returned /proc/meminfo content");
+    ck(n > 0 && buf[0] != 0, "the meminfo content is non-empty text");
+
+    memset(buf, 0, sizeof buf);
+    ck(procfs_read("/proc/uptime", buf, sizeof buf - 1) > 0, "procfs_read served /proc/uptime");
+
+    /* A nonexistent node under /proc must fail rather than return stale bytes. */
+    memset(buf, 0, sizeof buf);
+    ck(procfs_read("/proc/definitely_not_here", buf, sizeof buf - 1) <= 0,
+       "procfs_read fails for a nonexistent node");
+
+    static vfs_dirent ents[64];
+    int cnt = procfs_list("/proc", ents, 64);
+    ck(cnt > 0, "procfs_list enumerated /proc");
+}
+
 void ipc_selftest(void) {
     ipc_pass = ipc_fail = 0;
-    kprintf("[ipc] POSIX IPC self-test (mqueue / sem / shm / pty / flock / inotify / eventfd)\n");
+    kprintf("[ipc] POSIX IPC self-test (mqueue / sem / shm / pty / flock / inotify / eventfd\n");
+    kprintf("[ipc]                        / tmpfs / unixsock / sysvipc / procfs)\n");
     test_mqueue();
     test_sem();
     test_shm();
@@ -232,6 +363,10 @@ void ipc_selftest(void) {
     test_flock();
     test_inotify();
     test_eventfd();
+    test_tmpfs();
+    test_unixsock();
+    test_sysvipc();
+    test_procfs();
     kprintf("[ %s ] ipc self-test: %d passed, %d failed\n\n",
             ipc_fail ? "!!" : "ok", ipc_pass, ipc_fail);
 }

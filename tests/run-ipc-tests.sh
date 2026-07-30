@@ -73,6 +73,18 @@ require "inotify saw an event after a matching VFS mutation"      "inotify obser
 require "inotify ignores mutations outside its watch"             "inotify does not over-report"
 require "eventfd_read returned the accumulated count"             "eventfd accumulates and drains"
 
+# M1907: the second batch of subsystems.
+require "tmpfs_pread honoured the offset"                         "tmpfs positioned reads"
+require "tmpfs_read sees the truncated length"                    "tmpfs truncate"
+require "tmpfs_readlink returned the target, unfollowed"          "tmpfs symlinks are not followed by readlink"
+require "unix_recv reports EOF once the peer closed"              "unix sockets report EOF, not an error, on peer close"
+require "unix_recv read it on endpoint A"                          "unix sockets carry data BOTH directions"
+require "sysv semop -9 with IPC_NOWAIT fails, not blocks"         "SysV semop honours IPC_NOWAIT"
+require "the failed semop left the value UNCHANGED"               "SysV semop is all-or-nothing (no partial apply)"
+require "sysv msgrcv selected mtype 9, skipping 7"                "SysV msgrcv selects by mtype, not FIFO"
+require "procfs does NOT claim a real disk path"                  "procfs_owns does not over-claim"
+require "procfs_read fails for a nonexistent node"                "procfs rejects unknown nodes"
+
 # And the summary must report zero failures.
 if grep -qE "ipc self-test: [0-9]+ passed, 0 failed" "$SLOG"; then
     n=$(grep -oE "ipc self-test: [0-9]+ passed" "$SLOG" | grep -oE "[0-9]+" | head -1)
@@ -84,7 +96,7 @@ else
 fi
 
 if [ "$fail" -eq 0 ]; then
-    echo "PASS: in-guest POSIX IPC (mqueue priority order, sem O_CREAT/O_EXCL + non-blocking trywait, shm frame sharing + size cap, pty data path, flock exclusion/sharing/pid-release, inotify filtering, eventfd accumulate+drain)"
+    echo "PASS: in-guest POSIX IPC (mqueue priority order, sem O_CREAT/O_EXCL + non-blocking trywait, shm frame sharing + size cap, pty data path, flock exclusion/sharing/pid-release, inotify filtering, eventfd accumulate+drain, tmpfs pread/truncate/symlink, unixsock bidirectional + EOF, SysV IPC_NOWAIT + all-or-nothing semop + mtype selection, procfs ownership + unknown-node rejection)"
 else
     echo "FAIL: in-guest POSIX IPC self-test"; exit 1
 fi
