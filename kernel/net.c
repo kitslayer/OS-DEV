@@ -907,14 +907,103 @@ static void tcp_send_seg(const uint8_t *dmac, const uint8_t *dip,
 /* Receive the next TCP segment for our connection (server dip:80 -> us:sport).
  * Returns the IP-payload TCP header pointer via *tcp_out and the data length;
  * 0 on timeout. */
+/* --- parked inbound segments: cross-connection demux (M1908) ----------------
+ *
+ * tcp_recv_seg used to DROP every frame that did not match the polling
+ * connection's 4-tuple. That silently included frames belonging to ANOTHER LIVE
+ * CONNECTION, so whichever connection happened to poll first destroyed everyone
+ * else's packets. Two concurrent network users therefore starved each other:
+ * the boot network self-test (a background task doing a real HTTPS fetch) and
+ * the in-guest httpd could not both work, which is why httpdtest failed
+ * intermittently and why netcon's own test sleeps to wait the demo out. The
+ * stack's comments called this "no cross-connection demux".
+ *
+ * Fix: a small global park ring. A TCP frame that isn't ours is stashed instead
+ * of discarded, and every poll checks the ring for its own segment first. That
+ * makes concurrent connections work without giving each connection its own
+ * buffer (which, at OOO_N connections x 1600 bytes, would be far heavier).
+ *
+ * Parked frames are aged out: a connection can close with segments still parked
+ * for it, and without expiry those slots would leak and eventually wedge the
+ * ring. PARK_TTL is generous relative to a poll interval but short enough that a
+ * dead connection's frames cannot hold a slot for long. */
+#define PARK_N    8
+#define PARK_MAX  1600
+#define PARK_TTL  200            /* ticks (~2s at 100Hz) */
+static struct {
+    uint8_t  buf[PARK_MAX];
+    int      len;                /* 0 = slot free */
+    uint64_t at;                 /* tick parked, for expiry */
+} g_park[PARK_N];
+
+/* Does a parked/received frame belong to (dip, sport, dport)? Assumes the frame
+ * has already been validated as IPv4/TCP with a complete header. */
+static int park_matches(const uint8_t *f, int len, const uint8_t *dip,
+                        uint16_t sport, uint16_t dport) {
+    if (len < 34) return 0;
+    if (get16(f + 12) != 0x0800 || f[14 + 9] != 6) return 0;
+    if (memcmp(f + 26, dip, 4) != 0) return 0;
+    int ihl = (f[14] & 0x0F) * 4;
+    if (ihl < 20 || 14 + ihl + 20 > len) return 0;
+    const uint8_t *t = f + 14 + ihl;
+    return get16(t + 0) == dport && get16(t + 2) == sport;
+}
+
+/* Stash a frame that belongs to someone else. Drops the OLDEST parked frame when
+ * full: losing a segment is recoverable (TCP retransmits), whereas refusing to
+ * park would put us back to discarding the newest. */
+static void park_put(const uint8_t *f, int len) {
+    if (len <= 0 || len > PARK_MAX) return;
+    uint64_t now = timer_ticks();
+    int slot = -1;
+    for (int i = 0; i < PARK_N; i++) {
+        if (g_park[i].len && now - g_park[i].at > PARK_TTL) g_park[i].len = 0;  /* expire */
+        if (!g_park[i].len && slot < 0) slot = i;
+    }
+    if (slot < 0) {                       /* full: evict the oldest */
+        uint64_t oldest = ~0ull; slot = 0;
+        for (int i = 0; i < PARK_N; i++)
+            if (g_park[i].at < oldest) { oldest = g_park[i].at; slot = i; }
+    }
+    memcpy(g_park[slot].buf, f, (size_t)len);
+    g_park[slot].len = len;
+    g_park[slot].at  = now;
+}
+
+/* Take a parked frame for this connection, if one is waiting. Returns its length
+ * (copied into `buf`) or 0. */
+static int park_take(uint8_t *buf, int max, const uint8_t *dip,
+                     uint16_t sport, uint16_t dport) {
+    uint64_t now = timer_ticks();
+    for (int i = 0; i < PARK_N; i++) {
+        if (!g_park[i].len) continue;
+        if (now - g_park[i].at > PARK_TTL) { g_park[i].len = 0; continue; }
+        if (!park_matches(g_park[i].buf, g_park[i].len, dip, sport, dport)) continue;
+        int n = g_park[i].len; if (n > max) n = max;
+        memcpy(buf, g_park[i].buf, (size_t)n);
+        g_park[i].len = 0;
+        return n;
+    }
+    return 0;
+}
+
 static int tcp_recv_seg(uint8_t *buf, int max, const uint8_t *dip,
                         uint16_t sport, uint16_t dport, uint64_t ticks,
                         uint8_t **tcp_out, int *dlen_out) {
     uint64_t deadline = timer_ticks() + ticks;
-    while (timer_ticks() < deadline) {
-        int len = nic_receive(buf, max);
-        if (len < 34) continue;
-        if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 6) continue;   /* IPv4/TCP */
+    for (;;) {
+        /* Our own parked segments first: they arrived before anything we are
+         * about to poll, so honouring them preserves ordering. */
+        int len = park_take(buf, max, dip, sport, dport);
+        if (len == 0) {
+            if (timer_ticks() >= deadline) return 0;
+            len = nic_receive(buf, max);
+            if (len < 34) continue;
+            if (get16(buf + 12) != 0x0800 || buf[14 + 9] != 6) continue;   /* IPv4/TCP */
+            /* Not ours, but a valid TCP frame: PARK it rather than destroy it —
+             * it may be another live connection's data (M1908). */
+            if (!park_matches(buf, len, dip, sport, dport)) { park_put(buf, len); continue; }
+        }
         if (memcmp(buf + 26, dip, 4) != 0) continue;                   /* from server */
         int ihl = (buf[14] & 0x0F) * 4;
         if (ihl < 20 || 14 + ihl + 20 > len) continue;     /* need a full TCP header */
@@ -933,7 +1022,6 @@ static int tcp_recv_seg(uint8_t *buf, int max, const uint8_t *dip,
         *dlen_out = dlen;
         return 1;
     }
-    return 0;
 }
 
 /* ---------------- reusable TCP stream (for HTTP and, later, TLS) ----------- */
