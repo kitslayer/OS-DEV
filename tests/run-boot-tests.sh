@@ -118,6 +118,7 @@ require "AML method evaluation OK"           "ACPI AML method-evaluation VM (rec
 require "eBPF JIT OK"                         "eBPF JIT: bytecode compiled to native x86-64, == interpreter (M1290)"
 require "sched: 64 sub-millisecond yields advanced vruntime"  "CFS charges sub-ms yields (M1912: a yield-spinner cannot starve a lock holder)"
 require "concurrent CMOS reads from 2 tasks"  "RTC CMOS index/data pair is atomic under concurrent readers (M1913)"
+require "concurrent config reads of 2 devices"  "PCI 0xCF8/0xCFC address/data pair is indivisible under concurrent readers (M1914)"
 require "Networking works!"                  "e1000 + ARP + ICMP echo (SLIRP gateway)"
 softrequire "200 OK"                         "TCP/HTTP GET to real example.com (needs internet)"
 softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chain validated + certverify (needs internet)"

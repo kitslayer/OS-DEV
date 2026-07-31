@@ -44,6 +44,7 @@ void     pci_enumerate(void);   /* print every device (for inspection) */
  * Returns the number present (may exceed `max`; only the first `max` are stored).
  * Pass out=NULL to just count. Used by the lspci syscall. */
 int      pci_collect(pci_device_t *out, int max);
+void     pci_selftest(void);   /* boot: 0xCF8/0xCFC address+data pair is indivisible (M1914) */
 
 /* /pci scheme (M1120): `sub` is the path after "/pci/" — "" lists every device,
  * "<bb:ss.f>/<field>" reads one device's vendor/device/class/irq/bars/config.
